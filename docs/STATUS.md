@@ -7,9 +7,9 @@
 
 | Métrica | Valor |
 |---------|-------|
-| Total de Testes | **117** 🎉 |
+| Total de Testes | **131** 🎉 |
 | Domain Layer | 99 testes ✅ |
-| Use Cases Layer | 18 testes ✅ |
+| Use Cases Layer | 32 testes ✅ |
 | Infrastructure Layer | 0 testes 📋 |
 | Cobertura (Domain) | 100% ✅ |
 | Status Compilação | ✅ Sem erros |
@@ -75,40 +75,48 @@
 
 ---
 
-### 2️⃣ Use Cases Layer (Camada 2) ✅ PROGRESSO SIGNIFICATIVO
+### 2️⃣ Use Cases Layer (Camada 2) ✅ COMPLETO
 
-**Status**: 18 testes (4 use cases implementados)
+**Status**: 32 testes (7 use cases implementados)
 
 #### Implementado ✅
-- [x] **ImportPhotoUseCase** (4 testes com mocks)
+- [x] **ImportPhotoUseCase** (4 testes)
   - Importa foto única para catálogo
-  - Testes com mockall para isolamento
   - Validação de erros do repository
-  - Criação de IDs únicos testada
+  - Criação de IDs únicos
 
 - [x] **ImportPhotosUseCase** (5 testes)
   - Importação em lote (batch)
   - Tratamento de falhas parciais
-  - Resultado com sucessos e falhas
   - Continua importando mesmo com erros
 
 - [x] **RatePhotoUseCase** (5 testes)
   - Classificar foto com rating (0-5 estrelas)
   - Remover rating de foto
-  - Tratamento de foto não encontrada
   - Múltiplas classificações
+
+- [x] **SetColorLabelUseCase** (5 testes)
+  - Definir color label em foto
+  - Remover color label
+  - Todas as 5 cores suportadas
 
 - [x] **CreateCollectionUseCase** (4 testes)
   - Criar coleção com nome e descrição
   - Descrição opcional
-  - IDs únicos para cada coleção
-  - Tratamento de erros
+  - IDs únicos
+
+- [x] **AddPhotoToCollectionUseCase** (5 testes)
+  - Adicionar foto à coleção
+  - Validação de foto e coleção existentes
+  - Previne duplicatas
+
+- [x] **RemovePhotoFromCollectionUseCase** (4 testes)
+  - Remover foto da coleção
+  - Validação de existência
+  - Múltiplas remoções
 
 #### Próximos Passos 📋
 - [ ] **ScanDirectoryUseCase** - Escanear diretório recursivamente
-- [ ] **SetColorLabelUseCase** - Definir color label em foto
-- [ ] **AddPhotoToCollectionUseCase** - Adicionar foto à coleção
-- [ ] **RemovePhotoFromCollectionUseCase** - Remover foto da coleção
 
 ---
 
@@ -269,5 +277,5 @@ cargo test -p use-cases
 ---
 
 **Última execução de testes**: 16/dez/2025  
-**Resultado**: ✅ 117/117 testes passando  
-**Tempo de execução**: ~0.01s (domain) + ~0.00s (use-cases)
+**Resultado**: ✅ 131/131 testes passando  
+**Tempo de execução**: ~0.03s (domain) + ~0.00s (use-cases)

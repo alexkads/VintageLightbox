@@ -131,10 +131,25 @@ Criar versão mínima funcional com importação, visualização, edição bási
   - Remover rating de foto
   - Tratamento de erros (foto não encontrada)
 
+- [x] 🔴🟢🔵 SetColorLabelUseCase (5 testes)
+  - Definir color label em foto (Red, Yellow, Green, Blue, Purple)
+  - Remover color label
+  - Múltiplas mudanças de cor
+
 ### 1.2.2 Use Cases: Coleções ✅ (implementado)
 - [x] 🔴🟢🔵 CreateCollectionUseCase (4 testes)
   - Criar coleção com nome e descrição opcional
   - Validação e persistência
+
+- [x] 🔴🟢🔵 AddPhotoToCollectionUseCase (5 testes)
+  - Adicionar foto à coleção
+  - Validação de foto e coleção existentes
+  - Previne duplicatas
+
+- [x] 🔴🟢🔵 RemovePhotoFromCollectionUseCase (4 testes)
+  - Remover foto da coleção
+  - Validação de existência
+  - Múltiplas remoções
 
 ### 1.3 Infrastructure: Importação (1 semana)
 - [ ] Implementar File Scanner (testes de integração)
