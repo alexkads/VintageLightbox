@@ -3,8 +3,10 @@
 //! Implementações de repositories usando SQLite.
 
 pub mod photo_repository;
+pub mod collection_repository;
 
 pub use photo_repository::PhotoRepositoryImpl;
+pub use collection_repository::CollectionRepositoryImpl;
 
 use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
 

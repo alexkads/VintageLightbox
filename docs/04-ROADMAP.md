@@ -13,11 +13,11 @@ Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Ar
 ## 📊 Progresso Atual (Atualizado: 16/dez/2025)
 
 ### Status Geral
-- **Fase Atual**: Fase 1 (MVP) - Infrastructure Layer 🔄
-- **Total de Testes**: **142 testes passando** 🎉
+- **Fase Atual**: Fase 1 (MVP) - Infrastructure Layer ✅
+- **Total de Testes**: **152 testes passando** 🎉
   - Domain Layer: 99 testes (100% cobertura)
   - Use Cases Layer: 32 testes (7 use cases)
-  - Infrastructure Layer: 11 testes (PhotoRepository)
+  - Infrastructure Layer: 21 testes (2 repositories)
 
 ### Conquistas Recentes
 - ✅ **Domain Layer 100% completo** (99 testes)

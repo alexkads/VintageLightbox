@@ -7,4 +7,4 @@ pub mod database;
 pub mod file_system;
 pub mod raw_processing;
 
-pub use database::{PhotoRepositoryImpl, create_pool, run_migrations};
+pub use database::{PhotoRepositoryImpl, CollectionRepositoryImpl, create_pool, run_migrations};

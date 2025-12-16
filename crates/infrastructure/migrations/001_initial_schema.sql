@@ -23,9 +23,7 @@ CREATE TABLE IF NOT EXISTS collections (
 CREATE TABLE IF NOT EXISTS collection_photos (
     collection_id TEXT NOT NULL,
     photo_id TEXT NOT NULL,
-    PRIMARY KEY (collection_id, photo_id),
-    FOREIGN KEY (collection_id) REFERENCES collections(id) ON DELETE CASCADE,
-    FOREIGN KEY (photo_id) REFERENCES photos(id) ON DELETE CASCADE
+    PRIMARY KEY (collection_id, photo_id)
 );
 
 -- Indexes for performance

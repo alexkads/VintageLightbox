@@ -7,10 +7,10 @@
 
 | Métrica | Valor |
 |---------|-------|
-| Total de Testes | **142** 🎉 |
+| Total de Testes | **152** 🎉 |
 | Domain Layer | 99 testes ✅ |
 | Use Cases Layer | 32 testes ✅ |
-| Infrastructure Layer | 11 testes ✅ |
+| Infrastructure Layer | 21 testes ✅ |
 | Cobertura (Domain) | 100% ✅ |
 | Status Compilação | ✅ Sem erros |
 
@@ -132,15 +132,19 @@
 
 ---
 
-### 3️⃣ Infrastructure Layer (Camada 4) 🔄 EM ANDAMENTO
+### 3️⃣ Infrastructure Layer (Camada 4) ✅ COMPLETO
 
-**Status**: 11 testes (PhotoRepository implementado)
+**Status**: 21 testes (PhotoRepository + CollectionRepository)
 
 #### Implementado ✅
 - [x] **PhotoRepositoryImpl** (SQLite)
   - CRUD completo para fotos
-  - Conversão entre domain entities e database rows
   - 9 testes de integração
+
+- [x] **CollectionRepositoryImpl** (SQLite)
+  - CRUD completo para coleções
+  - Relação many-to-many com fotos
+  - 10 testes de integração
 
 - [x] **Database Module**
   - Connection pool com SQLx
@@ -148,12 +152,11 @@
   - 2 testes unitários
 
 - [x] **Schema SQLite**
-  - Tabela `photos` com todos os campos
+  - Tabelas `photos`, `collections`, `collection_photos`
   - Índices para performance
   - Migrations funcionando
 
 #### Próximos Passos 📋
-- [ ] **CollectionRepositoryImpl** - Persistência de coleções
 - [ ] **File Scanner** - Escanear diretórios
 - [ ] **EXIF Reader** - Ler metadados
 - [ ] **Thumbnail Generator** - Gerar previews
