@@ -1,0 +1,16 @@
+[package]
+name = "use-cases"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+domain = { path = "../domain" }
+thiserror.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+mockall.workspace = true
+proptest.workspace = true
+tokio = { workspace = true, features = ["test-util"] }

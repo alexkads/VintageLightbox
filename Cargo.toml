@@ -1,0 +1,54 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/domain",
+    "crates/use-cases",
+    "crates/adapters",
+    "crates/infrastructure",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["VintageLightbox Team"]
+license = "MIT"
+
+[workspace.dependencies]
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Error handling
+thiserror = "1.0"
+anyhow = "1.0"
+
+# Testing tools
+mockall = "0.12"
+proptest = "1.4"
+fake = { version = "2.9", features = ["derive"] }
+tempfile = "3.8"
+
+# Benchmarking
+criterion = { version = "0.5", features = ["html_reports"] }
+
+# Snapshot testing
+insta = { version = "1.34", features = ["yaml"] }
+
+# Async runtime (for future use)
+tokio = { version = "1.35", features = ["full"] }
+
+# Utilities
+uuid = { version = "1.6", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+[profile.dev]
+opt-level = 0
+debug = true
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+
+[profile.test]
+opt-level = 1

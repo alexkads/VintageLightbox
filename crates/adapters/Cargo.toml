@@ -1,0 +1,16 @@
+[package]
+name = "adapters"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+domain = { path = "../domain" }
+use-cases = { path = "../use-cases" }
+thiserror.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+mockall.workspace = true
+insta.workspace = true

@@ -2,8 +2,10 @@
 
 ## Visão Geral
 
-Este roadmap divide o desenvolvimento em fases incrementais, priorizando funcionalidades essenciais primeiro e expandindo progressivamente.
+Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Architecture** e **Test-Driven Development (TDD)**. Cada funcionalidade é implementada com testes primeiro, garantindo qualidade desde o início.
 
+**Metodologia**: TDD (Red-Green-Refactor) em todas as fases  
+**Arquitetura**: Clean Architecture (Domain → Use Cases → Adapters → Infrastructure)  
 **Estimativa Total**: 12-18 meses (desenvolvimento solo/pequena equipe)
 
 ---
@@ -11,19 +13,33 @@ Este roadmap divide o desenvolvimento em fases incrementais, priorizando funcion
 ## Fase 0: Setup e Fundação (2-3 semanas)
 
 ### Objetivos
-- Configurar ambiente de desenvolvimento
-- Estrutura base do projeto
+- Configurar ambiente de desenvolvimento com TDD
+- Estrutura base seguindo Clean Architecture
+- Setup de ferramentas de teste
 - Proof of concept das tecnologias principais
 
 ### Tarefas
 
-#### 0.1 Configuração do Projeto
+#### 0.1 Configuração do Projeto (Clean Architecture + TDD)
 - [ ] Criar repositório Git
-- [ ] Configurar Cargo workspace
-- [ ] Setup de CI/CD básico (GitHub Actions)
-- [ ] Configurar linters e formatters (clippy, rustfmt)
-- [ ] Estrutura de diretórios base
+- [ ] Configurar Cargo workspace com estrutura Clean Architecture:
+  - `crates/domain` (Camada 1: Entities)
+  - `crates/use-cases` (Camada 2: Application Business Rules)
+  - `crates/adapters` (Camada 3: Interface Adapters)
+  - `crates/infrastructure` (Camada 4: Frameworks & Drivers)
+- [ ] Setup de CI/CD com testes automáticos (GitHub Actions)
+- [ ] Configurar ferramentas de qualidade:
+  - clippy, rustfmt
+  - cargo-tarpaulin (cobertura de testes)
+  - cargo-watch (TDD watch mode)
+  - cargo-nextest (test runner melhorado)
+- [ ] Configurar ferramentas de teste:
+  - mockall (mocking)
+  - proptest (property-based testing)
+  - criterion (benchmarking)
+  - insta (snapshot testing)
 - [ ] README e documentação inicial
+- [ ] Template de PR com checklist TDD
 
 #### 0.2 Proof of Concept - Slint UI
 - [ ] Criar janela básica com Slint
@@ -32,43 +48,72 @@ Este roadmap divide o desenvolvimento em fases incrementais, priorizando funcion
 - [ ] Testar responsividade
 - [ ] Validar performance da UI
 
-#### 0.3 Proof of Concept - RAW Processing
-- [ ] Integrar LibRaw ou rawler
+#### 0.3 Domain Layer - Primeiro Ciclo TDD (1 semana)
+- [ ] 🔴 RED: Escrever testes para Value Objects (Rating, PhotoId)
+- [ ] 🟢 GREEN: Implementar Value Objects
+- [ ] 🔵 REFACTOR: Melhorar design
+- [ ] 🔴 RED: Escrever testes para Photo Entity
+- [ ] 🟢 GREEN: Implementar Photo Entity básica
+- [ ] 🔵 REFACTOR: Extrair comportamentos
+- [ ] Meta: 100% cobertura de testes no domain
+
+#### 0.4 Proof of Concept - RAW Processing (Infrastructure)
+- [ ] Testes de integração com LibRaw/rawler
+- [ ] Implementar RAW Decoder trait
 - [ ] Decodificar arquivo RAW de teste
 - [ ] Aplicar ajuste básico (exposição)
 - [ ] Renderizar preview
-- [ ] Medir performance
+- [ ] Benchmark de performance
 
-#### 0.4 Proof of Concept - Database
-- [ ] Setup SQLite com rusqlite
-- [ ] Schema básico (Photo table)
-- [ ] CRUD operations
+#### 0.5 Proof of Concept - Database (Infrastructure)
+- [ ] TDD: Repository trait (domain)
+- [ ] Implementar SQLite Repository
+- [ ] Testes de integração: CRUD operations
 - [ ] Testes de performance com 10k registros
+- [ ] Migrations básicas
 
 ### Entregáveis
 - ✅ Projeto configurado e compilando
+- ✅ CI/CD rodando testes automaticamente
+- ✅ Domain layer testado (100% coverage)
 - ✅ Demo: Carregar e exibir arquivo RAW
 - ✅ Demo: Aplicar ajuste e ver resultado
-- ✅ Documentação técnica básica
+- ✅ Documentação técnica e de testes
 
 ---
 
 ## Fase 1: MVP - Core Básico (2-3 meses)
 
 ### Objetivos
-Criar versão mínima funcional com importação, visualização, edição básica e exportação.
+Criar versão mínima funcional com importação, visualização, edição básica e exportação.  
+**Todas as features implementadas com TDD**.
 
-### 1.1 Importação Básica (2 semanas)
-- [ ] Dialog de seleção de diretório
-- [ ] Scanner de arquivos (RAW + JPEG)
-- [ ] Extração de metadados EXIF básicos
-- [ ] Inserção no banco de dados
-- [ ] Geração de thumbnails (single-threaded primeiro)
-- [ ] Progress bar de importação
+### 1.1 Domain Layer Completo (1 semana - TDD)
+- [ ] 🔴🟢🔵 TDD: Adjustment Value Objects
+- [ ] 🔴🟢🔵 TDD: Collection Entity
+- [ ] 🔴🟢🔵 TDD: Domain Services (DuplicateDetection)
+- [ ] 🔴🟢🔵 Property tests com proptest
+- [ ] Meta: 100% cobertura no domain
+
+### 1.2 Use Cases: Importação (1 semana - TDD)
+- [ ] 🔴 Escrever teste: ImportPhotosUseCase com mocks
+- [ ] 🟢 Implementar ImportPhotosUseCase
+- [ ] 🔵 Refatorar orquestração
+- [ ] 🔴 Escrever teste: ScanDirectoryUseCase
+- [ ] 🟢 Implementar ScanDirectoryUseCase
+- [ ] 🔵 Refatorar
+- [ ] Meta: ≥95% cobertura
+
+### 1.3 Infrastructure: Importação (1 semana)
+- [ ] Implementar File Scanner (testes de integração)
+- [ ] Implementar EXIF Reader
+- [ ] Implementar Thumbnail Generator
+- [ ] SQLite Photo Repository
+- [ ] Testes de performance: importar 100 fotos
 
 **Critério de Aceitação**: Importar 100 fotos em < 2 minutos
 
-### 1.2 Biblioteca - Visualização (2 semanas)
+### 1.4 UI: Biblioteca - Visualização (1 semana)
 - [ ] Grade de thumbnails
 - [ ] Scroll virtual para performance
 - [ ] Seleção de fotos (single, multi)

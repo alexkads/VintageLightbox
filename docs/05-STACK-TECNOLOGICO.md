@@ -4,6 +4,12 @@
 
 Este documento detalha todas as tecnologias, bibliotecas e ferramentas utilizadas no desenvolvimento do VintageLightbox.
 
+**Princípios Fundamentais**:
+- 🏗️ **Clean Architecture**: Separação clara de responsabilidades em camadas
+- 🧪 **Test-Driven Development (TDD)**: Testes primeiro, código depois
+- 📐 **SOLID Principles**: Design orientado a objetos de qualidade
+- ♻️ **Refatoração Contínua**: Código limpo e evolutivo
+
 ---
 
 ## 1. Linguagem de Programação
@@ -395,6 +401,386 @@ tracing-subscriber = "0.3"
 
 ---
 
+## 14. Test-Driven Development (TDD) - Ferramentas de Teste
+
+### Metodologia TDD
+
+O VintageLightbox segue rigorosamente o ciclo **Red-Green-Refactor**:
+
+```
+1. 🔴 RED: Escrever teste que falha
+   ├─> Definir comportamento esperado
+   └─> Criar interface/assinatura de função
+
+2. 🟢 GREEN: Implementar código mínimo
+   ├─> Fazer o teste passar
+   └─> Não se preocupar com otimização ainda
+
+3. 🔵 REFACTOR: Melhorar código
+   ├─> Eliminar duplicação
+   ├─> Melhorar design
+   └─> Manter testes verdes
+```
+
+### 14.1 Cargo Test (Built-in)
+
+**Framework de teste padrão do Rust**
+
+**Características**:
+- ✅ Integrado ao Cargo
+- ✅ Testes unitários e integração
+- ✅ Execução paralela
+- ✅ Filtering e organização
+
+**Estrutura de Testes**:
+```rust
+// Em cada módulo: tests unitários
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_photo_rating_valid() {
+        let rating = Rating::try_from(5).unwrap();
+        assert_eq!(rating.value(), 5);
+    }
+    
+    #[test]
+    #[should_panic(expected = "invalid rating")]
+    fn test_photo_rating_invalid() {
+        Rating::try_from(6).unwrap(); // Deve falhar
+    }
+}
+
+// Em tests/: testes de integração
+#[test]
+fn test_import_workflow() {
+    let catalog = Catalog::new();
+    catalog.import_from("test_fixtures/photos").unwrap();
+    assert!(catalog.count() > 0);
+}
+```
+
+**Comandos**:
+```bash
+# Rodar todos os testes
+cargo test
+
+# Testes específicos
+cargo test test_photo_rating
+
+# Com output detalhado
+cargo test -- --nocapture
+
+# Testes de um crate específico
+cargo test -p domain
+
+# Rodar testes em série (não paralelo)
+cargo test -- --test-threads=1
+```
+
+### 14.2 Mockall
+
+**Crate**: `mockall = "0.12"`
+
+**Uso**: Mock objects para testar Use Cases isoladamente
+
+**Características**:
+- ✅ Mocking de traits
+- ✅ Expectativas e verificações
+- ✅ Controle total sobre retornos
+
+**Exemplo TDD**:
+```rust
+use mockall::mock;
+use mockall::predicate::*;
+
+// 1. RED: Definir o contrato (trait)
+pub trait PhotoRepository {
+    fn find_by_id(&self, id: PhotoId) -> Result<Option<Photo>>;
+    fn save(&self, photo: &Photo) -> Result<()>;
+}
+
+// 2. RED: Escrever teste com mock
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    mock! {
+        pub PhotoRepo {}
+        impl PhotoRepository for PhotoRepo {
+            fn find_by_id(&self, id: PhotoId) -> Result<Option<Photo>>;
+            fn save(&self, photo: &Photo) -> Result<()>;
+        }
+    }
+    
+    #[test]
+    fn test_rate_photo_updates_repository() {
+        // Arrange
+        let mut mock_repo = MockPhotoRepo::new();
+        let test_photo = Photo::new_test();
+        
+        mock_repo.expect_find_by_id()
+            .with(eq(PhotoId::from(123)))
+            .times(1)
+            .returning(move |_| Ok(Some(test_photo.clone())));
+        
+        mock_repo.expect_save()
+            .times(1)
+            .returning(|_| Ok(()));
+        
+        // Act
+        let use_case = RatePhotoUseCase::new(mock_repo);
+        let result = use_case.execute(RatePhotoInput {
+            photo_id: PhotoId::from(123),
+            rating: Rating::Five,
+        });
+        
+        // Assert
+        assert!(result.is_ok());
+    }
+}
+
+// 3. GREEN: Implementar o Use Case
+// 4. REFACTOR: Melhorar código mantendo testes verdes
+```
+
+### 14.3 Proptest (Property-based Testing)
+
+**Crate**: `proptest = "1.4"`
+
+**Uso**: Testes baseados em propriedades, gera casos de teste automaticamente
+
+**Características**:
+- ✅ Geração automática de casos de teste
+- ✅ Shrinking - encontra caso mínimo que falha
+- ✅ Testa invariantes e propriedades
+
+**Exemplo**:
+```rust
+use proptest::prelude::*;
+
+proptest! {
+    #[test]
+    fn test_rating_roundtrip(rating in 0..=5i32) {
+        // Property: Rating deve fazer roundtrip através de conversão
+        let r = Rating::try_from(rating).unwrap();
+        prop_assert_eq!(r.value(), rating);
+    }
+    
+    #[test]
+    fn test_exposure_adjustment_symmetric(delta in -5.0..5.0f32) {
+        // Property: aplicar +delta e depois -delta deve voltar ao original
+        let mut photo = Photo::new_test();
+        let original_exposure = photo.exposure();
+        
+        photo.adjust_exposure(delta).unwrap();
+        photo.adjust_exposure(-delta).unwrap();
+        
+        prop_assert!((photo.exposure() - original_exposure).abs() < 0.001);
+    }
+}
+```
+
+### 14.4 Criterion (Benchmarking)
+
+**Crate**: `criterion = "0.5"`
+
+**Uso**: Benchmarks estatisticamente rigorosos
+
+**Características**:
+- ✅ Medição precisa de performance
+- ✅ Detecção de regressões
+- ✅ Geração de gráficos
+- ✅ Comparação entre versões
+
+**Exemplo**:
+```rust
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
+
+fn benchmark_thumbnail_generation(c: &mut Criterion) {
+    let photo = load_test_photo();
+    
+    c.bench_function("generate_thumbnail_200px", |b| {
+        b.iter(|| {
+            generate_thumbnail(black_box(&photo), black_box(200))
+        })
+    });
+}
+
+criterion_group!(benches, benchmark_thumbnail_generation);
+criterion_main!(benches);
+```
+
+**Rodar benchmarks**:
+```bash
+cargo bench
+```
+
+### 14.5 Insta (Snapshot Testing)
+
+**Crate**: `insta = "1.34"`
+
+**Uso**: Testes de snapshot para outputs complexos
+
+**Características**:
+- ✅ Captura output e compara com snapshot salvo
+- ✅ Útil para testar serialização, formatação, etc.
+- ✅ Review de mudanças com `cargo insta review`
+
+**Exemplo**:
+```rust
+use insta::assert_debug_snapshot;
+
+#[test]
+fn test_photo_metadata_serialization() {
+    let photo = Photo::new_test();
+    assert_debug_snapshot!(photo.metadata());
+}
+
+#[test]
+fn test_adjustment_chain_output() {
+    let adjustments = vec![
+        Adjustment::Exposure(1.5),
+        Adjustment::Contrast(0.2),
+    ];
+    assert_debug_snapshot!(adjustments);
+}
+```
+
+### 14.6 Fake (Test Data Generation)
+
+**Crate**: `fake = "2.9"`
+
+**Uso**: Geração de dados realistas para testes
+
+**Exemplo**:
+```rust
+use fake::{Fake, Faker};
+
+#[test]
+fn test_with_fake_data() {
+    let photo = Photo {
+        id: PhotoId::new(),
+        path: Faker.fake(),
+        camera: Faker.fake(),
+        lens: Faker.fake(),
+        // ...
+    };
+    // Testar com dados realistas
+}
+```
+
+### 14.7 Wiremock (HTTP Mocking)
+
+**Crate**: `wiremock = "0.6"`
+
+**Uso**: Mock de serviços HTTP (útil se integrar com serviços externos)
+
+### 14.8 Tempfile (Arquivos Temporários)
+
+**Crate**: `tempfile = "3.8"`
+
+**Uso**: Criar arquivos temporários para testes
+
+**Exemplo**:
+```rust
+use tempfile::tempdir;
+
+#[test]
+fn test_import_photos_from_directory() {
+    let dir = tempdir().unwrap();
+    let test_file = dir.path().join("test.jpg");
+    
+    // Criar arquivo de teste
+    std::fs::write(&test_file, TEST_JPEG_DATA).unwrap();
+    
+    // Testar importação
+    let catalog = Catalog::new();
+    catalog.import_from(dir.path()).unwrap();
+    
+    assert_eq!(catalog.count(), 1);
+    // tempdir é automaticamente deletado ao sair do escopo
+}
+```
+
+### 14.9 Cobertura de Testes
+
+**Ferramenta**: `cargo-tarpaulin` ou `cargo-llvm-cov`
+
+**Instalação**:
+```bash
+cargo install cargo-tarpaulin
+# ou
+cargo install cargo-llvm-cov
+```
+
+**Uso**:
+```bash
+# Gerar relatório de cobertura
+cargo tarpaulin --out Html --output-dir coverage
+
+# Com llvm-cov
+cargo llvm-cov --html
+```
+
+**Meta de Cobertura**:
+- **Domain Layer**: 100% (regras de negócio críticas)
+- **Use Cases Layer**: ≥ 95%
+- **Adapters Layer**: ≥ 85%
+- **Infrastructure Layer**: ≥ 70% (muitos testes de integração)
+
+### 14.10 Estrutura de Testes
+
+```
+crates/
+├── domain/
+│   ├── src/
+│   │   ├── entities/
+│   │   │   └── photo.rs
+│   │   └── lib.rs
+│   └── tests/              # Testes de integração do domínio
+│       └── photo_tests.rs
+├── use-cases/
+│   ├── src/
+│   │   └── import/
+│   │       └── import_photos.rs
+│   └── tests/              # Testes com mocks
+│       └── import_tests.rs
+└── infrastructure/
+    └── tests/              # Testes de integração reais
+        └── sqlite_repository_tests.rs
+
+tests/                      # Testes E2E da aplicação
+├── fixtures/               # Dados de teste
+│   └── photos/
+└── integration/
+    └── full_workflow_test.rs
+```
+
+### Comandos Úteis TDD
+
+```bash
+# Watch mode - roda testes automaticamente ao salvar
+cargo install cargo-watch
+cargo watch -x test
+
+# Rodar apenas testes rápidos (unitários)
+cargo test --lib
+
+# Rodar testes de integração
+cargo test --test '*'
+
+# Continuous testing com feedback visual
+cargo install cargo-nextest
+cargo nextest run
+
+# Verificar testes sem compilar código
+cargo check --tests
+```
+
+---
+
 ## 14. Testes
 
 ### 14.1 Cargo Test (Built-in)
@@ -767,38 +1153,238 @@ Verificar compatibilidade:
 
 ---
 
-## 25. Próximos Passos Técnicos
+## 25. Próximos Passos Técnicos (Abordagem TDD)
 
-1. **Setup Inicial**
-   ```bash
-   cargo new --bin vintage-lightbox
-   cd vintage-lightbox
-   cargo init --lib crates/vintage-core
-   cargo init --lib crates/vintage-raw
-   # ...
-   ```
+### 1. Setup Inicial com Clean Architecture
 
-2. **Primeiro Protótipo**
-   - Janela Slint básica
-   - Carregar um arquivo RAW
-   - Aplicar ajuste de exposição
-   - Exibir resultado
+```bash
+# Criar workspace
+cargo new --bin vintage-lightbox
+cd vintage-lightbox
 
-3. **Validação Tecnológica**
-   - Benchmark de performance
-   - Testes de compatibilidade
-   - Validação de UX
+# Criar crates seguindo Clean Architecture
+cargo init --lib crates/domain              # Camada 1: Entities
+cargo init --lib crates/use-cases           # Camada 2: Application Business Rules
+cargo init --lib crates/adapters            # Camada 3: Interface Adapters
+cargo init --lib crates/infrastructure      # Camada 4: Frameworks & Drivers
+
+# Configurar workspace
+cat > Cargo.toml << 'EOF'
+[workspace]
+members = [
+    "crates/domain",
+    "crates/use-cases",
+    "crates/adapters",
+    "crates/infrastructure",
+]
+
+[workspace.dependencies]
+# Dependências compartilhadas
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "1.0"
+
+# Ferramentas de teste
+mockall = "0.12"
+proptest = "1.4"
+criterion = "0.5"
+insta = "1.34"
+fake = "2.9"
+tempfile = "3.8"
+EOF
+```
+
+### 2. Primeiro Ciclo TDD: Rating de Fotos
+
+**Passo 1: 🔴 RED - Escrever o teste primeiro**
+
+```bash
+# crates/domain/src/entities/photo.rs
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_rate_photo_with_valid_rating() {
+        // Arrange
+        let mut photo = Photo::new_test();
+        let rating = Rating::Five;
+        
+        // Act
+        let result = photo.rate(rating);
+        
+        // Assert
+        assert!(result.is_ok());
+        assert_eq!(photo.rating(), Some(Rating::Five));
+    }
+}
+
+# Rodar teste (vai falhar - RED)
+cargo test -p domain
+```
+
+**Passo 2: 🟢 GREEN - Implementar código mínimo**
+
+```rust
+impl Photo {
+    pub fn rate(&mut self, rating: Rating) -> Result<(), DomainError> {
+        self.rating = Some(rating);
+        Ok(())
+    }
+}
+
+# Rodar teste novamente (deve passar - GREEN)
+cargo test -p domain
+```
+
+**Passo 3: 🔵 REFACTOR - Melhorar código**
+
+```rust
+// Adicionar validação, melhorar design
+impl Photo {
+    pub fn rate(&mut self, rating: Rating) -> Result<(), DomainError> {
+        rating.validate()?;
+        self.rating = Some(rating);
+        self.emit_event(DomainEvent::PhotoRated { 
+            photo_id: self.id, 
+            rating 
+        });
+        Ok(())
+    }
+}
+
+# Testes ainda passam após refatoração
+cargo test -p domain
+```
+
+### 3. Configurar CI/CD com TDD
+
+```yaml
+# .github/workflows/ci.yml
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions-rs/toolchain@v1
+      - name: Run tests
+        run: cargo test --all-features
+      - name: Check coverage
+        run: |
+          cargo install cargo-tarpaulin
+          cargo tarpaulin --all-features --workspace --out Xml
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Run clippy
+        run: cargo clippy -- -D warnings
+
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Check formatting
+        run: cargo fmt -- --check
+```
+
+### 4. Roteiro de Desenvolvimento TDD
+
+**Semana 1-2: Domain Layer**
+- ✅ TDD: Entities (Photo, Collection, Adjustment)
+- ✅ TDD: Value Objects (Rating, ColorLabel, PhotoId)
+- ✅ TDD: Domain Services
+- ✅ Meta: 100% cobertura de testes
+
+**Semana 3-4: Use Cases Layer**
+- ✅ TDD: ImportPhotosUseCase com mocks
+- ✅ TDD: RatePhotoUseCase
+- ✅ TDD: ApplyAdjustmentUseCase
+- ✅ Meta: ≥95% cobertura
+
+**Semana 5-6: Infrastructure Layer**
+- ✅ Testes de integração: SQLite Repository
+- ✅ Testes de integração: File System
+- ✅ Testes de integração: RAW Decoder
+- ✅ Meta: ≥70% cobertura + todos os testes de integração passando
+
+**Semana 7-8: Adapters + UI**
+- ✅ Controllers com testes
+- ✅ Presenters com testes de snapshot
+- ✅ Integração Slint (testes manuais + E2E)
+
+### 5. Checklist de Qualidade
+
+Antes de cada commit:
+```bash
+# 1. Rodar todos os testes
+cargo test --workspace
+
+# 2. Verificar cobertura
+cargo tarpaulin --workspace
+
+# 3. Rodar linter
+cargo clippy --all-targets --all-features -- -D warnings
+
+# 4. Verificar formatação
+cargo fmt --all -- --check
+
+# 5. Rodar benchmarks (se mudou código de performance)
+cargo bench
+
+# 6. Verificar documentação
+cargo doc --no-deps --workspace
+```
+
+Script automatizado:
+```bash
+#!/bin/bash
+# scripts/pre-commit.sh
+set -e
+
+echo "🧪 Running tests..."
+cargo test --workspace
+
+echo "📊 Checking coverage..."
+cargo tarpaulin --workspace --ignore-tests
+
+echo "📎 Running clippy..."
+cargo clippy --all-targets --all-features -- -D warnings
+
+echo "🎨 Checking formatting..."
+cargo fmt --all -- --check
+
+echo "✅ All checks passed!"
+```
 
 ---
 
 ## Conclusão
 
-O stack escolhido oferece:
-- ✅ **Performance**: Rust + otimizações adequadas
-- ✅ **Segurança**: Memory safety + validações
-- ✅ **Cross-platform**: Funciona nativamente em macOS e Windows
-- ✅ **Manutenibilidade**: Código limpo, modular, testável
-- ✅ **Ecossistema**: Crates de qualidade disponíveis
-- ✅ **Futuro**: Tecnologias em desenvolvimento ativo
+O stack escolhido, combinado com **Clean Architecture** e **TDD**, oferece:
 
-Este stack é sólido o suficiente para construir uma aplicação profissional competitiva.
+- ✅ **Performance**: Rust + otimizações adequadas
+- ✅ **Segurança**: Memory safety + validações + testes abrangentes
+- ✅ **Cross-platform**: Funciona nativamente em macOS e Windows
+- ✅ **Manutenibilidade**: Código limpo, modular, testável, bem documentado
+- ✅ **Qualidade**: TDD garante código correto desde o início
+- ✅ **Arquitetura**: Clean Architecture permite evolução independente de camadas
+- ✅ **Testabilidade**: 100% das regras de negócio testadas isoladamente
+- ✅ **Ecossistema**: Crates de qualidade + ferramentas de teste de primeira classe
+- ✅ **Futuro**: Tecnologias em desenvolvimento ativo
+- ✅ **Refatoração Segura**: Testes garantem que mudanças não quebram funcionalidades
+
+**Princípios Seguidos**:
+- 🏗️ Clean Architecture: Separação clara de responsabilidades
+- 🧪 TDD: Testes primeiro, código depois
+- 📐 SOLID: Design de qualidade
+- ♻️ Refatoração Contínua: Sempre melhorando
+- 🎯 Domain-Driven Design: Foco nas regras de negócio
+
+Este stack e metodologia são sólidos o suficiente para construir uma aplicação profissional competitiva e sustentável a longo prazo.
