@@ -7,10 +7,10 @@
 
 | Métrica | Valor |
 |---------|-------|
-| Total de Testes | **131** 🎉 |
+| Total de Testes | **142** 🎉 |
 | Domain Layer | 99 testes ✅ |
 | Use Cases Layer | 32 testes ✅ |
-| Infrastructure Layer | 0 testes 📋 |
+| Infrastructure Layer | 11 testes ✅ |
 | Cobertura (Domain) | 100% ✅ |
 | Status Compilação | ✅ Sem erros |
 
@@ -132,21 +132,31 @@
 
 ---
 
-### 4️⃣ Infrastructure Layer (Camada 4) 📋 PLANEJADO
+### 3️⃣ Infrastructure Layer (Camada 4) 🔄 EM ANDAMENTO
 
-**Status**: Não iniciado
+**Status**: 11 testes (PhotoRepository implementado)
 
-#### Planejado
-- [ ] **SQLite Repositories**
-  - PhotoRepositoryImpl
-  - CollectionRepositoryImpl
-  - Migrations com refinery ou diesel_migrations
+#### Implementado ✅
+- [x] **PhotoRepositoryImpl** (SQLite)
+  - CRUD completo para fotos
+  - Conversão entre domain entities e database rows
+  - 9 testes de integração
 
-- [ ] **File System**
-  - File scanner
-  - Thumbnail generator
-  - EXIF reader
+- [x] **Database Module**
+  - Connection pool com SQLx
+  - Migration system
+  - 2 testes unitários
 
+- [x] **Schema SQLite**
+  - Tabela `photos` com todos os campos
+  - Índices para performance
+  - Migrations funcionando
+
+#### Próximos Passos 📋
+- [ ] **CollectionRepositoryImpl** - Persistência de coleções
+- [ ] **File Scanner** - Escanear diretórios
+- [ ] **EXIF Reader** - Ler metadados
+- [ ] **Thumbnail Generator** - Gerar previews
 - [ ] **RAW Processing**
   - LibRaw/rawler integration
   - Format decoders (CR2, NEF, ARW, DNG)

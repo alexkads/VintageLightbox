@@ -10,6 +10,42 @@ Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Ar
 
 ---
 
+## 📊 Progresso Atual (Atualizado: 16/dez/2025)
+
+### Status Geral
+- **Fase Atual**: Fase 1 (MVP) - Infrastructure Layer 🔄
+- **Total de Testes**: **142 testes passando** 🎉
+  - Domain Layer: 99 testes (100% cobertura)
+  - Use Cases Layer: 32 testes (7 use cases)
+  - Infrastructure Layer: 11 testes (PhotoRepository)
+
+### Conquistas Recentes
+- ✅ **Domain Layer 100% completo** (99 testes)
+  - Value Objects: Rating, PhotoId, ColorLabel, FilePath, CollectionId
+  - Entities: Photo, Collection
+  - Repository Traits definidos
+
+- ✅ **Use Cases Layer completo** (32 testes, 7 use cases)
+  - **Importação**: ImportPhotoUseCase (4), ImportPhotosUseCase (5)
+  - **Organização**: RatePhotoUseCase (5), SetColorLabelUseCase (5)
+  - **Coleções**: CreateCollectionUseCase (4), AddPhotoToCollectionUseCase (5), RemovePhotoFromCollectionUseCase (4)
+
+### Próximos Passos
+1. **Infrastructure Layer** - Implementar SQLite repositories e file system
+2. **RAW Processing** - Integração com LibRaw/rawler
+3. **UI Layer** - Interface Slint para visualização e edição
+4. **Adapters Layer** - Controllers e Presenters
+
+### Métricas de Qualidade
+- ✅ 100% cobertura no Domain Layer
+- ✅ TDD rigoroso aplicado (Red-Green-Refactor)
+- ✅ Zero warnings de compilação
+- ✅ CI/CD rodando em 3 plataformas
+- ✅ Mocks com mockall para testes isolados
+- ✅ Property-based testing com proptest
+
+---
+
 ## Fase 0: Setup e Fundação (2-3 semanas)
 
 ### Objetivos
@@ -89,9 +125,12 @@ Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Ar
   - Value Objects: Rating, PhotoId, ColorLabel, FilePath, CollectionId
   - Entities: Photo (rating, color labels, timestamps), Collection
   - Repository Traits: PhotoRepository, CollectionRepository
-- ✅ Use Cases iniciado (4 testes)
-  - ImportPhotoUseCase com mocks
-- ✅ **Total: 103 testes passando** 🎉
+- ✅ Use Cases layer com 7 use cases (32 testes)
+  - ImportPhotoUseCase, ImportPhotosUseCase
+  - RatePhotoUseCase, SetColorLabelUseCase
+  - CreateCollectionUseCase, AddPhotoToCollectionUseCase, RemovePhotoFromCollectionUseCase
+- ✅ **Total: 131 testes passando** 🎉
+- ✅ **Metas alcançadas: ≥20 testes use-cases, ≥95% cobertura**
 - [ ] Demo: Carregar e exibir arquivo RAW
 - [ ] Demo: Aplicar ajuste e ver resultado
 - ✅ Documentação técnica e de testes
@@ -123,7 +162,7 @@ Criar versão mínima funcional com importação, visualização, edição bási
 - [ ] 🔴 Escrever teste: ScanDirectoryUseCase
 - [ ] 🟢 Implementar ScanDirectoryUseCase
 - [ ] 🔵 Refatorar
-- [x] **Meta parcial: 18 testes no use-cases (4 + 5 + 5 + 4)**
+- [x] **Meta alcançada: 32 testes no use-cases (7 use cases completos)** ✅
 
 ### 1.2.1 Use Cases: Organização ✅ (implementado)
 - [x] 🔴🟢🔵 RatePhotoUseCase (5 testes)
@@ -217,12 +256,20 @@ Criar versão mínima funcional com importação, visualização, edição bási
 - [ ] Documentação de usuário básica
 
 ### Entregáveis MVP
-- ✅ Aplicação instalável (macOS ou Windows)
-- ✅ Importar fotos RAW e JPEG
-- ✅ Editar exposição, contraste, temperatura
-- ✅ Classificar por estrelas
-- ✅ Exportar para JPEG
-- ✅ Manual básico do usuário
+- ✅ **131 testes passando** (99 domain + 32 use-cases)
+- ✅ **7 Use Cases implementados com TDD**
+  - Importação: ImportPhotoUseCase, ImportPhotosUseCase
+  - Organização: RatePhotoUseCase, SetColorLabelUseCase
+  - Coleções: CreateCollectionUseCase, AddPhotoToCollectionUseCase, RemovePhotoFromCollectionUseCase
+- ✅ **Domain Layer 100% completo**
+- [ ] Aplicação instalável (macOS ou Windows)
+- [ ] Importar fotos RAW e JPEG
+- [ ] Editar exposição, contraste, temperatura
+- [ ] Classificar por estrelas (lógica implementada, UI pendente)
+- [ ] Exportar para JPEG
+- [ ] Manual básico do usuário
+
+**Status Atual**: Use Cases Layer completo, Infrastructure Layer pendente
 
 ---
 

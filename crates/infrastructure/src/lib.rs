@@ -1,7 +1,10 @@
 //! # Infrastructure Layer - VintageLightbox
 //!
-//! Implementações de frameworks e drivers externos
+//! Esta camada contém implementações concretas de persistência,
+//! file system, e outras integrações externas.
 
 pub mod database;
 pub mod file_system;
 pub mod raw_processing;
+
+pub use database::{PhotoRepositoryImpl, create_pool, run_migrations};
