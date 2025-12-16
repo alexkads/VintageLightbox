@@ -16,13 +16,40 @@ VintageLightbox é uma aplicação multiplataforma de gerenciamento e edição d
 - 💾 **Presets personalizados** para workflow consistente
 - 📤 **Exportação otimizada** para JPEG/PNG
 
+## 🏗️ Arquitetura e Metodologia
+
+Este projeto segue **Clean Architecture** e **Test-Driven Development (TDD)**:
+
+- 🏛️ **4 Camadas**: Domain → Use Cases → Adapters → Infrastructure
+- 🧪 **TDD**: Ciclo Red-Green-Refactor em todo o código
+- 📊 **100% cobertura** no Domain Layer
+- ✅ **37 testes** já implementados (Value Objects)
+
 ## 🚀 Tecnologias
 
 - **Linguagem**: Rust (performance e segurança)
 - **Interface**: Slint UI (nativa e multiplataforma)
 - **RAW Processing**: LibRaw/rawler
 - **Database**: SQLite
+- **Testing**: cargo test, mockall, proptest, criterion
 - **Plataformas**: macOS e Windows
+
+## 🎯 Status do Desenvolvimento
+
+**Fase Atual**: Setup e Domain Layer ✅
+
+- [x] Workspace configurado com Clean Architecture
+- [x] Ferramentas de teste configuradas
+- [x] Value Objects implementados com TDD (Rating, PhotoId, ColorLabel)
+- [x] 37 testes passando com sucesso
+- [ ] Photo Entity (em progresso)
+- [ ] Use Cases Layer
+- [ ] Infrastructure Layer
+
+**Rodando os testes**:
+```bash
+cargo test --workspace
+```
 
 ## 📚 Documentação
 

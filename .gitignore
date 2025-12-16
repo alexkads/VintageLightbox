@@ -1,0 +1,48 @@
+# Rust
+/target/
+**/*.rs.bk
+*.pdb
+
+# Cargo
+Cargo.lock
+.cargo/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Testing
+*.profraw
+*.profdata
+coverage/
+tarpaulin-report.html
+cobertura.xml
+
+# Benchmarks
+criterion/
+
+# Build artifacts
+*.dylib
+*.so
+*.dll
+*.exe
+
+# Documentation
+book/
+
+# Environment
+.env
+.env.local
+
+# OS
+Thumbs.db
+.Spotlight-V100
+.Trashes
+
+# Temporary files
+tmp/
+temp/
