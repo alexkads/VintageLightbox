@@ -504,7 +504,13 @@ rustflags = ["-C", "link-arg=-mmacosx-version-min=11.0"]
 # .github/workflows/ci.yml
 name: CI
 
-on: [push, pull_request]
+on:
+  push:
+    branches-ignore:
+      - dev
+  pull_request:
+    branches-ignore:
+      - dev
 
 jobs:
   test:
@@ -518,6 +524,8 @@ jobs:
       - run: cargo test --all-features
       - run: cargo clippy -- -D warnings
 ```
+
+**Nota**: CI/CD não executa na branch `dev` para permitir desenvolvimento experimental sem overhead de testes automáticos.
 
 ---
 
