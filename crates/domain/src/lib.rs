@@ -18,3 +18,4 @@ pub mod value_objects;
 
 // Re-exports públicos
 pub use errors::{DomainError, DomainResult};
+pub use repositories::{CollectionRepository, PhotoRepository};

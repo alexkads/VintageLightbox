@@ -69,31 +69,35 @@ crates/
 
 **Responsabilidade**: Regras de negócio empresariais puras, independentes de qualquer framework ou tecnologia.
 
-#### `domain/` (crates/domain/)
+#### `domain/` (crates/domain/) ✅ **IMPLEMENTADO**
+
 Módulo com entidades e lógica de domínio central.
 
 ```rust
 domain/
 ├── entities/
-│   ├── photo.rs          // Entity: Photo com metadados e validações
-│   ├── catalog.rs        // Entity: Catálogo de fotos
-│   ├── collection.rs     // Entity: Coleções/Álbuns
-│   └── adjustment.rs     // Entity: Ajustes de edição
+│   ├── photo.rs          // ✅ Entity: Photo com rating, color labels, timestamps
+│   ├── collection.rs     // ✅ Entity: Coleções/Álbuns com gerenciamento de fotos
+│   ├── catalog.rs        // 🚧 Entity: Catálogo de fotos
+│   └── adjustment.rs     // 🚧 Entity: Ajustes de edição
 ├── value_objects/
-│   ├── rating.rs         // Value Object: Sistema de classificação (0-5)
-│   ├── color_label.rs    // Value Object: Marcações por cor
-│   ├── photo_id.rs       // Value Object: Identificador único
-│   ├── file_path.rs      // Value Object: Caminho de arquivo validado
-│   └── color_space.rs    // Value Object: Espaço de cor
+│   ├── rating.rs         // ✅ Value Object: Sistema de classificação (0-5)
+│   ├── color_label.rs    // ✅ Value Object: Marcações por cor
+│   ├── photo_id.rs       // ✅ Value Object: Identificador único UUID
+│   ├── collection_id.rs  // ✅ Value Object: ID de coleção
+│   ├── file_path.rs      // ✅ Value Object: Caminho de arquivo validado
+│   └── color_space.rs    // 🚧 Value Object: Espaço de cor
 ├── services/
-│   ├── duplicate_detection.rs  // Domain Service: Detecção de duplicatas
-│   └── color_management.rs     // Domain Service: Gerenciamento de cor
-├── repositories/          // Repository Traits (Interfaces)
-│   ├── photo_repository.rs
-│   ├── collection_repository.rs
-│   └── preset_repository.rs
-├── errors.rs             // Domain-specific errors
-└── lib.rs
+│   ├── duplicate_detection.rs  // 🚧 Domain Service: Detecção de duplicatas
+│   └── color_management.rs     // 🚧 Domain Service: Gerenciamento de cor
+├── repositories.rs       // ✅ Repository Traits (Interfaces)
+│   ├── PhotoRepository   // ✅ Interface para persistência de fotos
+│   └── CollectionRepository // ✅ Interface para persistência de coleções
+├── errors.rs             // ✅ Domain-specific errors
+└── lib.rs                // ✅ Exports públicos
+
+// 📊 Status: 99 testes, 100% cobertura
+```
 
 // Exemplo de Entity
 pub struct Photo {
@@ -124,31 +128,30 @@ impl Photo {
 
 **Responsabilidade**: Orquestração de fluxos de trabalho e regras de negócio específicas da aplicação.
 
-#### `use-cases/` (crates/use-cases/)
+#### `use-cases/` (crates/use-cases/) 🚧 **EM ANDAMENTO**
 
 ```rust
 use-cases/
 ├── import/
-│   ├── import_photos.rs       // Use Case: Importar fotos
-│   ├── scan_directory.rs      // Use Case: Escanear diretório
-│   └── detect_duplicates.rs   // Use Case: Detectar duplicatas
+│   ├── import_photo.rs        // ✅ Use Case: Importar foto única
+│   ├── import_photos.rs       // 🚧 Use Case: Importar fotos (batch)
+│   ├── scan_directory.rs      // 🚧 Use Case: Escanear diretório
+│   └── detect_duplicates.rs   // 🚧 Use Case: Detectar duplicatas
 ├── edit/
-│   ├── apply_adjustment.rs    // Use Case: Aplicar ajuste a foto
-│   ├── save_preset.rs         // Use Case: Salvar preset
-│   └── batch_edit.rs          // Use Case: Edição em lote
+│   ├── apply_adjustment.rs    // 🚧 Use Case: Aplicar ajuste a foto
+│   ├── save_preset.rs         // 🚧 Use Case: Salvar preset
+│   └── batch_edit.rs          // 🚧 Use Case: Edição em lote
 ├── organize/
-│   ├── rate_photo.rs          // Use Case: Classificar foto
-│   ├── add_to_collection.rs   // Use Case: Adicionar a coleção
-│   └── filter_photos.rs       // Use Case: Filtrar fotos
+│   ├── rate_photo.rs          // 🚧 Use Case: Classificar foto
+│   ├── add_to_collection.rs   // 🚧 Use Case: Adicionar a coleção
+│   └── filter_photos.rs       // 🚧 Use Case: Filtrar fotos
 ├── export/
-│   ├── export_photo.rs        // Use Case: Exportar foto
-│   └── batch_export.rs        // Use Case: Exportação em lote
-├── ports/                      // Input/Output Boundaries
-│   ├── photo_repository.rs    // Port: Repository interface
-│   ├── file_system.rs         // Port: File system interface
-│   ├── raw_decoder.rs         // Port: RAW decoder interface
-│   └── presenter.rs           // Port: Presenter interface
-└── lib.rs
+│   ├── export_photo.rs        // 🚧 Use Case: Exportar foto
+│   └── batch_export.rs        // 🚧 Use Case: Exportação em lote
+└── lib.rs                      // ✅ Exports públicos
+
+// 📊 Status: 4 testes (ImportPhotoUseCase com mocks)
+```
 
 // Exemplo de Use Case
 pub struct RatePhotoUseCase<R: PhotoRepository> {

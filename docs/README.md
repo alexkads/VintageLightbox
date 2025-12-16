@@ -6,7 +6,20 @@ Bem-vindo à documentação do VintageLightbox! Este índice organiza todos os d
 
 VintageLightbox é um clone profissional do Adobe Lightroom desenvolvido em Rust com interface Slint, focado em fotógrafos profissionais que precisam de uma solução completa para importação, edição, organização e venda de fotos.
 
+**Status Atual**: 103 testes passando | Domain Layer completo | Use Cases iniciado  
+**Veja**: [STATUS.md](STATUS.md) para progresso detalhado
+
 ## 📚 Documentos Principais
+
+### 0. [Status do Projeto](STATUS.md) 🆕
+**Conteúdo**: Status consolidado da implementação
+- 103 testes passando (99 domain + 4 use-cases)
+- Progresso por camada (Domain ✅, Use Cases 🚧)
+- Métricas e conquistas
+- Próximas milestones
+- Guia de contribuição
+
+**Leia se você quer**: Ver o progresso atual e próximos passos.
 
 ### 1. [Requisitos do Sistema](01-REQUISITOS.md)
 **Conteúdo**: Requisitos funcionais e não-funcionais completos

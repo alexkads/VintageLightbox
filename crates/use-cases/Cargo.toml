@@ -9,8 +9,9 @@ license.workspace = true
 domain = { path = "../domain" }
 thiserror.workspace = true
 serde.workspace = true
+async-trait.workspace = true
 
 [dev-dependencies]
 mockall.workspace = true
 proptest.workspace = true
-tokio = { workspace = true, features = ["test-util"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }

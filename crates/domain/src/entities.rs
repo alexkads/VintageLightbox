@@ -1,4 +1,6 @@
-// pub mod photo;
+pub mod collection;
+pub mod photo;
 
 // Re-exports
-// pub use photo::Photo;
+pub use collection::Collection;
+pub use photo::Photo;

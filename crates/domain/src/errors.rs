@@ -6,6 +6,9 @@ pub enum DomainError {
     #[error("Rating inválido: deve estar entre 0 e 5")]
     InvalidRating,
 
+    #[error("ID inválido: {id} - {reason}")]
+    InvalidId { id: String, reason: String },
+
     #[error("Photo ID inválido")]
     InvalidPhotoId,
 

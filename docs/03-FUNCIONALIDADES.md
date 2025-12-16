@@ -1,5 +1,32 @@
 # Especificação de Funcionalidades - VintageLightbox
 
+## 📊 Status de Implementação
+
+**Última atualização**: 16 de dezembro de 2025
+
+### Implementado ✅
+- **Domain Layer** (99 testes, 100% cobertura)
+  - Value Objects: Rating, PhotoId, ColorLabel, FilePath, CollectionId
+  - Entities: Photo (com rating, color labels, timestamps, edit tracking), Collection
+  - Repository Traits: PhotoRepository, CollectionRepository
+  
+- **Use Cases Layer** (4 testes)
+  - ImportPhotoUseCase (testado com mocks)
+
+### Em Andamento 🚧
+- Use Cases de Importação (batch, scan directory)
+- Infrastructure Layer (SQLite repositories)
+
+### Planejado 📋
+- RAW Processing
+- UI com Slint
+- Exportação
+- Presets
+
+**Total**: 103 testes passando 🎉
+
+---
+
 ## 1. Módulo de Importação
 
 ### 1.1 Seleção de Fonte

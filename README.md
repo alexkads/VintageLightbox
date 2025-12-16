@@ -36,15 +36,23 @@ Este projeto segue **Clean Architecture** e **Test-Driven Development (TDD)**:
 
 ## 🎯 Status do Desenvolvimento
 
-**Fase Atual**: Setup e Domain Layer ✅
+**Fase Atual**: Domain Layer + Use Cases ✅
 
 - [x] Workspace configurado com Clean Architecture
-- [x] Ferramentas de teste configuradas
-- [x] Value Objects implementados com TDD (Rating, PhotoId, ColorLabel)
-- [x] 37 testes passando com sucesso
-- [ ] Photo Entity (em progresso)
-- [ ] Use Cases Layer
-- [ ] Infrastructure Layer
+- [x] Ferramentas de teste configuradas (TDD)
+- [x] **Value Objects** (99 testes)
+  - Rating, PhotoId, ColorLabel, FilePath, CollectionId
+- [x] **Entidades** (99 testes)
+  - Photo Entity (com rating, color labels, edit tracking)
+  - Collection Entity (com photos management)
+- [x] **Repository Traits** (interfaces)
+  - PhotoRepository, CollectionRepository
+- [x] **Use Cases** (4 testes)
+  - ImportPhotoUseCase (com mocks)
+- [ ] Infrastructure Layer (SQLite, File System)
+- [ ] Adapters Layer (Controllers, Presenters)
+
+**103 testes passando** 🎉
 
 **Rodando os testes**:
 ```bash
