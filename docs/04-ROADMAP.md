@@ -117,13 +117,24 @@ Criar versão mínima funcional com importação, visualização, edição bási
 - [x] 🔴 Escrever teste: ImportPhotoUseCase com mocks
 - [x] 🟢 Implementar ImportPhotoUseCase
 - [x] 🔵 Refatorar com Arc<dyn Repository>
-- [ ] 🔴 Escrever teste: ImportPhotosUseCase (batch)
-- [ ] 🟢 Implementar ImportPhotosUseCase (batch)
-- [ ] 🔵 Refatorar
+- [x] 🔴 Escrever teste: ImportPhotosUseCase (batch)
+- [x] 🟢 Implementar ImportPhotosUseCase (batch)
+- [x] 🔵 Refatorar
 - [ ] 🔴 Escrever teste: ScanDirectoryUseCase
 - [ ] 🟢 Implementar ScanDirectoryUseCase
 - [ ] 🔵 Refatorar
-- [ ] Meta: ≥95% cobertura (atual: 4 testes)
+- [x] **Meta parcial: 18 testes no use-cases (4 + 5 + 5 + 4)**
+
+### 1.2.1 Use Cases: Organização ✅ (implementado)
+- [x] 🔴🟢🔵 RatePhotoUseCase (5 testes)
+  - Classificar foto com rating (0-5 estrelas)
+  - Remover rating de foto
+  - Tratamento de erros (foto não encontrada)
+
+### 1.2.2 Use Cases: Coleções ✅ (implementado)
+- [x] 🔴🟢🔵 CreateCollectionUseCase (4 testes)
+  - Criar coleção com nome e descrição opcional
+  - Validação e persistência
 
 ### 1.3 Infrastructure: Importação (1 semana)
 - [ ] Implementar File Scanner (testes de integração)

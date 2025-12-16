@@ -7,9 +7,9 @@
 
 | Métrica | Valor |
 |---------|-------|
-| Total de Testes | **103** 🎉 |
+| Total de Testes | **117** 🎉 |
 | Domain Layer | 99 testes ✅ |
-| Use Cases Layer | 4 testes 🚧 |
+| Use Cases Layer | 18 testes ✅ |
 | Infrastructure Layer | 0 testes 📋 |
 | Cobertura (Domain) | 100% ✅ |
 | Status Compilação | ✅ Sem erros |
@@ -75,9 +75,9 @@
 
 ---
 
-### 2️⃣ Use Cases Layer (Camada 2) 🚧 EM ANDAMENTO
+### 2️⃣ Use Cases Layer (Camada 2) ✅ PROGRESSO SIGNIFICATIVO
 
-**Status**: 4 testes (ImportPhotoUseCase)
+**Status**: 18 testes (4 use cases implementados)
 
 #### Implementado ✅
 - [x] **ImportPhotoUseCase** (4 testes com mocks)
@@ -86,12 +86,29 @@
   - Validação de erros do repository
   - Criação de IDs únicos testada
 
+- [x] **ImportPhotosUseCase** (5 testes)
+  - Importação em lote (batch)
+  - Tratamento de falhas parciais
+  - Resultado com sucessos e falhas
+  - Continua importando mesmo com erros
+
+- [x] **RatePhotoUseCase** (5 testes)
+  - Classificar foto com rating (0-5 estrelas)
+  - Remover rating de foto
+  - Tratamento de foto não encontrada
+  - Múltiplas classificações
+
+- [x] **CreateCollectionUseCase** (4 testes)
+  - Criar coleção com nome e descrição
+  - Descrição opcional
+  - IDs únicos para cada coleção
+  - Tratamento de erros
+
 #### Próximos Passos 📋
-- [ ] **RatePhotoUseCase** - Classificar foto com estrelas
-- [ ] **CreateCollectionUseCase** - Criar nova coleção
-- [ ] **AddPhotoToCollectionUseCase** - Adicionar foto à coleção
-- [ ] **ImportPhotosUseCase** (batch) - Importar múltiplas fotos
 - [ ] **ScanDirectoryUseCase** - Escanear diretório recursivamente
+- [ ] **SetColorLabelUseCase** - Definir color label em foto
+- [ ] **AddPhotoToCollectionUseCase** - Adicionar foto à coleção
+- [ ] **RemovePhotoFromCollectionUseCase** - Remover foto da coleção
 
 ---
 
@@ -252,5 +269,5 @@ cargo test -p use-cases
 ---
 
 **Última execução de testes**: 16/dez/2025  
-**Resultado**: ✅ 103/103 testes passando  
-**Tempo de execução**: ~0.02s (domain) + ~0.00s (use-cases)
+**Resultado**: ✅ 117/117 testes passando  
+**Tempo de execução**: ~0.01s (domain) + ~0.00s (use-cases)
