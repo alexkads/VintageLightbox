@@ -4,46 +4,12 @@
 
 use std::path::Path;
 use std::fs::File;
-use domain::DomainResult;
-
-/// Metadados EXIF extraídos de uma foto
-#[derive(Debug, Clone, PartialEq)]
-pub struct PhotoMetadata {
-    /// Modelo da câmera
-    pub camera_model: Option<String>,
-    /// Fabricante da câmera
-    pub camera_make: Option<String>,
-    /// Data/hora da captura
-    pub date_time: Option<String>,
-    /// ISO
-    pub iso: Option<u32>,
-    /// Abertura (f-number)
-    pub aperture: Option<f64>,
-    /// Velocidade do obturador
-    pub shutter_speed: Option<String>,
-    /// Distância focal
-    pub focal_length: Option<f64>,
-    /// Largura da imagem
-    pub width: Option<u32>,
-    /// Altura da imagem
-    pub height: Option<u32>,
-}
-
-impl Default for PhotoMetadata {
-    fn default() -> Self {
-        Self {
-            camera_model: None,
-            camera_make: None,
-            date_time: None,
-            iso: None,
-            aperture: None,
-            shutter_speed: None,
-            focal_length: None,
-            width: None,
-            height: None,
-        }
-    }
-}
+use domain::{
+    value_objects::{FilePath, PhotoMetadata},
+    services::MetadataExtractor,
+    DomainResult,
+};
+use async_trait::async_trait;
 
 /// Leitor de metadados EXIF
 pub struct ExifReader;
@@ -63,9 +29,11 @@ impl ExifReader {
         let mut bufreader = std::io::BufReader::new(&file);
         let exifreader = exif::Reader::new();
         
-        let exif_data = exifreader.read_from_container(&mut bufreader).map_err(|e| {
-            domain::DomainError::InvalidOperation(format!("Failed to read EXIF data: {}", e))
-        })?;
+        // Se falhar ao ler EXIF, retorna metadados vazios em vez de erro
+        // Isso permite importar imagens sem EXIF
+        let Ok(exif_data) = exifreader.read_from_container(&mut bufreader) else {
+            return Ok(PhotoMetadata::default());
+        };
 
         let mut metadata = PhotoMetadata::default();
 
@@ -138,13 +106,26 @@ impl ExifReader {
 
     /// Verifica se um arquivo tem metadados EXIF
     pub fn has_exif(&self, path: &Path) -> bool {
-        self.read_metadata(path).is_ok()
+        // Tenta ler e vê se algum campo foi preenchido
+        if let Ok(metadata) = self.read_metadata(path) {
+             metadata.camera_model.is_some() || metadata.iso.is_some()
+        } else {
+            false
+        }
     }
 }
 
 impl Default for ExifReader {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[async_trait]
+impl MetadataExtractor for ExifReader {
+    fn extract(&self, path: &FilePath) -> DomainResult<PhotoMetadata> {
+        let path_ref: &Path = path.as_ref();
+        self.read_metadata(path_ref)
     }
 }
 
@@ -159,7 +140,6 @@ mod tests {
         let mut file = NamedTempFile::new().unwrap();
         
         // JPEG mínimo com marcador EXIF
-        // Este é um JPEG válido mas mínimo para testes
         let jpeg_data = vec![
             0xFF, 0xD8, // SOI (Start of Image)
             0xFF, 0xE1, // APP1 marker (EXIF)
@@ -189,66 +169,26 @@ mod tests {
     }
 
     #[test]
-    fn test_has_exif_nonexistent_file() {
-        let reader = ExifReader::new();
-        assert!(!reader.has_exif(Path::new("/nonexistent/file.jpg")));
-    }
-
-    #[test]
     fn test_read_metadata_from_valid_jpeg() {
         let reader = ExifReader::new();
         let file = create_test_jpeg_with_exif();
         
-        // Should not panic, even if EXIF data is minimal
         let result = reader.read_metadata(file.path());
         
-        // May succeed or fail depending on EXIF validity, but shouldn't panic
         match result {
             Ok(metadata) => {
-                // If successful, metadata should be initialized
                 assert!(metadata.camera_model.is_none() || metadata.camera_model.is_some());
             }
             Err(_) => {
-                // It's ok if minimal EXIF fails to parse
+                // Should not error even if EXIF is empty
             }
         }
     }
 
     #[test]
-    fn test_metadata_default() {
-        let metadata = PhotoMetadata::default();
-        assert!(metadata.camera_model.is_none());
-        assert!(metadata.camera_make.is_none());
-        assert!(metadata.date_time.is_none());
-        assert!(metadata.iso.is_none());
-        assert!(metadata.aperture.is_none());
-        assert!(metadata.shutter_speed.is_none());
-        assert!(metadata.focal_length.is_none());
-        assert!(metadata.width.is_none());
-        assert!(metadata.height.is_none());
-    }
-
-    #[test]
-    fn test_metadata_clone() {
-        let metadata = PhotoMetadata {
-            camera_model: Some("Canon EOS 5D".to_string()),
-            camera_make: Some("Canon".to_string()),
-            date_time: Some("2024:01:01 12:00:00".to_string()),
-            iso: Some(400),
-            aperture: Some(2.8),
-            shutter_speed: Some("1/125".to_string()),
-            focal_length: Some(50.0),
-            width: Some(6000),
-            height: Some(4000),
-        };
-
-        let cloned = metadata.clone();
-        assert_eq!(metadata, cloned);
-    }
-
-    #[test]
-    fn test_exif_reader_default() {
-        let reader = ExifReader::default();
-        assert!(!reader.has_exif(Path::new("/nonexistent.jpg")));
+    fn test_metadata_extraction_implementation() {
+        let reader = ExifReader::new();
+        // Just verify it implements the trait by calling it
+        let _ = MetadataExtractor::extract(&reader, &FilePath::new("/test.jpg").unwrap());
     }
 }

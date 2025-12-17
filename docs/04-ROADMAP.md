@@ -42,6 +42,7 @@ Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Ar
   - **ExifReader**: Extração de metadados EXIF (7 testes)
     - Câmera, ISO, abertura, velocidade
     - Dimensões da imagem
+    - Integrado com ImportPhotoUseCase e ScanDirectoryUseCase ✅
 
 ### Próximos Passos
 1. **Infrastructure Layer** - Implementar SQLite repositories e file system

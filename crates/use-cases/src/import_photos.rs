@@ -7,6 +7,7 @@ use domain::{
     entities::Photo,
     repositories::PhotoRepository,
     value_objects::FilePath,
+    services::MetadataExtractor,
     DomainResult,
 };
 use std::sync::Arc;
@@ -35,12 +36,19 @@ impl BatchImportResult {
 /// Use Case para importar múltiplas fotos
 pub struct ImportPhotosUseCase {
     photo_repository: Arc<dyn PhotoRepository>,
+    metadata_extractor: Arc<dyn MetadataExtractor>,
 }
 
 impl ImportPhotosUseCase {
     /// Cria uma nova instância do Use Case
-    pub fn new(photo_repository: Arc<dyn PhotoRepository>) -> Self {
-        Self { photo_repository }
+    pub fn new(
+        photo_repository: Arc<dyn PhotoRepository>,
+        metadata_extractor: Arc<dyn MetadataExtractor>,
+    ) -> Self {
+        Self {
+            photo_repository,
+            metadata_extractor,
+        }
     }
 
     /// Importa múltiplas fotos do sistema de arquivos
@@ -65,7 +73,13 @@ impl ImportPhotosUseCase {
     }
 
     async fn import_single(&self, file_path: &FilePath) -> DomainResult<Photo> {
-        let photo = Photo::new(file_path.clone());
+        let mut photo = Photo::new(file_path.clone());
+
+        // Extrair metadados
+        if let Ok(metadata) = self.metadata_extractor.extract(file_path) {
+            photo.set_metadata(metadata);
+        }
+
         self.photo_repository.save(&photo).await?;
         Ok(photo)
     }
@@ -74,9 +88,21 @@ impl ImportPhotosUseCase {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use domain::{DomainError, PhotoRepository};
+    use domain::{
+        DomainError, PhotoRepository,
+        value_objects::PhotoMetadata,
+    };
     use mockall::mock;
     use mockall::predicate::*;
+
+    // Mock do MetadataExtractor
+    mock! {
+        pub MetadataExtractor {}
+
+        impl MetadataExtractor for MetadataExtractor {
+            fn extract(&self, path: &FilePath) -> DomainResult<PhotoMetadata>;
+        }
+    }
 
     // Mock do PhotoRepository
     mock! {
@@ -103,8 +129,16 @@ mod tests {
             .expect_save()
             .times(3)
             .returning(|_| Ok(()));
+
+        let mut mock_extractor = MockMetadataExtractor::new();
+        mock_extractor
+            .expect_extract()
+            .returning(|_| Ok(PhotoMetadata::default()));
         
-        let use_case = ImportPhotosUseCase::new(Arc::new(mock_repo));
+        let use_case = ImportPhotosUseCase::new(
+            Arc::new(mock_repo),
+            Arc::new(mock_extractor)
+        );
         
         let file_paths = vec![
             FilePath::new("/photos/img1.jpg").unwrap(),
@@ -143,8 +177,16 @@ mod tests {
                     Ok(())
                 }
             });
+
+        let mut mock_extractor = MockMetadataExtractor::new();
+        mock_extractor
+            .expect_extract()
+            .returning(|_| Ok(PhotoMetadata::default()));
         
-        let use_case = ImportPhotosUseCase::new(Arc::new(mock_repo));
+        let use_case = ImportPhotosUseCase::new(
+            Arc::new(mock_repo),
+            Arc::new(mock_extractor)
+        );
         
         let file_paths = vec![
             FilePath::new("/photos/img1.jpg").unwrap(),
@@ -171,7 +213,11 @@ mod tests {
     async fn test_import_empty_list() {
         // Arrange
         let mock_repo = MockPhotoRepo::new();
-        let use_case = ImportPhotosUseCase::new(Arc::new(mock_repo));
+        let mock_extractor = MockMetadataExtractor::new();
+        let use_case = ImportPhotosUseCase::new(
+            Arc::new(mock_repo),
+            Arc::new(mock_extractor)
+        );
         
         // Act
         let result = use_case.execute(vec![]).await;
@@ -194,8 +240,16 @@ mod tests {
             .expect_save()
             .times(2)
             .returning(|_| Err(DomainError::InvalidFilePath("Permission denied".to_string())));
+
+        let mut mock_extractor = MockMetadataExtractor::new();
+        mock_extractor
+            .expect_extract()
+            .returning(|_| Ok(PhotoMetadata::default()));
         
-        let use_case = ImportPhotosUseCase::new(Arc::new(mock_repo));
+        let use_case = ImportPhotosUseCase::new(
+            Arc::new(mock_repo),
+            Arc::new(mock_extractor)
+        );
         
         let file_paths = vec![
             FilePath::new("/photos/img1.jpg").unwrap(),
@@ -221,8 +275,16 @@ mod tests {
             .expect_save()
             .times(3)
             .returning(|_| Ok(()));
+
+        let mut mock_extractor = MockMetadataExtractor::new();
+        mock_extractor
+            .expect_extract()
+            .returning(|_| Ok(PhotoMetadata::default()));
         
-        let use_case = ImportPhotosUseCase::new(Arc::new(mock_repo));
+        let use_case = ImportPhotosUseCase::new(
+            Arc::new(mock_repo),
+            Arc::new(mock_extractor)
+        );
         
         let file_paths = vec![
             FilePath::new("/photos/img1.jpg").unwrap(),

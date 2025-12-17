@@ -5,7 +5,7 @@
 use domain::{
     entities::Photo,
     repositories::PhotoRepository,
-    value_objects::{ColorLabel, FilePath, Rating},
+    value_objects::{ColorLabel, FilePath, Rating, PhotoMetadata},
 };
 use infrastructure::{create_pool, run_migrations, PhotoRepositoryImpl};
 
@@ -188,4 +188,44 @@ async fn test_delete_nonexistent_photo() {
 
     // Assert
     assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn test_save_and_find_photo_with_metadata() {
+    // Arrange
+    let repo = create_test_repository().await;
+    let file_path = FilePath::new("/photos/test_meta.jpg").unwrap();
+    let mut photo = Photo::new(file_path);
+    let photo_id = photo.id().clone();
+
+    // Create metadata
+    let metadata = PhotoMetadata {
+        camera_make: Some("Canon".to_string()),
+        camera_model: Some("EOS R5".to_string()),
+        date_time: Some("2023-12-17 12:00:00".to_string()),
+        iso: Some(100),
+        aperture: Some(2.8),
+        shutter_speed: Some("1/1000".to_string()),
+        focal_length: Some(50.0),
+        width: Some(8192),
+        height: Some(5464),
+    };
+
+    photo.set_metadata(metadata.clone());
+
+    // Act - Save
+    repo.save(&photo).await.unwrap();
+
+    // Act - Find
+    let found = repo.find_by_id(&photo_id).await.unwrap().unwrap();
+
+    // Assert
+    assert!(found.metadata().is_some());
+    let found_metadata = found.metadata().unwrap();
+    
+    // Check key fields
+    assert_eq!(found_metadata.camera_make, Some("Canon".to_string()));
+    assert_eq!(found_metadata.camera_model, Some("EOS R5".to_string()));
+    assert_eq!(found_metadata.iso, Some(100));
+    assert_eq!(found_metadata.width, Some(8192));
 }

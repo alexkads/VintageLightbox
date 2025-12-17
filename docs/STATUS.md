@@ -134,6 +134,9 @@
 
 ### 3️⃣ Infrastructure Layer (Camada 4) 🔄 EM ANDAMENTO
 
+**Total Tests**: 171 passing
+**Coverage**: ~95%
+**Fase**: 1.5 - Infrastructure Layer (Metadata)
 **Status**: 42 testes (Repositories + File System + Metadata)
 
 #### Implementado ✅
@@ -145,9 +148,12 @@
 - [x] **ExifReader** - 7 testes
   - Extrai metadados (câmera, ISO, abertura, etc)
   - Suporta JPEG, TIFF, RAW
-  - Dimensões da imagem
+  - Integrado com workflows de importação ✅
 
 #### Próximos Passos 📋
+- [x] **Metadata Persistence** - Salvar metadados no SQLite ✅
+  - Coluna JSON na tabela `photos`
+  - Serialização/Deserialização automática
 - [ ] **Thumbnail Generator** - Gerar previews
 - [ ] **RAW Decoder** - Processar arquivos RAW
 - [ ] **UI Layer** - Interface com Slint

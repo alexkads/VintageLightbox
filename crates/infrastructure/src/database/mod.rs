@@ -22,8 +22,12 @@ pub async fn create_pool(database_url: &str) -> Result<SqlitePool, sqlx::Error> 
 pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     // Ler e executar migration SQL
     let migration_sql = include_str!("../../migrations/001_initial_schema.sql");
-    
     sqlx::raw_sql(migration_sql)
+        .execute(pool)
+        .await?;
+
+    let migration_002 = include_str!("../../migrations/002_add_metadata_to_photos.sql");
+    sqlx::raw_sql(migration_002)
         .execute(pool)
         .await?;
     

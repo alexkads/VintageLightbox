@@ -37,6 +37,9 @@ impl ScanDirectoryUseCase {
     pub async fn execute(&self, directory_path: &Path) -> DomainResult<ScanDirectoryResult> {
         // Usar FileScanner para encontrar arquivos
         let scanner = crate::file_system::FileScanner::new();
+        // Usar ExifReader para metadados
+        let exif_reader = crate::exif_reader::ExifReader::new();
+
         let files = scanner.scan_directory(directory_path)?;
 
         let total_found = files.len();
@@ -45,7 +48,7 @@ impl ScanDirectoryUseCase {
 
         // Tentar importar cada arquivo encontrado
         for file_path in files {
-            match self.import_photo(&file_path).await {
+            match self.import_photo(&file_path, &exif_reader).await {
                 Ok(photo) => imported.push(photo),
                 Err(e) => {
                     failed.push((
@@ -64,9 +67,14 @@ impl ScanDirectoryUseCase {
     }
 
     /// Importa uma única foto
-    async fn import_photo(&self, path: &Path) -> DomainResult<Photo> {
+    async fn import_photo(&self, path: &Path, exif_reader: &crate::exif_reader::ExifReader) -> DomainResult<Photo> {
         let file_path = FilePath::new(path.to_string_lossy().as_ref())?;
-        let photo = Photo::new(file_path);
+        let mut photo = Photo::new(file_path.clone());
+        
+        if let Ok(metadata) = exif_reader.read_metadata(path) {
+            photo.set_metadata(metadata);
+        }
+
         self.photo_repository.save(&photo).await?;
         Ok(photo)
     }

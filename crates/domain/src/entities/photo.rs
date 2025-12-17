@@ -9,6 +9,7 @@ use crate::{
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use crate::value_objects::PhotoMetadata;
 
 /// Entidade Photo - representa uma fotografia no catálogo
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -27,6 +28,8 @@ pub struct Photo {
     modified_at: DateTime<Utc>,
     /// Flag de foto editada
     is_edited: bool,
+    /// Metadados técnicos (EXIF)
+    metadata: Option<PhotoMetadata>,
 }
 
 impl Photo {
@@ -35,18 +38,35 @@ impl Photo {
         Self::with_id(PhotoId::new(), file_path)
     }
 
-    /// Cria uma nova foto com ID específico (para reconstrução de persistência)
-    pub fn with_id(id: PhotoId, file_path: FilePath) -> Self {
-        let now = Utc::now();
+    /// Reconstrói uma foto a partir de dados persistidos (uso interno/infraestrutura)
+    pub fn reconstruct(
+        id: PhotoId,
+        file_path: FilePath,
+        imported_at: DateTime<Utc>,
+        modified_at: DateTime<Utc>,
+        metadata: Option<PhotoMetadata>,
+        rating: Option<Rating>,
+        color_label: Option<ColorLabel>,
+        is_edited: bool,
+    ) -> Self {
         Self {
             id,
             file_path,
-            rating: None,
-            color_label: None,
-            imported_at: now,
-            modified_at: now,
-            is_edited: false,
+            imported_at,
+            modified_at,
+            metadata,
+            rating,
+            color_label,
+            is_edited,
         }
+    }
+
+    /// Cria uma nova foto com ID específico (para testes/migrações)
+    pub fn with_id(id: PhotoId, file_path: FilePath) -> Self {
+        let now = Utc::now();
+        Self::reconstruct(
+            id, file_path, now, now, None, None, None, false
+        )
     }
 
     /// Cria uma foto para testes
@@ -145,6 +165,17 @@ impl Photo {
     /// Retorna a extensão do arquivo
     pub fn extension(&self) -> Option<&str> {
         self.file_path.extension()
+    }
+
+    /// Retorna os metadados da foto
+    pub fn metadata(&self) -> Option<&PhotoMetadata> {
+        self.metadata.as_ref()
+    }
+
+    /// Define os metadados da foto
+    pub fn set_metadata(&mut self, metadata: PhotoMetadata) {
+        self.metadata = Some(metadata);
+        self.modified_at = Utc::now();
     }
 }
 
@@ -332,9 +363,15 @@ mod tests {
         // Arrange
         let id = PhotoId::new();
         let path = FilePath::new("/test/photo.jpg").unwrap();
+        let now = Utc::now();
         
-        let photo1 = Photo::with_id(id, path.clone());
-        let photo2 = Photo::with_id(id, path);
+        // Usar reconstruct para garantir timestamps idênticos
+        let photo1 = Photo::reconstruct(
+            id, path.clone(), now, now, None, None, None, false
+        );
+        let photo2 = Photo::reconstruct(
+            id, path, now, now, None, None, None, false
+        );
 
         // Assert
         assert_eq!(photo1, photo2);
