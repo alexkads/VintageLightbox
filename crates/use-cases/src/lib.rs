@@ -1,7 +1,7 @@
 //! # Use Cases Layer - VintageLightbox
 //!
-//! Esta camada contém as regras de negócio da aplicação,
-//! orquestrando o uso das entidades de domínio.
+//! Esta camada contém a lógica de negócio da aplicação,
+//! orquestrando as operações entre o domain e a infraestrutura.
 
 pub mod import_photo;
 pub mod import_photos;

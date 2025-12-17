@@ -13,11 +13,11 @@ Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Ar
 ## 📊 Progresso Atual (Atualizado: 16/dez/2025)
 
 ### Status Geral
-- **Fase Atual**: Fase 1 (MVP) - Infrastructure Layer ✅
-- **Total de Testes**: **152 testes passando** 🎉
+- **Fase Atual**: Fase 1 (MVP) - Infrastructure Layer 🔄
+- **Total de Testes**: **166 testes passando** 🎉
   - Domain Layer: 99 testes (100% cobertura)
   - Use Cases Layer: 32 testes (7 use cases)
-  - Infrastructure Layer: 21 testes (2 repositories)
+  - Infrastructure Layer: 35 testes (Repositories + File System + Use Cases)
 
 ### Conquistas Recentes
 - ✅ **Domain Layer 100% completo** (99 testes)
@@ -35,6 +35,12 @@ Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Ar
   - **CollectionRepositoryImpl**: CRUD + many-to-many (10 testes)
   - **Database Module**: Connection pool, migrations (2 testes)
   - **Schema SQLite**: 3 tabelas com índices otimizados
+
+- 🔄 **Infrastructure Layer - File System** (14 testes)
+  - **FileScanner**: Scan recursivo de diretórios (9 testes)
+  - **ScanDirectoryUseCase**: Scan + import automático (5 testes)
+    - Integra FileScanner com import de fotos
+    - Relatório de sucesso/falhas
 
 ### Próximos Passos
 1. **Infrastructure Layer** - Implementar SQLite repositories e file system
@@ -196,23 +202,16 @@ Criar versão mínima funcional com importação, visualização, edição bási
   - Validação de existência
   - Múltiplas remoções
 
-### 1.3 Infrastructure: Importação ✅ (1 semana - COMPLETO)
-- [x] SQLite Photo Repository (9 testes de integração)
-  - CRUD completo
-  - Conversão de tipos domain ↔ database
-  - Tratamento de erros
-- [x] SQLite Collection Repository (10 testes de integração)
-  - CRUD completo
-  - Relação many-to-many com fotos
-  - Queries JOIN otimizadas
-- [x] Database Module (2 testes)
-  - Connection pool com SQLx
-  - Migration system
-- [ ] Implementar File Scanner (testes de integração)
+### 1.3 Infrastructure: File System 🔄 (1 semana - EM ANDAMENTO)
+- [x] FileScanner (9 testes unitários)
+  - Scan recursivo de diretórios
+  - Filtro por extensões (jpg, png, cr2, nef, arw, dng, etc)
+  - Ignora arquivos/diretórios ocultos
+  - Case-insensitive
 - [ ] Implementar EXIF Reader
 - [ ] Implementar Thumbnail Generator
 
-**Meta alcançada**: 21 testes de integração ✅
+**Meta parcial**: 9 testes de file system ✅
 
 ### 1.4 UI: Biblioteca - Visualização (1 semana)
 - [ ] Grade de thumbnails

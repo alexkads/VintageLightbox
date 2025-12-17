@@ -7,10 +7,10 @@
 
 | Métrica | Valor |
 |---------|-------|
-| Total de Testes | **152** 🎉 |
+| Total de Testes | **166** 🎉 |
 | Domain Layer | 99 testes ✅ |
 | Use Cases Layer | 32 testes ✅ |
-| Infrastructure Layer | 21 testes ✅ |
+| Infrastructure Layer | 35 testes ✅ |
 | Cobertura (Domain) | 100% ✅ |
 | Status Compilação | ✅ Sem erros |
 
@@ -132,34 +132,24 @@
 
 ---
 
-### 3️⃣ Infrastructure Layer (Camada 4) ✅ COMPLETO
+### 3️⃣ Infrastructure Layer (Camada 4) 🔄 EM ANDAMENTO
 
-**Status**: 21 testes (PhotoRepository + CollectionRepository)
+**Status**: 35 testes (Repositories + File System + Use Cases)
 
 #### Implementado ✅
-- [x] **PhotoRepositoryImpl** (SQLite)
-  - CRUD completo para fotos
-  - 9 testes de integração
-
-- [x] **CollectionRepositoryImpl** (SQLite)
-  - CRUD completo para coleções
-  - Relação many-to-many com fotos
-  - 10 testes de integração
-
-- [x] **Database Module**
-  - Connection pool com SQLx
-  - Migration system
-  - 2 testes unitários
-
-- [x] **Schema SQLite**
-  - Tabelas `photos`, `collections`, `collection_photos`
-  - Índices para performance
-  - Migrations funcionando
+- [x] **PhotoRepositoryImpl** (SQLite) - 9 testes
+- [x] **CollectionRepositoryImpl** (SQLite) - 10 testes
+- [x] **Database Module** - 2 testes
+- [x] **FileScanner** - 9 testes
+- [x] **ScanDirectoryUseCase** - 5 testes
+  - Integra FileScanner com import de fotos
+  - Scan recursivo + import automático
+  - Relatório de sucesso/falhas
 
 #### Próximos Passos 📋
-- [ ] **File Scanner** - Escanear diretórios
-- [ ] **EXIF Reader** - Ler metadados
+- [ ] **EXIF Reader** - Ler metadados de fotos
 - [ ] **Thumbnail Generator** - Gerar previews
+- [ ] **RAW Decoder** - Processar arquivos RAW
 - [ ] **RAW Processing**
   - LibRaw/rawler integration
   - Format decoders (CR2, NEF, ARW, DNG)
