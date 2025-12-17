@@ -10,14 +10,14 @@ Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Ar
 
 ---
 
-## 📊 Progresso Atual (Atualizado: 16/dez/2025)
+## 📊 Progresso Atual (Atualizado: 17/dez/2025)
 
 ### Status Geral
 - **Fase Atual**: Fase 1 (MVP) - Infrastructure Layer 🔄
-- **Total de Testes**: **166 testes passando** 🎉
+- **Total de Testes**: **173 testes passando** 🎉
   - Domain Layer: 99 testes (100% cobertura)
   - Use Cases Layer: 32 testes (7 use cases)
-  - Infrastructure Layer: 35 testes (Repositories + File System + Use Cases)
+  - Infrastructure Layer: 42 testes (Repositories + File System + Metadata)
 
 ### Conquistas Recentes
 - ✅ **Domain Layer 100% completo** (99 testes)
@@ -36,11 +36,12 @@ Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Ar
   - **Database Module**: Connection pool, migrations (2 testes)
   - **Schema SQLite**: 3 tabelas com índices otimizados
 
-- 🔄 **Infrastructure Layer - File System** (14 testes)
+- 🔄 **Infrastructure Layer - File System + Metadata** (21 testes)
   - **FileScanner**: Scan recursivo de diretórios (9 testes)
   - **ScanDirectoryUseCase**: Scan + import automático (5 testes)
-    - Integra FileScanner com import de fotos
-    - Relatório de sucesso/falhas
+  - **ExifReader**: Extração de metadados EXIF (7 testes)
+    - Câmera, ISO, abertura, velocidade
+    - Dimensões da imagem
 
 ### Próximos Passos
 1. **Infrastructure Layer** - Implementar SQLite repositories e file system

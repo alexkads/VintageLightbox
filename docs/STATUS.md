@@ -7,10 +7,10 @@
 
 | Métrica | Valor |
 |---------|-------|
-| Total de Testes | **166** 🎉 |
+| Total de Testes | **173** 🎉 |
 | Domain Layer | 99 testes ✅ |
 | Use Cases Layer | 32 testes ✅ |
-| Infrastructure Layer | 35 testes ✅ |
+| Infrastructure Layer | 42 testes ✅ |
 | Cobertura (Domain) | 100% ✅ |
 | Status Compilação | ✅ Sem erros |
 
@@ -134,7 +134,7 @@
 
 ### 3️⃣ Infrastructure Layer (Camada 4) 🔄 EM ANDAMENTO
 
-**Status**: 35 testes (Repositories + File System + Use Cases)
+**Status**: 42 testes (Repositories + File System + Metadata)
 
 #### Implementado ✅
 - [x] **PhotoRepositoryImpl** (SQLite) - 9 testes
@@ -142,14 +142,15 @@
 - [x] **Database Module** - 2 testes
 - [x] **FileScanner** - 9 testes
 - [x] **ScanDirectoryUseCase** - 5 testes
-  - Integra FileScanner com import de fotos
-  - Scan recursivo + import automático
-  - Relatório de sucesso/falhas
+- [x] **ExifReader** - 7 testes
+  - Extrai metadados (câmera, ISO, abertura, etc)
+  - Suporta JPEG, TIFF, RAW
+  - Dimensões da imagem
 
 #### Próximos Passos 📋
-- [ ] **EXIF Reader** - Ler metadados de fotos
 - [ ] **Thumbnail Generator** - Gerar previews
 - [ ] **RAW Decoder** - Processar arquivos RAW
+- [ ] **UI Layer** - Interface com Slint
 - [ ] **RAW Processing**
   - LibRaw/rawler integration
   - Format decoders (CR2, NEF, ARW, DNG)
