@@ -1,0 +1,18 @@
+[package]
+name = "ui"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+slint = { version = "=1.8.0", features = ["renderer-winit-femtovg"] }
+tokio.workspace = true
+rfd = { version = "0.14.1", features = ["file-handle-inner"] } # Downgraded to safer version? Trying 0.14 just in case. Or let's try 0.16 first but likely need downgrade.
+infrastructure = { path = "../infrastructure" }
+adapters = { path = "../adapters" }
+use-cases = { path = "../use-cases" }
+domain = { path = "../domain" }
+
+[build-dependencies]
+slint-build = "1.8.0"

@@ -10,7 +10,7 @@ Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Ar
 
 ---
 
-## 📊 Progresso Atual (Atualizado: 17/dez/2025)
+## 📊 Progresso Atual (Atualizado: 18/dez/2025)
 
 ### Status Geral
 - **Fase Atual**: Fase 1 (MVP) - Infrastructure Layer 🔄
@@ -92,11 +92,11 @@ Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Ar
 - [x] Script dev.sh para workflow TDD
 
 #### 0.2 Proof of Concept - Slint UI
-- [ ] Criar janela básica com Slint
-- [ ] Testar grid de imagens
-- [ ] Implementar navegação básica
-- [ ] Testar responsividade
-- [ ] Validar performance da UI
+- [x] Criar janela básica com Slint
+- [x] Testar grid de imagens
+- [x] Implementar navegação básica
+- [x] Testar responsividade
+- [x] Validar performance da UI
 
 #### 0.3 Domain Layer - Primeiro Ciclo TDD ✅ (1 semana)
 - [x] 🔴 RED: Escrever testes para Value Objects (Rating, PhotoId, ColorLabel, FilePath, CollectionId)
@@ -112,19 +112,19 @@ Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Ar
 - [x] **Meta alcançada: 99 testes passando, 100% cobertura no domain**
 
 #### 0.4 Proof of Concept - RAW Processing (Infrastructure)
-- [ ] Testes de integração com LibRaw/rawler
-- [ ] Implementar RAW Decoder trait
-- [ ] Decodificar arquivo RAW de teste
+- [x] Testes de integração com LibRaw/rawler
+- [x] Implementar RAW Decoder trait
+- [x] Decodificar arquivo RAW de teste
 - [ ] Aplicar ajuste básico (exposição)
 - [ ] Renderizar preview
 - [ ] Benchmark de performance
 
 #### 0.5 Proof of Concept - Database (Infrastructure)
-- [ ] TDD: Repository trait (domain)
-- [ ] Implementar SQLite Repository
-- [ ] Testes de integração: CRUD operations
-- [ ] Testes de performance com 10k registros
-- [ ] Migrations básicas
+- [x] TDD: Repository trait (domain)
+- [x] Implementar SQLite Repository
+- [x] Testes de integração: CRUD operations
+- [x] Testes de performance com 10k registros
+- [x] Migrations básicas
 
 #### 0.6 Use Cases Layer - Primeiro Ciclo TDD ✅
 - [x] 🔴 RED: Escrever testes para ImportPhotoUseCase
@@ -210,10 +210,10 @@ Criar versão mínima funcional com importação, visualização, edição bási
   - Filtro por extensões (jpg, png, cr2, nef, arw, dng, etc)
   - Ignora arquivos/diretórios ocultos
   - Case-insensitive
-- [ ] Implementar EXIF Reader
-- [ ] Implementar Thumbnail Generator
+- [x] Implementar EXIF Reader
+- [x] Implementar Thumbnail Generator
 
-**Meta parcial**: 9 testes de file system ✅
+**Meta parcial**: 18 testes de file system ✅
 
 ### 1.4 UI: Biblioteca - Visualização (1 semana)
 - [ ] Grade de thumbnails

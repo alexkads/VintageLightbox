@@ -12,3 +12,6 @@ pub mod exif_reader;
 pub use database::{PhotoRepositoryImpl, CollectionRepositoryImpl, create_pool, run_migrations};
 pub use scan_directory::{ScanDirectoryUseCase, ScanDirectoryResult};
 pub use exif_reader::ExifReader;
+pub mod thumbnail_generator;
+pub use thumbnail_generator::ThumbnailGeneratorImpl;
+pub use raw_processing::RawDecoderImpl;

@@ -12,3 +12,26 @@ pub trait MetadataExtractor: Send + Sync {
     /// Extrai metadados do arquivo especificado
     fn extract(&self, path: &FilePath) -> DomainResult<PhotoMetadata>;
 }
+
+/// Serviço para geração de thumbnails
+#[async_trait]
+pub trait ThumbnailGenerator: Send + Sync {
+    /// Gera um thumbnail para a imagem especificada
+    /// Retorna os bytes da imagem (JPEG) redimensionada
+    async fn generate(&self, path: &FilePath, max_size: u32) -> DomainResult<Vec<u8>>;
+}
+
+/// Representa uma imagem RAW decodificada
+pub struct RawImage {
+    pub width: usize,
+    pub height: usize,
+    pub data: Vec<u16>, // Dados RAW geralmente são 12-14 bits, cabem em u16
+    pub cpp: usize,     // Components per pixel (usually 1 for bayer)
+}
+
+/// Serviço para decodificação de arquivos RAW
+#[async_trait]
+pub trait RawDecoder: Send + Sync {
+    /// Decodifica um arquivo RAW retornando os dados brutos
+    fn decode(&self, path: &FilePath) -> DomainResult<RawImage>;
+}

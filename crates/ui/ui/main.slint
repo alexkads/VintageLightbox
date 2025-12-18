@@ -1,0 +1,16 @@
+import { VerticalBox, Button, GridBox, StandardListView } from "std-widgets.slint";
+
+export component MainWindow inherits Window {
+    title: "VintageLightbox POC";
+    width: 800px;
+    height: 600px;
+
+    callback import_clicked();
+
+    VerticalBox {
+        Button {
+            text: "Import Photos";
+            clicked => { root.import_clicked(); }
+        }
+    }
+}

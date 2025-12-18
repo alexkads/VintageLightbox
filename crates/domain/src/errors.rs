@@ -29,6 +29,9 @@ pub enum DomainError {
 
     #[error("Operação inválida: {0}")]
     InvalidOperation(String),
+
+    #[error("Erro de infraestrutura: {0}")]
+    InfrastructureError(String),
 }
 
 /// Tipo Result padrão para operações de domínio
