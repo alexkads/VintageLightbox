@@ -13,13 +13,22 @@ Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Ar
 ## 📊 Progresso Atual (Atualizado: 18/dez/2025)
 
 ### Status Geral
-- **Fase Atual**: Fase 1 (MVP) - Infrastructure Layer 🔄
+- **Fase Atual**: Fase 1 (MVP) - UI & Integration 🔄
 - **Total de Testes**: **173 testes passando** 🎉
   - Domain Layer: 99 testes (100% cobertura)
   - Use Cases Layer: 32 testes (7 use cases)
   - Infrastructure Layer: 42 testes (Repositories + File System + Metadata)
 
 ### Conquistas Recentes
+- ✅ **Integração UI Completa**
+  - Controller de Importação conectado
+  - Diálogo de arquivos nativo via `rfd`
+  - Persistência no SQLite via UI
+- ✅ **Grid de Biblioteca (UI)**
+  - `LibraryController` implementado
+  - Grid responsiva (POC) exibindo itens do banco
+
+
 - ✅ **Domain Layer 100% completo** (99 testes)
   - Value Objects: Rating, PhotoId, ColorLabel, FilePath, CollectionId
   - Entities: Photo, Collection

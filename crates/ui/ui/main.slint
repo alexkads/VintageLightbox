@@ -1,4 +1,9 @@
-import { VerticalBox, Button, GridBox, StandardListView } from "std-widgets.slint";
+struct TileData {
+    name: string,
+    image: image,
+}
+
+import { VerticalBox, Button, StandardListView, ScrollView, HorizontalBox } from "std-widgets.slint";
 
 export component MainWindow inherits Window {
     title: "VintageLightbox POC";
@@ -6,11 +11,32 @@ export component MainWindow inherits Window {
     height: 600px;
 
     callback import_clicked();
+    in-out property <[TileData]> photo_model: [];
 
     VerticalBox {
         Button {
             text: "Import Photos";
             clicked => { root.import_clicked(); }
+        }
+
+        ScrollView {
+            VerticalBox {
+                alignment: start;
+                Text {
+                     text: "Library: " + photo_model.length + " photos";
+                }
+                for item in photo_model : HorizontalBox {
+                    Image {
+                        source: item.image;
+                        width: 100px;
+                        height: 100px;
+                    }
+                    Text {
+                        text: item.name;
+                        vertical-alignment: center;
+                    }
+                }
+            }
         }
     }
 }
