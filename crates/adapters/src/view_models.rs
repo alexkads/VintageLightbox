@@ -5,5 +5,5 @@ pub struct PhotoViewModel {
     pub id: String,
     pub path: String,
     pub name: String,
-    // Future: thumbnail_path, rating, etc.
+    pub thumbnail_path: Option<String>,
 }

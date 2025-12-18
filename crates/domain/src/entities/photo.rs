@@ -30,6 +30,8 @@ pub struct Photo {
     is_edited: bool,
     /// Metadados técnicos (EXIF)
     metadata: Option<PhotoMetadata>,
+    /// Caminho do thumbnail
+    thumbnail_path: Option<FilePath>,
 }
 
 impl Photo {
@@ -48,6 +50,7 @@ impl Photo {
         rating: Option<Rating>,
         color_label: Option<ColorLabel>,
         is_edited: bool,
+        thumbnail_path: Option<FilePath>,
     ) -> Self {
         Self {
             id,
@@ -58,6 +61,7 @@ impl Photo {
             rating,
             color_label,
             is_edited,
+            thumbnail_path,
         }
     }
 
@@ -65,7 +69,7 @@ impl Photo {
     pub fn with_id(id: PhotoId, file_path: FilePath) -> Self {
         let now = Utc::now();
         Self::reconstruct(
-            id, file_path, now, now, None, None, None, false
+            id, file_path, now, now, None, None, None, false, None
         )
     }
 
@@ -175,6 +179,17 @@ impl Photo {
     /// Define os metadados da foto
     pub fn set_metadata(&mut self, metadata: PhotoMetadata) {
         self.metadata = Some(metadata);
+        self.modified_at = Utc::now();
+    }
+
+    /// Retorna o caminho do thumbnail
+    pub fn thumbnail_path(&self) -> Option<&FilePath> {
+        self.thumbnail_path.as_ref()
+    }
+
+    /// Define o caminho do thumbnail
+    pub fn set_thumbnail_path(&mut self, path: FilePath) {
+        self.thumbnail_path = Some(path);
         self.modified_at = Utc::now();
     }
 }

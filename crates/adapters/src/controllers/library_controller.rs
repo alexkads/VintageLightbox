@@ -20,6 +20,7 @@ impl LibraryController {
                 id: photo.id().to_string(),
                 path: photo.file_path().as_ref().to_string_lossy().to_string(),
                 name: photo.file_path().file_name().unwrap_or_default().to_string(),
+                thumbnail_path: photo.thumbnail_path().map(|p| p.to_string_lossy().to_string()),
             }
         }).collect();
 

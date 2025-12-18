@@ -7,15 +7,17 @@ use domain::{
     entities::Photo,
     repositories::PhotoRepository,
     value_objects::FilePath,
-    services::MetadataExtractor,
+    services::{MetadataExtractor, ThumbnailGenerator},
     DomainResult,
 };
 use std::sync::Arc;
+use std::path::Path;
 
 /// Use Case para importar fotos
 pub struct ImportPhotoUseCase {
     photo_repository: Arc<dyn PhotoRepository>,
     metadata_extractor: Arc<dyn MetadataExtractor>,
+    thumbnail_generator: Arc<dyn ThumbnailGenerator>,
 }
 
 impl ImportPhotoUseCase {
@@ -23,10 +25,12 @@ impl ImportPhotoUseCase {
     pub fn new(
         photo_repository: Arc<dyn PhotoRepository>,
         metadata_extractor: Arc<dyn MetadataExtractor>,
+        thumbnail_generator: Arc<dyn ThumbnailGenerator>,
     ) -> Self {
         Self {
             photo_repository,
             metadata_extractor,
+            thumbnail_generator,
         }
     }
 
@@ -38,6 +42,37 @@ impl ImportPhotoUseCase {
         // Extrair e definir metadados (se falhar, logar e continuar sem metadados)
         if let Ok(metadata) = self.metadata_extractor.extract(&file_path) {
             photo.set_metadata(metadata);
+        }
+
+        // Gerar Thumbnail
+        // TODO: Mover lógica de persistência de arquivo de thumbnail para infra ou service dedicado?
+        // Por enquanto, faremos aqui: salva como <caminho>.thumb.jpg
+        match self.thumbnail_generator.generate(&file_path, 300).await {
+            Ok(bytes) => {
+                let path_ref: &Path = file_path.as_ref();
+                let _file_stem = path_ref.file_stem().unwrap_or_default();
+                let file_name = path_ref.file_name().unwrap_or_default();
+                let parent = path_ref.parent().unwrap_or(Path::new("."));
+                
+                // Opção A: Salvar no mesmo diretório com sufixo
+                // let thumb_name = format!("{}.thumb.jpg", file_name.to_string_lossy());
+                // let thumb_path = parent.join(thumb_name);
+                
+                // Opção B: Pasta global de cache (Mais limpo)
+                // Para MVP, vamos usar Opção A pela simplicidade de visualização
+                let thumb_path = parent.join(format!("{}.thumb.jpg", file_name.to_string_lossy()));
+
+                if let Err(e) = tokio::fs::write(&thumb_path, bytes).await {
+                    eprintln!("Failed to write thumbnail: {}", e);
+                } else {
+                    if let Some(path_str) = thumb_path.to_str() {
+                         if let Ok(path_obj) = FilePath::new(path_str) {
+                            photo.set_thumbnail_path(path_obj);
+                        }
+                    }
+                }
+            },
+            Err(e) => eprintln!("Failed to generate thumbnail: {}", e),
         }
         
         // Persistir no repositório

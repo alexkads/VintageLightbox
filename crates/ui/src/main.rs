@@ -4,9 +4,11 @@ use std::sync::Arc;
 use infrastructure::{
     create_pool, run_migrations,
     PhotoRepositoryImpl, ExifReader,
+    ThumbnailGeneratorImpl,
 };
 use use_cases::ImportPhotoUseCase;
 use adapters::controllers::ImportController;
+use std::path::Path;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -20,11 +22,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let photo_repository = Arc::new(PhotoRepositoryImpl::new(pool));
     let metadata_extractor = Arc::new(ExifReader);
+    let thumbnail_generator = Arc::new(ThumbnailGeneratorImpl::new());
 
     // 2. Setup Use Cases
     let import_photo_use_case = Arc::new(ImportPhotoUseCase::new(
         photo_repository.clone(), 
-        metadata_extractor
+        metadata_extractor,
+        thumbnail_generator
     ));
 
     // 3. Setup Controllers
@@ -46,12 +50,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                      let _ = slint::invoke_from_event_loop(move || {
                         if let Some(main_window) = main_window_weak.upgrade() {
                             let tile_data: Vec<TileData> = view_models.into_iter().map(|vm| {
+                                let image = if let Some(path) = &vm.thumbnail_path {
+                                    slint::Image::load_from_path(Path::new(path)).unwrap_or_default()
+                                } else {
+                                    slint::Image::default()
+                                };
+                                
                                 TileData {
                                     name: slint::SharedString::from(vm.name),
-                                    // Placeholder image for now, real thumbnail loading needed later
-                                    // Slint image loading from path is synchronous and tricky without custom loader
-                                    // For POC we might leave image empty or use a resource
-                                    image: slint::Image::default(), 
+                                    image,
                                 }
                             }).collect();
                             
@@ -102,9 +109,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 let _ = slint::invoke_from_event_loop(move || {
                                     if let Some(main_window) = main_window_weak.upgrade() {
                                         let tile_data: Vec<TileData> = view_models.into_iter().map(|vm| {
+                                            let image = if let Some(path) = &vm.thumbnail_path {
+                                                slint::Image::load_from_path(Path::new(path)).unwrap_or_default()
+                                            } else {
+                                                slint::Image::default()
+                                            };
+
                                             TileData {
                                                 name: slint::SharedString::from(vm.name),
-                                                image: slint::Image::default(), 
+                                                image,
                                             }
                                         }).collect();
                                         
@@ -116,6 +129,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             Err(e) => eprintln!("Failed to refresh photos: {}", e),
                         }
                     },
+
                     Err(e) => eprintln!("Import failed: {}", e),
                 }
             } else {

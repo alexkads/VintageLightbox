@@ -10,6 +10,7 @@ domain = { path = "../domain" }
 thiserror.workspace = true
 serde.workspace = true
 async-trait.workspace = true
+tokio = { workspace = true, features = ["fs", "io-util"] }
 
 [dev-dependencies]
 mockall.workspace = true
