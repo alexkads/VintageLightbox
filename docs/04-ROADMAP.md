@@ -27,6 +27,9 @@ Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Ar
 - ✅ **Grid de Biblioteca (UI)**
   - `LibraryController` implementado
   - Grid responsiva (POC) exibindo itens do banco
+  - **Thumbnails Reais**: Geração e exibição de imagens locais
+- ✅ **Infrastructure Layer 100% completo** (42 testes)
+  - Thumbnails, EXIF, Raw, Database
 
 
 - ✅ **Domain Layer 100% completo** (99 testes)
@@ -56,8 +59,15 @@ Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Ar
 ### Próximos Passos
 1. **Infrastructure Layer** - Implementar SQLite repositories e file system
 2. **RAW Processing** - Integração com LibRaw/rawler
-3. **UI Layer** - Interface Slint para visualização e edição
-4. **Adapters Layer** - Controllers e Presenters
+3. **UI Layer** - Interface Slint para visualização e edição (Parcial)
+4. **Adapters Layer** - Controllers e Presenters (Parcial)
+
+### Entregas Recentes (Fase 1.5)
+- ✅ **Grid Personalizado**: Layout calculado com suporte a 5 colunas.
+- ✅ **Visualização Detalhada**: Zoom in/out (básico), navegação.
+- ✅ **Performance**: Carregamento assíncrono de metadados, síncrono de imagens (UI responsiva).
+- ✅ **Grid Virtualizado (v1.6)**: Implementado `ListView` com chunks de 5 fotos para scroll infinito eficiente.
+- ✅ **Metadados UI (v1.6)**: Painel lateral com EXIF (ISO, Abertura, Shutter) e Rating.
 
 ### Métricas de Qualidade
 - ✅ 100% cobertura no Domain Layer
@@ -225,12 +235,12 @@ Criar versão mínima funcional com importação, visualização, edição bási
 **Meta parcial**: 18 testes de file system ✅
 
 ### 1.4 UI: Biblioteca - Visualização (1 semana)
-- [ ] Grade de thumbnails
-- [ ] Scroll virtual para performance
+- [x] Grade de thumbnails (Calculated, pending virtualization)
+- [x] Scroll virtual para performance (ListView implementation)
 - [ ] Seleção de fotos (single, multi)
 - [ ] Navegação com teclado (setas)
-- [ ] Zoom de thumbnail (hover/click)
-- [ ] Informações básicas (nome, data, câmera)
+- [x] Zoom de thumbnail (via Detail View)
+- [x] Informações básicas (nome, data, câmera) (Metadata Panel)
 
 **Critério de Aceitação**: Navegar 1000 fotos sem lag
 

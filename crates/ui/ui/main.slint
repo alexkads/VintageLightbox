@@ -1,39 +1,191 @@
 struct TileData {
+    id: string,
     name: string,
     image: image,
 }
 
-import { VerticalBox, Button, StandardListView, ScrollView, HorizontalBox } from "std-widgets.slint";
+struct RowData {
+    tiles: [TileData],
+}
+
+import { VerticalBox, Button, ScrollView, HorizontalBox, ListView, Slider } from "std-widgets.slint";
 
 export component MainWindow inherits Window {
     title: "VintageLightbox POC";
-    width: 800px;
-    height: 600px;
+    width: 1000px;
+    height: 700px;
 
     callback import_clicked();
-    in-out property <[TileData]> photo_model: [];
+    callback tile_clicked(string);
+    callback back_clicked();
+    callback rate_photo(string, int);
+    callback navigate(int);
 
-    VerticalBox {
-        Button {
-            text: "Import Photos";
-            clicked => { root.import_clicked(); }
+    forward-focus: focus_scope;
+
+    in-out property <[RowData]> grid_model: [];
+    in-out property <image> detail_image;
+    in-out property <string> detail_id;
+    in-out property <string> detail_name;
+    in-out property <string> detail_date;
+    in-out property <string> detail_camera;
+    in-out property <string> detail_exposure;
+    in-out property <string> detail_rating;
+    in-out property <int> current_view: 0;
+
+    focus_scope := FocusScope {
+        key-pressed(event) => {
+            if (root.current_view == 1) {
+                if (event.text == Key.RightArrow) {
+                    root.navigate(1);
+                    return accept;
+                }
+                if (event.text == Key.LeftArrow) {
+                    root.navigate(-1);
+                    return accept;
+                }
+            }
+            reject
         }
 
-        ScrollView {
-            VerticalBox {
-                alignment: start;
+        VerticalBox {
+            visible: current_view == 0;
+            HorizontalBox {
+                alignment: space-between;
                 Text {
-                     text: "Library: " + photo_model.length + " photos";
+                    text: "Library";
+                    vertical-alignment: center;
+                    font-size: 16px;
                 }
-                for item in photo_model : HorizontalBox {
-                    Image {
-                        source: item.image;
-                        width: 100px;
-                        height: 100px;
+                Button {
+                    text: "Import Photos";
+                    clicked => { root.import_clicked(); }
+                }
+            }
+
+            ListView {
+                for row in grid_model: HorizontalLayout {
+                    padding: 10px;
+                    spacing: 10px;
+                    height: 180px;
+                    alignment: start;
+                    for tile in row.tiles: VerticalLayout {
+                        width: 150px;
+                        spacing: 5px;
+                        Image {
+                            source: tile.image;
+                            width: 150px;
+                            height: 130px;
+                            image-fit: contain;
+                        }
+                        Text {
+                            text: tile.name;
+                            overflow: elide;
+                            horizontal-alignment: center;
+                        }
+                        TouchArea {
+                            clicked => { root.tile_clicked(tile.id); }
+                        }
                     }
-                    Text {
-                        text: item.name;
-                        vertical-alignment: center;
+                }
+            }
+        }
+
+        HorizontalBox {
+            visible: current_view == 1;
+            image_viewport := Rectangle {
+                background: #111;
+                horizontal-stretch: 1;
+                clip: true;
+                property <length> pan_x: 0px;
+                property <length> pan_y: 0px;
+                property <float> zoom_level: 1.0;
+                property <length> start_pan_x;
+                property <length> start_pan_y;
+
+                Image {
+                    source: root.detail_image;
+                    width: parent.width * zoom_level;
+                    height: parent.height * zoom_level;
+                    x: (parent.width - self.width) / 2 + pan_x;
+                    y: (parent.height - self.height) / 2 + pan_y;
+                    image-fit: contain;
+                }
+                TouchArea {
+                    pointer-event(event) => {
+                        if (event.kind == PointerEventKind.down) {
+                            image_viewport.start_pan_x = image_viewport.pan_x - self.mouse-x;
+                            image_viewport.start_pan_y = image_viewport.pan_y - self.mouse-y;
+                        }
+                    }
+                    moved => {
+                        if (self.pressed) {
+                            image_viewport.pan_x = image_viewport.start_pan_x + self.mouse-x;
+                            image_viewport.pan_y = image_viewport.start_pan_y + self.mouse-y;
+                        }
+                    }
+                    scroll-event(event) => {
+                        if (event.delta-y > 0) {
+                            image_viewport.zoom_level = min(5.0, image_viewport.zoom_level + 0.1);
+                        } else {
+                            image_viewport.zoom_level = max(0.1, image_viewport.zoom_level - 0.1);
+                        }
+                        return accept;
+                    }
+                    double-clicked => {
+                        image_viewport.pan_x = 0px;
+                        image_viewport.pan_y = 0px;
+                        image_viewport.zoom_level = 1.0;
+                    }
+                }
+                function back() {
+                    root.back_clicked();
+                    image_viewport.pan_x = 0px;
+                    image_viewport.pan_y = 0px;
+                    image_viewport.zoom_level = 1.0;
+                }
+                TouchArea {
+                    width: 100px; height: 40px; x: 20px; y: 20px;
+                    Rectangle { background: #333; border-radius: 4px; opacity: 0.8; }
+                    Text { text: " Back "; color: white; vertical-alignment: center; horizontal-alignment: center; }
+                    clicked => { back(); }
+                }
+            }
+            Rectangle {
+                width: 320px;
+                background: #222;
+                VerticalLayout {
+                    padding: 20px; spacing: 15px; alignment: start;
+                    Text { text: "Details"; font-size: 18px; font-weight: 700; color: white; }
+                    VerticalBox {
+                        spacing: 5px;
+                        Text { text: "Name: " + root.detail_name; font-size: 12px; color: #ccc; wrap: word-wrap; }
+                        Text { text: "Date: " + root.detail_date; font-size: 12px; color: #ccc; }
+                        Text { text: "Shot: " + root.detail_camera; font-size: 12px; color: #ccc; }
+                        Text { text: "Exif: " + root.detail_exposure; font-size: 12px; color: #ccc; }
+                    }
+                    Rectangle { height: 1px; background: #444; }
+                    Text { text: "Rating"; font-size: 14px; font-weight: 600; color: white; }
+                    HorizontalLayout {
+                        spacing: 5px; alignment: start;
+                        for i in 5: TouchArea {
+                            width: 25px; height: 25px;
+                            Text { text: "★"; font-size: 20px; color: #888; }
+                            clicked => { root.rate_photo(root.detail_id, i + 1); }
+                        }
+                    }
+                    Text { text: root.detail_rating; font-size: 14px; color: #ffd700; }
+                    Rectangle { height: 1px; background: #444; }
+                    Text { text: "Edit (Preview)"; font-size: 16px; font-weight: 600; color: white; }
+                    VerticalBox {
+                        spacing: 5px;
+                        Text { text: "Exposure"; color: white; }
+                        Slider { minimum: -5.0; maximum: 5.0; value: 0.0; }
+                    }
+                    VerticalBox {
+                        spacing: 5px;
+                        Text { text: "Contrast"; color: white; }
+                        Slider { minimum: 0.0; maximum: 2.0; value: 1.0; }
                     }
                 }
             }
