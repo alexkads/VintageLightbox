@@ -68,6 +68,8 @@ Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Ar
 - ✅ **Performance**: Carregamento assíncrono de metadados, síncrono de imagens (UI responsiva).
 - ✅ **Grid Virtualizado (v1.6)**: Implementado `ListView` com chunks de 5 fotos para scroll infinito eficiente.
 - ✅ **Metadados UI (v1.6)**: Painel lateral com EXIF (ISO, Abertura, Shutter) e Rating.
+- ✅ **Interatividade (v1.7)**: Zoom/Pan com mouse, Navegação por setas, Rating clicável.
+- ✅ **Editor UI (v1.7)**: Sliders de Exposição e Contraste (Skeleton).
 
 ### Métricas de Qualidade
 - ✅ 100% cobertura no Domain Layer
@@ -238,7 +240,7 @@ Criar versão mínima funcional com importação, visualização, edição bási
 - [x] Grade de thumbnails (Calculated, pending virtualization)
 - [x] Scroll virtual para performance (ListView implementation)
 - [ ] Seleção de fotos (single, multi)
-- [ ] Navegação com teclado (setas)
+- [x] Navegação com teclado (setas)
 - [x] Zoom de thumbnail (via Detail View)
 - [x] Informações básicas (nome, data, câmera) (Metadata Panel)
 
@@ -259,7 +261,7 @@ Criar versão mínima funcional com importação, visualização, edição bási
 **Critério de Aceitação**: Ajuste aplicado em < 500ms
 
 ### 1.4 UI de Edição (2 semanas)
-- [ ] Painel de edição com sliders
+- [x] Painel de edição com sliders
 - [ ] Vinculação com ajustes RAW
 - [ ] Undo/Redo (histórico simples)
 - [ ] Reset de ajustes
@@ -267,7 +269,7 @@ Criar versão mínima funcional com importação, visualização, edição bási
 - [ ] Salvar ajustes no banco
 
 ### 1.5 Classificação Básica (1 semana)
-- [ ] Sistema de rating (0-5 estrelas)
+- [x] Sistema de rating (0-5 estrelas)
 - [ ] Atalhos de teclado (0-5)
 - [ ] Exibição de rating nos thumbnails
 - [ ] Filtro por rating mínimo

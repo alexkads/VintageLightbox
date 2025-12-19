@@ -13,6 +13,7 @@ infrastructure = { path = "../infrastructure" }
 adapters = { path = "../adapters" }
 use-cases = { path = "../use-cases" }
 domain = { path = "../domain" }
+image = "0.24"
 
 [build-dependencies]
 slint-build = "1.8.0"

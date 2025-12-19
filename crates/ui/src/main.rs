@@ -1,6 +1,6 @@
 slint::include_modules!();
 
-use std::sync::Arc;
+
 use infrastructure::{
     create_pool, run_migrations,
     PhotoRepositoryImpl, ExifReader,
@@ -8,6 +8,7 @@ use infrastructure::{
 };
 use use_cases::ImportPhotoUseCase;
 use adapters::controllers::ImportController;
+use adapters::view_models::PhotoViewModel;
 use std::path::Path;
 
 #[tokio::main]
@@ -40,9 +41,50 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let main_window_weak = main_window.as_weak();
 
     // State to hold photos for detail view lookup
-    let photos_state = Arc::new(std::sync::Mutex::new(Vec::<adapters::view_models::PhotoViewModel>::new()));
+    let photos_state = Arc::new(std::sync::Mutex::new(Vec::<PhotoViewModel>::new()));
 
     // Initial load of photos
+    
+    // --- Image Processing State ---
+    use std::sync::{Arc, Mutex};
+    // Active full-res image (loaded in memory for editing)
+    let active_image: Arc<Mutex<Option<image::DynamicImage>>> = Arc::new(Mutex::new(None));
+    
+    // Helper to process image
+    fn process_image(img: &image::DynamicImage, exposure: f32, contrast: f32) -> slint::Image {
+        // 1. Exposure (Brighten)
+        // exposure is -5.0 to 5.0. brighten takes i32. 
+        // We'll approximate exposure by simple brightening.
+        // A better value would be scaling pixel values, but 'brighten' is available in image::imageops.
+        // brighten(img, value): value is i32.
+        let brightened = if exposure != 0.0 {
+            // Mapping -5.0..5.0 to roughly -50..50 for i32 brighten
+            image::imageops::brighten(img, (exposure * 10.0) as i32)
+        } else {
+            img.to_rgba8()
+        };
+
+        // 2. Contrast
+        // adjust_contrast(img, c): c is f32. 
+        // 1.0 = original. < 1.0 low contrast, > 1.0 high contrast.
+        let contrasted = if contrast != 1.0 {
+            image::imageops::contrast(&brightened, contrast)
+        } else {
+            brightened
+        };
+
+        // Convert back to Slint Image
+        let buffer = contrasted;
+        let pixel_buffer = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(
+            buffer.as_raw(),
+            buffer.width(),
+            buffer.height(),
+        );
+        slint::Image::from_rgba8(pixel_buffer)
+    }
+
+    let active_image_for_nav = active_image.clone();
+
     {
         let library_controller = library_controller.clone();
         let main_window_weak = main_window_weak.clone();
@@ -155,6 +197,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let main_window_weak_for_tile = main_window.as_weak();
     let photos_state_for_tile = photos_state.clone();
+    let active_image_for_tile = active_image.clone(); // Added clone
     main_window.on_tile_clicked(move |id_str| {
         let id_string = id_str.as_str().to_string();
         if let Ok(photos) = photos_state_for_tile.lock() {
@@ -175,9 +218,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 let image_path = Path::new(&path_str);
                 
-                let image = match slint::Image::load_from_path(image_path) {
-                    Ok(img) => img,
+                // Load using image crate for editing support
+                let image = match image::open(image_path) {
+                    Ok(dyn_img) => {
+                         // Save to active_image state
+                         if let Ok(mut active) = active_image_for_tile.lock() {
+                             *active = Some(dyn_img.clone());
+                         }
+                         // Convert to Slint
+                         let buffer = dyn_img.to_rgba8();
+                         let pixel_buffer = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(
+                            buffer.as_raw(),
+                            buffer.width(),
+                            buffer.height(),
+                        );
+                        slint::Image::from_rgba8(pixel_buffer)
+                    },
                     Err(_) => {
+                         // Fallback to thumbnail or default
                          if let Some(thumb) = &thumbnail_path_str {
                             slint::Image::load_from_path(Path::new(thumb)).unwrap_or_default()
                         } else {
@@ -185,7 +243,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                 };
-                
+
                 if let Some(ui) = main_window_weak_for_tile.upgrade() {
                     ui.set_detail_id(slint::SharedString::from(id)); // Use cloned ID
                     ui.set_detail_image(image);
@@ -221,26 +279,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // TODO: Call Controller -> UseCase -> Repository to persist
     });
 
-    // Navigation Callback
+
+    
+    // --- Callbacks ---
+
+    // Updated Navigation Callback (loads active_image)
     let photos_state_for_nav = photos_state.clone();
     let main_window_weak_for_nav = main_window.as_weak();
+    
     main_window.on_navigate(move |direction| {
-        let mut target_index: Option<usize> = None;
-        let mut target_photo: Option<adapters::view_models::PhotoViewModel> = None;
+        // ... (existing navigation logic to find target_photo) ...
+        // Re-implementing logic to include saving to active_image
+        let mut target_photo: Option<PhotoViewModel> = None;
 
         if let Ok(photos) = photos_state_for_nav.lock() {
-            if let Some(current_ui) = main_window_weak_for_nav.upgrade() {
+             if let Some(current_ui) = main_window_weak_for_nav.upgrade() {
                  let current_id = current_ui.get_detail_id().as_str().to_string();
                  if let Some(pos) = photos.iter().position(|p| p.id == current_id) {
-                     let new_pos = if direction > 0 {
-                         (pos + 1)
-                     } else {
-                         if pos > 0 { pos - 1 } else { 0 }
-                     };
-                     
+                     let new_pos = if direction > 0 { pos + 1 } else { if pos > 0 { pos - 1 } else { 0 } };
                      if new_pos < photos.len() {
-                         target_index = Some(new_pos);
-                         target_photo = Some(photos[new_pos].clone());
+                         target_photo = Some(photos[new_pos].clone()); // Clone minimal data
                      }
                  }
             }
@@ -248,33 +306,74 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         
         if let Some(photo) = target_photo {
              let path_str = photo.path.clone();
-             let thumbnail_path_str = photo.thumbnail_path.clone();
              let id = photo.id.clone();
-             
-             // Load image outside lock (implied here as we cloned target_photo)
-             let image_path = Path::new(&path_str);
-             let image = match slint::Image::load_from_path(image_path) {
-                Ok(img) => img,
-                Err(_) => {
-                     if let Some(thumb) = &thumbnail_path_str {
-                        slint::Image::load_from_path(Path::new(thumb)).unwrap_or_default()
-                    } else {
-                        slint::Image::default()
-                    }
-                }
-            };
-            
-            if let Some(ui) = main_window_weak_for_nav.upgrade() {
+             // Metadata update
+             if let Some(ui) = main_window_weak_for_nav.upgrade() {
                 ui.set_detail_id(slint::SharedString::from(id));
-                ui.set_detail_image(image);
                 ui.set_detail_name(slint::SharedString::from(photo.name));
                 ui.set_detail_date(slint::SharedString::from(photo.date));
                 ui.set_detail_camera(slint::SharedString::from(photo.camera));
                 ui.set_detail_exposure(slint::SharedString::from(photo.exposure));
                 ui.set_detail_rating(slint::SharedString::from(format!("Rating: {}/5", photo.rating)));
+             }
+
+             // Load Image
+             let image_path = Path::new(&path_str);
+             // Use image crate to load DynamicImage for processing
+             match image::open(image_path) {
+                 Ok(dyn_img) => {
+                     // Save to active_image state
+                     if let Ok(mut active) = active_image_for_nav.lock() {
+                         *active = Some(dyn_img.clone());
+                     }
+                     // Convert to Slint for display (Initial display: no edits)
+                     let buffer = dyn_img.to_rgba8();
+                     let pixel_buffer = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(
+                        buffer.as_raw(),
+                        buffer.width(),
+                        buffer.height(),
+                    );
+                    let slint_img = slint::Image::from_rgba8(pixel_buffer);
+                    
+                    if let Some(ui) = main_window_weak_for_nav.upgrade() {
+                        ui.set_detail_image(slint_img);
+                    }
+                 },
+                 Err(e) => {
+                     println!("Error loading image for editing: {:?}", e);
+                     // Fallback to thumbnail or default if load fails
+                     if let Some(ui) = main_window_weak_for_nav.upgrade() {
+                        ui.set_detail_image(slint::Image::default()); 
+                     }
+                 }
+             }
+        }
+    });
+
+    // Apply Edits Callback
+    let active_image_for_edits = active_image.clone();
+    let main_window_weak_for_edits = main_window.as_weak();
+    main_window.on_apply_edits(move |exposure, contrast| {
+        // Debounce or optimize? For now, block main thread (MVP)
+        let processed_img = if let Ok(active_opt) = active_image_for_edits.lock() {
+            if let Some(img) = active_opt.as_ref() {
+                Some(process_image(img, exposure, contrast))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        if let Some(img) = processed_img {
+            if let Some(ui) = main_window_weak_for_edits.upgrade() {
+                ui.set_detail_image(img);
             }
         }
     });
+
+    // Update tile_click to also load active_image
+    // ... (This requires updating on_tile_clicked logic similarly to on_navigate)
 
     let main_window_weak_for_back = main_window.as_weak();
     main_window.on_back_clicked(move || {

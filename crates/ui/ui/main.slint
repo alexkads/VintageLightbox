@@ -20,6 +20,7 @@ export component MainWindow inherits Window {
     callback back_clicked();
     callback rate_photo(string, int);
     callback navigate(int);
+    callback apply_edits(float, float);
 
     forward-focus: focus_scope;
 
@@ -127,7 +128,8 @@ export component MainWindow inherits Window {
                     scroll-event(event) => {
                         if (event.delta-y > 0) {
                             image_viewport.zoom_level = min(5.0, image_viewport.zoom_level + 0.1);
-                        } else {
+                        }
+                        else {
                             image_viewport.zoom_level = max(0.1, image_viewport.zoom_level - 0.1);
                         }
                         return accept;
@@ -179,13 +181,13 @@ export component MainWindow inherits Window {
                     Text { text: "Edit (Preview)"; font-size: 16px; font-weight: 600; color: white; }
                     VerticalBox {
                         spacing: 5px;
-                        Text { text: "Exposure"; color: white; }
-                        Slider { minimum: -5.0; maximum: 5.0; value: 0.0; }
+                        Text { text: "Exposure: " + exposure_slider.value; color: white; }
+                        exposure_slider := Slider { minimum: -5.0; maximum: 5.0; value: 0.0; changed => { root.apply_edits(self.value, contrast_slider.value); } }
                     }
                     VerticalBox {
                         spacing: 5px;
-                        Text { text: "Contrast"; color: white; }
-                        Slider { minimum: 0.0; maximum: 2.0; value: 1.0; }
+                        Text { text: "Contrast: " + contrast_slider.value; color: white; }
+                        contrast_slider := Slider { minimum: 0.5; maximum: 2.0; value: 1.0; changed => { root.apply_edits(exposure_slider.value, self.value); } }
                     }
                 }
             }

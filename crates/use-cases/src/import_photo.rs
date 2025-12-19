@@ -101,6 +101,15 @@ mod tests {
         }
     }
 
+    // Mock do ThumbnailGenerator
+    mock! {
+        pub ThumbnailGenerator {}
+        #[async_trait::async_trait]
+        impl ThumbnailGenerator for ThumbnailGenerator {
+            async fn generate(&self, path: &FilePath, max_dimension: u32) -> DomainResult<Vec<u8>>;
+        }
+    }
+
     // Mock do PhotoRepository
     mock! {
         pub PhotoRepo {}
@@ -132,9 +141,15 @@ mod tests {
             .expect_extract()
             .returning(|_| Ok(PhotoMetadata::default()));
         
+        let mut mock_generator = MockThumbnailGenerator::new();
+        mock_generator
+            .expect_generate()
+            .returning(|_, _| Ok(vec![]));
+
         let use_case = ImportPhotoUseCase::new(
             Arc::new(mock_repo),
-            Arc::new(mock_extractor)
+            Arc::new(mock_extractor),
+            Arc::new(mock_generator)
         );
         let file_path = FilePath::new("/path/to/photo.jpg").unwrap();
         
@@ -163,9 +178,15 @@ mod tests {
             .expect_extract()
             .returning(|_| Ok(PhotoMetadata::default()));
         
+        let mut mock_generator = MockThumbnailGenerator::new();
+        mock_generator
+            .expect_generate()
+            .returning(|_, _| Ok(vec![]));
+
         let use_case = ImportPhotoUseCase::new(
             Arc::new(mock_repo),
-            Arc::new(mock_extractor)
+            Arc::new(mock_extractor),
+            Arc::new(mock_generator)
         );
         let file_path = FilePath::new("/path/to/photo.jpg").unwrap();
         
@@ -191,9 +212,15 @@ mod tests {
             .expect_extract()
             .returning(|_| Ok(PhotoMetadata::default()));
         
+        let mut mock_generator = MockThumbnailGenerator::new();
+        mock_generator
+            .expect_generate()
+            .returning(|_, _| Ok(vec![]));
+
         let use_case = ImportPhotoUseCase::new(
             Arc::new(mock_repo),
-            Arc::new(mock_extractor)
+            Arc::new(mock_extractor),
+            Arc::new(mock_generator)
         );
         
         let file_path1 = FilePath::new("/path/to/photo1.jpg").unwrap();
@@ -223,9 +250,15 @@ mod tests {
             .expect_extract()
             .returning(|_| Ok(PhotoMetadata::default()));
         
+        let mut mock_generator = MockThumbnailGenerator::new();
+        mock_generator
+            .expect_generate()
+            .returning(|_, _| Ok(vec![]));
+
         let use_case = ImportPhotoUseCase::new(
             Arc::new(mock_repo),
-            Arc::new(mock_extractor)
+            Arc::new(mock_extractor),
+            Arc::new(mock_generator)
         );
         
         // Act & Assert - diferentes extensões devem funcionar

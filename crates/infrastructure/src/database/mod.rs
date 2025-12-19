@@ -31,6 +31,11 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         .execute(pool)
         .await?;
     
+    let migration_003 = include_str!("../../migrations/003_add_thumbnail_path.sql");
+    sqlx::raw_sql(migration_003)
+        .execute(pool)
+        .await?;
+    
     Ok(())
 }
 

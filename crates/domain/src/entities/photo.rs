@@ -382,10 +382,10 @@ mod tests {
         
         // Usar reconstruct para garantir timestamps idênticos
         let photo1 = Photo::reconstruct(
-            id, path.clone(), now, now, None, None, None, false
+            id, path.clone(), now, now, None, None, None, false, None
         );
         let photo2 = Photo::reconstruct(
-            id, path, now, now, None, None, None, false
+            id, path, now, now, None, None, None, false, None
         );
 
         // Assert
