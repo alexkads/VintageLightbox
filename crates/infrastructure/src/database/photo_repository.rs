@@ -47,6 +47,8 @@ impl PhotoRepositoryImpl {
         let color_label_str: Option<String> = row.try_get("color_label").ok();
         let is_edited: bool = row.try_get("is_edited").unwrap_or(false);
         let thumbnail_path_str: Option<String> = row.try_get("thumbnail_path").ok();
+        let edit_exposure: Option<f32> = row.try_get("edit_exposure").ok();
+        let edit_contrast: Option<f32> = row.try_get("edit_contrast").ok();
         
         // Metadata persistido como JSON string
         let metadata_str: Option<String> = row.try_get("metadata").ok();
@@ -80,7 +82,9 @@ impl PhotoRepositoryImpl {
             rating,
             color_label,
             is_edited,
-            thumbnail_path
+            thumbnail_path,
+            edit_exposure,
+            edit_contrast
         ))
     }
 }
@@ -96,14 +100,16 @@ impl PhotoRepository for PhotoRepositoryImpl {
         let imported_at = photo.imported_at().to_rfc3339();
         let modified_at = photo.modified_at().to_rfc3339();
         let thumbnail_path = photo.thumbnail_path().map(|p| p.to_string_lossy().to_string());
+        let edit_exposure = photo.edit_exposure();
+        let edit_contrast = photo.edit_contrast();
         
         // Serializar metadata para JSON
         let metadata = photo.metadata()
             .and_then(|m| serde_json::to_string(m).ok());
 
         sqlx::query(
-            "INSERT INTO photos (id, file_path, rating, color_label, is_edited, imported_at, modified_at, metadata, thumbnail_path)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO photos (id, file_path, rating, color_label, is_edited, imported_at, modified_at, metadata, thumbnail_path, edit_exposure, edit_contrast)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         .bind(&id)
         .bind(&file_path)
@@ -114,6 +120,8 @@ impl PhotoRepository for PhotoRepositoryImpl {
         .bind(&modified_at)
         .bind(metadata)
         .bind(thumbnail_path)
+        .bind(edit_exposure)
+        .bind(edit_contrast)
         .execute(&self.pool)
         .await
         .map_err(|e| DomainError::InvalidOperation(format!("Failed to save photo: {}", e)))?;
@@ -155,6 +163,8 @@ impl PhotoRepository for PhotoRepositoryImpl {
         let is_edited = photo.is_edited();
         let modified_at = photo.modified_at().to_rfc3339();
         let thumbnail_path = photo.thumbnail_path().map(|p| p.to_string_lossy().to_string());
+        let edit_exposure = photo.edit_exposure();
+        let edit_contrast = photo.edit_contrast();
         
         // Serializar metadata para JSON
         let metadata = photo.metadata()
@@ -162,7 +172,7 @@ impl PhotoRepository for PhotoRepositoryImpl {
 
         let result = sqlx::query(
             "UPDATE photos 
-             SET file_path = ?, rating = ?, color_label = ?, is_edited = ?, modified_at = ?, metadata = ?, thumbnail_path = ?
+             SET file_path = ?, rating = ?, color_label = ?, is_edited = ?, modified_at = ?, metadata = ?, thumbnail_path = ?, edit_exposure = ?, edit_contrast = ?
              WHERE id = ?"
         )
         .bind(&file_path)
@@ -172,6 +182,8 @@ impl PhotoRepository for PhotoRepositoryImpl {
         .bind(&modified_at)
         .bind(metadata)
         .bind(thumbnail_path)
+        .bind(edit_exposure)
+        .bind(edit_contrast)
         .bind(&id)
         .execute(&self.pool)
         .await

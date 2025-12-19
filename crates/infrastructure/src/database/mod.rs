@@ -36,6 +36,11 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         .execute(pool)
         .await?;
     
+    let migration_004 = include_str!("../../migrations/004_add_edit_fields.sql");
+    sqlx::raw_sql(migration_004)
+        .execute(pool)
+        .await?;
+    
     Ok(())
 }
 

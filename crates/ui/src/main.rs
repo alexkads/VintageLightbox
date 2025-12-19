@@ -6,35 +6,39 @@ use infrastructure::{
     PhotoRepositoryImpl, ExifReader,
     ThumbnailGeneratorImpl,
 };
-use use_cases::ImportPhotoUseCase;
-use adapters::controllers::ImportController;
-use adapters::view_models::PhotoViewModel;
-use std::path::Path;
+    use use_cases::{ImportPhotoUseCase, SavePhotoEditsUseCase};
+    use adapters::controllers::{ImportController, EditorController};
+    use adapters::view_models::PhotoViewModel;
+    use std::path::Path;
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // 1. Setup Infrastructure
-    // Usar arquivo local para persistência
-    let database_url = "sqlite:vintage_lightbox.db?mode=rwc"; 
-    let pool = create_pool(database_url).await?;
+    #[tokio::main]
+    async fn main() -> Result<(), Box<dyn std::error::Error>> {
+        // 1. Setup Infrastructure
+        // Usar arquivo local para persistência
+        let database_url = "sqlite:vintage_lightbox.db?mode=rwc"; 
+        let pool = create_pool(database_url).await?;
+        
+        // Executar migrations ao iniciar
+        run_migrations(&pool).await?;
     
-    // Executar migrations ao iniciar
-    run_migrations(&pool).await?;
-
-    let photo_repository = Arc::new(PhotoRepositoryImpl::new(pool));
-    let metadata_extractor = Arc::new(ExifReader);
-    let thumbnail_generator = Arc::new(ThumbnailGeneratorImpl::new());
-
-    // 2. Setup Use Cases
-    let import_photo_use_case = Arc::new(ImportPhotoUseCase::new(
-        photo_repository.clone(), 
-        metadata_extractor,
-        thumbnail_generator
-    ));
-
-    // 3. Setup Controllers
-    let import_controller = Arc::new(ImportController::new(import_photo_use_case.clone()));
-    let library_controller = Arc::new(adapters::controllers::LibraryController::new(photo_repository.clone()));
+        let photo_repository = Arc::new(PhotoRepositoryImpl::new(pool));
+        let metadata_extractor = Arc::new(ExifReader);
+        let thumbnail_generator = Arc::new(ThumbnailGeneratorImpl::new());
+    
+        // 2. Setup Use Cases
+        let import_photo_use_case = Arc::new(ImportPhotoUseCase::new(
+            photo_repository.clone(), 
+            metadata_extractor,
+            thumbnail_generator
+        ));
+        let save_photo_edits_use_case = Arc::new(SavePhotoEditsUseCase::new(
+            photo_repository.clone()
+        ));
+    
+        // 3. Setup Controllers
+        let import_controller = Arc::new(ImportController::new(import_photo_use_case.clone()));
+        let library_controller = Arc::new(adapters::controllers::LibraryController::new(photo_repository.clone()));
+        let editor_controller = Arc::new(EditorController::new(save_photo_edits_use_case.clone()));
 
     // 4. Setup UI
     let main_window = MainWindow::new()?;
@@ -225,14 +229,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                          if let Ok(mut active) = active_image_for_tile.lock() {
                              *active = Some(dyn_img.clone());
                          }
-                         // Convert to Slint
-                         let buffer = dyn_img.to_rgba8();
-                         let pixel_buffer = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(
-                            buffer.as_raw(),
-                            buffer.width(),
-                            buffer.height(),
-                        );
-                        slint::Image::from_rgba8(pixel_buffer)
+                         
+                         // Apply edits if they exist
+                         let edit_exposure = photo.edit_exposure.unwrap_or(0.0);
+                         let edit_contrast = photo.edit_contrast.unwrap_or(1.0);
+                         
+                         process_image(&dyn_img, edit_exposure, edit_contrast)
                     },
                     Err(_) => {
                          // Fallback to thumbnail or default
@@ -252,6 +254,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     ui.set_detail_camera(camera);
                     ui.set_detail_exposure(exposure);
                     ui.set_detail_rating(rating);
+                    
+                    // Initialize edit sliders
+                    let edit_exposure = photo.edit_exposure.unwrap_or(0.0);
+                    let edit_contrast = photo.edit_contrast.unwrap_or(1.0);
+                    ui.set_active_exposure(edit_exposure);
+                    ui.set_active_contrast(edit_contrast);
+                    
                     ui.set_current_view(1);
                 }
             }
@@ -315,6 +324,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ui.set_detail_camera(slint::SharedString::from(photo.camera));
                 ui.set_detail_exposure(slint::SharedString::from(photo.exposure));
                 ui.set_detail_rating(slint::SharedString::from(format!("Rating: {}/5", photo.rating)));
+                
+                // Initialize edit sliders
+                let edit_exposure = photo.edit_exposure.unwrap_or(0.0);
+                let edit_contrast = photo.edit_contrast.unwrap_or(1.0);
+                ui.set_active_exposure(edit_exposure);
+                ui.set_active_contrast(edit_contrast);
              }
 
              // Load Image
@@ -326,18 +341,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                      if let Ok(mut active) = active_image_for_nav.lock() {
                          *active = Some(dyn_img.clone());
                      }
-                     // Convert to Slint for display (Initial display: no edits)
-                     let buffer = dyn_img.to_rgba8();
-                     let pixel_buffer = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(
-                        buffer.as_raw(),
-                        buffer.width(),
-                        buffer.height(),
-                    );
-                    let slint_img = slint::Image::from_rgba8(pixel_buffer);
-                    
-                    if let Some(ui) = main_window_weak_for_nav.upgrade() {
-                        ui.set_detail_image(slint_img);
-                    }
+                     // Apply edits if they exist
+                     let edit_exposure = photo.edit_exposure.unwrap_or(0.0);
+                     let edit_contrast = photo.edit_contrast.unwrap_or(1.0);
+                     
+                     let slint_img = process_image(&dyn_img, edit_exposure, edit_contrast);
+                     
+                     if let Some(ui) = main_window_weak_for_nav.upgrade() {
+                         ui.set_detail_image(slint_img);
+                     }
                  },
                  Err(e) => {
                      println!("Error loading image for editing: {:?}", e);
@@ -348,6 +360,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                  }
              }
         }
+    });
+
+    // Save Edits Callback
+    let editor_controller_clone = editor_controller.clone();
+    main_window.on_save_edits(move |id, exposure, contrast| {
+        let controller = editor_controller_clone.clone();
+        let id_str = id.as_str().to_string();
+        
+        tokio::spawn(async move {
+            match controller.save_edits(id_str, exposure, contrast).await {
+                Ok(_) => println!("Edits saved successfully!"),
+                Err(e) => eprintln!("Failed to save edits: {}", e),
+            }
+        });
     });
 
     // Apply Edits Callback

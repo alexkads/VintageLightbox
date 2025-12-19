@@ -18,6 +18,8 @@ pub use set_color_label::SetColorLabelUseCase;
 pub use create_collection::CreateCollectionUseCase;
 pub use add_photo_to_collection::AddPhotoToCollectionUseCase;
 pub use remove_photo_from_collection::RemovePhotoFromCollectionUseCase;
+pub mod save_photo_edits;
+pub use save_photo_edits::SavePhotoEditsUseCase;
 
 pub mod import;
 pub mod edit;

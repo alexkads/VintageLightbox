@@ -39,6 +39,8 @@ impl LibraryController {
                         camera,
                         exposure,
                         rating,
+                        edit_exposure: photo.edit_exposure(),
+                        edit_contrast: photo.edit_contrast(),
                     }
                 })
                 .collect();

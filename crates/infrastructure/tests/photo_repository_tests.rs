@@ -229,3 +229,36 @@ async fn test_save_and_find_photo_with_metadata() {
     assert_eq!(found_metadata.iso, Some(100));
     assert_eq!(found_metadata.width, Some(8192));
 }
+
+#[tokio::test]
+async fn test_save_and_find_photo_with_edits() {
+    // Arrange
+    let repo = create_test_repository().await;
+    let file_path = FilePath::new("/photos/test_edits.jpg").unwrap();
+    let mut photo = Photo::new(file_path);
+    let photo_id = photo.id().clone();
+
+    // Set edits
+    photo.set_edits(Some(1.5), Some(0.8)).unwrap();
+
+    // Act - Save
+    repo.save(&photo).await.unwrap();
+
+    // Act - Find
+    let found = repo.find_by_id(&photo_id).await.unwrap().unwrap();
+
+    // Assert
+    assert!(found.is_edited());
+    assert_eq!(found.edit_exposure(), Some(1.5));
+    assert_eq!(found.edit_contrast(), Some(0.8));
+
+    // Act - Update (modify edits)
+    let mut found_mut = found;
+    found_mut.set_edits(Some(-0.5), Some(1.2)).unwrap();
+    repo.update(&found_mut).await.unwrap();
+
+    // Verify Update
+    let updated = repo.find_by_id(&photo_id).await.unwrap().unwrap();
+    assert_eq!(updated.edit_exposure(), Some(-0.5));
+    assert_eq!(updated.edit_contrast(), Some(1.2));
+}

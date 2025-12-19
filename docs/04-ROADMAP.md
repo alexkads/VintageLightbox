@@ -70,6 +70,7 @@ Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Ar
 - ✅ **Metadados UI (v1.6)**: Painel lateral com EXIF (ISO, Abertura, Shutter) e Rating.
 - ✅ **Interatividade (v1.7)**: Zoom/Pan com mouse, Navegação por setas, Rating clicável.
 - ✅ **Editor UI (v1.7)**: Sliders de Exposição e Contraste (Skeleton).
+- ✅ **Processamento de Imagem (v1.8)**: Aplicação de Brilho/Contraste em tempo real (Backend + UI Integration).
 
 ### Métricas de Qualidade
 - ✅ 100% cobertura no Domain Layer
@@ -249,20 +250,20 @@ Criar versão mínima funcional com importação, visualização, edição bási
 ### 1.3 Processamento RAW Básico (3 semanas)
 - [ ] Decodificação de formatos principais (CR2, NEF, ARW, DNG)
 - [ ] Estrutura de ajustes não-destrutivos
-- [ ] Implementar ajustes básicos:
-  - [ ] Exposição
-  - [ ] Contraste
+- [x] Implementar ajustes básicos:
+  - [x] Exposição
+  - [x] Contraste
   - [ ] Temperatura de cor
   - [ ] Tint
   - [ ] Highlights/Shadows
-- [ ] Aplicação em tempo real
+- [x] Aplicação em tempo real
 - [ ] Cache de previews
 
 **Critério de Aceitação**: Ajuste aplicado em < 500ms
 
 ### 1.4 UI de Edição (2 semanas)
 - [x] Painel de edição com sliders
-- [ ] Vinculação com ajustes RAW
+- [x] Vinculação com ajustes (Basic Processing)
 - [ ] Undo/Redo (histórico simples)
 - [ ] Reset de ajustes
 - [ ] Antes/Depois (tecla \)

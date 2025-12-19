@@ -32,6 +32,10 @@ pub struct Photo {
     metadata: Option<PhotoMetadata>,
     /// Caminho do thumbnail
     thumbnail_path: Option<FilePath>,
+    /// Ajuste de exposição (persistence)
+    edit_exposure: Option<f32>,
+    /// Ajuste de contraste (persistence)
+    edit_contrast: Option<f32>,
 }
 
 impl Photo {
@@ -51,6 +55,8 @@ impl Photo {
         color_label: Option<ColorLabel>,
         is_edited: bool,
         thumbnail_path: Option<FilePath>,
+        edit_exposure: Option<f32>,
+        edit_contrast: Option<f32>,
     ) -> Self {
         Self {
             id,
@@ -62,6 +68,8 @@ impl Photo {
             color_label,
             is_edited,
             thumbnail_path,
+            edit_exposure,
+            edit_contrast,
         }
     }
 
@@ -69,7 +77,7 @@ impl Photo {
     pub fn with_id(id: PhotoId, file_path: FilePath) -> Self {
         let now = Utc::now();
         Self::reconstruct(
-            id, file_path, now, now, None, None, None, false, None
+            id, file_path, now, now, None, None, None, false, None, None, None
         )
     }
 
@@ -191,6 +199,25 @@ impl Photo {
     pub fn set_thumbnail_path(&mut self, path: FilePath) {
         self.thumbnail_path = Some(path);
         self.modified_at = Utc::now();
+    }
+
+    /// Retorna o campo edit_exposure
+    pub fn edit_exposure(&self) -> Option<f32> {
+        self.edit_exposure
+    }
+
+    /// Retorna o campo edit_contrast
+    pub fn edit_contrast(&self) -> Option<f32> {
+        self.edit_contrast
+    }
+
+    /// Define os ajustes de edição e marca como editada
+    pub fn set_edits(&mut self, exposure: Option<f32>, contrast: Option<f32>) -> DomainResult<()> {
+        self.edit_exposure = exposure;
+        self.edit_contrast = contrast;
+        self.is_edited = true;
+        self.modified_at = Utc::now();
+        Ok(())
     }
 }
 
@@ -381,15 +408,32 @@ mod tests {
         let now = Utc::now();
         
         // Usar reconstruct para garantir timestamps idênticos
+        // Usar reconstruct para garantir timestamps idênticos
         let photo1 = Photo::reconstruct(
-            id, path.clone(), now, now, None, None, None, false, None
+            id, path.clone(), now, now, None, None, None, false, None, None, None
         );
         let photo2 = Photo::reconstruct(
-            id, path, now, now, None, None, None, false, None
+            id, path, now, now, None, None, None, false, None, None, None
         );
 
         // Assert
         assert_eq!(photo1, photo2);
+    }
+
+    #[test]
+    fn test_set_edits() {
+        let file_path = FilePath::new("/photos/test.jpg").unwrap();
+        let mut photo = Photo::new(file_path);
+
+        assert!(photo.edit_exposure().is_none());
+        assert!(photo.edit_contrast().is_none());
+        assert!(!photo.is_edited());
+
+        photo.set_edits(Some(1.5), Some(1.2)).unwrap();
+
+        assert_eq!(photo.edit_exposure(), Some(1.5));
+        assert_eq!(photo.edit_contrast(), Some(1.2));
+        assert!(photo.is_edited());
     }
 
     #[test]

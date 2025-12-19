@@ -8,7 +8,14 @@ struct RowData {
     tiles: [TileData],
 }
 
-import { VerticalBox, Button, ScrollView, HorizontalBox, ListView, Slider } from "std-widgets.slint";
+import {
+    VerticalBox,
+    Button,
+    ScrollView,
+    HorizontalBox,
+    ListView,
+    Slider,
+} from "std-widgets.slint";
 
 export component MainWindow inherits Window {
     title: "VintageLightbox POC";
@@ -21,6 +28,10 @@ export component MainWindow inherits Window {
     callback rate_photo(string, int);
     callback navigate(int);
     callback apply_edits(float, float);
+    callback save_edits(string, float, float);
+
+    in-out property <float> active_exposure: 0.0;
+    in-out property <float> active_contrast: 1.0;
 
     forward-focus: focus_scope;
 
@@ -58,9 +69,12 @@ export component MainWindow inherits Window {
                     vertical-alignment: center;
                     font-size: 16px;
                 }
+
                 Button {
                     text: "Import Photos";
-                    clicked => { root.import_clicked(); }
+                    clicked => {
+                        root.import_clicked();
+                    }
                 }
             }
 
@@ -79,13 +93,17 @@ export component MainWindow inherits Window {
                             height: 130px;
                             image-fit: contain;
                         }
+
                         Text {
                             text: tile.name;
                             overflow: elide;
                             horizontal-alignment: center;
                         }
+
                         TouchArea {
-                            clicked => { root.tile_clicked(tile.id); }
+                            clicked => {
+                                root.tile_clicked(tile.id);
+                            }
                         }
                     }
                 }
@@ -112,6 +130,7 @@ export component MainWindow inherits Window {
                     y: (parent.height - self.height) / 2 + pan_y;
                     image-fit: contain;
                 }
+
                 TouchArea {
                     pointer-event(event) => {
                         if (event.kind == PointerEventKind.down) {
@@ -128,8 +147,7 @@ export component MainWindow inherits Window {
                     scroll-event(event) => {
                         if (event.delta-y > 0) {
                             image_viewport.zoom_level = min(5.0, image_viewport.zoom_level + 0.1);
-                        }
-                        else {
+                        } else {
                             image_viewport.zoom_level = max(0.1, image_viewport.zoom_level - 0.1);
                         }
                         return accept;
@@ -140,6 +158,7 @@ export component MainWindow inherits Window {
                         image_viewport.zoom_level = 1.0;
                     }
                 }
+
                 function back() {
                     root.back_clicked();
                     image_viewport.pan_x = 0px;
@@ -147,47 +166,160 @@ export component MainWindow inherits Window {
                     image_viewport.zoom_level = 1.0;
                 }
                 TouchArea {
-                    width: 100px; height: 40px; x: 20px; y: 20px;
-                    Rectangle { background: #333; border-radius: 4px; opacity: 0.8; }
-                    Text { text: " Back "; color: white; vertical-alignment: center; horizontal-alignment: center; }
-                    clicked => { back(); }
+                    width: 100px;
+                    height: 40px;
+                    x: 20px;
+                    y: 20px;
+                    Rectangle {
+                        background: #333;
+                        border-radius: 4px;
+                        opacity: 0.8;
+                    }
+
+                    Text {
+                        text: " Back ";
+                        color: white;
+                        vertical-alignment: center;
+                        horizontal-alignment: center;
+                    }
+
+                    clicked => {
+                        back();
+                    }
                 }
             }
+
             Rectangle {
                 width: 320px;
                 background: #222;
                 VerticalLayout {
-                    padding: 20px; spacing: 15px; alignment: start;
-                    Text { text: "Details"; font-size: 18px; font-weight: 700; color: white; }
+                    padding: 20px;
+                    spacing: 15px;
+                    alignment: start;
+                    Text {
+                        text: "Details";
+                        font-size: 18px;
+                        font-weight: 700;
+                        color: white;
+                    }
+
                     VerticalBox {
                         spacing: 5px;
-                        Text { text: "Name: " + root.detail_name; font-size: 12px; color: #ccc; wrap: word-wrap; }
-                        Text { text: "Date: " + root.detail_date; font-size: 12px; color: #ccc; }
-                        Text { text: "Shot: " + root.detail_camera; font-size: 12px; color: #ccc; }
-                        Text { text: "Exif: " + root.detail_exposure; font-size: 12px; color: #ccc; }
-                    }
-                    Rectangle { height: 1px; background: #444; }
-                    Text { text: "Rating"; font-size: 14px; font-weight: 600; color: white; }
-                    HorizontalLayout {
-                        spacing: 5px; alignment: start;
-                        for i in 5: TouchArea {
-                            width: 25px; height: 25px;
-                            Text { text: "★"; font-size: 20px; color: #888; }
-                            clicked => { root.rate_photo(root.detail_id, i + 1); }
+                        Text {
+                            text: "Name: " + root.detail_name;
+                            font-size: 12px;
+                            color: #ccc;
+                            wrap: word-wrap;
+                        }
+
+                        Text {
+                            text: "Date: " + root.detail_date;
+                            font-size: 12px;
+                            color: #ccc;
+                        }
+
+                        Text {
+                            text: "Shot: " + root.detail_camera;
+                            font-size: 12px;
+                            color: #ccc;
+                        }
+
+                        Text {
+                            text: "Exif: " + root.detail_exposure;
+                            font-size: 12px;
+                            color: #ccc;
                         }
                     }
-                    Text { text: root.detail_rating; font-size: 14px; color: #ffd700; }
-                    Rectangle { height: 1px; background: #444; }
-                    Text { text: "Edit (Preview)"; font-size: 16px; font-weight: 600; color: white; }
-                    VerticalBox {
-                        spacing: 5px;
-                        Text { text: "Exposure: " + exposure_slider.value; color: white; }
-                        exposure_slider := Slider { minimum: -5.0; maximum: 5.0; value: 0.0; changed => { root.apply_edits(self.value, contrast_slider.value); } }
+
+                    Rectangle {
+                        height: 1px;
+                        background: #444;
                     }
+
+                    Text {
+                        text: "Rating";
+                        font-size: 14px;
+                        font-weight: 600;
+                        color: white;
+                    }
+
+                    HorizontalLayout {
+                        spacing: 5px;
+                        alignment: start;
+                        for i in 5: TouchArea {
+                            width: 25px;
+                            height: 25px;
+                            Text {
+                                text: "★";
+                                font-size: 20px;
+                                color: #888;
+                            }
+
+                            clicked => {
+                                root.rate_photo(root.detail_id, i + 1);
+                            }
+                        }
+                    }
+
+                    Text {
+                        text: root.detail_rating;
+                        font-size: 14px;
+                        color: #ffd700;
+                    }
+
+                    Rectangle {
+                        height: 1px;
+                        background: #444;
+                    }
+
+                    Text {
+                        text: "Edit";
+                        font-size: 16px;
+                        font-weight: 600;
+                        color: white;
+                    }
+
+                    Button {
+                        text: "Save Edits";
+                        clicked => {
+                            root.save_edits(root.detail_id, root.active_exposure, root.active_contrast);
+                        }
+                    }
+
                     VerticalBox {
                         spacing: 5px;
-                        Text { text: "Contrast: " + contrast_slider.value; color: white; }
-                        contrast_slider := Slider { minimum: 0.5; maximum: 2.0; value: 1.0; changed => { root.apply_edits(exposure_slider.value, self.value); } }
+                        Text {
+                            text: "Exposure: " + (round(root.active_exposure * 100) / 100);
+                            color: white;
+                        }
+
+                        exposure_slider := Slider {
+                            minimum: -2.0;
+                            maximum: 2.0;
+                            value: root.active_exposure;
+                            changed(val) => {
+                                root.active_exposure = val;
+                                root.apply_edits(root.active_exposure, root.active_contrast);
+                            }
+                        }
+                    }
+
+                    VerticalBox {
+                        spacing: 5px;
+                        Text {
+                            text: "Contrast: " + (round(root.active_contrast * 100) / 100);
+                            color: white;
+                        }
+
+                        contrast_slider := Slider {
+                            minimum: 0.5;
+                            maximum: 1.5;
+                            value: root.active_contrast;
+                            changed(val) => {
+                                root.active_contrast = val;
+                                root.apply_edits(root.active_exposure, root.active_contrast);
+                            }
+                        }
                     }
                 }
             }
