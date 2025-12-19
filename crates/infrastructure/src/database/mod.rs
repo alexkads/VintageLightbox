@@ -20,25 +20,10 @@ pub async fn create_pool(database_url: &str) -> Result<SqlitePool, sqlx::Error> 
 
 /// Executa migrations do banco de dados
 pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
-    // Ler e executar migration SQL
-    let migration_sql = include_str!("../../migrations/001_initial_schema.sql");
-    sqlx::raw_sql(migration_sql)
-        .execute(pool)
-        .await?;
-
-    let migration_002 = include_str!("../../migrations/002_add_metadata_to_photos.sql");
-    sqlx::raw_sql(migration_002)
-        .execute(pool)
-        .await?;
-    
-    let migration_003 = include_str!("../../migrations/003_add_thumbnail_path.sql");
-    sqlx::raw_sql(migration_003)
-        .execute(pool)
-        .await?;
-    
-    let migration_004 = include_str!("../../migrations/004_add_edit_fields.sql");
-    sqlx::raw_sql(migration_004)
-        .execute(pool)
+    // Usar migrate! macro embedda as migrations no binário e garante versionamento
+    // O caminho é relativo a este arquivo (src/database/mod.rs) -> ../../migrations
+    sqlx::migrate!("./migrations")
+        .run(pool)
         .await?;
     
     Ok(())

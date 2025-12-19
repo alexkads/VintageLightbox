@@ -106,6 +106,16 @@ export component MainWindow inherits Window {
                     }
                 }
             }
+            
+            // Empty State
+            Text {
+                visible: root.grid_model.length == 0;
+                text: "Library is empty.\nClick 'Import Photos' to start.";
+                color: #666;
+                font-size: 18px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
         }
 
         HorizontalBox {
