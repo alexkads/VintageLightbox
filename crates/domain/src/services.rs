@@ -35,3 +35,10 @@ pub trait RawDecoder: Send + Sync {
     /// Decodifica um arquivo RAW retornando os dados brutos
     fn decode(&self, path: &FilePath) -> DomainResult<RawImage>;
 }
+
+/// Serviço para exportação de imagens processadas
+#[async_trait]
+pub trait ImageExporter: Send + Sync {
+    /// Exporta a foto aplicando as edições para o caminho de destino
+    async fn export(&self, photo: &crate::entities::Photo, output_path: &FilePath) -> DomainResult<()>;
+}

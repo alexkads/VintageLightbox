@@ -4,10 +4,10 @@ slint::include_modules!();
 use infrastructure::{
     create_pool, run_migrations,
     PhotoRepositoryImpl, ExifReader,
-    ThumbnailGeneratorImpl,
+    ThumbnailGeneratorImpl, ImageExporterImpl,
 };
-    use use_cases::{ImportPhotoUseCase, SavePhotoEditsUseCase};
-    use adapters::controllers::{ImportController, EditorController};
+    use use_cases::{ImportPhotoUseCase, SavePhotoEditsUseCase, ExportPhotoUseCase};
+    use adapters::controllers::{ImportController, EditorController, ExportController};
     use adapters::view_models::PhotoViewModel;
     use std::path::Path;
 
@@ -24,6 +24,7 @@ use infrastructure::{
         let photo_repository = Arc::new(PhotoRepositoryImpl::new(pool));
         let metadata_extractor = Arc::new(ExifReader);
         let thumbnail_generator = Arc::new(ThumbnailGeneratorImpl::new());
+        let image_exporter = Arc::new(ImageExporterImpl::new());
     
         // 2. Setup Use Cases
         let import_photo_use_case = Arc::new(ImportPhotoUseCase::new(
@@ -34,11 +35,16 @@ use infrastructure::{
         let save_photo_edits_use_case = Arc::new(SavePhotoEditsUseCase::new(
             photo_repository.clone()
         ));
+        let export_photo_use_case = Arc::new(ExportPhotoUseCase::new(
+             photo_repository.clone(),
+             image_exporter
+        ));
     
         // 3. Setup Controllers
         let import_controller = Arc::new(ImportController::new(import_photo_use_case.clone()));
         let library_controller = Arc::new(adapters::controllers::LibraryController::new(photo_repository.clone()));
         let editor_controller = Arc::new(EditorController::new(save_photo_edits_use_case.clone()));
+        let export_controller = Arc::new(ExportController::new(export_photo_use_case.clone()));
 
     // 4. Setup UI
     let main_window = MainWindow::new()?;
@@ -229,13 +235,17 @@ use infrastructure::{
                 // Load using image crate for editing support
                 let image = match image::open(image_path) {
                     Ok(dyn_img) => {
+                         // Resize for performance (Preview Mode)
+                         // Keep aspect ratio, max width/height 1280
+                         let preview_img = dyn_img.resize(1280, 1280, image::imageops::FilterType::Triangle);
+
                          // Save to active_image state
                          if let Ok(mut active) = active_image_for_tile.lock() {
-                             *active = Some(dyn_img.clone());
+                             *active = Some(preview_img.clone());
                          }
                          
                          // Apply edits if they exist
-                         process_image(&dyn_img, edit_exposure_val, edit_contrast_val)
+                         process_image(&preview_img, edit_exposure_val, edit_contrast_val)
                     },
                     Err(_) => {
                          // Fallback to thumbnail or default
@@ -336,15 +346,18 @@ use infrastructure::{
              // Use image crate to load DynamicImage for processing
              match image::open(image_path) {
                  Ok(dyn_img) => {
+                     // Resize for performance (Preview Mode)
+                     let preview_img = dyn_img.resize(1280, 1280, image::imageops::FilterType::Triangle);
+
                      // Save to active_image state
                      if let Ok(mut active) = active_image_for_nav.lock() {
-                         *active = Some(dyn_img.clone());
+                         *active = Some(preview_img.clone());
                      }
                      // Apply edits if they exist
                      let edit_exposure = photo.edit_exposure.unwrap_or(0.0);
                      let edit_contrast = photo.edit_contrast.unwrap_or(1.0);
                      
-                     let slint_img = process_image(&dyn_img, edit_exposure, edit_contrast);
+                     let slint_img = process_image(&preview_img, edit_exposure, edit_contrast);
                      
                      if let Some(ui) = main_window_weak_for_nav.upgrade() {
                          ui.set_detail_image(slint_img);
@@ -365,35 +378,105 @@ use infrastructure::{
     let editor_controller_clone = editor_controller.clone();
     main_window.on_save_edits(move |id, exposure, contrast| {
         let controller = editor_controller_clone.clone();
-        let id_str = id.as_str().to_string();
-        
         tokio::spawn(async move {
-            match controller.save_edits(id_str, exposure, contrast).await {
-                Ok(_) => println!("Edits saved successfully!"),
-                Err(e) => eprintln!("Failed to save edits: {}", e),
+            if let Err(e) = controller.save_edits(id.clone().into(), exposure, contrast).await {
+                eprintln!("Error saving edits: {}", e);
+            } else {
+                println!("Edits saved for photo {}", id);
             }
         });
     });
 
-    // Apply Edits Callback
-    let active_image_for_edits = active_image.clone();
-    let main_window_weak_for_edits = main_window.as_weak();
-    main_window.on_apply_edits(move |exposure, contrast| {
-        // Debounce or optimize? For now, block main thread (MVP)
-        let processed_img = if let Ok(active_opt) = active_image_for_edits.lock() {
-            if let Some(img) = active_opt.as_ref() {
-                Some(process_image(img, exposure, contrast))
-            } else {
-                None
+    let export_controller = export_controller.clone();
+    main_window.on_export_clicked(move |id| {
+        let controller = export_controller.clone();
+        tokio::spawn(async move {
+            // Open Save Dialog
+            if let Some(path) = rfd::FileDialog::new()
+                .add_filter("JPEG Image", &["jpg", "jpeg"])
+                .set_file_name("export.jpg")
+                .save_file() 
+            {
+                let path_str = path.to_string_lossy().to_string();
+                if let Err(e) = controller.export_photo(id.into(), path_str).await {
+                     eprintln!("Error exporting photo: {}", e);
+                } else {
+                     println!("Photo exported successfully to {:?}", path);
+                }
             }
-        } else {
-            None
-        };
+        });
+    });
 
-        if let Some(img) = processed_img {
-            if let Some(ui) = main_window_weak_for_edits.upgrade() {
-                ui.set_detail_image(img);
+    // --- Debounced Edit Processing ---
+    
+    // Shared state for edit requests
+    struct EditState {
+        exposure: f32,
+        contrast: f32,
+        pending: bool,
+    }
+    
+    let edit_state = Arc::new(Mutex::new(EditState {
+        exposure: 0.0,
+        contrast: 1.0,
+        pending: false,
+    }));
+
+    // Spawn background processor
+    {
+        let edit_state = edit_state.clone();
+        let active_image = active_image.clone();
+        let main_window_weak = main_window.as_weak();
+        
+        tokio::spawn(async move {
+            loop {
+                // Throttle/Debounce interval
+                tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+
+                let (exposure, contrast, should_process) = {
+                    let mut state = edit_state.lock().unwrap();
+                    if state.pending {
+                        state.pending = false; // Reset pending flag
+                        (state.exposure, state.contrast, true)
+                    } else {
+                        (0.0, 1.0, false)
+                    }
+                };
+
+                if should_process {
+                     // Perform processing (CPU bound, so spawn_blocking would be ideal, but here we are in async task)
+                     // basic logic for MVP
+                     let processed_img = {
+                         if let Ok(active_opt) = active_image.lock() {
+                             if let Some(img) = active_opt.as_ref() {
+                                 Some(process_image(img, exposure, contrast))
+                             } else {
+                                 None
+                             }
+                         } else {
+                             None
+                         }
+                     };
+
+                     if let Some(img) = processed_img {
+                         let _ = slint::invoke_from_event_loop(move || {
+                             if let Some(ui) = main_window_weak.upgrade() {
+                                 ui.set_detail_image(img);
+                             }
+                         });
+                     }
+                }
             }
+        });
+    }
+
+    // Apply Edits Callback - Just updates state
+    let edit_state_for_callback = edit_state.clone();
+    main_window.on_apply_edits(move |exposure, contrast| {
+        if let Ok(mut state) = edit_state_for_callback.lock() {
+            state.exposure = exposure;
+            state.contrast = contrast;
+            state.pending = true;
         }
     });
 

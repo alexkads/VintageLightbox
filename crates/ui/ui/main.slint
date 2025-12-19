@@ -27,6 +27,7 @@ export component MainWindow inherits Window {
     callback navigate(int);
     callback apply_edits(float, float);
     callback save_edits(string, float, float);
+    callback export_clicked(string);
 
     in-out property <float> active_exposure: 0.0;
     in-out property <float> active_contrast: 1.0;
@@ -82,20 +83,22 @@ export component MainWindow inherits Window {
                     spacing: 10px;
                     height: 180px;
                     alignment: start;
-                    for tile in row.tiles: VerticalLayout {
+                    for tile in row.tiles: Rectangle {
                         width: 150px;
-                        spacing: 5px;
-                        Image {
-                            source: tile.image;
-                            width: 150px;
-                            height: 130px;
-                            image-fit: contain;
-                        }
+                        VerticalLayout {
+                            spacing: 5px;
+                            Image {
+                                source: tile.image;
+                                width: 150px;
+                                height: 130px;
+                                image-fit: contain;
+                            }
 
-                        Text {
-                            text: tile.name;
-                            overflow: elide;
-                            horizontal-alignment: center;
+                            Text {
+                                text: tile.name;
+                                overflow: elide;
+                                horizontal-alignment: center;
+                            }
                         }
 
                         TouchArea {
@@ -291,6 +294,13 @@ export component MainWindow inherits Window {
                         text: "Save Edits";
                         clicked => {
                             root.save_edits(root.detail_id, root.active_exposure, root.active_contrast);
+                        }
+                    }
+
+                    Button {
+                        text: "Export JPEG";
+                        clicked => {
+                            root.export_clicked(root.detail_id);
                         }
                     }
 

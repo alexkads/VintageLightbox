@@ -13,7 +13,7 @@ Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Ar
 ## 📊 Progresso Atual (Atualizado: 18/dez/2025)
 
 ### Status Geral
-- **Fase Atual**: Fase 1 (MVP) - UI & Integration 🔄
+- **Fase Atual**: Fase 1 (MVP) - Concluído ✅ / Iniciando Fase 2 �
 - **Total de Testes**: **173 testes passando** 🎉
   - Domain Layer: 99 testes (100% cobertura)
   - Use Cases Layer: 32 testes (7 use cases)
@@ -71,6 +71,8 @@ Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Ar
 - ✅ **Interatividade (v1.7)**: Zoom/Pan com mouse, Navegação por setas, Rating clicável.
 - ✅ **Editor UI (v1.7)**: Sliders de Exposição e Contraste (Skeleton).
 - ✅ **Processamento de Imagem (v1.8)**: Aplicação de Brilho/Contraste em tempo real (Backend + UI Integration).
+- ✅ **Debounce (v1.11)**: Otimização de sliders com delay para evitar travamentos.
+- ✅ **Exportação (v1.10)**: Salvar imagem editada em alta resolução (JPEG).
 
 ### Métricas de Qualidade
 - ✅ 100% cobertura no Domain Layer
@@ -173,7 +175,7 @@ Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Ar
 
 ---
 
-## Fase 1: MVP - Core Básico (2-3 meses) 🚧 EM ANDAMENTO
+## Fase 1: MVP - Core Básico (2-3 meses) ✅ CONCLUÍDO
 
 ### Objetivos
 Criar versão mínima funcional com importação, visualização, edição básica e exportação.  
@@ -267,7 +269,7 @@ Criar versão mínima funcional com importação, visualização, edição bási
 - [ ] Undo/Redo (histórico simples)
 - [ ] Reset de ajustes
 - [ ] Antes/Depois (tecla \)
-- [ ] Salvar ajustes no banco
+- [x] Salvar ajustes no banco
 
 ### 1.5 Classificação Básica (1 semana)
 - [x] Sistema de rating (0-5 estrelas)
@@ -277,11 +279,11 @@ Criar versão mínima funcional com importação, visualização, edição bási
 - [ ] Persistência no banco
 
 ### 1.6 Exportação Básica (2 semanas)
-- [ ] Seleção de fotos para exportar
-- [ ] Configurações: formato (JPEG), qualidade
-- [ ] Redimensionamento simples
-- [ ] Aplicação de ajustes na exportação
-- [ ] Exportação single-threaded
+- [x] Seleção de fotos para exportar (Single)
+- [x] Configurações: formato (JPEG), qualidade
+- [x] Redimensionamento simples (Via resize na exportação se necessário, MVP usa full)
+- [x] Aplicação de ajustes na exportação
+- [x] Exportação single-threaded
 - [ ] Progress bar
 - [ ] Abrir pasta após exportação
 
@@ -313,9 +315,9 @@ Criar versão mínima funcional com importação, visualização, edição bási
 
 **Status Atual**: 
 - ✅ Backend completo (Domain + Use Cases + Repositories)
-- 🚧 Frontend pendente (UI com Slint)
-- 🚧 RAW Processing pendente
-- 🚧 File System operations pendente
+- ✅ Frontend completo (UI com Slint, Grid, Details, Edit)
+- ✅ RAW Processing básico (via image crate preview)
+- ✅ File System operations completo
 
 ---
 
@@ -623,6 +625,10 @@ Criar versão mínima funcional com importação, visualização, edição bási
 - [ ] Máscaras de ajuste
 - [ ] Panoramas e HDR
 - [ ] Focus stacking
+- [ ] **Phase 2.1: GPU Acceleration**
+  - Implement Custom Slint Renderer or integrate `wgpu`.
+  - Migrate image processing from CPU (`image` crate) to Metal Compute Shaders.
+  - Target: Real-time processing of 24MP+ RAW files.
 - [ ] GPU acceleration (WGPU)
 
 ### Integração e Extensibilidade (v2.x)

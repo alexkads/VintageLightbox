@@ -21,6 +21,9 @@ pub use remove_photo_from_collection::RemovePhotoFromCollectionUseCase;
 pub mod save_photo_edits;
 pub use save_photo_edits::SavePhotoEditsUseCase;
 
+pub mod export_photo;
+pub use export_photo::ExportPhotoUseCase;
+
 pub mod import;
 pub mod edit;
 pub mod organize;

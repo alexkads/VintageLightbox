@@ -15,3 +15,5 @@ pub use exif_reader::ExifReader;
 pub mod thumbnail_generator;
 pub use thumbnail_generator::ThumbnailGeneratorImpl;
 pub use raw_processing::RawDecoderImpl;
+pub mod image_exporter;
+pub use image_exporter::ImageExporterImpl;
