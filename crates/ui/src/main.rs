@@ -217,6 +217,10 @@ use infrastructure::{
                 let exposure = slint::SharedString::from(&photo.exposure);
                 let rating = slint::SharedString::from(format!("Rating: {}/5", photo.rating));
 
+                // Extract edits before dropping lock
+                let edit_exposure_val = photo.edit_exposure.unwrap_or(0.0);
+                let edit_contrast_val = photo.edit_contrast.unwrap_or(1.0);
+
                 // Drop lock before loading image
                 drop(photos);
 
@@ -231,10 +235,7 @@ use infrastructure::{
                          }
                          
                          // Apply edits if they exist
-                         let edit_exposure = photo.edit_exposure.unwrap_or(0.0);
-                         let edit_contrast = photo.edit_contrast.unwrap_or(1.0);
-                         
-                         process_image(&dyn_img, edit_exposure, edit_contrast)
+                         process_image(&dyn_img, edit_exposure_val, edit_contrast_val)
                     },
                     Err(_) => {
                          // Fallback to thumbnail or default
@@ -256,10 +257,8 @@ use infrastructure::{
                     ui.set_detail_rating(rating);
                     
                     // Initialize edit sliders
-                    let edit_exposure = photo.edit_exposure.unwrap_or(0.0);
-                    let edit_contrast = photo.edit_contrast.unwrap_or(1.0);
-                    ui.set_active_exposure(edit_exposure);
-                    ui.set_active_contrast(edit_contrast);
+                    ui.set_active_exposure(edit_exposure_val);
+                    ui.set_active_contrast(edit_contrast_val);
                     
                     ui.set_current_view(1);
                 }
