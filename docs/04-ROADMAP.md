@@ -20,6 +20,21 @@ Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Ar
   - Infrastructure Layer: 42 testes (Repositories + File System + Metadata)
 
 ### Conquistas Recentes
+- ✅ **UI Architecture Refactoring** 🏗️
+  - **Estrutura Modular**: Refatorado de 1 arquivo monolítico para 20+ arquivos organizados
+  - **Clean Architecture na UI**: Separação em camadas (Design System, Components, Panels, Views)
+  - **Design System Completo**: 
+    - `design_system/tokens.slint`: Tokens centralizados (cores, espaçamento, tipografia)
+    - `design_system/primitives.slint`: Componentes base reutilizáveis (Buttons, Cards, Overlays)
+  - **Arquitetura em Camadas**:
+    - `types.slint`: Structs compartilhados (TileData, RowData)
+    - `components/`: 8 widgets reutilizáveis (Toolbar, PhotoGrid, Filmstrip, Histogram, etc.)
+    - `panels/`: 8 painéis compostos (Navigator, Catalog, Collections, QuickDevelop, Metadata, etc.)
+    - `views/`: 2 views principais (LibraryView, DevelopView)
+    - `main.slint`: Root component com gerenciamento de estado e callbacks
+  - **Benefícios**: Melhor manutenibilidade, reutilização de código, separação de responsabilidades
+  - **Documentação**: Ver `docs/06-UI-ARCHITECTURE.md` para detalhes completos
+
 - ✅ **UI Redesign Completo (v2.0)** 🎨
   - **Design System**: Paleta de cores premium, tipografia, espaçamento, sombras
   - **Componentes Premium**: PhotoCard, PremiumButton, EditSlider, RatingSelector, ColorLabelSelector
@@ -66,12 +81,21 @@ Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Ar
     - Integrado com ImportPhotoUseCase e ScanDirectoryUseCase ✅
 
 ### Próximos Passos
-1. **Rust Integration** - Conectar novos componentes UI aos controllers
-2. **Advanced Features** - Histograma, before/after, presets
-3. **RAW Processing** - Integração com LibRaw/rawler
-4. **Performance** - Otimizações e profiling
+1. **Component Integration** - Conectar componentes refatorados (Histogram, RatingWidget, ColorLabels) aos controllers Rust
+2. **Advanced Features** - Before/after toggle, presets system
+3. **RAW Processing** - Integração completa com LibRaw/rawler
+4. **Performance** - Otimizações e profiling, possível GPU acceleration (Phase 2.1)
 
-### Entregas Recentes (Fase 2.0 - UI Redesign)
+### Entregas Recentes (Fase 2.0 - UI Redesign + Architecture)
+- ✅ **UI Architecture Refactoring (Clean Architecture)**:
+  - Estrutura modular: 20+ arquivos organizados em camadas
+  - Design System: `tokens.slint` + `primitives.slint`
+  - 8 Components reutilizáveis: Toolbar, PhotoGrid, Filmstrip, Histogram, RatingWidget, ColorLabels, SliderControl, ImageViewer
+  - 8 Panels compostos: Navigator, Catalog, Collections, QuickDevelop, Metadata, Presets, History, BasicAdjustments
+  - 2 Views principais: LibraryView, DevelopView
+  - Fluxo de dados unidirecional: Components → Panels → Views → Main → Rust callbacks
+  - Documentação completa em `docs/06-UI-ARCHITECTURE.md`
+  
 - ✅ **Design System Completo**: Tokens de cor, tipografia, espaçamento, sombras, animações
 - ✅ **Componentes Premium**: 
   - PhotoCard com hover effects e overlays de rating/label
