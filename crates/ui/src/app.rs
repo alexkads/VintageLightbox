@@ -116,14 +116,23 @@ impl eframe::App for VintageLightboxApp {
 
         // Load image for selected photo if needed
         if let Some(photo_id) = &self.state.selected_photo_id.clone() {
-            if self.state.detail_image.is_none() {
+            // Check if we need to load a new image
+            let needs_reload = self.state.loaded_photo_id.as_ref() != Some(photo_id);
+            
+            if needs_reload {
+                // Clear previous image first
+                self.state.detail_image = None;
+                
                 // Find the photo in our list
                 if let Some(photo) = self.state.photos.iter().find(|p| &p.id == photo_id) {
-                    // Load image synchronously for now (TODO: make async)
+                    // Load image
                     if let Ok(img) = image::open(&photo.path) {
-                        // Calculate histogram
+                        // OPTIMIZATION: Resize to preview resolution (1920x1080) for fast loading
+                        let preview_img = crate::image_processing::ImageProcessor::resize_for_preview(&img, 1920);
+                        
+                        // Calculate histogram from preview
                         self.state.histogram_data = Some(
-                            crate::components::histogram::HistogramData::from_image(&img)
+                            crate::components::histogram::HistogramData::from_image(&preview_img)
                         );
                         
                         // Apply edits if they exist
@@ -131,19 +140,20 @@ impl eframe::App for VintageLightboxApp {
                         let contrast = photo.edit_contrast.unwrap_or(1.0);
                         
                         let processed = if exposure != 0.0 || contrast != 1.0 {
-                            crate::image_processing::ImageProcessor::process_image(&img, exposure, contrast)
+                            crate::image_processing::ImageProcessor::process_image(&preview_img, exposure, contrast)
                         } else {
-                            img
+                            preview_img
                         };
                         
-                        // Create texture
+                        // Create texture with unique name per photo
                         let texture = crate::image_processing::ImageProcessor::load_texture(
                             ctx,
-                            format!("detail_{}", photo_id),
-                            &processed,
+                            format!("photo_{}", photo_id),
+                            &processed
                         );
                         
                         self.state.detail_image = Some(texture);
+                        self.state.loaded_photo_id = Some(photo_id.clone());
                     }
                 }
             }
