@@ -38,8 +38,6 @@ pub struct AppState {
     // ============================================
     pub photos: Vec<PhotoViewModel>,
     pub selected_photo_id: Option<String>,
-    /// ID of the photo currently loaded in detail_image (for change detection)
-    pub loaded_photo_id: Option<String>,
 
     // ============================================
     // Detail View
@@ -86,7 +84,6 @@ impl AppState {
             current_view: CurrentView::Library,
             photos: Vec::new(),
             selected_photo_id: None,
-            loaded_photo_id: None,
             detail_image: None,
             detail_metadata: None,
             histogram_data: None,

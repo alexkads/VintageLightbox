@@ -3,6 +3,7 @@
 
 use eframe::egui;
 use std::sync::Arc;
+use tokio::sync::mpsc;
 
 use adapters::controllers::*;
 use adapters::view_models::PhotoViewModel;
@@ -39,9 +40,9 @@ pub struct VintageLightboxApp {
 
     // ============================================
     // Async Communication
-    // ============================================    // Async photo loading
-    photo_receiver: tokio::sync::mpsc::Receiver<Result<Vec<PhotoViewModel>, String>>,
-    photo_sender: tokio::sync::mpsc::Sender<Result<Vec<PhotoViewModel>, String>>,
+    // ============================================
+    photo_receiver: mpsc::Receiver<Result<Vec<PhotoViewModel>, String>>,
+    photo_sender: mpsc::Sender<Result<Vec<PhotoViewModel>, String>>,
 }
 
 impl VintageLightboxApp {
@@ -59,7 +60,7 @@ impl VintageLightboxApp {
         Theme::apply_to_context(&cc.egui_ctx);
 
         // Create channel for async photo loading
-        let (photo_sender, photo_receiver) = tokio::sync::mpsc::channel(1);
+        let (photo_sender, photo_receiver) = mpsc::channel(1);
 
         Self {
             state: AppState::new(),
@@ -110,33 +111,19 @@ impl eframe::App for VintageLightboxApp {
             self.state.busy_message.clear();
         }
 
-        // Load photos on first frame if not already loading
-        if self.state.photos.is_empty() && !self.state.is_busy {
-            self.load_photos(ctx);
-        }
-
         // Handle keyboard input
         self.keyboard_handler.handle_input(ctx, &mut self.state, &self.photo_controller);
 
-        // Load image for selected photo if needed (SYNCHRONOUS but fast with resize)
+        // Load image for selected photo if needed
         if let Some(photo_id) = &self.state.selected_photo_id.clone() {
-            // Check if we need to load a new image
-            let needs_reload = self.state.loaded_photo_id.as_ref() != Some(photo_id);
-            
-            if needs_reload {
-                // Clear previous image first
-                self.state.detail_image = None;
-                
+            if self.state.detail_image.is_none() {
                 // Find the photo in our list
                 if let Some(photo) = self.state.photos.iter().find(|p| &p.id == photo_id) {
-                    // Load image
+                    // Load image synchronously for now (TODO: make async)
                     if let Ok(img) = image::open(&photo.path) {
-                        // OPTIMIZATION: Resize to preview resolution (1920x1080) for fast loading
-                        let preview_img = crate::image_processing::ImageProcessor::resize_for_preview(&img);
-                        
-                        // Calculate histogram from preview
+                        // Calculate histogram
                         self.state.histogram_data = Some(
-                            crate::components::histogram::HistogramData::from_image(&preview_img)
+                            crate::components::histogram::HistogramData::from_image(&img)
                         );
                         
                         // Apply edits if they exist
@@ -144,20 +131,19 @@ impl eframe::App for VintageLightboxApp {
                         let contrast = photo.edit_contrast.unwrap_or(1.0);
                         
                         let processed = if exposure != 0.0 || contrast != 1.0 {
-                            crate::image_processing::ImageProcessor::process_image(&preview_img, exposure, contrast)
+                            crate::image_processing::ImageProcessor::process_image(&img, exposure, contrast)
                         } else {
-                            preview_img
+                            img
                         };
                         
-                        // Create texture with unique name per photo
+                        // Create texture
                         let texture = crate::image_processing::ImageProcessor::load_texture(
                             ctx,
-                            format!("photo_{}", photo_id),
-                            &processed
+                            format!("detail_{}", photo_id),
+                            &processed,
                         );
                         
                         self.state.detail_image = Some(texture);
-                        self.state.loaded_photo_id = Some(photo_id.clone());
                     }
                 }
             }
@@ -182,7 +168,6 @@ impl eframe::App for VintageLightboxApp {
                         &mut self.state,
                         &self.editor_controller,
                         &self.export_controller,
-                        &self.photo_controller,
                     );
                 }
             }
@@ -255,7 +240,6 @@ impl VintageLightboxApp {
     fn handle_import(&mut self, ctx: &egui::Context) {
         let import_controller = self.import_controller.clone();
         let library_controller = self.library_controller.clone();
-        let sender = self.photo_sender.clone();
         let ctx = ctx.clone();
 
         // Spawn file dialog
@@ -270,10 +254,10 @@ impl VintageLightboxApp {
                     if let Err(e) = import_controller.import_files(vec![path.to_string()]).await {
                         eprintln!("Failed to import photo: {}", e);
                     } else {
-                        // Reload photos after import using the channel
-                        let result = library_controller.get_all_photos().await;
-                        let _ = sender.send(result).await;
-                        ctx.request_repaint();
+                        // Reload photos after import
+                        if let Ok(_photos) = library_controller.get_all_photos().await {
+                            ctx.request_repaint();
+                        }
                     }
                 }
             }
