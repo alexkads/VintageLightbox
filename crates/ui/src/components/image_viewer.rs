@@ -37,6 +37,7 @@ impl ImageViewer {
 
         // Draw image if available
         if let Some(texture) = &state.detail_image {
+            println!("DEBUG ImageViewer: Rendering texture. ID: {:?}, Size: {:?}", texture.id(), texture.size());
             let texture_size = Vec2::new(texture.size()[0] as f32, texture.size()[1] as f32);
 
             // Calculate scaled size
@@ -50,6 +51,7 @@ impl ImageViewer {
             let center = rect.center() + state.pan_offset;
             let img_rect = Rect::from_center_size(center, zoomed_size);
 
+            println!("DEBUG ImageViewer: Painting. img_rect: {:?}, zoomed_size: {:?}", img_rect, zoomed_size);
             egui::Image::new(texture).paint_at(ui, img_rect);
         } else {
             // No image loaded

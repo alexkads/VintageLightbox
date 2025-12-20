@@ -168,6 +168,7 @@ impl eframe::App for VintageLightboxApp {
                         &mut self.state,
                         &self.editor_controller,
                         &self.export_controller,
+                        &self.photo_controller,
                     );
                 }
             }
