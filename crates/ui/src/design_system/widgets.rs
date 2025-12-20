@@ -4,7 +4,7 @@
 
 #![allow(dead_code)]
 
-use egui::{Button, Response, Ui, Vec2, Rounding, Stroke, RichText, Color32, Rect};
+use egui::{Button, Response, Ui, Vec2, CornerRadius, Stroke, RichText, Color32, Rect};
 use super::theme::Theme;
 
 // ============================================
@@ -19,7 +19,7 @@ pub fn primary_button(ui: &mut Ui, text: &str) -> Response {
     )
     .fill(Theme::ACCENT_PRIMARY)
     .min_size(Vec2::new(80.0, 32.0))
-    .rounding(Rounding::same(Theme::RADIUS_MD));
+    .corner_radius(CornerRadius::same(Theme::RADIUS_MD as u8));
 
     ui.add(button)
 }
@@ -37,7 +37,7 @@ pub fn secondary_button(ui: &mut Ui, text: &str) -> Response {
     .fill(Theme::BG_ACTIVE)
     .stroke(Stroke::new(1.0, Theme::BORDER_DEFAULT))
     .min_size(Vec2::new(80.0, 32.0))
-    .rounding(Rounding::same(Theme::RADIUS_MD));
+    .corner_radius(CornerRadius::same(Theme::RADIUS_MD as u8));
 
     ui.add(button)
 }
@@ -58,7 +58,7 @@ pub fn icon_button_sized(ui: &mut Ui, icon: &str, icon_size: f32) -> Response {
     )
     .fill(Theme::BG_ELEVATED)
     .min_size(Vec2::new(40.0, 40.0))
-    .rounding(Rounding::same(Theme::RADIUS_FULL));
+    .corner_radius(CornerRadius::same(255));
 
     ui.add(button)
 }
@@ -87,7 +87,7 @@ pub fn nav_button(ui: &mut Ui, text: &str, active: bool) -> Response {
     )
     .fill(bg_color)
     .min_size(Vec2::new(80.0, 32.0))
-    .rounding(Rounding::same(Theme::RADIUS_MD));
+    .corner_radius(CornerRadius::same(Theme::RADIUS_MD as u8));
 
     ui.add(button)
 }
@@ -113,7 +113,7 @@ pub fn nav_button_with_icon(ui: &mut Ui, icon: &str, text: &str, active: bool) -
     )
     .fill(bg_color)
     .min_size(Vec2::new(80.0, 32.0))
-    .rounding(Rounding::same(Theme::RADIUS_MD));
+    .corner_radius(CornerRadius::same(Theme::RADIUS_MD as u8));
 
     ui.add(button)
 }
@@ -202,7 +202,7 @@ pub fn menu_item_with_indent(ui: &mut Ui, text: &str, selected: bool, indent: f3
 pub fn card(ui: &mut Ui, add_contents: impl FnOnce(&mut Ui)) {
     egui::Frame::none()
         .fill(Theme::BG_APP)
-        .rounding(Rounding::same(Theme::RADIUS_MD))
+        .corner_radius(CornerRadius::same(Theme::RADIUS_MD as u8))
         .show(ui, add_contents);
 }
 

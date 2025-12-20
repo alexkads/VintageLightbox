@@ -159,13 +159,11 @@ impl Theme {
         // Hyperlink color
         visuals.hyperlink_color = Self::ACCENT_PRIMARY;
 
-        // Window settings
-        visuals.window_rounding = Self::RADIUS_MD.into();
         // Flat shadows for minimalist look
         visuals.window_shadow = egui::epaint::Shadow {
-            offset: egui::vec2(0.0, 0.0),
-            blur: 0.0,
-            spread: 0.0,
+            offset: [0, 0],
+            blur: 0,
+            spread: 0,
             color: egui::Color32::TRANSPARENT,
         };
 

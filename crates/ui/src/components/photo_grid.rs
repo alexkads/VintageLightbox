@@ -230,6 +230,7 @@ impl PhotoGrid {
                 rect,
                 Theme::RADIUS_MD,
                 egui::Stroke::new(2.0, Theme::ACCENT_PRIMARY),
+                egui::StrokeKind::Outside,
             );
         }
     }

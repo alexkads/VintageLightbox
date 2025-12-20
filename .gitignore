@@ -22,6 +22,10 @@ coverage/
 tarpaulin-report.html
 cobertura.xml
 
+# egui_kittest snapshots
+**/tests/snapshots/**/*.diff.png
+**/tests/snapshots/**/*.new.png
+
 # Benchmarks
 criterion/
 
