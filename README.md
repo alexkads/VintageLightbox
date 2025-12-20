@@ -1,6 +1,6 @@
-# VintageLightbox
+# VintageLightbox 📷
 
-Clone profissional do Adobe Lightroom desenvolvido em Rust com interface Slint.
+Clone profissional do Adobe Lightroom desenvolvido em Rust com interface egui.
 
 ## 📸 Sobre o Projeto
 
@@ -28,7 +28,7 @@ Este projeto segue **Clean Architecture** e **Test-Driven Development (TDD)**:
 ## 🚀 Tecnologias
 
 - **Linguagem**: Rust (performance e segurança)
-- **Interface**: Slint UI (nativa e multiplataforma)
+- **Interface**: egui (nativa e multiplataforma)
 - **RAW Processing**: LibRaw/rawler
 - **Database**: SQLite
 - **Testing**: cargo test, mockall, proptest, criterion
@@ -128,7 +128,7 @@ VintageLightbox/
 ├── crates/
 │   ├── vintage-core/        # Lógica de domínio
 │   ├── vintage-raw/         # Processamento RAW
-│   ├── vintage-ui/          # Interface Slint
+│   ├── vintage-ui/          # Interface egui
 │   ├── vintage-import/      # Módulo de importação
 │   ├── vintage-export/      # Módulo de exportação
 │   └── vintage-database/    # Camada de dados
@@ -210,7 +210,7 @@ Este projeto é inspirado em:
 - DarkTable
 - RawTherapee
 
-Agradecimentos às comunidades de Rust, Slint e processamento de imagens open source.
+Agradecimentos às comunidades de Rust, egui e processamento de imagens open source.
 
 ## 📞 Contato
 

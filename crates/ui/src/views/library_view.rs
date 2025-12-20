@@ -1,0 +1,149 @@
+// Library View
+// Three-panel layout with photo grid in the center
+
+use egui::Ui;
+use crate::state::AppState;
+use crate::design_system::theme::Theme;
+use crate::components::photo_grid::PhotoGrid;
+
+pub struct LibraryView {
+    photo_grid: PhotoGrid,
+}
+
+impl LibraryView {
+    pub fn new() -> Self {
+        Self {
+            photo_grid: PhotoGrid::new(),
+        }
+    }
+
+    pub fn show(&mut self, ui: &mut Ui, state: &mut AppState, ctx: &egui::Context) {
+        // Left sidebar
+        egui::SidePanel::left("left_sidebar")
+            .resizable(false)
+            .exact_width(Theme::SIDEBAR_WIDTH)
+            .show_inside(ui, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    self.show_left_sidebar(ui, state);
+                });
+            });
+
+        // Right sidebar
+        egui::SidePanel::right("right_sidebar")
+            .resizable(false)
+            .exact_width(Theme::PANEL_WIDTH)
+            .show_inside(ui, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    self.show_right_sidebar(ui, state);
+                });
+            });
+
+        // Center - Photo grid
+        egui::CentralPanel::default().show_inside(ui, |ui| {
+            self.photo_grid.show(ui, state, ctx);
+        });
+
+        // Bottom filmstrip
+        egui::TopBottomPanel::bottom("filmstrip")
+            .exact_height(Theme::FILMSTRIP_HEIGHT)
+            .show_inside(ui, |ui| {
+                crate::components::filmstrip::Filmstrip::show(ui, state);
+            });
+    }
+
+    fn show_left_sidebar(&self, ui: &mut Ui, _state: &AppState) {
+        use crate::design_system::widgets;
+
+        // Navigator Panel
+        widgets::section_title(ui, "Navigator");
+        ui.add_space(Theme::SPACE_SM);
+        ui.vertical(|ui| {
+            ui.set_height(140.0);
+            ui.label(
+                egui::RichText::new("Preview")
+                    .size(Theme::FONT_SM)
+                    .color(Theme::TEXT_MUTED)
+            );
+        });
+
+        ui.add_space(Theme::SPACE_LG);
+
+        // Catalog Panel
+        widgets::section_title(ui, "Catalog");
+        ui.add_space(Theme::SPACE_SM);
+
+        if widgets::menu_item(ui, "All Photographs", true).clicked() {
+            // TODO: Filter to show all photos
+        }
+
+        if widgets::menu_item(ui, "Quick Collection", false).clicked() {
+            // TODO: Filter to quick collection
+        }
+
+        ui.add_space(Theme::SPACE_LG);
+
+        // Collections Panel
+        widgets::section_title(ui, "Collections");
+        ui.add_space(Theme::SPACE_SM);
+
+        if widgets::secondary_button(ui, "+ Create Collection").clicked() {
+            // TODO: Create new collection
+        }
+    }
+
+    fn show_right_sidebar(&self, ui: &mut Ui, state: &AppState) {
+        use crate::design_system::widgets;
+        use crate::components::histogram::Histogram;
+
+        // Histogram
+        Histogram::show(ui, None);
+        ui.add_space(Theme::SPACE_MD);
+
+        // Quick Develop Panel
+        widgets::section_title(ui, "Quick Develop");
+        ui.add_space(Theme::SPACE_SM);
+
+        if let Some(photo) = state.get_current_photo() {
+            // Rating
+            ui.label(
+                egui::RichText::new("Rating")
+                    .size(Theme::FONT_SM)
+                    .color(Theme::TEXT_MUTED)
+            );
+            crate::components::rating_widget::RatingWidget::show_readonly(
+                ui,
+                photo.rating,
+                16.0
+            );
+
+            ui.add_space(Theme::SPACE_MD);
+
+            // Color Labels
+            ui.label(
+                egui::RichText::new("Color Label")
+                    .size(Theme::FONT_SM)
+                    .color(Theme::TEXT_MUTED)
+            );
+            crate::components::color_labels::ColorLabels::show(ui, &None, false);
+        }
+
+        ui.add_space(Theme::SPACE_XL);
+
+        // Metadata Panel
+        widgets::section_title(ui, "Metadata");
+        ui.add_space(Theme::SPACE_SM);
+
+        if let Some(photo) = state.get_current_photo() {
+            widgets::label_text(ui, &format!("File: {}", photo.name));
+            widgets::label_text(ui, &format!("Date: {}", photo.date));
+            widgets::label_text(ui, &format!("Camera: {}", photo.camera));
+            widgets::label_text(ui, &format!("Exposure: {}", photo.exposure));
+        }
+    }
+}
+
+impl Default for LibraryView {
+    fn default() -> Self {
+        Self::new()
+    }
+}

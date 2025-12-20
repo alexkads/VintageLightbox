@@ -1,605 +1,112 @@
-slint::include_modules!();
+// VintageLightbox - Photo Management Application
+// Main entry point using eframe (egui)
 
+mod app;
+mod state;
+mod design_system;
+mod image_processing;
+mod keyboard;
+mod components;
+mod views;
+
+use std::sync::Arc;
 
 use infrastructure::{
     create_pool, run_migrations,
     PhotoRepositoryImpl, ExifReader,
     ThumbnailGeneratorImpl, ImageExporterImpl,
 };
-    use use_cases::{ImportPhotoUseCase, SavePhotoEditsUseCase, ExportPhotoUseCase, RatePhotoUseCase, SetColorLabelUseCase};
-    use adapters::controllers::{ImportController, EditorController, ExportController, PhotoController};
-    use adapters::view_models::PhotoViewModel;
-    use std::path::Path;
+use use_cases::{
+    ImportPhotoUseCase, SavePhotoEditsUseCase, ExportPhotoUseCase,
+    RatePhotoUseCase, SetColorLabelUseCase,
+};
+use adapters::controllers::{
+    ImportController, LibraryController, EditorController,
+    ExportController, PhotoController,
+};
 
-    #[tokio::main]
-    async fn main() -> Result<(), Box<dyn std::error::Error>> {
-        // 1. Setup Infrastructure
-        // Usar arquivo local para persistência
-        let database_url = "sqlite:vintage_lightbox.db?mode=rwc"; 
-        let pool = create_pool(database_url).await?;
-        
-        // Executar migrations ao iniciar
-        run_migrations(&pool).await?;
-    
-        let photo_repository = Arc::new(PhotoRepositoryImpl::new(pool));
-        let metadata_extractor = Arc::new(ExifReader);
-        let thumbnail_generator = Arc::new(ThumbnailGeneratorImpl::new());
-        let image_exporter = Arc::new(ImageExporterImpl::new());
-    
-        // 2. Setup Use Cases
-        let import_photo_use_case = Arc::new(ImportPhotoUseCase::new(
-            photo_repository.clone(), 
-            metadata_extractor,
-            thumbnail_generator
-        ));
-        let save_photo_edits_use_case = Arc::new(SavePhotoEditsUseCase::new(
-            photo_repository.clone()
-        ));
-        let export_photo_use_case = Arc::new(ExportPhotoUseCase::new(
-             photo_repository.clone(),
-             image_exporter
-        ));
-        let rate_photo_use_case = Arc::new(RatePhotoUseCase::new(photo_repository.clone()));
-        let set_color_label_use_case = Arc::new(SetColorLabelUseCase::new(photo_repository.clone()));
-    
-        // 3. Setup Controllers
-        let import_controller = Arc::new(ImportController::new(import_photo_use_case.clone()));
-        let library_controller = Arc::new(adapters::controllers::LibraryController::new(photo_repository.clone()));
-        let editor_controller = Arc::new(EditorController::new(save_photo_edits_use_case.clone()));
-        let export_controller = Arc::new(ExportController::new(export_photo_use_case.clone()));
-        let photo_controller = Arc::new(PhotoController::new(rate_photo_use_case, set_color_label_use_case));
+use app::VintageLightboxApp;
 
-    // 4. Setup UI
-    let main_window = MainWindow::new()?;
-    let main_window_weak = main_window.as_weak();
+#[tokio::main]
+async fn main() -> Result<(), eframe::Error> {
+    // ============================================
+    // 1. Setup Infrastructure Layer
+    // ============================================
+    let database_url = "sqlite:vintage_lightbox.db?mode=rwc";
+    let pool = create_pool(database_url).await
+        .expect("Failed to create database pool");
 
-    // State to hold photos for detail view lookup
-    let photos_state = Arc::new(std::sync::Mutex::new(Vec::<PhotoViewModel>::new()));
+    // Run migrations
+    run_migrations(&pool).await
+        .expect("Failed to run database migrations");
 
-    // Initial load of photos
-    
-    // --- Image Processing State ---
-    use std::sync::{Arc, Mutex};
-    // Active full-res image (loaded in memory for editing)
-    let active_image: Arc<Mutex<Option<image::DynamicImage>>> = Arc::new(Mutex::new(None));
-    
-    // Core processing logic returning Send-safe RgbaImage
-    fn process_image_data(img: &image::DynamicImage, exposure: f32, contrast: f32) -> image::RgbaImage {
-        // 1. Exposure (Brighten)
-        let brightened = if exposure != 0.0 {
-            image::imageops::brighten(img, (exposure * 10.0) as i32)
-        } else {
-            img.to_rgba8()
-        };
+    let photo_repository = Arc::new(PhotoRepositoryImpl::new(pool));
+    let metadata_extractor = Arc::new(ExifReader);
+    let thumbnail_generator = Arc::new(ThumbnailGeneratorImpl::new());
+    let image_exporter = Arc::new(ImageExporterImpl::new());
 
-        // 2. Contrast
-        let contrasted = if contrast != 1.0 {
-            image::imageops::contrast(&brightened, contrast)
-        } else {
-            brightened
-        };
-        contrasted
-    }
+    // ============================================
+    // 2. Setup Use Cases Layer
+    // ============================================
+    let import_photo_use_case = Arc::new(ImportPhotoUseCase::new(
+        photo_repository.clone(),
+        metadata_extractor,
+        thumbnail_generator,
+    ));
+    let save_photo_edits_use_case = Arc::new(SavePhotoEditsUseCase::new(
+        photo_repository.clone()
+    ));
+    let export_photo_use_case = Arc::new(ExportPhotoUseCase::new(
+        photo_repository.clone(),
+        image_exporter,
+    ));
+    let rate_photo_use_case = Arc::new(RatePhotoUseCase::new(
+        photo_repository.clone()
+    ));
+    let set_color_label_use_case = Arc::new(SetColorLabelUseCase::new(
+        photo_repository.clone()
+    ));
 
-    // Helper to convert to Slint Image
-    fn image_to_slint(buffer: image::RgbaImage) -> slint::Image {
-        let pixel_buffer = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(
-            buffer.as_raw(),
-            buffer.width(),
-            buffer.height(),
-        );
-        slint::Image::from_rgba8(pixel_buffer)
-    }
+    // ============================================
+    // 3. Setup Controllers (Adapters Layer)
+    // ============================================
+    let import_controller = Arc::new(ImportController::new(import_photo_use_case));
+    let library_controller = Arc::new(LibraryController::new(photo_repository));
+    let editor_controller = Arc::new(EditorController::new(save_photo_edits_use_case));
+    let export_controller = Arc::new(ExportController::new(export_photo_use_case));
+    let photo_controller = Arc::new(PhotoController::new(
+        rate_photo_use_case,
+        set_color_label_use_case,
+    ));
 
-    // Legacy helper for synchronous calls
-    fn process_image(img: &image::DynamicImage, exposure: f32, contrast: f32) -> slint::Image {
-        let data = process_image_data(img, exposure, contrast);
-        image_to_slint(data)
-    }
+    // ============================================
+    // 4. Launch eframe Application
+    // ============================================
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([1400.0, 900.0])
+            .with_min_inner_size([800.0, 600.0])
+            .with_title("VintageLightbox"),
+        ..Default::default()
+    };
 
-    let active_image_for_nav = active_image.clone();
+    eframe::run_native(
+        "VintageLightbox",
+        options,
+        Box::new(move |cc| {
+            let mut app = VintageLightboxApp::new(
+                cc,
+                import_controller,
+                library_controller.clone(),
+                editor_controller,
+                export_controller,
+                photo_controller,
+            );
 
-    {
-        let library_controller = library_controller.clone();
-        let main_window_weak = main_window_weak.clone();
-        let photos_state = photos_state.clone();
+            // Load photos on startup
+            app.load_photos(&cc.egui_ctx);
 
-        tokio::spawn(async move {
-            match library_controller.get_all_photos().await {
-                Ok(view_models) => {
-                     // Update state
-                     if let Ok(mut photos) = photos_state.lock() {
-                         *photos = view_models.clone();
-                     }
-
-                     let _ = slint::invoke_from_event_loop(move || {
-                        if let Some(main_window) = main_window_weak.upgrade() {
-                            let rows: Vec<RowData> = view_models.chunks(5).map(|chunk| {
-                                let tiles: Vec<TileData> = chunk.iter().map(|vm| {
-                                    let image = if let Some(path) = &vm.thumbnail_path {
-                                        slint::Image::load_from_path(Path::new(path)).unwrap_or_default()
-                                    } else {
-                                        slint::Image::default()
-                                    };
-                                    
-                                    TileData {
-                                        id: slint::SharedString::from(&vm.id),
-                                        name: slint::SharedString::from(&vm.name),
-                                        image,
-                                        rating: vm.rating,
-                                        color_label: slint::SharedString::from(""),
-                                    }
-                                }).collect();
-                                
-                                RowData {
-                                    tiles: slint::ModelRc::from(std::rc::Rc::new(slint::VecModel::from(tiles)))
-                                }
-                            }).collect();
-                            
-                            let model = std::rc::Rc::new(slint::VecModel::from(rows));
-                            main_window.set_grid_model(slint::ModelRc::from(model));
-                        }
-                    });
-                }
-                Err(e) => eprintln!("Failed to load photos: {}", e),
-            }
-        });
-    }
-
-    let controller = import_controller.clone();
-    let library_controller_for_import = library_controller.clone();
-    let main_window_weak_for_import = main_window.as_weak();
-    let photos_state_for_import = photos_state.clone();
-
-    main_window.on_import_clicked(move || {
-        let controller = controller.clone();
-        let library_controller = library_controller_for_import.clone();
-        let main_window_weak = main_window_weak_for_import.clone();
-        let photos_state = photos_state_for_import.clone();
-        
-        tokio::spawn(async move {
-            let file = rfd::AsyncFileDialog::new()
-                .add_filter("Images", &["jpg", "png", "raw", "cr2", "nef"])
-                .pick_file()
-                .await;
-
-            if let Some(file_handle) = file {
-                #[cfg(not(target_arch = "wasm32"))]
-                let path_str = file_handle.path().to_string_lossy().to_string();
-                
-                // Set Busy
-                let mw_weak = main_window_weak.clone();
-                let _ = slint::invoke_from_event_loop(move || {
-                    if let Some(ui) = mw_weak.upgrade() {
-                        ui.set_is_busy(true);
-                        ui.set_busy_message(slint::SharedString::from("Importing photos..."));
-                    }
-                });
-
-                match controller.import_files(vec![path_str]).await {
-                    Ok(_) => {
-                        match library_controller.get_all_photos().await {
-                            Ok(view_models) => {
-                                if let Ok(mut photos) = photos_state.lock() {
-                                    *photos = view_models.clone();
-                                }
-
-                                let _ = slint::invoke_from_event_loop(move || {
-                                    if let Some(main_window) = main_window_weak.upgrade() {
-                                        main_window.set_is_busy(false); // Unset Busy
-                                        let rows: Vec<RowData> = view_models.chunks(5).map(|chunk| {
-                                            let tiles: Vec<TileData> = chunk.iter().map(|vm| {
-                                                let image = if let Some(path) = &vm.thumbnail_path {
-                                                    slint::Image::load_from_path(Path::new(path)).unwrap_or_default()
-                                                } else {
-                                                    slint::Image::default()
-                                                };
-                                                
-                                                TileData {
-                                                    id: slint::SharedString::from(&vm.id),
-                                                    name: slint::SharedString::from(&vm.name),
-                                                    image,
-                                                    rating: vm.rating,
-                                                    color_label: slint::SharedString::from(""),
-                                                }
-                                            }).collect();
-                                            
-                                            RowData {
-                                                tiles: slint::ModelRc::from(std::rc::Rc::new(slint::VecModel::from(tiles)))
-                                            }
-                                        }).collect();
-                                        
-                                        let model = std::rc::Rc::new(slint::VecModel::from(rows));
-                                        main_window.set_grid_model(slint::ModelRc::from(model));
-                                    }
-                                });
-                            }
-                            Err(e) => {
-                                eprintln!("Failed to refresh photos: {}", e);
-                                let _ = slint::invoke_from_event_loop(move || {
-                                    if let Some(ui) = main_window_weak.upgrade() { ui.set_is_busy(false); }
-                                });
-                            }
-                        }
-                    },
-                    Err(e) => {
-                        eprintln!("Import failed: {}", e);
-                         let _ = slint::invoke_from_event_loop(move || {
-                            if let Some(ui) = main_window_weak.upgrade() { ui.set_is_busy(false); }
-                        });
-                    }
-                }
-            }
-        });
-    });
-
-    let main_window_weak_for_tile = main_window.as_weak();
-    let photos_state_for_tile = photos_state.clone();
-    let active_image_for_tile = active_image.clone(); // Added clone
-    main_window.on_tile_clicked(move |id_str| {
-        let id_string = id_str.as_str().to_string();
-        if let Ok(photos) = photos_state_for_tile.lock() {
-            if let Some(photo) = photos.iter().find(|p| p.id == id_string) {
-                let path_str = photo.path.clone();
-                let thumbnail_path_str = photo.thumbnail_path.clone();
-                
-                let id = photo.id.clone();
-                // Metadata
-                let name = slint::SharedString::from(&photo.name);
-                let date = slint::SharedString::from(&photo.date);
-                let camera = slint::SharedString::from(&photo.camera);
-                let exposure = slint::SharedString::from(&photo.exposure);
-                let rating = slint::SharedString::from(format!("Rating: {}/5", photo.rating));
-
-                // Extract edits before dropping lock
-                let edit_exposure_val = photo.edit_exposure.unwrap_or(0.0);
-                let edit_contrast_val = photo.edit_contrast.unwrap_or(1.0);
-
-                // Drop lock before loading image
-                drop(photos);
-
-                let image_path = Path::new(&path_str);
-                
-                // Load using image crate for editing support
-                let image = match image::open(image_path) {
-                    Ok(dyn_img) => {
-                         // Resize for performance (Preview Mode)
-                         // Keep aspect ratio, max width/height 1280
-                         let preview_img = dyn_img.resize(1280, 1280, image::imageops::FilterType::Triangle);
-
-                         // Save to active_image state
-                         if let Ok(mut active) = active_image_for_tile.lock() {
-                             *active = Some(preview_img.clone());
-                         }
-                         
-                         // Apply edits if they exist
-                         process_image(&preview_img, edit_exposure_val, edit_contrast_val)
-                    },
-                    Err(_) => {
-                         // Fallback to thumbnail or default
-                         if let Some(thumb) = &thumbnail_path_str {
-                            slint::Image::load_from_path(Path::new(thumb)).unwrap_or_default()
-                        } else {
-                            slint::Image::default()
-                        }
-                    }
-                };
-
-                if let Some(ui) = main_window_weak_for_tile.upgrade() {
-                    ui.set_detail_id(slint::SharedString::from(id)); // Use cloned ID
-                    ui.set_detail_image(image);
-                    ui.set_detail_name(name);
-                    ui.set_detail_date(date);
-                    ui.set_detail_camera(camera);
-                    ui.set_detail_exposure(exposure);
-                    ui.set_detail_rating(rating);
-                    
-                    // Initialize edit sliders
-                    ui.set_active_exposure(edit_exposure_val);
-                    ui.set_active_contrast(edit_contrast_val);
-                    
-                    ui.set_current_view(1);
-                }
-            }
-        }
-    });
-
-    // Rating Callback
-    let photos_state_for_rate = photos_state.clone();
-    let main_window_weak_for_rate = main_window.as_weak();
-    let photo_controller_for_rate = photo_controller.clone();
-    
-    main_window.on_rate_photo(move |id, rating| {
-        let id_string = id.as_str().to_string();
-        let controller = photo_controller_for_rate.clone();
-        let photos_state = photos_state_for_rate.clone();
-        let ui_weak = main_window_weak_for_rate.clone();
-        
-        // Optimistic UI update
-        if let Some(ui) = ui_weak.upgrade() {
-            ui.set_detail_rating(slint::SharedString::from(format!("Rating: {}/5", rating)));
-        }
-        
-        // Update in-memory state
-        if let Ok(mut photos) = photos_state.lock() {
-            if let Some(photo) = photos.iter_mut().find(|p| p.id == id_string) {
-                photo.rating = rating;
-            }
-        }
-        
-        // Persist to database
-        tokio::spawn(async move {
-            if let Err(e) = controller.rate_photo(&id_string, rating).await {
-                eprintln!("Failed to rate photo: {}", e);
-                // TODO: Revert optimistic update on error
-            } else {
-                println!("Photo rated successfully: id={} rating={}", id_string, rating);
-            }
-        });
-    });
-
-    // Color Label Callback
-    let photos_state_for_label = photos_state.clone();
-    let photo_controller_for_label = photo_controller.clone();
-    
-    main_window.on_set_color_label(move |id, label| {
-        let id_string = id.as_str().to_string();
-        let label_string = label.as_str().to_string();
-        let controller = photo_controller_for_label.clone();
-        let photos_state = photos_state_for_label.clone();
-        
-        // Update in-memory state
-        if let Ok(mut photos) = photos_state.lock() {
-            if let Some(_photo) = photos.iter_mut().find(|p| p.id == id_string) {
-                // Store color label in view model (we'll need to add this field)
-                // For now, just log it
-                println!("Color label set in memory: id={} label={}", id_string, label_string);
-            }
-        }
-        
-        // Persist to database
-        tokio::spawn(async move {
-            if let Err(e) = controller.set_color_label(&id_string, &label_string).await {
-                eprintln!("Failed to set color label: {}", e);
-            } else {
-                println!("Color label set successfully: id={} label={}", id_string, label_string);
-            }
-        });
-    });
-
-
-    // --- Callbacks ---
-
-    // Updated Navigation Callback (loads active_image)
-    let photos_state_for_nav = photos_state.clone();
-    let main_window_weak_for_nav = main_window.as_weak();
-    
-    main_window.on_navigate(move |direction| {
-        // ... (existing navigation logic to find target_photo) ...
-        // Re-implementing logic to include saving to active_image
-        let mut target_photo: Option<PhotoViewModel> = None;
-
-        if let Ok(photos) = photos_state_for_nav.lock() {
-             if let Some(current_ui) = main_window_weak_for_nav.upgrade() {
-                 let current_id = current_ui.get_detail_id().as_str().to_string();
-                 if let Some(pos) = photos.iter().position(|p| p.id == current_id) {
-                     let new_pos = if direction > 0 { pos + 1 } else { if pos > 0 { pos - 1 } else { 0 } };
-                     if new_pos < photos.len() {
-                         target_photo = Some(photos[new_pos].clone()); // Clone minimal data
-                     }
-                 }
-            }
-        }
-        
-        if let Some(photo) = target_photo {
-             let path_str = photo.path.clone();
-             let id = photo.id.clone();
-             // Metadata update
-             if let Some(ui) = main_window_weak_for_nav.upgrade() {
-                ui.set_detail_id(slint::SharedString::from(id));
-                ui.set_detail_name(slint::SharedString::from(photo.name));
-                ui.set_detail_date(slint::SharedString::from(photo.date));
-                ui.set_detail_camera(slint::SharedString::from(photo.camera));
-                ui.set_detail_exposure(slint::SharedString::from(photo.exposure));
-                ui.set_detail_rating(slint::SharedString::from(format!("Rating: {}/5", photo.rating)));
-                
-                // Initialize edit sliders
-                let edit_exposure = photo.edit_exposure.unwrap_or(0.0);
-                let edit_contrast = photo.edit_contrast.unwrap_or(1.0);
-                ui.set_active_exposure(edit_exposure);
-                ui.set_active_contrast(edit_contrast);
-             }
-
-             // Load Image
-             let image_path = Path::new(&path_str);
-             // Use image crate to load DynamicImage for processing
-             match image::open(image_path) {
-                 Ok(dyn_img) => {
-                     // Resize for performance (Preview Mode)
-                     let preview_img = dyn_img.resize(1280, 1280, image::imageops::FilterType::Triangle);
-
-                     // Save to active_image state
-                     if let Ok(mut active) = active_image_for_nav.lock() {
-                         *active = Some(preview_img.clone());
-                     }
-                     // Apply edits if they exist
-                     let edit_exposure = photo.edit_exposure.unwrap_or(0.0);
-                     let edit_contrast = photo.edit_contrast.unwrap_or(1.0);
-                     
-                     let slint_img = process_image(&preview_img, edit_exposure, edit_contrast);
-                     
-                     if let Some(ui) = main_window_weak_for_nav.upgrade() {
-                         ui.set_detail_image(slint_img);
-                     }
-                 },
-                 Err(e) => {
-                     println!("Error loading image for editing: {:?}", e);
-                     // Fallback to thumbnail or default if load fails
-                     if let Some(ui) = main_window_weak_for_nav.upgrade() {
-                        ui.set_detail_image(slint::Image::default()); 
-                     }
-                 }
-             }
-        }
-    });
-
-    // Save Edits Callback
-    let editor_controller_clone = editor_controller.clone();
-    let main_window_weak_for_save = main_window.as_weak();
-    main_window.on_save_edits(move |id, exposure, contrast| {
-        let controller = editor_controller_clone.clone();
-        let ui_weak = main_window_weak_for_save.clone();
-        
-        // optimistic updates? No, backend first.
-        let _ = slint::invoke_from_event_loop(move || {
-             if let Some(ui) = ui_weak.upgrade() {
-                 ui.set_is_busy(true);
-                 ui.set_busy_message(slint::SharedString::from("Saving edits..."));
-             }
-        });
-        
-        let ui_weak = main_window_weak_for_save.clone();
-        tokio::spawn(async move {
-            if let Err(e) = controller.save_edits(id.clone().into(), exposure, contrast).await {
-                eprintln!("Error saving edits: {}", e);
-            } else {
-                println!("Edits saved for photo {}", id);
-            }
-            
-            let _ = slint::invoke_from_event_loop(move || {
-                 if let Some(ui) = ui_weak.upgrade() {
-                     ui.set_is_busy(false);
-                 }
-            });
-        });
-    });
-
-    let export_controller = export_controller.clone();
-    let main_window_weak_for_export = main_window.as_weak();
-    main_window.on_export_clicked(move |id| {
-        let controller = export_controller.clone();
-        let ui_weak_for_export = main_window_weak_for_export.clone();
-        tokio::spawn(async move {
-            // Open Save Dialog
-            if let Some(path) = rfd::FileDialog::new()
-                .add_filter("JPEG Image", &["jpg", "jpeg"])
-                .set_file_name("export.jpg")
-                .save_file() 
-            {
-                // Set Busy
-                let ui_weak = ui_weak_for_export.clone();
-                let _ = slint::invoke_from_event_loop(move || {
-                    if let Some(ui) = ui_weak.upgrade() {
-                        ui.set_is_busy(true);
-                        ui.set_busy_message(slint::SharedString::from("Exporting JPEG..."));
-                    }
-                });
-
-                let path_str = path.to_string_lossy().to_string();
-                if let Err(e) = controller.export_photo(id.into(), path_str).await {
-                     eprintln!("Error exporting photo: {}", e);
-                } else {
-                     println!("Photo exported successfully to {:?}", path);
-                }
-                
-                // Unset Busy
-                let ui_weak = ui_weak_for_export.clone();
-                let _ = slint::invoke_from_event_loop(move || {
-                    if let Some(ui) = ui_weak.upgrade() { ui.set_is_busy(false); }
-                });
-            }
-        });
-    });
-
-    // --- Debounced Edit Processing ---
-    
-    // Shared state for edit requests
-    struct EditState {
-        exposure: f32,
-        contrast: f32,
-        pending: bool,
-    }
-    
-    let edit_state = Arc::new(Mutex::new(EditState {
-        exposure: 0.0,
-        contrast: 1.0,
-        pending: false,
-    }));
-
-    // Spawn background processor
-    {
-        let edit_state = edit_state.clone();
-        let active_image = active_image.clone();
-        let main_window_weak = main_window.as_weak();
-        
-        tokio::spawn(async move {
-            loop {
-                // Throttle/Debounce interval
-                tokio::time::sleep(std::time::Duration::from_millis(150)).await;
-
-                let (exposure, contrast, should_process) = {
-                    let mut state = edit_state.lock().unwrap();
-                    if state.pending {
-                        state.pending = false; // Reset pending flag
-                        (state.exposure, state.contrast, true)
-                    } else {
-                        (0.0, 1.0, false)
-                    }
-                };
-
-                if should_process {
-                     // Perform processing (CPU bound)
-                     // produce RgbaImage (Send)
-                     let processed_buffer = {
-                         if let Ok(active_opt) = active_image.lock() {
-                             if let Some(img) = active_opt.as_ref() {
-                                 Some(process_image_data(img, exposure, contrast))
-                             } else {
-                                 None
-                             }
-                         } else {
-                             None
-                         }
-                     };
-
-                     if let Some(buffer) = processed_buffer {
-                         let ui_weak = main_window_weak.clone();
-                         let _ = slint::invoke_from_event_loop(move || {
-                             // Convert to Slint Image here (Main Thread)
-                             let img = image_to_slint(buffer);
-                             if let Some(ui) = ui_weak.upgrade() {
-                                 ui.set_detail_image(img);
-                             }
-                         });
-                     }
-                }
-            }
-        });
-    }
-
-    // Apply Edits Callback - Just updates state
-    let edit_state_for_callback = edit_state.clone();
-    main_window.on_apply_edits(move |exposure, contrast| {
-        if let Ok(mut state) = edit_state_for_callback.lock() {
-            state.exposure = exposure;
-            state.contrast = contrast;
-            state.pending = true;
-        }
-    });
-
-    // Update tile_click to also load active_image
-    // ... (This requires updating on_tile_clicked logic similarly to on_navigate)
-
-    let main_window_weak_for_back = main_window.as_weak();
-    main_window.on_back_clicked(move || {
-        if let Some(ui) = main_window_weak_for_back.upgrade() {
-            ui.set_current_view(0); // Switch to Library view
-            ui.set_detail_image(slint::Image::default()); // Clear memory
-        }
-    });
-
-    println!("Starting VintageLightbox UI...");
-    main_window.run()?;
-    
-    Ok(())
+            Ok(Box::new(app))
+        }),
+    )
 }

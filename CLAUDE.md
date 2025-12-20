@@ -36,9 +36,11 @@ VintageLightbox follows **Clean Architecture** with 4 layers as separate crates:
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│  ui (Slint)                                         │
-│  - main.rs: Application entry, UI callbacks         │
-│  - ui/main.slint: UI definitions                    │
+│  ui (egui)                                          │
+│  - main.rs: Application entry, eframe setup         │
+│  - app.rs: Main app loop and state management       │
+│  - components/: Reusable UI widgets                 │
+│  - views/: LibraryView, DevelopView                 │
 ├─────────────────────────────────────────────────────┤
 │  adapters                                           │
 │  - controllers/: ImportController, EditorController │
@@ -80,11 +82,12 @@ VintageLightbox follows **Clean Architecture** with 4 layers as separate crates:
 
 ## UI Framework
 
-- **Slint 1.8.0** with `renderer-winit-femtovg`
-- UI definitions in `crates/ui/ui/main.slint`
-- Build script: `crates/ui/build.rs` compiles `.slint` files
+- **egui 0.28** with eframe (OpenGL backend via glow)
+- UI components in `crates/ui/src/components/`
+- Views in `crates/ui/src/views/`
 - Async file dialogs via `rfd` crate
-- Image processing offloaded from main thread via debounced background processor
+- Image processing with `image` crate, textures via egui::TextureHandle
+- Keyboard shortcuts handled in `keyboard.rs`
 
 ## Adding New Features
 
@@ -92,4 +95,4 @@ VintageLightbox follows **Clean Architecture** with 4 layers as separate crates:
 2. Create use case in `use-cases` that depends only on domain traits
 3. Implement infrastructure (repository, file system) in `infrastructure`
 4. Add controller in `adapters` to bridge use case and UI
-5. Wire up in `ui/src/main.rs` and add UI elements to `.slint` file
+5. Wire up in `ui/src/app.rs` and create/update UI components in `components/` or `views/`
