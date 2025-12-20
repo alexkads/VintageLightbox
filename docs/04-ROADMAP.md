@@ -122,6 +122,7 @@ Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Ar
 - ✅ Property-based testing com proptest
 - ✅ egui 0.29.1 compatível com macOS Sequoia
 - ✅ Async photo loading com tokio channels
+- ✅ **E2E testing com egui_kittest** (3 testes passando)
 
 ---
 

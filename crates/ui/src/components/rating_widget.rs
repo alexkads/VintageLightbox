@@ -10,8 +10,8 @@ pub struct RatingWidget;
 
 impl RatingWidget {
     /// Show an interactive rating widget
-    /// Returns true if the rating was changed
-    pub fn show(ui: &mut Ui, rating: &mut i32, star_size: f32) -> bool {
+    /// Returns Some(new_rating) if the rating was changed
+    pub fn show(ui: &mut Ui, rating: &mut i32, star_size: f32) -> Option<i32> {
         Self::show_impl(ui, rating, true, star_size)
     }
 
@@ -22,7 +22,7 @@ impl RatingWidget {
     }
 
     /// Internal implementation for both interactive and readonly modes
-    fn show_impl(ui: &mut Ui, rating: &mut i32, interactive: bool, star_size: f32) -> bool {
+    fn show_impl(ui: &mut Ui, rating: &mut i32, interactive: bool, star_size: f32) -> Option<i32> {
         let spacing = Theme::SPACE_XS;
         let total_width = (star_size * 5.0) + (spacing * 4.0);
 
@@ -31,7 +31,7 @@ impl RatingWidget {
             if interactive { Sense::click() } else { Sense::hover() },
         );
 
-        let mut changed = false;
+        let mut changed_rating: Option<i32> = None;
         let mut hover_star: Option<usize> = None;
 
         // Check which star is being hovered
@@ -74,12 +74,12 @@ impl RatingWidget {
 
                 if new_rating != *rating {
                     *rating = new_rating;
-                    changed = true;
+                    changed_rating = Some(new_rating);
                 }
             }
         }
 
-        changed
+        changed_rating
     }
 
     /// Compact inline display for thumbnails (non-interactive)

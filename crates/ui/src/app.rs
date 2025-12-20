@@ -3,7 +3,6 @@
 
 use eframe::egui;
 use std::sync::Arc;
-use tokio::sync::mpsc;
 
 use adapters::controllers::*;
 use adapters::view_models::PhotoViewModel;
@@ -40,9 +39,13 @@ pub struct VintageLightboxApp {
 
     // ============================================
     // Async Communication
-    // ============================================
-    photo_receiver: mpsc::Receiver<Result<Vec<PhotoViewModel>, String>>,
-    photo_sender: mpsc::Sender<Result<Vec<PhotoViewModel>, String>>,
+    // ============================================    // Async photo loading
+    photo_receiver: tokio::sync::mpsc::Receiver<Result<Vec<PhotoViewModel>, String>>,
+    photo_sender: tokio::sync::mpsc::Sender<Result<Vec<PhotoViewModel>, String>>,
+    
+    // Async image loading
+    image_receiver: tokio::sync::mpsc::Receiver<Result<(egui::TextureHandle, crate::components::histogram::HistogramData), String>>,
+    image_sender: tokio::sync::mpsc::Sender<Result<(egui::TextureHandle, crate::components::histogram::HistogramData), String>>,
 }
 
 impl VintageLightboxApp {
@@ -60,7 +63,8 @@ impl VintageLightboxApp {
         Theme::apply_to_context(&cc.egui_ctx);
 
         // Create channel for async photo loading
-        let (photo_sender, photo_receiver) = mpsc::channel(1);
+        let (photo_sender, photo_receiver) = tokio::sync::mpsc::channel(1);
+        let (image_sender, image_receiver) = tokio::sync::mpsc::channel(1);
 
         Self {
             state: AppState::new(),
@@ -74,6 +78,8 @@ impl VintageLightboxApp {
             keyboard_handler: KeyboardHandler::new(),
             photo_receiver,
             photo_sender,
+            image_receiver,
+            image_sender,
         }
     }
 
@@ -111,40 +117,87 @@ impl eframe::App for VintageLightboxApp {
             self.state.busy_message.clear();
         }
 
+        // Load photos on first frame if not already loading
+        if self.state.photos.is_empty() && !self.state.is_busy {
+            self.load_photos(ctx);
+        }
+
         // Handle keyboard input
         self.keyboard_handler.handle_input(ctx, &mut self.state, &self.photo_controller);
 
-        // Load image for selected photo if needed
+        // Poll for async image loading results
+        if let Ok(result) = self.image_receiver.try_recv() {
+            match result {
+                Ok((texture, histogram)) => {
+                    self.state.detail_image = Some(texture);
+                    self.state.histogram_data = Some(histogram);
+                }
+                Err(e) => {
+                    eprintln!("Failed to load image: {}", e);
+                }
+            }
+            self.state.is_busy = false;
+            self.state.busy_message.clear();
+        }
+
+        // Load image for selected photo if needed (async)
         if let Some(photo_id) = &self.state.selected_photo_id.clone() {
-            if self.state.detail_image.is_none() {
+            // Check if we need to load a new image
+            let needs_reload = self.state.loaded_photo_id.as_ref() != Some(photo_id);
+            
+            if needs_reload && !self.state.is_busy {
                 // Find the photo in our list
-                if let Some(photo) = self.state.photos.iter().find(|p| &p.id == photo_id) {
-                    // Load image synchronously for now (TODO: make async)
-                    if let Ok(img) = image::open(&photo.path) {
-                        // Calculate histogram
-                        self.state.histogram_data = Some(
-                            crate::components::histogram::HistogramData::from_image(&img)
-                        );
+                if let Some(photo) = self.state.photos.iter().find(|p| &p.id == photo_id).cloned() {
+                    let ctx = ctx.clone();
+                    let sender = self.image_sender.clone();
+                    let photo_id_clone = photo_id.clone();
+                    
+                    self.state.is_busy = true;
+                    self.state.busy_message = "Loading image...".to_string();
+                    self.state.loaded_photo_id = Some(photo_id.clone());
+                    
+                    // Spawn async task to load image
+                    tokio::spawn(async move {
+                        let result = tokio::task::spawn_blocking(move || {
+                            // Load image
+                            let img = image::open(&photo.path)?;
+                            
+                            // Calculate histogram
+                            let histogram = crate::components::histogram::HistogramData::from_image(&img);
+                            
+                            // Apply edits if they exist
+                            let exposure = photo.edit_exposure.unwrap_or(0.0);
+                            let contrast = photo.edit_contrast.unwrap_or(1.0);
+                            
+                            let processed = if exposure != 0.0 || contrast != 1.0 {
+                                crate::image_processing::ImageProcessor::process_image(&img, exposure, contrast)
+                            } else {
+                                img
+                            };
+                            
+                            Ok::<_, image::ImageError>((processed, histogram))
+                        }).await;
                         
-                        // Apply edits if they exist
-                        let exposure = photo.edit_exposure.unwrap_or(0.0);
-                        let contrast = photo.edit_contrast.unwrap_or(1.0);
+                        match result {
+                            Ok(Ok((processed, histogram))) => {
+                                // Create texture on main thread
+                                let texture = crate::image_processing::ImageProcessor::load_texture(
+                                    &ctx,
+                                    &format!("detail_{}", photo_id_clone),
+                                    &processed
+                                );
+                                let _ = sender.send(Ok((texture, histogram))).await;
+                            }
+                            Ok(Err(e)) => {
+                                let _ = sender.send(Err(format!("Image error: {}", e))).await;
+                            }
+                            Err(e) => {
+                                let _ = sender.send(Err(format!("Task error: {}", e))).await;
+                            }
+                        }
                         
-                        let processed = if exposure != 0.0 || contrast != 1.0 {
-                            crate::image_processing::ImageProcessor::process_image(&img, exposure, contrast)
-                        } else {
-                            img
-                        };
-                        
-                        // Create texture
-                        let texture = crate::image_processing::ImageProcessor::load_texture(
-                            ctx,
-                            format!("detail_{}", photo_id),
-                            &processed,
-                        );
-                        
-                        self.state.detail_image = Some(texture);
-                    }
+                        ctx.request_repaint();
+                    });
                 }
             }
         }
@@ -168,6 +221,7 @@ impl eframe::App for VintageLightboxApp {
                         &mut self.state,
                         &self.editor_controller,
                         &self.export_controller,
+                        &self.photo_controller,
                     );
                 }
             }
@@ -240,6 +294,7 @@ impl VintageLightboxApp {
     fn handle_import(&mut self, ctx: &egui::Context) {
         let import_controller = self.import_controller.clone();
         let library_controller = self.library_controller.clone();
+        let sender = self.photo_sender.clone();
         let ctx = ctx.clone();
 
         // Spawn file dialog
@@ -254,10 +309,10 @@ impl VintageLightboxApp {
                     if let Err(e) = import_controller.import_files(vec![path.to_string()]).await {
                         eprintln!("Failed to import photo: {}", e);
                     } else {
-                        // Reload photos after import
-                        if let Ok(_photos) = library_controller.get_all_photos().await {
-                            ctx.request_repaint();
-                        }
+                        // Reload photos after import using the channel
+                        let result = library_controller.get_all_photos().await;
+                        let _ = sender.send(result).await;
+                        ctx.request_repaint();
                     }
                 }
             }

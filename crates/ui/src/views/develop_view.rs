@@ -19,6 +19,7 @@ impl DevelopView {
         state: &mut AppState,
         editor_controller: &std::sync::Arc<adapters::controllers::EditorController>,
         export_controller: &std::sync::Arc<adapters::controllers::ExportController>,
+        photo_controller: &std::sync::Arc<adapters::controllers::PhotoController>,
     ) {
         // Left sidebar - Presets & History
         egui::SidePanel::left("develop_left")
@@ -36,7 +37,7 @@ impl DevelopView {
             .exact_width(Theme::PANEL_WIDTH + 20.0)
             .show_inside(ui, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    self.show_right_sidebar(ui, state, editor_controller, export_controller);
+                    self.show_right_sidebar(ui, state, editor_controller, export_controller, photo_controller);
                 });
             });
 
@@ -78,6 +79,7 @@ impl DevelopView {
         state: &mut AppState,
         editor_controller: &std::sync::Arc<adapters::controllers::EditorController>,
         export_controller: &std::sync::Arc<adapters::controllers::ExportController>,
+        photo_controller: &std::sync::Arc<adapters::controllers::PhotoController>,
     ) {
         use crate::design_system::widgets;
         use crate::components::{histogram::Histogram, slider_control::SliderControl, rating_widget::RatingWidget};
@@ -178,7 +180,18 @@ impl DevelopView {
         ui.add_space(Theme::SPACE_SM);
 
         if let Some(metadata) = &mut state.detail_metadata {
-            RatingWidget::show(ui, &mut metadata.rating, 20.0);
+            if let Some(new_rating) = RatingWidget::show(ui, &mut metadata.rating, 20.0) {
+                // Persist rating change to database
+                if let Some(photo_id) = &state.selected_photo_id {
+                    let controller = photo_controller.clone();
+                    let photo_id = photo_id.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = controller.rate_photo(&photo_id, new_rating).await {
+                            eprintln!("Failed to save rating: {}", e);
+                        }
+                    });
+                }
+            }
         }
 
         ui.add_space(Theme::SPACE_XL);

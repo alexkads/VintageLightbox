@@ -28,10 +28,10 @@ Este projeto segue **Clean Architecture** e **Test-Driven Development (TDD)**:
 ## 🚀 Tecnologias
 
 - **Linguagem**: Rust (performance e segurança)
-- **Interface**: egui (nativa e multiplataforma)
+- **Interface**: egui 0.31 (nativa e multiplataforma)
 - **RAW Processing**: LibRaw/rawler
 - **Database**: SQLite
-- **Testing**: cargo test, mockall, proptest, criterion
+- **Testing**: cargo test, mockall, proptest, criterion, **egui_kittest** (E2E)
 - **Plataformas**: macOS e Windows
 
 ## 🎯 Status do Desenvolvimento
@@ -56,7 +56,14 @@ Este projeto segue **Clean Architecture** e **Test-Driven Development (TDD)**:
 
 **Rodando os testes**:
 ```bash
+# Todos os testes unitários
 cargo test --workspace
+
+# Testes E2E da UI (egui_kittest)
+cargo test -p ui --test rating_widget_tests
+
+# Atualizar snapshots (quando necessário)
+UPDATE_SNAPSHOTS=true cargo test -p ui
 ```
 
 ## 📚 Documentação
@@ -68,6 +75,7 @@ A documentação completa do projeto está organizada na pasta `docs/`:
 - **[03-FUNCIONALIDADES.md](docs/03-FUNCIONALIDADES.md)** - Especificação detalhada de cada funcionalidade
 - **[04-ROADMAP.md](docs/04-ROADMAP.md)** - Planejamento de desenvolvimento em fases
 - **[05-STACK-TECNOLOGICO.md](docs/05-STACK-TECNOLOGICO.md)** - Stack completo e dependências
+- **[07-E2E-TESTING.md](docs/07-E2E-TESTING.md)** - Guia de testes E2E com egui_kittest
 
 ## ✨ Principais Funcionalidades
 
