@@ -42,10 +42,6 @@ pub struct VintageLightboxApp {
     // ============================================    // Async photo loading
     photo_receiver: tokio::sync::mpsc::Receiver<Result<Vec<PhotoViewModel>, String>>,
     photo_sender: tokio::sync::mpsc::Sender<Result<Vec<PhotoViewModel>, String>>,
-    
-    // Async image loading
-    image_receiver: tokio::sync::mpsc::Receiver<Result<(egui::TextureHandle, crate::components::histogram::HistogramData), String>>,
-    image_sender: tokio::sync::mpsc::Sender<Result<(egui::TextureHandle, crate::components::histogram::HistogramData), String>>,
 }
 
 impl VintageLightboxApp {
@@ -64,7 +60,6 @@ impl VintageLightboxApp {
 
         // Create channel for async photo loading
         let (photo_sender, photo_receiver) = tokio::sync::mpsc::channel(1);
-        let (image_sender, image_receiver) = tokio::sync::mpsc::channel(1);
 
         Self {
             state: AppState::new(),
@@ -78,8 +73,6 @@ impl VintageLightboxApp {
             keyboard_handler: KeyboardHandler::new(),
             photo_receiver,
             photo_sender,
-            image_receiver,
-            image_sender,
         }
     }
 
@@ -125,79 +118,47 @@ impl eframe::App for VintageLightboxApp {
         // Handle keyboard input
         self.keyboard_handler.handle_input(ctx, &mut self.state, &self.photo_controller);
 
-        // Poll for async image loading results
-        if let Ok(result) = self.image_receiver.try_recv() {
-            match result {
-                Ok((texture, histogram)) => {
-                    self.state.detail_image = Some(texture);
-                    self.state.histogram_data = Some(histogram);
-                }
-                Err(e) => {
-                    eprintln!("Failed to load image: {}", e);
-                }
-            }
-            self.state.is_busy = false;
-            self.state.busy_message.clear();
-        }
-
-        // Load image for selected photo if needed (async)
+        // Load image for selected photo if needed (SYNCHRONOUS but fast with resize)
         if let Some(photo_id) = &self.state.selected_photo_id.clone() {
             // Check if we need to load a new image
             let needs_reload = self.state.loaded_photo_id.as_ref() != Some(photo_id);
             
-            if needs_reload && !self.state.is_busy {
+            if needs_reload {
+                // Clear previous image first
+                self.state.detail_image = None;
+                
                 // Find the photo in our list
-                if let Some(photo) = self.state.photos.iter().find(|p| &p.id == photo_id).cloned() {
-                    let ctx = ctx.clone();
-                    let sender = self.image_sender.clone();
-                    let photo_id_clone = photo_id.clone();
-                    
-                    self.state.is_busy = true;
-                    self.state.busy_message = "Loading image...".to_string();
-                    self.state.loaded_photo_id = Some(photo_id.clone());
-                    
-                    // Spawn async task to load image
-                    tokio::spawn(async move {
-                        let result = tokio::task::spawn_blocking(move || {
-                            // Load image
-                            let img = image::open(&photo.path)?;
-                            
-                            // Calculate histogram
-                            let histogram = crate::components::histogram::HistogramData::from_image(&img);
-                            
-                            // Apply edits if they exist
-                            let exposure = photo.edit_exposure.unwrap_or(0.0);
-                            let contrast = photo.edit_contrast.unwrap_or(1.0);
-                            
-                            let processed = if exposure != 0.0 || contrast != 1.0 {
-                                crate::image_processing::ImageProcessor::process_image(&img, exposure, contrast)
-                            } else {
-                                img
-                            };
-                            
-                            Ok::<_, image::ImageError>((processed, histogram))
-                        }).await;
+                if let Some(photo) = self.state.photos.iter().find(|p| &p.id == photo_id) {
+                    // Load image
+                    if let Ok(img) = image::open(&photo.path) {
+                        // OPTIMIZATION: Resize to preview resolution (1920x1080) for fast loading
+                        let preview_img = crate::image_processing::ImageProcessor::resize_for_preview(&img);
                         
-                        match result {
-                            Ok(Ok((processed, histogram))) => {
-                                // Create texture on main thread
-                                let texture = crate::image_processing::ImageProcessor::load_texture(
-                                    &ctx,
-                                    &format!("detail_{}", photo_id_clone),
-                                    &processed
-                                );
-                                let _ = sender.send(Ok((texture, histogram))).await;
-                            }
-                            Ok(Err(e)) => {
-                                let _ = sender.send(Err(format!("Image error: {}", e))).await;
-                            }
-                            Err(e) => {
-                                let _ = sender.send(Err(format!("Task error: {}", e))).await;
-                            }
-                        }
+                        // Calculate histogram from preview
+                        self.state.histogram_data = Some(
+                            crate::components::histogram::HistogramData::from_image(&preview_img)
+                        );
                         
-                        ctx.request_repaint();
-                    });
+                        // Apply edits if they exist
+                        let exposure = photo.edit_exposure.unwrap_or(0.0);
+                        let contrast = photo.edit_contrast.unwrap_or(1.0);
+                        
+                        let processed = if exposure != 0.0 || contrast != 1.0 {
+                            crate::image_processing::ImageProcessor::process_image(&preview_img, exposure, contrast)
+                        } else {
+                            preview_img
+                        };
+                        
+                        // Create texture with unique name per photo
+                        let texture = crate::image_processing::ImageProcessor::load_texture(
+                            ctx,
+                            format!("photo_{}", photo_id),
+                            &processed
+                        );
+                        
+                        self.state.detail_image = Some(texture);
+                        self.state.loaded_photo_id = Some(photo_id.clone());
+                    }
                 }
             }
         }

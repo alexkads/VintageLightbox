@@ -61,22 +61,55 @@ impl ImageProcessor {
         Self::load_texture(ctx, "processed_image", &processed)
     }
 
-    /// Core image processing logic
-    /// Applies exposure (brightness) and contrast adjustments
-    pub fn process_image(img: &DynamicImage, exposure: f32, contrast: f32) -> DynamicImage {
-        // Apply exposure (brightness adjustment)
-        let mut result = if exposure != 0.0 {
-            image::imageops::brighten(img, (exposure * 10.0) as i32)
-        } else {
-            img.to_rgba8()
-        };
+    /// Resize image for fast preview (max 1920x1080)
+    /// This dramatically speeds up loading by reducing texture size
+    pub fn resize_for_preview(img: &DynamicImage) -> DynamicImage {
+        let (width, height) = (img.width(), img.height());
+        
+        // Only resize if image is larger than preview size
+        const MAX_WIDTH: u32 = 1920;
+        const MAX_HEIGHT: u32 = 1080;
+        
+        if width <= MAX_WIDTH && height <= MAX_HEIGHT {
+            return img.clone();
+        }
+        
+        // Calculate scale to fit within max dimensions
+        let width_scale = MAX_WIDTH as f32 / width as f32;
+        let height_scale = MAX_HEIGHT as f32 / height as f32;
+        let scale = width_scale.min(height_scale);
+        
+        let new_width = (width as f32 * scale) as u32;
+        let new_height = (height as f32 * scale) as u32;
+        
+        img.resize(new_width, new_height, image::imageops::FilterType::Lanczos3)
+    }
 
+    /// Process image with exposure and contrast adjustments
+    pub fn process_image(img: &DynamicImage, exposure: f32, contrast: f32) -> DynamicImage {
+        let mut rgba = img.to_rgba8();
+        
+        // Apply exposure (brightness adjustment)
+        if exposure != 0.0 {
+            let exposure_factor = 2.0_f32.powf(exposure);
+            for pixel in rgba.pixels_mut() {
+                pixel[0] = (pixel[0] as f32 * exposure_factor).min(255.0) as u8;
+                pixel[1] = (pixel[1] as f32 * exposure_factor).min(255.0) as u8;
+                pixel[2] = (pixel[2] as f32 * exposure_factor).min(255.0) as u8;
+            }
+        }
+        
         // Apply contrast
         if contrast != 1.0 {
-            result = image::imageops::contrast(&result, contrast);
+            let factor = contrast;
+            for pixel in rgba.pixels_mut() {
+                pixel[0] = ((pixel[0] as f32 - 128.0) * factor + 128.0).clamp(0.0, 255.0) as u8;
+                pixel[1] = ((pixel[1] as f32 - 128.0) * factor + 128.0).clamp(0.0, 255.0) as u8;
+                pixel[2] = ((pixel[2] as f32 - 128.0) * factor + 128.0).clamp(0.0, 255.0) as u8;
+            }
         }
-
-        DynamicImage::ImageRgba8(result)
+        
+        DynamicImage::ImageRgba8(rgba)
     }
 
     /// Check if enough time has passed since last edit for debouncing
@@ -86,26 +119,6 @@ impl ImageProcessor {
         } else {
             true
         }
-    }
-
-    /// Resize image to fit within max dimensions while preserving aspect ratio
-    pub fn resize_for_preview(img: &DynamicImage, max_size: u32) -> DynamicImage {
-        let (width, height) = (img.width(), img.height());
-
-        if width <= max_size && height <= max_size {
-            return img.clone();
-        }
-
-        let scale = if width > height {
-            max_size as f32 / width as f32
-        } else {
-            max_size as f32 / height as f32
-        };
-
-        let new_width = (width as f32 * scale) as u32;
-        let new_height = (height as f32 * scale) as u32;
-
-        img.resize(new_width, new_height, image::imageops::FilterType::Lanczos3)
     }
 }
 
@@ -118,23 +131,28 @@ impl Default for ImageProcessor {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_resize_for_preview() {
-        // Create a test image
-        let img = DynamicImage::new_rgb8(2000, 1500);
-        let resized = ImageProcessor::resize_for_preview(&img, 1280);
-
-        assert!(resized.width() <= 1280);
-        assert!(resized.height() <= 1280);
-    }
+    use image::{DynamicImage, RgbaImage, GenericImageView};
 
     #[test]
     fn test_process_image_no_changes() {
-        let img = DynamicImage::new_rgb8(100, 100);
+        let img = DynamicImage::ImageRgba8(RgbaImage::new(100, 100));
         let processed = ImageProcessor::process_image(&img, 0.0, 1.0);
+        assert_eq!(img.dimensions(), processed.dimensions());
+    }
 
-        assert_eq!(processed.width(), 100);
-        assert_eq!(processed.height(), 100);
+    #[test]
+    fn test_resize_for_preview() {
+        // Test with large image
+        let large_img = DynamicImage::ImageRgba8(RgbaImage::new(4000, 3000));
+        let preview = ImageProcessor::resize_for_preview(&large_img);
+        
+        // Should be resized to fit within 1920x1080
+        assert!(preview.width() <= 1920);
+        assert!(preview.height() <= 1080);
+        
+        // Test with small image (should not resize)
+        let small_img = DynamicImage::ImageRgba8(RgbaImage::new(800, 600));
+        let preview = ImageProcessor::resize_for_preview(&small_img);
+        assert_eq!(preview.dimensions(), (800, 600));
     }
 }
