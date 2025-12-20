@@ -60,37 +60,38 @@ use infrastructure::{
     // Active full-res image (loaded in memory for editing)
     let active_image: Arc<Mutex<Option<image::DynamicImage>>> = Arc::new(Mutex::new(None));
     
-    // Helper to process image
-    fn process_image(img: &image::DynamicImage, exposure: f32, contrast: f32) -> slint::Image {
+    // Core processing logic returning Send-safe RgbaImage
+    fn process_image_data(img: &image::DynamicImage, exposure: f32, contrast: f32) -> image::RgbaImage {
         // 1. Exposure (Brighten)
-        // exposure is -5.0 to 5.0. brighten takes i32. 
-        // We'll approximate exposure by simple brightening.
-        // A better value would be scaling pixel values, but 'brighten' is available in image::imageops.
-        // brighten(img, value): value is i32.
         let brightened = if exposure != 0.0 {
-            // Mapping -5.0..5.0 to roughly -50..50 for i32 brighten
             image::imageops::brighten(img, (exposure * 10.0) as i32)
         } else {
             img.to_rgba8()
         };
 
         // 2. Contrast
-        // adjust_contrast(img, c): c is f32. 
-        // 1.0 = original. < 1.0 low contrast, > 1.0 high contrast.
         let contrasted = if contrast != 1.0 {
             image::imageops::contrast(&brightened, contrast)
         } else {
             brightened
         };
+        contrasted
+    }
 
-        // Convert back to Slint Image
-        let buffer = contrasted;
+    // Helper to convert to Slint Image
+    fn image_to_slint(buffer: image::RgbaImage) -> slint::Image {
         let pixel_buffer = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(
             buffer.as_raw(),
             buffer.width(),
             buffer.height(),
         );
         slint::Image::from_rgba8(pixel_buffer)
+    }
+
+    // Legacy helper for synchronous calls
+    fn process_image(img: &image::DynamicImage, exposure: f32, contrast: f32) -> slint::Image {
+        let data = process_image_data(img, exposure, contrast);
+        image_to_slint(data)
     }
 
     let active_image_for_nav = active_image.clone();
@@ -161,6 +162,15 @@ use infrastructure::{
                 #[cfg(not(target_arch = "wasm32"))]
                 let path_str = file_handle.path().to_string_lossy().to_string();
                 
+                // Set Busy
+                let mw_weak = main_window_weak.clone();
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(ui) = mw_weak.upgrade() {
+                        ui.set_is_busy(true);
+                        ui.set_busy_message(slint::SharedString::from("Importing photos..."));
+                    }
+                });
+
                 match controller.import_files(vec![path_str]).await {
                     Ok(_) => {
                         match library_controller.get_all_photos().await {
@@ -171,6 +181,7 @@ use infrastructure::{
 
                                 let _ = slint::invoke_from_event_loop(move || {
                                     if let Some(main_window) = main_window_weak.upgrade() {
+                                        main_window.set_is_busy(false); // Unset Busy
                                         let rows: Vec<RowData> = view_models.chunks(5).map(|chunk| {
                                             let tiles: Vec<TileData> = chunk.iter().map(|vm| {
                                                 let image = if let Some(path) = &vm.thumbnail_path {
@@ -196,10 +207,20 @@ use infrastructure::{
                                     }
                                 });
                             }
-                            Err(e) => eprintln!("Failed to refresh photos: {}", e),
+                            Err(e) => {
+                                eprintln!("Failed to refresh photos: {}", e);
+                                let _ = slint::invoke_from_event_loop(move || {
+                                    if let Some(ui) = main_window_weak.upgrade() { ui.set_is_busy(false); }
+                                });
+                            }
                         }
                     },
-                    Err(e) => eprintln!("Import failed: {}", e),
+                    Err(e) => {
+                        eprintln!("Import failed: {}", e);
+                         let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(ui) = main_window_weak.upgrade() { ui.set_is_busy(false); }
+                        });
+                    }
                 }
             }
         });
@@ -376,20 +397,40 @@ use infrastructure::{
 
     // Save Edits Callback
     let editor_controller_clone = editor_controller.clone();
+    let main_window_weak_for_save = main_window.as_weak();
     main_window.on_save_edits(move |id, exposure, contrast| {
         let controller = editor_controller_clone.clone();
+        let ui_weak = main_window_weak_for_save.clone();
+        
+        // optimistic updates? No, backend first.
+        let _ = slint::invoke_from_event_loop(move || {
+             if let Some(ui) = ui_weak.upgrade() {
+                 ui.set_is_busy(true);
+                 ui.set_busy_message(slint::SharedString::from("Saving edits..."));
+             }
+        });
+        
+        let ui_weak = main_window_weak_for_save.clone();
         tokio::spawn(async move {
             if let Err(e) = controller.save_edits(id.clone().into(), exposure, contrast).await {
                 eprintln!("Error saving edits: {}", e);
             } else {
                 println!("Edits saved for photo {}", id);
             }
+            
+            let _ = slint::invoke_from_event_loop(move || {
+                 if let Some(ui) = ui_weak.upgrade() {
+                     ui.set_is_busy(false);
+                 }
+            });
         });
     });
 
     let export_controller = export_controller.clone();
+    let main_window_weak_for_export = main_window.as_weak();
     main_window.on_export_clicked(move |id| {
         let controller = export_controller.clone();
+        let ui_weak_for_export = main_window_weak_for_export.clone();
         tokio::spawn(async move {
             // Open Save Dialog
             if let Some(path) = rfd::FileDialog::new()
@@ -397,12 +438,27 @@ use infrastructure::{
                 .set_file_name("export.jpg")
                 .save_file() 
             {
+                // Set Busy
+                let ui_weak = ui_weak_for_export.clone();
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(ui) = ui_weak.upgrade() {
+                        ui.set_is_busy(true);
+                        ui.set_busy_message(slint::SharedString::from("Exporting JPEG..."));
+                    }
+                });
+
                 let path_str = path.to_string_lossy().to_string();
                 if let Err(e) = controller.export_photo(id.into(), path_str).await {
                      eprintln!("Error exporting photo: {}", e);
                 } else {
                      println!("Photo exported successfully to {:?}", path);
                 }
+                
+                // Unset Busy
+                let ui_weak = ui_weak_for_export.clone();
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(ui) = ui_weak.upgrade() { ui.set_is_busy(false); }
+                });
             }
         });
     });
@@ -444,12 +500,12 @@ use infrastructure::{
                 };
 
                 if should_process {
-                     // Perform processing (CPU bound, so spawn_blocking would be ideal, but here we are in async task)
-                     // basic logic for MVP
-                     let processed_img = {
+                     // Perform processing (CPU bound)
+                     // produce RgbaImage (Send)
+                     let processed_buffer = {
                          if let Ok(active_opt) = active_image.lock() {
                              if let Some(img) = active_opt.as_ref() {
-                                 Some(process_image(img, exposure, contrast))
+                                 Some(process_image_data(img, exposure, contrast))
                              } else {
                                  None
                              }
@@ -458,9 +514,12 @@ use infrastructure::{
                          }
                      };
 
-                     if let Some(img) = processed_img {
+                     if let Some(buffer) = processed_buffer {
+                         let ui_weak = main_window_weak.clone();
                          let _ = slint::invoke_from_event_loop(move || {
-                             if let Some(ui) = main_window_weak.upgrade() {
+                             // Convert to Slint Image here (Main Thread)
+                             let img = image_to_slint(buffer);
+                             if let Some(ui) = ui_weak.upgrade() {
                                  ui.set_detail_image(img);
                              }
                          });

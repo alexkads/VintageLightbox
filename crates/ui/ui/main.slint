@@ -43,6 +43,8 @@ export component MainWindow inherits Window {
     in-out property <string> detail_exposure;
     in-out property <string> detail_rating;
     in-out property <int> current_view: 0;
+    in-out property <bool> is_busy: false;
+    in-out property <string> busy_message: "Processing...";
 
     focus_scope := FocusScope {
         key-pressed(event) => {
@@ -111,13 +113,43 @@ export component MainWindow inherits Window {
             }
             
             // Empty State
-            Text {
+            VerticalLayout {
                 visible: root.grid_model.length == 0;
-                text: "Library is empty.\nClick 'Import Photos' to start.";
-                color: #666;
-                font-size: 18px;
-                horizontal-alignment: center;
-                vertical-alignment: center;
+                alignment: center;
+                spacing: 20px;
+                Text {
+                    text: "No photos in your library yet.";
+                    color: #888;
+                    font-size: 24px;
+                    horizontal-alignment: center;
+                }
+
+                Text {
+                    text: "Import photos to start editing.";
+                    color: #666;
+                    font-size: 16px;
+                    horizontal-alignment: center;
+                }
+
+                Rectangle {
+                    height: 50px;
+                    width: 200px;
+                    background: #333;
+                    border-radius: 8px;
+                    Text {
+                        text: "Import Photos";
+                        color: white;
+                        font-size: 16px;
+                        vertical-alignment: center;
+                        horizontal-alignment: center;
+                    }
+
+                    TouchArea {
+                        clicked => {
+                            root.import_clicked();
+                        }
+                    }
+                }
             }
         }
 
@@ -342,5 +374,35 @@ export component MainWindow inherits Window {
                 }
             }
         }
+    }
+
+    // Busy Overlay
+    Rectangle {
+        visible: root.is_busy;
+        width: 100%;
+        height: 100%;
+        background: #000000aa; // Semi-transparent black
+
+        VerticalLayout {
+            alignment: center;
+            spacing: 20px;
+            Text {
+                text: root.busy_message;
+                color: white;
+                font-size: 24px;
+                horizontal-alignment: center;
+            }
+            
+            // Pulsing Loading Bar (Static for MVP stability)
+            Rectangle {
+                width: 200px;
+                height: 4px;
+                background: white;
+                opacity: 0.8;
+            }
+        }
+        
+        // Block clicks
+        TouchArea { }
     }
 }
