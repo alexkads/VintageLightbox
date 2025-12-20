@@ -24,16 +24,22 @@ Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Ar
   - **Estrutura Modular**: Refatorado de 1 arquivo monolítico para 20+ arquivos organizados
   - **Clean Architecture na UI**: Separação em camadas (Design System, Components, Panels, Views)
   - **Design System Completo**: 
-    - `design_system/tokens.slint`: Tokens centralizados (cores, espaçamento, tipografia)
-    - `design_system/primitives.slint`: Componentes base reutilizáveis (Buttons, Cards, Overlays)
+    - `design_system/theme.rs`: Tokens centralizados (cores, espaçamento, tipografia)
+    - `design_system/widgets.rs`: Componentes base reutilizáveis (Buttons, Cards, Overlays)
   - **Arquitetura em Camadas**:
-    - `types.slint`: Structs compartilhados (TileData, RowData)
+    - `state.rs`: Structs de estado compartilhados (AppState, DetailMetadata)
     - `components/`: 8 widgets reutilizáveis (Toolbar, PhotoGrid, Filmstrip, Histogram, etc.)
-    - `panels/`: 8 painéis compostos (Navigator, Catalog, Collections, QuickDevelop, Metadata, etc.)
+    - `panels/`: Painéis compostos integrados nas views
     - `views/`: 2 views principais (LibraryView, DevelopView)
-    - `main.slint`: Root component com gerenciamento de estado e callbacks
+    - `app.rs`: Root component com gerenciamento de estado e controllers
   - **Benefícios**: Melhor manutenibilidade, reutilização de código, separação de responsabilidades
   - **Documentação**: Ver `docs/06-UI-ARCHITECTURE.md` para detalhes completos
+
+- ✅ **Correções de Runtime e Dependências (20/dez/2025)** 🔧
+  - **Atualização egui 0.29.1**: Corrigido crash no macOS (`icrate` incompatibilidade com macOS Sequoia)
+  - **Async Photo Loading**: Corrigido bug onde fotos carregavam mas nunca atualizavam o estado (canal tokio implementado)
+  - **Deprecation Fixes**: Substituído `allocate_ui_at_rect` por `allocate_new_ui(UiBuilder...)` no ImageViewer
+  - **Warning Cleanup**: Adicionado `#[allow(dead_code)]` em componentes não utilizados para build limpo
 
 - ✅ **UI Redesign Completo (v2.0)** 🎨
   - **Design System**: Paleta de cores premium, tipografia, espaçamento, sombras
@@ -89,7 +95,7 @@ Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Ar
 ### Entregas Recentes (Fase 2.0 - UI Redesign + Architecture)
 - ✅ **UI Architecture Refactoring (Clean Architecture)**:
   - Estrutura modular: 20+ arquivos organizados em camadas
-  - Design System: `tokens.slint` + `primitives.slint`
+  - Design System: `theme.rs` + `widgets.rs`
   - 8 Components reutilizáveis: Toolbar, PhotoGrid, Filmstrip, Histogram, RatingWidget, ColorLabels, SliderControl, ImageViewer
   - 8 Panels compostos: Navigator, Catalog, Collections, QuickDevelop, Metadata, Presets, History, BasicAdjustments
   - 2 Views principais: LibraryView, DevelopView
@@ -110,10 +116,12 @@ Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Ar
 ### Métricas de Qualidade
 - ✅ 100% cobertura no Domain Layer
 - ✅ TDD rigoroso aplicado (Red-Green-Refactor)
-- ✅ Zero warnings de compilação
+- ✅ Zero warnings de compilação (com `#[allow(dead_code)]` em código futuro)
 - ✅ CI/CD rodando em 3 plataformas
 - ✅ Mocks com mockall para testes isolados
 - ✅ Property-based testing com proptest
+- ✅ egui 0.29.1 compatível com macOS Sequoia
+- ✅ Async photo loading com tokio channels
 
 ---
 
@@ -148,8 +156,8 @@ Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Ar
 - [x] README e documentação inicial
 - [x] Script dev.sh para workflow TDD
 
-#### 0.2 Proof of Concept - Slint UI
-- [x] Criar janela básica com Slint
+#### 0.2 Proof of Concept - egui UI
+- [x] Criar janela básica com egui
 - [x] Testar grid de imagens
 - [x] Implementar navegação básica
 - [x] Testar responsividade
@@ -348,7 +356,7 @@ Criar versão mínima funcional com importação, visualização, edição bási
 
 **Status Atual**: 
 - ✅ Backend completo (Domain + Use Cases + Repositories)
-- ✅ Frontend completo (UI com Slint, Grid, Details, Edit)
+- ✅ Frontend completo (UI com egui, Grid, Details, Edit)
 - ✅ RAW Processing básico (via image crate preview)
 - ✅ File System operations completo
 
@@ -659,7 +667,7 @@ Criar versão mínima funcional com importação, visualização, edição bási
 - [ ] Panoramas e HDR
 - [ ] Focus stacking
 - [ ] **Phase 2.1: GPU Acceleration**
-  - Implement Custom Slint Renderer or integrate `wgpu`.
+  - Integrate `wgpu` with egui for GPU-accelerated rendering.
   - Migrate image processing from CPU (`image` crate) to Metal Compute Shaders.
   - Target: Real-time processing of 24MP+ RAW files.
 - [ ] GPU acceleration (WGPU)
@@ -709,8 +717,8 @@ Criar versão mínima funcional com importação, visualização, edição bási
 1. **Performance de RAW Processing**
    - Mitigação: POC na Fase 0, otimizações contínuas
 
-2. **Slint Limitations**
-   - Mitigação: Avaliar cedo, plano B com egui
+2. **egui Limitations**
+   - Mitigação: Avaliar cedo, alternativas como iced ou Slint
 
 3. **Cross-platform Issues**
    - Mitigação: Testes contínuos em ambas plataformas
