@@ -1,0 +1,58 @@
+// VintageLightbox - Filmstrip Component
+// Horizontal thumbnail strip at bottom
+
+import { Theme } from "../design_system/tokens.slint";
+import { TileData, RowData } from "../types.slint";
+import { ListView } from "std-widgets.slint";
+
+// Individual Filmstrip Thumbnail
+component FilmstripThumbnail inherits Rectangle {
+    in property <TileData> data;
+    in property <bool> selected: false;
+    callback clicked();
+
+    width: Theme.thumbnail-size;
+    height: 84px;
+    background: touch.has-hover ? Theme.bg-active : Theme.bg-elevated;
+    border-radius: Theme.radius-sm;
+    border-width: root.selected ? 2px : 0px;
+    border-color: Theme.accent-primary;
+
+    Image {
+        source: root.data.image;
+        width: 100%;
+        height: 100%;
+        image-fit: contain;
+    }
+
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+// Full Filmstrip
+export component Filmstrip inherits Rectangle {
+    in property <[RowData]> model: [];
+    in property <string> selected-id: "";
+    callback tile-clicked(string);
+
+    height: Theme.filmstrip-height;
+    background: Theme.bg-surface;
+
+    HorizontalLayout {
+        padding: Theme.space-sm;
+        spacing: Theme.space-xs;
+
+        ListView {
+            for row in root.model: HorizontalLayout {
+                spacing: Theme.space-xs;
+
+                for tile in row.tiles: FilmstripThumbnail {
+                    data: tile;
+                    selected: tile.id == root.selected-id;
+                    clicked => { root.tile-clicked(tile.id); }
+                }
+            }
+        }
+    }
+}

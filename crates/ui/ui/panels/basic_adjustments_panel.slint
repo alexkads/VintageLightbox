@@ -1,0 +1,159 @@
+// VintageLightbox - Basic Adjustments Panel
+// Main editing controls in Develop view
+
+import { Theme } from "../design_system/tokens.slint";
+import { PanelHeader, PrimaryButton, SecondaryButton, Spacer, SectionTitle } from "../design_system/primitives.slint";
+import { SliderControl } from "../components/slider_control.slint";
+import { RatingWidget } from "../components/rating_widget.slint";
+import { Histogram } from "../components/histogram.slint";
+import { ScrollView } from "std-widgets.slint";
+
+export component BasicAdjustmentsPanel inherits Rectangle {
+    in-out property <float> exposure: 0.0;
+    in-out property <float> contrast: 1.0;
+    in property <int> rating: 0;
+    in property <string> photo-name: "";
+    in property <string> photo-date: "";
+    in property <string> photo-camera: "";
+    in property <string> photo-exposure: "";
+
+    callback exposure-changed(float);
+    callback contrast-changed(float);
+    callback save-clicked();
+    callback export-clicked();
+    callback rating-changed(int);
+
+    width: Theme.panel-width + 20px;
+    background: Theme.bg-surface;
+
+    ScrollView {
+        VerticalLayout {
+            padding: Theme.space-sm;
+            spacing: Theme.space-xs;
+
+            // Histogram
+            Histogram {
+                chart-height: 100px;
+            }
+
+            Spacer { size: Theme.space-md; }
+
+            // Basic Section
+            PanelHeader {
+                title: "Basic";
+            }
+
+            SliderControl {
+                label: "Exposure";
+                value: root.exposure;
+                minimum: -2.0;
+                maximum: 2.0;
+                changed(val) => {
+                    root.exposure = val;
+                    root.exposure-changed(val);
+                }
+            }
+
+            Spacer { size: Theme.space-sm; }
+
+            SliderControl {
+                label: "Contrast";
+                value: root.contrast;
+                minimum: 0.5;
+                maximum: 1.5;
+                changed(val) => {
+                    root.contrast = val;
+                    root.contrast-changed(val);
+                }
+            }
+
+            Spacer { size: Theme.space-lg; }
+
+            // Collapsed Sections
+            PanelHeader {
+                title: "Tone Curve";
+                collapsed: true;
+            }
+
+            PanelHeader {
+                title: "HSL / Color";
+                collapsed: true;
+            }
+
+            Spacer { size: Theme.space-xl; }
+
+            // Action Buttons
+            VerticalLayout {
+                padding-left: Theme.space-md;
+                padding-right: Theme.space-md;
+                spacing: Theme.space-sm;
+
+                PrimaryButton {
+                    text: "Save";
+                    clicked => { root.save-clicked(); }
+                }
+
+                SecondaryButton {
+                    text: "Export";
+                    clicked => { root.export-clicked(); }
+                }
+            }
+
+            Spacer { size: Theme.space-lg; }
+
+            // Rating Section
+            VerticalLayout {
+                padding-left: Theme.space-md;
+                padding-right: Theme.space-md;
+                spacing: Theme.space-sm;
+
+                SectionTitle { text: "Rating"; }
+
+                RatingWidget {
+                    rating: root.rating;
+                    star-size: 20px;
+                    rating-changed(r) => { root.rating-changed(r); }
+                }
+            }
+
+            Spacer { size: Theme.space-xl; }
+
+            // Metadata Section
+            VerticalLayout {
+                padding-left: Theme.space-md;
+                padding-right: Theme.space-md;
+                spacing: Theme.space-xs;
+
+                SectionTitle { text: "Metadata"; }
+
+                Text {
+                    text: root.photo-name;
+                    color: Theme.text-secondary;
+                    font-size: Theme.font-xs;
+                    wrap: word-wrap;
+                }
+
+                Text {
+                    text: root.photo-date;
+                    color: Theme.text-disabled;
+                    font-size: Theme.font-xs;
+                }
+
+                Text {
+                    text: root.photo-camera;
+                    color: Theme.text-disabled;
+                    font-size: Theme.font-xs;
+                }
+
+                Text {
+                    text: root.photo-exposure;
+                    color: Theme.text-disabled;
+                    font-size: Theme.font-xs;
+                }
+            }
+
+            // Flexible space at bottom
+            Rectangle { vertical-stretch: 1; }
+        }
+    }
+}

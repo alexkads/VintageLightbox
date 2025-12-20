@@ -1,0 +1,36 @@
+// VintageLightbox - History Panel
+// Edit history in left sidebar
+
+import { Theme } from "../design_system/tokens.slint";
+import { PanelHeader, MenuItem } from "../design_system/primitives.slint";
+
+export component HistoryPanel inherits VerticalLayout {
+    in property <[string]> history-items: ["Import"];
+    in property <int> current-index: 0;
+    callback history-selected(int);
+
+    spacing: Theme.space-xs;
+
+    PanelHeader {
+        title: "History";
+    }
+
+    for item[index] in root.history-items: Rectangle {
+        height: 24px;
+
+        HorizontalLayout {
+            padding-left: Theme.space-lg;
+
+            Text {
+                text: item;
+                color: index == root.current-index ? Theme.text-secondary : Theme.text-disabled;
+                font-size: Theme.font-sm;
+                vertical-alignment: center;
+            }
+        }
+
+        TouchArea {
+            clicked => { root.history-selected(index); }
+        }
+    }
+}

@@ -1,0 +1,62 @@
+// VintageLightbox - Quick Develop Panel
+// Quick editing controls in right sidebar (Library view)
+
+import { Theme } from "../design_system/tokens.slint";
+import { PanelHeader, LabelText } from "../design_system/primitives.slint";
+import { RatingWidget } from "../components/rating_widget.slint";
+import { ColorLabels } from "../components/color_labels.slint";
+
+export component QuickDevelopPanel inherits VerticalLayout {
+    in property <int> rating: 0;
+    in property <string> color-label: "";
+    callback rating-changed(int);
+    callback color-selected(string);
+
+    spacing: Theme.space-xs;
+
+    PanelHeader {
+        title: "Quick Develop";
+    }
+
+    // Rating Row
+    Rectangle {
+        height: 36px;
+
+        HorizontalLayout {
+            padding-left: Theme.space-md;
+            padding-right: Theme.space-md;
+            alignment: space-between;
+
+            LabelText {
+                text: "Rating";
+                vertical-alignment: center;
+            }
+
+            RatingWidget {
+                rating: root.rating;
+                rating-changed(r) => { root.rating-changed(r); }
+            }
+        }
+    }
+
+    // Color Label Row
+    Rectangle {
+        height: 36px;
+
+        HorizontalLayout {
+            padding-left: Theme.space-md;
+            padding-right: Theme.space-md;
+            alignment: space-between;
+
+            LabelText {
+                text: "Label";
+                vertical-alignment: center;
+            }
+
+            ColorLabels {
+                selected-color: root.color-label;
+                color-selected(c) => { root.color-selected(c); }
+            }
+        }
+    }
+}

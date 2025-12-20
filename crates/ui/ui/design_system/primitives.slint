@@ -1,0 +1,311 @@
+// VintageLightbox Design System - Primitive Components
+// Reusable base components built on design tokens
+
+import { Theme } from "tokens.slint";
+
+// ============================================
+// PRIMARY BUTTON
+// Main action button with accent color
+// ============================================
+export component PrimaryButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> enabled: true;
+    callback clicked();
+
+    height: 32px;
+    min-width: 80px;
+    border-radius: Theme.radius-md;
+    background: !root.enabled ? Theme.bg-active :
+                touch.has-hover ? Theme.accent-hover : Theme.accent-primary;
+
+    HorizontalLayout {
+        padding-left: Theme.space-md;
+        padding-right: Theme.space-md;
+        alignment: center;
+
+        Text {
+            text: root.text;
+            color: root.enabled ? white : Theme.text-disabled;
+            font-size: Theme.font-md;
+            font-weight: Theme.weight-semibold;
+            vertical-alignment: center;
+            horizontal-alignment: center;
+        }
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+}
+
+// ============================================
+// SECONDARY BUTTON
+// Ghost/outline style button
+// ============================================
+export component SecondaryButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> enabled: true;
+    callback clicked();
+
+    height: 32px;
+    min-width: 80px;
+    border-radius: Theme.radius-md;
+    background: touch.has-hover ? Theme.bg-hover : Theme.bg-active;
+
+    HorizontalLayout {
+        padding-left: Theme.space-md;
+        padding-right: Theme.space-md;
+        alignment: center;
+
+        Text {
+            text: root.text;
+            color: root.enabled ? Theme.text-primary : Theme.text-disabled;
+            font-size: Theme.font-md;
+            vertical-alignment: center;
+            horizontal-alignment: center;
+        }
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+}
+
+// ============================================
+// ICON BUTTON
+// Circular button for icons
+// ============================================
+export component IconButton inherits Rectangle {
+    in property <string> icon;
+    in property <length> icon-size: Theme.font-xl;
+    in property <bool> enabled: true;
+    callback clicked();
+
+    width: 40px;
+    height: 40px;
+    border-radius: Theme.radius-full;
+    background: touch.has-hover ? Theme.bg-active : Theme.bg-elevated;
+
+    Text {
+        text: root.icon;
+        color: root.enabled ? Theme.text-primary : Theme.text-disabled;
+        font-size: root.icon-size;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+}
+
+// ============================================
+// NAV BUTTON
+// Navigation button with text and optional icon
+// ============================================
+export component NavButton inherits Rectangle {
+    in property <string> text;
+    in property <string> icon: "";
+    in property <bool> active: false;
+    callback clicked();
+
+    height: 32px;
+    min-width: 80px;
+    border-radius: Theme.radius-md;
+    background: root.active ? Theme.bg-active :
+                touch.has-hover ? Theme.bg-hover : transparent;
+
+    HorizontalLayout {
+        padding-left: Theme.space-sm;
+        padding-right: Theme.space-sm;
+        alignment: center;
+        spacing: Theme.space-xs;
+
+        if root.icon != "": Text {
+            text: root.icon;
+            color: root.active ? Theme.text-primary : Theme.text-muted;
+            font-size: Theme.font-lg;
+            vertical-alignment: center;
+        }
+
+        Text {
+            text: root.text;
+            color: root.active ? Theme.text-primary : Theme.text-muted;
+            font-size: Theme.font-md;
+            vertical-alignment: center;
+            horizontal-alignment: center;
+        }
+    }
+
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+// ============================================
+// PANEL HEADER
+// Collapsible panel header with title
+// ============================================
+export component PanelHeader inherits Rectangle {
+    in property <string> title;
+    in property <bool> collapsed: false;
+    callback toggled();
+
+    height: 30px;
+
+    HorizontalLayout {
+        padding-left: Theme.space-sm;
+        spacing: Theme.space-xs;
+
+        Text {
+            text: root.collapsed ? "▶" : "▼";
+            color: Theme.text-secondary;
+            font-size: Theme.font-sm;
+            vertical-alignment: center;
+        }
+
+        Text {
+            text: root.title;
+            color: Theme.text-secondary;
+            font-size: Theme.font-sm;
+            font-weight: Theme.weight-semibold;
+            vertical-alignment: center;
+        }
+    }
+
+    TouchArea {
+        clicked => { root.toggled(); }
+    }
+}
+
+// ============================================
+// MENU ITEM
+// Clickable menu item with hover state
+// ============================================
+export component MenuItem inherits Rectangle {
+    in property <string> text;
+    in property <bool> selected: false;
+    in property <length> indent: Theme.space-lg;
+    callback clicked();
+
+    height: 26px;
+    border-radius: Theme.radius-sm;
+    background: root.selected ? Theme.bg-active :
+                touch.has-hover ? Theme.bg-hover : transparent;
+
+    HorizontalLayout {
+        padding-left: root.indent;
+
+        Text {
+            text: root.text;
+            color: root.selected ? Theme.text-primary : Theme.text-secondary;
+            font-size: Theme.font-sm;
+            vertical-alignment: center;
+        }
+    }
+
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+// ============================================
+// CARD
+// Container with background and border-radius
+// ============================================
+export component Card inherits Rectangle {
+    background: Theme.bg-app;
+    border-radius: Theme.radius-md;
+}
+
+// ============================================
+// DIVIDER
+// Horizontal divider line
+// ============================================
+export component Divider inherits Rectangle {
+    height: 1px;
+    background: Theme.border-default;
+}
+
+// ============================================
+// SPACER
+// Flexible empty space
+// ============================================
+export component Spacer inherits Rectangle {
+    in property <length> size: Theme.space-lg;
+    height: root.size;
+}
+
+// ============================================
+// OVERLAY
+// Modal overlay with busy state
+// ============================================
+export component Overlay inherits Rectangle {
+    in property <string> message: "Processing...";
+    in property <bool> show: false;
+
+    width: 100%;
+    height: 100%;
+    background: Theme.bg-overlay;
+    visible: root.show;
+
+    VerticalLayout {
+        alignment: center;
+        spacing: Theme.space-lg;
+
+        Text {
+            text: root.message;
+            color: white;
+            font-size: Theme.font-xl;
+            horizontal-alignment: center;
+        }
+
+        Rectangle {
+            width: 200px;
+            height: 4px;
+            background: Theme.bg-active;
+            border-radius: Theme.radius-xs;
+
+            Rectangle {
+                width: 60px;
+                height: 4px;
+                background: Theme.accent-primary;
+                border-radius: Theme.radius-xs;
+            }
+        }
+    }
+
+    // Block clicks
+    TouchArea { }
+}
+
+// ============================================
+// SECTION TITLE
+// Section header text
+// ============================================
+export component SectionTitle inherits Text {
+    color: Theme.text-muted;
+    font-size: Theme.font-sm;
+    font-weight: Theme.weight-semibold;
+}
+
+// ============================================
+// LABEL TEXT
+// Small label text
+// ============================================
+export component LabelText inherits Text {
+    color: Theme.text-muted;
+    font-size: Theme.font-sm;
+}
+
+// ============================================
+// VALUE TEXT
+// Value display text
+// ============================================
+export component ValueText inherits Text {
+    color: Theme.text-secondary;
+    font-size: Theme.font-sm;
+}

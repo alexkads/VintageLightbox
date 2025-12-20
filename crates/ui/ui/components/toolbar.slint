@@ -1,0 +1,67 @@
+// VintageLightbox - Toolbar Component
+// Main application toolbar
+
+import { Theme } from "../design_system/tokens.slint";
+import { PrimaryButton, NavButton } from "../design_system/primitives.slint";
+
+export component Toolbar inherits Rectangle {
+    in property <int> current-view: 0;
+    in property <string> photo-count: "Photos";
+    callback import-clicked();
+    callback view-changed(int);
+
+    height: Theme.toolbar-height;
+    background: Theme.bg-elevated;
+
+    HorizontalLayout {
+        padding-left: Theme.space-lg;
+        padding-right: Theme.space-lg;
+        alignment: space-between;
+
+        HorizontalLayout {
+            spacing: Theme.space-xl;
+
+            // App Title
+            Text {
+                text: "VintageLightbox";
+                color: Theme.text-primary;
+                font-size: Theme.font-lg;
+                font-weight: Theme.weight-semibold;
+                vertical-alignment: center;
+            }
+
+            // View Tabs
+            HorizontalLayout {
+                spacing: Theme.space-xxs;
+
+                NavButton {
+                    text: "Library";
+                    active: root.current-view == 0;
+                    clicked => { root.view-changed(0); }
+                }
+
+                NavButton {
+                    text: "Develop";
+                    active: root.current-view == 1;
+                    clicked => { root.view-changed(1); }
+                }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: Theme.space-md;
+
+            Text {
+                text: root.photo-count;
+                color: Theme.text-muted;
+                font-size: Theme.font-md;
+                vertical-alignment: center;
+            }
+
+            PrimaryButton {
+                text: "Import";
+                clicked => { root.import-clicked(); }
+            }
+        }
+    }
+}

@@ -1,0 +1,86 @@
+// VintageLightbox - Color Labels Component
+// Color label selection widget
+
+import { Theme } from "../design_system/tokens.slint";
+
+export component ColorLabels inherits Rectangle {
+    in property <string> selected-color: "";
+    in property <bool> interactive: true;
+    callback color-selected(string);
+
+    height: 16px;
+
+    HorizontalLayout {
+        spacing: Theme.space-sm;
+
+        Rectangle {
+            width: 16px;
+            height: 16px;
+            border-radius: Theme.radius-full;
+            background: Theme.label-red;
+            opacity: root.selected-color == "red" ? 1.0 :
+                     (root.interactive && touch-red.has-hover) ? 1.0 : 0.7;
+
+            touch-red := TouchArea {
+                enabled: root.interactive;
+                clicked => { root.color-selected("red"); }
+            }
+        }
+
+        Rectangle {
+            width: 16px;
+            height: 16px;
+            border-radius: Theme.radius-full;
+            background: Theme.label-yellow;
+            opacity: root.selected-color == "yellow" ? 1.0 :
+                     (root.interactive && touch-yellow.has-hover) ? 1.0 : 0.7;
+
+            touch-yellow := TouchArea {
+                enabled: root.interactive;
+                clicked => { root.color-selected("yellow"); }
+            }
+        }
+
+        Rectangle {
+            width: 16px;
+            height: 16px;
+            border-radius: Theme.radius-full;
+            background: Theme.label-green;
+            opacity: root.selected-color == "green" ? 1.0 :
+                     (root.interactive && touch-green.has-hover) ? 1.0 : 0.7;
+
+            touch-green := TouchArea {
+                enabled: root.interactive;
+                clicked => { root.color-selected("green"); }
+            }
+        }
+
+        Rectangle {
+            width: 16px;
+            height: 16px;
+            border-radius: Theme.radius-full;
+            background: Theme.label-blue;
+            opacity: root.selected-color == "blue" ? 1.0 :
+                     (root.interactive && touch-blue.has-hover) ? 1.0 : 0.7;
+
+            touch-blue := TouchArea {
+                enabled: root.interactive;
+                clicked => { root.color-selected("blue"); }
+            }
+        }
+
+        Rectangle {
+            width: 16px;
+            height: 16px;
+            border-radius: Theme.radius-full;
+            background: Theme.label-purple;
+            opacity: root.selected-color == "purple" ? 1.0 :
+                     (root.interactive && touch-purple.has-hover) ? 1.0 : 0.7;
+
+            touch-purple := TouchArea {
+                enabled: root.interactive;
+                clicked => { root.color-selected("purple"); }
+            }
+        }
+    }
+}

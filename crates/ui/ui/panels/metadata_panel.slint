@@ -1,0 +1,49 @@
+// VintageLightbox - Metadata Panel
+// Photo metadata display
+
+import { Theme } from "../design_system/tokens.slint";
+import { PanelHeader, LabelText, ValueText } from "../design_system/primitives.slint";
+
+export component MetadataPanel inherits VerticalLayout {
+    in property <string> file-name: "-";
+    in property <string> date: "-";
+    in property <string> camera: "-";
+    in property <string> exposure: "-";
+    in property <string> dimensions: "-";
+
+    spacing: Theme.space-xs;
+
+    PanelHeader {
+        title: "Metadata";
+    }
+
+    VerticalLayout {
+        padding-left: Theme.space-md;
+        spacing: Theme.space-xxs;
+
+        HorizontalLayout {
+            LabelText { text: "File Name: "; }
+            ValueText { text: root.file-name; }
+        }
+
+        HorizontalLayout {
+            LabelText { text: "Date: "; }
+            ValueText { text: root.date; }
+        }
+
+        HorizontalLayout {
+            LabelText { text: "Camera: "; }
+            ValueText { text: root.camera; }
+        }
+
+        HorizontalLayout {
+            LabelText { text: "Exposure: "; }
+            ValueText { text: root.exposure; }
+        }
+
+        if root.dimensions != "-": HorizontalLayout {
+            LabelText { text: "Size: "; }
+            ValueText { text: root.dimensions; }
+        }
+    }
+}

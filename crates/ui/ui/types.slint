@@ -1,0 +1,26 @@
+// VintageLightbox - Shared Type Definitions
+// This file contains all shared data structures used across the UI
+
+export struct TileData {
+    id: string,
+    name: string,
+    image: image,
+    rating: int,
+    color_label: string,
+}
+
+export struct RowData {
+    tiles: [TileData],
+}
+
+export struct PhotoMetadata {
+    name: string,
+    date: string,
+    camera: string,
+    exposure: string,
+}
+
+export struct EditSettings {
+    exposure: float,
+    contrast: float,
+}

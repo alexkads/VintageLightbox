@@ -1,0 +1,46 @@
+// VintageLightbox - Slider Control Component
+// Slider with label and value display
+
+import { Theme } from "../design_system/tokens.slint";
+import { Slider } from "std-widgets.slint";
+
+export component SliderControl inherits VerticalLayout {
+    in property <string> label;
+    in-out property <float> value;
+    in property <float> minimum: 0.0;
+    in property <float> maximum: 1.0;
+    in property <int> decimals: 2;
+    callback changed(float);
+
+    padding-left: Theme.space-md;
+    padding-right: Theme.space-md;
+    spacing: Theme.space-xs;
+
+    HorizontalLayout {
+        alignment: space-between;
+
+        Text {
+            text: root.label;
+            color: Theme.text-muted;
+            font-size: Theme.font-sm;
+        }
+
+        Text {
+            text: root.decimals == 0 ? round(root.value) :
+                  root.decimals == 1 ? round(root.value * 10) / 10 :
+                  round(root.value * 100) / 100;
+            color: Theme.text-muted;
+            font-size: Theme.font-sm;
+        }
+    }
+
+    Slider {
+        minimum: root.minimum;
+        maximum: root.maximum;
+        value: root.value;
+        changed(val) => {
+            root.value = val;
+            root.changed(val);
+        }
+    }
+}

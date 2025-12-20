@@ -1,0 +1,92 @@
+// VintageLightbox - Develop View
+// Photo editing view with viewer and adjustment panels
+
+import { Theme } from "../design_system/tokens.slint";
+import { Spacer } from "../design_system/primitives.slint";
+import { ImageViewer } from "../components/image_viewer.slint";
+import { PresetsPanel } from "../panels/presets_panel.slint";
+import { HistoryPanel } from "../panels/history_panel.slint";
+import { BasicAdjustmentsPanel } from "../panels/basic_adjustments_panel.slint";
+
+export component DevelopView inherits HorizontalLayout {
+    in property <image> detail-image;
+    in property <string> detail-id;
+    in property <string> detail-name;
+    in property <string> detail-date;
+    in property <string> detail-camera;
+    in property <string> detail-exposure;
+    in property <int> detail-rating: 0;
+    in-out property <float> active-exposure: 0.0;
+    in-out property <float> active-contrast: 1.0;
+
+    callback back-clicked();
+    callback navigate(int);
+    callback apply-edits(float, float);
+    callback save-edits(string, float, float);
+    callback export-clicked(string);
+    callback rate-photo(string, int);
+
+    spacing: 0px;
+
+    // Left Sidebar - Presets & History
+    Rectangle {
+        width: Theme.sidebar-width;
+        background: Theme.bg-surface;
+
+        VerticalLayout {
+            padding: Theme.space-sm;
+            spacing: Theme.space-xs;
+
+            PresetsPanel { }
+
+            Spacer { size: Theme.space-lg; }
+
+            HistoryPanel { }
+
+            // Flexible space
+            Rectangle { vertical-stretch: 1; }
+        }
+    }
+
+    // Center - Image Viewer
+    ImageViewer {
+        horizontal-stretch: 1;
+        source: root.detail-image;
+
+        back-clicked => { root.back-clicked(); }
+        navigate(dir) => { root.navigate(dir); }
+    }
+
+    // Right Sidebar - Adjustments
+    BasicAdjustmentsPanel {
+        exposure: root.active-exposure;
+        contrast: root.active-contrast;
+        rating: root.detail-rating;
+        photo-name: root.detail-name;
+        photo-date: root.detail-date;
+        photo-camera: root.detail-camera;
+        photo-exposure: root.detail-exposure;
+
+        exposure-changed(val) => {
+            root.active-exposure = val;
+            root.apply-edits(root.active-exposure, root.active-contrast);
+        }
+
+        contrast-changed(val) => {
+            root.active-contrast = val;
+            root.apply-edits(root.active-exposure, root.active-contrast);
+        }
+
+        save-clicked => {
+            root.save-edits(root.detail-id, root.active-exposure, root.active-contrast);
+        }
+
+        export-clicked => {
+            root.export-clicked(root.detail-id);
+        }
+
+        rating-changed(r) => {
+            root.rate-photo(root.detail-id, r);
+        }
+    }
+}
