@@ -6,8 +6,8 @@ use infrastructure::{
     PhotoRepositoryImpl, ExifReader,
     ThumbnailGeneratorImpl, ImageExporterImpl,
 };
-    use use_cases::{ImportPhotoUseCase, SavePhotoEditsUseCase, ExportPhotoUseCase};
-    use adapters::controllers::{ImportController, EditorController, ExportController};
+    use use_cases::{ImportPhotoUseCase, SavePhotoEditsUseCase, ExportPhotoUseCase, RatePhotoUseCase, SetColorLabelUseCase};
+    use adapters::controllers::{ImportController, EditorController, ExportController, PhotoController};
     use adapters::view_models::PhotoViewModel;
     use std::path::Path;
 
@@ -39,12 +39,15 @@ use infrastructure::{
              photo_repository.clone(),
              image_exporter
         ));
+        let rate_photo_use_case = Arc::new(RatePhotoUseCase::new(photo_repository.clone()));
+        let set_color_label_use_case = Arc::new(SetColorLabelUseCase::new(photo_repository.clone()));
     
         // 3. Setup Controllers
         let import_controller = Arc::new(ImportController::new(import_photo_use_case.clone()));
         let library_controller = Arc::new(adapters::controllers::LibraryController::new(photo_repository.clone()));
         let editor_controller = Arc::new(EditorController::new(save_photo_edits_use_case.clone()));
         let export_controller = Arc::new(ExportController::new(export_photo_use_case.clone()));
+        let photo_controller = Arc::new(PhotoController::new(rate_photo_use_case, set_color_label_use_case));
 
     // 4. Setup UI
     let main_window = MainWindow::new()?;
@@ -304,26 +307,67 @@ use infrastructure::{
     // Rating Callback
     let photos_state_for_rate = photos_state.clone();
     let main_window_weak_for_rate = main_window.as_weak();
-    // Assuming we would inject a RatePhotoUseCase here in real imp.
+    let photo_controller_for_rate = photo_controller.clone();
+    
     main_window.on_rate_photo(move |id, rating| {
-        println!("Rate photo: id={} rating={}", id, rating);
-        // Minimal state update to reflect change immediately in UI (optimistic)
         let id_string = id.as_str().to_string();
-        if let Some(ui) = main_window_weak_for_rate.upgrade() {
-             ui.set_detail_rating(slint::SharedString::from(format!("Rating: {}/5", rating)));
+        let controller = photo_controller_for_rate.clone();
+        let photos_state = photos_state_for_rate.clone();
+        let ui_weak = main_window_weak_for_rate.clone();
+        
+        // Optimistic UI update
+        if let Some(ui) = ui_weak.upgrade() {
+            ui.set_detail_rating(slint::SharedString::from(format!("Rating: {}/5", rating)));
         }
         
         // Update in-memory state
-        if let Ok(mut photos) = photos_state_for_rate.lock() {
+        if let Ok(mut photos) = photos_state.lock() {
             if let Some(photo) = photos.iter_mut().find(|p| p.id == id_string) {
                 photo.rating = rating;
             }
         }
-        // TODO: Call Controller -> UseCase -> Repository to persist
+        
+        // Persist to database
+        tokio::spawn(async move {
+            if let Err(e) = controller.rate_photo(&id_string, rating).await {
+                eprintln!("Failed to rate photo: {}", e);
+                // TODO: Revert optimistic update on error
+            } else {
+                println!("Photo rated successfully: id={} rating={}", id_string, rating);
+            }
+        });
+    });
+
+    // Color Label Callback
+    let photos_state_for_label = photos_state.clone();
+    let photo_controller_for_label = photo_controller.clone();
+    
+    main_window.on_set_color_label(move |id, label| {
+        let id_string = id.as_str().to_string();
+        let label_string = label.as_str().to_string();
+        let controller = photo_controller_for_label.clone();
+        let photos_state = photos_state_for_label.clone();
+        
+        // Update in-memory state
+        if let Ok(mut photos) = photos_state.lock() {
+            if let Some(_photo) = photos.iter_mut().find(|p| p.id == id_string) {
+                // Store color label in view model (we'll need to add this field)
+                // For now, just log it
+                println!("Color label set in memory: id={} label={}", id_string, label_string);
+            }
+        }
+        
+        // Persist to database
+        tokio::spawn(async move {
+            if let Err(e) = controller.set_color_label(&id_string, &label_string).await {
+                eprintln!("Failed to set color label: {}", e);
+            } else {
+                println!("Color label set successfully: id={} label={}", id_string, label_string);
+            }
+        });
     });
 
 
-    
     // --- Callbacks ---
 
     // Updated Navigation Callback (loads active_image)
