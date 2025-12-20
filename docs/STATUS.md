@@ -1,7 +1,7 @@
 # Status do Projeto - VintageLightbox
 
-**Última atualização**: 16 de dezembro de 2025  
-**Fase Atual**: Fase 0/1 - Setup e Domain Layer ✅
+**Última atualização**: 20 de dezembro de 2025  
+**Fase Atual**: Fase 1 - MVP + UI Redesign v2.0 ✅
 
 ## 📊 Métricas Gerais
 
@@ -11,6 +11,7 @@
 | Domain Layer | 99 testes ✅ |
 | Use Cases Layer | 32 testes ✅ |
 | Infrastructure Layer | 42 testes ✅ |
+| UI Components | 8 componentes premium ✅ |
 | Cobertura (Domain) | 100% ✅ |
 | Status Compilação | ✅ Sem erros |
 

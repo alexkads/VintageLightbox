@@ -1,24 +1,24 @@
+// VintageLightbox - Lightroom-Style Photo Editor
+import { VerticalBox, HorizontalBox, Button, ScrollView, ListView, Slider } from "std-widgets.slint";
+
+
 struct TileData {
     id: string,
     name: string,
     image: image,
+    rating: int,
+    color_label: string,
 }
 
 struct RowData {
     tiles: [TileData],
 }
 
-import { VerticalBox } from "std-widgets.slint";
-import { Button } from "std-widgets.slint";
-import { ScrollView } from "std-widgets.slint";
-import { HorizontalBox } from "std-widgets.slint";
-import { ListView } from "std-widgets.slint";
-import { Slider } from "std-widgets.slint";
-
 export component MainWindow inherits Window {
-    title: "VintageLightbox POC";
-    width: 1000px;
-    height: 700px;
+    title: "VintageLightbox";
+    width: 1400px;
+    height: 900px;
+    background: #1a1a1a;
 
     callback import_clicked();
     callback tile_clicked(string);
@@ -28,11 +28,6 @@ export component MainWindow inherits Window {
     callback apply_edits(float, float);
     callback save_edits(string, float, float);
     callback export_clicked(string);
-
-    in-out property <float> active_exposure: 0.0;
-    in-out property <float> active_contrast: 1.0;
-
-    forward-focus: focus_scope;
 
     in-out property <[RowData]> grid_model: [];
     in-out property <image> detail_image;
@@ -45,6 +40,10 @@ export component MainWindow inherits Window {
     in-out property <int> current_view: 0;
     in-out property <bool> is_busy: false;
     in-out property <string> busy_message: "Processing...";
+    in-out property <float> active_exposure: 0.0;
+    in-out property <float> active_contrast: 1.0;
+
+    forward-focus: focus_scope;
 
     focus_scope := FocusScope {
         key-pressed(event) => {
@@ -57,113 +56,824 @@ export component MainWindow inherits Window {
                     root.navigate(-1);
                     return accept;
                 }
+                if (event.text == Key.Escape) {
+                    root.back_clicked();
+                    return accept;
+                }
             }
             reject
         }
 
-        VerticalBox {
+        // LIBRARY VIEW
+        VerticalLayout {
             visible: current_view == 0;
-            HorizontalBox {
-                alignment: space-between;
-                Text {
-                    text: "Library";
-                    vertical-alignment: center;
-                    font-size: 16px;
-                }
+            spacing: 0px;
 
-                Button {
-                    text: "Import Photos";
-                    clicked => {
-                        root.import_clicked();
-                    }
-                }
-            }
+            // Top Toolbar
+            Rectangle {
+                height: 48px;
+                background: #2d2d2d;
 
-            ListView {
-                for row in grid_model: HorizontalLayout {
-                    padding: 10px;
-                    spacing: 10px;
-                    height: 180px;
-                    alignment: start;
-                    for tile in row.tiles: Rectangle {
-                        width: 150px;
-                        VerticalLayout {
-                            spacing: 5px;
-                            Image {
-                                source: tile.image;
-                                width: 150px;
-                                height: 130px;
-                                image-fit: contain;
+                HorizontalLayout {
+                    padding-left: 16px;
+                    padding-right: 16px;
+                    alignment: space-between;
+
+                    HorizontalLayout {
+                        spacing: 24px;
+
+                        Text {
+                            text: "VintageLightbox";
+                            color: #e0e0e0;
+                            font-size: 14px;
+                            font-weight: 600;
+                            vertical-alignment: center;
+                        }
+
+                        HorizontalLayout {
+                            spacing: 2px;
+
+                            Rectangle {
+                                width: 80px;
+                                height: 32px;
+                                background: #3a3a3a;
+                                border-radius: 4px;
+                                Text {
+                                    text: "Library";
+                                    color: white;
+                                    font-size: 12px;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
                             }
 
+                            Rectangle {
+                                width: 80px;
+                                height: 32px;
+                                background: #2d2d2d;
+                                border-radius: 4px;
+                                Text {
+                                    text: "Develop";
+                                    color: #808080;
+                                    font-size: 12px;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                    }
+
+                    HorizontalLayout {
+                        spacing: 12px;
+
+                        Text {
+                            text: "Photos";
+                            color: #808080;
+                            font-size: 12px;
+                            vertical-alignment: center;
+                        }
+
+                        Rectangle {
+                            width: 100px;
+                            height: 28px;
+                            background: import_touch.has-hover ? #4a9eff : #3a3a3a;
+                            border-radius: 4px;
                             Text {
-                                text: tile.name;
-                                overflow: elide;
+                                text: "Import";
+                                color: white;
+                                font-size: 12px;
                                 horizontal-alignment: center;
+                                vertical-alignment: center;
                             }
-                        }
 
-                        TouchArea {
-                            clicked => {
-                                root.tile_clicked(tile.id);
+                            import_touch := TouchArea {
+                                clicked => {
+                                    root.import_clicked();
+                                }
                             }
                         }
                     }
                 }
             }
-            
-            // Empty State
-            VerticalLayout {
-                visible: root.grid_model.length == 0;
-                alignment: center;
-                spacing: 20px;
-                Text {
-                    text: "No photos in your library yet.";
-                    color: #888;
-                    font-size: 24px;
-                    horizontal-alignment: center;
-                }
 
-                Text {
-                    text: "Import photos to start editing.";
-                    color: #666;
-                    font-size: 16px;
-                    horizontal-alignment: center;
-                }
+            // Main Content
+            HorizontalLayout {
+                spacing: 0px;
 
+                // Left Panel
                 Rectangle {
-                    height: 50px;
-                    width: 200px;
-                    background: #333;
-                    border-radius: 8px;
-                    Text {
-                        text: "Import Photos";
-                        color: white;
-                        font-size: 16px;
-                        vertical-alignment: center;
-                        horizontal-alignment: center;
+                    width: 220px;
+                    background: #252525;
+
+                    VerticalLayout {
+                        padding: 8px;
+                        spacing: 4px;
+
+                        Rectangle {
+                            height: 30px;
+                            HorizontalLayout {
+                                padding-left: 8px;
+                                Text {
+                                    text: "▼ Navigator";
+                                    color: #b0b0b0;
+                                    font-size: 11px;
+                                    font-weight: 600;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            height: 140px;
+                            background: #1a1a1a;
+                            border-radius: 4px;
+                            Text {
+                                text: "Preview";
+                                color: #606060;
+                                font-size: 11px;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        Rectangle {
+                            height: 16px;
+                        }
+
+                        Rectangle {
+                            height: 30px;
+                            HorizontalLayout {
+                                padding-left: 8px;
+                                Text {
+                                    text: "▼ Catalog";
+                                    color: #b0b0b0;
+                                    font-size: 11px;
+                                    font-weight: 600;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            height: 26px;
+                            background: cat1.has-hover ? #333333 : transparent;
+                            border-radius: 3px;
+                            HorizontalLayout {
+                                padding-left: 16px;
+                                Text {
+                                    text: "All Photographs";
+                                    color: #c0c0c0;
+                                    font-size: 11px;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            cat1 := TouchArea { }
+                        }
+
+                        Rectangle {
+                            height: 26px;
+                            background: cat2.has-hover ? #333333 : transparent;
+                            border-radius: 3px;
+                            HorizontalLayout {
+                                padding-left: 16px;
+                                Text {
+                                    text: "Quick Collection";
+                                    color: #c0c0c0;
+                                    font-size: 11px;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            cat2 := TouchArea { }
+                        }
+
+                        Rectangle {
+                            height: 16px;
+                        }
+
+                        Rectangle {
+                            height: 30px;
+                            HorizontalLayout {
+                                padding-left: 8px;
+                                Text {
+                                    text: "▼ Collections";
+                                    color: #b0b0b0;
+                                    font-size: 11px;
+                                    font-weight: 600;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            height: 26px;
+                            background: #2a2a2a;
+                            border-radius: 3px;
+                            HorizontalLayout {
+                                padding-left: 16px;
+                                Text {
+                                    text: "+ Create Collection";
+                                    color: #808080;
+                                    font-size: 11px;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            vertical-stretch: 1;
+                        }
+                    }
+                }
+
+                // Center Grid
+                Rectangle {
+                    horizontal-stretch: 1;
+                    background: #1a1a1a;
+
+                    if grid_model.length > 0: ListView {
+                        for row in grid_model: HorizontalLayout {
+                            padding: 8px;
+                            spacing: 8px;
+                            height: 160px;
+
+                            for tile in row.tiles: Rectangle {
+                                width: 140px;
+                                background: tile_hover.has-hover ? #353535 : #252525;
+                                border-radius: 4px;
+
+                                VerticalLayout {
+                                    spacing: 4px;
+                                    padding: 4px;
+
+                                    Rectangle {
+                                        height: 110px;
+                                        background: #1a1a1a;
+                                        border-radius: 3px;
+
+                                        Image {
+                                            source: tile.image;
+                                            width: 100%;
+                                            height: 100%;
+                                            image-fit: contain;
+                                        }
+
+                                        if tile_hover.has-hover: Rectangle {
+                                            y: parent.height - 20px;
+                                            height: 20px;
+                                            background: #000000aa;
+                                            HorizontalLayout {
+                                                padding-left: 4px;
+                                                spacing: 1px;
+                                                Text {
+                                                    text: "★";
+                                                    color: tile.rating >= 1 ? #ffd700 : #404040;
+                                                    font-size: 11px;
+                                                }
+
+                                                Text {
+                                                    text: "★";
+                                                    color: tile.rating >= 2 ? #ffd700 : #404040;
+                                                    font-size: 11px;
+                                                }
+
+                                                Text {
+                                                    text: "★";
+                                                    color: tile.rating >= 3 ? #ffd700 : #404040;
+                                                    font-size: 11px;
+                                                }
+
+                                                Text {
+                                                    text: "★";
+                                                    color: tile.rating >= 4 ? #ffd700 : #404040;
+                                                    font-size: 11px;
+                                                }
+
+                                                Text {
+                                                    text: "★";
+                                                    color: tile.rating >= 5 ? #ffd700 : #404040;
+                                                    font-size: 11px;
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    Text {
+                                        text: tile.name;
+                                        color: #909090;
+                                        font-size: 10px;
+                                        overflow: elide;
+                                        horizontal-alignment: center;
+                                    }
+                                }
+
+                                tile_hover := TouchArea {
+                                    clicked => {
+                                        root.tile_clicked(tile.id);
+                                    }
+                                }
+
+                                Rectangle {
+                                    visible: tile_hover.has-hover;
+                                    border-width: 2px;
+                                    border-color: #4a9eff;
+                                    border-radius: 4px;
+                                }
+                            }
+                        }
                     }
 
-                    TouchArea {
-                        clicked => {
-                            root.import_clicked();
+                    if grid_model.length == 0: VerticalLayout {
+                        alignment: center;
+                        spacing: 16px;
+                        Text {
+                            text: "📷";
+                            font-size: 64px;
+                            horizontal-alignment: center;
+                        }
+
+                        Text {
+                            text: "No photos in your catalog";
+                            color: #808080;
+                            font-size: 18px;
+                            horizontal-alignment: center;
+                        }
+
+                        Text {
+                            text: "Click Import to add photos";
+                            color: #606060;
+                            font-size: 14px;
+                            horizontal-alignment: center;
+                        }
+
+                        Rectangle {
+                            width: 140px;
+                            height: 36px;
+                            background: #4a9eff;
+                            border-radius: 6px;
+                            Text {
+                                text: "Import Photos";
+                                color: white;
+                                font-size: 14px;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+
+                            TouchArea {
+                                clicked => {
+                                    root.import_clicked();
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Right Panel
+                Rectangle {
+                    width: 280px;
+                    background: #252525;
+
+                    VerticalLayout {
+                        padding: 8px;
+                        spacing: 4px;
+
+                        Rectangle {
+                            height: 80px;
+                            background: #1a1a1a;
+                            border-radius: 4px;
+                            Text {
+                                text: "Histogram";
+                                color: #505050;
+                                font-size: 11px;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        Rectangle {
+                            height: 8px;
+                        }
+
+                        Rectangle {
+                            height: 30px;
+                            HorizontalLayout {
+                                padding-left: 8px;
+                                Text {
+                                    text: "▼ Quick Develop";
+                                    color: #b0b0b0;
+                                    font-size: 11px;
+                                    font-weight: 600;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            height: 36px;
+                            HorizontalLayout {
+                                padding-left: 12px;
+                                padding-right: 12px;
+                                alignment: space-between;
+                                Text {
+                                    text: "Rating";
+                                    color: #909090;
+                                    font-size: 11px;
+                                    vertical-alignment: center;
+                                }
+
+                                HorizontalLayout {
+                                    spacing: 4px;
+                                    Text {
+                                        text: "★";
+                                        color: #505050;
+                                        font-size: 16px;
+                                    }
+
+                                    Text {
+                                        text: "★";
+                                        color: #505050;
+                                        font-size: 16px;
+                                    }
+
+                                    Text {
+                                        text: "★";
+                                        color: #505050;
+                                        font-size: 16px;
+                                    }
+
+                                    Text {
+                                        text: "★";
+                                        color: #505050;
+                                        font-size: 16px;
+                                    }
+
+                                    Text {
+                                        text: "★";
+                                        color: #505050;
+                                        font-size: 16px;
+                                    }
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            height: 36px;
+                            HorizontalLayout {
+                                padding-left: 12px;
+                                padding-right: 12px;
+                                alignment: space-between;
+                                Text {
+                                    text: "Label";
+                                    color: #909090;
+                                    font-size: 11px;
+                                    vertical-alignment: center;
+                                }
+
+                                HorizontalLayout {
+                                    spacing: 6px;
+                                    Rectangle {
+                                        width: 16px;
+                                        height: 16px;
+                                        border-radius: 8px;
+                                        background: #ef4444;
+                                        opacity: 0.7;
+                                    }
+
+                                    Rectangle {
+                                        width: 16px;
+                                        height: 16px;
+                                        border-radius: 8px;
+                                        background: #fbbf24;
+                                        opacity: 0.7;
+                                    }
+
+                                    Rectangle {
+                                        width: 16px;
+                                        height: 16px;
+                                        border-radius: 8px;
+                                        background: #4ade80;
+                                        opacity: 0.7;
+                                    }
+
+                                    Rectangle {
+                                        width: 16px;
+                                        height: 16px;
+                                        border-radius: 8px;
+                                        background: #4a9eff;
+                                        opacity: 0.7;
+                                    }
+
+                                    Rectangle {
+                                        width: 16px;
+                                        height: 16px;
+                                        border-radius: 8px;
+                                        background: #a855f7;
+                                        opacity: 0.7;
+                                    }
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            height: 12px;
+                        }
+
+                        Rectangle {
+                            height: 30px;
+                            HorizontalLayout {
+                                padding-left: 8px;
+                                Text {
+                                    text: "▼ Metadata";
+                                    color: #b0b0b0;
+                                    font-size: 11px;
+                                    font-weight: 600;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            height: 22px;
+                            HorizontalLayout {
+                                padding-left: 12px;
+                                Text {
+                                    text: "File Name: -";
+                                    color: #707070;
+                                    font-size: 10px;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            height: 22px;
+                            HorizontalLayout {
+                                padding-left: 12px;
+                                Text {
+                                    text: "Date: -";
+                                    color: #707070;
+                                    font-size: 10px;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            height: 22px;
+                            HorizontalLayout {
+                                padding-left: 12px;
+                                Text {
+                                    text: "Camera: -";
+                                    color: #707070;
+                                    font-size: 10px;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            vertical-stretch: 1;
+                        }
+                    }
+                }
+            }
+
+            // Filmstrip
+            Rectangle {
+                height: 100px;
+                background: #252525;
+                HorizontalLayout {
+                    padding: 8px;
+                    spacing: 4px;
+                    if grid_model.length > 0: ListView {
+                        for row in grid_model: HorizontalLayout {
+                            spacing: 4px;
+                            for tile in row.tiles: Rectangle {
+                                width: 80px;
+                                height: 84px;
+                                background: film_touch.has-hover ? #3a3a3a : #2a2a2a;
+                                border-radius: 3px;
+                                Image {
+                                    source: tile.image;
+                                    width: 100%;
+                                    height: 100%;
+                                    image-fit: contain;
+                                }
+
+                                film_touch := TouchArea {
+                                    clicked => {
+                                        root.tile_clicked(tile.id);
+                                    }
+                                }
+                            }
                         }
                     }
                 }
             }
         }
 
-        HorizontalBox {
+        // DEVELOP VIEW
+        HorizontalLayout {
             visible: current_view == 1;
-            image_viewport := Rectangle {
-                background: #111;
+            spacing: 0px;
+
+            Rectangle {
+                width: 220px;
+                background: #252525;
+                VerticalLayout {
+                    padding: 8px;
+                    spacing: 4px;
+                    Rectangle {
+                        height: 30px;
+                        HorizontalLayout {
+                            padding-left: 8px;
+                            Text {
+                                text: "▼ Presets";
+                                color: #b0b0b0;
+                                font-size: 11px;
+                                font-weight: 600;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        height: 24px;
+                        background: pr1.has-hover ? #333333 : transparent;
+                        border-radius: 3px;
+                        HorizontalLayout {
+                            padding-left: 16px;
+                            Text {
+                                text: "Default";
+                                color: #a0a0a0;
+                                font-size: 11px;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        pr1 := TouchArea { }
+                    }
+
+                    Rectangle {
+                        height: 24px;
+                        background: pr2.has-hover ? #333333 : transparent;
+                        border-radius: 3px;
+                        HorizontalLayout {
+                            padding-left: 16px;
+                            Text {
+                                text: "Auto";
+                                color: #a0a0a0;
+                                font-size: 11px;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        pr2 := TouchArea { }
+                    }
+
+                    Rectangle {
+                        height: 24px;
+                        background: pr3.has-hover ? #333333 : transparent;
+                        border-radius: 3px;
+                        HorizontalLayout {
+                            padding-left: 16px;
+                            Text {
+                                text: "B&W";
+                                color: #a0a0a0;
+                                font-size: 11px;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        pr3 := TouchArea { }
+                    }
+
+                    Rectangle {
+                        height: 16px;
+                    }
+
+                    Rectangle {
+                        height: 30px;
+                        HorizontalLayout {
+                            padding-left: 8px;
+                            Text {
+                                text: "▼ History";
+                                color: #b0b0b0;
+                                font-size: 11px;
+                                font-weight: 600;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        height: 24px;
+                        HorizontalLayout {
+                            padding-left: 16px;
+                            Text {
+                                text: "Import";
+                                color: #606060;
+                                font-size: 11px;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        vertical-stretch: 1;
+                    }
+                }
+            }
+
+            Rectangle {
                 horizontal-stretch: 1;
+                background: #1a1a1a;
                 clip: true;
                 property <length> pan_x: 0px;
                 property <length> pan_y: 0px;
                 property <float> zoom_level: 1.0;
                 property <length> start_pan_x;
                 property <length> start_pan_y;
+
+                Rectangle {
+                    x: 16px;
+                    y: 16px;
+                    width: 90px;
+                    height: 32px;
+                    background: back_touch.has-hover ? #3a3a3a : #2a2a2a;
+                    border-radius: 4px;
+                    HorizontalLayout {
+                        alignment: center;
+                        spacing: 6px;
+                        Text {
+                            text: "←";
+                            color: white;
+                            font-size: 14px;
+                            vertical-alignment: center;
+                        }
+
+                        Text {
+                            text: "Library";
+                            color: white;
+                            font-size: 12px;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    back_touch := TouchArea {
+                        clicked => {
+                            pan_x = 0px;
+                            pan_y = 0px;
+                            zoom_level = 1.0;
+                            root.back_clicked();
+                        }
+                    }
+                }
+
+                Rectangle {
+                    x: 16px;
+                    y: (parent.height - 40px) / 2;
+                    width: 40px;
+                    height: 40px;
+                    background: nav_prev.has-hover ? #3a3a3a : #2a2a2a;
+                    border-radius: 20px;
+                    Text {
+                        text: "‹";
+                        color: white;
+                        font-size: 24px;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+
+                    nav_prev := TouchArea {
+                        clicked => {
+                            root.navigate(-1);
+                        }
+                    }
+                }
+
+                Rectangle {
+                    x: parent.width - 56px;
+                    y: (parent.height - 40px) / 2;
+                    width: 40px;
+                    height: 40px;
+                    background: nav_next.has-hover ? #3a3a3a : #2a2a2a;
+                    border-radius: 20px;
+                    Text {
+                        text: "›";
+                        color: white;
+                        font-size: 24px;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+
+                    nav_next := TouchArea {
+                        clicked => {
+                            root.navigate(1);
+                        }
+                    }
+                }
 
                 Image {
                     source: root.detail_image;
@@ -174,201 +884,370 @@ export component MainWindow inherits Window {
                     image-fit: contain;
                 }
 
-                TouchArea {
+                img_touch := TouchArea {
+                    width: 100%;
+                    height: 100%;
                     pointer-event(event) => {
                         if (event.kind == PointerEventKind.down) {
-                            image_viewport.start_pan_x = image_viewport.pan_x - self.mouse-x;
-                            image_viewport.start_pan_y = image_viewport.pan_y - self.mouse-y;
+                            start_pan_x = pan_x - self.mouse-x;
+                            start_pan_y = pan_y - self.mouse-y;
                         }
                     }
                     moved => {
                         if (self.pressed) {
-                            image_viewport.pan_x = image_viewport.start_pan_x + self.mouse-x;
-                            image_viewport.pan_y = image_viewport.start_pan_y + self.mouse-y;
+                            pan_x = start_pan_x + self.mouse-x;
+                            pan_y = start_pan_y + self.mouse-y;
                         }
                     }
                     scroll-event(event) => {
                         if (event.delta-y > 0) {
-                            image_viewport.zoom_level = min(5.0, image_viewport.zoom_level + 0.1);
+                            zoom_level = min(5.0, zoom_level + 0.1);
                         } else {
-                            image_viewport.zoom_level = max(0.1, image_viewport.zoom_level - 0.1);
+                            zoom_level = max(0.5, zoom_level - 0.1);
                         }
                         return accept;
                     }
                     double-clicked => {
-                        image_viewport.pan_x = 0px;
-                        image_viewport.pan_y = 0px;
-                        image_viewport.zoom_level = 1.0;
-                    }
-                }
-
-                function back() {
-                    root.back_clicked();
-                    image_viewport.pan_x = 0px;
-                    image_viewport.pan_y = 0px;
-                    image_viewport.zoom_level = 1.0;
-                }
-                TouchArea {
-                    width: 100px;
-                    height: 40px;
-                    x: 20px;
-                    y: 20px;
-                    Rectangle {
-                        background: #333;
-                        border-radius: 4px;
-                        opacity: 0.8;
-                    }
-
-                    Text {
-                        text: " Back ";
-                        color: white;
-                        vertical-alignment: center;
-                        horizontal-alignment: center;
-                    }
-
-                    clicked => {
-                        back();
+                        pan_x = 0px;
+                        pan_y = 0px;
+                        zoom_level = 1.0;
                     }
                 }
             }
 
             Rectangle {
-                width: 320px;
-                background: #222;
-                VerticalLayout {
-                    padding: 20px;
-                    spacing: 15px;
-                    alignment: start;
-                    Text {
-                        text: "Details";
-                        font-size: 18px;
-                        font-weight: 700;
-                        color: white;
-                    }
-
-                    VerticalBox {
-                        spacing: 5px;
-                        Text {
-                            text: "Name: " + root.detail_name;
-                            font-size: 12px;
-                            color: #ccc;
-                            wrap: word-wrap;
-                        }
-
-                        Text {
-                            text: "Date: " + root.detail_date;
-                            font-size: 12px;
-                            color: #ccc;
-                        }
-
-                        Text {
-                            text: "Shot: " + root.detail_camera;
-                            font-size: 12px;
-                            color: #ccc;
-                        }
-
-                        Text {
-                            text: "Exif: " + root.detail_exposure;
-                            font-size: 12px;
-                            color: #ccc;
-                        }
-                    }
-
-                    Rectangle {
-                        height: 1px;
-                        background: #444;
-                    }
-
-                    Text {
-                        text: "Rating";
-                        font-size: 14px;
-                        font-weight: 600;
-                        color: white;
-                    }
-
-                    HorizontalLayout {
-                        spacing: 5px;
-                        alignment: start;
-                        for i in 5: TouchArea {
-                            width: 25px;
-                            height: 25px;
+                width: 300px;
+                background: #252525;
+                ScrollView {
+                    VerticalLayout {
+                        padding: 8px;
+                        spacing: 4px;
+                        Rectangle {
+                            height: 100px;
+                            background: #1a1a1a;
+                            border-radius: 4px;
                             Text {
-                                text: "★";
-                                font-size: 20px;
-                                color: #888;
-                            }
-
-                            clicked => {
-                                root.rate_photo(root.detail_id, i + 1);
+                                text: "Histogram";
+                                color: #505050;
+                                font-size: 11px;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
                             }
                         }
-                    }
 
-                    Text {
-                        text: root.detail_rating;
-                        font-size: 14px;
-                        color: #ffd700;
-                    }
-
-                    Rectangle {
-                        height: 1px;
-                        background: #444;
-                    }
-
-                    Text {
-                        text: "Edit";
-                        font-size: 16px;
-                        font-weight: 600;
-                        color: white;
-                    }
-
-                    Button {
-                        text: "Save Edits";
-                        clicked => {
-                            root.save_edits(root.detail_id, root.active_exposure, root.active_contrast);
-                        }
-                    }
-
-                    Button {
-                        text: "Export JPEG";
-                        clicked => {
-                            root.export_clicked(root.detail_id);
-                        }
-                    }
-
-                    VerticalBox {
-                        spacing: 5px;
-                        Text {
-                            text: "Exposure: " + (round(root.active_exposure * 100) / 100);
-                            color: white;
+                        Rectangle {
+                            height: 12px;
                         }
 
-                        exposure_slider := Slider {
-                            minimum: -2.0;
-                            maximum: 2.0;
-                            value: root.active_exposure;
-                            changed(val) => {
-                                root.active_exposure = val;
-                                root.apply_edits(root.active_exposure, root.active_contrast);
+                        Rectangle {
+                            height: 30px;
+                            HorizontalLayout {
+                                padding-left: 8px;
+                                Text {
+                                    text: "▼ Basic";
+                                    color: #b0b0b0;
+                                    font-size: 11px;
+                                    font-weight: 600;
+                                    vertical-alignment: center;
+                                }
                             }
                         }
-                    }
 
-                    VerticalBox {
-                        spacing: 5px;
-                        Text {
-                            text: "Contrast: " + (round(root.active_contrast * 100) / 100);
-                            color: white;
+                        VerticalLayout {
+                            padding-left: 12px;
+                            padding-right: 12px;
+                            spacing: 4px;
+                            HorizontalLayout {
+                                alignment: space-between;
+                                Text {
+                                    text: "Exposure";
+                                    color: #909090;
+                                    font-size: 11px;
+                                }
+
+                                Text {
+                                    text: round(root.active_exposure * 100) / 100;
+                                    color: #909090;
+                                    font-size: 11px;
+                                }
+                            }
+
+                            Slider {
+                                minimum: -2.0;
+                                maximum: 2.0;
+                                value: root.active_exposure;
+                                changed(val) => {
+                                    root.active_exposure = val;
+                                    root.apply_edits(root.active_exposure, root.active_contrast);
+                                }
+                            }
                         }
 
-                        contrast_slider := Slider {
-                            minimum: 0.5;
-                            maximum: 1.5;
-                            value: root.active_contrast;
-                            changed(val) => {
-                                root.active_contrast = val;
-                                root.apply_edits(root.active_exposure, root.active_contrast);
+                        Rectangle {
+                            height: 8px;
+                        }
+
+                        VerticalLayout {
+                            padding-left: 12px;
+                            padding-right: 12px;
+                            spacing: 4px;
+                            HorizontalLayout {
+                                alignment: space-between;
+                                Text {
+                                    text: "Contrast";
+                                    color: #909090;
+                                    font-size: 11px;
+                                }
+
+                                Text {
+                                    text: round(root.active_contrast * 100) / 100;
+                                    color: #909090;
+                                    font-size: 11px;
+                                }
                             }
+
+                            Slider {
+                                minimum: 0.5;
+                                maximum: 1.5;
+                                value: root.active_contrast;
+                                changed(val) => {
+                                    root.active_contrast = val;
+                                    root.apply_edits(root.active_exposure, root.active_contrast);
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            height: 16px;
+                        }
+
+                        Rectangle {
+                            height: 30px;
+                            HorizontalLayout {
+                                padding-left: 8px;
+                                Text {
+                                    text: "▶ Tone Curve";
+                                    color: #606060;
+                                    font-size: 11px;
+                                    font-weight: 600;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            height: 30px;
+                            HorizontalLayout {
+                                padding-left: 8px;
+                                Text {
+                                    text: "▶ HSL / Color";
+                                    color: #606060;
+                                    font-size: 11px;
+                                    font-weight: 600;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            height: 24px;
+                        }
+
+                        VerticalLayout {
+                            padding-left: 12px;
+                            padding-right: 12px;
+                            spacing: 8px;
+                            Rectangle {
+                                height: 32px;
+                                background: save_btn.has-hover ? #4a9eff : #3a8ee6;
+                                border-radius: 4px;
+                                Text {
+                                    text: "Save";
+                                    color: white;
+                                    font-size: 12px;
+                                    font-weight: 600;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+
+                                save_btn := TouchArea {
+                                    clicked => {
+                                        root.save_edits(root.detail_id, root.active_exposure, root.active_contrast);
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                height: 32px;
+                                background: export_btn.has-hover ? #4a4a4a : #3a3a3a;
+                                border-radius: 4px;
+                                Text {
+                                    text: "Export";
+                                    color: white;
+                                    font-size: 12px;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+
+                                export_btn := TouchArea {
+                                    clicked => {
+                                        root.export_clicked(root.detail_id);
+                                    }
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            height: 16px;
+                        }
+
+                        VerticalLayout {
+                            padding-left: 12px;
+                            padding-right: 12px;
+                            spacing: 8px;
+                            Text {
+                                text: "Rating";
+                                color: #808080;
+                                font-size: 11px;
+                            }
+
+                            HorizontalLayout {
+                                spacing: 4px;
+                                Rectangle {
+                                    width: 24px;
+                                    height: 24px;
+                                    Text {
+                                        text: "★";
+                                        color: r1.has-hover ? #ffd700 : #404040;
+                                        font-size: 20px;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+
+                                    r1 := TouchArea {
+                                        clicked => {
+                                            root.rate_photo(root.detail_id, 1);
+                                        }
+                                    }
+                                }
+
+                                Rectangle {
+                                    width: 24px;
+                                    height: 24px;
+                                    Text {
+                                        text: "★";
+                                        color: r2.has-hover ? #ffd700 : #404040;
+                                        font-size: 20px;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+
+                                    r2 := TouchArea {
+                                        clicked => {
+                                            root.rate_photo(root.detail_id, 2);
+                                        }
+                                    }
+                                }
+
+                                Rectangle {
+                                    width: 24px;
+                                    height: 24px;
+                                    Text {
+                                        text: "★";
+                                        color: r3.has-hover ? #ffd700 : #404040;
+                                        font-size: 20px;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+
+                                    r3 := TouchArea {
+                                        clicked => {
+                                            root.rate_photo(root.detail_id, 3);
+                                        }
+                                    }
+                                }
+
+                                Rectangle {
+                                    width: 24px;
+                                    height: 24px;
+                                    Text {
+                                        text: "★";
+                                        color: r4.has-hover ? #ffd700 : #404040;
+                                        font-size: 20px;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+
+                                    r4 := TouchArea {
+                                        clicked => {
+                                            root.rate_photo(root.detail_id, 4);
+                                        }
+                                    }
+                                }
+
+                                Rectangle {
+                                    width: 24px;
+                                    height: 24px;
+                                    Text {
+                                        text: "★";
+                                        color: r5.has-hover ? #ffd700 : #404040;
+                                        font-size: 20px;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+
+                                    r5 := TouchArea {
+                                        clicked => {
+                                            root.rate_photo(root.detail_id, 5);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            height: 24px;
+                        }
+
+                        VerticalLayout {
+                            padding-left: 12px;
+                            padding-right: 12px;
+                            spacing: 4px;
+                            Text {
+                                text: "Metadata";
+                                color: #808080;
+                                font-size: 11px;
+                                font-weight: 600;
+                            }
+
+                            Text {
+                                text: root.detail_name;
+                                color: #a0a0a0;
+                                font-size: 10px;
+                                wrap: word-wrap;
+                            }
+
+                            Text {
+                                text: root.detail_date;
+                                color: #707070;
+                                font-size: 10px;
+                            }
+
+                            Text {
+                                text: root.detail_camera;
+                                color: #707070;
+                                font-size: 10px;
+                            }
+
+                            Text {
+                                text: root.detail_exposure;
+                                color: #707070;
+                                font-size: 10px;
+                            }
+                        }
+
+                        Rectangle {
+                            vertical-stretch: 1;
                         }
                     }
                 }
@@ -376,33 +1255,34 @@ export component MainWindow inherits Window {
         }
     }
 
-    // Busy Overlay
-    Rectangle {
-        visible: root.is_busy;
+    if is_busy: Rectangle {
         width: 100%;
         height: 100%;
-        background: #000000aa; // Semi-transparent black
-
+        background: #000000cc;
         VerticalLayout {
             alignment: center;
-            spacing: 20px;
+            spacing: 16px;
             Text {
-                text: root.busy_message;
+                text: busy_message;
                 color: white;
-                font-size: 24px;
+                font-size: 18px;
                 horizontal-alignment: center;
             }
-            
-            // Pulsing Loading Bar (Static for MVP stability)
+
             Rectangle {
                 width: 200px;
                 height: 4px;
-                background: white;
-                opacity: 0.8;
+                background: #333333;
+                border-radius: 2px;
+                Rectangle {
+                    width: 60px;
+                    height: 4px;
+                    background: #4a9eff;
+                    border-radius: 2px;
+                }
             }
         }
-        
-        // Block clicks
+
         TouchArea { }
     }
 }

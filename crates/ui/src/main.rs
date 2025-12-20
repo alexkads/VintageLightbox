@@ -123,6 +123,8 @@ use infrastructure::{
                                         id: slint::SharedString::from(&vm.id),
                                         name: slint::SharedString::from(&vm.name),
                                         image,
+                                        rating: vm.rating,
+                                        color_label: slint::SharedString::from(""),
                                     }
                                 }).collect();
                                 
@@ -194,6 +196,8 @@ use infrastructure::{
                                                     id: slint::SharedString::from(&vm.id),
                                                     name: slint::SharedString::from(&vm.name),
                                                     image,
+                                                    rating: vm.rating,
+                                                    color_label: slint::SharedString::from(""),
                                                 }
                                             }).collect();
                                             

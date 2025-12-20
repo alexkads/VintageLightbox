@@ -10,27 +10,36 @@ Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Ar
 
 ---
 
-## 📊 Progresso Atual (Atualizado: 18/dez/2025)
+## 📊 Progresso Atual (Atualizado: 20/dez/2025)
 
 ### Status Geral
-- **Fase Atual**: Fase 1 (MVP) - Concluído ✅ / Iniciando Fase 2 �
+- **Fase Atual**: Fase 1 (MVP) - UI Redesign Completo ✅
 - **Total de Testes**: **173 testes passando** 🎉
   - Domain Layer: 99 testes (100% cobertura)
   - Use Cases Layer: 32 testes (7 use cases)
   - Infrastructure Layer: 42 testes (Repositories + File System + Metadata)
 
 ### Conquistas Recentes
+- ✅ **UI Redesign Completo (v2.0)** 🎨
+  - **Design System**: Paleta de cores premium, tipografia, espaçamento, sombras
+  - **Componentes Premium**: PhotoCard, PremiumButton, EditSlider, RatingSelector, ColorLabelSelector
+  - **Views Profissionais**: LibraryView com grid responsivo, DetailView com painel de edição
+  - **Animações Suaves**: Hover effects, transições, micro-interações
+  - **Empty State**: Design convidativo com CTA proeminente
+  
 - ✅ **Integração UI Completa**
   - Controller de Importação conectado
   - Diálogo de arquivos nativo via `rfd`
   - Persistência no SQLite via UI
-- ✅ **Grid de Biblioteca (UI)**
-  - `LibraryController` implementado
-  - Grid responsiva (POC) exibindo itens do banco
-  - **Thumbnails Reais**: Geração e exibição de imagens locais
+  
+- ✅ **Grid de Biblioteca (UI v2.0)**
+  - Layout responsivo com 5 colunas
+  - Cards premium com hover effects e overlays
+  - Indicadores de rating e color label
+  - Scroll virtualizado para performance
+  
 - ✅ **Infrastructure Layer 100% completo** (42 testes)
   - Thumbnails, EXIF, Raw, Database
-
 
 - ✅ **Domain Layer 100% completo** (99 testes)
   - Value Objects: Rating, PhotoId, ColorLabel, FilePath, CollectionId
@@ -48,7 +57,7 @@ Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Ar
   - **Database Module**: Connection pool, migrations (2 testes)
   - **Schema SQLite**: 3 tabelas com índices otimizados
 
-- 🔄 **Infrastructure Layer - File System + Metadata** (21 testes)
+- ✅ **Infrastructure Layer - File System + Metadata** (21 testes)
   - **FileScanner**: Scan recursivo de diretórios (9 testes)
   - **ScanDirectoryUseCase**: Scan + import automático (5 testes)
   - **ExifReader**: Extração de metadados EXIF (7 testes)
@@ -57,22 +66,22 @@ Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Ar
     - Integrado com ImportPhotoUseCase e ScanDirectoryUseCase ✅
 
 ### Próximos Passos
-1. **Infrastructure Layer** - Implementar SQLite repositories e file system
-2. **RAW Processing** - Integração com LibRaw/rawler
-3. **UI Layer** - Interface Slint para visualização e edição (Parcial)
-4. **Adapters Layer** - Controllers e Presenters (Parcial)
+1. **Rust Integration** - Conectar novos componentes UI aos controllers
+2. **Advanced Features** - Histograma, before/after, presets
+3. **RAW Processing** - Integração com LibRaw/rawler
+4. **Performance** - Otimizações e profiling
 
-### Entregas Recentes (Fase 1.5)
-- ✅ **Grid Personalizado**: Layout calculado com suporte a 5 colunas.
-- ✅ **Visualização Detalhada**: Zoom in/out (básico), navegação.
-- ✅ **Performance**: Carregamento assíncrono de metadados, síncrono de imagens (UI responsiva).
-- ✅ **Grid Virtualizado (v1.6)**: Implementado `ListView` com chunks de 5 fotos para scroll infinito eficiente.
-- ✅ **Metadados UI (v1.6)**: Painel lateral com EXIF (ISO, Abertura, Shutter) e Rating.
-- ✅ **Interatividade (v1.7)**: Zoom/Pan com mouse, Navegação por setas, Rating clicável.
-- ✅ **Editor UI (v1.7)**: Sliders de Exposição e Contraste (Skeleton).
-- ✅ **Processamento de Imagem (v1.8)**: Aplicação de Brilho/Contraste em tempo real (Backend + UI Integration).
-- ✅ **Debounce (v1.11)**: Otimização de sliders com delay para evitar travamentos.
-- ✅ **Exportação (v1.10)**: Salvar imagem editada em alta resolução (JPEG).
+### Entregas Recentes (Fase 2.0 - UI Redesign)
+- ✅ **Design System Completo**: Tokens de cor, tipografia, espaçamento, sombras, animações
+- ✅ **Componentes Premium**: 
+  - PhotoCard com hover effects e overlays de rating/label
+  - PremiumButton com 3 variantes (primary, secondary, ghost)
+  - EditSlider com gradient fill e handle animado
+  - RatingSelector com preview e animações
+  - ColorLabelSelector com 5 cores e scale effects
+- ✅ **LibraryView Profissional**: Header com contador, grid responsivo, empty state premium
+- ✅ **DetailView Completo**: Viewer com zoom/pan, painel de metadados, rating/labels, sliders de edição
+- ✅ **MainWindow Integrado**: Roteamento de views, keyboard shortcuts, busy overlay
 
 ### Métricas de Qualidade
 - ✅ 100% cobertura no Domain Layer
