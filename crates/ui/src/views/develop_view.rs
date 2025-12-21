@@ -24,6 +24,27 @@ impl DevelopView {
         photo_sender: &tokio::sync::mpsc::Sender<Result<Vec<adapters::view_models::PhotoViewModel>, String>>,
         ctx: &egui::Context,
     ) {
+        // Bottom filmstrip (must be first to reserve space)
+        egui::TopBottomPanel::bottom("filmstrip_develop")
+            .exact_height(120.0)  // 80px thumbnails + 40px padding
+            .show_inside(ui, |ui| {
+                let photos = state.photos.clone();
+                let selected_id = state.selected_photo_id.clone();
+                
+                crate::components::filmstrip::Filmstrip::show(
+                    ui,
+                    &photos,
+                    &selected_id,
+                    |photo_id| {
+                        // Select photo and trigger load in Develop view
+                        state.selected_photo_id = Some(photo_id.clone());
+                        // Clear current image to trigger reload
+                        state.loaded_photo_id = None;
+                        ctx.request_repaint();
+                    },
+                );
+            });
+
         // Left sidebar - Presets & History
         egui::SidePanel::left("develop_left")
             .resizable(false)

@@ -18,6 +18,24 @@ impl LibraryView {
     }
 
     pub fn show(&mut self, ui: &mut Ui, state: &mut AppState, ctx: &egui::Context) {
+        // Bottom filmstrip (must be first to reserve space)
+        egui::TopBottomPanel::bottom("filmstrip")
+            .exact_height(120.0)  // 80px thumbnails + 40px padding
+            .show_inside(ui, |ui| {
+                let photos = state.photos.clone();
+                let selected_id = state.selected_photo_id.clone();
+                
+                crate::components::filmstrip::Filmstrip::show(
+                    ui,
+                    &photos,
+                    &selected_id,
+                    |photo_id| {
+                        // Select photo but STAY in Library view
+                        state.selected_photo_id = Some(photo_id);
+                    },
+                );
+            });
+
         // Left sidebar
         egui::SidePanel::left("left_sidebar")
             .resizable(false)
@@ -42,13 +60,6 @@ impl LibraryView {
         egui::CentralPanel::default().show_inside(ui, |ui| {
             self.photo_grid.show(ui, state, ctx);
         });
-
-        // Bottom filmstrip
-        egui::TopBottomPanel::bottom("filmstrip")
-            .exact_height(Theme::FILMSTRIP_HEIGHT)
-            .show_inside(ui, |ui| {
-                crate::components::filmstrip::Filmstrip::show(ui, state);
-            });
     }
 
     fn show_left_sidebar(&self, ui: &mut Ui, state: &mut AppState) {
