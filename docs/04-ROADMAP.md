@@ -68,6 +68,12 @@ Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Ar
   - **BLOB Cache (SQLite)**: Thumbs e Previews armazenados em BLOBs (rusqlite) para library limpa e alta performance. ✅ verified
   - **Path Centralization**: Estrutura `infrastructure::paths` implementada para suporte robusto cross-platform (Mac/Win/Linux). ✅ verified
 
+- ✅ **FOLDER NAVIGATION (21/dez/2025)** 📂
+  - **Árvore de Diretórios**: Visualização da estrutura de pastas
+  - **Filtro Recursivo**: Clicar em uma pasta filtra a grid para mostrar fotos dela e subpastas
+  - **Integração Library**: Painel "Folders" na sidebar esquerda
+
+
 - ✅ **SISTEMA DE EDIÇÃO PROFISSIONAL (20/dez/2025)** 🎨
   - **11 Sliders de Ajuste**: Sistema completo de edição não-destrutiva
     - **Básicos**: Exposure, Contrast
@@ -530,6 +536,7 @@ Criar versão mínima funcional com importação, visualização, edição bási
 - [x] ✅ **Whites e Blacks** - Controle fino de extremos tonais
 - [x] ✅ **Highlights e Shadows** - Ajuste seletivo por luminância
 - [x] ✅ **Temperature e Tint** - White balance completo
+- [ ] **Smart Folder Hierarchy** - Detecção inteligente de datas (Ano/Mês) na árvore da biblioteca
 - [ ] 🎯 **Tone Curve** - Curva de tons paramétrica (PRÓXIMO)
 - [ ] **Point Curve** - Curva com múltiplos pontos de controle
 - [ ] **HSL/Color** - Ajustes por canal de cor (8 canais: Red, Orange, Yellow, Green, Aqua, Blue, Purple, Magenta)

@@ -195,6 +195,16 @@ pub struct AppState {
     pub saved_clarity: f32,
     pub saved_vibrance: f32,
     pub saved_saturation: f32,
+
+    // ============================================
+    // Folder Navigation
+    // ============================================
+    /// Root nodes of the folder tree
+    pub folder_tree_roots: Vec<crate::components::folder_tree::FolderNode>,
+    /// Currently selected folder path filter
+    pub filter_folder_path: Option<std::path::PathBuf>,
+    /// Set of expanded folder paths in the tree
+    pub expanded_folders: HashSet<String>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -274,6 +284,9 @@ impl AppState {
             saved_clarity: 0.0,
             saved_vibrance: 0.0,
             saved_saturation: 0.0,
+            folder_tree_roots: Vec::new(),
+            filter_folder_path: None,
+            expanded_folders: HashSet::new(),
         }
     }
 
@@ -352,6 +365,15 @@ impl AppState {
                 // Filter by color label
                 if let Some(ref filter_label) = self.filter_color_label {
                     if photo.color_label.as_ref() != Some(filter_label) {
+                        return false;
+                    }
+                }
+
+                // Filter by Folder Path
+                if let Some(ref folder_path) = self.filter_folder_path {
+                    let photo_path = std::path::Path::new(&photo.path);
+                    // Check if photo is within the selected folder (recursive)
+                    if !photo_path.starts_with(folder_path) {
                         return false;
                     }
                 }
@@ -502,6 +524,12 @@ impl AppState {
     /// Get count of selected photos
     pub fn selection_count(&self) -> usize {
         self.selected_photo_ids.len()
+    }
+
+    /// Rebuild the folder tree from current photos
+    pub fn rebuild_folder_tree(&mut self) {
+        use crate::components::folder_tree::FolderNode;
+        self.folder_tree_roots = FolderNode::build_tree(&self.photos);
     }
 }
 

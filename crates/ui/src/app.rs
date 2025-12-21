@@ -126,6 +126,7 @@ impl eframe::App for VintageLightboxApp {
                 Ok(photos) => {
                     println!("Received {} photos from channel", photos.len());
                     self.state.photos = photos;
+                    self.state.rebuild_folder_tree();
                 }
                 Err(e) => {
                     eprintln!("Failed to load photos: {}", e);

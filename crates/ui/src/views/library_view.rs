@@ -134,6 +134,25 @@ impl LibraryView {
             // Reset filters
             state.filter_min_rating = 0;
             state.filter_color_label = None;
+            state.filter_folder_path = None;
+        }
+
+        ui.add_space(Theme::SPACE_LG);
+
+        // Folders Panel
+        widgets::section_title(ui, "Folders");
+        ui.add_space(Theme::SPACE_SM);
+
+        let mut folder_tree = crate::components::folder_tree::FolderTree::new(
+            state.filter_folder_path.as_deref(),
+            &mut state.expanded_folders,
+        );
+
+        if let Some(clicked_path) = folder_tree.show(ui, &state.folder_tree_roots) {
+            state.filter_folder_path = Some(clicked_path);
+            // Reset other filters if desired, or keep them additive?
+            // Lightroom behavior: Clicking a folder usually resets "Collection" selection but keeps filters.
+            // For now, let's just set the folder path.
         }
 
         ui.add_space(Theme::SPACE_LG);
