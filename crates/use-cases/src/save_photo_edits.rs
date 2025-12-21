@@ -29,6 +29,10 @@ impl SavePhotoEditsUseCase {
         clarity: f32,
         vibrance: f32,
         saturation: f32,
+        tone_curve_shadows: f32,
+        tone_curve_darks: f32,
+        tone_curve_lights: f32,
+        tone_curve_highlights: f32,
     ) -> DomainResult<()> {
         let mut photo = self.photo_repository.find_by_id(&id).await?
             .ok_or(DomainError::PhotoNotFound)?;
@@ -36,7 +40,9 @@ impl SavePhotoEditsUseCase {
         photo.set_edits(
             Some(exposure), Some(contrast), Some(temperature), Some(tint),
             Some(highlights), Some(shadows), Some(whites), Some(blacks),
-            Some(clarity), Some(vibrance), Some(saturation)
+            Some(clarity), Some(vibrance), Some(saturation),
+            Some(tone_curve_shadows), Some(tone_curve_darks),
+            Some(tone_curve_lights), Some(tone_curve_highlights)
         )?;
         self.photo_repository.update(&photo).await?;
 
@@ -85,13 +91,19 @@ mod tests {
              .returning(move |_| Ok(Some(photo_clone.clone())));
 
         mock_repo.expect_update()
-             .withf(|p| p.edit_exposure() == Some(1.0) && p.edit_contrast() == Some(1.2))
+             .withf(|p| {
+                 p.edit_exposure() == Some(1.0) && 
+                 p.edit_contrast() == Some(1.2) &&
+                 p.edit_tone_curve_shadows() == Some(-30.0) &&
+                 p.edit_tone_curve_highlights() == Some(30.0)
+             })
              .times(1)
              .returning(|_| Ok(()));
 
         let use_case = SavePhotoEditsUseCase::new(Arc::new(mock_repo));
         let result = use_case.execute(
-            id, 1.0, 1.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+            id, 1.0, 1.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            -30.0, -10.0, 10.0, 30.0
         ).await;
 
         assert!(result.is_ok());
@@ -109,7 +121,8 @@ mod tests {
 
         let use_case = SavePhotoEditsUseCase::new(Arc::new(mock_repo));
         let result = use_case.execute(
-            id, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+            id, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0
         ).await;
 
         match result {

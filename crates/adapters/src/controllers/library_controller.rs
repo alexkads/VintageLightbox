@@ -51,6 +51,10 @@ impl LibraryController {
                         edit_clarity: photo.edit_clarity(),
                         edit_vibrance: photo.edit_vibrance(),
                         edit_saturation: photo.edit_saturation(),
+                        edit_tone_curve_shadows: photo.edit_tone_curve_shadows(),
+                        edit_tone_curve_darks: photo.edit_tone_curve_darks(),
+                        edit_tone_curve_lights: photo.edit_tone_curve_lights(),
+                        edit_tone_curve_highlights: photo.edit_tone_curve_highlights(),
                     }
                 })
                 .collect();

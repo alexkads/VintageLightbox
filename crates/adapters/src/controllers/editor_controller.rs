@@ -25,12 +25,17 @@ impl EditorController {
         clarity: f32,
         vibrance: f32,
         saturation: f32,
+        tone_curve_shadows: f32,
+        tone_curve_darks: f32,
+        tone_curve_lights: f32,
+        tone_curve_highlights: f32,
     ) -> Result<(), String> {
         let photo_id = PhotoId::from_string(&id).map_err(|e| e.to_string())?;
 
         self.save_photo_edits_use_case.execute(
             photo_id, exposure, contrast, temperature, tint, highlights, shadows,
-            whites, blacks, clarity, vibrance, saturation
+            whites, blacks, clarity, vibrance, saturation,
+            tone_curve_shadows, tone_curve_darks, tone_curve_lights, tone_curve_highlights
         ).await
             .map_err(|e| e.to_string())
     }

@@ -274,7 +274,8 @@ impl DevelopView {
                 tokio::spawn(async move {
                     if let Err(e) = controller.save_edits(
                         id, exposure, contrast, temperature, tint, highlights, shadows,
-                        whites, blacks, clarity, vibrance, saturation
+                        whites, blacks, clarity, vibrance, saturation,
+                        0.0, 0.0, 0.0, 0.0  // Tone curve (to be implemented in UI)
                     ).await {
                         eprintln!("Failed to save edits: {}", e);
                     }

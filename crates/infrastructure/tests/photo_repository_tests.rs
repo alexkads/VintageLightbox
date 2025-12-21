@@ -240,7 +240,8 @@ async fn test_save_and_find_photo_with_edits() {
 
     // Set edits
     photo.set_edits(
-        Some(1.5), Some(0.8), None, None, None, None, None, None, None, None, None
+        Some(1.5), Some(0.8), None, None, None, None, None, None, None, None, None,
+        None, None, None, None
     ).unwrap();
 
     // Act - Save
@@ -257,7 +258,8 @@ async fn test_save_and_find_photo_with_edits() {
     // Act - Update (modify edits)
     let mut found_mut = found;
     found_mut.set_edits(
-        Some(-0.5), Some(1.2), None, None, None, None, None, None, None, None, None
+        Some(-0.5), Some(1.2), None, None, None, None, None, None, None, None, None,
+        None, None, None, None
     ).unwrap();
     repo.update(&found_mut).await.unwrap();
 

@@ -22,4 +22,8 @@ pub struct PhotoViewModel {
     pub edit_clarity: Option<f32>,
     pub edit_vibrance: Option<f32>,
     pub edit_saturation: Option<f32>,
+    pub edit_tone_curve_shadows: Option<f32>,
+    pub edit_tone_curve_darks: Option<f32>,
+    pub edit_tone_curve_lights: Option<f32>,
+    pub edit_tone_curve_highlights: Option<f32>,
 }

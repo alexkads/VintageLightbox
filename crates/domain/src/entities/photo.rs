@@ -54,6 +54,14 @@ pub struct Photo {
     edit_vibrance: Option<f32>,
     /// Ajuste de saturation (overall color intensity)
     edit_saturation: Option<f32>,
+    /// Tone curve: Shadows adjustment (-100 to +100)
+    edit_tone_curve_shadows: Option<f32>,
+    /// Tone curve: Darks adjustment (-100 to +100)
+    edit_tone_curve_darks: Option<f32>,
+    /// Tone curve: Lights adjustment (-100 to +100)
+    edit_tone_curve_lights: Option<f32>,
+    /// Tone curve: Highlights adjustment (-100 to +100)
+    edit_tone_curve_highlights: Option<f32>,
 }
 
 impl Photo {
@@ -84,6 +92,10 @@ impl Photo {
         edit_clarity: Option<f32>,
         edit_vibrance: Option<f32>,
         edit_saturation: Option<f32>,
+        edit_tone_curve_shadows: Option<f32>,
+        edit_tone_curve_darks: Option<f32>,
+        edit_tone_curve_lights: Option<f32>,
+        edit_tone_curve_highlights: Option<f32>,
     ) -> Self {
         Self {
             id,
@@ -106,6 +118,10 @@ impl Photo {
             edit_clarity,
             edit_vibrance,
             edit_saturation,
+            edit_tone_curve_shadows,
+            edit_tone_curve_darks,
+            edit_tone_curve_lights,
+            edit_tone_curve_highlights,
         }
     }
 
@@ -114,7 +130,8 @@ impl Photo {
         let now = Utc::now();
         Self::reconstruct(
             id, file_path, now, now, None, None, None, false, None,
-            None, None, None, None, None, None, None, None, None, None, None
+            None, None, None, None, None, None, None, None, None, None, None,
+            None, None, None, None
         )
     }
 
@@ -307,6 +324,10 @@ impl Photo {
         clarity: Option<f32>,
         vibrance: Option<f32>,
         saturation: Option<f32>,
+        tone_curve_shadows: Option<f32>,
+        tone_curve_darks: Option<f32>,
+        tone_curve_lights: Option<f32>,
+        tone_curve_highlights: Option<f32>,
     ) -> DomainResult<()> {
         self.edit_exposure = exposure;
         self.edit_contrast = contrast;
@@ -319,9 +340,33 @@ impl Photo {
         self.edit_clarity = clarity;
         self.edit_vibrance = vibrance;
         self.edit_saturation = saturation;
+        self.edit_tone_curve_shadows = tone_curve_shadows;
+        self.edit_tone_curve_darks = tone_curve_darks;
+        self.edit_tone_curve_lights = tone_curve_lights;
+        self.edit_tone_curve_highlights = tone_curve_highlights;
         self.is_edited = true;
         self.modified_at = Utc::now();
         Ok(())
+    }
+
+    /// Retorna o campo edit_tone_curve_shadows
+    pub fn edit_tone_curve_shadows(&self) -> Option<f32> {
+        self.edit_tone_curve_shadows
+    }
+
+    /// Retorna o campo edit_tone_curve_darks
+    pub fn edit_tone_curve_darks(&self) -> Option<f32> {
+        self.edit_tone_curve_darks
+    }
+
+    /// Retorna o campo edit_tone_curve_lights
+    pub fn edit_tone_curve_lights(&self) -> Option<f32> {
+        self.edit_tone_curve_lights
+    }
+
+    /// Retorna o campo edit_tone_curve_highlights
+    pub fn edit_tone_curve_highlights(&self) -> Option<f32> {
+        self.edit_tone_curve_highlights
     }
 }
 
@@ -515,11 +560,13 @@ mod tests {
         // Usar reconstruct para garantir timestamps idênticos
         let photo1 = Photo::reconstruct(
             id, path.clone(), now, now, None, None, None, false, None,
-            None, None, None, None, None, None, None, None, None, None, None
+            None, None, None, None, None, None, None, None, None, None, None,
+            None, None, None, None
         );
         let photo2 = Photo::reconstruct(
             id, path, now, now, None, None, None, false, None,
-            None, None, None, None, None, None, None, None, None, None, None
+            None, None, None, None, None, None, None, None, None, None, None,
+            None, None, None, None
         );
 
         // Assert
@@ -536,7 +583,8 @@ mod tests {
         assert!(!photo.is_edited());
 
         photo.set_edits(
-            Some(1.5), Some(1.2), None, None, None, None, None, None, None, None, None
+            Some(1.5), Some(1.2), None, None, None, None, None, None, None, None, None,
+            None, None, None, None
         ).unwrap();
 
         assert_eq!(photo.edit_exposure(), Some(1.5));
@@ -558,6 +606,100 @@ mod tests {
         assert_eq!(photo1, photo2);
         assert_eq!(photo2.rating(), Some(Rating::FIVE));
         assert_eq!(photo2.color_label(), Some(ColorLabel::Green));
+    }
+
+    // 🔴 RED: Tests for Tone Curve fields
+    #[test]
+    fn test_tone_curve_fields_default_none() {
+        // Arrange & Act
+        let photo = Photo::new_test();
+
+        // Assert
+        assert!(photo.edit_tone_curve_shadows().is_none());
+        assert!(photo.edit_tone_curve_darks().is_none());
+        assert!(photo.edit_tone_curve_lights().is_none());
+        assert!(photo.edit_tone_curve_highlights().is_none());
+    }
+
+    #[test]
+    fn test_set_tone_curve_via_set_edits() {
+        // Arrange
+        let mut photo = Photo::new_test();
+
+        // Act
+        photo.set_edits(
+            None, None, None, None, None, None, None, None, None, None, None,
+            Some(-50.0), Some(-25.0), Some(25.0), Some(50.0)
+        ).unwrap();
+
+        // Assert
+        assert_eq!(photo.edit_tone_curve_shadows(), Some(-50.0));
+        assert_eq!(photo.edit_tone_curve_darks(), Some(-25.0));
+        assert_eq!(photo.edit_tone_curve_lights(), Some(25.0));
+        assert_eq!(photo.edit_tone_curve_highlights(), Some(50.0));
+        assert!(photo.is_edited());
+    }
+
+    #[test]
+    fn test_tone_curve_all_zones() {
+        // Arrange
+        let mut photo = Photo::new_test();
+
+        // Act - Test all four zones
+        photo.set_edits(
+            None, None, None, None, None, None, None, None, None, None, None,
+            Some(-100.0), Some(-50.0), Some(50.0), Some(100.0)
+        ).unwrap();
+
+        // Assert
+        assert_eq!(photo.edit_tone_curve_shadows(), Some(-100.0));
+        assert_eq!(photo.edit_tone_curve_darks(), Some(-50.0));
+        assert_eq!(photo.edit_tone_curve_lights(), Some(50.0));
+        assert_eq!(photo.edit_tone_curve_highlights(), Some(100.0));
+    }
+
+    #[test]
+    fn test_tone_curve_with_other_edits() {
+        // Arrange
+        let mut photo = Photo::new_test();
+
+        // Act - Combine tone curve with other adjustments
+        photo.set_edits(
+            Some(1.5), Some(1.2), Some(5.0), Some(-3.0),
+            Some(-20.0), Some(30.0), Some(10.0), Some(-5.0),
+            Some(0.3), Some(0.2), Some(0.1),
+            Some(-30.0), Some(-10.0), Some(10.0), Some(30.0)
+        ).unwrap();
+
+        // Assert - All fields should be set
+        assert_eq!(photo.edit_exposure(), Some(1.5));
+        assert_eq!(photo.edit_contrast(), Some(1.2));
+        assert_eq!(photo.edit_tone_curve_shadows(), Some(-30.0));
+        assert_eq!(photo.edit_tone_curve_darks(), Some(-10.0));
+        assert_eq!(photo.edit_tone_curve_lights(), Some(10.0));
+        assert_eq!(photo.edit_tone_curve_highlights(), Some(30.0));
+        assert!(photo.is_edited());
+    }
+
+    #[test]
+    fn test_tone_curve_reconstruct_roundtrip() {
+        // Arrange
+        let id = PhotoId::new();
+        let path = FilePath::new("/test/photo.jpg").unwrap();
+        let now = Utc::now();
+
+        // Act - Reconstruct with tone curve values
+        let photo = Photo::reconstruct(
+            id, path, now, now, None, None, None, true, None,
+            Some(1.0), Some(1.0), None, None, None, None, None, None, None, None, None,
+            Some(-40.0), Some(-20.0), Some(20.0), Some(40.0)
+        );
+
+        // Assert
+        assert_eq!(photo.edit_tone_curve_shadows(), Some(-40.0));
+        assert_eq!(photo.edit_tone_curve_darks(), Some(-20.0));
+        assert_eq!(photo.edit_tone_curve_lights(), Some(20.0));
+        assert_eq!(photo.edit_tone_curve_highlights(), Some(40.0));
     }
 }
 

@@ -54,9 +54,11 @@ async fn test_e2e_import_edit_export_flow() {
     // 3. EDIT (Save Edits)
     // Apply Exposure +1.0 (Brighten) and Contrast 1.2
     let save_result = save_edits_uc.execute(
-        photo_id.clone(), 1.0, 1.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+        photo_id.clone(), 1.0, 1.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0
     ).await;
     assert!(save_result.is_ok(), "Save edits failed");
+
 
     // Verify persistence
     let updated_photo = repo.find_by_id(&photo_id).await.unwrap().unwrap();
