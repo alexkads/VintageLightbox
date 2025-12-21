@@ -23,6 +23,18 @@ Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Ar
 
 ### Conquistas Recentes
 
+- ✅ **GPU ACCELERATION (WGPU) (21/dez/2025)** 🚀
+  - **WGPU Compute Shaders**: Processamento de imagem acelerado por hardware
+  - **Pipeline Híbrido**: Fallback automático para CPU se GPU não disponível
+  - **Performance**: Ajustes em tempo real (< 16ms) mesmo em imagens 24MP+
+  - **11 Ajustes Suportados**: Exposure, Contrast, Temp, Tint, Highlights, Shadows, Whites, Blacks, Clarity, Vibrance, Saturation
+  - **Arquitetura**: `GpuImageProcessor` com LRU Cache de texturas e buffers
+
+- ✅ **CENTRALIZED PATHS (21/dez/2025)** 📁
+  - **Cross-Platform**: `infrastructure::paths` gerencia caminhos (Mac/Win/Linux)
+  - **Standardization**: Uso do crate `directories` para localização correta de config/data/cache
+  - **Robustez**: Previne erros de "caminho não encontrado" em diferentes OS
+
 - ✅ **ASYNC IMAGE PROCESSING (21/dez/2025)** ⚡
   - **Rayon Integration**: Processamento paralelo de thumbnails e imagens
   - **AsyncThumbnailLoader**: Carregamento de thumbnails em threads separadas
@@ -50,8 +62,7 @@ Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Ar
   - **4 Zonas Paramétricas**: Shadows, Darks, Lights, Highlights (-100 a +100)
   - **Domain Layer**: 5 novos testes para tone curve
   - **Database Migration**: 006_add_tone_curve_fields.sql
-  - **Full Stack**: Domain → Use Cases → Adapters → UI integrado
-  - **Próximo Passo**: Sliders na UI e algoritmo de processamento
+  - **Status**: Backend pronto, UI e Shader pendentes
 
 - ✅ **CORREÇÃO CRÍTICA: Gray Photo Bug (21/dez/2025)** 🐛
   - **Problema**: Apenas a primeira foto carregava corretamente, fotos subsequentes apareciam como tela cinza
@@ -66,10 +77,10 @@ Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Ar
   - **Configurável**: Toggle via `.env` (SHOW_PERFORMANCE_STATS)
   - **Otimização de Upload**: Texture upload movido para background thread (zero UI blocking)
   - **BLOB Cache (SQLite)**: Thumbs e Previews armazenados em BLOBs (rusqlite) para library limpa e alta performance. ✅ verified
-  - **Path Centralization**: Estrutura `infrastructure::paths` implementada para suporte robusto cross-platform (Mac/Win/Linux). ✅ verified
 
 - ✅ **FOLDER NAVIGATION (21/dez/2025)** 📂
   - **Árvore de Diretórios**: Visualização da estrutura de pastas
+  - **Ano/Mês/Dia**: Estrutura hierárquica inteligente para datas
   - **Filtro Recursivo**: Clicar em uma pasta filtra a grid para mostrar fotos dela e subpastas
   - **Integração Library**: Painel "Folders" na sidebar esquerda
 
@@ -188,12 +199,13 @@ Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Ar
 1. ✅ ~~**Undo/Redo**~~ - Sistema de histórico completo (20 estados, Cmd+Z/Cmd+Shift+Z)
 2. ✅ ~~**Reset de Ajustes**~~ - Volta todos os sliders ao padrão
 3. ✅ ~~**Before/After Toggle**~~ - Comparação antes/depois (tecla \)
-4. 🎯 **Tone Curve** - Curva de tons paramétrica (PRÓXIMO)
-5. **Presets System** - Salvar e aplicar presets de edição (Default, Auto, B&W, Custom)
-6. **HSL/Color** - Ajustes por canal de cor (8 canais)
-7. **RAW Processing Avançado** - Integração completa com LibRaw/rawler para mais formatos
-8. **Performance Optimization** - Profiling e otimizações, possível GPU acceleration (Phase 2.1)
-9. **Instaladores** - Build para macOS e Windows
+4. ✅ ~~**GPU Acceleration**~~ - WGPU Compute Shaders implementados
+5. 🎯 **Tone Curve UI** - Sliders paramétricos e integração com shader
+6. **Cache System Optimization** - Cache robusto (L1/L2) para performance em catálogos grandes
+7. **Presets System** - Salvar e aplicar presets de edição (Default, Auto, B&W, Custom)
+8. **HSL/Color** - Ajustes por canal de cor (8 canais)
+9. **RAW Processing Avançado** - Integração completa com LibRaw/rawler para mais formatos
+10. **Instaladores** - Build para macOS e Windows
 
 ### Entregas Recentes (Fase 2.0 - UI Redesign + Architecture)
 - ✅ **UI Architecture Refactoring (Clean Architecture)**:
