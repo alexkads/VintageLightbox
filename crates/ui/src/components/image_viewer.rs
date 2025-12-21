@@ -1,7 +1,7 @@
 // Image Viewer Component
 // Displays images with zoom, pan, and navigation controls
 
-use egui::{Ui, Vec2, Rect, Sense, UiBuilder};
+use egui::{Ui, Vec2, Rect, Sense, UiBuilder, Color32};
 use crate::state::{AppState, CurrentView};
 use crate::design_system::{theme::Theme, widgets};
 
@@ -35,7 +35,7 @@ impl ImageViewer {
             state.reset_viewer();
         }
 
-        // Draw image if available (prefer full-res, fallback to thumbnail)
+        // Draw image logic with transition
         if let Some(texture) = &state.detail_image {
             // Full resolution image available
             let texture_size = Vec2::new(texture.size()[0] as f32, texture.size()[1] as f32);
@@ -51,7 +51,39 @@ impl ImageViewer {
             let center = rect.center() + state.pan_offset;
             let img_rect = Rect::from_center_size(center, zoomed_size);
 
-            egui::Image::new(texture).paint_at(ui, img_rect);
+            // Transition Logic
+            let mut opacity = 1.0;
+            let mut is_transitioning = false;
+
+            if let Some(loaded_at) = state.detail_image_loaded_at {
+                let elapsed = loaded_at.elapsed().as_secs_f32();
+                let duration = 0.35; // 350ms transition
+                
+                if elapsed < duration {
+                    // Ease-out curve for smoother feel: 1 - (1-x)^2
+                    let t = elapsed / duration;
+                    opacity = 1.0 - (1.0 - t).powi(2);
+                    is_transitioning = true;
+                    ui.ctx().request_repaint(); // Continue animation
+                } else {
+                    // Transition complete
+                    state.detail_image_loaded_at = None;
+                }
+            }
+
+            // If transitioning, draw the thumbnail underneath
+            if is_transitioning {
+                if let Some(thumbnail) = &state.thumbnail_preview {
+                    // Draw thumbnail stretched to exactly match the detail image rect
+                    // This ensures perfect alignment during cross-fade
+                    egui::Image::new(thumbnail).paint_at(ui, img_rect);
+                }
+            }
+
+            // Draw full-res image with opacity
+            let tint = Color32::from_white_alpha((opacity * 255.0) as u8);
+            egui::Image::new(texture).tint(tint).paint_at(ui, img_rect);
+            
         } else if let Some(thumbnail) = &state.thumbnail_preview {
             // LIGHTROOM-STYLE: Show thumbnail as instant preview while loading full-res
             let texture_size = Vec2::new(thumbnail.size()[0] as f32, thumbnail.size()[1] as f32);
@@ -73,13 +105,13 @@ impl ImageViewer {
                 rect.right_top() - Vec2::new(120.0, -10.0),
                 Vec2::new(110.0, 24.0)
             );
-            ui.painter().rect_filled(loading_rect, 4.0, egui::Color32::from_black_alpha(180));
+            ui.painter().rect_filled(loading_rect, 4.0, Color32::from_black_alpha(180));
             ui.painter().text(
                 loading_rect.center(),
                 egui::Align2::CENTER_CENTER,
                 "⏳ Loading HD...",
                 egui::FontId::proportional(12.0),
-                egui::Color32::WHITE,
+                Color32::WHITE,
             );
             
             // Request repaint to poll for full-res result

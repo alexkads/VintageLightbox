@@ -71,6 +71,8 @@ pub struct AppState {
     pub detail_metadata: Option<DetailMetadata>,
     /// Histogram data for the current image
     pub histogram_data: Option<crate::components::histogram::HistogramData>,
+    /// Timestamp when the detail image was fully loaded (for transition animation)
+    pub detail_image_loaded_at: Option<std::time::Instant>,
 
     // ============================================
     // Image Processing
@@ -187,6 +189,7 @@ impl AppState {
             thumbnail_preview: None,
             detail_metadata: None,
             histogram_data: None,
+            detail_image_loaded_at: None,
             active_image: Arc::new(Mutex::new(None)),
             active_exposure: 0.0,
             active_contrast: 1.0,

@@ -166,7 +166,9 @@ impl eframe::App for VintageLightboxApp {
                 self.state.performance_metrics.texture_upload_time_ms = Some(upload_start.elapsed().as_secs_f32() * 1000.0);
                 
                 self.state.detail_image = Some(texture);
-                self.state.thumbnail_preview = None;  // Clear thumbnail, we have full-res now
+                // LIGHTROOM-STYLE: Start transition from thumbnail to full-res
+                self.state.detail_image_loaded_at = Some(std::time::Instant::now());
+                // self.state.thumbnail_preview = None;  // Keep thumbnail for cross-fade transition
                 self.state.loaded_photo_id = Some(result.photo_id);
                 
                 // Force repaint to show the loaded image immediately
@@ -210,6 +212,7 @@ impl eframe::App for VintageLightboxApp {
                 self.state.detail_image = None;
                 self.state.original_preview = None;
                 self.state.original_image_data = None;
+                self.state.detail_image_loaded_at = None;
 
                 // Find the photo and request async processing
                 if let Some(photo) = self.state.photos.iter().find(|p| &p.id == photo_id) {
