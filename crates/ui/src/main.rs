@@ -33,15 +33,28 @@ use app::VintageLightboxApp;
 #[tokio::main]
 async fn main() -> Result<(), eframe::Error> {
     // ============================================
-    // 0. Initialize Environment
+    // 0. Initialize Environment & Catalog Structure
     // ============================================
     dotenv::dotenv().ok();
+
+    // Lightroom-style Catalog Structure
+    // Path: ~/Pictures/VintageLightbox/VintageLightbox Catalog
+    // Logic centralized in infrastructure::paths to ensure cross-platform consistency
+    let catalog_path = infrastructure::paths::AppPaths::catalog_root();
+
+    if !catalog_path.exists() {
+        std::fs::create_dir_all(&catalog_path).expect("Failed to create catalog directory");
+    }
+
+    // Database Path: ./VintageLightbox Catalog/vintage_lightbox.db
+    let db_path = catalog_path.join("vintage_lightbox.db");
+    // SQLite requires path to be string, prepended with sqlite:
+    let database_url = format!("sqlite:{}?mode=rwc", db_path.to_string_lossy());
 
     // ============================================
     // 1. Setup Infrastructure Layer
     // ============================================
-    let database_url = "sqlite:vintage_lightbox.db?mode=rwc";
-    let pool = create_pool(database_url).await
+    let pool = create_pool(&database_url).await
         .expect("Failed to create database pool");
 
     // Run migrations
@@ -52,7 +65,10 @@ async fn main() -> Result<(), eframe::Error> {
     let metadata_extractor = Arc::new(ExifReader);
     let thumbnail_generator = Arc::new(ThumbnailGeneratorImpl::new());
     let image_exporter = Arc::new(ImageExporterImpl::new());
-    let preview_manager = Arc::new(PreviewManager::new());
+    
+    // Preview Cache Path: ./VintageLightbox Catalog/Previews.lrdata
+    let preview_path = catalog_path.join("Previews.lrdata");
+    let preview_manager = Arc::new(PreviewManager::new_with_path(preview_path));
 
     // ============================================
     // 2. Setup Use Cases Layer
@@ -61,7 +77,7 @@ async fn main() -> Result<(), eframe::Error> {
         photo_repository.clone(),
         metadata_extractor,
         thumbnail_generator,
-        preview_manager,
+        preview_manager.clone(),
     ));
     let save_photo_edits_use_case = Arc::new(SavePhotoEditsUseCase::new(
         photo_repository.clone()
@@ -115,6 +131,7 @@ async fn main() -> Result<(), eframe::Error> {
                 editor_controller,
                 export_controller,
                 photo_controller,
+                preview_manager.clone(),
             );
 
             // Load photos on startup

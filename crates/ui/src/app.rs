@@ -4,6 +4,7 @@
 use eframe::egui;
 use std::sync::Arc;
 use tokio::sync::mpsc;
+use infrastructure::cache::preview_manager::PreviewManager;
 
 use adapters::controllers::*;
 use adapters::view_models::PhotoViewModel;
@@ -56,6 +57,9 @@ pub struct VintageLightboxApp {
     current_edit_request_id: u64,
     /// The ID of the photo currently requested for loading (to avoid race conditions)
     requested_photo_id: Option<String>,
+    
+    /// Preview Manager for instant sync lookups
+    preview_manager: Arc<PreviewManager>,
 }
 
 impl VintageLightboxApp {
@@ -68,6 +72,7 @@ impl VintageLightboxApp {
         editor_controller: Arc<EditorController>,
         export_controller: Arc<ExportController>,
         photo_controller: Arc<PhotoController>,
+        preview_manager: Arc<PreviewManager>,
     ) -> Self {
         // Apply custom theme
         Theme::apply_to_context(&cc.egui_ctx);
@@ -82,15 +87,16 @@ impl VintageLightboxApp {
             editor_controller,
             export_controller,
             photo_controller,
-            library_view: LibraryView::new(),
-            develop_view: DevelopView::new(),
+            library_view: LibraryView::new(preview_manager.clone()),
+            develop_view: DevelopView::new(preview_manager.clone()),
             keyboard_handler: KeyboardHandler::new(),
             photo_receiver,
             photo_sender,
-            image_processor: AsyncImageProcessor::new(),
+            image_processor: AsyncImageProcessor::new(preview_manager.clone()),
             gpu_edit_processor: crate::gpu_processor::GpuImageProcessor::new(),
             current_edit_request_id: 0,
             requested_photo_id: None,
+            preview_manager,
         }
     }
 
@@ -231,9 +237,33 @@ impl eframe::App for VintageLightboxApp {
                     
                     // LIGHTROOM-STYLE: Load thumbnail as instant preview WITH EFFECTS APPLIED
                     // This gives immediate visual feedback that matches the final look
-                    if let Some(thumb_path) = &photo.thumbnail_path {
+                    // Try to load from PreviewManager (BLOB cache) FIRST
+                    if let Some(thumb_img) = self.preview_manager.get_thumbnail(photo_id) {
+                         // Apply the same effects to thumbnail for consistent appearance
+                         let processed_thumb = crate::image_processing::ImageProcessor::process_image(
+                             &thumb_img,
+                             exposure,
+                             contrast,
+                             temperature,
+                             tint,
+                             highlights,
+                             shadows,
+                             whites,
+                             blacks,
+                             clarity,
+                             vibrance,
+                             saturation,
+                         );
+                         
+                         let thumb_texture = crate::image_processing::ImageProcessor::load_texture(
+                             ctx,
+                             format!("thumb_{}", photo_id),
+                             &processed_thumb
+                         );
+                         self.state.thumbnail_preview = Some(thumb_texture);
+                    } else if let Some(thumb_path) = &photo.thumbnail_path {
+                        // Fallback to legacy file path (migration support)
                         if let Ok(thumb_img) = image::open(thumb_path) {
-                            // Apply the same effects to thumbnail for consistent appearance
                             let processed_thumb = crate::image_processing::ImageProcessor::process_image(
                                 &thumb_img,
                                 exposure,

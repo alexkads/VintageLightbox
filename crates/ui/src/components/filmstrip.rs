@@ -8,6 +8,8 @@ use adapters::view_models::PhotoViewModel;
 use crate::design_system::theme::Theme;
 use crate::async_loader::{AsyncThumbnailLoader, ThumbnailRequest};
 use crate::state::AppState;
+use std::sync::Arc;
+use infrastructure::cache::preview_manager::PreviewManager;
 
 pub struct Filmstrip {
     /// Cache of loaded thumbnail textures
@@ -21,10 +23,10 @@ impl Filmstrip {
     const THUMBNAIL_SPACING: f32 = 4.0;
     const SELECTED_BORDER_WIDTH: f32 = 3.0;
 
-    pub fn new() -> Self {
+    pub fn new(preview_manager: Arc<PreviewManager>) -> Self {
         Self {
             thumbnail_cache: HashMap::new(),
-            thumbnail_loader: AsyncThumbnailLoader::new(),
+            thumbnail_loader: AsyncThumbnailLoader::new(preview_manager),
         }
     }
 
@@ -390,11 +392,9 @@ impl Filmstrip {
         let requests: Vec<ThumbnailRequest> = photos
             .iter()
             .filter(|p| !self.thumbnail_cache.contains_key(&p.id))
-            .filter_map(|p| {
-                p.thumbnail_path.as_ref().map(|path| ThumbnailRequest {
-                    photo_id: p.id.clone(),
-                    path: path.clone(),
-                })
+            .map(|p| ThumbnailRequest {
+                photo_id: p.id.clone(),
+                path: p.path.clone(),
             })
             .take(30) // Limit batch size
             .collect();
@@ -414,8 +414,5 @@ impl Filmstrip {
     }
 }
 
-impl Default for Filmstrip {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+// Default implementation removed because PreviewManager is required
+// impl Default for Filmstrip { ... }

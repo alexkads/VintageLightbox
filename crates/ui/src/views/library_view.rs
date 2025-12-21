@@ -6,6 +6,8 @@ use crate::state::AppState;
 use crate::design_system::theme::Theme;
 use crate::components::photo_grid::PhotoGrid;
 use crate::components::filmstrip::Filmstrip;
+use std::sync::Arc;
+use infrastructure::cache::preview_manager::PreviewManager;
 
 pub struct LibraryView {
     photo_grid: PhotoGrid,
@@ -13,10 +15,10 @@ pub struct LibraryView {
 }
 
 impl LibraryView {
-    pub fn new() -> Self {
+    pub fn new(preview_manager: Arc<PreviewManager>) -> Self {
         Self {
-            photo_grid: PhotoGrid::new(),
-            filmstrip: Filmstrip::new(),
+            photo_grid: PhotoGrid::new(preview_manager.clone()),
+            filmstrip: Filmstrip::new(preview_manager),
         }
     }
 
@@ -196,8 +198,5 @@ impl LibraryView {
     }
 }
 
-impl Default for LibraryView {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+// Default implementation removed because PreviewManager is required
+// impl Default for LibraryView { ... }

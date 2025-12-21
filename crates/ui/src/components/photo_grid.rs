@@ -12,6 +12,8 @@ use crate::design_system::theme::Theme;
 use crate::async_loader::{AsyncThumbnailLoader, ThumbnailRequest};
 use crate::components::context_menu::{ContextMenu, ContextMenuItem};
 use adapters::view_models::PhotoViewModel;
+use std::sync::Arc;
+use infrastructure::cache::preview_manager::PreviewManager;
 
 pub struct PhotoGrid {
     /// Cache of loaded thumbnail textures
@@ -25,11 +27,11 @@ pub struct PhotoGrid {
 }
 
 impl PhotoGrid {
-    pub fn new() -> Self {
+    pub fn new(preview_manager: Arc<PreviewManager>) -> Self {
         Self {
             thumbnail_cache: HashMap::new(),
             last_selected_id: None,
-            thumbnail_loader: AsyncThumbnailLoader::new(),
+            thumbnail_loader: AsyncThumbnailLoader::new(preview_manager),
             context_menu: ContextMenu::new("photo_grid_context"),
         }
     }
@@ -472,8 +474,5 @@ impl PhotoGrid {
     }
 }
 
-impl Default for PhotoGrid {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+// Default implementation removed because PreviewManager is required
+// impl Default for PhotoGrid { ... }

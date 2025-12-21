@@ -66,6 +66,7 @@ Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Ar
   - **Configurável**: Toggle via `.env` (SHOW_PERFORMANCE_STATS)
   - **Otimização de Upload**: Texture upload movido para background thread (zero UI blocking)
   - **BLOB Cache (SQLite)**: Thumbs e Previews armazenados em BLOBs (rusqlite) para library limpa e alta performance. ✅ verified
+  - **Path Centralization**: Estrutura `infrastructure::paths` implementada para suporte robusto cross-platform (Mac/Win/Linux). ✅ verified
 
 - ✅ **SISTEMA DE EDIÇÃO PROFISSIONAL (20/dez/2025)** 🎨
   - **11 Sliders de Ajuste**: Sistema completo de edição não-destrutiva
@@ -572,7 +573,7 @@ Criar versão mínima funcional com importação, visualização, edição bási
 
 ### 2.8 Performance e Otimizações (1 semana) ✅
 - [x] Otimizar geração de thumbnails (AsyncThumbnailLoader)
-- [x] Melhorar cache de previews (Smart Preview System - BLOB SQLite) ✅
+- [x] Melhorar cache de previews (Smart Preview System - BLOB SQLite) ✅ + RAM LRU ✅
 - [x] Profiling e otimizações críticas (Performance Stats Overlay)
 - [x] Reduzir uso de memória (Texture management otimizado)
 
@@ -580,7 +581,8 @@ Criar versão mínima funcional com importação, visualização, edição bási
 - ✅ Edição profissional de RAW
 - ✅ Sistema completo de organização
 - ✅ Workflow eficiente com presets
-- ✅ Performance otimizada
+- ✅ Performance otimizada (Async + Cache L1/L2)
+- ✅ **Cross-Platform Ready**: Caminhos de arquivo centralizados e padronizados via `directories` crate.
 
 ---
 

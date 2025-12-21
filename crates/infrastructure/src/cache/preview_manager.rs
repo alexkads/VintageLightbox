@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::fs;
-use directories::ProjectDirs;
+// use directories::ProjectDirs;
 use image::DynamicImage;
 use domain::services::{PreviewStorage, PreviewType};
 use domain::value_objects::PhotoId;
@@ -16,11 +16,7 @@ pub struct PreviewManager {
 
 impl PreviewManager {
     pub fn new() -> Self {
-        let cache_dir = if let Some(proj_dirs) = ProjectDirs::from("com", "vintagelightbox", "app") {
-            proj_dirs.cache_dir().join("previews")
-        } else {
-            PathBuf::from(".cache/previews")
-        };
+        let cache_dir = crate::paths::AppPaths::preview_cache_dir();
         Self::new_with_path(cache_dir)
     }
 

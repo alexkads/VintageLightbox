@@ -6,15 +6,17 @@ use crate::state::AppState;
 use crate::design_system::theme::Theme;
 use crate::components::image_viewer::ImageViewer;
 use crate::components::filmstrip::Filmstrip;
+use std::sync::Arc;
+use infrastructure::cache::preview_manager::PreviewManager;
 
 pub struct DevelopView {
     filmstrip: Filmstrip,
 }
 
 impl DevelopView {
-    pub fn new() -> Self {
+    pub fn new(preview_manager: Arc<PreviewManager>) -> Self {
         Self {
-            filmstrip: Filmstrip::new(),
+            filmstrip: Filmstrip::new(preview_manager),
         }
     }
 
@@ -418,8 +420,5 @@ impl DevelopView {
     }
 }
 
-impl Default for DevelopView {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+// Default implementation removed because PreviewManager is required
+// impl Default for DevelopView { ... }

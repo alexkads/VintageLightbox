@@ -7,6 +7,8 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use rayon::prelude::*;
 use image::DynamicImage;
+use lru::LruCache;
+use std::num::NonZeroUsize;
 
 /// Request to load a thumbnail
 #[derive(Clone)]
@@ -35,13 +37,13 @@ pub struct AsyncThumbnailLoader {
 
 impl AsyncThumbnailLoader {
     /// Create a new async thumbnail loader
-    pub fn new() -> Self {
+    /// Create a new async thumbnail loader
+    pub fn new(preview_manager: Arc<infrastructure::cache::preview_manager::PreviewManager>) -> Self {
         let (request_sender, request_receiver) = channel::<Vec<ThumbnailRequest>>();
         let (result_sender, result_receiver) = channel::<ThumbnailResult>();
         let loading = Arc::new(Mutex::new(std::collections::HashSet::new()));
         let loading_clone = loading.clone();
 
-        let preview_manager = Arc::new(infrastructure::cache::preview_manager::PreviewManager::new());
         let preview_manager_clone = preview_manager.clone();
 
         // Spawn background thread for processing thumbnail requests
@@ -171,11 +173,8 @@ impl AsyncThumbnailLoader {
     }
 }
 
-impl Default for AsyncThumbnailLoader {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+// Default implementation removed because PreviewManager is required
+// impl Default for AsyncThumbnailLoader { ... }
 
 
 /// Async image processor for heavy operations like full image loading and processing
@@ -189,6 +188,15 @@ pub struct AsyncImageProcessor {
     /// Manager for smart preview caching
     #[allow(dead_code)] // It is used inside thread closure but compiler might not see it across clone
     preview_manager: Arc<infrastructure::cache::preview_manager::PreviewManager>,
+    /// In-memory cache for decoded images (avoid repeated JPEG decoding)
+    #[allow(dead_code)]
+    memory_cache: Arc<Mutex<LruCache<String, DecodedImage>>>,
+}
+
+/// Cached decoded image data
+struct DecodedImage {
+    image: DynamicImage,
+    histogram: crate::components::histogram::HistogramData,
 }
 
 /// Request to process an image
@@ -227,17 +235,22 @@ pub struct ImageProcessResult {
 
 impl AsyncImageProcessor {
     /// Create a new async image processor
-    pub fn new() -> Self {
+    /// Create a new async image processor
+    pub fn new(preview_manager: Arc<infrastructure::cache::preview_manager::PreviewManager>) -> Self {
         let (request_sender, request_receiver) = channel::<ImageProcessRequest>();
         let (result_sender, result_receiver) = channel::<ImageProcessResult>();
         let processing = Arc::new(Mutex::new(None));
         let processing_clone = processing.clone();
-        let preview_manager = Arc::new(infrastructure::cache::preview_manager::PreviewManager::new());
         let preview_manager_clone = preview_manager.clone();
+        
+        // Cache capacity: 5 images (~200MB for 24MP images)
+        let cache_capacity = NonZeroUsize::new(5).unwrap();
+        let memory_cache = Arc::new(Mutex::new(LruCache::new(cache_capacity)));
+        let memory_cache_clone = memory_cache.clone();
 
         // Spawn dedicated thread for image processing
         std::thread::spawn(move || {
-            Self::background_processor(request_receiver, result_sender, processing_clone, preview_manager_clone);
+            Self::background_processor(request_receiver, result_sender, processing_clone, preview_manager_clone, memory_cache_clone);
         });
 
         Self {
@@ -245,6 +258,7 @@ impl AsyncImageProcessor {
             result_receiver,
             processing,
             preview_manager,
+            memory_cache,
         }
     }
 
@@ -254,6 +268,7 @@ impl AsyncImageProcessor {
         sender: Sender<ImageProcessResult>,
         processing: Arc<Mutex<Option<String>>>,
         preview_manager: Arc<infrastructure::cache::preview_manager::PreviewManager>,
+        memory_cache: Arc<Mutex<LruCache<String, DecodedImage>>>,
     ) {
         while let Ok(request) = receiver.recv() {
             // Mark as processing
@@ -261,41 +276,89 @@ impl AsyncImageProcessor {
 
             let start_time = std::time::Instant::now();
 
-            // 1. Try to load Smart Preview from cache first
-            let cached_preview = preview_manager.get_preview(&request.photo_id);
-            
-            let preview_img = if let Some(img) = cached_preview {
-                // Cache hit! Use optimized image
-                // println!("Smart Preview loaded for {}", request.photo_id);
-                img
-            } else {
-                // Cache miss. Load original and generate Smart Preview
-                if let Ok(img) = image::open(&request.path) {
-                    // Resize for preview using Rayon-accelerated operations
-                    let resized = crate::image_processing::ImageProcessor::resize_for_preview(
-                        &img, 
-                        request.max_preview_size
-                    );
-                    
-                    // Save to cache for next time
-                    let _ = preview_manager.save_preview(&request.photo_id, &resized);
-                    // println!("Smart Preview generated for {}", request.photo_id);
-                    
-                    resized
+            // 0. Try Memory Cache first (RAM - Instant)
+            let memory_hit = {
+                let mut cache = memory_cache.lock();
+                if let Some(decoded) = cache.get(&request.photo_id) {
+                    Some((decoded.image.clone(), decoded.histogram.clone()))
                 } else {
-                    // Failed to load image
-                    *processing.lock() = None;
-                    continue;
+                    None
                 }
+            };
+
+            let (preview_img, histogram) = if let Some((img, hist)) = memory_hit {
+                 // RAM Cache Hit!
+                 let ram_check_ms = start_time.elapsed().as_secs_f32() * 1000.0;
+                 println!("RAM CACHE HIT: {} (Memory read: {:.2}ms)", request.photo_id, ram_check_ms);
+                 (img, hist)
+            } else {
+                // RAM Miss - Try SQLite Cache
+                
+                // 1. Try to load Smart Preview from cache first
+                let cache_check_start = std::time::Instant::now();
+                let cached_preview = preview_manager.get_preview(&request.photo_id);
+                let cache_check_ms = cache_check_start.elapsed().as_secs_f32() * 1000.0;
+                
+                let img = if let Some(img) = cached_preview {
+                    // Cache hit! Use optimized image
+                    println!("SQLITE BLOB HIT: {} (Decode: {:.2}ms)", request.photo_id, cache_check_ms);
+                    img
+                } else {
+                    // Cache miss. Load original and generate Smart Preview
+                    println!("FULL CACHE MISS: {}", request.photo_id);
+                    let load_start = std::time::Instant::now();
+                    if let Ok(img) = image::open(&request.path) {
+                        let open_ms = load_start.elapsed().as_secs_f32() * 1000.0;
+                        
+                        // Resize for preview using Rayon-accelerated operations
+                        let resize_start = std::time::Instant::now();
+                        let resized = crate::image_processing::ImageProcessor::resize_for_preview(
+                            &img, 
+                            request.max_preview_size
+                        );
+                        let resize_ms = resize_start.elapsed().as_secs_f32() * 1000.0;
+                        
+                        // Save to cache for next time
+                        let save_start = std::time::Instant::now();
+                        if let Err(e) = preview_manager.save_preview(&request.photo_id, &resized) {
+                            eprintln!("CACHE SAVE ERROR: {}", e);
+                        }
+                        let save_ms = save_start.elapsed().as_secs_f32() * 1000.0;
+                        
+                        println!("Generated Smart Preview: Open={:.2}ms, Resize={:.2}ms, Save={:.2}ms", open_ms, resize_ms, save_ms);
+                        
+                        resized
+                    } else {
+                        // Failed to load image
+                        eprintln!("Failed to open image: {}", request.path);
+                        *processing.lock() = None;
+                        continue;
+                    }
+                };
+                
+                // Calculate histogram
+                let hist_start = std::time::Instant::now();
+                let hist = crate::components::histogram::HistogramData::from_image(&img);
+                let hist_ms = hist_start.elapsed().as_secs_f32() * 1000.0;
+                
+                // Store in Memory Cache
+                {
+                    let mut cache = memory_cache.lock();
+                    cache.put(request.photo_id.clone(), DecodedImage {
+                        image: img.clone(),
+                        histogram: hist.clone(),
+                    });
+                    println!("RAM CACHE STORE: {} (Count: {}) | Hist Calc: {:.2}ms", request.photo_id, cache.len(), hist_ms);
+                }
+                
+                (img, hist)
             };
 
             // Continue with preview_img (either from cache or just generated)
             {
                 // Store original for before/after
+                // CLONE WARNING: This might be expensive for large images
                 let original_preview = preview_img.clone();
-
-                // Calculate histogram from preview
-                let histogram = crate::components::histogram::HistogramData::from_image(&preview_img);
 
                 // Apply edits if any
                 let has_edits = request.exposure != 0.0 || request.contrast != 1.0 || 
@@ -335,7 +398,7 @@ impl AsyncImageProcessor {
                     load_time_ms: start_time.elapsed().as_secs_f32() * 1000.0,
                 };
                 
-                println!("Processed: {} in {:.2}ms", request.path, result.load_time_ms);
+                // println!("Processed: {} in {:.2}ms", request.path, result.load_time_ms);
 
                 let _ = sender.send(result);
             }
@@ -367,11 +430,8 @@ impl AsyncImageProcessor {
     }
 }
 
-impl Default for AsyncImageProcessor {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+// Default implementation removed because PreviewManager is required
+// impl Default for AsyncImageProcessor { ... }
 
 
 /// Async edit processor for real-time slider adjustments
