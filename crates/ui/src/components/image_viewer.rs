@@ -35,8 +35,9 @@ impl ImageViewer {
             state.reset_viewer();
         }
 
-        // Draw image if available
+        // Draw image if available (prefer full-res, fallback to thumbnail)
         if let Some(texture) = &state.detail_image {
+            // Full resolution image available
             let texture_size = Vec2::new(texture.size()[0] as f32, texture.size()[1] as f32);
 
             // Calculate scaled size
@@ -51,8 +52,40 @@ impl ImageViewer {
             let img_rect = Rect::from_center_size(center, zoomed_size);
 
             egui::Image::new(texture).paint_at(ui, img_rect);
+        } else if let Some(thumbnail) = &state.thumbnail_preview {
+            // LIGHTROOM-STYLE: Show thumbnail as instant preview while loading full-res
+            let texture_size = Vec2::new(thumbnail.size()[0] as f32, thumbnail.size()[1] as f32);
+
+            // Calculate scaled size (will be blurry but instant!)
+            let scale = (available_size.x / texture_size.x)
+                .min(available_size.y / texture_size.y);
+
+            let base_img_size = texture_size * scale;
+            let zoomed_size = base_img_size * state.zoom_level;
+
+            let center = rect.center() + state.pan_offset;
+            let img_rect = Rect::from_center_size(center, zoomed_size);
+
+            egui::Image::new(thumbnail).paint_at(ui, img_rect);
+            
+            // Show subtle loading indicator in corner
+            let loading_rect = Rect::from_min_size(
+                rect.right_top() - Vec2::new(120.0, -10.0),
+                Vec2::new(110.0, 24.0)
+            );
+            ui.painter().rect_filled(loading_rect, 4.0, egui::Color32::from_black_alpha(180));
+            ui.painter().text(
+                loading_rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "⏳ Loading HD...",
+                egui::FontId::proportional(12.0),
+                egui::Color32::WHITE,
+            );
+            
+            // Request repaint to poll for full-res result
+            ui.ctx().request_repaint();
         } else if state.develop_selected_photo_id.is_some() {
-            // Image is loading - show spinner
+            // No thumbnail available, show spinner (should be rare)
             let time = ui.ctx().input(|i| i.time);
             let spinner_char = match ((time * 8.0) as usize) % 4 {
                 0 => "◐",

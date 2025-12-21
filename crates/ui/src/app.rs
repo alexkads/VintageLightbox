@@ -154,6 +154,7 @@ impl eframe::App for VintageLightboxApp {
                 );
                 
                 self.state.detail_image = Some(texture);
+                self.state.thumbnail_preview = None;  // Clear thumbnail, we have full-res now
                 self.state.loaded_photo_id = Some(result.photo_id);
             }
         }
@@ -179,14 +180,25 @@ impl eframe::App for VintageLightboxApp {
             let is_processing = self.image_processor.processing_photo_id().as_ref() == Some(photo_id);
 
             if needs_reload && !is_processing {
-                // Clear previous image (UI shows loading state inline)
+                // Clear previous full-res image (but keep thumbnail for instant preview)
                 self.state.detail_image = None;
                 self.state.original_preview = None;
-                // Note: Não usamos is_busy aqui para evitar modal bloqueante
-                // O ImageViewer mostrará um indicador inline
 
                 // Find the photo and request async processing
                 if let Some(photo) = self.state.photos.iter().find(|p| &p.id == photo_id) {
+                    // LIGHTROOM-STYLE: Load thumbnail as instant preview
+                    // This gives immediate visual feedback while high-res loads
+                    if let Some(thumb_path) = &photo.thumbnail_path {
+                        if let Ok(thumb_img) = image::open(thumb_path) {
+                            let thumb_texture = crate::image_processing::ImageProcessor::load_texture(
+                                ctx,
+                                format!("thumb_preview_{}", photo_id),
+                                &thumb_img
+                            );
+                            self.state.thumbnail_preview = Some(thumb_texture);
+                        }
+                    }
+
                     // Load saved edits
                     let exposure = photo.edit_exposure.unwrap_or(0.0);
                     let contrast = photo.edit_contrast.unwrap_or(1.0);

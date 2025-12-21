@@ -63,8 +63,10 @@ pub struct AppState {
     // ============================================
     // Detail View
     // ============================================
-    /// Texture handle for the currently displayed image
+    /// Texture handle for the currently displayed image (full resolution)
     pub detail_image: Option<egui::TextureHandle>,
+    /// Thumbnail preview shown instantly while full image loads (Lightroom-style)
+    pub thumbnail_preview: Option<egui::TextureHandle>,
     /// Metadata of the currently selected photo
     pub detail_metadata: Option<DetailMetadata>,
     /// Histogram data for the current image
@@ -166,6 +168,7 @@ impl AppState {
             develop_selected_photo_id: None,
             loaded_photo_id: None,
             detail_image: None,
+            thumbnail_preview: None,
             detail_metadata: None,
             histogram_data: None,
             active_image: Arc::new(Mutex::new(None)),
