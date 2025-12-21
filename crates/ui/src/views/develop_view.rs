@@ -107,7 +107,7 @@ impl DevelopView {
         &self,
         ui: &mut Ui,
         state: &mut AppState,
-        editor_controller: &std::sync::Arc<adapters::controllers::EditorController>,
+        _editor_controller: &std::sync::Arc<adapters::controllers::EditorController>,
         export_controller: &std::sync::Arc<adapters::controllers::ExportController>,
         photo_controller: &std::sync::Arc<adapters::controllers::PhotoController>,
         library_controller: &std::sync::Arc<adapters::controllers::LibraryController>,
@@ -125,124 +125,155 @@ impl DevelopView {
         widgets::section_title(ui, "Basic");
         ui.add_space(Theme::SPACE_SM);
 
+        // Track if any slider changed for auto-save
+        let mut any_slider_changed = false;
+
         // Exposure slider
-        SliderControl::show(
+        if SliderControl::show(
             ui,
             "Exposure",
             &mut state.active_exposure,
             -2.0..=2.0,
             0.1,
-        );
+        ) {
+            any_slider_changed = true;
+        }
 
         ui.add_space(Theme::SPACE_SM);
 
         // Contrast slider
-        SliderControl::show(
+        if SliderControl::show(
             ui,
             "Contrast",
             &mut state.active_contrast,
             0.5..=1.5,
             0.05,
-        );
+        ) {
+            any_slider_changed = true;
+        }
 
         ui.add_space(Theme::SPACE_SM);
 
         // Temperature slider
-        SliderControl::show(
+        if SliderControl::show(
             ui,
             "Temperature",
             &mut state.active_temperature,
             -10.0..=10.0,
             0.5,
-        );
+        ) {
+            any_slider_changed = true;
+        }
 
         ui.add_space(Theme::SPACE_SM);
 
         // Tint slider
-        SliderControl::show(
+        if SliderControl::show(
             ui,
             "Tint",
             &mut state.active_tint,
             -10.0..=10.0,
             0.5,
-        );
+        ) {
+            any_slider_changed = true;
+        }
 
         ui.add_space(Theme::SPACE_SM);
 
         // Highlights slider
-        SliderControl::show(
+        if SliderControl::show(
             ui,
             "Highlights",
             &mut state.active_highlights,
             -100.0..=100.0,
             5.0,
-        );
+        ) {
+            any_slider_changed = true;
+        }
 
         ui.add_space(Theme::SPACE_SM);
 
         // Shadows slider
-        SliderControl::show(
+        if SliderControl::show(
             ui,
             "Shadows",
             &mut state.active_shadows,
             -100.0..=100.0,
             5.0,
-        );
+        ) {
+            any_slider_changed = true;
+        }
 
         ui.add_space(Theme::SPACE_SM);
 
         // Whites slider
-        SliderControl::show(
+        if SliderControl::show(
             ui,
             "Whites",
             &mut state.active_whites,
             -100.0..=100.0,
             5.0,
-        );
+        ) {
+            any_slider_changed = true;
+        }
 
         ui.add_space(Theme::SPACE_SM);
 
         // Blacks slider
-        SliderControl::show(
+        if SliderControl::show(
             ui,
             "Blacks",
             &mut state.active_blacks,
             -100.0..=100.0,
             5.0,
-        );
+        ) {
+            any_slider_changed = true;
+        }
 
         ui.add_space(Theme::SPACE_SM);
 
         // Clarity slider
-        SliderControl::show(
+        if SliderControl::show(
             ui,
             "Clarity",
             &mut state.active_clarity,
             -1.0..=1.0,
             0.05,
-        );
+        ) {
+            any_slider_changed = true;
+        }
 
         ui.add_space(Theme::SPACE_SM);
 
         // Vibrance slider
-        SliderControl::show(
+        if SliderControl::show(
             ui,
             "Vibrance",
             &mut state.active_vibrance,
             -1.0..=1.0,
             0.05,
-        );
+        ) {
+            any_slider_changed = true;
+        }
 
         ui.add_space(Theme::SPACE_SM);
 
         // Saturation slider
-        SliderControl::show(
+        if SliderControl::show(
             ui,
             "Saturation",
             &mut state.active_saturation,
             -1.0..=1.0,
             0.05,
-        );
+        ) {
+            any_slider_changed = true;
+        }
+
+        // Mark for auto-save if any slider changed
+        if any_slider_changed {
+            state.pending_auto_save = true;
+            state.last_slider_change_time = Some(std::time::Instant::now());
+        }
 
         ui.add_space(Theme::SPACE_LG);
 
@@ -274,49 +305,10 @@ impl DevelopView {
             state.active_clarity = 0.0;
             state.active_vibrance = 0.0;
             state.active_saturation = 0.0;
-        }
 
-        ui.add_space(Theme::SPACE_SM);
-
-        // Action buttons
-        if widgets::primary_button(ui, "Save").clicked() {
-            if let Some(metadata) = &state.detail_metadata {
-                let controller = editor_controller.clone();
-                let id = metadata.id.clone();
-                let exposure = state.active_exposure;
-                let contrast = state.active_contrast;
-                let temperature = state.active_temperature;
-                let tint = state.active_tint;
-                let highlights = state.active_highlights;
-                let shadows = state.active_shadows;
-                let whites = state.active_whites;
-                let blacks = state.active_blacks;
-                let clarity = state.active_clarity;
-                let vibrance = state.active_vibrance;
-                let saturation = state.active_saturation;
-
-                state.is_busy = true;
-                state.busy_message = "Saving edits...".to_string();
-
-                let lib_ctrl = library_controller.clone();
-                let sender = photo_sender.clone();
-                let ctx_clone = ctx.clone();
-
-                tokio::spawn(async move {
-                    if let Err(e) = controller.save_edits(
-                        id, exposure, contrast, temperature, tint, highlights, shadows,
-                        whites, blacks, clarity, vibrance, saturation,
-                        0.0, 0.0, 0.0, 0.0  // Tone curve (to be implemented in UI)
-                    ).await {
-                        eprintln!("Failed to save edits: {}", e);
-                    } else {
-                        // Reload photos to update cache so UI doesn't show stale data
-                        let result = lib_ctrl.get_all_photos().await;
-                        let _ = sender.send(result).await;
-                        ctx_clone.request_repaint();
-                    }
-                });
-            }
+            // Auto-save happens after reset too
+            state.pending_auto_save = true;
+            state.last_slider_change_time = Some(std::time::Instant::now());
         }
 
         ui.add_space(Theme::SPACE_SM);

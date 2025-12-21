@@ -168,6 +168,26 @@ pub struct AppState {
     pub show_performance_stats: bool,
     /// Timestamp when the current photo load started (to measure TTI)
     pub start_load_time: Option<std::time::Instant>,
+
+    // ============================================
+    // Auto-Save Debouncing
+    // ============================================
+    /// Whether edits are pending to be auto-saved
+    pub pending_auto_save: bool,
+    /// Timestamp of the last slider change (for debounce)
+    pub last_slider_change_time: Option<std::time::Instant>,
+    /// Last saved values (to avoid unnecessary saves)
+    pub saved_exposure: f32,
+    pub saved_contrast: f32,
+    pub saved_temperature: f32,
+    pub saved_tint: f32,
+    pub saved_highlights: f32,
+    pub saved_shadows: f32,
+    pub saved_whites: f32,
+    pub saved_blacks: f32,
+    pub saved_clarity: f32,
+    pub saved_vibrance: f32,
+    pub saved_saturation: f32,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -231,6 +251,19 @@ impl AppState {
             performance_metrics: PerformanceMetrics::default(),
             show_performance_stats: std::env::var("SHOW_PERFORMANCE_STATS").map_or(false, |v| v == "true"),
             start_load_time: None,
+            pending_auto_save: false,
+            last_slider_change_time: None,
+            saved_exposure: 0.0,
+            saved_contrast: 1.0,
+            saved_temperature: 0.0,
+            saved_tint: 0.0,
+            saved_highlights: 0.0,
+            saved_shadows: 0.0,
+            saved_whites: 0.0,
+            saved_blacks: 0.0,
+            saved_clarity: 0.0,
+            saved_vibrance: 0.0,
+            saved_saturation: 0.0,
         }
     }
 

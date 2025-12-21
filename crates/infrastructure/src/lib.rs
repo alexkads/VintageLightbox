@@ -18,3 +18,5 @@ pub use thumbnail_generator::ThumbnailGeneratorImpl;
 pub use raw_processing::RawDecoderImpl;
 pub mod image_exporter;
 pub use image_exporter::ImageExporterImpl;
+pub mod content_hash;
+pub use content_hash::calculate_file_hash;

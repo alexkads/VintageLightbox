@@ -62,6 +62,8 @@ pub struct Photo {
     edit_tone_curve_lights: Option<f32>,
     /// Tone curve: Highlights adjustment (-100 to +100)
     edit_tone_curve_highlights: Option<f32>,
+    /// SHA-256 hash of the file content (for duplicate detection)
+    content_hash: Option<String>,
 }
 
 impl Photo {
@@ -96,6 +98,7 @@ impl Photo {
         edit_tone_curve_darks: Option<f32>,
         edit_tone_curve_lights: Option<f32>,
         edit_tone_curve_highlights: Option<f32>,
+        content_hash: Option<String>,
     ) -> Self {
         Self {
             id,
@@ -122,6 +125,7 @@ impl Photo {
             edit_tone_curve_darks,
             edit_tone_curve_lights,
             edit_tone_curve_highlights,
+            content_hash,
         }
     }
 
@@ -131,7 +135,7 @@ impl Photo {
         Self::reconstruct(
             id, file_path, now, now, None, None, None, false, None,
             None, None, None, None, None, None, None, None, None, None, None,
-            None, None, None, None
+            None, None, None, None, None
         )
     }
 
@@ -368,6 +372,17 @@ impl Photo {
     pub fn edit_tone_curve_highlights(&self) -> Option<f32> {
         self.edit_tone_curve_highlights
     }
+
+    /// Retorna o hash de conteúdo do arquivo (SHA-256)
+    pub fn content_hash(&self) -> Option<&str> {
+        self.content_hash.as_deref()
+    }
+
+    /// Define o hash de conteúdo do arquivo
+    pub fn set_content_hash(&mut self, hash: String) {
+        self.content_hash = Some(hash);
+        self.modified_at = Utc::now();
+    }
 }
 
 #[cfg(test)]
@@ -561,12 +576,12 @@ mod tests {
         let photo1 = Photo::reconstruct(
             id, path.clone(), now, now, None, None, None, false, None,
             None, None, None, None, None, None, None, None, None, None, None,
-            None, None, None, None
+            None, None, None, None, None
         );
         let photo2 = Photo::reconstruct(
             id, path, now, now, None, None, None, false, None,
             None, None, None, None, None, None, None, None, None, None, None,
-            None, None, None, None
+            None, None, None, None, None
         );
 
         // Assert
@@ -692,7 +707,7 @@ mod tests {
         let photo = Photo::reconstruct(
             id, path, now, now, None, None, None, true, None,
             Some(1.0), Some(1.0), None, None, None, None, None, None, None, None, None,
-            Some(-40.0), Some(-20.0), Some(20.0), Some(40.0)
+            Some(-40.0), Some(-20.0), Some(20.0), Some(40.0), None
         );
 
         // Assert

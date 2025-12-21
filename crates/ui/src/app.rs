@@ -276,6 +276,18 @@ impl eframe::App for VintageLightboxApp {
                     self.state.prev_clarity = clarity;
                     self.state.prev_vibrance = vibrance;
                     self.state.prev_saturation = saturation;
+                    // Initialize saved values for auto-save comparison
+                    self.state.saved_exposure = exposure;
+                    self.state.saved_contrast = contrast;
+                    self.state.saved_temperature = temperature;
+                    self.state.saved_tint = tint;
+                    self.state.saved_highlights = highlights;
+                    self.state.saved_shadows = shadows;
+                    self.state.saved_whites = whites;
+                    self.state.saved_blacks = blacks;
+                    self.state.saved_clarity = clarity;
+                    self.state.saved_vibrance = vibrance;
+                    self.state.saved_saturation = saturation;
 
                     // Request async image loading (non-blocking!)
                     self.image_processor.request_process(ImageProcessRequest {
@@ -410,6 +422,105 @@ impl eframe::App for VintageLightboxApp {
                         self.state.prev_saturation = self.state.active_saturation;
                     }
                     self.state.prev_show_before = self.state.show_before;
+                }
+            }
+        }
+
+        // ============================================
+        // AUTO-SAVE DEBOUNCE (500ms delay)
+        // ============================================
+        const AUTO_SAVE_DEBOUNCE_MS: u128 = 500;
+        
+        if self.state.pending_auto_save {
+            if let Some(last_change) = self.state.last_slider_change_time {
+                let elapsed = last_change.elapsed().as_millis();
+                if elapsed >= AUTO_SAVE_DEBOUNCE_MS {
+                    // Check if values actually changed from last saved state
+                    let values_changed =
+                        self.state.active_exposure != self.state.saved_exposure ||
+                        self.state.active_contrast != self.state.saved_contrast ||
+                        self.state.active_temperature != self.state.saved_temperature ||
+                        self.state.active_tint != self.state.saved_tint ||
+                        self.state.active_highlights != self.state.saved_highlights ||
+                        self.state.active_shadows != self.state.saved_shadows ||
+                        self.state.active_whites != self.state.saved_whites ||
+                        self.state.active_blacks != self.state.saved_blacks ||
+                        self.state.active_clarity != self.state.saved_clarity ||
+                        self.state.active_vibrance != self.state.saved_vibrance ||
+                        self.state.active_saturation != self.state.saved_saturation;
+
+                    if values_changed {
+                        if let Some(metadata) = &self.state.detail_metadata {
+                            let controller = self.editor_controller.clone();
+                            let id = metadata.id.clone();
+                            let exposure = self.state.active_exposure;
+                            let contrast = self.state.active_contrast;
+                            let temperature = self.state.active_temperature;
+                            let tint = self.state.active_tint;
+                            let highlights = self.state.active_highlights;
+                            let shadows = self.state.active_shadows;
+                            let whites = self.state.active_whites;
+                            let blacks = self.state.active_blacks;
+                            let clarity = self.state.active_clarity;
+                            let vibrance = self.state.active_vibrance;
+                            let saturation = self.state.active_saturation;
+
+                            // Update saved values BEFORE spawning
+                            self.state.saved_exposure = exposure;
+                            self.state.saved_contrast = contrast;
+                            self.state.saved_temperature = temperature;
+                            self.state.saved_tint = tint;
+                            self.state.saved_highlights = highlights;
+                            self.state.saved_shadows = shadows;
+                            self.state.saved_whites = whites;
+                            self.state.saved_blacks = blacks;
+                            self.state.saved_clarity = clarity;
+                            self.state.saved_vibrance = vibrance;
+                            self.state.saved_saturation = saturation;
+
+                            // Update the PhotoViewModel in the local list to reflect saved edits
+                            // This ensures the photo loads with correct values when switching photos
+                            if let Some(photo) = self.state.photos.iter_mut().find(|p| p.id == id) {
+                                photo.edit_exposure = Some(exposure);
+                                photo.edit_contrast = Some(contrast);
+                                photo.edit_temperature = Some(temperature);
+                                photo.edit_tint = Some(tint);
+                                photo.edit_highlights = Some(highlights);
+                                photo.edit_shadows = Some(shadows);
+                                photo.edit_whites = Some(whites);
+                                photo.edit_blacks = Some(blacks);
+                                photo.edit_clarity = Some(clarity);
+                                photo.edit_vibrance = Some(vibrance);
+                                photo.edit_saturation = Some(saturation);
+                            }
+
+                            // Clear pending flag
+                            self.state.pending_auto_save = false;
+                            self.state.last_slider_change_time = None;
+
+                            let ctx_clone = ctx.clone();
+
+                            tokio::spawn(async move {
+                                if let Err(e) = controller.save_edits(
+                                    id, exposure, contrast, temperature, tint, highlights, shadows,
+                                    whites, blacks, clarity, vibrance, saturation,
+                                    0.0, 0.0, 0.0, 0.0  // Tone curve (to be implemented in UI)
+                                ).await {
+                                    eprintln!("Auto-save failed: {}", e);
+                                } else {
+                                    println!("Auto-saved edits");
+                                }
+                                ctx_clone.request_repaint();
+                            });
+                        }
+                    }
+                    
+                    // Clear pending flag even if values didn't change
+                    self.state.pending_auto_save = false;
+                    self.state.last_slider_change_time = None;
+                } else {
+                    // Not yet time to save, request repaint to check again
+                    ctx.request_repaint();
                 }
             }
         }

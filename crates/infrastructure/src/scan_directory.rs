@@ -71,6 +71,11 @@ impl ScanDirectoryUseCase {
         let file_path = FilePath::new(path.to_string_lossy().as_ref())?;
         let mut photo = Photo::new(file_path.clone());
         
+        // Calculate content hash for duplicate detection
+        if let Ok(hash) = crate::content_hash::calculate_file_hash(path) {
+            photo.set_content_hash(hash);
+        }
+        
         if let Ok(metadata) = exif_reader.read_metadata(path) {
             photo.set_metadata(metadata);
         }

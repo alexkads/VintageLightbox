@@ -62,6 +62,7 @@ impl PhotoRepositoryImpl {
         let edit_tone_curve_darks: Option<f32> = row.try_get("edit_tone_curve_darks").ok();
         let edit_tone_curve_lights: Option<f32> = row.try_get("edit_tone_curve_lights").ok();
         let edit_tone_curve_highlights: Option<f32> = row.try_get("edit_tone_curve_highlights").ok();
+        let content_hash: Option<String> = row.try_get("content_hash").ok();
 
 
 
@@ -113,6 +114,7 @@ impl PhotoRepositoryImpl {
             edit_tone_curve_darks,
             edit_tone_curve_lights,
             edit_tone_curve_highlights,
+            content_hash,
         ))
     }
 }
@@ -143,14 +145,15 @@ impl PhotoRepository for PhotoRepositoryImpl {
         let edit_tone_curve_darks = photo.edit_tone_curve_darks();
         let edit_tone_curve_lights = photo.edit_tone_curve_lights();
         let edit_tone_curve_highlights = photo.edit_tone_curve_highlights();
+        let content_hash = photo.content_hash().map(|s| s.to_string());
 
         // Serializar metadata para JSON
         let metadata = photo.metadata()
             .and_then(|m| serde_json::to_string(m).ok());
 
         sqlx::query(
-            "INSERT INTO photos (id, file_path, rating, color_label, is_edited, imported_at, modified_at, metadata, thumbnail_path, edit_exposure, edit_contrast, edit_temperature, edit_tint, edit_highlights, edit_shadows, edit_whites, edit_blacks, edit_clarity, edit_vibrance, edit_saturation, edit_tone_curve_shadows, edit_tone_curve_darks, edit_tone_curve_lights, edit_tone_curve_highlights)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO photos (id, file_path, rating, color_label, is_edited, imported_at, modified_at, metadata, thumbnail_path, edit_exposure, edit_contrast, edit_temperature, edit_tint, edit_highlights, edit_shadows, edit_whites, edit_blacks, edit_clarity, edit_vibrance, edit_saturation, edit_tone_curve_shadows, edit_tone_curve_darks, edit_tone_curve_lights, edit_tone_curve_highlights, content_hash)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         .bind(&id)
         .bind(&file_path)
@@ -176,6 +179,7 @@ impl PhotoRepository for PhotoRepositoryImpl {
         .bind(edit_tone_curve_darks)
         .bind(edit_tone_curve_lights)
         .bind(edit_tone_curve_highlights)
+        .bind(content_hash)
         .execute(&self.pool)
         .await
         .map_err(|e| DomainError::InvalidOperation(format!("Failed to save photo: {}", e)))?;
@@ -232,6 +236,7 @@ impl PhotoRepository for PhotoRepositoryImpl {
         let edit_tone_curve_darks = photo.edit_tone_curve_darks();
         let edit_tone_curve_lights = photo.edit_tone_curve_lights();
         let edit_tone_curve_highlights = photo.edit_tone_curve_highlights();
+        let content_hash = photo.content_hash().map(|s| s.to_string());
 
         // Serializar metadata para JSON
         let metadata = photo.metadata()
@@ -239,7 +244,7 @@ impl PhotoRepository for PhotoRepositoryImpl {
 
         let result = sqlx::query(
             "UPDATE photos
-             SET file_path = ?, rating = ?, color_label = ?, is_edited = ?, modified_at = ?, metadata = ?, thumbnail_path = ?, edit_exposure = ?, edit_contrast = ?, edit_temperature = ?, edit_tint = ?, edit_highlights = ?, edit_shadows = ?, edit_whites = ?, edit_blacks = ?, edit_clarity = ?, edit_vibrance = ?, edit_saturation = ?, edit_tone_curve_shadows = ?, edit_tone_curve_darks = ?, edit_tone_curve_lights = ?, edit_tone_curve_highlights = ?
+             SET file_path = ?, rating = ?, color_label = ?, is_edited = ?, modified_at = ?, metadata = ?, thumbnail_path = ?, edit_exposure = ?, edit_contrast = ?, edit_temperature = ?, edit_tint = ?, edit_highlights = ?, edit_shadows = ?, edit_whites = ?, edit_blacks = ?, edit_clarity = ?, edit_vibrance = ?, edit_saturation = ?, edit_tone_curve_shadows = ?, edit_tone_curve_darks = ?, edit_tone_curve_lights = ?, edit_tone_curve_highlights = ?, content_hash = ?
              WHERE id = ?"
         )
         .bind(&file_path)
@@ -264,6 +269,7 @@ impl PhotoRepository for PhotoRepositoryImpl {
         .bind(edit_tone_curve_darks)
         .bind(edit_tone_curve_lights)
         .bind(edit_tone_curve_highlights)
+        .bind(content_hash)
         .bind(&id)
         .execute(&self.pool)
         .await
