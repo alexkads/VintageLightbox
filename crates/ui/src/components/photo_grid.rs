@@ -2,12 +2,14 @@
 
 // Photo Grid Component
 // Displays photos in a 5-column grid layout with thumbnails
+// Uses async thumbnail loading for smooth UI
 
 use egui::{Ui, Vec2, Sense, Image, Rect, Color32};
 use std::collections::HashMap;
 
-use crate::state::{AppState, CurrentView};
+use crate::state::AppState;
 use crate::design_system::theme::Theme;
+use crate::async_loader::{AsyncThumbnailLoader, ThumbnailRequest};
 use adapters::view_models::PhotoViewModel;
 
 pub struct PhotoGrid {
@@ -15,6 +17,8 @@ pub struct PhotoGrid {
     thumbnail_cache: HashMap<String, egui::TextureHandle>,
     /// Track last selected photo to detect selection changes
     last_selected_id: Option<String>,
+    /// Async thumbnail loader (Rayon-powered)
+    thumbnail_loader: AsyncThumbnailLoader,
 }
 
 impl PhotoGrid {
@@ -22,6 +26,7 @@ impl PhotoGrid {
         Self {
             thumbnail_cache: HashMap::new(),
             last_selected_id: None,
+            thumbnail_loader: AsyncThumbnailLoader::new(),
         }
     }
 
@@ -32,6 +37,22 @@ impl PhotoGrid {
         state: &mut AppState,
         ctx: &egui::Context,
     ) {
+        // Poll for completed thumbnails (non-blocking)
+        let results = self.thumbnail_loader.poll_results();
+        for result in results {
+            let texture = crate::image_processing::ImageProcessor::load_texture(
+                ctx,
+                format!("grid_thumb_{}", result.photo_id),
+                &result.image
+            );
+            self.thumbnail_cache.insert(result.photo_id, texture);
+        }
+
+        // Request repaint if thumbnails are still loading
+        if self.thumbnail_loader.loading_count() > 0 {
+            ctx.request_repaint();
+        }
+
         // Get filtered photos
         let filtered_photos = state.get_filtered_photos();
 
@@ -40,15 +61,37 @@ impl PhotoGrid {
             return;
         }
 
+        // Request thumbnails for visible photos (async, non-blocking)
+        self.request_visible_thumbnails(&filtered_photos);
+
         // Check if selection changed (e.g., from filmstrip)
-        let selection_changed = state.selected_photo_id != self.last_selected_id;
-        self.last_selected_id = state.selected_photo_id.clone();
+        let selection_changed = state.library_selected_photo_id != self.last_selected_id;
+        self.last_selected_id = state.library_selected_photo_id.clone();
 
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 self.show_grid(ui, state, ctx, &filtered_photos, selection_changed);
             });
+    }
+
+    /// Request async loading of thumbnails for visible photos
+    fn request_visible_thumbnails(&mut self, photos: &[PhotoViewModel]) {
+        let requests: Vec<ThumbnailRequest> = photos
+            .iter()
+            .filter(|p| !self.thumbnail_cache.contains_key(&p.id))
+            .filter_map(|p| {
+                p.thumbnail_path.as_ref().map(|path| ThumbnailRequest {
+                    photo_id: p.id.clone(),
+                    path: path.clone(),
+                })
+            })
+            .take(20) // Limit batch size to avoid overwhelming
+            .collect();
+
+        if !requests.is_empty() {
+            self.thumbnail_loader.request_thumbnails(requests);
+        }
     }
 
     /// Show the grid of photo tiles
@@ -87,8 +130,8 @@ impl PhotoGrid {
                 ui.spacing_mut().item_spacing.x = spacing;
 
                 for photo in chunk {
-                    // Check if this is the selected photo
-                    let is_selected = state.selected_photo_id.as_ref() == Some(&photo.id);
+                    // Check if this is the selected photo (in Library view)
+                    let is_selected = state.library_selected_photo_id.as_ref() == Some(&photo.id);
                     
                     // Show the tile
                     self.show_tile_with_height(ui, photo, state, ctx, tile_width, tile_height);
@@ -108,7 +151,7 @@ impl PhotoGrid {
         ui: &mut Ui,
         photo: &PhotoViewModel,
         state: &mut AppState,
-        ctx: &egui::Context,
+        _ctx: &egui::Context,  // Kept for API compatibility
         tile_width: f32,
         tile_height: f32,
     ) {
@@ -116,9 +159,9 @@ impl PhotoGrid {
 
         let (rect, response) = ui.allocate_exact_size(tile_size, Sense::click());
 
-        // Handle click - only select, don't load full image
+        // Handle click - select in Library (does NOT affect Develop)
         if response.clicked() {
-            state.selected_photo_id = Some(photo.id.clone());
+            state.library_selected_photo_id = Some(photo.id.clone());
             
             // Populate metadata for detail view
             state.detail_metadata = Some(crate::state::DetailMetadata {
@@ -147,8 +190,8 @@ impl PhotoGrid {
             // Note: Full image loading happens in Develop view, not here
             // This keeps Library view fast and responsive
         }
-        // Background - highlight selected photo
-        let is_selected = state.selected_photo_id.as_ref() == Some(&photo.id);
+        // Background - highlight selected photo (Library selection)
+        let is_selected = state.library_selected_photo_id.as_ref() == Some(&photo.id);
         let bg_color = if is_selected {
             Theme::BG_ACTIVE
         } else if response.hovered() {
@@ -158,8 +201,7 @@ impl PhotoGrid {
         };
         ui.painter().rect_filled(rect, Theme::RADIUS_MD, bg_color);
 
-        // Load and display thumbnail
-        self.load_thumbnail_if_needed(photo, ctx);
+        // Display thumbnail (loaded asynchronously)
 
         if let Some(texture) = self.thumbnail_cache.get(&photo.id) {
             // Calculate image area - leave space for name at bottom (proportional to tile height)
@@ -274,23 +316,7 @@ impl PhotoGrid {
         }
     }
 
-    /// Load thumbnail texture if not already cached
-    fn load_thumbnail_if_needed(&mut self, photo: &PhotoViewModel, ctx: &egui::Context) {
-        if self.thumbnail_cache.contains_key(&photo.id) {
-            return;
-        }
-
-        if let Some(thumb_path) = &photo.thumbnail_path {
-            if let Ok(img) = image::open(thumb_path) {
-                let texture = crate::image_processing::ImageProcessor::load_texture(
-                    ctx,
-                    format!("thumb_{}", photo.id),
-                    &img,
-                );
-                self.thumbnail_cache.insert(photo.id.clone(), texture);
-            }
-        }
-    }
+    // Note: Thumbnail loading is now handled asynchronously by request_visible_thumbnails()
 
     /// Show empty state when no photos are loaded
     fn show_empty_state(&self, ui: &mut Ui) {

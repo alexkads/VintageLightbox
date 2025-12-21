@@ -34,7 +34,7 @@ impl DevelopView {
             .exact_height(120.0)  // 80px thumbnails + 40px padding
             .show_inside(ui, |ui| {
                 let photos = state.photos.clone();
-                let selected_id = state.selected_photo_id.clone();
+                let selected_id = state.develop_selected_photo_id.clone();
                 
                 self.filmstrip.show(
                     ui,
@@ -42,8 +42,8 @@ impl DevelopView {
                     &photos,
                     &selected_id,
                     |photo_id| {
-                        // Select photo and trigger load in Develop view
-                        state.selected_photo_id = Some(photo_id.clone());
+                        // Select photo and trigger load in Develop view (independent from Library)
+                        state.develop_selected_photo_id = Some(photo_id.clone());
                         // Clear current image to trigger reload
                         state.loaded_photo_id = None;
                         ctx.request_repaint();
@@ -350,7 +350,7 @@ impl DevelopView {
             egui::RichText::new("Delete Photo")
                 .color(egui::Color32::from_rgb(200, 60, 60))
         ).clicked() {
-            if let Some(photo_id) = &state.selected_photo_id {
+            if let Some(photo_id) = &state.develop_selected_photo_id {
                 let photo_ctrl = photo_controller.clone();
                 let lib_ctrl = library_controller.clone();
                 let sender = photo_sender.clone();
@@ -372,8 +372,8 @@ impl DevelopView {
                     }
                 });
 
-                // Clear selection and return to library
-                state.selected_photo_id = None;
+                // Clear develop selection and return to library
+                state.develop_selected_photo_id = None;
                 state.loaded_photo_id = None;
                 state.detail_image = None;
                 state.detail_metadata = None;
@@ -390,7 +390,7 @@ impl DevelopView {
         if let Some(metadata) = &mut state.detail_metadata {
             if let Some(new_rating) = RatingWidget::show(ui, &mut metadata.rating, 20.0) {
                 // Persist rating change to database
-                if let Some(photo_id) = &state.selected_photo_id {
+                if let Some(photo_id) = &state.develop_selected_photo_id {
                     let controller = photo_controller.clone();
                     let photo_id = photo_id.clone();
                     tokio::spawn(async move {

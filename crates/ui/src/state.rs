@@ -53,7 +53,10 @@ pub struct AppState {
     // Photo Library
     // ============================================
     pub photos: Vec<PhotoViewModel>,
-    pub selected_photo_id: Option<String>,
+    /// Selected photo in Library view (independent from Develop)
+    pub library_selected_photo_id: Option<String>,
+    /// Selected photo in Develop view (independent from Library)
+    pub develop_selected_photo_id: Option<String>,
     /// ID of the photo currently loaded in detail_image (for change detection)
     pub loaded_photo_id: Option<String>,
 
@@ -159,7 +162,8 @@ impl AppState {
         Self {
             current_view: CurrentView::Library,
             photos: Vec::new(),
-            selected_photo_id: None,
+            library_selected_photo_id: None,
+            develop_selected_photo_id: None,
             loaded_photo_id: None,
             detail_image: None,
             detail_metadata: None,
@@ -204,17 +208,37 @@ impl AppState {
         }
     }
 
-    /// Get the currently selected photo view model
+    /// Get the selected photo ID for the current view
+    pub fn selected_photo_id(&self) -> Option<&String> {
+        match self.current_view {
+            CurrentView::Library => self.library_selected_photo_id.as_ref(),
+            CurrentView::Develop => self.develop_selected_photo_id.as_ref(),
+        }
+    }
+
+    /// Get the currently selected photo view model (based on current view)
     pub fn get_current_photo(&self) -> Option<&PhotoViewModel> {
-        self.selected_photo_id.as_ref()
+        self.selected_photo_id()
             .and_then(|id| self.photos.iter().find(|p| &p.id == id))
     }
 
-    /// Navigate to the next or previous photo
+    /// Get the library selected photo view model
+    pub fn get_library_photo(&self) -> Option<&PhotoViewModel> {
+        self.library_selected_photo_id.as_ref()
+            .and_then(|id| self.photos.iter().find(|p| &p.id == id))
+    }
+
+    /// Get the develop selected photo view model
+    pub fn get_develop_photo(&self) -> Option<&PhotoViewModel> {
+        self.develop_selected_photo_id.as_ref()
+            .and_then(|id| self.photos.iter().find(|p| &p.id == id))
+    }
+
+    /// Navigate to the next or previous photo in develop view
     /// direction: 1 for next, -1 for previous
     /// Returns the new photo ID if navigation was successful
-    pub fn navigate(&mut self, direction: i32) -> Option<String> {
-        if let Some(current_id) = &self.selected_photo_id {
+    pub fn navigate_develop(&mut self, direction: i32) -> Option<String> {
+        if let Some(current_id) = &self.develop_selected_photo_id {
             if let Some(pos) = self.photos.iter().position(|p| &p.id == current_id) {
                 let new_pos = if direction > 0 {
                     (pos + 1).min(self.photos.len().saturating_sub(1))
@@ -241,9 +265,9 @@ impl AppState {
         !self.photos.is_empty()
     }
 
-    /// Get the index of the currently selected photo
-    pub fn current_photo_index(&self) -> Option<usize> {
-        self.selected_photo_id.as_ref()
+    /// Get the index of the currently selected photo in develop view
+    pub fn develop_photo_index(&self) -> Option<usize> {
+        self.develop_selected_photo_id.as_ref()
             .and_then(|id| self.photos.iter().position(|p| &p.id == id))
     }
 

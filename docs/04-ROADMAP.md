@@ -23,6 +23,15 @@ Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Ar
 
 ### Conquistas Recentes
 
+- ✅ **ASYNC IMAGE PROCESSING (21/dez/2025)** ⚡
+  - **Rayon Integration**: Processamento paralelo de thumbnails e imagens
+  - **AsyncThumbnailLoader**: Carregamento de thumbnails em threads separadas
+  - **AsyncImageProcessor**: Carregamento de imagens full-size sem bloquear UI
+  - **AsyncEditProcessor**: Processamento de edits em tempo real com debouncing
+  - **UI Nunca Trava**: Library e Develop isolados - processamento pesado não afeta navegação
+  - **Polling Non-Blocking**: UI faz poll de resultados sem esperar
+  - **Seleções Independentes**: `library_selected_photo_id` e `develop_selected_photo_id` separados
+
 - ✅ **FILMSTRIP NAVIGATION (21/dez/2025)** 🎞️
   - **Barra de Miniaturas**: Filmstrip horizontal no rodapé (estilo Lightroom)
   - **Presente em Library e Develop**: Navegação rápida em ambas as views

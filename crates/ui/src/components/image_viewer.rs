@@ -88,8 +88,9 @@ impl ImageViewer {
 
             ui.allocate_new_ui(UiBuilder::new().max_rect(left_rect), |ui| {
                 if widgets::icon_button(ui, "‹").clicked() {
-                    if let Some(new_id) = state.navigate(-1) {
-                        state.selected_photo_id = Some(new_id);
+                    if let Some(new_id) = state.navigate_develop(-1) {
+                        state.develop_selected_photo_id = Some(new_id);
+                        state.loaded_photo_id = None; // Force reload
                     }
                 }
             });
@@ -100,8 +101,9 @@ impl ImageViewer {
 
             ui.allocate_new_ui(UiBuilder::new().max_rect(right_rect), |ui| {
                 if widgets::icon_button(ui, "›").clicked() {
-                    if let Some(new_id) = state.navigate(1) {
-                        state.selected_photo_id = Some(new_id);
+                    if let Some(new_id) = state.navigate_develop(1) {
+                        state.develop_selected_photo_id = Some(new_id);
+                        state.loaded_photo_id = None; // Force reload
                     }
                 }
             });

@@ -51,18 +51,18 @@ impl KeyboardHandler {
                 state.undo();
             }
 
-            // Navigation shortcuts (Arrow keys)
+            // Navigation shortcuts (Arrow keys) - only in Develop view
             if i.key_pressed(Key::ArrowRight) {
-                if let Some(new_id) = state.navigate(1) {
-                    state.selected_photo_id = Some(new_id.clone());
-                    // TODO: Load new photo image
+                if let Some(new_id) = state.navigate_develop(1) {
+                    state.develop_selected_photo_id = Some(new_id.clone());
+                    state.loaded_photo_id = None; // Force reload
                 }
             }
 
             if i.key_pressed(Key::ArrowLeft) {
-                if let Some(new_id) = state.navigate(-1) {
-                    state.selected_photo_id = Some(new_id.clone());
-                    // TODO: Load new photo image
+                if let Some(new_id) = state.navigate_develop(-1) {
+                    state.develop_selected_photo_id = Some(new_id.clone());
+                    state.loaded_photo_id = None; // Force reload
                 }
             }
 

@@ -8,6 +8,7 @@ mod image_processing;
 mod keyboard;
 mod components;
 mod views;
+pub mod async_loader;
 
 use std::sync::Arc;
 

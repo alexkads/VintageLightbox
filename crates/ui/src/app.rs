@@ -11,6 +11,7 @@ use crate::state::{AppState, CurrentView};
 use crate::design_system::{theme::Theme, widgets};
 use crate::views::{library_view::LibraryView, develop_view::DevelopView};
 use crate::keyboard::KeyboardHandler;
+use crate::async_loader::{AsyncImageProcessor, AsyncEditProcessor, ImageProcessRequest, EditRequest};
 
 /// Main application struct
 pub struct VintageLightboxApp {
@@ -43,6 +44,16 @@ pub struct VintageLightboxApp {
     // ============================================
     photo_receiver: mpsc::Receiver<Result<Vec<PhotoViewModel>, String>>,
     photo_sender: mpsc::Sender<Result<Vec<PhotoViewModel>, String>>,
+
+    // ============================================
+    // Async Image Processing (Rayon-powered)
+    // ============================================
+    /// Processes full image loading in background
+    image_processor: AsyncImageProcessor,
+    /// Processes slider edits in background for real-time feedback
+    edit_processor: AsyncEditProcessor,
+    /// Current edit request ID for tracking latest edit
+    current_edit_request_id: u64,
 }
 
 impl VintageLightboxApp {
@@ -74,6 +85,9 @@ impl VintageLightboxApp {
             keyboard_handler: KeyboardHandler::new(),
             photo_receiver,
             photo_sender,
+            image_processor: AsyncImageProcessor::new(),
+            edit_processor: AsyncEditProcessor::new(),
+            current_edit_request_id: 0,
         }
     }
 
@@ -115,95 +129,121 @@ impl eframe::App for VintageLightboxApp {
         // Handle keyboard input
         self.keyboard_handler.handle_input(ctx, &mut self.state, &self.photo_controller);
 
-        // Load image for selected photo if needed
-        if let Some(photo_id) = &self.state.selected_photo_id.clone() {
-            // Check if we need to load a new image
-            let needs_reload = self.state.loaded_photo_id.as_ref() != Some(photo_id);
+        // ============================================
+        // ASYNC IMAGE LOADING (Non-blocking)
+        // ============================================
+        
+        // Poll for completed image processing results
+        if let Some(result) = self.image_processor.poll_result() {
+            // Check if this is still the photo we want
+            if self.state.develop_selected_photo_id.as_ref() == Some(&result.photo_id) {
+                // Store original for before/after
+                self.state.original_preview = Some(result.original_preview);
+                self.state.histogram_data = Some(result.histogram);
+                
+                // Create texture from processed image
+                let texture = crate::image_processing::ImageProcessor::load_texture(
+                    ctx,
+                    format!("photo_{}", result.photo_id),
+                    &result.preview
+                );
+                
+                self.state.detail_image = Some(texture);
+                self.state.loaded_photo_id = Some(result.photo_id);
+                self.state.is_busy = false;
+                self.state.busy_message.clear();
+            }
+        }
 
-            if needs_reload {
-                // Clear previous image first
+        // Poll for completed edit processing results
+        if let Some(result) = self.edit_processor.poll_result() {
+            // Only apply if this is the latest request
+            if result.request_id >= self.current_edit_request_id.saturating_sub(5) {
+                if let Some(photo_id) = &self.state.develop_selected_photo_id.clone() {
+                    let texture = crate::image_processing::ImageProcessor::load_texture(
+                        ctx,
+                        format!("photo_{}", photo_id),
+                        &result.processed
+                    );
+                    self.state.detail_image = Some(texture);
+                }
+            }
+        }
+
+        // Request image loading if needed (non-blocking)
+        if let Some(photo_id) = &self.state.develop_selected_photo_id.clone() {
+            let needs_reload = self.state.loaded_photo_id.as_ref() != Some(photo_id);
+            let is_processing = self.image_processor.processing_photo_id().as_ref() == Some(photo_id);
+
+            if needs_reload && !is_processing {
+                // Clear previous image
                 self.state.detail_image = None;
                 self.state.original_preview = None;
+                self.state.is_busy = true;
+                self.state.busy_message = "Loading image...".to_string();
 
-                // Find the photo in our list
+                // Find the photo and request async processing
                 if let Some(photo) = self.state.photos.iter().find(|p| &p.id == photo_id) {
-                    // Load image
-                    if let Ok(img) = image::open(&photo.path) {
-                        // OPTIMIZATION: Resize to preview resolution (1920x1080) for fast loading
-                        let preview_img = crate::image_processing::ImageProcessor::resize_for_preview(&img, 1920);
+                    // Load saved edits
+                    let exposure = photo.edit_exposure.unwrap_or(0.0);
+                    let contrast = photo.edit_contrast.unwrap_or(1.0);
+                    let temperature = photo.edit_temperature.unwrap_or(0.0);
+                    let tint = photo.edit_tint.unwrap_or(0.0);
+                    let highlights = photo.edit_highlights.unwrap_or(0.0);
+                    let shadows = photo.edit_shadows.unwrap_or(0.0);
+                    let whites = photo.edit_whites.unwrap_or(0.0);
+                    let blacks = photo.edit_blacks.unwrap_or(0.0);
+                    let clarity = photo.edit_clarity.unwrap_or(0.0);
+                    let vibrance = photo.edit_vibrance.unwrap_or(0.0);
+                    let saturation = photo.edit_saturation.unwrap_or(0.0);
 
-                        // Calculate histogram from preview
-                        self.state.histogram_data = Some(
-                            crate::components::histogram::HistogramData::from_image(&preview_img)
-                        );
+                    // Initialize active values immediately (UI responds instantly)
+                    self.state.active_exposure = exposure;
+                    self.state.active_contrast = contrast;
+                    self.state.active_temperature = temperature;
+                    self.state.active_tint = tint;
+                    self.state.active_highlights = highlights;
+                    self.state.active_shadows = shadows;
+                    self.state.active_whites = whites;
+                    self.state.active_blacks = blacks;
+                    self.state.active_clarity = clarity;
+                    self.state.active_vibrance = vibrance;
+                    self.state.active_saturation = saturation;
+                    self.state.prev_exposure = exposure;
+                    self.state.prev_contrast = contrast;
+                    self.state.prev_temperature = temperature;
+                    self.state.prev_tint = tint;
+                    self.state.prev_highlights = highlights;
+                    self.state.prev_shadows = shadows;
+                    self.state.prev_whites = whites;
+                    self.state.prev_blacks = blacks;
+                    self.state.prev_clarity = clarity;
+                    self.state.prev_vibrance = vibrance;
+                    self.state.prev_saturation = saturation;
 
-                        // Store original preview for real-time processing
-                        self.state.original_preview = Some(preview_img.clone());
+                    // Request async image loading (non-blocking!)
+                    self.image_processor.request_process(ImageProcessRequest {
+                        photo_id: photo_id.clone(),
+                        path: photo.path.clone(),
+                        exposure,
+                        contrast,
+                        temperature,
+                        tint,
+                        highlights,
+                        shadows,
+                        whites,
+                        blacks,
+                        clarity,
+                        vibrance,
+                        saturation,
+                        max_preview_size: 1920,
+                    });
 
-                        // Load saved edits
-                        let exposure = photo.edit_exposure.unwrap_or(0.0);
-                        let contrast = photo.edit_contrast.unwrap_or(1.0);
-                        let temperature = photo.edit_temperature.unwrap_or(0.0);
-                        let tint = photo.edit_tint.unwrap_or(0.0);
-                        let highlights = photo.edit_highlights.unwrap_or(0.0);
-                        let shadows = photo.edit_shadows.unwrap_or(0.0);
-                        let whites = photo.edit_whites.unwrap_or(0.0);
-                        let blacks = photo.edit_blacks.unwrap_or(0.0);
-                        let clarity = photo.edit_clarity.unwrap_or(0.0);
-                        let vibrance = photo.edit_vibrance.unwrap_or(0.0);
-                        let saturation = photo.edit_saturation.unwrap_or(0.0);
-
-                        // Initialize active values
-                        self.state.active_exposure = exposure;
-                        self.state.active_contrast = contrast;
-                        self.state.active_temperature = temperature;
-                        self.state.active_tint = tint;
-                        self.state.active_highlights = highlights;
-                        self.state.active_shadows = shadows;
-                        self.state.active_whites = whites;
-                        self.state.active_blacks = blacks;
-                        self.state.active_clarity = clarity;
-                        self.state.active_vibrance = vibrance;
-                        self.state.active_saturation = saturation;
-                        self.state.prev_exposure = exposure;
-                        self.state.prev_contrast = contrast;
-                        self.state.prev_temperature = temperature;
-                        self.state.prev_tint = tint;
-                        self.state.prev_highlights = highlights;
-                        self.state.prev_shadows = shadows;
-                        self.state.prev_whites = whites;
-                        self.state.prev_blacks = blacks;
-                        self.state.prev_clarity = clarity;
-                        self.state.prev_vibrance = vibrance;
-                        self.state.prev_saturation = saturation;
-
-                        // Apply edits if they exist
-                        let has_edits = exposure != 0.0 || contrast != 1.0 || temperature != 0.0 ||
-                                       tint != 0.0 || highlights != 0.0 || shadows != 0.0 ||
-                                       whites != 0.0 || blacks != 0.0 || clarity != 0.0 ||
-                                       vibrance != 0.0 || saturation != 0.0;
-                        let processed = if has_edits {
-                            crate::image_processing::ImageProcessor::process_image(
-                                &preview_img, exposure, contrast, temperature, tint,
-                                highlights, shadows, whites, blacks, clarity, vibrance, saturation
-                            )
-                        } else {
-                            preview_img
-                        };
-
-                        // Create texture with unique name per photo
-                        let texture = crate::image_processing::ImageProcessor::load_texture(
-                            ctx,
-                            format!("photo_{}", photo_id),
-                            &processed
-                        );
-
-                        self.state.detail_image = Some(texture);
-                        self.state.loaded_photo_id = Some(photo_id.clone());
-                    }
+                    // Request repaint to poll for results
+                    ctx.request_repaint();
                 }
-            } else {
-                // Photo is already loaded, check if edits changed OR show_before toggled
+            } else if !needs_reload {
+                // Photo is loaded, check for edit changes
                 let edits_changed =
                     self.state.active_exposure != self.state.prev_exposure ||
                     self.state.active_contrast != self.state.prev_contrast ||
@@ -218,10 +258,9 @@ impl eframe::App for VintageLightboxApp {
                     self.state.active_saturation != self.state.prev_saturation;
                 let before_toggled = self.state.show_before != self.state.prev_show_before;
 
-                if edits_changed || before_toggled {
-                    // If edits changed (not just before/after toggle), save to history
+                if (edits_changed || before_toggled) && self.state.original_preview.is_some() {
+                    // Save to history if needed
                     if edits_changed && !self.state.show_before {
-                        // Check if this is actually a new state (not just reprocessing)
                         let should_save = if let Some(index) = self.state.history_index {
                             if let Some(last_snapshot) = self.state.edit_history.get(index) {
                                 last_snapshot.exposure != self.state.active_exposure ||
@@ -239,7 +278,7 @@ impl eframe::App for VintageLightboxApp {
                                 true
                             }
                         } else {
-                            true // No history yet
+                            true
                         };
 
                         if should_save {
@@ -247,56 +286,55 @@ impl eframe::App for VintageLightboxApp {
                         }
                     }
 
-                    // Reprocess image
+                    // Request async edit processing (non-blocking!)
                     if let Some(original) = &self.state.original_preview {
-                        // If showing "before", use original without edits
-                        // Otherwise, apply current edits
-                        let processed = if self.state.show_before {
-                            original.clone()
+                        if self.state.show_before {
+                            // Show original immediately (no processing needed)
+                            let texture = crate::image_processing::ImageProcessor::load_texture(
+                                ctx,
+                                format!("photo_{}", photo_id),
+                                original
+                            );
+                            self.state.detail_image = Some(texture);
                         } else {
-                            crate::image_processing::ImageProcessor::process_image(
-                                original,
-                                self.state.active_exposure,
-                                self.state.active_contrast,
-                                self.state.active_temperature,
-                                self.state.active_tint,
-                                self.state.active_highlights,
-                                self.state.active_shadows,
-                                self.state.active_whites,
-                                self.state.active_blacks,
-                                self.state.active_clarity,
-                                self.state.active_vibrance,
-                                self.state.active_saturation,
-                            )
-                        };
+                            // Request async edit processing
+                            self.current_edit_request_id = self.edit_processor.next_request_id();
+                            self.edit_processor.request_edit(EditRequest {
+                                request_id: self.current_edit_request_id,
+                                original: original.clone(),
+                                exposure: self.state.active_exposure,
+                                contrast: self.state.active_contrast,
+                                temperature: self.state.active_temperature,
+                                tint: self.state.active_tint,
+                                highlights: self.state.active_highlights,
+                                shadows: self.state.active_shadows,
+                                whites: self.state.active_whites,
+                                blacks: self.state.active_blacks,
+                                clarity: self.state.active_clarity,
+                                vibrance: self.state.active_vibrance,
+                                saturation: self.state.active_saturation,
+                            });
 
-                        // Update texture
-                        let texture = crate::image_processing::ImageProcessor::load_texture(
-                            ctx,
-                            format!("photo_{}", photo_id),
-                            &processed
-                        );
-
-                        self.state.detail_image = Some(texture);
-
-                        // Update previous values only if not in before mode
-                        if !self.state.show_before {
-                            self.state.prev_exposure = self.state.active_exposure;
-                            self.state.prev_contrast = self.state.active_contrast;
-                            self.state.prev_temperature = self.state.active_temperature;
-                            self.state.prev_tint = self.state.active_tint;
-                            self.state.prev_highlights = self.state.active_highlights;
-                            self.state.prev_shadows = self.state.active_shadows;
-                            self.state.prev_whites = self.state.active_whites;
-                            self.state.prev_blacks = self.state.active_blacks;
-                            self.state.prev_clarity = self.state.active_clarity;
-                            self.state.prev_vibrance = self.state.active_vibrance;
-                            self.state.prev_saturation = self.state.active_saturation;
+                            // Request repaint to poll for results
+                            ctx.request_repaint();
                         }
-
-                        // Always update prev_show_before
-                        self.state.prev_show_before = self.state.show_before;
                     }
+
+                    // Update previous values
+                    if !self.state.show_before {
+                        self.state.prev_exposure = self.state.active_exposure;
+                        self.state.prev_contrast = self.state.active_contrast;
+                        self.state.prev_temperature = self.state.active_temperature;
+                        self.state.prev_tint = self.state.active_tint;
+                        self.state.prev_highlights = self.state.active_highlights;
+                        self.state.prev_shadows = self.state.active_shadows;
+                        self.state.prev_whites = self.state.active_whites;
+                        self.state.prev_blacks = self.state.active_blacks;
+                        self.state.prev_clarity = self.state.active_clarity;
+                        self.state.prev_vibrance = self.state.active_vibrance;
+                        self.state.prev_saturation = self.state.active_saturation;
+                    }
+                    self.state.prev_show_before = self.state.show_before;
                 }
             }
         }
@@ -359,9 +397,15 @@ impl VintageLightboxApp {
 
             ui.add_space(Theme::SPACE_SM);
 
-            let develop_enabled = self.state.selected_photo_id.is_some();
+            // Develop button enabled if Library has a selection
+            let develop_enabled = self.state.library_selected_photo_id.is_some();
             if develop_enabled {
                 if widgets::nav_button(ui, "Develop", self.state.current_view == CurrentView::Develop).clicked() {
+                    // Copy Library selection to Develop when entering Develop mode
+                    if self.state.develop_selected_photo_id.is_none() {
+                        self.state.develop_selected_photo_id = self.state.library_selected_photo_id.clone();
+                        self.state.loaded_photo_id = None; // Force image load
+                    }
                     self.state.current_view = CurrentView::Develop;
                 }
             } else {

@@ -22,6 +22,8 @@ adapters = { path = "../adapters" }
 use-cases = { path = "../use-cases" }
 domain = { path = "../domain" }
 image = "0.24"
+rayon = "1.10"
+parking_lot = "0.12"
 
 [dev-dependencies]
 egui_kittest = { version = "0.31", features = ["wgpu", "snapshot"] }

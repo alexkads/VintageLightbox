@@ -1,14 +1,18 @@
 // Filmstrip Component
 // Horizontal thumbnail navigation bar similar to Lightroom
+// Uses async thumbnail loading for smooth UI
 
-use egui::{Ui, Vec2, Sense, Color32, Stroke, Rounding, Image};
+use egui::{Ui, Vec2, Sense, Color32, Stroke, CornerRadius, Image};
 use std::collections::HashMap;
 use adapters::view_models::PhotoViewModel;
 use crate::design_system::theme::Theme;
+use crate::async_loader::{AsyncThumbnailLoader, ThumbnailRequest};
 
 pub struct Filmstrip {
     /// Cache of loaded thumbnail textures
     thumbnail_cache: HashMap<String, egui::TextureHandle>,
+    /// Async thumbnail loader (Rayon-powered)
+    thumbnail_loader: AsyncThumbnailLoader,
 }
 
 impl Filmstrip {
@@ -19,6 +23,7 @@ impl Filmstrip {
     pub fn new() -> Self {
         Self {
             thumbnail_cache: HashMap::new(),
+            thumbnail_loader: AsyncThumbnailLoader::new(),
         }
     }
 
@@ -30,11 +35,30 @@ impl Filmstrip {
         selected_photo_id: &Option<String>,
         mut on_select: impl FnMut(String),
     ) {
+        // Poll for completed thumbnails (non-blocking)
+        let results = self.thumbnail_loader.poll_results();
+        for result in results {
+            let texture = crate::image_processing::ImageProcessor::load_texture(
+                ctx,
+                format!("filmstrip_thumb_{}", result.photo_id),
+                &result.image
+            );
+            self.thumbnail_cache.insert(result.photo_id, texture);
+        }
+
+        // Request repaint if thumbnails are still loading
+        if self.thumbnail_loader.loading_count() > 0 {
+            ctx.request_repaint();
+        }
+
+        // Request thumbnails for visible photos (async, non-blocking)
+        self.request_visible_thumbnails(photos);
+
         // Dark background like Lightroom
         let bg_color = Color32::from_rgb(42, 42, 42);
         ui.painter().rect_filled(
             ui.available_rect_before_wrap(),
-            Rounding::ZERO,
+            CornerRadius::ZERO,
             bg_color,
         );
 
@@ -47,9 +71,6 @@ impl Filmstrip {
 
                     for photo in photos {
                         let is_selected = selected_photo_id.as_ref() == Some(&photo.id);
-                        
-                        // Load thumbnail if needed
-                        self.load_thumbnail_if_needed(photo, ctx);
                         
                         // Reserve space for thumbnail
                         let (rect, response) = ui.allocate_exact_size(
@@ -66,7 +87,7 @@ impl Filmstrip {
                         
                         ui.painter().rect_filled(
                             rect,
-                            Rounding::same(2),
+                            CornerRadius::same(2),
                             thumb_color,
                         );
 
@@ -119,7 +140,7 @@ impl Filmstrip {
                         if is_selected {
                             ui.painter().rect_stroke(
                                 rect,
-                                Rounding::same(2),
+                                CornerRadius::same(2),
                                 Stroke::new(Self::SELECTED_BORDER_WIDTH, Color32::WHITE),
                                 egui::StrokeKind::Outside,
                             );
@@ -139,27 +160,32 @@ impl Filmstrip {
             });
     }
 
-    /// Load thumbnail texture if not already cached
-    fn load_thumbnail_if_needed(&mut self, photo: &PhotoViewModel, ctx: &egui::Context) {
-        if self.thumbnail_cache.contains_key(&photo.id) {
-            return;
-        }
+    /// Request async loading of thumbnails for visible photos
+    fn request_visible_thumbnails(&mut self, photos: &[PhotoViewModel]) {
+        let requests: Vec<ThumbnailRequest> = photos
+            .iter()
+            .filter(|p| !self.thumbnail_cache.contains_key(&p.id))
+            .filter_map(|p| {
+                p.thumbnail_path.as_ref().map(|path| ThumbnailRequest {
+                    photo_id: p.id.clone(),
+                    path: path.clone(),
+                })
+            })
+            .take(30) // Limit batch size
+            .collect();
 
-        if let Some(thumb_path) = &photo.thumbnail_path {
-            if let Ok(img) = image::open(thumb_path) {
-                let texture = crate::image_processing::ImageProcessor::load_texture(
-                    ctx,
-                    format!("filmstrip_thumb_{}", photo.id),
-                    &img,
-                );
-                self.thumbnail_cache.insert(photo.id.clone(), texture);
-            }
+        if !requests.is_empty() {
+            self.thumbnail_loader.request_thumbnails(requests);
         }
     }
 
+    // Note: Thumbnail loading is now handled asynchronously by request_visible_thumbnails()
+
     /// Clear the thumbnail cache
+    #[allow(dead_code)]
     pub fn clear_cache(&mut self) {
         self.thumbnail_cache.clear();
+        self.thumbnail_loader.clear_requested();
     }
 }
 
