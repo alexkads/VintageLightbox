@@ -65,6 +65,7 @@ Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Ar
   - **Performance Stats**: Overlay debug com métricas detalhadas (Load Time, GPU Process, Texture Upload)
   - **Configurável**: Toggle via `.env` (SHOW_PERFORMANCE_STATS)
   - **Otimização de Upload**: Texture upload movido para background thread (zero UI blocking)
+  - **BLOB Cache (SQLite)**: Thumbs e Previews armazenados em BLOBs (rusqlite) para library limpa e alta performance. ✅ verified
 
 - ✅ **SISTEMA DE EDIÇÃO PROFISSIONAL (20/dez/2025)** 🎨
   - **11 Sliders de Ajuste**: Sistema completo de edição não-destrutiva
@@ -571,7 +572,7 @@ Criar versão mínima funcional com importação, visualização, edição bási
 
 ### 2.8 Performance e Otimizações (1 semana) ✅
 - [x] Otimizar geração de thumbnails (AsyncThumbnailLoader)
-- [x] Melhorar cache de previews (Smart Preview System)
+- [x] Melhorar cache de previews (Smart Preview System - BLOB SQLite) ✅
 - [x] Profiling e otimizações críticas (Performance Stats Overlay)
 - [x] Reduzir uso de memória (Texture management otimizado)
 
