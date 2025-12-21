@@ -157,8 +157,20 @@ pub struct AppState {
     // ============================================
     // Undo/Redo History
     // ============================================
+    /// Undo/Redo history
     pub edit_history: Vec<EditSnapshot>,
     pub history_index: Option<usize>, // Current position in history (None = no history)
+
+    /// Performance Metrics
+    pub performance_metrics: PerformanceMetrics,
+    pub show_performance_stats: bool,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct PerformanceMetrics {
+    pub image_load_time_ms: Option<f32>,
+    pub gpu_process_time_ms: Option<f32>,
+    pub texture_upload_time_ms: Option<f32>,
 }
 
 impl AppState {
@@ -211,6 +223,8 @@ impl AppState {
             pending_export: None,
             edit_history: Vec::new(),
             history_index: None,
+            performance_metrics: PerformanceMetrics::default(),
+            show_performance_stats: std::env::var("SHOW_PERFORMANCE_STATS").map_or(false, |v| v == "true"),
         }
     }
 

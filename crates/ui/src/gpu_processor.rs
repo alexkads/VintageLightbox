@@ -7,6 +7,7 @@ use parking_lot::Mutex;
 use image::DynamicImage;
 use lru::LruCache;
 use std::num::NonZeroUsize;
+use eframe::egui::ColorImage;
 
 /// Parameters for image adjustments (must match WGSL struct layout)
 #[repr(C)]
@@ -58,6 +59,8 @@ pub struct GpuProcessRequest {
 pub struct GpuProcessResult {
     pub request_id: u64,
     pub processed_image: DynamicImage,
+    pub preview: ColorImage,
+    pub process_time_ms: f32,
 }
 
 struct GpuResources {
@@ -179,6 +182,7 @@ impl GpuImageProcessor {
             }
 
             // Process on GPU
+            let start_time = std::time::Instant::now();
             if let Some(result) = Self::process_on_gpu(
                 &device,
                 &queue,
@@ -186,9 +190,12 @@ impl GpuImageProcessor {
                 &request,
                 &mut resources_cache,
             ) {
+                let preview = crate::image_processing::ImageProcessor::dynamic_to_color_image(&result);
                 let _ = sender.send(GpuProcessResult {
                     request_id: request.request_id,
                     processed_image: result,
+                    preview,
+                    process_time_ms: start_time.elapsed().as_secs_f32() * 1000.0,
                 });
             }
         }
@@ -414,6 +421,7 @@ impl GpuImageProcessor {
             }
 
             // Convert back to DynamicImage and process on CPU
+            let start_time = std::time::Instant::now();
             if let Some(img) = image::RgbaImage::from_raw(
                 request.width,
                 request.height,
@@ -435,9 +443,12 @@ impl GpuImageProcessor {
                     request.params.saturation,
                 );
 
+                let preview = crate::image_processing::ImageProcessor::dynamic_to_color_image(&processed);
                 let _ = sender.send(GpuProcessResult {
                     request_id: request.request_id,
                     processed_image: processed,
+                    preview,
+                    process_time_ms: start_time.elapsed().as_secs_f32() * 1000.0,
                 });
             }
         }

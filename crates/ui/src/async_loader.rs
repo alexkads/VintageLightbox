@@ -1,6 +1,7 @@
 // Async Thumbnail Loader
 // Uses Rayon for parallel thumbnail loading without blocking the UI
 
+use eframe::egui::ColorImage;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use parking_lot::Mutex;
@@ -165,6 +166,9 @@ pub struct AsyncImageProcessor {
     result_receiver: Receiver<ImageProcessResult>,
     /// Flag indicating if a request is in progress
     processing: Arc<Mutex<Option<String>>>,
+    /// Manager for smart preview caching
+    #[allow(dead_code)] // It is used inside thread closure but compiler might not see it across clone
+    preview_manager: Arc<infrastructure::cache::preview_manager::PreviewManager>,
 }
 
 /// Request to process an image
@@ -189,12 +193,16 @@ pub struct ImageProcessRequest {
 /// Result of image processing
 pub struct ImageProcessResult {
     pub photo_id: String,
-    /// Processed preview image
-    pub preview: DynamicImage,
+    /// Processed preview image prepared for display
+    pub preview: ColorImage,
     /// Original (unprocessed) preview for before/after
     pub original_preview: DynamicImage,
+    /// Processed DynamicImage (for saving/further processing if needed)
+    pub processed_image: DynamicImage,
     /// Histogram data
     pub histogram: crate::components::histogram::HistogramData,
+    /// Time taken to load and process
+    pub load_time_ms: f32,
 }
 
 impl AsyncImageProcessor {
@@ -204,16 +212,19 @@ impl AsyncImageProcessor {
         let (result_sender, result_receiver) = channel::<ImageProcessResult>();
         let processing = Arc::new(Mutex::new(None));
         let processing_clone = processing.clone();
+        let preview_manager = Arc::new(infrastructure::cache::preview_manager::PreviewManager::new());
+        let preview_manager_clone = preview_manager.clone();
 
         // Spawn dedicated thread for image processing
         std::thread::spawn(move || {
-            Self::background_processor(request_receiver, result_sender, processing_clone);
+            Self::background_processor(request_receiver, result_sender, processing_clone, preview_manager_clone);
         });
 
         Self {
             request_sender,
             result_receiver,
             processing,
+            preview_manager,
         }
     }
 
@@ -222,19 +233,44 @@ impl AsyncImageProcessor {
         receiver: Receiver<ImageProcessRequest>,
         sender: Sender<ImageProcessResult>,
         processing: Arc<Mutex<Option<String>>>,
+        preview_manager: Arc<infrastructure::cache::preview_manager::PreviewManager>,
     ) {
         while let Ok(request) = receiver.recv() {
             // Mark as processing
             *processing.lock() = Some(request.photo_id.clone());
 
-            // Load and process the image
-            if let Ok(img) = image::open(&request.path) {
-                // Resize for preview using Rayon-accelerated operations
-                let preview_img = crate::image_processing::ImageProcessor::resize_for_preview(
-                    &img, 
-                    request.max_preview_size
-                );
+            let start_time = std::time::Instant::now();
 
+            // 1. Try to load Smart Preview from cache first
+            let cached_preview = preview_manager.get_preview(&request.photo_id);
+            
+            let preview_img = if let Some(img) = cached_preview {
+                // Cache hit! Use optimized image
+                // println!("Smart Preview loaded for {}", request.photo_id);
+                img
+            } else {
+                // Cache miss. Load original and generate Smart Preview
+                if let Ok(img) = image::open(&request.path) {
+                    // Resize for preview using Rayon-accelerated operations
+                    let resized = crate::image_processing::ImageProcessor::resize_for_preview(
+                        &img, 
+                        request.max_preview_size
+                    );
+                    
+                    // Save to cache for next time
+                    let _ = preview_manager.save_preview(&request.photo_id, &resized);
+                    // println!("Smart Preview generated for {}", request.photo_id);
+                    
+                    resized
+                } else {
+                    // Failed to load image
+                    *processing.lock() = None;
+                    continue;
+                }
+            };
+
+            // Continue with preview_img (either from cache or just generated)
+            {
                 // Store original for before/after
                 let original_preview = preview_img.clone();
 
@@ -268,12 +304,18 @@ impl AsyncImageProcessor {
                     preview_img
                 };
 
+                let processed_color = crate::image_processing::ImageProcessor::dynamic_to_color_image(&processed);
+
                 let result = ImageProcessResult {
                     photo_id: request.photo_id,
-                    preview: processed,
+                    preview: processed_color,
                     original_preview,
+                    processed_image: processed,
                     histogram,
+                    load_time_ms: start_time.elapsed().as_secs_f32() * 1000.0,
                 };
+                
+                println!("Processed: {} in {:.2}ms", request.path, result.load_time_ms);
 
                 let _ = sender.send(result);
             }

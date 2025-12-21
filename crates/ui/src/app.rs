@@ -144,14 +144,16 @@ impl eframe::App for VintageLightboxApp {
                 
                 self.state.original_preview = Some(result.original_preview);
                 self.state.histogram_data = Some(result.histogram);
+                self.state.performance_metrics.image_load_time_ms = Some(result.load_time_ms);
                 
-                // Create texture with consistent name to allow update-in-place
-                // This prevents texture thrashing and flickering
-                let texture = crate::image_processing::ImageProcessor::load_texture(
-                    ctx,
+                // Create texture (measure upload time)
+                let upload_start = std::time::Instant::now();
+                let texture = ctx.load_texture(
                     format!("display_{}", result.photo_id),
-                    &result.preview
+                    result.preview,
+                    egui::TextureOptions::default()
                 );
+                self.state.performance_metrics.texture_upload_time_ms = Some(upload_start.elapsed().as_secs_f32() * 1000.0);
                 
                 self.state.detail_image = Some(texture);
                 self.state.thumbnail_preview = None;  // Clear thumbnail, we have full-res now
@@ -164,11 +166,15 @@ impl eframe::App for VintageLightboxApp {
             // Only apply if this is the latest request
             if result.request_id >= self.current_edit_request_id.saturating_sub(5) {
                 if let Some(photo_id) = &self.state.develop_selected_photo_id.clone() {
-                    let texture = crate::image_processing::ImageProcessor::load_texture(
-                        ctx,
+                    self.state.performance_metrics.gpu_process_time_ms = Some(result.process_time_ms);
+
+                    let upload_start = std::time::Instant::now();
+                    let texture = ctx.load_texture(
                         format!("display_{}", photo_id),
-                        &result.processed_image
+                        result.preview,
+                        egui::TextureOptions::default()
                     );
+                    self.state.performance_metrics.texture_upload_time_ms = Some(upload_start.elapsed().as_secs_f32() * 1000.0);
                     self.state.detail_image = Some(texture);
                 }
             }
@@ -252,7 +258,7 @@ impl eframe::App for VintageLightboxApp {
                         clarity,
                         vibrance,
                         saturation,
-                        max_preview_size: 1920,
+                        max_preview_size: 2560,
                     });
 
                     // Request repaint to poll for results
@@ -403,6 +409,9 @@ impl eframe::App for VintageLightboxApp {
         if self.state.is_busy {
             widgets::show_busy_overlay(ctx, &self.state.busy_message);
         }
+
+        // Performance Debug Overlay
+        self.show_debug_overlay(ctx);
     }
 }
 
@@ -524,5 +533,50 @@ impl VintageLightboxApp {
             let _ = sender.send(result).await;
             ctx.request_repaint();
         });
+    }
+
+    /// Show debug overlay with performance metrics
+    fn show_debug_overlay(&self, ctx: &egui::Context) {
+        if !self.state.show_performance_stats {
+            return;
+        }
+
+        let metrics = &self.state.performance_metrics;
+        
+        egui::Window::new("Performance Stats")
+            .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-10.0, -10.0))
+            .resizable(false)
+            .collapsible(true)
+            .title_bar(true)
+            .default_open(true)
+            .show(ctx, |ui| {
+                ui.style_mut().override_text_style = Some(egui::TextStyle::Monospace);
+                
+                egui::Grid::new("perf_grid").num_columns(2).striped(true).show(ui, |ui| {
+                    if let Some(t) = metrics.image_load_time_ms {
+                        ui.label("Image Load:");
+                        ui.label(format!("{:.1} ms", t));
+                        ui.end_row();
+                    }
+                    if let Some(t) = metrics.gpu_process_time_ms {
+                        ui.label("GPU Process:");
+                        ui.colored_label(
+                            if t > 16.0 { egui::Color32::RED } else { egui::Color32::GREEN },
+                            format!("{:.1} ms", t)
+                        );
+                        ui.end_row();
+                    }
+                    if let Some(t) = metrics.texture_upload_time_ms {
+                        ui.label("Texture Upload:");
+                        ui.label(format!("{:.1} ms", t));
+                        ui.end_row();
+                    }
+                    
+                    // FPS
+                    ui.label("FPS:");
+                    ui.label(format!("{:.0}", 1.0 / ctx.input(|i| i.stable_dt)));
+                    ui.end_row();
+                });
+            });
     }
 }

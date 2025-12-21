@@ -18,6 +18,7 @@ async-trait.workspace = true
 kamadak-exif = "0.6"
 image = "0.24"
 rawloader = "0.37.1"
+directories = "6.0.0"
 
 [dev-dependencies]
 tempfile.workspace = true

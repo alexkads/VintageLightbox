@@ -32,6 +32,11 @@ use app::VintageLightboxApp;
 #[tokio::main]
 async fn main() -> Result<(), eframe::Error> {
     // ============================================
+    // 0. Initialize Environment
+    // ============================================
+    dotenv::dotenv().ok();
+
+    // ============================================
     // 1. Setup Infrastructure Layer
     // ============================================
     let database_url = "sqlite:vintage_lightbox.db?mode=rwc";

@@ -5,6 +5,7 @@
 
 pub mod database;
 pub mod file_system;
+pub mod cache;
 pub mod raw_processing;
 pub mod scan_directory;
 pub mod exif_reader;

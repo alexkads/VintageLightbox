@@ -59,6 +59,13 @@ Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Ar
   - **Solução**: Refatoração completa do pipeline de processamento de imagem
   - **Impacto**: Navegação entre fotos agora funciona perfeitamente
 
+- ✅ **SMART PREVIEWS & PERFORMANCE (21/dez/2025)** ⚡
+  - **Smart Preview System**: Cache local de imagens redimensionadas (2560px, JPEG Q90)
+  - **Load Instantâneo**: Navegação subsequente usa cache (<10ms) ao invés de decodificar RAW/full-res
+  - **Performance Stats**: Overlay debug com métricas detalhadas (Load Time, GPU Process, Texture Upload)
+  - **Configurável**: Toggle via `.env` (SHOW_PERFORMANCE_STATS)
+  - **Otimização de Upload**: Texture upload movido para background thread (zero UI blocking)
+
 - ✅ **SISTEMA DE EDIÇÃO PROFISSIONAL (20/dez/2025)** 🎨
   - **11 Sliders de Ajuste**: Sistema completo de edição não-destrutiva
     - **Básicos**: Exposure, Contrast
@@ -562,11 +569,11 @@ Criar versão mínima funcional com importação, visualização, edição bási
 - [ ] Auto-sync (aplicar ajustes às próximas)
 - [ ] Copiar/colar ajustes
 
-### 2.8 Performance e Otimizações (1 semana)
-- [ ] Otimizar geração de thumbnails
-- [ ] Melhorar cache de previews
-- [ ] Profiling e otimizações críticas
-- [ ] Reduzir uso de memória
+### 2.8 Performance e Otimizações (1 semana) ✅
+- [x] Otimizar geração de thumbnails (AsyncThumbnailLoader)
+- [x] Melhorar cache de previews (Smart Preview System)
+- [x] Profiling e otimizações críticas (Performance Stats Overlay)
+- [x] Reduzir uso de memória (Texture management otimizado)
 
 ### Entregáveis Fase 2
 - ✅ Edição profissional de RAW
