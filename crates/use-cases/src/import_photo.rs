@@ -7,7 +7,7 @@ use domain::{
     entities::Photo,
     repositories::PhotoRepository,
     value_objects::FilePath,
-    services::{MetadataExtractor, ThumbnailGenerator},
+    services::{MetadataExtractor, ThumbnailGenerator, PreviewStorage, PreviewType},
     DomainResult,
 };
 use std::sync::Arc;
@@ -18,6 +18,7 @@ pub struct ImportPhotoUseCase {
     photo_repository: Arc<dyn PhotoRepository>,
     metadata_extractor: Arc<dyn MetadataExtractor>,
     thumbnail_generator: Arc<dyn ThumbnailGenerator>,
+    preview_storage: Arc<dyn PreviewStorage>,
 }
 
 impl ImportPhotoUseCase {
@@ -26,11 +27,13 @@ impl ImportPhotoUseCase {
         photo_repository: Arc<dyn PhotoRepository>,
         metadata_extractor: Arc<dyn MetadataExtractor>,
         thumbnail_generator: Arc<dyn ThumbnailGenerator>,
+        preview_storage: Arc<dyn PreviewStorage>,
     ) -> Self {
         Self {
             photo_repository,
             metadata_extractor,
             thumbnail_generator,
+            preview_storage,
         }
     }
 
@@ -112,8 +115,7 @@ impl ImportPhotoUseCase {
             dest_path
         };
         
-        // Guardar o novo nome para usar no thumbnail
-        let new_file_name_for_thumb = new_file_name.clone();
+
         
         // Criar FilePath com o novo caminho
         let new_file_path = FilePath::new(final_path.to_string_lossy().as_ref())?;
@@ -127,26 +129,11 @@ impl ImportPhotoUseCase {
         }
 
         // Gerar Thumbnail no subdiretório thumb
+        // Gerar Thumbnail no storage
         match self.thumbnail_generator.generate(&new_file_path, 300).await {
             Ok(bytes) => {
-                // Create thumb subdirectory
-                let thumb_dir = dest_dir.join("thumb");
-                if !thumb_dir.exists() {
-                    if let Err(e) = tokio::fs::create_dir_all(&thumb_dir).await {
-                        eprintln!("Failed to create thumb directory: {}", e);
-                    }
-                }
-                
-                let thumb_path = thumb_dir.join(format!("{}.thumb.jpg", new_file_name_for_thumb));
-
-                if let Err(e) = tokio::fs::write(&thumb_path, bytes).await {
-                    eprintln!("Failed to write thumbnail: {}", e);
-                } else {
-                    if let Some(path_str) = thumb_path.to_str() {
-                         if let Ok(path_obj) = FilePath::new(path_str) {
-                            photo.set_thumbnail_path(path_obj);
-                        }
-                    }
+                if let Err(e) = self.preview_storage.save(&photo.id(), PreviewType::Thumbnail, &bytes) {
+                    eprintln!("Failed to save thumbnail: {}", e);
                 }
             },
             Err(e) => eprintln!("Failed to generate thumbnail: {}", e),
@@ -154,26 +141,11 @@ impl ImportPhotoUseCase {
 
         // Gerar Preview (Otimizado para edição fluida)
         // Usamos 2560px como um bom balanço entre qualidade e performance (Matches Roadmap)
+        // Gerar Preview (Otimizado para edição fluida)
         match self.thumbnail_generator.generate(&new_file_path, 2560).await {
             Ok(bytes) => {
-                // Create preview subdirectory
-                let preview_dir = dest_dir.join("preview");
-                if !preview_dir.exists() {
-                    if let Err(e) = tokio::fs::create_dir_all(&preview_dir).await {
-                        eprintln!("Failed to create preview directory: {}", e);
-                    }
-                }
-                
-                let preview_path = preview_dir.join(format!("{}.preview.jpg", new_file_name_for_thumb));
-
-                if let Err(e) = tokio::fs::write(&preview_path, bytes).await {
-                    eprintln!("Failed to write preview: {}", e);
-                } else {
-                    if let Some(path_str) = preview_path.to_str() {
-                         if let Ok(path_obj) = FilePath::new(path_str) {
-                            photo.set_preview_path(path_obj);
-                        }
-                    }
+                if let Err(e) = self.preview_storage.save(&photo.id(), PreviewType::Large, &bytes) {
+                    eprintln!("Failed to save preview: {}", e);
                 }
             },
             Err(e) => eprintln!("Failed to generate preview: {}", e),
@@ -225,6 +197,17 @@ mod tests {
         }
     }
 
+    // Mock do PreviewStorage
+    mock! {
+        pub PreviewStorage {}
+        impl PreviewStorage for PreviewStorage {
+            fn save(&self, id: &domain::value_objects::PhotoId, preview_type: PreviewType, data: &[u8]) -> DomainResult<()>;
+            fn get(&self, id: &domain::value_objects::PhotoId, preview_type: PreviewType) -> DomainResult<Option<Vec<u8>>>;
+            fn has(&self, id: &domain::value_objects::PhotoId, preview_type: PreviewType) -> DomainResult<bool>;
+            fn delete(&self, id: &domain::value_objects::PhotoId) -> DomainResult<()>;
+        }
+    }
+
     // Mock do PhotoRepository
     mock! {
         pub PhotoRepo {}
@@ -261,10 +244,14 @@ mod tests {
             .expect_generate()
             .returning(|_, _| Ok(vec![]));
 
+        let mut mock_preview_storage = MockPreviewStorage::new();
+        mock_preview_storage.expect_save().returning(|_, _, _| Ok(()));
+
         let use_case = ImportPhotoUseCase::new(
             Arc::new(mock_repo),
             Arc::new(mock_extractor),
-            Arc::new(mock_generator)
+            Arc::new(mock_generator),
+            Arc::new(mock_preview_storage)
         );
         let temp_file = NamedTempFile::new().unwrap();
         let path = temp_file.path().to_str().unwrap();
@@ -302,10 +289,14 @@ mod tests {
             .expect_generate()
             .returning(|_, _| Ok(vec![]));
 
+        let mut mock_preview_storage = MockPreviewStorage::new();
+        mock_preview_storage.expect_save().returning(|_, _, _| Ok(()));
+
         let use_case = ImportPhotoUseCase::new(
             Arc::new(mock_repo),
             Arc::new(mock_extractor),
-            Arc::new(mock_generator)
+            Arc::new(mock_generator),
+            Arc::new(mock_preview_storage)
         );
         let temp_file = NamedTempFile::new().unwrap();
         let path = temp_file.path().to_str().unwrap();
@@ -338,10 +329,14 @@ mod tests {
             .expect_generate()
             .returning(|_, _| Ok(vec![]));
 
+        let mut mock_preview_storage = MockPreviewStorage::new();
+        mock_preview_storage.expect_save().returning(|_, _, _| Ok(()));
+
         let use_case = ImportPhotoUseCase::new(
             Arc::new(mock_repo),
             Arc::new(mock_extractor),
-            Arc::new(mock_generator)
+            Arc::new(mock_generator),
+            Arc::new(mock_preview_storage)
         );
         
         let temp_file1 = NamedTempFile::new().unwrap();
@@ -379,10 +374,14 @@ mod tests {
             .expect_generate()
             .returning(|_, _| Ok(vec![]));
 
+        let mut mock_preview_storage = MockPreviewStorage::new();
+        mock_preview_storage.expect_save().returning(|_, _, _| Ok(()));
+
         let use_case = ImportPhotoUseCase::new(
             Arc::new(mock_repo),
             Arc::new(mock_extractor),
-            Arc::new(mock_generator)
+            Arc::new(mock_generator),
+            Arc::new(mock_preview_storage)
         );
         
         // Act & Assert - diferentes extensões devem funcionar

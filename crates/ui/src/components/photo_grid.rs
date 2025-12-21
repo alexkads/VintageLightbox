@@ -150,11 +150,9 @@ impl PhotoGrid {
         let requests: Vec<ThumbnailRequest> = photos
             .iter()
             .filter(|p| !self.thumbnail_cache.contains_key(&p.id))
-            .filter_map(|p| {
-                p.thumbnail_path.as_ref().map(|path| ThumbnailRequest {
-                    photo_id: p.id.clone(),
-                    path: path.clone(),
-                })
+            .map(|p| ThumbnailRequest {
+                photo_id: p.id.clone(),
+                path: p.path.clone(),
             })
             .take(20) // Limit batch size to avoid overwhelming
             .collect();

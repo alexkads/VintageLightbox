@@ -42,3 +42,6 @@ pub trait ImageExporter: Send + Sync {
     /// Exporta a foto aplicando as edições para o caminho de destino
     async fn export(&self, photo: &crate::entities::Photo, output_path: &FilePath) -> DomainResult<()>;
 }
+
+pub mod preview_storage;
+pub use preview_storage::*;

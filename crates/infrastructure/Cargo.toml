@@ -20,6 +20,7 @@ image = "0.24"
 rawloader = "0.37.1"
 directories = "6.0.0"
 sha2 = "0.10"
+rusqlite = { version = "0.30.0", features = ["bundled"] }
 
 [dev-dependencies]
 tempfile.workspace = true

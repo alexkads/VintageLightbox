@@ -41,9 +41,12 @@ impl AsyncThumbnailLoader {
         let loading = Arc::new(Mutex::new(std::collections::HashSet::new()));
         let loading_clone = loading.clone();
 
+        let preview_manager = Arc::new(infrastructure::cache::preview_manager::PreviewManager::new());
+        let preview_manager_clone = preview_manager.clone();
+
         // Spawn background thread for processing thumbnail requests
         std::thread::spawn(move || {
-            Self::background_loader(request_receiver, result_sender, loading_clone);
+            Self::background_loader(request_receiver, result_sender, loading_clone, preview_manager_clone);
         });
 
         Self {
@@ -59,6 +62,7 @@ impl AsyncThumbnailLoader {
         receiver: Receiver<Vec<ThumbnailRequest>>,
         sender: Sender<ThumbnailResult>,
         loading: Arc<Mutex<std::collections::HashSet<String>>>,
+        preview_manager: Arc<infrastructure::cache::preview_manager::PreviewManager>,
     ) {
         while let Ok(requests) = receiver.recv() {
             // Mark all as loading
@@ -73,11 +77,27 @@ impl AsyncThumbnailLoader {
             let results: Vec<_> = requests
                 .par_iter()
                 .filter_map(|req| {
-                    match image::open(&req.path) {
-                        Ok(img) => Some(ThumbnailResult {
+                    // 1. Try cache first
+                    if let Some(img) = preview_manager.get_thumbnail(&req.photo_id) {
+                         return Some(ThumbnailResult {
                             photo_id: req.photo_id.clone(),
                             image: img,
-                        }),
+                        });
+                    }
+
+                    // 2. Fallback to loading original and generating thumbnail
+                    match image::open(&req.path) {
+                        Ok(img) => {
+                             // Resize
+                             let thumb = crate::image_processing::ImageProcessor::resize_for_preview(&img, 300);
+                             // Save to cache
+                             let _ = preview_manager.save_thumbnail(&req.photo_id, &thumb);
+                             
+                             Some(ThumbnailResult {
+                                photo_id: req.photo_id.clone(),
+                                image: thumb,
+                             })
+                        },
                         Err(e) => {
                             eprintln!("Failed to load thumbnail {}: {}", req.path, e);
                             None

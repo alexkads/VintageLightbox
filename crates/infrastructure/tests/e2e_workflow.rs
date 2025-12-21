@@ -1,4 +1,4 @@
-use infrastructure::{create_pool, run_migrations, PhotoRepositoryImpl, ExifReader, ThumbnailGeneratorImpl, ImageExporterImpl};
+use infrastructure::{create_pool, run_migrations, PhotoRepositoryImpl, ExifReader, ThumbnailGeneratorImpl, ImageExporterImpl, cache::preview_manager::PreviewManager};
 use use_cases::{ImportPhotoUseCase, SavePhotoEditsUseCase, ExportPhotoUseCase};
 use domain::repositories::PhotoRepository;
 use domain::value_objects::FilePath;
@@ -33,9 +33,11 @@ async fn test_e2e_import_edit_export_flow() {
     let metadata_extractor = Arc::new(ExifReader);
     let thumbnail_generator = Arc::new(ThumbnailGeneratorImpl::new());
     let image_exporter = Arc::new(ImageExporterImpl::new());
+    let preview_dir = temp_dir.path().join("previews");
+    let preview_manager = Arc::new(PreviewManager::new_with_path(preview_dir));
 
     // Use Cases
-    let import_uc = ImportPhotoUseCase::new(repo.clone(), metadata_extractor, thumbnail_generator);
+    let import_uc = ImportPhotoUseCase::new(repo.clone(), metadata_extractor, thumbnail_generator, preview_manager);
     let save_edits_uc = SavePhotoEditsUseCase::new(repo.clone());
     let export_uc = ExportPhotoUseCase::new(repo.clone(), image_exporter);
 

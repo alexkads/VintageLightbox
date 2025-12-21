@@ -17,6 +17,7 @@ use infrastructure::{
     create_pool, run_migrations,
     PhotoRepositoryImpl, ExifReader,
     ThumbnailGeneratorImpl, ImageExporterImpl,
+    cache::preview_manager::PreviewManager,
 };
 use use_cases::{
     ImportPhotoUseCase, SavePhotoEditsUseCase, ExportPhotoUseCase,
@@ -51,6 +52,7 @@ async fn main() -> Result<(), eframe::Error> {
     let metadata_extractor = Arc::new(ExifReader);
     let thumbnail_generator = Arc::new(ThumbnailGeneratorImpl::new());
     let image_exporter = Arc::new(ImageExporterImpl::new());
+    let preview_manager = Arc::new(PreviewManager::new());
 
     // ============================================
     // 2. Setup Use Cases Layer
@@ -59,6 +61,7 @@ async fn main() -> Result<(), eframe::Error> {
         photo_repository.clone(),
         metadata_extractor,
         thumbnail_generator,
+        preview_manager,
     ));
     let save_photo_edits_use_case = Arc::new(SavePhotoEditsUseCase::new(
         photo_repository.clone()

@@ -30,9 +30,9 @@ pub struct Photo {
     is_edited: bool,
     /// Metadados técnicos (EXIF)
     metadata: Option<PhotoMetadata>,
-    /// Caminho do thumbnail
+    /// Caminho do thumbnail [DEPRECATED: Use PreviewStorage service]
     thumbnail_path: Option<FilePath>,
-    /// Caminho do preview (resolução otimizada para tela)
+    /// Caminho do preview (resolução otimizada para tela) [DEPRECATED: Use PreviewStorage service]
     preview_path: Option<FilePath>,
     /// Ajuste de exposição (persistence)
     edit_exposure: Option<f32>,
