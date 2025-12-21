@@ -46,12 +46,14 @@ pub struct VintageLightboxApp {
     photo_sender: mpsc::Sender<Result<Vec<PhotoViewModel>, String>>,
 
     // ============================================
-    // Async Image Processing (Rayon-powered)
+    // Async Image Processing (Rayon-powered + GPU)
     // ============================================
     /// Processes full image loading in background
     image_processor: AsyncImageProcessor,
-    /// Processes slider edits in background for real-time feedback
+    /// Processes slider edits in background (CPU fallback)
     edit_processor: AsyncEditProcessor,
+    /// GPU-accelerated edit processor (primary for sliders)
+    gpu_edit_processor: crate::gpu_processor::GpuImageProcessor,
     /// Current edit request ID for tracking latest edit
     current_edit_request_id: u64,
 }
@@ -87,6 +89,7 @@ impl VintageLightboxApp {
             photo_sender,
             image_processor: AsyncImageProcessor::new(),
             edit_processor: AsyncEditProcessor::new(),
+            gpu_edit_processor: crate::gpu_processor::GpuImageProcessor::new(),
             current_edit_request_id: 0,
         }
     }
@@ -159,15 +162,15 @@ impl eframe::App for VintageLightboxApp {
             }
         }
 
-        // Poll for completed edit processing results
-        if let Some(result) = self.edit_processor.poll_result() {
+        // Poll for completed GPU edit processing results
+        if let Some(result) = self.gpu_edit_processor.poll_result() {
             // Only apply if this is the latest request
             if result.request_id >= self.current_edit_request_id.saturating_sub(5) {
                 if let Some(photo_id) = &self.state.develop_selected_photo_id.clone() {
                     let texture = crate::image_processing::ImageProcessor::load_texture(
                         ctx,
-                        format!("edit_{}_req{}", photo_id, result.request_id),
-                        &result.processed
+                        format!("gpu_edit_{}_req{}", photo_id, result.request_id),
+                        &result.processed_image
                     );
                     self.state.detail_image = Some(texture);
                 }
@@ -301,7 +304,7 @@ impl eframe::App for VintageLightboxApp {
                         }
                     }
 
-                    // Request async edit processing (non-blocking!)
+                    // Request async edit processing (GPU-accelerated!)
                     if let Some(original) = &self.state.original_preview {
                         if self.state.show_before {
                             // Show original immediately (no processing needed)
@@ -312,22 +315,31 @@ impl eframe::App for VintageLightboxApp {
                             );
                             self.state.detail_image = Some(texture);
                         } else {
-                            // Request async edit processing
-                            self.current_edit_request_id = self.edit_processor.next_request_id();
-                            self.edit_processor.request_edit(EditRequest {
+                            // Request GPU-accelerated edit processing
+                            let rgba_img = original.to_rgba8();
+                            let (width, height) = rgba_img.dimensions();
+                            let image_data = rgba_img.into_raw();
+                            
+                            self.current_edit_request_id = self.gpu_edit_processor.next_request_id();
+                            self.gpu_edit_processor.request_process(crate::gpu_processor::GpuProcessRequest {
                                 request_id: self.current_edit_request_id,
-                                original: original.clone(),
-                                exposure: self.state.active_exposure,
-                                contrast: self.state.active_contrast,
-                                temperature: self.state.active_temperature,
-                                tint: self.state.active_tint,
-                                highlights: self.state.active_highlights,
-                                shadows: self.state.active_shadows,
-                                whites: self.state.active_whites,
-                                blacks: self.state.active_blacks,
-                                clarity: self.state.active_clarity,
-                                vibrance: self.state.active_vibrance,
-                                saturation: self.state.active_saturation,
+                                image_data,
+                                width,
+                                height,
+                                params: crate::gpu_processor::GpuEditParams {
+                                    exposure: self.state.active_exposure,
+                                    contrast: self.state.active_contrast,
+                                    temperature: self.state.active_temperature,
+                                    tint: self.state.active_tint,
+                                    highlights: self.state.active_highlights,
+                                    shadows: self.state.active_shadows,
+                                    whites: self.state.active_whites,
+                                    blacks: self.state.active_blacks,
+                                    clarity: self.state.active_clarity,
+                                    vibrance: self.state.active_vibrance,
+                                    saturation: self.state.active_saturation,
+                                    _padding: 0.0,
+                                },
                             });
 
                             // Request repaint to poll for results

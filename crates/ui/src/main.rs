@@ -9,6 +9,7 @@ mod keyboard;
 mod components;
 mod views;
 pub mod async_loader;
+pub mod gpu_processor;
 
 use std::sync::Arc;
 

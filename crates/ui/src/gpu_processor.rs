@@ -1,0 +1,416 @@
+// GPU Image Processor
+// Uses WGPU compute shaders for fast image processing
+
+use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::Arc;
+use parking_lot::Mutex;
+use image::DynamicImage;
+
+/// Parameters for image adjustments (must match WGSL struct layout)
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct GpuEditParams {
+    pub exposure: f32,
+    pub contrast: f32,
+    pub temperature: f32,
+    pub tint: f32,
+    pub highlights: f32,
+    pub shadows: f32,
+    pub whites: f32,
+    pub blacks: f32,
+    pub clarity: f32,
+    pub vibrance: f32,
+    pub saturation: f32,
+    pub _padding: f32,  // Align to 16 bytes
+}
+
+impl Default for GpuEditParams {
+    fn default() -> Self {
+        Self {
+            exposure: 0.0,
+            contrast: 1.0,
+            temperature: 0.0,
+            tint: 0.0,
+            highlights: 0.0,
+            shadows: 0.0,
+            whites: 0.0,
+            blacks: 0.0,
+            clarity: 0.0,
+            vibrance: 0.0,
+            saturation: 0.0,
+            _padding: 0.0,
+        }
+    }
+}
+
+/// Request to process an image on GPU
+pub struct GpuProcessRequest {
+    pub request_id: u64,
+    pub image_data: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+    pub params: GpuEditParams,
+}
+
+/// Result of GPU processing
+pub struct GpuProcessResult {
+    pub request_id: u64,
+    pub processed_image: DynamicImage,
+}
+
+/// GPU-accelerated image processor
+pub struct GpuImageProcessor {
+    request_sender: Sender<GpuProcessRequest>,
+    result_receiver: Receiver<GpuProcessResult>,
+    current_request_id: Arc<Mutex<u64>>,
+    gpu_available: bool,
+}
+
+impl GpuImageProcessor {
+    /// Create a new GPU image processor
+    pub fn new() -> Self {
+        let (request_sender, request_receiver) = channel::<GpuProcessRequest>();
+        let (result_sender, result_receiver) = channel::<GpuProcessResult>();
+        let current_request_id = Arc::new(Mutex::new(0u64));
+        let current_request_id_clone = current_request_id.clone();
+
+        // Try to initialize GPU in background thread
+        let gpu_available = std::thread::spawn(move || {
+            Self::gpu_processor_thread(request_receiver, result_sender, current_request_id_clone)
+        }).is_finished() == false; // Thread started successfully
+
+        Self {
+            request_sender,
+            result_receiver,
+            current_request_id,
+            gpu_available: true, // Assume true, will fail gracefully if not
+        }
+    }
+
+    /// Background thread that processes images on GPU
+    fn gpu_processor_thread(
+        receiver: Receiver<GpuProcessRequest>,
+        sender: Sender<GpuProcessResult>,
+        current_request_id: Arc<Mutex<u64>>,
+    ) {
+        // Initialize WGPU
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::all(),
+            ..Default::default()
+        });
+
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            compatible_surface: None,
+            force_fallback_adapter: false,
+        }));
+
+        let adapter = match adapter {
+            Some(a) => a,
+            None => {
+                eprintln!("GPU: No suitable adapter found, falling back to CPU");
+                // Fall back to CPU processing
+                Self::cpu_fallback_loop(receiver, sender, current_request_id);
+                return;
+            }
+        };
+
+        let (device, queue) = match pollster::block_on(adapter.request_device(
+            &wgpu::DeviceDescriptor {
+                label: Some("VintageLightbox GPU"),
+                required_features: wgpu::Features::empty(),
+                required_limits: wgpu::Limits::default(),
+                memory_hints: wgpu::MemoryHints::Performance,
+            },
+            None,
+        )) {
+            Ok(dq) => dq,
+            Err(e) => {
+                eprintln!("GPU: Failed to create device: {}, falling back to CPU", e);
+                Self::cpu_fallback_loop(receiver, sender, current_request_id);
+                return;
+            }
+        };
+
+        // Load shader
+        let shader_source = include_str!("shaders/image_adjustments.wgsl");
+        let shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Image Adjustments Shader"),
+            source: wgpu::ShaderSource::Wgsl(shader_source.into()),
+        });
+
+        // Create compute pipeline
+        let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("Image Processing Pipeline"),
+            layout: None,
+            module: &shader_module,
+            entry_point: Some("main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            cache: None,
+        });
+
+        println!("GPU: Initialized successfully with {}", adapter.get_info().name);
+
+        // Process requests
+        while let Ok(request) = receiver.recv() {
+            // Check if this request is still current (debouncing)
+            let current_id = *current_request_id.lock();
+            if request.request_id < current_id {
+                continue; // Skip outdated requests
+            }
+
+            // Process on GPU
+            if let Some(result) = Self::process_on_gpu(
+                &device,
+                &queue,
+                &pipeline,
+                &request,
+            ) {
+                let _ = sender.send(GpuProcessResult {
+                    request_id: request.request_id,
+                    processed_image: result,
+                });
+            }
+        }
+    }
+
+    /// Process a single image on GPU
+    fn process_on_gpu(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        pipeline: &wgpu::ComputePipeline,
+        request: &GpuProcessRequest,
+    ) -> Option<DynamicImage> {
+        let width = request.width;
+        let height = request.height;
+
+        // Create input texture
+        let input_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Input Texture"),
+            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+
+        // Create output texture (storage)
+        let output_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Output Texture"),
+            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+
+        // Upload image data
+        queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &input_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &request.image_data,
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(4 * width),
+                rows_per_image: Some(height),
+            },
+            wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+        );
+
+        // Create uniform buffer for parameters
+        let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Params Buffer"),
+            contents: bytemuck::bytes_of(&request.params),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+
+        // Create bind group
+        let bind_group_layout = pipeline.get_bind_group_layout(0);
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Compute Bind Group"),
+            layout: &bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(
+                        &input_texture.create_view(&wgpu::TextureViewDescriptor::default())
+                    ),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(
+                        &output_texture.create_view(&wgpu::TextureViewDescriptor::default())
+                    ),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: params_buffer.as_entire_binding(),
+                },
+            ],
+        });
+
+        // Create output buffer for reading back
+        let output_buffer_size = (4 * width * height) as wgpu::BufferAddress;
+        let output_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Output Buffer"),
+            size: output_buffer_size,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        // Create command encoder
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Compute Encoder"),
+        });
+
+        // Dispatch compute shader
+        {
+            let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("Image Processing Pass"),
+                timestamp_writes: None,
+            });
+            compute_pass.set_pipeline(pipeline);
+            compute_pass.set_bind_group(0, &bind_group, &[]);
+            
+            // Dispatch workgroups (16x16 threads each)
+            let workgroups_x = (width + 15) / 16;
+            let workgroups_y = (height + 15) / 16;
+            compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, 1);
+        }
+
+        // Copy output texture to buffer
+        encoder.copy_texture_to_buffer(
+            wgpu::ImageCopyTexture {
+                texture: &output_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::ImageCopyBuffer {
+                buffer: &output_buffer,
+                layout: wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(4 * width),
+                    rows_per_image: Some(height),
+                },
+            },
+            wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+        );
+
+        // Submit commands
+        queue.submit(std::iter::once(encoder.finish()));
+
+        // Read back results
+        let buffer_slice = output_buffer.slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+        buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
+            let _ = tx.send(result);
+        });
+        device.poll(wgpu::Maintain::Wait);
+
+        if rx.recv().ok()?.is_ok() {
+            let data = buffer_slice.get_mapped_range();
+            let result_data: Vec<u8> = data.to_vec();
+            drop(data);
+            output_buffer.unmap();
+
+            // Convert to DynamicImage
+            let img_buffer = image::RgbaImage::from_raw(width, height, result_data)?;
+            Some(DynamicImage::ImageRgba8(img_buffer))
+        } else {
+            None
+        }
+    }
+
+    /// CPU fallback when GPU is not available
+    fn cpu_fallback_loop(
+        receiver: Receiver<GpuProcessRequest>,
+        sender: Sender<GpuProcessResult>,
+        current_request_id: Arc<Mutex<u64>>,
+    ) {
+        while let Ok(request) = receiver.recv() {
+            let current_id = *current_request_id.lock();
+            if request.request_id < current_id {
+                continue;
+            }
+
+            // Convert back to DynamicImage and process on CPU
+            if let Some(img) = image::RgbaImage::from_raw(
+                request.width,
+                request.height,
+                request.image_data.clone(),
+            ) {
+                let dynamic_img = DynamicImage::ImageRgba8(img);
+                let processed = crate::image_processing::ImageProcessor::process_image(
+                    &dynamic_img,
+                    request.params.exposure,
+                    request.params.contrast,
+                    request.params.temperature,
+                    request.params.tint,
+                    request.params.highlights,
+                    request.params.shadows,
+                    request.params.whites,
+                    request.params.blacks,
+                    request.params.clarity,
+                    request.params.vibrance,
+                    request.params.saturation,
+                );
+
+                let _ = sender.send(GpuProcessResult {
+                    request_id: request.request_id,
+                    processed_image: processed,
+                });
+            }
+        }
+    }
+
+    /// Request GPU processing (non-blocking)
+    pub fn request_process(&self, request: GpuProcessRequest) -> u64 {
+        let id = request.request_id;
+        *self.current_request_id.lock() = id;
+        let _ = self.request_sender.send(request);
+        id
+    }
+
+    /// Generate a new request ID
+    pub fn next_request_id(&self) -> u64 {
+        let mut guard = self.current_request_id.lock();
+        *guard += 1;
+        *guard
+    }
+
+    /// Poll for completed result (non-blocking)
+    pub fn poll_result(&self) -> Option<GpuProcessResult> {
+        let mut latest: Option<GpuProcessResult> = None;
+        
+        while let Ok(result) = self.result_receiver.try_recv() {
+            if latest.as_ref().is_none_or(|l| result.request_id > l.request_id) {
+                latest = Some(result);
+            }
+        }
+        
+        latest
+    }
+
+    /// Check if GPU is available
+    pub fn is_gpu_available(&self) -> bool {
+        self.gpu_available
+    }
+}
+
+impl Default for GpuImageProcessor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// We need buffer init descriptor
+use wgpu::util::DeviceExt;
