@@ -242,6 +242,17 @@ impl eframe::App for VintageLightboxApp {
                     let vibrance = photo.edit_vibrance.unwrap_or(0.0);
                     let saturation = photo.edit_saturation.unwrap_or(0.0);
 
+                    // Update detail metadata immediately
+                    self.state.detail_metadata = Some(crate::state::DetailMetadata {
+                        id: photo.id.clone(),
+                        name: photo.name.clone(),
+                        date: photo.date.clone(),
+                        camera: photo.camera.clone(),
+                        exposure: photo.exposure.clone(),
+                        rating: photo.rating,
+                        color_label: photo.color_label.clone(),
+                    });
+
                     // Initialize active values immediately (UI responds instantly)
                     self.state.active_exposure = exposure;
                     self.state.active_contrast = contrast;
