@@ -298,6 +298,10 @@ impl DevelopView {
                 state.is_busy = true;
                 state.busy_message = "Saving edits...".to_string();
 
+                let lib_ctrl = library_controller.clone();
+                let sender = photo_sender.clone();
+                let ctx_clone = ctx.clone();
+
                 tokio::spawn(async move {
                     if let Err(e) = controller.save_edits(
                         id, exposure, contrast, temperature, tint, highlights, shadows,
@@ -305,6 +309,11 @@ impl DevelopView {
                         0.0, 0.0, 0.0, 0.0  // Tone curve (to be implemented in UI)
                     ).await {
                         eprintln!("Failed to save edits: {}", e);
+                    } else {
+                        // Reload photos to update cache so UI doesn't show stale data
+                        let result = lib_ctrl.get_all_photos().await;
+                        let _ = sender.send(result).await;
+                        ctx_clone.request_repaint();
                     }
                 });
             }

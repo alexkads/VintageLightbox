@@ -63,6 +63,8 @@ impl PhotoRepositoryImpl {
         let edit_tone_curve_lights: Option<f32> = row.try_get("edit_tone_curve_lights").ok();
         let edit_tone_curve_highlights: Option<f32> = row.try_get("edit_tone_curve_highlights").ok();
 
+
+
         // Metadata persistido como JSON string
         let metadata_str: Option<String> = row.try_get("metadata").ok();
         let metadata: Option<PhotoMetadata> = match metadata_str {
