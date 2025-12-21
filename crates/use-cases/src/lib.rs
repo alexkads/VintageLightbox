@@ -10,6 +10,7 @@ pub mod set_color_label;
 pub mod create_collection;
 pub mod add_photo_to_collection;
 pub mod remove_photo_from_collection;
+pub mod delete_photo;
 
 pub use import_photo::ImportPhotoUseCase;
 pub use import_photos::{ImportPhotosUseCase, BatchImportResult};
@@ -18,6 +19,7 @@ pub use set_color_label::SetColorLabelUseCase;
 pub use create_collection::CreateCollectionUseCase;
 pub use add_photo_to_collection::AddPhotoToCollectionUseCase;
 pub use remove_photo_from_collection::RemovePhotoFromCollectionUseCase;
+pub use delete_photo::DeletePhotoUseCase;
 pub mod save_photo_edits;
 pub use save_photo_edits::SavePhotoEditsUseCase;
 

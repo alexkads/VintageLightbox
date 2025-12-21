@@ -200,7 +200,7 @@ pub fn menu_item_with_indent(ui: &mut Ui, text: &str, selected: bool, indent: f3
 // Container with background and border-radius
 // ============================================
 pub fn card(ui: &mut Ui, add_contents: impl FnOnce(&mut Ui)) {
-    egui::Frame::none()
+    egui::Frame::default()
         .fill(Theme::BG_APP)
         .corner_radius(CornerRadius::same(Theme::RADIUS_MD as u8))
         .show(ui, add_contents);

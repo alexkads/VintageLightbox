@@ -39,6 +39,7 @@ impl LibraryController {
                         camera,
                         exposure,
                         rating,
+                        color_label: photo.color_label().map(|c| c.to_string()),
                         edit_exposure: photo.edit_exposure(),
                         edit_contrast: photo.edit_contrast(),
                     }

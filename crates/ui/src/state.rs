@@ -60,6 +60,12 @@ pub struct AppState {
     pub active_exposure: f32,
     /// Current contrast adjustment value
     pub active_contrast: f32,
+    /// Previous exposure value (for change detection)
+    pub prev_exposure: f32,
+    /// Previous contrast value (for change detection)
+    pub prev_contrast: f32,
+    /// Original unprocessed preview image
+    pub original_preview: Option<DynamicImage>,
 
     // ============================================
     // Image Viewer State
@@ -72,6 +78,12 @@ pub struct AppState {
     // ============================================
     pub is_busy: bool,
     pub busy_message: String,
+
+    // ============================================
+    // Filters
+    // ============================================
+    pub filter_min_rating: i32,
+    pub filter_color_label: Option<String>,
 
     // ============================================
     // Async Operations
@@ -93,10 +105,15 @@ impl AppState {
             active_image: Arc::new(Mutex::new(None)),
             active_exposure: 0.0,
             active_contrast: 1.0,
+            prev_exposure: 0.0,
+            prev_contrast: 1.0,
+            original_preview: None,
             zoom_level: 1.0,
             pan_offset: egui::Vec2::ZERO,
             is_busy: false,
             busy_message: String::new(),
+            filter_min_rating: 0,
+            filter_color_label: None,
             pending_import: None,
             pending_export: None,
         }
@@ -143,6 +160,28 @@ impl AppState {
     pub fn current_photo_index(&self) -> Option<usize> {
         self.selected_photo_id.as_ref()
             .and_then(|id| self.photos.iter().position(|p| &p.id == id))
+    }
+
+    /// Get filtered photos based on current filter settings
+    pub fn get_filtered_photos(&self) -> Vec<PhotoViewModel> {
+        self.photos.iter()
+            .filter(|photo| {
+                // Filter by minimum rating
+                if photo.rating < self.filter_min_rating {
+                    return false;
+                }
+
+                // Filter by color label
+                if let Some(ref filter_label) = self.filter_color_label {
+                    if photo.color_label.as_ref() != Some(filter_label) {
+                        return false;
+                    }
+                }
+
+                true
+            })
+            .cloned()
+            .collect()
     }
 }
 

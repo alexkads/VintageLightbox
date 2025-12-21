@@ -20,6 +20,9 @@ impl DevelopView {
         editor_controller: &std::sync::Arc<adapters::controllers::EditorController>,
         export_controller: &std::sync::Arc<adapters::controllers::ExportController>,
         photo_controller: &std::sync::Arc<adapters::controllers::PhotoController>,
+        library_controller: &std::sync::Arc<adapters::controllers::LibraryController>,
+        photo_sender: &tokio::sync::mpsc::Sender<Result<Vec<adapters::view_models::PhotoViewModel>, String>>,
+        ctx: &egui::Context,
     ) {
         // Left sidebar - Presets & History
         egui::SidePanel::left("develop_left")
@@ -37,7 +40,7 @@ impl DevelopView {
             .exact_width(Theme::PANEL_WIDTH + 20.0)
             .show_inside(ui, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    self.show_right_sidebar(ui, state, editor_controller, export_controller, photo_controller);
+                    self.show_right_sidebar(ui, state, editor_controller, export_controller, photo_controller, library_controller, photo_sender, ctx);
                 });
             });
 
@@ -80,6 +83,9 @@ impl DevelopView {
         editor_controller: &std::sync::Arc<adapters::controllers::EditorController>,
         export_controller: &std::sync::Arc<adapters::controllers::ExportController>,
         photo_controller: &std::sync::Arc<adapters::controllers::PhotoController>,
+        library_controller: &std::sync::Arc<adapters::controllers::LibraryController>,
+        photo_sender: &tokio::sync::mpsc::Sender<Result<Vec<adapters::view_models::PhotoViewModel>, String>>,
+        ctx: &egui::Context,
     ) {
         use crate::design_system::widgets;
         use crate::components::{histogram::Histogram, slider_control::SliderControl, rating_widget::RatingWidget};
@@ -153,7 +159,7 @@ impl DevelopView {
             if let Some(metadata) = &state.detail_metadata {
                 let controller = export_controller.clone();
                 let id = metadata.id.clone();
-                
+
                 tokio::spawn(async move {
                     let file_dialog = rfd::AsyncFileDialog::new()
                         .set_title("Export Photo")
@@ -161,7 +167,7 @@ impl DevelopView {
                         .add_filter("JPEG", &["jpg", "jpeg"])
                         .save_file()
                         .await;
-                    
+
                     if let Some(file) = file_dialog {
                         if let Some(path) = file.path().to_str() {
                             if let Err(e) = controller.export_photo(id, path.to_string()).await {
@@ -170,6 +176,51 @@ impl DevelopView {
                         }
                     }
                 });
+            }
+        }
+
+        ui.add_space(Theme::SPACE_XL);
+
+        // Delete button
+        ui.label(
+            egui::RichText::new("Danger Zone")
+                .size(Theme::FONT_SM)
+                .color(Theme::TEXT_MUTED)
+        );
+        ui.add_space(Theme::SPACE_SM);
+
+        if ui.button(
+            egui::RichText::new("Delete Photo")
+                .color(egui::Color32::from_rgb(200, 60, 60))
+        ).clicked() {
+            if let Some(photo_id) = &state.selected_photo_id {
+                let photo_ctrl = photo_controller.clone();
+                let lib_ctrl = library_controller.clone();
+                let sender = photo_sender.clone();
+                let ctx_clone = ctx.clone();
+                let id = photo_id.clone();
+
+                state.is_busy = true;
+                state.busy_message = "Deleting photo...".to_string();
+
+                tokio::spawn(async move {
+                    // Delete the photo
+                    if let Err(e) = photo_ctrl.delete_photo(&id).await {
+                        eprintln!("Failed to delete photo: {}", e);
+                    } else {
+                        // Reload photos after delete
+                        let result = lib_ctrl.get_all_photos().await;
+                        let _ = sender.send(result).await;
+                        ctx_clone.request_repaint();
+                    }
+                });
+
+                // Clear selection and return to library
+                state.selected_photo_id = None;
+                state.loaded_photo_id = None;
+                state.detail_image = None;
+                state.detail_metadata = None;
+                state.current_view = crate::state::CurrentView::Library;
             }
         }
 

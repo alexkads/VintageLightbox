@@ -59,8 +59,8 @@ impl VintageLightboxApp {
         // Apply custom theme
         Theme::apply_to_context(&cc.egui_ctx);
 
-        // Create channel for async photo loading
-        let (photo_sender, photo_receiver) = mpsc::channel(1);
+        // Create channel for async photo loading (capacity 10 to avoid blocking)
+        let (photo_sender, photo_receiver) = mpsc::channel(10);
 
         Self {
             state: AppState::new(),
@@ -101,6 +101,7 @@ impl eframe::App for VintageLightboxApp {
         if let Ok(result) = self.photo_receiver.try_recv() {
             match result {
                 Ok(photos) => {
+                    println!("Received {} photos from channel", photos.len());
                     self.state.photos = photos;
                 }
                 Err(e) => {
@@ -118,42 +119,82 @@ impl eframe::App for VintageLightboxApp {
         if let Some(photo_id) = &self.state.selected_photo_id.clone() {
             // Check if we need to load a new image
             let needs_reload = self.state.loaded_photo_id.as_ref() != Some(photo_id);
-            
+
             if needs_reload {
                 // Clear previous image first
                 self.state.detail_image = None;
-                
+                self.state.original_preview = None;
+
                 // Find the photo in our list
                 if let Some(photo) = self.state.photos.iter().find(|p| &p.id == photo_id) {
                     // Load image
                     if let Ok(img) = image::open(&photo.path) {
                         // OPTIMIZATION: Resize to preview resolution (1920x1080) for fast loading
                         let preview_img = crate::image_processing::ImageProcessor::resize_for_preview(&img, 1920);
-                        
+
                         // Calculate histogram from preview
                         self.state.histogram_data = Some(
                             crate::components::histogram::HistogramData::from_image(&preview_img)
                         );
-                        
-                        // Apply edits if they exist
+
+                        // Store original preview for real-time processing
+                        self.state.original_preview = Some(preview_img.clone());
+
+                        // Load saved edits
                         let exposure = photo.edit_exposure.unwrap_or(0.0);
                         let contrast = photo.edit_contrast.unwrap_or(1.0);
-                        
+
+                        // Initialize active values
+                        self.state.active_exposure = exposure;
+                        self.state.active_contrast = contrast;
+                        self.state.prev_exposure = exposure;
+                        self.state.prev_contrast = contrast;
+
+                        // Apply edits if they exist
                         let processed = if exposure != 0.0 || contrast != 1.0 {
                             crate::image_processing::ImageProcessor::process_image(&preview_img, exposure, contrast)
                         } else {
                             preview_img
                         };
-                        
+
                         // Create texture with unique name per photo
                         let texture = crate::image_processing::ImageProcessor::load_texture(
                             ctx,
                             format!("photo_{}", photo_id),
                             &processed
                         );
-                        
+
                         self.state.detail_image = Some(texture);
                         self.state.loaded_photo_id = Some(photo_id.clone());
+                    }
+                }
+            } else {
+                // Photo is already loaded, check if edits changed (real-time preview)
+                let edits_changed =
+                    self.state.active_exposure != self.state.prev_exposure ||
+                    self.state.active_contrast != self.state.prev_contrast;
+
+                if edits_changed {
+                    // Reprocess image with new edit values
+                    if let Some(original) = &self.state.original_preview {
+                        let processed = crate::image_processing::ImageProcessor::process_image(
+                            original,
+                            self.state.active_exposure,
+                            self.state.active_contrast
+                        );
+
+                        // Update texture
+                        let texture = crate::image_processing::ImageProcessor::load_texture(
+                            ctx,
+                            format!("photo_{}", photo_id),
+                            &processed
+                        );
+
+                        self.state.detail_image = Some(texture);
+
+                        // Update previous values
+                        self.state.prev_exposure = self.state.active_exposure;
+                        self.state.prev_contrast = self.state.active_contrast;
                     }
                 }
             }
@@ -179,6 +220,9 @@ impl eframe::App for VintageLightboxApp {
                         &self.editor_controller,
                         &self.export_controller,
                         &self.photo_controller,
+                        &self.library_controller,
+                        &self.photo_sender,
+                        ctx,
                     );
                 }
             }
@@ -252,6 +296,10 @@ impl VintageLightboxApp {
         let import_controller = self.import_controller.clone();
         let library_controller = self.library_controller.clone();
         let ctx = ctx.clone();
+        let sender = self.photo_sender.clone();
+
+        self.state.is_busy = true;
+        self.state.busy_message = "Importing photos...".to_string();
 
         // Spawn file dialog
         tokio::spawn(async move {
@@ -259,19 +307,45 @@ impl VintageLightboxApp {
                 .add_filter("Images", &["jpg", "jpeg", "png", "raw", "cr2", "nef", "arw"])
                 .set_title("Import Photos");
 
-            if let Some(file) = file_dialog.pick_file().await {
-                if let Some(path) = file.path().to_str() {
-                    // Import the photo
-                    if let Err(e) = import_controller.import_files(vec![path.to_string()]).await {
-                        eprintln!("Failed to import photo: {}", e);
-                    } else {
-                        // Reload photos after import
-                        if let Ok(_photos) = library_controller.get_all_photos().await {
-                            ctx.request_repaint();
+            let files_opt = file_dialog.pick_files().await;
+
+            // Always reload photos at the end, even if canceled
+            let result = if let Some(files) = files_opt {
+                if !files.is_empty() {
+                    // Collect all file paths
+                    let paths: Vec<String> = files
+                        .iter()
+                        .filter_map(|f| f.path().to_str().map(|s| s.to_string()))
+                        .collect();
+
+                    if !paths.is_empty() {
+                        // Import all photos at once
+                        match import_controller.import_files(paths).await {
+                            Ok(_) => {
+                                println!("Photos imported successfully");
+                                // Reload photos after successful import
+                                library_controller.get_all_photos().await
+                            }
+                            Err(e) => {
+                                eprintln!("Failed to import photos: {}", e);
+                                // Still reload to show any partial imports
+                                library_controller.get_all_photos().await
+                            }
                         }
+                    } else {
+                        library_controller.get_all_photos().await
                     }
+                } else {
+                    library_controller.get_all_photos().await
                 }
-            }
+            } else {
+                // User canceled, still reload to ensure consistency
+                library_controller.get_all_photos().await
+            };
+
+            // Send result to UI
+            let _ = sender.send(result).await;
+            ctx.request_repaint();
         });
     }
 }

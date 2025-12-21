@@ -29,7 +29,10 @@ impl PhotoGrid {
         state: &mut AppState,
         ctx: &egui::Context,
     ) {
-        if state.photos.is_empty() {
+        // Get filtered photos
+        let filtered_photos = state.get_filtered_photos();
+
+        if filtered_photos.is_empty() {
             self.show_empty_state(ui);
             return;
         }
@@ -37,7 +40,7 @@ impl PhotoGrid {
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                self.show_grid(ui, state, ctx);
+                self.show_grid(ui, state, ctx, &filtered_photos);
             });
     }
 
@@ -47,6 +50,7 @@ impl PhotoGrid {
         ui: &mut Ui,
         state: &mut AppState,
         ctx: &egui::Context,
+        photos: &[PhotoViewModel],
     ) {
         let columns = 5;
         let spacing = Theme::SPACE_SM;
@@ -54,9 +58,6 @@ impl PhotoGrid {
         let tile_width = (available_width - (spacing * (columns - 1) as f32)) / columns as f32;
 
         ui.spacing_mut().item_spacing = Vec2::new(spacing, spacing);
-
-        // Clone photos to avoid borrow checker issues
-        let photos = state.photos.clone();
 
         // Layout photos in rows
         for chunk in photos.chunks(columns) {
@@ -95,7 +96,7 @@ impl PhotoGrid {
                 camera: photo.camera.clone(),
                 exposure: photo.exposure.clone(),
                 rating: photo.rating,
-                color_label: None, // TODO: Add color_label to PhotoViewModel
+                color_label: photo.color_label.clone(),
             });
             
             // Load full image asynchronously

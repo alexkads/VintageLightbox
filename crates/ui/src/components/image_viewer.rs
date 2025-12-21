@@ -88,8 +88,8 @@ impl ImageViewer {
 
             ui.allocate_new_ui(UiBuilder::new().max_rect(left_rect), |ui| {
                 if widgets::icon_button(ui, "‹").clicked() {
-                    if let Some(_new_id) = state.navigate(-1) {
-                        // TODO: Load previous photo
+                    if let Some(new_id) = state.navigate(-1) {
+                        state.selected_photo_id = Some(new_id);
                     }
                 }
             });
@@ -100,8 +100,8 @@ impl ImageViewer {
 
             ui.allocate_new_ui(UiBuilder::new().max_rect(right_rect), |ui| {
                 if widgets::icon_button(ui, "›").clicked() {
-                    if let Some(_new_id) = state.navigate(1) {
-                        // TODO: Load next photo
+                    if let Some(new_id) = state.navigate(1) {
+                        state.selected_photo_id = Some(new_id);
                     }
                 }
             });

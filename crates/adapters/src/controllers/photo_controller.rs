@@ -1,21 +1,24 @@
 use domain::value_objects::{PhotoId, ColorLabel, Rating};
-use use_cases::{RatePhotoUseCase, SetColorLabelUseCase};
+use use_cases::{RatePhotoUseCase, SetColorLabelUseCase, DeletePhotoUseCase};
 use std::sync::Arc;
 
 /// Controller for photo operations (rating, color labels, etc.)
 pub struct PhotoController {
     rate_photo_use_case: Arc<RatePhotoUseCase>,
     set_color_label_use_case: Arc<SetColorLabelUseCase>,
+    delete_photo_use_case: Arc<DeletePhotoUseCase>,
 }
 
 impl PhotoController {
     pub fn new(
         rate_photo_use_case: Arc<RatePhotoUseCase>,
         set_color_label_use_case: Arc<SetColorLabelUseCase>,
+        delete_photo_use_case: Arc<DeletePhotoUseCase>,
     ) -> Self {
         Self {
             rate_photo_use_case,
             set_color_label_use_case,
+            delete_photo_use_case,
         }
     }
 
@@ -69,6 +72,21 @@ impl PhotoController {
                 .await
                 .map_err(|e| format!("Failed to set color label: {}", e))?;
         }
+
+        Ok(())
+    }
+
+    /// Delete a photo from the catalog
+    pub async fn delete_photo(&self, photo_id: &str) -> Result<(), String> {
+        // Convert string ID to PhotoId
+        let photo_id = PhotoId::from_string(photo_id)
+            .map_err(|e| format!("Invalid photo ID: {}", e))?;
+
+        // Execute delete use case
+        self.delete_photo_use_case
+            .execute(photo_id)
+            .await
+            .map_err(|e| format!("Failed to delete photo: {}", e))?;
 
         Ok(())
     }
