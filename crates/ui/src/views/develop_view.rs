@@ -5,16 +5,21 @@ use egui::Ui;
 use crate::state::AppState;
 use crate::design_system::theme::Theme;
 use crate::components::image_viewer::ImageViewer;
+use crate::components::filmstrip::Filmstrip;
 
-pub struct DevelopView;
+pub struct DevelopView {
+    filmstrip: Filmstrip,
+}
 
 impl DevelopView {
     pub fn new() -> Self {
-        Self
+        Self {
+            filmstrip: Filmstrip::new(),
+        }
     }
 
     pub fn show(
-        &self,
+        &mut self,
         ui: &mut Ui,
         state: &mut AppState,
         editor_controller: &std::sync::Arc<adapters::controllers::EditorController>,
@@ -31,8 +36,9 @@ impl DevelopView {
                 let photos = state.photos.clone();
                 let selected_id = state.selected_photo_id.clone();
                 
-                crate::components::filmstrip::Filmstrip::show(
+                self.filmstrip.show(
                     ui,
+                    ctx,
                     &photos,
                     &selected_id,
                     |photo_id| {

@@ -5,15 +5,18 @@ use egui::Ui;
 use crate::state::AppState;
 use crate::design_system::theme::Theme;
 use crate::components::photo_grid::PhotoGrid;
+use crate::components::filmstrip::Filmstrip;
 
 pub struct LibraryView {
     photo_grid: PhotoGrid,
+    filmstrip: Filmstrip,
 }
 
 impl LibraryView {
     pub fn new() -> Self {
         Self {
             photo_grid: PhotoGrid::new(),
+            filmstrip: Filmstrip::new(),
         }
     }
 
@@ -25,8 +28,9 @@ impl LibraryView {
                 let photos = state.photos.clone();
                 let selected_id = state.selected_photo_id.clone();
                 
-                crate::components::filmstrip::Filmstrip::show(
+                self.filmstrip.show(
                     ui,
+                    ctx,
                     &photos,
                     &selected_id,
                     |photo_id| {

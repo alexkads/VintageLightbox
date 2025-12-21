@@ -120,7 +120,7 @@ impl PhotoGrid {
                 }
             });
             
-            state.current_view = CurrentView::Develop;
+            // Stay in Library view - user must explicitly switch to Develop
         }
 
         // Background
