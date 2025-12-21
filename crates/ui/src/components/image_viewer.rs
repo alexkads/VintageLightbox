@@ -35,9 +35,9 @@ impl ImageViewer {
             state.reset_viewer();
         }
 
-        // Draw image logic with transition
+        // Draw image logic - NO transition since thumbnail has same effects applied
         if let Some(texture) = &state.detail_image {
-            // Full resolution image available
+            // Full resolution image available - show immediately
             let texture_size = Vec2::new(texture.size()[0] as f32, texture.size()[1] as f32);
 
             // Calculate scaled size
@@ -51,41 +51,14 @@ impl ImageViewer {
             let center = rect.center() + state.pan_offset;
             let img_rect = Rect::from_center_size(center, zoomed_size);
 
-            // Transition Logic
-            let mut opacity = 1.0;
-            let mut is_transitioning = false;
-
-            if let Some(loaded_at) = state.detail_image_loaded_at {
-                let elapsed = loaded_at.elapsed().as_secs_f32();
-                let duration = 0.6; // 600ms transition for smoother feel
-                
-                if elapsed < duration {
-                    // Cubic ease-out: 1 - (1-x)^3
-                    let t = elapsed / duration;
-                    opacity = 1.0 - (1.0 - t).powi(3);
-                    is_transitioning = true;
-                    ui.ctx().request_repaint(); // Continue animation
-                } else {
-                    // Transition complete
-                    state.detail_image_loaded_at = None;
-                }
-            }
-
-            // If transitioning, draw the thumbnail underneath
-            if is_transitioning {
-                if let Some(thumbnail) = &state.thumbnail_preview {
-                    // Draw thumbnail stretched to exactly match the detail image rect
-                    // This ensures perfect alignment during cross-fade
-                    egui::Image::new(thumbnail).paint_at(ui, img_rect);
-                }
-            }
-
-            // Draw full-res image with opacity
-            let tint = Color32::from_white_alpha((opacity * 255.0) as u8);
-            egui::Image::new(texture).tint(tint).paint_at(ui, img_rect);
+            // Draw full-res image (no fade since thumbnail already has effects)
+            egui::Image::new(texture).paint_at(ui, img_rect);
+            
+            // Clear loaded_at since we no longer need transition
+            state.detail_image_loaded_at = None;
             
         } else if let Some(thumbnail) = &state.thumbnail_preview {
-            // LIGHTROOM-STYLE: Show thumbnail as instant preview while loading full-res
+            // LIGHTROOM-STYLE: Show thumbnail with effects as instant preview
             let texture_size = Vec2::new(thumbnail.size()[0] as f32, thumbnail.size()[1] as f32);
 
             // Calculate scaled size (will be blurry but instant!)

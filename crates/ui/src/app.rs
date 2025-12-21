@@ -216,20 +216,7 @@ impl eframe::App for VintageLightboxApp {
 
                 // Find the photo and request async processing
                 if let Some(photo) = self.state.photos.iter().find(|p| &p.id == photo_id) {
-                    // LIGHTROOM-STYLE: Load thumbnail as instant preview
-                    // This gives immediate visual feedback while high-res loads
-                    if let Some(thumb_path) = &photo.thumbnail_path {
-                        if let Ok(thumb_img) = image::open(thumb_path) {
-                            let thumb_texture = crate::image_processing::ImageProcessor::load_texture(
-                                ctx,
-                                format!("thumb_{}", photo_id),
-                                &thumb_img
-                            );
-                            self.state.thumbnail_preview = Some(thumb_texture);
-                        }
-                    }
-
-                    // Load saved edits
+                    // Load saved edits FIRST (needed for thumbnail processing)
                     let exposure = photo.edit_exposure.unwrap_or(0.0);
                     let contrast = photo.edit_contrast.unwrap_or(1.0);
                     let temperature = photo.edit_temperature.unwrap_or(0.0);
@@ -241,6 +228,35 @@ impl eframe::App for VintageLightboxApp {
                     let clarity = photo.edit_clarity.unwrap_or(0.0);
                     let vibrance = photo.edit_vibrance.unwrap_or(0.0);
                     let saturation = photo.edit_saturation.unwrap_or(0.0);
+                    
+                    // LIGHTROOM-STYLE: Load thumbnail as instant preview WITH EFFECTS APPLIED
+                    // This gives immediate visual feedback that matches the final look
+                    if let Some(thumb_path) = &photo.thumbnail_path {
+                        if let Ok(thumb_img) = image::open(thumb_path) {
+                            // Apply the same effects to thumbnail for consistent appearance
+                            let processed_thumb = crate::image_processing::ImageProcessor::process_image(
+                                &thumb_img,
+                                exposure,
+                                contrast,
+                                temperature,
+                                tint,
+                                highlights,
+                                shadows,
+                                whites,
+                                blacks,
+                                clarity,
+                                vibrance,
+                                saturation,
+                            );
+                            
+                            let thumb_texture = crate::image_processing::ImageProcessor::load_texture(
+                                ctx,
+                                format!("thumb_{}", photo_id),
+                                &processed_thumb
+                            );
+                            self.state.thumbnail_preview = Some(thumb_texture);
+                        }
+                    }
 
                     // Update detail metadata immediately
                     self.state.detail_metadata = Some(crate::state::DetailMetadata {
