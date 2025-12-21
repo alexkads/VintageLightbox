@@ -123,6 +123,8 @@ pub struct AppState {
     pub prev_saturation: f32,
     /// Original unprocessed preview image
     pub original_preview: Option<DynamicImage>,
+    /// Cached raw image data for GPU processing (Arc to avoid cloning)
+    pub original_image_data: Option<Arc<Vec<u8>>>,
 
     // ============================================
     // Image Viewer State
@@ -195,6 +197,7 @@ impl AppState {
             prev_vibrance: 0.0,
             prev_saturation: 0.0,
             original_preview: None,
+            original_image_data: None,
             zoom_level: 1.0,
             pan_offset: egui::Vec2::ZERO,
             show_before: false,

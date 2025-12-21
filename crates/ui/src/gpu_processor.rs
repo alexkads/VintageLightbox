@@ -46,7 +46,7 @@ impl Default for GpuEditParams {
 /// Request to process an image on GPU
 pub struct GpuProcessRequest {
     pub request_id: u64,
-    pub image_data: Vec<u8>,
+    pub image_data: Arc<Vec<u8>>, // Use Arc to avoid cloning massive image data
     pub width: u32,
     pub height: u32,
     pub params: GpuEditParams,
@@ -56,6 +56,19 @@ pub struct GpuProcessRequest {
 pub struct GpuProcessResult {
     pub request_id: u64,
     pub processed_image: DynamicImage,
+}
+
+struct GpuResources {
+    width: u32,
+    height: u32,
+    input_texture: wgpu::Texture,
+    output_texture: wgpu::Texture,
+    params_buffer: wgpu::Buffer,
+    output_buffer: wgpu::Buffer,
+    bind_group: wgpu::BindGroup,
+    padded_bytes_per_row: u32,
+    unpadded_bytes_per_row: u32,
+    last_image_data: Option<Arc<Vec<u8>>>, // To detect if input changed
 }
 
 /// GPU-accelerated image processor
@@ -75,7 +88,7 @@ impl GpuImageProcessor {
         let current_request_id_clone = current_request_id.clone();
 
         // Try to initialize GPU in background thread
-        let gpu_available = std::thread::spawn(move || {
+        let _gpu_available = std::thread::spawn(move || {
             Self::gpu_processor_thread(request_receiver, result_sender, current_request_id_clone)
         }).is_finished() == false; // Thread started successfully
 
@@ -151,6 +164,8 @@ impl GpuImageProcessor {
 
         println!("GPU: Initialized successfully with {}", adapter.get_info().name);
 
+        let mut resources: Option<GpuResources> = None;
+
         // Process requests
         while let Ok(request) = receiver.recv() {
             // Check if this request is still current (debouncing)
@@ -165,6 +180,7 @@ impl GpuImageProcessor {
                 &queue,
                 &pipeline,
                 &request,
+                &mut resources,
             ) {
                 let _ = sender.send(GpuProcessResult {
                     request_id: request.request_id,
@@ -180,97 +196,140 @@ impl GpuImageProcessor {
         queue: &wgpu::Queue,
         pipeline: &wgpu::ComputePipeline,
         request: &GpuProcessRequest,
+        resources_cache: &mut Option<GpuResources>,
     ) -> Option<DynamicImage> {
         let width = request.width;
         let height = request.height;
         
-        // WGPU requires bytes_per_row to be aligned to 256 bytes
-        const COPY_BYTES_PER_ROW_ALIGNMENT: u32 = 256;
-        let unpadded_bytes_per_row = 4 * width;
-        let padded_bytes_per_row = ((unpadded_bytes_per_row + COPY_BYTES_PER_ROW_ALIGNMENT - 1) 
-            / COPY_BYTES_PER_ROW_ALIGNMENT) * COPY_BYTES_PER_ROW_ALIGNMENT;
+        // Re-create resources if dimensions changed or first run
+        let needs_recreation = match resources_cache {
+            Some(res) => res.width != width || res.height != height,
+            None => true,
+        };
 
-        // Create input texture
-        let input_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("Input Texture"),
-            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        if needs_recreation {
+           // WGPU requires bytes_per_row to be aligned to 256 bytes
+            const COPY_BYTES_PER_ROW_ALIGNMENT: u32 = 256;
+            let unpadded_bytes_per_row = 4 * width;
+            let padded_bytes_per_row = ((unpadded_bytes_per_row + COPY_BYTES_PER_ROW_ALIGNMENT - 1) 
+                / COPY_BYTES_PER_ROW_ALIGNMENT) * COPY_BYTES_PER_ROW_ALIGNMENT;
 
-        // Create output texture (storage)
-        let output_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("Output Texture"),
-            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
+            println!("GPU Debug: Creating resources for {}x{} (padded row: {})", 
+                width, height, padded_bytes_per_row);
 
-        // Upload image data (input doesn't need alignment for write_texture)
-        queue.write_texture(
-            wgpu::ImageCopyTexture {
-                texture: &input_texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            &request.image_data,
-            wgpu::ImageDataLayout {
-                offset: 0,
-                bytes_per_row: Some(unpadded_bytes_per_row),
-                rows_per_image: Some(height),
-            },
-            wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
-        );
+            // Create input texture
+            let input_texture = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("Input Texture"),
+                size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
 
-        // Create uniform buffer for parameters
-        let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Params Buffer"),
-            contents: bytemuck::bytes_of(&request.params),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
+            // Create output texture (storage)
+            let output_texture = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("Output Texture"),
+                size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
+            });
 
-        // Create bind group
-        let bind_group_layout = pipeline.get_bind_group_layout(0);
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Compute Bind Group"),
-            layout: &bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(
-                        &input_texture.create_view(&wgpu::TextureViewDescriptor::default())
-                    ),
+            // Create uniform buffer for parameters
+            // Usage COPY_DST to allow updates
+            let params_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Params Buffer"),
+                size: std::mem::size_of::<GpuEditParams>() as wgpu::BufferAddress,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+
+            // Create bind group
+            let bind_group_layout = pipeline.get_bind_group_layout(0);
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Compute Bind Group"),
+                layout: &bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(
+                            &input_texture.create_view(&wgpu::TextureViewDescriptor::default())
+                        ),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(
+                            &output_texture.create_view(&wgpu::TextureViewDescriptor::default())
+                        ),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: params_buffer.as_entire_binding(),
+                    },
+                ],
+            });
+
+            // Create output buffer with padded size for reading back
+            let output_buffer_size = (padded_bytes_per_row * height) as wgpu::BufferAddress;
+            let output_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Output Buffer"),
+                size: output_buffer_size,
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            });
+
+            *resources_cache = Some(GpuResources {
+                width,
+                height,
+                input_texture,
+                output_texture,
+                params_buffer,
+                output_buffer,
+                bind_group,
+                padded_bytes_per_row,
+                unpadded_bytes_per_row,
+                last_image_data: None,
+            });
+        }
+
+        let resources = resources_cache.as_mut().unwrap();
+
+        // Check if image data needs upload (pointer equality check)
+        // If it's a different Arc, or same Arc but we just created resources, we upload.
+        // Actually, if we just created resources, last_image_data is None.
+        let need_upload = match &resources.last_image_data {
+            Some(last) => !Arc::ptr_eq(last, &request.image_data),
+            None => true,
+        };
+
+        if need_upload {
+            // Upload image data
+            queue.write_texture(
+                wgpu::ImageCopyTexture {
+                    texture: &resources.input_texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
                 },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(
-                        &output_texture.create_view(&wgpu::TextureViewDescriptor::default())
-                    ),
+                &request.image_data,
+                wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(resources.unpadded_bytes_per_row),
+                    rows_per_image: Some(height),
                 },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: params_buffer.as_entire_binding(),
-                },
-            ],
-        });
+                wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            );
+            resources.last_image_data = Some(request.image_data.clone());
+        }
 
-        // Create output buffer with padded size for reading back
-        let output_buffer_size = (padded_bytes_per_row * height) as wgpu::BufferAddress;
-        let output_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Output Buffer"),
-            size: output_buffer_size,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
+        // Update params
+        queue.write_buffer(&resources.params_buffer, 0, bytemuck::bytes_of(&request.params));
 
         // Create command encoder
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -284,7 +343,7 @@ impl GpuImageProcessor {
                 timestamp_writes: None,
             });
             compute_pass.set_pipeline(pipeline);
-            compute_pass.set_bind_group(0, &bind_group, &[]);
+            compute_pass.set_bind_group(0, &resources.bind_group, &[]);
             
             // Dispatch workgroups (16x16 threads each)
             let workgroups_x = (width + 15) / 16;
@@ -292,19 +351,19 @@ impl GpuImageProcessor {
             compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, 1);
         }
 
-        // Copy output texture to buffer (must use padded bytes_per_row!)
+        // Copy output texture to buffer
         encoder.copy_texture_to_buffer(
             wgpu::ImageCopyTexture {
-                texture: &output_texture,
+                texture: &resources.output_texture,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
             wgpu::ImageCopyBuffer {
-                buffer: &output_buffer,
+                buffer: &resources.output_buffer,
                 layout: wgpu::ImageDataLayout {
                     offset: 0,
-                    bytes_per_row: Some(padded_bytes_per_row),
+                    bytes_per_row: Some(resources.padded_bytes_per_row),
                     rows_per_image: Some(height),
                 },
             },
@@ -315,7 +374,7 @@ impl GpuImageProcessor {
         queue.submit(std::iter::once(encoder.finish()));
 
         // Read back results
-        let buffer_slice = output_buffer.slice(..);
+        let buffer_slice = resources.output_buffer.slice(..);
         let (tx, rx) = std::sync::mpsc::channel();
         buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
             let _ = tx.send(result);
@@ -326,15 +385,15 @@ impl GpuImageProcessor {
             let data = buffer_slice.get_mapped_range();
             
             // Remove padding from each row
-            let mut result_data: Vec<u8> = Vec::with_capacity((unpadded_bytes_per_row * height) as usize);
+            let mut result_data: Vec<u8> = Vec::with_capacity((resources.unpadded_bytes_per_row * height) as usize);
             for y in 0..height {
-                let start = (y * padded_bytes_per_row) as usize;
-                let end = start + unpadded_bytes_per_row as usize;
+                let start = (y * resources.padded_bytes_per_row) as usize;
+                let end = start + resources.unpadded_bytes_per_row as usize;
                 result_data.extend_from_slice(&data[start..end]);
             }
             
             drop(data);
-            output_buffer.unmap();
+            resources.output_buffer.unmap();
 
             // Convert to DynamicImage
             let img_buffer = image::RgbaImage::from_raw(width, height, result_data)?;
@@ -360,7 +419,7 @@ impl GpuImageProcessor {
             if let Some(img) = image::RgbaImage::from_raw(
                 request.width,
                 request.height,
-                request.image_data.clone(),
+                request.image_data.as_ref().clone(),
             ) {
                 let dynamic_img = DynamicImage::ImageRgba8(img);
                 let processed = crate::image_processing::ImageProcessor::process_image(
@@ -427,4 +486,4 @@ impl Default for GpuImageProcessor {
 }
 
 // We need buffer init descriptor
-use wgpu::util::DeviceExt;
+

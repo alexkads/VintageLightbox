@@ -11,7 +11,7 @@ use crate::state::{AppState, CurrentView};
 use crate::design_system::{theme::Theme, widgets};
 use crate::views::{library_view::LibraryView, develop_view::DevelopView};
 use crate::keyboard::KeyboardHandler;
-use crate::async_loader::{AsyncImageProcessor, AsyncEditProcessor, ImageProcessRequest, EditRequest};
+use crate::async_loader::{AsyncImageProcessor, ImageProcessRequest};
 
 /// Main application struct
 pub struct VintageLightboxApp {
@@ -50,8 +50,6 @@ pub struct VintageLightboxApp {
     // ============================================
     /// Processes full image loading in background
     image_processor: AsyncImageProcessor,
-    /// Processes slider edits in background (CPU fallback)
-    edit_processor: AsyncEditProcessor,
     /// GPU-accelerated edit processor (primary for sliders)
     gpu_edit_processor: crate::gpu_processor::GpuImageProcessor,
     /// Current edit request ID for tracking latest edit
@@ -88,7 +86,6 @@ impl VintageLightboxApp {
             photo_receiver,
             photo_sender,
             image_processor: AsyncImageProcessor::new(),
-            edit_processor: AsyncEditProcessor::new(),
             gpu_edit_processor: crate::gpu_processor::GpuImageProcessor::new(),
             current_edit_request_id: 0,
         }
@@ -141,6 +138,10 @@ impl eframe::App for VintageLightboxApp {
             // Check if this is still the photo we want
             if self.state.develop_selected_photo_id.as_ref() == Some(&result.photo_id) {
                 // Store original for before/after
+                // Create cached Arc<Vec<u8>> for GPU processing to avoid repeated allocations
+                let rgba = result.original_preview.to_rgba8();
+                self.state.original_image_data = Some(Arc::new(rgba.into_raw()));
+                
                 self.state.original_preview = Some(result.original_preview);
                 self.state.histogram_data = Some(result.histogram);
                 
@@ -186,6 +187,7 @@ impl eframe::App for VintageLightboxApp {
                 // Clear previous full-res image (but keep thumbnail for instant preview)
                 self.state.detail_image = None;
                 self.state.original_preview = None;
+                self.state.original_image_data = None;
 
                 // Find the photo and request async processing
                 if let Some(photo) = self.state.photos.iter().find(|p| &p.id == photo_id) {
@@ -316,9 +318,16 @@ impl eframe::App for VintageLightboxApp {
                             self.state.detail_image = Some(texture);
                         } else {
                             // Request GPU-accelerated edit processing
-                            let rgba_img = original.to_rgba8();
-                            let (width, height) = rgba_img.dimensions();
-                            let image_data = rgba_img.into_raw();
+                            // Use cached data to avoid expensive cloning
+                            let (image_data, width, height) = if let Some(data) = &self.state.original_image_data {
+                                let width = original.width();
+                                let height = original.height();
+                                (data.clone(), width, height)
+                            } else {
+                                // Fallback if cache is missing (shouldn't happen)
+                                let rgba = original.to_rgba8();
+                                (Arc::new(rgba.clone().into_raw()), rgba.width(), rgba.height())
+                            };
                             
                             self.current_edit_request_id = self.gpu_edit_processor.next_request_id();
                             self.gpu_edit_processor.request_process(crate::gpu_processor::GpuProcessRequest {
