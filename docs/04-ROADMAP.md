@@ -137,11 +137,11 @@ Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Ar
 1. ✅ ~~**Undo/Redo**~~ - Sistema de histórico completo (20 estados, Cmd+Z/Cmd+Shift+Z)
 2. ✅ ~~**Reset de Ajustes**~~ - Volta todos os sliders ao padrão
 3. ✅ ~~**Before/After Toggle**~~ - Comparação antes/depois (tecla \)
-4. **Presets System** - Salvar e aplicar presets de edição (Default, Auto, B&W, Custom)
-5. **RAW Processing Avançado** - Integração completa com LibRaw/rawler para mais formatos
-6. **Tone Curve** - Curva de tons paramétrica
-7. **HSL/Color** - Ajustes por canal de cor (8 canais)
-8. **Performance** - Otimizações e profiling, possível GPU acceleration (Phase 2.1)
+4. 🎯 **Tone Curve** - Curva de tons paramétrica (PRÓXIMO)
+5. **Presets System** - Salvar e aplicar presets de edição (Default, Auto, B&W, Custom)
+6. **HSL/Color** - Ajustes por canal de cor (8 canais)
+7. **RAW Processing Avançado** - Integração completa com LibRaw/rawler para mais formatos
+8. **Performance Optimization** - Profiling e otimizações, possível GPU acceleration (Phase 2.1)
 9. **Instaladores** - Build para macOS e Windows
 
 ### Entregas Recentes (Fase 2.0 - UI Redesign + Architecture)
@@ -178,6 +178,14 @@ Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Ar
 - ✅ **186 testes totais** com 100% de sucesso
 - ✅ **8 Use Cases completos** (incluindo DeletePhotoUseCase)
 - ✅ **MVP totalmente funcional** - workflow completo end-to-end
+
+### Estado de Estabilidade (20/dez/2025)
+- ✅ **Build Status**: Compilação limpa sem warnings
+- ✅ **Test Suite**: 186/186 testes passando (100% success rate)
+- ✅ **Database**: 5 migrations aplicadas com sucesso
+- ✅ **Codebase**: 74 arquivos Rust organizados em 5 crates
+- ✅ **Architecture**: Clean Architecture implementada em todas as camadas
+- ✅ **MVP**: Workflow completo end-to-end funcional
 
 ---
 
@@ -474,11 +482,11 @@ Criar versão mínima funcional com importação, visualização, edição bási
 - [x] ✅ **Whites e Blacks** - Controle fino de extremos tonais
 - [x] ✅ **Highlights e Shadows** - Ajuste seletivo por luminância
 - [x] ✅ **Temperature e Tint** - White balance completo
-- [ ] Curva de tons (paramétrica) - *Próximo*
-- [ ] Point curve com múltiplos pontos
-- [ ] Ajustes HSL (8 canais de cor)
-- [ ] Redução de ruído básica
-- [ ] Nitidez básica
+- [ ] 🎯 **Tone Curve** - Curva de tons paramétrica (PRÓXIMO)
+- [ ] **Point Curve** - Curva com múltiplos pontos de controle
+- [ ] **HSL/Color** - Ajustes por canal de cor (8 canais: Red, Orange, Yellow, Green, Aqua, Blue, Purple, Magenta)
+- [ ] **Redução de Ruído** - Luminance e Color noise reduction
+- [ ] **Nitidez** - Sharpening com Amount, Radius, Detail, Masking
 
 ### 2.3 Presets (2 semanas)
 - [ ] Salvar preset de ajustes
@@ -807,6 +815,31 @@ Criar versão mínima funcional com importação, visualização, edição bási
 - [ ] Novo usuário consegue importar e editar em < 5min
 - [ ] Todas as ações principais acessíveis via teclado
 - [ ] Documentação cobre 95% dos casos de uso
+
+---
+
+## Lições Aprendidas (Fase 1)
+
+### Sucessos
+- ✅ **TDD rigoroso** resultou em 100% de confiança no código
+- ✅ **Clean Architecture** facilitou refatorações e testes isolados
+- ✅ **egui** mostrou-se excelente para UIs profissionais em Rust
+- ✅ **SQLite + sqlx** proporcionou persistência robusta e type-safe
+- ✅ **Async/await** manteve a UI responsiva durante operações pesadas
+- ✅ **Rust ownership** eliminou bugs de memória e race conditions
+
+### Desafios Superados
+- 🔧 **Compatibilidade macOS Sequoia**: Resolvido com atualização do egui para 0.29.1+
+- 🔧 **Image Processing Performance**: Otimizado com processamento off-main-thread
+- 🔧 **UI State Management**: Implementado com canais tokio para comunicação assíncrona
+- 🔧 **Database Migrations**: Migrado para `sqlx::migrate!` macro para type-safety
+- 🔧 **Gray Photo Bug**: Corrigido problema de carregamento de fotos consecutivas
+
+### Próximas Otimizações
+- 🎯 **GPU Acceleration**: Avaliar wgpu para processamento de imagem em tempo real
+- 🎯 **Caching Strategy**: Implementar cache inteligente de previews e thumbnails
+- 🎯 **Batch Processing**: Otimizar operações em lote com paralelização
+- 🎯 **RAW Decoder**: Integrar LibRaw/rawler para suporte a mais formatos
 
 ---
 
