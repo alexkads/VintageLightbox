@@ -183,6 +183,12 @@ impl GpuImageProcessor {
     ) -> Option<DynamicImage> {
         let width = request.width;
         let height = request.height;
+        
+        // WGPU requires bytes_per_row to be aligned to 256 bytes
+        const COPY_BYTES_PER_ROW_ALIGNMENT: u32 = 256;
+        let unpadded_bytes_per_row = 4 * width;
+        let padded_bytes_per_row = ((unpadded_bytes_per_row + COPY_BYTES_PER_ROW_ALIGNMENT - 1) 
+            / COPY_BYTES_PER_ROW_ALIGNMENT) * COPY_BYTES_PER_ROW_ALIGNMENT;
 
         // Create input texture
         let input_texture = device.create_texture(&wgpu::TextureDescriptor {
@@ -208,7 +214,7 @@ impl GpuImageProcessor {
             view_formats: &[],
         });
 
-        // Upload image data
+        // Upload image data (input doesn't need alignment for write_texture)
         queue.write_texture(
             wgpu::ImageCopyTexture {
                 texture: &input_texture,
@@ -219,7 +225,7 @@ impl GpuImageProcessor {
             &request.image_data,
             wgpu::ImageDataLayout {
                 offset: 0,
-                bytes_per_row: Some(4 * width),
+                bytes_per_row: Some(unpadded_bytes_per_row),
                 rows_per_image: Some(height),
             },
             wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
@@ -257,8 +263,8 @@ impl GpuImageProcessor {
             ],
         });
 
-        // Create output buffer for reading back
-        let output_buffer_size = (4 * width * height) as wgpu::BufferAddress;
+        // Create output buffer with padded size for reading back
+        let output_buffer_size = (padded_bytes_per_row * height) as wgpu::BufferAddress;
         let output_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Output Buffer"),
             size: output_buffer_size,
@@ -286,7 +292,7 @@ impl GpuImageProcessor {
             compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, 1);
         }
 
-        // Copy output texture to buffer
+        // Copy output texture to buffer (must use padded bytes_per_row!)
         encoder.copy_texture_to_buffer(
             wgpu::ImageCopyTexture {
                 texture: &output_texture,
@@ -298,7 +304,7 @@ impl GpuImageProcessor {
                 buffer: &output_buffer,
                 layout: wgpu::ImageDataLayout {
                     offset: 0,
-                    bytes_per_row: Some(4 * width),
+                    bytes_per_row: Some(padded_bytes_per_row),
                     rows_per_image: Some(height),
                 },
             },
@@ -318,7 +324,15 @@ impl GpuImageProcessor {
 
         if rx.recv().ok()?.is_ok() {
             let data = buffer_slice.get_mapped_range();
-            let result_data: Vec<u8> = data.to_vec();
+            
+            // Remove padding from each row
+            let mut result_data: Vec<u8> = Vec::with_capacity((unpadded_bytes_per_row * height) as usize);
+            for y in 0..height {
+                let start = (y * padded_bytes_per_row) as usize;
+                let end = start + unpadded_bytes_per_row as usize;
+                result_data.extend_from_slice(&data[start..end]);
+            }
+            
             drop(data);
             output_buffer.unmap();
 
