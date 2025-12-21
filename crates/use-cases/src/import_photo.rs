@@ -34,33 +34,110 @@ impl ImportPhotoUseCase {
         }
     }
 
-    /// Importa uma foto do sistema de arquivos
+    /// Importa uma foto do sistema de arquivos, copiando para diretório organizado
     pub async fn execute(&self, file_path: FilePath) -> DomainResult<Photo> {
-        // Criar nova entidade Photo
-        let mut photo = Photo::new(file_path.clone());
+        // Extrair metadados primeiro para obter a data
+        let metadata_result = self.metadata_extractor.extract(&file_path);
+        
+        // Determinar a data para organização das pastas
+        let (year, month, day) = if let Ok(ref metadata) = metadata_result {
+            if let Some(ref dt) = metadata.date_time {
+                // Tentar parsear EXIF date format "YYYY:MM:DD HH:MM:SS"
+                let parts: Vec<&str> = dt.split(' ').next()
+                    .unwrap_or("")
+                    .split(':')
+                    .collect();
+                if parts.len() >= 3 {
+                    (parts[0].to_string(), parts[1].to_string(), parts[2].to_string())
+                } else {
+                    Self::current_date()
+                }
+            } else {
+                Self::current_date()
+            }
+        } else {
+            Self::current_date()
+        };
+        
+        // Obter diretório base: ~/Pictures/VintageLightbox
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+        let base_dir = std::path::PathBuf::from(&home)
+            .join("Pictures")
+            .join("VintageLightbox");
+        
+        // Criar subdiretório baseado na data: YYYY/MM/DD
+        let dest_dir = base_dir.join(&year).join(&month).join(&day);
+        
+        // Criar diretórios se não existirem
+        if !dest_dir.exists() {
+            tokio::fs::create_dir_all(&dest_dir).await.map_err(|e| {
+                domain::DomainError::InfrastructureError(format!(
+                    "Failed to create directory {}: {}", dest_dir.display(), e
+                ))
+            })?;
+        }
+        
+        // Obter extensão do arquivo original
+        let source_path: &Path = file_path.as_ref();
+        let extension = source_path.extension()
+            .map(|e| e.to_string_lossy().to_string())
+            .unwrap_or_else(|| "jpg".to_string());
+        
+        // Gerar nome padronizado: photo-YYYY-MM-DD-NNN
+        // Encontrar o próximo número sequencial disponível
+        let mut sequential = 1;
+        loop {
+            let new_name = format!("photo-{}-{}-{}-{:03}.{}", year, month, day, sequential, extension);
+            let dest_path = dest_dir.join(&new_name);
+            if !dest_path.exists() {
+                break;
+            }
+            sequential += 1;
+        }
+        
+        let new_file_name = format!("photo-{}-{}-{}-{:03}.{}", year, month, day, sequential, extension);
+        let dest_path = dest_dir.join(&new_file_name);
+        
+        // Copiar o arquivo para o destino com novo nome
+        let final_path = if dest_path.exists() {
+            println!("File already exists at: {}", dest_path.display());
+            dest_path
+        } else {
+            tokio::fs::copy(source_path, &dest_path).await.map_err(|e| {
+                domain::DomainError::InfrastructureError(format!(
+                    "Failed to copy file to {}: {}", dest_path.display(), e
+                ))
+            })?;
+            println!("Copied to: {}", dest_path.display());
+            dest_path
+        };
+        
+        // Guardar o novo nome para usar no thumbnail
+        let new_file_name_for_thumb = new_file_name.clone();
+        
+        // Criar FilePath com o novo caminho
+        let new_file_path = FilePath::new(final_path.to_string_lossy().as_ref())?;
+        
+        // Criar nova entidade Photo com o caminho copiado
+        let mut photo = Photo::new(new_file_path.clone());
 
-        // Extrair e definir metadados (se falhar, logar e continuar sem metadados)
-        if let Ok(metadata) = self.metadata_extractor.extract(&file_path) {
+        // Definir metadados se disponíveis
+        if let Ok(metadata) = metadata_result {
             photo.set_metadata(metadata);
         }
 
-        // Gerar Thumbnail
-        // TODO: Mover lógica de persistência de arquivo de thumbnail para infra ou service dedicado?
-        // Por enquanto, faremos aqui: salva como <caminho>.thumb.jpg
-        match self.thumbnail_generator.generate(&file_path, 300).await {
+        // Gerar Thumbnail no subdiretório thumb
+        match self.thumbnail_generator.generate(&new_file_path, 300).await {
             Ok(bytes) => {
-                let path_ref: &Path = file_path.as_ref();
-                let _file_stem = path_ref.file_stem().unwrap_or_default();
-                let file_name = path_ref.file_name().unwrap_or_default();
-                let parent = path_ref.parent().unwrap_or(Path::new("."));
+                // Create thumb subdirectory
+                let thumb_dir = dest_dir.join("thumb");
+                if !thumb_dir.exists() {
+                    if let Err(e) = tokio::fs::create_dir_all(&thumb_dir).await {
+                        eprintln!("Failed to create thumb directory: {}", e);
+                    }
+                }
                 
-                // Opção A: Salvar no mesmo diretório com sufixo
-                // let thumb_name = format!("{}.thumb.jpg", file_name.to_string_lossy());
-                // let thumb_path = parent.join(thumb_name);
-                
-                // Opção B: Pasta global de cache (Mais limpo)
-                // Para MVP, vamos usar Opção A pela simplicidade de visualização
-                let thumb_path = parent.join(format!("{}.thumb.jpg", file_name.to_string_lossy()));
+                let thumb_path = thumb_dir.join(format!("{}.thumb.jpg", new_file_name_for_thumb));
 
                 if let Err(e) = tokio::fs::write(&thumb_path, bytes).await {
                     eprintln!("Failed to write thumbnail: {}", e);
@@ -79,6 +156,16 @@ impl ImportPhotoUseCase {
         self.photo_repository.save(&photo).await?;
         
         Ok(photo)
+    }
+    
+    /// Retorna data atual formatada como (YYYY, MM, DD)
+    fn current_date() -> (String, String, String) {
+        let now = chrono::Local::now();
+        (
+            now.format("%Y").to_string(),
+            now.format("%m").to_string(),
+            now.format("%d").to_string(),
+        )
     }
 }
 

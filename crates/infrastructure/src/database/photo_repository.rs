@@ -47,21 +47,22 @@ impl PhotoRepositoryImpl {
         let color_label_str: Option<String> = row.try_get("color_label").ok();
         let is_edited: bool = row.try_get("is_edited").unwrap_or(false);
         let thumbnail_path_str: Option<String> = row.try_get("thumbnail_path").ok();
-        let edit_exposure: Option<f32> = row.try_get("edit_exposure").ok();
-        let edit_contrast: Option<f32> = row.try_get("edit_contrast").ok();
-        let edit_temperature: Option<f32> = row.try_get("edit_temperature").ok();
-        let edit_tint: Option<f32> = row.try_get("edit_tint").ok();
-        let edit_highlights: Option<f32> = row.try_get("edit_highlights").ok();
-        let edit_shadows: Option<f32> = row.try_get("edit_shadows").ok();
-        let edit_whites: Option<f32> = row.try_get("edit_whites").ok();
-        let edit_blacks: Option<f32> = row.try_get("edit_blacks").ok();
-        let edit_clarity: Option<f32> = row.try_get("edit_clarity").ok();
-        let edit_vibrance: Option<f32> = row.try_get("edit_vibrance").ok();
-        let edit_saturation: Option<f32> = row.try_get("edit_saturation").ok();
-        let edit_tone_curve_shadows: Option<f32> = row.try_get("edit_tone_curve_shadows").ok();
-        let edit_tone_curve_darks: Option<f32> = row.try_get("edit_tone_curve_darks").ok();
-        let edit_tone_curve_lights: Option<f32> = row.try_get("edit_tone_curve_lights").ok();
-        let edit_tone_curve_highlights: Option<f32> = row.try_get("edit_tone_curve_highlights").ok();
+        let edit_exposure: Option<f32> = row.try_get::<Option<f32>, _>("edit_exposure").unwrap_or(None);
+        let edit_contrast: Option<f32> = row.try_get::<Option<f32>, _>("edit_contrast").unwrap_or(None);
+        
+        let edit_temperature: Option<f32> = row.try_get::<Option<f32>, _>("edit_temperature").unwrap_or(None);
+        let edit_tint: Option<f32> = row.try_get::<Option<f32>, _>("edit_tint").unwrap_or(None);
+        let edit_highlights: Option<f32> = row.try_get::<Option<f32>, _>("edit_highlights").unwrap_or(None);
+        let edit_shadows: Option<f32> = row.try_get::<Option<f32>, _>("edit_shadows").unwrap_or(None);
+        let edit_whites: Option<f32> = row.try_get::<Option<f32>, _>("edit_whites").unwrap_or(None);
+        let edit_blacks: Option<f32> = row.try_get::<Option<f32>, _>("edit_blacks").unwrap_or(None);
+        let edit_clarity: Option<f32> = row.try_get::<Option<f32>, _>("edit_clarity").unwrap_or(None);
+        let edit_vibrance: Option<f32> = row.try_get::<Option<f32>, _>("edit_vibrance").unwrap_or(None);
+        let edit_saturation: Option<f32> = row.try_get::<Option<f32>, _>("edit_saturation").unwrap_or(None);
+        let edit_tone_curve_shadows: Option<f32> = row.try_get::<Option<f32>, _>("edit_tone_curve_shadows").unwrap_or(None);
+        let edit_tone_curve_darks: Option<f32> = row.try_get::<Option<f32>, _>("edit_tone_curve_darks").unwrap_or(None);
+        let edit_tone_curve_lights: Option<f32> = row.try_get::<Option<f32>, _>("edit_tone_curve_lights").unwrap_or(None);
+        let edit_tone_curve_highlights: Option<f32> = row.try_get::<Option<f32>, _>("edit_tone_curve_highlights").unwrap_or(None);
         let content_hash: Option<String> = row.try_get("content_hash").ok();
 
 

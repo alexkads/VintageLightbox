@@ -66,17 +66,100 @@ impl ScanDirectoryUseCase {
         })
     }
 
-    /// Importa uma única foto
+    /// Importa uma única foto, copiando para o diretório organizado
     async fn import_photo(&self, path: &Path, exif_reader: &crate::exif_reader::ExifReader) -> DomainResult<Photo> {
-        let file_path = FilePath::new(path.to_string_lossy().as_ref())?;
+        // Read EXIF metadata first to get the photo date
+        let metadata_result = exif_reader.read_metadata(path);
+        
+        // Determine the date for folder organization
+        // Parse date_time string (format: "YYYY:MM:DD HH:MM:SS" or similar) or use current date
+        let (year, month, day) = if let Ok(ref metadata) = metadata_result {
+            if let Some(ref dt) = metadata.date_time {
+                // Try to parse EXIF date format "YYYY:MM:DD HH:MM:SS"
+                let parts: Vec<&str> = dt.split(' ').next()
+                    .unwrap_or("")
+                    .split(':')
+                    .collect();
+                if parts.len() >= 3 {
+                    (
+                        parts[0].to_string(),
+                        parts[1].to_string(),
+                        parts[2].to_string(),
+                    )
+                } else {
+                    // Fallback to current date
+                    let now = chrono::Local::now();
+                    (
+                        now.format("%Y").to_string(),
+                        now.format("%m").to_string(),
+                        now.format("%d").to_string(),
+                    )
+                }
+            } else {
+                let now = chrono::Local::now();
+                (
+                    now.format("%Y").to_string(),
+                    now.format("%m").to_string(),
+                    now.format("%d").to_string(),
+                )
+            }
+        } else {
+            let now = chrono::Local::now();
+            (
+                now.format("%Y").to_string(),
+                now.format("%m").to_string(),
+                now.format("%d").to_string(),
+            )
+        };
+        
+        // Get the library base directory: ~/Pictures/VintageLightbox
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+        let base_dir = std::path::PathBuf::from(&home)
+            .join("Pictures")
+            .join("VintageLightbox");
+        
+        // Create date-based subdirectory: YYYY/MM/DD
+        let dest_dir = base_dir.join(&year).join(&month).join(&day);
+        
+        // Create directories if they don't exist
+        if !dest_dir.exists() {
+            std::fs::create_dir_all(&dest_dir).map_err(|e| {
+                domain::DomainError::InfrastructureError(format!(
+                    "Failed to create directory {}: {}", dest_dir.display(), e
+                ))
+            })?;
+        }
+        
+        // Get the filename and create destination path
+        let file_name = path.file_name()
+            .ok_or_else(|| domain::DomainError::InfrastructureError("Invalid file name".to_string()))?;
+        let dest_path = dest_dir.join(file_name);
+        
+        // Copy the file if it doesn't already exist at destination
+        let final_path = if dest_path.exists() {
+            // File already exists, use the existing path
+            dest_path
+        } else {
+            // Copy the file to the organized directory
+            std::fs::copy(path, &dest_path).map_err(|e| {
+                domain::DomainError::InfrastructureError(format!(
+                    "Failed to copy file to {}: {}", dest_path.display(), e
+                ))
+            })?;
+            println!("Copied to: {}", dest_path.display());
+            dest_path
+        };
+        
+        let file_path = FilePath::new(final_path.to_string_lossy().as_ref())?;
         let mut photo = Photo::new(file_path.clone());
         
         // Calculate content hash for duplicate detection
-        if let Ok(hash) = crate::content_hash::calculate_file_hash(path) {
+        if let Ok(hash) = crate::content_hash::calculate_file_hash(&final_path) {
             photo.set_content_hash(hash);
         }
         
-        if let Ok(metadata) = exif_reader.read_metadata(path) {
+        // Set metadata if available
+        if let Ok(metadata) = metadata_result {
             photo.set_metadata(metadata);
         }
 

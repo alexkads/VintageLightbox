@@ -74,12 +74,17 @@ impl PhotoGrid {
                 result.image.clone()
             };
             
+            // Create texture from the image
+            let resized_image = crate::image_processing::ImageProcessor::resize_for_preview(&processed_image, 300);
+            
             let texture = crate::image_processing::ImageProcessor::load_texture(
                 ctx,
                 format!("grid_thumb_{}", result.photo_id),
-                &processed_image
+                &resized_image
             );
             self.thumbnail_cache.insert(result.photo_id, texture);
+            // Request repaint to show the newly cached thumbnail
+            ctx.request_repaint();
         }
 
         // Request repaint if thumbnails are still loading
@@ -374,6 +379,34 @@ impl PhotoGrid {
                     color,
                 );
             }
+        }
+
+        // Check if file exists and show warning triangle if missing
+        let file_exists = std::path::Path::new(&photo.path).exists();
+        if !file_exists {
+            // Log to console
+            if response.hovered() {
+                eprintln!("⚠️ File not found: {}", photo.path);
+            }
+            
+            // Draw warning triangle
+            let warning_pos = rect.min + Vec2::new(8.0, 8.0);
+            
+            // Background circle
+            ui.painter().circle_filled(
+                warning_pos + Vec2::new(10.0, 10.0),
+                14.0,
+                Color32::from_rgb(255, 100, 50),
+            );
+            
+            // Warning icon
+            ui.painter().text(
+                warning_pos + Vec2::new(10.0, 10.0),
+                egui::Align2::CENTER_CENTER,
+                "⚠",
+                egui::FontId::proportional(16.0),
+                Color32::WHITE,
+            );
         }
 
         // Selection border - show for selected OR hovered
