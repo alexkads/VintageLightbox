@@ -416,7 +416,7 @@ Criar versão mínima funcional com importação, visualização, edição bási
   - [x] **Cor**: Clarity, Vibrance, Saturation
 - [x] Aplicação em tempo real (processamento pixel-a-pixel otimizado)
 - [x] Persistência de todos os ajustes no SQLite
-- [ ] Cache de previews - *Próxima fase*
+- [x] Cache de previews (Smart Preview System)
 
 **Critério de Aceitação**: ✅ Ajuste aplicado em tempo real (< 100ms para preview 1920px)
 

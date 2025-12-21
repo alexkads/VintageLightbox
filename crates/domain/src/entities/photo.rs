@@ -32,6 +32,8 @@ pub struct Photo {
     metadata: Option<PhotoMetadata>,
     /// Caminho do thumbnail
     thumbnail_path: Option<FilePath>,
+    /// Caminho do preview (resolução otimizada para tela)
+    preview_path: Option<FilePath>,
     /// Ajuste de exposição (persistence)
     edit_exposure: Option<f32>,
     /// Ajuste de contraste (persistence)
@@ -83,6 +85,7 @@ impl Photo {
         color_label: Option<ColorLabel>,
         is_edited: bool,
         thumbnail_path: Option<FilePath>,
+        preview_path: Option<FilePath>,
         edit_exposure: Option<f32>,
         edit_contrast: Option<f32>,
         edit_temperature: Option<f32>,
@@ -110,6 +113,7 @@ impl Photo {
             color_label,
             is_edited,
             thumbnail_path,
+            preview_path,
             edit_exposure,
             edit_contrast,
             edit_temperature,
@@ -133,7 +137,7 @@ impl Photo {
     pub fn with_id(id: PhotoId, file_path: FilePath) -> Self {
         let now = Utc::now();
         Self::reconstruct(
-            id, file_path, now, now, None, None, None, false, None,
+            id, file_path, now, now, None, None, None, false, None, None,
             None, None, None, None, None, None, None, None, None, None, None,
             None, None, None, None, None
         )
@@ -256,6 +260,17 @@ impl Photo {
     /// Define o caminho do thumbnail
     pub fn set_thumbnail_path(&mut self, path: FilePath) {
         self.thumbnail_path = Some(path);
+        self.modified_at = Utc::now();
+    }
+
+    /// Retorna o caminho do preview
+    pub fn preview_path(&self) -> Option<&FilePath> {
+        self.preview_path.as_ref()
+    }
+
+    /// Define o caminho do preview
+    pub fn set_preview_path(&mut self, path: FilePath) {
+        self.preview_path = Some(path);
         self.modified_at = Utc::now();
     }
 
@@ -574,12 +589,12 @@ mod tests {
         // Usar reconstruct para garantir timestamps idênticos
         // Usar reconstruct para garantir timestamps idênticos
         let photo1 = Photo::reconstruct(
-            id, path.clone(), now, now, None, None, None, false, None,
+            id, path.clone(), now, now, None, None, None, false, None, None,
             None, None, None, None, None, None, None, None, None, None, None,
             None, None, None, None, None
         );
         let photo2 = Photo::reconstruct(
-            id, path, now, now, None, None, None, false, None,
+            id, path, now, now, None, None, None, false, None, None,
             None, None, None, None, None, None, None, None, None, None, None,
             None, None, None, None, None
         );
@@ -705,7 +720,7 @@ mod tests {
 
         // Act - Reconstruct with tone curve values
         let photo = Photo::reconstruct(
-            id, path, now, now, None, None, None, true, None,
+            id, path, now, now, None, None, None, true, None, None,
             Some(1.0), Some(1.0), None, None, None, None, None, None, None, None, None,
             Some(-40.0), Some(-20.0), Some(20.0), Some(40.0), None
         );

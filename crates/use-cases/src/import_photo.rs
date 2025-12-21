@@ -151,6 +151,33 @@ impl ImportPhotoUseCase {
             },
             Err(e) => eprintln!("Failed to generate thumbnail: {}", e),
         }
+
+        // Gerar Preview (Otimizado para edição fluida)
+        // Usamos 2560px como um bom balanço entre qualidade e performance (Matches Roadmap)
+        match self.thumbnail_generator.generate(&new_file_path, 2560).await {
+            Ok(bytes) => {
+                // Create preview subdirectory
+                let preview_dir = dest_dir.join("preview");
+                if !preview_dir.exists() {
+                    if let Err(e) = tokio::fs::create_dir_all(&preview_dir).await {
+                        eprintln!("Failed to create preview directory: {}", e);
+                    }
+                }
+                
+                let preview_path = preview_dir.join(format!("{}.preview.jpg", new_file_name_for_thumb));
+
+                if let Err(e) = tokio::fs::write(&preview_path, bytes).await {
+                    eprintln!("Failed to write preview: {}", e);
+                } else {
+                    if let Some(path_str) = preview_path.to_str() {
+                         if let Ok(path_obj) = FilePath::new(path_str) {
+                            photo.set_preview_path(path_obj);
+                        }
+                    }
+                }
+            },
+            Err(e) => eprintln!("Failed to generate preview: {}", e),
+        }
         
         // Persistir no repositório
         self.photo_repository.save(&photo).await?;
@@ -178,6 +205,7 @@ mod tests {
     };
     use mockall::mock;
     use mockall::predicate::*;
+    use tempfile::NamedTempFile;
 
     // Mock do MetadataExtractor
     mock! {
@@ -238,7 +266,9 @@ mod tests {
             Arc::new(mock_extractor),
             Arc::new(mock_generator)
         );
-        let file_path = FilePath::new("/path/to/photo.jpg").unwrap();
+        let temp_file = NamedTempFile::new().unwrap();
+        let path = temp_file.path().to_str().unwrap();
+        let file_path = FilePath::new(path).unwrap();
         
         // Act
         let result = use_case.execute(file_path.clone()).await;
@@ -246,7 +276,9 @@ mod tests {
         // Assert
         assert!(result.is_ok());
         let photo = result.unwrap();
-        assert_eq!(photo.file_path(), &file_path);
+        let path_str = photo.file_path().to_string();
+        assert!(path_str.contains("VintageLightbox"));
+        assert_ne!(photo.file_path(), &file_path);
     }
 
     #[tokio::test]
@@ -275,7 +307,9 @@ mod tests {
             Arc::new(mock_extractor),
             Arc::new(mock_generator)
         );
-        let file_path = FilePath::new("/path/to/photo.jpg").unwrap();
+        let temp_file = NamedTempFile::new().unwrap();
+        let path = temp_file.path().to_str().unwrap();
+        let file_path = FilePath::new(path).unwrap();
         
         // Act
         let result = use_case.execute(file_path).await;
@@ -310,8 +344,11 @@ mod tests {
             Arc::new(mock_generator)
         );
         
-        let file_path1 = FilePath::new("/path/to/photo1.jpg").unwrap();
-        let file_path2 = FilePath::new("/path/to/photo2.jpg").unwrap();
+        let temp_file1 = NamedTempFile::new().unwrap();
+        let file_path1 = FilePath::new(temp_file1.path().to_str().unwrap()).unwrap();
+        
+        let temp_file2 = NamedTempFile::new().unwrap();
+        let file_path2 = FilePath::new(temp_file2.path().to_str().unwrap()).unwrap();
         
         // Act
         let photo1 = use_case.execute(file_path1).await.unwrap();
@@ -352,8 +389,13 @@ mod tests {
         let extensions = vec!["jpg", "png", "raw"];
         
         for ext in extensions {
-            let path = format!("/photos/image.{}", ext);
-            let file_path = FilePath::new(&path).unwrap();
+            let mut builder = tempfile::Builder::new();
+            let suffix = format!(".{}", ext);
+            builder.suffix(&suffix);
+            let temp_file = builder.tempfile().unwrap();
+            let path_str = temp_file.path().to_str().unwrap();
+            let file_path = FilePath::new(path_str).unwrap();
+            
             let result = use_case.execute(file_path).await;
             
             assert!(result.is_ok());

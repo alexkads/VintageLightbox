@@ -47,6 +47,7 @@ impl PhotoRepositoryImpl {
         let color_label_str: Option<String> = row.try_get("color_label").ok();
         let is_edited: bool = row.try_get("is_edited").unwrap_or(false);
         let thumbnail_path_str: Option<String> = row.try_get("thumbnail_path").ok();
+        let preview_path_str: Option<String> = row.try_get("preview_path").ok();
         let edit_exposure: Option<f32> = row.try_get::<Option<f32>, _>("edit_exposure").unwrap_or(None);
         let edit_contrast: Option<f32> = row.try_get::<Option<f32>, _>("edit_contrast").unwrap_or(None);
         
@@ -80,6 +81,7 @@ impl PhotoRepositoryImpl {
         let rating = rating_val.and_then(|v| Rating::new(v as u8).ok());
         let color_label = color_label_str.and_then(|s| ColorLabel::from_name(&s).ok());
         let thumbnail_path = thumbnail_path_str.and_then(|s| FilePath::new(&s).ok());
+        let preview_path = preview_path_str.and_then(|s| FilePath::new(&s).ok());
 
         let imported_at = DateTime::parse_from_rfc3339(&imported_at_str)
             .map_err(|e| DomainError::InvalidOperation(format!("Invalid imported_at date: {}", e)))?
@@ -100,6 +102,7 @@ impl PhotoRepositoryImpl {
             color_label,
             is_edited,
             thumbnail_path,
+            preview_path,
             edit_exposure,
             edit_contrast,
             edit_temperature,
@@ -131,6 +134,7 @@ impl PhotoRepository for PhotoRepositoryImpl {
         let imported_at = photo.imported_at().to_rfc3339();
         let modified_at = photo.modified_at().to_rfc3339();
         let thumbnail_path = photo.thumbnail_path().map(|p| p.to_string_lossy().to_string());
+        let preview_path = photo.preview_path().map(|p| p.to_string_lossy().to_string());
         let edit_exposure = photo.edit_exposure();
         let edit_contrast = photo.edit_contrast();
         let edit_temperature = photo.edit_temperature();
@@ -153,8 +157,8 @@ impl PhotoRepository for PhotoRepositoryImpl {
             .and_then(|m| serde_json::to_string(m).ok());
 
         sqlx::query(
-            "INSERT INTO photos (id, file_path, rating, color_label, is_edited, imported_at, modified_at, metadata, thumbnail_path, edit_exposure, edit_contrast, edit_temperature, edit_tint, edit_highlights, edit_shadows, edit_whites, edit_blacks, edit_clarity, edit_vibrance, edit_saturation, edit_tone_curve_shadows, edit_tone_curve_darks, edit_tone_curve_lights, edit_tone_curve_highlights, content_hash)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO photos (id, file_path, rating, color_label, is_edited, imported_at, modified_at, metadata, thumbnail_path, preview_path, edit_exposure, edit_contrast, edit_temperature, edit_tint, edit_highlights, edit_shadows, edit_whites, edit_blacks, edit_clarity, edit_vibrance, edit_saturation, edit_tone_curve_shadows, edit_tone_curve_darks, edit_tone_curve_lights, edit_tone_curve_highlights, content_hash)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         .bind(&id)
         .bind(&file_path)
@@ -165,6 +169,7 @@ impl PhotoRepository for PhotoRepositoryImpl {
         .bind(&modified_at)
         .bind(metadata)
         .bind(thumbnail_path)
+        .bind(preview_path)
         .bind(edit_exposure)
         .bind(edit_contrast)
         .bind(edit_temperature)
@@ -222,6 +227,7 @@ impl PhotoRepository for PhotoRepositoryImpl {
         let is_edited = photo.is_edited();
         let modified_at = photo.modified_at().to_rfc3339();
         let thumbnail_path = photo.thumbnail_path().map(|p| p.to_string_lossy().to_string());
+        let preview_path = photo.preview_path().map(|p| p.to_string_lossy().to_string());
         let edit_exposure = photo.edit_exposure();
         let edit_contrast = photo.edit_contrast();
         let edit_temperature = photo.edit_temperature();
@@ -245,7 +251,7 @@ impl PhotoRepository for PhotoRepositoryImpl {
 
         let result = sqlx::query(
             "UPDATE photos
-             SET file_path = ?, rating = ?, color_label = ?, is_edited = ?, modified_at = ?, metadata = ?, thumbnail_path = ?, edit_exposure = ?, edit_contrast = ?, edit_temperature = ?, edit_tint = ?, edit_highlights = ?, edit_shadows = ?, edit_whites = ?, edit_blacks = ?, edit_clarity = ?, edit_vibrance = ?, edit_saturation = ?, edit_tone_curve_shadows = ?, edit_tone_curve_darks = ?, edit_tone_curve_lights = ?, edit_tone_curve_highlights = ?, content_hash = ?
+             SET file_path = ?, rating = ?, color_label = ?, is_edited = ?, modified_at = ?, metadata = ?, thumbnail_path = ?, preview_path = ?, edit_exposure = ?, edit_contrast = ?, edit_temperature = ?, edit_tint = ?, edit_highlights = ?, edit_shadows = ?, edit_whites = ?, edit_blacks = ?, edit_clarity = ?, edit_vibrance = ?, edit_saturation = ?, edit_tone_curve_shadows = ?, edit_tone_curve_darks = ?, edit_tone_curve_lights = ?, edit_tone_curve_highlights = ?, content_hash = ?
              WHERE id = ?"
         )
         .bind(&file_path)
@@ -255,6 +261,7 @@ impl PhotoRepository for PhotoRepositoryImpl {
         .bind(&modified_at)
         .bind(metadata)
         .bind(thumbnail_path)
+        .bind(preview_path)
         .bind(edit_exposure)
         .bind(edit_contrast)
         .bind(edit_temperature)
