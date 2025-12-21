@@ -141,17 +141,20 @@ impl eframe::App for VintageLightboxApp {
                 self.state.original_preview = Some(result.original_preview);
                 self.state.histogram_data = Some(result.histogram);
                 
-                // Create texture from processed image
+                // Create texture with unique name (timestamp prevents cache conflicts)
+                let timestamp = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis())
+                    .unwrap_or(0);
+                    
                 let texture = crate::image_processing::ImageProcessor::load_texture(
                     ctx,
-                    format!("photo_{}", result.photo_id),
+                    format!("detail_{}_{}", result.photo_id, timestamp),
                     &result.preview
                 );
                 
                 self.state.detail_image = Some(texture);
                 self.state.loaded_photo_id = Some(result.photo_id);
-                self.state.is_busy = false;
-                self.state.busy_message.clear();
             }
         }
 
@@ -162,7 +165,7 @@ impl eframe::App for VintageLightboxApp {
                 if let Some(photo_id) = &self.state.develop_selected_photo_id.clone() {
                     let texture = crate::image_processing::ImageProcessor::load_texture(
                         ctx,
-                        format!("photo_{}", photo_id),
+                        format!("edit_{}_req{}", photo_id, result.request_id),
                         &result.processed
                     );
                     self.state.detail_image = Some(texture);
@@ -176,11 +179,11 @@ impl eframe::App for VintageLightboxApp {
             let is_processing = self.image_processor.processing_photo_id().as_ref() == Some(photo_id);
 
             if needs_reload && !is_processing {
-                // Clear previous image
+                // Clear previous image (UI shows loading state inline)
                 self.state.detail_image = None;
                 self.state.original_preview = None;
-                self.state.is_busy = true;
-                self.state.busy_message = "Loading image...".to_string();
+                // Note: Não usamos is_busy aqui para evitar modal bloqueante
+                // O ImageViewer mostrará um indicador inline
 
                 // Find the photo and request async processing
                 if let Some(photo) = self.state.photos.iter().find(|p| &p.id == photo_id) {

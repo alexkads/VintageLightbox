@@ -51,12 +51,32 @@ impl ImageViewer {
             let img_rect = Rect::from_center_size(center, zoomed_size);
 
             egui::Image::new(texture).paint_at(ui, img_rect);
-        } else {
-            // No image loaded
+        } else if state.develop_selected_photo_id.is_some() {
+            // Image is loading - show spinner
+            let time = ui.ctx().input(|i| i.time);
+            let spinner_char = match ((time * 8.0) as usize) % 4 {
+                0 => "◐",
+                1 => "◓",
+                2 => "◑",
+                _ => "◒",
+            };
+            
             ui.painter().text(
                 rect.center(),
                 egui::Align2::CENTER_CENTER,
-                "No image loaded",
+                format!("{} Loading...", spinner_char),
+                egui::FontId::proportional(Theme::FONT_XL),
+                Theme::TEXT_MUTED,
+            );
+            
+            // Request repaint for animation
+            ui.ctx().request_repaint();
+        } else {
+            // No image selected
+            ui.painter().text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "Select a photo to view",
                 egui::FontId::proportional(Theme::FONT_XL),
                 Theme::TEXT_MUTED,
             );
