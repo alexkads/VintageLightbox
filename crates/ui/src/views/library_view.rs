@@ -66,8 +66,23 @@ impl LibraryView {
         });
     }
 
-    fn show_left_sidebar(&self, ui: &mut Ui, state: &mut AppState) {
+    fn show_left_sidebar(&mut self, ui: &mut Ui, state: &mut AppState) {
         use crate::design_system::widgets;
+
+        // Grid View Panel
+        widgets::section_title(ui, "Grid View");
+        ui.add_space(Theme::SPACE_SM);
+        
+        ui.horizontal(|ui| {
+            for cols in [1, 2, 3, 4, 5] {
+                let label = if cols == 1 { "⬛" } else { &format!("{}", cols) };
+                if ui.selectable_label(state.grid_columns == cols, label).clicked() {
+                    state.grid_columns = cols;
+                }
+            }
+        });
+        
+        ui.add_space(Theme::SPACE_LG);
 
         // Filters Panel
         widgets::section_title(ui, "Filters");

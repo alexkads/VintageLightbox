@@ -14,8 +14,8 @@ Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Ar
 
 ### Status Geral
 - **Fase Atual**: Fase 1 (MVP) - **100% FUNCIONAL** ✅
-- **Total de Testes**: **186 testes passando** 🎉
-  - Domain Layer: 100 testes (100% cobertura)
+- **Total de Testes**: **191 testes passando** 🎉
+  - Domain Layer: 105 testes (100% cobertura, +5 tone curve)
   - Use Cases Layer: 35 testes (9 use cases incluindo DeletePhotoUseCase)
   - Infrastructure Layer: 51 testes (Repositories + File System + Metadata + E2E)
   - Adapters Layer: 0 testes
@@ -23,12 +23,32 @@ Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Ar
 
 ### Conquistas Recentes
 
+- ✅ **FILMSTRIP NAVIGATION (21/dez/2025)** 🎞️
+  - **Barra de Miniaturas**: Filmstrip horizontal no rodapé (estilo Lightroom)
+  - **Presente em Library e Develop**: Navegação rápida em ambas as views
+  - **Seleção Destacada**: Borda branca na foto selecionada
+  - **Comportamento Lightroom**: Clicar em Library não muda para Develop
+  - **Cache de Thumbnails**: Performance otimizada com cache de texturas
+
+- ✅ **GRID VIEW MODES (21/dez/2025)** 🖼️
+  - **5 Modos de Visualização**: 1, 2, 3, 4, ou 5 fotos por linha
+  - **Modo Tela Cheia**: 1 coluna usa toda altura disponível
+  - **Controles na Sidebar**: Botões para trocar modo de visualização
+  - **Proporção Mantida**: Fotos exibidas sem deformação
+  - **Seleção sem Navegação**: Clicar na foto seleciona mas permanece em Library
+
+- ✅ **TONE CURVE BACKEND (21/dez/2025)** 📈
+  - **4 Zonas Paramétricas**: Shadows, Darks, Lights, Highlights (-100 a +100)
+  - **Domain Layer**: 5 novos testes para tone curve
+  - **Database Migration**: 006_add_tone_curve_fields.sql
+  - **Full Stack**: Domain → Use Cases → Adapters → UI integrado
+  - **Próximo Passo**: Sliders na UI e algoritmo de processamento
+
 - ✅ **CORREÇÃO CRÍTICA: Gray Photo Bug (21/dez/2025)** 🐛
   - **Problema**: Apenas a primeira foto carregava corretamente, fotos subsequentes apareciam como tela cinza
   - **Causa Raiz**: Bug no `dynamic_to_color_image` e processamento de imagem
   - **Solução**: Refatoração completa do pipeline de processamento de imagem
   - **Impacto**: Navegação entre fotos agora funciona perfeitamente
-  - **Commits**: Múltiplas tentativas de fix documentadas no histórico
 
 - ✅ **SISTEMA DE EDIÇÃO PROFISSIONAL (20/dez/2025)** 🎨
   - **11 Sliders de Ajuste**: Sistema completo de edição não-destrutiva

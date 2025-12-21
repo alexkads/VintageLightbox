@@ -132,6 +132,8 @@ pub struct AppState {
     // ============================================
     pub is_busy: bool,
     pub busy_message: String,
+    /// Number of columns in photo grid (1-5)
+    pub grid_columns: usize,
 
     // ============================================
     // Filters
@@ -192,6 +194,7 @@ impl AppState {
             prev_show_before: false,
             is_busy: false,
             busy_message: String::new(),
+            grid_columns: 4,  // Default 4 columns
             filter_min_rating: 0,
             filter_color_label: None,
             pending_import: None,

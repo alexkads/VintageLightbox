@@ -52,10 +52,24 @@ impl PhotoGrid {
         ctx: &egui::Context,
         photos: &[PhotoViewModel],
     ) {
-        let columns = 5;
+        let columns = state.grid_columns.max(1).min(5); // Clamp to 1-5
         let spacing = Theme::SPACE_SM;
         let available_width = ui.available_width();
-        let tile_width = (available_width - (spacing * (columns - 1) as f32)) / columns as f32;
+        
+        // Calculate tile size based on columns
+        let tile_width = if columns == 1 {
+            // Single column: use full width with max height
+            available_width - spacing * 2.0
+        } else {
+            (available_width - (spacing * (columns - 1) as f32)) / columns as f32
+        };
+        
+        // Adjust tile height based on column count
+        let tile_height = if columns == 1 {
+            (ui.available_height() - 100.0).max(300.0) // Full view mode
+        } else {
+            Theme::TILE_HEIGHT
+        };
 
         ui.spacing_mut().item_spacing = Vec2::new(spacing, spacing);
 
@@ -65,22 +79,23 @@ impl PhotoGrid {
                 ui.spacing_mut().item_spacing.x = spacing;
 
                 for photo in chunk {
-                    self.show_tile(ui, photo, state, ctx, tile_width);
+                    self.show_tile_with_height(ui, photo, state, ctx, tile_width, tile_height);
                 }
             });
         }
     }
 
-    /// Show a single photo tile
-    fn show_tile(
+    /// Show a single photo tile with variable height
+    fn show_tile_with_height(
         &mut self,
         ui: &mut Ui,
         photo: &PhotoViewModel,
         state: &mut AppState,
         ctx: &egui::Context,
         tile_width: f32,
+        tile_height: f32,
     ) {
-        let tile_size = Vec2::new(tile_width, Theme::TILE_HEIGHT);
+        let tile_size = Vec2::new(tile_width, tile_height);
 
         let (rect, response) = ui.allocate_exact_size(tile_size, Sense::click());
 
@@ -135,13 +150,16 @@ impl PhotoGrid {
         self.load_thumbnail_if_needed(photo, ctx);
 
         if let Some(texture) = self.thumbnail_cache.get(&photo.id) {
-            let img_height = 110.0;
+            // Calculate image area - leave space for name at bottom (proportional to tile height)
+            let name_space = (tile_height * 0.15).max(25.0).min(40.0);
+            let img_height = tile_height - name_space - Theme::SPACE_XS * 2.0;
+            
             let img_rect = Rect::from_min_size(
                 rect.min + Vec2::new(Theme::SPACE_XS, Theme::SPACE_XS),
                 Vec2::new(tile_width - Theme::SPACE_XS * 2.0, img_height),
             );
 
-            // Calculate centered image position
+            // Calculate centered image position preserving aspect ratio
             let texture_aspect = texture.size()[0] as f32 / texture.size()[1] as f32;
             let img_aspect = img_rect.width() / img_rect.height();
 
@@ -166,16 +184,17 @@ impl PhotoGrid {
             Image::new(texture).paint_at(ui, img_display_rect);
         }
 
-        // File name
-        let name_y = rect.min.y + 120.0;
+        // File name - positioned at bottom of tile
+        let name_height = 25.0;
         let name_rect = Rect::from_min_size(
-            rect.min + Vec2::new(0.0, name_y),
-            Vec2::new(tile_width, 20.0),
+            rect.min + Vec2::new(0.0, tile_height - name_height),
+            Vec2::new(tile_width, name_height),
         );
 
-        // Truncate name if too long
-        let display_name = if photo.name.len() > 20 {
-            format!("{}...", &photo.name[..17])
+        // Truncate name based on tile width
+        let max_chars = ((tile_width / 8.0) as usize).max(5);
+        let display_name = if photo.name.len() > max_chars {
+            format!("{}...", &photo.name[..(max_chars - 3)])
         } else {
             photo.name.clone()
         };
