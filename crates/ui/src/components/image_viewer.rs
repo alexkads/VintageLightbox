@@ -57,12 +57,12 @@ impl ImageViewer {
 
             if let Some(loaded_at) = state.detail_image_loaded_at {
                 let elapsed = loaded_at.elapsed().as_secs_f32();
-                let duration = 0.35; // 350ms transition
+                let duration = 0.6; // 600ms transition for smoother feel
                 
                 if elapsed < duration {
-                    // Ease-out curve for smoother feel: 1 - (1-x)^2
+                    // Cubic ease-out: 1 - (1-x)^3
                     let t = elapsed / duration;
-                    opacity = 1.0 - (1.0 - t).powi(2);
+                    opacity = 1.0 - (1.0 - t).powi(3);
                     is_transitioning = true;
                     ui.ctx().request_repaint(); // Continue animation
                 } else {
