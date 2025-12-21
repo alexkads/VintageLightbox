@@ -146,6 +146,13 @@ impl eframe::App for VintageLightboxApp {
                 self.state.histogram_data = Some(result.histogram);
                 self.state.performance_metrics.image_load_time_ms = Some(result.load_time_ms);
                 
+                // Calculate TTI (Time To Interactive)
+                if let Some(start_time) = self.state.start_load_time {
+                    let tti = start_time.elapsed().as_secs_f32() * 1000.0;
+                    println!("Controls released for editing effects in {:.2}ms", tti);
+                    self.state.start_load_time = None;
+                }
+                
                 // Create texture (measure upload time)
                 let upload_start = std::time::Instant::now();
                 let texture = ctx.load_texture(
@@ -260,6 +267,9 @@ impl eframe::App for VintageLightboxApp {
                         saturation,
                         max_preview_size: 2560,
                     });
+
+                    // Start timing TTI
+                    self.state.start_load_time = Some(std::time::Instant::now());
 
                     // Request repaint to poll for results
                     ctx.request_repaint();

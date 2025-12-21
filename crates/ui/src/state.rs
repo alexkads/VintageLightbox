@@ -164,6 +164,8 @@ pub struct AppState {
     /// Performance Metrics
     pub performance_metrics: PerformanceMetrics,
     pub show_performance_stats: bool,
+    /// Timestamp when the current photo load started (to measure TTI)
+    pub start_load_time: Option<std::time::Instant>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -225,6 +227,7 @@ impl AppState {
             history_index: None,
             performance_metrics: PerformanceMetrics::default(),
             show_performance_stats: std::env::var("SHOW_PERFORMANCE_STATS").map_or(false, |v| v == "true"),
+            start_load_time: None,
         }
     }
 
