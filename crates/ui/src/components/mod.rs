@@ -6,3 +6,4 @@ pub mod toolbar;
 pub mod slider_control;
 pub mod filmstrip;
 pub mod histogram;
+pub mod context_menu;

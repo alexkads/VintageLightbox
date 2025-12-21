@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use adapters::view_models::PhotoViewModel;
 use crate::design_system::theme::Theme;
 use crate::async_loader::{AsyncThumbnailLoader, ThumbnailRequest};
+use crate::state::AppState;
 
 pub struct Filmstrip {
     /// Cache of loaded thumbnail textures
@@ -32,8 +33,7 @@ impl Filmstrip {
         ui: &mut Ui,
         ctx: &egui::Context,
         photos: &[PhotoViewModel],
-        selected_photo_id: &Option<String>,
-        mut on_select: impl FnMut(String),
+        state: &mut AppState,
     ) {
         // Poll for completed thumbnails (non-blocking)
         let results = self.thumbnail_loader.poll_results();
@@ -69,8 +69,9 @@ impl Filmstrip {
                 ui.horizontal(|ui| {
                     ui.add_space(Theme::SPACE_SM);
 
-                    for photo in photos {
-                        let is_selected = selected_photo_id.as_ref() == Some(&photo.id);
+                    for (index, photo) in photos.iter().enumerate() {
+                        let is_multi_selected = state.is_photo_selected(&photo.id);
+                        let is_primary_selected = state.library_selected_photo_id.as_ref() == Some(&photo.id);
                         
                         // Reserve space for thumbnail
                         let (rect, response) = ui.allocate_exact_size(
@@ -78,8 +79,28 @@ impl Filmstrip {
                             Sense::click(),
                         );
 
+                        // Handle click with modifier keys for multi-selection
+                        if response.clicked() {
+                            let modifiers = ui.input(|i| i.modifiers);
+                            
+                            if modifiers.command {
+                                // Cmd+click: toggle individual selection
+                                state.toggle_selection(&photo.id);
+                                state.last_clicked_index = Some(index);
+                            } else if modifiers.shift {
+                                // Shift+click: range selection
+                                state.select_range(index);
+                            } else {
+                                // Regular click: single select
+                                state.single_select(&photo.id, index);
+                            }
+                            state.library_selected_photo_id = Some(photo.id.clone());
+                        }
+
                         // Draw thumbnail background
-                        let thumb_color = if response.hovered() {
+                        let thumb_color = if is_multi_selected || is_primary_selected {
+                            Color32::from_rgb(70, 70, 70)
+                        } else if response.hovered() {
                             Color32::from_rgb(60, 60, 60)
                         } else {
                             Color32::from_rgb(50, 50, 50)
@@ -136,6 +157,151 @@ impl Filmstrip {
                             );
                         }
 
+                        // Draw selection border
+                        if is_primary_selected {
+                            ui.painter().rect_stroke(
+                                rect,
+                                CornerRadius::same(2),
+                                Stroke::new(Self::SELECTED_BORDER_WIDTH, Color32::WHITE),
+                                egui::StrokeKind::Outside,
+                            );
+                        } else if is_multi_selected {
+                            ui.painter().rect_stroke(
+                                rect,
+                                CornerRadius::same(2),
+                                Stroke::new(2.0, Theme::ACCENT_PRIMARY),
+                                egui::StrokeKind::Outside,
+                            );
+                        }
+                        
+                        // Show checkmark for multi-selected items
+                        if is_multi_selected && state.selection_count() > 1 {
+                            let check_pos = rect.min + Vec2::new(6.0, 6.0);
+                            ui.painter().circle_filled(check_pos, 8.0, Theme::ACCENT_PRIMARY);
+                            ui.painter().text(
+                                check_pos,
+                                egui::Align2::CENTER_CENTER,
+                                "✓",
+                                egui::FontId::proportional(10.0),
+                                Color32::WHITE,
+                            );
+                        }
+
+                        // Spacing between thumbnails
+                        ui.add_space(Self::THUMBNAIL_SPACING);
+                    }
+
+                    ui.add_space(Theme::SPACE_SM);
+                });
+            });
+    }
+    
+    /// Show filmstrip for Develop view (single selection mode with callback)
+    pub fn show_develop(
+        &mut self,
+        ui: &mut Ui,
+        ctx: &egui::Context,
+        photos: &[PhotoViewModel],
+        selected_photo_id: &Option<String>,
+        mut on_select: impl FnMut(String),
+    ) {
+        // Poll for completed thumbnails (non-blocking)
+        let results = self.thumbnail_loader.poll_results();
+        for result in results {
+            let texture = crate::image_processing::ImageProcessor::load_texture(
+                ctx,
+                format!("filmstrip_thumb_{}", result.photo_id),
+                &result.image
+            );
+            self.thumbnail_cache.insert(result.photo_id, texture);
+        }
+
+        // Request repaint if thumbnails are still loading
+        if self.thumbnail_loader.loading_count() > 0 {
+            ctx.request_repaint();
+        }
+
+        // Request thumbnails for visible photos (async, non-blocking)
+        self.request_visible_thumbnails(photos);
+
+        // Dark background like Lightroom
+        let bg_color = Color32::from_rgb(42, 42, 42);
+        ui.painter().rect_filled(
+            ui.available_rect_before_wrap(),
+            CornerRadius::ZERO,
+            bg_color,
+        );
+
+        // Horizontal scroll area
+        egui::ScrollArea::horizontal()
+            .id_salt("filmstrip_scroll_develop")
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.add_space(Theme::SPACE_SM);
+
+                    for photo in photos {
+                        let is_selected = selected_photo_id.as_ref() == Some(&photo.id);
+                        
+                        // Reserve space for thumbnail
+                        let (rect, response) = ui.allocate_exact_size(
+                            Vec2::new(Self::THUMBNAIL_SIZE, Self::THUMBNAIL_SIZE),
+                            Sense::click(),
+                        );
+
+                        // Draw thumbnail background
+                        let thumb_color = if is_selected {
+                            Color32::from_rgb(70, 70, 70)
+                        } else if response.hovered() {
+                            Color32::from_rgb(60, 60, 60)
+                        } else {
+                            Color32::from_rgb(50, 50, 50)
+                        };
+                        
+                        ui.painter().rect_filled(
+                            rect,
+                            CornerRadius::same(2),
+                            thumb_color,
+                        );
+
+                        // Draw thumbnail image or placeholder
+                        if let Some(texture) = self.thumbnail_cache.get(&photo.id) {
+                            let img_rect = rect.shrink(2.0);
+                            let texture_aspect = texture.size()[0] as f32 / texture.size()[1] as f32;
+                            let img_aspect = img_rect.width() / img_rect.height();
+                            
+                            let img_display_rect = if texture_aspect > img_aspect {
+                                let display_height = img_rect.width() / texture_aspect;
+                                let y_offset = (img_rect.height() - display_height) / 2.0;
+                                egui::Rect::from_min_size(
+                                    img_rect.min + Vec2::new(0.0, y_offset),
+                                    Vec2::new(img_rect.width(), display_height),
+                                )
+                            } else {
+                                let display_width = img_rect.height() * texture_aspect;
+                                let x_offset = (img_rect.width() - display_width) / 2.0;
+                                egui::Rect::from_min_size(
+                                    img_rect.min + Vec2::new(x_offset, 0.0),
+                                    Vec2::new(display_width, img_rect.height()),
+                                )
+                            };
+                            
+                            Image::new(texture).paint_at(ui, img_display_rect);
+                        } else {
+                            let text_pos = rect.center();
+                            let short_name = if photo.name.len() > 8 {
+                                format!("{}...", &photo.name[..5])
+                            } else {
+                                photo.name.clone()
+                            };
+                            ui.painter().text(
+                                text_pos,
+                                egui::Align2::CENTER_CENTER,
+                                short_name,
+                                egui::FontId::proportional(9.0),
+                                Color32::from_rgb(120, 120, 120),
+                            );
+                        }
+
                         // Draw selected border
                         if is_selected {
                             ui.painter().rect_stroke(
@@ -151,7 +317,6 @@ impl Filmstrip {
                             on_select(photo.id.clone());
                         }
 
-                        // Spacing between thumbnails
                         ui.add_space(Self::THUMBNAIL_SPACING);
                     }
 

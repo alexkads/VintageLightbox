@@ -26,17 +26,12 @@ impl LibraryView {
             .exact_height(120.0)  // 80px thumbnails + 40px padding
             .show_inside(ui, |ui| {
                 let photos = state.photos.clone();
-                let selected_id = state.library_selected_photo_id.clone();
                 
                 self.filmstrip.show(
                     ui,
                     ctx,
                     &photos,
-                    &selected_id,
-                    |photo_id| {
-                        // Select photo but STAY in Library view (independent from Develop)
-                        state.library_selected_photo_id = Some(photo_id);
-                    },
+                    state,
                 );
             });
 

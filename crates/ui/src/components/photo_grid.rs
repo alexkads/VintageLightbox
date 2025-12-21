@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use crate::state::AppState;
 use crate::design_system::theme::Theme;
 use crate::async_loader::{AsyncThumbnailLoader, ThumbnailRequest};
+use crate::components::context_menu::{ContextMenu, ContextMenuItem};
 use adapters::view_models::PhotoViewModel;
 
 pub struct PhotoGrid {
@@ -19,6 +20,8 @@ pub struct PhotoGrid {
     last_selected_id: Option<String>,
     /// Async thumbnail loader (Rayon-powered)
     thumbnail_loader: AsyncThumbnailLoader,
+    /// Context menu for right-click actions
+    context_menu: ContextMenu,
 }
 
 impl PhotoGrid {
@@ -27,6 +30,7 @@ impl PhotoGrid {
             thumbnail_cache: HashMap::new(),
             last_selected_id: None,
             thumbnail_loader: AsyncThumbnailLoader::new(),
+            context_menu: ContextMenu::new("photo_grid_context"),
         }
     }
 
@@ -73,6 +77,37 @@ impl PhotoGrid {
             .show(ui, |ui| {
                 self.show_grid(ui, state, ctx, &filtered_photos, selection_changed);
             });
+        
+        // Show context menu if open
+        let menu_items = vec![
+            ContextMenuItem::new("Open in Develop").with_icon("🖼").with_shortcut("Enter"),
+            ContextMenuItem::new("---"),
+            ContextMenuItem::new("Select All").with_shortcut("⌘A"),
+            ContextMenuItem::new("Deselect All").with_shortcut("⌘D"),
+            ContextMenuItem::new("---"),
+            ContextMenuItem::new("Delete").with_icon("🗑").with_shortcut("⌫").destructive(),
+        ];
+        
+        if let Some(clicked_index) = self.context_menu.show(ctx, &menu_items) {
+            match clicked_index {
+                0 => {
+                    // Open in Develop
+                    if let Some(photo_id) = state.library_selected_photo_id.clone() {
+                        state.develop_selected_photo_id = Some(photo_id);
+                        state.current_view = crate::state::CurrentView::Develop;
+                        state.loaded_photo_id = None;
+                    }
+                }
+                2 => state.select_all(),
+                3 => state.clear_selection(),
+                5 => {
+                    if !state.selected_photo_ids.is_empty() {
+                        state.show_delete_confirmation = true;
+                    }
+                }
+                _ => {}
+            }
+        }
     }
 
     /// Request async loading of thumbnails for visible photos
@@ -125,6 +160,7 @@ impl PhotoGrid {
         ui.spacing_mut().item_spacing = Vec2::new(spacing, spacing);
 
         // Layout photos in rows
+        let mut global_index = 0usize;
         for chunk in photos.chunks(columns) {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = spacing;
@@ -133,19 +169,19 @@ impl PhotoGrid {
                     // Check if this is the selected photo (in Library view)
                     let is_selected = state.library_selected_photo_id.as_ref() == Some(&photo.id);
                     
-                    // Show the tile
-                    self.show_tile_with_height(ui, photo, state, ctx, tile_width, tile_height);
+                    // Show the tile with index for multi-selection
+                    self.show_tile_with_height(ui, photo, state, ctx, tile_width, tile_height, global_index);
                     
                     // Auto-scroll to selected photo when selection changes
                     if is_selected && selection_changed {
                         ui.scroll_to_cursor(Some(egui::Align::Center));
                     }
+                    global_index += 1;
                 }
             });
         }
     }
 
-    /// Show a single photo tile with variable height
     fn show_tile_with_height(
         &mut self,
         ui: &mut Ui,
@@ -154,16 +190,39 @@ impl PhotoGrid {
         _ctx: &egui::Context,  // Kept for API compatibility
         tile_width: f32,
         tile_height: f32,
+        index: usize,
     ) {
         let tile_size = Vec2::new(tile_width, tile_height);
 
         let (rect, response) = ui.allocate_exact_size(tile_size, Sense::click());
 
-        // Handle click - select in Library (does NOT affect Develop)
+        // Handle right-click - open context menu
+        if response.secondary_clicked() {
+            // If right-clicking on a non-selected photo, select it first
+            if !state.is_photo_selected(&photo.id) {
+                state.single_select(&photo.id, index);
+            }
+            self.context_menu.check_open(&response);
+        }
+
+        // Handle left click with modifier keys for multi-selection
         if response.clicked() {
-            state.library_selected_photo_id = Some(photo.id.clone());
+            let modifiers = ui.input(|i| i.modifiers);
             
-            // Populate metadata for detail view
+            if modifiers.command {
+                // Cmd+click: toggle individual selection
+                state.toggle_selection(&photo.id);
+                state.last_clicked_index = Some(index);
+            } else if modifiers.shift {
+                // Shift+click: range selection
+                state.select_range(index);
+            } else {
+                // Regular click: single select
+                state.single_select(&photo.id, index);
+            }
+            
+            // Populate metadata for detail view (for the primary selection)
+            state.library_selected_photo_id = Some(photo.id.clone());
             state.detail_metadata = Some(crate::state::DetailMetadata {
                 id: photo.id.clone(),
                 name: photo.name.clone(),
@@ -173,25 +232,14 @@ impl PhotoGrid {
                 rating: photo.rating,
                 color_label: photo.color_label.clone(),
             });
-            
-            // Update active edit values from photo
-            state.active_exposure = photo.edit_exposure.unwrap_or(0.0);
-            state.active_contrast = photo.edit_contrast.unwrap_or(1.0);
-            state.active_temperature = photo.edit_temperature.unwrap_or(0.0);
-            state.active_tint = photo.edit_tint.unwrap_or(0.0);
-            state.active_highlights = photo.edit_highlights.unwrap_or(0.0);
-            state.active_shadows = photo.edit_shadows.unwrap_or(0.0);
-            state.active_whites = photo.edit_whites.unwrap_or(0.0);
-            state.active_blacks = photo.edit_blacks.unwrap_or(0.0);
-            state.active_clarity = photo.edit_clarity.unwrap_or(0.0);
-            state.active_vibrance = photo.edit_vibrance.unwrap_or(0.0);
-            state.active_saturation = photo.edit_saturation.unwrap_or(0.0);
-            
-            // Note: Full image loading happens in Develop view, not here
-            // This keeps Library view fast and responsive
         }
-        // Background - highlight selected photo (Library selection)
-        let is_selected = state.library_selected_photo_id.as_ref() == Some(&photo.id);
+        
+        // Check if photo is in multi-selection OR is the primary selection
+        let is_multi_selected = state.is_photo_selected(&photo.id);
+        let is_primary_selected = state.library_selected_photo_id.as_ref() == Some(&photo.id);
+        let is_selected = is_multi_selected || is_primary_selected;
+        
+        // Background - highlight selected photo
         let bg_color = if is_selected {
             Theme::BG_ACTIVE
         } else if response.hovered() {
@@ -299,11 +347,19 @@ impl PhotoGrid {
         }
 
         // Selection border - show for selected OR hovered
-        if is_selected {
+        // Different border for multi-selection vs primary selection
+        if is_primary_selected {
             ui.painter().rect_stroke(
                 rect,
                 Theme::RADIUS_MD,
                 egui::Stroke::new(3.0, egui::Color32::WHITE),
+                egui::StrokeKind::Outside,
+            );
+        } else if is_multi_selected {
+            ui.painter().rect_stroke(
+                rect,
+                Theme::RADIUS_MD,
+                egui::Stroke::new(2.0, Theme::ACCENT_PRIMARY),
                 egui::StrokeKind::Outside,
             );
         } else if response.hovered() {
@@ -312,6 +368,19 @@ impl PhotoGrid {
                 Theme::RADIUS_MD,
                 egui::Stroke::new(2.0, Theme::ACCENT_PRIMARY),
                 egui::StrokeKind::Outside,
+            );
+        }
+        
+        // Show checkmark for multi-selected items
+        if is_multi_selected && state.selection_count() > 1 {
+            let check_pos = rect.min + Vec2::new(8.0, 8.0);
+            ui.painter().circle_filled(check_pos, 10.0, Theme::ACCENT_PRIMARY);
+            ui.painter().text(
+                check_pos,
+                egui::Align2::CENTER_CENTER,
+                "✓",
+                egui::FontId::proportional(12.0),
+                egui::Color32::WHITE,
             );
         }
     }

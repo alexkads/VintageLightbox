@@ -5,6 +5,7 @@
 
 use adapters::view_models::PhotoViewModel;
 use image::DynamicImage;
+use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
 /// Snapshot of editing state for undo/redo
@@ -59,6 +60,12 @@ pub struct AppState {
     pub develop_selected_photo_id: Option<String>,
     /// ID of the photo currently loaded in detail_image (for change detection)
     pub loaded_photo_id: Option<String>,
+    /// Multi-selection: set of selected photo IDs
+    pub selected_photo_ids: HashSet<String>,
+    /// Last clicked photo index for Shift+click range selection
+    pub last_clicked_index: Option<usize>,
+    /// Whether to show delete confirmation dialog
+    pub show_delete_confirmation: bool,
 
     // ============================================
     // Detail View
@@ -205,6 +212,9 @@ impl AppState {
             library_selected_photo_id: None,
             develop_selected_photo_id: None,
             loaded_photo_id: None,
+            selected_photo_ids: HashSet::new(),
+            last_clicked_index: None,
+            show_delete_confirmation: false,
             detail_image: None,
             thumbnail_preview: None,
             detail_metadata: None,
@@ -431,6 +441,67 @@ impl AppState {
             }
         }
         false
+    }
+
+    // ============================================
+    // Multi-Selection Methods
+    // ============================================
+    
+    /// Select all photos (Cmd+A)
+    pub fn select_all(&mut self) {
+        self.selected_photo_ids = self.photos.iter().map(|p| p.id.clone()).collect();
+    }
+    
+    /// Clear all selections (Escape)
+    pub fn clear_selection(&mut self) {
+        self.selected_photo_ids.clear();
+        self.last_clicked_index = None;
+    }
+    
+    /// Toggle selection of a single photo (Cmd+click)
+    pub fn toggle_selection(&mut self, photo_id: &str) {
+        if self.selected_photo_ids.contains(photo_id) {
+            self.selected_photo_ids.remove(photo_id);
+        } else {
+            self.selected_photo_ids.insert(photo_id.to_string());
+        }
+    }
+    
+    /// Select range from last clicked to current (Shift+click)
+    pub fn select_range(&mut self, current_index: usize) {
+        if let Some(last_index) = self.last_clicked_index {
+            let start = last_index.min(current_index);
+            let end = last_index.max(current_index);
+            
+            for i in start..=end {
+                if let Some(photo) = self.photos.get(i) {
+                    self.selected_photo_ids.insert(photo.id.clone());
+                }
+            }
+        } else {
+            // No previous click, just select this one
+            if let Some(photo) = self.photos.get(current_index) {
+                self.selected_photo_ids.insert(photo.id.clone());
+            }
+        }
+    }
+    
+    /// Single select (regular click)
+    pub fn single_select(&mut self, photo_id: &str, index: usize) {
+        self.selected_photo_ids.clear();
+        self.selected_photo_ids.insert(photo_id.to_string());
+        self.last_clicked_index = Some(index);
+        self.library_selected_photo_id = Some(photo_id.to_string());
+    }
+    
+    /// Check if a photo is selected
+    pub fn is_photo_selected(&self, photo_id: &str) -> bool {
+        self.selected_photo_ids.contains(photo_id)
+    }
+    
+    /// Get count of selected photos
+    pub fn selection_count(&self) -> usize {
+        self.selected_photo_ids.len()
     }
 }
 

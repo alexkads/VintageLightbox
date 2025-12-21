@@ -525,6 +525,100 @@ impl eframe::App for VintageLightboxApp {
             }
         }
 
+        // ============================================
+        // KEYBOARD SHORTCUTS (Library View)
+        // ============================================
+        if self.state.current_view == crate::state::CurrentView::Library {
+            ctx.input(|i| {
+                // Cmd+A: Select all
+                if i.modifiers.command && i.key_pressed(egui::Key::A) {
+                    self.state.select_all();
+                }
+                
+                // Cmd+D: Deselect all
+                if i.modifiers.command && i.key_pressed(egui::Key::D) {
+                    self.state.clear_selection();
+                }
+                
+                // Escape: Clear selection
+                if i.key_pressed(egui::Key::Escape) {
+                    self.state.clear_selection();
+                }
+                
+                // Delete or Backspace: Show delete confirmation
+                if i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace) {
+                    if !self.state.selected_photo_ids.is_empty() {
+                        self.state.show_delete_confirmation = true;
+                    }
+                }
+            });
+        }
+
+        // ============================================
+        // DELETE CONFIRMATION DIALOG
+        // ============================================
+        if self.state.show_delete_confirmation {
+            let count = self.state.selection_count();
+            egui::Window::new("Delete Photos")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(ctx, |ui| {
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(10.0);
+                        ui.label(egui::RichText::new("⚠️").size(32.0));
+                        ui.add_space(10.0);
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "Are you sure you want to delete {} photo{}?",
+                                count,
+                                if count == 1 { "" } else { "s" }
+                            ))
+                            .size(16.0)
+                        );
+                        ui.add_space(15.0);
+                        
+                        ui.horizontal(|ui| {
+                            if ui.button("Cancel").clicked() {
+                                self.state.show_delete_confirmation = false;
+                            }
+                            ui.add_space(20.0);
+                            if ui.button(egui::RichText::new("Delete").color(egui::Color32::from_rgb(255, 100, 100))).clicked() {
+                                // Perform deletion
+                                let ids_to_delete: Vec<String> = self.state.selected_photo_ids.iter().cloned().collect();
+                                let photo_controller = self.photo_controller.clone();
+                                let library_controller = self.library_controller.clone();
+                                let photo_sender = self.photo_sender.clone();
+                                let ctx_clone = ctx.clone();
+                                
+                                tokio::spawn(async move {
+                                    for id in &ids_to_delete {
+                                        if let Err(e) = photo_controller.delete_photo(id).await {
+                                            eprintln!("Failed to delete photo {}: {}", id, e);
+                                        }
+                                    }
+                                    // Reload photos list
+                                    match library_controller.get_all_photos().await {
+                                        Ok(photos) => {
+                                            let _ = photo_sender.send(Ok(photos)).await;
+                                        }
+                                        Err(e) => {
+                                            eprintln!("Failed to reload photos: {}", e);
+                                        }
+                                    }
+                                    ctx_clone.request_repaint();
+                                });
+                                
+                                self.state.clear_selection();
+                                self.state.library_selected_photo_id = None;
+                                self.state.show_delete_confirmation = false;
+                            }
+                        });
+                        ui.add_space(10.0);
+                    });
+                });
+        }
+
         // Top toolbar
         egui::TopBottomPanel::top("toolbar")
             .exact_height(Theme::TOOLBAR_HEIGHT)

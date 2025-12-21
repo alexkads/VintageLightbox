@@ -36,7 +36,7 @@ impl DevelopView {
                 let photos = state.photos.clone();
                 let selected_id = state.develop_selected_photo_id.clone();
                 
-                self.filmstrip.show(
+                self.filmstrip.show_develop(
                     ui,
                     ctx,
                     &photos,
