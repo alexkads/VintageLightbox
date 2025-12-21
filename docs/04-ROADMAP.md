@@ -26,6 +26,9 @@ Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Ar
 - ✅ **MVP 100% FUNCIONAL (20/dez/2025)** 🚀
   - **Preview em Tempo Real**: Sliders de exposure/contrast atualizam imagem instantaneamente
   - **Auto-refresh da Biblioteca**: Biblioteca atualiza automaticamente após import
+    - **Fix Critical**: Canal aumentado para capacidade 10 (evita bloqueio)
+    - **Fix Critical**: Reload sempre executado (mesmo com cancelamento/erro)
+    - **Debug Logs**: Adicionados logs para diagnóstico de problemas
   - **Navegação entre Fotos**: Setas funcionando no develop view
   - **Import Múltiplo**: Seleção e importação de múltiplas fotos simultaneamente
   - **Color Labels na Grid**: Rótulos de cor visíveis no photo grid
@@ -313,7 +316,10 @@ Criar versão mínima funcional com importação, visualização, edição bási
 - [x] **Navegação entre fotos com setas** (‹ › buttons)
 - [x] **Filtros por rating e color label**
 - [x] **Import múltiplo de fotos**
-- [x] **Auto-refresh após import**
+- [x] **Auto-refresh após import** (with critical fixes)
+  - Canal com capacidade 10 (crates/ui/src/app.rs:63)
+  - Reload incondicional ao final do import (app.rs:311-343)
+  - Logs de debug para monitoramento (app.rs:104, 324)
 
 **Critério de Aceitação**: Navegar 1000 fotos sem lag ✅
 
