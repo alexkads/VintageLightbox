@@ -11,10 +11,27 @@ impl EditorController {
         Self { save_photo_edits_use_case }
     }
 
-    pub async fn save_edits(&self, id: String, exposure: f32, contrast: f32) -> Result<(), String> {
+    pub async fn save_edits(
+        &self,
+        id: String,
+        exposure: f32,
+        contrast: f32,
+        temperature: f32,
+        tint: f32,
+        highlights: f32,
+        shadows: f32,
+        whites: f32,
+        blacks: f32,
+        clarity: f32,
+        vibrance: f32,
+        saturation: f32,
+    ) -> Result<(), String> {
         let photo_id = PhotoId::from_string(&id).map_err(|e| e.to_string())?;
-        
-        self.save_photo_edits_use_case.execute(photo_id, exposure, contrast).await
+
+        self.save_photo_edits_use_case.execute(
+            photo_id, exposure, contrast, temperature, tint, highlights, shadows,
+            whites, blacks, clarity, vibrance, saturation
+        ).await
             .map_err(|e| e.to_string())
     }
 }

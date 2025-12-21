@@ -36,6 +36,24 @@ pub struct Photo {
     edit_exposure: Option<f32>,
     /// Ajuste de contraste (persistence)
     edit_contrast: Option<f32>,
+    /// Ajuste de temperatura (white balance warm/cool)
+    edit_temperature: Option<f32>,
+    /// Ajuste de tint (green/magenta)
+    edit_tint: Option<f32>,
+    /// Ajuste de highlights (bright areas)
+    edit_highlights: Option<f32>,
+    /// Ajuste de shadows (dark areas)
+    edit_shadows: Option<f32>,
+    /// Ajuste de whites (brightest whites)
+    edit_whites: Option<f32>,
+    /// Ajuste de blacks (darkest blacks)
+    edit_blacks: Option<f32>,
+    /// Ajuste de clarity (local contrast/sharpness)
+    edit_clarity: Option<f32>,
+    /// Ajuste de vibrance (intelligent saturation)
+    edit_vibrance: Option<f32>,
+    /// Ajuste de saturation (overall color intensity)
+    edit_saturation: Option<f32>,
 }
 
 impl Photo {
@@ -57,6 +75,15 @@ impl Photo {
         thumbnail_path: Option<FilePath>,
         edit_exposure: Option<f32>,
         edit_contrast: Option<f32>,
+        edit_temperature: Option<f32>,
+        edit_tint: Option<f32>,
+        edit_highlights: Option<f32>,
+        edit_shadows: Option<f32>,
+        edit_whites: Option<f32>,
+        edit_blacks: Option<f32>,
+        edit_clarity: Option<f32>,
+        edit_vibrance: Option<f32>,
+        edit_saturation: Option<f32>,
     ) -> Self {
         Self {
             id,
@@ -70,6 +97,15 @@ impl Photo {
             thumbnail_path,
             edit_exposure,
             edit_contrast,
+            edit_temperature,
+            edit_tint,
+            edit_highlights,
+            edit_shadows,
+            edit_whites,
+            edit_blacks,
+            edit_clarity,
+            edit_vibrance,
+            edit_saturation,
         }
     }
 
@@ -77,7 +113,8 @@ impl Photo {
     pub fn with_id(id: PhotoId, file_path: FilePath) -> Self {
         let now = Utc::now();
         Self::reconstruct(
-            id, file_path, now, now, None, None, None, false, None, None, None
+            id, file_path, now, now, None, None, None, false, None,
+            None, None, None, None, None, None, None, None, None, None, None
         )
     }
 
@@ -211,10 +248,77 @@ impl Photo {
         self.edit_contrast
     }
 
+    /// Retorna o campo edit_temperature
+    pub fn edit_temperature(&self) -> Option<f32> {
+        self.edit_temperature
+    }
+
+    /// Retorna o campo edit_tint
+    pub fn edit_tint(&self) -> Option<f32> {
+        self.edit_tint
+    }
+
+    /// Retorna o campo edit_highlights
+    pub fn edit_highlights(&self) -> Option<f32> {
+        self.edit_highlights
+    }
+
+    /// Retorna o campo edit_shadows
+    pub fn edit_shadows(&self) -> Option<f32> {
+        self.edit_shadows
+    }
+
+    /// Retorna o campo edit_whites
+    pub fn edit_whites(&self) -> Option<f32> {
+        self.edit_whites
+    }
+
+    /// Retorna o campo edit_blacks
+    pub fn edit_blacks(&self) -> Option<f32> {
+        self.edit_blacks
+    }
+
+    /// Retorna o campo edit_clarity
+    pub fn edit_clarity(&self) -> Option<f32> {
+        self.edit_clarity
+    }
+
+    /// Retorna o campo edit_vibrance
+    pub fn edit_vibrance(&self) -> Option<f32> {
+        self.edit_vibrance
+    }
+
+    /// Retorna o campo edit_saturation
+    pub fn edit_saturation(&self) -> Option<f32> {
+        self.edit_saturation
+    }
+
     /// Define os ajustes de edição e marca como editada
-    pub fn set_edits(&mut self, exposure: Option<f32>, contrast: Option<f32>) -> DomainResult<()> {
+    pub fn set_edits(
+        &mut self,
+        exposure: Option<f32>,
+        contrast: Option<f32>,
+        temperature: Option<f32>,
+        tint: Option<f32>,
+        highlights: Option<f32>,
+        shadows: Option<f32>,
+        whites: Option<f32>,
+        blacks: Option<f32>,
+        clarity: Option<f32>,
+        vibrance: Option<f32>,
+        saturation: Option<f32>,
+    ) -> DomainResult<()> {
         self.edit_exposure = exposure;
         self.edit_contrast = contrast;
+        self.edit_temperature = temperature;
+        self.edit_tint = tint;
+        self.edit_highlights = highlights;
+        self.edit_shadows = shadows;
+        self.edit_whites = whites;
+        self.edit_blacks = blacks;
+        self.edit_clarity = clarity;
+        self.edit_vibrance = vibrance;
+        self.edit_saturation = saturation;
         self.is_edited = true;
         self.modified_at = Utc::now();
         Ok(())
@@ -410,10 +514,12 @@ mod tests {
         // Usar reconstruct para garantir timestamps idênticos
         // Usar reconstruct para garantir timestamps idênticos
         let photo1 = Photo::reconstruct(
-            id, path.clone(), now, now, None, None, None, false, None, None, None
+            id, path.clone(), now, now, None, None, None, false, None,
+            None, None, None, None, None, None, None, None, None, None, None
         );
         let photo2 = Photo::reconstruct(
-            id, path, now, now, None, None, None, false, None, None, None
+            id, path, now, now, None, None, None, false, None,
+            None, None, None, None, None, None, None, None, None, None, None
         );
 
         // Assert
@@ -429,7 +535,9 @@ mod tests {
         assert!(photo.edit_contrast().is_none());
         assert!(!photo.is_edited());
 
-        photo.set_edits(Some(1.5), Some(1.2)).unwrap();
+        photo.set_edits(
+            Some(1.5), Some(1.2), None, None, None, None, None, None, None, None, None
+        ).unwrap();
 
         assert_eq!(photo.edit_exposure(), Some(1.5));
         assert_eq!(photo.edit_contrast(), Some(1.2));

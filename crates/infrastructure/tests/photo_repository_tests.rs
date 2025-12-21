@@ -239,7 +239,9 @@ async fn test_save_and_find_photo_with_edits() {
     let photo_id = photo.id().clone();
 
     // Set edits
-    photo.set_edits(Some(1.5), Some(0.8)).unwrap();
+    photo.set_edits(
+        Some(1.5), Some(0.8), None, None, None, None, None, None, None, None, None
+    ).unwrap();
 
     // Act - Save
     repo.save(&photo).await.unwrap();
@@ -254,7 +256,9 @@ async fn test_save_and_find_photo_with_edits() {
 
     // Act - Update (modify edits)
     let mut found_mut = found;
-    found_mut.set_edits(Some(-0.5), Some(1.2)).unwrap();
+    found_mut.set_edits(
+        Some(-0.5), Some(1.2), None, None, None, None, None, None, None, None, None
+    ).unwrap();
     repo.update(&found_mut).await.unwrap();
 
     // Verify Update

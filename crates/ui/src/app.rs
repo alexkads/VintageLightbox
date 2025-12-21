@@ -143,16 +143,50 @@ impl eframe::App for VintageLightboxApp {
                         // Load saved edits
                         let exposure = photo.edit_exposure.unwrap_or(0.0);
                         let contrast = photo.edit_contrast.unwrap_or(1.0);
+                        let temperature = photo.edit_temperature.unwrap_or(0.0);
+                        let tint = photo.edit_tint.unwrap_or(0.0);
+                        let highlights = photo.edit_highlights.unwrap_or(0.0);
+                        let shadows = photo.edit_shadows.unwrap_or(0.0);
+                        let whites = photo.edit_whites.unwrap_or(0.0);
+                        let blacks = photo.edit_blacks.unwrap_or(0.0);
+                        let clarity = photo.edit_clarity.unwrap_or(0.0);
+                        let vibrance = photo.edit_vibrance.unwrap_or(0.0);
+                        let saturation = photo.edit_saturation.unwrap_or(0.0);
 
                         // Initialize active values
                         self.state.active_exposure = exposure;
                         self.state.active_contrast = contrast;
+                        self.state.active_temperature = temperature;
+                        self.state.active_tint = tint;
+                        self.state.active_highlights = highlights;
+                        self.state.active_shadows = shadows;
+                        self.state.active_whites = whites;
+                        self.state.active_blacks = blacks;
+                        self.state.active_clarity = clarity;
+                        self.state.active_vibrance = vibrance;
+                        self.state.active_saturation = saturation;
                         self.state.prev_exposure = exposure;
                         self.state.prev_contrast = contrast;
+                        self.state.prev_temperature = temperature;
+                        self.state.prev_tint = tint;
+                        self.state.prev_highlights = highlights;
+                        self.state.prev_shadows = shadows;
+                        self.state.prev_whites = whites;
+                        self.state.prev_blacks = blacks;
+                        self.state.prev_clarity = clarity;
+                        self.state.prev_vibrance = vibrance;
+                        self.state.prev_saturation = saturation;
 
                         // Apply edits if they exist
-                        let processed = if exposure != 0.0 || contrast != 1.0 {
-                            crate::image_processing::ImageProcessor::process_image(&preview_img, exposure, contrast)
+                        let has_edits = exposure != 0.0 || contrast != 1.0 || temperature != 0.0 ||
+                                       tint != 0.0 || highlights != 0.0 || shadows != 0.0 ||
+                                       whites != 0.0 || blacks != 0.0 || clarity != 0.0 ||
+                                       vibrance != 0.0 || saturation != 0.0;
+                        let processed = if has_edits {
+                            crate::image_processing::ImageProcessor::process_image(
+                                &preview_img, exposure, contrast, temperature, tint,
+                                highlights, shadows, whites, blacks, clarity, vibrance, saturation
+                            )
                         } else {
                             preview_img
                         };
@@ -169,19 +203,72 @@ impl eframe::App for VintageLightboxApp {
                     }
                 }
             } else {
-                // Photo is already loaded, check if edits changed (real-time preview)
+                // Photo is already loaded, check if edits changed OR show_before toggled
                 let edits_changed =
                     self.state.active_exposure != self.state.prev_exposure ||
-                    self.state.active_contrast != self.state.prev_contrast;
+                    self.state.active_contrast != self.state.prev_contrast ||
+                    self.state.active_temperature != self.state.prev_temperature ||
+                    self.state.active_tint != self.state.prev_tint ||
+                    self.state.active_highlights != self.state.prev_highlights ||
+                    self.state.active_shadows != self.state.prev_shadows ||
+                    self.state.active_whites != self.state.prev_whites ||
+                    self.state.active_blacks != self.state.prev_blacks ||
+                    self.state.active_clarity != self.state.prev_clarity ||
+                    self.state.active_vibrance != self.state.prev_vibrance ||
+                    self.state.active_saturation != self.state.prev_saturation;
+                let before_toggled = self.state.show_before != self.state.prev_show_before;
 
-                if edits_changed {
-                    // Reprocess image with new edit values
+                if edits_changed || before_toggled {
+                    // If edits changed (not just before/after toggle), save to history
+                    if edits_changed && !self.state.show_before {
+                        // Check if this is actually a new state (not just reprocessing)
+                        let should_save = if let Some(index) = self.state.history_index {
+                            if let Some(last_snapshot) = self.state.edit_history.get(index) {
+                                last_snapshot.exposure != self.state.active_exposure ||
+                                last_snapshot.contrast != self.state.active_contrast ||
+                                last_snapshot.temperature != self.state.active_temperature ||
+                                last_snapshot.tint != self.state.active_tint ||
+                                last_snapshot.highlights != self.state.active_highlights ||
+                                last_snapshot.shadows != self.state.active_shadows ||
+                                last_snapshot.whites != self.state.active_whites ||
+                                last_snapshot.blacks != self.state.active_blacks ||
+                                last_snapshot.clarity != self.state.active_clarity ||
+                                last_snapshot.vibrance != self.state.active_vibrance ||
+                                last_snapshot.saturation != self.state.active_saturation
+                            } else {
+                                true
+                            }
+                        } else {
+                            true // No history yet
+                        };
+
+                        if should_save {
+                            self.state.push_edit_snapshot();
+                        }
+                    }
+
+                    // Reprocess image
                     if let Some(original) = &self.state.original_preview {
-                        let processed = crate::image_processing::ImageProcessor::process_image(
-                            original,
-                            self.state.active_exposure,
-                            self.state.active_contrast
-                        );
+                        // If showing "before", use original without edits
+                        // Otherwise, apply current edits
+                        let processed = if self.state.show_before {
+                            original.clone()
+                        } else {
+                            crate::image_processing::ImageProcessor::process_image(
+                                original,
+                                self.state.active_exposure,
+                                self.state.active_contrast,
+                                self.state.active_temperature,
+                                self.state.active_tint,
+                                self.state.active_highlights,
+                                self.state.active_shadows,
+                                self.state.active_whites,
+                                self.state.active_blacks,
+                                self.state.active_clarity,
+                                self.state.active_vibrance,
+                                self.state.active_saturation,
+                            )
+                        };
 
                         // Update texture
                         let texture = crate::image_processing::ImageProcessor::load_texture(
@@ -192,9 +279,23 @@ impl eframe::App for VintageLightboxApp {
 
                         self.state.detail_image = Some(texture);
 
-                        // Update previous values
-                        self.state.prev_exposure = self.state.active_exposure;
-                        self.state.prev_contrast = self.state.active_contrast;
+                        // Update previous values only if not in before mode
+                        if !self.state.show_before {
+                            self.state.prev_exposure = self.state.active_exposure;
+                            self.state.prev_contrast = self.state.active_contrast;
+                            self.state.prev_temperature = self.state.active_temperature;
+                            self.state.prev_tint = self.state.active_tint;
+                            self.state.prev_highlights = self.state.active_highlights;
+                            self.state.prev_shadows = self.state.active_shadows;
+                            self.state.prev_whites = self.state.active_whites;
+                            self.state.prev_blacks = self.state.active_blacks;
+                            self.state.prev_clarity = self.state.active_clarity;
+                            self.state.prev_vibrance = self.state.active_vibrance;
+                            self.state.prev_saturation = self.state.active_saturation;
+                        }
+
+                        // Always update prev_show_before
+                        self.state.prev_show_before = self.state.show_before;
                     }
                 }
             }

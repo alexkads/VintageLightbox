@@ -13,4 +13,13 @@ pub struct PhotoViewModel {
     pub color_label: Option<String>,
     pub edit_exposure: Option<f32>,
     pub edit_contrast: Option<f32>,
+    pub edit_temperature: Option<f32>,
+    pub edit_tint: Option<f32>,
+    pub edit_highlights: Option<f32>,
+    pub edit_shadows: Option<f32>,
+    pub edit_whites: Option<f32>,
+    pub edit_blacks: Option<f32>,
+    pub edit_clarity: Option<f32>,
+    pub edit_vibrance: Option<f32>,
+    pub edit_saturation: Option<f32>,
 }

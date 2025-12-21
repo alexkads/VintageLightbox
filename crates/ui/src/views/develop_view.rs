@@ -118,6 +118,105 @@ impl DevelopView {
             0.05,
         );
 
+        ui.add_space(Theme::SPACE_SM);
+
+        // Temperature slider
+        SliderControl::show(
+            ui,
+            "Temperature",
+            &mut state.active_temperature,
+            -10.0..=10.0,
+            0.5,
+        );
+
+        ui.add_space(Theme::SPACE_SM);
+
+        // Tint slider
+        SliderControl::show(
+            ui,
+            "Tint",
+            &mut state.active_tint,
+            -10.0..=10.0,
+            0.5,
+        );
+
+        ui.add_space(Theme::SPACE_SM);
+
+        // Highlights slider
+        SliderControl::show(
+            ui,
+            "Highlights",
+            &mut state.active_highlights,
+            -100.0..=100.0,
+            5.0,
+        );
+
+        ui.add_space(Theme::SPACE_SM);
+
+        // Shadows slider
+        SliderControl::show(
+            ui,
+            "Shadows",
+            &mut state.active_shadows,
+            -100.0..=100.0,
+            5.0,
+        );
+
+        ui.add_space(Theme::SPACE_SM);
+
+        // Whites slider
+        SliderControl::show(
+            ui,
+            "Whites",
+            &mut state.active_whites,
+            -100.0..=100.0,
+            5.0,
+        );
+
+        ui.add_space(Theme::SPACE_SM);
+
+        // Blacks slider
+        SliderControl::show(
+            ui,
+            "Blacks",
+            &mut state.active_blacks,
+            -100.0..=100.0,
+            5.0,
+        );
+
+        ui.add_space(Theme::SPACE_SM);
+
+        // Clarity slider
+        SliderControl::show(
+            ui,
+            "Clarity",
+            &mut state.active_clarity,
+            -1.0..=1.0,
+            0.05,
+        );
+
+        ui.add_space(Theme::SPACE_SM);
+
+        // Vibrance slider
+        SliderControl::show(
+            ui,
+            "Vibrance",
+            &mut state.active_vibrance,
+            -1.0..=1.0,
+            0.05,
+        );
+
+        ui.add_space(Theme::SPACE_SM);
+
+        // Saturation slider
+        SliderControl::show(
+            ui,
+            "Saturation",
+            &mut state.active_saturation,
+            -1.0..=1.0,
+            0.05,
+        );
+
         ui.add_space(Theme::SPACE_LG);
 
         // Collapsed sections (placeholders)
@@ -134,6 +233,24 @@ impl DevelopView {
 
         ui.add_space(Theme::SPACE_XXL);
 
+        // Reset button
+        if widgets::secondary_button(ui, "Reset").clicked() {
+            // Reset adjustments to default values
+            state.active_exposure = 0.0;
+            state.active_contrast = 1.0;
+            state.active_temperature = 0.0;
+            state.active_tint = 0.0;
+            state.active_highlights = 0.0;
+            state.active_shadows = 0.0;
+            state.active_whites = 0.0;
+            state.active_blacks = 0.0;
+            state.active_clarity = 0.0;
+            state.active_vibrance = 0.0;
+            state.active_saturation = 0.0;
+        }
+
+        ui.add_space(Theme::SPACE_SM);
+
         // Action buttons
         if widgets::primary_button(ui, "Save").clicked() {
             if let Some(metadata) = &state.detail_metadata {
@@ -141,12 +258,24 @@ impl DevelopView {
                 let id = metadata.id.clone();
                 let exposure = state.active_exposure;
                 let contrast = state.active_contrast;
-                
+                let temperature = state.active_temperature;
+                let tint = state.active_tint;
+                let highlights = state.active_highlights;
+                let shadows = state.active_shadows;
+                let whites = state.active_whites;
+                let blacks = state.active_blacks;
+                let clarity = state.active_clarity;
+                let vibrance = state.active_vibrance;
+                let saturation = state.active_saturation;
+
                 state.is_busy = true;
                 state.busy_message = "Saving edits...".to_string();
-                
+
                 tokio::spawn(async move {
-                    if let Err(e) = controller.save_edits(id, exposure, contrast).await {
+                    if let Err(e) = controller.save_edits(
+                        id, exposure, contrast, temperature, tint, highlights, shadows,
+                        whites, blacks, clarity, vibrance, saturation
+                    ).await {
                         eprintln!("Failed to save edits: {}", e);
                     }
                 });

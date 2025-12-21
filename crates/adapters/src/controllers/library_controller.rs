@@ -42,6 +42,15 @@ impl LibraryController {
                         color_label: photo.color_label().map(|c| c.to_string()),
                         edit_exposure: photo.edit_exposure(),
                         edit_contrast: photo.edit_contrast(),
+                        edit_temperature: photo.edit_temperature(),
+                        edit_tint: photo.edit_tint(),
+                        edit_highlights: photo.edit_highlights(),
+                        edit_shadows: photo.edit_shadows(),
+                        edit_whites: photo.edit_whites(),
+                        edit_blacks: photo.edit_blacks(),
+                        edit_clarity: photo.edit_clarity(),
+                        edit_vibrance: photo.edit_vibrance(),
+                        edit_saturation: photo.edit_saturation(),
                     }
                 })
                 .collect();

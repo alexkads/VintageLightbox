@@ -34,6 +34,23 @@ impl KeyboardHandler {
                 return;
             }
 
+            // Backslash - Toggle Before/After view
+            if i.key_pressed(Key::Backslash) {
+                state.show_before = !state.show_before;
+            }
+
+            // Undo/Redo shortcuts (Cmd+Z / Cmd+Shift+Z)
+            let cmd_pressed = i.modifiers.command;
+            let shift_pressed = i.modifiers.shift;
+
+            if cmd_pressed && shift_pressed && i.key_pressed(Key::Z) {
+                // Redo
+                state.redo();
+            } else if cmd_pressed && i.key_pressed(Key::Z) {
+                // Undo
+                state.undo();
+            }
+
             // Navigation shortcuts (Arrow keys)
             if i.key_pressed(Key::ArrowRight) {
                 if let Some(new_id) = state.navigate(1) {

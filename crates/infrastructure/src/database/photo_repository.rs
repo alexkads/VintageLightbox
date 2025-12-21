@@ -49,7 +49,16 @@ impl PhotoRepositoryImpl {
         let thumbnail_path_str: Option<String> = row.try_get("thumbnail_path").ok();
         let edit_exposure: Option<f32> = row.try_get("edit_exposure").ok();
         let edit_contrast: Option<f32> = row.try_get("edit_contrast").ok();
-        
+        let edit_temperature: Option<f32> = row.try_get("edit_temperature").ok();
+        let edit_tint: Option<f32> = row.try_get("edit_tint").ok();
+        let edit_highlights: Option<f32> = row.try_get("edit_highlights").ok();
+        let edit_shadows: Option<f32> = row.try_get("edit_shadows").ok();
+        let edit_whites: Option<f32> = row.try_get("edit_whites").ok();
+        let edit_blacks: Option<f32> = row.try_get("edit_blacks").ok();
+        let edit_clarity: Option<f32> = row.try_get("edit_clarity").ok();
+        let edit_vibrance: Option<f32> = row.try_get("edit_vibrance").ok();
+        let edit_saturation: Option<f32> = row.try_get("edit_saturation").ok();
+
         // Metadata persistido como JSON string
         let metadata_str: Option<String> = row.try_get("metadata").ok();
         let metadata: Option<PhotoMetadata> = match metadata_str {
@@ -84,7 +93,16 @@ impl PhotoRepositoryImpl {
             is_edited,
             thumbnail_path,
             edit_exposure,
-            edit_contrast
+            edit_contrast,
+            edit_temperature,
+            edit_tint,
+            edit_highlights,
+            edit_shadows,
+            edit_whites,
+            edit_blacks,
+            edit_clarity,
+            edit_vibrance,
+            edit_saturation,
         ))
     }
 }
@@ -102,14 +120,23 @@ impl PhotoRepository for PhotoRepositoryImpl {
         let thumbnail_path = photo.thumbnail_path().map(|p| p.to_string_lossy().to_string());
         let edit_exposure = photo.edit_exposure();
         let edit_contrast = photo.edit_contrast();
-        
+        let edit_temperature = photo.edit_temperature();
+        let edit_tint = photo.edit_tint();
+        let edit_highlights = photo.edit_highlights();
+        let edit_shadows = photo.edit_shadows();
+        let edit_whites = photo.edit_whites();
+        let edit_blacks = photo.edit_blacks();
+        let edit_clarity = photo.edit_clarity();
+        let edit_vibrance = photo.edit_vibrance();
+        let edit_saturation = photo.edit_saturation();
+
         // Serializar metadata para JSON
         let metadata = photo.metadata()
             .and_then(|m| serde_json::to_string(m).ok());
 
         sqlx::query(
-            "INSERT INTO photos (id, file_path, rating, color_label, is_edited, imported_at, modified_at, metadata, thumbnail_path, edit_exposure, edit_contrast)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO photos (id, file_path, rating, color_label, is_edited, imported_at, modified_at, metadata, thumbnail_path, edit_exposure, edit_contrast, edit_temperature, edit_tint, edit_highlights, edit_shadows, edit_whites, edit_blacks, edit_clarity, edit_vibrance, edit_saturation)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         .bind(&id)
         .bind(&file_path)
@@ -122,6 +149,15 @@ impl PhotoRepository for PhotoRepositoryImpl {
         .bind(thumbnail_path)
         .bind(edit_exposure)
         .bind(edit_contrast)
+        .bind(edit_temperature)
+        .bind(edit_tint)
+        .bind(edit_highlights)
+        .bind(edit_shadows)
+        .bind(edit_whites)
+        .bind(edit_blacks)
+        .bind(edit_clarity)
+        .bind(edit_vibrance)
+        .bind(edit_saturation)
         .execute(&self.pool)
         .await
         .map_err(|e| DomainError::InvalidOperation(format!("Failed to save photo: {}", e)))?;
@@ -165,14 +201,23 @@ impl PhotoRepository for PhotoRepositoryImpl {
         let thumbnail_path = photo.thumbnail_path().map(|p| p.to_string_lossy().to_string());
         let edit_exposure = photo.edit_exposure();
         let edit_contrast = photo.edit_contrast();
-        
+        let edit_temperature = photo.edit_temperature();
+        let edit_tint = photo.edit_tint();
+        let edit_highlights = photo.edit_highlights();
+        let edit_shadows = photo.edit_shadows();
+        let edit_whites = photo.edit_whites();
+        let edit_blacks = photo.edit_blacks();
+        let edit_clarity = photo.edit_clarity();
+        let edit_vibrance = photo.edit_vibrance();
+        let edit_saturation = photo.edit_saturation();
+
         // Serializar metadata para JSON
         let metadata = photo.metadata()
             .and_then(|m| serde_json::to_string(m).ok());
 
         let result = sqlx::query(
-            "UPDATE photos 
-             SET file_path = ?, rating = ?, color_label = ?, is_edited = ?, modified_at = ?, metadata = ?, thumbnail_path = ?, edit_exposure = ?, edit_contrast = ?
+            "UPDATE photos
+             SET file_path = ?, rating = ?, color_label = ?, is_edited = ?, modified_at = ?, metadata = ?, thumbnail_path = ?, edit_exposure = ?, edit_contrast = ?, edit_temperature = ?, edit_tint = ?, edit_highlights = ?, edit_shadows = ?, edit_whites = ?, edit_blacks = ?, edit_clarity = ?, edit_vibrance = ?, edit_saturation = ?
              WHERE id = ?"
         )
         .bind(&file_path)
@@ -184,6 +229,15 @@ impl PhotoRepository for PhotoRepositoryImpl {
         .bind(thumbnail_path)
         .bind(edit_exposure)
         .bind(edit_contrast)
+        .bind(edit_temperature)
+        .bind(edit_tint)
+        .bind(edit_highlights)
+        .bind(edit_shadows)
+        .bind(edit_whites)
+        .bind(edit_blacks)
+        .bind(edit_clarity)
+        .bind(edit_vibrance)
+        .bind(edit_saturation)
         .bind(&id)
         .execute(&self.pool)
         .await

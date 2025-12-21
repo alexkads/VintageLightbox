@@ -15,11 +15,29 @@ impl SavePhotoEditsUseCase {
         Self { photo_repository }
     }
 
-    pub async fn execute(&self, id: PhotoId, exposure: f32, contrast: f32) -> DomainResult<()> {
+    pub async fn execute(
+        &self,
+        id: PhotoId,
+        exposure: f32,
+        contrast: f32,
+        temperature: f32,
+        tint: f32,
+        highlights: f32,
+        shadows: f32,
+        whites: f32,
+        blacks: f32,
+        clarity: f32,
+        vibrance: f32,
+        saturation: f32,
+    ) -> DomainResult<()> {
         let mut photo = self.photo_repository.find_by_id(&id).await?
             .ok_or(DomainError::PhotoNotFound)?;
 
-        photo.set_edits(Some(exposure), Some(contrast))?;
+        photo.set_edits(
+            Some(exposure), Some(contrast), Some(temperature), Some(tint),
+            Some(highlights), Some(shadows), Some(whites), Some(blacks),
+            Some(clarity), Some(vibrance), Some(saturation)
+        )?;
         self.photo_repository.update(&photo).await?;
 
         Ok(())
@@ -52,7 +70,7 @@ mod tests {
     #[tokio::test]
     async fn test_save_edits_success() {
         let mut mock_repo = MockPhotoRepository::new();
-        let photo_id = PhotoId::new();
+        let _photo_id = PhotoId::new();
         
         let id = PhotoId::new();
         let path = FilePath::new("/test.jpg").unwrap();
@@ -72,7 +90,9 @@ mod tests {
              .returning(|_| Ok(()));
 
         let use_case = SavePhotoEditsUseCase::new(Arc::new(mock_repo));
-        let result = use_case.execute(id, 1.0, 1.2).await;
+        let result = use_case.execute(
+            id, 1.0, 1.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+        ).await;
 
         assert!(result.is_ok());
     }
@@ -88,7 +108,9 @@ mod tests {
              .returning(|_| Ok(None));
 
         let use_case = SavePhotoEditsUseCase::new(Arc::new(mock_repo));
-        let result = use_case.execute(id, 1.0, 1.0).await;
+        let result = use_case.execute(
+            id, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+        ).await;
 
         match result {
              Err(DomainError::PhotoNotFound) => (),
