@@ -54,6 +54,8 @@ pub struct VintageLightboxApp {
     gpu_edit_processor: crate::gpu_processor::GpuImageProcessor,
     /// Current edit request ID for tracking latest edit
     current_edit_request_id: u64,
+    /// The ID of the photo currently requested for loading (to avoid race conditions)
+    requested_photo_id: Option<String>,
 }
 
 impl VintageLightboxApp {
@@ -88,6 +90,7 @@ impl VintageLightboxApp {
             image_processor: AsyncImageProcessor::new(),
             gpu_edit_processor: crate::gpu_processor::GpuImageProcessor::new(),
             current_edit_request_id: 0,
+            requested_photo_id: None,
         }
     }
 
@@ -165,6 +168,9 @@ impl eframe::App for VintageLightboxApp {
                 self.state.detail_image = Some(texture);
                 self.state.thumbnail_preview = None;  // Clear thumbnail, we have full-res now
                 self.state.loaded_photo_id = Some(result.photo_id);
+                
+                // Force repaint to show the loaded image immediately
+                ctx.request_repaint();
             }
         }
 
@@ -183,6 +189,9 @@ impl eframe::App for VintageLightboxApp {
                     );
                     self.state.performance_metrics.texture_upload_time_ms = Some(upload_start.elapsed().as_secs_f32() * 1000.0);
                     self.state.detail_image = Some(texture);
+                    
+                    // Force repaint to show the edited image immediately
+                    ctx.request_repaint();
                 }
             }
         }
@@ -190,9 +199,13 @@ impl eframe::App for VintageLightboxApp {
         // Request image loading if needed (non-blocking)
         if let Some(photo_id) = &self.state.develop_selected_photo_id.clone() {
             let needs_reload = self.state.loaded_photo_id.as_ref() != Some(photo_id);
-            let is_processing = self.image_processor.processing_photo_id().as_ref() == Some(photo_id);
+            // Check if we already requested this specific photo to avoid loops
+            let already_requested = self.requested_photo_id.as_ref() == Some(photo_id);
 
-            if needs_reload && !is_processing {
+            if needs_reload && !already_requested {
+                // Update requested ID immediately prevents loop
+                self.requested_photo_id = Some(photo_id.clone());
+
                 // Clear previous full-res image (but keep thumbnail for instant preview)
                 self.state.detail_image = None;
                 self.state.original_preview = None;
@@ -422,6 +435,12 @@ impl eframe::App for VintageLightboxApp {
 
         // Performance Debug Overlay
         self.show_debug_overlay(ctx);
+
+        // Keep UI active if we are waiting for background tasks
+        // This prevents the UI from sleeping (gray screen) while image loads
+        if self.image_processor.is_processing() || self.requested_photo_id.is_some() {
+            ctx.request_repaint();
+        }
     }
 }
 
