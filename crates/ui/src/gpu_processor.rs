@@ -5,6 +5,8 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use parking_lot::Mutex;
 use image::DynamicImage;
+use lru::LruCache;
+use std::num::NonZeroUsize;
 
 /// Parameters for image adjustments (must match WGSL struct layout)
 #[repr(C)]
@@ -59,8 +61,6 @@ pub struct GpuProcessResult {
 }
 
 struct GpuResources {
-    width: u32,
-    height: u32,
     input_texture: wgpu::Texture,
     output_texture: wgpu::Texture,
     params_buffer: wgpu::Buffer,
@@ -164,7 +164,11 @@ impl GpuImageProcessor {
 
         println!("GPU: Initialized successfully with {}", adapter.get_info().name);
 
-        let mut resources: Option<GpuResources> = None;
+
+
+        // LRU Cache for GPU resources (textures, buffers, etc.)
+        // Cache up to 5 different image sizes/resolutions to avoid recreation when switching photos
+        let mut resources_cache: LruCache<(u32, u32), GpuResources> = LruCache::new(NonZeroUsize::new(5).unwrap());
 
         // Process requests
         while let Ok(request) = receiver.recv() {
@@ -180,7 +184,7 @@ impl GpuImageProcessor {
                 &queue,
                 &pipeline,
                 &request,
-                &mut resources,
+                &mut resources_cache,
             ) {
                 let _ = sender.send(GpuProcessResult {
                     request_id: request.request_id,
@@ -196,25 +200,20 @@ impl GpuImageProcessor {
         queue: &wgpu::Queue,
         pipeline: &wgpu::ComputePipeline,
         request: &GpuProcessRequest,
-        resources_cache: &mut Option<GpuResources>,
+        resources_cache: &mut LruCache<(u32, u32), GpuResources>,
     ) -> Option<DynamicImage> {
         let width = request.width;
         let height = request.height;
         
-        // Re-create resources if dimensions changed or first run
-        let needs_recreation = match resources_cache {
-            Some(res) => res.width != width || res.height != height,
-            None => true,
-        };
-
-        if needs_recreation {
-           // WGPU requires bytes_per_row to be aligned to 256 bytes
+        // Check if we have resources for this size
+        if !resources_cache.contains(&(width, height)) {
+             // WGPU requires bytes_per_row to be aligned to 256 bytes
             const COPY_BYTES_PER_ROW_ALIGNMENT: u32 = 256;
             let unpadded_bytes_per_row = 4 * width;
             let padded_bytes_per_row = ((unpadded_bytes_per_row + COPY_BYTES_PER_ROW_ALIGNMENT - 1) 
                 / COPY_BYTES_PER_ROW_ALIGNMENT) * COPY_BYTES_PER_ROW_ALIGNMENT;
 
-            println!("GPU Debug: Creating resources for {}x{} (padded row: {})", 
+            println!("GPU CACHE: Creating new resources for {}x{} (padded row: {})", 
                 width, height, padded_bytes_per_row);
 
             // Create input texture
@@ -284,9 +283,7 @@ impl GpuImageProcessor {
                 mapped_at_creation: false,
             });
 
-            *resources_cache = Some(GpuResources {
-                width,
-                height,
+            resources_cache.put((width, height), GpuResources {
                 input_texture,
                 output_texture,
                 params_buffer,
@@ -298,7 +295,8 @@ impl GpuImageProcessor {
             });
         }
 
-        let resources = resources_cache.as_mut().unwrap();
+        // Get resources from cache
+        let resources = resources_cache.get_mut(&(width, height)).unwrap();
 
         // Check if image data needs upload (pointer equality check)
         // If it's a different Arc, or same Arc but we just created resources, we upload.

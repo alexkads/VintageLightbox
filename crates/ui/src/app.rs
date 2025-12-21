@@ -145,15 +145,11 @@ impl eframe::App for VintageLightboxApp {
                 self.state.original_preview = Some(result.original_preview);
                 self.state.histogram_data = Some(result.histogram);
                 
-                // Create texture with unique name (timestamp prevents cache conflicts)
-                let timestamp = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_millis())
-                    .unwrap_or(0);
-                    
+                // Create texture with consistent name to allow update-in-place
+                // This prevents texture thrashing and flickering
                 let texture = crate::image_processing::ImageProcessor::load_texture(
                     ctx,
-                    format!("detail_{}_{}", result.photo_id, timestamp),
+                    format!("display_{}", result.photo_id),
                     &result.preview
                 );
                 
@@ -170,7 +166,7 @@ impl eframe::App for VintageLightboxApp {
                 if let Some(photo_id) = &self.state.develop_selected_photo_id.clone() {
                     let texture = crate::image_processing::ImageProcessor::load_texture(
                         ctx,
-                        format!("gpu_edit_{}_req{}", photo_id, result.request_id),
+                        format!("display_{}", photo_id),
                         &result.processed_image
                     );
                     self.state.detail_image = Some(texture);
@@ -197,7 +193,7 @@ impl eframe::App for VintageLightboxApp {
                         if let Ok(thumb_img) = image::open(thumb_path) {
                             let thumb_texture = crate::image_processing::ImageProcessor::load_texture(
                                 ctx,
-                                format!("thumb_preview_{}", photo_id),
+                                format!("thumb_{}", photo_id),
                                 &thumb_img
                             );
                             self.state.thumbnail_preview = Some(thumb_texture);
@@ -312,7 +308,7 @@ impl eframe::App for VintageLightboxApp {
                             // Show original immediately (no processing needed)
                             let texture = crate::image_processing::ImageProcessor::load_texture(
                                 ctx,
-                                format!("photo_{}", photo_id),
+                                format!("display_{}", photo_id),
                                 original
                             );
                             self.state.detail_image = Some(texture);
