@@ -13,12 +13,15 @@ use adapters::view_models::PhotoViewModel;
 pub struct PhotoGrid {
     /// Cache of loaded thumbnail textures
     thumbnail_cache: HashMap<String, egui::TextureHandle>,
+    /// Track last selected photo to detect selection changes
+    last_selected_id: Option<String>,
 }
 
 impl PhotoGrid {
     pub fn new() -> Self {
         Self {
             thumbnail_cache: HashMap::new(),
+            last_selected_id: None,
         }
     }
 
@@ -37,10 +40,14 @@ impl PhotoGrid {
             return;
         }
 
+        // Check if selection changed (e.g., from filmstrip)
+        let selection_changed = state.selected_photo_id != self.last_selected_id;
+        self.last_selected_id = state.selected_photo_id.clone();
+
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                self.show_grid(ui, state, ctx, &filtered_photos);
+                self.show_grid(ui, state, ctx, &filtered_photos, selection_changed);
             });
     }
 
@@ -51,6 +58,7 @@ impl PhotoGrid {
         state: &mut AppState,
         ctx: &egui::Context,
         photos: &[PhotoViewModel],
+        selection_changed: bool,
     ) {
         let columns = state.grid_columns.max(1).min(5); // Clamp to 1-5
         let spacing = Theme::SPACE_SM;
@@ -79,7 +87,16 @@ impl PhotoGrid {
                 ui.spacing_mut().item_spacing.x = spacing;
 
                 for photo in chunk {
+                    // Check if this is the selected photo
+                    let is_selected = state.selected_photo_id.as_ref() == Some(&photo.id);
+                    
+                    // Show the tile
                     self.show_tile_with_height(ui, photo, state, ctx, tile_width, tile_height);
+                    
+                    // Auto-scroll to selected photo when selection changes
+                    if is_selected && selection_changed {
+                        ui.scroll_to_cursor(Some(egui::Align::Center));
+                    }
                 }
             });
         }
@@ -99,7 +116,7 @@ impl PhotoGrid {
 
         let (rect, response) = ui.allocate_exact_size(tile_size, Sense::click());
 
-        // Handle click
+        // Handle click - only select, don't load full image
         if response.clicked() {
             state.selected_photo_id = Some(photo.id.clone());
             
@@ -114,32 +131,27 @@ impl PhotoGrid {
                 color_label: photo.color_label.clone(),
             });
             
-            // Load full image asynchronously
-            let photo_path = photo.path.clone();
-            let _photo_id = photo.id.clone();
-            let ctx_clone = ctx.clone();
-            let exposure = photo.edit_exposure.unwrap_or(0.0);
-            let contrast = photo.edit_contrast.unwrap_or(1.0);
+            // Update active edit values from photo
+            state.active_exposure = photo.edit_exposure.unwrap_or(0.0);
+            state.active_contrast = photo.edit_contrast.unwrap_or(1.0);
+            state.active_temperature = photo.edit_temperature.unwrap_or(0.0);
+            state.active_tint = photo.edit_tint.unwrap_or(0.0);
+            state.active_highlights = photo.edit_highlights.unwrap_or(0.0);
+            state.active_shadows = photo.edit_shadows.unwrap_or(0.0);
+            state.active_whites = photo.edit_whites.unwrap_or(0.0);
+            state.active_blacks = photo.edit_blacks.unwrap_or(0.0);
+            state.active_clarity = photo.edit_clarity.unwrap_or(0.0);
+            state.active_vibrance = photo.edit_vibrance.unwrap_or(0.0);
+            state.active_saturation = photo.edit_saturation.unwrap_or(0.0);
             
-            // Update active edit values
-            state.active_exposure = exposure;
-            state.active_contrast = contrast;
-            
-            tokio::spawn(async move {
-                // Load image from disk
-                if let Ok(_img) = image::open(&photo_path) {
-                    // Store in active_image for processing
-                    // Note: Texture creation must happen on main thread
-                    // We'll trigger a repaint and the texture will be created in the next frame
-                    ctx_clone.request_repaint();
-                }
-            });
-            
-            // Stay in Library view - user must explicitly switch to Develop
+            // Note: Full image loading happens in Develop view, not here
+            // This keeps Library view fast and responsive
         }
-
-        // Background
-        let bg_color = if response.hovered() {
+        // Background - highlight selected photo
+        let is_selected = state.selected_photo_id.as_ref() == Some(&photo.id);
+        let bg_color = if is_selected {
+            Theme::BG_ACTIVE
+        } else if response.hovered() {
             Theme::BG_HOVER
         } else {
             Theme::BG_SURFACE
@@ -244,8 +256,15 @@ impl PhotoGrid {
             }
         }
 
-        // Selection border
-        if response.hovered() {
+        // Selection border - show for selected OR hovered
+        if is_selected {
+            ui.painter().rect_stroke(
+                rect,
+                Theme::RADIUS_MD,
+                egui::Stroke::new(3.0, egui::Color32::WHITE),
+                egui::StrokeKind::Outside,
+            );
+        } else if response.hovered() {
             ui.painter().rect_stroke(
                 rect,
                 Theme::RADIUS_MD,
