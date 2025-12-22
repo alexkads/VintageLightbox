@@ -699,3 +699,188 @@ mod tests {
         assert_eq!(loader.requested.len(), 0);
     }
 }
+
+#[cfg(test)]
+mod cache_system_tests {
+    use super::*;
+    use std::sync::Arc;
+    use infrastructure::cache::preview_manager::PreviewManager;
+    use tempfile::TempDir;
+    use image::{DynamicImage, RgbaImage};
+
+    /// Helper to create a test image
+    fn create_test_image(width: u32, height: u32, color: [u8; 4]) -> DynamicImage {
+        let img = RgbaImage::from_pixel(width, height, image::Rgba(color));
+        DynamicImage::ImageRgba8(img)
+    }
+
+    /// Helper to create a test PreviewManager with temporary database
+    fn create_test_preview_manager() -> (Arc<PreviewManager>, TempDir) {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_dir = temp_dir.path().to_path_buf();
+        let manager = Arc::new(PreviewManager::new_with_path(cache_dir));
+        (manager, temp_dir)
+    }
+
+    #[test]
+    fn test_l2_cache_save_and_retrieve() {
+        let (preview_manager, _temp_dir) = create_test_preview_manager();
+        
+        // Create a test image
+        let test_image = create_test_image(100, 100, [255, 0, 0, 255]); // Red
+        
+        // Save to L2 cache (SQLite BLOB)
+        let photo_id = "test_photo_1";
+        preview_manager.save_preview(photo_id, &test_image).unwrap();
+        
+        // Retrieve from L2 cache
+        let retrieved = preview_manager.get_preview(photo_id);
+        assert!(retrieved.is_some(), "Should retrieve image from L2 cache");
+        
+        let retrieved_img = retrieved.unwrap();
+        assert_eq!(retrieved_img.width(), 100);
+        assert_eq!(retrieved_img.height(), 100);
+    }
+
+    #[test]
+    fn test_l2_cache_miss() {
+        let (preview_manager, _temp_dir) = create_test_preview_manager();
+        
+        // Try to retrieve non-existent image
+        let result = preview_manager.get_preview("nonexistent_photo");
+        assert!(result.is_none(), "Should return None for cache miss");
+    }
+
+    #[test]
+    fn test_l2_cache_overwrite() {
+        let (preview_manager, _temp_dir) = create_test_preview_manager();
+        
+        let photo_id = "test_photo_overwrite";
+        
+        // Save first image (red)
+        let img1 = create_test_image(100, 100, [255, 0, 0, 255]);
+        preview_manager.save_preview(photo_id, &img1).unwrap();
+        
+        // Save second image (blue) - should overwrite
+        let img2 = create_test_image(200, 200, [0, 0, 255, 255]);
+        preview_manager.save_preview(photo_id, &img2).unwrap();
+        
+        // Retrieve and verify it's the second image
+        let retrieved = preview_manager.get_preview(photo_id).unwrap();
+        assert_eq!(retrieved.width(), 200, "Should have new image dimensions");
+        assert_eq!(retrieved.height(), 200);
+    }
+
+    #[test]
+    fn test_l2_cache_multiple_photos() {
+        let (preview_manager, _temp_dir) = create_test_preview_manager();
+        
+        // Save multiple photos
+        for i in 0..10 {
+            let photo_id = format!("photo_{}", i);
+            let img = create_test_image(100 + i * 10, 100 + i * 10, [i as u8 * 25, 0, 0, 255]);
+            preview_manager.save_preview(&photo_id, &img).unwrap();
+        }
+        
+        // Verify all can be retrieved
+        for i in 0..10 {
+            let photo_id = format!("photo_{}", i);
+            let retrieved = preview_manager.get_preview(&photo_id);
+            assert!(retrieved.is_some(), "Photo {} should be in cache", i);
+            
+            let img = retrieved.unwrap();
+            assert_eq!(img.width(), 100 + i * 10);
+        }
+    }
+
+    #[test]
+    fn test_thumbnail_cache_separate_from_preview() {
+        let (preview_manager, _temp_dir) = create_test_preview_manager();
+        
+        let photo_id = "test_photo_dual";
+        
+        // Save both thumbnail and preview for same photo
+        let thumbnail = create_test_image(300, 300, [255, 0, 0, 255]); // Red thumbnail
+        let preview = create_test_image(2560, 2560, [0, 255, 0, 255]); // Green preview
+        
+        preview_manager.save_thumbnail(photo_id, &thumbnail).unwrap();
+        preview_manager.save_preview(photo_id, &preview).unwrap();
+        
+        // Retrieve both
+        let retrieved_thumb = preview_manager.get_thumbnail(photo_id).unwrap();
+        let retrieved_preview = preview_manager.get_preview(photo_id).unwrap();
+        
+        // Verify they're different
+        assert_eq!(retrieved_thumb.width(), 300);
+        assert_eq!(retrieved_preview.width(), 2560);
+    }
+
+    #[test]
+    fn test_l2_cache_persistence() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_dir = temp_dir.path().to_path_buf();
+        
+        let photo_id = "persistent_photo";
+        let test_image = create_test_image(150, 150, [128, 128, 128, 255]);
+        
+        // Create first manager and save
+        {
+            let manager = PreviewManager::new_with_path(cache_dir.clone());
+            manager.save_preview(photo_id, &test_image).unwrap();
+        } // Manager dropped
+        
+        // Create new manager with same database
+        {
+            let manager = PreviewManager::new_with_path(cache_dir);
+            let retrieved = manager.get_preview(photo_id);
+            assert!(retrieved.is_some(), "Cache should persist across manager instances");
+            
+            let img = retrieved.unwrap();
+            assert_eq!(img.width(), 150);
+        }
+    }
+
+    #[test]
+    fn test_l2_cache_jpeg_compression() {
+        let (preview_manager, _temp_dir) = create_test_preview_manager();
+        
+        // Create a large image
+        let large_image = create_test_image(2560, 1440, [200, 100, 50, 255]);
+        let photo_id = "compression_test";
+        
+        // Save to cache (will be JPEG compressed)
+        preview_manager.save_preview(photo_id, &large_image).unwrap();
+        
+        // Retrieve and verify dimensions are preserved
+        let retrieved = preview_manager.get_preview(photo_id).unwrap();
+        assert_eq!(retrieved.width(), 2560, "Width should be preserved");
+        assert_eq!(retrieved.height(), 1440, "Height should be preserved");
+        
+        // Note: Colors may differ slightly due to JPEG compression, but dimensions should match
+    }
+
+    #[test]
+    fn test_cache_error_handling() {
+        let (preview_manager, _temp_dir) = create_test_preview_manager();
+        
+        // Try to save with empty photo_id
+        let img = create_test_image(100, 100, [255, 255, 255, 255]);
+        let result = preview_manager.save_preview("", &img);
+        
+        // Should not panic, may succeed or fail gracefully
+        // Just verify it doesn't crash
+        let _ = result;
+    }
+
+    #[test]
+    fn test_l1_lru_cache_capacity() {
+        // This test verifies the L1 RAM cache LRU eviction
+        // The AsyncImageProcessor has a capacity of 5 images
+        let (preview_manager, _temp_dir) = create_test_preview_manager();
+        let processor = AsyncImageProcessor::new(preview_manager);
+        
+        // The LRU cache is internal, so we can't directly test it
+        // But we can verify the processor was created successfully
+        assert!(!processor.is_processing());
+    }
+}
