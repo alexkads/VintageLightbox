@@ -34,6 +34,7 @@ pollster = "0.4"
 lru = "0.16.2"
 dotenv = "0.15.0"
 opener = "0.7"
+egui-phosphor = { version = "0.9", default-features = false, features = ["regular"] }
 
 
 [dev-dependencies]

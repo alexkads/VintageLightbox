@@ -82,6 +82,11 @@ impl VintageLightboxApp {
         use crate::design_system::theme_selector::ThemeVariant;
         ThemeVariant::default().apply_to_context(&cc.egui_ctx);
 
+        // Initialize Phosphor icon fonts
+        let mut fonts = egui::FontDefinitions::default();
+        egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
+        cc.egui_ctx.set_fonts(fonts);
+
         // Create channel for async photo loading (capacity 10 to avoid blocking)
         let (photo_sender, photo_receiver) = mpsc::channel(10);
 
@@ -969,6 +974,8 @@ impl eframe::App for VintageLightboxApp {
 impl VintageLightboxApp {
     /// Show the toolbar at the top of the window
     fn show_toolbar(&mut self, ui: &mut egui::Ui) {
+        use crate::design_system::icons;
+        
         ui.horizontal(|ui| {
             ui.add_space(Theme::SPACE_LG);
 
@@ -1001,8 +1008,9 @@ impl VintageLightboxApp {
 
             ui.add_space(Theme::SPACE_LG);
 
-            // View tabs
-            if widgets::nav_button(ui, "Library", self.state.current_view == CurrentView::Library).clicked() {
+            // View tabs with icons
+            let library_label = format!("{} Library", icons::NAV_LIBRARY);
+            if widgets::nav_button(ui, &library_label, self.state.current_view == CurrentView::Library).clicked() {
                 self.state.current_view = CurrentView::Library;
                 self.state.reset_viewer();
             }
@@ -1010,9 +1018,10 @@ impl VintageLightboxApp {
             ui.add_space(Theme::SPACE_SM);
 
             // Develop button enabled if Library has a selection
+            let develop_label = format!("{} Develop", icons::NAV_DEVELOP);
             let develop_enabled = self.state.library_selected_photo_id.is_some();
             if develop_enabled {
-                if widgets::nav_button(ui, "Develop", self.state.current_view == CurrentView::Develop).clicked() {
+                if widgets::nav_button(ui, &develop_label, self.state.current_view == CurrentView::Develop).clicked() {
                     // Copy Library selection to Develop when entering Develop mode
                     if self.state.develop_selected_photo_id.is_none() {
                         self.state.develop_selected_photo_id = self.state.library_selected_photo_id.clone();
@@ -1022,31 +1031,33 @@ impl VintageLightboxApp {
                 }
             } else {
                 ui.add_enabled_ui(false, |ui| {
-                    widgets::nav_button(ui, "Develop", false);
+                    widgets::nav_button(ui, &develop_label, false);
                 });
             }
 
             // Spacer to push photo count and import button to the right
-            ui.allocate_space(egui::vec2(ui.available_width() - 250.0, 0.0));
+            ui.allocate_space(egui::vec2(ui.available_width() - 280.0, 0.0));
 
-            // Photo count
+            // Photo count with icon
             let photo_count = self.state.photos.len();
             ui.label(
-                egui::RichText::new(format!("{} photos", photo_count))
+                egui::RichText::new(format!("{} {} photos", icons::FILE_IMAGE, photo_count))
                     .size(Theme::FONT_MD)
                     .color(Theme::TEXT_SECONDARY)
             );
 
             ui.add_space(Theme::SPACE_LG);
 
-            // Import buttons
-            if widgets::primary_button(ui, "Import").clicked() {
+            // Import button with icon
+            let import_label = format!("{} Import", icons::ACTION_IMPORT);
+            if widgets::primary_button(ui, &import_label).clicked() {
                 self.handle_import(ui.ctx());
             }
 
             ui.add_space(Theme::SPACE_SM);
 
-            if widgets::secondary_button(ui, "Advanced Import").clicked() {
+            // Advanced Import icon button with tooltip
+            if widgets::icon_button_tooltip(ui, icons::ACTION_SETTINGS, "Advanced Import").clicked() {
                 self.handle_advanced_import(ui.ctx());
             }
 

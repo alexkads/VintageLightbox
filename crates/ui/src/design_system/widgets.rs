@@ -63,6 +63,32 @@ pub fn icon_button_sized(ui: &mut Ui, icon: &str, icon_size: f32) -> Response {
     ui.add(button)
 }
 
+/// Icon button with tooltip
+pub fn icon_button_tooltip(ui: &mut Ui, icon: &str, tooltip: &str) -> Response {
+    let response = icon_button(ui, icon);
+    response.on_hover_text(tooltip)
+}
+
+/// Icon button with custom size and tooltip
+pub fn icon_button_tooltip_sized(ui: &mut Ui, icon: &str, tooltip: &str, icon_size: f32) -> Response {
+    let response = icon_button_sized(ui, icon, icon_size);
+    response.on_hover_text(tooltip)
+}
+
+/// Primary style icon button (accent color background)
+pub fn icon_button_primary(ui: &mut Ui, icon: &str, tooltip: &str) -> Response {
+    let button = Button::new(
+        RichText::new(icon)
+            .color(Color32::WHITE)
+            .size(Theme::FONT_XL)
+    )
+    .fill(Theme::ACCENT_PRIMARY)
+    .min_size(Vec2::new(40.0, 40.0))
+    .corner_radius(CornerRadius::same(255));
+
+    ui.add(button).on_hover_text(tooltip)
+}
+
 // ============================================
 // NAV BUTTON
 // Navigation button with text and optional icon

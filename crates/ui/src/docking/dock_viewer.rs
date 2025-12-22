@@ -539,8 +539,9 @@ impl<'a> DockViewer<'a> {
 
             ui.add_space(Theme::SPACE_MD);
 
-            // Reset button
-            if ui.button("Reset All").clicked() {
+            // Reset button with icon
+            let reset_label = format!("{} Reset All", crate::design_system::icons::ACTION_RESET);
+            if ui.button(&reset_label).clicked() {
                 self.context.state.active_exposure = 0.0;
                 self.context.state.active_contrast = 1.0;
                 self.context.state.active_temperature = 0.0;
@@ -558,8 +559,9 @@ impl<'a> DockViewer<'a> {
 
             ui.add_space(Theme::SPACE_MD);
 
-            // Export button
-            if ui.button("📤 Export JPEG").clicked() {
+            // Export button with icon
+            let export_label = format!("{} Export JPEG", crate::design_system::icons::ACTION_EXPORT);
+            if ui.button(&export_label).clicked() {
                 if let Some(metadata) = &self.context.state.detail_metadata {
                     let controller = self.context.export_controller.clone();
                     let id = metadata.id.clone();
