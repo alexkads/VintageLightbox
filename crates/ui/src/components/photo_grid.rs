@@ -274,16 +274,42 @@ impl PhotoGrid {
         let is_multi_selected = state.is_photo_selected(&photo.id);
         let is_primary_selected = state.library_selected_photo_id.as_ref() == Some(&photo.id);
         let is_selected = is_multi_selected || is_primary_selected;
-        
-        // Background - highlight selected photo
-        let bg_color = if is_selected {
-            Theme::BG_ACTIVE
-        } else if response.hovered() {
-            Theme::BG_HOVER
-        } else {
-            Theme::BG_SURFACE
+
+        // Initialize the color mapping for labels
+        let label_color = match photo.color_label.as_deref() {
+            Some("Red") => Some(Color32::from_rgb(200, 40, 40)),
+            Some("Yellow") => Some(Color32::from_rgb(220, 220, 40)),
+            Some("Green") => Some(Color32::from_rgb(40, 180, 40)),
+            Some("Blue") => Some(Color32::from_rgb(40, 80, 200)),
+            Some("Purple") => Some(Color32::from_rgb(180, 40, 180)),
+            _ => None,
         };
-        ui.painter().rect_filled(rect, Theme::RADIUS_MD, bg_color);
+        
+        // Background - highlight with color label or selection state
+        if let Some(color) = label_color {
+             // Draw a subtle colored background/frame
+             ui.painter().rect_filled(
+                 rect,
+                 Theme::RADIUS_MD,
+                 if is_selected { color.gamma_multiply(0.4) } else { color.gamma_multiply(0.2) },
+             );
+             // And a solid border for the label
+             ui.painter().rect_stroke(
+                 rect.shrink(1.0),
+                 Theme::RADIUS_MD,
+                 egui::Stroke::new(3.0, color),
+                 egui::StrokeKind::Outside,
+             );
+        } else {
+            let bg_color = if is_selected {
+                Theme::BG_ACTIVE
+            } else if response.hovered() {
+                Theme::BG_HOVER
+            } else {
+                Theme::BG_SURFACE
+            };
+            ui.painter().rect_filled(rect, Theme::RADIUS_MD, bg_color);
+        }
 
         // Display thumbnail (loaded asynchronously)
 
@@ -345,40 +371,51 @@ impl PhotoGrid {
             Theme::TEXT_MUTED,
         );
 
-        // Hover overlay with rating
-        if response.hovered() && photo.rating > 0 {
+        // Rating display - Always show if rating > 0, or on hover
+        if photo.rating > 0 || response.hovered() {
+            let overlay_height = 20.0;
             let overlay_rect = Rect::from_min_size(
-                rect.min + Vec2::new(0.0, 90.0),
-                Vec2::new(tile_width, 20.0),
+                egui::pos2(rect.min.x, rect.max.y - name_height - overlay_height - 4.0), // Above filename
+                Vec2::new(tile_width, overlay_height),
             );
-            ui.painter().rect_filled(
-                overlay_rect,
-                0.0,
-                Color32::from_rgba_premultiplied(0, 0, 0, 170),
-            );
+            
+            // Only draw background if we are hovering (to make it readable) or if it's strictly necessary
+            if response.hovered() {
+                 ui.painter().rect_filled(
+                    overlay_rect,
+                    10.0,
+                    Color32::from_black_alpha(100),
+                );
+            }
 
             // Draw rating stars
             let star_size = 12.0;
             let total_stars_width = star_size * 5.0;
             let start_x = overlay_rect.center().x - total_stars_width / 2.0;
+            let center_y = overlay_rect.center().y;
 
             for i in 0..5 {
                 let star_x = start_x + (i as f32 * star_size);
-                let star_pos = egui::pos2(star_x + star_size / 2.0, overlay_rect.center().y);
+                let star_pos = egui::pos2(star_x + star_size / 2.0, center_y);
 
                 let color = if i < photo.rating as usize {
                     Theme::RATING_ACTIVE
                 } else {
-                    Theme::RATING_INACTIVE
+                    if response.hovered() { Theme::RATING_INACTIVE } else { Color32::TRANSPARENT } // Hide empty stars if not hovering
                 };
 
-                ui.painter().text(
-                    star_pos,
-                    egui::Align2::CENTER_CENTER,
-                    "★",
-                    egui::FontId::proportional(star_size),
-                    color,
-                );
+                if color != Color32::TRANSPARENT {
+                    ui.painter().text(
+                        star_pos,
+                        egui::Align2::CENTER_CENTER,
+                        "★",
+                        egui::FontId::proportional(star_size),
+                        color,
+                    );
+                } else if response.hovered() {
+                     // Draw dot for empty slot on hover?
+                     ui.painter().circle_filled(star_pos, 2.0, Color32::from_gray(80));
+                }
             }
         }
 

@@ -54,7 +54,7 @@ impl SetFlagUseCase {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use domain::{PhotoRepository, value_objects::{FilePath, ColorLabel}};
+    use domain::{PhotoRepository, value_objects::FilePath};
     use mockall::mock;
     use mockall::predicate::*;
 

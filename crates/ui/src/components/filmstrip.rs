@@ -131,24 +131,30 @@ impl Filmstrip {
                         // Note: We check this AFTER flags to allow flags to steal clicks if needed
                         let mut thumb_clicked = response.clicked();
 
-                        // Interactive Flags (Pick/Reject) - Top Left
-                        // Always show if set, or show ghosts if hovered
-                        let is_hovered = response.hovered();
+                        // Interactive Flags (Pick/Reject) - Pre-calculation & Interaction
+                        // We handle interaction here to intercept clicks, but draw later to be on top
                         let current_flag = photo.flag.unwrap_or(0);
+                        let is_hovered = response.hovered();
+                        let show_flags = is_hovered || current_flag != 0;
                         
-                        if is_hovered || current_flag != 0 {
+                        let mut pick_rect = egui::Rect::NOTHING;
+                        let mut reject_rect = egui::Rect::NOTHING;
+                        let mut pick_hovered = false;
+                        let mut reject_hovered = false;
+
+                        if show_flags {
                             let flag_size = 14.0;
                             let padding = 4.0;
                             let spacing = 2.0;
 
                             // Pick Icon [P]
-                            let pick_rect = egui::Rect::from_min_size(
+                            pick_rect = egui::Rect::from_min_size(
                                 rect.min + Vec2::new(padding, padding),
                                 Vec2::new(flag_size, flag_size)
                             );
                             
                             // Reject Icon [X]
-                            let reject_rect = egui::Rect::from_min_size(
+                            reject_rect = egui::Rect::from_min_size(
                                 rect.min + Vec2::new(padding + flag_size + spacing, padding),
                                 Vec2::new(flag_size, flag_size)
                             );
@@ -156,6 +162,9 @@ impl Filmstrip {
                             let pick_response = ui.interact(pick_rect, egui::Id::new(format!("pick_{}", photo.id)), Sense::click());
                             let reject_response = ui.interact(reject_rect, egui::Id::new(format!("reject_{}", photo.id)), Sense::click());
                             
+                            pick_hovered = pick_response.hovered();
+                            reject_hovered = reject_response.hovered();
+
                             // Handle Flag Clicks
                             if pick_response.clicked() {
                                 thumb_clicked = false; // Consume click
@@ -166,32 +175,6 @@ impl Filmstrip {
                                 let new_flag = if current_flag == -1 { 0 } else { -1 }; // Toggle
                                 action = Some(FilmstripAction::SetFlag(photo.id.clone(), new_flag));
                             }
-
-                            // Draw Pick Icon
-                            let pick_bg = if current_flag == 1 { Theme::ACCENT_SUCCESS } else if pick_response.hovered() { Color32::from_gray(100) } else { Color32::from_black_alpha(100) };
-                            let pick_fg = if current_flag == 1 { Color32::WHITE } else { Color32::from_gray(200) };
-                            
-                            ui.painter().circle_filled(pick_rect.center(), flag_size / 2.0, pick_bg);
-                            ui.painter().text(
-                                pick_rect.center(),
-                                egui::Align2::CENTER_CENTER,
-                                "P", // Or "🏳"
-                                egui::FontId::proportional(9.0),
-                                pick_fg,
-                            );
-
-                            // Draw Reject Icon
-                            let reject_bg = if current_flag == -1 { Theme::ACCENT_ERROR } else if reject_response.hovered() { Color32::from_gray(100) } else { Color32::from_black_alpha(100) };
-                            let reject_fg = if current_flag == -1 { Color32::WHITE } else { Color32::from_gray(200) };
-                            
-                            ui.painter().circle_filled(reject_rect.center(), flag_size / 2.0, reject_bg);
-                            ui.painter().text(
-                                reject_rect.center(),
-                                egui::Align2::CENTER_CENTER,
-                                "X", 
-                                egui::FontId::proportional(9.0),
-                                reject_fg,
-                            );
                         }
 
                         if thumb_clicked {
@@ -285,6 +268,28 @@ impl Filmstrip {
                             );
                         }
 
+                        // Draw Rating Stars
+                        if photo.rating > 0 {
+                            let star_size = 10.0;
+                            let total_stars_width = star_size * 5.0;
+                            let start_x = rect.center().x - total_stars_width / 2.0;
+                            let star_y = rect.max.y - star_size; // Bottom
+
+                            // Draw subtle background
+                            let bg_rect = egui::Rect::from_min_size(
+                                egui::pos2(start_x - 2.0, star_y - star_size/2.0),
+                                egui::Vec2::new(total_stars_width + 4.0, star_size)
+                            );
+                            ui.painter().rect_filled(bg_rect, 4.0, Color32::from_black_alpha(100));
+
+                            for i in 0..5 {
+                                let star_x = start_x + (i as f32 * star_size);
+                                let star_pos = egui::pos2(star_x + star_size / 2.0, star_y);
+                                let color = if i < photo.rating as usize { Theme::RATING_ACTIVE } else { Color32::from_gray(80) };
+                                ui.painter().text(star_pos, egui::Align2::CENTER_CENTER, "★", egui::FontId::proportional(star_size), color);
+                            }
+                        }
+
                         // Draw selection border
                         if is_primary_selected {
                             ui.painter().rect_stroke(
@@ -312,6 +317,36 @@ impl Filmstrip {
                                 "✓",
                                 egui::FontId::proportional(10.0),
                                 Color32::WHITE,
+                            );
+                        }
+
+                        // Draw Interactive Flags (Last layer)
+                        if show_flags {
+                            let flag_size = 14.0;
+                            // Draw Pick Icon
+                            let pick_bg = if current_flag == 1 { Theme::ACCENT_SUCCESS } else if pick_hovered { Color32::from_gray(100) } else { Color32::from_black_alpha(100) };
+                            let pick_fg = if current_flag == 1 { Color32::WHITE } else { Color32::from_gray(200) };
+                            
+                            ui.painter().circle_filled(pick_rect.center(), flag_size / 2.0, pick_bg);
+                            ui.painter().text(
+                                pick_rect.center(),
+                                egui::Align2::CENTER_CENTER,
+                                "P",
+                                egui::FontId::proportional(9.0),
+                                pick_fg,
+                            );
+
+                            // Draw Reject Icon
+                            let reject_bg = if current_flag == -1 { Theme::ACCENT_ERROR } else if reject_hovered { Color32::from_gray(100) } else { Color32::from_black_alpha(100) };
+                            let reject_fg = if current_flag == -1 { Color32::WHITE } else { Color32::from_gray(200) };
+                            
+                            ui.painter().circle_filled(reject_rect.center(), flag_size / 2.0, reject_bg);
+                            ui.painter().text(
+                                reject_rect.center(),
+                                egui::Align2::CENTER_CENTER,
+                                "X", 
+                                egui::FontId::proportional(9.0),
+                                reject_fg,
                             );
                         }
 
@@ -495,6 +530,28 @@ impl Filmstrip {
                                 egui::FontId::proportional(9.0),
                                 Color32::from_rgb(120, 120, 120),
                             );
+                        }
+
+                        // Draw Rating Stars
+                        if photo.rating > 0 {
+                            let star_size = 10.0;
+                            let total_stars_width = star_size * 5.0;
+                            let start_x = rect.center().x - total_stars_width / 2.0;
+                            let star_y = rect.max.y - star_size;
+
+                            // Draw subtle background
+                            let bg_rect = egui::Rect::from_min_size(
+                                egui::pos2(start_x - 2.0, star_y - star_size/2.0),
+                                egui::Vec2::new(total_stars_width + 4.0, star_size)
+                            );
+                            ui.painter().rect_filled(bg_rect, 4.0, Color32::from_black_alpha(100));
+
+                            for i in 0..5 {
+                                let star_x = start_x + (i as f32 * star_size);
+                                let star_pos = egui::pos2(star_x + star_size / 2.0, star_y);
+                                let color = if i < photo.rating as usize { Theme::RATING_ACTIVE } else { Color32::from_gray(80) };
+                                ui.painter().text(star_pos, egui::Align2::CENTER_CENTER, "★", egui::FontId::proportional(star_size), color);
+                            }
                         }
 
                         // Draw selected border

@@ -229,6 +229,7 @@ mod tests {
             camera: "Camera".to_string(),
             exposure: "f/1.8".to_string(),
             rating: 0,
+            flag: Some(0),
             color_label: None,
             edit_exposure: None,
             edit_contrast: None,
