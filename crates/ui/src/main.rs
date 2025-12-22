@@ -1,16 +1,10 @@
 // VintageLightbox - Photo Management Application
 // Main entry point using eframe (egui)
 
-mod app;
-mod state;
-mod design_system;
-mod image_processing;
-mod keyboard;
-mod components;
-mod views;
-pub mod async_loader;
-pub mod gpu_processor;
-pub mod docking;
+// Modules are now exported via lib.rs to allow integration testing
+// We use the 'ui' library crate for implementation
+
+use ui::app::VintageLightboxApp;
 
 use std::sync::Arc;
 
@@ -31,7 +25,7 @@ use adapters::controllers::{
     ExportController, PhotoController,
 };
 
-use app::VintageLightboxApp;
+
 
 #[tokio::main]
 async fn main() -> Result<(), eframe::Error> {

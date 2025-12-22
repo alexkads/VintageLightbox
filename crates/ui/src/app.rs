@@ -166,7 +166,6 @@ impl eframe::App for VintageLightboxApp {
         if let Ok(result) = self.photo_receiver.try_recv() {
             match result {
                 Ok(photos) => {
-                    self.state.toasts.success(format!("Loaded {} photos", photos.len()));
                     self.state.photos = photos;
                     self.state.rebuild_folder_tree();
                 }
@@ -706,7 +705,6 @@ impl eframe::App for VintageLightboxApp {
                             };
                             ctx_clone.request_repaint();
                         });
-                        self.state.toasts.info("Flagged as Pick");
                     }
                 }
 
@@ -730,7 +728,6 @@ impl eframe::App for VintageLightboxApp {
                             };
                             ctx_clone.request_repaint();
                         });
-                        self.state.toasts.info("Flagged as Reject");
                     }
                 }
 
@@ -754,7 +751,6 @@ impl eframe::App for VintageLightboxApp {
                             };
                             ctx_clone.request_repaint();
                         });
-                         self.state.toasts.info("Removed Flag");
                     }
                 }
 
