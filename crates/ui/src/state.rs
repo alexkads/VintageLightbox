@@ -165,6 +165,7 @@ pub struct AppState {
     // ============================================
     pub filter_min_rating: i32,
     pub filter_color_label: Option<String>,
+    pub filter_flag: Option<i32>, // 1=Pick, -1=Reject, 0=Unflagged, None=All
 
     // ============================================
     // Async Operations
@@ -293,6 +294,7 @@ impl AppState {
             grid_columns: 4,  // Default 4 columns
             filter_min_rating: 0,
             filter_color_label: None,
+            filter_flag: None,
             pending_import: None,
             pending_export: None,
             edit_history: Vec::new(),
@@ -402,6 +404,14 @@ impl AppState {
                 // Filter by color label
                 if let Some(ref filter_label) = self.filter_color_label {
                     if photo.color_label.as_ref() != Some(filter_label) {
+                        return false;
+                    }
+                }
+
+                // Filter by flag
+                if let Some(filter_flag) = self.filter_flag {
+                    let photo_flag = photo.flag.unwrap_or(0); // Treat None as 0 (Unflagged)
+                    if photo_flag != filter_flag {
                         return false;
                     }
                 }

@@ -745,12 +745,12 @@ import_controller.import_with_options(files, options, tx, pause, cancel).await?;
 - [ ] Preview de preset (hover)
 - [ ] Categorização de presets
 
-### 2.4 Sistema de Flags e Cores (1 semana)
-- [ ] Pick/Reject flags
-- [ ] Color labels (5 cores)
-- [ ] Atalhos (P, X, U, 6-9)
-- [ ] Exibição visual nos thumbnails
-- [ ] Filtros por flag e cor
+### 2.4 Sistema de Flags e Cores (1 semana) ✅ COMPLETO (22/dez/2025)
+- [x] Pick/Reject flags
+- [x] Color labels (5 cores)
+- [x] Atalhos (P, X, U, 6-9)
+- [x] Exibição visual nos thumbnails
+- [x] Filtros por flag e cor
 
 ### 2.5 Coleções (2 semanas)
 - [ ] Criar coleção simples

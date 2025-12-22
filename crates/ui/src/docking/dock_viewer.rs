@@ -309,6 +309,32 @@ impl<'a> DockViewer<'a> {
 
     fn render_filters_panel(&mut self, ui: &mut Ui) {
         egui::ScrollArea::vertical().show(ui, |ui| {
+            // Flag filter
+            ui.label(egui::RichText::new("Flag").size(Theme::FONT_SM).color(Theme::TEXT_MUTED));
+            ui.horizontal(|ui| {
+                // All (None)
+                if ui.selectable_label(self.context.state.filter_flag.is_none(), "All").clicked() {
+                    self.context.state.filter_flag = None;
+                }
+                
+                // Picked (1)
+                if ui.selectable_label(self.context.state.filter_flag == Some(1), "Picked").clicked() {
+                    self.context.state.filter_flag = Some(1);
+                }
+
+                // Unflagged (0)
+                if ui.selectable_label(self.context.state.filter_flag == Some(0), "Unflagged").clicked() {
+                    self.context.state.filter_flag = Some(0);
+                }
+
+                // Rejected (-1)
+                if ui.selectable_label(self.context.state.filter_flag == Some(-1), "Rejected").clicked() {
+                    self.context.state.filter_flag = Some(-1);
+                }
+            });
+
+            ui.add_space(Theme::SPACE_SM);
+
             // Rating filter
             ui.label(egui::RichText::new("Min Rating").size(Theme::FONT_SM).color(Theme::TEXT_MUTED));
             ui.horizontal(|ui| {
