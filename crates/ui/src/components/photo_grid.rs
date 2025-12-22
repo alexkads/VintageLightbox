@@ -277,11 +277,11 @@ impl PhotoGrid {
 
         // Initialize the color mapping for labels
         let label_color = match photo.color_label.as_deref() {
-            Some("Red") => Some(Color32::from_rgb(200, 40, 40)),
-            Some("Yellow") => Some(Color32::from_rgb(220, 220, 40)),
-            Some("Green") => Some(Color32::from_rgb(40, 180, 40)),
-            Some("Blue") => Some(Color32::from_rgb(40, 80, 200)),
-            Some("Purple") => Some(Color32::from_rgb(180, 40, 180)),
+            Some("Red") | Some("red") => Some(Color32::from_rgb(200, 40, 40)),
+            Some("Yellow") | Some("yellow") => Some(Color32::from_rgb(220, 220, 40)),
+            Some("Green") | Some("green") => Some(Color32::from_rgb(40, 180, 40)),
+            Some("Blue") | Some("blue") => Some(Color32::from_rgb(40, 80, 200)),
+            Some("Purple") | Some("purple") => Some(Color32::from_rgb(180, 40, 180)),
             _ => None,
         };
         

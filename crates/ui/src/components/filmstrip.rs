@@ -208,6 +208,16 @@ impl Filmstrip {
                             }
                         }
 
+                        // Initialize the color mapping for labels
+                        let label_color = match photo.color_label.as_deref() {
+                            Some("Red") | Some("red") => Some(Theme::LABEL_RED),
+                            Some("Yellow") | Some("yellow") => Some(Theme::LABEL_YELLOW),
+                            Some("Green") | Some("green") => Some(Theme::LABEL_GREEN),
+                            Some("Blue") | Some("blue") => Some(Theme::LABEL_BLUE),
+                            Some("Purple") | Some("purple") => Some(Theme::LABEL_PURPLE),
+                            _ => None,
+                        };
+
                         // Draw thumbnail background
                         let thumb_color = if is_multi_selected || is_primary_selected {
                             Color32::from_rgb(70, 70, 70)
@@ -217,11 +227,32 @@ impl Filmstrip {
                             Color32::from_rgb(50, 50, 50)
                         };
                         
+                        // Fill background (tinted if color label exists)
+                        let bg_fill = if let Some(color) = label_color {
+                            if is_multi_selected || is_primary_selected {
+                                color.gamma_multiply(0.4)
+                            } else {
+                                color.gamma_multiply(0.2)
+                            }
+                        } else {
+                            thumb_color
+                        };
+
                         ui.painter().rect_filled(
                             rect,
                             CornerRadius::same(2),
-                            thumb_color,
+                            bg_fill,
                         );
+
+                        // Draw color label border if present
+                        if let Some(color) = label_color {
+                            ui.painter().rect_stroke(
+                                rect.shrink(1.0),
+                                CornerRadius::same(2),
+                                Stroke::new(3.0, color),
+                                egui::StrokeKind::Outside,
+                            );
+                        }
 
                         // Draw thumbnail image or placeholder
                         if let Some(texture) = self.thumbnail_cache.get(&photo.id) {
@@ -478,6 +509,16 @@ impl Filmstrip {
                             Sense::click(),
                         );
 
+                        // Initialize the color mapping for labels
+                        let label_color = match photo.color_label.as_deref() {
+                            Some("Red") | Some("red") => Some(Theme::LABEL_RED),
+                            Some("Yellow") | Some("yellow") => Some(Theme::LABEL_YELLOW),
+                            Some("Green") | Some("green") => Some(Theme::LABEL_GREEN),
+                            Some("Blue") | Some("blue") => Some(Theme::LABEL_BLUE),
+                            Some("Purple") | Some("purple") => Some(Theme::LABEL_PURPLE),
+                            _ => None,
+                        };
+
                         // Draw thumbnail background
                         let thumb_color = if is_selected {
                             Color32::from_rgb(70, 70, 70)
@@ -487,11 +528,32 @@ impl Filmstrip {
                             Color32::from_rgb(50, 50, 50)
                         };
                         
+                        // Fill background (tinted if color label exists)
+                        let bg_fill = if let Some(color) = label_color {
+                            if is_selected {
+                                color.gamma_multiply(0.4)
+                            } else {
+                                color.gamma_multiply(0.2)
+                            }
+                        } else {
+                            thumb_color
+                        };
+                        
                         ui.painter().rect_filled(
                             rect,
                             CornerRadius::same(2),
-                            thumb_color,
+                            bg_fill,
                         );
+
+                        // Draw color label border if present
+                        if let Some(color) = label_color {
+                            ui.painter().rect_stroke(
+                                rect.shrink(1.0),
+                                CornerRadius::same(2),
+                                Stroke::new(3.0, color),
+                                egui::StrokeKind::Outside,
+                            );
+                        }
 
                         // Draw thumbnail image or placeholder
                         if let Some(texture) = self.thumbnail_cache.get(&photo.id) {
@@ -517,6 +579,7 @@ impl Filmstrip {
                             
                             Image::new(texture).paint_at(ui, img_display_rect);
                         } else {
+                            // Draw placeholder text
                             let text_pos = rect.center();
                             let short_name = if photo.name.len() > 8 {
                                 format!("{}...", &photo.name[..5])
@@ -537,7 +600,7 @@ impl Filmstrip {
                             let star_size = 10.0;
                             let total_stars_width = star_size * 5.0;
                             let start_x = rect.center().x - total_stars_width / 2.0;
-                            let star_y = rect.max.y - star_size;
+                            let star_y = rect.max.y - star_size; // Bottom
 
                             // Draw subtle background
                             let bg_rect = egui::Rect::from_min_size(

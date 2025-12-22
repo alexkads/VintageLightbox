@@ -23,6 +23,9 @@ impl KeyboardHandler {
         photo_sender: &tokio::sync::mpsc::Sender<Result<Vec<adapters::view_models::PhotoViewModel>, String>>,
     ) {
         ctx.input(|i| {
+            // Check if we have any modals open that shouldn't receive shortcuts
+            // For now, only assume if we're not busy (though shortcuts might be valid while background processing?)
+            
             // ==========================================
             // GLOBAL SHORTCUTS (Work in all views)
             // ==========================================
@@ -41,6 +44,26 @@ impl KeyboardHandler {
 
             // Flag shortcuts (P, X, U)
             self.handle_flag_shortcuts(i, state, photo_controller, library_controller, photo_sender);
+
+            // Selection shortcuts (Cmd+A, Cmd+D) - Library only
+            if state.current_view == CurrentView::Library {
+                // Cmd+A: Select all
+                if i.modifiers.command && i.key_pressed(Key::A) {
+                    state.select_all();
+                }
+                
+                // Cmd+D: Deselect all
+                if i.modifiers.command && i.key_pressed(Key::D) {
+                    state.clear_selection();
+                }
+
+                // Delete or Backspace: Show delete confirmation
+                if i.key_pressed(Key::Delete) || i.key_pressed(Key::Backspace) {
+                    if !state.selected_photo_ids.is_empty() {
+                        state.show_delete_confirmation = true;
+                    }
+                }
+            }
 
             // ==========================================
             // DEVELOP VIEW SPECIFIC
@@ -186,17 +209,35 @@ impl KeyboardHandler {
                 let target_ids = self.get_target_photos(state);
                 if target_ids.is_empty() { continue; }
 
-                let color_label = color_opt.map(|s| s.to_string());
-                let color_str = color_label.clone().unwrap_or_default();
+                let selected_color = color_opt.map(|s| s.to_string()).unwrap_or_default();
+                
+                // Check if we should toggle OFF (if all targets already have this color)
+                // We handle case-insensitivity ("Red" vs "red")
+                let all_already_have_color = target_ids.iter().all(|id| {
+                    if let Some(photo) = state.photos.iter().find(|p| p.id == *id) {
+                         match &photo.color_label {
+                             Some(current) => current.eq_ignore_ascii_case(&selected_color),
+                             None => false,
+                         }
+                    } else {
+                        false
+                    }
+                });
+
+                let (new_color_label, new_color_str) = if all_already_have_color {
+                    (None, "".to_string())
+                } else {
+                    (Some(selected_color.clone()), selected_color)
+                };
 
                 // Optimistically update UI
                 for id in &target_ids {
                     if let Some(photo) = state.photos.iter_mut().find(|p| p.id == *id) {
-                        photo.color_label = color_label.clone();
+                        photo.color_label = new_color_label.clone();
                     }
                     if let Some(meta) = &mut state.detail_metadata {
                         if meta.id == *id {
-                            meta.color_label = color_label.clone();
+                            meta.color_label = new_color_label.clone();
                         }
                     }
                 }
@@ -204,7 +245,7 @@ impl KeyboardHandler {
                 // Async update
                 let controller = photo_controller.clone();
                 let ids_clone = target_ids.clone();
-                let label_clone = color_str.clone();
+                let label_clone = new_color_str;
                 let lib_controller = library_controller.clone();
                 let sender = photo_sender.clone();
                 
