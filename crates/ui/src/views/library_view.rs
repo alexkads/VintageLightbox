@@ -168,10 +168,12 @@ impl LibraryView {
 
     fn show_right_sidebar(&self, ui: &mut Ui, state: &AppState) {
         use crate::design_system::widgets;
-        use crate::components::histogram::Histogram;
+        use crate::components::metadata_charts::MetadataCharts;
 
-        // Histogram
-        Histogram::show(ui, None);
+        // Library Statistics
+        widgets::section_title(ui, "Statistics");
+        ui.add_space(Theme::SPACE_SM);
+        MetadataCharts::show(ui, &state.photos);
         ui.add_space(Theme::SPACE_MD);
 
         // Quick Develop Panel

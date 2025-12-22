@@ -117,10 +117,19 @@ impl DevelopView {
         ctx: &egui::Context,
     ) {
         use crate::design_system::widgets;
-        use crate::components::{histogram::Histogram, slider_control::SliderControl, rating_widget::RatingWidget};
+        use crate::components::{
+            histogram_plot::HistogramPlot,
+            tone_curve::ToneCurveEditor,
+            slider_control::SliderControl,
+            rating_widget::RatingWidget
+        };
 
-        // Histogram
-        Histogram::show(ui, state.histogram_data.as_ref());
+        // Interactive Histogram
+        HistogramPlot::show(ui, state.histogram_data.as_ref());
+        ui.add_space(Theme::SPACE_MD);
+
+        // Tone Curve Visualization
+        ToneCurveEditor::show(ui, state);
         ui.add_space(Theme::SPACE_MD);
 
         // Basic Adjustments
