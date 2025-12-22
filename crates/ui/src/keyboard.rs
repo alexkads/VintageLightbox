@@ -19,6 +19,8 @@ impl KeyboardHandler {
         ctx: &Context,
         state: &mut AppState,
         photo_controller: &Arc<PhotoController>,
+        library_controller: &Arc<adapters::controllers::LibraryController>,
+        photo_sender: &tokio::sync::mpsc::Sender<Result<Vec<adapters::view_models::PhotoViewModel>, String>>,
     ) {
         ctx.input(|i| {
             // ==========================================
@@ -32,13 +34,13 @@ impl KeyboardHandler {
             }
 
             // Rating shortcuts (0-5)
-            self.handle_rating_shortcuts(i, state, photo_controller);
+            self.handle_rating_shortcuts(i, state, photo_controller, library_controller, photo_sender);
 
             // Color label shortcuts (6-9 and 0 for none, though 0 is shared with unrate)
-            self.handle_color_label_shortcuts(i, state, photo_controller);
+            self.handle_color_label_shortcuts(i, state, photo_controller, library_controller, photo_sender);
 
             // Flag shortcuts (P, X, U)
-            self.handle_flag_shortcuts(i, state, photo_controller);
+            self.handle_flag_shortcuts(i, state, photo_controller, library_controller, photo_sender);
 
             // ==========================================
             // DEVELOP VIEW SPECIFIC
@@ -109,6 +111,8 @@ impl KeyboardHandler {
         input: &egui::InputState,
         state: &mut AppState,
         photo_controller: &Arc<PhotoController>,
+        library_controller: &Arc<adapters::controllers::LibraryController>,
+        photo_sender: &tokio::sync::mpsc::Sender<Result<Vec<adapters::view_models::PhotoViewModel>, String>>,
     ) {
         let rating_keys = [
             (Key::Num0, 0),
@@ -142,11 +146,18 @@ impl KeyboardHandler {
                 // Perform async updates
                 let controller = photo_controller.clone();
                 let ids_clone = target_ids.clone();
+                let lib_controller = library_controller.clone();
+                let sender = photo_sender.clone();
+                
                 tokio::spawn(async move {
                     for id in ids_clone {
                         if let Err(e) = controller.rate_photo(&id, rating).await {
                             eprintln!("Failed to rate photo {}: {}", id, e);
                         }
+                    }
+                    // Force reload to sync state
+                    if let Ok(photos) = lib_controller.get_all_photos().await {
+                        let _ = sender.send(Ok(photos)).await;
                     }
                 });
             }
@@ -159,6 +170,8 @@ impl KeyboardHandler {
         input: &egui::InputState,
         state: &mut AppState,
         photo_controller: &Arc<PhotoController>,
+        library_controller: &Arc<adapters::controllers::LibraryController>,
+        photo_sender: &tokio::sync::mpsc::Sender<Result<Vec<adapters::view_models::PhotoViewModel>, String>>,
     ) {
         let color_keys = [
             (Key::Num6, Some("Red")),
@@ -192,12 +205,18 @@ impl KeyboardHandler {
                 let controller = photo_controller.clone();
                 let ids_clone = target_ids.clone();
                 let label_clone = color_str.clone();
+                let lib_controller = library_controller.clone();
+                let sender = photo_sender.clone();
                 
                 tokio::spawn(async move {
                     for id in ids_clone {
                         if let Err(e) = controller.set_color_label(&id, &label_clone).await {
                             eprintln!("Failed to set color label for {}: {}", id, e);
                         }
+                    }
+                    // Force reload to sync state
+                    if let Ok(photos) = lib_controller.get_all_photos().await {
+                        let _ = sender.send(Ok(photos)).await;
                     }
                 });
             }
@@ -210,42 +229,61 @@ impl KeyboardHandler {
         input: &egui::InputState,
         state: &mut AppState,
         photo_controller: &Arc<PhotoController>,
+        library_controller: &Arc<adapters::controllers::LibraryController>,
+        photo_sender: &tokio::sync::mpsc::Sender<Result<Vec<adapters::view_models::PhotoViewModel>, String>>,
     ) {
         let flag_keys = [
             (Key::P, 1),  // Pick
             (Key::X, -1), // Reject
-            (Key::U, 0),  // Unflag
+            (Key::U, 0),  // Unflag (absolute)
         ];
 
-        for (key, flag) in flag_keys {
+        for (key, requested_flag) in flag_keys {
             if input.key_pressed(key) {
                 let target_ids = self.get_target_photos(state);
-                if target_ids.is_empty() { continue; }
+                if target_ids.is_empty() { 
+                    continue; 
+                }
+
+                // Collect the new flag state for each photo and trigger async updates
+                let mut updates: Vec<(String, i32)> = Vec::new();
 
                 // Optimistically update UI
                 for id in &target_ids {
                     if let Some(photo) = state.photos.iter_mut().find(|p| p.id == *id) {
-                        photo.flag = Some(flag);
+                        let current_flag = photo.flag.unwrap_or(0);
+                        
+                        // Toggle logic: If the requested flag is already set, toggle to 0 (Unflag).
+                        // Unless the requested flag is 0 (Unflag shortcut), which always sets to 0.
+                        let new_flag = if requested_flag != 0 && current_flag == requested_flag {
+                            0 
+                        } else {
+                            requested_flag
+                        };
+                        
+                        photo.flag = Some(new_flag);
+                        updates.push((id.clone(), new_flag));
                     }
-                    // Detail metadata doesn't usually store flag in this app version yet?
-                    // Checked PhotoViewModel: it has flag.
-                    // Checked DetailMetadata: let's verify if it has flag.
-                    // If DetailMetadata struct doesn't have flag, we can't update it there, but PhotoViewModel is enough for Grid/Filmstrip.
                 }
 
                 // Async update
                 let controller = photo_controller.clone();
-                let ids_clone = target_ids.clone();
+                let lib_controller = library_controller.clone();
+                let sender = photo_sender.clone();
                 
-                tokio::spawn(async move {
-                    for id in ids_clone {
-                        if let Err(e) = controller.set_flag(&id, flag).await {
-                             eprintln!("Failed to set flag for {}: {}", id, e);
+                if !updates.is_empty() {
+                    tokio::spawn(async move {
+                        for (id, flag) in updates {
+                            if let Err(e) = controller.set_flag(&id, flag).await {
+                                eprintln!("Failed to set flag for {}: {}", id, e);
+                            }
                         }
-                    }
-                });
-                
-                // If in Library view, we might want to auto-advance? (Lightroom feature, maybe later)
+                        // Force reload to sync state
+                        if let Ok(photos) = lib_controller.get_all_photos().await {
+                            let _ = sender.send(Ok(photos)).await;
+                        }
+                    });
+                }
             }
         }
     }

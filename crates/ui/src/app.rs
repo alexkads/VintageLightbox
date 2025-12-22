@@ -217,7 +217,14 @@ impl eframe::App for VintageLightboxApp {
         }
 
         // Handle keyboard input
-        self.keyboard_handler.handle_input(ctx, &mut self.state, &self.photo_controller);
+        // Handle keyboard input
+        self.keyboard_handler.handle_input(
+            ctx,
+            &mut self.state,
+            &self.photo_controller,
+            &self.library_controller,
+            &self.photo_sender
+        );
 
         // ============================================
         // ASYNC IMAGE LOADING (Non-blocking)
