@@ -136,6 +136,18 @@ impl eframe::App for VintageLightboxApp {
             self.state.busy_message.clear();
         }
 
+        // Poll for import preview dialog
+        if let Some(receiver) = &mut self.state.pending_import_preview_receiver {
+            if let Ok(dialog_opt) = receiver.try_recv() {
+                if let Some(dialog) = dialog_opt {
+                    self.state.import_preview_dialog = Some(dialog);
+                }
+                self.state.is_busy = false;
+                self.state.busy_message.clear();
+                self.state.pending_import_preview_receiver = None;
+            }
+        }
+
         // Handle keyboard input
         self.keyboard_handler.handle_input(ctx, &mut self.state, &self.photo_controller);
 
@@ -602,6 +614,79 @@ impl eframe::App for VintageLightboxApp {
         }
 
         // ============================================
+        // ADVANCED IMPORT DIALOGS
+        // ============================================
+
+        // Import Preview Dialog
+        if let Some(dialog) = &mut self.state.import_preview_dialog {
+            if let Some(action) = dialog.show(ctx) {
+                use crate::components::import_dialogs::ImportDialogAction;
+                match action {
+                    ImportDialogAction::Import => {
+                        // Get selected files and options
+                        let files = dialog.get_selected_files();
+                        let options = dialog.get_options();
+
+                        // Start import with progress dialog
+                        let (progress_sender, progress_receiver) = tokio::sync::mpsc::unbounded_channel();
+                        let pause_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+                        let cancel_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+                        use crate::components::import_dialogs::ImportProgressDialog;
+                        self.state.import_progress_dialog = Some(ImportProgressDialog::new(
+                            files.len(),
+                            pause_flag.clone(),
+                            cancel_flag.clone(),
+                            progress_receiver,
+                        ));
+
+                        // Spawn import task
+                        let import_controller = self.import_controller.clone();
+                        let library_controller = self.library_controller.clone();
+                        let photo_sender = self.photo_sender.clone();
+                        let ctx_clone = ctx.clone();
+
+                        tokio::spawn(async move {
+                            // Run import
+                            let _ = import_controller.import_with_options(
+                                files,
+                                options,
+                                progress_sender,
+                                pause_flag,
+                                cancel_flag,
+                            ).await;
+
+                            // Reload library
+                            match library_controller.get_all_photos().await {
+                                Ok(photos) => {
+                                    let _ = photo_sender.send(Ok(photos)).await;
+                                }
+                                Err(e) => {
+                                    eprintln!("Failed to reload photos: {}", e);
+                                }
+                            }
+                            ctx_clone.request_repaint();
+                        });
+                    }
+                    ImportDialogAction::Cancel => {
+                        // User canceled, close dialog
+                        self.state.import_preview_dialog = None;
+                    }
+                }
+            }
+        }
+
+        // Import Progress Dialog
+        if let Some(dialog) = &mut self.state.import_progress_dialog {
+            let is_open = dialog.show(ctx);
+            if !is_open {
+                // Dialog closed, cleanup
+                self.state.import_progress_dialog = None;
+                self.state.import_preview_dialog = None;
+            }
+        }
+
+        // ============================================
         // DELETE CONFIRMATION DIALOG
         // ============================================
         if self.state.show_delete_confirmation {
@@ -763,9 +848,15 @@ impl VintageLightboxApp {
 
             ui.add_space(Theme::SPACE_LG);
 
-            // Import button
+            // Import buttons
             if widgets::primary_button(ui, "Import").clicked() {
                 self.handle_import(ui.ctx());
+            }
+
+            ui.add_space(Theme::SPACE_SM);
+
+            if widgets::secondary_button(ui, "Advanced Import").clicked() {
+                self.handle_advanced_import(ui.ctx());
             }
 
             ui.add_space(Theme::SPACE_LG);
@@ -828,6 +919,75 @@ impl VintageLightboxApp {
             let _ = sender.send(result).await;
             ctx.request_repaint();
         });
+    }
+
+    /// Handle advanced import button click
+    fn handle_advanced_import(&mut self, ctx: &egui::Context) {
+        let import_controller = self.import_controller.clone();
+        let ctx_clone = ctx.clone();
+
+        // Create a channel to send dialog state back to UI thread
+        let (dialog_tx, dialog_rx) = tokio::sync::mpsc::channel::<Option<crate::components::import_dialogs::ImportPreviewDialog>>(1);
+
+        self.state.is_busy = true;
+        self.state.busy_message = "Loading preview...".to_string();
+
+        // Spawn file dialog and preview generation
+        tokio::spawn(async move {
+            let file_dialog = rfd::AsyncFileDialog::new()
+                .add_filter("Images", &["jpg", "jpeg", "png", "raw", "cr2", "nef", "arw", "dng"])
+                .set_title("Select Photos for Advanced Import");
+
+            if let Some(files) = file_dialog.pick_files().await {
+                if !files.is_empty() {
+                    // Collect all file paths
+                    let paths: Vec<String> = files
+                        .iter()
+                        .filter_map(|f| f.path().to_str().map(|s| s.to_string()))
+                        .collect();
+
+                    if !paths.is_empty() {
+                        // Generate preview and check duplicates in parallel
+                        let preview_future = import_controller.preview_import(paths.clone());
+                        let duplicates_future = import_controller.check_duplicates(paths.clone());
+
+                        match tokio::try_join!(preview_future, duplicates_future) {
+                            Ok((previews, duplicates)) => {
+                                // Build duplicate flags vec
+                                let duplicate_flags: Vec<bool> = previews.iter()
+                                    .map(|preview| {
+                                        duplicates.iter().any(|d| {
+                                            d.file_path == preview.file_path && d.is_duplicate
+                                        })
+                                    })
+                                    .collect();
+
+                                // Create preview dialog
+                                use crate::components::import_dialogs::ImportPreviewDialog;
+                                let mut dialog = ImportPreviewDialog::new();
+                                dialog.set_items(previews, duplicate_flags);
+
+                                // Send dialog to UI thread
+                                let _ = dialog_tx.send(Some(dialog)).await;
+                                ctx_clone.request_repaint();
+                                return;
+                            }
+                            Err(e) => {
+                                eprintln!("Failed to prepare import preview: {}", e);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Send None if canceled or failed
+            let _ = dialog_tx.send(None).await;
+            ctx_clone.request_repaint();
+        });
+
+        // Poll for dialog in the update loop
+        // Store receiver in app state for polling
+        self.state.pending_import_preview_receiver = Some(dialog_rx);
     }
 
     /// Show debug overlay with performance metrics

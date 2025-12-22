@@ -7,6 +7,7 @@ use adapters::view_models::PhotoViewModel;
 use image::DynamicImage;
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
+use crate::components::import_dialogs::{ImportPreviewDialog, ImportProgressDialog};
 
 /// Snapshot of editing state for undo/redo
 #[derive(Debug, Clone)]
@@ -205,6 +206,16 @@ pub struct AppState {
     pub filter_folder_path: Option<std::path::PathBuf>,
     /// Set of expanded folder paths in the tree
     pub expanded_folders: HashSet<String>,
+
+    // ============================================
+    // Advanced Import Dialogs
+    // ============================================
+    /// Import preview dialog state
+    pub import_preview_dialog: Option<ImportPreviewDialog>,
+    /// Import progress dialog state
+    pub import_progress_dialog: Option<ImportProgressDialog>,
+    /// Receiver for import preview dialog (async communication)
+    pub pending_import_preview_receiver: Option<tokio::sync::mpsc::Receiver<Option<ImportPreviewDialog>>>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -287,6 +298,9 @@ impl AppState {
             folder_tree_roots: Vec::new(),
             filter_folder_path: None,
             expanded_folders: HashSet::new(),
+            import_preview_dialog: None,
+            import_progress_dialog: None,
+            pending_import_preview_receiver: None,
         }
     }
 

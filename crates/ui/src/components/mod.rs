@@ -8,3 +8,4 @@ pub mod filmstrip;
 pub mod histogram;
 pub mod context_menu;
 pub mod folder_tree;
+pub mod import_dialogs;

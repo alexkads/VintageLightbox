@@ -17,11 +17,13 @@ use infrastructure::{
     create_pool, run_migrations,
     PhotoRepositoryImpl, ExifReader,
     ThumbnailGeneratorImpl, ImageExporterImpl,
+    FileOrganizerImpl,
     cache::preview_manager::PreviewManager,
 };
 use use_cases::{
     ImportPhotoUseCase, SavePhotoEditsUseCase, ExportPhotoUseCase,
     RatePhotoUseCase, SetColorLabelUseCase, DeletePhotoUseCase,
+    PreviewBeforeImportUseCase, CheckDuplicatesUseCase, ImportWithOptionsUseCase,
 };
 use adapters::controllers::{
     ImportController, LibraryController, EditorController,
@@ -65,7 +67,8 @@ async fn main() -> Result<(), eframe::Error> {
     let metadata_extractor = Arc::new(ExifReader);
     let thumbnail_generator = Arc::new(ThumbnailGeneratorImpl::new());
     let image_exporter = Arc::new(ImageExporterImpl::new());
-    
+    let file_organizer = Arc::new(FileOrganizerImpl::new(catalog_path.clone()));
+
     // Preview Cache Path: ./VintageLightbox Catalog/Previews.lrdata
     let preview_path = catalog_path.join("Previews.lrdata");
     let preview_manager = Arc::new(PreviewManager::new_with_path(preview_path));
@@ -75,10 +78,27 @@ async fn main() -> Result<(), eframe::Error> {
     // ============================================
     let import_photo_use_case = Arc::new(ImportPhotoUseCase::new(
         photo_repository.clone(),
-        metadata_extractor,
-        thumbnail_generator,
+        metadata_extractor.clone(),
+        thumbnail_generator.clone(),
         preview_manager.clone(),
     ));
+
+    // Advanced import use cases
+    let preview_before_import_use_case = Arc::new(PreviewBeforeImportUseCase::new(
+        metadata_extractor.clone(),
+        thumbnail_generator.clone(),
+    ));
+    let check_duplicates_use_case = Arc::new(CheckDuplicatesUseCase::new(
+        photo_repository.clone()
+    ));
+    let import_with_options_use_case = Arc::new(ImportWithOptionsUseCase::new(
+        photo_repository.clone(),
+        metadata_extractor.clone(),
+        thumbnail_generator.clone(),
+        preview_manager.clone(),
+        file_organizer,
+    ));
+
     let save_photo_edits_use_case = Arc::new(SavePhotoEditsUseCase::new(
         photo_repository.clone()
     ));
@@ -99,7 +119,12 @@ async fn main() -> Result<(), eframe::Error> {
     // ============================================
     // 3. Setup Controllers (Adapters Layer)
     // ============================================
-    let import_controller = Arc::new(ImportController::new(import_photo_use_case));
+    let import_controller = Arc::new(ImportController::new(
+        import_photo_use_case,
+        preview_before_import_use_case,
+        check_duplicates_use_case,
+        import_with_options_use_case,
+    ));
     let library_controller = Arc::new(LibraryController::new(photo_repository));
     let editor_controller = Arc::new(EditorController::new(save_photo_edits_use_case));
     let export_controller = Arc::new(ExportController::new(export_photo_use_case));

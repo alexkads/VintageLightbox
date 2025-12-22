@@ -317,4 +317,17 @@ impl PhotoRepository for PhotoRepositoryImpl {
 
         Ok(count > 0)
     }
+
+    async fn find_by_content_hash(&self, hash: &str) -> DomainResult<Option<Photo>> {
+        let row = sqlx::query("SELECT * FROM photos WHERE content_hash = ? LIMIT 1")
+            .bind(hash)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| DomainError::InvalidOperation(format!("Failed to find photo by hash: {}", e)))?;
+
+        match row {
+            Some(r) => Ok(Some(Self::row_to_photo(&r)?)),
+            None => Ok(None),
+        }
+    }
 }

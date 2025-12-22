@@ -45,3 +45,6 @@ pub trait ImageExporter: Send + Sync {
 
 pub mod preview_storage;
 pub use preview_storage::*;
+
+pub mod file_organizer;
+pub use file_organizer::FileOrganizer;

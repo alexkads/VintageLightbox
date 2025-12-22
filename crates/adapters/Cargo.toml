@@ -10,6 +10,7 @@ domain = { path = "../domain" }
 use-cases = { path = "../use-cases" }
 thiserror.workspace = true
 serde.workspace = true
+tokio.workspace = true
 
 [dev-dependencies]
 mockall.workspace = true

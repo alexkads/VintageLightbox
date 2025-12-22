@@ -21,3 +21,5 @@ pub mod image_exporter;
 pub use image_exporter::ImageExporterImpl;
 pub mod content_hash;
 pub use content_hash::calculate_file_hash;
+pub mod file_organizer;
+pub use file_organizer::FileOrganizerImpl;

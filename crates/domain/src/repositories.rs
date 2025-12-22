@@ -30,6 +30,10 @@ pub trait PhotoRepository: Send + Sync {
     
     /// Verifica se uma foto existe
     async fn exists(&self, id: &PhotoId) -> DomainResult<bool>;
+
+    /// Busca uma foto pelo content hash (SHA-256)
+    /// Retorna None se não encontrar nenhuma foto com esse hash
+    async fn find_by_content_hash(&self, hash: &str) -> DomainResult<Option<Photo>>;
 }
 
 /// Repository para persistência de Collections

@@ -76,6 +76,7 @@ mod tests {
             async fn update(&self, photo: &Photo) -> DomainResult<()>;
             async fn delete(&self, id: &PhotoId) -> DomainResult<()>;
             async fn exists(&self, id: &PhotoId) -> DomainResult<bool>;
+            async fn find_by_content_hash(&self, hash: &str) -> DomainResult<Option<Photo>>;
         }
     }
 

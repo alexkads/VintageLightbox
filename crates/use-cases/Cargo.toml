@@ -12,6 +12,9 @@ serde.workspace = true
 async-trait.workspace = true
 tokio = { workspace = true, features = ["fs", "io-util"] }
 chrono.workspace = true
+rayon.workspace = true
+futures.workspace = true
+sha2 = "0.10"
 
 [dev-dependencies]
 mockall.workspace = true

@@ -5,6 +5,9 @@
 
 pub mod import_photo;
 pub mod import_photos;
+pub mod preview_before_import;
+pub mod check_duplicates;
+pub mod import_with_options;
 pub mod rate_photo;
 pub mod set_color_label;
 pub mod create_collection;
@@ -14,6 +17,9 @@ pub mod delete_photo;
 
 pub use import_photo::ImportPhotoUseCase;
 pub use import_photos::{ImportPhotosUseCase, BatchImportResult};
+pub use preview_before_import::{PreviewBeforeImportUseCase, ImportPreviewItem};
+pub use check_duplicates::{CheckDuplicatesUseCase, DuplicateCheckResult};
+pub use import_with_options::{ImportWithOptionsUseCase, ImportRequest, ImportProgress, ImportResult};
 pub use rate_photo::RatePhotoUseCase;
 pub use set_color_label::SetColorLabelUseCase;
 pub use create_collection::CreateCollectionUseCase;
