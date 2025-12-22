@@ -10,7 +10,7 @@ Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Ar
 
 ---
 
-## 📊 Progresso Atual (Atualizado: 21/dez/2025)
+## 📊 Progresso Atual (Atualizado: 22/dez/2025)
 
 ### Status Geral
 - **Fase Atual**: Fase 2.1 (Importação Avançada) - **100% COMPLETO** ✅
@@ -22,6 +22,20 @@ Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Ar
   - UI Layer: 0 testes (testes removidos temporariamente)
 
 ### Conquistas Recentes
+
+- ✅ **INTEGRAÇÃO PHOSPHOR ICONS (22/dez/2025)** 🎨
+  - **Visual Profissional**: Substituição de ícones unicode/texto por Phosphor Icons
+  - **Pacote Otimizado**: Crate `egui_phosphor` integrado
+  - **Componentes Atualizados**: Toolbar, Rating, Filmstrip, Dock Viewer
+  - **Design System**: Módulo `icons.rs` centralizado com aliases semânticos
+  - **Status**: ✅ **100% COMPLETO**
+
+- ✅ **FIX E2E TESTS & SHORTCUTS (22/dez/2025)** 🔧
+  - **Testes de Integração**: Correção de race conditions em testes E2E
+  - **Atalhos de Teclado**: Verificação robusta de Pick (P) e Reject (X)
+  - **Preview Manager**: Inicialização corrigida para testes
+  - **CI Stability**: Test suite estabilizada
+  - **Status**: ✅ **100% COMPLETO**
 
 - ✅ **MELHORIAS VISUAIS DA UI - 100% COMPLETO (22/dez/2025)** 🎨
   - **3 Fases Implementadas com Zero Dependências Externas**:
@@ -730,7 +744,7 @@ import_controller.import_with_options(files, options, tx, pause, cancel).await?;
 - [x] ✅ **Whites e Blacks** - Controle fino de extremos tonais
 - [x] ✅ **Highlights e Shadows** - Ajuste seletivo por luminância
 - [x] ✅ **Temperature e Tint** - White balance completo
-- [ ] **Smart Folder Hierarchy** - Detecção inteligente de datas (Ano/Mês) na árvore da biblioteca
+- [x] ✅ **Smart Folder Hierarchy** - Detecção inteligente de datas (Ano/Mês) na árvore da biblioteca
 - [ ] 🎯 **Tone Curve** - Curva de tons paramétrica (PRÓXIMO)
 - [ ] **Point Curve** - Curva com múltiplos pontos de controle
 - [ ] **HSL/Color** - Ajustes por canal de cor (8 canais: Red, Orange, Yellow, Green, Aqua, Blue, Purple, Magenta)
