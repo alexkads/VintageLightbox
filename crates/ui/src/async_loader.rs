@@ -568,3 +568,134 @@ impl Default for AsyncEditProcessor {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use infrastructure::cache::preview_manager::PreviewManager;
+    use tempfile::TempDir;
+
+    fn create_test_preview_manager() -> Arc<PreviewManager> {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_dir = temp_dir.path().to_path_buf();
+        Arc::new(PreviewManager::new_with_path(cache_dir))
+    }
+
+    #[test]
+    fn test_clear_requested_for_removes_specific_photo() {
+        let preview_manager = create_test_preview_manager();
+        let mut loader = AsyncThumbnailLoader::new(preview_manager);
+
+        // Request some thumbnails
+        let requests = vec![
+            ThumbnailRequest {
+                photo_id: "photo1".to_string(),
+                path: "/path/to/photo1.jpg".to_string(),
+            },
+            ThumbnailRequest {
+                photo_id: "photo2".to_string(),
+                path: "/path/to/photo2.jpg".to_string(),
+            },
+            ThumbnailRequest {
+                photo_id: "photo3".to_string(),
+                path: "/path/to/photo3.jpg".to_string(),
+            },
+        ];
+        loader.request_thumbnails(requests);
+
+        // Verify all are in requested set
+        assert!(loader.requested.contains("photo1"));
+        assert!(loader.requested.contains("photo2"));
+        assert!(loader.requested.contains("photo3"));
+
+        // Clear one specific photo
+        loader.clear_requested_for("photo2");
+
+        // Verify only photo2 was removed
+        assert!(loader.requested.contains("photo1"));
+        assert!(!loader.requested.contains("photo2"));
+        assert!(loader.requested.contains("photo3"));
+    }
+
+    #[test]
+    fn test_clear_requested_for_allows_re_request() {
+        let preview_manager = create_test_preview_manager();
+        let mut loader = AsyncThumbnailLoader::new(preview_manager);
+
+        // Request a thumbnail
+        let request = ThumbnailRequest {
+            photo_id: "photo1".to_string(),
+            path: "/path/to/photo1.jpg".to_string(),
+        };
+        loader.request_thumbnails(vec![request.clone()]);
+
+        // Verify it's in requested set
+        assert!(loader.requested.contains("photo1"));
+        let initial_count = loader.requested.len();
+
+        // Try to request again - should be filtered out (duplicate prevention)
+        loader.request_thumbnails(vec![request.clone()]);
+        assert_eq!(loader.requested.len(), initial_count); // No change
+
+        // Clear requested state for this photo
+        loader.clear_requested_for("photo1");
+        assert!(!loader.requested.contains("photo1"));
+
+        // Now request a different photo to verify the set works
+        let request2 = ThumbnailRequest {
+            photo_id: "photo2".to_string(),
+            path: "/path/to/photo2.jpg".to_string(),
+        };
+        loader.request_thumbnails(vec![request2]);
+        assert!(loader.requested.contains("photo2"));
+        assert!(!loader.requested.contains("photo1")); // Still cleared
+    }
+
+    #[test]
+    fn test_clear_requested_for_nonexistent_photo() {
+        let preview_manager = create_test_preview_manager();
+        let mut loader = AsyncThumbnailLoader::new(preview_manager);
+
+        // Request some thumbnails
+        let requests = vec![
+            ThumbnailRequest {
+                photo_id: "photo1".to_string(),
+                path: "/path/to/photo1.jpg".to_string(),
+            },
+        ];
+        loader.request_thumbnails(requests);
+
+        // Clear a photo that was never requested - should not panic
+        loader.clear_requested_for("nonexistent");
+
+        // Verify original photo is still there
+        assert!(loader.requested.contains("photo1"));
+    }
+
+    #[test]
+    fn test_clear_requested_clears_all() {
+        let preview_manager = create_test_preview_manager();
+        let mut loader = AsyncThumbnailLoader::new(preview_manager);
+
+        // Request multiple thumbnails
+        let requests = vec![
+            ThumbnailRequest {
+                photo_id: "photo1".to_string(),
+                path: "/path/to/photo1.jpg".to_string(),
+            },
+            ThumbnailRequest {
+                photo_id: "photo2".to_string(),
+                path: "/path/to/photo2.jpg".to_string(),
+            },
+        ];
+        loader.request_thumbnails(requests);
+
+        assert_eq!(loader.requested.len(), 2);
+
+        // Clear all
+        loader.clear_requested();
+
+        assert_eq!(loader.requested.len(), 0);
+    }
+}
