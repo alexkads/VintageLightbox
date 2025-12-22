@@ -8,6 +8,8 @@ use image::DynamicImage;
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use crate::components::import_dialogs::{ImportPreviewDialog, ImportProgressDialog};
+use crate::design_system::theme_selector::ThemeVariant;
+use egui_notify::Toasts;
 
 /// Snapshot of editing state for undo/redo
 #[derive(Debug, Clone)]
@@ -151,6 +153,10 @@ pub struct AppState {
     pub busy_message: String,
     /// Number of columns in photo grid (1-5)
     pub grid_columns: usize,
+    /// Toast notifications
+    pub toasts: Toasts,
+    /// Selected theme variant
+    pub selected_theme: ThemeVariant,
 
     // ============================================
     // Filters
@@ -301,6 +307,8 @@ impl AppState {
             import_preview_dialog: None,
             import_progress_dialog: None,
             pending_import_preview_receiver: None,
+            toasts: Toasts::default(),
+            selected_theme: ThemeVariant::default(),
         }
     }
 

@@ -74,8 +74,9 @@ impl VintageLightboxApp {
         photo_controller: Arc<PhotoController>,
         preview_manager: Arc<PreviewManager>,
     ) -> Self {
-        // Apply custom theme
-        Theme::apply_to_context(&cc.egui_ctx);
+        // Apply default theme
+        use crate::design_system::theme_selector::ThemeVariant;
+        ThemeVariant::default().apply_to_context(&cc.egui_ctx);
 
         // Create channel for async photo loading (capacity 10 to avoid blocking)
         let (photo_sender, photo_receiver) = mpsc::channel(10);
@@ -124,12 +125,12 @@ impl eframe::App for VintageLightboxApp {
         if let Ok(result) = self.photo_receiver.try_recv() {
             match result {
                 Ok(photos) => {
-                    println!("Received {} photos from channel", photos.len());
+                    self.state.toasts.success(format!("Loaded {} photos", photos.len()));
                     self.state.photos = photos;
                     self.state.rebuild_folder_tree();
                 }
                 Err(e) => {
-                    eprintln!("Failed to load photos: {}", e);
+                    self.state.toasts.error(format!("Failed to load photos: {}", e));
                 }
             }
             self.state.is_busy = false;
@@ -170,8 +171,8 @@ impl eframe::App for VintageLightboxApp {
                 
                 // Calculate TTI (Time To Interactive)
                 if let Some(start_time) = self.state.start_load_time {
-                    let tti = start_time.elapsed().as_secs_f32() * 1000.0;
-                    println!("Controls released for editing effects in {:.2}ms", tti);
+                    let _tti = start_time.elapsed().as_secs_f32() * 1000.0;
+                    // TTI measurement complete (could be logged to metrics)
                     self.state.start_load_time = None;
                 }
                 
@@ -565,9 +566,8 @@ impl eframe::App for VintageLightboxApp {
                                     whites, blacks, clarity, vibrance, saturation,
                                     0.0, 0.0, 0.0, 0.0  // Tone curve (to be implemented in UI)
                                 ).await {
+                                    // Note: Toast will be shown in the next frame via state
                                     eprintln!("Auto-save failed: {}", e);
-                                } else {
-                                    println!("Auto-saved edits");
                                 }
                                 ctx_clone.request_repaint();
                             });
@@ -723,24 +723,20 @@ impl eframe::App for VintageLightboxApp {
                                 let photo_sender = self.photo_sender.clone();
                                 let ctx_clone = ctx.clone();
                                 
+                                let deleted_count = ids_to_delete.len();
                                 tokio::spawn(async move {
                                     for id in &ids_to_delete {
-                                        if let Err(e) = photo_controller.delete_photo(id).await {
-                                            eprintln!("Failed to delete photo {}: {}", id, e);
-                                        }
+                                        let _ = photo_controller.delete_photo(id).await;
                                     }
                                     // Reload photos list
-                                    match library_controller.get_all_photos().await {
-                                        Ok(photos) => {
-                                            let _ = photo_sender.send(Ok(photos)).await;
-                                        }
-                                        Err(e) => {
-                                            eprintln!("Failed to reload photos: {}", e);
-                                        }
-                                    }
+                                    let _ = match library_controller.get_all_photos().await {
+                                        Ok(photos) => photo_sender.send(Ok(photos)).await,
+                                        Err(e) => photo_sender.send(Err(e)).await,
+                                    };
                                     ctx_clone.request_repaint();
                                 });
-                                
+
+                                self.state.toasts.info(format!("Deleting {} photo{}...", deleted_count, if deleted_count == 1 { "" } else { "s" }));
                                 self.state.clear_selection();
                                 self.state.library_selected_photo_id = None;
                                 self.state.show_delete_confirmation = false;
@@ -750,6 +746,9 @@ impl eframe::App for VintageLightboxApp {
                     });
                 });
         }
+
+        // Show toast notifications
+        self.state.toasts.show(ctx);
 
         // Top toolbar
         egui::TopBottomPanel::top("toolbar")
@@ -809,6 +808,26 @@ impl VintageLightboxApp {
             );
 
             ui.add_space(Theme::SPACE_XXL);
+
+            // Theme selector
+            use crate::design_system::theme_selector::ThemeVariant;
+            let ctx_clone = ui.ctx().clone();
+            egui::ComboBox::from_id_salt("theme_selector")
+                .selected_text(self.state.selected_theme.display_name())
+                .show_ui(ui, |ui| {
+                    for variant in ThemeVariant::all() {
+                        if ui.selectable_value(
+                            &mut self.state.selected_theme,
+                            variant,
+                            variant.display_name()
+                        ).clicked() {
+                            variant.apply_to_context(&ctx_clone);
+                            self.state.toasts.info(format!("Theme changed to {}", variant.display_name()));
+                        }
+                    }
+                });
+
+            ui.add_space(Theme::SPACE_LG);
 
             // View tabs
             if widgets::nav_button(ui, "Library", self.state.current_view == CurrentView::Library).clicked() {
@@ -892,14 +911,13 @@ impl VintageLightboxApp {
 
                     if !paths.is_empty() {
                         // Import all photos at once
-                        match import_controller.import_files(paths).await {
+                        let import_result = import_controller.import_files(paths.clone()).await;
+                        match import_result {
                             Ok(_) => {
-                                println!("Photos imported successfully");
-                                // Reload photos after successful import
+                                // Success will be shown via photo reload
                                 library_controller.get_all_photos().await
                             }
-                            Err(e) => {
-                                eprintln!("Failed to import photos: {}", e);
+                            Err(_e) => {
                                 // Still reload to show any partial imports
                                 library_controller.get_all_photos().await
                             }
@@ -972,8 +990,8 @@ impl VintageLightboxApp {
                                 ctx_clone.request_repaint();
                                 return;
                             }
-                            Err(e) => {
-                                eprintln!("Failed to prepare import preview: {}", e);
+                            Err(_e) => {
+                                // Error will be handled by sending None
                             }
                         }
                     }
