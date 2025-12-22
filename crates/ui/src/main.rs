@@ -23,7 +23,7 @@ use infrastructure::{
 };
 use use_cases::{
     ImportPhotoUseCase, SavePhotoEditsUseCase, ExportPhotoUseCase,
-    RatePhotoUseCase, SetColorLabelUseCase, DeletePhotoUseCase,
+    RatePhotoUseCase, SetColorLabelUseCase, SetFlagUseCase, DeletePhotoUseCase,
     PreviewBeforeImportUseCase, CheckDuplicatesUseCase, ImportWithOptionsUseCase,
 };
 use adapters::controllers::{
@@ -113,6 +113,9 @@ async fn main() -> Result<(), eframe::Error> {
     let set_color_label_use_case = Arc::new(SetColorLabelUseCase::new(
         photo_repository.clone()
     ));
+    let set_flag_use_case = Arc::new(SetFlagUseCase::new(
+        photo_repository.clone()
+    ));
     let delete_photo_use_case = Arc::new(DeletePhotoUseCase::new(
         photo_repository.clone()
     ));
@@ -132,6 +135,7 @@ async fn main() -> Result<(), eframe::Error> {
     let photo_controller = Arc::new(PhotoController::new(
         rate_photo_use_case,
         set_color_label_use_case,
+        set_flag_use_case,
         delete_photo_use_case,
     ));
 

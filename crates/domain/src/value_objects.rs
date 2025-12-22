@@ -5,6 +5,7 @@ pub mod color_label;
 pub mod file_path;
 pub mod photo_metadata;
 pub mod import_options;
+pub mod flag;
 
 // Re-exports
 pub use collection_id::CollectionId;
@@ -14,3 +15,4 @@ pub use color_label::ColorLabel;
 pub use file_path::FilePath;
 pub use photo_metadata::PhotoMetadata;
 pub use import_options::{ImportOptions, OrganizationStrategy, RenamePattern};
+pub use flag::Flag;

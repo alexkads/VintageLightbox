@@ -4,7 +4,7 @@
 //! Implementado usando TDD.
 
 use crate::{
-    value_objects::{ColorLabel, FilePath, PhotoId, Rating},
+    value_objects::{ColorLabel, FilePath, Flag, PhotoId, Rating},
     DomainResult,
 };
 use chrono::{DateTime, Utc};
@@ -22,6 +22,8 @@ pub struct Photo {
     rating: Option<Rating>,
     /// Etiqueta de cor
     color_label: Option<ColorLabel>,
+    /// Flag (Pick/Reject)
+    flag: Option<Flag>,
     /// Data de importação
     imported_at: DateTime<Utc>,
     /// Data de última modificação
@@ -83,6 +85,7 @@ impl Photo {
         metadata: Option<PhotoMetadata>,
         rating: Option<Rating>,
         color_label: Option<ColorLabel>,
+        flag: Option<Flag>,
         is_edited: bool,
         thumbnail_path: Option<FilePath>,
         preview_path: Option<FilePath>,
@@ -111,6 +114,7 @@ impl Photo {
             metadata,
             rating,
             color_label,
+            flag,
             is_edited,
             thumbnail_path,
             preview_path,
@@ -137,7 +141,7 @@ impl Photo {
     pub fn with_id(id: PhotoId, file_path: FilePath) -> Self {
         let now = Utc::now();
         Self::reconstruct(
-            id, file_path, now, now, None, None, None, false, None, None,
+            id, file_path, now, now, None, None, None, None, false, None, None,
             None, None, None, None, None, None, None, None, None, None, None,
             None, None, None, None, None
         )
@@ -192,6 +196,28 @@ impl Photo {
     pub fn remove_color_label(&mut self) {
         self.color_label = None;
         self.modified_at = Utc::now();
+    }
+
+    /// Retorna a flag atual
+    pub fn flag(&self) -> Option<Flag> {
+        self.flag
+    }
+
+    /// Define a flag
+    pub fn set_flag(&mut self, flag: Flag) {
+        self.flag = Some(flag);
+        self.modified_at = Utc::now();
+    }
+
+    /// Remove a flag
+    pub fn remove_flag(&mut self) {
+        self.flag = None;
+        self.modified_at = Utc::now();
+    }
+
+    /// Verifica se a foto tem flag
+    pub fn has_flag(&self) -> bool {
+        self.flag.is_some()
     }
 
     /// Retorna a data de importação
@@ -420,6 +446,7 @@ mod tests {
         assert_eq!(photo.file_path(), &path);
         assert_eq!(photo.rating(), None);
         assert_eq!(photo.color_label(), None);
+        assert_eq!(photo.flag(), None);
         assert!(!photo.is_edited());
     }
 
@@ -495,6 +522,36 @@ mod tests {
         // Assert
         assert_eq!(photo.color_label(), None);
         assert!(!photo.has_color_label());
+    }
+
+    #[test]
+    fn test_photo_set_flag() {
+        // Arrange
+        let mut photo = Photo::new_test();
+        let original_modified = photo.modified_at();
+
+        // Act
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        photo.set_flag(Flag::Pick);
+
+        // Assert
+        assert_eq!(photo.flag(), Some(Flag::Pick));
+        assert!(photo.has_flag());
+        assert!(photo.modified_at() > original_modified);
+    }
+
+    #[test]
+    fn test_photo_remove_flag() {
+        // Arrange
+        let mut photo = Photo::new_test();
+        photo.set_flag(Flag::Reject);
+
+        // Act
+        photo.remove_flag();
+
+        // Assert
+        assert_eq!(photo.flag(), None);
+        assert!(!photo.has_flag());
     }
 
     #[test]
@@ -589,12 +646,12 @@ mod tests {
         // Usar reconstruct para garantir timestamps idênticos
         // Usar reconstruct para garantir timestamps idênticos
         let photo1 = Photo::reconstruct(
-            id, path.clone(), now, now, None, None, None, false, None, None,
+            id, path.clone(), now, now, None, None, None, None, false, None, None,
             None, None, None, None, None, None, None, None, None, None, None,
             None, None, None, None, None
         );
         let photo2 = Photo::reconstruct(
-            id, path, now, now, None, None, None, false, None, None,
+            id, path, now, now, None, None, None, None, false, None, None,
             None, None, None, None, None, None, None, None, None, None, None,
             None, None, None, None, None
         );
@@ -628,6 +685,7 @@ mod tests {
         let mut photo1 = Photo::new_test();
         photo1.rate(Rating::FIVE).unwrap();
         photo1.set_color_label(ColorLabel::Green);
+        photo1.set_flag(Flag::Pick);
 
         // Act
         let photo2 = photo1.clone();
@@ -636,6 +694,7 @@ mod tests {
         assert_eq!(photo1, photo2);
         assert_eq!(photo2.rating(), Some(Rating::FIVE));
         assert_eq!(photo2.color_label(), Some(ColorLabel::Green));
+        assert_eq!(photo2.flag(), Some(Flag::Pick));
     }
 
     // 🔴 RED: Tests for Tone Curve fields
@@ -720,7 +779,7 @@ mod tests {
 
         // Act - Reconstruct with tone curve values
         let photo = Photo::reconstruct(
-            id, path, now, now, None, None, None, true, None, None,
+            id, path, now, now, None, None, None, None, true, None, None,
             Some(1.0), Some(1.0), None, None, None, None, None, None, None, None, None,
             Some(-40.0), Some(-20.0), Some(20.0), Some(40.0), None
         );
@@ -776,6 +835,25 @@ mod business_logic_tests {
     }
 
     #[test]
+    fn test_flag_workflow() {
+        // Arrange
+        let mut photo = Photo::new_test();
+
+        // Act & Assert
+        assert!(!photo.has_flag());
+
+        photo.set_flag(Flag::Pick);
+        assert!(photo.has_flag());
+        assert_eq!(photo.flag(), Some(Flag::Pick));
+
+        photo.set_flag(Flag::Reject);
+        assert_eq!(photo.flag(), Some(Flag::Reject));
+
+        photo.remove_flag();
+        assert!(!photo.has_flag());
+    }
+
+    #[test]
     fn test_edit_workflow() {
         // Arrange
         let mut photo = Photo::new_test();
@@ -798,6 +876,7 @@ mod business_logic_tests {
         // Act - Simular workflow real de usuário
         photo.rate(Rating::FOUR).unwrap();
         photo.set_color_label(ColorLabel::Green);
+        photo.set_flag(Flag::Pick);
         photo.mark_as_edited();
 
         // Assert

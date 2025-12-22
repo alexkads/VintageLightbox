@@ -20,6 +20,7 @@ pub enum FilmstripAction {
     Delete,
     SelectAll,
     DeselectAll,
+    SetFlag(String, i32),
 }
 
 pub struct Filmstrip {
@@ -127,7 +128,73 @@ impl Filmstrip {
                         );
 
                         // Handle click with modifier keys for multi-selection
-                        if response.clicked() {
+                        // Note: We check this AFTER flags to allow flags to steal clicks if needed
+                        let mut thumb_clicked = response.clicked();
+
+                        // Interactive Flags (Pick/Reject) - Top Left
+                        // Always show if set, or show ghosts if hovered
+                        let is_hovered = response.hovered();
+                        let current_flag = photo.flag.unwrap_or(0);
+                        
+                        if is_hovered || current_flag != 0 {
+                            let flag_size = 14.0;
+                            let padding = 4.0;
+                            let spacing = 2.0;
+
+                            // Pick Icon [P]
+                            let pick_rect = egui::Rect::from_min_size(
+                                rect.min + Vec2::new(padding, padding),
+                                Vec2::new(flag_size, flag_size)
+                            );
+                            
+                            // Reject Icon [X]
+                            let reject_rect = egui::Rect::from_min_size(
+                                rect.min + Vec2::new(padding + flag_size + spacing, padding),
+                                Vec2::new(flag_size, flag_size)
+                            );
+
+                            let pick_response = ui.interact(pick_rect, egui::Id::new(format!("pick_{}", photo.id)), Sense::click());
+                            let reject_response = ui.interact(reject_rect, egui::Id::new(format!("reject_{}", photo.id)), Sense::click());
+                            
+                            // Handle Flag Clicks
+                            if pick_response.clicked() {
+                                thumb_clicked = false; // Consume click
+                                let new_flag = if current_flag == 1 { 0 } else { 1 }; // Toggle
+                                action = Some(FilmstripAction::SetFlag(photo.id.clone(), new_flag));
+                            } else if reject_response.clicked() {
+                                thumb_clicked = false; // Consume click
+                                let new_flag = if current_flag == -1 { 0 } else { -1 }; // Toggle
+                                action = Some(FilmstripAction::SetFlag(photo.id.clone(), new_flag));
+                            }
+
+                            // Draw Pick Icon
+                            let pick_bg = if current_flag == 1 { Theme::ACCENT_SUCCESS } else if pick_response.hovered() { Color32::from_gray(100) } else { Color32::from_black_alpha(100) };
+                            let pick_fg = if current_flag == 1 { Color32::WHITE } else { Color32::from_gray(200) };
+                            
+                            ui.painter().circle_filled(pick_rect.center(), flag_size / 2.0, pick_bg);
+                            ui.painter().text(
+                                pick_rect.center(),
+                                egui::Align2::CENTER_CENTER,
+                                "P", // Or "🏳"
+                                egui::FontId::proportional(9.0),
+                                pick_fg,
+                            );
+
+                            // Draw Reject Icon
+                            let reject_bg = if current_flag == -1 { Theme::ACCENT_ERROR } else if reject_response.hovered() { Color32::from_gray(100) } else { Color32::from_black_alpha(100) };
+                            let reject_fg = if current_flag == -1 { Color32::WHITE } else { Color32::from_gray(200) };
+                            
+                            ui.painter().circle_filled(reject_rect.center(), flag_size / 2.0, reject_bg);
+                            ui.painter().text(
+                                reject_rect.center(),
+                                egui::Align2::CENTER_CENTER,
+                                "X", 
+                                egui::FontId::proportional(9.0),
+                                reject_fg,
+                            );
+                        }
+
+                        if thumb_clicked {
                             let modifiers = ui.input(|i| i.modifiers);
                             
                             if modifiers.command {
@@ -301,6 +368,7 @@ impl Filmstrip {
         photos: &[PhotoViewModel],
         selected_photo_id: &Option<String>,
         mut on_select: impl FnMut(String),
+        mut on_flag: impl FnMut(String, i32),
     ) {
         // Poll for completed thumbnails (non-blocking)
         let results = self.thumbnail_loader.poll_results();
@@ -439,9 +507,73 @@ impl Filmstrip {
                             );
                         }
 
+                        // Interactive Flags (Pick/Reject) - Top Left
+                        // Always show if set, or show ghosts if hovered
+                        let is_hovered = response.hovered();
+                        let current_flag = photo.flag.unwrap_or(0);
+                        let mut thumb_clicked = response.clicked();
+
+                        if is_hovered || current_flag != 0 {
+                            let flag_size = 14.0;
+                            let padding = 4.0;
+                            let spacing = 2.0;
+
+                            // Pick Icon [P]
+                            let pick_rect = egui::Rect::from_min_size(
+                                rect.min + Vec2::new(padding, padding),
+                                Vec2::new(flag_size, flag_size)
+                            );
+                            
+                            // Reject Icon [X]
+                            let reject_rect = egui::Rect::from_min_size(
+                                rect.min + Vec2::new(padding + flag_size + spacing, padding),
+                                Vec2::new(flag_size, flag_size)
+                            );
+
+                            let pick_response = ui.interact(pick_rect, egui::Id::new(format!("dv_pick_{}", photo.id)), Sense::click());
+                            let reject_response = ui.interact(reject_rect, egui::Id::new(format!("dv_reject_{}", photo.id)), Sense::click());
+                            
+                            // Handle Flag Clicks
+                            if pick_response.clicked() {
+                                thumb_clicked = false; // Consume click
+                                let new_flag = if current_flag == 1 { 0 } else { 1 }; // Toggle
+                                on_flag(photo.id.clone(), new_flag);
+                            } else if reject_response.clicked() {
+                                thumb_clicked = false; // Consume click
+                                let new_flag = if current_flag == -1 { 0 } else { -1 }; // Toggle
+                                on_flag(photo.id.clone(), new_flag);
+                            }
+
+                            // Draw Pick Icon
+                            let pick_bg = if current_flag == 1 { Theme::ACCENT_SUCCESS } else if pick_response.hovered() { Color32::from_gray(100) } else { Color32::from_black_alpha(100) };
+                            let pick_fg = if current_flag == 1 { Color32::WHITE } else { Color32::from_gray(200) };
+                            
+                            ui.painter().circle_filled(pick_rect.center(), flag_size / 2.0, pick_bg);
+                            ui.painter().text(
+                                pick_rect.center(),
+                                egui::Align2::CENTER_CENTER,
+                                "P",
+                                egui::FontId::proportional(9.0),
+                                pick_fg,
+                            );
+
+                            // Draw Reject Icon
+                            let reject_bg = if current_flag == -1 { Theme::ACCENT_ERROR } else if reject_response.hovered() { Color32::from_gray(100) } else { Color32::from_black_alpha(100) };
+                            let reject_fg = if current_flag == -1 { Color32::WHITE } else { Color32::from_gray(200) };
+                            
+                            ui.painter().circle_filled(reject_rect.center(), flag_size / 2.0, reject_bg);
+                            ui.painter().text(
+                                reject_rect.center(),
+                                egui::Align2::CENTER_CENTER,
+                                "X", 
+                                egui::FontId::proportional(9.0),
+                                reject_fg,
+                            );
+                        }
+
                         // Handle click
-                        if response.clicked() {
-                            on_select(photo.id.clone());
+                        if thumb_clicked {
+                             on_select(photo.id.clone());
                         }
 
                         ui.add_space(Self::THUMBNAIL_SPACING);

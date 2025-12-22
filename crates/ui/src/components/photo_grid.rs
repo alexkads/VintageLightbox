@@ -410,6 +410,35 @@ impl PhotoGrid {
             );
         }
 
+        // Display Flags (Pick/Reject) - Top Left
+        if let Some(flag) = photo.flag {
+            if flag != 0 {
+                let flag_pos = rect.min + Vec2::new(8.0, 8.0);
+                
+                // Background circle
+                let flag_color = if flag == 1 { Theme::ACCENT_SUCCESS } else { Theme::ACCENT_ERROR };
+                ui.painter().circle_filled(
+                    flag_pos + Vec2::new(10.0, 10.0),
+                    12.0,
+                    flag_color,
+                );
+                
+                
+                // Or better icons: P for Pick, X for Reject
+                // Lightroom uses a white flag icon for pick, and a black flag with x for reject.
+                // Let's use simple text for now.
+                let display_icon = if flag == 1 { "P" } else { "X" };
+                
+                ui.painter().text(
+                    flag_pos + Vec2::new(10.0, 10.0),
+                    egui::Align2::CENTER_CENTER,
+                    display_icon,
+                    egui::FontId::proportional(14.0),
+                    Color32::WHITE,
+                );
+            }
+        }
+
         // Selection border - show for selected OR hovered
         // Different border for multi-selection vs primary selection
         if is_primary_selected {

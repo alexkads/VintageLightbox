@@ -52,6 +52,22 @@ impl DevelopView {
                         state.loaded_photo_id = None;
                         ctx.request_repaint();
                     },
+                    |photo_id, flag_code| {
+                        // Handle flag
+                        let controller = photo_controller.clone();
+                        let library_controller = library_controller.clone();
+                        let photo_sender = photo_sender.clone();
+                        let ctx_clone = ctx.clone();
+                        
+                        tokio::spawn(async move {
+                            let _ = controller.set_flag(&photo_id, flag_code).await;
+                            // Reload
+                            if let Ok(photos) = library_controller.get_all_photos().await {
+                                     let _ = photo_sender.send(Ok(photos)).await;
+                            }
+                            ctx_clone.request_repaint();
+                        });
+                    }
                 );
             });
 

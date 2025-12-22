@@ -224,6 +224,23 @@ impl<'a> TabViewer for DockViewer<'a> {
                                 self.context.state.show_delete_confirmation = true;
                             }
                         }
+                        FilmstripAction::SetFlag(photo_id, flag_code) => {
+                            let controller = self.context.photo_controller.clone();
+                            let library_controller = self.context.library_controller.clone();
+                            let photo_sender = self.context.photo_sender.clone();
+                            let ctx_clone = self.context.ctx.clone();
+                            let id = photo_id.clone();
+                            
+                            tokio::spawn(async move {
+                                let _ = controller.set_flag(&id, flag_code).await;
+                                
+                                // Reload
+                                if let Ok(photos) = library_controller.get_all_photos().await {
+                                     let _ = photo_sender.send(Ok(photos)).await;
+                                }
+                                ctx_clone.request_repaint();
+                            });
+                        }
                     }
                 }
                 

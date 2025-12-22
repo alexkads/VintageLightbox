@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use domain::{
     entities::Photo,
     repositories::PhotoRepository,
-    value_objects::{ColorLabel, FilePath, PhotoId, Rating},
+    value_objects::{ColorLabel, FilePath, Flag, PhotoId, Rating},
     DomainError, DomainResult,
 };
 use sqlx::{Row, SqlitePool};
@@ -45,6 +45,7 @@ impl PhotoRepositoryImpl {
 
         let rating_val: Option<i64> = row.try_get("rating").ok();
         let color_label_str: Option<String> = row.try_get("color_label").ok();
+        let flag_val: Option<i32> = row.try_get("flag").ok();
         let is_edited: bool = row.try_get("is_edited").unwrap_or(false);
         let thumbnail_path_str: Option<String> = row.try_get("thumbnail_path").ok();
         let preview_path_str: Option<String> = row.try_get("preview_path").ok();
@@ -80,6 +81,7 @@ impl PhotoRepositoryImpl {
         let file_path = FilePath::new(&file_path_str)?;
         let rating = rating_val.and_then(|v| Rating::new(v as u8).ok());
         let color_label = color_label_str.and_then(|s| ColorLabel::from_name(&s).ok());
+        let flag = flag_val.and_then(Flag::from_code);
         let thumbnail_path = thumbnail_path_str.and_then(|s| FilePath::new(&s).ok());
         let preview_path = preview_path_str.and_then(|s| FilePath::new(&s).ok());
 
@@ -100,6 +102,7 @@ impl PhotoRepositoryImpl {
             metadata,
             rating,
             color_label,
+            flag,
             is_edited,
             thumbnail_path,
             preview_path,
@@ -130,6 +133,7 @@ impl PhotoRepository for PhotoRepositoryImpl {
         let file_path = photo.file_path().to_string_lossy().to_string();
         let rating = photo.rating().map(|r| r.value() as i64);
         let color_label = photo.color_label().map(|c| c.name().to_string());
+        let flag = photo.flag().map(|f| f.as_code());
         let is_edited = photo.is_edited();
         let imported_at = photo.imported_at().to_rfc3339();
         let modified_at = photo.modified_at().to_rfc3339();
@@ -157,13 +161,14 @@ impl PhotoRepository for PhotoRepositoryImpl {
             .and_then(|m| serde_json::to_string(m).ok());
 
         sqlx::query(
-            "INSERT INTO photos (id, file_path, rating, color_label, is_edited, imported_at, modified_at, metadata, thumbnail_path, preview_path, edit_exposure, edit_contrast, edit_temperature, edit_tint, edit_highlights, edit_shadows, edit_whites, edit_blacks, edit_clarity, edit_vibrance, edit_saturation, edit_tone_curve_shadows, edit_tone_curve_darks, edit_tone_curve_lights, edit_tone_curve_highlights, content_hash)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO photos (id, file_path, rating, color_label, flag, is_edited, imported_at, modified_at, metadata, thumbnail_path, preview_path, edit_exposure, edit_contrast, edit_temperature, edit_tint, edit_highlights, edit_shadows, edit_whites, edit_blacks, edit_clarity, edit_vibrance, edit_saturation, edit_tone_curve_shadows, edit_tone_curve_darks, edit_tone_curve_lights, edit_tone_curve_highlights, content_hash)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         .bind(&id)
         .bind(&file_path)
         .bind(rating)
         .bind(color_label)
+        .bind(flag)
         .bind(is_edited)
         .bind(&imported_at)
         .bind(&modified_at)
@@ -224,6 +229,7 @@ impl PhotoRepository for PhotoRepositoryImpl {
         let file_path = photo.file_path().to_string_lossy().to_string();
         let rating = photo.rating().map(|r| r.value() as i64);
         let color_label = photo.color_label().map(|c| c.name().to_string());
+        let flag = photo.flag().map(|f| f.as_code());
         let is_edited = photo.is_edited();
         let modified_at = photo.modified_at().to_rfc3339();
         let thumbnail_path = photo.thumbnail_path().map(|p| p.to_string_lossy().to_string());
@@ -251,12 +257,13 @@ impl PhotoRepository for PhotoRepositoryImpl {
 
         let result = sqlx::query(
             "UPDATE photos
-             SET file_path = ?, rating = ?, color_label = ?, is_edited = ?, modified_at = ?, metadata = ?, thumbnail_path = ?, preview_path = ?, edit_exposure = ?, edit_contrast = ?, edit_temperature = ?, edit_tint = ?, edit_highlights = ?, edit_shadows = ?, edit_whites = ?, edit_blacks = ?, edit_clarity = ?, edit_vibrance = ?, edit_saturation = ?, edit_tone_curve_shadows = ?, edit_tone_curve_darks = ?, edit_tone_curve_lights = ?, edit_tone_curve_highlights = ?, content_hash = ?
+             SET file_path = ?, rating = ?, color_label = ?, flag = ?, is_edited = ?, modified_at = ?, metadata = ?, thumbnail_path = ?, preview_path = ?, edit_exposure = ?, edit_contrast = ?, edit_temperature = ?, edit_tint = ?, edit_highlights = ?, edit_shadows = ?, edit_whites = ?, edit_blacks = ?, edit_clarity = ?, edit_vibrance = ?, edit_saturation = ?, edit_tone_curve_shadows = ?, edit_tone_curve_darks = ?, edit_tone_curve_lights = ?, edit_tone_curve_highlights = ?, content_hash = ?
              WHERE id = ?"
         )
         .bind(&file_path)
         .bind(rating)
         .bind(color_label)
+        .bind(flag)
         .bind(is_edited)
         .bind(&modified_at)
         .bind(metadata)

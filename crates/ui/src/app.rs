@@ -128,6 +128,30 @@ impl VintageLightboxApp {
             ctx.request_repaint();
         });
     }
+
+    /// Helper action to set color label via keyboard shortcut
+    fn set_color_label_action(&self, ctx: &egui::Context, label: &str) {
+        if let Some(photo_id) = &self.state.library_selected_photo_id {
+            let id = photo_id.clone();
+            let label = label.to_string();
+            let controller = self.photo_controller.clone();
+            let library_controller = self.library_controller.clone();
+            let photo_sender = self.photo_sender.clone();
+            let ctx_clone = ctx.clone();
+            
+            tokio::spawn(async move {
+                let _ = controller.set_color_label(&id, &label).await;
+                
+                 // Reload photos list to update UI
+                let _ = match library_controller.get_all_photos().await {
+                    Ok(photos) => photo_sender.send(Ok(photos)).await,
+                    Err(e) => photo_sender.send(Err(e)).await,
+                };
+                ctx_clone.request_repaint();
+            });
+            // Toast handled by UI update or we can add one here
+        }
+    }
 }
 
 impl eframe::App for VintageLightboxApp {
@@ -652,6 +676,97 @@ impl eframe::App for VintageLightboxApp {
                     if !self.state.selected_photo_ids.is_empty() {
                         self.state.show_delete_confirmation = true;
                     }
+                }
+
+                // Flags
+                // P: Pick (Flag)
+                if i.key_pressed(egui::Key::P) {
+                    if let Some(photo_id) = &self.state.library_selected_photo_id {
+                        let id = photo_id.clone();
+                        let controller = self.photo_controller.clone();
+                        let library_controller = self.library_controller.clone();
+                        let photo_sender = self.photo_sender.clone();
+                        let ctx_clone = ctx.clone();
+                        
+                        tokio::spawn(async move {
+                            // 1 = Pick
+                            let _ = controller.set_flag(&id, 1).await;
+                            
+                             // Reload photos list to update UI
+                            let _ = match library_controller.get_all_photos().await {
+                                Ok(photos) => photo_sender.send(Ok(photos)).await,
+                                Err(e) => photo_sender.send(Err(e)).await,
+                            };
+                            ctx_clone.request_repaint();
+                        });
+                        self.state.toasts.info("Flagged as Pick");
+                    }
+                }
+
+                // X: Reject
+                if i.key_pressed(egui::Key::X) {
+                    if let Some(photo_id) = &self.state.library_selected_photo_id {
+                        let id = photo_id.clone();
+                        let controller = self.photo_controller.clone();
+                         let library_controller = self.library_controller.clone();
+                        let photo_sender = self.photo_sender.clone();
+                        let ctx_clone = ctx.clone();
+                         
+                        tokio::spawn(async move {
+                            // -1 = Reject (using i32 representation)
+                            let _ = controller.set_flag(&id, -1).await;
+                            
+                             // Reload photos list to update UI
+                            let _ = match library_controller.get_all_photos().await {
+                                Ok(photos) => photo_sender.send(Ok(photos)).await,
+                                Err(e) => photo_sender.send(Err(e)).await,
+                            };
+                            ctx_clone.request_repaint();
+                        });
+                        self.state.toasts.info("Flagged as Reject");
+                    }
+                }
+
+                // U: Unflag
+                if i.key_pressed(egui::Key::U) {
+                     if let Some(photo_id) = &self.state.library_selected_photo_id {
+                        let id = photo_id.clone();
+                        let controller = self.photo_controller.clone();
+                         let library_controller = self.library_controller.clone();
+                        let photo_sender = self.photo_sender.clone();
+                        let ctx_clone = ctx.clone();
+                        
+                        tokio::spawn(async move {
+                            // 0 = Remove flag
+                            let _ = controller.set_flag(&id, 0).await;
+                            
+                             // Reload photos list to update UI
+                            let _ = match library_controller.get_all_photos().await {
+                                Ok(photos) => photo_sender.send(Ok(photos)).await,
+                                Err(e) => photo_sender.send(Err(e)).await,
+                            };
+                            ctx_clone.request_repaint();
+                        });
+                         self.state.toasts.info("Removed Flag");
+                    }
+                }
+
+                // Color Labels
+                // 6: Red
+                if i.key_pressed(egui::Key::Num6) {
+                    self.set_color_label_action(ctx, "Red");
+                }
+                // 7: Yellow
+                if i.key_pressed(egui::Key::Num7) {
+                    self.set_color_label_action(ctx, "Yellow");
+                }
+                // 8: Green
+                if i.key_pressed(egui::Key::Num8) {
+                    self.set_color_label_action(ctx, "Green");
+                }
+                // 9: Blue
+                if i.key_pressed(egui::Key::Num9) {
+                     self.set_color_label_action(ctx, "Blue");
                 }
             });
         }

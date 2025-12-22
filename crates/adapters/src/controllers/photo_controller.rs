@@ -1,11 +1,12 @@
-use domain::value_objects::{PhotoId, ColorLabel, Rating};
-use use_cases::{RatePhotoUseCase, SetColorLabelUseCase, DeletePhotoUseCase};
+use domain::value_objects::{PhotoId, ColorLabel, Flag, Rating};
+use use_cases::{RatePhotoUseCase, SetColorLabelUseCase, SetFlagUseCase, DeletePhotoUseCase};
 use std::sync::Arc;
 
 /// Controller for photo operations (rating, color labels, etc.)
 pub struct PhotoController {
     rate_photo_use_case: Arc<RatePhotoUseCase>,
     set_color_label_use_case: Arc<SetColorLabelUseCase>,
+    set_flag_use_case: Arc<SetFlagUseCase>,
     delete_photo_use_case: Arc<DeletePhotoUseCase>,
 }
 
@@ -13,11 +14,13 @@ impl PhotoController {
     pub fn new(
         rate_photo_use_case: Arc<RatePhotoUseCase>,
         set_color_label_use_case: Arc<SetColorLabelUseCase>,
+        set_flag_use_case: Arc<SetFlagUseCase>,
         delete_photo_use_case: Arc<DeletePhotoUseCase>,
     ) -> Self {
         Self {
             rate_photo_use_case,
             set_color_label_use_case,
+            set_flag_use_case,
             delete_photo_use_case,
         }
     }
@@ -87,6 +90,33 @@ impl PhotoController {
             .execute(photo_id)
             .await
             .map_err(|e| format!("Failed to delete photo: {}", e))?;
+
+        Ok(())
+    }
+
+    /// Set flag on a photo
+    pub async fn set_flag(&self, photo_id: &str, flag_code: i32) -> Result<(), String> {
+        // Convert string ID to PhotoId
+        let photo_id = PhotoId::from_string(photo_id)
+            .map_err(|e| format!("Invalid photo ID: {}", e))?;
+
+        // Execute appropriate use case method
+        if flag_code == 0 {
+            // Remove flag
+            self.set_flag_use_case
+                .remove_flag(photo_id)
+                .await
+                .map_err(|e| format!("Failed to remove flag: {}", e))?;
+        } else {
+            // Set flag
+            let flag = Flag::from_code(flag_code)
+                .ok_or_else(|| format!("Invalid flag code '{}'", flag_code))?;
+            
+            self.set_flag_use_case
+                .execute(photo_id, flag)
+                .await
+                .map_err(|e| format!("Failed to set flag: {}", e))?;
+        }
 
         Ok(())
     }
