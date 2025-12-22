@@ -5,14 +5,16 @@ use eframe::egui;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use infrastructure::cache::preview_manager::PreviewManager;
+use egui_dock::DockArea;
 
 use adapters::controllers::*;
 use adapters::view_models::PhotoViewModel;
 use crate::state::{AppState, CurrentView};
 use crate::design_system::{theme::Theme, widgets};
-use crate::views::{library_view::LibraryView, develop_view::DevelopView};
 use crate::keyboard::KeyboardHandler;
 use crate::async_loader::{AsyncImageProcessor, ImageProcessRequest};
+use crate::docking::{DockViewer, DockViewerContext};
+use crate::components::{photo_grid::PhotoGrid, filmstrip::Filmstrip};
 
 /// Main application struct
 pub struct VintageLightboxApp {
@@ -28,12 +30,6 @@ pub struct VintageLightboxApp {
     pub editor_controller: Arc<EditorController>,
     pub export_controller: Arc<ExportController>,
     pub photo_controller: Arc<PhotoController>,
-
-    // ============================================
-    // Views
-    // ============================================
-    library_view: LibraryView,
-    develop_view: DevelopView,
 
     // ============================================
     // Input Handlers
@@ -60,6 +56,14 @@ pub struct VintageLightboxApp {
     
     /// Preview Manager for instant sync lookups
     preview_manager: Arc<PreviewManager>,
+    
+    // ============================================
+    // Docking UI Components
+    // ============================================
+    photo_grid: PhotoGrid,
+    filmstrip: Filmstrip,
+    library_dock_state: egui_dock::DockState<crate::docking::DockTab>,
+    develop_dock_state: egui_dock::DockState<crate::docking::DockTab>,
 }
 
 impl VintageLightboxApp {
@@ -88,8 +92,6 @@ impl VintageLightboxApp {
             editor_controller,
             export_controller,
             photo_controller,
-            library_view: LibraryView::new(preview_manager.clone()),
-            develop_view: DevelopView::new(preview_manager.clone()),
             keyboard_handler: KeyboardHandler::new(),
             photo_receiver,
             photo_sender,
@@ -97,6 +99,15 @@ impl VintageLightboxApp {
             gpu_edit_processor: crate::gpu_processor::GpuImageProcessor::new(),
             current_edit_request_id: 0,
             requested_photo_id: None,
+            photo_grid: PhotoGrid::new(preview_manager.clone()),
+            filmstrip: Filmstrip::new(preview_manager.clone()),
+            // Load dock states from storage, or create defaults
+            library_dock_state: cc.storage
+                .and_then(|s| eframe::get_value(s, "library_dock_state"))
+                .unwrap_or_else(crate::docking::create_library_layout),
+            develop_dock_state: cc.storage
+                .and_then(|s| eframe::get_value(s, "develop_dock_state"))
+                .unwrap_or_else(crate::docking::create_develop_layout),
             preview_manager,
         }
     }
@@ -120,6 +131,12 @@ impl VintageLightboxApp {
 }
 
 impl eframe::App for VintageLightboxApp {
+    /// Save dock layouts to storage on exit
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        eframe::set_value(storage, "library_dock_state", &self.library_dock_state);
+        eframe::set_value(storage, "develop_dock_state", &self.develop_dock_state);
+    }
+
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Poll for async photo loading results
         if let Ok(result) = self.photo_receiver.try_recv() {
@@ -757,25 +774,32 @@ impl eframe::App for VintageLightboxApp {
                 self.show_toolbar(ui);
             });
 
-        // Main content area
-        egui::CentralPanel::default().show(ctx, |ui| {
-            match self.state.current_view {
-                CurrentView::Library => {
-                    self.library_view.show(ui, &mut self.state, ctx);
-                }
-                CurrentView::Develop => {
-                    self.develop_view.show(
-                        ui,
-                        &mut self.state,
-                        &self.editor_controller,
-                        &self.export_controller,
-                        &self.photo_controller,
-                        &self.library_controller,
-                        &self.photo_sender,
-                        ctx,
-                    );
-                }
-            }
+        // Main content area - Docking UI
+        egui::CentralPanel::default().show(ctx, |_ui| {
+            // Get the appropriate dock state for the current view
+            let dock_state = match self.state.current_view {
+                CurrentView::Library => &mut self.library_dock_state,
+                CurrentView::Develop => &mut self.develop_dock_state,
+            };
+            
+            // Create dock viewer context with all required references
+            let context = DockViewerContext {
+                state: &mut self.state,
+                library_controller: &self.library_controller,
+                editor_controller: &self.editor_controller,
+                export_controller: &self.export_controller,
+                photo_controller: &self.photo_controller,
+                preview_manager: &self.preview_manager,
+                photo_sender: &self.photo_sender,
+                ctx,
+                photo_grid: &mut self.photo_grid,
+                filmstrip: &mut self.filmstrip,
+            };
+            
+            // Render the dock area with all tabs
+            let mut dock_viewer = DockViewer::new(context);
+            DockArea::new(dock_state)
+                .show(ctx, &mut dock_viewer);
         });
 
         // Busy overlay

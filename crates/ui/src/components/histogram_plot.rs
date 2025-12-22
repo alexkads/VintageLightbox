@@ -6,8 +6,10 @@ use egui_plot::{Plot, PlotPoints, Line, Legend};
 use crate::components::histogram::HistogramData;
 use crate::design_system::theme::Theme;
 
+#[allow(dead_code)]
 pub struct HistogramPlot;
 
+#[allow(dead_code)]
 impl HistogramPlot {
     /// Show interactive histogram widget with zoom and hover
     pub fn show(ui: &mut Ui, histogram_data: Option<&HistogramData>) {

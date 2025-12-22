@@ -10,6 +10,7 @@ mod components;
 mod views;
 pub mod async_loader;
 pub mod gpu_processor;
+pub mod docking;
 
 use std::sync::Arc;
 

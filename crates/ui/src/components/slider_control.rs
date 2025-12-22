@@ -4,8 +4,10 @@
 use egui::{Ui, Slider};
 use crate::design_system::theme::Theme;
 
+#[allow(dead_code)]
 pub struct SliderControl;
 
+#[allow(dead_code)]
 impl SliderControl {
     /// Show a labeled slider with value display
     pub fn show(

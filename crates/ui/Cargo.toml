@@ -16,6 +16,8 @@ eframe = { version = "0.31", default-features = false, features = [
 egui_extras = { version = "0.31", features = ["image"] }
 egui-notify = "0.19"
 egui_plot = "0.31"
+egui_dock = { version = "0.16", features = ["serde"] }
+serde = { version = "1.0", features = ["derive"] }
 poll-promise = "0.3"
 tokio.workspace = true
 rfd = { version = "0.14.1", features = ["file-handle-inner"] }

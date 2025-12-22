@@ -2,7 +2,7 @@
 // Visualizes photo library statistics
 
 use egui::Ui;
-use egui_plot::{Plot, PlotPoints, Bar, BarChart};
+use egui_plot::{Plot, Bar, BarChart};
 use adapters::view_models::PhotoViewModel;
 use crate::design_system::theme::Theme;
 

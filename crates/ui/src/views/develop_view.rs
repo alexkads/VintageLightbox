@@ -9,10 +9,12 @@ use crate::components::filmstrip::Filmstrip;
 use std::sync::Arc;
 use infrastructure::cache::preview_manager::PreviewManager;
 
+#[allow(dead_code)]
 pub struct DevelopView {
     filmstrip: Filmstrip,
 }
 
+#[allow(dead_code)]
 impl DevelopView {
     pub fn new(preview_manager: Arc<PreviewManager>) -> Self {
         Self {

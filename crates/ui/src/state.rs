@@ -9,6 +9,8 @@ use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use crate::components::import_dialogs::{ImportPreviewDialog, ImportProgressDialog};
 use crate::design_system::theme_selector::ThemeVariant;
+use crate::docking::DockTab;
+use egui_dock::DockState;
 use egui_notify::Toasts;
 
 /// Snapshot of editing state for undo/redo
@@ -222,6 +224,14 @@ pub struct AppState {
     pub import_progress_dialog: Option<ImportProgressDialog>,
     /// Receiver for import preview dialog (async communication)
     pub pending_import_preview_receiver: Option<tokio::sync::mpsc::Receiver<Option<ImportPreviewDialog>>>,
+
+    // ============================================
+    // Docking System (egui_dock)
+    // ============================================
+    /// Dock state for Library view layout
+    pub library_dock_state: DockState<DockTab>,
+    /// Dock state for Develop view layout
+    pub develop_dock_state: DockState<DockTab>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -309,6 +319,8 @@ impl AppState {
             pending_import_preview_receiver: None,
             toasts: Toasts::default(),
             selected_theme: ThemeVariant::default(),
+            library_dock_state: crate::docking::create_library_layout(),
+            develop_dock_state: crate::docking::create_develop_layout(),
         }
     }
 
