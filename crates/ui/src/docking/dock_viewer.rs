@@ -111,6 +111,7 @@ impl<'a> TabViewer for DockViewer<'a> {
 
             DockTab::Filmstrip => {
                 use crate::state::CurrentView;
+                use crate::components::filmstrip::FilmstripAction;
                 let photos = self.context.state.photos.clone();
                 let current_view = self.context.state.current_view;
                 
@@ -118,12 +119,113 @@ impl<'a> TabViewer for DockViewer<'a> {
                 // The show() method updates library_selected_photo_id, so we need to sync
                 let prev_library_id = self.context.state.library_selected_photo_id.clone();
                 
-                self.context.filmstrip.show(
+                let action = self.context.filmstrip.show(
                     ui,
                     self.context.ctx,
                     &photos,
                     self.context.state,
                 );
+
+                // Handle context menu actions
+                if let Some(action) = action {
+                    match action {
+                        FilmstripAction::OpenInDevelop => {
+                            if let Some(photo_id) = self.context.state.library_selected_photo_id.clone() {
+                                self.context.state.develop_selected_photo_id = Some(photo_id);
+                                self.context.state.current_view = CurrentView::Develop;
+                                self.context.state.loaded_photo_id = None;
+                            }
+                        }
+                        FilmstripAction::Export => {
+                            // Trigger export for selected photo
+                            if let Some(metadata) = &self.context.state.detail_metadata.clone() {
+                                let controller = self.context.export_controller.clone();
+                                let id = metadata.id.clone();
+                                let ctx_clone = self.context.ctx.clone();
+
+                                let (export_tx, export_rx) = tokio::sync::mpsc::channel::<Result<String, String>>(1);
+                                self.context.state.pending_export_receiver = Some(export_rx);
+                                self.context.state.is_busy = true;
+                                self.context.state.busy_message = "Exporting...".to_string();
+                                self.context.state.toasts.info("Exporting photo...");
+
+                                tokio::spawn(async move {
+                                    let file_dialog = rfd::AsyncFileDialog::new()
+                                        .set_title("Export Photo")
+                                        .set_file_name("exported.jpg")
+                                        .add_filter("JPEG", &["jpg", "jpeg"])
+                                        .save_file()
+                                        .await;
+
+                                    if let Some(file) = file_dialog {
+                                        if let Some(path) = file.path().to_str() {
+                                            let path_string = path.to_string();
+                                            match controller.export_photo(id, path_string.clone()).await {
+                                                Ok(_) => {
+                                                    let _ = export_tx.send(Ok(path_string)).await;
+                                                }
+                                                Err(e) => {
+                                                    let _ = export_tx.send(Err(e)).await;
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        let _ = export_tx.send(Err("Cancelled".to_string())).await;
+                                    }
+                                    ctx_clone.request_repaint();
+                                });
+                            } else if let Some(photo_id) = &self.context.state.library_selected_photo_id {
+                                // No detail_metadata, use library_selected_photo_id
+                                let controller = self.context.export_controller.clone();
+                                let id = photo_id.clone();
+                                let ctx_clone = self.context.ctx.clone();
+
+                                let (export_tx, export_rx) = tokio::sync::mpsc::channel::<Result<String, String>>(1);
+                                self.context.state.pending_export_receiver = Some(export_rx);
+                                self.context.state.is_busy = true;
+                                self.context.state.busy_message = "Exporting...".to_string();
+                                self.context.state.toasts.info("Exporting photo...");
+
+                                tokio::spawn(async move {
+                                    let file_dialog = rfd::AsyncFileDialog::new()
+                                        .set_title("Export Photo")
+                                        .set_file_name("exported.jpg")
+                                        .add_filter("JPEG", &["jpg", "jpeg"])
+                                        .save_file()
+                                        .await;
+
+                                    if let Some(file) = file_dialog {
+                                        if let Some(path) = file.path().to_str() {
+                                            let path_string = path.to_string();
+                                            match controller.export_photo(id, path_string.clone()).await {
+                                                Ok(_) => {
+                                                    let _ = export_tx.send(Ok(path_string)).await;
+                                                }
+                                                Err(e) => {
+                                                    let _ = export_tx.send(Err(e)).await;
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        let _ = export_tx.send(Err("Cancelled".to_string())).await;
+                                    }
+                                    ctx_clone.request_repaint();
+                                });
+                            }
+                        }
+                        FilmstripAction::SelectAll => {
+                            self.context.state.select_all();
+                        }
+                        FilmstripAction::DeselectAll => {
+                            self.context.state.clear_selection();
+                        }
+                        FilmstripAction::Delete => {
+                            if !self.context.state.selected_photo_ids.is_empty() {
+                                self.context.state.show_delete_confirmation = true;
+                            }
+                        }
+                    }
+                }
                 
                 // If we're in Develop mode and library_selected_photo_id changed,
                 // sync it to develop_selected_photo_id and trigger image reload
@@ -435,6 +537,53 @@ impl<'a> DockViewer<'a> {
                 self.context.state.active_saturation = 0.0;
                 self.context.state.last_slider_change_time = Some(std::time::Instant::now());
                 self.context.state.pending_auto_save = true;
+            }
+
+            ui.add_space(Theme::SPACE_MD);
+
+            // Export button
+            if ui.button("📤 Export JPEG").clicked() {
+                if let Some(metadata) = &self.context.state.detail_metadata {
+                    let controller = self.context.export_controller.clone();
+                    let id = metadata.id.clone();
+                    let ctx_clone = self.context.ctx.clone();
+
+                    // Create channel for export result
+                    let (export_tx, export_rx) = tokio::sync::mpsc::channel::<Result<String, String>>(1);
+                    self.context.state.pending_export_receiver = Some(export_rx);
+                    self.context.state.is_busy = true;
+                    self.context.state.busy_message = "Exporting...".to_string();
+                    self.context.state.toasts.info("Exporting photo...");
+
+                    tokio::spawn(async move {
+                        let file_dialog = rfd::AsyncFileDialog::new()
+                            .set_title("Export Photo")
+                            .set_file_name("exported.jpg")
+                            .add_filter("JPEG", &["jpg", "jpeg"])
+                            .save_file()
+                            .await;
+
+                        if let Some(file) = file_dialog {
+                            if let Some(path) = file.path().to_str() {
+                                let path_string = path.to_string();
+                                match controller.export_photo(id, path_string.clone()).await {
+                                    Ok(_) => {
+                                        let _ = export_tx.send(Ok(path_string)).await;
+                                    }
+                                    Err(e) => {
+                                        let _ = export_tx.send(Err(e)).await;
+                                    }
+                                }
+                            }
+                        } else {
+                            // User cancelled
+                            let _ = export_tx.send(Err("Cancelled".to_string())).await;
+                        }
+                        ctx_clone.request_repaint();
+                    });
+                } else {
+                    self.context.state.toasts.warning("No photo selected");
+                }
             }
         });
     }

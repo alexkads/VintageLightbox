@@ -567,18 +567,28 @@ Criar versão mínima funcional com importação, visualização, edição bási
 - [x] Persistência no banco
 - [x] **Color labels na PhotoGrid**
 
-### 1.6 Exportação Básica (2 semanas)
+### 1.6 Exportação Básica (2 semanas) ✅ COMPLETO (22/dez/2025)
 - [x] Seleção de fotos para exportar (Single)
-- [x] Configurações: formato (JPEG), qualidade
+- [x] Configurações: formato (JPEG), qualidade 90%
 - [x] Redimensionamento simples (Via resize na exportação se necessário, MVP usa full)
-- [x] Aplicação de ajustes na exportação
+- [x] **Aplicação de TODOS os 11 ajustes na exportação**
+  - Exposure, Contrast, Temperature, Tint
+  - Highlights, Shadows, Whites, Blacks
+  - Clarity, Vibrance, Saturation
 - [x] Exportação single-threaded
-- [ ] Progress bar
-- [ ] Abrir pasta após exportação
+- [x] **Toast notifications** (Exporting..., Success!, Error)
+- [x] **Abrir pasta após exportação** (opener crate)
 
 **Critério de Aceitação**: Exportar 10 fotos de 24MP em < 20s
 
-### 1.7 Testes e Polish (1 semana)
+### 1.7 UI Polish & Context Menu (22/dez/2025) ✅
+- [x] **Context Menu na Filmstrip**
+  - [x] Ações: Open in Develop, Export, Select All, Deselect All, Delete
+  - [x] Suporte a **Right-click** e **Control+Click** (macOS)
+  - [x] Design compacto e hover effects
+- [x] Melhorias visuais na UI (Compact dimensions)
+
+### 1.8 Testes e Estabilização (Próximo)
 - [ ] Testes de integração
 - [ ] Correção de bugs críticos
 - [ ] Melhorias de UX baseadas em uso
@@ -629,6 +639,7 @@ Criar versão mínima funcional com importação, visualização, edição bási
 - ✅ **Sistema de Undo/Redo** - Histórico de 20 estados com Cmd+Z/Cmd+Shift+Z
 - ✅ **Before/After Toggle** - Comparação instantânea (tecla \\)
 - ✅ **Gray Photo Bug RESOLVIDO** - Navegação entre fotos funcionando perfeitamente
+- ✅ **Context Menu Nativo** - Ações rápidas na filmstrip com UX polida
 - ✅ File System operations completo
 - ✅ **MVP TOTALMENTE FUNCIONAL** - Workflow end-to-end completo com edição profissional
 

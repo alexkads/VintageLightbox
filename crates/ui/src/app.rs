@@ -166,6 +166,32 @@ impl eframe::App for VintageLightboxApp {
             }
         }
 
+        // Poll for export results
+        if let Some(receiver) = &mut self.state.pending_export_receiver {
+            if let Ok(result) = receiver.try_recv() {
+                match result {
+                    Ok(path) => {
+                        self.state.toasts.success("Exported successfully!");
+                        // Open the folder containing the exported file
+                        if let Some(parent) = std::path::Path::new(&path).parent() {
+                            if let Err(e) = opener::open(parent) {
+                                eprintln!("Failed to open folder: {}", e);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        // Don't show error toast for user cancellation
+                        if e != "Cancelled" {
+                            self.state.toasts.error(format!("Export failed: {}", e));
+                        }
+                    }
+                }
+                self.state.is_busy = false;
+                self.state.busy_message.clear();
+                self.state.pending_export_receiver = None;
+            }
+        }
+
         // Handle keyboard input
         self.keyboard_handler.handle_input(ctx, &mut self.state, &self.photo_controller);
 

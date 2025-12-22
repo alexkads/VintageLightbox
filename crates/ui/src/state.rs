@@ -171,6 +171,8 @@ pub struct AppState {
     // ============================================
     pub pending_import: Option<poll_promise::Promise<Result<(), String>>>,
     pub pending_export: Option<poll_promise::Promise<Result<(), String>>>,
+    /// Receiver for export results (path of exported file or error)
+    pub pending_export_receiver: Option<tokio::sync::mpsc::Receiver<Result<String, String>>>,
 
     // ============================================
     // Undo/Redo History
@@ -317,6 +319,7 @@ impl AppState {
             import_preview_dialog: None,
             import_progress_dialog: None,
             pending_import_preview_receiver: None,
+            pending_export_receiver: None,
             toasts: Toasts::default(),
             selected_theme: ThemeVariant::default(),
             library_dock_state: crate::docking::create_library_layout(),

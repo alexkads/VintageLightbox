@@ -237,7 +237,8 @@ impl PhotoGrid {
             if !state.is_photo_selected(&photo.id) {
                 state.single_select(&photo.id, index);
             }
-            self.context_menu.check_open(&response);
+            // Pass context for tracking open time
+            self.context_menu.check_open(ui.ctx(), &response);
         }
 
         // Handle left click with modifier keys for multi-selection

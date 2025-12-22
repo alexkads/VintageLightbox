@@ -33,6 +33,7 @@ bytemuck = { version = "1.14", features = ["derive"] }
 pollster = "0.4"
 lru = "0.16.2"
 dotenv = "0.15.0"
+opener = "0.7"
 
 
 [dev-dependencies]

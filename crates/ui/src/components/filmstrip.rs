@@ -8,14 +8,27 @@ use adapters::view_models::PhotoViewModel;
 use crate::design_system::theme::Theme;
 use crate::async_loader::{AsyncThumbnailLoader, ThumbnailRequest};
 use crate::state::AppState;
+use crate::components::context_menu::{ContextMenu, ContextMenuItem};
 use std::sync::Arc;
 use infrastructure::cache::preview_manager::PreviewManager;
+
+/// Represents an action triggered by the context menu
+#[derive(Clone, Debug, PartialEq)]
+pub enum FilmstripAction {
+    OpenInDevelop,
+    Export,
+    Delete,
+    SelectAll,
+    DeselectAll,
+}
 
 pub struct Filmstrip {
     /// Cache of loaded thumbnail textures
     thumbnail_cache: HashMap<String, egui::TextureHandle>,
     /// Async thumbnail loader (Rayon-powered)
     thumbnail_loader: AsyncThumbnailLoader,
+    /// Context menu for right-click actions
+    context_menu: ContextMenu,
 }
 
 impl Filmstrip {
@@ -27,6 +40,7 @@ impl Filmstrip {
         Self {
             thumbnail_cache: HashMap::new(),
             thumbnail_loader: AsyncThumbnailLoader::new(preview_manager),
+            context_menu: ContextMenu::new("filmstrip_context_menu"),
         }
     }
 
@@ -36,7 +50,8 @@ impl Filmstrip {
         ctx: &egui::Context,
         photos: &[PhotoViewModel],
         state: &mut AppState,
-    ) {
+    ) -> Option<FilmstripAction> {
+        let mut action: Option<FilmstripAction> = None;
         // Poll for completed thumbnails (non-blocking)
         let results = self.thumbnail_loader.poll_results();
         for result in results {
@@ -127,6 +142,20 @@ impl Filmstrip {
                                 state.single_select(&photo.id, index);
                             }
                             state.library_selected_photo_id = Some(photo.id.clone());
+                        }
+
+                        // Handle right-click or Control+click (macOS trackpad) - open context menu
+                        let is_control_click = response.clicked() && ui.input(|i| i.modifiers.ctrl);
+                        if response.secondary_clicked() || is_control_click {
+                            // If right-clicking on a non-selected photo, select it first
+                            if !state.is_photo_selected(&photo.id) {
+                                state.single_select(&photo.id, index);
+                            }
+                            state.library_selected_photo_id = Some(photo.id.clone());
+                            // Open context menu at click position
+                            if let Some(pos) = response.interact_pointer_pos() {
+                                self.context_menu.open(ctx, pos);
+                            }
                         }
 
                         // Draw thumbnail background
@@ -226,6 +255,42 @@ impl Filmstrip {
                     ui.add_space(Theme::SPACE_SM);
                 });
             });
+
+        // Show context menu if open
+        let selection_count = state.selection_count();
+        let items = vec![
+            ContextMenuItem::new("Open in Develop")
+                .with_icon("🖼️")
+                .with_shortcut("Enter"),
+            ContextMenuItem::new("Export JPEG...")
+                .with_icon("📤")
+                .with_shortcut("⌘E"),
+            ContextMenuItem::new("---"),  // Separator
+            ContextMenuItem::new("Select All")
+                .with_icon("☑️")
+                .with_shortcut("⌘A"),
+            ContextMenuItem::new("Deselect All")
+                .with_icon("☐")
+                .with_shortcut("⌘D"),
+            ContextMenuItem::new("---"),  // Separator
+            ContextMenuItem::new(&format!("Delete {} Photo{}", selection_count, if selection_count == 1 { "" } else { "s" }))
+                .with_icon("🗑️")
+                .with_shortcut("⌫")
+                .destructive(),
+        ];
+
+        if let Some(clicked_index) = self.context_menu.show(ctx, &items) {
+            action = match clicked_index {
+                0 => Some(FilmstripAction::OpenInDevelop),
+                1 => Some(FilmstripAction::Export),
+                3 => Some(FilmstripAction::SelectAll),
+                4 => Some(FilmstripAction::DeselectAll),
+                6 => Some(FilmstripAction::Delete),
+                _ => None,
+            };
+        }
+
+        action
     }
     
     /// Show filmstrip for Develop view (single selection mode with callback)

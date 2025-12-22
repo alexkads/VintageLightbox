@@ -330,6 +330,14 @@ impl DevelopView {
             if let Some(metadata) = &state.detail_metadata {
                 let controller = export_controller.clone();
                 let id = metadata.id.clone();
+                let ctx_clone = ctx.clone();
+
+                // Create channel for export result
+                let (export_tx, export_rx) = tokio::sync::mpsc::channel::<Result<String, String>>(1);
+                state.pending_export_receiver = Some(export_rx);
+                state.is_busy = true;
+                state.busy_message = "Exporting...".to_string();
+                state.toasts.info("Exporting photo...");
 
                 tokio::spawn(async move {
                     let file_dialog = rfd::AsyncFileDialog::new()
@@ -341,11 +349,21 @@ impl DevelopView {
 
                     if let Some(file) = file_dialog {
                         if let Some(path) = file.path().to_str() {
-                            if let Err(e) = controller.export_photo(id, path.to_string()).await {
-                                eprintln!("Failed to export: {}", e);
+                            let path_string = path.to_string();
+                            match controller.export_photo(id, path_string.clone()).await {
+                                Ok(_) => {
+                                    let _ = export_tx.send(Ok(path_string)).await;
+                                }
+                                Err(e) => {
+                                    let _ = export_tx.send(Err(e)).await;
+                                }
                             }
                         }
+                    } else {
+                        // User cancelled - send empty error to clear busy state
+                        let _ = export_tx.send(Err("Cancelled".to_string())).await;
                     }
+                    ctx_clone.request_repaint();
                 });
             }
         }
