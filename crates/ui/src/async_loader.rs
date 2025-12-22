@@ -171,6 +171,11 @@ impl AsyncThumbnailLoader {
     pub fn clear_requested(&mut self) {
         self.requested.clear();
     }
+
+    /// Clear requested state for a specific photo (useful when invalidating cache)
+    pub fn clear_requested_for(&mut self, photo_id: &str) {
+        self.requested.remove(photo_id);
+    }
 }
 
 // Default implementation removed because PreviewManager is required

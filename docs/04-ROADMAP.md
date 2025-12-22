@@ -186,6 +186,15 @@ Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Ar
   - **Filtro Recursivo**: Clicar em uma pasta filtra a grid para mostrar fotos dela e subpastas
   - **Integração Library**: Painel "Folders" na sidebar esquerda
 
+- ✅ **THUMBNAIL AUTO-REFRESH (22/dez/2025)** 🔄
+  - **Atualização Automática**: Thumbnails no Grid e Filmstrip atualizam quando efeitos são modificados no Develop
+  - **Cache Invalidation**: Sistema de invalidação seletiva de cache por photo_id
+  - **Sincronização Instantânea**: Mudanças nos sliders refletem em todos os componentes após auto-save (500ms)
+  - **Performance**: Regeneração assíncrona via AsyncThumbnailLoader existente
+  - **Arquitetura**: Métodos `invalidate_thumbnail()` em PhotoGrid e Filmstrip
+  - **Integração**: Auto-save flow em app.rs invalida caches automaticamente
+
+
 
 - ✅ **SISTEMA DE EDIÇÃO PROFISSIONAL (20/dez/2025)** 🎨
   - **11 Sliders de Ajuste**: Sistema completo de edição não-destrutiva

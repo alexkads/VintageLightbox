@@ -539,6 +539,13 @@ impl PhotoGrid {
     pub fn clear_cache(&mut self) {
         self.thumbnail_cache.clear();
     }
+
+    /// Invalidate a specific photo's cached thumbnail (forces regeneration)
+    pub fn invalidate_thumbnail(&mut self, photo_id: &str) {
+        self.thumbnail_cache.remove(photo_id);
+        // Also clear from requested set so it can be re-requested
+        self.thumbnail_loader.clear_requested_for(photo_id);
+    }
 }
 
 // Default implementation removed because PreviewManager is required

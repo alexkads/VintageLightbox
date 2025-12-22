@@ -627,6 +627,10 @@ impl eframe::App for VintageLightboxApp {
                                 photo.edit_saturation = Some(saturation);
                             }
 
+                            // Invalidate cached thumbnails to force regeneration with updated effects
+                            self.photo_grid.invalidate_thumbnail(&id);
+                            self.filmstrip.invalidate_thumbnail(&id);
+
                             // Clear pending flag
                             self.state.pending_auto_save = false;
                             self.state.last_slider_change_time = None;
