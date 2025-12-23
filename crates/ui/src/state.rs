@@ -12,6 +12,7 @@ use crate::design_system::theme_selector::ThemeVariant;
 use crate::docking::DockTab;
 use egui_dock::DockState;
 use egui_notify::Toasts;
+use infrastructure::cache::CacheStats;
 
 /// Snapshot of editing state for undo/redo
 #[derive(Debug, Clone)]
@@ -235,6 +236,16 @@ pub struct AppState {
     pub library_dock_state: DockState<DockTab>,
     /// Dock state for Develop view layout
     pub develop_dock_state: DockState<DockTab>,
+
+    // ============================================
+    // Cache & Settings
+    // ============================================
+    /// Whether to show the settings dialog
+    pub show_settings_dialog: bool,
+    /// Current cache statistics (refreshed when settings dialog opens)
+    pub cache_stats: Option<CacheStats>,
+    /// Progress of cache building (shown in toolbar)
+    pub cache_building_progress: Option<CacheBuildingProgress>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -242,6 +253,19 @@ pub struct PerformanceMetrics {
     pub image_load_time_ms: Option<f32>,
     pub gpu_process_time_ms: Option<f32>,
     pub texture_upload_time_ms: Option<f32>,
+}
+
+/// Progress of cache/preview building during import or regeneration
+#[derive(Debug, Clone)]
+pub struct CacheBuildingProgress {
+    /// Total number of items to process
+    pub total: usize,
+    /// Number of items completed
+    pub completed: usize,
+    /// Current file being processed (display name)
+    pub current_file: String,
+    /// Type of preview being built ("Thumbnail" or "Preview")
+    pub preview_type: String,
 }
 
 impl AppState {
@@ -326,8 +350,12 @@ impl AppState {
             selected_theme: ThemeVariant::default(),
             library_dock_state: crate::docking::create_library_layout(),
             develop_dock_state: crate::docking::create_develop_layout(),
+            show_settings_dialog: false,
+            cache_stats: None,
+            cache_building_progress: None,
         }
     }
+
 
     /// Get the selected photo ID for the current view
     pub fn selected_photo_id(&self) -> Option<&String> {

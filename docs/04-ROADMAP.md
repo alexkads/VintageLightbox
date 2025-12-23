@@ -215,6 +215,15 @@ Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Ar
   - **Arquitetura**: Métodos `invalidate_thumbnail()` em PhotoGrid e Filmstrip
   - **Integração**: Auto-save flow em app.rs invalida caches automaticamente
 
+- ✅ **CACHE UI & SETTINGS (22/dez/2025)** ⚙️
+  - **Settings Dialog**: Nova janela de configurações acessível via toolbar (ícone engrenagem)
+  - **Cache Statistics**: Exibe contagem de Thumbnails, Previews, Tamanho Total e Localização
+  - **Cache Management**: Botões para limpar Thumbnails, Previews ou Cache Completo
+  - **Integração Backend**: Métodos `cleanup_lru`, `clear_all`, `clear_thumbnails`, `clear_previews` no PreviewManager
+  - **Arquitetura**: Componente `SettingsDialog` reutilizável, estado no `AppState`
+  - **Feedback Visual**: Toasts de sucesso/erro ao limpar cache
+  - **Status**: ✅ **100% COMPLETO**
+
 
 
 - ✅ **SISTEMA DE EDIÇÃO PROFISSIONAL (20/dez/2025)** 🎨

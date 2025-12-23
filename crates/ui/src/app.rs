@@ -15,6 +15,7 @@ use crate::keyboard::KeyboardHandler;
 use crate::async_loader::{AsyncImageProcessor, ImageProcessRequest};
 use crate::docking::{DockViewer, DockViewerContext};
 use crate::components::{photo_grid::PhotoGrid, filmstrip::Filmstrip};
+use crate::components::settings_dialog::{SettingsDialog, SettingsAction};
 
 /// Main application struct
 pub struct VintageLightboxApp {
@@ -786,8 +787,40 @@ impl eframe::App for VintageLightboxApp {
         // Show toast notifications
         self.state.toasts.show(ctx);
 
+        // Show Settings Dialog
+        if let Some(action) = SettingsDialog::show(ctx, &mut self.state) {
+            match action {
+                SettingsAction::ClearThumbnails => {
+                    if let Ok(count) = self.preview_manager.clear_thumbnails() {
+                        self.state.toasts.success(format!("Cleared {} thumbnails", count));
+                        // Refresh stats
+                        self.state.cache_stats = Some(self.preview_manager.get_stats());
+                    } else {
+                        self.state.toasts.error("Failed to clear thumbnails");
+                    }
+                }
+                SettingsAction::ClearPreviews => {
+                    if let Ok(count) = self.preview_manager.clear_previews() {
+                        self.state.toasts.success(format!("Cleared {} previews", count));
+                        self.state.cache_stats = Some(self.preview_manager.get_stats());
+                    } else {
+                        self.state.toasts.error("Failed to clear previews");
+                    }
+                }
+                SettingsAction::ClearAllCache => {
+                    if let Ok(count) = self.preview_manager.clear_all() {
+                        self.state.toasts.success(format!("Cache cleared completely ({} items)", count));
+                        self.state.cache_stats = Some(self.preview_manager.get_stats());
+                    } else {
+                        self.state.toasts.error("Failed to clear cache");
+                    }
+                }
+            }
+        }
+
         // Top toolbar
         egui::TopBottomPanel::top("toolbar")
+
             .exact_height(Theme::TOOLBAR_HEIGHT)
             .show(ctx, |ui| {
                 self.show_toolbar(ui);
@@ -925,6 +958,18 @@ impl VintageLightboxApp {
             // Advanced Import icon button with tooltip
             if widgets::icon_button_tooltip(ui, icons::ACTION_SETTINGS, "Advanced Import").clicked() {
                 self.handle_advanced_import(ui.ctx());
+            }
+
+            ui.add_space(Theme::SPACE_SM);
+
+            // Cache building progress indicator
+            crate::components::settings_dialog::show_cache_progress(ui, &self.state);
+
+            // Settings button
+            if widgets::icon_button_tooltip(ui, icons::ACTION_SETTINGS, "Settings").clicked() {
+                // Refresh cache stats when opening
+                self.state.cache_stats = Some(self.preview_manager.get_stats());
+                self.state.show_settings_dialog = true;
             }
 
             ui.add_space(Theme::SPACE_LG);

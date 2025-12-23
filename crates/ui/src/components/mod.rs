@@ -12,3 +12,4 @@ pub mod metadata_charts;
 pub mod context_menu;
 pub mod folder_tree;
 pub mod import_dialogs;
+pub mod settings_dialog;

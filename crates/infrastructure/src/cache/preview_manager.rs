@@ -8,11 +8,25 @@ use domain::value_objects::PhotoId;
 use domain::DomainResult;
 use rusqlite::{params, Connection, OptionalExtension};
 
+/// Statistics about the preview cache for UI display
+#[derive(Debug, Clone)]
+pub struct CacheStats {
+    /// Number of thumbnail entries (type 0)
+    pub thumbnail_count: u64,
+    /// Number of large preview entries (type 1)
+    pub large_preview_count: u64,
+    /// Total size of all cache data in bytes
+    pub total_size_bytes: u64,
+    /// Path to the cache database
+    pub db_path: PathBuf,
+}
+
 pub struct PreviewManager {
     conn: Mutex<Connection>,
     #[allow(dead_code)]
     cache_dir: PathBuf,
 }
+
 
 impl PreviewManager {
     pub fn new() -> Self {
@@ -180,7 +194,72 @@ impl PreviewManager {
         
         Ok(deleted as u64)
     }
+
+    /// Get cache statistics for UI display
+    pub fn get_stats(&self) -> CacheStats {
+        let conn = self.conn.lock().unwrap();
+        
+        // Count thumbnails (type 0)
+        let thumbnail_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM previews WHERE type = 0",
+            [],
+            |row| row.get(0)
+        ).unwrap_or(0);
+        
+        // Count large previews (type 1)
+        let large_preview_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM previews WHERE type = 1",
+            [],
+            |row| row.get(0)
+        ).unwrap_or(0);
+        
+        // Total size of all data
+        let total_size_bytes: i64 = conn.query_row(
+            "SELECT COALESCE(SUM(LENGTH(data)), 0) FROM previews",
+            [],
+            |row| row.get(0)
+        ).unwrap_or(0);
+        
+        CacheStats {
+            thumbnail_count: thumbnail_count as u64,
+            large_preview_count: large_preview_count as u64,
+            total_size_bytes: total_size_bytes as u64,
+            db_path: self.cache_dir.join("preview_cache.db"),
+        }
+    }
+
+    /// Clear all cache entries
+    /// Returns the number of deleted entries
+    pub fn clear_all(&self) -> Result<u64, String> {
+        let conn = self.conn.lock().unwrap();
+        let deleted = conn.execute("DELETE FROM previews", [])
+            .map_err(|e| e.to_string())?;
+        
+        // VACUUM to reclaim disk space
+        conn.execute("VACUUM", []).ok();
+        
+        Ok(deleted as u64)
+    }
+
+    /// Clear only thumbnail entries (type 0)
+    /// Returns the number of deleted entries
+    pub fn clear_thumbnails(&self) -> Result<u64, String> {
+        let conn = self.conn.lock().unwrap();
+        let deleted = conn.execute("DELETE FROM previews WHERE type = 0", [])
+            .map_err(|e| e.to_string())?;
+        Ok(deleted as u64)
+    }
+
+    /// Clear only large preview entries (type 1)
+    /// Returns the number of deleted entries
+    pub fn clear_previews(&self) -> Result<u64, String> {
+        let conn = self.conn.lock().unwrap();
+        let deleted = conn.execute("DELETE FROM previews WHERE type = 1", [])
+            .map_err(|e| e.to_string())?;
+        Ok(deleted as u64)
+    }
 }
+
 
 impl PreviewStorage for PreviewManager {
     fn save(&self, id: &PhotoId, preview_type: PreviewType, data: &[u8]) -> DomainResult<()> {
@@ -247,5 +326,72 @@ impl PreviewStorage for PreviewManager {
             params![id.to_string()],
         ).map_err(|e| domain::DomainError::InfrastructureError(format!("DB error: {}", e)))?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+    use image::{DynamicImage, RgbaImage};
+
+    // Helper para criar imagem dummy
+    fn create_dummy_image(width: u32, height: u32) -> DynamicImage {
+        DynamicImage::ImageRgba8(RgbaImage::new(width, height))
+    }
+
+    #[test]
+    fn test_cache_stats_and_clearing() {
+        // Setup com diretório temporário
+        let dir = tempdir().unwrap();
+        let manager = PreviewManager::new_with_path(dir.path().to_path_buf());
+        let photo_id = "test_photo_1";
+
+        // Inicial: stats vazios
+        let stats = manager.get_stats();
+        assert_eq!(stats.thumbnail_count, 0);
+        assert_eq!(stats.large_preview_count, 0);
+
+        // Inserir dados
+        let img = create_dummy_image(100, 100);
+        
+        // Salvar Thumbnail
+        manager.save_thumbnail(photo_id, &img).unwrap();
+        
+        // Salvar Preview
+        manager.save_preview(photo_id, &img).unwrap();
+
+        // Verificar stats pós-inserção
+        let stats = manager.get_stats();
+        assert_eq!(stats.thumbnail_count, 1);
+        assert_eq!(stats.large_preview_count, 1);
+        assert!(stats.total_size_bytes > 0);
+
+        // Testar Clear Thumbnails
+        let count = manager.clear_thumbnails().unwrap();
+        assert_eq!(count, 1);
+        
+        let stats = manager.get_stats();
+        assert_eq!(stats.thumbnail_count, 0, "Thumbnails should be gone");
+        assert_eq!(stats.large_preview_count, 1, "Previews should remain");
+
+        // Recolocar thumbnail para testar Clear All
+        manager.save_thumbnail(photo_id, &img).unwrap();
+        
+        // Testar Clear Previews
+        let count = manager.clear_previews().unwrap();
+        assert_eq!(count, 1);
+
+        let stats = manager.get_stats();
+        assert_eq!(stats.thumbnail_count, 1, "Thumbnails should remain");
+        assert_eq!(stats.large_preview_count, 0, "Previews should be gone");
+
+        // Testar Clear All
+        let count = manager.clear_all().unwrap();
+        assert!(count >= 1); // Pode deletar metas
+
+        let stats = manager.get_stats();
+        assert_eq!(stats.thumbnail_count, 0);
+        assert_eq!(stats.large_preview_count, 0);
     }
 }
