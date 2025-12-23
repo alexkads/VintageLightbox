@@ -114,6 +114,10 @@ pub struct AppState {
     pub active_vibrance: f32,
     /// Current saturation adjustment value
     pub active_saturation: f32,
+    pub active_tone_curve_shadows: f32,
+    pub active_tone_curve_darks: f32,
+    pub active_tone_curve_lights: f32,
+    pub active_tone_curve_highlights: f32,
     /// Previous exposure value (for change detection)
     pub prev_exposure: f32,
     /// Previous contrast value (for change detection)
@@ -296,6 +300,10 @@ impl AppState {
             active_clarity: 0.0,
             active_vibrance: 0.0,
             active_saturation: 0.0,
+            active_tone_curve_shadows: 0.0,
+            active_tone_curve_darks: 0.0,
+            active_tone_curve_lights: 0.0,
+            active_tone_curve_highlights: 0.0,
             prev_exposure: 0.0,
             prev_contrast: 1.0,
             prev_temperature: 0.0,

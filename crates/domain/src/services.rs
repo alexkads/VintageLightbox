@@ -19,6 +19,16 @@ pub trait ThumbnailGenerator: Send + Sync {
     /// Gera um thumbnail para a imagem especificada
     /// Retorna os bytes da imagem (JPEG) redimensionada
     async fn generate(&self, path: &FilePath, max_size: u32) -> DomainResult<Vec<u8>>;
+
+    /// Gera múltiplos thumbnails de uma vez, otimizando a leitura do arquivo
+    /// Retorna os bytes de cada thumbnail na ordem solicitada
+    async fn generate_set(&self, path: &FilePath, max_sizes: &[u32]) -> DomainResult<Vec<Vec<u8>>> {
+         let mut results = Vec::new();
+         for size in max_sizes {
+             results.push(self.generate(path, *size).await?);
+         }
+         Ok(results)
+    }
 }
 
 /// Representa uma imagem RAW decodificada

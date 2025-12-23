@@ -6,6 +6,7 @@
 
 pub mod app;
 pub mod state;
+pub mod panels;
 pub mod design_system;
 pub mod image_processing;
 pub mod keyboard;

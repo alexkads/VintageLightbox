@@ -128,27 +128,20 @@ impl ImportPhotoUseCase {
             photo.set_metadata(metadata);
         }
 
-        // Gerar Thumbnail no subdiretório thumb
-        // Gerar Thumbnail no storage
-        match self.thumbnail_generator.generate(&new_file_path, 300).await {
-            Ok(bytes) => {
-                if let Err(e) = self.preview_storage.save(&photo.id(), PreviewType::Thumbnail, &bytes) {
-                    eprintln!("Failed to save thumbnail: {}", e);
+        // Gerar Thumbnails (Batched)
+        // Solicita geração de thumbnails de 300px (Thumbnail) e 2560px (Large Preview) em um único passo
+        match self.thumbnail_generator.generate_set(&new_file_path, &[300, 2560]).await {
+            Ok(results) => {
+                if results.len() >= 2 {
+                     if let Err(e) = self.preview_storage.save(&photo.id(), PreviewType::Thumbnail, &results[0]) {
+                        eprintln!("Failed to save thumbnail: {}", e);
+                    }
+                     if let Err(e) = self.preview_storage.save(&photo.id(), PreviewType::Large, &results[1]) {
+                        eprintln!("Failed to save preview: {}", e);
+                    }
                 }
             },
-            Err(e) => eprintln!("Failed to generate thumbnail: {}", e),
-        }
-
-        // Gerar Preview (Otimizado para edição fluida)
-        // Usamos 2560px como um bom balanço entre qualidade e performance (Matches Roadmap)
-        // Gerar Preview (Otimizado para edição fluida)
-        match self.thumbnail_generator.generate(&new_file_path, 2560).await {
-            Ok(bytes) => {
-                if let Err(e) = self.preview_storage.save(&photo.id(), PreviewType::Large, &bytes) {
-                    eprintln!("Failed to save preview: {}", e);
-                }
-            },
-            Err(e) => eprintln!("Failed to generate preview: {}", e),
+            Err(e) => eprintln!("Failed to generate thumbnails: {}", e),
         }
         
         // Persistir no repositório
@@ -194,6 +187,7 @@ mod tests {
         #[async_trait::async_trait]
         impl ThumbnailGenerator for ThumbnailGenerator {
             async fn generate(&self, path: &FilePath, max_dimension: u32) -> DomainResult<Vec<u8>>;
+            async fn generate_set(&self, path: &FilePath, max_sizes: &[u32]) -> DomainResult<Vec<Vec<u8>>>;
         }
     }
 
@@ -241,12 +235,15 @@ mod tests {
             .returning(|_| Ok(PhotoMetadata::default()));
         
         let mut mock_generator = MockThumbnailGenerator::new();
+        // Expect generate_set call for 300 and 2560 sizes
         mock_generator
-            .expect_generate()
-            .returning(|_, _| Ok(vec![]));
+            .expect_generate_set()
+            .with(always(), eq(vec![300, 2560]))
+            .times(1)
+            .returning(|_, _| Ok(vec![vec![1,2,3], vec![4,5,6]])); // Return fake image data
 
         let mut mock_preview_storage = MockPreviewStorage::new();
-        mock_preview_storage.expect_save().returning(|_, _, _| Ok(()));
+        mock_preview_storage.expect_save().times(2).returning(|_, _, _| Ok(()));
 
         let use_case = ImportPhotoUseCase::new(
             Arc::new(mock_repo),
@@ -287,8 +284,8 @@ mod tests {
         
         let mut mock_generator = MockThumbnailGenerator::new();
         mock_generator
-            .expect_generate()
-            .returning(|_, _| Ok(vec![]));
+            .expect_generate_set()
+            .returning(|_, _| Ok(vec![vec![], vec![]]));
 
         let mut mock_preview_storage = MockPreviewStorage::new();
         mock_preview_storage.expect_save().returning(|_, _, _| Ok(()));
@@ -327,8 +324,8 @@ mod tests {
         
         let mut mock_generator = MockThumbnailGenerator::new();
         mock_generator
-            .expect_generate()
-            .returning(|_, _| Ok(vec![]));
+            .expect_generate_set()
+            .returning(|_, _| Ok(vec![vec![], vec![]]));
 
         let mut mock_preview_storage = MockPreviewStorage::new();
         mock_preview_storage.expect_save().returning(|_, _, _| Ok(()));
@@ -372,8 +369,8 @@ mod tests {
         
         let mut mock_generator = MockThumbnailGenerator::new();
         mock_generator
-            .expect_generate()
-            .returning(|_, _| Ok(vec![]));
+            .expect_generate_set()
+            .returning(|_, _| Ok(vec![vec![], vec![]]));
 
         let mut mock_preview_storage = MockPreviewStorage::new();
         mock_preview_storage.expect_save().returning(|_, _, _| Ok(()));

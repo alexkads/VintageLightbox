@@ -9,16 +9,46 @@ use crate::components::filmstrip::Filmstrip;
 use std::sync::Arc;
 use infrastructure::cache::preview_manager::PreviewManager;
 
+use crate::panels::PresetsPanel;
+
 #[allow(dead_code)]
 pub struct DevelopView {
     filmstrip: Filmstrip,
+    presets_panel: PresetsPanel,
 }
 
 #[allow(dead_code)]
 impl DevelopView {
     pub fn new(preview_manager: Arc<PreviewManager>) -> Self {
+        let mut presets_panel = PresetsPanel::new();
+        // Initialize with system presets for now (temporary until we pull from Use Case properly)
+        let system_presets = vec![
+            domain::entities::Preset::system("Auto", domain::entities::preset::PresetAdjustments {
+                 exposure: Some(0.0), // Placeholder
+                 ..Default::default()
+            }),
+            domain::entities::Preset::system("B&W", domain::entities::preset::PresetAdjustments {
+                 saturation: Some(-100.0),
+                 ..Default::default()
+            }),
+            domain::entities::Preset::system("Warm", domain::entities::preset::PresetAdjustments {
+                 temperature: Some(15.0),
+                 ..Default::default()
+            }),
+             domain::entities::Preset::system("Cool", domain::entities::preset::PresetAdjustments {
+                 temperature: Some(-15.0),
+                 ..Default::default()
+            }),
+             domain::entities::Preset::system("High Contrast", domain::entities::preset::PresetAdjustments {
+                 contrast: Some(1.5),
+                 ..Default::default()
+            }),
+        ];
+        presets_panel.set_presets(system_presets, vec![]);
+        
         Self {
             filmstrip: Filmstrip::new(preview_manager),
+            presets_panel,
         }
     }
 
@@ -77,7 +107,7 @@ impl DevelopView {
             .exact_width(Theme::SIDEBAR_WIDTH)
             .show_inside(ui, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    self.show_left_sidebar(ui);
+                    self.show_left_sidebar(ui, state);
                 });
             });
 
@@ -97,21 +127,38 @@ impl DevelopView {
         });
     }
 
-    fn show_left_sidebar(&self, ui: &mut Ui) {
+    fn show_left_sidebar(&mut self, ui: &mut Ui, state: &mut AppState) {
         use crate::design_system::widgets;
 
         // Presets Panel
         widgets::section_title(ui, "Presets");
         ui.add_space(Theme::SPACE_SM);
 
-        if widgets::menu_item(ui, "Default", false).clicked() {
-            // TODO: Apply default preset
-        }
-        if widgets::menu_item(ui, "Auto", false).clicked() {
-            // TODO: Apply auto preset
-        }
-        if widgets::menu_item(ui, "B&W", false).clicked() {
-            // TODO: Apply B&W preset
+        if let Some(preset) = self.presets_panel.ui(ui, &state.selected_theme) {
+             // Apply preset logic
+             if let Some(v) = preset.adjustments.exposure { state.active_exposure = v; }
+             if let Some(v) = preset.adjustments.contrast { state.active_contrast = v; }
+             if let Some(v) = preset.adjustments.temperature { state.active_temperature = v; }
+             if let Some(v) = preset.adjustments.tint { state.active_tint = v; }
+             if let Some(v) = preset.adjustments.highlights { state.active_highlights = v; }
+             if let Some(v) = preset.adjustments.shadows { state.active_shadows = v; }
+             if let Some(v) = preset.adjustments.whites { state.active_whites = v; }
+             if let Some(v) = preset.adjustments.blacks { state.active_blacks = v; }
+             if let Some(v) = preset.adjustments.clarity { state.active_clarity = v; }
+             if let Some(v) = preset.adjustments.vibrance { state.active_vibrance = v; }
+             if let Some(v) = preset.adjustments.saturation { state.active_saturation = v; }
+             
+             if let Some(v) = preset.adjustments.tone_curve_shadows { state.active_tone_curve_shadows = v; }
+             if let Some(v) = preset.adjustments.tone_curve_darks { state.active_tone_curve_darks = v; }
+             if let Some(v) = preset.adjustments.tone_curve_lights { state.active_tone_curve_lights = v; }
+             if let Some(v) = preset.adjustments.tone_curve_highlights { state.active_tone_curve_highlights = v; }
+
+             state.pending_auto_save = true;
+             state.last_slider_change_time = Some(std::time::Instant::now());
+             
+             // Trigger repaint
+             // Note: context is available via ui.ctx()
+             ui.ctx().request_repaint();
         }
 
         ui.add_space(Theme::SPACE_LG);

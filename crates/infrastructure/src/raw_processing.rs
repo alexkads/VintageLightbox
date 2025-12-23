@@ -101,6 +101,15 @@ pub fn load_raw_as_dynamic_image(path: &str) -> Result<image::DynamicImage, Stri
     Ok(image::DynamicImage::ImageRgb8(img_buffer))
 }
 
+/// Extrai o preview JPEG embutido no arquivo RAW (muito mais rápido que raw decoding)
+pub fn extract_embedded_preview(_path: &str) -> Option<Vec<u8>> {
+    // TODO: Implement using a crate that supports embedded preview extraction
+    // rsraw v0.1.0 does not expose thumbnail() method directly on RawImage.
+    // We might need to upgrade rsraw or use a different crate like `rawloader` if it supports it, 
+    // or parse the file structure manually (TIFF/IFD).
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

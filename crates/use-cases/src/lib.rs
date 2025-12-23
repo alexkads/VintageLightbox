@@ -15,6 +15,7 @@ pub mod create_collection;
 pub mod add_photo_to_collection;
 pub mod remove_photo_from_collection;
 pub mod delete_photo;
+pub mod presets;
 
 pub use import_photo::ImportPhotoUseCase;
 pub use import_photos::{ImportPhotosUseCase, BatchImportResult};

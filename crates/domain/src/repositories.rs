@@ -65,3 +65,21 @@ pub trait CollectionRepository: Send + Sync {
 //     fn find_all(&self) -> DomainResult<Vec<Photo>>;
 //     fn delete(&self, id: PhotoId) -> DomainResult<()>;
 // }
+
+use crate::entities::{Preset, PresetId};
+
+/// Repository para persistência de Presets
+#[async_trait]
+pub trait PresetRepository: Send + Sync {
+    /// Salva um preset
+    async fn save(&self, preset: &Preset) -> DomainResult<()>;
+    
+    /// Busca um preset por ID
+    async fn find_by_id(&self, id: &PresetId) -> DomainResult<Option<Preset>>;
+    
+    /// Lista todos os presets
+    async fn find_all(&self) -> DomainResult<Vec<Preset>>;
+    
+    /// Remove um preset
+    async fn delete(&self, id: &PresetId) -> DomainResult<()>;
+}
