@@ -135,47 +135,89 @@ impl Filmstrip {
                         // We handle interaction here to intercept clicks, but draw later to be on top
                         let current_flag = photo.flag.unwrap_or(0);
                         let is_hovered = response.hovered();
-                        let show_flags = is_hovered || current_flag != 0;
+
+                        // Interactive Flags (Pick/Reject)
+                        // defined relative to thumbnail rect
+                        let flag_size = 14.0;
+                        let padding = 4.0;
+                        let spacing = 2.0;
+
+                        // Pick Icon [P] Area
+                        let pick_rect = egui::Rect::from_min_size(
+                            rect.min + Vec2::new(padding, padding),
+                            Vec2::new(flag_size, flag_size)
+                        );
                         
-                        let mut pick_rect = egui::Rect::NOTHING;
-                        let mut reject_rect = egui::Rect::NOTHING;
-                        let mut pick_hovered = false;
-                        let mut reject_hovered = false;
+                        // Reject Icon [X] Area
+                        let reject_rect = egui::Rect::from_min_size(
+                            rect.min + Vec2::new(padding + flag_size + spacing, padding),
+                            Vec2::new(flag_size, flag_size)
+                        );
+
+                        // Always handle interactions, so we don't lose clicks during hover transitions
+                        let pick_response = ui.interact(pick_rect, egui::Id::new(format!("pick_{}", photo.id)), Sense::click());
+                        let reject_response = ui.interact(reject_rect, egui::Id::new(format!("reject_{}", photo.id)), Sense::click());
+                        
+                        let pick_hovered = pick_response.hovered();
+                        let reject_hovered = reject_response.hovered();
+
+                        // Handle Flag Clicks
+                        if pick_response.clicked() {
+                            thumb_clicked = false; // Consume click
+                            let new_flag = if current_flag == 1 { 0 } else { 1 }; // Toggle
+                            action = Some(FilmstripAction::SetFlag(photo.id.clone(), new_flag));
+                        } else if reject_response.clicked() {
+                            thumb_clicked = false; // Consume click
+                            let new_flag = if current_flag == -1 { 0 } else { -1 }; // Toggle
+                            action = Some(FilmstripAction::SetFlag(photo.id.clone(), new_flag));
+                        }
+
+                        // Determine if we should SHOW the flags
+                        // Show if: 
+                        // 1. Mouse is hovering the thumbnail
+                        // 2. Photo already has a flag (picked/rejected)
+                        // 3. Mouse is hovering the flag buttons themselves (active interaction)
+                        let show_flags = is_hovered || current_flag != 0 || pick_hovered || reject_hovered;
 
                         if show_flags {
-                            let flag_size = 14.0;
-                            let padding = 4.0;
-                            let spacing = 2.0;
-
-                            // Pick Icon [P]
-                            pick_rect = egui::Rect::from_min_size(
-                                rect.min + Vec2::new(padding, padding),
-                                Vec2::new(flag_size, flag_size)
-                            );
+                            // Painting logic only
+                            let painter = ui.painter();
                             
-                            // Reject Icon [X]
-                            reject_rect = egui::Rect::from_min_size(
-                                rect.min + Vec2::new(padding + flag_size + spacing, padding),
-                                Vec2::new(flag_size, flag_size)
+                            // Pick Icon (Checkmark)
+                            let pick_color = if current_flag == 1 {
+                                Theme::ACCENT_SUCCESS // Green for picked
+                            } else if pick_hovered {
+                                Theme::TEXT_PRIMARY // White on hover
+                            } else {
+                                Theme::TEXT_MUTED // Gray otherwise
+                            };
+                            
+                            painter.text(
+                                pick_rect.center(),
+                                egui::Align2::CENTER_CENTER,
+                                crate::design_system::icons::FLAG_PICK,
+                                egui::FontId::proportional(12.0),
+                                pick_color,
                             );
 
-                            let pick_response = ui.interact(pick_rect, egui::Id::new(format!("pick_{}", photo.id)), Sense::click());
-                            let reject_response = ui.interact(reject_rect, egui::Id::new(format!("reject_{}", photo.id)), Sense::click());
-                            
-                            pick_hovered = pick_response.hovered();
-                            reject_hovered = reject_response.hovered();
+                            // Reject Icon (X)
+                            let reject_color = if current_flag == -1 {
+                                Theme::ACCENT_ERROR // Red for rejected
+                            } else if reject_hovered {
+                                Theme::TEXT_PRIMARY // White on hover
+                            } else {
+                                Theme::TEXT_MUTED // Gray otherwise
+                            };
 
-                            // Handle Flag Clicks
-                            if pick_response.clicked() {
-                                thumb_clicked = false; // Consume click
-                                let new_flag = if current_flag == 1 { 0 } else { 1 }; // Toggle
-                                action = Some(FilmstripAction::SetFlag(photo.id.clone(), new_flag));
-                            } else if reject_response.clicked() {
-                                thumb_clicked = false; // Consume click
-                                let new_flag = if current_flag == -1 { 0 } else { -1 }; // Toggle
-                                action = Some(FilmstripAction::SetFlag(photo.id.clone(), new_flag));
-                            }
+                            painter.text(
+                                reject_rect.center(),
+                                egui::Align2::CENTER_CENTER,
+                                crate::design_system::icons::FLAG_REJECT,
+                                egui::FontId::proportional(12.0),
+                                reject_color,
+                            );
                         }
+
 
                         if thumb_clicked {
                             let modifiers = ui.input(|i| i.modifiers);
