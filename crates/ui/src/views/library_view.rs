@@ -29,7 +29,7 @@ impl LibraryView {
         egui::TopBottomPanel::bottom("filmstrip")
             .exact_height(120.0)  // 80px thumbnails + 40px padding
             .show_inside(ui, |ui| {
-                let photos = state.photos.clone();
+                let photos = state.get_filtered_photos();
                 
                 self.filmstrip.show(
                     ui,

@@ -403,7 +403,11 @@ impl AppState {
 
                 // Filter by color label
                 if let Some(ref filter_label) = self.filter_color_label {
-                    if photo.color_label.as_ref() != Some(filter_label) {
+                    let matches = match photo.color_label.as_ref() {
+                        Some(label) => label.eq_ignore_ascii_case(filter_label),
+                        None => false,
+                    };
+                    if !matches {
                         return false;
                     }
                 }

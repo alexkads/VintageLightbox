@@ -112,7 +112,7 @@ impl<'a> TabViewer for DockViewer<'a> {
             DockTab::Filmstrip => {
                 use crate::state::CurrentView;
                 use crate::components::filmstrip::FilmstripAction;
-                let photos = self.context.state.photos.clone();
+                let photos = self.context.state.get_filtered_photos();
                 let current_view = self.context.state.current_view;
                 
                 // For Develop view, we need the filmstrip to update develop_selected_photo_id
