@@ -16,7 +16,7 @@ pub use scan_directory::{ScanDirectoryUseCase, ScanDirectoryResult};
 pub use exif_reader::ExifReader;
 pub mod thumbnail_generator;
 pub use thumbnail_generator::ThumbnailGeneratorImpl;
-pub use raw_processing::RawDecoderImpl;
+pub use raw_processing::{RawDecoderImpl, is_raw_file, load_raw_as_dynamic_image};
 pub mod image_exporter;
 pub use image_exporter::ImageExporterImpl;
 pub mod content_hash;

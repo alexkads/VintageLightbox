@@ -47,6 +47,60 @@ impl RawDecoder for RawDecoderImpl {
     }
 }
 
+/// Verifica se um arquivo é RAW baseado na extensão
+pub fn is_raw_file(path: &str) -> bool {
+    let ext = std::path::Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase());
+    matches!(
+        ext.as_deref(),
+        Some("nef" | "cr2" | "cr3" | "arw" | "dng" | "orf" | "raw" | "rw2" | "raf" | "pef" | "srw" | "x3f")
+    )
+}
+
+/// Carrega um arquivo RAW e converte para DynamicImage RGB
+/// 
+/// Esta função usa LibRaw (via rsraw) que já faz:
+/// 1. Demosaic de alta qualidade
+/// 2. White balance automático
+/// 3. Color correction
+/// 4. Retorna DynamicImage::ImageRgb8
+pub fn load_raw_as_dynamic_image(path: &str) -> Result<image::DynamicImage, String> {
+    use rsraw::{RawImage, BIT_DEPTH_8};
+    
+    // 1. Read file to buffer
+    let file_data = std::fs::read(path)
+        .map_err(|e| format!("Failed to read RAW file: {}", e))?;
+    
+    // 2. Open RAW image with LibRaw
+    let mut raw = RawImage::open(&file_data)
+        .map_err(|e| format!("LibRaw failed to open: {:?}", e))?;
+    
+    // 3. Unpack the raw data
+    raw.unpack()
+        .map_err(|e| format!("LibRaw unpack failed: {:?}", e))?;
+    
+    // 4. Get dimensions before processing
+    let width = raw.width();
+    let height = raw.height();
+    
+    // 5. Process with LibRaw (demosaic, white balance, color correction)
+    let processed = raw.process::<BIT_DEPTH_8>()
+        .map_err(|e| format!("LibRaw process failed: {:?}", e))?;
+    
+    // 6. Get RGB data from processed image
+    // ProcessedImage<8> implements Deref<Target=[u8]>
+    let rgb_data: Vec<u8> = processed.to_vec();
+    
+    // 7. Create RGB image 
+    // LibRaw returns RGB data, 3 bytes per pixel
+    let img_buffer = image::RgbImage::from_raw(width, height, rgb_data)
+        .ok_or_else(|| "Failed to create image buffer from LibRaw data".to_string())?;
+    
+    Ok(image::DynamicImage::ImageRgb8(img_buffer))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

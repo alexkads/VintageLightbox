@@ -88,7 +88,17 @@ impl AsyncThumbnailLoader {
                     }
 
                     // 2. Fallback to loading original and generating thumbnail
-                    match image::open(&req.path) {
+                    // Check if it's a RAW file and use appropriate loader
+                    let img_result = if infrastructure::is_raw_file(&req.path) {
+                        infrastructure::load_raw_as_dynamic_image(&req.path)
+                            .map_err(|e| image::ImageError::IoError(
+                                std::io::Error::new(std::io::ErrorKind::Other, e)
+                            ))
+                    } else {
+                        image::open(&req.path)
+                    };
+                    
+                    match img_result {
                         Ok(img) => {
                              // Resize
                              let thumb = crate::image_processing::ImageProcessor::resize_for_preview(&img, 300);
@@ -312,7 +322,16 @@ impl AsyncImageProcessor {
                     // Cache miss. Load original and generate Smart Preview
                     println!("FULL CACHE MISS: {}", request.photo_id);
                     let load_start = std::time::Instant::now();
-                    if let Ok(img) = image::open(&request.path) {
+                    
+                    // Check if it's a RAW file and use appropriate loader
+                    let img_result = if infrastructure::is_raw_file(&request.path) {
+                        println!("Loading RAW file with demosaic: {}", request.path);
+                        infrastructure::load_raw_as_dynamic_image(&request.path)
+                    } else {
+                        image::open(&request.path).map_err(|e| e.to_string())
+                    };
+                    
+                    if let Ok(img) = img_result {
                         let open_ms = load_start.elapsed().as_secs_f32() * 1000.0;
                         
                         // Resize for preview using Rayon-accelerated operations
@@ -335,7 +354,7 @@ impl AsyncImageProcessor {
                         resized
                     } else {
                         // Failed to load image
-                        eprintln!("Failed to open image: {}", request.path);
+                        eprintln!("Failed to open image: {} - {:?}", request.path, img_result.err());
                         *processing.lock() = None;
                         continue;
                     }

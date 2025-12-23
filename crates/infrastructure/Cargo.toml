@@ -17,10 +17,11 @@ sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "sqlite", "mig
 async-trait.workspace = true
 kamadak-exif = "0.6"
 image = "0.24"
-rawloader = "0.37.1"
+rawloader = "0.37.1"  # Mantido para fallback se rsraw falhar
 directories = "6.0.0"
 sha2 = "0.10"
 rusqlite = { version = "0.30.0", features = ["bundled"] }
+rsraw = "0.1"  # LibRaw binding - demosaic/white balance/color correction integrados
 
 [dev-dependencies]
 tempfile.workspace = true
