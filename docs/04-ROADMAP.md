@@ -30,6 +30,13 @@ Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Ar
   - **Design System**: Módulo `icons.rs` centralizado com aliases semânticos
   - **Status**: ✅ **100% COMPLETO**
 
+- ✅ **FILMSTRIP COLORS & FILTERS (22/dez/2025)** 🎞️
+  - **Color Label Rendering**: Visualização de cores (bordas/background) na Filmstrip
+  - **Toggling Inteligente**: Atalhos de cor (6-9) agora funcionam como toggle (remove se já existir)
+  - **Filtros Case-Insensitive**: Correção crítica na lógica de filtro de cores ("Red" vs "red")
+  - **Consistência de Views**: Correção no `DockViewer` para que o Filmstrip respeite os filtros ativos do Grid
+  - **Status**: ✅ **100% COMPLETO** (Validado com TDD)
+
 - ✅ **FIX E2E TESTS & SHORTCUTS (22/dez/2025)** 🔧
   - **Testes de Integração**: Correção de race conditions em testes E2E
   - **Atalhos de Teclado**: Verificação robusta de Pick (P) e Reject (X)
