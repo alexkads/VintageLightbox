@@ -767,13 +767,16 @@ import_controller.import_with_options(files, options, tx, pause, cancel).await?;
 - [ ] **Redução de Ruído** - Luminance e Color noise reduction
 - [ ] **Nitidez** - Sharpening com Amount, Radius, Detail, Masking
 
-### 2.3 Presets (2 semanas)
-- [ ] Salvar preset de ajustes
-- [ ] Aplicar preset a foto
-- [ ] Lista de presets na UI
-- [ ] Presets incluídos (5-10 básicos)
-- [ ] Preview de preset (hover)
-- [ ] Categorização de presets
+### 2.3 Presets ✅ BACKEND COMPLETO (23/dez/2025)
+- [x] ✅ **Domain Layer**: `Preset`, `PresetAdjustments`, `PresetId` entities
+- [x] ✅ **Salvar preset de ajustes** - `SavePresetUseCase` implementado
+- [x] ✅ **Aplicar preset a foto** - Conversão `Photo` ↔ `PresetAdjustments`
+- [x] ✅ **Lista de presets na UI** - `PresetsPanel` com seções System/User
+- [x] ✅ **Deletar presets** - `DeletePresetUseCase` + context menu na UI
+- [x] ✅ **Persistência SQLite** - Migration `010_create_presets_table.sql`
+- [ ] 🎯 **Presets incluídos** (5-10 básicos) - Populer presets de sistema
+- [ ] **Preview de preset (hover)** - Mostrar efeito antes de aplicar
+- [ ] **Categorização de presets** - Organizar por tipo (B&W, Vintage, etc.)
 
 ### 2.4 Sistema de Flags e Cores (1 semana) ✅ COMPLETO (22/dez/2025)
 - [x] Pick/Reject flags
