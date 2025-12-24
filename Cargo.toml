@@ -6,6 +6,7 @@ members = [
     "crates/adapters",
     "crates/infrastructure",
     "crates/ui",
+    "crates/ui-gtk4",
 ]
 
 [workspace.package]
