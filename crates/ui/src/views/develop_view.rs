@@ -382,44 +382,17 @@ impl DevelopView {
         ui.add_space(Theme::SPACE_SM);
 
         if widgets::secondary_button(ui, "Export").clicked() {
-            if let Some(metadata) = &state.detail_metadata {
-                let controller = export_controller.clone();
-                let id = metadata.id.clone();
-                let ctx_clone = ctx.clone();
-
-                // Create channel for export result
-                let (export_tx, export_rx) = tokio::sync::mpsc::channel::<Result<String, String>>(1);
-                state.pending_export_receiver = Some(export_rx);
-                state.is_busy = true;
-                state.busy_message = "Exporting...".to_string();
-                state.toasts.info("Exporting photo...");
-
-                tokio::spawn(async move {
-                    let file_dialog = rfd::AsyncFileDialog::new()
-                        .set_title("Export Photo")
-                        .set_file_name("exported.jpg")
-                        .add_filter("JPEG", &["jpg", "jpeg"])
-                        .save_file()
-                        .await;
-
-                    if let Some(file) = file_dialog {
-                        if let Some(path) = file.path().to_str() {
-                            let path_string = path.to_string();
-                            match controller.export_photo(id, path_string.clone()).await {
-                                Ok(_) => {
-                                    let _ = export_tx.send(Ok(path_string)).await;
-                                }
-                                Err(e) => {
-                                    let _ = export_tx.send(Err(e)).await;
-                                }
-                            }
-                        }
-                    } else {
-                        // User cancelled - send empty error to clear busy state
-                        let _ = export_tx.send(Err("Cancelled".to_string())).await;
-                    }
-                    ctx_clone.request_repaint();
-                });
+            if let Some(photo) = &state.detail_metadata {
+                 let mut dialog = egui_file::FileDialog::save_file(None)
+                    .title("Export Photo")
+                    .default_filename("exported.jpg");
+                dialog.open();
+                
+                state.export_target_id = Some(photo.id.clone());
+                state.import_dialog = Some(dialog);
+                state.import_dialog_mode = crate::state::ImportDialogMode::Export;
+            } else {
+                 // Warning if no photo
             }
         }
 

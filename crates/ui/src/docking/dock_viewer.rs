@@ -138,78 +138,28 @@ impl<'a> TabViewer for DockViewer<'a> {
                         FilmstripAction::Export => {
                             // Trigger export for selected photo
                             if let Some(metadata) = &self.context.state.detail_metadata.clone() {
-                                let controller = self.context.export_controller.clone();
                                 let id = metadata.id.clone();
-                                let ctx_clone = self.context.ctx.clone();
+                                
+                                let mut dialog = egui_file::FileDialog::save_file(None)
+                                    .title("Export Photo")
+                                    .default_filename("exported.jpg");
+                                dialog.open();
+                                
+                                self.context.state.export_target_id = Some(id);
+                                self.context.state.import_dialog = Some(dialog);
+                                self.context.state.import_dialog_mode = crate::state::ImportDialogMode::Export;
 
-                                let (export_tx, export_rx) = tokio::sync::mpsc::channel::<Result<String, String>>(1);
-                                self.context.state.pending_export_receiver = Some(export_rx);
-                                self.context.state.is_busy = true;
-                                self.context.state.busy_message = "Exporting...".to_string();
-                                self.context.state.toasts.info("Exporting photo...");
-
-                                tokio::spawn(async move {
-                                    let file_dialog = rfd::AsyncFileDialog::new()
-                                        .set_title("Export Photo")
-                                        .set_file_name("exported.jpg")
-                                        .add_filter("JPEG", &["jpg", "jpeg"])
-                                        .save_file()
-                                        .await;
-
-                                    if let Some(file) = file_dialog {
-                                        if let Some(path) = file.path().to_str() {
-                                            let path_string = path.to_string();
-                                            match controller.export_photo(id, path_string.clone()).await {
-                                                Ok(_) => {
-                                                    let _ = export_tx.send(Ok(path_string)).await;
-                                                }
-                                                Err(e) => {
-                                                    let _ = export_tx.send(Err(e)).await;
-                                                }
-                                            }
-                                        }
-                                    } else {
-                                        let _ = export_tx.send(Err("Cancelled".to_string())).await;
-                                    }
-                                    ctx_clone.request_repaint();
-                                });
                             } else if let Some(photo_id) = &self.context.state.library_selected_photo_id {
-                                // No detail_metadata, use library_selected_photo_id
-                                let controller = self.context.export_controller.clone();
                                 let id = photo_id.clone();
-                                let ctx_clone = self.context.ctx.clone();
-
-                                let (export_tx, export_rx) = tokio::sync::mpsc::channel::<Result<String, String>>(1);
-                                self.context.state.pending_export_receiver = Some(export_rx);
-                                self.context.state.is_busy = true;
-                                self.context.state.busy_message = "Exporting...".to_string();
-                                self.context.state.toasts.info("Exporting photo...");
-
-                                tokio::spawn(async move {
-                                    let file_dialog = rfd::AsyncFileDialog::new()
-                                        .set_title("Export Photo")
-                                        .set_file_name("exported.jpg")
-                                        .add_filter("JPEG", &["jpg", "jpeg"])
-                                        .save_file()
-                                        .await;
-
-                                    if let Some(file) = file_dialog {
-                                        if let Some(path) = file.path().to_str() {
-                                            let path_string = path.to_string();
-                                            match controller.export_photo(id, path_string.clone()).await {
-                                                Ok(_) => {
-                                                    let _ = export_tx.send(Ok(path_string)).await;
-                                                }
-                                                Err(e) => {
-                                                    let _ = export_tx.send(Err(e)).await;
-                                                }
-                                            }
-                                        }
-                                    } else {
-                                        let _ = export_tx.send(Err("Cancelled".to_string())).await;
-                                    }
-                                    ctx_clone.request_repaint();
-                                });
+                                
+                                let mut dialog = egui_file::FileDialog::save_file(None)
+                                    .title("Export Photo")
+                                    .default_filename("exported.jpg");
+                                dialog.open();
+                                
+                                self.context.state.export_target_id = Some(id);
+                                self.context.state.import_dialog = Some(dialog);
+                                self.context.state.import_dialog_mode = crate::state::ImportDialogMode::Export;
                             }
                         }
                         FilmstripAction::SelectAll => {
@@ -529,43 +479,16 @@ impl<'a> DockViewer<'a> {
             let export_label = format!("{} Export JPEG", crate::design_system::icons::ACTION_EXPORT);
             if ui.button(&export_label).clicked() {
                 if let Some(metadata) = &self.context.state.detail_metadata {
-                    let controller = self.context.export_controller.clone();
                     let id = metadata.id.clone();
-                    let ctx_clone = self.context.ctx.clone();
-
-                    // Create channel for export result
-                    let (export_tx, export_rx) = tokio::sync::mpsc::channel::<Result<String, String>>(1);
-                    self.context.state.pending_export_receiver = Some(export_rx);
-                    self.context.state.is_busy = true;
-                    self.context.state.busy_message = "Exporting...".to_string();
-                    self.context.state.toasts.info("Exporting photo...");
-
-                    tokio::spawn(async move {
-                        let file_dialog = rfd::AsyncFileDialog::new()
-                            .set_title("Export Photo")
-                            .set_file_name("exported.jpg")
-                            .add_filter("JPEG", &["jpg", "jpeg"])
-                            .save_file()
-                            .await;
-
-                        if let Some(file) = file_dialog {
-                            if let Some(path) = file.path().to_str() {
-                                let path_string = path.to_string();
-                                match controller.export_photo(id, path_string.clone()).await {
-                                    Ok(_) => {
-                                        let _ = export_tx.send(Ok(path_string)).await;
-                                    }
-                                    Err(e) => {
-                                        let _ = export_tx.send(Err(e)).await;
-                                    }
-                                }
-                            }
-                        } else {
-                            // User cancelled
-                            let _ = export_tx.send(Err("Cancelled".to_string())).await;
-                        }
-                        ctx_clone.request_repaint();
-                    });
+                    
+                    let mut dialog = egui_file::FileDialog::save_file(None)
+                        .title("Export Photo")
+                        .default_filename("exported.jpg");
+                    dialog.open();
+                    
+                    self.context.state.export_target_id = Some(id);
+                    self.context.state.import_dialog = Some(dialog);
+                    self.context.state.import_dialog_mode = crate::state::ImportDialogMode::Export;
                 } else {
                     self.context.state.toasts.warning("No photo selected");
                 }

@@ -258,6 +258,20 @@ pub struct AppState {
     pub show_save_preset_dialog: bool,
     /// Name input for new preset
     pub save_preset_name: String,
+
+    // ============================================
+    // File Dialogs
+    // ============================================
+    pub import_dialog: Option<egui_file::FileDialog>,
+    pub import_dialog_mode: ImportDialogMode,
+    pub export_target_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImportDialogMode {
+    Simple,
+    Advanced,
+    Export, // Reusing for export too?
 }
 
 #[derive(Clone, Debug, Default)]
@@ -369,6 +383,9 @@ impl AppState {
             presets: Vec::new(),
             show_save_preset_dialog: false,
             save_preset_name: String::new(),
+            import_dialog: None,
+            import_dialog_mode: ImportDialogMode::Simple,
+            export_target_id: None,
         }
     }
 
