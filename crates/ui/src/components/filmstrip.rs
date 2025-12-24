@@ -49,15 +49,30 @@ impl Filmstrip {
         &mut self,
         ui: &mut Ui,
         ctx: &egui::Context,
-        photos: &[PhotoViewModel],
         state: &mut AppState,
     ) -> Option<FilmstripAction> {
         let mut action: Option<FilmstripAction> = None;
+
+        // Render Filter Toolbox
+        ui.horizontal(|ui| {
+            ui.add_space(Theme::SPACE_SM);
+            state.filmstrip_filter.ui(ui);
+        });
+        ui.separator();
+
+        // Note: apply returns a list of references derived from state.photos
+        // This locks state.photos for reading, preventing us from calling methods on state that borrow it mutably.
+        // We must access disjoint fields (like selected_photo_ids) directly.
+        let visible_photos = state.filmstrip_filter.apply(&state.photos);
+
         // Poll for completed thumbnails (non-blocking)
         let results = self.thumbnail_loader.poll_results();
         for result in results {
             // Find the photo's edit values to apply effects to thumbnail
-            let processed_image = if let Some(photo) = photos.iter().find(|p| p.id == result.photo_id) {
+            // Use state.photos to find edits (we need to find by ID)
+            // Since visible_photos is a subset, checking state.photos is more robust/correct if edits updated
+            // But visible_photos refs point to state.photos anyway.
+            let processed_image = if let Some(photo) = state.photos.iter().find(|p| p.id == result.photo_id) {
                 let exposure = photo.edit_exposure.unwrap_or(0.0);
                 let contrast = photo.edit_contrast.unwrap_or(1.0);
                 let temperature = photo.edit_temperature.unwrap_or(0.0);
@@ -100,7 +115,19 @@ impl Filmstrip {
         }
 
         // Request thumbnails for visible photos (async, non-blocking)
-        self.request_visible_thumbnails(photos);
+        let requests: Vec<ThumbnailRequest> = visible_photos
+            .iter()
+            .filter(|p| !self.thumbnail_cache.contains_key(&p.id))
+            .map(|p| ThumbnailRequest {
+                photo_id: p.id.clone(),
+                path: p.path.clone(),
+            })
+            .take(30)
+            .collect();
+
+        if !requests.is_empty() {
+            self.thumbnail_loader.request_thumbnails(requests);
+        }
 
         // Dark background like Lightroom
         let bg_color = Color32::from_rgb(42, 42, 42);
@@ -117,8 +144,9 @@ impl Filmstrip {
                 ui.horizontal(|ui| {
                     ui.add_space(Theme::SPACE_SM);
 
-                    for (index, photo) in photos.iter().enumerate() {
-                        let is_multi_selected = state.is_photo_selected(&photo.id);
+                    for (index, photo) in visible_photos.iter().enumerate() {
+                        // Access fields directly to avoid borrow conflict
+                        let is_multi_selected = state.selected_photo_ids.contains(&photo.id);
                         let is_primary_selected = state.library_selected_photo_id.as_ref() == Some(&photo.id);
                         
                         // Reserve space for thumbnail
@@ -128,94 +156,52 @@ impl Filmstrip {
                         );
 
                         // Handle click with modifier keys for multi-selection
-                        // Note: We check this AFTER flags to allow flags to steal clicks if needed
                         let mut thumb_clicked = response.clicked();
 
-                        // Interactive Flags (Pick/Reject) - Pre-calculation & Interaction
-                        // We handle interaction here to intercept clicks, but draw later to be on top
+                        // Interactive Flags logic ...
                         let current_flag = photo.flag.unwrap_or(0);
                         let is_hovered = response.hovered();
 
-                        // Interactive Flags (Pick/Reject)
-                        // defined relative to thumbnail rect
+                       // ... (Flag interaction code same as before) ...
                         let flag_size = 14.0;
                         let padding = 4.0;
                         let spacing = 2.0;
 
-                        // Pick Icon [P] Area
                         let pick_rect = egui::Rect::from_min_size(
                             rect.min + Vec2::new(padding, padding),
                             Vec2::new(flag_size, flag_size)
                         );
                         
-                        // Reject Icon [X] Area
                         let reject_rect = egui::Rect::from_min_size(
                             rect.min + Vec2::new(padding + flag_size + spacing, padding),
                             Vec2::new(flag_size, flag_size)
                         );
 
-                        // Always handle interactions, so we don't lose clicks during hover transitions
                         let pick_response = ui.interact(pick_rect, egui::Id::new(format!("pick_{}", photo.id)), Sense::click());
                         let reject_response = ui.interact(reject_rect, egui::Id::new(format!("reject_{}", photo.id)), Sense::click());
                         
                         let pick_hovered = pick_response.hovered();
                         let reject_hovered = reject_response.hovered();
 
-                        // Handle Flag Clicks
                         if pick_response.clicked() {
-                            thumb_clicked = false; // Consume click
-                            let new_flag = if current_flag == 1 { 0 } else { 1 }; // Toggle
+                            thumb_clicked = false;
+                            let new_flag = if current_flag == 1 { 0 } else { 1 };
                             action = Some(FilmstripAction::SetFlag(photo.id.clone(), new_flag));
                         } else if reject_response.clicked() {
-                            thumb_clicked = false; // Consume click
-                            let new_flag = if current_flag == -1 { 0 } else { -1 }; // Toggle
+                            thumb_clicked = false;
+                            let new_flag = if current_flag == -1 { 0 } else { -1 };
                             action = Some(FilmstripAction::SetFlag(photo.id.clone(), new_flag));
                         }
 
-                        // Determine if we should SHOW the flags
-                        // Show if: 
-                        // 1. Mouse is hovering the thumbnail
-                        // 2. Photo already has a flag (picked/rejected)
-                        // 3. Mouse is hovering the flag buttons themselves (active interaction)
                         let show_flags = is_hovered || current_flag != 0 || pick_hovered || reject_hovered;
 
                         if show_flags {
-                            // Painting logic only
                             let painter = ui.painter();
-                            
-                            // Pick Icon (Checkmark)
-                            let pick_color = if current_flag == 1 {
-                                Theme::ACCENT_SUCCESS // Green for picked
-                            } else if pick_hovered {
-                                Theme::TEXT_PRIMARY // White on hover
-                            } else {
-                                Theme::TEXT_MUTED // Gray otherwise
-                            };
-                            
-                            painter.text(
-                                pick_rect.center(),
-                                egui::Align2::CENTER_CENTER,
-                                crate::design_system::icons::FLAG_PICK,
-                                egui::FontId::proportional(12.0),
-                                pick_color,
-                            );
+                            let pick_color = if current_flag == 1 { Theme::ACCENT_SUCCESS } else if pick_hovered { Theme::TEXT_PRIMARY } else { Theme::TEXT_MUTED };
+                            painter.text(pick_rect.center(), egui::Align2::CENTER_CENTER, crate::design_system::icons::FLAG_PICK, egui::FontId::proportional(12.0), pick_color);
 
-                            // Reject Icon (X)
-                            let reject_color = if current_flag == -1 {
-                                Theme::ACCENT_ERROR // Red for rejected
-                            } else if reject_hovered {
-                                Theme::TEXT_PRIMARY // White on hover
-                            } else {
-                                Theme::TEXT_MUTED // Gray otherwise
-                            };
-
-                            painter.text(
-                                reject_rect.center(),
-                                egui::Align2::CENTER_CENTER,
-                                crate::design_system::icons::FLAG_REJECT,
-                                egui::FontId::proportional(12.0),
-                                reject_color,
-                            );
+                            let reject_color = if current_flag == -1 { Theme::ACCENT_ERROR } else if reject_hovered { Theme::TEXT_PRIMARY } else { Theme::TEXT_MUTED };
+                            painter.text(reject_rect.center(), egui::Align2::CENTER_CENTER, crate::design_system::icons::FLAG_REJECT, egui::FontId::proportional(12.0), reject_color);
                         }
 
 
@@ -224,32 +210,59 @@ impl Filmstrip {
                             
                             if modifiers.command {
                                 // Cmd+click: toggle individual selection
-                                state.toggle_selection(&photo.id);
-                                state.last_clicked_index = Some(index);
+                                if state.selected_photo_ids.contains(&photo.id) {
+                                    state.selected_photo_ids.remove(&photo.id);
+                                } else {
+                                    state.selected_photo_ids.insert(photo.id.clone());
+                                }
+                                state.last_clicked_index = Some(index); // Use visible index? Might be confusing if refiltered.
                             } else if modifiers.shift {
-                                // Shift+click: range selection
-                                state.select_range(index);
+                                // Range selection in FILTERED view
+                                // Find where the last selected photo is in the current visible list
+                                if let Some(last_id) = &state.library_selected_photo_id {
+                                    if let Some(start_idx) = visible_photos.iter().position(|p| &p.id == last_id) {
+                                        let start = start_idx.min(index);
+                                        let end = start_idx.max(index);
+                                        
+                                        state.selected_photo_ids.clear();
+                                        // Select everything in between
+                                        for i in start..=end {
+                                            state.selected_photo_ids.insert(visible_photos[i].id.clone());
+                                        }
+                                    } else {
+                                        // Last selected not visible, treating as single select
+                                        state.selected_photo_ids.clear();
+                                        state.selected_photo_ids.insert(photo.id.clone());
+                                    }
+                                } else {
+                                     state.selected_photo_ids.clear();
+                                     state.selected_photo_ids.insert(photo.id.clone());
+                                }
                             } else {
                                 // Regular click: single select
-                                state.single_select(&photo.id, index);
+                                state.selected_photo_ids.clear();
+                                state.selected_photo_ids.insert(photo.id.clone());
+                                state.last_clicked_index = Some(index);
                             }
                             state.library_selected_photo_id = Some(photo.id.clone());
                         }
 
-                        // Handle right-click or Control+click (macOS trackpad) - open context menu
+                        // Handle right-click
                         let is_control_click = response.clicked() && ui.input(|i| i.modifiers.ctrl);
                         if response.secondary_clicked() || is_control_click {
-                            // If right-clicking on a non-selected photo, select it first
-                            if !state.is_photo_selected(&photo.id) {
-                                state.single_select(&photo.id, index);
+                            if !state.selected_photo_ids.contains(&photo.id) {
+                                state.selected_photo_ids.clear();
+                                state.selected_photo_ids.insert(photo.id.clone());
+                                state.last_clicked_index = Some(index);
                             }
                             state.library_selected_photo_id = Some(photo.id.clone());
-                            // Open context menu at click position
                             if let Some(pos) = response.interact_pointer_pos() {
                                 self.context_menu.open(ctx, pos);
                             }
                         }
 
+                        // ... (Rendering thumbnail, etc. same as before) ...
+                        
                         // Initialize the color mapping for labels
                         let label_color = match photo.color_label.as_deref() {
                             Some("Red") | Some("red") => Some(Theme::LABEL_RED),
@@ -269,7 +282,6 @@ impl Filmstrip {
                             Color32::from_rgb(50, 50, 50)
                         };
                         
-                        // Fill background (tinted if color label exists)
                         let bg_fill = if let Some(color) = label_color {
                             if is_multi_selected || is_primary_selected {
                                 color.gamma_multiply(0.4)
@@ -286,7 +298,6 @@ impl Filmstrip {
                             bg_fill,
                         );
 
-                        // Draw color label border if present
                         if let Some(color) = label_color {
                             ui.painter().rect_stroke(
                                 rect.shrink(1.0),
@@ -296,17 +307,12 @@ impl Filmstrip {
                             );
                         }
 
-                        // Draw thumbnail image or placeholder
                         if let Some(texture) = self.thumbnail_cache.get(&photo.id) {
-                            // Draw actual thumbnail
-                            let img_rect = rect.shrink(2.0); // Small padding
-                            
-                            // Calculate centered image position preserving aspect ratio
+                            let img_rect = rect.shrink(2.0);
                             let texture_aspect = texture.size()[0] as f32 / texture.size()[1] as f32;
                             let img_aspect = img_rect.width() / img_rect.height();
                             
                             let img_display_rect = if texture_aspect > img_aspect {
-                                // Wider than tall - fit width
                                 let display_height = img_rect.width() / texture_aspect;
                                 let y_offset = (img_rect.height() - display_height) / 2.0;
                                 egui::Rect::from_min_size(
@@ -314,7 +320,6 @@ impl Filmstrip {
                                     Vec2::new(img_rect.width(), display_height),
                                 )
                             } else {
-                                // Taller than wide - fit height
                                 let display_width = img_rect.height() * texture_aspect;
                                 let x_offset = (img_rect.width() - display_width) / 2.0;
                                 egui::Rect::from_min_size(
@@ -322,10 +327,8 @@ impl Filmstrip {
                                     Vec2::new(display_width, img_rect.height()),
                                 )
                             };
-                            
                             Image::new(texture).paint_at(ui, img_display_rect);
                         } else {
-                            // Draw placeholder text
                             let text_pos = rect.center();
                             let short_name = if photo.name.len() > 8 {
                                 format!("{}...", &photo.name[..5])
@@ -346,9 +349,7 @@ impl Filmstrip {
                             let star_size = 10.0;
                             let total_stars_width = star_size * 5.0;
                             let start_x = rect.center().x - total_stars_width / 2.0;
-                            let star_y = rect.max.y - star_size; // Bottom
-
-                            // Draw subtle background
+                            let star_y = rect.max.y - star_size;
                             let bg_rect = egui::Rect::from_min_size(
                                 egui::pos2(start_x - 2.0, star_y - star_size/2.0),
                                 egui::Vec2::new(total_stars_width + 4.0, star_size)
@@ -363,7 +364,6 @@ impl Filmstrip {
                             }
                         }
 
-                        // Draw selection border
                         if is_primary_selected {
                             ui.painter().rect_stroke(
                                 rect,
@@ -380,8 +380,7 @@ impl Filmstrip {
                             );
                         }
                         
-                        // Show checkmark for multi-selected items
-                        if is_multi_selected && state.selection_count() > 1 {
+                        if is_multi_selected && state.selected_photo_ids.len() > 1 {
                             let check_pos = rect.min + Vec2::new(6.0, 6.0);
                             ui.painter().circle_filled(check_pos, 8.0, Theme::ACCENT_PRIMARY);
                             ui.painter().text(
@@ -393,37 +392,20 @@ impl Filmstrip {
                             );
                         }
 
-                        // Draw Interactive Flags (Last layer)
+                        // Flags (Last layer)
                         if show_flags {
                             let flag_size = 14.0;
-                            // Draw Pick Icon
                             let pick_bg = if current_flag == 1 { Theme::ACCENT_SUCCESS } else if pick_hovered { Color32::from_gray(100) } else { Color32::from_black_alpha(100) };
                             let pick_fg = if current_flag == 1 { Color32::WHITE } else { Color32::from_gray(200) };
-                            
                             ui.painter().circle_filled(pick_rect.center(), flag_size / 2.0, pick_bg);
-                            ui.painter().text(
-                                pick_rect.center(),
-                                egui::Align2::CENTER_CENTER,
-                                "P",
-                                egui::FontId::proportional(9.0),
-                                pick_fg,
-                            );
+                            ui.painter().text(pick_rect.center(), egui::Align2::CENTER_CENTER, "P", egui::FontId::proportional(9.0), pick_fg);
 
-                            // Draw Reject Icon
                             let reject_bg = if current_flag == -1 { Theme::ACCENT_ERROR } else if reject_hovered { Color32::from_gray(100) } else { Color32::from_black_alpha(100) };
                             let reject_fg = if current_flag == -1 { Color32::WHITE } else { Color32::from_gray(200) };
-                            
                             ui.painter().circle_filled(reject_rect.center(), flag_size / 2.0, reject_bg);
-                            ui.painter().text(
-                                reject_rect.center(),
-                                egui::Align2::CENTER_CENTER,
-                                "X", 
-                                egui::FontId::proportional(9.0),
-                                reject_fg,
-                            );
+                            ui.painter().text(reject_rect.center(), egui::Align2::CENTER_CENTER, "X", egui::FontId::proportional(9.0), reject_fg);
                         }
 
-                        // Spacing between thumbnails
                         ui.add_space(Self::THUMBNAIL_SPACING);
                     }
 
@@ -432,7 +414,8 @@ impl Filmstrip {
             });
 
         // Show context menu if open
-        let selection_count = state.selection_count();
+        // Access state.selected_photo_ids directly
+        let selection_count = state.selected_photo_ids.len();
         let items = vec![
             ContextMenuItem::new("Open in Develop")
                 .with_icon("🖼️")
@@ -467,7 +450,6 @@ impl Filmstrip {
 
         action
     }
-    
     /// Show filmstrip for Develop view (single selection mode with callback)
     pub fn show_develop(
         &mut self,
@@ -475,9 +457,20 @@ impl Filmstrip {
         ctx: &egui::Context,
         photos: &[PhotoViewModel],
         selected_photo_id: &Option<String>,
+        filter: &mut crate::components::filmstrip_filter::FilmstripFilter,
         mut on_select: impl FnMut(String),
         mut on_flag: impl FnMut(String, i32),
     ) {
+        // Render Filter Toolbox
+        ui.horizontal(|ui| {
+            ui.add_space(Theme::SPACE_SM);
+            filter.ui(ui);
+        });
+        ui.separator();
+
+        // Apply Filter
+        let visible_photos = filter.apply(photos);
+
         // Poll for completed thumbnails (non-blocking)
         let results = self.thumbnail_loader.poll_results();
         for result in results {
@@ -525,7 +518,21 @@ impl Filmstrip {
         }
 
         // Request thumbnails for visible photos (async, non-blocking)
-        self.request_visible_thumbnails(photos);
+        // Optimization: only request for *visible* (filtered) photos
+       
+        let requests: Vec<ThumbnailRequest> = visible_photos
+            .iter()
+            .filter(|p| !self.thumbnail_cache.contains_key(&p.id))
+            .map(|p| ThumbnailRequest {
+                photo_id: p.id.clone(),
+                path: p.path.clone(),
+            })
+            .take(30)
+            .collect();
+
+        if !requests.is_empty() {
+            self.thumbnail_loader.request_thumbnails(requests);
+        }
 
         // Dark background like Lightroom
         let bg_color = Color32::from_rgb(42, 42, 42);
@@ -542,7 +549,7 @@ impl Filmstrip {
                 ui.horizontal(|ui| {
                     ui.add_space(Theme::SPACE_SM);
 
-                    for photo in photos {
+                    for photo in visible_photos {
                         let is_selected = selected_photo_id.as_ref() == Some(&photo.id);
                         
                         // Reserve space for thumbnail
@@ -747,21 +754,6 @@ impl Filmstrip {
     }
 
     /// Request async loading of thumbnails for visible photos
-    fn request_visible_thumbnails(&mut self, photos: &[PhotoViewModel]) {
-        let requests: Vec<ThumbnailRequest> = photos
-            .iter()
-            .filter(|p| !self.thumbnail_cache.contains_key(&p.id))
-            .map(|p| ThumbnailRequest {
-                photo_id: p.id.clone(),
-                path: p.path.clone(),
-            })
-            .take(30) // Limit batch size
-            .collect();
-
-        if !requests.is_empty() {
-            self.thumbnail_loader.request_thumbnails(requests);
-        }
-    }
 
     // Note: Thumbnail loading is now handled asynchronously by request_visible_thumbnails()
 

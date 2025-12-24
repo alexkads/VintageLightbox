@@ -13,6 +13,7 @@ use crate::docking::DockTab;
 use egui_dock::DockState;
 use egui_notify::Toasts;
 use infrastructure::cache::CacheStats;
+use crate::components::filmstrip_filter::FilmstripFilter;
 
 /// Snapshot of editing state for undo/redo
 #[derive(Debug, Clone)]
@@ -168,9 +169,8 @@ pub struct AppState {
     // ============================================
     // Filters
     // ============================================
-    pub filter_min_rating: i32,
-    pub filter_color_label: Option<String>,
-    pub filter_flag: Option<i32>, // 1=Pick, -1=Reject, 0=Unflagged, None=All
+    // Filmstrip specific filter
+    pub filmstrip_filter: FilmstripFilter,
 
     // ============================================
     // Async Operations
@@ -218,8 +218,6 @@ pub struct AppState {
     // ============================================
     /// Root nodes of the folder tree
     pub folder_tree_roots: Vec<crate::components::folder_tree::FolderNode>,
-    /// Currently selected folder path filter
-    pub filter_folder_path: Option<std::path::PathBuf>,
     /// Set of expanded folder paths in the tree
     pub expanded_folders: HashSet<String>,
 
@@ -334,9 +332,7 @@ impl AppState {
             is_busy: false,
             busy_message: String::new(),
             grid_columns: 4,  // Default 4 columns
-            filter_min_rating: 0,
-            filter_color_label: None,
-            filter_flag: None,
+            filmstrip_filter: FilmstripFilter::new(),
             pending_import: None,
             pending_export: None,
             edit_history: Vec::new(),
@@ -358,7 +354,6 @@ impl AppState {
             saved_vibrance: 0.0,
             saved_saturation: 0.0,
             folder_tree_roots: Vec::new(),
-            filter_folder_path: None,
             expanded_folders: HashSet::new(),
             import_preview_dialog: None,
             import_progress_dialog: None,
@@ -441,48 +436,6 @@ impl AppState {
             .and_then(|id| self.photos.iter().position(|p| &p.id == id))
     }
 
-    /// Get filtered photos based on current filter settings
-    pub fn get_filtered_photos(&self) -> Vec<PhotoViewModel> {
-        self.photos.iter()
-            .filter(|photo| {
-                // Filter by minimum rating
-                if photo.rating < self.filter_min_rating {
-                    return false;
-                }
-
-                // Filter by color label
-                if let Some(ref filter_label) = self.filter_color_label {
-                    let matches = match photo.color_label.as_ref() {
-                        Some(label) => label.eq_ignore_ascii_case(filter_label),
-                        None => false,
-                    };
-                    if !matches {
-                        return false;
-                    }
-                }
-
-                // Filter by flag
-                if let Some(filter_flag) = self.filter_flag {
-                    let photo_flag = photo.flag.unwrap_or(0); // Treat None as 0 (Unflagged)
-                    if photo_flag != filter_flag {
-                        return false;
-                    }
-                }
-
-                // Filter by Folder Path
-                if let Some(ref folder_path) = self.filter_folder_path {
-                    let photo_path = std::path::Path::new(&photo.path);
-                    // Check if photo is within the selected folder (recursive)
-                    if !photo_path.starts_with(folder_path) {
-                        return false;
-                    }
-                }
-
-                true
-            })
-            .cloned()
-            .collect()
-    }
 
     /// Push current edit state to history (for undo/redo)
     pub fn push_edit_snapshot(&mut self) {

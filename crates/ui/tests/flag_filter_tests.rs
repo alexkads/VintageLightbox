@@ -47,28 +47,36 @@ fn test_filter_by_flags() {
     ];
 
     // 1. Test Filter: Picked (1)
-    state.filter_flag = Some(1);
-    let filtered = state.get_filtered_photos();
+    state.filmstrip_filter.reset();
+    state.filmstrip_filter.show_flagged = true;
+    let filtered_refs = state.filmstrip_filter.apply(&state.photos);
+    let filtered: Vec<PhotoViewModel> = filtered_refs.into_iter().cloned().collect();
     assert_eq!(filtered.len(), 2, "Should have 2 picked photos");
     assert!(filtered.iter().any(|p| p.id == "1"));
     assert!(filtered.iter().any(|p| p.id == "5"));
 
     // 2. Test Filter: Rejected (-1)
-    state.filter_flag = Some(-1);
-    let filtered = state.get_filtered_photos();
+    state.filmstrip_filter.reset();
+    state.filmstrip_filter.show_rejected = true;
+    let filtered_refs = state.filmstrip_filter.apply(&state.photos);
+    let filtered: Vec<PhotoViewModel> = filtered_refs.into_iter().cloned().collect();
     assert_eq!(filtered.len(), 1, "Should have 1 rejected photo");
     assert_eq!(filtered[0].id, "2");
 
     // 3. Test Filter: Unflagged (0)
-    state.filter_flag = Some(0);
-    let filtered = state.get_filtered_photos();
+    state.filmstrip_filter.reset();
+    state.filmstrip_filter.show_unflagged = true;
+    let filtered_refs = state.filmstrip_filter.apply(&state.photos);
+    let filtered: Vec<PhotoViewModel> = filtered_refs.into_iter().cloned().collect();
     assert_eq!(filtered.len(), 2, "Should have 2 unflagged photos (Explicit 0 and None)");
     assert!(filtered.iter().any(|p| p.id == "3"));
     assert!(filtered.iter().any(|p| p.id == "4"));
 
     // 4. Test Filter: All (None)
-    state.filter_flag = None;
-    let filtered = state.get_filtered_photos();
+    state.filmstrip_filter.reset();
+    // Default is all off = show all
+    let filtered_refs = state.filmstrip_filter.apply(&state.photos);
+    let filtered: Vec<PhotoViewModel> = filtered_refs.into_iter().cloned().collect();
     assert_eq!(filtered.len(), 5, "Should return all photos");
 }
 
@@ -84,10 +92,11 @@ fn test_filter_combined_with_rating() {
     state.photos = vec![p1, p2, p3];
 
     // Filter: Picked AND Rating >= 4
-    state.filter_flag = Some(1);
-    state.filter_min_rating = 4;
+    state.filmstrip_filter.show_flagged = true;
+    state.filmstrip_filter.min_rating = 4;
     
-    let filtered = state.get_filtered_photos();
+    let filtered_refs = state.filmstrip_filter.apply(&state.photos);
+    let filtered: Vec<PhotoViewModel> = filtered_refs.into_iter().cloned().collect();
     assert_eq!(filtered.len(), 1, "Should filter by both Flag and Rating");
     assert_eq!(filtered[0].id, "1");
 }

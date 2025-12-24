@@ -36,7 +36,6 @@ pub fn create_library_layout() -> DockState<DockTab> {
     );
     
     // Add more tabs to left sidebar
-    tree.push_to_focused_leaf(DockTab::Filters);
     tree.set_focused_node(left_sidebar);
     tree.push_to_focused_leaf(DockTab::GridSettings);
     

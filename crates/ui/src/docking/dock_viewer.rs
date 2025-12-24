@@ -85,9 +85,6 @@ impl<'a> TabViewer for DockViewer<'a> {
                 self.render_grid_settings(ui);
             }
 
-            DockTab::Filters => {
-                self.render_filters_panel(ui);
-            }
 
             DockTab::Histogram => {
                 Histogram::show(ui, self.context.state.histogram_data.as_ref());
@@ -116,7 +113,6 @@ impl<'a> TabViewer for DockViewer<'a> {
             DockTab::Filmstrip => {
                 use crate::state::CurrentView;
                 use crate::components::filmstrip::FilmstripAction;
-                let photos = self.context.state.get_filtered_photos();
                 let current_view = self.context.state.current_view;
                 
                 // For Develop view, we need the filmstrip to update develop_selected_photo_id
@@ -126,7 +122,6 @@ impl<'a> TabViewer for DockViewer<'a> {
                 let action = self.context.filmstrip.show(
                     ui,
                     self.context.ctx,
-                    &photos,
                     self.context.state,
                 );
 
@@ -278,12 +273,12 @@ impl<'a> DockViewer<'a> {
     fn render_folders_panel(&mut self, ui: &mut Ui) {
         egui::ScrollArea::vertical().show(ui, |ui| {
             let mut folder_tree = FolderTree::new(
-                self.context.state.filter_folder_path.as_deref(),
+                self.context.state.filmstrip_filter.folder_path.as_deref(),
                 &mut self.context.state.expanded_folders,
             );
 
             if let Some(clicked_path) = folder_tree.show(ui, &self.context.state.folder_tree_roots) {
-                self.context.state.filter_folder_path = Some(clicked_path);
+                self.context.state.filmstrip_filter.folder_path = Some(clicked_path);
             }
         });
     }
@@ -311,65 +306,6 @@ impl<'a> DockViewer<'a> {
         });
     }
 
-    fn render_filters_panel(&mut self, ui: &mut Ui) {
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            // Flag filter
-            ui.label(egui::RichText::new("Flag").size(Theme::FONT_SM).color(Theme::TEXT_MUTED));
-            ui.horizontal(|ui| {
-                // All (None)
-                if ui.selectable_label(self.context.state.filter_flag.is_none(), "All").clicked() {
-                    self.context.state.filter_flag = None;
-                }
-                
-                // Picked (1)
-                if ui.selectable_label(self.context.state.filter_flag == Some(1), "Picked").clicked() {
-                    self.context.state.filter_flag = Some(1);
-                }
-
-                // Unflagged (0)
-                if ui.selectable_label(self.context.state.filter_flag == Some(0), "Unflagged").clicked() {
-                    self.context.state.filter_flag = Some(0);
-                }
-
-                // Rejected (-1)
-                if ui.selectable_label(self.context.state.filter_flag == Some(-1), "Rejected").clicked() {
-                    self.context.state.filter_flag = Some(-1);
-                }
-            });
-
-            ui.add_space(Theme::SPACE_SM);
-
-            // Rating filter
-            ui.label(egui::RichText::new("Min Rating").size(Theme::FONT_SM).color(Theme::TEXT_MUTED));
-            ui.horizontal(|ui| {
-                for rating in 0..=5 {
-                    let text = if rating == 0 { "All" } else { &"★".repeat(rating) };
-                    if ui.selectable_label(self.context.state.filter_min_rating == rating as i32, text).clicked() {
-                        self.context.state.filter_min_rating = rating as i32;
-                    }
-                }
-            });
-
-            ui.add_space(Theme::SPACE_SM);
-
-            // Color label filter
-            ui.label(egui::RichText::new("Color Label").size(Theme::FONT_SM).color(Theme::TEXT_MUTED));
-            let labels = vec![
-                ("All", None),
-                ("Red", Some("Red".to_string())),
-                ("Yellow", Some("Yellow".to_string())),
-                ("Green", Some("Green".to_string())),
-                ("Blue", Some("Blue".to_string())),
-                ("Purple", Some("Purple".to_string())),
-            ];
-
-            for (name, label) in labels {
-                if widgets::menu_item(ui, name, self.context.state.filter_color_label == label).clicked() {
-                    self.context.state.filter_color_label = label;
-                }
-            }
-        });
-    }
 
     fn render_quick_develop(&mut self, ui: &mut Ui) {
         if let Some(photo) = self.context.state.get_current_photo() {

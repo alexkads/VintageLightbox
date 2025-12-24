@@ -64,7 +64,8 @@ async fn test_filtering_by_color_label() {
     let (mut state, _, _, _, _, _, _) = setup_harness().await;
 
     // 1. Filter by "Red" (Capitalized, as set by UI)
-    state.filter_color_label = Some("Red".to_string());
+    // 1. Filter by "Red" (Capitalized, as set by UI)
+    state.filmstrip_filter.color_labels.insert(domain::value_objects::ColorLabel::Red);
     
     // NOTE: Both PhotoGrid and Filmstrip rely on `state.get_filtered_photos()` or equivalent logic.
     // By verifying this method returns the correct subset, we ensure both components receive the correct data.
@@ -72,8 +73,9 @@ async fn test_filtering_by_color_label() {
     // 2. Apply logic that PhotoGrid uses (simulated here, we need to find where it is)
     // Assuming logic is: photo.color_label == state.filter_color_label
     
-    // 2. Call state.get_filtered_photos() which now has the fix
-    let filtered_photos = state.get_filtered_photos();
+    // 2. Apply filtering logic
+    let filtered_refs = state.filmstrip_filter.apply(&state.photos);
+    let filtered_photos: Vec<PhotoViewModel> = filtered_refs.into_iter().cloned().collect();
 
     // 3. Asset we found the red photo
     assert_eq!(filtered_photos.len(), 1, "Should find exactly one Red photo");

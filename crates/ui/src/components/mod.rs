@@ -13,3 +13,4 @@ pub mod context_menu;
 pub mod folder_tree;
 pub mod import_dialogs;
 pub mod settings_dialog;
+pub mod filmstrip_filter;

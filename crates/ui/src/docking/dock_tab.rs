@@ -25,8 +25,6 @@ pub enum DockTab {
     Collections,
     /// Grid view settings
     GridSettings,
-    /// Filters panel (rating, color labels)
-    Filters,
     
     // ============================================
     // Right Sidebar Panels
@@ -59,7 +57,6 @@ impl fmt::Display for DockTab {
             DockTab::Folders => write!(f, "Folders"),
             DockTab::Collections => write!(f, "Collections"),
             DockTab::GridSettings => write!(f, "Grid Settings"),
-            DockTab::Filters => write!(f, "Filters"),
             DockTab::Histogram => write!(f, "Histogram"),
             DockTab::QuickDevelop => write!(f, "Quick Develop"),
             DockTab::Metadata => write!(f, "Metadata"),

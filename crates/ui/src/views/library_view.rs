@@ -29,12 +29,9 @@ impl LibraryView {
         egui::TopBottomPanel::bottom("filmstrip")
             .exact_height(120.0)  // 80px thumbnails + 40px padding
             .show_inside(ui, |ui| {
-                let photos = state.get_filtered_photos();
-                
                 self.filmstrip.show(
                     ui,
                     ctx,
-                    &photos,
                     state,
                 );
             });
@@ -83,60 +80,14 @@ impl LibraryView {
         
         ui.add_space(Theme::SPACE_LG);
 
-        // Filters Panel
-        widgets::section_title(ui, "Filters");
-        ui.add_space(Theme::SPACE_SM);
-
-        // Rating filter
-        ui.label(
-            egui::RichText::new("Min Rating")
-                .size(Theme::FONT_SM)
-                .color(Theme::TEXT_MUTED)
-        );
-        ui.horizontal(|ui| {
-            for rating in 0..=5 {
-                let text = if rating == 0 { "All" } else { &"★".repeat(rating) };
-                if ui.selectable_label(state.filter_min_rating == rating as i32, text).clicked() {
-                    state.filter_min_rating = rating as i32;
-                }
-            }
-        });
-
-        ui.add_space(Theme::SPACE_SM);
-
-        // Color label filter
-        ui.label(
-            egui::RichText::new("Color Label")
-                .size(Theme::FONT_SM)
-                .color(Theme::TEXT_MUTED)
-        );
-
-        let labels = vec![
-            ("All", None),
-            ("Red", Some("Red".to_string())),
-            ("Yellow", Some("Yellow".to_string())),
-            ("Green", Some("Green".to_string())),
-            ("Blue", Some("Blue".to_string())),
-            ("Purple", Some("Purple".to_string())),
-        ];
-
-        for (name, label) in labels {
-            if widgets::menu_item(ui, name, state.filter_color_label == label).clicked() {
-                state.filter_color_label = label;
-            }
-        }
-
-        ui.add_space(Theme::SPACE_LG);
-
         // Catalog Panel
         widgets::section_title(ui, "Catalog");
         ui.add_space(Theme::SPACE_SM);
 
         if widgets::menu_item(ui, "All Photographs", true).clicked() {
             // Reset filters
-            state.filter_min_rating = 0;
-            state.filter_color_label = None;
-            state.filter_folder_path = None;
+            state.filmstrip_filter.reset();
+            state.filmstrip_filter.folder_path = None;
         }
 
         ui.add_space(Theme::SPACE_LG);
@@ -146,12 +97,12 @@ impl LibraryView {
         ui.add_space(Theme::SPACE_SM);
 
         let mut folder_tree = crate::components::folder_tree::FolderTree::new(
-            state.filter_folder_path.as_deref(),
+            state.filmstrip_filter.folder_path.as_deref(),
             &mut state.expanded_folders,
         );
 
         if let Some(clicked_path) = folder_tree.show(ui, &state.folder_tree_roots) {
-            state.filter_folder_path = Some(clicked_path);
+            state.filmstrip_filter.folder_path = Some(clicked_path);
             // Reset other filters if desired, or keep them additive?
             // Lightroom behavior: Clicking a folder usually resets "Collection" selection but keeps filters.
             // For now, let's just set the folder path.

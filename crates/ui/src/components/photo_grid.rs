@@ -95,7 +95,9 @@ impl PhotoGrid {
         }
 
         // Get filtered photos
-        let filtered_photos = state.get_filtered_photos();
+        // Get filtered photos
+        let filtered_refs = state.filmstrip_filter.apply(&state.photos);
+        let filtered_photos: Vec<PhotoViewModel> = filtered_refs.into_iter().cloned().collect();
 
         if filtered_photos.is_empty() {
             self.show_empty_state(ui);

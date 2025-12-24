@@ -43,14 +43,14 @@ impl DevelopView {
         egui::TopBottomPanel::bottom("filmstrip_develop")
             .exact_height(120.0)  // 80px thumbnails + 40px padding
             .show_inside(ui, |ui| {
-                let photos = state.get_filtered_photos();
                 let selected_id = state.develop_selected_photo_id.clone();
                 
                 self.filmstrip.show_develop(
                     ui,
                     ctx,
-                    &photos,
+                    &state.photos,
                     &selected_id,
+                    &mut state.filmstrip_filter,
                     |photo_id| {
                         // Select photo and trigger load in Develop view (independent from Library)
                         state.develop_selected_photo_id = Some(photo_id.clone());
