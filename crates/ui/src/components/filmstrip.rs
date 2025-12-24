@@ -274,13 +274,7 @@ impl Filmstrip {
                         };
 
                         // Draw thumbnail background
-                        let thumb_color = if is_multi_selected || is_primary_selected {
-                            ui.visuals().selection.bg_fill.linear_multiply(0.4)
-                        } else if response.hovered() {
-                            ui.visuals().widgets.hovered.bg_fill
-                        } else {
-                            ui.visuals().widgets.inactive.bg_fill
-                        };
+                        let thumb_color = ui.visuals().widgets.inactive.bg_fill;
                         
                         let bg_fill = if let Some(color) = label_color {
                             if is_multi_selected || is_primary_selected {
@@ -365,30 +359,37 @@ impl Filmstrip {
                         }
 
                         if is_primary_selected {
+                            // Double border for primary selection
                             ui.painter().rect_stroke(
                                 rect,
                                 CornerRadius::same(2),
-                                Stroke::new(Self::SELECTED_BORDER_WIDTH, ui.visuals().strong_text_color()),
+                                Stroke::new(1.0, Color32::WHITE),
+                                egui::StrokeKind::Inside,
+                            );
+                            ui.painter().rect_stroke(
+                                rect,
+                                CornerRadius::same(2),
+                                Stroke::new(3.0, ui.visuals().selection.bg_fill),
                                 egui::StrokeKind::Outside,
                             );
                         } else if is_multi_selected {
                             ui.painter().rect_stroke(
                                 rect,
                                 CornerRadius::same(2),
-                                Stroke::new(2.0, ui.visuals().selection.bg_fill),
+                                Stroke::new(2.0, ui.visuals().text_color()),
                                 egui::StrokeKind::Outside,
                             );
                         }
                         
                         if is_multi_selected && state.selected_photo_ids.len() > 1 {
                             let check_pos = rect.min + Vec2::new(6.0, 6.0);
-                            ui.painter().circle_filled(check_pos, 8.0, ui.visuals().selection.bg_fill);
+                            ui.painter().circle_filled(check_pos, 8.0, ui.visuals().text_color());
                             ui.painter().text(
                                 check_pos,
                                 egui::Align2::CENTER_CENTER,
                                 "✓",
                                 egui::FontId::proportional(10.0),
-                                ui.visuals().strong_text_color(),
+                                ui.visuals().panel_fill, // Text color inverse (background)
                             );
                         }
 
@@ -569,13 +570,7 @@ impl Filmstrip {
                         };
 
                         // Draw thumbnail background
-                        let thumb_color = if is_selected {
-                             ui.visuals().selection.bg_fill.linear_multiply(0.4)
-                        } else if response.hovered() {
-                             ui.visuals().widgets.hovered.bg_fill
-                        } else {
-                             ui.visuals().widgets.inactive.bg_fill
-                        };
+                        let thumb_color = ui.visuals().widgets.inactive.bg_fill;
                         
                         // Fill background (tinted if color label exists)
                         let bg_fill = if let Some(color) = label_color {
@@ -668,10 +663,20 @@ impl Filmstrip {
 
                         // Draw selected border
                         if is_selected {
+                            // Filmstrip develop mode (single selection conceptually, but double border for consistency if needed)
+                            // Or just simple border if it's the active edited photo.
+                            // The user requested primary selection identification, which implies library/multi-select context.
+                            // But consistency is good.
                             ui.painter().rect_stroke(
                                 rect,
                                 CornerRadius::same(2),
-                                Stroke::new(Self::SELECTED_BORDER_WIDTH, ui.visuals().strong_text_color()),
+                                Stroke::new(1.0, Color32::WHITE),
+                                egui::StrokeKind::Inside,
+                            );
+                            ui.painter().rect_stroke(
+                                rect,
+                                CornerRadius::same(2),
+                                Stroke::new(3.0, ui.visuals().selection.bg_fill),
                                 egui::StrokeKind::Outside,
                             );
                         }

@@ -303,13 +303,7 @@ impl PhotoGrid {
                  egui::StrokeKind::Outside,
              );
         } else {
-            let bg_color = if is_selected {
-                ui.visuals().selection.bg_fill.linear_multiply(0.3)
-            } else if response.hovered() {
-                ui.visuals().widgets.hovered.bg_fill
-            } else {
-                ui.visuals().widgets.inactive.weak_bg_fill
-            };
+            let bg_color = ui.visuals().widgets.inactive.weak_bg_fill;
             ui.painter().rect_filled(rect, Theme::RADIUS_MD, bg_color);
         }
 
@@ -485,24 +479,33 @@ impl PhotoGrid {
         // Selection border - show for selected OR hovered
         // Different border for multi-selection vs primary selection
         if is_primary_selected {
+            // Double border for primary selection (Source)
+            // 1. Inner White Border
             ui.painter().rect_stroke(
                 rect,
                 Theme::RADIUS_MD,
-                egui::Stroke::new(3.0, ui.visuals().strong_text_color()),
+                egui::Stroke::new(1.0, Color32::WHITE),
+                egui::StrokeKind::Inside,
+            );
+            // 2. Outer Blue Border
+            ui.painter().rect_stroke(
+                rect,
+                Theme::RADIUS_MD,
+                egui::Stroke::new(3.0, ui.visuals().selection.bg_fill),
                 egui::StrokeKind::Outside,
             );
         } else if is_multi_selected {
             ui.painter().rect_stroke(
                 rect,
                 Theme::RADIUS_MD,
-                egui::Stroke::new(2.0, ui.visuals().selection.bg_fill),
+                egui::Stroke::new(2.0, ui.visuals().text_color()), // Neutral border for multi-selection
                 egui::StrokeKind::Outside,
             );
         } else if response.hovered() {
             ui.painter().rect_stroke(
                 rect,
                 Theme::RADIUS_MD,
-                egui::Stroke::new(2.0, ui.visuals().selection.bg_fill),
+                egui::Stroke::new(2.0, ui.visuals().text_color().linear_multiply(0.5)),
                 egui::StrokeKind::Outside,
             );
         }
