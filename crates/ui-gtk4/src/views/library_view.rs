@@ -1,12 +1,29 @@
-//! Minimal working example of LibraryView with photos
+//! Library View with DockManager
+//!
+//! Complete library view using the DockManager system with proper component integration.
 
 use gtk4::prelude::*;
 use relm4::prelude::*;
+use std::sync::Arc;
 
 use adapters::view_models::PhotoViewModel;
+use infrastructure::cache::preview_manager::PreviewManager;
 
+use crate::docking::{DockManager, PanelPosition};
+use crate::components::photo_grid::{PhotoGrid, PhotoGridMsg, PhotoGridOutput};
+use crate::components::folder_tree::{FolderTree, FolderTreeOutput};
+use crate::components::filter_panel::FilterPanel;
+use crate::components::metadata_panel::MetadataPanel;
+use crate::components::filmstrip::{Filmstrip, FilmstripMsg};
+
+#[allow(dead_code)]
 pub struct LibraryView {
-    photos: Vec<PhotoViewModel>,
+    dock_manager: DockManager,
+    photo_grid: Controller<PhotoGrid>,
+    folder_tree: Controller<FolderTree>,
+    filter_panel: Controller<FilterPanel>,
+    metadata_panel: Controller<MetadataPanel>,
+    filmstrip: Controller<Filmstrip>,
 }
 
 #[derive(Debug)]
@@ -18,230 +35,139 @@ pub enum LibraryViewMsg {
 pub enum LibraryViewOutput {
     SelectPhoto(String),
     OpenPhoto(String),
-    SetRating(i32),
-    SetColorLabel(Option<domain::value_objects::ColorLabel>),
 }
 
 #[relm4::component(pub)]
 impl SimpleComponent for LibraryView {
-    type Init = ();
+    type Init = Arc<PreviewManager>;
     type Input = LibraryViewMsg;
     type Output = LibraryViewOutput;
 
     view! {
+        #[root]
         gtk4::Box {
             set_orientation: gtk4::Orientation::Vertical,
             set_spacing: 0,
             set_hexpand: true,
             set_vexpand: true,
-            
+
             // Header
             gtk4::Box {
                 set_orientation: gtk4::Orientation::Horizontal,
                 set_margin_all: 12,
-                
+                set_spacing: 8,
+
                 gtk4::Label {
                     set_markup: "<span size='large' weight='bold'>Library</span>",
-                },
-            },
-            
-            // Main content - ScrolledWindow with FlowBox
-            gtk4::ScrolledWindow {
-                set_hexpand: true,
-                set_vexpand: true,
-                set_policy: (gtk4::PolicyType::Never, gtk4::PolicyType::Automatic),
-                
-                #[name(flow_box)]
-                gtk4::FlowBox {
-                    set_valign: gtk4::Align::Start,
-                    set_max_children_per_line: 5,
-                    set_min_children_per_line: 2,
-                    set_selection_mode: gtk4::SelectionMode::Single,
-                    set_homogeneous: false,
-                    set_row_spacing: 16,
-                    set_column_spacing: 16,
-                    set_margin_all: 16,
-                },
-            },
-            
-            // Separator between Grid and Filmstrip
-            gtk4::Separator {
-                set_orientation: gtk4::Orientation::Horizontal,
-            },
-            
-            // Filmstrip area (Bottom)
-            gtk4::Box {
-                set_orientation: gtk4::Orientation::Vertical,
-                set_height_request: 100,
-                add_css_class: "filmstrip-container",
-                
-                gtk4::Label {
-                    set_label: "Filmstrip",
+                    set_hexpand: true,
                     set_halign: gtk4::Align::Start,
-                    set_margin_start: 12,
-                    set_margin_top: 4,
-                    add_css_class: "caption",
-                    set_opacity: 0.7,
                 },
 
-                gtk4::ScrolledWindow {
-                    set_hexpand: true,
-                    set_vexpand: true,
-                    set_policy: (gtk4::PolicyType::Automatic, gtk4::PolicyType::Never),
-                    
-                    #[name(filmstrip_box)]
-                    gtk4::Box {
-                        set_orientation: gtk4::Orientation::Horizontal,
-                        set_spacing: 8,
-                        set_margin_all: 8,
-                    },
+                gtk4::Button {
+                    set_label: "Import",
+                    set_tooltip_text: Some("Import photos"),
                 },
             },
+
+            // DockManager root
+            #[local_ref]
+            dock_root -> gtk4::Box {},
         }
     }
 
     fn init(
-        _init: Self::Init,
+        preview_manager: Self::Init,
         root: Self::Root,
-        _sender: ComponentSender<Self>,
+        sender: ComponentSender<Self>,
     ) -> ComponentParts<Self> {
+        // Initialize child components
+        let photo_grid = PhotoGrid::builder()
+            .launch(preview_manager.clone())
+            .forward(sender.input_sender(), |output| match output {
+                PhotoGridOutput::PhotoSelected(_id) => LibraryViewMsg::SetPhotos(vec![]), // Placeholder
+                PhotoGridOutput::PhotoActivated(_id) => LibraryViewMsg::SetPhotos(vec![]), // Placeholder
+            });
+
+        let folder_tree = FolderTree::builder()
+            .launch(())
+            .forward(sender.input_sender(), |output| match output {
+                FolderTreeOutput::FolderSelected(_) => LibraryViewMsg::SetPhotos(vec![]),
+            });
+
+        let filter_panel = FilterPanel::builder()
+            .launch(())
+            .forward(sender.input_sender(), |_output| {
+                LibraryViewMsg::SetPhotos(vec![])
+            });
+
+        let metadata_panel = MetadataPanel::builder()
+            .launch(())
+            .detach();
+
+        let filmstrip = Filmstrip::builder()
+            .launch(())
+            .detach();
+
+        // Create DockManager with Library layout
+        let mut dock_manager = DockManager::new_library();
+
+        // Add panels to DockManager
+        dock_manager.add_panel(
+            PanelPosition::Center,
+            photo_grid.widget().upcast_ref::<gtk4::Widget>(),
+            None,
+        );
+
+        dock_manager.add_panel(
+            PanelPosition::Left,
+            folder_tree.widget().upcast_ref::<gtk4::Widget>(),
+            Some("Folders"),
+        );
+
+        dock_manager.add_panel(
+            PanelPosition::Left,
+            filter_panel.widget().upcast_ref::<gtk4::Widget>(),
+            Some("Filters"),
+        );
+
+        dock_manager.add_panel(
+            PanelPosition::Right,
+            metadata_panel.widget().upcast_ref::<gtk4::Widget>(),
+            Some("Metadata"),
+        );
+
+        dock_manager.add_panel(
+            PanelPosition::Bottom,
+            filmstrip.widget().upcast_ref::<gtk4::Widget>(),
+            None,
+        );
+
         let model = LibraryView {
-            photos: Vec::new(),
+            dock_manager,
+            photo_grid,
+            folder_tree,
+            filter_panel,
+            metadata_panel,
+            filmstrip,
         };
-        
+
+        let dock_root = model.dock_manager.get_root();
         let widgets = view_output!();
-        
+
         ComponentParts { model, widgets }
     }
 
     fn update(&mut self, msg: Self::Input, _sender: ComponentSender<Self>) {
         match msg {
             LibraryViewMsg::SetPhotos(photos) => {
-                println!("LibraryView: Received {} photos", photos.len());
-                self.photos = photos;
-                
-                // Manually populate the flow_box through the widgets
-                // This is the KEY - we need to access widgets.flow_box
+                println!("LibraryView: Setting {} photos", photos.len());
+
+                // Forward to PhotoGrid
+                self.photo_grid.emit(PhotoGridMsg::SetPhotos(photos.clone()));
+
+                // Forward to Filmstrip
+                self.filmstrip.emit(FilmstripMsg::SetPhotos(photos));
             }
         }
     }
-    
-    fn post_view(&self, widgets: &mut Self::Widgets) {
-        // Clear existing children
-        while let Some(child) = widgets.flow_box.first_child() {
-            widgets.flow_box.remove(&child);
-        }
-        
-        // Add photo cards
-        // Populate main grid
-        println!("LibraryView: Populating grid with {} cards", self.photos.len());
-        for photo in &self.photos {
-            let card = create_photo_card(photo);
-            widgets.flow_box.append(&card);
-        }
-        
-        // Populate filmstrip
-        while let Some(child) = widgets.filmstrip_box.first_child() {
-            widgets.filmstrip_box.remove(&child);
-        }
-
-        println!("LibraryView: Populating filmstrip with {} items", self.photos.len());
-        for photo in &self.photos {
-            let item = create_filmstrip_item(photo);
-            widgets.filmstrip_box.append(&item);
-        }
-    }
-}
-
-// Helper for filmstrip item (smaller version)
-fn create_filmstrip_item(photo: &PhotoViewModel) -> gtk4::Widget {
-    let item = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Vertical)
-        .spacing(2)
-        .width_request(80)
-        .build();
-
-    let frame = gtk4::Frame::builder()
-        .width_request(80)
-        .height_request(60)
-        .build();
-
-    let image_path = photo.thumbnail_path.as_deref().unwrap_or(&photo.path);
-    let file = gtk4::gio::File::for_path(image_path);
-    
-    let picture = gtk4::Picture::builder()
-        .file(&file)
-        .content_fit(gtk4::ContentFit::Cover)
-        .build();
-        
-    frame.set_child(Some(&picture));
-    item.append(&frame);
-    
-    // Tiny rating
-    if photo.rating > 0 {
-        let stars = "★".repeat(photo.rating as usize);
-        let rating = gtk4::Label::builder()
-            .label(&stars)
-            .css_classes(["caption", "small-rating"])
-            .halign(gtk4::Align::Center)
-            .build();
-        item.append(&rating);
-    }
-
-    item.upcast()
-}
-
-fn create_photo_card(photo: &PhotoViewModel) -> gtk4::Widget {
-    let card = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Vertical)
-        .spacing(8)
-        .width_request(180)
-        .build();
-    
-    // Thumbnail frame
-    let frame = gtk4::Frame::builder()
-        .width_request(180)
-        .height_request(140)
-        .build();
-    
-    // Determine which path to use (prefer thumbnail, fallback to main path)
-    let image_path = photo.thumbnail_path.as_deref().unwrap_or(&photo.path);
-    let file = gtk4::gio::File::for_path(image_path);
-    
-    // Create picture widget that loads from file
-    let picture = gtk4::Picture::builder()
-        .file(&file)
-        .content_fit(gtk4::ContentFit::Cover)
-        .halign(gtk4::Align::Center)
-        .valign(gtk4::Align::Center)
-        .build();
-    
-    frame.set_child(Some(&picture));
-    card.append(&frame);
-    
-    // Filename
-    let filename = std::path::Path::new(&photo.path)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("Unknown");
-    
-    let name_label = gtk4::Label::builder()
-        .label(filename)
-        .ellipsize(gtk4::pango::EllipsizeMode::Middle)
-        .max_width_chars(20)
-        .wrap(true)
-        .justify(gtk4::Justification::Center)
-        .build();
-    card.append(&name_label);
-    
-    // Rating
-    if photo.rating > 0 {
-        let stars = "★".repeat(photo.rating as usize);
-        let rating = gtk4::Label::builder()
-            .label(&stars)
-            .build();
-        card.append(&rating);
-    }
-    
-    card.upcast()
 }

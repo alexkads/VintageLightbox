@@ -1,13 +1,17 @@
 //! Image Viewer Component
 //!
-//! Displays the main photo with zoom/pan capabilities.
+//! Displays the main photo with zoom/pan capabilities using Cairo.
 
 use gtk4::prelude::*;
 use relm4::prelude::*;
+use gdk_pixbuf::Pixbuf;
+
+use crate::utils::image_conversion::{load_image_from_file, dynamic_image_to_pixbuf};
 
 /// Image viewer component
 pub struct ImageViewer {
     current_image_path: Option<String>,
+    current_pixbuf: Option<Pixbuf>,
     zoom_level: f64,
     pan_x: f64,
     pan_y: f64,
@@ -42,18 +46,73 @@ impl SimpleComponent for ImageViewer {
             set_hexpand: true,
             set_vexpand: true,
             
-            // Scrollable image container
-            gtk4::ScrolledWindow {
+            // Drawing area for custom image rendering
+            #[name = "drawing_area"]
+            gtk4::DrawingArea {
                 set_hexpand: true,
                 set_vexpand: true,
-                set_policy: (gtk4::PolicyType::Automatic, gtk4::PolicyType::Automatic),
+                add_css_class: "image-viewer",
                 
-                #[name = "picture"]
-                gtk4::Picture {
-                    set_hexpand: true,
-                    set_vexpand: true,
-                    set_content_fit: gtk4::ContentFit::Contain,
-                    add_css_class: "image-viewer",
+                // Custom drawing function
+                set_draw_func: {
+                    let pixbuf_opt = model.current_pixbuf.clone();
+                    let zoom = model.zoom_level;
+                    let pan_x = model.pan_x;
+                    let pan_y = model.pan_y;
+                    
+                    move |_, cr, width, height| {
+                        let width = width as f64;
+                        let height = height as f64;
+                        
+                        if let Some(pixbuf) = &pixbuf_opt {
+                            let img_w = pixbuf.width() as f64;
+                            let img_h = pixbuf.height() as f64;
+
+                            // Calculate scale to fit
+                            let scale_w = width / img_w;
+                            let scale_h = height / img_h;
+                            let base_scale = scale_w.min(scale_h);
+                            let scale = base_scale * zoom;
+
+                            // Apply transformations
+                            cr.translate(width / 2.0 + pan_x, height / 2.0 + pan_y);
+                            cr.scale(scale, scale);
+                            cr.set_source_pixbuf(pixbuf, -img_w / 2.0, -img_h / 2.0);
+                            
+                            if let Err(e) = cr.paint() {
+                                eprintln!("Failed to paint image: {}", e);
+                            }
+                        } else {
+                             // Draw placeholder text if no image
+                             cr.set_source_rgb(0.5, 0.5, 0.5);
+                             cr.select_font_face("Sans", gtk4::cairo::FontSlant::Normal, gtk4::cairo::FontWeight::Normal);
+                             cr.set_font_size(20.0);
+                             let text = "No image selected";
+                             let extents = cr.text_extents(text).unwrap();
+                             cr.move_to(width / 2.0 - extents.width() / 2.0, height / 2.0 + extents.height() / 2.0);
+                             let _ = cr.show_text(text);
+                        }
+                    }
+                },
+                
+                // Zoom scroll controller
+                add_controller = gtk4::EventControllerScroll {
+                    set_flags: gtk4::EventControllerScrollFlags::VERTICAL,
+                    connect_scroll[sender] => move |_, _dx, dy| {
+                        if dy > 0.0 {
+                            sender.input(ImageViewerMsg::ZoomOut);
+                        } else {
+                            sender.input(ImageViewerMsg::ZoomIn);
+                        }
+                        gtk4::glib::Propagation::Stop
+                    },
+                },
+                
+                // Pan drag controller
+                add_controller = gtk4::GestureDrag {
+                    connect_drag_update[sender] => move |_, dx, dy| {
+                        sender.input(ImageViewerMsg::Pan { dx, dy });
+                    },
                 },
             },
             
@@ -93,47 +152,17 @@ impl SimpleComponent for ImageViewer {
                     connect_clicked => ImageViewerMsg::ZoomFit,
                 },
             },
-            
-            // Navigation arrows
-            add_overlay = &gtk4::Box {
-                set_orientation: gtk4::Orientation::Horizontal,
-                set_halign: gtk4::Align::Fill,
-                set_valign: gtk4::Align::Center,
-                
-                gtk4::Button {
-                    set_icon_name: "go-previous-symbolic",
-                    set_tooltip_text: Some("Previous Photo (Left Arrow)"),
-                    set_halign: gtk4::Align::Start,
-                    set_margin_start: 16,
-                    add_css_class: "circular",
-                    add_css_class: "osd",
-                    // Navigation handled by parent
-                },
-                
-                gtk4::Box {
-                    set_hexpand: true,
-                },
-                
-                gtk4::Button {
-                    set_icon_name: "go-next-symbolic",
-                    set_tooltip_text: Some("Next Photo (Right Arrow)"),
-                    set_halign: gtk4::Align::End,
-                    set_margin_end: 16,
-                    add_css_class: "circular",
-                    add_css_class: "osd",
-                    // Navigation handled by parent
-                },
-            },
         }
     }
 
     fn init(
         _init: Self::Init,
         root: Self::Root,
-        _sender: ComponentSender<Self>,
+        sender: ComponentSender<Self>,
     ) -> ComponentParts<Self> {
         let model = ImageViewer {
             current_image_path: None,
+            current_pixbuf: None,
             zoom_level: 1.0,
             pan_x: 0.0,
             pan_y: 0.0,
@@ -147,11 +176,27 @@ impl SimpleComponent for ImageViewer {
     fn update(&mut self, msg: Self::Input, _sender: ComponentSender<Self>) {
         match msg {
             ImageViewerMsg::LoadImage(path) => {
-                self.current_image_path = Some(path);
+                self.current_image_path = Some(path.clone());
                 self.zoom_level = 1.0;
                 self.pan_x = 0.0;
                 self.pan_y = 0.0;
-                // Note: Actual image loading would happen here
+                
+                // Load image into Pixbuf
+                match load_image_from_file(&path) {
+                    Ok(img) => {
+                         match dynamic_image_to_pixbuf(&img) {
+                             Ok(pixbuf) => self.current_pixbuf = Some(pixbuf),
+                             Err(e) => {
+                                 eprintln!("Failed to convert image to pixbuf: {}", e);
+                                 self.current_pixbuf = None;
+                             }
+                         }
+                    },
+                    Err(e) => {
+                        eprintln!("Failed to load image: {}", e);
+                        self.current_pixbuf = None;
+                    }
+                }
             }
             ImageViewerMsg::SetZoom(level) => {
                 self.zoom_level = level.clamp(0.1, 10.0);

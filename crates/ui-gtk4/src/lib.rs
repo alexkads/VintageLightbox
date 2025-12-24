@@ -9,3 +9,6 @@ pub mod messages;
 pub mod components;
 pub mod views;
 pub mod dialogs;
+pub mod docking;
+pub mod workers;
+pub mod utils;

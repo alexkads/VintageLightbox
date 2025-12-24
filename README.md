@@ -28,11 +28,17 @@ Este projeto segue **Clean Architecture** e **Test-Driven Development (TDD)**:
 ## 🚀 Tecnologias
 
 - **Linguagem**: Rust (performance e segurança)
-- **Interface**: egui 0.31 (nativa e multiplataforma)
+- **Interface**:
+  - **egui 0.28** (atual, funcional) - `crates/ui/`
+  - **GTK4/Relm4 0.9** (experimental, em migração) - `crates/ui-gtk4/` ⚠️
 - **RAW Processing**: LibRaw/rawler
 - **Database**: SQLite
 - **Testing**: cargo test, mockall, proptest, criterion, **egui_kittest** (E2E)
 - **Plataformas**: macOS e Windows
+
+> ⚠️ **Nota sobre UI GTK4**: Implementação experimental em desenvolvimento ativo.
+> A UI egui (`crates/ui/`) é a versão funcional atual.
+> Veja [ui-gtk4/README.md](crates/ui-gtk4/README.md) para detalhes sobre a migração.
 
 ## 🎯 Status do Desenvolvimento
 

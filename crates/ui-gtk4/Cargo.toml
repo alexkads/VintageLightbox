@@ -1,3 +1,9 @@
+# ⚠️ EXPERIMENTAL: UI GTK4/Relm4 em desenvolvimento ativo
+# Esta é uma implementação experimental da interface de usuário.
+# A UI egui (crates/ui/) é a versão funcional atual.
+# Progresso: ~13% (Fases 1-2 completas de 7 planejadas)
+# Veja crates/ui-gtk4/README.md para detalhes
+
 [package]
 name = "ui-gtk4"
 version.workspace = true

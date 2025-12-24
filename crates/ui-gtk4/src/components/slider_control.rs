@@ -5,6 +5,10 @@
 use gtk4::prelude::*;
 use relm4::prelude::*;
 
+use std::cell::Cell;
+use std::rc::Rc;
+use std::time::Duration;
+
 /// Slider control component
 pub struct SliderControl {
     label: String,
@@ -12,6 +16,7 @@ pub struct SliderControl {
     min: f64,
     max: f64,
     default: f64,
+    debounce_handle: Rc<Cell<Option<glib::SourceId>>>,
 }
 
 /// Initialization for slider
@@ -23,7 +28,7 @@ pub struct SliderInit {
 }
 
 /// Messages for the slider
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum SliderMsg {
     SetValue(f64),
     Reset,
@@ -33,6 +38,7 @@ pub enum SliderMsg {
 #[derive(Debug)]
 pub enum SliderOutput {
     ValueChanged(f64),
+    DebouncedValue(f64),
 }
 
 #[relm4::component(pub)]
@@ -104,6 +110,7 @@ impl SimpleComponent for SliderControl {
             min: init.min,
             max: init.max,
             default: init.default,
+            debounce_handle: Rc::new(Cell::new(None)),
         };
         
         let widgets = view_output!();
@@ -116,12 +123,34 @@ impl SimpleComponent for SliderControl {
             SliderMsg::SetValue(value) => {
                 if (self.value - value).abs() > 0.001 {
                     self.value = value;
+                    
+                    // Immediate output for preview
                     let _ = sender.output(SliderOutput::ValueChanged(value));
+                    
+                    // Cancel previous debounce timer
+                    if let Some(id) = self.debounce_handle.take() {
+                        id.remove();
+                    }
+                    
+                    // Start new 500ms timer
+                    let sender_clone = sender.clone();
+                    let handle = glib::timeout_add_local_once(
+                        Duration::from_millis(500),
+                        move || {
+                            let _ = sender_clone.output(SliderOutput::DebouncedValue(value));
+                        }
+                    );
+                    self.debounce_handle.set(Some(handle));
                 }
             }
             SliderMsg::Reset => {
                 self.value = self.default;
                 let _ = sender.output(SliderOutput::ValueChanged(self.default));
+                let _ = sender.output(SliderOutput::DebouncedValue(self.default));
+                
+                if let Some(id) = self.debounce_handle.take() {
+                    id.remove();
+                }
             }
         }
     }

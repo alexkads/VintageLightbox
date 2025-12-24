@@ -15,6 +15,7 @@ use crate::components::toolbar::Toolbar;
 
 /// Main application component
 /// In relm4, `model` in the view! macro refers to `&Self`, so we name our fields accordingly
+#[allow(dead_code)]
 pub struct VintageLightboxApp {
     /// Application state
     state: AppModel,
@@ -66,7 +67,7 @@ impl Component for VintageLightboxApp {
                     add_child = &gtk4::Box {
                         set_orientation: gtk4::Orientation::Vertical,
                         #[local_ref]
-                        develop_widget -> gtk4::Paned {},
+                        develop_widget -> gtk4::Box {},
                     } -> {
                         set_name: "develop_page",
                         set_title: "Develop",
@@ -122,9 +123,12 @@ impl Component for VintageLightboxApp {
         root: Self::Root,
         sender: ComponentSender<Self>,
     ) -> ComponentParts<Self> {
+        // Extract what we need from init before moving it
+        let preview_manager = init.preview_manager.clone();
+
         // Create the state
         let state = AppModel::new(init);
-        
+
         // Create child components
         let toolbar = Toolbar::builder()
             .launch(())
@@ -138,16 +142,14 @@ impl Component for VintageLightboxApp {
                     ToolbarOutput::OpenSettings => AppMsg::OpenSettings,
                 }
             });
-        
+
         let library_view = LibraryView::builder()
-            .launch(())
+            .launch(preview_manager)
             .forward(sender.input_sender(), |msg| {
                 use crate::views::library_view::LibraryViewOutput;
                 match msg {
                     LibraryViewOutput::SelectPhoto(id) => AppMsg::SelectPhoto(id),
                     LibraryViewOutput::OpenPhoto(id) => AppMsg::OpenPhotoInDevelop(id),
-                    LibraryViewOutput::SetRating(r) => AppMsg::SetRating(r),
-                    LibraryViewOutput::SetColorLabel(c) => AppMsg::SetColorLabel(c),
                 }
             });
         
