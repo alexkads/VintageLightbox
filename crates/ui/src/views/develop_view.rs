@@ -349,12 +349,12 @@ impl DevelopView {
         ui.label(
             egui::RichText::new("▶ Tone Curve")
                 .size(Theme::FONT_SM)
-                .color(Theme::TEXT_SECONDARY)
+                .color(ui.visuals().text_color())
         );
         ui.label(
             egui::RichText::new("▶ HSL / Color")
                 .size(Theme::FONT_SM)
-                .color(Theme::TEXT_SECONDARY)
+                .color(ui.visuals().text_color())
         );
 
         ui.add_space(Theme::SPACE_XXL);
@@ -429,7 +429,7 @@ impl DevelopView {
         ui.label(
             egui::RichText::new("Danger Zone")
                 .size(Theme::FONT_SM)
-                .color(Theme::TEXT_MUTED)
+                .color(ui.visuals().weak_text_color())
         );
         ui.add_space(Theme::SPACE_SM);
 

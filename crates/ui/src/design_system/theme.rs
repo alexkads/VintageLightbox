@@ -154,7 +154,7 @@ impl Theme {
 
         // Selection color
         visuals.selection.bg_fill = Self::ACCENT_PRIMARY;
-        visuals.selection.stroke.color = Self::ACCENT_PRIMARY;
+        visuals.selection.stroke.color = Color32::WHITE;
 
         // Hyperlink color
         visuals.hyperlink_color = Self::ACCENT_PRIMARY;

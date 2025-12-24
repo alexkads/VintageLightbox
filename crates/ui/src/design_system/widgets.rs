@@ -14,10 +14,10 @@ use super::theme::Theme;
 pub fn primary_button(ui: &mut Ui, text: &str) -> Response {
     let button = Button::new(
         RichText::new(text)
-            .color(Color32::WHITE)
+            .color(ui.visuals().selection.stroke.color)
             .size(Theme::FONT_MD)
     )
-    .fill(Theme::ACCENT_PRIMARY)
+    .fill(ui.visuals().selection.bg_fill)
     .min_size(Vec2::new(80.0, 32.0))
     .corner_radius(CornerRadius::same(Theme::RADIUS_MD as u8));
 
@@ -31,11 +31,11 @@ pub fn primary_button(ui: &mut Ui, text: &str) -> Response {
 pub fn secondary_button(ui: &mut Ui, text: &str) -> Response {
     let button = Button::new(
         RichText::new(text)
-            .color(Theme::TEXT_PRIMARY)
+            .color(ui.visuals().text_color())
             .size(Theme::FONT_MD)
     )
-    .fill(Theme::BG_ACTIVE)
-    .stroke(Stroke::new(1.0, Theme::BORDER_DEFAULT))
+    .fill(ui.visuals().widgets.active.bg_fill)
+    .stroke(Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color))
     .min_size(Vec2::new(80.0, 32.0))
     .corner_radius(CornerRadius::same(Theme::RADIUS_MD as u8));
 
@@ -53,10 +53,10 @@ pub fn icon_button(ui: &mut Ui, icon: &str) -> Response {
 pub fn icon_button_sized(ui: &mut Ui, icon: &str, icon_size: f32) -> Response {
     let button = Button::new(
         RichText::new(icon)
-            .color(Theme::TEXT_PRIMARY)
+            .color(ui.visuals().text_color())
             .size(icon_size)
     )
-    .fill(Theme::BG_ELEVATED)
+    .fill(ui.visuals().widgets.inactive.weak_bg_fill)
     .min_size(Vec2::new(40.0, 40.0))
     .corner_radius(CornerRadius::same(255));
 
@@ -79,10 +79,10 @@ pub fn icon_button_tooltip_sized(ui: &mut Ui, icon: &str, tooltip: &str, icon_si
 pub fn icon_button_primary(ui: &mut Ui, icon: &str, tooltip: &str) -> Response {
     let button = Button::new(
         RichText::new(icon)
-            .color(Color32::WHITE)
+            .color(ui.visuals().selection.stroke.color)
             .size(Theme::FONT_XL)
     )
-    .fill(Theme::ACCENT_PRIMARY)
+    .fill(ui.visuals().selection.bg_fill)
     .min_size(Vec2::new(40.0, 40.0))
     .corner_radius(CornerRadius::same(255));
 
@@ -95,15 +95,15 @@ pub fn icon_button_primary(ui: &mut Ui, icon: &str, tooltip: &str) -> Response {
 // ============================================
 pub fn nav_button(ui: &mut Ui, text: &str, active: bool) -> Response {
     let bg_color = if active {
-        Theme::BG_ACTIVE
+        ui.visuals().widgets.active.bg_fill
     } else {
         Color32::TRANSPARENT
     };
 
     let text_color = if active {
-        Theme::TEXT_PRIMARY
+        ui.visuals().text_color()
     } else {
-        Theme::TEXT_MUTED
+        ui.visuals().weak_text_color()
     };
 
     let button = Button::new(
@@ -120,15 +120,15 @@ pub fn nav_button(ui: &mut Ui, text: &str, active: bool) -> Response {
 
 pub fn nav_button_with_icon(ui: &mut Ui, icon: &str, text: &str, active: bool) -> Response {
     let bg_color = if active {
-        Theme::BG_ACTIVE
+        ui.visuals().widgets.active.bg_fill
     } else {
         Color32::TRANSPARENT
     };
 
     let text_color = if active {
-        Theme::TEXT_PRIMARY
+        ui.visuals().text_color()
     } else {
-        Theme::TEXT_MUTED
+        ui.visuals().weak_text_color()
     };
 
     let label = format!("{} {}", icon, text);
@@ -164,7 +164,7 @@ impl PanelHeader {
         let response = ui.add(
             Button::new(
                 RichText::new(label)
-                    .color(Theme::TEXT_SECONDARY)
+                    .color(ui.visuals().text_color())
                     .size(Theme::FONT_SM)
             )
             .fill(Color32::TRANSPARENT)
@@ -194,17 +194,17 @@ pub fn menu_item_with_indent(ui: &mut Ui, text: &str, selected: bool, indent: f3
     );
 
     let bg_color = if selected {
-        Theme::BG_ACTIVE
+        ui.visuals().selection.bg_fill
     } else if response.hovered() {
-        Theme::BG_HOVER
+        ui.visuals().widgets.hovered.bg_fill
     } else {
         Color32::TRANSPARENT
     };
 
     let text_color = if selected {
-        Theme::TEXT_PRIMARY
+        ui.visuals().strong_text_color()
     } else {
-        Theme::TEXT_SECONDARY
+        ui.visuals().text_color()
     };
 
     ui.painter().rect_filled(rect, Theme::RADIUS_SM, bg_color);
@@ -227,7 +227,7 @@ pub fn menu_item_with_indent(ui: &mut Ui, text: &str, selected: bool, indent: f3
 // ============================================
 pub fn card(ui: &mut Ui, add_contents: impl FnOnce(&mut Ui)) {
     egui::Frame::default()
-        .fill(Theme::BG_APP)
+        .fill(ui.visuals().panel_fill)
         .corner_radius(CornerRadius::same(Theme::RADIUS_MD as u8))
         .show(ui, add_contents);
 }
@@ -311,7 +311,7 @@ pub fn show_busy_overlay(ctx: &egui::Context, message: &str) {
 pub fn section_title(ui: &mut Ui, text: &str) {
     ui.label(
         RichText::new(text)
-            .color(Theme::TEXT_MUTED)
+            .color(ui.visuals().weak_text_color())
             .size(Theme::FONT_SM)
     );
 }
@@ -323,7 +323,7 @@ pub fn section_title(ui: &mut Ui, text: &str) {
 pub fn label_text(ui: &mut Ui, text: &str) {
     ui.label(
         RichText::new(text)
-            .color(Theme::TEXT_MUTED)
+            .color(ui.visuals().weak_text_color())
             .size(Theme::FONT_SM)
     );
 }
@@ -335,7 +335,7 @@ pub fn label_text(ui: &mut Ui, text: &str) {
 pub fn value_text(ui: &mut Ui, text: &str) {
     ui.label(
         RichText::new(text)
-            .color(Theme::TEXT_SECONDARY)
+            .color(ui.visuals().text_color())
             .size(Theme::FONT_SM)
     );
 }

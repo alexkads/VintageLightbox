@@ -304,11 +304,11 @@ impl PhotoGrid {
              );
         } else {
             let bg_color = if is_selected {
-                Theme::BG_ACTIVE
+                ui.visuals().selection.bg_fill.linear_multiply(0.3)
             } else if response.hovered() {
-                Theme::BG_HOVER
+                ui.visuals().widgets.hovered.bg_fill
             } else {
-                Theme::BG_SURFACE
+                ui.visuals().widgets.inactive.weak_bg_fill
             };
             ui.painter().rect_filled(rect, Theme::RADIUS_MD, bg_color);
         }
@@ -370,7 +370,7 @@ impl PhotoGrid {
             egui::Align2::CENTER_CENTER,
             display_name,
             egui::FontId::proportional(Theme::FONT_XS),
-            Theme::TEXT_MUTED,
+            ui.visuals().text_color(),
         );
 
         // Rating display - Always show if rating > 0, or on hover
@@ -403,7 +403,11 @@ impl PhotoGrid {
                 let color = if i < photo.rating as usize {
                     Theme::RATING_ACTIVE
                 } else {
-                    if response.hovered() { Theme::RATING_INACTIVE } else { Color32::TRANSPARENT } // Hide empty stars if not hovering
+                    if response.hovered() { 
+                        ui.visuals().text_color().linear_multiply(0.3) 
+                    } else { 
+                        Color32::TRANSPARENT 
+                    } // Hide empty stars if not hovering
                 };
 
                 if color != Color32::TRANSPARENT {
@@ -416,7 +420,7 @@ impl PhotoGrid {
                     );
                 } else if response.hovered() {
                      // Draw dot for empty slot on hover?
-                     ui.painter().circle_filled(star_pos, 2.0, Color32::from_gray(80));
+                     ui.painter().circle_filled(star_pos, 2.0, ui.visuals().text_color().linear_multiply(0.2));
                 }
             }
         }
@@ -484,21 +488,21 @@ impl PhotoGrid {
             ui.painter().rect_stroke(
                 rect,
                 Theme::RADIUS_MD,
-                egui::Stroke::new(3.0, egui::Color32::WHITE),
+                egui::Stroke::new(3.0, ui.visuals().strong_text_color()),
                 egui::StrokeKind::Outside,
             );
         } else if is_multi_selected {
             ui.painter().rect_stroke(
                 rect,
                 Theme::RADIUS_MD,
-                egui::Stroke::new(2.0, Theme::ACCENT_PRIMARY),
+                egui::Stroke::new(2.0, ui.visuals().selection.bg_fill),
                 egui::StrokeKind::Outside,
             );
         } else if response.hovered() {
             ui.painter().rect_stroke(
                 rect,
                 Theme::RADIUS_MD,
-                egui::Stroke::new(2.0, Theme::ACCENT_PRIMARY),
+                egui::Stroke::new(2.0, ui.visuals().selection.bg_fill),
                 egui::StrokeKind::Outside,
             );
         }

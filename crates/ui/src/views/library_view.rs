@@ -138,7 +138,7 @@ impl LibraryView {
             ui.label(
                 egui::RichText::new("Rating")
                     .size(Theme::FONT_SM)
-                    .color(Theme::TEXT_MUTED)
+                    .color(ui.visuals().weak_text_color())
             );
             crate::components::rating_widget::RatingWidget::show_readonly(
                 ui,
@@ -152,7 +152,7 @@ impl LibraryView {
             ui.label(
                 egui::RichText::new("Color Label")
                     .size(Theme::FONT_SM)
-                    .color(Theme::TEXT_MUTED)
+                    .color(ui.visuals().weak_text_color())
             );
             crate::components::color_labels::ColorLabels::show(ui, &None, false);
         }

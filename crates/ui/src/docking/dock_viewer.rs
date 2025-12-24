@@ -295,7 +295,7 @@ impl<'a> DockViewer<'a> {
 
     fn render_grid_settings(&mut self, ui: &mut Ui) {
         ui.add_space(Theme::SPACE_SM);
-        ui.label(egui::RichText::new("Columns").size(Theme::FONT_SM).color(Theme::TEXT_MUTED));
+        ui.label(egui::RichText::new("Columns").size(Theme::FONT_SM).color(ui.visuals().weak_text_color()));
         ui.horizontal(|ui| {
             for cols in [1, 2, 3, 4, 5] {
                 let label = if cols == 1 { "⬛" } else { &format!("{}", cols) };
@@ -309,12 +309,12 @@ impl<'a> DockViewer<'a> {
 
     fn render_quick_develop(&mut self, ui: &mut Ui) {
         if let Some(photo) = self.context.state.get_current_photo() {
-            ui.label(egui::RichText::new("Rating").size(Theme::FONT_SM).color(Theme::TEXT_MUTED));
+            ui.label(egui::RichText::new("Rating").size(Theme::FONT_SM).color(ui.visuals().weak_text_color()));
             RatingWidget::show_readonly(ui, photo.rating, 16.0);
 
             ui.add_space(Theme::SPACE_MD);
 
-            ui.label(egui::RichText::new("Color Label").size(Theme::FONT_SM).color(Theme::TEXT_MUTED));
+            ui.label(egui::RichText::new("Color Label").size(Theme::FONT_SM).color(ui.visuals().weak_text_color()));
             ColorLabels::show(ui, &None, false);
         } else {
             ui.centered_and_justified(|ui| {

@@ -130,7 +130,7 @@ impl Filmstrip {
         }
 
         // Dark background like Lightroom
-        let bg_color = Color32::from_rgb(42, 42, 42);
+        let bg_color = ui.visuals().panel_fill;
         ui.painter().rect_filled(
             ui.available_rect_before_wrap(),
             CornerRadius::ZERO,
@@ -197,10 +197,10 @@ impl Filmstrip {
 
                         if show_flags {
                             let painter = ui.painter();
-                            let pick_color = if current_flag == 1 { Theme::ACCENT_SUCCESS } else if pick_hovered { Theme::TEXT_PRIMARY } else { Theme::TEXT_MUTED };
+                            let pick_color = if current_flag == 1 { Theme::ACCENT_SUCCESS } else if pick_hovered { ui.visuals().text_color() } else { ui.visuals().weak_text_color() };
                             painter.text(pick_rect.center(), egui::Align2::CENTER_CENTER, crate::design_system::icons::FLAG_PICK, egui::FontId::proportional(12.0), pick_color);
 
-                            let reject_color = if current_flag == -1 { Theme::ACCENT_ERROR } else if reject_hovered { Theme::TEXT_PRIMARY } else { Theme::TEXT_MUTED };
+                            let reject_color = if current_flag == -1 { Theme::ACCENT_ERROR } else if reject_hovered { ui.visuals().text_color() } else { ui.visuals().weak_text_color() };
                             painter.text(reject_rect.center(), egui::Align2::CENTER_CENTER, crate::design_system::icons::FLAG_REJECT, egui::FontId::proportional(12.0), reject_color);
                         }
 
@@ -275,11 +275,11 @@ impl Filmstrip {
 
                         // Draw thumbnail background
                         let thumb_color = if is_multi_selected || is_primary_selected {
-                            Color32::from_rgb(70, 70, 70)
+                            ui.visuals().selection.bg_fill.linear_multiply(0.4)
                         } else if response.hovered() {
-                            Color32::from_rgb(60, 60, 60)
+                            ui.visuals().widgets.hovered.bg_fill
                         } else {
-                            Color32::from_rgb(50, 50, 50)
+                            ui.visuals().widgets.inactive.bg_fill
                         };
                         
                         let bg_fill = if let Some(color) = label_color {
@@ -368,40 +368,40 @@ impl Filmstrip {
                             ui.painter().rect_stroke(
                                 rect,
                                 CornerRadius::same(2),
-                                Stroke::new(Self::SELECTED_BORDER_WIDTH, Color32::WHITE),
+                                Stroke::new(Self::SELECTED_BORDER_WIDTH, ui.visuals().strong_text_color()),
                                 egui::StrokeKind::Outside,
                             );
                         } else if is_multi_selected {
                             ui.painter().rect_stroke(
                                 rect,
                                 CornerRadius::same(2),
-                                Stroke::new(2.0, Theme::ACCENT_PRIMARY),
+                                Stroke::new(2.0, ui.visuals().selection.bg_fill),
                                 egui::StrokeKind::Outside,
                             );
                         }
                         
                         if is_multi_selected && state.selected_photo_ids.len() > 1 {
                             let check_pos = rect.min + Vec2::new(6.0, 6.0);
-                            ui.painter().circle_filled(check_pos, 8.0, Theme::ACCENT_PRIMARY);
+                            ui.painter().circle_filled(check_pos, 8.0, ui.visuals().selection.bg_fill);
                             ui.painter().text(
                                 check_pos,
                                 egui::Align2::CENTER_CENTER,
                                 "✓",
                                 egui::FontId::proportional(10.0),
-                                Color32::WHITE,
+                                ui.visuals().strong_text_color(),
                             );
                         }
 
                         // Flags (Last layer)
                         if show_flags {
                             let flag_size = 14.0;
-                            let pick_bg = if current_flag == 1 { Theme::ACCENT_SUCCESS } else if pick_hovered { Color32::from_gray(100) } else { Color32::from_black_alpha(100) };
-                            let pick_fg = if current_flag == 1 { Color32::WHITE } else { Color32::from_gray(200) };
+                            let pick_bg = if current_flag == 1 { Theme::ACCENT_SUCCESS } else if pick_hovered { ui.visuals().widgets.hovered.bg_fill } else { ui.visuals().widgets.inactive.bg_fill };
+                            let pick_fg = if current_flag == 1 { Color32::WHITE } else { ui.visuals().text_color() };
                             ui.painter().circle_filled(pick_rect.center(), flag_size / 2.0, pick_bg);
                             ui.painter().text(pick_rect.center(), egui::Align2::CENTER_CENTER, "P", egui::FontId::proportional(9.0), pick_fg);
 
-                            let reject_bg = if current_flag == -1 { Theme::ACCENT_ERROR } else if reject_hovered { Color32::from_gray(100) } else { Color32::from_black_alpha(100) };
-                            let reject_fg = if current_flag == -1 { Color32::WHITE } else { Color32::from_gray(200) };
+                            let reject_bg = if current_flag == -1 { Theme::ACCENT_ERROR } else if reject_hovered { ui.visuals().widgets.hovered.bg_fill } else { ui.visuals().widgets.inactive.bg_fill };
+                            let reject_fg = if current_flag == -1 { Color32::WHITE } else { ui.visuals().text_color() };
                             ui.painter().circle_filled(reject_rect.center(), flag_size / 2.0, reject_bg);
                             ui.painter().text(reject_rect.center(), egui::Align2::CENTER_CENTER, "X", egui::FontId::proportional(9.0), reject_fg);
                         }
@@ -535,7 +535,7 @@ impl Filmstrip {
         }
 
         // Dark background like Lightroom
-        let bg_color = Color32::from_rgb(42, 42, 42);
+        let bg_color = ui.visuals().panel_fill;
         ui.painter().rect_filled(
             ui.available_rect_before_wrap(),
             CornerRadius::ZERO,
@@ -570,11 +570,11 @@ impl Filmstrip {
 
                         // Draw thumbnail background
                         let thumb_color = if is_selected {
-                            Color32::from_rgb(70, 70, 70)
+                             ui.visuals().selection.bg_fill.linear_multiply(0.4)
                         } else if response.hovered() {
-                            Color32::from_rgb(60, 60, 60)
+                             ui.visuals().widgets.hovered.bg_fill
                         } else {
-                            Color32::from_rgb(50, 50, 50)
+                             ui.visuals().widgets.inactive.bg_fill
                         };
                         
                         // Fill background (tinted if color label exists)
@@ -640,7 +640,7 @@ impl Filmstrip {
                                 egui::Align2::CENTER_CENTER,
                                 short_name,
                                 egui::FontId::proportional(9.0),
-                                Color32::from_rgb(120, 120, 120),
+                                ui.visuals().weak_text_color(),
                             );
                         }
 
@@ -671,7 +671,7 @@ impl Filmstrip {
                             ui.painter().rect_stroke(
                                 rect,
                                 CornerRadius::same(2),
-                                Stroke::new(Self::SELECTED_BORDER_WIDTH, Color32::WHITE),
+                                Stroke::new(Self::SELECTED_BORDER_WIDTH, ui.visuals().strong_text_color()),
                                 egui::StrokeKind::Outside,
                             );
                         }
@@ -714,8 +714,8 @@ impl Filmstrip {
                             }
 
                             // Draw Pick Icon
-                            let pick_bg = if current_flag == 1 { Theme::ACCENT_SUCCESS } else if pick_response.hovered() { Color32::from_gray(100) } else { Color32::from_black_alpha(100) };
-                            let pick_fg = if current_flag == 1 { Color32::WHITE } else { Color32::from_gray(200) };
+                            let pick_bg = if current_flag == 1 { Theme::ACCENT_SUCCESS } else if pick_response.hovered() { ui.visuals().widgets.hovered.bg_fill } else { ui.visuals().widgets.inactive.bg_fill };
+                            let pick_fg = if current_flag == 1 { Color32::WHITE } else { ui.visuals().text_color() };
                             
                             ui.painter().circle_filled(pick_rect.center(), flag_size / 2.0, pick_bg);
                             ui.painter().text(
@@ -727,8 +727,8 @@ impl Filmstrip {
                             );
 
                             // Draw Reject Icon
-                            let reject_bg = if current_flag == -1 { Theme::ACCENT_ERROR } else if reject_response.hovered() { Color32::from_gray(100) } else { Color32::from_black_alpha(100) };
-                            let reject_fg = if current_flag == -1 { Color32::WHITE } else { Color32::from_gray(200) };
+                            let reject_bg = if current_flag == -1 { Theme::ACCENT_ERROR } else if reject_response.hovered() { ui.visuals().widgets.hovered.bg_fill } else { ui.visuals().widgets.inactive.bg_fill };
+                            let reject_fg = if current_flag == -1 { Color32::WHITE } else { ui.visuals().text_color() };
                             
                             ui.painter().circle_filled(reject_rect.center(), flag_size / 2.0, reject_bg);
                             ui.painter().text(

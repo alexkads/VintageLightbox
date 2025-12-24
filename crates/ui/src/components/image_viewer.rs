@@ -14,7 +14,7 @@ impl ImageViewer {
         let (rect, response) = ui.allocate_exact_size(available_size, Sense::click_and_drag());
 
         // Fill background
-        ui.painter().rect_filled(rect, 0.0, Theme::BG_APP);
+        ui.painter().rect_filled(rect, 0.0, ui.visuals().panel_fill);
 
         // Handle zoom with scroll
         if response.hovered() {
@@ -104,7 +104,7 @@ impl ImageViewer {
                 egui::Align2::CENTER_CENTER,
                 format!("{} Loading...", spinner_char),
                 egui::FontId::proportional(Theme::FONT_XL),
-                Theme::TEXT_MUTED,
+                ui.visuals().weak_text_color(),
             );
             
             // Request repaint for animation
@@ -116,7 +116,7 @@ impl ImageViewer {
                 egui::Align2::CENTER_CENTER,
                 "Select a photo to view",
                 egui::FontId::proportional(Theme::FONT_XL),
-                Theme::TEXT_MUTED,
+                ui.visuals().weak_text_color(),
             );
         }
 
@@ -176,14 +176,14 @@ impl ImageViewer {
             ui.painter().rect_filled(
                 zoom_rect,
                 Theme::RADIUS_SM,
-                Theme::BG_ELEVATED,
+                ui.visuals().window_fill(),
             );
             ui.painter().text(
                 zoom_rect.center(),
                 egui::Align2::CENTER_CENTER,
                 zoom_text,
                 egui::FontId::proportional(Theme::FONT_SM),
-                Theme::TEXT_SECONDARY,
+                ui.visuals().text_color(),
             );
         }
     }

@@ -79,11 +79,11 @@ impl SettingsDialog {
 
     /// Show cache statistics section
     fn show_cache_statistics(ui: &mut Ui, state: &AppState) {
-        ui.heading(RichText::new("📊 Cache Statistics").color(Theme::TEXT_PRIMARY));
+        ui.heading(RichText::new("📊 Cache Statistics").color(ui.visuals().strong_text_color()));
         ui.add_space(Theme::SPACE_SM);
 
         egui::Frame::default()
-            .fill(Theme::BG_ELEVATED)
+            .fill(ui.visuals().window_fill())
             .corner_radius(Theme::RADIUS_SM)
             .inner_margin(egui::Margin::same(Theme::SPACE_MD as i8))
             .show(ui, |ui| {
@@ -93,33 +93,33 @@ impl SettingsDialog {
                         .spacing([20.0, 8.0])
                         .show(ui, |ui| {
                             // Thumbnails
-                            ui.label(RichText::new("Thumbnails:").color(Theme::TEXT_MUTED));
+                            ui.label(RichText::new("Thumbnails:").color(ui.visuals().weak_text_color()));
                             ui.label(RichText::new(format!(
                                 "{} items",
                                 stats.thumbnail_count
-                            )).color(Theme::TEXT_PRIMARY));
+                            )).color(ui.visuals().text_color()));
                             ui.end_row();
 
                             // Large Previews
-                            ui.label(RichText::new("Large Previews:").color(Theme::TEXT_MUTED));
+                            ui.label(RichText::new("Large Previews:").color(ui.visuals().weak_text_color()));
                             ui.label(RichText::new(format!(
                                 "{} items",
                                 stats.large_preview_count
-                            )).color(Theme::TEXT_PRIMARY));
+                            )).color(ui.visuals().text_color()));
                             ui.end_row();
 
                             // Total Size
-                            ui.label(RichText::new("Total Size:").color(Theme::TEXT_MUTED));
+                            ui.label(RichText::new("Total Size:").color(ui.visuals().weak_text_color()));
                             ui.label(RichText::new(
                                 Self::format_bytes(stats.total_size_bytes)
-                            ).color(Theme::ACCENT_PRIMARY).strong());
+                            ).color(ui.visuals().strong_text_color()).strong());
                             ui.end_row();
 
                             // Location
-                            ui.label(RichText::new("Location:").color(Theme::TEXT_MUTED));
+                            ui.label(RichText::new("Location:").color(ui.visuals().weak_text_color()));
                             ui.label(RichText::new(
                                 stats.db_path.to_string_lossy().to_string()
-                            ).color(Theme::TEXT_SECONDARY).size(Theme::FONT_XS));
+                            ).color(ui.visuals().text_color()).size(Theme::FONT_XS));
                             ui.end_row();
                         });
                 } else {
@@ -135,11 +135,11 @@ impl SettingsDialog {
     fn show_clear_cache_section(ui: &mut Ui, state: &AppState) -> Option<SettingsAction> {
         let mut action = None;
 
-        ui.heading(RichText::new("🗑️ Clear Cache").color(Theme::TEXT_PRIMARY));
+        ui.heading(RichText::new("🗑️ Clear Cache").color(ui.visuals().strong_text_color()));
         ui.add_space(Theme::SPACE_SM);
 
         egui::Frame::default()
-            .fill(Theme::BG_ELEVATED)
+            .fill(ui.visuals().window_fill())
             .corner_radius(Theme::RADIUS_SM)
             .inner_margin(egui::Margin::same(Theme::SPACE_MD as i8))
             .show(ui, |ui| {
@@ -185,16 +185,16 @@ impl SettingsDialog {
     /// Show info section with helpful tips
     fn show_info_section(ui: &mut Ui) {
         egui::Frame::default()
-            .fill(Theme::BG_SURFACE)
+            .fill(ui.visuals().window_fill())
             .corner_radius(Theme::RADIUS_SM)
             .inner_margin(egui::Margin::same(Theme::SPACE_SM as i8))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(icons::ACTION_INFO).color(Theme::ACCENT_PRIMARY));
+                    ui.label(RichText::new(icons::ACTION_INFO).color(ui.visuals().strong_text_color()));
                     ui.label(RichText::new(
                         "Clearing cache will require regenerating previews when photos are next opened. \
                         This is safe and does not affect your original photos."
-                    ).color(Theme::TEXT_MUTED).size(Theme::FONT_SM));
+                    ).color(ui.visuals().weak_text_color()).size(Theme::FONT_SM));
                 });
             });
     }
