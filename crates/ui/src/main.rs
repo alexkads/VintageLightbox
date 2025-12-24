@@ -13,16 +13,18 @@ use infrastructure::{
     PhotoRepositoryImpl, ExifReader,
     ThumbnailGeneratorImpl, ImageExporterImpl,
     FileOrganizerImpl,
+    SqlitePresetRepository,
     cache::preview_manager::PreviewManager,
 };
 use use_cases::{
     ImportPhotoUseCase, SavePhotoEditsUseCase, ExportPhotoUseCase,
     RatePhotoUseCase, SetColorLabelUseCase, SetFlagUseCase, DeletePhotoUseCase,
     PreviewBeforeImportUseCase, CheckDuplicatesUseCase, ImportWithOptionsUseCase,
+    presets::{ListPresetsUseCase, SavePresetUseCase, DeletePresetUseCase},
 };
 use adapters::controllers::{
     ImportController, LibraryController, EditorController,
-    ExportController, PhotoController,
+    ExportController, PhotoController, PresetController,
 };
 
 
@@ -58,7 +60,8 @@ async fn main() -> Result<(), eframe::Error> {
     run_migrations(&pool).await
         .expect("Failed to run database migrations");
 
-    let photo_repository = Arc::new(PhotoRepositoryImpl::new(pool));
+    let photo_repository = Arc::new(PhotoRepositoryImpl::new(pool.clone()));
+    let preset_repository = Arc::new(SqlitePresetRepository::new(pool));
     let metadata_extractor = Arc::new(ExifReader);
     let thumbnail_generator = Arc::new(ThumbnailGeneratorImpl::new());
     let image_exporter = Arc::new(ImageExporterImpl::new());
@@ -114,6 +117,17 @@ async fn main() -> Result<(), eframe::Error> {
         photo_repository.clone()
     ));
 
+    // Preset use cases
+    let list_presets_use_case = Arc::new(ListPresetsUseCase::new(
+        preset_repository.clone()
+    ));
+    let save_preset_use_case = Arc::new(SavePresetUseCase::new(
+        preset_repository.clone()
+    ));
+    let delete_preset_use_case = Arc::new(DeletePresetUseCase::new(
+        preset_repository
+    ));
+
     // ============================================
     // 3. Setup Controllers (Adapters Layer)
     // ============================================
@@ -131,6 +145,11 @@ async fn main() -> Result<(), eframe::Error> {
         set_color_label_use_case,
         set_flag_use_case,
         delete_photo_use_case,
+    ));
+    let preset_controller = Arc::new(PresetController::new(
+        list_presets_use_case,
+        save_preset_use_case,
+        delete_preset_use_case,
     ));
 
     // ============================================
@@ -155,11 +174,15 @@ async fn main() -> Result<(), eframe::Error> {
                 editor_controller,
                 export_controller,
                 photo_controller,
+                preset_controller,
                 preview_manager.clone(),
             );
 
             // Load photos on startup
             app.load_photos(&cc.egui_ctx);
+            
+            // Load presets on startup
+            app.load_presets(&cc.egui_ctx);
 
             Ok(Box::new(app))
         }),

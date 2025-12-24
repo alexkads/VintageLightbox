@@ -31,6 +31,7 @@ pub struct VintageLightboxApp {
     pub editor_controller: Arc<EditorController>,
     pub export_controller: Arc<ExportController>,
     pub photo_controller: Arc<PhotoController>,
+    pub preset_controller: Arc<PresetController>,
 
     // ============================================
     // Input Handlers
@@ -42,6 +43,8 @@ pub struct VintageLightboxApp {
     // ============================================
     photo_receiver: mpsc::Receiver<Result<Vec<PhotoViewModel>, String>>,
     photo_sender: mpsc::Sender<Result<Vec<PhotoViewModel>, String>>,
+    preset_receiver: mpsc::Receiver<Result<Vec<domain::entities::Preset>, String>>,
+    preset_sender: mpsc::Sender<Result<Vec<domain::entities::Preset>, String>>,
 
     // ============================================
     // Async Image Processing (Rayon-powered + GPU)
@@ -77,6 +80,7 @@ impl VintageLightboxApp {
         editor_controller: Arc<EditorController>,
         export_controller: Arc<ExportController>,
         photo_controller: Arc<PhotoController>,
+        preset_controller: Arc<PresetController>,
         preview_manager: Arc<PreviewManager>,
     ) -> Self {
         // Apply default theme
@@ -90,6 +94,8 @@ impl VintageLightboxApp {
 
         // Create channel for async photo loading (capacity 10 to avoid blocking)
         let (photo_sender, photo_receiver) = mpsc::channel(10);
+        // Create channel for async preset loading
+        let (preset_sender, preset_receiver) = mpsc::channel(10);
 
         Self {
             state: AppState::new(),
@@ -98,9 +104,12 @@ impl VintageLightboxApp {
             editor_controller,
             export_controller,
             photo_controller,
+            preset_controller,
             keyboard_handler: KeyboardHandler::new(),
             photo_receiver,
             photo_sender,
+            preset_receiver,
+            preset_sender,
             image_processor: AsyncImageProcessor::new(preview_manager.clone()),
             gpu_edit_processor: crate::gpu_processor::GpuImageProcessor::new(),
             current_edit_request_id: 0,
@@ -134,6 +143,20 @@ impl VintageLightboxApp {
             ctx.request_repaint();
         });
     }
+
+    /// Load all presets from the database
+    pub fn load_presets(&mut self, ctx: &egui::Context) {
+        let preset_controller = self.preset_controller.clone();
+        let ctx = ctx.clone();
+        let sender = self.preset_sender.clone();
+
+        // Spawn task to load presets
+        tokio::spawn(async move {
+            let result = preset_controller.list_presets().await;
+            let _ = sender.send(result).await;
+            ctx.request_repaint();
+        });
+    }
 }
 
 
@@ -158,6 +181,18 @@ impl eframe::App for VintageLightboxApp {
             }
             self.state.is_busy = false;
             self.state.busy_message.clear();
+        }
+
+        // Poll for async preset loading results
+        if let Ok(result) = self.preset_receiver.try_recv() {
+            match result {
+                Ok(presets) => {
+                    self.state.presets = presets;
+                }
+                Err(e) => {
+                    self.state.toasts.error(format!("Failed to load presets: {}", e));
+                }
+            }
         }
 
         // Poll for import preview dialog
@@ -816,6 +851,85 @@ impl eframe::App for VintageLightboxApp {
                     }
                 }
             }
+        }
+
+        // Save Preset Dialog
+        if self.state.show_save_preset_dialog {
+            egui::Window::new("Save Preset")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(ctx, |ui| {
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(10.0);
+                        ui.label("Enter a name for your preset:");
+                        ui.add_space(5.0);
+                        
+                        let response = ui.text_edit_singleline(&mut self.state.save_preset_name);
+                        
+                        // Auto-focus the text field
+                        if self.state.show_save_preset_dialog {
+                            response.request_focus();
+                        }
+                        
+                        ui.add_space(15.0);
+                        
+                        ui.horizontal(|ui| {
+                            if ui.button("Cancel").clicked() {
+                                self.state.show_save_preset_dialog = false;
+                                self.state.save_preset_name.clear();
+                            }
+                            ui.add_space(20.0);
+                            
+                            let can_save = !self.state.save_preset_name.trim().is_empty();
+                            if ui.add_enabled(can_save, egui::Button::new("Save")).clicked() {
+                                // Create adjustments from current state
+                                let adjustments = domain::entities::preset::PresetAdjustments {
+                                    exposure: Some(self.state.active_exposure),
+                                    contrast: Some(self.state.active_contrast),
+                                    temperature: Some(self.state.active_temperature),
+                                    tint: Some(self.state.active_tint),
+                                    highlights: Some(self.state.active_highlights),
+                                    shadows: Some(self.state.active_shadows),
+                                    whites: Some(self.state.active_whites),
+                                    blacks: Some(self.state.active_blacks),
+                                    clarity: Some(self.state.active_clarity),
+                                    vibrance: Some(self.state.active_vibrance),
+                                    saturation: Some(self.state.active_saturation),
+                                    tone_curve_shadows: Some(self.state.active_tone_curve_shadows),
+                                    tone_curve_darks: Some(self.state.active_tone_curve_darks),
+                                    tone_curve_lights: Some(self.state.active_tone_curve_lights),
+                                    tone_curve_highlights: Some(self.state.active_tone_curve_highlights),
+                                };
+                                
+                                let name = self.state.save_preset_name.trim().to_string();
+                                let controller = self.preset_controller.clone();
+                                let preset_sender = self.preset_sender.clone();
+                                let ctx_clone = ctx.clone();
+                                
+                                tokio::spawn(async move {
+                                    match controller.save_preset(name.clone(), adjustments).await {
+                                        Ok(_) => {
+                                            // Reload presets
+                                            if let Ok(presets) = controller.list_presets().await {
+                                                let _ = preset_sender.send(Ok(presets)).await;
+                                            }
+                                        }
+                                        Err(e) => {
+                                            eprintln!("Failed to save preset: {}", e);
+                                        }
+                                    }
+                                    ctx_clone.request_repaint();
+                                });
+                                
+                                self.state.toasts.success(format!("Preset '{}' saved!", self.state.save_preset_name.trim()));
+                                self.state.show_save_preset_dialog = false;
+                                self.state.save_preset_name.clear();
+                            }
+                        });
+                        ui.add_space(10.0);
+                    });
+                });
         }
 
         // Top toolbar

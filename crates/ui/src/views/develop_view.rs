@@ -20,31 +20,7 @@ pub struct DevelopView {
 #[allow(dead_code)]
 impl DevelopView {
     pub fn new(preview_manager: Arc<PreviewManager>) -> Self {
-        let mut presets_panel = PresetsPanel::new();
-        // Initialize with system presets for now (temporary until we pull from Use Case properly)
-        let system_presets = vec![
-            domain::entities::Preset::system("Auto", domain::entities::preset::PresetAdjustments {
-                 exposure: Some(0.0), // Placeholder
-                 ..Default::default()
-            }),
-            domain::entities::Preset::system("B&W", domain::entities::preset::PresetAdjustments {
-                 saturation: Some(-100.0),
-                 ..Default::default()
-            }),
-            domain::entities::Preset::system("Warm", domain::entities::preset::PresetAdjustments {
-                 temperature: Some(15.0),
-                 ..Default::default()
-            }),
-             domain::entities::Preset::system("Cool", domain::entities::preset::PresetAdjustments {
-                 temperature: Some(-15.0),
-                 ..Default::default()
-            }),
-             domain::entities::Preset::system("High Contrast", domain::entities::preset::PresetAdjustments {
-                 contrast: Some(1.5),
-                 ..Default::default()
-            }),
-        ];
-        presets_panel.set_presets(system_presets, vec![]);
+        let presets_panel = PresetsPanel::new();
         
         Self {
             filmstrip: Filmstrip::new(preview_manager),
@@ -130,7 +106,17 @@ impl DevelopView {
     fn show_left_sidebar(&mut self, ui: &mut Ui, state: &mut AppState) {
         use crate::design_system::widgets;
 
-        // Presets Panel
+        // Presets Panel - update from state.presets
+        let system_presets: Vec<_> = state.presets.iter()
+            .filter(|p| p.is_system)
+            .cloned()
+            .collect();
+        let user_presets: Vec<_> = state.presets.iter()
+            .filter(|p| !p.is_system)
+            .cloned()
+            .collect();
+        self.presets_panel.set_presets(system_presets, user_presets);
+
         widgets::section_title(ui, "Presets");
         ui.add_space(Theme::SPACE_SM);
 
@@ -157,8 +143,14 @@ impl DevelopView {
              state.last_slider_change_time = Some(std::time::Instant::now());
              
              // Trigger repaint
-             // Note: context is available via ui.ctx()
              ui.ctx().request_repaint();
+        }
+
+        ui.add_space(Theme::SPACE_MD);
+
+        // Save as Preset button
+        if widgets::secondary_button(ui, "+ Save as Preset").clicked() {
+            state.show_save_preset_dialog = true;
         }
 
         ui.add_space(Theme::SPACE_LG);

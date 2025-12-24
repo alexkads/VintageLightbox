@@ -41,6 +41,8 @@ pub enum DockTab {
     BasicAdjustments,
     /// Tone curve controls
     ToneCurve,
+    /// Presets panel
+    Presets,
     
     // ============================================
     // Bottom Panels
@@ -63,6 +65,7 @@ impl fmt::Display for DockTab {
             DockTab::Metadata => write!(f, "Metadata"),
             DockTab::BasicAdjustments => write!(f, "Basic"),
             DockTab::ToneCurve => write!(f, "Tone Curve"),
+            DockTab::Presets => write!(f, "Presets"),
             DockTab::Filmstrip => write!(f, "Filmstrip"),
         }
     }

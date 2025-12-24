@@ -79,12 +79,16 @@ pub fn create_develop_layout() -> DockState<DockTab> {
     let mut dock_state = DockState::new(vec![DockTab::ImageViewer]);
     let tree = dock_state.main_surface_mut();
     
-    // Split off left sidebar with histogram (15% width)
-    let [_left_sidebar, _center_and_right] = tree.split_left(
+    // Split off left sidebar with presets and histogram (18% width)
+    let [left_sidebar, _center_and_right] = tree.split_left(
         NodeIndex::root(),
-        0.15,
-        vec![DockTab::Histogram],
+        0.18,
+        vec![DockTab::Presets],
     );
+    
+    // Add histogram tab to left sidebar
+    tree.set_focused_node(left_sidebar);
+    tree.push_to_focused_leaf(DockTab::Histogram);
     
     // Split off right sidebar with adjustments (70% center, 30% right - adjustments need more space)
     let [center, right_sidebar] = tree.split_right(

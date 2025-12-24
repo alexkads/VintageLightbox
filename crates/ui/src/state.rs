@@ -250,6 +250,16 @@ pub struct AppState {
     pub cache_stats: Option<CacheStats>,
     /// Progress of cache building (shown in toolbar)
     pub cache_building_progress: Option<CacheBuildingProgress>,
+
+    // ============================================
+    // Presets
+    // ============================================
+    /// Loaded presets (system + user)
+    pub presets: Vec<domain::entities::Preset>,
+    /// Whether to show the save preset dialog
+    pub show_save_preset_dialog: bool,
+    /// Name input for new preset
+    pub save_preset_name: String,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -361,6 +371,9 @@ impl AppState {
             show_settings_dialog: false,
             cache_stats: None,
             cache_building_progress: None,
+            presets: Vec::new(),
+            show_save_preset_dialog: false,
+            save_preset_name: String::new(),
         }
     }
 

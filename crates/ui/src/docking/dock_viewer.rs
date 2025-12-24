@@ -109,6 +109,10 @@ impl<'a> TabViewer for DockViewer<'a> {
                 ToneCurveEditor::show(ui, self.context.state);
             }
 
+            DockTab::Presets => {
+                self.render_presets_panel(ui);
+            }
+
             DockTab::Filmstrip => {
                 use crate::state::CurrentView;
                 use crate::components::filmstrip::FilmstripAction;
@@ -632,4 +636,79 @@ impl<'a> DockViewer<'a> {
             }
         });
     }
+
+    fn render_presets_panel(&mut self, ui: &mut Ui) {
+        // Clone presets to avoid borrow issues
+        let system_presets: Vec<_> = self.context.state.presets.iter()
+            .filter(|p| p.is_system)
+            .cloned()
+            .collect();
+        let user_presets: Vec<_> = self.context.state.presets.iter()
+            .filter(|p| !p.is_system)
+            .cloned()
+            .collect();
+        
+        let mut preset_to_apply: Option<domain::entities::Preset> = None;
+        
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            // System Presets
+            ui.collapsing("System Presets", |ui| {
+                for preset in &system_presets {
+                    if ui.selectable_label(false, &preset.name).clicked() {
+                        preset_to_apply = Some(preset.clone());
+                    }
+                }
+            });
+            
+            ui.add_space(Theme::SPACE_SM);
+            
+            // User Presets
+            ui.collapsing("User Presets", |ui| {
+                if user_presets.is_empty() {
+                    ui.label("No user presets yet");
+                } else {
+                    for preset in &user_presets {
+                        if ui.selectable_label(false, &preset.name).clicked() {
+                            preset_to_apply = Some(preset.clone());
+                        }
+                    }
+                }
+            });
+            
+            ui.add_space(Theme::SPACE_MD);
+            
+            // Save as Preset button
+            if widgets::secondary_button(ui, "+ Save as Preset").clicked() {
+                self.context.state.show_save_preset_dialog = true;
+            }
+        });
+        
+        // Apply preset outside the closure
+        if let Some(preset) = preset_to_apply {
+            self.apply_preset(&preset);
+        }
+    }
+    
+    fn apply_preset(&mut self, preset: &domain::entities::Preset) {
+        if let Some(v) = preset.adjustments.exposure { self.context.state.active_exposure = v; }
+        if let Some(v) = preset.adjustments.contrast { self.context.state.active_contrast = v; }
+        if let Some(v) = preset.adjustments.temperature { self.context.state.active_temperature = v; }
+        if let Some(v) = preset.adjustments.tint { self.context.state.active_tint = v; }
+        if let Some(v) = preset.adjustments.highlights { self.context.state.active_highlights = v; }
+        if let Some(v) = preset.adjustments.shadows { self.context.state.active_shadows = v; }
+        if let Some(v) = preset.adjustments.whites { self.context.state.active_whites = v; }
+        if let Some(v) = preset.adjustments.blacks { self.context.state.active_blacks = v; }
+        if let Some(v) = preset.adjustments.clarity { self.context.state.active_clarity = v; }
+        if let Some(v) = preset.adjustments.vibrance { self.context.state.active_vibrance = v; }
+        if let Some(v) = preset.adjustments.saturation { self.context.state.active_saturation = v; }
+        if let Some(v) = preset.adjustments.tone_curve_shadows { self.context.state.active_tone_curve_shadows = v; }
+        if let Some(v) = preset.adjustments.tone_curve_darks { self.context.state.active_tone_curve_darks = v; }
+        if let Some(v) = preset.adjustments.tone_curve_lights { self.context.state.active_tone_curve_lights = v; }
+        if let Some(v) = preset.adjustments.tone_curve_highlights { self.context.state.active_tone_curve_highlights = v; }
+        
+        self.context.state.pending_auto_save = true;
+        self.context.state.last_slider_change_time = Some(std::time::Instant::now());
+        self.context.state.toasts.success(format!("Applied preset: {}", preset.name));
+    }
 }
+
