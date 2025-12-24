@@ -23,6 +23,12 @@ Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Ar
 
 ### Conquistas Recentes
 
+- ✅ **THEME & SELECTION UX FIXES (24/dez/2025)** 🎨
+  - **Latte Light Theme**: Correção completa de cores hardcoded em PhotoGrid, Filmstrip e Widgets. Tema claro agora 100% funcional.
+  - **Seleção Profissional**: Implementação de "Double Border" (Azul Externo + Branco Interno) para seleção primária.
+  - **Fundo Limpo**: Remoção de preenchimento de fundo na seleção, focando na borda para clareza (evita conflito com color labels).
+  - **Contraste Vintage Dark**: Correção de texto invisível em botões primários no tema padrão.
+  - **Status**: ✅ **100% COMPLETO**
 - ✅ **INTEGRAÇÃO PHOSPHOR ICONS (22/dez/2025)** 🎨
   - **Visual Profissional**: Substituição de ícones unicode/texto por Phosphor Icons
   - **Pacote Otimizado**: Crate `egui_phosphor` integrado
