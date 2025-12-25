@@ -1,5 +1,5 @@
 // Image Adjustments Compute Shader
-// Processes all 11 adjustments in parallel on the GPU
+// Processes all adjustments in parallel on the GPU
 
 struct Params {
     exposure: f32,
@@ -13,7 +13,11 @@ struct Params {
     clarity: f32,
     vibrance: f32,
     saturation: f32,
-    _padding: f32,  // Align to 16 bytes
+    // Tone curve parametric zones
+    tone_curve_shadows: f32,
+    tone_curve_darks: f32,
+    tone_curve_lights: f32,
+    tone_curve_highlights: f32,
 }
 
 @group(0) @binding(0) var input_texture: texture_2d<f32>;
@@ -136,6 +140,66 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         b = lum3 + (b - lum3) * factor;
     }
     
+    // 12-15. Tone Curve Parametric Zones
+    let lum_final = (r + g + b) / 3.0;
+    let norm_lum = lum_final / 255.0;
+    
+    // Zone 1: Shadows (0.0 - 0.25 range)
+    if (params.tone_curve_shadows != 0.0) {
+        let zone_center = 0.125;
+        let zone_width = 0.25;
+        let dist = abs(norm_lum - zone_center);
+        if (dist < zone_width) {
+            let weight = 1.0 - (dist / zone_width);
+            let adjustment = params.tone_curve_shadows * 0.01 * weight;
+            r += r * adjustment;
+            g += g * adjustment;
+            b += b * adjustment;
+        }
+    }
+    
+    // Zone 2: Darks (0.25 - 0.5 range)
+    if (params.tone_curve_darks != 0.0) {
+        let zone_center = 0.375;
+        let zone_width = 0.25;
+        let dist = abs(norm_lum - zone_center);
+        if (dist < zone_width) {
+            let weight = 1.0 - (dist / zone_width);
+            let adjustment = params.tone_curve_darks * 0.01 * weight;
+            r += r * adjustment;
+            g += g * adjustment;
+            b += b * adjustment;
+        }
+    }
+    
+    // Zone 3: Lights (0.5 - 0.75 range)
+    if (params.tone_curve_lights != 0.0) {
+        let zone_center = 0.625;
+        let zone_width = 0.25;
+        let dist = abs(norm_lum - zone_center);
+        if (dist < zone_width) {
+            let weight = 1.0 - (dist / zone_width);
+            let adjustment = params.tone_curve_lights * 0.01 * weight;
+            r += r * adjustment;
+            g += g * adjustment;
+            b += b * adjustment;
+        }
+    }
+    
+    // Zone 4: Highlights (0.75 - 1.0 range)
+    if (params.tone_curve_highlights != 0.0) {
+        let zone_center = 0.875;
+        let zone_width = 0.25;
+        let dist = abs(norm_lum - zone_center);
+        if (dist < zone_width) {
+            let weight = 1.0 - (dist / zone_width);
+            let adjustment = params.tone_curve_highlights * 0.01 * weight;
+            r += r * adjustment;
+            g += g * adjustment;
+            b += b * adjustment;
+        }
+    }
+    
     // Clamp values to 0-255 and convert back to 0.0-1.0
     r = clamp(r, 0.0, 255.0) / 255.0;
     g = clamp(g, 0.0, 255.0) / 255.0;
@@ -144,3 +208,4 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     // Write output
     textureStore(output_texture, vec2<i32>(global_id.xy), vec4<f32>(r, g, b, a));
 }
+

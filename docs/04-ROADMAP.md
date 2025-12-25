@@ -775,8 +775,13 @@ import_controller.import_with_options(files, options, tx, pause, cancel).await?;
 - [x] ✅ **Highlights e Shadows** - Ajuste seletivo por luminância
 - [x] ✅ **Temperature e Tint** - White balance completo
 - [x] ✅ **Smart Folder Hierarchy** - Detecção inteligente de datas (Ano/Mês) na árvore da biblioteca
-- [ ] 🎯 **Tone Curve** - Curva de tons paramétrica (PRÓXIMO)
-- [ ] **Point Curve** - Curva com múltiplos pontos de controle
+- [x] ✅ **Tone Curve Backend** (25/dez/2025) - 4 zonas paramétricas implementadas:
+  - CPU: `ImageProcessor::process_image()` com shadows/darks/lights/highlights
+  - GPU: Shader WGSL com mesma lógica sincronizada
+  - Undo/Redo: `EditSnapshot` com 4 campos de tone curve
+  - Persistência: Campos já existem na entidade `Photo` e banco de dados
+- [ ] 🎯 **Tone Curve UI** - Sliders para controle das 4 zonas (PRÓXIMO)
+- [ ] **Point Curve** - Curva com múltiplos pontos de controle (complexo)
 - [ ] **HSL/Color** - Ajustes por canal de cor (8 canais: Red, Orange, Yellow, Green, Aqua, Blue, Purple, Magenta)
 - [ ] **Redução de Ruído** - Luminance e Color noise reduction
 - [ ] **Nitidez** - Sharpening com Amount, Radius, Detail, Masking

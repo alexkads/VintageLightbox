@@ -29,6 +29,11 @@ pub struct EditSnapshot {
     pub clarity: f32,
     pub vibrance: f32,
     pub saturation: f32,
+    // Tone Curve (parametric zones)
+    pub tone_curve_shadows: f32,
+    pub tone_curve_darks: f32,
+    pub tone_curve_lights: f32,
+    pub tone_curve_highlights: f32,
 }
 
 /// Current view in the application
@@ -482,6 +487,10 @@ impl AppState {
             clarity: self.active_clarity,
             vibrance: self.active_vibrance,
             saturation: self.active_saturation,
+            tone_curve_shadows: self.active_tone_curve_shadows,
+            tone_curve_darks: self.active_tone_curve_darks,
+            tone_curve_lights: self.active_tone_curve_lights,
+            tone_curve_highlights: self.active_tone_curve_highlights,
         };
 
         // If we're not at the end of history, truncate everything after current position
@@ -518,6 +527,10 @@ impl AppState {
                 self.active_clarity = snapshot.clarity;
                 self.active_vibrance = snapshot.vibrance;
                 self.active_saturation = snapshot.saturation;
+                self.active_tone_curve_shadows = snapshot.tone_curve_shadows;
+                self.active_tone_curve_darks = snapshot.tone_curve_darks;
+                self.active_tone_curve_lights = snapshot.tone_curve_lights;
+                self.active_tone_curve_highlights = snapshot.tone_curve_highlights;
                 self.history_index = Some(new_index);
                 return true;
             }
@@ -542,6 +555,10 @@ impl AppState {
                 self.active_clarity = snapshot.clarity;
                 self.active_vibrance = snapshot.vibrance;
                 self.active_saturation = snapshot.saturation;
+                self.active_tone_curve_shadows = snapshot.tone_curve_shadows;
+                self.active_tone_curve_darks = snapshot.tone_curve_darks;
+                self.active_tone_curve_lights = snapshot.tone_curve_lights;
+                self.active_tone_curve_highlights = snapshot.tone_curve_highlights;
                 self.history_index = Some(new_index);
                 return true;
             }

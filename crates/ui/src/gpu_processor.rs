@@ -24,7 +24,11 @@ pub struct GpuEditParams {
     pub clarity: f32,
     pub vibrance: f32,
     pub saturation: f32,
-    pub _padding: f32,  // Align to 16 bytes
+    // Tone curve parametric zones
+    pub tone_curve_shadows: f32,
+    pub tone_curve_darks: f32,
+    pub tone_curve_lights: f32,
+    pub tone_curve_highlights: f32,
 }
 
 impl Default for GpuEditParams {
@@ -41,7 +45,10 @@ impl Default for GpuEditParams {
             clarity: 0.0,
             vibrance: 0.0,
             saturation: 0.0,
-            _padding: 0.0,
+            tone_curve_shadows: 0.0,
+            tone_curve_darks: 0.0,
+            tone_curve_lights: 0.0,
+            tone_curve_highlights: 0.0,
         }
     }
 }
@@ -441,6 +448,10 @@ impl GpuImageProcessor {
                     request.params.clarity,
                     request.params.vibrance,
                     request.params.saturation,
+                    request.params.tone_curve_shadows,
+                    request.params.tone_curve_darks,
+                    request.params.tone_curve_lights,
+                    request.params.tone_curve_highlights,
                 );
 
                 let preview = crate::image_processing::ImageProcessor::dynamic_to_color_image(&processed);

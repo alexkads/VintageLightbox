@@ -62,13 +62,18 @@ impl ImageProcessor {
         clarity: f32,
         vibrance: f32,
         saturation: f32,
+        tone_curve_shadows: f32,
+        tone_curve_darks: f32,
+        tone_curve_lights: f32,
+        tone_curve_highlights: f32,
     ) -> TextureHandle {
         self.last_edit_time = Some(Instant::now());
 
         // Process image immediately
         let processed = Self::process_image(
             img, exposure, contrast, temperature, tint, highlights, shadows,
-            whites, blacks, clarity, vibrance, saturation
+            whites, blacks, clarity, vibrance, saturation,
+            tone_curve_shadows, tone_curve_darks, tone_curve_lights, tone_curve_highlights,
         );
         Self::load_texture(ctx, "processed_image", &processed)
     }
@@ -88,6 +93,11 @@ impl ImageProcessor {
         clarity: f32,
         vibrance: f32,
         saturation: f32,
+        // Tone curve parametric zones
+        tone_curve_shadows: f32,
+        tone_curve_darks: f32,
+        tone_curve_lights: f32,
+        tone_curve_highlights: f32,
     ) -> DynamicImage {
         use image::{Rgba, Pixel};
 
@@ -220,6 +230,67 @@ impl ImageProcessor {
                     b = luminance + (b - luminance) * factor;
                 }
 
+                // 12-15. Tone Curve Parametric Zones
+                // Each zone affects a specific luminance range with smooth falloff
+                let luminance = (r + g + b) / 3.0;
+                let norm_lum = luminance / 255.0; // Normalize to 0-1
+
+                // Zone 1: Shadows (0.0 - 0.25 range, centered at 0.125)
+                if tone_curve_shadows != 0.0 {
+                    let zone_center = 0.125;
+                    let zone_width = 0.25;
+                    let dist = (norm_lum - zone_center).abs();
+                    if dist < zone_width {
+                        let weight = 1.0 - (dist / zone_width);
+                        let adjustment = tone_curve_shadows * 0.01 * weight;
+                        r += r * adjustment;
+                        g += g * adjustment;
+                        b += b * adjustment;
+                    }
+                }
+
+                // Zone 2: Darks (0.25 - 0.5 range, centered at 0.375)
+                if tone_curve_darks != 0.0 {
+                    let zone_center = 0.375;
+                    let zone_width = 0.25;
+                    let dist = (norm_lum - zone_center).abs();
+                    if dist < zone_width {
+                        let weight = 1.0 - (dist / zone_width);
+                        let adjustment = tone_curve_darks * 0.01 * weight;
+                        r += r * adjustment;
+                        g += g * adjustment;
+                        b += b * adjustment;
+                    }
+                }
+
+                // Zone 3: Lights (0.5 - 0.75 range, centered at 0.625)
+                if tone_curve_lights != 0.0 {
+                    let zone_center = 0.625;
+                    let zone_width = 0.25;
+                    let dist = (norm_lum - zone_center).abs();
+                    if dist < zone_width {
+                        let weight = 1.0 - (dist / zone_width);
+                        let adjustment = tone_curve_lights * 0.01 * weight;
+                        r += r * adjustment;
+                        g += g * adjustment;
+                        b += b * adjustment;
+                    }
+                }
+
+                // Zone 4: Highlights (0.75 - 1.0 range, centered at 0.875)
+                if tone_curve_highlights != 0.0 {
+                    let zone_center = 0.875;
+                    let zone_width = 0.25;
+                    let dist = (norm_lum - zone_center).abs();
+                    if dist < zone_width {
+                        let weight = 1.0 - (dist / zone_width);
+                        let adjustment = tone_curve_highlights * 0.01 * weight;
+                        r += r * adjustment;
+                        g += g * adjustment;
+                        b += b * adjustment;
+                    }
+                }
+
                 // Clamp values to 0-255
                 r = r.clamp(0.0, 255.0);
                 g = g.clamp(0.0, 255.0);
@@ -286,7 +357,8 @@ mod tests {
     fn test_process_image_no_changes() {
         let img = DynamicImage::new_rgb8(100, 100);
         let processed = ImageProcessor::process_image(
-            &img, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+            &img, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, // tone curve params
         );
 
         assert_eq!(processed.width(), 100);

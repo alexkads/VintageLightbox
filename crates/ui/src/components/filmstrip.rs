@@ -92,7 +92,8 @@ impl Filmstrip {
                 if has_edits {
                     crate::image_processing::ImageProcessor::process_image(
                         &result.image, exposure, contrast, temperature, tint,
-                        highlights, shadows, whites, blacks, clarity, vibrance, saturation
+                        highlights, shadows, whites, blacks, clarity, vibrance, saturation,
+                        0.0, 0.0, 0.0, 0.0, // tone curve (not applied to thumbnails)
                     )
                 } else {
                     result.image.clone()
@@ -496,7 +497,8 @@ impl Filmstrip {
                 if has_edits {
                     crate::image_processing::ImageProcessor::process_image(
                         &result.image, exposure, contrast, temperature, tint,
-                        highlights, shadows, whites, blacks, clarity, vibrance, saturation
+                        highlights, shadows, whites, blacks, clarity, vibrance, saturation,
+                        0.0, 0.0, 0.0, 0.0, // tone curve (not applied to thumbnails)
                     )
                 } else {
                     result.image.clone()

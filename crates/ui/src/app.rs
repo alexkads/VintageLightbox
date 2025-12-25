@@ -368,6 +368,7 @@ impl eframe::App for VintageLightboxApp {
                              clarity,
                              vibrance,
                              saturation,
+                             0.0, 0.0, 0.0, 0.0, // tone curve
                          );
                          
                          let thumb_texture = crate::image_processing::ImageProcessor::load_texture(
@@ -392,6 +393,7 @@ impl eframe::App for VintageLightboxApp {
                                 clarity,
                                 vibrance,
                                 saturation,
+                                0.0, 0.0, 0.0, 0.0, // tone curve
                             );
                             
                             let thumb_texture = crate::image_processing::ImageProcessor::load_texture(
@@ -559,7 +561,10 @@ impl eframe::App for VintageLightboxApp {
                                     clarity: self.state.active_clarity,
                                     vibrance: self.state.active_vibrance,
                                     saturation: self.state.active_saturation,
-                                    _padding: 0.0,
+                                    tone_curve_shadows: self.state.active_tone_curve_shadows,
+                                    tone_curve_darks: self.state.active_tone_curve_darks,
+                                    tone_curve_lights: self.state.active_tone_curve_lights,
+                                    tone_curve_highlights: self.state.active_tone_curve_highlights,
                                 },
                             });
 

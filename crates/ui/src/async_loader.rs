@@ -407,6 +407,7 @@ impl AsyncImageProcessor {
                         request.clarity,
                         request.vibrance,
                         request.saturation,
+                        0.0, 0.0, 0.0, 0.0, // tone curve
                     )
                 } else {
                     preview_img
@@ -484,6 +485,11 @@ pub struct EditRequest {
     pub clarity: f32,
     pub vibrance: f32,
     pub saturation: f32,
+    // Tone curve parametric zones
+    pub tone_curve_shadows: f32,
+    pub tone_curve_darks: f32,
+    pub tone_curve_lights: f32,
+    pub tone_curve_highlights: f32,
 }
 
 /// Result of applying edits
@@ -540,6 +546,10 @@ impl AsyncEditProcessor {
                 request.clarity,
                 request.vibrance,
                 request.saturation,
+                request.tone_curve_shadows,
+                request.tone_curve_darks,
+                request.tone_curve_lights,
+                request.tone_curve_highlights,
             );
 
             let result = EditResult {
