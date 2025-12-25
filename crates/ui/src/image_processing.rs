@@ -66,6 +66,14 @@ impl ImageProcessor {
         tone_curve_darks: f32,
         tone_curve_lights: f32,
         tone_curve_highlights: f32,
+        hsl_red_sat: f32,
+        hsl_orange_sat: f32,
+        hsl_yellow_sat: f32,
+        hsl_green_sat: f32,
+        hsl_aqua_sat: f32,
+        hsl_blue_sat: f32,
+        hsl_purple_sat: f32,
+        hsl_magenta_sat: f32,
     ) -> TextureHandle {
         self.last_edit_time = Some(Instant::now());
 
@@ -74,6 +82,8 @@ impl ImageProcessor {
             img, exposure, contrast, temperature, tint, highlights, shadows,
             whites, blacks, clarity, vibrance, saturation,
             tone_curve_shadows, tone_curve_darks, tone_curve_lights, tone_curve_highlights,
+            hsl_red_sat, hsl_orange_sat, hsl_yellow_sat, hsl_green_sat,
+            hsl_aqua_sat, hsl_blue_sat, hsl_purple_sat, hsl_magenta_sat,
         );
         Self::load_texture(ctx, "processed_image", &processed)
     }
@@ -98,6 +108,15 @@ impl ImageProcessor {
         tone_curve_darks: f32,
         tone_curve_lights: f32,
         tone_curve_highlights: f32,
+        // HSL color channel saturations (-100 to +100)
+        hsl_red_sat: f32,
+        hsl_orange_sat: f32,
+        hsl_yellow_sat: f32,
+        hsl_green_sat: f32,
+        hsl_aqua_sat: f32,
+        hsl_blue_sat: f32,
+        hsl_purple_sat: f32,
+        hsl_magenta_sat: f32,
     ) -> DynamicImage {
         use image::{Rgba, Pixel};
 
@@ -291,6 +310,139 @@ impl ImageProcessor {
                     }
                 }
 
+                // HSL Color Channel Saturation Adjustments
+                // Only apply if any HSL slider is non-zero
+                let has_hsl_adjustment = hsl_red_sat != 0.0 || hsl_orange_sat != 0.0 
+                    || hsl_yellow_sat != 0.0 || hsl_green_sat != 0.0
+                    || hsl_aqua_sat != 0.0 || hsl_blue_sat != 0.0
+                    || hsl_purple_sat != 0.0 || hsl_magenta_sat != 0.0;
+                
+                if has_hsl_adjustment {
+                    // Normalize RGB to 0-1 range
+                    let r_norm = r / 255.0;
+                    let g_norm = g / 255.0;
+                    let b_norm = b / 255.0;
+                    
+                    let max_c = r_norm.max(g_norm).max(b_norm);
+                    let min_c = r_norm.min(g_norm).min(b_norm);
+                    let delta = max_c - min_c;
+                    
+                    // Calculate hue (0-360 degrees)
+                    let hue = if delta == 0.0 {
+                        0.0
+                    } else if max_c == r_norm {
+                        60.0 * (((g_norm - b_norm) / delta) % 6.0)
+                    } else if max_c == g_norm {
+                        60.0 * (((b_norm - r_norm) / delta) + 2.0)
+                    } else {
+                        60.0 * (((r_norm - g_norm) / delta) + 4.0)
+                    };
+                    let hue = if hue < 0.0 { hue + 360.0 } else { hue };
+                    
+                    // Calculate lightness and saturation
+                    let lightness = (max_c + min_c) / 2.0;
+                    let sat = if delta == 0.0 {
+                        0.0
+                    } else {
+                        delta / (1.0 - (2.0 * lightness - 1.0).abs())
+                    };
+                    
+                    // Determine which color channel this hue belongs to
+                    // and calculate adjustment based on how close to center
+                    let sat_adjustment = {
+                        // Color ranges in degrees (with overlap for smooth transitions)
+                        // Red: 330-30 (wraps around 0)
+                        // Orange: 15-45
+                        // Yellow: 45-75
+                        // Green: 75-165
+                        // Aqua: 165-210
+                        // Blue: 210-270
+                        // Purple: 270-300
+                        // Magenta: 300-345
+                        
+                        let mut adjustment = 0.0;
+                        
+                        // Red (wraps around 0)
+                        if hue >= 345.0 || hue < 15.0 {
+                            let dist = if hue >= 345.0 { hue - 360.0 } else { hue };
+                            let weight = 1.0 - (dist.abs() / 15.0).min(1.0);
+                            adjustment += hsl_red_sat * weight;
+                        }
+                        // Orange: 15-45
+                        if hue >= 15.0 && hue < 45.0 {
+                            let center = 30.0;
+                            let weight = 1.0 - ((hue - center).abs() / 15.0).min(1.0);
+                            adjustment += hsl_orange_sat * weight;
+                        }
+                        // Yellow: 45-75
+                        if hue >= 45.0 && hue < 75.0 {
+                            let center = 60.0;
+                            let weight = 1.0 - ((hue - center).abs() / 15.0).min(1.0);
+                            adjustment += hsl_yellow_sat * weight;
+                        }
+                        // Green: 75-165
+                        if hue >= 75.0 && hue < 165.0 {
+                            let center = 120.0;
+                            let weight = 1.0 - ((hue - center).abs() / 45.0).min(1.0);
+                            adjustment += hsl_green_sat * weight;
+                        }
+                        // Aqua: 165-210
+                        if hue >= 165.0 && hue < 210.0 {
+                            let center = 187.5;
+                            let weight = 1.0 - ((hue - center).abs() / 22.5).min(1.0);
+                            adjustment += hsl_aqua_sat * weight;
+                        }
+                        // Blue: 210-270
+                        if hue >= 210.0 && hue < 270.0 {
+                            let center = 240.0;
+                            let weight = 1.0 - ((hue - center).abs() / 30.0).min(1.0);
+                            adjustment += hsl_blue_sat * weight;
+                        }
+                        // Purple: 270-310
+                        if hue >= 270.0 && hue < 310.0 {
+                            let center = 290.0;
+                            let weight = 1.0 - ((hue - center).abs() / 20.0).min(1.0);
+                            adjustment += hsl_purple_sat * weight;
+                        }
+                        // Magenta: 310-345
+                        if hue >= 310.0 && hue < 345.0 {
+                            let center = 327.5;
+                            let weight = 1.0 - ((hue - center).abs() / 17.5).min(1.0);
+                            adjustment += hsl_magenta_sat * weight;
+                        }
+                        
+                        adjustment * 0.01 // Convert from -100..100 to -1..1
+                    };
+                    
+                    // Apply saturation adjustment and convert back to RGB
+                    if sat_adjustment != 0.0 {
+                        let new_sat = (sat + sat_adjustment * sat).clamp(0.0, 1.0);
+                        
+                        // HSL to RGB conversion
+                        let c = (1.0 - (2.0 * lightness - 1.0).abs()) * new_sat;
+                        let x = c * (1.0 - ((hue / 60.0) % 2.0 - 1.0).abs());
+                        let m = lightness - c / 2.0;
+                        
+                        let (r1, g1, b1) = if hue < 60.0 {
+                            (c, x, 0.0)
+                        } else if hue < 120.0 {
+                            (x, c, 0.0)
+                        } else if hue < 180.0 {
+                            (0.0, c, x)
+                        } else if hue < 240.0 {
+                            (0.0, x, c)
+                        } else if hue < 300.0 {
+                            (x, 0.0, c)
+                        } else {
+                            (c, 0.0, x)
+                        };
+                        
+                        r = (r1 + m) * 255.0;
+                        g = (g1 + m) * 255.0;
+                        b = (b1 + m) * 255.0;
+                    }
+                }
+
                 // Clamp values to 0-255
                 r = r.clamp(0.0, 255.0);
                 g = g.clamp(0.0, 255.0);
@@ -359,6 +511,7 @@ mod tests {
         let processed = ImageProcessor::process_image(
             &img, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
             0.0, 0.0, 0.0, 0.0, // tone curve params
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL
         );
 
         assert_eq!(processed.width(), 100);

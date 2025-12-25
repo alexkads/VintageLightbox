@@ -13,7 +13,7 @@ pub mod thumbnail_generator;
 pub mod content_hash;
 
 // Re-exports for main.rs compatibility
-pub use database::{create_pool, run_migrations, PhotoRepositoryImpl, SqlitePresetRepository};
+pub use database::{create_pool, run_migrations, PhotoRepositoryImpl, SqlitePresetRepository, CollectionRepositoryImpl};
 pub use exif_reader::ExifReader;
 pub use thumbnail_generator::ThumbnailGeneratorImpl;
 pub use image_exporter::ImageExporterImpl;

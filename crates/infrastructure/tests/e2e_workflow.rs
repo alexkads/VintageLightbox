@@ -57,7 +57,9 @@ async fn test_e2e_import_edit_export_flow() {
     // Apply Exposure +1.0 (Brighten) and Contrast 1.2
     let save_result = save_edits_uc.execute(
         photo_id.clone(), 1.0, 1.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-        0.0, 0.0, 0.0, 0.0
+        0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL
+        0.0, 0.0 // NR
     ).await;
     assert!(save_result.is_ok(), "Save edits failed");
 

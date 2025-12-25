@@ -20,7 +20,7 @@ impl DeletePhotoUseCase {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use domain::{PhotoRepository, entities::Photo, value_objects::FilePath};
+    use domain::{repositories::PhotoRepository, entities::Photo, value_objects::FilePath};
     use mockall::mock;
     use mockall::predicate::*;
 

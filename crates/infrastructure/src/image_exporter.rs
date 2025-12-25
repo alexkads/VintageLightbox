@@ -28,8 +28,19 @@ impl ImageExporterImpl {
         clarity: f32,
         vibrance: f32,
         saturation: f32,
+        nr_luminance: f32,
+        nr_color: f32,
     ) -> DynamicImage {
-        let mut result = img.to_rgba8();
+        // 0. Noise Reduction (Simple Blur Approximation for CPU)
+        let img_to_process = if nr_luminance > 0.0 {
+            // Map 0-100 range to sigma 0.0 - 2.0
+            let sigma = nr_luminance * 0.02; 
+            img.blur(sigma)
+        } else {
+            img.clone()
+        };
+
+        let mut result = img_to_process.to_rgba8();
         let (width, height) = result.dimensions();
 
         // Apply adjustments pixel by pixel
@@ -184,12 +195,15 @@ impl ImageExporter for ImageExporterImpl {
         let clarity = photo.edit_clarity().unwrap_or(0.0);
         let vibrance = photo.edit_vibrance().unwrap_or(0.0);
         let saturation = photo.edit_saturation().unwrap_or(0.0);
+        let nr_luminance = photo.edit_nr_luminance().unwrap_or(0.0);
+        let nr_color = photo.edit_nr_color().unwrap_or(0.0);
 
         // Apply all 11 adjustments
         let processed = Self::process_image(
             &img, exposure, contrast, temperature, tint,
             highlights, shadows, whites, blacks,
-            clarity, vibrance, saturation
+            clarity, vibrance, saturation,
+            nr_luminance, nr_color
         );
 
         // Save as JPEG with quality 90

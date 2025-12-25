@@ -23,6 +23,15 @@ Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Ar
 
 ### Conquistas Recentes
 
+- ✅ **LUMINANCE NOISE REDUCTION (25/dez/2025)** 📉
+  - **Bilateral Filter (GPU)**: Aceleração por hardware (WGSL) para redução de ruído.
+  - **Preservação de Bordas**: Algoritmo bilateral que suaviza áreas planas mantendo detalhes.
+  - **UI Integrada**: Sliders de Luminance e Color NR no painel "Detail".
+  - **Fallback CPU**: Implementação visual (Smart Blur) para exportação via CPU.
+  - **Integração Completa**: Undo/Redo, Reset e Persistência no banco de dados.
+  - **Status**: ✅ **Luminância COMPLETO** (Cor NR partially implemented in UI/DB)
+
+
 - ✅ **THEME & SELECTION UX FIXES (24/dez/2025)** 🎨
   - **Latte Light Theme**: Correção completa de cores hardcoded em PhotoGrid, Filmstrip e Widgets. Tema claro agora 100% funcional.
   - **Seleção Profissional**: Implementação de "Double Border" (Azul Externo + Branco Interno) para seleção primária.
@@ -783,7 +792,12 @@ import_controller.import_with_options(files, options, tx, pause, cancel).await?;
 - [x] ✅ **Tone Curve UI** (25/dez/2025) - Sliders para controle das 4 zonas no Develop View
 - [ ] **Point Curve** - Curva com múltiplos pontos de controle (complexo)
 - [ ] **HSL/Color** - Ajustes por canal de cor (8 canais: Red, Orange, Yellow, Green, Aqua, Blue, Purple, Magenta)
-- [ ] **Redução de Ruído** - Luminance e Color noise reduction
+- [x] ✅ **Redução de Ruído** (25/dez/2025) - Luminance Noise Reduction funcional:
+  - GPU: Bilateral Filter implementado em WGSL
+  - CPU: Smart Blur approximation para export
+  - UI: Sliders adicionados no Develop View
+  - Undo/Redo: Integrado no sistema de snapshot
+- [ ] **Color Noise Reduction** - Ajuste de crominância (U/V channels)
 - [ ] **Nitidez** - Sharpening com Amount, Radius, Detail, Masking
 
 ### 2.3 Presets ✅ BACKEND COMPLETO (23/dez/2025)

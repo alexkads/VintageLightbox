@@ -369,6 +369,7 @@ impl eframe::App for VintageLightboxApp {
                              vibrance,
                              saturation,
                              0.0, 0.0, 0.0, 0.0, // tone curve
+                             0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL
                          );
                          
                          let thumb_texture = crate::image_processing::ImageProcessor::load_texture(
@@ -394,6 +395,7 @@ impl eframe::App for VintageLightboxApp {
                                 vibrance,
                                 saturation,
                                 0.0, 0.0, 0.0, 0.0, // tone curve
+                                0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL
                             );
                             
                             let thumb_texture = crate::image_processing::ImageProcessor::load_texture(
@@ -573,6 +575,18 @@ impl eframe::App for VintageLightboxApp {
                                     tone_curve_darks: self.state.active_tone_curve_darks,
                                     tone_curve_lights: self.state.active_tone_curve_lights,
                                     tone_curve_highlights: self.state.active_tone_curve_highlights,
+                                    // HSL from AppState
+                                    hsl_red_sat: self.state.active_hsl_red_sat,
+                                    hsl_orange_sat: self.state.active_hsl_orange_sat,
+                                    hsl_yellow_sat: self.state.active_hsl_yellow_sat,
+                                    hsl_green_sat: self.state.active_hsl_green_sat,
+                                    hsl_aqua_sat: self.state.active_hsl_aqua_sat,
+                                    hsl_blue_sat: self.state.active_hsl_blue_sat,
+                                    hsl_purple_sat: self.state.active_hsl_purple_sat,
+                                    hsl_magenta_sat: self.state.active_hsl_magenta_sat,
+                                    // NR
+                                    nr_luminance: self.state.active_nr_luminance,
+                                    nr_color: self.state.active_nr_color,
                                 },
                             });
 
@@ -646,15 +660,19 @@ impl eframe::App for VintageLightboxApp {
                             let tone_curve_darks = self.state.active_tone_curve_darks;
                             let tone_curve_lights = self.state.active_tone_curve_lights;
                             let tone_curve_highlights = self.state.active_tone_curve_highlights;
-                            // HSL saturation values (all 0.0 for now until HSL state is added)
-                            let hsl_red_sat = 0.0;
-                            let hsl_orange_sat = 0.0;
-                            let hsl_yellow_sat = 0.0;
-                            let hsl_green_sat = 0.0;
-                            let hsl_aqua_sat = 0.0;
-                            let hsl_blue_sat = 0.0;
-                            let hsl_purple_sat = 0.0;
-                            let hsl_magenta_sat = 0.0;
+                            // HSL saturation values from state
+                            let hsl_red_sat = self.state.active_hsl_red_sat;
+                            let hsl_orange_sat = self.state.active_hsl_orange_sat;
+                            let hsl_yellow_sat = self.state.active_hsl_yellow_sat;
+                            let hsl_green_sat = self.state.active_hsl_green_sat;
+                            let hsl_aqua_sat = self.state.active_hsl_aqua_sat;
+                            let hsl_blue_sat = self.state.active_hsl_blue_sat;
+                            let hsl_purple_sat = self.state.active_hsl_purple_sat;
+                            let hsl_magenta_sat = self.state.active_hsl_magenta_sat;
+
+                            // Noise Reduction (placeholder)
+                            let nr_luminance = 0.0;
+                            let nr_color = 0.0;
 
                             // Update saved values BEFORE spawning
                             self.state.saved_exposure = exposure;
@@ -668,6 +686,15 @@ impl eframe::App for VintageLightboxApp {
                             self.state.saved_clarity = clarity;
                             self.state.saved_vibrance = vibrance;
                             self.state.saved_saturation = saturation;
+                            // Update saved HSL values
+                            self.state.saved_hsl_red_sat = hsl_red_sat;
+                            self.state.saved_hsl_orange_sat = hsl_orange_sat;
+                            self.state.saved_hsl_yellow_sat = hsl_yellow_sat;
+                            self.state.saved_hsl_green_sat = hsl_green_sat;
+                            self.state.saved_hsl_aqua_sat = hsl_aqua_sat;
+                            self.state.saved_hsl_blue_sat = hsl_blue_sat;
+                            self.state.saved_hsl_purple_sat = hsl_purple_sat;
+                            self.state.saved_hsl_magenta_sat = hsl_magenta_sat;
 
                             // Update the PhotoViewModel in the local list to reflect saved edits
                             // This ensures the photo loads with correct values when switching photos
@@ -701,7 +728,8 @@ impl eframe::App for VintageLightboxApp {
                                     whites, blacks, clarity, vibrance, saturation,
                                     tone_curve_shadows, tone_curve_darks, tone_curve_lights, tone_curve_highlights,
                                     hsl_red_sat, hsl_orange_sat, hsl_yellow_sat, hsl_green_sat,
-                                    hsl_aqua_sat, hsl_blue_sat, hsl_purple_sat, hsl_magenta_sat
+                                    hsl_aqua_sat, hsl_blue_sat, hsl_purple_sat, hsl_magenta_sat,
+                                    nr_luminance, nr_color
                                 ).await {
                                     // Note: Toast will be shown in the next frame via state
                                     eprintln!("Auto-save failed: {}", e);

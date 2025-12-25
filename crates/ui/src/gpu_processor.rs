@@ -29,6 +29,18 @@ pub struct GpuEditParams {
     pub tone_curve_darks: f32,
     pub tone_curve_lights: f32,
     pub tone_curve_highlights: f32,
+    // HSL color channel saturations (-100 to +100)
+    pub hsl_red_sat: f32,
+    pub hsl_orange_sat: f32,
+    pub hsl_yellow_sat: f32,
+    pub hsl_green_sat: f32,
+    pub hsl_aqua_sat: f32,
+    pub hsl_blue_sat: f32,
+    pub hsl_purple_sat: f32,
+    pub hsl_magenta_sat: f32,
+    // Noise Reduction
+    pub nr_luminance: f32,
+    pub nr_color: f32,
 }
 
 impl Default for GpuEditParams {
@@ -49,6 +61,16 @@ impl Default for GpuEditParams {
             tone_curve_darks: 0.0,
             tone_curve_lights: 0.0,
             tone_curve_highlights: 0.0,
+            hsl_red_sat: 0.0,
+            hsl_orange_sat: 0.0,
+            hsl_yellow_sat: 0.0,
+            hsl_green_sat: 0.0,
+            hsl_aqua_sat: 0.0,
+            hsl_blue_sat: 0.0,
+            hsl_purple_sat: 0.0,
+            hsl_magenta_sat: 0.0,
+            nr_luminance: 0.0,
+            nr_color: 0.0,
         }
     }
 }
@@ -452,6 +474,7 @@ impl GpuImageProcessor {
                     request.params.tone_curve_darks,
                     request.params.tone_curve_lights,
                     request.params.tone_curve_highlights,
+                    0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL
                 );
 
                 let preview = crate::image_processing::ImageProcessor::dynamic_to_color_image(&processed);

@@ -34,6 +34,18 @@ pub struct EditSnapshot {
     pub tone_curve_darks: f32,
     pub tone_curve_lights: f32,
     pub tone_curve_highlights: f32,
+    // HSL color channel saturations
+    pub hsl_red_sat: f32,
+    pub hsl_orange_sat: f32,
+    pub hsl_yellow_sat: f32,
+    pub hsl_green_sat: f32,
+    pub hsl_aqua_sat: f32,
+    pub hsl_blue_sat: f32,
+    pub hsl_purple_sat: f32,
+    pub hsl_magenta_sat: f32,
+    // Noise Reduction
+    pub nr_luminance: f32,
+    pub nr_color: f32,
 }
 
 /// Current view in the application
@@ -136,6 +148,18 @@ pub struct AppState {
     pub active_tone_curve_darks: f32,
     pub active_tone_curve_lights: f32,
     pub active_tone_curve_highlights: f32,
+    // HSL color channel saturations (-100 to +100)
+    pub active_hsl_red_sat: f32,
+    pub active_hsl_orange_sat: f32,
+    pub active_hsl_yellow_sat: f32,
+    pub active_hsl_green_sat: f32,
+    pub active_hsl_aqua_sat: f32,
+    pub active_hsl_blue_sat: f32,
+    pub active_hsl_purple_sat: f32,
+    pub active_hsl_magenta_sat: f32,
+    // Noise Reduction (Amount 0-100)
+    pub active_nr_luminance: f32,
+    pub active_nr_color: f32,
     /// Previous exposure value (for change detection)
     pub prev_exposure: f32,
     /// Previous contrast value (for change detection)
@@ -166,6 +190,18 @@ pub struct AppState {
     pub prev_tone_curve_lights: f32,
     /// Previous tone curve highlights (for change detection)
     pub prev_tone_curve_highlights: f32,
+    // Previous HSL values (for change detection)
+    pub prev_hsl_red_sat: f32,
+    pub prev_hsl_orange_sat: f32,
+    pub prev_hsl_yellow_sat: f32,
+    pub prev_hsl_green_sat: f32,
+    pub prev_hsl_aqua_sat: f32,
+    pub prev_hsl_blue_sat: f32,
+    pub prev_hsl_purple_sat: f32,
+    pub prev_hsl_magenta_sat: f32,
+    // Previous NR (for change detection)
+    pub prev_nr_luminance: f32,
+    pub prev_nr_color: f32,
     /// Original unprocessed preview image
     pub original_preview: Option<DynamicImage>,
     /// Cached raw image data for GPU processing (Arc to avoid cloning)
@@ -237,6 +273,15 @@ pub struct AppState {
     pub saved_clarity: f32,
     pub saved_vibrance: f32,
     pub saved_saturation: f32,
+    // Saved HSL values
+    pub saved_hsl_red_sat: f32,
+    pub saved_hsl_orange_sat: f32,
+    pub saved_hsl_yellow_sat: f32,
+    pub saved_hsl_green_sat: f32,
+    pub saved_hsl_aqua_sat: f32,
+    pub saved_hsl_blue_sat: f32,
+    pub saved_hsl_purple_sat: f32,
+    pub saved_hsl_magenta_sat: f32,
 
     // ============================================
     // Folder Navigation
@@ -352,6 +397,18 @@ impl AppState {
             active_tone_curve_darks: 0.0,
             active_tone_curve_lights: 0.0,
             active_tone_curve_highlights: 0.0,
+            // HSL active values
+            active_hsl_red_sat: 0.0,
+            active_hsl_orange_sat: 0.0,
+            active_hsl_yellow_sat: 0.0,
+            active_hsl_green_sat: 0.0,
+            active_hsl_aqua_sat: 0.0,
+            active_hsl_blue_sat: 0.0,
+            active_hsl_purple_sat: 0.0,
+            active_hsl_magenta_sat: 0.0,
+            // NR
+            active_nr_luminance: 0.0,
+            active_nr_color: 0.0,
             prev_exposure: 0.0,
             prev_contrast: 1.0,
             prev_temperature: 0.0,
@@ -367,6 +424,18 @@ impl AppState {
             prev_tone_curve_darks: 0.0,
             prev_tone_curve_lights: 0.0,
             prev_tone_curve_highlights: 0.0,
+            // HSL prev values
+            prev_hsl_red_sat: 0.0,
+            prev_hsl_orange_sat: 0.0,
+            prev_hsl_yellow_sat: 0.0,
+            prev_hsl_green_sat: 0.0,
+            prev_hsl_aqua_sat: 0.0,
+            prev_hsl_blue_sat: 0.0,
+            prev_hsl_purple_sat: 0.0,
+            prev_hsl_magenta_sat: 0.0,
+            // NR prev
+            prev_nr_luminance: 0.0,
+            prev_nr_color: 0.0,
             original_preview: None,
             original_image_data: None,
             zoom_level: 1.0,
@@ -397,6 +466,15 @@ impl AppState {
             saved_clarity: 0.0,
             saved_vibrance: 0.0,
             saved_saturation: 0.0,
+            // HSL saved values
+            saved_hsl_red_sat: 0.0,
+            saved_hsl_orange_sat: 0.0,
+            saved_hsl_yellow_sat: 0.0,
+            saved_hsl_green_sat: 0.0,
+            saved_hsl_aqua_sat: 0.0,
+            saved_hsl_blue_sat: 0.0,
+            saved_hsl_purple_sat: 0.0,
+            saved_hsl_magenta_sat: 0.0,
             folder_tree_roots: Vec::new(),
             expanded_folders: HashSet::new(),
             import_preview_dialog: None,
@@ -473,6 +551,35 @@ impl AppState {
         self.pan_offset = egui::Vec2::ZERO;
     }
 
+    /// Reset all edits to default values
+    pub fn reset_edits(&mut self) {
+        self.active_exposure = 0.0;
+        self.active_contrast = 1.0;
+        self.active_temperature = 0.0;
+        self.active_tint = 0.0;
+        self.active_highlights = 0.0;
+        self.active_shadows = 0.0;
+        self.active_whites = 0.0;
+        self.active_blacks = 0.0;
+        self.active_clarity = 0.0;
+        self.active_vibrance = 0.0;
+        self.active_saturation = 0.0;
+        self.active_tone_curve_shadows = 0.0;
+        self.active_tone_curve_darks = 0.0;
+        self.active_tone_curve_lights = 0.0;
+        self.active_tone_curve_highlights = 0.0;
+        self.active_hsl_red_sat = 0.0;
+        self.active_hsl_orange_sat = 0.0;
+        self.active_hsl_yellow_sat = 0.0;
+        self.active_hsl_green_sat = 0.0;
+        self.active_hsl_aqua_sat = 0.0;
+        self.active_hsl_blue_sat = 0.0;
+        self.active_hsl_purple_sat = 0.0;
+        self.active_hsl_magenta_sat = 0.0;
+        self.active_nr_luminance = 0.0;
+        self.active_nr_color = 0.0;
+    }
+
     /// Check if we have any photos loaded
     pub fn has_photos(&self) -> bool {
         !self.photos.is_empty()
@@ -503,6 +610,16 @@ impl AppState {
             tone_curve_darks: self.active_tone_curve_darks,
             tone_curve_lights: self.active_tone_curve_lights,
             tone_curve_highlights: self.active_tone_curve_highlights,
+            hsl_red_sat: self.active_hsl_red_sat,
+            hsl_orange_sat: self.active_hsl_orange_sat,
+            hsl_yellow_sat: self.active_hsl_yellow_sat,
+            hsl_green_sat: self.active_hsl_green_sat,
+            hsl_aqua_sat: self.active_hsl_aqua_sat,
+            hsl_blue_sat: self.active_hsl_blue_sat,
+            hsl_purple_sat: self.active_hsl_purple_sat,
+            hsl_magenta_sat: self.active_hsl_magenta_sat,
+            nr_luminance: self.active_nr_luminance,
+            nr_color: self.active_nr_color,
         };
 
         // If we're not at the end of history, truncate everything after current position
@@ -543,6 +660,16 @@ impl AppState {
                 self.active_tone_curve_darks = snapshot.tone_curve_darks;
                 self.active_tone_curve_lights = snapshot.tone_curve_lights;
                 self.active_tone_curve_highlights = snapshot.tone_curve_highlights;
+                self.active_hsl_red_sat = snapshot.hsl_red_sat;
+                self.active_hsl_orange_sat = snapshot.hsl_orange_sat;
+                self.active_hsl_yellow_sat = snapshot.hsl_yellow_sat;
+                self.active_hsl_green_sat = snapshot.hsl_green_sat;
+                self.active_hsl_aqua_sat = snapshot.hsl_aqua_sat;
+                self.active_hsl_blue_sat = snapshot.hsl_blue_sat;
+                self.active_hsl_purple_sat = snapshot.hsl_purple_sat;
+                self.active_hsl_magenta_sat = snapshot.hsl_magenta_sat;
+                self.active_nr_luminance = snapshot.nr_luminance;
+                self.active_nr_color = snapshot.nr_color;
                 self.history_index = Some(new_index);
                 return true;
             }
@@ -571,6 +698,16 @@ impl AppState {
                 self.active_tone_curve_darks = snapshot.tone_curve_darks;
                 self.active_tone_curve_lights = snapshot.tone_curve_lights;
                 self.active_tone_curve_highlights = snapshot.tone_curve_highlights;
+                self.active_hsl_red_sat = snapshot.hsl_red_sat;
+                self.active_hsl_orange_sat = snapshot.hsl_orange_sat;
+                self.active_hsl_yellow_sat = snapshot.hsl_yellow_sat;
+                self.active_hsl_green_sat = snapshot.hsl_green_sat;
+                self.active_hsl_aqua_sat = snapshot.hsl_aqua_sat;
+                self.active_hsl_blue_sat = snapshot.hsl_blue_sat;
+                self.active_hsl_purple_sat = snapshot.hsl_purple_sat;
+                self.active_hsl_magenta_sat = snapshot.hsl_magenta_sat;
+                self.active_nr_luminance = snapshot.nr_luminance;
+                self.active_nr_color = snapshot.nr_color;
                 self.history_index = Some(new_index);
                 return true;
             }

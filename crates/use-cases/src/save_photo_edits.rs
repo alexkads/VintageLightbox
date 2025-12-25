@@ -41,6 +41,8 @@ impl SavePhotoEditsUseCase {
         hsl_blue_sat: f32,
         hsl_purple_sat: f32,
         hsl_magenta_sat: f32,
+        nr_luminance: f32,
+        nr_color: f32,
     ) -> DomainResult<()> {
         let mut photo = self.photo_repository.find_by_id(&id).await?
             .ok_or(DomainError::PhotoNotFound)?;
@@ -53,7 +55,8 @@ impl SavePhotoEditsUseCase {
             Some(tone_curve_lights), Some(tone_curve_highlights),
             Some(hsl_red_sat), Some(hsl_orange_sat), Some(hsl_yellow_sat),
             Some(hsl_green_sat), Some(hsl_aqua_sat), Some(hsl_blue_sat),
-            Some(hsl_purple_sat), Some(hsl_magenta_sat)
+            Some(hsl_purple_sat), Some(hsl_magenta_sat),
+            Some(nr_luminance), Some(nr_color)
         )?;
         self.photo_repository.update(&photo).await?;
 
@@ -116,7 +119,8 @@ mod tests {
         let result = use_case.execute(
             id, 1.0, 1.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
             -30.0, -10.0, 10.0, 30.0,
-            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 // HSL
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL
+            0.0, 0.0 // NR
         ).await;
 
         assert!(result.is_ok());
@@ -136,7 +140,8 @@ mod tests {
         let result = use_case.execute(
             id, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
             0.0, 0.0, 0.0, 0.0,
-            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 // HSL
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL
+            0.0, 0.0 // NR
         ).await;
 
         match result {

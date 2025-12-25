@@ -94,6 +94,7 @@ impl Filmstrip {
                         &result.image, exposure, contrast, temperature, tint,
                         highlights, shadows, whites, blacks, clarity, vibrance, saturation,
                         0.0, 0.0, 0.0, 0.0, // tone curve (not applied to thumbnails)
+                        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL
                     )
                 } else {
                     result.image.clone()
@@ -499,6 +500,7 @@ impl Filmstrip {
                         &result.image, exposure, contrast, temperature, tint,
                         highlights, shadows, whites, blacks, clarity, vibrance, saturation,
                         0.0, 0.0, 0.0, 0.0, // tone curve (not applied to thumbnails)
+                        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL
                     )
                 } else {
                     result.image.clone()

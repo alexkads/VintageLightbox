@@ -89,7 +89,7 @@ impl ImportPhotosUseCase {
 mod tests {
     use super::*;
     use domain::{
-        DomainError, PhotoRepository,
+        DomainError, repositories::PhotoRepository,
         value_objects::PhotoMetadata,
     };
     use mockall::mock;

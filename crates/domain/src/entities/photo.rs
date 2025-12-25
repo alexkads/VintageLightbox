@@ -84,6 +84,10 @@ pub struct Photo {
     edit_hsl_purple_sat: Option<f32>,
     /// HSL: Magenta channel saturation adjustment (-100 to +100)
     edit_hsl_magenta_sat: Option<f32>,
+    /// Noise reduction: Luminance (0 to 100)
+    edit_nr_luminance: Option<f32>,
+    /// Noise reduction: Color (0 to 100)
+    edit_nr_color: Option<f32>,
 }
 
 impl Photo {
@@ -129,6 +133,8 @@ impl Photo {
         edit_hsl_blue_sat: Option<f32>,
         edit_hsl_purple_sat: Option<f32>,
         edit_hsl_magenta_sat: Option<f32>,
+        edit_nr_luminance: Option<f32>,
+        edit_nr_color: Option<f32>,
     ) -> Self {
         Self {
             id,
@@ -166,6 +172,8 @@ impl Photo {
             edit_hsl_blue_sat,
             edit_hsl_purple_sat,
             edit_hsl_magenta_sat,
+            edit_nr_luminance,
+            edit_nr_color,
         }
     }
 
@@ -176,7 +184,8 @@ impl Photo {
             id, file_path, now, now, None, None, None, None, false, None, None,
             None, None, None, None, None, None, None, None, None, None, None,
             None, None, None, None, None,
-            None, None, None, None, None, None, None, None // HSL (8 fields)
+            None, None, None, None, None, None, None, None, // HSL (8 fields)
+            None, None // NR (2 fields)
         )
     }
 
@@ -414,6 +423,8 @@ impl Photo {
         hsl_blue_sat: Option<f32>,
         hsl_purple_sat: Option<f32>,
         hsl_magenta_sat: Option<f32>,
+        nr_luminance: Option<f32>,
+        nr_color: Option<f32>,
     ) -> DomainResult<()> {
         self.edit_exposure = exposure;
         self.edit_contrast = contrast;
@@ -438,6 +449,8 @@ impl Photo {
         self.edit_hsl_blue_sat = hsl_blue_sat;
         self.edit_hsl_purple_sat = hsl_purple_sat;
         self.edit_hsl_magenta_sat = hsl_magenta_sat;
+        self.edit_nr_luminance = nr_luminance;
+        self.edit_nr_color = nr_color;
         self.is_edited = true;
         self.modified_at = Utc::now();
         Ok(())
@@ -502,6 +515,18 @@ impl Photo {
     pub fn edit_hsl_magenta_sat(&self) -> Option<f32> {
         self.edit_hsl_magenta_sat
     }
+
+    /// Retorna o campo edit_nr_luminance
+    pub fn edit_nr_luminance(&self) -> Option<f32> {
+        self.edit_nr_luminance
+    }
+
+    /// Retorna o campo edit_nr_color
+    pub fn edit_nr_color(&self) -> Option<f32> {
+        self.edit_nr_color
+    }
+
+
 
     /// Retorna o hash de conteúdo do arquivo (SHA-256)
     pub fn content_hash(&self) -> Option<&str> {
@@ -737,13 +762,15 @@ mod tests {
             id, path.clone(), now, now, None, None, None, None, false, None, None,
             None, None, None, None, None, None, None, None, None, None, None,
             None, None, None, None, None,
-            None, None, None, None, None, None, None, None // HSL (8 fields)
+            None, None, None, None, None, None, None, None, // HSL (8 fields)
+            None, None // NR
         );
         let photo2 = Photo::reconstruct(
             id, path, now, now, None, None, None, None, false, None, None,
             None, None, None, None, None, None, None, None, None, None, None,
             None, None, None, None, None,
-            None, None, None, None, None, None, None, None // HSL (8 fields)
+            None, None, None, None, None, None, None, None, // HSL (8 fields)
+            None, None // NR
         );
 
         // Assert
@@ -762,7 +789,8 @@ mod tests {
         photo.set_edits(
             Some(1.5), Some(1.2), None, None, None, None, None, None, None, None, None,
             None, None, None, None,
-            None, None, None, None, None, None, None, None // HSL
+            None, None, None, None, None, None, None, None, // HSL
+            None, None // NR
         ).unwrap();
 
         assert_eq!(photo.edit_exposure(), Some(1.5));
@@ -810,7 +838,8 @@ mod tests {
         photo.set_edits(
             None, None, None, None, None, None, None, None, None, None, None,
             Some(-50.0), Some(-25.0), Some(25.0), Some(50.0),
-            None, None, None, None, None, None, None, None // HSL
+            None, None, None, None, None, None, None, None, // HSL
+            None, None // NR
         ).unwrap();
 
         // Assert
@@ -830,7 +859,8 @@ mod tests {
         photo.set_edits(
             None, None, None, None, None, None, None, None, None, None, None,
             Some(-100.0), Some(-50.0), Some(50.0), Some(100.0),
-            None, None, None, None, None, None, None, None // HSL
+            None, None, None, None, None, None, None, None, // HSL
+            None, None // NR
         ).unwrap();
 
         // Assert
@@ -851,7 +881,8 @@ mod tests {
             Some(-20.0), Some(30.0), Some(10.0), Some(-5.0),
             Some(0.3), Some(0.2), Some(0.1),
             Some(-30.0), Some(-10.0), Some(10.0), Some(30.0),
-            None, None, None, None, None, None, None, None // HSL
+            None, None, None, None, None, None, None, None, // HSL
+            None, None // NR
         ).unwrap();
 
         // Assert - All fields should be set
@@ -876,7 +907,8 @@ mod tests {
             id, path, now, now, None, None, None, None, true, None, None,
             Some(1.0), Some(1.0), None, None, None, None, None, None, None, None, None,
             Some(-40.0), Some(-20.0), Some(20.0), Some(40.0), None,
-            None, None, None, None, None, None, None, None // HSL
+            None, None, None, None, None, None, None, None, // HSL
+            None, None // NR
         );
 
         // Assert

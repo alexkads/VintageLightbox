@@ -41,7 +41,7 @@ impl CreateCollectionUseCase {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use domain::{CollectionRepository, value_objects::PhotoId};
+    use domain::{repositories::CollectionRepository, value_objects::PhotoId};
     use mockall::mock;
 
     // Mock do CollectionRepository

@@ -401,34 +401,144 @@ impl DevelopView {
 
         ui.add_space(Theme::SPACE_LG);
 
-        // HSL/Color placeholder
-        ui.label(
-            egui::RichText::new("▶ HSL / Color")
-                .size(Theme::FONT_SM)
-                .color(ui.visuals().text_color())
-        );
+        // HSL / Color Section
+        widgets::section_title(ui, "HSL / Color");
+        ui.add_space(Theme::SPACE_SM);
+
+        // Red saturation
+        if SliderControl::show(
+            ui,
+            "Red",
+            &mut state.active_hsl_red_sat,
+            -100.0..=100.0,
+            5.0,
+        ) {
+            any_slider_changed = true;
+        }
+
+        ui.add_space(Theme::SPACE_SM);
+
+        // Orange saturation
+        if SliderControl::show(
+            ui,
+            "Orange",
+            &mut state.active_hsl_orange_sat,
+            -100.0..=100.0,
+            5.0,
+        ) {
+            any_slider_changed = true;
+        }
+
+        ui.add_space(Theme::SPACE_SM);
+
+        // Yellow saturation
+        if SliderControl::show(
+            ui,
+            "Yellow",
+            &mut state.active_hsl_yellow_sat,
+            -100.0..=100.0,
+            5.0,
+        ) {
+            any_slider_changed = true;
+        }
+
+        ui.add_space(Theme::SPACE_SM);
+
+        // Green saturation
+        if SliderControl::show(
+            ui,
+            "Green",
+            &mut state.active_hsl_green_sat,
+            -100.0..=100.0,
+            5.0,
+        ) {
+            any_slider_changed = true;
+        }
+
+        ui.add_space(Theme::SPACE_SM);
+
+        // Aqua saturation
+        if SliderControl::show(
+            ui,
+            "Aqua",
+            &mut state.active_hsl_aqua_sat,
+            -100.0..=100.0,
+            5.0,
+        ) {
+            any_slider_changed = true;
+        }
+
+        ui.add_space(Theme::SPACE_SM);
+
+        // Blue saturation
+        if SliderControl::show(
+            ui,
+            "Blue",
+            &mut state.active_hsl_blue_sat,
+            -100.0..=100.0,
+            5.0,
+        ) {
+            any_slider_changed = true;
+        }
+
+        ui.add_space(Theme::SPACE_SM);
+
+        // Purple saturation
+        if SliderControl::show(
+            ui,
+            "Purple",
+            &mut state.active_hsl_purple_sat,
+            -100.0..=100.0,
+            5.0,
+        ) {
+            any_slider_changed = true;
+        }
+
+        ui.add_space(Theme::SPACE_SM);
+
+        // Magenta saturation
+        if SliderControl::show(
+            ui,
+            "Magenta",
+            &mut state.active_hsl_magenta_sat,
+            -100.0..=100.0,
+            5.0,
+        ) {
+            any_slider_changed = true;
+        }
+
+        ui.add_space(Theme::SPACE_XXL);
+
+        // Detail (Noise Reduction)
+        widgets::section_title(ui, "Detail");
+        ui.add_space(Theme::SPACE_SM);
+
+        if SliderControl::show(
+            ui,
+            "Luminance NR",
+            &mut state.active_nr_luminance,
+            0.0..=100.0,
+            1.0,
+        ) {
+            any_slider_changed = true;
+        }
+
+        if SliderControl::show(
+            ui,
+            "Color NR",
+            &mut state.active_nr_color,
+            0.0..=100.0,
+            1.0,
+        ) {
+            any_slider_changed = true;
+        }
 
         ui.add_space(Theme::SPACE_XXL);
 
         // Reset button
         if widgets::secondary_button(ui, "Reset").clicked() {
             // Reset adjustments to default values
-            state.active_exposure = 0.0;
-            state.active_contrast = 1.0;
-            state.active_temperature = 0.0;
-            state.active_tint = 0.0;
-            state.active_highlights = 0.0;
-            state.active_shadows = 0.0;
-            state.active_whites = 0.0;
-            state.active_blacks = 0.0;
-            state.active_clarity = 0.0;
-            state.active_vibrance = 0.0;
-            state.active_saturation = 0.0;
-            // Reset tone curve
-            state.active_tone_curve_shadows = 0.0;
-            state.active_tone_curve_darks = 0.0;
-            state.active_tone_curve_lights = 0.0;
-            state.active_tone_curve_highlights = 0.0;
+            state.reset_edits();
 
             // Auto-save happens after reset too
             state.pending_auto_save = true;

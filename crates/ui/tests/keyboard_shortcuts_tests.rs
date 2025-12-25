@@ -3,7 +3,10 @@ use std::time::Duration;
 
 use ui::state::{AppState, CurrentView};
 use ui::keyboard::KeyboardHandler;
-use adapters::controllers::{PhotoController, LibraryController};
+use adapters::controllers::{PhotoController, LibraryController, EditorController, ExportController, ImportController};
+use infrastructure::{ExifReader, ThumbnailGeneratorImpl, ImageExporterImpl, cache::preview_manager::PreviewManager};
+use tempfile::tempdir;
+use use_cases::{SavePhotoEditsUseCase, ExportPhotoUseCase, ImportPhotoUseCase};
 use adapters::view_models::PhotoViewModel;
 use domain::repositories::PhotoRepository;
 use domain::entities::Photo;
@@ -19,6 +22,9 @@ async fn setup_harness() -> (
     Arc<KeyboardHandler>,
     Arc<PhotoController>,
     Arc<LibraryController>,
+    Arc<EditorController>,
+    Arc<ExportController>,
+    Arc<ImportController>,
     tokio::sync::mpsc::Sender<Result<Vec<PhotoViewModel>, String>>,
     tokio::sync::mpsc::Receiver<Result<Vec<PhotoViewModel>, String>>,
     Arc<infrastructure::database::PhotoRepositoryImpl>
@@ -39,6 +45,23 @@ async fn setup_harness() -> (
     let color_uc = use_cases::SetColorLabelUseCase::new(photo_repo.clone());
     let flag_uc = use_cases::SetFlagUseCase::new(photo_repo.clone());
     let delete_uc = use_cases::DeletePhotoUseCase::new(photo_repo.clone());
+    
+    // Additional Use Cases for extra controllers
+    let save_uc = SavePhotoEditsUseCase::new(photo_repo.clone());
+    let exporter = Arc::new(ImageExporterImpl::new());
+    let export_uc = ExportPhotoUseCase::new(photo_repo.clone(), exporter);
+    
+    let exif_reader = Arc::new(ExifReader);
+    let thumb_gen = Arc::new(ThumbnailGeneratorImpl::new());
+    let temp_dir_obj = tempdir().expect("temp");
+    // We need to keep temp_dir alive? It drops at end of setup_harness?
+    // Handing ownership? No, PreviewManager takes PathBuf.
+    // Ideally we leak it or keep it alive. But for test duration it might be fine if variable persists?
+    // Wait, tempdir deletes on drop. If we drop it here, dir is gone.
+    // We can return it? Or just `into_path()` (persisted?) No `into_path` persists it.
+    let preview_man = Arc::new(PreviewManager::new_with_path(temp_dir_obj.into_path().join("previews")));
+    
+    let import_uc = ImportPhotoUseCase::new(photo_repo.clone(), exif_reader, thumb_gen, preview_man);
 
     // 4. Controllers
     let photo_controller = Arc::new(PhotoController::new(
@@ -49,6 +72,10 @@ async fn setup_harness() -> (
     ));
 
     let lib_controller = Arc::new(LibraryController::new(photo_repo.clone()));
+    let editor_controller = Arc::new(EditorController::new(Arc::new(save_uc)));
+    let export_controller = Arc::new(ExportController::new(Arc::new(export_uc)));
+    let import_controller = Arc::new(ImportController::new(Arc::new(import_uc)));
+
     let kb_handler = Arc::new(KeyboardHandler::new());
     let (tx, rx) = tokio::sync::mpsc::channel(100);
 
@@ -66,7 +93,7 @@ async fn setup_harness() -> (
     state.photos = view_models;
     state.rebuild_folder_tree();
 
-    (state, kb_handler, photo_controller, lib_controller, tx, rx, photo_repo)
+    (state, kb_handler, photo_controller, lib_controller, editor_controller, export_controller, import_controller, tx, rx, photo_repo)
 }
 
 /// Helper to drain all pending reloads and return the last one
@@ -120,7 +147,7 @@ async fn wait_for_db_flag(
 /// 3. Reloading state from database before each step to ensure consistency
 #[tokio::test]
 async fn test_flag_toggle_shortcut() {
-    let (mut state, kb_handler, photo_controller, lib_controller, tx, mut rx, repo) = setup_harness().await;
+    let (mut state, kb_handler, photo_controller, lib_controller, editor_controller, export_controller, import_controller, tx, mut rx, repo) = setup_harness().await;
     
     // Select the first photo
     let photo_id = state.photos[0].id.clone();
@@ -143,7 +170,7 @@ async fn test_flag_toggle_shortcut() {
                 physical_key: None,
             });
         });
-        kb_handler.handle_input(&ctx, &mut state, &photo_controller, &lib_controller, &tx);
+        kb_handler.handle_input(&ctx, &mut state, &photo_controller, &lib_controller, &editor_controller, &export_controller, &import_controller, &tx);
     }
     
     // Verify Optimistic Update
@@ -172,7 +199,7 @@ async fn test_flag_toggle_shortcut() {
                 physical_key: None,
             });
         });
-        kb_handler.handle_input(&ctx, &mut state, &photo_controller, &lib_controller, &tx);
+        kb_handler.handle_input(&ctx, &mut state, &photo_controller, &lib_controller, &editor_controller, &export_controller, &import_controller, &tx);
     }
     
     // Verify Optimistic Update
@@ -199,7 +226,7 @@ async fn test_flag_toggle_shortcut() {
                 physical_key: None,
             });
         });
-        kb_handler.handle_input(&ctx, &mut state, &photo_controller, &lib_controller, &tx);
+        kb_handler.handle_input(&ctx, &mut state, &photo_controller, &lib_controller, &editor_controller, &export_controller, &import_controller, &tx);
     }
     assert_eq!(state.photos[0].flag, Some(-1), "Optimistic update should set flag to -1");
     
@@ -228,7 +255,7 @@ async fn test_flag_toggle_shortcut() {
                 physical_key: None,
             });
         });
-        kb_handler.handle_input(&ctx, &mut state, &photo_controller, &lib_controller, &tx);
+        kb_handler.handle_input(&ctx, &mut state, &photo_controller, &lib_controller, &editor_controller, &export_controller, &import_controller, &tx);
     }
     assert_eq!(state.photos[0].flag, Some(0), "Optimistic update should toggle flag to 0");
     

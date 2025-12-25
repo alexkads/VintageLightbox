@@ -60,7 +60,7 @@ impl SetColorLabelUseCase {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use domain::{PhotoRepository, value_objects::FilePath};
+    use domain::{repositories::PhotoRepository, value_objects::FilePath};
     use mockall::mock;
     use mockall::predicate::*;
 

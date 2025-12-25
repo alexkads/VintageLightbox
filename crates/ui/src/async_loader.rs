@@ -408,6 +408,7 @@ impl AsyncImageProcessor {
                         request.vibrance,
                         request.saturation,
                         0.0, 0.0, 0.0, 0.0, // tone curve
+                        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL
                     )
                 } else {
                     preview_img
@@ -550,6 +551,7 @@ impl AsyncEditProcessor {
                 request.tone_curve_darks,
                 request.tone_curve_lights,
                 request.tone_curve_highlights,
+                0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL
             );
 
             let result = EditResult {
