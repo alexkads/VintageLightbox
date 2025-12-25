@@ -28,7 +28,10 @@ struct Params {
     hsl_purple_sat: f32,
     hsl_magenta_sat: f32,
     nr_luminance: f32,
+    nr_luminance: f32,
     nr_color: f32,
+    sharpen_amount: f32,
+    sharpen_radius: f32,
 }
 
 @group(0) @binding(0) var input_texture: texture_2d<f32>;
@@ -51,22 +54,34 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var b = pixel.b * 255.0;
     let a = pixel.a;
     
-    // 0. Noise Reduction (Bilateral Filter on Luminance)
-    // Applied before other adjustments to avoid amplifying noise
-    if (params.nr_luminance > 0.0) {
-        var sum_r = 0.0;
-        var sum_g = 0.0;
-        var sum_b = 0.0;
-        var sum_weight = 0.0;
+    // 0. Noise Reduction & Sharpening
+    // We combine NR and Sharpening (USM) in a single neighborhood loop for efficiency
+    let do_nr_lum = params.nr_luminance > 0.0;
+    let do_nr_col = params.nr_color > 0.0;
+    let do_sharpen = params.sharpen_amount > 0.0;
+    
+    if (do_nr_lum || do_nr_col || do_sharpen) {
+        var sum_r_lum = 0.0;
+        var sum_g_lum = 0.0;
+        var sum_b_lum = 0.0;
+        var sum_weight_lum = 0.0;
         
-        // Calculate center luminance (0-1 range from loaded pixel)
-        let center_lum = (pixel.r + pixel.g + pixel.b) / 3.0;
+        var sum_u_col = 0.0;
+        var sum_v_col = 0.0;
+        var sum_weight_col = 0.0;
         
-        let sigma_s = 2.0; // Spatial sigma (fixed spatial weighted window)
-        // Map 0-100 UI range to useful sigma_r range (e.g., 0.0 to 0.2 intensity difference)
-        // If nr_luminance is 100, sigma_r = 0.1?
-        // Let's try 0.2 at max.
-        let sigma_r = params.nr_luminance * 0.002; 
+        var sum_y_sharpen = 0.0;
+        var sum_weight_sharpen = 0.0;
+        
+        // Calculate center luminance and YUV
+        let center_y = 0.299 * r + 0.587 * g + 0.114 * b;
+        let center_lum_norm = center_y / 255.0; 
+        
+        // Params
+        let sigma_s = 2.0; // NR Spatial
+        let sigma_r = max(params.nr_luminance * 0.002, 0.0001); // NR Range
+        let sigma_color = max(params.nr_color * 0.05, 0.1); // Color NR
+        let sigma_sharpen = max(params.sharpen_radius, 0.5); // Sharpen Radius
         
         // 5x5 Kernel
         for (var dy: i32 = -2; dy <= 2; dy++) {
@@ -74,39 +89,85 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 let nx = i32(global_id.x) + dx;
                 let ny = i32(global_id.y) + dy;
                 
-                // Bounds check
                 if (nx >= 0 && ny >= 0 && nx < i32(dims.x) && ny < i32(dims.y)) {
                     let neighbor = textureLoad(input_texture, vec2<i32>(nx, ny), 0);
-                    let neighbor_lum = (neighbor.r + neighbor.g + neighbor.b) / 3.0;
+                    let nr = neighbor.r * 255.0;
+                    let ng = neighbor.g * 255.0;
+                    let nb = neighbor.b * 255.0;
                     
-                    let diff = center_lum - neighbor_lum;
                     let dist_sq = f32(dx*dx + dy*dy);
+                    let n_lum = (0.299 * nr + 0.587 * ng + 0.114 * nb) / 255.0;
                     
-                    let weight = exp(-dist_sq / (2.0 * sigma_s * sigma_s)) * 
-                                 exp(-(diff * diff) / (2.0 * sigma_r * sigma_r + 0.00001));
-                                 
-                    sum_r += neighbor.r * weight;
-                    sum_g += neighbor.g * weight;
-                    sum_b += neighbor.b * weight;
-                    sum_weight += weight;
+                    // --- Luminance NR (Bilateral) ---
+                    if (do_nr_lum) {
+                        let diff = center_lum_norm - n_lum;
+                        let weight = exp(-dist_sq / (2.0 * sigma_s * sigma_s)) * 
+                                     exp(-(diff * diff) / (2.0 * sigma_r * sigma_r));
+                        sum_r_lum += nr * weight;
+                        sum_g_lum += ng * weight;
+                        sum_b_lum += nb * weight;
+                        sum_weight_lum += weight;
+                    }
+                    
+                    // --- Color NR (Gaussian on U/V) ---
+                    if (do_nr_col) {
+                         let nu = -0.147 * nr - 0.289 * ng + 0.436 * nb;
+                         let nv = 0.615 * nr - 0.515 * ng - 0.100 * nb;
+                         let weight = exp(-dist_sq / (2.0 * sigma_color * sigma_color));
+                         sum_u_col += nu * weight;
+                         sum_v_col += nv * weight;
+                         sum_weight_col += weight;
+                    }
+                    
+                    // --- Sharpening (Gaussian on Y) ---
+                    if (do_sharpen) {
+                        // Gaussian blur for USM
+                        let weight = exp(-dist_sq / (2.0 * sigma_sharpen * sigma_sharpen));
+                        let ny_val = 0.299 * nr + 0.587 * ng + 0.114 * nb;
+                        sum_y_sharpen += ny_val * weight;
+                        sum_weight_sharpen += weight;
+                    }
                 }
             }
         }
         
-        if (sum_weight > 0.0) {
-            r = (sum_r / sum_weight) * 255.0;
-            g = (sum_g / sum_weight) * 255.0;
-            b = (sum_b / sum_weight) * 255.0;
-        } else {
-             // Fallback to original
-             r = pixel.r * 255.0;
-             g = pixel.g * 255.0;
-             b = pixel.b * 255.0;
+        // --- Recombine NR Results ---
+        var final_y = center_y;
+        
+        if (do_nr_lum && sum_weight_lum > 0.0) {
+            let fr = sum_r_lum / sum_weight_lum;
+            let fg = sum_g_lum / sum_weight_lum;
+            let fb = sum_b_lum / sum_weight_lum;
+            final_y = 0.299 * fr + 0.587 * fg + 0.114 * fb;
         }
-    } else {
-        r = pixel.r * 255.0;
-        g = pixel.g * 255.0;
-        b = pixel.b * 255.0;
+        
+        var final_u = -0.147 * r - 0.289 * g + 0.436 * b;
+        var final_v = 0.615 * r - 0.515 * g - 0.100 * b;
+        
+        if (do_nr_col && sum_weight_col > 0.0) {
+            final_u = sum_u_col / sum_weight_col;
+            final_v = sum_v_col / sum_weight_col;
+        }
+        
+        // Apply NR changes to r,g,b
+        if (do_nr_lum || do_nr_col) {
+            r = final_y + 1.140 * final_v;
+            g = final_y - 0.395 * final_u - 0.581 * final_v;
+            b = final_y + 2.032 * final_u;
+        }
+        
+        // --- Apply Sharpening (USM) ---
+        if (do_sharpen && sum_weight_sharpen > 0.0) {
+            let blurred_y = sum_y_sharpen / sum_weight_sharpen;
+            let detail = final_y - blurred_y;
+            let amount = params.sharpen_amount * 0.05; // Scale 0-100 to approx 0-5
+            
+            // Add detail back to RGB channels
+            r += detail * amount;
+            g += detail * amount;
+            b += detail * amount;
+        }
+        
     }
     if (params.exposure != 0.0) {
         let factor = pow(2.0, params.exposure);

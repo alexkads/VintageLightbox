@@ -30,14 +30,50 @@ impl ImageExporterImpl {
         saturation: f32,
         nr_luminance: f32,
         nr_color: f32,
+        sharpen_amount: f32,
+        sharpen_radius: f32,
     ) -> DynamicImage {
-        // 0. Noise Reduction (Simple Blur Approximation for CPU)
-        let img_to_process = if nr_luminance > 0.0 {
+        // 0. Noise Reduction
+        // 0.1 Luminance NR (Simple partial blur)
+        let img_luminance_filtered = if nr_luminance > 0.0 {
             // Map 0-100 range to sigma 0.0 - 2.0
             let sigma = nr_luminance * 0.02; 
             img.blur(sigma)
         } else {
             img.clone()
+        };
+
+        // 0.2 Color NR (Blur then Restore Luminance)
+        let img_to_process = if nr_color > 0.0 {
+             let sigma = nr_color * 0.05; // 0-100 -> 0-5.0 sigma
+             let blurred = img_luminance_filtered.blur(sigma);
+             
+             let mut recombined = img_luminance_filtered.to_rgba8();
+             let blurred_rgba = blurred.to_rgba8();
+             let (width, height) = recombined.dimensions();
+             
+             for y in 0..height {
+                 for x in 0..width {
+                     let orig = recombined.get_pixel(x, y);
+                     let blur = blurred_rgba.get_pixel(x, y);
+                     
+                     let y_orig = 0.299 * orig[0] as f32 + 0.587 * orig[1] as f32 + 0.114 * orig[2] as f32;
+                     let y_blur = 0.299 * blur[0] as f32 + 0.587 * blur[1] as f32 + 0.114 * blur[2] as f32;
+                     
+                     if y_blur > 0.001 {
+                         let ratio = y_orig / y_blur;
+                         let r = (blur[0] as f32 * ratio).clamp(0.0, 255.0) as u8;
+                         let g = (blur[1] as f32 * ratio).clamp(0.0, 255.0) as u8;
+                         let b = (blur[2] as f32 * ratio).clamp(0.0, 255.0) as u8;
+                         recombined.put_pixel(x, y, Rgba([r, g, b, orig[3]]));
+                     } else {
+                         recombined.put_pixel(x, y, *orig);
+                     }
+                 }
+             }
+             DynamicImage::ImageRgba8(recombined)
+        } else {
+             img_luminance_filtered
         };
 
         let mut result = img_to_process.to_rgba8();
@@ -170,7 +206,19 @@ impl ImageExporterImpl {
             }
         }
 
-        DynamicImage::ImageRgba8(result)
+        let final_image = if sharpen_amount > 0.0 {
+            // Apply unsharp mask logic
+            // image::imageops::unsharpen takes (image, sigma, amount)
+            // Amount in image crate is i32? Let's check or cast. 
+            // Actually image crate unsharpen signature: (image, sigma, amount) where amount is i32
+            // But typical amount is small integer? 
+            // Let's assume input 0-100 maps to something reasonable.
+            image::imageops::unsharpen(&result, sharpen_radius, sharpen_amount as i32)
+        } else {
+            result
+        };
+
+        DynamicImage::ImageRgba8(final_image)
     }
 }
 
@@ -197,13 +245,16 @@ impl ImageExporter for ImageExporterImpl {
         let saturation = photo.edit_saturation().unwrap_or(0.0);
         let nr_luminance = photo.edit_nr_luminance().unwrap_or(0.0);
         let nr_color = photo.edit_nr_color().unwrap_or(0.0);
+        let sharpen_amount = photo.edit_sharpen_amount().unwrap_or(0.0);
+        let sharpen_radius = photo.edit_sharpen_radius().unwrap_or(1.0);
 
-        // Apply all 11 adjustments
+        // Apply all adjustments
         let processed = Self::process_image(
             &img, exposure, contrast, temperature, tint,
             highlights, shadows, whites, blacks,
             clarity, vibrance, saturation,
-            nr_luminance, nr_color
+            nr_luminance, nr_color,
+            sharpen_amount, sharpen_radius
         );
 
         // Save as JPEG with quality 90

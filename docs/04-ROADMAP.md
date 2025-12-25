@@ -23,13 +23,19 @@ Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Ar
 
 ### Conquistas Recentes
 
-- ✅ **LUMINANCE NOISE REDUCTION (25/dez/2025)** 📉
-  - **Bilateral Filter (GPU)**: Aceleração por hardware (WGSL) para redução de ruído.
-  - **Preservação de Bordas**: Algoritmo bilateral que suaviza áreas planas mantendo detalhes.
-  - **UI Integrada**: Sliders de Luminance e Color NR no painel "Detail".
-  - **Fallback CPU**: Implementação visual (Smart Blur) para exportação via CPU.
-  - **Integração Completa**: Undo/Redo, Reset e Persistência no banco de dados.
-  - **Status**: ✅ **Luminância COMPLETO** (Cor NR partially implemented in UI/DB)
+- ✅ **NOISE REDUCTION COMPLETE (25/dez/2025)** 📉
+  - **Luminance NR**: Bilateral Filter (GPU) + Smart Blur (CPU)
+  - **Color NR**: Gaussian Blur on UV channels (GPU) + Blur & Restore Luminance (CPU)
+  - **UI Integrada**: Sliders independentes para Luminance e Color no painel Detail
+  - **Single-Pass Shader**: Otimização crítica combinando filtros Luma/Chroma em um único loop 5x5
+  - **Status**: ✅ **100% COMPLETO**
+
+- ✅ **SHARPENING COMPLETE (25/dez/2025)** 🔪
+  - **Unsharp Mask (USM)**: Implementado no shader GPU e CPU fallback
+  - **Parâmetros**: Amount (0-100) e Radius (0.5-3.0)
+  - **Integração**: Single-pass combinado com Noise Reduction no shader 5x5
+  - **Testes**: Todos passando (domain, use-cases, infrastructure)
+  - **Status**: ✅ **100% COMPLETO**
 
 
 - ✅ **THEME & SELECTION UX FIXES (24/dez/2025)** 🎨
@@ -792,13 +798,15 @@ import_controller.import_with_options(files, options, tx, pause, cancel).await?;
 - [x] ✅ **Tone Curve UI** (25/dez/2025) - Sliders para controle das 4 zonas no Develop View
 - [ ] **Point Curve** - Curva com múltiplos pontos de controle (complexo)
 - [ ] **HSL/Color** - Ajustes por canal de cor (8 canais: Red, Orange, Yellow, Green, Aqua, Blue, Purple, Magenta)
-- [x] ✅ **Redução de Ruído** (25/dez/2025) - Luminance Noise Reduction funcional:
-  - GPU: Bilateral Filter implementado em WGSL
-  - CPU: Smart Blur approximation para export
-  - UI: Sliders adicionados no Develop View
-  - Undo/Redo: Integrado no sistema de snapshot
-- [ ] **Color Noise Reduction** - Ajuste de crominância (U/V channels)
-- [ ] **Nitidez** - Sharpening com Amount, Radius, Detail, Masking
+- [x] ✅ **Redução de Ruído** (25/dez/2025) - 100% Funcional (Luma + Chroma):
+  - **Luminance**: Bilateral Filter (preserva bordas)
+  - **Color**: Gaussian Blur em canais UV (remove manchas coloridas)
+  - **GPU**: Implementação otimizada em WGSL (single pass)
+  - **CPU**: Fallback implementado para exportação
+- [x] ✅ **Nitidez** (25/dez/2025) - 100% Funcional:
+  - **Unsharp Mask (USM)**: Implementado no shader (GPU) e CPU (export).
+  - **Controles**: Amount (0-100) e Radius (0.5-3.0) na UI.
+  - **Otimização**: Integrado ao loop 5x5 de redução de ruído no shader.
 
 ### 2.3 Presets ✅ BACKEND COMPLETO (23/dez/2025)
 - [x] ✅ **Domain Layer**: `Preset`, `PresetAdjustments`, `PresetId` entities

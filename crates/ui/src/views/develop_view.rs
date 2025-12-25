@@ -533,6 +533,28 @@ impl DevelopView {
             any_slider_changed = true;
         }
 
+        ui.add_space(Theme::SPACE_SM);
+
+        if SliderControl::show(
+            ui,
+            "Sharpen Amount",
+            &mut state.active_sharpen_amount,
+            0.0..=100.0,
+            1.0,
+        ) {
+            any_slider_changed = true;
+        }
+
+        if SliderControl::show(
+            ui,
+            "Sharpen Radius",
+            &mut state.active_sharpen_radius,
+            0.5..=3.0,
+            0.1,
+        ) {
+            any_slider_changed = true;
+        }
+
         ui.add_space(Theme::SPACE_XXL);
 
         // Reset button

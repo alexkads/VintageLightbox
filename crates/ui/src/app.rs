@@ -71,6 +71,9 @@ pub struct VintageLightboxApp {
     filmstrip: Filmstrip,
     library_dock_state: egui_dock::DockState<crate::docking::DockTab>,
     develop_dock_state: egui_dock::DockState<crate::docking::DockTab>,
+    
+    /// Flag to trigger initial photo load on first frame
+    needs_initial_load: bool,
 }
 
 impl VintageLightboxApp {
@@ -131,6 +134,7 @@ impl VintageLightboxApp {
                 .and_then(|s| eframe::get_value(s, "develop_dock_state"))
                 .unwrap_or_else(crate::docking::create_develop_layout),
             preview_manager,
+            needs_initial_load: true,
         }
     }
 
@@ -175,6 +179,13 @@ impl eframe::App for VintageLightboxApp {
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Trigger initial photo and preset loading on first frame
+        if self.needs_initial_load {
+            self.needs_initial_load = false;
+            self.load_photos(ctx);
+            self.load_presets(ctx);
+        }
+
         // Poll for async photo loading results
         if let Ok(result) = self.photo_receiver.try_recv() {
             match result {
@@ -587,6 +598,9 @@ impl eframe::App for VintageLightboxApp {
                                     // NR
                                     nr_luminance: self.state.active_nr_luminance,
                                     nr_color: self.state.active_nr_color,
+                                    // Sharpening
+                                    sharpen_amount: self.state.active_sharpen_amount,
+                                    sharpen_radius: self.state.active_sharpen_radius,
                                 },
                             });
 
@@ -670,9 +684,12 @@ impl eframe::App for VintageLightboxApp {
                             let hsl_purple_sat = self.state.active_hsl_purple_sat;
                             let hsl_magenta_sat = self.state.active_hsl_magenta_sat;
 
-                            // Noise Reduction (placeholder)
-                            let nr_luminance = 0.0;
-                            let nr_color = 0.0;
+                            // Noise Reduction from state
+                            let nr_luminance = self.state.active_nr_luminance;
+                            let nr_color = self.state.active_nr_color;
+                            // Sharpening from state
+                            let sharpen_amount = self.state.active_sharpen_amount;
+                            let sharpen_radius = self.state.active_sharpen_radius;
 
                             // Update saved values BEFORE spawning
                             self.state.saved_exposure = exposure;
@@ -729,7 +746,8 @@ impl eframe::App for VintageLightboxApp {
                                     tone_curve_shadows, tone_curve_darks, tone_curve_lights, tone_curve_highlights,
                                     hsl_red_sat, hsl_orange_sat, hsl_yellow_sat, hsl_green_sat,
                                     hsl_aqua_sat, hsl_blue_sat, hsl_purple_sat, hsl_magenta_sat,
-                                    nr_luminance, nr_color
+                                    nr_luminance, nr_color,
+                                    sharpen_amount, sharpen_radius
                                 ).await {
                                     // Note: Toast will be shown in the next frame via state
                                     eprintln!("Auto-save failed: {}", e);

@@ -41,6 +41,9 @@ pub struct GpuEditParams {
     // Noise Reduction
     pub nr_luminance: f32,
     pub nr_color: f32,
+    // Sharpening
+    pub sharpen_amount: f32,
+    pub sharpen_radius: f32,
 }
 
 impl Default for GpuEditParams {
@@ -71,6 +74,8 @@ impl Default for GpuEditParams {
             hsl_magenta_sat: 0.0,
             nr_luminance: 0.0,
             nr_color: 0.0,
+            sharpen_amount: 0.0,
+            sharpen_radius: 1.0,
         }
     }
 }

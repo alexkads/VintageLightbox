@@ -46,6 +46,9 @@ pub struct EditSnapshot {
     // Noise Reduction
     pub nr_luminance: f32,
     pub nr_color: f32,
+    // Sharpening
+    pub sharpen_amount: f32,
+    pub sharpen_radius: f32,
 }
 
 /// Current view in the application
@@ -160,6 +163,9 @@ pub struct AppState {
     // Noise Reduction (Amount 0-100)
     pub active_nr_luminance: f32,
     pub active_nr_color: f32,
+    // Sharpening
+    pub active_sharpen_amount: f32,
+    pub active_sharpen_radius: f32,
     /// Previous exposure value (for change detection)
     pub prev_exposure: f32,
     /// Previous contrast value (for change detection)
@@ -202,6 +208,9 @@ pub struct AppState {
     // Previous NR (for change detection)
     pub prev_nr_luminance: f32,
     pub prev_nr_color: f32,
+    // Previous Sharpening
+    pub prev_sharpen_amount: f32,
+    pub prev_sharpen_radius: f32,
     /// Original unprocessed preview image
     pub original_preview: Option<DynamicImage>,
     /// Cached raw image data for GPU processing (Arc to avoid cloning)
@@ -282,6 +291,9 @@ pub struct AppState {
     pub saved_hsl_blue_sat: f32,
     pub saved_hsl_purple_sat: f32,
     pub saved_hsl_magenta_sat: f32,
+    // Sharpening
+    pub saved_sharpen_amount: f32,
+    pub saved_sharpen_radius: f32,
 
     // ============================================
     // Folder Navigation
@@ -409,6 +421,9 @@ impl AppState {
             // NR
             active_nr_luminance: 0.0,
             active_nr_color: 0.0,
+            // Sharpening
+            active_sharpen_amount: 0.0,
+            active_sharpen_radius: 1.0,
             prev_exposure: 0.0,
             prev_contrast: 1.0,
             prev_temperature: 0.0,
@@ -436,6 +451,9 @@ impl AppState {
             // NR prev
             prev_nr_luminance: 0.0,
             prev_nr_color: 0.0,
+            // Sharpening prev
+            prev_sharpen_amount: 0.0,
+            prev_sharpen_radius: 1.0,
             original_preview: None,
             original_image_data: None,
             zoom_level: 1.0,
@@ -475,6 +493,9 @@ impl AppState {
             saved_hsl_blue_sat: 0.0,
             saved_hsl_purple_sat: 0.0,
             saved_hsl_magenta_sat: 0.0,
+            // Sharpening saved values
+            saved_sharpen_amount: 0.0,
+            saved_sharpen_radius: 1.0,
             folder_tree_roots: Vec::new(),
             expanded_folders: HashSet::new(),
             import_preview_dialog: None,
@@ -578,6 +599,8 @@ impl AppState {
         self.active_hsl_magenta_sat = 0.0;
         self.active_nr_luminance = 0.0;
         self.active_nr_color = 0.0;
+        self.active_sharpen_amount = 0.0;
+        self.active_sharpen_radius = 1.0;
     }
 
     /// Check if we have any photos loaded
@@ -620,6 +643,8 @@ impl AppState {
             hsl_magenta_sat: self.active_hsl_magenta_sat,
             nr_luminance: self.active_nr_luminance,
             nr_color: self.active_nr_color,
+            sharpen_amount: self.active_sharpen_amount,
+            sharpen_radius: self.active_sharpen_radius,
         };
 
         // If we're not at the end of history, truncate everything after current position

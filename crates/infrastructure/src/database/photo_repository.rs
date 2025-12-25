@@ -79,6 +79,9 @@ impl PhotoRepositoryImpl {
         // Noise Reduction fields
         let edit_nr_luminance: Option<f32> = row.try_get::<Option<f32>, _>("edit_nr_luminance").unwrap_or(None);
         let edit_nr_color: Option<f32> = row.try_get::<Option<f32>, _>("edit_nr_color").unwrap_or(None);
+        // Sharpening fields
+        let edit_sharpen_amount: Option<f32> = row.try_get::<Option<f32>, _>("edit_sharpen_amount").unwrap_or(None);
+        let edit_sharpen_radius: Option<f32> = row.try_get::<Option<f32>, _>("edit_sharpen_radius").unwrap_or(None);
 
 
         // Metadata persistido como JSON string
@@ -144,6 +147,8 @@ impl PhotoRepositoryImpl {
             edit_hsl_magenta_sat,
             edit_nr_luminance,
             edit_nr_color,
+            edit_sharpen_amount,
+            edit_sharpen_radius,
         ))
     }
 }
@@ -189,14 +194,16 @@ impl PhotoRepository for PhotoRepositoryImpl {
         // Noise Reduction fields
         let edit_nr_luminance = photo.edit_nr_luminance();
         let edit_nr_color = photo.edit_nr_color();
+        let edit_sharpen_amount = photo.edit_sharpen_amount();
+        let edit_sharpen_radius = photo.edit_sharpen_radius();
 
         // Serializar metadata para JSON
         let metadata = photo.metadata()
             .and_then(|m| serde_json::to_string(m).ok());
 
         sqlx::query(
-            "INSERT INTO photos (id, file_path, rating, color_label, flag, is_edited, imported_at, modified_at, metadata, thumbnail_path, preview_path, edit_exposure, edit_contrast, edit_temperature, edit_tint, edit_highlights, edit_shadows, edit_whites, edit_blacks, edit_clarity, edit_vibrance, edit_saturation, edit_tone_curve_shadows, edit_tone_curve_darks, edit_tone_curve_lights, edit_tone_curve_highlights, content_hash, edit_hsl_red_sat, edit_hsl_orange_sat, edit_hsl_yellow_sat, edit_hsl_green_sat, edit_hsl_aqua_sat, edit_hsl_blue_sat, edit_hsl_purple_sat, edit_hsl_magenta_sat, edit_nr_luminance, edit_nr_color)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO photos (id, file_path, rating, color_label, flag, is_edited, imported_at, modified_at, metadata, thumbnail_path, preview_path, edit_exposure, edit_contrast, edit_temperature, edit_tint, edit_highlights, edit_shadows, edit_whites, edit_blacks, edit_clarity, edit_vibrance, edit_saturation, edit_tone_curve_shadows, edit_tone_curve_darks, edit_tone_curve_lights, edit_tone_curve_highlights, content_hash, edit_hsl_red_sat, edit_hsl_orange_sat, edit_hsl_yellow_sat, edit_hsl_green_sat, edit_hsl_aqua_sat, edit_hsl_blue_sat, edit_hsl_purple_sat, edit_hsl_magenta_sat, edit_nr_luminance, edit_nr_color, edit_sharpen_amount, edit_sharpen_radius)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         .bind(&id)
         .bind(&file_path)
@@ -235,6 +242,8 @@ impl PhotoRepository for PhotoRepositoryImpl {
         .bind(edit_hsl_magenta_sat)
         .bind(edit_nr_luminance)
         .bind(edit_nr_color)
+        .bind(edit_sharpen_amount)
+        .bind(edit_sharpen_radius)
         .execute(&self.pool)
         .await
         .map_err(|e| DomainError::InvalidOperation(format!("Failed to save photo: {}", e)))?;
@@ -306,6 +315,9 @@ impl PhotoRepository for PhotoRepositoryImpl {
         // Noise Reduction fields
         let edit_nr_luminance = photo.edit_nr_luminance();
         let edit_nr_color = photo.edit_nr_color();
+        // Sharpening fields
+        let edit_sharpen_amount = photo.edit_sharpen_amount();
+        let edit_sharpen_radius = photo.edit_sharpen_radius();
 
         // Serializar metadata para JSON
         let metadata = photo.metadata()
@@ -313,7 +325,7 @@ impl PhotoRepository for PhotoRepositoryImpl {
 
         let result = sqlx::query(
             "UPDATE photos
-             SET file_path = ?, rating = ?, color_label = ?, flag = ?, is_edited = ?, modified_at = ?, metadata = ?, thumbnail_path = ?, preview_path = ?, edit_exposure = ?, edit_contrast = ?, edit_temperature = ?, edit_tint = ?, edit_highlights = ?, edit_shadows = ?, edit_whites = ?, edit_blacks = ?, edit_clarity = ?, edit_vibrance = ?, edit_saturation = ?, edit_tone_curve_shadows = ?, edit_tone_curve_darks = ?, edit_tone_curve_lights = ?, edit_tone_curve_highlights = ?, content_hash = ?, edit_hsl_red_sat = ?, edit_hsl_orange_sat = ?, edit_hsl_yellow_sat = ?, edit_hsl_green_sat = ?, edit_hsl_aqua_sat = ?, edit_hsl_blue_sat = ?, edit_hsl_purple_sat = ?, edit_hsl_magenta_sat = ?, edit_nr_luminance = ?, edit_nr_color = ?
+             SET file_path = ?, rating = ?, color_label = ?, flag = ?, is_edited = ?, modified_at = ?, metadata = ?, thumbnail_path = ?, preview_path = ?, edit_exposure = ?, edit_contrast = ?, edit_temperature = ?, edit_tint = ?, edit_highlights = ?, edit_shadows = ?, edit_whites = ?, edit_blacks = ?, edit_clarity = ?, edit_vibrance = ?, edit_saturation = ?, edit_tone_curve_shadows = ?, edit_tone_curve_darks = ?, edit_tone_curve_lights = ?, edit_tone_curve_highlights = ?, content_hash = ?, edit_hsl_red_sat = ?, edit_hsl_orange_sat = ?, edit_hsl_yellow_sat = ?, edit_hsl_green_sat = ?, edit_hsl_aqua_sat = ?, edit_hsl_blue_sat = ?, edit_hsl_purple_sat = ?, edit_hsl_magenta_sat = ?, edit_nr_luminance = ?, edit_nr_color = ?, edit_sharpen_amount = ?, edit_sharpen_radius = ?
              WHERE id = ?"
         )
         .bind(&file_path)
@@ -351,6 +363,8 @@ impl PhotoRepository for PhotoRepositoryImpl {
         .bind(edit_hsl_magenta_sat)
         .bind(edit_nr_luminance)
         .bind(edit_nr_color)
+        .bind(edit_sharpen_amount)
+        .bind(edit_sharpen_radius)
         .bind(&id)
         .execute(&self.pool)
         .await

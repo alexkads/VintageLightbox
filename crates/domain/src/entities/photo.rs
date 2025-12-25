@@ -88,6 +88,10 @@ pub struct Photo {
     edit_nr_luminance: Option<f32>,
     /// Noise reduction: Color (0 to 100)
     edit_nr_color: Option<f32>,
+    /// Sharpening: Amount (0.0 to 100.0)
+    edit_sharpen_amount: Option<f32>,
+    /// Sharpening: Radius (0.5 to 3.0)
+    edit_sharpen_radius: Option<f32>,
 }
 
 impl Photo {
@@ -135,6 +139,8 @@ impl Photo {
         edit_hsl_magenta_sat: Option<f32>,
         edit_nr_luminance: Option<f32>,
         edit_nr_color: Option<f32>,
+        edit_sharpen_amount: Option<f32>,
+        edit_sharpen_radius: Option<f32>,
     ) -> Self {
         Self {
             id,
@@ -174,6 +180,8 @@ impl Photo {
             edit_hsl_magenta_sat,
             edit_nr_luminance,
             edit_nr_color,
+            edit_sharpen_amount,
+            edit_sharpen_radius,
         }
     }
 
@@ -185,7 +193,8 @@ impl Photo {
             None, None, None, None, None, None, None, None, None, None, None,
             None, None, None, None, None,
             None, None, None, None, None, None, None, None, // HSL (8 fields)
-            None, None // NR (2 fields)
+            None, None, // NR (2 fields)
+            None, None, // Sharpening (2 fields)
         )
     }
 
@@ -425,6 +434,8 @@ impl Photo {
         hsl_magenta_sat: Option<f32>,
         nr_luminance: Option<f32>,
         nr_color: Option<f32>,
+        sharpen_amount: Option<f32>,
+        sharpen_radius: Option<f32>,
     ) -> DomainResult<()> {
         self.edit_exposure = exposure;
         self.edit_contrast = contrast;
@@ -451,6 +462,8 @@ impl Photo {
         self.edit_hsl_magenta_sat = hsl_magenta_sat;
         self.edit_nr_luminance = nr_luminance;
         self.edit_nr_color = nr_color;
+        self.edit_sharpen_amount = sharpen_amount;
+        self.edit_sharpen_radius = sharpen_radius;
         self.is_edited = true;
         self.modified_at = Utc::now();
         Ok(())
@@ -524,6 +537,16 @@ impl Photo {
     /// Retorna o campo edit_nr_color
     pub fn edit_nr_color(&self) -> Option<f32> {
         self.edit_nr_color
+    }
+
+    /// Retorna o campo edit_sharpen_amount
+    pub fn edit_sharpen_amount(&self) -> Option<f32> {
+        self.edit_sharpen_amount
+    }
+
+    /// Retorna o campo edit_sharpen_radius
+    pub fn edit_sharpen_radius(&self) -> Option<f32> {
+        self.edit_sharpen_radius
     }
 
 
@@ -763,14 +786,16 @@ mod tests {
             None, None, None, None, None, None, None, None, None, None, None,
             None, None, None, None, None,
             None, None, None, None, None, None, None, None, // HSL (8 fields)
-            None, None // NR
+            None, None, // NR
+            None, None  // Sharpening
         );
         let photo2 = Photo::reconstruct(
             id, path, now, now, None, None, None, None, false, None, None,
             None, None, None, None, None, None, None, None, None, None, None,
             None, None, None, None, None,
             None, None, None, None, None, None, None, None, // HSL (8 fields)
-            None, None // NR
+            None, None, // NR
+            None, None  // Sharpening
         );
 
         // Assert
@@ -790,7 +815,8 @@ mod tests {
             Some(1.5), Some(1.2), None, None, None, None, None, None, None, None, None,
             None, None, None, None,
             None, None, None, None, None, None, None, None, // HSL
-            None, None // NR
+            None, None, // NR
+            None, None  // Sharpening
         ).unwrap();
 
         assert_eq!(photo.edit_exposure(), Some(1.5));
@@ -839,7 +865,8 @@ mod tests {
             None, None, None, None, None, None, None, None, None, None, None,
             Some(-50.0), Some(-25.0), Some(25.0), Some(50.0),
             None, None, None, None, None, None, None, None, // HSL
-            None, None // NR
+            None, None, // NR
+            None, None  // Sharpening
         ).unwrap();
 
         // Assert
@@ -860,7 +887,8 @@ mod tests {
             None, None, None, None, None, None, None, None, None, None, None,
             Some(-100.0), Some(-50.0), Some(50.0), Some(100.0),
             None, None, None, None, None, None, None, None, // HSL
-            None, None // NR
+            None, None, // NR
+            None, None  // Sharpening
         ).unwrap();
 
         // Assert
@@ -882,7 +910,8 @@ mod tests {
             Some(0.3), Some(0.2), Some(0.1),
             Some(-30.0), Some(-10.0), Some(10.0), Some(30.0),
             None, None, None, None, None, None, None, None, // HSL
-            None, None // NR
+            None, None, // NR
+            None, None  // Sharpening
         ).unwrap();
 
         // Assert - All fields should be set
@@ -908,7 +937,8 @@ mod tests {
             Some(1.0), Some(1.0), None, None, None, None, None, None, None, None, None,
             Some(-40.0), Some(-20.0), Some(20.0), Some(40.0), None,
             None, None, None, None, None, None, None, None, // HSL
-            None, None // NR
+            None, None, // NR
+            None, None  // Sharpening
         );
 
         // Assert

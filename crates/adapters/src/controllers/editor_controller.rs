@@ -39,6 +39,8 @@ impl EditorController {
         hsl_magenta_sat: f32,
         nr_luminance: f32,
         nr_color: f32,
+        sharpen_amount: f32,
+        sharpen_radius: f32,
     ) -> Result<(), String> {
         let photo_id = PhotoId::from_string(&id).map_err(|e| e.to_string())?;
 
@@ -48,7 +50,8 @@ impl EditorController {
             tone_curve_shadows, tone_curve_darks, tone_curve_lights, tone_curve_highlights,
             hsl_red_sat, hsl_orange_sat, hsl_yellow_sat, hsl_green_sat,
             hsl_aqua_sat, hsl_blue_sat, hsl_purple_sat, hsl_magenta_sat,
-            nr_luminance, nr_color
+            nr_luminance, nr_color,
+            sharpen_amount, sharpen_radius
         ).await
             .map_err(|e| e.to_string())
     }
