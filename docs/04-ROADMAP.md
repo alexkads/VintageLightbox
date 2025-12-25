@@ -727,12 +727,20 @@ Criar versão mínima funcional com importação, visualização, edição bási
 - ✅ UI Components 70% (Dialogs estruturados: import_dialogs.rs criado)
 
 **Pendente para v1 UI completo**:
-- [ ] UI Integration: Conectar dialogs ao app state (app.rs)
-- [ ] UI Integration: Adicionar botão "Advanced Import" no LibraryView
-- [ ] UI Integration: Instanciar use cases no app initialization
+- [x] UI Integration: Conectar dialogs ao app state (app.rs) ✅
+- [x] UI Integration: Adicionar botão "Advanced Import" no LibraryView ✅
+- [x] UI Integration: Instanciar use cases no app initialization ✅
 - [ ] UI Polish: Thumbnails reais nos previews (atualmente texto placeholder)
 - [ ] UI Polish: Resolver borrow checker issues nos dialogs
 - [ ] Testes E2E: Fluxo completo end-to-end com UI
+
+**Status de Progresso Adicional (25/dez/2025)**:
+- ✅ **Import View UI Shell**:
+  - `ImportView` struct criada e integrada no `CurrentView`.
+  - Layout básico definido (Sources, Grid, Options).
+  - Integração com `ImportController` via `tokio::mpsc` channels para carregamento assíncrono de dispositivos.
+  - Navegação entre Library e Import View funcional.
+  - Correção de erros de compilação no setup de dependências em `main.rs`.
 
 **Arquivos Criados**:
 - `crates/domain/src/value_objects/import_options.rs` (5 testes)
