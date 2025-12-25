@@ -642,6 +642,19 @@ impl eframe::App for VintageLightboxApp {
                             let clarity = self.state.active_clarity;
                             let vibrance = self.state.active_vibrance;
                             let saturation = self.state.active_saturation;
+                            let tone_curve_shadows = self.state.active_tone_curve_shadows;
+                            let tone_curve_darks = self.state.active_tone_curve_darks;
+                            let tone_curve_lights = self.state.active_tone_curve_lights;
+                            let tone_curve_highlights = self.state.active_tone_curve_highlights;
+                            // HSL saturation values (all 0.0 for now until HSL state is added)
+                            let hsl_red_sat = 0.0;
+                            let hsl_orange_sat = 0.0;
+                            let hsl_yellow_sat = 0.0;
+                            let hsl_green_sat = 0.0;
+                            let hsl_aqua_sat = 0.0;
+                            let hsl_blue_sat = 0.0;
+                            let hsl_purple_sat = 0.0;
+                            let hsl_magenta_sat = 0.0;
 
                             // Update saved values BEFORE spawning
                             self.state.saved_exposure = exposure;
@@ -686,7 +699,9 @@ impl eframe::App for VintageLightboxApp {
                                 if let Err(e) = controller.save_edits(
                                     id, exposure, contrast, temperature, tint, highlights, shadows,
                                     whites, blacks, clarity, vibrance, saturation,
-                                    0.0, 0.0, 0.0, 0.0  // Tone curve (to be implemented in UI)
+                                    tone_curve_shadows, tone_curve_darks, tone_curve_lights, tone_curve_highlights,
+                                    hsl_red_sat, hsl_orange_sat, hsl_yellow_sat, hsl_green_sat,
+                                    hsl_aqua_sat, hsl_blue_sat, hsl_purple_sat, hsl_magenta_sat
                                 ).await {
                                     // Note: Toast will be shown in the next frame via state
                                     eprintln!("Auto-save failed: {}", e);

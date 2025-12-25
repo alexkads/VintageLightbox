@@ -33,6 +33,14 @@ impl SavePhotoEditsUseCase {
         tone_curve_darks: f32,
         tone_curve_lights: f32,
         tone_curve_highlights: f32,
+        hsl_red_sat: f32,
+        hsl_orange_sat: f32,
+        hsl_yellow_sat: f32,
+        hsl_green_sat: f32,
+        hsl_aqua_sat: f32,
+        hsl_blue_sat: f32,
+        hsl_purple_sat: f32,
+        hsl_magenta_sat: f32,
     ) -> DomainResult<()> {
         let mut photo = self.photo_repository.find_by_id(&id).await?
             .ok_or(DomainError::PhotoNotFound)?;
@@ -42,7 +50,10 @@ impl SavePhotoEditsUseCase {
             Some(highlights), Some(shadows), Some(whites), Some(blacks),
             Some(clarity), Some(vibrance), Some(saturation),
             Some(tone_curve_shadows), Some(tone_curve_darks),
-            Some(tone_curve_lights), Some(tone_curve_highlights)
+            Some(tone_curve_lights), Some(tone_curve_highlights),
+            Some(hsl_red_sat), Some(hsl_orange_sat), Some(hsl_yellow_sat),
+            Some(hsl_green_sat), Some(hsl_aqua_sat), Some(hsl_blue_sat),
+            Some(hsl_purple_sat), Some(hsl_magenta_sat)
         )?;
         self.photo_repository.update(&photo).await?;
 
@@ -104,7 +115,8 @@ mod tests {
         let use_case = SavePhotoEditsUseCase::new(Arc::new(mock_repo));
         let result = use_case.execute(
             id, 1.0, 1.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-            -30.0, -10.0, 10.0, 30.0
+            -30.0, -10.0, 10.0, 30.0,
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 // HSL
         ).await;
 
         assert!(result.is_ok());
@@ -123,7 +135,8 @@ mod tests {
         let use_case = SavePhotoEditsUseCase::new(Arc::new(mock_repo));
         let result = use_case.execute(
             id, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-            0.0, 0.0, 0.0, 0.0
+            0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 // HSL
         ).await;
 
         match result {

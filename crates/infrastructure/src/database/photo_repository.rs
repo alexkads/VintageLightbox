@@ -66,7 +66,16 @@ impl PhotoRepositoryImpl {
         let edit_tone_curve_lights: Option<f32> = row.try_get::<Option<f32>, _>("edit_tone_curve_lights").unwrap_or(None);
         let edit_tone_curve_highlights: Option<f32> = row.try_get::<Option<f32>, _>("edit_tone_curve_highlights").unwrap_or(None);
         let content_hash: Option<String> = row.try_get("content_hash").ok();
-
+        
+        // HSL saturation fields
+        let edit_hsl_red_sat: Option<f32> = row.try_get::<Option<f32>, _>("edit_hsl_red_sat").unwrap_or(None);
+        let edit_hsl_orange_sat: Option<f32> = row.try_get::<Option<f32>, _>("edit_hsl_orange_sat").unwrap_or(None);
+        let edit_hsl_yellow_sat: Option<f32> = row.try_get::<Option<f32>, _>("edit_hsl_yellow_sat").unwrap_or(None);
+        let edit_hsl_green_sat: Option<f32> = row.try_get::<Option<f32>, _>("edit_hsl_green_sat").unwrap_or(None);
+        let edit_hsl_aqua_sat: Option<f32> = row.try_get::<Option<f32>, _>("edit_hsl_aqua_sat").unwrap_or(None);
+        let edit_hsl_blue_sat: Option<f32> = row.try_get::<Option<f32>, _>("edit_hsl_blue_sat").unwrap_or(None);
+        let edit_hsl_purple_sat: Option<f32> = row.try_get::<Option<f32>, _>("edit_hsl_purple_sat").unwrap_or(None);
+        let edit_hsl_magenta_sat: Option<f32> = row.try_get::<Option<f32>, _>("edit_hsl_magenta_sat").unwrap_or(None);
 
 
         // Metadata persistido como JSON string
@@ -122,6 +131,14 @@ impl PhotoRepositoryImpl {
             edit_tone_curve_lights,
             edit_tone_curve_highlights,
             content_hash,
+            edit_hsl_red_sat,
+            edit_hsl_orange_sat,
+            edit_hsl_yellow_sat,
+            edit_hsl_green_sat,
+            edit_hsl_aqua_sat,
+            edit_hsl_blue_sat,
+            edit_hsl_purple_sat,
+            edit_hsl_magenta_sat,
         ))
     }
 }
@@ -155,14 +172,23 @@ impl PhotoRepository for PhotoRepositoryImpl {
         let edit_tone_curve_lights = photo.edit_tone_curve_lights();
         let edit_tone_curve_highlights = photo.edit_tone_curve_highlights();
         let content_hash = photo.content_hash().map(|s| s.to_string());
+        // HSL saturation fields
+        let edit_hsl_red_sat = photo.edit_hsl_red_sat();
+        let edit_hsl_orange_sat = photo.edit_hsl_orange_sat();
+        let edit_hsl_yellow_sat = photo.edit_hsl_yellow_sat();
+        let edit_hsl_green_sat = photo.edit_hsl_green_sat();
+        let edit_hsl_aqua_sat = photo.edit_hsl_aqua_sat();
+        let edit_hsl_blue_sat = photo.edit_hsl_blue_sat();
+        let edit_hsl_purple_sat = photo.edit_hsl_purple_sat();
+        let edit_hsl_magenta_sat = photo.edit_hsl_magenta_sat();
 
         // Serializar metadata para JSON
         let metadata = photo.metadata()
             .and_then(|m| serde_json::to_string(m).ok());
 
         sqlx::query(
-            "INSERT INTO photos (id, file_path, rating, color_label, flag, is_edited, imported_at, modified_at, metadata, thumbnail_path, preview_path, edit_exposure, edit_contrast, edit_temperature, edit_tint, edit_highlights, edit_shadows, edit_whites, edit_blacks, edit_clarity, edit_vibrance, edit_saturation, edit_tone_curve_shadows, edit_tone_curve_darks, edit_tone_curve_lights, edit_tone_curve_highlights, content_hash)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO photos (id, file_path, rating, color_label, flag, is_edited, imported_at, modified_at, metadata, thumbnail_path, preview_path, edit_exposure, edit_contrast, edit_temperature, edit_tint, edit_highlights, edit_shadows, edit_whites, edit_blacks, edit_clarity, edit_vibrance, edit_saturation, edit_tone_curve_shadows, edit_tone_curve_darks, edit_tone_curve_lights, edit_tone_curve_highlights, content_hash, edit_hsl_red_sat, edit_hsl_orange_sat, edit_hsl_yellow_sat, edit_hsl_green_sat, edit_hsl_aqua_sat, edit_hsl_blue_sat, edit_hsl_purple_sat, edit_hsl_magenta_sat)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         .bind(&id)
         .bind(&file_path)
@@ -191,6 +217,14 @@ impl PhotoRepository for PhotoRepositoryImpl {
         .bind(edit_tone_curve_lights)
         .bind(edit_tone_curve_highlights)
         .bind(content_hash)
+        .bind(edit_hsl_red_sat)
+        .bind(edit_hsl_orange_sat)
+        .bind(edit_hsl_yellow_sat)
+        .bind(edit_hsl_green_sat)
+        .bind(edit_hsl_aqua_sat)
+        .bind(edit_hsl_blue_sat)
+        .bind(edit_hsl_purple_sat)
+        .bind(edit_hsl_magenta_sat)
         .execute(&self.pool)
         .await
         .map_err(|e| DomainError::InvalidOperation(format!("Failed to save photo: {}", e)))?;
@@ -250,6 +284,15 @@ impl PhotoRepository for PhotoRepositoryImpl {
         let edit_tone_curve_lights = photo.edit_tone_curve_lights();
         let edit_tone_curve_highlights = photo.edit_tone_curve_highlights();
         let content_hash = photo.content_hash().map(|s| s.to_string());
+        // HSL saturation fields
+        let edit_hsl_red_sat = photo.edit_hsl_red_sat();
+        let edit_hsl_orange_sat = photo.edit_hsl_orange_sat();
+        let edit_hsl_yellow_sat = photo.edit_hsl_yellow_sat();
+        let edit_hsl_green_sat = photo.edit_hsl_green_sat();
+        let edit_hsl_aqua_sat = photo.edit_hsl_aqua_sat();
+        let edit_hsl_blue_sat = photo.edit_hsl_blue_sat();
+        let edit_hsl_purple_sat = photo.edit_hsl_purple_sat();
+        let edit_hsl_magenta_sat = photo.edit_hsl_magenta_sat();
 
         // Serializar metadata para JSON
         let metadata = photo.metadata()
@@ -257,7 +300,7 @@ impl PhotoRepository for PhotoRepositoryImpl {
 
         let result = sqlx::query(
             "UPDATE photos
-             SET file_path = ?, rating = ?, color_label = ?, flag = ?, is_edited = ?, modified_at = ?, metadata = ?, thumbnail_path = ?, preview_path = ?, edit_exposure = ?, edit_contrast = ?, edit_temperature = ?, edit_tint = ?, edit_highlights = ?, edit_shadows = ?, edit_whites = ?, edit_blacks = ?, edit_clarity = ?, edit_vibrance = ?, edit_saturation = ?, edit_tone_curve_shadows = ?, edit_tone_curve_darks = ?, edit_tone_curve_lights = ?, edit_tone_curve_highlights = ?, content_hash = ?
+             SET file_path = ?, rating = ?, color_label = ?, flag = ?, is_edited = ?, modified_at = ?, metadata = ?, thumbnail_path = ?, preview_path = ?, edit_exposure = ?, edit_contrast = ?, edit_temperature = ?, edit_tint = ?, edit_highlights = ?, edit_shadows = ?, edit_whites = ?, edit_blacks = ?, edit_clarity = ?, edit_vibrance = ?, edit_saturation = ?, edit_tone_curve_shadows = ?, edit_tone_curve_darks = ?, edit_tone_curve_lights = ?, edit_tone_curve_highlights = ?, content_hash = ?, edit_hsl_red_sat = ?, edit_hsl_orange_sat = ?, edit_hsl_yellow_sat = ?, edit_hsl_green_sat = ?, edit_hsl_aqua_sat = ?, edit_hsl_blue_sat = ?, edit_hsl_purple_sat = ?, edit_hsl_magenta_sat = ?
              WHERE id = ?"
         )
         .bind(&file_path)
@@ -285,6 +328,14 @@ impl PhotoRepository for PhotoRepositoryImpl {
         .bind(edit_tone_curve_lights)
         .bind(edit_tone_curve_highlights)
         .bind(content_hash)
+        .bind(edit_hsl_red_sat)
+        .bind(edit_hsl_orange_sat)
+        .bind(edit_hsl_yellow_sat)
+        .bind(edit_hsl_green_sat)
+        .bind(edit_hsl_aqua_sat)
+        .bind(edit_hsl_blue_sat)
+        .bind(edit_hsl_purple_sat)
+        .bind(edit_hsl_magenta_sat)
         .bind(&id)
         .execute(&self.pool)
         .await

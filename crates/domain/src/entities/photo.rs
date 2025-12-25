@@ -121,6 +121,14 @@ impl Photo {
         edit_tone_curve_lights: Option<f32>,
         edit_tone_curve_highlights: Option<f32>,
         content_hash: Option<String>,
+        edit_hsl_red_sat: Option<f32>,
+        edit_hsl_orange_sat: Option<f32>,
+        edit_hsl_yellow_sat: Option<f32>,
+        edit_hsl_green_sat: Option<f32>,
+        edit_hsl_aqua_sat: Option<f32>,
+        edit_hsl_blue_sat: Option<f32>,
+        edit_hsl_purple_sat: Option<f32>,
+        edit_hsl_magenta_sat: Option<f32>,
     ) -> Self {
         Self {
             id,
@@ -150,6 +158,14 @@ impl Photo {
             edit_tone_curve_lights,
             edit_tone_curve_highlights,
             content_hash,
+            edit_hsl_red_sat,
+            edit_hsl_orange_sat,
+            edit_hsl_yellow_sat,
+            edit_hsl_green_sat,
+            edit_hsl_aqua_sat,
+            edit_hsl_blue_sat,
+            edit_hsl_purple_sat,
+            edit_hsl_magenta_sat,
         }
     }
 
@@ -159,7 +175,8 @@ impl Photo {
         Self::reconstruct(
             id, file_path, now, now, None, None, None, None, false, None, None,
             None, None, None, None, None, None, None, None, None, None, None,
-            None, None, None, None, None
+            None, None, None, None, None,
+            None, None, None, None, None, None, None, None // HSL (8 fields)
         )
     }
 
@@ -389,6 +406,14 @@ impl Photo {
         tone_curve_darks: Option<f32>,
         tone_curve_lights: Option<f32>,
         tone_curve_highlights: Option<f32>,
+        hsl_red_sat: Option<f32>,
+        hsl_orange_sat: Option<f32>,
+        hsl_yellow_sat: Option<f32>,
+        hsl_green_sat: Option<f32>,
+        hsl_aqua_sat: Option<f32>,
+        hsl_blue_sat: Option<f32>,
+        hsl_purple_sat: Option<f32>,
+        hsl_magenta_sat: Option<f32>,
     ) -> DomainResult<()> {
         self.edit_exposure = exposure;
         self.edit_contrast = contrast;
@@ -405,6 +430,14 @@ impl Photo {
         self.edit_tone_curve_darks = tone_curve_darks;
         self.edit_tone_curve_lights = tone_curve_lights;
         self.edit_tone_curve_highlights = tone_curve_highlights;
+        self.edit_hsl_red_sat = hsl_red_sat;
+        self.edit_hsl_orange_sat = hsl_orange_sat;
+        self.edit_hsl_yellow_sat = hsl_yellow_sat;
+        self.edit_hsl_green_sat = hsl_green_sat;
+        self.edit_hsl_aqua_sat = hsl_aqua_sat;
+        self.edit_hsl_blue_sat = hsl_blue_sat;
+        self.edit_hsl_purple_sat = hsl_purple_sat;
+        self.edit_hsl_magenta_sat = hsl_magenta_sat;
         self.is_edited = true;
         self.modified_at = Utc::now();
         Ok(())
@@ -428,6 +461,46 @@ impl Photo {
     /// Retorna o campo edit_tone_curve_highlights
     pub fn edit_tone_curve_highlights(&self) -> Option<f32> {
         self.edit_tone_curve_highlights
+    }
+
+    /// Retorna o campo edit_hsl_red_sat
+    pub fn edit_hsl_red_sat(&self) -> Option<f32> {
+        self.edit_hsl_red_sat
+    }
+
+    /// Retorna o campo edit_hsl_orange_sat
+    pub fn edit_hsl_orange_sat(&self) -> Option<f32> {
+        self.edit_hsl_orange_sat
+    }
+
+    /// Retorna o campo edit_hsl_yellow_sat
+    pub fn edit_hsl_yellow_sat(&self) -> Option<f32> {
+        self.edit_hsl_yellow_sat
+    }
+
+    /// Retorna o campo edit_hsl_green_sat
+    pub fn edit_hsl_green_sat(&self) -> Option<f32> {
+        self.edit_hsl_green_sat
+    }
+
+    /// Retorna o campo edit_hsl_aqua_sat
+    pub fn edit_hsl_aqua_sat(&self) -> Option<f32> {
+        self.edit_hsl_aqua_sat
+    }
+
+    /// Retorna o campo edit_hsl_blue_sat
+    pub fn edit_hsl_blue_sat(&self) -> Option<f32> {
+        self.edit_hsl_blue_sat
+    }
+
+    /// Retorna o campo edit_hsl_purple_sat
+    pub fn edit_hsl_purple_sat(&self) -> Option<f32> {
+        self.edit_hsl_purple_sat
+    }
+
+    /// Retorna o campo edit_hsl_magenta_sat
+    pub fn edit_hsl_magenta_sat(&self) -> Option<f32> {
+        self.edit_hsl_magenta_sat
     }
 
     /// Retorna o hash de conteúdo do arquivo (SHA-256)
@@ -660,16 +733,17 @@ mod tests {
         let now = Utc::now();
         
         // Usar reconstruct para garantir timestamps idênticos
-        // Usar reconstruct para garantir timestamps idênticos
         let photo1 = Photo::reconstruct(
             id, path.clone(), now, now, None, None, None, None, false, None, None,
             None, None, None, None, None, None, None, None, None, None, None,
-            None, None, None, None, None
+            None, None, None, None, None,
+            None, None, None, None, None, None, None, None // HSL (8 fields)
         );
         let photo2 = Photo::reconstruct(
             id, path, now, now, None, None, None, None, false, None, None,
             None, None, None, None, None, None, None, None, None, None, None,
-            None, None, None, None, None
+            None, None, None, None, None,
+            None, None, None, None, None, None, None, None // HSL (8 fields)
         );
 
         // Assert
@@ -687,7 +761,8 @@ mod tests {
 
         photo.set_edits(
             Some(1.5), Some(1.2), None, None, None, None, None, None, None, None, None,
-            None, None, None, None
+            None, None, None, None,
+            None, None, None, None, None, None, None, None // HSL
         ).unwrap();
 
         assert_eq!(photo.edit_exposure(), Some(1.5));
@@ -734,7 +809,8 @@ mod tests {
         // Act
         photo.set_edits(
             None, None, None, None, None, None, None, None, None, None, None,
-            Some(-50.0), Some(-25.0), Some(25.0), Some(50.0)
+            Some(-50.0), Some(-25.0), Some(25.0), Some(50.0),
+            None, None, None, None, None, None, None, None // HSL
         ).unwrap();
 
         // Assert
@@ -753,7 +829,8 @@ mod tests {
         // Act - Test all four zones
         photo.set_edits(
             None, None, None, None, None, None, None, None, None, None, None,
-            Some(-100.0), Some(-50.0), Some(50.0), Some(100.0)
+            Some(-100.0), Some(-50.0), Some(50.0), Some(100.0),
+            None, None, None, None, None, None, None, None // HSL
         ).unwrap();
 
         // Assert
@@ -773,7 +850,8 @@ mod tests {
             Some(1.5), Some(1.2), Some(5.0), Some(-3.0),
             Some(-20.0), Some(30.0), Some(10.0), Some(-5.0),
             Some(0.3), Some(0.2), Some(0.1),
-            Some(-30.0), Some(-10.0), Some(10.0), Some(30.0)
+            Some(-30.0), Some(-10.0), Some(10.0), Some(30.0),
+            None, None, None, None, None, None, None, None // HSL
         ).unwrap();
 
         // Assert - All fields should be set
@@ -797,7 +875,8 @@ mod tests {
         let photo = Photo::reconstruct(
             id, path, now, now, None, None, None, None, true, None, None,
             Some(1.0), Some(1.0), None, None, None, None, None, None, None, None, None,
-            Some(-40.0), Some(-20.0), Some(20.0), Some(40.0), None
+            Some(-40.0), Some(-20.0), Some(20.0), Some(40.0), None,
+            None, None, None, None, None, None, None, None // HSL
         );
 
         // Assert
