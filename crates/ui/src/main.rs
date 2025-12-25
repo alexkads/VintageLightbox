@@ -17,26 +17,24 @@ use infrastructure::{
     cache::preview_manager::PreviewManager,
 };
 use use_cases::{
+    GetImportSourcesUseCase,
     ImportPhotoUseCase, SavePhotoEditsUseCase, ExportPhotoUseCase,
     RatePhotoUseCase, SetColorLabelUseCase, SetFlagUseCase, DeletePhotoUseCase,
-    PreviewBeforeImportUseCase, CheckDuplicatesUseCase, ImportWithOptionsUseCase,
-    presets::{ListPresetsUseCase, SavePresetUseCase, DeletePresetUseCase},
+    CheckDuplicatesUseCase, ImportWithOptionsUseCase,
+    PreviewBeforeImportUseCase,
 };
+use use_cases::presets::{ListPresetsUseCase, SavePresetUseCase, DeletePresetUseCase};
+
 use adapters::controllers::{
-    ImportController, LibraryController, EditorController,
-    ExportController, PhotoController, PresetController,
+    LibraryController, EditorController, ImportController, ExportController, PhotoController, PresetController
 };
-
-
 
 #[tokio::main]
-async fn main() -> Result<(), eframe::Error> {
-    // ============================================
-    // 0. Initialize Environment & Catalog Structure
-    // ============================================
-    dotenv::dotenv().ok();
+async fn main() {
+    // Initialize formatting for better panic messages
+    // human_panic::setup_panic!();
 
-    // Lightroom-style Catalog Structure
+    // 0. Setup Paths
     // Path: ~/Pictures/VintageLightbox/VintageLightbox Catalog
     // Logic centralized in infrastructure::paths to ensure cross-platform consistency
     let catalog_path = infrastructure::paths::AppPaths::catalog_root();
@@ -71,6 +69,8 @@ async fn main() -> Result<(), eframe::Error> {
     let preview_path = catalog_path.join("Previews.lrdata");
     let preview_manager = Arc::new(PreviewManager::new_with_path(preview_path));
 
+    let device_repo = Arc::new(infrastructure::devices::repository::InfrastructureDeviceRepository::new());
+
     // ============================================
     // 2. Setup Use Cases Layer
     // ============================================
@@ -79,22 +79,6 @@ async fn main() -> Result<(), eframe::Error> {
         metadata_extractor.clone(),
         thumbnail_generator.clone(),
         preview_manager.clone(),
-    ));
-
-    // Advanced import use cases
-    let preview_before_import_use_case = Arc::new(PreviewBeforeImportUseCase::new(
-        metadata_extractor.clone(),
-        thumbnail_generator.clone(),
-    ));
-    let check_duplicates_use_case = Arc::new(CheckDuplicatesUseCase::new(
-        photo_repository.clone()
-    ));
-    let import_with_options_use_case = Arc::new(ImportWithOptionsUseCase::new(
-        photo_repository.clone(),
-        metadata_extractor.clone(),
-        thumbnail_generator.clone(),
-        preview_manager.clone(),
-        file_organizer,
     ));
 
     let save_photo_edits_use_case = Arc::new(SavePhotoEditsUseCase::new(
@@ -128,6 +112,26 @@ async fn main() -> Result<(), eframe::Error> {
         preset_repository
     ));
 
+    // Advanced import use cases
+    let preview_before_import_use_case = Arc::new(PreviewBeforeImportUseCase::new(
+        metadata_extractor.clone(),
+        thumbnail_generator.clone(),
+    ));
+    let check_duplicates_use_case = Arc::new(CheckDuplicatesUseCase::new(
+        photo_repository.clone()
+    ));
+    let import_with_options_use_case = Arc::new(ImportWithOptionsUseCase::new(
+        photo_repository.clone(),
+        metadata_extractor.clone(),
+        thumbnail_generator.clone(),
+        preview_manager.clone(),
+        file_organizer,
+    ));
+    
+    let get_import_sources_use_case = Arc::new(GetImportSourcesUseCase::new(
+        device_repo.clone()
+    ));
+
     // ============================================
     // 3. Setup Controllers (Adapters Layer)
     // ============================================
@@ -136,16 +140,19 @@ async fn main() -> Result<(), eframe::Error> {
         preview_before_import_use_case,
         check_duplicates_use_case,
         import_with_options_use_case,
+        get_import_sources_use_case,
     ));
     let library_controller = Arc::new(LibraryController::new(photo_repository));
     let editor_controller = Arc::new(EditorController::new(save_photo_edits_use_case));
     let export_controller = Arc::new(ExportController::new(export_photo_use_case));
+    
     let photo_controller = Arc::new(PhotoController::new(
         rate_photo_use_case,
         set_color_label_use_case,
         set_flag_use_case,
         delete_photo_use_case,
     ));
+    
     let preset_controller = Arc::new(PresetController::new(
         list_presets_use_case,
         save_preset_use_case,
@@ -153,38 +160,33 @@ async fn main() -> Result<(), eframe::Error> {
     ));
 
     // ============================================
-    // 4. Launch eframe Application
+    // 4. Run Application
     // ============================================
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1400.0, 900.0])
-            .with_min_inner_size([800.0, 600.0])
-            .with_title("VintageLightbox"),
+    let native_options = eframe::NativeOptions {
+        viewport: eframe::egui::ViewportBuilder::default()
+            .with_maximized(true)
+            .with_decorations(true)
+            .with_transparent(false),
+        renderer: eframe::Renderer::Wgpu,
         ..Default::default()
     };
 
-    eframe::run_native(
+    let _ = eframe::run_native(
         "VintageLightbox",
-        options,
-        Box::new(move |cc| {
-            let mut app = VintageLightboxApp::new(
+        native_options,
+        Box::new(|cc| {
+            // Style/Icon configuration is handled inside VintageLightboxApp::new
+            
+            Ok(Box::new(VintageLightboxApp::new(
                 cc,
                 import_controller,
-                library_controller.clone(),
+                library_controller,
                 editor_controller,
                 export_controller,
                 photo_controller,
                 preset_controller,
-                preview_manager.clone(),
-            );
-
-            // Load photos on startup
-            app.load_photos(&cc.egui_ctx);
-            
-            // Load presets on startup
-            app.load_presets(&cc.egui_ctx);
-
-            Ok(Box::new(app))
+                preview_manager,
+            )))
         }),
-    )
+    );
 }

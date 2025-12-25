@@ -36,6 +36,7 @@ pub struct EditSnapshot {
 pub enum CurrentView {
     Library,
     Develop,
+    Import,
 }
 
 /// Metadata for the currently selected photo in detail view
@@ -50,12 +51,23 @@ pub struct DetailMetadata {
     pub color_label: Option<String>,
 }
 
+/// State for the Import View
+#[derive(Default)]
+pub struct ImportViewState {
+    pub devices: Vec<domain::import_source::ImportSource>,
+    pub selected_source_id: Option<String>,
+    pub found_files: Vec<String>, // Paths
+    pub selected_files: std::collections::HashSet<String>,
+    pub options: domain::value_objects::ImportOptions,
+}
+
 /// Main application state
 pub struct AppState {
     // ============================================
     // Navigation
     // ============================================
     pub current_view: CurrentView,
+    pub import_view_state: ImportViewState,
 
     // ============================================
     // Photo Library
@@ -298,6 +310,7 @@ impl AppState {
     pub fn new() -> Self {
         Self {
             current_view: CurrentView::Library,
+            import_view_state: ImportViewState::default(),
             photos: Vec::new(),
             library_selected_photo_id: None,
             develop_selected_photo_id: None,
@@ -395,6 +408,7 @@ impl AppState {
         match self.current_view {
             CurrentView::Library => self.library_selected_photo_id.as_ref(),
             CurrentView::Develop => self.develop_selected_photo_id.as_ref(),
+            CurrentView::Import => None,
         }
     }
 

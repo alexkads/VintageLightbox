@@ -45,6 +45,9 @@ pub struct VintageLightboxApp {
     photo_sender: mpsc::Sender<Result<Vec<PhotoViewModel>, String>>,
     preset_receiver: mpsc::Receiver<Result<Vec<domain::entities::Preset>, String>>,
     preset_sender: mpsc::Sender<Result<Vec<domain::entities::Preset>, String>>,
+    
+    import_source_sender: mpsc::Sender<(Vec<domain::import_source::ImportSource>, Vec<domain::import_source::ImportSource>)>,
+    import_source_receiver: mpsc::Receiver<(Vec<domain::import_source::ImportSource>, Vec<domain::import_source::ImportSource>)>,
 
     // ============================================
     // Async Image Processing (Rayon-powered + GPU)
@@ -96,6 +99,8 @@ impl VintageLightboxApp {
         let (photo_sender, photo_receiver) = mpsc::channel(10);
         // Create channel for async preset loading
         let (preset_sender, preset_receiver) = mpsc::channel(10);
+        // Create channel for async import source loading
+        let (import_source_sender, import_source_receiver) = mpsc::channel(5);
 
         Self {
             state: AppState::new(),
@@ -110,6 +115,8 @@ impl VintageLightboxApp {
             photo_sender,
             preset_receiver,
             preset_sender,
+            import_source_sender,
+            import_source_receiver,
             image_processor: AsyncImageProcessor::new(preview_manager.clone()),
             gpu_edit_processor: crate::gpu_processor::GpuImageProcessor::new(),
             current_edit_request_id: 0,
@@ -240,6 +247,9 @@ impl eframe::App for VintageLightboxApp {
             &mut self.state,
             &self.photo_controller,
             &self.library_controller,
+            &self.editor_controller,
+            &self.export_controller,
+            &self.import_controller,
             &self.photo_sender
         );
 
@@ -944,12 +954,21 @@ impl eframe::App for VintageLightboxApp {
             });
 
         // Main content area - Docking UI
-        egui::CentralPanel::default().show(ctx, |_ui| {
-            // Get the appropriate dock state for the current view
-            let dock_state = match self.state.current_view {
-                CurrentView::Library => &mut self.library_dock_state,
-                CurrentView::Develop => &mut self.develop_dock_state,
-            };
+        if self.state.current_view == CurrentView::Import {
+            crate::views::import_view::ImportView::show(
+                ctx, 
+                &mut self.state, 
+                &self.import_controller, 
+                &self.import_source_sender
+            );
+        } else {
+            egui::CentralPanel::default().show(ctx, |_ui| {
+                // Get the appropriate dock state for the current view
+                let dock_state = match self.state.current_view {
+                    CurrentView::Library => &mut self.library_dock_state,
+                    CurrentView::Develop => &mut self.develop_dock_state,
+                    CurrentView::Import => &mut self.library_dock_state,
+                };
             
             // Create dock viewer context with all required references
             let context = DockViewerContext {
@@ -969,7 +988,8 @@ impl eframe::App for VintageLightboxApp {
             let mut dock_viewer = DockViewer::new(context);
             DockArea::new(dock_state)
                 .show(ctx, &mut dock_viewer);
-        });
+            });
+        }
 
         // Busy overlay
         if self.state.is_busy {
@@ -1095,12 +1115,13 @@ impl VintageLightboxApp {
 
     /// Handle import button click
     fn handle_import(&mut self, _ctx: &egui::Context) {
-        let mut dialog = egui_file::FileDialog::open_file(None)
-            .title("Import Photos");
+        self.state.current_view = crate::state::CurrentView::Import;
         
-        dialog.open();
-        self.state.import_dialog = Some(dialog);
-        self.state.import_dialog_mode = crate::state::ImportDialogMode::Simple;
+        // Trigger loading devices
+        let controller = self.import_controller.clone();
+        // Since we don't have a direct way to mutate state from here async easily without Arc<Mutex<AppState>> which we don't have,
+        // we might need a channel or just rely on ImportView to load on mount/poll.
+        // For now, let's assume ImportView handles loading logic or we implement a "LoadSources" action.
     }
 
     /// Handle advanced import button click

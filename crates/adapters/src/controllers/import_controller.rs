@@ -17,6 +17,7 @@ pub struct ImportController {
     preview_use_case: Arc<PreviewBeforeImportUseCase>,
     check_duplicates_use_case: Arc<CheckDuplicatesUseCase>,
     import_with_options_use_case: Arc<ImportWithOptionsUseCase>,
+    get_import_sources_use_case: Arc<use_cases::GetImportSourcesUseCase>,
 }
 
 impl ImportController {
@@ -25,12 +26,14 @@ impl ImportController {
         preview_use_case: Arc<PreviewBeforeImportUseCase>,
         check_duplicates_use_case: Arc<CheckDuplicatesUseCase>,
         import_with_options_use_case: Arc<ImportWithOptionsUseCase>,
+        get_import_sources_use_case: Arc<use_cases::GetImportSourcesUseCase>,
     ) -> Self {
         Self {
             import_photo_use_case,
             preview_use_case,
             check_duplicates_use_case,
             import_with_options_use_case,
+            get_import_sources_use_case,
         }
     }
 
@@ -198,5 +201,9 @@ impl ImportController {
             "Import complete: {} successful, {} failed, {} skipped",
             result.successful, result.failed, result.skipped
         ))
+    }
+
+    pub async fn get_sources(&self) -> (Vec<domain::import_source::ImportSource>, Vec<domain::import_source::ImportSource>) {
+        self.get_import_sources_use_case.execute().await
     }
 }

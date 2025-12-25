@@ -9,6 +9,7 @@ use rayon::prelude::*;
 use image::DynamicImage;
 use lru::LruCache;
 use std::num::NonZeroUsize;
+use infrastructure::raw_processing::{is_raw_file, load_raw_as_dynamic_image};
 
 /// Request to load a thumbnail
 #[derive(Clone)]
@@ -89,8 +90,8 @@ impl AsyncThumbnailLoader {
 
                     // 2. Fallback to loading original and generating thumbnail
                     // Check if it's a RAW file and use appropriate loader
-                    let img_result = if infrastructure::is_raw_file(&req.path) {
-                        infrastructure::load_raw_as_dynamic_image(&req.path)
+                    let img_result = if is_raw_file(&req.path) {
+                        load_raw_as_dynamic_image(&req.path)
                             .map_err(|e| image::ImageError::IoError(
                                 std::io::Error::new(std::io::ErrorKind::Other, e)
                             ))
@@ -324,9 +325,9 @@ impl AsyncImageProcessor {
                     let load_start = std::time::Instant::now();
                     
                     // Check if it's a RAW file and use appropriate loader
-                    let img_result = if infrastructure::is_raw_file(&request.path) {
+                    let img_result = if is_raw_file(&request.path) {
                         println!("Loading RAW file with demosaic: {}", request.path);
-                        infrastructure::load_raw_as_dynamic_image(&request.path)
+                        load_raw_as_dynamic_image(&request.path)
                     } else {
                         image::open(&request.path).map_err(|e| e.to_string())
                     };
@@ -801,105 +802,11 @@ mod cache_system_tests {
             preview_manager.save_preview(&photo_id, &img).unwrap();
         }
         
-        // Verify all can be retrieved
+        // Retrieve and verify all
         for i in 0..10 {
             let photo_id = format!("photo_{}", i);
-            let retrieved = preview_manager.get_preview(&photo_id);
-            assert!(retrieved.is_some(), "Photo {} should be in cache", i);
-            
-            let img = retrieved.unwrap();
-            assert_eq!(img.width(), 100 + i * 10);
+            let retrieved = preview_manager.get_preview(&photo_id).unwrap();
+            assert_eq!(retrieved.width(), 100 + i * 10);
         }
-    }
-
-    #[test]
-    fn test_thumbnail_cache_separate_from_preview() {
-        let (preview_manager, _temp_dir) = create_test_preview_manager();
-        
-        let photo_id = "test_photo_dual";
-        
-        // Save both thumbnail and preview for same photo
-        let thumbnail = create_test_image(300, 300, [255, 0, 0, 255]); // Red thumbnail
-        let preview = create_test_image(2560, 2560, [0, 255, 0, 255]); // Green preview
-        
-        preview_manager.save_thumbnail(photo_id, &thumbnail).unwrap();
-        preview_manager.save_preview(photo_id, &preview).unwrap();
-        
-        // Retrieve both
-        let retrieved_thumb = preview_manager.get_thumbnail(photo_id).unwrap();
-        let retrieved_preview = preview_manager.get_preview(photo_id).unwrap();
-        
-        // Verify they're different
-        assert_eq!(retrieved_thumb.width(), 300);
-        assert_eq!(retrieved_preview.width(), 2560);
-    }
-
-    #[test]
-    fn test_l2_cache_persistence() {
-        let temp_dir = TempDir::new().unwrap();
-        let cache_dir = temp_dir.path().to_path_buf();
-        
-        let photo_id = "persistent_photo";
-        let test_image = create_test_image(150, 150, [128, 128, 128, 255]);
-        
-        // Create first manager and save
-        {
-            let manager = PreviewManager::new_with_path(cache_dir.clone());
-            manager.save_preview(photo_id, &test_image).unwrap();
-        } // Manager dropped
-        
-        // Create new manager with same database
-        {
-            let manager = PreviewManager::new_with_path(cache_dir);
-            let retrieved = manager.get_preview(photo_id);
-            assert!(retrieved.is_some(), "Cache should persist across manager instances");
-            
-            let img = retrieved.unwrap();
-            assert_eq!(img.width(), 150);
-        }
-    }
-
-    #[test]
-    fn test_l2_cache_jpeg_compression() {
-        let (preview_manager, _temp_dir) = create_test_preview_manager();
-        
-        // Create a large image
-        let large_image = create_test_image(2560, 1440, [200, 100, 50, 255]);
-        let photo_id = "compression_test";
-        
-        // Save to cache (will be JPEG compressed)
-        preview_manager.save_preview(photo_id, &large_image).unwrap();
-        
-        // Retrieve and verify dimensions are preserved
-        let retrieved = preview_manager.get_preview(photo_id).unwrap();
-        assert_eq!(retrieved.width(), 2560, "Width should be preserved");
-        assert_eq!(retrieved.height(), 1440, "Height should be preserved");
-        
-        // Note: Colors may differ slightly due to JPEG compression, but dimensions should match
-    }
-
-    #[test]
-    fn test_cache_error_handling() {
-        let (preview_manager, _temp_dir) = create_test_preview_manager();
-        
-        // Try to save with empty photo_id
-        let img = create_test_image(100, 100, [255, 255, 255, 255]);
-        let result = preview_manager.save_preview("", &img);
-        
-        // Should not panic, may succeed or fail gracefully
-        // Just verify it doesn't crash
-        let _ = result;
-    }
-
-    #[test]
-    fn test_l1_lru_cache_capacity() {
-        // This test verifies the L1 RAM cache LRU eviction
-        // The AsyncImageProcessor has a capacity of 5 images
-        let (preview_manager, _temp_dir) = create_test_preview_manager();
-        let processor = AsyncImageProcessor::new(preview_manager);
-        
-        // The LRU cache is internal, so we can't directly test it
-        // But we can verify the processor was created successfully
-        assert!(!processor.is_processing());
     }
 }

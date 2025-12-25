@@ -23,6 +23,7 @@ sha2 = "0.10"
 rusqlite = { version = "0.30.0", features = ["bundled"] }
 rsraw = "0.1"  # LibRaw binding - demosaic/white balance/color correction integrados
 uuid.workspace = true
+sysinfo = "0.36.1"
 
 [dev-dependencies]
 tempfile.workspace = true
