@@ -158,6 +158,14 @@ pub struct AppState {
     pub prev_vibrance: f32,
     /// Previous saturation value (for change detection)
     pub prev_saturation: f32,
+    /// Previous tone curve shadows (for change detection)
+    pub prev_tone_curve_shadows: f32,
+    /// Previous tone curve darks (for change detection)
+    pub prev_tone_curve_darks: f32,
+    /// Previous tone curve lights (for change detection)
+    pub prev_tone_curve_lights: f32,
+    /// Previous tone curve highlights (for change detection)
+    pub prev_tone_curve_highlights: f32,
     /// Original unprocessed preview image
     pub original_preview: Option<DynamicImage>,
     /// Cached raw image data for GPU processing (Arc to avoid cloning)
@@ -355,6 +363,10 @@ impl AppState {
             prev_clarity: 0.0,
             prev_vibrance: 0.0,
             prev_saturation: 0.0,
+            prev_tone_curve_shadows: 0.0,
+            prev_tone_curve_darks: 0.0,
+            prev_tone_curve_lights: 0.0,
+            prev_tone_curve_highlights: 0.0,
             original_preview: None,
             original_image_data: None,
             zoom_level: 1.0,

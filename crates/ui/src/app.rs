@@ -489,7 +489,11 @@ impl eframe::App for VintageLightboxApp {
                     self.state.active_blacks != self.state.prev_blacks ||
                     self.state.active_clarity != self.state.prev_clarity ||
                     self.state.active_vibrance != self.state.prev_vibrance ||
-                    self.state.active_saturation != self.state.prev_saturation;
+                    self.state.active_saturation != self.state.prev_saturation ||
+                    self.state.active_tone_curve_shadows != self.state.prev_tone_curve_shadows ||
+                    self.state.active_tone_curve_darks != self.state.prev_tone_curve_darks ||
+                    self.state.active_tone_curve_lights != self.state.prev_tone_curve_lights ||
+                    self.state.active_tone_curve_highlights != self.state.prev_tone_curve_highlights;
                 let before_toggled = self.state.show_before != self.state.prev_show_before;
 
                 if (edits_changed || before_toggled) && self.state.original_preview.is_some() {
@@ -507,7 +511,11 @@ impl eframe::App for VintageLightboxApp {
                                 last_snapshot.blacks != self.state.active_blacks ||
                                 last_snapshot.clarity != self.state.active_clarity ||
                                 last_snapshot.vibrance != self.state.active_vibrance ||
-                                last_snapshot.saturation != self.state.active_saturation
+                                last_snapshot.saturation != self.state.active_saturation ||
+                                last_snapshot.tone_curve_shadows != self.state.active_tone_curve_shadows ||
+                                last_snapshot.tone_curve_darks != self.state.active_tone_curve_darks ||
+                                last_snapshot.tone_curve_lights != self.state.active_tone_curve_lights ||
+                                last_snapshot.tone_curve_highlights != self.state.active_tone_curve_highlights
                             } else {
                                 true
                             }
@@ -586,6 +594,10 @@ impl eframe::App for VintageLightboxApp {
                         self.state.prev_clarity = self.state.active_clarity;
                         self.state.prev_vibrance = self.state.active_vibrance;
                         self.state.prev_saturation = self.state.active_saturation;
+                        self.state.prev_tone_curve_shadows = self.state.active_tone_curve_shadows;
+                        self.state.prev_tone_curve_darks = self.state.active_tone_curve_darks;
+                        self.state.prev_tone_curve_lights = self.state.active_tone_curve_lights;
+                        self.state.prev_tone_curve_highlights = self.state.active_tone_curve_highlights;
                     }
                     self.state.prev_show_before = self.state.show_before;
                 }

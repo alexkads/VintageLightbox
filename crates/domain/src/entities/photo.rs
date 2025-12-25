@@ -68,6 +68,22 @@ pub struct Photo {
     edit_tone_curve_highlights: Option<f32>,
     /// SHA-256 hash of the file content (for duplicate detection)
     content_hash: Option<String>,
+    /// HSL: Red channel saturation adjustment (-100 to +100)
+    edit_hsl_red_sat: Option<f32>,
+    /// HSL: Orange channel saturation adjustment (-100 to +100)
+    edit_hsl_orange_sat: Option<f32>,
+    /// HSL: Yellow channel saturation adjustment (-100 to +100)
+    edit_hsl_yellow_sat: Option<f32>,
+    /// HSL: Green channel saturation adjustment (-100 to +100)
+    edit_hsl_green_sat: Option<f32>,
+    /// HSL: Aqua channel saturation adjustment (-100 to +100)
+    edit_hsl_aqua_sat: Option<f32>,
+    /// HSL: Blue channel saturation adjustment (-100 to +100)
+    edit_hsl_blue_sat: Option<f32>,
+    /// HSL: Purple channel saturation adjustment (-100 to +100)
+    edit_hsl_purple_sat: Option<f32>,
+    /// HSL: Magenta channel saturation adjustment (-100 to +100)
+    edit_hsl_magenta_sat: Option<f32>,
 }
 
 impl Photo {

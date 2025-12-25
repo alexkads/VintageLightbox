@@ -345,12 +345,63 @@ impl DevelopView {
 
         ui.add_space(Theme::SPACE_LG);
 
-        // Collapsed sections (placeholders)
-        ui.label(
-            egui::RichText::new("▶ Tone Curve")
-                .size(Theme::FONT_SM)
-                .color(ui.visuals().text_color())
-        );
+        // Tone Curve Section
+        widgets::section_title(ui, "Tone Curve");
+        ui.add_space(Theme::SPACE_SM);
+
+        // Shadows (darkest tones)
+        if SliderControl::show(
+            ui,
+            "Shadows",
+            &mut state.active_tone_curve_shadows,
+            -100.0..=100.0,
+            5.0,
+        ) {
+            any_slider_changed = true;
+        }
+
+        ui.add_space(Theme::SPACE_SM);
+
+        // Darks (dark midtones)
+        if SliderControl::show(
+            ui,
+            "Darks",
+            &mut state.active_tone_curve_darks,
+            -100.0..=100.0,
+            5.0,
+        ) {
+            any_slider_changed = true;
+        }
+
+        ui.add_space(Theme::SPACE_SM);
+
+        // Lights (light midtones)
+        if SliderControl::show(
+            ui,
+            "Lights",
+            &mut state.active_tone_curve_lights,
+            -100.0..=100.0,
+            5.0,
+        ) {
+            any_slider_changed = true;
+        }
+
+        ui.add_space(Theme::SPACE_SM);
+
+        // Highlights (brightest tones)
+        if SliderControl::show(
+            ui,
+            "Highlights (Curve)",
+            &mut state.active_tone_curve_highlights,
+            -100.0..=100.0,
+            5.0,
+        ) {
+            any_slider_changed = true;
+        }
+
+        ui.add_space(Theme::SPACE_LG);
+
+        // HSL/Color placeholder
         ui.label(
             egui::RichText::new("▶ HSL / Color")
                 .size(Theme::FONT_SM)
@@ -373,6 +424,11 @@ impl DevelopView {
             state.active_clarity = 0.0;
             state.active_vibrance = 0.0;
             state.active_saturation = 0.0;
+            // Reset tone curve
+            state.active_tone_curve_shadows = 0.0;
+            state.active_tone_curve_darks = 0.0;
+            state.active_tone_curve_lights = 0.0;
+            state.active_tone_curve_highlights = 0.0;
 
             // Auto-save happens after reset too
             state.pending_auto_save = true;

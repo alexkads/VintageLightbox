@@ -780,7 +780,7 @@ import_controller.import_with_options(files, options, tx, pause, cancel).await?;
   - GPU: Shader WGSL com mesma lógica sincronizada
   - Undo/Redo: `EditSnapshot` com 4 campos de tone curve
   - Persistência: Campos já existem na entidade `Photo` e banco de dados
-- [ ] 🎯 **Tone Curve UI** - Sliders para controle das 4 zonas (PRÓXIMO)
+- [x] ✅ **Tone Curve UI** (25/dez/2025) - Sliders para controle das 4 zonas no Develop View
 - [ ] **Point Curve** - Curva com múltiplos pontos de controle (complexo)
 - [ ] **HSL/Color** - Ajustes por canal de cor (8 canais: Red, Orange, Yellow, Green, Aqua, Blue, Purple, Magenta)
 - [ ] **Redução de Ruído** - Luminance e Color noise reduction
