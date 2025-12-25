@@ -20,9 +20,9 @@ impl KeyboardHandler {
         state: &mut AppState,
         photo_controller: &Arc<PhotoController>,
         library_controller: &Arc<adapters::controllers::LibraryController>,
-        editor_controller: &Arc<adapters::controllers::EditorController>,
-        export_controller: &Arc<adapters::controllers::ExportController>,
-        import_controller: &Arc<adapters::controllers::ImportController>,
+        _editor_controller: &Arc<adapters::controllers::EditorController>,
+        _export_controller: &Arc<adapters::controllers::ExportController>,
+        _import_controller: &Arc<adapters::controllers::ImportController>,
         photo_sender: &tokio::sync::mpsc::Sender<Result<Vec<adapters::view_models::PhotoViewModel>, String>>,
     ) {
         ctx.input(|i| {

@@ -1,5 +1,4 @@
 use std::path::PathBuf;
-use async_trait::async_trait;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ImportSourceType {

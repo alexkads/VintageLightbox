@@ -1,8 +1,7 @@
 pub mod history_repo;
 pub mod repository;
-use domain::import_source::{ImportSource, ImportSourceType};
-use sysinfo::{Disks, System};
-use std::path::PathBuf;
+use domain::import_source::ImportSource;
+use sysinfo::Disks;
 
 pub struct DeviceService;
 

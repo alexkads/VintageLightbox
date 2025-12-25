@@ -1,9 +1,7 @@
 use domain::import_source::{ImportSource, DeviceRepository};
-use domain::import_source::ImportSourceType;
 use async_trait::async_trait;
 use crate::devices::DeviceService;
 use crate::devices::history_repo::ImportHistoryRepository;
-use std::sync::Arc;
 
 pub struct InfrastructureDeviceRepository {
     device_service: DeviceService,

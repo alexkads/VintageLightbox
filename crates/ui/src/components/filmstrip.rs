@@ -35,6 +35,7 @@ pub struct Filmstrip {
 impl Filmstrip {
     const THUMBNAIL_SIZE: f32 = 80.0;
     const THUMBNAIL_SPACING: f32 = 4.0;
+    #[allow(dead_code)]
     const SELECTED_BORDER_WIDTH: f32 = 3.0;
 
     pub fn new(preview_manager: Arc<PreviewManager>) -> Self {

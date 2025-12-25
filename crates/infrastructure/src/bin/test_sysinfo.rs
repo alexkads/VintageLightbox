@@ -1,4 +1,4 @@
-use sysinfo::{Disks, System};
+use sysinfo::Disks;
 
 fn main() {
     let disks = Disks::new_with_refreshed_list();

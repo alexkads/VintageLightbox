@@ -47,6 +47,7 @@ pub struct VintageLightboxApp {
     preset_sender: mpsc::Sender<Result<Vec<domain::entities::Preset>, String>>,
     
     import_source_sender: mpsc::Sender<(Vec<domain::import_source::ImportSource>, Vec<domain::import_source::ImportSource>)>,
+    #[allow(dead_code)]
     import_source_receiver: mpsc::Receiver<(Vec<domain::import_source::ImportSource>, Vec<domain::import_source::ImportSource>)>,
 
     // ============================================
@@ -1196,7 +1197,7 @@ impl VintageLightboxApp {
         self.state.current_view = crate::state::CurrentView::Import;
         
         // Trigger loading devices
-        let controller = self.import_controller.clone();
+        let _controller = self.import_controller.clone();
         // Since we don't have a direct way to mutate state from here async easily without Arc<Mutex<AppState>> which we don't have,
         // we might need a channel or just rely on ImportView to load on mount/poll.
         // For now, let's assume ImportView handles loading logic or we implement a "LoadSources" action.
@@ -1284,7 +1285,7 @@ impl VintageLightboxApp {
                             
                             tokio::spawn(async move {
                                  let result = import_controller.import_files(vec![path_str]).await;
-                                 library_controller.get_all_photos().await;
+                                 let _ = library_controller.get_all_photos().await;
                                  let _ = sender.send(match result {
                                      Ok(_) => Ok(vec![]),
                                      Err(e) => Err(e),

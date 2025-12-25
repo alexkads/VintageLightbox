@@ -162,12 +162,13 @@ impl DevelopView {
         widgets::menu_item(ui, "Current State", true);
     }
 
+    #[allow(unused_assignments)]
     fn show_right_sidebar(
         &self,
         ui: &mut Ui,
         state: &mut AppState,
         _editor_controller: &std::sync::Arc<adapters::controllers::EditorController>,
-        export_controller: &std::sync::Arc<adapters::controllers::ExportController>,
+        _export_controller: &std::sync::Arc<adapters::controllers::ExportController>,
         photo_controller: &std::sync::Arc<adapters::controllers::PhotoController>,
         library_controller: &std::sync::Arc<adapters::controllers::LibraryController>,
         photo_sender: &tokio::sync::mpsc::Sender<Result<Vec<adapters::view_models::PhotoViewModel>, String>>,

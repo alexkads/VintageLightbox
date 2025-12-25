@@ -1,7 +1,7 @@
 use egui::{Ui, RichText};
 use crate::state::AppState;
 use adapters::controllers::ImportController;
-use domain::import_source::{ImportSource, ImportSourceType};
+use domain::import_source::ImportSource;
 use tokio::sync::mpsc;
 use std::sync::Arc;
 
@@ -73,15 +73,7 @@ impl ImportView {
         ui.label(RichText::new("FROM").strong());
         
         if state.import_view_state.devices.is_empty() && !state.is_busy {
-             // Fetch devices
-             let controller = controller.clone();
-             let sender = sender.clone();
-             let ctx = ctx.clone();
-             // Prevent infinite loop by not updating state busy here, relying on button or one-off
-             // But actually we should probably set a flag "has_fetched_devices"
-             
-             // For now, let's just do it if button clicked OR if it's empty (maybe unreliable loop?)
-             // Better: trigger once or use a "refresh" button
+             // Placeholder: Devices will be fetched when user clicks "Refresh Devices"
         }
 
         egui::CollapsingHeader::new("Devices")
