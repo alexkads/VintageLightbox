@@ -74,6 +74,34 @@ impl ImageProcessor {
         hsl_blue_sat: f32,
         hsl_purple_sat: f32,
         hsl_magenta_sat: f32,
+        // HSL Hue
+        hsl_red_hue: f32,
+        hsl_orange_hue: f32,
+        hsl_yellow_hue: f32,
+        hsl_green_hue: f32,
+        hsl_aqua_hue: f32,
+        hsl_blue_hue: f32,
+        hsl_purple_hue: f32,
+        hsl_magenta_hue: f32,
+        // HSL Lum
+        hsl_red_lum: f32,
+        hsl_orange_lum: f32,
+        hsl_yellow_lum: f32,
+        hsl_green_lum: f32,
+        hsl_aqua_lum: f32,
+        hsl_blue_lum: f32,
+        hsl_purple_lum: f32,
+        hsl_magenta_lum: f32,
+        // Lens
+        lens_distortion: f32,
+        lens_vignette_amount: f32,
+        lens_vignette_midpoint: f32,
+        // NR
+        nr_luminance: f32,
+        nr_color: f32,
+        // Sharpening
+        sharpen_amount: f32,
+        sharpen_radius: f32,
     ) -> TextureHandle {
         self.last_edit_time = Some(Instant::now());
 
@@ -84,6 +112,13 @@ impl ImageProcessor {
             tone_curve_shadows, tone_curve_darks, tone_curve_lights, tone_curve_highlights,
             hsl_red_sat, hsl_orange_sat, hsl_yellow_sat, hsl_green_sat,
             hsl_aqua_sat, hsl_blue_sat, hsl_purple_sat, hsl_magenta_sat,
+            hsl_red_hue, hsl_orange_hue, hsl_yellow_hue, hsl_green_hue,
+            hsl_aqua_hue, hsl_blue_hue, hsl_purple_hue, hsl_magenta_hue,
+            hsl_red_lum, hsl_orange_lum, hsl_yellow_lum, hsl_green_lum,
+            hsl_aqua_lum, hsl_blue_lum, hsl_purple_lum, hsl_magenta_lum,
+            lens_distortion, lens_vignette_amount, lens_vignette_midpoint,
+            nr_luminance, nr_color,
+            sharpen_amount, sharpen_radius,
         );
         Self::load_texture(ctx, "processed_image", &processed)
     }
@@ -117,6 +152,34 @@ impl ImageProcessor {
         hsl_blue_sat: f32,
         hsl_purple_sat: f32,
         hsl_magenta_sat: f32,
+        // HSL Hue
+        hsl_red_hue: f32,
+        hsl_orange_hue: f32,
+        hsl_yellow_hue: f32,
+        hsl_green_hue: f32,
+        hsl_aqua_hue: f32,
+        hsl_blue_hue: f32,
+        hsl_purple_hue: f32,
+        hsl_magenta_hue: f32,
+        // HSL Lum
+        hsl_red_lum: f32,
+        hsl_orange_lum: f32,
+        hsl_yellow_lum: f32,
+        hsl_green_lum: f32,
+        hsl_aqua_lum: f32,
+        hsl_blue_lum: f32,
+        hsl_purple_lum: f32,
+        hsl_magenta_lum: f32,
+        // Lens
+        lens_distortion: f32,
+        lens_vignette_amount: f32,
+        lens_vignette_midpoint: f32,
+        // NR
+        nr_luminance: f32,
+        nr_color: f32,
+        // Sharpening
+        sharpen_amount: f32,
+        sharpen_radius: f32,
     ) -> DynamicImage {
         use image::{Rgba, Pixel};
 
@@ -511,7 +574,12 @@ mod tests {
         let processed = ImageProcessor::process_image(
             &img, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
             0.0, 0.0, 0.0, 0.0, // tone curve params
-            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL Sat
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL Hue
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL Lum
+            0.0, 0.0, 0.0, // Lens
+            0.0, 0.0, // NR
+            0.0, 1.0, // Sharpening
         );
 
         assert_eq!(processed.width(), 100);

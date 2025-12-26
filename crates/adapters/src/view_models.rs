@@ -1,6 +1,6 @@
 use serde::{Serialize, Deserialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PhotoViewModel {
     pub id: String,
     pub name: String,
@@ -27,6 +27,43 @@ pub struct PhotoViewModel {
     pub edit_tone_curve_darks: Option<f32>,
     pub edit_tone_curve_lights: Option<f32>,
     pub edit_tone_curve_highlights: Option<f32>,
+    // HSL Saturation
+    pub edit_hsl_red_sat: Option<f32>,
+    pub edit_hsl_orange_sat: Option<f32>,
+    pub edit_hsl_yellow_sat: Option<f32>,
+    pub edit_hsl_green_sat: Option<f32>,
+    pub edit_hsl_aqua_sat: Option<f32>,
+    pub edit_hsl_blue_sat: Option<f32>,
+    pub edit_hsl_purple_sat: Option<f32>,
+    pub edit_hsl_magenta_sat: Option<f32>,
+    // HSL Hue
+    pub edit_hsl_red_hue: Option<f32>,
+    pub edit_hsl_orange_hue: Option<f32>,
+    pub edit_hsl_yellow_hue: Option<f32>,
+    pub edit_hsl_green_hue: Option<f32>,
+    pub edit_hsl_aqua_hue: Option<f32>,
+    pub edit_hsl_blue_hue: Option<f32>,
+    pub edit_hsl_purple_hue: Option<f32>,
+    pub edit_hsl_magenta_hue: Option<f32>,
+    // HSL Lum
+    pub edit_hsl_red_lum: Option<f32>,
+    pub edit_hsl_orange_lum: Option<f32>,
+    pub edit_hsl_yellow_lum: Option<f32>,
+    pub edit_hsl_green_lum: Option<f32>,
+    pub edit_hsl_aqua_lum: Option<f32>,
+    pub edit_hsl_blue_lum: Option<f32>,
+    pub edit_hsl_purple_lum: Option<f32>,
+    pub edit_hsl_magenta_lum: Option<f32>,
+    // Lens
+    pub edit_lens_distortion: Option<f32>,
+    pub edit_lens_vignette_amount: Option<f32>,
+    pub edit_lens_vignette_midpoint: Option<f32>,
+    // NR
+    pub edit_nr_luminance: Option<f32>,
+    pub edit_nr_color: Option<f32>,
+    // Sharpening
+    pub edit_sharpen_amount: Option<f32>,
+    pub edit_sharpen_radius: Option<f32>,
 }
 
 /// ViewModel for import preview items

@@ -246,6 +246,7 @@ mod tests {
             edit_tone_curve_darks: None,
             edit_tone_curve_lights: None,
             edit_tone_curve_highlights: None,
+            ..Default::default()
         }
     }
 

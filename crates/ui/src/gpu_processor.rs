@@ -37,7 +37,30 @@ pub struct GpuEditParams {
     pub hsl_aqua_sat: f32,
     pub hsl_blue_sat: f32,
     pub hsl_purple_sat: f32,
+
     pub hsl_magenta_sat: f32,
+    // HSL Hue
+    pub hsl_red_hue: f32,
+    pub hsl_orange_hue: f32,
+    pub hsl_yellow_hue: f32,
+    pub hsl_green_hue: f32,
+    pub hsl_aqua_hue: f32,
+    pub hsl_blue_hue: f32,
+    pub hsl_purple_hue: f32,
+    pub hsl_magenta_hue: f32,
+    // HSL Lum
+    pub hsl_red_lum: f32,
+    pub hsl_orange_lum: f32,
+    pub hsl_yellow_lum: f32,
+    pub hsl_green_lum: f32,
+    pub hsl_aqua_lum: f32,
+    pub hsl_blue_lum: f32,
+    pub hsl_purple_lum: f32,
+    pub hsl_magenta_lum: f32,
+    // Lens
+    pub lens_distortion: f32,
+    pub lens_vignette_amount: f32,
+    pub lens_vignette_midpoint: f32,
     // Noise Reduction
     pub nr_luminance: f32,
     pub nr_color: f32,
@@ -72,6 +95,11 @@ impl Default for GpuEditParams {
             hsl_blue_sat: 0.0,
             hsl_purple_sat: 0.0,
             hsl_magenta_sat: 0.0,
+            hsl_red_hue: 0.0, hsl_orange_hue: 0.0, hsl_yellow_hue: 0.0, hsl_green_hue: 0.0,
+            hsl_aqua_hue: 0.0, hsl_blue_hue: 0.0, hsl_purple_hue: 0.0, hsl_magenta_hue: 0.0,
+            hsl_red_lum: 0.0, hsl_orange_lum: 0.0, hsl_yellow_lum: 0.0, hsl_green_lum: 0.0,
+            hsl_aqua_lum: 0.0, hsl_blue_lum: 0.0, hsl_purple_lum: 0.0, hsl_magenta_lum: 0.0,
+            lens_distortion: 0.0, lens_vignette_amount: 0.0, lens_vignette_midpoint: 0.0,
             nr_luminance: 0.0,
             nr_color: 0.0,
             sharpen_amount: 0.0,
@@ -479,7 +507,20 @@ impl GpuImageProcessor {
                     request.params.tone_curve_darks,
                     request.params.tone_curve_lights,
                     request.params.tone_curve_highlights,
-                    0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL
+                    request.params.hsl_red_sat, request.params.hsl_orange_sat, request.params.hsl_yellow_sat, request.params.hsl_green_sat,
+                    request.params.hsl_aqua_sat, request.params.hsl_blue_sat, request.params.hsl_purple_sat, request.params.hsl_magenta_sat,
+                    // HSL Hue
+                    request.params.hsl_red_hue, request.params.hsl_orange_hue, request.params.hsl_yellow_hue, request.params.hsl_green_hue,
+                    request.params.hsl_aqua_hue, request.params.hsl_blue_hue, request.params.hsl_purple_hue, request.params.hsl_magenta_hue,
+                    // HSL Lum
+                    request.params.hsl_red_lum, request.params.hsl_orange_lum, request.params.hsl_yellow_lum, request.params.hsl_green_lum,
+                    request.params.hsl_aqua_lum, request.params.hsl_blue_lum, request.params.hsl_purple_lum, request.params.hsl_magenta_lum,
+                    // Lens
+                    request.params.lens_distortion, request.params.lens_vignette_amount, request.params.lens_vignette_midpoint,
+                    // NR
+                    request.params.nr_luminance, request.params.nr_color,
+                    // Sharpening
+                    request.params.sharpen_amount, request.params.sharpen_radius,
                 );
 
                 let preview = crate::image_processing::ImageProcessor::dynamic_to_color_image(&processed);

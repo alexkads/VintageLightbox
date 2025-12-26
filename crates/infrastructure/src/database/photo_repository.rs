@@ -76,6 +76,31 @@ impl PhotoRepositoryImpl {
         let edit_hsl_blue_sat: Option<f32> = row.try_get::<Option<f32>, _>("edit_hsl_blue_sat").unwrap_or(None);
         let edit_hsl_purple_sat: Option<f32> = row.try_get::<Option<f32>, _>("edit_hsl_purple_sat").unwrap_or(None);
         let edit_hsl_magenta_sat: Option<f32> = row.try_get::<Option<f32>, _>("edit_hsl_magenta_sat").unwrap_or(None);
+        
+        // HSL Hue fields
+        let edit_hsl_red_hue: Option<f32> = row.try_get::<Option<f32>, _>("edit_hsl_red_hue").unwrap_or(None);
+        let edit_hsl_orange_hue: Option<f32> = row.try_get::<Option<f32>, _>("edit_hsl_orange_hue").unwrap_or(None);
+        let edit_hsl_yellow_hue: Option<f32> = row.try_get::<Option<f32>, _>("edit_hsl_yellow_hue").unwrap_or(None);
+        let edit_hsl_green_hue: Option<f32> = row.try_get::<Option<f32>, _>("edit_hsl_green_hue").unwrap_or(None);
+        let edit_hsl_aqua_hue: Option<f32> = row.try_get::<Option<f32>, _>("edit_hsl_aqua_hue").unwrap_or(None);
+        let edit_hsl_blue_hue: Option<f32> = row.try_get::<Option<f32>, _>("edit_hsl_blue_hue").unwrap_or(None);
+        let edit_hsl_purple_hue: Option<f32> = row.try_get::<Option<f32>, _>("edit_hsl_purple_hue").unwrap_or(None);
+        let edit_hsl_magenta_hue: Option<f32> = row.try_get::<Option<f32>, _>("edit_hsl_magenta_hue").unwrap_or(None);
+
+        // HSL Luminance fields
+        let edit_hsl_red_lum: Option<f32> = row.try_get::<Option<f32>, _>("edit_hsl_red_lum").unwrap_or(None);
+        let edit_hsl_orange_lum: Option<f32> = row.try_get::<Option<f32>, _>("edit_hsl_orange_lum").unwrap_or(None);
+        let edit_hsl_yellow_lum: Option<f32> = row.try_get::<Option<f32>, _>("edit_hsl_yellow_lum").unwrap_or(None);
+        let edit_hsl_green_lum: Option<f32> = row.try_get::<Option<f32>, _>("edit_hsl_green_lum").unwrap_or(None);
+        let edit_hsl_aqua_lum: Option<f32> = row.try_get::<Option<f32>, _>("edit_hsl_aqua_lum").unwrap_or(None);
+        let edit_hsl_blue_lum: Option<f32> = row.try_get::<Option<f32>, _>("edit_hsl_blue_lum").unwrap_or(None);
+        let edit_hsl_purple_lum: Option<f32> = row.try_get::<Option<f32>, _>("edit_hsl_purple_lum").unwrap_or(None);
+        let edit_hsl_magenta_lum: Option<f32> = row.try_get::<Option<f32>, _>("edit_hsl_magenta_lum").unwrap_or(None);
+
+        // Lens Correction fields
+        let edit_lens_distortion: Option<f32> = row.try_get::<Option<f32>, _>("edit_lens_distortion").unwrap_or(None);
+        let edit_lens_vignette_amount: Option<f32> = row.try_get::<Option<f32>, _>("edit_lens_vignette_amount").unwrap_or(None);
+        let edit_lens_vignette_midpoint: Option<f32> = row.try_get::<Option<f32>, _>("edit_lens_vignette_midpoint").unwrap_or(None);
         // Noise Reduction fields
         let edit_nr_luminance: Option<f32> = row.try_get::<Option<f32>, _>("edit_nr_luminance").unwrap_or(None);
         let edit_nr_color: Option<f32> = row.try_get::<Option<f32>, _>("edit_nr_color").unwrap_or(None);
@@ -145,6 +170,25 @@ impl PhotoRepositoryImpl {
             edit_hsl_blue_sat,
             edit_hsl_purple_sat,
             edit_hsl_magenta_sat,
+            edit_hsl_red_hue,
+            edit_hsl_orange_hue,
+            edit_hsl_yellow_hue,
+            edit_hsl_green_hue,
+            edit_hsl_aqua_hue,
+            edit_hsl_blue_hue,
+            edit_hsl_purple_hue,
+            edit_hsl_magenta_hue,
+            edit_hsl_red_lum,
+            edit_hsl_orange_lum,
+            edit_hsl_yellow_lum,
+            edit_hsl_green_lum,
+            edit_hsl_aqua_lum,
+            edit_hsl_blue_lum,
+            edit_hsl_purple_lum,
+            edit_hsl_magenta_lum,
+            edit_lens_distortion,
+            edit_lens_vignette_amount,
+            edit_lens_vignette_midpoint,
             edit_nr_luminance,
             edit_nr_color,
             edit_sharpen_amount,
@@ -191,6 +235,28 @@ impl PhotoRepository for PhotoRepositoryImpl {
         let edit_hsl_blue_sat = photo.edit_hsl_blue_sat();
         let edit_hsl_purple_sat = photo.edit_hsl_purple_sat();
         let edit_hsl_magenta_sat = photo.edit_hsl_magenta_sat();
+        // HSL Hue
+        let edit_hsl_red_hue = photo.edit_hsl_red_hue();
+        let edit_hsl_orange_hue = photo.edit_hsl_orange_hue();
+        let edit_hsl_yellow_hue = photo.edit_hsl_yellow_hue();
+        let edit_hsl_green_hue = photo.edit_hsl_green_hue();
+        let edit_hsl_aqua_hue = photo.edit_hsl_aqua_hue();
+        let edit_hsl_blue_hue = photo.edit_hsl_blue_hue();
+        let edit_hsl_purple_hue = photo.edit_hsl_purple_hue();
+        let edit_hsl_magenta_hue = photo.edit_hsl_magenta_hue();
+        // HSL Lum
+        let edit_hsl_red_lum = photo.edit_hsl_red_lum();
+        let edit_hsl_orange_lum = photo.edit_hsl_orange_lum();
+        let edit_hsl_yellow_lum = photo.edit_hsl_yellow_lum();
+        let edit_hsl_green_lum = photo.edit_hsl_green_lum();
+        let edit_hsl_aqua_lum = photo.edit_hsl_aqua_lum();
+        let edit_hsl_blue_lum = photo.edit_hsl_blue_lum();
+        let edit_hsl_purple_lum = photo.edit_hsl_purple_lum();
+        let edit_hsl_magenta_lum = photo.edit_hsl_magenta_lum();
+        // Lens
+        let edit_lens_distortion = photo.edit_lens_distortion();
+        let edit_lens_vignette_amount = photo.edit_lens_vignette_amount();
+        let edit_lens_vignette_midpoint = photo.edit_lens_vignette_midpoint();
         // Noise Reduction fields
         let edit_nr_luminance = photo.edit_nr_luminance();
         let edit_nr_color = photo.edit_nr_color();
@@ -202,8 +268,8 @@ impl PhotoRepository for PhotoRepositoryImpl {
             .and_then(|m| serde_json::to_string(m).ok());
 
         sqlx::query(
-            "INSERT INTO photos (id, file_path, rating, color_label, flag, is_edited, imported_at, modified_at, metadata, thumbnail_path, preview_path, edit_exposure, edit_contrast, edit_temperature, edit_tint, edit_highlights, edit_shadows, edit_whites, edit_blacks, edit_clarity, edit_vibrance, edit_saturation, edit_tone_curve_shadows, edit_tone_curve_darks, edit_tone_curve_lights, edit_tone_curve_highlights, content_hash, edit_hsl_red_sat, edit_hsl_orange_sat, edit_hsl_yellow_sat, edit_hsl_green_sat, edit_hsl_aqua_sat, edit_hsl_blue_sat, edit_hsl_purple_sat, edit_hsl_magenta_sat, edit_nr_luminance, edit_nr_color, edit_sharpen_amount, edit_sharpen_radius)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO photos (id, file_path, rating, color_label, flag, is_edited, imported_at, modified_at, metadata, thumbnail_path, preview_path, edit_exposure, edit_contrast, edit_temperature, edit_tint, edit_highlights, edit_shadows, edit_whites, edit_blacks, edit_clarity, edit_vibrance, edit_saturation, edit_tone_curve_shadows, edit_tone_curve_darks, edit_tone_curve_lights, edit_tone_curve_highlights, content_hash, edit_hsl_red_sat, edit_hsl_orange_sat, edit_hsl_yellow_sat, edit_hsl_green_sat, edit_hsl_aqua_sat, edit_hsl_blue_sat, edit_hsl_purple_sat, edit_hsl_magenta_sat, edit_hsl_red_hue, edit_hsl_orange_hue, edit_hsl_yellow_hue, edit_hsl_green_hue, edit_hsl_aqua_hue, edit_hsl_blue_hue, edit_hsl_purple_hue, edit_hsl_magenta_hue, edit_hsl_red_lum, edit_hsl_orange_lum, edit_hsl_yellow_lum, edit_hsl_green_lum, edit_hsl_aqua_lum, edit_hsl_blue_lum, edit_hsl_purple_lum, edit_hsl_magenta_lum, edit_lens_distortion, edit_lens_vignette_amount, edit_lens_vignette_midpoint, edit_nr_luminance, edit_nr_color, edit_sharpen_amount, edit_sharpen_radius)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         .bind(&id)
         .bind(&file_path)
@@ -240,6 +306,25 @@ impl PhotoRepository for PhotoRepositoryImpl {
         .bind(edit_hsl_blue_sat)
         .bind(edit_hsl_purple_sat)
         .bind(edit_hsl_magenta_sat)
+        .bind(edit_hsl_red_hue)
+        .bind(edit_hsl_orange_hue)
+        .bind(edit_hsl_yellow_hue)
+        .bind(edit_hsl_green_hue)
+        .bind(edit_hsl_aqua_hue)
+        .bind(edit_hsl_blue_hue)
+        .bind(edit_hsl_purple_hue)
+        .bind(edit_hsl_magenta_hue)
+        .bind(edit_hsl_red_lum)
+        .bind(edit_hsl_orange_lum)
+        .bind(edit_hsl_yellow_lum)
+        .bind(edit_hsl_green_lum)
+        .bind(edit_hsl_aqua_lum)
+        .bind(edit_hsl_blue_lum)
+        .bind(edit_hsl_purple_lum)
+        .bind(edit_hsl_magenta_lum)
+        .bind(edit_lens_distortion)
+        .bind(edit_lens_vignette_amount)
+        .bind(edit_lens_vignette_midpoint)
         .bind(edit_nr_luminance)
         .bind(edit_nr_color)
         .bind(edit_sharpen_amount)
@@ -312,6 +397,28 @@ impl PhotoRepository for PhotoRepositoryImpl {
         let edit_hsl_blue_sat = photo.edit_hsl_blue_sat();
         let edit_hsl_purple_sat = photo.edit_hsl_purple_sat();
         let edit_hsl_magenta_sat = photo.edit_hsl_magenta_sat();
+        // HSL Hue
+        let edit_hsl_red_hue = photo.edit_hsl_red_hue();
+        let edit_hsl_orange_hue = photo.edit_hsl_orange_hue();
+        let edit_hsl_yellow_hue = photo.edit_hsl_yellow_hue();
+        let edit_hsl_green_hue = photo.edit_hsl_green_hue();
+        let edit_hsl_aqua_hue = photo.edit_hsl_aqua_hue();
+        let edit_hsl_blue_hue = photo.edit_hsl_blue_hue();
+        let edit_hsl_purple_hue = photo.edit_hsl_purple_hue();
+        let edit_hsl_magenta_hue = photo.edit_hsl_magenta_hue();
+        // HSL Lum
+        let edit_hsl_red_lum = photo.edit_hsl_red_lum();
+        let edit_hsl_orange_lum = photo.edit_hsl_orange_lum();
+        let edit_hsl_yellow_lum = photo.edit_hsl_yellow_lum();
+        let edit_hsl_green_lum = photo.edit_hsl_green_lum();
+        let edit_hsl_aqua_lum = photo.edit_hsl_aqua_lum();
+        let edit_hsl_blue_lum = photo.edit_hsl_blue_lum();
+        let edit_hsl_purple_lum = photo.edit_hsl_purple_lum();
+        let edit_hsl_magenta_lum = photo.edit_hsl_magenta_lum();
+        // Lens
+        let edit_lens_distortion = photo.edit_lens_distortion();
+        let edit_lens_vignette_amount = photo.edit_lens_vignette_amount();
+        let edit_lens_vignette_midpoint = photo.edit_lens_vignette_midpoint();
         // Noise Reduction fields
         let edit_nr_luminance = photo.edit_nr_luminance();
         let edit_nr_color = photo.edit_nr_color();
@@ -325,7 +432,7 @@ impl PhotoRepository for PhotoRepositoryImpl {
 
         let result = sqlx::query(
             "UPDATE photos
-             SET file_path = ?, rating = ?, color_label = ?, flag = ?, is_edited = ?, modified_at = ?, metadata = ?, thumbnail_path = ?, preview_path = ?, edit_exposure = ?, edit_contrast = ?, edit_temperature = ?, edit_tint = ?, edit_highlights = ?, edit_shadows = ?, edit_whites = ?, edit_blacks = ?, edit_clarity = ?, edit_vibrance = ?, edit_saturation = ?, edit_tone_curve_shadows = ?, edit_tone_curve_darks = ?, edit_tone_curve_lights = ?, edit_tone_curve_highlights = ?, content_hash = ?, edit_hsl_red_sat = ?, edit_hsl_orange_sat = ?, edit_hsl_yellow_sat = ?, edit_hsl_green_sat = ?, edit_hsl_aqua_sat = ?, edit_hsl_blue_sat = ?, edit_hsl_purple_sat = ?, edit_hsl_magenta_sat = ?, edit_nr_luminance = ?, edit_nr_color = ?, edit_sharpen_amount = ?, edit_sharpen_radius = ?
+             SET file_path = ?, rating = ?, color_label = ?, flag = ?, is_edited = ?, modified_at = ?, metadata = ?, thumbnail_path = ?, preview_path = ?, edit_exposure = ?, edit_contrast = ?, edit_temperature = ?, edit_tint = ?, edit_highlights = ?, edit_shadows = ?, edit_whites = ?, edit_blacks = ?, edit_clarity = ?, edit_vibrance = ?, edit_saturation = ?, edit_tone_curve_shadows = ?, edit_tone_curve_darks = ?, edit_tone_curve_lights = ?, edit_tone_curve_highlights = ?, content_hash = ?, edit_hsl_red_sat = ?, edit_hsl_orange_sat = ?, edit_hsl_yellow_sat = ?, edit_hsl_green_sat = ?, edit_hsl_aqua_sat = ?, edit_hsl_blue_sat = ?, edit_hsl_purple_sat = ?, edit_hsl_magenta_sat = ?, edit_hsl_red_hue = ?, edit_hsl_orange_hue = ?, edit_hsl_yellow_hue = ?, edit_hsl_green_hue = ?, edit_hsl_aqua_hue = ?, edit_hsl_blue_hue = ?, edit_hsl_purple_hue = ?, edit_hsl_magenta_hue = ?, edit_hsl_red_lum = ?, edit_hsl_orange_lum = ?, edit_hsl_yellow_lum = ?, edit_hsl_green_lum = ?, edit_hsl_aqua_lum = ?, edit_hsl_blue_lum = ?, edit_hsl_purple_lum = ?, edit_hsl_magenta_lum = ?, edit_lens_distortion = ?, edit_lens_vignette_amount = ?, edit_lens_vignette_midpoint = ?, edit_nr_luminance = ?, edit_nr_color = ?, edit_sharpen_amount = ?, edit_sharpen_radius = ?
              WHERE id = ?"
         )
         .bind(&file_path)
@@ -361,6 +468,25 @@ impl PhotoRepository for PhotoRepositoryImpl {
         .bind(edit_hsl_blue_sat)
         .bind(edit_hsl_purple_sat)
         .bind(edit_hsl_magenta_sat)
+        .bind(edit_hsl_red_hue)
+        .bind(edit_hsl_orange_hue)
+        .bind(edit_hsl_yellow_hue)
+        .bind(edit_hsl_green_hue)
+        .bind(edit_hsl_aqua_hue)
+        .bind(edit_hsl_blue_hue)
+        .bind(edit_hsl_purple_hue)
+        .bind(edit_hsl_magenta_hue)
+        .bind(edit_hsl_red_lum)
+        .bind(edit_hsl_orange_lum)
+        .bind(edit_hsl_yellow_lum)
+        .bind(edit_hsl_green_lum)
+        .bind(edit_hsl_aqua_lum)
+        .bind(edit_hsl_blue_lum)
+        .bind(edit_hsl_purple_lum)
+        .bind(edit_hsl_magenta_lum)
+        .bind(edit_lens_distortion)
+        .bind(edit_lens_vignette_amount)
+        .bind(edit_lens_vignette_midpoint)
         .bind(edit_nr_luminance)
         .bind(edit_nr_color)
         .bind(edit_sharpen_amount)

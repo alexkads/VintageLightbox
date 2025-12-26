@@ -92,9 +92,11 @@ impl DevelopView {
             .resizable(false)
             .exact_width(Theme::PANEL_WIDTH + 20.0)
             .show_inside(ui, |ui| {
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    self.show_right_sidebar(ui, state, editor_controller, export_controller, photo_controller, library_controller, photo_sender, ctx);
-                });
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        self.show_right_sidebar(ui, state, editor_controller, export_controller, photo_controller, library_controller, photo_sender, ctx);
+                    });
             });
 
         // Center - Image viewer
@@ -505,6 +507,102 @@ impl DevelopView {
             -100.0..=100.0,
             5.0,
         ) {
+            any_slider_changed = true;
+        }
+
+        ui.add_space(Theme::SPACE_XXL);
+
+        // HSL Hue Section
+        widgets::section_title(ui, "HSL / Hue");
+        ui.add_space(Theme::SPACE_SM);
+
+        // HSL Hue controls
+        if SliderControl::show(ui, "Red Hue", &mut state.active_hsl_red_hue, -180.0..=180.0, 5.0) {
+            any_slider_changed = true;
+        }
+        ui.add_space(Theme::SPACE_SM);
+        if SliderControl::show(ui, "Orange Hue", &mut state.active_hsl_orange_hue, -180.0..=180.0, 5.0) {
+            any_slider_changed = true;
+        }
+        ui.add_space(Theme::SPACE_SM);
+        if SliderControl::show(ui, "Yellow Hue", &mut state.active_hsl_yellow_hue, -180.0..=180.0, 5.0) {
+            any_slider_changed = true;
+        }
+        ui.add_space(Theme::SPACE_SM);
+        if SliderControl::show(ui, "Green Hue", &mut state.active_hsl_green_hue, -180.0..=180.0, 5.0) {
+            any_slider_changed = true;
+        }
+        ui.add_space(Theme::SPACE_SM);
+        if SliderControl::show(ui, "Aqua Hue", &mut state.active_hsl_aqua_hue, -180.0..=180.0, 5.0) {
+            any_slider_changed = true;
+        }
+        ui.add_space(Theme::SPACE_SM);
+        if SliderControl::show(ui, "Blue Hue", &mut state.active_hsl_blue_hue, -180.0..=180.0, 5.0) {
+            any_slider_changed = true;
+        }
+        ui.add_space(Theme::SPACE_SM);
+        if SliderControl::show(ui, "Purple Hue", &mut state.active_hsl_purple_hue, -180.0..=180.0, 5.0) {
+            any_slider_changed = true;
+        }
+        ui.add_space(Theme::SPACE_SM);
+        if SliderControl::show(ui, "Magenta Hue", &mut state.active_hsl_magenta_hue, -180.0..=180.0, 5.0) {
+            any_slider_changed = true;
+        }
+
+        ui.add_space(Theme::SPACE_XXL);
+
+        // HSL Luminance Section
+        widgets::section_title(ui, "HSL / Luminance");
+        ui.add_space(Theme::SPACE_SM);
+
+        // HSL Luminance controls
+        if SliderControl::show(ui, "Red Lum", &mut state.active_hsl_red_lum, -100.0..=100.0, 5.0) {
+            any_slider_changed = true;
+        }
+        ui.add_space(Theme::SPACE_SM);
+        if SliderControl::show(ui, "Orange Lum", &mut state.active_hsl_orange_lum, -100.0..=100.0, 5.0) {
+            any_slider_changed = true;
+        }
+        ui.add_space(Theme::SPACE_SM);
+        if SliderControl::show(ui, "Yellow Lum", &mut state.active_hsl_yellow_lum, -100.0..=100.0, 5.0) {
+            any_slider_changed = true;
+        }
+        ui.add_space(Theme::SPACE_SM);
+        if SliderControl::show(ui, "Green Lum", &mut state.active_hsl_green_lum, -100.0..=100.0, 5.0) {
+            any_slider_changed = true;
+        }
+        ui.add_space(Theme::SPACE_SM);
+        if SliderControl::show(ui, "Aqua Lum", &mut state.active_hsl_aqua_lum, -100.0..=100.0, 5.0) {
+            any_slider_changed = true;
+        }
+        ui.add_space(Theme::SPACE_SM);
+        if SliderControl::show(ui, "Blue Lum", &mut state.active_hsl_blue_lum, -100.0..=100.0, 5.0) {
+            any_slider_changed = true;
+        }
+        ui.add_space(Theme::SPACE_SM);
+        if SliderControl::show(ui, "Purple Lum", &mut state.active_hsl_purple_lum, -100.0..=100.0, 5.0) {
+            any_slider_changed = true;
+        }
+        ui.add_space(Theme::SPACE_SM);
+        if SliderControl::show(ui, "Magenta Lum", &mut state.active_hsl_magenta_lum, -100.0..=100.0, 5.0) {
+            any_slider_changed = true;
+        }
+
+        ui.add_space(Theme::SPACE_XXL);
+
+        // Lens Corrections Section
+        widgets::section_title(ui, "Lens Corrections");
+        ui.add_space(Theme::SPACE_SM);
+
+        if SliderControl::show(ui, "Distortion", &mut state.active_lens_distortion, -100.0..=100.0, 1.0) {
+            any_slider_changed = true;
+        }
+        ui.add_space(Theme::SPACE_SM);
+        if SliderControl::show(ui, "Vignette Amount", &mut state.active_lens_vignette_amount, -100.0..=100.0, 1.0) {
+            any_slider_changed = true;
+        }
+        ui.add_space(Theme::SPACE_SM);
+        if SliderControl::show(ui, "Vignette Midpoint", &mut state.active_lens_vignette_midpoint, 0.0..=100.0, 1.0) {
             any_slider_changed = true;
         }
 

@@ -77,6 +77,7 @@ pub struct Photo {
     /// HSL: Green channel saturation adjustment (-100 to +100)
     edit_hsl_green_sat: Option<f32>,
     /// HSL: Aqua channel saturation adjustment (-100 to +100)
+    /// HSL: Aqua channel saturation adjustment (-100 to +100)
     edit_hsl_aqua_sat: Option<f32>,
     /// HSL: Blue channel saturation adjustment (-100 to +100)
     edit_hsl_blue_sat: Option<f32>,
@@ -84,6 +85,35 @@ pub struct Photo {
     edit_hsl_purple_sat: Option<f32>,
     /// HSL: Magenta channel saturation adjustment (-100 to +100)
     edit_hsl_magenta_sat: Option<f32>,
+    
+    // --- HSL Hue (-100 to +100) ---
+    edit_hsl_red_hue: Option<f32>,
+    edit_hsl_orange_hue: Option<f32>,
+    edit_hsl_yellow_hue: Option<f32>,
+    edit_hsl_green_hue: Option<f32>,
+    edit_hsl_aqua_hue: Option<f32>,
+    edit_hsl_blue_hue: Option<f32>,
+    edit_hsl_purple_hue: Option<f32>,
+    edit_hsl_magenta_hue: Option<f32>,
+
+    // --- HSL Luminance (-100 to +100) ---
+    edit_hsl_red_lum: Option<f32>,
+    edit_hsl_orange_lum: Option<f32>,
+    edit_hsl_yellow_lum: Option<f32>,
+    edit_hsl_green_lum: Option<f32>,
+    edit_hsl_aqua_lum: Option<f32>,
+    edit_hsl_blue_lum: Option<f32>,
+    edit_hsl_purple_lum: Option<f32>,
+    edit_hsl_magenta_lum: Option<f32>,
+
+    // --- Lens Corrections ---
+    /// Lens Distortion (-100 to +100)
+    edit_lens_distortion: Option<f32>,
+    /// Vignette Amount (-100 to +100)
+    edit_lens_vignette_amount: Option<f32>,
+    /// Vignette Midpoint (0 to 100)
+    edit_lens_vignette_midpoint: Option<f32>,
+
     /// Noise reduction: Luminance (0 to 100)
     edit_nr_luminance: Option<f32>,
     /// Noise reduction: Color (0 to 100)
@@ -137,6 +167,25 @@ impl Photo {
         edit_hsl_blue_sat: Option<f32>,
         edit_hsl_purple_sat: Option<f32>,
         edit_hsl_magenta_sat: Option<f32>,
+        edit_hsl_red_hue: Option<f32>,
+        edit_hsl_orange_hue: Option<f32>,
+        edit_hsl_yellow_hue: Option<f32>,
+        edit_hsl_green_hue: Option<f32>,
+        edit_hsl_aqua_hue: Option<f32>,
+        edit_hsl_blue_hue: Option<f32>,
+        edit_hsl_purple_hue: Option<f32>,
+        edit_hsl_magenta_hue: Option<f32>,
+        edit_hsl_red_lum: Option<f32>,
+        edit_hsl_orange_lum: Option<f32>,
+        edit_hsl_yellow_lum: Option<f32>,
+        edit_hsl_green_lum: Option<f32>,
+        edit_hsl_aqua_lum: Option<f32>,
+        edit_hsl_blue_lum: Option<f32>,
+        edit_hsl_purple_lum: Option<f32>,
+        edit_hsl_magenta_lum: Option<f32>,
+        edit_lens_distortion: Option<f32>,
+        edit_lens_vignette_amount: Option<f32>,
+        edit_lens_vignette_midpoint: Option<f32>,
         edit_nr_luminance: Option<f32>,
         edit_nr_color: Option<f32>,
         edit_sharpen_amount: Option<f32>,
@@ -178,6 +227,25 @@ impl Photo {
             edit_hsl_blue_sat,
             edit_hsl_purple_sat,
             edit_hsl_magenta_sat,
+            edit_hsl_red_hue,
+            edit_hsl_orange_hue,
+            edit_hsl_yellow_hue,
+            edit_hsl_green_hue,
+            edit_hsl_aqua_hue,
+            edit_hsl_blue_hue,
+            edit_hsl_purple_hue,
+            edit_hsl_magenta_hue,
+            edit_hsl_red_lum,
+            edit_hsl_orange_lum,
+            edit_hsl_yellow_lum,
+            edit_hsl_green_lum,
+            edit_hsl_aqua_lum,
+            edit_hsl_blue_lum,
+            edit_hsl_purple_lum,
+            edit_hsl_magenta_lum,
+            edit_lens_distortion,
+            edit_lens_vignette_amount,
+            edit_lens_vignette_midpoint,
             edit_nr_luminance,
             edit_nr_color,
             edit_sharpen_amount,
@@ -192,7 +260,10 @@ impl Photo {
             id, file_path, now, now, None, None, None, None, false, None, None,
             None, None, None, None, None, None, None, None, None, None, None,
             None, None, None, None, None,
-            None, None, None, None, None, None, None, None, // HSL (8 fields)
+            None, None, None, None, None, None, None, None, // HSL Sat
+            None, None, None, None, None, None, None, None, // HSL Hue
+            None, None, None, None, None, None, None, None, // HSL Lum
+            None, None, None, // Lens
             None, None, // NR (2 fields)
             None, None, // Sharpening (2 fields)
         )
@@ -432,6 +503,25 @@ impl Photo {
         hsl_blue_sat: Option<f32>,
         hsl_purple_sat: Option<f32>,
         hsl_magenta_sat: Option<f32>,
+        hsl_red_hue: Option<f32>,
+        hsl_orange_hue: Option<f32>,
+        hsl_yellow_hue: Option<f32>,
+        hsl_green_hue: Option<f32>,
+        hsl_aqua_hue: Option<f32>,
+        hsl_blue_hue: Option<f32>,
+        hsl_purple_hue: Option<f32>,
+        hsl_magenta_hue: Option<f32>,
+        hsl_red_lum: Option<f32>,
+        hsl_orange_lum: Option<f32>,
+        hsl_yellow_lum: Option<f32>,
+        hsl_green_lum: Option<f32>,
+        hsl_aqua_lum: Option<f32>,
+        hsl_blue_lum: Option<f32>,
+        hsl_purple_lum: Option<f32>,
+        hsl_magenta_lum: Option<f32>,
+        lens_distortion: Option<f32>,
+        lens_vignette_amount: Option<f32>,
+        lens_vignette_midpoint: Option<f32>,
         nr_luminance: Option<f32>,
         nr_color: Option<f32>,
         sharpen_amount: Option<f32>,
@@ -460,6 +550,25 @@ impl Photo {
         self.edit_hsl_blue_sat = hsl_blue_sat;
         self.edit_hsl_purple_sat = hsl_purple_sat;
         self.edit_hsl_magenta_sat = hsl_magenta_sat;
+        self.edit_hsl_red_hue = hsl_red_hue;
+        self.edit_hsl_orange_hue = hsl_orange_hue;
+        self.edit_hsl_yellow_hue = hsl_yellow_hue;
+        self.edit_hsl_green_hue = hsl_green_hue;
+        self.edit_hsl_aqua_hue = hsl_aqua_hue;
+        self.edit_hsl_blue_hue = hsl_blue_hue;
+        self.edit_hsl_purple_hue = hsl_purple_hue;
+        self.edit_hsl_magenta_hue = hsl_magenta_hue;
+        self.edit_hsl_red_lum = hsl_red_lum;
+        self.edit_hsl_orange_lum = hsl_orange_lum;
+        self.edit_hsl_yellow_lum = hsl_yellow_lum;
+        self.edit_hsl_green_lum = hsl_green_lum;
+        self.edit_hsl_aqua_lum = hsl_aqua_lum;
+        self.edit_hsl_blue_lum = hsl_blue_lum;
+        self.edit_hsl_purple_lum = hsl_purple_lum;
+        self.edit_hsl_magenta_lum = hsl_magenta_lum;
+        self.edit_lens_distortion = lens_distortion;
+        self.edit_lens_vignette_amount = lens_vignette_amount;
+        self.edit_lens_vignette_midpoint = lens_vignette_midpoint;
         self.edit_nr_luminance = nr_luminance;
         self.edit_nr_color = nr_color;
         self.edit_sharpen_amount = sharpen_amount;
@@ -548,6 +657,33 @@ impl Photo {
     pub fn edit_sharpen_radius(&self) -> Option<f32> {
         self.edit_sharpen_radius
     }
+
+    /// Retorna o campo edit_hsl_red_hue
+    pub fn edit_hsl_red_hue(&self) -> Option<f32> { self.edit_hsl_red_hue }
+    pub fn edit_hsl_orange_hue(&self) -> Option<f32> { self.edit_hsl_orange_hue }
+    pub fn edit_hsl_yellow_hue(&self) -> Option<f32> { self.edit_hsl_yellow_hue }
+    pub fn edit_hsl_green_hue(&self) -> Option<f32> { self.edit_hsl_green_hue }
+    pub fn edit_hsl_aqua_hue(&self) -> Option<f32> { self.edit_hsl_aqua_hue }
+    pub fn edit_hsl_blue_hue(&self) -> Option<f32> { self.edit_hsl_blue_hue }
+    pub fn edit_hsl_purple_hue(&self) -> Option<f32> { self.edit_hsl_purple_hue }
+    pub fn edit_hsl_magenta_hue(&self) -> Option<f32> { self.edit_hsl_magenta_hue }
+
+    /// Retorna o campo edit_hsl_red_lum
+    pub fn edit_hsl_red_lum(&self) -> Option<f32> { self.edit_hsl_red_lum }
+    pub fn edit_hsl_orange_lum(&self) -> Option<f32> { self.edit_hsl_orange_lum }
+    pub fn edit_hsl_yellow_lum(&self) -> Option<f32> { self.edit_hsl_yellow_lum }
+    pub fn edit_hsl_green_lum(&self) -> Option<f32> { self.edit_hsl_green_lum }
+    pub fn edit_hsl_aqua_lum(&self) -> Option<f32> { self.edit_hsl_aqua_lum }
+    pub fn edit_hsl_blue_lum(&self) -> Option<f32> { self.edit_hsl_blue_lum }
+    pub fn edit_hsl_purple_lum(&self) -> Option<f32> { self.edit_hsl_purple_lum }
+    pub fn edit_hsl_magenta_lum(&self) -> Option<f32> { self.edit_hsl_magenta_lum }
+
+    /// Retorna o campo edit_lens_distortion
+    pub fn edit_lens_distortion(&self) -> Option<f32> { self.edit_lens_distortion }
+    /// Retorna o campo edit_lens_vignette_amount
+    pub fn edit_lens_vignette_amount(&self) -> Option<f32> { self.edit_lens_vignette_amount }
+    /// Retorna o campo edit_lens_vignette_midpoint
+    pub fn edit_lens_vignette_midpoint(&self) -> Option<f32> { self.edit_lens_vignette_midpoint }
 
 
 

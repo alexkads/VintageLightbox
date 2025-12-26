@@ -86,6 +86,50 @@ impl Filmstrip {
                 let vibrance = photo.edit_vibrance.unwrap_or(0.0);
                 let saturation = photo.edit_saturation.unwrap_or(0.0);
                 
+                // Tone Curve
+                let tone_curve_shadows = photo.edit_tone_curve_shadows.unwrap_or(0.0);
+                let tone_curve_darks = photo.edit_tone_curve_darks.unwrap_or(0.0);
+                let tone_curve_lights = photo.edit_tone_curve_lights.unwrap_or(0.0);
+                let tone_curve_highlights = photo.edit_tone_curve_highlights.unwrap_or(0.0);
+                
+                // HSL Saturation
+                let hsl_red_sat = photo.edit_hsl_red_sat.unwrap_or(0.0);
+                let hsl_orange_sat = photo.edit_hsl_orange_sat.unwrap_or(0.0);
+                let hsl_yellow_sat = photo.edit_hsl_yellow_sat.unwrap_or(0.0);
+                let hsl_green_sat = photo.edit_hsl_green_sat.unwrap_or(0.0);
+                let hsl_aqua_sat = photo.edit_hsl_aqua_sat.unwrap_or(0.0);
+                let hsl_blue_sat = photo.edit_hsl_blue_sat.unwrap_or(0.0);
+                let hsl_purple_sat = photo.edit_hsl_purple_sat.unwrap_or(0.0);
+                let hsl_magenta_sat = photo.edit_hsl_magenta_sat.unwrap_or(0.0);
+                // HSL Hue
+                let hsl_red_hue = photo.edit_hsl_red_hue.unwrap_or(0.0);
+                let hsl_orange_hue = photo.edit_hsl_orange_hue.unwrap_or(0.0);
+                let hsl_yellow_hue = photo.edit_hsl_yellow_hue.unwrap_or(0.0);
+                let hsl_green_hue = photo.edit_hsl_green_hue.unwrap_or(0.0);
+                let hsl_aqua_hue = photo.edit_hsl_aqua_hue.unwrap_or(0.0);
+                let hsl_blue_hue = photo.edit_hsl_blue_hue.unwrap_or(0.0);
+                let hsl_purple_hue = photo.edit_hsl_purple_hue.unwrap_or(0.0);
+                let hsl_magenta_hue = photo.edit_hsl_magenta_hue.unwrap_or(0.0);
+                // HSL Lum
+                let hsl_red_lum = photo.edit_hsl_red_lum.unwrap_or(0.0);
+                let hsl_orange_lum = photo.edit_hsl_orange_lum.unwrap_or(0.0);
+                let hsl_yellow_lum = photo.edit_hsl_yellow_lum.unwrap_or(0.0);
+                let hsl_green_lum = photo.edit_hsl_green_lum.unwrap_or(0.0);
+                let hsl_aqua_lum = photo.edit_hsl_aqua_lum.unwrap_or(0.0);
+                let hsl_blue_lum = photo.edit_hsl_blue_lum.unwrap_or(0.0);
+                let hsl_purple_lum = photo.edit_hsl_purple_lum.unwrap_or(0.0);
+                let hsl_magenta_lum = photo.edit_hsl_magenta_lum.unwrap_or(0.0);
+                // Lens
+                let lens_distortion = photo.edit_lens_distortion.unwrap_or(0.0);
+                let lens_vignette_amount = photo.edit_lens_vignette_amount.unwrap_or(0.0);
+                let lens_vignette_midpoint = photo.edit_lens_vignette_midpoint.unwrap_or(0.0);
+                // NR
+                let nr_luminance = photo.edit_nr_luminance.unwrap_or(0.0);
+                let nr_color = photo.edit_nr_color.unwrap_or(0.0);
+                // Sharpening
+                let sharpen_amount = photo.edit_sharpen_amount.unwrap_or(0.0);
+                let sharpen_radius = photo.edit_sharpen_radius.unwrap_or(1.0);
+                
                 // Only apply effects if there are actual edits
                 let has_edits = exposure != 0.0 || contrast != 1.0 || temperature != 0.0 || 
                                tint != 0.0 || saturation != 0.0 || vibrance != 0.0;
@@ -94,8 +138,21 @@ impl Filmstrip {
                     crate::image_processing::ImageProcessor::process_image(
                         &result.image, exposure, contrast, temperature, tint,
                         highlights, shadows, whites, blacks, clarity, vibrance, saturation,
-                        0.0, 0.0, 0.0, 0.0, // tone curve (not applied to thumbnails)
-                        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL
+                        tone_curve_shadows, tone_curve_darks, tone_curve_lights, tone_curve_highlights,
+                        hsl_red_sat, hsl_orange_sat, hsl_yellow_sat, hsl_green_sat,
+                        hsl_aqua_sat, hsl_blue_sat, hsl_purple_sat, hsl_magenta_sat,
+                        // HSL Hue
+                        hsl_red_hue, hsl_orange_hue, hsl_yellow_hue, hsl_green_hue,
+                        hsl_aqua_hue, hsl_blue_hue, hsl_purple_hue, hsl_magenta_hue,
+                        // HSL Lum
+                        hsl_red_lum, hsl_orange_lum, hsl_yellow_lum, hsl_green_lum,
+                        hsl_aqua_lum, hsl_blue_lum, hsl_purple_lum, hsl_magenta_lum,
+                        // Lens
+                        lens_distortion, lens_vignette_amount, lens_vignette_midpoint,
+                        // NR
+                        nr_luminance, nr_color,
+                        // Sharpening
+                        sharpen_amount, sharpen_radius,
                     )
                 } else {
                     result.image.clone()
@@ -491,6 +548,50 @@ impl Filmstrip {
                 let clarity = photo.edit_clarity.unwrap_or(0.0);
                 let vibrance = photo.edit_vibrance.unwrap_or(0.0);
                 let saturation = photo.edit_saturation.unwrap_or(0.0);
+
+                // Tone Curve
+                let tone_curve_shadows = photo.edit_tone_curve_shadows.unwrap_or(0.0);
+                let tone_curve_darks = photo.edit_tone_curve_darks.unwrap_or(0.0);
+                let tone_curve_lights = photo.edit_tone_curve_lights.unwrap_or(0.0);
+                let tone_curve_highlights = photo.edit_tone_curve_highlights.unwrap_or(0.0);
+
+                // HSL Saturation
+                let hsl_red_sat = photo.edit_hsl_red_sat.unwrap_or(0.0);
+                let hsl_orange_sat = photo.edit_hsl_orange_sat.unwrap_or(0.0);
+                let hsl_yellow_sat = photo.edit_hsl_yellow_sat.unwrap_or(0.0);
+                let hsl_green_sat = photo.edit_hsl_green_sat.unwrap_or(0.0);
+                let hsl_aqua_sat = photo.edit_hsl_aqua_sat.unwrap_or(0.0);
+                let hsl_blue_sat = photo.edit_hsl_blue_sat.unwrap_or(0.0);
+                let hsl_purple_sat = photo.edit_hsl_purple_sat.unwrap_or(0.0);
+                let hsl_magenta_sat = photo.edit_hsl_magenta_sat.unwrap_or(0.0);
+                // HSL Hue
+                let hsl_red_hue = photo.edit_hsl_red_hue.unwrap_or(0.0);
+                let hsl_orange_hue = photo.edit_hsl_orange_hue.unwrap_or(0.0);
+                let hsl_yellow_hue = photo.edit_hsl_yellow_hue.unwrap_or(0.0);
+                let hsl_green_hue = photo.edit_hsl_green_hue.unwrap_or(0.0);
+                let hsl_aqua_hue = photo.edit_hsl_aqua_hue.unwrap_or(0.0);
+                let hsl_blue_hue = photo.edit_hsl_blue_hue.unwrap_or(0.0);
+                let hsl_purple_hue = photo.edit_hsl_purple_hue.unwrap_or(0.0);
+                let hsl_magenta_hue = photo.edit_hsl_magenta_hue.unwrap_or(0.0);
+                // HSL Lum
+                let hsl_red_lum = photo.edit_hsl_red_lum.unwrap_or(0.0);
+                let hsl_orange_lum = photo.edit_hsl_orange_lum.unwrap_or(0.0);
+                let hsl_yellow_lum = photo.edit_hsl_yellow_lum.unwrap_or(0.0);
+                let hsl_green_lum = photo.edit_hsl_green_lum.unwrap_or(0.0);
+                let hsl_aqua_lum = photo.edit_hsl_aqua_lum.unwrap_or(0.0);
+                let hsl_blue_lum = photo.edit_hsl_blue_lum.unwrap_or(0.0);
+                let hsl_purple_lum = photo.edit_hsl_purple_lum.unwrap_or(0.0);
+                let hsl_magenta_lum = photo.edit_hsl_magenta_lum.unwrap_or(0.0);
+                // Lens
+                let lens_distortion = photo.edit_lens_distortion.unwrap_or(0.0);
+                let lens_vignette_amount = photo.edit_lens_vignette_amount.unwrap_or(0.0);
+                let lens_vignette_midpoint = photo.edit_lens_vignette_midpoint.unwrap_or(0.0);
+                // NR
+                let nr_luminance = photo.edit_nr_luminance.unwrap_or(0.0);
+                let nr_color = photo.edit_nr_color.unwrap_or(0.0);
+                // Sharpening
+                let sharpen_amount = photo.edit_sharpen_amount.unwrap_or(0.0);
+                let sharpen_radius = photo.edit_sharpen_radius.unwrap_or(1.0);
                 
                 // Only apply effects if there are actual edits
                 let has_edits = exposure != 0.0 || contrast != 1.0 || temperature != 0.0 || 
@@ -500,8 +601,21 @@ impl Filmstrip {
                     crate::image_processing::ImageProcessor::process_image(
                         &result.image, exposure, contrast, temperature, tint,
                         highlights, shadows, whites, blacks, clarity, vibrance, saturation,
-                        0.0, 0.0, 0.0, 0.0, // tone curve (not applied to thumbnails)
-                        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL
+                        tone_curve_shadows, tone_curve_darks, tone_curve_lights, tone_curve_highlights,
+                        hsl_red_sat, hsl_orange_sat, hsl_yellow_sat, hsl_green_sat,
+                        hsl_aqua_sat, hsl_blue_sat, hsl_purple_sat, hsl_magenta_sat,
+                        // HSL Hue
+                        hsl_red_hue, hsl_orange_hue, hsl_yellow_hue, hsl_green_hue,
+                        hsl_aqua_hue, hsl_blue_hue, hsl_purple_hue, hsl_magenta_hue,
+                        // HSL Lum
+                        hsl_red_lum, hsl_orange_lum, hsl_yellow_lum, hsl_green_lum,
+                        hsl_aqua_lum, hsl_blue_lum, hsl_purple_lum, hsl_magenta_lum,
+                        // Lens
+                        lens_distortion, lens_vignette_amount, lens_vignette_midpoint,
+                        // NR
+                        nr_luminance, nr_color,
+                        // Sharpening
+                        sharpen_amount, sharpen_radius,
                     )
                 } else {
                     result.image.clone()

@@ -43,6 +43,28 @@ pub struct EditSnapshot {
     pub hsl_blue_sat: f32,
     pub hsl_purple_sat: f32,
     pub hsl_magenta_sat: f32,
+    // HSL Hue
+    pub hsl_red_hue: f32,
+    pub hsl_orange_hue: f32,
+    pub hsl_yellow_hue: f32,
+    pub hsl_green_hue: f32,
+    pub hsl_aqua_hue: f32,
+    pub hsl_blue_hue: f32,
+    pub hsl_purple_hue: f32,
+    pub hsl_magenta_hue: f32,
+    // HSL Lum
+    pub hsl_red_lum: f32,
+    pub hsl_orange_lum: f32,
+    pub hsl_yellow_lum: f32,
+    pub hsl_green_lum: f32,
+    pub hsl_aqua_lum: f32,
+    pub hsl_blue_lum: f32,
+    pub hsl_purple_lum: f32,
+    pub hsl_magenta_lum: f32,
+    // Lens
+    pub lens_distortion: f32,
+    pub lens_vignette_amount: f32,
+    pub lens_vignette_midpoint: f32,
     // Noise Reduction
     pub nr_luminance: f32,
     pub nr_color: f32,
@@ -160,6 +182,28 @@ pub struct AppState {
     pub active_hsl_blue_sat: f32,
     pub active_hsl_purple_sat: f32,
     pub active_hsl_magenta_sat: f32,
+    // HSL Hue
+    pub active_hsl_red_hue: f32,
+    pub active_hsl_orange_hue: f32,
+    pub active_hsl_yellow_hue: f32,
+    pub active_hsl_green_hue: f32,
+    pub active_hsl_aqua_hue: f32,
+    pub active_hsl_blue_hue: f32,
+    pub active_hsl_purple_hue: f32,
+    pub active_hsl_magenta_hue: f32,
+    // HSL Lum
+    pub active_hsl_red_lum: f32,
+    pub active_hsl_orange_lum: f32,
+    pub active_hsl_yellow_lum: f32,
+    pub active_hsl_green_lum: f32,
+    pub active_hsl_aqua_lum: f32,
+    pub active_hsl_blue_lum: f32,
+    pub active_hsl_purple_lum: f32,
+    pub active_hsl_magenta_lum: f32,
+    // Lens
+    pub active_lens_distortion: f32,
+    pub active_lens_vignette_amount: f32,
+    pub active_lens_vignette_midpoint: f32,
     // Noise Reduction (Amount 0-100)
     pub active_nr_luminance: f32,
     pub active_nr_color: f32,
@@ -205,6 +249,28 @@ pub struct AppState {
     pub prev_hsl_blue_sat: f32,
     pub prev_hsl_purple_sat: f32,
     pub prev_hsl_magenta_sat: f32,
+    // HSL Hue
+    pub prev_hsl_red_hue: f32,
+    pub prev_hsl_orange_hue: f32,
+    pub prev_hsl_yellow_hue: f32,
+    pub prev_hsl_green_hue: f32,
+    pub prev_hsl_aqua_hue: f32,
+    pub prev_hsl_blue_hue: f32,
+    pub prev_hsl_purple_hue: f32,
+    pub prev_hsl_magenta_hue: f32,
+    // HSL Lum
+    pub prev_hsl_red_lum: f32,
+    pub prev_hsl_orange_lum: f32,
+    pub prev_hsl_yellow_lum: f32,
+    pub prev_hsl_green_lum: f32,
+    pub prev_hsl_aqua_lum: f32,
+    pub prev_hsl_blue_lum: f32,
+    pub prev_hsl_purple_lum: f32,
+    pub prev_hsl_magenta_lum: f32,
+    // Lens
+    pub prev_lens_distortion: f32,
+    pub prev_lens_vignette_amount: f32,
+    pub prev_lens_vignette_midpoint: f32,
     // Previous NR (for change detection)
     pub prev_nr_luminance: f32,
     pub prev_nr_color: f32,
@@ -282,6 +348,11 @@ pub struct AppState {
     pub saved_clarity: f32,
     pub saved_vibrance: f32,
     pub saved_saturation: f32,
+    // Saved Tone Curve
+    pub saved_tone_curve_shadows: f32,
+    pub saved_tone_curve_darks: f32,
+    pub saved_tone_curve_lights: f32,
+    pub saved_tone_curve_highlights: f32,
     // Saved HSL values
     pub saved_hsl_red_sat: f32,
     pub saved_hsl_orange_sat: f32,
@@ -291,6 +362,31 @@ pub struct AppState {
     pub saved_hsl_blue_sat: f32,
     pub saved_hsl_purple_sat: f32,
     pub saved_hsl_magenta_sat: f32,
+    // HSL Hue
+    pub saved_hsl_red_hue: f32,
+    pub saved_hsl_orange_hue: f32,
+    pub saved_hsl_yellow_hue: f32,
+    pub saved_hsl_green_hue: f32,
+    pub saved_hsl_aqua_hue: f32,
+    pub saved_hsl_blue_hue: f32,
+    pub saved_hsl_purple_hue: f32,
+    pub saved_hsl_magenta_hue: f32,
+    // HSL Lum
+    pub saved_hsl_red_lum: f32,
+    pub saved_hsl_orange_lum: f32,
+    pub saved_hsl_yellow_lum: f32,
+    pub saved_hsl_green_lum: f32,
+    pub saved_hsl_aqua_lum: f32,
+    pub saved_hsl_blue_lum: f32,
+    pub saved_hsl_purple_lum: f32,
+    pub saved_hsl_magenta_lum: f32,
+    // Lens
+    pub saved_lens_distortion: f32,
+    pub saved_lens_vignette_amount: f32,
+    pub saved_lens_vignette_midpoint: f32,
+    // Saved NR
+    pub saved_nr_luminance: f32,
+    pub saved_nr_color: f32,
     // Sharpening
     pub saved_sharpen_amount: f32,
     pub saved_sharpen_radius: f32,
@@ -418,6 +514,28 @@ impl AppState {
             active_hsl_blue_sat: 0.0,
             active_hsl_purple_sat: 0.0,
             active_hsl_magenta_sat: 0.0,
+            // HSL Hue
+            active_hsl_red_hue: 0.0,
+            active_hsl_orange_hue: 0.0,
+            active_hsl_yellow_hue: 0.0,
+            active_hsl_green_hue: 0.0,
+            active_hsl_aqua_hue: 0.0,
+            active_hsl_blue_hue: 0.0,
+            active_hsl_purple_hue: 0.0,
+            active_hsl_magenta_hue: 0.0,
+            // HSL Lum
+            active_hsl_red_lum: 0.0,
+            active_hsl_orange_lum: 0.0,
+            active_hsl_yellow_lum: 0.0,
+            active_hsl_green_lum: 0.0,
+            active_hsl_aqua_lum: 0.0,
+            active_hsl_blue_lum: 0.0,
+            active_hsl_purple_lum: 0.0,
+            active_hsl_magenta_lum: 0.0,
+            // Lens
+            active_lens_distortion: 0.0,
+            active_lens_vignette_amount: 0.0,
+            active_lens_vignette_midpoint: 0.0,
             // NR
             active_nr_luminance: 0.0,
             active_nr_color: 0.0,
@@ -448,6 +566,28 @@ impl AppState {
             prev_hsl_blue_sat: 0.0,
             prev_hsl_purple_sat: 0.0,
             prev_hsl_magenta_sat: 0.0,
+            // HSL Hue
+            prev_hsl_red_hue: 0.0,
+            prev_hsl_orange_hue: 0.0,
+            prev_hsl_yellow_hue: 0.0,
+            prev_hsl_green_hue: 0.0,
+            prev_hsl_aqua_hue: 0.0,
+            prev_hsl_blue_hue: 0.0,
+            prev_hsl_purple_hue: 0.0,
+            prev_hsl_magenta_hue: 0.0,
+            // HSL Lum
+            prev_hsl_red_lum: 0.0,
+            prev_hsl_orange_lum: 0.0,
+            prev_hsl_yellow_lum: 0.0,
+            prev_hsl_green_lum: 0.0,
+            prev_hsl_aqua_lum: 0.0,
+            prev_hsl_blue_lum: 0.0,
+            prev_hsl_purple_lum: 0.0,
+            prev_hsl_magenta_lum: 0.0,
+            // Lens
+            prev_lens_distortion: 0.0,
+            prev_lens_vignette_amount: 0.0,
+            prev_lens_vignette_midpoint: 0.0,
             // NR prev
             prev_nr_luminance: 0.0,
             prev_nr_color: 0.0,
@@ -484,6 +624,11 @@ impl AppState {
             saved_clarity: 0.0,
             saved_vibrance: 0.0,
             saved_saturation: 0.0,
+            // Saved Tone Curve
+            saved_tone_curve_shadows: 0.0,
+            saved_tone_curve_darks: 0.0,
+            saved_tone_curve_lights: 0.0,
+            saved_tone_curve_highlights: 0.0,
             // HSL saved values
             saved_hsl_red_sat: 0.0,
             saved_hsl_orange_sat: 0.0,
@@ -493,6 +638,28 @@ impl AppState {
             saved_hsl_blue_sat: 0.0,
             saved_hsl_purple_sat: 0.0,
             saved_hsl_magenta_sat: 0.0,
+            // HSL saved values
+            saved_hsl_red_hue: 0.0,
+            saved_hsl_orange_hue: 0.0,
+            saved_hsl_yellow_hue: 0.0,
+            saved_hsl_green_hue: 0.0,
+            saved_hsl_aqua_hue: 0.0,
+            saved_hsl_blue_hue: 0.0,
+            saved_hsl_purple_hue: 0.0,
+            saved_hsl_magenta_hue: 0.0,
+            saved_hsl_red_lum: 0.0,
+            saved_hsl_orange_lum: 0.0,
+            saved_hsl_yellow_lum: 0.0,
+            saved_hsl_green_lum: 0.0,
+            saved_hsl_aqua_lum: 0.0,
+            saved_hsl_blue_lum: 0.0,
+            saved_hsl_purple_lum: 0.0,
+            saved_hsl_magenta_lum: 0.0,
+            saved_lens_distortion: 0.0,
+            saved_lens_vignette_amount: 0.0,
+            saved_lens_vignette_midpoint: 0.0,
+            saved_nr_luminance: 0.0,
+            saved_nr_color: 0.0,
             // Sharpening saved values
             saved_sharpen_amount: 0.0,
             saved_sharpen_radius: 1.0,
@@ -597,6 +764,28 @@ impl AppState {
         self.active_hsl_blue_sat = 0.0;
         self.active_hsl_purple_sat = 0.0;
         self.active_hsl_magenta_sat = 0.0;
+        // HSL Hue
+        self.active_hsl_red_hue = 0.0;
+        self.active_hsl_orange_hue = 0.0;
+        self.active_hsl_yellow_hue = 0.0;
+        self.active_hsl_green_hue = 0.0;
+        self.active_hsl_aqua_hue = 0.0;
+        self.active_hsl_blue_hue = 0.0;
+        self.active_hsl_purple_hue = 0.0;
+        self.active_hsl_magenta_hue = 0.0;
+        // HSL Lum
+        self.active_hsl_red_lum = 0.0;
+        self.active_hsl_orange_lum = 0.0;
+        self.active_hsl_yellow_lum = 0.0;
+        self.active_hsl_green_lum = 0.0;
+        self.active_hsl_aqua_lum = 0.0;
+        self.active_hsl_blue_lum = 0.0;
+        self.active_hsl_purple_lum = 0.0;
+        self.active_hsl_magenta_lum = 0.0;
+        // Lens
+        self.active_lens_distortion = 0.0;
+        self.active_lens_vignette_amount = 0.0;
+        self.active_lens_vignette_midpoint = 0.0;
         self.active_nr_luminance = 0.0;
         self.active_nr_color = 0.0;
         self.active_sharpen_amount = 0.0;
@@ -641,6 +830,28 @@ impl AppState {
             hsl_blue_sat: self.active_hsl_blue_sat,
             hsl_purple_sat: self.active_hsl_purple_sat,
             hsl_magenta_sat: self.active_hsl_magenta_sat,
+            // HSL Hue
+            hsl_red_hue: self.active_hsl_red_hue,
+            hsl_orange_hue: self.active_hsl_orange_hue,
+            hsl_yellow_hue: self.active_hsl_yellow_hue,
+            hsl_green_hue: self.active_hsl_green_hue,
+            hsl_aqua_hue: self.active_hsl_aqua_hue,
+            hsl_blue_hue: self.active_hsl_blue_hue,
+            hsl_purple_hue: self.active_hsl_purple_hue,
+            hsl_magenta_hue: self.active_hsl_magenta_hue,
+            // HSL Lum
+            hsl_red_lum: self.active_hsl_red_lum,
+            hsl_orange_lum: self.active_hsl_orange_lum,
+            hsl_yellow_lum: self.active_hsl_yellow_lum,
+            hsl_green_lum: self.active_hsl_green_lum,
+            hsl_aqua_lum: self.active_hsl_aqua_lum,
+            hsl_blue_lum: self.active_hsl_blue_lum,
+            hsl_purple_lum: self.active_hsl_purple_lum,
+            hsl_magenta_lum: self.active_hsl_magenta_lum,
+            // Lens
+            lens_distortion: self.active_lens_distortion,
+            lens_vignette_amount: self.active_lens_vignette_amount,
+            lens_vignette_midpoint: self.active_lens_vignette_midpoint,
             nr_luminance: self.active_nr_luminance,
             nr_color: self.active_nr_color,
             sharpen_amount: self.active_sharpen_amount,
@@ -689,8 +900,31 @@ impl AppState {
                 self.active_hsl_orange_sat = snapshot.hsl_orange_sat;
                 self.active_hsl_yellow_sat = snapshot.hsl_yellow_sat;
                 self.active_hsl_green_sat = snapshot.hsl_green_sat;
-                self.active_hsl_aqua_sat = snapshot.hsl_aqua_sat;
                 self.active_hsl_blue_sat = snapshot.hsl_blue_sat;
+                self.active_hsl_purple_sat = snapshot.hsl_purple_sat;
+                self.active_hsl_magenta_sat = snapshot.hsl_magenta_sat;
+                // HSL Hue
+                self.active_hsl_red_hue = snapshot.hsl_red_hue;
+                self.active_hsl_orange_hue = snapshot.hsl_orange_hue;
+                self.active_hsl_yellow_hue = snapshot.hsl_yellow_hue;
+                self.active_hsl_green_hue = snapshot.hsl_green_hue;
+                self.active_hsl_aqua_hue = snapshot.hsl_aqua_hue;
+                self.active_hsl_blue_hue = snapshot.hsl_blue_hue;
+                self.active_hsl_purple_hue = snapshot.hsl_purple_hue;
+                self.active_hsl_magenta_hue = snapshot.hsl_magenta_hue;
+                // HSL Lum
+                self.active_hsl_red_lum = snapshot.hsl_red_lum;
+                self.active_hsl_orange_lum = snapshot.hsl_orange_lum;
+                self.active_hsl_yellow_lum = snapshot.hsl_yellow_lum;
+                self.active_hsl_green_lum = snapshot.hsl_green_lum;
+                self.active_hsl_aqua_lum = snapshot.hsl_aqua_lum;
+                self.active_hsl_blue_lum = snapshot.hsl_blue_lum;
+                self.active_hsl_purple_lum = snapshot.hsl_purple_lum;
+                self.active_hsl_magenta_lum = snapshot.hsl_magenta_lum;
+                // Lens
+                self.active_lens_distortion = snapshot.lens_distortion;
+                self.active_lens_vignette_amount = snapshot.lens_vignette_amount;
+                self.active_lens_vignette_midpoint = snapshot.lens_vignette_midpoint;
                 self.active_hsl_purple_sat = snapshot.hsl_purple_sat;
                 self.active_hsl_magenta_sat = snapshot.hsl_magenta_sat;
                 self.active_nr_luminance = snapshot.nr_luminance;

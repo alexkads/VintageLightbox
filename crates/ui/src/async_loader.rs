@@ -230,6 +230,48 @@ pub struct ImageProcessRequest {
     pub clarity: f32,
     pub vibrance: f32,
     pub saturation: f32,
+    // Tone curve parametric zones
+    pub tone_curve_shadows: f32,
+    pub tone_curve_darks: f32,
+    pub tone_curve_lights: f32,
+    pub tone_curve_highlights: f32,
+    // HSL Saturation
+    pub hsl_red_sat: f32,
+    pub hsl_orange_sat: f32,
+    pub hsl_yellow_sat: f32,
+    pub hsl_green_sat: f32,
+    pub hsl_aqua_sat: f32,
+    pub hsl_blue_sat: f32,
+    pub hsl_purple_sat: f32,
+    pub hsl_magenta_sat: f32,
+    // HSL Hue
+    pub hsl_red_hue: f32,
+    pub hsl_orange_hue: f32,
+    pub hsl_yellow_hue: f32,
+    pub hsl_green_hue: f32,
+    pub hsl_aqua_hue: f32,
+    pub hsl_blue_hue: f32,
+    pub hsl_purple_hue: f32,
+    pub hsl_magenta_hue: f32,
+    // HSL Lum
+    pub hsl_red_lum: f32,
+    pub hsl_orange_lum: f32,
+    pub hsl_yellow_lum: f32,
+    pub hsl_green_lum: f32,
+    pub hsl_aqua_lum: f32,
+    pub hsl_blue_lum: f32,
+    pub hsl_purple_lum: f32,
+    pub hsl_magenta_lum: f32,
+    // Lens
+    pub lens_distortion: f32,
+    pub lens_vignette_amount: f32,
+    pub lens_vignette_midpoint: f32,
+    // NR
+    pub nr_luminance: f32,
+    pub nr_color: f32,
+    // Sharpening
+    pub sharpen_amount: f32,
+    pub sharpen_radius: f32,
     /// Max preview size (width or height)
     pub max_preview_size: u32,
 }
@@ -391,7 +433,31 @@ impl AsyncImageProcessor {
                                request.highlights != 0.0 || request.shadows != 0.0 ||
                                request.whites != 0.0 || request.blacks != 0.0 ||
                                request.clarity != 0.0 || request.vibrance != 0.0 ||
-                               request.saturation != 0.0;
+
+                               // Tone Curve
+                               request.tone_curve_shadows != 0.0 || request.tone_curve_darks != 0.0 ||
+                               request.tone_curve_lights != 0.0 || request.tone_curve_highlights != 0.0 ||
+                               // HSL Sat
+                               request.hsl_red_sat != 0.0 || request.hsl_orange_sat != 0.0 ||
+                               request.hsl_yellow_sat != 0.0 || request.hsl_green_sat != 0.0 ||
+                               request.hsl_aqua_sat != 0.0 || request.hsl_blue_sat != 0.0 ||
+                               request.hsl_purple_sat != 0.0 || request.hsl_magenta_sat != 0.0 ||
+                               // HSL Hue
+                               request.hsl_red_hue != 0.0 || request.hsl_orange_hue != 0.0 ||
+                               request.hsl_yellow_hue != 0.0 || request.hsl_green_hue != 0.0 ||
+                               request.hsl_aqua_hue != 0.0 || request.hsl_blue_hue != 0.0 ||
+                               request.hsl_purple_hue != 0.0 || request.hsl_magenta_hue != 0.0 ||
+                               // HSL Lum
+                               request.hsl_red_lum != 0.0 || request.hsl_orange_lum != 0.0 ||
+                               request.hsl_yellow_lum != 0.0 || request.hsl_green_lum != 0.0 ||
+                               request.hsl_aqua_lum != 0.0 || request.hsl_blue_lum != 0.0 ||
+                               request.hsl_purple_lum != 0.0 || request.hsl_magenta_lum != 0.0 ||
+                               // Lens
+                               request.lens_distortion != 0.0 || request.lens_vignette_amount != 0.0 || request.lens_vignette_midpoint != 0.0 ||
+                               // NR
+                               request.nr_luminance != 0.0 || request.nr_color != 0.0 ||
+                               // Sharpening
+                               request.sharpen_amount != 0.0 || request.sharpen_radius != 1.0;
 
                 let processed = if has_edits {
                     crate::image_processing::ImageProcessor::process_image(
@@ -408,7 +474,20 @@ impl AsyncImageProcessor {
                         request.vibrance,
                         request.saturation,
                         0.0, 0.0, 0.0, 0.0, // tone curve
-                        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL
+                        request.hsl_red_sat, request.hsl_orange_sat, request.hsl_yellow_sat, request.hsl_green_sat,
+                        request.hsl_aqua_sat, request.hsl_blue_sat, request.hsl_purple_sat, request.hsl_magenta_sat,
+                        // HSL Hue
+                        request.hsl_red_hue, request.hsl_orange_hue, request.hsl_yellow_hue, request.hsl_green_hue,
+                        request.hsl_aqua_hue, request.hsl_blue_hue, request.hsl_purple_hue, request.hsl_magenta_hue,
+                        // HSL Lum
+                        request.hsl_red_lum, request.hsl_orange_lum, request.hsl_yellow_lum, request.hsl_green_lum,
+                        request.hsl_aqua_lum, request.hsl_blue_lum, request.hsl_purple_lum, request.hsl_magenta_lum,
+                        // Lens
+                        request.lens_distortion, request.lens_vignette_amount, request.lens_vignette_midpoint,
+                        // NR
+                        request.nr_luminance, request.nr_color,
+                        // Sharpening
+                        request.sharpen_amount, request.sharpen_radius,
                     )
                 } else {
                     preview_img
@@ -491,6 +570,43 @@ pub struct EditRequest {
     pub tone_curve_darks: f32,
     pub tone_curve_lights: f32,
     pub tone_curve_highlights: f32,
+    // HSL Saturation
+    pub hsl_red_sat: f32,
+    pub hsl_orange_sat: f32,
+    pub hsl_yellow_sat: f32,
+    pub hsl_green_sat: f32,
+    pub hsl_aqua_sat: f32,
+    pub hsl_blue_sat: f32,
+    pub hsl_purple_sat: f32,
+    pub hsl_magenta_sat: f32,
+    // HSL Hue
+    pub hsl_red_hue: f32,
+    pub hsl_orange_hue: f32,
+    pub hsl_yellow_hue: f32,
+    pub hsl_green_hue: f32,
+    pub hsl_aqua_hue: f32,
+    pub hsl_blue_hue: f32,
+    pub hsl_purple_hue: f32,
+    pub hsl_magenta_hue: f32,
+    // HSL Lum
+    pub hsl_red_lum: f32,
+    pub hsl_orange_lum: f32,
+    pub hsl_yellow_lum: f32,
+    pub hsl_green_lum: f32,
+    pub hsl_aqua_lum: f32,
+    pub hsl_blue_lum: f32,
+    pub hsl_purple_lum: f32,
+    pub hsl_magenta_lum: f32,
+    // Lens
+    pub lens_distortion: f32,
+    pub lens_vignette_amount: f32,
+    pub lens_vignette_midpoint: f32,
+    // NR
+    pub nr_luminance: f32,
+    pub nr_color: f32,
+    // Sharpening
+    pub sharpen_amount: f32,
+    pub sharpen_radius: f32,
 }
 
 /// Result of applying edits
@@ -551,7 +667,20 @@ impl AsyncEditProcessor {
                 request.tone_curve_darks,
                 request.tone_curve_lights,
                 request.tone_curve_highlights,
-                0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL
+                request.hsl_red_sat, request.hsl_orange_sat, request.hsl_yellow_sat, request.hsl_green_sat,
+                request.hsl_aqua_sat, request.hsl_blue_sat, request.hsl_purple_sat, request.hsl_magenta_sat,
+                // HSL Hue
+                request.hsl_red_hue, request.hsl_orange_hue, request.hsl_yellow_hue, request.hsl_green_hue,
+                request.hsl_aqua_hue, request.hsl_blue_hue, request.hsl_purple_hue, request.hsl_magenta_hue,
+                // HSL Lum
+                request.hsl_red_lum, request.hsl_orange_lum, request.hsl_yellow_lum, request.hsl_green_lum,
+                request.hsl_aqua_lum, request.hsl_blue_lum, request.hsl_purple_lum, request.hsl_magenta_lum,
+                // Lens
+                request.lens_distortion, request.lens_vignette_amount, request.lens_vignette_midpoint,
+                // NR
+                request.nr_luminance, request.nr_color,
+                // Sharpening
+                request.sharpen_amount, request.sharpen_radius,
             );
 
             let result = EditResult {

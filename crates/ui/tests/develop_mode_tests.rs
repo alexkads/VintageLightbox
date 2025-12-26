@@ -21,7 +21,12 @@ mod image_processing_tests {
     fn test_exposure_positive_brightens_image() {
         let img = create_test_image(10, 10, 100, 100, 100);
         let processed = ImageProcessor::process_image(
-            &img, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+            &img, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // Existing 24
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL Hue
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL Lum
+            0.0, 0.0, 0.0, // Lens
+            0.0, 0.0, // NR
+            0.0, 1.0 // Sharpening
         );
         
         let rgba = processed.to_rgba8();
@@ -38,7 +43,12 @@ mod image_processing_tests {
     fn test_exposure_negative_darkens_image() {
         let img = create_test_image(10, 10, 200, 200, 200);
         let processed = ImageProcessor::process_image(
-            &img, -1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+            &img, -1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0,
+            0.0, 0.0,
+            0.0, 1.0
         );
         
         let rgba = processed.to_rgba8();
@@ -54,7 +64,12 @@ mod image_processing_tests {
         // Create image with mid-gray pixels
         let img = create_test_image(10, 10, 128, 128, 128);
         let processed = ImageProcessor::process_image(
-            &img, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+            &img, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0,
+            0.0, 0.0,
+            0.0, 1.0
         );
         
         let rgba = processed.to_rgba8();
@@ -70,7 +85,12 @@ mod image_processing_tests {
         // Create image with light pixels  
         let img = create_test_image(10, 10, 200, 200, 200);
         let processed = ImageProcessor::process_image(
-            &img, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+            &img, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0,
+            0.0, 0.0,
+            0.0, 1.0
         );
         
         let rgba = processed.to_rgba8();
@@ -85,7 +105,12 @@ mod image_processing_tests {
     fn test_temperature_warm() {
         let img = create_test_image(10, 10, 100, 100, 100);
         let processed = ImageProcessor::process_image(
-            &img, 0.0, 1.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+            &img, 0.0, 1.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0,
+            0.0, 0.0,
+            0.0, 1.0
         );
         
         let rgba = processed.to_rgba8();
@@ -99,7 +124,12 @@ mod image_processing_tests {
     fn test_temperature_cool() {
         let img = create_test_image(10, 10, 100, 100, 100);
         let processed = ImageProcessor::process_image(
-            &img, 0.0, 1.0, -5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+            &img, 0.0, 1.0, -5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0,
+            0.0, 0.0,
+            0.0, 1.0
         );
         
         let rgba = processed.to_rgba8();
@@ -114,7 +144,12 @@ mod image_processing_tests {
         // Create a colored image (not gray)
         let img = create_test_image(10, 10, 200, 100, 50);
         let processed = ImageProcessor::process_image(
-            &img, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+            &img, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0,
+            0.0, 0.0,
+            0.0, 1.0
         );
         
         let rgba = processed.to_rgba8();
@@ -130,7 +165,12 @@ mod image_processing_tests {
     fn test_saturation_decrease_to_grayscale() {
         let img = create_test_image(10, 10, 200, 100, 50);
         let processed = ImageProcessor::process_image(
-            &img, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+            &img, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0,
+            0.0, 0.0,
+            0.0, 1.0
         );
         
         let rgba = processed.to_rgba8();
@@ -147,7 +187,12 @@ mod image_processing_tests {
         // Create bright image (>128 luminance)
         let img = create_test_image(10, 10, 200, 200, 200);
         let processed = ImageProcessor::process_image(
-            &img, 0.0, 1.0, 0.0, 0.0, 50.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+            &img, 0.0, 1.0, 0.0, 0.0, 50.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0,
+            0.0, 0.0,
+            0.0, 1.0
         );
         
         let rgba = processed.to_rgba8();
@@ -162,7 +207,12 @@ mod image_processing_tests {
         // Create dark image (<128 luminance)
         let img = create_test_image(10, 10, 50, 50, 50);
         let processed = ImageProcessor::process_image(
-            &img, 0.0, 1.0, 0.0, 0.0, 0.0, 50.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+            &img, 0.0, 1.0, 0.0, 0.0, 0.0, 50.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0,
+            0.0, 0.0,
+            0.0, 1.0
         );
         
         let rgba = processed.to_rgba8();
@@ -176,7 +226,12 @@ mod image_processing_tests {
     fn test_image_dimensions_preserved() {
         let img = create_test_image(123, 456, 100, 100, 100);
         let processed = ImageProcessor::process_image(
-            &img, 1.0, 1.5, 3.0, -2.0, 10.0, 20.0, 5.0, -5.0, 0.3, 0.2, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+            &img, 1.0, 1.5, 3.0, -2.0, 10.0, 20.0, 5.0, -5.0, 0.3, 0.2, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0,
+            0.0, 0.0,
+            0.0, 1.0
         );
         
         assert_eq!(processed.width(), 123, "Width should be preserved");
@@ -190,7 +245,12 @@ mod image_processing_tests {
         let dynamic = DynamicImage::ImageRgba8(img);
         
         let processed = ImageProcessor::process_image(
-            &dynamic, 1.0, 2.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+            &dynamic, 1.0, 2.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0,
+            0.0, 0.0,
+            0.0, 1.0
         );
         
         let rgba = processed.to_rgba8();
@@ -203,7 +263,12 @@ mod image_processing_tests {
     fn test_pixel_values_clamped() {
         let img = create_test_image(10, 10, 250, 250, 250);
         let processed = ImageProcessor::process_image(
-            &img, 2.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+            &img, 2.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0,
+            0.0, 0.0,
+            0.0, 1.0
         );
         
         let rgba = processed.to_rgba8();
@@ -484,4 +549,3 @@ mod debounce_tests {
     // Note: Detailed debounce timing tests removed because last_edit_time is private.
     // The debouncing behavior is tested implicitly through apply_edits_debounced.
 }
-

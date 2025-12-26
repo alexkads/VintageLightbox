@@ -362,6 +362,50 @@ impl eframe::App for VintageLightboxApp {
                     let vibrance = photo.edit_vibrance.unwrap_or(0.0);
                     let saturation = photo.edit_saturation.unwrap_or(0.0);
                     
+                    // Tone Curve
+                    let tone_curve_shadows = photo.edit_tone_curve_shadows.unwrap_or(0.0);
+                    let tone_curve_darks = photo.edit_tone_curve_darks.unwrap_or(0.0);
+                    let tone_curve_lights = photo.edit_tone_curve_lights.unwrap_or(0.0);
+                    let tone_curve_highlights = photo.edit_tone_curve_highlights.unwrap_or(0.0);
+
+                    // HSL Saturation
+                    let hsl_red_sat = photo.edit_hsl_red_sat.unwrap_or(0.0);
+                    let hsl_orange_sat = photo.edit_hsl_orange_sat.unwrap_or(0.0);
+                    let hsl_yellow_sat = photo.edit_hsl_yellow_sat.unwrap_or(0.0);
+                    let hsl_green_sat = photo.edit_hsl_green_sat.unwrap_or(0.0);
+                    let hsl_aqua_sat = photo.edit_hsl_aqua_sat.unwrap_or(0.0);
+                    let hsl_blue_sat = photo.edit_hsl_blue_sat.unwrap_or(0.0);
+                    let hsl_purple_sat = photo.edit_hsl_purple_sat.unwrap_or(0.0);
+                    let hsl_magenta_sat = photo.edit_hsl_magenta_sat.unwrap_or(0.0);
+                    // HSL Hue
+                    let hsl_red_hue = photo.edit_hsl_red_hue.unwrap_or(0.0);
+                    let hsl_orange_hue = photo.edit_hsl_orange_hue.unwrap_or(0.0);
+                    let hsl_yellow_hue = photo.edit_hsl_yellow_hue.unwrap_or(0.0);
+                    let hsl_green_hue = photo.edit_hsl_green_hue.unwrap_or(0.0);
+                    let hsl_aqua_hue = photo.edit_hsl_aqua_hue.unwrap_or(0.0);
+                    let hsl_blue_hue = photo.edit_hsl_blue_hue.unwrap_or(0.0);
+                    let hsl_purple_hue = photo.edit_hsl_purple_hue.unwrap_or(0.0);
+                    let hsl_magenta_hue = photo.edit_hsl_magenta_hue.unwrap_or(0.0);
+                    // HSL Lum
+                    let hsl_red_lum = photo.edit_hsl_red_lum.unwrap_or(0.0);
+                    let hsl_orange_lum = photo.edit_hsl_orange_lum.unwrap_or(0.0);
+                    let hsl_yellow_lum = photo.edit_hsl_yellow_lum.unwrap_or(0.0);
+                    let hsl_green_lum = photo.edit_hsl_green_lum.unwrap_or(0.0);
+                    let hsl_aqua_lum = photo.edit_hsl_aqua_lum.unwrap_or(0.0);
+                    let hsl_blue_lum = photo.edit_hsl_blue_lum.unwrap_or(0.0);
+                    let hsl_purple_lum = photo.edit_hsl_purple_lum.unwrap_or(0.0);
+                    let hsl_magenta_lum = photo.edit_hsl_magenta_lum.unwrap_or(0.0);
+                    // Lens
+                    let lens_distortion = photo.edit_lens_distortion.unwrap_or(0.0);
+                    let lens_vignette_amount = photo.edit_lens_vignette_amount.unwrap_or(0.0);
+                    let lens_vignette_midpoint = photo.edit_lens_vignette_midpoint.unwrap_or(0.0);
+                    // NR
+                    let nr_luminance = photo.edit_nr_luminance.unwrap_or(0.0);
+                    let nr_color = photo.edit_nr_color.unwrap_or(0.0);
+                    // Sharpening
+                    let sharpen_amount = photo.edit_sharpen_amount.unwrap_or(0.0);
+                    let sharpen_radius = photo.edit_sharpen_radius.unwrap_or(1.0);
+                    
                     // LIGHTROOM-STYLE: Load thumbnail as instant preview WITH EFFECTS APPLIED
                     // This gives immediate visual feedback that matches the final look
                     // Try to load from PreviewManager (BLOB cache) FIRST
@@ -380,8 +424,21 @@ impl eframe::App for VintageLightboxApp {
                              clarity,
                              vibrance,
                              saturation,
-                             0.0, 0.0, 0.0, 0.0, // tone curve
-                             0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL
+                             tone_curve_shadows, tone_curve_darks, tone_curve_lights, tone_curve_highlights,
+                             hsl_red_sat, hsl_orange_sat, hsl_yellow_sat, hsl_green_sat,
+                             hsl_aqua_sat, hsl_blue_sat, hsl_purple_sat, hsl_magenta_sat,
+                             // HSL Hue
+                             hsl_red_hue, hsl_orange_hue, hsl_yellow_hue, hsl_green_hue,
+                             hsl_aqua_hue, hsl_blue_hue, hsl_purple_hue, hsl_magenta_hue,
+                             // HSL Lum
+                             hsl_red_lum, hsl_orange_lum, hsl_yellow_lum, hsl_green_lum,
+                             hsl_aqua_lum, hsl_blue_lum, hsl_purple_lum, hsl_magenta_lum,
+                             // Lens
+                             lens_distortion, lens_vignette_amount, lens_vignette_midpoint,
+                             // NR
+                             nr_luminance, nr_color,
+                             // Sharpening
+                             sharpen_amount, sharpen_radius,
                          );
                          
                          let thumb_texture = crate::image_processing::ImageProcessor::load_texture(
@@ -406,8 +463,21 @@ impl eframe::App for VintageLightboxApp {
                                 clarity,
                                 vibrance,
                                 saturation,
-                                0.0, 0.0, 0.0, 0.0, // tone curve
-                                0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL
+                                tone_curve_shadows, tone_curve_darks, tone_curve_lights, tone_curve_highlights,
+                                hsl_red_sat, hsl_orange_sat, hsl_yellow_sat, hsl_green_sat,
+                                hsl_aqua_sat, hsl_blue_sat, hsl_purple_sat, hsl_magenta_sat,
+                                // HSL Hue
+                                hsl_red_hue, hsl_orange_hue, hsl_yellow_hue, hsl_green_hue,
+                                hsl_aqua_hue, hsl_blue_hue, hsl_purple_hue, hsl_magenta_hue,
+                                // HSL Lum
+                                hsl_red_lum, hsl_orange_lum, hsl_yellow_lum, hsl_green_lum,
+                                hsl_aqua_lum, hsl_blue_lum, hsl_purple_lum, hsl_magenta_lum,
+                                // Lens
+                                lens_distortion, lens_vignette_amount, lens_vignette_midpoint,
+                                // NR
+                                nr_luminance, nr_color,
+                                // Sharpening
+                                sharpen_amount, sharpen_radius,
                             );
                             
                             let thumb_texture = crate::image_processing::ImageProcessor::load_texture(
@@ -465,6 +535,131 @@ impl eframe::App for VintageLightboxApp {
                     self.state.saved_clarity = clarity;
                     self.state.saved_vibrance = vibrance;
                     self.state.saved_saturation = saturation;
+                    // Tone Curve
+                    self.state.saved_tone_curve_shadows = tone_curve_shadows;
+                    self.state.saved_tone_curve_darks = tone_curve_darks;
+                    self.state.saved_tone_curve_lights = tone_curve_lights;
+                    self.state.saved_tone_curve_highlights = tone_curve_highlights;
+                    // HSL Saturation state
+                    self.state.active_hsl_red_sat = hsl_red_sat;
+                    self.state.active_hsl_orange_sat = hsl_orange_sat;
+                    self.state.active_hsl_yellow_sat = hsl_yellow_sat;
+                    self.state.active_hsl_green_sat = hsl_green_sat;
+                    self.state.active_hsl_aqua_sat = hsl_aqua_sat;
+                    self.state.active_hsl_blue_sat = hsl_blue_sat;
+                    self.state.active_hsl_purple_sat = hsl_purple_sat;
+                    self.state.active_hsl_magenta_sat = hsl_magenta_sat;
+                    
+                    self.state.prev_hsl_red_sat = hsl_red_sat;
+                    self.state.prev_hsl_orange_sat = hsl_orange_sat;
+                    self.state.prev_hsl_yellow_sat = hsl_yellow_sat;
+                    self.state.prev_hsl_green_sat = hsl_green_sat;
+                    self.state.prev_hsl_aqua_sat = hsl_aqua_sat;
+                    self.state.prev_hsl_blue_sat = hsl_blue_sat;
+                    self.state.prev_hsl_purple_sat = hsl_purple_sat;
+                    self.state.prev_hsl_magenta_sat = hsl_magenta_sat;
+                    
+                    self.state.saved_hsl_red_sat = hsl_red_sat;
+                    self.state.saved_hsl_orange_sat = hsl_orange_sat;
+                    self.state.saved_hsl_yellow_sat = hsl_yellow_sat;
+                    self.state.saved_hsl_green_sat = hsl_green_sat;
+                    self.state.saved_hsl_aqua_sat = hsl_aqua_sat;
+                    self.state.saved_hsl_blue_sat = hsl_blue_sat;
+                    self.state.saved_hsl_purple_sat = hsl_purple_sat;
+                    self.state.saved_hsl_magenta_sat = hsl_magenta_sat;
+
+                    // HSL Hue state
+                    self.state.active_hsl_red_hue = hsl_red_hue;
+                    self.state.active_hsl_orange_hue = hsl_orange_hue;
+                    self.state.active_hsl_yellow_hue = hsl_yellow_hue;
+                    self.state.active_hsl_green_hue = hsl_green_hue;
+                    self.state.active_hsl_aqua_hue = hsl_aqua_hue;
+                    self.state.active_hsl_blue_hue = hsl_blue_hue;
+                    self.state.active_hsl_purple_hue = hsl_purple_hue;
+                    self.state.active_hsl_magenta_hue = hsl_magenta_hue;
+                    
+                    self.state.prev_hsl_red_hue = hsl_red_hue;
+                    self.state.prev_hsl_orange_hue = hsl_orange_hue;
+                    self.state.prev_hsl_yellow_hue = hsl_yellow_hue;
+                    self.state.prev_hsl_green_hue = hsl_green_hue;
+                    self.state.prev_hsl_aqua_hue = hsl_aqua_hue;
+                    self.state.prev_hsl_blue_hue = hsl_blue_hue;
+                    self.state.prev_hsl_purple_hue = hsl_purple_hue;
+                    self.state.prev_hsl_magenta_hue = hsl_magenta_hue;
+                    
+                    self.state.saved_hsl_red_hue = hsl_red_hue;
+                    self.state.saved_hsl_orange_hue = hsl_orange_hue;
+                    self.state.saved_hsl_yellow_hue = hsl_yellow_hue;
+                    self.state.saved_hsl_green_hue = hsl_green_hue;
+                    self.state.saved_hsl_aqua_hue = hsl_aqua_hue;
+                    self.state.saved_hsl_blue_hue = hsl_blue_hue;
+                    self.state.saved_hsl_purple_hue = hsl_purple_hue;
+                    self.state.saved_hsl_magenta_hue = hsl_magenta_hue;
+
+                    // HSL Lum state
+                    self.state.active_hsl_red_lum = hsl_red_lum;
+                    self.state.active_hsl_orange_lum = hsl_orange_lum;
+                    self.state.active_hsl_yellow_lum = hsl_yellow_lum;
+                    self.state.active_hsl_green_lum = hsl_green_lum;
+                    self.state.active_hsl_aqua_lum = hsl_aqua_lum;
+                    self.state.active_hsl_blue_lum = hsl_blue_lum;
+                    self.state.active_hsl_purple_lum = hsl_purple_lum;
+                    self.state.active_hsl_magenta_lum = hsl_magenta_lum;
+                    
+                    self.state.prev_hsl_red_lum = hsl_red_lum;
+                    self.state.prev_hsl_orange_lum = hsl_orange_lum;
+                    self.state.prev_hsl_yellow_lum = hsl_yellow_lum;
+                    self.state.prev_hsl_green_lum = hsl_green_lum;
+                    self.state.prev_hsl_aqua_lum = hsl_aqua_lum;
+                    self.state.prev_hsl_blue_lum = hsl_blue_lum;
+                    self.state.prev_hsl_purple_lum = hsl_purple_lum;
+                    self.state.prev_hsl_magenta_lum = hsl_magenta_lum;
+                    
+                    self.state.saved_hsl_red_lum = hsl_red_lum;
+                    self.state.saved_hsl_orange_lum = hsl_orange_lum;
+                    self.state.saved_hsl_yellow_lum = hsl_yellow_lum;
+                    self.state.saved_hsl_green_lum = hsl_green_lum;
+                    self.state.saved_hsl_aqua_lum = hsl_aqua_lum;
+                    self.state.saved_hsl_blue_lum = hsl_blue_lum;
+                    self.state.saved_hsl_purple_lum = hsl_purple_lum;
+                    self.state.saved_hsl_magenta_lum = hsl_magenta_lum;
+
+                    // Lens
+                    self.state.active_lens_distortion = lens_distortion;
+                    self.state.active_lens_vignette_amount = lens_vignette_amount;
+                    self.state.active_lens_vignette_midpoint = lens_vignette_midpoint;
+                    self.state.prev_lens_distortion = lens_distortion;
+                    self.state.prev_lens_vignette_amount = lens_vignette_amount;
+                    self.state.prev_lens_vignette_midpoint = lens_vignette_midpoint;
+                    self.state.saved_lens_distortion = lens_distortion;
+                    self.state.saved_lens_vignette_amount = lens_vignette_amount;
+                    self.state.saved_lens_vignette_midpoint = lens_vignette_midpoint;
+
+                    // NR
+                    self.state.active_nr_luminance = nr_luminance;
+                    self.state.active_nr_color = nr_color;
+                    self.state.prev_nr_luminance = nr_luminance;
+                    self.state.prev_nr_color = nr_color;
+                    self.state.saved_nr_luminance = nr_luminance;
+                    self.state.saved_nr_color = nr_color;
+
+                    // Sharpening
+                    self.state.active_sharpen_amount = sharpen_amount;
+                    self.state.active_sharpen_radius = sharpen_radius;
+                    self.state.prev_sharpen_amount = sharpen_amount;
+                    self.state.prev_sharpen_radius = sharpen_radius;
+                    self.state.saved_sharpen_amount = sharpen_amount;
+                    self.state.saved_sharpen_radius = sharpen_radius;
+
+                    // Initialize Tone Curve active/prev values (saved already done above)
+                    self.state.active_tone_curve_shadows = tone_curve_shadows;
+                    self.state.active_tone_curve_darks = tone_curve_darks;
+                    self.state.active_tone_curve_lights = tone_curve_lights;
+                    self.state.active_tone_curve_highlights = tone_curve_highlights;
+                    self.state.prev_tone_curve_shadows = tone_curve_shadows;
+                    self.state.prev_tone_curve_darks = tone_curve_darks;
+                    self.state.prev_tone_curve_lights = tone_curve_lights;
+                    self.state.prev_tone_curve_highlights = tone_curve_highlights;
 
                     // Request async image loading (non-blocking!)
                     self.image_processor.request_process(ImageProcessRequest {
@@ -481,6 +676,25 @@ impl eframe::App for VintageLightboxApp {
                         clarity,
                         vibrance,
                         saturation,
+                        tone_curve_shadows,
+                        tone_curve_darks,
+                        tone_curve_lights,
+                        tone_curve_highlights,
+                        // HSL Saturation
+                        hsl_red_sat, hsl_orange_sat, hsl_yellow_sat, hsl_green_sat,
+                        hsl_aqua_sat, hsl_blue_sat, hsl_purple_sat, hsl_magenta_sat,
+                        // HSL Hue
+                        hsl_red_hue, hsl_orange_hue, hsl_yellow_hue, hsl_green_hue,
+                        hsl_aqua_hue, hsl_blue_hue, hsl_purple_hue, hsl_magenta_hue,
+                        // HSL Lum
+                        hsl_red_lum, hsl_orange_lum, hsl_yellow_lum, hsl_green_lum,
+                        hsl_aqua_lum, hsl_blue_lum, hsl_purple_lum, hsl_magenta_lum,
+                        // Lens
+                        lens_distortion, lens_vignette_amount, lens_vignette_midpoint,
+                        // NR
+                        nr_luminance, nr_color,
+                        // Sharpening
+                        sharpen_amount, sharpen_radius,
                         max_preview_size: 2560,
                     });
 
@@ -507,7 +721,44 @@ impl eframe::App for VintageLightboxApp {
                     self.state.active_tone_curve_shadows != self.state.prev_tone_curve_shadows ||
                     self.state.active_tone_curve_darks != self.state.prev_tone_curve_darks ||
                     self.state.active_tone_curve_lights != self.state.prev_tone_curve_lights ||
-                    self.state.active_tone_curve_highlights != self.state.prev_tone_curve_highlights;
+                    self.state.active_tone_curve_highlights != self.state.prev_tone_curve_highlights ||
+                    // HSL Saturation
+                    self.state.active_hsl_red_sat != self.state.prev_hsl_red_sat ||
+                    self.state.active_hsl_orange_sat != self.state.prev_hsl_orange_sat ||
+                    self.state.active_hsl_yellow_sat != self.state.prev_hsl_yellow_sat ||
+                    self.state.active_hsl_green_sat != self.state.prev_hsl_green_sat ||
+                    self.state.active_hsl_aqua_sat != self.state.prev_hsl_aqua_sat ||
+                    self.state.active_hsl_blue_sat != self.state.prev_hsl_blue_sat ||
+                    self.state.active_hsl_purple_sat != self.state.prev_hsl_purple_sat ||
+                    self.state.active_hsl_magenta_sat != self.state.prev_hsl_magenta_sat ||
+                    // HSL Hue
+                    self.state.active_hsl_red_hue != self.state.prev_hsl_red_hue ||
+                    self.state.active_hsl_orange_hue != self.state.prev_hsl_orange_hue ||
+                    self.state.active_hsl_yellow_hue != self.state.prev_hsl_yellow_hue ||
+                    self.state.active_hsl_green_hue != self.state.prev_hsl_green_hue ||
+                    self.state.active_hsl_aqua_hue != self.state.prev_hsl_aqua_hue ||
+                    self.state.active_hsl_blue_hue != self.state.prev_hsl_blue_hue ||
+                    self.state.active_hsl_purple_hue != self.state.prev_hsl_purple_hue ||
+                    self.state.active_hsl_magenta_hue != self.state.prev_hsl_magenta_hue ||
+                    // HSL Lum
+                    self.state.active_hsl_red_lum != self.state.prev_hsl_red_lum ||
+                    self.state.active_hsl_orange_lum != self.state.prev_hsl_orange_lum ||
+                    self.state.active_hsl_yellow_lum != self.state.prev_hsl_yellow_lum ||
+                    self.state.active_hsl_green_lum != self.state.prev_hsl_green_lum ||
+                    self.state.active_hsl_aqua_lum != self.state.prev_hsl_aqua_lum ||
+                    self.state.active_hsl_blue_lum != self.state.prev_hsl_blue_lum ||
+                    self.state.active_hsl_purple_lum != self.state.prev_hsl_purple_lum ||
+                    self.state.active_hsl_magenta_lum != self.state.prev_hsl_magenta_lum ||
+                    // Lens
+                    self.state.active_lens_distortion != self.state.prev_lens_distortion ||
+                    self.state.active_lens_vignette_amount != self.state.prev_lens_vignette_amount ||
+                    self.state.active_lens_vignette_midpoint != self.state.prev_lens_vignette_midpoint ||
+                    // NR
+                    self.state.active_nr_luminance != self.state.prev_nr_luminance ||
+                    self.state.active_nr_color != self.state.prev_nr_color ||
+                    // Sharpen
+                    self.state.active_sharpen_amount != self.state.prev_sharpen_amount ||
+                    self.state.active_sharpen_radius != self.state.prev_sharpen_radius;
                 let before_toggled = self.state.show_before != self.state.prev_show_before;
 
                 if (edits_changed || before_toggled) && self.state.original_preview.is_some() {
@@ -529,7 +780,44 @@ impl eframe::App for VintageLightboxApp {
                                 last_snapshot.tone_curve_shadows != self.state.active_tone_curve_shadows ||
                                 last_snapshot.tone_curve_darks != self.state.active_tone_curve_darks ||
                                 last_snapshot.tone_curve_lights != self.state.active_tone_curve_lights ||
-                                last_snapshot.tone_curve_highlights != self.state.active_tone_curve_highlights
+                                last_snapshot.tone_curve_highlights != self.state.active_tone_curve_highlights ||
+                                // HSL Sat
+                                last_snapshot.hsl_red_sat != self.state.active_hsl_red_sat ||
+                                last_snapshot.hsl_orange_sat != self.state.active_hsl_orange_sat ||
+                                last_snapshot.hsl_yellow_sat != self.state.active_hsl_yellow_sat ||
+                                last_snapshot.hsl_green_sat != self.state.active_hsl_green_sat ||
+                                last_snapshot.hsl_aqua_sat != self.state.active_hsl_aqua_sat ||
+                                last_snapshot.hsl_blue_sat != self.state.active_hsl_blue_sat ||
+                                last_snapshot.hsl_purple_sat != self.state.active_hsl_purple_sat ||
+                                last_snapshot.hsl_magenta_sat != self.state.active_hsl_magenta_sat ||
+                                // HSL Hue
+                                last_snapshot.hsl_red_hue != self.state.active_hsl_red_hue ||
+                                last_snapshot.hsl_orange_hue != self.state.active_hsl_orange_hue ||
+                                last_snapshot.hsl_yellow_hue != self.state.active_hsl_yellow_hue ||
+                                last_snapshot.hsl_green_hue != self.state.active_hsl_green_hue ||
+                                last_snapshot.hsl_aqua_hue != self.state.active_hsl_aqua_hue ||
+                                last_snapshot.hsl_blue_hue != self.state.active_hsl_blue_hue ||
+                                last_snapshot.hsl_purple_hue != self.state.active_hsl_purple_hue ||
+                                last_snapshot.hsl_magenta_hue != self.state.active_hsl_magenta_hue ||
+                                // HSL Lum
+                                last_snapshot.hsl_red_lum != self.state.active_hsl_red_lum ||
+                                last_snapshot.hsl_orange_lum != self.state.active_hsl_orange_lum ||
+                                last_snapshot.hsl_yellow_lum != self.state.active_hsl_yellow_lum ||
+                                last_snapshot.hsl_green_lum != self.state.active_hsl_green_lum ||
+                                last_snapshot.hsl_aqua_lum != self.state.active_hsl_aqua_lum ||
+                                last_snapshot.hsl_blue_lum != self.state.active_hsl_blue_lum ||
+                                last_snapshot.hsl_purple_lum != self.state.active_hsl_purple_lum ||
+                                last_snapshot.hsl_magenta_lum != self.state.active_hsl_magenta_lum ||
+                                // Lens
+                                last_snapshot.lens_distortion != self.state.active_lens_distortion ||
+                                last_snapshot.lens_vignette_amount != self.state.active_lens_vignette_amount ||
+                                last_snapshot.lens_vignette_midpoint != self.state.active_lens_vignette_midpoint ||
+                                // NR
+                                last_snapshot.nr_luminance != self.state.active_nr_luminance ||
+                                last_snapshot.nr_color != self.state.active_nr_color ||
+                                // Sharpen
+                                last_snapshot.sharpen_amount != self.state.active_sharpen_amount ||
+                                last_snapshot.sharpen_radius != self.state.active_sharpen_radius
                             } else {
                                 true
                             }
@@ -596,6 +884,28 @@ impl eframe::App for VintageLightboxApp {
                                     hsl_blue_sat: self.state.active_hsl_blue_sat,
                                     hsl_purple_sat: self.state.active_hsl_purple_sat,
                                     hsl_magenta_sat: self.state.active_hsl_magenta_sat,
+                                    // HSL Hue
+                                    hsl_red_hue: self.state.active_hsl_red_hue,
+                                    hsl_orange_hue: self.state.active_hsl_orange_hue,
+                                    hsl_yellow_hue: self.state.active_hsl_yellow_hue,
+                                    hsl_green_hue: self.state.active_hsl_green_hue,
+                                    hsl_aqua_hue: self.state.active_hsl_aqua_hue,
+                                    hsl_blue_hue: self.state.active_hsl_blue_hue,
+                                    hsl_purple_hue: self.state.active_hsl_purple_hue,
+                                    hsl_magenta_hue: self.state.active_hsl_magenta_hue,
+                                    // HSL Lum
+                                    hsl_red_lum: self.state.active_hsl_red_lum,
+                                    hsl_orange_lum: self.state.active_hsl_orange_lum,
+                                    hsl_yellow_lum: self.state.active_hsl_yellow_lum,
+                                    hsl_green_lum: self.state.active_hsl_green_lum,
+                                    hsl_aqua_lum: self.state.active_hsl_aqua_lum,
+                                    hsl_blue_lum: self.state.active_hsl_blue_lum,
+                                    hsl_purple_lum: self.state.active_hsl_purple_lum,
+                                    hsl_magenta_lum: self.state.active_hsl_magenta_lum,
+                                    // Lens
+                                    lens_distortion: self.state.active_lens_distortion,
+                                    lens_vignette_amount: self.state.active_lens_vignette_amount,
+                                    lens_vignette_midpoint: self.state.active_lens_vignette_midpoint,
                                     // NR
                                     nr_luminance: self.state.active_nr_luminance,
                                     nr_color: self.state.active_nr_color,
@@ -627,6 +937,43 @@ impl eframe::App for VintageLightboxApp {
                         self.state.prev_tone_curve_darks = self.state.active_tone_curve_darks;
                         self.state.prev_tone_curve_lights = self.state.active_tone_curve_lights;
                         self.state.prev_tone_curve_highlights = self.state.active_tone_curve_highlights;
+                        // HSL Sat
+                        self.state.prev_hsl_red_sat = self.state.active_hsl_red_sat;
+                        self.state.prev_hsl_orange_sat = self.state.active_hsl_orange_sat;
+                        self.state.prev_hsl_yellow_sat = self.state.active_hsl_yellow_sat;
+                        self.state.prev_hsl_green_sat = self.state.active_hsl_green_sat;
+                        self.state.prev_hsl_aqua_sat = self.state.active_hsl_aqua_sat;
+                        self.state.prev_hsl_blue_sat = self.state.active_hsl_blue_sat;
+                        self.state.prev_hsl_purple_sat = self.state.active_hsl_purple_sat;
+                        self.state.prev_hsl_magenta_sat = self.state.active_hsl_magenta_sat;
+                        // HSL Hue
+                        self.state.prev_hsl_red_hue = self.state.active_hsl_red_hue;
+                        self.state.prev_hsl_orange_hue = self.state.active_hsl_orange_hue;
+                        self.state.prev_hsl_yellow_hue = self.state.active_hsl_yellow_hue;
+                        self.state.prev_hsl_green_hue = self.state.active_hsl_green_hue;
+                        self.state.prev_hsl_aqua_hue = self.state.active_hsl_aqua_hue;
+                        self.state.prev_hsl_blue_hue = self.state.active_hsl_blue_hue;
+                        self.state.prev_hsl_purple_hue = self.state.active_hsl_purple_hue;
+                        self.state.prev_hsl_magenta_hue = self.state.active_hsl_magenta_hue;
+                        // HSL Lum
+                        self.state.prev_hsl_red_lum = self.state.active_hsl_red_lum;
+                        self.state.prev_hsl_orange_lum = self.state.active_hsl_orange_lum;
+                        self.state.prev_hsl_yellow_lum = self.state.active_hsl_yellow_lum;
+                        self.state.prev_hsl_green_lum = self.state.active_hsl_green_lum;
+                        self.state.prev_hsl_aqua_lum = self.state.active_hsl_aqua_lum;
+                        self.state.prev_hsl_blue_lum = self.state.active_hsl_blue_lum;
+                        self.state.prev_hsl_purple_lum = self.state.active_hsl_purple_lum;
+                        self.state.prev_hsl_magenta_lum = self.state.active_hsl_magenta_lum;
+                        // Lens
+                        self.state.prev_lens_distortion = self.state.active_lens_distortion;
+                        self.state.prev_lens_vignette_amount = self.state.active_lens_vignette_amount;
+                        self.state.prev_lens_vignette_midpoint = self.state.active_lens_vignette_midpoint;
+                        // NR
+                        self.state.prev_nr_luminance = self.state.active_nr_luminance;
+                        self.state.prev_nr_color = self.state.active_nr_color;
+                        // Sharpen
+                        self.state.prev_sharpen_amount = self.state.active_sharpen_amount;
+                        self.state.prev_sharpen_radius = self.state.active_sharpen_radius;
                     }
                     self.state.prev_show_before = self.state.show_before;
                 }
@@ -654,7 +1001,49 @@ impl eframe::App for VintageLightboxApp {
                         self.state.active_blacks != self.state.saved_blacks ||
                         self.state.active_clarity != self.state.saved_clarity ||
                         self.state.active_vibrance != self.state.saved_vibrance ||
-                        self.state.active_saturation != self.state.saved_saturation;
+                        self.state.active_saturation != self.state.saved_saturation ||
+                        // Tone Curve
+                        self.state.active_tone_curve_shadows != self.state.saved_tone_curve_shadows ||
+                        self.state.active_tone_curve_darks != self.state.saved_tone_curve_darks ||
+                        self.state.active_tone_curve_lights != self.state.saved_tone_curve_lights ||
+                        self.state.active_tone_curve_highlights != self.state.saved_tone_curve_highlights ||
+                        // HSL Sat
+                        self.state.active_hsl_red_sat != self.state.saved_hsl_red_sat ||
+                        self.state.active_hsl_orange_sat != self.state.saved_hsl_orange_sat ||
+                        self.state.active_hsl_yellow_sat != self.state.saved_hsl_yellow_sat ||
+                        self.state.active_hsl_green_sat != self.state.saved_hsl_green_sat ||
+                        self.state.active_hsl_aqua_sat != self.state.saved_hsl_aqua_sat ||
+                        self.state.active_hsl_blue_sat != self.state.saved_hsl_blue_sat ||
+                        self.state.active_hsl_purple_sat != self.state.saved_hsl_purple_sat ||
+                        self.state.active_hsl_magenta_sat != self.state.saved_hsl_magenta_sat ||
+                        // HSL Hue
+                        self.state.active_hsl_red_hue != self.state.saved_hsl_red_hue ||
+                        self.state.active_hsl_orange_hue != self.state.saved_hsl_orange_hue ||
+                        self.state.active_hsl_yellow_hue != self.state.saved_hsl_yellow_hue ||
+                        self.state.active_hsl_green_hue != self.state.saved_hsl_green_hue ||
+                        self.state.active_hsl_aqua_hue != self.state.saved_hsl_aqua_hue ||
+                        self.state.active_hsl_blue_hue != self.state.saved_hsl_blue_hue ||
+                        self.state.active_hsl_purple_hue != self.state.saved_hsl_purple_hue ||
+                        self.state.active_hsl_magenta_hue != self.state.saved_hsl_magenta_hue ||
+                        // HSL Lum
+                        self.state.active_hsl_red_lum != self.state.saved_hsl_red_lum ||
+                        self.state.active_hsl_orange_lum != self.state.saved_hsl_orange_lum ||
+                        self.state.active_hsl_yellow_lum != self.state.saved_hsl_yellow_lum ||
+                        self.state.active_hsl_green_lum != self.state.saved_hsl_green_lum ||
+                        self.state.active_hsl_aqua_lum != self.state.saved_hsl_aqua_lum ||
+                        self.state.active_hsl_blue_lum != self.state.saved_hsl_blue_lum ||
+                        self.state.active_hsl_purple_lum != self.state.saved_hsl_purple_lum ||
+                        self.state.active_hsl_magenta_lum != self.state.saved_hsl_magenta_lum ||
+                        // Lens
+                        self.state.active_lens_distortion != self.state.saved_lens_distortion ||
+                        self.state.active_lens_vignette_amount != self.state.saved_lens_vignette_amount ||
+                        self.state.active_lens_vignette_midpoint != self.state.saved_lens_vignette_midpoint ||
+                        // NR
+                        self.state.active_nr_luminance != self.state.saved_nr_luminance ||
+                        self.state.active_nr_color != self.state.saved_nr_color ||
+                        // Sharpen
+                        self.state.active_sharpen_amount != self.state.saved_sharpen_amount ||
+                        self.state.active_sharpen_radius != self.state.saved_sharpen_radius;
 
                     if values_changed {
                         if let Some(metadata) = &self.state.detail_metadata {
@@ -684,6 +1073,28 @@ impl eframe::App for VintageLightboxApp {
                             let hsl_blue_sat = self.state.active_hsl_blue_sat;
                             let hsl_purple_sat = self.state.active_hsl_purple_sat;
                             let hsl_magenta_sat = self.state.active_hsl_magenta_sat;
+                            // HSL Hue
+                            let hsl_red_hue = self.state.active_hsl_red_hue;
+                            let hsl_orange_hue = self.state.active_hsl_orange_hue;
+                            let hsl_yellow_hue = self.state.active_hsl_yellow_hue;
+                            let hsl_green_hue = self.state.active_hsl_green_hue;
+                            let hsl_aqua_hue = self.state.active_hsl_aqua_hue;
+                            let hsl_blue_hue = self.state.active_hsl_blue_hue;
+                            let hsl_purple_hue = self.state.active_hsl_purple_hue;
+                            let hsl_magenta_hue = self.state.active_hsl_magenta_hue;
+                            // HSL Lum
+                            let hsl_red_lum = self.state.active_hsl_red_lum;
+                            let hsl_orange_lum = self.state.active_hsl_orange_lum;
+                            let hsl_yellow_lum = self.state.active_hsl_yellow_lum;
+                            let hsl_green_lum = self.state.active_hsl_green_lum;
+                            let hsl_aqua_lum = self.state.active_hsl_aqua_lum;
+                            let hsl_blue_lum = self.state.active_hsl_blue_lum;
+                            let hsl_purple_lum = self.state.active_hsl_purple_lum;
+                            let hsl_magenta_lum = self.state.active_hsl_magenta_lum;
+                            // Lens
+                            let lens_distortion = self.state.active_lens_distortion;
+                            let lens_vignette_amount = self.state.active_lens_vignette_amount;
+                            let lens_vignette_midpoint = self.state.active_lens_vignette_midpoint;
 
                             // Noise Reduction from state
                             let nr_luminance = self.state.active_nr_luminance;
@@ -728,6 +1139,47 @@ impl eframe::App for VintageLightboxApp {
                                 photo.edit_clarity = Some(clarity);
                                 photo.edit_vibrance = Some(vibrance);
                                 photo.edit_saturation = Some(saturation);
+                                photo.edit_tone_curve_shadows = Some(tone_curve_shadows);
+                                photo.edit_tone_curve_darks = Some(tone_curve_darks);
+                                photo.edit_tone_curve_lights = Some(tone_curve_lights);
+                                photo.edit_tone_curve_highlights = Some(tone_curve_highlights);
+                                // HSL Sat
+                                photo.edit_hsl_red_sat = Some(hsl_red_sat);
+                                photo.edit_hsl_orange_sat = Some(hsl_orange_sat);
+                                photo.edit_hsl_yellow_sat = Some(hsl_yellow_sat);
+                                photo.edit_hsl_green_sat = Some(hsl_green_sat);
+                                photo.edit_hsl_aqua_sat = Some(hsl_aqua_sat);
+                                photo.edit_hsl_blue_sat = Some(hsl_blue_sat);
+                                photo.edit_hsl_purple_sat = Some(hsl_purple_sat);
+                                photo.edit_hsl_magenta_sat = Some(hsl_magenta_sat);
+                                // HSL Hue
+                                photo.edit_hsl_red_hue = Some(hsl_red_hue);
+                                photo.edit_hsl_orange_hue = Some(hsl_orange_hue);
+                                photo.edit_hsl_yellow_hue = Some(hsl_yellow_hue);
+                                photo.edit_hsl_green_hue = Some(hsl_green_hue);
+                                photo.edit_hsl_aqua_hue = Some(hsl_aqua_hue);
+                                photo.edit_hsl_blue_hue = Some(hsl_blue_hue);
+                                photo.edit_hsl_purple_hue = Some(hsl_purple_hue);
+                                photo.edit_hsl_magenta_hue = Some(hsl_magenta_hue);
+                                // HSL Lum
+                                photo.edit_hsl_red_lum = Some(hsl_red_lum);
+                                photo.edit_hsl_orange_lum = Some(hsl_orange_lum);
+                                photo.edit_hsl_yellow_lum = Some(hsl_yellow_lum);
+                                photo.edit_hsl_green_lum = Some(hsl_green_lum);
+                                photo.edit_hsl_aqua_lum = Some(hsl_aqua_lum);
+                                photo.edit_hsl_blue_lum = Some(hsl_blue_lum);
+                                photo.edit_hsl_purple_lum = Some(hsl_purple_lum);
+                                photo.edit_hsl_magenta_lum = Some(hsl_magenta_lum);
+                                // Lens
+                                photo.edit_lens_distortion = Some(lens_distortion);
+                                photo.edit_lens_vignette_amount = Some(lens_vignette_amount);
+                                photo.edit_lens_vignette_midpoint = Some(lens_vignette_midpoint);
+                                // NR
+                                photo.edit_nr_luminance = Some(nr_luminance);
+                                photo.edit_nr_color = Some(nr_color);
+                                // Sharpen
+                                photo.edit_sharpen_amount = Some(sharpen_amount);
+                                photo.edit_sharpen_radius = Some(sharpen_radius);
                             }
 
                             // Invalidate cached thumbnails to force regeneration with updated effects
@@ -747,7 +1199,17 @@ impl eframe::App for VintageLightboxApp {
                                     tone_curve_shadows, tone_curve_darks, tone_curve_lights, tone_curve_highlights,
                                     hsl_red_sat, hsl_orange_sat, hsl_yellow_sat, hsl_green_sat,
                                     hsl_aqua_sat, hsl_blue_sat, hsl_purple_sat, hsl_magenta_sat,
+                                    // HSL Hue
+                                    hsl_red_hue, hsl_orange_hue, hsl_yellow_hue, hsl_green_hue,
+                                    hsl_aqua_hue, hsl_blue_hue, hsl_purple_hue, hsl_magenta_hue,
+                                    // HSL Lum
+                                    hsl_red_lum, hsl_orange_lum, hsl_yellow_lum, hsl_green_lum,
+                                    hsl_aqua_lum, hsl_blue_lum, hsl_purple_lum, hsl_magenta_lum,
+                                    // Lens
+                                    lens_distortion, lens_vignette_amount, lens_vignette_midpoint,
+                                    // NR
                                     nr_luminance, nr_color,
+                                    // Sharpen
                                     sharpen_amount, sharpen_radius
                                 ).await {
                                     // Note: Toast will be shown in the next frame via state
@@ -941,6 +1403,11 @@ impl eframe::App for VintageLightboxApp {
                     } else {
                         self.state.toasts.error("Failed to clear cache");
                     }
+                }
+                SettingsAction::ResetDockingLayout => {
+                    self.library_dock_state = crate::docking::create_library_layout();
+                    self.develop_dock_state = crate::docking::create_develop_layout();
+                    self.state.toasts.success("Layout reset to default");
                 }
             }
         }

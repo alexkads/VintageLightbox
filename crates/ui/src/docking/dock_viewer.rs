@@ -106,6 +106,30 @@ impl<'a> TabViewer for DockViewer<'a> {
                 ToneCurveEditor::show(ui, self.context.state);
             }
 
+            DockTab::HSLColor => {
+                self.render_hsl_color(ui);
+            }
+
+            DockTab::HSLHue => {
+                self.render_hsl_hue(ui);
+            }
+
+            DockTab::HSLLuminance => {
+                self.render_hsl_luminance(ui);
+            }
+
+            DockTab::LensCorrections => {
+                self.render_lens_corrections(ui);
+            }
+
+            DockTab::Detail => {
+                self.render_detail(ui);
+            }
+
+            DockTab::AllAdjustments => {
+                self.render_all_adjustments(ui);
+            }
+
             DockTab::Presets => {
                 self.render_presets_panel(ui);
             }
@@ -568,6 +592,573 @@ impl<'a> DockViewer<'a> {
         self.context.state.pending_auto_save = true;
         self.context.state.last_slider_change_time = Some(std::time::Instant::now());
         self.context.state.toasts.success(format!("Applied preset: {}", preset.name));
+    }
+
+    fn render_hsl_color(&mut self, ui: &mut Ui) {
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            ui.add_space(Theme::SPACE_SM);
+            
+            let colors = [
+                ("Red", &mut self.context.state.active_hsl_red_sat),
+                ("Orange", &mut self.context.state.active_hsl_orange_sat),
+                ("Yellow", &mut self.context.state.active_hsl_yellow_sat),
+                ("Green", &mut self.context.state.active_hsl_green_sat),
+                ("Aqua", &mut self.context.state.active_hsl_aqua_sat),
+                ("Blue", &mut self.context.state.active_hsl_blue_sat),
+                ("Purple", &mut self.context.state.active_hsl_purple_sat),
+                ("Magenta", &mut self.context.state.active_hsl_magenta_sat),
+            ];
+            
+            for (name, value) in colors {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(name).size(Theme::FONT_SM));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(format!("{:+.0}", *value));
+                    });
+                });
+                if ui.add(egui::Slider::new(value, -100.0..=100.0).show_value(false)).changed() {
+                    self.context.state.last_slider_change_time = Some(std::time::Instant::now());
+                    self.context.state.pending_auto_save = true;
+                }
+                ui.add_space(Theme::SPACE_SM);
+            }
+        });
+    }
+
+    fn render_hsl_hue(&mut self, ui: &mut Ui) {
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            ui.add_space(Theme::SPACE_SM);
+            
+            let colors = [
+                ("Red", &mut self.context.state.active_hsl_red_hue),
+                ("Orange", &mut self.context.state.active_hsl_orange_hue),
+                ("Yellow", &mut self.context.state.active_hsl_yellow_hue),
+                ("Green", &mut self.context.state.active_hsl_green_hue),
+                ("Aqua", &mut self.context.state.active_hsl_aqua_hue),
+                ("Blue", &mut self.context.state.active_hsl_blue_hue),
+                ("Purple", &mut self.context.state.active_hsl_purple_hue),
+                ("Magenta", &mut self.context.state.active_hsl_magenta_hue),
+            ];
+            
+            for (name, value) in colors {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(name).size(Theme::FONT_SM));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(format!("{:+.0}°", *value));
+                    });
+                });
+                if ui.add(egui::Slider::new(value, -180.0..=180.0).show_value(false)).changed() {
+                    self.context.state.last_slider_change_time = Some(std::time::Instant::now());
+                    self.context.state.pending_auto_save = true;
+                }
+                ui.add_space(Theme::SPACE_SM);
+            }
+        });
+    }
+
+    fn render_hsl_luminance(&mut self, ui: &mut Ui) {
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            ui.add_space(Theme::SPACE_SM);
+            
+            let colors = [
+                ("Red", &mut self.context.state.active_hsl_red_lum),
+                ("Orange", &mut self.context.state.active_hsl_orange_lum),
+                ("Yellow", &mut self.context.state.active_hsl_yellow_lum),
+                ("Green", &mut self.context.state.active_hsl_green_lum),
+                ("Aqua", &mut self.context.state.active_hsl_aqua_lum),
+                ("Blue", &mut self.context.state.active_hsl_blue_lum),
+                ("Purple", &mut self.context.state.active_hsl_purple_lum),
+                ("Magenta", &mut self.context.state.active_hsl_magenta_lum),
+            ];
+            
+            for (name, value) in colors {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(name).size(Theme::FONT_SM));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(format!("{:+.0}", *value));
+                    });
+                });
+                if ui.add(egui::Slider::new(value, -100.0..=100.0).show_value(false)).changed() {
+                    self.context.state.last_slider_change_time = Some(std::time::Instant::now());
+                    self.context.state.pending_auto_save = true;
+                }
+                ui.add_space(Theme::SPACE_SM);
+            }
+        });
+    }
+
+    fn render_lens_corrections(&mut self, ui: &mut Ui) {
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            ui.add_space(Theme::SPACE_SM);
+            
+            // Distortion
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("Distortion").size(Theme::FONT_SM));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(format!("{:+.0}", self.context.state.active_lens_distortion));
+                });
+            });
+            if ui.add(egui::Slider::new(&mut self.context.state.active_lens_distortion, -100.0..=100.0).show_value(false)).changed() {
+                self.context.state.last_slider_change_time = Some(std::time::Instant::now());
+                self.context.state.pending_auto_save = true;
+            }
+            
+            ui.add_space(Theme::SPACE_MD);
+            
+            // Vignette Amount
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("Vignette Amount").size(Theme::FONT_SM));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(format!("{:+.0}", self.context.state.active_lens_vignette_amount));
+                });
+            });
+            if ui.add(egui::Slider::new(&mut self.context.state.active_lens_vignette_amount, -100.0..=100.0).show_value(false)).changed() {
+                self.context.state.last_slider_change_time = Some(std::time::Instant::now());
+                self.context.state.pending_auto_save = true;
+            }
+            
+            ui.add_space(Theme::SPACE_SM);
+            
+            // Vignette Midpoint
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("Vignette Midpoint").size(Theme::FONT_SM));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(format!("{:.0}", self.context.state.active_lens_vignette_midpoint));
+                });
+            });
+            if ui.add(egui::Slider::new(&mut self.context.state.active_lens_vignette_midpoint, 0.0..=100.0).show_value(false)).changed() {
+                self.context.state.last_slider_change_time = Some(std::time::Instant::now());
+                self.context.state.pending_auto_save = true;
+            }
+        });
+    }
+
+    fn render_detail(&mut self, ui: &mut Ui) {
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            ui.add_space(Theme::SPACE_SM);
+            
+            widgets::section_title(ui, "Noise Reduction");
+            ui.add_space(Theme::SPACE_SM);
+            
+            // Luminance NR
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("Luminance").size(Theme::FONT_SM));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(format!("{:.0}", self.context.state.active_nr_luminance));
+                });
+            });
+            if ui.add(egui::Slider::new(&mut self.context.state.active_nr_luminance, 0.0..=100.0).show_value(false)).changed() {
+                self.context.state.last_slider_change_time = Some(std::time::Instant::now());
+                self.context.state.pending_auto_save = true;
+            }
+            
+            ui.add_space(Theme::SPACE_SM);
+            
+            // Color NR
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("Color").size(Theme::FONT_SM));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(format!("{:.0}", self.context.state.active_nr_color));
+                });
+            });
+            if ui.add(egui::Slider::new(&mut self.context.state.active_nr_color, 0.0..=100.0).show_value(false)).changed() {
+                self.context.state.last_slider_change_time = Some(std::time::Instant::now());
+                self.context.state.pending_auto_save = true;
+            }
+            
+            ui.add_space(Theme::SPACE_LG);
+            
+            widgets::section_title(ui, "Sharpening");
+            ui.add_space(Theme::SPACE_SM);
+            
+            // Sharpen Amount
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("Amount").size(Theme::FONT_SM));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(format!("{:.0}", self.context.state.active_sharpen_amount));
+                });
+            });
+            if ui.add(egui::Slider::new(&mut self.context.state.active_sharpen_amount, 0.0..=100.0).show_value(false)).changed() {
+                self.context.state.last_slider_change_time = Some(std::time::Instant::now());
+                self.context.state.pending_auto_save = true;
+            }
+            
+            ui.add_space(Theme::SPACE_SM);
+            
+            // Sharpen Radius
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("Radius").size(Theme::FONT_SM));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(format!("{:.1}", self.context.state.active_sharpen_radius));
+                });
+            });
+            if ui.add(egui::Slider::new(&mut self.context.state.active_sharpen_radius, 0.5..=3.0).show_value(false)).changed() {
+                self.context.state.last_slider_change_time = Some(std::time::Instant::now());
+                self.context.state.pending_auto_save = true;
+            }
+        });
+    }
+
+    /// Render all adjustments in a single scrollable panel with collapsible sections
+    fn render_all_adjustments(&mut self, ui: &mut Ui) {
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.add_space(Theme::SPACE_SM);
+                
+                // Basic Section (collapsible)
+                egui::CollapsingHeader::new(egui::RichText::new("Basic").strong())
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        self.render_basic_sliders(ui);
+                    });
+                
+                ui.add_space(Theme::SPACE_SM);
+                
+                // Tone Curve Section
+                egui::CollapsingHeader::new(egui::RichText::new("Tone Curve").strong())
+                    .default_open(false)
+                    .show(ui, |ui| {
+                        ToneCurveEditor::show(ui, self.context.state);
+                    });
+                
+                ui.add_space(Theme::SPACE_SM);
+                
+                // Detail Section
+                egui::CollapsingHeader::new(egui::RichText::new("Detail").strong())
+                    .default_open(false)
+                    .show(ui, |ui| {
+                        self.render_detail_sliders(ui);
+                    });
+                
+                ui.add_space(Theme::SPACE_SM);
+                
+                // HSL / Color Section
+                egui::CollapsingHeader::new(egui::RichText::new("HSL / Color").strong())
+                    .default_open(false)
+                    .show(ui, |ui| {
+                        self.render_hsl_color_sliders(ui);
+                    });
+                
+                ui.add_space(Theme::SPACE_SM);
+                
+                // HSL / Luminance Section
+                egui::CollapsingHeader::new(egui::RichText::new("HSL / Luminance").strong())
+                    .default_open(false)
+                    .show(ui, |ui| {
+                        self.render_hsl_luminance_sliders(ui);
+                    });
+                
+                ui.add_space(Theme::SPACE_SM);
+                
+                // HSL / Hue Section
+                egui::CollapsingHeader::new(egui::RichText::new("HSL / Hue").strong())
+                    .default_open(false)
+                    .show(ui, |ui| {
+                        self.render_hsl_hue_sliders(ui);
+                    });
+                
+                ui.add_space(Theme::SPACE_SM);
+                
+                // Lens Corrections Section
+                egui::CollapsingHeader::new(egui::RichText::new("Lens Corrections").strong())
+                    .default_open(false)
+                    .show(ui, |ui| {
+                        self.render_lens_corrections_sliders(ui);
+                    });
+                
+                ui.add_space(Theme::SPACE_MD);
+                
+                // Reset and Export buttons
+                ui.horizontal(|ui| {
+                    let reset_label = format!("{} Reset All", crate::design_system::icons::ACTION_RESET);
+                    if ui.button(&reset_label).clicked() {
+                        self.context.state.reset_edits();
+                        self.context.state.pending_auto_save = true;
+                        self.context.state.last_slider_change_time = Some(std::time::Instant::now());
+                    }
+                });
+                
+                ui.add_space(Theme::SPACE_SM);
+                
+                let export_label = format!("{} Export JPEG", crate::design_system::icons::ACTION_EXPORT);
+                if ui.button(&export_label).clicked() {
+                    if let Some(metadata) = &self.context.state.detail_metadata {
+                        let id = metadata.id.clone();
+                        
+                        let mut dialog = egui_file::FileDialog::save_file(None)
+                            .title("Export Photo")
+                            .default_filename("exported.jpg");
+                        dialog.open();
+                        
+                        self.context.state.export_target_id = Some(id);
+                        self.context.state.import_dialog = Some(dialog);
+                        self.context.state.import_dialog_mode = crate::state::ImportDialogMode::Export;
+                    } else {
+                        self.context.state.toasts.warning("No photo selected");
+                    }
+                }
+            });
+    }
+
+    // Helper methods for collapsible sections (no outer ScrollArea)
+    fn render_basic_sliders(&mut self, ui: &mut Ui) {
+        // Exposure
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("Exposure").size(Theme::FONT_SM));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(format!("{:+.2}", self.context.state.active_exposure));
+            });
+        });
+        if ui.add(egui::Slider::new(&mut self.context.state.active_exposure, -5.0..=5.0).show_value(false)).changed() {
+            self.context.state.last_slider_change_time = Some(std::time::Instant::now());
+            self.context.state.pending_auto_save = true;
+        }
+
+        // Contrast
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("Contrast").size(Theme::FONT_SM));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(format!("{:.2}", self.context.state.active_contrast));
+            });
+        });
+        if ui.add(egui::Slider::new(&mut self.context.state.active_contrast, 0.0..=2.0).show_value(false)).changed() {
+            self.context.state.last_slider_change_time = Some(std::time::Instant::now());
+            self.context.state.pending_auto_save = true;
+        }
+
+        // Temperature
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("Temperature").size(Theme::FONT_SM));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(format!("{:+.1}", self.context.state.active_temperature));
+            });
+        });
+        if ui.add(egui::Slider::new(&mut self.context.state.active_temperature, -10.0..=10.0).show_value(false)).changed() {
+            self.context.state.last_slider_change_time = Some(std::time::Instant::now());
+            self.context.state.pending_auto_save = true;
+        }
+
+        // Tint
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("Tint").size(Theme::FONT_SM));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(format!("{:+.1}", self.context.state.active_tint));
+            });
+        });
+        if ui.add(egui::Slider::new(&mut self.context.state.active_tint, -10.0..=10.0).show_value(false)).changed() {
+            self.context.state.last_slider_change_time = Some(std::time::Instant::now());
+            self.context.state.pending_auto_save = true;
+        }
+
+        ui.add_space(Theme::SPACE_SM);
+
+        // Highlights, Shadows, Whites, Blacks
+        for (name, value, range) in [
+            ("Highlights", &mut self.context.state.active_highlights, -100.0..=100.0),
+            ("Shadows", &mut self.context.state.active_shadows, -100.0..=100.0),
+            ("Whites", &mut self.context.state.active_whites, -100.0..=100.0),
+            ("Blacks", &mut self.context.state.active_blacks, -100.0..=100.0),
+        ] {
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new(name).size(Theme::FONT_SM));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(format!("{:.0}", *value));
+                });
+            });
+            if ui.add(egui::Slider::new(value, range).show_value(false)).changed() {
+                self.context.state.last_slider_change_time = Some(std::time::Instant::now());
+                self.context.state.pending_auto_save = true;
+            }
+        }
+
+        ui.add_space(Theme::SPACE_SM);
+
+        // Clarity, Vibrance, Saturation
+        for (name, value) in [
+            ("Clarity", &mut self.context.state.active_clarity),
+            ("Vibrance", &mut self.context.state.active_vibrance),
+            ("Saturation", &mut self.context.state.active_saturation),
+        ] {
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new(name).size(Theme::FONT_SM));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(format!("{:+.2}", *value));
+                });
+            });
+            if ui.add(egui::Slider::new(value, -1.0..=1.0).show_value(false)).changed() {
+                self.context.state.last_slider_change_time = Some(std::time::Instant::now());
+                self.context.state.pending_auto_save = true;
+            }
+        }
+    }
+
+    fn render_detail_sliders(&mut self, ui: &mut Ui) {
+        ui.label(egui::RichText::new("Noise Reduction").size(Theme::FONT_SM).color(ui.visuals().weak_text_color()));
+        ui.add_space(Theme::SPACE_XS);
+        
+        for (name, value) in [
+            ("Luminance", &mut self.context.state.active_nr_luminance),
+            ("Color", &mut self.context.state.active_nr_color),
+        ] {
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new(name).size(Theme::FONT_SM));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(format!("{:.0}", *value));
+                });
+            });
+            if ui.add(egui::Slider::new(value, 0.0..=100.0).show_value(false)).changed() {
+                self.context.state.last_slider_change_time = Some(std::time::Instant::now());
+                self.context.state.pending_auto_save = true;
+            }
+        }
+
+        ui.add_space(Theme::SPACE_SM);
+        ui.label(egui::RichText::new("Sharpening").size(Theme::FONT_SM).color(ui.visuals().weak_text_color()));
+        ui.add_space(Theme::SPACE_XS);
+
+        // Sharpen Amount
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("Amount").size(Theme::FONT_SM));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(format!("{:.0}", self.context.state.active_sharpen_amount));
+            });
+        });
+        if ui.add(egui::Slider::new(&mut self.context.state.active_sharpen_amount, 0.0..=100.0).show_value(false)).changed() {
+            self.context.state.last_slider_change_time = Some(std::time::Instant::now());
+            self.context.state.pending_auto_save = true;
+        }
+
+        // Sharpen Radius
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("Radius").size(Theme::FONT_SM));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(format!("{:.1}", self.context.state.active_sharpen_radius));
+            });
+        });
+        if ui.add(egui::Slider::new(&mut self.context.state.active_sharpen_radius, 0.5..=3.0).show_value(false)).changed() {
+            self.context.state.last_slider_change_time = Some(std::time::Instant::now());
+            self.context.state.pending_auto_save = true;
+        }
+    }
+
+    fn render_hsl_color_sliders(&mut self, ui: &mut Ui) {
+        let colors = ["Red", "Orange", "Yellow", "Green", "Aqua", "Blue", "Purple", "Magenta"];
+        let values = [
+            &mut self.context.state.active_hsl_red_sat,
+            &mut self.context.state.active_hsl_orange_sat,
+            &mut self.context.state.active_hsl_yellow_sat,
+            &mut self.context.state.active_hsl_green_sat,
+            &mut self.context.state.active_hsl_aqua_sat,
+            &mut self.context.state.active_hsl_blue_sat,
+            &mut self.context.state.active_hsl_purple_sat,
+            &mut self.context.state.active_hsl_magenta_sat,
+        ];
+        
+        for (name, value) in colors.iter().zip(values.into_iter()) {
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new(*name).size(Theme::FONT_SM));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(format!("{:+.0}", *value));
+                });
+            });
+            if ui.add(egui::Slider::new(value, -100.0..=100.0).show_value(false)).changed() {
+                self.context.state.last_slider_change_time = Some(std::time::Instant::now());
+                self.context.state.pending_auto_save = true;
+            }
+        }
+    }
+
+    fn render_hsl_luminance_sliders(&mut self, ui: &mut Ui) {
+        let colors = ["Red", "Orange", "Yellow", "Green", "Aqua", "Blue", "Purple", "Magenta"];
+        let values = [
+            &mut self.context.state.active_hsl_red_lum,
+            &mut self.context.state.active_hsl_orange_lum,
+            &mut self.context.state.active_hsl_yellow_lum,
+            &mut self.context.state.active_hsl_green_lum,
+            &mut self.context.state.active_hsl_aqua_lum,
+            &mut self.context.state.active_hsl_blue_lum,
+            &mut self.context.state.active_hsl_purple_lum,
+            &mut self.context.state.active_hsl_magenta_lum,
+        ];
+        
+        for (name, value) in colors.iter().zip(values.into_iter()) {
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new(*name).size(Theme::FONT_SM));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(format!("{:+.0}", *value));
+                });
+            });
+            if ui.add(egui::Slider::new(value, -100.0..=100.0).show_value(false)).changed() {
+                self.context.state.last_slider_change_time = Some(std::time::Instant::now());
+                self.context.state.pending_auto_save = true;
+            }
+        }
+    }
+
+    fn render_hsl_hue_sliders(&mut self, ui: &mut Ui) {
+        let colors = ["Red", "Orange", "Yellow", "Green", "Aqua", "Blue", "Purple", "Magenta"];
+        let values = [
+            &mut self.context.state.active_hsl_red_hue,
+            &mut self.context.state.active_hsl_orange_hue,
+            &mut self.context.state.active_hsl_yellow_hue,
+            &mut self.context.state.active_hsl_green_hue,
+            &mut self.context.state.active_hsl_aqua_hue,
+            &mut self.context.state.active_hsl_blue_hue,
+            &mut self.context.state.active_hsl_purple_hue,
+            &mut self.context.state.active_hsl_magenta_hue,
+        ];
+        
+        for (name, value) in colors.iter().zip(values.into_iter()) {
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new(*name).size(Theme::FONT_SM));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(format!("{:+.0}°", *value));
+                });
+            });
+            if ui.add(egui::Slider::new(value, -180.0..=180.0).show_value(false)).changed() {
+                self.context.state.last_slider_change_time = Some(std::time::Instant::now());
+                self.context.state.pending_auto_save = true;
+            }
+        }
+    }
+
+    fn render_lens_corrections_sliders(&mut self, ui: &mut Ui) {
+        // Distortion
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("Distortion").size(Theme::FONT_SM));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(format!("{:+.0}", self.context.state.active_lens_distortion));
+            });
+        });
+        if ui.add(egui::Slider::new(&mut self.context.state.active_lens_distortion, -100.0..=100.0).show_value(false)).changed() {
+            self.context.state.last_slider_change_time = Some(std::time::Instant::now());
+            self.context.state.pending_auto_save = true;
+        }
+
+        // Vignette Amount
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("Vignette Amount").size(Theme::FONT_SM));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(format!("{:+.0}", self.context.state.active_lens_vignette_amount));
+            });
+        });
+        if ui.add(egui::Slider::new(&mut self.context.state.active_lens_vignette_amount, -100.0..=100.0).show_value(false)).changed() {
+            self.context.state.last_slider_change_time = Some(std::time::Instant::now());
+            self.context.state.pending_auto_save = true;
+        }
+
+        // Vignette Midpoint
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("Vignette Midpoint").size(Theme::FONT_SM));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(format!("{:.0}", self.context.state.active_lens_vignette_midpoint));
+            });
+        });
+        if ui.add(egui::Slider::new(&mut self.context.state.active_lens_vignette_midpoint, 0.0..=100.0).show_value(false)).changed() {
+            self.context.state.last_slider_change_time = Some(std::time::Instant::now());
+            self.context.state.pending_auto_save = true;
+        }
     }
 }
 

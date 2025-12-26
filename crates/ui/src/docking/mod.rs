@@ -66,9 +66,9 @@ pub fn create_library_layout() -> DockState<DockTab> {
 /// Layout:
 /// ```text
 /// ┌─────────────┬─────────────────────────┬──────────────┐
-/// │  Histogram  │                         │  Basic       │
-/// │             │      ImageViewer        │  ToneCurve   │
-/// │             │                         │              │
+/// │  Presets    │                         │  Histogram   │
+/// │             │      ImageViewer        │  Adjustments │
+/// │             │                         │  (all in 1)  │
 /// ├─────────────┴─────────────────────────┴──────────────┤
 /// │                    Filmstrip                         │
 /// └──────────────────────────────────────────────────────┘
@@ -78,27 +78,26 @@ pub fn create_develop_layout() -> DockState<DockTab> {
     let mut dock_state = DockState::new(vec![DockTab::ImageViewer]);
     let tree = dock_state.main_surface_mut();
     
-    // Split off left sidebar with presets and histogram (18% width)
-    let [left_sidebar, _center_and_right] = tree.split_left(
+    // Split off left sidebar with presets (18% width)
+    let [_left_sidebar, _center_and_right] = tree.split_left(
         NodeIndex::root(),
         0.18,
         vec![DockTab::Presets],
     );
     
-    // Add histogram tab to left sidebar
-    tree.set_focused_node(left_sidebar);
-    tree.push_to_focused_leaf(DockTab::Histogram);
-    
-    // Split off right sidebar with adjustments (70% center, 30% right - adjustments need more space)
+    // Split off right sidebar with histogram at top and adjustments below
     let [center, right_sidebar] = tree.split_right(
         NodeIndex::root(),
-        0.72,
-        vec![DockTab::BasicAdjustments],
+        0.70,
+        vec![DockTab::Histogram],
     );
     
-    // Add tone curve tab to right sidebar
-    tree.set_focused_node(right_sidebar);
-    tree.push_to_focused_leaf(DockTab::ToneCurve);
+    // Split the right sidebar to have Histogram at top and AllAdjustments below
+    let [_histogram, _adjustments] = tree.split_below(
+        right_sidebar,
+        0.20,
+        vec![DockTab::AllAdjustments],
+    );
     
     // Split off filmstrip at bottom
     let [_main, _filmstrip] = tree.split_below(

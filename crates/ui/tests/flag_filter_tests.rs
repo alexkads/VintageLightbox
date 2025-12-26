@@ -29,6 +29,7 @@ fn create_photo(id: &str, flag: Option<i32>) -> PhotoViewModel {
         edit_tone_curve_darks: None,
         edit_tone_curve_lights: None,
         edit_tone_curve_highlights: None,
+        ..Default::default()
     }
 }
 

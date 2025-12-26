@@ -69,7 +69,12 @@ impl PhotoGrid {
                         &result.image, exposure, contrast, temperature, tint,
                         highlights, shadows, whites, blacks, clarity, vibrance, saturation,
                         0.0, 0.0, 0.0, 0.0, // tone curve (not applied to thumbnails)
-                        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL
+                        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL Sat
+                        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL Hue
+                        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL Lum
+                        0.0, 0.0, 0.0, // Lens
+                        0.0, 0.0, // NR
+                        0.0, 1.0, // Sharpening
                     )
                 } else {
                     result.image.clone()

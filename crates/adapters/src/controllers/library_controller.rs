@@ -56,6 +56,43 @@ impl LibraryController {
                         edit_tone_curve_darks: photo.edit_tone_curve_darks(),
                         edit_tone_curve_lights: photo.edit_tone_curve_lights(),
                         edit_tone_curve_highlights: photo.edit_tone_curve_highlights(),
+                        // HSL Saturation
+                        edit_hsl_red_sat: photo.edit_hsl_red_sat(),
+                        edit_hsl_orange_sat: photo.edit_hsl_orange_sat(),
+                        edit_hsl_yellow_sat: photo.edit_hsl_yellow_sat(),
+                        edit_hsl_green_sat: photo.edit_hsl_green_sat(),
+                        edit_hsl_aqua_sat: photo.edit_hsl_aqua_sat(),
+                        edit_hsl_blue_sat: photo.edit_hsl_blue_sat(),
+                        edit_hsl_purple_sat: photo.edit_hsl_purple_sat(),
+                        edit_hsl_magenta_sat: photo.edit_hsl_magenta_sat(),
+                        // HSL Hue
+                        edit_hsl_red_hue: photo.edit_hsl_red_hue(),
+                        edit_hsl_orange_hue: photo.edit_hsl_orange_hue(),
+                        edit_hsl_yellow_hue: photo.edit_hsl_yellow_hue(),
+                        edit_hsl_green_hue: photo.edit_hsl_green_hue(),
+                        edit_hsl_aqua_hue: photo.edit_hsl_aqua_hue(),
+                        edit_hsl_blue_hue: photo.edit_hsl_blue_hue(),
+                        edit_hsl_purple_hue: photo.edit_hsl_purple_hue(),
+                        edit_hsl_magenta_hue: photo.edit_hsl_magenta_hue(),
+                        // HSL Lum
+                        edit_hsl_red_lum: photo.edit_hsl_red_lum(),
+                        edit_hsl_orange_lum: photo.edit_hsl_orange_lum(),
+                        edit_hsl_yellow_lum: photo.edit_hsl_yellow_lum(),
+                        edit_hsl_green_lum: photo.edit_hsl_green_lum(),
+                        edit_hsl_aqua_lum: photo.edit_hsl_aqua_lum(),
+                        edit_hsl_blue_lum: photo.edit_hsl_blue_lum(),
+                        edit_hsl_purple_lum: photo.edit_hsl_purple_lum(),
+                        edit_hsl_magenta_lum: photo.edit_hsl_magenta_lum(),
+                        // Lens
+                        edit_lens_distortion: photo.edit_lens_distortion(),
+                        edit_lens_vignette_amount: photo.edit_lens_vignette_amount(),
+                        edit_lens_vignette_midpoint: photo.edit_lens_vignette_midpoint(),
+                        // NR
+                        edit_nr_luminance: photo.edit_nr_luminance(),
+                        edit_nr_color: photo.edit_nr_color(),
+                        // Sharpening
+                        edit_sharpen_amount: photo.edit_sharpen_amount(),
+                        edit_sharpen_radius: photo.edit_sharpen_radius(),
                     }
                 })
                 .collect();

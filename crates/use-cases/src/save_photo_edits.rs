@@ -41,6 +41,25 @@ impl SavePhotoEditsUseCase {
         hsl_blue_sat: f32,
         hsl_purple_sat: f32,
         hsl_magenta_sat: f32,
+        hsl_red_hue: f32,
+        hsl_orange_hue: f32,
+        hsl_yellow_hue: f32,
+        hsl_green_hue: f32,
+        hsl_aqua_hue: f32,
+        hsl_blue_hue: f32,
+        hsl_purple_hue: f32,
+        hsl_magenta_hue: f32,
+        hsl_red_lum: f32,
+        hsl_orange_lum: f32,
+        hsl_yellow_lum: f32,
+        hsl_green_lum: f32,
+        hsl_aqua_lum: f32,
+        hsl_blue_lum: f32,
+        hsl_purple_lum: f32,
+        hsl_magenta_lum: f32,
+        lens_distortion: f32,
+        lens_vignette_amount: f32,
+        lens_vignette_midpoint: f32,
         nr_luminance: f32,
         nr_color: f32,
         sharpen_amount: f32,
@@ -58,6 +77,13 @@ impl SavePhotoEditsUseCase {
             Some(hsl_red_sat), Some(hsl_orange_sat), Some(hsl_yellow_sat),
             Some(hsl_green_sat), Some(hsl_aqua_sat), Some(hsl_blue_sat),
             Some(hsl_purple_sat), Some(hsl_magenta_sat),
+            Some(hsl_red_hue), Some(hsl_orange_hue), Some(hsl_yellow_hue),
+            Some(hsl_green_hue), Some(hsl_aqua_hue), Some(hsl_blue_hue),
+            Some(hsl_purple_hue), Some(hsl_magenta_hue),
+            Some(hsl_red_lum), Some(hsl_orange_lum), Some(hsl_yellow_lum),
+            Some(hsl_green_lum), Some(hsl_aqua_lum), Some(hsl_blue_lum),
+            Some(hsl_purple_lum), Some(hsl_magenta_lum),
+            Some(lens_distortion), Some(lens_vignette_amount), Some(lens_vignette_midpoint),
             Some(nr_luminance), Some(nr_color),
             Some(sharpen_amount), Some(sharpen_radius)
         )?;
@@ -122,7 +148,10 @@ mod tests {
         let result = use_case.execute(
             id, 1.0, 1.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
             -30.0, -10.0, 10.0, 30.0,
-            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL Sat
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL Hue
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL Lum
+            0.0, 0.0, 0.0, // Lens
             0.0, 0.0, // NR
             0.0, 1.0  // Sharpening (amount, radius)
         ).await;
@@ -144,7 +173,10 @@ mod tests {
         let result = use_case.execute(
             id, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
             0.0, 0.0, 0.0, 0.0,
-            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL Sat
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL Hue
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL Lum
+            0.0, 0.0, 0.0, // Lens
             0.0, 0.0, // NR
             0.0, 1.0  // Sharpening
         ).await;

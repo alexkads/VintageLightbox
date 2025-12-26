@@ -13,6 +13,7 @@ pub enum SettingsAction {
     ClearThumbnails,
     ClearPreviews,
     ClearAllCache,
+    ResetDockingLayout,
 }
 
 pub struct SettingsDialog;
@@ -49,6 +50,13 @@ impl SettingsDialog {
 
                     // Clear Cache Section
                     if let Some(requested_action) = Self::show_clear_cache_section(ui, state) {
+                        action = Some(requested_action);
+                    }
+
+                    ui.add_space(Theme::SPACE_LG);
+
+                    // Layout Section
+                    if let Some(requested_action) = Self::show_layout_section(ui) {
                         action = Some(requested_action);
                     }
 
@@ -197,6 +205,32 @@ impl SettingsDialog {
                     ).color(ui.visuals().weak_text_color()).size(Theme::FONT_SM));
                 });
             });
+    }
+
+    /// Show layout management section
+    fn show_layout_section(ui: &mut Ui) -> Option<SettingsAction> {
+        let mut action = None;
+
+        ui.heading(RichText::new("🪟 Layout").color(ui.visuals().strong_text_color()));
+        ui.add_space(Theme::SPACE_SM);
+
+        egui::Frame::default()
+            .fill(ui.visuals().window_fill())
+            .corner_radius(Theme::RADIUS_SM)
+            .inner_margin(egui::Margin::same(Theme::SPACE_MD as i8))
+            .show(ui, |ui| {
+                ui.label(RichText::new(
+                    "Reset the panel layout to default. Use this if panels are missing or in unexpected positions."
+                ).color(ui.visuals().weak_text_color()).size(Theme::FONT_SM));
+                
+                ui.add_space(Theme::SPACE_SM);
+                
+                if ui.add(Button::new("Reset Layout to Default").min_size(Vec2::new(180.0, 28.0))).clicked() {
+                    action = Some(SettingsAction::ResetDockingLayout);
+                }
+            });
+
+        action
     }
 
     /// Format bytes into human-readable format
