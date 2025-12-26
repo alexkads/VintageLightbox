@@ -2,6 +2,7 @@
 mod tests {
     use egui::Context;
     use egui_kittest::Harness;
+    use egui_kittest::kittest::Queryable;
     use std::time::Duration;
     use ui::components::secondary_window::SecondaryWindow;
     use ui::monitors::MonitorInfo;
@@ -118,5 +119,88 @@ mod tests {
         });
         
         harness.run(); 
+    }
+
+    #[test]
+    fn test_info_toggle_signal_handling() {
+        let mut harness = Harness::new_ui(|ui| {
+             let mut window = SecondaryWindow::new();
+             let monitors = vec![create_dummy_monitor(0, true)];
+             window.open(&monitors);
+             
+             // Initial state: Info overlay is ON by default
+             assert!(window.show_info_overlay, "Info overlay should be ON initially");
+
+             // 1. Inject 'I' signal (toggle OFF)
+             let toggle_id = egui::Id::new("secondary_window_toggle_info");
+             ui.ctx().data_mut(|d| d.insert_temp(toggle_id, true));
+             
+             // Process frame
+             window.show(ui.ctx(), None, None, false, None);
+             
+             // Verify signal consumed and state flipped
+             assert!(!ui.ctx().data(|d| d.get_temp::<bool>(toggle_id).unwrap_or(false)), "Signal should be consumed");
+             assert!(!window.show_info_overlay, "Info overlay should be OFF");
+
+             // 2. Inject 'I' signal again (toggle ON)
+             ui.ctx().data_mut(|d| d.insert_temp(toggle_id, true));
+             window.show(ui.ctx(), None, None, false, None);
+             assert!(window.show_info_overlay, "Info overlay should be ON");
+        });
+        harness.run_steps(1);
+    }
+
+    #[test]
+    fn test_stress_input_signals() {
+        // Stress test: rapid toggling via signals to ensure no logic drift
+        let mut harness = Harness::new_ui(|ui| {
+             let mut window = SecondaryWindow::new();
+             let monitors = vec![create_dummy_monitor(0, true)];
+             window.open(&monitors);
+             
+             let toggle_id = egui::Id::new("secondary_window_toggle_info");
+             
+             for i in 0..100 {
+                 let expected_state = i % 2 == 0; // Starts true (i=0 -> becomes false?) No, starts true.
+                 // If i=0: insert signal -> toggle -> becomes false.
+                 // If i=1: insert signal -> toggle -> becomes true.
+                 
+                 ui.ctx().data_mut(|d| d.insert_temp(toggle_id, true));
+                 window.show(ui.ctx(), None, None, false, None);
+                 
+                 // Verify
+                 if i % 2 == 0 {
+                     assert!(!window.show_info_overlay, "Iter {}: Should be false", i);
+                 } else {
+                     assert!(window.show_info_overlay, "Iter {}: Should be true", i);
+                 }
+             }
+        });
+        harness.run_steps(1);
+        harness.run_steps(1);
+    }
+
+    #[test]
+    fn test_consume_esc_key() {
+        let mut harness = Harness::new_ui(|ui| {
+             let mut window = SecondaryWindow::new();
+             let monitors = vec![create_dummy_monitor(0, true)];
+             window.open(&monitors);
+             
+             window.show(ui.ctx(), None, None, false, None);
+
+             let close_req = egui::Id::new("secondary_window_close_req");
+             if ui.ctx().data(|d| d.get_temp::<bool>(close_req).unwrap_or(false)) {
+                 ui.label("SIGNALCHECK");
+             }
+        });
+
+        // Simulate ESC key press
+        // Since kittest APIs vary, we try standard harness input manipulation
+        harness.press_key(egui::Key::Escape);
+        harness.run_steps(1);
+        
+        // If logic worked, we should find the label
+        let _ = harness.get_by_label("SIGNALCHECK");
     }
 }

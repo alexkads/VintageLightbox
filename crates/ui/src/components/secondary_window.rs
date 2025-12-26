@@ -110,6 +110,14 @@ impl SecondaryWindow {
             ctx.data_mut(|d| d.remove_temp::<bool>(close_req_id));
             return;
         }
+        
+        // Check if the viewport requested to toggle info
+        let toggle_info_id = egui::Id::new("secondary_window_toggle_info");
+        if ctx.data(|d| d.get_temp(toggle_info_id).unwrap_or(false)) {
+            self.show_info_overlay = !self.show_info_overlay;
+            // Debounce/consume signal
+            ctx.data_mut(|d| d.remove_temp::<bool>(toggle_info_id));
+        }
 
         let Some(monitor) = &self.monitor else {
             return;
@@ -209,14 +217,17 @@ impl SecondaryWindow {
                     });
                 
                 // Handle keyboard shortcuts
-                ctx.input(|i| {
-                    // Esc to close
-                    if i.key_pressed(egui::Key::Escape) {
-                        ctx.send_viewport_cmd(ViewportCommand::Close);
-                    }
-                });
+                // Explicitly consume keys to prevent backend/default handling conflicts
+                if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+                     ctx.data_mut(|d| d.insert_temp(egui::Id::new("secondary_window_close_req"), true));
+                }
+                
+                if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::I)) {
+                    ctx.data_mut(|d| d.insert_temp(egui::Id::new("secondary_window_toggle_info"), true));
+                }
             }
         );
+
     }
 }
 
