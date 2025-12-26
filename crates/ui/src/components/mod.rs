@@ -4,6 +4,7 @@ pub mod rating_widget;
 pub mod color_labels;
 pub mod toolbar;
 pub mod slider_control;
+pub mod advanced_slider;
 pub mod filmstrip;
 pub mod histogram;
 pub mod histogram_plot;

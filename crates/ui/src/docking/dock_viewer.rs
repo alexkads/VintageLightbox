@@ -23,6 +23,7 @@ use crate::components::{
     color_labels::ColorLabels,
     metadata_charts::MetadataCharts,
     tone_curve::ToneCurveEditor,
+    advanced_slider::AdvancedSlider,
 };
 
 use super::dock_tab::DockTab;
@@ -903,93 +904,74 @@ impl<'a> DockViewer<'a> {
 
     // Helper methods for collapsible sections (no outer ScrollArea)
     fn render_basic_sliders(&mut self, ui: &mut Ui) {
-        // Exposure
-        ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("Exposure").size(Theme::FONT_SM));
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(format!("{:+.2}", self.context.state.active_exposure));
-            });
-        });
-        if ui.add(egui::Slider::new(&mut self.context.state.active_exposure, -5.0..=5.0).show_value(false)).changed() {
+        // Exposure (default: 0.0)
+        if AdvancedSlider::show(ui, "exposure", "Exposure", &mut self.context.state.active_exposure, -5.0..=5.0, 0.0, 2) {
             self.context.state.last_slider_change_time = Some(std::time::Instant::now());
             self.context.state.pending_auto_save = true;
         }
 
-        // Contrast
-        ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("Contrast").size(Theme::FONT_SM));
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(format!("{:.2}", self.context.state.active_contrast));
-            });
-        });
-        if ui.add(egui::Slider::new(&mut self.context.state.active_contrast, 0.0..=2.0).show_value(false)).changed() {
+        // Contrast (default: 1.0)
+        if AdvancedSlider::show(ui, "contrast", "Contrast", &mut self.context.state.active_contrast, 0.0..=2.0, 1.0, 2) {
             self.context.state.last_slider_change_time = Some(std::time::Instant::now());
             self.context.state.pending_auto_save = true;
         }
 
-        // Temperature
-        ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("Temperature").size(Theme::FONT_SM));
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(format!("{:+.1}", self.context.state.active_temperature));
-            });
-        });
-        if ui.add(egui::Slider::new(&mut self.context.state.active_temperature, -10.0..=10.0).show_value(false)).changed() {
+        // Temperature (default: 0.0)
+        if AdvancedSlider::show(ui, "temperature", "Temperature", &mut self.context.state.active_temperature, -10.0..=10.0, 0.0, 1) {
             self.context.state.last_slider_change_time = Some(std::time::Instant::now());
             self.context.state.pending_auto_save = true;
         }
 
-        // Tint
-        ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("Tint").size(Theme::FONT_SM));
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(format!("{:+.1}", self.context.state.active_tint));
-            });
-        });
-        if ui.add(egui::Slider::new(&mut self.context.state.active_tint, -10.0..=10.0).show_value(false)).changed() {
+        // Tint (default: 0.0)
+        if AdvancedSlider::show(ui, "tint", "Tint", &mut self.context.state.active_tint, -10.0..=10.0, 0.0, 1) {
             self.context.state.last_slider_change_time = Some(std::time::Instant::now());
             self.context.state.pending_auto_save = true;
         }
 
         ui.add_space(Theme::SPACE_SM);
 
-        // Highlights, Shadows, Whites, Blacks
-        for (name, value, range) in [
-            ("Highlights", &mut self.context.state.active_highlights, -100.0..=100.0),
-            ("Shadows", &mut self.context.state.active_shadows, -100.0..=100.0),
-            ("Whites", &mut self.context.state.active_whites, -100.0..=100.0),
-            ("Blacks", &mut self.context.state.active_blacks, -100.0..=100.0),
-        ] {
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(name).size(Theme::FONT_SM));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(format!("{:.0}", *value));
-                });
-            });
-            if ui.add(egui::Slider::new(value, range).show_value(false)).changed() {
-                self.context.state.last_slider_change_time = Some(std::time::Instant::now());
-                self.context.state.pending_auto_save = true;
-            }
+        // Highlights (default: 0.0)
+        if AdvancedSlider::show(ui, "highlights", "Highlights", &mut self.context.state.active_highlights, -100.0..=100.0, 0.0, 0) {
+            self.context.state.last_slider_change_time = Some(std::time::Instant::now());
+            self.context.state.pending_auto_save = true;
+        }
+
+        // Shadows (default: 0.0)
+        if AdvancedSlider::show(ui, "shadows", "Shadows", &mut self.context.state.active_shadows, -100.0..=100.0, 0.0, 0) {
+            self.context.state.last_slider_change_time = Some(std::time::Instant::now());
+            self.context.state.pending_auto_save = true;
+        }
+
+        // Whites (default: 0.0)
+        if AdvancedSlider::show(ui, "whites", "Whites", &mut self.context.state.active_whites, -100.0..=100.0, 0.0, 0) {
+            self.context.state.last_slider_change_time = Some(std::time::Instant::now());
+            self.context.state.pending_auto_save = true;
+        }
+
+        // Blacks (default: 0.0)
+        if AdvancedSlider::show(ui, "blacks", "Blacks", &mut self.context.state.active_blacks, -100.0..=100.0, 0.0, 0) {
+            self.context.state.last_slider_change_time = Some(std::time::Instant::now());
+            self.context.state.pending_auto_save = true;
         }
 
         ui.add_space(Theme::SPACE_SM);
 
-        // Clarity, Vibrance, Saturation
-        for (name, value) in [
-            ("Clarity", &mut self.context.state.active_clarity),
-            ("Vibrance", &mut self.context.state.active_vibrance),
-            ("Saturation", &mut self.context.state.active_saturation),
-        ] {
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(name).size(Theme::FONT_SM));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(format!("{:+.2}", *value));
-                });
-            });
-            if ui.add(egui::Slider::new(value, -1.0..=1.0).show_value(false)).changed() {
-                self.context.state.last_slider_change_time = Some(std::time::Instant::now());
-                self.context.state.pending_auto_save = true;
-            }
+        // Clarity (default: 0.0)
+        if AdvancedSlider::show(ui, "clarity", "Clarity", &mut self.context.state.active_clarity, -1.0..=1.0, 0.0, 2) {
+            self.context.state.last_slider_change_time = Some(std::time::Instant::now());
+            self.context.state.pending_auto_save = true;
+        }
+
+        // Vibrance (default: 0.0)
+        if AdvancedSlider::show(ui, "vibrance", "Vibrance", &mut self.context.state.active_vibrance, -1.0..=1.0, 0.0, 2) {
+            self.context.state.last_slider_change_time = Some(std::time::Instant::now());
+            self.context.state.pending_auto_save = true;
+        }
+
+        // Saturation (default: 0.0)
+        if AdvancedSlider::show(ui, "saturation", "Saturation", &mut self.context.state.active_saturation, -1.0..=1.0, 0.0, 2) {
+            self.context.state.last_slider_change_time = Some(std::time::Instant::now());
+            self.context.state.pending_auto_save = true;
         }
     }
 
@@ -997,72 +979,49 @@ impl<'a> DockViewer<'a> {
         ui.label(egui::RichText::new("Noise Reduction").size(Theme::FONT_SM).color(ui.visuals().weak_text_color()));
         ui.add_space(Theme::SPACE_XS);
         
-        for (name, value) in [
-            ("Luminance", &mut self.context.state.active_nr_luminance),
-            ("Color", &mut self.context.state.active_nr_color),
-        ] {
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(name).size(Theme::FONT_SM));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(format!("{:.0}", *value));
-                });
-            });
-            if ui.add(egui::Slider::new(value, 0.0..=100.0).show_value(false)).changed() {
-                self.context.state.last_slider_change_time = Some(std::time::Instant::now());
-                self.context.state.pending_auto_save = true;
-            }
+        // NR Luminance (default: 0.0)
+        if AdvancedSlider::show(ui, "nr_luminance", "Luminance", &mut self.context.state.active_nr_luminance, 0.0..=100.0, 0.0, 0) {
+            self.context.state.last_slider_change_time = Some(std::time::Instant::now());
+            self.context.state.pending_auto_save = true;
+        }
+
+        // NR Color (default: 0.0)
+        if AdvancedSlider::show(ui, "nr_color", "Color", &mut self.context.state.active_nr_color, 0.0..=100.0, 0.0, 0) {
+            self.context.state.last_slider_change_time = Some(std::time::Instant::now());
+            self.context.state.pending_auto_save = true;
         }
 
         ui.add_space(Theme::SPACE_SM);
         ui.label(egui::RichText::new("Sharpening").size(Theme::FONT_SM).color(ui.visuals().weak_text_color()));
         ui.add_space(Theme::SPACE_XS);
 
-        // Sharpen Amount
-        ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("Amount").size(Theme::FONT_SM));
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(format!("{:.0}", self.context.state.active_sharpen_amount));
-            });
-        });
-        if ui.add(egui::Slider::new(&mut self.context.state.active_sharpen_amount, 0.0..=100.0).show_value(false)).changed() {
+        // Sharpen Amount (default: 0.0)
+        if AdvancedSlider::show(ui, "sharpen_amount", "Amount", &mut self.context.state.active_sharpen_amount, 0.0..=100.0, 0.0, 0) {
             self.context.state.last_slider_change_time = Some(std::time::Instant::now());
             self.context.state.pending_auto_save = true;
         }
 
-        // Sharpen Radius
-        ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("Radius").size(Theme::FONT_SM));
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(format!("{:.1}", self.context.state.active_sharpen_radius));
-            });
-        });
-        if ui.add(egui::Slider::new(&mut self.context.state.active_sharpen_radius, 0.5..=3.0).show_value(false)).changed() {
+        // Sharpen Radius (default: 1.0)
+        if AdvancedSlider::show(ui, "sharpen_radius", "Radius", &mut self.context.state.active_sharpen_radius, 0.5..=3.0, 1.0, 1) {
             self.context.state.last_slider_change_time = Some(std::time::Instant::now());
             self.context.state.pending_auto_save = true;
         }
     }
 
     fn render_hsl_color_sliders(&mut self, ui: &mut Ui) {
-        let colors = ["Red", "Orange", "Yellow", "Green", "Aqua", "Blue", "Purple", "Magenta"];
-        let values = [
-            &mut self.context.state.active_hsl_red_sat,
-            &mut self.context.state.active_hsl_orange_sat,
-            &mut self.context.state.active_hsl_yellow_sat,
-            &mut self.context.state.active_hsl_green_sat,
-            &mut self.context.state.active_hsl_aqua_sat,
-            &mut self.context.state.active_hsl_blue_sat,
-            &mut self.context.state.active_hsl_purple_sat,
-            &mut self.context.state.active_hsl_magenta_sat,
+        let sliders = [
+            ("hsl_red_sat", "Red", &mut self.context.state.active_hsl_red_sat),
+            ("hsl_orange_sat", "Orange", &mut self.context.state.active_hsl_orange_sat),
+            ("hsl_yellow_sat", "Yellow", &mut self.context.state.active_hsl_yellow_sat),
+            ("hsl_green_sat", "Green", &mut self.context.state.active_hsl_green_sat),
+            ("hsl_aqua_sat", "Aqua", &mut self.context.state.active_hsl_aqua_sat),
+            ("hsl_blue_sat", "Blue", &mut self.context.state.active_hsl_blue_sat),
+            ("hsl_purple_sat", "Purple", &mut self.context.state.active_hsl_purple_sat),
+            ("hsl_magenta_sat", "Magenta", &mut self.context.state.active_hsl_magenta_sat),
         ];
         
-        for (name, value) in colors.iter().zip(values.into_iter()) {
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(*name).size(Theme::FONT_SM));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(format!("{:+.0}", *value));
-                });
-            });
-            if ui.add(egui::Slider::new(value, -100.0..=100.0).show_value(false)).changed() {
+        for (id, name, value) in sliders {
+            if AdvancedSlider::show(ui, id, name, value, -100.0..=100.0, 0.0, 0) {
                 self.context.state.last_slider_change_time = Some(std::time::Instant::now());
                 self.context.state.pending_auto_save = true;
             }
@@ -1070,26 +1029,19 @@ impl<'a> DockViewer<'a> {
     }
 
     fn render_hsl_luminance_sliders(&mut self, ui: &mut Ui) {
-        let colors = ["Red", "Orange", "Yellow", "Green", "Aqua", "Blue", "Purple", "Magenta"];
-        let values = [
-            &mut self.context.state.active_hsl_red_lum,
-            &mut self.context.state.active_hsl_orange_lum,
-            &mut self.context.state.active_hsl_yellow_lum,
-            &mut self.context.state.active_hsl_green_lum,
-            &mut self.context.state.active_hsl_aqua_lum,
-            &mut self.context.state.active_hsl_blue_lum,
-            &mut self.context.state.active_hsl_purple_lum,
-            &mut self.context.state.active_hsl_magenta_lum,
+        let sliders = [
+            ("hsl_red_lum", "Red", &mut self.context.state.active_hsl_red_lum),
+            ("hsl_orange_lum", "Orange", &mut self.context.state.active_hsl_orange_lum),
+            ("hsl_yellow_lum", "Yellow", &mut self.context.state.active_hsl_yellow_lum),
+            ("hsl_green_lum", "Green", &mut self.context.state.active_hsl_green_lum),
+            ("hsl_aqua_lum", "Aqua", &mut self.context.state.active_hsl_aqua_lum),
+            ("hsl_blue_lum", "Blue", &mut self.context.state.active_hsl_blue_lum),
+            ("hsl_purple_lum", "Purple", &mut self.context.state.active_hsl_purple_lum),
+            ("hsl_magenta_lum", "Magenta", &mut self.context.state.active_hsl_magenta_lum),
         ];
         
-        for (name, value) in colors.iter().zip(values.into_iter()) {
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(*name).size(Theme::FONT_SM));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(format!("{:+.0}", *value));
-                });
-            });
-            if ui.add(egui::Slider::new(value, -100.0..=100.0).show_value(false)).changed() {
+        for (id, name, value) in sliders {
+            if AdvancedSlider::show(ui, id, name, value, -100.0..=100.0, 0.0, 0) {
                 self.context.state.last_slider_change_time = Some(std::time::Instant::now());
                 self.context.state.pending_auto_save = true;
             }
@@ -1097,26 +1049,19 @@ impl<'a> DockViewer<'a> {
     }
 
     fn render_hsl_hue_sliders(&mut self, ui: &mut Ui) {
-        let colors = ["Red", "Orange", "Yellow", "Green", "Aqua", "Blue", "Purple", "Magenta"];
-        let values = [
-            &mut self.context.state.active_hsl_red_hue,
-            &mut self.context.state.active_hsl_orange_hue,
-            &mut self.context.state.active_hsl_yellow_hue,
-            &mut self.context.state.active_hsl_green_hue,
-            &mut self.context.state.active_hsl_aqua_hue,
-            &mut self.context.state.active_hsl_blue_hue,
-            &mut self.context.state.active_hsl_purple_hue,
-            &mut self.context.state.active_hsl_magenta_hue,
+        let sliders = [
+            ("hsl_red_hue", "Red", &mut self.context.state.active_hsl_red_hue),
+            ("hsl_orange_hue", "Orange", &mut self.context.state.active_hsl_orange_hue),
+            ("hsl_yellow_hue", "Yellow", &mut self.context.state.active_hsl_yellow_hue),
+            ("hsl_green_hue", "Green", &mut self.context.state.active_hsl_green_hue),
+            ("hsl_aqua_hue", "Aqua", &mut self.context.state.active_hsl_aqua_hue),
+            ("hsl_blue_hue", "Blue", &mut self.context.state.active_hsl_blue_hue),
+            ("hsl_purple_hue", "Purple", &mut self.context.state.active_hsl_purple_hue),
+            ("hsl_magenta_hue", "Magenta", &mut self.context.state.active_hsl_magenta_hue),
         ];
         
-        for (name, value) in colors.iter().zip(values.into_iter()) {
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(*name).size(Theme::FONT_SM));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(format!("{:+.0}°", *value));
-                });
-            });
-            if ui.add(egui::Slider::new(value, -180.0..=180.0).show_value(false)).changed() {
+        for (id, name, value) in sliders {
+            if AdvancedSlider::show(ui, id, name, value, -180.0..=180.0, 0.0, 0) {
                 self.context.state.last_slider_change_time = Some(std::time::Instant::now());
                 self.context.state.pending_auto_save = true;
             }
@@ -1124,38 +1069,20 @@ impl<'a> DockViewer<'a> {
     }
 
     fn render_lens_corrections_sliders(&mut self, ui: &mut Ui) {
-        // Distortion
-        ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("Distortion").size(Theme::FONT_SM));
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(format!("{:+.0}", self.context.state.active_lens_distortion));
-            });
-        });
-        if ui.add(egui::Slider::new(&mut self.context.state.active_lens_distortion, -100.0..=100.0).show_value(false)).changed() {
+        // Distortion (default: 0.0)
+        if AdvancedSlider::show(ui, "lens_distortion", "Distortion", &mut self.context.state.active_lens_distortion, -100.0..=100.0, 0.0, 0) {
             self.context.state.last_slider_change_time = Some(std::time::Instant::now());
             self.context.state.pending_auto_save = true;
         }
 
-        // Vignette Amount
-        ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("Vignette Amount").size(Theme::FONT_SM));
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(format!("{:+.0}", self.context.state.active_lens_vignette_amount));
-            });
-        });
-        if ui.add(egui::Slider::new(&mut self.context.state.active_lens_vignette_amount, -100.0..=100.0).show_value(false)).changed() {
+        // Vignette Amount (default: 0.0)
+        if AdvancedSlider::show(ui, "lens_vignette_amount", "Vignette Amount", &mut self.context.state.active_lens_vignette_amount, -100.0..=100.0, 0.0, 0) {
             self.context.state.last_slider_change_time = Some(std::time::Instant::now());
             self.context.state.pending_auto_save = true;
         }
 
-        // Vignette Midpoint
-        ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("Vignette Midpoint").size(Theme::FONT_SM));
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(format!("{:.0}", self.context.state.active_lens_vignette_midpoint));
-            });
-        });
-        if ui.add(egui::Slider::new(&mut self.context.state.active_lens_vignette_midpoint, 0.0..=100.0).show_value(false)).changed() {
+        // Vignette Midpoint (default: 50.0)
+        if AdvancedSlider::show(ui, "lens_vignette_midpoint", "Vignette Midpoint", &mut self.context.state.active_lens_vignette_midpoint, 0.0..=100.0, 50.0, 0) {
             self.context.state.last_slider_change_time = Some(std::time::Instant::now());
             self.context.state.pending_auto_save = true;
         }
