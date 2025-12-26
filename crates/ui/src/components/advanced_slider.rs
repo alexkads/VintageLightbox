@@ -169,8 +169,8 @@ impl AdvancedSlider {
             mem.data.insert_temp(id, edit_string);
         });
         
-        // Much larger padding at bottom for clear visual separation
-        ui.add_space(Theme::SPACE_LG);
+        // Moderate padding at bottom for clear but compact separation
+        ui.add_space(Theme::SPACE_MD);
         
         changed
     }
