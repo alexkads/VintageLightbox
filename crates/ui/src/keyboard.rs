@@ -25,10 +25,52 @@ impl KeyboardHandler {
         _import_controller: &Arc<adapters::controllers::ImportController>,
         photo_sender: &tokio::sync::mpsc::Sender<Result<Vec<adapters::view_models::PhotoViewModel>, String>>,
     ) {
+        // ==========================================
+        // NAVIGATION SHORTCUTS (Arrow keys) - Must be outside closure for Develop mode
+        // ==========================================
+        let arrow_right = ctx.input(|i| i.key_pressed(Key::ArrowRight));
+        let arrow_left = ctx.input(|i| i.key_pressed(Key::ArrowLeft));
+
+        if arrow_right || arrow_left {
+            let direction = if arrow_right { 1 } else { -1 };
+
+            match state.current_view {
+                CurrentView::Library => {
+                    if let Some(new_id) = state.navigate_library(direction) {
+                        state.library_selected_photo_id = Some(new_id);
+                        state.clear_selection();
+                    }
+                }
+                CurrentView::Develop => {
+                    let visible_photos = state.filmstrip_filter.apply(&state.photos);
+
+                    if let Some(current_id) = &state.develop_selected_photo_id.clone() {
+                        if let Some(current_pos) = visible_photos.iter().position(|p| &p.id == current_id) {
+                            let new_pos = if direction > 0 {
+                                (current_pos + 1).min(visible_photos.len().saturating_sub(1))
+                            } else {
+                                current_pos.saturating_sub(1)
+                            };
+
+                            if new_pos != current_pos {
+                                if let Some(photo) = visible_photos.get(new_pos) {
+                                    let new_id = photo.id.clone();
+                                    // Update both IDs to keep Filmstrip and ImageViewer in sync
+                                    state.develop_selected_photo_id = Some(new_id.clone());
+                                    state.library_selected_photo_id = Some(new_id);
+                                    state.loaded_photo_id = None;
+                                    state.reset_viewer();
+                                    ctx.request_repaint();
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
         ctx.input(|i| {
-            // Check if we have any modals open that shouldn't receive shortcuts
-            // For now, only assume if we're not busy (though shortcuts might be valid while background processing?)
-            
             // ==========================================
             // GLOBAL SHORTCUTS (Work in all views)
             // ==========================================
@@ -54,7 +96,7 @@ impl KeyboardHandler {
                 if i.modifiers.command && i.key_pressed(Key::A) {
                     state.select_all();
                 }
-                
+
                 // Cmd+D: Deselect all
                 if i.modifiers.command && i.key_pressed(Key::D) {
                     state.clear_selection();
@@ -65,45 +107,6 @@ impl KeyboardHandler {
                     if !state.selected_photo_ids.is_empty() {
                         state.show_delete_confirmation = true;
                     }
-                }
-            }
-
-            // ==========================================
-            // NAVIGATION SHORTCUTS (Arrow keys) - Filmstrip in Library & Develop
-            // ==========================================
-            if i.key_pressed(Key::ArrowRight) {
-                match state.current_view {
-                    CurrentView::Library => {
-                        if let Some(new_id) = state.navigate_library(1) {
-                            state.library_selected_photo_id = Some(new_id);
-                            state.clear_selection();
-                        }
-                    }
-                    CurrentView::Develop => {
-                        if let Some(new_id) = state.navigate_develop(1) {
-                            state.develop_selected_photo_id = Some(new_id);
-                            state.loaded_photo_id = None; // Force reload
-                        }
-                    }
-                    _ => {}
-                }
-            }
-
-            if i.key_pressed(Key::ArrowLeft) {
-                match state.current_view {
-                    CurrentView::Library => {
-                        if let Some(new_id) = state.navigate_library(-1) {
-                            state.library_selected_photo_id = Some(new_id);
-                            state.clear_selection();
-                        }
-                    }
-                    CurrentView::Develop => {
-                        if let Some(new_id) = state.navigate_develop(-1) {
-                            state.develop_selected_photo_id = Some(new_id);
-                            state.loaded_photo_id = None; // Force reload
-                        }
-                    }
-                    _ => {}
                 }
             }
 
