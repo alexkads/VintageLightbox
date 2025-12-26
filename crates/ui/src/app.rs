@@ -284,7 +284,11 @@ impl eframe::App for VintageLightboxApp {
         // Poll for completed image processing results
         if let Some(result) = self.image_processor.poll_result() {
             // Check if this is still the photo we want
-            if self.state.develop_selected_photo_id.as_ref() == Some(&result.photo_id) {
+            // Accept if matches develop selection OR (secondary window open AND matches library selection)
+            let is_target = self.state.develop_selected_photo_id.as_ref() == Some(&result.photo_id) ||
+                           (self.secondary_window.is_open && self.state.library_selected_photo_id.as_ref() == Some(&result.photo_id));
+
+            if is_target {
                 // Store original for before/after
                 // Create cached Arc<Vec<u8>> for GPU processing to avoid repeated allocations
                 let rgba = result.original_preview.to_rgba8();
