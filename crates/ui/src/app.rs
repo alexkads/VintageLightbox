@@ -344,18 +344,17 @@ impl eframe::App for VintageLightboxApp {
         }
 
         // Request image loading if needed (non-blocking)
-        // Determine which photo to load:
-        // 1. In Develop mode, always load the develop selection
-        // 2. If Secondary Window is open, load the library selection (if not already handled by develop)
+        // Check if we need to load a new photo
+        // Trigger if:
+        // 1. We are in Develop View AND have a selected photo
+        // 2. OR we are in Library View AND Secondary Window is open (needs high-res)
         let target_photo_id = if self.state.current_view == crate::state::CurrentView::Develop {
             self.state.develop_selected_photo_id.clone()
         } else if self.secondary_window.is_open {
-            // Secondary window needs high-quality render even in Library mode
-            self.state.develop_selected_photo_id.clone()
-                .or(self.state.library_selected_photo_id.clone())
+             // Bridge: If secondary window is open, use library selection to drive image loading
+             self.state.library_selected_photo_id.clone()
         } else {
-            // Background loading? For now, stick to develop selection
-            self.state.develop_selected_photo_id.clone()
+            None
         };
 
         if let Some(photo_id) = &target_photo_id {
