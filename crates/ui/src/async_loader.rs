@@ -202,17 +202,95 @@ pub struct AsyncImageProcessor {
     /// Flag indicating if a request is in progress
     processing: Arc<Mutex<Option<String>>>,
     /// Manager for smart preview caching
-    #[allow(dead_code)] // It is used inside thread closure but compiler might not see it across clone
     preview_manager: Arc<infrastructure::cache::preview_manager::PreviewManager>,
     /// In-memory cache for decoded images (avoid repeated JPEG decoding)
-    #[allow(dead_code)]
     memory_cache: Arc<Mutex<LruCache<String, DecodedImage>>>,
+    /// Set of photo IDs currently being prefetched (to avoid duplicate prefetch)
+    prefetching: Arc<Mutex<std::collections::HashSet<String>>>,
 }
 
 /// Cached decoded image data
 struct DecodedImage {
     image: DynamicImage,
     histogram: crate::components::histogram::HistogramData,
+    /// Cached processed ColorImage with edit parameters hash
+    /// (exposure, contrast, temp, tint, highlights, shadows, whites, blacks, clarity, vibrance, sat)
+    processed_cache: Option<ProcessedCache>,
+}
+
+/// Cache for processed image to avoid re-processing
+struct ProcessedCache {
+    /// Hash of edit parameters used to generate this cache
+    edits_hash: u64,
+    /// Pre-processed ColorImage ready for display
+    color_image: ColorImage,
+    /// Pre-cloned original for before/after
+    original_preview: DynamicImage,
+}
+
+impl ImageProcessRequest {
+    /// Calculate a hash of the edit parameters for cache invalidation
+    fn edits_hash(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        use std::collections::hash_map::DefaultHasher;
+
+        let mut hasher = DefaultHasher::new();
+        // Hash all edit parameters (using bits to avoid float comparison issues)
+        self.exposure.to_bits().hash(&mut hasher);
+        self.contrast.to_bits().hash(&mut hasher);
+        self.temperature.to_bits().hash(&mut hasher);
+        self.tint.to_bits().hash(&mut hasher);
+        self.highlights.to_bits().hash(&mut hasher);
+        self.shadows.to_bits().hash(&mut hasher);
+        self.whites.to_bits().hash(&mut hasher);
+        self.blacks.to_bits().hash(&mut hasher);
+        self.clarity.to_bits().hash(&mut hasher);
+        self.vibrance.to_bits().hash(&mut hasher);
+        self.saturation.to_bits().hash(&mut hasher);
+        self.tone_curve_shadows.to_bits().hash(&mut hasher);
+        self.tone_curve_darks.to_bits().hash(&mut hasher);
+        self.tone_curve_lights.to_bits().hash(&mut hasher);
+        self.tone_curve_highlights.to_bits().hash(&mut hasher);
+        // HSL Sat
+        self.hsl_red_sat.to_bits().hash(&mut hasher);
+        self.hsl_orange_sat.to_bits().hash(&mut hasher);
+        self.hsl_yellow_sat.to_bits().hash(&mut hasher);
+        self.hsl_green_sat.to_bits().hash(&mut hasher);
+        self.hsl_aqua_sat.to_bits().hash(&mut hasher);
+        self.hsl_blue_sat.to_bits().hash(&mut hasher);
+        self.hsl_purple_sat.to_bits().hash(&mut hasher);
+        self.hsl_magenta_sat.to_bits().hash(&mut hasher);
+        // HSL Hue
+        self.hsl_red_hue.to_bits().hash(&mut hasher);
+        self.hsl_orange_hue.to_bits().hash(&mut hasher);
+        self.hsl_yellow_hue.to_bits().hash(&mut hasher);
+        self.hsl_green_hue.to_bits().hash(&mut hasher);
+        self.hsl_aqua_hue.to_bits().hash(&mut hasher);
+        self.hsl_blue_hue.to_bits().hash(&mut hasher);
+        self.hsl_purple_hue.to_bits().hash(&mut hasher);
+        self.hsl_magenta_hue.to_bits().hash(&mut hasher);
+        // HSL Lum
+        self.hsl_red_lum.to_bits().hash(&mut hasher);
+        self.hsl_orange_lum.to_bits().hash(&mut hasher);
+        self.hsl_yellow_lum.to_bits().hash(&mut hasher);
+        self.hsl_green_lum.to_bits().hash(&mut hasher);
+        self.hsl_aqua_lum.to_bits().hash(&mut hasher);
+        self.hsl_blue_lum.to_bits().hash(&mut hasher);
+        self.hsl_purple_lum.to_bits().hash(&mut hasher);
+        self.hsl_magenta_lum.to_bits().hash(&mut hasher);
+        // Lens
+        self.lens_distortion.to_bits().hash(&mut hasher);
+        self.lens_vignette_amount.to_bits().hash(&mut hasher);
+        self.lens_vignette_midpoint.to_bits().hash(&mut hasher);
+        // NR
+        self.nr_luminance.to_bits().hash(&mut hasher);
+        self.nr_color.to_bits().hash(&mut hasher);
+        // Sharpening
+        self.sharpen_amount.to_bits().hash(&mut hasher);
+        self.sharpen_radius.to_bits().hash(&mut hasher);
+
+        hasher.finish()
+    }
 }
 
 /// Request to process an image
@@ -301,8 +379,9 @@ impl AsyncImageProcessor {
         let processing_clone = processing.clone();
         let preview_manager_clone = preview_manager.clone();
         
-        // Cache capacity: 5 images (~200MB for 24MP images)
-        let cache_capacity = NonZeroUsize::new(5).unwrap();
+        // Cache capacity: 15 images (~600MB for 24MP images)
+        // Larger cache improves navigation performance by keeping more recently viewed photos in RAM
+        let cache_capacity = NonZeroUsize::new(15).unwrap();
         let memory_cache = Arc::new(Mutex::new(LruCache::new(cache_capacity)));
         let memory_cache_clone = memory_cache.clone();
 
@@ -317,6 +396,7 @@ impl AsyncImageProcessor {
             processing,
             preview_manager,
             memory_cache,
+            prefetching: Arc::new(Mutex::new(std::collections::HashSet::new())),
         }
     }
 
@@ -333,8 +413,36 @@ impl AsyncImageProcessor {
             *processing.lock() = Some(request.photo_id.clone());
 
             let start_time = std::time::Instant::now();
+            let edits_hash = request.edits_hash();
 
-            // 0. Try Memory Cache first (RAM - Instant)
+            // 0. Try FULL processed cache first (RAM - Instant, no processing needed!)
+            {
+                let mut cache = memory_cache.lock();
+                if let Some(decoded) = cache.get_mut(&request.photo_id) {
+                    if let Some(ref processed) = decoded.processed_cache {
+                        if processed.edits_hash == edits_hash {
+                            // FULL CACHE HIT! Return immediately without any processing
+                            let cache_ms = start_time.elapsed().as_secs_f32() * 1000.0;
+                            println!("FULL PROCESSED CACHE HIT: {} ({:.2}ms)", request.photo_id, cache_ms);
+
+                            let result = ImageProcessResult {
+                                photo_id: request.photo_id.clone(),
+                                preview: processed.color_image.clone(),
+                                original_preview: processed.original_preview.clone(),
+                                processed_image: decoded.image.clone(), // Not ideal but needed
+                                histogram: decoded.histogram.clone(),
+                                load_time_ms: cache_ms,
+                            };
+
+                            let _ = sender.send(result);
+                            *processing.lock() = None;
+                            continue;
+                        }
+                    }
+                }
+            }
+
+            // 1. Try Memory Cache for base image (RAM - Fast)
             let memory_hit = {
                 let mut cache = memory_cache.lock();
                 if let Some(decoded) = cache.get(&request.photo_id) {
@@ -345,9 +453,9 @@ impl AsyncImageProcessor {
             };
 
             let (preview_img, histogram) = if let Some((img, hist)) = memory_hit {
-                 // RAM Cache Hit!
+                 // RAM Cache Hit (but need to process)!
                  let ram_check_ms = start_time.elapsed().as_secs_f32() * 1000.0;
-                 println!("RAM CACHE HIT: {} (Memory read: {:.2}ms)", request.photo_id, ram_check_ms);
+                 println!("RAM CACHE HIT (needs processing): {} ({:.2}ms)", request.photo_id, ram_check_ms);
                  (img, hist)
             } else {
                 // RAM Miss - Try SQLite Cache
@@ -408,12 +516,13 @@ impl AsyncImageProcessor {
                 let hist = crate::components::histogram::HistogramData::from_image(&img);
                 let hist_ms = hist_start.elapsed().as_secs_f32() * 1000.0;
                 
-                // Store in Memory Cache
+                // Store in Memory Cache (without processed cache initially)
                 {
                     let mut cache = memory_cache.lock();
                     cache.put(request.photo_id.clone(), DecodedImage {
                         image: img.clone(),
                         histogram: hist.clone(),
+                        processed_cache: None,
                     });
                     println!("RAM CACHE STORE: {} (Count: {}) | Hist Calc: {:.2}ms", request.photo_id, cache.len(), hist_ms);
                 }
@@ -423,9 +532,13 @@ impl AsyncImageProcessor {
 
             // Continue with preview_img (either from cache or just generated)
             {
+                let post_cache_start = std::time::Instant::now();
+
                 // Store original for before/after
                 // CLONE WARNING: This might be expensive for large images
+                let clone_start = std::time::Instant::now();
                 let original_preview = preview_img.clone();
+                let clone_ms = clone_start.elapsed().as_secs_f32() * 1000.0;
 
                 // Apply edits if any
                 let has_edits = request.exposure != 0.0 || request.contrast != 1.0 || 
@@ -459,6 +572,7 @@ impl AsyncImageProcessor {
                                // Sharpening
                                request.sharpen_amount != 0.0 || request.sharpen_radius != 1.0;
 
+                let edit_start = std::time::Instant::now();
                 let processed = if has_edits {
                     crate::image_processing::ImageProcessor::process_image(
                         &preview_img,
@@ -492,8 +606,28 @@ impl AsyncImageProcessor {
                 } else {
                     preview_img
                 };
+                let edit_ms = edit_start.elapsed().as_secs_f32() * 1000.0;
 
+                let convert_start = std::time::Instant::now();
                 let processed_color = crate::image_processing::ImageProcessor::dynamic_to_color_image(&processed);
+                let convert_ms = convert_start.elapsed().as_secs_f32() * 1000.0;
+
+                let post_cache_ms = post_cache_start.elapsed().as_secs_f32() * 1000.0;
+                println!("POST-CACHE: {} | Clone: {:.2}ms, Edits: {:.2}ms, Convert: {:.2}ms, Total: {:.2}ms",
+                    request.photo_id, clone_ms, edit_ms, convert_ms, post_cache_ms);
+
+                // Save processed result to cache for instant retrieval next time
+                {
+                    let mut cache = memory_cache.lock();
+                    if let Some(decoded) = cache.get_mut(&request.photo_id) {
+                        decoded.processed_cache = Some(ProcessedCache {
+                            edits_hash,
+                            color_image: processed_color.clone(),
+                            original_preview: original_preview.clone(),
+                        });
+                        println!("PROCESSED CACHE SAVED: {} (hash: {})", request.photo_id, edits_hash);
+                    }
+                }
 
                 let result = ImageProcessResult {
                     photo_id: request.photo_id,
@@ -503,8 +637,6 @@ impl AsyncImageProcessor {
                     histogram,
                     load_time_ms: start_time.elapsed().as_secs_f32() * 1000.0,
                 };
-                
-                // println!("Processed: {} in {:.2}ms", request.path, result.load_time_ms);
 
                 let _ = sender.send(result);
             }
@@ -533,6 +665,92 @@ impl AsyncImageProcessor {
     /// Get the ID of the photo currently being processed
     pub fn processing_photo_id(&self) -> Option<String> {
         self.processing.lock().clone()
+    }
+
+    /// Check if a photo is already in the RAM cache (L1)
+    pub fn is_in_cache(&self, photo_id: &str) -> bool {
+        self.memory_cache.lock().contains(photo_id)
+    }
+
+    /// Prefetch a photo into the RAM cache (L1) without processing edits
+    /// This runs in a SEPARATE THREAD to not block the main image loading
+    pub fn prefetch(&self, photo_id: String, path: String, max_preview_size: u32) {
+        // Skip if already in cache
+        if self.is_in_cache(&photo_id) {
+            return;
+        }
+
+        // Skip if already being prefetched
+        {
+            let mut prefetching = self.prefetching.lock();
+            if prefetching.contains(&photo_id) {
+                return;
+            }
+            prefetching.insert(photo_id.clone());
+        }
+
+        // Clone what we need for the background thread
+        let memory_cache = self.memory_cache.clone();
+        let preview_manager = self.preview_manager.clone();
+        let prefetching = self.prefetching.clone();
+        let photo_id_for_cleanup = photo_id.clone();
+
+        // Spawn a SEPARATE thread for prefetch (doesn't block main queue)
+        std::thread::spawn(move || {
+            let start_time = std::time::Instant::now();
+
+            // Try to load from SQLite cache first
+            let img = if let Some(cached_img) = preview_manager.get_preview(&photo_id) {
+                let decode_ms = start_time.elapsed().as_secs_f32() * 1000.0;
+                println!("PREFETCH SQLITE HIT: {} ({:.2}ms)", photo_id, decode_ms);
+                cached_img
+            } else {
+                // Cache miss - load from disk
+                println!("PREFETCH CACHE MISS: {} - loading from disk", photo_id);
+                let load_start = std::time::Instant::now();
+
+                let img_result = if is_raw_file(&path) {
+                    load_raw_as_dynamic_image(&path)
+                } else {
+                    image::open(&path).map_err(|e| e.to_string())
+                };
+
+                if let Ok(img) = img_result {
+                    let resized = crate::image_processing::ImageProcessor::resize_for_preview(
+                        &img,
+                        max_preview_size,
+                    );
+
+                    // Save to SQLite for next time
+                    let _ = preview_manager.save_preview(&photo_id, &resized);
+
+                    let load_ms = load_start.elapsed().as_secs_f32() * 1000.0;
+                    println!("PREFETCH GENERATED: {} ({:.2}ms)", photo_id, load_ms);
+                    resized
+                } else {
+                    // Failed to load - remove from prefetching set and return
+                    prefetching.lock().remove(&photo_id_for_cleanup);
+                    return;
+                }
+            };
+
+            // Calculate histogram and store in L1 cache
+            let hist = crate::components::histogram::HistogramData::from_image(&img);
+
+            {
+                let mut cache = memory_cache.lock();
+                cache.put(photo_id.clone(), DecodedImage {
+                    image: img,
+                    histogram: hist,
+                    processed_cache: None, // Will be populated on first actual use
+                });
+                let total_ms = start_time.elapsed().as_secs_f32() * 1000.0;
+                println!("PREFETCH CACHED: {} (Total: {:.2}ms, Cache size: {})", photo_id, total_ms, cache.len());
+            }
+
+            // Remove from prefetching set
+            prefetching.lock().remove(&photo_id_for_cleanup);
+        });
     }
 }
 

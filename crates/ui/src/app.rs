@@ -698,6 +698,29 @@ impl eframe::App for VintageLightboxApp {
                         max_preview_size: 2560,
                     });
 
+                    // Prefetch adjacent photos into L1 cache for faster navigation
+                    // Find current photo index and prefetch previous/next
+                    if let Some(current_idx) = self.state.photos.iter().position(|p| &p.id == photo_id) {
+                        // Prefetch previous photo
+                        if current_idx > 0 {
+                            if let Some(prev_photo) = self.state.photos.get(current_idx - 1) {
+                                self.image_processor.prefetch(
+                                    prev_photo.id.clone(),
+                                    prev_photo.path.clone(),
+                                    2560,
+                                );
+                            }
+                        }
+                        // Prefetch next photo
+                        if let Some(next_photo) = self.state.photos.get(current_idx + 1) {
+                            self.image_processor.prefetch(
+                                next_photo.id.clone(),
+                                next_photo.path.clone(),
+                                2560,
+                            );
+                        }
+                    }
+
                     // Start timing TTI
                     self.state.start_load_time = Some(std::time::Instant::now());
 
