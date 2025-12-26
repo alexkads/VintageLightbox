@@ -69,6 +69,47 @@ impl KeyboardHandler {
             }
 
             // ==========================================
+            // NAVIGATION SHORTCUTS (Arrow keys) - Library & Develop
+            // ==========================================
+            if i.key_pressed(Key::ArrowRight) {
+                match state.current_view {
+                    CurrentView::Library => {
+                        // Navigate to next photo in filmstrip
+                        if let Some(new_id) = state.navigate_library(1) {
+                            state.library_selected_photo_id = Some(new_id);
+                            state.clear_selection();
+                        }
+                    }
+                    CurrentView::Develop => {
+                        if let Some(new_id) = state.navigate_develop(1) {
+                            state.develop_selected_photo_id = Some(new_id.clone());
+                            state.loaded_photo_id = None; // Force reload
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            if i.key_pressed(Key::ArrowLeft) {
+                match state.current_view {
+                    CurrentView::Library => {
+                        // Navigate to previous photo in filmstrip
+                        if let Some(new_id) = state.navigate_library(-1) {
+                            state.library_selected_photo_id = Some(new_id);
+                            state.clear_selection();
+                        }
+                    }
+                    CurrentView::Develop => {
+                        if let Some(new_id) = state.navigate_develop(-1) {
+                            state.develop_selected_photo_id = Some(new_id.clone());
+                            state.loaded_photo_id = None; // Force reload
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            // ==========================================
             // DEVELOP VIEW SPECIFIC
             // ==========================================
             if state.current_view == CurrentView::Develop {
@@ -87,21 +128,6 @@ impl KeyboardHandler {
                 } else if cmd_pressed && i.key_pressed(Key::Z) {
                     // Undo
                     state.undo();
-                }
-
-                // Navigation shortcuts (Arrow keys)
-                if i.key_pressed(Key::ArrowRight) {
-                    if let Some(new_id) = state.navigate_develop(1) {
-                        state.develop_selected_photo_id = Some(new_id.clone());
-                        state.loaded_photo_id = None; // Force reload
-                    }
-                }
-
-                if i.key_pressed(Key::ArrowLeft) {
-                    if let Some(new_id) = state.navigate_develop(-1) {
-                        state.develop_selected_photo_id = Some(new_id.clone());
-                        state.loaded_photo_id = None; // Force reload
-                    }
                 }
             }
         });

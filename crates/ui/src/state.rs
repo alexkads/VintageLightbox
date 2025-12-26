@@ -733,6 +733,46 @@ impl AppState {
         None
     }
 
+    /// Navigate to the next or previous photo in library view (filmstrip)
+    /// direction: 1 for next, -1 for previous
+    /// Returns the new photo ID if navigation was successful
+    pub fn navigate_library(&mut self, direction: i32) -> Option<String> {
+        // Get currently filtered photos
+        let filtered: Vec<_> = self.filmstrip_filter.apply(&self.photos);
+        
+        if filtered.is_empty() {
+            return None;
+        }
+        
+        // Find current position in filtered list
+        let current_pos = if let Some(current_id) = &self.library_selected_photo_id {
+            filtered.iter().position(|p| &p.id == current_id)
+        } else {
+            None
+        };
+        
+        let new_pos = match current_pos {
+            Some(pos) => {
+                if direction > 0 {
+                    (pos + 1).min(filtered.len().saturating_sub(1))
+                } else {
+                    pos.saturating_sub(1)
+                }
+            }
+            None => {
+                // No current selection, select first or last
+                if direction > 0 { 0 } else { filtered.len().saturating_sub(1) }
+            }
+        };
+        
+        // Return the new photo ID if it's different
+        if current_pos != Some(new_pos) {
+            return filtered.get(new_pos).map(|p| p.id.clone());
+        }
+        
+        None
+    }
+
     /// Reset zoom and pan to defaults
     pub fn reset_viewer(&mut self) {
         self.zoom_level = 1.0;

@@ -138,34 +138,7 @@ impl ImageViewer {
             }
         });
 
-        // Navigation arrows
-        if state.has_photos() {
-            // Left arrow
-            let left_pos = rect.min + Vec2::new(Theme::SPACE_LG, rect.height() / 2.0 - 20.0);
-            let left_rect = Rect::from_min_size(left_pos, Vec2::new(40.0, 40.0));
 
-            ui.allocate_new_ui(UiBuilder::new().max_rect(left_rect), |ui| {
-                if widgets::icon_button(ui, "‹").clicked() {
-                    if let Some(new_id) = state.navigate_develop(-1) {
-                        state.develop_selected_photo_id = Some(new_id);
-                        state.loaded_photo_id = None; // Force reload
-                    }
-                }
-            });
-
-            // Right arrow
-            let right_pos = rect.max - Vec2::new(40.0 + Theme::SPACE_LG, rect.height() / 2.0 + 20.0);
-            let right_rect = Rect::from_min_size(right_pos, Vec2::new(40.0, 40.0));
-
-            ui.allocate_new_ui(UiBuilder::new().max_rect(right_rect), |ui| {
-                if widgets::icon_button(ui, "›").clicked() {
-                    if let Some(new_id) = state.navigate_develop(1) {
-                        state.develop_selected_photo_id = Some(new_id);
-                        state.loaded_photo_id = None; // Force reload
-                    }
-                }
-            });
-        }
 
         // Zoom indicator (bottom-right)
         if state.zoom_level != 1.0 {
