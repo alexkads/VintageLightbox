@@ -16,6 +16,8 @@ use crate::async_loader::{AsyncImageProcessor, ImageProcessRequest};
 use crate::docking::{DockViewer, DockViewerContext};
 use crate::components::{photo_grid::PhotoGrid, filmstrip::Filmstrip};
 use crate::components::settings_dialog::{SettingsDialog, SettingsAction};
+use crate::components::secondary_window::SecondaryWindow;
+use crate::monitors::{MonitorDetector, MonitorInfo};
 
 /// Main application struct
 pub struct VintageLightboxApp {
@@ -75,6 +77,14 @@ pub struct VintageLightboxApp {
     
     /// Flag to trigger initial photo load on first frame
     needs_initial_load: bool,
+    
+    // ============================================
+    // Secondary Window (Multi-Monitor)
+    // ============================================
+    /// Secondary window for client view on second monitor
+    secondary_window: SecondaryWindow,
+    /// Cached list of available monitors
+    cached_monitors: Vec<MonitorInfo>,
 }
 
 impl VintageLightboxApp {
@@ -136,6 +146,8 @@ impl VintageLightboxApp {
                 .unwrap_or_else(crate::docking::create_develop_layout),
             preview_manager,
             needs_initial_load: true,
+            secondary_window: SecondaryWindow::new(),
+            cached_monitors: Vec::new(),
         }
     }
 
@@ -332,7 +344,21 @@ impl eframe::App for VintageLightboxApp {
         }
 
         // Request image loading if needed (non-blocking)
-        if let Some(photo_id) = &self.state.develop_selected_photo_id.clone() {
+        // Determine which photo to load:
+        // 1. In Develop mode, always load the develop selection
+        // 2. If Secondary Window is open, load the library selection (if not already handled by develop)
+        let target_photo_id = if self.state.current_view == crate::state::CurrentView::Develop {
+            self.state.develop_selected_photo_id.clone()
+        } else if self.secondary_window.is_open {
+            // Secondary window needs high-quality render even in Library mode
+            self.state.develop_selected_photo_id.clone()
+                .or(self.state.library_selected_photo_id.clone())
+        } else {
+            // Background loading? For now, stick to develop selection
+            self.state.develop_selected_photo_id.clone()
+        };
+
+        if let Some(photo_id) = &target_photo_id {
             let needs_reload = self.state.loaded_photo_id.as_ref() != Some(photo_id);
             // Check if we already requested this specific photo to avoid loops
             let already_requested = self.requested_photo_id.as_ref() == Some(photo_id);
@@ -1568,9 +1594,78 @@ impl eframe::App for VintageLightboxApp {
         // Performance Debug Overlay
         self.show_debug_overlay(ctx);
 
+        // ============================================
+        // SECONDARY WINDOW (Multi-Monitor Support)
+        // ============================================
+        // Handle F key to toggle secondary window
+        if ctx.input(|i| i.key_pressed(egui::Key::F)) && !ctx.wants_keyboard_input() {
+            // Prevent multiple toggles if update() is called multiple times per frame (common in egui)
+            let toggle_id = egui::Id::new("secondary_window_toggle_frame");
+            let last_time = ctx.data(|d| d.get_temp::<f64>(toggle_id).unwrap_or(-1.0));
+            let current_time = ctx.input(|i| i.time);
+
+            if last_time != current_time {
+                // Record this frame as handled
+                ctx.data_mut(|d| d.insert_temp(toggle_id, current_time));
+
+                // Always refresh monitor list to catch changes
+                self.cached_monitors = MonitorDetector::get_monitors();
+                self.secondary_window.toggle(&self.cached_monitors);
+                
+                // Show toast notification
+                if self.secondary_window.is_open {
+                    let monitor_name = self.secondary_window.monitor
+                        .as_ref()
+                        .map(|m| m.name.as_str())
+                        .unwrap_or("Unknown");
+                    self.state.toasts.info(format!("Opening on {}", monitor_name));
+                } else {
+                    self.state.toasts.info("Secondary window closed");
+                }
+            }
+        }
+        
+        // Handle I key to toggle info overlay in secondary window
+        if ctx.input(|i| i.key_pressed(egui::Key::I)) && self.secondary_window.is_open {
+            self.secondary_window.toggle_info_overlay();
+        }
+        
+        // Sync secondary window with current selection
+        if self.secondary_window.is_open {
+            self.secondary_window.set_photo(self.state.develop_selected_photo_id.clone()
+                .or_else(|| self.state.library_selected_photo_id.clone()));
+                
+            // Render secondary window viewport
+            // We need to clone the info since we can't borrow self twice or pass multiple refs easily
+            let photo_info = self.state.get_current_photo().map(|p| {
+                let rating = if p.rating > 0 {
+                    "★".repeat(p.rating as usize)
+                } else {
+                    String::new()
+                };
+                (p.name.clone(), rating)
+            });
+            
+            let has_selection = self.state.develop_selected_photo_id.is_some() || 
+                               self.state.library_selected_photo_id.is_some();
+
+            self.secondary_window.show(
+                ctx,
+                self.state.detail_image.as_ref(),
+                self.state.thumbnail_preview.as_ref(),
+                has_selection,
+                photo_info.as_ref().map(|(n, r)| (n.as_str(), r.as_str())),
+            );
+        }
+
         // Keep UI active if we are waiting for background tasks
         // This prevents the UI from sleeping (gray screen) while image loads
         if self.image_processor.is_processing() || self.requested_photo_id.is_some() {
+            ctx.request_repaint();
+        }
+        
+        // Also keep repainting if secondary window is open (to sync updates)
+        if self.secondary_window.is_open {
             ctx.request_repaint();
         }
     }

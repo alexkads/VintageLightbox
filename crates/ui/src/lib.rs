@@ -15,3 +15,4 @@ pub mod views;
 pub mod async_loader;
 pub mod gpu_processor;
 pub mod docking;
+pub mod monitors;

@@ -10,34 +10,77 @@ pub struct ImageViewer;
 impl ImageViewer {
     /// Show the image viewer with zoom/pan capabilities
     pub fn show(ui: &mut Ui, state: &mut AppState) {
+        let (new_zoom, new_pan) = Self::render(
+            ui,
+            state.detail_image.as_ref(),
+            state.thumbnail_preview.as_ref(),
+            state.develop_selected_photo_id.is_some(),
+            state.zoom_level,
+            state.pan_offset,
+            true, // interactive
+        );
+
+        state.zoom_level = new_zoom;
+        state.pan_offset = new_pan;
+
+        // Double-click reset handled in render via return values or we need to pass interaction back? 
+        // Actually, render returning modified zoom/pan is cleanest.
+        // We also need to handle the "Back" button and overlays, which are specific to the main Interactive viewer.
+        
+        // UI overlay elements (Main viewer only)
+        Self::show_controls(ui, state, ui.max_rect());
+    }
+
+    /// Stateless rendering of the image viewer content
+    /// Returns (new_zoom, new_pan)
+    pub fn render(
+        ui: &mut Ui,
+        detail_image: Option<&egui::TextureHandle>,
+        thumbnail_preview: Option<&egui::TextureHandle>,
+        has_selection: bool,
+        current_zoom: f32,
+        current_pan: Vec2,
+        interactive: bool,
+    ) -> (f32, Vec2) {
         let available_size = ui.available_size();
-        let (rect, response) = ui.allocate_exact_size(available_size, Sense::click_and_drag());
+        let match_size_arg = if interactive {
+            Sense::click_and_drag()
+        } else {
+            Sense::hover()
+        };
+        let (rect, response) = ui.allocate_exact_size(available_size, match_size_arg);
 
         // Fill background
         ui.painter().rect_filled(rect, 0.0, ui.visuals().panel_fill);
 
-        // Handle zoom with scroll
-        if response.hovered() {
-            let scroll_delta = ui.input(|i| i.raw_scroll_delta.y);
-            if scroll_delta != 0.0 {
-                let zoom_delta = scroll_delta * 0.001;
-                state.zoom_level = (state.zoom_level + zoom_delta).clamp(0.5, 5.0);
+        let mut zoom = current_zoom;
+        let mut pan = current_pan;
+
+        if interactive {
+            // Handle zoom with scroll
+            if response.hovered() {
+                let scroll_delta = ui.input(|i| i.raw_scroll_delta.y);
+                if scroll_delta != 0.0 {
+                    let zoom_delta = scroll_delta * 0.001;
+                    zoom = (zoom + zoom_delta).clamp(0.5, 5.0);
+                }
+            }
+
+            // Handle pan with drag
+            if response.dragged() {
+                pan += response.drag_delta();
+            }
+
+            // Double-click to reset
+            if response.double_clicked() {
+                zoom = 1.0;
+                pan = Vec2::ZERO;
             }
         }
 
-        // Handle pan with drag
-        if response.dragged() {
-            state.pan_offset += response.drag_delta();
-        }
-
-        // Double-click to reset
-        if response.double_clicked() {
-            state.reset_viewer();
-        }
-
-        // Draw image logic - NO transition since thumbnail has same effects applied
-        if let Some(texture) = &state.detail_image {
-            // Full resolution image available - show immediately
+        // Draw image logic
+        if let Some(texture) = detail_image {
+            // Full resolution image available
             let texture_size = Vec2::new(texture.size()[0] as f32, texture.size()[1] as f32);
 
             // Calculate scaled size
@@ -46,34 +89,29 @@ impl ImageViewer {
                 .min(1.0); // Don't upscale beyond original size
 
             let base_img_size = texture_size * scale;
-            let zoomed_size = base_img_size * state.zoom_level;
+            let zoomed_size = base_img_size * zoom;
 
-            let center = rect.center() + state.pan_offset;
+            let center = rect.center() + pan;
             let img_rect = Rect::from_center_size(center, zoomed_size);
 
-            // Draw full-res image (no fade since thumbnail already has effects)
             egui::Image::new(texture).paint_at(ui, img_rect);
             
-            // Clear loaded_at since we no longer need transition
-            state.detail_image_loaded_at = None;
-            
-        } else if let Some(thumbnail) = &state.thumbnail_preview {
-            // LIGHTROOM-STYLE: Show thumbnail with effects as instant preview
+        } else if let Some(thumbnail) = thumbnail_preview {
+            // LIGHTROOM-STYLE: Show thumbnail with effects
             let texture_size = Vec2::new(thumbnail.size()[0] as f32, thumbnail.size()[1] as f32);
 
-            // Calculate scaled size (will be blurry but instant!)
             let scale = (available_size.x / texture_size.x)
                 .min(available_size.y / texture_size.y);
 
             let base_img_size = texture_size * scale;
-            let zoomed_size = base_img_size * state.zoom_level;
+            let zoomed_size = base_img_size * zoom;
 
-            let center = rect.center() + state.pan_offset;
+            let center = rect.center() + pan;
             let img_rect = Rect::from_center_size(center, zoomed_size);
 
             egui::Image::new(thumbnail).paint_at(ui, img_rect);
             
-            // Show subtle loading indicator in corner
+            // Show subtle loading indicator
             let loading_rect = Rect::from_min_size(
                 rect.right_top() - Vec2::new(120.0, -10.0),
                 Vec2::new(110.0, 24.0)
@@ -87,10 +125,9 @@ impl ImageViewer {
                 Color32::WHITE,
             );
             
-            // Request repaint to poll for full-res result
             ui.ctx().request_repaint();
-        } else if state.develop_selected_photo_id.is_some() {
-            // No thumbnail available, show spinner (should be rare)
+        } else if has_selection {
+            // No thumbnail available, show spinner
             let time = ui.ctx().input(|i| i.time);
             let spinner_char = match ((time * 8.0) as usize) % 4 {
                 0 => "◐",
@@ -107,7 +144,6 @@ impl ImageViewer {
                 ui.visuals().weak_text_color(),
             );
             
-            // Request repaint for animation
             ui.ctx().request_repaint();
         } else {
             // No image selected
@@ -120,8 +156,7 @@ impl ImageViewer {
             );
         }
 
-        // UI overlay elements
-        Self::show_controls(ui, state, rect);
+        (zoom, pan)
     }
 
     /// Show viewer controls (back button, navigation, zoom indicator)
@@ -137,8 +172,6 @@ impl ImageViewer {
                 state.reset_viewer();
             }
         });
-
-
 
         // Zoom indicator (bottom-right)
         if state.zoom_level != 1.0 {
@@ -161,3 +194,4 @@ impl ImageViewer {
         }
     }
 }
+
