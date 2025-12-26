@@ -69,12 +69,11 @@ impl KeyboardHandler {
             }
 
             // ==========================================
-            // NAVIGATION SHORTCUTS (Arrow keys) - Library & Develop
+            // NAVIGATION SHORTCUTS (Arrow keys) - Filmstrip in Library & Develop
             // ==========================================
             if i.key_pressed(Key::ArrowRight) {
                 match state.current_view {
                     CurrentView::Library => {
-                        // Navigate to next photo in filmstrip
                         if let Some(new_id) = state.navigate_library(1) {
                             state.library_selected_photo_id = Some(new_id);
                             state.clear_selection();
@@ -82,7 +81,7 @@ impl KeyboardHandler {
                     }
                     CurrentView::Develop => {
                         if let Some(new_id) = state.navigate_develop(1) {
-                            state.develop_selected_photo_id = Some(new_id.clone());
+                            state.develop_selected_photo_id = Some(new_id);
                             state.loaded_photo_id = None; // Force reload
                         }
                     }
@@ -93,7 +92,6 @@ impl KeyboardHandler {
             if i.key_pressed(Key::ArrowLeft) {
                 match state.current_view {
                     CurrentView::Library => {
-                        // Navigate to previous photo in filmstrip
                         if let Some(new_id) = state.navigate_library(-1) {
                             state.library_selected_photo_id = Some(new_id);
                             state.clear_selection();
@@ -101,7 +99,7 @@ impl KeyboardHandler {
                     }
                     CurrentView::Develop => {
                         if let Some(new_id) = state.navigate_develop(-1) {
-                            state.develop_selected_photo_id = Some(new_id.clone());
+                            state.develop_selected_photo_id = Some(new_id);
                             state.loaded_photo_id = None; // Force reload
                         }
                     }
