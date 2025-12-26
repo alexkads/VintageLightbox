@@ -1601,7 +1601,12 @@ impl eframe::App for VintageLightboxApp {
         // SECONDARY WINDOW (Multi-Monitor Support)
         // ============================================
         // Handle F key to toggle secondary window
-        if ctx.input(|i| i.key_pressed(egui::Key::F)) && !ctx.wants_keyboard_input() {
+        // Handle F key or UI request to toggle secondary window
+        let f_key = ctx.input(|i| i.key_pressed(egui::Key::F)) && !ctx.wants_keyboard_input();
+        let ui_req = self.state.request_toggle_secondary_window;
+        
+        if f_key || ui_req {
+            self.state.request_toggle_secondary_window = false; // Consume request
             // Prevent multiple toggles if update() is called multiple times per frame (common in egui)
             let toggle_id = egui::Id::new("secondary_window_toggle_frame");
             let last_time = ctx.data(|d| d.get_temp::<f64>(toggle_id).unwrap_or(-1.0));

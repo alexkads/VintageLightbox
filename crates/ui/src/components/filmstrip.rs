@@ -21,6 +21,7 @@ pub enum FilmstripAction {
     SelectAll,
     DeselectAll,
     SetFlag(String, i32),
+    ToggleSecondaryWindow, // New action
 }
 
 pub struct Filmstrip {
@@ -58,6 +59,16 @@ impl Filmstrip {
         ui.horizontal(|ui| {
             ui.add_space(Theme::SPACE_SM);
             state.filmstrip_filter.ui(ui);
+            
+            use crate::components::filmstrip_secondary_windows::{FilmstripSecondaryWindows, SecondaryWindowAction};
+            
+            if let Some(act) = FilmstripSecondaryWindows::show(ui) {
+                match act {
+                    SecondaryWindowAction::Toggle => {
+                        action = Some(FilmstripAction::ToggleSecondaryWindow);
+                    }
+                }
+            }
         });
         ui.separator();
 

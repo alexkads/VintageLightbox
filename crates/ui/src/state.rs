@@ -443,6 +443,9 @@ pub struct AppState {
     pub import_dialog: Option<egui_file::FileDialog>,
     pub import_dialog_mode: ImportDialogMode,
     pub export_target_id: Option<String>,
+    
+    // Command request from UI to App
+    pub request_toggle_secondary_window: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -597,7 +600,9 @@ impl AppState {
             original_preview: None,
             original_image_data: None,
             zoom_level: 1.0,
+
             pan_offset: egui::Vec2::ZERO,
+            request_toggle_secondary_window: false,
             show_before: false,
             prev_show_before: false,
             is_busy: false,

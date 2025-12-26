@@ -215,6 +215,9 @@ impl<'a> TabViewer for DockViewer<'a> {
                                 ctx_clone.request_repaint();
                             });
                         }
+                        FilmstripAction::ToggleSecondaryWindow => {
+                            self.context.state.request_toggle_secondary_window = true;
+                        }
                     }
                 }
                 
