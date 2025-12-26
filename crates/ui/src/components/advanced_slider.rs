@@ -47,6 +47,9 @@ impl AdvancedSlider {
         let alt_pressed = ui.input(|i| i.modifiers.alt);
         
         ui.horizontal(|ui| {
+            // Padding Left
+            ui.add_space(Theme::SPACE_XS);
+
             // Label - Alt+Click to reset
             let label_response = ui.add(
                 egui::Label::new(
@@ -55,16 +58,19 @@ impl AdvancedSlider {
                 ).sense(Sense::click())
             );
             
-            if alt_pressed && label_response.clicked() {
+            if (alt_pressed && label_response.clicked()) || label_response.double_clicked() {
                 *value = default_value;
                 changed = true;
                 is_editing = false;
                 edit_string = format!("{:.prec$}", default_value, prec = decimals);
             }
             
-            label_response.on_hover_text("Alt+Click to reset");
+            label_response.on_hover_text("Double-click or Alt+Click to reset");
             
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                // Padding Right - prevents value from touching the edge
+                ui.add_space(Theme::SPACE_MD);
+
                 // Value display/edit
                 if is_editing {
                     // Show text input when editing
@@ -113,8 +119,8 @@ impl AdvancedSlider {
                         ).sense(Sense::click())
                     );
                     
-                    // Alt+Click to reset, regular click to edit
-                    if alt_pressed && value_response.clicked() {
+                    // Alt+Click or Double-Click to reset, regular click to edit
+                    if (alt_pressed && value_response.clicked()) || value_response.double_clicked() {
                         *value = default_value;
                         changed = true;
                         edit_string = format!("{:.prec$}", default_value, prec = decimals);
@@ -124,7 +130,7 @@ impl AdvancedSlider {
                     }
                     
                     // Tooltip on hover
-                    value_response.on_hover_text("Click to edit\nAlt+Click to reset");
+                    value_response.on_hover_text("Click to edit\nDouble-click or Alt+Click to reset");
                 }
             });
         });
@@ -132,25 +138,30 @@ impl AdvancedSlider {
         // Larger space between label and slider for breathing room
         ui.add_space(Theme::SPACE_XS);
         
-        // Slider with Alt+Click reset
-        let slider_response = ui.add(
-            egui::Slider::new(value, range.clone())
-                .show_value(false)
-        );
+        // Slider with proper horizontal padding
+        let slider_response = ui.horizontal(|ui| {
+            ui.add_space(Theme::SPACE_XS);
+            let s = ui.add(
+                egui::Slider::new(value, range.clone())
+                    .show_value(false)
+            );
+            ui.add_space(Theme::SPACE_MD); // Match the value padding
+            s
+        }).inner;
         
         if slider_response.changed() {
             changed = true;
         }
         
-        // Alt+Click or Right-click on slider to reset
-        if (alt_pressed && slider_response.clicked()) || slider_response.secondary_clicked() {
+        // Reset Logic: Double-click OR Alt+Click OR Right-click
+        if slider_response.double_clicked() || (alt_pressed && slider_response.clicked()) || slider_response.secondary_clicked() {
             *value = default_value;
             changed = true;
             edit_string = format!("{:.prec$}", default_value, prec = decimals);
         }
         
         // Show reset hint on hover
-        slider_response.on_hover_text("Alt+Click or Right-click to reset");
+        slider_response.on_hover_text("Double-click, Right-click or Alt+Click to reset");
         
         // Store edit state
         ui.memory_mut(|mem| {
