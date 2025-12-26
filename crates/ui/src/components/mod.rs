@@ -17,3 +17,4 @@ pub mod settings_dialog;
 pub mod filmstrip_filter;
 pub mod secondary_window;
 pub mod filmstrip_secondary_windows;
+pub mod print_dialog;

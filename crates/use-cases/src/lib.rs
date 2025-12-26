@@ -17,6 +17,7 @@ pub mod organize;
 pub mod edit;
 pub mod export;
 pub mod import_photos; // Likely legacy but better include
+pub mod configure_print_job;
 
 // Re-export common types
 pub use import_photo::ImportPhotoUseCase;
@@ -37,3 +38,6 @@ pub use delete_photo::DeletePhotoUseCase;
 pub use create_collection::CreateCollectionUseCase;
 pub use add_photo_to_collection::AddPhotoToCollectionUseCase;
 pub use remove_photo_from_collection::RemovePhotoFromCollectionUseCase;
+
+// Exports for PrintController
+pub use configure_print_job::ConfigurePrintJobUseCase;

@@ -78,6 +78,7 @@ pub struct EditSnapshot {
 pub enum CurrentView {
     Library,
     Develop,
+    Print,
     Import,
 }
 
@@ -446,6 +447,16 @@ pub struct AppState {
     
     // Command request from UI to App
     pub request_toggle_secondary_window: bool,
+
+    // ============================================
+    // Print View State
+    // ============================================
+    /// State for the Print view (Lightroom-style print module)
+    pub print_view_state: Option<crate::views::print_view::PrintViewState>,
+    /// Whether to show the print dialog (legacy - kept for compatibility)
+    pub show_print_dialog: bool,
+    /// Print dialog state (legacy - kept for compatibility)
+    pub print_dialog_state: Option<crate::components::print_dialog::PrintDialogState>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -687,6 +698,10 @@ impl AppState {
             import_dialog: None,
             import_dialog_mode: ImportDialogMode::Simple,
             export_target_id: None,
+            // Print view state
+            print_view_state: None,
+            show_print_dialog: false,
+            print_dialog_state: None,
         }
     }
 
@@ -696,6 +711,7 @@ impl AppState {
         match self.current_view {
             CurrentView::Library => self.library_selected_photo_id.as_ref(),
             CurrentView::Develop => self.develop_selected_photo_id.as_ref(),
+            CurrentView::Print => self.library_selected_photo_id.as_ref(),
             CurrentView::Import => None,
         }
     }

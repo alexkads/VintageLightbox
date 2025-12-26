@@ -74,6 +74,8 @@ pub struct VintageLightboxApp {
     filmstrip: Filmstrip,
     library_dock_state: egui_dock::DockState<crate::docking::DockTab>,
     develop_dock_state: egui_dock::DockState<crate::docking::DockTab>,
+    /// Print view component
+    print_view: crate::views::print_view::PrintView,
     
     /// Flag to trigger initial photo load on first frame
     needs_initial_load: bool,
@@ -144,6 +146,7 @@ impl VintageLightboxApp {
             develop_dock_state: cc.storage
                 .and_then(|s| eframe::get_value(s, "develop_dock_state"))
                 .unwrap_or_else(crate::docking::create_develop_layout),
+            print_view: crate::views::print_view::PrintView::new(preview_manager.clone()),
             preview_manager,
             needs_initial_load: true,
             secondary_window: SecondaryWindow::new(),
@@ -1428,6 +1431,36 @@ impl eframe::App for VintageLightboxApp {
         // Show toast notifications
         self.state.toasts.show(ctx);
 
+        // Show Print Dialog
+        if self.state.show_print_dialog {
+            if let Some(ref mut print_state) = self.state.print_dialog_state {
+                use crate::components::print_dialog::{PrintDialog, PrintDialogAction};
+                
+                let action = PrintDialog::show(ctx, print_state);
+                
+                match action {
+                    PrintDialogAction::Print => {
+                        // TODO: Execute print job when infrastructure is ready
+                        let photo_count = print_state.photo_ids.len();
+                        let layout = print_state.layout.display_name();
+                        self.state.toasts.info(format!(
+                            "Print functionality coming soon! Would print {} photo(s) with {} layout", 
+                            photo_count, layout
+                        ));
+                        self.state.show_print_dialog = false;
+                        self.state.print_dialog_state = None;
+                    }
+                    PrintDialogAction::Cancel => {
+                        self.state.show_print_dialog = false;
+                        self.state.print_dialog_state = None;
+                    }
+                    PrintDialogAction::None => {
+                        // Dialog still open, nothing to do
+                    }
+                }
+            }
+        }
+
         // Show Settings Dialog
         if let Some(action) = SettingsDialog::show(ctx, &mut self.state) {
             match action {
@@ -1559,12 +1592,25 @@ impl eframe::App for VintageLightboxApp {
                 &self.import_controller, 
                 &self.import_source_sender
             );
+        } else if self.state.current_view == CurrentView::Print {
+            // Print view - Lightroom-style print module
+            egui::CentralPanel::default().show(ctx, |ui| {
+                self.print_view.show(
+                    ui,
+                    &mut self.state,
+                    &self.photo_controller,
+                    &self.library_controller,
+                    &self.photo_sender,
+                    ctx,
+                );
+            });
         } else {
             egui::CentralPanel::default().show(ctx, |_ui| {
                 // Get the appropriate dock state for the current view
                 let dock_state = match self.state.current_view {
                     CurrentView::Library => &mut self.library_dock_state,
                     CurrentView::Develop => &mut self.develop_dock_state,
+                    CurrentView::Print => &mut self.library_dock_state, // Fallback
                     CurrentView::Import => &mut self.library_dock_state,
                 };
             
@@ -1740,6 +1786,32 @@ impl VintageLightboxApp {
             } else {
                 ui.add_enabled_ui(false, |ui| {
                     widgets::nav_button(ui, &develop_label, false);
+                });
+            }
+
+            ui.add_space(Theme::SPACE_SM);
+
+            // Print button - switches to Print view (Lightroom-style print module)
+            let print_label = format!("{} Print", icons::NAV_PRINT);
+            let print_enabled = !self.state.selected_photo_ids.is_empty() || self.state.library_selected_photo_id.is_some();
+            if print_enabled {
+                if widgets::nav_button(ui, &print_label, self.state.current_view == CurrentView::Print).clicked() {
+                    // Initialize print view state with selected photos
+                    let photo_ids: Vec<String> = if !self.state.selected_photo_ids.is_empty() {
+                        self.state.selected_photo_ids.iter().cloned().collect()
+                    } else if let Some(id) = &self.state.library_selected_photo_id {
+                        vec![id.clone()]
+                    } else {
+                        vec![]
+                    };
+                    
+                    // Set up print view state and switch view
+                    self.state.print_view_state = Some(crate::views::print_view::PrintViewState::new(photo_ids));
+                    self.state.current_view = CurrentView::Print;
+                }
+            } else {
+                ui.add_enabled_ui(false, |ui| {
+                    widgets::nav_button(ui, &print_label, false);
                 });
             }
 

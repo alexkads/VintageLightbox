@@ -21,6 +21,9 @@ pub enum DomainError {
     #[error("Adjustment value fora dos limites permitidos")]
     InvalidAdjustmentValue,
 
+    #[error("Print settings inválido: {0}")]
+    InvalidPrintSettings(String),
+
     #[error("Foto não encontrada")]
     PhotoNotFound,
 

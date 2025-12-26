@@ -145,8 +145,8 @@ impl KeyboardHandler {
                     Vec::new()
                 }
             }
-            CurrentView::Library => {
-                // In Library, act on multi-selection if exists, otherwise single selection
+            CurrentView::Library | CurrentView::Print => {
+                // In Library and Print, act on multi-selection if exists, otherwise single selection
                 if !state.selected_photo_ids.is_empty() {
                     state.selected_photo_ids.iter().cloned().collect()
                 } else if let Some(id) = &state.library_selected_photo_id {
