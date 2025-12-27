@@ -180,6 +180,7 @@ impl SecondaryWindow {
                             false, // interactive
                             false, // allow_pan
                             crop_settings.as_ref(), // Pass crop settings ref
+                            true, // apply_crop_clip: Always clip in secondary window (presentation mode)
                         );
                         
                         // Optional overlay with photo info (bottom left)

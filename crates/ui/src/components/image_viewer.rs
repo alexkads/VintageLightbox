@@ -19,9 +19,8 @@ impl ImageViewer {
             state.pan_offset,
             true, // interactive
             !state.crop_mode_active, // allow_pan: Disable pan in crop mode (unless Space is held)
-            // If crop mode is active, we show the original image (untransformed) so the user can edit the crop.
-            // If crop mode is INACTIVE, we show the applied crop.
-            if state.crop_mode_active { None } else { state.crop_settings.as_ref() },
+            state.crop_settings.as_ref(), // Always pass crop settings so we can get rotation
+            !state.crop_mode_active, // apply_crop_clip: Only clip UVs if NOT in crop editing mode
         );
 
         state.zoom_level = new_zoom;
@@ -31,55 +30,16 @@ impl ImageViewer {
         if state.crop_mode_active {
             if let Some(crop_settings) = &mut state.crop_settings {
                 if let Some(img_rect) = painted_image_rect {
-                    // We also need the texture size to handle drag deltas correctly
-                    // We can infer it or get it from state again
-                     if let Some(texture) = state.detail_image.as_ref().or(state.thumbnail_preview.as_ref()) {
-                        let texture_size = Vec2::new(texture.size()[0] as f32, texture.size()[1] as f32);
-
-                        // Show crop overlay
-                        use crate::components::crop_overlay::CropOverlay;
-                        let overlay_response = CropOverlay::show(
-                            ui,
-                            img_rect,
-                            viewer_rect, 
-                            crop_settings,
-                            state.show_composition_grid,
-                        );
-
-                        // Handle overlay interactions
-                        if let Some(handle_index) = overlay_response.handle_dragged {
-                            CropOverlay::update_from_handle_drag(
-                                crop_settings,
-                                handle_index,
-                                overlay_response.drag_delta,
-                                texture_size,
-                                &state.selected_aspect_ratio,
-                            );
-                        } else if overlay_response.crop_dragged {
-                            CropOverlay::update_from_crop_drag(
-                                crop_settings,
-                                overlay_response.drag_delta,
-                                texture_size,
-                            );
-                        } else if overlay_response.rotation_dragged {
-                            // Straighten / Rotation Logic
-                            // Calculate angle change based on x/y delta or angular movement
-                            // Simple horizontal drag for rotation is common in sliders, but on image maybe specialized behavior
-                            // For simplicity, let's map horizontal drag to rotation angle
-                            let sensitivity = 0.5; // degrees per pixel
-                            let delta_degrees = overlay_response.drag_delta.x * sensitivity;
-                            
-                            // Update crop angle
-                            let new_angle = crop_settings.angle() + delta_degrees;
-                            // Clamp angle if needed? Usually straighten is limited (e.g. +/- 45 deg)
-                            
-                            *crop_settings = domain::value_objects::CropSettings::new(
-                                crop_settings.crop_x(), crop_settings.crop_y(), crop_settings.crop_width(), crop_settings.crop_height(),
-                                crop_settings.rotation_90(), new_angle,
-                                crop_settings.flip_horizontal(), crop_settings.flip_vertical()
-                            );
-                        }
-                    }
+                    // Show crop overlay
+                    use crate::components::crop_overlay::CropOverlay;
+                    CropOverlay::show(
+                        ui,
+                        img_rect,
+                        viewer_rect, 
+                        crop_settings,
+                        state.show_composition_grid,
+                        state.selected_aspect_ratio.clone(),
+                    );
                 }
             }
         }
@@ -100,6 +60,7 @@ impl ImageViewer {
         interactive: bool,
         allow_pan: bool, // Restored parameter
         crop_settings: Option<&domain::value_objects::CropSettings>, // Updated for crop support
+        apply_crop_clip: bool, // New parameter: if true, applies UV crop. If false, shows full image but rotated.
     ) -> (f32, Vec2, Option<Rect>, Rect) {
         let available_size = ui.available_size();
         let match_size_arg = if interactive {
@@ -168,11 +129,25 @@ impl ImageViewer {
 
             // Calculate the effective size considering crop (for aspect ratio correction)
             let effective_size = if let Some(crop) = crop_settings {
-                // When cropped, the displayed portion has different dimensions based on logical crop
-                Vec2::new(
-                    texture_size.x * crop.crop_width(),
-                    texture_size.y * crop.crop_height()
-                )
+                if apply_crop_clip {
+                    // When cropped AND CLIPPED, the displayed portion has different dimensions
+                    Vec2::new(
+                        texture_size.x * crop.crop_width(),
+                        texture_size.y * crop.crop_height()
+                    )
+                } else {
+                    // When NOT clipped (editing crop), we show the full image, BUT...
+                    // if it is rotated 90/270 degrees, the effective aspect ratio of the bounding box changes.
+                    // The viewer `Rect` allocation below is "dumb", it just fills space.
+                    // But `base_img_size` calculation depends on aspect ratio.
+                    
+                    if crop.rotation_90() % 2 != 0 {
+                         // Rotated 90 or 270: swap w/h for aspect ratio calculation
+                         Vec2::new(texture_size.y, texture_size.x)
+                    } else {
+                         texture_size
+                    }
+                }
             } else {
                 texture_size
             };
@@ -196,11 +171,30 @@ impl ImageViewer {
                 // UV coordinates are normalized (0.0-1.0), so this works identically
                 // for both 300px thumbnail and 2560px full-res, eliminating shift.
                 
-                let uv = Rect::from_min_size(
-                    egui::pos2(crop.crop_x(), crop.crop_y()), 
-                    egui::vec2(crop.crop_width(), crop.crop_height())
-                );
-                img = img.uv(uv);
+                if apply_crop_clip {
+                    let uv = Rect::from_min_size(
+                        egui::pos2(crop.crop_x(), crop.crop_y()), 
+                        egui::vec2(crop.crop_width(), crop.crop_height())
+                    );
+                    img = img.uv(uv);
+                } else {
+                    // When editing crop (full image shown), we must still apply FLIPS visually
+                    // Rotation is handled by .rotate(), but flips need UV manipulation
+                    let mut min = egui::pos2(0.0, 0.0);
+                    let mut max = egui::pos2(1.0, 1.0);
+
+                    if crop.flip_horizontal() {
+                        std::mem::swap(&mut min.x, &mut max.x);
+                    }
+                    if crop.flip_vertical() {
+                        std::mem::swap(&mut min.y, &mut max.y);
+                    }
+                    
+                    if crop.flip_horizontal() || crop.flip_vertical() {
+                        img = img.uv(Rect::from_min_max(min, max));
+                    }
+                }
+                 
                 
                 // Rotation
                 let total_degrees = (crop.rotation_90() as f32 * 90.0) + crop.angle();
