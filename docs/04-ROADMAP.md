@@ -868,6 +868,94 @@ import_controller.import_with_options(files, options, tx, pause, cancel).await?;
 - [x] ✅ **Prefetch Paralelo (26/dez/2025)**: Fotos adjacentes pré-carregadas em threads separadas
 - [x] ✅ **ProcessedCache (26/dez/2025)**: Cache do resultado final evita re-processamento (~800ms → 0.01ms)
 
+### 2.9 Corte e Rotação (Crop & Rotate) - 2 semanas 📋 PLANEJADO
+
+**Descrição**: Ferramenta de corte com proporções fixas e personalizadas, posicionamento da imagem dentro da área de corte, rotação e endireitamento de horizonte. Todas as operações são não-destrutivas e integradas ao Develop View.
+
+#### 2.9.1 Domain Layer (TDD)
+- [ ] 🔴🟢🔵 **CropSettings Value Object**
+  - `crop_x`, `crop_y`, `crop_width`, `crop_height` (normalized 0.0-1.0)
+  - `rotation_90` (múltiplos de 90°: -1, 0, 1, 2)
+  - `angle` (rotação fina: -45.0 a +45.0)
+  - `flip_horizontal`, `flip_vertical`
+  - Validações e testes de propriedade
+- [ ] 🔴🟢🔵 **AspectRatio Enum**
+  - `Original`, `Free`, `Ratio(u32, u32)`, `Custom(String)`
+  - Cálculo de dimensões com proporção fixa
+  - Swap orientation (2:3 ↔ 3:2)
+- [ ] 🔴🟢🔵 **CustomAspectRatio Entity**
+  - `id`, `name`, `width`, `height`, `created_at`
+  - Persistência no perfil do usuário
+
+#### 2.9.2 Use Cases Layer (TDD)
+- [ ] 🔴🟢🔵 **ApplyCropUseCase**
+  - Aplicar crop settings a uma foto
+  - Validação de bounds (crop dentro da imagem)
+  - Integração com Undo/Redo (EditSnapshot)
+- [ ] 🔴🟢🔵 **SaveCustomAspectRatioUseCase**
+  - Salvar proporção customizada
+  - Limite de 20 proporções por usuário
+- [ ] 🔴🟢🔵 **DeleteCustomAspectRatioUseCase**
+  - Deletar proporção customizada
+  - Validação de existência
+
+#### 2.9.3 Infrastructure Layer (TDD)
+- [ ] 🔴🟢🔵 **Migração SQLite**
+  - Campos de crop na tabela photos: `crop_x`, `crop_y`, `crop_width`, `crop_height`, `rotation_90`, `angle`, `flip_h`, `flip_v`
+  - Tabela `custom_aspect_ratios` para proporções salvas
+- [ ] 🔴🟢🔵 **GPU Shader (WGSL)**
+  - Aplicar rotação e crop em compute shader
+  - Interpolação bilinear para rotação suave
+- [ ] 🔴🟢🔵 **CPU Fallback**
+  - Processamento de crop/rotate para exportação
+  - Mesma lógica do GPU shader
+
+#### 2.9.4 UI Layer - Develop View
+- [ ] **Crop Overlay Component**
+  - Renderização do overlay com handles nos cantos/bordas
+  - Área externa escurecida (dimmed)
+  - Grid de composição (Rule of Thirds, Golden Ratio, etc.)
+- [ ] **Drag Interactions**
+  - Arrastar handles para redimensionar crop
+  - Arrastar imagem para reposicionar dentro do crop
+  - Respeitar locked aspect ratio nos handles
+- [ ] **Crop Toolbar**
+  - Dropdown de aspect ratios predefinidos
+  - Botões de rotação 90° (esquerda/direita)
+  - Botões de flip (horizontal/vertical)
+  - Slider de ângulo fino (-45° a +45°)
+  - Ferramenta Straighten (desenhar linha no horizonte)
+  - Botão Reset
+- [ ] **Custom Aspect Ratio Dialog**
+  - Input de largura/altura
+  - Campo de nome (opcional)
+  - Botões Usar/Salvar/Cancelar
+- [ ] **Keyboard Shortcuts**
+  - `R`: Toggle crop mode
+  - `X`: Swap orientation
+  - `O`: Cycle composition overlays
+  - `H`/`V`: Flip horizontal/vertical
+  - `Cmd+[`/`Cmd+]`: Rotate 90°
+  - `Enter`: Apply crop
+  - `Escape`: Cancel crop
+
+#### 2.9.5 Integração
+- [ ] **Preview em Tempo Real**
+  - Crop aplicado no preview do Develop View
+  - Performance: <16ms para manter 60fps
+- [ ] **Exportação**
+  - Crop aplicado na exportação final
+  - Resolução calculada após crop
+- [ ] **Undo/Redo**
+  - CropSettings integrado ao EditSnapshot
+  - Navegação completa pelo histórico de crops
+- [ ] **Filmstrip/Thumbnail**
+  - Thumbnails refletem crop atual
+
+**Estimativa**: 2 semanas (1 semana backend + 1 semana UI)
+**Prioridade**: Alta (feature essencial para workflow de edição)
+**Dependências**: GPU Processing (concluído), Undo/Redo (concluído)
+
 ### Entregáveis Fase 2
 - ✅ Edição profissional de RAW
 - ✅ Sistema completo de organização

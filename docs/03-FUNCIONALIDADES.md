@@ -322,6 +322,249 @@ Resultado: Casamento_20231215_001.CR2
 - Dimensões
 - Espaço de cor
 
+### 2.5 Corte e Rotação (Crop & Rotate)
+
+**Descrição**: Ferramenta de corte com proporções fixas e personalizadas, posicionamento da imagem dentro da área de corte, rotação e endireitamento de horizonte. Todas as operações são não-destrutivas.
+
+#### 2.5.1 Ferramenta de Corte
+
+**Ativação**:
+- Atalho de teclado: `R` (Crop mode)
+- Botão na toolbar do Develop View (ícone de crop)
+- Ao clicar, overlay de corte aparece sobre a imagem
+
+**Overlay de Corte**:
+```
+┌─────────────────────────────────────────────┐
+│           Aspect: [▼ 2:3        ]           │
+│                                             │
+│    ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓    │
+│    ┃ ○────────────┬────────────○       ┃    │
+│    ┃ │            │            │       ┃    │
+│    ┃ │            │            │       ┃    │
+│    ┃ ├────────────┼────────────┤       ┃    │
+│    ┃ │            │            │       ┃    │
+│    ┃ │            │            │       ┃    │
+│    ┃ ○────────────┴────────────○       ┃    │
+│    ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛    │
+│                                             │
+│  Angle: [-2.5°  ]  [Straighten] [Reset]     │
+└─────────────────────────────────────────────┘
+```
+
+**Elementos do Overlay**:
+- **Handles nos cantos**: Arrastar para redimensionar mantendo proporção
+- **Handles nas bordas**: Arrastar para redimensionar (se proporção livre)
+- **Área interna**: Arrastar para reposicionar a imagem dentro do crop
+- **Área externa escurecida**: Mostra o que será cortado
+- **Grid de composição**: Regra dos terços (padrão), Grid, Diagonal, etc.
+
+**Interações**:
+- **Arrastar handles**: Redimensiona área de corte
+- **Arrastar imagem**: Reposiciona foto dentro do crop
+- **Scroll/Pinch**: Zoom na área de crop
+- **Enter/Return**: Aplicar corte
+- **Escape**: Cancelar e sair do modo crop
+- **Double-click fora**: Aplicar corte
+
+#### 2.5.2 Proporções de Aspecto (Aspect Ratios)
+
+**Proporções Predefinidas**:
+| Proporção | Uso Comum |
+|-----------|-----------|
+| **Original** | Mantém proporção original da foto |
+| **Livre** | Sem restrição de proporção |
+| **1:1** | Quadrado (Instagram, avatares) |
+| **2:3** | Formato padrão 35mm (prints 10x15) |
+| **3:2** | Paisagem 35mm |
+| **4:3** | Formato comum de sensores compactos |
+| **3:4** | Retrato 4:3 |
+| **4:5** | Instagram portrait, prints 8x10 |
+| **5:4** | Paisagem 8x10 |
+| **5:7** | Print 5x7 polegadas |
+| **16:9** | Widescreen, vídeo HD |
+| **9:16** | Stories, Reels, TikTok |
+
+**Dropdown de Proporções**:
+```
+┌─────────────────────┐
+│ ▼ Aspect Ratio      │
+├─────────────────────┤
+│ ○ Original          │
+│ ○ As Shot           │
+│ ─────────────────── │
+│ ○ 1:1 Square        │
+│ ○ 2:3 / 3:2         │
+│ ○ 4:3 / 3:4         │
+│ ○ 4:5 / 5:4         │
+│ ○ 5:7 / 7:5         │
+│ ○ 16:9 / 9:16       │
+│ ─────────────────── │
+│ ○ Custom...         │
+│ ─────────────────── │
+│   📐 Retrato 8x12   │ ← Custom salvo
+│   📐 Banner Web     │ ← Custom salvo
+│ ─────────────────── │
+│ [+ Salvar Custom]   │
+└─────────────────────┘
+```
+
+**Swap Orientation**:
+- Atalho: `X` (troca entre portrait/landscape)
+- Ex: 2:3 ↔ 3:2, 4:5 ↔ 5:4
+
+#### 2.5.3 Proporções Customizadas
+
+**Criar Nova Proporção**:
+1. Selecionar "Custom..." no dropdown
+2. Inserir valores de largura e altura
+3. Nomear a proporção (opcional)
+4. Salvar para uso futuro
+
+**Dialog de Custom Ratio**:
+```
+┌─────────────────────────────────────┐
+│  Custom Aspect Ratio           [X]  │
+├─────────────────────────────────────┤
+│                                     │
+│  Largura: [  8  ] : Altura: [ 12 ] │
+│                                     │
+│  Nome: [Retrato 8x12_________]     │
+│                                     │
+│  [Cancelar]  [Usar]  [Salvar]      │
+└─────────────────────────────────────┘
+```
+
+**Gerenciamento de Custom Ratios**:
+- Salvas em configurações do usuário
+- Aparecem no dropdown abaixo das predefinidas
+- Context menu: Renomear, Deletar
+- Limite: 20 proporções customizadas
+
+#### 2.5.4 Rotação
+
+**Rotação de 90°**:
+- **Rotação Esquerda**: Atalho `Cmd/Ctrl + [` ou botão ↶
+- **Rotação Direita**: Atalho `Cmd/Ctrl + ]` ou botão ↷
+- Rotaciona em incrementos de 90 graus
+- Atualiza automaticamente a área de crop
+
+**Slider de Ângulo Fino**:
+- Range: -45° a +45°
+- Precisão: 0.1°
+- Preview em tempo real
+- Atalhos: `←/→` ajusta ±0.1°, `Shift+←/→` ajusta ±1°
+
+**Ferramenta Straighten (Endireitar)**:
+1. Clicar no botão "Straighten" ou atalho `Cmd/Ctrl + Shift + R`
+2. Arrastar uma linha sobre horizonte ou elemento vertical na foto
+3. Sistema calcula e aplica rotação para endireitar
+
+```
+        ↙ Arraste para definir horizonte
+    ─────────────────────●
+   ●─────────────────────
+```
+
+#### 2.5.5 Flip (Espelhar)
+
+**Opções**:
+- **Flip Horizontal**: Espelha horizontalmente (Atalho: `H`)
+- **Flip Vertical**: Espelha verticalmente (Atalho: `V`)
+
+**Casos de Uso**:
+- Corrigir fotos de selfie espelhadas
+- Composição artística
+- Corrigir texto espelhado
+
+#### 2.5.6 Guias de Composição (Overlays)
+
+**Tipos de Guias**:
+| Guia | Descrição |
+|------|-----------|
+| **Rule of Thirds** | Grid 3x3 (padrão) |
+| **Grid** | Grid fino para alinhamento preciso |
+| **Diagonal** | Linhas diagonais dos cantos |
+| **Golden Ratio** | Proporção áurea (espiral) |
+| **Golden Triangle** | Triângulos áureos |
+| **Center** | Linhas centrais horizontal e vertical |
+| **Aspect Ratios** | Mostra proporções alternativas |
+
+**Ciclar Guias**: Atalho `O` para ciclar entre guias disponíveis
+
+#### 2.5.7 Toolbar de Crop
+
+**Layout da Toolbar** (horizontal, abaixo do menu principal):
+```
+┌────────────────────────────────────────────────────────────────────┐
+│ [R Crop] │ Aspect: [▼ 2:3] │ [↶] [↷] │ Angle: [-2.5° ▲▼] │ [⟳] │  │
+│          │                  │ Flip [⟷] [⤢] │ [Straighten] │ [Reset] │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+**Componentes**:
+1. **Crop Toggle**: Ativa/desativa modo crop
+2. **Aspect Dropdown**: Seleção de proporção
+3. **Rotate 90° Buttons**: Rotação rápida esquerda/direita
+4. **Flip Buttons**: Horizontal e Vertical
+5. **Angle Slider/Input**: Ajuste fino de rotação
+6. **Straighten Tool**: Ferramenta de endireitamento
+7. **Reset Button**: Volta crop ao estado original
+
+#### 2.5.8 Persistência e Edição Não-Destrutiva
+
+**Dados Armazenados**:
+```rust
+struct CropSettings {
+    // Área de corte (valores normalizados 0.0-1.0)
+    crop_x: f32,       // Posição X do canto superior esquerdo
+    crop_y: f32,       // Posição Y do canto superior esquerdo
+    crop_width: f32,   // Largura do crop
+    crop_height: f32,  // Altura do crop
+    
+    // Rotação
+    rotation_90: i32,  // Múltiplos de 90° (-1, 0, 1, 2)
+    angle: f32,        // Ângulo fino em graus (-45.0 a +45.0)
+    
+    // Flip
+    flip_horizontal: bool,
+    flip_vertical: bool,
+    
+    // Proporção selecionada (para UI)
+    aspect_ratio: AspectRatio,
+}
+
+enum AspectRatio {
+    Original,
+    Free,
+    Ratio(u32, u32),  // Ex: Ratio(2, 3)
+    Custom(String),   // Nome da custom ratio
+}
+```
+
+**Comportamento**:
+- Crop é armazenado como metadado, não modifica arquivo original
+- Aplicado durante preview e exportação
+- Undo/Redo suporta todas as operações de crop
+- Reset retorna ao estado "sem crop"
+
+#### 2.5.9 Atalhos de Teclado
+
+| Atalho | Ação |
+|--------|------|
+| `R` | Entrar/sair do modo crop |
+| `Enter` | Aplicar crop |
+| `Escape` | Cancelar crop |
+| `X` | Trocar orientação (swap aspect) |
+| `O` | Ciclar guias de composição |
+| `H` | Flip horizontal |
+| `V` | Flip vertical |
+| `Cmd/Ctrl + [` | Rotação 90° esquerda |
+| `Cmd/Ctrl + ]` | Rotação 90° direita |
+| `←/→` | Ajuste fino de ângulo (±0.1°) |
+| `Shift + ←/→` | Ajuste de ângulo (±1°) |
+| `Cmd/Ctrl + Shift + R` | Ferramenta straighten |
+
 ---
 
 ## 3. Módulo de Biblioteca
