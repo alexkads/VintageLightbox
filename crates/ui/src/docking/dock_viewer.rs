@@ -24,6 +24,7 @@ use crate::components::{
     metadata_charts::MetadataCharts,
     tone_curve::ToneCurveEditor,
     advanced_slider::AdvancedSlider,
+    crop_toolbar::CropToolbar,
 };
 
 use super::dock_tab::DockTab;
@@ -71,6 +72,178 @@ impl<'a> TabViewer for DockViewer<'a> {
             }
 
             DockTab::ImageViewer => {
+                // Crop Toolbar (when crop mode is active)
+                if self.context.state.crop_mode_active {
+                    egui::TopBottomPanel::top("crop_toolbar_panel")
+                        .exact_height(50.0)
+                        .show_inside(ui, |ui| {
+                            let mut rotate = false;
+                            let mut flip_h = false;
+                            let mut flip_v = false;
+                            let mut reset = false;
+                            let mut apply = false;
+                            
+                            // Capture previous ratio to detect changes
+                            let prev_ratio = self.context.state.selected_aspect_ratio.clone();
+
+                            CropToolbar::show(
+                                ui,
+                                &mut self.context.state.selected_aspect_ratio,
+                                &mut self.context.state.show_composition_grid,
+                                &mut rotate,
+                                &mut flip_h,
+                                &mut flip_v,
+                                &mut reset,
+                                &mut apply,
+                            );
+
+                            // Detect aspect ratio change
+                            if prev_ratio != self.context.state.selected_aspect_ratio {
+                                let new_ratio = self.context.state.selected_aspect_ratio.clone();
+                                
+                                // Reset to Original/Free or Apply Ratio
+                                match new_ratio {
+                                    domain::value_objects::AspectRatio::Original => {
+                                        // Reset to full crop (original ratio)
+                                         if let Some(crop) = &mut self.context.state.crop_settings {
+                                             *crop = domain::value_objects::CropSettings::default();
+                                         }
+                                    },
+                                    domain::value_objects::AspectRatio::Free => {
+                                        // No op, keep current crop but unlock handles
+                                    },
+                                    _ => {
+                                        // Apply ratio logic
+                                        // Try to get dimensions from loaded texture first (most accurate), then metadata
+                                        let (w, h) = if let Some(texture) = &self.context.state.detail_image {
+                                            (texture.size()[0] as f32, texture.size()[1] as f32)
+                                        } else if let Some(photo) = self.context.state.get_current_photo() {
+                                            (
+                                                photo.width.unwrap_or(1000) as f32,
+                                                photo.height.unwrap_or(1000) as f32
+                                            )
+                                        } else {
+                                            (1000.0, 1000.0)
+                                        };
+
+                                        if w > 0.0 && h > 0.0 {
+                                            let img_aspect = w / h;
+                                            let target_ratio = new_ratio.value();
+                                            
+                                            // Calculate normalized dimensions (relative to image)
+                                            // We want (nw * w) / (nh * h) = target_ratio
+                                            // nw / nh = target_ratio * (h / w) = target_ratio / img_aspect
+                                            
+                                            let ratio_factor = target_ratio / img_aspect;
+                                            
+                                            let (nw, nh) = if ratio_factor < 1.0 {
+                                                // Target is narrower than image -> constrain width
+                                                // Check if we clamp to 1.0 (full height)
+                                                (ratio_factor, 1.0)
+                                            } else {
+                                                // Target is wider than image -> constrain height
+                                                (1.0, 1.0 / ratio_factor)
+                                            };
+                                            
+                                            // Center the crop
+                                            let nx = (1.0 - nw) / 2.0;
+                                            let ny = (1.0 - nh) / 2.0;
+                                            
+                                            if let Some(crop) = &mut self.context.state.crop_settings {
+                                                *crop = domain::value_objects::CropSettings::new(
+                                                    nx, ny, nw, nh,
+                                                    crop.rotation_90(), crop.angle(),
+                                                    crop.flip_horizontal(), crop.flip_vertical()
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            
+                            // Handle button clicks
+                            if reset {
+                                self.context.state.crop_settings = Some(domain::value_objects::CropSettings::default());
+                                self.context.state.selected_aspect_ratio = domain::value_objects::AspectRatio::Original;
+                                self.context.state.show_composition_grid = false;
+                            }
+                            if apply {
+                                // Apply crop and exit crop mode
+                                self.context.state.crop_mode_active = false;
+                            }
+    
+                            // Handle rotations (Swap Aspect Ratio Orientation)
+                            if rotate {
+                                // Get access to image dimensions to calculate proper aspect ratio
+                                // Do this BEFORE borrowing crop_settings mutably to avoid double borrow
+                                let (w, h) = if let Some(texture) = &self.context.state.detail_image {
+                                    (texture.size()[0] as f32, texture.size()[1] as f32)
+                                } else if let Some(photo) = self.context.state.get_current_photo() {
+                                    (
+                                        photo.width.unwrap_or(1000) as f32,
+                                        photo.height.unwrap_or(1000) as f32
+                                    )
+                                } else {
+                                    (1000.0, 1000.0)
+                                };
+
+                                if let Some(crop) = &mut self.context.state.crop_settings {
+                                    if w > 0.0 && h > 0.0 {
+                                        let img_aspect = w / h;
+                                        
+                                        // Current crop aspect ratio
+                                        let current_crop_aspect = (crop.crop_width() * w) / (crop.crop_height() * h);
+                                        
+                                        // Invert/Swap aspect ratio
+                                        let target_ratio = 1.0 / current_crop_aspect;
+                                        
+                                        // Recalculate normalized width/height
+                                        let ratio_factor = target_ratio / img_aspect;
+                                        
+                                        let (nw, nh) = if ratio_factor < 1.0 {
+                                            // Target is narrower than image -> constrain width
+                                            (ratio_factor, 1.0)
+                                        } else {
+                                            // Target is wider than image -> constrain height
+                                            (1.0, 1.0 / ratio_factor)
+                                        };
+                                        
+                                        // Center the crop
+                                        let nx = (1.0 - nw) / 2.0;
+                                        let ny = (1.0 - nh) / 2.0;
+                                        
+                                        *crop = domain::value_objects::CropSettings::new(
+                                            nx, ny, nw, nh,
+                                            crop.rotation_90(), crop.angle(), // Maintain current image rotation
+                                            crop.flip_horizontal(), crop.flip_vertical()
+                                        );
+                                    }
+                                }
+                            }
+                            
+                            // Handle flips
+                            if flip_h {
+                                if let Some(crop) = &mut self.context.state.crop_settings {
+                                    *crop = domain::value_objects::CropSettings::new(
+                                        crop.crop_x(), crop.crop_y(), crop.crop_width(), crop.crop_height(),
+                                        crop.rotation_90(), crop.angle(),
+                                        !crop.flip_horizontal(), crop.flip_vertical()
+                                    );
+                                }
+                            }
+                            if flip_v {
+                                if let Some(crop) = &mut self.context.state.crop_settings {
+                                    *crop = domain::value_objects::CropSettings::new(
+                                        crop.crop_x(), crop.crop_y(), crop.crop_width(), crop.crop_height(),
+                                        crop.rotation_90(), crop.angle(),
+                                        crop.flip_horizontal(), !crop.flip_vertical()
+                                    );
+                                }
+                            }
+                        });
+                }
+
                 ImageViewer::show(ui, self.context.state);
             }
 

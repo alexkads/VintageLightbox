@@ -290,6 +290,14 @@ pub struct AppState {
     pub pan_offset: egui::Vec2,
     pub show_before: bool, // Before/After toggle state
     pub prev_show_before: bool, // Previous before/after state for change detection
+    
+    // ============================================
+    // Crop Tool State (Develop mode only)
+    // ============================================
+    pub crop_mode_active: bool,
+    pub crop_settings: Option<domain::value_objects::CropSettings>,
+    pub selected_aspect_ratio: domain::value_objects::AspectRatio,
+    pub show_composition_grid: bool,
 
     // ============================================
     // UI State
@@ -616,6 +624,11 @@ impl AppState {
             request_toggle_secondary_window: false,
             show_before: false,
             prev_show_before: false,
+            // Crop state
+            crop_mode_active: false,
+            crop_settings: None,
+            selected_aspect_ratio: domain::value_objects::AspectRatio::Original,
+            show_composition_grid: false,
             is_busy: false,
             busy_message: String::new(),
             grid_columns: 4,  // Default 4 columns

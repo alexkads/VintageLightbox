@@ -12,6 +12,8 @@ pub struct PhotoViewModel {
     pub rating: i32,
     pub color_label: Option<String>,
     pub flag: Option<i32>,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
     pub edit_exposure: Option<f32>,
     pub edit_contrast: Option<f32>,
     pub edit_temperature: Option<f32>,

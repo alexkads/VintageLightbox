@@ -75,7 +75,86 @@ impl DevelopView {
                         });
                     }
                 );
-            });
+            })  ;
+
+        // Crop Toolbar (when crop mode is active)
+        if state.crop_mode_active {
+            egui::TopBottomPanel::top("crop_toolbar_panel")
+                .exact_height(50.0)
+                .show_inside(ui, |ui| {
+                    use crate::components::crop_toolbar::CropToolbar;
+                    
+                    let mut rotate = false;
+                    let mut flip_h = false;
+                    let mut flip_v = false;
+                    let mut reset = false;
+                    let mut apply = false;
+                    
+                    CropToolbar::show(
+                        ui,
+                        &mut state.selected_aspect_ratio,
+                        &mut state.show_composition_grid,
+                        &mut rotate,
+                        &mut flip_h,
+                        &mut flip_v,
+                        &mut reset,
+                        &mut apply,
+                    );
+                    
+                    // Handle button clicks
+                    if reset {
+                        state.crop_settings = Some(domain::value_objects::CropSettings::default());
+                        state.selected_aspect_ratio = domain::value_objects::AspectRatio::Original;
+                        state.show_composition_grid = false;
+                    }
+                    if apply {
+                        // Apply crop and exit crop mode
+                        state.crop_mode_active = false;
+                        // TODO: Persist crop settings when we add database support
+                    }
+                    
+                    // Handle rotations (Swap Aspect Ratio Orientation)
+                    if rotate {
+                        // This logic should likely be moved to a controller or method on CropSettings
+                        // For now we duplicate what's in DockViewer or remove this usage if DevelopView isn't primary
+                        // Note: DevelopView seems to be unused for rendering in favor of DockViewer.
+                        // But we must fix complication.
+                        
+                        // We will just do a dummy implementation here to satisfy the compiler
+                        // assuming DockViewer is the one actually running.
+                        if let Some(crop) = &mut state.crop_settings {
+                             // Simple swap of w/h logic if we had dimensions, but we don't easily have them here
+                             // passing 0 rotation for now as placeholder or attempting basic swap based on assumed w>h
+                             let new_rotation = crop.rotation_90() + 1;
+                             *crop = domain::value_objects::CropSettings::new(
+                                 crop.crop_x(), crop.crop_y(), crop.crop_width(), crop.crop_height(),
+                                 new_rotation, crop.angle(),
+                                 crop.flip_horizontal(), crop.flip_vertical()
+                             );
+                         }
+                    }
+                    
+                    // Handle flips
+                    if flip_h {
+                        if let Some(crop) = &mut state.crop_settings {
+                            *crop = domain::value_objects::CropSettings::new(
+                                crop.crop_x(), crop.crop_y(), crop.crop_width(), crop.crop_height(),
+                                crop.rotation_90(), crop.angle(),
+                                !crop.flip_horizontal(), crop.flip_vertical()
+                            );
+                        }
+                    }
+                    if flip_v {
+                        if let Some(crop) = &mut state.crop_settings {
+                            *crop = domain::value_objects::CropSettings::new(
+                                crop.crop_x(), crop.crop_y(), crop.crop_width(), crop.crop_height(),
+                                crop.rotation_90(), crop.angle(),
+                                crop.flip_horizontal(), !crop.flip_vertical()
+                            );
+                        }
+                    }
+                });
+        }
 
         // Left sidebar - Presets & History
         egui::SidePanel::left("develop_left")

@@ -119,6 +119,17 @@ impl KeyboardHandler {
                     state.show_before = !state.show_before;
                 }
 
+                // R - Toggle Crop mode
+                if i.key_pressed(Key::R) {
+                    state.crop_mode_active = !state.crop_mode_active;
+                    if state.crop_mode_active {
+                        // Initialize crop settings when entering crop mode
+                        if state.crop_settings.is_none() {
+                            state.crop_settings = Some(domain::value_objects::CropSettings::default());
+                        }
+                    }
+                }
+
                 // Undo/Redo shortcuts (Cmd+Z / Cmd+Shift+Z)
                 let cmd_pressed = i.modifiers.command;
                 let shift_pressed = i.modifiers.shift;

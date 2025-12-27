@@ -10,7 +10,7 @@ pub struct ImageViewer;
 impl ImageViewer {
     /// Show the image viewer with zoom/pan capabilities
     pub fn show(ui: &mut Ui, state: &mut AppState) {
-        let (new_zoom, new_pan) = Self::render(
+        let (new_zoom, new_pan, painted_image_rect) = Self::render(
             ui,
             state.detail_image.as_ref(),
             state.thumbnail_preview.as_ref(),
@@ -23,16 +23,51 @@ impl ImageViewer {
         state.zoom_level = new_zoom;
         state.pan_offset = new_pan;
 
-        // Double-click reset handled in render via return values or we need to pass interaction back? 
-        // Actually, render returning modified zoom/pan is cleanest.
-        // We also need to handle the "Back" button and overlays, which are specific to the main Interactive viewer.
+        // Show crop overlay if in crop mode
+        if state.crop_mode_active {
+            if let Some(crop_settings) = &mut state.crop_settings {
+                if let Some(img_rect) = painted_image_rect {
+                    // We also need the texture size to handle drag deltas correctly
+                    // We can infer it or get it from state again
+                     if let Some(texture) = state.detail_image.as_ref().or(state.thumbnail_preview.as_ref()) {
+                        let texture_size = Vec2::new(texture.size()[0] as f32, texture.size()[1] as f32);
+
+                        // Show crop overlay
+                        use crate::components::crop_overlay::CropOverlay;
+                        let overlay_response = CropOverlay::show(
+                            ui,
+                            img_rect,
+                            crop_settings,
+                            state.show_composition_grid,
+                        );
+
+                        // Handle overlay interactions
+                        if let Some(handle_index) = overlay_response.handle_dragged {
+                            CropOverlay::update_from_handle_drag(
+                                crop_settings,
+                                handle_index,
+                                overlay_response.drag_delta,
+                                texture_size,
+                                &state.selected_aspect_ratio,
+                            );
+                        } else if overlay_response.crop_dragged {
+                            CropOverlay::update_from_crop_drag(
+                                crop_settings,
+                                overlay_response.drag_delta,
+                                texture_size,
+                            );
+                        }
+                    }
+                }
+            }
+        }
         
         // UI overlay elements (Main viewer only)
         Self::show_controls(ui, state, ui.max_rect());
     }
 
     /// Stateless rendering of the image viewer content
-    /// Returns (new_zoom, new_pan)
+    /// Returns (new_zoom, new_pan, painted_image_rect)
     pub fn render(
         ui: &mut Ui,
         detail_image: Option<&egui::TextureHandle>,
@@ -41,7 +76,7 @@ impl ImageViewer {
         current_zoom: f32,
         current_pan: Vec2,
         interactive: bool,
-    ) -> (f32, Vec2) {
+    ) -> (f32, Vec2, Option<Rect>) {
         let available_size = ui.available_size();
         let match_size_arg = if interactive {
             Sense::click_and_drag()
@@ -55,6 +90,7 @@ impl ImageViewer {
 
         let mut zoom = current_zoom;
         let mut pan = current_pan;
+        let mut painted_rect = None;
 
         if interactive {
             // Handle zoom with scroll
@@ -95,6 +131,7 @@ impl ImageViewer {
             let img_rect = Rect::from_center_size(center, zoomed_size);
 
             egui::Image::new(texture).paint_at(ui, img_rect);
+            painted_rect = Some(img_rect);
             
         } else if let Some(thumbnail) = thumbnail_preview {
             // LIGHTROOM-STYLE: Show thumbnail with effects
@@ -110,6 +147,7 @@ impl ImageViewer {
             let img_rect = Rect::from_center_size(center, zoomed_size);
 
             egui::Image::new(thumbnail).paint_at(ui, img_rect);
+            painted_rect = Some(img_rect);
             
             // Show subtle loading indicator
             let loading_rect = Rect::from_min_size(
@@ -156,7 +194,7 @@ impl ImageViewer {
             );
         }
 
-        (zoom, pan)
+        (zoom, pan, painted_rect)
     }
 
     /// Show viewer controls (back button, navigation, zoom indicator)
