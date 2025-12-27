@@ -234,7 +234,7 @@ impl CropOverlay {
          let cy = crop.crop_y();
          let cw = crop.crop_width();
          let ch = crop.crop_height();
-         
+
          let (nx, ny, nw, nh) = match index {
             0 => (cx + norm_delta.x, cy + norm_delta.y, cw - norm_delta.x, ch - norm_delta.y),
             1 => (cx, cy + norm_delta.y, cw, ch - norm_delta.y),
@@ -246,25 +246,25 @@ impl CropOverlay {
             7 => (cx + norm_delta.x, cy, cw - norm_delta.x, ch),
             _ => (cx, cy, cw, ch),
          };
-         
+
          // Aspect Ratio Logic would go here (simplified for now)
          *crop = CropSettings::new(
-             nx, ny, nw, nh, 
-             crop.rotation_90(), crop.angle(), 
+             nx, ny, nw, nh,
+             crop.rotation_90(), crop.angle(),
              crop.flip_horizontal(), crop.flip_vertical()
          );
     }
-    
+
     fn update_crop_pan(crop: &mut CropSettings, delta: Vec2, image_size: Vec2) {
         let norm_delta = Vec2::new(delta.x / image_size.x, delta.y / image_size.y);
         *crop = CropSettings::new(
              crop.crop_x() + norm_delta.x,
              crop.crop_y() + norm_delta.y,
-             crop.crop_width(), 
+             crop.crop_width(),
              crop.crop_height(),
-             crop.rotation_90(), 
-             crop.angle(), 
-             crop.flip_horizontal(), 
+             crop.rotation_90(),
+             crop.angle(),
+             crop.flip_horizontal(),
              crop.flip_vertical()
          );
     }

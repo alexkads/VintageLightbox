@@ -130,7 +130,9 @@ impl ImageViewer {
             // Calculate the effective size considering crop (for aspect ratio correction)
             let effective_size = if let Some(crop) = crop_settings {
                 if apply_crop_clip {
-                    // When cropped AND CLIPPED, the displayed portion has different dimensions
+                    // When cropped AND CLIPPED, the displayed portion has different dimensions.
+                    // The saved crop coordinates are already in ORIGINAL texture space
+                    // (rotation was "consumed" during save), so use them directly.
                     Vec2::new(
                         texture_size.x * crop.crop_width(),
                         texture_size.y * crop.crop_height()
@@ -140,7 +142,7 @@ impl ImageViewer {
                     // if it is rotated 90/270 degrees, the effective aspect ratio of the bounding box changes.
                     // The viewer `Rect` allocation below is "dumb", it just fills space.
                     // But `base_img_size` calculation depends on aspect ratio.
-                    
+
                     if crop.rotation_90() % 2 != 0 {
                          // Rotated 90 or 270: swap w/h for aspect ratio calculation
                          Vec2::new(texture_size.y, texture_size.x)
@@ -170,13 +172,27 @@ impl ImageViewer {
             if let Some(crop) = crop_settings {
                 // UV coordinates are normalized (0.0-1.0), so this works identically
                 // for both 300px thumbnail and 2560px full-res, eliminating shift.
-                
+
                 if apply_crop_clip {
-                    let uv = Rect::from_min_size(
-                        egui::pos2(crop.crop_x(), crop.crop_y()), 
-                        egui::vec2(crop.crop_width(), crop.crop_height())
+                    // The saved crop coordinates are already in ORIGINAL texture space
+                    // (rotation_90 and angle were "consumed" during save).
+                    // The viewer NEVER rotates - crop defines the final result.
+                    let mut uv_min = egui::pos2(crop.crop_x(), crop.crop_y());
+                    let mut uv_max = egui::pos2(
+                        crop.crop_x() + crop.crop_width(),
+                        crop.crop_y() + crop.crop_height()
                     );
-                    img = img.uv(uv);
+
+                    // Apply flips by swapping UV coordinates
+                    if crop.flip_horizontal() {
+                        std::mem::swap(&mut uv_min.x, &mut uv_max.x);
+                    }
+                    if crop.flip_vertical() {
+                        std::mem::swap(&mut uv_min.y, &mut uv_max.y);
+                    }
+
+                    img = img.uv(Rect::from_min_max(uv_min, uv_max));
+                    // No rotation applied here - the snapshot represents final pixels
                 } else {
                     // When editing crop (full image shown), we must still apply FLIPS visually
                     // Rotation is handled by .rotate(), but flips need UV manipulation
@@ -193,14 +209,19 @@ impl ImageViewer {
                     if crop.flip_horizontal() || crop.flip_vertical() {
                         img = img.uv(Rect::from_min_max(min, max));
                     }
+
+                    // Rotation is only applied during EDITING (when showing full image)
+                    // When apply_crop_clip is true, the UV transformation already accounts
+                    // for the rotation, so we don't apply it again visually.
+                    let total_degrees = (crop.rotation_90() as f32 * 90.0) + crop.angle();
+                    if total_degrees != 0.0 {
+                        img = img.rotate(total_degrees.to_radians(), Vec2::splat(0.5));
+                    }
                 }
-                 
-                
-                // Rotation
-                let total_degrees = (crop.rotation_90() as f32 * 90.0) + crop.angle();
-                if total_degrees != 0.0 {
-                    img = img.rotate(total_degrees.to_radians(), Vec2::splat(0.5));
-                }
+                // When apply_crop_clip is true, rotation is NOT applied here.
+                // The snapshot represents the final cropped pixels, and the UV
+                // transformation (from_visual_space) already maps to the correct
+                // region of the original texture. No additional rotation needed.
             }
 
             img.paint_at(ui, img_rect);

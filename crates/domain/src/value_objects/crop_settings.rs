@@ -112,6 +112,110 @@ impl CropSettings {
     pub fn has_modifications(&self) -> bool {
         self.is_cropped() || self.is_rotated() || self.is_flipped()
     }
+
+    /// Transforms crop coordinates from original image space to visual (rotated) space.
+    /// This is used during crop editing to display the crop frame correctly on a rotated image.
+    ///
+    /// When an image is rotated visually, the crop rectangle needs to be displayed
+    /// in the rotated coordinate system even though it's stored in original space.
+    pub fn to_visual_space(&self) -> (f32, f32, f32, f32) {
+        let (x, y, w, h) = (self.crop_x, self.crop_y, self.crop_width, self.crop_height);
+
+        // In egui, Image::rotate(angle) with positive angles rotates CLOCKWISE visually.
+        // So rotation_90=1 means 90° CW visual rotation.
+        match self.rotation_90 % 4 {
+            0 => (x, y, w, h),
+            1 | -3 => {
+                // rotation_90=1: 90° CW visual rotation.
+                // Original (ox, oy) -> Visual (1-oy, ox)
+                // For rect: (x, y, w, h) -> (1-y-h, x, h, w)
+                (1.0 - y - h, x, h, w)
+            }
+            2 | -2 => {
+                // 180°: original (x, y, w, h) -> visual (1-x-w, 1-y-h, w, h)
+                (1.0 - x - w, 1.0 - y - h, w, h)
+            }
+            3 | -1 => {
+                // rotation_90=3 or -1: 270° CW = 90° CCW visual rotation.
+                // Original (ox, oy) -> Visual (oy, 1-ox)
+                // For rect: (x, y, w, h) -> (y, 1-x-w, h, w)
+                (y, 1.0 - x - w, h, w)
+            }
+            _ => (x, y, w, h),
+        }
+    }
+
+    /// Transforms crop coordinates from visual (rotated) space back to original image space.
+    /// This is used when saving crop edits that were made on a rotated image.
+    ///
+    /// The visual space is what the user sees/edits, and the original space is
+    /// what gets stored in the database and used for actual image processing.
+    pub fn from_visual_space(
+        visual_x: f32,
+        visual_y: f32,
+        visual_w: f32,
+        visual_h: f32,
+        rotation_90: i32,
+    ) -> (f32, f32, f32, f32) {
+        // Note: In egui, positive angles are counter-clockwise (CCW).
+        // rotation_90 = 1 means 90° CCW, rotation_90 = -1 means 90° CW.
+        //
+        // The visual space is the rotated image as seen on screen.
+        // We need to map visual coordinates back to original texture UV.
+        //
+        // For 90° CCW (rotation_90=1): visual top-left corresponds to original bottom-left
+        // For 90° CW (rotation_90=-1 or 3): visual top-left corresponds to original top-right
+
+        // In egui, Image::rotate(angle) with positive angles rotates CLOCKWISE visually
+        // (because Y-axis points down in screen coordinates).
+        // So rotation_90=1 means 90° CW visual rotation.
+        match rotation_90 % 4 {
+            0 => (visual_x, visual_y, visual_w, visual_h),
+            1 | -3 => {
+                // rotation_90=1: 90° CW visual rotation.
+                // For 90° CW: Original (ox, oy) -> Visual (1-oy, ox)
+                // Inverse: Visual (vx, vy) -> Original (vy, 1-vx)
+                // For rect: (vx, vy, vw, vh) -> (vy, 1-vx-vw, vh, vw)
+                (visual_y, 1.0 - visual_x - visual_w, visual_h, visual_w)
+            }
+            2 | -2 => {
+                // 180°: visual (x, y, w, h) -> original (1-x-w, 1-y-h, w, h)
+                (1.0 - visual_x - visual_w, 1.0 - visual_y - visual_h, visual_w, visual_h)
+            }
+            3 | -1 => {
+                // rotation_90=3 or -1: 270° CW = 90° CCW visual rotation.
+                // For 90° CCW: Original (ox, oy) -> Visual (oy, 1-ox)
+                // Inverse: Visual (vx, vy) -> Original (1-vy, vx)
+                // For rect: (vx, vy, vw, vh) -> (1-vy-vh, vx, vh, vw)
+                (1.0 - visual_y - visual_h, visual_x, visual_h, visual_w)
+            }
+            _ => (visual_x, visual_y, visual_w, visual_h),
+        }
+    }
+
+    /// Creates a new CropSettings by updating crop coordinates from visual space.
+    /// Preserves all other settings (rotation, angle, flips).
+    pub fn with_visual_crop(
+        &self,
+        visual_x: f32,
+        visual_y: f32,
+        visual_w: f32,
+        visual_h: f32,
+    ) -> Self {
+        let (orig_x, orig_y, orig_w, orig_h) =
+            Self::from_visual_space(visual_x, visual_y, visual_w, visual_h, self.rotation_90);
+
+        Self::new(
+            orig_x,
+            orig_y,
+            orig_w,
+            orig_h,
+            self.rotation_90,
+            self.angle,
+            self.flip_horizontal,
+            self.flip_vertical,
+        )
+    }
 }
 
 impl Default for CropSettings {
@@ -281,5 +385,342 @@ mod crop_settings_tests {
 
         let flipped = CropSettings::new(0.0, 0.0, 1.0, 1.0, 0, 0.0, true, false);
         assert!(flipped.has_modifications());
+    }
+
+    // =============================================
+    // Coordinate Space Transformation Tests
+    // =============================================
+
+    #[test]
+    fn test_to_visual_space_no_rotation() {
+        // No rotation: coordinates should remain the same
+        let crop = CropSettings::new(0.1, 0.2, 0.5, 0.3, 0, 0.0, false, false);
+        let (vx, vy, vw, vh) = crop.to_visual_space();
+
+        assert!((vx - 0.1).abs() < 0.001);
+        assert!((vy - 0.2).abs() < 0.001);
+        assert!((vw - 0.5).abs() < 0.001);
+        assert!((vh - 0.3).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_to_visual_space_90_degrees() {
+        // 90° CW: original (x, y, w, h) -> visual (1-y-h, x, h, w)
+        // Original: x=0.1, y=0.2, w=0.5, h=0.3
+        // Expected visual: x=1-0.2-0.3=0.5, y=0.1, w=0.3, h=0.5
+        let crop = CropSettings::new(0.1, 0.2, 0.5, 0.3, 1, 0.0, false, false);
+        let (vx, vy, vw, vh) = crop.to_visual_space();
+
+        assert!((vx - 0.5).abs() < 0.001, "vx: expected 0.5, got {}", vx);
+        assert!((vy - 0.1).abs() < 0.001, "vy: expected 0.1, got {}", vy);
+        assert!((vw - 0.3).abs() < 0.001, "vw: expected 0.3, got {}", vw);
+        assert!((vh - 0.5).abs() < 0.001, "vh: expected 0.5, got {}", vh);
+    }
+
+    #[test]
+    fn test_to_visual_space_180_degrees() {
+        // 180°: original (x, y, w, h) -> visual (1-x-w, 1-y-h, w, h)
+        // Original: x=0.1, y=0.2, w=0.5, h=0.3
+        // Expected visual: x=1-0.1-0.5=0.4, y=1-0.2-0.3=0.5, w=0.5, h=0.3
+        let crop = CropSettings::new(0.1, 0.2, 0.5, 0.3, 2, 0.0, false, false);
+        let (vx, vy, vw, vh) = crop.to_visual_space();
+
+        assert!((vx - 0.4).abs() < 0.001, "vx: expected 0.4, got {}", vx);
+        assert!((vy - 0.5).abs() < 0.001, "vy: expected 0.5, got {}", vy);
+        assert!((vw - 0.5).abs() < 0.001, "vw: expected 0.5, got {}", vw);
+        assert!((vh - 0.3).abs() < 0.001, "vh: expected 0.3, got {}", vh);
+    }
+
+    #[test]
+    fn test_to_visual_space_270_degrees() {
+        // 270° CW (90° CCW): original (x, y, w, h) -> visual (y, 1-x-w, h, w)
+        // Original: x=0.1, y=0.2, w=0.5, h=0.3
+        // Expected visual: x=0.2, y=1-0.1-0.5=0.4, w=0.3, h=0.5
+        let crop = CropSettings::new(0.1, 0.2, 0.5, 0.3, 3, 0.0, false, false);
+        let (vx, vy, vw, vh) = crop.to_visual_space();
+
+        assert!((vx - 0.2).abs() < 0.001, "vx: expected 0.2, got {}", vx);
+        assert!((vy - 0.4).abs() < 0.001, "vy: expected 0.4, got {}", vy);
+        assert!((vw - 0.3).abs() < 0.001, "vw: expected 0.3, got {}", vw);
+        assert!((vh - 0.5).abs() < 0.001, "vh: expected 0.5, got {}", vh);
+    }
+
+    #[test]
+    fn test_roundtrip_transformation_90_degrees() {
+        // Test that original -> visual -> original gives the same result
+        let original = CropSettings::new(0.1, 0.2, 0.5, 0.3, 1, 0.0, false, false);
+        let (vx, vy, vw, vh) = original.to_visual_space();
+        let roundtrip = original.with_visual_crop(vx, vy, vw, vh);
+
+        assert!((roundtrip.crop_x() - 0.1).abs() < 0.001, "x roundtrip failed");
+        assert!((roundtrip.crop_y() - 0.2).abs() < 0.001, "y roundtrip failed");
+        assert!((roundtrip.crop_width() - 0.5).abs() < 0.001, "w roundtrip failed");
+        assert!((roundtrip.crop_height() - 0.3).abs() < 0.001, "h roundtrip failed");
+    }
+
+    #[test]
+    fn test_roundtrip_transformation_180_degrees() {
+        let original = CropSettings::new(0.1, 0.2, 0.5, 0.3, 2, 0.0, false, false);
+        let (vx, vy, vw, vh) = original.to_visual_space();
+        let roundtrip = original.with_visual_crop(vx, vy, vw, vh);
+
+        assert!((roundtrip.crop_x() - 0.1).abs() < 0.001, "x roundtrip failed");
+        assert!((roundtrip.crop_y() - 0.2).abs() < 0.001, "y roundtrip failed");
+        assert!((roundtrip.crop_width() - 0.5).abs() < 0.001, "w roundtrip failed");
+        assert!((roundtrip.crop_height() - 0.3).abs() < 0.001, "h roundtrip failed");
+    }
+
+    #[test]
+    fn test_roundtrip_transformation_270_degrees() {
+        let original = CropSettings::new(0.1, 0.2, 0.5, 0.3, 3, 0.0, false, false);
+        let (vx, vy, vw, vh) = original.to_visual_space();
+        let roundtrip = original.with_visual_crop(vx, vy, vw, vh);
+
+        assert!((roundtrip.crop_x() - 0.1).abs() < 0.001, "x roundtrip failed");
+        assert!((roundtrip.crop_y() - 0.2).abs() < 0.001, "y roundtrip failed");
+        assert!((roundtrip.crop_width() - 0.5).abs() < 0.001, "w roundtrip failed");
+        assert!((roundtrip.crop_height() - 0.3).abs() < 0.001, "h roundtrip failed");
+    }
+
+    #[test]
+    fn test_visual_edit_preserves_after_save() {
+        // Simulate: User loads image rotated 90°, makes a crop edit in visual space,
+        // saves, then reloads. The crop should appear at the same visual position.
+
+        // Start with a rotated image with full-frame crop
+        let initial = CropSettings::new(0.0, 0.0, 1.0, 1.0, 1, 0.0, false, false);
+
+        // User drags crop in visual space to (0.1, 0.1, 0.6, 0.4)
+        let edited = initial.with_visual_crop(0.1, 0.1, 0.6, 0.4);
+
+        // Simulate save and reload (coordinates are now in original space)
+        let reloaded = CropSettings::new(
+            edited.crop_x(), edited.crop_y(),
+            edited.crop_width(), edited.crop_height(),
+            edited.rotation_90(), edited.angle(),
+            edited.flip_horizontal(), edited.flip_vertical()
+        );
+
+        // The visual representation should match what the user edited
+        let (final_vx, final_vy, final_vw, final_vh) = reloaded.to_visual_space();
+
+        assert!((final_vx - 0.1).abs() < 0.001, "visual x mismatch after reload");
+        assert!((final_vy - 0.1).abs() < 0.001, "visual y mismatch after reload");
+        assert!((final_vw - 0.6).abs() < 0.001, "visual w mismatch after reload");
+        assert!((final_vh - 0.4).abs() < 0.001, "visual h mismatch after reload");
+    }
+
+    // =============================================
+    // E2E Test: Full crop+rotation persistence flow
+    // =============================================
+
+    /// This test simulates the EXACT flow of the application:
+    /// 1. Image is displayed with rotation (egui Image::rotate)
+    /// 2. User draws crop frame on the VISUAL (rotated) image
+    /// 3. App saves: transforms visual coords to original, sets rotation=0
+    /// 4. App displays: applies UV directly (no rotation)
+    /// 5. VERIFY: The UV region matches the visual crop content
+    #[test]
+    fn test_e2e_crop_rotation_persistence_90cw() {
+        println!("\n=== E2E Test: 90° CW rotation ===");
+
+        // Simulating a 100x100 image for easy visualization
+        // Original image coordinates:
+        //   (0,0)-----(1,0)
+        //     |         |
+        //     |    A    |   A = top-left quadrant
+        //     |         |
+        //   (0,1)-----(1,1)
+
+        // After 90° CW rotation, the visual image becomes:
+        //   Original bottom-left -> Visual top-left
+        //   Original top-left -> Visual top-right
+        //   Original top-right -> Visual bottom-right
+        //   Original bottom-left -> Visual top-left
+
+        let rotation = 1; // 90° CW in egui
+
+        // STEP 1: User sees rotated image and draws crop on VISUAL top-left quadrant
+        let visual_crop = (0.0_f32, 0.0_f32, 0.5_f32, 0.5_f32); // top-left quarter visually
+        println!("Visual crop (what user selected): x={}, y={}, w={}, h={}",
+                 visual_crop.0, visual_crop.1, visual_crop.2, visual_crop.3);
+
+        // STEP 2: Transform to original space (this is what gets saved)
+        let (orig_x, orig_y, orig_w, orig_h) = CropSettings::from_visual_space(
+            visual_crop.0, visual_crop.1, visual_crop.2, visual_crop.3, rotation
+        );
+        println!("Original space (saved to DB): x={}, y={}, w={}, h={}",
+                 orig_x, orig_y, orig_w, orig_h);
+
+        // STEP 3: When displaying, we apply UV directly (rotation=0 was saved)
+        // The UV rect is (orig_x, orig_y) to (orig_x+orig_w, orig_y+orig_h)
+        println!("UV applied to texture: ({}, {}) to ({}, {})",
+                 orig_x, orig_y, orig_x + orig_w, orig_y + orig_h);
+
+        // STEP 4: VERIFY - For 90° CW rotation:
+        // Visual top-left (0,0) should map to Original bottom-left (0, 0.5-1.0)
+        // So visual crop (0,0,0.5,0.5) should map to original left-bottom quadrant
+        //
+        // Let's verify by checking what original region corresponds to visual top-left:
+        // - Visual (0,0) comes from Original where?
+        //   For 90° CW: Original (ox,oy) -> Visual (1-oy, ox)
+        //   So Visual (0,0) = (1-oy, ox) means 1-oy=0, ox=0 -> oy=1, ox=0
+        //   Visual (0,0) <- Original (0, 1) [bottom-left corner]
+        //
+        // - Visual (0.5,0) comes from Original where?
+        //   (1-oy, ox) = (0.5, 0) -> oy=0.5, ox=0
+        //   Visual (0.5, 0) <- Original (0, 0.5)
+        //
+        // - Visual (0, 0.5) comes from Original where?
+        //   (1-oy, ox) = (0, 0.5) -> oy=1, ox=0.5
+        //   Visual (0, 0.5) <- Original (0.5, 1)
+        //
+        // - Visual (0.5, 0.5) comes from Original where?
+        //   (1-oy, ox) = (0.5, 0.5) -> oy=0.5, ox=0.5
+        //   Visual (0.5, 0.5) <- Original (0.5, 0.5)
+        //
+        // So the visual rectangle (0,0)-(0.5,0.5) corresponds to original:
+        // Corners: (0,1), (0,0.5), (0.5,1), (0.5,0.5)
+        // This is the region x:[0, 0.5], y:[0.5, 1] -> (0, 0.5, 0.5, 0.5)
+
+        let expected_orig = (0.0_f32, 0.5_f32, 0.5_f32, 0.5_f32);
+        println!("Expected original: x={}, y={}, w={}, h={}",
+                 expected_orig.0, expected_orig.1, expected_orig.2, expected_orig.3);
+
+        assert!((orig_x - expected_orig.0).abs() < 0.001,
+                "orig_x: expected {}, got {}", expected_orig.0, orig_x);
+        assert!((orig_y - expected_orig.1).abs() < 0.001,
+                "orig_y: expected {}, got {}", expected_orig.1, orig_y);
+        assert!((orig_w - expected_orig.2).abs() < 0.001,
+                "orig_w: expected {}, got {}", expected_orig.2, orig_w);
+        assert!((orig_h - expected_orig.3).abs() < 0.001,
+                "orig_h: expected {}, got {}", expected_orig.3, orig_h);
+
+        println!("✓ 90° CW test PASSED\n");
+    }
+
+    #[test]
+    fn test_e2e_crop_rotation_persistence_90ccw() {
+        println!("\n=== E2E Test: 90° CCW rotation (rotation_90=3) ===");
+
+        let rotation = 3; // 270° CW = 90° CCW
+
+        // User draws crop on visual top-left quadrant
+        let visual_crop = (0.0_f32, 0.0_f32, 0.5_f32, 0.5_f32);
+        println!("Visual crop: x={}, y={}, w={}, h={}",
+                 visual_crop.0, visual_crop.1, visual_crop.2, visual_crop.3);
+
+        let (orig_x, orig_y, orig_w, orig_h) = CropSettings::from_visual_space(
+            visual_crop.0, visual_crop.1, visual_crop.2, visual_crop.3, rotation
+        );
+        println!("Original space: x={}, y={}, w={}, h={}",
+                 orig_x, orig_y, orig_w, orig_h);
+
+        // For 90° CCW: Original (ox,oy) -> Visual (oy, 1-ox)
+        // Visual (0,0) = (oy, 1-ox) -> oy=0, 1-ox=0 -> ox=1, oy=0
+        // Visual (0,0) <- Original (1, 0) [top-right corner]
+        //
+        // Visual (0.5, 0) <- oy=0.5, ox=1 -> Original (1, 0.5)
+        // Visual (0, 0.5) <- oy=0, ox=0.5 -> Original (0.5, 0)
+        // Visual (0.5, 0.5) <- oy=0.5, ox=0.5 -> Original (0.5, 0.5)
+        //
+        // Corners in original: (1,0), (1,0.5), (0.5,0), (0.5,0.5)
+        // This is x:[0.5, 1], y:[0, 0.5] -> (0.5, 0, 0.5, 0.5)
+
+        let expected_orig = (0.5_f32, 0.0_f32, 0.5_f32, 0.5_f32);
+        println!("Expected original: x={}, y={}, w={}, h={}",
+                 expected_orig.0, expected_orig.1, expected_orig.2, expected_orig.3);
+
+        assert!((orig_x - expected_orig.0).abs() < 0.001,
+                "orig_x: expected {}, got {}", expected_orig.0, orig_x);
+        assert!((orig_y - expected_orig.1).abs() < 0.001,
+                "orig_y: expected {}, got {}", expected_orig.1, orig_y);
+        assert!((orig_w - expected_orig.2).abs() < 0.001,
+                "orig_w: expected {}, got {}", expected_orig.2, orig_w);
+        assert!((orig_h - expected_orig.3).abs() < 0.001,
+                "orig_h: expected {}, got {}", expected_orig.3, orig_h);
+
+        println!("✓ 90° CCW test PASSED\n");
+    }
+
+    #[test]
+    fn test_e2e_crop_rotation_persistence_180() {
+        println!("\n=== E2E Test: 180° rotation ===");
+
+        let rotation = 2;
+
+        let visual_crop = (0.0_f32, 0.0_f32, 0.5_f32, 0.5_f32);
+        println!("Visual crop: x={}, y={}, w={}, h={}",
+                 visual_crop.0, visual_crop.1, visual_crop.2, visual_crop.3);
+
+        let (orig_x, orig_y, orig_w, orig_h) = CropSettings::from_visual_space(
+            visual_crop.0, visual_crop.1, visual_crop.2, visual_crop.3, rotation
+        );
+        println!("Original space: x={}, y={}, w={}, h={}",
+                 orig_x, orig_y, orig_w, orig_h);
+
+        // For 180°: Original (ox,oy) -> Visual (1-ox, 1-oy)
+        // Visual (0,0) <- Original (1, 1) [bottom-right]
+        // Visual (0.5, 0.5) <- Original (0.5, 0.5) [center]
+        //
+        // Visual top-left quadrant corresponds to Original bottom-right quadrant
+        // -> (0.5, 0.5, 0.5, 0.5)
+
+        let expected_orig = (0.5_f32, 0.5_f32, 0.5_f32, 0.5_f32);
+        println!("Expected original: x={}, y={}, w={}, h={}",
+                 expected_orig.0, expected_orig.1, expected_orig.2, expected_orig.3);
+
+        assert!((orig_x - expected_orig.0).abs() < 0.001,
+                "orig_x: expected {}, got {}", expected_orig.0, orig_x);
+        assert!((orig_y - expected_orig.1).abs() < 0.001,
+                "orig_y: expected {}, got {}", expected_orig.1, orig_y);
+        assert!((orig_w - expected_orig.2).abs() < 0.001,
+                "orig_w: expected {}, got {}", expected_orig.2, orig_w);
+        assert!((orig_h - expected_orig.3).abs() < 0.001,
+                "orig_h: expected {}, got {}", expected_orig.3, orig_h);
+
+        println!("✓ 180° test PASSED\n");
+    }
+
+    /// Test with non-centered crop to catch edge cases
+    #[test]
+    fn test_e2e_asymmetric_crop_90cw() {
+        println!("\n=== E2E Test: Asymmetric crop with 90° CW ===");
+
+        let rotation = 1;
+
+        // Crop the TOP portion of the visual image (not centered)
+        // This simulates cropping workers' heads in a rotated photo
+        let visual_crop = (0.1_f32, 0.05_f32, 0.8_f32, 0.4_f32); // wide strip at top
+        println!("Visual crop (top strip): x={}, y={}, w={}, h={}",
+                 visual_crop.0, visual_crop.1, visual_crop.2, visual_crop.3);
+
+        let (orig_x, orig_y, orig_w, orig_h) = CropSettings::from_visual_space(
+            visual_crop.0, visual_crop.1, visual_crop.2, visual_crop.3, rotation
+        );
+        println!("Original space: x={}, y={}, w={}, h={}",
+                 orig_x, orig_y, orig_w, orig_h);
+
+        // For 90° CW: Visual (vx,vy) -> Original (vy, 1-vx-vw)
+        // Wait, let me recalculate the formula...
+        // from_visual_space for rotation=1: (vy, 1-vx-vw, vh, vw)
+        //
+        // visual_crop = (0.1, 0.05, 0.8, 0.4)
+        // orig = (0.05, 1-0.1-0.8, 0.4, 0.8) = (0.05, 0.1, 0.4, 0.8)
+
+        let expected_orig = (0.05_f32, 0.1_f32, 0.4_f32, 0.8_f32);
+        println!("Expected original: x={}, y={}, w={}, h={}",
+                 expected_orig.0, expected_orig.1, expected_orig.2, expected_orig.3);
+
+        assert!((orig_x - expected_orig.0).abs() < 0.001,
+                "orig_x: expected {}, got {}", expected_orig.0, orig_x);
+        assert!((orig_y - expected_orig.1).abs() < 0.001,
+                "orig_y: expected {}, got {}", expected_orig.1, orig_y);
+        assert!((orig_w - expected_orig.2).abs() < 0.001,
+                "orig_w: expected {}, got {}", expected_orig.2, orig_w);
+        assert!((orig_h - expected_orig.3).abs() < 0.001,
+                "orig_h: expected {}, got {}", expected_orig.3, orig_h);
+
+        println!("✓ Asymmetric crop test PASSED\n");
     }
 }

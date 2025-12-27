@@ -136,27 +136,67 @@ impl DevelopView {
                                       lens_distortion, lens_vignette_amount, lens_vignette_midpoint,
                                       nr_luminance, nr_color,
                                       sharpen_amount, sharpen_radius,
-                                      active_crop.as_ref().map(|c| c.crop_x()),
-                                      active_crop.as_ref().map(|c| c.crop_y()),
-                                      active_crop.as_ref().map(|c| c.crop_width()),
-                                      active_crop.as_ref().map(|c| c.crop_height()),
-                                      active_crop.as_ref().map(|c| c.rotation_90()),
-                                      active_crop.as_ref().map(|c| c.angle()),
+                                      // Transform crop coordinates from visual space to original space.
+                                      // rotation_90 is "consumed" by the coordinate transformation.
+                                      // angle (fine rotation) is KEPT so empty corners are shown correctly.
+                                      active_crop.as_ref().map(|c| {
+                                          let (ox, _, _, _) = domain::value_objects::CropSettings::from_visual_space(
+                                              c.crop_x(), c.crop_y(), c.crop_width(), c.crop_height(), c.rotation_90()
+                                          );
+                                          ox
+                                      }),
+                                      active_crop.as_ref().map(|c| {
+                                          let (_, oy, _, _) = domain::value_objects::CropSettings::from_visual_space(
+                                              c.crop_x(), c.crop_y(), c.crop_width(), c.crop_height(), c.rotation_90()
+                                          );
+                                          oy
+                                      }),
+                                      active_crop.as_ref().map(|c| {
+                                          let (_, _, ow, _) = domain::value_objects::CropSettings::from_visual_space(
+                                              c.crop_x(), c.crop_y(), c.crop_width(), c.crop_height(), c.rotation_90()
+                                          );
+                                          ow
+                                      }),
+                                      active_crop.as_ref().map(|c| {
+                                          let (_, _, _, oh) = domain::value_objects::CropSettings::from_visual_space(
+                                              c.crop_x(), c.crop_y(), c.crop_width(), c.crop_height(), c.rotation_90()
+                                          );
+                                          oh
+                                      }),
+                                      // rotation_90 is consumed by coordinate transformation
+                                      Some(0),
+                                      // angle is consumed - viewer never rotates
+                                      Some(0.0),
                                       active_crop.as_ref().map(|c| c.flip_horizontal()),
                                       active_crop.as_ref().map(|c| c.flip_vertical()),
                                   ).await;
                               });
                               
                               // Also update in-memory ViewModel so crop persists when switching back
+                              // Same transformation: visual->original coords, rotation consumed
                               if let Some(photo_vm) = state.photos.iter_mut().find(|p| p.id == id_for_update) {
-                                   photo_vm.edit_crop_x = crop_for_update.as_ref().map(|c| c.crop_x());
-                                   photo_vm.edit_crop_y = crop_for_update.as_ref().map(|c| c.crop_y());
-                                   photo_vm.edit_crop_width = crop_for_update.as_ref().map(|c| c.crop_width());
-                                   photo_vm.edit_crop_height = crop_for_update.as_ref().map(|c| c.crop_height());
-                                   photo_vm.edit_crop_rotation = crop_for_update.as_ref().map(|c| c.rotation_90());
-                                   photo_vm.edit_crop_angle = crop_for_update.as_ref().map(|c| c.angle());
-                                   photo_vm.edit_crop_flip_h = crop_for_update.as_ref().map(|c| c.flip_horizontal());
-                                   photo_vm.edit_crop_flip_v = crop_for_update.as_ref().map(|c| c.flip_vertical());
+                                   if let Some(c) = crop_for_update.as_ref() {
+                                       let (ox, oy, ow, oh) = domain::value_objects::CropSettings::from_visual_space(
+                                           c.crop_x(), c.crop_y(), c.crop_width(), c.crop_height(), c.rotation_90()
+                                       );
+                                       photo_vm.edit_crop_x = Some(ox);
+                                       photo_vm.edit_crop_y = Some(oy);
+                                       photo_vm.edit_crop_width = Some(ow);
+                                       photo_vm.edit_crop_height = Some(oh);
+                                       photo_vm.edit_crop_rotation = Some(0);  // Rotation consumed
+                                       photo_vm.edit_crop_angle = Some(0.0);   // Angle consumed
+                                       photo_vm.edit_crop_flip_h = Some(c.flip_horizontal());
+                                       photo_vm.edit_crop_flip_v = Some(c.flip_vertical());
+                                   } else {
+                                       photo_vm.edit_crop_x = None;
+                                       photo_vm.edit_crop_y = None;
+                                       photo_vm.edit_crop_width = None;
+                                       photo_vm.edit_crop_height = None;
+                                       photo_vm.edit_crop_rotation = None;
+                                       photo_vm.edit_crop_angle = None;
+                                       photo_vm.edit_crop_flip_h = None;
+                                       photo_vm.edit_crop_flip_v = None;
+                                   }
                                    // Also update exposure and other edits
                                    photo_vm.edit_exposure = Some(exposure);
                                    photo_vm.edit_contrast = Some(contrast);
