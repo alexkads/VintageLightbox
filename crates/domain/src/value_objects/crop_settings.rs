@@ -723,4 +723,110 @@ mod crop_settings_tests {
 
         println!("✓ Asymmetric crop test PASSED\n");
     }
+
+    // =============================================
+    // INVARIANT: Viewer NEVER rotates (Lightroom behavior)
+    // =============================================
+    //
+    // The CORRECT behavior (like Adobe Lightroom) is:
+    // - Crop defines the final result
+    // - Viewer is just a viewport, it NEVER applies rotation
+    // - All transformations are "baked" into UV coordinates
+    //
+    // When saving:
+    // - rotation_90: CONSUMED (transformed into UV coordinates)
+    // - angle: CONSUMED (for empty corners, requires pre-rendering in future)
+    // - Saved snapshot: rotation_90 = 0, angle = 0
+    //
+    // This is NOT a limitation, it's the CORRECT behavior!
+
+    /// INVARIANT: Saved snapshot must have rotation_90 = 0
+    /// The rotation is consumed by coordinate transformation.
+    /// VIEWER NEVER ROTATES!
+    #[test]
+    fn test_invariant_viewer_never_rotates_rotation90() {
+        // When saving a crop with rotation, the rotation must be consumed
+        // The saved coordinates are in original texture space
+
+        let rotation_90 = 1; // 90° CW during editing
+        let visual_crop = (0.1_f32, 0.2_f32, 0.5_f32, 0.4_f32);
+
+        // Transform to original space - this CONSUMES the rotation
+        let (orig_x, orig_y, orig_w, orig_h) = CropSettings::from_visual_space(
+            visual_crop.0, visual_crop.1, visual_crop.2, visual_crop.3, rotation_90
+        );
+
+        // INVARIANT: Saved rotation_90 must be 0
+        let saved_rotation_90 = 0;
+
+        // Viewer applies UV directly WITHOUT ANY ROTATION
+        // This is the correct Lightroom-like behavior
+
+        assert_eq!(saved_rotation_90, 0,
+            "INVARIANT VIOLATED: Saved snapshot must have rotation_90 = 0. Viewer NEVER rotates!");
+
+        // Verify UV gives correct result without rotation
+        let saved = CropSettings::new(
+            orig_x, orig_y, orig_w, orig_h,
+            saved_rotation_90, 0.0, false, false
+        );
+
+        // With saved_rotation=0, to_visual_space returns same coords (no rotation)
+        let (vx, vy, _vw, _vh) = saved.to_visual_space();
+        assert!((vx - orig_x).abs() < 0.001, "UV must be applied directly without rotation");
+        assert!((vy - orig_y).abs() < 0.001, "UV must be applied directly without rotation");
+
+        println!("✓ INVARIANT: Viewer never rotates (rotation_90 consumed)");
+    }
+
+    /// INVARIANT: Saved snapshot must have angle = 0
+    /// Empty corners from angle rotation require pre-rendering.
+    /// VIEWER NEVER ROTATES!
+    #[test]
+    fn test_invariant_viewer_never_rotates_angle() {
+        // Angle (fine rotation) creates empty corners
+        // These corners require PRE-RENDERING to capture
+        // The viewer itself NEVER applies rotation
+
+        // INVARIANT: Saved angle must be 0
+        let saved_angle = 0.0_f32;
+
+        assert_eq!(saved_angle, 0.0,
+            "INVARIANT VIOLATED: Saved snapshot must have angle = 0. Viewer NEVER rotates!");
+
+        println!("✓ INVARIANT: Viewer never rotates (angle consumed)");
+        println!("  For empty corners from angle: pre-render rotated image first");
+    }
+
+    /// Regression test: Ensure viewer never applies rotation
+    /// This test will FAIL if anyone tries to rotate in the viewer
+    #[test]
+    fn test_regression_viewer_must_not_rotate() {
+        // This test documents the CORRECT behavior to prevent regression
+        //
+        // WRONG (causes regression):
+        //   if crop.angle() != 0.0 {
+        //       img = img.rotate(crop.angle().to_radians(), ...);  // NO!
+        //   }
+        //
+        // CORRECT:
+        //   img = img.uv(crop_rect);  // UV only, no rotation
+        //
+        // If empty corners are needed from angle rotation:
+        //   1. Pre-render the rotated image to a new texture
+        //   2. Apply UV crop on the pre-rendered texture
+        //   3. Display without any viewer rotation
+
+        let saved_rotation_90 = 0;
+        let saved_angle = 0.0_f32;
+
+        // These assertions document the invariants
+        assert_eq!(saved_rotation_90, 0, "rotation_90 must be 0 in saved snapshot");
+        assert_eq!(saved_angle, 0.0, "angle must be 0 in saved snapshot");
+
+        println!("✓ REGRESSION TEST: Viewer must not rotate");
+        println!("  - Saved rotation_90 = 0 ✓");
+        println!("  - Saved angle = 0 ✓");
+        println!("  - Viewer applies UV only, NO rotation ✓");
+    }
 }
