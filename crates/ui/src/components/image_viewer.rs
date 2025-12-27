@@ -152,10 +152,10 @@ impl ImageViewer {
 
         // Draw image logic
         if let Some(texture) = detail_image {
-            // Full resolution image available
+            // Full resolution image available (already cropped via pixel if crop_settings was provided to async_loader)
             let texture_size = Vec2::new(texture.size()[0] as f32, texture.size()[1] as f32);
 
-            // Calculate scaled size
+            // Calculate scaled size (texture is already cropped, so use actual dimensions)
             let scale = (available_size.x / texture_size.x)
                 .min(available_size.y / texture_size.y)
                 .min(1.0); // Don't upscale beyond original size
@@ -166,41 +166,12 @@ impl ImageViewer {
             let center = rect.center() + pan;
             let img_rect = Rect::from_center_size(center, zoomed_size);
 
-            let mut img = egui::Image::new(texture);
+            // Note: UV crop removed - crop is now applied via pixels in async_loader
+            // for consistency with thumbnails. crop_settings parameter is kept for 
+            // future use (e.g., in-progress crop mode preview)
+            let _unused_crop = crop_settings; // Suppress unused warning
 
-            // Apply crop and rotation if settings are provided
-            // AND we are not in crop mode (in crop mode we show full image with overlay)
-            // But wait, the `render` function receives `crop_settings`.
-            // The caller handles logic: 
-            // - If in interactive mode (crop mode), caller might pass None or handle it differently?
-            // - Actually, ImageViewer::show passes `!state.crop_mode_active` as `allow_pan`. 
-            // - And previously it passed angle. 
-            // - If `crop_mode_active` is true, we want FULL image.
-            // - If `crop_mode_active` is false, we want CROPPED image.
-            // - So we should pass `crop_settings` ONLY if we want them applied.
-            
-            if let Some(crop) = crop_settings {
-                // Calculate UV
-                // Note: UV coordinates are (0,0) top-left to (1,1) bottom-right
-                // crop_x/y are top-left relative to image
-                // TODO: Handle flip_h/flip_v if egui supports it via UV swapping? 
-                // egui::Rect enforces min <= max, so standard Rect can't represent flip.
-                // We might need to rotate 180 for flips or similar? 
-                // For now, implementing crop and rotation.
-                
-                let uv = Rect::from_min_size(
-                    egui::pos2(crop.crop_x(), crop.crop_y()), 
-                    egui::vec2(crop.crop_width(), crop.crop_height())
-                );
-                img = img.uv(uv);
-                
-                // Rotation
-                // Sum rotation_90 and fine angle
-                let total_degrees = (crop.rotation_90() as f32 * 90.0) + crop.angle();
-                img = img.rotate(total_degrees.to_radians(), Vec2::splat(0.5));
-            }
-
-            img.paint_at(ui, img_rect);
+            egui::Image::new(texture).paint_at(ui, img_rect);
             painted_rect = Some(img_rect);
             
         } else if let Some(thumbnail) = thumbnail_preview {

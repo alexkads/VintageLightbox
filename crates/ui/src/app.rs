@@ -329,7 +329,8 @@ impl eframe::App for VintageLightboxApp {
                 self.state.detail_image = Some(texture);
                 // LIGHTROOM-STYLE: Start transition from thumbnail to full-res
                 self.state.detail_image_loaded_at = Some(std::time::Instant::now());
-                // self.state.thumbnail_preview = None;  // Keep thumbnail for cross-fade transition
+                // Clear thumbnail to avoid micro-differences between pixel crop (thumb) and UV crop (full-res)
+                self.state.thumbnail_preview = None;
                 self.state.loaded_photo_id = Some(result.photo_id);
                 
                 // Force repaint to show the loaded image immediately
@@ -784,6 +785,8 @@ impl eframe::App for VintageLightboxApp {
                         // Sharpening
                         sharpen_amount, sharpen_radius,
                         max_preview_size: 2560,
+                        // Crop settings for unified pixel-based crop
+                        crop_settings: self.state.crop_settings.clone(),
                     });
 
                     // Prefetch adjacent photos into L1 cache for faster navigation
