@@ -108,6 +108,16 @@ impl PhotoRepositoryImpl {
         let edit_sharpen_amount: Option<f32> = row.try_get::<Option<f32>, _>("edit_sharpen_amount").unwrap_or(None);
         let edit_sharpen_radius: Option<f32> = row.try_get::<Option<f32>, _>("edit_sharpen_radius").unwrap_or(None);
 
+        // Crop fields
+        let edit_crop_x: Option<f32> = row.try_get::<Option<f32>, _>("edit_crop_x").unwrap_or(None);
+        let edit_crop_y: Option<f32> = row.try_get::<Option<f32>, _>("edit_crop_y").unwrap_or(None);
+        let edit_crop_width: Option<f32> = row.try_get::<Option<f32>, _>("edit_crop_width").unwrap_or(None);
+        let edit_crop_height: Option<f32> = row.try_get::<Option<f32>, _>("edit_crop_height").unwrap_or(None);
+        let edit_crop_rotation: Option<i32> = row.try_get::<Option<i32>, _>("edit_crop_rotation").unwrap_or(None);
+        let edit_crop_angle: Option<f32> = row.try_get::<Option<f32>, _>("edit_crop_angle").unwrap_or(None);
+        let edit_crop_flip_h: Option<bool> = row.try_get::<Option<bool>, _>("edit_crop_flip_h").unwrap_or(None);
+        let edit_crop_flip_v: Option<bool> = row.try_get::<Option<bool>, _>("edit_crop_flip_v").unwrap_or(None);
+
 
         // Metadata persistido como JSON string
         let metadata_str: Option<String> = row.try_get("metadata").ok();
@@ -193,6 +203,14 @@ impl PhotoRepositoryImpl {
             edit_nr_color,
             edit_sharpen_amount,
             edit_sharpen_radius,
+            edit_crop_x,
+            edit_crop_y,
+            edit_crop_width,
+            edit_crop_height,
+            edit_crop_rotation,
+            edit_crop_angle,
+            edit_crop_flip_h,
+            edit_crop_flip_v,
         ))
     }
 }
@@ -268,8 +286,8 @@ impl PhotoRepository for PhotoRepositoryImpl {
             .and_then(|m| serde_json::to_string(m).ok());
 
         sqlx::query(
-            "INSERT INTO photos (id, file_path, rating, color_label, flag, is_edited, imported_at, modified_at, metadata, thumbnail_path, preview_path, edit_exposure, edit_contrast, edit_temperature, edit_tint, edit_highlights, edit_shadows, edit_whites, edit_blacks, edit_clarity, edit_vibrance, edit_saturation, edit_tone_curve_shadows, edit_tone_curve_darks, edit_tone_curve_lights, edit_tone_curve_highlights, content_hash, edit_hsl_red_sat, edit_hsl_orange_sat, edit_hsl_yellow_sat, edit_hsl_green_sat, edit_hsl_aqua_sat, edit_hsl_blue_sat, edit_hsl_purple_sat, edit_hsl_magenta_sat, edit_hsl_red_hue, edit_hsl_orange_hue, edit_hsl_yellow_hue, edit_hsl_green_hue, edit_hsl_aqua_hue, edit_hsl_blue_hue, edit_hsl_purple_hue, edit_hsl_magenta_hue, edit_hsl_red_lum, edit_hsl_orange_lum, edit_hsl_yellow_lum, edit_hsl_green_lum, edit_hsl_aqua_lum, edit_hsl_blue_lum, edit_hsl_purple_lum, edit_hsl_magenta_lum, edit_lens_distortion, edit_lens_vignette_amount, edit_lens_vignette_midpoint, edit_nr_luminance, edit_nr_color, edit_sharpen_amount, edit_sharpen_radius)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO photos (id, file_path, rating, color_label, flag, is_edited, imported_at, modified_at, metadata, thumbnail_path, preview_path, edit_exposure, edit_contrast, edit_temperature, edit_tint, edit_highlights, edit_shadows, edit_whites, edit_blacks, edit_clarity, edit_vibrance, edit_saturation, edit_tone_curve_shadows, edit_tone_curve_darks, edit_tone_curve_lights, edit_tone_curve_highlights, content_hash, edit_hsl_red_sat, edit_hsl_orange_sat, edit_hsl_yellow_sat, edit_hsl_green_sat, edit_hsl_aqua_sat, edit_hsl_blue_sat, edit_hsl_purple_sat, edit_hsl_magenta_sat, edit_hsl_red_hue, edit_hsl_orange_hue, edit_hsl_yellow_hue, edit_hsl_green_hue, edit_hsl_aqua_hue, edit_hsl_blue_hue, edit_hsl_purple_hue, edit_hsl_magenta_hue, edit_hsl_red_lum, edit_hsl_orange_lum, edit_hsl_yellow_lum, edit_hsl_green_lum, edit_hsl_aqua_lum, edit_hsl_blue_lum, edit_hsl_purple_lum, edit_hsl_magenta_lum, edit_lens_distortion, edit_lens_vignette_amount, edit_lens_vignette_midpoint, edit_nr_luminance, edit_nr_color, edit_sharpen_amount, edit_sharpen_radius, edit_crop_x, edit_crop_y, edit_crop_width, edit_crop_height, edit_crop_rotation, edit_crop_angle, edit_crop_flip_h, edit_crop_flip_v)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         .bind(&id)
         .bind(&file_path)
@@ -425,6 +443,15 @@ impl PhotoRepository for PhotoRepositoryImpl {
         // Sharpening fields
         let edit_sharpen_amount = photo.edit_sharpen_amount();
         let edit_sharpen_radius = photo.edit_sharpen_radius();
+        // Crop fields
+        let edit_crop_x = photo.edit_crop_x();
+        let edit_crop_y = photo.edit_crop_y();
+        let edit_crop_width = photo.edit_crop_width();
+        let edit_crop_height = photo.edit_crop_height();
+        let edit_crop_rotation = photo.edit_crop_rotation();
+        let edit_crop_angle = photo.edit_crop_angle();
+        let edit_crop_flip_h = photo.edit_crop_flip_h();
+        let edit_crop_flip_v = photo.edit_crop_flip_v();
 
         // Serializar metadata para JSON
         let metadata = photo.metadata()
@@ -432,7 +459,7 @@ impl PhotoRepository for PhotoRepositoryImpl {
 
         let result = sqlx::query(
             "UPDATE photos
-             SET file_path = ?, rating = ?, color_label = ?, flag = ?, is_edited = ?, modified_at = ?, metadata = ?, thumbnail_path = ?, preview_path = ?, edit_exposure = ?, edit_contrast = ?, edit_temperature = ?, edit_tint = ?, edit_highlights = ?, edit_shadows = ?, edit_whites = ?, edit_blacks = ?, edit_clarity = ?, edit_vibrance = ?, edit_saturation = ?, edit_tone_curve_shadows = ?, edit_tone_curve_darks = ?, edit_tone_curve_lights = ?, edit_tone_curve_highlights = ?, content_hash = ?, edit_hsl_red_sat = ?, edit_hsl_orange_sat = ?, edit_hsl_yellow_sat = ?, edit_hsl_green_sat = ?, edit_hsl_aqua_sat = ?, edit_hsl_blue_sat = ?, edit_hsl_purple_sat = ?, edit_hsl_magenta_sat = ?, edit_hsl_red_hue = ?, edit_hsl_orange_hue = ?, edit_hsl_yellow_hue = ?, edit_hsl_green_hue = ?, edit_hsl_aqua_hue = ?, edit_hsl_blue_hue = ?, edit_hsl_purple_hue = ?, edit_hsl_magenta_hue = ?, edit_hsl_red_lum = ?, edit_hsl_orange_lum = ?, edit_hsl_yellow_lum = ?, edit_hsl_green_lum = ?, edit_hsl_aqua_lum = ?, edit_hsl_blue_lum = ?, edit_hsl_purple_lum = ?, edit_hsl_magenta_lum = ?, edit_lens_distortion = ?, edit_lens_vignette_amount = ?, edit_lens_vignette_midpoint = ?, edit_nr_luminance = ?, edit_nr_color = ?, edit_sharpen_amount = ?, edit_sharpen_radius = ?
+             SET file_path = ?, rating = ?, color_label = ?, flag = ?, is_edited = ?, modified_at = ?, metadata = ?, thumbnail_path = ?, preview_path = ?, edit_exposure = ?, edit_contrast = ?, edit_temperature = ?, edit_tint = ?, edit_highlights = ?, edit_shadows = ?, edit_whites = ?, edit_blacks = ?, edit_clarity = ?, edit_vibrance = ?, edit_saturation = ?, edit_tone_curve_shadows = ?, edit_tone_curve_darks = ?, edit_tone_curve_lights = ?, edit_tone_curve_highlights = ?, content_hash = ?, edit_hsl_red_sat = ?, edit_hsl_orange_sat = ?, edit_hsl_yellow_sat = ?, edit_hsl_green_sat = ?, edit_hsl_aqua_sat = ?, edit_hsl_blue_sat = ?, edit_hsl_purple_sat = ?, edit_hsl_magenta_sat = ?, edit_hsl_red_hue = ?, edit_hsl_orange_hue = ?, edit_hsl_yellow_hue = ?, edit_hsl_green_hue = ?, edit_hsl_aqua_hue = ?, edit_hsl_blue_hue = ?, edit_hsl_purple_hue = ?, edit_hsl_magenta_hue = ?, edit_hsl_red_lum = ?, edit_hsl_orange_lum = ?, edit_hsl_yellow_lum = ?, edit_hsl_green_lum = ?, edit_hsl_aqua_lum = ?, edit_hsl_blue_lum = ?, edit_hsl_purple_lum = ?, edit_hsl_magenta_lum = ?, edit_lens_distortion = ?, edit_lens_vignette_amount = ?, edit_lens_vignette_midpoint = ?, edit_nr_luminance = ?, edit_nr_color = ?, edit_sharpen_amount = ?, edit_sharpen_radius = ?, edit_crop_x = ?, edit_crop_y = ?, edit_crop_width = ?, edit_crop_height = ?, edit_crop_rotation = ?, edit_crop_angle = ?, edit_crop_flip_h = ?, edit_crop_flip_v = ?
              WHERE id = ?"
         )
         .bind(&file_path)
@@ -491,6 +518,14 @@ impl PhotoRepository for PhotoRepositoryImpl {
         .bind(edit_nr_color)
         .bind(edit_sharpen_amount)
         .bind(edit_sharpen_radius)
+        .bind(edit_crop_x)
+        .bind(edit_crop_y)
+        .bind(edit_crop_width)
+        .bind(edit_crop_height)
+        .bind(edit_crop_rotation)
+        .bind(edit_crop_angle)
+        .bind(edit_crop_flip_h)
+        .bind(edit_crop_flip_v)
         .bind(&id)
         .execute(&self.pool)
         .await

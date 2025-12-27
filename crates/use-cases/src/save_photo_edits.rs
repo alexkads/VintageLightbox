@@ -64,6 +64,14 @@ impl SavePhotoEditsUseCase {
         nr_color: f32,
         sharpen_amount: f32,
         sharpen_radius: f32,
+        crop_x: Option<f32>,
+        crop_y: Option<f32>,
+        crop_width: Option<f32>,
+        crop_height: Option<f32>,
+        crop_rotation: Option<i32>,
+        crop_angle: Option<f32>,
+        crop_flip_h: Option<bool>,
+        crop_flip_v: Option<bool>,
     ) -> DomainResult<()> {
         let mut photo = self.photo_repository.find_by_id(&id).await?
             .ok_or(DomainError::PhotoNotFound)?;
@@ -85,7 +93,9 @@ impl SavePhotoEditsUseCase {
             Some(hsl_purple_lum), Some(hsl_magenta_lum),
             Some(lens_distortion), Some(lens_vignette_amount), Some(lens_vignette_midpoint),
             Some(nr_luminance), Some(nr_color),
-            Some(sharpen_amount), Some(sharpen_radius)
+            Some(sharpen_amount), Some(sharpen_radius),
+            crop_x, crop_y, crop_width, crop_height,
+            crop_rotation, crop_angle, crop_flip_h, crop_flip_v
         )?;
         self.photo_repository.update(&photo).await?;
 

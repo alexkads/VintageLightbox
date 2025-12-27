@@ -242,9 +242,13 @@ async fn test_save_and_find_photo_with_edits() {
     photo.set_edits(
         Some(1.5), Some(0.8), None, None, None, None, None, None, None, None, None,
         None, None, None, None,
-        None, None, None, None, None, None, None, None, // HSL
+        None, None, None, None, None, None, None, None, // HSL (Sat)
+        None, None, None, None, None, None, None, None, // HSL (Hue)
+        None, None, None, None, None, None, None, None, // HSL (Lum)
+        None, None, None, // Lens
         None, None, // NR
-        None, None  // Sharpening
+        None, None, // Sharpening
+        None, None, None, None, None, None, None, None // Crop
     ).unwrap();
 
     // Act - Save
@@ -263,9 +267,13 @@ async fn test_save_and_find_photo_with_edits() {
     found_mut.set_edits(
         Some(-0.5), Some(1.2), None, None, None, None, None, None, None, None, None,
         None, None, None, None,
-        None, None, None, None, None, None, None, None, // HSL
+        None, None, None, None, None, None, None, None, // HSL (Sat)
+        None, None, None, None, None, None, None, None, // HSL (Hue)
+        None, None, None, None, None, None, None, None, // HSL (Lum)
+        None, None, None, // Lens
         None, None, // NR
-        None, None  // Sharpening
+        None, None, // Sharpening
+        None, None, None, None, None, None, None, None // Crop
     ).unwrap();
     repo.update(&found_mut).await.unwrap();
 

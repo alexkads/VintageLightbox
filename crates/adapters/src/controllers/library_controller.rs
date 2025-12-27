@@ -95,6 +95,15 @@ impl LibraryController {
                         // Sharpening
                         edit_sharpen_amount: photo.edit_sharpen_amount(),
                         edit_sharpen_radius: photo.edit_sharpen_radius(),
+                        // Crop & Rotation
+                        edit_crop_x: photo.edit_crop_x(),
+                        edit_crop_y: photo.edit_crop_y(),
+                        edit_crop_width: photo.edit_crop_width(),
+                        edit_crop_height: photo.edit_crop_height(),
+                        edit_crop_rotation: photo.edit_crop_rotation(),
+                        edit_crop_angle: photo.edit_crop_angle(),
+                        edit_crop_flip_h: photo.edit_crop_flip_h(),
+                        edit_crop_flip_v: photo.edit_crop_flip_v(),
                     }
                 })
                 .collect();

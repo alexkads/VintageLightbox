@@ -1,4 +1,4 @@
-use egui::{Ui, Rect, Pos2, Vec2, Color32, Stroke, Sense, Response};
+use egui::{Ui, Rect, Pos2, Vec2, Color32, Stroke, Sense};
 use domain::value_objects::{CropSettings, AspectRatio};
 
 /// Visual overlay for crop mode showing crop rectangle, handles, and composition grid

@@ -19,7 +19,9 @@ impl ImageViewer {
             state.pan_offset,
             true, // interactive
             !state.crop_mode_active, // allow_pan: Disable pan in crop mode (unless Space is held)
-            state.crop_settings.as_ref().map(|c| c.angle()).unwrap_or(0.0),
+            // If crop mode is active, we show the original image (untransformed) so the user can edit the crop.
+            // If crop mode is INACTIVE, we show the applied crop.
+            if state.crop_mode_active { None } else { state.crop_settings.as_ref() },
         );
 
         state.zoom_level = new_zoom;
@@ -96,8 +98,8 @@ impl ImageViewer {
         current_zoom: f32,
         current_pan: Vec2,
         interactive: bool,
-        allow_pan: bool, // New parameter to control panning
-        rotation_angle: f32, // New parameter for straightening
+        allow_pan: bool, // Restored parameter
+        crop_settings: Option<&domain::value_objects::CropSettings>, // Updated for crop support
     ) -> (f32, Vec2, Option<Rect>, Rect) {
         let available_size = ui.available_size();
         let match_size_arg = if interactive {
@@ -164,9 +166,41 @@ impl ImageViewer {
             let center = rect.center() + pan;
             let img_rect = Rect::from_center_size(center, zoomed_size);
 
-            egui::Image::new(texture)
-                .rotate(rotation_angle.to_radians(), Vec2::splat(0.5))
-                .paint_at(ui, img_rect);
+            let mut img = egui::Image::new(texture);
+
+            // Apply crop and rotation if settings are provided
+            // AND we are not in crop mode (in crop mode we show full image with overlay)
+            // But wait, the `render` function receives `crop_settings`.
+            // The caller handles logic: 
+            // - If in interactive mode (crop mode), caller might pass None or handle it differently?
+            // - Actually, ImageViewer::show passes `!state.crop_mode_active` as `allow_pan`. 
+            // - And previously it passed angle. 
+            // - If `crop_mode_active` is true, we want FULL image.
+            // - If `crop_mode_active` is false, we want CROPPED image.
+            // - So we should pass `crop_settings` ONLY if we want them applied.
+            
+            if let Some(crop) = crop_settings {
+                // Calculate UV
+                // Note: UV coordinates are (0,0) top-left to (1,1) bottom-right
+                // crop_x/y are top-left relative to image
+                // TODO: Handle flip_h/flip_v if egui supports it via UV swapping? 
+                // egui::Rect enforces min <= max, so standard Rect can't represent flip.
+                // We might need to rotate 180 for flips or similar? 
+                // For now, implementing crop and rotation.
+                
+                let uv = Rect::from_min_size(
+                    egui::pos2(crop.crop_x(), crop.crop_y()), 
+                    egui::vec2(crop.crop_width(), crop.crop_height())
+                );
+                img = img.uv(uv);
+                
+                // Rotation
+                // Sum rotation_90 and fine angle
+                let total_degrees = (crop.rotation_90() as f32 * 90.0) + crop.angle();
+                img = img.rotate(total_degrees.to_radians(), Vec2::splat(0.5));
+            }
+
+            img.paint_at(ui, img_rect);
             painted_rect = Some(img_rect);
             
         } else if let Some(thumbnail) = thumbnail_preview {

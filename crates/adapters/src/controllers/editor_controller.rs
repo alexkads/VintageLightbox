@@ -60,6 +60,14 @@ impl EditorController {
         nr_color: f32,
         sharpen_amount: f32,
         sharpen_radius: f32,
+        crop_x: Option<f32>,
+        crop_y: Option<f32>,
+        crop_width: Option<f32>,
+        crop_height: Option<f32>,
+        crop_rotation: Option<i32>,
+        crop_angle: Option<f32>,
+        crop_flip_h: Option<bool>,
+        crop_flip_v: Option<bool>,
     ) -> Result<(), String> {
         let photo_id = PhotoId::from_string(&id).map_err(|e| e.to_string())?;
 
@@ -75,7 +83,16 @@ impl EditorController {
             hsl_aqua_lum, hsl_blue_lum, hsl_purple_lum, hsl_magenta_lum,
             lens_distortion, lens_vignette_amount, lens_vignette_midpoint,
             nr_luminance, nr_color,
-            sharpen_amount, sharpen_radius
+
+            sharpen_amount, sharpen_radius,
+            crop_x,
+            crop_y,
+            crop_width,
+            crop_height,
+            crop_rotation,
+            crop_angle,
+            crop_flip_h,
+            crop_flip_v,
         ).await
             .map_err(|e| e.to_string())
     }

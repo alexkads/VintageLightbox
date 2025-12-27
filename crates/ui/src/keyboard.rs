@@ -75,10 +75,10 @@ impl KeyboardHandler {
             // GLOBAL SHORTCUTS (Work in all views)
             // ==========================================
 
-            // Escape - Return to Library view
+            // Escape - Return to Library view (deferred to app.rs to allow save)
             if i.key_pressed(Key::Escape) && state.current_view == CurrentView::Develop {
-                state.current_view = CurrentView::Library;
-                state.reset_viewer();
+                // Set flag, app.rs will handle save + mode switch
+                state.deferred_exit_develop_mode = true;
             }
 
             // Rating shortcuts (0-5)

@@ -546,6 +546,47 @@ impl ImageProcessor {
 
         img.resize(new_width, new_height, image::imageops::FilterType::Lanczos3)
     }
+
+    /// Apply crop settings to an image
+    /// Handles crop region, flips, and 90-degree rotations
+    pub fn apply_crop(img: &DynamicImage, crop_settings: &domain::value_objects::CropSettings) -> DynamicImage {
+        let (w, h) = (img.width() as f32, img.height() as f32);
+        
+        // Calculate pixel coordinates from normalized values (0.0 to 1.0)
+        let crop_x = (crop_settings.crop_x() * w) as u32;
+        let crop_y = (crop_settings.crop_y() * h) as u32;
+        let crop_w = ((crop_settings.crop_width() * w) as u32).max(1);
+        let crop_h = ((crop_settings.crop_height() * h) as u32).max(1);
+        
+        // Clamp to image bounds
+        let crop_x = crop_x.min(img.width().saturating_sub(1));
+        let crop_y = crop_y.min(img.height().saturating_sub(1));
+        let crop_w = crop_w.min(img.width().saturating_sub(crop_x));
+        let crop_h = crop_h.min(img.height().saturating_sub(crop_y));
+        
+        // Crop the image
+        let mut result = img.crop_imm(crop_x, crop_y, crop_w, crop_h);
+        
+        // Apply horizontal flip
+        if crop_settings.flip_horizontal() {
+            result = result.fliph();
+        }
+        
+        // Apply vertical flip
+        if crop_settings.flip_vertical() {
+            result = result.flipv();
+        }
+        
+        // Apply 90-degree rotations
+        match crop_settings.rotation_90() {
+            1 => result = result.rotate90(),
+            2 => result = result.rotate180(),
+            3 => result = result.rotate270(),
+            _ => {} // 0 or other = no rotation
+        }
+        
+        result
+    }
 }
 
 impl Default for ImageProcessor {

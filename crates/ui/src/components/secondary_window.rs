@@ -96,6 +96,7 @@ impl SecondaryWindow {
         detail_image: Option<&egui::TextureHandle>,
         thumbnail_preview: Option<&egui::TextureHandle>,
         has_selection: bool,
+        crop_settings: Option<&domain::value_objects::CropSettings>,
         photo_info: Option<(&str, &str)>, // (filename, rating)
     ) {
         if !self.is_open {
@@ -135,6 +136,7 @@ impl SecondaryWindow {
         let detail_clone = detail_image.cloned();
         let thumb_clone = thumbnail_preview.cloned();
         let photo_info_clone = photo_info.map(|(n, r)| (n.to_string(), r.to_string()));
+        let crop_settings = crop_settings.cloned(); // Clone value object
         let show_info = self.show_info_overlay;
         let session_id = self.session_id;
         
@@ -177,7 +179,7 @@ impl SecondaryWindow {
                             egui::Vec2::ZERO, // pan
                             false, // interactive
                             false, // allow_pan
-                            0.0, // rotation - TODO: Should we pass actual rotation here too?
+                            crop_settings.as_ref(), // Pass crop settings ref
                         );
                         
                         // Optional overlay with photo info (bottom left)

@@ -43,38 +43,150 @@ impl DevelopView {
         egui::TopBottomPanel::bottom("filmstrip_develop")
             .exact_height(120.0)  // 80px thumbnails + 40px padding
             .show_inside(ui, |ui| {
+                let photos_clone = state.photos.clone();
                 let selected_id = state.develop_selected_photo_id.clone();
                 
+                let mut pending_selection = None;
+                let mut pending_flag = None;
+
                 self.filmstrip.show_develop(
                     ui,
                     ctx,
-                    &state.photos,
+                    &photos_clone,
                     &selected_id,
                     &mut state.filmstrip_filter,
                     |photo_id| {
-                        // Select photo and trigger load in Develop view (independent from Library)
-                        state.develop_selected_photo_id = Some(photo_id.clone());
-                        // Clear current image to trigger reload
-                        state.loaded_photo_id = None;
-                        ctx.request_repaint();
+                        pending_selection = Some(photo_id);
                     },
                     |photo_id, flag_code| {
-                        // Handle flag
-                        let controller = photo_controller.clone();
-                        let library_controller = library_controller.clone();
-                        let photo_sender = photo_sender.clone();
-                        let ctx_clone = ctx.clone();
-                        
-                        tokio::spawn(async move {
-                            let _ = controller.set_flag(&photo_id, flag_code).await;
-                            // Reload
-                            if let Ok(photos) = library_controller.get_all_photos().await {
-                                     let _ = photo_sender.send(Ok(photos)).await;
-                            }
-                            ctx_clone.request_repaint();
-                        });
+                         pending_flag = Some((photo_id, flag_code));
                     }
                 );
+                
+                // Process pending actions
+                if let Some(photo_id) = pending_selection {
+                     // Check if we need to save the CURRENT photo before switching
+                     if state.pending_auto_save {
+                         if let Some(vm) = state.get_current_photo() {
+                             // Trigger explicit save for current photo
+                              let controller = editor_controller.clone();
+                              let id = vm.id.clone();
+                              let exposure = state.active_exposure;
+                              let contrast = state.active_contrast;
+                              let temperature = state.active_temperature;
+                              let tint = state.active_tint;
+                              let highlights = state.active_highlights;
+                              let shadows = state.active_shadows;
+                              let whites = state.active_whites;
+                              let blacks = state.active_blacks;
+                              let clarity = state.active_clarity;
+                              let vibrance = state.active_vibrance;
+                              let saturation = state.active_saturation;
+                              let tone_curve_shadows = state.active_tone_curve_shadows;
+                              let tone_curve_darks = state.active_tone_curve_darks;
+                              let tone_curve_lights = state.active_tone_curve_lights;
+                              let tone_curve_highlights = state.active_tone_curve_highlights;
+                              let hsl_red_sat = state.active_hsl_red_sat;
+                              let hsl_orange_sat = state.active_hsl_orange_sat;
+                              let hsl_yellow_sat = state.active_hsl_yellow_sat;
+                              let hsl_green_sat = state.active_hsl_green_sat;
+                              let hsl_aqua_sat = state.active_hsl_aqua_sat;
+                              let hsl_blue_sat = state.active_hsl_blue_sat;
+                              let hsl_purple_sat = state.active_hsl_purple_sat;
+                              let hsl_magenta_sat = state.active_hsl_magenta_sat;
+                              let hsl_red_hue = state.active_hsl_red_hue;
+                              let hsl_orange_hue = state.active_hsl_orange_hue;
+                              let hsl_yellow_hue = state.active_hsl_yellow_hue;
+                              let hsl_green_hue = state.active_hsl_green_hue;
+                              let hsl_aqua_hue = state.active_hsl_aqua_hue;
+                              let hsl_blue_hue = state.active_hsl_blue_hue;
+                              let hsl_purple_hue = state.active_hsl_purple_hue;
+                              let hsl_magenta_hue = state.active_hsl_magenta_hue;
+                              let hsl_red_lum = state.active_hsl_red_lum;
+                              let hsl_orange_lum = state.active_hsl_orange_lum;
+                              let hsl_yellow_lum = state.active_hsl_yellow_lum;
+                              let hsl_green_lum = state.active_hsl_green_lum;
+                              let hsl_aqua_lum = state.active_hsl_aqua_lum;
+                              let hsl_blue_lum = state.active_hsl_blue_lum;
+                              let hsl_purple_lum = state.active_hsl_purple_lum;
+                              let hsl_magenta_lum = state.active_hsl_magenta_lum;
+                              let lens_distortion = state.active_lens_distortion;
+                              let lens_vignette_amount = state.active_lens_vignette_amount;
+                              let lens_vignette_midpoint = state.active_lens_vignette_midpoint;
+                              let nr_luminance = state.active_nr_luminance;
+                              let nr_color = state.active_nr_color;
+                              let sharpen_amount = state.active_sharpen_amount;
+                              let sharpen_radius = state.active_sharpen_radius;
+                              let active_crop = state.crop_settings.clone();
+
+                              // Clone for use after spawn
+                              let id_for_update = id.clone();
+                              let crop_for_update = active_crop.clone();
+
+                              tokio::spawn(async move {
+                                  let _ = controller.save_edits(
+                                      id,
+                                      exposure, contrast, temperature, tint,
+                                      highlights, shadows, whites, blacks,
+                                      clarity, vibrance, saturation,
+                                      tone_curve_shadows, tone_curve_darks, tone_curve_lights, tone_curve_highlights,
+                                      hsl_red_sat, hsl_orange_sat, hsl_yellow_sat, hsl_green_sat, hsl_aqua_sat, hsl_blue_sat, hsl_purple_sat, hsl_magenta_sat,
+                                      hsl_red_hue, hsl_orange_hue, hsl_yellow_hue, hsl_green_hue, hsl_aqua_hue, hsl_blue_hue, hsl_purple_hue, hsl_magenta_hue,
+                                      hsl_red_lum, hsl_orange_lum, hsl_yellow_lum, hsl_green_lum, hsl_aqua_lum, hsl_blue_lum, hsl_purple_lum, hsl_magenta_lum,
+                                      lens_distortion, lens_vignette_amount, lens_vignette_midpoint,
+                                      nr_luminance, nr_color,
+                                      sharpen_amount, sharpen_radius,
+                                      active_crop.as_ref().map(|c| c.crop_x()),
+                                      active_crop.as_ref().map(|c| c.crop_y()),
+                                      active_crop.as_ref().map(|c| c.crop_width()),
+                                      active_crop.as_ref().map(|c| c.crop_height()),
+                                      active_crop.as_ref().map(|c| c.rotation_90()),
+                                      active_crop.as_ref().map(|c| c.angle()),
+                                      active_crop.as_ref().map(|c| c.flip_horizontal()),
+                                      active_crop.as_ref().map(|c| c.flip_vertical()),
+                                  ).await;
+                              });
+                              
+                              // Also update in-memory ViewModel so crop persists when switching back
+                              if let Some(photo_vm) = state.photos.iter_mut().find(|p| p.id == id_for_update) {
+                                   photo_vm.edit_crop_x = crop_for_update.as_ref().map(|c| c.crop_x());
+                                   photo_vm.edit_crop_y = crop_for_update.as_ref().map(|c| c.crop_y());
+                                   photo_vm.edit_crop_width = crop_for_update.as_ref().map(|c| c.crop_width());
+                                   photo_vm.edit_crop_height = crop_for_update.as_ref().map(|c| c.crop_height());
+                                   photo_vm.edit_crop_rotation = crop_for_update.as_ref().map(|c| c.rotation_90());
+                                   photo_vm.edit_crop_angle = crop_for_update.as_ref().map(|c| c.angle());
+                                   photo_vm.edit_crop_flip_h = crop_for_update.as_ref().map(|c| c.flip_horizontal());
+                                   photo_vm.edit_crop_flip_v = crop_for_update.as_ref().map(|c| c.flip_vertical());
+                                   // Also update exposure and other edits
+                                   photo_vm.edit_exposure = Some(exposure);
+                                   photo_vm.edit_contrast = Some(contrast);
+                              }
+                         }
+                     }
+
+                    // Select photo and trigger load in Develop view (independent from Library)
+                    state.develop_selected_photo_id = Some(photo_id.clone());
+                    // Clear current image to trigger reload
+                    state.loaded_photo_id = None;
+                    ctx.request_repaint();
+                }
+                
+                if let Some((photo_id, flag_code)) = pending_flag {
+                     // Handle flag
+                    let controller = photo_controller.clone();
+                    let library_controller = library_controller.clone();
+                    let photo_sender = photo_sender.clone();
+                    let ctx_clone = ctx.clone();
+                    
+                    tokio::spawn(async move {
+                        let _ = controller.set_flag(&photo_id, flag_code).await;
+                        // Reload
+                        if let Ok(photos) = library_controller.get_all_photos().await {
+                                 let _ = photo_sender.send(Ok(photos)).await;
+                        }
+                        ctx_clone.request_repaint();
+                    });
+                }
             })  ;
 
         // Crop Toolbar (when crop mode is active)
@@ -101,6 +213,11 @@ impl DevelopView {
                         &mut apply,
                     );
                     
+                    // Allow applying with ENTER key
+                    if ui.ctx().input(|i| i.key_pressed(egui::Key::Enter)) {
+                        apply = true;
+                    }
+                    
                     // Handle button clicks
                     if reset {
                         state.crop_settings = Some(domain::value_objects::CropSettings::default());
@@ -108,9 +225,112 @@ impl DevelopView {
                         state.show_composition_grid = false;
                     }
                     if apply {
+                        println!("DEBUG: Apply button clicked or Enter pressed");
                         // Apply crop and exit crop mode
                         state.crop_mode_active = false;
-                        // TODO: Persist crop settings when we add database support
+                        state.pending_auto_save = false; // We are saving immediately
+
+                        // Force immediate save for "Apply" action to ensure persistence
+                        if let Some(id) = state.develop_selected_photo_id.clone() {
+                            println!("DEBUG: Saving crop for photo_id: {}", id);
+                            if let Some(crop) = &state.crop_settings {
+                                println!("DEBUG: Crop settings: {:?}", crop);
+                            } else {
+                                println!("DEBUG: Crop settings is NONE!");
+                            }
+                            
+                            let controller = editor_controller.clone();
+
+                            
+                            let exposure = state.active_exposure;
+                            let contrast = state.active_contrast;
+                            let temperature = state.active_temperature;
+                            let tint = state.active_tint;
+                            let highlights = state.active_highlights;
+                            let shadows = state.active_shadows;
+                            let whites = state.active_whites;
+                            let blacks = state.active_blacks;
+                            let clarity = state.active_clarity;
+                            let vibrance = state.active_vibrance;
+                            let saturation = state.active_saturation;
+                            let tone_curve_shadows = state.active_tone_curve_shadows;
+                            let tone_curve_darks = state.active_tone_curve_darks;
+                            let tone_curve_lights = state.active_tone_curve_lights;
+                            let tone_curve_highlights = state.active_tone_curve_highlights;
+                            let hsl_red_sat = state.active_hsl_red_sat;
+                            let hsl_orange_sat = state.active_hsl_orange_sat;
+                            let hsl_yellow_sat = state.active_hsl_yellow_sat;
+                            let hsl_green_sat = state.active_hsl_green_sat;
+                            let hsl_aqua_sat = state.active_hsl_aqua_sat;
+                            let hsl_blue_sat = state.active_hsl_blue_sat;
+                            let hsl_purple_sat = state.active_hsl_purple_sat;
+                            let hsl_magenta_sat = state.active_hsl_magenta_sat;
+                            let hsl_red_hue = state.active_hsl_red_hue;
+                            let hsl_orange_hue = state.active_hsl_orange_hue;
+                            let hsl_yellow_hue = state.active_hsl_yellow_hue;
+                            let hsl_green_hue = state.active_hsl_green_hue;
+                            let hsl_aqua_hue = state.active_hsl_aqua_hue;
+                            let hsl_blue_hue = state.active_hsl_blue_hue;
+                            let hsl_purple_hue = state.active_hsl_purple_hue;
+                            let hsl_magenta_hue = state.active_hsl_magenta_hue;
+                            let hsl_red_lum = state.active_hsl_red_lum;
+                            let hsl_orange_lum = state.active_hsl_orange_lum;
+                            let hsl_yellow_lum = state.active_hsl_yellow_lum;
+                            let hsl_green_lum = state.active_hsl_green_lum;
+                            let hsl_aqua_lum = state.active_hsl_aqua_lum;
+                            let hsl_blue_lum = state.active_hsl_blue_lum;
+                            let hsl_purple_lum = state.active_hsl_purple_lum;
+                            let hsl_magenta_lum = state.active_hsl_magenta_lum;
+                            let lens_distortion = state.active_lens_distortion;
+                            let lens_vignette_amount = state.active_lens_vignette_amount;
+                            let lens_vignette_midpoint = state.active_lens_vignette_midpoint;
+                            let nr_luminance = state.active_nr_luminance;
+                            let nr_color = state.active_nr_color;
+                            let sharpen_amount = state.active_sharpen_amount;
+                            let sharpen_radius = state.active_sharpen_radius;
+                            let active_crop = state.crop_settings.clone();
+                            
+                            let id_for_task = id.clone();
+                            let active_crop_for_task = active_crop.clone();
+                            
+                            tokio::spawn(async move {
+                                   let _ = controller.save_edits(
+                                       id_for_task,
+                                       exposure, contrast, temperature, tint,
+                                       highlights, shadows, whites, blacks,
+                                       clarity, vibrance, saturation,
+                                       tone_curve_shadows, tone_curve_darks, tone_curve_lights, tone_curve_highlights,
+                                       hsl_red_sat, hsl_orange_sat, hsl_yellow_sat, hsl_green_sat, hsl_aqua_sat, hsl_blue_sat, hsl_purple_sat, hsl_magenta_sat,
+                                       hsl_red_hue, hsl_orange_hue, hsl_yellow_hue, hsl_green_hue, hsl_aqua_hue, hsl_blue_hue, hsl_purple_hue, hsl_magenta_hue,
+                                       hsl_red_lum, hsl_orange_lum, hsl_yellow_lum, hsl_green_lum, hsl_aqua_lum, hsl_blue_lum, hsl_purple_lum, hsl_magenta_lum,
+                                       lens_distortion, lens_vignette_amount, lens_vignette_midpoint,
+                                       nr_luminance, nr_color,
+                                       sharpen_amount, sharpen_radius,
+                                       active_crop_for_task.as_ref().map(|c| c.crop_x()),
+                                       active_crop_for_task.as_ref().map(|c| c.crop_y()),
+                                       active_crop_for_task.as_ref().map(|c| c.crop_width()),
+                                       active_crop_for_task.as_ref().map(|c| c.crop_height()),
+                                       active_crop_for_task.as_ref().map(|c| c.rotation_90()),
+                                       active_crop_for_task.as_ref().map(|c| c.angle()),
+                                       active_crop_for_task.as_ref().map(|c| c.flip_horizontal()),
+                                       active_crop_for_task.as_ref().map(|c| c.flip_vertical()),
+                                   ).await;
+                               });
+                               
+                            // Update in-memory VM
+                            if let Some(photo_vm) = state.photos.iter_mut().find(|p| p.id == id) {
+                                   photo_vm.edit_crop_x = active_crop.as_ref().map(|c| c.crop_x());
+                                   photo_vm.edit_crop_y = active_crop.as_ref().map(|c| c.crop_y());
+                                   photo_vm.edit_crop_width = active_crop.as_ref().map(|c| c.crop_width());
+                                   photo_vm.edit_crop_height = active_crop.as_ref().map(|c| c.crop_height());
+                                   photo_vm.edit_crop_rotation = active_crop.as_ref().map(|c| c.rotation_90());
+                                   photo_vm.edit_crop_angle = active_crop.as_ref().map(|c| c.angle());
+                                   photo_vm.edit_crop_flip_h = active_crop.as_ref().map(|c| c.flip_horizontal());
+                                   photo_vm.edit_crop_flip_v = active_crop.as_ref().map(|c| c.flip_vertical());
+                                   photo_vm.edit_exposure = Some(exposure);
+                                   photo_vm.edit_contrast = Some(contrast);
+                                }
+                        }
                     }
                     
                     // Handle rotations (Swap Aspect Ratio Orientation)

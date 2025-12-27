@@ -66,6 +66,15 @@ pub struct PhotoViewModel {
     // Sharpening
     pub edit_sharpen_amount: Option<f32>,
     pub edit_sharpen_radius: Option<f32>,
+    // Crop & Rotation
+    pub edit_crop_x: Option<f32>,
+    pub edit_crop_y: Option<f32>,
+    pub edit_crop_width: Option<f32>,
+    pub edit_crop_height: Option<f32>,
+    pub edit_crop_rotation: Option<i32>,
+    pub edit_crop_angle: Option<f32>,
+    pub edit_crop_flip_h: Option<bool>,
+    pub edit_crop_flip_v: Option<bool>,
 }
 
 /// ViewModel for import preview items

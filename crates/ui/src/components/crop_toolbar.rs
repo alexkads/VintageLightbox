@@ -1,4 +1,4 @@
-use egui::{Ui, ComboBox, Button};
+use egui::{Ui, ComboBox};
 use domain::value_objects::AspectRatio;
 use crate::design_system::icons;
 

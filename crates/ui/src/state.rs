@@ -71,6 +71,8 @@ pub struct EditSnapshot {
     // Sharpening
     pub sharpen_amount: f32,
     pub sharpen_radius: f32,
+    // Crop Settings
+    pub crop_settings: Option<domain::value_objects::CropSettings>,
 }
 
 /// Current view in the application
@@ -343,6 +345,8 @@ pub struct AppState {
     // ============================================
     /// Whether edits are pending to be auto-saved
     pub pending_auto_save: bool,
+    /// Flag to request save and switch to Library mode (set by Escape key, handled by app.rs)
+    pub deferred_exit_develop_mode: bool,
     /// Timestamp of the last slider change (for debounce)
     pub last_slider_change_time: Option<std::time::Instant>,
     /// Last saved values (to avoid unnecessary saves)
@@ -641,6 +645,7 @@ impl AppState {
             show_performance_stats: std::env::var("SHOW_PERFORMANCE_STATS").map_or(false, |v| v == "true"),
             start_load_time: None,
             pending_auto_save: false,
+            deferred_exit_develop_mode: false,
             last_slider_change_time: None,
             saved_exposure: 0.0,
             saved_contrast: 1.0,
@@ -930,6 +935,7 @@ impl AppState {
             nr_color: self.active_nr_color,
             sharpen_amount: self.active_sharpen_amount,
             sharpen_radius: self.active_sharpen_radius,
+            crop_settings: self.crop_settings.clone(),
         };
 
         // If we're not at the end of history, truncate everything after current position

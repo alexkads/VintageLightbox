@@ -122,6 +122,16 @@ pub struct Photo {
     edit_sharpen_amount: Option<f32>,
     /// Sharpening: Radius (0.5 to 3.0)
     edit_sharpen_radius: Option<f32>,
+
+    // --- Crop & Rotation ---
+    edit_crop_x: Option<f32>,
+    edit_crop_y: Option<f32>,
+    edit_crop_width: Option<f32>,
+    edit_crop_height: Option<f32>,
+    edit_crop_rotation: Option<i32>,
+    edit_crop_angle: Option<f32>,
+    edit_crop_flip_h: Option<bool>,
+    edit_crop_flip_v: Option<bool>,
 }
 
 impl Photo {
@@ -190,6 +200,14 @@ impl Photo {
         edit_nr_color: Option<f32>,
         edit_sharpen_amount: Option<f32>,
         edit_sharpen_radius: Option<f32>,
+        edit_crop_x: Option<f32>,
+        edit_crop_y: Option<f32>,
+        edit_crop_width: Option<f32>,
+        edit_crop_height: Option<f32>,
+        edit_crop_rotation: Option<i32>,
+        edit_crop_angle: Option<f32>,
+        edit_crop_flip_h: Option<bool>,
+        edit_crop_flip_v: Option<bool>,
     ) -> Self {
         Self {
             id,
@@ -250,6 +268,14 @@ impl Photo {
             edit_nr_color,
             edit_sharpen_amount,
             edit_sharpen_radius,
+            edit_crop_x,
+            edit_crop_y,
+            edit_crop_width,
+            edit_crop_height,
+            edit_crop_rotation,
+            edit_crop_angle,
+            edit_crop_flip_h,
+            edit_crop_flip_v,
         }
     }
 
@@ -266,6 +292,7 @@ impl Photo {
             None, None, None, // Lens
             None, None, // NR (2 fields)
             None, None, // Sharpening (2 fields)
+            None, None, None, None, None, None, None, None, // Crop & Rotation (8 fields)
         )
     }
 
@@ -526,6 +553,14 @@ impl Photo {
         nr_color: Option<f32>,
         sharpen_amount: Option<f32>,
         sharpen_radius: Option<f32>,
+        crop_x: Option<f32>,
+        crop_y: Option<f32>,
+        crop_width: Option<f32>,
+        crop_height: Option<f32>,
+        crop_rotation: Option<i32>,
+        crop_angle: Option<f32>,
+        crop_flip_h: Option<bool>,
+        crop_flip_v: Option<bool>,
     ) -> DomainResult<()> {
         self.edit_exposure = exposure;
         self.edit_contrast = contrast;
@@ -573,14 +608,65 @@ impl Photo {
         self.edit_nr_color = nr_color;
         self.edit_sharpen_amount = sharpen_amount;
         self.edit_sharpen_radius = sharpen_radius;
+        self.edit_crop_x = crop_x;
+        self.edit_crop_y = crop_y;
+        self.edit_crop_width = crop_width;
+        self.edit_crop_height = crop_height;
+        self.edit_crop_rotation = crop_rotation;
+        self.edit_crop_angle = crop_angle;
+        self.edit_crop_flip_h = crop_flip_h;
+        self.edit_crop_flip_v = crop_flip_v;
+
         self.is_edited = true;
         self.modified_at = Utc::now();
+
         Ok(())
     }
+
 
     /// Retorna o campo edit_tone_curve_shadows
     pub fn edit_tone_curve_shadows(&self) -> Option<f32> {
         self.edit_tone_curve_shadows
+    }
+
+    /// Retorna o campo edit_crop_x
+    pub fn edit_crop_x(&self) -> Option<f32> {
+        self.edit_crop_x
+    }
+
+    /// Retorna o campo edit_crop_y
+    pub fn edit_crop_y(&self) -> Option<f32> {
+        self.edit_crop_y
+    }
+
+    /// Retorna o campo edit_crop_width
+    pub fn edit_crop_width(&self) -> Option<f32> {
+        self.edit_crop_width
+    }
+
+    /// Retorna o campo edit_crop_height
+    pub fn edit_crop_height(&self) -> Option<f32> {
+        self.edit_crop_height
+    }
+
+    /// Retorna o campo edit_crop_rotation
+    pub fn edit_crop_rotation(&self) -> Option<i32> {
+        self.edit_crop_rotation
+    }
+
+    /// Retorna o campo edit_crop_angle
+    pub fn edit_crop_angle(&self) -> Option<f32> {
+        self.edit_crop_angle
+    }
+
+    /// Retorna o campo edit_crop_flip_h
+    pub fn edit_crop_flip_h(&self) -> Option<bool> {
+        self.edit_crop_flip_h
+    }
+
+    /// Retorna o campo edit_crop_flip_v
+    pub fn edit_crop_flip_v(&self) -> Option<bool> {
+        self.edit_crop_flip_v
     }
 
     /// Retorna o campo edit_tone_curve_darks

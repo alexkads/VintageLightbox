@@ -202,6 +202,15 @@ impl eframe::App for VintageLightboxApp {
             self.load_presets(ctx);
         }
 
+        // Handle deferred exit from Develop mode (triggered by Escape key)
+        // This ensures edits are saved before switching to Library
+        if self.state.deferred_exit_develop_mode {
+            self.state.deferred_exit_develop_mode = false;
+            self.save_pending_develop_edits();
+            self.state.current_view = CurrentView::Library;
+            self.state.reset_viewer();
+        }
+
         // Poll for async photo loading results
         if let Ok(result) = self.photo_receiver.try_recv() {
             match result {
@@ -578,6 +587,19 @@ impl eframe::App for VintageLightboxApp {
                     self.state.active_hsl_yellow_sat = hsl_yellow_sat;
                     self.state.active_hsl_green_sat = hsl_green_sat;
                     self.state.active_hsl_aqua_sat = hsl_aqua_sat;
+                    
+                    // Initialize crop settings
+                    if let (Some(x), Some(y), Some(w), Some(h)) = (photo.edit_crop_x, photo.edit_crop_y, photo.edit_crop_width, photo.edit_crop_height) {
+                         self.state.crop_settings = Some(domain::value_objects::CropSettings::new(
+                             x, y, w, h,
+                             photo.edit_crop_rotation.unwrap_or(0),
+                             photo.edit_crop_angle.unwrap_or(0.0),
+                             photo.edit_crop_flip_h.unwrap_or(false),
+                             photo.edit_crop_flip_v.unwrap_or(false),
+                         ));
+                    } else {
+                        self.state.crop_settings = None;
+                    }
                     self.state.active_hsl_blue_sat = hsl_blue_sat;
                     self.state.active_hsl_purple_sat = hsl_purple_sat;
                     self.state.active_hsl_magenta_sat = hsl_magenta_sat;
@@ -872,7 +894,9 @@ impl eframe::App for VintageLightboxApp {
                                 last_snapshot.nr_color != self.state.active_nr_color ||
                                 // Sharpen
                                 last_snapshot.sharpen_amount != self.state.active_sharpen_amount ||
-                                last_snapshot.sharpen_radius != self.state.active_sharpen_radius
+                                last_snapshot.sharpen_radius != self.state.active_sharpen_radius ||
+                                // Check crop settings diff
+                                last_snapshot.crop_settings != self.state.crop_settings
                             } else {
                                 true
                             }
@@ -1235,6 +1259,26 @@ impl eframe::App for VintageLightboxApp {
                                 // Sharpen
                                 photo.edit_sharpen_amount = Some(sharpen_amount);
                                 photo.edit_sharpen_radius = Some(sharpen_radius);
+                                // Crop settings update
+                                if let Some(crop) = &self.state.crop_settings {
+                                    photo.edit_crop_x = Some(crop.crop_x());
+                                    photo.edit_crop_y = Some(crop.crop_y());
+                                    photo.edit_crop_width = Some(crop.crop_width());
+                                    photo.edit_crop_height = Some(crop.crop_height());
+                                    photo.edit_crop_rotation = Some(crop.rotation_90());
+                                    photo.edit_crop_angle = Some(crop.angle());
+                                    photo.edit_crop_flip_h = Some(crop.flip_horizontal());
+                                    photo.edit_crop_flip_v = Some(crop.flip_vertical());
+                                } else {
+                                    photo.edit_crop_x = None;
+                                    photo.edit_crop_y = None;
+                                    photo.edit_crop_width = None;
+                                    photo.edit_crop_height = None;
+                                    photo.edit_crop_rotation = None;
+                                    photo.edit_crop_angle = None;
+                                    photo.edit_crop_flip_h = None;
+                                    photo.edit_crop_flip_v = None;
+                                }
                             }
 
                             // Invalidate cached thumbnails to force regeneration with updated effects
@@ -1244,6 +1288,19 @@ impl eframe::App for VintageLightboxApp {
                             // Clear pending flag
                             self.state.pending_auto_save = false;
                             self.state.last_slider_change_time = None;
+
+                            // Extract crop settings for closure
+                            let (
+                                crop_x, crop_y, crop_width, crop_height,
+                                crop_rotation, crop_angle, crop_flip_h, crop_flip_v
+                            ) = if let Some(c) = &self.state.crop_settings {
+                                (
+                                    Some(c.crop_x()), Some(c.crop_y()), Some(c.crop_width()), Some(c.crop_height()),
+                                    Some(c.rotation_90()), Some(c.angle()), Some(c.flip_horizontal()), Some(c.flip_vertical())
+                                )
+                            } else {
+                                (None, None, None, None, None, None, None, None)
+                            };
 
                             let ctx_clone = ctx.clone();
 
@@ -1265,7 +1322,10 @@ impl eframe::App for VintageLightboxApp {
                                     // NR
                                     nr_luminance, nr_color,
                                     // Sharpen
-                                    sharpen_amount, sharpen_radius
+                                    sharpen_amount, sharpen_radius,
+                                    // Crop
+                                    crop_x, crop_y, crop_width, crop_height,
+                                    crop_rotation, crop_angle, crop_flip_h, crop_flip_v
                                 ).await {
                                     // Note: Toast will be shown in the next frame via state
                                     eprintln!("Auto-save failed: {}", e);
@@ -1700,14 +1760,14 @@ impl eframe::App for VintageLightboxApp {
                 (p.name.clone(), rating)
             });
             
-            let has_selection = self.state.develop_selected_photo_id.is_some() || 
+            let _has_selection = self.state.develop_selected_photo_id.is_some() || 
                                self.state.library_selected_photo_id.is_some();
-
             self.secondary_window.show(
                 ctx,
                 self.state.detail_image.as_ref(),
                 self.state.thumbnail_preview.as_ref(),
-                has_selection,
+                self.state.develop_selected_photo_id.is_some(),
+                self.state.crop_settings.as_ref(), // Pass crop settings
                 photo_info.as_ref().map(|(n, r)| (n.as_str(), r.as_str())),
             );
         }
@@ -1765,6 +1825,10 @@ impl VintageLightboxApp {
             // View tabs with icons
             let library_label = format!("{} Library", icons::NAV_LIBRARY);
             if widgets::nav_button(ui, &library_label, self.state.current_view == CurrentView::Library).clicked() {
+                // Save pending edits before leaving Develop mode
+                if self.state.current_view == CurrentView::Develop {
+                    self.save_pending_develop_edits();
+                }
                 self.state.current_view = CurrentView::Library;
                 self.state.reset_viewer();
             }
@@ -1855,6 +1919,115 @@ impl VintageLightboxApp {
 
             ui.add_space(Theme::SPACE_LG);
         });
+    }
+
+    /// Save any pending develop edits before switching away from Develop mode.
+    /// This ensures crop and other edits are persisted even when:
+    /// - Clicking Library nav button
+    /// - Pressing Escape key
+    /// - Switching to any other mode
+    fn save_pending_develop_edits(&mut self) {
+        if !self.state.pending_auto_save {
+            return;
+        }
+        
+        if let Some(vm) = self.state.get_current_photo() {
+            let controller = self.editor_controller.clone();
+            let id = vm.id.clone();
+            let exposure = self.state.active_exposure;
+            let contrast = self.state.active_contrast;
+            let temperature = self.state.active_temperature;
+            let tint = self.state.active_tint;
+            let highlights = self.state.active_highlights;
+            let shadows = self.state.active_shadows;
+            let whites = self.state.active_whites;
+            let blacks = self.state.active_blacks;
+            let clarity = self.state.active_clarity;
+            let vibrance = self.state.active_vibrance;
+            let saturation = self.state.active_saturation;
+            let tone_curve_shadows = self.state.active_tone_curve_shadows;
+            let tone_curve_darks = self.state.active_tone_curve_darks;
+            let tone_curve_lights = self.state.active_tone_curve_lights;
+            let tone_curve_highlights = self.state.active_tone_curve_highlights;
+            let hsl_red_sat = self.state.active_hsl_red_sat;
+            let hsl_orange_sat = self.state.active_hsl_orange_sat;
+            let hsl_yellow_sat = self.state.active_hsl_yellow_sat;
+            let hsl_green_sat = self.state.active_hsl_green_sat;
+            let hsl_aqua_sat = self.state.active_hsl_aqua_sat;
+            let hsl_blue_sat = self.state.active_hsl_blue_sat;
+            let hsl_purple_sat = self.state.active_hsl_purple_sat;
+            let hsl_magenta_sat = self.state.active_hsl_magenta_sat;
+            let hsl_red_hue = self.state.active_hsl_red_hue;
+            let hsl_orange_hue = self.state.active_hsl_orange_hue;
+            let hsl_yellow_hue = self.state.active_hsl_yellow_hue;
+            let hsl_green_hue = self.state.active_hsl_green_hue;
+            let hsl_aqua_hue = self.state.active_hsl_aqua_hue;
+            let hsl_blue_hue = self.state.active_hsl_blue_hue;
+            let hsl_purple_hue = self.state.active_hsl_purple_hue;
+            let hsl_magenta_hue = self.state.active_hsl_magenta_hue;
+            let hsl_red_lum = self.state.active_hsl_red_lum;
+            let hsl_orange_lum = self.state.active_hsl_orange_lum;
+            let hsl_yellow_lum = self.state.active_hsl_yellow_lum;
+            let hsl_green_lum = self.state.active_hsl_green_lum;
+            let hsl_aqua_lum = self.state.active_hsl_aqua_lum;
+            let hsl_blue_lum = self.state.active_hsl_blue_lum;
+            let hsl_purple_lum = self.state.active_hsl_purple_lum;
+            let hsl_magenta_lum = self.state.active_hsl_magenta_lum;
+            let lens_distortion = self.state.active_lens_distortion;
+            let lens_vignette_amount = self.state.active_lens_vignette_amount;
+            let lens_vignette_midpoint = self.state.active_lens_vignette_midpoint;
+            let nr_luminance = self.state.active_nr_luminance;
+            let nr_color = self.state.active_nr_color;
+            let sharpen_amount = self.state.active_sharpen_amount;
+            let sharpen_radius = self.state.active_sharpen_radius;
+            let active_crop = self.state.crop_settings.clone();
+
+            // Clone for in-memory update
+            let id_for_update = id.clone();
+            let crop_for_update = active_crop.clone();
+
+            // Spawn async save
+            tokio::spawn(async move {
+                let _ = controller.save_edits(
+                    id,
+                    exposure, contrast, temperature, tint,
+                    highlights, shadows, whites, blacks,
+                    clarity, vibrance, saturation,
+                    tone_curve_shadows, tone_curve_darks, tone_curve_lights, tone_curve_highlights,
+                    hsl_red_sat, hsl_orange_sat, hsl_yellow_sat, hsl_green_sat, hsl_aqua_sat, hsl_blue_sat, hsl_purple_sat, hsl_magenta_sat,
+                    hsl_red_hue, hsl_orange_hue, hsl_yellow_hue, hsl_green_hue, hsl_aqua_hue, hsl_blue_hue, hsl_purple_hue, hsl_magenta_hue,
+                    hsl_red_lum, hsl_orange_lum, hsl_yellow_lum, hsl_green_lum, hsl_aqua_lum, hsl_blue_lum, hsl_purple_lum, hsl_magenta_lum,
+                    lens_distortion, lens_vignette_amount, lens_vignette_midpoint,
+                    nr_luminance, nr_color,
+                    sharpen_amount, sharpen_radius,
+                    active_crop.as_ref().map(|c| c.crop_x()),
+                    active_crop.as_ref().map(|c| c.crop_y()),
+                    active_crop.as_ref().map(|c| c.crop_width()),
+                    active_crop.as_ref().map(|c| c.crop_height()),
+                    active_crop.as_ref().map(|c| c.rotation_90()),
+                    active_crop.as_ref().map(|c| c.angle()),
+                    active_crop.as_ref().map(|c| c.flip_horizontal()),
+                    active_crop.as_ref().map(|c| c.flip_vertical()),
+                ).await;
+            });
+            
+            // Update in-memory ViewModel immediately
+            if let Some(photo_vm) = self.state.photos.iter_mut().find(|p| p.id == id_for_update) {
+                photo_vm.edit_crop_x = crop_for_update.as_ref().map(|c| c.crop_x());
+                photo_vm.edit_crop_y = crop_for_update.as_ref().map(|c| c.crop_y());
+                photo_vm.edit_crop_width = crop_for_update.as_ref().map(|c| c.crop_width());
+                photo_vm.edit_crop_height = crop_for_update.as_ref().map(|c| c.crop_height());
+                photo_vm.edit_crop_rotation = crop_for_update.as_ref().map(|c| c.rotation_90());
+                photo_vm.edit_crop_angle = crop_for_update.as_ref().map(|c| c.angle());
+                photo_vm.edit_crop_flip_h = crop_for_update.as_ref().map(|c| c.flip_horizontal());
+                photo_vm.edit_crop_flip_v = crop_for_update.as_ref().map(|c| c.flip_vertical());
+                photo_vm.edit_exposure = Some(exposure);
+                photo_vm.edit_contrast = Some(contrast);
+            }
+            
+            // Clear pending flag
+            self.state.pending_auto_save = false;
+        }
     }
 
     /// Handle import button click

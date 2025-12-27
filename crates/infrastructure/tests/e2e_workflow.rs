@@ -58,9 +58,13 @@ async fn test_e2e_import_edit_export_flow() {
     let save_result = save_edits_uc.execute(
         photo_id.clone(), 1.0, 1.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
         0.0, 0.0, 0.0, 0.0,
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL Sat
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL Hue
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL Lum
+        0.0, 0.0, 0.0, // Lens
         0.0, 0.0, // NR
-        0.0, 1.0  // Sharpening (amount, radius)
+        0.0, 1.0, // Sharpening (amount, radius)
+        None, None, None, None, None, None, None, None // Crop
     ).await;
     assert!(save_result.is_ok(), "Save edits failed");
 
