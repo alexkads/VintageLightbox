@@ -10,7 +10,7 @@ pub struct ImageViewer;
 impl ImageViewer {
     /// Show the image viewer with zoom/pan capabilities
     pub fn show(ui: &mut Ui, state: &mut AppState) {
-        let (new_zoom, new_pan, painted_image_rect) = Self::render(
+        let (new_zoom, new_pan, painted_image_rect, viewer_rect) = Self::render(
             ui,
             state.detail_image.as_ref(),
             state.thumbnail_preview.as_ref(),
@@ -18,6 +18,8 @@ impl ImageViewer {
             state.zoom_level,
             state.pan_offset,
             true, // interactive
+            !state.crop_mode_active, // allow_pan: Disable pan in crop mode (unless Space is held)
+            state.crop_settings.as_ref().map(|c| c.angle()).unwrap_or(0.0),
         );
 
         state.zoom_level = new_zoom;
@@ -37,6 +39,7 @@ impl ImageViewer {
                         let overlay_response = CropOverlay::show(
                             ui,
                             img_rect,
+                            viewer_rect, 
                             crop_settings,
                             state.show_composition_grid,
                         );
@@ -55,6 +58,23 @@ impl ImageViewer {
                                 crop_settings,
                                 overlay_response.drag_delta,
                                 texture_size,
+                            );
+                        } else if overlay_response.rotation_dragged {
+                            // Straighten / Rotation Logic
+                            // Calculate angle change based on x/y delta or angular movement
+                            // Simple horizontal drag for rotation is common in sliders, but on image maybe specialized behavior
+                            // For simplicity, let's map horizontal drag to rotation angle
+                            let sensitivity = 0.5; // degrees per pixel
+                            let delta_degrees = overlay_response.drag_delta.x * sensitivity;
+                            
+                            // Update crop angle
+                            let new_angle = crop_settings.angle() + delta_degrees;
+                            // Clamp angle if needed? Usually straighten is limited (e.g. +/- 45 deg)
+                            
+                            *crop_settings = domain::value_objects::CropSettings::new(
+                                crop_settings.crop_x(), crop_settings.crop_y(), crop_settings.crop_width(), crop_settings.crop_height(),
+                                crop_settings.rotation_90(), new_angle,
+                                crop_settings.flip_horizontal(), crop_settings.flip_vertical()
                             );
                         }
                     }
@@ -76,7 +96,9 @@ impl ImageViewer {
         current_zoom: f32,
         current_pan: Vec2,
         interactive: bool,
-    ) -> (f32, Vec2, Option<Rect>) {
+        allow_pan: bool, // New parameter to control panning
+        rotation_angle: f32, // New parameter for straightening
+    ) -> (f32, Vec2, Option<Rect>, Rect) {
         let available_size = ui.available_size();
         let match_size_arg = if interactive {
             Sense::click_and_drag()
@@ -103,8 +125,20 @@ impl ImageViewer {
             }
 
             // Handle pan with drag
-            if response.dragged() {
+            // Allow pan if explicitly allowed OR if Spacebar is held (Space+Drag to Pan override)
+            let space_held = ui.input(|i| i.key_down(egui::Key::Space));
+            let should_pan = allow_pan || space_held;
+            
+            if should_pan && response.dragged() {
                 pan += response.drag_delta();
+            }
+
+            // Set cursor for pan mode
+            if space_held && response.hovered() {
+                ui.output_mut(|o| o.cursor_icon = egui::CursorIcon::Grab);
+                if response.dragged() {
+                    ui.output_mut(|o| o.cursor_icon = egui::CursorIcon::Grabbing);
+                }
             }
 
             // Double-click to reset
@@ -130,7 +164,9 @@ impl ImageViewer {
             let center = rect.center() + pan;
             let img_rect = Rect::from_center_size(center, zoomed_size);
 
-            egui::Image::new(texture).paint_at(ui, img_rect);
+            egui::Image::new(texture)
+                .rotate(rotation_angle.to_radians(), Vec2::splat(0.5))
+                .paint_at(ui, img_rect);
             painted_rect = Some(img_rect);
             
         } else if let Some(thumbnail) = thumbnail_preview {
@@ -194,7 +230,7 @@ impl ImageViewer {
             );
         }
 
-        (zoom, pan, painted_rect)
+        (zoom, pan, painted_rect, rect)
     }
 
     /// Show viewer controls (back button, navigation, zoom indicator)

@@ -18,6 +18,7 @@ impl CropOverlay {
     pub fn show(
         ui: &mut Ui,
         image_rect: Rect,
+        viewer_rect: Rect, // New: Full viewer area
         crop_settings: &mut CropSettings,
         show_grid: bool,
     ) -> CropOverlayResponse {
@@ -25,6 +26,58 @@ impl CropOverlay {
 
         // Calculate crop rectangle in screen coordinates
         let crop_rect = Self::calculate_crop_rect(image_rect, crop_settings);
+
+        // Interaction logic handled BEFORE drawing to allow cursor updates
+        let handles = Self::get_handle_positions(crop_rect);
+        let mut hovering_handle = None;
+        let handle_radius = 8.0;
+
+        let mouse_pos = ui.input(|i| i.pointer.hover_pos());
+
+        if let Some(pos) = mouse_pos {
+            // Check handles
+            for (i, &handle_pos) in handles.iter().enumerate() {
+                if pos.distance(handle_pos) <= handle_radius * 1.5 {
+                    hovering_handle = Some(i);
+                    break;
+                }
+            }
+            
+            // Check interaction
+            if let Some(i) = hovering_handle {
+                ui.output_mut(|o| o.cursor_icon = Self::get_cursor_for_handle(i));
+                // Drag handled by handle widget later
+            } else if crop_rect.contains(pos) {
+                // Inside crop -> Move
+                ui.output_mut(|o| o.cursor_icon = egui::CursorIcon::Move);
+                
+                if ui.input(|i| i.pointer.primary_down()) {
+                    response.crop_dragged = true;
+                }
+            } else if viewer_rect.contains(pos) {
+                // Outside crop but inside viewer -> Rotation
+                ui.output_mut(|o| o.cursor_icon = egui::CursorIcon::None);
+                
+                // Draw custom rotation cursor
+                let painter = ui.painter().clone().with_layer_id(egui::LayerId::debug());
+                painter.text(
+                    pos,
+                    egui::Align2::CENTER_CENTER,
+                    crate::design_system::icons::ARROWS_CLOCKWISE,
+                    egui::FontId::proportional(20.0),
+                    Color32::WHITE,
+                );
+                 
+                 // Manual drag handling for rotation since we don't have a widget for the background hole
+                 if ui.input(|i| i.pointer.primary_down()) {
+                     response.rotation_dragged = true;
+                 }
+            }
+            
+            if ui.input(|i| i.pointer.primary_down()) {
+                 response.drag_delta = ui.input(|i| i.pointer.delta());
+            }
+        }
 
         // Draw darkened area outside crop
         Self::draw_darken_overlay(ui, image_rect, crop_rect);
@@ -303,5 +356,6 @@ impl CropOverlay {
 pub struct CropOverlayResponse {
     pub handle_dragged: Option<usize>,
     pub crop_dragged: bool,
+    pub rotation_dragged: bool,
     pub drag_delta: Vec2,
 }

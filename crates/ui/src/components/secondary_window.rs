@@ -176,6 +176,8 @@ impl SecondaryWindow {
                             1.0, // zoom
                             egui::Vec2::ZERO, // pan
                             false, // interactive
+                            false, // allow_pan
+                            0.0, // rotation - TODO: Should we pass actual rotation here too?
                         );
                         
                         // Optional overlay with photo info (bottom left)
