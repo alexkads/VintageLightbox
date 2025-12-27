@@ -221,6 +221,17 @@ impl CropOverlay {
         }
     }
     
+    /// Get the target aspect ratio value (width/height)
+    /// Returns None for Free (no constraint), otherwise returns the ratio value
+    fn get_aspect_ratio_value(aspect_ratio: &AspectRatio, image_size: Vec2) -> Option<f32> {
+        match aspect_ratio {
+            AspectRatio::Free => None, // No constraint
+            AspectRatio::Original => Some(image_size.x / image_size.y),
+            // All other ratios use the built-in value() method
+            _ => Some(aspect_ratio.value()),
+        }
+    }
+
     // Internal updates for self-contained interaction
     fn update_crop_handle(
         crop: &mut CropSettings,
@@ -229,44 +240,166 @@ impl CropOverlay {
         image_size: Vec2,
         aspect_ratio: &AspectRatio,
     ) {
-         let norm_delta = Vec2::new(delta.x / image_size.x, delta.y / image_size.y);
-         let cx = crop.crop_x();
-         let cy = crop.crop_y();
-         let cw = crop.crop_width();
-         let ch = crop.crop_height();
+        let norm_delta = Vec2::new(delta.x / image_size.x, delta.y / image_size.y);
+        let cx = crop.crop_x();
+        let cy = crop.crop_y();
+        let cw = crop.crop_width();
+        let ch = crop.crop_height();
 
-         let (nx, ny, nw, nh) = match index {
-            0 => (cx + norm_delta.x, cy + norm_delta.y, cw - norm_delta.x, ch - norm_delta.y),
-            1 => (cx, cy + norm_delta.y, cw, ch - norm_delta.y),
-            2 => (cx, cy + norm_delta.y, cw + norm_delta.x, ch - norm_delta.y),
-            3 => (cx, cy, cw + norm_delta.x, ch),
-            4 => (cx, cy, cw + norm_delta.x, ch + norm_delta.y),
-            5 => (cx, cy, cw, ch + norm_delta.y),
-            6 => (cx + norm_delta.x, cy, cw - norm_delta.x, ch + norm_delta.y),
-            7 => (cx + norm_delta.x, cy, cw - norm_delta.x, ch),
+        // Get target aspect ratio (if locked)
+        let target_ratio = Self::get_aspect_ratio_value(aspect_ratio, image_size);
+
+        // Calculate new dimensions based on handle being dragged
+        let (mut nx, mut ny, mut nw, mut nh) = match index {
+            // Corner handles (0, 2, 4, 6) - diagonal resize
+            0 => (cx + norm_delta.x, cy + norm_delta.y, cw - norm_delta.x, ch - norm_delta.y), // Top-left
+            2 => (cx, cy + norm_delta.y, cw + norm_delta.x, ch - norm_delta.y), // Top-right
+            4 => (cx, cy, cw + norm_delta.x, ch + norm_delta.y), // Bottom-right
+            6 => (cx + norm_delta.x, cy, cw - norm_delta.x, ch + norm_delta.y), // Bottom-left
+            // Edge handles (1, 3, 5, 7) - single axis resize
+            1 => (cx, cy + norm_delta.y, cw, ch - norm_delta.y), // Top
+            3 => (cx, cy, cw + norm_delta.x, ch), // Right
+            5 => (cx, cy, cw, ch + norm_delta.y), // Bottom
+            7 => (cx + norm_delta.x, cy, cw - norm_delta.x, ch), // Left
             _ => (cx, cy, cw, ch),
-         };
+        };
 
-         // Aspect Ratio Logic would go here (simplified for now)
-         *crop = CropSettings::new(
-             nx, ny, nw, nh,
-             crop.rotation_90(), crop.angle(),
-             crop.flip_horizontal(), crop.flip_vertical()
-         );
+        // Apply aspect ratio constraint if locked
+        if let Some(ratio) = target_ratio {
+            // Current aspect = width / height (in pixels)
+            // Target ratio is also width/height
+            // We need to adjust based on which handle is being dragged
+
+            let pixel_w = nw * image_size.x;
+            let pixel_h = nh * image_size.y;
+            let current_ratio = pixel_w / pixel_h;
+
+            match index {
+                // Corner handles - constrain to ratio
+                0 | 2 | 4 | 6 => {
+                    // Use the dominant movement direction
+                    let abs_dx = norm_delta.x.abs();
+                    let abs_dy = norm_delta.y.abs();
+
+                    if abs_dx > abs_dy {
+                        // Width is primary, adjust height
+                        let new_pixel_h = pixel_w / ratio;
+                        let new_nh = new_pixel_h / image_size.y;
+
+                        match index {
+                            0 => { ny = cy + ch - new_nh; nh = new_nh; }
+                            2 => { ny = cy + ch - new_nh; nh = new_nh; }
+                            4 => { nh = new_nh; }
+                            6 => { nh = new_nh; }
+                            _ => {}
+                        }
+                    } else {
+                        // Height is primary, adjust width
+                        let new_pixel_w = pixel_h * ratio;
+                        let new_nw = new_pixel_w / image_size.x;
+
+                        match index {
+                            0 => { nx = cx + cw - new_nw; nw = new_nw; }
+                            2 => { nw = new_nw; }
+                            4 => { nw = new_nw; }
+                            6 => { nx = cx + cw - new_nw; nw = new_nw; }
+                            _ => {}
+                        }
+                    }
+                }
+                // Edge handles - adjust the perpendicular dimension to maintain ratio
+                1 | 5 => {
+                    // Vertical edge (top/bottom) - height changed, adjust width
+                    let new_pixel_w = pixel_h * ratio;
+                    let new_nw = new_pixel_w / image_size.x;
+                    let delta_w = new_nw - cw;
+                    nx = cx - delta_w / 2.0; // Center the width change
+                    nw = new_nw;
+                }
+                3 | 7 => {
+                    // Horizontal edge (left/right) - width changed, adjust height
+                    let new_pixel_h = pixel_w / ratio;
+                    let new_nh = new_pixel_h / image_size.y;
+                    let delta_h = new_nh - ch;
+                    ny = cy - delta_h / 2.0; // Center the height change
+                    nh = new_nh;
+                }
+                _ => {}
+            }
+        }
+
+        // Minimum size constraint (5% of image)
+        const MIN_SIZE: f32 = 0.05;
+        if nw < MIN_SIZE {
+            if index == 0 || index == 6 || index == 7 {
+                nx = cx + cw - MIN_SIZE;
+            }
+            nw = MIN_SIZE;
+        }
+        if nh < MIN_SIZE {
+            if index == 0 || index == 1 || index == 2 {
+                ny = cy + ch - MIN_SIZE;
+            }
+            nh = MIN_SIZE;
+        }
+
+        // Clamp to image bounds [0, 1]
+        if nx < 0.0 { nw += nx; nx = 0.0; }
+        if ny < 0.0 { nh += ny; ny = 0.0; }
+        if nx + nw > 1.0 { nw = 1.0 - nx; }
+        if ny + nh > 1.0 { nh = 1.0 - ny; }
+
+        // After clamping, re-apply aspect ratio if it was violated
+        if let Some(ratio) = target_ratio {
+            let pixel_w = nw * image_size.x;
+            let pixel_h = nh * image_size.y;
+            let current_ratio = pixel_w / pixel_h;
+
+            // If ratio was violated by clamping, shrink the other dimension
+            if (current_ratio - ratio).abs() > 0.01 {
+                if current_ratio > ratio {
+                    // Too wide, shrink width
+                    let new_pixel_w = pixel_h * ratio;
+                    nw = new_pixel_w / image_size.x;
+                } else {
+                    // Too tall, shrink height
+                    let new_pixel_h = pixel_w / ratio;
+                    nh = new_pixel_h / image_size.y;
+                }
+            }
+        }
+
+        *crop = CropSettings::new(
+            nx, ny, nw, nh,
+            crop.rotation_90(), crop.angle(),
+            crop.flip_horizontal(), crop.flip_vertical()
+        );
     }
 
     fn update_crop_pan(crop: &mut CropSettings, delta: Vec2, image_size: Vec2) {
         let norm_delta = Vec2::new(delta.x / image_size.x, delta.y / image_size.y);
+
+        let mut new_x = crop.crop_x() + norm_delta.x;
+        let mut new_y = crop.crop_y() + norm_delta.y;
+        let w = crop.crop_width();
+        let h = crop.crop_height();
+
+        // Clamp to image bounds [0, 1]
+        if new_x < 0.0 { new_x = 0.0; }
+        if new_y < 0.0 { new_y = 0.0; }
+        if new_x + w > 1.0 { new_x = 1.0 - w; }
+        if new_y + h > 1.0 { new_y = 1.0 - h; }
+
         *crop = CropSettings::new(
-             crop.crop_x() + norm_delta.x,
-             crop.crop_y() + norm_delta.y,
-             crop.crop_width(),
-             crop.crop_height(),
-             crop.rotation_90(),
-             crop.angle(),
-             crop.flip_horizontal(),
-             crop.flip_vertical()
-         );
+            new_x,
+            new_y,
+            w,
+            h,
+            crop.rotation_90(),
+            crop.angle(),
+            crop.flip_horizontal(),
+            crop.flip_vertical()
+        );
     }
     
     // Public wrappers for compatibility if needed, but we handle internally now
