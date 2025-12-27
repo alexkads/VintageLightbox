@@ -151,60 +151,83 @@ impl ImageViewer {
         }
 
         // Draw image logic
-        if let Some(texture) = detail_image {
-            // Full resolution image available (already cropped via pixel if crop_settings was provided to async_loader)
+        // Determine which texture to draw
+        let (texture_handle, is_thumbnail) = if let Some(texture) = detail_image {
+            (Some(texture), false)
+        } else if let Some(thumbnail) = thumbnail_preview {
+            (Some(thumbnail), true)
+        } else {
+            (None, false)
+        };
+
+        if let Some(texture) = texture_handle {
+            // Unified drawing logic for both Full Res and Thumbnail
+            // This ensures identical aspect ratio and positioning calculations
+            
             let texture_size = Vec2::new(texture.size()[0] as f32, texture.size()[1] as f32);
 
-            // Calculate scaled size (texture is already cropped, so use actual dimensions)
-            let scale = (available_size.x / texture_size.x)
-                .min(available_size.y / texture_size.y)
-                .min(1.0); // Don't upscale beyond original size
+            // Calculate the effective size considering crop (for aspect ratio correction)
+            let effective_size = if let Some(crop) = crop_settings {
+                // When cropped, the displayed portion has different dimensions based on logical crop
+                Vec2::new(
+                    texture_size.x * crop.crop_width(),
+                    texture_size.y * crop.crop_height()
+                )
+            } else {
+                texture_size
+            };
 
-            let base_img_size = texture_size * scale;
+            // Calculate scaled size based on effective (cropped) dimensions to fit available space
+            // NOTE: We allow upscaling (remove .min(1.0)) so that small thumbnails 
+            // stretch to fill the screen, acting as proper placeholders for the HD image.
+            let scale = (available_size.x / effective_size.x)
+                .min(available_size.y / effective_size.y);
+
+            let base_img_size = effective_size * scale;
             let zoomed_size = base_img_size * zoom;
 
             let center = rect.center() + pan;
             let img_rect = Rect::from_center_size(center, zoomed_size);
 
-            // Note: UV crop removed - crop is now applied via pixels in async_loader
-            // for consistency with thumbnails. crop_settings parameter is kept for 
-            // future use (e.g., in-progress crop mode preview)
-            let _unused_crop = crop_settings; // Suppress unused warning
+            let mut img = egui::Image::new(texture);
 
-            egui::Image::new(texture).paint_at(ui, img_rect);
+            // Apply UV Crop and Rotation if settings provided
+            if let Some(crop) = crop_settings {
+                // UV coordinates are normalized (0.0-1.0), so this works identically
+                // for both 300px thumbnail and 2560px full-res, eliminating shift.
+                
+                let uv = Rect::from_min_size(
+                    egui::pos2(crop.crop_x(), crop.crop_y()), 
+                    egui::vec2(crop.crop_width(), crop.crop_height())
+                );
+                img = img.uv(uv);
+                
+                // Rotation
+                let total_degrees = (crop.rotation_90() as f32 * 90.0) + crop.angle();
+                if total_degrees != 0.0 {
+                    img = img.rotate(total_degrees.to_radians(), Vec2::splat(0.5));
+                }
+            }
+
+            img.paint_at(ui, img_rect);
             painted_rect = Some(img_rect);
-            
-        } else if let Some(thumbnail) = thumbnail_preview {
-            // LIGHTROOM-STYLE: Show thumbnail with effects
-            let texture_size = Vec2::new(thumbnail.size()[0] as f32, thumbnail.size()[1] as f32);
 
-            let scale = (available_size.x / texture_size.x)
-                .min(available_size.y / texture_size.y);
-
-            let base_img_size = texture_size * scale;
-            let zoomed_size = base_img_size * zoom;
-
-            let center = rect.center() + pan;
-            let img_rect = Rect::from_center_size(center, zoomed_size);
-
-            egui::Image::new(thumbnail).paint_at(ui, img_rect);
-            painted_rect = Some(img_rect);
-            
-            // Show subtle loading indicator
-            let loading_rect = Rect::from_min_size(
-                rect.right_top() - Vec2::new(120.0, -10.0),
-                Vec2::new(110.0, 24.0)
-            );
-            ui.painter().rect_filled(loading_rect, 4.0, Color32::from_black_alpha(180));
-            ui.painter().text(
-                loading_rect.center(),
-                egui::Align2::CENTER_CENTER,
-                "⏳ Loading HD...",
-                egui::FontId::proportional(12.0),
-                Color32::WHITE,
-            );
-            
-            ui.ctx().request_repaint();
+            // If it's a thumbnail, show loading indicator
+            if is_thumbnail {
+                let loading_rect = Rect::from_min_size(
+                    rect.right_top() - Vec2::new(120.0, -10.0),
+                    Vec2::new(110.0, 24.0)
+                );
+                ui.painter().rect_filled(loading_rect, 4.0, Color32::from_black_alpha(180));
+                ui.painter().text(
+                    loading_rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    "⏳ Loading HD...",
+                    egui::FontId::proportional(12.0),
+                    Color32::WHITE,
+                );
+                ui.ctx().request_repaint();
+            }
         } else if has_selection {
             // No thumbnail available, show spinner
             let time = ui.ctx().input(|i| i.time);

@@ -288,17 +288,6 @@ impl ImageProcessRequest {
         // Sharpening
         self.sharpen_amount.to_bits().hash(&mut hasher);
         self.sharpen_radius.to_bits().hash(&mut hasher);
-        // Crop settings
-        if let Some(crop) = &self.crop_settings {
-            crop.crop_x().to_bits().hash(&mut hasher);
-            crop.crop_y().to_bits().hash(&mut hasher);
-            crop.crop_width().to_bits().hash(&mut hasher);
-            crop.crop_height().to_bits().hash(&mut hasher);
-            crop.rotation_90().hash(&mut hasher);
-            crop.angle().to_bits().hash(&mut hasher);
-            crop.flip_horizontal().hash(&mut hasher);
-            crop.flip_vertical().hash(&mut hasher);
-        }
 
         hasher.finish()
     }
@@ -363,8 +352,6 @@ pub struct ImageProcessRequest {
     pub sharpen_radius: f32,
     /// Max preview size (width or height)
     pub max_preview_size: u32,
-    /// Crop settings for unified pixel-based crop
-    pub crop_settings: Option<domain::value_objects::CropSettings>,
 }
 
 /// Result of image processing
@@ -621,15 +608,8 @@ impl AsyncImageProcessor {
                 };
                 let edit_ms = edit_start.elapsed().as_secs_f32() * 1000.0;
 
-                // Apply crop if present (pixel-based for consistency with thumbnails)
-                let cropped = if let Some(ref crop) = request.crop_settings {
-                    crate::image_processing::ImageProcessor::apply_crop(&processed, crop)
-                } else {
-                    processed
-                };
-
                 let convert_start = std::time::Instant::now();
-                let processed_color = crate::image_processing::ImageProcessor::dynamic_to_color_image(&cropped);
+                let processed_color = crate::image_processing::ImageProcessor::dynamic_to_color_image(&processed);
                 let convert_ms = convert_start.elapsed().as_secs_f32() * 1000.0;
 
                 let post_cache_ms = post_cache_start.elapsed().as_secs_f32() * 1000.0;
@@ -653,7 +633,7 @@ impl AsyncImageProcessor {
                     photo_id: request.photo_id,
                     preview: processed_color,
                     original_preview,
-                    processed_image: cropped,
+                    processed_image: processed,
                     histogram,
                     load_time_ms: start_time.elapsed().as_secs_f32() * 1000.0,
                 };
