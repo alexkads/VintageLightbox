@@ -482,10 +482,27 @@ impl eframe::App for VintageLightboxApp {
                              sharpen_amount, sharpen_radius,
                          );
                          
+                         // Apply crop if present for consistent preview
+                         let final_thumb = if let (Some(x), Some(y), Some(w), Some(h)) = (
+                             photo.edit_crop_x, photo.edit_crop_y,
+                             photo.edit_crop_width, photo.edit_crop_height
+                         ) {
+                             let crop_settings = domain::value_objects::CropSettings::new(
+                                 x, y, w, h,
+                                 photo.edit_crop_rotation.unwrap_or(0),
+                                 photo.edit_crop_angle.unwrap_or(0.0),
+                                 photo.edit_crop_flip_h.unwrap_or(false),
+                                 photo.edit_crop_flip_v.unwrap_or(false),
+                             );
+                             crate::image_processing::ImageProcessor::apply_crop(&processed_thumb, &crop_settings)
+                         } else {
+                             processed_thumb
+                         };
+                         
                          let thumb_texture = crate::image_processing::ImageProcessor::load_texture(
                              ctx,
                              format!("thumb_{}", photo_id),
-                             &processed_thumb
+                             &final_thumb
                          );
                          self.state.thumbnail_preview = Some(thumb_texture);
                     } else if let Some(thumb_path) = &photo.thumbnail_path {
@@ -521,10 +538,27 @@ impl eframe::App for VintageLightboxApp {
                                 sharpen_amount, sharpen_radius,
                             );
                             
+                            // Apply crop if present for consistent preview
+                            let final_thumb = if let (Some(x), Some(y), Some(w), Some(h)) = (
+                                photo.edit_crop_x, photo.edit_crop_y,
+                                photo.edit_crop_width, photo.edit_crop_height
+                            ) {
+                                let crop_settings = domain::value_objects::CropSettings::new(
+                                    x, y, w, h,
+                                    photo.edit_crop_rotation.unwrap_or(0),
+                                    photo.edit_crop_angle.unwrap_or(0.0),
+                                    photo.edit_crop_flip_h.unwrap_or(false),
+                                    photo.edit_crop_flip_v.unwrap_or(false),
+                                );
+                                crate::image_processing::ImageProcessor::apply_crop(&processed_thumb, &crop_settings)
+                            } else {
+                                processed_thumb
+                            };
+                            
                             let thumb_texture = crate::image_processing::ImageProcessor::load_texture(
                                 ctx,
                                 format!("thumb_{}", photo_id),
-                                &processed_thumb
+                                &final_thumb
                             );
                             self.state.thumbnail_preview = Some(thumb_texture);
                         }
