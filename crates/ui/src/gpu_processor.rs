@@ -67,6 +67,14 @@ pub struct GpuEditParams {
     // Sharpening
     pub sharpen_amount: f32,
     pub sharpen_radius: f32,
+    // Crop and Rotation
+    pub crop_x: f32,
+    pub crop_y: f32,
+    pub crop_width: f32,
+    pub crop_height: f32,
+    pub rotation_angle: f32,  // in radians
+    pub flip_horizontal: f32, // 0.0 or 1.0
+    pub flip_vertical: f32,   // 0.0 or 1.0
 }
 
 impl Default for GpuEditParams {
@@ -104,6 +112,14 @@ impl Default for GpuEditParams {
             nr_color: 0.0,
             sharpen_amount: 0.0,
             sharpen_radius: 1.0,
+            // Crop and Rotation defaults (full frame, no rotation)
+            crop_x: 0.0,
+            crop_y: 0.0,
+            crop_width: 1.0,
+            crop_height: 1.0,
+            rotation_angle: 0.0,
+            flip_horizontal: 0.0,
+            flip_vertical: 0.0,
         }
     }
 }

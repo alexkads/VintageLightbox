@@ -992,6 +992,16 @@ impl eframe::App for VintageLightboxApp {
                                     // Sharpening
                                     sharpen_amount: self.state.active_sharpen_amount,
                                     sharpen_radius: self.state.active_sharpen_radius,
+                                    // Crop and Rotation (from CropSettings)
+                                    crop_x: self.state.crop_settings.as_ref().map(|c| c.crop_x()).unwrap_or(0.0),
+                                    crop_y: self.state.crop_settings.as_ref().map(|c| c.crop_y()).unwrap_or(0.0),
+                                    crop_width: self.state.crop_settings.as_ref().map(|c| c.crop_width()).unwrap_or(1.0),
+                                    crop_height: self.state.crop_settings.as_ref().map(|c| c.crop_height()).unwrap_or(1.0),
+                                    rotation_angle: self.state.crop_settings.as_ref()
+                                        .map(|c| c.total_rotation().to_radians())
+                                        .unwrap_or(0.0),
+                                    flip_horizontal: if self.state.crop_settings.as_ref().map(|c| c.flip_horizontal()).unwrap_or(false) { 1.0 } else { 0.0 },
+                                    flip_vertical: if self.state.crop_settings.as_ref().map(|c| c.flip_vertical()).unwrap_or(false) { 1.0 } else { 0.0 },
                                 },
                             });
 

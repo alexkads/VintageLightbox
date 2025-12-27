@@ -32,6 +32,14 @@ struct Params {
     nr_color: f32,
     sharpen_amount: f32,
     sharpen_radius: f32,
+    // Crop and Rotation
+    crop_x: f32,
+    crop_y: f32,
+    crop_width: f32,
+    crop_height: f32,
+    rotation_angle: f32,
+    flip_horizontal: f32,
+    flip_vertical: f32,
 }
 
 @group(0) @binding(0) var input_texture: texture_2d<f32>;
@@ -47,8 +55,71 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         return;
     }
     
+    // ===== CROP AND ROTATION TRANSFORMATION =====
+    // Calculate normalized UV coordinates (0.0-1.0)
+    var uv = vec2<f32>(
+        f32(global_id.x) / f32(dims.x),
+        f32(global_id.y) / f32(dims.y)
+    );
+    
+    // Apply crop transformation (map output pixel to input texture region)
+    // The crop defines a sub-region of the input texture
+    uv = vec2<f32>(
+        params.crop_x + uv.x * params.crop_width,
+        params.crop_y + uv.y * params.crop_height
+    );
+    
+    // Apply flips
+    if (params.flip_horizontal > 0.5) {
+        uv.x = params.crop_x + params.crop_width - (uv.x - params.crop_x);
+    }
+    if (params.flip_vertical > 0.5) {
+        uv.y = params.crop_y + params.crop_height - (uv.y - params.crop_y);
+    }
+    
+    // Apply rotation around crop center
+    if (abs(params.rotation_angle) > 0.001) {
+        // Calculate crop center
+        let crop_center = vec2<f32>(
+            params.crop_x + params.crop_width * 0.5,
+            params.crop_y + params.crop_height * 0.5
+        );
+        
+        // Translate to origin (crop center)
+        var uv_centered = uv - crop_center;
+        
+        // Apply 2D rotation matrix
+        let cos_angle = cos(params.rotation_angle);
+        let sin_angle = sin(params.rotation_angle);
+        let rotated = vec2<f32>(
+            uv_centered.x * cos_angle - uv_centered.y * sin_angle,
+            uv_centered.x * sin_angle + uv_centered.y * cos_angle
+        );
+        
+        // Translate back
+        uv = rotated + crop_center;
+    }
+    
+    // Bounds check after transformation - if outside texture, output black
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+        textureStore(output_texture, vec2<i32>(global_id.xy), vec4<f32>(0.0, 0.0, 0.0, 1.0));
+        return;
+    }
+    
+    // Convert UV back to pixel coordinates for texture sampling
+    let sample_coords = vec2<i32>(
+        i32(uv.x * f32(dims.x)),
+        i32(uv.y * f32(dims.y))
+    );
+    
+    // Clamp to texture bounds
+    let clamped_coords = vec2<i32>(
+        clamp(sample_coords.x, 0, i32(dims.x) - 1),
+        clamp(sample_coords.y, 0, i32(dims.y) - 1)
+    );
+    
     // Load pixel (values in 0.0-1.0 range)
-    let pixel = textureLoad(input_texture, vec2<i32>(global_id.xy), 0);
+    let pixel = textureLoad(input_texture, clamped_coords, 0);
     var r = pixel.r * 255.0;
     var g = pixel.g * 255.0;
     var b = pixel.b * 255.0;
