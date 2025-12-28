@@ -330,17 +330,22 @@ impl PhotoGrid {
 
             // Construct CropSettings from photo view model
             let crop_settings = if let (Some(x), Some(y), Some(w), Some(h)) = (
-                photo.edit_crop_x, 
-                photo.edit_crop_y, 
-                photo.edit_crop_width, 
+                photo.edit_crop_x,
+                photo.edit_crop_y,
+                photo.edit_crop_width,
                 photo.edit_crop_height
             ) {
                 let r90 = photo.edit_crop_rotation.unwrap_or(0);
                 let ang = photo.edit_crop_angle.unwrap_or(0.0);
                 let fh = photo.edit_crop_flip_h.unwrap_or(false);
                 let fv = photo.edit_crop_flip_v.unwrap_or(false);
-                
-                Some(domain::value_objects::CropSettings::new(x, y, w, h, r90, ang, fh, fv))
+                let fill_mode = domain::value_objects::RotationFillMode::from_code(
+                    photo.edit_crop_fill_mode.unwrap_or(0)
+                ).unwrap_or_default();
+
+                Some(domain::value_objects::CropSettings::with_fill_mode_value(
+                    x, y, w, h, r90, ang, fh, fv, fill_mode
+                ))
             } else {
                 None
             };

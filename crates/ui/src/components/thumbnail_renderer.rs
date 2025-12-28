@@ -1,7 +1,14 @@
 use egui::{Color32, Rect, Vec2};
-use domain::value_objects::CropSettings;
+use domain::value_objects::{CropSettings, RotationFillMode};
+use crate::geometry::{ClipVertex, clip_polygon_to_uv_bounds};
 
-/// Renders a thumbnail with support for Crop, Rotation (Mesh-based), and Aspect Ratio fitting.
+/// Renders a thumbnail with support for Crop, Rotation (Mesh-based), Fill Mode, and Aspect Ratio fitting.
+///
+/// # Arguments
+/// * `ui` - The egui UI context
+/// * `rect` - The rectangle to render the thumbnail into
+/// * `texture` - The texture handle for the image
+/// * `crop_settings` - Optional crop settings including rotation and fill mode
 pub fn render_thumbnail(
     ui: &mut egui::Ui,
     rect: Rect,
@@ -111,7 +118,6 @@ pub fn render_thumbnail(
             uvs[i] = egui::pos2(final_u, final_v);
         }
 
-        let mut mesh = Mesh::with_texture(texture.id());
         let screen_corners = [
             display_rect.min,
             egui::pos2(display_rect.max.x, display_rect.min.y),
@@ -119,17 +125,52 @@ pub fn render_thumbnail(
             egui::pos2(display_rect.min.x, display_rect.max.y),
         ];
 
-        for (i, &pos) in screen_corners.iter().enumerate() {
-            mesh.vertices.push(Vertex {
-                pos, 
-                uv: uvs[i], 
-                color: Color32::WHITE
-            });
-        }
-        mesh.add_triangle(0, 1, 2);
-        mesh.add_triangle(0, 2, 3);
+        // Draw fill background for empty areas created by rotation
+        // Only needed when angle is non-zero (non 90-degree rotation creates gaps)
+        if crop.angle() != 0.0 {
+            let fill_color = match crop.fill_mode() {
+                RotationFillMode::Black => Color32::BLACK,
+                RotationFillMode::White => Color32::WHITE,
+                RotationFillMode::Transparent => Color32::TRANSPARENT,
+                RotationFillMode::Intelligent => Color32::from_gray(30),
+                RotationFillMode::ShrinkToFit => Color32::TRANSPARENT,
+            };
 
-        ui.painter().add(egui::Shape::mesh(mesh));
+            if fill_color != Color32::TRANSPARENT {
+                ui.painter().rect_filled(display_rect, 0.0, fill_color);
+            }
+        }
+
+        // Create input vertices for polygon clipping
+        let input_vertices: Vec<ClipVertex> = screen_corners
+            .iter()
+            .zip(uvs.iter())
+            .map(|(&pos, &uv)| ClipVertex::new(pos, uv))
+            .collect();
+
+        // Clip polygon to valid UV bounds [0,1]
+        let clipped = clip_polygon_to_uv_bounds(&input_vertices);
+
+        // Only draw texture mesh if we have valid vertices after clipping
+        if clipped.len() >= 3 {
+            let mut mesh = Mesh::with_texture(texture.id());
+
+            // Add clipped vertices to mesh
+            for v in &clipped {
+                mesh.vertices.push(Vertex {
+                    pos: v.pos,
+                    uv: v.uv,
+                    color: Color32::WHITE,
+                });
+            }
+
+            // Triangulate using fan triangulation (works for convex polygons)
+            for i in 1..(clipped.len() - 1) {
+                mesh.add_triangle(0, i as u32, (i + 1) as u32);
+            }
+
+            ui.painter().add(egui::Shape::mesh(mesh));
+        }
 
     } else {
         // Simple Image Render
