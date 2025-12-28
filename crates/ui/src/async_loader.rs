@@ -1081,7 +1081,8 @@ mod tests {
 
 #[cfg(test)]
 mod cache_system_tests {
-    use super::*;
+    #[allow(unused_imports)]
+    use super::{AsyncThumbnailLoader, ThumbnailRequest};
     use std::sync::Arc;
     use infrastructure::cache::preview_manager::PreviewManager;
     use tempfile::TempDir;

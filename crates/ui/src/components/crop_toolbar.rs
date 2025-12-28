@@ -21,7 +21,7 @@ impl CropToolbar {
             
             // Aspect Ratio Selector
             ui.label("Aspect:");
-            ComboBox::from_id_source("crop_aspect_ratio")
+            ComboBox::from_id_salt("crop_aspect_ratio")
                 .selected_text(selected_ratio.to_string())
                 .show_ui(ui, |ui| {
                     ui.selectable_value(selected_ratio, AspectRatio::Original, "Original");

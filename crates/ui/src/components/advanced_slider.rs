@@ -1,7 +1,7 @@
 // Advanced Slider Component
 // Professional slider with editable value, custom styling, and double-click reset
 
-use egui::{Ui, Sense, RichText, TextEdit, Color32, Rect, Rounding, Stroke, Vec2, pos2};
+use egui::{Ui, Sense, RichText, TextEdit, Color32, Rect, CornerRadius, Stroke, Vec2, pos2};
 use crate::design_system::theme::Theme;
 
 /// An advanced slider control with:
@@ -180,7 +180,7 @@ impl AdvancedSlider {
         // Draw rail background
         painter.rect_filled(
             rail_rect,
-            Rounding::from(Self::RAIL_ROUNDING),
+            CornerRadius::same(Self::RAIL_ROUNDING as u8),
             Theme::BG_ELEVATED
         );
         
@@ -201,7 +201,7 @@ impl AdvancedSlider {
             );
             painter.rect_filled(
                 fill_rect,
-                Rounding::ZERO,
+                CornerRadius::ZERO,
                 Theme::ACCENT_PRIMARY.linear_multiply(0.6)
             );
         }
