@@ -110,6 +110,8 @@ impl CropPanel {
                 ui.label(egui::RichText::new("Fill:").size(Theme::FONT_SM));
                 ui.add_space(ui.available_width() - 110.0);
                 
+                let mut new_fill_mode: Option<domain::value_objects::RotationFillMode> = None;
+                
                 if let Some(crop) = &state.crop_settings {
                     let current_mode = crop.fill_mode();
                     
@@ -119,12 +121,17 @@ impl CropPanel {
                         .show_ui(ui, |ui| {
                             for mode in domain::value_objects::RotationFillMode::all() {
                                 if ui.selectable_label(*mode == current_mode, mode.to_string()).clicked() {
-                                    if let Some(crop_settings) = &mut state.crop_settings {
-                                        *crop_settings = crop_settings.with_fill_mode(*mode);
-                                    }
+                                    new_fill_mode = Some(*mode);
                                 }
                             }
                         });
+                }
+                
+                // Apply selection after the borrow ends
+                if let Some(mode) = new_fill_mode {
+                    if let Some(crop_settings) = &mut state.crop_settings {
+                        *crop_settings = crop_settings.with_fill_mode(mode);
+                    }
                 }
             });
             
