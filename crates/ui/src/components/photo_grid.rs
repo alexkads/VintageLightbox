@@ -4,7 +4,7 @@
 // Displays photos in a 5-column grid layout with thumbnails
 // Uses async thumbnail loading for smooth UI
 
-use egui::{Ui, Vec2, Sense, Image, Rect, Color32};
+use egui::{Ui, Vec2, Sense, Rect, Color32};
 use std::collections::HashMap;
 
 use crate::state::AppState;
@@ -80,22 +80,7 @@ impl PhotoGrid {
                     result.image.clone()
                 };
                 
-                // Apply crop if present
-                if let (Some(x), Some(y), Some(w), Some(h)) = (
-                    photo.edit_crop_x, photo.edit_crop_y,
-                    photo.edit_crop_width, photo.edit_crop_height
-                ) {
-                    let crop_settings = domain::value_objects::CropSettings::new(
-                        x, y, w, h,
-                        photo.edit_crop_rotation.unwrap_or(0),
-                        photo.edit_crop_angle.unwrap_or(0.0),
-                        photo.edit_crop_flip_h.unwrap_or(false),
-                        photo.edit_crop_flip_v.unwrap_or(false),
-                    );
-                    crate::image_processing::ImageProcessor::apply_crop(&processed, &crop_settings)
-                } else {
-                    processed
-                }
+                processed
             } else {
                 result.image.clone()
             };
@@ -343,29 +328,29 @@ impl PhotoGrid {
                 Vec2::new(tile_width - Theme::SPACE_XS * 2.0, img_height),
             );
 
-            // Calculate centered image position preserving aspect ratio
-            let texture_aspect = texture.size()[0] as f32 / texture.size()[1] as f32;
-            let img_aspect = img_rect.width() / img_rect.height();
-
-            let img_display_rect = if texture_aspect > img_aspect {
-                // Wider than tall - fit width
-                let display_height = img_rect.width() / texture_aspect;
-                let y_offset = (img_rect.height() - display_height) / 2.0;
-                Rect::from_min_size(
-                    img_rect.min + Vec2::new(0.0, y_offset),
-                    Vec2::new(img_rect.width(), display_height),
-                )
+            // Construct CropSettings from photo view model
+            let crop_settings = if let (Some(x), Some(y), Some(w), Some(h)) = (
+                photo.edit_crop_x, 
+                photo.edit_crop_y, 
+                photo.edit_crop_width, 
+                photo.edit_crop_height
+            ) {
+                let r90 = photo.edit_crop_rotation.unwrap_or(0);
+                let ang = photo.edit_crop_angle.unwrap_or(0.0);
+                let fh = photo.edit_crop_flip_h.unwrap_or(false);
+                let fv = photo.edit_crop_flip_v.unwrap_or(false);
+                
+                Some(domain::value_objects::CropSettings::new(x, y, w, h, r90, ang, fh, fv))
             } else {
-                // Taller than wide - fit height
-                let display_width = img_rect.height() * texture_aspect;
-                let x_offset = (img_rect.width() - display_width) / 2.0;
-                Rect::from_min_size(
-                    img_rect.min + Vec2::new(x_offset, 0.0),
-                    Vec2::new(display_width, img_rect.height()),
-                )
+                None
             };
 
-            Image::new(texture).paint_at(ui, img_display_rect);
+            crate::components::thumbnail_renderer::render_thumbnail(
+                ui,
+                img_rect,
+                texture,
+                crop_settings.as_ref()
+            );
         }
 
         // File name - positioned at bottom of tile

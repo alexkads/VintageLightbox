@@ -21,3 +21,4 @@ pub mod settings_dialog;
 pub mod slider_control;
 pub mod tone_curve;
 pub mod toolbar;
+pub mod thumbnail_renderer;

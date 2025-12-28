@@ -351,6 +351,9 @@ impl DevelopView {
                                    photo_vm.edit_crop_flip_v = active_crop.as_ref().map(|c| c.flip_vertical());
                                    photo_vm.edit_exposure = Some(exposure);
                                    photo_vm.edit_contrast = Some(contrast);
+                                   
+                                   // Queue for invalidation (to update Filmstrip/Grid)
+                                   state.invalidation_queue.insert(id.clone());
                                 }
                         }
                     }
