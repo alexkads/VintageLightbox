@@ -11,6 +11,7 @@ pub mod print_layout;
 pub mod print_job_id;
 pub mod crop_settings;
 pub mod aspect_ratio;
+pub mod rotation_fill_mode;
 
 // Re-exports
 pub use collection_id::CollectionId;
@@ -26,3 +27,4 @@ pub use print_layout::PrintLayout;
 pub use print_job_id::PrintJobId;
 pub use crop_settings::CropSettings;
 pub use aspect_ratio::AspectRatio;
+pub use rotation_fill_mode::RotationFillMode;

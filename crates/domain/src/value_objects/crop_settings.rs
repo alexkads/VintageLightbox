@@ -1,3 +1,5 @@
+use super::rotation_fill_mode::RotationFillMode;
+
 /// Represents crop and rotation settings for a photo.
 /// All crop coordinates are normalized (0.0 to 1.0) relative to the original image dimensions.
 #[derive(Debug, Clone, PartialEq)]
@@ -10,6 +12,7 @@ pub struct CropSettings {
     angle: f32,
     flip_horizontal: bool,
     flip_vertical: bool,
+    fill_mode: RotationFillMode,
 }
 
 impl CropSettings {
@@ -49,6 +52,7 @@ impl CropSettings {
             angle,
             flip_horizontal,
             flip_vertical,
+            fill_mode: RotationFillMode::default(),
         }
     }
 
@@ -83,6 +87,87 @@ impl CropSettings {
 
     pub fn flip_vertical(&self) -> bool {
         self.flip_vertical
+    }
+
+    pub fn fill_mode(&self) -> RotationFillMode {
+        self.fill_mode
+    }
+
+    /// Creates a new CropSettings with a different fill_mode
+    pub fn with_fill_mode(&self, fill_mode: RotationFillMode) -> Self {
+        Self {
+            crop_x: self.crop_x,
+            crop_y: self.crop_y,
+            crop_width: self.crop_width,
+            crop_height: self.crop_height,
+            rotation_90: self.rotation_90,
+            angle: self.angle,
+            flip_horizontal: self.flip_horizontal,
+            flip_vertical: self.flip_vertical,
+            fill_mode,
+        }
+    }
+
+    /// Creates a new CropSettings with toggled flip_horizontal (preserves fill_mode)
+    pub fn with_flip_horizontal(&self, flip: bool) -> Self {
+        Self {
+            crop_x: self.crop_x,
+            crop_y: self.crop_y,
+            crop_width: self.crop_width,
+            crop_height: self.crop_height,
+            rotation_90: self.rotation_90,
+            angle: self.angle,
+            flip_horizontal: flip,
+            flip_vertical: self.flip_vertical,
+            fill_mode: self.fill_mode,
+        }
+    }
+
+    /// Creates a new CropSettings with toggled flip_vertical (preserves fill_mode)
+    pub fn with_flip_vertical(&self, flip: bool) -> Self {
+        Self {
+            crop_x: self.crop_x,
+            crop_y: self.crop_y,
+            crop_width: self.crop_width,
+            crop_height: self.crop_height,
+            rotation_90: self.rotation_90,
+            angle: self.angle,
+            flip_horizontal: self.flip_horizontal,
+            flip_vertical: flip,
+            fill_mode: self.fill_mode,
+        }
+    }
+
+    /// Creates a new CropSettings with a different angle (preserves fill_mode)
+    pub fn with_angle(&self, angle: f32) -> Self {
+        let angle = angle.clamp(-Self::MAX_ANGLE, Self::MAX_ANGLE);
+        Self {
+            crop_x: self.crop_x,
+            crop_y: self.crop_y,
+            crop_width: self.crop_width,
+            crop_height: self.crop_height,
+            rotation_90: self.rotation_90,
+            angle,
+            flip_horizontal: self.flip_horizontal,
+            flip_vertical: self.flip_vertical,
+            fill_mode: self.fill_mode,
+        }
+    }
+
+    /// Creates a new CropSettings with a different rotation_90 (preserves fill_mode)
+    pub fn with_rotation_90(&self, rotation_90: i32) -> Self {
+        let rotation_90 = rotation_90.clamp(-1, 3);
+        Self {
+            crop_x: self.crop_x,
+            crop_y: self.crop_y,
+            crop_width: self.crop_width,
+            crop_height: self.crop_height,
+            rotation_90,
+            angle: self.angle,
+            flip_horizontal: self.flip_horizontal,
+            flip_vertical: self.flip_vertical,
+            fill_mode: self.fill_mode,
+        }
     }
 
     /// Returns the total rotation in degrees (90° increments + fine angle)
@@ -229,6 +314,7 @@ impl Default for CropSettings {
             angle: 0.0,
             flip_horizontal: false,
             flip_vertical: false,
+            fill_mode: RotationFillMode::default(),
         }
     }
 }

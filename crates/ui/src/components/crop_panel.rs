@@ -89,11 +89,7 @@ impl CropPanel {
             if let Some(crop) = &mut state.crop_settings {
                 let mut angle = crop.angle();
                 if ui.add(egui::Slider::new(&mut angle, -45.0..=45.0).show_value(false)).changed() {
-                    *crop = domain::value_objects::CropSettings::new(
-                        crop.crop_x(), crop.crop_y(), crop.crop_width(), crop.crop_height(),
-                        crop.rotation_90(), angle,
-                        crop.flip_horizontal(), crop.flip_vertical()
-                    );
+                    *crop = crop.with_angle(angle);
                 }
             }
             
@@ -108,6 +104,31 @@ impl CropPanel {
             });
             
             ui.add_space(Theme::SPACE_MD);
+            
+            // Fill Mode selector (for rotation empty areas)
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("Fill:").size(Theme::FONT_SM));
+                ui.add_space(ui.available_width() - 110.0);
+                
+                if let Some(crop) = &state.crop_settings {
+                    let current_mode = crop.fill_mode();
+                    
+                    egui::ComboBox::from_id_salt("crop_fill_mode")
+                        .selected_text(current_mode.to_string())
+                        .width(100.0)
+                        .show_ui(ui, |ui| {
+                            for mode in domain::value_objects::RotationFillMode::all() {
+                                if ui.selectable_label(*mode == current_mode, mode.to_string()).clicked() {
+                                    if let Some(crop_settings) = &mut state.crop_settings {
+                                        *crop_settings = crop_settings.with_fill_mode(*mode);
+                                    }
+                                }
+                            }
+                        });
+                }
+            });
+            
+            ui.add_space(Theme::SPACE_SM);
             ui.separator();
             ui.add_space(Theme::SPACE_SM);
             
@@ -115,21 +136,13 @@ impl CropPanel {
             ui.horizontal(|ui| {
                 if ui.button("⇄ Flip H").on_hover_text("Flip horizontal").clicked() {
                     if let Some(crop) = &mut state.crop_settings {
-                        *crop = domain::value_objects::CropSettings::new(
-                            crop.crop_x(), crop.crop_y(), crop.crop_width(), crop.crop_height(),
-                            crop.rotation_90(), crop.angle(),
-                            !crop.flip_horizontal(), crop.flip_vertical()
-                        );
+                        *crop = crop.with_flip_horizontal(!crop.flip_horizontal());
                     }
                 }
                 
                 if ui.button("⇅ Flip V").on_hover_text("Flip vertical").clicked() {
                     if let Some(crop) = &mut state.crop_settings {
-                        *crop = domain::value_objects::CropSettings::new(
-                            crop.crop_x(), crop.crop_y(), crop.crop_width(), crop.crop_height(),
-                            crop.rotation_90(), crop.angle(),
-                            crop.flip_horizontal(), !crop.flip_vertical()
-                        );
+                        *crop = crop.with_flip_vertical(!crop.flip_vertical());
                     }
                 }
             });

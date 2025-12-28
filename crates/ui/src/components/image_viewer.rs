@@ -253,6 +253,29 @@ impl ImageViewer {
 
                     // 3. Construct Mesh
                     use egui::epaint::{Mesh, Vertex};
+                    
+                    // Draw fill background for empty areas created by rotation
+                    // Only needed when angle is non-zero (non 90-degree rotation creates gaps)
+                    if crop.angle() != 0.0 {
+                        let fill_color = match crop.fill_mode() {
+                            domain::value_objects::RotationFillMode::Black => Color32::BLACK,
+                            domain::value_objects::RotationFillMode::White => Color32::WHITE,
+                            domain::value_objects::RotationFillMode::Transparent => Color32::TRANSPARENT,
+                            domain::value_objects::RotationFillMode::Intelligent => {
+                                // For now, Intelligent uses a dark gray as placeholder
+                                Color32::from_gray(30)
+                            },
+                            domain::value_objects::RotationFillMode::ShrinkToFit => {
+                                // ShrinkToFit doesn't need fill
+                                Color32::TRANSPARENT
+                            },
+                        };
+                        
+                        if fill_color != Color32::TRANSPARENT {
+                            ui.painter().rect_filled(img_rect, 0.0, fill_color);
+                        }
+                    }
+                    
                     let mut mesh = Mesh::with_texture(texture.id());
                     
                     // Vertices correspond to the View Rect (img_rect)
@@ -298,6 +321,31 @@ impl ImageViewer {
                     // Rotation is only applied during EDITING (when showing full image)
                     let total_degrees = (crop.rotation_90() as f32 * 90.0) + crop.angle();
                     if total_degrees != 0.0 {
+                        // Draw fill background for empty areas created by rotation
+                        // Only needed when angle is non-zero (non 90-degree rotation creates gaps)
+                        if crop.angle() != 0.0 {
+                            let fill_color = match crop.fill_mode() {
+                                domain::value_objects::RotationFillMode::Black => Color32::BLACK,
+                                domain::value_objects::RotationFillMode::White => Color32::WHITE,
+                                domain::value_objects::RotationFillMode::Transparent => Color32::TRANSPARENT,
+                                domain::value_objects::RotationFillMode::Intelligent => {
+                                    // For now, Intelligent uses a dark gray as placeholder
+                                    // Future: sample edges and blend
+                                    Color32::from_gray(30)
+                                },
+                                domain::value_objects::RotationFillMode::ShrinkToFit => {
+                                    // ShrinkToFit doesn't need fill - handled differently
+                                    // Use transparent to show no fill needed
+                                    Color32::TRANSPARENT
+                                },
+                            };
+                            
+                            // Draw background fill behind the rotated image
+                            if fill_color != Color32::TRANSPARENT {
+                                ui.painter().rect_filled(img_rect, 0.0, fill_color);
+                            }
+                        }
+                        
                         img = img.rotate(total_degrees.to_radians(), Vec2::splat(0.5));
                     }
                 }

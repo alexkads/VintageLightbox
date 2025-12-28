@@ -360,42 +360,21 @@ impl DevelopView {
                     
                     // Handle rotations (Swap Aspect Ratio Orientation)
                     if rotate {
-                        // This logic should likely be moved to a controller or method on CropSettings
-                        // For now we duplicate what's in DockViewer or remove this usage if DevelopView isn't primary
-                        // Note: DevelopView seems to be unused for rendering in favor of DockViewer.
-                        // But we must fix complication.
-                        
-                        // We will just do a dummy implementation here to satisfy the compiler
-                        // assuming DockViewer is the one actually running.
                         if let Some(crop) = &mut state.crop_settings {
-                             // Simple swap of w/h logic if we had dimensions, but we don't easily have them here
-                             // passing 0 rotation for now as placeholder or attempting basic swap based on assumed w>h
                              let new_rotation = crop.rotation_90() + 1;
-                             *crop = domain::value_objects::CropSettings::new(
-                                 crop.crop_x(), crop.crop_y(), crop.crop_width(), crop.crop_height(),
-                                 new_rotation, crop.angle(),
-                                 crop.flip_horizontal(), crop.flip_vertical()
-                             );
+                             *crop = crop.with_rotation_90(new_rotation);
                          }
                     }
                     
                     // Handle flips
                     if flip_h {
                         if let Some(crop) = &mut state.crop_settings {
-                            *crop = domain::value_objects::CropSettings::new(
-                                crop.crop_x(), crop.crop_y(), crop.crop_width(), crop.crop_height(),
-                                crop.rotation_90(), crop.angle(),
-                                !crop.flip_horizontal(), crop.flip_vertical()
-                            );
+                            *crop = crop.with_flip_horizontal(!crop.flip_horizontal());
                         }
                     }
                     if flip_v {
                         if let Some(crop) = &mut state.crop_settings {
-                            *crop = domain::value_objects::CropSettings::new(
-                                crop.crop_x(), crop.crop_y(), crop.crop_width(), crop.crop_height(),
-                                crop.rotation_90(), crop.angle(),
-                                crop.flip_horizontal(), !crop.flip_vertical()
-                            );
+                            *crop = crop.with_flip_vertical(!crop.flip_vertical());
                         }
                     }
                 });
