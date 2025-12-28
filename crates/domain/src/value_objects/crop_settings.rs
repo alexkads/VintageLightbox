@@ -301,6 +301,84 @@ impl CropSettings {
             self.flip_vertical,
         )
     }
+
+    /// Calculates the maximum inscribed rectangle for a given rotation angle.
+    /// Returns a new CropSettings with adjusted crop coordinates that fit entirely
+    /// within the rotated image without any black borders.
+    ///
+    /// This is used when `RotationFillMode::ShrinkToFit` is active.
+    ///
+    /// Algorithm: For an image rotated by angle θ, the largest axis-aligned inscribed
+    /// rectangle can be calculated using the inscribed rectangle formula.
+    /// For a unit square rotated by θ, the inscribed rectangle has:
+    /// - width = height = 1 / (|cos(θ)| + |sin(θ)|)
+    ///
+    /// For a general rectangle with aspect ratio W:H, we scale accordingly.
+    pub fn calculate_shrink_to_fit(&self, image_width: f32, image_height: f32) -> Self {
+        let angle_rad = self.angle.to_radians();
+        let cos_a = angle_rad.cos().abs();
+        let sin_a = angle_rad.sin().abs();
+
+        // For a very small rotation, return unchanged
+        if sin_a < 0.001 {
+            return self.clone();
+        }
+
+        // Calculate the aspect ratio of the rotated image space
+        // After rotation by 90-degree increments, the effective dimensions may swap
+        let (eff_w, eff_h) = if self.rotation_90 % 2 != 0 {
+            (image_height, image_width)
+        } else {
+            (image_width, image_height)
+        };
+
+        // For a rectangle with aspect ratio `aspect`, the largest inscribed axis-aligned
+        // rectangle after rotation by angle θ has dimensions:
+        //
+        // The formula is derived from the fact that the corners of the inscribed rectangle
+        // must touch the edges of the rotated original rectangle.
+        //
+        // For a unit square: inscribed_size = 1 / (cos(θ) + sin(θ))
+        // For a rectangle: we need to account for aspect ratio
+        //
+        // The inscribed rectangle's normalized dimensions are:
+        // new_width = cos(θ) / (cos(θ) + sin(θ) * aspect)
+        // new_height = cos(θ) / (cos(θ) * aspect + sin(θ))
+        //
+        // Simplified: scale = 1 / (cos(θ) + sin(θ) * max(aspect, 1/aspect))
+        // But the exact formula for maintaining aspect depends on target aspect ratio.
+
+        // For "Shrink to Fit", we want the largest rectangle that:
+        // 1. Fits entirely within the rotated image (no black borders)
+        // 2. Maintains the current crop's aspect ratio if possible
+
+        // Scale factor for a rectangle to fit inside rotated bounds
+        // This is the "inset" amount needed to avoid corners going outside
+        let scale = 1.0 / (cos_a + sin_a * (eff_w / eff_h).max(eff_h / eff_w));
+
+        // Start from FULL image (1.0) scaled down
+        // This ensures we always find the maximum inscribed rectangle for the current angle,
+        // preventing "recursive shrinking" where the crop gets smaller and smaller
+        // as the user drags the slider.
+        let new_width = scale;
+        let new_height = scale;
+
+        // Center the new crop (0.5, 0.5 is center in normalized coords)
+        let new_x = (1.0 - new_width) / 2.0;
+        let new_y = (1.0 - new_height) / 2.0;
+
+        Self {
+            crop_x: new_x,
+            crop_y: new_y,
+            crop_width: new_width,
+            crop_height: new_height,
+            rotation_90: self.rotation_90,
+            angle: self.angle,
+            flip_horizontal: self.flip_horizontal,
+            flip_vertical: self.flip_vertical,
+            fill_mode: self.fill_mode,
+        }
+    }
 }
 
 impl Default for CropSettings {
@@ -914,5 +992,89 @@ mod crop_settings_tests {
         println!("  - Saved rotation_90 = 0 ✓");
         println!("  - Saved angle = 0 ✓");
         println!("  - Viewer applies UV only, NO rotation ✓");
+    }
+
+    // =============================================
+    // Shrink to Fit Tests
+    // =============================================
+
+    #[test]
+    fn test_shrink_to_fit_zero_angle_unchanged() {
+        // With zero rotation angle, crop should remain unchanged
+        let crop = CropSettings::default();
+        let result = crop.calculate_shrink_to_fit(100.0, 100.0);
+        
+        assert_eq!(result.crop_x(), crop.crop_x());
+        assert_eq!(result.crop_y(), crop.crop_y());
+        assert_eq!(result.crop_width(), crop.crop_width());
+        assert_eq!(result.crop_height(), crop.crop_height());
+    }
+
+    #[test]
+    fn test_shrink_to_fit_reduces_crop_with_rotation() {
+        // With any significant rotation, crop should shrink
+        let crop = CropSettings::new(0.0, 0.0, 1.0, 1.0, 0, 15.0, false, false);
+        let result = crop.calculate_shrink_to_fit(100.0, 100.0);
+        
+        // Crop dimensions should be smaller than original
+        assert!(result.crop_width() < 1.0, "Width should shrink: {}", result.crop_width());
+        assert!(result.crop_height() < 1.0, "Height should shrink: {}", result.crop_height());
+        
+        // Should be centered (since original was full frame)
+        let center_x = result.crop_x() + result.crop_width() / 2.0;
+        let center_y = result.crop_y() + result.crop_height() / 2.0;
+        assert!((center_x - 0.5).abs() < 0.01, "Should be horizontally centered");
+        assert!((center_y - 0.5).abs() < 0.01, "Should be vertically centered");
+    }
+
+    #[test]
+    fn test_shrink_to_fit_symmetric_angles() {
+        // +15° and -15° should produce same dimensions
+        let crop_pos = CropSettings::new(0.0, 0.0, 1.0, 1.0, 0, 15.0, false, false);
+        let crop_neg = CropSettings::new(0.0, 0.0, 1.0, 1.0, 0, -15.0, false, false);
+        
+        let result_pos = crop_pos.calculate_shrink_to_fit(100.0, 100.0);
+        let result_neg = crop_neg.calculate_shrink_to_fit(100.0, 100.0);
+        
+        assert!((result_pos.crop_width() - result_neg.crop_width()).abs() < 0.001);
+        assert!((result_pos.crop_height() - result_neg.crop_height()).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_shrink_to_fit_larger_angle_smaller_crop() {
+        // Larger rotation should produce smaller crop
+        let crop_small = CropSettings::new(0.0, 0.0, 1.0, 1.0, 0, 5.0, false, false);
+        let crop_large = CropSettings::new(0.0, 0.0, 1.0, 1.0, 0, 30.0, false, false);
+        
+        let result_small = crop_small.calculate_shrink_to_fit(100.0, 100.0);
+        let result_large = crop_large.calculate_shrink_to_fit(100.0, 100.0);
+        
+        assert!(result_large.crop_width() < result_small.crop_width(), 
+            "30° rotation should produce smaller crop than 5°");
+    }
+
+    #[test]
+    fn test_shrink_to_fit_preserves_fill_mode() {
+        use super::RotationFillMode;
+        
+        let crop = CropSettings::default()
+            .with_fill_mode(RotationFillMode::ShrinkToFit)
+            .with_angle(15.0);
+        
+        let result = crop.calculate_shrink_to_fit(100.0, 100.0);
+        
+        assert_eq!(result.fill_mode(), RotationFillMode::ShrinkToFit);
+    }
+
+    #[test]
+    fn test_shrink_to_fit_resets_small_crop() {
+        // ShrinkToFit acts as "Auto Max Crop", so it should expand a small crop
+        // to fill the maximum inscribed rectangle
+        let crop = CropSettings::new(0.4, 0.4, 0.1, 0.1, 0, 15.0, false, false);
+        let result = crop.calculate_shrink_to_fit(100.0, 100.0);
+        
+        // Should grow significantly (to ~0.8 for 15 degrees)
+        assert!(result.crop_width() > 0.5, "Small crop should expand to max inscribed: {}", result.crop_width());
+        assert!((result.crop_x() - (1.0 - result.crop_width())/2.0).abs() < 0.001, "Should be centered");
     }
 }

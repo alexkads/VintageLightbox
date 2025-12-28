@@ -90,6 +90,19 @@ impl CropPanel {
                 let mut angle = crop.angle();
                 if ui.add(egui::Slider::new(&mut angle, -45.0..=45.0).show_value(false)).changed() {
                     *crop = crop.with_angle(angle);
+                    
+                    // If ShrinkToFit is active, recalculate the crop
+                    if crop.fill_mode() == domain::value_objects::RotationFillMode::ShrinkToFit {
+                        if let Some(img) = state.original_preview.as_ref() {
+                            let (img_w, img_h) = (img.width() as f32, img.height() as f32);
+                            *crop = crop.calculate_shrink_to_fit(img_w, img_h);
+                            
+                            // Re-apply aspect ratio constraint on the new maximized crop
+                            if state.selected_aspect_ratio != AspectRatio::Free {
+                                Self::enforce_aspect_ratio(state);
+                            }
+                        }
+                    }
                 }
             }
             
@@ -131,6 +144,19 @@ impl CropPanel {
                 if let Some(mode) = new_fill_mode {
                     if let Some(crop_settings) = &mut state.crop_settings {
                         *crop_settings = crop_settings.with_fill_mode(mode);
+                        
+                        // If ShrinkToFit is selected, apply the calculation immediately
+                        if mode == domain::value_objects::RotationFillMode::ShrinkToFit {
+                            if let Some(img) = state.original_preview.as_ref() {
+                                let (img_w, img_h) = (img.width() as f32, img.height() as f32);
+                                *crop_settings = crop_settings.calculate_shrink_to_fit(img_w, img_h);
+
+                                // Re-apply aspect ratio constraint on the new maximized crop
+                                if state.selected_aspect_ratio != AspectRatio::Free {
+                                    Self::enforce_aspect_ratio(state);
+                                }
+                            }
+                        }
                     }
                 }
             });
@@ -245,7 +271,7 @@ impl CropPanel {
                  new_x, new_y, new_w_n, new_h_n,
                  current_crop.rotation_90(), current_crop.angle(),
                  current_crop.flip_horizontal(), current_crop.flip_vertical()
-            ));
+            ).with_fill_mode(current_crop.fill_mode()));
             
             // Ensure crop mode is active if we selected a ratio
             state.crop_mode_active = true;
@@ -335,5 +361,25 @@ mod tests {
          let crop = state.crop_settings.unwrap();
         assert!((crop.crop_width() - 0.375).abs() < 0.001, "Width should be 0.375, got {}", crop.crop_width());
         assert!((crop.crop_height() - 1.0).abs() < 0.001, "Height should be 1.0");
+    }
+
+    #[test]
+    fn test_enforce_aspect_ratio_preserves_fill_mode() {
+        let mut state = AppState::new();
+        state.original_preview = Some(image::DynamicImage::new_rgb8(100, 100));
+        
+        // Initial setup with ShrinkToFit
+        state.crop_settings = Some(
+            CropSettings::default()
+                .with_fill_mode(domain::value_objects::RotationFillMode::ShrinkToFit)
+        );
+        
+        // Trigger enforce aspect ratio
+        state.selected_aspect_ratio = AspectRatio::Square;
+        CropPanel::enforce_aspect_ratio(&mut state);
+        
+        // Should preserve fill mode
+        let crop = state.crop_settings.unwrap();
+        assert_eq!(crop.fill_mode(), domain::value_objects::RotationFillMode::ShrinkToFit);
     }
 }
