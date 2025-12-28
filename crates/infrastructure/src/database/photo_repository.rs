@@ -280,6 +280,15 @@ impl PhotoRepository for PhotoRepositoryImpl {
         let edit_nr_color = photo.edit_nr_color();
         let edit_sharpen_amount = photo.edit_sharpen_amount();
         let edit_sharpen_radius = photo.edit_sharpen_radius();
+        // Crop fields
+        let edit_crop_x = photo.edit_crop_x();
+        let edit_crop_y = photo.edit_crop_y();
+        let edit_crop_width = photo.edit_crop_width();
+        let edit_crop_height = photo.edit_crop_height();
+        let edit_crop_rotation = photo.edit_crop_rotation();
+        let edit_crop_angle = photo.edit_crop_angle();
+        let edit_crop_flip_h = photo.edit_crop_flip_h();
+        let edit_crop_flip_v = photo.edit_crop_flip_v();
 
         // Serializar metadata para JSON
         let metadata = photo.metadata()
@@ -347,6 +356,14 @@ impl PhotoRepository for PhotoRepositoryImpl {
         .bind(edit_nr_color)
         .bind(edit_sharpen_amount)
         .bind(edit_sharpen_radius)
+        .bind(edit_crop_x)
+        .bind(edit_crop_y)
+        .bind(edit_crop_width)
+        .bind(edit_crop_height)
+        .bind(edit_crop_rotation)
+        .bind(edit_crop_angle)
+        .bind(edit_crop_flip_h)
+        .bind(edit_crop_flip_v)
         .execute(&self.pool)
         .await
         .map_err(|e| DomainError::InvalidOperation(format!("Failed to save photo: {}", e)))?;
