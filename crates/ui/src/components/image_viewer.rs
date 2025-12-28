@@ -257,8 +257,6 @@ impl ImageViewer {
                     // Draw fill background for empty areas created by rotation
                     // Only needed when angle is non-zero (non 90-degree rotation creates gaps)
                     if crop.angle() != 0.0 {
-                        // DEBUG: Log fill mode being used
-                        eprintln!("ImageViewer: apply_crop_clip=true, angle={}, fill_mode={:?}", crop.angle(), crop.fill_mode());
                         let fill_color = match crop.fill_mode() {
                             domain::value_objects::RotationFillMode::Black => Color32::BLACK,
                             domain::value_objects::RotationFillMode::White => Color32::WHITE,
