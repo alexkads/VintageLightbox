@@ -163,7 +163,10 @@ mod tests {
             0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL Lum
             0.0, 0.0, 0.0, // Lens
             0.0, 0.0, // NR
-            0.0, 1.0  // Sharpening (amount, radius)
+            0.0, 1.0, // Sharpening (amount, radius)
+            None, None, None, None, // Crop Rect
+            None, None, // Rotation
+            None, None // Flip
         ).await;
 
         assert!(result.is_ok());

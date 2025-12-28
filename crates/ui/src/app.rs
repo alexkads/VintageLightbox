@@ -1061,6 +1061,16 @@ impl eframe::App for VintageLightboxApp {
         }
 
         // ============================================
+        // CROP APPLY (imediato, não debounced)
+        // ============================================
+        if self.state.pending_crop_apply {
+            self.state.pending_crop_apply = false;
+            // Mark for immediate save
+            self.state.pending_auto_save = true;
+            self.state.last_slider_change_time = Some(std::time::Instant::now() - std::time::Duration::from_millis(1000));
+        }
+
+        // ============================================
         // AUTO-SAVE DEBOUNCE (500ms delay)
         // ============================================
         const AUTO_SAVE_DEBOUNCE_MS: u128 = 500;
@@ -1123,7 +1133,10 @@ impl eframe::App for VintageLightboxApp {
                         self.state.active_nr_color != self.state.saved_nr_color ||
                         // Sharpen
                         self.state.active_sharpen_amount != self.state.saved_sharpen_amount ||
-                        self.state.active_sharpen_radius != self.state.saved_sharpen_radius;
+                        self.state.active_sharpen_amount != self.state.saved_sharpen_amount ||
+                        self.state.active_sharpen_radius != self.state.saved_sharpen_radius ||
+                        // Crop
+                        self.state.crop_settings != self.state.saved_crop_settings;
 
                     if values_changed {
                         if let Some(metadata) = &self.state.detail_metadata {
@@ -1204,6 +1217,9 @@ impl eframe::App for VintageLightboxApp {
                             self.state.saved_hsl_blue_sat = hsl_blue_sat;
                             self.state.saved_hsl_purple_sat = hsl_purple_sat;
                             self.state.saved_hsl_magenta_sat = hsl_magenta_sat;
+                            
+                            // Update saved crop settings
+                            self.state.saved_crop_settings = self.state.crop_settings.clone();
 
                             // Update the PhotoViewModel in the local list to reflect saved edits
                             // This ensures the photo loads with correct values when switching photos

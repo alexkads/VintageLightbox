@@ -53,6 +53,8 @@ pub enum DockTab {
     AllAdjustments,
     /// Presets panel
     Presets,
+    /// Crop & Straighten tool panel
+    CropTool,
     
     // ============================================
     // Bottom Panels
@@ -81,6 +83,7 @@ impl fmt::Display for DockTab {
             DockTab::Detail => write!(f, "Detail"),
             DockTab::AllAdjustments => write!(f, "Adjustments"),
             DockTab::Presets => write!(f, "Presets"),
+            DockTab::CropTool => write!(f, "Crop & Straighten"),
             DockTab::Filmstrip => write!(f, "Filmstrip"),
         }
     }

@@ -2,6 +2,7 @@ pub mod advanced_slider;
 pub mod color_labels;
 pub mod context_menu;
 pub mod crop_overlay;
+pub mod crop_panel;
 pub mod crop_toolbar;
 pub mod filmstrip;
 pub mod filmstrip_filter;

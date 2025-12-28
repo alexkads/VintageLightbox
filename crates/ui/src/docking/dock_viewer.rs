@@ -24,7 +24,7 @@ use crate::components::{
     metadata_charts::MetadataCharts,
     tone_curve::ToneCurveEditor,
     advanced_slider::AdvancedSlider,
-    crop_toolbar::CropToolbar,
+    crop_panel::CropPanel,
 };
 
 use super::dock_tab::DockTab;
@@ -72,296 +72,6 @@ impl<'a> TabViewer for DockViewer<'a> {
             }
 
             DockTab::ImageViewer => {
-                // Crop Toolbar (when crop mode is active)
-                if self.context.state.crop_mode_active {
-                    egui::TopBottomPanel::top("crop_toolbar_panel")
-                        .exact_height(50.0)
-                        .show_inside(ui, |ui| {
-                            let mut rotate = false;
-                            let mut flip_h = false;
-                            let mut flip_v = false;
-                            let mut reset = false;
-                            let mut apply = false;
-                            
-                            // Capture previous ratio to detect changes
-                            let prev_ratio = self.context.state.selected_aspect_ratio.clone();
-
-                            CropToolbar::show(
-                                ui,
-                                &mut self.context.state.selected_aspect_ratio,
-                                &mut self.context.state.show_composition_grid,
-                                &mut rotate,
-                                &mut flip_h,
-                                &mut flip_v,
-                                &mut reset,
-                                &mut apply,
-                            );
-                            
-                            // Allow applying with ENTER key
-                            if ui.ctx().input(|i| i.key_pressed(egui::Key::Enter)) {
-                                apply = true;
-                            }
-
-                            // Detect aspect ratio change
-                            if prev_ratio != self.context.state.selected_aspect_ratio {
-                                let new_ratio = self.context.state.selected_aspect_ratio.clone();
-                                
-                                // Reset to Original/Free or Apply Ratio
-                                match new_ratio {
-                                    domain::value_objects::AspectRatio::Original => {
-                                        // Reset to full crop (original ratio)
-                                         if let Some(crop) = &mut self.context.state.crop_settings {
-                                             *crop = domain::value_objects::CropSettings::default();
-                                         }
-                                    },
-                                    domain::value_objects::AspectRatio::Free => {
-                                        // No op, keep current crop but unlock handles
-                                    },
-                                    _ => {
-                                        // Apply ratio logic
-                                        // Try to get dimensions from loaded texture first (most accurate), then metadata
-                                        let (w, h) = if let Some(texture) = &self.context.state.detail_image {
-                                            (texture.size()[0] as f32, texture.size()[1] as f32)
-                                        } else if let Some(photo) = self.context.state.get_current_photo() {
-                                            (
-                                                photo.width.unwrap_or(1000) as f32,
-                                                photo.height.unwrap_or(1000) as f32
-                                            )
-                                        } else {
-                                            (1000.0, 1000.0)
-                                        };
-
-                                        if w > 0.0 && h > 0.0 {
-                                            let img_aspect = w / h;
-                                            let target_ratio = new_ratio.value();
-                                            
-                                            // Calculate normalized dimensions (relative to image)
-                                            // We want (nw * w) / (nh * h) = target_ratio
-                                            // nw / nh = target_ratio * (h / w) = target_ratio / img_aspect
-                                            
-                                            let ratio_factor = target_ratio / img_aspect;
-                                            
-                                            let (nw, nh) = if ratio_factor < 1.0 {
-                                                // Target is narrower than image -> constrain width
-                                                // Check if we clamp to 1.0 (full height)
-                                                (ratio_factor, 1.0)
-                                            } else {
-                                                // Target is wider than image -> constrain height
-                                                (1.0, 1.0 / ratio_factor)
-                                            };
-                                            
-                                            // Center the crop
-                                            let nx = (1.0 - nw) / 2.0;
-                                            let ny = (1.0 - nh) / 2.0;
-                                            
-                                            if let Some(crop) = &mut self.context.state.crop_settings {
-                                                *crop = domain::value_objects::CropSettings::new(
-                                                    nx, ny, nw, nh,
-                                                    crop.rotation_90(), crop.angle(),
-                                                    crop.flip_horizontal(), crop.flip_vertical()
-                                                );
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            
-                            // Handle button clicks
-                            if reset {
-                                self.context.state.crop_settings = Some(domain::value_objects::CropSettings::default());
-                                self.context.state.selected_aspect_ratio = domain::value_objects::AspectRatio::Original;
-                                self.context.state.show_composition_grid = false;
-                            }
-                            if apply {
-                                println!("DEBUG: Apply button clicked in DockViewer");
-                                // Apply crop and exit crop mode
-                                self.context.state.crop_mode_active = false;
-                                self.context.state.pending_auto_save = false; // Saving immediately
-
-                                // Force immediate save for "Apply" action
-                                if let Some(id) = self.context.state.develop_selected_photo_id.clone() {
-                                    println!("DEBUG: Saving crop for photo_id: {}", id);
-                                    if let Some(crop) = &self.context.state.crop_settings {
-                                        println!("DEBUG: Crop settings: {:?}", crop);
-                                    }
-
-                                    let controller = self.context.editor_controller.clone();
-                                    
-                                    let exposure = self.context.state.active_exposure;
-                                    let contrast = self.context.state.active_contrast;
-                                    let temperature = self.context.state.active_temperature;
-                                    let tint = self.context.state.active_tint;
-                                    let highlights = self.context.state.active_highlights;
-                                    let shadows = self.context.state.active_shadows;
-                                    let whites = self.context.state.active_whites;
-                                    let blacks = self.context.state.active_blacks;
-                                    let clarity = self.context.state.active_clarity;
-                                    let vibrance = self.context.state.active_vibrance;
-                                    let saturation = self.context.state.active_saturation;
-                                    let tone_curve_shadows = self.context.state.active_tone_curve_shadows;
-                                    let tone_curve_darks = self.context.state.active_tone_curve_darks;
-                                    let tone_curve_lights = self.context.state.active_tone_curve_lights;
-                                    let tone_curve_highlights = self.context.state.active_tone_curve_highlights;
-                                    let hsl_red_sat = self.context.state.active_hsl_red_sat;
-                                    let hsl_orange_sat = self.context.state.active_hsl_orange_sat;
-                                    let hsl_yellow_sat = self.context.state.active_hsl_yellow_sat;
-                                    let hsl_green_sat = self.context.state.active_hsl_green_sat;
-                                    let hsl_aqua_sat = self.context.state.active_hsl_aqua_sat;
-                                    let hsl_blue_sat = self.context.state.active_hsl_blue_sat;
-                                    let hsl_purple_sat = self.context.state.active_hsl_purple_sat;
-                                    let hsl_magenta_sat = self.context.state.active_hsl_magenta_sat;
-                                    let hsl_red_hue = self.context.state.active_hsl_red_hue;
-                                    let hsl_orange_hue = self.context.state.active_hsl_orange_hue;
-                                    let hsl_yellow_hue = self.context.state.active_hsl_yellow_hue;
-                                    let hsl_green_hue = self.context.state.active_hsl_green_hue;
-                                    let hsl_aqua_hue = self.context.state.active_hsl_aqua_hue;
-                                    let hsl_blue_hue = self.context.state.active_hsl_blue_hue;
-                                    let hsl_purple_hue = self.context.state.active_hsl_purple_hue;
-                                    let hsl_magenta_hue = self.context.state.active_hsl_magenta_hue;
-                                    let hsl_red_lum = self.context.state.active_hsl_red_lum;
-                                    let hsl_orange_lum = self.context.state.active_hsl_orange_lum;
-                                    let hsl_yellow_lum = self.context.state.active_hsl_yellow_lum;
-                                    let hsl_green_lum = self.context.state.active_hsl_green_lum;
-                                    let hsl_aqua_lum = self.context.state.active_hsl_aqua_lum;
-                                    let hsl_blue_lum = self.context.state.active_hsl_blue_lum;
-                                    let hsl_purple_lum = self.context.state.active_hsl_purple_lum;
-                                    let hsl_magenta_lum = self.context.state.active_hsl_magenta_lum;
-                                    let lens_distortion = self.context.state.active_lens_distortion;
-                                    let lens_vignette_amount = self.context.state.active_lens_vignette_amount;
-                                    let lens_vignette_midpoint = self.context.state.active_lens_vignette_midpoint;
-                                    let nr_luminance = self.context.state.active_nr_luminance;
-                                    let nr_color = self.context.state.active_nr_color;
-                                    let sharpen_amount = self.context.state.active_sharpen_amount;
-                                    let sharpen_radius = self.context.state.active_sharpen_radius;
-                                    let active_crop = self.context.state.crop_settings.clone();
-                                    
-                                    let id_for_task = id.clone();
-                                    let active_crop_for_task = active_crop.clone();
-                                    
-                                    tokio::spawn(async move {
-                                        let result = controller.save_edits(
-                                            id_for_task,
-                                            exposure, contrast, temperature, tint,
-                                            highlights, shadows, whites, blacks,
-                                            clarity, vibrance, saturation,
-                                            tone_curve_shadows, tone_curve_darks, tone_curve_lights, tone_curve_highlights,
-                                            hsl_red_sat, hsl_orange_sat, hsl_yellow_sat, hsl_green_sat, hsl_aqua_sat, hsl_blue_sat, hsl_purple_sat, hsl_magenta_sat,
-                                            hsl_red_hue, hsl_orange_hue, hsl_yellow_hue, hsl_green_hue, hsl_aqua_hue, hsl_blue_hue, hsl_purple_hue, hsl_magenta_hue,
-                                            hsl_red_lum, hsl_orange_lum, hsl_yellow_lum, hsl_green_lum, hsl_aqua_lum, hsl_blue_lum, hsl_purple_lum, hsl_magenta_lum,
-                                            lens_distortion, lens_vignette_amount, lens_vignette_midpoint,
-                                            nr_luminance, nr_color,
-                                            sharpen_amount, sharpen_radius,
-                                            active_crop_for_task.as_ref().map(|c| c.crop_x()),
-                                            active_crop_for_task.as_ref().map(|c| c.crop_y()),
-                                            active_crop_for_task.as_ref().map(|c| c.crop_width()),
-                                            active_crop_for_task.as_ref().map(|c| c.crop_height()),
-                                            active_crop_for_task.as_ref().map(|c| c.rotation_90()),
-                                            active_crop_for_task.as_ref().map(|c| c.angle()),
-                                            active_crop_for_task.as_ref().map(|c| c.flip_horizontal()),
-                                            active_crop_for_task.as_ref().map(|c| c.flip_vertical()),
-                                        ).await;
-                                        
-                                        if let Err(e) = result {
-                                            println!("ERROR saving crop: {}", e);
-                                        } else {
-                                            println!("DEBUG: Crop saved successfully!");
-                                        }
-                                    });
-                                    
-                                    // Update in-memory VM
-                                    if let Some(photo_vm) = self.context.state.photos.iter_mut().find(|p| p.id == id) {
-                                        photo_vm.edit_crop_x = active_crop.as_ref().map(|c| c.crop_x());
-                                        photo_vm.edit_crop_y = active_crop.as_ref().map(|c| c.crop_y());
-                                        photo_vm.edit_crop_width = active_crop.as_ref().map(|c| c.crop_width());
-                                        photo_vm.edit_crop_height = active_crop.as_ref().map(|c| c.crop_height());
-                                        photo_vm.edit_crop_rotation = active_crop.as_ref().map(|c| c.rotation_90());
-                                        photo_vm.edit_crop_angle = active_crop.as_ref().map(|c| c.angle());
-                                        photo_vm.edit_crop_flip_h = active_crop.as_ref().map(|c| c.flip_horizontal());
-                                        photo_vm.edit_crop_flip_v = active_crop.as_ref().map(|c| c.flip_vertical());
-                                        photo_vm.edit_exposure = Some(exposure);
-                                        photo_vm.edit_contrast = Some(contrast);
-                                        println!("DEBUG: Updated in-memory ViewModel for {}", id);
-                                    }
-                                    
-                                    // Invalidate thumbnail caches so they regenerate with new crop
-                                    self.context.filmstrip.invalidate_thumbnail(&id);
-                                    self.context.photo_grid.invalidate_thumbnail(&id);
-                                    println!("DEBUG: Invalidated thumbnail caches for {}", id);
-                                }
-                            }
-    
-                            // Handle rotations (Swap Aspect Ratio Orientation)
-                            if rotate {
-                                // Get access to image dimensions to calculate proper aspect ratio
-                                // Do this BEFORE borrowing crop_settings mutably to avoid double borrow
-                                let (w, h) = if let Some(texture) = &self.context.state.detail_image {
-                                    (texture.size()[0] as f32, texture.size()[1] as f32)
-                                } else if let Some(photo) = self.context.state.get_current_photo() {
-                                    (
-                                        photo.width.unwrap_or(1000) as f32,
-                                        photo.height.unwrap_or(1000) as f32
-                                    )
-                                } else {
-                                    (1000.0, 1000.0)
-                                };
-
-                                if let Some(crop) = &mut self.context.state.crop_settings {
-                                    if w > 0.0 && h > 0.0 {
-                                        let img_aspect = w / h;
-                                        
-                                        // Current crop aspect ratio
-                                        let current_crop_aspect = (crop.crop_width() * w) / (crop.crop_height() * h);
-                                        
-                                        // Invert/Swap aspect ratio
-                                        let target_ratio = 1.0 / current_crop_aspect;
-                                        
-                                        // Recalculate normalized width/height
-                                        let ratio_factor = target_ratio / img_aspect;
-                                        
-                                        let (nw, nh) = if ratio_factor < 1.0 {
-                                            // Target is narrower than image -> constrain width
-                                            (ratio_factor, 1.0)
-                                        } else {
-                                            // Target is wider than image -> constrain height
-                                            (1.0, 1.0 / ratio_factor)
-                                        };
-                                        
-                                        // Center the crop
-                                        let nx = (1.0 - nw) / 2.0;
-                                        let ny = (1.0 - nh) / 2.0;
-                                        
-                                        *crop = domain::value_objects::CropSettings::new(
-                                            nx, ny, nw, nh,
-                                            crop.rotation_90(), crop.angle(), // Maintain current image rotation
-                                            crop.flip_horizontal(), crop.flip_vertical()
-                                        );
-                                    }
-                                }
-                            }
-                            
-                            // Handle flips
-                            if flip_h {
-                                if let Some(crop) = &mut self.context.state.crop_settings {
-                                    *crop = domain::value_objects::CropSettings::new(
-                                        crop.crop_x(), crop.crop_y(), crop.crop_width(), crop.crop_height(),
-                                        crop.rotation_90(), crop.angle(),
-                                        !crop.flip_horizontal(), crop.flip_vertical()
-                                    );
-                                }
-                            }
-                            if flip_v {
-                                if let Some(crop) = &mut self.context.state.crop_settings {
-                                    *crop = domain::value_objects::CropSettings::new(
-                                        crop.crop_x(), crop.crop_y(), crop.crop_width(), crop.crop_height(),
-                                        crop.rotation_90(), crop.angle(),
-                                        crop.flip_horizontal(), !crop.flip_vertical()
-                                    );
-                                }
-                            }
-                        });
-                }
-
                 ImageViewer::show(ui, self.context.state);
             }
 
@@ -424,6 +134,10 @@ impl<'a> TabViewer for DockViewer<'a> {
 
             DockTab::Presets => {
                 self.render_presets_panel(ui);
+            }
+
+            DockTab::CropTool => {
+                CropPanel::show(ui, self.context.state);
             }
 
             DockTab::Filmstrip => {
@@ -1099,6 +813,21 @@ impl<'a> DockViewer<'a> {
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
+                ui.add_space(Theme::SPACE_SM);
+                
+                // Crop & Straighten Section (collapsible)
+                // Crop & Straighten Section (collapsible)
+                let is_open = self.context.state.crop_mode_active;
+                let response = egui::CollapsingHeader::new(egui::RichText::new("Crop & Straighten").strong())
+                    .open(Some(is_open))
+                    .show(ui, |ui| {
+                        CropPanel::show(ui, self.context.state);
+                    });
+
+                if response.header_response.clicked() {
+                    self.context.state.crop_mode_active = !is_open;
+                }
+                
                 ui.add_space(Theme::SPACE_SM);
                 
                 // Basic Section (collapsible)

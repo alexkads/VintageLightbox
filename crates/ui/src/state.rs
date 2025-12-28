@@ -345,6 +345,8 @@ pub struct AppState {
     // ============================================
     /// Whether edits are pending to be auto-saved
     pub pending_auto_save: bool,
+    /// Flag to apply crop settings (set by CropPanel Apply button)
+    pub pending_crop_apply: bool,
     /// Flag to request save and switch to Library mode (set by Escape key, handled by app.rs)
     pub deferred_exit_develop_mode: bool,
     /// Timestamp of the last slider change (for debounce)
@@ -403,6 +405,9 @@ pub struct AppState {
     // Sharpening
     pub saved_sharpen_amount: f32,
     pub saved_sharpen_radius: f32,
+    
+    // Saved Crop
+    pub saved_crop_settings: Option<domain::value_objects::CropSettings>,
 
     // ============================================
     // Folder Navigation
@@ -645,6 +650,7 @@ impl AppState {
             show_performance_stats: std::env::var("SHOW_PERFORMANCE_STATS").map_or(false, |v| v == "true"),
             start_load_time: None,
             pending_auto_save: false,
+            pending_crop_apply: false,
             deferred_exit_develop_mode: false,
             last_slider_change_time: None,
             saved_exposure: 0.0,
@@ -697,6 +703,9 @@ impl AppState {
             // Sharpening saved values
             saved_sharpen_amount: 0.0,
             saved_sharpen_radius: 1.0,
+            
+            saved_crop_settings: None,
+
             folder_tree_roots: Vec::new(),
             expanded_folders: HashSet::new(),
             import_preview_dialog: None,
@@ -810,6 +819,27 @@ impl AppState {
         }
         
         None
+    }
+
+    /// Ensure the selected photo in develop view is valid according to current filters
+    /// If the current photo is filtered out, select the next available one.
+    pub fn sanitize_develop_selection(&mut self) {
+        // Apply filters
+        let filtered = self.filmstrip_filter.apply(&self.photos);
+        
+        let should_change = if let Some(current_id) = &self.develop_selected_photo_id {
+            // Check if current ID is in filtered list
+            !filtered.iter().any(|p| &p.id == current_id)
+        } else {
+            // No selection, should select first if available
+            !filtered.is_empty()
+        };
+
+        if should_change {
+             self.develop_selected_photo_id = filtered.first().map(|p| p.id.clone());
+             // Force reload
+             self.loaded_photo_id = None;
+        }
     }
 
     /// Reset zoom and pan to defaults
