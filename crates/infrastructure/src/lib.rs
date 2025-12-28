@@ -11,6 +11,7 @@ pub mod raw_processing;
 pub mod scan_directory;
 pub mod thumbnail_generator;
 pub mod content_hash;
+pub mod intelligent_fill;
 
 // Re-exports for main.rs compatibility
 pub use database::{create_pool, run_migrations, PhotoRepositoryImpl, SqlitePresetRepository, CollectionRepositoryImpl};
@@ -18,4 +19,5 @@ pub use exif_reader::ExifReader;
 pub use thumbnail_generator::ThumbnailGeneratorImpl;
 pub use image_exporter::ImageExporterImpl;
 pub use file_organizer::FileOrganizerImpl;
+pub use intelligent_fill::OnnxInpainterImpl;
 // pub use fs::FileSystemImpl; // Commenting out until verified

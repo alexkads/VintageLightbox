@@ -302,6 +302,18 @@ pub struct AppState {
     pub show_composition_grid: bool,
 
     // ============================================
+    // Intelligent Fill State
+    // ============================================
+    /// Cached intelligent fill result texture
+    pub intelligent_fill_texture: Option<egui::TextureHandle>,
+    /// Current intelligent fill request ID (for debouncing)
+    pub intelligent_fill_request_id: u64,
+    /// Whether intelligent fill is processing
+    pub intelligent_fill_pending: bool,
+    /// Previous angle used for intelligent fill (to detect changes)
+    pub prev_intelligent_fill_angle: f32,
+
+    // ============================================
     // UI State
     // ============================================
     pub is_busy: bool,
@@ -642,6 +654,11 @@ impl AppState {
             crop_settings: None,
             selected_aspect_ratio: domain::value_objects::AspectRatio::Original,
             show_composition_grid: false,
+            // Intelligent fill state
+            intelligent_fill_texture: None,
+            intelligent_fill_request_id: 0,
+            intelligent_fill_pending: false,
+            prev_intelligent_fill_angle: 0.0,
             is_busy: false,
             busy_message: String::new(),
             grid_columns: 4,  // Default 4 columns

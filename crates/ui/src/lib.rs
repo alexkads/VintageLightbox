@@ -14,6 +14,7 @@ pub mod components;
 pub mod views;
 pub mod async_loader;
 pub mod gpu_processor;
+pub mod intelligent_fill;
 pub mod docking;
 pub mod monitors;
 pub mod geometry;

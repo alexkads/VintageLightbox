@@ -59,6 +59,9 @@ pub struct VintageLightboxApp {
     image_processor: AsyncImageProcessor,
     /// GPU-accelerated edit processor (primary for sliders)
     gpu_edit_processor: crate::gpu_processor::GpuImageProcessor,
+    /// GPU-accelerated intelligent fill processor for rotation edges
+    #[allow(dead_code)] // TODO: Integrar com image_viewer quando fill_mode == Intelligent
+    intelligent_fill_processor: crate::intelligent_fill::IntelligentFillProcessor,
     /// Current edit request ID for tracking latest edit
     current_edit_request_id: u64,
     /// The ID of the photo currently requested for loading (to avoid race conditions)
@@ -135,6 +138,7 @@ impl VintageLightboxApp {
             import_source_receiver,
             image_processor: AsyncImageProcessor::new(preview_manager.clone()),
             gpu_edit_processor: crate::gpu_processor::GpuImageProcessor::new(),
+            intelligent_fill_processor: crate::intelligent_fill::IntelligentFillProcessor::new(),
             current_edit_request_id: 0,
             requested_photo_id: None,
             photo_grid: PhotoGrid::new(preview_manager.clone()),
@@ -366,6 +370,27 @@ impl eframe::App for VintageLightboxApp {
                 }
             }
         }
+
+        // Poll for completed Intelligent Fill processing results
+        if let Some(result) = self.intelligent_fill_processor.poll_result() {
+            eprintln!("[IntelligentFill] Got result! request_id={}, expected={}, time={}ms",
+                result.request_id, self.state.intelligent_fill_request_id, result.process_time_ms);
+            if result.request_id == self.state.intelligent_fill_request_id {
+                // Create texture from the filled image
+                let texture = ctx.load_texture(
+                    "intelligent_fill_result",
+                    result.preview,
+                    egui::TextureOptions::default()
+                );
+                self.state.intelligent_fill_texture = Some(texture);
+                self.state.intelligent_fill_pending = false;
+                eprintln!("[IntelligentFill] Texture created successfully!");
+                ctx.request_repaint();
+            }
+        }
+
+        // Request Intelligent Fill if needed
+        self.request_intelligent_fill_if_needed();
 
         // Request image loading if needed (non-blocking)
         // Check if we need to load a new photo
@@ -1948,6 +1973,82 @@ impl VintageLightboxApp {
 
             ui.add_space(Theme::SPACE_LG);
         });
+    }
+
+    /// Request Intelligent Fill processing if needed
+    /// Called when crop settings change and fill_mode is Intelligent
+    fn request_intelligent_fill_if_needed(&mut self) {
+        // Only process if we're in develop view with a selected photo
+        if self.state.current_view != crate::state::CurrentView::Develop {
+            return;
+        }
+
+        // Check if we have crop settings with Intelligent fill mode
+        let crop = match &self.state.crop_settings {
+            Some(c) => c,
+            None => {
+                eprintln!("[IntelligentFill] No crop settings");
+                return;
+            }
+        };
+
+        // Only process if fill mode is Intelligent
+        if crop.fill_mode() != domain::value_objects::RotationFillMode::Intelligent {
+            // Clear any cached texture if fill mode changed
+            if self.state.intelligent_fill_texture.is_some() {
+                self.state.intelligent_fill_texture = None;
+            }
+            return;
+        }
+
+        // Only process if there's a non-zero angle
+        if crop.angle() == 0.0 {
+            self.state.intelligent_fill_texture = None;
+            return;
+        }
+
+        eprintln!("[IntelligentFill] fill_mode=Intelligent, angle={}", crop.angle());
+
+        // Check if angle changed (debouncing)
+        let angle_changed = (crop.angle() - self.state.prev_intelligent_fill_angle).abs() > 0.001;
+        if !angle_changed && self.state.intelligent_fill_texture.is_some() {
+            return; // Already have a valid texture for this angle
+        }
+
+        // Need original image data to process
+        let image_data = match &self.state.original_image_data {
+            Some(data) => data.clone(),
+            None => {
+                eprintln!("[IntelligentFill] No original_image_data!");
+                return;
+            }
+        };
+
+        let original = match &self.state.original_preview {
+            Some(img) => img,
+            None => {
+                eprintln!("[IntelligentFill] No original_preview!");
+                return;
+            }
+        };
+
+        eprintln!("[IntelligentFill] Sending request for {}x{}", original.width(), original.height());
+
+        // Create request
+        let request_id = self.intelligent_fill_processor.next_request_id();
+        let request = crate::intelligent_fill::IntelligentFillRequest {
+            request_id,
+            image_data,
+            width: original.width(),
+            height: original.height(),
+            crop_settings: crop.clone(),
+        };
+
+        // Send request
+        self.intelligent_fill_processor.request_fill(request);
+        self.state.intelligent_fill_request_id = request_id;
+        self.state.intelligent_fill_pending = true;
+        self.state.prev_intelligent_fill_angle = crop.angle();
     }
 
     /// Save any pending develop edits before switching away from Develop mode.

@@ -26,4 +26,9 @@ impl AppPaths {
     pub fn preview_cache_dir() -> PathBuf {
         Self::catalog_root().join("Previews.lrdata")
     }
+
+    /// Returns the path to the Models directory for ML/AI models
+    pub fn models_dir() -> PathBuf {
+        Self::catalog_root().join("Models")
+    }
 }

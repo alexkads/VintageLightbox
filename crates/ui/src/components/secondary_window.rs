@@ -174,6 +174,7 @@ impl SecondaryWindow {
                             ui,
                             detail_clone.as_ref(),
                             thumb_clone.as_ref(),
+                            None, // intelligent_fill_texture: Not needed for presentation
                             has_selection,
                             1.0, // zoom
                             egui::Vec2::ZERO, // pan
