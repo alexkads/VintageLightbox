@@ -142,8 +142,10 @@ impl CropPanel {
                 
                 // Apply selection after the borrow ends
                 if let Some(mode) = new_fill_mode {
+                    eprintln!("CropPanel: User selected fill_mode={:?}", mode);
                     if let Some(crop_settings) = &mut state.crop_settings {
                         *crop_settings = crop_settings.with_fill_mode(mode);
+                        eprintln!("CropPanel: Updated crop_settings.fill_mode={:?}", crop_settings.fill_mode());
                         
                         // If ShrinkToFit is selected, apply the calculation immediately
                         if mode == domain::value_objects::RotationFillMode::ShrinkToFit {

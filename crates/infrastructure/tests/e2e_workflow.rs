@@ -64,7 +64,7 @@ async fn test_e2e_import_edit_export_flow() {
         0.0, 0.0, 0.0, // Lens
         0.0, 0.0, // NR
         0.0, 1.0, // Sharpening (amount, radius)
-        None, None, None, None, None, None, None, None // Crop
+        None, None, None, None, None, None, None, None, None // Crop
     ).await;
     assert!(save_result.is_ok(), "Save edits failed");
 

@@ -257,6 +257,8 @@ impl ImageViewer {
                     // Draw fill background for empty areas created by rotation
                     // Only needed when angle is non-zero (non 90-degree rotation creates gaps)
                     if crop.angle() != 0.0 {
+                        // DEBUG: Log fill mode being used
+                        eprintln!("ImageViewer: apply_crop_clip=true, angle={}, fill_mode={:?}", crop.angle(), crop.fill_mode());
                         let fill_color = match crop.fill_mode() {
                             domain::value_objects::RotationFillMode::Black => Color32::BLACK,
                             domain::value_objects::RotationFillMode::White => Color32::WHITE,
@@ -288,10 +290,26 @@ impl ImageViewer {
                     ];
 
                     for (i, &pos) in screen_corners.iter().enumerate() {
+                        // Check if UV is within valid texture bounds
+                        // If UV is outside [0,1], make vertex transparent to show fill color
+                        let uv = uvs[i];
+                        let uv_in_bounds = uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0;
+                        let vertex_color = if uv_in_bounds {
+                            Color32::WHITE
+                        } else {
+                            // Vertex is outside image - use fill color directly
+                            match crop.fill_mode() {
+                                domain::value_objects::RotationFillMode::Black => Color32::BLACK,
+                                domain::value_objects::RotationFillMode::White => Color32::WHITE,
+                                domain::value_objects::RotationFillMode::Transparent => Color32::TRANSPARENT,
+                                domain::value_objects::RotationFillMode::Intelligent => Color32::from_gray(30),
+                                domain::value_objects::RotationFillMode::ShrinkToFit => Color32::TRANSPARENT,
+                            }
+                        };
                         mesh.vertices.push(Vertex {
                             pos, 
                             uv: uvs[i], 
-                            color: Color32::WHITE
+                            color: vertex_color
                         });
                     }
                     

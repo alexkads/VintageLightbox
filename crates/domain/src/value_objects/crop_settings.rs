@@ -31,6 +31,25 @@ impl CropSettings {
         flip_horizontal: bool,
         flip_vertical: bool,
     ) -> Self {
+        Self::with_fill_mode_value(
+            crop_x, crop_y, crop_width, crop_height,
+            rotation_90, angle, flip_horizontal, flip_vertical,
+            RotationFillMode::default(),
+        )
+    }
+
+    /// Creates a new CropSettings with the specified values and fill mode.
+    pub fn with_fill_mode_value(
+        crop_x: f32,
+        crop_y: f32,
+        crop_width: f32,
+        crop_height: f32,
+        rotation_90: i32,
+        angle: f32,
+        flip_horizontal: bool,
+        flip_vertical: bool,
+        fill_mode: RotationFillMode,
+    ) -> Self {
         let crop_x = crop_x.clamp(0.0, 1.0);
         let crop_y = crop_y.clamp(0.0, 1.0);
         let crop_width = crop_width.clamp(Self::MIN_CROP_SIZE, 1.0);
@@ -52,7 +71,7 @@ impl CropSettings {
             angle,
             flip_horizontal,
             flip_vertical,
-            fill_mode: RotationFillMode::default(),
+            fill_mode,
         }
     }
 

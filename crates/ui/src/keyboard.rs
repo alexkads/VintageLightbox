@@ -134,6 +134,7 @@ impl KeyboardHandler {
                                                     crop_settings.as_ref().map(|c| c.angle()),
                                                     crop_settings.as_ref().map(|c| c.flip_horizontal()),
                                                     crop_settings.as_ref().map(|c| c.flip_vertical()),
+                                                    crop_settings.as_ref().map(|c| c.fill_mode() as u8),
                                                 ).await;
                                             });
                                             

@@ -75,6 +75,7 @@ pub struct PhotoViewModel {
     pub edit_crop_angle: Option<f32>,
     pub edit_crop_flip_h: Option<bool>,
     pub edit_crop_flip_v: Option<bool>,
+    pub edit_crop_fill_mode: Option<u8>,
 }
 
 /// ViewModel for import preview items

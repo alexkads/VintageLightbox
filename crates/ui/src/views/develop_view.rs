@@ -151,6 +151,7 @@ impl DevelopView {
                                       active_crop.as_ref().map(|c| c.angle()),
                                       active_crop.as_ref().map(|c| c.flip_horizontal()),
                                       active_crop.as_ref().map(|c| c.flip_vertical()),
+                                      active_crop.as_ref().map(|c| c.fill_mode() as u8),
                                   ).await;
                               });
                               
@@ -166,6 +167,7 @@ impl DevelopView {
                                         photo_vm.edit_crop_angle = Some(c.angle());
                                         photo_vm.edit_crop_flip_h = Some(c.flip_horizontal());
                                         photo_vm.edit_crop_flip_v = Some(c.flip_vertical());
+                                        photo_vm.edit_crop_fill_mode = Some(c.fill_mode() as u8);
                                    } else {
                                        photo_vm.edit_crop_x = None;
                                        photo_vm.edit_crop_y = None;
@@ -175,6 +177,7 @@ impl DevelopView {
                                        photo_vm.edit_crop_angle = None;
                                        photo_vm.edit_crop_flip_h = None;
                                        photo_vm.edit_crop_flip_v = None;
+                                       photo_vm.edit_crop_fill_mode = None;
                                    }
                                    // Also update exposure and other edits
                                    photo_vm.edit_exposure = Some(exposure);
@@ -336,6 +339,7 @@ impl DevelopView {
                                        active_crop_for_task.as_ref().map(|c| c.angle()),
                                        active_crop_for_task.as_ref().map(|c| c.flip_horizontal()),
                                        active_crop_for_task.as_ref().map(|c| c.flip_vertical()),
+                                       active_crop_for_task.as_ref().map(|c| c.fill_mode() as u8),
                                    ).await;
                                });
                                
@@ -349,6 +353,7 @@ impl DevelopView {
                                    photo_vm.edit_crop_angle = active_crop.as_ref().map(|c| c.angle());
                                    photo_vm.edit_crop_flip_h = active_crop.as_ref().map(|c| c.flip_horizontal());
                                    photo_vm.edit_crop_flip_v = active_crop.as_ref().map(|c| c.flip_vertical());
+                                   photo_vm.edit_crop_fill_mode = active_crop.as_ref().map(|c| c.fill_mode() as u8);
                                    photo_vm.edit_exposure = Some(exposure);
                                    photo_vm.edit_contrast = Some(contrast);
                                    

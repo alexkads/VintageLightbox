@@ -68,6 +68,7 @@ impl EditorController {
         crop_angle: Option<f32>,
         crop_flip_h: Option<bool>,
         crop_flip_v: Option<bool>,
+        crop_fill_mode: Option<u8>,
     ) -> Result<(), String> {
         let photo_id = PhotoId::from_string(&id).map_err(|e| e.to_string())?;
 
@@ -93,6 +94,7 @@ impl EditorController {
             crop_angle,
             crop_flip_h,
             crop_flip_v,
+            crop_fill_mode
         ).await
             .map_err(|e| e.to_string())
     }

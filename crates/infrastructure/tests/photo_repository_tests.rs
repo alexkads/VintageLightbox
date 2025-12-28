@@ -248,7 +248,7 @@ async fn test_save_and_find_photo_with_edits() {
         None, None, None, // Lens
         None, None, // NR
         None, None, // Sharpening
-        None, None, None, None, None, None, None, None // Crop
+        None, None, None, None, None, None, None, None, None // Crop
     ).unwrap();
 
     // Act - Save
@@ -273,7 +273,7 @@ async fn test_save_and_find_photo_with_edits() {
         None, None, None, // Lens
         None, None, // NR
         None, None, // Sharpening
-        None, None, None, None, None, None, None, None // Crop
+        None, None, None, None, None, None, None, None, None // Crop
     ).unwrap();
     repo.update(&found_mut).await.unwrap();
 

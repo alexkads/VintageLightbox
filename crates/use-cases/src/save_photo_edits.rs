@@ -72,6 +72,7 @@ impl SavePhotoEditsUseCase {
         crop_angle: Option<f32>,
         crop_flip_h: Option<bool>,
         crop_flip_v: Option<bool>,
+        crop_fill_mode: Option<u8>,
     ) -> DomainResult<()> {
         let mut photo = self.photo_repository.find_by_id(&id).await?
             .ok_or(DomainError::PhotoNotFound)?;
@@ -95,7 +96,8 @@ impl SavePhotoEditsUseCase {
             Some(nr_luminance), Some(nr_color),
             Some(sharpen_amount), Some(sharpen_radius),
             crop_x, crop_y, crop_width, crop_height,
-            crop_rotation, crop_angle, crop_flip_h, crop_flip_v
+            crop_rotation, crop_angle, crop_flip_h, crop_flip_v,
+            crop_fill_mode
         )?;
         self.photo_repository.update(&photo).await?;
 
@@ -166,7 +168,8 @@ mod tests {
             0.0, 1.0, // Sharpening (amount, radius)
             None, None, None, None, // Crop Rect
             None, None, // Rotation
-            None, None // Flip
+            None, None, // Flip
+            None // Fill Mode
         ).await;
 
         assert!(result.is_ok());
@@ -194,7 +197,8 @@ mod tests {
             0.0, 1.0,  // Sharpening
             None, None, None, None, // Crop Rect
             None, None, // Rotation
-            None, None // Flip
+            None, None, // Flip
+            None // Fill Mode
         ).await;
 
         match result {

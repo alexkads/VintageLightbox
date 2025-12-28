@@ -104,6 +104,7 @@ impl LibraryController {
                         edit_crop_angle: photo.edit_crop_angle(),
                         edit_crop_flip_h: photo.edit_crop_flip_h(),
                         edit_crop_flip_v: photo.edit_crop_flip_v(),
+                        edit_crop_fill_mode: photo.edit_crop_fill_mode(),
                     }
                 })
                 .collect();

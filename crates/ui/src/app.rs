@@ -598,12 +598,15 @@ impl eframe::App for VintageLightboxApp {
                     
                     // Initialize crop settings
                     if let (Some(x), Some(y), Some(w), Some(h)) = (photo.edit_crop_x, photo.edit_crop_y, photo.edit_crop_width, photo.edit_crop_height) {
-                         self.state.crop_settings = Some(domain::value_objects::CropSettings::new(
+                        let fill_mode = domain::value_objects::RotationFillMode::try_from(photo.edit_crop_fill_mode.unwrap_or(0))
+                            .unwrap_or_default();
+                         self.state.crop_settings = Some(domain::value_objects::CropSettings::with_fill_mode_value(
                              x, y, w, h,
                              photo.edit_crop_rotation.unwrap_or(0),
                              photo.edit_crop_angle.unwrap_or(0.0),
                              photo.edit_crop_flip_h.unwrap_or(false),
                              photo.edit_crop_flip_v.unwrap_or(false),
+                             fill_mode,
                          ));
                     } else {
                         self.state.crop_settings = None;
@@ -1293,6 +1296,7 @@ impl eframe::App for VintageLightboxApp {
                                     photo.edit_crop_angle = Some(crop.angle());
                                     photo.edit_crop_flip_h = Some(crop.flip_horizontal());
                                     photo.edit_crop_flip_v = Some(crop.flip_vertical());
+                                    photo.edit_crop_fill_mode = Some(crop.fill_mode() as u8);
                                 } else {
                                     photo.edit_crop_x = None;
                                     photo.edit_crop_y = None;
@@ -1302,6 +1306,7 @@ impl eframe::App for VintageLightboxApp {
                                     photo.edit_crop_angle = None;
                                     photo.edit_crop_flip_h = None;
                                     photo.edit_crop_flip_v = None;
+                                    photo.edit_crop_fill_mode = None;
                                 }
                             }
 
@@ -1316,14 +1321,14 @@ impl eframe::App for VintageLightboxApp {
                             // Extract crop settings for closure
                             let (
                                 crop_x, crop_y, crop_width, crop_height,
-                                crop_rotation, crop_angle, crop_flip_h, crop_flip_v
+                                crop_rotation, crop_angle, crop_flip_h, crop_flip_v, crop_fill_mode
                             ) = if let Some(c) = &self.state.crop_settings {
                                 (
                                     Some(c.crop_x()), Some(c.crop_y()), Some(c.crop_width()), Some(c.crop_height()),
-                                    Some(c.rotation_90()), Some(c.angle()), Some(c.flip_horizontal()), Some(c.flip_vertical())
+                                    Some(c.rotation_90()), Some(c.angle()), Some(c.flip_horizontal()), Some(c.flip_vertical()), Some(c.fill_mode() as u8)
                                 )
                             } else {
-                                (None, None, None, None, None, None, None, None)
+                                (None, None, None, None, None, None, None, None, None)
                             };
 
                             let ctx_clone = ctx.clone();
@@ -1349,7 +1354,7 @@ impl eframe::App for VintageLightboxApp {
                                     sharpen_amount, sharpen_radius,
                                     // Crop
                                     crop_x, crop_y, crop_width, crop_height,
-                                    crop_rotation, crop_angle, crop_flip_h, crop_flip_v
+                                    crop_rotation, crop_angle, crop_flip_h, crop_flip_v, crop_fill_mode
                                 ).await {
                                     // Note: Toast will be shown in the next frame via state
                                     eprintln!("Auto-save failed: {}", e);
@@ -2032,6 +2037,7 @@ impl VintageLightboxApp {
                     active_crop.as_ref().map(|c| c.angle()),
                     active_crop.as_ref().map(|c| c.flip_horizontal()),
                     active_crop.as_ref().map(|c| c.flip_vertical()),
+                    active_crop.as_ref().map(|c| c.fill_mode() as u8),
                 ).await;
             });
             
@@ -2045,6 +2051,7 @@ impl VintageLightboxApp {
                 photo_vm.edit_crop_angle = crop_for_update.as_ref().map(|c| c.angle());
                 photo_vm.edit_crop_flip_h = crop_for_update.as_ref().map(|c| c.flip_horizontal());
                 photo_vm.edit_crop_flip_v = crop_for_update.as_ref().map(|c| c.flip_vertical());
+                photo_vm.edit_crop_fill_mode = crop_for_update.as_ref().map(|c| c.fill_mode() as u8);
                 photo_vm.edit_exposure = Some(exposure);
                 photo_vm.edit_contrast = Some(contrast);
             }

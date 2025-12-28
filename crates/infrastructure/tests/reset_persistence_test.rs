@@ -51,7 +51,7 @@ async fn test_reset_persistence_with_default_values() {
         None, None,
 
         // Crop (8)
-        Some(0.2), Some(0.2), Some(0.6), Some(0.6), Some(0), Some(0.0), Some(false), Some(false)
+        Some(0.2), Some(0.2), Some(0.6), Some(0.6), Some(0), Some(0.0), Some(false), Some(false), None
     ).unwrap();
 
     repo.save(&photo).await.expect("Failed to save initial photo");
@@ -85,7 +85,7 @@ async fn test_reset_persistence_with_default_values() {
         None, None,
 
         // Crop (8) -> Reset
-        Some(0.0), Some(0.0), Some(1.0), Some(1.0), Some(0), Some(0.0), Some(false), Some(false)
+        Some(0.0), Some(0.0), Some(1.0), Some(1.0), Some(0), Some(0.0), Some(false), Some(false), None
     ).unwrap();
 
     // Try calling update. If trait doesn't have it, we'll see compile error.
