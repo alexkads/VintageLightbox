@@ -176,7 +176,7 @@ impl CropPanel {
         let current_crop = state.crop_settings.clone().unwrap_or(domain::value_objects::CropSettings::default());
 
         // Calculate image ratio
-        let (img_w, img_h) = if let Some(img) = state.active_image.lock().unwrap().as_ref() {
+        let (img_w, img_h) = if let Some(img) = state.original_preview.as_ref() {
             (img.width() as f32, img.height() as f32)
         } else {
             (1.0, 1.0)
@@ -236,7 +236,6 @@ impl CropPanel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, Mutex};
     use domain::value_objects::CropSettings;
 
     #[test]
@@ -244,7 +243,7 @@ mod tests {
         let mut state = AppState::new();
         // Setup 100x100 image
         let img = image::DynamicImage::new_rgb8(100, 100);
-        state.active_image = Arc::new(Mutex::new(Some(img)));
+        state.original_preview = Some(img);
         
         // Full initial crop (100x100) -> 0,0,1,1
         state.crop_settings = Some(CropSettings::default());
@@ -265,7 +264,7 @@ mod tests {
           let mut state = AppState::new();
         // Setup 200x100 image (2:1 ratio)
         let img = image::DynamicImage::new_rgb8(200, 100);
-        state.active_image = Arc::new(Mutex::new(Some(img)));
+        state.original_preview = Some(img);
         
         // Full initial crop (0,0,1,1) -> Covers 200x100 pixels.
         // Aspect Ratio of Crop = 2.0.
@@ -298,7 +297,7 @@ mod tests {
           let mut state = AppState::new();
         // Setup 200x100 image (2:1 ratio)
         let img = image::DynamicImage::new_rgb8(200, 100);
-        state.active_image = Arc::new(Mutex::new(Some(img)));
+        state.original_preview = Some(img);
         
         // Select 1:2 (Tall) -> "Portrait" slice.
         // Assume AspectRatio::ThreeFour (3:4 = 0.75).

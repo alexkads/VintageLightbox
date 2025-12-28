@@ -24,20 +24,20 @@ impl CropToolbar {
             ComboBox::from_id_salt("crop_aspect_ratio")
                 .selected_text(selected_ratio.to_string())
                 .show_ui(ui, |ui| {
-                    ui.selectable_value(selected_ratio, AspectRatio::Original, "Original");
-                    ui.selectable_value(selected_ratio, AspectRatio::Free, "Free");
+                    ui.selectable_value(selected_ratio, AspectRatio::Original, AspectRatio::Original.to_string());
+                    ui.selectable_value(selected_ratio, AspectRatio::Free, AspectRatio::Free.to_string());
                     ui.separator();
-                    ui.selectable_value(selected_ratio, AspectRatio::Square, "1:1 Square");
-                    ui.selectable_value(selected_ratio, AspectRatio::TwoThree, "2:3 Portrait");
-                    ui.selectable_value(selected_ratio, AspectRatio::ThreeTwo, "3:2 Landscape");
-                    ui.selectable_value(selected_ratio, AspectRatio::FourThree, "4:3");
-                    ui.selectable_value(selected_ratio, AspectRatio::ThreeFour, "3:4");
-                    ui.selectable_value(selected_ratio, AspectRatio::FourFive, "4:5");
-                    ui.selectable_value(selected_ratio, AspectRatio::FiveFour, "5:4");
-                    ui.selectable_value(selected_ratio, AspectRatio::FiveSeven, "5:7");
-                    ui.selectable_value(selected_ratio, AspectRatio::SevenFive, "7:5");
-                    ui.selectable_value(selected_ratio, AspectRatio::SixteenNine, "16:9 Wide");
-                    ui.selectable_value(selected_ratio, AspectRatio::NineSixteen, "9:16 Stories");
+                    ui.selectable_value(selected_ratio, AspectRatio::Square, AspectRatio::Square.to_string());
+                    ui.selectable_value(selected_ratio, AspectRatio::TwoThree, AspectRatio::TwoThree.to_string());
+                    ui.selectable_value(selected_ratio, AspectRatio::ThreeTwo, AspectRatio::ThreeTwo.to_string());
+                    ui.selectable_value(selected_ratio, AspectRatio::FourThree, AspectRatio::FourThree.to_string());
+                    ui.selectable_value(selected_ratio, AspectRatio::ThreeFour, AspectRatio::ThreeFour.to_string());
+                    ui.selectable_value(selected_ratio, AspectRatio::FourFive, AspectRatio::FourFive.to_string());
+                    ui.selectable_value(selected_ratio, AspectRatio::FiveFour, AspectRatio::FiveFour.to_string());
+                    ui.selectable_value(selected_ratio, AspectRatio::FiveSeven, AspectRatio::FiveSeven.to_string());
+                    ui.selectable_value(selected_ratio, AspectRatio::SevenFive, AspectRatio::SevenFive.to_string());
+                    ui.selectable_value(selected_ratio, AspectRatio::SixteenNine, AspectRatio::SixteenNine.to_string());
+                    ui.selectable_value(selected_ratio, AspectRatio::NineSixteen, AspectRatio::NineSixteen.to_string());
                 });
 
             ui.separator();
