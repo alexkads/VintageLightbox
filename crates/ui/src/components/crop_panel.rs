@@ -191,7 +191,8 @@ impl CropPanel {
             
             // Action buttons
             ui.horizontal(|ui| {
-                if ui.button("↺ Reset").on_hover_text("Reset crop (Shift+R)").clicked() {
+                let reset_shortcut = ui.input(|i| i.modifiers.shift && i.key_pressed(egui::Key::R));
+                if ui.button("↺ Reset").on_hover_text("Reset crop (Shift+R)").clicked() || reset_shortcut {
                     state.crop_settings = Some(domain::value_objects::CropSettings::default());
                     state.selected_aspect_ratio = AspectRatio::Original;
                 }
