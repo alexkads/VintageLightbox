@@ -192,7 +192,14 @@ impl ImageViewer {
                     }
 
                     img = img.uv(Rect::from_min_max(uv_min, uv_max));
-                    // No rotation applied here - the snapshot represents final pixels
+                    
+                    // Apply rotation to the final cropped result
+                    // Even if we just clipped UVs, the resulting "widget" needs to be rotated 
+                    // if the user intended a rotation. 
+                    let total_degrees = (crop.rotation_90() as f32 * 90.0) + crop.angle();
+                    if total_degrees != 0.0 {
+                        img = img.rotate(total_degrees.to_radians(), Vec2::splat(0.5));
+                    }
                 } else {
                     // When editing crop (full image shown), we must still apply FLIPS visually
                     // Rotation is handled by .rotate(), but flips need UV manipulation

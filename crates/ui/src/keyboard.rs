@@ -20,7 +20,7 @@ impl KeyboardHandler {
         state: &mut AppState,
         photo_controller: &Arc<PhotoController>,
         library_controller: &Arc<adapters::controllers::LibraryController>,
-        _editor_controller: &Arc<adapters::controllers::EditorController>,
+        editor_controller: &Arc<adapters::controllers::EditorController>,
         _export_controller: &Arc<adapters::controllers::ExportController>,
         _import_controller: &Arc<adapters::controllers::ImportController>,
         photo_sender: &tokio::sync::mpsc::Sender<Result<Vec<adapters::view_models::PhotoViewModel>, String>>,
@@ -54,6 +54,94 @@ impl KeyboardHandler {
 
                             if new_pos != current_pos {
                                 if let Some(photo) = visible_photos.get(new_pos) {
+                                    // Check if we need to save the CURRENT photo before switching
+                                    let needs_save = state.pending_auto_save || (state.crop_mode_active && state.crop_settings.is_some());
+                                    
+                                    if needs_save {
+                                        if let Some(vm) = state.get_current_photo() {
+                                            // Trigger explicit save for current photo
+                                            let controller = editor_controller.clone();
+                                            let photo_id = vm.id.clone();
+                                            
+                                            // Capture current values
+                                            let exposure = state.active_exposure;
+                                            let contrast = state.active_contrast;
+                                            let temperature = state.active_temperature;
+                                            let tint = state.active_tint;
+                                            let highlights = state.active_highlights;
+                                            let shadows = state.active_shadows;
+                                            let whites = state.active_whites;
+                                            let blacks = state.active_blacks;
+                                            let clarity = state.active_clarity;
+                                            let vibrance = state.active_vibrance;
+                                            let saturation = state.active_saturation;
+                                            let tone_curve_shadows = state.active_tone_curve_shadows;
+                                            let tone_curve_darks = state.active_tone_curve_darks;
+                                            let tone_curve_lights = state.active_tone_curve_lights;
+                                            let tone_curve_highlights = state.active_tone_curve_highlights;
+                                            let hsl_red_sat = state.active_hsl_red_sat;
+                                            let hsl_orange_sat = state.active_hsl_orange_sat;
+                                            let hsl_yellow_sat = state.active_hsl_yellow_sat;
+                                            let hsl_green_sat = state.active_hsl_green_sat;
+                                            let hsl_aqua_sat = state.active_hsl_aqua_sat;
+                                            let hsl_blue_sat = state.active_hsl_blue_sat;
+                                            let hsl_purple_sat = state.active_hsl_purple_sat;
+                                            let hsl_magenta_sat = state.active_hsl_magenta_sat;
+                                            let hsl_red_hue = state.active_hsl_red_hue;
+                                            let hsl_orange_hue = state.active_hsl_orange_hue;
+                                            let hsl_yellow_hue = state.active_hsl_yellow_hue;
+                                            let hsl_green_hue = state.active_hsl_green_hue;
+                                            let hsl_aqua_hue = state.active_hsl_aqua_hue;
+                                            let hsl_blue_hue = state.active_hsl_blue_hue;
+                                            let hsl_purple_hue = state.active_hsl_purple_hue;
+                                            let hsl_magenta_hue = state.active_hsl_magenta_hue;
+                                            let hsl_red_lum = state.active_hsl_red_lum;
+                                            let hsl_orange_lum = state.active_hsl_orange_lum;
+                                            let hsl_yellow_lum = state.active_hsl_yellow_lum;
+                                            let hsl_green_lum = state.active_hsl_green_lum;
+                                            let hsl_aqua_lum = state.active_hsl_aqua_lum;
+                                            let hsl_blue_lum = state.active_hsl_blue_lum;
+                                            let hsl_purple_lum = state.active_hsl_purple_lum;
+                                            let hsl_magenta_lum = state.active_hsl_magenta_lum;
+                                            let lens_distortion = state.active_lens_distortion;
+                                            let lens_vignette_amount = state.active_lens_vignette_amount;
+                                            let lens_vignette_midpoint = state.active_lens_vignette_midpoint;
+                                            let nr_luminance = state.active_nr_luminance;
+                                            let nr_color = state.active_nr_color;
+                                            let sharpen_amount = state.active_sharpen_amount;
+                                            let sharpen_radius = state.active_sharpen_radius;
+                                            let crop_settings = state.crop_settings.clone();
+
+                                            tokio::spawn(async move {
+                                                let _ = controller.save_edits(
+                                                    photo_id,
+                                                    exposure, contrast, 
+                                                    temperature, tint,
+                                                    highlights, shadows, whites, blacks,
+                                                    clarity, vibrance, saturation,
+                                                    tone_curve_shadows, tone_curve_darks, tone_curve_lights, tone_curve_highlights,
+                                                    hsl_red_sat, hsl_orange_sat, hsl_yellow_sat, hsl_green_sat, hsl_aqua_sat, hsl_blue_sat, hsl_purple_sat, hsl_magenta_sat,
+                                                    hsl_red_hue, hsl_orange_hue, hsl_yellow_hue, hsl_green_hue, hsl_aqua_hue, hsl_blue_hue, hsl_purple_hue, hsl_magenta_hue,
+                                                    hsl_red_lum, hsl_orange_lum, hsl_yellow_lum, hsl_green_lum, hsl_aqua_lum, hsl_blue_lum, hsl_purple_lum, hsl_magenta_lum,
+                                                    lens_distortion, lens_vignette_amount, lens_vignette_midpoint,
+                                                    nr_luminance, nr_color,
+                                                    sharpen_amount, sharpen_radius,
+                                                    crop_settings.as_ref().map(|c| c.crop_x()),
+                                                    crop_settings.as_ref().map(|c| c.crop_y()),
+                                                    crop_settings.as_ref().map(|c| c.crop_width()),
+                                                    crop_settings.as_ref().map(|c| c.crop_height()),
+                                                    crop_settings.as_ref().map(|c| c.rotation_90()),
+                                                    crop_settings.as_ref().map(|c| c.angle()),
+                                                    crop_settings.as_ref().map(|c| c.flip_horizontal()),
+                                                    crop_settings.as_ref().map(|c| c.flip_vertical()),
+                                                ).await;
+                                            });
+                                            
+                                            // Update saved crop settings to match current, preventing re-save loop on next frame
+                                            state.saved_crop_settings = state.crop_settings.clone();
+                                        }
+                                    }
+
                                     let new_id = photo.id.clone();
                                     // Update both IDs to keep Filmstrip and ImageViewer in sync
                                     state.develop_selected_photo_id = Some(new_id.clone());

@@ -195,6 +195,13 @@ impl eframe::App for VintageLightboxApp {
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Process thumbnail invalidation requests
+        let invalidated_ids: Vec<_> = self.state.invalidation_queue.drain().collect();
+        for id in invalidated_ids {
+            self.filmstrip.invalidate_thumbnail(&id);
+            self.photo_grid.invalidate_thumbnail(&id);
+        }
+
         // Trigger initial photo and preset loading on first frame
         if self.needs_initial_load {
             self.needs_initial_load = false;

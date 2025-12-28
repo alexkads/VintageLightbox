@@ -67,6 +67,9 @@ mod tests {
                  1.0,  // zoom
                  egui::Vec2::ZERO, // pan
                  false, // interactive
+                 true, // allow_pan
+                 None, // crop_settings
+                 false, // apply_crop_clip
              );
         });
 
@@ -107,6 +110,7 @@ mod tests {
                  None, 
                  None, 
                  false,
+                 None,
                  None
              );
              
@@ -136,7 +140,7 @@ mod tests {
              ui.ctx().data_mut(|d| d.insert_temp(toggle_id, true));
              
              // Process frame
-             window.show(ui.ctx(), None, None, false, None);
+             window.show(ui.ctx(), None, None, false, None, None);
              
              // Verify signal consumed and state flipped
              assert!(!ui.ctx().data(|d| d.get_temp::<bool>(toggle_id).unwrap_or(false)), "Signal should be consumed");
@@ -144,7 +148,7 @@ mod tests {
 
              // 2. Inject 'I' signal again (toggle ON)
              ui.ctx().data_mut(|d| d.insert_temp(toggle_id, true));
-             window.show(ui.ctx(), None, None, false, None);
+             window.show(ui.ctx(), None, None, false, None, None);
              assert!(window.show_info_overlay, "Info overlay should be ON");
         });
         harness.run_steps(1);
@@ -166,7 +170,7 @@ mod tests {
                  // If i=1: insert signal -> toggle -> becomes true.
                  
                  ui.ctx().data_mut(|d| d.insert_temp(toggle_id, true));
-                 window.show(ui.ctx(), None, None, false, None);
+                 window.show(ui.ctx(), None, None, false, None, None);
                  
                  // Verify
                  if i % 2 == 0 {
@@ -187,7 +191,7 @@ mod tests {
              let monitors = vec![create_dummy_monitor(0, true)];
              window.open(&monitors);
              
-             window.show(ui.ctx(), None, None, false, None);
+             window.show(ui.ctx(), None, None, false, None, None);
 
              let close_req = egui::Id::new("secondary_window_close_req");
              if ui.ctx().data(|d| d.get_temp::<bool>(close_req).unwrap_or(false)) {

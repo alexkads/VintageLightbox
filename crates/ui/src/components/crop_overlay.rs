@@ -121,7 +121,7 @@ impl CropOverlay {
         }
 
         // Handles
-        for (i, &pos) in handles.iter().enumerate() {
+        for &pos in handles.iter() {
             let rect = Rect::from_center_size(pos, Vec2::splat(Self::HANDLE_SIZE));
             ui.painter().rect_filled(rect, 2.0, Self::HANDLE_COLOR);
             ui.painter().rect_stroke(rect, 2.0, Stroke::new(Self::HANDLE_STROKE, Color32::BLACK), egui::StrokeKind::Middle);
@@ -272,7 +272,7 @@ impl CropOverlay {
 
             let pixel_w = nw * image_size.x;
             let pixel_h = nh * image_size.y;
-            let current_ratio = pixel_w / pixel_h;
+            let _current_ratio = pixel_w / pixel_h;
 
             match index {
                 // Corner handles - constrain to ratio

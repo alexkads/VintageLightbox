@@ -473,7 +473,11 @@ pub struct AppState {
     /// Whether to show the print dialog (legacy - kept for compatibility)
     pub show_print_dialog: bool,
     /// Print dialog state (legacy - kept for compatibility)
+    /// Print dialog state (legacy - kept for compatibility)
     pub print_dialog_state: Option<crate::components::print_dialog::PrintDialogState>,
+    
+    // Invalidation Queue for Thumbnails
+    pub invalidation_queue: HashSet<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -729,6 +733,7 @@ impl AppState {
             print_view_state: None,
             show_print_dialog: false,
             print_dialog_state: None,
+            invalidation_queue: HashSet::new(),
         }
     }
 

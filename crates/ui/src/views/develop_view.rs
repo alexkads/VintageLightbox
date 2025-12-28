@@ -69,7 +69,10 @@ impl DevelopView {
                 // Process pending actions
                 if let Some(photo_id) = pending_selection {
                      // Check if we need to save the CURRENT photo before switching
-                     if state.pending_auto_save {
+                     // Auto-save if there are pending edits OR if we are in crop mode (commit crop)
+                     let needs_save = state.pending_auto_save || (state.crop_mode_active && state.crop_settings.is_some());
+                     
+                     if needs_save {
                          if let Some(vm) = state.get_current_photo() {
                              // Trigger explicit save for current photo
                               let controller = editor_controller.clone();
@@ -176,6 +179,9 @@ impl DevelopView {
                                    // Also update exposure and other edits
                                    photo_vm.edit_exposure = Some(exposure);
                                    photo_vm.edit_contrast = Some(contrast);
+                                   
+                                   // Queue for invalidation (to update Filmstrip/Grid)
+                                   state.invalidation_queue.insert(id_for_update.clone());
                               }
                          }
                      }

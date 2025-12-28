@@ -39,6 +39,7 @@ display-info = "0.5"
 
 
 [dev-dependencies]
+async-trait.workspace = true
 egui_kittest = { version = "0.31", features = ["wgpu", "snapshot"] }
 sqlx = { version = "0.7", features = ["runtime-tokio", "sqlite"] }
 tempfile = "3.8"

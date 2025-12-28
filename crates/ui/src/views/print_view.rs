@@ -360,7 +360,7 @@ impl PrintView {
         ui.add_space(Theme::SPACE_XS);
         
         // Get print state photo_ids for highlighting
-        let print_photo_ids: std::collections::HashSet<String> = state.print_view_state
+        let _print_photo_ids: std::collections::HashSet<String> = state.print_view_state
             .as_ref()
             .map(|ps| ps.photo_ids.iter().cloned().collect())
             .unwrap_or_default();
