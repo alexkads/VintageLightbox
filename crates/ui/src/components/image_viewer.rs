@@ -4,6 +4,7 @@
 use egui::{Ui, Vec2, Rect, Sense, UiBuilder, Color32};
 use crate::state::{AppState, CurrentView};
 use crate::design_system::{theme::Theme, widgets};
+use crate::geometry::{ClipVertex, clip_polygon_to_uv_bounds};
 
 pub struct ImageViewer;
 
@@ -251,9 +252,8 @@ impl ImageViewer {
                         uvs[i] = egui::pos2(final_u, final_v);
                     }
 
-                    // 3. Construct Mesh
-                    use egui::epaint::{Mesh, Vertex};
-                    
+                    // 3. Draw fill background and construct clipped mesh
+
                     // Draw fill background for empty areas created by rotation
                     // Only needed when angle is non-zero (non 90-degree rotation creates gaps)
                     if crop.angle() != 0.0 {
@@ -278,10 +278,7 @@ impl ImageViewer {
                         }
                     }
                     
-                    let mut mesh = Mesh::with_texture(texture.id());
-                    
-                    // Vertices correspond to the View Rect (img_rect)
-                    // TL, TR, BR, BL
+                    // Create input vertices with screen position + UV
                     let screen_corners = [
                         img_rect.min,
                         egui::pos2(img_rect.max.x, img_rect.min.y),
@@ -289,36 +286,37 @@ impl ImageViewer {
                         egui::pos2(img_rect.min.x, img_rect.max.y),
                     ];
 
-                    for (i, &pos) in screen_corners.iter().enumerate() {
-                        // Check if UV is within valid texture bounds
-                        // If UV is outside [0,1], make vertex transparent to show fill color
-                        let uv = uvs[i];
-                        let uv_in_bounds = uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0;
-                        let vertex_color = if uv_in_bounds {
-                            Color32::WHITE
-                        } else {
-                            // Vertex is outside image - use fill color directly
-                            match crop.fill_mode() {
-                                domain::value_objects::RotationFillMode::Black => Color32::BLACK,
-                                domain::value_objects::RotationFillMode::White => Color32::WHITE,
-                                domain::value_objects::RotationFillMode::Transparent => Color32::TRANSPARENT,
-                                domain::value_objects::RotationFillMode::Intelligent => Color32::from_gray(30),
-                                domain::value_objects::RotationFillMode::ShrinkToFit => Color32::TRANSPARENT,
-                            }
-                        };
-                        mesh.vertices.push(Vertex {
-                            pos, 
-                            uv: uvs[i], 
-                            color: vertex_color
-                        });
-                    }
-                    
-                    // Add Quad Indices (0, 1, 2) and (0, 2, 3)
-                    mesh.add_triangle(0, 1, 2);
-                    mesh.add_triangle(0, 2, 3);
+                    let input_vertices: Vec<ClipVertex> = screen_corners
+                        .iter()
+                        .zip(uvs.iter())
+                        .map(|(&pos, &uv)| ClipVertex::new(pos, uv))
+                        .collect();
 
-                    // 4. Draw Mesh
-                    ui.painter().add(egui::Shape::mesh(mesh));
+                    // Clip polygon to valid UV bounds [0,1]
+                    let clipped = clip_polygon_to_uv_bounds(&input_vertices);
+
+                    // Only draw texture mesh if we have valid vertices after clipping
+                    if clipped.len() >= 3 {
+                        use egui::epaint::{Mesh, Vertex};
+                        let mut mesh = Mesh::with_texture(texture.id());
+
+                        // Add clipped vertices to mesh
+                        for v in &clipped {
+                            mesh.vertices.push(Vertex {
+                                pos: v.pos,
+                                uv: v.uv,
+                                color: Color32::WHITE,
+                            });
+                        }
+
+                        // Triangulate using fan triangulation (works for convex polygons)
+                        for i in 1..(clipped.len() - 1) {
+                            mesh.add_triangle(0, i as u32, (i + 1) as u32);
+                        }
+
+                        // Draw clipped texture mesh
+                        ui.painter().add(egui::Shape::mesh(mesh));
+                    }
                     
                     painted_rect = Some(img_rect);
                     
