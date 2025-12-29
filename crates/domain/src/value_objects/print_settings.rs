@@ -107,7 +107,7 @@ impl PrintSettings {
         color_mode: ColorMode,
     ) -> DomainResult<Self> {
         // Valida DPI
-        if dpi < Self::MIN_DPI || dpi > Self::MAX_DPI {
+        if !(Self::MIN_DPI..=Self::MAX_DPI).contains(&dpi) {
             return Err(DomainError::InvalidPrintSettings(format!(
                 "DPI must be between {} and {}",
                 Self::MIN_DPI,

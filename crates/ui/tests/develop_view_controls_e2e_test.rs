@@ -13,7 +13,6 @@ use infrastructure::cache::preview_manager::PreviewManager;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
-use tempfile::tempdir;
 
 /// Helper to create a minimal test harness with DevelopView
 fn create_develop_view_harness() -> (Harness<'static>, Rc<RefCell<AppState>>) {

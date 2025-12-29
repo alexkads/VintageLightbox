@@ -371,24 +371,18 @@ impl ImportProgressDialog {
                             self.pause_flag.store(true, Ordering::Relaxed);
                             self.status = ImportStatus::Paused;
                         }
-                    } else if self.status == ImportStatus::Paused {
-                        if ui.add(Button::new("Resume").min_size(Vec2::new(80.0, 25.0))).clicked() {
-                            self.pause_flag.store(false, Ordering::Relaxed);
-                            self.status = ImportStatus::Importing;
-                        }
+                    } else if self.status == ImportStatus::Paused && ui.add(Button::new("Resume").min_size(Vec2::new(80.0, 25.0))).clicked() {
+                        self.pause_flag.store(false, Ordering::Relaxed);
+                        self.status = ImportStatus::Importing;
                     }
 
-                    if self.status != ImportStatus::Completed && self.status != ImportStatus::Cancelled {
-                        if ui.add(Button::new("Cancel").min_size(Vec2::new(80.0, 25.0))).clicked() {
-                            self.cancel_flag.store(true, Ordering::Relaxed);
-                            self.status = ImportStatus::Cancelled;
-                        }
+                    if self.status != ImportStatus::Completed && self.status != ImportStatus::Cancelled && ui.add(Button::new("Cancel").min_size(Vec2::new(80.0, 25.0))).clicked() {
+                        self.cancel_flag.store(true, Ordering::Relaxed);
+                        self.status = ImportStatus::Cancelled;
                     }
 
-                    if self.status == ImportStatus::Completed || self.status == ImportStatus::Cancelled {
-                        if ui.add(Button::new("Close").min_size(Vec2::new(80.0, 25.0))).clicked() {
-                            should_close = true;
-                        }
+                    if (self.status == ImportStatus::Completed || self.status == ImportStatus::Cancelled) && ui.add(Button::new("Close").min_size(Vec2::new(80.0, 25.0))).clicked() {
+                        should_close = true;
                     }
                 });
             });

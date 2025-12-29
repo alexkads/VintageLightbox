@@ -58,7 +58,7 @@ impl FolderNode {
                     }
                 }
             }
-            if prefix.as_os_str().len() > 0 {
+            if !prefix.as_os_str().is_empty() {
                 lcp = Some(prefix);
             }
         }
@@ -110,11 +110,11 @@ impl FolderNode {
         let mut roots: Vec<FolderNode> = Vec::new();
         // Sort by length desc so we process children before parents
         let mut all_node_paths: Vec<PathBuf> = nodes.keys().cloned().collect();
-        all_node_paths.sort_by(|a, b| b.as_os_str().len().cmp(&a.as_os_str().len()));
+        all_node_paths.sort_by_key(|b| std::cmp::Reverse(b.as_os_str().len()));
 
         for path in all_node_paths {
             if let Some(node) = nodes.remove(&path) {
-                let parent_exists = path.parent().map_or(false, |p| nodes.contains_key(p));
+                let parent_exists = path.parent().is_some_and(|p| nodes.contains_key(p));
                 
                 if parent_exists {
                      let parent_path = path.parent().unwrap();
@@ -165,7 +165,7 @@ impl<'a> FolderTree<'a> {
         let mut clicked_path = None;
         
         let path_str = node.path.to_string_lossy().to_string();
-        let is_selected = self.selected_path.map_or(false, |p| p == node.path);
+        let is_selected = self.selected_path.is_some_and(|p| p == node.path);
         let icon_color = if is_selected { Theme::ACCENT_PRIMARY } else { Theme::TEXT_MUTED };
         
         let id = ui.make_persistent_id(&path_str);

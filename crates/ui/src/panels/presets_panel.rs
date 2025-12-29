@@ -12,6 +12,12 @@ pub struct PresetsPanel {
     user_presets_collapsed: bool,
 }
 
+impl Default for PresetsPanel {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PresetsPanel {
     pub fn new() -> Self {
         Self {

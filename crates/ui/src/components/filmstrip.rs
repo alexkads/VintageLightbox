@@ -550,6 +550,7 @@ impl Filmstrip {
         action
     }
     /// Show filmstrip for Develop view (single selection mode with callback)
+    #[allow(clippy::too_many_arguments)]
     pub fn show_develop(
         &mut self,
         ui: &mut Ui,
@@ -635,7 +636,9 @@ impl Filmstrip {
                 let has_edits = exposure != 0.0 || contrast != 1.0 || temperature != 0.0 || 
                                tint != 0.0 || saturation != 0.0 || vibrance != 0.0;
                 
-                let processed = if has_edits {
+                
+                
+                if has_edits {
                     crate::image_processing::ImageProcessor::process_image(
                         &result.image, exposure, contrast, temperature, tint,
                         highlights, shadows, whites, blacks, clarity, vibrance, saturation,
@@ -657,9 +660,7 @@ impl Filmstrip {
                     )
                 } else {
                     result.image.clone()
-                };
-                
-                processed
+                }
             } else {
                 result.image.clone()
             };

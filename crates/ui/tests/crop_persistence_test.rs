@@ -86,6 +86,7 @@ async fn test_crop_persistence_flow() {
          Some(crop_settings.angle()),
          Some(crop_settings.flip_horizontal()),
          Some(crop_settings.flip_vertical()),
+         Some(0), // crop_fill_mode (0 = default/solid)
      ).await.expect("Failed to save edits");
 
     // 4. Reload from DB (simulate app restart)
@@ -172,6 +173,7 @@ async fn test_crop_persistence_on_photo_switch() {
                  active_crop.as_ref().map(|c| c.angle()),
                  active_crop.as_ref().map(|c| c.flip_horizontal()),
                  active_crop.as_ref().map(|c| c.flip_vertical()),
+                 active_crop.as_ref().map(|_c| 0), // crop_fill_mode
              ).await.expect("Save failed");
         }
     }

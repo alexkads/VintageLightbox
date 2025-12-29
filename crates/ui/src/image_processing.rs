@@ -426,49 +426,49 @@ impl ImageProcessor {
                         let mut adjustment = 0.0;
                         
                         // Red (wraps around 0)
-                        if hue >= 345.0 || hue < 15.0 {
+                        if !(15.0..345.0).contains(&hue) {
                             let dist = if hue >= 345.0 { hue - 360.0 } else { hue };
                             let weight = 1.0 - (dist.abs() / 15.0).min(1.0);
                             adjustment += hsl_red_sat * weight;
                         }
                         // Orange: 15-45
-                        if hue >= 15.0 && hue < 45.0 {
+                        if (15.0..45.0).contains(&hue) {
                             let center = 30.0;
                             let weight = 1.0 - ((hue - center).abs() / 15.0).min(1.0);
                             adjustment += hsl_orange_sat * weight;
                         }
                         // Yellow: 45-75
-                        if hue >= 45.0 && hue < 75.0 {
+                        if (45.0..75.0).contains(&hue) {
                             let center = 60.0;
                             let weight = 1.0 - ((hue - center).abs() / 15.0).min(1.0);
                             adjustment += hsl_yellow_sat * weight;
                         }
                         // Green: 75-165
-                        if hue >= 75.0 && hue < 165.0 {
+                        if (75.0..165.0).contains(&hue) {
                             let center = 120.0;
                             let weight = 1.0 - ((hue - center).abs() / 45.0).min(1.0);
                             adjustment += hsl_green_sat * weight;
                         }
                         // Aqua: 165-210
-                        if hue >= 165.0 && hue < 210.0 {
+                        if (165.0..210.0).contains(&hue) {
                             let center = 187.5;
                             let weight = 1.0 - ((hue - center).abs() / 22.5).min(1.0);
                             adjustment += hsl_aqua_sat * weight;
                         }
                         // Blue: 210-270
-                        if hue >= 210.0 && hue < 270.0 {
+                        if (210.0..270.0).contains(&hue) {
                             let center = 240.0;
                             let weight = 1.0 - ((hue - center).abs() / 30.0).min(1.0);
                             adjustment += hsl_blue_sat * weight;
                         }
                         // Purple: 270-310
-                        if hue >= 270.0 && hue < 310.0 {
+                        if (270.0..310.0).contains(&hue) {
                             let center = 290.0;
                             let weight = 1.0 - ((hue - center).abs() / 20.0).min(1.0);
                             adjustment += hsl_purple_sat * weight;
                         }
                         // Magenta: 310-345
-                        if hue >= 310.0 && hue < 345.0 {
+                        if (310.0..345.0).contains(&hue) {
                             let center = 327.5;
                             let weight = 1.0 - ((hue - center).abs() / 17.5).min(1.0);
                             adjustment += hsl_magenta_sat * weight;

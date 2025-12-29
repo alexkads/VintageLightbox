@@ -21,6 +21,7 @@ impl CropSettings {
 
     /// Creates a new CropSettings with the specified values.
     /// All values are clamped to valid ranges.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         crop_x: f32,
         crop_y: f32,
@@ -39,6 +40,7 @@ impl CropSettings {
     }
 
     /// Creates a new CropSettings with the specified values and fill mode.
+    #[allow(clippy::too_many_arguments)]
     pub fn with_fill_mode_value(
         crop_x: f32,
         crop_y: f32,

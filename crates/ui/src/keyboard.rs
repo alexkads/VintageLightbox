@@ -192,10 +192,8 @@ impl KeyboardHandler {
                 }
 
                 // Delete or Backspace: Show delete confirmation
-                if i.key_pressed(Key::Delete) || i.key_pressed(Key::Backspace) {
-                    if !state.selected_photo_ids.is_empty() {
-                        state.show_delete_confirmation = true;
-                    }
+                if (i.key_pressed(Key::Delete) || i.key_pressed(Key::Backspace)) && !state.selected_photo_ids.is_empty() {
+                    state.show_delete_confirmation = true;
                 }
             }
 

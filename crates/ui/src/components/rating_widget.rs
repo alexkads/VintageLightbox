@@ -48,7 +48,7 @@ impl RatingWidget {
             let star_pos = egui::pos2(star_x + star_size / 2.0, rect.center().y);
 
             let is_filled = i < *rating as usize;
-            let is_hover_preview = interactive && hover_star.map_or(false, |h| i <= h);
+            let is_hover_preview = interactive && hover_star.is_some_and(|h| i <= h);
 
             let color = if is_filled || is_hover_preview {
                 Theme::RATING_ACTIVE

@@ -1,9 +1,9 @@
 #[cfg(test)]
 mod tests {
-    use egui::Context;
+    
     use egui_kittest::Harness;
     use egui_kittest::kittest::Queryable;
-    use std::time::Duration;
+    
     use ui::components::secondary_window::SecondaryWindow;
     use ui::monitors::MonitorInfo;
     use ui::components::image_viewer::ImageViewer;
@@ -63,6 +63,7 @@ mod tests {
                  ui,
                  None, // No texture in headless test
                  None, 
+                 None, // intelligent_fill_texture 
                  true, // has selection
                  1.0,  // zoom
                  egui::Vec2::ZERO, // pan

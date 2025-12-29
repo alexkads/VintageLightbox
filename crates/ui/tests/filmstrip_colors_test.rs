@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use ui::state::{AppState, CurrentView};
 use ui::keyboard::KeyboardHandler;
-use adapters::controllers::{PhotoController, LibraryController, EditorController, ExportController, ImportController};
+use adapters::controllers::{PhotoController, LibraryController, EditorController, ExportController};
 use infrastructure::{ExifReader, ThumbnailGeneratorImpl, ImageExporterImpl, cache::preview_manager::PreviewManager};
 use tempfile::tempdir;
 use use_cases::{SavePhotoEditsUseCase, ExportPhotoUseCase, ImportPhotoUseCase};

@@ -1,5 +1,4 @@
 use ui::state::AppState;
-use ui::components::filmstrip_filter::FilmstripFilter;
 use adapters::view_models::PhotoViewModel;
 use domain::value_objects::ColorLabel;
 

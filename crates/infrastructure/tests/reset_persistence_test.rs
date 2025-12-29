@@ -1,7 +1,7 @@
 use domain::{
     entities::Photo,
     repositories::PhotoRepository,
-    value_objects::{FilePath, PhotoId},
+    value_objects::FilePath,
 };
 use infrastructure::database::photo_repository::PhotoRepositoryImpl;
 use sqlx::sqlite::SqlitePoolOptions;

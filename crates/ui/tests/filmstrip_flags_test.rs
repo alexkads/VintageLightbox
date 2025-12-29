@@ -54,7 +54,7 @@ async fn setup_harness() -> (
 
 #[tokio::test]
 async fn test_filmstrip_flag_toggling() {
-    let (mut state, photo_repo, photo_controller) = setup_harness().await;
+    let (state, photo_repo, photo_controller) = setup_harness().await;
 
     let photo_id = state.photos[0].id.clone();
     

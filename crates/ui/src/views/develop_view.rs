@@ -28,6 +28,7 @@ impl DevelopView {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn show(
         &mut self,
         ui: &mut Ui,
@@ -473,6 +474,7 @@ impl DevelopView {
     }
 
     #[allow(unused_assignments)]
+    #[allow(clippy::too_many_arguments)]
     fn show_right_sidebar(
         &self,
         ui: &mut Ui,

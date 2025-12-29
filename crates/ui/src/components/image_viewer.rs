@@ -52,6 +52,7 @@ impl ImageViewer {
 
     /// Stateless rendering of the image viewer content
     /// Returns (new_zoom, new_pan, painted_image_rect)
+    #[allow(clippy::too_many_arguments)]
     pub fn render(
         ui: &mut Ui,
         detail_image: Option<&egui::TextureHandle>,

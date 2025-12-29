@@ -7,9 +7,10 @@ use crate::{DomainError, DomainResult};
 use serde::{Deserialize, Serialize};
 
 /// Layout de impressão
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum PrintLayout {
     /// Uma foto por página
+    #[default]
     Single,
     /// Múltiplas fotos em grid (colunas x linhas)
     Multiple { columns: u8, rows: u8 },
@@ -42,9 +43,7 @@ impl PrintLayout {
 
     /// Cria um layout ContactSheet com validação
     pub fn contact_sheet(photos_per_page: u8) -> DomainResult<Self> {
-        if photos_per_page < Self::MIN_PHOTOS_PER_PAGE
-            || photos_per_page > Self::MAX_PHOTOS_PER_PAGE
-        {
+        if !(Self::MIN_PHOTOS_PER_PAGE..=Self::MAX_PHOTOS_PER_PAGE).contains(&photos_per_page) {
             return Err(DomainError::InvalidPrintSettings(format!(
                 "Photos per page must be between {} and {}",
                 Self::MIN_PHOTOS_PER_PAGE,
@@ -76,12 +75,6 @@ impl PrintLayout {
     /// Verifica se o layout requer metadata (contact sheet)
     pub fn requires_metadata(&self) -> bool {
         matches!(self, PrintLayout::ContactSheet { .. })
-    }
-}
-
-impl Default for PrintLayout {
-    fn default() -> Self {
-        PrintLayout::Single
     }
 }
 

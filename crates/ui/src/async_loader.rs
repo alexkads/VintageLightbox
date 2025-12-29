@@ -93,7 +93,7 @@ impl AsyncThumbnailLoader {
                     let img_result = if is_raw_file(&req.path) {
                         load_raw_as_dynamic_image(&req.path)
                             .map_err(|e| image::ImageError::IoError(
-                                std::io::Error::new(std::io::ErrorKind::Other, e)
+                                std::io::Error::other(e)
                             ))
                     } else {
                         image::open(&req.path)
@@ -445,11 +445,7 @@ impl AsyncImageProcessor {
             // 1. Try Memory Cache for base image (RAM - Fast)
             let memory_hit = {
                 let mut cache = memory_cache.lock();
-                if let Some(decoded) = cache.get(&request.photo_id) {
-                    Some((decoded.image.clone(), decoded.histogram.clone()))
-                } else {
-                    None
-                }
+                cache.get(&request.photo_id).map(|decoded| (decoded.image.clone(), decoded.histogram.clone()))
             };
 
             let (preview_img, histogram) = if let Some((img, hist)) = memory_hit {
@@ -933,7 +929,7 @@ impl AsyncEditProcessor {
         
         // Drain all available results, keep only the latest
         while let Ok(result) = self.result_receiver.try_recv() {
-            if latest.as_ref().map_or(true, |l| result.request_id > l.request_id) {
+            if latest.as_ref().is_none_or(|l| result.request_id > l.request_id) {
                 latest = Some(result);
             }
         }

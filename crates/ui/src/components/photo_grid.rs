@@ -64,7 +64,9 @@ impl PhotoGrid {
                 let has_edits = exposure != 0.0 || contrast != 1.0 || temperature != 0.0 || 
                                tint != 0.0 || saturation != 0.0 || vibrance != 0.0;
                 
-                let processed = if has_edits {
+                
+                
+                if has_edits {
                     crate::image_processing::ImageProcessor::process_image(
                         &result.image, exposure, contrast, temperature, tint,
                         highlights, shadows, whites, blacks, clarity, vibrance, saturation,
@@ -78,9 +80,7 @@ impl PhotoGrid {
                     )
                 } else {
                     result.image.clone()
-                };
-                
-                processed
+                }
             } else {
                 result.image.clone()
             };
@@ -184,7 +184,7 @@ impl PhotoGrid {
         photos: &[PhotoViewModel],
         selection_changed: bool,
     ) {
-        let columns = state.grid_columns.max(1).min(5); // Clamp to 1-5
+        let columns = state.grid_columns.clamp(1, 5); // Clamp to 1-5
         let spacing = Theme::SPACE_SM;
         let available_width = ui.available_width();
         
@@ -228,6 +228,7 @@ impl PhotoGrid {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn show_tile_with_height(
         &mut self,
         ui: &mut Ui,
@@ -320,7 +321,7 @@ impl PhotoGrid {
 
         if let Some(texture) = self.thumbnail_cache.get(&photo.id) {
             // Calculate image area - leave space for name at bottom (proportional to tile height)
-            let name_space = (tile_height * 0.15).max(25.0).min(40.0);
+            let name_space = (tile_height * 0.15).clamp(25.0, 40.0);
             let img_height = tile_height - name_space - Theme::SPACE_XS * 2.0;
             
             let img_rect = Rect::from_min_size(
@@ -410,12 +411,10 @@ impl PhotoGrid {
 
                 let color = if i < photo.rating as usize {
                     Theme::RATING_ACTIVE
-                } else {
-                    if response.hovered() { 
-                        ui.visuals().text_color().linear_multiply(0.3) 
-                    } else { 
-                        Color32::TRANSPARENT 
-                    } // Hide empty stars if not hovering
+                } else if response.hovered() { 
+                    ui.visuals().text_color().linear_multiply(0.3) 
+                } else { 
+                    Color32::TRANSPARENT 
                 };
 
                 if color != Color32::TRANSPARENT {

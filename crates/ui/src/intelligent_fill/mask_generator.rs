@@ -213,8 +213,8 @@ impl MaskGenerator {
             compute_pass.set_bind_group(0, &resources.bind_group, &[]);
 
             // Dispatch: 16x16 workgroups
-            let workgroups_x = (width + 15) / 16;
-            let workgroups_y = (height + 15) / 16;
+            let workgroups_x = width.div_ceil(16);
+            let workgroups_y = height.div_ceil(16);
             compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, 1);
         }
 
@@ -313,10 +313,8 @@ impl MaskGenerator {
                 let source_y = rotated_y + center_y;
 
                 // Verificar se está dentro dos bounds
-                let is_valid = source_x >= 0.0
-                    && source_x <= 1.0
-                    && source_y >= 0.0
-                    && source_y <= 1.0;
+                let is_valid = (0.0..=1.0).contains(&source_x)
+                    && (0.0..=1.0).contains(&source_y);
 
                 if !is_valid {
                     mask[(y * width + x) as usize] = 255;

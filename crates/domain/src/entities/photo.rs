@@ -142,6 +142,7 @@ impl Photo {
     }
 
     /// Reconstrói uma foto a partir de dados persistidos (uso interno/infraestrutura)
+    #[allow(clippy::too_many_arguments)]
     pub fn reconstruct(
         id: PhotoId,
         file_path: FilePath,
@@ -508,6 +509,7 @@ impl Photo {
     }
 
     /// Define os ajustes de edição e marca como editada
+    #[allow(clippy::too_many_arguments)]
     pub fn set_edits(
         &mut self,
         exposure: Option<f32>,

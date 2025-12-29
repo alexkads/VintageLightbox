@@ -153,9 +153,9 @@ impl GpuImageProcessor {
         let current_request_id_clone = current_request_id.clone();
 
         // Try to initialize GPU in background thread
-        let _gpu_available = std::thread::spawn(move || {
+        let _gpu_available = !std::thread::spawn(move || {
             Self::gpu_processor_thread(request_receiver, result_sender, current_request_id_clone)
-        }).is_finished() == false; // Thread started successfully
+        }).is_finished(); // Thread started successfully
 
         Self {
             request_sender,
@@ -279,8 +279,7 @@ impl GpuImageProcessor {
              // WGPU requires bytes_per_row to be aligned to 256 bytes
             const COPY_BYTES_PER_ROW_ALIGNMENT: u32 = 256;
             let unpadded_bytes_per_row = 4 * width;
-            let padded_bytes_per_row = ((unpadded_bytes_per_row + COPY_BYTES_PER_ROW_ALIGNMENT - 1) 
-                / COPY_BYTES_PER_ROW_ALIGNMENT) * COPY_BYTES_PER_ROW_ALIGNMENT;
+            let padded_bytes_per_row = unpadded_bytes_per_row.div_ceil(COPY_BYTES_PER_ROW_ALIGNMENT) * COPY_BYTES_PER_ROW_ALIGNMENT;
 
             println!("GPU CACHE: Creating new resources for {}x{} (padded row: {})", 
                 width, height, padded_bytes_per_row);
@@ -413,8 +412,8 @@ impl GpuImageProcessor {
             compute_pass.set_bind_group(0, &resources.bind_group, &[]);
             
             // Dispatch workgroups (16x16 threads each)
-            let workgroups_x = (width + 15) / 16;
-            let workgroups_y = (height + 15) / 16;
+            let workgroups_x = width.div_ceil(16);
+            let workgroups_y = height.div_ceil(16);
             compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, 1);
         }
 

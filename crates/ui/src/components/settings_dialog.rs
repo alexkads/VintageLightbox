@@ -152,8 +152,8 @@ impl SettingsDialog {
             .inner_margin(egui::Margin::same(Theme::SPACE_MD as i8))
             .show(ui, |ui| {
                 let stats = state.cache_stats.as_ref();
-                let has_thumbnails = stats.map_or(false, |s| s.thumbnail_count > 0);
-                let has_previews = stats.map_or(false, |s| s.large_preview_count > 0);
+                let has_thumbnails = stats.is_some_and(|s| s.thumbnail_count > 0);
+                let has_previews = stats.is_some_and(|s| s.large_preview_count > 0);
                 let has_cache = has_thumbnails || has_previews;
 
                 ui.horizontal(|ui| {

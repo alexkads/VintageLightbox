@@ -1,10 +1,10 @@
 #[cfg(test)]
 mod tests {
-    use ui::components::crop_panel::CropPanel;
+    
     use ui::state::AppState;
     use domain::value_objects::{CropSettings, RotationFillMode, AspectRatio};
     use image::DynamicImage;
-    use egui::Context;
+    
 
     #[test]
     fn test_crop_panel_reset_restores_defaults() {

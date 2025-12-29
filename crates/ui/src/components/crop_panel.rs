@@ -222,7 +222,7 @@ impl CropPanel {
 
     /// Updates the current crop selection to match the selected aspect ratio
     pub fn enforce_aspect_ratio(state: &mut AppState) {
-        let current_crop = state.crop_settings.clone().unwrap_or(domain::value_objects::CropSettings::default());
+        let current_crop = state.crop_settings.clone().unwrap_or_default();
 
         // Calculate image ratio
         let (img_w, img_h) = if let Some(img) = state.original_preview.as_ref() {

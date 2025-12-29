@@ -228,12 +228,10 @@ impl<'a> TabViewer for DockViewer<'a> {
                 
                 // If we're in Develop mode and library_selected_photo_id changed,
                 // sync it to develop_selected_photo_id and trigger image reload
-                if current_view == CurrentView::Develop {
-                    if self.context.state.library_selected_photo_id != prev_library_id {
-                        if let Some(new_id) = self.context.state.library_selected_photo_id.clone() {
-                            self.context.state.develop_selected_photo_id = Some(new_id);
-                            self.context.state.loaded_photo_id = None; // Force reload
-                        }
+                if current_view == CurrentView::Develop && self.context.state.library_selected_photo_id != prev_library_id {
+                    if let Some(new_id) = self.context.state.library_selected_photo_id.clone() {
+                        self.context.state.develop_selected_photo_id = Some(new_id);
+                        self.context.state.loaded_photo_id = None; // Force reload
                     }
                 }
             }

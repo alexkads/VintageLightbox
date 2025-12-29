@@ -191,7 +191,7 @@ impl PrintViewState {
             return 0;
         }
         let per_page = self.selected_template.photos_per_page().max(1);
-        (self.photo_ids.len() + per_page - 1) / per_page
+        self.photo_ids.len().div_ceil(per_page)
     }
 }
 
@@ -282,14 +282,12 @@ impl PrintView {
             
             // "Use All Photos" checkbox
             if let Some(ref mut print_state) = state.print_view_state {
-                if ui.checkbox(&mut print_state.use_all_photos, "Use All Photos").changed() {
-                    if print_state.use_all_photos {
-                        // Auto-populate with all filtered photos
-                        print_state.photo_ids = state.filmstrip_filter.apply(&state.photos)
-                            .iter()
-                            .map(|p| p.id.clone())
-                            .collect();
-                    }
+                if ui.checkbox(&mut print_state.use_all_photos, "Use All Photos").changed() && print_state.use_all_photos {
+                    // Auto-populate with all filtered photos
+                    print_state.photo_ids = state.filmstrip_filter.apply(&state.photos)
+                        .iter()
+                        .map(|p| p.id.clone())
+                        .collect();
                 }
             }
             
@@ -559,10 +557,8 @@ impl PrintView {
             ui.add_space(Theme::SPACE_SM);
             
             // Reset photo positions button
-            if !print_state.cell_offsets.is_empty() {
-                if ui.small_button("Reset Photo Positions").clicked() {
-                    print_state.cell_offsets.clear();
-                }
+            if !print_state.cell_offsets.is_empty() && ui.small_button("Reset Photo Positions").clicked() {
+                print_state.cell_offsets.clear();
             }
         }
 

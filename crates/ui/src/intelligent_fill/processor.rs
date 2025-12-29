@@ -316,9 +316,9 @@ impl IntelligentFillProcessor {
         width: u32,
         height: u32,
     ) -> Option<(u8, u8, u8, u8)> {
-        for radius in 1..100 {
-            for dy in -(radius as i32)..=(radius as i32) {
-                for dx in -(radius as i32)..=(radius as i32) {
+        for radius in 1_i32..100 {
+            for dy in -radius..=radius {
+                for dx in -radius..=radius {
                     if dx.abs() != radius && dy.abs() != radius {
                         continue;
                     }

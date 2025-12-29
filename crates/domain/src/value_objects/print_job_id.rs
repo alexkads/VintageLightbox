@@ -33,10 +33,7 @@ impl PrintJobId {
         self.0
     }
 
-    /// Converte para string
-    pub fn to_string(&self) -> String {
-        self.0.to_string()
-    }
+
 }
 
 impl Default for PrintJobId {

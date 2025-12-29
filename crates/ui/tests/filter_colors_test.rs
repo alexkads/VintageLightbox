@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use std::time::Duration;
 
 use ui::state::{AppState, CurrentView};
 use ui::keyboard::KeyboardHandler;

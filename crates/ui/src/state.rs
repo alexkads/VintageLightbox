@@ -668,7 +668,7 @@ impl AppState {
             edit_history: Vec::new(),
             history_index: None,
             performance_metrics: PerformanceMetrics::default(),
-            show_performance_stats: std::env::var("SHOW_PERFORMANCE_STATS").map_or(false, |v| v == "true"),
+            show_performance_stats: std::env::var("SHOW_PERFORMANCE_STATS").is_ok_and(|v| v == "true"),
             start_load_time: None,
             pending_auto_save: false,
             pending_crop_apply: false,
