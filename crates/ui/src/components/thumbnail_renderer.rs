@@ -1,6 +1,7 @@
 use egui::{Color32, Rect, Vec2};
 use domain::value_objects::{CropSettings, RotationFillMode};
 use crate::geometry::{ClipVertex, clip_polygon_to_uv_bounds};
+use crate::components::animated_fill::{render_zebra_simple, ZebraPatternConfig};
 
 /// Renders a thumbnail with support for Crop, Rotation (Mesh-based), Fill Mode, and Aspect Ratio fitting.
 ///
@@ -132,7 +133,11 @@ pub fn render_thumbnail(
                 RotationFillMode::Black => Color32::BLACK,
                 RotationFillMode::White => Color32::WHITE,
                 RotationFillMode::Transparent => Color32::TRANSPARENT,
-                RotationFillMode::Intelligent => Color32::from_gray(30),
+                RotationFillMode::Intelligent => {
+                    // Show subtle animated zebra for thumbnails
+                    render_zebra_simple(ui, display_rect, &ZebraPatternConfig::dark_subtle());
+                    Color32::TRANSPARENT
+                }
                 RotationFillMode::ShrinkToFit => Color32::TRANSPARENT,
             };
 

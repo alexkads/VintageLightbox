@@ -420,6 +420,9 @@ impl eframe::App for VintageLightboxApp {
                 self.state.original_preview = None;
                 self.state.original_image_data = None;
                 self.state.detail_image_loaded_at = None;
+                // Reset intelligent fill state for new photo
+                self.state.intelligent_fill_texture = None;
+                self.state.prev_intelligent_fill_angle = f32::NAN; // Force reprocessing by using NaN
 
                 // Find the photo and request async processing
                 if let Some(photo) = self.state.photos.iter().find(|p| &p.id == photo_id) {

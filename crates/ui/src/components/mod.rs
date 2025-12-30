@@ -1,4 +1,5 @@
 pub mod advanced_slider;
+pub mod animated_fill;
 pub mod color_labels;
 pub mod context_menu;
 pub mod crop_overlay;

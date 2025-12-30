@@ -5,6 +5,7 @@ use egui::{Ui, Vec2, Rect, Sense, UiBuilder, Color32};
 use crate::state::{AppState, CurrentView};
 use crate::design_system::{theme::Theme, widgets};
 use crate::geometry::{ClipVertex, clip_polygon_to_uv_bounds};
+use crate::components::animated_fill::{render_zebra_simple, ZebraPatternConfig};
 
 pub struct ImageViewer;
 
@@ -285,8 +286,9 @@ impl ImageViewer {
                                 domain::value_objects::RotationFillMode::White => Color32::WHITE,
                                 domain::value_objects::RotationFillMode::Transparent => Color32::TRANSPARENT,
                                 domain::value_objects::RotationFillMode::Intelligent => {
-                                    // Processing or not available - show placeholder (magenta for debug visibility)
-                                    Color32::from_rgb(255, 0, 255)
+                                    // Processing - show animated zebra pattern within img_rect only
+                                    render_zebra_simple(ui, img_rect, &ZebraPatternConfig::processing_indicator());
+                                    Color32::TRANSPARENT // Don't draw solid color over the animation
                                 },
                                 domain::value_objects::RotationFillMode::ShrinkToFit => {
                                     // ShrinkToFit doesn't need fill
@@ -342,6 +344,39 @@ impl ImageViewer {
                     }
                     
                     painted_rect = Some(img_rect);
+                    
+                    // Show "Processing..." indicator when intelligent fill is pending
+                    if crop.fill_mode() == domain::value_objects::RotationFillMode::Intelligent
+                        && intelligent_fill_texture.is_none()
+                        && crop.angle() != 0.0
+                    {
+                        // Animated spinner character
+                        let time = ui.ctx().input(|i| i.time);
+                        let spinner_char = match ((time * 8.0) as usize) % 4 {
+                            0 => "◐",
+                            1 => "◓",
+                            2 => "◑",
+                            _ => "◒",
+                        };
+                        
+                        // Draw processing indicator badge
+                        let badge_size = Vec2::new(160.0, 28.0);
+                        let badge_pos = rect.center_top() + Vec2::new(-badge_size.x / 2.0, 20.0);
+                        let badge_rect = Rect::from_min_size(badge_pos, badge_size);
+                        
+                        ui.painter().rect_filled(
+                            badge_rect,
+                            6.0,
+                            Color32::from_rgba_unmultiplied(30, 30, 40, 230)
+                        );
+                        ui.painter().text(
+                            badge_rect.center(),
+                            egui::Align2::CENTER_CENTER,
+                            format!("{} Intelligent Fill...", spinner_char),
+                            egui::FontId::proportional(13.0),
+                            Color32::from_rgb(180, 180, 200),
+                        );
+                    }
                     
                     // Return early as we handled painting
                     return (zoom, pan, painted_rect, rect);
@@ -429,8 +464,9 @@ impl ImageViewer {
                                 domain::value_objects::RotationFillMode::White => Color32::WHITE,
                                 domain::value_objects::RotationFillMode::Transparent => Color32::TRANSPARENT,
                                 domain::value_objects::RotationFillMode::Intelligent => {
-                                    // Processing or not available - show placeholder
-                                    Color32::from_gray(60)
+                                    // Processing - show animated zebra pattern within img_rect only
+                                    render_zebra_simple(ui, img_rect, &ZebraPatternConfig::processing_indicator());
+                                    Color32::TRANSPARENT // Don't draw solid color over the animation
                                 },
                                 domain::value_objects::RotationFillMode::ShrinkToFit => {
                                     Color32::TRANSPARENT
