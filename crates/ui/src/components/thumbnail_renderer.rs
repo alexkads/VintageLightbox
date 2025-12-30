@@ -1,5 +1,5 @@
 use egui::{Color32, Rect, Vec2, pos2};
-use domain::value_objects::{CropSettings, RotationFillMode};
+use adapters::view_models::{CropSettings, RotationFillMode};
 use crate::geometry::{ClipVertex, clip_polygon_to_uv_bounds};
 use crate::components::animated_fill::{render_zebra_simple, ZebraPatternConfig};
 use crate::geometry::calculate_crop_uvs;

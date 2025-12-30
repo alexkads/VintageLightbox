@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::mpsc;
 use adapters::view_models::{ImportPreviewItemViewModel, ImportProgressViewModel};
-use domain::value_objects::{ImportOptions, OrganizationStrategy, RenamePattern};
+use adapters::view_models::{ImportOptions, OrganizationStrategy, RenamePattern};
 
 /// State for import preview dialog
 #[derive(Default)]

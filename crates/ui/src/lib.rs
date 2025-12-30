@@ -6,6 +6,7 @@
 
 pub mod app;
 pub mod state;
+pub mod editor_state_adapter;
 pub mod panels;
 pub mod design_system;
 pub mod image_processing;

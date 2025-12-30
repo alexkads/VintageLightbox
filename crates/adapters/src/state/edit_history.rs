@@ -2,7 +2,7 @@
 //!
 //! Gerencia histórico de edições para undo/redo.
 
-use super::editing_session::PhotoEdits;
+use domain::value_objects::PhotoEdits;
 
 /// Snapshot de estado para undo/redo
 #[derive(Debug, Clone)]
@@ -137,11 +137,11 @@ mod tests {
     fn test_push_and_undo() {
         let mut history = EditHistory::new();
         
-        let mut edits1 = PhotoEdits::new();
+        let mut edits1 = PhotoEdits::default();
         edits1.exposure = 0.0;
         history.push(edits1, "Initial");
 
-        let mut edits2 = PhotoEdits::new();
+        let mut edits2 = PhotoEdits::default();
         edits2.exposure = 0.5;
         history.push(edits2, "Adjust exposure");
 
@@ -154,11 +154,11 @@ mod tests {
     fn test_undo_and_redo() {
         let mut history = EditHistory::new();
         
-        let mut edits1 = PhotoEdits::new();
+        let mut edits1 = PhotoEdits::default();
         edits1.exposure = 0.0;
         history.push(edits1, "Initial");
 
-        let mut edits2 = PhotoEdits::new();
+        let mut edits2 = PhotoEdits::default();
         edits2.exposure = 1.0;
         history.push(edits2, "Exposure +1");
 
@@ -173,13 +173,13 @@ mod tests {
     fn test_push_after_undo_clears_redo() {
         let mut history = EditHistory::new();
         
-        history.push(PhotoEdits::new(), "1");
-        history.push(PhotoEdits::new(), "2");
-        history.push(PhotoEdits::new(), "3");
+        history.push(PhotoEdits::default(), "1");
+        history.push(PhotoEdits::default(), "2");
+        history.push(PhotoEdits::default(), "3");
 
         history.undo(); // Volta para 2
         
-        history.push(PhotoEdits::new(), "new");
+        history.push(PhotoEdits::default(), "new");
         
         // Redo não deve estar disponível
         assert!(!history.can_redo());
@@ -191,7 +191,7 @@ mod tests {
         let mut history = EditHistory::with_max_size(3);
         
         for i in 0..5 {
-            let mut edits = PhotoEdits::new();
+            let mut edits = PhotoEdits::default();
             edits.exposure = i as f32;
             history.push(edits, format!("Edit {}", i));
         }

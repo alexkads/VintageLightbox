@@ -24,6 +24,7 @@ impl KeyboardHandler {
         _export_controller: &Arc<adapters::controllers::ExportController>,
         _import_controller: &Arc<adapters::controllers::ImportController>,
         photo_sender: &tokio::sync::mpsc::Sender<Result<Vec<adapters::view_models::PhotoViewModel>, String>>,
+        editor_service: &mut adapters::services::EditorService,
     ) {
         // ==========================================
         // NAVIGATION SHORTCUTS (Arrow keys) - Must be outside closure for Develop mode
@@ -63,69 +64,24 @@ impl KeyboardHandler {
                                             let controller = editor_controller.clone();
                                             let photo_id = vm.id.clone();
                                             
-                                            // Capture current values
-                                            let exposure = state.active_exposure;
-                                            let contrast = state.active_contrast;
-                                            let temperature = state.active_temperature;
-                                            let tint = state.active_tint;
-                                            let highlights = state.active_highlights;
-                                            let shadows = state.active_shadows;
-                                            let whites = state.active_whites;
-                                            let blacks = state.active_blacks;
-                                            let clarity = state.active_clarity;
-                                            let vibrance = state.active_vibrance;
-                                            let saturation = state.active_saturation;
-                                            let tone_curve_shadows = state.active_tone_curve_shadows;
-                                            let tone_curve_darks = state.active_tone_curve_darks;
-                                            let tone_curve_lights = state.active_tone_curve_lights;
-                                            let tone_curve_highlights = state.active_tone_curve_highlights;
-                                            let hsl_red_sat = state.active_hsl_red_sat;
-                                            let hsl_orange_sat = state.active_hsl_orange_sat;
-                                            let hsl_yellow_sat = state.active_hsl_yellow_sat;
-                                            let hsl_green_sat = state.active_hsl_green_sat;
-                                            let hsl_aqua_sat = state.active_hsl_aqua_sat;
-                                            let hsl_blue_sat = state.active_hsl_blue_sat;
-                                            let hsl_purple_sat = state.active_hsl_purple_sat;
-                                            let hsl_magenta_sat = state.active_hsl_magenta_sat;
-                                            let hsl_red_hue = state.active_hsl_red_hue;
-                                            let hsl_orange_hue = state.active_hsl_orange_hue;
-                                            let hsl_yellow_hue = state.active_hsl_yellow_hue;
-                                            let hsl_green_hue = state.active_hsl_green_hue;
-                                            let hsl_aqua_hue = state.active_hsl_aqua_hue;
-                                            let hsl_blue_hue = state.active_hsl_blue_hue;
-                                            let hsl_purple_hue = state.active_hsl_purple_hue;
-                                            let hsl_magenta_hue = state.active_hsl_magenta_hue;
-                                            let hsl_red_lum = state.active_hsl_red_lum;
-                                            let hsl_orange_lum = state.active_hsl_orange_lum;
-                                            let hsl_yellow_lum = state.active_hsl_yellow_lum;
-                                            let hsl_green_lum = state.active_hsl_green_lum;
-                                            let hsl_aqua_lum = state.active_hsl_aqua_lum;
-                                            let hsl_blue_lum = state.active_hsl_blue_lum;
-                                            let hsl_purple_lum = state.active_hsl_purple_lum;
-                                            let hsl_magenta_lum = state.active_hsl_magenta_lum;
-                                            let lens_distortion = state.active_lens_distortion;
-                                            let lens_vignette_amount = state.active_lens_vignette_amount;
-                                            let lens_vignette_midpoint = state.active_lens_vignette_midpoint;
-                                            let nr_luminance = state.active_nr_luminance;
-                                            let nr_color = state.active_nr_color;
-                                            let sharpen_amount = state.active_sharpen_amount;
-                                            let sharpen_radius = state.active_sharpen_radius;
+                                            // Get current edits from EditorService (simplified!)
+                                            let current_edits = editor_service.current_edits();
                                             let crop_settings = state.crop_settings.clone();
 
                                             tokio::spawn(async move {
                                                 let _ = controller.save_edits(
                                                     photo_id,
-                                                    exposure, contrast, 
-                                                    temperature, tint,
-                                                    highlights, shadows, whites, blacks,
-                                                    clarity, vibrance, saturation,
-                                                    tone_curve_shadows, tone_curve_darks, tone_curve_lights, tone_curve_highlights,
-                                                    hsl_red_sat, hsl_orange_sat, hsl_yellow_sat, hsl_green_sat, hsl_aqua_sat, hsl_blue_sat, hsl_purple_sat, hsl_magenta_sat,
-                                                    hsl_red_hue, hsl_orange_hue, hsl_yellow_hue, hsl_green_hue, hsl_aqua_hue, hsl_blue_hue, hsl_purple_hue, hsl_magenta_hue,
-                                                    hsl_red_lum, hsl_orange_lum, hsl_yellow_lum, hsl_green_lum, hsl_aqua_lum, hsl_blue_lum, hsl_purple_lum, hsl_magenta_lum,
-                                                    lens_distortion, lens_vignette_amount, lens_vignette_midpoint,
-                                                    nr_luminance, nr_color,
-                                                    sharpen_amount, sharpen_radius,
+                                                    current_edits.exposure, current_edits.contrast, 
+                                                    current_edits.temperature, current_edits.tint,
+                                                    current_edits.highlights, current_edits.shadows, current_edits.whites, current_edits.blacks,
+                                                    current_edits.clarity, current_edits.vibrance, current_edits.saturation,
+                                                    current_edits.tone_curve_shadows, current_edits.tone_curve_darks, current_edits.tone_curve_lights, current_edits.tone_curve_highlights,
+                                                    current_edits.hsl_red_sat, current_edits.hsl_orange_sat, current_edits.hsl_yellow_sat, current_edits.hsl_green_sat, current_edits.hsl_aqua_sat, current_edits.hsl_blue_sat, current_edits.hsl_purple_sat, current_edits.hsl_magenta_sat,
+                                                    current_edits.hsl_red_hue, current_edits.hsl_orange_hue, current_edits.hsl_yellow_hue, current_edits.hsl_green_hue, current_edits.hsl_aqua_hue, current_edits.hsl_blue_hue, current_edits.hsl_purple_hue, current_edits.hsl_magenta_hue,
+                                                    current_edits.hsl_red_lum, current_edits.hsl_orange_lum, current_edits.hsl_yellow_lum, current_edits.hsl_green_lum, current_edits.hsl_aqua_lum, current_edits.hsl_blue_lum, current_edits.hsl_purple_lum, current_edits.hsl_magenta_lum,
+                                                    current_edits.lens_distortion, current_edits.lens_vignette_amount, current_edits.lens_vignette_midpoint,
+                                                    current_edits.nr_luminance, current_edits.nr_color,
+                                                    current_edits.sharpen_amount, current_edits.sharpen_radius,
                                                     crop_settings.as_ref().map(|c| c.crop_x()),
                                                     crop_settings.as_ref().map(|c| c.crop_y()),
                                                     crop_settings.as_ref().map(|c| c.crop_width()),
@@ -222,11 +178,25 @@ impl KeyboardHandler {
                 let shift_pressed = i.modifiers.shift;
 
                 if cmd_pressed && shift_pressed && i.key_pressed(Key::Z) {
-                    // Redo
-                    state.redo();
+                    // Redo via EditorService
+                    if editor_service.can_redo() {
+                        if let Some(_edits) = editor_service.redo() {
+                            // Sync back to state
+                            crate::editor_state_adapter::EditorStateAdapter::sync_to_state(editor_service, state);
+                            state.pending_auto_save = true;
+                            ctx.request_repaint();
+                        }
+                    }
                 } else if cmd_pressed && i.key_pressed(Key::Z) {
-                    // Undo
-                    state.undo();
+                    // Undo via EditorService
+                    if editor_service.can_undo() {
+                        if let Some(_edits) = editor_service.undo() {
+                            // Sync back to state
+                            crate::editor_state_adapter::EditorStateAdapter::sync_to_state(editor_service, state);
+                            state.pending_auto_save = true;
+                            ctx.request_repaint();
+                        }
+                    }
                 }
             }
         });

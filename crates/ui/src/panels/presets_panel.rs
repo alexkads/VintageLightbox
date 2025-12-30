@@ -3,7 +3,7 @@ use crate::design_system::{
     theme::Theme,
     widgets::{self, PanelHeader},
 };
-use domain::entities::Preset;
+use adapters::view_models::Preset;
 
 pub struct PresetsPanel {
     system_presets: Vec<Preset>,

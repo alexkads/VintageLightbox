@@ -1,5 +1,36 @@
 use serde::{Serialize, Deserialize};
 
+// =============================================================================
+// Re-exports for UI Layer
+// =============================================================================
+// These re-exports allow UI to import from adapters instead of domain directly,
+// maintaining clean architecture boundaries while avoiding code duplication
+// for simple value objects that are already DTOs.
+
+// Photo editing types
+pub use domain::value_objects::PhotoEdits;
+pub use domain::value_objects::CropSettings;
+pub use domain::value_objects::AspectRatio;
+pub use domain::value_objects::RotationFillMode;
+
+// Classification types
+pub use domain::value_objects::ColorLabel;
+pub use domain::value_objects::Flag;
+
+// Import types
+pub use domain::import_source::ImportSource;
+pub use domain::value_objects::{ImportOptions, OrganizationStrategy, RenamePattern};
+
+// Entity types (when needed as DTOs in UI)
+pub use domain::entities::Preset;
+
+// Services types (when UI needs to interact with service status)
+pub use domain::services::intelligent_fill::ModelStatus;
+
+// =============================================================================
+// Dedicated ViewModels
+// =============================================================================
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PhotoViewModel {
     pub id: String,

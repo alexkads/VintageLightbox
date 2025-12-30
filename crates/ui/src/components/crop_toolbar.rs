@@ -1,5 +1,5 @@
 use egui::{Ui, ComboBox};
-use domain::value_objects::AspectRatio;
+use adapters::view_models::AspectRatio;
 use crate::design_system::icons;
 
 /// Toolbar for crop controls in Develop mode

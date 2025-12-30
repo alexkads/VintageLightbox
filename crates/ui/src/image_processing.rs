@@ -8,7 +8,7 @@ use egui::{ColorImage, TextureHandle, Context};
 use image::DynamicImage;
 use std::time::{Duration, Instant};
 use infrastructure::image_processing::ImageAlgorithms;
-use domain::value_objects::PhotoEdits;
+use adapters::view_models::PhotoEdits;
 
 /// Image processor with debouncing support
 pub struct ImageProcessor {

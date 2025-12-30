@@ -1,7 +1,7 @@
 use egui::{Ui, RichText};
 use crate::state::AppState;
 use adapters::controllers::ImportController;
-use domain::import_source::ImportSource;
+use adapters::view_models::ImportSource;
 use tokio::sync::mpsc;
 use std::sync::Arc;
 

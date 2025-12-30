@@ -8,6 +8,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 
 use adapters::controllers::*;
+use adapters::services::editor_service::EditorService;
 use adapters::view_models::PhotoViewModel;
 use infrastructure::cache::preview_manager::PreviewManager;
 
@@ -41,6 +42,7 @@ pub struct DockViewerContext<'a> {
     pub ctx: &'a egui::Context,
     pub photo_grid: &'a mut PhotoGrid,
     pub filmstrip: &'a mut Filmstrip,
+    pub editor_service: &'a mut EditorService,
 }
 
 /// TabViewer implementation for VintageLightbox
@@ -329,13 +331,17 @@ impl<'a> DockViewer<'a> {
             ui.add_space(Theme::SPACE_SM);
             
             // Exposure
+            let current_edits = self.context.editor_service.current_edits();
+            let mut exposure = current_edits.exposure;
+            
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new("Exposure").size(Theme::FONT_SM));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(format!("{:+.2}", self.context.state.active_exposure));
+                    ui.label(format!("{:+.2}", exposure));
                 });
             });
-            if ui.add(egui::Slider::new(&mut self.context.state.active_exposure, -5.0..=5.0).show_value(false)).changed() {
+            if ui.add(egui::Slider::new(&mut exposure, -5.0..=5.0).show_value(false)).changed() {
+                let _ = self.context.editor_service.update_field("Exposure", |e| e.exposure = exposure);
                 self.context.state.last_slider_change_time = Some(std::time::Instant::now());
                 self.context.state.pending_auto_save = true;
             }
@@ -343,13 +349,16 @@ impl<'a> DockViewer<'a> {
             ui.add_space(Theme::SPACE_SM);
 
             // Contrast
+            let mut contrast = current_edits.contrast;
+            
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new("Contrast").size(Theme::FONT_SM));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(format!("{:.2}", self.context.state.active_contrast));
+                    ui.label(format!("{:.2}", contrast));
                 });
             });
-            if ui.add(egui::Slider::new(&mut self.context.state.active_contrast, 0.0..=2.0).show_value(false)).changed() {
+            if ui.add(egui::Slider::new(&mut contrast, 0.0..=2.0).show_value(false)).changed() {
+                let _ = self.context.editor_service.update_field("Contrast", |e| e.contrast = contrast);
                 self.context.state.last_slider_change_time = Some(std::time::Instant::now());
                 self.context.state.pending_auto_save = true;
             }
@@ -357,13 +366,16 @@ impl<'a> DockViewer<'a> {
             ui.add_space(Theme::SPACE_SM);
 
             // Temperature
+            let mut temperature = current_edits.temperature;
+            
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new("Temperature").size(Theme::FONT_SM));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(format!("{:+.1}", self.context.state.active_temperature));
+                    ui.label(format!("{:+.1}", temperature));
                 });
             });
-            if ui.add(egui::Slider::new(&mut self.context.state.active_temperature, -10.0..=10.0).show_value(false)).changed() {
+            if ui.add(egui::Slider::new(&mut temperature, -10.0..=10.0).show_value(false)).changed() {
+                let _ = self.context.editor_service.update_field("Temperature", |e| e.temperature = temperature);
                 self.context.state.last_slider_change_time = Some(std::time::Instant::now());
                 self.context.state.pending_auto_save = true;
             }
@@ -489,17 +501,20 @@ impl<'a> DockViewer<'a> {
             // Reset button with icon
             let reset_label = format!("{} Reset All", crate::design_system::icons::ACTION_RESET);
             if ui.button(&reset_label).clicked() {
-                self.context.state.active_exposure = 0.0;
-                self.context.state.active_contrast = 1.0;
-                self.context.state.active_temperature = 0.0;
-                self.context.state.active_tint = 0.0;
-                self.context.state.active_highlights = 0.0;
-                self.context.state.active_shadows = 0.0;
-                self.context.state.active_whites = 0.0;
-                self.context.state.active_blacks = 0.0;
-                self.context.state.active_clarity = 0.0;
-                self.context.state.active_vibrance = 0.0;
-                self.context.state.active_saturation = 0.0;
+                // Use EditorService to reset all fields at once
+                let _ = self.context.editor_service.update_field("Reset All", |e| {
+                    e.exposure = 0.0;
+                    e.contrast = 1.0;
+                    e.temperature = 0.0;
+                    e.tint = 0.0;
+                    e.highlights = 0.0;
+                    e.shadows = 0.0;
+                    e.whites = 0.0;
+                    e.blacks = 0.0;
+                    e.clarity = 0.0;
+                    e.vibrance = 0.0;
+                    e.saturation = 0.0;
+                });
                 self.context.state.last_slider_change_time = Some(std::time::Instant::now());
                 self.context.state.pending_auto_save = true;
             }
@@ -580,25 +595,29 @@ impl<'a> DockViewer<'a> {
     }
     
     fn apply_preset(&mut self, preset: &domain::entities::Preset) {
-        if let Some(v) = preset.adjustments.exposure { self.context.state.active_exposure = v; }
-        if let Some(v) = preset.adjustments.contrast { self.context.state.active_contrast = v; }
-        if let Some(v) = preset.adjustments.temperature { self.context.state.active_temperature = v; }
-        if let Some(v) = preset.adjustments.tint { self.context.state.active_tint = v; }
-        if let Some(v) = preset.adjustments.highlights { self.context.state.active_highlights = v; }
-        if let Some(v) = preset.adjustments.shadows { self.context.state.active_shadows = v; }
-        if let Some(v) = preset.adjustments.whites { self.context.state.active_whites = v; }
-        if let Some(v) = preset.adjustments.blacks { self.context.state.active_blacks = v; }
-        if let Some(v) = preset.adjustments.clarity { self.context.state.active_clarity = v; }
-        if let Some(v) = preset.adjustments.vibrance { self.context.state.active_vibrance = v; }
-        if let Some(v) = preset.adjustments.saturation { self.context.state.active_saturation = v; }
-        if let Some(v) = preset.adjustments.tone_curve_shadows { self.context.state.active_tone_curve_shadows = v; }
-        if let Some(v) = preset.adjustments.tone_curve_darks { self.context.state.active_tone_curve_darks = v; }
-        if let Some(v) = preset.adjustments.tone_curve_lights { self.context.state.active_tone_curve_lights = v; }
-        if let Some(v) = preset.adjustments.tone_curve_highlights { self.context.state.active_tone_curve_highlights = v; }
+        // Use EditorService to apply all preset adjustments
+        let preset_name = preset.name.clone();
+        let _ = self.context.editor_service.update_field(&format!("Preset: {}", preset_name), |e| {
+            if let Some(v) = preset.adjustments.exposure { e.exposure = v; }
+            if let Some(v) = preset.adjustments.contrast { e.contrast = v; }
+            if let Some(v) = preset.adjustments.temperature { e.temperature = v; }
+            if let Some(v) = preset.adjustments.tint { e.tint = v; }
+            if let Some(v) = preset.adjustments.highlights { e.highlights = v; }
+            if let Some(v) = preset.adjustments.shadows { e.shadows = v; }
+            if let Some(v) = preset.adjustments.whites { e.whites = v; }
+            if let Some(v) = preset.adjustments.blacks { e.blacks = v; }
+            if let Some(v) = preset.adjustments.clarity { e.clarity = v; }
+            if let Some(v) = preset.adjustments.vibrance { e.vibrance = v; }
+            if let Some(v) = preset.adjustments.saturation { e.saturation = v; }
+            if let Some(v) = preset.adjustments.tone_curve_shadows { e.tone_curve_shadows = v; }
+            if let Some(v) = preset.adjustments.tone_curve_darks { e.tone_curve_darks = v; }
+            if let Some(v) = preset.adjustments.tone_curve_lights { e.tone_curve_lights = v; }
+            if let Some(v) = preset.adjustments.tone_curve_highlights { e.tone_curve_highlights = v; }
+        });
         
         self.context.state.pending_auto_save = true;
         self.context.state.last_slider_change_time = Some(std::time::Instant::now());
-        self.context.state.toasts.success(format!("Applied preset: {}", preset.name));
+        self.context.state.toasts.success(format!("Applied preset: {}", preset_name));
     }
 
     fn render_hsl_color(&mut self, ui: &mut Ui) {

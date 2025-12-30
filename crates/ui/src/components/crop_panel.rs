@@ -3,7 +3,7 @@
 
 use egui::{Ui, ComboBox};
 // use image::GenericImageView; // Inherent methods used
-use domain::value_objects::AspectRatio;
+use adapters::view_models::AspectRatio;
 use crate::design_system::theme::Theme;
 use crate::state::AppState;
 
@@ -285,7 +285,7 @@ impl CropPanel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use domain::value_objects::CropSettings;
+    use adapters::view_models::CropSettings;
 
     #[test]
     fn test_enforce_aspect_ratio_1_to_1() {

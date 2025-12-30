@@ -66,7 +66,8 @@ async fn setup_harness() -> (
     Arc<ExportController>,
     Arc<ImportController>,
     tokio::sync::mpsc::Sender<Result<Vec<PhotoViewModel>, String>>,
-    Context
+    Context,
+    adapters::services::EditorService,
 ) {
      let db_url = "sqlite::memory:";
      let pool = sqlx::SqlitePool::connect(db_url).await.expect("Failed to create in-memory db");
@@ -142,12 +143,14 @@ async fn setup_harness() -> (
      
      let (tx, _rx) = tokio::sync::mpsc::channel(100);
      
-     (state, kb_handler, photo_controller, lib_controller, editor_controller, export_controller, import_controller, tx, Context::default())
+     let editor_service = adapters::services::EditorService::new();
+     
+     (state, kb_handler, photo_controller, lib_controller, editor_controller, export_controller, import_controller, tx, Context::default(), editor_service)
 }
 
 #[tokio::test]
 async fn test_keyboard_nav_saves_crop() {
-    let (mut state, kb_handler, photo_controller, lib_controller, editor_controller, export_controller, import_controller, tx, ctx) = setup_harness().await;
+    let (mut state, kb_handler, photo_controller, lib_controller, editor_controller, export_controller, import_controller, tx, ctx, mut editor_service) = setup_harness().await;
     
     // Mock Photo 1
     let mut photo1 = PhotoViewModel::default();
@@ -183,7 +186,8 @@ async fn test_keyboard_nav_saves_crop() {
         &editor_controller,
         &export_controller,
         &import_controller,
-        &tx
+        &tx,
+        &mut editor_service
     );
     
     // Wait for async spawn to complete (checking synchronous flag update)

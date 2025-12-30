@@ -1,5 +1,5 @@
 use egui::{Pos2, Vec2, pos2, vec2};
-use domain::value_objects::CropSettings;
+use adapters::view_models::CropSettings;
 
 /// Calculate UV coordinates for the "Neutral Viewer" mode (Lightroom style).
 /// The Viewer renders the final cropped result as a straight rectangle.

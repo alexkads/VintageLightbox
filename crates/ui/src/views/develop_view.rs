@@ -33,6 +33,7 @@ impl DevelopView {
         &mut self,
         ui: &mut Ui,
         state: &mut AppState,
+        editor_service: &mut adapters::services::EditorService,
         editor_controller: &std::sync::Arc<adapters::controllers::EditorController>,
         export_controller: &std::sync::Arc<adapters::controllers::ExportController>,
         photo_controller: &std::sync::Arc<adapters::controllers::PhotoController>,
@@ -78,52 +79,9 @@ impl DevelopView {
                              // Trigger explicit save for current photo
                               let controller = editor_controller.clone();
                               let id = vm.id.clone();
-                              let exposure = state.active_exposure;
-                              let contrast = state.active_contrast;
-                              let temperature = state.active_temperature;
-                              let tint = state.active_tint;
-                              let highlights = state.active_highlights;
-                              let shadows = state.active_shadows;
-                              let whites = state.active_whites;
-                              let blacks = state.active_blacks;
-                              let clarity = state.active_clarity;
-                              let vibrance = state.active_vibrance;
-                              let saturation = state.active_saturation;
-                              let tone_curve_shadows = state.active_tone_curve_shadows;
-                              let tone_curve_darks = state.active_tone_curve_darks;
-                              let tone_curve_lights = state.active_tone_curve_lights;
-                              let tone_curve_highlights = state.active_tone_curve_highlights;
-                              let hsl_red_sat = state.active_hsl_red_sat;
-                              let hsl_orange_sat = state.active_hsl_orange_sat;
-                              let hsl_yellow_sat = state.active_hsl_yellow_sat;
-                              let hsl_green_sat = state.active_hsl_green_sat;
-                              let hsl_aqua_sat = state.active_hsl_aqua_sat;
-                              let hsl_blue_sat = state.active_hsl_blue_sat;
-                              let hsl_purple_sat = state.active_hsl_purple_sat;
-                              let hsl_magenta_sat = state.active_hsl_magenta_sat;
-                              let hsl_red_hue = state.active_hsl_red_hue;
-                              let hsl_orange_hue = state.active_hsl_orange_hue;
-                              let hsl_yellow_hue = state.active_hsl_yellow_hue;
-                              let hsl_green_hue = state.active_hsl_green_hue;
-                              let hsl_aqua_hue = state.active_hsl_aqua_hue;
-                              let hsl_blue_hue = state.active_hsl_blue_hue;
-                              let hsl_purple_hue = state.active_hsl_purple_hue;
-                              let hsl_magenta_hue = state.active_hsl_magenta_hue;
-                              let hsl_red_lum = state.active_hsl_red_lum;
-                              let hsl_orange_lum = state.active_hsl_orange_lum;
-                              let hsl_yellow_lum = state.active_hsl_yellow_lum;
-                              let hsl_green_lum = state.active_hsl_green_lum;
-                              let hsl_aqua_lum = state.active_hsl_aqua_lum;
-                              let hsl_blue_lum = state.active_hsl_blue_lum;
-                              let hsl_purple_lum = state.active_hsl_purple_lum;
-                              let hsl_magenta_lum = state.active_hsl_magenta_lum;
-                              let lens_distortion = state.active_lens_distortion;
-                              let lens_vignette_amount = state.active_lens_vignette_amount;
-                              let lens_vignette_midpoint = state.active_lens_vignette_midpoint;
-                              let nr_luminance = state.active_nr_luminance;
-                              let nr_color = state.active_nr_color;
-                              let sharpen_amount = state.active_sharpen_amount;
-                              let sharpen_radius = state.active_sharpen_radius;
+                              
+                              // Get current edits from EditorService (simplified!)
+                              let current_edits = editor_service.current_edits();
                               let active_crop = state.crop_settings.clone();
 
                               // Clone for use after spawn
@@ -133,16 +91,16 @@ impl DevelopView {
                               tokio::spawn(async move {
                                   let _ = controller.save_edits(
                                       id,
-                                      exposure, contrast, temperature, tint,
-                                      highlights, shadows, whites, blacks,
-                                      clarity, vibrance, saturation,
-                                      tone_curve_shadows, tone_curve_darks, tone_curve_lights, tone_curve_highlights,
-                                      hsl_red_sat, hsl_orange_sat, hsl_yellow_sat, hsl_green_sat, hsl_aqua_sat, hsl_blue_sat, hsl_purple_sat, hsl_magenta_sat,
-                                      hsl_red_hue, hsl_orange_hue, hsl_yellow_hue, hsl_green_hue, hsl_aqua_hue, hsl_blue_hue, hsl_purple_hue, hsl_magenta_hue,
-                                      hsl_red_lum, hsl_orange_lum, hsl_yellow_lum, hsl_green_lum, hsl_aqua_lum, hsl_blue_lum, hsl_purple_lum, hsl_magenta_lum,
-                                      lens_distortion, lens_vignette_amount, lens_vignette_midpoint,
-                                      nr_luminance, nr_color,
-                                      sharpen_amount, sharpen_radius,
+                                      current_edits.exposure, current_edits.contrast, current_edits.temperature, current_edits.tint,
+                                      current_edits.highlights, current_edits.shadows, current_edits.whites, current_edits.blacks,
+                                      current_edits.clarity, current_edits.vibrance, current_edits.saturation,
+                                      current_edits.tone_curve_shadows, current_edits.tone_curve_darks, current_edits.tone_curve_lights, current_edits.tone_curve_highlights,
+                                      current_edits.hsl_red_sat, current_edits.hsl_orange_sat, current_edits.hsl_yellow_sat, current_edits.hsl_green_sat, current_edits.hsl_aqua_sat, current_edits.hsl_blue_sat, current_edits.hsl_purple_sat, current_edits.hsl_magenta_sat,
+                                      current_edits.hsl_red_hue, current_edits.hsl_orange_hue, current_edits.hsl_yellow_hue, current_edits.hsl_green_hue, current_edits.hsl_aqua_hue, current_edits.hsl_blue_hue, current_edits.hsl_purple_hue, current_edits.hsl_magenta_hue,
+                                      current_edits.hsl_red_lum, current_edits.hsl_orange_lum, current_edits.hsl_yellow_lum, current_edits.hsl_green_lum, current_edits.hsl_aqua_lum, current_edits.hsl_blue_lum, current_edits.hsl_purple_lum, current_edits.hsl_magenta_lum,
+                                      current_edits.lens_distortion, current_edits.lens_vignette_amount, current_edits.lens_vignette_midpoint,
+                                      current_edits.nr_luminance, current_edits.nr_color,
+                                      current_edits.sharpen_amount, current_edits.sharpen_radius,
                                       // Crop settings
                                       active_crop.as_ref().map(|c| c.crop_x()),
                                       active_crop.as_ref().map(|c| c.crop_y()),
@@ -181,8 +139,8 @@ impl DevelopView {
                                        photo_vm.edit_crop_fill_mode = None;
                                    }
                                    // Also update exposure and other edits
-                                   photo_vm.edit_exposure = Some(exposure);
-                                   photo_vm.edit_contrast = Some(contrast);
+                                   photo_vm.edit_exposure = Some(current_edits.exposure);
+                                   photo_vm.edit_contrast = Some(current_edits.contrast);
                                    
                                    // Queue for invalidation (to update Filmstrip/Grid)
                                    state.invalidation_queue.insert(id_for_update.clone());
@@ -267,53 +225,8 @@ impl DevelopView {
                             
                             let controller = editor_controller.clone();
 
-                            
-                            let exposure = state.active_exposure;
-                            let contrast = state.active_contrast;
-                            let temperature = state.active_temperature;
-                            let tint = state.active_tint;
-                            let highlights = state.active_highlights;
-                            let shadows = state.active_shadows;
-                            let whites = state.active_whites;
-                            let blacks = state.active_blacks;
-                            let clarity = state.active_clarity;
-                            let vibrance = state.active_vibrance;
-                            let saturation = state.active_saturation;
-                            let tone_curve_shadows = state.active_tone_curve_shadows;
-                            let tone_curve_darks = state.active_tone_curve_darks;
-                            let tone_curve_lights = state.active_tone_curve_lights;
-                            let tone_curve_highlights = state.active_tone_curve_highlights;
-                            let hsl_red_sat = state.active_hsl_red_sat;
-                            let hsl_orange_sat = state.active_hsl_orange_sat;
-                            let hsl_yellow_sat = state.active_hsl_yellow_sat;
-                            let hsl_green_sat = state.active_hsl_green_sat;
-                            let hsl_aqua_sat = state.active_hsl_aqua_sat;
-                            let hsl_blue_sat = state.active_hsl_blue_sat;
-                            let hsl_purple_sat = state.active_hsl_purple_sat;
-                            let hsl_magenta_sat = state.active_hsl_magenta_sat;
-                            let hsl_red_hue = state.active_hsl_red_hue;
-                            let hsl_orange_hue = state.active_hsl_orange_hue;
-                            let hsl_yellow_hue = state.active_hsl_yellow_hue;
-                            let hsl_green_hue = state.active_hsl_green_hue;
-                            let hsl_aqua_hue = state.active_hsl_aqua_hue;
-                            let hsl_blue_hue = state.active_hsl_blue_hue;
-                            let hsl_purple_hue = state.active_hsl_purple_hue;
-                            let hsl_magenta_hue = state.active_hsl_magenta_hue;
-                            let hsl_red_lum = state.active_hsl_red_lum;
-                            let hsl_orange_lum = state.active_hsl_orange_lum;
-                            let hsl_yellow_lum = state.active_hsl_yellow_lum;
-                            let hsl_green_lum = state.active_hsl_green_lum;
-                            let hsl_aqua_lum = state.active_hsl_aqua_lum;
-                            let hsl_blue_lum = state.active_hsl_blue_lum;
-                            let hsl_purple_lum = state.active_hsl_purple_lum;
-                            let hsl_magenta_lum = state.active_hsl_magenta_lum;
-                            let lens_distortion = state.active_lens_distortion;
-                            let lens_vignette_amount = state.active_lens_vignette_amount;
-                            let lens_vignette_midpoint = state.active_lens_vignette_midpoint;
-                            let nr_luminance = state.active_nr_luminance;
-                            let nr_color = state.active_nr_color;
-                            let sharpen_amount = state.active_sharpen_amount;
-                            let sharpen_radius = state.active_sharpen_radius;
+                            // Get current edits from EditorService (simplified!)
+                            let current_edits = editor_service.current_edits();
                             let active_crop = state.crop_settings.clone();
                             
                             let id_for_task = id.clone();
@@ -322,16 +235,16 @@ impl DevelopView {
                             tokio::spawn(async move {
                                    let _ = controller.save_edits(
                                        id_for_task,
-                                       exposure, contrast, temperature, tint,
-                                       highlights, shadows, whites, blacks,
-                                       clarity, vibrance, saturation,
-                                       tone_curve_shadows, tone_curve_darks, tone_curve_lights, tone_curve_highlights,
-                                       hsl_red_sat, hsl_orange_sat, hsl_yellow_sat, hsl_green_sat, hsl_aqua_sat, hsl_blue_sat, hsl_purple_sat, hsl_magenta_sat,
-                                       hsl_red_hue, hsl_orange_hue, hsl_yellow_hue, hsl_green_hue, hsl_aqua_hue, hsl_blue_hue, hsl_purple_hue, hsl_magenta_hue,
-                                       hsl_red_lum, hsl_orange_lum, hsl_yellow_lum, hsl_green_lum, hsl_aqua_lum, hsl_blue_lum, hsl_purple_lum, hsl_magenta_lum,
-                                       lens_distortion, lens_vignette_amount, lens_vignette_midpoint,
-                                       nr_luminance, nr_color,
-                                       sharpen_amount, sharpen_radius,
+                                       current_edits.exposure, current_edits.contrast, current_edits.temperature, current_edits.tint,
+                                       current_edits.highlights, current_edits.shadows, current_edits.whites, current_edits.blacks,
+                                       current_edits.clarity, current_edits.vibrance, current_edits.saturation,
+                                       current_edits.tone_curve_shadows, current_edits.tone_curve_darks, current_edits.tone_curve_lights, current_edits.tone_curve_highlights,
+                                       current_edits.hsl_red_sat, current_edits.hsl_orange_sat, current_edits.hsl_yellow_sat, current_edits.hsl_green_sat, current_edits.hsl_aqua_sat, current_edits.hsl_blue_sat, current_edits.hsl_purple_sat, current_edits.hsl_magenta_sat,
+                                       current_edits.hsl_red_hue, current_edits.hsl_orange_hue, current_edits.hsl_yellow_hue, current_edits.hsl_green_hue, current_edits.hsl_aqua_hue, current_edits.hsl_blue_hue, current_edits.hsl_purple_hue, current_edits.hsl_magenta_hue,
+                                       current_edits.hsl_red_lum, current_edits.hsl_orange_lum, current_edits.hsl_yellow_lum, current_edits.hsl_green_lum, current_edits.hsl_aqua_lum, current_edits.hsl_blue_lum, current_edits.hsl_purple_lum, current_edits.hsl_magenta_lum,
+                                       current_edits.lens_distortion, current_edits.lens_vignette_amount, current_edits.lens_vignette_midpoint,
+                                       current_edits.nr_luminance, current_edits.nr_color,
+                                       current_edits.sharpen_amount, current_edits.sharpen_radius,
                                        active_crop_for_task.as_ref().map(|c| c.crop_x()),
                                        active_crop_for_task.as_ref().map(|c| c.crop_y()),
                                        active_crop_for_task.as_ref().map(|c| c.crop_width()),
@@ -355,8 +268,8 @@ impl DevelopView {
                                    photo_vm.edit_crop_flip_h = active_crop.as_ref().map(|c| c.flip_horizontal());
                                    photo_vm.edit_crop_flip_v = active_crop.as_ref().map(|c| c.flip_vertical());
                                    photo_vm.edit_crop_fill_mode = active_crop.as_ref().map(|c| c.fill_mode() as u8);
-                                   photo_vm.edit_exposure = Some(exposure);
-                                   photo_vm.edit_contrast = Some(contrast);
+                                   photo_vm.edit_exposure = Some(current_edits.exposure);
+                                   photo_vm.edit_contrast = Some(current_edits.contrast);
                                    
                                    // Queue for invalidation (to update Filmstrip/Grid)
                                    state.invalidation_queue.insert(id.clone());
@@ -392,7 +305,7 @@ impl DevelopView {
             .exact_width(Theme::SIDEBAR_WIDTH)
             .show_inside(ui, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    self.show_left_sidebar(ui, state);
+                    self.show_left_sidebar(ui, state, editor_service);
                 });
             });
 
@@ -404,7 +317,7 @@ impl DevelopView {
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        self.show_right_sidebar(ui, state, editor_controller, export_controller, photo_controller, library_controller, photo_sender, ctx);
+                        self.show_right_sidebar(ui, state, editor_controller, export_controller, photo_controller, library_controller, photo_sender, ctx, editor_service);
                     });
             });
 
@@ -414,7 +327,7 @@ impl DevelopView {
         });
     }
 
-    fn show_left_sidebar(&mut self, ui: &mut Ui, state: &mut AppState) {
+    fn show_left_sidebar(&mut self, ui: &mut Ui, state: &mut AppState, editor_service: &mut adapters::services::EditorService) {
         use crate::design_system::widgets;
 
         // Presets Panel - update from state.presets
@@ -432,24 +345,29 @@ impl DevelopView {
         ui.add_space(Theme::SPACE_SM);
 
         if let Some(preset) = self.presets_panel.ui(ui, &state.selected_theme) {
-             // Apply preset logic
-             if let Some(v) = preset.adjustments.exposure { state.active_exposure = v; }
-             if let Some(v) = preset.adjustments.contrast { state.active_contrast = v; }
-             if let Some(v) = preset.adjustments.temperature { state.active_temperature = v; }
-             if let Some(v) = preset.adjustments.tint { state.active_tint = v; }
-             if let Some(v) = preset.adjustments.highlights { state.active_highlights = v; }
-             if let Some(v) = preset.adjustments.shadows { state.active_shadows = v; }
-             if let Some(v) = preset.adjustments.whites { state.active_whites = v; }
-             if let Some(v) = preset.adjustments.blacks { state.active_blacks = v; }
-             if let Some(v) = preset.adjustments.clarity { state.active_clarity = v; }
-             if let Some(v) = preset.adjustments.vibrance { state.active_vibrance = v; }
-             if let Some(v) = preset.adjustments.saturation { state.active_saturation = v; }
+             // Apply preset via EditorService
+             let _ = editor_service.update_field(&preset.name, |edits| {
+                 // Apply only the fields present in the preset
+                 if let Some(v) = preset.adjustments.exposure { edits.exposure = v; }
+                 if let Some(v) = preset.adjustments.contrast { edits.contrast = v; }
+                 if let Some(v) = preset.adjustments.temperature { edits.temperature = v; }
+                 if let Some(v) = preset.adjustments.tint { edits.tint = v; }
+                 if let Some(v) = preset.adjustments.highlights { edits.highlights = v; }
+                 if let Some(v) = preset.adjustments.shadows { edits.shadows = v; }
+                 if let Some(v) = preset.adjustments.whites { edits.whites = v; }
+                 if let Some(v) = preset.adjustments.blacks { edits.blacks = v; }
+                 if let Some(v) = preset.adjustments.clarity { edits.clarity = v; }
+                 if let Some(v) = preset.adjustments.vibrance { edits.vibrance = v; }
+                 if let Some(v) = preset.adjustments.saturation { edits.saturation = v; }
+                 if let Some(v) = preset.adjustments.tone_curve_shadows { edits.tone_curve_shadows = v; }
+                 if let Some(v) = preset.adjustments.tone_curve_darks { edits.tone_curve_darks = v; }
+                 if let Some(v) = preset.adjustments.tone_curve_lights { edits.tone_curve_lights = v; }
+                 if let Some(v) = preset.adjustments.tone_curve_highlights { edits.tone_curve_highlights = v; }
+             });
              
-             if let Some(v) = preset.adjustments.tone_curve_shadows { state.active_tone_curve_shadows = v; }
-             if let Some(v) = preset.adjustments.tone_curve_darks { state.active_tone_curve_darks = v; }
-             if let Some(v) = preset.adjustments.tone_curve_lights { state.active_tone_curve_lights = v; }
-             if let Some(v) = preset.adjustments.tone_curve_highlights { state.active_tone_curve_highlights = v; }
-
+             // Sync back to state for UI
+             crate::editor_state_adapter::EditorStateAdapter::sync_to_state(editor_service, state);
+             
              state.pending_auto_save = true;
              state.last_slider_change_time = Some(std::time::Instant::now());
              
@@ -466,10 +384,41 @@ impl DevelopView {
 
         ui.add_space(Theme::SPACE_LG);
 
-        // History Panel
+        // History Panel with Undo/Redo
         widgets::section_title(ui, "History");
         ui.add_space(Theme::SPACE_SM);
 
+        // Undo/Redo buttons
+        ui.horizontal(|ui| {
+            let can_undo = editor_service.can_undo();
+            let can_redo = editor_service.can_redo();
+            
+            ui.add_enabled_ui(can_undo, |ui| {
+                if widgets::secondary_button(ui, "⟲ Undo").clicked() {
+                    if let Some(_edits) = editor_service.undo() {
+                        // Sync back to state
+                        crate::editor_state_adapter::EditorStateAdapter::sync_to_state(editor_service, state);
+                        state.pending_auto_save = true;
+                        ui.ctx().request_repaint();
+                    }
+                }
+            });
+            
+            ui.add_space(Theme::SPACE_SM);
+            
+            ui.add_enabled_ui(can_redo, |ui| {
+                if widgets::secondary_button(ui, "⟳ Redo").clicked() {
+                    if let Some(_edits) = editor_service.redo() {
+                        // Sync back to state
+                        crate::editor_state_adapter::EditorStateAdapter::sync_to_state(editor_service, state);
+                        state.pending_auto_save = true;
+                        ui.ctx().request_repaint();
+                    }
+                }
+            });
+        });
+
+        ui.add_space(Theme::SPACE_SM);
         widgets::menu_item(ui, "Current State", true);
     }
 
@@ -485,6 +434,7 @@ impl DevelopView {
         library_controller: &std::sync::Arc<adapters::controllers::LibraryController>,
         photo_sender: &tokio::sync::mpsc::Sender<Result<Vec<adapters::view_models::PhotoViewModel>, String>>,
         ctx: &egui::Context,
+        editor_service: &mut adapters::services::EditorService,
     ) {
         use crate::design_system::widgets;
         use crate::components::{
@@ -493,6 +443,9 @@ impl DevelopView {
             slider_control::SliderControl,
             rating_widget::RatingWidget
         };
+        
+        // Sync EditorService → AppState (in case of undo/redo)
+        crate::editor_state_adapter::EditorStateAdapter::sync_to_state(editor_service, state);
 
         // Interactive Histogram
         HistogramPlot::show(ui, state.histogram_data.as_ref());
@@ -509,135 +462,105 @@ impl DevelopView {
         // Track if any slider changed for auto-save
         let mut any_slider_changed = false;
 
+        // Get current edits from service
+        let current_edits = editor_service.current_edits();
+        
         // Exposure slider
-        if SliderControl::show(
-            ui,
-            "Exposure",
-            &mut state.active_exposure,
-            -2.0..=2.0,
-            0.1,
-        ) {
+        let mut exposure = current_edits.exposure;
+        if SliderControl::show(ui, "Exposure", &mut exposure, -2.0..=2.0, 0.1) {
+            let _ = editor_service.update_field("Exposure", |e| e.exposure = exposure);
             any_slider_changed = true;
         }
 
         ui.add_space(Theme::SPACE_SM);
 
         // Contrast slider
-        if SliderControl::show(
-            ui,
-            "Contrast",
-            &mut state.active_contrast,
-            0.5..=1.5,
-            0.05,
-        ) {
+        let mut contrast = current_edits.contrast;
+        if SliderControl::show(ui, "Contrast", &mut contrast, 0.5..=1.5, 0.05) {
+            let _ = editor_service.update_field("Contrast", |e| e.contrast = contrast);
             any_slider_changed = true;
         }
 
         ui.add_space(Theme::SPACE_SM);
 
         // Temperature slider
-        if SliderControl::show(
-            ui,
-            "Temperature",
-            &mut state.active_temperature,
-            -10.0..=10.0,
-            0.5,
-        ) {
+        let mut temperature = current_edits.temperature;
+        if SliderControl::show(ui, "Temperature", &mut temperature, -10.0..=10.0, 0.5) {
+            let _ = editor_service.update_field("Temperature", |e| e.temperature = temperature);
             any_slider_changed = true;
         }
 
         ui.add_space(Theme::SPACE_SM);
 
         // Tint slider
-        if SliderControl::show(
-            ui,
-            "Tint",
-            &mut state.active_tint,
-            -10.0..=10.0,
-            0.5,
-        ) {
+        let mut tint = current_edits.tint;
+        if SliderControl::show(ui, "Tint", &mut tint, -10.0..=10.0, 0.5) {
+            let _ = editor_service.update_field("Tint", |e| e.tint = tint);
             any_slider_changed = true;
         }
 
         ui.add_space(Theme::SPACE_SM);
 
         // Highlights slider
-        if SliderControl::show(
-            ui,
-            "Highlights",
-            &mut state.active_highlights,
-            -100.0..=100.0,
-            5.0,
-        ) {
+        let mut highlights = current_edits.highlights;
+        if SliderControl::show(ui, "Highlights", &mut highlights, -100.0..=100.0, 5.0) {
+            let _ = editor_service.update_field("Highlights", |e| e.highlights = highlights);
             any_slider_changed = true;
         }
 
         ui.add_space(Theme::SPACE_SM);
 
         // Shadows slider
-        if SliderControl::show(
-            ui,
-            "Shadows",
-            &mut state.active_shadows,
-            -100.0..=100.0,
-            5.0,
-        ) {
+        let mut shadows = current_edits.shadows;
+        if SliderControl::show(ui, "Shadows", &mut shadows, -100.0..=100.0, 5.0) {
+            let _ = editor_service.update_field("Shadows", |e| e.shadows = shadows);
             any_slider_changed = true;
         }
 
         ui.add_space(Theme::SPACE_SM);
 
         // Whites slider
-        if SliderControl::show(
-            ui,
-            "Whites",
-            &mut state.active_whites,
-            -100.0..=100.0,
-            5.0,
-        ) {
+        let mut whites = current_edits.whites;
+        if SliderControl::show(ui, "Whites", &mut whites, -100.0..=100.0, 5.0) {
+            let _ = editor_service.update_field("Whites", |e| e.whites = whites);
             any_slider_changed = true;
         }
 
         ui.add_space(Theme::SPACE_SM);
 
         // Blacks slider
-        if SliderControl::show(
-            ui,
-            "Blacks",
-            &mut state.active_blacks,
-            -100.0..=100.0,
-            5.0,
-        ) {
+        let mut blacks = current_edits.blacks;
+        if SliderControl::show(ui, "Blacks", &mut blacks, -100.0..=100.0, 5.0) {
+            let _ = editor_service.update_field("Blacks", |e| e.blacks = blacks);
             any_slider_changed = true;
         }
 
         ui.add_space(Theme::SPACE_SM);
 
         // Clarity slider
-        if SliderControl::show(
-            ui,
-            "Clarity",
-            &mut state.active_clarity,
-            -1.0..=1.0,
-            0.05,
-        ) {
+        let mut clarity = current_edits.clarity;
+        if SliderControl::show(ui, "Clarity", &mut clarity, -1.0..=1.0, 0.05) {
+            let _ = editor_service.update_field("Clarity", |e| e.clarity = clarity);
             any_slider_changed = true;
         }
 
         ui.add_space(Theme::SPACE_SM);
 
         // Vibrance slider
-        if SliderControl::show(
-            ui,
-            "Vibrance",
-            &mut state.active_vibrance,
-            -1.0..=1.0,
-            0.05,
-        ) {
+        let mut vibrance = current_edits.vibrance;
+        if SliderControl::show(ui, "Vibrance", &mut vibrance, -1.0..=1.0, 0.05) {
+            let _ = editor_service.update_field("Vibrance", |e| e.vibrance = vibrance);
             any_slider_changed = true;
         }
 
         ui.add_space(Theme::SPACE_SM);
+
+        // Saturation slider
+        let mut saturation = current_edits.saturation;
+        if SliderControl::show(ui, "Saturation", &mut saturation, -1.0..=1.0, 0.05) {
+            let _ = editor_service.update_field("Saturation", |e| e.saturation = saturation);
+            any_slider_changed = true;
+        }
 
         // Saturation slider
         if SliderControl::show(
@@ -663,52 +586,36 @@ impl DevelopView {
         ui.add_space(Theme::SPACE_SM);
 
         // Shadows (darkest tones)
-        if SliderControl::show(
-            ui,
-            "Shadows",
-            &mut state.active_tone_curve_shadows,
-            -100.0..=100.0,
-            5.0,
-        ) {
+        let mut tone_curve_shadows = current_edits.tone_curve_shadows;
+        if SliderControl::show(ui, "Shadows", &mut tone_curve_shadows, -100.0..=100.0, 5.0) {
+            let _ = editor_service.update_field("Tone Curve Shadows", |e| e.tone_curve_shadows = tone_curve_shadows);
             any_slider_changed = true;
         }
 
         ui.add_space(Theme::SPACE_SM);
 
         // Darks (dark midtones)
-        if SliderControl::show(
-            ui,
-            "Darks",
-            &mut state.active_tone_curve_darks,
-            -100.0..=100.0,
-            5.0,
-        ) {
+        let mut tone_curve_darks = current_edits.tone_curve_darks;
+        if SliderControl::show(ui, "Darks", &mut tone_curve_darks, -100.0..=100.0, 5.0) {
+            let _ = editor_service.update_field("Tone Curve Darks", |e| e.tone_curve_darks = tone_curve_darks);
             any_slider_changed = true;
         }
 
         ui.add_space(Theme::SPACE_SM);
 
         // Lights (light midtones)
-        if SliderControl::show(
-            ui,
-            "Lights",
-            &mut state.active_tone_curve_lights,
-            -100.0..=100.0,
-            5.0,
-        ) {
+        let mut tone_curve_lights = current_edits.tone_curve_lights;
+        if SliderControl::show(ui, "Lights", &mut tone_curve_lights, -100.0..=100.0, 5.0) {
+            let _ = editor_service.update_field("Tone Curve Lights", |e| e.tone_curve_lights = tone_curve_lights);
             any_slider_changed = true;
         }
 
         ui.add_space(Theme::SPACE_SM);
 
         // Highlights (brightest tones)
-        if SliderControl::show(
-            ui,
-            "Highlights (Curve)",
-            &mut state.active_tone_curve_highlights,
-            -100.0..=100.0,
-            5.0,
-        ) {
+        let mut tone_curve_highlights = current_edits.tone_curve_highlights;
+        if SliderControl::show(ui, "Highlights (Curve)", &mut tone_curve_highlights, -100.0..=100.0, 5.0) {
+            let _ = editor_service.update_field("Tone Curve Highlights", |e| e.tone_curve_highlights = tone_curve_highlights);
             any_slider_changed = true;
         }
 
@@ -719,104 +626,72 @@ impl DevelopView {
         ui.add_space(Theme::SPACE_SM);
 
         // Red saturation
-        if SliderControl::show(
-            ui,
-            "Red",
-            &mut state.active_hsl_red_sat,
-            -100.0..=100.0,
-            5.0,
-        ) {
+        let mut hsl_red_sat = current_edits.hsl_red_sat;
+        if SliderControl::show(ui, "Red", &mut hsl_red_sat, -100.0..=100.0, 5.0) {
+            let _ = editor_service.update_field("HSL Red Sat", |e| e.hsl_red_sat = hsl_red_sat);
             any_slider_changed = true;
         }
 
         ui.add_space(Theme::SPACE_SM);
 
         // Orange saturation
-        if SliderControl::show(
-            ui,
-            "Orange",
-            &mut state.active_hsl_orange_sat,
-            -100.0..=100.0,
-            5.0,
-        ) {
+        let mut hsl_orange_sat = current_edits.hsl_orange_sat;
+        if SliderControl::show(ui, "Orange", &mut hsl_orange_sat, -100.0..=100.0, 5.0) {
+            let _ = editor_service.update_field("HSL Orange Sat", |e| e.hsl_orange_sat = hsl_orange_sat);
             any_slider_changed = true;
         }
 
         ui.add_space(Theme::SPACE_SM);
 
         // Yellow saturation
-        if SliderControl::show(
-            ui,
-            "Yellow",
-            &mut state.active_hsl_yellow_sat,
-            -100.0..=100.0,
-            5.0,
-        ) {
+        let mut hsl_yellow_sat = current_edits.hsl_yellow_sat;
+        if SliderControl::show(ui, "Yellow", &mut hsl_yellow_sat, -100.0..=100.0, 5.0) {
+            let _ = editor_service.update_field("HSL Yellow Sat", |e| e.hsl_yellow_sat = hsl_yellow_sat);
             any_slider_changed = true;
         }
 
         ui.add_space(Theme::SPACE_SM);
 
         // Green saturation
-        if SliderControl::show(
-            ui,
-            "Green",
-            &mut state.active_hsl_green_sat,
-            -100.0..=100.0,
-            5.0,
-        ) {
+        let mut hsl_green_sat = current_edits.hsl_green_sat;
+        if SliderControl::show(ui, "Green", &mut hsl_green_sat, -100.0..=100.0, 5.0) {
+            let _ = editor_service.update_field("HSL Green Sat", |e| e.hsl_green_sat = hsl_green_sat);
             any_slider_changed = true;
         }
 
         ui.add_space(Theme::SPACE_SM);
 
         // Aqua saturation
-        if SliderControl::show(
-            ui,
-            "Aqua",
-            &mut state.active_hsl_aqua_sat,
-            -100.0..=100.0,
-            5.0,
-        ) {
+        let mut hsl_aqua_sat = current_edits.hsl_aqua_sat;
+        if SliderControl::show(ui, "Aqua", &mut hsl_aqua_sat, -100.0..=100.0, 5.0) {
+            let _ = editor_service.update_field("HSL Aqua Sat", |e| e.hsl_aqua_sat = hsl_aqua_sat);
             any_slider_changed = true;
         }
 
         ui.add_space(Theme::SPACE_SM);
 
         // Blue saturation
-        if SliderControl::show(
-            ui,
-            "Blue",
-            &mut state.active_hsl_blue_sat,
-            -100.0..=100.0,
-            5.0,
-        ) {
+        let mut hsl_blue_sat = current_edits.hsl_blue_sat;
+        if SliderControl::show(ui, "Blue", &mut hsl_blue_sat, -100.0..=100.0, 5.0) {
+            let _ = editor_service.update_field("HSL Blue Sat", |e| e.hsl_blue_sat = hsl_blue_sat);
             any_slider_changed = true;
         }
 
         ui.add_space(Theme::SPACE_SM);
 
         // Purple saturation
-        if SliderControl::show(
-            ui,
-            "Purple",
-            &mut state.active_hsl_purple_sat,
-            -100.0..=100.0,
-            5.0,
-        ) {
+        let mut hsl_purple_sat = current_edits.hsl_purple_sat;
+        if SliderControl::show(ui, "Purple", &mut hsl_purple_sat, -100.0..=100.0, 5.0) {
+            let _ = editor_service.update_field("HSL Purple Sat", |e| e.hsl_purple_sat = hsl_purple_sat);
             any_slider_changed = true;
         }
 
         ui.add_space(Theme::SPACE_SM);
 
         // Magenta saturation
-        if SliderControl::show(
-            ui,
-            "Magenta",
-            &mut state.active_hsl_magenta_sat,
-            -100.0..=100.0,
-            5.0,
-        ) {
+        let mut hsl_magenta_sat = current_edits.hsl_magenta_sat;
+        if SliderControl::show(ui, "Magenta", &mut hsl_magenta_sat, -100.0..=100.0, 5.0) {
+            let _ = editor_service.update_field("HSL Magenta Sat", |e| e.hsl_magenta_sat = hsl_magenta_sat);
             any_slider_changed = true;
         }
 
@@ -827,35 +702,58 @@ impl DevelopView {
         ui.add_space(Theme::SPACE_SM);
 
         // HSL Hue controls
-        if SliderControl::show(ui, "Red Hue", &mut state.active_hsl_red_hue, -180.0..=180.0, 5.0) {
+        let mut hsl_red_hue = current_edits.hsl_red_hue;
+        if SliderControl::show(ui, "Red Hue", &mut hsl_red_hue, -180.0..=180.0, 5.0) {
+            let _ = editor_service.update_field("HSL Red Hue", |e| e.hsl_red_hue = hsl_red_hue);
             any_slider_changed = true;
         }
         ui.add_space(Theme::SPACE_SM);
-        if SliderControl::show(ui, "Orange Hue", &mut state.active_hsl_orange_hue, -180.0..=180.0, 5.0) {
+        
+        let mut hsl_orange_hue = current_edits.hsl_orange_hue;
+        if SliderControl::show(ui, "Orange Hue", &mut hsl_orange_hue, -180.0..=180.0, 5.0) {
+            let _ = editor_service.update_field("HSL Orange Hue", |e| e.hsl_orange_hue = hsl_orange_hue);
             any_slider_changed = true;
         }
         ui.add_space(Theme::SPACE_SM);
-        if SliderControl::show(ui, "Yellow Hue", &mut state.active_hsl_yellow_hue, -180.0..=180.0, 5.0) {
+        
+        let mut hsl_yellow_hue = current_edits.hsl_yellow_hue;
+        if SliderControl::show(ui, "Yellow Hue", &mut hsl_yellow_hue, -180.0..=180.0, 5.0) {
+            let _ = editor_service.update_field("HSL Yellow Hue", |e| e.hsl_yellow_hue = hsl_yellow_hue);
             any_slider_changed = true;
         }
         ui.add_space(Theme::SPACE_SM);
-        if SliderControl::show(ui, "Green Hue", &mut state.active_hsl_green_hue, -180.0..=180.0, 5.0) {
+        
+        let mut hsl_green_hue = current_edits.hsl_green_hue;
+        if SliderControl::show(ui, "Green Hue", &mut hsl_green_hue, -180.0..=180.0, 5.0) {
+            let _ = editor_service.update_field("HSL Green Hue", |e| e.hsl_green_hue = hsl_green_hue);
             any_slider_changed = true;
         }
         ui.add_space(Theme::SPACE_SM);
-        if SliderControl::show(ui, "Aqua Hue", &mut state.active_hsl_aqua_hue, -180.0..=180.0, 5.0) {
+        
+        let mut hsl_aqua_hue = current_edits.hsl_aqua_hue;
+        if SliderControl::show(ui, "Aqua Hue", &mut hsl_aqua_hue, -180.0..=180.0, 5.0) {
+            let _ = editor_service.update_field("HSL Aqua Hue", |e| e.hsl_aqua_hue = hsl_aqua_hue);
             any_slider_changed = true;
         }
         ui.add_space(Theme::SPACE_SM);
-        if SliderControl::show(ui, "Blue Hue", &mut state.active_hsl_blue_hue, -180.0..=180.0, 5.0) {
+        
+        let mut hsl_blue_hue = current_edits.hsl_blue_hue;
+        if SliderControl::show(ui, "Blue Hue", &mut hsl_blue_hue, -180.0..=180.0, 5.0) {
+            let _ = editor_service.update_field("HSL Blue Hue", |e| e.hsl_blue_hue = hsl_blue_hue);
             any_slider_changed = true;
         }
         ui.add_space(Theme::SPACE_SM);
-        if SliderControl::show(ui, "Purple Hue", &mut state.active_hsl_purple_hue, -180.0..=180.0, 5.0) {
+        
+        let mut hsl_purple_hue = current_edits.hsl_purple_hue;
+        if SliderControl::show(ui, "Purple Hue", &mut hsl_purple_hue, -180.0..=180.0, 5.0) {
+            let _ = editor_service.update_field("HSL Purple Hue", |e| e.hsl_purple_hue = hsl_purple_hue);
             any_slider_changed = true;
         }
         ui.add_space(Theme::SPACE_SM);
-        if SliderControl::show(ui, "Magenta Hue", &mut state.active_hsl_magenta_hue, -180.0..=180.0, 5.0) {
+        
+        let mut hsl_magenta_hue = current_edits.hsl_magenta_hue;
+        if SliderControl::show(ui, "Magenta Hue", &mut hsl_magenta_hue, -180.0..=180.0, 5.0) {
+            let _ = editor_service.update_field("HSL Magenta Hue", |e| e.hsl_magenta_hue = hsl_magenta_hue);
             any_slider_changed = true;
         }
 
@@ -866,35 +764,58 @@ impl DevelopView {
         ui.add_space(Theme::SPACE_SM);
 
         // HSL Luminance controls
-        if SliderControl::show(ui, "Red Lum", &mut state.active_hsl_red_lum, -100.0..=100.0, 5.0) {
+        let mut hsl_red_lum = current_edits.hsl_red_lum;
+        if SliderControl::show(ui, "Red Lum", &mut hsl_red_lum, -100.0..=100.0, 5.0) {
+            let _ = editor_service.update_field("HSL Red Lum", |e| e.hsl_red_lum = hsl_red_lum);
             any_slider_changed = true;
         }
         ui.add_space(Theme::SPACE_SM);
-        if SliderControl::show(ui, "Orange Lum", &mut state.active_hsl_orange_lum, -100.0..=100.0, 5.0) {
+        
+        let mut hsl_orange_lum = current_edits.hsl_orange_lum;
+        if SliderControl::show(ui, "Orange Lum", &mut hsl_orange_lum, -100.0..=100.0, 5.0) {
+            let _ = editor_service.update_field("HSL Orange Lum", |e| e.hsl_orange_lum = hsl_orange_lum);
             any_slider_changed = true;
         }
         ui.add_space(Theme::SPACE_SM);
-        if SliderControl::show(ui, "Yellow Lum", &mut state.active_hsl_yellow_lum, -100.0..=100.0, 5.0) {
+        
+        let mut hsl_yellow_lum = current_edits.hsl_yellow_lum;
+        if SliderControl::show(ui, "Yellow Lum", &mut hsl_yellow_lum, -100.0..=100.0, 5.0) {
+            let _ = editor_service.update_field("HSL Yellow Lum", |e| e.hsl_yellow_lum = hsl_yellow_lum);
             any_slider_changed = true;
         }
         ui.add_space(Theme::SPACE_SM);
-        if SliderControl::show(ui, "Green Lum", &mut state.active_hsl_green_lum, -100.0..=100.0, 5.0) {
+        
+        let mut hsl_green_lum = current_edits.hsl_green_lum;
+        if SliderControl::show(ui, "Green Lum", &mut hsl_green_lum, -100.0..=100.0, 5.0) {
+            let _ = editor_service.update_field("HSL Green Lum", |e| e.hsl_green_lum = hsl_green_lum);
             any_slider_changed = true;
         }
         ui.add_space(Theme::SPACE_SM);
-        if SliderControl::show(ui, "Aqua Lum", &mut state.active_hsl_aqua_lum, -100.0..=100.0, 5.0) {
+        
+        let mut hsl_aqua_lum = current_edits.hsl_aqua_lum;
+        if SliderControl::show(ui, "Aqua Lum", &mut hsl_aqua_lum, -100.0..=100.0, 5.0) {
+            let _ = editor_service.update_field("HSL Aqua Lum", |e| e.hsl_aqua_lum = hsl_aqua_lum);
             any_slider_changed = true;
         }
         ui.add_space(Theme::SPACE_SM);
-        if SliderControl::show(ui, "Blue Lum", &mut state.active_hsl_blue_lum, -100.0..=100.0, 5.0) {
+        
+        let mut hsl_blue_lum = current_edits.hsl_blue_lum;
+        if SliderControl::show(ui, "Blue Lum", &mut hsl_blue_lum, -100.0..=100.0, 5.0) {
+            let _ = editor_service.update_field("HSL Blue Lum", |e| e.hsl_blue_lum = hsl_blue_lum);
             any_slider_changed = true;
         }
         ui.add_space(Theme::SPACE_SM);
-        if SliderControl::show(ui, "Purple Lum", &mut state.active_hsl_purple_lum, -100.0..=100.0, 5.0) {
+        
+        let mut hsl_purple_lum = current_edits.hsl_purple_lum;
+        if SliderControl::show(ui, "Purple Lum", &mut hsl_purple_lum, -100.0..=100.0, 5.0) {
+            let _ = editor_service.update_field("HSL Purple Lum", |e| e.hsl_purple_lum = hsl_purple_lum);
             any_slider_changed = true;
         }
         ui.add_space(Theme::SPACE_SM);
-        if SliderControl::show(ui, "Magenta Lum", &mut state.active_hsl_magenta_lum, -100.0..=100.0, 5.0) {
+        
+        let mut hsl_magenta_lum = current_edits.hsl_magenta_lum;
+        if SliderControl::show(ui, "Magenta Lum", &mut hsl_magenta_lum, -100.0..=100.0, 5.0) {
+            let _ = editor_service.update_field("HSL Magenta Lum", |e| e.hsl_magenta_lum = hsl_magenta_lum);
             any_slider_changed = true;
         }
 
@@ -904,15 +825,23 @@ impl DevelopView {
         widgets::section_title(ui, "Lens Corrections");
         ui.add_space(Theme::SPACE_SM);
 
-        if SliderControl::show(ui, "Distortion", &mut state.active_lens_distortion, -100.0..=100.0, 1.0) {
+        let mut lens_distortion = current_edits.lens_distortion;
+        if SliderControl::show(ui, "Distortion", &mut lens_distortion, -100.0..=100.0, 1.0) {
+            let _ = editor_service.update_field("Lens Distortion", |e| e.lens_distortion = lens_distortion);
             any_slider_changed = true;
         }
         ui.add_space(Theme::SPACE_SM);
-        if SliderControl::show(ui, "Vignette Amount", &mut state.active_lens_vignette_amount, -100.0..=100.0, 1.0) {
+        
+        let mut lens_vignette_amount = current_edits.lens_vignette_amount;
+        if SliderControl::show(ui, "Vignette Amount", &mut lens_vignette_amount, -100.0..=100.0, 1.0) {
+            let _ = editor_service.update_field("Vignette Amount", |e| e.lens_vignette_amount = lens_vignette_amount);
             any_slider_changed = true;
         }
         ui.add_space(Theme::SPACE_SM);
-        if SliderControl::show(ui, "Vignette Midpoint", &mut state.active_lens_vignette_midpoint, 0.0..=100.0, 1.0) {
+        
+        let mut lens_vignette_midpoint = current_edits.lens_vignette_midpoint;
+        if SliderControl::show(ui, "Vignette Midpoint", &mut lens_vignette_midpoint, 0.0..=100.0, 1.0) {
+            let _ = editor_service.update_field("Vignette Midpoint", |e| e.lens_vignette_midpoint = lens_vignette_midpoint);
             any_slider_changed = true;
         }
 
@@ -922,45 +851,29 @@ impl DevelopView {
         widgets::section_title(ui, "Detail");
         ui.add_space(Theme::SPACE_SM);
 
-        if SliderControl::show(
-            ui,
-            "Luminance NR",
-            &mut state.active_nr_luminance,
-            0.0..=100.0,
-            1.0,
-        ) {
+        let mut nr_luminance = current_edits.nr_luminance;
+        if SliderControl::show(ui, "Luminance NR", &mut nr_luminance, 0.0..=100.0, 1.0) {
+            let _ = editor_service.update_field("Luminance NR", |e| e.nr_luminance = nr_luminance);
             any_slider_changed = true;
         }
 
-        if SliderControl::show(
-            ui,
-            "Color NR",
-            &mut state.active_nr_color,
-            0.0..=100.0,
-            1.0,
-        ) {
+        let mut nr_color = current_edits.nr_color;
+        if SliderControl::show(ui, "Color NR", &mut nr_color, 0.0..=100.0, 1.0) {
+            let _ = editor_service.update_field("Color NR", |e| e.nr_color = nr_color);
             any_slider_changed = true;
         }
 
         ui.add_space(Theme::SPACE_SM);
 
-        if SliderControl::show(
-            ui,
-            "Sharpen Amount",
-            &mut state.active_sharpen_amount,
-            0.0..=100.0,
-            1.0,
-        ) {
+        let mut sharpen_amount = current_edits.sharpen_amount;
+        if SliderControl::show(ui, "Sharpen Amount", &mut sharpen_amount, 0.0..=100.0, 1.0) {
+            let _ = editor_service.update_field("Sharpen Amount", |e| e.sharpen_amount = sharpen_amount);
             any_slider_changed = true;
         }
 
-        if SliderControl::show(
-            ui,
-            "Sharpen Radius",
-            &mut state.active_sharpen_radius,
-            0.5..=3.0,
-            0.1,
-        ) {
+        let mut sharpen_radius = current_edits.sharpen_radius;
+        if SliderControl::show(ui, "Sharpen Radius", &mut sharpen_radius, 0.5..=3.0, 0.1) {
+            let _ = editor_service.update_field("Sharpen Radius", |e| e.sharpen_radius = sharpen_radius);
             any_slider_changed = true;
         }
 
@@ -1070,6 +983,11 @@ impl DevelopView {
             widgets::label_text(ui, &metadata.date);
             widgets::label_text(ui, &metadata.camera);
             widgets::label_text(ui, &metadata.exposure);
+        }
+        
+        // Sync AppState → EditorService (if any changes)
+        if any_slider_changed {
+            let _ = crate::editor_state_adapter::EditorStateAdapter::sync_from_state(state, editor_service);
         }
     }
 }

@@ -1,5 +1,5 @@
 use egui::{Ui, Color32, RichText, Sense};
-use domain::value_objects::ColorLabel;
+use adapters::view_models::ColorLabel;
 use crate::design_system::theme::Theme;
 use adapters::state::PhotoFilters;
 

@@ -11,8 +11,8 @@ use infrastructure::image_processing::intelligent_fill::{
     IntelligentFillRequest as InfraRequest,
 };
 
-pub use domain::value_objects::CropSettings;
-pub use domain::services::intelligent_fill::ModelStatus;
+pub use adapters::view_models::CropSettings;
+pub use adapters::view_models::ModelStatus;
 
 /// Request para processamento de intelligent fill
 #[derive(Clone)]

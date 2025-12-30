@@ -14,7 +14,7 @@ use infrastructure::image_processing::histogram::HistogramData;
 pub use infrastructure::image_processing::async_loader::{
     AsyncThumbnailLoader, ThumbnailRequest, ThumbnailResult,
 };
-use domain::value_objects::PhotoEdits;
+use adapters::view_models::PhotoEdits;
 
 // Re-export or redefine UI structs
 // We keep flattened structs for API compatibility with UI code
