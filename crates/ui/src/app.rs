@@ -267,12 +267,15 @@ impl eframe::App for VintageLightboxApp {
                 match result {
                     Ok(path) => {
                         self.state.toasts.success("Exported successfully!");
-                        // Open the folder containing the exported file
-                        if let Some(parent) = std::path::Path::new(&path).parent() {
-                            if let Err(e) = opener::open(parent) {
-                                eprintln!("Failed to open folder: {}", e);
-                            }
-                        }
+                        // Open the folder containing the exported file using the controller (Adapter layer)
+                        // This removes the UI layer's direct dependency on filesystem/OS operations
+                        let controller = self.export_controller.clone();
+                        let path_clone = path.clone();
+                        tokio::spawn(async move {
+                             if let Err(e) = controller.open_export_location(path_clone).await {
+                                 eprintln!("Failed to open folder: {}", e);
+                             }
+                        });
                     }
                     Err(e) => {
                         // Don't show error toast for user cancellation

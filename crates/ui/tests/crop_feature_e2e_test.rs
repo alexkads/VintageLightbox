@@ -62,7 +62,10 @@ async fn setup_harness() -> (
 
     let lib_controller = Arc::new(LibraryController::new(photo_repo.clone()));
     let editor_controller = Arc::new(EditorController::new(Arc::new(save_uc)));
-    let export_controller = Arc::new(ExportController::new(Arc::new(export_uc)));
+    let export_controller = Arc::new(ExportController::new(
+        Arc::new(export_uc),
+        Arc::new(infrastructure::SystemGatewayImpl::new())
+    ));
 
     let kb_handler = Arc::new(KeyboardHandler::new());
     let (tx, rx) = tokio::sync::mpsc::channel(100);

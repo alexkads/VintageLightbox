@@ -135,6 +135,8 @@ async fn main() {
     // ============================================
     // 3. Setup Controllers (Adapters Layer)
     // ============================================
+    let system_gateway = Arc::new(infrastructure::SystemGatewayImpl::new());
+
     let import_controller = Arc::new(ImportController::new(
         import_photo_use_case,
         preview_before_import_use_case,
@@ -144,7 +146,10 @@ async fn main() {
     ));
     let library_controller = Arc::new(LibraryController::new(photo_repository));
     let editor_controller = Arc::new(EditorController::new(save_photo_edits_use_case));
-    let export_controller = Arc::new(ExportController::new(export_photo_use_case));
+    let export_controller = Arc::new(ExportController::new(
+        export_photo_use_case,
+        system_gateway,
+    ));
     
     let photo_controller = Arc::new(PhotoController::new(
         rate_photo_use_case,

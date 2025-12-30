@@ -14,6 +14,7 @@ pub mod content_hash;
 pub mod intelligent_fill;
 pub mod image_processing;
 pub mod services;
+pub mod system;
 
 // Re-exports for main.rs compatibility
 pub use database::{create_pool, run_migrations, PhotoRepositoryImpl, SqlitePresetRepository, CollectionRepositoryImpl};
@@ -22,4 +23,5 @@ pub use thumbnail_generator::ThumbnailGeneratorImpl;
 pub use image_exporter::ImageExporterImpl;
 pub use file_organizer::FileOrganizerImpl;
 pub use intelligent_fill::OnnxInpainterImpl;
+pub use system::system_gateway::SystemGatewayImpl;
 // pub use fs::FileSystemImpl; // Commenting out until verified

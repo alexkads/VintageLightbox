@@ -93,7 +93,10 @@ async fn setup_harness() -> (
          photo_repo.clone(),
          Arc::new(DummyExporter)
      );
-     let export_controller = Arc::new(ExportController::new(Arc::new(export_uc)));
+     let export_controller = Arc::new(ExportController::new(
+        Arc::new(export_uc),
+        Arc::new(infrastructure::SystemGatewayImpl::new())
+     ));
      
      // Import with dependencies
      let meta_extractor = Arc::new(DummyMetadataExtractor);

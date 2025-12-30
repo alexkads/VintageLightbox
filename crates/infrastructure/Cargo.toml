@@ -31,6 +31,7 @@ pollster = "0.4"
 lru = "0.16.2"
 parking_lot = "0.12"
 rayon = "1.8"
+opener = "0.8.3"
 
 [dev-dependencies]
 tempfile.workspace = true
