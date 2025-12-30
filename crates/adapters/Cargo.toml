@@ -11,6 +11,7 @@ use-cases = { path = "../use-cases" }
 thiserror.workspace = true
 serde.workspace = true
 tokio.workspace = true
+image = "0.24"
 
 [dev-dependencies]
 mockall.workspace = true

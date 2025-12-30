@@ -159,21 +159,7 @@ impl From<&PhotoEdits> for GpuEditParams {
     }
 }
 
-/// Request to process an image on GPU
-pub struct GpuProcessRequest {
-    pub request_id: u64,
-    pub image_data: Arc<Vec<u8>>, // Use Arc to avoid cloning massive image data
-    pub width: u32,
-    pub height: u32,
-    pub params: GpuEditParams,
-}
-
-/// Result of GPU processing (Pure Infrastructure, no UI types)
-pub struct GpuProcessResult {
-    pub request_id: u64,
-    pub processed_image: DynamicImage,
-    pub process_time_ms: f32,
-}
+pub use adapters::services::gpu_processing_service::{GpuProcessingService, GpuProcessRequest, GpuProcessResult};
 
 struct GpuResources {
     input_texture: wgpu::Texture,
@@ -192,6 +178,37 @@ pub struct GpuImageProcessor {
     result_receiver: Receiver<GpuProcessResult>,
     current_request_id: Arc<Mutex<u64>>,
     gpu_available: bool,
+}
+
+impl GpuProcessingService for GpuImageProcessor {
+    fn request_process(&self, request: GpuProcessRequest) -> u64 {
+        let id = request.request_id;
+        *self.current_request_id.lock() = id;
+        let _ = self.request_sender.send(request);
+        id
+    }
+
+    fn poll_result(&self) -> Option<GpuProcessResult> {
+        let mut latest: Option<GpuProcessResult> = None;
+        
+        while let Ok(result) = self.result_receiver.try_recv() {
+            if latest.as_ref().is_none_or(|l| result.request_id > l.request_id) {
+                latest = Some(result);
+            }
+        }
+        
+        latest
+    }
+
+    fn is_gpu_available(&self) -> bool {
+        self.gpu_available
+    }
+
+    fn next_request_id(&self) -> u64 {
+        let mut guard = self.current_request_id.lock();
+        *guard += 1;
+        *guard
+    }
 }
 
 impl GpuImageProcessor {
@@ -292,6 +309,9 @@ impl GpuImageProcessor {
                 continue; // Skip outdated requests
             }
 
+            // Convert params to GPU struct
+            let gpu_params = GpuEditParams::from(&request.params);
+
             // Process on GPU
             let start_time = std::time::Instant::now();
             if let Some(result) = Self::process_on_gpu(
@@ -299,6 +319,7 @@ impl GpuImageProcessor {
                 &queue,
                 &pipeline,
                 &request,
+                &gpu_params,
                 &mut resources_cache,
             ) {
                 let _ = sender.send(GpuProcessResult {
@@ -316,6 +337,7 @@ impl GpuImageProcessor {
         queue: &wgpu::Queue,
         pipeline: &wgpu::ComputePipeline,
         request: &GpuProcessRequest,
+        gpu_params: &GpuEditParams,
         resources_cache: &mut LruCache<(u32, u32), GpuResources>,
     ) -> Option<DynamicImage> {
         let width = request.width;
@@ -442,7 +464,7 @@ impl GpuImageProcessor {
         }
 
         // Update params
-        queue.write_buffer(&resources.params_buffer, 0, bytemuck::bytes_of(&request.params));
+        queue.write_buffer(&resources.params_buffer, 0, bytemuck::bytes_of(gpu_params));
 
         // Create command encoder
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -537,59 +559,8 @@ impl GpuImageProcessor {
             ) {
                 let dynamic_img = DynamicImage::ImageRgba8(img);
 
-                // Construct PhotoEdits from GpuEditParams
-                // This is a bit manual, but avoids dependency cycle back to UI or using bytemuck for PhotoEdits (which has Option<Box...>)
-                let edits = PhotoEdits {
-                    exposure: request.params.exposure,
-                    contrast: request.params.contrast,
-                    temperature: request.params.temperature,
-                    tint: request.params.tint,
-                    highlights: request.params.highlights,
-                    shadows: request.params.shadows,
-                    whites: request.params.whites,
-                    blacks: request.params.blacks,
-                    clarity: request.params.clarity,
-                    vibrance: request.params.vibrance,
-                    saturation: request.params.saturation,
-                    tone_curve_shadows: request.params.tone_curve_shadows,
-                    tone_curve_darks: request.params.tone_curve_darks,
-                    tone_curve_lights: request.params.tone_curve_lights,
-                    tone_curve_highlights: request.params.tone_curve_highlights,
-                    hsl_red_sat: request.params.hsl_red_sat,
-                    hsl_orange_sat: request.params.hsl_orange_sat,
-                    hsl_yellow_sat: request.params.hsl_yellow_sat,
-                    hsl_green_sat: request.params.hsl_green_sat,
-                    hsl_aqua_sat: request.params.hsl_aqua_sat,
-                    hsl_blue_sat: request.params.hsl_blue_sat,
-                    hsl_purple_sat: request.params.hsl_purple_sat,
-                    hsl_magenta_sat: request.params.hsl_magenta_sat,
-                    hsl_red_hue: request.params.hsl_red_hue,
-                    hsl_orange_hue: request.params.hsl_orange_hue,
-                    hsl_yellow_hue: request.params.hsl_yellow_hue,
-                    hsl_green_hue: request.params.hsl_green_hue,
-                    hsl_aqua_hue: request.params.hsl_aqua_hue,
-                    hsl_blue_hue: request.params.hsl_blue_hue,
-                    hsl_purple_hue: request.params.hsl_purple_hue,
-                    hsl_magenta_hue: request.params.hsl_magenta_hue,
-                    hsl_red_lum: request.params.hsl_red_lum,
-                    hsl_orange_lum: request.params.hsl_orange_lum,
-                    hsl_yellow_lum: request.params.hsl_yellow_lum,
-                    hsl_green_lum: request.params.hsl_green_lum,
-                    hsl_aqua_lum: request.params.hsl_aqua_lum,
-                    hsl_blue_lum: request.params.hsl_blue_lum,
-                    hsl_purple_lum: request.params.hsl_purple_lum,
-                    hsl_magenta_lum: request.params.hsl_magenta_lum,
-                    lens_distortion: request.params.lens_distortion,
-                    lens_vignette_amount: request.params.lens_vignette_amount,
-                    lens_vignette_midpoint: request.params.lens_vignette_midpoint,
-                    nr_luminance: request.params.nr_luminance,
-                    nr_color: request.params.nr_color,
-                    sharpen_amount: request.params.sharpen_amount,
-                    sharpen_radius: request.params.sharpen_radius,
-                    crop_settings: None,
-                };
-
-                let processed = ImageAlgorithms::process_image(&dynamic_img, &edits);
+                // Use params directly from request (PhotoEdits)
+                let processed = ImageAlgorithms::process_image(&dynamic_img, &request.params);
 
                 let _ = sender.send(GpuProcessResult {
                     request_id: request.request_id,
@@ -600,38 +571,30 @@ impl GpuImageProcessor {
         }
     }
 
-    /// Request GPU processing (non-blocking)
+    // Methods moved to Trait implementation
+    // Keeping request_process, poll_result, is_gpu_available, next_request_id as proxies if needed?
+    // No, I'll delete them from impl GpuImageProcessor to force usage of Trait or call via Trait.
+    // However, if other code uses inherent methods, I might break it.
+    // The previous implementation had inherent methods.
+    // I already implemented them in the trait.
+    // Inherent methods for backward compatibility
+    
     pub fn request_process(&self, request: GpuProcessRequest) -> u64 {
-        let id = request.request_id;
-        *self.current_request_id.lock() = id;
-        let _ = self.request_sender.send(request);
-        id
+        GpuProcessingService::request_process(self, request)
     }
 
-    /// Generate a new request ID
     pub fn next_request_id(&self) -> u64 {
-        let mut guard = self.current_request_id.lock();
-        *guard += 1;
-        *guard
+        GpuProcessingService::next_request_id(self)
     }
 
-    /// Poll for completed result (non-blocking)
     pub fn poll_result(&self) -> Option<GpuProcessResult> {
-        let mut latest: Option<GpuProcessResult> = None;
-        
-        while let Ok(result) = self.result_receiver.try_recv() {
-            if latest.as_ref().is_none_or(|l| result.request_id > l.request_id) {
-                latest = Some(result);
-            }
-        }
-        
-        latest
+        GpuProcessingService::poll_result(self)
     }
 
-    /// Check if GPU is available
     pub fn is_gpu_available(&self) -> bool {
-        self.gpu_available
+        GpuProcessingService::is_gpu_available(self)
     }
+
 }
 
 impl Default for GpuImageProcessor {

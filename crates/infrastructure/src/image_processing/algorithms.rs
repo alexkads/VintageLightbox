@@ -4,10 +4,21 @@
 //! Podem ser usados por qualquer frontend (egui, Tauri, GTK, etc.)
 
 use image::DynamicImage;
-use domain::value_objects::PhotoEdits;
+use domain::value_objects::{PhotoEdits, CropSettings};
+use adapters::services::image_processing_service::ImageProcessingService;
 
 /// Struct com algoritmos de processamento de imagem
 pub struct ImageAlgorithms;
+
+impl ImageProcessingService for ImageAlgorithms {
+    fn process_image(&self, img: &DynamicImage, edits: &PhotoEdits) -> DynamicImage {
+        Self::process_image(img, edits)
+    }
+    
+    fn apply_crop(&self, img: &DynamicImage, crop: &CropSettings) -> DynamicImage {
+        Self::apply_crop(img, crop)
+    }
+}
 
 impl ImageAlgorithms {
     /// Processa uma imagem aplicando todos os ajustes de edição

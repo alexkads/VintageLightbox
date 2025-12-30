@@ -977,7 +977,7 @@ impl eframe::App for VintageLightboxApp {
                                 image_data,
                                 width,
                                 height,
-                                params: crate::gpu_processor::GpuEditParams {
+                                params: domain::value_objects::PhotoEdits {
                                     exposure: self.state.active_exposure,
                                     contrast: self.state.active_contrast,
                                     temperature: self.state.active_temperature,
@@ -1030,6 +1030,8 @@ impl eframe::App for VintageLightboxApp {
                                     // Sharpening
                                     sharpen_amount: self.state.active_sharpen_amount,
                                     sharpen_radius: self.state.active_sharpen_radius,
+                                    // New field required by PhotoEdits
+                                    crop_settings: None,
                                 },
                             });
 
