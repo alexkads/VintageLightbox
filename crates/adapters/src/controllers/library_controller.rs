@@ -105,10 +105,118 @@ impl LibraryController {
                         edit_crop_flip_h: photo.edit_crop_flip_h(),
                         edit_crop_flip_v: photo.edit_crop_flip_v(),
                         edit_crop_fill_mode: photo.edit_crop_fill_mode(),
+                        file_missing: !std::path::Path::new(&photo.file_path().to_string()).exists(),
                     }
                 })
                 .collect();
 
         Ok(view_models)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use domain::{
+        entities::Photo,
+        value_objects::{PhotoId, FilePath, Rating, ColorLabel},
+        DomainResult, DomainError,
+    };
+    use mockall::mock;
+    use mockall::predicate::*;
+
+    mock! {
+        pub PhotoRepo {}
+        #[async_trait::async_trait]
+        impl PhotoRepository for PhotoRepo {
+            async fn save(&self, photo: &Photo) -> DomainResult<()>;
+            async fn find_by_id(&self, id: &PhotoId) -> DomainResult<Option<Photo>>;
+            async fn find_all(&self) -> DomainResult<Vec<Photo>>;
+            async fn update(&self, photo: &Photo) -> DomainResult<()>;
+            async fn delete(&self, id: &PhotoId) -> DomainResult<()>;
+            async fn exists(&self, id: &PhotoId) -> DomainResult<bool>;
+            async fn find_by_content_hash(&self, hash: &str) -> DomainResult<Option<Photo>>;
+        }
+    }
+
+    #[tokio::test]
+    async fn test_get_all_photos_success() {
+        // Arrange
+        let mut mock_repo = MockPhotoRepo::new();
+        
+        let path1 = FilePath::new("/photos/1.jpg").unwrap();
+        let mut photo1 = Photo::new(path1.clone());
+        photo1.rate(Rating::new(5).unwrap()).unwrap();
+        let id1 = photo1.id(); // Capture the actual ID
+        
+        let path2 = FilePath::new("/photos/2.jpg").unwrap();
+        let mut photo2 = Photo::new(path2.clone());
+        photo2.set_color_label(ColorLabel::Red);
+        let id2 = photo2.id(); // Capture the actual ID
+
+        // A mock implementation of repository returning 2 photos
+        mock_repo
+            .expect_find_all()
+            .times(1)
+            .returning(move || Ok(vec![photo1.clone(), photo2.clone()]));
+
+        let controller = LibraryController::new(Arc::new(mock_repo));
+
+        // Act
+        let result = controller.get_all_photos().await;
+
+        // Assert
+        assert!(result.is_ok());
+        let view_models = result.unwrap();
+        assert_eq!(view_models.len(), 2);
+        
+        // Verificações básicas de mapeamento
+        let vm1 = view_models.iter().find(|vm| vm.id == id1.to_string());
+        assert!(vm1.is_some());
+        assert_eq!(vm1.unwrap().rating, 5);
+
+        let vm2 = view_models.iter().find(|vm| vm.id == id2.to_string());
+        assert!(vm2.is_some());
+        assert_eq!(vm2.unwrap().color_label, Some("red".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_get_all_photos_empty() {
+        // Arrange
+        let mut mock_repo = MockPhotoRepo::new();
+        
+        mock_repo
+            .expect_find_all()
+            .times(1)
+            .returning(|| Ok(Vec::new()));
+
+        let controller = LibraryController::new(Arc::new(mock_repo));
+
+        // Act
+        let result = controller.get_all_photos().await;
+
+        // Assert
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_get_all_photos_error() {
+        // Arrange
+        let mut mock_repo = MockPhotoRepo::new();
+        
+        mock_repo
+            .expect_find_all()
+            .times(1)
+            .returning(|| Err(DomainError::InfrastructureError("DB Error".to_string())));
+
+        let controller = LibraryController::new(Arc::new(mock_repo));
+
+        // Act
+        let result = controller.get_all_photos().await;
+
+        // Assert
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "Erro de infraestrutura: DB Error");
     }
 }

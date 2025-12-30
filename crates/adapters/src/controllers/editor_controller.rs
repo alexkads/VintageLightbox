@@ -99,3 +99,81 @@ impl EditorController {
             .map_err(|e| e.to_string())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use domain::{
+        entities::Photo,
+        repositories::PhotoRepository,
+        value_objects::{PhotoId, FilePath},
+        DomainResult, DomainError,
+    };
+    use mockall::mock;
+    use mockall::predicate::*;
+
+    mock! {
+        pub PhotoRepo {}
+        #[async_trait::async_trait]
+        impl PhotoRepository for PhotoRepo {
+            async fn save(&self, photo: &Photo) -> DomainResult<()>;
+            async fn find_by_id(&self, id: &PhotoId) -> DomainResult<Option<Photo>>;
+            async fn find_all(&self) -> DomainResult<Vec<Photo>>;
+            async fn update(&self, photo: &Photo) -> DomainResult<()>;
+            async fn delete(&self, id: &PhotoId) -> DomainResult<()>;
+            async fn exists(&self, id: &PhotoId) -> DomainResult<bool>;
+            async fn find_by_content_hash(&self, hash: &str) -> DomainResult<Option<Photo>>;
+        }
+    }
+
+    #[tokio::test]
+    async fn test_save_edits_success() {
+        // Arrange
+        let mut mock_repo = MockPhotoRepo::new();
+        let id_str = "550e8400-e29b-41d4-a716-446655440000";
+        let photo_id = PhotoId::from_string(id_str).unwrap();
+        
+        let path = FilePath::new("/photos/test.jpg").unwrap();
+        let photo = Photo::with_id(photo_id.clone(), path);
+        let photo_clone = photo.clone();
+
+        mock_repo
+            .expect_find_by_id()
+            .with(eq(photo_id))
+            .returning(move |_| Ok(Some(photo_clone.clone())));
+
+        mock_repo
+            .expect_update()
+            .withf(|p| {
+                // Verify some key edits
+                p.edit_exposure() == Some(1.5) &&
+                p.edit_contrast() == Some(1.2) &&
+                p.edit_crop_rotation() == Some(90)
+            })
+            .times(1)
+            .returning(|_| Ok(()));
+
+        let use_case = Arc::new(SavePhotoEditsUseCase::new(Arc::new(mock_repo)));
+        let controller = EditorController::new(use_case);
+
+        // Act
+        let result = controller.save_edits(
+            id_str.to_string(),
+            1.5, 1.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // Basic
+            0.0, 0.0, 0.0, 0.0, // Tone Curve
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL Sat
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL Hue
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL Lum
+            0.0, 0.0, 0.0, // Lens
+            0.0, 0.0, // NR
+            0.0, 0.0, // Sharpen
+            None, None, None, None, // Crop Rect
+            Some(90), None, // Rotation
+            None, None, // Flip
+            None // Fill Mode
+        ).await;
+
+        // Assert
+        assert!(result.is_ok());
+    }
+}

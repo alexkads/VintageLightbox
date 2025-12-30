@@ -603,3 +603,98 @@ impl PhotoRepository for PhotoRepositoryImpl {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::sqlite::SqlitePoolOptions;
+    
+    // Setup helper
+    async fn setup_repo() -> PhotoRepositoryImpl {
+        let pool = SqlitePoolOptions::new()
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+
+        // Run migrations
+        // Path relative to CARGO_MANIFEST_DIR (crates/infrastructure)
+        sqlx::migrate!("./migrations")
+            .run(&pool)
+            .await
+            .expect("Failed to run migrations");
+            
+        PhotoRepositoryImpl::new(pool)
+    }
+
+    #[tokio::test]
+    async fn test_save_and_find_by_id() {
+        let repo = setup_repo().await;
+        
+        let path = FilePath::new("/tmp/test.jpg").unwrap();
+        let photo = Photo::new(path);
+        let id = photo.id().clone();
+        
+        repo.save(&photo).await.unwrap();
+        
+        // Exists
+        assert!(repo.exists(&id).await.unwrap());
+        
+        // Find by ID
+        let found = repo.find_by_id(&id).await.unwrap();
+        assert!(found.is_some());
+        let found_photo = found.unwrap();
+        assert_eq!(found_photo.id(), id);
+        assert_eq!(found_photo.file_path().to_string_lossy(), "/tmp/test.jpg");
+    }
+
+    #[tokio::test]
+    async fn test_update_photo() {
+        let repo = setup_repo().await;
+        
+        let path = FilePath::new("/tmp/update.jpg").unwrap();
+        let mut photo = Photo::new(path);
+        let id = photo.id().clone();
+        
+        repo.save(&photo).await.unwrap();
+        
+        // Update
+        photo.rate(Rating::new(5).unwrap()).unwrap();
+        photo.set_color_label(ColorLabel::Red);
+        
+        repo.update(&photo).await.unwrap();
+        
+        // Verify
+        let updated = repo.find_by_id(&id).await.unwrap().unwrap();
+        assert_eq!(updated.rating(), Some(Rating::new(5).unwrap()));
+        assert_eq!(updated.color_label(), Some(ColorLabel::Red));
+    }
+
+    #[tokio::test]
+    async fn test_delete_photo() {
+        let repo = setup_repo().await;
+        
+        let path = FilePath::new("/tmp/delete.jpg").unwrap();
+        let photo = Photo::new(path);
+        let id = photo.id().clone();
+        
+        repo.save(&photo).await.unwrap();
+        assert!(repo.exists(&id).await.unwrap());
+        
+        repo.delete(&id).await.unwrap();
+        assert!(!repo.exists(&id).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_find_all() {
+        let repo = setup_repo().await;
+        
+        let p1 = Photo::new(FilePath::new("/tmp/1.jpg").unwrap());
+        let p2 = Photo::new(FilePath::new("/tmp/2.jpg").unwrap());
+        
+        repo.save(&p1).await.unwrap();
+        repo.save(&p2).await.unwrap();
+        
+        let all = repo.find_all().await.unwrap();
+        assert_eq!(all.len(), 2);
+    }
+}

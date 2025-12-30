@@ -16,3 +16,4 @@ image = "0.24"
 [dev-dependencies]
 mockall.workspace = true
 insta.workspace = true
+async-trait.workspace = true

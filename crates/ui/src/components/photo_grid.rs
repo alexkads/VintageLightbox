@@ -433,7 +433,7 @@ impl PhotoGrid {
         }
 
         // Check if file exists and show warning triangle if missing
-        let file_exists = std::path::Path::new(&photo.path).exists();
+        let file_exists = !photo.file_missing;
         if !file_exists {
             // Log to console
             if response.hovered() {

@@ -428,7 +428,7 @@ pub struct AppState {
     // Folder Navigation
     // ============================================
     /// Root nodes of the folder tree
-    pub folder_tree_roots: Vec<crate::components::folder_tree::FolderNode>,
+    pub folder_tree_roots: Vec<adapters::view_models::FolderNode>,
     /// Set of expanded folder paths in the tree
     pub expanded_folders: HashSet<String>,
 
@@ -804,7 +804,11 @@ impl AppState {
                 };
 
                 if new_pos != pos {
-                    return self.photos.get(new_pos).map(|p| p.id.clone());
+                    let new_id = self.photos.get(new_pos).map(|p| p.id.clone());
+                    if let Some(ref id) = new_id {
+                        self.internal_state.develop_selected_id = Some(id.clone());
+                    }
+                    return new_id;
                 }
             }
         }
@@ -845,7 +849,11 @@ impl AppState {
         
         // Return the new photo ID if it's different
         if current_pos != Some(new_pos) {
-            return filtered.get(new_pos).map(|p| p.id.clone());
+            let new_id = filtered.get(new_pos).map(|p| p.id.clone());
+            if let Some(ref id) = new_id {
+                self.internal_state.library_selected_id = Some(id.clone());
+            }
+            return new_id;
         }
         
         None
@@ -1177,7 +1185,7 @@ impl AppState {
 
     /// Rebuild the folder tree from current photos
     pub fn rebuild_folder_tree(&mut self) {
-        use crate::components::folder_tree::FolderNode;
+        use adapters::view_models::FolderNode;
         self.folder_tree_roots = FolderNode::build_tree(&self.photos);
     }
 }
@@ -1185,5 +1193,96 @@ impl AppState {
 impl Default for AppState {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use adapters::view_models::PhotoViewModel;
+    use adapters::state::CurrentView;
+
+    fn create_test_photo(id: &str) -> PhotoViewModel {
+        PhotoViewModel {
+            id: id.to_string(),
+            path: format!("/tmp/{}.jpg", id),
+            name: format!("{}.jpg", id),
+            thumbnail_path: None,
+            date: "2024-01-01".to_string(),
+            camera: "Test Camera".to_string(),
+            exposure: "1/100".to_string(),
+            rating: 0,
+            color_label: None,
+            flag: None,
+            width: Some(100),
+            height: Some(100),
+            file_missing: false,
+            // Initialize optional edit fields to None using default
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn test_single_select() {
+        let mut state = AppState::new();
+        state.photos = vec![
+            create_test_photo("1"),
+            create_test_photo("2"),
+        ];
+
+        state.single_select("1", 0);
+
+        assert!(state.selected_photo_ids.contains("1"));
+        assert!(!state.selected_photo_ids.contains("2"));
+        assert_eq!(state.internal_state.library_selected_id, Some("1".to_string()));
+        assert_eq!(state.last_clicked_index, Some(0));
+    }
+
+    #[test]
+    fn test_toggle_selection() {
+        let mut state = AppState::new();
+        state.photos = vec![
+            create_test_photo("1"),
+            create_test_photo("2"),
+        ];
+
+        state.toggle_selection("1");
+        assert!(state.selected_photo_ids.contains("1"));
+
+        state.toggle_selection("2");
+        assert!(state.selected_photo_ids.contains("1"));
+        assert!(state.selected_photo_ids.contains("2"));
+
+        state.toggle_selection("1");
+        assert!(!state.selected_photo_ids.contains("1"));
+        assert!(state.selected_photo_ids.contains("2"));
+    }
+
+    #[test]
+    fn test_navigate_develop() {
+        let mut state = AppState::new();
+        state.photos = vec![
+            create_test_photo("1"),
+            create_test_photo("2"),
+            create_test_photo("3"),
+        ];
+        state.internal_state.current_view = CurrentView::Develop;
+        state.internal_state.develop_selected_id = Some("2".to_string());
+
+        // Next
+        let next = state.navigate_develop(1);
+        assert_eq!(next, Some("3".to_string()));
+        assert_eq!(state.internal_state.develop_selected_id, Some("3".to_string()));
+
+        // Previous
+        let prev = state.navigate_develop(-1);
+        assert_eq!(prev, Some("2".to_string()));
+        assert_eq!(state.internal_state.develop_selected_id, Some("2".to_string()));
+
+        // Bounds check (Next at end)
+        state.navigate_develop(1); // to 3
+        let none = state.navigate_develop(1); // to 4? no
+        assert_eq!(none, None);
+        assert_eq!(state.internal_state.develop_selected_id, Some("3".to_string()));
     }
 }

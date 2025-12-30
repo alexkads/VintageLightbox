@@ -11,6 +11,6 @@ pub mod view_models;
 pub mod state;
 pub mod services;
 
-pub use view_models::PhotoViewModel;
+pub use view_models::{PhotoViewModel, FolderNode};
 pub use state::{ApplicationState, EditingSession, EditHistory, PhotoFilters};
 pub use services::NavigationService;
