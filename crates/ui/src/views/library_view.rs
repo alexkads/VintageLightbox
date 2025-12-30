@@ -86,8 +86,8 @@ impl LibraryView {
 
         if widgets::menu_item(ui, "All Photographs", true).clicked() {
             // Reset filters
-            state.filmstrip_filter.reset();
-            state.filmstrip_filter.folder_path = None;
+            state.internal_state.photo_filters.reset();
+            state.internal_state.photo_filters.folder_path = None;
         }
 
         ui.add_space(Theme::SPACE_LG);
@@ -97,12 +97,12 @@ impl LibraryView {
         ui.add_space(Theme::SPACE_SM);
 
         let mut folder_tree = crate::components::folder_tree::FolderTree::new(
-            state.filmstrip_filter.folder_path.as_deref(),
+            state.internal_state.photo_filters.folder_path.as_deref(),
             &mut state.expanded_folders,
         );
 
         if let Some(clicked_path) = folder_tree.show(ui, &state.folder_tree_roots) {
-            state.filmstrip_filter.folder_path = Some(clicked_path);
+            state.internal_state.photo_filters.folder_path = Some(clicked_path);
             // Reset other filters if desired, or keep them additive?
             // Lightroom behavior: Clicking a folder usually resets "Collection" selection but keeps filters.
             // For now, let's just set the folder path.

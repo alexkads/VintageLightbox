@@ -69,7 +69,7 @@ async fn setup_harness() -> (
 
     // 5. Initial State
     let mut state = AppState::new();
-    state.current_view = CurrentView::Develop;
+    state.internal_state.current_view = CurrentView::Develop;
 
     // 6. Seed Test Data
     let photo1 = Photo::new(FilePath::new("/tmp/test_crop.jpg").unwrap());
@@ -82,7 +82,7 @@ async fn setup_harness() -> (
     
     // Select first photo in develop view
     if let Some(photo) = state.photos.first() {
-        state.develop_selected_photo_id = Some(photo.id.clone());
+        state.internal_state.develop_selected_id = Some(photo.id.clone());
     }
 
     (state, kb_handler, photo_controller, lib_controller, editor_controller, export_controller, tx, rx)
@@ -98,7 +98,7 @@ async fn test_crop_mode_toggle_with_r_key() {
     let (mut state, _kb, _photo_ctrl, _lib_ctrl, _ed_ctrl, _ex_ctrl, _tx, _rx) = setup_harness().await;
 
     // Verify initial state
-    assert_eq!(state.current_view, CurrentView::Develop);
+    assert_eq!(state.internal_state.current_view, CurrentView::Develop);
     assert!(!state.crop_mode_active, "Crop mode should be inactive initially");
     assert!(state.crop_settings.is_none(), "Crop settings should be None initially");
 

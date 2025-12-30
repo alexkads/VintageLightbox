@@ -6,7 +6,7 @@
 use crate::{DomainError, DomainResult};
 
 /// Modo de preenchimento para áreas vazias na rotação
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize)]
 pub enum RotationFillMode {
     /// Preenche com preto (padrão)
     #[default]

@@ -48,7 +48,7 @@ impl DevelopView {
             .exact_height(120.0)  // 80px thumbnails + 40px padding
             .show_inside(ui, |ui| {
                 let photos_clone = state.photos.clone();
-                let selected_id = state.develop_selected_photo_id.clone();
+                let selected_id = state.internal_state.develop_selected_id.clone();
                 
                 let mut pending_selection = None;
                 let mut pending_flag = None;
@@ -58,7 +58,7 @@ impl DevelopView {
                     ctx,
                     &photos_clone,
                     &selected_id,
-                    &mut state.filmstrip_filter,
+                    &mut state.internal_state.photo_filters,
                     |photo_id| {
                         pending_selection = Some(photo_id);
                     },
@@ -191,7 +191,7 @@ impl DevelopView {
                      }
 
                     // Select photo and trigger load in Develop view (independent from Library)
-                    state.develop_selected_photo_id = Some(photo_id.clone());
+                    state.internal_state.develop_selected_id = Some(photo_id.clone());
                     // Clear current image to trigger reload
                     state.loaded_photo_id = None;
                     ctx.request_repaint();
@@ -257,7 +257,7 @@ impl DevelopView {
                         state.pending_auto_save = false; // We are saving immediately
 
                         // Force immediate save for "Apply" action to ensure persistence
-                        if let Some(id) = state.develop_selected_photo_id.clone() {
+                        if let Some(id) = state.internal_state.develop_selected_id.clone() {
                             println!("DEBUG: Saving crop for photo_id: {}", id);
                             if let Some(crop) = &state.crop_settings {
                                 println!("DEBUG: Crop settings: {:?}", crop);
@@ -1007,7 +1007,7 @@ impl DevelopView {
             egui::RichText::new("Delete Photo")
                 .color(egui::Color32::from_rgb(200, 60, 60))
         ).clicked() {
-            if let Some(photo_id) = &state.develop_selected_photo_id {
+            if let Some(photo_id) = &state.internal_state.develop_selected_id {
                 let photo_ctrl = photo_controller.clone();
                 let lib_ctrl = library_controller.clone();
                 let sender = photo_sender.clone();
@@ -1030,11 +1030,11 @@ impl DevelopView {
                 });
 
                 // Clear develop selection and return to library
-                state.develop_selected_photo_id = None;
+                state.internal_state.develop_selected_id = None;
                 state.loaded_photo_id = None;
                 state.detail_image = None;
                 state.detail_metadata = None;
-                state.current_view = crate::state::CurrentView::Library;
+                state.internal_state.current_view = crate::state::CurrentView::Library;
             }
         }
 
@@ -1047,7 +1047,7 @@ impl DevelopView {
         if let Some(metadata) = &mut state.detail_metadata {
             if let Some(new_rating) = RatingWidget::show(ui, &mut metadata.rating, 20.0) {
                 // Persist rating change to database
-                if let Some(photo_id) = &state.develop_selected_photo_id {
+                if let Some(photo_id) = &state.internal_state.develop_selected_id {
                     let controller = photo_controller.clone();
                     let photo_id = photo_id.clone();
                     tokio::spawn(async move {

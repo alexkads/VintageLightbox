@@ -13,7 +13,10 @@ use crate::docking::DockTab;
 use egui_dock::DockState;
 use egui_notify::Toasts;
 use infrastructure::cache::CacheStats;
-use crate::components::filmstrip_filter::FilmstripFilter;
+// Replaced by adapters::state::PhotoFilters within internal_state
+// use crate::components::filmstrip_filter::FilmstripFilter;
+use adapters::state::ApplicationState; 
+pub use adapters::state::CurrentView; // View enum now from adapters, re-exported
 
 /// Snapshot of editing state for undo/redo
 #[derive(Debug, Clone)]
@@ -75,14 +78,7 @@ pub struct EditSnapshot {
     pub crop_settings: Option<domain::value_objects::CropSettings>,
 }
 
-/// Current view in the application
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CurrentView {
-    Library,
-    Develop,
-    Print,
-    Import,
-}
+// CurrentView enum removed - using adapters::state::CurrentView
 
 /// Metadata for the currently selected photo in detail view
 #[derive(Debug, Clone)]
@@ -109,19 +105,26 @@ pub struct ImportViewState {
 /// Main application state
 pub struct AppState {
     // ============================================
-    // Navigation
+    // Core State (Adapters)
     // ============================================
-    pub current_view: CurrentView,
+    pub internal_state: ApplicationState,
+
+    // ============================================
+    // Navigation (Managed by internal_state/ApplicationState)
+    // ============================================
+    // pub current_view: CurrentView, // Removed
+
     pub import_view_state: ImportViewState,
 
     // ============================================
     // Photo Library
     // ============================================
     pub photos: Vec<PhotoViewModel>,
-    /// Selected photo in Library view (independent from Develop)
-    pub library_selected_photo_id: Option<String>,
-    /// Selected photo in Develop view (independent from Library)
-    pub develop_selected_photo_id: Option<String>,
+    /// Selected photo in Library view (Managed by internal_state)
+    // pub library_selected_photo_id: Option<String>,
+    /// Selected photo in Develop view (Managed by internal_state)
+    // pub develop_selected_photo_id: Option<String>,
+
     /// ID of the photo currently loaded in detail_image (for change detection)
     pub loaded_photo_id: Option<String>,
     /// Multi-selection: set of selected photo IDs
@@ -328,8 +331,8 @@ pub struct AppState {
     // ============================================
     // Filters
     // ============================================
-    // Filmstrip specific filter
-    pub filmstrip_filter: FilmstripFilter,
+    // Filmstrip specific filter (Managed by internal_state/ApplicationState)
+    // pub filmstrip_filter: FilmstripFilter, // Removed
 
     // ============================================
     // Async Operations
@@ -521,12 +524,17 @@ pub struct CacheBuildingProgress {
 
 impl AppState {
     pub fn new() -> Self {
+        let mut internal_state = ApplicationState::new();
+        // Ensure default view is Library
+        internal_state.current_view = CurrentView::Library;
+
         Self {
-            current_view: CurrentView::Library,
+            internal_state,
+            // current_view: CurrentView::Library,
             import_view_state: ImportViewState::default(),
             photos: Vec::new(),
-            library_selected_photo_id: None,
-            develop_selected_photo_id: None,
+            // library_selected_photo_id: None,
+            // develop_selected_photo_id: None,
             loaded_photo_id: None,
             selected_photo_ids: HashSet::new(),
             last_clicked_index: None,
@@ -662,7 +670,7 @@ impl AppState {
             is_busy: false,
             busy_message: String::new(),
             grid_columns: 4,  // Default 4 columns
-            filmstrip_filter: FilmstripFilter::new(),
+            // filmstrip_filter: FilmstripFilter::new(),
             pending_import: None,
             pending_export: None,
             edit_history: Vec::new(),
@@ -757,10 +765,10 @@ impl AppState {
 
     /// Get the selected photo ID for the current view
     pub fn selected_photo_id(&self) -> Option<&String> {
-        match self.current_view {
-            CurrentView::Library => self.library_selected_photo_id.as_ref(),
-            CurrentView::Develop => self.develop_selected_photo_id.as_ref(),
-            CurrentView::Print => self.library_selected_photo_id.as_ref(),
+        match self.internal_state.current_view {
+            CurrentView::Library => self.internal_state.library_selected_id.as_ref(),
+            CurrentView::Develop => self.internal_state.develop_selected_id.as_ref(),
+            CurrentView::Print => self.internal_state.library_selected_id.as_ref(),
             CurrentView::Import => None,
         }
     }
@@ -773,13 +781,13 @@ impl AppState {
 
     /// Get the library selected photo view model
     pub fn get_library_photo(&self) -> Option<&PhotoViewModel> {
-        self.library_selected_photo_id.as_ref()
+        self.internal_state.library_selected_id.as_ref()
             .and_then(|id| self.photos.iter().find(|p| &p.id == id))
     }
 
     /// Get the develop selected photo view model
     pub fn get_develop_photo(&self) -> Option<&PhotoViewModel> {
-        self.develop_selected_photo_id.as_ref()
+        self.internal_state.develop_selected_id.as_ref()
             .and_then(|id| self.photos.iter().find(|p| &p.id == id))
     }
 
@@ -787,7 +795,7 @@ impl AppState {
     /// direction: 1 for next, -1 for previous
     /// Returns the new photo ID if navigation was successful
     pub fn navigate_develop(&mut self, direction: i32) -> Option<String> {
-        if let Some(current_id) = &self.develop_selected_photo_id {
+        if let Some(current_id) = &self.internal_state.develop_selected_id {
             if let Some(pos) = self.photos.iter().position(|p| &p.id == current_id) {
                 let new_pos = if direction > 0 {
                     (pos + 1).min(self.photos.len().saturating_sub(1))
@@ -808,14 +816,14 @@ impl AppState {
     /// Returns the new photo ID if navigation was successful
     pub fn navigate_library(&mut self, direction: i32) -> Option<String> {
         // Get currently filtered photos
-        let filtered: Vec<_> = self.filmstrip_filter.apply(&self.photos);
+        let filtered: Vec<_> = self.internal_state.photo_filters.apply(&self.photos);
         
         if filtered.is_empty() {
             return None;
         }
         
         // Find current position in filtered list
-        let current_pos = if let Some(current_id) = &self.library_selected_photo_id {
+        let current_pos = if let Some(current_id) = &self.internal_state.library_selected_id {
             filtered.iter().position(|p| &p.id == current_id)
         } else {
             None
@@ -847,9 +855,9 @@ impl AppState {
     /// If the current photo is filtered out, select the next available one.
     pub fn sanitize_develop_selection(&mut self) {
         // Apply filters
-        let filtered = self.filmstrip_filter.apply(&self.photos);
+        let filtered = self.internal_state.photo_filters.apply(&self.photos);
         
-        let should_change = if let Some(current_id) = &self.develop_selected_photo_id {
+        let should_change = if let Some(current_id) = &self.internal_state.develop_selected_id {
             // Check if current ID is in filtered list
             !filtered.iter().any(|p| &p.id == current_id)
         } else {
@@ -858,7 +866,7 @@ impl AppState {
         };
 
         if should_change {
-             self.develop_selected_photo_id = filtered.first().map(|p| p.id.clone());
+             self.internal_state.develop_selected_id = filtered.first().map(|p| p.id.clone());
              // Force reload
              self.loaded_photo_id = None;
         }
@@ -930,7 +938,7 @@ impl AppState {
 
     /// Get the index of the currently selected photo in develop view
     pub fn develop_photo_index(&self) -> Option<usize> {
-        self.develop_selected_photo_id.as_ref()
+        self.internal_state.develop_selected_id.as_ref()
             .and_then(|id| self.photos.iter().position(|p| &p.id == id))
     }
 
@@ -1154,7 +1162,7 @@ impl AppState {
         self.selected_photo_ids.clear();
         self.selected_photo_ids.insert(photo_id.to_string());
         self.last_clicked_index = Some(index);
-        self.library_selected_photo_id = Some(photo_id.to_string());
+        self.internal_state.library_selected_id = Some(photo_id.to_string());
     }
     
     /// Check if a photo is selected

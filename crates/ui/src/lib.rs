@@ -18,3 +18,6 @@ pub mod intelligent_fill;
 pub mod docking;
 pub mod monitors;
 pub mod geometry;
+pub mod adapters;
+pub mod rendering;
+

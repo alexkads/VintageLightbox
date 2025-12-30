@@ -143,11 +143,11 @@ impl<'a> TabViewer for DockViewer<'a> {
             DockTab::Filmstrip => {
                 use crate::state::CurrentView;
                 use crate::components::filmstrip::FilmstripAction;
-                let current_view = self.context.state.current_view;
+                let current_view = self.context.state.internal_state.current_view;
                 
                 // For Develop view, we need the filmstrip to update develop_selected_photo_id
                 // The show() method updates library_selected_photo_id, so we need to sync
-                let prev_library_id = self.context.state.library_selected_photo_id.clone();
+                let prev_library_id = self.context.state.internal_state.library_selected_id.clone();
                 
                 let action = self.context.filmstrip.show(
                     ui,
@@ -159,9 +159,9 @@ impl<'a> TabViewer for DockViewer<'a> {
                 if let Some(action) = action {
                     match action {
                         FilmstripAction::OpenInDevelop => {
-                            if let Some(photo_id) = self.context.state.library_selected_photo_id.clone() {
-                                self.context.state.develop_selected_photo_id = Some(photo_id);
-                                self.context.state.current_view = CurrentView::Develop;
+                            if let Some(photo_id) = self.context.state.internal_state.library_selected_id.clone() {
+                                self.context.state.internal_state.develop_selected_id = Some(photo_id);
+                                self.context.state.internal_state.current_view = CurrentView::Develop;
                                 self.context.state.loaded_photo_id = None;
                             }
                         }
@@ -179,7 +179,7 @@ impl<'a> TabViewer for DockViewer<'a> {
                                 self.context.state.import_dialog = Some(dialog);
                                 self.context.state.import_dialog_mode = crate::state::ImportDialogMode::Export;
 
-                            } else if let Some(photo_id) = &self.context.state.library_selected_photo_id {
+                            } else if let Some(photo_id) = &self.context.state.internal_state.library_selected_id {
                                 let id = photo_id.clone();
                                 
                                 let mut dialog = egui_file::FileDialog::save_file(None)
@@ -228,9 +228,9 @@ impl<'a> TabViewer for DockViewer<'a> {
                 
                 // If we're in Develop mode and library_selected_photo_id changed,
                 // sync it to develop_selected_photo_id and trigger image reload
-                if current_view == CurrentView::Develop && self.context.state.library_selected_photo_id != prev_library_id {
-                    if let Some(new_id) = self.context.state.library_selected_photo_id.clone() {
-                        self.context.state.develop_selected_photo_id = Some(new_id);
+                if current_view == CurrentView::Develop && self.context.state.internal_state.library_selected_id != prev_library_id {
+                    if let Some(new_id) = self.context.state.internal_state.library_selected_id.clone() {
+                        self.context.state.internal_state.develop_selected_id = Some(new_id);
                         self.context.state.loaded_photo_id = None; // Force reload
                     }
                 }
@@ -254,12 +254,12 @@ impl<'a> DockViewer<'a> {
     fn render_folders_panel(&mut self, ui: &mut Ui) {
         egui::ScrollArea::vertical().show(ui, |ui| {
             let mut folder_tree = FolderTree::new(
-                self.context.state.filmstrip_filter.folder_path.as_deref(),
+                self.context.state.internal_state.photo_filters.folder_path.as_deref(),
                 &mut self.context.state.expanded_folders,
             );
 
             if let Some(clicked_path) = folder_tree.show(ui, &self.context.state.folder_tree_roots) {
-                self.context.state.filmstrip_filter.folder_path = Some(clicked_path);
+                self.context.state.internal_state.photo_filters.folder_path = Some(clicked_path);
             }
         });
     }

@@ -3,7 +3,7 @@
 //! Gera máscaras de rotação usando wgpu compute shaders.
 //! A máscara indica quais pixels estão fora dos bounds originais
 //! após a rotação e precisam ser preenchidos.
-
+//! Moved from UI layer.
 
 /// Parâmetros para geração de máscara (deve corresponder ao layout WGSL)
 #[repr(C)]
@@ -60,6 +60,9 @@ pub struct MaskGenerator {
 impl MaskGenerator {
     /// Cria um novo MaskGenerator
     pub fn new(device: &wgpu::Device) -> Self {
+        // Shader is located in infrastructure/src/image_processing/shaders/rotation_mask.wgsl
+        // This file is in infrastructure/src/image_processing/intelligent_fill/mask_generator.rs
+        // So ../shaders/rotation_mask.wgsl resolves correctly to ../shaders
         let shader_source = include_str!("../shaders/rotation_mask.wgsl");
         let shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Rotation Mask Shader"),

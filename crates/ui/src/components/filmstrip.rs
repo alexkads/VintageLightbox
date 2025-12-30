@@ -58,7 +58,7 @@ impl Filmstrip {
         // Render Filter Toolbox
         ui.horizontal(|ui| {
             ui.add_space(Theme::SPACE_SM);
-            state.filmstrip_filter.ui(ui);
+            crate::components::filmstrip_filter::render(ui, &mut state.internal_state.photo_filters);
             
             use crate::components::filmstrip_secondary_windows::{FilmstripSecondaryWindows, SecondaryWindowAction};
             
@@ -75,7 +75,7 @@ impl Filmstrip {
         // Note: apply returns a list of references derived from state.photos
         // This locks state.photos for reading, preventing us from calling methods on state that borrow it mutably.
         // We must access disjoint fields (like selected_photo_ids) directly.
-        let visible_photos = state.filmstrip_filter.apply(&state.photos);
+        let visible_photos = state.internal_state.photo_filters.apply(&state.photos);
 
         // Poll for completed thumbnails (non-blocking)
         let results = self.thumbnail_loader.poll_results();
@@ -235,7 +235,7 @@ impl Filmstrip {
                     for (index, photo) in visible_photos.iter().enumerate() {
                         // Access fields directly to avoid borrow conflict
                         let is_multi_selected = state.selected_photo_ids.contains(&photo.id);
-                        let is_primary_selected = state.library_selected_photo_id.as_ref() == Some(&photo.id);
+                        let is_primary_selected = state.internal_state.library_selected_id.as_ref() == Some(&photo.id);
                         
                         // Reserve space for thumbnail
                         let (rect, response) = ui.allocate_exact_size(
@@ -307,7 +307,7 @@ impl Filmstrip {
                             } else if modifiers.shift {
                                 // Range selection in FILTERED view
                                 // Find where the last selected photo is in the current visible list
-                                if let Some(last_id) = &state.library_selected_photo_id {
+                                if let Some(last_id) = &state.internal_state.library_selected_id {
                                     if let Some(start_idx) = visible_photos.iter().position(|p| &p.id == last_id) {
                                         let start = start_idx.min(index);
                                         let end = start_idx.max(index);
@@ -332,7 +332,7 @@ impl Filmstrip {
                                 state.selected_photo_ids.insert(photo.id.clone());
                                 state.last_clicked_index = Some(index);
                             }
-                            state.library_selected_photo_id = Some(photo.id.clone());
+                            state.internal_state.library_selected_id = Some(photo.id.clone());
                         }
 
                         // Handle right-click
@@ -343,7 +343,7 @@ impl Filmstrip {
                                 state.selected_photo_ids.insert(photo.id.clone());
                                 state.last_clicked_index = Some(index);
                             }
-                            state.library_selected_photo_id = Some(photo.id.clone());
+                            state.internal_state.library_selected_id = Some(photo.id.clone());
                             if let Some(pos) = response.interact_pointer_pos() {
                                 self.context_menu.open(ctx, pos);
                             }
@@ -557,14 +557,14 @@ impl Filmstrip {
         ctx: &egui::Context,
         photos: &[PhotoViewModel],
         selected_photo_id: &Option<String>,
-        filter: &mut crate::components::filmstrip_filter::FilmstripFilter,
+        filter: &mut adapters::state::PhotoFilters,
         mut on_select: impl FnMut(String),
         mut on_flag: impl FnMut(String, i32),
     ) {
         // Render Filter Toolbox
         ui.horizontal(|ui| {
             ui.add_space(Theme::SPACE_SM);
-            filter.ui(ui);
+            crate::components::filmstrip_filter::render(ui, filter);
         });
         ui.separator();
 

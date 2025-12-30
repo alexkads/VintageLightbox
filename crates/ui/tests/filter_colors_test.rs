@@ -39,7 +39,7 @@ async fn setup_harness() -> (
     let (tx, rx) = tokio::sync::mpsc::channel(100);
 
     let mut state = AppState::new();
-    state.current_view = CurrentView::Library;
+    state.internal_state.current_view = CurrentView::Library;
 
     // Seed Data: 1 Red Photo, 1 Blue Photo
     let photo1 = Photo::new(FilePath::new("/tmp/red_photo.jpg").unwrap());
@@ -64,7 +64,7 @@ async fn test_filtering_by_color_label() {
 
     // 1. Filter by "Red" (Capitalized, as set by UI)
     // 1. Filter by "Red" (Capitalized, as set by UI)
-    state.filmstrip_filter.color_labels.insert(domain::value_objects::ColorLabel::Red);
+    state.internal_state.photo_filters.color_labels.insert(domain::value_objects::ColorLabel::Red);
     
     // NOTE: Both PhotoGrid and Filmstrip rely on `state.get_filtered_photos()` or equivalent logic.
     // By verifying this method returns the correct subset, we ensure both components receive the correct data.
@@ -73,7 +73,7 @@ async fn test_filtering_by_color_label() {
     // Assuming logic is: photo.color_label == state.filter_color_label
     
     // 2. Apply filtering logic
-    let filtered_refs = state.filmstrip_filter.apply(&state.photos);
+    let filtered_refs = state.internal_state.photo_filters.apply(&state.photos);
     let filtered_photos: Vec<PhotoViewModel> = filtered_refs.into_iter().cloned().collect();
 
     // 3. Asset we found the red photo

@@ -34,17 +34,17 @@ impl KeyboardHandler {
         if arrow_right || arrow_left {
             let direction = if arrow_right { 1 } else { -1 };
 
-            match state.current_view {
+            match state.internal_state.current_view {
                 CurrentView::Library => {
                     if let Some(new_id) = state.navigate_library(direction) {
-                        state.library_selected_photo_id = Some(new_id);
+                        state.internal_state.library_selected_id = Some(new_id);
                         state.clear_selection();
                     }
                 }
                 CurrentView::Develop => {
-                    let visible_photos = state.filmstrip_filter.apply(&state.photos);
+                    let visible_photos = state.internal_state.photo_filters.apply(&state.photos);
 
-                    if let Some(current_id) = &state.develop_selected_photo_id.clone() {
+                    if let Some(current_id) = &state.internal_state.develop_selected_id.clone() {
                         if let Some(current_pos) = visible_photos.iter().position(|p| &p.id == current_id) {
                             let new_pos = if direction > 0 {
                                 (current_pos + 1).min(visible_photos.len().saturating_sub(1))
@@ -145,8 +145,8 @@ impl KeyboardHandler {
 
                                     let new_id = photo.id.clone();
                                     // Update both IDs to keep Filmstrip and ImageViewer in sync
-                                    state.develop_selected_photo_id = Some(new_id.clone());
-                                    state.library_selected_photo_id = Some(new_id);
+                                    state.internal_state.develop_selected_id = Some(new_id.clone());
+                                    state.internal_state.library_selected_id = Some(new_id);
                                     state.loaded_photo_id = None;
                                     state.reset_viewer();
                                     ctx.request_repaint();
@@ -165,7 +165,7 @@ impl KeyboardHandler {
             // ==========================================
 
             // Escape - Return to Library view (deferred to app.rs to allow save)
-            if i.key_pressed(Key::Escape) && state.current_view == CurrentView::Develop {
+            if i.key_pressed(Key::Escape) && state.internal_state.current_view == CurrentView::Develop {
                 // Set flag, app.rs will handle save + mode switch
                 state.deferred_exit_develop_mode = true;
             }
@@ -180,7 +180,7 @@ impl KeyboardHandler {
             self.handle_flag_shortcuts(i, state, photo_controller, library_controller, photo_sender);
 
             // Selection shortcuts (Cmd+A, Cmd+D) - Library only
-            if state.current_view == CurrentView::Library {
+            if state.internal_state.current_view == CurrentView::Library {
                 // Cmd+A: Select all
                 if i.modifiers.command && i.key_pressed(Key::A) {
                     state.select_all();
@@ -200,7 +200,7 @@ impl KeyboardHandler {
             // ==========================================
             // DEVELOP VIEW SPECIFIC
             // ==========================================
-            if state.current_view == CurrentView::Develop {
+            if state.internal_state.current_view == CurrentView::Develop {
                 // Backslash - Toggle Before/After view
                 if i.key_pressed(Key::Backslash) {
                     state.show_before = !state.show_before;
@@ -234,10 +234,10 @@ impl KeyboardHandler {
 
     /// Helper to get target photo IDs based on current selection and view
     fn get_target_photos(&self, state: &AppState) -> Vec<String> {
-        match state.current_view {
+        match state.internal_state.current_view {
             CurrentView::Develop => {
                 // In Develop, act on the currently loaded photo
-                if let Some(id) = &state.develop_selected_photo_id {
+                if let Some(id) = &state.internal_state.develop_selected_id {
                     vec![id.clone()]
                 } else {
                     Vec::new()
@@ -247,7 +247,7 @@ impl KeyboardHandler {
                 // In Library and Print, act on multi-selection if exists, otherwise single selection
                 if !state.selected_photo_ids.is_empty() {
                     state.selected_photo_ids.iter().cloned().collect()
-                } else if let Some(id) = &state.library_selected_photo_id {
+                } else if let Some(id) = &state.internal_state.library_selected_id {
                     vec![id.clone()]
                 } else {
                     Vec::new()

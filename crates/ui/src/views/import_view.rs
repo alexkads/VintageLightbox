@@ -20,7 +20,7 @@ impl ImportView {
                 ui.heading("Import Photos");
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button("Cancel").clicked() {
-                        state.current_view = crate::state::CurrentView::Library;
+                        state.internal_state.current_view = crate::state::CurrentView::Library;
                     }
                 });
             });
@@ -55,7 +55,7 @@ impl ImportView {
                             if ui.add_enabled(count > 0, egui::Button::new(label)).clicked() {
                                 // Trigger Import
                                 // TODO: call controller
-                                state.current_view = crate::state::CurrentView::Library;
+                                state.internal_state.current_view = crate::state::CurrentView::Library;
                             }
                          });
                     });

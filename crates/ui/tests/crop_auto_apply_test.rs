@@ -135,7 +135,7 @@ async fn setup_harness() -> (
      
      let kb_handler = Arc::new(KeyboardHandler::new());
      let mut state = AppState::new();
-     state.current_view = CurrentView::Develop;
+     state.internal_state.current_view = CurrentView::Develop;
      
      let (tx, _rx) = tokio::sync::mpsc::channel(100);
      
@@ -154,7 +154,7 @@ async fn test_keyboard_nav_saves_crop() {
     photo2.id = "p2".to_string();
     
     state.photos = vec![photo1, photo2];
-    state.develop_selected_photo_id = Some("p1".to_string());
+    state.internal_state.develop_selected_id = Some("p1".to_string());
     
     // Enter Crop Mode
     state.crop_mode_active = true;
@@ -187,7 +187,7 @@ async fn test_keyboard_nav_saves_crop() {
     
     // Verify State Change:
     // 1. Photo ID should be "p2"
-    assert_eq!(state.develop_selected_photo_id, Some("p2".to_string()), "Should navigate to p2");
+    assert_eq!(state.internal_state.develop_selected_id, Some("p2".to_string()), "Should navigate to p2");
     
     // 2. saved_crop_settings should be set (This is our flag that the logic ran)
     assert!(state.saved_crop_settings.is_some(), "saved_crop_settings should be updated");

@@ -80,7 +80,7 @@ async fn setup_harness() -> (
 
     // 5. Initial State
     let mut state = AppState::new();
-    state.current_view = CurrentView::Library;
+    state.internal_state.current_view = CurrentView::Library;
 
     // 6. Seed Data (One Photo)
     let photo1 = Photo::new(FilePath::new("/tmp/test_colors.jpg").unwrap());

@@ -224,7 +224,7 @@ impl PrintView {
         if state.print_view_state.is_none() {
             let photo_ids: Vec<String> = if !state.selected_photo_ids.is_empty() {
                 state.selected_photo_ids.iter().cloned().collect()
-            } else if let Some(id) = &state.library_selected_photo_id {
+            } else if let Some(id) = &state.internal_state.library_selected_id {
                 vec![id.clone()]
             } else {
                 vec![]
@@ -284,7 +284,7 @@ impl PrintView {
             if let Some(ref mut print_state) = state.print_view_state {
                 if ui.checkbox(&mut print_state.use_all_photos, "Use All Photos").changed() && print_state.use_all_photos {
                     // Auto-populate with all filtered photos
-                    print_state.photo_ids = state.filmstrip_filter.apply(&state.photos)
+                    print_state.photo_ids = state.internal_state.photo_filters.apply(&state.photos)
                         .iter()
                         .map(|p| p.id.clone())
                         .collect();
@@ -298,7 +298,7 @@ impl PrintView {
             // Selection buttons
             if ui.small_button("Select All").clicked() {
                 if let Some(ref mut print_state) = state.print_view_state {
-                    print_state.photo_ids = state.filmstrip_filter.apply(&state.photos)
+                    print_state.photo_ids = state.internal_state.photo_filters.apply(&state.photos)
                         .iter()
                         .map(|p| p.id.clone())
                         .collect();
@@ -319,7 +319,7 @@ impl PrintView {
             
             if ui.small_button("Flagged Only").clicked() {
                 if let Some(ref mut print_state) = state.print_view_state {
-                    print_state.photo_ids = state.filmstrip_filter.apply(&state.photos)
+                    print_state.photo_ids = state.internal_state.photo_filters.apply(&state.photos)
                         .iter()
                         .filter(|p| p.flag == Some(1)) // Pick flag
                         .map(|p| p.id.clone())
@@ -332,7 +332,7 @@ impl PrintView {
             
             if ui.small_button("Invert").clicked() {
                 if let Some(ref mut print_state) = state.print_view_state {
-                    let all_ids: std::collections::HashSet<String> = state.filmstrip_filter.apply(&state.photos)
+                    let all_ids: std::collections::HashSet<String> = state.internal_state.photo_filters.apply(&state.photos)
                         .iter()
                         .map(|p| p.id.clone())
                         .collect();
@@ -346,7 +346,7 @@ impl PrintView {
             
             // Selection count
             if let Some(ref print_state) = state.print_view_state {
-                let total = state.filmstrip_filter.apply(&state.photos).len();
+                let total = state.internal_state.photo_filters.apply(&state.photos).len();
                 ui.label(
                     egui::RichText::new(format!("{}/{} selected", print_state.photo_ids.len(), total))
                         .size(Theme::FONT_SM)
@@ -363,7 +363,7 @@ impl PrintView {
             .map(|ps| ps.photo_ids.iter().cloned().collect())
             .unwrap_or_default();
         
-        let selected_id = state.library_selected_photo_id.clone();
+        let selected_id = state.internal_state.library_selected_id.clone();
         
         // Filmstrip with selection indicators
         self.filmstrip.show_develop(
@@ -371,7 +371,7 @@ impl PrintView {
             ctx,
             &state.photos,
             &selected_id,
-            &mut state.filmstrip_filter,
+            &mut state.internal_state.photo_filters,
             |photo_id| {
                 // Toggle photo in print collection
                 if let Some(ref mut print_state) = state.print_view_state {
@@ -382,7 +382,7 @@ impl PrintView {
                     }
                     print_state.use_all_photos = false; // Switch to manual mode
                 }
-                state.library_selected_photo_id = Some(photo_id);
+                state.internal_state.library_selected_id = Some(photo_id);
                 ctx.request_repaint();
             },
             |photo_id, flag_code| {
@@ -468,7 +468,7 @@ impl PrintView {
 
         // Add all filtered photos
         if widgets::secondary_button(ui, "Add All Photos").clicked() {
-            let filtered_ids: Vec<String> = state.filmstrip_filter.apply(&state.photos)
+            let filtered_ids: Vec<String> = state.internal_state.photo_filters.apply(&state.photos)
                 .iter()
                 .map(|p| p.id.clone())
                 .collect();

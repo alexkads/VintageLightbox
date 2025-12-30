@@ -25,7 +25,7 @@ async fn setup_harness() -> (
     let editor_controller = Arc::new(EditorController::new(Arc::new(save_uc)));
     
     let mut state = AppState::new();
-    state.current_view = CurrentView::Develop;
+    state.internal_state.current_view = CurrentView::Develop;
 
     (state, photo_repo, lib_controller, editor_controller)
 }
@@ -43,7 +43,7 @@ async fn test_crop_persistence_flow() {
     // 2. Load into State
     let photos = lib_controller.get_all_photos().await.unwrap();
     state.photos = photos;
-    state.develop_selected_photo_id = Some(photo_id.to_string());
+    state.internal_state.develop_selected_id = Some(photo_id.to_string());
     
     // Simulate selection to populate view model
     let _ = state.get_current_photo().unwrap();
@@ -132,7 +132,7 @@ async fn test_crop_persistence_on_photo_switch() {
     photo_repo.save(&photo2).await.unwrap();
     
     state.photos = lib_controller.get_all_photos().await.unwrap();
-    state.develop_selected_photo_id = Some(id1.to_string());
+    state.internal_state.develop_selected_id = Some(id1.to_string());
     
     // 2. Simulate User Editing Photo 1
     // In UI, this updates `state.active_*` values and `state.crop_settings`
@@ -179,7 +179,7 @@ async fn test_crop_persistence_on_photo_switch() {
     }
     
     // Switch ID
-    state.develop_selected_photo_id = Some(id2.to_string());
+    state.internal_state.develop_selected_id = Some(id2.to_string());
     state.active_exposure = 0.0; // Reset active state (simulating load)
     state.crop_settings = None;
     

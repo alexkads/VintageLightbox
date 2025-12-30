@@ -105,7 +105,7 @@ impl PhotoGrid {
 
         // Get filtered photos
         // Get filtered photos
-        let filtered_refs = state.filmstrip_filter.apply(&state.photos);
+        let filtered_refs = state.internal_state.photo_filters.apply(&state.photos);
         let filtered_photos: Vec<PhotoViewModel> = filtered_refs.into_iter().cloned().collect();
 
         if filtered_photos.is_empty() {
@@ -117,8 +117,8 @@ impl PhotoGrid {
         self.request_visible_thumbnails(&filtered_photos);
 
         // Check if selection changed (e.g., from filmstrip)
-        let selection_changed = state.library_selected_photo_id != self.last_selected_id;
-        self.last_selected_id = state.library_selected_photo_id.clone();
+        let selection_changed = state.internal_state.library_selected_id != self.last_selected_id;
+        self.last_selected_id = state.internal_state.library_selected_id.clone();
 
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
@@ -140,9 +140,9 @@ impl PhotoGrid {
             match clicked_index {
                 0 => {
                     // Open in Develop
-                    if let Some(photo_id) = state.library_selected_photo_id.clone() {
-                        state.develop_selected_photo_id = Some(photo_id);
-                        state.current_view = crate::state::CurrentView::Develop;
+                    if let Some(photo_id) = state.internal_state.library_selected_id.clone() {
+                        state.internal_state.develop_selected_id = Some(photo_id);
+                        state.internal_state.current_view = crate::state::CurrentView::Develop;
                         state.loaded_photo_id = None;
                     }
                 }
@@ -213,7 +213,7 @@ impl PhotoGrid {
 
                 for photo in chunk {
                     // Check if this is the selected photo (in Library view)
-                    let is_selected = state.library_selected_photo_id.as_ref() == Some(&photo.id);
+                    let is_selected = state.internal_state.library_selected_id.as_ref() == Some(&photo.id);
                     
                     // Show the tile with index for multi-selection
                     self.show_tile_with_height(ui, photo, state, ctx, tile_width, tile_height, global_index);
@@ -270,7 +270,7 @@ impl PhotoGrid {
             }
             
             // Populate metadata for detail view (for the primary selection)
-            state.library_selected_photo_id = Some(photo.id.clone());
+            state.internal_state.library_selected_id = Some(photo.id.clone());
             state.detail_metadata = Some(crate::state::DetailMetadata {
                 id: photo.id.clone(),
                 name: photo.name.clone(),
@@ -284,7 +284,7 @@ impl PhotoGrid {
         
         // Check if photo is in multi-selection OR is the primary selection
         let is_multi_selected = state.is_photo_selected(&photo.id);
-        let is_primary_selected = state.library_selected_photo_id.as_ref() == Some(&photo.id);
+        let is_primary_selected = state.internal_state.library_selected_id.as_ref() == Some(&photo.id);
         let is_selected = is_multi_selected || is_primary_selected;
 
         // Initialize the color mapping for labels

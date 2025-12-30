@@ -12,6 +12,8 @@ pub mod scan_directory;
 pub mod thumbnail_generator;
 pub mod content_hash;
 pub mod intelligent_fill;
+pub mod image_processing;
+pub mod services;
 
 // Re-exports for main.rs compatibility
 pub use database::{create_pool, run_migrations, PhotoRepositoryImpl, SqlitePresetRepository, CollectionRepositoryImpl};

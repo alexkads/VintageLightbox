@@ -74,7 +74,7 @@ async fn setup_harness() -> (
 
     // 5. Initial State
     let mut state = AppState::new();
-    state.current_view = CurrentView::Develop;
+    state.internal_state.current_view = CurrentView::Develop;
 
     // 6. Seed Test Data
     let photo1 = Photo::new(FilePath::new("/tmp/test_intelligent_fill.jpg").unwrap());
@@ -87,7 +87,7 @@ async fn setup_harness() -> (
 
     // Select first photo in develop view
     if let Some(photo) = state.photos.first() {
-        state.develop_selected_photo_id = Some(photo.id.clone());
+        state.internal_state.develop_selected_id = Some(photo.id.clone());
     }
 
     (state, kb_handler, photo_controller, lib_controller, editor_controller, export_controller, tx, rx)
@@ -647,13 +647,13 @@ async fn test_intelligent_fill_request_conditions() {
     let (mut state, _kb, _photo_ctrl, _lib_ctrl, _ed_ctrl, _ex_ctrl, _tx, _rx) = setup_harness().await;
 
     // Set up conditions for intelligent fill request
-    state.current_view = CurrentView::Develop;
+    state.internal_state.current_view = CurrentView::Develop;
     state.crop_settings = Some(CropSettings::default()
         .with_fill_mode(RotationFillMode::Intelligent)
         .with_angle(-15.0));
 
     // Check conditions (mirrors request_intelligent_fill_if_needed logic)
-    let in_develop_view = state.current_view == CurrentView::Develop;
+    let in_develop_view = state.internal_state.current_view == CurrentView::Develop;
     let has_crop_settings = state.crop_settings.is_some();
 
     let crop = state.crop_settings.as_ref().unwrap();

@@ -218,7 +218,7 @@ impl eframe::App for VintageLightboxApp {
         if self.state.deferred_exit_develop_mode {
             self.state.deferred_exit_develop_mode = false;
             self.save_pending_develop_edits();
-            self.state.current_view = CurrentView::Library;
+            self.state.internal_state.current_view = CurrentView::Library;
             self.state.reset_viewer();
         }
 
@@ -308,8 +308,8 @@ impl eframe::App for VintageLightboxApp {
         if let Some(result) = self.image_processor.poll_result() {
             // Check if this is still the photo we want
             // Accept if matches develop selection OR (secondary window open AND matches library selection)
-            let is_target = self.state.develop_selected_photo_id.as_ref() == Some(&result.photo_id) ||
-                           (self.secondary_window.is_open && self.state.library_selected_photo_id.as_ref() == Some(&result.photo_id));
+            let is_target = self.state.internal_state.develop_selected_id.as_ref() == Some(&result.photo_id) ||
+                           (self.secondary_window.is_open && self.state.internal_state.library_selected_id.as_ref() == Some(&result.photo_id));
 
             if is_target {
                 // Store original for before/after
@@ -353,7 +353,7 @@ impl eframe::App for VintageLightboxApp {
         if let Some(result) = self.gpu_edit_processor.poll_result() {
             // Only apply if this is the latest request
             if result.request_id >= self.current_edit_request_id.saturating_sub(5) {
-                if let Some(photo_id) = &self.state.develop_selected_photo_id.clone() {
+                if let Some(photo_id) = &self.state.internal_state.develop_selected_id.clone() {
                     self.state.performance_metrics.gpu_process_time_ms = Some(result.process_time_ms);
 
                     let upload_start = std::time::Instant::now();
@@ -397,11 +397,11 @@ impl eframe::App for VintageLightboxApp {
         // Trigger if:
         // 1. We are in Develop View AND have a selected photo
         // 2. OR we are in Library View AND Secondary Window is open (needs high-res)
-        let target_photo_id = if self.state.current_view == crate::state::CurrentView::Develop {
-            self.state.develop_selected_photo_id.clone()
+        let target_photo_id = if self.state.internal_state.current_view == crate::state::CurrentView::Develop {
+            self.state.internal_state.develop_selected_id.clone()
         } else if self.secondary_window.is_open {
              // Bridge: If secondary window is open, use library selection to drive image loading
-             self.state.library_selected_photo_id.clone()
+             self.state.internal_state.library_selected_id.clone()
         } else {
             None
         };
@@ -1533,7 +1533,7 @@ impl eframe::App for VintageLightboxApp {
 
                                 self.state.toasts.info(format!("Deleting {} photo{}...", deleted_count, if deleted_count == 1 { "" } else { "s" }));
                                 self.state.clear_selection();
-                                self.state.library_selected_photo_id = None;
+                                self.state.internal_state.library_selected_id = None;
                                 self.state.show_delete_confirmation = false;
                             }
                         });
@@ -1702,14 +1702,14 @@ impl eframe::App for VintageLightboxApp {
             });
 
         // Main content area - Docking UI
-        if self.state.current_view == CurrentView::Import {
+        if self.state.internal_state.current_view == CurrentView::Import {
             crate::views::import_view::ImportView::show(
                 ctx, 
                 &mut self.state, 
                 &self.import_controller, 
                 &self.import_source_sender
             );
-        } else if self.state.current_view == CurrentView::Print {
+        } else if self.state.internal_state.current_view == CurrentView::Print {
             // Print view - Lightroom-style print module
             egui::CentralPanel::default().show(ctx, |ui| {
                 self.print_view.show(
@@ -1724,7 +1724,7 @@ impl eframe::App for VintageLightboxApp {
         } else {
             egui::CentralPanel::default().show(ctx, |_ui| {
                 // Get the appropriate dock state for the current view
-                let dock_state = match self.state.current_view {
+                let dock_state = match self.state.internal_state.current_view {
                     CurrentView::Library => &mut self.library_dock_state,
                     CurrentView::Develop => &mut self.develop_dock_state,
                     CurrentView::Print => &mut self.library_dock_state, // Fallback
@@ -1803,8 +1803,8 @@ impl eframe::App for VintageLightboxApp {
         
         // Sync secondary window with current selection
         if self.secondary_window.is_open {
-            self.secondary_window.set_photo(self.state.develop_selected_photo_id.clone()
-                .or_else(|| self.state.library_selected_photo_id.clone()));
+            self.secondary_window.set_photo(self.state.internal_state.develop_selected_id.clone()
+                .or_else(|| self.state.internal_state.library_selected_id.clone()));
                 
             // Render secondary window viewport
             // We need to clone the info since we can't borrow self twice or pass multiple refs easily
@@ -1817,13 +1817,13 @@ impl eframe::App for VintageLightboxApp {
                 (p.name.clone(), rating)
             });
             
-            let _has_selection = self.state.develop_selected_photo_id.is_some() || 
-                               self.state.library_selected_photo_id.is_some();
+            let _has_selection = self.state.internal_state.develop_selected_id.is_some() || 
+                               self.state.internal_state.library_selected_id.is_some();
             self.secondary_window.show(
                 ctx,
                 self.state.detail_image.as_ref(),
                 self.state.thumbnail_preview.as_ref(),
-                self.state.develop_selected_photo_id.is_some(),
+                self.state.internal_state.develop_selected_id.is_some(),
                 self.state.crop_settings.as_ref(), // Pass crop settings
                 photo_info.as_ref().map(|(n, r)| (n.as_str(), r.as_str())),
             );
@@ -1881,12 +1881,12 @@ impl VintageLightboxApp {
 
             // View tabs with icons
             let library_label = format!("{} Library", icons::NAV_LIBRARY);
-            if widgets::nav_button(ui, &library_label, self.state.current_view == CurrentView::Library).clicked() {
+            if widgets::nav_button(ui, &library_label, self.state.internal_state.current_view == CurrentView::Library).clicked() {
                 // Save pending edits before leaving Develop mode
-                if self.state.current_view == CurrentView::Develop {
+                if self.state.internal_state.current_view == CurrentView::Develop {
                     self.save_pending_develop_edits();
                 }
-                self.state.current_view = CurrentView::Library;
+                self.state.internal_state.current_view = CurrentView::Library;
                 self.state.reset_viewer();
             }
 
@@ -1894,15 +1894,15 @@ impl VintageLightboxApp {
 
             // Develop button enabled if Library has a selection
             let develop_label = format!("{} Develop", icons::NAV_DEVELOP);
-            let develop_enabled = self.state.library_selected_photo_id.is_some();
+            let develop_enabled = self.state.internal_state.library_selected_id.is_some();
             if develop_enabled {
-                if widgets::nav_button(ui, &develop_label, self.state.current_view == CurrentView::Develop).clicked() {
+                if widgets::nav_button(ui, &develop_label, self.state.internal_state.current_view == CurrentView::Develop).clicked() {
                     // Copy Library selection to Develop when entering Develop mode
-                    if self.state.develop_selected_photo_id.is_none() {
-                        self.state.develop_selected_photo_id = self.state.library_selected_photo_id.clone();
+                    if self.state.internal_state.develop_selected_id.is_none() {
+                        self.state.internal_state.develop_selected_id = self.state.internal_state.library_selected_id.clone();
                         self.state.loaded_photo_id = None; // Force image load
                     }
-                    self.state.current_view = CurrentView::Develop;
+                    self.state.internal_state.current_view = CurrentView::Develop;
                 }
             } else {
                 ui.add_enabled_ui(false, |ui| {
@@ -1914,13 +1914,13 @@ impl VintageLightboxApp {
 
             // Print button - switches to Print view (Lightroom-style print module)
             let print_label = format!("{} Print", icons::NAV_PRINT);
-            let print_enabled = !self.state.selected_photo_ids.is_empty() || self.state.library_selected_photo_id.is_some();
+            let print_enabled = !self.state.selected_photo_ids.is_empty() || self.state.internal_state.library_selected_id.is_some();
             if print_enabled {
-                if widgets::nav_button(ui, &print_label, self.state.current_view == CurrentView::Print).clicked() {
+                if widgets::nav_button(ui, &print_label, self.state.internal_state.current_view == CurrentView::Print).clicked() {
                     // Initialize print view state with selected photos
                     let photo_ids: Vec<String> = if !self.state.selected_photo_ids.is_empty() {
                         self.state.selected_photo_ids.iter().cloned().collect()
-                    } else if let Some(id) = &self.state.library_selected_photo_id {
+                    } else if let Some(id) = &self.state.internal_state.library_selected_id {
                         vec![id.clone()]
                     } else {
                         vec![]
@@ -1928,7 +1928,7 @@ impl VintageLightboxApp {
                     
                     // Set up print view state and switch view
                     self.state.print_view_state = Some(crate::views::print_view::PrintViewState::new(photo_ids));
-                    self.state.current_view = CurrentView::Print;
+                    self.state.internal_state.current_view = CurrentView::Print;
                 }
             } else {
                 ui.add_enabled_ui(false, |ui| {
@@ -1982,7 +1982,7 @@ impl VintageLightboxApp {
     /// Called when crop settings change and fill_mode is Intelligent
     fn request_intelligent_fill_if_needed(&mut self) {
         // Only process if we're in develop view with a selected photo
-        if self.state.current_view != crate::state::CurrentView::Develop {
+        if self.state.internal_state.current_view != crate::state::CurrentView::Develop {
             return;
         }
 
@@ -2167,7 +2167,7 @@ impl VintageLightboxApp {
 
     /// Handle import button click
     fn handle_import(&mut self, _ctx: &egui::Context) {
-        self.state.current_view = crate::state::CurrentView::Import;
+        self.state.internal_state.current_view = crate::state::CurrentView::Import;
         
         // Trigger loading devices
         let _controller = self.import_controller.clone();

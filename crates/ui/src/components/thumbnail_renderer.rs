@@ -1,33 +1,24 @@
-use egui::{Color32, Rect, Vec2};
+use egui::{Color32, Rect, Vec2, pos2};
 use domain::value_objects::{CropSettings, RotationFillMode};
 use crate::geometry::{ClipVertex, clip_polygon_to_uv_bounds};
 use crate::components::animated_fill::{render_zebra_simple, ZebraPatternConfig};
+use crate::geometry::calculate_crop_uvs;
+use crate::rendering::traits::ImageRenderer;
+use crate::rendering::adapters::EguiRenderer;
+use crate::rendering::primitives::{MeshData, Vertex};
 
 /// Renders a thumbnail with support for Crop, Rotation (Mesh-based), Fill Mode, and Aspect Ratio fitting.
-///
-/// # Arguments
-/// * `ui` - The egui UI context
-/// * `rect` - The rectangle to render the thumbnail into
-/// * `texture` - The texture handle for the image
-/// * `crop_settings` - Optional crop settings including rotation and fill mode
 pub fn render_thumbnail(
     ui: &mut egui::Ui,
     rect: Rect,
     texture: &egui::TextureHandle,
     crop_settings: Option<&CropSettings>,
 ) {
+    let mut renderer = EguiRenderer::new(ui);
     let texture_size = Vec2::new(texture.size()[0] as f32, texture.size()[1] as f32);
 
-    // 1. Calculate Effective Size (account for 90-degree rotation)
-    // If we have crop settings, the "Image" we are viewing is the Cropped result.
-    // The Aspect Ratio of the VIEW is crop_width / crop_height (relative to frame).
-    // The Frame Aspect Ratio depends on Rotation90.
-    
-    // Actually, following ImageViewer logic:
-    // We want to fit the "Straightened Crop Result" into 'rect'.
-    
+    // 1. Calculate Effective Size & Aspect Ratio (Straightened Crop Result)
     let (target_aspect, rotated_texture_size) = if let Some(crop) = crop_settings {
-        // Frame Aspect Ratio
         let frame_aspect = if crop.rotation_90() % 2 != 0 {
             texture_size.y / texture_size.x
         } else {
@@ -40,16 +31,9 @@ pub fn render_thumbnail(
             texture_size
         };
 
-        // Crop Aspect Ratio (The visible window)
-        // crop w/h are normalized to Frame dimensions.
-        // So Width in pixels = crop.w * FrameW.
-        // Aspect = (crop.w * FrameW) / (crop.h * FrameH)
-        //        = (crop.w / crop.h) * FrameAspect
         let view_aspect = (crop.crop_width() / crop.crop_height()) * frame_aspect;
-        
         (view_aspect, rot_tex_size)
     } else {
-        // No crop: Just fits the texture.
         let view_aspect = texture_size.x / texture_size.y;
         (view_aspect, texture_size)
     };
@@ -60,74 +44,27 @@ pub fn render_thumbnail(
         // Limited by Width
         let h = rect.width() / target_aspect;
         let y = rect.center().y - h / 2.0;
-        Rect::from_min_size(egui::pos2(rect.min.x, y), Vec2::new(rect.width(), h))
+        Rect::from_min_size(pos2(rect.min.x, y), Vec2::new(rect.width(), h))
     } else {
         // Limited by Height
         let w = rect.height() * target_aspect;
         let x = rect.center().x - w / 2.0;
-        Rect::from_min_size(egui::pos2(x, rect.min.y), Vec2::new(w, rect.height()))
+        Rect::from_min_size(pos2(x, rect.min.y), Vec2::new(w, rect.height()))
     };
 
     // 3. Render
     if let Some(crop) = crop_settings {
-        // Mesh Rendering (Copied from ImageViewer "Neutral Viewer")
-        use egui::epaint::{Mesh, Vertex};
-        
-        let cx = crop.crop_x();
-        let cy = crop.crop_y();
-        let cw = crop.crop_width();
-        let ch = crop.crop_height();
-
-        let corners_frame = [
-            egui::pos2(cx, cy),           // Top-Left
-            egui::pos2(cx + cw, cy),      // Top-Right
-            egui::pos2(cx + cw, cy + ch), // Bottom-Right
-            egui::pos2(cx, cy + ch),      // Bottom-Left
-        ];
-
-        let angle_rad = crop.angle().to_radians();
-        let aspect = rotated_texture_size.x / rotated_texture_size.y;
-        let center = egui::pos2(0.5, 0.5);
-
-        let mut uvs = [egui::Pos2::ZERO; 4];
-        
-        for (i, &p_frame) in corners_frame.iter().enumerate() {
-            let p_centered = p_frame - center;
-            let p_phys = egui::vec2(p_centered.x * aspect, p_centered.y);
-            let (sin, cos) = (-angle_rad).sin_cos();
-            let p_rot = egui::vec2(
-                p_phys.x * cos - p_phys.y * sin,
-                p_phys.x * sin + p_phys.y * cos
-            );
-            let p_rot_norm = egui::vec2(p_rot.x / aspect, p_rot.y);
-            let uv_r90 = center + p_rot_norm;
-
-            let uv_orig = match crop.rotation_90() % 4 {
-                0 => uv_r90,
-                1 => egui::pos2(uv_r90.y, 1.0 - uv_r90.x),
-                2 => egui::pos2(1.0 - uv_r90.x, 1.0 - uv_r90.y),
-                3 => egui::pos2(1.0 - uv_r90.y, uv_r90.x),
-                _ => uv_r90,
-            };
-
-            let mut final_u = uv_orig.x;
-            let mut final_v = uv_orig.y;
-
-            if crop.flip_horizontal() { final_u = 1.0 - final_u; }
-            if crop.flip_vertical() { final_v = 1.0 - final_v; }
-
-            uvs[i] = egui::pos2(final_u, final_v);
-        }
+        // A. Calculate UVs
+        let uvs = calculate_crop_uvs(crop, rotated_texture_size);
 
         let screen_corners = [
             display_rect.min,
-            egui::pos2(display_rect.max.x, display_rect.min.y),
+            pos2(display_rect.max.x, display_rect.min.y),
             display_rect.max,
-            egui::pos2(display_rect.min.x, display_rect.max.y),
+            pos2(display_rect.min.x, display_rect.max.y),
         ];
 
-        // Draw fill background for empty areas created by rotation
-        // Only needed when angle is non-zero (non 90-degree rotation creates gaps)
+        // B. Draw Background Fill (if angle != 0)
         if crop.angle() != 0.0 {
             let fill_color = match crop.fill_mode() {
                 RotationFillMode::Black => Color32::BLACK,
@@ -135,50 +72,54 @@ pub fn render_thumbnail(
                 RotationFillMode::Transparent => Color32::TRANSPARENT,
                 RotationFillMode::Intelligent => {
                     // Show subtle animated zebra for thumbnails
-                    render_zebra_simple(ui, display_rect, &ZebraPatternConfig::dark_subtle());
+                    // Note: render_zebra_simple still uses ui directly, we should ideally abstract it too later
+                    render_zebra_simple(renderer.ui, display_rect, &ZebraPatternConfig::dark_subtle());
                     Color32::TRANSPARENT
                 }
                 RotationFillMode::ShrinkToFit => Color32::TRANSPARENT,
             };
 
             if fill_color != Color32::TRANSPARENT {
-                ui.painter().rect_filled(display_rect, 0.0, fill_color);
+                renderer.draw_rect(display_rect, fill_color);
             }
         }
 
-        // Create input vertices for polygon clipping
+        // C. Clip Polygon
         let input_vertices: Vec<ClipVertex> = screen_corners
             .iter()
             .zip(uvs.iter())
             .map(|(&pos, &uv)| ClipVertex::new(pos, uv))
             .collect();
 
-        // Clip polygon to valid UV bounds [0,1]
         let clipped = clip_polygon_to_uv_bounds(&input_vertices);
 
-        // Only draw texture mesh if we have valid vertices after clipping
+        // D. Render Mesh
         if clipped.len() >= 3 {
-            let mut mesh = Mesh::with_texture(texture.id());
-
-            // Add clipped vertices to mesh
-            for v in &clipped {
-                mesh.vertices.push(Vertex {
-                    pos: v.pos,
-                    uv: v.uv,
-                    color: Color32::WHITE,
-                });
-            }
-
-            // Triangulate using fan triangulation (works for convex polygons)
+            let mut indices = Vec::new();
+            // Fan triangulation
             for i in 1..(clipped.len() - 1) {
-                mesh.add_triangle(0, i as u32, (i + 1) as u32);
+                indices.push(0);
+                indices.push(i as u32);
+                indices.push((i + 1) as u32);
             }
 
-            ui.painter().add(egui::Shape::mesh(mesh));
+            let vertices = clipped.iter().map(|v| Vertex {
+                pos: v.pos,
+                uv: v.uv,
+                color: Color32::WHITE,
+            }).collect();
+
+            let mesh_data = MeshData {
+                vertices,
+                indices,
+                texture_id: texture.id(),
+            };
+            
+            renderer.draw_mesh(mesh_data);
         }
 
     } else {
         // Simple Image Render
-        egui::Image::new(texture).paint_at(ui, display_rect);
+        renderer.draw_image(display_rect, texture.id(), Rect::from_min_max(pos2(0.0,0.0), pos2(1.0,1.0)));
     }
 }

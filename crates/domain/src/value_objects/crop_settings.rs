@@ -2,7 +2,7 @@ use super::rotation_fill_mode::RotationFillMode;
 
 /// Represents crop and rotation settings for a photo.
 /// All crop coordinates are normalized (0.0 to 1.0) relative to the original image dimensions.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct CropSettings {
     crop_x: f32,
     crop_y: f32,

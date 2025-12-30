@@ -21,25 +21,25 @@ fn test_sanitize_selection_auto_advances_when_filtered() {
     state.photos = vec![photo1, photo2, photo3];
 
     // Select Photo 1 (Red)
-    state.develop_selected_photo_id = Some("photo1".to_string());
+    state.internal_state.develop_selected_id = Some("photo1".to_string());
     state.loaded_photo_id = Some("photo1".to_string());
 
     // Apply Filter: Blue only
-    state.filmstrip_filter.color_labels.insert(ColorLabel::Blue);
+    state.internal_state.photo_filters.color_labels.insert(ColorLabel::Blue);
 
     // Filter excludes currently selected photo. Sanitize should switch to next available (photo2)
     state.sanitize_develop_selection();
 
-    assert_eq!(state.develop_selected_photo_id, Some("photo2".to_string()), "Should advance to first available photo (photo2)");
+    assert_eq!(state.internal_state.develop_selected_id, Some("photo2".to_string()), "Should advance to first available photo (photo2)");
     assert_eq!(state.loaded_photo_id, None, "Should force reload");
 
     // Case 2: Current photo IS allowed by filter
-    state.develop_selected_photo_id = Some("photo3".to_string());
+    state.internal_state.develop_selected_id = Some("photo3".to_string());
     state.loaded_photo_id = Some("photo3".to_string());
 
     state.sanitize_develop_selection();
 
-    assert_eq!(state.develop_selected_photo_id, Some("photo3".to_string()), "Should remain on photo3 as it matches filter");
+    assert_eq!(state.internal_state.develop_selected_id, Some("photo3".to_string()), "Should remain on photo3 as it matches filter");
     assert_eq!(state.loaded_photo_id, Some("photo3".to_string()), "Should NOT force reload");
 }
 
@@ -49,12 +49,12 @@ fn test_sanitize_selection_clears_if_none_available() {
     let photo1 = create_view_model("photo1", Some(ColorLabel::Red));
     state.photos = vec![photo1];
 
-    state.develop_selected_photo_id = Some("photo1".to_string());
+    state.internal_state.develop_selected_id = Some("photo1".to_string());
 
     // Filter: Blue only (none matches)
-    state.filmstrip_filter.color_labels.insert(ColorLabel::Blue);
+    state.internal_state.photo_filters.color_labels.insert(ColorLabel::Blue);
 
     state.sanitize_develop_selection();
 
-    assert_eq!(state.develop_selected_photo_id, None, "Should clear selection if no photos match");
+    assert_eq!(state.internal_state.develop_selected_id, None, "Should clear selection if no photos match");
 }
