@@ -23,7 +23,7 @@ fn create_develop_view_harness() -> (Harness<'static>, Rc<RefCell<AppState>>) {
     let develop_view = DevelopView::new(preview_manager);
     
     // Create shared state
-    let state = Rc::new(RefCell::new(AppState::new()));
+    let state = Rc::new(RefCell::new(AppState::new(false)));
     
     // Clone for closure
     let state_clone = state.clone();

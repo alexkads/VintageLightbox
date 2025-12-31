@@ -180,9 +180,6 @@ impl ImageViewer {
             let mut img = egui::Image::new(texture);
 
             if let Some(crop) = crop_settings {
-                eprintln!("[ImageViewer] apply_crop_clip={}, angle={}, rotation_90={}",
-                    apply_crop_clip, crop.angle(), crop.rotation_90());
-                
                 // Initialize renderer wrapper
                 let mut renderer = EguiRenderer::new(ui);
 

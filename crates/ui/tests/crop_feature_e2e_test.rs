@@ -71,7 +71,7 @@ async fn setup_harness() -> (
     let (tx, rx) = tokio::sync::mpsc::channel(100);
 
     // 5. Initial State
-    let mut state = AppState::new();
+    let mut state = AppState::new(false);
     state.internal_state.current_view = CurrentView::Develop;
 
     // 6. Seed Test Data

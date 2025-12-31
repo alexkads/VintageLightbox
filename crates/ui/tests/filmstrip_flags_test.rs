@@ -39,7 +39,7 @@ async fn setup_harness() -> (
     let lib_controller = Arc::new(LibraryController::new(photo_repo.clone()));
 
     // 5. Initial State
-    let mut state = AppState::new();
+    let mut state = AppState::new(false);
     
     // 6. Seed Data (One Photo)
     let photo1 = Photo::new(FilePath::new("/tmp/unflagged_photo.jpg").unwrap());

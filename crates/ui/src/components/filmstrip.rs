@@ -81,107 +81,19 @@ impl Filmstrip {
         let results = self.thumbnail_loader.poll_results();
         for result in results {
             // Find the photo's edit values to apply effects to thumbnail
-            // Use state.photos to find edits (we need to find by ID)
-            // Since visible_photos is a subset, checking state.photos is more robust/correct if edits updated
-            // But visible_photos refs point to state.photos anyway.
             let processed_image = if let Some(photo) = state.photos.iter().find(|p| p.id == result.photo_id) {
-                let exposure = photo.edit_exposure.unwrap_or(0.0);
-                let contrast = photo.edit_contrast.unwrap_or(1.0);
-                let temperature = photo.edit_temperature.unwrap_or(0.0);
-                let tint = photo.edit_tint.unwrap_or(0.0);
-                let highlights = photo.edit_highlights.unwrap_or(0.0);
-                let shadows = photo.edit_shadows.unwrap_or(0.0);
-                let whites = photo.edit_whites.unwrap_or(0.0);
-                let blacks = photo.edit_blacks.unwrap_or(0.0);
-                let clarity = photo.edit_clarity.unwrap_or(0.0);
-                let vibrance = photo.edit_vibrance.unwrap_or(0.0);
-                let saturation = photo.edit_saturation.unwrap_or(0.0);
-                
-                // Tone Curve
-                let tone_curve_shadows = photo.edit_tone_curve_shadows.unwrap_or(0.0);
-                let tone_curve_darks = photo.edit_tone_curve_darks.unwrap_or(0.0);
-                let tone_curve_lights = photo.edit_tone_curve_lights.unwrap_or(0.0);
-                let tone_curve_highlights = photo.edit_tone_curve_highlights.unwrap_or(0.0);
-                
-                // HSL Saturation
-                let hsl_red_sat = photo.edit_hsl_red_sat.unwrap_or(0.0);
-                let hsl_orange_sat = photo.edit_hsl_orange_sat.unwrap_or(0.0);
-                let hsl_yellow_sat = photo.edit_hsl_yellow_sat.unwrap_or(0.0);
-                let hsl_green_sat = photo.edit_hsl_green_sat.unwrap_or(0.0);
-                let hsl_aqua_sat = photo.edit_hsl_aqua_sat.unwrap_or(0.0);
-                let hsl_blue_sat = photo.edit_hsl_blue_sat.unwrap_or(0.0);
-                let hsl_purple_sat = photo.edit_hsl_purple_sat.unwrap_or(0.0);
-                let hsl_magenta_sat = photo.edit_hsl_magenta_sat.unwrap_or(0.0);
-                // HSL Hue
-                let hsl_red_hue = photo.edit_hsl_red_hue.unwrap_or(0.0);
-                let hsl_orange_hue = photo.edit_hsl_orange_hue.unwrap_or(0.0);
-                let hsl_yellow_hue = photo.edit_hsl_yellow_hue.unwrap_or(0.0);
-                let hsl_green_hue = photo.edit_hsl_green_hue.unwrap_or(0.0);
-                let hsl_aqua_hue = photo.edit_hsl_aqua_hue.unwrap_or(0.0);
-                let hsl_blue_hue = photo.edit_hsl_blue_hue.unwrap_or(0.0);
-                let hsl_purple_hue = photo.edit_hsl_purple_hue.unwrap_or(0.0);
-                let hsl_magenta_hue = photo.edit_hsl_magenta_hue.unwrap_or(0.0);
-                // HSL Lum
-                let hsl_red_lum = photo.edit_hsl_red_lum.unwrap_or(0.0);
-                let hsl_orange_lum = photo.edit_hsl_orange_lum.unwrap_or(0.0);
-                let hsl_yellow_lum = photo.edit_hsl_yellow_lum.unwrap_or(0.0);
-                let hsl_green_lum = photo.edit_hsl_green_lum.unwrap_or(0.0);
-                let hsl_aqua_lum = photo.edit_hsl_aqua_lum.unwrap_or(0.0);
-                let hsl_blue_lum = photo.edit_hsl_blue_lum.unwrap_or(0.0);
-                let hsl_purple_lum = photo.edit_hsl_purple_lum.unwrap_or(0.0);
-                let hsl_magenta_lum = photo.edit_hsl_magenta_lum.unwrap_or(0.0);
-                // Lens
-                let lens_distortion = photo.edit_lens_distortion.unwrap_or(0.0);
-                let lens_vignette_amount = photo.edit_lens_vignette_amount.unwrap_or(0.0);
-                let lens_vignette_midpoint = photo.edit_lens_vignette_midpoint.unwrap_or(0.0);
-                // NR
-                let nr_luminance = photo.edit_nr_luminance.unwrap_or(0.0);
-                let nr_color = photo.edit_nr_color.unwrap_or(0.0);
-                // Sharpening
-                let sharpen_amount = photo.edit_sharpen_amount.unwrap_or(0.0);
-                let sharpen_radius = photo.edit_sharpen_radius.unwrap_or(1.0);
-                
                 // Only apply effects if there are actual edits
-                let has_edits = exposure != 0.0 || contrast != 1.0 || temperature != 0.0 || 
-                               tint != 0.0 || saturation != 0.0 || vibrance != 0.0;
-                
-                let processed = if has_edits {
-                    crate::image_processing::ImageProcessor::process_image(
-                        &result.image, exposure, contrast, temperature, tint,
-                        highlights, shadows, whites, blacks, clarity, vibrance, saturation,
-                        tone_curve_shadows, tone_curve_darks, tone_curve_lights, tone_curve_highlights,
-                        hsl_red_sat, hsl_orange_sat, hsl_yellow_sat, hsl_green_sat,
-                        hsl_aqua_sat, hsl_blue_sat, hsl_purple_sat, hsl_magenta_sat,
-                        // HSL Hue
-                        hsl_red_hue, hsl_orange_hue, hsl_yellow_hue, hsl_green_hue,
-                        hsl_aqua_hue, hsl_blue_hue, hsl_purple_hue, hsl_magenta_hue,
-                        // HSL Lum
-                        hsl_red_lum, hsl_orange_lum, hsl_yellow_lum, hsl_green_lum,
-                        hsl_aqua_lum, hsl_blue_lum, hsl_purple_lum, hsl_magenta_lum,
-                        // Lens
-                        lens_distortion, lens_vignette_amount, lens_vignette_midpoint,
-                        // NR
-                        nr_luminance, nr_color,
-                        // Sharpening
-                        sharpen_amount, sharpen_radius,
-                    )
+                let processed = if photo.has_edits() {
+                    let edits = photo.to_edits();
+                    crate::image_processing::ImageProcessor::process_image(&result.image, &edits)
                 } else {
                     result.image.clone()
                 };
                 
-                // Apply crop if present
-                if let (Some(x), Some(y), Some(w), Some(h)) = (
-                    photo.edit_crop_x, photo.edit_crop_y,
-                    photo.edit_crop_width, photo.edit_crop_height
-                ) {
-                    let crop_settings = domain::value_objects::CropSettings::new(
-                        x, y, w, h,
-                        photo.edit_crop_rotation.unwrap_or(0),
-                        photo.edit_crop_angle.unwrap_or(0.0),
-                        photo.edit_crop_flip_h.unwrap_or(false),
-                        photo.edit_crop_flip_v.unwrap_or(false),
-                    );
-                    crate::image_processing::ImageProcessor::apply_crop(&processed, &crop_settings)
+                // Apply crop if present (from edits)
+                let edits = photo.to_edits();
+                if let Some(ref crop_settings) = edits.crop_settings {
+                    crate::image_processing::ImageProcessor::apply_crop(&processed, crop_settings)
                 } else {
                     processed
                 }
@@ -576,88 +488,10 @@ impl Filmstrip {
         for result in results {
             // Find the photo's edit values to apply effects to thumbnail
             let processed_image = if let Some(photo) = photos.iter().find(|p| p.id == result.photo_id) {
-                let exposure = photo.edit_exposure.unwrap_or(0.0);
-                let contrast = photo.edit_contrast.unwrap_or(1.0);
-                let temperature = photo.edit_temperature.unwrap_or(0.0);
-                let tint = photo.edit_tint.unwrap_or(0.0);
-                let highlights = photo.edit_highlights.unwrap_or(0.0);
-                let shadows = photo.edit_shadows.unwrap_or(0.0);
-                let whites = photo.edit_whites.unwrap_or(0.0);
-                let blacks = photo.edit_blacks.unwrap_or(0.0);
-                let clarity = photo.edit_clarity.unwrap_or(0.0);
-                let vibrance = photo.edit_vibrance.unwrap_or(0.0);
-                let saturation = photo.edit_saturation.unwrap_or(0.0);
-
-                // Tone Curve
-                let tone_curve_shadows = photo.edit_tone_curve_shadows.unwrap_or(0.0);
-                let tone_curve_darks = photo.edit_tone_curve_darks.unwrap_or(0.0);
-                let tone_curve_lights = photo.edit_tone_curve_lights.unwrap_or(0.0);
-                let tone_curve_highlights = photo.edit_tone_curve_highlights.unwrap_or(0.0);
-
-                // HSL Saturation
-                let hsl_red_sat = photo.edit_hsl_red_sat.unwrap_or(0.0);
-                let hsl_orange_sat = photo.edit_hsl_orange_sat.unwrap_or(0.0);
-                let hsl_yellow_sat = photo.edit_hsl_yellow_sat.unwrap_or(0.0);
-                let hsl_green_sat = photo.edit_hsl_green_sat.unwrap_or(0.0);
-                let hsl_aqua_sat = photo.edit_hsl_aqua_sat.unwrap_or(0.0);
-                let hsl_blue_sat = photo.edit_hsl_blue_sat.unwrap_or(0.0);
-                let hsl_purple_sat = photo.edit_hsl_purple_sat.unwrap_or(0.0);
-                let hsl_magenta_sat = photo.edit_hsl_magenta_sat.unwrap_or(0.0);
-                // HSL Hue
-                let hsl_red_hue = photo.edit_hsl_red_hue.unwrap_or(0.0);
-                let hsl_orange_hue = photo.edit_hsl_orange_hue.unwrap_or(0.0);
-                let hsl_yellow_hue = photo.edit_hsl_yellow_hue.unwrap_or(0.0);
-                let hsl_green_hue = photo.edit_hsl_green_hue.unwrap_or(0.0);
-                let hsl_aqua_hue = photo.edit_hsl_aqua_hue.unwrap_or(0.0);
-                let hsl_blue_hue = photo.edit_hsl_blue_hue.unwrap_or(0.0);
-                let hsl_purple_hue = photo.edit_hsl_purple_hue.unwrap_or(0.0);
-                let hsl_magenta_hue = photo.edit_hsl_magenta_hue.unwrap_or(0.0);
-                // HSL Lum
-                let hsl_red_lum = photo.edit_hsl_red_lum.unwrap_or(0.0);
-                let hsl_orange_lum = photo.edit_hsl_orange_lum.unwrap_or(0.0);
-                let hsl_yellow_lum = photo.edit_hsl_yellow_lum.unwrap_or(0.0);
-                let hsl_green_lum = photo.edit_hsl_green_lum.unwrap_or(0.0);
-                let hsl_aqua_lum = photo.edit_hsl_aqua_lum.unwrap_or(0.0);
-                let hsl_blue_lum = photo.edit_hsl_blue_lum.unwrap_or(0.0);
-                let hsl_purple_lum = photo.edit_hsl_purple_lum.unwrap_or(0.0);
-                let hsl_magenta_lum = photo.edit_hsl_magenta_lum.unwrap_or(0.0);
-                // Lens
-                let lens_distortion = photo.edit_lens_distortion.unwrap_or(0.0);
-                let lens_vignette_amount = photo.edit_lens_vignette_amount.unwrap_or(0.0);
-                let lens_vignette_midpoint = photo.edit_lens_vignette_midpoint.unwrap_or(0.0);
-                // NR
-                let nr_luminance = photo.edit_nr_luminance.unwrap_or(0.0);
-                let nr_color = photo.edit_nr_color.unwrap_or(0.0);
-                // Sharpening
-                let sharpen_amount = photo.edit_sharpen_amount.unwrap_or(0.0);
-                let sharpen_radius = photo.edit_sharpen_radius.unwrap_or(1.0);
-                
                 // Only apply effects if there are actual edits
-                let has_edits = exposure != 0.0 || contrast != 1.0 || temperature != 0.0 || 
-                               tint != 0.0 || saturation != 0.0 || vibrance != 0.0;
-                
-                
-                
-                if has_edits {
-                    crate::image_processing::ImageProcessor::process_image(
-                        &result.image, exposure, contrast, temperature, tint,
-                        highlights, shadows, whites, blacks, clarity, vibrance, saturation,
-                        tone_curve_shadows, tone_curve_darks, tone_curve_lights, tone_curve_highlights,
-                        hsl_red_sat, hsl_orange_sat, hsl_yellow_sat, hsl_green_sat,
-                        hsl_aqua_sat, hsl_blue_sat, hsl_purple_sat, hsl_magenta_sat,
-                        // HSL Hue
-                        hsl_red_hue, hsl_orange_hue, hsl_yellow_hue, hsl_green_hue,
-                        hsl_aqua_hue, hsl_blue_hue, hsl_purple_hue, hsl_magenta_hue,
-                        // HSL Lum
-                        hsl_red_lum, hsl_orange_lum, hsl_yellow_lum, hsl_green_lum,
-                        hsl_aqua_lum, hsl_blue_lum, hsl_purple_lum, hsl_magenta_lum,
-                        // Lens
-                        lens_distortion, lens_vignette_amount, lens_vignette_midpoint,
-                        // NR
-                        nr_luminance, nr_color,
-                        // Sharpening
-                        sharpen_amount, sharpen_radius,
-                    )
+                if photo.has_edits() {
+                    let edits = photo.to_edits();
+                    crate::image_processing::ImageProcessor::process_image(&result.image, &edits)
                 } else {
                     result.image.clone()
                 }

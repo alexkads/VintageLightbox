@@ -110,6 +110,89 @@ pub struct PhotoViewModel {
     pub file_missing: bool,
 }
 
+impl PhotoViewModel {
+    /// Convert edit fields to a PhotoEdits struct for image processing
+    pub fn to_edits(&self) -> PhotoEdits {
+        let crop_settings = if let (Some(x), Some(y), Some(w), Some(h)) = (
+            self.edit_crop_x, self.edit_crop_y,
+            self.edit_crop_width, self.edit_crop_height
+        ) {
+            let fill_mode = RotationFillMode::try_from(self.edit_crop_fill_mode.unwrap_or(0))
+                .unwrap_or_default();
+            Some(CropSettings::with_fill_mode_value(
+                x, y, w, h,
+                self.edit_crop_rotation.unwrap_or(0),
+                self.edit_crop_angle.unwrap_or(0.0),
+                self.edit_crop_flip_h.unwrap_or(false),
+                self.edit_crop_flip_v.unwrap_or(false),
+                fill_mode,
+            ))
+        } else {
+            None
+        };
+
+        PhotoEdits {
+            exposure: self.edit_exposure.unwrap_or(0.0),
+            contrast: self.edit_contrast.unwrap_or(1.0),
+            temperature: self.edit_temperature.unwrap_or(0.0),
+            tint: self.edit_tint.unwrap_or(0.0),
+            highlights: self.edit_highlights.unwrap_or(0.0),
+            shadows: self.edit_shadows.unwrap_or(0.0),
+            whites: self.edit_whites.unwrap_or(0.0),
+            blacks: self.edit_blacks.unwrap_or(0.0),
+            clarity: self.edit_clarity.unwrap_or(0.0),
+            vibrance: self.edit_vibrance.unwrap_or(0.0),
+            saturation: self.edit_saturation.unwrap_or(0.0),
+            tone_curve_shadows: self.edit_tone_curve_shadows.unwrap_or(0.0),
+            tone_curve_darks: self.edit_tone_curve_darks.unwrap_or(0.0),
+            tone_curve_lights: self.edit_tone_curve_lights.unwrap_or(0.0),
+            tone_curve_highlights: self.edit_tone_curve_highlights.unwrap_or(0.0),
+            hsl_red_sat: self.edit_hsl_red_sat.unwrap_or(0.0),
+            hsl_orange_sat: self.edit_hsl_orange_sat.unwrap_or(0.0),
+            hsl_yellow_sat: self.edit_hsl_yellow_sat.unwrap_or(0.0),
+            hsl_green_sat: self.edit_hsl_green_sat.unwrap_or(0.0),
+            hsl_aqua_sat: self.edit_hsl_aqua_sat.unwrap_or(0.0),
+            hsl_blue_sat: self.edit_hsl_blue_sat.unwrap_or(0.0),
+            hsl_purple_sat: self.edit_hsl_purple_sat.unwrap_or(0.0),
+            hsl_magenta_sat: self.edit_hsl_magenta_sat.unwrap_or(0.0),
+            hsl_red_hue: self.edit_hsl_red_hue.unwrap_or(0.0),
+            hsl_orange_hue: self.edit_hsl_orange_hue.unwrap_or(0.0),
+            hsl_yellow_hue: self.edit_hsl_yellow_hue.unwrap_or(0.0),
+            hsl_green_hue: self.edit_hsl_green_hue.unwrap_or(0.0),
+            hsl_aqua_hue: self.edit_hsl_aqua_hue.unwrap_or(0.0),
+            hsl_blue_hue: self.edit_hsl_blue_hue.unwrap_or(0.0),
+            hsl_purple_hue: self.edit_hsl_purple_hue.unwrap_or(0.0),
+            hsl_magenta_hue: self.edit_hsl_magenta_hue.unwrap_or(0.0),
+            hsl_red_lum: self.edit_hsl_red_lum.unwrap_or(0.0),
+            hsl_orange_lum: self.edit_hsl_orange_lum.unwrap_or(0.0),
+            hsl_yellow_lum: self.edit_hsl_yellow_lum.unwrap_or(0.0),
+            hsl_green_lum: self.edit_hsl_green_lum.unwrap_or(0.0),
+            hsl_aqua_lum: self.edit_hsl_aqua_lum.unwrap_or(0.0),
+            hsl_blue_lum: self.edit_hsl_blue_lum.unwrap_or(0.0),
+            hsl_purple_lum: self.edit_hsl_purple_lum.unwrap_or(0.0),
+            hsl_magenta_lum: self.edit_hsl_magenta_lum.unwrap_or(0.0),
+            lens_distortion: self.edit_lens_distortion.unwrap_or(0.0),
+            lens_vignette_amount: self.edit_lens_vignette_amount.unwrap_or(0.0),
+            lens_vignette_midpoint: self.edit_lens_vignette_midpoint.unwrap_or(0.0),
+            nr_luminance: self.edit_nr_luminance.unwrap_or(0.0),
+            nr_color: self.edit_nr_color.unwrap_or(0.0),
+            sharpen_amount: self.edit_sharpen_amount.unwrap_or(0.0),
+            sharpen_radius: self.edit_sharpen_radius.unwrap_or(1.0),
+            crop_settings,
+        }
+    }
+    
+    /// Check if the photo has any edits applied
+    pub fn has_edits(&self) -> bool {
+        self.edit_exposure.unwrap_or(0.0) != 0.0 ||
+        self.edit_contrast.unwrap_or(1.0) != 1.0 ||
+        self.edit_temperature.unwrap_or(0.0) != 0.0 ||
+        self.edit_tint.unwrap_or(0.0) != 0.0 ||
+        self.edit_saturation.unwrap_or(0.0) != 0.0 ||
+        self.edit_vibrance.unwrap_or(0.0) != 0.0
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct FolderNode {
     pub name: String,

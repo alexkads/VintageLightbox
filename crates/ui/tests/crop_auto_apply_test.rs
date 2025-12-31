@@ -138,7 +138,7 @@ async fn setup_harness() -> (
      ));
      
      let kb_handler = Arc::new(KeyboardHandler::new());
-     let mut state = AppState::new();
+     let mut state = AppState::new(false);
      state.internal_state.current_view = CurrentView::Develop;
      
      let (tx, _rx) = tokio::sync::mpsc::channel(100);

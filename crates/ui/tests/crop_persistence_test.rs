@@ -24,7 +24,7 @@ async fn setup_harness() -> (
     let lib_controller = Arc::new(LibraryController::new(photo_repo.clone()));
     let editor_controller = Arc::new(EditorController::new(Arc::new(save_uc)));
     
-    let mut state = AppState::new();
+    let mut state = AppState::new(false);
     state.internal_state.current_view = CurrentView::Develop;
 
     (state, photo_repo, lib_controller, editor_controller)

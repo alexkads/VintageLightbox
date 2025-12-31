@@ -8,7 +8,7 @@ use std::cell::RefCell;
 
 #[test]
 fn test_crop_panel_apply_button() {
-    let mut val = AppState::new();
+    let mut val = AppState::new(false);
     // Activate crop mode
     val.crop_mode_active = true;
     val.crop_settings = Some(CropSettings::default());
@@ -37,7 +37,7 @@ fn test_crop_panel_apply_button() {
 
 #[test]
 fn test_crop_panel_cancel_button() {
-    let mut val = AppState::new();
+    let mut val = AppState::new(false);
     val.crop_mode_active = true;
     val.crop_settings = Some(CropSettings::default());
 

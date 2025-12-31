@@ -247,8 +247,12 @@ pub struct AsyncImageProcessor {
     request_sender: Sender<ImageProcessRequest>,
     result_receiver: Receiver<ImageProcessResult>,
     processing: Arc<Mutex<Option<String>>>,
+    // These fields maintain Arc ownership for the background thread
+    #[allow(dead_code)]
     preview_manager: Arc<PreviewManager>,
+    #[allow(dead_code)]
     memory_cache: Arc<Mutex<LruCache<String, DecodedImage>>>,
+    #[allow(dead_code)]
     prefetching: Arc<Mutex<std::collections::HashSet<String>>>,
 }
 

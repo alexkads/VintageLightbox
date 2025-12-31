@@ -36,7 +36,7 @@ fn create_photo(id: &str, flag: Option<i32>) -> PhotoViewModel {
 #[test]
 fn test_filter_by_flags() {
     // Setup state
-    let mut state = AppState::new();
+    let mut state = AppState::new(false);
     
     // Add photos with different flags
     state.photos = vec![
@@ -83,7 +83,7 @@ fn test_filter_by_flags() {
 
 #[test]
 fn test_filter_combined_with_rating() {
-    let mut state = AppState::new();
+    let mut state = AppState::new(false);
     
     // Add photos with flags AND ratings
     let mut p1 = create_photo("1", Some(1)); p1.rating = 5; // Picked, 5 stars

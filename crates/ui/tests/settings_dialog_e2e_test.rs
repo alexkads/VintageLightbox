@@ -10,7 +10,7 @@ use std::path::PathBuf;
 #[test]
 fn test_settings_dialog_clear_thumbnails() {
     // Setup State
-    let state = Rc::new(RefCell::new(AppState::new()));
+    let state = Rc::new(RefCell::new(AppState::new(false)));
     {
         let mut s = state.borrow_mut();
         s.show_settings_dialog = true; // Force dialog open
@@ -60,7 +60,7 @@ fn test_settings_dialog_clear_thumbnails() {
 #[test]
 fn test_settings_dialog_stats_display() {
     // Test verifying stats are shown
-    let state = Rc::new(RefCell::new(AppState::new()));
+    let state = Rc::new(RefCell::new(AppState::new(false)));
     {
         let mut s = state.borrow_mut();
         s.show_settings_dialog = true; // Force dialog open

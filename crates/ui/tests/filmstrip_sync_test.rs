@@ -11,7 +11,7 @@ fn create_view_model(id: &str, color: Option<ColorLabel>) -> PhotoViewModel {
 
 #[test]
 fn test_sanitize_selection_auto_advances_when_filtered() {
-    let mut state = AppState::new();
+    let mut state = AppState::new(false);
 
     // Setup 3 photos: 1 Red, 2 Blue
     let photo1 = create_view_model("photo1", Some(ColorLabel::Red));
@@ -45,7 +45,7 @@ fn test_sanitize_selection_auto_advances_when_filtered() {
 
 #[test]
 fn test_sanitize_selection_clears_if_none_available() {
-    let mut state = AppState::new();
+    let mut state = AppState::new(false);
     let photo1 = create_view_model("photo1", Some(ColorLabel::Red));
     state.photos = vec![photo1];
 

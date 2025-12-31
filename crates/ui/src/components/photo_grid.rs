@@ -48,36 +48,10 @@ impl PhotoGrid {
         for result in results {
             // Find the photo's edit values to apply effects to thumbnail
             let processed_image = if let Some(photo) = state.photos.iter().find(|p| p.id == result.photo_id) {
-                let exposure = photo.edit_exposure.unwrap_or(0.0);
-                let contrast = photo.edit_contrast.unwrap_or(1.0);
-                let temperature = photo.edit_temperature.unwrap_or(0.0);
-                let tint = photo.edit_tint.unwrap_or(0.0);
-                let highlights = photo.edit_highlights.unwrap_or(0.0);
-                let shadows = photo.edit_shadows.unwrap_or(0.0);
-                let whites = photo.edit_whites.unwrap_or(0.0);
-                let blacks = photo.edit_blacks.unwrap_or(0.0);
-                let clarity = photo.edit_clarity.unwrap_or(0.0);
-                let vibrance = photo.edit_vibrance.unwrap_or(0.0);
-                let saturation = photo.edit_saturation.unwrap_or(0.0);
-                
                 // Only apply effects if there are actual edits
-                let has_edits = exposure != 0.0 || contrast != 1.0 || temperature != 0.0 || 
-                               tint != 0.0 || saturation != 0.0 || vibrance != 0.0;
-                
-                
-                
-                if has_edits {
-                    crate::image_processing::ImageProcessor::process_image(
-                        &result.image, exposure, contrast, temperature, tint,
-                        highlights, shadows, whites, blacks, clarity, vibrance, saturation,
-                        0.0, 0.0, 0.0, 0.0, // tone curve (not applied to thumbnails)
-                        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL Sat
-                        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL Hue
-                        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL Lum
-                        0.0, 0.0, 0.0, // Lens
-                        0.0, 0.0, // NR
-                        0.0, 1.0, // Sharpening
-                    )
+                if photo.has_edits() {
+                    let edits = photo.to_edits();
+                    crate::image_processing::ImageProcessor::process_image(&result.image, &edits)
                 } else {
                     result.image.clone()
                 }

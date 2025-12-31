@@ -8,7 +8,7 @@ mod tests {
 
     #[test]
     fn test_crop_panel_reset_restores_defaults() {
-        let mut state = AppState::new();
+        let mut state = AppState::new(false);
         state.original_preview = Some(DynamicImage::new_rgb8(100, 100));
         
         // 1. Setup complex state

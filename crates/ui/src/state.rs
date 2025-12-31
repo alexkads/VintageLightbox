@@ -294,7 +294,7 @@ pub struct CacheBuildingProgress {
 }
 
 impl AppState {
-    pub fn new() -> Self {
+    pub fn new(show_performance_stats: bool) -> Self {
         let mut internal_state = ApplicationState::new();
         // Ensure default view is Library
         internal_state.current_view = CurrentView::Library;
@@ -345,7 +345,7 @@ impl AppState {
             // edit_history: Vec::new(), // REMOVED - using EditorService
             // history_index: None,       // REMOVED - using EditorService
             performance_metrics: PerformanceMetrics::default(),
-            show_performance_stats: std::env::var("SHOW_PERFORMANCE_STATS").is_ok_and(|v| v == "true"),
+            show_performance_stats,
             start_load_time: None,
             pending_auto_save: false,
             pending_crop_apply: false,
@@ -597,7 +597,7 @@ impl AppState {
 
 impl Default for AppState {
     fn default() -> Self {
-        Self::new()
+        Self::new(false)
     }
 }
 
@@ -629,7 +629,7 @@ mod tests {
 
     #[test]
     fn test_single_select() {
-        let mut state = AppState::new();
+        let mut state = AppState::new(false);
         state.photos = vec![
             create_test_photo("1"),
             create_test_photo("2"),
@@ -645,7 +645,7 @@ mod tests {
 
     #[test]
     fn test_toggle_selection() {
-        let mut state = AppState::new();
+        let mut state = AppState::new(false);
         state.photos = vec![
             create_test_photo("1"),
             create_test_photo("2"),
@@ -665,7 +665,7 @@ mod tests {
 
     #[test]
     fn test_navigate_develop() {
-        let mut state = AppState::new();
+        let mut state = AppState::new(false);
         state.photos = vec![
             create_test_photo("1"),
             create_test_photo("2"),

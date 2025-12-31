@@ -38,7 +38,7 @@ async fn setup_harness() -> (
     let kb_handler = Arc::new(KeyboardHandler::new());
     let (tx, rx) = tokio::sync::mpsc::channel(100);
 
-    let mut state = AppState::new();
+    let mut state = AppState::new(false);
     state.internal_state.current_view = CurrentView::Library;
 
     // Seed Data: 1 Red Photo, 1 Blue Photo

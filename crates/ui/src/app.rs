@@ -127,7 +127,7 @@ impl VintageLightboxApp {
         let (import_source_sender, import_source_receiver) = mpsc::channel(5);
 
         Self {
-            state: AppState::new(),
+            state: AppState::new(false),
             import_controller,
             library_controller,
             editor_controller,
@@ -438,97 +438,13 @@ impl eframe::App for VintageLightboxApp {
 
                 // Find the photo and request async processing
                 if let Some(photo) = self.state.photos.iter().find(|p| &p.id == photo_id) {
-                    // Load saved edits FIRST (needed for thumbnail processing)
-                    let exposure = photo.edit_exposure.unwrap_or(0.0);
-                    let contrast = photo.edit_contrast.unwrap_or(1.0);
-                    let temperature = photo.edit_temperature.unwrap_or(0.0);
-                    let tint = photo.edit_tint.unwrap_or(0.0);
-                    let highlights = photo.edit_highlights.unwrap_or(0.0);
-                    let shadows = photo.edit_shadows.unwrap_or(0.0);
-                    let whites = photo.edit_whites.unwrap_or(0.0);
-                    let blacks = photo.edit_blacks.unwrap_or(0.0);
-                    let clarity = photo.edit_clarity.unwrap_or(0.0);
-                    let vibrance = photo.edit_vibrance.unwrap_or(0.0);
-                    let saturation = photo.edit_saturation.unwrap_or(0.0);
-                    
-                    // Tone Curve
-                    let tone_curve_shadows = photo.edit_tone_curve_shadows.unwrap_or(0.0);
-                    let tone_curve_darks = photo.edit_tone_curve_darks.unwrap_or(0.0);
-                    let tone_curve_lights = photo.edit_tone_curve_lights.unwrap_or(0.0);
-                    let tone_curve_highlights = photo.edit_tone_curve_highlights.unwrap_or(0.0);
-
-                    // HSL Saturation
-                    let hsl_red_sat = photo.edit_hsl_red_sat.unwrap_or(0.0);
-                    let hsl_orange_sat = photo.edit_hsl_orange_sat.unwrap_or(0.0);
-                    let hsl_yellow_sat = photo.edit_hsl_yellow_sat.unwrap_or(0.0);
-                    let hsl_green_sat = photo.edit_hsl_green_sat.unwrap_or(0.0);
-                    let hsl_aqua_sat = photo.edit_hsl_aqua_sat.unwrap_or(0.0);
-                    let hsl_blue_sat = photo.edit_hsl_blue_sat.unwrap_or(0.0);
-                    let hsl_purple_sat = photo.edit_hsl_purple_sat.unwrap_or(0.0);
-                    let hsl_magenta_sat = photo.edit_hsl_magenta_sat.unwrap_or(0.0);
-                    // HSL Hue
-                    let hsl_red_hue = photo.edit_hsl_red_hue.unwrap_or(0.0);
-                    let hsl_orange_hue = photo.edit_hsl_orange_hue.unwrap_or(0.0);
-                    let hsl_yellow_hue = photo.edit_hsl_yellow_hue.unwrap_or(0.0);
-                    let hsl_green_hue = photo.edit_hsl_green_hue.unwrap_or(0.0);
-                    let hsl_aqua_hue = photo.edit_hsl_aqua_hue.unwrap_or(0.0);
-                    let hsl_blue_hue = photo.edit_hsl_blue_hue.unwrap_or(0.0);
-                    let hsl_purple_hue = photo.edit_hsl_purple_hue.unwrap_or(0.0);
-                    let hsl_magenta_hue = photo.edit_hsl_magenta_hue.unwrap_or(0.0);
-                    // HSL Lum
-                    let hsl_red_lum = photo.edit_hsl_red_lum.unwrap_or(0.0);
-                    let hsl_orange_lum = photo.edit_hsl_orange_lum.unwrap_or(0.0);
-                    let hsl_yellow_lum = photo.edit_hsl_yellow_lum.unwrap_or(0.0);
-                    let hsl_green_lum = photo.edit_hsl_green_lum.unwrap_or(0.0);
-                    let hsl_aqua_lum = photo.edit_hsl_aqua_lum.unwrap_or(0.0);
-                    let hsl_blue_lum = photo.edit_hsl_blue_lum.unwrap_or(0.0);
-                    let hsl_purple_lum = photo.edit_hsl_purple_lum.unwrap_or(0.0);
-                    let hsl_magenta_lum = photo.edit_hsl_magenta_lum.unwrap_or(0.0);
-                    // Lens
-                    let lens_distortion = photo.edit_lens_distortion.unwrap_or(0.0);
-                    let lens_vignette_amount = photo.edit_lens_vignette_amount.unwrap_or(0.0);
-                    let lens_vignette_midpoint = photo.edit_lens_vignette_midpoint.unwrap_or(0.0);
-                    // NR
-                    let nr_luminance = photo.edit_nr_luminance.unwrap_or(0.0);
-                    let nr_color = photo.edit_nr_color.unwrap_or(0.0);
-                    // Sharpening
-                    let sharpen_amount = photo.edit_sharpen_amount.unwrap_or(0.0);
-                    let sharpen_radius = photo.edit_sharpen_radius.unwrap_or(1.0);
-                    
                     // LIGHTROOM-STYLE: Load thumbnail as instant preview WITH EFFECTS APPLIED
                     // This gives immediate visual feedback that matches the final look
                     // Try to load from PreviewManager (BLOB cache) FIRST
                     if let Some(thumb_img) = self.preview_manager.get_thumbnail(photo_id) {
                          // Apply the same effects to thumbnail for consistent appearance
-                         let processed_thumb = crate::image_processing::ImageProcessor::process_image(
-                             &thumb_img,
-                             exposure,
-                             contrast,
-                             temperature,
-                             tint,
-                             highlights,
-                             shadows,
-                             whites,
-                             blacks,
-                             clarity,
-                             vibrance,
-                             saturation,
-                             tone_curve_shadows, tone_curve_darks, tone_curve_lights, tone_curve_highlights,
-                             hsl_red_sat, hsl_orange_sat, hsl_yellow_sat, hsl_green_sat,
-                             hsl_aqua_sat, hsl_blue_sat, hsl_purple_sat, hsl_magenta_sat,
-                             // HSL Hue
-                             hsl_red_hue, hsl_orange_hue, hsl_yellow_hue, hsl_green_hue,
-                             hsl_aqua_hue, hsl_blue_hue, hsl_purple_hue, hsl_magenta_hue,
-                             // HSL Lum
-                             hsl_red_lum, hsl_orange_lum, hsl_yellow_lum, hsl_green_lum,
-                             hsl_aqua_lum, hsl_blue_lum, hsl_purple_lum, hsl_magenta_lum,
-                             // Lens
-                             lens_distortion, lens_vignette_amount, lens_vignette_midpoint,
-                             // NR
-                             nr_luminance, nr_color,
-                             // Sharpening
-                             sharpen_amount, sharpen_radius,
-                         );
+                         let edits = photo.to_edits();
+                         let processed_thumb = crate::image_processing::ImageProcessor::process_image(&thumb_img, &edits);
                          
                          let thumb_texture = crate::image_processing::ImageProcessor::load_texture(
                              ctx,
@@ -536,47 +452,8 @@ impl eframe::App for VintageLightboxApp {
                              &processed_thumb
                          );
                          self.state.thumbnail_preview = Some(thumb_texture);
-                    } else if let Some(thumb_path) = &photo.thumbnail_path {
-                        // Fallback to legacy file path (migration support)
-                        if let Ok(thumb_img) = image::open(thumb_path) {
-                            let processed_thumb = crate::image_processing::ImageProcessor::process_image(
-                                &thumb_img,
-                                exposure,
-                                contrast,
-                                temperature,
-                                tint,
-                                highlights,
-                                shadows,
-                                whites,
-                                blacks,
-                                clarity,
-                                vibrance,
-                                saturation,
-                                tone_curve_shadows, tone_curve_darks, tone_curve_lights, tone_curve_highlights,
-                                hsl_red_sat, hsl_orange_sat, hsl_yellow_sat, hsl_green_sat,
-                                hsl_aqua_sat, hsl_blue_sat, hsl_purple_sat, hsl_magenta_sat,
-                                // HSL Hue
-                                hsl_red_hue, hsl_orange_hue, hsl_yellow_hue, hsl_green_hue,
-                                hsl_aqua_hue, hsl_blue_hue, hsl_purple_hue, hsl_magenta_hue,
-                                // HSL Lum
-                                hsl_red_lum, hsl_orange_lum, hsl_yellow_lum, hsl_green_lum,
-                                hsl_aqua_lum, hsl_blue_lum, hsl_purple_lum, hsl_magenta_lum,
-                                // Lens
-                                lens_distortion, lens_vignette_amount, lens_vignette_midpoint,
-                                // NR
-                                nr_luminance, nr_color,
-                                // Sharpening
-                                sharpen_amount, sharpen_radius,
-                            );
-                            
-                            let thumb_texture = crate::image_processing::ImageProcessor::load_texture(
-                                ctx,
-                                format!("thumb_{}", photo_id),
-                                &processed_thumb
-                            );
-                            self.state.thumbnail_preview = Some(thumb_texture);
-                        }
                     }
+                    // Legacy file path fallback removed - PreviewManager is the only source
 
                     // Update detail metadata immediately
                     self.state.detail_metadata = Some(crate::state::DetailMetadata {
@@ -589,62 +466,9 @@ impl eframe::App for VintageLightboxApp {
                         color_label: photo.color_label.clone(),
                     });
 
-                    // Initialize crop settings
-                    let crop_settings = if let (Some(x), Some(y), Some(w), Some(h)) = (photo.edit_crop_x, photo.edit_crop_y, photo.edit_crop_width, photo.edit_crop_height) {
-                        let fill_mode = domain::value_objects::RotationFillMode::try_from(photo.edit_crop_fill_mode.unwrap_or(0))
-                            .unwrap_or_default();
-                         Some(domain::value_objects::CropSettings::with_fill_mode_value(
-                             x, y, w, h,
-                             photo.edit_crop_rotation.unwrap_or(0),
-                             photo.edit_crop_angle.unwrap_or(0.0),
-                             photo.edit_crop_flip_h.unwrap_or(false),
-                             photo.edit_crop_flip_v.unwrap_or(false),
-                             fill_mode
-                         ))
-                    } else {
-                        None
-                    };
-                    self.state.crop_settings = crop_settings.clone();
-
-                    let initial_edits = domain::value_objects::PhotoEdits {
-                        exposure,
-                        contrast,
-                        temperature,
-                        tint,
-                        highlights,
-                        shadows,
-                        whites,
-                        blacks,
-                        clarity,
-                        vibrance,
-                        saturation,
-                        
-                        tone_curve_shadows,
-                        tone_curve_darks,
-                        tone_curve_lights,
-                        tone_curve_highlights,
-                        
-                        hsl_red_sat, hsl_orange_sat, hsl_yellow_sat, hsl_green_sat,
-                        hsl_aqua_sat, hsl_blue_sat, hsl_purple_sat, hsl_magenta_sat,
-                        
-                        hsl_red_hue, hsl_orange_hue, hsl_yellow_hue, hsl_green_hue,
-                        hsl_aqua_hue, hsl_blue_hue, hsl_purple_hue, hsl_magenta_hue,
-                        
-                        hsl_red_lum, hsl_orange_lum, hsl_yellow_lum, hsl_green_lum,
-                        hsl_aqua_lum, hsl_blue_lum, hsl_purple_lum, hsl_magenta_lum,
-                        
-                        lens_distortion,
-                        lens_vignette_amount,
-                        lens_vignette_midpoint,
-                        
-                        nr_luminance,
-                        nr_color,
-                        
-                        sharpen_amount,
-                        sharpen_radius,
-                        
-                        crop_settings,
-                    };
+                    // Initialize crop settings from edits
+                    let initial_edits = photo.to_edits();
+                    self.state.crop_settings = initial_edits.crop_settings.clone();
                     
                     // Start editing session in EditorService (manages history, undo/redo state)
                     self.editor_service.start_editing(photo.id.clone(), initial_edits.clone());

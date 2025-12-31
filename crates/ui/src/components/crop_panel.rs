@@ -289,7 +289,7 @@ mod tests {
 
     #[test]
     fn test_enforce_aspect_ratio_1_to_1() {
-        let mut state = AppState::new();
+        let mut state = AppState::new(false);
         // Setup 100x100 image
         let img = image::DynamicImage::new_rgb8(100, 100);
         state.original_preview = Some(img);
@@ -310,7 +310,7 @@ mod tests {
     
     #[test]
     fn test_enforce_aspect_ratio_square_selection_on_landscape_image() {
-          let mut state = AppState::new();
+          let mut state = AppState::new(false);
         // Setup 200x100 image (2:1 ratio)
         let img = image::DynamicImage::new_rgb8(200, 100);
         state.original_preview = Some(img);
@@ -343,7 +343,7 @@ mod tests {
 
     #[test]
     fn test_enforce_aspect_ratio_tall_selection_on_landscape_image() {
-          let mut state = AppState::new();
+          let mut state = AppState::new(false);
         // Setup 200x100 image (2:1 ratio)
         let img = image::DynamicImage::new_rgb8(200, 100);
         state.original_preview = Some(img);
@@ -368,7 +368,7 @@ mod tests {
 
     #[test]
     fn test_enforce_aspect_ratio_preserves_fill_mode() {
-        let mut state = AppState::new();
+        let mut state = AppState::new(false);
         state.original_preview = Some(image::DynamicImage::new_rgb8(100, 100));
         
         // Initial setup with ShrinkToFit
