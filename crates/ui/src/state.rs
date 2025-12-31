@@ -216,73 +216,6 @@ pub struct AppState {
     // Sharpening
     pub active_sharpen_amount: f32,
     pub active_sharpen_radius: f32,
-    /// Previous exposure value (for change detection)
-    pub prev_exposure: f32,
-    /// Previous contrast value (for change detection)
-    pub prev_contrast: f32,
-    /// Previous temperature value (for change detection)
-    pub prev_temperature: f32,
-    /// Previous tint value (for change detection)
-    pub prev_tint: f32,
-    /// Previous highlights value (for change detection)
-    pub prev_highlights: f32,
-    /// Previous shadows value (for change detection)
-    pub prev_shadows: f32,
-    /// Previous whites value (for change detection)
-    pub prev_whites: f32,
-    /// Previous blacks value (for change detection)
-    pub prev_blacks: f32,
-    /// Previous clarity value (for change detection)
-    pub prev_clarity: f32,
-    /// Previous vibrance value (for change detection)
-    pub prev_vibrance: f32,
-    /// Previous saturation value (for change detection)
-    pub prev_saturation: f32,
-    /// Previous tone curve shadows (for change detection)
-    pub prev_tone_curve_shadows: f32,
-    /// Previous tone curve darks (for change detection)
-    pub prev_tone_curve_darks: f32,
-    /// Previous tone curve lights (for change detection)
-    pub prev_tone_curve_lights: f32,
-    /// Previous tone curve highlights (for change detection)
-    pub prev_tone_curve_highlights: f32,
-    // Previous HSL values (for change detection)
-    pub prev_hsl_red_sat: f32,
-    pub prev_hsl_orange_sat: f32,
-    pub prev_hsl_yellow_sat: f32,
-    pub prev_hsl_green_sat: f32,
-    pub prev_hsl_aqua_sat: f32,
-    pub prev_hsl_blue_sat: f32,
-    pub prev_hsl_purple_sat: f32,
-    pub prev_hsl_magenta_sat: f32,
-    // HSL Hue
-    pub prev_hsl_red_hue: f32,
-    pub prev_hsl_orange_hue: f32,
-    pub prev_hsl_yellow_hue: f32,
-    pub prev_hsl_green_hue: f32,
-    pub prev_hsl_aqua_hue: f32,
-    pub prev_hsl_blue_hue: f32,
-    pub prev_hsl_purple_hue: f32,
-    pub prev_hsl_magenta_hue: f32,
-    // HSL Lum
-    pub prev_hsl_red_lum: f32,
-    pub prev_hsl_orange_lum: f32,
-    pub prev_hsl_yellow_lum: f32,
-    pub prev_hsl_green_lum: f32,
-    pub prev_hsl_aqua_lum: f32,
-    pub prev_hsl_blue_lum: f32,
-    pub prev_hsl_purple_lum: f32,
-    pub prev_hsl_magenta_lum: f32,
-    // Lens
-    pub prev_lens_distortion: f32,
-    pub prev_lens_vignette_amount: f32,
-    pub prev_lens_vignette_midpoint: f32,
-    // Previous NR (for change detection)
-    pub prev_nr_luminance: f32,
-    pub prev_nr_color: f32,
-    // Previous Sharpening
-    pub prev_sharpen_amount: f32,
-    pub prev_sharpen_radius: f32,
     /// Original unprocessed preview image
     pub original_preview: Option<DynamicImage>,
     /// Cached raw image data for GPU processing (Arc to avoid cloning)
@@ -493,6 +426,16 @@ pub struct AppState {
     
     // Invalidation Queue for Thumbnails
     pub invalidation_queue: HashSet<String>,
+    
+    // ============================================
+    // Change Detection (EditorService Integration)
+    // ============================================
+    /// Last processed edits (for efficient change detection)
+    /// Replaces individual prev_* field comparisons
+    pub last_processed_edits: domain::value_objects::PhotoEdits,
+    /// Last saved edits (for auto-save comparison)
+    /// Replaces individual saved_* field comparisons
+    pub last_saved_edits: domain::value_objects::PhotoEdits,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -597,58 +540,6 @@ impl AppState {
             // Sharpening
             active_sharpen_amount: 0.0,
             active_sharpen_radius: 1.0,
-            prev_exposure: 0.0,
-            prev_contrast: 1.0,
-            prev_temperature: 0.0,
-            prev_tint: 0.0,
-            prev_highlights: 0.0,
-            prev_shadows: 0.0,
-            prev_whites: 0.0,
-            prev_blacks: 0.0,
-            prev_clarity: 0.0,
-            prev_vibrance: 0.0,
-            prev_saturation: 0.0,
-            prev_tone_curve_shadows: 0.0,
-            prev_tone_curve_darks: 0.0,
-            prev_tone_curve_lights: 0.0,
-            prev_tone_curve_highlights: 0.0,
-            // HSL prev values
-            prev_hsl_red_sat: 0.0,
-            prev_hsl_orange_sat: 0.0,
-            prev_hsl_yellow_sat: 0.0,
-            prev_hsl_green_sat: 0.0,
-            prev_hsl_aqua_sat: 0.0,
-            prev_hsl_blue_sat: 0.0,
-            prev_hsl_purple_sat: 0.0,
-            prev_hsl_magenta_sat: 0.0,
-            // HSL Hue
-            prev_hsl_red_hue: 0.0,
-            prev_hsl_orange_hue: 0.0,
-            prev_hsl_yellow_hue: 0.0,
-            prev_hsl_green_hue: 0.0,
-            prev_hsl_aqua_hue: 0.0,
-            prev_hsl_blue_hue: 0.0,
-            prev_hsl_purple_hue: 0.0,
-            prev_hsl_magenta_hue: 0.0,
-            // HSL Lum
-            prev_hsl_red_lum: 0.0,
-            prev_hsl_orange_lum: 0.0,
-            prev_hsl_yellow_lum: 0.0,
-            prev_hsl_green_lum: 0.0,
-            prev_hsl_aqua_lum: 0.0,
-            prev_hsl_blue_lum: 0.0,
-            prev_hsl_purple_lum: 0.0,
-            prev_hsl_magenta_lum: 0.0,
-            // Lens
-            prev_lens_distortion: 0.0,
-            prev_lens_vignette_amount: 0.0,
-            prev_lens_vignette_midpoint: 0.0,
-            // NR prev
-            prev_nr_luminance: 0.0,
-            prev_nr_color: 0.0,
-            // Sharpening prev
-            prev_sharpen_amount: 0.0,
-            prev_sharpen_radius: 1.0,
             original_preview: None,
             original_image_data: None,
             zoom_level: 1.0,
@@ -759,6 +650,8 @@ impl AppState {
             show_print_dialog: false,
             print_dialog_state: None,
             invalidation_queue: HashSet::new(),
+            last_processed_edits: domain::value_objects::PhotoEdits::default(),
+            last_saved_edits: domain::value_objects::PhotoEdits::default(),
         }
     }
 

@@ -36,6 +36,11 @@ pub struct VintageLightboxApp {
     pub preset_controller: Arc<PresetController>,
 
     // ============================================
+    // Services (from adapters layer)
+    // ============================================
+    editor_service: adapters::services::EditorService,
+
+    // ============================================
     // Input Handlers
     // ============================================
     keyboard_handler: KeyboardHandler,
@@ -129,6 +134,7 @@ impl VintageLightboxApp {
             export_controller,
             photo_controller,
             preset_controller,
+            editor_service: adapters::services::EditorService::new(),
             keyboard_handler: KeyboardHandler::new(),
             photo_receiver,
             photo_sender,
@@ -291,7 +297,6 @@ impl eframe::App for VintageLightboxApp {
         }
 
         // Handle keyboard input
-        // Handle keyboard input
         self.keyboard_handler.handle_input(
             ctx,
             &mut self.state,
@@ -300,7 +305,8 @@ impl eframe::App for VintageLightboxApp {
             &self.editor_controller,
             &self.export_controller,
             &self.import_controller,
-            &self.photo_sender
+            &self.photo_sender,
+            &mut self.editor_service
         );
 
         // ============================================
@@ -592,34 +598,7 @@ impl eframe::App for VintageLightboxApp {
                     self.state.active_clarity = clarity;
                     self.state.active_vibrance = vibrance;
                     self.state.active_saturation = saturation;
-                    self.state.prev_exposure = exposure;
-                    self.state.prev_contrast = contrast;
-                    self.state.prev_temperature = temperature;
-                    self.state.prev_tint = tint;
-                    self.state.prev_highlights = highlights;
-                    self.state.prev_shadows = shadows;
-                    self.state.prev_whites = whites;
-                    self.state.prev_blacks = blacks;
-                    self.state.prev_clarity = clarity;
-                    self.state.prev_vibrance = vibrance;
-                    self.state.prev_saturation = saturation;
-                    // Initialize saved values for auto-save comparison
-                    self.state.saved_exposure = exposure;
-                    self.state.saved_contrast = contrast;
-                    self.state.saved_temperature = temperature;
-                    self.state.saved_tint = tint;
-                    self.state.saved_highlights = highlights;
-                    self.state.saved_shadows = shadows;
-                    self.state.saved_whites = whites;
-                    self.state.saved_blacks = blacks;
-                    self.state.saved_clarity = clarity;
-                    self.state.saved_vibrance = vibrance;
-                    self.state.saved_saturation = saturation;
-                    // Tone Curve
-                    self.state.saved_tone_curve_shadows = tone_curve_shadows;
-                    self.state.saved_tone_curve_darks = tone_curve_darks;
-                    self.state.saved_tone_curve_lights = tone_curve_lights;
-                    self.state.saved_tone_curve_highlights = tone_curve_highlights;
+
                     // HSL Saturation state
                     self.state.active_hsl_red_sat = hsl_red_sat;
                     self.state.active_hsl_orange_sat = hsl_orange_sat;
@@ -646,23 +625,7 @@ impl eframe::App for VintageLightboxApp {
                     self.state.active_hsl_purple_sat = hsl_purple_sat;
                     self.state.active_hsl_magenta_sat = hsl_magenta_sat;
                     
-                    self.state.prev_hsl_red_sat = hsl_red_sat;
-                    self.state.prev_hsl_orange_sat = hsl_orange_sat;
-                    self.state.prev_hsl_yellow_sat = hsl_yellow_sat;
-                    self.state.prev_hsl_green_sat = hsl_green_sat;
-                    self.state.prev_hsl_aqua_sat = hsl_aqua_sat;
-                    self.state.prev_hsl_blue_sat = hsl_blue_sat;
-                    self.state.prev_hsl_purple_sat = hsl_purple_sat;
-                    self.state.prev_hsl_magenta_sat = hsl_magenta_sat;
-                    
-                    self.state.saved_hsl_red_sat = hsl_red_sat;
-                    self.state.saved_hsl_orange_sat = hsl_orange_sat;
-                    self.state.saved_hsl_yellow_sat = hsl_yellow_sat;
-                    self.state.saved_hsl_green_sat = hsl_green_sat;
-                    self.state.saved_hsl_aqua_sat = hsl_aqua_sat;
-                    self.state.saved_hsl_blue_sat = hsl_blue_sat;
-                    self.state.saved_hsl_purple_sat = hsl_purple_sat;
-                    self.state.saved_hsl_magenta_sat = hsl_magenta_sat;
+
 
                     // HSL Hue state
                     self.state.active_hsl_red_hue = hsl_red_hue;
@@ -674,23 +637,7 @@ impl eframe::App for VintageLightboxApp {
                     self.state.active_hsl_purple_hue = hsl_purple_hue;
                     self.state.active_hsl_magenta_hue = hsl_magenta_hue;
                     
-                    self.state.prev_hsl_red_hue = hsl_red_hue;
-                    self.state.prev_hsl_orange_hue = hsl_orange_hue;
-                    self.state.prev_hsl_yellow_hue = hsl_yellow_hue;
-                    self.state.prev_hsl_green_hue = hsl_green_hue;
-                    self.state.prev_hsl_aqua_hue = hsl_aqua_hue;
-                    self.state.prev_hsl_blue_hue = hsl_blue_hue;
-                    self.state.prev_hsl_purple_hue = hsl_purple_hue;
-                    self.state.prev_hsl_magenta_hue = hsl_magenta_hue;
-                    
-                    self.state.saved_hsl_red_hue = hsl_red_hue;
-                    self.state.saved_hsl_orange_hue = hsl_orange_hue;
-                    self.state.saved_hsl_yellow_hue = hsl_yellow_hue;
-                    self.state.saved_hsl_green_hue = hsl_green_hue;
-                    self.state.saved_hsl_aqua_hue = hsl_aqua_hue;
-                    self.state.saved_hsl_blue_hue = hsl_blue_hue;
-                    self.state.saved_hsl_purple_hue = hsl_purple_hue;
-                    self.state.saved_hsl_magenta_hue = hsl_magenta_hue;
+
 
                     // HSL Lum state
                     self.state.active_hsl_red_lum = hsl_red_lum;
@@ -702,60 +649,29 @@ impl eframe::App for VintageLightboxApp {
                     self.state.active_hsl_purple_lum = hsl_purple_lum;
                     self.state.active_hsl_magenta_lum = hsl_magenta_lum;
                     
-                    self.state.prev_hsl_red_lum = hsl_red_lum;
-                    self.state.prev_hsl_orange_lum = hsl_orange_lum;
-                    self.state.prev_hsl_yellow_lum = hsl_yellow_lum;
-                    self.state.prev_hsl_green_lum = hsl_green_lum;
-                    self.state.prev_hsl_aqua_lum = hsl_aqua_lum;
-                    self.state.prev_hsl_blue_lum = hsl_blue_lum;
-                    self.state.prev_hsl_purple_lum = hsl_purple_lum;
-                    self.state.prev_hsl_magenta_lum = hsl_magenta_lum;
-                    
-                    self.state.saved_hsl_red_lum = hsl_red_lum;
-                    self.state.saved_hsl_orange_lum = hsl_orange_lum;
-                    self.state.saved_hsl_yellow_lum = hsl_yellow_lum;
-                    self.state.saved_hsl_green_lum = hsl_green_lum;
-                    self.state.saved_hsl_aqua_lum = hsl_aqua_lum;
-                    self.state.saved_hsl_blue_lum = hsl_blue_lum;
-                    self.state.saved_hsl_purple_lum = hsl_purple_lum;
-                    self.state.saved_hsl_magenta_lum = hsl_magenta_lum;
 
                     // Lens
                     self.state.active_lens_distortion = lens_distortion;
                     self.state.active_lens_vignette_amount = lens_vignette_amount;
                     self.state.active_lens_vignette_midpoint = lens_vignette_midpoint;
-                    self.state.prev_lens_distortion = lens_distortion;
-                    self.state.prev_lens_vignette_amount = lens_vignette_amount;
-                    self.state.prev_lens_vignette_midpoint = lens_vignette_midpoint;
-                    self.state.saved_lens_distortion = lens_distortion;
-                    self.state.saved_lens_vignette_amount = lens_vignette_amount;
-                    self.state.saved_lens_vignette_midpoint = lens_vignette_midpoint;
+
 
                     // NR
                     self.state.active_nr_luminance = nr_luminance;
                     self.state.active_nr_color = nr_color;
-                    self.state.prev_nr_luminance = nr_luminance;
-                    self.state.prev_nr_color = nr_color;
-                    self.state.saved_nr_luminance = nr_luminance;
-                    self.state.saved_nr_color = nr_color;
+
 
                     // Sharpening
                     self.state.active_sharpen_amount = sharpen_amount;
                     self.state.active_sharpen_radius = sharpen_radius;
-                    self.state.prev_sharpen_amount = sharpen_amount;
-                    self.state.prev_sharpen_radius = sharpen_radius;
-                    self.state.saved_sharpen_amount = sharpen_amount;
-                    self.state.saved_sharpen_radius = sharpen_radius;
+
 
                     // Initialize Tone Curve active/prev values (saved already done above)
                     self.state.active_tone_curve_shadows = tone_curve_shadows;
                     self.state.active_tone_curve_darks = tone_curve_darks;
                     self.state.active_tone_curve_lights = tone_curve_lights;
                     self.state.active_tone_curve_highlights = tone_curve_highlights;
-                    self.state.prev_tone_curve_shadows = tone_curve_shadows;
-                    self.state.prev_tone_curve_darks = tone_curve_darks;
-                    self.state.prev_tone_curve_lights = tone_curve_lights;
-                    self.state.prev_tone_curve_highlights = tone_curve_highlights;
+
 
                     // Request async image loading (non-blocking!)
                     self.image_processor.request_process(ImageProcessRequest {
@@ -825,59 +741,9 @@ impl eframe::App for VintageLightboxApp {
                 }
             } else if !needs_reload {
                 // Photo is loaded, check for edit changes
-                let edits_changed =
-                    self.state.active_exposure != self.state.prev_exposure ||
-                    self.state.active_contrast != self.state.prev_contrast ||
-                    self.state.active_temperature != self.state.prev_temperature ||
-                    self.state.active_tint != self.state.prev_tint ||
-                    self.state.active_highlights != self.state.prev_highlights ||
-                    self.state.active_shadows != self.state.prev_shadows ||
-                    self.state.active_whites != self.state.prev_whites ||
-                    self.state.active_blacks != self.state.prev_blacks ||
-                    self.state.active_clarity != self.state.prev_clarity ||
-                    self.state.active_vibrance != self.state.prev_vibrance ||
-                    self.state.active_saturation != self.state.prev_saturation ||
-                    self.state.active_tone_curve_shadows != self.state.prev_tone_curve_shadows ||
-                    self.state.active_tone_curve_darks != self.state.prev_tone_curve_darks ||
-                    self.state.active_tone_curve_lights != self.state.prev_tone_curve_lights ||
-                    self.state.active_tone_curve_highlights != self.state.prev_tone_curve_highlights ||
-                    // HSL Saturation
-                    self.state.active_hsl_red_sat != self.state.prev_hsl_red_sat ||
-                    self.state.active_hsl_orange_sat != self.state.prev_hsl_orange_sat ||
-                    self.state.active_hsl_yellow_sat != self.state.prev_hsl_yellow_sat ||
-                    self.state.active_hsl_green_sat != self.state.prev_hsl_green_sat ||
-                    self.state.active_hsl_aqua_sat != self.state.prev_hsl_aqua_sat ||
-                    self.state.active_hsl_blue_sat != self.state.prev_hsl_blue_sat ||
-                    self.state.active_hsl_purple_sat != self.state.prev_hsl_purple_sat ||
-                    self.state.active_hsl_magenta_sat != self.state.prev_hsl_magenta_sat ||
-                    // HSL Hue
-                    self.state.active_hsl_red_hue != self.state.prev_hsl_red_hue ||
-                    self.state.active_hsl_orange_hue != self.state.prev_hsl_orange_hue ||
-                    self.state.active_hsl_yellow_hue != self.state.prev_hsl_yellow_hue ||
-                    self.state.active_hsl_green_hue != self.state.prev_hsl_green_hue ||
-                    self.state.active_hsl_aqua_hue != self.state.prev_hsl_aqua_hue ||
-                    self.state.active_hsl_blue_hue != self.state.prev_hsl_blue_hue ||
-                    self.state.active_hsl_purple_hue != self.state.prev_hsl_purple_hue ||
-                    self.state.active_hsl_magenta_hue != self.state.prev_hsl_magenta_hue ||
-                    // HSL Lum
-                    self.state.active_hsl_red_lum != self.state.prev_hsl_red_lum ||
-                    self.state.active_hsl_orange_lum != self.state.prev_hsl_orange_lum ||
-                    self.state.active_hsl_yellow_lum != self.state.prev_hsl_yellow_lum ||
-                    self.state.active_hsl_green_lum != self.state.prev_hsl_green_lum ||
-                    self.state.active_hsl_aqua_lum != self.state.prev_hsl_aqua_lum ||
-                    self.state.active_hsl_blue_lum != self.state.prev_hsl_blue_lum ||
-                    self.state.active_hsl_purple_lum != self.state.prev_hsl_purple_lum ||
-                    self.state.active_hsl_magenta_lum != self.state.prev_hsl_magenta_lum ||
-                    // Lens
-                    self.state.active_lens_distortion != self.state.prev_lens_distortion ||
-                    self.state.active_lens_vignette_amount != self.state.prev_lens_vignette_amount ||
-                    self.state.active_lens_vignette_midpoint != self.state.prev_lens_vignette_midpoint ||
-                    // NR
-                    self.state.active_nr_luminance != self.state.prev_nr_luminance ||
-                    self.state.active_nr_color != self.state.prev_nr_color ||
-                    // Sharpen
-                    self.state.active_sharpen_amount != self.state.prev_sharpen_amount ||
-                    self.state.active_sharpen_radius != self.state.prev_sharpen_radius;
+                // Use EditorService for efficient change detection
+                let current_edits = self.editor_service.current_edits();
+                let edits_changed = current_edits != self.state.last_processed_edits;
                 let before_toggled = self.state.show_before != self.state.prev_show_before;
 
                 if (edits_changed || before_toggled) && self.state.original_preview.is_some() {
@@ -1043,60 +909,9 @@ impl eframe::App for VintageLightboxApp {
                         }
                     }
 
-                    // Update previous values
+                    // Update last processed edits for change detection
                     if !self.state.show_before {
-                        self.state.prev_exposure = self.state.active_exposure;
-                        self.state.prev_contrast = self.state.active_contrast;
-                        self.state.prev_temperature = self.state.active_temperature;
-                        self.state.prev_tint = self.state.active_tint;
-                        self.state.prev_highlights = self.state.active_highlights;
-                        self.state.prev_shadows = self.state.active_shadows;
-                        self.state.prev_whites = self.state.active_whites;
-                        self.state.prev_blacks = self.state.active_blacks;
-                        self.state.prev_clarity = self.state.active_clarity;
-                        self.state.prev_vibrance = self.state.active_vibrance;
-                        self.state.prev_saturation = self.state.active_saturation;
-                        self.state.prev_tone_curve_shadows = self.state.active_tone_curve_shadows;
-                        self.state.prev_tone_curve_darks = self.state.active_tone_curve_darks;
-                        self.state.prev_tone_curve_lights = self.state.active_tone_curve_lights;
-                        self.state.prev_tone_curve_highlights = self.state.active_tone_curve_highlights;
-                        // HSL Sat
-                        self.state.prev_hsl_red_sat = self.state.active_hsl_red_sat;
-                        self.state.prev_hsl_orange_sat = self.state.active_hsl_orange_sat;
-                        self.state.prev_hsl_yellow_sat = self.state.active_hsl_yellow_sat;
-                        self.state.prev_hsl_green_sat = self.state.active_hsl_green_sat;
-                        self.state.prev_hsl_aqua_sat = self.state.active_hsl_aqua_sat;
-                        self.state.prev_hsl_blue_sat = self.state.active_hsl_blue_sat;
-                        self.state.prev_hsl_purple_sat = self.state.active_hsl_purple_sat;
-                        self.state.prev_hsl_magenta_sat = self.state.active_hsl_magenta_sat;
-                        // HSL Hue
-                        self.state.prev_hsl_red_hue = self.state.active_hsl_red_hue;
-                        self.state.prev_hsl_orange_hue = self.state.active_hsl_orange_hue;
-                        self.state.prev_hsl_yellow_hue = self.state.active_hsl_yellow_hue;
-                        self.state.prev_hsl_green_hue = self.state.active_hsl_green_hue;
-                        self.state.prev_hsl_aqua_hue = self.state.active_hsl_aqua_hue;
-                        self.state.prev_hsl_blue_hue = self.state.active_hsl_blue_hue;
-                        self.state.prev_hsl_purple_hue = self.state.active_hsl_purple_hue;
-                        self.state.prev_hsl_magenta_hue = self.state.active_hsl_magenta_hue;
-                        // HSL Lum
-                        self.state.prev_hsl_red_lum = self.state.active_hsl_red_lum;
-                        self.state.prev_hsl_orange_lum = self.state.active_hsl_orange_lum;
-                        self.state.prev_hsl_yellow_lum = self.state.active_hsl_yellow_lum;
-                        self.state.prev_hsl_green_lum = self.state.active_hsl_green_lum;
-                        self.state.prev_hsl_aqua_lum = self.state.active_hsl_aqua_lum;
-                        self.state.prev_hsl_blue_lum = self.state.active_hsl_blue_lum;
-                        self.state.prev_hsl_purple_lum = self.state.active_hsl_purple_lum;
-                        self.state.prev_hsl_magenta_lum = self.state.active_hsl_magenta_lum;
-                        // Lens
-                        self.state.prev_lens_distortion = self.state.active_lens_distortion;
-                        self.state.prev_lens_vignette_amount = self.state.active_lens_vignette_amount;
-                        self.state.prev_lens_vignette_midpoint = self.state.active_lens_vignette_midpoint;
-                        // NR
-                        self.state.prev_nr_luminance = self.state.active_nr_luminance;
-                        self.state.prev_nr_color = self.state.active_nr_color;
-                        // Sharpen
-                        self.state.prev_sharpen_amount = self.state.active_sharpen_amount;
-                        self.state.prev_sharpen_radius = self.state.active_sharpen_radius;
+                        self.state.last_processed_edits = current_edits;
                     }
                     self.state.prev_show_before = self.state.show_before;
                 }
@@ -1122,64 +937,9 @@ impl eframe::App for VintageLightboxApp {
             if let Some(last_change) = self.state.last_slider_change_time {
                 let elapsed = last_change.elapsed().as_millis();
                 if elapsed >= AUTO_SAVE_DEBOUNCE_MS {
-                    // Check if values actually changed from last saved state
-                    let values_changed =
-                        self.state.active_exposure != self.state.saved_exposure ||
-                        self.state.active_contrast != self.state.saved_contrast ||
-                        self.state.active_temperature != self.state.saved_temperature ||
-                        self.state.active_tint != self.state.saved_tint ||
-                        self.state.active_highlights != self.state.saved_highlights ||
-                        self.state.active_shadows != self.state.saved_shadows ||
-                        self.state.active_whites != self.state.saved_whites ||
-                        self.state.active_blacks != self.state.saved_blacks ||
-                        self.state.active_clarity != self.state.saved_clarity ||
-                        self.state.active_vibrance != self.state.saved_vibrance ||
-                        self.state.active_saturation != self.state.saved_saturation ||
-                        // Tone Curve
-                        self.state.active_tone_curve_shadows != self.state.saved_tone_curve_shadows ||
-                        self.state.active_tone_curve_darks != self.state.saved_tone_curve_darks ||
-                        self.state.active_tone_curve_lights != self.state.saved_tone_curve_lights ||
-                        self.state.active_tone_curve_highlights != self.state.saved_tone_curve_highlights ||
-                        // HSL Sat
-                        self.state.active_hsl_red_sat != self.state.saved_hsl_red_sat ||
-                        self.state.active_hsl_orange_sat != self.state.saved_hsl_orange_sat ||
-                        self.state.active_hsl_yellow_sat != self.state.saved_hsl_yellow_sat ||
-                        self.state.active_hsl_green_sat != self.state.saved_hsl_green_sat ||
-                        self.state.active_hsl_aqua_sat != self.state.saved_hsl_aqua_sat ||
-                        self.state.active_hsl_blue_sat != self.state.saved_hsl_blue_sat ||
-                        self.state.active_hsl_purple_sat != self.state.saved_hsl_purple_sat ||
-                        self.state.active_hsl_magenta_sat != self.state.saved_hsl_magenta_sat ||
-                        // HSL Hue
-                        self.state.active_hsl_red_hue != self.state.saved_hsl_red_hue ||
-                        self.state.active_hsl_orange_hue != self.state.saved_hsl_orange_hue ||
-                        self.state.active_hsl_yellow_hue != self.state.saved_hsl_yellow_hue ||
-                        self.state.active_hsl_green_hue != self.state.saved_hsl_green_hue ||
-                        self.state.active_hsl_aqua_hue != self.state.saved_hsl_aqua_hue ||
-                        self.state.active_hsl_blue_hue != self.state.saved_hsl_blue_hue ||
-                        self.state.active_hsl_purple_hue != self.state.saved_hsl_purple_hue ||
-                        self.state.active_hsl_magenta_hue != self.state.saved_hsl_magenta_hue ||
-                        // HSL Lum
-                        self.state.active_hsl_red_lum != self.state.saved_hsl_red_lum ||
-                        self.state.active_hsl_orange_lum != self.state.saved_hsl_orange_lum ||
-                        self.state.active_hsl_yellow_lum != self.state.saved_hsl_yellow_lum ||
-                        self.state.active_hsl_green_lum != self.state.saved_hsl_green_lum ||
-                        self.state.active_hsl_aqua_lum != self.state.saved_hsl_aqua_lum ||
-                        self.state.active_hsl_blue_lum != self.state.saved_hsl_blue_lum ||
-                        self.state.active_hsl_purple_lum != self.state.saved_hsl_purple_lum ||
-                        self.state.active_hsl_magenta_lum != self.state.saved_hsl_magenta_lum ||
-                        // Lens
-                        self.state.active_lens_distortion != self.state.saved_lens_distortion ||
-                        self.state.active_lens_vignette_amount != self.state.saved_lens_vignette_amount ||
-                        self.state.active_lens_vignette_midpoint != self.state.saved_lens_vignette_midpoint ||
-                        // NR
-                        self.state.active_nr_luminance != self.state.saved_nr_luminance ||
-                        self.state.active_nr_color != self.state.saved_nr_color ||
-                        // Sharpen
-                        self.state.active_sharpen_amount != self.state.saved_sharpen_amount ||
-                        self.state.active_sharpen_amount != self.state.saved_sharpen_amount ||
-                        self.state.active_sharpen_radius != self.state.saved_sharpen_radius ||
-                        // Crop
-                        self.state.crop_settings != self.state.saved_crop_settings;
+                    // Check if values actually changed from last saved state using PhotoEdits
+                    let current_edits = self.editor_service.current_edits();
+                    let values_changed = current_edits != self.state.last_saved_edits;
 
                     if values_changed {
                         if let Some(metadata) = &self.state.detail_metadata {
@@ -1239,30 +999,9 @@ impl eframe::App for VintageLightboxApp {
                             let sharpen_amount = self.state.active_sharpen_amount;
                             let sharpen_radius = self.state.active_sharpen_radius;
 
-                            // Update saved values BEFORE spawning
-                            self.state.saved_exposure = exposure;
-                            self.state.saved_contrast = contrast;
-                            self.state.saved_temperature = temperature;
-                            self.state.saved_tint = tint;
-                            self.state.saved_highlights = highlights;
-                            self.state.saved_shadows = shadows;
-                            self.state.saved_whites = whites;
-                            self.state.saved_blacks = blacks;
-                            self.state.saved_clarity = clarity;
-                            self.state.saved_vibrance = vibrance;
-                            self.state.saved_saturation = saturation;
-                            // Update saved HSL values
-                            self.state.saved_hsl_red_sat = hsl_red_sat;
-                            self.state.saved_hsl_orange_sat = hsl_orange_sat;
-                            self.state.saved_hsl_yellow_sat = hsl_yellow_sat;
-                            self.state.saved_hsl_green_sat = hsl_green_sat;
-                            self.state.saved_hsl_aqua_sat = hsl_aqua_sat;
-                            self.state.saved_hsl_blue_sat = hsl_blue_sat;
-                            self.state.saved_hsl_purple_sat = hsl_purple_sat;
-                            self.state.saved_hsl_magenta_sat = hsl_magenta_sat;
-                            
-                            // Update saved crop settings
-                            self.state.saved_crop_settings = self.state.crop_settings.clone();
+                            // Update saved edits for auto-save comparison
+                            self.state.last_saved_edits = current_edits.clone();
+
 
                             // Update the PhotoViewModel in the local list to reflect saved edits
                             // This ensures the photo loads with correct values when switching photos
@@ -1748,6 +1487,7 @@ impl eframe::App for VintageLightboxApp {
                 ctx,
                 photo_grid: &mut self.photo_grid,
                 filmstrip: &mut self.filmstrip,
+                editor_service: &mut self.editor_service,
             };
             
             // Render the dock area with all tabs
