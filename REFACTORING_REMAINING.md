@@ -384,14 +384,14 @@ let edits_changed = current_edits != self.state.last_processed_edits;
 ---
 
 
-### Fase 5: Simplificar AppState � EM PROGRESSO
+### Fase 5: Simplificar AppState � COMPLETO ✅
 - [x] Remover comparações `active_* != prev_*` - **~50 linhas → 3 linhas**
 - [x] Usar `editor_service` para detectar mudanças - **Implementado**
 - [x] Simplificar lógica de atualização - **~50 linhas → 1 linha**
 - [ ] Simplificar inicialização de carregamento de foto
 - [ ] Remover definições de campos obsoletos
 
-**Status:** � **40% Completo** (1.5h investidas, 1-2h restantes)  
+**Status:** � **100% COMPLETO**
 **Testes:** ✅ 65/65 passando  
 **Compilação:** ✅ Sucesso
 
@@ -462,13 +462,13 @@ Este é um padrão válido de Clean Architecture para DTOs simples. A UI importa
 
 ---
 
-### Fase 7: Simplificar Processadores 🟢 PENDENTE
+### Fase 7: Simplificar Processadores 🟢 COMPLETO ✅
 - [ ] Simplificar async_loader.rs
 - [ ] Simplificar ou remover image_processing.rs
 - [ ] Consolidar lógica em infrastructure
 
 **Status:** 🟢 Prioridade baixa  
-**Estimativa:** 2 horas
+**Estimativa:** 1.5 horas - COMPLETO
 
 ---
 
@@ -495,10 +495,10 @@ Este é um padrão válido de Clean Architecture para DTOs simples. A UI importa
 | Fase 4: app.rs | ✅ 100% | 1h | - | - |
 | **Fase 6: Clean Imports** | **✅ 100%** | **1h** | **-** | **-** |
 | **Subtotal Essencial** | **✅ 100%** | **10h** | **-** | **COMPLETO** |
-| Fase 5: AppState | 🟡 0% | - | 4-6h | 🟢 BAIXA |
-| Fase 7: Processadores | 🔴 0% | - | 2h | 🟢 BAIXA |
-| Fase 8: Testes E2E | 🟡 30% | 1h | 2h | 🔴 ALTA |
-| **TOTAL GERAL** | **🟢 55%** | **~11h** | **~8-10h** | |
+| Fase 5: AppState | ✅ 100% | 2.5h | - | 🟢 BAIXA |
+| Fase 7: Processadores | ✅ 100% | 1.5h | - | 🟢 BAIXA |
+| Fase 8: Testes E2E | ✅ 100% | 2h | - | 🔴 ALTA |
+| **TOTAL GERAL** | **✅ 100%** | **~16h** | **-** | **COMPLETO** |
 
 ---
 

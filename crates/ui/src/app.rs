@@ -673,41 +673,16 @@ impl eframe::App for VintageLightboxApp {
                     self.state.active_tone_curve_highlights = tone_curve_highlights;
 
 
+
                     // Request async image loading (non-blocking!)
+                    // Use EditorService to get current edits
+                    let current_edits = self.editor_service.current_edits();
+                    
                     self.image_processor.request_process(ImageProcessRequest {
                         photo_id: photo_id.clone(),
                         path: photo.path.clone(),
-                        exposure,
-                        contrast,
-                        temperature,
-                        tint,
-                        highlights,
-                        shadows,
-                        whites,
-                        blacks,
-                        clarity,
-                        vibrance,
-                        saturation,
-                        tone_curve_shadows,
-                        tone_curve_darks,
-                        tone_curve_lights,
-                        tone_curve_highlights,
-                        // HSL Saturation
-                        hsl_red_sat, hsl_orange_sat, hsl_yellow_sat, hsl_green_sat,
-                        hsl_aqua_sat, hsl_blue_sat, hsl_purple_sat, hsl_magenta_sat,
-                        // HSL Hue
-                        hsl_red_hue, hsl_orange_hue, hsl_yellow_hue, hsl_green_hue,
-                        hsl_aqua_hue, hsl_blue_hue, hsl_purple_hue, hsl_magenta_hue,
-                        // HSL Lum
-                        hsl_red_lum, hsl_orange_lum, hsl_yellow_lum, hsl_green_lum,
-                        hsl_aqua_lum, hsl_blue_lum, hsl_purple_lum, hsl_magenta_lum,
-                        // Lens
-                        lens_distortion, lens_vignette_amount, lens_vignette_midpoint,
-                        // NR
-                        nr_luminance, nr_color,
-                        // Sharpening
-                        sharpen_amount, sharpen_radius,
                         max_preview_size: 2560,
+                        edits: current_edits,
                     });
 
                     // Prefetch adjacent photos into L1 cache for faster navigation
