@@ -97,10 +97,11 @@ impl CropOverlay {
             let delta = response.drag_delta.x * sensitivity;
             let new_angle = crop_settings.angle() + delta;
             
-            *crop_settings = CropSettings::new(
+            *crop_settings = CropSettings::with_fill_mode_value(
                 crop_settings.crop_x(), crop_settings.crop_y(), crop_settings.crop_width(), crop_settings.crop_height(),
                 crop_settings.rotation_90(), new_angle,
-                crop_settings.flip_horizontal(), crop_settings.flip_vertical()
+                crop_settings.flip_horizontal(), crop_settings.flip_vertical(),
+                crop_settings.fill_mode()
             );
         }
 
@@ -369,10 +370,11 @@ impl CropOverlay {
             }
         }
 
-        *crop = CropSettings::new(
+        *crop = CropSettings::with_fill_mode_value(
             nx, ny, nw, nh,
             crop.rotation_90(), crop.angle(),
-            crop.flip_horizontal(), crop.flip_vertical()
+            crop.flip_horizontal(), crop.flip_vertical(),
+            crop.fill_mode()
         );
     }
 
@@ -390,7 +392,7 @@ impl CropOverlay {
         if new_x + w > 1.0 { new_x = 1.0 - w; }
         if new_y + h > 1.0 { new_y = 1.0 - h; }
 
-        *crop = CropSettings::new(
+        *crop = CropSettings::with_fill_mode_value(
             new_x,
             new_y,
             w,
@@ -398,7 +400,8 @@ impl CropOverlay {
             crop.rotation_90(),
             crop.angle(),
             crop.flip_horizontal(),
-            crop.flip_vertical()
+            crop.flip_vertical(),
+            crop.fill_mode()
         );
     }
     

@@ -197,6 +197,9 @@ impl CropPanel {
                 if ui.button("↺ Reset").on_hover_text("Reset crop (Shift+R)").clicked() || reset_shortcut {
                     state.crop_settings = Some(CropSettings::default());
                     state.selected_aspect_ratio = AspectRatio::Original;
+                    state.show_composition_grid = false;
+                    // Clear intelligent fill texture since angle is now 0
+                    state.intelligent_fill_texture = None;
                 }
                 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

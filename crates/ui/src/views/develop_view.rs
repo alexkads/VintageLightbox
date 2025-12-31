@@ -152,6 +152,8 @@ impl DevelopView {
                         state.crop_settings = Some(CropSettings::default());
                         state.selected_aspect_ratio = AspectRatio::Original;
                         state.show_composition_grid = false;
+                        // Clear intelligent fill texture since angle is now 0
+                        state.intelligent_fill_texture = None;
                     }
                     if apply {
                         println!("DEBUG: Apply button clicked or Enter pressed");
