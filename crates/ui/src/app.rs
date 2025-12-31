@@ -530,11 +530,21 @@ impl eframe::App for VintageLightboxApp {
                 let edits_changed = current_edits != self.state.last_processed_edits;
                 let before_toggled = self.state.show_before != self.state.prev_show_before;
 
-                if (edits_changed || before_toggled) && self.state.original_preview.is_some() {
-                    // Save to history if needed
-                    // History management is handled by EditorService
+                // GPU Debounce: Only process if sufficient time elapsed (50ms)
+                // This prevents flooding GPU with requests during rapid slider dragging
+                const GPU_DEBOUNCE_MS: u128 = 50;
+                let should_process_gpu = if before_toggled {
+                    true // Before/After toggle is instant
+                } else if edits_changed {
+                    // Check debounce time
+                    self.state.last_slider_change_time
+                        .map(|t| t.elapsed().as_millis() >= GPU_DEBOUNCE_MS)
+                        .unwrap_or(true)
+                } else {
+                    false
+                };
 
-
+                if should_process_gpu && self.state.original_preview.is_some() {
                     // Request async edit processing (GPU-accelerated!)
                     if let Some(original) = &self.state.original_preview {
                         if self.state.show_before {
@@ -571,6 +581,9 @@ impl eframe::App for VintageLightboxApp {
                                 },
                             });
 
+                            // Track last GPU request time
+                            self.state.last_gpu_request_time = Some(std::time::Instant::now());
+
                             // Request repaint to poll for results
                             ctx.request_repaint();
                         }
@@ -581,6 +594,9 @@ impl eframe::App for VintageLightboxApp {
                         self.state.last_processed_edits = current_edits;
                     }
                     self.state.prev_show_before = self.state.show_before;
+                } else if edits_changed {
+                    // Edits changed but we're debouncing - schedule repaint to check again
+                    ctx.request_repaint();
                 }
             }
         }

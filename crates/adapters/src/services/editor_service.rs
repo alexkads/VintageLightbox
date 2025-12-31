@@ -11,6 +11,12 @@ use crate::state::editing_session::EditingSession;
 pub struct EditorService {
     /// Sessão de edição ativa (se houver)
     active_session: Option<EditingSession>,
+    /// Versão das edições (incrementada a cada mudança)
+    edits_version: u64,
+    /// Cache das edições atuais (para evitar clones repetidos)
+    cached_edits: Option<PhotoEdits>,
+    /// Versão do cache
+    cached_version: u64,
 }
 
 impl EditorService {
@@ -18,17 +24,25 @@ impl EditorService {
     pub fn new() -> Self {
         Self {
             active_session: None,
+            edits_version: 0,
+            cached_edits: None,
+            cached_version: 0,
         }
     }
     
     /// Inicia uma nova sessão de edição
     pub fn start_editing(&mut self, photo_id: String, initial_edits: PhotoEdits) {
+        self.cached_edits = Some(initial_edits.clone());
         self.active_session = Some(EditingSession::new(photo_id, initial_edits));
+        self.edits_version += 1;
+        self.cached_version = self.edits_version;
     }
     
     /// Finaliza a sessão de edição atual
     pub fn end_editing(&mut self) {
         self.active_session = None;
+        self.cached_edits = None;
+        self.edits_version += 1;
     }
     
     /// Verifica se há uma sessão ativa
@@ -41,8 +55,21 @@ impl EditorService {
         self.active_session.as_ref().map(|s| s.photo_id.as_str())
     }
     
-    /// Retorna as edições atuais (ou padrão se não houver sessão)
+    /// Retorna a versão das edições (para detecção de mudanças sem clonar)
+    pub fn edits_version(&self) -> u64 {
+        self.edits_version
+    }
+    
+    /// Retorna as edições atuais (usa cache se disponível)
     pub fn current_edits(&self) -> PhotoEdits {
+        // Se o cache é válido, retorna ele
+        if self.cached_version == self.edits_version {
+            if let Some(ref cached) = self.cached_edits {
+                return cached.clone();
+            }
+        }
+        
+        // Fallback para sessão ativa (cache inválido)
         self.active_session
             .as_ref()
             .map(|s| s.get_current_edits())
@@ -52,7 +79,10 @@ impl EditorService {
     /// Atualiza as edições da sessão ativa
     pub fn update_edits(&mut self, edits: PhotoEdits, description: impl Into<String>) -> Result<(), String> {
         if let Some(session) = &mut self.active_session {
+            self.cached_edits = Some(edits.clone());
             session.update_edits(edits, description);
+            self.edits_version += 1;
+            self.cached_version = self.edits_version;
             Ok(())
         } else {
             Err("No active editing session".to_string())
@@ -67,7 +97,10 @@ impl EditorService {
         if let Some(session) = &mut self.active_session {
             let mut edits = session.get_current_edits();
             update_fn(&mut edits);
+            self.cached_edits = Some(edits.clone());
             session.update_edits(edits, description);
+            self.edits_version += 1;
+            self.cached_version = self.edits_version;
             Ok(())
         } else {
             Err("No active editing session".to_string())
@@ -76,12 +109,22 @@ impl EditorService {
     
     /// Executa undo
     pub fn undo(&mut self) -> Option<PhotoEdits> {
-        self.active_session.as_mut().and_then(|s| s.undo())
+        let result = self.active_session.as_mut().and_then(|s| s.undo());
+        if result.is_some() {
+            self.edits_version += 1;
+            self.cached_edits = None; // Invalida cache
+        }
+        result
     }
     
     /// Executa redo
     pub fn redo(&mut self) -> Option<PhotoEdits> {
-        self.active_session.as_mut().and_then(|s| s.redo())
+        let result = self.active_session.as_mut().and_then(|s| s.redo());
+        if result.is_some() {
+            self.edits_version += 1;
+            self.cached_edits = None; // Invalida cache
+        }
+        result
     }
     
     /// Pode fazer undo?
@@ -98,6 +141,9 @@ impl EditorService {
     pub fn reset_to_defaults(&mut self) -> Result<(), String> {
         if let Some(session) = &mut self.active_session {
             session.reset_to_defaults();
+            self.edits_version += 1;
+            self.cached_edits = Some(PhotoEdits::default());
+            self.cached_version = self.edits_version;
             Ok(())
         } else {
             Err("No active editing session".to_string())

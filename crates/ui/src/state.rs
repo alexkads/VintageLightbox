@@ -182,6 +182,8 @@ pub struct AppState {
     pub deferred_exit_develop_mode: bool,
     /// Timestamp of the last slider change (for debounce)
     pub last_slider_change_time: Option<std::time::Instant>,
+    /// Timestamp of the last GPU request (for GPU debounce)
+    pub last_gpu_request_time: Option<std::time::Instant>,
     /// Last saved values (to avoid unnecessary saves)
     // saved_* fields REMOVED - Using EditorService
 
@@ -351,6 +353,7 @@ impl AppState {
             pending_crop_apply: false,
             deferred_exit_develop_mode: false,
             last_slider_change_time: None,
+            last_gpu_request_time: None,
             // saved_* initialization REMOVED - Using EditorService
 
 
