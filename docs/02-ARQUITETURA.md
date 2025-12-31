@@ -205,7 +205,7 @@ infrastructure/
 
 ### 2.5 UI Layer (Camada 5 - Presentation) ✅ COMPLETO
 
-**Responsabilidade**: Renderização da interface gráfica usando **egui 0.31**. Esta camada é "burra" - não contém regras de negócio, apenas lógica de visualização e captura de eventos.
+**Responsabilidade**: Renderização da interface gráfica usando **egui 0.31**. Esta camada é "burra" - não contém regras de negócio, apenas lógica de visualização e captura de eventos. Após a extração das regras de negócio, a UI apenas emite eventos/AppAction e os controllers (Adapters) chamam os use cases para validação e persistência.
 
 #### `crates/ui/src/`
 

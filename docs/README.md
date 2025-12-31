@@ -7,6 +7,7 @@ Bem-vindo à documentação do VintageLightbox! Este índice organiza todos os d
 VintageLightbox é um clone profissional do Adobe Lightroom desenvolvido em Rust com interface egui, focado em fotógrafos profissionais que precisam de uma solução completa para importação, edição, organização e venda de fotos.
 
 **Status Atual**: 360+ testes passando | MVP Completo ✅ | Todas as camadas implementadas  
+**Nota**: A UI (egui) está 100% livre de regras de negócio; toda decisão passa por controllers → use cases.
 **Veja**: [STATUS.md](STATUS.md) para progresso detalhado
 
 ## 📚 Documentos Principais

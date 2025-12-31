@@ -14,6 +14,12 @@ A UI foi desenvolvida com egui (Immediate Mode GUI), oferecendo:
 - **GPU-accelerated** rendering via wgpu
 - **Design System** com tokens e ícones Phosphor
 
+## Responsabilidades (UI sem regras de negócio)
+
+- Renderizar estado vindo de ViewModels e presenters.
+- Transformar interações do usuário em `AppAction` encaminhadas para os controllers.
+- Não realizar validações ou mutações de domínio; todas as regras vivem em Use Cases e Domain.
+
 ## Estrutura de Arquivos
 
 ```

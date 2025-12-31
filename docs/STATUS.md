@@ -246,6 +246,7 @@
 - ✅ **Multi-level Cache** (L0/L1/Preview)
 - ✅ **5 Temas** customizáveis
 - ✅ **Zero warnings** de compilação
+- ✅ **UI sem regras de negócio** (eventos via controllers → use cases)
 
 ---
 

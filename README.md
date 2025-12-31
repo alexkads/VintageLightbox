@@ -23,7 +23,7 @@ Este projeto segue **Clean Architecture** e **Test-Driven Development (TDD)**:
 ```
 ┌─────────────────────────────────────────────────────┐
 │  UI Layer (egui 0.31)                               │
-│  4 Views • 25+ Components • 5 Temas                 │
+│  Render-only (sem regras de negócio) • 4 Views • 25+ Components • 5 Temas │
 ├─────────────────────────────────────────────────────┤
 │  Infrastructure (wgpu • SQLite • LibRaw)            │
 │  GPU Compute • Multi-level Cache • 48 testes        │
