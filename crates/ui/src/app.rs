@@ -606,6 +606,14 @@ impl eframe::App for VintageLightboxApp {
         // ============================================
         if self.state.pending_crop_apply {
             self.state.pending_crop_apply = false;
+            
+            // Sync crop settings to EditorService so change detection works
+            if let Some(crop) = &self.state.crop_settings {
+                let _ = self.editor_service.update_field("Apply Crop", |edits| {
+                    edits.crop_settings = Some(crop.clone());
+                });
+            }
+            
             // Mark for immediate save
             self.state.pending_auto_save = true;
             self.state.last_slider_change_time = Some(std::time::Instant::now() - std::time::Duration::from_millis(1000));

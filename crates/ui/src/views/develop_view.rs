@@ -225,7 +225,14 @@ impl DevelopView {
                             
                             let controller = editor_controller.clone();
 
-                            // Get current edits from EditorService (simplified!)
+                            // Sync crop settings to EditorService before getting current edits
+                            if let Some(crop) = &state.crop_settings {
+                                let _ = editor_service.update_field("Apply Crop", |edits| {
+                                    edits.crop_settings = Some(crop.clone());
+                                });
+                            }
+
+                            // Get current edits from EditorService (now includes crop!)
                             let current_edits = editor_service.current_edits();
                             let active_crop = state.crop_settings.clone();
                             

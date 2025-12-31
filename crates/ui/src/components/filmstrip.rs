@@ -82,20 +82,12 @@ impl Filmstrip {
         for result in results {
             // Find the photo's edit values to apply effects to thumbnail
             let processed_image = if let Some(photo) = state.photos.iter().find(|p| p.id == result.photo_id) {
-                // Only apply effects if there are actual edits
-                let processed = if photo.has_edits() {
+                // Apply all edits including crop (process_image now handles crop internally)
+                if photo.has_edits() {
                     let edits = photo.to_edits();
                     crate::image_processing::ImageProcessor::process_image(&result.image, &edits)
                 } else {
                     result.image.clone()
-                };
-                
-                // Apply crop if present (from edits)
-                let edits = photo.to_edits();
-                if let Some(ref crop_settings) = edits.crop_settings {
-                    crate::image_processing::ImageProcessor::apply_crop(&processed, crop_settings)
-                } else {
-                    processed
                 }
             } else {
                 result.image.clone()

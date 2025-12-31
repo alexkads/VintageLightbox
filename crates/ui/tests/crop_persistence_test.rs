@@ -200,3 +200,82 @@ async fn test_crop_persistence_on_photo_switch() {
     assert!(saved_p1.edit_crop_flip_v().unwrap());
     assert!(!saved_p1.edit_crop_flip_h().unwrap());
 }
+
+#[tokio::test]
+async fn test_editor_service_crop_integration() {
+    use adapters::services::EditorService;
+    use domain::value_objects::{PhotoEdits, PhotoId};
+    
+    // 1. Setup
+    let mut editor_service = EditorService::new();
+    let initial_edits = PhotoEdits::default();
+    // Use valid UUID for PhotoId
+    let photo_id_str = "550e8400-e29b-41d4-a716-446655440000".to_string();
+    // Create domain PhotoId
+    let photo_id = PhotoId::from_string(&photo_id_str).unwrap();
+    
+    // Start editing session (Service expects String for ID usually? checking signature)
+    // EditorService::start_editing takes String: pub fn start_editing(&mut self, photo_id: String, ...)
+    editor_service.start_editing(photo_id_str.clone(), initial_edits);
+    
+    // 2. Create Crop Settings (simulating UI state)
+    let crop_settings = CropSettings::new(
+        0.1, 0.1, 0.8, 0.8,
+        0, 5.0,
+        true, false
+    );
+    
+    // 3. Update Service with Crop (Simulating what we added to app.rs and develop_view.rs)
+    editor_service.update_field("Apply Crop", |edits| {
+        edits.crop_settings = Some(crop_settings.clone());
+    }).expect("Failed to update crop");
+    
+    // 4. Verify current_edits now includes the crop
+    let current_edits = editor_service.current_edits();
+    
+    assert!(current_edits.crop_settings.is_some(), "Crop settings should be present in current_edits");
+    let saved_crop = current_edits.crop_settings.as_ref().unwrap();
+    
+    assert_eq!(saved_crop.crop_x(), 0.1);
+    assert_eq!(saved_crop.crop_width(), 0.8);
+    assert_eq!(saved_crop.angle(), 5.0);
+    assert!(saved_crop.flip_horizontal());
+    
+    // 5. Verify persistence flow using EditorController (Integration)
+    let (_, photo_repo, _, editor_controller) = setup_harness().await;
+    
+    // Create and save the photo first so it exists in DB
+    let photo_path = FilePath::new("/tmp/test_integration.jpg").unwrap();
+    let photo = Photo::with_id(photo_id.clone(), photo_path);
+    photo_repo.save(&photo).await.unwrap();
+
+    // Call save_edits using the data from editor_service (mimicking develop_view.rs)
+    editor_controller.save_edits(
+         photo_id.to_string(),
+         current_edits.exposure, current_edits.contrast, current_edits.temperature, current_edits.tint,
+         current_edits.highlights, current_edits.shadows, current_edits.whites, current_edits.blacks,
+         current_edits.clarity, current_edits.vibrance, current_edits.saturation,
+         current_edits.tone_curve_shadows, current_edits.tone_curve_darks, current_edits.tone_curve_lights, current_edits.tone_curve_highlights,
+         current_edits.hsl_red_sat, current_edits.hsl_orange_sat, current_edits.hsl_yellow_sat, current_edits.hsl_green_sat, current_edits.hsl_aqua_sat, current_edits.hsl_blue_sat, current_edits.hsl_purple_sat, current_edits.hsl_magenta_sat,
+         current_edits.hsl_red_hue, current_edits.hsl_orange_hue, current_edits.hsl_yellow_hue, current_edits.hsl_green_hue, current_edits.hsl_aqua_hue, current_edits.hsl_blue_hue, current_edits.hsl_purple_hue, current_edits.hsl_magenta_hue,
+         current_edits.hsl_red_lum, current_edits.hsl_orange_lum, current_edits.hsl_yellow_lum, current_edits.hsl_green_lum, current_edits.hsl_aqua_lum, current_edits.hsl_blue_lum, current_edits.hsl_purple_lum, current_edits.hsl_magenta_lum,
+         current_edits.lens_distortion, current_edits.lens_vignette_amount, current_edits.lens_vignette_midpoint,
+         current_edits.nr_luminance, current_edits.nr_color,
+         current_edits.sharpen_amount, current_edits.sharpen_radius,
+         // Pass crop settings explicitly derived from current_edits (as done in the fix)
+         current_edits.crop_settings.as_ref().map(|c| c.crop_x()),
+         current_edits.crop_settings.as_ref().map(|c| c.crop_y()),
+         current_edits.crop_settings.as_ref().map(|c| c.crop_width()),
+         current_edits.crop_settings.as_ref().map(|c| c.crop_height()),
+         current_edits.crop_settings.as_ref().map(|c| c.rotation_90()),
+         current_edits.crop_settings.as_ref().map(|c| c.angle()),
+         current_edits.crop_settings.as_ref().map(|c| c.flip_horizontal()),
+         current_edits.crop_settings.as_ref().map(|c| c.flip_vertical()),
+         current_edits.crop_settings.as_ref().map(|c| c.fill_mode() as u8),
+     ).await.expect("Save failed");
+     
+     // 6. Verify in Repository
+     let saved_photo = photo_repo.find_by_id(&photo_id).await.unwrap().unwrap();
+     assert_eq!(saved_photo.edit_crop_x().unwrap(), 0.1);
+     assert_eq!(saved_photo.edit_crop_angle().unwrap(), 5.0);
+}

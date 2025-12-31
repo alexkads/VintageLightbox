@@ -30,7 +30,8 @@ impl ImageAlgorithms {
     /// # Returns
     /// Nova imagem com ajustes aplicados
     pub fn process_image(img: &DynamicImage, edits: &PhotoEdits) -> DynamicImage {
-        Self::process_image_params(
+        // Apply color/tone adjustments first
+        let processed = Self::process_image_params(
             img,
             edits.exposure,
             edits.contrast,
@@ -78,7 +79,14 @@ impl ImageAlgorithms {
             edits.nr_color,
             edits.sharpen_amount,
             edits.sharpen_radius,
-        )
+        );
+        
+        // Apply crop if present (after all color adjustments)
+        if let Some(crop_settings) = &edits.crop_settings {
+            Self::apply_crop(&processed, crop_settings)
+        } else {
+            processed
+        }
     }
 
     /// Processa uma imagem com parâmetros explícitos
@@ -576,5 +584,38 @@ mod tests {
         
         let processed = ImageAlgorithms::process_image(&img, &edits);
         assert_eq!(processed.width(), 10);
+    }
+
+    #[test]
+    fn test_process_image_with_crop() {
+        let img = DynamicImage::new_rgb8(100, 100);
+        let mut edits = PhotoEdits::default();
+        // Crop to center 50x50 area
+        edits.crop_settings = Some(domain::value_objects::CropSettings::new(
+            0.25, 0.25, 0.5, 0.5, // x, y, width, height (normalized)
+            0, 0.0, false, false  // rotation_90, angle, flip_h, flip_v
+        ));
+        
+        let processed = ImageAlgorithms::process_image(&img, &edits);
+        assert_eq!(processed.width(), 50);
+        assert_eq!(processed.height(), 50);
+    }
+
+    #[test]
+    fn test_process_image_with_crop_and_exposure() {
+        let img = DynamicImage::new_rgb8(100, 100);
+        let mut edits = PhotoEdits::default();
+        edits.exposure = 1.0; // +1 stop
+        edits.crop_settings = Some(domain::value_objects::CropSettings::new(
+            0.0, 0.0, 0.5, 0.5, // Crop to top-left quarter
+            0, 0.0, false, false
+        ));
+        
+        let processed = ImageAlgorithms::process_image(&img, &edits);
+        // Should be cropped to 50x50
+        assert_eq!(processed.width(), 50);
+        assert_eq!(processed.height(), 50);
+        // Exposure should be applied to the cropped image
+        // (We can't easily test pixel values here, but dimensions confirm crop was applied)
     }
 }
