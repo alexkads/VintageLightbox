@@ -3,7 +3,7 @@
 // Application State Management
 // Replaces Slint's declarative properties with Rust state struct
 
-use adapters::view_models::PhotoViewModel;
+use adapters::view_models::{PhotoViewModel, ImportSource, ImportOptions, CropSettings, AspectRatio, PhotoEdits, Preset};
 use image::DynamicImage;
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
@@ -19,7 +19,7 @@ use adapters::state::ApplicationState;
 pub use adapters::state::CurrentView; // View enum now from adapters, re-exported
 
 
-// EditSnapshot removed - using domain::value_objects::PhotoEdits directly
+// EditSnapshot removed - using PhotoEdits directly
 // History management is now handled by adapters::services::EditorService
 
 // CurrentView enum removed - using adapters::state::CurrentView
@@ -39,11 +39,11 @@ pub struct DetailMetadata {
 /// State for the Import View
 #[derive(Default)]
 pub struct ImportViewState {
-    pub devices: Vec<domain::import_source::ImportSource>,
+    pub devices: Vec<ImportSource>,
     pub selected_source_id: Option<String>,
     pub found_files: Vec<String>, // Paths
     pub selected_files: std::collections::HashSet<String>,
-    pub options: domain::value_objects::ImportOptions,
+    pub options: ImportOptions,
 }
 
 /// Main application state
@@ -115,8 +115,8 @@ pub struct AppState {
     // Crop Tool State (Develop mode only)
     // ============================================
     pub crop_mode_active: bool,
-    pub crop_settings: Option<domain::value_objects::CropSettings>,
-    pub selected_aspect_ratio: domain::value_objects::AspectRatio,
+    pub crop_settings: Option<CropSettings>,
+    pub selected_aspect_ratio: AspectRatio,
     pub show_composition_grid: bool,
 
     // ============================================
@@ -227,7 +227,7 @@ pub struct AppState {
     // Presets
     // ============================================
     /// Loaded presets (system + user)
-    pub presets: Vec<domain::entities::Preset>,
+    pub presets: Vec<Preset>,
     /// Whether to show the save preset dialog
     pub show_save_preset_dialog: bool,
     /// Name input for new preset
@@ -262,10 +262,10 @@ pub struct AppState {
     // ============================================
     /// Last processed edits (for efficient change detection)
     /// Replaces individual prev_* field comparisons
-    pub last_processed_edits: domain::value_objects::PhotoEdits,
+    pub last_processed_edits: PhotoEdits,
     /// Last saved edits (for auto-save comparison)
     /// Replaces individual saved_* field comparisons
-    pub last_saved_edits: domain::value_objects::PhotoEdits,
+    pub last_saved_edits: PhotoEdits,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -331,7 +331,7 @@ impl AppState {
             // Crop state
             crop_mode_active: false,
             crop_settings: None,
-            selected_aspect_ratio: domain::value_objects::AspectRatio::Original,
+            selected_aspect_ratio: AspectRatio::Original,
             show_composition_grid: false,
             // Intelligent fill state
             intelligent_fill_texture: None,
@@ -381,8 +381,8 @@ impl AppState {
             show_print_dialog: false,
             print_dialog_state: None,
             invalidation_queue: HashSet::new(),
-            last_processed_edits: domain::value_objects::PhotoEdits::default(),
-            last_saved_edits: domain::value_objects::PhotoEdits::default(),
+            last_processed_edits: PhotoEdits::default(),
+            last_saved_edits: PhotoEdits::default(),
         }
     }
 

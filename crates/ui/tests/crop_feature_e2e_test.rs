@@ -48,7 +48,7 @@ async fn setup_harness() -> (
     let exif_reader = Arc::new(ExifReader);
     let thumb_gen = Arc::new(ThumbnailGeneratorImpl::new());
     let temp_dir_obj = tempdir().expect("temp");
-    let preview_man = Arc::new(PreviewManager::new_with_path(temp_dir_obj.into_path().join("previews")));
+    let preview_man = Arc::new(PreviewManager::new_with_path(temp_dir_obj.keep().join("previews")));
     
     let _import_uc = ImportPhotoUseCase::new(photo_repo.clone(), exif_reader, thumb_gen, preview_man);
 

@@ -3,6 +3,7 @@
 
 use std::sync::Arc;
 use domain::entities::{Preset, PresetId, preset::PresetAdjustments};
+use domain::value_objects::PhotoEdits;
 use use_cases::presets::{ListPresetsUseCase, SavePresetUseCase, DeletePresetUseCase};
 
 pub struct PresetController {
@@ -42,6 +43,33 @@ impl PresetController {
             .execute(name, adjustments)
             .await
             .map_err(|e| e.to_string())
+    }
+
+    /// Convenience: build adjustments from PhotoEdits (UI-friendly)
+    pub async fn save_preset_from_edits(
+        &self,
+        name: String,
+        edits: PhotoEdits,
+    ) -> Result<Preset, String> {
+        let adjustments = PresetAdjustments {
+            exposure: Some(edits.exposure),
+            contrast: Some(edits.contrast),
+            temperature: Some(edits.temperature),
+            tint: Some(edits.tint),
+            highlights: Some(edits.highlights),
+            shadows: Some(edits.shadows),
+            whites: Some(edits.whites),
+            blacks: Some(edits.blacks),
+            clarity: Some(edits.clarity),
+            vibrance: Some(edits.vibrance),
+            saturation: Some(edits.saturation),
+            tone_curve_shadows: Some(edits.tone_curve_shadows),
+            tone_curve_darks: Some(edits.tone_curve_darks),
+            tone_curve_lights: Some(edits.tone_curve_lights),
+            tone_curve_highlights: Some(edits.tone_curve_highlights),
+        };
+
+        self.save_preset(name, adjustments).await
     }
 
     /// Delete a preset by ID

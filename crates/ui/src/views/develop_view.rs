@@ -8,6 +8,7 @@ use crate::components::image_viewer::ImageViewer;
 use crate::components::filmstrip::Filmstrip;
 use std::sync::Arc;
 use infrastructure::cache::preview_manager::PreviewManager;
+use adapters::view_models::{CropSettings, AspectRatio};
 
 use crate::panels::PresetsPanel;
 
@@ -69,84 +70,28 @@ impl DevelopView {
                 );
                 
                 // Process pending actions
-                if let Some(photo_id) = pending_selection {
-                     // Check if we need to save the CURRENT photo before switching
-                     // Auto-save if there are pending edits OR if we are in crop mode (commit crop)
-                     let needs_save = state.pending_auto_save || (state.crop_mode_active && state.crop_settings.is_some());
-                     
-                     if needs_save {
-                         if let Some(vm) = state.get_current_photo() {
-                             // Trigger explicit save for current photo
-                              let controller = editor_controller.clone();
-                              let id = vm.id.clone();
-                              
-                              // Get current edits from EditorService (simplified!)
-                              let current_edits = editor_service.current_edits();
-                              let active_crop = state.crop_settings.clone();
+                 if let Some(photo_id) = pending_selection {
+                      // Check if we need to save the CURRENT photo before switching
+                      // Auto-save if there are pending edits OR if we are in crop mode (commit crop)
+                      let needs_save = state.pending_auto_save || (state.crop_mode_active && state.crop_settings.is_some());
+                      
+                      if needs_save {
+                          if let Some(vm) = state.get_current_photo() {
+                              // Trigger explicit save for current photo
+                               let controller = editor_controller.clone();
+                               let id = vm.id.clone();
+                               
+                               // Get current edits from EditorService (includes crop when present)
+                               let mut current_edits = editor_service.current_edits();
+                               if let Some(crop) = state.crop_settings.clone() {
+                                   current_edits.crop_settings = Some(crop);
+                               }
 
-                              // Clone for use after spawn
-                              let id_for_update = id.clone();
-                              let crop_for_update = active_crop.clone();
-
-                              tokio::spawn(async move {
-                                  let _ = controller.save_edits(
-                                      id,
-                                      current_edits.exposure, current_edits.contrast, current_edits.temperature, current_edits.tint,
-                                      current_edits.highlights, current_edits.shadows, current_edits.whites, current_edits.blacks,
-                                      current_edits.clarity, current_edits.vibrance, current_edits.saturation,
-                                      current_edits.tone_curve_shadows, current_edits.tone_curve_darks, current_edits.tone_curve_lights, current_edits.tone_curve_highlights,
-                                      current_edits.hsl_red_sat, current_edits.hsl_orange_sat, current_edits.hsl_yellow_sat, current_edits.hsl_green_sat, current_edits.hsl_aqua_sat, current_edits.hsl_blue_sat, current_edits.hsl_purple_sat, current_edits.hsl_magenta_sat,
-                                      current_edits.hsl_red_hue, current_edits.hsl_orange_hue, current_edits.hsl_yellow_hue, current_edits.hsl_green_hue, current_edits.hsl_aqua_hue, current_edits.hsl_blue_hue, current_edits.hsl_purple_hue, current_edits.hsl_magenta_hue,
-                                      current_edits.hsl_red_lum, current_edits.hsl_orange_lum, current_edits.hsl_yellow_lum, current_edits.hsl_green_lum, current_edits.hsl_aqua_lum, current_edits.hsl_blue_lum, current_edits.hsl_purple_lum, current_edits.hsl_magenta_lum,
-                                      current_edits.lens_distortion, current_edits.lens_vignette_amount, current_edits.lens_vignette_midpoint,
-                                      current_edits.nr_luminance, current_edits.nr_color,
-                                      current_edits.sharpen_amount, current_edits.sharpen_radius,
-                                      // Crop settings
-                                      active_crop.as_ref().map(|c| c.crop_x()),
-                                      active_crop.as_ref().map(|c| c.crop_y()),
-                                      active_crop.as_ref().map(|c| c.crop_width()),
-                                      active_crop.as_ref().map(|c| c.crop_height()),
-                                      active_crop.as_ref().map(|c| c.rotation_90()),
-                                      active_crop.as_ref().map(|c| c.angle()),
-                                      active_crop.as_ref().map(|c| c.flip_horizontal()),
-                                      active_crop.as_ref().map(|c| c.flip_vertical()),
-                                      active_crop.as_ref().map(|c| c.fill_mode() as u8),
-                                  ).await;
-                              });
-                              
-                              // Also update in-memory ViewModel so crop persists when switching back
-                              // Same transformation: visual->original coords, rotation consumed
-                              if let Some(photo_vm) = state.photos.iter_mut().find(|p| p.id == id_for_update) {
-                                    if let Some(c) = crop_for_update.as_ref() {
-                                        photo_vm.edit_crop_x = Some(c.crop_x());
-                                        photo_vm.edit_crop_y = Some(c.crop_y());
-                                        photo_vm.edit_crop_width = Some(c.crop_width());
-                                        photo_vm.edit_crop_height = Some(c.crop_height());
-                                        photo_vm.edit_crop_rotation = Some(c.rotation_90());
-                                        photo_vm.edit_crop_angle = Some(c.angle());
-                                        photo_vm.edit_crop_flip_h = Some(c.flip_horizontal());
-                                        photo_vm.edit_crop_flip_v = Some(c.flip_vertical());
-                                        photo_vm.edit_crop_fill_mode = Some(c.fill_mode() as u8);
-                                   } else {
-                                       photo_vm.edit_crop_x = None;
-                                       photo_vm.edit_crop_y = None;
-                                       photo_vm.edit_crop_width = None;
-                                       photo_vm.edit_crop_height = None;
-                                       photo_vm.edit_crop_rotation = None;
-                                       photo_vm.edit_crop_angle = None;
-                                       photo_vm.edit_crop_flip_h = None;
-                                       photo_vm.edit_crop_flip_v = None;
-                                       photo_vm.edit_crop_fill_mode = None;
-                                   }
-                                   // Also update exposure and other edits
-                                   photo_vm.edit_exposure = Some(current_edits.exposure);
-                                   photo_vm.edit_contrast = Some(current_edits.contrast);
-                                   
-                                   // Queue for invalidation (to update Filmstrip/Grid)
-                                   state.invalidation_queue.insert(id_for_update.clone());
-                              }
-                         }
-                     }
+                               tokio::spawn(async move {
+                                   let _ = controller.save_edits_from_vo(&id, current_edits).await;
+                               });
+                          }
+                      }
 
                     // Select photo and trigger load in Develop view (independent from Library)
                     state.internal_state.develop_selected_id = Some(photo_id.clone());
@@ -204,8 +149,8 @@ impl DevelopView {
                     
                     // Handle button clicks
                     if reset {
-                        state.crop_settings = Some(domain::value_objects::CropSettings::default());
-                        state.selected_aspect_ratio = domain::value_objects::AspectRatio::Original;
+                        state.crop_settings = Some(CropSettings::default());
+                        state.selected_aspect_ratio = AspectRatio::Original;
                         state.show_composition_grid = false;
                     }
                     if apply {
@@ -234,53 +179,14 @@ impl DevelopView {
 
                             // Get current edits from EditorService (now includes crop!)
                             let current_edits = editor_service.current_edits();
-                            let active_crop = state.crop_settings.clone();
-                            
-                            let id_for_task = id.clone();
-                            let active_crop_for_task = active_crop.clone();
+                            let id_clone = id.clone();
                             
                             tokio::spawn(async move {
-                                   let _ = controller.save_edits(
-                                       id_for_task,
-                                       current_edits.exposure, current_edits.contrast, current_edits.temperature, current_edits.tint,
-                                       current_edits.highlights, current_edits.shadows, current_edits.whites, current_edits.blacks,
-                                       current_edits.clarity, current_edits.vibrance, current_edits.saturation,
-                                       current_edits.tone_curve_shadows, current_edits.tone_curve_darks, current_edits.tone_curve_lights, current_edits.tone_curve_highlights,
-                                       current_edits.hsl_red_sat, current_edits.hsl_orange_sat, current_edits.hsl_yellow_sat, current_edits.hsl_green_sat, current_edits.hsl_aqua_sat, current_edits.hsl_blue_sat, current_edits.hsl_purple_sat, current_edits.hsl_magenta_sat,
-                                       current_edits.hsl_red_hue, current_edits.hsl_orange_hue, current_edits.hsl_yellow_hue, current_edits.hsl_green_hue, current_edits.hsl_aqua_hue, current_edits.hsl_blue_hue, current_edits.hsl_purple_hue, current_edits.hsl_magenta_hue,
-                                       current_edits.hsl_red_lum, current_edits.hsl_orange_lum, current_edits.hsl_yellow_lum, current_edits.hsl_green_lum, current_edits.hsl_aqua_lum, current_edits.hsl_blue_lum, current_edits.hsl_purple_lum, current_edits.hsl_magenta_lum,
-                                       current_edits.lens_distortion, current_edits.lens_vignette_amount, current_edits.lens_vignette_midpoint,
-                                       current_edits.nr_luminance, current_edits.nr_color,
-                                       current_edits.sharpen_amount, current_edits.sharpen_radius,
-                                       active_crop_for_task.as_ref().map(|c| c.crop_x()),
-                                       active_crop_for_task.as_ref().map(|c| c.crop_y()),
-                                       active_crop_for_task.as_ref().map(|c| c.crop_width()),
-                                       active_crop_for_task.as_ref().map(|c| c.crop_height()),
-                                       active_crop_for_task.as_ref().map(|c| c.rotation_90()),
-                                       active_crop_for_task.as_ref().map(|c| c.angle()),
-                                       active_crop_for_task.as_ref().map(|c| c.flip_horizontal()),
-                                       active_crop_for_task.as_ref().map(|c| c.flip_vertical()),
-                                       active_crop_for_task.as_ref().map(|c| c.fill_mode() as u8),
-                                   ).await;
-                               });
-                               
-                            // Update in-memory VM
-                            if let Some(photo_vm) = state.photos.iter_mut().find(|p| p.id == id) {
-                                   photo_vm.edit_crop_x = active_crop.as_ref().map(|c| c.crop_x());
-                                   photo_vm.edit_crop_y = active_crop.as_ref().map(|c| c.crop_y());
-                                   photo_vm.edit_crop_width = active_crop.as_ref().map(|c| c.crop_width());
-                                   photo_vm.edit_crop_height = active_crop.as_ref().map(|c| c.crop_height());
-                                   photo_vm.edit_crop_rotation = active_crop.as_ref().map(|c| c.rotation_90());
-                                   photo_vm.edit_crop_angle = active_crop.as_ref().map(|c| c.angle());
-                                   photo_vm.edit_crop_flip_h = active_crop.as_ref().map(|c| c.flip_horizontal());
-                                   photo_vm.edit_crop_flip_v = active_crop.as_ref().map(|c| c.flip_vertical());
-                                   photo_vm.edit_crop_fill_mode = active_crop.as_ref().map(|c| c.fill_mode() as u8);
-                                   photo_vm.edit_exposure = Some(current_edits.exposure);
-                                   photo_vm.edit_contrast = Some(current_edits.contrast);
-                                   
-                                   // Queue for invalidation (to update Filmstrip/Grid)
-                                   state.invalidation_queue.insert(id.clone());
-                                }
+                                   let _ = controller.save_edits_from_vo(&id_clone, current_edits).await;
+                                });
+                            
+                            // Refresh thumbnails/grid after saving crop
+                            state.invalidation_queue.insert(id);
                         }
                     }
                     

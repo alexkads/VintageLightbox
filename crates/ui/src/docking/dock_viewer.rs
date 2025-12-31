@@ -9,7 +9,7 @@ use tokio::sync::mpsc;
 
 use adapters::controllers::*;
 use adapters::services::editor_service::EditorService;
-use adapters::view_models::PhotoViewModel;
+use adapters::view_models::{PhotoViewModel, Preset};
 use infrastructure::cache::preview_manager::PreviewManager;
 
 use crate::state::AppState;
@@ -570,7 +570,7 @@ impl<'a> DockViewer<'a> {
             .cloned()
             .collect();
         
-        let mut preset_to_apply: Option<domain::entities::Preset> = None;
+        let mut preset_to_apply: Option<Preset> = None;
         
         egui::ScrollArea::vertical().show(ui, |ui| {
             // System Presets
@@ -611,7 +611,7 @@ impl<'a> DockViewer<'a> {
         }
     }
     
-    fn apply_preset(&mut self, preset: &domain::entities::Preset) {
+    fn apply_preset(&mut self, preset: &Preset) {
         // Use EditorService to apply all preset adjustments
         let preset_name = preset.name.clone();
         let _ = self.context.editor_service.update_field(&format!("Preset: {}", preset_name), |e| {
@@ -1613,4 +1613,3 @@ impl<'a> DockViewer<'a> {
         }
     }
 }
-

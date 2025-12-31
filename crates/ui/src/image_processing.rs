@@ -8,7 +8,7 @@
 
 use image::DynamicImage;
 use infrastructure::image_processing::ImageAlgorithms;
-use adapters::view_models::PhotoEdits;
+use adapters::view_models::{PhotoEdits, CropSettings};
 
 // Re-export pure conversion functions from adapters
 pub use crate::adapters::egui_texture::{dynamic_to_color_image, load_texture};
@@ -34,7 +34,7 @@ impl ImageProcessor {
     }
 
     /// Apply crop settings - delegates to infrastructure
-    pub fn apply_crop(img: &DynamicImage, crop_settings: &domain::value_objects::CropSettings) -> DynamicImage {
+    pub fn apply_crop(img: &DynamicImage, crop_settings: &CropSettings) -> DynamicImage {
         ImageAlgorithms::apply_crop(img, crop_settings)
     }
     

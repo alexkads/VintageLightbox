@@ -4,7 +4,7 @@
 
 use egui::{Ui, Vec2, Sense, Color32, Stroke, CornerRadius};
 use std::collections::HashMap;
-use adapters::view_models::PhotoViewModel;
+use adapters::view_models::{PhotoViewModel, RotationFillMode, CropSettings};
 use crate::design_system::theme::Theme;
 use crate::async_loader::{AsyncThumbnailLoader, ThumbnailRequest};
 use crate::state::AppState;
@@ -307,11 +307,11 @@ impl Filmstrip {
                                 let ang = photo.edit_crop_angle.unwrap_or(0.0);
                                 let fh = photo.edit_crop_flip_h.unwrap_or(false);
                                 let fv = photo.edit_crop_flip_v.unwrap_or(false);
-                                let fill_mode = domain::value_objects::RotationFillMode::from_code(
+                                let fill_mode = RotationFillMode::from_code(
                                     photo.edit_crop_fill_mode.unwrap_or(0)
                                 ).unwrap_or_default();
 
-                                Some(domain::value_objects::CropSettings::with_fill_mode_value(
+                                Some(CropSettings::with_fill_mode_value(
                                     x, y, w, h, r90, ang, fh, fv, fill_mode
                                 ))
                             } else {
@@ -599,11 +599,11 @@ impl Filmstrip {
                                 let ang = photo.edit_crop_angle.unwrap_or(0.0);
                                 let fh = photo.edit_crop_flip_h.unwrap_or(false);
                                 let fv = photo.edit_crop_flip_v.unwrap_or(false);
-                                let fill_mode = domain::value_objects::RotationFillMode::from_code(
+                                let fill_mode = RotationFillMode::from_code(
                                     photo.edit_crop_fill_mode.unwrap_or(0)
                                 ).unwrap_or_default();
 
-                                Some(domain::value_objects::CropSettings::with_fill_mode_value(
+                                Some(CropSettings::with_fill_mode_value(
                                     x, y, w, h, r90, ang, fh, fv, fill_mode
                                 ))
                             } else {

@@ -8,7 +8,7 @@ use infrastructure::cache::preview_manager::PreviewManager;
 use egui_dock::DockArea;
 
 use adapters::controllers::*;
-use adapters::view_models::PhotoViewModel;
+use adapters::view_models::{PhotoViewModel, Preset, ImportSource, RotationFillMode};
 use crate::state::{AppState, CurrentView};
 use crate::design_system::{theme::Theme, widgets};
 use crate::keyboard::KeyboardHandler;
@@ -50,12 +50,12 @@ pub struct VintageLightboxApp {
     // ============================================
     photo_receiver: mpsc::Receiver<Result<Vec<PhotoViewModel>, String>>,
     photo_sender: mpsc::Sender<Result<Vec<PhotoViewModel>, String>>,
-    preset_receiver: mpsc::Receiver<Result<Vec<domain::entities::Preset>, String>>,
-    preset_sender: mpsc::Sender<Result<Vec<domain::entities::Preset>, String>>,
+    preset_receiver: mpsc::Receiver<Result<Vec<Preset>, String>>,
+    preset_sender: mpsc::Sender<Result<Vec<Preset>, String>>,
     
-    import_source_sender: mpsc::Sender<(Vec<domain::import_source::ImportSource>, Vec<domain::import_source::ImportSource>)>,
+    import_source_sender: mpsc::Sender<(Vec<ImportSource>, Vec<ImportSource>)>,
     #[allow(dead_code)]
-    import_source_receiver: mpsc::Receiver<(Vec<domain::import_source::ImportSource>, Vec<domain::import_source::ImportSource>)>,
+    import_source_receiver: mpsc::Receiver<(Vec<ImportSource>, Vec<ImportSource>)>,
 
     // ============================================
     // Async Image Processing (Rayon-powered + GPU)
@@ -1029,33 +1029,14 @@ impl eframe::App for VintageLightboxApp {
                             
                             let can_save = !self.state.save_preset_name.trim().is_empty();
                             if ui.add_enabled(can_save, egui::Button::new("Save")).clicked() {
-                                // Create adjustments from current state
                                 let edits = self.editor_service.current_edits();
-                                let adjustments = domain::entities::preset::PresetAdjustments {
-                                    exposure: Some(edits.exposure),
-                                    contrast: Some(edits.contrast),
-                                    temperature: Some(edits.temperature),
-                                    tint: Some(edits.tint),
-                                    highlights: Some(edits.highlights),
-                                    shadows: Some(edits.shadows),
-                                    whites: Some(edits.whites),
-                                    blacks: Some(edits.blacks),
-                                    clarity: Some(edits.clarity),
-                                    vibrance: Some(edits.vibrance),
-                                    saturation: Some(edits.saturation),
-                                    tone_curve_shadows: Some(edits.tone_curve_shadows),
-                                    tone_curve_darks: Some(edits.tone_curve_darks),
-                                    tone_curve_lights: Some(edits.tone_curve_lights),
-                                    tone_curve_highlights: Some(edits.tone_curve_highlights),
-                                };
-                                
                                 let name = self.state.save_preset_name.trim().to_string();
                                 let controller = self.preset_controller.clone();
                                 let preset_sender = self.preset_sender.clone();
                                 let ctx_clone = ctx.clone();
                                 
                                 tokio::spawn(async move {
-                                    match controller.save_preset(name.clone(), adjustments).await {
+                                    match controller.save_preset_from_edits(name.clone(), edits).await {
                                         Ok(_) => {
                                             // Reload presets
                                             if let Ok(presets) = controller.list_presets().await {
@@ -1383,7 +1364,7 @@ impl VintageLightboxApp {
         };
 
         // Only process if fill mode is Intelligent
-        if crop.fill_mode() != domain::value_objects::RotationFillMode::Intelligent {
+        if crop.fill_mode() != RotationFillMode::Intelligent {
             // Clear any cached texture if fill mode changed
             if self.state.intelligent_fill_texture.is_some() {
                 self.state.intelligent_fill_texture = None;

@@ -23,6 +23,7 @@ pub use domain::value_objects::{ImportOptions, OrganizationStrategy, RenamePatte
 
 // Entity types (when needed as DTOs in UI)
 pub use domain::entities::Preset;
+pub use domain::entities::preset::PresetAdjustments;
 
 // Services types (when UI needs to interact with service status)
 pub use domain::services::intelligent_fill::ModelStatus;

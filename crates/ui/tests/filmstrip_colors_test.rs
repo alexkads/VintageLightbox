@@ -53,7 +53,7 @@ async fn setup_harness() -> (
     let exif_reader = Arc::new(ExifReader);
     let thumb_gen = Arc::new(ThumbnailGeneratorImpl::new());
     let temp_dir_obj = tempdir().expect("temp");
-    let preview_man = Arc::new(PreviewManager::new_with_path(temp_dir_obj.into_path().join("previews"))); // Using local var temp_dir? No temp_dir_obj
+    let preview_man = Arc::new(PreviewManager::new_with_path(temp_dir_obj.keep().join("previews"))); // Using local var temp_dir? No temp_dir_obj
     // Wait, in previous replacement I used temp_dir_obj.into_path().join("previews"). But passed 'temp_dir' to function?
     // No, I need temp_dir call here like `let temp_dir_obj = tempfile::tempdir()...`
     // Ah I used `use tempfile::tempdir`.

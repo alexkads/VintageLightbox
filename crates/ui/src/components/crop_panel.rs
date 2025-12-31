@@ -3,7 +3,7 @@
 
 use egui::{Ui, ComboBox};
 // use image::GenericImageView; // Inherent methods used
-use adapters::view_models::AspectRatio;
+use adapters::view_models::{AspectRatio, RotationFillMode, CropSettings};
 use crate::design_system::theme::Theme;
 use crate::state::AppState;
 
@@ -92,7 +92,7 @@ impl CropPanel {
                     *crop = crop.with_angle(angle);
                     
                     // If ShrinkToFit is active, recalculate the crop
-                    if crop.fill_mode() == domain::value_objects::RotationFillMode::ShrinkToFit {
+                    if crop.fill_mode() == RotationFillMode::ShrinkToFit {
                         if let Some(img) = state.original_preview.as_ref() {
                             let (img_w, img_h) = (img.width() as f32, img.height() as f32);
                             *crop = crop.calculate_shrink_to_fit(img_w, img_h);
@@ -123,7 +123,7 @@ impl CropPanel {
                 ui.label(egui::RichText::new("Fill:").size(Theme::FONT_SM));
                 ui.add_space(ui.available_width() - 110.0);
                 
-                let mut new_fill_mode: Option<domain::value_objects::RotationFillMode> = None;
+                let mut new_fill_mode: Option<RotationFillMode> = None;
                 
                 if let Some(crop) = &state.crop_settings {
                     let current_mode = crop.fill_mode();
@@ -132,7 +132,7 @@ impl CropPanel {
                         .selected_text(current_mode.to_string())
                         .width(100.0)
                         .show_ui(ui, |ui| {
-                            for mode in domain::value_objects::RotationFillMode::all() {
+                            for mode in RotationFillMode::all() {
                                 if ui.selectable_label(*mode == current_mode, mode.to_string()).clicked() {
                                     new_fill_mode = Some(*mode);
                                 }
@@ -148,7 +148,7 @@ impl CropPanel {
                         eprintln!("CropPanel: Updated crop_settings.fill_mode={:?}", crop_settings.fill_mode());
                         
                         // If ShrinkToFit is selected, apply the calculation immediately
-                        if mode == domain::value_objects::RotationFillMode::ShrinkToFit {
+                        if mode == RotationFillMode::ShrinkToFit {
                             if let Some(img) = state.original_preview.as_ref() {
                                 let (img_w, img_h) = (img.width() as f32, img.height() as f32);
                                 *crop_settings = crop_settings.calculate_shrink_to_fit(img_w, img_h);
@@ -195,7 +195,7 @@ impl CropPanel {
             ui.horizontal(|ui| {
                 let reset_shortcut = ui.input(|i| i.modifiers.shift && i.key_pressed(egui::Key::R));
                 if ui.button("↺ Reset").on_hover_text("Reset crop (Shift+R)").clicked() || reset_shortcut {
-                    state.crop_settings = Some(domain::value_objects::CropSettings::default());
+                    state.crop_settings = Some(CropSettings::default());
                     state.selected_aspect_ratio = AspectRatio::Original;
                 }
                 
@@ -270,7 +270,7 @@ impl CropPanel {
             let new_x = (cx - new_w_n / 2.0).clamp(0.0, 1.0 - new_w_n);
             let new_y = (cy - new_h_n / 2.0).clamp(0.0, 1.0 - new_h_n);
             
-            state.crop_settings = Some(domain::value_objects::CropSettings::new(
+            state.crop_settings = Some(CropSettings::new(
                  new_x, new_y, new_w_n, new_h_n,
                  current_crop.rotation_90(), current_crop.angle(),
                  current_crop.flip_horizontal(), current_crop.flip_vertical()
@@ -374,7 +374,7 @@ mod tests {
         // Initial setup with ShrinkToFit
         state.crop_settings = Some(
             CropSettings::default()
-                .with_fill_mode(domain::value_objects::RotationFillMode::ShrinkToFit)
+                .with_fill_mode(RotationFillMode::ShrinkToFit)
         );
         
         // Trigger enforce aspect ratio
@@ -383,6 +383,6 @@ mod tests {
         
         // Should preserve fill mode
         let crop = state.crop_settings.unwrap();
-        assert_eq!(crop.fill_mode(), domain::value_objects::RotationFillMode::ShrinkToFit);
+        assert_eq!(crop.fill_mode(), RotationFillMode::ShrinkToFit);
     }
 }

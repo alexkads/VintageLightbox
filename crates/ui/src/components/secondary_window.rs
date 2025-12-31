@@ -3,6 +3,7 @@
 
 use egui::{Context, ViewportBuilder, ViewportId, ViewportCommand, Pos2, Color32, RichText, Align2};
 use crate::monitors::MonitorInfo;
+use adapters::view_models::CropSettings;
 
 /// Manages the secondary fullscreen window for client viewing
 pub struct SecondaryWindow {
@@ -96,7 +97,7 @@ impl SecondaryWindow {
         detail_image: Option<&egui::TextureHandle>,
         thumbnail_preview: Option<&egui::TextureHandle>,
         has_selection: bool,
-        crop_settings: Option<&domain::value_objects::CropSettings>,
+        crop_settings: Option<&CropSettings>,
         photo_info: Option<(&str, &str)>, // (filename, rating)
     ) {
         if !self.is_open {

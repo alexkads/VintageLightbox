@@ -5,6 +5,7 @@ use egui::{Context, Key};
 use crate::state::{AppState, CurrentView};
 use std::sync::Arc;
 use adapters::controllers::PhotoController;
+use adapters::view_models::CropSettings;
 
 pub struct KeyboardHandler;
 
@@ -66,44 +67,18 @@ impl KeyboardHandler {
                                             
                                             // Get current edits from EditorService (simplified!)
                                             let mut current_edits = editor_service.current_edits();
-                                            let crop_settings = state.crop_settings.clone();
-                                            
-                                            // Merge crop settings into current_edits for state update
-                                            if let Some(crop) = &crop_settings {
-                                                current_edits.crop_settings = Some(crop.clone());
+                                            if let Some(crop) = state.crop_settings.clone() {
+                                                current_edits.crop_settings = Some(crop);
                                             }
-                                            
-                                            // Update last_saved_edits to reflect what we are about to save
-                                            state.last_saved_edits = current_edits.clone();
 
+                                            let current_edits_clone = current_edits.clone();
                                             tokio::spawn(async move {
-                                                let _ = controller.save_edits(
-                                                    photo_id,
-                                                    current_edits.exposure, current_edits.contrast, 
-                                                    current_edits.temperature, current_edits.tint,
-                                                    current_edits.highlights, current_edits.shadows, current_edits.whites, current_edits.blacks,
-                                                    current_edits.clarity, current_edits.vibrance, current_edits.saturation,
-                                                    current_edits.tone_curve_shadows, current_edits.tone_curve_darks, current_edits.tone_curve_lights, current_edits.tone_curve_highlights,
-                                                    current_edits.hsl_red_sat, current_edits.hsl_orange_sat, current_edits.hsl_yellow_sat, current_edits.hsl_green_sat, current_edits.hsl_aqua_sat, current_edits.hsl_blue_sat, current_edits.hsl_purple_sat, current_edits.hsl_magenta_sat,
-                                                    current_edits.hsl_red_hue, current_edits.hsl_orange_hue, current_edits.hsl_yellow_hue, current_edits.hsl_green_hue, current_edits.hsl_aqua_hue, current_edits.hsl_blue_hue, current_edits.hsl_purple_hue, current_edits.hsl_magenta_hue,
-                                                    current_edits.hsl_red_lum, current_edits.hsl_orange_lum, current_edits.hsl_yellow_lum, current_edits.hsl_green_lum, current_edits.hsl_aqua_lum, current_edits.hsl_blue_lum, current_edits.hsl_purple_lum, current_edits.hsl_magenta_lum,
-                                                    current_edits.lens_distortion, current_edits.lens_vignette_amount, current_edits.lens_vignette_midpoint,
-                                                    current_edits.nr_luminance, current_edits.nr_color,
-                                                    current_edits.sharpen_amount, current_edits.sharpen_radius,
-                                                    current_edits.crop_settings.as_ref().map(|c| c.crop_x()),
-                                                    current_edits.crop_settings.as_ref().map(|c| c.crop_y()),
-                                                    current_edits.crop_settings.as_ref().map(|c| c.crop_width()),
-                                                    current_edits.crop_settings.as_ref().map(|c| c.crop_height()),
-                                                    current_edits.crop_settings.as_ref().map(|c| c.rotation_90()),
-                                                    current_edits.crop_settings.as_ref().map(|c| c.angle()),
-                                                    current_edits.crop_settings.as_ref().map(|c| c.flip_horizontal()),
-                                                    current_edits.crop_settings.as_ref().map(|c| c.flip_vertical()),
-                                                    current_edits.crop_settings.as_ref().map(|c| c.fill_mode() as u8),
-                                                ).await;
+                                                let _ = controller.save_edits_from_vo(&photo_id, current_edits).await;
                                             });
                                             
-                                            // Update saved crop settings to match current, preventing re-save loop on next frame
-                                            // state.saved_crop_settings = state.crop_settings.clone();
+                                            // Update last_saved_edits to reflect what was saved
+                                            state.last_saved_edits = current_edits_clone;
+                                            state.pending_auto_save = false;
                                         }
                                     }
 
@@ -176,7 +151,7 @@ impl KeyboardHandler {
                     if state.crop_mode_active {
                         // Initialize crop settings when entering crop mode
                         if state.crop_settings.is_none() {
-                            state.crop_settings = Some(domain::value_objects::CropSettings::default());
+                            state.crop_settings = Some(CropSettings::default());
                         }
                     }
                 }

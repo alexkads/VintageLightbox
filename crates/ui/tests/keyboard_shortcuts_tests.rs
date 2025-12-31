@@ -59,7 +59,7 @@ async fn setup_harness() -> (
     // Ideally we leak it or keep it alive. But for test duration it might be fine if variable persists?
     // Wait, tempdir deletes on drop. If we drop it here, dir is gone.
     // We can return it? Or just `into_path()` (persisted?) No `into_path` persists it.
-    let preview_man = Arc::new(PreviewManager::new_with_path(temp_dir_obj.into_path().join("previews")));
+    let preview_man = Arc::new(PreviewManager::new_with_path(temp_dir_obj.keep().join("previews")));
     
     let _import_uc = ImportPhotoUseCase::new(photo_repo.clone(), exif_reader, thumb_gen, preview_man);
 

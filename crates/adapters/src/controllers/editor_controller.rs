@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use domain::value_objects::PhotoId;
+use domain::value_objects::{PhotoEdits, PhotoId};
 use use_cases::SavePhotoEditsUseCase;
 
 pub struct EditorController {
@@ -97,6 +97,77 @@ impl EditorController {
             crop_fill_mode
         ).await
             .map_err(|e| e.to_string())
+    }
+
+    /// Saves edits using a PhotoEdits value object (preferred entry point for UI)
+    pub async fn save_edits_from_vo(
+        &self,
+        id: &str,
+        edits: PhotoEdits,
+    ) -> Result<(), String> {
+        let photo_id = PhotoId::from_string(id).map_err(|e| e.to_string())?;
+        let crop = edits.crop_settings.clone();
+
+        self.save_photo_edits_use_case.execute(
+            photo_id,
+            edits.exposure,
+            edits.contrast,
+            edits.temperature,
+            edits.tint,
+            edits.highlights,
+            edits.shadows,
+            edits.whites,
+            edits.blacks,
+            edits.clarity,
+            edits.vibrance,
+            edits.saturation,
+            edits.tone_curve_shadows,
+            edits.tone_curve_darks,
+            edits.tone_curve_lights,
+            edits.tone_curve_highlights,
+            edits.hsl_red_sat,
+            edits.hsl_orange_sat,
+            edits.hsl_yellow_sat,
+            edits.hsl_green_sat,
+            edits.hsl_aqua_sat,
+            edits.hsl_blue_sat,
+            edits.hsl_purple_sat,
+            edits.hsl_magenta_sat,
+            edits.hsl_red_hue,
+            edits.hsl_orange_hue,
+            edits.hsl_yellow_hue,
+            edits.hsl_green_hue,
+            edits.hsl_aqua_hue,
+            edits.hsl_blue_hue,
+            edits.hsl_purple_hue,
+            edits.hsl_magenta_hue,
+            edits.hsl_red_lum,
+            edits.hsl_orange_lum,
+            edits.hsl_yellow_lum,
+            edits.hsl_green_lum,
+            edits.hsl_aqua_lum,
+            edits.hsl_blue_lum,
+            edits.hsl_purple_lum,
+            edits.hsl_magenta_lum,
+            edits.lens_distortion,
+            edits.lens_vignette_amount,
+            edits.lens_vignette_midpoint,
+            edits.nr_luminance,
+            edits.nr_color,
+            edits.sharpen_amount,
+            edits.sharpen_radius,
+            crop.as_ref().map(|c| c.crop_x()),
+            crop.as_ref().map(|c| c.crop_y()),
+            crop.as_ref().map(|c| c.crop_width()),
+            crop.as_ref().map(|c| c.crop_height()),
+            crop.as_ref().map(|c| c.rotation_90()),
+            crop.as_ref().map(|c| c.angle()),
+            crop.as_ref().map(|c| c.flip_horizontal()),
+            crop.as_ref().map(|c| c.flip_vertical()),
+            crop.as_ref().map(|c| c.fill_mode() as u8),
+        )
+        .await
+        .map_err(|e| e.to_string())
     }
 }
 

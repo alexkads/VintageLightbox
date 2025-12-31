@@ -11,6 +11,7 @@ use crate::rendering::traits::ImageRenderer;
 use crate::rendering::primitives::{MeshData, Vertex};
 use crate::geometry::{calculate_crop_uvs, calculate_full_image_uvs};
 use egui::pos2;
+use adapters::view_models::{CropSettings, RotationFillMode};
 
 pub struct ImageViewer;
 
@@ -69,7 +70,7 @@ impl ImageViewer {
         current_pan: Vec2,
         interactive: bool,
         allow_pan: bool, // Restored parameter
-        crop_settings: Option<&domain::value_objects::CropSettings>, // Updated for crop support
+        crop_settings: Option<&CropSettings>, // Updated for crop support
         apply_crop_clip: bool, // New parameter: if true, applies UV crop. If false, shows full image but rotated.
     ) -> (f32, Vec2, Option<Rect>, Rect) {
         let available_size = ui.available_size();
@@ -192,7 +193,7 @@ impl ImageViewer {
                     // B. Draw Background Fill (if angle != 0)
                     if crop.angle() != 0.0 {
                         // Check if we should use intelligent fill texture
-                        let use_intelligent_fill = crop.fill_mode() == domain::value_objects::RotationFillMode::Intelligent
+                        let use_intelligent_fill = crop.fill_mode() == RotationFillMode::Intelligent
                             && intelligent_fill_texture.is_some();
 
                         if use_intelligent_fill {
@@ -203,14 +204,14 @@ impl ImageViewer {
                             }
                         } else {
                             let fill_color = match crop.fill_mode() {
-                                domain::value_objects::RotationFillMode::Black => Color32::BLACK,
-                                domain::value_objects::RotationFillMode::White => Color32::WHITE,
-                                domain::value_objects::RotationFillMode::Transparent => Color32::TRANSPARENT,
-                                domain::value_objects::RotationFillMode::Intelligent => {
+                                RotationFillMode::Black => Color32::BLACK,
+                                RotationFillMode::White => Color32::WHITE,
+                                RotationFillMode::Transparent => Color32::TRANSPARENT,
+                                RotationFillMode::Intelligent => {
                                     render_zebra_simple(renderer.ui, img_rect, &ZebraPatternConfig::processing_indicator());
                                     Color32::TRANSPARENT 
                                 },
-                                domain::value_objects::RotationFillMode::ShrinkToFit => Color32::TRANSPARENT,
+                                RotationFillMode::ShrinkToFit => Color32::TRANSPARENT,
                             };
                             
                             if fill_color != Color32::TRANSPARENT {
@@ -261,7 +262,7 @@ impl ImageViewer {
                     painted_rect = Some(img_rect);
                     
                     // Show "Processing..." indicator logic
-                    if crop.fill_mode() == domain::value_objects::RotationFillMode::Intelligent
+                    if crop.fill_mode() == RotationFillMode::Intelligent
                         && intelligent_fill_texture.is_none()
                         && crop.angle() != 0.0
                     {
@@ -293,7 +294,7 @@ impl ImageViewer {
                         let uvs = calculate_full_image_uvs(crop, aspect);
 
                         // Draw fill background first
-                        let use_intelligent_fill = crop.fill_mode() == domain::value_objects::RotationFillMode::Intelligent
+                        let use_intelligent_fill = crop.fill_mode() == RotationFillMode::Intelligent
                             && intelligent_fill_texture.is_some();
 
                         if use_intelligent_fill {
@@ -304,14 +305,14 @@ impl ImageViewer {
                             }
                         } else {
                             let fill_color = match crop.fill_mode() {
-                                domain::value_objects::RotationFillMode::Black => Color32::BLACK,
-                                domain::value_objects::RotationFillMode::White => Color32::WHITE,
-                                domain::value_objects::RotationFillMode::Transparent => Color32::TRANSPARENT,
-                                domain::value_objects::RotationFillMode::Intelligent => {
+                                RotationFillMode::Black => Color32::BLACK,
+                                RotationFillMode::White => Color32::WHITE,
+                                RotationFillMode::Transparent => Color32::TRANSPARENT,
+                                RotationFillMode::Intelligent => {
                                     render_zebra_simple(renderer.ui, img_rect, &ZebraPatternConfig::processing_indicator());
                                     Color32::TRANSPARENT
                                 },
-                                domain::value_objects::RotationFillMode::ShrinkToFit => Color32::TRANSPARENT,
+                                RotationFillMode::ShrinkToFit => Color32::TRANSPARENT,
                             };
 
                             if fill_color != Color32::TRANSPARENT {
