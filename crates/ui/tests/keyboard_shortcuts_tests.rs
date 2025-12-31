@@ -61,7 +61,7 @@ async fn setup_harness() -> (
     // We can return it? Or just `into_path()` (persisted?) No `into_path` persists it.
     let preview_man = Arc::new(PreviewManager::new_with_path(temp_dir_obj.into_path().join("previews")));
     
-    let import_uc = ImportPhotoUseCase::new(photo_repo.clone(), exif_reader, thumb_gen, preview_man);
+    let _import_uc = ImportPhotoUseCase::new(photo_repo.clone(), exif_reader, thumb_gen, preview_man);
 
     // 4. Controllers
     let photo_controller = Arc::new(PhotoController::new(

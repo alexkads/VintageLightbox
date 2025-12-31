@@ -136,7 +136,7 @@ async fn test_crop_persistence_on_photo_switch() {
     
     // 2. Simulate User Editing Photo 1
     // In UI, this updates `state.active_*` values and `state.crop_settings`
-    state.active_exposure = 1.5;
+    let active_exposure = 1.5;
     let crop_settings = CropSettings::new(
         0.2, 0.2, 0.6, 0.6,
         0, 10.0,
@@ -156,15 +156,21 @@ async fn test_crop_persistence_on_photo_switch() {
         if let Some(vm) = state.get_current_photo() {
              let controller = editor_controller.clone();
              let id = vm.id.clone();
-             let exposure = state.active_exposure;
+             let exposure = active_exposure;
              // ... other params ...
              let active_crop = state.crop_settings.clone();
              
              // Await directly here instead of spawn
              controller.save_edits(
                  id,
-                 exposure, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
-                 , 0.0, // Added one more float
+                 exposure, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // Basic (11)
+                 0.0, 0.0, 0.0, 0.0, // Tone Curve (4)
+                 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL Sat (8)
+                 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL Hue (8)
+                 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL Lum (8)
+                 0.0, 0.0, 0.0, // Lens (3)
+                 0.0, 0.0, // NR (2)
+                 0.0, 0.0, // Sharpen (2)
                  active_crop.as_ref().map(|c| c.crop_x()),
                  active_crop.as_ref().map(|c| c.crop_y()),
                  active_crop.as_ref().map(|c| c.crop_width()),
@@ -180,7 +186,7 @@ async fn test_crop_persistence_on_photo_switch() {
     
     // Switch ID
     state.internal_state.develop_selected_id = Some(id2.to_string());
-    state.active_exposure = 0.0; // Reset active state (simulating load)
+    // state.active_exposure = 0.0; // Removed: active_exposure local var doesn't need reset
     state.crop_settings = None;
     
     // 4. Verify Photo 1 persisted

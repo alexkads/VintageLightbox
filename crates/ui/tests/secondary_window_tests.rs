@@ -166,7 +166,7 @@ mod tests {
              let toggle_id = egui::Id::new("secondary_window_toggle_info");
              
              for i in 0..100 {
-                 let expected_state = i % 2 == 0; // Starts true (i=0 -> becomes false?) No, starts true.
+                 let _expected_state = i % 2 == 0; // Starts true (i=0 -> becomes false?) No, starts true.
                  // If i=0: insert signal -> toggle -> becomes false.
                  // If i=1: insert signal -> toggle -> becomes true.
                  

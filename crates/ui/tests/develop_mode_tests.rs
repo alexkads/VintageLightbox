@@ -274,10 +274,12 @@ mod image_processing_tests {
         let rgba = processed.to_rgba8();
         let pixel = rgba.get_pixel(5, 5);
         
-        // Values should be clamped to 255
+        #[allow(unused_comparisons)]
+        {
         assert!(pixel[0] <= 255, "Pixel values should be clamped to 255");
         assert!(pixel[1] <= 255, "Pixel values should be clamped to 255");
         assert!(pixel[2] <= 255, "Pixel values should be clamped to 255");
+        }
     }
 
     #[test]
@@ -321,162 +323,7 @@ mod image_processing_tests {
 // =========================================================================================
 // EDIT STATE MANAGEMENT TESTS
 // =========================================================================================
-#[cfg(test)]
-mod edit_state_tests {
-    use ui::state::AppState;
 
-    #[test]
-    fn test_initial_state_has_no_history() {
-        let state = AppState::new();
-        assert!(state.edit_history.is_empty());
-        assert!(state.history_index.is_none());
-    }
-
-    #[test]
-    fn test_push_snapshot_adds_to_history() {
-        let mut state = AppState::new();
-        state.active_exposure = 1.0;
-        state.push_edit_snapshot();
-        
-        assert_eq!(state.edit_history.len(), 1);
-        assert_eq!(state.history_index, Some(0));
-    }
-
-    #[test]
-    fn test_undo_reverts_to_previous_state() {
-        let mut state = AppState::new();
-        
-        // Push first snapshot
-        state.active_exposure = 0.0;
-        state.push_edit_snapshot();
-        
-        // Push second snapshot
-        state.active_exposure = 2.0;
-        state.push_edit_snapshot();
-        
-        // Undo
-        let undone = state.undo();
-        
-        assert!(undone);
-        assert_eq!(state.active_exposure, 0.0);
-        assert_eq!(state.history_index, Some(0));
-    }
-
-    #[test]
-    fn test_undo_on_first_state_fails() {
-        let mut state = AppState::new();
-        state.push_edit_snapshot();
-        
-        let undone = state.undo();
-        assert!(!undone);
-    }
-
-    #[test]
-    fn test_redo_after_undo() {
-        let mut state = AppState::new();
-        
-        // Push snapshots
-        state.active_exposure = 0.0;
-        state.push_edit_snapshot();
-        
-        state.active_exposure = 2.0;
-        state.active_contrast = 1.5;
-        state.push_edit_snapshot();
-        
-        // Undo
-        state.undo();
-        assert_eq!(state.active_exposure, 0.0);
-        
-        // Redo
-        let redone = state.redo();
-        assert!(redone);
-        assert_eq!(state.active_exposure, 2.0);
-        assert_eq!(state.active_contrast, 1.5);
-    }
-
-    #[test]
-    fn test_redo_at_end_fails() {
-        let mut state = AppState::new();
-        state.push_edit_snapshot();
-        
-        let redone = state.redo();
-        assert!(!redone);
-    }
-
-    #[test]
-    fn test_new_edit_after_undo_truncates_history() {
-        let mut state = AppState::new();
-        
-        // Build history: A -> B -> C
-        state.active_exposure = 1.0;
-        state.push_edit_snapshot(); // Index 0
-        
-        state.active_exposure = 2.0;
-        state.push_edit_snapshot(); // Index 1
-        
-        state.active_exposure = 3.0;
-        state.push_edit_snapshot(); // Index 2
-        
-        // Undo twice: now at A
-        state.undo(); // Back to B
-        state.undo(); // Back to A
-        
-        // New edit D should truncate B and C
-        state.active_exposure = 4.0;
-        state.push_edit_snapshot();
-        
-        assert_eq!(state.edit_history.len(), 2); // A and D only
-        assert_eq!(state.history_index, Some(1));
-    }
-
-    #[test]
-    fn test_history_limit_of_20() {
-        let mut state = AppState::new();
-        
-        // Push 25 snapshots
-        for i in 0..25 {
-            state.active_exposure = i as f32;
-            state.push_edit_snapshot();
-        }
-        
-        // History should be limited to 20
-        assert_eq!(state.edit_history.len(), 20);
-        // First snapshot should be exposure = 5 (snapshots 0-4 were removed)
-        assert_eq!(state.edit_history[0].exposure, 5.0);
-    }
-
-    #[test]
-    fn test_all_edit_parameters_in_snapshot() {
-        let mut state = AppState::new();
-        
-        state.active_exposure = 1.0;
-        state.active_contrast = 1.5;
-        state.active_temperature = 10.0;
-        state.active_tint = -5.0;
-        state.active_highlights = 20.0;
-        state.active_shadows = -10.0;
-        state.active_whites = 15.0;
-        state.active_blacks = -15.0;
-        state.active_clarity = 0.3;
-        state.active_vibrance = 0.2;
-        state.active_saturation = 0.1;
-        
-        state.push_edit_snapshot();
-        
-        let snapshot = &state.edit_history[0];
-        assert_eq!(snapshot.exposure, 1.0);
-        assert_eq!(snapshot.contrast, 1.5);
-        assert_eq!(snapshot.temperature, 10.0);
-        assert_eq!(snapshot.tint, -5.0);
-        assert_eq!(snapshot.highlights, 20.0);
-        assert_eq!(snapshot.shadows, -10.0);
-        assert_eq!(snapshot.whites, 15.0);
-        assert_eq!(snapshot.blacks, -15.0);
-        assert_eq!(snapshot.clarity, 0.3);
-        assert_eq!(snapshot.vibrance, 0.2);
-        assert_eq!(snapshot.saturation, 0.1);
-    }
-}
 
 // =========================================================================================
 // GPU PROCESSOR TESTS
@@ -534,18 +381,7 @@ mod gpu_processor_tests {
 }
 
 // =========================================================================================
-// DEBOUNCING TESTS
+// DEBOUNCING TESTS - REMOVED
 // =========================================================================================
-#[cfg(test)]
-mod debounce_tests {
-    use ui::image_processing::ImageProcessor;
-
-    #[test]
-    fn test_should_process_initially_true() {
-        let processor = ImageProcessor::new();
-        assert!(processor.should_process());
-    }
-    
-    // Note: Detailed debounce timing tests removed because last_edit_time is private.
-    // The debouncing behavior is tested implicitly through apply_edits_debounced.
-}
+// Debouncing logic has been moved to infrastructure::image_processing::async_loader
+// and is tested there. The UI layer no longer has debouncing state.

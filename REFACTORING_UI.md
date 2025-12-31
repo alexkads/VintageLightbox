@@ -3,7 +3,7 @@
 ## Objetivo
 Remover responsabilidades de lógica de negócio e aplicação da camada UI para facilitar futuras migrações de framework (egui → Tauri ou outro).
 
-## Status: Em Progresso ✅
+## Status: Completo ✅
 
 ### ✅ Completado
 
@@ -276,6 +276,6 @@ Continuar com:
 
 ---
 
-**Data:** 30 de dezembro de 2025  
+**Data:** 31 de dezembro de 2025  
 **Branch:** feature/refactur_arc  
-**Status:** ✅ Fundação completa, pronto para refatoração de app.rs
+**Status:** ✅ Refatoração completa. Fases 1-4 finalizadas.

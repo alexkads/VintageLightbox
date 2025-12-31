@@ -366,7 +366,9 @@ impl DevelopView {
              });
              
              // Sync back to state for UI
-             crate::editor_state_adapter::EditorStateAdapter::sync_to_state(editor_service, state);
+             // Sync back to state for UI
+
+
              
              state.pending_auto_save = true;
              state.last_slider_change_time = Some(std::time::Instant::now());
@@ -397,7 +399,8 @@ impl DevelopView {
                 if widgets::secondary_button(ui, "⟲ Undo").clicked() {
                     if let Some(_edits) = editor_service.undo() {
                         // Sync back to state
-                        crate::editor_state_adapter::EditorStateAdapter::sync_to_state(editor_service, state);
+                        // Sync back to state
+
                         state.pending_auto_save = true;
                         ui.ctx().request_repaint();
                     }
@@ -410,7 +413,8 @@ impl DevelopView {
                 if widgets::secondary_button(ui, "⟳ Redo").clicked() {
                     if let Some(_edits) = editor_service.redo() {
                         // Sync back to state
-                        crate::editor_state_adapter::EditorStateAdapter::sync_to_state(editor_service, state);
+                        // Sync back to state
+
                         state.pending_auto_save = true;
                         ui.ctx().request_repaint();
                     }
@@ -445,14 +449,18 @@ impl DevelopView {
         };
         
         // Sync EditorService → AppState (in case of undo/redo)
-        crate::editor_state_adapter::EditorStateAdapter::sync_to_state(editor_service, state);
+        // Sync EditorService → AppState (in case of undo/redo)
+
 
         // Interactive Histogram
         HistogramPlot::show(ui, state.histogram_data.as_ref());
         ui.add_space(Theme::SPACE_MD);
 
+        // Get current edits from service (moved to top)
+        let current_edits = editor_service.current_edits();
+
         // Tone Curve Visualization
-        ToneCurveEditor::show(ui, state);
+        ToneCurveEditor::show(ui, &current_edits);
         ui.add_space(Theme::SPACE_MD);
 
         // Basic Adjustments
@@ -463,7 +471,7 @@ impl DevelopView {
         let mut any_slider_changed = false;
 
         // Get current edits from service
-        let current_edits = editor_service.current_edits();
+        // let current_edits = editor_service.current_edits(); // Moved to top
         
         // Exposure slider
         let mut exposure = current_edits.exposure;
@@ -563,15 +571,7 @@ impl DevelopView {
         }
 
         // Saturation slider
-        if SliderControl::show(
-            ui,
-            "Saturation",
-            &mut state.active_saturation,
-            -1.0..=1.0,
-            0.05,
-        ) {
-            any_slider_changed = true;
-        }
+        // REMOVED DUPLICATE
 
         // Mark for auto-save if any slider changed
         if any_slider_changed {
@@ -882,7 +882,7 @@ impl DevelopView {
         // Reset button
         if widgets::secondary_button(ui, "Reset").clicked() {
             // Reset adjustments to default values
-            state.reset_edits();
+            let _ = editor_service.update_field("Reset All", |e| *e = Default::default());
 
             // Auto-save happens after reset too
             state.pending_auto_save = true;
@@ -986,9 +986,9 @@ impl DevelopView {
         }
         
         // Sync AppState → EditorService (if any changes)
-        if any_slider_changed {
-            let _ = crate::editor_state_adapter::EditorStateAdapter::sync_from_state(state, editor_service);
-        }
+        // if any_slider_changed {
+
+        // }
     }
 }
 

@@ -107,7 +107,7 @@ mod tests {
         entities::Photo,
         repositories::PhotoRepository,
         value_objects::{PhotoId, FilePath},
-        DomainResult, DomainError,
+        DomainResult,
     };
     use mockall::mock;
     use mockall::predicate::*;

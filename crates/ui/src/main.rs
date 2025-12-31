@@ -34,19 +34,10 @@ async fn main() {
     // Initialize formatting for better panic messages
     // human_panic::setup_panic!();
 
-    // 0. Setup Paths
-    // Path: ~/Pictures/VintageLightbox/VintageLightbox Catalog
-    // Logic centralized in infrastructure::paths to ensure cross-platform consistency
-    let catalog_path = infrastructure::paths::AppPaths::catalog_root();
-
-    if !catalog_path.exists() {
-        std::fs::create_dir_all(&catalog_path).expect("Failed to create catalog directory");
-    }
-
-    // Database Path: ./VintageLightbox Catalog/vintage_lightbox.db
-    let db_path = catalog_path.join("vintage_lightbox.db");
-    // SQLite requires path to be string, prepended with sqlite:
-    let database_url = format!("sqlite:{}?mode=rwc", db_path.to_string_lossy());
+    // 0. Setup Paths & Database
+    // Logic centralized in infrastructure::paths::AppPaths
+    let database_url = infrastructure::paths::AppPaths::ensure_catalog_exists()
+        .expect("Failed to create catalog directory");
 
     // ============================================
     // 1. Setup Infrastructure Layer
@@ -63,10 +54,10 @@ async fn main() {
     let metadata_extractor = Arc::new(ExifReader);
     let thumbnail_generator = Arc::new(ThumbnailGeneratorImpl::new());
     let image_exporter = Arc::new(ImageExporterImpl::new());
-    let file_organizer = Arc::new(FileOrganizerImpl::new(catalog_path.clone()));
+    let file_organizer = Arc::new(FileOrganizerImpl::new(infrastructure::paths::AppPaths::catalog_root()));
 
     // Preview Cache Path: ./VintageLightbox Catalog/Previews.lrdata
-    let preview_path = catalog_path.join("Previews.lrdata");
+    let preview_path = infrastructure::paths::AppPaths::catalog_root().join("Previews.lrdata");
     let preview_manager = Arc::new(PreviewManager::new_with_path(preview_path));
 
     let device_repo = Arc::new(infrastructure::devices::repository::InfrastructureDeviceRepository::new());

@@ -17,6 +17,7 @@ use domain::value_objects::FilePath;
 // =========================================================================================
 
 // Helper to create a dummy test harness with IN-MEMORY SQLite
+#[allow(dead_code)]
 async fn setup_harness() -> (
     AppState,
     Arc<KeyboardHandler>,
@@ -59,7 +60,7 @@ async fn setup_harness() -> (
     // I should be careful with names.
     // In previous file I used `temp_dir_obj`.
     
-    let import_uc = ImportPhotoUseCase::new(photo_repo.clone(), exif_reader, thumb_gen, preview_man);
+    let _import_uc = ImportPhotoUseCase::new(photo_repo.clone(), exif_reader, thumb_gen, preview_man);
 
     // 4. Controllers
     let photo_controller = Arc::new(PhotoController::new(
@@ -98,6 +99,7 @@ async fn setup_harness() -> (
 }
 
 /// Helper to drain all pending reloads
+#[allow(dead_code)]
 async fn drain_reloads(
     rx: &mut tokio::sync::mpsc::Receiver<Result<Vec<PhotoViewModel>, String>>
 ) {

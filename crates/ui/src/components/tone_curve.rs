@@ -3,7 +3,7 @@
 
 use egui::Ui;
 use egui_plot::{Plot, PlotPoints, Line};
-use crate::state::AppState;
+use adapters::view_models::PhotoEdits;
 use crate::design_system::theme::Theme;
 
 pub struct ToneCurveEditor;
@@ -11,7 +11,7 @@ pub struct ToneCurveEditor;
 impl ToneCurveEditor {
     /// Show tone curve visualization
     /// Returns true if the curve was modified
-    pub fn show(ui: &mut Ui, state: &AppState) -> bool {
+    pub fn show(ui: &mut Ui, edits: &PhotoEdits) -> bool {
         let changed = false;
 
         ui.vertical(|ui| {
@@ -24,7 +24,7 @@ impl ToneCurveEditor {
             ui.add_space(Theme::SPACE_XS);
 
             // Generate curve based on current adjustments
-            let curve_points = Self::generate_curve_from_adjustments(state);
+            let curve_points = Self::generate_curve_from_adjustments(edits);
 
             Plot::new("tone_curve_plot")
                 .height(180.0)
@@ -74,41 +74,41 @@ impl ToneCurveEditor {
 
     /// Generate curve points based on current adjustments
     /// This creates a simplified representation of how adjustments affect the tone curve
-    fn generate_curve_from_adjustments(state: &AppState) -> PlotPoints {
+    fn generate_curve_from_adjustments(edits: &PhotoEdits) -> PlotPoints {
         let points: Vec<[f64; 2]> = (0..=100)
             .map(|i| {
                 let input = i as f64 / 100.0;
                 let mut output = input;
 
                 // Apply exposure (affects entire curve)
-                output += state.active_exposure as f64 * 0.1;
+                output += edits.exposure as f64 * 0.1;
 
                 // Apply contrast (S-curve around midpoint)
-                let contrast_factor = 1.0 + (state.active_contrast as f64 - 1.0);
+                let contrast_factor = 1.0 + (edits.contrast as f64 - 1.0);
                 output = (output - 0.5) * contrast_factor + 0.5;
 
                 // Apply highlights (affects upper range)
                 if input > 0.5 {
                     let highlight_factor = (input - 0.5) * 2.0; // 0 to 1 for upper half
-                    output += state.active_highlights as f64 * 0.05 * highlight_factor;
+                    output += edits.highlights as f64 * 0.05 * highlight_factor;
                 }
 
                 // Apply shadows (affects lower range)
                 if input < 0.5 {
                     let shadow_factor = (0.5 - input) * 2.0; // 0 to 1 for lower half
-                    output += state.active_shadows as f64 * 0.05 * shadow_factor;
+                    output += edits.shadows as f64 * 0.05 * shadow_factor;
                 }
 
                 // Apply whites (affects extreme highlights)
                 if input > 0.75 {
                     let white_factor = (input - 0.75) * 4.0; // 0 to 1 for top quarter
-                    output += state.active_whites as f64 * 0.03 * white_factor;
+                    output += edits.whites as f64 * 0.03 * white_factor;
                 }
 
                 // Apply blacks (affects extreme shadows)
                 if input < 0.25 {
                     let black_factor = (0.25 - input) * 4.0; // 0 to 1 for bottom quarter
-                    output += state.active_blacks as f64 * 0.03 * black_factor;
+                    output += edits.blacks as f64 * 0.03 * black_factor;
                 }
 
                 // Clamp output to valid range

@@ -314,7 +314,10 @@ impl eframe::App for VintageLightboxApp {
         // ============================================
         
         // Poll for completed image processing results
-        if let Some(result) = self.image_processor.poll_result() {
+        if let Some(infra_result) = self.image_processor.poll_result() {
+            // Convert infrastructure result to UI result with ColorImage
+            let result = crate::async_loader::convert_image_result(infra_result);
+            
             // Check if this is still the photo we want
             // Accept if matches develop selection OR (secondary window open AND matches library selection)
             let is_target = self.state.internal_state.develop_selected_id.as_ref() == Some(&result.photo_id) ||
@@ -586,91 +589,69 @@ impl eframe::App for VintageLightboxApp {
                         color_label: photo.color_label.clone(),
                     });
 
-                    // Initialize active values immediately (UI responds instantly)
-                    self.state.active_exposure = exposure;
-                    self.state.active_contrast = contrast;
-                    self.state.active_temperature = temperature;
-                    self.state.active_tint = tint;
-                    self.state.active_highlights = highlights;
-                    self.state.active_shadows = shadows;
-                    self.state.active_whites = whites;
-                    self.state.active_blacks = blacks;
-                    self.state.active_clarity = clarity;
-                    self.state.active_vibrance = vibrance;
-                    self.state.active_saturation = saturation;
-
-                    // HSL Saturation state
-                    self.state.active_hsl_red_sat = hsl_red_sat;
-                    self.state.active_hsl_orange_sat = hsl_orange_sat;
-                    self.state.active_hsl_yellow_sat = hsl_yellow_sat;
-                    self.state.active_hsl_green_sat = hsl_green_sat;
-                    self.state.active_hsl_aqua_sat = hsl_aqua_sat;
-                    
                     // Initialize crop settings
-                    if let (Some(x), Some(y), Some(w), Some(h)) = (photo.edit_crop_x, photo.edit_crop_y, photo.edit_crop_width, photo.edit_crop_height) {
+                    let crop_settings = if let (Some(x), Some(y), Some(w), Some(h)) = (photo.edit_crop_x, photo.edit_crop_y, photo.edit_crop_width, photo.edit_crop_height) {
                         let fill_mode = domain::value_objects::RotationFillMode::try_from(photo.edit_crop_fill_mode.unwrap_or(0))
                             .unwrap_or_default();
-                         self.state.crop_settings = Some(domain::value_objects::CropSettings::with_fill_mode_value(
+                         Some(domain::value_objects::CropSettings::with_fill_mode_value(
                              x, y, w, h,
                              photo.edit_crop_rotation.unwrap_or(0),
                              photo.edit_crop_angle.unwrap_or(0.0),
                              photo.edit_crop_flip_h.unwrap_or(false),
                              photo.edit_crop_flip_v.unwrap_or(false),
-                             fill_mode,
-                         ));
+                             fill_mode
+                         ))
                     } else {
-                        self.state.crop_settings = None;
-                    }
-                    self.state.active_hsl_blue_sat = hsl_blue_sat;
-                    self.state.active_hsl_purple_sat = hsl_purple_sat;
-                    self.state.active_hsl_magenta_sat = hsl_magenta_sat;
+                        None
+                    };
+                    self.state.crop_settings = crop_settings.clone();
+
+                    let initial_edits = domain::value_objects::PhotoEdits {
+                        exposure,
+                        contrast,
+                        temperature,
+                        tint,
+                        highlights,
+                        shadows,
+                        whites,
+                        blacks,
+                        clarity,
+                        vibrance,
+                        saturation,
+                        
+                        tone_curve_shadows,
+                        tone_curve_darks,
+                        tone_curve_lights,
+                        tone_curve_highlights,
+                        
+                        hsl_red_sat, hsl_orange_sat, hsl_yellow_sat, hsl_green_sat,
+                        hsl_aqua_sat, hsl_blue_sat, hsl_purple_sat, hsl_magenta_sat,
+                        
+                        hsl_red_hue, hsl_orange_hue, hsl_yellow_hue, hsl_green_hue,
+                        hsl_aqua_hue, hsl_blue_hue, hsl_purple_hue, hsl_magenta_hue,
+                        
+                        hsl_red_lum, hsl_orange_lum, hsl_yellow_lum, hsl_green_lum,
+                        hsl_aqua_lum, hsl_blue_lum, hsl_purple_lum, hsl_magenta_lum,
+                        
+                        lens_distortion,
+                        lens_vignette_amount,
+                        lens_vignette_midpoint,
+                        
+                        nr_luminance,
+                        nr_color,
+                        
+                        sharpen_amount,
+                        sharpen_radius,
+                        
+                        crop_settings,
+                    };
                     
-
-
-                    // HSL Hue state
-                    self.state.active_hsl_red_hue = hsl_red_hue;
-                    self.state.active_hsl_orange_hue = hsl_orange_hue;
-                    self.state.active_hsl_yellow_hue = hsl_yellow_hue;
-                    self.state.active_hsl_green_hue = hsl_green_hue;
-                    self.state.active_hsl_aqua_hue = hsl_aqua_hue;
-                    self.state.active_hsl_blue_hue = hsl_blue_hue;
-                    self.state.active_hsl_purple_hue = hsl_purple_hue;
-                    self.state.active_hsl_magenta_hue = hsl_magenta_hue;
+                    // Start editing session in EditorService (manages history, undo/redo state)
+                    self.editor_service.start_editing(photo.id.clone(), initial_edits.clone());
                     
-
-
-                    // HSL Lum state
-                    self.state.active_hsl_red_lum = hsl_red_lum;
-                    self.state.active_hsl_orange_lum = hsl_orange_lum;
-                    self.state.active_hsl_yellow_lum = hsl_yellow_lum;
-                    self.state.active_hsl_green_lum = hsl_green_lum;
-                    self.state.active_hsl_aqua_lum = hsl_aqua_lum;
-                    self.state.active_hsl_blue_lum = hsl_blue_lum;
-                    self.state.active_hsl_purple_lum = hsl_purple_lum;
-                    self.state.active_hsl_magenta_lum = hsl_magenta_lum;
-                    
-
-                    // Lens
-                    self.state.active_lens_distortion = lens_distortion;
-                    self.state.active_lens_vignette_amount = lens_vignette_amount;
-                    self.state.active_lens_vignette_midpoint = lens_vignette_midpoint;
-
-
-                    // NR
-                    self.state.active_nr_luminance = nr_luminance;
-                    self.state.active_nr_color = nr_color;
-
-
-                    // Sharpening
-                    self.state.active_sharpen_amount = sharpen_amount;
-                    self.state.active_sharpen_radius = sharpen_radius;
-
-
-                    // Initialize Tone Curve active/prev values (saved already done above)
-                    self.state.active_tone_curve_shadows = tone_curve_shadows;
-                    self.state.active_tone_curve_darks = tone_curve_darks;
-                    self.state.active_tone_curve_lights = tone_curve_lights;
-                    self.state.active_tone_curve_highlights = tone_curve_highlights;
+                    // Initialize change detection state
+                    self.state.last_processed_edits = initial_edits.clone();
+                    self.state.last_saved_edits = initial_edits;
 
 
 
@@ -685,7 +666,10 @@ impl eframe::App for VintageLightboxApp {
                         edits: current_edits,
                     });
 
-                    // Prefetch adjacent photos into L1 cache for faster navigation
+                    // TODO: Prefetch adjacent photos into L1 cache for faster navigation
+                    // This functionality was removed during UI simplification
+                    // and can be reimplemented in infrastructure if needed
+                    /*
                     // Find current photo index and prefetch previous/next
                     if let Some(current_idx) = self.state.photos.iter().position(|p| &p.id == photo_id) {
                         // Prefetch previous photo
@@ -707,6 +691,7 @@ impl eframe::App for VintageLightboxApp {
                             );
                         }
                     }
+                    */
 
                     // Start timing TTI
                     self.state.start_load_time = Some(std::time::Instant::now());
@@ -723,74 +708,8 @@ impl eframe::App for VintageLightboxApp {
 
                 if (edits_changed || before_toggled) && self.state.original_preview.is_some() {
                     // Save to history if needed
-                    if edits_changed && !self.state.show_before {
-                        let should_save = if let Some(index) = self.state.history_index {
-                            if let Some(last_snapshot) = self.state.edit_history.get(index) {
-                                last_snapshot.exposure != self.state.active_exposure ||
-                                last_snapshot.contrast != self.state.active_contrast ||
-                                last_snapshot.temperature != self.state.active_temperature ||
-                                last_snapshot.tint != self.state.active_tint ||
-                                last_snapshot.highlights != self.state.active_highlights ||
-                                last_snapshot.shadows != self.state.active_shadows ||
-                                last_snapshot.whites != self.state.active_whites ||
-                                last_snapshot.blacks != self.state.active_blacks ||
-                                last_snapshot.clarity != self.state.active_clarity ||
-                                last_snapshot.vibrance != self.state.active_vibrance ||
-                                last_snapshot.saturation != self.state.active_saturation ||
-                                last_snapshot.tone_curve_shadows != self.state.active_tone_curve_shadows ||
-                                last_snapshot.tone_curve_darks != self.state.active_tone_curve_darks ||
-                                last_snapshot.tone_curve_lights != self.state.active_tone_curve_lights ||
-                                last_snapshot.tone_curve_highlights != self.state.active_tone_curve_highlights ||
-                                // HSL Sat
-                                last_snapshot.hsl_red_sat != self.state.active_hsl_red_sat ||
-                                last_snapshot.hsl_orange_sat != self.state.active_hsl_orange_sat ||
-                                last_snapshot.hsl_yellow_sat != self.state.active_hsl_yellow_sat ||
-                                last_snapshot.hsl_green_sat != self.state.active_hsl_green_sat ||
-                                last_snapshot.hsl_aqua_sat != self.state.active_hsl_aqua_sat ||
-                                last_snapshot.hsl_blue_sat != self.state.active_hsl_blue_sat ||
-                                last_snapshot.hsl_purple_sat != self.state.active_hsl_purple_sat ||
-                                last_snapshot.hsl_magenta_sat != self.state.active_hsl_magenta_sat ||
-                                // HSL Hue
-                                last_snapshot.hsl_red_hue != self.state.active_hsl_red_hue ||
-                                last_snapshot.hsl_orange_hue != self.state.active_hsl_orange_hue ||
-                                last_snapshot.hsl_yellow_hue != self.state.active_hsl_yellow_hue ||
-                                last_snapshot.hsl_green_hue != self.state.active_hsl_green_hue ||
-                                last_snapshot.hsl_aqua_hue != self.state.active_hsl_aqua_hue ||
-                                last_snapshot.hsl_blue_hue != self.state.active_hsl_blue_hue ||
-                                last_snapshot.hsl_purple_hue != self.state.active_hsl_purple_hue ||
-                                last_snapshot.hsl_magenta_hue != self.state.active_hsl_magenta_hue ||
-                                // HSL Lum
-                                last_snapshot.hsl_red_lum != self.state.active_hsl_red_lum ||
-                                last_snapshot.hsl_orange_lum != self.state.active_hsl_orange_lum ||
-                                last_snapshot.hsl_yellow_lum != self.state.active_hsl_yellow_lum ||
-                                last_snapshot.hsl_green_lum != self.state.active_hsl_green_lum ||
-                                last_snapshot.hsl_aqua_lum != self.state.active_hsl_aqua_lum ||
-                                last_snapshot.hsl_blue_lum != self.state.active_hsl_blue_lum ||
-                                last_snapshot.hsl_purple_lum != self.state.active_hsl_purple_lum ||
-                                last_snapshot.hsl_magenta_lum != self.state.active_hsl_magenta_lum ||
-                                // Lens
-                                last_snapshot.lens_distortion != self.state.active_lens_distortion ||
-                                last_snapshot.lens_vignette_amount != self.state.active_lens_vignette_amount ||
-                                last_snapshot.lens_vignette_midpoint != self.state.active_lens_vignette_midpoint ||
-                                // NR
-                                last_snapshot.nr_luminance != self.state.active_nr_luminance ||
-                                last_snapshot.nr_color != self.state.active_nr_color ||
-                                // Sharpen
-                                last_snapshot.sharpen_amount != self.state.active_sharpen_amount ||
-                                last_snapshot.sharpen_radius != self.state.active_sharpen_radius ||
-                                // Check crop settings diff
-                                last_snapshot.crop_settings != self.state.crop_settings
-                            } else {
-                                true
-                            }
-                        } else {
-                            true
-                        };
+                    // History management is handled by EditorService
 
-                        if should_save {
-                            self.state.push_edit_snapshot();
-                        }
-                    }
 
                     // Request async edit processing (GPU-accelerated!)
                     if let Some(original) = &self.state.original_preview {
@@ -821,61 +740,10 @@ impl eframe::App for VintageLightboxApp {
                                 image_data,
                                 width,
                                 height,
-                                params: domain::value_objects::PhotoEdits {
-                                    exposure: self.state.active_exposure,
-                                    contrast: self.state.active_contrast,
-                                    temperature: self.state.active_temperature,
-                                    tint: self.state.active_tint,
-                                    highlights: self.state.active_highlights,
-                                    shadows: self.state.active_shadows,
-                                    whites: self.state.active_whites,
-                                    blacks: self.state.active_blacks,
-                                    clarity: self.state.active_clarity,
-                                    vibrance: self.state.active_vibrance,
-                                    saturation: self.state.active_saturation,
-                                    tone_curve_shadows: self.state.active_tone_curve_shadows,
-                                    tone_curve_darks: self.state.active_tone_curve_darks,
-                                    tone_curve_lights: self.state.active_tone_curve_lights,
-                                    tone_curve_highlights: self.state.active_tone_curve_highlights,
-                                    // HSL from AppState
-                                    hsl_red_sat: self.state.active_hsl_red_sat,
-                                    hsl_orange_sat: self.state.active_hsl_orange_sat,
-                                    hsl_yellow_sat: self.state.active_hsl_yellow_sat,
-                                    hsl_green_sat: self.state.active_hsl_green_sat,
-                                    hsl_aqua_sat: self.state.active_hsl_aqua_sat,
-                                    hsl_blue_sat: self.state.active_hsl_blue_sat,
-                                    hsl_purple_sat: self.state.active_hsl_purple_sat,
-                                    hsl_magenta_sat: self.state.active_hsl_magenta_sat,
-                                    // HSL Hue
-                                    hsl_red_hue: self.state.active_hsl_red_hue,
-                                    hsl_orange_hue: self.state.active_hsl_orange_hue,
-                                    hsl_yellow_hue: self.state.active_hsl_yellow_hue,
-                                    hsl_green_hue: self.state.active_hsl_green_hue,
-                                    hsl_aqua_hue: self.state.active_hsl_aqua_hue,
-                                    hsl_blue_hue: self.state.active_hsl_blue_hue,
-                                    hsl_purple_hue: self.state.active_hsl_purple_hue,
-                                    hsl_magenta_hue: self.state.active_hsl_magenta_hue,
-                                    // HSL Lum
-                                    hsl_red_lum: self.state.active_hsl_red_lum,
-                                    hsl_orange_lum: self.state.active_hsl_orange_lum,
-                                    hsl_yellow_lum: self.state.active_hsl_yellow_lum,
-                                    hsl_green_lum: self.state.active_hsl_green_lum,
-                                    hsl_aqua_lum: self.state.active_hsl_aqua_lum,
-                                    hsl_blue_lum: self.state.active_hsl_blue_lum,
-                                    hsl_purple_lum: self.state.active_hsl_purple_lum,
-                                    hsl_magenta_lum: self.state.active_hsl_magenta_lum,
-                                    // Lens
-                                    lens_distortion: self.state.active_lens_distortion,
-                                    lens_vignette_amount: self.state.active_lens_vignette_amount,
-                                    lens_vignette_midpoint: self.state.active_lens_vignette_midpoint,
-                                    // NR
-                                    nr_luminance: self.state.active_nr_luminance,
-                                    nr_color: self.state.active_nr_color,
-                                    // Sharpening
-                                    sharpen_amount: self.state.active_sharpen_amount,
-                                    sharpen_radius: self.state.active_sharpen_radius,
-                                    // New field required by PhotoEdits
-                                    crop_settings: None,
+                                params: {
+                                    let mut edits = self.editor_service.current_edits();
+                                    edits.crop_settings = None;
+                                    edits
                                 },
                             });
 
@@ -920,59 +788,8 @@ impl eframe::App for VintageLightboxApp {
                         if let Some(metadata) = &self.state.detail_metadata {
                             let controller = self.editor_controller.clone();
                             let id = metadata.id.clone();
-                            let exposure = self.state.active_exposure;
-                            let contrast = self.state.active_contrast;
-                            let temperature = self.state.active_temperature;
-                            let tint = self.state.active_tint;
-                            let highlights = self.state.active_highlights;
-                            let shadows = self.state.active_shadows;
-                            let whites = self.state.active_whites;
-                            let blacks = self.state.active_blacks;
-                            let clarity = self.state.active_clarity;
-                            let vibrance = self.state.active_vibrance;
-                            let saturation = self.state.active_saturation;
-                            let tone_curve_shadows = self.state.active_tone_curve_shadows;
-                            let tone_curve_darks = self.state.active_tone_curve_darks;
-                            let tone_curve_lights = self.state.active_tone_curve_lights;
-                            let tone_curve_highlights = self.state.active_tone_curve_highlights;
-                            // HSL saturation values from state
-                            let hsl_red_sat = self.state.active_hsl_red_sat;
-                            let hsl_orange_sat = self.state.active_hsl_orange_sat;
-                            let hsl_yellow_sat = self.state.active_hsl_yellow_sat;
-                            let hsl_green_sat = self.state.active_hsl_green_sat;
-                            let hsl_aqua_sat = self.state.active_hsl_aqua_sat;
-                            let hsl_blue_sat = self.state.active_hsl_blue_sat;
-                            let hsl_purple_sat = self.state.active_hsl_purple_sat;
-                            let hsl_magenta_sat = self.state.active_hsl_magenta_sat;
-                            // HSL Hue
-                            let hsl_red_hue = self.state.active_hsl_red_hue;
-                            let hsl_orange_hue = self.state.active_hsl_orange_hue;
-                            let hsl_yellow_hue = self.state.active_hsl_yellow_hue;
-                            let hsl_green_hue = self.state.active_hsl_green_hue;
-                            let hsl_aqua_hue = self.state.active_hsl_aqua_hue;
-                            let hsl_blue_hue = self.state.active_hsl_blue_hue;
-                            let hsl_purple_hue = self.state.active_hsl_purple_hue;
-                            let hsl_magenta_hue = self.state.active_hsl_magenta_hue;
-                            // HSL Lum
-                            let hsl_red_lum = self.state.active_hsl_red_lum;
-                            let hsl_orange_lum = self.state.active_hsl_orange_lum;
-                            let hsl_yellow_lum = self.state.active_hsl_yellow_lum;
-                            let hsl_green_lum = self.state.active_hsl_green_lum;
-                            let hsl_aqua_lum = self.state.active_hsl_aqua_lum;
-                            let hsl_blue_lum = self.state.active_hsl_blue_lum;
-                            let hsl_purple_lum = self.state.active_hsl_purple_lum;
-                            let hsl_magenta_lum = self.state.active_hsl_magenta_lum;
-                            // Lens
-                            let lens_distortion = self.state.active_lens_distortion;
-                            let lens_vignette_amount = self.state.active_lens_vignette_amount;
-                            let lens_vignette_midpoint = self.state.active_lens_vignette_midpoint;
+                            // Use cached current_edits directly
 
-                            // Noise Reduction from state
-                            let nr_luminance = self.state.active_nr_luminance;
-                            let nr_color = self.state.active_nr_color;
-                            // Sharpening from state
-                            let sharpen_amount = self.state.active_sharpen_amount;
-                            let sharpen_radius = self.state.active_sharpen_radius;
 
                             // Update saved edits for auto-save comparison
                             self.state.last_saved_edits = current_edits.clone();
@@ -981,58 +798,58 @@ impl eframe::App for VintageLightboxApp {
                             // Update the PhotoViewModel in the local list to reflect saved edits
                             // This ensures the photo loads with correct values when switching photos
                             if let Some(photo) = self.state.photos.iter_mut().find(|p| p.id == id) {
-                                photo.edit_exposure = Some(exposure);
-                                photo.edit_contrast = Some(contrast);
-                                photo.edit_temperature = Some(temperature);
-                                photo.edit_tint = Some(tint);
-                                photo.edit_highlights = Some(highlights);
-                                photo.edit_shadows = Some(shadows);
-                                photo.edit_whites = Some(whites);
-                                photo.edit_blacks = Some(blacks);
-                                photo.edit_clarity = Some(clarity);
-                                photo.edit_vibrance = Some(vibrance);
-                                photo.edit_saturation = Some(saturation);
-                                photo.edit_tone_curve_shadows = Some(tone_curve_shadows);
-                                photo.edit_tone_curve_darks = Some(tone_curve_darks);
-                                photo.edit_tone_curve_lights = Some(tone_curve_lights);
-                                photo.edit_tone_curve_highlights = Some(tone_curve_highlights);
+                                photo.edit_exposure = Some(current_edits.exposure);
+                                photo.edit_contrast = Some(current_edits.contrast);
+                                photo.edit_temperature = Some(current_edits.temperature);
+                                photo.edit_tint = Some(current_edits.tint);
+                                photo.edit_highlights = Some(current_edits.highlights);
+                                photo.edit_shadows = Some(current_edits.shadows);
+                                photo.edit_whites = Some(current_edits.whites);
+                                photo.edit_blacks = Some(current_edits.blacks);
+                                photo.edit_clarity = Some(current_edits.clarity);
+                                photo.edit_vibrance = Some(current_edits.vibrance);
+                                photo.edit_saturation = Some(current_edits.saturation);
+                                photo.edit_tone_curve_shadows = Some(current_edits.tone_curve_shadows);
+                                photo.edit_tone_curve_darks = Some(current_edits.tone_curve_darks);
+                                photo.edit_tone_curve_lights = Some(current_edits.tone_curve_lights);
+                                photo.edit_tone_curve_highlights = Some(current_edits.tone_curve_highlights);
                                 // HSL Sat
-                                photo.edit_hsl_red_sat = Some(hsl_red_sat);
-                                photo.edit_hsl_orange_sat = Some(hsl_orange_sat);
-                                photo.edit_hsl_yellow_sat = Some(hsl_yellow_sat);
-                                photo.edit_hsl_green_sat = Some(hsl_green_sat);
-                                photo.edit_hsl_aqua_sat = Some(hsl_aqua_sat);
-                                photo.edit_hsl_blue_sat = Some(hsl_blue_sat);
-                                photo.edit_hsl_purple_sat = Some(hsl_purple_sat);
-                                photo.edit_hsl_magenta_sat = Some(hsl_magenta_sat);
+                                photo.edit_hsl_red_sat = Some(current_edits.hsl_red_sat);
+                                photo.edit_hsl_orange_sat = Some(current_edits.hsl_orange_sat);
+                                photo.edit_hsl_yellow_sat = Some(current_edits.hsl_yellow_sat);
+                                photo.edit_hsl_green_sat = Some(current_edits.hsl_green_sat);
+                                photo.edit_hsl_aqua_sat = Some(current_edits.hsl_aqua_sat);
+                                photo.edit_hsl_blue_sat = Some(current_edits.hsl_blue_sat);
+                                photo.edit_hsl_purple_sat = Some(current_edits.hsl_purple_sat);
+                                photo.edit_hsl_magenta_sat = Some(current_edits.hsl_magenta_sat);
                                 // HSL Hue
-                                photo.edit_hsl_red_hue = Some(hsl_red_hue);
-                                photo.edit_hsl_orange_hue = Some(hsl_orange_hue);
-                                photo.edit_hsl_yellow_hue = Some(hsl_yellow_hue);
-                                photo.edit_hsl_green_hue = Some(hsl_green_hue);
-                                photo.edit_hsl_aqua_hue = Some(hsl_aqua_hue);
-                                photo.edit_hsl_blue_hue = Some(hsl_blue_hue);
-                                photo.edit_hsl_purple_hue = Some(hsl_purple_hue);
-                                photo.edit_hsl_magenta_hue = Some(hsl_magenta_hue);
+                                photo.edit_hsl_red_hue = Some(current_edits.hsl_red_hue);
+                                photo.edit_hsl_orange_hue = Some(current_edits.hsl_orange_hue);
+                                photo.edit_hsl_yellow_hue = Some(current_edits.hsl_yellow_hue);
+                                photo.edit_hsl_green_hue = Some(current_edits.hsl_green_hue);
+                                photo.edit_hsl_aqua_hue = Some(current_edits.hsl_aqua_hue);
+                                photo.edit_hsl_blue_hue = Some(current_edits.hsl_blue_hue);
+                                photo.edit_hsl_purple_hue = Some(current_edits.hsl_purple_hue);
+                                photo.edit_hsl_magenta_hue = Some(current_edits.hsl_magenta_hue);
                                 // HSL Lum
-                                photo.edit_hsl_red_lum = Some(hsl_red_lum);
-                                photo.edit_hsl_orange_lum = Some(hsl_orange_lum);
-                                photo.edit_hsl_yellow_lum = Some(hsl_yellow_lum);
-                                photo.edit_hsl_green_lum = Some(hsl_green_lum);
-                                photo.edit_hsl_aqua_lum = Some(hsl_aqua_lum);
-                                photo.edit_hsl_blue_lum = Some(hsl_blue_lum);
-                                photo.edit_hsl_purple_lum = Some(hsl_purple_lum);
-                                photo.edit_hsl_magenta_lum = Some(hsl_magenta_lum);
+                                photo.edit_hsl_red_lum = Some(current_edits.hsl_red_lum);
+                                photo.edit_hsl_orange_lum = Some(current_edits.hsl_orange_lum);
+                                photo.edit_hsl_yellow_lum = Some(current_edits.hsl_yellow_lum);
+                                photo.edit_hsl_green_lum = Some(current_edits.hsl_green_lum);
+                                photo.edit_hsl_aqua_lum = Some(current_edits.hsl_aqua_lum);
+                                photo.edit_hsl_blue_lum = Some(current_edits.hsl_blue_lum);
+                                photo.edit_hsl_purple_lum = Some(current_edits.hsl_purple_lum);
+                                photo.edit_hsl_magenta_lum = Some(current_edits.hsl_magenta_lum);
                                 // Lens
-                                photo.edit_lens_distortion = Some(lens_distortion);
-                                photo.edit_lens_vignette_amount = Some(lens_vignette_amount);
-                                photo.edit_lens_vignette_midpoint = Some(lens_vignette_midpoint);
+                                photo.edit_lens_distortion = Some(current_edits.lens_distortion);
+                                photo.edit_lens_vignette_amount = Some(current_edits.lens_vignette_amount);
+                                photo.edit_lens_vignette_midpoint = Some(current_edits.lens_vignette_midpoint);
                                 // NR
-                                photo.edit_nr_luminance = Some(nr_luminance);
-                                photo.edit_nr_color = Some(nr_color);
+                                photo.edit_nr_luminance = Some(current_edits.nr_luminance);
+                                photo.edit_nr_color = Some(current_edits.nr_color);
                                 // Sharpen
-                                photo.edit_sharpen_amount = Some(sharpen_amount);
-                                photo.edit_sharpen_radius = Some(sharpen_radius);
+                                photo.edit_sharpen_amount = Some(current_edits.sharpen_amount);
+                                photo.edit_sharpen_radius = Some(current_edits.sharpen_radius);
                                 // Crop settings update
                                 if let Some(crop) = &self.state.crop_settings {
                                     photo.edit_crop_x = Some(crop.crop_x());
@@ -1082,23 +899,24 @@ impl eframe::App for VintageLightboxApp {
 
                             tokio::spawn(async move {
                                 if let Err(e) = controller.save_edits(
-                                    id, exposure, contrast, temperature, tint, highlights, shadows,
-                                    whites, blacks, clarity, vibrance, saturation,
-                                    tone_curve_shadows, tone_curve_darks, tone_curve_lights, tone_curve_highlights,
-                                    hsl_red_sat, hsl_orange_sat, hsl_yellow_sat, hsl_green_sat,
-                                    hsl_aqua_sat, hsl_blue_sat, hsl_purple_sat, hsl_magenta_sat,
+                                    id, 
+                                    current_edits.exposure, current_edits.contrast, current_edits.temperature, current_edits.tint, current_edits.highlights, current_edits.shadows,
+                                    current_edits.whites, current_edits.blacks, current_edits.clarity, current_edits.vibrance, current_edits.saturation,
+                                    current_edits.tone_curve_shadows, current_edits.tone_curve_darks, current_edits.tone_curve_lights, current_edits.tone_curve_highlights,
+                                    current_edits.hsl_red_sat, current_edits.hsl_orange_sat, current_edits.hsl_yellow_sat, current_edits.hsl_green_sat,
+                                    current_edits.hsl_aqua_sat, current_edits.hsl_blue_sat, current_edits.hsl_purple_sat, current_edits.hsl_magenta_sat,
                                     // HSL Hue
-                                    hsl_red_hue, hsl_orange_hue, hsl_yellow_hue, hsl_green_hue,
-                                    hsl_aqua_hue, hsl_blue_hue, hsl_purple_hue, hsl_magenta_hue,
+                                    current_edits.hsl_red_hue, current_edits.hsl_orange_hue, current_edits.hsl_yellow_hue, current_edits.hsl_green_hue,
+                                    current_edits.hsl_aqua_hue, current_edits.hsl_blue_hue, current_edits.hsl_purple_hue, current_edits.hsl_magenta_hue,
                                     // HSL Lum
-                                    hsl_red_lum, hsl_orange_lum, hsl_yellow_lum, hsl_green_lum,
-                                    hsl_aqua_lum, hsl_blue_lum, hsl_purple_lum, hsl_magenta_lum,
+                                    current_edits.hsl_red_lum, current_edits.hsl_orange_lum, current_edits.hsl_yellow_lum, current_edits.hsl_green_lum,
+                                    current_edits.hsl_aqua_lum, current_edits.hsl_blue_lum, current_edits.hsl_purple_lum, current_edits.hsl_magenta_lum,
                                     // Lens
-                                    lens_distortion, lens_vignette_amount, lens_vignette_midpoint,
+                                    current_edits.lens_distortion, current_edits.lens_vignette_amount, current_edits.lens_vignette_midpoint,
                                     // NR
-                                    nr_luminance, nr_color,
+                                    current_edits.nr_luminance, current_edits.nr_color,
                                     // Sharpen
-                                    sharpen_amount, sharpen_radius,
+                                    current_edits.sharpen_amount, current_edits.sharpen_radius,
                                     // Crop
                                     crop_x, crop_y, crop_width, crop_height,
                                     crop_rotation, crop_angle, crop_flip_h, crop_flip_v, crop_fill_mode
@@ -1364,22 +1182,23 @@ impl eframe::App for VintageLightboxApp {
                             let can_save = !self.state.save_preset_name.trim().is_empty();
                             if ui.add_enabled(can_save, egui::Button::new("Save")).clicked() {
                                 // Create adjustments from current state
+                                let edits = self.editor_service.current_edits();
                                 let adjustments = domain::entities::preset::PresetAdjustments {
-                                    exposure: Some(self.state.active_exposure),
-                                    contrast: Some(self.state.active_contrast),
-                                    temperature: Some(self.state.active_temperature),
-                                    tint: Some(self.state.active_tint),
-                                    highlights: Some(self.state.active_highlights),
-                                    shadows: Some(self.state.active_shadows),
-                                    whites: Some(self.state.active_whites),
-                                    blacks: Some(self.state.active_blacks),
-                                    clarity: Some(self.state.active_clarity),
-                                    vibrance: Some(self.state.active_vibrance),
-                                    saturation: Some(self.state.active_saturation),
-                                    tone_curve_shadows: Some(self.state.active_tone_curve_shadows),
-                                    tone_curve_darks: Some(self.state.active_tone_curve_darks),
-                                    tone_curve_lights: Some(self.state.active_tone_curve_lights),
-                                    tone_curve_highlights: Some(self.state.active_tone_curve_highlights),
+                                    exposure: Some(edits.exposure),
+                                    contrast: Some(edits.contrast),
+                                    temperature: Some(edits.temperature),
+                                    tint: Some(edits.tint),
+                                    highlights: Some(edits.highlights),
+                                    shadows: Some(edits.shadows),
+                                    whites: Some(edits.whites),
+                                    blacks: Some(edits.blacks),
+                                    clarity: Some(edits.clarity),
+                                    vibrance: Some(edits.vibrance),
+                                    saturation: Some(edits.saturation),
+                                    tone_curve_shadows: Some(edits.tone_curve_shadows),
+                                    tone_curve_darks: Some(edits.tone_curve_darks),
+                                    tone_curve_lights: Some(edits.tone_curve_lights),
+                                    tone_curve_highlights: Some(edits.tone_curve_highlights),
                                 };
                                 
                                 let name = self.state.save_preset_name.trim().to_string();
@@ -1787,72 +1606,30 @@ impl VintageLightboxApp {
         if let Some(vm) = self.state.get_current_photo() {
             let controller = self.editor_controller.clone();
             let id = vm.id.clone();
-            let exposure = self.state.active_exposure;
-            let contrast = self.state.active_contrast;
-            let temperature = self.state.active_temperature;
-            let tint = self.state.active_tint;
-            let highlights = self.state.active_highlights;
-            let shadows = self.state.active_shadows;
-            let whites = self.state.active_whites;
-            let blacks = self.state.active_blacks;
-            let clarity = self.state.active_clarity;
-            let vibrance = self.state.active_vibrance;
-            let saturation = self.state.active_saturation;
-            let tone_curve_shadows = self.state.active_tone_curve_shadows;
-            let tone_curve_darks = self.state.active_tone_curve_darks;
-            let tone_curve_lights = self.state.active_tone_curve_lights;
-            let tone_curve_highlights = self.state.active_tone_curve_highlights;
-            let hsl_red_sat = self.state.active_hsl_red_sat;
-            let hsl_orange_sat = self.state.active_hsl_orange_sat;
-            let hsl_yellow_sat = self.state.active_hsl_yellow_sat;
-            let hsl_green_sat = self.state.active_hsl_green_sat;
-            let hsl_aqua_sat = self.state.active_hsl_aqua_sat;
-            let hsl_blue_sat = self.state.active_hsl_blue_sat;
-            let hsl_purple_sat = self.state.active_hsl_purple_sat;
-            let hsl_magenta_sat = self.state.active_hsl_magenta_sat;
-            let hsl_red_hue = self.state.active_hsl_red_hue;
-            let hsl_orange_hue = self.state.active_hsl_orange_hue;
-            let hsl_yellow_hue = self.state.active_hsl_yellow_hue;
-            let hsl_green_hue = self.state.active_hsl_green_hue;
-            let hsl_aqua_hue = self.state.active_hsl_aqua_hue;
-            let hsl_blue_hue = self.state.active_hsl_blue_hue;
-            let hsl_purple_hue = self.state.active_hsl_purple_hue;
-            let hsl_magenta_hue = self.state.active_hsl_magenta_hue;
-            let hsl_red_lum = self.state.active_hsl_red_lum;
-            let hsl_orange_lum = self.state.active_hsl_orange_lum;
-            let hsl_yellow_lum = self.state.active_hsl_yellow_lum;
-            let hsl_green_lum = self.state.active_hsl_green_lum;
-            let hsl_aqua_lum = self.state.active_hsl_aqua_lum;
-            let hsl_blue_lum = self.state.active_hsl_blue_lum;
-            let hsl_purple_lum = self.state.active_hsl_purple_lum;
-            let hsl_magenta_lum = self.state.active_hsl_magenta_lum;
-            let lens_distortion = self.state.active_lens_distortion;
-            let lens_vignette_amount = self.state.active_lens_vignette_amount;
-            let lens_vignette_midpoint = self.state.active_lens_vignette_midpoint;
-            let nr_luminance = self.state.active_nr_luminance;
-            let nr_color = self.state.active_nr_color;
-            let sharpen_amount = self.state.active_sharpen_amount;
-            let sharpen_radius = self.state.active_sharpen_radius;
+            let current_edits = self.editor_service.current_edits();
+            // Use current edits directly
+
             let active_crop = self.state.crop_settings.clone();
 
             // Clone for in-memory update
             let id_for_update = id.clone();
             let crop_for_update = active_crop.clone();
+            let edits_for_local = current_edits.clone();
 
             // Spawn async save
             tokio::spawn(async move {
                 let _ = controller.save_edits(
                     id,
-                    exposure, contrast, temperature, tint,
-                    highlights, shadows, whites, blacks,
-                    clarity, vibrance, saturation,
-                    tone_curve_shadows, tone_curve_darks, tone_curve_lights, tone_curve_highlights,
-                    hsl_red_sat, hsl_orange_sat, hsl_yellow_sat, hsl_green_sat, hsl_aqua_sat, hsl_blue_sat, hsl_purple_sat, hsl_magenta_sat,
-                    hsl_red_hue, hsl_orange_hue, hsl_yellow_hue, hsl_green_hue, hsl_aqua_hue, hsl_blue_hue, hsl_purple_hue, hsl_magenta_hue,
-                    hsl_red_lum, hsl_orange_lum, hsl_yellow_lum, hsl_green_lum, hsl_aqua_lum, hsl_blue_lum, hsl_purple_lum, hsl_magenta_lum,
-                    lens_distortion, lens_vignette_amount, lens_vignette_midpoint,
-                    nr_luminance, nr_color,
-                    sharpen_amount, sharpen_radius,
+                    current_edits.exposure, current_edits.contrast, current_edits.temperature, current_edits.tint,
+                    current_edits.highlights, current_edits.shadows, current_edits.whites, current_edits.blacks,
+                    current_edits.clarity, current_edits.vibrance, current_edits.saturation,
+                    current_edits.tone_curve_shadows, current_edits.tone_curve_darks, current_edits.tone_curve_lights, current_edits.tone_curve_highlights,
+                    current_edits.hsl_red_sat, current_edits.hsl_orange_sat, current_edits.hsl_yellow_sat, current_edits.hsl_green_sat, current_edits.hsl_aqua_sat, current_edits.hsl_blue_sat, current_edits.hsl_purple_sat, current_edits.hsl_magenta_sat,
+                    current_edits.hsl_red_hue, current_edits.hsl_orange_hue, current_edits.hsl_yellow_hue, current_edits.hsl_green_hue, current_edits.hsl_aqua_hue, current_edits.hsl_blue_hue, current_edits.hsl_purple_hue, current_edits.hsl_magenta_hue,
+                    current_edits.hsl_red_lum, current_edits.hsl_orange_lum, current_edits.hsl_yellow_lum, current_edits.hsl_green_lum, current_edits.hsl_aqua_lum, current_edits.hsl_blue_lum, current_edits.hsl_purple_lum, current_edits.hsl_magenta_lum,
+                    current_edits.lens_distortion, current_edits.lens_vignette_amount, current_edits.lens_vignette_midpoint,
+                    current_edits.nr_luminance, current_edits.nr_color,
+                    current_edits.sharpen_amount, current_edits.sharpen_radius,
                     active_crop.as_ref().map(|c| c.crop_x()),
                     active_crop.as_ref().map(|c| c.crop_y()),
                     active_crop.as_ref().map(|c| c.crop_width()),
@@ -1876,8 +1653,58 @@ impl VintageLightboxApp {
                 photo_vm.edit_crop_flip_h = crop_for_update.as_ref().map(|c| c.flip_horizontal());
                 photo_vm.edit_crop_flip_v = crop_for_update.as_ref().map(|c| c.flip_vertical());
                 photo_vm.edit_crop_fill_mode = crop_for_update.as_ref().map(|c| c.fill_mode() as u8);
-                photo_vm.edit_exposure = Some(exposure);
-                photo_vm.edit_contrast = Some(contrast);
+                photo_vm.edit_exposure = Some(edits_for_local.exposure);
+                photo_vm.edit_contrast = Some(edits_for_local.contrast);
+                photo_vm.edit_temperature = Some(edits_for_local.temperature);
+                photo_vm.edit_tint = Some(edits_for_local.tint);
+                photo_vm.edit_highlights = Some(edits_for_local.highlights);
+                photo_vm.edit_shadows = Some(edits_for_local.shadows);
+                photo_vm.edit_whites = Some(edits_for_local.whites);
+                photo_vm.edit_blacks = Some(edits_for_local.blacks);
+                photo_vm.edit_clarity = Some(edits_for_local.clarity);
+                photo_vm.edit_vibrance = Some(edits_for_local.vibrance);
+                photo_vm.edit_saturation = Some(edits_for_local.saturation);
+                photo_vm.edit_tone_curve_shadows = Some(edits_for_local.tone_curve_shadows);
+                photo_vm.edit_tone_curve_darks = Some(edits_for_local.tone_curve_darks);
+                photo_vm.edit_tone_curve_lights = Some(edits_for_local.tone_curve_lights);
+                photo_vm.edit_tone_curve_highlights = Some(edits_for_local.tone_curve_highlights);
+                // HSL Sat
+                photo_vm.edit_hsl_red_sat = Some(edits_for_local.hsl_red_sat);
+                photo_vm.edit_hsl_orange_sat = Some(edits_for_local.hsl_orange_sat);
+                photo_vm.edit_hsl_yellow_sat = Some(edits_for_local.hsl_yellow_sat);
+                photo_vm.edit_hsl_green_sat = Some(edits_for_local.hsl_green_sat);
+                photo_vm.edit_hsl_aqua_sat = Some(edits_for_local.hsl_aqua_sat);
+                photo_vm.edit_hsl_blue_sat = Some(edits_for_local.hsl_blue_sat);
+                photo_vm.edit_hsl_purple_sat = Some(edits_for_local.hsl_purple_sat);
+                photo_vm.edit_hsl_magenta_sat = Some(edits_for_local.hsl_magenta_sat);
+                // HSL Hue
+                photo_vm.edit_hsl_red_hue = Some(edits_for_local.hsl_red_hue);
+                photo_vm.edit_hsl_orange_hue = Some(edits_for_local.hsl_orange_hue);
+                photo_vm.edit_hsl_yellow_hue = Some(edits_for_local.hsl_yellow_hue);
+                photo_vm.edit_hsl_green_hue = Some(edits_for_local.hsl_green_hue);
+                photo_vm.edit_hsl_aqua_hue = Some(edits_for_local.hsl_aqua_hue);
+                photo_vm.edit_hsl_blue_hue = Some(edits_for_local.hsl_blue_hue);
+                photo_vm.edit_hsl_purple_hue = Some(edits_for_local.hsl_purple_hue);
+                photo_vm.edit_hsl_magenta_hue = Some(edits_for_local.hsl_magenta_hue);
+                // HSL Lum
+                photo_vm.edit_hsl_red_lum = Some(edits_for_local.hsl_red_lum);
+                photo_vm.edit_hsl_orange_lum = Some(edits_for_local.hsl_orange_lum);
+                photo_vm.edit_hsl_yellow_lum = Some(edits_for_local.hsl_yellow_lum);
+                photo_vm.edit_hsl_green_lum = Some(edits_for_local.hsl_green_lum);
+                photo_vm.edit_hsl_aqua_lum = Some(edits_for_local.hsl_aqua_lum);
+                photo_vm.edit_hsl_blue_lum = Some(edits_for_local.hsl_blue_lum);
+                photo_vm.edit_hsl_purple_lum = Some(edits_for_local.hsl_purple_lum);
+                photo_vm.edit_hsl_magenta_lum = Some(edits_for_local.hsl_magenta_lum);
+                // Lens
+                photo_vm.edit_lens_distortion = Some(edits_for_local.lens_distortion);
+                photo_vm.edit_lens_vignette_amount = Some(edits_for_local.lens_vignette_amount);
+                photo_vm.edit_lens_vignette_midpoint = Some(edits_for_local.lens_vignette_midpoint);
+                // NR
+                photo_vm.edit_nr_luminance = Some(edits_for_local.nr_luminance);
+                photo_vm.edit_nr_color = Some(edits_for_local.nr_color);
+                // Sharpen
+                photo_vm.edit_sharpen_amount = Some(edits_for_local.sharpen_amount);
+                photo_vm.edit_sharpen_radius = Some(edits_for_local.sharpen_radius);
             }
             
             // Clear pending flag

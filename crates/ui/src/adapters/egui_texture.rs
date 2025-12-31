@@ -70,3 +70,50 @@ impl TextureRenderer for EguiTextureRenderer {
          Ok(())
     }
 }
+
+// ============================================
+// Pure Conversion Helpers
+// ============================================
+// These functions provide direct conversions without the TextureRenderer trait,
+// useful for simple UI components that don't need the full abstraction.
+
+/// Convert a DynamicImage to egui ColorImage
+/// 
+/// This is a pure conversion function with no side effects.
+pub fn dynamic_to_color_image(img: &DynamicImage) -> ColorImage {
+    let rgba = img.to_rgba8();
+    let size = [rgba.width() as usize, rgba.height() as usize];
+    let pixels = rgba.as_flat_samples();
+    ColorImage::from_rgba_unmultiplied(size, pixels.as_slice())
+}
+
+/// Create or update an egui texture from a DynamicImage
+/// 
+/// This loads the image into egui's texture system for rendering.
+pub fn load_texture(
+    ctx: &Context,
+    name: impl Into<String>,
+    img: &DynamicImage,
+) -> EguiTextureHandle {
+    let color_image = dynamic_to_color_image(img);
+    ctx.load_texture(
+        name,
+        color_image,
+        TextureOptions::default()
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use image::RgbaImage;
+
+    #[test]
+    fn test_dynamic_to_color_image() {
+        let img = DynamicImage::ImageRgba8(RgbaImage::new(100, 100));
+        let color_image = dynamic_to_color_image(&img);
+        
+        assert_eq!(color_image.size, [100, 100]);
+        assert_eq!(color_image.pixels.len(), 100 * 100);
+    }
+}

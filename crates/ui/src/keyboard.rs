@@ -65,8 +65,16 @@ impl KeyboardHandler {
                                             let photo_id = vm.id.clone();
                                             
                                             // Get current edits from EditorService (simplified!)
-                                            let current_edits = editor_service.current_edits();
+                                            let mut current_edits = editor_service.current_edits();
                                             let crop_settings = state.crop_settings.clone();
+                                            
+                                            // Merge crop settings into current_edits for state update
+                                            if let Some(crop) = &crop_settings {
+                                                current_edits.crop_settings = Some(crop.clone());
+                                            }
+                                            
+                                            // Update last_saved_edits to reflect what we are about to save
+                                            state.last_saved_edits = current_edits.clone();
 
                                             tokio::spawn(async move {
                                                 let _ = controller.save_edits(
@@ -82,20 +90,20 @@ impl KeyboardHandler {
                                                     current_edits.lens_distortion, current_edits.lens_vignette_amount, current_edits.lens_vignette_midpoint,
                                                     current_edits.nr_luminance, current_edits.nr_color,
                                                     current_edits.sharpen_amount, current_edits.sharpen_radius,
-                                                    crop_settings.as_ref().map(|c| c.crop_x()),
-                                                    crop_settings.as_ref().map(|c| c.crop_y()),
-                                                    crop_settings.as_ref().map(|c| c.crop_width()),
-                                                    crop_settings.as_ref().map(|c| c.crop_height()),
-                                                    crop_settings.as_ref().map(|c| c.rotation_90()),
-                                                    crop_settings.as_ref().map(|c| c.angle()),
-                                                    crop_settings.as_ref().map(|c| c.flip_horizontal()),
-                                                    crop_settings.as_ref().map(|c| c.flip_vertical()),
-                                                    crop_settings.as_ref().map(|c| c.fill_mode() as u8),
+                                                    current_edits.crop_settings.as_ref().map(|c| c.crop_x()),
+                                                    current_edits.crop_settings.as_ref().map(|c| c.crop_y()),
+                                                    current_edits.crop_settings.as_ref().map(|c| c.crop_width()),
+                                                    current_edits.crop_settings.as_ref().map(|c| c.crop_height()),
+                                                    current_edits.crop_settings.as_ref().map(|c| c.rotation_90()),
+                                                    current_edits.crop_settings.as_ref().map(|c| c.angle()),
+                                                    current_edits.crop_settings.as_ref().map(|c| c.flip_horizontal()),
+                                                    current_edits.crop_settings.as_ref().map(|c| c.flip_vertical()),
+                                                    current_edits.crop_settings.as_ref().map(|c| c.fill_mode() as u8),
                                                 ).await;
                                             });
                                             
                                             // Update saved crop settings to match current, preventing re-save loop on next frame
-                                            state.saved_crop_settings = state.crop_settings.clone();
+                                            // state.saved_crop_settings = state.crop_settings.clone();
                                         }
                                     }
 
@@ -182,7 +190,8 @@ impl KeyboardHandler {
                     if editor_service.can_redo() {
                         if let Some(_edits) = editor_service.redo() {
                             // Sync back to state
-                            crate::editor_state_adapter::EditorStateAdapter::sync_to_state(editor_service, state);
+                            // Sync back to state
+
                             state.pending_auto_save = true;
                             ctx.request_repaint();
                         }
@@ -192,7 +201,8 @@ impl KeyboardHandler {
                     if editor_service.can_undo() {
                         if let Some(_edits) = editor_service.undo() {
                             // Sync back to state
-                            crate::editor_state_adapter::EditorStateAdapter::sync_to_state(editor_service, state);
+                            // Sync back to state
+
                             state.pending_auto_save = true;
                             ctx.request_repaint();
                         }

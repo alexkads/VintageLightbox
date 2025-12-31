@@ -167,7 +167,7 @@ async fn test_keyboard_nav_saves_crop() {
     // Create normalized crop settings (x, y, w, h, rotation, angle, flip_h, flip_v)
     let crop = CropSettings::new(0.5, 0.5, 0.2, 0.2, 0, 0.0, false, false);
     state.crop_settings = Some(crop.clone());
-    state.saved_crop_settings = None;
+    state.last_saved_edits.crop_settings = None;
     
     // Simulate Right Arrow Key
     ctx.input_mut(|i| i.events.push(egui::Event::Key { 
@@ -197,7 +197,7 @@ async fn test_keyboard_nav_saves_crop() {
     assert_eq!(state.internal_state.develop_selected_id, Some("p2".to_string()), "Should navigate to p2");
     
     // 2. saved_crop_settings should be set (This is our flag that the logic ran)
-    assert!(state.saved_crop_settings.is_some(), "saved_crop_settings should be updated");
+    assert!(state.last_saved_edits.crop_settings.is_some(), "saved_crop_settings should be updated");
     // Verify using getter
-    assert_eq!(state.saved_crop_settings.as_ref().unwrap().crop_x(), 0.5);
+    assert_eq!(state.last_saved_edits.crop_settings.as_ref().unwrap().crop_x(), 0.5);
 }

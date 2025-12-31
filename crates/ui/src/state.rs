@@ -18,65 +18,9 @@ use infrastructure::cache::CacheStats;
 use adapters::state::ApplicationState; 
 pub use adapters::state::CurrentView; // View enum now from adapters, re-exported
 
-/// Snapshot of editing state for undo/redo
-#[derive(Debug, Clone)]
-pub struct EditSnapshot {
-    pub exposure: f32,
-    pub contrast: f32,
-    pub temperature: f32,
-    pub tint: f32,
-    pub highlights: f32,
-    pub shadows: f32,
-    pub whites: f32,
-    pub blacks: f32,
-    pub clarity: f32,
-    pub vibrance: f32,
-    pub saturation: f32,
-    // Tone Curve (parametric zones)
-    pub tone_curve_shadows: f32,
-    pub tone_curve_darks: f32,
-    pub tone_curve_lights: f32,
-    pub tone_curve_highlights: f32,
-    // HSL color channel saturations
-    pub hsl_red_sat: f32,
-    pub hsl_orange_sat: f32,
-    pub hsl_yellow_sat: f32,
-    pub hsl_green_sat: f32,
-    pub hsl_aqua_sat: f32,
-    pub hsl_blue_sat: f32,
-    pub hsl_purple_sat: f32,
-    pub hsl_magenta_sat: f32,
-    // HSL Hue
-    pub hsl_red_hue: f32,
-    pub hsl_orange_hue: f32,
-    pub hsl_yellow_hue: f32,
-    pub hsl_green_hue: f32,
-    pub hsl_aqua_hue: f32,
-    pub hsl_blue_hue: f32,
-    pub hsl_purple_hue: f32,
-    pub hsl_magenta_hue: f32,
-    // HSL Lum
-    pub hsl_red_lum: f32,
-    pub hsl_orange_lum: f32,
-    pub hsl_yellow_lum: f32,
-    pub hsl_green_lum: f32,
-    pub hsl_aqua_lum: f32,
-    pub hsl_blue_lum: f32,
-    pub hsl_purple_lum: f32,
-    pub hsl_magenta_lum: f32,
-    // Lens
-    pub lens_distortion: f32,
-    pub lens_vignette_amount: f32,
-    pub lens_vignette_midpoint: f32,
-    // Noise Reduction
-    pub nr_luminance: f32,
-    pub nr_color: f32,
-    // Sharpening
-    pub sharpen_amount: f32,
-    pub sharpen_radius: f32,
-    // Crop Settings
-    pub crop_settings: Option<domain::value_objects::CropSettings>,
-}
+
+// EditSnapshot removed - using domain::value_objects::PhotoEdits directly
+// History management is now handled by adapters::services::EditorService
 
 // CurrentView enum removed - using adapters::state::CurrentView
 
@@ -153,69 +97,7 @@ pub struct AppState {
     // ============================================
     /// Active image being edited (shared with background processing)
     pub active_image: Arc<Mutex<Option<DynamicImage>>>,
-    /// Current exposure adjustment value
-    pub active_exposure: f32,
-    /// Current contrast adjustment value
-    pub active_contrast: f32,
-    /// Current temperature adjustment value
-    pub active_temperature: f32,
-    /// Current tint adjustment value
-    pub active_tint: f32,
-    /// Current highlights adjustment value
-    pub active_highlights: f32,
-    /// Current shadows adjustment value
-    pub active_shadows: f32,
-    /// Current whites adjustment value
-    pub active_whites: f32,
-    /// Current blacks adjustment value
-    pub active_blacks: f32,
-    /// Current clarity adjustment value
-    pub active_clarity: f32,
-    /// Current vibrance adjustment value
-    pub active_vibrance: f32,
-    /// Current saturation adjustment value
-    pub active_saturation: f32,
-    pub active_tone_curve_shadows: f32,
-    pub active_tone_curve_darks: f32,
-    pub active_tone_curve_lights: f32,
-    pub active_tone_curve_highlights: f32,
-    // HSL color channel saturations (-100 to +100)
-    pub active_hsl_red_sat: f32,
-    pub active_hsl_orange_sat: f32,
-    pub active_hsl_yellow_sat: f32,
-    pub active_hsl_green_sat: f32,
-    pub active_hsl_aqua_sat: f32,
-    pub active_hsl_blue_sat: f32,
-    pub active_hsl_purple_sat: f32,
-    pub active_hsl_magenta_sat: f32,
-    // HSL Hue
-    pub active_hsl_red_hue: f32,
-    pub active_hsl_orange_hue: f32,
-    pub active_hsl_yellow_hue: f32,
-    pub active_hsl_green_hue: f32,
-    pub active_hsl_aqua_hue: f32,
-    pub active_hsl_blue_hue: f32,
-    pub active_hsl_purple_hue: f32,
-    pub active_hsl_magenta_hue: f32,
-    // HSL Lum
-    pub active_hsl_red_lum: f32,
-    pub active_hsl_orange_lum: f32,
-    pub active_hsl_yellow_lum: f32,
-    pub active_hsl_green_lum: f32,
-    pub active_hsl_aqua_lum: f32,
-    pub active_hsl_blue_lum: f32,
-    pub active_hsl_purple_lum: f32,
-    pub active_hsl_magenta_lum: f32,
-    // Lens
-    pub active_lens_distortion: f32,
-    pub active_lens_vignette_amount: f32,
-    pub active_lens_vignette_midpoint: f32,
-    // Noise Reduction (Amount 0-100)
-    pub active_nr_luminance: f32,
-    pub active_nr_color: f32,
-    // Sharpening
-    pub active_sharpen_amount: f32,
-    pub active_sharpen_radius: f32,
+    // active_* fields REMOVED - Using EditorService
     /// Original unprocessed preview image
     pub original_preview: Option<DynamicImage>,
     /// Cached raw image data for GPU processing (Arc to avoid cloning)
@@ -275,12 +157,13 @@ pub struct AppState {
     /// Receiver for export results (path of exported file or error)
     pub pending_export_receiver: Option<tokio::sync::mpsc::Receiver<Result<String, String>>>,
 
+
     // ============================================
-    // Undo/Redo History
+    // Undo/Redo History - REMOVED
     // ============================================
-    /// Undo/Redo history
-    pub edit_history: Vec<EditSnapshot>,
-    pub history_index: Option<usize>, // Current position in history (None = no history)
+    // History management is now handled by adapters::services::EditorService
+    // pub edit_history: Vec<EditSnapshot>,
+    // pub history_index: Option<usize>,
 
     /// Performance Metrics
     pub performance_metrics: PerformanceMetrics,
@@ -300,62 +183,7 @@ pub struct AppState {
     /// Timestamp of the last slider change (for debounce)
     pub last_slider_change_time: Option<std::time::Instant>,
     /// Last saved values (to avoid unnecessary saves)
-    pub saved_exposure: f32,
-    pub saved_contrast: f32,
-    pub saved_temperature: f32,
-    pub saved_tint: f32,
-    pub saved_highlights: f32,
-    pub saved_shadows: f32,
-    pub saved_whites: f32,
-    pub saved_blacks: f32,
-    pub saved_clarity: f32,
-    pub saved_vibrance: f32,
-    pub saved_saturation: f32,
-    // Saved Tone Curve
-    pub saved_tone_curve_shadows: f32,
-    pub saved_tone_curve_darks: f32,
-    pub saved_tone_curve_lights: f32,
-    pub saved_tone_curve_highlights: f32,
-    // Saved HSL values
-    pub saved_hsl_red_sat: f32,
-    pub saved_hsl_orange_sat: f32,
-    pub saved_hsl_yellow_sat: f32,
-    pub saved_hsl_green_sat: f32,
-    pub saved_hsl_aqua_sat: f32,
-    pub saved_hsl_blue_sat: f32,
-    pub saved_hsl_purple_sat: f32,
-    pub saved_hsl_magenta_sat: f32,
-    // HSL Hue
-    pub saved_hsl_red_hue: f32,
-    pub saved_hsl_orange_hue: f32,
-    pub saved_hsl_yellow_hue: f32,
-    pub saved_hsl_green_hue: f32,
-    pub saved_hsl_aqua_hue: f32,
-    pub saved_hsl_blue_hue: f32,
-    pub saved_hsl_purple_hue: f32,
-    pub saved_hsl_magenta_hue: f32,
-    // HSL Lum
-    pub saved_hsl_red_lum: f32,
-    pub saved_hsl_orange_lum: f32,
-    pub saved_hsl_yellow_lum: f32,
-    pub saved_hsl_green_lum: f32,
-    pub saved_hsl_aqua_lum: f32,
-    pub saved_hsl_blue_lum: f32,
-    pub saved_hsl_purple_lum: f32,
-    pub saved_hsl_magenta_lum: f32,
-    // Lens
-    pub saved_lens_distortion: f32,
-    pub saved_lens_vignette_amount: f32,
-    pub saved_lens_vignette_midpoint: f32,
-    // Saved NR
-    pub saved_nr_luminance: f32,
-    pub saved_nr_color: f32,
-    // Sharpening
-    pub saved_sharpen_amount: f32,
-    pub saved_sharpen_radius: f32,
-    
-    // Saved Crop
-    pub saved_crop_settings: Option<domain::value_objects::CropSettings>,
+    // saved_* fields REMOVED - Using EditorService
 
     // ============================================
     // Folder Navigation
@@ -488,58 +316,8 @@ impl AppState {
             histogram_data: None,
             detail_image_loaded_at: None,
             active_image: Arc::new(Mutex::new(None)),
-            active_exposure: 0.0,
-            active_contrast: 1.0,
-            active_temperature: 0.0,
-            active_tint: 0.0,
-            active_highlights: 0.0,
-            active_shadows: 0.0,
-            active_whites: 0.0,
-            active_blacks: 0.0,
-            active_clarity: 0.0,
-            active_vibrance: 0.0,
-            active_saturation: 0.0,
-            active_tone_curve_shadows: 0.0,
-            active_tone_curve_darks: 0.0,
-            active_tone_curve_lights: 0.0,
-            active_tone_curve_highlights: 0.0,
-            // HSL active values
-            active_hsl_red_sat: 0.0,
-            active_hsl_orange_sat: 0.0,
-            active_hsl_yellow_sat: 0.0,
-            active_hsl_green_sat: 0.0,
-            active_hsl_aqua_sat: 0.0,
-            active_hsl_blue_sat: 0.0,
-            active_hsl_purple_sat: 0.0,
-            active_hsl_magenta_sat: 0.0,
-            // HSL Hue
-            active_hsl_red_hue: 0.0,
-            active_hsl_orange_hue: 0.0,
-            active_hsl_yellow_hue: 0.0,
-            active_hsl_green_hue: 0.0,
-            active_hsl_aqua_hue: 0.0,
-            active_hsl_blue_hue: 0.0,
-            active_hsl_purple_hue: 0.0,
-            active_hsl_magenta_hue: 0.0,
-            // HSL Lum
-            active_hsl_red_lum: 0.0,
-            active_hsl_orange_lum: 0.0,
-            active_hsl_yellow_lum: 0.0,
-            active_hsl_green_lum: 0.0,
-            active_hsl_aqua_lum: 0.0,
-            active_hsl_blue_lum: 0.0,
-            active_hsl_purple_lum: 0.0,
-            active_hsl_magenta_lum: 0.0,
-            // Lens
-            active_lens_distortion: 0.0,
-            active_lens_vignette_amount: 0.0,
-            active_lens_vignette_midpoint: 0.0,
-            // NR
-            active_nr_luminance: 0.0,
-            active_nr_color: 0.0,
-            // Sharpening
-            active_sharpen_amount: 0.0,
-            active_sharpen_radius: 1.0,
+            // active_* initialization REMOVED - Using EditorService
+
             original_preview: None,
             original_image_data: None,
             zoom_level: 1.0,
@@ -564,8 +342,8 @@ impl AppState {
             // filmstrip_filter: FilmstripFilter::new(),
             pending_import: None,
             pending_export: None,
-            edit_history: Vec::new(),
-            history_index: None,
+            // edit_history: Vec::new(), // REMOVED - using EditorService
+            // history_index: None,       // REMOVED - using EditorService
             performance_metrics: PerformanceMetrics::default(),
             show_performance_stats: std::env::var("SHOW_PERFORMANCE_STATS").is_ok_and(|v| v == "true"),
             start_load_time: None,
@@ -573,58 +351,8 @@ impl AppState {
             pending_crop_apply: false,
             deferred_exit_develop_mode: false,
             last_slider_change_time: None,
-            saved_exposure: 0.0,
-            saved_contrast: 1.0,
-            saved_temperature: 0.0,
-            saved_tint: 0.0,
-            saved_highlights: 0.0,
-            saved_shadows: 0.0,
-            saved_whites: 0.0,
-            saved_blacks: 0.0,
-            saved_clarity: 0.0,
-            saved_vibrance: 0.0,
-            saved_saturation: 0.0,
-            // Saved Tone Curve
-            saved_tone_curve_shadows: 0.0,
-            saved_tone_curve_darks: 0.0,
-            saved_tone_curve_lights: 0.0,
-            saved_tone_curve_highlights: 0.0,
-            // HSL saved values
-            saved_hsl_red_sat: 0.0,
-            saved_hsl_orange_sat: 0.0,
-            saved_hsl_yellow_sat: 0.0,
-            saved_hsl_green_sat: 0.0,
-            saved_hsl_aqua_sat: 0.0,
-            saved_hsl_blue_sat: 0.0,
-            saved_hsl_purple_sat: 0.0,
-            saved_hsl_magenta_sat: 0.0,
-            // HSL saved values
-            saved_hsl_red_hue: 0.0,
-            saved_hsl_orange_hue: 0.0,
-            saved_hsl_yellow_hue: 0.0,
-            saved_hsl_green_hue: 0.0,
-            saved_hsl_aqua_hue: 0.0,
-            saved_hsl_blue_hue: 0.0,
-            saved_hsl_purple_hue: 0.0,
-            saved_hsl_magenta_hue: 0.0,
-            saved_hsl_red_lum: 0.0,
-            saved_hsl_orange_lum: 0.0,
-            saved_hsl_yellow_lum: 0.0,
-            saved_hsl_green_lum: 0.0,
-            saved_hsl_aqua_lum: 0.0,
-            saved_hsl_blue_lum: 0.0,
-            saved_hsl_purple_lum: 0.0,
-            saved_hsl_magenta_lum: 0.0,
-            saved_lens_distortion: 0.0,
-            saved_lens_vignette_amount: 0.0,
-            saved_lens_vignette_midpoint: 0.0,
-            saved_nr_luminance: 0.0,
-            saved_nr_color: 0.0,
-            // Sharpening saved values
-            saved_sharpen_amount: 0.0,
-            saved_sharpen_radius: 1.0,
-            
-            saved_crop_settings: None,
+            // saved_* initialization REMOVED - Using EditorService
+
 
             folder_tree_roots: Vec::new(),
             expanded_folders: HashSet::new(),
@@ -779,58 +507,14 @@ impl AppState {
         self.pan_offset = egui::Vec2::ZERO;
     }
 
-    /// Reset all edits to default values
-    pub fn reset_edits(&mut self) {
-        self.active_exposure = 0.0;
-        self.active_contrast = 1.0;
-        self.active_temperature = 0.0;
-        self.active_tint = 0.0;
-        self.active_highlights = 0.0;
-        self.active_shadows = 0.0;
-        self.active_whites = 0.0;
-        self.active_blacks = 0.0;
-        self.active_clarity = 0.0;
-        self.active_vibrance = 0.0;
-        self.active_saturation = 0.0;
-        self.active_tone_curve_shadows = 0.0;
-        self.active_tone_curve_darks = 0.0;
-        self.active_tone_curve_lights = 0.0;
-        self.active_tone_curve_highlights = 0.0;
-        self.active_hsl_red_sat = 0.0;
-        self.active_hsl_orange_sat = 0.0;
-        self.active_hsl_yellow_sat = 0.0;
-        self.active_hsl_green_sat = 0.0;
-        self.active_hsl_aqua_sat = 0.0;
-        self.active_hsl_blue_sat = 0.0;
-        self.active_hsl_purple_sat = 0.0;
-        self.active_hsl_magenta_sat = 0.0;
-        // HSL Hue
-        self.active_hsl_red_hue = 0.0;
-        self.active_hsl_orange_hue = 0.0;
-        self.active_hsl_yellow_hue = 0.0;
-        self.active_hsl_green_hue = 0.0;
-        self.active_hsl_aqua_hue = 0.0;
-        self.active_hsl_blue_hue = 0.0;
-        self.active_hsl_purple_hue = 0.0;
-        self.active_hsl_magenta_hue = 0.0;
-        // HSL Lum
-        self.active_hsl_red_lum = 0.0;
-        self.active_hsl_orange_lum = 0.0;
-        self.active_hsl_yellow_lum = 0.0;
-        self.active_hsl_green_lum = 0.0;
-        self.active_hsl_aqua_lum = 0.0;
-        self.active_hsl_blue_lum = 0.0;
-        self.active_hsl_purple_lum = 0.0;
-        self.active_hsl_magenta_lum = 0.0;
-        // Lens
-        self.active_lens_distortion = 0.0;
-        self.active_lens_vignette_amount = 0.0;
-        self.active_lens_vignette_midpoint = 0.0;
-        self.active_nr_luminance = 0.0;
-        self.active_nr_color = 0.0;
-        self.active_sharpen_amount = 0.0;
-        self.active_sharpen_radius = 1.0;
-    }
+    // ============================================
+    // Business Logic Methods - REMOVED
+    // ============================================
+    // The following methods have been removed as they duplicate EditorService functionality:
+    // - reset_edits() -> use EditorService::reset()
+    // - push_edit_snapshot() -> EditorService handles history automatically  
+    // - undo() -> use EditorService::undo()
+    // - redo() -> use EditorService::redo()
 
     /// Check if we have any photos loaded
     pub fn has_photos(&self) -> bool {
@@ -841,178 +525,6 @@ impl AppState {
     pub fn develop_photo_index(&self) -> Option<usize> {
         self.internal_state.develop_selected_id.as_ref()
             .and_then(|id| self.photos.iter().position(|p| &p.id == id))
-    }
-
-
-    /// Push current edit state to history (for undo/redo)
-    pub fn push_edit_snapshot(&mut self) {
-        let snapshot = EditSnapshot {
-            exposure: self.active_exposure,
-            contrast: self.active_contrast,
-            temperature: self.active_temperature,
-            tint: self.active_tint,
-            highlights: self.active_highlights,
-            shadows: self.active_shadows,
-            whites: self.active_whites,
-            blacks: self.active_blacks,
-            clarity: self.active_clarity,
-            vibrance: self.active_vibrance,
-            saturation: self.active_saturation,
-            tone_curve_shadows: self.active_tone_curve_shadows,
-            tone_curve_darks: self.active_tone_curve_darks,
-            tone_curve_lights: self.active_tone_curve_lights,
-            tone_curve_highlights: self.active_tone_curve_highlights,
-            hsl_red_sat: self.active_hsl_red_sat,
-            hsl_orange_sat: self.active_hsl_orange_sat,
-            hsl_yellow_sat: self.active_hsl_yellow_sat,
-            hsl_green_sat: self.active_hsl_green_sat,
-            hsl_aqua_sat: self.active_hsl_aqua_sat,
-            hsl_blue_sat: self.active_hsl_blue_sat,
-            hsl_purple_sat: self.active_hsl_purple_sat,
-            hsl_magenta_sat: self.active_hsl_magenta_sat,
-            // HSL Hue
-            hsl_red_hue: self.active_hsl_red_hue,
-            hsl_orange_hue: self.active_hsl_orange_hue,
-            hsl_yellow_hue: self.active_hsl_yellow_hue,
-            hsl_green_hue: self.active_hsl_green_hue,
-            hsl_aqua_hue: self.active_hsl_aqua_hue,
-            hsl_blue_hue: self.active_hsl_blue_hue,
-            hsl_purple_hue: self.active_hsl_purple_hue,
-            hsl_magenta_hue: self.active_hsl_magenta_hue,
-            // HSL Lum
-            hsl_red_lum: self.active_hsl_red_lum,
-            hsl_orange_lum: self.active_hsl_orange_lum,
-            hsl_yellow_lum: self.active_hsl_yellow_lum,
-            hsl_green_lum: self.active_hsl_green_lum,
-            hsl_aqua_lum: self.active_hsl_aqua_lum,
-            hsl_blue_lum: self.active_hsl_blue_lum,
-            hsl_purple_lum: self.active_hsl_purple_lum,
-            hsl_magenta_lum: self.active_hsl_magenta_lum,
-            // Lens
-            lens_distortion: self.active_lens_distortion,
-            lens_vignette_amount: self.active_lens_vignette_amount,
-            lens_vignette_midpoint: self.active_lens_vignette_midpoint,
-            nr_luminance: self.active_nr_luminance,
-            nr_color: self.active_nr_color,
-            sharpen_amount: self.active_sharpen_amount,
-            sharpen_radius: self.active_sharpen_radius,
-            crop_settings: self.crop_settings.clone(),
-        };
-
-        // If we're not at the end of history, truncate everything after current position
-        if let Some(index) = self.history_index {
-            self.edit_history.truncate(index + 1);
-        }
-
-        // Add new snapshot
-        self.edit_history.push(snapshot);
-
-        // Limit history to 20 states
-        if self.edit_history.len() > 20 {
-            self.edit_history.remove(0);
-        }
-
-        // Update index to point to the new snapshot
-        self.history_index = Some(self.edit_history.len() - 1);
-    }
-
-    /// Undo to previous edit state
-    pub fn undo(&mut self) -> bool {
-        if let Some(index) = self.history_index {
-            if index > 0 {
-                let new_index = index - 1;
-                let snapshot = &self.edit_history[new_index];
-                self.active_exposure = snapshot.exposure;
-                self.active_contrast = snapshot.contrast;
-                self.active_temperature = snapshot.temperature;
-                self.active_tint = snapshot.tint;
-                self.active_highlights = snapshot.highlights;
-                self.active_shadows = snapshot.shadows;
-                self.active_whites = snapshot.whites;
-                self.active_blacks = snapshot.blacks;
-                self.active_clarity = snapshot.clarity;
-                self.active_vibrance = snapshot.vibrance;
-                self.active_saturation = snapshot.saturation;
-                self.active_tone_curve_shadows = snapshot.tone_curve_shadows;
-                self.active_tone_curve_darks = snapshot.tone_curve_darks;
-                self.active_tone_curve_lights = snapshot.tone_curve_lights;
-                self.active_tone_curve_highlights = snapshot.tone_curve_highlights;
-                self.active_hsl_red_sat = snapshot.hsl_red_sat;
-                self.active_hsl_orange_sat = snapshot.hsl_orange_sat;
-                self.active_hsl_yellow_sat = snapshot.hsl_yellow_sat;
-                self.active_hsl_green_sat = snapshot.hsl_green_sat;
-                self.active_hsl_blue_sat = snapshot.hsl_blue_sat;
-                self.active_hsl_purple_sat = snapshot.hsl_purple_sat;
-                self.active_hsl_magenta_sat = snapshot.hsl_magenta_sat;
-                // HSL Hue
-                self.active_hsl_red_hue = snapshot.hsl_red_hue;
-                self.active_hsl_orange_hue = snapshot.hsl_orange_hue;
-                self.active_hsl_yellow_hue = snapshot.hsl_yellow_hue;
-                self.active_hsl_green_hue = snapshot.hsl_green_hue;
-                self.active_hsl_aqua_hue = snapshot.hsl_aqua_hue;
-                self.active_hsl_blue_hue = snapshot.hsl_blue_hue;
-                self.active_hsl_purple_hue = snapshot.hsl_purple_hue;
-                self.active_hsl_magenta_hue = snapshot.hsl_magenta_hue;
-                // HSL Lum
-                self.active_hsl_red_lum = snapshot.hsl_red_lum;
-                self.active_hsl_orange_lum = snapshot.hsl_orange_lum;
-                self.active_hsl_yellow_lum = snapshot.hsl_yellow_lum;
-                self.active_hsl_green_lum = snapshot.hsl_green_lum;
-                self.active_hsl_aqua_lum = snapshot.hsl_aqua_lum;
-                self.active_hsl_blue_lum = snapshot.hsl_blue_lum;
-                self.active_hsl_purple_lum = snapshot.hsl_purple_lum;
-                self.active_hsl_magenta_lum = snapshot.hsl_magenta_lum;
-                // Lens
-                self.active_lens_distortion = snapshot.lens_distortion;
-                self.active_lens_vignette_amount = snapshot.lens_vignette_amount;
-                self.active_lens_vignette_midpoint = snapshot.lens_vignette_midpoint;
-                self.active_hsl_purple_sat = snapshot.hsl_purple_sat;
-                self.active_hsl_magenta_sat = snapshot.hsl_magenta_sat;
-                self.active_nr_luminance = snapshot.nr_luminance;
-                self.active_nr_color = snapshot.nr_color;
-                self.history_index = Some(new_index);
-                return true;
-            }
-        }
-        false
-    }
-
-    /// Redo to next edit state
-    pub fn redo(&mut self) -> bool {
-        if let Some(index) = self.history_index {
-            if index < self.edit_history.len() - 1 {
-                let new_index = index + 1;
-                let snapshot = &self.edit_history[new_index];
-                self.active_exposure = snapshot.exposure;
-                self.active_contrast = snapshot.contrast;
-                self.active_temperature = snapshot.temperature;
-                self.active_tint = snapshot.tint;
-                self.active_highlights = snapshot.highlights;
-                self.active_shadows = snapshot.shadows;
-                self.active_whites = snapshot.whites;
-                self.active_blacks = snapshot.blacks;
-                self.active_clarity = snapshot.clarity;
-                self.active_vibrance = snapshot.vibrance;
-                self.active_saturation = snapshot.saturation;
-                self.active_tone_curve_shadows = snapshot.tone_curve_shadows;
-                self.active_tone_curve_darks = snapshot.tone_curve_darks;
-                self.active_tone_curve_lights = snapshot.tone_curve_lights;
-                self.active_tone_curve_highlights = snapshot.tone_curve_highlights;
-                self.active_hsl_red_sat = snapshot.hsl_red_sat;
-                self.active_hsl_orange_sat = snapshot.hsl_orange_sat;
-                self.active_hsl_yellow_sat = snapshot.hsl_yellow_sat;
-                self.active_hsl_green_sat = snapshot.hsl_green_sat;
-                self.active_hsl_aqua_sat = snapshot.hsl_aqua_sat;
-                self.active_hsl_blue_sat = snapshot.hsl_blue_sat;
-                self.active_hsl_purple_sat = snapshot.hsl_purple_sat;
-                self.active_hsl_magenta_sat = snapshot.hsl_magenta_sat;
-                self.active_nr_luminance = snapshot.nr_luminance;
-                self.active_nr_color = snapshot.nr_color;
-                self.history_index = Some(new_index);
-                return true;
-            }
-        }
-        false
     }
 
     // ============================================

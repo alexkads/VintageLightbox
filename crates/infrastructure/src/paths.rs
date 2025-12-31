@@ -31,4 +31,20 @@ impl AppPaths {
     pub fn models_dir() -> PathBuf {
         Self::catalog_root().join("Models")
     }
+
+    /// Ensures the catalog directory and all subdirectories exist.
+    /// Creates them if they don't exist.
+    /// Returns the database URL string for SQLite.
+    pub fn ensure_catalog_exists() -> Result<String, std::io::Error> {
+        let catalog_path = Self::catalog_root();
+        
+        if !catalog_path.exists() {
+            std::fs::create_dir_all(&catalog_path)?;
+        }
+        
+        let db_path = catalog_path.join("vintage_lightbox.db");
+        let database_url = format!("sqlite:{}?mode=rwc", db_path.to_string_lossy());
+        
+        Ok(database_url)
+    }
 }
