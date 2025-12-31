@@ -1,7 +1,9 @@
 # Requisitos do Sistema - VintageLightbox
 
 ## Visão Geral
-VintageLightbox é uma aplicação multiplataforma de gerenciamento e edição de fotos profissionais, similar ao Adobe Lightroom, desenvolvida em Rust com interface gráfica Slint.
+VintageLightbox é uma aplicação multiplataforma de gerenciamento e edição de fotos profissionais, similar ao Adobe Lightroom, desenvolvida em Rust com interface gráfica egui.
+
+**Status Atual**: MVP Completo ✅ | 360+ testes passando | Domain + Use Cases + Infrastructure + Adapters + UI implementados
 
 ## 1. Requisitos Funcionais
 
@@ -181,17 +183,22 @@ VintageLightbox é uma aplicação multiplataforma de gerenciamento e edição d
 
 ### 4.1 Tecnologias Obrigatórias
 - **Linguagem**: Rust (estável, última versão)
-- **Interface Gráfica**: Slint UI
-- **Processamento RAW**: LibRaw ou rawler
-- **Gerenciamento de Cores**: Little CMS (lcms2)
+- **Interface Gráfica**: egui (Immediate Mode GUI)
+- **Processamento RAW**: rawler + LibRaw fallback
+- **GPU Acceleration**: wgpu (Compute Shaders)
 - **Banco de Dados**: SQLite com rusqlite
 
-### 4.2 Dependências Recomendadas
+### 4.2 Dependências Principais
+- `egui` + `eframe` - Framework de UI
+- `wgpu` - Aceleração GPU via compute shaders
 - `image` - Manipulação de imagens
 - `rayon` - Paralelização
 - `serde` - Serialização
-- `tokio` - Async runtime (se necessário)
+- `tokio` - Async runtime
 - `kamadak-exif` - Leitura de metadados EXIF
+- `egui_plot` - Gráficos interativos (Histograma, Tone Curve)
+- `egui-notify` - Sistema de notificações toast
+- `egui_phosphor` - Ícones profissionais
 
 ## 5. Requisitos de Documentação
 

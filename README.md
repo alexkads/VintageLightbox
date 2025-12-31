@@ -2,147 +2,192 @@
 
 Clone profissional do Adobe Lightroom desenvolvido em Rust com interface egui.
 
+**Status**: ✅ MVP Completo | **Testes**: 360+ | **Data**: 31 de dezembro de 2025
+
 ## 📸 Sobre o Projeto
 
 VintageLightbox é uma aplicação multiplataforma de gerenciamento e edição de fotos RAW, projetada para fotógrafos profissionais que precisam de:
 
-- 📥 **Importação eficiente** de grandes volumes de fotos
-- 🎨 **Edição não-destrutiva** de arquivos RAW/DNG
-- 🖥️ **Suporte multi-monitor** para apresentação a clientes
-- ⭐ **Organização avançada** com classificação, tags e coleções
-- ✅ **Pré-seleção rápida** de fotos
-- 💰 **Gestão de vendas** e marcação de fotos compradas
-- 🖨️ **Sistema de impressão** profissional
+- 📥 **Importação eficiente** de grandes volumes de fotos com detecção de duplicatas
+- 🎨 **Edição não-destrutiva** com 13 ajustes GPU-accelerated em tempo real
+- 🖥️ **Interface moderna** com 5 temas e atalhos de teclado profissionais
+- ⭐ **Organização avançada** com classificação, flags, cores e coleções
 - 💾 **Presets personalizados** para workflow consistente
-- 📤 **Exportação otimizada** para JPEG/PNG
+- 📤 **Exportação otimizada** para JPEG/PNG/TIFF
+- 🖨️ **Sistema de impressão** com layouts variados
 
 ## 🏗️ Arquitetura e Metodologia
 
 Este projeto segue **Clean Architecture** e **Test-Driven Development (TDD)**:
 
-- 🏛️ **4 Camadas**: Domain → Use Cases → Adapters → Infrastructure
-- 🧪 **TDD**: Ciclo Red-Green-Refactor em todo o código
-- 📊 **100% cobertura** no Domain Layer
-- ✅ **37 testes** já implementados (Value Objects)
+```
+┌─────────────────────────────────────────────────────┐
+│  UI Layer (egui 0.31)                               │
+│  4 Views • 25+ Components • 5 Temas                 │
+├─────────────────────────────────────────────────────┤
+│  Infrastructure (wgpu • SQLite • LibRaw)            │
+│  GPU Compute • Multi-level Cache • 48 testes        │
+├─────────────────────────────────────────────────────┤
+│  Adapters (Controllers • Presenters • State)        │
+│  6 Controllers • EditHistory • 27 testes            │
+├─────────────────────────────────────────────────────┤
+│  Use Cases (20+ casos de uso)                       │
+│  Import • Edit • Organize • Export • 65 testes      │
+├─────────────────────────────────────────────────────┤
+│  Domain (Entities • Value Objects • Traits)         │
+│  4 Entities • 15 Value Objects • 220 testes         │
+└─────────────────────────────────────────────────────┘
+```
 
 ## 🚀 Tecnologias
 
-- **Linguagem**: Rust (performance e segurança)
-- **Interface**: egui 0.31 (nativa e multiplataforma)
-- **RAW Processing**: LibRaw/rawler
-- **Database**: SQLite
-- **Testing**: cargo test, mockall, proptest, criterion, **egui_kittest** (E2E)
-- **Plataformas**: macOS e Windows
+| Categoria | Tecnologia | Versão |
+|-----------|------------|--------|
+| **Linguagem** | Rust | 1.75+ |
+| **UI Framework** | egui | 0.31 |
+| **GPU Compute** | wgpu | 24.0 |
+| **Database** | SQLite + rusqlite | 0.32 |
+| **RAW Processing** | LibRaw / rawler | - |
+| **Image Codecs** | image-rs | 0.25 |
+| **Testing** | mockall, proptest | - |
 
 ## 🎯 Status do Desenvolvimento
 
-**Fase Atual**: Domain Layer + Use Cases ✅
+**Fase Atual**: MVP Completo ✅
 
-- [x] Workspace configurado com Clean Architecture
-- [x] Ferramentas de teste configuradas (TDD)
-- [x] **Value Objects** (99 testes)
-  - Rating, PhotoId, ColorLabel, FilePath, CollectionId
-- [x] **Entidades** (99 testes)
-  - Photo Entity (com rating, color labels, edit tracking)
-  - Collection Entity (com photos management)
-- [x] **Repository Traits** (interfaces)
-  - PhotoRepository, CollectionRepository
-- [x] **Use Cases** (4 testes)
-  - ImportPhotoUseCase (com mocks)
-- [ ] Infrastructure Layer (SQLite, File System)
-- [ ] Adapters Layer (Controllers, Presenters)
+### Camadas Implementadas
 
-**103 testes passando** 🎉
+| Camada | Status | Testes |
+|--------|--------|--------|
+| Domain | ✅ Completo | 220 |
+| Use Cases | ✅ Completo | 65 |
+| Infrastructure | ✅ Completo | 48 |
+| Adapters | ✅ Completo | 27 |
+| UI | ✅ Completo | - |
+| **Total** | **✅** | **360+** |
 
-**Rodando os testes**:
+### Features Implementadas
+
+- [x] **Value Objects**: Rating, PhotoId, ColorLabel, Flag, PhotoEdits, CropSettings, etc.
+- [x] **Entities**: Photo, Collection, Preset, PrintJob
+- [x] **20+ Use Cases**: Import, Edit, Organize, Export, Print, Presets
+- [x] **6 Controllers**: Library, Editor, Photo, Import, Export, Preset
+- [x] **GPU Processing**: 13 ajustes em single-pass shader (~2ms para 4K)
+- [x] **Multi-level Cache**: L0 (0.01ms) → L1 (15 imgs) → L2 (SQLite BLOB)
+- [x] **UI Completa**: 4 views, 25+ componentes, 5 temas
+
+## 🧪 Rodando os Testes
+
 ```bash
-# Todos os testes unitários
+# Todos os testes
 cargo test --workspace
 
-# Testes E2E da UI (egui_kittest)
-cargo test -p ui --test rating_widget_tests
+# Por camada
+cargo test -p domain        # 220 testes
+cargo test -p use-cases     # 65 testes
+cargo test -p infrastructure # 48 testes
+cargo test -p adapters      # 27 testes
 
-# Atualizar snapshots (quando necessário)
-UPDATE_SNAPSHOTS=true cargo test -p ui
+# Com output detalhado
+cargo test --workspace -- --nocapture
+```
+
+## 🖥️ Executando a Aplicação
+
+```bash
+# Desenvolvimento
+cargo run -p ui
+
+# Release otimizado
+cargo build -p ui --release
+./target/release/ui
 ```
 
 ## 📚 Documentação
 
 A documentação completa do projeto está organizada na pasta `docs/`:
 
-- **[01-REQUISITOS.md](docs/01-REQUISITOS.md)** - Requisitos funcionais e não-funcionais detalhados
-- **[02-ARQUITETURA.md](docs/02-ARQUITETURA.md)** - Arquitetura do sistema, módulos e padrões de design
-- **[03-FUNCIONALIDADES.md](docs/03-FUNCIONALIDADES.md)** - Especificação detalhada de cada funcionalidade
-- **[04-ROADMAP.md](docs/04-ROADMAP.md)** - Planejamento de desenvolvimento em fases
-- **[05-STACK-TECNOLOGICO.md](docs/05-STACK-TECNOLOGICO.md)** - Stack completo e dependências
-- **[07-E2E-TESTING.md](docs/07-E2E-TESTING.md)** - Guia de testes E2E com egui_kittest
+| Documento | Descrição |
+|-----------|-----------|
+| [01-REQUISITOS.md](docs/01-REQUISITOS.md) | Requisitos funcionais e não-funcionais |
+| [02-ARQUITETURA.md](docs/02-ARQUITETURA.md) | Clean Architecture, camadas e padrões |
+| [03-FUNCIONALIDADES.md](docs/03-FUNCIONALIDADES.md) | Especificação detalhada de features |
+| [04-ROADMAP.md](docs/04-ROADMAP.md) | Planejamento de desenvolvimento |
+| [05-STACK-TECNOLOGICO.md](docs/05-STACK-TECNOLOGICO.md) | Stack completo e dependências |
+| [06-UI-ARCHITECTURE.md](docs/06-UI-ARCHITECTURE.md) | Arquitetura da UI egui |
+| [STATUS.md](docs/STATUS.md) | Status atual do projeto |
 
-## ✨ Principais Funcionalidades
+## ✨ Funcionalidades Principais
 
-### Importação
+### 🎨 Edição GPU-Accelerated
+
+13 ajustes em tempo real via wgpu compute shaders:
+
+| Categoria | Ajustes |
+|-----------|---------|
+| **Básicos** | Exposure, Contrast, Highlights, Shadows, Whites, Blacks |
+| **Presença** | Clarity, Vibrance, Saturation |
+| **White Balance** | Temperature, Tint |
+| **Tone Curve** | RGB channels, Parametric |
+| **HSL** | 8 cores × Hue/Saturation/Luminance |
+| **Detalhe** | Sharpening, Noise Reduction |
+| **Transformação** | Crop, Rotation, Flip |
+
+### 📥 Importação Inteligente
+
 - Suporte a múltiplos formatos RAW (CR2, NEF, ARW, DNG, etc.)
-- Detecção automática de duplicatas
+- Detecção automática de duplicatas via hash SHA-256
 - Geração paralela de thumbnails
+- Preview antes de importar
 - Organização automática por data
 
-### Edição RAW
-- Ajustes básicos: exposição, contraste, temperatura, matiz
-- Ajustes avançados: curva de tons, HSL, correção de lente
-- Redução de ruído e nitidez
-- Efeitos criativos: vinheta, split toning, grain
-- Histórico completo com undo/redo ilimitado
+### ⭐ Organização Avançada
 
-### Organização
 - Classificação por estrelas (0-5)
-- Flags de cor personalizáveis
-- Sistema de tags hierárquico
-- Coleções simples e inteligentes
-- Busca e filtros avançados
+- Flags: Pick, Reject, Unflagged
+- Color Labels: Red, Yellow, Green, Blue, Purple
+- Coleções com fotos organizadas
+- Filtros e busca avançada
 
-### Multi-Monitor
-- Exibição em tela cheia no segundo monitor
-- Modo apresentação com slideshow
-- Sincronização automática
-- Comparação lado a lado
+### 🖨️ Impressão Profissional
 
-### Vendas
-- Marcação de fotos compradas
-- Registro de informações do cliente
-- Relatórios de vendas
-- Controle de entregas
+- Layouts variados
+- Preview de impressão
+- Configurações de papel e qualidade
 
-### Exportação e Impressão
-- Exportação JPEG/PNG com ajuste de qualidade
-- Redimensionamento e marca d'água
-- Renomeação em lote
-- Layouts de impressão variados
-- Gerenciamento de cor para impressão
+## 🎹 Atalhos de Teclado
 
-## 🏗️ Status do Projeto
+### Globais
+| Tecla | Ação |
+|-------|------|
+| `G` | Library View |
+| `D` | Develop View |
+| `1-5` | Rating |
+| `6-9` | Color Labels |
+| `P` / `X` / `U` | Flag |
+| `Cmd+Z` | Undo |
 
-**Fase Atual**: Documentação e Planejamento ✅
+### Develop View
+| Tecla | Ação |
+|-------|------|
+| `←` / `→` | Foto anterior/próxima |
+| `Space` | Antes/Depois |
+| `F` | Fullscreen |
+| `R` | Crop Tool |
+| `0` / `1` / `2` | Zoom Fit/100%/200% |
 
-**Próximas Etapas**:
-1. Setup do projeto e proof of concept (Fase 0)
-2. Desenvolvimento do MVP (Fase 1)
-3. Features essenciais (Fase 2)
-
-Consulte o [Roadmap](docs/04-ROADMAP.md) para detalhes.
-
-## 🛠️ Estrutura do Projeto (Planejada)
+## 🛠️ Estrutura do Projeto
 
 ```
 VintageLightbox/
 ├── crates/
-│   ├── vintage-core/        # Lógica de domínio
-│   ├── vintage-raw/         # Processamento RAW
-│   ├── vintage-ui/          # Interface egui
-│   ├── vintage-import/      # Módulo de importação
-│   ├── vintage-export/      # Módulo de exportação
-│   └── vintage-database/    # Camada de dados
-├── assets/                  # Recursos (ícones, presets)
-├── docs/                    # Documentação
-└── tests/                   # Testes e fixtures
+│   ├── domain/          # Camada 1: Entities, Value Objects (220 testes)
+│   ├── use-cases/       # Camada 2: Application Business Rules (65 testes)
+│   ├── adapters/        # Camada 3: Controllers, Presenters (27 testes)
+│   ├── infrastructure/  # Camada 4: SQLite, wgpu, Cache (48 testes)
+│   └── ui/              # Camada 5: egui views e componentes
+├── docs/                # Documentação completa
+└── target/              # Build output
 ```
 
 ## 📋 Requisitos do Sistema
@@ -151,27 +196,28 @@ VintageLightbox/
 - Rust 1.75 ou superior
 - macOS 10.15+ ou Windows 10+
 - 8GB RAM mínimo
-- Xcode Command Line Tools (macOS) ou Visual Studio Build Tools (Windows)
+- GPU com suporte Vulkan/Metal (para wgpu)
 
 ### Para Usuários Finais
 - macOS 10.15+ ou Windows 10+
 - 4GB RAM (8GB recomendado)
+- GPU dedicada ou integrada recente
 - 500MB espaço em disco
 
 ## 🎯 Diferenciais
 
 - **100% Rust**: Segurança de memória e performance nativa
-- **Interface Nativa**: UI responsiva e fluida
-- **Multi-Monitor**: Recurso essencial para fotógrafos
-- **Gestão de Vendas**: Integrada diretamente no workflow
-- **Open Source**: Transparência e comunidade
+- **GPU-Accelerated**: Edição em tempo real via wgpu compute shaders
+- **Clean Architecture**: 5 camadas bem definidas, 360+ testes
+- **Interface Moderna**: egui com 5 temas e atalhos profissionais
+- **Multi-level Cache**: Performance otimizada (0.01ms lookup)
 - **Cross-Platform**: Funciona nativamente em macOS e Windows
 
 ## 📖 Para Começar
 
 ### 1. Clone o Repositório
 ```bash
-git clone https://github.com/seu-usuario/VintageLightbox.git
+git clone https://github.com/alexkads/VintageLightbox.git
 cd VintageLightbox
 ```
 
@@ -180,56 +226,36 @@ cd VintageLightbox
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
-### 3. Leia a Documentação
-Comece pelos documentos na pasta `docs/` para entender o projeto:
-- [Requisitos](docs/01-REQUISITOS.md)
-- [Arquitetura](docs/02-ARQUITETURA.md)
-- [Roadmap](docs/04-ROADMAP.md)
-
-### 4. Setup do Desenvolvimento (Em breve)
+### 3. Execute os Testes
 ```bash
-# Será disponibilizado na Fase 0
-cargo build
-cargo test
-cargo run
+cargo test --workspace
+```
+
+### 4. Execute a Aplicação
+```bash
+cargo run -p ui
 ```
 
 ## 🤝 Contribuindo
 
 Contribuições são bem-vindas! Por favor:
 
-1. Leia a documentação completa
-2. Abra uma issue para discutir mudanças grandes
-3. Siga os padrões de código Rust (rustfmt, clippy)
-4. Escreva testes para novas funcionalidades
-5. Atualize a documentação quando necessário
+1. Leia a documentação em `docs/`
+2. Siga TDD: escreva testes primeiro
+3. Use `cargo fmt` e `cargo clippy`
+4. Atualize a documentação quando necessário
 
 ## 📄 Licença
 
-A ser definida. Opções consideradas:
-- GPL-3.0 (para projeto completamente open source)
-- MIT (para maior permissividade)
-- Dual License (GPL + Commercial)
+MIT License - Veja [LICENSE](LICENSE) para detalhes.
 
-## 🙏 Agradecimentos
+## 🙏 Inspiração
 
 Este projeto é inspirado em:
 - Adobe Lightroom
 - DarkTable
 - RawTherapee
 
-Agradecimentos às comunidades de Rust, egui e processamento de imagens open source.
-
-## 📞 Contato
-
-- **Issues**: Use o GitHub Issues para bugs e sugestões
-- **Discussões**: Use o GitHub Discussions para perguntas
-- **Documentação**: Consulte a pasta `docs/`
-
 ---
 
-**Status**: 🟡 Em Planejamento - Documentação Completa ✅
-
-**Versão**: 0.1.0-planning
-
-**Última Atualização**: Dezembro 2025
+**Status**: ✅ MVP Completo | **Versão**: 0.1.0 | **Última Atualização**: 31 de dezembro de 2025

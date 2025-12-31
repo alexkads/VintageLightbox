@@ -2,28 +2,41 @@
 
 ## 📊 Status de Implementação
 
-**Última atualização**: 16 de dezembro de 2025
+**Última atualização**: 31 de dezembro de 2025
 
 ### Implementado ✅
-- **Domain Layer** (99 testes, 100% cobertura)
-  - Value Objects: Rating, PhotoId, ColorLabel, FilePath, CollectionId
-  - Entities: Photo (com rating, color labels, timestamps, edit tracking), Collection
-  - Repository Traits: PhotoRepository, CollectionRepository
-  
-- **Use Cases Layer** (4 testes)
-  - ImportPhotoUseCase (testado com mocks)
 
-### Em Andamento 🚧
-- Use Cases de Importação (batch, scan directory)
-- Infrastructure Layer (SQLite repositories)
+#### Domain Layer (220 testes, ~100% cobertura)
+- **Value Objects**: Rating, PhotoId, ColorLabel, FilePath, CollectionId, Flag, PhotoMetadata, PhotoEdits, CropSettings, AspectRatio, RotationFillMode, ImportOptions, PrintSettings, PrintLayout, PrintJobId
+- **Entities**: Photo (rating, color labels, flags, edits, timestamps), Collection, Preset, PrintJob
+- **Repository Traits**: PhotoRepository, CollectionRepository, PresetRepository
 
-### Planejado 📋
-- RAW Processing
-- UI com Slint
-- Exportação
-- Presets
+#### Use Cases Layer (65 testes)
+- **Importação**: ImportPhotoUseCase, ImportPhotosUseCase, PreviewBeforeImportUseCase, CheckDuplicatesUseCase, ImportWithOptionsUseCase, GetImportSourcesUseCase
+- **Edição**: SavePhotoEditsUseCase
+- **Organização**: RatePhotoUseCase, SetColorLabelUseCase, SetFlagUseCase, DeletePhotoUseCase
+- **Coleções**: CreateCollectionUseCase, AddPhotoToCollectionUseCase, RemovePhotoFromCollectionUseCase
+- **Exportação**: ExportPhotoUseCase
+- **Impressão**: ConfigurePrintJobUseCase
+- **Presets**: Gestão completa de presets
 
-**Total**: 103 testes passando 🎉
+#### Infrastructure Layer (48 testes)
+- **Database**: PhotoRepositoryImpl, CollectionRepositoryImpl, SqlitePresetRepository
+- **File System**: FileScanner, FileOrganizer, ScanDirectory
+- **Processing**: ExifReader, ThumbnailGenerator, ImageExporter, RawProcessing
+- **Cache**: Sistema multi-nível (L0/L1/Preview)
+
+#### Adapters Layer (27 testes)
+- **Controllers**: LibraryController, EditorController, PhotoController, ImportController, ExportController, PresetController
+- **Services**: EditorService, NavigationService
+- **State**: ApplicationState, EditHistory, PhotoFilters
+
+#### UI Layer (egui)
+- **Views**: LibraryView, DevelopView, PrintView, ImportView
+- **Components**: 25+ componentes reutilizáveis
+- **Design System**: 5 temas, Phosphor Icons, widgets customizados
+
+**Total**: 360+ testes passando 🎉
 
 ---
 

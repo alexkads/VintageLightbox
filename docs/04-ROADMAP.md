@@ -5,21 +5,21 @@
 Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Architecture** e **Test-Driven Development (TDD)**. Cada funcionalidade é implementada com testes primeiro, garantindo qualidade desde o início.
 
 **Metodologia**: TDD (Red-Green-Refactor) em todas as fases  
-**Arquitetura**: Clean Architecture (Domain → Use Cases → Adapters → Infrastructure)  
+**Arquitetura**: Clean Architecture (Domain → Use Cases → Adapters → Infrastructure → UI)  
 **Estimativa Total**: 12-18 meses (desenvolvimento solo/pequena equipe)
 
 ---
 
-## 📊 Progresso Atual (Atualizado: 26/dez/2025)
+## 📊 Progresso Atual (Atualizado: 31/dez/2025)
 
 ### Status Geral
-- **Fase Atual**: Fase 2.1 (Importação Avançada) - **100% COMPLETO** ✅
-- **Total de Testes**: **225 testes passando** 🎉
-  - Domain Layer: 115 testes (100% cobertura, +5 tone curve, +5 import options)
-  - Use Cases Layer: 50 testes (+15: Preview, Duplicates, ImportWithOptions)
-  - Infrastructure Layer: 58 testes (+7: FileOrganizer, async hash)
-  - Adapters Layer: 0 testes
-  - UI Layer: 0 testes (testes removidos temporariamente)
+- **Fase Atual**: MVP Completo + Features Avançadas ✅
+- **Total de Testes**: **360+ testes passando** 🎉
+  - Domain Layer: 220 testes (~100% cobertura)
+  - Use Cases Layer: 65 testes (20+ use cases)
+  - Infrastructure Layer: 48 testes
+  - Adapters Layer: 27 testes
+  - UI Layer: Testes E2E disponíveis
 
 ### Conquistas Recentes
 

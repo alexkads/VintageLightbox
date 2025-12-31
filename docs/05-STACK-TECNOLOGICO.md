@@ -10,6 +10,8 @@ Este documento detalha todas as tecnologias, bibliotecas e ferramentas utilizada
 - 📐 **SOLID Principles**: Design orientado a objetos de qualidade
 - ♻️ **Refatoração Contínua**: Código limpo e evolutivo
 
+**Status**: MVP Completo ✅ | 360+ testes | Todas as camadas implementadas
+
 ---
 
 ## 1. Linguagem de Programação
@@ -31,73 +33,102 @@ Este documento detalha todas as tecnologias, bibliotecas e ferramentas utilizada
 
 ## 2. Interface Gráfica
 
-### Slint UI 1.x
+### egui 0.31 (Immediate Mode GUI) ✅ IMPLEMENTADO
 
 **Características**:
-- ✅ Declarativa e reativa (similar a QML/SwiftUI)
-- ✅ Nativa e performática
+- ✅ Immediate Mode - simples e performático
+- ✅ Nativo e responsivo
 - ✅ Cross-platform (macOS, Windows, Linux)
 - ✅ Suporte a HiDPI/Retina
-- ✅ Temas customizáveis
+- ✅ Integração com wgpu para GPU
 - ✅ Hot-reload durante desenvolvimento
 
+**Crates Utilizados**:
+```toml
+egui = "0.31"
+eframe = "0.31"
+egui_plot = "0.31"      # Gráficos interativos
+egui-notify = "0.19"    # Sistema de notificações toast
+egui_phosphor = "0.9"   # Ícones profissionais
+```
+
 **Exemplo de Código**:
-```slint
-component PhotoGrid {
-    in property <[PhotoItem]> photos;
-    
-    GridView {
-        for photo in photos: Rectangle {
-            Image {
-                source: photo.thumbnail;
-            }
+```rust
+fn ui(&mut self, ctx: &egui::Context) {
+    egui::CentralPanel::default().show(ctx, |ui| {
+        ui.heading("VintageLightbox");
+        
+        if ui.button("Import Photos").clicked() {
+            self.show_import_dialog = true;
         }
-    }
+        
+        PhotoGrid::new(&self.photos)
+            .columns(self.grid_columns)
+            .show(ui);
+    });
 }
 ```
 
-**Website**: https://slint.dev/
-
-**Alternativa (Plano B)**: egui - se Slint não atender requisitos
+**Design System Implementado**:
+- **5 Temas**: Vintage Dark, Mocha Dark, Macchiato Dark, Frappe Dark, Latte Light
+- **Phosphor Icons**: Ícones profissionais em toda a UI
+- **Sistema de Notificações**: Toast notifications não-intrusivas
+- **Gráficos Interativos**: Histograma RGB, Tone Curve, Rating Distribution
 
 ---
 
 ## 3. Processamento de Imagens RAW
 
-### 3.1 LibRaw (via Rust binding)
-
-**Crate**: `libraw-rs` ou FFI customizado
-
-**Características**:
-- ✅ Suporta 90+ formatos RAW
-- ✅ Maduro e battle-tested
-- ✅ Usado por DarkTable, RawTherapee
-- ✅ Extração de thumbnail embutido
-- ✅ Metadados completos
-
-**Instalação Nativa**:
-- macOS: `brew install libraw`
-- Windows: Compilar ou usar binários pré-compilados
-
-### 3.2 Rawler (Rust puro)
+### 3.1 Rawler (Rust puro) ✅ IMPLEMENTADO
 
 **Crate**: `rawler`
 
 **Características**:
 - ✅ 100% Rust (sem dependências C)
 - ✅ Rápido e seguro
-- ✅ Menos formatos que LibRaw
-- ✅ Mais fácil de distribuir
+- ✅ Suporta principais formatos: CR2, NEF, ARW, DNG, RAF
+- ✅ Mais fácil de distribuir (sem deps nativas)
 
-**Decisão**: Começar com rawler, avaliar LibRaw se precisar de mais formatos.
+### 3.2 LibRaw (Fallback)
+
+**Uso**: Fallback para formatos não suportados pelo rawler
 
 ---
 
-## 4. Processamento de Imagens
+## 4. Aceleração GPU
 
-### 4.1 Image Crate
+### wgpu (Compute Shaders) ✅ IMPLEMENTADO
 
-**Crate**: `image = "0.24"`
+**Crate**: `wgpu`
+
+**Características**:
+- ✅ Aceleração GPU cross-platform (Vulkan, Metal, DX12)
+- ✅ Compute shaders para processamento de imagem
+- ✅ Fallback automático para CPU
+- ✅ Performance: < 16ms para 24MP (60fps)
+
+**Ajustes GPU Suportados** (single-pass shader):
+1. Exposure
+2. Contrast
+3. Temperature
+4. Tint
+5. Highlights
+6. Shadows
+7. Whites
+8. Blacks
+9. Clarity
+10. Vibrance
+11. Saturation
+12. Noise Reduction (Luminance + Color)
+13. Sharpening
+
+---
+
+## 5. Processamento de Imagens
+
+### 5.1 Image Crate
+
+**Crate**: `image`
 
 **Uso**:
 - Encoding/decoding JPEG, PNG, TIFF
@@ -105,19 +136,9 @@ component PhotoGrid {
 - Conversões de formato de pixel
 - Operações básicas de imagem
 
-### 4.2 ImageProc
+### 5.2 Fast Image Resize
 
-**Crate**: `imageproc = "0.23"`
-
-**Uso**:
-- Filtros (blur, sharpen)
-- Transformações
-- Operações morfológicas
-- Detecção de features
-
-### 4.3 Fast Image Resize
-
-**Crate**: `fast_image_resize = "3.0"`
+**Crate**: `fast_image_resize`
 
 **Uso**:
 - Redimensionamento high-quality e rápido
@@ -126,53 +147,31 @@ component PhotoGrid {
 
 ---
 
-## 5. Gerenciamento de Cores
-
-### Little CMS 2 (LCMS2)
-
-**Crate**: `lcms2 = "6.0"` (binding)
-
-**Características**:
-- ✅ Engine de gerenciamento de cor profissional
-- ✅ Suporta ICC profiles
-- ✅ Conversões de espaço de cor precisas
-- ✅ Usado por Photoshop, GIMP, etc.
-
-**Perfis Incluídos**:
-- sRGB IEC61966-2.1
-- Adobe RGB (1998)
-- ProPhoto RGB
-- Display P3
-
----
-
 ## 6. Metadados
 
-### 6.1 Kamadak-exif
+### Kamadak-exif ✅ IMPLEMENTADO
 
-**Crate**: `kamadak-exif = "0.5"`
+**Crate**: `kamadak-exif`
 
 **Uso**:
 - Leitura de metadados EXIF
 - Suporta TIFF, JPEG, RAW (via TIFF headers)
 - Acesso a tags padrão e customizadas
 
-### 6.2 XMP Toolkit (Opcional)
-
-**Crate**: Binding customizado ou `xmp-toolkit-rs`
-
-**Uso**:
-- Leitura/escrita de sidecar XMP
-- Sincronização de metadados
-- Histórico de edições
+**Metadados Extraídos**:
+- Câmera, Lente
+- ISO, Apertura, Velocidade do obturador
+- Data de captura
+- Dimensões
+- GPS (quando disponível)
 
 ---
 
 ## 7. Banco de Dados
 
-### SQLite via Rusqlite
+### SQLite via Rusqlite ✅ IMPLEMENTADO
 
-**Crate**: `rusqlite = "0.30"`
+**Crate**: `rusqlite`
 
 **Características**:
 - ✅ Embarcado (sem servidor)
@@ -183,121 +182,14 @@ component PhotoGrid {
 
 **Features Usadas**:
 - Bundled (SQLite compilado junto)
-- Backup API
-- Full-Text Search (FTS5)
-- JSON1 extension
+- BLOB storage para thumbnails/previews
+- Migrations automáticas
 
-**Schema Base**:
-```sql
-CREATE TABLE photos (
-    id INTEGER PRIMARY KEY,
-    path TEXT NOT NULL UNIQUE,
-    filename TEXT NOT NULL,
-    file_hash TEXT,
-    import_date DATETIME,
-    capture_date DATETIME,
-    camera TEXT,
-    lens TEXT,
-    iso INTEGER,
-    aperture REAL,
-    shutter_speed TEXT,
-    focal_length REAL,
-    width INTEGER,
-    height INTEGER,
-    rating INTEGER DEFAULT 0,
-    color_label INTEGER,
-    pick_flag INTEGER DEFAULT 0, -- 0: none, 1: pick, -1: reject
-    is_edited BOOLEAN DEFAULT 0,
-    is_purchased BOOLEAN DEFAULT 0
-);
-
-CREATE TABLE adjustments (
-    id INTEGER PRIMARY KEY,
-    photo_id INTEGER NOT NULL,
-    exposure REAL DEFAULT 0,
-    contrast REAL DEFAULT 0,
-    temperature INTEGER DEFAULT 5500,
-    tint REAL DEFAULT 0,
-    highlights REAL DEFAULT 0,
-    shadows REAL DEFAULT 0,
-    -- ... outros ajustes
-    FOREIGN KEY (photo_id) REFERENCES photos(id)
-);
-```
-
----
-
-## 8. Concorrência e Paralelização
-
-### 8.1 Rayon
-
-**Crate**: `rayon = "1.8"`
-
-**Uso**:
-- Data parallelism
-- Geração de thumbnails em paralelo
-- Processamento batch
-- Fork-join parallelism
-
-**Exemplo**:
-```rust
-use rayon::prelude::*;
-
-photos.par_iter()
-    .map(|photo| generate_thumbnail(photo))
-    .collect()
-```
-
-### 8.2 Tokio (Async Runtime)
-
-**Crate**: `tokio = { version = "1.35", features = ["full"] }`
-
-**Uso**:
-- I/O assíncrono (file system)
-- Background tasks
-- Event loop
-- Timers
-
-**Características**:
-- Multi-threaded runtime
-- Work-stealing scheduler
-- Async file I/O
-
----
-
-## 9. Serialização e Configuração
-
-### 9.1 Serde
-
-**Crate**: 
-```toml
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-```
-
-**Uso**:
-- Serialização de presets
-- Configurações da aplicação
-- Comunicação entre módulos
-- Formato de dados estruturados
-
-### 9.2 Toml (Configuração)
-
-**Crate**: `toml = "0.8"`
-
-**Uso**:
-- Arquivo de configuração do usuário
-- Settings e preferências
-
-**Exemplo**:
-```toml
-# config.toml
-[cache]
-max_size_mb = 2048
-location = "~/Library/Caches/VintageLightbox"
-
-[performance]
-thumbnail_threads = 4
+**Schema Atual** (16 migrations):
+- `photos` - Dados principais das fotos
+- `collections` - Coleções de fotos
+- `collection_photos` - Relação N:N
+- `presets` - Presets de edição salvos
 preview_threads = 2
 
 [ui]

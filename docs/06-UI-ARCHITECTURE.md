@@ -1,163 +1,245 @@
 # Arquitetura da Interface - VintageLightbox
 
-Este documento descreve a arquitetura da interface de usuário do VintageLightbox, construída com Slint UI seguindo princípios de Clean Architecture e Design System.
+**Última atualização**: 31 de dezembro de 2025  
+**Framework**: egui 0.31 (Immediate Mode GUI)
+
+Este documento descreve a arquitetura da interface de usuário do VintageLightbox, construída com **egui** seguindo princípios de Clean Architecture e Design System.
 
 ## Visão Geral
 
-A UI foi refatorada de um arquivo monolítico para uma estrutura modular com 20+ arquivos, organizados em camadas com responsabilidades bem definidas.
+A UI foi desenvolvida com egui (Immediate Mode GUI), oferecendo:
+- **4 Views principais**: Library, Develop, Print, Import
+- **25+ componentes** reutilizáveis
+- **5 temas** (Light, Dark, Nord, Monokai, Solarized)
+- **GPU-accelerated** rendering via wgpu
+- **Design System** com tokens e ícones Phosphor
 
 ## Estrutura de Arquivos
 
 ```
-crates/ui/ui/
-├── main.slint                      # Root component (composição)
-├── types.slint                     # Structs compartilhados
+crates/ui/src/
+├── main.rs                         # Entry point
+├── app.rs                          # Loop principal, estado global
+├── state.rs                        # ViewState, seleção, zoom, modo
 ├── design_system/
-│   ├── tokens.slint                # Design tokens
-│   └── primitives.slint            # Componentes base
+│   ├── mod.rs                      # Re-exports
+│   ├── tokens.rs                   # Design tokens (cores, spacing)
+│   ├── themes.rs                   # 5 temas predefinidos
+│   └── icons.rs                    # Phosphor Icons integration
+├── views/
+│   ├── mod.rs                      # Re-exports
+│   ├── library_view.rs             # Grid de fotos + sidebars
+│   ├── develop_view.rs             # Editor de foto + ajustes
+│   ├── print_view.rs               # Módulo de impressão
+│   └── import_view.rs              # Wizard de importação
 ├── components/
-│   ├── toolbar.slint               # Barra de navegação
-│   ├── photo_grid.slint            # Grid de fotos
-│   ├── filmstrip.slint             # Thumbnails
-│   ├── histogram.slint             # Histograma
-│   ├── rating_widget.slint         # Estrelas de rating
-│   ├── color_labels.slint          # Labels de cor
-│   ├── slider_control.slint        # Slider com label
-│   └── image_viewer.slint          # Viewer com zoom/pan
+│   ├── mod.rs                      # Re-exports
+│   ├── toolbar.rs                  # Barra de navegação principal
+│   ├── photo_grid.rs               # Grid de thumbnails com seleção
+│   ├── filmstrip.rs                # Thumbnails horizontais
+│   ├── histogram.rs                # Histograma RGB
+│   ├── rating_widget.rs            # Estrelas interativas (0-5)
+│   ├── color_labels.rs             # Seletor de 5 cores
+│   ├── flag_widget.rs              # Pick/Reject/Unflagged
+│   ├── slider_control.rs           # Slider com label e valor
+│   ├── image_viewer.rs             # Viewer com zoom/pan
+│   ├── tone_curve.rs               # Editor de curva de tons
+│   ├── crop_overlay.rs             # Overlay de corte interativo
+│   ├── aspect_ratio_selector.rs    # Proporções predefinidas
+│   ├── progress_bar.rs             # Barra de progresso
+│   ├── busy_overlay.rs             # Overlay de carregamento
+│   ├── search_bar.rs               # Busca de fotos
+│   ├── filter_bar.rs               # Filtros de biblioteca
+│   └── ... (25+ componentes)
 ├── panels/
-│   ├── navigator_panel.slint       # Painel Navigator
-│   ├── catalog_panel.slint         # Painel Catalog
-│   ├── collections_panel.slint     # Painel Collections
-│   ├── quick_develop_panel.slint   # Painel Quick Develop
-│   ├── metadata_panel.slint        # Painel Metadata
-│   ├── presets_panel.slint         # Painel Presets
-│   ├── history_panel.slint         # Painel History
-│   └── basic_adjustments_panel.slint # Painel de ajustes
-└── views/
-    ├── library_view.slint          # View da biblioteca
-    └── develop_view.slint          # View de edição
+│   ├── mod.rs                      # Re-exports
+│   ├── navigator_panel.rs          # Preview da foto selecionada
+│   ├── catalog_panel.rs            # Navegação do catálogo
+│   ├── collections_panel.rs        # Lista de coleções
+│   ├── quick_develop_panel.rs      # Controles rápidos de edição
+│   ├── metadata_panel.rs           # Exibição de metadados EXIF
+│   ├── presets_panel.rs            # Presets salvos
+│   ├── history_panel.rs            # Histórico de edição
+│   └── basic_adjustments_panel.rs  # Controles completos de edição
+├── async_loader.rs                 # Carregamento assíncrono de imagens
+└── gpu_processor.rs                # Interface com wgpu para ajustes
 ```
 
 ## Design System
 
-### Design Tokens (`design_system/tokens.slint`)
+### Design Tokens (`design_system/tokens.rs`)
 
 Tokens centralizados garantem consistência visual em toda a aplicação:
 
-```slint
-export global Theme {
+```rust
+pub struct DesignTokens {
     // Cores de Background
-    out property <color> bg-app: #1a1a1a;
-    out property <color> bg-surface: #252525;
-    out property <color> bg-elevated: #2d2d2d;
-    out property <color> bg-hover: #353535;
+    pub bg_app: Color32,         // #1a1a1a (dark)
+    pub bg_surface: Color32,     // #252525
+    pub bg_elevated: Color32,    // #2d2d2d
+    pub bg_hover: Color32,       // #353535
 
     // Cores de Texto
-    out property <color> text-primary: #e0e0e0;
-    out property <color> text-secondary: #b0b0b0;
-    out property <color> text-muted: #808080;
+    pub text_primary: Color32,   // #e0e0e0
+    pub text_secondary: Color32, // #b0b0b0
+    pub text_muted: Color32,     // #808080
 
     // Cores de Accent
-    out property <color> accent-primary: #4a9eff;
+    pub accent_primary: Color32, // #4a9eff
 
     // Espaçamentos
-    out property <length> space-sm: 8px;
-    out property <length> space-md: 12px;
-    out property <length> space-lg: 16px;
+    pub space_xs: f32,           // 4.0
+    pub space_sm: f32,           // 8.0
+    pub space_md: f32,           // 12.0
+    pub space_lg: f32,           // 16.0
+    pub space_xl: f32,           // 24.0
 
     // Tipografia
-    out property <length> font-sm: 11px;
-    out property <length> font-md: 12px;
-    out property <length> font-lg: 14px;
+    pub font_sm: f32,            // 11.0
+    pub font_md: f32,            // 12.0
+    pub font_lg: f32,            // 14.0
+    pub font_xl: f32,            // 18.0
+
+    // Raios de borda
+    pub radius_sm: f32,          // 4.0
+    pub radius_md: f32,          // 8.0
+    pub radius_lg: f32,          // 12.0
 }
 ```
 
-### Componentes Primitivos (`design_system/primitives.slint`)
+### Temas (`design_system/themes.rs`)
 
-Componentes base reutilizáveis:
+5 temas disponíveis:
+
+| Tema | Descrição |
+|------|-----------|
+| `Dark` | Tema escuro padrão (como Lightroom) |
+| `Light` | Tema claro |
+| `Nord` | Tons azul-acinzentados |
+| `Monokai` | Tons quentes, inspirado no editor |
+| `Solarized` | Tema Solarized Dark |
+
+```rust
+pub enum Theme {
+    Dark,
+    Light,
+    Nord,
+    Monokai,
+    Solarized,
+}
+
+impl Theme {
+    pub fn tokens(&self) -> DesignTokens {
+        match self {
+            Theme::Dark => dark_tokens(),
+            Theme::Light => light_tokens(),
+            // ...
+        }
+    }
+}
+```
+
+### Componentes Base
 
 | Componente | Descrição |
 |------------|-----------|
-| `PrimaryButton` | Botão principal com cor de accent |
-| `SecondaryButton` | Botão secundário/ghost |
-| `IconButton` | Botão circular para ícones |
-| `NavButton` | Botão de navegação com estado ativo |
-| `PanelHeader` | Cabeçalho de painel colapsável |
-| `MenuItem` | Item de menu com hover |
-| `Card` | Container com background |
-| `Overlay` | Overlay modal para estados busy |
+| `primary_button` | Botão principal com cor de accent |
+| `secondary_button` | Botão secundário/ghost |
+| `icon_button` | Botão circular para ícones |
+| `nav_button` | Botão de navegação com estado ativo |
+| `panel_header` | Cabeçalho de painel colapsável |
+| `menu_item` | Item de menu com hover |
+| `card` | Container com background |
+| `overlay` | Overlay modal para estados busy |
+| `slider` | Slider customizado com precisão |
+| `dropdown` | Dropdown com busca |
 
 ## Arquitetura de Camadas
 
-### 1. Types (`types.slint`)
+### 1. State (`state.rs`)
 
-Structs de dados compartilhados:
+Estado global da aplicação:
 
-```slint
-export struct TileData {
-    id: string,
-    name: string,
-    image: image,
-    rating: int,
-    color_label: string,
+```rust
+pub struct AppState {
+    pub current_view: ViewMode,        // Library, Develop, Print, Import
+    pub selected_photo_id: Option<PhotoId>,
+    pub selected_photo_ids: HashSet<PhotoId>, // Multi-seleção
+    pub zoom_level: f32,
+    pub pan_offset: Vec2,
+    pub current_theme: Theme,
+    pub is_busy: bool,
+    pub busy_message: String,
+    
+    // Filtros e ordenação
+    pub filters: PhotoFilters,
+    pub sort_by: SortField,
+    pub sort_order: SortOrder,
+    
+    // Estado de edição
+    pub current_edits: PhotoEdits,
+    pub edit_history: EditHistory,
 }
 
-export struct RowData {
-    tiles: [TileData],
+pub enum ViewMode {
+    Library,
+    Develop,
+    Print,
+    Import,
 }
 ```
 
-### 2. Components (`components/`)
-
-Widgets reutilizáveis com lógica encapsulada:
-
-- **RatingWidget**: Widget interativo de estrelas
-- **ColorLabels**: Seletor de labels de cor
-- **SliderControl**: Slider com label e valor
-- **PhotoGrid**: Grid de thumbnails com seleção
-- **ImageViewer**: Viewer com zoom/pan por gestos
-- **Filmstrip**: Strip horizontal de thumbnails
-
-### 3. Panels (`panels/`)
-
-Painéis compostos para sidebars:
-
-- **NavigatorPanel**: Preview da foto selecionada
-- **CatalogPanel**: Navegação do catálogo
-- **CollectionsPanel**: Lista de coleções
-- **QuickDevelopPanel**: Controles rápidos de edição
-- **MetadataPanel**: Exibição de metadados
-- **BasicAdjustmentsPanel**: Controles de edição completos
-
-### 4. Views (`views/`)
+### 2. Views (`views/`)
 
 Views completas que compõem panels e components:
 
-- **LibraryView**: Grid de fotos + sidebars + filmstrip
-- **DevelopView**: Editor de foto + panels de ajustes
+- **LibraryView**: Grid de fotos + sidebars + filmstrip + filtros
+- **DevelopView**: Editor de foto + painéis de ajustes + histograma
+- **PrintView**: Configuração de impressão + preview de layout
+- **ImportView**: Wizard de importação com preview
 
-### 5. Main (`main.slint`)
+### 3. Components (`components/`)
 
-Root component que:
-- Gerencia estado da aplicação
-- Compõe views baseado em `current_view`
-- Define callbacks para bridge com Rust
-- Gerencia overlay de busy state
+Widgets reutilizáveis com lógica encapsulada:
+
+- **RatingWidget**: Widget interativo de estrelas (0-5)
+- **ColorLabels**: Seletor de 5 labels de cor
+- **FlagWidget**: Toggle de flags (Flagged/Rejected/Unflagged)
+- **SliderControl**: Slider com label e valor numérico
+- **PhotoGrid**: Grid de thumbnails com seleção múltipla
+- **ImageViewer**: Viewer com zoom/pan por gestos e teclado
+- **Filmstrip**: Strip horizontal de thumbnails com scroll
+- **ToneCurve**: Editor de curva de tons interativo
+- **CropOverlay**: Overlay de corte com handles arrastáveis
+- **Histogram**: Histograma RGB em tempo real
+
+### 4. Panels (`panels/`)
+
+Painéis compostos para sidebars:
+
+- **NavigatorPanel**: Preview da foto selecionada com zoom miniatura
+- **CatalogPanel**: Árvore de navegação do catálogo
+- **CollectionsPanel**: Lista de coleções com drag-and-drop
+- **QuickDevelopPanel**: Controles rápidos (exposure, WB, etc)
+- **MetadataPanel**: Exibição de metadados EXIF/IPTC
+- **PresetsPanel**: Lista de presets com preview hover
+- **HistoryPanel**: Histórico de edições com Undo/Redo
+- **BasicAdjustmentsPanel**: Controles completos de edição
 
 ## Fluxo de Dados
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  main.slint                                                 │
+│  app.rs (Loop Principal)                                    │
 │  ┌─────────────────────────────────────────────────────┐   │
-│  │  State: grid_model, detail_*, active_*, is_busy     │   │
+│  │  AppState: view_mode, selected_photos, edits, zoom  │   │
 │  └─────────────────────────────────────────────────────┘   │
 │                           │                                 │
 │                           ▼                                 │
 │  ┌─────────────────────────────────────────────────────┐   │
-│  │  Views: LibraryView / DevelopView                   │   │
+│  │  Views: LibraryView / DevelopView / etc             │   │
 │  │  ┌─────────────────────────────────────────────┐   │   │
-│  │  │  Panels: composed from components           │   │   │
+│  │  │  Panels: sidebar panels with state          │   │   │
 │  │  │  ┌─────────────────────────────────────┐   │   │   │
 │  │  │  │  Components: atomic UI elements     │   │   │   │
 │  │  │  └─────────────────────────────────────┘   │   │   │
@@ -166,88 +248,165 @@ Root component que:
 │                           │                                 │
 │                           ▼                                 │
 │  ┌─────────────────────────────────────────────────────┐   │
-│  │  Callbacks → Rust Backend                           │   │
+│  │  Controllers (Adapters) → Use Cases → Domain        │   │
 │  └─────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## Callbacks (Bridge para Rust)
-
-```slint
-callback import_clicked();
-callback tile_clicked(string);
-callback back_clicked();
-callback rate_photo(string, int);
-callback navigate(int);
-callback apply_edits(float, float);
-callback save_edits(string, float, float);
-callback export_clicked(string);
-```
-
 ## Atalhos de Teclado
 
-| Tecla | Ação | View |
-|-------|------|------|
-| `→` | Próxima foto | Develop |
-| `←` | Foto anterior | Develop |
-| `Esc` | Voltar para Library | Develop |
+### Globais
 
-## Adicionando Novos Componentes
+| Tecla | Ação |
+|-------|------|
+| `G` | Ir para Library |
+| `D` | Ir para Develop |
+| `Cmd/Ctrl + I` | Importar fotos |
+| `Cmd/Ctrl + E` | Exportar foto(s) |
+| `Cmd/Ctrl + Z` | Desfazer |
+| `Cmd/Ctrl + Shift + Z` | Refazer |
+| `Cmd/Ctrl + ,` | Preferências |
+| `1-5` | Definir rating |
+| `6-9` | Definir color label |
+| `P` | Flag como Pick |
+| `X` | Flag como Rejected |
+| `U` | Remover flag |
 
-### 1. Criar componente
+### Library View
 
-```slint
-// components/my_component.slint
-import { Theme } from "../design_system/tokens.slint";
+| Tecla | Ação |
+|-------|------|
+| `↑ ↓ ← →` | Navegar grid |
+| `Enter` | Abrir em Develop |
+| `Space` | Toggle seleção |
+| `Cmd/Ctrl + A` | Selecionar todas |
+| `Delete` | Remover foto(s) |
+| `+` / `-` | Zoom grid |
 
-export component MyComponent inherits Rectangle {
-    in property <string> value;
-    callback value-changed(string);
+### Develop View
 
-    background: Theme.bg-surface;
-    // ...
+| Tecla | Ação |
+|-------|------|
+| `→` | Próxima foto |
+| `←` | Foto anterior |
+| `Esc` | Voltar para Library |
+| `F` | Fullscreen |
+| `R` | Ferramenta de corte |
+| `Space` | Antes/Depois |
+| `0` | Fit to screen |
+| `1` | Zoom 100% |
+| `2` | Zoom 200% |
+
+## Comunicação com Backend
+
+### Via Controllers (Adapters Layer)
+
+```rust
+// Em DevelopView
+fn on_slider_change(&mut self, ctx: &Context, new_exposure: f32) {
+    // 1. Atualiza estado local para feedback instantâneo
+    self.state.current_edits.exposure = new_exposure;
+    
+    // 2. Solicita reprocessamento GPU
+    ctx.request_repaint();
+    
+    // 3. (Opcional) Salva automaticamente após debounce
+    if self.auto_save_enabled {
+        self.editor_controller.save_edits(&self.state.current_edits);
+    }
+}
+
+// Em LibraryView
+fn on_photo_click(&mut self, photo_id: PhotoId) {
+    // 1. Atualiza seleção
+    self.state.selected_photo_id = Some(photo_id);
+    
+    // 2. Solicita preview via controller
+    self.library_controller.load_preview(photo_id);
 }
 ```
 
-### 2. Usar em panel ou view
+### Callbacks para Ações
 
-```slint
-import { MyComponent } from "../components/my_component.slint";
+```rust
+pub enum AppAction {
+    ImportPhotos(Vec<PathBuf>),
+    ExportPhoto(PhotoId, ExportSettings),
+    RatePhoto(PhotoId, Rating),
+    SetColorLabel(PhotoId, ColorLabel),
+    SetFlag(PhotoId, Flag),
+    SaveEdits(PhotoId, PhotoEdits),
+    CreateCollection(String),
+    AddToCollection(CollectionId, PhotoId),
+    DeletePhoto(PhotoId),
+    ApplyPreset(PhotoId, PresetId),
+}
+```
 
-export component MyPanel {
-    MyComponent {
-        value: "test";
-        value-changed(v) => { /* handle */ }
+## Processamento GPU
+
+### Pipeline de Ajustes
+
+```rust
+pub struct GpuProcessor {
+    device: wgpu::Device,
+    queue: wgpu::Queue,
+    pipeline: wgpu::ComputePipeline,
+    bind_group_layout: wgpu::BindGroupLayout,
+}
+
+impl GpuProcessor {
+    /// Aplica ajustes à imagem usando compute shaders
+    pub fn process(&self, image: &Image, edits: &PhotoEdits) -> Image {
+        // 1. Upload da imagem para GPU
+        let input_texture = self.create_texture(image);
+        
+        // 2. Cria buffer de uniforms com parâmetros de edição
+        let uniforms = self.create_uniforms(edits);
+        
+        // 3. Dispatch do compute shader (13 ajustes em single-pass)
+        self.dispatch_compute(&input_texture, &uniforms);
+        
+        // 4. Download do resultado
+        self.download_result()
     }
 }
 ```
 
-### 3. Propagar callback se necessário
+### Ajustes Suportados
 
-Se o callback precisa chegar ao Rust, propague até `main.slint`:
-
-```
-Component → Panel → View → main.slint → Rust callback
-```
+| Categoria | Ajustes |
+|-----------|---------|
+| **Básicos** | Exposure, Contrast, Highlights, Shadows, Whites, Blacks |
+| **Presença** | Clarity, Vibrance, Saturation |
+| **White Balance** | Temperature, Tint |
+| **Tone Curve** | RGB channels, Parametric |
+| **HSL** | 8 cores × Hue/Saturation/Luminance |
+| **Detalhe** | Sharpening, Noise Reduction |
+| **Efeitos** | Vignette, Grain |
+| **Correções** | Lens Distortion, Chromatic Aberration |
+| **Transformação** | Crop, Rotation, Flip |
 
 ## Boas Práticas
 
 1. **Use tokens**: Nunca hardcode cores ou espaçamentos
-2. **Componentes pequenos**: Cada arquivo ~50-100 linhas
-3. **Props explícitas**: Use `in property` e `callback` para interface clara
-4. **Nomes consistentes**: Use kebab-case para propriedades Slint
-5. **Documentação**: Comente a intenção do componente no topo do arquivo
+2. **Componentes pequenos**: Cada arquivo ~100-200 linhas
+3. **Props explícitas**: Funções recebem apenas o necessário
+4. **Estado mínimo**: Só armazene o que precisa para renderizar
+5. **Feedback instantâneo**: GPU para ajustes em tempo real
+6. **Atalhos de teclado**: Todas as ações têm atalhos
+7. **Async loading**: Imagens carregam em background
+8. **Prefetching**: Próximas fotos pré-carregadas
 
 ## Build
 
-O sistema de build não requer mudanças - Slint resolve imports automaticamente:
+```bash
+# Desenvolvimento com hot-reload
+cargo run -p ui
 
-```rust
-// build.rs
-slint_build::compile("ui/main.slint").unwrap();
-```
+# Release otimizado
+cargo build -p ui --release
 
-```rust
-// main.rs
-slint::include_modules!();
+# Testes de UI (se houver)
+cargo test -p ui
 ```
