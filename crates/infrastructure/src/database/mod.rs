@@ -5,10 +5,12 @@
 pub mod photo_repository;
 pub mod collection_repository;
 pub mod preset_repository;
+pub mod unit_of_work;
 
 pub use photo_repository::PhotoRepositoryImpl;
 pub use collection_repository::CollectionRepositoryImpl;
 pub use preset_repository::SqlitePresetRepository;
+pub use unit_of_work::{SqliteUnitOfWork, SqliteTransactionScope};
 
 use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
 

@@ -17,7 +17,7 @@ pub mod services;
 pub mod system;
 
 // Re-exports for main.rs compatibility
-pub use database::{create_pool, run_migrations, PhotoRepositoryImpl, SqlitePresetRepository, CollectionRepositoryImpl};
+pub use database::{create_pool, run_migrations, PhotoRepositoryImpl, SqlitePresetRepository, CollectionRepositoryImpl, SqliteUnitOfWork, SqliteTransactionScope};
 pub use exif_reader::ExifReader;
 pub use thumbnail_generator::ThumbnailGeneratorImpl;
 pub use image_exporter::ImageExporterImpl;

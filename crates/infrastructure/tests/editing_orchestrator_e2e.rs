@@ -23,6 +23,7 @@ use domain::{
 use infrastructure::{
     create_pool, run_migrations,
     PhotoRepositoryImpl,
+    SqliteUnitOfWork,
     cache::preview_manager::PreviewManager,
     services::EditingOrchestratorImpl,
 };
@@ -73,7 +74,7 @@ impl EditObserver for TestObserver {
 
 /// Cria uma estrutura de teste com componentes reais
 async fn setup_test_environment() -> (
-    Arc<EditingOrchestratorImpl<PhotoRepositoryImpl, PreviewManager>>,
+    Arc<EditingOrchestratorImpl<PreviewManager>>,
     Arc<PhotoRepositoryImpl>,
     Arc<PreviewManager>,
     tempfile::TempDir,
@@ -86,7 +87,8 @@ async fn setup_test_environment() -> (
     let pool = create_pool(&db_url).await.expect("Failed to create pool");
     run_migrations(&pool).await.expect("Failed to run migrations");
     
-    let photo_repository = Arc::new(PhotoRepositoryImpl::new(pool));
+    let photo_repository = Arc::new(PhotoRepositoryImpl::new(pool.clone()));
+    let unit_of_work = Arc::new(SqliteUnitOfWork::new(pool));
     
     // Criar PreviewManager com diretório temporário
     let preview_dir = temp_dir.path().join("previews");
@@ -96,6 +98,7 @@ async fn setup_test_environment() -> (
     let orchestrator = Arc::new(EditingOrchestratorImpl::new(
         photo_repository.clone(),
         preview_manager.clone(),
+        unit_of_work,
     ));
     
     (orchestrator, photo_repository, preview_manager, temp_dir)

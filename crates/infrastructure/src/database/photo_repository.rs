@@ -1,6 +1,20 @@
 //! SQLite Photo Repository Implementation
 //!
 //! Implementação concreta do PhotoRepository usando SQLite via SQLx.
+//!
+//! ## Uso com UnitOfWork
+//!
+//! O repository suporta operações transacionais via métodos `*_within`:
+//!
+//! ```rust,ignore
+//! let uow = SqliteUnitOfWork::new(pool);
+//! let mut tx = uow.begin().await?;
+//! 
+//! repo.save_within(&mut tx, &photo).await?;
+//! repo.update_within(&mut tx, &photo).await?;
+//! 
+//! tx.commit().await?;
+//! ```
 
 use async_trait::async_trait;
 use domain::{
@@ -10,6 +24,8 @@ use domain::{
     DomainError, DomainResult,
 };
 use sqlx::{Row, SqlitePool};
+
+use super::unit_of_work::SqliteTransactionScope;
 
 /// Implementação SQLite do PhotoRepository
 pub struct PhotoRepositoryImpl {
@@ -215,6 +231,367 @@ impl PhotoRepositoryImpl {
             edit_crop_flip_v,
             edit_crop_fill_mode,
         ))
+    }
+
+    /// Helper para extrair valores de bind de uma Photo
+    fn photo_bind_values(photo: &Photo) -> PhotoBindValues {
+        PhotoBindValues {
+            id: photo.id().to_string(),
+            file_path: photo.file_path().to_string_lossy().to_string(),
+            rating: photo.rating().map(|r| r.value() as i64),
+            color_label: photo.color_label().map(|c| c.name().to_string()),
+            flag: photo.flag().map(|f| f.as_code()),
+            is_edited: photo.is_edited(),
+            imported_at: photo.imported_at().to_rfc3339(),
+            modified_at: photo.modified_at().to_rfc3339(),
+            thumbnail_path: photo.thumbnail_path().map(|p| p.to_string_lossy().to_string()),
+            preview_path: photo.preview_path().map(|p| p.to_string_lossy().to_string()),
+            edit_exposure: photo.edit_exposure(),
+            edit_contrast: photo.edit_contrast(),
+            edit_temperature: photo.edit_temperature(),
+            edit_tint: photo.edit_tint(),
+            edit_highlights: photo.edit_highlights(),
+            edit_shadows: photo.edit_shadows(),
+            edit_whites: photo.edit_whites(),
+            edit_blacks: photo.edit_blacks(),
+            edit_clarity: photo.edit_clarity(),
+            edit_vibrance: photo.edit_vibrance(),
+            edit_saturation: photo.edit_saturation(),
+            edit_tone_curve_shadows: photo.edit_tone_curve_shadows(),
+            edit_tone_curve_darks: photo.edit_tone_curve_darks(),
+            edit_tone_curve_lights: photo.edit_tone_curve_lights(),
+            edit_tone_curve_highlights: photo.edit_tone_curve_highlights(),
+            content_hash: photo.content_hash().map(|s| s.to_string()),
+            edit_hsl_red_sat: photo.edit_hsl_red_sat(),
+            edit_hsl_orange_sat: photo.edit_hsl_orange_sat(),
+            edit_hsl_yellow_sat: photo.edit_hsl_yellow_sat(),
+            edit_hsl_green_sat: photo.edit_hsl_green_sat(),
+            edit_hsl_aqua_sat: photo.edit_hsl_aqua_sat(),
+            edit_hsl_blue_sat: photo.edit_hsl_blue_sat(),
+            edit_hsl_purple_sat: photo.edit_hsl_purple_sat(),
+            edit_hsl_magenta_sat: photo.edit_hsl_magenta_sat(),
+            edit_hsl_red_hue: photo.edit_hsl_red_hue(),
+            edit_hsl_orange_hue: photo.edit_hsl_orange_hue(),
+            edit_hsl_yellow_hue: photo.edit_hsl_yellow_hue(),
+            edit_hsl_green_hue: photo.edit_hsl_green_hue(),
+            edit_hsl_aqua_hue: photo.edit_hsl_aqua_hue(),
+            edit_hsl_blue_hue: photo.edit_hsl_blue_hue(),
+            edit_hsl_purple_hue: photo.edit_hsl_purple_hue(),
+            edit_hsl_magenta_hue: photo.edit_hsl_magenta_hue(),
+            edit_hsl_red_lum: photo.edit_hsl_red_lum(),
+            edit_hsl_orange_lum: photo.edit_hsl_orange_lum(),
+            edit_hsl_yellow_lum: photo.edit_hsl_yellow_lum(),
+            edit_hsl_green_lum: photo.edit_hsl_green_lum(),
+            edit_hsl_aqua_lum: photo.edit_hsl_aqua_lum(),
+            edit_hsl_blue_lum: photo.edit_hsl_blue_lum(),
+            edit_hsl_purple_lum: photo.edit_hsl_purple_lum(),
+            edit_hsl_magenta_lum: photo.edit_hsl_magenta_lum(),
+            edit_lens_distortion: photo.edit_lens_distortion(),
+            edit_lens_vignette_amount: photo.edit_lens_vignette_amount(),
+            edit_lens_vignette_midpoint: photo.edit_lens_vignette_midpoint(),
+            edit_nr_luminance: photo.edit_nr_luminance(),
+            edit_nr_color: photo.edit_nr_color(),
+            edit_sharpen_amount: photo.edit_sharpen_amount(),
+            edit_sharpen_radius: photo.edit_sharpen_radius(),
+            edit_crop_x: photo.edit_crop_x(),
+            edit_crop_y: photo.edit_crop_y(),
+            edit_crop_width: photo.edit_crop_width(),
+            edit_crop_height: photo.edit_crop_height(),
+            edit_crop_rotation: photo.edit_crop_rotation(),
+            edit_crop_angle: photo.edit_crop_angle(),
+            edit_crop_flip_h: photo.edit_crop_flip_h(),
+            edit_crop_flip_v: photo.edit_crop_flip_v(),
+            edit_crop_fill_mode: photo.edit_crop_fill_mode(),
+            metadata: photo.metadata().and_then(|m| serde_json::to_string(m).ok()),
+        }
+    }
+}
+
+/// Struct auxiliar com todos os valores para bind de uma Photo
+#[allow(dead_code)]
+struct PhotoBindValues {
+    id: String,
+    file_path: String,
+    rating: Option<i64>,
+    color_label: Option<String>,
+    flag: Option<i32>,
+    is_edited: bool,
+    imported_at: String,
+    modified_at: String,
+    thumbnail_path: Option<String>,
+    preview_path: Option<String>,
+    edit_exposure: Option<f32>,
+    edit_contrast: Option<f32>,
+    edit_temperature: Option<f32>,
+    edit_tint: Option<f32>,
+    edit_highlights: Option<f32>,
+    edit_shadows: Option<f32>,
+    edit_whites: Option<f32>,
+    edit_blacks: Option<f32>,
+    edit_clarity: Option<f32>,
+    edit_vibrance: Option<f32>,
+    edit_saturation: Option<f32>,
+    edit_tone_curve_shadows: Option<f32>,
+    edit_tone_curve_darks: Option<f32>,
+    edit_tone_curve_lights: Option<f32>,
+    edit_tone_curve_highlights: Option<f32>,
+    content_hash: Option<String>,
+    edit_hsl_red_sat: Option<f32>,
+    edit_hsl_orange_sat: Option<f32>,
+    edit_hsl_yellow_sat: Option<f32>,
+    edit_hsl_green_sat: Option<f32>,
+    edit_hsl_aqua_sat: Option<f32>,
+    edit_hsl_blue_sat: Option<f32>,
+    edit_hsl_purple_sat: Option<f32>,
+    edit_hsl_magenta_sat: Option<f32>,
+    edit_hsl_red_hue: Option<f32>,
+    edit_hsl_orange_hue: Option<f32>,
+    edit_hsl_yellow_hue: Option<f32>,
+    edit_hsl_green_hue: Option<f32>,
+    edit_hsl_aqua_hue: Option<f32>,
+    edit_hsl_blue_hue: Option<f32>,
+    edit_hsl_purple_hue: Option<f32>,
+    edit_hsl_magenta_hue: Option<f32>,
+    edit_hsl_red_lum: Option<f32>,
+    edit_hsl_orange_lum: Option<f32>,
+    edit_hsl_yellow_lum: Option<f32>,
+    edit_hsl_green_lum: Option<f32>,
+    edit_hsl_aqua_lum: Option<f32>,
+    edit_hsl_blue_lum: Option<f32>,
+    edit_hsl_purple_lum: Option<f32>,
+    edit_hsl_magenta_lum: Option<f32>,
+    edit_lens_distortion: Option<f32>,
+    edit_lens_vignette_amount: Option<f32>,
+    edit_lens_vignette_midpoint: Option<f32>,
+    edit_nr_luminance: Option<f32>,
+    edit_nr_color: Option<f32>,
+    edit_sharpen_amount: Option<f32>,
+    edit_sharpen_radius: Option<f32>,
+    edit_crop_x: Option<f32>,
+    edit_crop_y: Option<f32>,
+    edit_crop_width: Option<f32>,
+    edit_crop_height: Option<f32>,
+    edit_crop_rotation: Option<i32>,
+    edit_crop_angle: Option<f32>,
+    edit_crop_flip_h: Option<bool>,
+    edit_crop_flip_v: Option<bool>,
+    edit_crop_fill_mode: Option<u8>,
+    metadata: Option<String>,
+}
+
+/// Métodos transacionais para PhotoRepository
+impl PhotoRepositoryImpl {
+    /// Salva uma foto dentro de uma transação existente.
+    ///
+    /// Use este método quando precisar garantir atomicidade entre
+    /// múltiplas operações de banco de dados.
+    ///
+    /// ## Exemplo
+    /// ```rust,ignore
+    /// let mut tx = uow.begin().await?;
+    /// repo.save_within(&mut tx, &photo).await?;
+    /// tx.commit().await?;
+    /// ```
+    pub async fn save_within(
+        &self,
+        tx: &mut SqliteTransactionScope,
+        photo: &Photo,
+    ) -> DomainResult<()> {
+        let v = Self::photo_bind_values(photo);
+
+        sqlx::query(
+            "INSERT INTO photos (id, file_path, rating, color_label, flag, is_edited, imported_at, modified_at, metadata, thumbnail_path, preview_path, edit_exposure, edit_contrast, edit_temperature, edit_tint, edit_highlights, edit_shadows, edit_whites, edit_blacks, edit_clarity, edit_vibrance, edit_saturation, edit_tone_curve_shadows, edit_tone_curve_darks, edit_tone_curve_lights, edit_tone_curve_highlights, content_hash, edit_hsl_red_sat, edit_hsl_orange_sat, edit_hsl_yellow_sat, edit_hsl_green_sat, edit_hsl_aqua_sat, edit_hsl_blue_sat, edit_hsl_purple_sat, edit_hsl_magenta_sat, edit_hsl_red_hue, edit_hsl_orange_hue, edit_hsl_yellow_hue, edit_hsl_green_hue, edit_hsl_aqua_hue, edit_hsl_blue_hue, edit_hsl_purple_hue, edit_hsl_magenta_hue, edit_hsl_red_lum, edit_hsl_orange_lum, edit_hsl_yellow_lum, edit_hsl_green_lum, edit_hsl_aqua_lum, edit_hsl_blue_lum, edit_hsl_purple_lum, edit_hsl_magenta_lum, edit_lens_distortion, edit_lens_vignette_amount, edit_lens_vignette_midpoint, edit_nr_luminance, edit_nr_color, edit_sharpen_amount, edit_sharpen_radius, edit_crop_x, edit_crop_y, edit_crop_width, edit_crop_height, edit_crop_rotation, edit_crop_angle, edit_crop_flip_h, edit_crop_flip_v, edit_crop_fill_mode)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        )
+        .bind(&v.id)
+        .bind(&v.file_path)
+        .bind(v.rating)
+        .bind(&v.color_label)
+        .bind(v.flag)
+        .bind(v.is_edited)
+        .bind(&v.imported_at)
+        .bind(&v.modified_at)
+        .bind(&v.metadata)
+        .bind(&v.thumbnail_path)
+        .bind(&v.preview_path)
+        .bind(v.edit_exposure)
+        .bind(v.edit_contrast)
+        .bind(v.edit_temperature)
+        .bind(v.edit_tint)
+        .bind(v.edit_highlights)
+        .bind(v.edit_shadows)
+        .bind(v.edit_whites)
+        .bind(v.edit_blacks)
+        .bind(v.edit_clarity)
+        .bind(v.edit_vibrance)
+        .bind(v.edit_saturation)
+        .bind(v.edit_tone_curve_shadows)
+        .bind(v.edit_tone_curve_darks)
+        .bind(v.edit_tone_curve_lights)
+        .bind(v.edit_tone_curve_highlights)
+        .bind(&v.content_hash)
+        .bind(v.edit_hsl_red_sat)
+        .bind(v.edit_hsl_orange_sat)
+        .bind(v.edit_hsl_yellow_sat)
+        .bind(v.edit_hsl_green_sat)
+        .bind(v.edit_hsl_aqua_sat)
+        .bind(v.edit_hsl_blue_sat)
+        .bind(v.edit_hsl_purple_sat)
+        .bind(v.edit_hsl_magenta_sat)
+        .bind(v.edit_hsl_red_hue)
+        .bind(v.edit_hsl_orange_hue)
+        .bind(v.edit_hsl_yellow_hue)
+        .bind(v.edit_hsl_green_hue)
+        .bind(v.edit_hsl_aqua_hue)
+        .bind(v.edit_hsl_blue_hue)
+        .bind(v.edit_hsl_purple_hue)
+        .bind(v.edit_hsl_magenta_hue)
+        .bind(v.edit_hsl_red_lum)
+        .bind(v.edit_hsl_orange_lum)
+        .bind(v.edit_hsl_yellow_lum)
+        .bind(v.edit_hsl_green_lum)
+        .bind(v.edit_hsl_aqua_lum)
+        .bind(v.edit_hsl_blue_lum)
+        .bind(v.edit_hsl_purple_lum)
+        .bind(v.edit_hsl_magenta_lum)
+        .bind(v.edit_lens_distortion)
+        .bind(v.edit_lens_vignette_amount)
+        .bind(v.edit_lens_vignette_midpoint)
+        .bind(v.edit_nr_luminance)
+        .bind(v.edit_nr_color)
+        .bind(v.edit_sharpen_amount)
+        .bind(v.edit_sharpen_radius)
+        .bind(v.edit_crop_x)
+        .bind(v.edit_crop_y)
+        .bind(v.edit_crop_width)
+        .bind(v.edit_crop_height)
+        .bind(v.edit_crop_rotation)
+        .bind(v.edit_crop_angle)
+        .bind(v.edit_crop_flip_h)
+        .bind(v.edit_crop_flip_v)
+        .bind(v.edit_crop_fill_mode)
+        .execute(&mut **tx.connection())
+        .await
+        .map_err(|e| DomainError::InvalidOperation(format!("Failed to save photo: {}", e)))?;
+
+        tx.record_operation();
+        Ok(())
+    }
+
+    /// Atualiza uma foto dentro de uma transação existente.
+    ///
+    /// Use este método quando precisar garantir atomicidade entre
+    /// múltiplas operações de banco de dados.
+    pub async fn update_within(
+        &self,
+        tx: &mut SqliteTransactionScope,
+        photo: &Photo,
+    ) -> DomainResult<()> {
+        let v = Self::photo_bind_values(photo);
+
+        let result = sqlx::query(
+            "UPDATE photos
+             SET file_path = ?, rating = ?, color_label = ?, flag = ?, is_edited = ?, modified_at = ?, metadata = ?, thumbnail_path = ?, preview_path = ?, edit_exposure = ?, edit_contrast = ?, edit_temperature = ?, edit_tint = ?, edit_highlights = ?, edit_shadows = ?, edit_whites = ?, edit_blacks = ?, edit_clarity = ?, edit_vibrance = ?, edit_saturation = ?, edit_tone_curve_shadows = ?, edit_tone_curve_darks = ?, edit_tone_curve_lights = ?, edit_tone_curve_highlights = ?, content_hash = ?, edit_hsl_red_sat = ?, edit_hsl_orange_sat = ?, edit_hsl_yellow_sat = ?, edit_hsl_green_sat = ?, edit_hsl_aqua_sat = ?, edit_hsl_blue_sat = ?, edit_hsl_purple_sat = ?, edit_hsl_magenta_sat = ?, edit_hsl_red_hue = ?, edit_hsl_orange_hue = ?, edit_hsl_yellow_hue = ?, edit_hsl_green_hue = ?, edit_hsl_aqua_hue = ?, edit_hsl_blue_hue = ?, edit_hsl_purple_hue = ?, edit_hsl_magenta_hue = ?, edit_hsl_red_lum = ?, edit_hsl_orange_lum = ?, edit_hsl_yellow_lum = ?, edit_hsl_green_lum = ?, edit_hsl_aqua_lum = ?, edit_hsl_blue_lum = ?, edit_hsl_purple_lum = ?, edit_hsl_magenta_lum = ?, edit_lens_distortion = ?, edit_lens_vignette_amount = ?, edit_lens_vignette_midpoint = ?, edit_nr_luminance = ?, edit_nr_color = ?, edit_sharpen_amount = ?, edit_sharpen_radius = ?, edit_crop_x = ?, edit_crop_y = ?, edit_crop_width = ?, edit_crop_height = ?, edit_crop_rotation = ?, edit_crop_angle = ?, edit_crop_flip_h = ?, edit_crop_flip_v = ?, edit_crop_fill_mode = ?
+             WHERE id = ?"
+        )
+        .bind(&v.file_path)
+        .bind(v.rating)
+        .bind(&v.color_label)
+        .bind(v.flag)
+        .bind(v.is_edited)
+        .bind(&v.modified_at)
+        .bind(&v.metadata)
+        .bind(&v.thumbnail_path)
+        .bind(&v.preview_path)
+        .bind(v.edit_exposure)
+        .bind(v.edit_contrast)
+        .bind(v.edit_temperature)
+        .bind(v.edit_tint)
+        .bind(v.edit_highlights)
+        .bind(v.edit_shadows)
+        .bind(v.edit_whites)
+        .bind(v.edit_blacks)
+        .bind(v.edit_clarity)
+        .bind(v.edit_vibrance)
+        .bind(v.edit_saturation)
+        .bind(v.edit_tone_curve_shadows)
+        .bind(v.edit_tone_curve_darks)
+        .bind(v.edit_tone_curve_lights)
+        .bind(v.edit_tone_curve_highlights)
+        .bind(&v.content_hash)
+        .bind(v.edit_hsl_red_sat)
+        .bind(v.edit_hsl_orange_sat)
+        .bind(v.edit_hsl_yellow_sat)
+        .bind(v.edit_hsl_green_sat)
+        .bind(v.edit_hsl_aqua_sat)
+        .bind(v.edit_hsl_blue_sat)
+        .bind(v.edit_hsl_purple_sat)
+        .bind(v.edit_hsl_magenta_sat)
+        .bind(v.edit_hsl_red_hue)
+        .bind(v.edit_hsl_orange_hue)
+        .bind(v.edit_hsl_yellow_hue)
+        .bind(v.edit_hsl_green_hue)
+        .bind(v.edit_hsl_aqua_hue)
+        .bind(v.edit_hsl_blue_hue)
+        .bind(v.edit_hsl_purple_hue)
+        .bind(v.edit_hsl_magenta_hue)
+        .bind(v.edit_hsl_red_lum)
+        .bind(v.edit_hsl_orange_lum)
+        .bind(v.edit_hsl_yellow_lum)
+        .bind(v.edit_hsl_green_lum)
+        .bind(v.edit_hsl_aqua_lum)
+        .bind(v.edit_hsl_blue_lum)
+        .bind(v.edit_hsl_purple_lum)
+        .bind(v.edit_hsl_magenta_lum)
+        .bind(v.edit_lens_distortion)
+        .bind(v.edit_lens_vignette_amount)
+        .bind(v.edit_lens_vignette_midpoint)
+        .bind(v.edit_nr_luminance)
+        .bind(v.edit_nr_color)
+        .bind(v.edit_sharpen_amount)
+        .bind(v.edit_sharpen_radius)
+        .bind(v.edit_crop_x)
+        .bind(v.edit_crop_y)
+        .bind(v.edit_crop_width)
+        .bind(v.edit_crop_height)
+        .bind(v.edit_crop_rotation)
+        .bind(v.edit_crop_angle)
+        .bind(v.edit_crop_flip_h)
+        .bind(v.edit_crop_flip_v)
+        .bind(v.edit_crop_fill_mode)
+        .bind(&v.id)
+        .execute(&mut **tx.connection())
+        .await
+        .map_err(|e| DomainError::InvalidOperation(format!("Failed to update photo: {}", e)))?;
+
+        if result.rows_affected() == 0 {
+            return Err(DomainError::PhotoNotFound);
+        }
+
+        tx.record_operation();
+        Ok(())
+    }
+
+    /// Deleta uma foto dentro de uma transação existente.
+    pub async fn delete_within(
+        &self,
+        tx: &mut SqliteTransactionScope,
+        id: &PhotoId,
+    ) -> DomainResult<()> {
+        let id_str = id.to_string();
+
+        let result = sqlx::query("DELETE FROM photos WHERE id = ?")
+            .bind(&id_str)
+            .execute(&mut **tx.connection())
+            .await
+            .map_err(|e| DomainError::InvalidOperation(format!("Failed to delete photo: {}", e)))?;
+
+        if result.rows_affected() == 0 {
+            return Err(DomainError::PhotoNotFound);
+        }
+
+        tx.record_operation();
+        Ok(())
     }
 }
 
