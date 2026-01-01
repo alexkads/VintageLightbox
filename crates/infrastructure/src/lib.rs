@@ -24,4 +24,5 @@ pub use image_exporter::ImageExporterImpl;
 pub use file_organizer::FileOrganizerImpl;
 pub use intelligent_fill::OnnxInpainterImpl;
 pub use system::system_gateway::SystemGatewayImpl;
+pub use services::EditingOrchestratorImpl;
 // pub use fs::FileSystemImpl; // Commenting out until verified

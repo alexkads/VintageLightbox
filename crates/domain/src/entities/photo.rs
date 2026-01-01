@@ -4,7 +4,7 @@
 //! Implementado usando TDD.
 
 use crate::{
-    value_objects::{ColorLabel, FilePath, Flag, PhotoId, Rating},
+    value_objects::{ColorLabel, FilePath, Flag, PhotoId, Rating, PhotoEdits, CropSettings},
     DomainResult,
 };
 use chrono::{DateTime, Utc};
@@ -628,6 +628,202 @@ impl Photo {
         self.modified_at = Utc::now();
 
         Ok(())
+    }
+
+    /// Aplica edições usando o Value Object PhotoEdits.
+    ///
+    /// Este método é preferido sobre `set_edits` pois:
+    /// - Usa um único parâmetro em vez de ~60 parâmetros
+    /// - É type-safe e não permite erros de ordem de parâmetros
+    /// - Integra com o EditingOrchestrator para fluxo coordenado
+    ///
+    /// ## Exemplo
+    /// ```rust,ignore
+    /// let mut edits = PhotoEdits::default();
+    /// edits.exposure = 0.5;
+    /// edits.contrast = 1.2;
+    /// photo.apply_photo_edits(edits)?;
+    /// ```
+    pub fn apply_photo_edits(&mut self, edits: PhotoEdits) -> DomainResult<()> {
+        self.edit_exposure = Some(edits.exposure);
+        self.edit_contrast = Some(edits.contrast);
+        self.edit_temperature = Some(edits.temperature);
+        self.edit_tint = Some(edits.tint);
+        self.edit_highlights = Some(edits.highlights);
+        self.edit_shadows = Some(edits.shadows);
+        self.edit_whites = Some(edits.whites);
+        self.edit_blacks = Some(edits.blacks);
+        self.edit_clarity = Some(edits.clarity);
+        self.edit_vibrance = Some(edits.vibrance);
+        self.edit_saturation = Some(edits.saturation);
+        
+        // Tone Curve
+        self.edit_tone_curve_shadows = Some(edits.tone_curve_shadows);
+        self.edit_tone_curve_darks = Some(edits.tone_curve_darks);
+        self.edit_tone_curve_lights = Some(edits.tone_curve_lights);
+        self.edit_tone_curve_highlights = Some(edits.tone_curve_highlights);
+        
+        // HSL Saturation
+        self.edit_hsl_red_sat = Some(edits.hsl_red_sat);
+        self.edit_hsl_orange_sat = Some(edits.hsl_orange_sat);
+        self.edit_hsl_yellow_sat = Some(edits.hsl_yellow_sat);
+        self.edit_hsl_green_sat = Some(edits.hsl_green_sat);
+        self.edit_hsl_aqua_sat = Some(edits.hsl_aqua_sat);
+        self.edit_hsl_blue_sat = Some(edits.hsl_blue_sat);
+        self.edit_hsl_purple_sat = Some(edits.hsl_purple_sat);
+        self.edit_hsl_magenta_sat = Some(edits.hsl_magenta_sat);
+        
+        // HSL Hue
+        self.edit_hsl_red_hue = Some(edits.hsl_red_hue);
+        self.edit_hsl_orange_hue = Some(edits.hsl_orange_hue);
+        self.edit_hsl_yellow_hue = Some(edits.hsl_yellow_hue);
+        self.edit_hsl_green_hue = Some(edits.hsl_green_hue);
+        self.edit_hsl_aqua_hue = Some(edits.hsl_aqua_hue);
+        self.edit_hsl_blue_hue = Some(edits.hsl_blue_hue);
+        self.edit_hsl_purple_hue = Some(edits.hsl_purple_hue);
+        self.edit_hsl_magenta_hue = Some(edits.hsl_magenta_hue);
+        
+        // HSL Luminance
+        self.edit_hsl_red_lum = Some(edits.hsl_red_lum);
+        self.edit_hsl_orange_lum = Some(edits.hsl_orange_lum);
+        self.edit_hsl_yellow_lum = Some(edits.hsl_yellow_lum);
+        self.edit_hsl_green_lum = Some(edits.hsl_green_lum);
+        self.edit_hsl_aqua_lum = Some(edits.hsl_aqua_lum);
+        self.edit_hsl_blue_lum = Some(edits.hsl_blue_lum);
+        self.edit_hsl_purple_lum = Some(edits.hsl_purple_lum);
+        self.edit_hsl_magenta_lum = Some(edits.hsl_magenta_lum);
+        
+        // Lens
+        self.edit_lens_distortion = Some(edits.lens_distortion);
+        self.edit_lens_vignette_amount = Some(edits.lens_vignette_amount);
+        self.edit_lens_vignette_midpoint = Some(edits.lens_vignette_midpoint);
+        
+        // Detail
+        self.edit_nr_luminance = Some(edits.nr_luminance);
+        self.edit_nr_color = Some(edits.nr_color);
+        self.edit_sharpen_amount = Some(edits.sharpen_amount);
+        self.edit_sharpen_radius = Some(edits.sharpen_radius);
+        
+        // Crop
+        if let Some(crop) = edits.crop_settings {
+            self.edit_crop_x = Some(crop.crop_x());
+            self.edit_crop_y = Some(crop.crop_y());
+            self.edit_crop_width = Some(crop.crop_width());
+            self.edit_crop_height = Some(crop.crop_height());
+            self.edit_crop_rotation = Some(crop.rotation_90());
+            self.edit_crop_angle = Some(crop.angle());
+            self.edit_crop_flip_h = Some(crop.flip_horizontal());
+            self.edit_crop_flip_v = Some(crop.flip_vertical());
+            self.edit_crop_fill_mode = Some(crop.fill_mode() as u8);
+        } else {
+            self.edit_crop_x = None;
+            self.edit_crop_y = None;
+            self.edit_crop_width = None;
+            self.edit_crop_height = None;
+            self.edit_crop_rotation = None;
+            self.edit_crop_angle = None;
+            self.edit_crop_flip_h = None;
+            self.edit_crop_flip_v = None;
+            self.edit_crop_fill_mode = None;
+        }
+
+        self.is_edited = true;
+        self.modified_at = Utc::now();
+
+        Ok(())
+    }
+
+    /// Extrai as edições atuais da foto como um Value Object PhotoEdits.
+    ///
+    /// Útil para:
+    /// - Comparar edições entre fotos
+    /// - Serializar edições para presets
+    /// - Passar para o sistema de preview
+    pub fn get_photo_edits(&self) -> PhotoEdits {
+        PhotoEdits {
+            exposure: self.edit_exposure.unwrap_or(0.0),
+            contrast: self.edit_contrast.unwrap_or(1.0),
+            temperature: self.edit_temperature.unwrap_or(0.0),
+            tint: self.edit_tint.unwrap_or(0.0),
+            highlights: self.edit_highlights.unwrap_or(0.0),
+            shadows: self.edit_shadows.unwrap_or(0.0),
+            whites: self.edit_whites.unwrap_or(0.0),
+            blacks: self.edit_blacks.unwrap_or(0.0),
+            clarity: self.edit_clarity.unwrap_or(0.0),
+            vibrance: self.edit_vibrance.unwrap_or(0.0),
+            saturation: self.edit_saturation.unwrap_or(0.0),
+            
+            tone_curve_shadows: self.edit_tone_curve_shadows.unwrap_or(0.0),
+            tone_curve_darks: self.edit_tone_curve_darks.unwrap_or(0.0),
+            tone_curve_lights: self.edit_tone_curve_lights.unwrap_or(0.0),
+            tone_curve_highlights: self.edit_tone_curve_highlights.unwrap_or(0.0),
+            
+            hsl_red_sat: self.edit_hsl_red_sat.unwrap_or(0.0),
+            hsl_orange_sat: self.edit_hsl_orange_sat.unwrap_or(0.0),
+            hsl_yellow_sat: self.edit_hsl_yellow_sat.unwrap_or(0.0),
+            hsl_green_sat: self.edit_hsl_green_sat.unwrap_or(0.0),
+            hsl_aqua_sat: self.edit_hsl_aqua_sat.unwrap_or(0.0),
+            hsl_blue_sat: self.edit_hsl_blue_sat.unwrap_or(0.0),
+            hsl_purple_sat: self.edit_hsl_purple_sat.unwrap_or(0.0),
+            hsl_magenta_sat: self.edit_hsl_magenta_sat.unwrap_or(0.0),
+            
+            hsl_red_hue: self.edit_hsl_red_hue.unwrap_or(0.0),
+            hsl_orange_hue: self.edit_hsl_orange_hue.unwrap_or(0.0),
+            hsl_yellow_hue: self.edit_hsl_yellow_hue.unwrap_or(0.0),
+            hsl_green_hue: self.edit_hsl_green_hue.unwrap_or(0.0),
+            hsl_aqua_hue: self.edit_hsl_aqua_hue.unwrap_or(0.0),
+            hsl_blue_hue: self.edit_hsl_blue_hue.unwrap_or(0.0),
+            hsl_purple_hue: self.edit_hsl_purple_hue.unwrap_or(0.0),
+            hsl_magenta_hue: self.edit_hsl_magenta_hue.unwrap_or(0.0),
+            
+            hsl_red_lum: self.edit_hsl_red_lum.unwrap_or(0.0),
+            hsl_orange_lum: self.edit_hsl_orange_lum.unwrap_or(0.0),
+            hsl_yellow_lum: self.edit_hsl_yellow_lum.unwrap_or(0.0),
+            hsl_green_lum: self.edit_hsl_green_lum.unwrap_or(0.0),
+            hsl_aqua_lum: self.edit_hsl_aqua_lum.unwrap_or(0.0),
+            hsl_blue_lum: self.edit_hsl_blue_lum.unwrap_or(0.0),
+            hsl_purple_lum: self.edit_hsl_purple_lum.unwrap_or(0.0),
+            hsl_magenta_lum: self.edit_hsl_magenta_lum.unwrap_or(0.0),
+            
+            lens_distortion: self.edit_lens_distortion.unwrap_or(0.0),
+            lens_vignette_amount: self.edit_lens_vignette_amount.unwrap_or(0.0),
+            lens_vignette_midpoint: self.edit_lens_vignette_midpoint.unwrap_or(0.0),
+            
+            nr_luminance: self.edit_nr_luminance.unwrap_or(0.0),
+            nr_color: self.edit_nr_color.unwrap_or(0.0),
+            sharpen_amount: self.edit_sharpen_amount.unwrap_or(0.0),
+            sharpen_radius: self.edit_sharpen_radius.unwrap_or(1.0),
+            
+            crop_settings: self.get_crop_settings(),
+        }
+    }
+
+    /// Extrai as configurações de crop como um Value Object.
+    fn get_crop_settings(&self) -> Option<CropSettings> {
+        // Se todos os campos de crop são None, retorna None
+        if self.edit_crop_x.is_none() 
+            && self.edit_crop_y.is_none() 
+            && self.edit_crop_width.is_none() 
+            && self.edit_crop_height.is_none() 
+        {
+            return None;
+        }
+
+        let fill_mode = crate::value_objects::RotationFillMode::try_from(
+            self.edit_crop_fill_mode.unwrap_or(0)
+        ).unwrap_or_default();
+
+        Some(CropSettings::with_fill_mode_value(
+            self.edit_crop_x.unwrap_or(0.0),
+            self.edit_crop_y.unwrap_or(0.0),
+            self.edit_crop_width.unwrap_or(1.0),
+            self.edit_crop_height.unwrap_or(1.0),
+            self.edit_crop_rotation.unwrap_or(0),
+            self.edit_crop_angle.unwrap_or(0.0),
+            self.edit_crop_flip_h.unwrap_or(false),
+            self.edit_crop_flip_v.unwrap_or(false),
+            fill_mode,
+        ))
     }
 
 
