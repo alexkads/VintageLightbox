@@ -156,12 +156,13 @@
   - Coluna JSON na tabela `photos`
   - Serialização/Deserialização automática
 - [ ] **Thumbnail Generator** - Gerar previews
-- [ ] **RAW Decoder** - Processar arquivos RAW
+- [x] **RAW Decoder** - Processar arquivos RAW (incluindo extração de previews embutidos) ✅
 - [ ] **UI Layer** - Interface com Slint
-- [ ] **RAW Processing**
+- [x] **RAW Processing** ✅
   - LibRaw/rawler integration
   - Format decoders (CR2, NEF, ARW, DNG)
   - Adjustment pipeline
+  - Embedded preview extraction (Fast path)
 
 ---
 

@@ -1270,7 +1270,7 @@ import_controller.import_with_options(files, options, tx, pause, cancel).await?;
 - 🎯 **GPU Acceleration**: Avaliar wgpu para processamento de imagem em tempo real
 - 🎯 **Caching Strategy**: Implementar cache inteligente de previews e thumbnails
 - 🎯 **Batch Processing**: Otimizar operações em lote com paralelização
-- 🎯 **RAW Decoder**: Integrar LibRaw/rawler para suporte a mais formatos
+- ✅ **RAW Decoder**: Integrado LibRaw/rawler e implementada extração de previews embutidos para performance superior.
 
 ---
 
