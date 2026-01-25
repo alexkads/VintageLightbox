@@ -102,14 +102,11 @@ pub fn load_raw_as_dynamic_image(path: &str) -> Result<image::DynamicImage, Stri
 }
 
 /// Extrai o preview JPEG embutido no arquivo RAW (muito mais rápido que raw decoding)
-pub fn extract_embedded_preview(path: &str) -> Option<Vec<u8>> {
-    // Tenta usar rawloader para extrair o thumbnail embutido
-    if let Ok(raw) = rawloader::decode_file(path) {
-        if !raw.thumbnails.is_empty() {
-            // Retorna o primeiro thumbnail disponível (geralmente o maior JPEG)
-            return Some(raw.thumbnails[0].data.clone());
-        }
-    }
+pub fn extract_embedded_preview(_path: &str) -> Option<Vec<u8>> {
+    // TODO: Implement using a crate that supports embedded preview extraction
+    // rsraw v0.1.0 does not expose thumbnail() method directly on RawImage.
+    // We might need to upgrade rsraw or use a different crate like `rawloader` if it supports it, 
+    // or parse the file structure manually (TIFF/IFD).
     None
 }
 
