@@ -377,10 +377,35 @@ com mais de um. `default-run` no `Cargo.toml` fez a instrução escrita passar a
 5% de distância. Numa barra de 15 botões isso é o mesmo que não marcar nenhum, então o filtro aceso
 virou `primary` enquanto não houver decisão melhor.
 
-⚠️ **E a cobertura que falta**: a solda entre o evento do campo de busca e o `refiltrar` é o único
-trecho novo que um teste alcançaria, e não tem teste. O substituto que o §6 prevê é o
-`gpui::TestAppContext`, que exige a feature `test-support` do `gpui` — é a próxima decisão, e vale
-tomá-la **antes** dos sliders, que são ~50 controles com a mesma forma de solda.
+#### ✅ `TestAppContext` está de pé — e a decisão foi tomada antes dos sliders
+
+O substituto que o §6 prevê para os 146 testes de UI **existe e roda** (`544a0cb`). Veio agora, e não
+depois da Revelação, porque são ~50 controles com a mesma forma de solda pela frente: componente
+emite evento, tela assina, estado muda. O molde está em
+[`tela.rs`](../crates/ui-gpui/src/biblioteca/tela.rs), no `mod testes`.
+
+```bash
+cargo test -p ui-gpui --lib tela::testes
+```
+
+⚠️ **`test-support` entrou em `[dev-dependencies]`, e não em `[dependencies]`**, mesmo custando uma
+segunda compilação do gpui (~2,6 GB de `target`): a feature liga junto o `leak-detection`, que grava
+backtrace a cada handle de entidade. Num projeto onde a fase 1 quase condenou o framework por medir
+fluidez no perfil errado, carregar detector de vazamento no binário do produto é repetir o mesmo erro
+de outro jeito.
+
+🚨 **O achado: um dos dois testes passava com o código quebrado.** Depois de escrevê-los, quebrei a
+solda de propósito (`drop` na `Subscription`) para conferir se eles falhavam:
+
+| Teste | Com a solda quebrada |
+|---|---|
+| `digitar_na_busca_filtra_a_grade` | ❌ FAILED — como tinha de ser |
+| `limpar_a_busca_devolve_o_acervo` | ✅ **ok** |
+
+O segundo cobrava só o fim: se nada nunca filtra, a grade tem as três fotos no final, que era
+exatamente a asserção. Faltava a do meio. 🔑 **Teste de volta precisa provar que houve ida** — e o
+único jeito de descobrir isso é quebrar o código de propósito e olhar qual teste não reclama. Vale
+para os ~50 sliders: cada um vai ter um "arrasta e volta ao padrão".
 
 ### Fase 3 — Importação (2–3 semanas)
 
@@ -405,6 +430,8 @@ conquistada e se preserva.
    **Antes de apagar qualquer um, extrair dele a lista de comportamentos** para `docs/PARIDADE-UI.md`.
    ✅ O substituto existe e é decente: **`gpui::TestAppContext`** — é como o Zed testa a própria
    interface. Não é snapshot visual, mas dirige janela e afirma sobre estado.
+   ✅ **E não é mais promessa**: os dois primeiros rodam desde 15/ago (`544a0cb`, fase 2), com o
+   `test-support` ligado em `[dev-dependencies]`.
 2. ⚠️ **`gpui` é pre-1.0** (0.2.2), com quebras assumidas entre versões. Não é pior que o egui, que
    já obrigou 0.28 → 0.31 aqui — mas também não é melhor.
 3. ⚠️ **Windows é alpha** no Zed, com relatos de *DirectX device removal*. Hoje isso não bloqueia
