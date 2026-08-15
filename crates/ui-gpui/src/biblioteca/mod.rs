@@ -7,3 +7,4 @@
 
 pub mod grade;
 pub mod miniaturas;
+pub mod tela;
