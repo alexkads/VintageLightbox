@@ -9,6 +9,7 @@ use adapters::view_models::PhotoViewModel;
 use gpui::{div, img, prelude::*, px, rgb, uniform_list, Context, SharedString, Window};
 use infrastructure::cache::preview_manager::PreviewManager;
 
+use super::filtros::{indices_visiveis, FiltroDeSinalizador, Filtros, NotaMinima};
 use super::grade::{colunas_que_cabem, fotos_da_linha, linhas_necessarias};
 use super::miniaturas::{capacidade_para, CacheDeMiniaturas, Miniatura};
 
@@ -29,6 +30,13 @@ pub struct Biblioteca {
     /// `Mutex` porque o closure recebe `&mut App`, e não `&mut self`: o cache
     /// precisa ser escrito de dentro dele.
     cache: Arc<Mutex<CacheDeMiniaturas>>,
+    filtros: Filtros,
+    /// Os índices do acervo que passam pelos filtros.
+    ///
+    /// Recalculado **quando o filtro muda**, e não a cada quadro: filtrar 2.000
+    /// fotos 60 vezes por segundo é trabalho que ninguém pediu, e a resposta é
+    /// sempre a mesma enquanto ninguém tocar na barra.
+    visiveis: Vec<usize>,
 }
 
 /// Quantas linhas cabem na altura da janela.
@@ -60,33 +68,147 @@ fn largura_util(window: &Window) -> f32 {
 
 impl Biblioteca {
     pub fn nova(fotos: Vec<PhotoViewModel>, previews: Arc<PreviewManager>) -> Self {
-        Self {
+        let mut tela = Self {
             fotos: Arc::new(fotos),
             previews,
             // Nasce do tamanho da janela padrão e se ajusta no primeiro
             // `render`, quando a janela de verdade já foi medida.
             cache: Arc::new(Mutex::new(CacheDeMiniaturas::nova(capacidade_para(6, 4)))),
-        }
+            filtros: Filtros::default(),
+            visiveis: Vec::new(),
+        };
+        // Nasce com a lista pronta: sem isto o primeiro quadro mostraria uma
+        // grade vazia sobre um acervo cheio, e a tela só se corrigiria no
+        // primeiro clique.
+        tela.refiltrar();
+        tela
     }
 
-    fn cabecalho(&self) -> impl IntoElement {
+    /// Recalcula o que está visível. Chamado só quando um filtro muda.
+    fn refiltrar(&mut self) {
+        self.visiveis = indices_visiveis(&self.fotos, &self.filtros);
+    }
+
+    fn cabecalho(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let total = self.fotos.len();
+        let mostradas = self.visiveis.len();
+
+        // O contador diz **as duas coisas** quando há filtro. Mostrar só
+        // "12 fotos" com 2.000 no acervo é um número parcial se apresentando
+        // como total, e quem lê conclui que perdeu o acervo.
         let texto: SharedString = if total == 0 {
             "Nenhuma foto no catálogo — importe uma pasta pelo app de egui".into()
-        } else {
+        } else if mostradas == total {
             format!("{total} fotos").into()
+        } else {
+            format!("{mostradas} de {total} fotos").into()
         };
 
         div()
             .flex()
-            .items_center()
-            .gap(px(12.))
+            .flex_col()
+            .gap(px(8.))
             .p(px(12.))
             .border_b_1()
             .border_color(rgb(0x303030))
-            .child(div().text_lg().child("Biblioteca"))
-            .child(div().text_sm().text_color(rgb(0x9a9a9a)).child(texto))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(12.))
+                    .child(div().text_lg().child("Biblioteca"))
+                    .child(div().text_sm().text_color(rgb(0x9a9a9a)).child(texto)),
+            )
+            .child(self.barra_de_filtros(cx))
     }
+
+    /// Notas, sinalizadores e o botão de limpar.
+    fn barra_de_filtros(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let nota_atual = self.filtros.nota_minima.0;
+        let sinalizador_atual = self.filtros.sinalizador;
+
+        // Laços com `for`, e não `map` com `move`: `cx.listener` empresta o
+        // `cx`, e um closure `move` o levaria embora — sobrando nada para o
+        // segundo grupo de botões. O compilador chama isso de "captured
+        // variable cannot escape", e a saída é coletar em `Vec` emprestando a
+        // cada volta.
+        let mut notas = Vec::new();
+        for n in 0..=5u8 {
+            notas.push(botao(
+                format!("nota-{n}"),
+                if n == 0 {
+                    "todas".to_string()
+                } else {
+                    "★".repeat(n as usize)
+                },
+                nota_atual == n,
+                cx.listener(move |this, _ev, _window, cx| {
+                    this.filtros.nota_minima = NotaMinima(n);
+                    this.refiltrar();
+                    cx.notify();
+                }),
+            ));
+        }
+
+        let mut sinalizadores = Vec::new();
+        for (qual, rotulo) in [
+            (FiltroDeSinalizador::Qualquer, "todos"),
+            (FiltroDeSinalizador::Escolhidas, "escolhidas"),
+            (FiltroDeSinalizador::Rejeitadas, "rejeitadas"),
+            (FiltroDeSinalizador::SemSinalizador, "sem marca"),
+        ] {
+            sinalizadores.push(botao(
+                format!("sinal-{rotulo}"),
+                rotulo.to_string(),
+                sinalizador_atual == qual,
+                cx.listener(move |this, _ev, _window, cx| {
+                    this.filtros.sinalizador = qual;
+                    this.refiltrar();
+                    cx.notify();
+                }),
+            ));
+        }
+
+        div()
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .gap(px(12.))
+            .child(rotulo_do_grupo("nota mínima"))
+            .child(div().flex().gap(px(4.)).children(notas))
+            .child(rotulo_do_grupo("sinalizador"))
+            .child(div().flex().gap(px(4.)).children(sinalizadores))
+    }
+}
+
+/// Rótulo cinza que nomeia um grupo de botões.
+fn rotulo_do_grupo(texto: &'static str) -> impl IntoElement {
+    div().text_xs().text_color(rgb(0x7a7a7a)).child(texto)
+}
+
+/// Um botão de filtro, aceso quando é o escolhido.
+///
+/// `id` próprio em cada um: o GPUI usa o id para saber que este é o mesmo
+/// elemento entre quadros. Dois botões com o mesmo id trocariam de estado um
+/// com o outro ao serem clicados.
+fn botao(
+    id: String,
+    texto: String,
+    aceso: bool,
+    ao_clicar: impl Fn(&gpui::ClickEvent, &mut Window, &mut gpui::App) + 'static,
+) -> impl IntoElement {
+    div()
+        .id(SharedString::from(id))
+        .px(px(8.))
+        .py(px(3.))
+        .rounded(px(3.))
+        .text_xs()
+        .cursor_pointer()
+        .bg(if aceso { rgb(0x3a5a8a) } else { rgb(0x2a2a2a) })
+        .text_color(if aceso { rgb(0xffffff) } else { rgb(0xb0b0b0) })
+        .hover(|estilo| estilo.bg(if aceso { rgb(0x456ba0) } else { rgb(0x363636) }))
+        .child(SharedString::from(texto))
+        .on_click(ao_clicar)
 }
 
 /// Uma célula da grade: a miniatura, ou o lugar dela.
@@ -141,9 +263,11 @@ fn celula(
 }
 
 impl Render for Biblioteca {
-    fn render(&mut self, window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colunas = colunas_que_cabem(largura_util(window), PASSO);
-        let total = self.fotos.len();
+        // O total da grade é o **filtrado**, e não o acervo: são os índices em
+        // `visiveis` que o `uniform_list` percorre.
+        let total = self.visiveis.len();
         let linhas = linhas_necessarias(total, colunas);
 
         // O cache acompanha a janela: redimensionar para maior sem isto o
@@ -155,6 +279,7 @@ impl Render for Biblioteca {
             .ajustar_capacidade(capacidade_para(colunas, linhas_visiveis(window)));
 
         let fotos = self.fotos.clone();
+        let visiveis = Arc::new(self.visiveis.clone());
         let previews = self.previews.clone();
         let cache = self.cache.clone();
 
@@ -164,7 +289,7 @@ impl Render for Biblioteca {
             .size_full()
             .bg(rgb(0x1b1b1b))
             .text_color(rgb(0xe6e6e6))
-            .child(self.cabecalho())
+            .child(self.cabecalho(cx))
             .child(
                 // O `uniform_list` só chama o closure para as linhas visíveis.
                 // É o que faz 2.000 fotos custarem o mesmo que 20 na hora de
@@ -176,7 +301,15 @@ impl Render for Biblioteca {
 
                             div().flex().gap(px(ESPACAMENTO)).p(px(4.)).children(
                                 desta_linha
-                                    .map(|i| celula(&fotos[i], &previews, &cache))
+                                    // Dois saltos: a linha dá a posição na lista
+                                    // **filtrada**, e `visiveis` traduz para o
+                                    // índice do acervo. Indexar `fotos` direto
+                                    // mostraria a foto errada assim que houvesse
+                                    // filtro — e a grade continuaria bonita, que
+                                    // é o que torna esse defeito caro.
+                                    .map(|posicao| {
+                                        celula(&fotos[visiveis[posicao]], &previews, &cache)
+                                    })
                                     .collect::<Vec<_>>(),
                             )
                         })

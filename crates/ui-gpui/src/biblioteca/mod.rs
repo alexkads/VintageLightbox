@@ -5,6 +5,7 @@
 //! decide se vale morar neste framework, com duas semanas em jogo em vez de
 //! cinco meses.
 
+pub mod filtros;
 pub mod grade;
 pub mod miniaturas;
 pub mod tela;
