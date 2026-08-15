@@ -220,7 +220,7 @@ teste escrevia no catálogo real sem erro, o `to_string` sombreado dava o mesmo 
 reclamava porque não rodava. **Pré-condição de migração é onde o silêncio custa mais caro** — o
 que não avisa agora vira "o GPUI quebrou isso" daqui a três meses.
 
-### Fase 1 — Biblioteca, num crate ao lado 🔄 **em andamento**
+### Fase 1 — Biblioteca, num crate ao lado ✅ **critério de saída atingido em 15/ago/2026**
 
 `crates/ui-gpui` entra no workspace **sem tirar `crates/ui`**. Os dois compilam, os dois rodam:
 `cargo run -p ui` e `cargo run -p ui-gpui`.
@@ -228,9 +228,8 @@ que não avisa agora vira "o GPUI quebrou isso" daqui a três meses.
 Entrega: grade virtualizada com miniaturas de verdade, filmstrip, árvore de pastas, filtros,
 nota/cor/sinalizador. Inclui a ponte de imagem da §3.1 — sem ela não há miniatura.
 
-**Critério de saída**: abrir o catálogo real e navegar 2.000 fotos a 60fps.
-**É aqui que você decide se gosta de morar nisso.** Duas semanas jogadas fora se não gostar, em vez
-de cinco meses.
+**Critério de saída**: abrir o catálogo real e navegar 2.000 fotos a 60fps. ✅ **Atingido** — ver
+abaixo. **É aqui que você decide se gosta de morar nisso**, e a decisão foi ficar.
 
 #### O que já está de pé
 
@@ -247,9 +246,45 @@ de cinco meses.
 | ⬜ Busca por texto na barra (a lógica existe; falta o campo) | |
 | ⬜ Carregamento assíncrono das fotos (hoje bloqueia a abertura) | |
 
-**Estado medido**: 2.000 fotos abertas com árvore, filtros, grade e filmstrip — 102 MB residentes,
-0,3% de CPU parado. **Os 60fps não foram medidos** — isso é rolagem com olho humano, e é o que
-decide a fase.
+### ✅ Critério de saída atingido — 15/ago/2026
+
+**2.000 fotos, navegando fluido.** Conferido pelo dono, rolando a grade: *"agora ficou muito bom"*.
+É a resposta que a fase 1 existia para dar, e ela veio antes de qualquer reescrita da Revelação.
+
+#### 🚨 A armadilha que quase deu a resposta errada: medir fluidez em `debug`
+
+A primeira conferência foi feita com `target/debug`, e o veredito foi *"não está fluido"*. Estava
+certo — e o culpado não era o GPUI, nem a grade, nem o cache.
+
+| | debug | release |
+|---|------:|--------:|
+| por miniatura (SQLite + decode JPEG + BGRA) | **47 ms** | **0,84 ms** |
+| uma linha de 6 colunas | 280 ms — **17 quadros perdidos** | 5 ms |
+| já em cache | 0,0004 ms | ~0 ms |
+
+`[profile.dev] opt-level = 0` no workspace: decodificar JPEG e trocar canais sem otimização custa
+**56× mais**. Um framework inteiro quase foi julgado pelo perfil de compilação.
+
+🔑 **A regra que fica: fluidez, e qualquer número de desempenho, só se mede em `--release`.**
+Entregar `debug` para alguém julgar é entregar a pergunta errada. Vale para o resto da migração,
+e vale em dobro na fase 2, onde o slider tem de responder ao arrasto.
+
+#### `medir-miniaturas` — a régua, para não depender de impressão
+
+```bash
+VLB_CATALOG=/tmp/catalogo-de-medicao cargo run --release -p ui-gpui --bin medir-miniaturas
+```
+
+Mede o caminho inteiro de uma miniatura e responde em quantas cabem nos **16,7 ms** de um quadro a
+60fps. Foi ele que separou "o GPUI é lento" de "o binário estava sem otimização" — em segundos, e
+sem opinião no meio.
+
+⚠️ **E o orçamento não é folgado nem em release**: cabem ~20 miniaturas por quadro. Uma linha de 6
+passa com sobra, mas janela larga (8–10 colunas) numa rolagem rápida, revelando várias linhas por
+quadro, chega perto do limite. É o que o carregamento assíncrono resolve, e ele continua pendente.
+
+**Estado medido**: 102 MB residentes e 0,3% de CPU parado (debug); 229 MB e ~13% logo após abrir
+em release, com árvore, filtros, grade e filmstrip sobre 2.000 fotos.
 
 ⚠️ **A busca depende de uma decisão que ainda não foi tomada**: campo de texto exige adotar o
 `input` do `gpui-component`, o que traz junto o tema e o estado global dele
