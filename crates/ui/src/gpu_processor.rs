@@ -1,13 +1,13 @@
 // GPU Image Processor
 // Uses WGPU compute shaders for fast image processing
 
-use std::sync::mpsc::{channel, Receiver, Sender};
-use std::sync::Arc;
-use parking_lot::Mutex;
+use eframe::egui::ColorImage;
 use image::DynamicImage;
 use lru::LruCache;
+use parking_lot::Mutex;
 use std::num::NonZeroUsize;
-use eframe::egui::ColorImage;
+use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::Arc;
 
 /// Parameters for image adjustments (must match WGSL struct layout)
 #[repr(C)]
@@ -95,11 +95,25 @@ impl Default for GpuEditParams {
             hsl_blue_sat: 0.0,
             hsl_purple_sat: 0.0,
             hsl_magenta_sat: 0.0,
-            hsl_red_hue: 0.0, hsl_orange_hue: 0.0, hsl_yellow_hue: 0.0, hsl_green_hue: 0.0,
-            hsl_aqua_hue: 0.0, hsl_blue_hue: 0.0, hsl_purple_hue: 0.0, hsl_magenta_hue: 0.0,
-            hsl_red_lum: 0.0, hsl_orange_lum: 0.0, hsl_yellow_lum: 0.0, hsl_green_lum: 0.0,
-            hsl_aqua_lum: 0.0, hsl_blue_lum: 0.0, hsl_purple_lum: 0.0, hsl_magenta_lum: 0.0,
-            lens_distortion: 0.0, lens_vignette_amount: 0.0, lens_vignette_midpoint: 0.0,
+            hsl_red_hue: 0.0,
+            hsl_orange_hue: 0.0,
+            hsl_yellow_hue: 0.0,
+            hsl_green_hue: 0.0,
+            hsl_aqua_hue: 0.0,
+            hsl_blue_hue: 0.0,
+            hsl_purple_hue: 0.0,
+            hsl_magenta_hue: 0.0,
+            hsl_red_lum: 0.0,
+            hsl_orange_lum: 0.0,
+            hsl_yellow_lum: 0.0,
+            hsl_green_lum: 0.0,
+            hsl_aqua_lum: 0.0,
+            hsl_blue_lum: 0.0,
+            hsl_purple_lum: 0.0,
+            hsl_magenta_lum: 0.0,
+            lens_distortion: 0.0,
+            lens_vignette_amount: 0.0,
+            lens_vignette_midpoint: 0.0,
             nr_luminance: 0.0,
             nr_color: 0.0,
             sharpen_amount: 0.0,
@@ -155,7 +169,9 @@ impl GpuImageProcessor {
         // Try to initialize GPU in background thread
         let _gpu_available = std::thread::spawn(move || {
             Self::gpu_processor_thread(request_receiver, result_sender, current_request_id_clone)
-        }).is_finished() == false; // Thread started successfully
+        })
+        .is_finished()
+            == false; // Thread started successfully
 
         Self {
             request_sender,
@@ -227,13 +243,15 @@ impl GpuImageProcessor {
             cache: None,
         });
 
-        println!("GPU: Initialized successfully with {}", adapter.get_info().name);
-
-
+        println!(
+            "GPU: Initialized successfully with {}",
+            adapter.get_info().name
+        );
 
         // LRU Cache for GPU resources (textures, buffers, etc.)
         // Cache up to 5 different image sizes/resolutions to avoid recreation when switching photos
-        let mut resources_cache: LruCache<(u32, u32), GpuResources> = LruCache::new(NonZeroUsize::new(5).unwrap());
+        let mut resources_cache: LruCache<(u32, u32), GpuResources> =
+            LruCache::new(NonZeroUsize::new(5).unwrap());
 
         // Process requests
         while let Ok(request) = receiver.recv() {
@@ -245,14 +263,11 @@ impl GpuImageProcessor {
 
             // Process on GPU
             let start_time = std::time::Instant::now();
-            if let Some(result) = Self::process_on_gpu(
-                &device,
-                &queue,
-                &pipeline,
-                &request,
-                &mut resources_cache,
-            ) {
-                let preview = crate::image_processing::ImageProcessor::dynamic_to_color_image(&result);
+            if let Some(result) =
+                Self::process_on_gpu(&device, &queue, &pipeline, &request, &mut resources_cache)
+            {
+                let preview =
+                    crate::image_processing::ImageProcessor::dynamic_to_color_image(&result);
                 let _ = sender.send(GpuProcessResult {
                     request_id: request.request_id,
                     processed_image: result,
@@ -273,22 +288,30 @@ impl GpuImageProcessor {
     ) -> Option<DynamicImage> {
         let width = request.width;
         let height = request.height;
-        
+
         // Check if we have resources for this size
         if !resources_cache.contains(&(width, height)) {
-             // WGPU requires bytes_per_row to be aligned to 256 bytes
+            // WGPU requires bytes_per_row to be aligned to 256 bytes
             const COPY_BYTES_PER_ROW_ALIGNMENT: u32 = 256;
             let unpadded_bytes_per_row = 4 * width;
-            let padded_bytes_per_row = ((unpadded_bytes_per_row + COPY_BYTES_PER_ROW_ALIGNMENT - 1) 
-                / COPY_BYTES_PER_ROW_ALIGNMENT) * COPY_BYTES_PER_ROW_ALIGNMENT;
+            let padded_bytes_per_row = ((unpadded_bytes_per_row + COPY_BYTES_PER_ROW_ALIGNMENT
+                - 1)
+                / COPY_BYTES_PER_ROW_ALIGNMENT)
+                * COPY_BYTES_PER_ROW_ALIGNMENT;
 
-            println!("GPU CACHE: Creating new resources for {}x{} (padded row: {})", 
-                width, height, padded_bytes_per_row);
+            println!(
+                "GPU CACHE: Creating new resources for {}x{} (padded row: {})",
+                width, height, padded_bytes_per_row
+            );
 
             // Create input texture
             let input_texture = device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("Input Texture"),
-                size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
@@ -300,7 +323,11 @@ impl GpuImageProcessor {
             // Create output texture (storage)
             let output_texture = device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("Output Texture"),
-                size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
@@ -327,13 +354,13 @@ impl GpuImageProcessor {
                     wgpu::BindGroupEntry {
                         binding: 0,
                         resource: wgpu::BindingResource::TextureView(
-                            &input_texture.create_view(&wgpu::TextureViewDescriptor::default())
+                            &input_texture.create_view(&wgpu::TextureViewDescriptor::default()),
                         ),
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,
                         resource: wgpu::BindingResource::TextureView(
-                            &output_texture.create_view(&wgpu::TextureViewDescriptor::default())
+                            &output_texture.create_view(&wgpu::TextureViewDescriptor::default()),
                         ),
                     },
                     wgpu::BindGroupEntry {
@@ -352,16 +379,19 @@ impl GpuImageProcessor {
                 mapped_at_creation: false,
             });
 
-            resources_cache.put((width, height), GpuResources {
-                input_texture,
-                output_texture,
-                params_buffer,
-                output_buffer,
-                bind_group,
-                padded_bytes_per_row,
-                unpadded_bytes_per_row,
-                last_image_data: None,
-            });
+            resources_cache.put(
+                (width, height),
+                GpuResources {
+                    input_texture,
+                    output_texture,
+                    params_buffer,
+                    output_buffer,
+                    bind_group,
+                    padded_bytes_per_row,
+                    unpadded_bytes_per_row,
+                    last_image_data: None,
+                },
+            );
         }
 
         // Get resources from cache
@@ -390,13 +420,21 @@ impl GpuImageProcessor {
                     bytes_per_row: Some(resources.unpadded_bytes_per_row),
                     rows_per_image: Some(height),
                 },
-                wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+                wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
             );
             resources.last_image_data = Some(request.image_data.clone());
         }
 
         // Update params
-        queue.write_buffer(&resources.params_buffer, 0, bytemuck::bytes_of(&request.params));
+        queue.write_buffer(
+            &resources.params_buffer,
+            0,
+            bytemuck::bytes_of(&request.params),
+        );
 
         // Create command encoder
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -411,7 +449,7 @@ impl GpuImageProcessor {
             });
             compute_pass.set_pipeline(pipeline);
             compute_pass.set_bind_group(0, &resources.bind_group, &[]);
-            
+
             // Dispatch workgroups (16x16 threads each)
             let workgroups_x = (width + 15) / 16;
             let workgroups_y = (height + 15) / 16;
@@ -434,7 +472,11 @@ impl GpuImageProcessor {
                     rows_per_image: Some(height),
                 },
             },
-            wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
         );
 
         // Submit commands
@@ -450,15 +492,16 @@ impl GpuImageProcessor {
 
         if rx.recv().ok()?.is_ok() {
             let data = buffer_slice.get_mapped_range();
-            
+
             // Remove padding from each row
-            let mut result_data: Vec<u8> = Vec::with_capacity((resources.unpadded_bytes_per_row * height) as usize);
+            let mut result_data: Vec<u8> =
+                Vec::with_capacity((resources.unpadded_bytes_per_row * height) as usize);
             for y in 0..height {
                 let start = (y * resources.padded_bytes_per_row) as usize;
                 let end = start + resources.unpadded_bytes_per_row as usize;
                 result_data.extend_from_slice(&data[start..end]);
             }
-            
+
             drop(data);
             resources.output_buffer.unmap();
 
@@ -507,23 +550,46 @@ impl GpuImageProcessor {
                     request.params.tone_curve_darks,
                     request.params.tone_curve_lights,
                     request.params.tone_curve_highlights,
-                    request.params.hsl_red_sat, request.params.hsl_orange_sat, request.params.hsl_yellow_sat, request.params.hsl_green_sat,
-                    request.params.hsl_aqua_sat, request.params.hsl_blue_sat, request.params.hsl_purple_sat, request.params.hsl_magenta_sat,
+                    request.params.hsl_red_sat,
+                    request.params.hsl_orange_sat,
+                    request.params.hsl_yellow_sat,
+                    request.params.hsl_green_sat,
+                    request.params.hsl_aqua_sat,
+                    request.params.hsl_blue_sat,
+                    request.params.hsl_purple_sat,
+                    request.params.hsl_magenta_sat,
                     // HSL Hue
-                    request.params.hsl_red_hue, request.params.hsl_orange_hue, request.params.hsl_yellow_hue, request.params.hsl_green_hue,
-                    request.params.hsl_aqua_hue, request.params.hsl_blue_hue, request.params.hsl_purple_hue, request.params.hsl_magenta_hue,
+                    request.params.hsl_red_hue,
+                    request.params.hsl_orange_hue,
+                    request.params.hsl_yellow_hue,
+                    request.params.hsl_green_hue,
+                    request.params.hsl_aqua_hue,
+                    request.params.hsl_blue_hue,
+                    request.params.hsl_purple_hue,
+                    request.params.hsl_magenta_hue,
                     // HSL Lum
-                    request.params.hsl_red_lum, request.params.hsl_orange_lum, request.params.hsl_yellow_lum, request.params.hsl_green_lum,
-                    request.params.hsl_aqua_lum, request.params.hsl_blue_lum, request.params.hsl_purple_lum, request.params.hsl_magenta_lum,
+                    request.params.hsl_red_lum,
+                    request.params.hsl_orange_lum,
+                    request.params.hsl_yellow_lum,
+                    request.params.hsl_green_lum,
+                    request.params.hsl_aqua_lum,
+                    request.params.hsl_blue_lum,
+                    request.params.hsl_purple_lum,
+                    request.params.hsl_magenta_lum,
                     // Lens
-                    request.params.lens_distortion, request.params.lens_vignette_amount, request.params.lens_vignette_midpoint,
+                    request.params.lens_distortion,
+                    request.params.lens_vignette_amount,
+                    request.params.lens_vignette_midpoint,
                     // NR
-                    request.params.nr_luminance, request.params.nr_color,
+                    request.params.nr_luminance,
+                    request.params.nr_color,
                     // Sharpening
-                    request.params.sharpen_amount, request.params.sharpen_radius,
+                    request.params.sharpen_amount,
+                    request.params.sharpen_radius,
                 );
 
-                let preview = crate::image_processing::ImageProcessor::dynamic_to_color_image(&processed);
+                let preview =
+                    crate::image_processing::ImageProcessor::dynamic_to_color_image(&processed);
                 let _ = sender.send(GpuProcessResult {
                     request_id: request.request_id,
                     processed_image: processed,
@@ -552,13 +618,16 @@ impl GpuImageProcessor {
     /// Poll for completed result (non-blocking)
     pub fn poll_result(&self) -> Option<GpuProcessResult> {
         let mut latest: Option<GpuProcessResult> = None;
-        
+
         while let Ok(result) = self.result_receiver.try_recv() {
-            if latest.as_ref().is_none_or(|l| result.request_id > l.request_id) {
+            if latest
+                .as_ref()
+                .is_none_or(|l| result.request_id > l.request_id)
+            {
                 latest = Some(result);
             }
         }
-        
+
         latest
     }
 
@@ -575,4 +644,3 @@ impl Default for GpuImageProcessor {
 }
 
 // We need buffer init descriptor
-

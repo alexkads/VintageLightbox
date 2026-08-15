@@ -1,18 +1,13 @@
-use use_cases::{
-    ImportPhotoUseCase,
-    CheckDuplicatesUseCase,
-    ImportWithOptionsUseCase,
-    ImportRequest,
-    ImportProgress,
-    ScanSourceUseCase,
-    DescribeCandidatesUseCase,
+use crate::view_models::{
+    DuplicateCheckViewModel, ImportCandidateViewModel, ImportProgressViewModel,
 };
 use domain::value_objects::{FilePath, ImportOptions};
-use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 use tokio::sync::mpsc;
-use crate::view_models::{
-    ImportCandidateViewModel, DuplicateCheckViewModel, ImportProgressViewModel,
+use use_cases::{
+    CheckDuplicatesUseCase, DescribeCandidatesUseCase, ImportPhotoUseCase, ImportProgress,
+    ImportRequest, ImportWithOptionsUseCase, ScanSourceUseCase,
 };
 
 pub struct ImportController {
@@ -27,7 +22,7 @@ pub struct ImportController {
 impl ImportController {
     pub fn new(
         import_photo_use_case: Arc<ImportPhotoUseCase>,
-            check_duplicates_use_case: Arc<CheckDuplicatesUseCase>,
+        check_duplicates_use_case: Arc<CheckDuplicatesUseCase>,
         import_with_options_use_case: Arc<ImportWithOptionsUseCase>,
         get_import_sources_use_case: Arc<use_cases::GetImportSourcesUseCase>,
         scan_source_use_case: Arc<ScanSourceUseCase>,
@@ -61,10 +56,8 @@ impl ImportController {
         &self,
         files: Vec<String>,
     ) -> Result<Vec<ImportCandidateViewModel>, String> {
-        let file_paths: Vec<FilePath> = files
-            .iter()
-            .filter_map(|f| FilePath::new(f).ok())
-            .collect();
+        let file_paths: Vec<FilePath> =
+            files.iter().filter_map(|f| FilePath::new(f).ok()).collect();
 
         let candidates = self
             .describe_candidates_use_case
@@ -86,10 +79,7 @@ impl ImportController {
                     file_path,
                     file_size: item.file_size,
                     is_raw: item.is_raw,
-                    camera: format_camera(
-                        &item.metadata.camera_make,
-                        &item.metadata.camera_model,
-                    ),
+                    camera: format_camera(&item.metadata.camera_make, &item.metadata.camera_model),
                     date_time: item.metadata.date_time.unwrap_or_default(),
                     dimensions: match (item.metadata.width, item.metadata.height) {
                         (Some(w), Some(h)) => Some(format!("{}x{}", w, h)),
@@ -118,27 +108,32 @@ impl ImportController {
     }
 
     /// Check for duplicate files
-    pub async fn check_duplicates(&self, files: Vec<String>) -> Result<Vec<DuplicateCheckViewModel>, String> {
+    pub async fn check_duplicates(
+        &self,
+        files: Vec<String>,
+    ) -> Result<Vec<DuplicateCheckViewModel>, String> {
         // Convert strings to FilePaths
-        let file_paths: Result<Vec<FilePath>, _> = files
-            .iter()
-            .map(FilePath::new)
-            .collect();
+        let file_paths: Result<Vec<FilePath>, _> = files.iter().map(FilePath::new).collect();
 
         let file_paths = file_paths.map_err(|e| format!("Invalid file path: {}", e))?;
 
         // Execute duplicate check
-        let results = self.check_duplicates_use_case.execute(file_paths)
+        let results = self
+            .check_duplicates_use_case
+            .execute(file_paths)
             .await
             .map_err(|e| format!("Duplicate check failed: {}", e))?;
 
         // Convert to view models
-        Ok(results.into_iter().map(|result| DuplicateCheckViewModel {
-            file_path: result.file_path.to_string(),
-            content_hash: result.content_hash,
-            is_duplicate: result.is_duplicate,
-            existing_photo_path: result.existing_photo.map(|p| p.file_path().to_string()),
-        }).collect())
+        Ok(results
+            .into_iter()
+            .map(|result| DuplicateCheckViewModel {
+                file_path: result.file_path.to_string(),
+                content_hash: result.content_hash,
+                is_duplicate: result.is_duplicate,
+                existing_photo_path: result.existing_photo.map(|p| p.file_path().to_string()),
+            })
+            .collect())
     }
 
     /// Import with advanced options
@@ -151,10 +146,7 @@ impl ImportController {
         cancel_flag: Arc<AtomicBool>,
     ) -> Result<String, String> {
         // Convert strings to FilePaths
-        let file_paths: Result<Vec<FilePath>, _> = files
-            .iter()
-            .map(FilePath::new)
-            .collect();
+        let file_paths: Result<Vec<FilePath>, _> = files.iter().map(FilePath::new).collect();
 
         let file_paths = file_paths.map_err(|e| format!("Invalid file path: {}", e))?;
 
@@ -172,33 +164,39 @@ impl ImportController {
                     ImportProgress::Processing { index, path } => {
                         ImportProgressViewModel::Processing {
                             index,
-                            path: path.to_string()
-                        }
-                    }
-                    ImportProgress::Completed { photo } => {
-                        ImportProgressViewModel::Completed {
-                            photo_id: photo.id().to_string(),
-                            path: photo.file_path().to_string(),
-                        }
-                    }
-                    ImportProgress::Failed { path, error } => {
-                        ImportProgressViewModel::Failed {
                             path: path.to_string(),
-                            error
                         }
                     }
+                    ImportProgress::Completed { photo } => ImportProgressViewModel::Completed {
+                        photo_id: photo.id().to_string(),
+                        path: photo.file_path().to_string(),
+                    },
+                    ImportProgress::Failed { path, error } => ImportProgressViewModel::Failed {
+                        path: path.to_string(),
+                        error,
+                    },
                     ImportProgress::DuplicateSkipped { path, existing } => {
                         ImportProgressViewModel::DuplicateSkipped {
                             path: path.to_string(),
                             existing_path: existing.file_path().to_string(),
                         }
                     }
-                    ImportProgress::Paused { completed, remaining } => {
-                        ImportProgressViewModel::Paused { completed, remaining }
-                    }
-                    ImportProgress::Finished { successful, failed, skipped } => {
-                        ImportProgressViewModel::Finished { successful, failed, skipped }
-                    }
+                    ImportProgress::Paused {
+                        completed,
+                        remaining,
+                    } => ImportProgressViewModel::Paused {
+                        completed,
+                        remaining,
+                    },
+                    ImportProgress::Finished {
+                        successful,
+                        failed,
+                        skipped,
+                    } => ImportProgressViewModel::Finished {
+                        successful,
+                        failed,
+                        skipped,
+                    },
                 };
 
                 let _ = view_sender.send(vm);
@@ -215,7 +213,9 @@ impl ImportController {
         };
 
         // Execute import
-        let result = self.import_with_options_use_case.execute(request)
+        let result = self
+            .import_with_options_use_case
+            .execute(request)
             .await
             .map_err(|e| format!("Import failed: {}", e))?;
 
@@ -225,7 +225,12 @@ impl ImportController {
         ))
     }
 
-    pub async fn get_sources(&self) -> (Vec<domain::import_source::ImportSource>, Vec<domain::import_source::ImportSource>) {
+    pub async fn get_sources(
+        &self,
+    ) -> (
+        Vec<domain::import_source::ImportSource>,
+        Vec<domain::import_source::ImportSource>,
+    ) {
         self.get_import_sources_use_case.execute().await
     }
 }

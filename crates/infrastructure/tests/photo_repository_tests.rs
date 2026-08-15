@@ -5,7 +5,7 @@
 use domain::{
     entities::Photo,
     repositories::PhotoRepository,
-    value_objects::{ColorLabel, FilePath, Rating, PhotoMetadata},
+    value_objects::{ColorLabel, FilePath, PhotoMetadata, Rating},
 };
 use infrastructure::{create_pool, run_migrations, PhotoRepositoryImpl};
 
@@ -14,11 +14,11 @@ async fn create_test_repository() -> PhotoRepositoryImpl {
     let pool = create_pool("sqlite::memory:")
         .await
         .expect("Failed to create pool");
-    
+
     run_migrations(&pool)
         .await
         .expect("Failed to run migrations");
-    
+
     PhotoRepositoryImpl::new(pool)
 }
 
@@ -93,7 +93,7 @@ async fn test_delete_photo() {
 async fn test_find_all_photos() {
     // Arrange
     let repo = create_test_repository().await;
-    
+
     let photo1 = Photo::new(FilePath::new("/photos/photo1.jpg").unwrap());
     let photo2 = Photo::new(FilePath::new("/photos/photo2.jpg").unwrap());
     let photo3 = Photo::new(FilePath::new("/photos/photo3.jpg").unwrap());
@@ -222,7 +222,7 @@ async fn test_save_and_find_photo_with_metadata() {
     // Assert
     assert!(found.metadata().is_some());
     let found_metadata = found.metadata().unwrap();
-    
+
     // Check key fields
     assert_eq!(found_metadata.camera_make, Some("Canon".to_string()));
     assert_eq!(found_metadata.camera_model, Some("EOS R5".to_string()));
@@ -239,17 +239,64 @@ async fn test_save_and_find_photo_with_edits() {
     let photo_id = photo.id();
 
     // Set edits
-    photo.set_edits(
-        Some(1.5), Some(0.8), None, None, None, None, None, None, None, None, None,
-        None, None, None, None,
-        None, None, None, None, None, None, None, None, // HSL (Sat)
-        None, None, None, None, None, None, None, None, // HSL (Hue)
-        None, None, None, None, None, None, None, None, // HSL (Lum)
-        None, None, None, // Lens
-        None, None, // NR
-        None, None, // Sharpening
-        None, None, None, None, None, None, None, None // Crop
-    ).unwrap();
+    photo
+        .set_edits(
+            Some(1.5),
+            Some(0.8),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None, // HSL (Sat)
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None, // HSL (Hue)
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None, // HSL (Lum)
+            None,
+            None,
+            None, // Lens
+            None,
+            None, // NR
+            None,
+            None, // Sharpening
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None, // Crop
+        )
+        .unwrap();
 
     // Act - Save
     repo.save(&photo).await.unwrap();
@@ -264,17 +311,64 @@ async fn test_save_and_find_photo_with_edits() {
 
     // Act - Update (modify edits)
     let mut found_mut = found;
-    found_mut.set_edits(
-        Some(-0.5), Some(1.2), None, None, None, None, None, None, None, None, None,
-        None, None, None, None,
-        None, None, None, None, None, None, None, None, // HSL (Sat)
-        None, None, None, None, None, None, None, None, // HSL (Hue)
-        None, None, None, None, None, None, None, None, // HSL (Lum)
-        None, None, None, // Lens
-        None, None, // NR
-        None, None, // Sharpening
-        None, None, None, None, None, None, None, None // Crop
-    ).unwrap();
+    found_mut
+        .set_edits(
+            Some(-0.5),
+            Some(1.2),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None, // HSL (Sat)
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None, // HSL (Hue)
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None, // HSL (Lum)
+            None,
+            None,
+            None, // Lens
+            None,
+            None, // NR
+            None,
+            None, // Sharpening
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None, // Crop
+        )
+        .unwrap();
     repo.update(&found_mut).await.unwrap();
 
     // Verify Update

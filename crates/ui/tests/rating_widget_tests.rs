@@ -2,8 +2,8 @@
 //!
 //! Tests the star rating widget using egui_kittest
 
-use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
+use egui_kittest::Harness;
 use std::cell::Cell;
 use std::rc::Rc;
 
@@ -12,7 +12,7 @@ use std::rc::Rc;
 fn test_rating_widget_renders_empty() {
     let rating = Rc::new(Cell::new(0i32));
     let rating_clone = rating.clone();
-    
+
     let mut harness = Harness::new_ui(move |ui| {
         let r = rating_clone.get();
         ui.label("Rating:");
@@ -25,13 +25,13 @@ fn test_rating_widget_renders_empty() {
             }
         });
     });
-    
+
     harness.run();
     harness.fit_contents();
-    
+
     // Snapshot test - uncomment when running with snapshot features
     // harness.snapshot("rating_widget_empty");
-    
+
     assert_eq!(rating.get(), 0);
 }
 
@@ -39,7 +39,7 @@ fn test_rating_widget_renders_empty() {
 #[test]
 fn test_rating_widget_renders_3_stars() {
     let rating = 3i32;
-    
+
     let mut harness = Harness::new_ui(move |ui| {
         ui.label("Rating:");
         ui.horizontal(|ui| {
@@ -49,10 +49,10 @@ fn test_rating_widget_renders_3_stars() {
             }
         });
     });
-    
+
     harness.run();
     harness.fit_contents();
-    
+
     // Snapshot test - uncomment when running with snapshot features
     // harness.snapshot("rating_widget_3_stars");
 }
@@ -62,7 +62,7 @@ fn test_rating_widget_renders_3_stars() {
 fn test_rating_widget_click_changes_rating() {
     let rating = Rc::new(Cell::new(0i32));
     let rating_clone = rating.clone();
-    
+
     let mut harness = Harness::new_ui(move |ui| {
         let r = rating_clone.get();
         ui.horizontal(|ui| {
@@ -74,15 +74,15 @@ fn test_rating_widget_click_changes_rating() {
             }
         });
     });
-    
+
     // Initial state
     assert_eq!(rating.get(), 0);
-    
+
     // Click on star 3
     let star_3 = harness.get_by_label("star_3");
     star_3.click();
     harness.run();
-    
+
     // Rating should now be 3
     assert_eq!(rating.get(), 3);
 }

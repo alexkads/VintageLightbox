@@ -3,8 +3,8 @@
 // Color Labels Component
 // 5 circular color buttons for photo labeling
 
-use egui::{Ui, Vec2, Sense, Color32, Stroke};
 use crate::design_system::theme::Theme;
+use egui::{Color32, Sense, Stroke, Ui, Vec2};
 
 pub struct ColorLabels;
 
@@ -20,11 +20,7 @@ impl ColorLabels {
 
     /// Show interactive color labels
     /// Returns Some(color_name) if a color was clicked
-    pub fn show(
-        ui: &mut Ui,
-        selected_color: &Option<String>,
-        interactive: bool,
-    ) -> Option<String> {
+    pub fn show(ui: &mut Ui, selected_color: &Option<String>, interactive: bool) -> Option<String> {
         let mut clicked_color = None;
 
         ui.horizontal(|ui| {
@@ -34,7 +30,11 @@ impl ColorLabels {
                 let size = Vec2::new(16.0, 16.0);
                 let (rect, response) = ui.allocate_exact_size(
                     size,
-                    if interactive { Sense::click() } else { Sense::hover() },
+                    if interactive {
+                        Sense::click()
+                    } else {
+                        Sense::hover()
+                    },
                 );
 
                 let is_selected = selected_color.as_deref() == Some(*name);
@@ -51,7 +51,8 @@ impl ColorLabels {
                     (255.0 * opacity) as u8,
                 );
 
-                ui.painter().circle_filled(rect.center(), 8.0, color_with_opacity);
+                ui.painter()
+                    .circle_filled(rect.center(), 8.0, color_with_opacity);
 
                 if is_selected {
                     ui.painter().circle_stroke(

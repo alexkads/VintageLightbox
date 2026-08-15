@@ -3,28 +3,48 @@
 //! Orquestra a importação paralela de fotos com opções configuráveis.
 //! Integra detecção de duplicatas, organização de arquivos, e progress reporting.
 
+use crate::check_duplicates::CheckDuplicatesUseCase;
 use domain::{
     entities::Photo,
     repositories::PhotoRepository,
-    services::{MetadataExtractor, ThumbnailGenerator, PreviewStorage, FileOrganizer, PreviewType},
+    services::{FileOrganizer, MetadataExtractor, PreviewStorage, PreviewType, ThumbnailGenerator},
     value_objects::{FilePath, ImportMode, ImportOptions},
-    DomainResult, DomainError,
+    DomainError, DomainResult,
 };
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use tokio::sync::{mpsc, Semaphore};
-use crate::check_duplicates::CheckDuplicatesUseCase;
 
 /// Progresso da importação
 #[derive(Debug, Clone)]
 pub enum ImportProgress {
-    Starting { total: usize },
-    Processing { index: usize, path: FilePath },
-    Completed { photo: Photo },
-    Failed { path: FilePath, error: String },
-    DuplicateSkipped { path: FilePath, existing: Photo },
-    Paused { completed: usize, remaining: usize },
-    Finished { successful: usize, failed: usize, skipped: usize },
+    Starting {
+        total: usize,
+    },
+    Processing {
+        index: usize,
+        path: FilePath,
+    },
+    Completed {
+        photo: Photo,
+    },
+    Failed {
+        path: FilePath,
+        error: String,
+    },
+    DuplicateSkipped {
+        path: FilePath,
+        existing: Photo,
+    },
+    Paused {
+        completed: usize,
+        remaining: usize,
+    },
+    Finished {
+        successful: usize,
+        failed: usize,
+        skipped: usize,
+    },
 }
 
 /// Request de importação com opções
@@ -118,8 +138,10 @@ impl ImportWithOptionsUseCase {
         let mut tasks = Vec::new();
 
         for (index, file_path) in files.iter().enumerate() {
-            let permit = semaphore.clone().acquire_owned().await
-                .map_err(|e| DomainError::InfrastructureError(format!("Semaphore error: {}", e)))?;
+            let permit =
+                semaphore.clone().acquire_owned().await.map_err(|e| {
+                    DomainError::InfrastructureError(format!("Semaphore error: {}", e))
+                })?;
 
             let file_path = file_path.clone();
             let options = options.clone();
@@ -139,12 +161,14 @@ impl ImportWithOptionsUseCase {
             let imported_photos = imported_photos.clone();
 
             // Verificar se é duplicata
-            let is_duplicate = duplicates.iter()
+            let is_duplicate = duplicates
+                .iter()
                 .find(|d| d.file_path == file_path)
                 .map(|d| d.is_duplicate)
                 .unwrap_or(false);
 
-            let existing_photo = duplicates.iter()
+            let existing_photo = duplicates
+                .iter()
                 .find(|d| d.file_path == file_path)
                 .and_then(|d| d.existing_photo.clone());
 
@@ -189,7 +213,9 @@ impl ImportWithOptionsUseCase {
                     &*preview_storage,
                     &*file_organizer,
                     &*photo_repository,
-                ).await {
+                )
+                .await
+                {
                     Ok(photo) => {
                         successful.fetch_add(1, Ordering::Relaxed);
                         let _ = progress_sender.send(ImportProgress::Completed {
@@ -299,12 +325,12 @@ mod tests {
     use super::*;
     use domain::{
         repositories::PhotoRepository,
-        services::{MetadataExtractor, ThumbnailGenerator, PreviewStorage, FileOrganizer},
-        value_objects::{PhotoId, PhotoMetadata, OrganizationStrategy, RenamePattern},
+        services::{FileOrganizer, MetadataExtractor, PreviewStorage, ThumbnailGenerator},
+        value_objects::{OrganizationStrategy, PhotoId, PhotoMetadata, RenamePattern},
     };
     use mockall::{mock, predicate::*};
-    use tempfile::NamedTempFile;
     use std::io::Write;
+    use tempfile::NamedTempFile;
 
     // Mocks
     mock! {
@@ -385,10 +411,7 @@ mod tests {
         let mock_organizer = MockFileOrg;
 
         // Setup mocks - sem duplicatas (skip_duplicates = false, então não chama find_by_content_hash)
-        mock_repo
-            .expect_save()
-            .times(2)
-            .returning(|_| Ok(()));
+        mock_repo.expect_save().times(2).returning(|_| Ok(()));
 
         mock_metadata
             .expect_extract()
@@ -457,8 +480,12 @@ mod tests {
             messages.push(msg);
         }
 
-        assert!(messages.iter().any(|m| matches!(m, ImportProgress::Starting { .. })));
-        assert!(messages.iter().any(|m| matches!(m, ImportProgress::Finished { .. })));
+        assert!(messages
+            .iter()
+            .any(|m| matches!(m, ImportProgress::Starting { .. })));
+        assert!(messages
+            .iter()
+            .any(|m| matches!(m, ImportProgress::Finished { .. })));
     }
 
     #[tokio::test]
@@ -488,10 +515,7 @@ mod tests {
             });
 
         // Apenas 1 save (a não-duplicata)
-        mock_repo
-            .expect_save()
-            .times(1)
-            .returning(|_| Ok(()));
+        mock_repo.expect_save().times(1).returning(|_| Ok(()));
 
         mock_metadata
             .expect_extract()
@@ -612,22 +636,18 @@ mod tests {
 
         // Primeira falha, segunda sucede
         let mut call_count = 0;
-        mock_metadata
-            .expect_extract()
-            .times(2)
-            .returning(move |_| {
-                call_count += 1;
-                if call_count == 1 {
-                    Err(DomainError::InfrastructureError("Failed to extract metadata".to_string()))
-                } else {
-                    Ok(PhotoMetadata::default())
-                }
-            });
+        mock_metadata.expect_extract().times(2).returning(move |_| {
+            call_count += 1;
+            if call_count == 1 {
+                Err(DomainError::InfrastructureError(
+                    "Failed to extract metadata".to_string(),
+                ))
+            } else {
+                Ok(PhotoMetadata::default())
+            }
+        });
 
-        mock_repo
-            .expect_save()
-            .times(1)
-            .returning(|_| Ok(()));
+        mock_repo.expect_save().times(1).returning(|_| Ok(()));
 
         mock_thumbnail
             .expect_generate()
@@ -698,9 +718,7 @@ mod tests {
             .expect_find_by_content_hash()
             .returning(|_| Ok(None));
 
-        mock_repo
-            .expect_save()
-            .returning(|_| Ok(()));
+        mock_repo.expect_save().returning(|_| Ok(()));
 
         mock_metadata
             .expect_extract()
@@ -710,9 +728,7 @@ mod tests {
             .expect_generate()
             .returning(|_, _| Ok(vec![0u8; 100]));
 
-        mock_preview
-            .expect_save()
-            .returning(|_, _, _| Ok(()));
+        mock_preview.expect_save().returning(|_, _, _| Ok(()));
 
         let use_case = ImportWithOptionsUseCase::new(
             Arc::new(mock_repo),
@@ -754,9 +770,22 @@ mod tests {
         }
 
         // Deve ter: Starting, Processing, Completed, Finished
-        assert!(messages.iter().any(|m| matches!(m, ImportProgress::Starting { total: 1 })));
-        assert!(messages.iter().any(|m| matches!(m, ImportProgress::Processing { .. })));
-        assert!(messages.iter().any(|m| matches!(m, ImportProgress::Completed { .. })));
-        assert!(messages.iter().any(|m| matches!(m, ImportProgress::Finished { successful: 1, failed: 0, skipped: 0 })));
+        assert!(messages
+            .iter()
+            .any(|m| matches!(m, ImportProgress::Starting { total: 1 })));
+        assert!(messages
+            .iter()
+            .any(|m| matches!(m, ImportProgress::Processing { .. })));
+        assert!(messages
+            .iter()
+            .any(|m| matches!(m, ImportProgress::Completed { .. })));
+        assert!(messages.iter().any(|m| matches!(
+            m,
+            ImportProgress::Finished {
+                successful: 1,
+                failed: 0,
+                skipped: 0
+            }
+        )));
     }
 }

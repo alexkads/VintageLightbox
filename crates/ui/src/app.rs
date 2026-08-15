@@ -2,22 +2,22 @@
 // VintageLightboxApp implements eframe::App and manages the UI loop
 
 use eframe::egui;
+use egui_dock::DockArea;
+use infrastructure::cache::preview_manager::PreviewManager;
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use infrastructure::cache::preview_manager::PreviewManager;
-use egui_dock::DockArea;
 
+use crate::async_loader::{AsyncImageProcessor, ImageProcessRequest};
+use crate::components::secondary_window::SecondaryWindow;
+use crate::components::settings_dialog::{SettingsAction, SettingsDialog};
+use crate::components::{filmstrip::Filmstrip, photo_grid::PhotoGrid};
+use crate::design_system::{theme::Theme, widgets};
+use crate::docking::{DockViewer, DockViewerContext};
+use crate::keyboard::KeyboardHandler;
+use crate::monitors::{MonitorDetector, MonitorInfo};
+use crate::state::{AppState, CurrentView};
 use adapters::controllers::*;
 use adapters::view_models::PhotoViewModel;
-use crate::state::{AppState, CurrentView};
-use crate::design_system::{theme::Theme, widgets};
-use crate::keyboard::KeyboardHandler;
-use crate::async_loader::{AsyncImageProcessor, ImageProcessRequest};
-use crate::docking::{DockViewer, DockViewerContext};
-use crate::components::{photo_grid::PhotoGrid, filmstrip::Filmstrip};
-use crate::components::settings_dialog::{SettingsDialog, SettingsAction};
-use crate::components::secondary_window::SecondaryWindow;
-use crate::monitors::{MonitorDetector, MonitorInfo};
 
 /// Main application struct
 pub struct VintageLightboxApp {
@@ -47,7 +47,7 @@ pub struct VintageLightboxApp {
     photo_sender: mpsc::Sender<Result<Vec<PhotoViewModel>, String>>,
     preset_receiver: mpsc::Receiver<Result<Vec<domain::entities::Preset>, String>>,
     preset_sender: mpsc::Sender<Result<Vec<domain::entities::Preset>, String>>,
-    
+
     /// Canal único da tela de importação: origens, varredura, metadados e duplicatas
     import_sender: mpsc::Sender<crate::views::import_view::ImportMessage>,
     import_receiver: mpsc::Receiver<crate::views::import_view::ImportMessage>,
@@ -66,10 +66,10 @@ pub struct VintageLightboxApp {
     current_edit_request_id: u64,
     /// The ID of the photo currently requested for loading (to avoid race conditions)
     requested_photo_id: Option<String>,
-    
+
     /// Preview Manager for instant sync lookups
     preview_manager: Arc<PreviewManager>,
-    
+
     // ============================================
     // Docking UI Components
     // ============================================
@@ -79,10 +79,10 @@ pub struct VintageLightboxApp {
     develop_dock_state: egui_dock::DockState<crate::docking::DockTab>,
     /// Print view component
     print_view: crate::views::print_view::PrintView,
-    
+
     /// Flag to trigger initial photo load on first frame
     needs_initial_load: bool,
-    
+
     // ============================================
     // Secondary Window (Multi-Monitor)
     // ============================================
@@ -147,10 +147,12 @@ impl VintageLightboxApp {
             photo_grid: PhotoGrid::new(preview_manager.clone()),
             filmstrip: Filmstrip::new(preview_manager.clone()),
             // Load dock states from storage, or create defaults
-            library_dock_state: cc.storage
+            library_dock_state: cc
+                .storage
                 .and_then(|s| eframe::get_value(s, "library_dock_state"))
                 .unwrap_or_else(crate::docking::create_library_layout),
-            develop_dock_state: cc.storage
+            develop_dock_state: cc
+                .storage
                 .and_then(|s| eframe::get_value(s, "develop_dock_state"))
                 .unwrap_or_else(crate::docking::create_develop_layout),
             print_view: crate::views::print_view::PrintView::new(preview_manager.clone()),
@@ -193,7 +195,6 @@ impl VintageLightboxApp {
     }
 }
 
-
 impl eframe::App for VintageLightboxApp {
     /// Save dock layouts to storage on exit
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
@@ -233,7 +234,9 @@ impl eframe::App for VintageLightboxApp {
                     self.state.rebuild_folder_tree();
                 }
                 Err(e) => {
-                    self.state.toasts.error(format!("Failed to load photos: {}", e));
+                    self.state
+                        .toasts
+                        .error(format!("Failed to load photos: {}", e));
                 }
             }
             self.state.is_busy = false;
@@ -247,7 +250,9 @@ impl eframe::App for VintageLightboxApp {
                     self.state.presets = presets;
                 }
                 Err(e) => {
-                    self.state.toasts.error(format!("Failed to load presets: {}", e));
+                    self.state
+                        .toasts
+                        .error(format!("Failed to load presets: {}", e));
                 }
             }
         }
@@ -264,12 +269,9 @@ impl eframe::App for VintageLightboxApp {
             use crate::views::import_view::{ImportView, Seguimento};
 
             match ImportView::aplicar(&mut self.state, mensagem) {
-                Some(Seguimento::Detalhar(files)) => ImportView::detalhar(
-                    ctx,
-                    &self.import_controller,
-                    &self.import_sender,
-                    files,
-                ),
+                Some(Seguimento::Detalhar(files)) => {
+                    ImportView::detalhar(ctx, &self.import_controller, &self.import_sender, files)
+                }
                 Some(Seguimento::Varrer(root)) => ImportView::selecionar_origem(
                     ctx,
                     &mut self.state,
@@ -321,53 +323,55 @@ impl eframe::App for VintageLightboxApp {
             &self.editor_controller,
             &self.export_controller,
             &self.import_controller,
-            &self.photo_sender
+            &self.photo_sender,
         );
 
         // ============================================
         // ASYNC IMAGE LOADING (Non-blocking)
         // ============================================
-        
+
         // Poll for completed image processing results
         if let Some(result) = self.image_processor.poll_result() {
             // Check if this is still the photo we want
             // Accept if matches develop selection OR (secondary window open AND matches library selection)
-            let is_target = self.state.develop_selected_photo_id.as_ref() == Some(&result.photo_id) ||
-                           (self.secondary_window.is_open && self.state.library_selected_photo_id.as_ref() == Some(&result.photo_id));
+            let is_target = self.state.develop_selected_photo_id.as_ref() == Some(&result.photo_id)
+                || (self.secondary_window.is_open
+                    && self.state.library_selected_photo_id.as_ref() == Some(&result.photo_id));
 
             if is_target {
                 // Store original for before/after
                 // Create cached Arc<Vec<u8>> for GPU processing to avoid repeated allocations
                 let rgba = result.original_preview.to_rgba8();
                 self.state.original_image_data = Some(Arc::new(rgba.into_raw()));
-                
+
                 self.state.original_preview = Some(result.original_preview);
                 self.state.histogram_data = Some(result.histogram);
                 self.state.performance_metrics.image_load_time_ms = Some(result.load_time_ms);
-                
+
                 // Calculate TTI (Time To Interactive)
                 if let Some(start_time) = self.state.start_load_time {
                     let _tti = start_time.elapsed().as_secs_f32() * 1000.0;
                     // TTI measurement complete (could be logged to metrics)
                     self.state.start_load_time = None;
                 }
-                
+
                 // Create texture (measure upload time)
                 let upload_start = std::time::Instant::now();
                 let texture = ctx.load_texture(
                     format!("display_{}", result.photo_id),
                     result.preview,
-                    egui::TextureOptions::default()
+                    egui::TextureOptions::default(),
                 );
-                self.state.performance_metrics.texture_upload_time_ms = Some(upload_start.elapsed().as_secs_f32() * 1000.0);
-                
+                self.state.performance_metrics.texture_upload_time_ms =
+                    Some(upload_start.elapsed().as_secs_f32() * 1000.0);
+
                 self.state.detail_image = Some(texture);
                 // LIGHTROOM-STYLE: Start transition from thumbnail to full-res
                 self.state.detail_image_loaded_at = Some(std::time::Instant::now());
                 // Clear thumbnail to avoid micro-differences between pixel crop (thumb) and UV crop (full-res)
                 self.state.thumbnail_preview = None;
                 self.state.loaded_photo_id = Some(result.photo_id);
-                
+
                 // Force repaint to show the loaded image immediately
                 ctx.request_repaint();
             }
@@ -378,17 +382,19 @@ impl eframe::App for VintageLightboxApp {
             // Only apply if this is the latest request
             if result.request_id >= self.current_edit_request_id.saturating_sub(5) {
                 if let Some(photo_id) = &self.state.develop_selected_photo_id.clone() {
-                    self.state.performance_metrics.gpu_process_time_ms = Some(result.process_time_ms);
+                    self.state.performance_metrics.gpu_process_time_ms =
+                        Some(result.process_time_ms);
 
                     let upload_start = std::time::Instant::now();
                     let texture = ctx.load_texture(
                         format!("display_{}", photo_id),
                         result.preview,
-                        egui::TextureOptions::default()
+                        egui::TextureOptions::default(),
                     );
-                    self.state.performance_metrics.texture_upload_time_ms = Some(upload_start.elapsed().as_secs_f32() * 1000.0);
+                    self.state.performance_metrics.texture_upload_time_ms =
+                        Some(upload_start.elapsed().as_secs_f32() * 1000.0);
                     self.state.detail_image = Some(texture);
-                    
+
                     // Force repaint to show the edited image immediately
                     ctx.request_repaint();
                 }
@@ -403,8 +409,8 @@ impl eframe::App for VintageLightboxApp {
         let target_photo_id = if self.state.current_view == crate::state::CurrentView::Develop {
             self.state.develop_selected_photo_id.clone()
         } else if self.secondary_window.is_open {
-             // Bridge: If secondary window is open, use library selection to drive image loading
-             self.state.library_selected_photo_id.clone()
+            // Bridge: If secondary window is open, use library selection to drive image loading
+            self.state.library_selected_photo_id.clone()
         } else {
             None
         };
@@ -438,7 +444,7 @@ impl eframe::App for VintageLightboxApp {
                     let clarity = photo.edit_clarity.unwrap_or(0.0);
                     let vibrance = photo.edit_vibrance.unwrap_or(0.0);
                     let saturation = photo.edit_saturation.unwrap_or(0.0);
-                    
+
                     // Tone Curve
                     let tone_curve_shadows = photo.edit_tone_curve_shadows.unwrap_or(0.0);
                     let tone_curve_darks = photo.edit_tone_curve_darks.unwrap_or(0.0);
@@ -482,52 +488,14 @@ impl eframe::App for VintageLightboxApp {
                     // Sharpening
                     let sharpen_amount = photo.edit_sharpen_amount.unwrap_or(0.0);
                     let sharpen_radius = photo.edit_sharpen_radius.unwrap_or(1.0);
-                    
+
                     // LIGHTROOM-STYLE: Load thumbnail as instant preview WITH EFFECTS APPLIED
                     // This gives immediate visual feedback that matches the final look
                     // Try to load from PreviewManager (BLOB cache) FIRST
                     if let Some(thumb_img) = self.preview_manager.get_thumbnail(photo_id) {
-                         // Apply the same effects to thumbnail for consistent appearance
-                         let processed_thumb = crate::image_processing::ImageProcessor::process_image(
-                             &thumb_img,
-                             exposure,
-                             contrast,
-                             temperature,
-                             tint,
-                             highlights,
-                             shadows,
-                             whites,
-                             blacks,
-                             clarity,
-                             vibrance,
-                             saturation,
-                             tone_curve_shadows, tone_curve_darks, tone_curve_lights, tone_curve_highlights,
-                             hsl_red_sat, hsl_orange_sat, hsl_yellow_sat, hsl_green_sat,
-                             hsl_aqua_sat, hsl_blue_sat, hsl_purple_sat, hsl_magenta_sat,
-                             // HSL Hue
-                             hsl_red_hue, hsl_orange_hue, hsl_yellow_hue, hsl_green_hue,
-                             hsl_aqua_hue, hsl_blue_hue, hsl_purple_hue, hsl_magenta_hue,
-                             // HSL Lum
-                             hsl_red_lum, hsl_orange_lum, hsl_yellow_lum, hsl_green_lum,
-                             hsl_aqua_lum, hsl_blue_lum, hsl_purple_lum, hsl_magenta_lum,
-                             // Lens
-                             lens_distortion, lens_vignette_amount, lens_vignette_midpoint,
-                             // NR
-                             nr_luminance, nr_color,
-                             // Sharpening
-                             sharpen_amount, sharpen_radius,
-                         );
-                         
-                         let thumb_texture = crate::image_processing::ImageProcessor::load_texture(
-                             ctx,
-                             format!("thumb_{}", photo_id),
-                             &processed_thumb
-                         );
-                         self.state.thumbnail_preview = Some(thumb_texture);
-                    } else if let Some(thumb_path) = &photo.thumbnail_path {
-                        // Fallback to legacy file path (migration support)
-                        if let Ok(thumb_img) = image::open(thumb_path) {
-                            let processed_thumb = crate::image_processing::ImageProcessor::process_image(
+                        // Apply the same effects to thumbnail for consistent appearance
+                        let processed_thumb =
+                            crate::image_processing::ImageProcessor::process_image(
                                 &thumb_img,
                                 exposure,
                                 contrast,
@@ -540,28 +508,119 @@ impl eframe::App for VintageLightboxApp {
                                 clarity,
                                 vibrance,
                                 saturation,
-                                tone_curve_shadows, tone_curve_darks, tone_curve_lights, tone_curve_highlights,
-                                hsl_red_sat, hsl_orange_sat, hsl_yellow_sat, hsl_green_sat,
-                                hsl_aqua_sat, hsl_blue_sat, hsl_purple_sat, hsl_magenta_sat,
+                                tone_curve_shadows,
+                                tone_curve_darks,
+                                tone_curve_lights,
+                                tone_curve_highlights,
+                                hsl_red_sat,
+                                hsl_orange_sat,
+                                hsl_yellow_sat,
+                                hsl_green_sat,
+                                hsl_aqua_sat,
+                                hsl_blue_sat,
+                                hsl_purple_sat,
+                                hsl_magenta_sat,
                                 // HSL Hue
-                                hsl_red_hue, hsl_orange_hue, hsl_yellow_hue, hsl_green_hue,
-                                hsl_aqua_hue, hsl_blue_hue, hsl_purple_hue, hsl_magenta_hue,
+                                hsl_red_hue,
+                                hsl_orange_hue,
+                                hsl_yellow_hue,
+                                hsl_green_hue,
+                                hsl_aqua_hue,
+                                hsl_blue_hue,
+                                hsl_purple_hue,
+                                hsl_magenta_hue,
                                 // HSL Lum
-                                hsl_red_lum, hsl_orange_lum, hsl_yellow_lum, hsl_green_lum,
-                                hsl_aqua_lum, hsl_blue_lum, hsl_purple_lum, hsl_magenta_lum,
+                                hsl_red_lum,
+                                hsl_orange_lum,
+                                hsl_yellow_lum,
+                                hsl_green_lum,
+                                hsl_aqua_lum,
+                                hsl_blue_lum,
+                                hsl_purple_lum,
+                                hsl_magenta_lum,
                                 // Lens
-                                lens_distortion, lens_vignette_amount, lens_vignette_midpoint,
+                                lens_distortion,
+                                lens_vignette_amount,
+                                lens_vignette_midpoint,
                                 // NR
-                                nr_luminance, nr_color,
+                                nr_luminance,
+                                nr_color,
                                 // Sharpening
-                                sharpen_amount, sharpen_radius,
+                                sharpen_amount,
+                                sharpen_radius,
                             );
-                            
-                            let thumb_texture = crate::image_processing::ImageProcessor::load_texture(
-                                ctx,
-                                format!("thumb_{}", photo_id),
-                                &processed_thumb
-                            );
+
+                        let thumb_texture = crate::image_processing::ImageProcessor::load_texture(
+                            ctx,
+                            format!("thumb_{}", photo_id),
+                            &processed_thumb,
+                        );
+                        self.state.thumbnail_preview = Some(thumb_texture);
+                    } else if let Some(thumb_path) = &photo.thumbnail_path {
+                        // Fallback to legacy file path (migration support)
+                        if let Ok(thumb_img) = image::open(thumb_path) {
+                            let processed_thumb =
+                                crate::image_processing::ImageProcessor::process_image(
+                                    &thumb_img,
+                                    exposure,
+                                    contrast,
+                                    temperature,
+                                    tint,
+                                    highlights,
+                                    shadows,
+                                    whites,
+                                    blacks,
+                                    clarity,
+                                    vibrance,
+                                    saturation,
+                                    tone_curve_shadows,
+                                    tone_curve_darks,
+                                    tone_curve_lights,
+                                    tone_curve_highlights,
+                                    hsl_red_sat,
+                                    hsl_orange_sat,
+                                    hsl_yellow_sat,
+                                    hsl_green_sat,
+                                    hsl_aqua_sat,
+                                    hsl_blue_sat,
+                                    hsl_purple_sat,
+                                    hsl_magenta_sat,
+                                    // HSL Hue
+                                    hsl_red_hue,
+                                    hsl_orange_hue,
+                                    hsl_yellow_hue,
+                                    hsl_green_hue,
+                                    hsl_aqua_hue,
+                                    hsl_blue_hue,
+                                    hsl_purple_hue,
+                                    hsl_magenta_hue,
+                                    // HSL Lum
+                                    hsl_red_lum,
+                                    hsl_orange_lum,
+                                    hsl_yellow_lum,
+                                    hsl_green_lum,
+                                    hsl_aqua_lum,
+                                    hsl_blue_lum,
+                                    hsl_purple_lum,
+                                    hsl_magenta_lum,
+                                    // Lens
+                                    lens_distortion,
+                                    lens_vignette_amount,
+                                    lens_vignette_midpoint,
+                                    // NR
+                                    nr_luminance,
+                                    nr_color,
+                                    // Sharpening
+                                    sharpen_amount,
+                                    sharpen_radius,
+                                );
+
+                            let thumb_texture =
+                                crate::image_processing::ImageProcessor::load_texture(
+                                    ctx,
+                                    format!("thumb_{}", photo_id),
+                                    &processed_thumb,
+                                );
                             self.state.thumbnail_preview = Some(thumb_texture);
                         }
                     }
@@ -623,23 +682,31 @@ impl eframe::App for VintageLightboxApp {
                     self.state.active_hsl_yellow_sat = hsl_yellow_sat;
                     self.state.active_hsl_green_sat = hsl_green_sat;
                     self.state.active_hsl_aqua_sat = hsl_aqua_sat;
-                    
+
                     // Initialize crop settings
-                    if let (Some(x), Some(y), Some(w), Some(h)) = (photo.edit_crop_x, photo.edit_crop_y, photo.edit_crop_width, photo.edit_crop_height) {
-                         self.state.crop_settings = Some(domain::value_objects::CropSettings::new(
-                             x, y, w, h,
-                             photo.edit_crop_rotation.unwrap_or(0),
-                             photo.edit_crop_angle.unwrap_or(0.0),
-                             photo.edit_crop_flip_h.unwrap_or(false),
-                             photo.edit_crop_flip_v.unwrap_or(false),
-                         ));
+                    if let (Some(x), Some(y), Some(w), Some(h)) = (
+                        photo.edit_crop_x,
+                        photo.edit_crop_y,
+                        photo.edit_crop_width,
+                        photo.edit_crop_height,
+                    ) {
+                        self.state.crop_settings = Some(domain::value_objects::CropSettings::new(
+                            x,
+                            y,
+                            w,
+                            h,
+                            photo.edit_crop_rotation.unwrap_or(0),
+                            photo.edit_crop_angle.unwrap_or(0.0),
+                            photo.edit_crop_flip_h.unwrap_or(false),
+                            photo.edit_crop_flip_v.unwrap_or(false),
+                        ));
                     } else {
                         self.state.crop_settings = None;
                     }
                     self.state.active_hsl_blue_sat = hsl_blue_sat;
                     self.state.active_hsl_purple_sat = hsl_purple_sat;
                     self.state.active_hsl_magenta_sat = hsl_magenta_sat;
-                    
+
                     self.state.prev_hsl_red_sat = hsl_red_sat;
                     self.state.prev_hsl_orange_sat = hsl_orange_sat;
                     self.state.prev_hsl_yellow_sat = hsl_yellow_sat;
@@ -648,7 +715,7 @@ impl eframe::App for VintageLightboxApp {
                     self.state.prev_hsl_blue_sat = hsl_blue_sat;
                     self.state.prev_hsl_purple_sat = hsl_purple_sat;
                     self.state.prev_hsl_magenta_sat = hsl_magenta_sat;
-                    
+
                     self.state.saved_hsl_red_sat = hsl_red_sat;
                     self.state.saved_hsl_orange_sat = hsl_orange_sat;
                     self.state.saved_hsl_yellow_sat = hsl_yellow_sat;
@@ -667,7 +734,7 @@ impl eframe::App for VintageLightboxApp {
                     self.state.active_hsl_blue_hue = hsl_blue_hue;
                     self.state.active_hsl_purple_hue = hsl_purple_hue;
                     self.state.active_hsl_magenta_hue = hsl_magenta_hue;
-                    
+
                     self.state.prev_hsl_red_hue = hsl_red_hue;
                     self.state.prev_hsl_orange_hue = hsl_orange_hue;
                     self.state.prev_hsl_yellow_hue = hsl_yellow_hue;
@@ -676,7 +743,7 @@ impl eframe::App for VintageLightboxApp {
                     self.state.prev_hsl_blue_hue = hsl_blue_hue;
                     self.state.prev_hsl_purple_hue = hsl_purple_hue;
                     self.state.prev_hsl_magenta_hue = hsl_magenta_hue;
-                    
+
                     self.state.saved_hsl_red_hue = hsl_red_hue;
                     self.state.saved_hsl_orange_hue = hsl_orange_hue;
                     self.state.saved_hsl_yellow_hue = hsl_yellow_hue;
@@ -695,7 +762,7 @@ impl eframe::App for VintageLightboxApp {
                     self.state.active_hsl_blue_lum = hsl_blue_lum;
                     self.state.active_hsl_purple_lum = hsl_purple_lum;
                     self.state.active_hsl_magenta_lum = hsl_magenta_lum;
-                    
+
                     self.state.prev_hsl_red_lum = hsl_red_lum;
                     self.state.prev_hsl_orange_lum = hsl_orange_lum;
                     self.state.prev_hsl_yellow_lum = hsl_yellow_lum;
@@ -704,7 +771,7 @@ impl eframe::App for VintageLightboxApp {
                     self.state.prev_hsl_blue_lum = hsl_blue_lum;
                     self.state.prev_hsl_purple_lum = hsl_purple_lum;
                     self.state.prev_hsl_magenta_lum = hsl_magenta_lum;
-                    
+
                     self.state.saved_hsl_red_lum = hsl_red_lum;
                     self.state.saved_hsl_orange_lum = hsl_orange_lum;
                     self.state.saved_hsl_yellow_lum = hsl_yellow_lum;
@@ -771,26 +838,50 @@ impl eframe::App for VintageLightboxApp {
                         tone_curve_lights,
                         tone_curve_highlights,
                         // HSL Saturation
-                        hsl_red_sat, hsl_orange_sat, hsl_yellow_sat, hsl_green_sat,
-                        hsl_aqua_sat, hsl_blue_sat, hsl_purple_sat, hsl_magenta_sat,
+                        hsl_red_sat,
+                        hsl_orange_sat,
+                        hsl_yellow_sat,
+                        hsl_green_sat,
+                        hsl_aqua_sat,
+                        hsl_blue_sat,
+                        hsl_purple_sat,
+                        hsl_magenta_sat,
                         // HSL Hue
-                        hsl_red_hue, hsl_orange_hue, hsl_yellow_hue, hsl_green_hue,
-                        hsl_aqua_hue, hsl_blue_hue, hsl_purple_hue, hsl_magenta_hue,
+                        hsl_red_hue,
+                        hsl_orange_hue,
+                        hsl_yellow_hue,
+                        hsl_green_hue,
+                        hsl_aqua_hue,
+                        hsl_blue_hue,
+                        hsl_purple_hue,
+                        hsl_magenta_hue,
                         // HSL Lum
-                        hsl_red_lum, hsl_orange_lum, hsl_yellow_lum, hsl_green_lum,
-                        hsl_aqua_lum, hsl_blue_lum, hsl_purple_lum, hsl_magenta_lum,
+                        hsl_red_lum,
+                        hsl_orange_lum,
+                        hsl_yellow_lum,
+                        hsl_green_lum,
+                        hsl_aqua_lum,
+                        hsl_blue_lum,
+                        hsl_purple_lum,
+                        hsl_magenta_lum,
                         // Lens
-                        lens_distortion, lens_vignette_amount, lens_vignette_midpoint,
+                        lens_distortion,
+                        lens_vignette_amount,
+                        lens_vignette_midpoint,
                         // NR
-                        nr_luminance, nr_color,
+                        nr_luminance,
+                        nr_color,
                         // Sharpening
-                        sharpen_amount, sharpen_radius,
+                        sharpen_amount,
+                        sharpen_radius,
                         max_preview_size: 2560,
                     });
 
                     // Prefetch adjacent photos into L1 cache for faster navigation
                     // Find current photo index and prefetch previous/next
-                    if let Some(current_idx) = self.state.photos.iter().position(|p| &p.id == photo_id) {
+                    if let Some(current_idx) =
+                        self.state.photos.iter().position(|p| &p.id == photo_id)
+                    {
                         // Prefetch previous photo
                         if current_idx > 0 {
                             if let Some(prev_photo) = self.state.photos.get(current_idx - 1) {
@@ -819,8 +910,7 @@ impl eframe::App for VintageLightboxApp {
                 }
             } else if !needs_reload {
                 // Photo is loaded, check for edit changes
-                let edits_changed =
-                    self.state.active_exposure != self.state.prev_exposure ||
+                let edits_changed = self.state.active_exposure != self.state.prev_exposure ||
                     self.state.active_contrast != self.state.prev_contrast ||
                     self.state.active_temperature != self.state.prev_temperature ||
                     self.state.active_tint != self.state.prev_tint ||
@@ -952,83 +1042,97 @@ impl eframe::App for VintageLightboxApp {
                             let texture = crate::image_processing::ImageProcessor::load_texture(
                                 ctx,
                                 format!("display_{}", photo_id),
-                                original
+                                original,
                             );
                             self.state.detail_image = Some(texture);
                         } else {
                             // Request GPU-accelerated edit processing
                             // Use cached data to avoid expensive cloning
-                            let (image_data, width, height) = if let Some(data) = &self.state.original_image_data {
-                                let width = original.width();
-                                let height = original.height();
-                                (data.clone(), width, height)
-                            } else {
-                                // Fallback if cache is missing (shouldn't happen)
-                                let rgba = original.to_rgba8();
-                                (Arc::new(rgba.clone().into_raw()), rgba.width(), rgba.height())
-                            };
-                            
-                            self.current_edit_request_id = self.gpu_edit_processor.next_request_id();
-                            self.gpu_edit_processor.request_process(crate::gpu_processor::GpuProcessRequest {
-                                request_id: self.current_edit_request_id,
-                                image_data,
-                                width,
-                                height,
-                                params: crate::gpu_processor::GpuEditParams {
-                                    exposure: self.state.active_exposure,
-                                    contrast: self.state.active_contrast,
-                                    temperature: self.state.active_temperature,
-                                    tint: self.state.active_tint,
-                                    highlights: self.state.active_highlights,
-                                    shadows: self.state.active_shadows,
-                                    whites: self.state.active_whites,
-                                    blacks: self.state.active_blacks,
-                                    clarity: self.state.active_clarity,
-                                    vibrance: self.state.active_vibrance,
-                                    saturation: self.state.active_saturation,
-                                    tone_curve_shadows: self.state.active_tone_curve_shadows,
-                                    tone_curve_darks: self.state.active_tone_curve_darks,
-                                    tone_curve_lights: self.state.active_tone_curve_lights,
-                                    tone_curve_highlights: self.state.active_tone_curve_highlights,
-                                    // HSL from AppState
-                                    hsl_red_sat: self.state.active_hsl_red_sat,
-                                    hsl_orange_sat: self.state.active_hsl_orange_sat,
-                                    hsl_yellow_sat: self.state.active_hsl_yellow_sat,
-                                    hsl_green_sat: self.state.active_hsl_green_sat,
-                                    hsl_aqua_sat: self.state.active_hsl_aqua_sat,
-                                    hsl_blue_sat: self.state.active_hsl_blue_sat,
-                                    hsl_purple_sat: self.state.active_hsl_purple_sat,
-                                    hsl_magenta_sat: self.state.active_hsl_magenta_sat,
-                                    // HSL Hue
-                                    hsl_red_hue: self.state.active_hsl_red_hue,
-                                    hsl_orange_hue: self.state.active_hsl_orange_hue,
-                                    hsl_yellow_hue: self.state.active_hsl_yellow_hue,
-                                    hsl_green_hue: self.state.active_hsl_green_hue,
-                                    hsl_aqua_hue: self.state.active_hsl_aqua_hue,
-                                    hsl_blue_hue: self.state.active_hsl_blue_hue,
-                                    hsl_purple_hue: self.state.active_hsl_purple_hue,
-                                    hsl_magenta_hue: self.state.active_hsl_magenta_hue,
-                                    // HSL Lum
-                                    hsl_red_lum: self.state.active_hsl_red_lum,
-                                    hsl_orange_lum: self.state.active_hsl_orange_lum,
-                                    hsl_yellow_lum: self.state.active_hsl_yellow_lum,
-                                    hsl_green_lum: self.state.active_hsl_green_lum,
-                                    hsl_aqua_lum: self.state.active_hsl_aqua_lum,
-                                    hsl_blue_lum: self.state.active_hsl_blue_lum,
-                                    hsl_purple_lum: self.state.active_hsl_purple_lum,
-                                    hsl_magenta_lum: self.state.active_hsl_magenta_lum,
-                                    // Lens
-                                    lens_distortion: self.state.active_lens_distortion,
-                                    lens_vignette_amount: self.state.active_lens_vignette_amount,
-                                    lens_vignette_midpoint: self.state.active_lens_vignette_midpoint,
-                                    // NR
-                                    nr_luminance: self.state.active_nr_luminance,
-                                    nr_color: self.state.active_nr_color,
-                                    // Sharpening
-                                    sharpen_amount: self.state.active_sharpen_amount,
-                                    sharpen_radius: self.state.active_sharpen_radius,
+                            let (image_data, width, height) =
+                                if let Some(data) = &self.state.original_image_data {
+                                    let width = original.width();
+                                    let height = original.height();
+                                    (data.clone(), width, height)
+                                } else {
+                                    // Fallback if cache is missing (shouldn't happen)
+                                    let rgba = original.to_rgba8();
+                                    (
+                                        Arc::new(rgba.clone().into_raw()),
+                                        rgba.width(),
+                                        rgba.height(),
+                                    )
+                                };
+
+                            self.current_edit_request_id =
+                                self.gpu_edit_processor.next_request_id();
+                            self.gpu_edit_processor.request_process(
+                                crate::gpu_processor::GpuProcessRequest {
+                                    request_id: self.current_edit_request_id,
+                                    image_data,
+                                    width,
+                                    height,
+                                    params: crate::gpu_processor::GpuEditParams {
+                                        exposure: self.state.active_exposure,
+                                        contrast: self.state.active_contrast,
+                                        temperature: self.state.active_temperature,
+                                        tint: self.state.active_tint,
+                                        highlights: self.state.active_highlights,
+                                        shadows: self.state.active_shadows,
+                                        whites: self.state.active_whites,
+                                        blacks: self.state.active_blacks,
+                                        clarity: self.state.active_clarity,
+                                        vibrance: self.state.active_vibrance,
+                                        saturation: self.state.active_saturation,
+                                        tone_curve_shadows: self.state.active_tone_curve_shadows,
+                                        tone_curve_darks: self.state.active_tone_curve_darks,
+                                        tone_curve_lights: self.state.active_tone_curve_lights,
+                                        tone_curve_highlights: self
+                                            .state
+                                            .active_tone_curve_highlights,
+                                        // HSL from AppState
+                                        hsl_red_sat: self.state.active_hsl_red_sat,
+                                        hsl_orange_sat: self.state.active_hsl_orange_sat,
+                                        hsl_yellow_sat: self.state.active_hsl_yellow_sat,
+                                        hsl_green_sat: self.state.active_hsl_green_sat,
+                                        hsl_aqua_sat: self.state.active_hsl_aqua_sat,
+                                        hsl_blue_sat: self.state.active_hsl_blue_sat,
+                                        hsl_purple_sat: self.state.active_hsl_purple_sat,
+                                        hsl_magenta_sat: self.state.active_hsl_magenta_sat,
+                                        // HSL Hue
+                                        hsl_red_hue: self.state.active_hsl_red_hue,
+                                        hsl_orange_hue: self.state.active_hsl_orange_hue,
+                                        hsl_yellow_hue: self.state.active_hsl_yellow_hue,
+                                        hsl_green_hue: self.state.active_hsl_green_hue,
+                                        hsl_aqua_hue: self.state.active_hsl_aqua_hue,
+                                        hsl_blue_hue: self.state.active_hsl_blue_hue,
+                                        hsl_purple_hue: self.state.active_hsl_purple_hue,
+                                        hsl_magenta_hue: self.state.active_hsl_magenta_hue,
+                                        // HSL Lum
+                                        hsl_red_lum: self.state.active_hsl_red_lum,
+                                        hsl_orange_lum: self.state.active_hsl_orange_lum,
+                                        hsl_yellow_lum: self.state.active_hsl_yellow_lum,
+                                        hsl_green_lum: self.state.active_hsl_green_lum,
+                                        hsl_aqua_lum: self.state.active_hsl_aqua_lum,
+                                        hsl_blue_lum: self.state.active_hsl_blue_lum,
+                                        hsl_purple_lum: self.state.active_hsl_purple_lum,
+                                        hsl_magenta_lum: self.state.active_hsl_magenta_lum,
+                                        // Lens
+                                        lens_distortion: self.state.active_lens_distortion,
+                                        lens_vignette_amount: self
+                                            .state
+                                            .active_lens_vignette_amount,
+                                        lens_vignette_midpoint: self
+                                            .state
+                                            .active_lens_vignette_midpoint,
+                                        // NR
+                                        nr_luminance: self.state.active_nr_luminance,
+                                        nr_color: self.state.active_nr_color,
+                                        // Sharpening
+                                        sharpen_amount: self.state.active_sharpen_amount,
+                                        sharpen_radius: self.state.active_sharpen_radius,
+                                    },
                                 },
-                            });
+                            );
 
                             // Request repaint to poll for results
                             ctx.request_repaint();
@@ -1051,7 +1155,8 @@ impl eframe::App for VintageLightboxApp {
                         self.state.prev_tone_curve_shadows = self.state.active_tone_curve_shadows;
                         self.state.prev_tone_curve_darks = self.state.active_tone_curve_darks;
                         self.state.prev_tone_curve_lights = self.state.active_tone_curve_lights;
-                        self.state.prev_tone_curve_highlights = self.state.active_tone_curve_highlights;
+                        self.state.prev_tone_curve_highlights =
+                            self.state.active_tone_curve_highlights;
                         // HSL Sat
                         self.state.prev_hsl_red_sat = self.state.active_hsl_red_sat;
                         self.state.prev_hsl_orange_sat = self.state.active_hsl_orange_sat;
@@ -1081,8 +1186,10 @@ impl eframe::App for VintageLightboxApp {
                         self.state.prev_hsl_magenta_lum = self.state.active_hsl_magenta_lum;
                         // Lens
                         self.state.prev_lens_distortion = self.state.active_lens_distortion;
-                        self.state.prev_lens_vignette_amount = self.state.active_lens_vignette_amount;
-                        self.state.prev_lens_vignette_midpoint = self.state.active_lens_vignette_midpoint;
+                        self.state.prev_lens_vignette_amount =
+                            self.state.active_lens_vignette_amount;
+                        self.state.prev_lens_vignette_midpoint =
+                            self.state.active_lens_vignette_midpoint;
                         // NR
                         self.state.prev_nr_luminance = self.state.active_nr_luminance;
                         self.state.prev_nr_color = self.state.active_nr_color;
@@ -1102,21 +1209,21 @@ impl eframe::App for VintageLightboxApp {
             self.state.pending_crop_apply = false;
             // Mark for immediate save
             self.state.pending_auto_save = true;
-            self.state.last_slider_change_time = Some(std::time::Instant::now() - std::time::Duration::from_millis(1000));
+            self.state.last_slider_change_time =
+                Some(std::time::Instant::now() - std::time::Duration::from_millis(1000));
         }
 
         // ============================================
         // AUTO-SAVE DEBOUNCE (500ms delay)
         // ============================================
         const AUTO_SAVE_DEBOUNCE_MS: u128 = 500;
-        
+
         if self.state.pending_auto_save {
             if let Some(last_change) = self.state.last_slider_change_time {
                 let elapsed = last_change.elapsed().as_millis();
                 if elapsed >= AUTO_SAVE_DEBOUNCE_MS {
                     // Check if values actually changed from last saved state
-                    let values_changed =
-                        self.state.active_exposure != self.state.saved_exposure ||
+                    let values_changed = self.state.active_exposure != self.state.saved_exposure ||
                         self.state.active_contrast != self.state.saved_contrast ||
                         self.state.active_temperature != self.state.saved_temperature ||
                         self.state.active_tint != self.state.saved_tint ||
@@ -1252,7 +1359,7 @@ impl eframe::App for VintageLightboxApp {
                             self.state.saved_hsl_blue_sat = hsl_blue_sat;
                             self.state.saved_hsl_purple_sat = hsl_purple_sat;
                             self.state.saved_hsl_magenta_sat = hsl_magenta_sat;
-                            
+
                             // Update saved crop settings
                             self.state.saved_crop_settings = self.state.crop_settings.clone();
 
@@ -1343,12 +1450,24 @@ impl eframe::App for VintageLightboxApp {
 
                             // Extract crop settings for closure
                             let (
-                                crop_x, crop_y, crop_width, crop_height,
-                                crop_rotation, crop_angle, crop_flip_h, crop_flip_v
+                                crop_x,
+                                crop_y,
+                                crop_width,
+                                crop_height,
+                                crop_rotation,
+                                crop_angle,
+                                crop_flip_h,
+                                crop_flip_v,
                             ) = if let Some(c) = &self.state.crop_settings {
                                 (
-                                    Some(c.crop_x()), Some(c.crop_y()), Some(c.crop_width()), Some(c.crop_height()),
-                                    Some(c.rotation_90()), Some(c.angle()), Some(c.flip_horizontal()), Some(c.flip_vertical())
+                                    Some(c.crop_x()),
+                                    Some(c.crop_y()),
+                                    Some(c.crop_width()),
+                                    Some(c.crop_height()),
+                                    Some(c.rotation_90()),
+                                    Some(c.angle()),
+                                    Some(c.flip_horizontal()),
+                                    Some(c.flip_vertical()),
                                 )
                             } else {
                                 (None, None, None, None, None, None, None, None)
@@ -1357,28 +1476,72 @@ impl eframe::App for VintageLightboxApp {
                             let ctx_clone = ctx.clone();
 
                             tokio::spawn(async move {
-                                if let Err(e) = controller.save_edits(
-                                    id, exposure, contrast, temperature, tint, highlights, shadows,
-                                    whites, blacks, clarity, vibrance, saturation,
-                                    tone_curve_shadows, tone_curve_darks, tone_curve_lights, tone_curve_highlights,
-                                    hsl_red_sat, hsl_orange_sat, hsl_yellow_sat, hsl_green_sat,
-                                    hsl_aqua_sat, hsl_blue_sat, hsl_purple_sat, hsl_magenta_sat,
-                                    // HSL Hue
-                                    hsl_red_hue, hsl_orange_hue, hsl_yellow_hue, hsl_green_hue,
-                                    hsl_aqua_hue, hsl_blue_hue, hsl_purple_hue, hsl_magenta_hue,
-                                    // HSL Lum
-                                    hsl_red_lum, hsl_orange_lum, hsl_yellow_lum, hsl_green_lum,
-                                    hsl_aqua_lum, hsl_blue_lum, hsl_purple_lum, hsl_magenta_lum,
-                                    // Lens
-                                    lens_distortion, lens_vignette_amount, lens_vignette_midpoint,
-                                    // NR
-                                    nr_luminance, nr_color,
-                                    // Sharpen
-                                    sharpen_amount, sharpen_radius,
-                                    // Crop
-                                    crop_x, crop_y, crop_width, crop_height,
-                                    crop_rotation, crop_angle, crop_flip_h, crop_flip_v
-                                ).await {
+                                if let Err(e) = controller
+                                    .save_edits(
+                                        id,
+                                        exposure,
+                                        contrast,
+                                        temperature,
+                                        tint,
+                                        highlights,
+                                        shadows,
+                                        whites,
+                                        blacks,
+                                        clarity,
+                                        vibrance,
+                                        saturation,
+                                        tone_curve_shadows,
+                                        tone_curve_darks,
+                                        tone_curve_lights,
+                                        tone_curve_highlights,
+                                        hsl_red_sat,
+                                        hsl_orange_sat,
+                                        hsl_yellow_sat,
+                                        hsl_green_sat,
+                                        hsl_aqua_sat,
+                                        hsl_blue_sat,
+                                        hsl_purple_sat,
+                                        hsl_magenta_sat,
+                                        // HSL Hue
+                                        hsl_red_hue,
+                                        hsl_orange_hue,
+                                        hsl_yellow_hue,
+                                        hsl_green_hue,
+                                        hsl_aqua_hue,
+                                        hsl_blue_hue,
+                                        hsl_purple_hue,
+                                        hsl_magenta_hue,
+                                        // HSL Lum
+                                        hsl_red_lum,
+                                        hsl_orange_lum,
+                                        hsl_yellow_lum,
+                                        hsl_green_lum,
+                                        hsl_aqua_lum,
+                                        hsl_blue_lum,
+                                        hsl_purple_lum,
+                                        hsl_magenta_lum,
+                                        // Lens
+                                        lens_distortion,
+                                        lens_vignette_amount,
+                                        lens_vignette_midpoint,
+                                        // NR
+                                        nr_luminance,
+                                        nr_color,
+                                        // Sharpen
+                                        sharpen_amount,
+                                        sharpen_radius,
+                                        // Crop
+                                        crop_x,
+                                        crop_y,
+                                        crop_width,
+                                        crop_height,
+                                        crop_rotation,
+                                        crop_angle,
+                                        crop_flip_h,
+                                        crop_flip_v,
+                                    )
+                                    .await
+                                {
                                     // Note: Toast will be shown in the next frame via state
                                     eprintln!("Auto-save failed: {}", e);
                                 }
@@ -1386,7 +1549,7 @@ impl eframe::App for VintageLightboxApp {
                             });
                         }
                     }
-                    
+
                     // Clear pending flag even if values didn't change
                     self.state.pending_auto_save = false;
                     self.state.last_slider_change_time = None;
@@ -1401,7 +1564,6 @@ impl eframe::App for VintageLightboxApp {
         // KEYBOARD SHORTCUTS (Library View)
         // ============================================
         // Keyboard shortcuts are now handled globally by keyboard_handler (line 225)
-
 
         // ============================================
         // IMPORT MODAL
@@ -1452,23 +1614,30 @@ impl eframe::App for VintageLightboxApp {
                                 count,
                                 if count == 1 { "" } else { "s" }
                             ))
-                            .size(16.0)
+                            .size(16.0),
                         );
                         ui.add_space(15.0);
-                        
+
                         ui.horizontal(|ui| {
                             if ui.button("Cancel").clicked() {
                                 self.state.show_delete_confirmation = false;
                             }
                             ui.add_space(20.0);
-                            if ui.button(egui::RichText::new("Delete").color(egui::Color32::from_rgb(255, 100, 100))).clicked() {
+                            if ui
+                                .button(
+                                    egui::RichText::new("Delete")
+                                        .color(egui::Color32::from_rgb(255, 100, 100)),
+                                )
+                                .clicked()
+                            {
                                 // Perform deletion
-                                let ids_to_delete: Vec<String> = self.state.selected_photo_ids.iter().cloned().collect();
+                                let ids_to_delete: Vec<String> =
+                                    self.state.selected_photo_ids.iter().cloned().collect();
                                 let photo_controller = self.photo_controller.clone();
                                 let library_controller = self.library_controller.clone();
                                 let photo_sender = self.photo_sender.clone();
                                 let ctx_clone = ctx.clone();
-                                
+
                                 let deleted_count = ids_to_delete.len();
                                 tokio::spawn(async move {
                                     for id in &ids_to_delete {
@@ -1482,7 +1651,11 @@ impl eframe::App for VintageLightboxApp {
                                     ctx_clone.request_repaint();
                                 });
 
-                                self.state.toasts.info(format!("Deleting {} photo{}...", deleted_count, if deleted_count == 1 { "" } else { "s" }));
+                                self.state.toasts.info(format!(
+                                    "Deleting {} photo{}...",
+                                    deleted_count,
+                                    if deleted_count == 1 { "" } else { "s" }
+                                ));
                                 self.state.clear_selection();
                                 self.state.library_selected_photo_id = None;
                                 self.state.show_delete_confirmation = false;
@@ -1503,16 +1676,16 @@ impl eframe::App for VintageLightboxApp {
         if self.state.show_print_dialog {
             if let Some(ref mut print_state) = self.state.print_dialog_state {
                 use crate::components::print_dialog::{PrintDialog, PrintDialogAction};
-                
+
                 let action = PrintDialog::show(ctx, print_state);
-                
+
                 match action {
                     PrintDialogAction::Print => {
                         // TODO: Execute print job when infrastructure is ready
                         let photo_count = print_state.photo_ids.len();
                         let layout = print_state.layout.display_name();
                         self.state.toasts.info(format!(
-                            "Print functionality coming soon! Would print {} photo(s) with {} layout", 
+                            "Print functionality coming soon! Would print {} photo(s) with {} layout",
                             photo_count, layout
                         ));
                         self.state.show_print_dialog = false;
@@ -1534,7 +1707,9 @@ impl eframe::App for VintageLightboxApp {
             match action {
                 SettingsAction::ClearThumbnails => {
                     if let Ok(count) = self.preview_manager.clear_thumbnails() {
-                        self.state.toasts.success(format!("Cleared {} thumbnails", count));
+                        self.state
+                            .toasts
+                            .success(format!("Cleared {} thumbnails", count));
                         // Refresh stats
                         self.state.cache_stats = Some(self.preview_manager.get_stats());
                     } else {
@@ -1543,7 +1718,9 @@ impl eframe::App for VintageLightboxApp {
                 }
                 SettingsAction::ClearPreviews => {
                     if let Ok(count) = self.preview_manager.clear_previews() {
-                        self.state.toasts.success(format!("Cleared {} previews", count));
+                        self.state
+                            .toasts
+                            .success(format!("Cleared {} previews", count));
                         self.state.cache_stats = Some(self.preview_manager.get_stats());
                     } else {
                         self.state.toasts.error("Failed to clear previews");
@@ -1551,7 +1728,9 @@ impl eframe::App for VintageLightboxApp {
                 }
                 SettingsAction::ClearAllCache => {
                     if let Ok(count) = self.preview_manager.clear_all() {
-                        self.state.toasts.success(format!("Cache cleared completely ({} items)", count));
+                        self.state
+                            .toasts
+                            .success(format!("Cache cleared completely ({} items)", count));
                         self.state.cache_stats = Some(self.preview_manager.get_stats());
                     } else {
                         self.state.toasts.error("Failed to clear cache");
@@ -1576,25 +1755,28 @@ impl eframe::App for VintageLightboxApp {
                         ui.add_space(10.0);
                         ui.label("Enter a name for your preset:");
                         ui.add_space(5.0);
-                        
+
                         let response = ui.text_edit_singleline(&mut self.state.save_preset_name);
-                        
+
                         // Auto-focus the text field
                         if self.state.show_save_preset_dialog {
                             response.request_focus();
                         }
-                        
+
                         ui.add_space(15.0);
-                        
+
                         ui.horizontal(|ui| {
                             if ui.button("Cancel").clicked() {
                                 self.state.show_save_preset_dialog = false;
                                 self.state.save_preset_name.clear();
                             }
                             ui.add_space(20.0);
-                            
+
                             let can_save = !self.state.save_preset_name.trim().is_empty();
-                            if ui.add_enabled(can_save, egui::Button::new("Save")).clicked() {
+                            if ui
+                                .add_enabled(can_save, egui::Button::new("Save"))
+                                .clicked()
+                            {
                                 // Create adjustments from current state
                                 let adjustments = domain::entities::preset::PresetAdjustments {
                                     exposure: Some(self.state.active_exposure),
@@ -1611,14 +1793,16 @@ impl eframe::App for VintageLightboxApp {
                                     tone_curve_shadows: Some(self.state.active_tone_curve_shadows),
                                     tone_curve_darks: Some(self.state.active_tone_curve_darks),
                                     tone_curve_lights: Some(self.state.active_tone_curve_lights),
-                                    tone_curve_highlights: Some(self.state.active_tone_curve_highlights),
+                                    tone_curve_highlights: Some(
+                                        self.state.active_tone_curve_highlights,
+                                    ),
                                 };
-                                
+
                                 let name = self.state.save_preset_name.trim().to_string();
                                 let controller = self.preset_controller.clone();
                                 let preset_sender = self.preset_sender.clone();
                                 let ctx_clone = ctx.clone();
-                                
+
                                 tokio::spawn(async move {
                                     match controller.save_preset(name.clone(), adjustments).await {
                                         Ok(_) => {
@@ -1633,8 +1817,11 @@ impl eframe::App for VintageLightboxApp {
                                     }
                                     ctx_clone.request_repaint();
                                 });
-                                
-                                self.state.toasts.success(format!("Preset '{}' saved!", self.state.save_preset_name.trim()));
+
+                                self.state.toasts.success(format!(
+                                    "Preset '{}' saved!",
+                                    self.state.save_preset_name.trim()
+                                ));
                                 self.state.show_save_preset_dialog = false;
                                 self.state.save_preset_name.clear();
                             }
@@ -1646,7 +1833,6 @@ impl eframe::App for VintageLightboxApp {
 
         // Top toolbar
         egui::TopBottomPanel::top("toolbar")
-
             .exact_height(Theme::TOOLBAR_HEIGHT)
             .show(ctx, |ui| {
                 self.show_toolbar(ui);
@@ -1673,25 +1859,24 @@ impl eframe::App for VintageLightboxApp {
                     CurrentView::Develop => &mut self.develop_dock_state,
                     CurrentView::Print => &mut self.library_dock_state, // Fallback
                 };
-            
-            // Create dock viewer context with all required references
-            let context = DockViewerContext {
-                state: &mut self.state,
-                library_controller: &self.library_controller,
-                editor_controller: &self.editor_controller,
-                export_controller: &self.export_controller,
-                photo_controller: &self.photo_controller,
-                preview_manager: &self.preview_manager,
-                photo_sender: &self.photo_sender,
-                ctx,
-                photo_grid: &mut self.photo_grid,
-                filmstrip: &mut self.filmstrip,
-            };
-            
-            // Render the dock area with all tabs
-            let mut dock_viewer = DockViewer::new(context);
-            DockArea::new(dock_state)
-                .show(ctx, &mut dock_viewer);
+
+                // Create dock viewer context with all required references
+                let context = DockViewerContext {
+                    state: &mut self.state,
+                    library_controller: &self.library_controller,
+                    editor_controller: &self.editor_controller,
+                    export_controller: &self.export_controller,
+                    photo_controller: &self.photo_controller,
+                    preview_manager: &self.preview_manager,
+                    photo_sender: &self.photo_sender,
+                    ctx,
+                    photo_grid: &mut self.photo_grid,
+                    filmstrip: &mut self.filmstrip,
+                };
+
+                // Render the dock area with all tabs
+                let mut dock_viewer = DockViewer::new(context);
+                DockArea::new(dock_state).show(ctx, &mut dock_viewer);
             });
         }
 
@@ -1710,10 +1895,10 @@ impl eframe::App for VintageLightboxApp {
         // Handle F key or UI request to toggle secondary window
         let f_key = ctx.input(|i| i.key_pressed(egui::Key::F)) && !ctx.wants_keyboard_input();
         let ui_req = self.state.request_toggle_secondary_window;
-        
+
         if f_key || ui_req {
             self.state.request_toggle_secondary_window = false; // Consume request
-            // Prevent multiple toggles if update() is called multiple times per frame (common in egui)
+                                                                // Prevent multiple toggles if update() is called multiple times per frame (common in egui)
             let toggle_id = egui::Id::new("secondary_window_toggle_frame");
             let last_time = ctx.data(|d| d.get_temp::<f64>(toggle_id).unwrap_or(-1.0));
             let current_time = ctx.input(|i| i.time);
@@ -1725,30 +1910,38 @@ impl eframe::App for VintageLightboxApp {
                 // Always refresh monitor list to catch changes
                 self.cached_monitors = MonitorDetector::get_monitors();
                 self.secondary_window.toggle(&self.cached_monitors);
-                
+
                 // Show toast notification
                 if self.secondary_window.is_open {
-                    let monitor_name = self.secondary_window.monitor
+                    let monitor_name = self
+                        .secondary_window
+                        .monitor
                         .as_ref()
                         .map(|m| m.name.as_str())
                         .unwrap_or("Unknown");
-                    self.state.toasts.info(format!("Opening on {}", monitor_name));
+                    self.state
+                        .toasts
+                        .info(format!("Opening on {}", monitor_name));
                 } else {
                     self.state.toasts.info("Secondary window closed");
                 }
             }
         }
-        
+
         // Handle I key to toggle info overlay in secondary window
         if ctx.input(|i| i.key_pressed(egui::Key::I)) && self.secondary_window.is_open {
             self.secondary_window.toggle_info_overlay();
         }
-        
+
         // Sync secondary window with current selection
         if self.secondary_window.is_open {
-            self.secondary_window.set_photo(self.state.develop_selected_photo_id.clone()
-                .or_else(|| self.state.library_selected_photo_id.clone()));
-                
+            self.secondary_window.set_photo(
+                self.state
+                    .develop_selected_photo_id
+                    .clone()
+                    .or_else(|| self.state.library_selected_photo_id.clone()),
+            );
+
             // Render secondary window viewport
             // We need to clone the info since we can't borrow self twice or pass multiple refs easily
             let photo_info = self.state.get_current_photo().map(|p| {
@@ -1759,9 +1952,9 @@ impl eframe::App for VintageLightboxApp {
                 };
                 (p.name.clone(), rating)
             });
-            
-            let _has_selection = self.state.develop_selected_photo_id.is_some() || 
-                               self.state.library_selected_photo_id.is_some();
+
+            let _has_selection = self.state.develop_selected_photo_id.is_some()
+                || self.state.library_selected_photo_id.is_some();
             self.secondary_window.show(
                 ctx,
                 self.state.detail_image.as_ref(),
@@ -1777,7 +1970,7 @@ impl eframe::App for VintageLightboxApp {
         if self.image_processor.is_processing() || self.requested_photo_id.is_some() {
             ctx.request_repaint();
         }
-        
+
         // Also keep repainting if secondary window is open (to sync updates)
         if self.secondary_window.is_open {
             ctx.request_repaint();
@@ -1789,7 +1982,7 @@ impl VintageLightboxApp {
     /// Show the toolbar at the top of the window
     fn show_toolbar(&mut self, ui: &mut egui::Ui) {
         use crate::design_system::icons;
-        
+
         ui.horizontal(|ui| {
             ui.add_space(Theme::SPACE_LG);
 
@@ -1797,7 +1990,7 @@ impl VintageLightboxApp {
             ui.label(
                 egui::RichText::new("VintageLightbox")
                     .size(Theme::FONT_LG)
-                    .color(Theme::TEXT_PRIMARY)
+                    .color(Theme::TEXT_PRIMARY),
             );
 
             ui.add_space(Theme::SPACE_XXL);
@@ -1809,13 +2002,18 @@ impl VintageLightboxApp {
                 .selected_text(self.state.selected_theme.display_name())
                 .show_ui(ui, |ui| {
                     for variant in ThemeVariant::all() {
-                        if ui.selectable_value(
-                            &mut self.state.selected_theme,
-                            variant,
-                            variant.display_name()
-                        ).clicked() {
+                        if ui
+                            .selectable_value(
+                                &mut self.state.selected_theme,
+                                variant,
+                                variant.display_name(),
+                            )
+                            .clicked()
+                        {
                             variant.apply_to_context(&ctx_clone);
-                            self.state.toasts.info(format!("Theme changed to {}", variant.display_name()));
+                            self.state
+                                .toasts
+                                .info(format!("Theme changed to {}", variant.display_name()));
                         }
                     }
                 });
@@ -1824,7 +2022,13 @@ impl VintageLightboxApp {
 
             // View tabs with icons
             let library_label = format!("{} Library", icons::NAV_LIBRARY);
-            if widgets::nav_button(ui, &library_label, self.state.current_view == CurrentView::Library).clicked() {
+            if widgets::nav_button(
+                ui,
+                &library_label,
+                self.state.current_view == CurrentView::Library,
+            )
+            .clicked()
+            {
                 // Save pending edits before leaving Develop mode
                 if self.state.current_view == CurrentView::Develop {
                     self.save_pending_develop_edits();
@@ -1839,10 +2043,17 @@ impl VintageLightboxApp {
             let develop_label = format!("{} Develop", icons::NAV_DEVELOP);
             let develop_enabled = self.state.library_selected_photo_id.is_some();
             if develop_enabled {
-                if widgets::nav_button(ui, &develop_label, self.state.current_view == CurrentView::Develop).clicked() {
+                if widgets::nav_button(
+                    ui,
+                    &develop_label,
+                    self.state.current_view == CurrentView::Develop,
+                )
+                .clicked()
+                {
                     // Copy Library selection to Develop when entering Develop mode
                     if self.state.develop_selected_photo_id.is_none() {
-                        self.state.develop_selected_photo_id = self.state.library_selected_photo_id.clone();
+                        self.state.develop_selected_photo_id =
+                            self.state.library_selected_photo_id.clone();
                         self.state.loaded_photo_id = None; // Force image load
                     }
                     self.state.current_view = CurrentView::Develop;
@@ -1857,9 +2068,16 @@ impl VintageLightboxApp {
 
             // Print button - switches to Print view (Lightroom-style print module)
             let print_label = format!("{} Print", icons::NAV_PRINT);
-            let print_enabled = !self.state.selected_photo_ids.is_empty() || self.state.library_selected_photo_id.is_some();
+            let print_enabled = !self.state.selected_photo_ids.is_empty()
+                || self.state.library_selected_photo_id.is_some();
             if print_enabled {
-                if widgets::nav_button(ui, &print_label, self.state.current_view == CurrentView::Print).clicked() {
+                if widgets::nav_button(
+                    ui,
+                    &print_label,
+                    self.state.current_view == CurrentView::Print,
+                )
+                .clicked()
+                {
                     // Initialize print view state with selected photos
                     let photo_ids: Vec<String> = if !self.state.selected_photo_ids.is_empty() {
                         self.state.selected_photo_ids.iter().cloned().collect()
@@ -1868,9 +2086,10 @@ impl VintageLightboxApp {
                     } else {
                         vec![]
                     };
-                    
+
                     // Set up print view state and switch view
-                    self.state.print_view_state = Some(crate::views::print_view::PrintViewState::new(photo_ids));
+                    self.state.print_view_state =
+                        Some(crate::views::print_view::PrintViewState::new(photo_ids));
                     self.state.current_view = CurrentView::Print;
                 }
             } else {
@@ -1887,7 +2106,7 @@ impl VintageLightboxApp {
             ui.label(
                 egui::RichText::new(format!("{} {} photos", icons::FILE_IMAGE, photo_count))
                     .size(Theme::FONT_MD)
-                    .color(Theme::TEXT_SECONDARY)
+                    .color(Theme::TEXT_SECONDARY),
             );
 
             ui.add_space(Theme::SPACE_LG);
@@ -1923,7 +2142,7 @@ impl VintageLightboxApp {
         if !self.state.pending_auto_save {
             return;
         }
-        
+
         if let Some(vm) = self.state.get_current_photo() {
             let controller = self.editor_controller.clone();
             let id = vm.id.clone();
@@ -1981,29 +2200,67 @@ impl VintageLightboxApp {
 
             // Spawn async save
             tokio::spawn(async move {
-                let _ = controller.save_edits(
-                    id,
-                    exposure, contrast, temperature, tint,
-                    highlights, shadows, whites, blacks,
-                    clarity, vibrance, saturation,
-                    tone_curve_shadows, tone_curve_darks, tone_curve_lights, tone_curve_highlights,
-                    hsl_red_sat, hsl_orange_sat, hsl_yellow_sat, hsl_green_sat, hsl_aqua_sat, hsl_blue_sat, hsl_purple_sat, hsl_magenta_sat,
-                    hsl_red_hue, hsl_orange_hue, hsl_yellow_hue, hsl_green_hue, hsl_aqua_hue, hsl_blue_hue, hsl_purple_hue, hsl_magenta_hue,
-                    hsl_red_lum, hsl_orange_lum, hsl_yellow_lum, hsl_green_lum, hsl_aqua_lum, hsl_blue_lum, hsl_purple_lum, hsl_magenta_lum,
-                    lens_distortion, lens_vignette_amount, lens_vignette_midpoint,
-                    nr_luminance, nr_color,
-                    sharpen_amount, sharpen_radius,
-                    active_crop.as_ref().map(|c| c.crop_x()),
-                    active_crop.as_ref().map(|c| c.crop_y()),
-                    active_crop.as_ref().map(|c| c.crop_width()),
-                    active_crop.as_ref().map(|c| c.crop_height()),
-                    active_crop.as_ref().map(|c| c.rotation_90()),
-                    active_crop.as_ref().map(|c| c.angle()),
-                    active_crop.as_ref().map(|c| c.flip_horizontal()),
-                    active_crop.as_ref().map(|c| c.flip_vertical()),
-                ).await;
+                let _ = controller
+                    .save_edits(
+                        id,
+                        exposure,
+                        contrast,
+                        temperature,
+                        tint,
+                        highlights,
+                        shadows,
+                        whites,
+                        blacks,
+                        clarity,
+                        vibrance,
+                        saturation,
+                        tone_curve_shadows,
+                        tone_curve_darks,
+                        tone_curve_lights,
+                        tone_curve_highlights,
+                        hsl_red_sat,
+                        hsl_orange_sat,
+                        hsl_yellow_sat,
+                        hsl_green_sat,
+                        hsl_aqua_sat,
+                        hsl_blue_sat,
+                        hsl_purple_sat,
+                        hsl_magenta_sat,
+                        hsl_red_hue,
+                        hsl_orange_hue,
+                        hsl_yellow_hue,
+                        hsl_green_hue,
+                        hsl_aqua_hue,
+                        hsl_blue_hue,
+                        hsl_purple_hue,
+                        hsl_magenta_hue,
+                        hsl_red_lum,
+                        hsl_orange_lum,
+                        hsl_yellow_lum,
+                        hsl_green_lum,
+                        hsl_aqua_lum,
+                        hsl_blue_lum,
+                        hsl_purple_lum,
+                        hsl_magenta_lum,
+                        lens_distortion,
+                        lens_vignette_amount,
+                        lens_vignette_midpoint,
+                        nr_luminance,
+                        nr_color,
+                        sharpen_amount,
+                        sharpen_radius,
+                        active_crop.as_ref().map(|c| c.crop_x()),
+                        active_crop.as_ref().map(|c| c.crop_y()),
+                        active_crop.as_ref().map(|c| c.crop_width()),
+                        active_crop.as_ref().map(|c| c.crop_height()),
+                        active_crop.as_ref().map(|c| c.rotation_90()),
+                        active_crop.as_ref().map(|c| c.angle()),
+                        active_crop.as_ref().map(|c| c.flip_horizontal()),
+                        active_crop.as_ref().map(|c| c.flip_vertical()),
+                    )
+                    .await;
             });
-            
+
             // Update in-memory ViewModel immediately
             if let Some(photo_vm) = self.state.photos.iter_mut().find(|p| p.id == id_for_update) {
                 photo_vm.edit_crop_x = crop_for_update.as_ref().map(|c| c.crop_x());
@@ -2017,7 +2274,7 @@ impl VintageLightboxApp {
                 photo_vm.edit_exposure = Some(exposure);
                 photo_vm.edit_contrast = Some(contrast);
             }
-            
+
             // Clear pending flag
             self.state.pending_auto_save = false;
         }
@@ -2098,7 +2355,6 @@ impl VintageLightboxApp {
         }
     }
 
-
     /// Show debug overlay with performance metrics
     fn show_debug_overlay(&self, ctx: &egui::Context) {
         if !self.state.show_performance_stats {
@@ -2106,7 +2362,7 @@ impl VintageLightboxApp {
         }
 
         let metrics = &self.state.performance_metrics;
-        
+
         egui::Window::new("Performance Stats")
             .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-10.0, -10.0))
             .resizable(false)
@@ -2115,67 +2371,76 @@ impl VintageLightboxApp {
             .default_open(true)
             .show(ctx, |ui| {
                 ui.style_mut().override_text_style = Some(egui::TextStyle::Monospace);
-                
-                egui::Grid::new("perf_grid").num_columns(2).striped(true).show(ui, |ui| {
-                    if let Some(t) = metrics.image_load_time_ms {
-                        ui.label("Image Load:");
-                        ui.label(format!("{:.1} ms", t));
+
+                egui::Grid::new("perf_grid")
+                    .num_columns(2)
+                    .striped(true)
+                    .show(ui, |ui| {
+                        if let Some(t) = metrics.image_load_time_ms {
+                            ui.label("Image Load:");
+                            ui.label(format!("{:.1} ms", t));
+                            ui.end_row();
+                        }
+                        if let Some(t) = metrics.gpu_process_time_ms {
+                            ui.label("GPU Process:");
+                            ui.colored_label(
+                                if t > 16.0 {
+                                    egui::Color32::RED
+                                } else {
+                                    egui::Color32::GREEN
+                                },
+                                format!("{:.1} ms", t),
+                            );
+                            ui.end_row();
+                        }
+                        if let Some(t) = metrics.texture_upload_time_ms {
+                            ui.label("Texture Upload:");
+                            ui.label(format!("{:.1} ms", t));
+                            ui.end_row();
+                        }
+
+                        // FPS
+                        ui.label("FPS:");
+                        ui.label(format!("{:.0}", 1.0 / ctx.input(|i| i.stable_dt)));
                         ui.end_row();
-                    }
-                    if let Some(t) = metrics.gpu_process_time_ms {
-                        ui.label("GPU Process:");
-                        ui.colored_label(
-                            if t > 16.0 { egui::Color32::RED } else { egui::Color32::GREEN },
-                            format!("{:.1} ms", t)
-                        );
-                        ui.end_row();
-                    }
-                    if let Some(t) = metrics.texture_upload_time_ms {
-                        ui.label("Texture Upload:");
-                        ui.label(format!("{:.1} ms", t));
-                        ui.end_row();
-                    }
-                    
-                    // FPS
-                    ui.label("FPS:");
-                    ui.label(format!("{:.0}", 1.0 / ctx.input(|i| i.stable_dt)));
-                    ui.end_row();
-                });
+                    });
             });
     }
 
     /// Render import dialog and handle file selection
     fn render_import_dialog(&mut self, ctx: &egui::Context) {
         let mut open = false;
-        
+
         if let Some(dialog) = &mut self.state.import_dialog {
             if dialog.show(ctx).selected() {
                 if let Some(path) = dialog.path() {
                     let path = path.to_path_buf();
                     let path_str = path.to_string_lossy().to_string();
-                    
+
                     match self.state.import_dialog_mode {
                         crate::state::ImportDialogMode::Simple => {
-                             // Simple Import
+                            // Simple Import
                             let import_controller = self.import_controller.clone();
                             let library_controller = self.library_controller.clone();
                             let sender = self.photo_sender.clone();
                             let ctx_clone = ctx.clone();
-                            
+
                             self.state.is_busy = true;
                             self.state.busy_message = "Importing photo...".to_string();
-                            
+
                             tokio::spawn(async move {
-                                 let result = import_controller.import_files(vec![path_str]).await;
-                                 let _ = library_controller.get_all_photos().await;
-                                 let _ = sender.send(match result {
-                                     Ok(_) => Ok(vec![]),
-                                     Err(e) => Err(e),
-                                 }).await;
-                                 ctx_clone.request_repaint();
+                                let result = import_controller.import_files(vec![path_str]).await;
+                                let _ = library_controller.get_all_photos().await;
+                                let _ = sender
+                                    .send(match result {
+                                        Ok(_) => Ok(vec![]),
+                                        Err(e) => Err(e),
+                                    })
+                                    .await;
+                                ctx_clone.request_repaint();
                             });
-                        },
-                         crate::state::ImportDialogMode::Export => {
+                        }
+                        crate::state::ImportDialogMode::Export => {
                             if let Some(id) = self.state.export_target_id.clone() {
                                 let controller = self.export_controller.clone();
                                 let ctx_clone = ctx.clone();
@@ -2184,30 +2449,35 @@ impl VintageLightboxApp {
                                 // Let's check app.rs... no, wait, DockViewer was creating the receiver specifically.
                                 // App.rs has `self.state.pending_export_receiver` and `pending_export`.
                                 // So we should use that mechanism.
-                                
-                                let (export_tx, export_rx) = tokio::sync::mpsc::channel::<Result<String, String>>(1);
+
+                                let (export_tx, export_rx) =
+                                    tokio::sync::mpsc::channel::<Result<String, String>>(1);
                                 self.state.pending_export_receiver = Some(export_rx);
                                 self.state.is_busy = true;
                                 self.state.busy_message = "Exporting...".to_string();
                                 self.state.toasts.info("Exporting photo...");
-                                
+
                                 tokio::spawn(async move {
-                                     match controller.export_photo(id, path_str.clone()).await {
-                                         Ok(_) => { let _ = export_tx.send(Ok(path_str)).await; }
-                                         Err(e) => { let _ = export_tx.send(Err(e)).await; }
-                                     }
-                                     ctx_clone.request_repaint();
+                                    match controller.export_photo(id, path_str.clone()).await {
+                                        Ok(_) => {
+                                            let _ = export_tx.send(Ok(path_str)).await;
+                                        }
+                                        Err(e) => {
+                                            let _ = export_tx.send(Err(e)).await;
+                                        }
+                                    }
+                                    ctx_clone.request_repaint();
                                 });
                             }
-                         }
+                        }
                     }
                 }
             }
             open = dialog.state() == egui_file::State::Open;
         }
-        
+
         if !open && self.state.import_dialog.is_some() {
-             self.state.import_dialog = None;
+            self.state.import_dialog = None;
         }
     }
 }

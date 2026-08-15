@@ -6,11 +6,11 @@
 //! A escolha do que importar não mora aqui — mora na tela de importação
 //! (`views::import_view`), que mostra as fotos em miniatura antes de qualquer decisão.
 
-use egui::{Context, Window, Vec2, ScrollArea, Button, ProgressBar, Color32, RichText};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use tokio::sync::mpsc;
 use adapters::view_models::ImportProgressViewModel;
+use egui::{Button, Color32, Context, ProgressBar, RichText, ScrollArea, Vec2, Window};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use tokio::sync::mpsc;
 
 /// State for import progress dialog
 pub struct ImportProgressDialog {
@@ -81,7 +81,12 @@ impl ImportProgressDialog {
             }
             ImportProgressViewModel::Processing { index, path } => {
                 self.current_file = Some(path.clone());
-                self.add_log(format!("[{}/{}] Processing: {}", index + 1, self.total, path));
+                self.add_log(format!(
+                    "[{}/{}] Processing: {}",
+                    index + 1,
+                    self.total,
+                    path
+                ));
             }
             ImportProgressViewModel::Completed { photo_id: _, path } => {
                 self.completed += 1;
@@ -91,20 +96,36 @@ impl ImportProgressDialog {
                 self.failed += 1;
                 self.add_log(format!("✗ Failed: {} - {}", path, error));
             }
-            ImportProgressViewModel::DuplicateSkipped { path, existing_path: _ } => {
+            ImportProgressViewModel::DuplicateSkipped {
+                path,
+                existing_path: _,
+            } => {
                 self.skipped += 1;
                 self.add_log(format!("⊘ Skipped (duplicate): {}", path));
             }
-            ImportProgressViewModel::Paused { completed, remaining } => {
+            ImportProgressViewModel::Paused {
+                completed,
+                remaining,
+            } => {
                 self.status = ImportStatus::Paused;
-                self.add_log(format!("⏸ Paused - {}/{} completed, {} remaining", completed, self.total, remaining));
+                self.add_log(format!(
+                    "⏸ Paused - {}/{} completed, {} remaining",
+                    completed, self.total, remaining
+                ));
             }
-            ImportProgressViewModel::Finished { successful, failed, skipped } => {
+            ImportProgressViewModel::Finished {
+                successful,
+                failed,
+                skipped,
+            } => {
                 self.status = ImportStatus::Completed;
                 self.completed = successful;
                 self.failed = failed;
                 self.skipped = skipped;
-                self.add_log(format!("✓ Import finished: {} successful, {} failed, {} skipped", successful, failed, skipped));
+                self.add_log(format!(
+                    "✓ Import finished: {} successful, {} failed, {} skipped",
+                    successful, failed, skipped
+                ));
             }
         }
     }
@@ -139,23 +160,30 @@ impl ImportProgressDialog {
                     0.0
                 };
 
-                ui.add(ProgressBar::new(progress).text(
-                    format!("{}/{} files ({:.0}%)",
-                        self.completed + self.failed + self.skipped,
-                        self.total,
-                        progress * 100.0
-                    )
-                ));
+                ui.add(ProgressBar::new(progress).text(format!(
+                    "{}/{} files ({:.0}%)",
+                    self.completed + self.failed + self.skipped,
+                    self.total,
+                    progress * 100.0
+                )));
 
                 ui.separator();
 
                 // Status
                 ui.horizontal(|ui| {
                     let status_text = match self.status {
-                        ImportStatus::Importing => RichText::new("Status: Importing...").color(Color32::LIGHT_BLUE),
-                        ImportStatus::Paused => RichText::new("Status: Paused").color(Color32::YELLOW),
-                        ImportStatus::Completed => RichText::new("Status: Completed").color(Color32::LIGHT_GREEN),
-                        ImportStatus::Cancelled => RichText::new("Status: Cancelled").color(Color32::RED),
+                        ImportStatus::Importing => {
+                            RichText::new("Status: Importing...").color(Color32::LIGHT_BLUE)
+                        }
+                        ImportStatus::Paused => {
+                            RichText::new("Status: Paused").color(Color32::YELLOW)
+                        }
+                        ImportStatus::Completed => {
+                            RichText::new("Status: Completed").color(Color32::LIGHT_GREEN)
+                        }
+                        ImportStatus::Cancelled => {
+                            RichText::new("Status: Cancelled").color(Color32::RED)
+                        }
                     };
                     ui.label(status_text.strong());
                 });
@@ -188,26 +216,42 @@ impl ImportProgressDialog {
                 // Controls
                 ui.horizontal(|ui| {
                     if self.status == ImportStatus::Importing {
-                        if ui.add(Button::new("Pause").min_size(Vec2::new(80.0, 25.0))).clicked() {
+                        if ui
+                            .add(Button::new("Pause").min_size(Vec2::new(80.0, 25.0)))
+                            .clicked()
+                        {
                             self.pause_flag.store(true, Ordering::Relaxed);
                             self.status = ImportStatus::Paused;
                         }
                     } else if self.status == ImportStatus::Paused {
-                        if ui.add(Button::new("Resume").min_size(Vec2::new(80.0, 25.0))).clicked() {
+                        if ui
+                            .add(Button::new("Resume").min_size(Vec2::new(80.0, 25.0)))
+                            .clicked()
+                        {
                             self.pause_flag.store(false, Ordering::Relaxed);
                             self.status = ImportStatus::Importing;
                         }
                     }
 
-                    if self.status != ImportStatus::Completed && self.status != ImportStatus::Cancelled {
-                        if ui.add(Button::new("Cancel").min_size(Vec2::new(80.0, 25.0))).clicked() {
+                    if self.status != ImportStatus::Completed
+                        && self.status != ImportStatus::Cancelled
+                    {
+                        if ui
+                            .add(Button::new("Cancel").min_size(Vec2::new(80.0, 25.0)))
+                            .clicked()
+                        {
                             self.cancel_flag.store(true, Ordering::Relaxed);
                             self.status = ImportStatus::Cancelled;
                         }
                     }
 
-                    if self.status == ImportStatus::Completed || self.status == ImportStatus::Cancelled {
-                        if ui.add(Button::new("Close").min_size(Vec2::new(80.0, 25.0))).clicked() {
+                    if self.status == ImportStatus::Completed
+                        || self.status == ImportStatus::Cancelled
+                    {
+                        if ui
+                            .add(Button::new("Close").min_size(Vec2::new(80.0, 25.0)))
+                            .clicked()
+                        {
                             should_close = true;
                         }
                     }

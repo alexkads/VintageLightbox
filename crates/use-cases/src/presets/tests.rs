@@ -2,14 +2,14 @@
 //!
 //! Tests using mockall for PresetRepository mock.
 
-use std::sync::Arc;
+use crate::presets::{DeletePresetUseCase, ListPresetsUseCase, SavePresetUseCase};
 use domain::{
-    entities::{Preset, PresetId, preset::PresetAdjustments},
+    entities::{preset::PresetAdjustments, Preset, PresetId},
     repositories::PresetRepository,
     DomainError, DomainResult,
 };
 use mockall::mock;
-use crate::presets::{SavePresetUseCase, ListPresetsUseCase, DeletePresetUseCase};
+use std::sync::Arc;
 
 // Mock PresetRepository
 mock! {
@@ -32,13 +32,10 @@ mock! {
 async fn test_save_preset_success() {
     // Arrange
     let mut mock_repo = MockPresetRepo::new();
-    mock_repo
-        .expect_save()
-        .times(1)
-        .returning(|_| Ok(()));
+    mock_repo.expect_save().times(1).returning(|_| Ok(()));
 
     let use_case = SavePresetUseCase::new(Arc::new(mock_repo));
-    
+
     let adjustments = PresetAdjustments {
         exposure: Some(1.5),
         contrast: Some(1.2),
@@ -67,7 +64,7 @@ async fn test_save_preset_repository_error() {
         .returning(|_| Err(DomainError::InfrastructureError("DB error".to_string())));
 
     let use_case = SavePresetUseCase::new(Arc::new(mock_repo));
-    
+
     let adjustments = PresetAdjustments::default();
 
     // Act
@@ -85,11 +82,14 @@ async fn test_save_preset_repository_error() {
 async fn test_list_presets_returns_system_and_user() {
     // Arrange
     let mut mock_repo = MockPresetRepo::new();
-    
+
     // Repository returns user presets (system presets are added by the use case)
     let user_preset = Preset::user(
         "User Preset".to_string(),
-        PresetAdjustments { exposure: Some(0.5), ..Default::default() }
+        PresetAdjustments {
+            exposure: Some(0.5),
+            ..Default::default()
+        },
     );
     mock_repo
         .expect_find_all()
@@ -104,23 +104,22 @@ async fn test_list_presets_returns_system_and_user() {
     // Assert
     assert!(result.is_ok());
     let presets = result.unwrap();
-    
+
     // Should have system presets + user preset
     assert!(presets.len() >= 5); // At least 5 system presets
-    
+
     // Check system presets exist
-    let system_names: Vec<_> = presets.iter()
+    let system_names: Vec<_> = presets
+        .iter()
         .filter(|p| p.is_system)
         .map(|p| p.name.as_str())
         .collect();
     assert!(system_names.contains(&"Auto"));
     assert!(system_names.contains(&"B&W"));
     assert!(system_names.contains(&"Warm"));
-    
+
     // Check user preset exists
-    let user_presets: Vec<_> = presets.iter()
-        .filter(|p| !p.is_system)
-        .collect();
+    let user_presets: Vec<_> = presets.iter().filter(|p| !p.is_system).collect();
     assert_eq!(user_presets.len(), 1);
     assert_eq!(user_presets[0].name, "User Preset");
 }
@@ -142,7 +141,7 @@ async fn test_list_presets_empty_user_presets() {
     // Assert
     assert!(result.is_ok());
     let presets = result.unwrap();
-    
+
     // Should have at least system presets
     assert!(presets.len() >= 5);
     assert!(presets.iter().all(|p| p.is_system));
@@ -156,10 +155,7 @@ async fn test_list_presets_empty_user_presets() {
 async fn test_delete_preset_success() {
     // Arrange
     let mut mock_repo = MockPresetRepo::new();
-    mock_repo
-        .expect_delete()
-        .times(1)
-        .returning(|_| Ok(()));
+    mock_repo.expect_delete().times(1).returning(|_| Ok(()));
 
     let use_case = DeletePresetUseCase::new(Arc::new(mock_repo));
     let preset_id = PresetId::default();

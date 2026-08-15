@@ -181,7 +181,7 @@ mod property_tests {
         fn test_rating_comparison_is_consistent(a in 0u8..=5, b in 0u8..=5) {
             let rating_a = Rating::new(a).unwrap();
             let rating_b = Rating::new(b).unwrap();
-            
+
             prop_assert_eq!(rating_a < rating_b, a < b);
             prop_assert_eq!(rating_a > rating_b, a > b);
             prop_assert_eq!(rating_a == rating_b, a == b);

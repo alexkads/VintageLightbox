@@ -4,7 +4,7 @@
 //! Responsável por copiar arquivos para diretórios organizados seguindo diferentes estratégias.
 
 use crate::{
-    value_objects::{FilePath, ImportOptions, PhotoMetadata, OrganizationStrategy, RenamePattern},
+    value_objects::{FilePath, ImportOptions, OrganizationStrategy, PhotoMetadata, RenamePattern},
     DomainResult,
 };
 use async_trait::async_trait;

@@ -1,9 +1,9 @@
 // PresetController - Adapters Layer
 // Orchestrates preset operations between UI and Use Cases
 
+use domain::entities::{preset::PresetAdjustments, Preset, PresetId};
 use std::sync::Arc;
-use domain::entities::{Preset, PresetId, preset::PresetAdjustments};
-use use_cases::presets::{ListPresetsUseCase, SavePresetUseCase, DeletePresetUseCase};
+use use_cases::presets::{DeletePresetUseCase, ListPresetsUseCase, SavePresetUseCase};
 
 pub struct PresetController {
     list_presets_use_case: Arc<ListPresetsUseCase>,

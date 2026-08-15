@@ -103,10 +103,7 @@ impl CropSettings {
 
     /// Returns true if the image is cropped (not full frame)
     pub fn is_cropped(&self) -> bool {
-        self.crop_x > 0.0
-            || self.crop_y > 0.0
-            || self.crop_width < 1.0
-            || self.crop_height < 1.0
+        self.crop_x > 0.0 || self.crop_y > 0.0 || self.crop_width < 1.0 || self.crop_height < 1.0
     }
 
     /// Returns true if the image is rotated
@@ -191,7 +188,12 @@ impl CropSettings {
             }
             2 | -2 => {
                 // 180°: visual (x, y, w, h) -> original (1-x-w, 1-y-h, w, h)
-                (1.0 - visual_x - visual_w, 1.0 - visual_y - visual_h, visual_w, visual_h)
+                (
+                    1.0 - visual_x - visual_w,
+                    1.0 - visual_y - visual_h,
+                    visual_w,
+                    visual_h,
+                )
             }
             3 | -1 => {
                 // rotation_90=3 or -1: 270° CW = 90° CCW visual rotation.
@@ -251,7 +253,7 @@ mod crop_settings_tests {
     #[test]
     fn test_create_default_crop_settings() {
         let crop = CropSettings::default();
-        
+
         assert_eq!(crop.crop_x(), 0.0);
         assert_eq!(crop.crop_y(), 0.0);
         assert_eq!(crop.crop_width(), 1.0);
@@ -265,7 +267,7 @@ mod crop_settings_tests {
     #[test]
     fn test_create_crop_settings_with_valid_values() {
         let crop = CropSettings::new(0.1, 0.2, 0.5, 0.6, 1, 15.0, true, false);
-        
+
         assert_eq!(crop.crop_x(), 0.1);
         assert_eq!(crop.crop_y(), 0.2);
         assert_eq!(crop.crop_width(), 0.5);
@@ -463,10 +465,22 @@ mod crop_settings_tests {
         let (vx, vy, vw, vh) = original.to_visual_space();
         let roundtrip = original.with_visual_crop(vx, vy, vw, vh);
 
-        assert!((roundtrip.crop_x() - 0.1).abs() < 0.001, "x roundtrip failed");
-        assert!((roundtrip.crop_y() - 0.2).abs() < 0.001, "y roundtrip failed");
-        assert!((roundtrip.crop_width() - 0.5).abs() < 0.001, "w roundtrip failed");
-        assert!((roundtrip.crop_height() - 0.3).abs() < 0.001, "h roundtrip failed");
+        assert!(
+            (roundtrip.crop_x() - 0.1).abs() < 0.001,
+            "x roundtrip failed"
+        );
+        assert!(
+            (roundtrip.crop_y() - 0.2).abs() < 0.001,
+            "y roundtrip failed"
+        );
+        assert!(
+            (roundtrip.crop_width() - 0.5).abs() < 0.001,
+            "w roundtrip failed"
+        );
+        assert!(
+            (roundtrip.crop_height() - 0.3).abs() < 0.001,
+            "h roundtrip failed"
+        );
     }
 
     #[test]
@@ -475,10 +489,22 @@ mod crop_settings_tests {
         let (vx, vy, vw, vh) = original.to_visual_space();
         let roundtrip = original.with_visual_crop(vx, vy, vw, vh);
 
-        assert!((roundtrip.crop_x() - 0.1).abs() < 0.001, "x roundtrip failed");
-        assert!((roundtrip.crop_y() - 0.2).abs() < 0.001, "y roundtrip failed");
-        assert!((roundtrip.crop_width() - 0.5).abs() < 0.001, "w roundtrip failed");
-        assert!((roundtrip.crop_height() - 0.3).abs() < 0.001, "h roundtrip failed");
+        assert!(
+            (roundtrip.crop_x() - 0.1).abs() < 0.001,
+            "x roundtrip failed"
+        );
+        assert!(
+            (roundtrip.crop_y() - 0.2).abs() < 0.001,
+            "y roundtrip failed"
+        );
+        assert!(
+            (roundtrip.crop_width() - 0.5).abs() < 0.001,
+            "w roundtrip failed"
+        );
+        assert!(
+            (roundtrip.crop_height() - 0.3).abs() < 0.001,
+            "h roundtrip failed"
+        );
     }
 
     #[test]
@@ -487,10 +513,22 @@ mod crop_settings_tests {
         let (vx, vy, vw, vh) = original.to_visual_space();
         let roundtrip = original.with_visual_crop(vx, vy, vw, vh);
 
-        assert!((roundtrip.crop_x() - 0.1).abs() < 0.001, "x roundtrip failed");
-        assert!((roundtrip.crop_y() - 0.2).abs() < 0.001, "y roundtrip failed");
-        assert!((roundtrip.crop_width() - 0.5).abs() < 0.001, "w roundtrip failed");
-        assert!((roundtrip.crop_height() - 0.3).abs() < 0.001, "h roundtrip failed");
+        assert!(
+            (roundtrip.crop_x() - 0.1).abs() < 0.001,
+            "x roundtrip failed"
+        );
+        assert!(
+            (roundtrip.crop_y() - 0.2).abs() < 0.001,
+            "y roundtrip failed"
+        );
+        assert!(
+            (roundtrip.crop_width() - 0.5).abs() < 0.001,
+            "w roundtrip failed"
+        );
+        assert!(
+            (roundtrip.crop_height() - 0.3).abs() < 0.001,
+            "h roundtrip failed"
+        );
     }
 
     #[test]
@@ -506,19 +544,35 @@ mod crop_settings_tests {
 
         // Simulate save and reload (coordinates are now in original space)
         let reloaded = CropSettings::new(
-            edited.crop_x(), edited.crop_y(),
-            edited.crop_width(), edited.crop_height(),
-            edited.rotation_90(), edited.angle(),
-            edited.flip_horizontal(), edited.flip_vertical()
+            edited.crop_x(),
+            edited.crop_y(),
+            edited.crop_width(),
+            edited.crop_height(),
+            edited.rotation_90(),
+            edited.angle(),
+            edited.flip_horizontal(),
+            edited.flip_vertical(),
         );
 
         // The visual representation should match what the user edited
         let (final_vx, final_vy, final_vw, final_vh) = reloaded.to_visual_space();
 
-        assert!((final_vx - 0.1).abs() < 0.001, "visual x mismatch after reload");
-        assert!((final_vy - 0.1).abs() < 0.001, "visual y mismatch after reload");
-        assert!((final_vw - 0.6).abs() < 0.001, "visual w mismatch after reload");
-        assert!((final_vh - 0.4).abs() < 0.001, "visual h mismatch after reload");
+        assert!(
+            (final_vx - 0.1).abs() < 0.001,
+            "visual x mismatch after reload"
+        );
+        assert!(
+            (final_vy - 0.1).abs() < 0.001,
+            "visual y mismatch after reload"
+        );
+        assert!(
+            (final_vw - 0.6).abs() < 0.001,
+            "visual w mismatch after reload"
+        );
+        assert!(
+            (final_vh - 0.4).abs() < 0.001,
+            "visual h mismatch after reload"
+        );
     }
 
     // =============================================
@@ -553,20 +607,33 @@ mod crop_settings_tests {
 
         // STEP 1: User sees rotated image and draws crop on VISUAL top-left quadrant
         let visual_crop = (0.0_f32, 0.0_f32, 0.5_f32, 0.5_f32); // top-left quarter visually
-        println!("Visual crop (what user selected): x={}, y={}, w={}, h={}",
-                 visual_crop.0, visual_crop.1, visual_crop.2, visual_crop.3);
+        println!(
+            "Visual crop (what user selected): x={}, y={}, w={}, h={}",
+            visual_crop.0, visual_crop.1, visual_crop.2, visual_crop.3
+        );
 
         // STEP 2: Transform to original space (this is what gets saved)
         let (orig_x, orig_y, orig_w, orig_h) = CropSettings::from_visual_space(
-            visual_crop.0, visual_crop.1, visual_crop.2, visual_crop.3, rotation
+            visual_crop.0,
+            visual_crop.1,
+            visual_crop.2,
+            visual_crop.3,
+            rotation,
         );
-        println!("Original space (saved to DB): x={}, y={}, w={}, h={}",
-                 orig_x, orig_y, orig_w, orig_h);
+        println!(
+            "Original space (saved to DB): x={}, y={}, w={}, h={}",
+            orig_x, orig_y, orig_w, orig_h
+        );
 
         // STEP 3: When displaying, we apply UV directly (rotation=0 was saved)
         // The UV rect is (orig_x, orig_y) to (orig_x+orig_w, orig_y+orig_h)
-        println!("UV applied to texture: ({}, {}) to ({}, {})",
-                 orig_x, orig_y, orig_x + orig_w, orig_y + orig_h);
+        println!(
+            "UV applied to texture: ({}, {}) to ({}, {})",
+            orig_x,
+            orig_y,
+            orig_x + orig_w,
+            orig_y + orig_h
+        );
 
         // STEP 4: VERIFY - For 90° CW rotation:
         // Visual top-left (0,0) should map to Original bottom-left (0, 0.5-1.0)
@@ -595,17 +662,35 @@ mod crop_settings_tests {
         // This is the region x:[0, 0.5], y:[0.5, 1] -> (0, 0.5, 0.5, 0.5)
 
         let expected_orig = (0.0_f32, 0.5_f32, 0.5_f32, 0.5_f32);
-        println!("Expected original: x={}, y={}, w={}, h={}",
-                 expected_orig.0, expected_orig.1, expected_orig.2, expected_orig.3);
+        println!(
+            "Expected original: x={}, y={}, w={}, h={}",
+            expected_orig.0, expected_orig.1, expected_orig.2, expected_orig.3
+        );
 
-        assert!((orig_x - expected_orig.0).abs() < 0.001,
-                "orig_x: expected {}, got {}", expected_orig.0, orig_x);
-        assert!((orig_y - expected_orig.1).abs() < 0.001,
-                "orig_y: expected {}, got {}", expected_orig.1, orig_y);
-        assert!((orig_w - expected_orig.2).abs() < 0.001,
-                "orig_w: expected {}, got {}", expected_orig.2, orig_w);
-        assert!((orig_h - expected_orig.3).abs() < 0.001,
-                "orig_h: expected {}, got {}", expected_orig.3, orig_h);
+        assert!(
+            (orig_x - expected_orig.0).abs() < 0.001,
+            "orig_x: expected {}, got {}",
+            expected_orig.0,
+            orig_x
+        );
+        assert!(
+            (orig_y - expected_orig.1).abs() < 0.001,
+            "orig_y: expected {}, got {}",
+            expected_orig.1,
+            orig_y
+        );
+        assert!(
+            (orig_w - expected_orig.2).abs() < 0.001,
+            "orig_w: expected {}, got {}",
+            expected_orig.2,
+            orig_w
+        );
+        assert!(
+            (orig_h - expected_orig.3).abs() < 0.001,
+            "orig_h: expected {}, got {}",
+            expected_orig.3,
+            orig_h
+        );
 
         println!("✓ 90° CW test PASSED\n");
     }
@@ -618,14 +703,22 @@ mod crop_settings_tests {
 
         // User draws crop on visual top-left quadrant
         let visual_crop = (0.0_f32, 0.0_f32, 0.5_f32, 0.5_f32);
-        println!("Visual crop: x={}, y={}, w={}, h={}",
-                 visual_crop.0, visual_crop.1, visual_crop.2, visual_crop.3);
+        println!(
+            "Visual crop: x={}, y={}, w={}, h={}",
+            visual_crop.0, visual_crop.1, visual_crop.2, visual_crop.3
+        );
 
         let (orig_x, orig_y, orig_w, orig_h) = CropSettings::from_visual_space(
-            visual_crop.0, visual_crop.1, visual_crop.2, visual_crop.3, rotation
+            visual_crop.0,
+            visual_crop.1,
+            visual_crop.2,
+            visual_crop.3,
+            rotation,
         );
-        println!("Original space: x={}, y={}, w={}, h={}",
-                 orig_x, orig_y, orig_w, orig_h);
+        println!(
+            "Original space: x={}, y={}, w={}, h={}",
+            orig_x, orig_y, orig_w, orig_h
+        );
 
         // For 90° CCW: Original (ox,oy) -> Visual (oy, 1-ox)
         // Visual (0,0) = (oy, 1-ox) -> oy=0, 1-ox=0 -> ox=1, oy=0
@@ -639,17 +732,35 @@ mod crop_settings_tests {
         // This is x:[0.5, 1], y:[0, 0.5] -> (0.5, 0, 0.5, 0.5)
 
         let expected_orig = (0.5_f32, 0.0_f32, 0.5_f32, 0.5_f32);
-        println!("Expected original: x={}, y={}, w={}, h={}",
-                 expected_orig.0, expected_orig.1, expected_orig.2, expected_orig.3);
+        println!(
+            "Expected original: x={}, y={}, w={}, h={}",
+            expected_orig.0, expected_orig.1, expected_orig.2, expected_orig.3
+        );
 
-        assert!((orig_x - expected_orig.0).abs() < 0.001,
-                "orig_x: expected {}, got {}", expected_orig.0, orig_x);
-        assert!((orig_y - expected_orig.1).abs() < 0.001,
-                "orig_y: expected {}, got {}", expected_orig.1, orig_y);
-        assert!((orig_w - expected_orig.2).abs() < 0.001,
-                "orig_w: expected {}, got {}", expected_orig.2, orig_w);
-        assert!((orig_h - expected_orig.3).abs() < 0.001,
-                "orig_h: expected {}, got {}", expected_orig.3, orig_h);
+        assert!(
+            (orig_x - expected_orig.0).abs() < 0.001,
+            "orig_x: expected {}, got {}",
+            expected_orig.0,
+            orig_x
+        );
+        assert!(
+            (orig_y - expected_orig.1).abs() < 0.001,
+            "orig_y: expected {}, got {}",
+            expected_orig.1,
+            orig_y
+        );
+        assert!(
+            (orig_w - expected_orig.2).abs() < 0.001,
+            "orig_w: expected {}, got {}",
+            expected_orig.2,
+            orig_w
+        );
+        assert!(
+            (orig_h - expected_orig.3).abs() < 0.001,
+            "orig_h: expected {}, got {}",
+            expected_orig.3,
+            orig_h
+        );
 
         println!("✓ 90° CCW test PASSED\n");
     }
@@ -661,14 +772,22 @@ mod crop_settings_tests {
         let rotation = 2;
 
         let visual_crop = (0.0_f32, 0.0_f32, 0.5_f32, 0.5_f32);
-        println!("Visual crop: x={}, y={}, w={}, h={}",
-                 visual_crop.0, visual_crop.1, visual_crop.2, visual_crop.3);
+        println!(
+            "Visual crop: x={}, y={}, w={}, h={}",
+            visual_crop.0, visual_crop.1, visual_crop.2, visual_crop.3
+        );
 
         let (orig_x, orig_y, orig_w, orig_h) = CropSettings::from_visual_space(
-            visual_crop.0, visual_crop.1, visual_crop.2, visual_crop.3, rotation
+            visual_crop.0,
+            visual_crop.1,
+            visual_crop.2,
+            visual_crop.3,
+            rotation,
         );
-        println!("Original space: x={}, y={}, w={}, h={}",
-                 orig_x, orig_y, orig_w, orig_h);
+        println!(
+            "Original space: x={}, y={}, w={}, h={}",
+            orig_x, orig_y, orig_w, orig_h
+        );
 
         // For 180°: Original (ox,oy) -> Visual (1-ox, 1-oy)
         // Visual (0,0) <- Original (1, 1) [bottom-right]
@@ -678,17 +797,35 @@ mod crop_settings_tests {
         // -> (0.5, 0.5, 0.5, 0.5)
 
         let expected_orig = (0.5_f32, 0.5_f32, 0.5_f32, 0.5_f32);
-        println!("Expected original: x={}, y={}, w={}, h={}",
-                 expected_orig.0, expected_orig.1, expected_orig.2, expected_orig.3);
+        println!(
+            "Expected original: x={}, y={}, w={}, h={}",
+            expected_orig.0, expected_orig.1, expected_orig.2, expected_orig.3
+        );
 
-        assert!((orig_x - expected_orig.0).abs() < 0.001,
-                "orig_x: expected {}, got {}", expected_orig.0, orig_x);
-        assert!((orig_y - expected_orig.1).abs() < 0.001,
-                "orig_y: expected {}, got {}", expected_orig.1, orig_y);
-        assert!((orig_w - expected_orig.2).abs() < 0.001,
-                "orig_w: expected {}, got {}", expected_orig.2, orig_w);
-        assert!((orig_h - expected_orig.3).abs() < 0.001,
-                "orig_h: expected {}, got {}", expected_orig.3, orig_h);
+        assert!(
+            (orig_x - expected_orig.0).abs() < 0.001,
+            "orig_x: expected {}, got {}",
+            expected_orig.0,
+            orig_x
+        );
+        assert!(
+            (orig_y - expected_orig.1).abs() < 0.001,
+            "orig_y: expected {}, got {}",
+            expected_orig.1,
+            orig_y
+        );
+        assert!(
+            (orig_w - expected_orig.2).abs() < 0.001,
+            "orig_w: expected {}, got {}",
+            expected_orig.2,
+            orig_w
+        );
+        assert!(
+            (orig_h - expected_orig.3).abs() < 0.001,
+            "orig_h: expected {}, got {}",
+            expected_orig.3,
+            orig_h
+        );
 
         println!("✓ 180° test PASSED\n");
     }
@@ -703,14 +840,22 @@ mod crop_settings_tests {
         // Crop the TOP portion of the visual image (not centered)
         // This simulates cropping workers' heads in a rotated photo
         let visual_crop = (0.1_f32, 0.05_f32, 0.8_f32, 0.4_f32); // wide strip at top
-        println!("Visual crop (top strip): x={}, y={}, w={}, h={}",
-                 visual_crop.0, visual_crop.1, visual_crop.2, visual_crop.3);
+        println!(
+            "Visual crop (top strip): x={}, y={}, w={}, h={}",
+            visual_crop.0, visual_crop.1, visual_crop.2, visual_crop.3
+        );
 
         let (orig_x, orig_y, orig_w, orig_h) = CropSettings::from_visual_space(
-            visual_crop.0, visual_crop.1, visual_crop.2, visual_crop.3, rotation
+            visual_crop.0,
+            visual_crop.1,
+            visual_crop.2,
+            visual_crop.3,
+            rotation,
         );
-        println!("Original space: x={}, y={}, w={}, h={}",
-                 orig_x, orig_y, orig_w, orig_h);
+        println!(
+            "Original space: x={}, y={}, w={}, h={}",
+            orig_x, orig_y, orig_w, orig_h
+        );
 
         // For 90° CW: Visual (vx,vy) -> Original (vy, 1-vx-vw)
         // Wait, let me recalculate the formula...
@@ -720,17 +865,35 @@ mod crop_settings_tests {
         // orig = (0.05, 1-0.1-0.8, 0.4, 0.8) = (0.05, 0.1, 0.4, 0.8)
 
         let expected_orig = (0.05_f32, 0.1_f32, 0.4_f32, 0.8_f32);
-        println!("Expected original: x={}, y={}, w={}, h={}",
-                 expected_orig.0, expected_orig.1, expected_orig.2, expected_orig.3);
+        println!(
+            "Expected original: x={}, y={}, w={}, h={}",
+            expected_orig.0, expected_orig.1, expected_orig.2, expected_orig.3
+        );
 
-        assert!((orig_x - expected_orig.0).abs() < 0.001,
-                "orig_x: expected {}, got {}", expected_orig.0, orig_x);
-        assert!((orig_y - expected_orig.1).abs() < 0.001,
-                "orig_y: expected {}, got {}", expected_orig.1, orig_y);
-        assert!((orig_w - expected_orig.2).abs() < 0.001,
-                "orig_w: expected {}, got {}", expected_orig.2, orig_w);
-        assert!((orig_h - expected_orig.3).abs() < 0.001,
-                "orig_h: expected {}, got {}", expected_orig.3, orig_h);
+        assert!(
+            (orig_x - expected_orig.0).abs() < 0.001,
+            "orig_x: expected {}, got {}",
+            expected_orig.0,
+            orig_x
+        );
+        assert!(
+            (orig_y - expected_orig.1).abs() < 0.001,
+            "orig_y: expected {}, got {}",
+            expected_orig.1,
+            orig_y
+        );
+        assert!(
+            (orig_w - expected_orig.2).abs() < 0.001,
+            "orig_w: expected {}, got {}",
+            expected_orig.2,
+            orig_w
+        );
+        assert!(
+            (orig_h - expected_orig.3).abs() < 0.001,
+            "orig_h: expected {}, got {}",
+            expected_orig.3,
+            orig_h
+        );
 
         println!("✓ Asymmetric crop test PASSED\n");
     }
@@ -764,7 +927,11 @@ mod crop_settings_tests {
 
         // Transform to original space - this CONSUMES the rotation
         let (orig_x, orig_y, orig_w, orig_h) = CropSettings::from_visual_space(
-            visual_crop.0, visual_crop.1, visual_crop.2, visual_crop.3, rotation_90
+            visual_crop.0,
+            visual_crop.1,
+            visual_crop.2,
+            visual_crop.3,
+            rotation_90,
         );
 
         // INVARIANT: Saved rotation_90 must be 0
@@ -773,19 +940,33 @@ mod crop_settings_tests {
         // Viewer applies UV directly WITHOUT ANY ROTATION
         // This is the correct Lightroom-like behavior
 
-        assert_eq!(saved_rotation_90, 0,
-            "INVARIANT VIOLATED: Saved snapshot must have rotation_90 = 0. Viewer NEVER rotates!");
+        assert_eq!(
+            saved_rotation_90, 0,
+            "INVARIANT VIOLATED: Saved snapshot must have rotation_90 = 0. Viewer NEVER rotates!"
+        );
 
         // Verify UV gives correct result without rotation
         let saved = CropSettings::new(
-            orig_x, orig_y, orig_w, orig_h,
-            saved_rotation_90, 0.0, false, false
+            orig_x,
+            orig_y,
+            orig_w,
+            orig_h,
+            saved_rotation_90,
+            0.0,
+            false,
+            false,
         );
 
         // With saved_rotation=0, to_visual_space returns same coords (no rotation)
         let (vx, vy, _vw, _vh) = saved.to_visual_space();
-        assert!((vx - orig_x).abs() < 0.001, "UV must be applied directly without rotation");
-        assert!((vy - orig_y).abs() < 0.001, "UV must be applied directly without rotation");
+        assert!(
+            (vx - orig_x).abs() < 0.001,
+            "UV must be applied directly without rotation"
+        );
+        assert!(
+            (vy - orig_y).abs() < 0.001,
+            "UV must be applied directly without rotation"
+        );
 
         println!("✓ INVARIANT: Viewer never rotates (rotation_90 consumed)");
     }
@@ -802,8 +983,10 @@ mod crop_settings_tests {
         // INVARIANT: Saved angle must be 0
         let saved_angle = 0.0_f32;
 
-        assert_eq!(saved_angle, 0.0,
-            "INVARIANT VIOLATED: Saved snapshot must have angle = 0. Viewer NEVER rotates!");
+        assert_eq!(
+            saved_angle, 0.0,
+            "INVARIANT VIOLATED: Saved snapshot must have angle = 0. Viewer NEVER rotates!"
+        );
 
         println!("✓ INVARIANT: Viewer never rotates (angle consumed)");
         println!("  For empty corners from angle: pre-render rotated image first");
@@ -832,7 +1015,10 @@ mod crop_settings_tests {
         let saved_angle = 0.0_f32;
 
         // These assertions document the invariants
-        assert_eq!(saved_rotation_90, 0, "rotation_90 must be 0 in saved snapshot");
+        assert_eq!(
+            saved_rotation_90, 0,
+            "rotation_90 must be 0 in saved snapshot"
+        );
         assert_eq!(saved_angle, 0.0, "angle must be 0 in saved snapshot");
 
         println!("✓ REGRESSION TEST: Viewer must not rotate");

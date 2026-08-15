@@ -3,17 +3,17 @@
 // Application State Management
 // Replaces Slint's declarative properties with Rust state struct
 
-use adapters::view_models::PhotoViewModel;
-use image::DynamicImage;
-use std::collections::HashSet;
-use std::sync::{Arc, Mutex};
+use crate::components::filmstrip_filter::FilmstripFilter;
 use crate::components::import_dialogs::ImportProgressDialog;
 use crate::design_system::theme_selector::ThemeVariant;
 use crate::docking::DockTab;
+use adapters::view_models::PhotoViewModel;
 use egui_dock::DockState;
 use egui_notify::Toasts;
+use image::DynamicImage;
 use infrastructure::cache::CacheStats;
-use crate::components::filmstrip_filter::FilmstripFilter;
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
 
 /// Snapshot of editing state for undo/redo
 #[derive(Debug, Clone)]
@@ -274,18 +274,22 @@ impl ImportViewState {
     /// (rajada) trocariam de lugar a cada reordenação.
     pub fn sort_candidates(&mut self) {
         match self.sort_by {
-            ImportSortBy::CaptureTime => self
-                .candidates
-                .sort_by(|a, b| a.date_time.cmp(&b.date_time).then(a.file_name.cmp(&b.file_name))),
-            ImportSortBy::FileName => self.candidates.sort_by(|a, b| a.file_name.cmp(&b.file_name)),
-            ImportSortBy::FileSize => self
-                .candidates
-                .sort_by(|a, b| b.file_size.cmp(&a.file_size).then(a.file_name.cmp(&b.file_name))),
-            ImportSortBy::MediaType => self.candidates.sort_by(|a, b| {
-                b.is_raw
-                    .cmp(&a.is_raw)
+            ImportSortBy::CaptureTime => self.candidates.sort_by(|a, b| {
+                a.date_time
+                    .cmp(&b.date_time)
                     .then(a.file_name.cmp(&b.file_name))
             }),
+            ImportSortBy::FileName => self
+                .candidates
+                .sort_by(|a, b| a.file_name.cmp(&b.file_name)),
+            ImportSortBy::FileSize => self.candidates.sort_by(|a, b| {
+                b.file_size
+                    .cmp(&a.file_size)
+                    .then(a.file_name.cmp(&b.file_name))
+            }),
+            ImportSortBy::MediaType => self
+                .candidates
+                .sort_by(|a, b| b.is_raw.cmp(&a.is_raw).then(a.file_name.cmp(&b.file_name))),
         }
     }
 
@@ -485,9 +489,9 @@ pub struct AppState {
     // ============================================
     pub zoom_level: f32,
     pub pan_offset: egui::Vec2,
-    pub show_before: bool, // Before/After toggle state
+    pub show_before: bool,      // Before/After toggle state
     pub prev_show_before: bool, // Previous before/after state for change detection
-    
+
     // ============================================
     // Crop Tool State (Develop mode only)
     // ============================================
@@ -600,7 +604,7 @@ pub struct AppState {
     // Sharpening
     pub saved_sharpen_amount: f32,
     pub saved_sharpen_radius: f32,
-    
+
     // Saved Crop
     pub saved_crop_settings: Option<domain::value_objects::CropSettings>,
 
@@ -652,7 +656,7 @@ pub struct AppState {
     pub import_dialog: Option<egui_file::FileDialog>,
     pub import_dialog_mode: ImportDialogMode,
     pub export_target_id: Option<String>,
-    
+
     // Command request from UI to App
     pub request_toggle_secondary_window: bool,
 
@@ -666,7 +670,7 @@ pub struct AppState {
     /// Print dialog state (legacy - kept for compatibility)
     /// Print dialog state (legacy - kept for compatibility)
     pub print_dialog_state: Option<crate::components::print_dialog::PrintDialogState>,
-    
+
     // Invalidation Queue for Thumbnails
     pub invalidation_queue: HashSet<String>,
 }
@@ -838,14 +842,15 @@ impl AppState {
             show_composition_grid: false,
             is_busy: false,
             busy_message: String::new(),
-            grid_columns: 4,  // Default 4 columns
+            grid_columns: 4, // Default 4 columns
             filmstrip_filter: FilmstripFilter::new(),
             pending_import: None,
             pending_export: None,
             edit_history: Vec::new(),
             history_index: None,
             performance_metrics: PerformanceMetrics::default(),
-            show_performance_stats: std::env::var("SHOW_PERFORMANCE_STATS").map_or(false, |v| v == "true"),
+            show_performance_stats: std::env::var("SHOW_PERFORMANCE_STATS")
+                .map_or(false, |v| v == "true"),
             start_load_time: None,
             pending_auto_save: false,
             pending_crop_apply: false,
@@ -901,7 +906,7 @@ impl AppState {
             // Sharpening saved values
             saved_sharpen_amount: 0.0,
             saved_sharpen_radius: 1.0,
-            
+
             saved_crop_settings: None,
 
             folder_tree_roots: Vec::new(),
@@ -929,7 +934,6 @@ impl AppState {
         }
     }
 
-
     /// Get the selected photo ID for the current view
     pub fn selected_photo_id(&self) -> Option<&String> {
         match self.current_view {
@@ -947,13 +951,15 @@ impl AppState {
 
     /// Get the library selected photo view model
     pub fn get_library_photo(&self) -> Option<&PhotoViewModel> {
-        self.library_selected_photo_id.as_ref()
+        self.library_selected_photo_id
+            .as_ref()
             .and_then(|id| self.photos.iter().find(|p| &p.id == id))
     }
 
     /// Get the develop selected photo view model
     pub fn get_develop_photo(&self) -> Option<&PhotoViewModel> {
-        self.develop_selected_photo_id.as_ref()
+        self.develop_selected_photo_id
+            .as_ref()
             .and_then(|id| self.photos.iter().find(|p| &p.id == id))
     }
 
@@ -983,18 +989,18 @@ impl AppState {
     pub fn navigate_library(&mut self, direction: i32) -> Option<String> {
         // Get currently filtered photos
         let filtered: Vec<_> = self.filmstrip_filter.apply(&self.photos);
-        
+
         if filtered.is_empty() {
             return None;
         }
-        
+
         // Find current position in filtered list
         let current_pos = if let Some(current_id) = &self.library_selected_photo_id {
             filtered.iter().position(|p| &p.id == current_id)
         } else {
             None
         };
-        
+
         let new_pos = match current_pos {
             Some(pos) => {
                 if direction > 0 {
@@ -1005,15 +1011,19 @@ impl AppState {
             }
             None => {
                 // No current selection, select first or last
-                if direction > 0 { 0 } else { filtered.len().saturating_sub(1) }
+                if direction > 0 {
+                    0
+                } else {
+                    filtered.len().saturating_sub(1)
+                }
             }
         };
-        
+
         // Return the new photo ID if it's different
         if current_pos != Some(new_pos) {
             return filtered.get(new_pos).map(|p| p.id.clone());
         }
-        
+
         None
     }
 
@@ -1022,7 +1032,7 @@ impl AppState {
     pub fn sanitize_develop_selection(&mut self) {
         // Apply filters
         let filtered = self.filmstrip_filter.apply(&self.photos);
-        
+
         let should_change = if let Some(current_id) = &self.develop_selected_photo_id {
             // Check if current ID is in filtered list
             !filtered.iter().any(|p| &p.id == current_id)
@@ -1032,9 +1042,9 @@ impl AppState {
         };
 
         if should_change {
-             self.develop_selected_photo_id = filtered.first().map(|p| p.id.clone());
-             // Force reload
-             self.loaded_photo_id = None;
+            self.develop_selected_photo_id = filtered.first().map(|p| p.id.clone());
+            // Force reload
+            self.loaded_photo_id = None;
         }
     }
 
@@ -1104,10 +1114,10 @@ impl AppState {
 
     /// Get the index of the currently selected photo in develop view
     pub fn develop_photo_index(&self) -> Option<usize> {
-        self.develop_selected_photo_id.as_ref()
+        self.develop_selected_photo_id
+            .as_ref()
             .and_then(|id| self.photos.iter().position(|p| &p.id == id))
     }
-
 
     /// Push current edit state to history (for undo/redo)
     pub fn push_edit_snapshot(&mut self) {
@@ -1283,18 +1293,18 @@ impl AppState {
     // ============================================
     // Multi-Selection Methods
     // ============================================
-    
+
     /// Select all photos (Cmd+A)
     pub fn select_all(&mut self) {
         self.selected_photo_ids = self.photos.iter().map(|p| p.id.clone()).collect();
     }
-    
+
     /// Clear all selections (Escape)
     pub fn clear_selection(&mut self) {
         self.selected_photo_ids.clear();
         self.last_clicked_index = None;
     }
-    
+
     /// Toggle selection of a single photo (Cmd+click)
     pub fn toggle_selection(&mut self, photo_id: &str) {
         if self.selected_photo_ids.contains(photo_id) {
@@ -1303,13 +1313,13 @@ impl AppState {
             self.selected_photo_ids.insert(photo_id.to_string());
         }
     }
-    
+
     /// Select range from last clicked to current (Shift+click)
     pub fn select_range(&mut self, current_index: usize) {
         if let Some(last_index) = self.last_clicked_index {
             let start = last_index.min(current_index);
             let end = last_index.max(current_index);
-            
+
             for i in start..=end {
                 if let Some(photo) = self.photos.get(i) {
                     self.selected_photo_ids.insert(photo.id.clone());
@@ -1322,7 +1332,7 @@ impl AppState {
             }
         }
     }
-    
+
     /// Single select (regular click)
     pub fn single_select(&mut self, photo_id: &str, index: usize) {
         self.selected_photo_ids.clear();
@@ -1330,12 +1340,12 @@ impl AppState {
         self.last_clicked_index = Some(index);
         self.library_selected_photo_id = Some(photo_id.to_string());
     }
-    
+
     /// Check if a photo is selected
     pub fn is_photo_selected(&self, photo_id: &str) -> bool {
         self.selected_photo_ids.contains(photo_id)
     }
-    
+
     /// Get count of selected photos
     pub fn selection_count(&self) -> usize {
         self.selected_photo_ids.len()

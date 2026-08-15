@@ -24,7 +24,8 @@ impl ImportSource {
             source_type: ImportSourceType::Device,
         }
     }
-}#[async_trait::async_trait]
+}
+#[async_trait::async_trait]
 pub trait DeviceRepository: Send + Sync {
     async fn get_mounted_devices(&self) -> Vec<ImportSource>;
     async fn get_history(&self) -> Vec<ImportSource>;

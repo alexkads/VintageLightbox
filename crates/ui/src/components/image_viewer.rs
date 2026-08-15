@@ -1,9 +1,9 @@
 // Image Viewer Component
 // Displays images with zoom, pan, and navigation controls
 
-use egui::{Ui, Vec2, Rect, Sense, UiBuilder, Color32};
-use crate::state::{AppState, CurrentView};
 use crate::design_system::{theme::Theme, widgets};
+use crate::state::{AppState, CurrentView};
+use egui::{Color32, Rect, Sense, Ui, UiBuilder, Vec2};
 
 pub struct ImageViewer;
 
@@ -17,7 +17,7 @@ impl ImageViewer {
             state.develop_selected_photo_id.is_some(),
             state.zoom_level,
             state.pan_offset,
-            true, // interactive
+            true,                         // interactive
             !state.crop_mode_active, // allow_pan: Disable pan in crop mode (unless Space is held)
             state.crop_settings.as_ref(), // Always pass crop settings so we can get rotation
             !state.crop_mode_active, // apply_crop_clip: Only clip UVs if NOT in crop editing mode
@@ -35,7 +35,7 @@ impl ImageViewer {
                     CropOverlay::show(
                         ui,
                         img_rect,
-                        viewer_rect, 
+                        viewer_rect,
                         crop_settings,
                         state.show_composition_grid,
                         state.selected_aspect_ratio.clone(),
@@ -43,7 +43,7 @@ impl ImageViewer {
                 }
             }
         }
-        
+
         // UI overlay elements (Main viewer only)
         Self::show_controls(ui, state, ui.max_rect());
     }
@@ -91,7 +91,7 @@ impl ImageViewer {
             // Allow pan if explicitly allowed OR if Spacebar is held (Space+Drag to Pan override)
             let space_held = ui.input(|i| i.key_down(egui::Key::Space));
             let should_pan = allow_pan || space_held;
-            
+
             if should_pan && response.dragged() {
                 pan += response.drag_delta();
             }
@@ -124,18 +124,18 @@ impl ImageViewer {
         if let Some(texture) = texture_handle {
             // Unified drawing logic for both Full Res and Thumbnail
             // This ensures identical aspect ratio and positioning calculations
-            
+
             let texture_size = Vec2::new(texture.size()[0] as f32, texture.size()[1] as f32);
-            
+
             // Calculate the effective size based on rotation
             let rotated_texture_size = if let Some(crop) = crop_settings {
-                 if crop.rotation_90() % 2 != 0 {
-                     Vec2::new(texture_size.y, texture_size.x)
-                 } else {
-                     texture_size
-                 }
+                if crop.rotation_90() % 2 != 0 {
+                    Vec2::new(texture_size.y, texture_size.x)
+                } else {
+                    texture_size
+                }
             } else {
-                 texture_size
+                texture_size
             };
 
             // Calculate the effective size considering crop (for aspect ratio correction)
@@ -145,7 +145,7 @@ impl ImageViewer {
                     // Crop coordinates are relative to the rotated image dimensions.
                     Vec2::new(
                         rotated_texture_size.x * crop.crop_width(),
-                        rotated_texture_size.y * crop.crop_height()
+                        rotated_texture_size.y * crop.crop_height(),
                     )
                 } else {
                     // When editing crop, show full rotated image
@@ -156,10 +156,10 @@ impl ImageViewer {
             };
 
             // Calculate scaled size based on effective (cropped) dimensions to fit available space
-            // NOTE: We allow upscaling (remove .min(1.0)) so that small thumbnails 
+            // NOTE: We allow upscaling (remove .min(1.0)) so that small thumbnails
             // stretch to fill the screen, acting as proper placeholders for the HD image.
-            let scale = (available_size.x / effective_size.x)
-                .min(available_size.y / effective_size.y);
+            let scale =
+                (available_size.x / effective_size.x).min(available_size.y / effective_size.y);
 
             let base_img_size = effective_size * scale;
             let zoomed_size = base_img_size * zoom;
@@ -176,8 +176,6 @@ impl ImageViewer {
                     // We calculate the UV coordinates of the 4 corners of the crop in the original texture,
                     // accounting for rotation, aspect ratio, and flips.
                     // We draw a Mesh with these UVs, so the egui::Image widget itself is NOT rotated.
-
-
 
                     // 1. Define corners of the Crop Window in Frame Space (0.0 - 1.0)
                     // The Frame corresponds to the image rotated by 90-degree steps.
@@ -200,7 +198,7 @@ impl ImageViewer {
 
                     // Map texture coordinates to UVs
                     let mut uvs = [egui::Pos2::ZERO; 4];
-                    
+
                     for (i, &p_frame) in corners_frame.iter().enumerate() {
                         // A. Center relative to 0.5
                         let p_centered = p_frame - center;
@@ -215,12 +213,12 @@ impl ImageViewer {
                         let (sin, cos) = (-angle_rad).sin_cos();
                         let p_rot = egui::vec2(
                             p_phys.x * cos - p_phys.y * sin,
-                            p_phys.x * sin + p_phys.y * cos
+                            p_phys.x * sin + p_phys.y * cos,
                         );
 
                         // D. Restore Aspect Ratio normalization
                         let p_rot_norm = egui::vec2(p_rot.x / aspect, p_rot.y);
-                        
+
                         // E. Uncenter -> UV in Rotated-90 Space
                         let uv_r90 = center + p_rot_norm;
 
@@ -230,7 +228,7 @@ impl ImageViewer {
                         // Let's verify common conventions or check logic.
                         // If we don't have explicit logic, assume standard CW steps.
                         // For now, let's assume usage of `coord` mapping.
-                        
+
                         let uv_orig = match crop.rotation_90() % 4 {
                             0 => uv_r90,
                             1 => egui::pos2(uv_r90.y, 1.0 - uv_r90.x), // 90 CW
@@ -245,8 +243,12 @@ impl ImageViewer {
                         let mut final_u = uv_orig.x;
                         let mut final_v = uv_orig.y;
 
-                        if crop.flip_horizontal() { final_u = 1.0 - final_u; }
-                        if crop.flip_vertical() { final_v = 1.0 - final_v; }
+                        if crop.flip_horizontal() {
+                            final_u = 1.0 - final_u;
+                        }
+                        if crop.flip_vertical() {
+                            final_v = 1.0 - final_v;
+                        }
 
                         uvs[i] = egui::pos2(final_u, final_v);
                     }
@@ -254,7 +256,7 @@ impl ImageViewer {
                     // 3. Construct Mesh
                     use egui::epaint::{Mesh, Vertex};
                     let mut mesh = Mesh::with_texture(texture.id());
-                    
+
                     // Vertices correspond to the View Rect (img_rect)
                     // TL, TR, BR, BL
                     let screen_corners = [
@@ -266,21 +268,21 @@ impl ImageViewer {
 
                     for (i, &pos) in screen_corners.iter().enumerate() {
                         mesh.vertices.push(Vertex {
-                            pos, 
-                            uv: uvs[i], 
-                            color: Color32::WHITE
+                            pos,
+                            uv: uvs[i],
+                            color: Color32::WHITE,
                         });
                     }
-                    
+
                     // Add Quad Indices (0, 1, 2) and (0, 2, 3)
                     mesh.add_triangle(0, 1, 2);
                     mesh.add_triangle(0, 2, 3);
 
                     // 4. Draw Mesh
                     ui.painter().add(egui::Shape::mesh(mesh));
-                    
+
                     painted_rect = Some(img_rect);
-                    
+
                     // Return early as we handled painting
                     return (zoom, pan, painted_rect, rect);
                 } else {
@@ -289,8 +291,12 @@ impl ImageViewer {
                     // Rotation is handled by .rotate(), but flips need UV manipulation
                     let mut min = egui::pos2(0.0, 0.0);
                     let mut max = egui::pos2(1.0, 1.0);
-                    if crop.flip_horizontal() { std::mem::swap(&mut min.x, &mut max.x); }
-                    if crop.flip_vertical() { std::mem::swap(&mut min.y, &mut max.y); }
+                    if crop.flip_horizontal() {
+                        std::mem::swap(&mut min.x, &mut max.x);
+                    }
+                    if crop.flip_vertical() {
+                        std::mem::swap(&mut min.y, &mut max.y);
+                    }
                     if crop.flip_horizontal() || crop.flip_vertical() {
                         img = img.uv(Rect::from_min_max(min, max));
                     }
@@ -310,9 +316,10 @@ impl ImageViewer {
             if is_thumbnail {
                 let loading_rect = Rect::from_min_size(
                     rect.right_top() - Vec2::new(120.0, -10.0),
-                    Vec2::new(110.0, 24.0)
+                    Vec2::new(110.0, 24.0),
                 );
-                ui.painter().rect_filled(loading_rect, 4.0, Color32::from_black_alpha(180));
+                ui.painter()
+                    .rect_filled(loading_rect, 4.0, Color32::from_black_alpha(180));
                 ui.painter().text(
                     loading_rect.center(),
                     egui::Align2::CENTER_CENTER,
@@ -331,7 +338,7 @@ impl ImageViewer {
                 2 => "◑",
                 _ => "◒",
             };
-            
+
             ui.painter().text(
                 rect.center(),
                 egui::Align2::CENTER_CENTER,
@@ -339,7 +346,7 @@ impl ImageViewer {
                 egui::FontId::proportional(Theme::FONT_XL),
                 ui.visuals().weak_text_color(),
             );
-            
+
             ui.ctx().request_repaint();
         } else {
             // No image selected
@@ -375,11 +382,8 @@ impl ImageViewer {
             let zoom_pos = rect.max - Vec2::new(80.0 + Theme::SPACE_LG, Theme::SPACE_LG + 12.0);
             let zoom_rect = Rect::from_center_size(zoom_pos, Vec2::new(60.0, 24.0));
 
-            ui.painter().rect_filled(
-                zoom_rect,
-                Theme::RADIUS_SM,
-                ui.visuals().window_fill(),
-            );
+            ui.painter()
+                .rect_filled(zoom_rect, Theme::RADIUS_SM, ui.visuals().window_fill());
             ui.painter().text(
                 zoom_rect.center(),
                 egui::Align2::CENTER_CENTER,
@@ -390,4 +394,3 @@ impl ImageViewer {
         }
     }
 }
-

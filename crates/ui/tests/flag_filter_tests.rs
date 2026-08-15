@@ -1,5 +1,5 @@
-use ui::state::AppState;
 use adapters::view_models::PhotoViewModel;
+use ui::state::AppState;
 
 /// Helper to create a dummy photo with a specific flag
 fn create_photo(id: &str, flag: Option<i32>) -> PhotoViewModel {
@@ -37,14 +37,14 @@ fn create_photo(id: &str, flag: Option<i32>) -> PhotoViewModel {
 fn test_filter_by_flags() {
     // Setup state
     let mut state = AppState::new();
-    
+
     // Add photos with different flags
     state.photos = vec![
-        create_photo("1", Some(1)),   // Picked
-        create_photo("2", Some(-1)),  // Rejected
-        create_photo("3", Some(0)),   // Unflagged (Explicit 0)
-        create_photo("4", None),      // Unflagged (None)
-        create_photo("5", Some(1)),   // Picked
+        create_photo("1", Some(1)),  // Picked
+        create_photo("2", Some(-1)), // Rejected
+        create_photo("3", Some(0)),  // Unflagged (Explicit 0)
+        create_photo("4", None),     // Unflagged (None)
+        create_photo("5", Some(1)),  // Picked
     ];
 
     // 1. Test Filter: Picked (1)
@@ -69,7 +69,11 @@ fn test_filter_by_flags() {
     state.filmstrip_filter.show_unflagged = true;
     let filtered_refs = state.filmstrip_filter.apply(&state.photos);
     let filtered: Vec<PhotoViewModel> = filtered_refs.into_iter().cloned().collect();
-    assert_eq!(filtered.len(), 2, "Should have 2 unflagged photos (Explicit 0 and None)");
+    assert_eq!(
+        filtered.len(),
+        2,
+        "Should have 2 unflagged photos (Explicit 0 and None)"
+    );
     assert!(filtered.iter().any(|p| p.id == "3"));
     assert!(filtered.iter().any(|p| p.id == "4"));
 
@@ -84,18 +88,21 @@ fn test_filter_by_flags() {
 #[test]
 fn test_filter_combined_with_rating() {
     let mut state = AppState::new();
-    
+
     // Add photos with flags AND ratings
-    let mut p1 = create_photo("1", Some(1)); p1.rating = 5; // Picked, 5 stars
-    let mut p2 = create_photo("2", Some(1)); p2.rating = 3; // Picked, 3 stars
-    let mut p3 = create_photo("3", Some(-1)); p3.rating = 5; // Rejected, 5 stars
-    
+    let mut p1 = create_photo("1", Some(1));
+    p1.rating = 5; // Picked, 5 stars
+    let mut p2 = create_photo("2", Some(1));
+    p2.rating = 3; // Picked, 3 stars
+    let mut p3 = create_photo("3", Some(-1));
+    p3.rating = 5; // Rejected, 5 stars
+
     state.photos = vec![p1, p2, p3];
 
     // Filter: Picked AND Rating >= 4
     state.filmstrip_filter.show_flagged = true;
     state.filmstrip_filter.min_rating = 4;
-    
+
     let filtered_refs = state.filmstrip_filter.apply(&state.photos);
     let filtered: Vec<PhotoViewModel> = filtered_refs.into_iter().cloned().collect();
     assert_eq!(filtered.len(), 1, "Should filter by both Flag and Rating");

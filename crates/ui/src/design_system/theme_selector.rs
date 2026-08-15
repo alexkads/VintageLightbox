@@ -1,7 +1,7 @@
 // Theme Selector
 // Provides theme variants using egui's built-in Visuals
 
-use egui::{Context, Visuals, Color32, Stroke, style::Widgets};
+use egui::{style::Widgets, Color32, Context, Stroke, Visuals};
 
 /// Available theme variants for the application
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -70,7 +70,7 @@ impl ThemeVariant {
         // Catppuccin Mocha colors
         visuals.widgets = Widgets {
             noninteractive: egui::style::WidgetVisuals {
-                bg_fill: Color32::from_rgb(30, 30, 46), // Base
+                bg_fill: Color32::from_rgb(30, 30, 46),      // Base
                 weak_bg_fill: Color32::from_rgb(24, 24, 37), // Mantle
                 bg_stroke: Stroke::new(1.0, Color32::from_rgb(88, 91, 112)), // Surface1
                 fg_stroke: Stroke::new(1.0, Color32::from_rgb(205, 214, 244)), // Text
@@ -109,7 +109,8 @@ impl ThemeVariant {
         // Catppuccin Macchiato colors (blue-tinted)
         visuals.widgets.noninteractive.bg_fill = Color32::from_rgb(36, 39, 58); // Base
         visuals.widgets.noninteractive.weak_bg_fill = Color32::from_rgb(30, 32, 48); // Mantle
-        visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0, Color32::from_rgb(202, 211, 245)); // Text
+        visuals.widgets.noninteractive.fg_stroke =
+            Stroke::new(1.0, Color32::from_rgb(202, 211, 245)); // Text
         visuals.widgets.inactive.bg_fill = Color32::from_rgb(54, 58, 79); // Surface0
         visuals.widgets.hovered.bg_fill = Color32::from_rgb(91, 96, 120); // Overlay0
         visuals.widgets.active.bg_fill = Color32::from_rgb(138, 173, 244); // Blue
@@ -122,7 +123,8 @@ impl ThemeVariant {
         // Catppuccin Frappe colors (warm gray)
         visuals.widgets.noninteractive.bg_fill = Color32::from_rgb(48, 52, 70); // Base
         visuals.widgets.noninteractive.weak_bg_fill = Color32::from_rgb(41, 44, 60); // Mantle
-        visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0, Color32::from_rgb(198, 208, 245)); // Text
+        visuals.widgets.noninteractive.fg_stroke =
+            Stroke::new(1.0, Color32::from_rgb(198, 208, 245)); // Text
         visuals.widgets.inactive.bg_fill = Color32::from_rgb(65, 69, 89); // Surface0
         visuals.widgets.hovered.bg_fill = Color32::from_rgb(98, 104, 128); // Overlay0
         visuals.widgets.active.bg_fill = Color32::from_rgb(140, 170, 238); // Blue

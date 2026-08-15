@@ -3,8 +3,8 @@
 //! Reusable right-click context menu for photo actions.
 //! Designed to be extensible for future functionality.
 
-use egui::{Response, Id};
 use crate::design_system::theme::Theme;
+use egui::{Id, Response};
 
 /// Represents an action in the context menu
 #[derive(Clone)]
@@ -26,23 +26,23 @@ impl ContextMenuItem {
             destructive: false,
         }
     }
-    
+
     pub fn with_icon(mut self, icon: &str) -> Self {
         self.icon = Some(icon.to_string());
         self
     }
-    
+
     pub fn with_shortcut(mut self, shortcut: &str) -> Self {
         self.shortcut = Some(shortcut.to_string());
         self
     }
-    
+
     #[allow(dead_code)]
     pub fn disabled(mut self) -> Self {
         self.enabled = false;
         self
     }
-    
+
     pub fn destructive(mut self) -> Self {
         self.destructive = true;
         self
@@ -77,7 +77,7 @@ impl ContextMenu {
         self.position = position;
         self.last_open_time = ctx.input(|i| i.time);
     }
-    
+
     /// Check if a response triggered a context menu (right-click)
     /// Note: Use open() if you need to manually trigger it
     pub fn check_open(&mut self, ctx: &egui::Context, response: &Response) {
@@ -87,16 +87,16 @@ impl ContextMenu {
             }
         }
     }
-    
+
     /// Show the context menu with the given items
     /// Returns the index of the clicked item, if any
     pub fn show(&mut self, ctx: &egui::Context, items: &[ContextMenuItem]) -> Option<usize> {
         if !self.is_open {
             return None;
         }
-        
+
         let mut clicked_index = None;
-        
+
         // Close menu if clicked elsewhere
         if ctx.input(|i| i.pointer.any_click()) {
             let pointer_pos = ctx.input(|i| i.pointer.interact_pos());
@@ -104,7 +104,7 @@ impl ContextMenu {
                 // Will close after showing
             }
         }
-        
+
         egui::Area::new(self.id)
             .fixed_pos(self.position)
             .order(egui::Order::Foreground)
@@ -124,87 +124,92 @@ impl ContextMenu {
                             let height = 22.0;
                             let (rect, response) = ui.allocate_exact_size(
                                 egui::Vec2::new(ui.available_width(), height),
-                                if item.enabled { egui::Sense::click() } else { egui::Sense::hover() }
+                                if item.enabled {
+                                    egui::Sense::click()
+                                } else {
+                                    egui::Sense::hover()
+                                },
                             );
 
-                                // Draw hover background
-                                if item.enabled && response.hovered() {
-                                    ui.painter().rect_filled(
-                                        rect,
-                                        egui::CornerRadius::same(4),
-                                        Theme::BG_HOVER, // Use standard hover color
-                                    );
-                                }
+                            // Draw hover background
+                            if item.enabled && response.hovered() {
+                                ui.painter().rect_filled(
+                                    rect,
+                                    egui::CornerRadius::same(4),
+                                    Theme::BG_HOVER, // Use standard hover color
+                                );
+                            }
 
-                                // Layout content
-                                let text_color = if item.destructive {
-                                    egui::Color32::from_rgb(255, 100, 100)
-                                } else if item.enabled {
-                                    Theme::TEXT_PRIMARY
-                                } else {
-                                    Theme::TEXT_MUTED
-                                };
+                            // Layout content
+                            let text_color = if item.destructive {
+                                egui::Color32::from_rgb(255, 100, 100)
+                            } else if item.enabled {
+                                Theme::TEXT_PRIMARY
+                            } else {
+                                Theme::TEXT_MUTED
+                            };
 
-                                // Icon
-                                let mut x_cursor = rect.min.x + 8.0;
-                                if let Some(ref icon) = item.icon {
-                                    ui.painter().text(
-                                        egui::pos2(x_cursor, rect.center().y),
-                                        egui::Align2::LEFT_CENTER,
-                                        icon,
-                                        egui::FontId::proportional(Theme::FONT_SM),
-                                        text_color,
-                                    );
-                                    x_cursor += 20.0;
-                                } else {
-                                    // Indent if no icon but others might have? 
-                                    // For now simple left align
-                                }
-
-                                // Label
+                            // Icon
+                            let mut x_cursor = rect.min.x + 8.0;
+                            if let Some(ref icon) = item.icon {
                                 ui.painter().text(
                                     egui::pos2(x_cursor, rect.center().y),
                                     egui::Align2::LEFT_CENTER,
-                                    &item.label,
+                                    icon,
                                     egui::FontId::proportional(Theme::FONT_SM),
                                     text_color,
                                 );
-
-                                // Shortcut (right aligned)
-                                if let Some(ref shortcut) = item.shortcut {
-                                    ui.painter().text(
-                                        egui::pos2(rect.max.x - 8.0, rect.center().y),
-                                        egui::Align2::RIGHT_CENTER,
-                                        shortcut,
-                                        egui::FontId::proportional(Theme::FONT_XS),
-                                        Theme::TEXT_MUTED,
-                                    );
-                                }
-
-                                if item.enabled && response.clicked() {
-                                    clicked_index = Some(index);
-                                    self.is_open = false;
-                                }
+                                x_cursor += 20.0;
+                            } else {
+                                // Indent if no icon but others might have?
+                                // For now simple left align
                             }
+
+                            // Label
+                            ui.painter().text(
+                                egui::pos2(x_cursor, rect.center().y),
+                                egui::Align2::LEFT_CENTER,
+                                &item.label,
+                                egui::FontId::proportional(Theme::FONT_SM),
+                                text_color,
+                            );
+
+                            // Shortcut (right aligned)
+                            if let Some(ref shortcut) = item.shortcut {
+                                ui.painter().text(
+                                    egui::pos2(rect.max.x - 8.0, rect.center().y),
+                                    egui::Align2::RIGHT_CENTER,
+                                    shortcut,
+                                    egui::FontId::proportional(Theme::FONT_XS),
+                                    Theme::TEXT_MUTED,
+                                );
+                            }
+
+                            if item.enabled && response.clicked() {
+                                clicked_index = Some(index);
+                                self.is_open = false;
+                            }
+                        }
                     });
             });
-        
+
         // Close if clicked outside or Escape pressed
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.is_open = false;
         }
-        
+
         // Close if clicked outside the menu area
         // Ignore clicks that happened in the same frame/moment as opening
         let time_since_open = ctx.input(|i| i.time) - self.last_open_time;
-        if time_since_open > 0.1 && ctx.input(|i| i.pointer.any_click()) && clicked_index.is_none() {
+        if time_since_open > 0.1 && ctx.input(|i| i.pointer.any_click()) && clicked_index.is_none()
+        {
             // Delay close to next frame to avoid immediate re-open
             self.is_open = false;
         }
-        
+
         clicked_index
     }
-    
+
     /// Close the menu
     #[allow(dead_code)]
     pub fn close(&mut self) {

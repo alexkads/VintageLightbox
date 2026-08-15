@@ -6,8 +6,8 @@
 use domain::{
     entities::Photo,
     repositories::PhotoRepository,
-    value_objects::{PhotoId, ColorLabel},
-    DomainResult, DomainError,
+    value_objects::{ColorLabel, PhotoId},
+    DomainError, DomainResult,
 };
 use std::sync::Arc;
 
@@ -26,16 +26,15 @@ impl SetColorLabelUseCase {
     pub async fn execute(&self, photo_id: PhotoId, color_label: ColorLabel) -> DomainResult<Photo> {
         // Buscar foto no repositório
         let photo_option = self.photo_repository.find_by_id(&photo_id).await?;
-        
-        let mut photo = photo_option
-            .ok_or(DomainError::PhotoNotFound)?;
-        
+
+        let mut photo = photo_option.ok_or(DomainError::PhotoNotFound)?;
+
         // Aplicar color label
         photo.set_color_label(color_label);
-        
+
         // Persistir mudança
         self.photo_repository.update(&photo).await?;
-        
+
         Ok(photo)
     }
 
@@ -43,16 +42,15 @@ impl SetColorLabelUseCase {
     pub async fn clear(&self, photo_id: PhotoId) -> DomainResult<Photo> {
         // Buscar foto no repositório
         let photo_option = self.photo_repository.find_by_id(&photo_id).await?;
-        
-        let mut photo = photo_option
-            .ok_or(DomainError::PhotoNotFound)?;
-        
+
+        let mut photo = photo_option.ok_or(DomainError::PhotoNotFound)?;
+
         // Remover color label
         photo.remove_color_label();
-        
+
         // Persistir mudança
         self.photo_repository.update(&photo).await?;
-        
+
         Ok(photo)
     }
 }
@@ -86,9 +84,9 @@ mod tests {
         let file_path = FilePath::new("/photos/test.jpg").unwrap();
         let photo = Photo::new(file_path);
         let photo_id = photo.id();
-        
+
         let mut mock_repo = MockPhotoRepo::new();
-        
+
         // Mock find_by_id
         let photo_clone = photo.clone();
         mock_repo
@@ -96,19 +94,16 @@ mod tests {
             .with(eq(photo_id))
             .times(1)
             .returning(move |_| Ok(Some(photo_clone.clone())));
-        
+
         // Mock update
-        mock_repo
-            .expect_update()
-            .times(1)
-            .returning(|_| Ok(()));
-        
+        mock_repo.expect_update().times(1).returning(|_| Ok(()));
+
         let use_case = SetColorLabelUseCase::new(Arc::new(mock_repo));
         let color_label = ColorLabel::Red;
-        
+
         // Act
         let result = use_case.execute(photo_id, color_label).await;
-        
+
         // Assert
         assert!(result.is_ok());
         let updated_photo = result.unwrap();
@@ -119,26 +114,26 @@ mod tests {
     async fn test_set_color_label_photo_not_found() {
         // Arrange
         let photo_id = PhotoId::new();
-        
+
         let mut mock_repo = MockPhotoRepo::new();
-        
+
         // Mock find_by_id retornando None
         mock_repo
             .expect_find_by_id()
             .with(eq(photo_id))
             .times(1)
             .returning(|_| Ok(None));
-        
+
         let use_case = SetColorLabelUseCase::new(Arc::new(mock_repo));
         let color_label = ColorLabel::Blue;
-        
+
         // Act
         let result = use_case.execute(photo_id, color_label).await;
-        
+
         // Assert
         assert!(result.is_err());
         match result {
-            Err(DomainError::PhotoNotFound) => {},
+            Err(DomainError::PhotoNotFound) => {}
             _ => panic!("Expected PhotoNotFound error"),
         }
     }
@@ -150,9 +145,9 @@ mod tests {
         let mut photo = Photo::new(file_path);
         photo.set_color_label(ColorLabel::Yellow);
         let photo_id = photo.id();
-        
+
         let mut mock_repo = MockPhotoRepo::new();
-        
+
         // Mock find_by_id
         let photo_clone = photo.clone();
         mock_repo
@@ -160,18 +155,15 @@ mod tests {
             .with(eq(photo_id))
             .times(1)
             .returning(move |_| Ok(Some(photo_clone.clone())));
-        
+
         // Mock update
-        mock_repo
-            .expect_update()
-            .times(1)
-            .returning(|_| Ok(()));
-        
+        mock_repo.expect_update().times(1).returning(|_| Ok(()));
+
         let use_case = SetColorLabelUseCase::new(Arc::new(mock_repo));
-        
+
         // Act
         let result = use_case.clear(photo_id).await;
-        
+
         // Assert
         assert!(result.is_ok());
         let updated_photo = result.unwrap();
@@ -184,53 +176,47 @@ mod tests {
         let file_path = FilePath::new("/photos/test.jpg").unwrap();
         let photo = Photo::new(file_path);
         let photo_id = photo.id();
-        
+
         let mut mock_repo = MockPhotoRepo::new();
-        
+
         // Mock find_by_id (3 chamadas)
         let photo_clone1 = photo.clone();
         let photo_clone2 = photo.clone();
         let photo_clone3 = photo.clone();
-        mock_repo
-            .expect_find_by_id()
-            .times(3)
-            .returning(move |_| {
-                static mut CALL_COUNT: usize = 0;
-                unsafe {
-                    CALL_COUNT += 1;
-                    match CALL_COUNT {
-                        1 => Ok(Some(photo_clone1.clone())),
-                        2 => {
-                            let mut p = photo_clone2.clone();
-                            p.set_color_label(ColorLabel::Red);
-                            Ok(Some(p))
-                        },
-                        _ => {
-                            let mut p = photo_clone3.clone();
-                            p.set_color_label(ColorLabel::Green);
-                            Ok(Some(p))
-                        }
+        mock_repo.expect_find_by_id().times(3).returning(move |_| {
+            static mut CALL_COUNT: usize = 0;
+            unsafe {
+                CALL_COUNT += 1;
+                match CALL_COUNT {
+                    1 => Ok(Some(photo_clone1.clone())),
+                    2 => {
+                        let mut p = photo_clone2.clone();
+                        p.set_color_label(ColorLabel::Red);
+                        Ok(Some(p))
+                    }
+                    _ => {
+                        let mut p = photo_clone3.clone();
+                        p.set_color_label(ColorLabel::Green);
+                        Ok(Some(p))
                     }
                 }
-            });
-        
+            }
+        });
+
         // Mock update (3 chamadas)
-        mock_repo
-            .expect_update()
-            .times(3)
-            .returning(|_| Ok(()));
-        
+        mock_repo.expect_update().times(3).returning(|_| Ok(()));
+
         let use_case = SetColorLabelUseCase::new(Arc::new(mock_repo));
-        
+
         // Act - múltiplas mudanças
         let result1 = use_case.execute(photo_id, ColorLabel::Red).await;
         assert!(result1.is_ok());
-        
+
         let result2 = use_case.execute(photo_id, ColorLabel::Green).await;
         assert!(result2.is_ok());
-        
+
         let result3 = use_case.execute(photo_id, ColorLabel::Purple).await;
-        
+
         // Assert
         assert!(result3.is_ok());
         let final_photo = result3.unwrap();
@@ -243,26 +229,20 @@ mod tests {
         let file_path = FilePath::new("/photos/test.jpg").unwrap();
         let photo = Photo::new(file_path);
         let photo_id = photo.id();
-        
+
         let mut mock_repo = MockPhotoRepo::new();
-        
+
         // Mock find_by_id (5 cores)
-        mock_repo
-            .expect_find_by_id()
-            .times(5)
-            .returning(move |_| {
-                let p = Photo::new(FilePath::new("/photos/test.jpg").unwrap());
-                Ok(Some(p))
-            });
-        
+        mock_repo.expect_find_by_id().times(5).returning(move |_| {
+            let p = Photo::new(FilePath::new("/photos/test.jpg").unwrap());
+            Ok(Some(p))
+        });
+
         // Mock update (5 cores)
-        mock_repo
-            .expect_update()
-            .times(5)
-            .returning(|_| Ok(()));
-        
+        mock_repo.expect_update().times(5).returning(|_| Ok(()));
+
         let use_case = SetColorLabelUseCase::new(Arc::new(mock_repo));
-        
+
         // Act - testar todas as cores
         let colors = vec![
             ColorLabel::Red,
@@ -271,7 +251,7 @@ mod tests {
             ColorLabel::Blue,
             ColorLabel::Purple,
         ];
-        
+
         for color in colors {
             let result = use_case.execute(photo_id, color).await;
             assert!(result.is_ok());

@@ -23,11 +23,11 @@ pub trait ThumbnailGenerator: Send + Sync {
     /// Gera múltiplos thumbnails de uma vez, otimizando a leitura do arquivo
     /// Retorna os bytes de cada thumbnail na ordem solicitada
     async fn generate_set(&self, path: &FilePath, max_sizes: &[u32]) -> DomainResult<Vec<Vec<u8>>> {
-         let mut results = Vec::new();
-         for size in max_sizes {
-             results.push(self.generate(path, *size).await?);
-         }
-         Ok(results)
+        let mut results = Vec::new();
+        for size in max_sizes {
+            results.push(self.generate(path, *size).await?);
+        }
+        Ok(results)
     }
 }
 
@@ -50,7 +50,11 @@ pub trait RawDecoder: Send + Sync {
 #[async_trait]
 pub trait ImageExporter: Send + Sync {
     /// Exporta a foto aplicando as edições para o caminho de destino
-    async fn export(&self, photo: &crate::entities::Photo, output_path: &FilePath) -> DomainResult<()>;
+    async fn export(
+        &self,
+        photo: &crate::entities::Photo,
+        output_path: &FilePath,
+    ) -> DomainResult<()>;
 }
 
 pub mod preview_storage;

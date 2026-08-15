@@ -1,11 +1,11 @@
-use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
-use ui::components::settings_dialog::{SettingsDialog, SettingsAction};
-use ui::state::AppState;
+use egui_kittest::Harness;
 use infrastructure::cache::CacheStats;
 use std::cell::RefCell;
-use std::rc::Rc;
 use std::path::PathBuf;
+use std::rc::Rc;
+use ui::components::settings_dialog::{SettingsAction, SettingsDialog};
+use ui::state::AppState;
 
 #[test]
 fn test_settings_dialog_clear_thumbnails() {
@@ -31,7 +31,7 @@ fn test_settings_dialog_clear_thumbnails() {
         let mut s = state_clone.borrow_mut();
         // Render the dialog
         let action = SettingsDialog::show(ui.ctx(), &mut s);
-        
+
         if let Some(act) = action {
             *captured_action_clone.borrow_mut() = Some(act);
         }
@@ -51,7 +51,7 @@ fn test_settings_dialog_clear_thumbnails() {
     // 4. Verify action was captured
     let action = captured_action.borrow();
     match action.as_ref() {
-        Some(SettingsAction::ClearThumbnails) => {}, // Pass
+        Some(SettingsAction::ClearThumbnails) => {} // Pass
         Some(other) => panic!("Expected ClearThumbnails, got {:?}", other),
         None => panic!("No action captured after clicking button"),
     }
@@ -82,7 +82,7 @@ fn test_settings_dialog_stats_display() {
 
     // Verify stats text exists
     // "12345 items"
-    let _ = harness.get_by_label("12345 items"); 
+    let _ = harness.get_by_label("12345 items");
     // "678 items"
     let _ = harness.get_by_label("678 items");
 }

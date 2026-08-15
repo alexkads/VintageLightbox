@@ -1,4 +1,4 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PhotoViewModel {
@@ -107,11 +107,32 @@ pub struct DuplicateCheckViewModel {
 /// ViewModel for import progress events
 #[derive(Debug, Clone)]
 pub enum ImportProgressViewModel {
-    Starting { total: usize },
-    Processing { index: usize, path: String },
-    Completed { photo_id: String, path: String },
-    Failed { path: String, error: String },
-    DuplicateSkipped { path: String, existing_path: String },
-    Paused { completed: usize, remaining: usize },
-    Finished { successful: usize, failed: usize, skipped: usize },
+    Starting {
+        total: usize,
+    },
+    Processing {
+        index: usize,
+        path: String,
+    },
+    Completed {
+        photo_id: String,
+        path: String,
+    },
+    Failed {
+        path: String,
+        error: String,
+    },
+    DuplicateSkipped {
+        path: String,
+        existing_path: String,
+    },
+    Paused {
+        completed: usize,
+        remaining: usize,
+    },
+    Finished {
+        successful: usize,
+        failed: usize,
+        skipped: usize,
+    },
 }

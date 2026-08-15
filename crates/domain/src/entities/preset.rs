@@ -1,6 +1,6 @@
-use uuid::Uuid;
-use serde::{Deserialize, Serialize};
 use super::photo::Photo;
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct PresetId(Uuid);
@@ -29,8 +29,7 @@ impl std::fmt::Display for PresetId {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct PresetAdjustments {
     pub exposure: Option<f32>,
     pub contrast: Option<f32>,
@@ -48,7 +47,6 @@ pub struct PresetAdjustments {
     pub tone_curve_lights: Option<f32>,
     pub tone_curve_highlights: Option<f32>,
 }
-
 
 impl From<&Photo> for PresetAdjustments {
     fn from(photo: &Photo) -> Self {

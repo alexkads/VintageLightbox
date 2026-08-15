@@ -1,10 +1,13 @@
-use infrastructure::{create_pool, run_migrations, PhotoRepositoryImpl, ExifReader, ThumbnailGeneratorImpl, ImageExporterImpl, cache::preview_manager::PreviewManager};
-use use_cases::{ImportPhotoUseCase, SavePhotoEditsUseCase, ExportPhotoUseCase};
 use domain::repositories::PhotoRepository;
 use domain::value_objects::FilePath;
+use image::{ImageBuffer, Rgb};
+use infrastructure::{
+    cache::preview_manager::PreviewManager, create_pool, run_migrations, ExifReader,
+    ImageExporterImpl, PhotoRepositoryImpl, ThumbnailGeneratorImpl,
+};
 use std::sync::Arc;
 use tempfile::tempdir;
-use image::{Rgb, ImageBuffer};
+use use_cases::{ExportPhotoUseCase, ImportPhotoUseCase, SavePhotoEditsUseCase};
 
 #[tokio::test]
 async fn test_e2e_import_edit_export_flow() {
@@ -37,7 +40,12 @@ async fn test_e2e_import_edit_export_flow() {
     let preview_manager = Arc::new(PreviewManager::new_with_path(preview_dir));
 
     // Use Cases
-    let import_uc = ImportPhotoUseCase::new(repo.clone(), metadata_extractor, thumbnail_generator, preview_manager);
+    let import_uc = ImportPhotoUseCase::new(
+        repo.clone(),
+        metadata_extractor,
+        thumbnail_generator,
+        preview_manager,
+    );
     let save_edits_uc = SavePhotoEditsUseCase::new(repo.clone());
     let export_uc = ExportPhotoUseCase::new(repo.clone(), image_exporter);
 
@@ -45,8 +53,12 @@ async fn test_e2e_import_edit_export_flow() {
     let path_str = img_path.to_str().unwrap().to_string();
     let file_path = FilePath::new(&path_str).unwrap();
     let import_result = import_uc.execute(file_path).await;
-    assert!(import_result.is_ok(), "Import failed: {:?}", import_result.err());
-    
+    assert!(
+        import_result.is_ok(),
+        "Import failed: {:?}",
+        import_result.err()
+    );
+
     // Verify it's in DB
     let photos = repo.find_all().await.unwrap();
     assert_eq!(photos.len(), 1);
@@ -55,19 +67,19 @@ async fn test_e2e_import_edit_export_flow() {
 
     // 3. EDIT (Save Edits)
     // Apply Exposure +1.0 (Brighten) and Contrast 1.2
-    let save_result = save_edits_uc.execute(
-        photo_id, 1.0, 1.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-        0.0, 0.0, 0.0, 0.0,
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL Sat
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL Hue
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL Lum
-        0.0, 0.0, 0.0, // Lens
-        0.0, 0.0, // NR
-        0.0, 1.0, // Sharpening (amount, radius)
-        None, None, None, None, None, None, None, None // Crop
-    ).await;
+    let save_result = save_edits_uc
+        .execute(
+            photo_id, 1.0, 1.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL Sat
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL Hue
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL Lum
+            0.0, 0.0, 0.0, // Lens
+            0.0, 0.0, // NR
+            0.0, 1.0, // Sharpening (amount, radius)
+            None, None, None, None, None, None, None, None, // Crop
+        )
+        .await;
     assert!(save_result.is_ok(), "Save edits failed");
-
 
     // Verify persistence
     let updated_photo = repo.find_by_id(&photo_id).await.unwrap().unwrap();
@@ -77,9 +89,13 @@ async fn test_e2e_import_edit_export_flow() {
     // 4. EXPORT
     let export_path = export_dir.join("exported.jpg");
     let export_path_str = export_path.to_str().unwrap().to_string();
-    
+
     let export_result = export_uc.execute(photo_id, export_path_str.clone()).await;
-    assert!(export_result.is_ok(), "Export failed: {:?}", export_result.err());
+    assert!(
+        export_result.is_ok(),
+        "Export failed: {:?}",
+        export_result.err()
+    );
 
     // Verify file exists
     assert!(export_path.exists(), "Exported file not found");
@@ -89,9 +105,9 @@ async fn test_e2e_import_edit_export_flow() {
     let exported_img = image::open(&export_path).expect("Failed to open exported image");
     assert_eq!(exported_img.width(), 100);
     assert_eq!(exported_img.height(), 100);
-    
-    // Check pixel at (50,50) - Should be brighter than Red (255,0,0)? 
-    // Actually 255 red is max, but contrast might affect it. 
+
+    // Check pixel at (50,50) - Should be brighter than Red (255,0,0)?
+    // Actually 255 red is max, but contrast might affect it.
     // Since we brightened, 255 stays 255. But 0 might go up?
     // Brighten adds value. 1.0 * 10 = +10. So (255, 0, 0) -> (255, 10, 10).
     // Let's verify pixel change.

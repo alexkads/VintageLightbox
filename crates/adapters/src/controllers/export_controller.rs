@@ -1,6 +1,6 @@
+use domain::value_objects::PhotoId;
 use std::sync::Arc;
 use use_cases::ExportPhotoUseCase;
-use domain::value_objects::PhotoId;
 
 pub struct ExportController {
     export_photo_use_case: Arc<ExportPhotoUseCase>,

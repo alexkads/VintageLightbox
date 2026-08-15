@@ -3,12 +3,12 @@
 //! Implementação do serviço de organização de arquivos.
 //! Suporta diferentes estratégias de organização e padrões de renomeação.
 
+use async_trait::async_trait;
 use domain::{
     services::FileOrganizer,
-    value_objects::{FilePath, ImportOptions, PhotoMetadata, OrganizationStrategy, RenamePattern},
+    value_objects::{FilePath, ImportOptions, OrganizationStrategy, PhotoMetadata, RenamePattern},
     DomainError, DomainResult,
 };
-use async_trait::async_trait;
 use std::path::{Path, PathBuf};
 
 /// Implementação do FileOrganizer
@@ -31,10 +31,7 @@ impl FileOrganizerImpl {
         if let Some(meta) = metadata {
             if let Some(ref dt_str) = meta.date_time {
                 // Parse EXIF date format "YYYY:MM:DD HH:MM:SS"
-                let parts: Vec<&str> = dt_str.split(' ').next()
-                    .unwrap_or("")
-                    .split(':')
-                    .collect();
+                let parts: Vec<&str> = dt_str.split(' ').next().unwrap_or("").split(':').collect();
 
                 if parts.len() >= 3 {
                     return (
@@ -65,7 +62,10 @@ impl FileOrganizerImpl {
     ) -> String {
         let mut sequential = 1;
         loop {
-            let name = format!("photo-{}-{}-{}-{:03}.{}", year, month, day, sequential, extension);
+            let name = format!(
+                "photo-{}-{}-{}-{:03}.{}",
+                year, month, day, sequential, extension
+            );
             let path = dir.join(&name);
             if !tokio::fs::try_exists(&path).await.unwrap_or(false) {
                 return name;
@@ -77,16 +77,15 @@ impl FileOrganizerImpl {
     /// Gera nome único adicionando sufixo _1, _2, etc.
     async fn generate_unique_name(dir: &Path, original_name: &str) -> String {
         let path = Path::new(original_name);
-        let stem = path.file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("file");
-        let extension = path.extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("jpg");
+        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("file");
+        let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("jpg");
 
         // Primeiro tenta sem sufixo
         let first_try = format!("{}.{}", stem, extension);
-        if !tokio::fs::try_exists(dir.join(&first_try)).await.unwrap_or(false) {
+        if !tokio::fs::try_exists(dir.join(&first_try))
+            .await
+            .unwrap_or(false)
+        {
             return first_try;
         }
 
@@ -94,7 +93,10 @@ impl FileOrganizerImpl {
         let mut counter = 1;
         loop {
             let name = format!("{}_{}.{}", stem, counter, extension);
-            if !tokio::fs::try_exists(dir.join(&name)).await.unwrap_or(false) {
+            if !tokio::fs::try_exists(dir.join(&name))
+                .await
+                .unwrap_or(false)
+            {
                 return name;
             }
             counter += 1;
@@ -198,9 +200,7 @@ impl FileOrganizerImpl {
 
         tokio::fs::copy(source_path, &dest_path)
             .await
-            .map_err(|e| {
-                DomainError::InfrastructureError(format!("Failed to copy file: {}", e))
-            })?;
+            .map_err(|e| DomainError::InfrastructureError(format!("Failed to copy file: {}", e)))?;
 
         FilePath::new(dest_path.to_str().unwrap())
     }
@@ -250,8 +250,8 @@ impl FileOrganizer for FileOrganizerImpl {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
     use std::io::Write;
+    use tempfile::TempDir;
 
     // Helper para criar arquivo temporário
     fn create_test_file(dir: &Path, name: &str, content: &[u8]) -> PathBuf {
@@ -278,12 +278,14 @@ mod tests {
         let organizer = FileOrganizerImpl::new(temp_dest.path().to_path_buf());
 
         // Act
-        let result = organizer.organize_file(
-            &source_path,
-            Some(&metadata),
-            OrganizationStrategy::ByDate,
-            RenamePattern::Standard,
-        ).await;
+        let result = organizer
+            .organize_file(
+                &source_path,
+                Some(&metadata),
+                OrganizationStrategy::ByDate,
+                RenamePattern::Standard,
+            )
+            .await;
 
         // Assert
         assert!(result.is_ok());
@@ -311,12 +313,14 @@ mod tests {
         let organizer = FileOrganizerImpl::new(temp_dest.path().to_path_buf());
 
         // Act
-        let result = organizer.organize_file(
-            &source_path,
-            None, // Sem metadados
-            OrganizationStrategy::ByDate,
-            RenamePattern::Standard,
-        ).await;
+        let result = organizer
+            .organize_file(
+                &source_path,
+                None, // Sem metadados
+                OrganizationStrategy::ByDate,
+                RenamePattern::Standard,
+            )
+            .await;
 
         // Assert
         assert!(result.is_ok());
@@ -337,18 +341,21 @@ mod tests {
         let temp_source = TempDir::new().unwrap();
         let temp_dest = TempDir::new().unwrap();
 
-        let source_file = create_test_file(temp_source.path(), "original_name.jpg", b"test content");
+        let source_file =
+            create_test_file(temp_source.path(), "original_name.jpg", b"test content");
         let source_path = FilePath::new(source_file.to_str().unwrap()).unwrap();
 
         let organizer = FileOrganizerImpl::new(temp_dest.path().to_path_buf());
 
         // Act
-        let result = organizer.organize_file(
-            &source_path,
-            None,
-            OrganizationStrategy::PreserveStructure,
-            RenamePattern::KeepOriginal,
-        ).await;
+        let result = organizer
+            .organize_file(
+                &source_path,
+                None,
+                OrganizationStrategy::PreserveStructure,
+                RenamePattern::KeepOriginal,
+            )
+            .await;
 
         // Assert
         assert!(result.is_ok());
@@ -379,19 +386,23 @@ mod tests {
         let organizer = FileOrganizerImpl::new(temp_dest.path().to_path_buf());
 
         // Act - Import dois arquivos com mesma data
-        let result1 = organizer.organize_file(
-            &source_path1,
-            Some(&metadata),
-            OrganizationStrategy::ByDate,
-            RenamePattern::Standard,
-        ).await;
+        let result1 = organizer
+            .organize_file(
+                &source_path1,
+                Some(&metadata),
+                OrganizationStrategy::ByDate,
+                RenamePattern::Standard,
+            )
+            .await;
 
-        let result2 = organizer.organize_file(
-            &source_path2,
-            Some(&metadata),
-            OrganizationStrategy::ByDate,
-            RenamePattern::Standard,
-        ).await;
+        let result2 = organizer
+            .organize_file(
+                &source_path2,
+                Some(&metadata),
+                OrganizationStrategy::ByDate,
+                RenamePattern::Standard,
+            )
+            .await;
 
         // Assert
         assert!(result1.is_ok());
@@ -423,12 +434,14 @@ mod tests {
         let organizer = FileOrganizerImpl::new(temp_dest.path().to_path_buf());
 
         // Act
-        let result = organizer.organize_file(
-            &source_path,
-            Some(&metadata),
-            OrganizationStrategy::ByDate,
-            RenamePattern::Standard,
-        ).await;
+        let result = organizer
+            .organize_file(
+                &source_path,
+                Some(&metadata),
+                OrganizationStrategy::ByDate,
+                RenamePattern::Standard,
+            )
+            .await;
 
         // Assert
         assert!(result.is_ok());

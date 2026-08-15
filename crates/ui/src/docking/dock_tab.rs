@@ -1,9 +1,9 @@
 //! DockTab - Enum representing all dockable tabs
-//! 
+//!
 //! Each variant represents a tab that can be docked, moved, or closed.
 
+use serde::{Deserialize, Serialize};
 use std::fmt;
-use serde::{Serialize, Deserialize};
 
 /// All possible dockable tabs in VintageLightbox
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -15,7 +15,7 @@ pub enum DockTab {
     PhotoGrid,
     /// Full image viewer (Develop mode)
     ImageViewer,
-    
+
     // ============================================
     // Left Sidebar Panels
     // ============================================
@@ -25,7 +25,7 @@ pub enum DockTab {
     Collections,
     /// Grid view settings
     GridSettings,
-    
+
     // ============================================
     // Right Sidebar Panels
     // ============================================
@@ -55,7 +55,7 @@ pub enum DockTab {
     Presets,
     /// Crop & Straighten tool panel
     CropTool,
-    
+
     // ============================================
     // Bottom Panels
     // ============================================
@@ -94,7 +94,7 @@ impl DockTab {
     pub fn is_main_content(&self) -> bool {
         matches!(self, DockTab::PhotoGrid | DockTab::ImageViewer)
     }
-    
+
     /// Check if this tab should be closeable
     pub fn is_closeable(&self) -> bool {
         // Main content tabs cannot be closed

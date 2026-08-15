@@ -1,5 +1,5 @@
-use std::sync::Arc;
 use domain::value_objects::PhotoId;
+use std::sync::Arc;
 use use_cases::SavePhotoEditsUseCase;
 
 pub struct EditorController {
@@ -8,7 +8,9 @@ pub struct EditorController {
 
 impl EditorController {
     pub fn new(save_photo_edits_use_case: Arc<SavePhotoEditsUseCase>) -> Self {
-        Self { save_photo_edits_use_case }
+        Self {
+            save_photo_edits_use_case,
+        }
     }
 
     // ⚠️ Dívida reconhecida, não descuido — docs/10-MIGRACAO-GPUI.md §2.1.
@@ -82,29 +84,65 @@ impl EditorController {
     ) -> Result<(), String> {
         let photo_id = PhotoId::from_string(&id).map_err(|e| e.to_string())?;
 
-        self.save_photo_edits_use_case.execute(
-            photo_id, exposure, contrast, temperature, tint, highlights, shadows,
-            whites, blacks, clarity, vibrance, saturation,
-            tone_curve_shadows, tone_curve_darks, tone_curve_lights, tone_curve_highlights,
-            hsl_red_sat, hsl_orange_sat, hsl_yellow_sat, hsl_green_sat,
-            hsl_aqua_sat, hsl_blue_sat, hsl_purple_sat, hsl_magenta_sat,
-            hsl_red_hue, hsl_orange_hue, hsl_yellow_hue, hsl_green_hue,
-            hsl_aqua_hue, hsl_blue_hue, hsl_purple_hue, hsl_magenta_hue,
-            hsl_red_lum, hsl_orange_lum, hsl_yellow_lum, hsl_green_lum,
-            hsl_aqua_lum, hsl_blue_lum, hsl_purple_lum, hsl_magenta_lum,
-            lens_distortion, lens_vignette_amount, lens_vignette_midpoint,
-            nr_luminance, nr_color,
-
-            sharpen_amount, sharpen_radius,
-            crop_x,
-            crop_y,
-            crop_width,
-            crop_height,
-            crop_rotation,
-            crop_angle,
-            crop_flip_h,
-            crop_flip_v,
-        ).await
+        self.save_photo_edits_use_case
+            .execute(
+                photo_id,
+                exposure,
+                contrast,
+                temperature,
+                tint,
+                highlights,
+                shadows,
+                whites,
+                blacks,
+                clarity,
+                vibrance,
+                saturation,
+                tone_curve_shadows,
+                tone_curve_darks,
+                tone_curve_lights,
+                tone_curve_highlights,
+                hsl_red_sat,
+                hsl_orange_sat,
+                hsl_yellow_sat,
+                hsl_green_sat,
+                hsl_aqua_sat,
+                hsl_blue_sat,
+                hsl_purple_sat,
+                hsl_magenta_sat,
+                hsl_red_hue,
+                hsl_orange_hue,
+                hsl_yellow_hue,
+                hsl_green_hue,
+                hsl_aqua_hue,
+                hsl_blue_hue,
+                hsl_purple_hue,
+                hsl_magenta_hue,
+                hsl_red_lum,
+                hsl_orange_lum,
+                hsl_yellow_lum,
+                hsl_green_lum,
+                hsl_aqua_lum,
+                hsl_blue_lum,
+                hsl_purple_lum,
+                hsl_magenta_lum,
+                lens_distortion,
+                lens_vignette_amount,
+                lens_vignette_midpoint,
+                nr_luminance,
+                nr_color,
+                sharpen_amount,
+                sharpen_radius,
+                crop_x,
+                crop_y,
+                crop_width,
+                crop_height,
+                crop_rotation,
+                crop_angle,
+                crop_flip_h,
+                crop_flip_v,
+            )
+            .await
             .map_err(|e| e.to_string())
     }
 }

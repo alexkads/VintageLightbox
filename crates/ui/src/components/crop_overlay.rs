@@ -1,5 +1,5 @@
-use egui::{Ui, Rect, Pos2, Vec2, Color32, Stroke, Sense};
-use domain::value_objects::{CropSettings, AspectRatio};
+use domain::value_objects::{AspectRatio, CropSettings};
+use egui::{Color32, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 
 /// Visual overlay for crop mode showing crop rectangle, handles, and composition grid
 pub struct CropOverlay;
@@ -17,7 +17,7 @@ impl CropOverlay {
     /// Renders the crop overlay on top of the image
     pub fn show(
         ui: &mut Ui,
-        image_rect: Rect, // The layout bounds of the image (axis-aligned)
+        image_rect: Rect,  // The layout bounds of the image (axis-aligned)
         viewer_rect: Rect, // The full viewer area
         crop_settings: &mut CropSettings,
         show_grid: bool,
@@ -43,7 +43,7 @@ impl CropOverlay {
                     break;
                 }
             }
-            
+
             // Set Cursor
             if let Some(i) = hovering_handle {
                 ui.output_mut(|o| o.cursor_icon = Self::get_cursor_for_handle(i));
@@ -57,9 +57,9 @@ impl CropOverlay {
                 }
             } else if viewer_rect.contains(pos) {
                 // Rotation (Outside crop)
-                 ui.output_mut(|o| o.cursor_icon = egui::CursorIcon::None); // Or a rotation icon
-                 
-                 // Show rotation cursor
+                ui.output_mut(|o| o.cursor_icon = egui::CursorIcon::None); // Or a rotation icon
+
+                // Show rotation cursor
                 let painter = ui.painter().clone().with_layer_id(egui::LayerId::debug());
                 painter.text(
                     pos,
@@ -69,48 +69,59 @@ impl CropOverlay {
                     Color32::WHITE,
                 );
 
-                 if ui.input(|i| i.pointer.primary_down()) {
-                     response.rotation_dragged = true;
-                 }
+                if ui.input(|i| i.pointer.primary_down()) {
+                    response.rotation_dragged = true;
+                }
             }
-            
+
             // Capture Delta
-             if ui.input(|i| i.pointer.primary_down()) {
-                 response.drag_delta = ui.input(|i| i.pointer.delta());
+            if ui.input(|i| i.pointer.primary_down()) {
+                response.drag_delta = ui.input(|i| i.pointer.delta());
             }
         }
-        
+
         // Update Logic (Immediate - normally done by caller but let's decouple if needed)
         // Actually the caller does the update based on response, but previous code updated here.
         // Let's return the response and let caller handle OR handle here provided we have mutable access (we do).
-        
+
         if let Some(handle_idx) = response.handle_dragged {
-            Self::update_crop_handle(crop_settings, handle_idx, response.drag_delta, image_rect.size(), &aspect_ratio);
+            Self::update_crop_handle(
+                crop_settings,
+                handle_idx,
+                response.drag_delta,
+                image_rect.size(),
+                &aspect_ratio,
+            );
             // Re-calc rect for drawing
-             crop_rect = Self::calculate_crop_rect(image_rect, crop_settings);
+            crop_rect = Self::calculate_crop_rect(image_rect, crop_settings);
         } else if response.crop_dragged {
             Self::update_crop_pan(crop_settings, response.drag_delta, image_rect.size());
-             crop_rect = Self::calculate_crop_rect(image_rect, crop_settings);
+            crop_rect = Self::calculate_crop_rect(image_rect, crop_settings);
         } else if response.rotation_dragged {
             // Rotation Logic
             let sensitivity = 0.5;
             let delta = response.drag_delta.x * sensitivity;
             let new_angle = crop_settings.angle() + delta;
-            
+
             *crop_settings = CropSettings::new(
-                crop_settings.crop_x(), crop_settings.crop_y(), crop_settings.crop_width(), crop_settings.crop_height(),
-                crop_settings.rotation_90(), new_angle,
-                crop_settings.flip_horizontal(), crop_settings.flip_vertical()
+                crop_settings.crop_x(),
+                crop_settings.crop_y(),
+                crop_settings.crop_width(),
+                crop_settings.crop_height(),
+                crop_settings.rotation_90(),
+                new_angle,
+                crop_settings.flip_horizontal(),
+                crop_settings.flip_vertical(),
             );
         }
 
         // 3. Drawing
         Self::draw_darken_overlay(ui, image_rect, crop_rect);
-        
+
         // Crop Box
         ui.painter().rect_stroke(
-            crop_rect, 
-            0.0, 
+            crop_rect,
+            0.0,
             Stroke::new(Self::CROP_LINE_WIDTH, Self::CROP_LINE_COLOR),
             egui::StrokeKind::Middle,
         );
@@ -124,7 +135,12 @@ impl CropOverlay {
         for &pos in handles.iter() {
             let rect = Rect::from_center_size(pos, Vec2::splat(Self::HANDLE_SIZE));
             ui.painter().rect_filled(rect, 2.0, Self::HANDLE_COLOR);
-            ui.painter().rect_stroke(rect, 2.0, Stroke::new(Self::HANDLE_STROKE, Color32::BLACK), egui::StrokeKind::Middle);
+            ui.painter().rect_stroke(
+                rect,
+                2.0,
+                Stroke::new(Self::HANDLE_STROKE, Color32::BLACK),
+                egui::StrokeKind::Middle,
+            );
         }
 
         // Blocker
@@ -143,7 +159,7 @@ impl CropOverlay {
 
     fn draw_darken_overlay(ui: &mut Ui, image_rect: Rect, crop_rect: Rect) {
         let painter = ui.painter();
-        
+
         // We draw 4 rects around the crop rect, bounded by image_rect
         // Top
         if crop_rect.min.y > image_rect.min.y {
@@ -155,7 +171,7 @@ impl CropOverlay {
         }
         // Bottom
         if crop_rect.max.y < image_rect.max.y {
-             painter.rect_filled(
+            painter.rect_filled(
                 Rect::from_min_max(Pos2::new(image_rect.min.x, crop_rect.max.y), image_rect.max),
                 0.0,
                 Self::DARKEN_COLOR,
@@ -165,16 +181,16 @@ impl CropOverlay {
         painter.rect_filled(
             Rect::from_min_max(
                 Pos2::new(image_rect.min.x, crop_rect.min.y),
-                Pos2::new(crop_rect.min.x, crop_rect.max.y)
+                Pos2::new(crop_rect.min.x, crop_rect.max.y),
             ),
             0.0,
             Self::DARKEN_COLOR,
         );
         // Right
         painter.rect_filled(
-             Rect::from_min_max(
+            Rect::from_min_max(
                 Pos2::new(crop_rect.max.x, crop_rect.min.y),
-                Pos2::new(image_rect.max.x, crop_rect.max.y)
+                Pos2::new(image_rect.max.x, crop_rect.max.y),
             ),
             0.0,
             Self::DARKEN_COLOR,
@@ -190,10 +206,16 @@ impl CropOverlay {
 
         for i in 1..3 {
             let x = crop_rect.min.x + (i as f32 * third_w);
-            painter.line_segment([Pos2::new(x, crop_rect.min.y), Pos2::new(x, crop_rect.max.y)], stroke);
-            
+            painter.line_segment(
+                [Pos2::new(x, crop_rect.min.y), Pos2::new(x, crop_rect.max.y)],
+                stroke,
+            );
+
             let y = crop_rect.min.y + (i as f32 * third_h);
-            painter.line_segment([Pos2::new(crop_rect.min.x, y), Pos2::new(crop_rect.max.x, y)], stroke);
+            painter.line_segment(
+                [Pos2::new(crop_rect.min.x, y), Pos2::new(crop_rect.max.x, y)],
+                stroke,
+            );
         }
     }
 
@@ -220,7 +242,7 @@ impl CropOverlay {
             _ => egui::CursorIcon::Default,
         }
     }
-    
+
     /// Get the target aspect ratio value (width/height)
     /// Returns None for Free (no constraint), otherwise returns the ratio value
     fn get_aspect_ratio_value(aspect_ratio: &AspectRatio, image_size: Vec2) -> Option<f32> {
@@ -252,14 +274,19 @@ impl CropOverlay {
         // Calculate new dimensions based on handle being dragged
         let (mut nx, mut ny, mut nw, mut nh) = match index {
             // Corner handles (0, 2, 4, 6) - diagonal resize
-            0 => (cx + norm_delta.x, cy + norm_delta.y, cw - norm_delta.x, ch - norm_delta.y), // Top-left
+            0 => (
+                cx + norm_delta.x,
+                cy + norm_delta.y,
+                cw - norm_delta.x,
+                ch - norm_delta.y,
+            ), // Top-left
             2 => (cx, cy + norm_delta.y, cw + norm_delta.x, ch - norm_delta.y), // Top-right
-            4 => (cx, cy, cw + norm_delta.x, ch + norm_delta.y), // Bottom-right
+            4 => (cx, cy, cw + norm_delta.x, ch + norm_delta.y),                // Bottom-right
             6 => (cx + norm_delta.x, cy, cw - norm_delta.x, ch + norm_delta.y), // Bottom-left
             // Edge handles (1, 3, 5, 7) - single axis resize
             1 => (cx, cy + norm_delta.y, cw, ch - norm_delta.y), // Top
-            3 => (cx, cy, cw + norm_delta.x, ch), // Right
-            5 => (cx, cy, cw, ch + norm_delta.y), // Bottom
+            3 => (cx, cy, cw + norm_delta.x, ch),                // Right
+            5 => (cx, cy, cw, ch + norm_delta.y),                // Bottom
             7 => (cx + norm_delta.x, cy, cw - norm_delta.x, ch), // Left
             _ => (cx, cy, cw, ch),
         };
@@ -287,10 +314,20 @@ impl CropOverlay {
                         let new_nh = new_pixel_h / image_size.y;
 
                         match index {
-                            0 => { ny = cy + ch - new_nh; nh = new_nh; }
-                            2 => { ny = cy + ch - new_nh; nh = new_nh; }
-                            4 => { nh = new_nh; }
-                            6 => { nh = new_nh; }
+                            0 => {
+                                ny = cy + ch - new_nh;
+                                nh = new_nh;
+                            }
+                            2 => {
+                                ny = cy + ch - new_nh;
+                                nh = new_nh;
+                            }
+                            4 => {
+                                nh = new_nh;
+                            }
+                            6 => {
+                                nh = new_nh;
+                            }
                             _ => {}
                         }
                     } else {
@@ -299,10 +336,20 @@ impl CropOverlay {
                         let new_nw = new_pixel_w / image_size.x;
 
                         match index {
-                            0 => { nx = cx + cw - new_nw; nw = new_nw; }
-                            2 => { nw = new_nw; }
-                            4 => { nw = new_nw; }
-                            6 => { nx = cx + cw - new_nw; nw = new_nw; }
+                            0 => {
+                                nx = cx + cw - new_nw;
+                                nw = new_nw;
+                            }
+                            2 => {
+                                nw = new_nw;
+                            }
+                            4 => {
+                                nw = new_nw;
+                            }
+                            6 => {
+                                nx = cx + cw - new_nw;
+                                nw = new_nw;
+                            }
                             _ => {}
                         }
                     }
@@ -344,10 +391,20 @@ impl CropOverlay {
         }
 
         // Clamp to image bounds [0, 1]
-        if nx < 0.0 { nw += nx; nx = 0.0; }
-        if ny < 0.0 { nh += ny; ny = 0.0; }
-        if nx + nw > 1.0 { nw = 1.0 - nx; }
-        if ny + nh > 1.0 { nh = 1.0 - ny; }
+        if nx < 0.0 {
+            nw += nx;
+            nx = 0.0;
+        }
+        if ny < 0.0 {
+            nh += ny;
+            ny = 0.0;
+        }
+        if nx + nw > 1.0 {
+            nw = 1.0 - nx;
+        }
+        if ny + nh > 1.0 {
+            nh = 1.0 - ny;
+        }
 
         // After clamping, re-apply aspect ratio if it was violated
         if let Some(ratio) = target_ratio {
@@ -370,9 +427,14 @@ impl CropOverlay {
         }
 
         *crop = CropSettings::new(
-            nx, ny, nw, nh,
-            crop.rotation_90(), crop.angle(),
-            crop.flip_horizontal(), crop.flip_vertical()
+            nx,
+            ny,
+            nw,
+            nh,
+            crop.rotation_90(),
+            crop.angle(),
+            crop.flip_horizontal(),
+            crop.flip_vertical(),
         );
     }
 
@@ -385,10 +447,18 @@ impl CropOverlay {
         let h = crop.crop_height();
 
         // Clamp to image bounds [0, 1]
-        if new_x < 0.0 { new_x = 0.0; }
-        if new_y < 0.0 { new_y = 0.0; }
-        if new_x + w > 1.0 { new_x = 1.0 - w; }
-        if new_y + h > 1.0 { new_y = 1.0 - h; }
+        if new_x < 0.0 {
+            new_x = 0.0;
+        }
+        if new_y < 0.0 {
+            new_y = 0.0;
+        }
+        if new_x + w > 1.0 {
+            new_x = 1.0 - w;
+        }
+        if new_y + h > 1.0 {
+            new_y = 1.0 - h;
+        }
 
         *crop = CropSettings::new(
             new_x,
@@ -398,10 +468,10 @@ impl CropOverlay {
             crop.rotation_90(),
             crop.angle(),
             crop.flip_horizontal(),
-            crop.flip_vertical()
+            crop.flip_vertical(),
         );
     }
-    
+
     // Public wrappers for compatibility if needed, but we handle internally now
     pub fn update_from_handle_drag(
         crop: &mut CropSettings,
@@ -412,12 +482,8 @@ impl CropOverlay {
     ) {
         Self::update_crop_handle(crop, index, delta, image_size, aspect_ratio);
     }
-    
-    pub fn update_from_crop_drag(
-        crop: &mut CropSettings,
-        delta: Vec2,
-        image_size: Vec2,
-    ) {
+
+    pub fn update_from_crop_drag(crop: &mut CropSettings, delta: Vec2, image_size: Vec2) {
         Self::update_crop_pan(crop, delta, image_size);
     }
 }

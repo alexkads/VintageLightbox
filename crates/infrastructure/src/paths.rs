@@ -1,5 +1,5 @@
-use std::path::PathBuf;
 use directories::UserDirs;
+use std::path::PathBuf;
 
 pub struct AppPaths;
 
@@ -10,8 +10,10 @@ impl AppPaths {
     /// - Linux: ~/Pictures/VintageLightbox/VintageLightbox Catalog
     pub fn catalog_root() -> PathBuf {
         let user_dirs = UserDirs::new().expect("Could not find user directories");
-        let picture_dir = user_dirs.picture_dir().expect("Could not find Pictures directory");
-        
+        let picture_dir = user_dirs
+            .picture_dir()
+            .expect("Could not find Pictures directory");
+
         picture_dir
             .join("VintageLightbox")
             .join("VintageLightbox Catalog")

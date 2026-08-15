@@ -4,8 +4,8 @@
 
 #![allow(dead_code)]
 
-use egui::{Button, Response, Ui, Vec2, CornerRadius, Stroke, RichText, Color32, Rect};
 use super::theme::Theme;
+use egui::{Button, Color32, CornerRadius, Rect, Response, RichText, Stroke, Ui, Vec2};
 
 // ============================================
 // PRIMARY BUTTON
@@ -15,7 +15,7 @@ pub fn primary_button(ui: &mut Ui, text: &str) -> Response {
     let button = Button::new(
         RichText::new(text)
             .color(ui.visuals().selection.stroke.color)
-            .size(Theme::FONT_MD)
+            .size(Theme::FONT_MD),
     )
     .fill(ui.visuals().selection.bg_fill)
     .min_size(Vec2::new(80.0, 32.0))
@@ -32,10 +32,13 @@ pub fn secondary_button(ui: &mut Ui, text: &str) -> Response {
     let button = Button::new(
         RichText::new(text)
             .color(ui.visuals().text_color())
-            .size(Theme::FONT_MD)
+            .size(Theme::FONT_MD),
     )
     .fill(ui.visuals().widgets.active.bg_fill)
-    .stroke(Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color))
+    .stroke(Stroke::new(
+        1.0,
+        ui.visuals().widgets.noninteractive.bg_stroke.color,
+    ))
     .min_size(Vec2::new(80.0, 32.0))
     .corner_radius(CornerRadius::same(Theme::RADIUS_MD as u8));
 
@@ -54,7 +57,7 @@ pub fn icon_button_sized(ui: &mut Ui, icon: &str, icon_size: f32) -> Response {
     let button = Button::new(
         RichText::new(icon)
             .color(ui.visuals().text_color())
-            .size(icon_size)
+            .size(icon_size),
     )
     .fill(ui.visuals().widgets.inactive.weak_bg_fill)
     .min_size(Vec2::new(40.0, 40.0))
@@ -70,7 +73,12 @@ pub fn icon_button_tooltip(ui: &mut Ui, icon: &str, tooltip: &str) -> Response {
 }
 
 /// Icon button with custom size and tooltip
-pub fn icon_button_tooltip_sized(ui: &mut Ui, icon: &str, tooltip: &str, icon_size: f32) -> Response {
+pub fn icon_button_tooltip_sized(
+    ui: &mut Ui,
+    icon: &str,
+    tooltip: &str,
+    icon_size: f32,
+) -> Response {
     let response = icon_button_sized(ui, icon, icon_size);
     response.on_hover_text(tooltip)
 }
@@ -80,7 +88,7 @@ pub fn icon_button_primary(ui: &mut Ui, icon: &str, tooltip: &str) -> Response {
     let button = Button::new(
         RichText::new(icon)
             .color(ui.visuals().selection.stroke.color)
-            .size(Theme::FONT_XL)
+            .size(Theme::FONT_XL),
     )
     .fill(ui.visuals().selection.bg_fill)
     .min_size(Vec2::new(40.0, 40.0))
@@ -106,14 +114,10 @@ pub fn nav_button(ui: &mut Ui, text: &str, active: bool) -> Response {
         ui.visuals().weak_text_color()
     };
 
-    let button = Button::new(
-        RichText::new(text)
-            .color(text_color)
-            .size(Theme::FONT_MD)
-    )
-    .fill(bg_color)
-    .min_size(Vec2::new(80.0, 32.0))
-    .corner_radius(CornerRadius::same(Theme::RADIUS_MD as u8));
+    let button = Button::new(RichText::new(text).color(text_color).size(Theme::FONT_MD))
+        .fill(bg_color)
+        .min_size(Vec2::new(80.0, 32.0))
+        .corner_radius(CornerRadius::same(Theme::RADIUS_MD as u8));
 
     ui.add(button)
 }
@@ -132,14 +136,10 @@ pub fn nav_button_with_icon(ui: &mut Ui, icon: &str, text: &str, active: bool) -
     };
 
     let label = format!("{} {}", icon, text);
-    let button = Button::new(
-        RichText::new(label)
-            .color(text_color)
-            .size(Theme::FONT_MD)
-    )
-    .fill(bg_color)
-    .min_size(Vec2::new(80.0, 32.0))
-    .corner_radius(CornerRadius::same(Theme::RADIUS_MD as u8));
+    let button = Button::new(RichText::new(label).color(text_color).size(Theme::FONT_MD))
+        .fill(bg_color)
+        .min_size(Vec2::new(80.0, 32.0))
+        .corner_radius(CornerRadius::same(Theme::RADIUS_MD as u8));
 
     ui.add(button)
 }
@@ -165,10 +165,10 @@ impl PanelHeader {
             Button::new(
                 RichText::new(label)
                     .color(ui.visuals().text_color())
-                    .size(Theme::FONT_SM)
+                    .size(Theme::FONT_SM),
             )
             .fill(Color32::TRANSPARENT)
-            .frame(false)
+            .frame(false),
         );
 
         if response.clicked() {
@@ -188,10 +188,8 @@ pub fn menu_item(ui: &mut Ui, text: &str, selected: bool) -> Response {
 }
 
 pub fn menu_item_with_indent(ui: &mut Ui, text: &str, selected: bool, indent: f32) -> Response {
-    let (rect, response) = ui.allocate_exact_size(
-        Vec2::new(ui.available_width(), 26.0),
-        egui::Sense::click()
-    );
+    let (rect, response) =
+        ui.allocate_exact_size(Vec2::new(ui.available_width(), 26.0), egui::Sense::click());
 
     let bg_color = if selected {
         ui.visuals().selection.bg_fill
@@ -264,11 +262,8 @@ pub fn show_busy_overlay(ctx: &egui::Context, message: &str) {
         .show(ctx, |ui| {
             ui.allocate_ui(screen_rect.size(), |ui| {
                 // Semi-transparent black overlay
-                ui.painter().rect_filled(
-                    screen_rect,
-                    0.0,
-                    Theme::BG_OVERLAY,
-                );
+                ui.painter()
+                    .rect_filled(screen_rect, 0.0, Theme::BG_OVERLAY);
 
                 // Center the message
                 let text_pos = screen_rect.center();
@@ -281,25 +276,14 @@ pub fn show_busy_overlay(ctx: &egui::Context, message: &str) {
                 );
 
                 // Progress bar (animated could be added later)
-                let progress_rect = Rect::from_center_size(
-                    text_pos + Vec2::new(0.0, 40.0),
-                    Vec2::new(200.0, 4.0),
-                );
-                ui.painter().rect_filled(
-                    progress_rect,
-                    Theme::RADIUS_XS,
-                    Theme::BG_ACTIVE,
-                );
+                let progress_rect =
+                    Rect::from_center_size(text_pos + Vec2::new(0.0, 40.0), Vec2::new(200.0, 4.0));
+                ui.painter()
+                    .rect_filled(progress_rect, Theme::RADIUS_XS, Theme::BG_ACTIVE);
 
-                let progress_fill = Rect::from_min_size(
-                    progress_rect.min,
-                    Vec2::new(60.0, 4.0),
-                );
-                ui.painter().rect_filled(
-                    progress_fill,
-                    Theme::RADIUS_XS,
-                    Theme::ACCENT_PRIMARY,
-                );
+                let progress_fill = Rect::from_min_size(progress_rect.min, Vec2::new(60.0, 4.0));
+                ui.painter()
+                    .rect_filled(progress_fill, Theme::RADIUS_XS, Theme::ACCENT_PRIMARY);
             });
         });
 }
@@ -312,7 +296,7 @@ pub fn section_title(ui: &mut Ui, text: &str) {
     ui.label(
         RichText::new(text)
             .color(ui.visuals().weak_text_color())
-            .size(Theme::FONT_SM)
+            .size(Theme::FONT_SM),
     );
 }
 
@@ -324,7 +308,7 @@ pub fn label_text(ui: &mut Ui, text: &str) {
     ui.label(
         RichText::new(text)
             .color(ui.visuals().weak_text_color())
-            .size(Theme::FONT_SM)
+            .size(Theme::FONT_SM),
     );
 }
 
@@ -336,6 +320,6 @@ pub fn value_text(ui: &mut Ui, text: &str) {
     ui.label(
         RichText::new(text)
             .color(ui.visuals().text_color())
-            .size(Theme::FONT_SM)
+            .size(Theme::FONT_SM),
     );
 }

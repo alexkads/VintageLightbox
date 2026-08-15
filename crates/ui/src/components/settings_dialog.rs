@@ -1,11 +1,11 @@
 // Settings Dialog Component
 // Provides cache management and application settings
 
-use egui::{Context, Window, Ui, RichText, Vec2, Button, ProgressBar};
+use egui::{Button, Context, ProgressBar, RichText, Ui, Vec2, Window};
 // use infrastructure::cache::CacheStats;
-use crate::state::AppState;
-use crate::design_system::theme::Theme;
 use crate::design_system::icons;
+use crate::design_system::theme::Theme;
+use crate::state::AppState;
 
 /// Actions that can be performed from the settings dialog
 #[derive(Debug, Clone)]
@@ -71,7 +71,10 @@ impl SettingsDialog {
                 // Close Button
                 ui.horizontal(|ui| {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.add(Button::new("Close").min_size(Vec2::new(80.0, 28.0))).clicked() {
+                        if ui
+                            .add(Button::new("Close").min_size(Vec2::new(80.0, 28.0)))
+                            .clicked()
+                        {
                             close_dialog = true;
                         }
                     });
@@ -101,33 +104,46 @@ impl SettingsDialog {
                         .spacing([20.0, 8.0])
                         .show(ui, |ui| {
                             // Thumbnails
-                            ui.label(RichText::new("Thumbnails:").color(ui.visuals().weak_text_color()));
-                            ui.label(RichText::new(format!(
-                                "{} items",
-                                stats.thumbnail_count
-                            )).color(ui.visuals().text_color()));
+                            ui.label(
+                                RichText::new("Thumbnails:").color(ui.visuals().weak_text_color()),
+                            );
+                            ui.label(
+                                RichText::new(format!("{} items", stats.thumbnail_count))
+                                    .color(ui.visuals().text_color()),
+                            );
                             ui.end_row();
 
                             // Large Previews
-                            ui.label(RichText::new("Large Previews:").color(ui.visuals().weak_text_color()));
-                            ui.label(RichText::new(format!(
-                                "{} items",
-                                stats.large_preview_count
-                            )).color(ui.visuals().text_color()));
+                            ui.label(
+                                RichText::new("Large Previews:")
+                                    .color(ui.visuals().weak_text_color()),
+                            );
+                            ui.label(
+                                RichText::new(format!("{} items", stats.large_preview_count))
+                                    .color(ui.visuals().text_color()),
+                            );
                             ui.end_row();
 
                             // Total Size
-                            ui.label(RichText::new("Total Size:").color(ui.visuals().weak_text_color()));
-                            ui.label(RichText::new(
-                                Self::format_bytes(stats.total_size_bytes)
-                            ).color(ui.visuals().strong_text_color()).strong());
+                            ui.label(
+                                RichText::new("Total Size:").color(ui.visuals().weak_text_color()),
+                            );
+                            ui.label(
+                                RichText::new(Self::format_bytes(stats.total_size_bytes))
+                                    .color(ui.visuals().strong_text_color())
+                                    .strong(),
+                            );
                             ui.end_row();
 
                             // Location
-                            ui.label(RichText::new("Location:").color(ui.visuals().weak_text_color()));
-                            ui.label(RichText::new(
-                                stats.db_path.to_string_lossy().to_string()
-                            ).color(ui.visuals().text_color()).size(Theme::FONT_XS));
+                            ui.label(
+                                RichText::new("Location:").color(ui.visuals().weak_text_color()),
+                            );
+                            ui.label(
+                                RichText::new(stats.db_path.to_string_lossy().to_string())
+                                    .color(ui.visuals().text_color())
+                                    .size(Theme::FONT_XS),
+                            );
                             ui.end_row();
                         });
                 } else {
@@ -160,7 +176,7 @@ impl SettingsDialog {
                     // Clear Thumbnails
                     let thumb_btn = ui.add_enabled(
                         has_thumbnails,
-                        Button::new("Clear Thumbnails").min_size(Vec2::new(120.0, 28.0))
+                        Button::new("Clear Thumbnails").min_size(Vec2::new(120.0, 28.0)),
                     );
                     if thumb_btn.clicked() {
                         action = Some(SettingsAction::ClearThumbnails);
@@ -169,7 +185,7 @@ impl SettingsDialog {
                     // Clear Previews
                     let preview_btn = ui.add_enabled(
                         has_previews,
-                        Button::new("Clear Previews").min_size(Vec2::new(120.0, 28.0))
+                        Button::new("Clear Previews").min_size(Vec2::new(120.0, 28.0)),
                     );
                     if preview_btn.clicked() {
                         action = Some(SettingsAction::ClearPreviews);
@@ -178,8 +194,11 @@ impl SettingsDialog {
                     // Clear All
                     let all_btn = ui.add_enabled(
                         has_cache,
-                        Button::new(RichText::new("Clear All").color(egui::Color32::from_rgb(255, 120, 120)))
-                            .min_size(Vec2::new(100.0, 28.0))
+                        Button::new(
+                            RichText::new("Clear All")
+                                .color(egui::Color32::from_rgb(255, 120, 120)),
+                        )
+                        .min_size(Vec2::new(100.0, 28.0)),
                     );
                     if all_btn.clicked() {
                         action = Some(SettingsAction::ClearAllCache);
@@ -222,9 +241,9 @@ impl SettingsDialog {
                 ui.label(RichText::new(
                     "Reset the panel layout to default. Use this if panels are missing or in unexpected positions."
                 ).color(ui.visuals().weak_text_color()).size(Theme::FONT_SM));
-                
+
                 ui.add_space(Theme::SPACE_SM);
-                
+
                 if ui.add(Button::new("Reset Layout to Default").min_size(Vec2::new(180.0, 28.0))).clicked() {
                     action = Some(SettingsAction::ResetDockingLayout);
                 }
@@ -261,15 +280,10 @@ pub fn show_cache_progress(ui: &mut Ui, state: &AppState) {
         };
 
         ui.horizontal(|ui| {
-            ui.add(ProgressBar::new(pct)
-                .desired_width(150.0)
-                .text(format!(
-                    "Building {}... ({}/{})",
-                    progress.preview_type,
-                    progress.completed,
-                    progress.total
-                ))
-            );
+            ui.add(ProgressBar::new(pct).desired_width(150.0).text(format!(
+                "Building {}... ({}/{})",
+                progress.preview_type, progress.completed, progress.total
+            )));
         });
     }
 }

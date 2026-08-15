@@ -4,7 +4,7 @@
 // Handles conversion between DynamicImage and egui textures
 // Implements debounced processing similar to the Slint version
 
-use egui::{ColorImage, TextureHandle, Context};
+use egui::{ColorImage, Context, TextureHandle};
 use image::DynamicImage;
 use std::time::{Duration, Instant};
 
@@ -38,11 +38,7 @@ impl ImageProcessor {
         img: &DynamicImage,
     ) -> TextureHandle {
         let color_image = Self::dynamic_to_color_image(img);
-        ctx.load_texture(
-            name,
-            color_image,
-            egui::TextureOptions::default()
-        )
+        ctx.load_texture(name, color_image, egui::TextureOptions::default())
     }
 
     /// Apply image edits with debouncing
@@ -107,18 +103,53 @@ impl ImageProcessor {
 
         // Process image immediately
         let processed = Self::process_image(
-            img, exposure, contrast, temperature, tint, highlights, shadows,
-            whites, blacks, clarity, vibrance, saturation,
-            tone_curve_shadows, tone_curve_darks, tone_curve_lights, tone_curve_highlights,
-            hsl_red_sat, hsl_orange_sat, hsl_yellow_sat, hsl_green_sat,
-            hsl_aqua_sat, hsl_blue_sat, hsl_purple_sat, hsl_magenta_sat,
-            hsl_red_hue, hsl_orange_hue, hsl_yellow_hue, hsl_green_hue,
-            hsl_aqua_hue, hsl_blue_hue, hsl_purple_hue, hsl_magenta_hue,
-            hsl_red_lum, hsl_orange_lum, hsl_yellow_lum, hsl_green_lum,
-            hsl_aqua_lum, hsl_blue_lum, hsl_purple_lum, hsl_magenta_lum,
-            lens_distortion, lens_vignette_amount, lens_vignette_midpoint,
-            nr_luminance, nr_color,
-            sharpen_amount, sharpen_radius,
+            img,
+            exposure,
+            contrast,
+            temperature,
+            tint,
+            highlights,
+            shadows,
+            whites,
+            blacks,
+            clarity,
+            vibrance,
+            saturation,
+            tone_curve_shadows,
+            tone_curve_darks,
+            tone_curve_lights,
+            tone_curve_highlights,
+            hsl_red_sat,
+            hsl_orange_sat,
+            hsl_yellow_sat,
+            hsl_green_sat,
+            hsl_aqua_sat,
+            hsl_blue_sat,
+            hsl_purple_sat,
+            hsl_magenta_sat,
+            hsl_red_hue,
+            hsl_orange_hue,
+            hsl_yellow_hue,
+            hsl_green_hue,
+            hsl_aqua_hue,
+            hsl_blue_hue,
+            hsl_purple_hue,
+            hsl_magenta_hue,
+            hsl_red_lum,
+            hsl_orange_lum,
+            hsl_yellow_lum,
+            hsl_green_lum,
+            hsl_aqua_lum,
+            hsl_blue_lum,
+            hsl_purple_lum,
+            hsl_magenta_lum,
+            lens_distortion,
+            lens_vignette_amount,
+            lens_vignette_midpoint,
+            nr_luminance,
+            nr_color,
+            sharpen_amount,
+            sharpen_radius,
         );
         Self::load_texture(ctx, "processed_image", &processed)
     }
@@ -181,7 +212,7 @@ impl ImageProcessor {
         _sharpen_amount: f32,
         _sharpen_radius: f32,
     ) -> DynamicImage {
-        use image::{Rgba, Pixel};
+        use image::{Pixel, Rgba};
 
         let mut result = img.to_rgba8();
         let (width, height) = result.dimensions();
@@ -191,7 +222,8 @@ impl ImageProcessor {
             for x in 0..width {
                 let pixel = result.get_pixel(x, y);
                 let rgba = pixel.channels();
-                let (mut r, mut g, mut b, a) = (rgba[0] as f32, rgba[1] as f32, rgba[2] as f32, rgba[3]);
+                let (mut r, mut g, mut b, a) =
+                    (rgba[0] as f32, rgba[1] as f32, rgba[2] as f32, rgba[3]);
 
                 // 1. Exposure (brightness adjustment)
                 if exposure != 0.0 {
@@ -293,8 +325,10 @@ impl ImageProcessor {
                 // 10. Vibrance (intelligent saturation - affects muted colors more)
                 if vibrance != 0.0 {
                     let luminance = (r + g + b) / 3.0;
-                    let max_diff = ((r - luminance).abs().max((g - luminance).abs())).max((b - luminance).abs());
-                    if max_diff < 64.0 {  // Only affect less saturated colors
+                    let max_diff = ((r - luminance).abs().max((g - luminance).abs()))
+                        .max((b - luminance).abs());
+                    if max_diff < 64.0 {
+                        // Only affect less saturated colors
                         let factor = 1.0 + vibrance * 2.0;
                         r = luminance + (r - luminance) * factor;
                         g = luminance + (g - luminance) * factor;
@@ -375,21 +409,25 @@ impl ImageProcessor {
 
                 // HSL Color Channel Saturation Adjustments
                 // Only apply if any HSL slider is non-zero
-                let has_hsl_adjustment = hsl_red_sat != 0.0 || hsl_orange_sat != 0.0 
-                    || hsl_yellow_sat != 0.0 || hsl_green_sat != 0.0
-                    || hsl_aqua_sat != 0.0 || hsl_blue_sat != 0.0
-                    || hsl_purple_sat != 0.0 || hsl_magenta_sat != 0.0;
-                
+                let has_hsl_adjustment = hsl_red_sat != 0.0
+                    || hsl_orange_sat != 0.0
+                    || hsl_yellow_sat != 0.0
+                    || hsl_green_sat != 0.0
+                    || hsl_aqua_sat != 0.0
+                    || hsl_blue_sat != 0.0
+                    || hsl_purple_sat != 0.0
+                    || hsl_magenta_sat != 0.0;
+
                 if has_hsl_adjustment {
                     // Normalize RGB to 0-1 range
                     let r_norm = r / 255.0;
                     let g_norm = g / 255.0;
                     let b_norm = b / 255.0;
-                    
+
                     let max_c = r_norm.max(g_norm).max(b_norm);
                     let min_c = r_norm.min(g_norm).min(b_norm);
                     let delta = max_c - min_c;
-                    
+
                     // Calculate hue (0-360 degrees)
                     let hue = if delta == 0.0 {
                         0.0
@@ -401,7 +439,7 @@ impl ImageProcessor {
                         60.0 * (((r_norm - g_norm) / delta) + 4.0)
                     };
                     let hue = if hue < 0.0 { hue + 360.0 } else { hue };
-                    
+
                     // Calculate lightness and saturation
                     let lightness = (max_c + min_c) / 2.0;
                     let sat = if delta == 0.0 {
@@ -409,7 +447,7 @@ impl ImageProcessor {
                     } else {
                         delta / (1.0 - (2.0 * lightness - 1.0).abs())
                     };
-                    
+
                     // Determine which color channel this hue belongs to
                     // and calculate adjustment based on how close to center
                     let sat_adjustment = {
@@ -422,9 +460,9 @@ impl ImageProcessor {
                         // Blue: 210-270
                         // Purple: 270-300
                         // Magenta: 300-345
-                        
+
                         let mut adjustment = 0.0;
-                        
+
                         // Red (wraps around 0)
                         if hue >= 345.0 || hue < 15.0 {
                             let dist = if hue >= 345.0 { hue - 360.0 } else { hue };
@@ -473,19 +511,19 @@ impl ImageProcessor {
                             let weight = 1.0 - ((hue - center).abs() / 17.5).min(1.0);
                             adjustment += hsl_magenta_sat * weight;
                         }
-                        
+
                         adjustment * 0.01 // Convert from -100..100 to -1..1
                     };
-                    
+
                     // Apply saturation adjustment and convert back to RGB
                     if sat_adjustment != 0.0 {
                         let new_sat = (sat + sat_adjustment * sat).clamp(0.0, 1.0);
-                        
+
                         // HSL to RGB conversion
                         let c = (1.0 - (2.0 * lightness - 1.0).abs()) * new_sat;
                         let x = c * (1.0 - ((hue / 60.0) % 2.0 - 1.0).abs());
                         let m = lightness - c / 2.0;
-                        
+
                         let (r1, g1, b1) = if hue < 60.0 {
                             (c, x, 0.0)
                         } else if hue < 120.0 {
@@ -499,7 +537,7 @@ impl ImageProcessor {
                         } else {
                             (c, 0.0, x)
                         };
-                        
+
                         r = (r1 + m) * 255.0;
                         g = (g1 + m) * 255.0;
                         b = (b1 + m) * 255.0;
@@ -549,34 +587,37 @@ impl ImageProcessor {
 
     /// Apply crop settings to an image
     /// Handles crop region, flips, and 90-degree rotations
-    pub fn apply_crop(img: &DynamicImage, crop_settings: &domain::value_objects::CropSettings) -> DynamicImage {
+    pub fn apply_crop(
+        img: &DynamicImage,
+        crop_settings: &domain::value_objects::CropSettings,
+    ) -> DynamicImage {
         let (w, h) = (img.width() as f32, img.height() as f32);
-        
+
         // Calculate pixel coordinates from normalized values (0.0 to 1.0)
         let crop_x = (crop_settings.crop_x() * w) as u32;
         let crop_y = (crop_settings.crop_y() * h) as u32;
         let crop_w = ((crop_settings.crop_width() * w) as u32).max(1);
         let crop_h = ((crop_settings.crop_height() * h) as u32).max(1);
-        
+
         // Clamp to image bounds
         let crop_x = crop_x.min(img.width().saturating_sub(1));
         let crop_y = crop_y.min(img.height().saturating_sub(1));
         let crop_w = crop_w.min(img.width().saturating_sub(crop_x));
         let crop_h = crop_h.min(img.height().saturating_sub(crop_y));
-        
+
         // Crop the image
         let mut result = img.crop_imm(crop_x, crop_y, crop_w, crop_h);
-        
+
         // Apply horizontal flip
         if crop_settings.flip_horizontal() {
             result = result.fliph();
         }
-        
+
         // Apply vertical flip
         if crop_settings.flip_vertical() {
             result = result.flipv();
         }
-        
+
         // Apply 90-degree rotations
         match crop_settings.rotation_90() {
             1 => result = result.rotate90(),
@@ -584,7 +625,7 @@ impl ImageProcessor {
             3 => result = result.rotate270(),
             _ => {} // 0 or other = no rotation
         }
-        
+
         result
     }
 }
@@ -613,8 +654,8 @@ mod tests {
     fn test_process_image_no_changes() {
         let img = DynamicImage::new_rgb8(100, 100);
         let processed = ImageProcessor::process_image(
-            &img, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-            0.0, 0.0, 0.0, 0.0, // tone curve params
+            &img, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, // tone curve params
             0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL Sat
             0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL Hue
             0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL Lum

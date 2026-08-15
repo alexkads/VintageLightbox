@@ -3,8 +3,8 @@
 //! Dialog for configuring and executing print jobs.
 //! Provides layout selection, page configuration, and print preview.
 
+use crate::design_system::{icons, theme::Theme, widgets};
 use eframe::egui;
-use crate::design_system::{theme::Theme, icons, widgets};
 
 /// Print layout options
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -24,7 +24,7 @@ impl PrintLayoutOption {
             PrintLayoutOption::ContactSheet => "Contact Sheet",
         }
     }
-    
+
     pub fn all() -> &'static [PrintLayoutOption] {
         &[
             PrintLayoutOption::Single,
@@ -51,7 +51,7 @@ impl PaperSizeOption {
             PaperSizeOption::A3 => "A3 (297×420mm)",
         }
     }
-    
+
     pub fn all() -> &'static [PaperSizeOption] {
         &[
             PaperSizeOption::A4,
@@ -137,12 +137,9 @@ pub struct PrintDialog;
 impl PrintDialog {
     /// Show the print dialog
     /// Returns the action taken by the user
-    pub fn show(
-        ctx: &egui::Context,
-        state: &mut PrintDialogState,
-    ) -> PrintDialogAction {
+    pub fn show(ctx: &egui::Context, state: &mut PrintDialogState) -> PrintDialogAction {
         let mut action = PrintDialogAction::None;
-        
+
         egui::Window::new(format!("{} Print", icons::NAV_PRINT))
             .collapsible(false)
             .resizable(true)
@@ -151,24 +148,28 @@ impl PrintDialog {
             .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
             .show(ctx, |ui| {
                 ui.add_space(Theme::SPACE_MD);
-                
+
                 // Photo count info
                 ui.horizontal(|ui| {
                     ui.label(
-                        egui::RichText::new(format!("{} {} photo(s) selected", icons::FILE_IMAGE, state.photo_ids.len()))
-                            .size(Theme::FONT_MD)
-                            .color(Theme::TEXT_PRIMARY)
+                        egui::RichText::new(format!(
+                            "{} {} photo(s) selected",
+                            icons::FILE_IMAGE,
+                            state.photo_ids.len()
+                        ))
+                        .size(Theme::FONT_MD)
+                        .color(Theme::TEXT_PRIMARY),
                     );
                 });
-                
+
                 ui.add_space(Theme::SPACE_LG);
                 ui.separator();
                 ui.add_space(Theme::SPACE_MD);
-                
+
                 // Layout section
                 ui.heading(egui::RichText::new("Layout").size(Theme::FONT_LG));
                 ui.add_space(Theme::SPACE_SM);
-                
+
                 egui::ComboBox::from_label("Print Layout")
                     .selected_text(state.layout.display_name())
                     .show_ui(ui, |ui| {
@@ -176,13 +177,13 @@ impl PrintDialog {
                             ui.selectable_value(&mut state.layout, *layout, layout.display_name());
                         }
                     });
-                
+
                 ui.add_space(Theme::SPACE_MD);
-                
+
                 // Page Setup section
                 ui.heading(egui::RichText::new("Page Setup").size(Theme::FONT_LG));
                 ui.add_space(Theme::SPACE_SM);
-                
+
                 egui::ComboBox::from_label("Paper Size")
                     .selected_text(state.paper_size.display_name())
                     .show_ui(ui, |ui| {
@@ -190,47 +191,59 @@ impl PrintDialog {
                             ui.selectable_value(&mut state.paper_size, *size, size.display_name());
                         }
                     });
-                
+
                 ui.add_space(Theme::SPACE_SM);
-                
+
                 ui.horizontal(|ui| {
                     ui.label("Orientation:");
-                    ui.selectable_value(&mut state.orientation, OrientationOption::Portrait, "Portrait");
-                    ui.selectable_value(&mut state.orientation, OrientationOption::Landscape, "Landscape");
+                    ui.selectable_value(
+                        &mut state.orientation,
+                        OrientationOption::Portrait,
+                        "Portrait",
+                    );
+                    ui.selectable_value(
+                        &mut state.orientation,
+                        OrientationOption::Landscape,
+                        "Landscape",
+                    );
                 });
-                
+
                 ui.add_space(Theme::SPACE_SM);
-                
+
                 ui.horizontal(|ui| {
                     ui.label("Margins (mm):");
-                    ui.add(egui::DragValue::new(&mut state.margin_mm)
-                        .range(0..=50)
-                        .speed(1));
+                    ui.add(
+                        egui::DragValue::new(&mut state.margin_mm)
+                            .range(0..=50)
+                            .speed(1),
+                    );
                 });
-                
+
                 ui.add_space(Theme::SPACE_MD);
-                
+
                 // Options section
                 ui.heading(egui::RichText::new("Options").size(Theme::FONT_LG));
                 ui.add_space(Theme::SPACE_SM);
-                
+
                 ui.checkbox(&mut state.include_metadata, "Include photo metadata");
-                
+
                 ui.horizontal(|ui| {
                     ui.label("Copies:");
-                    ui.add(egui::DragValue::new(&mut state.copies)
-                        .range(1..=99)
-                        .speed(1));
+                    ui.add(
+                        egui::DragValue::new(&mut state.copies)
+                            .range(1..=99)
+                            .speed(1),
+                    );
                 });
-                
+
                 ui.add_space(Theme::SPACE_LG);
                 ui.separator();
                 ui.add_space(Theme::SPACE_MD);
-                
+
                 // Preview section (simplified)
                 ui.heading(egui::RichText::new("Preview").size(Theme::FONT_LG));
                 ui.add_space(Theme::SPACE_SM);
-                
+
                 // Calculate page count
                 let photos_per_page = match state.layout {
                     PrintLayoutOption::Single => 1,
@@ -238,37 +251,38 @@ impl PrintDialog {
                     PrintLayoutOption::Grid3x3 => 9,
                     PrintLayoutOption::ContactSheet => 12,
                 };
-                let page_count = (state.photo_ids.len() + photos_per_page - 1) / photos_per_page.max(1);
-                
+                let page_count =
+                    (state.photo_ids.len() + photos_per_page - 1) / photos_per_page.max(1);
+
                 ui.label(format!(
                     "{} page(s) will be printed ({} photos per page)",
                     page_count, photos_per_page
                 ));
-                
+
                 ui.add_space(Theme::SPACE_LG);
                 ui.separator();
                 ui.add_space(Theme::SPACE_MD);
-                
+
                 // Action buttons
                 ui.horizontal(|ui| {
                     // Spacer to push buttons to the right
                     ui.allocate_space(egui::vec2(ui.available_width() - 180.0, 0.0));
-                    
+
                     if widgets::secondary_button(ui, "Cancel").clicked() {
                         action = PrintDialogAction::Cancel;
                     }
-                    
+
                     ui.add_space(Theme::SPACE_SM);
-                    
+
                     let print_label = format!("{} Print", icons::NAV_PRINT);
                     if widgets::primary_button(ui, &print_label).clicked() {
                         action = PrintDialogAction::Print;
                     }
                 });
-                
+
                 ui.add_space(Theme::SPACE_MD);
             });
-        
+
         action
     }
 }

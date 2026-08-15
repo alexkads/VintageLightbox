@@ -52,12 +52,12 @@ pub const EDIT_ADJUSTMENT: &str = egui_phosphor::regular::SLIDERS_HORIZONTAL;
 // RATING ICONS
 // ============================================
 pub const STAR_EMPTY: &str = egui_phosphor::regular::STAR;
-pub const STAR_FILLED: &str = egui_phosphor::regular::STAR;  // Note: v0.9 doesn't have STAR_FILL, use STAR with color
+pub const STAR_FILLED: &str = egui_phosphor::regular::STAR; // Note: v0.9 doesn't have STAR_FILL, use STAR with color
 
 // ============================================
 // FLAG ICONS
 // ============================================
-pub const FLAG_PICK: &str = egui_phosphor::regular::CHECK_CIRCLE;  // Pick flag (checkmark)
+pub const FLAG_PICK: &str = egui_phosphor::regular::CHECK_CIRCLE; // Pick flag (checkmark)
 pub const FLAG_REJECT: &str = egui_phosphor::regular::X_CIRCLE;
 pub const FLAG_UNFLAGGED: &str = egui_phosphor::regular::FLAG_BANNER;
 

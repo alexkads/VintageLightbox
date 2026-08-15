@@ -3,7 +3,6 @@
 //! Caso de uso para definir ou remover uma flag de uma foto (Pick/Reject).
 //! Implementado com TDD.
 
-use std::sync::Arc;
 use domain::DomainResult;
 use domain::{
     entities::Photo,
@@ -11,6 +10,7 @@ use domain::{
     value_objects::{Flag, PhotoId},
     DomainError,
 };
+use std::sync::Arc;
 
 /// Caso de uso para definir ou remover uma flag de uma foto.
 pub struct SetFlagUseCase {
@@ -25,28 +25,26 @@ impl SetFlagUseCase {
     /// Define a flag para uma foto
     pub async fn execute(&self, id: PhotoId, flag: Flag) -> DomainResult<Photo> {
         let photo_option = self.repo.find_by_id(&id).await?;
-        
-        let mut photo = photo_option
-            .ok_or(DomainError::PhotoNotFound)?;
-            
+
+        let mut photo = photo_option.ok_or(DomainError::PhotoNotFound)?;
+
         photo.set_flag(flag);
-        
+
         self.repo.update(&photo).await?;
-        
+
         Ok(photo)
     }
 
     /// Remove a flag de uma foto
     pub async fn remove_flag(&self, id: PhotoId) -> DomainResult<Photo> {
         let photo_option = self.repo.find_by_id(&id).await?;
-        
-        let mut photo = photo_option
-            .ok_or(DomainError::PhotoNotFound)?;
-            
+
+        let mut photo = photo_option.ok_or(DomainError::PhotoNotFound)?;
+
         photo.remove_flag();
-        
+
         self.repo.update(&photo).await?;
-        
+
         Ok(photo)
     }
 }
@@ -80,26 +78,23 @@ mod tests {
         let file_path = FilePath::new("/photos/test.jpg").unwrap();
         let photo = Photo::new(file_path);
         let photo_id = photo.id();
-        
+
         let mut mock_repo = MockPhotoRepo::new();
-        
+
         let photo_clone = photo.clone();
         mock_repo
             .expect_find_by_id()
             .with(eq(photo_id))
             .times(1)
             .returning(move |_| Ok(Some(photo_clone.clone())));
-            
-        mock_repo
-            .expect_update()
-            .times(1)
-            .returning(|_| Ok(()));
-            
+
+        mock_repo.expect_update().times(1).returning(|_| Ok(()));
+
         let use_case = SetFlagUseCase::new(Arc::new(mock_repo));
-        
+
         // Act
         let result = use_case.execute(photo_id, Flag::Pick).await;
-        
+
         // Assert
         assert!(result.is_ok());
         let photo = result.unwrap();
@@ -112,26 +107,23 @@ mod tests {
         let file_path = FilePath::new("/photos/test.jpg").unwrap();
         let photo = Photo::new(file_path);
         let photo_id = photo.id();
-        
+
         let mut mock_repo = MockPhotoRepo::new();
-        
+
         let photo_clone = photo.clone();
         mock_repo
             .expect_find_by_id()
             .with(eq(photo_id))
             .times(1)
             .returning(move |_| Ok(Some(photo_clone.clone())));
-            
-        mock_repo
-            .expect_update()
-            .times(1)
-            .returning(|_| Ok(()));
-            
+
+        mock_repo.expect_update().times(1).returning(|_| Ok(()));
+
         let use_case = SetFlagUseCase::new(Arc::new(mock_repo));
-        
+
         // Act
         let result = use_case.execute(photo_id, Flag::Reject).await;
-        
+
         // Assert
         assert!(result.is_ok());
         let photo = result.unwrap();
@@ -145,26 +137,23 @@ mod tests {
         let mut photo = Photo::new(file_path);
         photo.set_flag(Flag::Pick);
         let photo_id = photo.id();
-        
+
         let mut mock_repo = MockPhotoRepo::new();
-        
+
         let photo_clone = photo.clone();
         mock_repo
             .expect_find_by_id()
             .with(eq(photo_id))
             .times(1)
             .returning(move |_| Ok(Some(photo_clone.clone())));
-            
-        mock_repo
-            .expect_update()
-            .times(1)
-            .returning(|_| Ok(()));
-            
+
+        mock_repo.expect_update().times(1).returning(|_| Ok(()));
+
         let use_case = SetFlagUseCase::new(Arc::new(mock_repo));
-        
+
         // Act
         let result = use_case.remove_flag(photo_id).await;
-        
+
         // Assert
         assert!(result.is_ok());
         let photo = result.unwrap();

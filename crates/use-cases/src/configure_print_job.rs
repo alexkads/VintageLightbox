@@ -97,10 +97,7 @@ mod tests {
         let mut mock_repo = MockPhotoRepo::new();
 
         // Mock exists para todas as fotos
-        mock_repo
-            .expect_exists()
-            .times(3)
-            .returning(|_| Ok(true));
+        mock_repo.expect_exists().times(3).returning(|_| Ok(true));
 
         let use_case = ConfigurePrintJobUseCase::new(Arc::new(mock_repo));
 
@@ -145,16 +142,13 @@ mod tests {
         let mut mock_repo = MockPhotoRepo::new();
 
         // Mock exists - primeira foto existe, segunda não
-        mock_repo
-            .expect_exists()
-            .times(2)
-            .returning(|_| {
-                static mut CALL_COUNT: usize = 0;
-                unsafe {
-                    CALL_COUNT += 1;
-                    Ok(CALL_COUNT == 1)
-                }
-            });
+        mock_repo.expect_exists().times(2).returning(|_| {
+            static mut CALL_COUNT: usize = 0;
+            unsafe {
+                CALL_COUNT += 1;
+                Ok(CALL_COUNT == 1)
+            }
+        });
 
         let use_case = ConfigurePrintJobUseCase::new(Arc::new(mock_repo));
 
@@ -178,10 +172,7 @@ mod tests {
 
         let mut mock_repo = MockPhotoRepo::new();
 
-        mock_repo
-            .expect_exists()
-            .times(4)
-            .returning(|_| Ok(true));
+        mock_repo.expect_exists().times(4).returning(|_| Ok(true));
 
         let use_case = ConfigurePrintJobUseCase::new(Arc::new(mock_repo));
 
@@ -205,10 +196,7 @@ mod tests {
 
         let mut mock_repo = MockPhotoRepo::new();
 
-        mock_repo
-            .expect_exists()
-            .times(25)
-            .returning(|_| Ok(true));
+        mock_repo.expect_exists().times(25).returning(|_| Ok(true));
 
         let use_case = ConfigurePrintJobUseCase::new(Arc::new(mock_repo));
 

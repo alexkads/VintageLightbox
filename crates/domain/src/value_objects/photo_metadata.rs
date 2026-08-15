@@ -4,8 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct PhotoMetadata {
     /// Modelo da câmera
     pub camera_model: Option<String>,
@@ -26,4 +25,3 @@ pub struct PhotoMetadata {
     /// Altura da imagem
     pub height: Option<u32>,
 }
-

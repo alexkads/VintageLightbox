@@ -21,7 +21,11 @@ impl ScanSourceUseCase {
     }
 
     /// Lista as fotos da origem
-    pub async fn execute(&self, root: &str, include_subfolders: bool) -> DomainResult<Vec<FilePath>> {
+    pub async fn execute(
+        &self,
+        root: &str,
+        include_subfolders: bool,
+    ) -> DomainResult<Vec<FilePath>> {
         if root.trim().is_empty() {
             return Ok(Vec::new());
         }
@@ -53,7 +57,11 @@ mod tests {
 
     #[async_trait]
     impl SourceScanner for ScannerFalso {
-        async fn scan(&self, _root: &str, _include_subfolders: bool) -> DomainResult<Vec<FilePath>> {
+        async fn scan(
+            &self,
+            _root: &str,
+            _include_subfolders: bool,
+        ) -> DomainResult<Vec<FilePath>> {
             self.chamadas.fetch_add(1, Ordering::Relaxed);
             Ok(self
                 .arquivos

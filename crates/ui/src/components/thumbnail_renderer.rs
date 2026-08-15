@@ -1,5 +1,5 @@
-use egui::{Color32, Rect, Vec2};
 use domain::value_objects::CropSettings;
+use egui::{Color32, Rect, Vec2};
 
 /// Renders a thumbnail with support for Crop, Rotation (Mesh-based), and Aspect Ratio fitting.
 pub fn render_thumbnail(
@@ -14,10 +14,10 @@ pub fn render_thumbnail(
     // If we have crop settings, the "Image" we are viewing is the Cropped result.
     // The Aspect Ratio of the VIEW is crop_width / crop_height (relative to frame).
     // The Frame Aspect Ratio depends on Rotation90.
-    
+
     // Actually, following ImageViewer logic:
     // We want to fit the "Straightened Crop Result" into 'rect'.
-    
+
     let (target_aspect, rotated_texture_size) = if let Some(crop) = crop_settings {
         // Frame Aspect Ratio
         let frame_aspect = if crop.rotation_90() % 2 != 0 {
@@ -25,7 +25,7 @@ pub fn render_thumbnail(
         } else {
             texture_size.x / texture_size.y
         };
-        
+
         let rot_tex_size = if crop.rotation_90() % 2 != 0 {
             Vec2::new(texture_size.y, texture_size.x)
         } else {
@@ -38,7 +38,7 @@ pub fn render_thumbnail(
         // Aspect = (crop.w * FrameW) / (crop.h * FrameH)
         //        = (crop.w / crop.h) * FrameAspect
         let view_aspect = (crop.crop_width() / crop.crop_height()) * frame_aspect;
-        
+
         (view_aspect, rot_tex_size)
     } else {
         // No crop: Just fits the texture.
@@ -64,7 +64,7 @@ pub fn render_thumbnail(
     if let Some(crop) = crop_settings {
         // Mesh Rendering (Copied from ImageViewer "Neutral Viewer")
         use egui::epaint::{Mesh, Vertex};
-        
+
         let cx = crop.crop_x();
         let cy = crop.crop_y();
         let cw = crop.crop_width();
@@ -82,14 +82,14 @@ pub fn render_thumbnail(
         let center = egui::pos2(0.5, 0.5);
 
         let mut uvs = [egui::Pos2::ZERO; 4];
-        
+
         for (i, &p_frame) in corners_frame.iter().enumerate() {
             let p_centered = p_frame - center;
             let p_phys = egui::vec2(p_centered.x * aspect, p_centered.y);
             let (sin, cos) = (-angle_rad).sin_cos();
             let p_rot = egui::vec2(
                 p_phys.x * cos - p_phys.y * sin,
-                p_phys.x * sin + p_phys.y * cos
+                p_phys.x * sin + p_phys.y * cos,
             );
             let p_rot_norm = egui::vec2(p_rot.x / aspect, p_rot.y);
             let uv_r90 = center + p_rot_norm;
@@ -105,8 +105,12 @@ pub fn render_thumbnail(
             let mut final_u = uv_orig.x;
             let mut final_v = uv_orig.y;
 
-            if crop.flip_horizontal() { final_u = 1.0 - final_u; }
-            if crop.flip_vertical() { final_v = 1.0 - final_v; }
+            if crop.flip_horizontal() {
+                final_u = 1.0 - final_u;
+            }
+            if crop.flip_vertical() {
+                final_v = 1.0 - final_v;
+            }
 
             uvs[i] = egui::pos2(final_u, final_v);
         }
@@ -121,16 +125,15 @@ pub fn render_thumbnail(
 
         for (i, &pos) in screen_corners.iter().enumerate() {
             mesh.vertices.push(Vertex {
-                pos, 
-                uv: uvs[i], 
-                color: Color32::WHITE
+                pos,
+                uv: uvs[i],
+                color: Color32::WHITE,
             });
         }
         mesh.add_triangle(0, 1, 2);
         mesh.add_triangle(0, 2, 3);
 
         ui.painter().add(egui::Shape::mesh(mesh));
-
     } else {
         // Simple Image Render
         egui::Image::new(texture).paint_at(ui, display_rect);

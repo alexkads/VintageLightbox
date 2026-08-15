@@ -1,6 +1,6 @@
 use domain::import_source::{ImportSource, ImportSourceType};
-use std::sync::{Arc, Mutex};
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 // Simple in-memory history for now, can be upgraded to DB or JSON file
 pub struct ImportHistoryRepository {
@@ -34,14 +34,19 @@ impl ImportHistoryRepository {
 
     pub fn get_recent(&self) -> Vec<ImportSource> {
         if let Ok(history) = self.history.lock() {
-            history.iter().map(|path| {
-                ImportSource {
+            history
+                .iter()
+                .map(|path| ImportSource {
                     id: format!("hist://{}", path.display()),
-                    name: path.file_name().unwrap_or_default().to_string_lossy().to_string(),
+                    name: path
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_string(),
                     path: path.clone(),
                     source_type: ImportSourceType::History,
-                }
-            }).collect()
+                })
+                .collect()
         } else {
             Vec::new()
         }

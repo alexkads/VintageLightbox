@@ -203,13 +203,15 @@ fn montar(state: AppState) -> (Harness<'static>, Cenario) {
     let harness = Harness::builder()
         .with_size(egui::Vec2::new(1440.0, 900.0))
         .build(move |ctx| {
-        // `temp` fica vivo enquanto o harness existir — o cache de previews aponta para ele
-        let _ = &temp;
+            // `temp` fica vivo enquanto o harness existir — o cache de previews aponta para ele
+            let _ = &temp;
 
-        let mut state = state_ui.borrow_mut();
-        if let Some(a) = ImportView::show(ctx, &mut state, &controller, &sender, &mut thumbnails) {
-            *acao_ui.borrow_mut() = Some(a);
-        }
+            let mut state = state_ui.borrow_mut();
+            if let Some(a) =
+                ImportView::show(ctx, &mut state, &controller, &sender, &mut thumbnails)
+            {
+                *acao_ui.borrow_mut() = Some(a);
+            }
         });
 
     // A fonte de ícones é instalada pelo app em `VintageLightboxApp::new`; sem ela aqui,

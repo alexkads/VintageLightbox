@@ -7,7 +7,7 @@ use domain::{
     entities::Collection,
     repositories::CollectionRepository,
     value_objects::{CollectionId, PhotoId},
-    DomainResult, DomainError,
+    DomainError, DomainResult,
 };
 use std::sync::Arc;
 
@@ -25,18 +25,24 @@ impl RemovePhotoFromCollectionUseCase {
     }
 
     /// Remove uma foto de uma coleção
-    pub async fn execute(&self, collection_id: CollectionId, photo_id: PhotoId) -> DomainResult<Collection> {
+    pub async fn execute(
+        &self,
+        collection_id: CollectionId,
+        photo_id: PhotoId,
+    ) -> DomainResult<Collection> {
         // Buscar coleção
-        let collection_option = self.collection_repository.find_by_id(&collection_id).await?;
-        let mut collection = collection_option
-            .ok_or(DomainError::CollectionNotFound)?;
+        let collection_option = self
+            .collection_repository
+            .find_by_id(&collection_id)
+            .await?;
+        let mut collection = collection_option.ok_or(DomainError::CollectionNotFound)?;
 
         // Remover foto da coleção
         let was_removed = collection.remove_photo(&photo_id);
-        
+
         if !was_removed {
             return Err(DomainError::InvalidOperation(
-                "Photo not found in collection".to_string()
+                "Photo not found in collection".to_string(),
             ));
         }
 
@@ -87,10 +93,7 @@ mod tests {
             .returning(move |_| Ok(Some(collection_clone.clone())));
 
         // Mock update
-        mock_repo
-            .expect_update()
-            .times(1)
-            .returning(|_| Ok(()));
+        mock_repo.expect_update().times(1).returning(|_| Ok(()));
 
         let use_case = RemovePhotoFromCollectionUseCase::new(Arc::new(mock_repo));
 
@@ -126,7 +129,7 @@ mod tests {
         // Assert
         assert!(result.is_err());
         match result {
-            Err(DomainError::CollectionNotFound) => {},
+            Err(DomainError::CollectionNotFound) => {}
             _ => panic!("Expected CollectionNotFound error"),
         }
     }
@@ -157,7 +160,7 @@ mod tests {
         match result {
             Err(DomainError::InvalidOperation(msg)) => {
                 assert_eq!(msg, "Photo not found in collection");
-            },
+            }
             _ => panic!("Expected InvalidOperation error"),
         }
     }
@@ -169,11 +172,11 @@ mod tests {
         let photo1_id = PhotoId::new();
         let photo2_id = PhotoId::new();
         let photo3_id = PhotoId::new();
-        
+
         collection.add_photo(photo1_id);
         collection.add_photo(photo2_id);
         collection.add_photo(photo3_id);
-        
+
         let collection_id = *collection.id();
 
         let mut mock_repo = MockCollectionRepo::new();
@@ -181,28 +184,22 @@ mod tests {
         // Mock find collection (2 calls)
         let collection_clone1 = collection.clone();
         let collection_clone2 = collection.clone();
-        mock_repo
-            .expect_find_by_id()
-            .times(2)
-            .returning(move |_| {
-                static mut CALL_COUNT: usize = 0;
-                unsafe {
-                    CALL_COUNT += 1;
-                    if CALL_COUNT == 1 {
-                        Ok(Some(collection_clone1.clone()))
-                    } else {
-                        let mut col = collection_clone2.clone();
-                        col.remove_photo(&PhotoId::new()); // Simula remoção anterior
-                        Ok(Some(col))
-                    }
+        mock_repo.expect_find_by_id().times(2).returning(move |_| {
+            static mut CALL_COUNT: usize = 0;
+            unsafe {
+                CALL_COUNT += 1;
+                if CALL_COUNT == 1 {
+                    Ok(Some(collection_clone1.clone()))
+                } else {
+                    let mut col = collection_clone2.clone();
+                    col.remove_photo(&PhotoId::new()); // Simula remoção anterior
+                    Ok(Some(col))
                 }
-            });
+            }
+        });
 
         // Mock update (2 calls)
-        mock_repo
-            .expect_update()
-            .times(2)
-            .returning(|_| Ok(()));
+        mock_repo.expect_update().times(2).returning(|_| Ok(()));
 
         let use_case = RemovePhotoFromCollectionUseCase::new(Arc::new(mock_repo));
 

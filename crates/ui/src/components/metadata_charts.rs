@@ -1,10 +1,10 @@
 // Metadata Charts Component
 // Visualizes photo library statistics
 
-use egui::Ui;
-use egui_plot::{Plot, Bar, BarChart};
-use adapters::view_models::PhotoViewModel;
 use crate::design_system::theme::Theme;
+use adapters::view_models::PhotoViewModel;
+use egui::Ui;
+use egui_plot::{Bar, BarChart, Plot};
 
 pub struct MetadataCharts;
 
@@ -15,7 +15,7 @@ impl MetadataCharts {
             ui.label(
                 egui::RichText::new("No photos to analyze")
                     .size(Theme::FONT_XS)
-                    .color(Theme::TEXT_MUTED)
+                    .color(Theme::TEXT_MUTED),
             );
             return;
         }
@@ -36,7 +36,7 @@ impl MetadataCharts {
         ui.label(
             egui::RichText::new("Rating Distribution")
                 .size(Theme::FONT_SM)
-                .color(Theme::TEXT_MUTED)
+                .color(Theme::TEXT_MUTED),
         );
 
         ui.add_space(Theme::SPACE_XS);
@@ -71,7 +71,7 @@ impl MetadataCharts {
         ui.label(
             egui::RichText::new(format!("Total: {} photos", photos.len()))
                 .size(Theme::FONT_XS)
-                .color(Theme::TEXT_HINT)
+                .color(Theme::TEXT_HINT),
         );
     }
 
@@ -80,7 +80,7 @@ impl MetadataCharts {
         ui.label(
             egui::RichText::new("Top Cameras")
                 .size(Theme::FONT_SM)
-                .color(Theme::TEXT_MUTED)
+                .color(Theme::TEXT_MUTED),
         );
 
         ui.add_space(Theme::SPACE_XS);
@@ -98,7 +98,7 @@ impl MetadataCharts {
             ui.label(
                 egui::RichText::new("No camera metadata available")
                     .size(Theme::FONT_XS)
-                    .color(Theme::TEXT_HINT)
+                    .color(Theme::TEXT_HINT),
             );
             return;
         }
@@ -134,7 +134,7 @@ impl MetadataCharts {
             ui.label(
                 egui::RichText::new(format!("{}: {} photos", camera, count))
                     .size(Theme::FONT_XS)
-                    .color(Theme::TEXT_HINT)
+                    .color(Theme::TEXT_HINT),
             );
         }
     }

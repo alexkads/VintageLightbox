@@ -9,25 +9,20 @@ use ui::app::VintageLightboxApp;
 use std::sync::Arc;
 
 use infrastructure::{
-    create_pool, run_migrations,
-    PhotoRepositoryImpl, ExifReader,
-    ThumbnailGeneratorImpl, ImageExporterImpl,
-    FileOrganizerImpl,
-    SourceScannerImpl,
-    SqlitePresetRepository,
-    cache::preview_manager::PreviewManager,
+    cache::preview_manager::PreviewManager, create_pool, run_migrations, ExifReader,
+    FileOrganizerImpl, ImageExporterImpl, PhotoRepositoryImpl, SourceScannerImpl,
+    SqlitePresetRepository, ThumbnailGeneratorImpl,
 };
+use use_cases::presets::{DeletePresetUseCase, ListPresetsUseCase, SavePresetUseCase};
 use use_cases::{
-    GetImportSourcesUseCase,
-    ImportPhotoUseCase, SavePhotoEditsUseCase, ExportPhotoUseCase,
-    RatePhotoUseCase, SetColorLabelUseCase, SetFlagUseCase, DeletePhotoUseCase,
-    CheckDuplicatesUseCase, ImportWithOptionsUseCase,
-    ScanSourceUseCase, DescribeCandidatesUseCase,
+    CheckDuplicatesUseCase, DeletePhotoUseCase, DescribeCandidatesUseCase, ExportPhotoUseCase,
+    GetImportSourcesUseCase, ImportPhotoUseCase, ImportWithOptionsUseCase, RatePhotoUseCase,
+    SavePhotoEditsUseCase, ScanSourceUseCase, SetColorLabelUseCase, SetFlagUseCase,
 };
-use use_cases::presets::{ListPresetsUseCase, SavePresetUseCase, DeletePresetUseCase};
 
 use adapters::controllers::{
-    LibraryController, EditorController, ImportController, ExportController, PhotoController, PresetController
+    EditorController, ExportController, ImportController, LibraryController, PhotoController,
+    PresetController,
 };
 
 #[tokio::main]
@@ -52,11 +47,13 @@ async fn main() {
     // ============================================
     // 1. Setup Infrastructure Layer
     // ============================================
-    let pool = create_pool(&database_url).await
+    let pool = create_pool(&database_url)
+        .await
         .expect("Failed to create database pool");
 
     // Run migrations
-    run_migrations(&pool).await
+    run_migrations(&pool)
+        .await
         .expect("Failed to run database migrations");
 
     let photo_repository = Arc::new(PhotoRepositoryImpl::new(pool.clone()));
@@ -70,7 +67,8 @@ async fn main() {
     let preview_path = catalog_path.join("Previews.lrdata");
     let preview_manager = Arc::new(PreviewManager::new_with_path(preview_path));
 
-    let device_repo = Arc::new(infrastructure::devices::repository::InfrastructureDeviceRepository::new());
+    let device_repo =
+        Arc::new(infrastructure::devices::repository::InfrastructureDeviceRepository::new());
 
     // ============================================
     // 2. Setup Use Cases Layer
@@ -82,41 +80,23 @@ async fn main() {
         preview_manager.clone(),
     ));
 
-    let save_photo_edits_use_case = Arc::new(SavePhotoEditsUseCase::new(
-        photo_repository.clone()
-    ));
+    let save_photo_edits_use_case = Arc::new(SavePhotoEditsUseCase::new(photo_repository.clone()));
     let export_photo_use_case = Arc::new(ExportPhotoUseCase::new(
         photo_repository.clone(),
         image_exporter,
     ));
-    let rate_photo_use_case = Arc::new(RatePhotoUseCase::new(
-        photo_repository.clone()
-    ));
-    let set_color_label_use_case = Arc::new(SetColorLabelUseCase::new(
-        photo_repository.clone()
-    ));
-    let set_flag_use_case = Arc::new(SetFlagUseCase::new(
-        photo_repository.clone()
-    ));
-    let delete_photo_use_case = Arc::new(DeletePhotoUseCase::new(
-        photo_repository.clone()
-    ));
+    let rate_photo_use_case = Arc::new(RatePhotoUseCase::new(photo_repository.clone()));
+    let set_color_label_use_case = Arc::new(SetColorLabelUseCase::new(photo_repository.clone()));
+    let set_flag_use_case = Arc::new(SetFlagUseCase::new(photo_repository.clone()));
+    let delete_photo_use_case = Arc::new(DeletePhotoUseCase::new(photo_repository.clone()));
 
     // Preset use cases
-    let list_presets_use_case = Arc::new(ListPresetsUseCase::new(
-        preset_repository.clone()
-    ));
-    let save_preset_use_case = Arc::new(SavePresetUseCase::new(
-        preset_repository.clone()
-    ));
-    let delete_preset_use_case = Arc::new(DeletePresetUseCase::new(
-        preset_repository
-    ));
+    let list_presets_use_case = Arc::new(ListPresetsUseCase::new(preset_repository.clone()));
+    let save_preset_use_case = Arc::new(SavePresetUseCase::new(preset_repository.clone()));
+    let delete_preset_use_case = Arc::new(DeletePresetUseCase::new(preset_repository));
 
     // Advanced import use cases
-    let check_duplicates_use_case = Arc::new(CheckDuplicatesUseCase::new(
-        photo_repository.clone()
-    ));
+    let check_duplicates_use_case = Arc::new(CheckDuplicatesUseCase::new(photo_repository.clone()));
     let import_with_options_use_case = Arc::new(ImportWithOptionsUseCase::new(
         photo_repository.clone(),
         metadata_extractor.clone(),
@@ -124,19 +104,14 @@ async fn main() {
         preview_manager.clone(),
         file_organizer,
     ));
-    
-    let get_import_sources_use_case = Arc::new(GetImportSourcesUseCase::new(
-        device_repo.clone()
-    ));
+
+    let get_import_sources_use_case = Arc::new(GetImportSourcesUseCase::new(device_repo.clone()));
 
     // Varredura e leitura de metadados da origem — o que alimenta a grade de importação
     // antes de qualquer arquivo ser copiado
-    let scan_source_use_case = Arc::new(ScanSourceUseCase::new(
-        Arc::new(SourceScannerImpl::new())
-    ));
-    let describe_candidates_use_case = Arc::new(DescribeCandidatesUseCase::new(
-        metadata_extractor.clone()
-    ));
+    let scan_source_use_case = Arc::new(ScanSourceUseCase::new(Arc::new(SourceScannerImpl::new())));
+    let describe_candidates_use_case =
+        Arc::new(DescribeCandidatesUseCase::new(metadata_extractor.clone()));
 
     // ============================================
     // 3. Setup Controllers (Adapters Layer)
@@ -152,14 +127,14 @@ async fn main() {
     let library_controller = Arc::new(LibraryController::new(photo_repository));
     let editor_controller = Arc::new(EditorController::new(save_photo_edits_use_case));
     let export_controller = Arc::new(ExportController::new(export_photo_use_case));
-    
+
     let photo_controller = Arc::new(PhotoController::new(
         rate_photo_use_case,
         set_color_label_use_case,
         set_flag_use_case,
         delete_photo_use_case,
     ));
-    
+
     let preset_controller = Arc::new(PresetController::new(
         list_presets_use_case,
         save_preset_use_case,
@@ -183,7 +158,7 @@ async fn main() {
         native_options,
         Box::new(|cc| {
             // Style/Icon configuration is handled inside VintageLightboxApp::new
-            
+
             Ok(Box::new(VintageLightboxApp::new(
                 cc,
                 import_controller,

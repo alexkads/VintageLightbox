@@ -2,14 +2,14 @@
 //!
 //! Extrai metadados EXIF de arquivos de imagem.
 
-use std::path::Path;
-use std::fs::File;
+use async_trait::async_trait;
 use domain::{
-    value_objects::{FilePath, PhotoMetadata},
     services::MetadataExtractor,
+    value_objects::{FilePath, PhotoMetadata},
     DomainResult,
 };
-use async_trait::async_trait;
+use std::fs::File;
+use std::path::Path;
 
 /// Leitor de metadados EXIF
 pub struct ExifReader;
@@ -28,7 +28,7 @@ impl ExifReader {
 
         let mut bufreader = std::io::BufReader::new(&file);
         let exifreader = exif::Reader::new();
-        
+
         // Se falhar ao ler EXIF, retorna metadados vazios em vez de erro
         // Isso permite importar imagens sem EXIF
         let Ok(exif_data) = exifreader.read_from_container(&mut bufreader) else {
@@ -53,7 +53,9 @@ impl ExifReader {
         }
 
         // Extrair ISO
-        if let Some(field) = exif_data.get_field(exif::Tag::PhotographicSensitivity, exif::In::PRIMARY) {
+        if let Some(field) =
+            exif_data.get_field(exif::Tag::PhotographicSensitivity, exif::In::PRIMARY)
+        {
             if let exif::Value::Short(ref v) = field.value {
                 if !v.is_empty() {
                     metadata.iso = Some(v[0] as u32);
@@ -108,7 +110,7 @@ impl ExifReader {
     pub fn has_exif(&self, path: &Path) -> bool {
         // Tenta ler e vê se algum campo foi preenchido
         if let Ok(metadata) = self.read_metadata(path) {
-             metadata.camera_model.is_some() || metadata.iso.is_some()
+            metadata.camera_model.is_some() || metadata.iso.is_some()
         } else {
             false
         }
@@ -138,7 +140,7 @@ mod tests {
     // Helper para criar um arquivo JPEG mínimo com EXIF
     fn create_test_jpeg_with_exif() -> NamedTempFile {
         let mut file = NamedTempFile::new().unwrap();
-        
+
         // JPEG mínimo com marcador EXIF
         let jpeg_data = vec![
             0xFF, 0xD8, // SOI (Start of Image)
@@ -146,10 +148,9 @@ mod tests {
             0x00, 0x10, // APP1 length (16 bytes)
             0x45, 0x78, 0x69, 0x66, 0x00, 0x00, // "Exif\0\0"
             // Minimal TIFF header
-            0x49, 0x49, 0x2A, 0x00, 0x08, 0x00, 0x00, 0x00,
-            0xFF, 0xD9, // EOI (End of Image)
+            0x49, 0x49, 0x2A, 0x00, 0x08, 0x00, 0x00, 0x00, 0xFF, 0xD9, // EOI (End of Image)
         ];
-        
+
         file.write_all(&jpeg_data).unwrap();
         file.flush().unwrap();
         file
@@ -174,9 +175,9 @@ mod tests {
     fn test_read_metadata_from_valid_jpeg() {
         let reader = ExifReader::new();
         let file = create_test_jpeg_with_exif();
-        
+
         let result = reader.read_metadata(file.path());
-        
+
         match result {
             Ok(metadata) => {
                 assert!(metadata.camera_model.is_none() || metadata.camera_model.is_some());

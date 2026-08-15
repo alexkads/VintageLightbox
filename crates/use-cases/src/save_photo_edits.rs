@@ -1,9 +1,5 @@
+use domain::{repositories::PhotoRepository, value_objects::PhotoId, DomainError, DomainResult};
 use std::sync::Arc;
-use domain::{
-    repositories::PhotoRepository,
-    value_objects::PhotoId,
-    DomainResult, DomainError,
-};
 
 /// Use Case: Salvar edições de uma foto
 pub struct SavePhotoEditsUseCase {
@@ -84,29 +80,67 @@ impl SavePhotoEditsUseCase {
         crop_flip_h: Option<bool>,
         crop_flip_v: Option<bool>,
     ) -> DomainResult<()> {
-        let mut photo = self.photo_repository.find_by_id(&id).await?
+        let mut photo = self
+            .photo_repository
+            .find_by_id(&id)
+            .await?
             .ok_or(DomainError::PhotoNotFound)?;
 
         photo.set_edits(
-            Some(exposure), Some(contrast), Some(temperature), Some(tint),
-            Some(highlights), Some(shadows), Some(whites), Some(blacks),
-            Some(clarity), Some(vibrance), Some(saturation),
-            Some(tone_curve_shadows), Some(tone_curve_darks),
-            Some(tone_curve_lights), Some(tone_curve_highlights),
-            Some(hsl_red_sat), Some(hsl_orange_sat), Some(hsl_yellow_sat),
-            Some(hsl_green_sat), Some(hsl_aqua_sat), Some(hsl_blue_sat),
-            Some(hsl_purple_sat), Some(hsl_magenta_sat),
-            Some(hsl_red_hue), Some(hsl_orange_hue), Some(hsl_yellow_hue),
-            Some(hsl_green_hue), Some(hsl_aqua_hue), Some(hsl_blue_hue),
-            Some(hsl_purple_hue), Some(hsl_magenta_hue),
-            Some(hsl_red_lum), Some(hsl_orange_lum), Some(hsl_yellow_lum),
-            Some(hsl_green_lum), Some(hsl_aqua_lum), Some(hsl_blue_lum),
-            Some(hsl_purple_lum), Some(hsl_magenta_lum),
-            Some(lens_distortion), Some(lens_vignette_amount), Some(lens_vignette_midpoint),
-            Some(nr_luminance), Some(nr_color),
-            Some(sharpen_amount), Some(sharpen_radius),
-            crop_x, crop_y, crop_width, crop_height,
-            crop_rotation, crop_angle, crop_flip_h, crop_flip_v
+            Some(exposure),
+            Some(contrast),
+            Some(temperature),
+            Some(tint),
+            Some(highlights),
+            Some(shadows),
+            Some(whites),
+            Some(blacks),
+            Some(clarity),
+            Some(vibrance),
+            Some(saturation),
+            Some(tone_curve_shadows),
+            Some(tone_curve_darks),
+            Some(tone_curve_lights),
+            Some(tone_curve_highlights),
+            Some(hsl_red_sat),
+            Some(hsl_orange_sat),
+            Some(hsl_yellow_sat),
+            Some(hsl_green_sat),
+            Some(hsl_aqua_sat),
+            Some(hsl_blue_sat),
+            Some(hsl_purple_sat),
+            Some(hsl_magenta_sat),
+            Some(hsl_red_hue),
+            Some(hsl_orange_hue),
+            Some(hsl_yellow_hue),
+            Some(hsl_green_hue),
+            Some(hsl_aqua_hue),
+            Some(hsl_blue_hue),
+            Some(hsl_purple_hue),
+            Some(hsl_magenta_hue),
+            Some(hsl_red_lum),
+            Some(hsl_orange_lum),
+            Some(hsl_yellow_lum),
+            Some(hsl_green_lum),
+            Some(hsl_aqua_lum),
+            Some(hsl_blue_lum),
+            Some(hsl_purple_lum),
+            Some(hsl_magenta_lum),
+            Some(lens_distortion),
+            Some(lens_vignette_amount),
+            Some(lens_vignette_midpoint),
+            Some(nr_luminance),
+            Some(nr_color),
+            Some(sharpen_amount),
+            Some(sharpen_radius),
+            crop_x,
+            crop_y,
+            crop_width,
+            crop_height,
+            crop_rotation,
+            crop_angle,
+            crop_flip_h,
+            crop_flip_v,
         )?;
         self.photo_repository.update(&photo).await?;
 
@@ -117,12 +151,9 @@ impl SavePhotoEditsUseCase {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use domain::{
-        entities::Photo,
-        value_objects::FilePath,
-    };
-    use mockall::predicate::*;
+    use domain::{entities::Photo, value_objects::FilePath};
     use mockall::mock;
+    use mockall::predicate::*;
 
     mock! {
         pub PhotoRepository {}
@@ -142,43 +173,46 @@ mod tests {
     async fn test_save_edits_success() {
         let mut mock_repo = MockPhotoRepository::new();
         let _photo_id = PhotoId::new();
-        
+
         let id = PhotoId::new();
         let path = FilePath::new("/test.jpg").unwrap();
         let photo = Photo::with_id(id, path);
 
         let id_expect = id;
         let photo_clone = photo.clone();
-        
-        mock_repo.expect_find_by_id()
-             .with(eq(id_expect))
-             .times(1)
-             .returning(move |_| Ok(Some(photo_clone.clone())));
 
-        mock_repo.expect_update()
-             .withf(|p| {
-                 p.edit_exposure() == Some(1.0) && 
-                 p.edit_contrast() == Some(1.2) &&
-                 p.edit_tone_curve_shadows() == Some(-30.0) &&
-                 p.edit_tone_curve_highlights() == Some(30.0)
-             })
-             .times(1)
-             .returning(|_| Ok(()));
+        mock_repo
+            .expect_find_by_id()
+            .with(eq(id_expect))
+            .times(1)
+            .returning(move |_| Ok(Some(photo_clone.clone())));
+
+        mock_repo
+            .expect_update()
+            .withf(|p| {
+                p.edit_exposure() == Some(1.0)
+                    && p.edit_contrast() == Some(1.2)
+                    && p.edit_tone_curve_shadows() == Some(-30.0)
+                    && p.edit_tone_curve_highlights() == Some(30.0)
+            })
+            .times(1)
+            .returning(|_| Ok(()));
 
         let use_case = SavePhotoEditsUseCase::new(Arc::new(mock_repo));
-        let result = use_case.execute(
-            id, 1.0, 1.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-            -30.0, -10.0, 10.0, 30.0,
-            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL Sat
-            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL Hue
-            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL Lum
-            0.0, 0.0, 0.0, // Lens
-            0.0, 0.0, // NR
-            0.0, 1.0, // Sharpening (amount, radius)
-            None, None, None, None, // Crop Rect
-            None, None, // Rotation
-            None, None // Flip
-        ).await;
+        let result = use_case
+            .execute(
+                id, 1.0, 1.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -30.0, -10.0, 10.0,
+                30.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL Sat
+                0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL Hue
+                0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL Lum
+                0.0, 0.0, 0.0, // Lens
+                0.0, 0.0, // NR
+                0.0, 1.0, // Sharpening (amount, radius)
+                None, None, None, None, // Crop Rect
+                None, None, // Rotation
+                None, None, // Flip
+            )
+            .await;
 
         assert!(result.is_ok());
     }
@@ -188,27 +222,29 @@ mod tests {
         let mut mock_repo = MockPhotoRepository::new();
         let id = PhotoId::new();
 
-        mock_repo.expect_find_by_id()
-             .with(eq(id))
-             .times(1)
-             .returning(|_| Ok(None));
+        mock_repo
+            .expect_find_by_id()
+            .with(eq(id))
+            .times(1)
+            .returning(|_| Ok(None));
 
         let use_case = SavePhotoEditsUseCase::new(Arc::new(mock_repo));
-        let result = use_case.execute(
-            id, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-            0.0, 0.0, 0.0, 0.0,
-            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL Sat
-            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL Hue
-            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL Lum
-            0.0, 0.0, 0.0, // Lens
-            0.0, 0.0, // NR
-            0.0, 1.0, // Sharpening
-            None, None, None, None, None, None, None, None, // Crop
-        ).await;
+        let result = use_case
+            .execute(
+                id, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL Sat
+                0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL Hue
+                0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL Lum
+                0.0, 0.0, 0.0, // Lens
+                0.0, 0.0, // NR
+                0.0, 1.0, // Sharpening
+                None, None, None, None, None, None, None, None, // Crop
+            )
+            .await;
 
         match result {
-             Err(DomainError::PhotoNotFound) => (),
-             _ => panic!("Expected PhotoNotFound error"),
+            Err(DomainError::PhotoNotFound) => (),
+            _ => panic!("Expected PhotoNotFound error"),
         }
     }
 }

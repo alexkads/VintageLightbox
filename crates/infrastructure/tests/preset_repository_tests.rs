@@ -3,7 +3,7 @@
 //! Tests using in-memory SQLite database.
 
 use domain::{
-    entities::{Preset, preset::PresetAdjustments},
+    entities::{preset::PresetAdjustments, Preset},
     repositories::PresetRepository,
 };
 use infrastructure::{create_pool, run_migrations, SqlitePresetRepository};
@@ -13,11 +13,11 @@ async fn create_test_repository() -> SqlitePresetRepository {
     let pool = create_pool("sqlite::memory:")
         .await
         .expect("Failed to create pool");
-    
+
     run_migrations(&pool)
         .await
         .expect("Failed to run migrations");
-    
+
     SqlitePresetRepository::new(pool)
 }
 
@@ -77,7 +77,7 @@ async fn test_save_system_preset() {
 async fn test_find_all_presets() {
     // Arrange
     let repo = create_test_repository().await;
-    
+
     let preset1 = Preset::user("Preset A".to_string(), PresetAdjustments::default());
     let preset2 = Preset::user("Preset B".to_string(), PresetAdjustments::default());
     let preset3 = Preset::system("System C", PresetAdjustments::default());
@@ -91,7 +91,7 @@ async fn test_find_all_presets() {
 
     // Assert
     assert_eq!(all_presets.len(), 3);
-    
+
     // Verify sorted by name
     assert_eq!(all_presets[0].name, "Preset A");
     assert_eq!(all_presets[1].name, "Preset B");

@@ -619,9 +619,7 @@ impl ImportView {
 
                     let organizacao = state.import_view_state.options.organization;
                     egui::ComboBox::from_id_salt("import_organization")
-                        .selected_text(
-                            RichText::new(organizacao.label()).size(Theme::FONT_SM),
-                        )
+                        .selected_text(RichText::new(organizacao.label()).size(Theme::FONT_SM))
                         .width(ui.available_width() - Theme::SPACE_SM)
                         .show_ui(ui, |ui| {
                             for estrategia in [
@@ -726,7 +724,11 @@ impl ImportView {
     /// Caminho que a primeira foto marcada vai ocupar, dadas as opções atuais
     fn exemplo_de_destino(state: &AppState) -> Option<String> {
         let opcoes = &state.import_view_state.options;
-        let candidato = state.import_view_state.candidates.iter().find(|c| c.checked)?;
+        let candidato = state
+            .import_view_state
+            .candidates
+            .iter()
+            .find(|c| c.checked)?;
 
         let pasta = match opcoes.organization {
             OrganizationStrategy::ByDate => {
@@ -761,7 +763,10 @@ impl ImportView {
                 let data = candidato.date_time.split(' ').next().unwrap_or("");
                 let partes: Vec<&str> = data.split(':').collect();
                 if partes.len() >= 3 {
-                    format!("photo-{}-{}-{}-001.{}", partes[0], partes[1], partes[2], extensao)
+                    format!(
+                        "photo-{}-{}-{}-001.{}",
+                        partes[0], partes[1], partes[2], extensao
+                    )
                 } else {
                     format!("photo-AAAA-MM-DD-001.{}", extensao)
                 }
@@ -802,7 +807,10 @@ impl ImportView {
 
         if visiveis.is_empty() {
             let (titulo, dica) = if state.import_view_state.candidates.is_empty() {
-                ("Nenhuma foto encontrada nesta origem", Some("Tente ligar \"Incluir subpastas\""))
+                (
+                    "Nenhuma foto encontrada nesta origem",
+                    Some("Tente ligar \"Incluir subpastas\""),
+                )
             } else {
                 ("Todas as fotos desta origem já estão no catálogo", None)
             };
@@ -930,9 +938,7 @@ impl ImportView {
                         let atual = state.import_view_state.sort_by;
                         let mut escolhido = atual;
                         egui::ComboBox::from_id_salt("import_sort")
-                            .selected_text(
-                                RichText::new(atual.label()).size(Theme::FONT_SM),
-                            )
+                            .selected_text(RichText::new(atual.label()).size(Theme::FONT_SM))
                             .width(150.0)
                             .show_ui(ui, |ui| {
                                 for criterio in ImportSortBy::TODOS {
@@ -1070,11 +1076,8 @@ impl ImportView {
                 Pos2::new(area_imagem.min.x, area_imagem.max.y - 22.0),
                 Vec2::new(area_imagem.width(), 22.0),
             );
-            ui.painter().rect_filled(
-                faixa,
-                0.0,
-                Color32::from_rgba_unmultiplied(0, 0, 0, 190),
-            );
+            ui.painter()
+                .rect_filled(faixa, 0.0, Color32::from_rgba_unmultiplied(0, 0, 0, 190));
             ui.painter().text(
                 faixa.center(),
                 egui::Align2::CENTER_CENTER,
@@ -1338,10 +1341,8 @@ impl ImportView {
                             .x
                             + padding * 2.0;
 
-                        let (rect, resposta) = ui.allocate_exact_size(
-                            Vec2::new(largura, altura),
-                            Sense::click(),
-                        );
+                        let (rect, resposta) =
+                            ui.allocate_exact_size(Vec2::new(largura, altura), Sense::click());
 
                         if ui.is_rect_visible(rect) {
                             let fundo = if ativo {
@@ -1418,14 +1419,10 @@ impl ImportView {
     /// Botão só de ícone, com dica
     fn botao_icone(ui: &mut Ui, icone: &str, dica: &str) -> egui::Response {
         ui.add(
-            egui::Button::new(
-                RichText::new(icone)
-                    .size(16.0)
-                    .color(Theme::TEXT_SECONDARY),
-            )
-            .fill(Color32::TRANSPARENT)
-            .min_size(Vec2::new(30.0, 30.0))
-            .corner_radius(Theme::RADIUS_MD),
+            egui::Button::new(RichText::new(icone).size(16.0).color(Theme::TEXT_SECONDARY))
+                .fill(Color32::TRANSPARENT)
+                .min_size(Vec2::new(30.0, 30.0))
+                .corner_radius(Theme::RADIUS_MD),
         )
         .on_hover_text(dica)
     }
@@ -1509,11 +1506,7 @@ impl ImportView {
         ui.centered_and_justified(|ui| {
             ui.vertical_centered(|ui| {
                 ui.add_space(ui.available_height() * 0.34);
-                ui.label(
-                    RichText::new(icone)
-                        .size(44.0)
-                        .color(Theme::TEXT_HINT),
-                );
+                ui.label(RichText::new(icone).size(44.0).color(Theme::TEXT_HINT));
                 ui.add_space(Theme::SPACE_SM);
                 ui.label(
                     RichText::new(titulo)
@@ -1593,7 +1586,9 @@ impl ImportView {
 
         tokio::spawn(async move {
             let (devices, recent) = controller.get_sources().await;
-            let _ = sender.send(ImportMessage::Sources { devices, recent }).await;
+            let _ = sender
+                .send(ImportMessage::Sources { devices, recent })
+                .await;
             ctx.request_repaint();
         });
     }
@@ -1690,9 +1685,8 @@ impl ImportView {
                 continue;
             };
 
-            let imagem = crate::image_processing::ImageProcessor::dynamic_to_color_image(
-                &resultado.image,
-            );
+            let imagem =
+                crate::image_processing::ImageProcessor::dynamic_to_color_image(&resultado.image);
             let textura = ctx.load_texture(
                 resultado.photo_id.clone(),
                 imagem,

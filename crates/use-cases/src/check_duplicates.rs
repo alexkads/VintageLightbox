@@ -4,14 +4,11 @@
 //! Usado antes da importação para evitar duplicatas no catálogo.
 
 use domain::{
-    entities::Photo,
-    repositories::PhotoRepository,
-    value_objects::FilePath,
-    DomainResult,
+    entities::Photo, repositories::PhotoRepository, value_objects::FilePath, DomainResult,
 };
-use std::sync::Arc;
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
 use std::io::Read;
+use std::sync::Arc;
 
 /// Resultado da verificação de duplicata para um arquivo
 #[derive(Debug, Clone)]
@@ -81,10 +78,7 @@ impl CheckDuplicatesUseCase {
         for (file_path, hash_opt) in hashes {
             if let Some(hash) = hash_opt {
                 // Buscar no banco de dados
-                let existing_photo = self
-                    .photo_repository
-                    .find_by_content_hash(&hash)
-                    .await?;
+                let existing_photo = self.photo_repository.find_by_content_hash(&hash).await?;
 
                 results.push(DuplicateCheckResult {
                     file_path,
@@ -112,8 +106,8 @@ mod tests {
     use super::*;
     use domain::repositories::PhotoRepository;
     use mockall::{mock, predicate::*};
-    use tempfile::NamedTempFile;
     use std::io::Write;
+    use tempfile::NamedTempFile;
 
     // Mock do PhotoRepository
     mock! {
@@ -262,9 +256,7 @@ mod tests {
         let use_case = CheckDuplicatesUseCase::new(Arc::new(mock_repo));
 
         let temp = create_temp_file_with_content(b"consistent content");
-        let files = vec![
-            FilePath::new(temp.path().to_str().unwrap()).unwrap(),
-        ];
+        let files = vec![FilePath::new(temp.path().to_str().unwrap()).unwrap()];
 
         // Act
         let result1 = use_case.execute(files.clone()).await.unwrap();

@@ -7,8 +7,7 @@ use crate::{DomainError, DomainResult};
 use serde::{Deserialize, Serialize};
 
 /// Layout de impressão
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum PrintLayout {
     /// Uma foto por página
     #[default]
@@ -44,8 +43,7 @@ impl PrintLayout {
 
     /// Cria um layout ContactSheet com validação
     pub fn contact_sheet(photos_per_page: u8) -> DomainResult<Self> {
-        if !(Self::MIN_PHOTOS_PER_PAGE..=Self::MAX_PHOTOS_PER_PAGE).contains(&photos_per_page)
-        {
+        if !(Self::MIN_PHOTOS_PER_PAGE..=Self::MAX_PHOTOS_PER_PAGE).contains(&photos_per_page) {
             return Err(DomainError::InvalidPrintSettings(format!(
                 "Photos per page must be between {} and {}",
                 Self::MIN_PHOTOS_PER_PAGE,
@@ -79,7 +77,6 @@ impl PrintLayout {
         matches!(self, PrintLayout::ContactSheet { .. })
     }
 }
-
 
 #[cfg(test)]
 mod tests {

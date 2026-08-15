@@ -154,7 +154,7 @@ impl PrintJob {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::value_objects::{PaperSize, Orientation, ColorMode, Margins};
+    use crate::value_objects::{ColorMode, Margins, Orientation, PaperSize};
 
     // 🔴 RED -> 🟢 GREEN -> 🔵 REFACTOR
 

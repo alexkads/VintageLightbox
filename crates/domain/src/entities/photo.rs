@@ -3,13 +3,13 @@
 //! Entidade central do domínio representando uma fotografia.
 //! Implementado usando TDD.
 
+use crate::value_objects::PhotoMetadata;
 use crate::{
     value_objects::{ColorLabel, FilePath, Flag, PhotoId, Rating},
     DomainResult,
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use crate::value_objects::PhotoMetadata;
 
 /// Entidade Photo - representa uma fotografia no catálogo
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -85,7 +85,7 @@ pub struct Photo {
     edit_hsl_purple_sat: Option<f32>,
     /// HSL: Magenta channel saturation adjustment (-100 to +100)
     edit_hsl_magenta_sat: Option<f32>,
-    
+
     // --- HSL Hue (-100 to +100) ---
     edit_hsl_red_hue: Option<f32>,
     edit_hsl_orange_hue: Option<f32>,
@@ -294,10 +294,9 @@ impl Photo {
     pub fn with_id(id: PhotoId, file_path: FilePath) -> Self {
         let now = Utc::now();
         Self::reconstruct(
-            id, file_path, now, now, None, None, None, None, false, None, None,
-            None, None, None, None, None, None, None, None, None, None, None,
-            None, None, None, None, None,
-            None, None, None, None, None, None, None, None, // HSL Sat
+            id, file_path, now, now, None, None, None, None, false, None, None, None, None, None,
+            None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+            None, None, None, None, None, None, None, // HSL Sat
             None, None, None, None, None, None, None, None, // HSL Hue
             None, None, None, None, None, None, None, None, // HSL Lum
             None, None, None, // Lens
@@ -645,7 +644,6 @@ impl Photo {
         Ok(())
     }
 
-
     /// Retorna o campo edit_tone_curve_shadows
     pub fn edit_tone_curve_shadows(&self) -> Option<f32> {
         self.edit_tone_curve_shadows
@@ -767,33 +765,69 @@ impl Photo {
     }
 
     /// Retorna o campo edit_hsl_red_hue
-    pub fn edit_hsl_red_hue(&self) -> Option<f32> { self.edit_hsl_red_hue }
-    pub fn edit_hsl_orange_hue(&self) -> Option<f32> { self.edit_hsl_orange_hue }
-    pub fn edit_hsl_yellow_hue(&self) -> Option<f32> { self.edit_hsl_yellow_hue }
-    pub fn edit_hsl_green_hue(&self) -> Option<f32> { self.edit_hsl_green_hue }
-    pub fn edit_hsl_aqua_hue(&self) -> Option<f32> { self.edit_hsl_aqua_hue }
-    pub fn edit_hsl_blue_hue(&self) -> Option<f32> { self.edit_hsl_blue_hue }
-    pub fn edit_hsl_purple_hue(&self) -> Option<f32> { self.edit_hsl_purple_hue }
-    pub fn edit_hsl_magenta_hue(&self) -> Option<f32> { self.edit_hsl_magenta_hue }
+    pub fn edit_hsl_red_hue(&self) -> Option<f32> {
+        self.edit_hsl_red_hue
+    }
+    pub fn edit_hsl_orange_hue(&self) -> Option<f32> {
+        self.edit_hsl_orange_hue
+    }
+    pub fn edit_hsl_yellow_hue(&self) -> Option<f32> {
+        self.edit_hsl_yellow_hue
+    }
+    pub fn edit_hsl_green_hue(&self) -> Option<f32> {
+        self.edit_hsl_green_hue
+    }
+    pub fn edit_hsl_aqua_hue(&self) -> Option<f32> {
+        self.edit_hsl_aqua_hue
+    }
+    pub fn edit_hsl_blue_hue(&self) -> Option<f32> {
+        self.edit_hsl_blue_hue
+    }
+    pub fn edit_hsl_purple_hue(&self) -> Option<f32> {
+        self.edit_hsl_purple_hue
+    }
+    pub fn edit_hsl_magenta_hue(&self) -> Option<f32> {
+        self.edit_hsl_magenta_hue
+    }
 
     /// Retorna o campo edit_hsl_red_lum
-    pub fn edit_hsl_red_lum(&self) -> Option<f32> { self.edit_hsl_red_lum }
-    pub fn edit_hsl_orange_lum(&self) -> Option<f32> { self.edit_hsl_orange_lum }
-    pub fn edit_hsl_yellow_lum(&self) -> Option<f32> { self.edit_hsl_yellow_lum }
-    pub fn edit_hsl_green_lum(&self) -> Option<f32> { self.edit_hsl_green_lum }
-    pub fn edit_hsl_aqua_lum(&self) -> Option<f32> { self.edit_hsl_aqua_lum }
-    pub fn edit_hsl_blue_lum(&self) -> Option<f32> { self.edit_hsl_blue_lum }
-    pub fn edit_hsl_purple_lum(&self) -> Option<f32> { self.edit_hsl_purple_lum }
-    pub fn edit_hsl_magenta_lum(&self) -> Option<f32> { self.edit_hsl_magenta_lum }
+    pub fn edit_hsl_red_lum(&self) -> Option<f32> {
+        self.edit_hsl_red_lum
+    }
+    pub fn edit_hsl_orange_lum(&self) -> Option<f32> {
+        self.edit_hsl_orange_lum
+    }
+    pub fn edit_hsl_yellow_lum(&self) -> Option<f32> {
+        self.edit_hsl_yellow_lum
+    }
+    pub fn edit_hsl_green_lum(&self) -> Option<f32> {
+        self.edit_hsl_green_lum
+    }
+    pub fn edit_hsl_aqua_lum(&self) -> Option<f32> {
+        self.edit_hsl_aqua_lum
+    }
+    pub fn edit_hsl_blue_lum(&self) -> Option<f32> {
+        self.edit_hsl_blue_lum
+    }
+    pub fn edit_hsl_purple_lum(&self) -> Option<f32> {
+        self.edit_hsl_purple_lum
+    }
+    pub fn edit_hsl_magenta_lum(&self) -> Option<f32> {
+        self.edit_hsl_magenta_lum
+    }
 
     /// Retorna o campo edit_lens_distortion
-    pub fn edit_lens_distortion(&self) -> Option<f32> { self.edit_lens_distortion }
+    pub fn edit_lens_distortion(&self) -> Option<f32> {
+        self.edit_lens_distortion
+    }
     /// Retorna o campo edit_lens_vignette_amount
-    pub fn edit_lens_vignette_amount(&self) -> Option<f32> { self.edit_lens_vignette_amount }
+    pub fn edit_lens_vignette_amount(&self) -> Option<f32> {
+        self.edit_lens_vignette_amount
+    }
     /// Retorna o campo edit_lens_vignette_midpoint
-    pub fn edit_lens_vignette_midpoint(&self) -> Option<f32> { self.edit_lens_vignette_midpoint }
-
-
+    pub fn edit_lens_vignette_midpoint(&self) -> Option<f32> {
+        self.edit_lens_vignette_midpoint
+    }
 
     /// Retorna o hash de conteúdo do arquivo (SHA-256)
     pub fn content_hash(&self) -> Option<&str> {
@@ -966,9 +1000,7 @@ mod tests {
     #[test]
     fn test_photo_file_name() {
         // Arrange
-        let photo = Photo::new(
-            FilePath::new("/path/to/my_photo.jpg").unwrap(),
-        );
+        let photo = Photo::new(FilePath::new("/path/to/my_photo.jpg").unwrap());
 
         // Act
         let name = photo.file_name();
@@ -980,12 +1012,8 @@ mod tests {
     #[test]
     fn test_photo_extension() {
         // Arrange
-        let photo1 = Photo::new(
-            FilePath::new("/path/photo.jpg").unwrap(),
-        );
-        let photo2 = Photo::new(
-            FilePath::new("/path/photo.RAW").unwrap(),
-        );
+        let photo1 = Photo::new(FilePath::new("/path/photo.jpg").unwrap());
+        let photo2 = Photo::new(FilePath::new("/path/photo.RAW").unwrap());
 
         // Assert
         assert_eq!(photo1.extension(), Some("jpg"));
@@ -1072,7 +1100,7 @@ mod business_logic_tests {
 
         // Act & Assert - Workflow completo de rating
         assert!(!photo.has_rating());
-        
+
         photo.rate(Rating::THREE).unwrap();
         assert!(photo.has_rating());
         assert_eq!(photo.rating(), Some(Rating::THREE));

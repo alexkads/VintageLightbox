@@ -140,7 +140,7 @@ mod tests {
         assert!(ColorLabel::from_name("pink").is_err());
         assert!(ColorLabel::from_name("").is_err());
         assert!(ColorLabel::from_name("notacolor").is_err());
-        
+
         let result = ColorLabel::from_name("invalid");
         assert_eq!(result.unwrap_err(), DomainError::InvalidColorLabel);
     }

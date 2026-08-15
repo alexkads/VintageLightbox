@@ -1,10 +1,10 @@
 use async_trait::async_trait;
-use domain::services::ImageExporter;
 use domain::entities::Photo;
+use domain::services::ImageExporter;
 use domain::value_objects::FilePath;
 use domain::{DomainError, DomainResult};
+use image::{DynamicImage, Pixel, Rgba};
 use std::path::Path;
-use image::{DynamicImage, Rgba, Pixel};
 
 pub struct ImageExporterImpl;
 
@@ -54,7 +54,7 @@ impl ImageExporterImpl {
         // 0.1 Luminance NR (Simple partial blur)
         let img_luminance_filtered = if nr_luminance > 0.0 {
             // Map 0-100 range to sigma 0.0 - 2.0
-            let sigma = nr_luminance * 0.02; 
+            let sigma = nr_luminance * 0.02;
             img.blur(sigma)
         } else {
             img.clone()
@@ -62,35 +62,37 @@ impl ImageExporterImpl {
 
         // 0.2 Color NR (Blur then Restore Luminance)
         let img_to_process = if nr_color > 0.0 {
-             let sigma = nr_color * 0.05; // 0-100 -> 0-5.0 sigma
-             let blurred = img_luminance_filtered.blur(sigma);
-             
-             let mut recombined = img_luminance_filtered.to_rgba8();
-             let blurred_rgba = blurred.to_rgba8();
-             let (width, height) = recombined.dimensions();
-             
-             for y in 0..height {
-                 for x in 0..width {
-                     let orig = recombined.get_pixel(x, y);
-                     let blur = blurred_rgba.get_pixel(x, y);
-                     
-                     let y_orig = 0.299 * orig[0] as f32 + 0.587 * orig[1] as f32 + 0.114 * orig[2] as f32;
-                     let y_blur = 0.299 * blur[0] as f32 + 0.587 * blur[1] as f32 + 0.114 * blur[2] as f32;
-                     
-                     if y_blur > 0.001 {
-                         let ratio = y_orig / y_blur;
-                         let r = (blur[0] as f32 * ratio).clamp(0.0, 255.0) as u8;
-                         let g = (blur[1] as f32 * ratio).clamp(0.0, 255.0) as u8;
-                         let b = (blur[2] as f32 * ratio).clamp(0.0, 255.0) as u8;
-                         recombined.put_pixel(x, y, Rgba([r, g, b, orig[3]]));
-                     } else {
-                         recombined.put_pixel(x, y, *orig);
-                     }
-                 }
-             }
-             DynamicImage::ImageRgba8(recombined)
+            let sigma = nr_color * 0.05; // 0-100 -> 0-5.0 sigma
+            let blurred = img_luminance_filtered.blur(sigma);
+
+            let mut recombined = img_luminance_filtered.to_rgba8();
+            let blurred_rgba = blurred.to_rgba8();
+            let (width, height) = recombined.dimensions();
+
+            for y in 0..height {
+                for x in 0..width {
+                    let orig = recombined.get_pixel(x, y);
+                    let blur = blurred_rgba.get_pixel(x, y);
+
+                    let y_orig =
+                        0.299 * orig[0] as f32 + 0.587 * orig[1] as f32 + 0.114 * orig[2] as f32;
+                    let y_blur =
+                        0.299 * blur[0] as f32 + 0.587 * blur[1] as f32 + 0.114 * blur[2] as f32;
+
+                    if y_blur > 0.001 {
+                        let ratio = y_orig / y_blur;
+                        let r = (blur[0] as f32 * ratio).clamp(0.0, 255.0) as u8;
+                        let g = (blur[1] as f32 * ratio).clamp(0.0, 255.0) as u8;
+                        let b = (blur[2] as f32 * ratio).clamp(0.0, 255.0) as u8;
+                        recombined.put_pixel(x, y, Rgba([r, g, b, orig[3]]));
+                    } else {
+                        recombined.put_pixel(x, y, *orig);
+                    }
+                }
+            }
+            DynamicImage::ImageRgba8(recombined)
         } else {
-             img_luminance_filtered
+            img_luminance_filtered
         };
 
         let mut result = img_to_process.to_rgba8();
@@ -101,7 +103,8 @@ impl ImageExporterImpl {
             for x in 0..width {
                 let pixel = result.get_pixel(x, y);
                 let rgba = pixel.channels();
-                let (mut r, mut g, mut b, a) = (rgba[0] as f32, rgba[1] as f32, rgba[2] as f32, rgba[3]);
+                let (mut r, mut g, mut b, a) =
+                    (rgba[0] as f32, rgba[1] as f32, rgba[2] as f32, rgba[3]);
 
                 // 1. Exposure (brightness adjustment)
                 if exposure != 0.0 {
@@ -196,8 +199,10 @@ impl ImageExporterImpl {
                 // 10. Vibrance (intelligent saturation - affects muted colors more)
                 if vibrance != 0.0 {
                     let luminance = (r + g + b) / 3.0;
-                    let max_diff = ((r - luminance).abs().max((g - luminance).abs())).max((b - luminance).abs());
-                    if max_diff < 64.0 {  // Only affect less saturated colors
+                    let max_diff = ((r - luminance).abs().max((g - luminance).abs()))
+                        .max((b - luminance).abs());
+                    if max_diff < 64.0 {
+                        // Only affect less saturated colors
                         let factor = 1.0 + vibrance * 2.0;
                         r = luminance + (r - luminance) * factor;
                         g = luminance + (g - luminance) * factor;
@@ -226,9 +231,9 @@ impl ImageExporterImpl {
         let final_image = if sharpen_amount > 0.0 {
             // Apply unsharp mask logic
             // image::imageops::unsharpen takes (image, sigma, amount)
-            // Amount in image crate is i32? Let's check or cast. 
+            // Amount in image crate is i32? Let's check or cast.
             // Actually image crate unsharpen signature: (image, sigma, amount) where amount is i32
-            // But typical amount is small integer? 
+            // But typical amount is small integer?
             // Let's assume input 0-100 maps to something reasonable.
             image::imageops::unsharpen(&result, sharpen_radius, sharpen_amount as i32)
         } else {
@@ -243,10 +248,11 @@ impl ImageExporterImpl {
 impl ImageExporter for ImageExporterImpl {
     async fn export(&self, photo: &Photo, output_path: &FilePath) -> DomainResult<()> {
         let input_path = photo.file_path().as_str()?;
-        
+
         // Load original image
-        let img = image::open(Path::new(&input_path))
-            .map_err(|e| DomainError::InfrastructureError(format!("Failed to open source image: {}", e)))?;
+        let img = image::open(Path::new(&input_path)).map_err(|e| {
+            DomainError::InfrastructureError(format!("Failed to open source image: {}", e))
+        })?;
 
         // Get all adjustments from photo
         let exposure = photo.edit_exposure().unwrap_or(0.0);
@@ -267,30 +273,44 @@ impl ImageExporter for ImageExporterImpl {
 
         // Apply all adjustments
         let processed = Self::process_image(
-            &img, exposure, contrast, temperature, tint,
-            highlights, shadows, whites, blacks,
-            clarity, vibrance, saturation,
-            nr_luminance, nr_color,
-            sharpen_amount, sharpen_radius
+            &img,
+            exposure,
+            contrast,
+            temperature,
+            tint,
+            highlights,
+            shadows,
+            whites,
+            blacks,
+            clarity,
+            vibrance,
+            saturation,
+            nr_luminance,
+            nr_color,
+            sharpen_amount,
+            sharpen_radius,
         );
 
         // Save as JPEG with quality 90
         let output_path_str = output_path.as_str()?;
         let rgb_img = processed.to_rgb8();
-        
-        let file = std::fs::File::create(Path::new(output_path_str))
-            .map_err(|e| DomainError::InfrastructureError(format!("Failed to create output file: {}", e)))?;
-        
+
+        let file = std::fs::File::create(Path::new(output_path_str)).map_err(|e| {
+            DomainError::InfrastructureError(format!("Failed to create output file: {}", e))
+        })?;
+
         let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(file, 90);
-        encoder.encode(
-            &rgb_img,
-            rgb_img.width(),
-            rgb_img.height(),
-            image::ExtendedColorType::Rgb8,
-        )
-            .map_err(|e| DomainError::InfrastructureError(format!("Failed to encode JPEG: {}", e)))?;
+        encoder
+            .encode(
+                &rgb_img,
+                rgb_img.width(),
+                rgb_img.height(),
+                image::ExtendedColorType::Rgb8,
+            )
+            .map_err(|e| {
+                DomainError::InfrastructureError(format!("Failed to encode JPEG: {}", e))
+            })?;
 
         Ok(())
     }
 }
-

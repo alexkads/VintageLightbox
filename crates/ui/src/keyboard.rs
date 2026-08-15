@@ -1,10 +1,10 @@
 // Keyboard Shortcut Handler
 // Handles all keyboard shortcuts for the application
 
-use egui::{Context, Key};
 use crate::state::{AppState, CurrentView};
-use std::sync::Arc;
 use adapters::controllers::PhotoController;
+use egui::{Context, Key};
+use std::sync::Arc;
 
 pub struct KeyboardHandler;
 
@@ -23,7 +23,9 @@ impl KeyboardHandler {
         editor_controller: &Arc<adapters::controllers::EditorController>,
         _export_controller: &Arc<adapters::controllers::ExportController>,
         _import_controller: &Arc<adapters::controllers::ImportController>,
-        photo_sender: &tokio::sync::mpsc::Sender<Result<Vec<adapters::view_models::PhotoViewModel>, String>>,
+        photo_sender: &tokio::sync::mpsc::Sender<
+            Result<Vec<adapters::view_models::PhotoViewModel>, String>,
+        >,
     ) {
         // ==========================================
         // NAVIGATION SHORTCUTS (Arrow keys) - Must be outside closure for Develop mode
@@ -45,7 +47,9 @@ impl KeyboardHandler {
                     let visible_photos = state.filmstrip_filter.apply(&state.photos);
 
                     if let Some(current_id) = &state.develop_selected_photo_id.clone() {
-                        if let Some(current_pos) = visible_photos.iter().position(|p| &p.id == current_id) {
+                        if let Some(current_pos) =
+                            visible_photos.iter().position(|p| &p.id == current_id)
+                        {
                             let new_pos = if direction > 0 {
                                 (current_pos + 1).min(visible_photos.len().saturating_sub(1))
                             } else {
@@ -55,14 +59,16 @@ impl KeyboardHandler {
                             if new_pos != current_pos {
                                 if let Some(photo) = visible_photos.get(new_pos) {
                                     // Check if we need to save the CURRENT photo before switching
-                                    let needs_save = state.pending_auto_save || (state.crop_mode_active && state.crop_settings.is_some());
-                                    
+                                    let needs_save = state.pending_auto_save
+                                        || (state.crop_mode_active
+                                            && state.crop_settings.is_some());
+
                                     if needs_save {
                                         if let Some(vm) = state.get_current_photo() {
                                             // Trigger explicit save for current photo
                                             let controller = editor_controller.clone();
                                             let photo_id = vm.id.clone();
-                                            
+
                                             // Capture current values
                                             let exposure = state.active_exposure;
                                             let contrast = state.active_contrast;
@@ -75,10 +81,12 @@ impl KeyboardHandler {
                                             let clarity = state.active_clarity;
                                             let vibrance = state.active_vibrance;
                                             let saturation = state.active_saturation;
-                                            let tone_curve_shadows = state.active_tone_curve_shadows;
+                                            let tone_curve_shadows =
+                                                state.active_tone_curve_shadows;
                                             let tone_curve_darks = state.active_tone_curve_darks;
                                             let tone_curve_lights = state.active_tone_curve_lights;
-                                            let tone_curve_highlights = state.active_tone_curve_highlights;
+                                            let tone_curve_highlights =
+                                                state.active_tone_curve_highlights;
                                             let hsl_red_sat = state.active_hsl_red_sat;
                                             let hsl_orange_sat = state.active_hsl_orange_sat;
                                             let hsl_yellow_sat = state.active_hsl_yellow_sat;
@@ -104,8 +112,10 @@ impl KeyboardHandler {
                                             let hsl_purple_lum = state.active_hsl_purple_lum;
                                             let hsl_magenta_lum = state.active_hsl_magenta_lum;
                                             let lens_distortion = state.active_lens_distortion;
-                                            let lens_vignette_amount = state.active_lens_vignette_amount;
-                                            let lens_vignette_midpoint = state.active_lens_vignette_midpoint;
+                                            let lens_vignette_amount =
+                                                state.active_lens_vignette_amount;
+                                            let lens_vignette_midpoint =
+                                                state.active_lens_vignette_midpoint;
                                             let nr_luminance = state.active_nr_luminance;
                                             let nr_color = state.active_nr_color;
                                             let sharpen_amount = state.active_sharpen_amount;
@@ -113,30 +123,77 @@ impl KeyboardHandler {
                                             let crop_settings = state.crop_settings.clone();
 
                                             tokio::spawn(async move {
-                                                let _ = controller.save_edits(
-                                                    photo_id,
-                                                    exposure, contrast, 
-                                                    temperature, tint,
-                                                    highlights, shadows, whites, blacks,
-                                                    clarity, vibrance, saturation,
-                                                    tone_curve_shadows, tone_curve_darks, tone_curve_lights, tone_curve_highlights,
-                                                    hsl_red_sat, hsl_orange_sat, hsl_yellow_sat, hsl_green_sat, hsl_aqua_sat, hsl_blue_sat, hsl_purple_sat, hsl_magenta_sat,
-                                                    hsl_red_hue, hsl_orange_hue, hsl_yellow_hue, hsl_green_hue, hsl_aqua_hue, hsl_blue_hue, hsl_purple_hue, hsl_magenta_hue,
-                                                    hsl_red_lum, hsl_orange_lum, hsl_yellow_lum, hsl_green_lum, hsl_aqua_lum, hsl_blue_lum, hsl_purple_lum, hsl_magenta_lum,
-                                                    lens_distortion, lens_vignette_amount, lens_vignette_midpoint,
-                                                    nr_luminance, nr_color,
-                                                    sharpen_amount, sharpen_radius,
-                                                    crop_settings.as_ref().map(|c| c.crop_x()),
-                                                    crop_settings.as_ref().map(|c| c.crop_y()),
-                                                    crop_settings.as_ref().map(|c| c.crop_width()),
-                                                    crop_settings.as_ref().map(|c| c.crop_height()),
-                                                    crop_settings.as_ref().map(|c| c.rotation_90()),
-                                                    crop_settings.as_ref().map(|c| c.angle()),
-                                                    crop_settings.as_ref().map(|c| c.flip_horizontal()),
-                                                    crop_settings.as_ref().map(|c| c.flip_vertical()),
-                                                ).await;
+                                                let _ = controller
+                                                    .save_edits(
+                                                        photo_id,
+                                                        exposure,
+                                                        contrast,
+                                                        temperature,
+                                                        tint,
+                                                        highlights,
+                                                        shadows,
+                                                        whites,
+                                                        blacks,
+                                                        clarity,
+                                                        vibrance,
+                                                        saturation,
+                                                        tone_curve_shadows,
+                                                        tone_curve_darks,
+                                                        tone_curve_lights,
+                                                        tone_curve_highlights,
+                                                        hsl_red_sat,
+                                                        hsl_orange_sat,
+                                                        hsl_yellow_sat,
+                                                        hsl_green_sat,
+                                                        hsl_aqua_sat,
+                                                        hsl_blue_sat,
+                                                        hsl_purple_sat,
+                                                        hsl_magenta_sat,
+                                                        hsl_red_hue,
+                                                        hsl_orange_hue,
+                                                        hsl_yellow_hue,
+                                                        hsl_green_hue,
+                                                        hsl_aqua_hue,
+                                                        hsl_blue_hue,
+                                                        hsl_purple_hue,
+                                                        hsl_magenta_hue,
+                                                        hsl_red_lum,
+                                                        hsl_orange_lum,
+                                                        hsl_yellow_lum,
+                                                        hsl_green_lum,
+                                                        hsl_aqua_lum,
+                                                        hsl_blue_lum,
+                                                        hsl_purple_lum,
+                                                        hsl_magenta_lum,
+                                                        lens_distortion,
+                                                        lens_vignette_amount,
+                                                        lens_vignette_midpoint,
+                                                        nr_luminance,
+                                                        nr_color,
+                                                        sharpen_amount,
+                                                        sharpen_radius,
+                                                        crop_settings.as_ref().map(|c| c.crop_x()),
+                                                        crop_settings.as_ref().map(|c| c.crop_y()),
+                                                        crop_settings
+                                                            .as_ref()
+                                                            .map(|c| c.crop_width()),
+                                                        crop_settings
+                                                            .as_ref()
+                                                            .map(|c| c.crop_height()),
+                                                        crop_settings
+                                                            .as_ref()
+                                                            .map(|c| c.rotation_90()),
+                                                        crop_settings.as_ref().map(|c| c.angle()),
+                                                        crop_settings
+                                                            .as_ref()
+                                                            .map(|c| c.flip_horizontal()),
+                                                        crop_settings
+                                                            .as_ref()
+                                                            .map(|c| c.flip_vertical()),
+                                                    )
+                                                    .await;
                                             });
-                                            
+
                                             // Update saved crop settings to match current, preventing re-save loop on next frame
                                             state.saved_crop_settings = state.crop_settings.clone();
                                         }
@@ -170,13 +227,31 @@ impl KeyboardHandler {
             }
 
             // Rating shortcuts (0-5)
-            self.handle_rating_shortcuts(i, state, photo_controller, library_controller, photo_sender);
+            self.handle_rating_shortcuts(
+                i,
+                state,
+                photo_controller,
+                library_controller,
+                photo_sender,
+            );
 
             // Color label shortcuts (6-9 and 0 for none, though 0 is shared with unrate)
-            self.handle_color_label_shortcuts(i, state, photo_controller, library_controller, photo_sender);
+            self.handle_color_label_shortcuts(
+                i,
+                state,
+                photo_controller,
+                library_controller,
+                photo_sender,
+            );
 
             // Flag shortcuts (P, X, U)
-            self.handle_flag_shortcuts(i, state, photo_controller, library_controller, photo_sender);
+            self.handle_flag_shortcuts(
+                i,
+                state,
+                photo_controller,
+                library_controller,
+                photo_sender,
+            );
 
             // Selection shortcuts (Cmd+A, Cmd+D) - Library only
             if state.current_view == CurrentView::Library {
@@ -213,7 +288,8 @@ impl KeyboardHandler {
                     if state.crop_mode_active {
                         // Initialize crop settings when entering crop mode
                         if state.crop_settings.is_none() {
-                            state.crop_settings = Some(domain::value_objects::CropSettings::default());
+                            state.crop_settings =
+                                Some(domain::value_objects::CropSettings::default());
                         }
                     }
                 }
@@ -264,7 +340,9 @@ impl KeyboardHandler {
         state: &mut AppState,
         photo_controller: &Arc<PhotoController>,
         library_controller: &Arc<adapters::controllers::LibraryController>,
-        photo_sender: &tokio::sync::mpsc::Sender<Result<Vec<adapters::view_models::PhotoViewModel>, String>>,
+        photo_sender: &tokio::sync::mpsc::Sender<
+            Result<Vec<adapters::view_models::PhotoViewModel>, String>,
+        >,
     ) {
         let rating_keys = [
             (Key::Num0, 0),
@@ -279,7 +357,9 @@ impl KeyboardHandler {
             // Check both standard Num keys and Numpad keys if possible (egui maps them usually)
             if input.key_pressed(key) {
                 let target_ids = self.get_target_photos(state);
-                if target_ids.is_empty() { continue; }
+                if target_ids.is_empty() {
+                    continue;
+                }
 
                 // Optimistically update UI state first
                 for id in &target_ids {
@@ -300,7 +380,7 @@ impl KeyboardHandler {
                 let ids_clone = target_ids.clone();
                 let lib_controller = library_controller.clone();
                 let sender = photo_sender.clone();
-                
+
                 tokio::spawn(async move {
                     for id in ids_clone {
                         if let Err(e) = controller.rate_photo(&id, rating).await {
@@ -323,7 +403,9 @@ impl KeyboardHandler {
         state: &mut AppState,
         photo_controller: &Arc<PhotoController>,
         library_controller: &Arc<adapters::controllers::LibraryController>,
-        photo_sender: &tokio::sync::mpsc::Sender<Result<Vec<adapters::view_models::PhotoViewModel>, String>>,
+        photo_sender: &tokio::sync::mpsc::Sender<
+            Result<Vec<adapters::view_models::PhotoViewModel>, String>,
+        >,
     ) {
         let color_keys = [
             (Key::Num6, Some("Red")),
@@ -336,18 +418,20 @@ impl KeyboardHandler {
         for (key, color_opt) in color_keys {
             if input.key_pressed(key) {
                 let target_ids = self.get_target_photos(state);
-                if target_ids.is_empty() { continue; }
+                if target_ids.is_empty() {
+                    continue;
+                }
 
                 let selected_color = color_opt.map(|s| s.to_string()).unwrap_or_default();
-                
+
                 // Check if we should toggle OFF (if all targets already have this color)
                 // We handle case-insensitivity ("Red" vs "red")
                 let all_already_have_color = target_ids.iter().all(|id| {
                     if let Some(photo) = state.photos.iter().find(|p| p.id == *id) {
-                         match &photo.color_label {
-                             Some(current) => current.eq_ignore_ascii_case(&selected_color),
-                             None => false,
-                         }
+                        match &photo.color_label {
+                            Some(current) => current.eq_ignore_ascii_case(&selected_color),
+                            None => false,
+                        }
                     } else {
                         false
                     }
@@ -377,7 +461,7 @@ impl KeyboardHandler {
                 let label_clone = new_color_str;
                 let lib_controller = library_controller.clone();
                 let sender = photo_sender.clone();
-                
+
                 tokio::spawn(async move {
                     for id in ids_clone {
                         if let Err(e) = controller.set_color_label(&id, &label_clone).await {
@@ -400,7 +484,9 @@ impl KeyboardHandler {
         state: &mut AppState,
         photo_controller: &Arc<PhotoController>,
         library_controller: &Arc<adapters::controllers::LibraryController>,
-        photo_sender: &tokio::sync::mpsc::Sender<Result<Vec<adapters::view_models::PhotoViewModel>, String>>,
+        photo_sender: &tokio::sync::mpsc::Sender<
+            Result<Vec<adapters::view_models::PhotoViewModel>, String>,
+        >,
     ) {
         let flag_keys = [
             (Key::P, 1),  // Pick
@@ -411,8 +497,8 @@ impl KeyboardHandler {
         for (key, requested_flag) in flag_keys {
             if input.key_pressed(key) {
                 let target_ids = self.get_target_photos(state);
-                if target_ids.is_empty() { 
-                    continue; 
+                if target_ids.is_empty() {
+                    continue;
                 }
 
                 // Collect the new flag state for each photo and trigger async updates
@@ -422,15 +508,15 @@ impl KeyboardHandler {
                 for id in &target_ids {
                     if let Some(photo) = state.photos.iter_mut().find(|p| p.id == *id) {
                         let current_flag = photo.flag.unwrap_or(0);
-                        
+
                         // Toggle logic: If the requested flag is already set, toggle to 0 (Unflag).
                         // Unless the requested flag is 0 (Unflag shortcut), which always sets to 0.
                         let new_flag = if requested_flag != 0 && current_flag == requested_flag {
-                            0 
+                            0
                         } else {
                             requested_flag
                         };
-                        
+
                         photo.flag = Some(new_flag);
                         updates.push((id.clone(), new_flag));
                     }
@@ -440,7 +526,7 @@ impl KeyboardHandler {
                 let controller = photo_controller.clone();
                 let lib_controller = library_controller.clone();
                 let sender = photo_sender.clone();
-                
+
                 if !updates.is_empty() {
                     tokio::spawn(async move {
                         for (id, flag) in updates {

@@ -3,8 +3,8 @@
 // Rating Widget Component
 // Interactive star rating (0-5 stars)
 
-use egui::{Ui, Vec2, Sense};
 use crate::design_system::theme::Theme;
+use egui::{Sense, Ui, Vec2};
 
 pub struct RatingWidget;
 
@@ -28,7 +28,11 @@ impl RatingWidget {
 
         let (rect, response) = ui.allocate_exact_size(
             Vec2::new(total_width, star_size),
-            if interactive { Sense::click() } else { Sense::hover() },
+            if interactive {
+                Sense::click()
+            } else {
+                Sense::hover()
+            },
         );
 
         let mut changed_rating: Option<i32> = None;

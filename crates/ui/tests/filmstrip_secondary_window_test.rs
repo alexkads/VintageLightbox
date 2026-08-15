@@ -1,8 +1,10 @@
-use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
-use ui::components::filmstrip_secondary_windows::{FilmstripSecondaryWindows, SecondaryWindowAction};
+use egui_kittest::Harness;
 use std::cell::Cell;
 use std::rc::Rc;
+use ui::components::filmstrip_secondary_windows::{
+    FilmstripSecondaryWindows, SecondaryWindowAction,
+};
 
 #[test]
 fn test_secondary_window_control_renders_and_clicks() {
@@ -19,21 +21,21 @@ fn test_secondary_window_control_renders_and_clicks() {
 
     // Initial render
     harness.run();
-    
+
     // Verify default state (no action)
     assert_eq!(last_action.get(), None);
-    
+
     // Find the toggle button by its icon text
     // Note: If this fails, we might need to verify exactly how RichText is handled by kittest,
     // or add semantic labels/IDs to the component.
     let btn = harness.get_by_label("🖥");
-    
+
     // Simulate click
     btn.click();
-    
+
     // Run frame to process click
     harness.run();
-    
+
     // Verify action was emitted
     assert_eq!(last_action.get(), Some(SecondaryWindowAction::Toggle));
 }

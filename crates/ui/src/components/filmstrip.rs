@@ -2,15 +2,15 @@
 // Horizontal thumbnail navigation bar similar to Lightroom
 // Uses async thumbnail loading for smooth UI
 
-use egui::{Ui, Vec2, Sense, Color32, Stroke, CornerRadius};
-use std::collections::HashMap;
-use adapters::view_models::PhotoViewModel;
-use crate::design_system::theme::Theme;
 use crate::async_loader::{AsyncThumbnailLoader, ThumbnailRequest};
-use crate::state::AppState;
 use crate::components::context_menu::{ContextMenu, ContextMenuItem};
-use std::sync::Arc;
+use crate::design_system::theme::Theme;
+use crate::state::AppState;
+use adapters::view_models::PhotoViewModel;
+use egui::{Color32, CornerRadius, Sense, Stroke, Ui, Vec2};
 use infrastructure::cache::preview_manager::PreviewManager;
+use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Represents an action triggered by the context menu
 #[derive(Clone, Debug, PartialEq)]
@@ -59,9 +59,11 @@ impl Filmstrip {
         ui.horizontal(|ui| {
             ui.add_space(Theme::SPACE_SM);
             state.filmstrip_filter.ui(ui);
-            
-            use crate::components::filmstrip_secondary_windows::{FilmstripSecondaryWindows, SecondaryWindowAction};
-            
+
+            use crate::components::filmstrip_secondary_windows::{
+                FilmstripSecondaryWindows, SecondaryWindowAction,
+            };
+
             if let Some(act) = FilmstripSecondaryWindows::show(ui) {
                 match act {
                     SecondaryWindowAction::Toggle => {
@@ -84,7 +86,9 @@ impl Filmstrip {
             // Use state.photos to find edits (we need to find by ID)
             // Since visible_photos is a subset, checking state.photos is more robust/correct if edits updated
             // But visible_photos refs point to state.photos anyway.
-            let processed_image = if let Some(photo) = state.photos.iter().find(|p| p.id == result.photo_id) {
+            let processed_image = if let Some(photo) =
+                state.photos.iter().find(|p| p.id == result.photo_id)
+            {
                 let exposure = photo.edit_exposure.unwrap_or(0.0);
                 let contrast = photo.edit_contrast.unwrap_or(1.0);
                 let temperature = photo.edit_temperature.unwrap_or(0.0);
@@ -96,13 +100,13 @@ impl Filmstrip {
                 let clarity = photo.edit_clarity.unwrap_or(0.0);
                 let vibrance = photo.edit_vibrance.unwrap_or(0.0);
                 let saturation = photo.edit_saturation.unwrap_or(0.0);
-                
+
                 // Tone Curve
                 let tone_curve_shadows = photo.edit_tone_curve_shadows.unwrap_or(0.0);
                 let tone_curve_darks = photo.edit_tone_curve_darks.unwrap_or(0.0);
                 let tone_curve_lights = photo.edit_tone_curve_lights.unwrap_or(0.0);
                 let tone_curve_highlights = photo.edit_tone_curve_highlights.unwrap_or(0.0);
-                
+
                 // HSL Saturation
                 let hsl_red_sat = photo.edit_hsl_red_sat.unwrap_or(0.0);
                 let hsl_orange_sat = photo.edit_hsl_orange_sat.unwrap_or(0.0);
@@ -140,42 +144,86 @@ impl Filmstrip {
                 // Sharpening
                 let sharpen_amount = photo.edit_sharpen_amount.unwrap_or(0.0);
                 let sharpen_radius = photo.edit_sharpen_radius.unwrap_or(1.0);
-                
+
                 // Only apply effects if there are actual edits
-                let has_edits = exposure != 0.0 || contrast != 1.0 || temperature != 0.0 || 
-                               tint != 0.0 || saturation != 0.0 || vibrance != 0.0;
-                
+                let has_edits = exposure != 0.0
+                    || contrast != 1.0
+                    || temperature != 0.0
+                    || tint != 0.0
+                    || saturation != 0.0
+                    || vibrance != 0.0;
+
                 let processed = if has_edits {
                     crate::image_processing::ImageProcessor::process_image(
-                        &result.image, exposure, contrast, temperature, tint,
-                        highlights, shadows, whites, blacks, clarity, vibrance, saturation,
-                        tone_curve_shadows, tone_curve_darks, tone_curve_lights, tone_curve_highlights,
-                        hsl_red_sat, hsl_orange_sat, hsl_yellow_sat, hsl_green_sat,
-                        hsl_aqua_sat, hsl_blue_sat, hsl_purple_sat, hsl_magenta_sat,
+                        &result.image,
+                        exposure,
+                        contrast,
+                        temperature,
+                        tint,
+                        highlights,
+                        shadows,
+                        whites,
+                        blacks,
+                        clarity,
+                        vibrance,
+                        saturation,
+                        tone_curve_shadows,
+                        tone_curve_darks,
+                        tone_curve_lights,
+                        tone_curve_highlights,
+                        hsl_red_sat,
+                        hsl_orange_sat,
+                        hsl_yellow_sat,
+                        hsl_green_sat,
+                        hsl_aqua_sat,
+                        hsl_blue_sat,
+                        hsl_purple_sat,
+                        hsl_magenta_sat,
                         // HSL Hue
-                        hsl_red_hue, hsl_orange_hue, hsl_yellow_hue, hsl_green_hue,
-                        hsl_aqua_hue, hsl_blue_hue, hsl_purple_hue, hsl_magenta_hue,
+                        hsl_red_hue,
+                        hsl_orange_hue,
+                        hsl_yellow_hue,
+                        hsl_green_hue,
+                        hsl_aqua_hue,
+                        hsl_blue_hue,
+                        hsl_purple_hue,
+                        hsl_magenta_hue,
                         // HSL Lum
-                        hsl_red_lum, hsl_orange_lum, hsl_yellow_lum, hsl_green_lum,
-                        hsl_aqua_lum, hsl_blue_lum, hsl_purple_lum, hsl_magenta_lum,
+                        hsl_red_lum,
+                        hsl_orange_lum,
+                        hsl_yellow_lum,
+                        hsl_green_lum,
+                        hsl_aqua_lum,
+                        hsl_blue_lum,
+                        hsl_purple_lum,
+                        hsl_magenta_lum,
                         // Lens
-                        lens_distortion, lens_vignette_amount, lens_vignette_midpoint,
+                        lens_distortion,
+                        lens_vignette_amount,
+                        lens_vignette_midpoint,
                         // NR
-                        nr_luminance, nr_color,
+                        nr_luminance,
+                        nr_color,
                         // Sharpening
-                        sharpen_amount, sharpen_radius,
+                        sharpen_amount,
+                        sharpen_radius,
                     )
                 } else {
                     result.image.clone()
                 };
-                
+
                 // Apply crop if present
                 if let (Some(x), Some(y), Some(w), Some(h)) = (
-                    photo.edit_crop_x, photo.edit_crop_y,
-                    photo.edit_crop_width, photo.edit_crop_height
+                    photo.edit_crop_x,
+                    photo.edit_crop_y,
+                    photo.edit_crop_width,
+                    photo.edit_crop_height,
                 ) {
                     let crop_settings = domain::value_objects::CropSettings::new(
-                        x, y, w, h,
+                        x,
+                        y,
+                        w,
+                        h,
                         photo.edit_crop_rotation.unwrap_or(0),
                         photo.edit_crop_angle.unwrap_or(0.0),
                         photo.edit_crop_flip_h.unwrap_or(false),
@@ -188,11 +236,11 @@ impl Filmstrip {
             } else {
                 result.image.clone()
             };
-            
+
             let texture = crate::image_processing::ImageProcessor::load_texture(
                 ctx,
                 format!("filmstrip_thumb_{}", result.photo_id),
-                &processed_image
+                &processed_image,
             );
             self.thumbnail_cache.insert(result.photo_id, texture);
         }
@@ -235,8 +283,9 @@ impl Filmstrip {
                     for (index, photo) in visible_photos.iter().enumerate() {
                         // Access fields directly to avoid borrow conflict
                         let is_multi_selected = state.selected_photo_ids.contains(&photo.id);
-                        let is_primary_selected = state.library_selected_photo_id.as_ref() == Some(&photo.id);
-                        
+                        let is_primary_selected =
+                            state.library_selected_photo_id.as_ref() == Some(&photo.id);
+
                         // Reserve space for thumbnail
                         let (rect, response) = ui.allocate_exact_size(
                             Vec2::new(Self::THUMBNAIL_SIZE, Self::THUMBNAIL_SIZE),
@@ -250,24 +299,32 @@ impl Filmstrip {
                         let current_flag = photo.flag.unwrap_or(0);
                         let is_hovered = response.hovered();
 
-                       // ... (Flag interaction code same as before) ...
+                        // ... (Flag interaction code same as before) ...
                         let flag_size = 14.0;
                         let padding = 4.0;
                         let spacing = 2.0;
 
                         let pick_rect = egui::Rect::from_min_size(
                             rect.min + Vec2::new(padding, padding),
-                            Vec2::new(flag_size, flag_size)
-                        );
-                        
-                        let reject_rect = egui::Rect::from_min_size(
-                            rect.min + Vec2::new(padding + flag_size + spacing, padding),
-                            Vec2::new(flag_size, flag_size)
+                            Vec2::new(flag_size, flag_size),
                         );
 
-                        let pick_response = ui.interact(pick_rect, egui::Id::new(format!("pick_{}", photo.id)), Sense::click());
-                        let reject_response = ui.interact(reject_rect, egui::Id::new(format!("reject_{}", photo.id)), Sense::click());
-                        
+                        let reject_rect = egui::Rect::from_min_size(
+                            rect.min + Vec2::new(padding + flag_size + spacing, padding),
+                            Vec2::new(flag_size, flag_size),
+                        );
+
+                        let pick_response = ui.interact(
+                            pick_rect,
+                            egui::Id::new(format!("pick_{}", photo.id)),
+                            Sense::click(),
+                        );
+                        let reject_response = ui.interact(
+                            reject_rect,
+                            egui::Id::new(format!("reject_{}", photo.id)),
+                            Sense::click(),
+                        );
+
                         let pick_hovered = pick_response.hovered();
                         let reject_hovered = reject_response.hovered();
 
@@ -281,21 +338,45 @@ impl Filmstrip {
                             action = Some(FilmstripAction::SetFlag(photo.id.clone(), new_flag));
                         }
 
-                        let show_flags = is_hovered || current_flag != 0 || pick_hovered || reject_hovered;
+                        let show_flags =
+                            is_hovered || current_flag != 0 || pick_hovered || reject_hovered;
 
                         if show_flags {
                             let painter = ui.painter();
-                            let pick_color = if current_flag == 1 { Theme::ACCENT_SUCCESS } else if pick_hovered { ui.visuals().text_color() } else { ui.visuals().weak_text_color() };
-                            painter.text(pick_rect.center(), egui::Align2::CENTER_CENTER, crate::design_system::icons::FLAG_PICK, egui::FontId::proportional(12.0), pick_color);
+                            let pick_color = if current_flag == 1 {
+                                Theme::ACCENT_SUCCESS
+                            } else if pick_hovered {
+                                ui.visuals().text_color()
+                            } else {
+                                ui.visuals().weak_text_color()
+                            };
+                            painter.text(
+                                pick_rect.center(),
+                                egui::Align2::CENTER_CENTER,
+                                crate::design_system::icons::FLAG_PICK,
+                                egui::FontId::proportional(12.0),
+                                pick_color,
+                            );
 
-                            let reject_color = if current_flag == -1 { Theme::ACCENT_ERROR } else if reject_hovered { ui.visuals().text_color() } else { ui.visuals().weak_text_color() };
-                            painter.text(reject_rect.center(), egui::Align2::CENTER_CENTER, crate::design_system::icons::FLAG_REJECT, egui::FontId::proportional(12.0), reject_color);
+                            let reject_color = if current_flag == -1 {
+                                Theme::ACCENT_ERROR
+                            } else if reject_hovered {
+                                ui.visuals().text_color()
+                            } else {
+                                ui.visuals().weak_text_color()
+                            };
+                            painter.text(
+                                reject_rect.center(),
+                                egui::Align2::CENTER_CENTER,
+                                crate::design_system::icons::FLAG_REJECT,
+                                egui::FontId::proportional(12.0),
+                                reject_color,
+                            );
                         }
-
 
                         if thumb_clicked {
                             let modifiers = ui.input(|i| i.modifiers);
-                            
+
                             if modifiers.command {
                                 // Cmd+click: toggle individual selection
                                 if state.selected_photo_ids.contains(&photo.id) {
@@ -308,14 +389,18 @@ impl Filmstrip {
                                 // Range selection in FILTERED view
                                 // Find where the last selected photo is in the current visible list
                                 if let Some(last_id) = &state.library_selected_photo_id {
-                                    if let Some(start_idx) = visible_photos.iter().position(|p| &p.id == last_id) {
+                                    if let Some(start_idx) =
+                                        visible_photos.iter().position(|p| &p.id == last_id)
+                                    {
                                         let start = start_idx.min(index);
                                         let end = start_idx.max(index);
-                                        
+
                                         state.selected_photo_ids.clear();
                                         // Select everything in between
                                         for i in start..=end {
-                                            state.selected_photo_ids.insert(visible_photos[i].id.clone());
+                                            state
+                                                .selected_photo_ids
+                                                .insert(visible_photos[i].id.clone());
                                         }
                                     } else {
                                         // Last selected not visible, treating as single select
@@ -323,8 +408,8 @@ impl Filmstrip {
                                         state.selected_photo_ids.insert(photo.id.clone());
                                     }
                                 } else {
-                                     state.selected_photo_ids.clear();
-                                     state.selected_photo_ids.insert(photo.id.clone());
+                                    state.selected_photo_ids.clear();
+                                    state.selected_photo_ids.insert(photo.id.clone());
                                 }
                             } else {
                                 // Regular click: single select
@@ -350,7 +435,7 @@ impl Filmstrip {
                         }
 
                         // ... (Rendering thumbnail, etc. same as before) ...
-                        
+
                         // Initialize the color mapping for labels
                         let label_color = match photo.color_label.as_deref() {
                             Some("Red") | Some("red") => Some(Theme::LABEL_RED),
@@ -363,7 +448,7 @@ impl Filmstrip {
 
                         // Draw thumbnail background
                         let thumb_color = ui.visuals().widgets.inactive.bg_fill;
-                        
+
                         let bg_fill = if let Some(color) = label_color {
                             if is_multi_selected || is_primary_selected {
                                 color.gamma_multiply(0.4)
@@ -374,11 +459,8 @@ impl Filmstrip {
                             thumb_color
                         };
 
-                        ui.painter().rect_filled(
-                            rect,
-                            CornerRadius::same(2),
-                            bg_fill,
-                        );
+                        ui.painter()
+                            .rect_filled(rect, CornerRadius::same(2), bg_fill);
 
                         if let Some(color) = label_color {
                             ui.painter().rect_stroke(
@@ -391,20 +473,22 @@ impl Filmstrip {
 
                         if let Some(texture) = self.thumbnail_cache.get(&photo.id) {
                             let img_rect = rect.shrink(2.0);
-                            
+
                             // Construct CropSettings from photo view model
                             let crop_settings = if let (Some(x), Some(y), Some(w), Some(h)) = (
-                                photo.edit_crop_x, 
-                                photo.edit_crop_y, 
-                                photo.edit_crop_width, 
-                                photo.edit_crop_height
+                                photo.edit_crop_x,
+                                photo.edit_crop_y,
+                                photo.edit_crop_width,
+                                photo.edit_crop_height,
                             ) {
                                 let r90 = photo.edit_crop_rotation.unwrap_or(0);
                                 let ang = photo.edit_crop_angle.unwrap_or(0.0);
                                 let fh = photo.edit_crop_flip_h.unwrap_or(false);
                                 let fv = photo.edit_crop_flip_v.unwrap_or(false);
-                                
-                                Some(domain::value_objects::CropSettings::new(x, y, w, h, r90, ang, fh, fv))
+
+                                Some(domain::value_objects::CropSettings::new(
+                                    x, y, w, h, r90, ang, fh, fv,
+                                ))
                             } else {
                                 None
                             };
@@ -413,7 +497,7 @@ impl Filmstrip {
                                 ui,
                                 img_rect,
                                 texture,
-                                crop_settings.as_ref()
+                                crop_settings.as_ref(),
                             );
                         } else {
                             let text_pos = rect.center();
@@ -438,16 +522,27 @@ impl Filmstrip {
                             let start_x = rect.center().x - total_stars_width / 2.0;
                             let star_y = rect.max.y - star_size;
                             let bg_rect = egui::Rect::from_min_size(
-                                egui::pos2(start_x - 2.0, star_y - star_size/2.0),
-                                egui::Vec2::new(total_stars_width + 4.0, star_size)
+                                egui::pos2(start_x - 2.0, star_y - star_size / 2.0),
+                                egui::Vec2::new(total_stars_width + 4.0, star_size),
                             );
-                            ui.painter().rect_filled(bg_rect, 4.0, Color32::from_black_alpha(100));
+                            ui.painter()
+                                .rect_filled(bg_rect, 4.0, Color32::from_black_alpha(100));
 
                             for i in 0..5 {
                                 let star_x = start_x + (i as f32 * star_size);
                                 let star_pos = egui::pos2(star_x + star_size / 2.0, star_y);
-                                let color = if i < photo.rating as usize { Theme::RATING_ACTIVE } else { Color32::from_gray(80) };
-                                ui.painter().text(star_pos, egui::Align2::CENTER_CENTER, "★", egui::FontId::proportional(star_size), color);
+                                let color = if i < photo.rating as usize {
+                                    Theme::RATING_ACTIVE
+                                } else {
+                                    Color32::from_gray(80)
+                                };
+                                ui.painter().text(
+                                    star_pos,
+                                    egui::Align2::CENTER_CENTER,
+                                    "★",
+                                    egui::FontId::proportional(star_size),
+                                    color,
+                                );
                             }
                         }
 
@@ -473,10 +568,11 @@ impl Filmstrip {
                                 egui::StrokeKind::Outside,
                             );
                         }
-                        
+
                         if is_multi_selected && state.selected_photo_ids.len() > 1 {
                             let check_pos = rect.min + Vec2::new(6.0, 6.0);
-                            ui.painter().circle_filled(check_pos, 8.0, ui.visuals().text_color());
+                            ui.painter()
+                                .circle_filled(check_pos, 8.0, ui.visuals().text_color());
                             ui.painter().text(
                                 check_pos,
                                 egui::Align2::CENTER_CENTER,
@@ -489,15 +585,55 @@ impl Filmstrip {
                         // Flags (Last layer)
                         if show_flags {
                             let flag_size = 14.0;
-                            let pick_bg = if current_flag == 1 { Theme::ACCENT_SUCCESS } else if pick_hovered { ui.visuals().widgets.hovered.bg_fill } else { ui.visuals().widgets.inactive.bg_fill };
-                            let pick_fg = if current_flag == 1 { Color32::WHITE } else { ui.visuals().text_color() };
-                            ui.painter().circle_filled(pick_rect.center(), flag_size / 2.0, pick_bg);
-                            ui.painter().text(pick_rect.center(), egui::Align2::CENTER_CENTER, "P", egui::FontId::proportional(9.0), pick_fg);
+                            let pick_bg = if current_flag == 1 {
+                                Theme::ACCENT_SUCCESS
+                            } else if pick_hovered {
+                                ui.visuals().widgets.hovered.bg_fill
+                            } else {
+                                ui.visuals().widgets.inactive.bg_fill
+                            };
+                            let pick_fg = if current_flag == 1 {
+                                Color32::WHITE
+                            } else {
+                                ui.visuals().text_color()
+                            };
+                            ui.painter().circle_filled(
+                                pick_rect.center(),
+                                flag_size / 2.0,
+                                pick_bg,
+                            );
+                            ui.painter().text(
+                                pick_rect.center(),
+                                egui::Align2::CENTER_CENTER,
+                                "P",
+                                egui::FontId::proportional(9.0),
+                                pick_fg,
+                            );
 
-                            let reject_bg = if current_flag == -1 { Theme::ACCENT_ERROR } else if reject_hovered { ui.visuals().widgets.hovered.bg_fill } else { ui.visuals().widgets.inactive.bg_fill };
-                            let reject_fg = if current_flag == -1 { Color32::WHITE } else { ui.visuals().text_color() };
-                            ui.painter().circle_filled(reject_rect.center(), flag_size / 2.0, reject_bg);
-                            ui.painter().text(reject_rect.center(), egui::Align2::CENTER_CENTER, "X", egui::FontId::proportional(9.0), reject_fg);
+                            let reject_bg = if current_flag == -1 {
+                                Theme::ACCENT_ERROR
+                            } else if reject_hovered {
+                                ui.visuals().widgets.hovered.bg_fill
+                            } else {
+                                ui.visuals().widgets.inactive.bg_fill
+                            };
+                            let reject_fg = if current_flag == -1 {
+                                Color32::WHITE
+                            } else {
+                                ui.visuals().text_color()
+                            };
+                            ui.painter().circle_filled(
+                                reject_rect.center(),
+                                flag_size / 2.0,
+                                reject_bg,
+                            );
+                            ui.painter().text(
+                                reject_rect.center(),
+                                egui::Align2::CENTER_CENTER,
+                                "X",
+                                egui::FontId::proportional(9.0),
+                                reject_fg,
+                            );
                         }
 
                         ui.add_space(Self::THUMBNAIL_SPACING);
@@ -517,18 +653,22 @@ impl Filmstrip {
             ContextMenuItem::new("Export JPEG...")
                 .with_icon("📤")
                 .with_shortcut("⌘E"),
-            ContextMenuItem::new("---"),  // Separator
+            ContextMenuItem::new("---"), // Separator
             ContextMenuItem::new("Select All")
                 .with_icon("☑️")
                 .with_shortcut("⌘A"),
             ContextMenuItem::new("Deselect All")
                 .with_icon("☐")
                 .with_shortcut("⌘D"),
-            ContextMenuItem::new("---"),  // Separator
-            ContextMenuItem::new(&format!("Delete {} Photo{}", selection_count, if selection_count == 1 { "" } else { "s" }))
-                .with_icon("🗑️")
-                .with_shortcut("⌫")
-                .destructive(),
+            ContextMenuItem::new("---"), // Separator
+            ContextMenuItem::new(&format!(
+                "Delete {} Photo{}",
+                selection_count,
+                if selection_count == 1 { "" } else { "s" }
+            ))
+            .with_icon("🗑️")
+            .with_shortcut("⌫")
+            .destructive(),
         ];
 
         if let Some(clicked_index) = self.context_menu.show(ctx, &items) {
@@ -569,100 +709,140 @@ impl Filmstrip {
         let results = self.thumbnail_loader.poll_results();
         for result in results {
             // Find the photo's edit values to apply effects to thumbnail
-            let processed_image = if let Some(photo) = photos.iter().find(|p| p.id == result.photo_id) {
-                let exposure = photo.edit_exposure.unwrap_or(0.0);
-                let contrast = photo.edit_contrast.unwrap_or(1.0);
-                let temperature = photo.edit_temperature.unwrap_or(0.0);
-                let tint = photo.edit_tint.unwrap_or(0.0);
-                let highlights = photo.edit_highlights.unwrap_or(0.0);
-                let shadows = photo.edit_shadows.unwrap_or(0.0);
-                let whites = photo.edit_whites.unwrap_or(0.0);
-                let blacks = photo.edit_blacks.unwrap_or(0.0);
-                let clarity = photo.edit_clarity.unwrap_or(0.0);
-                let vibrance = photo.edit_vibrance.unwrap_or(0.0);
-                let saturation = photo.edit_saturation.unwrap_or(0.0);
+            let processed_image =
+                if let Some(photo) = photos.iter().find(|p| p.id == result.photo_id) {
+                    let exposure = photo.edit_exposure.unwrap_or(0.0);
+                    let contrast = photo.edit_contrast.unwrap_or(1.0);
+                    let temperature = photo.edit_temperature.unwrap_or(0.0);
+                    let tint = photo.edit_tint.unwrap_or(0.0);
+                    let highlights = photo.edit_highlights.unwrap_or(0.0);
+                    let shadows = photo.edit_shadows.unwrap_or(0.0);
+                    let whites = photo.edit_whites.unwrap_or(0.0);
+                    let blacks = photo.edit_blacks.unwrap_or(0.0);
+                    let clarity = photo.edit_clarity.unwrap_or(0.0);
+                    let vibrance = photo.edit_vibrance.unwrap_or(0.0);
+                    let saturation = photo.edit_saturation.unwrap_or(0.0);
 
-                // Tone Curve
-                let tone_curve_shadows = photo.edit_tone_curve_shadows.unwrap_or(0.0);
-                let tone_curve_darks = photo.edit_tone_curve_darks.unwrap_or(0.0);
-                let tone_curve_lights = photo.edit_tone_curve_lights.unwrap_or(0.0);
-                let tone_curve_highlights = photo.edit_tone_curve_highlights.unwrap_or(0.0);
+                    // Tone Curve
+                    let tone_curve_shadows = photo.edit_tone_curve_shadows.unwrap_or(0.0);
+                    let tone_curve_darks = photo.edit_tone_curve_darks.unwrap_or(0.0);
+                    let tone_curve_lights = photo.edit_tone_curve_lights.unwrap_or(0.0);
+                    let tone_curve_highlights = photo.edit_tone_curve_highlights.unwrap_or(0.0);
 
-                // HSL Saturation
-                let hsl_red_sat = photo.edit_hsl_red_sat.unwrap_or(0.0);
-                let hsl_orange_sat = photo.edit_hsl_orange_sat.unwrap_or(0.0);
-                let hsl_yellow_sat = photo.edit_hsl_yellow_sat.unwrap_or(0.0);
-                let hsl_green_sat = photo.edit_hsl_green_sat.unwrap_or(0.0);
-                let hsl_aqua_sat = photo.edit_hsl_aqua_sat.unwrap_or(0.0);
-                let hsl_blue_sat = photo.edit_hsl_blue_sat.unwrap_or(0.0);
-                let hsl_purple_sat = photo.edit_hsl_purple_sat.unwrap_or(0.0);
-                let hsl_magenta_sat = photo.edit_hsl_magenta_sat.unwrap_or(0.0);
-                // HSL Hue
-                let hsl_red_hue = photo.edit_hsl_red_hue.unwrap_or(0.0);
-                let hsl_orange_hue = photo.edit_hsl_orange_hue.unwrap_or(0.0);
-                let hsl_yellow_hue = photo.edit_hsl_yellow_hue.unwrap_or(0.0);
-                let hsl_green_hue = photo.edit_hsl_green_hue.unwrap_or(0.0);
-                let hsl_aqua_hue = photo.edit_hsl_aqua_hue.unwrap_or(0.0);
-                let hsl_blue_hue = photo.edit_hsl_blue_hue.unwrap_or(0.0);
-                let hsl_purple_hue = photo.edit_hsl_purple_hue.unwrap_or(0.0);
-                let hsl_magenta_hue = photo.edit_hsl_magenta_hue.unwrap_or(0.0);
-                // HSL Lum
-                let hsl_red_lum = photo.edit_hsl_red_lum.unwrap_or(0.0);
-                let hsl_orange_lum = photo.edit_hsl_orange_lum.unwrap_or(0.0);
-                let hsl_yellow_lum = photo.edit_hsl_yellow_lum.unwrap_or(0.0);
-                let hsl_green_lum = photo.edit_hsl_green_lum.unwrap_or(0.0);
-                let hsl_aqua_lum = photo.edit_hsl_aqua_lum.unwrap_or(0.0);
-                let hsl_blue_lum = photo.edit_hsl_blue_lum.unwrap_or(0.0);
-                let hsl_purple_lum = photo.edit_hsl_purple_lum.unwrap_or(0.0);
-                let hsl_magenta_lum = photo.edit_hsl_magenta_lum.unwrap_or(0.0);
-                // Lens
-                let lens_distortion = photo.edit_lens_distortion.unwrap_or(0.0);
-                let lens_vignette_amount = photo.edit_lens_vignette_amount.unwrap_or(0.0);
-                let lens_vignette_midpoint = photo.edit_lens_vignette_midpoint.unwrap_or(0.0);
-                // NR
-                let nr_luminance = photo.edit_nr_luminance.unwrap_or(0.0);
-                let nr_color = photo.edit_nr_color.unwrap_or(0.0);
-                // Sharpening
-                let sharpen_amount = photo.edit_sharpen_amount.unwrap_or(0.0);
-                let sharpen_radius = photo.edit_sharpen_radius.unwrap_or(1.0);
-                
-                // Only apply effects if there are actual edits
-                let has_edits = exposure != 0.0 || contrast != 1.0 || temperature != 0.0 || 
-                               tint != 0.0 || saturation != 0.0 || vibrance != 0.0;
-                
-                let processed = if has_edits {
-                    crate::image_processing::ImageProcessor::process_image(
-                        &result.image, exposure, contrast, temperature, tint,
-                        highlights, shadows, whites, blacks, clarity, vibrance, saturation,
-                        tone_curve_shadows, tone_curve_darks, tone_curve_lights, tone_curve_highlights,
-                        hsl_red_sat, hsl_orange_sat, hsl_yellow_sat, hsl_green_sat,
-                        hsl_aqua_sat, hsl_blue_sat, hsl_purple_sat, hsl_magenta_sat,
-                        // HSL Hue
-                        hsl_red_hue, hsl_orange_hue, hsl_yellow_hue, hsl_green_hue,
-                        hsl_aqua_hue, hsl_blue_hue, hsl_purple_hue, hsl_magenta_hue,
-                        // HSL Lum
-                        hsl_red_lum, hsl_orange_lum, hsl_yellow_lum, hsl_green_lum,
-                        hsl_aqua_lum, hsl_blue_lum, hsl_purple_lum, hsl_magenta_lum,
-                        // Lens
-                        lens_distortion, lens_vignette_amount, lens_vignette_midpoint,
-                        // NR
-                        nr_luminance, nr_color,
-                        // Sharpening
-                        sharpen_amount, sharpen_radius,
-                    )
+                    // HSL Saturation
+                    let hsl_red_sat = photo.edit_hsl_red_sat.unwrap_or(0.0);
+                    let hsl_orange_sat = photo.edit_hsl_orange_sat.unwrap_or(0.0);
+                    let hsl_yellow_sat = photo.edit_hsl_yellow_sat.unwrap_or(0.0);
+                    let hsl_green_sat = photo.edit_hsl_green_sat.unwrap_or(0.0);
+                    let hsl_aqua_sat = photo.edit_hsl_aqua_sat.unwrap_or(0.0);
+                    let hsl_blue_sat = photo.edit_hsl_blue_sat.unwrap_or(0.0);
+                    let hsl_purple_sat = photo.edit_hsl_purple_sat.unwrap_or(0.0);
+                    let hsl_magenta_sat = photo.edit_hsl_magenta_sat.unwrap_or(0.0);
+                    // HSL Hue
+                    let hsl_red_hue = photo.edit_hsl_red_hue.unwrap_or(0.0);
+                    let hsl_orange_hue = photo.edit_hsl_orange_hue.unwrap_or(0.0);
+                    let hsl_yellow_hue = photo.edit_hsl_yellow_hue.unwrap_or(0.0);
+                    let hsl_green_hue = photo.edit_hsl_green_hue.unwrap_or(0.0);
+                    let hsl_aqua_hue = photo.edit_hsl_aqua_hue.unwrap_or(0.0);
+                    let hsl_blue_hue = photo.edit_hsl_blue_hue.unwrap_or(0.0);
+                    let hsl_purple_hue = photo.edit_hsl_purple_hue.unwrap_or(0.0);
+                    let hsl_magenta_hue = photo.edit_hsl_magenta_hue.unwrap_or(0.0);
+                    // HSL Lum
+                    let hsl_red_lum = photo.edit_hsl_red_lum.unwrap_or(0.0);
+                    let hsl_orange_lum = photo.edit_hsl_orange_lum.unwrap_or(0.0);
+                    let hsl_yellow_lum = photo.edit_hsl_yellow_lum.unwrap_or(0.0);
+                    let hsl_green_lum = photo.edit_hsl_green_lum.unwrap_or(0.0);
+                    let hsl_aqua_lum = photo.edit_hsl_aqua_lum.unwrap_or(0.0);
+                    let hsl_blue_lum = photo.edit_hsl_blue_lum.unwrap_or(0.0);
+                    let hsl_purple_lum = photo.edit_hsl_purple_lum.unwrap_or(0.0);
+                    let hsl_magenta_lum = photo.edit_hsl_magenta_lum.unwrap_or(0.0);
+                    // Lens
+                    let lens_distortion = photo.edit_lens_distortion.unwrap_or(0.0);
+                    let lens_vignette_amount = photo.edit_lens_vignette_amount.unwrap_or(0.0);
+                    let lens_vignette_midpoint = photo.edit_lens_vignette_midpoint.unwrap_or(0.0);
+                    // NR
+                    let nr_luminance = photo.edit_nr_luminance.unwrap_or(0.0);
+                    let nr_color = photo.edit_nr_color.unwrap_or(0.0);
+                    // Sharpening
+                    let sharpen_amount = photo.edit_sharpen_amount.unwrap_or(0.0);
+                    let sharpen_radius = photo.edit_sharpen_radius.unwrap_or(1.0);
+
+                    // Only apply effects if there are actual edits
+                    let has_edits = exposure != 0.0
+                        || contrast != 1.0
+                        || temperature != 0.0
+                        || tint != 0.0
+                        || saturation != 0.0
+                        || vibrance != 0.0;
+
+                    let processed = if has_edits {
+                        crate::image_processing::ImageProcessor::process_image(
+                            &result.image,
+                            exposure,
+                            contrast,
+                            temperature,
+                            tint,
+                            highlights,
+                            shadows,
+                            whites,
+                            blacks,
+                            clarity,
+                            vibrance,
+                            saturation,
+                            tone_curve_shadows,
+                            tone_curve_darks,
+                            tone_curve_lights,
+                            tone_curve_highlights,
+                            hsl_red_sat,
+                            hsl_orange_sat,
+                            hsl_yellow_sat,
+                            hsl_green_sat,
+                            hsl_aqua_sat,
+                            hsl_blue_sat,
+                            hsl_purple_sat,
+                            hsl_magenta_sat,
+                            // HSL Hue
+                            hsl_red_hue,
+                            hsl_orange_hue,
+                            hsl_yellow_hue,
+                            hsl_green_hue,
+                            hsl_aqua_hue,
+                            hsl_blue_hue,
+                            hsl_purple_hue,
+                            hsl_magenta_hue,
+                            // HSL Lum
+                            hsl_red_lum,
+                            hsl_orange_lum,
+                            hsl_yellow_lum,
+                            hsl_green_lum,
+                            hsl_aqua_lum,
+                            hsl_blue_lum,
+                            hsl_purple_lum,
+                            hsl_magenta_lum,
+                            // Lens
+                            lens_distortion,
+                            lens_vignette_amount,
+                            lens_vignette_midpoint,
+                            // NR
+                            nr_luminance,
+                            nr_color,
+                            // Sharpening
+                            sharpen_amount,
+                            sharpen_radius,
+                        )
+                    } else {
+                        result.image.clone()
+                    };
+
+                    processed
                 } else {
                     result.image.clone()
                 };
-                
-                processed
-            } else {
-                result.image.clone()
-            };
-            
+
             let texture = crate::image_processing::ImageProcessor::load_texture(
                 ctx,
                 format!("filmstrip_thumb_{}", result.photo_id),
-                &processed_image
+                &processed_image,
             );
             self.thumbnail_cache.insert(result.photo_id, texture);
         }
@@ -674,7 +854,7 @@ impl Filmstrip {
 
         // Request thumbnails for visible photos (async, non-blocking)
         // Optimization: only request for *visible* (filtered) photos
-       
+
         let requests: Vec<ThumbnailRequest> = visible_photos
             .iter()
             .filter(|p| !self.thumbnail_cache.contains_key(&p.id))
@@ -706,7 +886,7 @@ impl Filmstrip {
 
                     for photo in visible_photos {
                         let is_selected = selected_photo_id.as_ref() == Some(&photo.id);
-                        
+
                         // Reserve space for thumbnail
                         let (rect, response) = ui.allocate_exact_size(
                             Vec2::new(Self::THUMBNAIL_SIZE, Self::THUMBNAIL_SIZE),
@@ -725,7 +905,7 @@ impl Filmstrip {
 
                         // Draw thumbnail background
                         let thumb_color = ui.visuals().widgets.inactive.bg_fill;
-                        
+
                         // Fill background (tinted if color label exists)
                         let bg_fill = if let Some(color) = label_color {
                             if is_selected {
@@ -736,12 +916,9 @@ impl Filmstrip {
                         } else {
                             thumb_color
                         };
-                        
-                        ui.painter().rect_filled(
-                            rect,
-                            CornerRadius::same(2),
-                            bg_fill,
-                        );
+
+                        ui.painter()
+                            .rect_filled(rect, CornerRadius::same(2), bg_fill);
 
                         // Draw color label border if present
                         if let Some(color) = label_color {
@@ -755,20 +932,22 @@ impl Filmstrip {
 
                         if let Some(texture) = self.thumbnail_cache.get(&photo.id) {
                             let img_rect = rect.shrink(2.0);
-                            
+
                             // Construct CropSettings from photo view model
                             let crop_settings = if let (Some(x), Some(y), Some(w), Some(h)) = (
-                                photo.edit_crop_x, 
-                                photo.edit_crop_y, 
-                                photo.edit_crop_width, 
-                                photo.edit_crop_height
+                                photo.edit_crop_x,
+                                photo.edit_crop_y,
+                                photo.edit_crop_width,
+                                photo.edit_crop_height,
                             ) {
                                 let r90 = photo.edit_crop_rotation.unwrap_or(0);
                                 let ang = photo.edit_crop_angle.unwrap_or(0.0);
                                 let fh = photo.edit_crop_flip_h.unwrap_or(false);
                                 let fv = photo.edit_crop_flip_v.unwrap_or(false);
-                                
-                                Some(domain::value_objects::CropSettings::new(x, y, w, h, r90, ang, fh, fv))
+
+                                Some(domain::value_objects::CropSettings::new(
+                                    x, y, w, h, r90, ang, fh, fv,
+                                ))
                             } else {
                                 None
                             };
@@ -777,7 +956,7 @@ impl Filmstrip {
                                 ui,
                                 img_rect,
                                 texture,
-                                crop_settings.as_ref()
+                                crop_settings.as_ref(),
                             );
                         } else {
                             // Draw placeholder text
@@ -805,16 +984,27 @@ impl Filmstrip {
 
                             // Draw subtle background
                             let bg_rect = egui::Rect::from_min_size(
-                                egui::pos2(start_x - 2.0, star_y - star_size/2.0),
-                                egui::Vec2::new(total_stars_width + 4.0, star_size)
+                                egui::pos2(start_x - 2.0, star_y - star_size / 2.0),
+                                egui::Vec2::new(total_stars_width + 4.0, star_size),
                             );
-                            ui.painter().rect_filled(bg_rect, 4.0, Color32::from_black_alpha(100));
+                            ui.painter()
+                                .rect_filled(bg_rect, 4.0, Color32::from_black_alpha(100));
 
                             for i in 0..5 {
                                 let star_x = start_x + (i as f32 * star_size);
                                 let star_pos = egui::pos2(star_x + star_size / 2.0, star_y);
-                                let color = if i < photo.rating as usize { Theme::RATING_ACTIVE } else { Color32::from_gray(80) };
-                                ui.painter().text(star_pos, egui::Align2::CENTER_CENTER, "★", egui::FontId::proportional(star_size), color);
+                                let color = if i < photo.rating as usize {
+                                    Theme::RATING_ACTIVE
+                                } else {
+                                    Color32::from_gray(80)
+                                };
+                                ui.painter().text(
+                                    star_pos,
+                                    egui::Align2::CENTER_CENTER,
+                                    "★",
+                                    egui::FontId::proportional(star_size),
+                                    color,
+                                );
                             }
                         }
 
@@ -852,18 +1042,26 @@ impl Filmstrip {
                             // Pick Icon [P]
                             let pick_rect = egui::Rect::from_min_size(
                                 rect.min + Vec2::new(padding, padding),
-                                Vec2::new(flag_size, flag_size)
+                                Vec2::new(flag_size, flag_size),
                             );
-                            
+
                             // Reject Icon [X]
                             let reject_rect = egui::Rect::from_min_size(
                                 rect.min + Vec2::new(padding + flag_size + spacing, padding),
-                                Vec2::new(flag_size, flag_size)
+                                Vec2::new(flag_size, flag_size),
                             );
 
-                            let pick_response = ui.interact(pick_rect, egui::Id::new(format!("dv_pick_{}", photo.id)), Sense::click());
-                            let reject_response = ui.interact(reject_rect, egui::Id::new(format!("dv_reject_{}", photo.id)), Sense::click());
-                            
+                            let pick_response = ui.interact(
+                                pick_rect,
+                                egui::Id::new(format!("dv_pick_{}", photo.id)),
+                                Sense::click(),
+                            );
+                            let reject_response = ui.interact(
+                                reject_rect,
+                                egui::Id::new(format!("dv_reject_{}", photo.id)),
+                                Sense::click(),
+                            );
+
                             // Handle Flag Clicks
                             if pick_response.clicked() {
                                 thumb_clicked = false; // Consume click
@@ -876,10 +1074,24 @@ impl Filmstrip {
                             }
 
                             // Draw Pick Icon
-                            let pick_bg = if current_flag == 1 { Theme::ACCENT_SUCCESS } else if pick_response.hovered() { ui.visuals().widgets.hovered.bg_fill } else { ui.visuals().widgets.inactive.bg_fill };
-                            let pick_fg = if current_flag == 1 { Color32::WHITE } else { ui.visuals().text_color() };
-                            
-                            ui.painter().circle_filled(pick_rect.center(), flag_size / 2.0, pick_bg);
+                            let pick_bg = if current_flag == 1 {
+                                Theme::ACCENT_SUCCESS
+                            } else if pick_response.hovered() {
+                                ui.visuals().widgets.hovered.bg_fill
+                            } else {
+                                ui.visuals().widgets.inactive.bg_fill
+                            };
+                            let pick_fg = if current_flag == 1 {
+                                Color32::WHITE
+                            } else {
+                                ui.visuals().text_color()
+                            };
+
+                            ui.painter().circle_filled(
+                                pick_rect.center(),
+                                flag_size / 2.0,
+                                pick_bg,
+                            );
                             ui.painter().text(
                                 pick_rect.center(),
                                 egui::Align2::CENTER_CENTER,
@@ -889,14 +1101,28 @@ impl Filmstrip {
                             );
 
                             // Draw Reject Icon
-                            let reject_bg = if current_flag == -1 { Theme::ACCENT_ERROR } else if reject_response.hovered() { ui.visuals().widgets.hovered.bg_fill } else { ui.visuals().widgets.inactive.bg_fill };
-                            let reject_fg = if current_flag == -1 { Color32::WHITE } else { ui.visuals().text_color() };
-                            
-                            ui.painter().circle_filled(reject_rect.center(), flag_size / 2.0, reject_bg);
+                            let reject_bg = if current_flag == -1 {
+                                Theme::ACCENT_ERROR
+                            } else if reject_response.hovered() {
+                                ui.visuals().widgets.hovered.bg_fill
+                            } else {
+                                ui.visuals().widgets.inactive.bg_fill
+                            };
+                            let reject_fg = if current_flag == -1 {
+                                Color32::WHITE
+                            } else {
+                                ui.visuals().text_color()
+                            };
+
+                            ui.painter().circle_filled(
+                                reject_rect.center(),
+                                flag_size / 2.0,
+                                reject_bg,
+                            );
                             ui.painter().text(
                                 reject_rect.center(),
                                 egui::Align2::CENTER_CENTER,
-                                "X", 
+                                "X",
                                 egui::FontId::proportional(9.0),
                                 reject_fg,
                             );
@@ -904,7 +1130,7 @@ impl Filmstrip {
 
                         // Handle click
                         if thumb_clicked {
-                             on_select(photo.id.clone());
+                            on_select(photo.id.clone());
                         }
 
                         ui.add_space(Self::THUMBNAIL_SPACING);

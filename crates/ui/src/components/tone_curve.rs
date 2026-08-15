@@ -1,10 +1,10 @@
 // Tone Curve Editor Component
 // Visualizes how adjustments affect the tone curve
 
-use egui::Ui;
-use egui_plot::{Plot, PlotPoints, Line};
-use crate::state::AppState;
 use crate::design_system::theme::Theme;
+use crate::state::AppState;
+use egui::Ui;
+use egui_plot::{Line, Plot, PlotPoints};
 
 pub struct ToneCurveEditor;
 
@@ -18,7 +18,7 @@ impl ToneCurveEditor {
             ui.label(
                 egui::RichText::new("Tone Curve")
                     .size(Theme::FONT_SM)
-                    .color(Theme::TEXT_MUTED)
+                    .color(Theme::TEXT_MUTED),
             );
 
             ui.add_space(Theme::SPACE_XS);
@@ -49,7 +49,7 @@ impl ToneCurveEditor {
                             .color(egui::Color32::from_gray(100))
                             .name("No Adjustment")
                             .width(1.0)
-                            .style(egui_plot::LineStyle::Dashed { length: 5.0 })
+                            .style(egui_plot::LineStyle::Dashed { length: 5.0 }),
                     );
 
                     // Draw adjusted curve
@@ -57,7 +57,7 @@ impl ToneCurveEditor {
                         Line::new(curve_points)
                             .color(egui::Color32::from_rgb(137, 180, 250))
                             .name("Current Adjustment")
-                            .width(2.0)
+                            .width(2.0),
                     );
                 });
 
@@ -65,7 +65,7 @@ impl ToneCurveEditor {
             ui.label(
                 egui::RichText::new("Visualizes combined effect of all adjustments")
                     .size(Theme::FONT_XS)
-                    .color(Theme::TEXT_HINT)
+                    .color(Theme::TEXT_HINT),
             );
         });
 

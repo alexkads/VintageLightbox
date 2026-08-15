@@ -2,12 +2,12 @@
 //!
 //! Implementações de repositories usando SQLite.
 
-pub mod photo_repository;
 pub mod collection_repository;
+pub mod photo_repository;
 pub mod preset_repository;
 
-pub use photo_repository::PhotoRepositoryImpl;
 pub use collection_repository::CollectionRepositoryImpl;
+pub use photo_repository::PhotoRepositoryImpl;
 pub use preset_repository::SqlitePresetRepository;
 
 use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
@@ -24,10 +24,8 @@ pub async fn create_pool(database_url: &str) -> Result<SqlitePool, sqlx::Error> 
 pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     // Usar migrate! macro embedda as migrations no binário e garante versionamento
     // O caminho é relativo a este arquivo (src/database/mod.rs) -> ../../migrations
-    sqlx::migrate!("./migrations")
-        .run(pool)
-        .await?;
-    
+    sqlx::migrate!("./migrations").run(pool).await?;
+
     Ok(())
 }
 

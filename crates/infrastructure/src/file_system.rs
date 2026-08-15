@@ -2,13 +2,12 @@
 //!
 //! Operações de file system para escanear diretórios e validar arquivos.
 
-use std::path::{Path, PathBuf};
 use domain::DomainResult;
+use std::path::{Path, PathBuf};
 
 /// Extensões de arquivo suportadas
 pub const SUPPORTED_EXTENSIONS: &[&str] = &[
-    "jpg", "jpeg", "png", "tiff", "tif",
-    "cr2", "nef", "arw", "dng", "raf", "orf", "rw2"
+    "jpg", "jpeg", "png", "tiff", "tif", "cr2", "nef", "arw", "dng", "raf", "orf", "rw2",
 ];
 
 /// Scanner de arquivos de fotos
@@ -39,7 +38,11 @@ impl FileScanner {
     /// `recursive == false` é o "Include Subfolders" desmarcado da tela de importação:
     /// varre só o nível pedido, o que num cartão de 64GB é a diferença entre uma tela
     /// instantânea e uma espera de minutos.
-    pub fn scan_directory_with_depth(&self, path: &Path, recursive: bool) -> DomainResult<Vec<PathBuf>> {
+    pub fn scan_directory_with_depth(
+        &self,
+        path: &Path,
+        recursive: bool,
+    ) -> DomainResult<Vec<PathBuf>> {
         let mut files = Vec::new();
         self.scan_level(path, recursive, &mut files)?;
         files.sort();
@@ -47,30 +50,33 @@ impl FileScanner {
     }
 
     /// Percorre um diretório, descendo em subpastas só quando `recursive`
-    fn scan_level(&self, path: &Path, recursive: bool, files: &mut Vec<PathBuf>) -> DomainResult<()> {
+    fn scan_level(
+        &self,
+        path: &Path,
+        recursive: bool,
+        files: &mut Vec<PathBuf>,
+    ) -> DomainResult<()> {
         if !path.exists() {
-            return Err(domain::DomainError::InvalidOperation(
-                format!("Path does not exist: {}", path.display())
-            ));
+            return Err(domain::DomainError::InvalidOperation(format!(
+                "Path does not exist: {}",
+                path.display()
+            )));
         }
 
         if !path.is_dir() {
-            return Err(domain::DomainError::InvalidOperation(
-                format!("Path is not a directory: {}", path.display())
-            ));
+            return Err(domain::DomainError::InvalidOperation(format!(
+                "Path is not a directory: {}",
+                path.display()
+            )));
         }
 
         let entries = std::fs::read_dir(path).map_err(|e| {
-            domain::DomainError::InvalidOperation(
-                format!("Failed to read directory: {}", e)
-            )
+            domain::DomainError::InvalidOperation(format!("Failed to read directory: {}", e))
         })?;
 
         for entry in entries {
             let entry = entry.map_err(|e| {
-                domain::DomainError::InvalidOperation(
-                    format!("Failed to read entry: {}", e)
-                )
+                domain::DomainError::InvalidOperation(format!("Failed to read entry: {}", e))
             })?;
 
             let path = entry.path();
@@ -144,7 +150,7 @@ mod tests {
 
         fs::write(base_path.join("subdir1/photo4.nef"), b"fake nef").unwrap();
         fs::write(base_path.join("subdir1/photo5.png"), b"fake png").unwrap();
-        
+
         fs::write(base_path.join("subdir2/photo6.arw"), b"fake arw").unwrap();
         fs::write(base_path.join(".hidden/photo7.jpg"), b"in hidden dir").unwrap();
 
@@ -171,8 +177,12 @@ mod tests {
         let files = scanner.scan_directory(temp_dir.path()).unwrap();
 
         // Verificar que encontrou arquivos em subdiretórios
-        let has_subdir1 = files.iter().any(|p| p.to_string_lossy().contains("subdir1"));
-        let has_subdir2 = files.iter().any(|p| p.to_string_lossy().contains("subdir2"));
+        let has_subdir1 = files
+            .iter()
+            .any(|p| p.to_string_lossy().contains("subdir1"));
+        let has_subdir2 = files
+            .iter()
+            .any(|p| p.to_string_lossy().contains("subdir2"));
 
         assert!(has_subdir1);
         assert!(has_subdir2);
@@ -203,7 +213,9 @@ mod tests {
         let files = scanner.scan_directory(temp_dir.path()).unwrap();
 
         // Não deve encontrar photo7.jpg que está em .hidden/
-        let has_hidden_dir = files.iter().any(|p| p.to_string_lossy().contains(".hidden"));
+        let has_hidden_dir = files
+            .iter()
+            .any(|p| p.to_string_lossy().contains(".hidden"));
 
         assert!(!has_hidden_dir);
     }
@@ -216,8 +228,12 @@ mod tests {
         let files = scanner.scan_directory(temp_dir.path()).unwrap();
 
         // Deve encontrar tanto .jpg quanto .JPG
-        let has_lowercase = files.iter().any(|p| p.to_string_lossy().ends_with("photo1.jpg"));
-        let has_uppercase = files.iter().any(|p| p.to_string_lossy().ends_with("photo2.JPG"));
+        let has_lowercase = files
+            .iter()
+            .any(|p| p.to_string_lossy().ends_with("photo1.jpg"));
+        let has_uppercase = files
+            .iter()
+            .any(|p| p.to_string_lossy().ends_with("photo2.JPG"));
 
         assert!(has_lowercase);
         assert!(has_uppercase);

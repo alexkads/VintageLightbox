@@ -2,11 +2,7 @@
 //!
 //! Testes de integração usando banco SQLite em memória.
 
-use domain::{
-    entities::Collection,
-    repositories::CollectionRepository,
-    value_objects::PhotoId,
-};
+use domain::{entities::Collection, repositories::CollectionRepository, value_objects::PhotoId};
 use infrastructure::{create_pool, run_migrations, CollectionRepositoryImpl};
 
 /// Helper para criar um repository de teste com banco em memória
@@ -14,11 +10,11 @@ async fn create_test_repository() -> CollectionRepositoryImpl {
     let pool = create_pool("sqlite::memory:")
         .await
         .expect("Failed to create pool");
-    
+
     run_migrations(&pool)
         .await
         .expect("Failed to run migrations");
-    
+
     CollectionRepositoryImpl::new(pool)
 }
 
@@ -67,7 +63,7 @@ async fn test_add_photos_to_collection() {
     let mut collection = Collection::new("My Collection");
     let photo1_id = PhotoId::new();
     let photo2_id = PhotoId::new();
-    
+
     collection.add_photo(photo1_id);
     collection.add_photo(photo2_id);
     let collection_id = *collection.id();
@@ -124,7 +120,7 @@ async fn test_delete_collection() {
 async fn test_find_all_collections() {
     // Arrange
     let repo = create_test_repository().await;
-    
+
     let collection1 = Collection::new("Collection 1");
     let collection2 = Collection::new("Collection 2");
     let collection3 = Collection::new("Collection 3");
@@ -145,13 +141,13 @@ async fn test_find_collections_by_photo() {
     // Arrange
     let repo = create_test_repository().await;
     let photo_id = PhotoId::new();
-    
+
     let mut collection1 = Collection::new("Collection 1");
     collection1.add_photo(photo_id);
-    
+
     let mut collection2 = Collection::new("Collection 2");
     collection2.add_photo(photo_id);
-    
+
     let collection3 = Collection::new("Collection 3");
 
     repo.save(&collection1).await.unwrap();
@@ -174,7 +170,7 @@ async fn test_remove_photo_from_collection() {
     let mut collection = Collection::new("My Collection");
     let photo1_id = PhotoId::new();
     let photo2_id = PhotoId::new();
-    
+
     collection.add_photo(photo1_id);
     collection.add_photo(photo2_id);
     let collection_id = *collection.id();

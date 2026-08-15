@@ -266,12 +266,12 @@ mod aspect_ratio_tests {
         // Original and Free should return None for value when used without original dimensions
         // This test ensures they're treated specially
         match AspectRatio::Original {
-            AspectRatio::Original => {}, // Expected
+            AspectRatio::Original => {} // Expected
             _ => panic!("Should be Original variant"),
         }
-        
+
         match AspectRatio::Free {
-            AspectRatio::Free => {}, // Expected
+            AspectRatio::Free => {} // Expected
             _ => panic!("Should be Free variant"),
         }
     }

@@ -195,7 +195,10 @@ mod tests {
             RenamePattern::KeepOriginal,
             false,
         );
-        assert_eq!(options.organization, OrganizationStrategy::PreserveStructure);
+        assert_eq!(
+            options.organization,
+            OrganizationStrategy::PreserveStructure
+        );
         assert_eq!(options.rename_pattern, RenamePattern::KeepOriginal);
         assert!(!options.skip_duplicates);
     }
@@ -249,7 +252,8 @@ mod tests {
     #[test]
     fn test_serde_aceita_json_antigo_sem_campos_novos() {
         // Catálogos gravados antes de `mode`/`destination` existirem têm de continuar lendo.
-        let json = r#"{"organization":"ByDate","rename_pattern":"Standard","skip_duplicates":true}"#;
+        let json =
+            r#"{"organization":"ByDate","rename_pattern":"Standard","skip_duplicates":true}"#;
         let options: ImportOptions = serde_json::from_str(json).unwrap();
 
         assert_eq!(options.mode, ImportMode::Copy);

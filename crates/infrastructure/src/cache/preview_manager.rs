@@ -1,11 +1,11 @@
+use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
-use std::fs;
 // use directories::ProjectDirs;
-use image::DynamicImage;
 use domain::services::{PreviewStorage, PreviewType};
 use domain::value_objects::PhotoId;
 use domain::DomainResult;
+use image::DynamicImage;
 use rusqlite::{params, Connection, OptionalExtension};
 
 /// Statistics about the preview cache for UI display
@@ -63,7 +63,6 @@ fn encode_jpeg<W: std::io::Write>(
         .map_err(|e| e.to_string())
 }
 
-
 impl Default for PreviewManager {
     fn default() -> Self {
         Self::new()
@@ -100,7 +99,8 @@ impl PreviewManager {
                 PRIMARY KEY (photo_id, type)
             )",
             [],
-        ).expect("Failed to initialize preview database");
+        )
+        .expect("Failed to initialize preview database");
 
         Self {
             conn: Mutex::new(conn),
@@ -112,18 +112,23 @@ impl PreviewManager {
     pub fn get_thumbnail(&self, photo_id_str: &str) -> Option<DynamicImage> {
         let conn = self.conn.lock().unwrap();
         // Type 0 = Thumbnail
-        let mut stmt = conn.prepare("SELECT data FROM previews WHERE photo_id = ?1 AND type = 0").ok()?;
-        let data: Option<Vec<u8>> = stmt.query_row(params![photo_id_str], |row| row.get(0)).optional().ok()?;
-        
+        let mut stmt = conn
+            .prepare("SELECT data FROM previews WHERE photo_id = ?1 AND type = 0")
+            .ok()?;
+        let data: Option<Vec<u8>> = stmt
+            .query_row(params![photo_id_str], |row| row.get(0))
+            .optional()
+            .ok()?;
+
         if let Some(bytes) = data {
-             // Update access time
-             let now = chrono::Utc::now().timestamp();
-             let _ = conn.execute(
-                 "UPDATE previews SET last_accessed_at = ?1 WHERE photo_id = ?2 AND type = 0", 
-                 params![now, photo_id_str]
-             );
-             
-             image::load_from_memory(&bytes).ok()
+            // Update access time
+            let now = chrono::Utc::now().timestamp();
+            let _ = conn.execute(
+                "UPDATE previews SET last_accessed_at = ?1 WHERE photo_id = ?2 AND type = 0",
+                params![now, photo_id_str],
+            );
+
+            image::load_from_memory(&bytes).ok()
         } else {
             None
         }
@@ -143,8 +148,9 @@ impl PreviewManager {
             "INSERT OR REPLACE INTO previews (photo_id, type, data, created_at, last_accessed_at)
              VALUES (?1, ?2, ?3, ?4, ?5)",
             params![photo_id_str, 0, bytes, now, now],
-        ).map_err(|e| e.to_string())?;
-        
+        )
+        .map_err(|e| e.to_string())?;
+
         Ok(())
     }
 
@@ -153,18 +159,23 @@ impl PreviewManager {
     pub fn get_preview(&self, photo_id_str: &str) -> Option<DynamicImage> {
         let conn = self.conn.lock().unwrap();
         // Type 1 = Large
-        let mut stmt = conn.prepare("SELECT data FROM previews WHERE photo_id = ?1 AND type = 1").ok()?;
-        let data: Option<Vec<u8>> = stmt.query_row(params![photo_id_str], |row| row.get(0)).optional().ok()?;
-        
+        let mut stmt = conn
+            .prepare("SELECT data FROM previews WHERE photo_id = ?1 AND type = 1")
+            .ok()?;
+        let data: Option<Vec<u8>> = stmt
+            .query_row(params![photo_id_str], |row| row.get(0))
+            .optional()
+            .ok()?;
+
         if let Some(bytes) = data {
-             // Update access time
-             let now = chrono::Utc::now().timestamp();
-             let _ = conn.execute(
-                 "UPDATE previews SET last_accessed_at = ?1 WHERE photo_id = ?2 AND type = 1", 
-                 params![now, photo_id_str]
-             );
-             
-             image::load_from_memory(&bytes).ok()
+            // Update access time
+            let now = chrono::Utc::now().timestamp();
+            let _ = conn.execute(
+                "UPDATE previews SET last_accessed_at = ?1 WHERE photo_id = ?2 AND type = 1",
+                params![now, photo_id_str],
+            );
+
+            image::load_from_memory(&bytes).ok()
         } else {
             None
         }
@@ -185,22 +196,25 @@ impl PreviewManager {
             "INSERT OR REPLACE INTO previews (photo_id, type, data, created_at, last_accessed_at)
              VALUES (?1, ?2, ?3, ?4, ?5)",
             params![photo_id_str, 1, bytes, now, now],
-        ).map_err(|e| e.to_string())?;
-        
+        )
+        .map_err(|e| e.to_string())?;
+
         Ok(())
     }
-    
+
     /// Cleanup old previews if cache exceeds size limit
     pub fn cleanup_lru(&self, max_size_bytes: u64) -> Result<u64, String> {
         let conn = self.conn.lock().unwrap();
-        
+
         // Check current size
         // This is a rough estimate summing Blob sizes
-        let size: i64 = conn.query_row(
-            "SELECT COALESCE(SUM(LENGTH(data)), 0) FROM previews",
-            [],
-            |row| row.get(0)
-        ).unwrap_or(0);
+        let size: i64 = conn
+            .query_row(
+                "SELECT COALESCE(SUM(LENGTH(data)), 0) FROM previews",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
 
         if size as u64 <= max_size_bytes {
             return Ok(0);
@@ -208,58 +222,64 @@ impl PreviewManager {
 
         // Delete oldest accessed
         // We delete in chunks until size is under limit, or just simplistic approach:
-        // Delete oldest 10%? 
+        // Delete oldest 10%?
         // Or delete strictly strictly oldest until satisfied.
-        
+
         let target_size = max_size_bytes as i64;
         let diff = size - target_size;
-        
-        if diff <= 0 { return Ok(0); }
+
+        if diff <= 0 {
+            return Ok(0);
+        }
 
         // Find items to delete
         // We want to delete rows with oldest last_accessed_at until we free 'diff' bytes.
         // This logic is complex in SQL alone without iteration.
         // Simplification: Delete oldest N items.
-        
+
         // Let's just delete the oldest 50 items and repeat or just one pass.
-        // Better: Delete where last_accessed_at < some_threshold? 
-        
+        // Better: Delete where last_accessed_at < some_threshold?
+
         // For now, let's just delete the 20 oldest items if we are over limit, as a maintenance step.
-        let deleted = conn.execute(
-            "DELETE FROM previews WHERE photo_id IN (
+        let deleted = conn
+            .execute(
+                "DELETE FROM previews WHERE photo_id IN (
                 SELECT photo_id FROM previews ORDER BY last_accessed_at ASC LIMIT 50
             )",
-            []
-        ).map_err(|e| e.to_string())?;
-        
+                [],
+            )
+            .map_err(|e| e.to_string())?;
+
         Ok(deleted as u64)
     }
 
     /// Get cache statistics for UI display
     pub fn get_stats(&self) -> CacheStats {
         let conn = self.conn.lock().unwrap();
-        
+
         // Count thumbnails (type 0)
-        let thumbnail_count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM previews WHERE type = 0",
-            [],
-            |row| row.get(0)
-        ).unwrap_or(0);
-        
+        let thumbnail_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM previews WHERE type = 0", [], |row| {
+                row.get(0)
+            })
+            .unwrap_or(0);
+
         // Count large previews (type 1)
-        let large_preview_count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM previews WHERE type = 1",
-            [],
-            |row| row.get(0)
-        ).unwrap_or(0);
-        
+        let large_preview_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM previews WHERE type = 1", [], |row| {
+                row.get(0)
+            })
+            .unwrap_or(0);
+
         // Total size of all data
-        let total_size_bytes: i64 = conn.query_row(
-            "SELECT COALESCE(SUM(LENGTH(data)), 0) FROM previews",
-            [],
-            |row| row.get(0)
-        ).unwrap_or(0);
-        
+        let total_size_bytes: i64 = conn
+            .query_row(
+                "SELECT COALESCE(SUM(LENGTH(data)), 0) FROM previews",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
         CacheStats {
             thumbnail_count: thumbnail_count as u64,
             large_preview_count: large_preview_count as u64,
@@ -272,12 +292,13 @@ impl PreviewManager {
     /// Returns the number of deleted entries
     pub fn clear_all(&self) -> Result<u64, String> {
         let conn = self.conn.lock().unwrap();
-        let deleted = conn.execute("DELETE FROM previews", [])
+        let deleted = conn
+            .execute("DELETE FROM previews", [])
             .map_err(|e| e.to_string())?;
-        
+
         // VACUUM to reclaim disk space
         conn.execute("VACUUM", []).ok();
-        
+
         Ok(deleted as u64)
     }
 
@@ -285,7 +306,8 @@ impl PreviewManager {
     /// Returns the number of deleted entries
     pub fn clear_thumbnails(&self) -> Result<u64, String> {
         let conn = self.conn.lock().unwrap();
-        let deleted = conn.execute("DELETE FROM previews WHERE type = 0", [])
+        let deleted = conn
+            .execute("DELETE FROM previews WHERE type = 0", [])
             .map_err(|e| e.to_string())?;
         Ok(deleted as u64)
     }
@@ -294,12 +316,12 @@ impl PreviewManager {
     /// Returns the number of deleted entries
     pub fn clear_previews(&self) -> Result<u64, String> {
         let conn = self.conn.lock().unwrap();
-        let deleted = conn.execute("DELETE FROM previews WHERE type = 1", [])
+        let deleted = conn
+            .execute("DELETE FROM previews WHERE type = 1", [])
             .map_err(|e| e.to_string())?;
         Ok(deleted as u64)
     }
 }
-
 
 impl PreviewStorage for PreviewManager {
     fn save(&self, id: &PhotoId, preview_type: PreviewType, data: &[u8]) -> DomainResult<()> {
@@ -314,7 +336,8 @@ impl PreviewStorage for PreviewManager {
             "INSERT OR REPLACE INTO previews (photo_id, type, data, created_at, last_accessed_at)
              VALUES (?1, ?2, ?3, ?4, ?5)",
             params![id.to_string(), type_id, data, now, now],
-        ).map_err(|e| domain::DomainError::InfrastructureError(format!("DB error: {}", e)))?;
+        )
+        .map_err(|e| domain::DomainError::InfrastructureError(format!("DB error: {}", e)))?;
 
         Ok(())
     }
@@ -325,19 +348,22 @@ impl PreviewStorage for PreviewManager {
             PreviewType::Thumbnail => 0,
             PreviewType::Large => 1,
         };
-        
-        let mut stmt = conn.prepare("SELECT data FROM previews WHERE photo_id = ?1 AND type = ?2")
-             .map_err(|e| domain::DomainError::InfrastructureError(format!("DB error: {}", e)))?;
-             
-        let data: Option<Vec<u8>> = stmt.query_row(params![id.to_string(), type_id], |row| row.get(0)).optional()
-             .map_err(|e| domain::DomainError::InfrastructureError(format!("DB error: {}", e)))?;
+
+        let mut stmt = conn
+            .prepare("SELECT data FROM previews WHERE photo_id = ?1 AND type = ?2")
+            .map_err(|e| domain::DomainError::InfrastructureError(format!("DB error: {}", e)))?;
+
+        let data: Option<Vec<u8>> = stmt
+            .query_row(params![id.to_string(), type_id], |row| row.get(0))
+            .optional()
+            .map_err(|e| domain::DomainError::InfrastructureError(format!("DB error: {}", e)))?;
 
         if data.is_some() {
-             let now = chrono::Utc::now().timestamp();
-             let _ = conn.execute(
-                 "UPDATE previews SET last_accessed_at = ?1 WHERE photo_id = ?2 AND type = ?3", 
-                 params![now, id.to_string(), type_id]
-             );
+            let now = chrono::Utc::now().timestamp();
+            let _ = conn.execute(
+                "UPDATE previews SET last_accessed_at = ?1 WHERE photo_id = ?2 AND type = ?3",
+                params![now, id.to_string(), type_id],
+            );
         }
 
         Ok(data)
@@ -349,12 +375,14 @@ impl PreviewStorage for PreviewManager {
             PreviewType::Thumbnail => 0,
             PreviewType::Large => 1,
         };
-        
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(1) FROM previews WHERE photo_id = ?1 AND type = ?2",
-            params![id.to_string(), type_id],
-            |row| row.get(0),
-        ).map_err(|e| domain::DomainError::InfrastructureError(format!("DB error: {}", e)))?;
+
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(1) FROM previews WHERE photo_id = ?1 AND type = ?2",
+                params![id.to_string(), type_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| domain::DomainError::InfrastructureError(format!("DB error: {}", e)))?;
 
         Ok(count > 0)
     }
@@ -364,7 +392,8 @@ impl PreviewStorage for PreviewManager {
         conn.execute(
             "DELETE FROM previews WHERE photo_id = ?1",
             params![id.to_string()],
-        ).map_err(|e| domain::DomainError::InfrastructureError(format!("DB error: {}", e)))?;
+        )
+        .map_err(|e| domain::DomainError::InfrastructureError(format!("DB error: {}", e)))?;
         Ok(())
     }
 }
@@ -372,8 +401,8 @@ impl PreviewStorage for PreviewManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
     use image::{DynamicImage, RgbaImage};
+    use tempfile::tempdir;
 
     // Helper para criar imagem dummy
     fn create_dummy_image(width: u32, height: u32) -> DynamicImage {
@@ -394,10 +423,10 @@ mod tests {
 
         // Inserir dados
         let img = create_dummy_image(100, 100);
-        
+
         // Salvar Thumbnail
         manager.save_thumbnail(photo_id, &img).unwrap();
-        
+
         // Salvar Preview
         manager.save_preview(photo_id, &img).unwrap();
 
@@ -410,14 +439,14 @@ mod tests {
         // Testar Clear Thumbnails
         let count = manager.clear_thumbnails().unwrap();
         assert_eq!(count, 1);
-        
+
         let stats = manager.get_stats();
         assert_eq!(stats.thumbnail_count, 0, "Thumbnails should be gone");
         assert_eq!(stats.large_preview_count, 1, "Previews should remain");
 
         // Recolocar thumbnail para testar Clear All
         manager.save_thumbnail(photo_id, &img).unwrap();
-        
+
         // Testar Clear Previews
         let count = manager.clear_previews().unwrap();
         assert_eq!(count, 1);

@@ -1,9 +1,9 @@
-use egui::{Ui, ScrollArea};
 use crate::design_system::{
     theme::Theme,
     widgets::{self, PanelHeader},
 };
 use domain::entities::Preset;
+use egui::{ScrollArea, Ui};
 
 pub struct PresetsPanel {
     system_presets: Vec<Preset>,
@@ -27,7 +27,11 @@ impl PresetsPanel {
         self.user_presets = user;
     }
 
-    pub fn ui(&mut self, ui: &mut Ui, _theme: &crate::design_system::theme_selector::ThemeVariant) -> Option<Preset> {
+    pub fn ui(
+        &mut self,
+        ui: &mut Ui,
+        _theme: &crate::design_system::theme_selector::ThemeVariant,
+    ) -> Option<Preset> {
         let mut applied_preset = None;
 
         ui.add_space(Theme::SPACE_SM);
@@ -44,7 +48,7 @@ impl PresetsPanel {
                 ui.indent("system_presets_indent", |ui| {
                     for preset in &self.system_presets {
                         if widgets::menu_item(ui, &preset.name, false).clicked() {
-                           applied_preset = Some(preset.clone());
+                            applied_preset = Some(preset.clone());
                         }
                     }
                 });
@@ -58,14 +62,14 @@ impl PresetsPanel {
             self.user_presets_collapsed = header.collapsed;
 
             if !self.user_presets_collapsed {
-                 ui.indent("user_presets_indent", |ui| {
+                ui.indent("user_presets_indent", |ui| {
                     if self.user_presets.is_empty() {
-                         widgets::label_text(ui, "No user presets");
+                        widgets::label_text(ui, "No user presets");
                     } else {
                         for preset in &self.user_presets {
-                             let response = widgets::menu_item(ui, &preset.name, false);
-                             
-                             if response.clicked() {
+                            let response = widgets::menu_item(ui, &preset.name, false);
+
+                            if response.clicked() {
                                 applied_preset = Some(preset.clone());
                             }
                             // Context menu for delete

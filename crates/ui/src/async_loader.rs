@@ -2,14 +2,14 @@
 // Uses Rayon for parallel thumbnail loading without blocking the UI
 
 use eframe::egui::ColorImage;
-use std::sync::mpsc::{channel, Receiver, Sender};
-use std::sync::Arc;
+use image::DynamicImage;
+use infrastructure::raw_processing::{is_raw_file, load_raw_as_dynamic_image};
+use lru::LruCache;
 use parking_lot::Mutex;
 use rayon::prelude::*;
-use image::DynamicImage;
-use lru::LruCache;
 use std::num::NonZeroUsize;
-use infrastructure::raw_processing::{is_raw_file, load_raw_as_dynamic_image};
+use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::Arc;
 
 /// Request to load a thumbnail
 #[derive(Clone)]
@@ -39,7 +39,9 @@ pub struct AsyncThumbnailLoader {
 impl AsyncThumbnailLoader {
     /// Create a new async thumbnail loader
     /// Create a new async thumbnail loader
-    pub fn new(preview_manager: Arc<infrastructure::cache::preview_manager::PreviewManager>) -> Self {
+    pub fn new(
+        preview_manager: Arc<infrastructure::cache::preview_manager::PreviewManager>,
+    ) -> Self {
         let (request_sender, request_receiver) = channel::<Vec<ThumbnailRequest>>();
         let (result_sender, result_receiver) = channel::<ThumbnailResult>();
         let loading = Arc::new(Mutex::new(std::collections::HashSet::new()));
@@ -49,7 +51,12 @@ impl AsyncThumbnailLoader {
 
         // Spawn background thread for processing thumbnail requests
         std::thread::spawn(move || {
-            Self::background_loader(request_receiver, result_sender, loading_clone, preview_manager_clone);
+            Self::background_loader(
+                request_receiver,
+                result_sender,
+                loading_clone,
+                preview_manager_clone,
+            );
         });
 
         Self {
@@ -82,7 +89,7 @@ impl AsyncThumbnailLoader {
                 .filter_map(|req| {
                     // 1. Try cache first
                     if let Some(img) = preview_manager.get_thumbnail(&req.photo_id) {
-                         return Some(ThumbnailResult {
+                        return Some(ThumbnailResult {
                             photo_id: req.photo_id.clone(),
                             image: img,
                         });
@@ -91,26 +98,30 @@ impl AsyncThumbnailLoader {
                     // 2. Fallback to loading original and generating thumbnail
                     // Check if it's a RAW file and use appropriate loader
                     let img_result = if is_raw_file(&req.path) {
-                        load_raw_as_dynamic_image(&req.path)
-                            .map_err(|e| image::ImageError::IoError(
-                                std::io::Error::new(std::io::ErrorKind::Other, e)
+                        load_raw_as_dynamic_image(&req.path).map_err(|e| {
+                            image::ImageError::IoError(std::io::Error::new(
+                                std::io::ErrorKind::Other,
+                                e,
                             ))
+                        })
                     } else {
                         image::open(&req.path)
                     };
-                    
+
                     match img_result {
                         Ok(img) => {
-                             // Resize
-                             let thumb = crate::image_processing::ImageProcessor::resize_for_preview(&img, 300);
-                             // Save to cache
-                             let _ = preview_manager.save_thumbnail(&req.photo_id, &thumb);
-                             
-                             Some(ThumbnailResult {
+                            // Resize
+                            let thumb = crate::image_processing::ImageProcessor::resize_for_preview(
+                                &img, 300,
+                            );
+                            // Save to cache
+                            let _ = preview_manager.save_thumbnail(&req.photo_id, &thumb);
+
+                            Some(ThumbnailResult {
                                 photo_id: req.photo_id.clone(),
                                 image: thumb,
-                             })
-                        },
+                            })
+                        }
                         Err(e) => {
                             eprintln!("Failed to load thumbnail {}: {}", req.path, e);
                             None
@@ -139,8 +150,8 @@ impl AsyncThumbnailLoader {
             requests
                 .into_iter()
                 .filter(|req| {
-                    !self.requested.contains(&req.photo_id) && 
-                    !loading_guard.contains(&req.photo_id)
+                    !self.requested.contains(&req.photo_id)
+                        && !loading_guard.contains(&req.photo_id)
                 })
                 .collect()
         };
@@ -192,7 +203,6 @@ impl AsyncThumbnailLoader {
 // Default implementation removed because PreviewManager is required
 // impl Default for AsyncThumbnailLoader { ... }
 
-
 /// Async image processor for heavy operations like full image loading and processing
 pub struct AsyncImageProcessor {
     /// Sender for image processing requests
@@ -231,8 +241,8 @@ struct ProcessedCache {
 impl ImageProcessRequest {
     /// Calculate a hash of the edit parameters for cache invalidation
     fn edits_hash(&self) -> u64 {
-        use std::hash::{Hash, Hasher};
         use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
 
         let mut hasher = DefaultHasher::new();
         // Hash all edit parameters (using bits to avoid float comparison issues)
@@ -372,13 +382,15 @@ pub struct ImageProcessResult {
 impl AsyncImageProcessor {
     /// Create a new async image processor
     /// Create a new async image processor
-    pub fn new(preview_manager: Arc<infrastructure::cache::preview_manager::PreviewManager>) -> Self {
+    pub fn new(
+        preview_manager: Arc<infrastructure::cache::preview_manager::PreviewManager>,
+    ) -> Self {
         let (request_sender, request_receiver) = channel::<ImageProcessRequest>();
         let (result_sender, result_receiver) = channel::<ImageProcessResult>();
         let processing = Arc::new(Mutex::new(None));
         let processing_clone = processing.clone();
         let preview_manager_clone = preview_manager.clone();
-        
+
         // Cache capacity: 15 images (~600MB for 24MP images)
         // Larger cache improves navigation performance by keeping more recently viewed photos in RAM
         let cache_capacity = NonZeroUsize::new(15).unwrap();
@@ -387,7 +399,13 @@ impl AsyncImageProcessor {
 
         // Spawn dedicated thread for image processing
         std::thread::spawn(move || {
-            Self::background_processor(request_receiver, result_sender, processing_clone, preview_manager_clone, memory_cache_clone);
+            Self::background_processor(
+                request_receiver,
+                result_sender,
+                processing_clone,
+                preview_manager_clone,
+                memory_cache_clone,
+            );
         });
 
         Self {
@@ -423,7 +441,10 @@ impl AsyncImageProcessor {
                         if processed.edits_hash == edits_hash {
                             // FULL CACHE HIT! Return immediately without any processing
                             let cache_ms = start_time.elapsed().as_secs_f32() * 1000.0;
-                            println!("FULL PROCESSED CACHE HIT: {} ({:.2}ms)", request.photo_id, cache_ms);
+                            println!(
+                                "FULL PROCESSED CACHE HIT: {} ({:.2}ms)",
+                                request.photo_id, cache_ms
+                            );
 
                             let result = ImageProcessResult {
                                 photo_id: request.photo_id.clone(),
@@ -453,27 +474,33 @@ impl AsyncImageProcessor {
             };
 
             let (preview_img, histogram) = if let Some((img, hist)) = memory_hit {
-                 // RAM Cache Hit (but need to process)!
-                 let ram_check_ms = start_time.elapsed().as_secs_f32() * 1000.0;
-                 println!("RAM CACHE HIT (needs processing): {} ({:.2}ms)", request.photo_id, ram_check_ms);
-                 (img, hist)
+                // RAM Cache Hit (but need to process)!
+                let ram_check_ms = start_time.elapsed().as_secs_f32() * 1000.0;
+                println!(
+                    "RAM CACHE HIT (needs processing): {} ({:.2}ms)",
+                    request.photo_id, ram_check_ms
+                );
+                (img, hist)
             } else {
                 // RAM Miss - Try SQLite Cache
-                
+
                 // 1. Try to load Smart Preview from cache first
                 let cache_check_start = std::time::Instant::now();
                 let cached_preview = preview_manager.get_preview(&request.photo_id);
                 let cache_check_ms = cache_check_start.elapsed().as_secs_f32() * 1000.0;
-                
+
                 let img = if let Some(img) = cached_preview {
                     // Cache hit! Use optimized image
-                    println!("SQLITE BLOB HIT: {} (Decode: {:.2}ms)", request.photo_id, cache_check_ms);
+                    println!(
+                        "SQLITE BLOB HIT: {} (Decode: {:.2}ms)",
+                        request.photo_id, cache_check_ms
+                    );
                     img
                 } else {
                     // Cache miss. Load original and generate Smart Preview
                     println!("FULL CACHE MISS: {}", request.photo_id);
                     let load_start = std::time::Instant::now();
-                    
+
                     // Check if it's a RAW file and use appropriate loader
                     let img_result = if is_raw_file(&request.path) {
                         println!("Loading RAW file with demosaic: {}", request.path);
@@ -481,52 +508,67 @@ impl AsyncImageProcessor {
                     } else {
                         image::open(&request.path).map_err(|e| e.to_string())
                     };
-                    
+
                     if let Ok(img) = img_result {
                         let open_ms = load_start.elapsed().as_secs_f32() * 1000.0;
-                        
+
                         // Resize for preview using Rayon-accelerated operations
                         let resize_start = std::time::Instant::now();
                         let resized = crate::image_processing::ImageProcessor::resize_for_preview(
-                            &img, 
-                            request.max_preview_size
+                            &img,
+                            request.max_preview_size,
                         );
                         let resize_ms = resize_start.elapsed().as_secs_f32() * 1000.0;
-                        
+
                         // Save to cache for next time
                         let save_start = std::time::Instant::now();
                         if let Err(e) = preview_manager.save_preview(&request.photo_id, &resized) {
                             eprintln!("CACHE SAVE ERROR: {}", e);
                         }
                         let save_ms = save_start.elapsed().as_secs_f32() * 1000.0;
-                        
-                        println!("Generated Smart Preview: Open={:.2}ms, Resize={:.2}ms, Save={:.2}ms", open_ms, resize_ms, save_ms);
-                        
+
+                        println!(
+                            "Generated Smart Preview: Open={:.2}ms, Resize={:.2}ms, Save={:.2}ms",
+                            open_ms, resize_ms, save_ms
+                        );
+
                         resized
                     } else {
                         // Failed to load image
-                        eprintln!("Failed to open image: {} - {:?}", request.path, img_result.err());
+                        eprintln!(
+                            "Failed to open image: {} - {:?}",
+                            request.path,
+                            img_result.err()
+                        );
                         *processing.lock() = None;
                         continue;
                     }
                 };
-                
+
                 // Calculate histogram
                 let hist_start = std::time::Instant::now();
                 let hist = crate::components::histogram::HistogramData::from_image(&img);
                 let hist_ms = hist_start.elapsed().as_secs_f32() * 1000.0;
-                
+
                 // Store in Memory Cache (without processed cache initially)
                 {
                     let mut cache = memory_cache.lock();
-                    cache.put(request.photo_id.clone(), DecodedImage {
-                        image: img.clone(),
-                        histogram: hist.clone(),
-                        processed_cache: None,
-                    });
-                    println!("RAM CACHE STORE: {} (Count: {}) | Hist Calc: {:.2}ms", request.photo_id, cache.len(), hist_ms);
+                    cache.put(
+                        request.photo_id.clone(),
+                        DecodedImage {
+                            image: img.clone(),
+                            histogram: hist.clone(),
+                            processed_cache: None,
+                        },
+                    );
+                    println!(
+                        "RAM CACHE STORE: {} (Count: {}) | Hist Calc: {:.2}ms",
+                        request.photo_id,
+                        cache.len(),
+                        hist_ms
+                    );
                 }
-                
+
                 (img, hist)
             };
 
@@ -541,7 +583,7 @@ impl AsyncImageProcessor {
                 let clone_ms = clone_start.elapsed().as_secs_f32() * 1000.0;
 
                 // Apply edits if any
-                let has_edits = request.exposure != 0.0 || request.contrast != 1.0 || 
+                let has_edits = request.exposure != 0.0 || request.contrast != 1.0 ||
                                request.temperature != 0.0 || request.tint != 0.0 ||
                                request.highlights != 0.0 || request.shadows != 0.0 ||
                                request.whites != 0.0 || request.blacks != 0.0 ||
@@ -587,21 +629,46 @@ impl AsyncImageProcessor {
                         request.clarity,
                         request.vibrance,
                         request.saturation,
-                        0.0, 0.0, 0.0, 0.0, // tone curve
-                        request.hsl_red_sat, request.hsl_orange_sat, request.hsl_yellow_sat, request.hsl_green_sat,
-                        request.hsl_aqua_sat, request.hsl_blue_sat, request.hsl_purple_sat, request.hsl_magenta_sat,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0, // tone curve
+                        request.hsl_red_sat,
+                        request.hsl_orange_sat,
+                        request.hsl_yellow_sat,
+                        request.hsl_green_sat,
+                        request.hsl_aqua_sat,
+                        request.hsl_blue_sat,
+                        request.hsl_purple_sat,
+                        request.hsl_magenta_sat,
                         // HSL Hue
-                        request.hsl_red_hue, request.hsl_orange_hue, request.hsl_yellow_hue, request.hsl_green_hue,
-                        request.hsl_aqua_hue, request.hsl_blue_hue, request.hsl_purple_hue, request.hsl_magenta_hue,
+                        request.hsl_red_hue,
+                        request.hsl_orange_hue,
+                        request.hsl_yellow_hue,
+                        request.hsl_green_hue,
+                        request.hsl_aqua_hue,
+                        request.hsl_blue_hue,
+                        request.hsl_purple_hue,
+                        request.hsl_magenta_hue,
                         // HSL Lum
-                        request.hsl_red_lum, request.hsl_orange_lum, request.hsl_yellow_lum, request.hsl_green_lum,
-                        request.hsl_aqua_lum, request.hsl_blue_lum, request.hsl_purple_lum, request.hsl_magenta_lum,
+                        request.hsl_red_lum,
+                        request.hsl_orange_lum,
+                        request.hsl_yellow_lum,
+                        request.hsl_green_lum,
+                        request.hsl_aqua_lum,
+                        request.hsl_blue_lum,
+                        request.hsl_purple_lum,
+                        request.hsl_magenta_lum,
                         // Lens
-                        request.lens_distortion, request.lens_vignette_amount, request.lens_vignette_midpoint,
+                        request.lens_distortion,
+                        request.lens_vignette_amount,
+                        request.lens_vignette_midpoint,
                         // NR
-                        request.nr_luminance, request.nr_color,
+                        request.nr_luminance,
+                        request.nr_color,
                         // Sharpening
-                        request.sharpen_amount, request.sharpen_radius,
+                        request.sharpen_amount,
+                        request.sharpen_radius,
                     )
                 } else {
                     preview_img
@@ -609,7 +676,8 @@ impl AsyncImageProcessor {
                 let edit_ms = edit_start.elapsed().as_secs_f32() * 1000.0;
 
                 let convert_start = std::time::Instant::now();
-                let processed_color = crate::image_processing::ImageProcessor::dynamic_to_color_image(&processed);
+                let processed_color =
+                    crate::image_processing::ImageProcessor::dynamic_to_color_image(&processed);
                 let convert_ms = convert_start.elapsed().as_secs_f32() * 1000.0;
 
                 let post_cache_ms = post_cache_start.elapsed().as_secs_f32() * 1000.0;
@@ -625,7 +693,10 @@ impl AsyncImageProcessor {
                             color_image: processed_color.clone(),
                             original_preview: original_preview.clone(),
                         });
-                        println!("PROCESSED CACHE SAVED: {} (hash: {})", request.photo_id, edits_hash);
+                        println!(
+                            "PROCESSED CACHE SAVED: {} (hash: {})",
+                            request.photo_id, edits_hash
+                        );
                     }
                 }
 
@@ -739,13 +810,21 @@ impl AsyncImageProcessor {
 
             {
                 let mut cache = memory_cache.lock();
-                cache.put(photo_id.clone(), DecodedImage {
-                    image: img,
-                    histogram: hist,
-                    processed_cache: None, // Will be populated on first actual use
-                });
+                cache.put(
+                    photo_id.clone(),
+                    DecodedImage {
+                        image: img,
+                        histogram: hist,
+                        processed_cache: None, // Will be populated on first actual use
+                    },
+                );
                 let total_ms = start_time.elapsed().as_secs_f32() * 1000.0;
-                println!("PREFETCH CACHED: {} (Total: {:.2}ms, Cache size: {})", photo_id, total_ms, cache.len());
+                println!(
+                    "PREFETCH CACHED: {} (Total: {:.2}ms, Cache size: {})",
+                    photo_id,
+                    total_ms,
+                    cache.len()
+                );
             }
 
             // Remove from prefetching set
@@ -756,7 +835,6 @@ impl AsyncImageProcessor {
 
 // Default implementation removed because PreviewManager is required
 // impl Default for AsyncImageProcessor { ... }
-
 
 /// Async edit processor for real-time slider adjustments
 pub struct AsyncEditProcessor {
@@ -885,20 +963,42 @@ impl AsyncEditProcessor {
                 request.tone_curve_darks,
                 request.tone_curve_lights,
                 request.tone_curve_highlights,
-                request.hsl_red_sat, request.hsl_orange_sat, request.hsl_yellow_sat, request.hsl_green_sat,
-                request.hsl_aqua_sat, request.hsl_blue_sat, request.hsl_purple_sat, request.hsl_magenta_sat,
+                request.hsl_red_sat,
+                request.hsl_orange_sat,
+                request.hsl_yellow_sat,
+                request.hsl_green_sat,
+                request.hsl_aqua_sat,
+                request.hsl_blue_sat,
+                request.hsl_purple_sat,
+                request.hsl_magenta_sat,
                 // HSL Hue
-                request.hsl_red_hue, request.hsl_orange_hue, request.hsl_yellow_hue, request.hsl_green_hue,
-                request.hsl_aqua_hue, request.hsl_blue_hue, request.hsl_purple_hue, request.hsl_magenta_hue,
+                request.hsl_red_hue,
+                request.hsl_orange_hue,
+                request.hsl_yellow_hue,
+                request.hsl_green_hue,
+                request.hsl_aqua_hue,
+                request.hsl_blue_hue,
+                request.hsl_purple_hue,
+                request.hsl_magenta_hue,
                 // HSL Lum
-                request.hsl_red_lum, request.hsl_orange_lum, request.hsl_yellow_lum, request.hsl_green_lum,
-                request.hsl_aqua_lum, request.hsl_blue_lum, request.hsl_purple_lum, request.hsl_magenta_lum,
+                request.hsl_red_lum,
+                request.hsl_orange_lum,
+                request.hsl_yellow_lum,
+                request.hsl_green_lum,
+                request.hsl_aqua_lum,
+                request.hsl_blue_lum,
+                request.hsl_purple_lum,
+                request.hsl_magenta_lum,
                 // Lens
-                request.lens_distortion, request.lens_vignette_amount, request.lens_vignette_midpoint,
+                request.lens_distortion,
+                request.lens_vignette_amount,
+                request.lens_vignette_midpoint,
                 // NR
-                request.nr_luminance, request.nr_color,
+                request.nr_luminance,
+                request.nr_color,
                 // Sharpening
-                request.sharpen_amount, request.sharpen_radius,
+                request.sharpen_amount,
+                request.sharpen_radius,
             );
 
             let result = EditResult {
@@ -930,14 +1030,17 @@ impl AsyncEditProcessor {
     /// Returns only the latest result (discards outdated ones)
     pub fn poll_result(&self) -> Option<EditResult> {
         let mut latest: Option<EditResult> = None;
-        
+
         // Drain all available results, keep only the latest
         while let Ok(result) = self.result_receiver.try_recv() {
-            if latest.as_ref().map_or(true, |l| result.request_id > l.request_id) {
+            if latest
+                .as_ref()
+                .map_or(true, |l| result.request_id > l.request_id)
+            {
                 latest = Some(result);
             }
         }
-        
+
         latest
     }
 }
@@ -951,8 +1054,8 @@ impl Default for AsyncEditProcessor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
     use infrastructure::cache::preview_manager::PreviewManager;
+    use std::sync::Arc;
     use tempfile::TempDir;
 
     fn create_test_preview_manager() -> Arc<PreviewManager> {
@@ -1037,12 +1140,10 @@ mod tests {
         let mut loader = AsyncThumbnailLoader::new(preview_manager);
 
         // Request some thumbnails
-        let requests = vec![
-            ThumbnailRequest {
-                photo_id: "photo1".to_string(),
-                path: "/path/to/photo1.jpg".to_string(),
-            },
-        ];
+        let requests = vec![ThumbnailRequest {
+            photo_id: "photo1".to_string(),
+            path: "/path/to/photo1.jpg".to_string(),
+        }];
         loader.request_thumbnails(requests);
 
         // Clear a photo that was never requested - should not panic
@@ -1083,10 +1184,10 @@ mod tests {
 mod cache_system_tests {
     #[allow(unused_imports)]
     use super::{AsyncThumbnailLoader, ThumbnailRequest};
-    use std::sync::Arc;
-    use infrastructure::cache::preview_manager::PreviewManager;
-    use tempfile::TempDir;
     use image::{DynamicImage, RgbaImage};
+    use infrastructure::cache::preview_manager::PreviewManager;
+    use std::sync::Arc;
+    use tempfile::TempDir;
 
     /// Helper to create a test image
     fn create_test_image(width: u32, height: u32, color: [u8; 4]) -> DynamicImage {
@@ -1105,18 +1206,18 @@ mod cache_system_tests {
     #[test]
     fn test_l2_cache_save_and_retrieve() {
         let (preview_manager, _temp_dir) = create_test_preview_manager();
-        
+
         // Create a test image
         let test_image = create_test_image(100, 100, [255, 0, 0, 255]); // Red
-        
+
         // Save to L2 cache (SQLite BLOB)
         let photo_id = "test_photo_1";
         preview_manager.save_preview(photo_id, &test_image).unwrap();
-        
+
         // Retrieve from L2 cache
         let retrieved = preview_manager.get_preview(photo_id);
         assert!(retrieved.is_some(), "Should retrieve image from L2 cache");
-        
+
         let retrieved_img = retrieved.unwrap();
         assert_eq!(retrieved_img.width(), 100);
         assert_eq!(retrieved_img.height(), 100);
@@ -1125,7 +1226,7 @@ mod cache_system_tests {
     #[test]
     fn test_l2_cache_miss() {
         let (preview_manager, _temp_dir) = create_test_preview_manager();
-        
+
         // Try to retrieve non-existent image
         let result = preview_manager.get_preview("nonexistent_photo");
         assert!(result.is_none(), "Should return None for cache miss");
@@ -1134,17 +1235,17 @@ mod cache_system_tests {
     #[test]
     fn test_l2_cache_overwrite() {
         let (preview_manager, _temp_dir) = create_test_preview_manager();
-        
+
         let photo_id = "test_photo_overwrite";
-        
+
         // Save first image (red)
         let img1 = create_test_image(100, 100, [255, 0, 0, 255]);
         preview_manager.save_preview(photo_id, &img1).unwrap();
-        
+
         // Save second image (blue) - should overwrite
         let img2 = create_test_image(200, 200, [0, 0, 255, 255]);
         preview_manager.save_preview(photo_id, &img2).unwrap();
-        
+
         // Retrieve and verify it's the second image
         let retrieved = preview_manager.get_preview(photo_id).unwrap();
         assert_eq!(retrieved.width(), 200, "Should have new image dimensions");
@@ -1154,14 +1255,14 @@ mod cache_system_tests {
     #[test]
     fn test_l2_cache_multiple_photos() {
         let (preview_manager, _temp_dir) = create_test_preview_manager();
-        
+
         // Save multiple photos
         for i in 0..10 {
             let photo_id = format!("photo_{}", i);
             let img = create_test_image(100 + i * 10, 100 + i * 10, [i as u8 * 25, 0, 0, 255]);
             preview_manager.save_preview(&photo_id, &img).unwrap();
         }
-        
+
         // Retrieve and verify all
         for i in 0..10 {
             let photo_id = format!("photo_{}", i);

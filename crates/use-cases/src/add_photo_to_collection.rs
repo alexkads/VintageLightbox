@@ -7,7 +7,7 @@ use domain::{
     entities::Collection,
     repositories::{CollectionRepository, PhotoRepository},
     value_objects::{CollectionId, PhotoId},
-    DomainResult, DomainError,
+    DomainError, DomainResult,
 };
 use std::sync::Arc;
 
@@ -30,7 +30,11 @@ impl AddPhotoToCollectionUseCase {
     }
 
     /// Adiciona uma foto a uma coleção
-    pub async fn execute(&self, collection_id: CollectionId, photo_id: PhotoId) -> DomainResult<Collection> {
+    pub async fn execute(
+        &self,
+        collection_id: CollectionId,
+        photo_id: PhotoId,
+    ) -> DomainResult<Collection> {
         // Verificar se a foto existe
         let photo_exists = self.photo_repository.exists(&photo_id).await?;
         if !photo_exists {
@@ -38,9 +42,11 @@ impl AddPhotoToCollectionUseCase {
         }
 
         // Buscar coleção
-        let collection_option = self.collection_repository.find_by_id(&collection_id).await?;
-        let mut collection = collection_option
-            .ok_or(DomainError::CollectionNotFound)?;
+        let collection_option = self
+            .collection_repository
+            .find_by_id(&collection_id)
+            .await?;
+        let mut collection = collection_option.ok_or(DomainError::CollectionNotFound)?;
 
         // Adicionar foto à coleção
         collection.add_photo(photo_id);
@@ -165,7 +171,7 @@ mod tests {
         // Assert
         assert!(result.is_err());
         match result {
-            Err(DomainError::PhotoNotFound) => {},
+            Err(DomainError::PhotoNotFound) => {}
             _ => panic!("Expected PhotoNotFound error"),
         }
     }
@@ -202,7 +208,7 @@ mod tests {
         // Assert
         assert!(result.is_err());
         match result {
-            Err(DomainError::CollectionNotFound) => {},
+            Err(DomainError::CollectionNotFound) => {}
             _ => panic!("Expected CollectionNotFound error"),
         }
     }

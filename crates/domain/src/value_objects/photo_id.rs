@@ -111,7 +111,7 @@ mod tests {
             "not-a-uuid",
             "12345",
             "",
-            "550e8400-e29b-41d4-a716",  // UUID incompleto
+            "550e8400-e29b-41d4-a716", // UUID incompleto
         ];
 
         // Act & Assert

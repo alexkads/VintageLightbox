@@ -1,10 +1,10 @@
 // Interactive Histogram Component using egui_plot
 // Provides zoom, pan, and hover tooltips
 
-use egui::Ui;
-use egui_plot::{Plot, PlotPoints, Line, Legend};
 use crate::components::histogram::HistogramData;
 use crate::design_system::theme::Theme;
+use egui::Ui;
+use egui_plot::{Legend, Line, Plot, PlotPoints};
 
 #[allow(dead_code)]
 pub struct HistogramPlot;
@@ -17,7 +17,7 @@ impl HistogramPlot {
             ui.label(
                 egui::RichText::new("Histogram (Interactive)")
                     .size(Theme::FONT_SM)
-                    .color(Theme::TEXT_MUTED)
+                    .color(Theme::TEXT_MUTED),
             );
 
             ui.add_space(Theme::SPACE_XS);
@@ -29,7 +29,7 @@ impl HistogramPlot {
                 ui.label(
                     egui::RichText::new("No image loaded")
                         .size(Theme::FONT_XS)
-                        .color(Theme::TEXT_MUTED)
+                        .color(Theme::TEXT_MUTED),
                 );
             }
         });
@@ -72,21 +72,21 @@ impl HistogramPlot {
                     Line::new(red_points)
                         .color(egui::Color32::from_rgb(255, 80, 80))
                         .name("Red")
-                        .width(1.0)
+                        .width(1.0),
                 );
 
                 plot_ui.line(
                     Line::new(green_points)
                         .color(egui::Color32::from_rgb(80, 255, 80))
                         .name("Green")
-                        .width(1.0)
+                        .width(1.0),
                 );
 
                 plot_ui.line(
                     Line::new(blue_points)
                         .color(egui::Color32::from_rgb(80, 80, 255))
                         .name("Blue")
-                        .width(1.0)
+                        .width(1.0),
                 );
             });
     }

@@ -23,7 +23,7 @@ impl MonitorDetector {
     /// List all connected monitors
     pub fn get_monitors() -> Vec<MonitorInfo> {
         let mut monitors = Vec::new();
-        
+
         if let Ok(displays) = DisplayInfo::all() {
             for display in displays {
                 monitors.push(MonitorInfo {
@@ -38,31 +38,34 @@ impl MonitorDetector {
                 });
             }
         }
-        
+
         monitors
     }
-    
+
     /// Get the first non-primary monitor, or primary if only one exists
     pub fn get_secondary_monitor() -> Option<MonitorInfo> {
         let monitors = Self::get_monitors();
         println!("DEBUG: Found {} monitors", monitors.len());
         for (i, m) in monitors.iter().enumerate() {
-            println!("DEBUG: Monitor #{}: {} ({}x{}) - Primary: {}", 
-                i, m.name, m.width, m.height, m.is_primary);
+            println!(
+                "DEBUG: Monitor #{}: {} ({}x{}) - Primary: {}",
+                i, m.name, m.width, m.height, m.is_primary
+            );
         }
 
-        let selected = monitors.iter()
+        let selected = monitors
+            .iter()
             .find(|m| !m.is_primary)
             .cloned()
             .or_else(|| monitors.into_iter().next());
-            
+
         if let Some(m) = &selected {
             println!("DEBUG: Selected secondary monitor: {}", m.name);
         }
-        
+
         selected
     }
-    
+
     /// Check if multiple monitors are available
     pub fn has_multiple_monitors() -> bool {
         Self::get_monitors().len() > 1
@@ -72,7 +75,7 @@ impl MonitorDetector {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_get_monitors_returns_list() {
         // This test will work on any system - should return at least 1 monitor
@@ -81,14 +84,17 @@ mod tests {
         // So we just check it doesn't panic
         println!("Found {} monitors", monitors.len());
     }
-    
+
     #[test]
     fn test_get_secondary_monitor_returns_something() {
         // Should return Some even with single monitor (returns primary as fallback)
         let secondary = MonitorDetector::get_secondary_monitor();
         // In headless environments, this might be None
         if let Some(monitor) = secondary {
-            println!("Secondary monitor: {} ({}x{})", monitor.name, monitor.width, monitor.height);
+            println!(
+                "Secondary monitor: {} ({}x{})",
+                monitor.name, monitor.width, monitor.height
+            );
         }
     }
 }

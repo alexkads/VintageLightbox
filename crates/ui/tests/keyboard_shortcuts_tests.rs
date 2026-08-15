@@ -1,16 +1,20 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use ui::state::{AppState, CurrentView};
-use ui::keyboard::KeyboardHandler;
-use adapters::controllers::{PhotoController, LibraryController, EditorController, ExportController, ImportController};
-use infrastructure::{ExifReader, ThumbnailGeneratorImpl, ImageExporterImpl, cache::preview_manager::PreviewManager};
-use tempfile::tempdir;
-use use_cases::{SavePhotoEditsUseCase, ExportPhotoUseCase, ImportPhotoUseCase};
+use adapters::controllers::{
+    EditorController, ExportController, ImportController, LibraryController, PhotoController,
+};
 use adapters::view_models::PhotoViewModel;
-use domain::repositories::PhotoRepository;
 use domain::entities::Photo;
+use domain::repositories::PhotoRepository;
 use domain::value_objects::FilePath;
+use infrastructure::{
+    cache::preview_manager::PreviewManager, ExifReader, ImageExporterImpl, ThumbnailGeneratorImpl,
+};
+use tempfile::tempdir;
+use ui::keyboard::KeyboardHandler;
+use ui::state::{AppState, CurrentView};
+use use_cases::{ExportPhotoUseCase, ImportPhotoUseCase, SavePhotoEditsUseCase};
 
 // =========================================================================================
 // TEST HARNESS
@@ -26,30 +30,39 @@ async fn setup_harness() -> (
     Arc<ExportController>,
     tokio::sync::mpsc::Sender<Result<Vec<PhotoViewModel>, String>>,
     tokio::sync::mpsc::Receiver<Result<Vec<PhotoViewModel>, String>>,
-    Arc<infrastructure::database::PhotoRepositoryImpl>
+    Arc<infrastructure::database::PhotoRepositoryImpl>,
 ) {
     // 1. In-Memory Database
     let db_url = "sqlite::memory:";
-    let pool = sqlx::SqlitePool::connect(db_url).await.expect("Failed to create in-memory db");
-    
+    let pool = sqlx::SqlitePool::connect(db_url)
+        .await
+        .expect("Failed to create in-memory db");
+
     // Run migrations
-    sqlx::migrate!("../infrastructure/migrations").run(&pool).await.expect("Failed to run migrations");
+    sqlx::migrate!("../infrastructure/migrations")
+        .run(&pool)
+        .await
+        .expect("Failed to run migrations");
 
     // 2. Repositories
-    let photo_repo = Arc::new(infrastructure::database::PhotoRepositoryImpl::new(pool.clone()));
-    let _coll_repo = Arc::new(infrastructure::database::CollectionRepositoryImpl::new(pool.clone()));
+    let photo_repo = Arc::new(infrastructure::database::PhotoRepositoryImpl::new(
+        pool.clone(),
+    ));
+    let _coll_repo = Arc::new(infrastructure::database::CollectionRepositoryImpl::new(
+        pool.clone(),
+    ));
 
     // 3. Use Cases (Full Real Stack)
     let rate_uc = use_cases::RatePhotoUseCase::new(photo_repo.clone());
     let color_uc = use_cases::SetColorLabelUseCase::new(photo_repo.clone());
     let flag_uc = use_cases::SetFlagUseCase::new(photo_repo.clone());
     let delete_uc = use_cases::DeletePhotoUseCase::new(photo_repo.clone());
-    
+
     // Additional Use Cases for extra controllers
     let save_uc = SavePhotoEditsUseCase::new(photo_repo.clone());
     let exporter = Arc::new(ImageExporterImpl::new());
     let export_uc = ExportPhotoUseCase::new(photo_repo.clone(), exporter);
-    
+
     let exif_reader = Arc::new(ExifReader);
     let thumb_gen = Arc::new(ThumbnailGeneratorImpl::new());
     let temp_dir_obj = tempdir().expect("temp");
@@ -58,16 +71,19 @@ async fn setup_harness() -> (
     // Ideally we leak it or keep it alive. But for test duration it might be fine if variable persists?
     // Wait, tempdir deletes on drop. If we drop it here, dir is gone.
     // We can return it? Or just `into_path()` (persisted?) No `into_path` persists it.
-    let preview_man = Arc::new(PreviewManager::new_with_path(temp_dir_obj.into_path().join("previews")));
-    
-    let import_uc = ImportPhotoUseCase::new(photo_repo.clone(), exif_reader, thumb_gen, preview_man);
+    let preview_man = Arc::new(PreviewManager::new_with_path(
+        temp_dir_obj.into_path().join("previews"),
+    ));
+
+    let import_uc =
+        ImportPhotoUseCase::new(photo_repo.clone(), exif_reader, thumb_gen, preview_man);
 
     // 4. Controllers
     let photo_controller = Arc::new(PhotoController::new(
         Arc::new(rate_uc),
         Arc::new(color_uc),
         Arc::new(flag_uc),
-        Arc::new(delete_uc)
+        Arc::new(delete_uc),
     ));
 
     let lib_controller = Arc::new(LibraryController::new(photo_repo.clone()));
@@ -93,13 +109,23 @@ async fn setup_harness() -> (
     state.photos = view_models;
     state.rebuild_folder_tree();
 
-    (state, kb_handler, photo_controller, lib_controller, editor_controller, export_controller, tx, rx, photo_repo)
+    (
+        state,
+        kb_handler,
+        photo_controller,
+        lib_controller,
+        editor_controller,
+        export_controller,
+        tx,
+        rx,
+        photo_repo,
+    )
 }
 
 /// Helper to drain all pending reloads and return the last one
-/// This prevents race conditions from out-of-order async updates  
+/// This prevents race conditions from out-of-order async updates
 async fn drain_reloads(
-    rx: &mut tokio::sync::mpsc::Receiver<Result<Vec<PhotoViewModel>, String>>
+    rx: &mut tokio::sync::mpsc::Receiver<Result<Vec<PhotoViewModel>, String>>,
 ) -> Option<Vec<PhotoViewModel>> {
     let mut last_photos = None;
     loop {
@@ -124,10 +150,13 @@ async fn wait_for_db_flag(
 ) -> bool {
     let start = std::time::Instant::now();
     let timeout = Duration::from_millis(timeout_ms);
-    
+
     while start.elapsed() < timeout {
-        let p = repo.find_by_id(&domain::value_objects::PhotoId::from_string(photo_id).unwrap())
-            .await.unwrap().unwrap();
+        let p = repo
+            .find_by_id(&domain::value_objects::PhotoId::from_string(photo_id).unwrap())
+            .await
+            .unwrap()
+            .unwrap();
         if p.flag() == expected_flag {
             return true;
         }

@@ -1,8 +1,10 @@
 // Secondary Window Component
 // Displays the selected photo in fullscreen on a secondary monitor
 
-use egui::{Context, ViewportBuilder, ViewportId, ViewportCommand, Pos2, Color32, RichText, Align2};
 use crate::monitors::MonitorInfo;
+use egui::{
+    Align2, Color32, Context, Pos2, RichText, ViewportBuilder, ViewportCommand, ViewportId,
+};
 
 /// Manages the secondary fullscreen window for client viewing
 pub struct SecondaryWindow {
@@ -34,7 +36,7 @@ impl SecondaryWindow {
             session_id: 0,
         }
     }
-    
+
     /// Toggle the secondary window on/off
     pub fn toggle(&mut self, monitors: &[MonitorInfo]) {
         if self.is_open {
@@ -43,49 +45,58 @@ impl SecondaryWindow {
             self.open(monitors);
         }
     }
-    
+
     /// Open secondary window on the best available monitor
     pub fn open(&mut self, monitors: &[MonitorInfo]) {
-        println!("DEBUG: Opening secondary window. Available monitors: {}", monitors.len());
+        println!(
+            "DEBUG: Opening secondary window. Available monitors: {}",
+            monitors.len()
+        );
         for (i, m) in monitors.iter().enumerate() {
-            println!("DEBUG: Monitor #{}: {} ({}x{}) @ ({},{}) Primary: {}", 
-                i, m.name, m.width, m.height, m.x, m.y, m.is_primary);
+            println!(
+                "DEBUG: Monitor #{}: {} ({}x{}) @ ({},{}) Primary: {}",
+                i, m.name, m.width, m.height, m.x, m.y, m.is_primary
+            );
         }
-        
+
         // Prefer secondary monitor, fallback to primary
-        self.monitor = monitors.iter()
+        self.monitor = monitors
+            .iter()
             .find(|m| !m.is_primary)
             .or_else(|| monitors.first())
             .cloned();
-            
+
         if let Some(m) = &self.monitor {
-            println!("DEBUG: Selected monitor for secondary window: {} @ ({},{})", m.name, m.x, m.y);
+            println!(
+                "DEBUG: Selected monitor for secondary window: {} @ ({},{})",
+                m.name, m.x, m.y
+            );
         } else {
             println!("DEBUG: No monitor selected!");
         }
-        
+
         self.is_open = true;
         self.session_id += 1;
     }
-    
+
     /// Close the secondary window
     pub fn close(&mut self) {
         self.is_open = false;
         self.current_photo_id = None;
     }
-    
+
     /// Update the photo being displayed
     pub fn set_photo(&mut self, photo_id: Option<String>) {
         self.current_photo_id = photo_id;
     }
-    
+
     /// Toggle the info overlay visibility
     pub fn toggle_info_overlay(&mut self) {
         self.show_info_overlay = !self.show_info_overlay;
     }
-    
+
     /// Show the secondary viewport (call from main app update)
-    /// 
+    ///
     /// # Arguments
     /// * `ctx` - The egui context
     /// * `image` - Optional texture handle for the photo to display
@@ -102,7 +113,7 @@ impl SecondaryWindow {
         if !self.is_open {
             return;
         }
-        
+
         // Check if the viewport requested to close itself (e.g. user pressed ESC inside it)
         // This is necessary because the viewport runs in a separate context/closure but shares egui::Memory
         let close_req_id = egui::Id::new("secondary_window_close_req");
@@ -111,7 +122,7 @@ impl SecondaryWindow {
             ctx.data_mut(|d| d.remove_temp::<bool>(close_req_id));
             return;
         }
-        
+
         // Check if the viewport requested to toggle info
         let toggle_info_id = egui::Id::new("secondary_window_toggle_info");
         if ctx.data(|d| d.get_temp(toggle_info_id).unwrap_or(false)) {
@@ -123,15 +134,15 @@ impl SecondaryWindow {
         let Some(monitor) = &self.monitor else {
             return;
         };
-        
+
         let viewport_id = ViewportId::from_hash_of("secondary_fullscreen");
-        
+
         // Calculate position at the start of the secondary monitor
         // Add an offset to ensure the window is clearly "inside" the monitor to prevent OS from snapping it to primary
-        let offset = 100; 
+        let offset = 100;
         let position = Pos2::new((monitor.x + offset) as f32, (monitor.y + offset) as f32);
         let size = egui::vec2(monitor.width as f32, monitor.height as f32);
-        
+
         // Clone data for the closure (fix lifetime issues)
         let detail_clone = detail_image.cloned();
         let thumb_clone = thumbnail_preview.cloned();
@@ -139,7 +150,7 @@ impl SecondaryWindow {
         let crop_settings = crop_settings.cloned(); // Clone value object
         let show_info = self.show_info_overlay;
         let session_id = self.session_id;
-        
+
         // Use deferred rendering to avoid blocking the main thread
         ctx.show_viewport_deferred(
             viewport_id,
@@ -175,14 +186,14 @@ impl SecondaryWindow {
                             detail_clone.as_ref(),
                             thumb_clone.as_ref(),
                             has_selection,
-                            1.0, // zoom
-                            egui::Vec2::ZERO, // pan
-                            false, // interactive
-                            false, // allow_pan
+                            1.0,                    // zoom
+                            egui::Vec2::ZERO,       // pan
+                            false,                  // interactive
+                            false,                  // allow_pan
                             crop_settings.as_ref(), // Pass crop settings ref
                             true, // apply_crop_clip: Always clip in secondary window (presentation mode)
                         );
-                        
+
                         // Optional overlay with photo info (bottom left)
                         if show_info {
                             if let Some((filename, rating)) = &photo_info_clone {
@@ -194,18 +205,22 @@ impl SecondaryWindow {
                                             .inner_margin(egui::Margin::same(8))
                                             .corner_radius(4.0)
                                             .show(ui, |ui| {
-                                                ui.label(RichText::new(filename)
-                                                    .size(14.0)
-                                                    .color(Color32::WHITE));
-                                                ui.label(RichText::new(rating)
-                                                    .size(12.0)
-                                                    .color(Color32::LIGHT_GRAY));
+                                                ui.label(
+                                                    RichText::new(filename)
+                                                        .size(14.0)
+                                                        .color(Color32::WHITE),
+                                                );
+                                                ui.label(
+                                                    RichText::new(rating)
+                                                        .size(12.0)
+                                                        .color(Color32::LIGHT_GRAY),
+                                                );
                                             });
                                     });
                             }
                         }
                     });
-                
+
                 // Instructions overlay (top right)
                 egui::Area::new(egui::Id::new("secondary_instructions_overlay"))
                     .anchor(Align2::RIGHT_TOP, egui::vec2(-20.0, 20.0))
@@ -215,31 +230,36 @@ impl SecondaryWindow {
                             .inner_margin(egui::Margin::same(8))
                             .corner_radius(4.0)
                             .show(ui, |ui| {
-                                ui.label(RichText::new("ESC to close • I to toggle info")
-                                    .size(11.0)
-                                    .color(Color32::from_gray(180)));
+                                ui.label(
+                                    RichText::new("ESC to close • I to toggle info")
+                                        .size(11.0)
+                                        .color(Color32::from_gray(180)),
+                                );
                             });
                     });
-                
+
                 // Handle keyboard shortcuts
                 // Explicitly consume keys to prevent backend/default handling conflicts
                 if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
-                     ctx.data_mut(|d| d.insert_temp(egui::Id::new("secondary_window_close_req"), true));
+                    ctx.data_mut(|d| {
+                        d.insert_temp(egui::Id::new("secondary_window_close_req"), true)
+                    });
                 }
-                
-                if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::I)) {
-                    ctx.data_mut(|d| d.insert_temp(egui::Id::new("secondary_window_toggle_info"), true));
-                }
-            }
-        );
 
+                if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::I)) {
+                    ctx.data_mut(|d| {
+                        d.insert_temp(egui::Id::new("secondary_window_toggle_info"), true)
+                    });
+                }
+            },
+        );
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_secondary_window_new() {
         let window = SecondaryWindow::new();
@@ -248,7 +268,7 @@ mod tests {
         assert!(window.current_photo_id.is_none());
         assert!(window.show_info_overlay);
     }
-    
+
     #[test]
     fn test_toggle_opens_and_closes() {
         let mut window = SecondaryWindow::new();
@@ -262,20 +282,20 @@ mod tests {
             is_primary: true,
             scale_factor: 1.0,
         }];
-        
+
         // Initially closed
         assert!(!window.is_open);
-        
+
         // Toggle opens
         window.toggle(&monitors);
         assert!(window.is_open);
         assert!(window.monitor.is_some());
-        
+
         // Toggle closes
         window.toggle(&monitors);
         assert!(!window.is_open);
     }
-    
+
     #[test]
     fn test_prefers_secondary_monitor() {
         let mut window = SecondaryWindow::new();
@@ -301,37 +321,37 @@ mod tests {
                 scale_factor: 1.0,
             },
         ];
-        
+
         window.open(&monitors);
-        
+
         assert!(window.is_open);
         let selected = window.monitor.as_ref().unwrap();
         assert_eq!(selected.name, "Secondary");
         assert!(!selected.is_primary);
     }
-    
+
     #[test]
     fn test_set_photo() {
         let mut window = SecondaryWindow::new();
-        
+
         assert!(window.current_photo_id.is_none());
-        
+
         window.set_photo(Some("photo-123".to_string()));
         assert_eq!(window.current_photo_id, Some("photo-123".to_string()));
-        
+
         window.set_photo(None);
         assert!(window.current_photo_id.is_none());
     }
-    
+
     #[test]
     fn test_toggle_info_overlay() {
         let mut window = SecondaryWindow::new();
-        
+
         assert!(window.show_info_overlay);
-        
+
         window.toggle_info_overlay();
         assert!(!window.show_info_overlay);
-        
+
         window.toggle_info_overlay();
         assert!(window.show_info_overlay);
     }

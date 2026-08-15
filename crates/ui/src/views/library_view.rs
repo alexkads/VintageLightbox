@@ -1,13 +1,13 @@
 // Library View
 // Three-panel layout with photo grid in the center
 
-use egui::Ui;
-use crate::state::AppState;
-use crate::design_system::theme::Theme;
-use crate::components::photo_grid::PhotoGrid;
 use crate::components::filmstrip::Filmstrip;
-use std::sync::Arc;
+use crate::components::photo_grid::PhotoGrid;
+use crate::design_system::theme::Theme;
+use crate::state::AppState;
+use egui::Ui;
 use infrastructure::cache::preview_manager::PreviewManager;
+use std::sync::Arc;
 
 #[allow(dead_code)]
 pub struct LibraryView {
@@ -27,13 +27,9 @@ impl LibraryView {
     pub fn show(&mut self, ui: &mut Ui, state: &mut AppState, ctx: &egui::Context) {
         // Bottom filmstrip (must be first to reserve space)
         egui::TopBottomPanel::bottom("filmstrip")
-            .exact_height(120.0)  // 80px thumbnails + 40px padding
+            .exact_height(120.0) // 80px thumbnails + 40px padding
             .show_inside(ui, |ui| {
-                self.filmstrip.show(
-                    ui,
-                    ctx,
-                    state,
-                );
+                self.filmstrip.show(ui, ctx, state);
             });
 
         // Left sidebar
@@ -68,16 +64,23 @@ impl LibraryView {
         // Grid View Panel
         widgets::section_title(ui, "Grid View");
         ui.add_space(Theme::SPACE_SM);
-        
+
         ui.horizontal(|ui| {
             for cols in [1, 2, 3, 4, 5] {
-                let label = if cols == 1 { "⬛" } else { &format!("{}", cols) };
-                if ui.selectable_label(state.grid_columns == cols, label).clicked() {
+                let label = if cols == 1 {
+                    "⬛"
+                } else {
+                    &format!("{}", cols)
+                };
+                if ui
+                    .selectable_label(state.grid_columns == cols, label)
+                    .clicked()
+                {
                     state.grid_columns = cols;
                 }
             }
         });
-        
+
         ui.add_space(Theme::SPACE_LG);
 
         // Catalog Panel
@@ -120,8 +123,8 @@ impl LibraryView {
     }
 
     fn show_right_sidebar(&self, ui: &mut Ui, state: &AppState) {
-        use crate::design_system::widgets;
         use crate::components::metadata_charts::MetadataCharts;
+        use crate::design_system::widgets;
 
         // Library Statistics
         widgets::section_title(ui, "Statistics");
@@ -138,13 +141,9 @@ impl LibraryView {
             ui.label(
                 egui::RichText::new("Rating")
                     .size(Theme::FONT_SM)
-                    .color(ui.visuals().weak_text_color())
+                    .color(ui.visuals().weak_text_color()),
             );
-            crate::components::rating_widget::RatingWidget::show_readonly(
-                ui,
-                photo.rating,
-                16.0
-            );
+            crate::components::rating_widget::RatingWidget::show_readonly(ui, photo.rating, 16.0);
 
             ui.add_space(Theme::SPACE_MD);
 
@@ -152,7 +151,7 @@ impl LibraryView {
             ui.label(
                 egui::RichText::new("Color Label")
                     .size(Theme::FONT_SM)
-                    .color(ui.visuals().weak_text_color())
+                    .color(ui.visuals().weak_text_color()),
             );
             crate::components::color_labels::ColorLabels::show(ui, &None, false);
         }

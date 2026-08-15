@@ -8,7 +8,9 @@
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
-use domain::value_objects::{FilePath, ImportMode, ImportOptions, OrganizationStrategy, RenamePattern};
+use domain::value_objects::{
+    FilePath, ImportMode, ImportOptions, OrganizationStrategy, RenamePattern,
+};
 use image::{ImageBuffer, Rgb};
 use infrastructure::{
     cache::preview_manager::PreviewManager, create_pool, run_migrations, ExifReader,
@@ -184,7 +186,11 @@ async fn destino_escolhido_vence_o_catalogo_padrao() {
     .await;
 
     assert_eq!(sucesso, 1);
-    assert_eq!(walk(&destino).len(), 1, "a foto foi para o destino escolhido");
+    assert_eq!(
+        walk(&destino).len(),
+        1,
+        "a foto foi para o destino escolhido"
+    );
     assert!(
         walk(&bancada.catalogo).is_empty(),
         "e o catálogo padrão não foi tocado"

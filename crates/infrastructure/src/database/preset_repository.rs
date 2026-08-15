@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use domain::entities::{Preset, PresetId, preset::PresetAdjustments};
+use domain::entities::{preset::PresetAdjustments, Preset, PresetId};
 use domain::repositories::PresetRepository;
 use domain::{DomainError, DomainResult};
 use sqlx::{Row, SqlitePool};
@@ -13,9 +13,7 @@ pub struct SqlitePresetRepository {
 
 impl SqlitePresetRepository {
     pub fn new(pool: SqlitePool) -> Self {
-        Self {
-            pool,
-        }
+        Self { pool }
     }
 }
 
@@ -23,7 +21,7 @@ impl SqlitePresetRepository {
 impl PresetRepository for SqlitePresetRepository {
     async fn save(&self, preset: &Preset) -> DomainResult<()> {
         let id_str = preset.id.to_string();
-        
+
         sqlx::query(
             r#"
             INSERT INTO presets (
@@ -82,10 +80,10 @@ impl PresetRepository for SqlitePresetRepository {
 
     async fn find_by_id(&self, id: &PresetId) -> DomainResult<Option<Preset>> {
         let id_str = id.to_string();
-        
+
         let row = sqlx::query(
             r#"
-            SELECT 
+            SELECT
                 id, name, is_system,
                 exposure, contrast, temperature, tint,
                 highlights, shadows, whites, blacks,
@@ -108,9 +106,9 @@ impl PresetRepository for SqlitePresetRepository {
     }
 
     async fn find_all(&self) -> DomainResult<Vec<Preset>> {
-         let rows = sqlx::query(
+        let rows = sqlx::query(
             r#"
-            SELECT 
+            SELECT
                 id, name, is_system,
                 exposure, contrast, temperature, tint,
                 highlights, shadows, whites, blacks,
@@ -128,7 +126,7 @@ impl PresetRepository for SqlitePresetRepository {
         for row in rows {
             presets.push(map_row_to_preset(&row)?);
         }
-        
+
         Ok(presets)
     }
 
@@ -144,13 +142,20 @@ impl PresetRepository for SqlitePresetRepository {
 }
 
 fn map_row_to_preset(row: &sqlx::sqlite::SqliteRow) -> DomainResult<Preset> {
-    let id_str: String = row.try_get("id").map_err(|e| DomainError::InfrastructureError(e.to_string()))?;
-    let uuid = Uuid::from_str(&id_str).map_err(|e| DomainError::InfrastructureError(e.to_string()))?;
+    let id_str: String = row
+        .try_get("id")
+        .map_err(|e| DomainError::InfrastructureError(e.to_string()))?;
+    let uuid =
+        Uuid::from_str(&id_str).map_err(|e| DomainError::InfrastructureError(e.to_string()))?;
     let id = PresetId::from(uuid);
-    
-    let name: String = row.try_get("name").map_err(|e| DomainError::InfrastructureError(e.to_string()))?;
-    let is_system: bool = row.try_get("is_system").map_err(|e| DomainError::InfrastructureError(e.to_string()))?;
-    
+
+    let name: String = row
+        .try_get("name")
+        .map_err(|e| DomainError::InfrastructureError(e.to_string()))?;
+    let is_system: bool = row
+        .try_get("is_system")
+        .map_err(|e| DomainError::InfrastructureError(e.to_string()))?;
+
     let adjustments = PresetAdjustments {
         exposure: row.try_get("exposure").ok(),
         contrast: row.try_get("contrast").ok(),

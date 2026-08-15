@@ -1,4 +1,4 @@
-use domain::entities::{Preset, preset::PresetAdjustments};
+use domain::entities::{preset::PresetAdjustments, Preset};
 use domain::repositories::PresetRepository;
 use domain::DomainResult;
 use std::sync::Arc;

@@ -19,6 +19,6 @@ pub mod rating_widget;
 pub mod secondary_window;
 pub mod settings_dialog;
 pub mod slider_control;
+pub mod thumbnail_renderer;
 pub mod tone_curve;
 pub mod toolbar;
-pub mod thumbnail_renderer;
