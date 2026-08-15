@@ -243,7 +243,7 @@ abaixo. **É aqui que você decide se gosta de morar nisso**, e a decisão foi f
 | ✅ Filtros de nota e sinalizador | `68dfc9d` |
 | ✅ Árvore de pastas e filtro por cor | `c7ea9f9` |
 | ✅ Seleção e filmstrip | `7bb02c7` |
-| ⬜ Busca por texto na barra (a lógica existe; falta o campo) | |
+| ✅ Busca por texto na barra | `cae826a` (já na fase 2 — dependia da base) |
 | ⬜ Carregamento assíncrono das fotos (hoje bloqueia a abertura) | |
 
 ### ✅ Critério de saída atingido — 15/ago/2026
@@ -286,11 +286,10 @@ quadro, chega perto do limite. É o que o carregamento assíncrono resolve, e el
 **Estado medido**: 102 MB residentes e 0,3% de CPU parado (debug); 229 MB e ~13% logo após abrir
 em release, com árvore, filtros, grade e filmstrip sobre 2.000 fotos.
 
-⚠️ **A busca depende de uma decisão que ainda não foi tomada**: campo de texto exige adotar o
-`input` do `gpui-component`, o que traz junto o tema e o estado global dele
-(`gpui_component::init`). É o caminho que o §4 já prevê — o mapa inteiro de componentes vem de lá —
-mas é adoção de base de UI, e não um campo solto. Fica para o começo da fase 2, junto com os
-sliders, que precisam da mesma base.
+✅ **A busca dependia de uma decisão, e ela foi tomada** — o campo de texto exigia adotar o `input`
+do `gpui-component`, o que traz junto o tema e o estado global dele (`gpui_component::init`). Como
+era adoção de base de UI, e não um campo solto, virou o primeiro passo da fase 2 (`98f8822`); o campo
+veio logo atrás (`cae826a`).
 
 #### `semear-catalogo` — como medir sem depender do acervo de ninguém
 
@@ -340,6 +339,48 @@ conferido por comparação automatizada de imagem.
 
 ⚠️ Aqui se consertam as duas lacunas que o STATUS registra: a exportação ignora o crop, e o
 undo/redo ignora o crop. Reproduzir defeito conhecido de propósito custa mais do que arrumar.
+
+#### A base do `gpui-component` ✅ — 15/ago/2026
+
+O primeiro passo não era um slider: era `gpui_component::init`, sem o qual **nenhum** componente da
+biblioteca funciona — slider, campo de texto, diálogo e menu leem estado global que só ele cria. Três
+coisas entraram juntas porque uma sozinha não roda (`98f8822`):
+
+| | |
+|---|---|
+| `gpui_component::init(cx)` antes de qualquer janela | |
+| A primeira camada da janela virou `Root` | hospeda diálogo, gaveta e aviso; o crate o procura com um `expect` |
+| O tema **Vintage Dark**, em `tema.rs` | a paleta do `design_system/theme.rs`, em hexadecimal |
+
+🚨 **O tema não é enfeite: o `init` troca o tema calado.** Ele instala o do shadcn (`#0a0a0a`, cantos
+de 6px) e **sincroniza claro/escuro com o sistema** — adotar a biblioteca sem mais nada faria o app
+abrir **branco** numa máquina em modo claro. Num programa de revelação o entorno é parte da medição
+de cor.
+
+🚨 **E as duas formas de errar um tema aqui são silenciosas**: cor ilegível não falha, *some* (o
+`apply_config` cai no padrão dele sem dizer nada); chave errada não falha, é *ignorada* (o
+`ThemeConfig` não recusa campo desconhecido). Nenhuma das duas dá erro, log ou tela quebrada — dão
+*uma cor diferente*. Os três testes de `tema.rs` existem só para isso, e o de ida e volta —
+serializar o que foi lido e cobrar cada chave escrita — é o único jeito de pegar a segunda sem
+depender da lista de ~90 nomes do esquema.
+
+🔑 **O que a adoção já devolveu no primeiro arquivo**: a armadilha 5 da fase 1 (cada closure é um tipo
+concreto, então `Vec` de botões com ações diferentes não compila) **deixou de existir** — o `Button`
+guarda o handler num `Rc<dyn Fn>` e todos voltam a ser o mesmo tipo. O `botao()` da Biblioteca não
+precisa mais apagar tipo.
+
+⚠️ **Achado de caminho**: `cargo run -p ui-gpui`, o comando que este documento manda rodar e que o
+`semear-catalogo` imprime no fim, **não escolhia nada** — três binários no crate, e o cargo desiste
+com mais de um. `default-run` no `Cargo.toml` fez a instrução escrita passar a ser verdade.
+
+⚠️ **A dívida que fica**: o `selected` do botão secundário é `#3a3a3a` sobre `#2d2d2d`, dois cinzas a
+5% de distância. Numa barra de 15 botões isso é o mesmo que não marcar nenhum, então o filtro aceso
+virou `primary` enquanto não houver decisão melhor.
+
+⚠️ **E a cobertura que falta**: a solda entre o evento do campo de busca e o `refiltrar` é o único
+trecho novo que um teste alcançaria, e não tem teste. O substituto que o §6 prevê é o
+`gpui::TestAppContext`, que exige a feature `test-support` do `gpui` — é a próxima decisão, e vale
+tomá-la **antes** dos sliders, que são ~50 controles com a mesma forma de solda.
 
 ### Fase 3 — Importação (2–3 semanas)
 
@@ -392,6 +433,7 @@ metade. Por isso `crates/ui` fica vivo e rodando até a fase 5 — abandonar pre
 
 | Assunto | Onde |
 |---------|------|
+| O tema Vintage Dark, e por que ele não é enfeite | [crates/ui-gpui/src/tema.rs](../crates/ui-gpui/src/tema.rs) |
 | Spike compilado (fora do repositório) | `scratchpad/gpui-spike/src/main.rs` |
 | O slider de 290 linhas que vira um componente | [advanced_slider.rs](../crates/ui/src/components/advanced_slider.rs) |
 | Pipeline GPU que sobrevive | [gpu_processor.rs](../crates/ui/src/gpu_processor.rs) · [image_adjustments.wgsl](../crates/ui/src/shaders/image_adjustments.wgsl) |
