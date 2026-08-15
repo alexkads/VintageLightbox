@@ -31,6 +31,9 @@ image = "0.25"
 # `RenderImage::new` recebe `SmallVec<[Frame; 1]>`, e o `gpui` não reexporta o
 # `smallvec` — quem constrói o argumento precisa da mesma versão que ele usa.
 smallvec = "1"
+# O mesmo `lru` que o `crates/ui` usa — um cache de imagem por crate ja e
+# suficiente; duas politicas de descarte diferentes para a mesma coisa nao.
+lru = "0.16.2"
 tokio.workspace = true
 anyhow = "1.0"
 # Só para ler a versão de migration aplicada na tela de primeira luz — a mesma

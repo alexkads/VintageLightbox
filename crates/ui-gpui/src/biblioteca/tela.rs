@@ -10,7 +10,7 @@ use gpui::{div, img, prelude::*, px, rgb, uniform_list, Context, SharedString, W
 use infrastructure::cache::preview_manager::PreviewManager;
 
 use super::grade::{colunas_que_cabem, fotos_da_linha, linhas_necessarias};
-use super::miniaturas::{CacheDeMiniaturas, Miniatura};
+use super::miniaturas::{capacidade_para, CacheDeMiniaturas, Miniatura};
 
 /// Lado da miniatura, mais o espaçamento — a unidade que decide quantas colunas
 /// cabem. Um número só, e não dois somados na hora de contar: separá-los faria
@@ -29,6 +29,17 @@ pub struct Biblioteca {
     /// `Mutex` porque o closure recebe `&mut App`, e não `&mut self`: o cache
     /// precisa ser escrito de dentro dele.
     cache: Arc<Mutex<CacheDeMiniaturas>>,
+}
+
+/// Quantas linhas cabem na altura da janela.
+///
+/// Serve para dimensionar o cache de miniaturas, e não para desenhar — quem
+/// decide o que desenhar é o `uniform_list`. Guardar menos que uma tela faria
+/// cada quadro descartar o que o seguinte pede de volta.
+fn linhas_visiveis(window: &Window) -> usize {
+    const ALTURA_DO_CABECALHO: f32 = 56.0;
+    let util = f32::from(window.viewport_size().height) - ALTURA_DO_CABECALHO;
+    ((util / PASSO).ceil() as usize).max(1)
 }
 
 /// O que sobra para a grade depois das margens laterais.
@@ -52,7 +63,9 @@ impl Biblioteca {
         Self {
             fotos: Arc::new(fotos),
             previews,
-            cache: Arc::new(Mutex::new(CacheDeMiniaturas::novo())),
+            // Nasce do tamanho da janela padrão e se ajusta no primeiro
+            // `render`, quando a janela de verdade já foi medida.
+            cache: Arc::new(Mutex::new(CacheDeMiniaturas::nova(capacidade_para(6, 4)))),
         }
     }
 
@@ -132,6 +145,14 @@ impl Render for Biblioteca {
         let colunas = colunas_que_cabem(largura_util(window), PASSO);
         let total = self.fotos.len();
         let linhas = linhas_necessarias(total, colunas);
+
+        // O cache acompanha a janela: redimensionar para maior sem isto o
+        // deixaria do tamanho da janela antiga, e a grade nova passaria a
+        // descartar justamente o que está mostrando.
+        self.cache
+            .lock()
+            .expect("o cache de miniaturas não deve estar envenenado")
+            .ajustar_capacidade(capacidade_para(colunas, linhas_visiveis(window)));
 
         let fotos = self.fotos.clone();
         let previews = self.previews.clone();
