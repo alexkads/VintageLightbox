@@ -6,3 +6,4 @@
 
 pub mod biblioteca;
 pub mod imagem;
+pub mod tema;

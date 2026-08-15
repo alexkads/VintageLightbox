@@ -6,7 +6,9 @@
 use std::sync::{Arc, Mutex};
 
 use adapters::view_models::PhotoViewModel;
-use gpui::{div, img, prelude::*, px, rgb, uniform_list, Context, SharedString, Window};
+use gpui::{div, img, prelude::*, px, uniform_list, App, Context, SharedString, Window};
+use gpui_component::button::{Button, ButtonVariants};
+use gpui_component::{ActiveTheme, Selectable, Sizable};
 use infrastructure::cache::preview_manager::PreviewManager;
 
 use super::filtros::{indices_visiveis, FiltroDeSinalizador, Filtros, NotaMinima};
@@ -130,14 +132,19 @@ impl Biblioteca {
             .gap(px(8.))
             .p(px(12.))
             .border_b_1()
-            .border_color(rgb(0x303030))
+            .border_color(cx.theme().border)
             .child(
                 div()
                     .flex()
                     .items_center()
                     .gap(px(12.))
                     .child(div().text_lg().child("Biblioteca"))
-                    .child(div().text_sm().text_color(rgb(0x9a9a9a)).child(texto)),
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(texto),
+                    ),
             )
             .child(self.barra_de_filtros(cx))
     }
@@ -243,11 +250,11 @@ impl Biblioteca {
             .flex_wrap()
             .items_center()
             .gap(px(12.))
-            .child(rotulo_do_grupo("nota mínima"))
+            .child(rotulo_do_grupo("nota mínima", cx))
             .child(div().flex().gap(px(4.)).children(notas))
-            .child(rotulo_do_grupo("sinalizador"))
+            .child(rotulo_do_grupo("sinalizador", cx))
             .child(div().flex().gap(px(4.)).children(sinalizadores))
-            .child(rotulo_do_grupo("cor"))
+            .child(rotulo_do_grupo("cor", cx))
             .child(div().flex().gap(px(4.)).children(cores))
     }
 
@@ -287,15 +294,15 @@ impl Biblioteca {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .rounded(px(3.))
+                    .rounded(cx.theme().radius)
                     .cursor_pointer()
                     .border_1()
                     .border_color(if e_a_selecionada {
-                        rgb(0x6a9ae0)
+                        cx.theme().primary
                     } else {
-                        rgb(0x2a2a2a)
+                        cx.theme().border
                     })
-                    .bg(rgb(0x232323))
+                    .bg(cx.theme().muted)
                     .child(
                         match self
                             .cache
@@ -308,7 +315,7 @@ impl Biblioteca {
                             }
                             Miniatura::Ausente => div()
                                 .text_xs()
-                                .text_color(rgb(0x5a5a5a))
+                                .text_color(cx.theme().muted_foreground)
                                 .child("—")
                                 .into_any_element(),
                         },
@@ -337,12 +344,12 @@ impl Biblioteca {
             .gap(px(12.))
             .p(px(8.))
             .border_t_1()
-            .border_color(rgb(0x303030))
+            .border_color(cx.theme().border)
             .child(
                 div()
                     .w(px(200.))
                     .text_xs()
-                    .text_color(rgb(0x9a9a9a))
+                    .text_color(cx.theme().muted_foreground)
                     .truncate()
                     .child(legenda),
             )
@@ -406,15 +413,19 @@ impl Biblioteca {
             .p(px(8.))
             .overflow_y_scroll()
             .border_r_1()
-            .border_color(rgb(0x303030))
-            .child(rotulo_do_grupo("pastas"))
+            .border_color(cx.theme().border)
+            .bg(cx.theme().sidebar)
+            .child(rotulo_do_grupo("pastas", cx))
             .children(itens)
     }
 }
 
 /// Rótulo cinza que nomeia um grupo de botões.
-fn rotulo_do_grupo(texto: &'static str) -> impl IntoElement {
-    div().text_xs().text_color(rgb(0x7a7a7a)).child(texto)
+fn rotulo_do_grupo(texto: &'static str, cx: &App) -> impl IntoElement {
+    div()
+        .text_xs()
+        .text_color(cx.theme().muted_foreground)
+        .child(texto)
 }
 
 /// Um botão de filtro, aceso quando é o escolhido.
@@ -423,29 +434,28 @@ fn rotulo_do_grupo(texto: &'static str) -> impl IntoElement {
 /// elemento entre quadros. Dois botões com o mesmo id trocariam de estado um
 /// com o outro ao serem clicados.
 ///
-/// Devolve `AnyElement`, e não `impl IntoElement`: **cada closure tem um tipo
-/// concreto próprio**, então dois botões com ações diferentes são dois tipos
-/// diferentes, e um `Vec` deles não compila. Apagar o tipo aqui é o que permite
-/// montar a barra com um `push` por botão.
+/// 🔑 **Devolve `Button`, e não `AnyElement`** — e essa é a diferença que o
+/// `gpui-component` fez aparecer. A versão à mão tinha de apagar o tipo porque
+/// cada closure é um tipo concreto próprio, e um `Vec` com dois botões de ações
+/// diferentes não compilava. O `Button` guarda o handler num `Rc<dyn Fn>`: todos
+/// os botões passam a ser **o mesmo tipo**, e a lista volta a ser uma lista.
 fn botao(
     id: String,
     texto: String,
     aceso: bool,
     ao_clicar: impl Fn(&gpui::ClickEvent, &mut Window, &mut gpui::App) + 'static,
-) -> gpui::AnyElement {
-    div()
-        .id(SharedString::from(id))
-        .px(px(8.))
-        .py(px(3.))
-        .rounded(px(3.))
-        .text_xs()
-        .cursor_pointer()
-        .bg(if aceso { rgb(0x3a5a8a) } else { rgb(0x2a2a2a) })
-        .text_color(if aceso { rgb(0xffffff) } else { rgb(0xb0b0b0) })
-        .hover(|estilo| estilo.bg(if aceso { rgb(0x456ba0) } else { rgb(0x363636) }))
-        .child(SharedString::from(texto))
+) -> Button {
+    Button::new(SharedString::from(id))
+        .label(SharedString::from(texto))
+        .xsmall()
+        // O aceso vira `primary`, e não só `selected`. `selected` num botão
+        // secundário é `#3a3a3a` sobre `#2d2d2d` — dois cinzas a 5% de distância
+        // um do outro, o que numa barra de 15 botões é o mesmo que não marcar
+        // nenhum. Qual filtro está ligado é a informação mais importante da
+        // barra: sem ela, a grade filtrada parece um acervo que encolheu.
+        .when(aceso, |b| b.primary())
+        .selected(aceso)
         .on_click(ao_clicar)
-        .into_any_element()
 }
 
 /// Uma célula da grade: a miniatura, ou o lugar dela.
@@ -455,6 +465,7 @@ fn celula(
     cache: &Mutex<CacheDeMiniaturas>,
     selecionada: bool,
     ao_clicar: impl Fn(&gpui::ClickEvent, &mut Window, &mut gpui::App) + 'static,
+    cx: &App,
 ) -> gpui::AnyElement {
     let miniatura = cache
         .lock()
@@ -467,8 +478,8 @@ fn celula(
         .flex()
         .items_center()
         .justify_center()
-        .bg(rgb(0x232323))
-        .rounded(px(3.));
+        .bg(cx.theme().muted)
+        .rounded(cx.theme().radius);
 
     let conteudo = match miniatura {
         // ⚠️ `object_fit` de conter, e não de cobrir: a moldura é quadrada e o
@@ -481,7 +492,7 @@ fn celula(
         Miniatura::Ausente => moldura.child(
             div()
                 .text_xs()
-                .text_color(rgb(0x6a6a6a))
+                .text_color(cx.theme().muted_foreground)
                 .child("sem preview"),
         ),
     };
@@ -493,25 +504,27 @@ fn celula(
         .gap(px(4.))
         .w(px(LADO_DO_ITEM))
         .p(px(2.))
-        .rounded(px(4.))
+        .rounded(cx.theme().radius)
         .cursor_pointer()
         // A moldura da seleção é **borda**, e não fundo: fundo colorido atrás
         // de uma foto muda como a foto é percebida, e num programa de revelação
         // isso é mentir sobre a cor. Pela mesma razão a borda é fina.
         .border_1()
+        // A borda existe sempre, e some no fundo quando não está selecionada:
+        // criá-la só na selecionada deslocaria a foto em 1px ao clicar.
         .border_color(if selecionada {
-            rgb(0x6a9ae0)
+            cx.theme().primary
         } else {
-            rgb(0x1b1b1b)
+            cx.theme().background
         })
         .child(conteudo)
         .child(
             div()
                 .text_xs()
                 .text_color(if selecionada {
-                    rgb(0xe6e6e6)
+                    cx.theme().foreground
                 } else {
-                    rgb(0x9a9a9a)
+                    cx.theme().muted_foreground
                 })
                 .truncate()
                 .child(SharedString::from(foto.name.clone())),
@@ -550,8 +563,8 @@ impl Render for Biblioteca {
             .flex()
             .flex_col()
             .size_full()
-            .bg(rgb(0x1b1b1b))
-            .text_color(rgb(0xe6e6e6))
+            .bg(cx.theme().background)
+            .text_color(cx.theme().foreground)
             .child(self.cabecalho(cx))
             // A partir daqui é uma linha: pastas à esquerda, grade à direita.
             // `min_h(0)` na linha e `flex_1` nos dois filhos — sem o `min_h`, o
@@ -566,7 +579,7 @@ impl Render for Biblioteca {
                         // O `uniform_list` só chama o closure para as linhas visíveis.
                         // É o que faz 2.000 fotos custarem o mesmo que 20 na hora de
                         // desenhar — a diferença entre rolar liso e engasgar.
-                        uniform_list("grade-da-biblioteca", linhas, move |faixa, _window, _cx| {
+                        uniform_list("grade-da-biblioteca", linhas, move |faixa, _window, cx| {
                             faixa
                                 .map(|indice| {
                                     let desta_linha = fotos_da_linha(indice, colunas, total);
@@ -604,6 +617,7 @@ impl Render for Biblioteca {
                                                             cx.notify();
                                                         });
                                                     },
+                                                    cx,
                                                 )
                                             })
                                             .collect::<Vec<_>>(),

@@ -7,10 +7,12 @@
 use std::sync::Arc;
 
 use gpui::{px, size, App, AppContext, Application, Bounds, WindowBounds, WindowOptions};
+use gpui_component::Root;
 use infrastructure::cache::preview_manager::PreviewManager;
 use infrastructure::paths::AppPaths;
 
 use ui_gpui::biblioteca::tela::Biblioteca;
+use ui_gpui::tema;
 
 #[tokio::main]
 async fn main() {
@@ -50,13 +52,30 @@ async fn main() {
     let previews = Arc::new(PreviewManager::new());
 
     Application::new().run(move |cx: &mut App| {
+        // Antes de qualquer janela: é o `init` que cria o `Theme` global, o
+        // registro de temas e os estados globais de campo de texto, menu,
+        // diálogo e lista. Sem ele, o primeiro componente do `gpui-component`
+        // que a tela usar entra num `cx.global::<...>()` que não existe.
+        gpui_component::init(cx);
+        // E logo em seguida o nosso tema, porque o `init` deixa o do shadcn
+        // ligado e sincronizado com o claro/escuro do sistema.
+        tema::aplicar(cx);
+
         let bounds = Bounds::centered(None, size(px(1100.), px(720.)), cx);
         cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
                 ..Default::default()
             },
-            |_, cx| cx.new(|_| Biblioteca::nova(fotos.clone(), previews.clone())),
+            |window, cx| {
+                let biblioteca = cx.new(|_| Biblioteca::nova(fotos.clone(), previews.clone()));
+                // A primeira camada da janela **tem** de ser o `Root`: é ele
+                // que hospeda diálogo, gaveta e aviso, e quem sabe qual campo
+                // de texto está com o foco. O `gpui-component` procura por ele
+                // com um `expect` — sem o `Root`, abrir um diálogo derruba o
+                // app em vez de mostrar o diálogo.
+                cx.new(|cx| Root::new(biblioteca, window, cx))
+            },
         )
         .expect("abrir a janela");
         cx.activate(true);

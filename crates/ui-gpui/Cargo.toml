@@ -4,6 +4,11 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
+# `cargo run -p ui-gpui` — o comando que a fase 1 documenta — não escolhia nada:
+# o crate tem três binários (o app, `medir-miniaturas` e `semear-catalogo`) e o
+# cargo desiste quando há mais de um. Sem esta linha, a instrução escrita em
+# docs/10-MIGRACAO-GPUI.md §5 e no `semear-catalogo` respondia com uma lista.
+default-run = "ui-gpui"
 
 # A interface em GPUI, construída **ao lado** de `crates/ui` e não no lugar
 # dele. Os dois compilam e rodam durante a migração inteira (docs/10-MIGRACAO-GPUI.md
@@ -36,6 +41,10 @@ smallvec = "1"
 lru = "0.16.2"
 tokio.workspace = true
 anyhow = "1.0"
+# O tema. `ThemeConfigColors` tem campos privados, então literal de struct não
+# compila de fora do crate — e o JSON é o formato nativo do `gpui-component`
+# para tema, não um contorno (`crates/ui-gpui/src/tema.rs`).
+serde_json.workspace = true
 # Só para ler a versão de migration aplicada na tela de primeira luz — a mesma
 # versão e as mesmas features do `infrastructure`, senão são dois drivers de
 # SQLite na árvore falando com o mesmo arquivo.
