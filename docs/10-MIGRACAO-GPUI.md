@@ -334,11 +334,62 @@ Sliders, histograma, curva de tons, HSL nos 8 canais, detalhe, lente, crop overl
 presets. O `gpu_processor.rs` e o WGSL **não mudam** — só o último passo, que hoje devolve
 `ColorImage`.
 
-**Critério de saída**: editar um RAW e exportar com **o mesmo resultado de pixel** do app egui,
-conferido por comparação automatizada de imagem.
+**Critério de saída**: ~~editar um RAW e exportar com **o mesmo resultado de pixel** do app egui~~ —
+🚨 **o critério estava medindo a coisa errada. Ver abaixo.**
 
 ⚠️ Aqui se consertam as duas lacunas que o STATUS registra: a exportação ignora o crop, e o
 undo/redo ignora o crop. Reproduzir defeito conhecido de propósito custa mais do que arrumar.
+
+#### 🚨 O critério de saída não media o que a fase 2 constrói
+
+Descoberto em 15/ago, ao portar o motor. **Exportar não passa pelo shader.** São dois caminhos
+diferentes, com implementações diferentes da mesma matemática:
+
+| | quem aplica | quantos ajustes |
+|---|---|---|
+| **A tela** (Revelação) | `image_adjustments.wgsl`, na GPU | **46** |
+| **O arquivo** (exportação) | `ImageExporterImpl::process_image`, na CPU | **15** |
+
+E os dois vivem em lugares diferentes: o shader é o que a fase 2 está portando; o exportador está na
+`infrastructure`, que o §2.1 declara **intocada**. Ou seja: os dois apps chamam o mesmo exportador, a
+igualdade de pixel na exportação é grátis, e conferir por ali **não toca no motor que acabou de ser
+portado**. Um critério que passa antes de o trabalho começar não é critério.
+
+Conferível a qualquer momento:
+
+```bash
+python3 - <<'PY'
+import re, pathlib
+gpu = pathlib.Path("crates/ui/src/gpu_processor.rs").read_text()
+campos = re.findall(r"pub (\w+): f32", gpu.split("pub struct GpuEditParams {")[1].split("}")[0])
+exp = pathlib.Path("crates/infrastructure/src/image_exporter.rs").read_text()
+usa = re.findall(r"(\w+): f32", exp.split("fn process_image(")[1].split(") -> ")[0])
+print(len(campos), len(usa), [c for c in campos if c not in usa])
+PY
+```
+
+**Critério de saída novo**: a mesma imagem, com os mesmos 46 ajustes, atravessando o motor dos dois
+apps, tem de sair **byte a byte igual**. O que garante isso hoje são três testes em
+[`processador.rs`](../crates/ui-gpui/src/revelacao/processador.rs): o WGSL é o mesmo arquivo
+(conferido byte a byte), o neutro devolve o pixel intacto, e a exposição atravessa com o valor certo
+no primeiro e no último pixel.
+
+#### 🚨 E, de quebra, um defeito do produto que ninguém tinha medido
+
+A exportação descarta **31 dos 46 ajustes**, em silêncio:
+
+- a **curva de tons** inteira (4 zonas);
+- o **HSL inteiro** — saturação, matiz e luminância nos 8 canais (24 parâmetros);
+- a **lente** — distorção e as duas da vinheta (3).
+
+O STATUS §"Lacunas" registrava só *"a exportação ignora o crop"* e dizia que ela "aplica os ajustes
+tonais". Aplica **15 deles**. Quem revela uma foto mexendo em HSL vê o resultado na tela, exporta e
+recebe outra imagem — sem erro, sem aviso.
+
+⚠️ **Isto não é da migração consertar**: é defeito do produto, mora na `infrastructure`, e mexer nele
+durante a fase 2 misturaria "portei errado" com "estava errado". Fica registrado aqui e no STATUS
+para virar trabalho próprio depois do cutover. O que a migração **não** pode fazer é continuar
+medindo a si mesma por ele.
 
 #### A base do `gpui-component` ✅ — 15/ago/2026
 

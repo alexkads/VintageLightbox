@@ -263,6 +263,12 @@ Não são erros de compilação; são features que a UI mostra como prontas e qu
 1. 🚨 **A exportação ignora o crop.** `ImageExporterImpl::export` abre o arquivo original, aplica os
    ajustes tonais e grava — sem nenhuma referência a crop, rotação ou flip. O usuário corta a foto,
    vê o corte no viewer e nos thumbnails, exporta e recebe a imagem inteira.
+   🚨 **E é bem maior que o crop** (medido em 15/ago/2026, ao portar o motor para GPUI):
+   `ImageExporterImpl::process_image` aplica **15** ajustes; o shader que desenha a tela aplica
+   **46**. A exportação descarta em silêncio a **curva de tons** inteira (4), o **HSL inteiro** —
+   saturação, matiz e luminância nos 8 canais (24) — e a **lente** (3). Quem revela mexendo em HSL vê
+   o resultado na tela, exporta e recebe outra imagem. A conta está em
+   [docs/10-MIGRACAO-GPUI.md](10-MIGRACAO-GPUI.md), §"Fase 2", com o script que a refaz.
 2. 🚨 **O undo/redo ignora o crop.** `EditSnapshot` (`crates/ui/src/state.rs:20`) lista os ~50
    campos de edição, mas nenhum de crop. Cortar não entra no histórico, e desfazer um ajuste
    posterior não restaura o corte anterior.
