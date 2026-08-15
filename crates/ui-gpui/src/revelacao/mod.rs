@@ -4,4 +4,5 @@
 //! Slider sem imagem embaixo não tem como ser conferido — e o critério de saída
 //! da fase é **igualdade de pixel** com o app de egui.
 
+pub mod processador;
 pub mod tela;

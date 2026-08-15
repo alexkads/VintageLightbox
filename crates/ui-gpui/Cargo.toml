@@ -41,6 +41,15 @@ smallvec = "1"
 lru = "0.16.2"
 tokio.workspace = true
 anyhow = "1.0"
+
+# O motor de revelação (`revelacao/processador.rs`). Nas mesmas versões do
+# `crates/ui`: o critério de saída da fase 2 é igualdade de pixel, e wgpu é
+# quem compila o WGSL — versão diferente é compilador diferente para o mesmo
+# shader. No macOS isto não conflita com o GPUI, que fala Metal direto.
+wgpu = "23.0"
+bytemuck = { version = "1.14", features = ["derive"] }
+pollster = "0.4"
+parking_lot = "0.12"
 # O tema. `ThemeConfigColors` tem campos privados, então literal de struct não
 # compila de fora do crate — e o JSON é o formato nativo do `gpui-component`
 # para tema, não um contorno (`crates/ui-gpui/src/tema.rs`).
