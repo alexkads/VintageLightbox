@@ -53,7 +53,7 @@ impl ThumbnailGenerator for ThumbnailGeneratorImpl {
                 for &size in &sizes {
                     if size <= 320 {
                         // Tenta extrair embedded preview
-                        if let Some(embedded) = extract_embedded_preview(&path_str) {
+                        if let Some(embedded) = extract_embedded_preview(&path_str, size) {
                             // Carrega o embedded preview como imagem para redimensionar se necessário
                             if let Ok(img) = image::load_from_memory(&embedded) {
                                 let thumbnail = img.thumbnail(size, size);

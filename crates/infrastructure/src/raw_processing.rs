@@ -102,15 +102,46 @@ pub fn load_raw_as_dynamic_image(path: &str) -> Result<image::DynamicImage, Stri
 }
 
 /// Extrai o preview JPEG embutido no arquivo RAW (muito mais rápido que raw decoding)
-pub fn extract_embedded_preview(path: &str) -> Option<Vec<u8>> {
-    // Tenta usar rawloader para extrair o thumbnail embutido
-    if let Ok(raw) = rawloader::decode_file(path) {
-        if !raw.thumbnails.is_empty() {
-            // Retorna o primeiro thumbnail disponível (geralmente o maior JPEG)
-            return Some(raw.thumbnails[0].data.clone());
-        }
+///
+/// Câmeras gravam mais de um preview no mesmo arquivo (de 160px a resolução cheia).
+/// `min_height` diz o menor tamanho que serve para quem chamou: devolve o **menor**
+/// preview que ainda atende, e só cai no maior disponível se nenhum atender. Pegar
+/// sempre o maior jogaria fora o ganho de velocidade — decodificar um JPEG 6000×4000
+/// para gerar um thumbnail de 320px custa mais do que o preview certo.
+///
+/// Só previews em JPEG são devolvidos: os outros formatos do LibRaw (bitmap cru,
+/// H.265) não passam por `image::load_from_memory`, que é o que o chamador faz.
+///
+/// Não chama `unpack()` de propósito — o preview embutido sai direto do arquivo,
+/// sem demosaic. É esse o caminho rápido.
+pub fn extract_embedded_preview(path: &str, min_height: u32) -> Option<Vec<u8>> {
+    use rsraw::{RawImage, ThumbFormat};
+
+    let file_data = std::fs::read(path).ok()?;
+    let mut raw = RawImage::open(&file_data).ok()?;
+
+    let mut jpegs: Vec<_> = raw
+        .extract_thumbs()
+        .ok()?
+        .into_iter()
+        .filter(|t| t.format == ThumbFormat::Jpeg && !t.data.is_empty())
+        .collect();
+
+    if jpegs.is_empty() {
+        return None;
     }
-    None
+
+    // `extract_thumbs` já devolve ordenado por altura crescente, mas o filtro acima
+    // não garante ordem se a fonte mudar — ordenar aqui é barato e torna a escolha
+    // independente disso.
+    jpegs.sort_by_key(|t| t.height);
+
+    let escolhido = jpegs
+        .iter()
+        .position(|t| t.height >= min_height)
+        .unwrap_or(jpegs.len() - 1);
+
+    Some(jpegs.swap_remove(escolhido).data)
 }
 
 #[cfg(test)]

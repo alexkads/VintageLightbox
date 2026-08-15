@@ -4,22 +4,23 @@ Bem-vindo à documentação do VintageLightbox! Este índice organiza todos os d
 
 ## 📖 Visão Geral
 
-VintageLightbox é um clone profissional do Adobe Lightroom desenvolvido em Rust com interface Slint, focado em fotógrafos profissionais que precisam de uma solução completa para importação, edição, organização e venda de fotos.
+VintageLightbox é um clone profissional do Adobe Lightroom desenvolvido em Rust com interface **egui/eframe (wgpu)**, focado em fotógrafos profissionais que precisam de uma solução completa para importação, edição, organização e venda de fotos.
 
-**Status Atual**: 103 testes passando | Domain Layer completo | Use Cases iniciado  
-**Veja**: [STATUS.md](STATUS.md) para progresso detalhado
+⚠️ **Nota**: vários documentos abaixo ainda descrevem a UI em **Slint**, tecnologia que foi trocada por **egui** durante a implementação. `06-UI-ARCHITECTURE.md` é o caso mais grave — descreve arquivos `.slint` que não existem.
+
+**Status Atual (15/ago/2026)**: ✅ compila, app sobe | 478 testes passando, 0 falhas  
+**Veja**: [STATUS.md](STATUS.md) — é a fonte de status do projeto
 
 ## 📚 Documentos Principais
 
 ### 0. [Status do Projeto](STATUS.md) 🆕
-**Conteúdo**: Status consolidado da implementação
-- 103 testes passando (99 domain + 4 use-cases)
-- Progresso por camada (Domain ✅, Use Cases 🚧)
-- Métricas e conquistas
-- Próximas milestones
-- Guia de contribuição
+**Conteúdo**: Status consolidado da implementação, medido do código
+- Os 2 erros de compilação que travavam build e suíte, e como foram consertados
+- Testes por camada: 478 passando, medidos
+- Progresso real por camada e lacunas encontradas
+- Próximos passos em ordem
 
-**Leia se você quer**: Ver o progresso atual e próximos passos.
+**Leia se você quer**: Ver o progresso atual e próximos passos. **Comece por aqui.**
 
 ### 1. [Requisitos do Sistema](01-REQUISITOS.md)
 **Conteúdo**: Requisitos funcionais e não-funcionais completos
@@ -205,4 +206,4 @@ Consulte o [Roadmap](04-ROADMAP.md) para detalhes completos.
 
 **Mantenedores**: Adicione seu nome aqui quando contribuir significativamente para a documentação.
 
-**Última Revisão**: Dezembro 2025
+**Última Revisão**: 15 de agosto de 2026

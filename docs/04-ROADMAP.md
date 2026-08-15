@@ -10,16 +10,22 @@ Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Ar
 
 ---
 
-## 📊 Progresso Atual (Atualizado: 26/dez/2025)
+## 📊 Progresso Atual (Atualizado: 15/ago/2026)
+
+> ✅ **Compila e roda.** O HEAD de `dev` estava quebrado por dois erros (`raw_processing.rs`, do
+> preview embutido de RAW de 25/jan/2026, e `save_photo_edits.rs`, teste não atualizado quando o
+> Crop acrescentou 8 parâmetros em 27/dez/2025). Os dois foram consertados em 15/ago/2026 e ainda
+> **não estão commitados**. Detalhes e o bloqueio que restou (4 migrations aplicadas fora do
+> repositório) em **[STATUS.md](STATUS.md)**, que é a fonte de status do projeto.
 
 ### Status Geral
-- **Fase Atual**: Fase 2.1 (Importação Avançada) - **100% COMPLETO** ✅
-- **Total de Testes**: **225 testes passando** 🎉
-  - Domain Layer: 115 testes (100% cobertura, +5 tone curve, +5 import options)
-  - Use Cases Layer: 50 testes (+15: Preview, Duplicates, ImportWithOptions)
-  - Infrastructure Layer: 58 testes (+7: FileOrganizer, async hash)
-  - Adapters Layer: 0 testes
-  - UI Layer: 0 testes (testes removidos temporariamente)
+- **Fase Atual**: Fase 2 (Funcionalidades Essenciais) — 2.1 a 2.4, 2.8 e 2.9 completas
+- **Total de Testes**: **478 passando, 0 falhas, 3 ignorados**
+  - Domain Layer: 202 ✅
+  - Use Cases Layer: 65 ✅
+  - Infrastructure Layer: 65 ✅
+  - Adapters Layer: 0 ⚠️ sem testes
+  - UI Layer: 146 ✅ (E2E `egui_kittest`)
 
 ### Conquistas Recentes
 
@@ -810,7 +816,8 @@ import_controller.import_with_options(files, options, tx, pause, cancel).await?;
   - Persistência: Campos já existem na entidade `Photo` e banco de dados
 - [x] ✅ **Tone Curve UI** (25/dez/2025) - Sliders para controle das 4 zonas no Develop View
 - [ ] **Point Curve** - Curva com múltiplos pontos de controle (complexo)
-- [ ] **HSL/Color** - Ajustes por canal de cor (8 canais: Red, Orange, Yellow, Green, Aqua, Blue, Purple, Magenta)
+- [x] ✅ **HSL/Color** - Ajustes por canal de cor (8 canais: Red, Orange, Yellow, Green, Aqua, Blue, Purple, Magenta) — Hue + Saturation + Luminance por canal (24 parâmetros), migrations `011` e `014`, sliders no Develop View
+- [x] ✅ **Correção de Lente** - Distortion + Vignette (amount/midpoint), migration `014`
 - [x] ✅ **Redução de Ruído** (25/dez/2025) - 100% Funcional (Luma + Chroma):
   - **Luminance**: Bilateral Filter (preserva bordas)
   - **Color**: Gaussian Blur em canais UV (remove manchas coloridas)
@@ -868,93 +875,53 @@ import_controller.import_with_options(files, options, tx, pause, cancel).await?;
 - [x] ✅ **Prefetch Paralelo (26/dez/2025)**: Fotos adjacentes pré-carregadas em threads separadas
 - [x] ✅ **ProcessedCache (26/dez/2025)**: Cache do resultado final evita re-processamento (~800ms → 0.01ms)
 
-### 2.9 Corte e Rotação (Crop & Rotate) - 2 semanas 📋 PLANEJADO
+### 2.9 Corte e Rotação (Crop & Rotate) ✅ IMPLEMENTADO (27/dez/2025) — com 3 lacunas
 
 **Descrição**: Ferramenta de corte com proporções fixas e personalizadas, posicionamento da imagem dentro da área de corte, rotação e endireitamento de horizonte. Todas as operações são não-destrutivas e integradas ao Develop View.
 
+**Como ficou, diferente do planejado**: não há `ApplyCropUseCase` — o crop é persistido por `SavePhotoEditsUseCase` junto dos demais ajustes (foi o que acrescentou os 8 parâmetros e quebrou o teste, veja STATUS.md). A tentativa de fazer o crop no shader GPU foi **revertida** (`10dda3f`); o que valeu foi renderização por mesh com mapeamento UV no `image_viewer` + `ImageProcessing::apply_crop` (CPU) para thumbnails.
+
 #### 2.9.1 Domain Layer (TDD)
-- [ ] 🔴🟢🔵 **CropSettings Value Object**
+- [x] ✅ **CropSettings Value Object**
   - `crop_x`, `crop_y`, `crop_width`, `crop_height` (normalized 0.0-1.0)
   - `rotation_90` (múltiplos de 90°: -1, 0, 1, 2)
   - `angle` (rotação fina: -45.0 a +45.0)
   - `flip_horizontal`, `flip_vertical`
-  - Validações e testes de propriedade
-- [ ] 🔴🟢🔵 **AspectRatio Enum**
-  - `Original`, `Free`, `Ratio(u32, u32)`, `Custom(String)`
-  - Cálculo de dimensões com proporção fixa
-  - Swap orientation (2:3 ↔ 3:2)
-- [ ] 🔴🟢🔵 **CustomAspectRatio Entity**
+  - Validações + invariante testada: o viewer nunca rotaciona (`c907148`)
+- [x] ✅ **AspectRatio Enum** — enum fechado de presets (`Original`, `Free`, `Square`, `TwoThree`, `ThreeTwo`, `FourThree`, …) com swap de orientação
+- [ ] 🔴🟢🔵 **CustomAspectRatio Entity** — **não implementado** (proporções são só as predefinidas)
   - `id`, `name`, `width`, `height`, `created_at`
   - Persistência no perfil do usuário
 
 #### 2.9.2 Use Cases Layer (TDD)
-- [ ] 🔴🟢🔵 **ApplyCropUseCase**
-  - Aplicar crop settings a uma foto
-  - Validação de bounds (crop dentro da imagem)
-  - Integração com Undo/Redo (EditSnapshot)
-- [ ] 🔴🟢🔵 **SaveCustomAspectRatioUseCase**
-  - Salvar proporção customizada
-  - Limite de 20 proporções por usuário
-- [ ] 🔴🟢🔵 **DeleteCustomAspectRatioUseCase**
-  - Deletar proporção customizada
-  - Validação de existência
+- [x] ✅ **Persistência do crop** — via `SavePhotoEditsUseCase` (não virou use case próprio)
+- [ ] 🔴🟢🔵 **SaveCustomAspectRatioUseCase** — não implementado
+- [ ] 🔴🟢🔵 **DeleteCustomAspectRatioUseCase** — não implementado
 
 #### 2.9.3 Infrastructure Layer (TDD)
-- [ ] 🔴🟢🔵 **Migração SQLite**
-  - Campos de crop na tabela photos: `crop_x`, `crop_y`, `crop_width`, `crop_height`, `rotation_90`, `angle`, `flip_h`, `flip_v`
-  - Tabela `custom_aspect_ratios` para proporções salvas
-- [ ] 🔴🟢🔵 **GPU Shader (WGSL)**
-  - Aplicar rotação e crop em compute shader
-  - Interpolação bilinear para rotação suave
-- [ ] 🔴🟢🔵 **CPU Fallback**
-  - Processamento de crop/rotate para exportação
-  - Mesma lógica do GPU shader
+- [x] ✅ **Migração SQLite** — `015_add_crop_fields.sql` com os 8 campos
+  - [ ] Tabela `custom_aspect_ratios` — não criada
+- [ ] ~~**GPU Shader (WGSL)**~~ — implementado e **revertido** (`305466e` → `10dda3f`)
+- [x] ✅ **CPU** — `ImageProcessing::apply_crop` (crop + flips + rotação 90°)
 
 #### 2.9.4 UI Layer - Develop View
-- [ ] **Crop Overlay Component**
-  - Renderização do overlay com handles nos cantos/bordas
-  - Área externa escurecida (dimmed)
-  - Grid de composição (Rule of Thirds, Golden Ratio, etc.)
-- [ ] **Drag Interactions**
-  - Arrastar handles para redimensionar crop
-  - Arrastar imagem para reposicionar dentro do crop
-  - Respeitar locked aspect ratio nos handles
-- [ ] **Crop Toolbar**
-  - Dropdown de aspect ratios predefinidos
-  - Botões de rotação 90° (esquerda/direita)
-  - Botões de flip (horizontal/vertical)
-  - Slider de ângulo fino (-45° a +45°)
-  - Ferramenta Straighten (desenhar linha no horizonte)
-  - Botão Reset
-- [ ] **Custom Aspect Ratio Dialog**
-  - Input de largura/altura
-  - Campo de nome (opcional)
-  - Botões Usar/Salvar/Cancelar
-- [ ] **Keyboard Shortcuts**
-  - `R`: Toggle crop mode
-  - `X`: Swap orientation
-  - `O`: Cycle composition overlays
-  - `H`/`V`: Flip horizontal/vertical
-  - `Cmd+[`/`Cmd+]`: Rotate 90°
-  - `Enter`: Apply crop
-  - `Escape`: Cancel crop
+- [x] ✅ **Crop Overlay Component** — handles, área externa escurecida, grid de composição
+- [x] ✅ **Drag Interactions** — resize com aspect ratio travado, mínimo e clamp de bordas; pan desabilitado em modo crop; cursor contextual
+- [x] ✅ **Crop Toolbar / Crop Panel** — dropdown de proporções, rotação 90°, flips, slider de ângulo fino, Reset
+  - [ ] Auto-straighten (botão existe, `crop_panel.rs:105` diz "not implemented")
+- [ ] **Custom Aspect Ratio Dialog** — não implementado
+- [x] ✅ **Keyboard Shortcut** — `R` alterna o modo crop
+  - [ ] `X` swap, `O` overlays, `H`/`V` flip, `Cmd+[`/`Cmd+]` rotação — não implementados
 
 #### 2.9.5 Integração
-- [ ] **Preview em Tempo Real**
-  - Crop aplicado no preview do Develop View
-  - Performance: <16ms para manter 60fps
-- [ ] **Exportação**
-  - Crop aplicado na exportação final
-  - Resolução calculada após crop
-- [ ] **Undo/Redo**
-  - CropSettings integrado ao EditSnapshot
-  - Navegação completa pelo histórico de crops
-- [ ] **Filmstrip/Thumbnail**
-  - Thumbnails refletem crop atual
+- [x] ✅ **Preview em Tempo Real** — mesh + UV no `image_viewer`
+- [ ] 🚨 **Exportação** — **o crop NÃO chega ao arquivo exportado**. `ImageExporterImpl::export` abre o original e aplica os ajustes tonais, sem nenhuma referência a crop/rotação/flip
+- [ ] 🚨 **Undo/Redo** — `EditSnapshot` não tem campos de crop; o histórico ignora corte
+- [x] ✅ **Filmstrip/Thumbnail** — `thumbnail_renderer` aplica crop e rotação, com invalidação ao editar
 
-**Estimativa**: 2 semanas (1 semana backend + 1 semana UI)
+**Estimativa original**: 2 semanas (1 semana backend + 1 semana UI)
 **Prioridade**: Alta (feature essencial para workflow de edição)
-**Dependências**: GPU Processing (concluído), Undo/Redo (concluído)
+**Pendente**: exportação, undo/redo, proporções customizadas, auto-straighten, atalhos extras
 
 ### Entregáveis Fase 2
 - ✅ Edição profissional de RAW

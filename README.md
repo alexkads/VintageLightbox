@@ -22,8 +22,8 @@ Este projeto segue **Clean Architecture** e **Test-Driven Development (TDD)**:
 
 - 🏛️ **4 Camadas**: Domain → Use Cases → Adapters → Infrastructure
 - 🧪 **TDD**: Ciclo Red-Green-Refactor em todo o código
-- 📊 **100% cobertura** no Domain Layer
-- ✅ **37 testes** já implementados (Value Objects)
+- 📊 **Domain**: 202 testes, incluindo property-based testing
+- ⚠️ **Adapters**: sem testes — é o vão de cobertura conhecido
 
 ## 🚀 Tecnologias
 
@@ -36,31 +36,31 @@ Este projeto segue **Clean Architecture** e **Test-Driven Development (TDD)**:
 
 ## 🎯 Status do Desenvolvimento
 
-**Fase Atual**: Domain Layer + Use Cases ✅
+**Fase Atual**: Fase 2 — Funcionalidades Essenciais (importação avançada, edição RAW completa,
+presets, flags, crop, impressão)
 
-- [x] Workspace configurado com Clean Architecture
-- [x] Ferramentas de teste configuradas (TDD)
-- [x] **Value Objects** (99 testes)
-  - Rating, PhotoId, ColorLabel, FilePath, CollectionId
-- [x] **Entidades** (99 testes)
-  - Photo Entity (com rating, color labels, edit tracking)
-  - Collection Entity (com photos management)
-- [x] **Repository Traits** (interfaces)
-  - PhotoRepository, CollectionRepository
-- [x] **Use Cases** (4 testes)
-  - ImportPhotoUseCase (com mocks)
-- [ ] Infrastructure Layer (SQLite, File System)
-- [ ] Adapters Layer (Controllers, Presenters)
+> ✅ **Compila, suíte verde (478 testes), app sobe** — depois de dois consertos feitos em
+> 15/ago/2026 e **ainda não commitados**. O quadro completo, incluindo 4 migrations aplicadas em
+> catálogos existentes que não estão no repositório, está em **[docs/STATUS.md](docs/STATUS.md)**.
 
-**103 testes passando** 🎉
+- [x] Workspace com Clean Architecture (5 crates)
+- [x] **Domain** — 4 entidades, 13 value objects, **202 testes passando**
+- [x] **Use Cases** — 20 módulos (importação, organização, edição, presets, export, print)
+- [x] **Infrastructure** — SQLite (15 migrations), cache L1/L2/L3, RAW via LibRaw, EXIF, thumbnails
+- [x] **Adapters** — 6 controllers (⚠️ sem testes)
+- [x] **UI** — egui 0.31 sobre wgpu: 4 views, 26 componentes, docking, multi-monitor, 5 temas
+- [ ] Commitar os consertos e reativar o CI ← **próximo passo**
+
+**478 testes passando · 0 falhas · 3 ignorados**
 
 **Rodando os testes**:
 ```bash
-# Todos os testes unitários
 cargo test --workspace
 
+cargo test -p domain
+
 # Testes E2E da UI (egui_kittest)
-cargo test -p ui --test rating_widget_tests
+cargo test -p ui --test crop_feature_e2e_test
 
 # Atualizar snapshots (quando necessário)
 UPDATE_SNAPSHOTS=true cargo test -p ui
@@ -118,31 +118,19 @@ A documentação completa do projeto está organizada na pasta `docs/`:
 - Layouts de impressão variados
 - Gerenciamento de cor para impressão
 
-## 🏗️ Status do Projeto
-
-**Fase Atual**: Documentação e Planejamento ✅
-
-**Próximas Etapas**:
-1. Setup do projeto e proof of concept (Fase 0)
-2. Desenvolvimento do MVP (Fase 1)
-3. Features essenciais (Fase 2)
-
-Consulte o [Roadmap](docs/04-ROADMAP.md) para detalhes.
-
-## 🛠️ Estrutura do Projeto (Planejada)
+## 🛠️ Estrutura do Projeto
 
 ```
-VintageLightbox/
+VintageLightbox-Rust/
 ├── crates/
-│   ├── vintage-core/        # Lógica de domínio
-│   ├── vintage-raw/         # Processamento RAW
-│   ├── vintage-ui/          # Interface egui
-│   ├── vintage-import/      # Módulo de importação
-│   ├── vintage-export/      # Módulo de exportação
-│   └── vintage-database/    # Camada de dados
-├── assets/                  # Recursos (ícones, presets)
-├── docs/                    # Documentação
-└── tests/                   # Testes e fixtures
+│   ├── domain/              # Entidades, value objects, traits (sem dependências externas)
+│   ├── use-cases/           # Orquestração de regras de negócio
+│   ├── adapters/            # Controllers, presenters, view models
+│   ├── infrastructure/      # SQLite, cache, RAW, EXIF, arquivos, dispositivos
+│   └── ui/                  # egui/eframe (wgpu): views, componentes, design system
+├── crates/infrastructure/migrations/   # 15 migrations SQLite
+├── docs/                    # Documentação (comece por STATUS.md)
+└── dev.sh                   # Helper de TDD
 ```
 
 ## 📋 Requisitos do Sistema
@@ -228,8 +216,8 @@ Agradecimentos às comunidades de Rust, egui e processamento de imagens open sou
 
 ---
 
-**Status**: 🟡 Em Planejamento - Documentação Completa ✅
+**Status**: 🟢 Fase 2 em andamento — compila e roda (veja [docs/STATUS.md](docs/STATUS.md))
 
-**Versão**: 0.1.0-planning
+**Versão**: 0.1.0
 
-**Última Atualização**: Dezembro 2025
+**Última Atualização**: 15 de agosto de 2026

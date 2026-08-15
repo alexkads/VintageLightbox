@@ -1,293 +1,283 @@
 # Status do Projeto - VintageLightbox
 
-**Última atualização**: 20 de dezembro de 2025  
-**Fase Atual**: Fase 1 - MVP + UI Redesign v2.0 ✅
+**Última atualização**: 15 de agosto de 2026
+**Último commit**: `318178d` — 25/jan/2026, _"feat: implement embedded preview extraction for RAW files"_
+**Branch de trabalho**: `dev` (com 3 arquivos alterados e **não commitados** — veja abaixo)
+**Estado**: ✅ compila, suíte verde, app sobe — depois de dois consertos feitos hoje
 
-## 📊 Métricas Gerais
+> ⚠️ **Este documento foi reescrito em 15/ago/2026 a partir do código, não do histórico.**
+> A versão anterior datava de 20/dez/2025 e descrevia um projeto muito menor do que o que existe
+> hoje (dizia "Adapters: não iniciado" — há 6 controllers; dizia 173 testes — há 481 declarados).
+> Os números abaixo foram medidos rodando `cargo test`/`cargo check`, não copiados.
+
+---
+
+## ✅ O que foi consertado em 15/ago/2026 (mudanças locais, **não commitadas**)
+
+O HEAD de `dev` não compilava. Dois erros independentes, ambos consertados:
+
+### 1. `infrastructure` (lib) — quebrava o app inteiro
+
+```
+error[E0609]: no field `thumbnails` on type `rawloader::RawImage`
+  --> crates/infrastructure/src/raw_processing.rs:108
+```
+
+`extract_embedded_preview()` (último commit, 25/jan) lia `raw.thumbnails`, campo que **não existe**
+em `rawloader 0.37.1`. Esse commit já tinha sido revertido uma vez (`a2a3e60` reverteu `6f0c1c8`) e
+voltou no mesmo dia sem correção.
+
+**Conserto**: reescrito sobre `rsraw::RawImage::extract_thumbs()` — a mesma LibRaw que
+`load_raw_as_dynamic_image` já usava. A função agora recebe `min_height` e devolve o **menor**
+preview JPEG que atende, em vez de um índice arbitrário (o `[0]` do código anterior seria o menor,
+apesar do comentário dizer "geralmente o maior"). Previews não-JPEG são descartados, porque quem
+chama passa o resultado por `image::load_from_memory`. `unpack()` não é chamado de propósito — o
+preview sai do arquivo sem demosaic, que é o ponto do caminho rápido.
+
+### 2. `use-cases` (lib test) — quebrava a suíte, não o app
+
+```
+error[E0061]: this method takes 55 arguments but 47 arguments were supplied
+  --> crates/use-cases/src/save_photo_edits.rs:186
+```
+
+O Crop & Rotate (27/dez/2025) acrescentou 8 parâmetros a `SavePhotoEditsUseCase::execute` e o teste
+no próprio arquivo não foi atualizado. A suíte estava quebrada **desde 27/dez/2025**, e o CI
+vermelho junto, nas três plataformas.
+
+**Conserto**: os 8 `None` que faltavam. ⚠️ **É remendo, não solução** — a assinatura de 55
+parâmetros posicionais é a causa, e vai quebrar de novo no próximo ajuste de edição. Trocar por um
+struct `PhotoEdits` continua sendo o conserto de verdade.
+
+---
+
+## 📊 Métricas medidas
 
 | Métrica | Valor |
 |---------|-------|
-| Total de Testes | **173** 🎉 |
-| Domain Layer | 99 testes ✅ |
-| Use Cases Layer | 32 testes ✅ |
-| Infrastructure Layer | 42 testes ✅ |
-| UI Components | 8 componentes premium ✅ |
-| Cobertura (Domain) | 100% ✅ |
-| Status Compilação | ✅ Sem erros |
+| `cargo check --workspace --all-targets` | ✅ **limpo** |
+| `cargo test --workspace` | ✅ **478 passando, 0 falhas, 3 ignorados** |
+| App | ✅ **sobe** — janela 1352×848, `GPU: Initialized successfully with Apple M2 Pro` |
+| Migrations SQLite no repositório | 15 (`001` … `015`) |
+| Crates | 5 (domain, use-cases, adapters, infrastructure, ui) |
 
-## 🎯 Progresso por Camada
+### Testes por camada
 
-### 1️⃣ Domain Layer (Camada 1 - Entities) ✅ COMPLETO
-
-**Status**: 99 testes, 100% de cobertura
-
-#### Value Objects ✅
-- [x] **Rating** (12 testes + property-based)
-  - Classificação 0-5 estrelas
-  - Validação e comparação
-  - Conversões e constantes
-
-- [x] **PhotoId** (13 testes)
-  - ID único baseado em UUID v4
-  - Roundtrip string ↔ UUID
-  - Display, Hash, Eq traits
-
-- [x] **ColorLabel** (12 testes + property-based)
-  - 5 cores: Red, Yellow, Green, Blue, Purple
-  - Conversões nome/código
-  - Validação de códigos
-
-- [x] **FilePath** (15 testes)
-  - Caminho de arquivo validado
-  - Operações: file_name, extension, parent
-  - Validação de paths vazios
-
-- [x] **CollectionId** (11 testes + property-based)
-  - ID de coleção com UUID
-  - Roundtrip e validações
-
-#### Entities ✅
-- [x] **Photo** (23 testes incluindo business logic)
-  - Campos: id, file_path, rating, color_label, timestamps, is_edited
-  - Métodos: rate(), unrate(), set_color_label(), mark_as_edited()
-  - Timestamps automáticos (imported_at, modified_at)
-  - Workflows completos testados
-
-- [x] **Collection** (21 testes incluindo business logic)
-  - Campos: id, name, description, photo_ids (HashSet), timestamps
-  - Métodos: add_photo(), remove_photo(), rename(), etc.
-  - Gerenciamento eficiente com HashSet
-  - Workflows de múltiplas fotos testados
-
-#### Repository Traits ✅
-- [x] **PhotoRepository** - Interface async com:
-  - save(), find_by_id(), find_all()
-  - update(), delete(), exists()
-
-- [x] **CollectionRepository** - Interface async com:
-  - save(), find_by_id(), find_all()
-  - update(), delete()
-  - find_by_photo() - busca coleções por foto
-
-#### Domain Errors ✅
-- [x] DomainError enum com todos os casos
-- [x] DomainResult<T> type alias
-- [x] thiserror para error handling
+| Camada | Testes | Situação |
+|--------|-------:|----------|
+| Domain | 202 | ✅ passando |
+| Use Cases | 65 | ✅ passando |
+| Adapters | 0 | ⚠️ nenhum teste escrito |
+| Infrastructure | 65 (34 unit + 31 integração em 7 arquivos) | ✅ passando (1 ignorado) |
+| UI | 146 (47 unit + 99 E2E `egui_kittest` em 18 arquivos) | ✅ passando (2 ignorados) |
 
 ---
 
-### 2️⃣ Use Cases Layer (Camada 2) ✅ COMPLETO
+## 🚨 Bloqueio que restou: 4 migrations aplicadas que não existem no repositório
 
-**Status**: 32 testes (7 use cases implementados)
+O app subiu só depois de encostar o catálogo local. Ele morria no start-up:
 
-#### Implementado ✅
-- [x] **ImportPhotoUseCase** (4 testes)
-  - Importa foto única para catálogo
-  - Validação de erros do repository
-  - Criação de IDs únicos
-
-- [x] **ImportPhotosUseCase** (5 testes)
-  - Importação em lote (batch)
-  - Tratamento de falhas parciais
-  - Continua importando mesmo com erros
-
-- [x] **RatePhotoUseCase** (5 testes)
-  - Classificar foto com rating (0-5 estrelas)
-  - Remover rating de foto
-  - Múltiplas classificações
-
-- [x] **SetColorLabelUseCase** (5 testes)
-  - Definir color label em foto
-  - Remover color label
-  - Todas as 5 cores suportadas
-
-- [x] **CreateCollectionUseCase** (4 testes)
-  - Criar coleção com nome e descrição
-  - Descrição opcional
-  - IDs únicos
-
-- [x] **AddPhotoToCollectionUseCase** (5 testes)
-  - Adicionar foto à coleção
-  - Validação de foto e coleção existentes
-  - Previne duplicatas
-
-- [x] **RemovePhotoFromCollectionUseCase** (4 testes)
-  - Remover foto da coleção
-  - Validação de existência
-  - Múltiplas remoções
-
-#### Próximos Passos 📋
-- [ ] **ScanDirectoryUseCase** - Escanear diretório recursivamente
-
----
-
-### 3️⃣ Adapters Layer (Camada 3) 📋 PLANEJADO
-
-**Status**: Não iniciado
-
-#### Planejado
-- [ ] Controllers (LibraryController, DevelopController)
-- [ ] Presenters (PhotoPresenter, GridPresenter)
-- [ ] ViewModels para Slint
-- [ ] DTOs e conversores
-
----
-
-### 3️⃣ Infrastructure Layer (Camada 4) 🔄 EM ANDAMENTO
-
-**Total Tests**: 171 passing
-**Coverage**: ~95%
-**Fase**: 1.5 - Infrastructure Layer (Metadata)
-**Status**: 42 testes (Repositories + File System + Metadata)
-
-#### Implementado ✅
-- [x] **PhotoRepositoryImpl** (SQLite) - 9 testes
-- [x] **CollectionRepositoryImpl** (SQLite) - 10 testes
-- [x] **Database Module** - 2 testes
-- [x] **FileScanner** - 9 testes
-- [x] **ScanDirectoryUseCase** - 5 testes
-- [x] **ExifReader** - 7 testes
-  - Extrai metadados (câmera, ISO, abertura, etc)
-  - Suporta JPEG, TIFF, RAW
-  - Integrado com workflows de importação ✅
-
-#### Próximos Passos 📋
-- [x] **Metadata Persistence** - Salvar metadados no SQLite ✅
-  - Coluna JSON na tabela `photos`
-  - Serialização/Deserialização automática
-- [ ] **Thumbnail Generator** - Gerar previews
-- [x] **RAW Decoder** - Processar arquivos RAW (incluindo extração de previews embutidos) ✅
-- [ ] **UI Layer** - Interface com Slint
-- [x] **RAW Processing** ✅
-  - LibRaw/rawler integration
-  - Format decoders (CR2, NEF, ARW, DNG)
-  - Adjustment pipeline
-  - Embedded preview extraction (Fast path)
-
----
-
-## 🛠️ Ferramentas e Configuração
-
-### Testing Stack ✅
-- [x] **cargo test** - Test runner padrão
-- [x] **mockall** - Mocking para use cases
-- [x] **proptest** - Property-based testing
-- [x] **criterion** - Benchmarking (configurado)
-- [x] **insta** - Snapshot testing (configurado)
-
-### CI/CD ✅
-- [x] GitHub Actions configurado
-  - Testes em Ubuntu, macOS, Windows
-  - Clippy linting
-  - Rustfmt check
-  - Build verification
-
-### Development Tools ✅
-- [x] **dev.sh** - Script helper para TDD workflow
-  - `./dev.sh test` - Roda testes
-  - `./dev.sh test:watch` - Watch mode
-  - `./dev.sh coverage` - Coverage report
-  - `./dev.sh check` - Linting completo
-
-### Dependências ✅
-- [x] serde - Serialização
-- [x] thiserror - Error handling
-- [x] uuid - Geração de IDs
-- [x] chrono - Timestamps
-- [x] async-trait - Async traits
-- [x] tokio - Async runtime (testes)
-
----
-
-## 📈 Próximas Milestones
-
-### Milestone 1: Use Cases Completo (1-2 semanas)
-- [ ] Implementar 5+ use cases principais
-- [ ] ≥20 testes no use-cases crate
-- [ ] Mocks para todos os repositories
-
-### Milestone 2: Infrastructure - Persistence (2-3 semanas)
-- [ ] SQLite schema e migrations
-- [ ] Implementar PhotoRepositoryImpl
-- [ ] Implementar CollectionRepositoryImpl
-- [ ] Testes de integração (≥15 testes)
-
-### Milestone 3: RAW Processing PoC (2-3 semanas)
-- [ ] Integrar LibRaw ou rawler
-- [ ] Decodificar CR2, NEF, ARW, DNG
-- [ ] Aplicar ajustes básicos (exposição)
-- [ ] Benchmark de performance
-
-### Milestone 4: UI Prototype (3-4 semanas)
-- [ ] Setup Slint UI
-- [ ] Grid de thumbnails
-- [ ] Seleção e navegação
-- [ ] Preview de foto
-
----
-
-## 🎉 Conquistas
-
-- ✅ **Clean Architecture** implementada corretamente
-- ✅ **TDD 100%** no domain layer (Red-Green-Refactor)
-- ✅ **Property-based testing** com proptest
-- ✅ **Mocking** funcional com mockall
-- ✅ **CI/CD** rodando em 3 plataformas
-- ✅ **103 testes passando** sem falhas
-- ✅ **Async repositories** com async-trait
-- ✅ **Zero warnings** de compilação
-
----
-
-## 📚 Documentação
-
-| Documento | Status |
-|-----------|--------|
-| [01-REQUISITOS.md](01-REQUISITOS.md) | ✅ Completo |
-| [02-ARQUITETURA.md](02-ARQUITETURA.md) | ✅ Atualizado |
-| [03-FUNCIONALIDADES.md](03-FUNCIONALIDADES.md) | ✅ Atualizado |
-| [04-ROADMAP.md](04-ROADMAP.md) | ✅ Atualizado |
-| [05-STACK-TECNOLOGICO.md](05-STACK-TECNOLOGICO.md) | ✅ Completo |
-| STATUS.md | ✅ Este documento |
-
----
-
-## 🚀 Como Contribuir
-
-### Rodando os Testes
-
-```bash
-# Todos os testes
-cargo test --workspace
-
-# Apenas domain
-cargo test -p domain
-
-# Apenas use-cases
-cargo test -p use-cases
-
-# Com coverage
-./dev.sh coverage
+```
+panicked at crates/ui/src/main.rs:59:
+Failed to run database migrations: Migrate(VersionMissing(16))
 ```
 
-### TDD Workflow
+A tabela `_sqlx_migrations` do catálogo em `~/Pictures/VintageLightbox/` registra **19** migrations
+aplicadas; o repositório tem **15**. As quatro que faltam:
 
-```bash
-# Watch mode (re-roda testes ao salvar)
-./dev.sh test:watch
+| Versão | Descrição | Aplicada em | Onde está o arquivo |
+|-------:|-----------|-------------|---------------------|
+| 16 | add crop fill mode | 28/dez/2025 | só nas branches `feature/refactur_arc` e `Diffusion-CNN-Content-Aware` |
+| 17 | create print jobs table | 01/jan/2026 | **em nenhuma branch** |
+| 18 | update fill mode default | 01/jan/2026 | **em nenhuma branch** |
+| 19 | add preset hsl fields | 25/jan/2026 | **em nenhuma branch** |
 
-# Check completo (fmt, clippy, testes)
-./dev.sh check
-```
+O banco local tem a tabela `print_jobs` criada; o repositório não sabe criá-la. E o código atual em
+`dev` **não referencia** `fill_mode`, `print_jobs` nem campos HSL de preset — zero ocorrências. Ou
+seja: essas migrations vieram de trabalho que ficou fora de `dev`, e o `PrintJob`/`print_view` que
+existem no código hoje trabalham sem a tabela que alguém já criou no banco.
 
-### Estrutura de Branches
+**Duas consequências práticas**:
+1. Quem clonar o repositório hoje monta um catálogo com 15 migrations — e nunca vai bater com este.
+2. Qualquer migration nova em `dev` vai nascer como `016` e colidir com a `016` das branches
+   laterais.
 
-- `main` - Código estável, todos os testes passando
-- `dev` - Desenvolvimento ativo
-- `feature/*` - Features específicas
+**Decidido em 15/ago/2026**: o catálogo antigo virou
+`~/Pictures/VintageLightbox/VintageLightbox Catalog/vintage_lightbox.db.bak-20260815` e o app criou
+um novo, limpo, com as 15 migrations do repositório. Voltar atrás é renomear de volta.
 
 ---
 
-**Última execução de testes**: 16/dez/2025  
-**Resultado**: ✅ 131/131 testes passando  
-**Tempo de execução**: ~0.03s (domain) + ~0.00s (use-cases)
+## 🎯 Progresso por camada
+
+### 1️⃣ Domain ✅ saudável
+
+**202 testes passando, 0 falhas.** É a única camada verificável hoje.
+
+- **Entidades**: `Photo`, `Collection`, `Preset`, `PrintJob`
+- **Value Objects** (13): `PhotoId`, `CollectionId`, `PrintJobId`, `Rating`, `ColorLabel`, `Flag`,
+  `FilePath`, `PhotoMetadata`, `CropSettings`, `AspectRatio`, `ImportOptions`, `PrintLayout`,
+  `PrintSettings`
+- **Serviços**: `FileOrganizer`, `PreviewStorage` (traits)
+- **Repositórios** (traits): `PhotoRepository`, `CollectionRepository`, `PresetRepository`
+- **Erros**: `DomainError` / `DomainResult` com `thiserror`
+- **Property-based testing**: 5 blocos `proptest!`
+
+`Photo` cresceu muito além do documentado em dez/2025: além de rating/color label/flag, carrega
+**~50 campos de edição** — básicos, tone curve (4 zonas), HSL (8 canais × hue/sat/lum = 24),
+correção de lente, redução de ruído, nitidez e crop.
+
+### 2️⃣ Use Cases ⚠️ implementado, suíte quebrada
+
+**20 módulos** (a versão anterior deste doc listava 7):
+
+| Área | Use Cases |
+|------|-----------|
+| Importação | `ImportPhoto`, `ImportPhotos`, `ImportWithOptions`, `PreviewBeforeImport`, `CheckDuplicates`, `GetImportSources` |
+| Organização | `RatePhoto`, `SetColorLabel`, `SetFlag`, `DeletePhoto`, `Organize` |
+| Coleções | `CreateCollection`, `AddPhotoToCollection`, `RemovePhotoFromCollection` |
+| Edição | `SavePhotoEdits`, `Edit` |
+| Presets | `SavePreset`, `ListPresets`, `DeletePreset` |
+| Saída | `ExportPhoto`, `Export`, `ConfigurePrintJob` |
+
+⚠️ **`SavePhotoEditsUseCase::execute` recebe 55 parâmetros posicionais.** O erro 2 é sintoma disso:
+a assinatura cresce a cada feature de edição e o call site quebra em silêncio. É candidato natural a
+um struct `PhotoEdits` — e o conserto do teste sem essa mudança só adia a próxima quebra.
+
+### 3️⃣ Adapters 🔄 existe, sem teste
+
+6 controllers (`Import`, `Library`, `Editor`, `Export`, `Photo`, `Preset`), mais `presenters.rs` e
+`view_models.rs`. **Zero testes** — é o único vão de cobertura estrutural do projeto.
+`LibraryController` está praticamente vazio (só `new`).
+
+### 4️⃣ Infrastructure ❌ bloqueada
+
+- **Database (sqlx/SQLite)**: `PhotoRepositoryImpl`, `CollectionRepositoryImpl`,
+  `SqlitePresetRepository` + 15 migrations
+- **Cache**: `preview_manager` — hierarquia L1 RAM (LRU 15 imagens) / L2 Smart Previews (BLOB
+  SQLite) / L3 disco, documentada em [08-CACHE-ARCHITECTURE.md](08-CACHE-ARCHITECTURE.md)
+- **RAW**: `raw_processing` com `rsraw` (LibRaw: demosaic, white balance, cor) e `rawloader` como
+  fallback ← **onde está o erro 1**
+- **Arquivos**: `file_scanner`, `file_organizer`, `content_hash`, `paths` (`AppPaths` resolve
+  catálogo por SO), `exif_reader`, `thumbnail_generator`, `image_exporter`
+- **Dispositivos**: `devices/` — detecção de fontes de importação (cartões) + histórico
+
+### 5️⃣ UI ❌ bloqueada (transitivo)
+
+egui **0.31** com eframe sobre **wgpu** — não glow/OpenGL.
+
+- **4 views**: `library_view`, `develop_view`, `import_view`, `print_view`
+- **26 componentes**, incluindo `crop_panel`/`crop_overlay`/`crop_toolbar`, `thumbnail_renderer`,
+  `filmstrip` (+ filtro e janelas secundárias), `histogram_plot`, `tone_curve`, `metadata_charts`,
+  `print_dialog`, `settings_dialog`, `import_dialogs`
+- **Design system**: 5 temas, tokens, Phosphor Icons, `theme_selector`
+- **Docking** (`egui_dock` 0.16), **multi-monitor** (`monitors.rs`, janelas secundárias)
+- **`gpu_processor.rs`**: pipeline wgpu com shader single-pass (NR + sharpening 5×5)
+- **`async_loader.rs`**: `ProcessedCache` + prefetch paralelo de vizinhos
+
+---
+
+## 📦 O que entrou desde a última atualização real (dez/2025 → jan/2026)
+
+- ✅ **Crop & Rotate completo** (27/dez): `CropSettings`, `AspectRatio`, painel + overlay + toolbar,
+  rotação e flip, renderização por mesh com UV, persistência (migration `015`), auto-apply na
+  navegação, aplicação nos thumbnails via `thumbnail_renderer`, 4 arquivos de teste E2E
+- ✅ **HSL 8 canais** (hue/sat/lum) e **correção de lente** — migrations `011` e `014`
+- ✅ **Redução de ruído e nitidez** em single-pass no shader
+- ✅ **Presets** com persistência (migration `010`) e painel na UI
+- ✅ **Print**: `PrintJob`, `PrintLayout`, `PrintSettings`, `print_view`, `print_dialog`
+- ❌ **Extração de preview embutido em RAW** (25/jan) — **não compila**; é o erro 1
+
+✅ O roadmap ([04-ROADMAP.md](04-ROADMAP.md)) foi corrigido junto com este documento: a seção 2.9
+(Crop & Rotate) estava marcada "📋 PLANEJADO" e o HSL da 2.2 como pendente — ambos implementados
+desde dez/2025.
+
+---
+
+## ⚠️ Lacunas encontradas na leitura do código
+
+Não são erros de compilação; são features que a UI mostra como prontas e que não fecham o ciclo.
+
+1. 🚨 **A exportação ignora o crop.** `ImageExporterImpl::export` abre o arquivo original, aplica os
+   ajustes tonais e grava — sem nenhuma referência a crop, rotação ou flip. O usuário corta a foto,
+   vê o corte no viewer e nos thumbnails, exporta e recebe a imagem inteira.
+2. 🚨 **O undo/redo ignora o crop.** `EditSnapshot` (`crates/ui/src/state.rs:20`) lista os ~50
+   campos de edição, mas nenhum de crop. Cortar não entra no histórico, e desfazer um ajuste
+   posterior não restaura o corte anterior.
+3. ⚠️ **Crop no shader GPU foi revertido** (`305466e` → `10dda3f`). O corte roda por mesh/UV no
+   viewer e por CPU (`ImageProcessing::apply_crop`) nos thumbnails. Funciona, mas é caminho
+   diferente do resto do pipeline de edição, que é GPU.
+4. ⚠️ **Coleções: backend pronto, UI é um TODO** (`library_view.rs:117`).
+5. ⚠️ **Adapters sem nenhum teste**, e `LibraryController` só tem `new`.
+
+---
+
+## 🔜 Próximos passos, em ordem
+
+1. **Commitar os dois consertos** — hoje só existem na árvore de trabalho. Enquanto não forem
+   commitados, o CI segue vermelho e um `git stash` os perde.
+2. **Decidir o destino das migrations 16-19.** As opções reais são recriar os arquivos a partir do
+   schema do banco antigo (o `.bak-20260815` ainda tem tudo), ou assumir que aquele trabalho ficou
+   nas branches laterais e seguir de 016 em `dev` sabendo da colisão.
+3. **Trocar os 55 parâmetros de `SavePhotoEditsUseCase::execute` por um struct** — a quebra de
+   27/dez foi sintoma, não causa.
+4. **Fechar o ciclo do crop**: exportação e undo/redo (veja "Lacunas" abaixo).
+5. **Testar a camada Adapters** (0 testes hoje).
+6. **Coleções na UI**: backend pronto e testado, mas `library_view.rs:117` ainda é
+   `// TODO: Create new collection`.
+
+---
+
+## 🛠️ Ferramentas
+
+| Área | Estado |
+|------|--------|
+| `cargo test` + `mockall` + `proptest` | ✅ configurado |
+| `egui_kittest` (E2E de UI, com snapshots) | ✅ 18 arquivos, 101 testes |
+| `criterion` / `insta` | ✅ configurados |
+| CI GitHub Actions (Ubuntu/macOS/Windows, fmt, clippy `-D warnings`, tarpaulin) | ⚠️ vermelho desde 27/dez/2025 — verde quando os consertos forem commitados |
+| `dev.sh` (`test`, `test:watch`, `coverage`, `check`) | ✅ |
+
+---
+
+## 📚 Estado da documentação
+
+| Documento | Situação |
+|-----------|----------|
+| [01-REQUISITOS.md](01-REQUISITOS.md) | ✅ |
+| [02-ARQUITETURA.md](02-ARQUITETURA.md) | ⚠️ revisar (fala em Slint em partes) |
+| [03-FUNCIONALIDADES.md](03-FUNCIONALIDADES.md) | ✅ |
+| [04-ROADMAP.md](04-ROADMAP.md) | ⚠️ 2.9 e HSL desatualizados |
+| [05-STACK-TECNOLOGICO.md](05-STACK-TECNOLOGICO.md) | ⚠️ revisar (Slint × egui) |
+| [06-UI-ARCHITECTURE.md](06-UI-ARCHITECTURE.md) | ❌ descreve UI em Slint; a UI é egui |
+| [07-E2E-TESTING.md](07-E2E-TESTING.md) | ✅ |
+| [08-CACHE-ARCHITECTURE.md](08-CACHE-ARCHITECTURE.md) | ✅ confere com o código |
+| STATUS.md | ✅ este documento |
+
+`CLAUDE.md` na raiz também está desatualizado: diz egui 0.28 com backend glow (é 0.31 com wgpu) e
+cita 2 views (são 4).
+
+---
+
+## 🚀 Como rodar os testes
+
+```bash
+cargo test --workspace          # 478 passando, 0 falhas, 3 ignorados
+cargo test -p domain            # 202 testes, ~0.01s
+
+# E2E de UI (egui_kittest)
+cargo test -p ui --test crop_feature_e2e_test
+UPDATE_SNAPSHOTS=true cargo test -p ui   # atualizar snapshots
+
+cargo run -p ui                 # sobe o app
+```
+
+⚠️ **O app usa um caminho fixo de catálogo** (`~/Pictures/VintageLightbox/VintageLightbox Catalog/`,
+via `AppPaths::catalog_root()`), sem variável de ambiente para redirecionar. Não dá para rodar
+contra um catálogo descartável sem mexer no do usuário — o que atrapalha teste manual e vale como
+melhoria.
+
+---
+
+**Última execução de testes**: 15/ago/2026
+**Resultado**: ✅ 478 passando, 0 falhas, 3 ignorados · app sobe e renderiza

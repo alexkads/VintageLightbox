@@ -191,7 +191,8 @@ mod tests {
             0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL Lum
             0.0, 0.0, 0.0, // Lens
             0.0, 0.0, // NR
-            0.0, 1.0  // Sharpening
+            0.0, 1.0, // Sharpening
+            None, None, None, None, None, None, None, None, // Crop
         ).await;
 
         match result {
