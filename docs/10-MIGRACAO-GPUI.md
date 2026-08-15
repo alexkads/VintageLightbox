@@ -193,17 +193,32 @@ reclamava. Vale para o resto da migração: erro novo depois de subir dependênc
 
 ## 5. Fases
 
-### Fase 0 — Pré-condições (≈ 1 semana)
+### Fase 0 — Pré-condições ✅ **concluída em 15/ago/2026**
 
-1. **Commitar a árvore** — 25 arquivos modificados e 5 não rastreados em `dev`, incluindo a
-   reescrita da tela de importação. Migrar por cima disso torna impossível separar "quebrou agora"
-   de "já estava quebrado".
-2. **Resolver as migrations 16–19** ([STATUS](STATUS.md)) — o app novo roda as mesmas migrations.
-3. **Catálogo por variável de ambiente** — hoje `AppPaths::catalog_root()` é caminho fixo; sem isso
-   não há teste automatizável contra catálogo descartável.
-4. ✅ **`image` 0.24 → 0.25** (§3.2) — **feito em 15/ago**. Quatro pontos de código, 522 testes
-   verdes, e um defeito de alfa no cache de preview que só apareceu porque a versão nova reclama.
-5. **CI verde**, sem o Ubuntu (§1), com o passo da Metal Toolchain.
+1. ✅ **Árvore commitada** — sobraram só os documentos desta decisão, que entraram junto.
+2. ✅ **Migrations 16–19 resolvidas** — o catálogo antigo virou `.bak` e o app criou um limpo com
+   as 15 do repositório ([STATUS](STATUS.md)). Conferido: o banco novo registra `15 migrations,
+   última v15`.
+3. ✅ **Catálogo por variável de ambiente** — `VLB_CATALOG` (`f906451`). 🚨 E não era hipotético:
+   `develop_view_controls_e2e_test.rs` chamava `PreviewManager::new()`, então **rodar `cargo test`
+   escrevia no cache real do fotógrafo**. O comentário ali dizia "no longer needs temp directory" e
+   o `use tempfile::tempdir` seguia importado sem uso — o import era o rastro de que aquilo já
+   tinha sido certo.
+4. ✅ **`image` 0.24 → 0.25** (§3.2, `3d5ba78`) — quatro pontos de código, e um defeito de alfa no
+   cache de preview que só apareceu porque a versão nova reclama.
+5. ✅ **CI verde** (`0d86077`, `55a6904`, `fb95adc`), sem o Ubuntu (§1), com a Metal Toolchain.
+   🚨 **O gatilho apontava para um branch `develop` que nunca existiu** — o trabalho é em `dev`.
+   Enquanto isso durou, `fmt` e `clippy` acumularam reprovação sem ninguém ver: 146 arquivos fora
+   de formatação e 125 avisos nas camadas internas. "CI verde" era uma afirmação que não tinha como
+   ser conferida.
+
+**Placar ao fim da fase 0**: 526 testes passando, 0 falhando, 3 ignorados; `fmt` limpo; `clippy`
+com `-D warnings` limpo nas quatro camadas que sobrevivem à migração.
+
+🔑 **O que os quatro achados têm em comum**: nenhum deles falhava. O JPEG com alfa era aceito, o
+teste escrevia no catálogo real sem erro, o `to_string` sombreado dava o mesmo texto, e o CI não
+reclamava porque não rodava. **Pré-condição de migração é onde o silêncio custa mais caro** — o
+que não avisa agora vira "o GPUI quebrou isso" daqui a três meses.
 
 ### Fase 1 — Biblioteca, num crate ao lado (2 semanas)
 
