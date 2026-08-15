@@ -220,7 +220,7 @@ teste escrevia no catálogo real sem erro, o `to_string` sombreado dava o mesmo 
 reclamava porque não rodava. **Pré-condição de migração é onde o silêncio custa mais caro** — o
 que não avisa agora vira "o GPUI quebrou isso" daqui a três meses.
 
-### Fase 1 — Biblioteca, num crate ao lado (2 semanas)
+### Fase 1 — Biblioteca, num crate ao lado 🔄 **em andamento**
 
 `crates/ui-gpui` entra no workspace **sem tirar `crates/ui`**. Os dois compilam, os dois rodam:
 `cargo run -p ui` e `cargo run -p ui-gpui`.
@@ -231,6 +231,55 @@ nota/cor/sinalizador. Inclui a ponte de imagem da §3.1 — sem ela não há min
 **Critério de saída**: abrir o catálogo real e navegar 2.000 fotos a 60fps.
 **É aqui que você decide se gosta de morar nisso.** Duas semanas jogadas fora se não gostar, em vez
 de cinco meses.
+
+#### O que já está de pé
+
+| | |
+|---|---|
+| ✅ Crate no workspace, compilando ao lado do `ui` | `6ba696b` |
+| ✅ Ponte de imagem `DynamicImage → RenderImage` (§3.1) | `6ba696b` |
+| ✅ Grade virtualizada (`uniform_list`), com a lógica de linhas testada | `c42f504` |
+| ✅ Miniaturas do cache, sob demanda | `e355676` |
+| ✅ Cache com descarte (LRU), capacidade tirada da janela | `ff3ed2a` |
+| ✅ Filtros de nota e sinalizador | `68dfc9d` |
+| ⬜ Filmstrip, árvore de pastas, filtro por cor e busca na barra | |
+| ⬜ Carregamento assíncrono das fotos (hoje bloqueia a abertura) | |
+
+**Estado medido**: 2.000 fotos abertas, 126 MB residentes, 0,0% de CPU parado. **Os 60fps não
+foram medidos** — isso é rolagem com olho humano, e é o que decide a fase.
+
+#### `semear-catalogo` — como medir sem depender do acervo de ninguém
+
+O catálogo real desta máquina está **vazio** desde que foi recriado limpo (migrations 16–19), e
+esperar 2.000 fotos importadas para só então descobrir que a grade engasga é a ordem errada.
+
+```bash
+VLB_CATALOG=/tmp/catalogo-de-medicao cargo run -p ui-gpui --bin semear-catalogo -- 2000
+VLB_CATALOG=/tmp/catalogo-de-medicao cargo run -p ui-gpui
+```
+
+As fotos sintéticas têm uma faixa listrada no topo de propósito: numa grade de cores chapadas não
+dá para ver se a virtualização troca miniaturas de lugar durante a rolagem, que é o defeito que ela
+introduz. As notas vão de 0 a 5 em partes iguais — com 2.000, filtrar por ★★★★★ tem de mostrar
+**333**, e por ★★★ tem de mostrar **999**.
+
+⚠️ Ele **recusa** escrever em catálogo que já tem fotos: `VLB_CATALOG` é texto livre e o padrão dele
+é a biblioteca real.
+
+#### As três armadilhas desta fase, todas silenciosas
+
+1. 🚨 **O GPUI quer BGRA; o crate `image` produz RGBA.** `RenderImage` é documentado como "in BGRA
+   format" e o Metal cria as texturas com `BGRA8Unorm`, mas `image::Frame` carrega um `RgbaImage` —
+   o tipo não diz qual ordem está lá. Entregar um pelo outro não falha: troca vermelho por azul em
+   **toda** foto, e quem olha conclui que o motor de cor está errado.
+2. 🚨 **A grade indexava o acervo, e não a lista filtrada.** Com filtro ativo, cada célula mostraria
+   a foto errada — e continuaria bonita. Só apareceu porque o compilador acusou a variável não usada.
+3. 🚨 **`Flag::as_code` dizia `2` para rejeitada e sempre gravou `-1`.** Um filtro escrito a partir
+   da documentação devolveria lista vazia, parecendo "não há nenhuma".
+
+⚠️ **E um falso alarme que quase virou achado**: `ps -o pcpu` mostrou 100% com o app parado — ele
+reporta a **média desde o início do processo**. O instantâneo (`top -l 3`) é 0,0%. Número de CPU só
+vale instantâneo.
 
 ### Fase 2 — Revelação (3–4 semanas)
 
