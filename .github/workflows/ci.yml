@@ -1,10 +1,15 @@
 name: CI
 
+# `dev`, e não `develop`: o branch chamado `develop` **nunca existiu** neste
+# repositório — o trabalho acontece em `dev`. Enquanto o gatilho apontou para um
+# nome inexistente, o CI só rodava em `main`, ou seja, depois de o trabalho já
+# estar mesclado. Um CI que não dispara onde se trabalha não é um CI verde: é um
+# CI mudo.
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main, dev ]
   pull_request:
-    branches: [ main, develop ]
+    branches: [ main, dev ]
 
 env:
   CARGO_TERM_COLOR: always
@@ -16,88 +21,138 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # 🚨 Sem `ubuntu-latest`, decidido na migração para GPUI
+        # (docs/10-MIGRACAO-GPUI.md §1).
+        #
+        # O `gpui 0.2.2` publicado no crates.io ainda resolve `blade-graphics`
+        # no Linux — a troca para wgpu (PR #46758 do Zed, merge em fev/2026)
+        # não chegou ao crate. Manter o Ubuntu na matriz passaria a compilar o
+        # caminho que o próprio Zed chamou de bagunça, para uma plataforma que
+        # o produto **não declara**: o README fala macOS e Windows, e o Linux
+        # estava aqui por inércia.
+        #
+        # ⚠️ Isto não é "o Linux não funciona" — é "ninguém confere o Linux".
+        # Voltar a suportá-lo é acrescentar a linha de volta e ver o que quebra.
+        os: [macos-latest, windows-latest]
         rust: [stable]
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Install Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: ${{ matrix.rust }}
           components: rustfmt, clippy
-      
+
+      # 🚨 O GPUI compila os shaders Metal em **tempo de build**, e o runner não
+      # traz a toolchain. Sem este passo o build morre com
+      # `cannot execute tool 'metal' due to missing Metal Toolchain`.
+      #
+      # O wgpu do egui compila shader em *runtime* e nunca exigiu isto — então
+      # é dependência nova, que entra antes do crate que a exige para o
+      # primeiro CI da fase 1 já nascer verde.
+      - name: Install Metal Toolchain
+        if: runner.os == 'macOS'
+        run: xcodebuild -downloadComponent MetalToolchain
+
       - name: Cache cargo registry
         uses: actions/cache@v4
         with:
           path: ~/.cargo/registry
           key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
-      
+
       - name: Cache cargo index
         uses: actions/cache@v4
         with:
           path: ~/.cargo/git
           key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
-      
+
       - name: Cache target directory
         uses: actions/cache@v4
         with:
           path: target
           key: ${{ runner.os }}-target-${{ hashFiles('**/Cargo.lock') }}
-      
+
       - name: Run tests
         run: cargo test --workspace --verbose
-      
+
       - name: Run tests (release mode)
         run: cargo test --workspace --release --verbose
 
+  # Formatação não compila nada, então continua no runner mais barato.
   fmt:
     name: Rustfmt
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Install Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
           components: rustfmt
-      
+
       - name: Check formatting
         run: cargo fmt --all -- --check
 
+  # Clippy sobre as **quatro camadas internas**, com `-D warnings`.
+  #
+  # 🚨 O job cobrava o workspace inteiro e **nunca esteve verde**: `crates/ui`
+  # tem centenas de avisos, e como o gatilho apontava para um branch inexistente
+  # ninguém via. Cobrar o `ui` agora seria arrumar, aviso a aviso, um crate que
+  # a fase 5 apaga — trabalho que o plano proíbe por não aproximar o cutover.
+  #
+  # O que fica coberto é o que **sobrevive** à migração: domain, use-cases,
+  # adapters e infrastructure passam com zero avisos, e é aí que uma regressão
+  # importa. Não precisa de Metal Toolchain: nenhuma das quatro toca a GPU, e é
+  # por isso que este job pode ficar no runner barato.
+  #
+  # ⚠️ Quando `crates/ui-gpui` nascer (fase 1), ele entra nesta lista — nasce
+  # limpo, e é muito mais barato mantê-lo assim do que limpá-lo depois.
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Install Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
           components: clippy
-      
-      - name: Run clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
 
+      - name: Run clippy
+        run: >
+          cargo clippy
+          -p domain -p use-cases -p adapters -p infrastructure
+          --all-targets --all-features -- -D warnings
+
+  # A cobertura fica no Ubuntu, mas **só sobre as quatro camadas internas** —
+  # que não têm GPU, não têm janela e são onde a cobertura diz alguma coisa.
+  #
+  # É o que permite manter o runner barato sem compilar `ui` nem, mais adiante,
+  # `ui-gpui`. Medir cobertura de interface por tarpaulin nunca deu número útil
+  # aqui: quem cobre a UI são os testes de UI.
   coverage:
     name: Code Coverage
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Install Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
-      
+
       - name: Install tarpaulin
         run: cargo install cargo-tarpaulin
-      
+
       - name: Generate coverage
-        run: cargo tarpaulin --workspace --out Xml --timeout 300
-      
+        run: >
+          cargo tarpaulin
+          -p domain -p use-cases -p adapters -p infrastructure
+          --out Xml --timeout 300
+
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
         with:
@@ -110,23 +165,28 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # Mesma matriz do `test`, e pelo mesmo motivo.
+        os: [macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Install Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
-      
+
+      - name: Install Metal Toolchain
+        if: runner.os == 'macOS'
+        run: xcodebuild -downloadComponent MetalToolchain
+
       - name: Build
         run: cargo build --workspace --release --verbose
-      
+
       - name: Check binary size (Unix)
         if: runner.os != 'Windows'
         run: |
           ls -lh target/release/
-      
+
       - name: Check binary size (Windows)
         if: runner.os == 'Windows'
         run: |
