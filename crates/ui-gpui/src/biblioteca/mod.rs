@@ -8,4 +8,5 @@
 pub mod filtros;
 pub mod grade;
 pub mod miniaturas;
+pub mod pastas;
 pub mod tela;

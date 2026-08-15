@@ -12,6 +12,7 @@ use infrastructure::cache::preview_manager::PreviewManager;
 use super::filtros::{indices_visiveis, FiltroDeSinalizador, Filtros, NotaMinima};
 use super::grade::{colunas_que_cabem, fotos_da_linha, linhas_necessarias};
 use super::miniaturas::{capacidade_para, CacheDeMiniaturas, Miniatura};
+use super::pastas::{pastas_do_acervo, Pasta};
 
 /// Lado da miniatura, mais o espaçamento — a unidade que decide quantas colunas
 /// cabem. Um número só, e não dois somados na hora de contar: separá-los faria
@@ -20,6 +21,9 @@ use super::miniaturas::{capacidade_para, CacheDeMiniaturas, Miniatura};
 const LADO_DO_ITEM: f32 = 180.0;
 const ESPACAMENTO: f32 = 8.0;
 const PASSO: f32 = LADO_DO_ITEM + ESPACAMENTO;
+
+/// Largura da coluna de pastas.
+const LADO_DA_ARVORE: f32 = 220.0;
 
 pub struct Biblioteca {
     /// `Arc` porque o closure do `uniform_list` é `'static` e precisa levar as
@@ -37,6 +41,12 @@ pub struct Biblioteca {
     /// fotos 60 vezes por segundo é trabalho que ninguém pediu, e a resposta é
     /// sempre a mesma enquanto ninguém tocar na barra.
     visiveis: Vec<usize>,
+    /// As pastas do acervo, calculadas **uma vez**.
+    ///
+    /// Elas saem dos caminhos das fotos, e as fotos não mudam enquanto a tela
+    /// vive — recalcular a cada quadro seria varrer 2.000 caminhos 60 vezes por
+    /// segundo para chegar sempre à mesma lista.
+    pastas: Vec<Pasta>,
 }
 
 /// Quantas linhas cabem na altura da janela.
@@ -63,7 +73,7 @@ fn linhas_visiveis(window: &Window) -> usize {
 /// leitura solta no meio do `render`.
 fn largura_util(window: &Window) -> f32 {
     const MARGEM_LATERAL: f32 = 16.0;
-    f32::from(window.viewport_size().width) - MARGEM_LATERAL
+    f32::from(window.viewport_size().width) - MARGEM_LATERAL - LADO_DA_ARVORE
 }
 
 impl Biblioteca {
@@ -76,7 +86,9 @@ impl Biblioteca {
             cache: Arc::new(Mutex::new(CacheDeMiniaturas::nova(capacidade_para(6, 4)))),
             filtros: Filtros::default(),
             visiveis: Vec::new(),
+            pastas: Vec::new(),
         };
+        tela.pastas = pastas_do_acervo(&tela.fotos);
         // Nasce com a lista pronta: sem isto o primeiro quadro mostraria uma
         // grade vazia sobre um acervo cheio, e a tela só se corrigiria no
         // primeiro clique.
@@ -142,11 +154,16 @@ impl Biblioteca {
                     "★".repeat(n as usize)
                 },
                 nota_atual == n,
-                cx.listener(move |this, _ev, _window, cx| {
-                    this.filtros.nota_minima = NotaMinima(n);
-                    this.refiltrar();
-                    cx.notify();
-                }),
+                cx.listener(
+                    move |this: &mut Self,
+                          _ev: &gpui::ClickEvent,
+                          _window,
+                          cx: &mut Context<Self>| {
+                        this.filtros.nota_minima = NotaMinima(n);
+                        this.refiltrar();
+                        cx.notify();
+                    },
+                ),
             ));
         }
 
@@ -161,11 +178,55 @@ impl Biblioteca {
                 format!("sinal-{rotulo}"),
                 rotulo.to_string(),
                 sinalizador_atual == qual,
-                cx.listener(move |this, _ev, _window, cx| {
-                    this.filtros.sinalizador = qual;
+                cx.listener(
+                    move |this: &mut Self,
+                          _ev: &gpui::ClickEvent,
+                          _window,
+                          cx: &mut Context<Self>| {
+                        this.filtros.sinalizador = qual;
+                        this.refiltrar();
+                        cx.notify();
+                    },
+                ),
+            ));
+        }
+
+        // As cinco do domínio (`ColorLabel`), na grafia que o legado grava na
+        // coluna — comparar com outra escrita não casaria com nada.
+        let mut cores = vec![botao(
+            "cor-todas".to_string(),
+            "todas".to_string(),
+            self.filtros.cor.is_none(),
+            cx.listener(
+                |this: &mut Self, _ev: &gpui::ClickEvent, _window, cx: &mut Context<Self>| {
+                    this.filtros.cor = None;
                     this.refiltrar();
                     cx.notify();
-                }),
+                },
+            ),
+        )];
+        for (valor, rotulo) in [
+            ("Red", "vermelho"),
+            ("Yellow", "amarelo"),
+            ("Green", "verde"),
+            ("Blue", "azul"),
+            ("Purple", "roxo"),
+        ] {
+            let aceso = self.filtros.cor.as_deref() == Some(valor);
+            cores.push(botao(
+                format!("cor-{valor}"),
+                rotulo.to_string(),
+                aceso,
+                cx.listener(
+                    move |this: &mut Self,
+                          _ev: &gpui::ClickEvent,
+                          _window,
+                          cx: &mut Context<Self>| {
+                        this.filtros.cor = if aceso { None } else { Some(valor.to_string()) };
+                        this.refiltrar();
+                        cx.notify();
+                    },
+                ),
             ));
         }
 
@@ -178,6 +239,70 @@ impl Biblioteca {
             .child(div().flex().gap(px(4.)).children(notas))
             .child(rotulo_do_grupo("sinalizador"))
             .child(div().flex().gap(px(4.)).children(sinalizadores))
+            .child(rotulo_do_grupo("cor"))
+            .child(div().flex().gap(px(4.)).children(cores))
+    }
+
+    /// A coluna de pastas, à esquerda da grade.
+    fn arvore_de_pastas(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let escolhida = self.filtros.pasta.clone();
+
+        let mut itens = vec![botao(
+            "pasta-todas".to_string(),
+            format!("Todas ({})", self.fotos.len()),
+            escolhida.is_none(),
+            cx.listener(
+                |this: &mut Self, _ev: &gpui::ClickEvent, _window, cx: &mut Context<Self>| {
+                    this.filtros.pasta = None;
+                    this.refiltrar();
+                    cx.notify();
+                },
+            ),
+        )];
+
+        for pasta in &self.pastas {
+            let caminho = pasta.caminho.clone();
+            let aceso = escolhida.as_deref() == Some(caminho.as_str());
+            let alvo = caminho.clone();
+
+            itens.push(botao(
+                format!("pasta-{caminho}"),
+                format!("{} ({})", pasta.nome, pasta.quantas),
+                aceso,
+                cx.listener(
+                    move |this: &mut Self,
+                          _ev: &gpui::ClickEvent,
+                          _window,
+                          cx: &mut Context<Self>| {
+                        // Clicar de novo na pasta acesa desfaz a escolha: sem isso,
+                        // a única saída seria achar o botão "Todas" no meio de uma
+                        // lista comprida.
+                        this.filtros.pasta = if this.filtros.pasta.as_deref() == Some(alvo.as_str())
+                        {
+                            None
+                        } else {
+                            Some(alvo.clone())
+                        };
+                        this.refiltrar();
+                        cx.notify();
+                    },
+                ),
+            ));
+        }
+
+        div()
+            .id("arvore-de-pastas")
+            .flex()
+            .flex_col()
+            .gap(px(4.))
+            .w(px(LADO_DA_ARVORE))
+            .h_full()
+            .p(px(8.))
+            .overflow_y_scroll()
+            .border_r_1()
+            .border_color(rgb(0x303030))
+            .child(rotulo_do_grupo("pastas"))
+            .children(itens)
     }
 }
 
@@ -191,12 +316,17 @@ fn rotulo_do_grupo(texto: &'static str) -> impl IntoElement {
 /// `id` próprio em cada um: o GPUI usa o id para saber que este é o mesmo
 /// elemento entre quadros. Dois botões com o mesmo id trocariam de estado um
 /// com o outro ao serem clicados.
+///
+/// Devolve `AnyElement`, e não `impl IntoElement`: **cada closure tem um tipo
+/// concreto próprio**, então dois botões com ações diferentes são dois tipos
+/// diferentes, e um `Vec` deles não compila. Apagar o tipo aqui é o que permite
+/// montar a barra com um `push` por botão.
 fn botao(
     id: String,
     texto: String,
     aceso: bool,
     ao_clicar: impl Fn(&gpui::ClickEvent, &mut Window, &mut gpui::App) + 'static,
-) -> impl IntoElement {
+) -> gpui::AnyElement {
     div()
         .id(SharedString::from(id))
         .px(px(8.))
@@ -209,6 +339,7 @@ fn botao(
         .hover(|estilo| estilo.bg(if aceso { rgb(0x456ba0) } else { rgb(0x363636) }))
         .child(SharedString::from(texto))
         .on_click(ao_clicar)
+        .into_any_element()
 }
 
 /// Uma célula da grade: a miniatura, ou o lugar dela.
@@ -290,33 +421,43 @@ impl Render for Biblioteca {
             .bg(rgb(0x1b1b1b))
             .text_color(rgb(0xe6e6e6))
             .child(self.cabecalho(cx))
+            // A partir daqui é uma linha: pastas à esquerda, grade à direita.
+            // `min_h(0)` na linha e `flex_1` nos dois filhos — sem o `min_h`, o
+            // conteúdo rolável empurra o pai e a rolagem nunca acontece.
             .child(
-                // O `uniform_list` só chama o closure para as linhas visíveis.
-                // É o que faz 2.000 fotos custarem o mesmo que 20 na hora de
-                // desenhar — a diferença entre rolar liso e engasgar.
-                uniform_list("grade-da-biblioteca", linhas, move |faixa, _window, _cx| {
-                    faixa
-                        .map(|indice| {
-                            let desta_linha = fotos_da_linha(indice, colunas, total);
+                div()
+                    .flex()
+                    .flex_1()
+                    .min_h(px(0.))
+                    .child(self.arvore_de_pastas(cx))
+                    .child(
+                        // O `uniform_list` só chama o closure para as linhas visíveis.
+                        // É o que faz 2.000 fotos custarem o mesmo que 20 na hora de
+                        // desenhar — a diferença entre rolar liso e engasgar.
+                        uniform_list("grade-da-biblioteca", linhas, move |faixa, _window, _cx| {
+                            faixa
+                                .map(|indice| {
+                                    let desta_linha = fotos_da_linha(indice, colunas, total);
 
-                            div().flex().gap(px(ESPACAMENTO)).p(px(4.)).children(
-                                desta_linha
-                                    // Dois saltos: a linha dá a posição na lista
-                                    // **filtrada**, e `visiveis` traduz para o
-                                    // índice do acervo. Indexar `fotos` direto
-                                    // mostraria a foto errada assim que houvesse
-                                    // filtro — e a grade continuaria bonita, que
-                                    // é o que torna esse defeito caro.
-                                    .map(|posicao| {
-                                        celula(&fotos[visiveis[posicao]], &previews, &cache)
-                                    })
-                                    .collect::<Vec<_>>(),
-                            )
+                                    div().flex().gap(px(ESPACAMENTO)).p(px(4.)).children(
+                                        desta_linha
+                                            // Dois saltos: a linha dá a posição na lista
+                                            // **filtrada**, e `visiveis` traduz para o
+                                            // índice do acervo. Indexar `fotos` direto
+                                            // mostraria a foto errada assim que houvesse
+                                            // filtro — e a grade continuaria bonita, que
+                                            // é o que torna esse defeito caro.
+                                            .map(|posicao| {
+                                                celula(&fotos[visiveis[posicao]], &previews, &cache)
+                                            })
+                                            .collect::<Vec<_>>(),
+                                    )
+                                })
+                                .collect()
                         })
-                        .collect()
-                })
-                .flex_1()
-                .p(px(8.)),
+                        .flex_1()
+                        .p(px(8.)),
+                    ),
             )
     }
 }

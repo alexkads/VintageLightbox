@@ -41,6 +41,8 @@ pub struct Filtros {
     pub cor: Option<String>,
     /// Trecho do nome do arquivo, sem diferenciar maiúsculas.
     pub busca: String,
+    /// Diretório escolhido na árvore lateral. `None` é "todas as pastas".
+    pub pasta: Option<String>,
 }
 
 impl Filtros {
@@ -51,6 +53,7 @@ impl Filtros {
             && self.sinalizador == FiltroDeSinalizador::Qualquer
             && self.cor.is_none()
             && self.busca.trim().is_empty()
+            && self.pasta.is_none()
     }
 
     fn aceita(&self, foto: &PhotoViewModel) -> bool {
@@ -70,6 +73,12 @@ impl Filtros {
 
         if let Some(cor) = &self.cor {
             if foto.color_label.as_deref() != Some(cor.as_str()) {
+                return false;
+            }
+        }
+
+        if let Some(pasta) = &self.pasta {
+            if !crate::biblioteca::pastas::na_pasta(foto, pasta) {
                 return false;
             }
         }

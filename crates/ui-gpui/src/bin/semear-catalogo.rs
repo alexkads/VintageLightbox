@@ -123,16 +123,30 @@ async fn main() {
         let id = uuid::Uuid::new_v4().to_string();
 
         sqlx::query(
-            "INSERT INTO photos (id, file_path, rating, is_edited, imported_at, modified_at, metadata)
-             VALUES (?1, ?2, ?3, 0, ?4, ?4, ?5)",
+            "INSERT INTO photos (id, file_path, rating, color_label, flag, is_edited, imported_at, modified_at, metadata)
+             VALUES (?1, ?2, ?3, ?6, ?7, 0, ?4, ?4, ?5)",
         )
         .bind(&id)
-        .bind(format!("/medicao/DSC_{i:05}.NEF"))
+        // Espalhadas por pastas, senao a arvore lateral nasce com um item so
+        // e nao ha o que conferir nela.
+        .bind(format!("/medicao/{}/DSC_{i:05}.NEF", 2020 + (i % 6)))
         // Notas de 0 a 5 espalhadas, para os filtros da fase 1d terem o que
         // filtrar quando chegarem.
         .bind((i % 6) as i64)
         .bind(&agora)
         .bind(r#"{"camera_model":"Medição","width":320,"height":240}"#)
+        // Uma em cada seis fica sem cor, e o resto gira pelas cinco do dominio.
+        .bind(match i % 6 {
+            0 => None,
+            n => Some(["Red", "Yellow", "Green", "Blue", "Purple"][n - 1]),
+        })
+        // 1 = escolhida, -1 = rejeitada, NULL = sem marca — a convencao do
+        // Lightroom, que e a que esta na coluna.
+        .bind(match i % 3 {
+            0 => Some(1i64),
+            1 => Some(-1i64),
+            _ => None,
+        })
         .execute(&pool)
         .await
         .expect("inserir a foto");
