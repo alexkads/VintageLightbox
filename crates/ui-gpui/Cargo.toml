@@ -54,3 +54,13 @@ uuid.workspace = true
 
 [dev-dependencies]
 tempfile = "3.8"
+# `TestAppContext` — o substituto que o plano escolheu para os 146 testes de UI
+# que morrem na fase 5 (§6). É como o Zed testa a própria interface: dirige
+# janela e afirma sobre estado, sem snapshot visual.
+#
+# ⚠️ Em `[dev-dependencies]`, e **não** em `[dependencies]`, mesmo custando uma
+# segunda compilação do gpui: `test-support` liga junto o `leak-detection`, que
+# grava backtrace a cada handle de entidade. Num app onde a fase 1 quase
+# condenou o framework por medir fluidez no perfil errado, carregar detector de
+# vazamento no binário do produto é repetir o mesmo erro de outro jeito.
+gpui = { version = "0.2.2", features = ["test-support"] }

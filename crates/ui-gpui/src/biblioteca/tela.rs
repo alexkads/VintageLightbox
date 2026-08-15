@@ -692,3 +692,155 @@ impl Render for Biblioteca {
             .child(self.filmstrip(cx))
     }
 }
+
+#[cfg(test)]
+mod testes {
+    use super::*;
+
+    use gpui::TestAppContext;
+    use tempfile::TempDir;
+
+    /// O primeiro teste de tela do projeto em `TestAppContext`.
+    ///
+    /// É o substituto que o plano escolheu para os 146 testes de UI que morrem
+    /// na fase 5 (docs/10-MIGRACAO-GPUI.md §6): não é snapshot visual — dirige a
+    /// janela e afirma sobre o **estado**. E é justamente o estado que a solda
+    /// entre componente e tela pode perder sem que nada falhe.
+    ///
+    /// ⚠️ Nunca `PreviewManager::new()` num teste: aquele resolve
+    /// `AppPaths::preview_cache_dir()` e escreve na biblioteca de fotos de quem
+    /// rodar a suíte — o defeito que a fase 0 encontrou.
+    fn previews_descartaveis() -> (Arc<PreviewManager>, TempDir) {
+        let dir = TempDir::new().expect("criar diretório temporário");
+        (
+            Arc::new(PreviewManager::new_with_path(dir.path().to_path_buf())),
+            dir,
+        )
+    }
+
+    fn foto(nome: &str) -> PhotoViewModel {
+        PhotoViewModel {
+            id: format!("id-{nome}"),
+            name: nome.to_string(),
+            path: format!("/fotos/{nome}"),
+            ..Default::default()
+        }
+    }
+
+    fn acervo() -> Vec<PhotoViewModel> {
+        vec![
+            foto("DSC_001.NEF"),
+            foto("DSC_002.NEF"),
+            foto("retrato.jpg"),
+        ]
+    }
+
+    fn nomes_visiveis(tela: &Biblioteca) -> Vec<String> {
+        tela.visiveis
+            .iter()
+            .map(|&i| tela.fotos[i].name.clone())
+            .collect()
+    }
+
+    /// 🚨 Digitar na busca filtra a grade.
+    ///
+    /// Parece óbvio, e é exatamente por isso que precisa de teste: o caminho
+    /// inteiro depende de uma `Subscription` guardada num campo da struct. Um
+    /// `let _ = cx.subscribe(...)` cancela a inscrição na hora, compila, roda, e
+    /// o campo aceita texto normalmente **sem filtrar nada** — sem erro, sem
+    /// aviso, sem sintoma além de "a busca não funciona".
+    ///
+    /// São ~50 controles com essa mesma forma de solda na Revelação. Este teste
+    /// é o molde deles.
+    #[gpui::test]
+    fn digitar_na_busca_filtra_a_grade(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        // O `InputState` lê estado global que só o `init` cria — sem esta linha
+        // o teste morre antes da primeira asserção.
+        cx.update(gpui_component::init);
+
+        let janela =
+            cx.add_window(|window, cx| Biblioteca::nova(acervo(), previews.clone(), window, cx));
+
+        janela
+            .update(cx, |tela, _window, _cx| {
+                assert_eq!(
+                    nomes_visiveis(tela).len(),
+                    3,
+                    "sem busca, a grade mostra o acervo inteiro"
+                );
+            })
+            .expect("a janela deve estar aberta");
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.busca
+                    .update(cx, |campo, cx| campo.set_value("RETRATO", window, cx));
+            })
+            .expect("a janela deve estar aberta");
+        // O `cx.emit` do componente enfileira um efeito; ele só chega ao
+        // assinante quando a fila drena. Sem isto o teste leria o estado de
+        // antes da digitação e passaria por engano.
+        cx.run_until_parked();
+
+        janela
+            .update(cx, |tela, _window, _cx| {
+                // Maiúsculas de propósito: a busca não diferencia caixa, e é o
+                // `filtros.rs` que garante isso. O que se confere aqui é que o
+                // texto **chegou** até ele.
+                assert_eq!(nomes_visiveis(tela), vec!["retrato.jpg"]);
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// Apagar a busca devolve o acervo inteiro.
+    ///
+    /// A ida sem a volta deixaria passar uma inscrição que dispara uma vez só —
+    /// e o sintoma seria uma grade que nunca mais destrava.
+    ///
+    /// ⚠️ A asserção do meio não é decoração. Sem ela este teste **passa com a
+    /// inscrição cancelada**: se nada nunca filtra, a grade tem as três fotos no
+    /// fim, que é exatamente o que ele cobra. Foi o que apareceu ao quebrar o
+    /// código de propósito para conferir se o teste falhava — o primeiro falhou,
+    /// este não. Teste de volta precisa provar que houve ida.
+    #[gpui::test]
+    fn limpar_a_busca_devolve_o_acervo(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+
+        let janela =
+            cx.add_window(|window, cx| Biblioteca::nova(acervo(), previews.clone(), window, cx));
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.busca
+                    .update(cx, |campo, cx| campo.set_value("retrato", window, cx));
+            })
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+
+        janela
+            .update(cx, |tela, _window, _cx| {
+                assert_eq!(
+                    nomes_visiveis(tela),
+                    vec!["retrato.jpg"],
+                    "sem a ida, a volta não prova nada"
+                );
+            })
+            .expect("a janela deve estar aberta");
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.busca
+                    .update(cx, |campo, cx| campo.set_value("", window, cx));
+            })
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+
+        janela
+            .update(cx, |tela, _window, _cx| {
+                assert_eq!(nomes_visiveis(tela).len(), 3);
+            })
+            .expect("a janela deve estar aberta");
+    }
+}
