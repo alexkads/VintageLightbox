@@ -16,8 +16,20 @@ use ui::views::develop_view::DevelopView;
 
 /// Helper to create a minimal test harness with DevelopView
 fn create_develop_view_harness() -> (Harness<'static>, Rc<RefCell<AppState>>) {
-    // Create PreviewManager (no longer needs temp directory)
-    let preview_manager = Arc::new(PreviewManager::new());
+    // 🚨 Era `PreviewManager::new()`, e o comentário dizia "no longer needs
+    // temp directory" — mas `new()` resolve `AppPaths::preview_cache_dir()`,
+    // que é o cache **real** do fotógrafo em `~/Pictures`. Rodar a suíte
+    // criava diretório e abria conexão SQLite na biblioteca de fotos de quem
+    // rodou. Ninguém percebia porque nada falha: o cache aceita a escrita.
+    //
+    // O `tempdir` continuava importado e sem uso — o import é o rastro de que
+    // isto já foi certo um dia.
+    //
+    // ⚠️ O `TempDir` precisa viver enquanto o teste roda: ao ser descartado, a
+    // pasta some, e o SQLite fica com o arquivo debaixo do pé. Por isso ele é
+    // vazado de propósito, e não ligado a uma variável que sai de escopo aqui.
+    let cache = Box::leak(Box::new(tempdir().expect("criar catálogo descartável")));
+    let preview_manager = Arc::new(PreviewManager::new_with_path(cache.path().to_path_buf()));
 
     // Create DevelopView
     let develop_view = DevelopView::new(preview_manager);

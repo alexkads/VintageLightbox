@@ -31,16 +31,20 @@ async fn main() {
     // human_panic::setup_panic!();
 
     // 0. Setup Paths
-    // Path: ~/Pictures/VintageLightbox/VintageLightbox Catalog
-    // Logic centralized in infrastructure::paths to ensure cross-platform consistency
+    // Path: ~/Pictures/VintageLightbox/VintageLightbox Catalog, ou o que
+    // `VLB_CATALOG` disser. Logic centralized in infrastructure::paths to
+    // ensure cross-platform consistency.
     let catalog_path = infrastructure::paths::AppPaths::catalog_root();
 
     if !catalog_path.exists() {
         std::fs::create_dir_all(&catalog_path).expect("Failed to create catalog directory");
     }
 
-    // Database Path: ./VintageLightbox Catalog/vintage_lightbox.db
-    let db_path = catalog_path.join("vintage_lightbox.db");
+    // `main_db_path()`, e não `catalog_path.join("vintage_lightbox.db")`: o
+    // nome do arquivo estava escrito nos dois lugares, iguais por coincidência.
+    // Bastaria mudar um para o app abrir um banco e o resto do sistema procurar
+    // outro — no mesmo diretório, sem erro nenhum na tela.
+    let db_path = infrastructure::paths::AppPaths::main_db_path();
     // SQLite requires path to be string, prepended with sqlite:
     let database_url = format!("sqlite:{}?mode=rwc", db_path.to_string_lossy());
 
