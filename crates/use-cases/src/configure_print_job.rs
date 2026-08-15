@@ -55,7 +55,7 @@ mod tests {
     use domain::{
         entities::Photo,
         repositories::PhotoRepository,
-        value_objects::{ColorMode, FilePath, Margins, Orientation, PaperSize},
+        value_objects::{ColorMode, Margins, Orientation, PaperSize},
     };
     use mockall::mock;
     use mockall::predicate::*;

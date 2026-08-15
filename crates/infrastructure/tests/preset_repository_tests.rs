@@ -32,7 +32,7 @@ async fn test_save_and_find_preset() {
         ..Default::default()
     };
     let preset = Preset::user("My Preset".to_string(), adjustments);
-    let preset_id = preset.id.clone();
+    let preset_id = preset.id;
 
     // Act - Save
     let save_result = repo.save(&preset).await;
@@ -61,7 +61,7 @@ async fn test_save_system_preset() {
         ..Default::default()
     };
     let preset = Preset::system("B&W", adjustments);
-    let preset_id = preset.id.clone();
+    let preset_id = preset.id;
 
     // Act
     repo.save(&preset).await.unwrap();
@@ -103,7 +103,7 @@ async fn test_delete_preset() {
     // Arrange
     let repo = create_test_repository().await;
     let preset = Preset::user("To Delete".to_string(), PresetAdjustments::default());
-    let preset_id = preset.id.clone();
+    let preset_id = preset.id;
 
     repo.save(&preset).await.unwrap();
 
@@ -125,7 +125,7 @@ async fn test_update_preset() {
         ..Default::default()
     };
     let mut preset = Preset::user("Original".to_string(), adjustments);
-    let preset_id = preset.id.clone();
+    let preset_id = preset.id;
 
     repo.save(&preset).await.unwrap();
 
@@ -162,7 +162,7 @@ async fn test_preset_with_all_adjustments() {
         tone_curve_highlights: Some(-10.0),
     };
     let preset = Preset::user("Full Preset".to_string(), adjustments);
-    let preset_id = preset.id.clone();
+    let preset_id = preset.id;
 
     // Act
     repo.save(&preset).await.unwrap();

@@ -5,6 +5,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct PhotoMetadata {
     /// Modelo da câmera
     pub camera_model: Option<String>,
@@ -26,18 +27,3 @@ pub struct PhotoMetadata {
     pub height: Option<u32>,
 }
 
-impl Default for PhotoMetadata {
-    fn default() -> Self {
-        Self {
-            camera_model: None,
-            camera_make: None,
-            date_time: None,
-            iso: None,
-            aperture: None,
-            shutter_speed: None,
-            focal_length: None,
-            width: None,
-            height: None,
-        }
-    }
-}

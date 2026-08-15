@@ -15,6 +15,17 @@ impl SavePhotoEditsUseCase {
         Self { photo_repository }
     }
 
+    // ⚠️ Dívida reconhecida, não descuido — docs/10-MIGRACAO-GPUI.md §2.1.
+    //
+    // A cadeia de ajustes de revelação (exposição, contraste, HSL nos 8 canais,
+    // detalhe, lente…) viaja como parâmetro solto do controller até o caso de
+    // uso. Agrupá-la num tipo é o conserto certo e é **outro commit**: mexe em
+    // quatro camadas de uma vez, e a migração para GPUI não depende disso — o
+    // plano registra explicitamente que virou dívida, e não pré-requisito.
+    //
+    // O `allow` fica na função, e não no crate, para que uma assinatura nova
+    // longa continue sendo cobrada pelo lint.
+    #[allow(clippy::too_many_arguments)]
     pub async fn execute(
         &self,
         id: PhotoId,
@@ -134,9 +145,9 @@ mod tests {
         
         let id = PhotoId::new();
         let path = FilePath::new("/test.jpg").unwrap();
-        let photo = Photo::with_id(id.clone(), path);
+        let photo = Photo::with_id(id, path);
 
-        let id_expect = id.clone();
+        let id_expect = id;
         let photo_clone = photo.clone();
         
         mock_repo.expect_find_by_id()
@@ -178,7 +189,7 @@ mod tests {
         let id = PhotoId::new();
 
         mock_repo.expect_find_by_id()
-             .with(eq(id.clone()))
+             .with(eq(id))
              .times(1)
              .returning(|_| Ok(None));
 

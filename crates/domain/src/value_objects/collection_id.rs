@@ -106,7 +106,7 @@ mod tests {
     fn test_collection_id_default() {
         let id = CollectionId::default();
         
-        assert!(id.as_uuid().is_nil() == false);
+        assert!(!id.as_uuid().is_nil());
     }
 
     #[test]

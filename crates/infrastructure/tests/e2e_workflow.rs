@@ -50,13 +50,13 @@ async fn test_e2e_import_edit_export_flow() {
     // Verify it's in DB
     let photos = repo.find_all().await.unwrap();
     assert_eq!(photos.len(), 1);
-    let photo_id = photos[0].id().clone();
+    let photo_id = photos[0].id();
     println!("Imported Photo ID: {}", photo_id.as_string());
 
     // 3. EDIT (Save Edits)
     // Apply Exposure +1.0 (Brighten) and Contrast 1.2
     let save_result = save_edits_uc.execute(
-        photo_id.clone(), 1.0, 1.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        photo_id, 1.0, 1.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
         0.0, 0.0, 0.0, 0.0,
         0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL Sat
         0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // HSL Hue
@@ -78,7 +78,7 @@ async fn test_e2e_import_edit_export_flow() {
     let export_path = export_dir.join("exported.jpg");
     let export_path_str = export_path.to_str().unwrap().to_string();
     
-    let export_result = export_uc.execute(photo_id.clone(), export_path_str.clone()).await;
+    let export_result = export_uc.execute(photo_id, export_path_str.clone()).await;
     assert!(export_result.is_ok(), "Export failed: {:?}", export_result.err());
 
     // Verify file exists
@@ -95,7 +95,7 @@ async fn test_e2e_import_edit_export_flow() {
     // Since we brightened, 255 stays 255. But 0 might go up?
     // Brighten adds value. 1.0 * 10 = +10. So (255, 0, 0) -> (255, 10, 10).
     // Let's verify pixel change.
-    let pixel = exported_img.to_rgb8().get_pixel(50, 50).clone();
+    let pixel = *exported_img.to_rgb8().get_pixel(50, 50);
     println!("Exported Pixel: {:?}", pixel);
     // Expecting non-zero G/B or modified R.
     // NOTE: JPEG compression might introduce artifacts, so exact match is risky.

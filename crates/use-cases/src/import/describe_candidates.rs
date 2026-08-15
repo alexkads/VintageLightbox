@@ -111,9 +111,10 @@ mod tests {
             if self.falha {
                 return Err(DomainError::InvalidOperation("sem exif".to_string()));
             }
-            let mut meta = PhotoMetadata::default();
-            meta.camera_model = self.camera.clone();
-            Ok(meta)
+            Ok(PhotoMetadata {
+                camera_model: self.camera.clone(),
+                ..Default::default()
+            })
         }
     }
 

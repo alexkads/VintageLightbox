@@ -8,8 +8,10 @@ use serde::{Deserialize, Serialize};
 
 /// Layout de impressão
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum PrintLayout {
     /// Uma foto por página
+    #[default]
     Single,
     /// Múltiplas fotos em grid (colunas x linhas)
     Multiple { columns: u8, rows: u8 },
@@ -42,8 +44,7 @@ impl PrintLayout {
 
     /// Cria um layout ContactSheet com validação
     pub fn contact_sheet(photos_per_page: u8) -> DomainResult<Self> {
-        if photos_per_page < Self::MIN_PHOTOS_PER_PAGE
-            || photos_per_page > Self::MAX_PHOTOS_PER_PAGE
+        if !(Self::MIN_PHOTOS_PER_PAGE..=Self::MAX_PHOTOS_PER_PAGE).contains(&photos_per_page)
         {
             return Err(DomainError::InvalidPrintSettings(format!(
                 "Photos per page must be between {} and {}",
@@ -79,11 +80,6 @@ impl PrintLayout {
     }
 }
 
-impl Default for PrintLayout {
-    fn default() -> Self {
-        PrintLayout::Single
-    }
-}
 
 #[cfg(test)]
 mod tests {

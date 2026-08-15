@@ -270,8 +270,10 @@ mod tests {
         let source_file = create_test_file(temp_source.path(), "photo.jpg", b"test content");
         let source_path = FilePath::new(source_file.to_str().unwrap()).unwrap();
 
-        let mut metadata = PhotoMetadata::default();
-        metadata.date_time = Some("2024:03:15 10:30:45".to_string());
+        let metadata = PhotoMetadata {
+            date_time: Some("2024:03:15 10:30:45".to_string()),
+            ..Default::default()
+        };
 
         let organizer = FileOrganizerImpl::new(temp_dest.path().to_path_buf());
 
@@ -369,8 +371,10 @@ mod tests {
         let source_path1 = FilePath::new(source_file1.to_str().unwrap()).unwrap();
         let source_path2 = FilePath::new(source_file2.to_str().unwrap()).unwrap();
 
-        let mut metadata = PhotoMetadata::default();
-        metadata.date_time = Some("2024:03:15 10:30:45".to_string());
+        let metadata = PhotoMetadata {
+            date_time: Some("2024:03:15 10:30:45".to_string()),
+            ..Default::default()
+        };
 
         let organizer = FileOrganizerImpl::new(temp_dest.path().to_path_buf());
 
@@ -411,8 +415,10 @@ mod tests {
         let source_file = create_test_file(temp_source.path(), "photo.jpg", b"test");
         let source_path = FilePath::new(source_file.to_str().unwrap()).unwrap();
 
-        let mut metadata = PhotoMetadata::default();
-        metadata.date_time = Some("2024:03:15 10:30:45".to_string());
+        let metadata = PhotoMetadata {
+            date_time: Some("2024:03:15 10:30:45".to_string()),
+            ..Default::default()
+        };
 
         let organizer = FileOrganizerImpl::new(temp_dest.path().to_path_buf());
 

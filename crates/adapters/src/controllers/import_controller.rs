@@ -122,7 +122,7 @@ impl ImportController {
         // Convert strings to FilePaths
         let file_paths: Result<Vec<FilePath>, _> = files
             .iter()
-            .map(|f| FilePath::new(f))
+            .map(FilePath::new)
             .collect();
 
         let file_paths = file_paths.map_err(|e| format!("Invalid file path: {}", e))?;
@@ -153,7 +153,7 @@ impl ImportController {
         // Convert strings to FilePaths
         let file_paths: Result<Vec<FilePath>, _> = files
             .iter()
-            .map(|f| FilePath::new(f))
+            .map(FilePath::new)
             .collect();
 
         let file_paths = file_paths.map_err(|e| format!("Invalid file path: {}", e))?;

@@ -6,7 +6,10 @@ use domain::{
     DomainError,
 };
 use async_trait::async_trait;
-use image::io::Reader as ImageReader;
+// `image::io::Reader` virou `image::ImageReader` no 0.25 — o alias antigo ainda
+// existe, mas depreciado. O nome local não muda, então nada mais aqui precisa
+// saber disso.
+use image::ImageReader;
 use image::ImageFormat;
 
 /// Implementação do ThumbnailGenerator usando a crate `image`

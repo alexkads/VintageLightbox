@@ -27,7 +27,7 @@ async fn test_save_and_find_collection() {
     // Arrange
     let repo = create_test_repository().await;
     let collection = Collection::new("My Collection");
-    let collection_id = collection.id().clone();
+    let collection_id = *collection.id();
 
     // Act - Save
     let save_result = repo.save(&collection).await;
@@ -50,7 +50,7 @@ async fn test_save_collection_with_description() {
     let repo = create_test_repository().await;
     let mut collection = Collection::new("My Collection");
     collection.set_description("A test collection");
-    let collection_id = collection.id().clone();
+    let collection_id = *collection.id();
 
     // Act
     repo.save(&collection).await.unwrap();
@@ -68,9 +68,9 @@ async fn test_add_photos_to_collection() {
     let photo1_id = PhotoId::new();
     let photo2_id = PhotoId::new();
     
-    collection.add_photo(photo1_id.clone());
-    collection.add_photo(photo2_id.clone());
-    let collection_id = collection.id().clone();
+    collection.add_photo(photo1_id);
+    collection.add_photo(photo2_id);
+    let collection_id = *collection.id();
 
     // Act
     repo.save(&collection).await.unwrap();
@@ -87,7 +87,7 @@ async fn test_update_collection() {
     // Arrange
     let repo = create_test_repository().await;
     let mut collection = Collection::new("Original Name");
-    let collection_id = collection.id().clone();
+    let collection_id = *collection.id();
 
     repo.save(&collection).await.unwrap();
 
@@ -107,7 +107,7 @@ async fn test_delete_collection() {
     // Arrange
     let repo = create_test_repository().await;
     let collection = Collection::new("To Delete");
-    let collection_id = collection.id().clone();
+    let collection_id = *collection.id();
 
     repo.save(&collection).await.unwrap();
 
@@ -147,10 +147,10 @@ async fn test_find_collections_by_photo() {
     let photo_id = PhotoId::new();
     
     let mut collection1 = Collection::new("Collection 1");
-    collection1.add_photo(photo_id.clone());
+    collection1.add_photo(photo_id);
     
     let mut collection2 = Collection::new("Collection 2");
-    collection2.add_photo(photo_id.clone());
+    collection2.add_photo(photo_id);
     
     let collection3 = Collection::new("Collection 3");
 
@@ -175,9 +175,9 @@ async fn test_remove_photo_from_collection() {
     let photo1_id = PhotoId::new();
     let photo2_id = PhotoId::new();
     
-    collection.add_photo(photo1_id.clone());
-    collection.add_photo(photo2_id.clone());
-    let collection_id = collection.id().clone();
+    collection.add_photo(photo1_id);
+    collection.add_photo(photo2_id);
+    let collection_id = *collection.id();
 
     repo.save(&collection).await.unwrap();
 

@@ -30,6 +30,7 @@ impl std::fmt::Display for PresetId {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct PresetAdjustments {
     pub exposure: Option<f32>,
     pub contrast: Option<f32>,
@@ -48,27 +49,6 @@ pub struct PresetAdjustments {
     pub tone_curve_highlights: Option<f32>,
 }
 
-impl Default for PresetAdjustments {
-    fn default() -> Self {
-        Self {
-            exposure: None,
-            contrast: None,
-            temperature: None,
-            tint: None,
-            highlights: None,
-            shadows: None,
-            whites: None,
-            blacks: None,
-            clarity: None,
-            vibrance: None,
-            saturation: None,
-            tone_curve_shadows: None,
-            tone_curve_darks: None,
-            tone_curve_lights: None,
-            tone_curve_highlights: None,
-        }
-    }
-}
 
 impl From<&Photo> for PresetAdjustments {
     fn from(photo: &Photo) -> Self {

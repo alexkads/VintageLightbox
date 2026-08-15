@@ -159,11 +159,18 @@ mod tests {
         let path = FilePath::new(file.path().to_str().unwrap()).unwrap();
         let result = decoder.decode(&path);
         
-        assert!(result.is_err());
-        match result {
-            Err(DomainError::InfrastructureError(_)) => assert!(true),
-            _ => assert!(false, "Expected InfrastructureError"),
-        }
+        // `assert!(true)` no braço certo e `assert!(false)` no outro diziam a
+        // coisa certa de um jeito que o compilador não conferia. `matches!`
+        // afirma o mesmo e ainda mostra o que veio quando falha.
+        //
+        // Sobre o `.err()`: `RawImage` não implementa `Debug`, então o
+        // `Result` inteiro não é formatável — e o caso de sucesso não tem o que
+        // relatar aqui além de "não deveria ter dado certo".
+        let erro = result.err();
+        assert!(
+            matches!(erro, Some(DomainError::InfrastructureError(_))),
+            "Expected InfrastructureError, got {erro:?}"
+        );
     }
     
     // Note: Testing successful decoding requires a real RAW file, 

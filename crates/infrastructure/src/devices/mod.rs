@@ -5,6 +5,12 @@ use sysinfo::Disks;
 
 pub struct DeviceService;
 
+impl Default for DeviceService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DeviceService {
     pub fn new() -> Self {
         Self

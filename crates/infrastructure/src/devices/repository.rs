@@ -8,6 +8,12 @@ pub struct InfrastructureDeviceRepository {
     history_repo: ImportHistoryRepository,
 }
 
+impl Default for InfrastructureDeviceRepository {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl InfrastructureDeviceRepository {
     pub fn new() -> Self {
         Self {

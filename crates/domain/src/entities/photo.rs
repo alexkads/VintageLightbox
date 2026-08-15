@@ -141,6 +141,17 @@ impl Photo {
     }
 
     /// Reconstrói uma foto a partir de dados persistidos (uso interno/infraestrutura)
+    // ⚠️ Dívida reconhecida, não descuido — docs/10-MIGRACAO-GPUI.md §2.1.
+    //
+    // A cadeia de ajustes de revelação (exposição, contraste, HSL nos 8 canais,
+    // detalhe, lente…) viaja como parâmetro solto do controller até o caso de
+    // uso. Agrupá-la num tipo é o conserto certo e é **outro commit**: mexe em
+    // quatro camadas de uma vez, e a migração para GPUI não depende disso — o
+    // plano registra explicitamente que virou dívida, e não pré-requisito.
+    //
+    // O `allow` fica na função, e não no crate, para que uma assinatura nova
+    // longa continue sendo cobrada pelo lint.
+    #[allow(clippy::too_many_arguments)]
     pub fn reconstruct(
         id: PhotoId,
         file_path: FilePath,
@@ -505,6 +516,17 @@ impl Photo {
     }
 
     /// Define os ajustes de edição e marca como editada
+    // ⚠️ Dívida reconhecida, não descuido — docs/10-MIGRACAO-GPUI.md §2.1.
+    //
+    // A cadeia de ajustes de revelação (exposição, contraste, HSL nos 8 canais,
+    // detalhe, lente…) viaja como parâmetro solto do controller até o caso de
+    // uso. Agrupá-la num tipo é o conserto certo e é **outro commit**: mexe em
+    // quatro camadas de uma vez, e a migração para GPUI não depende disso — o
+    // plano registra explicitamente que virou dívida, e não pré-requisito.
+    //
+    // O `allow` fica na função, e não no crate, para que uma assinatura nova
+    // longa continue sendo cobrada pelo lint.
+    #[allow(clippy::too_many_arguments)]
     pub fn set_edits(
         &mut self,
         exposure: Option<f32>,

@@ -64,6 +64,12 @@ fn encode_jpeg<W: std::io::Write>(
 }
 
 
+impl Default for PreviewManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PreviewManager {
     pub fn new() -> Self {
         let cache_dir = crate::paths::AppPaths::preview_cache_dir();

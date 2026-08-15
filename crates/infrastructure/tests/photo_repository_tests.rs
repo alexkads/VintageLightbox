@@ -28,7 +28,7 @@ async fn test_save_and_find_photo() {
     let repo = create_test_repository().await;
     let file_path = FilePath::new("/photos/test.jpg").unwrap();
     let photo = Photo::new(file_path.clone());
-    let photo_id = photo.id().clone();
+    let photo_id = photo.id();
 
     // Act - Save
     let save_result = repo.save(&photo).await;
@@ -50,7 +50,7 @@ async fn test_update_photo_rating() {
     let repo = create_test_repository().await;
     let file_path = FilePath::new("/photos/test.jpg").unwrap();
     let mut photo = Photo::new(file_path);
-    let photo_id = photo.id().clone();
+    let photo_id = photo.id();
 
     // Save initial photo
     repo.save(&photo).await.unwrap();
@@ -73,7 +73,7 @@ async fn test_delete_photo() {
     let repo = create_test_repository().await;
     let file_path = FilePath::new("/photos/test.jpg").unwrap();
     let photo = Photo::new(file_path);
-    let photo_id = photo.id().clone();
+    let photo_id = photo.id();
 
     // Save photo
     repo.save(&photo).await.unwrap();
@@ -128,7 +128,7 @@ async fn test_exists_photo() {
     let repo = create_test_repository().await;
     let file_path = FilePath::new("/photos/test.jpg").unwrap();
     let photo = Photo::new(file_path);
-    let photo_id = photo.id().clone();
+    let photo_id = photo.id();
 
     // Photo doesn't exist yet
     let exists_before = repo.exists(&photo_id).await.unwrap();
@@ -150,7 +150,7 @@ async fn test_update_photo_color_label() {
     let repo = create_test_repository().await;
     let file_path = FilePath::new("/photos/test.jpg").unwrap();
     let mut photo = Photo::new(file_path);
-    let photo_id = photo.id().clone();
+    let photo_id = photo.id();
 
     repo.save(&photo).await.unwrap();
 
@@ -196,7 +196,7 @@ async fn test_save_and_find_photo_with_metadata() {
     let repo = create_test_repository().await;
     let file_path = FilePath::new("/photos/test_meta.jpg").unwrap();
     let mut photo = Photo::new(file_path);
-    let photo_id = photo.id().clone();
+    let photo_id = photo.id();
 
     // Create metadata
     let metadata = PhotoMetadata {
@@ -236,7 +236,7 @@ async fn test_save_and_find_photo_with_edits() {
     let repo = create_test_repository().await;
     let file_path = FilePath::new("/photos/test_edits.jpg").unwrap();
     let mut photo = Photo::new(file_path);
-    let photo_id = photo.id().clone();
+    let photo_id = photo.id();
 
     // Set edits
     photo.set_edits(

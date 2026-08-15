@@ -7,6 +7,12 @@ pub struct ImportHistoryRepository {
     history: Arc<Mutex<Vec<PathBuf>>>, // Store paths
 }
 
+impl Default for ImportHistoryRepository {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ImportHistoryRepository {
     pub fn new() -> Self {
         Self {

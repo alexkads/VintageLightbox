@@ -73,8 +73,8 @@ mod tests {
         // Arrange
         let mut collection = Collection::new("My Collection");
         let photo_id = PhotoId::new();
-        collection.add_photo(photo_id.clone());
-        let collection_id = collection.id().clone();
+        collection.add_photo(photo_id);
+        let collection_id = *collection.id();
 
         let mut mock_repo = MockCollectionRepo::new();
 
@@ -82,7 +82,7 @@ mod tests {
         let collection_clone = collection.clone();
         mock_repo
             .expect_find_by_id()
-            .with(eq(collection_id.clone()))
+            .with(eq(collection_id))
             .times(1)
             .returning(move |_| Ok(Some(collection_clone.clone())));
 
@@ -95,7 +95,7 @@ mod tests {
         let use_case = RemovePhotoFromCollectionUseCase::new(Arc::new(mock_repo));
 
         // Act
-        let result = use_case.execute(collection_id, photo_id.clone()).await;
+        let result = use_case.execute(collection_id, photo_id).await;
 
         // Assert
         assert!(result.is_ok());
@@ -135,7 +135,7 @@ mod tests {
     async fn test_remove_nonexistent_photo_from_collection() {
         // Arrange
         let collection = Collection::new("My Collection");
-        let collection_id = collection.id().clone();
+        let collection_id = *collection.id();
         let photo_id = PhotoId::new(); // Foto que não está na coleção
 
         let mut mock_repo = MockCollectionRepo::new();
@@ -170,11 +170,11 @@ mod tests {
         let photo2_id = PhotoId::new();
         let photo3_id = PhotoId::new();
         
-        collection.add_photo(photo1_id.clone());
-        collection.add_photo(photo2_id.clone());
-        collection.add_photo(photo3_id.clone());
+        collection.add_photo(photo1_id);
+        collection.add_photo(photo2_id);
+        collection.add_photo(photo3_id);
         
-        let collection_id = collection.id().clone();
+        let collection_id = *collection.id();
 
         let mut mock_repo = MockCollectionRepo::new();
 
@@ -207,7 +207,7 @@ mod tests {
         let use_case = RemovePhotoFromCollectionUseCase::new(Arc::new(mock_repo));
 
         // Act
-        let result1 = use_case.execute(collection_id.clone(), photo1_id).await;
+        let result1 = use_case.execute(collection_id, photo1_id).await;
         let result2 = use_case.execute(collection_id, photo2_id).await;
 
         // Assert

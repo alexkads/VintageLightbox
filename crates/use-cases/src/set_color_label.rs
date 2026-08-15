@@ -85,7 +85,7 @@ mod tests {
         // Arrange
         let file_path = FilePath::new("/photos/test.jpg").unwrap();
         let photo = Photo::new(file_path);
-        let photo_id = photo.id().clone();
+        let photo_id = photo.id();
         
         let mut mock_repo = MockPhotoRepo::new();
         
@@ -93,7 +93,7 @@ mod tests {
         let photo_clone = photo.clone();
         mock_repo
             .expect_find_by_id()
-            .with(eq(photo_id.clone()))
+            .with(eq(photo_id))
             .times(1)
             .returning(move |_| Ok(Some(photo_clone.clone())));
         
@@ -125,7 +125,7 @@ mod tests {
         // Mock find_by_id retornando None
         mock_repo
             .expect_find_by_id()
-            .with(eq(photo_id.clone()))
+            .with(eq(photo_id))
             .times(1)
             .returning(|_| Ok(None));
         
@@ -149,7 +149,7 @@ mod tests {
         let file_path = FilePath::new("/photos/test.jpg").unwrap();
         let mut photo = Photo::new(file_path);
         photo.set_color_label(ColorLabel::Yellow);
-        let photo_id = photo.id().clone();
+        let photo_id = photo.id();
         
         let mut mock_repo = MockPhotoRepo::new();
         
@@ -157,7 +157,7 @@ mod tests {
         let photo_clone = photo.clone();
         mock_repo
             .expect_find_by_id()
-            .with(eq(photo_id.clone()))
+            .with(eq(photo_id))
             .times(1)
             .returning(move |_| Ok(Some(photo_clone.clone())));
         
@@ -183,7 +183,7 @@ mod tests {
         // Arrange
         let file_path = FilePath::new("/photos/test.jpg").unwrap();
         let photo = Photo::new(file_path);
-        let photo_id = photo.id().clone();
+        let photo_id = photo.id();
         
         let mut mock_repo = MockPhotoRepo::new();
         
@@ -223,10 +223,10 @@ mod tests {
         let use_case = SetColorLabelUseCase::new(Arc::new(mock_repo));
         
         // Act - múltiplas mudanças
-        let result1 = use_case.execute(photo_id.clone(), ColorLabel::Red).await;
+        let result1 = use_case.execute(photo_id, ColorLabel::Red).await;
         assert!(result1.is_ok());
         
-        let result2 = use_case.execute(photo_id.clone(), ColorLabel::Green).await;
+        let result2 = use_case.execute(photo_id, ColorLabel::Green).await;
         assert!(result2.is_ok());
         
         let result3 = use_case.execute(photo_id, ColorLabel::Purple).await;
@@ -242,7 +242,7 @@ mod tests {
         // Arrange
         let file_path = FilePath::new("/photos/test.jpg").unwrap();
         let photo = Photo::new(file_path);
-        let photo_id = photo.id().clone();
+        let photo_id = photo.id();
         
         let mut mock_repo = MockPhotoRepo::new();
         
@@ -273,7 +273,7 @@ mod tests {
         ];
         
         for color in colors {
-            let result = use_case.execute(photo_id.clone(), color).await;
+            let result = use_case.execute(photo_id, color).await;
             assert!(result.is_ok());
             assert_eq!(result.unwrap().color_label(), Some(color));
         }

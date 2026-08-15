@@ -45,13 +45,13 @@ mod tests {
         // Arrange
         let file_path = FilePath::new("/photos/test.jpg").unwrap();
         let photo = Photo::new(file_path);
-        let photo_id = photo.id().clone();
+        let photo_id = photo.id();
 
         let mut mock_repo = MockPhotoRepo::new();
 
         mock_repo
             .expect_delete()
-            .with(eq(photo_id.clone()))
+            .with(eq(photo_id))
             .times(1)
             .returning(|_| Ok(()));
 

@@ -157,8 +157,10 @@ mod tests {
 
     #[test]
     fn test_exif_reader_creation() {
+        // O que este teste realmente prova é que `new()` não entra em pânico —
+        // o `assert!(true)` que estava aqui não afirmava nada e escondia isso.
+        // Construir e descartar já é a afirmação inteira.
         let _reader = ExifReader::new();
-        assert!(true); // Just test instantiation
     }
 
     #[test]

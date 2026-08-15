@@ -5,7 +5,6 @@
 /// 2. Duplicate Detection
 /// 3. Import with Options (parallel)
 /// 4. Verify file organization
-
 use infrastructure::{
     create_pool, run_migrations,
     PhotoRepositoryImpl, ExifReader, ThumbnailGeneratorImpl,
@@ -180,7 +179,7 @@ async fn test_advanced_import_e2e_workflow() {
         .filter(|e| e.path().is_file())
         .collect();
 
-    assert!(files_in_dir.len() >= 1, "Should have at least 1 file in organized directory (got {})", files_in_dir.len());
+    assert!(!files_in_dir.is_empty(), "Should have at least 1 file in organized directory (got {})", files_in_dir.len());
     println!("  ✓ {} file(s) organized in: {}", files_in_dir.len(), expected_dir.display());
 
     // ============================================

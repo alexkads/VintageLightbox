@@ -376,7 +376,7 @@ impl PhotoRepository for PhotoRepositoryImpl {
             .map_err(|e| DomainError::InvalidOperation(format!("Failed to fetch photos: {}", e)))?;
 
         rows.iter()
-            .map(|row| Self::row_to_photo(row))
+            .map(Self::row_to_photo)
             .collect()
     }
 
