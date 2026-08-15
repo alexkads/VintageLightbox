@@ -6,8 +6,12 @@
 use std::sync::{Arc, Mutex};
 
 use adapters::view_models::PhotoViewModel;
-use gpui::{div, img, prelude::*, px, uniform_list, App, Context, SharedString, Window};
+use gpui::{
+    div, img, prelude::*, px, uniform_list, App, Context, Entity, SharedString, Subscription,
+    Window,
+};
 use gpui_component::button::{Button, ButtonVariants};
+use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::{ActiveTheme, Selectable, Sizable};
 use infrastructure::cache::preview_manager::PreviewManager;
 
@@ -56,6 +60,21 @@ pub struct Biblioteca {
     /// pasta manteria o índice e selecionaria uma foto diferente sem ninguém
     /// clicar em nada.
     selecionada: Option<usize>,
+    /// O campo de busca.
+    ///
+    /// Entidade própria, e não um `String` no estado da tela: o `InputState` do
+    /// `gpui-component` guarda o texto, o cursor, a seleção, o histórico de
+    /// desfazer e o piscar do cursor. Espelhar isso num campo daqui seria
+    /// reescrever o componente.
+    busca: Entity<InputState>,
+    /// 🚨 As assinaturas **têm de morar aqui**.
+    ///
+    /// `cx.subscribe` devolve uma `Subscription` que cancela a inscrição quando
+    /// é descartada. Um `let _ = cx.subscribe(...)` compila, roda, e o campo de
+    /// busca simplesmente não filtra nada — sem erro, sem aviso, digitando
+    /// normalmente. Guardar é o que mantém a inscrição viva enquanto a tela
+    /// existe.
+    _assinaturas: Vec<Subscription>,
 }
 
 /// Quantas linhas cabem na altura da janela.
@@ -86,7 +105,34 @@ fn largura_util(window: &Window) -> f32 {
 }
 
 impl Biblioteca {
-    pub fn nova(fotos: Vec<PhotoViewModel>, previews: Arc<PreviewManager>) -> Self {
+    pub fn nova(
+        fotos: Vec<PhotoViewModel>,
+        previews: Arc<PreviewManager>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let busca = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("buscar pelo nome do arquivo")
+                // Esc limpa o campo. Sem isso, desfazer uma busca é apagar
+                // caractere por caractere ou achar o `x` com o ponteiro — e
+                // buscar é a coisa que mais se desfaz numa Biblioteca.
+                .clean_on_escape()
+        });
+
+        // A tela não lê o campo a cada quadro: ela é avisada quando o texto
+        // muda. Ler no `render` funcionaria e custaria uma comparação de string
+        // por quadro para descobrir que nada mudou em 99% deles.
+        let assinatura = cx.subscribe(&busca, |tela, campo, evento: &InputEvent, cx| {
+            // Só `Change`. `Focus` e `Blur` também chegam aqui, e refiltrar 2.000
+            // fotos porque alguém clicou no campo é trabalho que ninguém pediu.
+            if matches!(evento, InputEvent::Change) {
+                tela.filtros.busca = campo.read(cx).value().to_string();
+                tela.refiltrar();
+                cx.notify();
+            }
+        });
+
         let mut tela = Self {
             fotos: Arc::new(fotos),
             previews,
@@ -97,6 +143,8 @@ impl Biblioteca {
             visiveis: Vec::new(),
             pastas: Vec::new(),
             selecionada: None,
+            busca,
+            _assinaturas: vec![assinatura],
         };
         tela.pastas = pastas_do_acervo(&tela.fotos);
         // Nasce com a lista pronta: sem isto o primeiro quadro mostraria uma
@@ -250,6 +298,18 @@ impl Biblioteca {
             .flex_wrap()
             .items_center()
             .gap(px(12.))
+            // A busca abre a barra porque é o filtro que responde à pergunta
+            // mais específica — "onde está *esta* foto". Os outros respondem
+            // "quais são as boas", que é uma varredura, não uma busca.
+            //
+            // A largura vem de um `div` em volta: o `Input` não implementa
+            // `Styled`, então ele não tem `.w()`. Sem a moldura ele cresceria
+            // até o fim da linha e empurraria os filtros para a linha de baixo.
+            .child(
+                div()
+                    .w(px(240.))
+                    .child(Input::new(&self.busca).cleanable(true)),
+            )
             .child(rotulo_do_grupo("nota mínima", cx))
             .child(div().flex().gap(px(4.)).children(notas))
             .child(rotulo_do_grupo("sinalizador", cx))

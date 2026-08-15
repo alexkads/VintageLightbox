@@ -68,7 +68,8 @@ async fn main() {
                 ..Default::default()
             },
             |window, cx| {
-                let biblioteca = cx.new(|_| Biblioteca::nova(fotos.clone(), previews.clone()));
+                let biblioteca =
+                    cx.new(|cx| Biblioteca::nova(fotos.clone(), previews.clone(), window, cx));
                 // A primeira camada da janela **tem** de ser o `Root`: é ele
                 // que hospeda diálogo, gaveta e aviso, e quem sabe qual campo
                 // de texto está com o foco. O `gpui-component` procura por ele
