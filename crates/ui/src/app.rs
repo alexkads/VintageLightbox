@@ -48,9 +48,12 @@ pub struct VintageLightboxApp {
     preset_receiver: mpsc::Receiver<Result<Vec<domain::entities::Preset>, String>>,
     preset_sender: mpsc::Sender<Result<Vec<domain::entities::Preset>, String>>,
     
-    import_source_sender: mpsc::Sender<(Vec<domain::import_source::ImportSource>, Vec<domain::import_source::ImportSource>)>,
-    #[allow(dead_code)]
-    import_source_receiver: mpsc::Receiver<(Vec<domain::import_source::ImportSource>, Vec<domain::import_source::ImportSource>)>,
+    /// Canal único da tela de importação: origens, varredura, metadados e duplicatas
+    import_sender: mpsc::Sender<crate::views::import_view::ImportMessage>,
+    import_receiver: mpsc::Receiver<crate::views::import_view::ImportMessage>,
+    /// Miniaturas da grade de importação — separado do loader da biblioteca porque
+    /// trabalha sobre arquivos que ainda não são fotos do catálogo
+    import_thumbnails: crate::async_loader::AsyncThumbnailLoader,
 
     // ============================================
     // Async Image Processing (Rayon-powered + GPU)
@@ -115,8 +118,9 @@ impl VintageLightboxApp {
         let (photo_sender, photo_receiver) = mpsc::channel(10);
         // Create channel for async preset loading
         let (preset_sender, preset_receiver) = mpsc::channel(10);
-        // Create channel for async import source loading
-        let (import_source_sender, import_source_receiver) = mpsc::channel(5);
+        // Canal da tela de importação — folgado porque a varredura de um cartão dispara
+        // várias mensagens em sequência (origens, arquivos, metadados, duplicatas)
+        let (import_sender, import_receiver) = mpsc::channel(32);
 
         Self {
             state: AppState::new(),
@@ -131,8 +135,11 @@ impl VintageLightboxApp {
             photo_sender,
             preset_receiver,
             preset_sender,
-            import_source_sender,
-            import_source_receiver,
+            import_sender,
+            import_receiver,
+            import_thumbnails: crate::async_loader::AsyncThumbnailLoader::new(
+                preview_manager.clone(),
+            ),
             image_processor: AsyncImageProcessor::new(preview_manager.clone()),
             gpu_edit_processor: crate::gpu_processor::GpuImageProcessor::new(),
             current_edit_request_id: 0,
@@ -245,15 +252,36 @@ impl eframe::App for VintageLightboxApp {
             }
         }
 
-        // Poll for import preview dialog
-        if let Some(receiver) = &mut self.state.pending_import_preview_receiver {
-            if let Ok(dialog_opt) = receiver.try_recv() {
-                if let Some(dialog) = dialog_opt {
-                    self.state.import_preview_dialog = Some(dialog);
-                }
-                self.state.is_busy = false;
-                self.state.busy_message.clear();
-                self.state.pending_import_preview_receiver = None;
+        // Resultados da tela de importação (origens, varredura, metadados, duplicatas)
+        //
+        // Drenar o canal inteiro por quadro: a varredura de um cartão manda várias
+        // mensagens juntas, e processar uma por quadro faria a grade se montar aos pedaços.
+        loop {
+            let Ok(mensagem) = self.import_receiver.try_recv() else {
+                break;
+            };
+
+            use crate::views::import_view::{ImportView, Seguimento};
+
+            match ImportView::aplicar(&mut self.state, mensagem) {
+                Some(Seguimento::Detalhar(files)) => ImportView::detalhar(
+                    ctx,
+                    &self.import_controller,
+                    &self.import_sender,
+                    files,
+                ),
+                Some(Seguimento::Varrer(root)) => ImportView::selecionar_origem(
+                    ctx,
+                    &mut self.state,
+                    &self.import_controller,
+                    &self.import_sender,
+                    root,
+                ),
+                None => {}
+            }
+
+            if let Some(erro) = self.state.import_view_state.status.take() {
+                self.state.toasts.error(erro);
             }
         }
 
@@ -1376,67 +1404,24 @@ impl eframe::App for VintageLightboxApp {
 
 
         // ============================================
-        // ADVANCED IMPORT DIALOGS
+        // IMPORT MODAL
         // ============================================
+        // Desenhado depois da view: a biblioteca continua atrás, com o backdrop por cima.
+        let acao_importacao = crate::views::import_view::ImportView::show(
+            ctx,
+            &mut self.state,
+            &self.import_controller,
+            &self.import_sender,
+            &mut self.import_thumbnails,
+        );
 
-        // Import Preview Dialog
-        if let Some(dialog) = &mut self.state.import_preview_dialog {
-            if let Some(action) = dialog.show(ctx) {
-                use crate::components::import_dialogs::ImportDialogAction;
-                match action {
-                    ImportDialogAction::Import => {
-                        // Get selected files and options
-                        let files = dialog.get_selected_files();
-                        let options = dialog.get_options();
-
-                        // Start import with progress dialog
-                        let (progress_sender, progress_receiver) = tokio::sync::mpsc::unbounded_channel();
-                        let pause_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-                        let cancel_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-
-                        use crate::components::import_dialogs::ImportProgressDialog;
-                        self.state.import_progress_dialog = Some(ImportProgressDialog::new(
-                            files.len(),
-                            pause_flag.clone(),
-                            cancel_flag.clone(),
-                            progress_receiver,
-                        ));
-
-                        // Spawn import task
-                        let import_controller = self.import_controller.clone();
-                        let library_controller = self.library_controller.clone();
-                        let photo_sender = self.photo_sender.clone();
-                        let ctx_clone = ctx.clone();
-
-                        tokio::spawn(async move {
-                            // Run import
-                            let _ = import_controller.import_with_options(
-                                files,
-                                options,
-                                progress_sender,
-                                pause_flag,
-                                cancel_flag,
-                            ).await;
-
-                            // Reload library
-                            match library_controller.get_all_photos().await {
-                                Ok(photos) => {
-                                    let _ = photo_sender.send(Ok(photos)).await;
-                                }
-                                Err(e) => {
-                                    eprintln!("Failed to reload photos: {}", e);
-                                }
-                            }
-                            ctx_clone.request_repaint();
-                        });
-                    }
-                    ImportDialogAction::Cancel => {
-                        // User canceled, close dialog
-                        self.state.import_preview_dialog = None;
-                    }
-                }
-            }
+        if let Some(acao) = acao_importacao {
+            self.handle_import_action(ctx, acao);
         }
+
+        // ============================================
+        // IMPORT PROGRESS
+        // ============================================
 
         // Import Progress Dialog
         if let Some(dialog) = &mut self.state.import_progress_dialog {
@@ -1444,7 +1429,6 @@ impl eframe::App for VintageLightboxApp {
             if !is_open {
                 // Dialog closed, cleanup
                 self.state.import_progress_dialog = None;
-                self.state.import_preview_dialog = None;
             }
         }
 
@@ -1669,14 +1653,7 @@ impl eframe::App for VintageLightboxApp {
             });
 
         // Main content area - Docking UI
-        if self.state.current_view == CurrentView::Import {
-            crate::views::import_view::ImportView::show(
-                ctx, 
-                &mut self.state, 
-                &self.import_controller, 
-                &self.import_source_sender
-            );
-        } else if self.state.current_view == CurrentView::Print {
+        if self.state.current_view == CurrentView::Print {
             // Print view - Lightroom-style print module
             egui::CentralPanel::default().show(ctx, |ui| {
                 self.print_view.show(
@@ -1695,7 +1672,6 @@ impl eframe::App for VintageLightboxApp {
                     CurrentView::Library => &mut self.library_dock_state,
                     CurrentView::Develop => &mut self.develop_dock_state,
                     CurrentView::Print => &mut self.library_dock_state, // Fallback
-                    CurrentView::Import => &mut self.library_dock_state,
                 };
             
             // Create dock viewer context with all required references
@@ -1924,13 +1900,6 @@ impl VintageLightboxApp {
 
             ui.add_space(Theme::SPACE_SM);
 
-            // Advanced Import icon button with tooltip
-            if widgets::icon_button_tooltip(ui, icons::ACTION_SETTINGS, "Advanced Import").clicked() {
-                self.handle_advanced_import(ui.ctx());
-            }
-
-            ui.add_space(Theme::SPACE_SM);
-
             // Cache building progress indicator
             crate::components::settings_dialog::show_cache_progress(ui, &self.state);
 
@@ -2055,29 +2024,80 @@ impl VintageLightboxApp {
     }
 
     /// Handle import button click
+    ///
+    /// A tela procura cartões sozinha ao abrir (`sources_requested`), então aqui basta
+    /// trocar de view — e zerar a marca para que uma segunda visita reveja os dispositivos:
+    /// entre uma importação e outra o fotógrafo troca de cartão, e a lista velha seria mentira.
     fn handle_import(&mut self, _ctx: &egui::Context) {
-        self.state.current_view = crate::state::CurrentView::Import;
-        
-        // Trigger loading devices
-        let _controller = self.import_controller.clone();
-        // Since we don't have a direct way to mutate state from here async easily without Arc<Mutex<AppState>> which we don't have,
-        // we might need a channel or just rely on ImportView to load on mount/poll.
-        // For now, let's assume ImportView handles loading logic or we implement a "LoadSources" action.
+        self.state.import_view_state.sources_requested = false;
+        self.state.import_view_state.open = true;
     }
 
-    /// Handle advanced import button click
-    fn handle_advanced_import(&mut self, _ctx: &egui::Context) {
-        let mut dialog = egui_file::FileDialog::open_file(None)
-            .title("Select Photos for Advanced Import");
+    /// Executa a decisão tomada na tela de importação
+    fn handle_import_action(
+        &mut self,
+        ctx: &egui::Context,
+        acao: crate::views::import_view::ImportAction,
+    ) {
+        use crate::views::import_view::ImportAction;
 
-        dialog.open();
-        // Reuse import_dialog state - this means regular import and advanced import share the same dialog slot,
-        // but render_import_dialog needs to know which action to take.
-        // For simplicity in this migration, I'll modify render_import_dialog to handle a flag or check context.
-        // Actually, simpler: I'll add a 'dialog_mode' to AppState.
-        self.state.import_dialog = Some(dialog);
-        self.state.import_dialog_mode = crate::state::ImportDialogMode::Advanced;
+        match acao {
+            ImportAction::Cancel => {
+                self.state.import_view_state.open = false;
+            }
+
+            ImportAction::Import { files, options } => {
+                if files.is_empty() {
+                    return;
+                }
+
+                let (progress_sender, progress_receiver) = tokio::sync::mpsc::unbounded_channel();
+                let pause_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+                let cancel_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+                use crate::components::import_dialogs::ImportProgressDialog;
+                self.state.import_progress_dialog = Some(ImportProgressDialog::new(
+                    files.len(),
+                    pause_flag.clone(),
+                    cancel_flag.clone(),
+                    progress_receiver,
+                ));
+
+                // Fechar o modal já: o diálogo de progresso fica por cima da biblioteca, e
+                // as fotos aparecem na grade conforme entram — como no Lightroom.
+                self.state.import_view_state.open = false;
+                self.state.import_view_state.clear_candidates();
+
+                let import_controller = self.import_controller.clone();
+                let library_controller = self.library_controller.clone();
+                let photo_sender = self.photo_sender.clone();
+                let ctx_clone = ctx.clone();
+
+                tokio::spawn(async move {
+                    let _ = import_controller
+                        .import_with_options(
+                            files,
+                            options,
+                            progress_sender,
+                            pause_flag,
+                            cancel_flag,
+                        )
+                        .await;
+
+                    match library_controller.get_all_photos().await {
+                        Ok(photos) => {
+                            let _ = photo_sender.send(Ok(photos)).await;
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to reload photos: {}", e);
+                        }
+                    }
+                    ctx_clone.request_repaint();
+                });
+            }
+        }
     }
+
 
     /// Show debug overlay with performance metrics
     fn show_debug_overlay(&self, ctx: &egui::Context) {
@@ -2153,48 +2173,6 @@ impl VintageLightboxApp {
                                      Err(e) => Err(e),
                                  }).await;
                                  ctx_clone.request_repaint();
-                            });
-                        },
-                        crate::state::ImportDialogMode::Advanced => {
-                            // Advanced Import
-                            let import_controller = self.import_controller.clone();
-                            let ctx_clone = ctx.clone();
-                            
-                            // Create a channel
-                            let (dialog_tx, dialog_rx) = tokio::sync::mpsc::channel::<Option<crate::components::import_dialogs::ImportPreviewDialog>>(1);
-                            self.state.pending_import_preview_receiver = Some(dialog_rx); // We need this polling in update(), make sure it's there
-                            // Wait, render_import_dialog is CALLED from update. poll_import_preview_dialog is likely missing?
-                            // I should verify update() loop has checking for pending_import_preview_receiver.
-                            
-                            self.state.is_busy = true;
-                            self.state.busy_message = "Loading preview...".to_string();
-                            
-                            tokio::spawn(async move {
-                                 // We only get one file from egui_file unless we handle dirs? egui_file supports dirs but we picked file.
-                                 // Assuming user selected a file.
-                                 let paths = vec![path_str];
-                                 
-                                 let preview_future = import_controller.preview_import(paths.clone());
-                                 let duplicates_future = import_controller.check_duplicates(paths.clone());
-
-                                match tokio::try_join!(preview_future, duplicates_future) {
-                                    Ok((previews, duplicates)) => {
-                                        let duplicate_flags: Vec<bool> = previews.iter()
-                                            .map(|preview| {
-                                                duplicates.iter().any(|d| {
-                                                    d.file_path == preview.file_path && d.is_duplicate
-                                                })
-                                            })
-                                            .collect();
-
-                                        use crate::components::import_dialogs::ImportPreviewDialog;
-                                        let mut dialog = ImportPreviewDialog::new();
-                                        dialog.set_items(previews, duplicate_flags);
-                                        let _ = dialog_tx.send(Some(dialog)).await;
-                                    }
-                                    Err(_) => { let _ = dialog_tx.send(None).await; }
-                                }
-                                ctx_clone.request_repaint();
                             });
                         },
                          crate::state::ImportDialogMode::Export => {

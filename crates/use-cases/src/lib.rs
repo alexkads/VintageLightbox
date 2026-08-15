@@ -26,6 +26,8 @@ pub use check_duplicates::CheckDuplicatesUseCase;
 pub use import_with_options::{ImportWithOptionsUseCase, ImportRequest, ImportProgress};
 pub use export_photo::ExportPhotoUseCase;
 pub use import::get_import_sources::GetImportSourcesUseCase;
+pub use import::scan_source::ScanSourceUseCase;
+pub use import::describe_candidates::{DescribeCandidatesUseCase, ImportCandidate};
 pub use save_photo_edits::SavePhotoEditsUseCase;
 
 // Exports for PhotoController

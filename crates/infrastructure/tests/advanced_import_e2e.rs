@@ -110,6 +110,7 @@ async fn test_advanced_import_e2e_workflow() {
             organization: OrganizationStrategy::ByDate,
             rename_pattern: RenamePattern::Standard,
             skip_duplicates: true,
+            ..ImportOptions::default()
         },
         progress_sender,
         pause_flag: pause_flag.clone(),

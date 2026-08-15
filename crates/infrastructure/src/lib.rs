@@ -9,6 +9,7 @@ pub mod image_exporter;
 pub mod paths;
 pub mod raw_processing;
 pub mod scan_directory;
+pub mod source_scanner;
 pub mod thumbnail_generator;
 pub mod content_hash;
 
@@ -18,4 +19,5 @@ pub use exif_reader::ExifReader;
 pub use thumbnail_generator::ThumbnailGeneratorImpl;
 pub use image_exporter::ImageExporterImpl;
 pub use file_organizer::FileOrganizerImpl;
+pub use source_scanner::SourceScannerImpl;
 // pub use fs::FileSystemImpl; // Commenting out until verified

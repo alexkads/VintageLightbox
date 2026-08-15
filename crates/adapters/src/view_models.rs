@@ -77,14 +77,20 @@ pub struct PhotoViewModel {
     pub edit_crop_flip_v: Option<bool>,
 }
 
-/// ViewModel for import preview items
+/// ViewModel de um arquivo listado na grade de importação
+///
+/// Não carrega bytes de miniatura: a grade
+/// pede a imagem por fora, só das células visíveis. Aqui vem o que dá para saber lendo
+/// pouco — o suficiente para ordenar, filtrar e decidir.
 #[derive(Debug, Clone)]
-pub struct ImportPreviewItemViewModel {
+pub struct ImportCandidateViewModel {
     pub file_path: String,
-    pub thumbnail_data: Vec<u8>,
+    /// Nome do arquivo, sem o caminho — é o que a célula mostra
+    pub file_name: String,
     pub file_size: u64,
     pub is_raw: bool,
     pub camera: String,
+    /// Data de captura no formato EXIF, ou vazio quando não há
     pub date_time: String,
     pub dimensions: Option<String>,
 }

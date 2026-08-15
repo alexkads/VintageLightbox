@@ -7,7 +7,7 @@ use domain::{
     entities::Photo,
     repositories::PhotoRepository,
     services::{MetadataExtractor, ThumbnailGenerator, PreviewStorage, FileOrganizer, PreviewType},
-    value_objects::{FilePath, ImportOptions},
+    value_objects::{FilePath, ImportMode, ImportOptions},
     DomainResult, DomainError,
 };
 use std::sync::Arc;
@@ -248,13 +248,20 @@ impl ImportWithOptionsUseCase {
         // 1. Extrair metadados
         let metadata = metadata_extractor.extract(source)?;
 
-        // 2. Organizar arquivo (copiar para destino)
-        let dest_path = file_organizer.organize_file(
-            source,
-            Some(&metadata),
-            options.organization,
-            options.rename_pattern.clone(),
-        ).await?;
+        // 2. Colocar o arquivo onde ele vai ficar, conforme o modo escolhido
+        //
+        // `Add` cataloga onde está: nada é copiado, e o caminho gravado é o original.
+        // `Copy` e `Move` passam pelo organizador; `Move` apaga a origem **depois** de
+        // tudo ter dado certo, nunca antes — um erro no meio não pode deixar o usuário
+        // sem o arquivo e sem o registro.
+        let dest_path = match options.mode {
+            ImportMode::Add => source.clone(),
+            ImportMode::Copy | ImportMode::Move => {
+                file_organizer
+                    .organize_file_with(source, Some(&metadata), options)
+                    .await?
+            }
+        };
 
         // 3. Criar entidade Photo
         let mut photo = Photo::new(dest_path.clone());
@@ -270,6 +277,18 @@ impl ImportWithOptionsUseCase {
 
         // 6. Salvar no banco de dados
         photo_repository.save(&photo).await?;
+
+        // 7. Só agora, com a foto registrada e as previews no lugar, o original pode sair
+        if options.mode == ImportMode::Move {
+            if let Err(e) = tokio::fs::remove_file(source.as_ref() as &std::path::Path).await {
+                // Falhar aqui não invalida a importação: a foto está no catálogo e o arquivo
+                // está no destino. O que sobrou foi uma cópia órfã na origem.
+                eprintln!(
+                    "Importação moveu {} mas não conseguiu apagar o original: {}",
+                    source, e
+                );
+            }
+        }
 
         Ok(photo)
     }
@@ -406,6 +425,7 @@ mod tests {
             organization: OrganizationStrategy::ByDate,
             rename_pattern: RenamePattern::Standard,
             skip_duplicates: false,
+            ..ImportOptions::default()
         };
 
         let (tx, mut rx) = mpsc::unbounded_channel();
@@ -508,6 +528,7 @@ mod tests {
             organization: OrganizationStrategy::ByDate,
             rename_pattern: RenamePattern::Standard,
             skip_duplicates: true, // Habilitar skip
+            ..ImportOptions::default()
         };
 
         let (tx, _rx) = mpsc::unbounded_channel();
@@ -554,6 +575,7 @@ mod tests {
             organization: OrganizationStrategy::ByDate,
             rename_pattern: RenamePattern::Standard,
             skip_duplicates: false,
+            ..ImportOptions::default()
         };
 
         let (tx, _rx) = mpsc::unbounded_channel();
@@ -637,6 +659,7 @@ mod tests {
             organization: OrganizationStrategy::ByDate,
             rename_pattern: RenamePattern::Standard,
             skip_duplicates: false,
+            ..ImportOptions::default()
         };
 
         let (tx, _rx) = mpsc::unbounded_channel();
@@ -706,6 +729,7 @@ mod tests {
             organization: OrganizationStrategy::ByDate,
             rename_pattern: RenamePattern::Standard,
             skip_duplicates: false,
+            ..ImportOptions::default()
         };
 
         let (tx, mut rx) = mpsc::unbounded_channel();

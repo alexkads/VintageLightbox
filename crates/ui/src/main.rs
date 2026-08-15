@@ -13,6 +13,7 @@ use infrastructure::{
     PhotoRepositoryImpl, ExifReader,
     ThumbnailGeneratorImpl, ImageExporterImpl,
     FileOrganizerImpl,
+    SourceScannerImpl,
     SqlitePresetRepository,
     cache::preview_manager::PreviewManager,
 };
@@ -21,7 +22,7 @@ use use_cases::{
     ImportPhotoUseCase, SavePhotoEditsUseCase, ExportPhotoUseCase,
     RatePhotoUseCase, SetColorLabelUseCase, SetFlagUseCase, DeletePhotoUseCase,
     CheckDuplicatesUseCase, ImportWithOptionsUseCase,
-    PreviewBeforeImportUseCase,
+    ScanSourceUseCase, DescribeCandidatesUseCase,
 };
 use use_cases::presets::{ListPresetsUseCase, SavePresetUseCase, DeletePresetUseCase};
 
@@ -113,10 +114,6 @@ async fn main() {
     ));
 
     // Advanced import use cases
-    let preview_before_import_use_case = Arc::new(PreviewBeforeImportUseCase::new(
-        metadata_extractor.clone(),
-        thumbnail_generator.clone(),
-    ));
     let check_duplicates_use_case = Arc::new(CheckDuplicatesUseCase::new(
         photo_repository.clone()
     ));
@@ -132,15 +129,25 @@ async fn main() {
         device_repo.clone()
     ));
 
+    // Varredura e leitura de metadados da origem — o que alimenta a grade de importação
+    // antes de qualquer arquivo ser copiado
+    let scan_source_use_case = Arc::new(ScanSourceUseCase::new(
+        Arc::new(SourceScannerImpl::new())
+    ));
+    let describe_candidates_use_case = Arc::new(DescribeCandidatesUseCase::new(
+        metadata_extractor.clone()
+    ));
+
     // ============================================
     // 3. Setup Controllers (Adapters Layer)
     // ============================================
     let import_controller = Arc::new(ImportController::new(
         import_photo_use_case,
-        preview_before_import_use_case,
         check_duplicates_use_case,
         import_with_options_use_case,
         get_import_sources_use_case,
+        scan_source_use_case,
+        describe_candidates_use_case,
     ));
     let library_controller = Arc::new(LibraryController::new(photo_repository));
     let editor_controller = Arc::new(EditorController::new(save_photo_edits_use_case));

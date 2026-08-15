@@ -7,7 +7,7 @@ use adapters::view_models::PhotoViewModel;
 use image::DynamicImage;
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
-use crate::components::import_dialogs::{ImportPreviewDialog, ImportProgressDialog};
+use crate::components::import_dialogs::ImportProgressDialog;
 use crate::design_system::theme_selector::ThemeVariant;
 use crate::docking::DockTab;
 use egui_dock::DockState;
@@ -81,7 +81,6 @@ pub enum CurrentView {
     Library,
     Develop,
     Print,
-    Import,
 }
 
 /// Metadata for the currently selected photo in detail view
@@ -96,14 +95,210 @@ pub struct DetailMetadata {
     pub color_label: Option<String>,
 }
 
+/// Critério de ordenação da grade de importação
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ImportSortBy {
+    /// Ordem de captura — o padrão, e o único que reconstrói a sequência do ensaio
+    #[default]
+    CaptureTime,
+    FileName,
+    FileSize,
+    /// RAW antes de JPEG
+    MediaType,
+}
+
+impl ImportSortBy {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::CaptureTime => "Hora de captura",
+            Self::FileName => "Nome do arquivo",
+            Self::FileSize => "Tamanho",
+            Self::MediaType => "Tipo (RAW primeiro)",
+        }
+    }
+
+    pub const TODOS: [ImportSortBy; 4] = [
+        Self::CaptureTime,
+        Self::FileName,
+        Self::FileSize,
+        Self::MediaType,
+    ];
+}
+
+/// Um arquivo listado na grade de importação
+#[derive(Debug, Clone)]
+pub struct ImportCandidate {
+    pub path: String,
+    pub file_name: String,
+    /// Marcado para importar — a checkbox da célula
+    pub checked: bool,
+    /// Já existe no catálogo (mesmo hash de conteúdo)
+    pub is_duplicate: bool,
+    pub file_size: u64,
+    pub is_raw: bool,
+    pub camera: String,
+    /// Data de captura em formato EXIF ("YYYY:MM:DD HH:MM:SS"), vazio quando não há
+    pub date_time: String,
+    pub dimensions: Option<String>,
+    /// Se os metadados já chegaram (a grade aparece antes deles)
+    pub described: bool,
+}
+
+impl ImportCandidate {
+    /// Cria um candidato só com o que o scan sabe — o resto chega depois
+    pub fn from_path(path: String) -> Self {
+        let file_name = std::path::Path::new(&path)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| path.clone());
+
+        Self {
+            path,
+            file_name,
+            checked: true,
+            is_duplicate: false,
+            file_size: 0,
+            is_raw: false,
+            camera: String::new(),
+            date_time: String::new(),
+            dimensions: None,
+            described: false,
+        }
+    }
+}
+
 /// State for the Import View
-#[derive(Default)]
 pub struct ImportViewState {
+    /// Se o modal de importação está aberto
+    ///
+    /// É modal e não view: a biblioteca continua desenhada atrás, e importar é uma tarefa
+    /// que começa e termina — não um lugar onde se fica.
+    pub open: bool,
+    /// Cartões e discos montados
     pub devices: Vec<domain::import_source::ImportSource>,
-    pub selected_source_id: Option<String>,
-    pub found_files: Vec<String>, // Paths
-    pub selected_files: std::collections::HashSet<String>,
+    /// Origens usadas recentemente
+    pub recent: Vec<domain::import_source::ImportSource>,
+    /// Se já pedimos a lista de origens ao entrar na tela
+    pub sources_requested: bool,
+    /// Pasta de origem escolhida
+    pub selected_source_path: Option<String>,
+    /// O que a grade mostra
+    pub candidates: Vec<ImportCandidate>,
     pub options: domain::value_objects::ImportOptions,
+    /// Lado da célula da grade, em pixels
+    pub thumb_size: f32,
+    pub sort_by: ImportSortBy,
+    /// Esconde da grade o que já está no catálogo
+    pub only_new: bool,
+    /// Varredura da origem em andamento
+    pub scanning: bool,
+    /// Leitura de metadados em andamento
+    pub describing: bool,
+    /// Conferência de duplicatas em andamento
+    pub checking_duplicates: bool,
+    /// Mensagem de estado exibida sobre a grade
+    pub status: Option<String>,
+    /// Índice em foco — a célula que a lupa mostra grande
+    pub focused: Option<usize>,
+    /// Se a lupa (foto grande sobre a grade) está aberta
+    pub lupa_aberta: bool,
+    /// Quantas colunas a grade desenhou no último quadro — as setas ↑↓ dependem disso
+    pub colunas: usize,
+    /// Índice que a grade precisa trazer para a área visível no próximo quadro
+    pub rolar_para: Option<usize>,
+    /// Âncora do último clique, para marcar um intervalo com Shift
+    pub ancora: Option<usize>,
+    /// Texturas das miniaturas já carregadas, por caminho de arquivo
+    pub thumbnails: std::collections::HashMap<String, egui::TextureHandle>,
+}
+
+impl Default for ImportViewState {
+    fn default() -> Self {
+        Self {
+            open: false,
+            devices: Vec::new(),
+            recent: Vec::new(),
+            sources_requested: false,
+            selected_source_path: None,
+            candidates: Vec::new(),
+            options: domain::value_objects::ImportOptions::default(),
+            thumb_size: 150.0,
+            sort_by: ImportSortBy::default(),
+            only_new: false,
+            scanning: false,
+            describing: false,
+            checking_duplicates: false,
+            status: None,
+            focused: None,
+            lupa_aberta: false,
+            colunas: 1,
+            rolar_para: None,
+            ancora: None,
+            thumbnails: std::collections::HashMap::new(),
+        }
+    }
+}
+
+impl ImportViewState {
+    /// Quantos arquivos estão marcados para importar
+    pub fn checked_count(&self) -> usize {
+        self.candidates.iter().filter(|c| c.checked).count()
+    }
+
+    /// Soma em bytes do que está marcado
+    pub fn checked_bytes(&self) -> u64 {
+        self.candidates
+            .iter()
+            .filter(|c| c.checked)
+            .map(|c| c.file_size)
+            .sum()
+    }
+
+    /// Quantos dos listados já existem no catálogo
+    pub fn duplicate_count(&self) -> usize {
+        self.candidates.iter().filter(|c| c.is_duplicate).count()
+    }
+
+    /// Caminhos marcados, na ordem em que a grade os mostra
+    pub fn checked_paths(&self) -> Vec<String> {
+        self.candidates
+            .iter()
+            .filter(|c| c.checked)
+            .map(|c| c.path.clone())
+            .collect()
+    }
+
+    /// Reordena a grade pelo critério corrente
+    ///
+    /// Empata sempre pelo nome do arquivo: sem isso, fotos disparadas no mesmo segundo
+    /// (rajada) trocariam de lugar a cada reordenação.
+    pub fn sort_candidates(&mut self) {
+        match self.sort_by {
+            ImportSortBy::CaptureTime => self
+                .candidates
+                .sort_by(|a, b| a.date_time.cmp(&b.date_time).then(a.file_name.cmp(&b.file_name))),
+            ImportSortBy::FileName => self.candidates.sort_by(|a, b| a.file_name.cmp(&b.file_name)),
+            ImportSortBy::FileSize => self
+                .candidates
+                .sort_by(|a, b| b.file_size.cmp(&a.file_size).then(a.file_name.cmp(&b.file_name))),
+            ImportSortBy::MediaType => self.candidates.sort_by(|a, b| {
+                b.is_raw
+                    .cmp(&a.is_raw)
+                    .then(a.file_name.cmp(&b.file_name))
+            }),
+        }
+    }
+
+    /// Limpa a listagem ao trocar de origem
+    pub fn clear_candidates(&mut self) {
+        self.candidates.clear();
+        self.thumbnails.clear();
+        self.focused = None;
+        self.lupa_aberta = false;
+        self.rolar_para = None;
+        self.ancora = None;
+        self.status = None;
+    }
 }
 
 /// Main application state
@@ -418,14 +613,10 @@ pub struct AppState {
     pub expanded_folders: HashSet<String>,
 
     // ============================================
-    // Advanced Import Dialogs
+    // Import Progress
     // ============================================
-    /// Import preview dialog state
-    pub import_preview_dialog: Option<ImportPreviewDialog>,
     /// Import progress dialog state
     pub import_progress_dialog: Option<ImportProgressDialog>,
-    /// Receiver for import preview dialog (async communication)
-    pub pending_import_preview_receiver: Option<tokio::sync::mpsc::Receiver<Option<ImportPreviewDialog>>>,
 
     // ============================================
     // Docking System (egui_dock)
@@ -480,10 +671,13 @@ pub struct AppState {
     pub invalidation_queue: HashSet<String>,
 }
 
+/// Para que serve o seletor de arquivos compartilhado (`import_dialog`)
+///
+/// `Advanced` saiu quando a tela de importação passou a fazer o trabalho inteiro: escolher
+/// as fotos agora é grade com miniaturas, não um seletor de um arquivo por vez.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImportDialogMode {
     Simple,
-    Advanced,
     Export, // Reusing for export too?
 }
 
@@ -712,9 +906,7 @@ impl AppState {
 
             folder_tree_roots: Vec::new(),
             expanded_folders: HashSet::new(),
-            import_preview_dialog: None,
             import_progress_dialog: None,
-            pending_import_preview_receiver: None,
             pending_export_receiver: None,
             toasts: Toasts::default(),
             selected_theme: ThemeVariant::default(),
@@ -744,7 +936,6 @@ impl AppState {
             CurrentView::Library => self.library_selected_photo_id.as_ref(),
             CurrentView::Develop => self.develop_selected_photo_id.as_ref(),
             CurrentView::Print => self.library_selected_photo_id.as_ref(),
-            CurrentView::Import => None,
         }
     }
 

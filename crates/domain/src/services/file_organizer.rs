@@ -4,7 +4,7 @@
 //! Responsável por copiar arquivos para diretórios organizados seguindo diferentes estratégias.
 
 use crate::{
-    value_objects::{FilePath, PhotoMetadata, OrganizationStrategy, RenamePattern},
+    value_objects::{FilePath, ImportOptions, PhotoMetadata, OrganizationStrategy, RenamePattern},
     DomainResult,
 };
 use async_trait::async_trait;
@@ -12,6 +12,27 @@ use async_trait::async_trait;
 /// Trait para organização de arquivos
 #[async_trait]
 pub trait FileOrganizer: Send + Sync {
+    /// Organiza um arquivo respeitando todas as opções do lote
+    ///
+    /// É a entrada usada pela importação: além de estratégia e renomeação, leva o destino
+    /// escolhido pelo usuário e a raiz de origem (que `PreserveStructure` precisa para saber
+    /// qual pedaço do caminho preservar). A implementação padrão ignora esses dois e delega
+    /// para [`FileOrganizer::organize_file`], para não quebrar implementações antigas.
+    async fn organize_file_with(
+        &self,
+        source: &FilePath,
+        metadata: Option<&PhotoMetadata>,
+        options: &ImportOptions,
+    ) -> DomainResult<FilePath> {
+        self.organize_file(
+            source,
+            metadata,
+            options.organization,
+            options.rename_pattern.clone(),
+        )
+        .await
+    }
+
     /// Organiza um arquivo copiando para o destino apropriado
     ///
     /// # Arguments

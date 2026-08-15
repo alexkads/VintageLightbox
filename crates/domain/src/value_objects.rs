@@ -19,7 +19,7 @@ pub use photo_id::PhotoId;
 pub use color_label::ColorLabel;
 pub use file_path::FilePath;
 pub use photo_metadata::PhotoMetadata;
-pub use import_options::{ImportOptions, OrganizationStrategy, RenamePattern};
+pub use import_options::{ImportMode, ImportOptions, OrganizationStrategy, RenamePattern};
 pub use flag::Flag;
 pub use print_settings::{PrintSettings, PaperSize, Orientation, ColorMode, Margins};
 pub use print_layout::PrintLayout;

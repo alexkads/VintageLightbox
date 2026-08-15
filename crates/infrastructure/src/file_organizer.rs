@@ -5,7 +5,7 @@
 
 use domain::{
     services::FileOrganizer,
-    value_objects::{FilePath, PhotoMetadata, OrganizationStrategy, RenamePattern},
+    value_objects::{FilePath, ImportOptions, PhotoMetadata, OrganizationStrategy, RenamePattern},
     DomainError, DomainResult,
 };
 use async_trait::async_trait;
@@ -102,6 +102,110 @@ impl FileOrganizerImpl {
     }
 }
 
+impl FileOrganizerImpl {
+    /// Diretório onde o arquivo deve cair, já criado no disco
+    ///
+    /// É o ponto em que as três estratégias divergem — o resto (nome, cópia) é igual.
+    async fn destination_dir(
+        &self,
+        source_path: &Path,
+        metadata: Option<&PhotoMetadata>,
+        strategy: OrganizationStrategy,
+        base_dir: &Path,
+        source_root: Option<&str>,
+    ) -> DomainResult<PathBuf> {
+        let dest_dir = match strategy {
+            OrganizationStrategy::ByDate => {
+                let (year, month, day) = Self::extract_date(metadata);
+                base_dir.join(year).join(month).join(day)
+            }
+
+            OrganizationStrategy::PreserveStructure => {
+                // Preserva o pedaço do caminho que fica *abaixo* da raiz de origem:
+                // /Volumes/CARTAO/DCIM/100CANON/IMG.CR2 com raiz /Volumes/CARTAO
+                // vira <destino>/DCIM/100CANON/IMG.CR2.
+                //
+                // Sem raiz de origem informada não há o que preservar — o caminho
+                // absoluto inteiro viraria subpasta —, então cai em pasta única.
+                let relativo = source_root
+                    .map(Path::new)
+                    .and_then(|root| source_path.parent()?.strip_prefix(root).ok())
+                    .filter(|rel| !rel.as_os_str().is_empty());
+
+                match relativo {
+                    Some(rel) => base_dir.join(rel),
+                    None => base_dir.to_path_buf(),
+                }
+            }
+
+            OrganizationStrategy::IntoOneFolder => base_dir.to_path_buf(),
+        };
+
+        tokio::fs::create_dir_all(&dest_dir).await.map_err(|e| {
+            DomainError::InfrastructureError(format!(
+                "Failed to create directory {}: {}",
+                dest_dir.display(),
+                e
+            ))
+        })?;
+
+        Ok(dest_dir)
+    }
+
+    /// Copia o arquivo para o destino resolvido pelas opções
+    async fn organize_into(
+        &self,
+        source: &FilePath,
+        metadata: Option<&PhotoMetadata>,
+        strategy: OrganizationStrategy,
+        rename_pattern: RenamePattern,
+        base_dir: &Path,
+        source_root: Option<&str>,
+    ) -> DomainResult<FilePath> {
+        let source_path: &Path = source.as_ref();
+
+        let extension = source_path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("jpg")
+            .to_lowercase();
+
+        let dest_dir = self
+            .destination_dir(source_path, metadata, strategy, base_dir, source_root)
+            .await?;
+
+        let original_name = source_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("photo.jpg");
+
+        let filename = match rename_pattern {
+            RenamePattern::Standard => {
+                let (year, month, day) = Self::extract_date(metadata);
+                Self::generate_sequential_name(&dest_dir, &year, &month, &day, &extension).await
+            }
+            RenamePattern::KeepOriginal => {
+                Self::generate_unique_name(&dest_dir, original_name).await
+            }
+            RenamePattern::Custom(_) => {
+                // v2 feature - por enquanto usa Standard
+                let (year, month, day) = Self::extract_date(metadata);
+                Self::generate_sequential_name(&dest_dir, &year, &month, &day, &extension).await
+            }
+        };
+
+        let dest_path = dest_dir.join(&filename);
+
+        tokio::fs::copy(source_path, &dest_path)
+            .await
+            .map_err(|e| {
+                DomainError::InfrastructureError(format!("Failed to copy file: {}", e))
+            })?;
+
+        FilePath::new(dest_path.to_str().unwrap())
+    }
+}
+
 #[async_trait]
 impl FileOrganizer for FileOrganizerImpl {
     async fn organize_file(
@@ -111,93 +215,35 @@ impl FileOrganizer for FileOrganizerImpl {
         strategy: OrganizationStrategy,
         rename_pattern: RenamePattern,
     ) -> DomainResult<FilePath> {
-        let source_path: &Path = source.as_ref();
+        let base_dir = self.base_dir.clone();
+        self.organize_into(source, metadata, strategy, rename_pattern, &base_dir, None)
+            .await
+    }
 
-        // Extrair extensão
-        let extension = source_path.extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("jpg")
-            .to_lowercase();
+    async fn organize_file_with(
+        &self,
+        source: &FilePath,
+        metadata: Option<&PhotoMetadata>,
+        options: &ImportOptions,
+    ) -> DomainResult<FilePath> {
+        // Destino escolhido na tela vence o catálogo padrão; vazio conta como não escolhido.
+        let base_dir = options
+            .destination
+            .as_deref()
+            .map(str::trim)
+            .filter(|d| !d.is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| self.base_dir.clone());
 
-        match strategy {
-            OrganizationStrategy::ByDate => {
-                // Extrair data dos metadados
-                let (year, month, day) = Self::extract_date(metadata);
-
-                // Criar diretório: base_dir/YYYY/MM/DD/
-                let dest_dir = self.base_dir.join(&year).join(&month).join(&day);
-                tokio::fs::create_dir_all(&dest_dir).await
-                    .map_err(|e| DomainError::InfrastructureError(
-                        format!("Failed to create directory {}: {}", dest_dir.display(), e)
-                    ))?;
-
-                // Gerar nome do arquivo baseado no padrão
-                let filename = match rename_pattern {
-                    RenamePattern::Standard => {
-                        Self::generate_sequential_name(&dest_dir, &year, &month, &day, &extension).await
-                    }
-                    RenamePattern::KeepOriginal => {
-                        let original_name = source_path.file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or("photo.jpg");
-                        Self::generate_unique_name(&dest_dir, original_name).await
-                    }
-                    RenamePattern::Custom(_) => {
-                        // v2 feature - por enquanto usa Standard
-                        Self::generate_sequential_name(&dest_dir, &year, &month, &day, &extension).await
-                    }
-                };
-
-                let dest_path = dest_dir.join(&filename);
-
-                // Copiar arquivo
-                tokio::fs::copy(source_path, &dest_path).await
-                    .map_err(|e| DomainError::InfrastructureError(
-                        format!("Failed to copy file: {}", e)
-                    ))?;
-
-                FilePath::new(dest_path.to_str().unwrap())
-            }
-
-            OrganizationStrategy::PreserveStructure => {
-                // Preservar estrutura de diretórios original
-                // Extrai o caminho relativo do arquivo (se possível)
-                let original_name = source_path.file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("photo.jpg");
-
-                // Para preservar estrutura, usamos apenas o nome do arquivo
-                // (uma implementação mais complexa poderia preservar hierarquia completa)
-                let dest_dir = self.base_dir.clone();
-                tokio::fs::create_dir_all(&dest_dir).await
-                    .map_err(|e| DomainError::InfrastructureError(
-                        format!("Failed to create directory: {}", e)
-                    ))?;
-
-                let filename = match rename_pattern {
-                    RenamePattern::KeepOriginal => {
-                        Self::generate_unique_name(&dest_dir, original_name).await
-                    }
-                    RenamePattern::Standard => {
-                        let (year, month, day) = Self::extract_date(metadata);
-                        Self::generate_sequential_name(&dest_dir, &year, &month, &day, &extension).await
-                    }
-                    RenamePattern::Custom(_) => {
-                        Self::generate_unique_name(&dest_dir, original_name).await
-                    }
-                };
-
-                let dest_path = dest_dir.join(&filename);
-
-                // Copiar arquivo
-                tokio::fs::copy(source_path, &dest_path).await
-                    .map_err(|e| DomainError::InfrastructureError(
-                        format!("Failed to copy file: {}", e)
-                    ))?;
-
-                FilePath::new(dest_path.to_str().unwrap())
-            }
-        }
+        self.organize_into(
+            source,
+            metadata,
+            options.organization,
+            options.rename_pattern.clone(),
+            &base_dir,
+            options.source_root.as_deref(),
+        )
+        .await
     }
 }
 

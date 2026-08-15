@@ -56,7 +56,7 @@ struct `PhotoEdits` continua sendo o conserto de verdade.
 | Métrica | Valor |
 |---------|-------|
 | `cargo check --workspace --all-targets` | ✅ **limpo** |
-| `cargo test --workspace` | ✅ **478 passando, 0 falhas, 3 ignorados** |
+| `cargo test --workspace` | ✅ **522 passando, 0 falhas, 3 ignorados** |
 | App | ✅ **sobe** — janela 1352×848, `GPU: Initialized successfully with Apple M2 Pro` |
 | Migrations SQLite no repositório | 15 (`001` … `015`) |
 | Crates | 5 (domain, use-cases, adapters, infrastructure, ui) |
@@ -70,6 +70,68 @@ struct `PhotoEdits` continua sendo o conserto de verdade.
 | Adapters | 0 | ⚠️ nenhum teste escrito |
 | Infrastructure | 65 (34 unit + 31 integração em 7 arquivos) | ✅ passando (1 ignorado) |
 | UI | 146 (47 unit + 99 E2E `egui_kittest` em 18 arquivos) | ✅ passando (2 ignorados) |
+
+---
+
+## 📥 Tela de importação reescrita em 15/ago/2026
+
+A tela existia mas **não importava**: o botão "Import N Photos" era um `// TODO: call controller`
+seguido de volta para a biblioteca. Escolher fotos, na prática, só dava pelo botão "Advanced
+Import" — seletor de **um arquivo por vez** e uma lista de texto, sem miniatura nenhuma, apesar de
+o `ImportPreviewItemViewModel` já carregar os bytes do thumbnail.
+
+Agora é o formato do Lightroom, num **modal** sobre a biblioteca: **DE** (cartões, recentes,
+escolher pasta, incluir subpastas) · **grade de miniaturas marcáveis** · **PARA** (modo, destino,
+organização, renomeação, duplicatas). Importar é tarefa que começa e termina, não lugar onde se
+fica — por isso `CurrentView::Import` **deixou de existir**, e o estado virou
+`ImportViewState::open`.
+
+**O que faz a tela abrir rápido é a ordem das leituras**, cada uma assíncrona e independente:
+
+1. `ScanSource` lista só caminhos — a grade aparece cheia na hora;
+2. `DescribeCandidates` lê EXIF em paralelo e as células vão se completando;
+3. miniaturas são geradas **só para as células visíveis** (`show_rows` + `AsyncThumbnailLoader`),
+   com chave `import::<caminho>` para não colidir com id de foto no cache;
+4. `CheckDuplicates` confere por hash e desmarca o que já está no catálogo.
+
+Emendar 3 em 1 é o que faria um cartão de 2.000 RAWs travar a janela por minutos.
+
+**`ImportOptions` ganhou o que a tela precisa decidir**: `mode` (`Add`/`Copy`/`Move`),
+`destination`, `source_root` e `include_subfolders`. Os campos novos têm `#[serde(default)]` —
+catálogo gravado antes deles continua lendo (há teste). `PreserveStructure` passou a preservar
+mesmo a hierarquia (usando `source_root`); `IntoOneFolder` é o comportamento antigo, agora
+nomeado.
+
+⚠️ **`Move` apaga o original** — e só depois de a foto estar no catálogo e as previews gravadas.
+Falha ao apagar não invalida a importação: sobra uma cópia órfã na origem, e isso vai para o log.
+Coberto por 7 testes E2E com JPEGs reais em disco (`import_modes_e2e.rs`).
+
+⚠️ **O modal forçou trocar o seletor de pastas.** `egui_file::FileDialog` é uma `Window` do egui
+(`Order::Middle`); o backdrop do modal fica em `Order::Foreground` e `set_modal_layer` bloqueia a
+entrada das camadas abaixo — o seletor apareceria escurecido e sem responder ao clique. Passou a ser
+o **seletor nativo do sistema** (`rfd::AsyncFileDialog`, dependência nova em `ui`), que é janela do
+SO e não disputa camada com o egui. A lupa, pelo mesmo motivo, virou modal aninhado em vez de
+`Window`.
+
+O seletor abre nas **Imagens do usuário** (`AppPaths::default_browse_dir`), ou onde a escolha
+anterior parou — antes abria em `/`, obrigando a descer `Users` → nome → Pictures toda vez.
+
+**A aparência foi refeita numa segunda passada**, depois de a primeira versão ficar com cara de
+protótipo: painéis com fundo próprio (`BG_ELEVATED` no cabeçalho/rodapé, `BG_SURFACE` nas laterais,
+`BG_APP` na grade) para as três regiões se separarem; **controle segmentado** no lugar da fileira de
+`selectable_label` que parecia três links soltos; linhas de origem com ícone, nome, caminho e barra
+de acento; marcador de seleção maior, com ✓ de verdade; estados vazios com ícone e uma saída
+("Tente ligar Incluir subpastas"); e **prévia do destino** — "a primeira foto vai para
+2026/08/15/photo-2026-08-15-001.cr2" —, que transforma três combos abstratos numa decisão
+conferível antes de apertar o botão.
+
+Na interação: duplo clique abre a lupa (antes alternava a marcação, o que contradizia o clique
+simples), ↑↓ navegam pelas linhas **levando a rolagem junto** (sem isso o foco saía da tela e a
+seta parecia não fazer nada), Shift+clique marca intervalo, ⌘A marca tudo e Enter importa.
+
+**Removido junto**: o botão "Advanced Import", o `ImportPreviewDialog` e o `preview_import` do
+controller. Ficaram sem chamador quando a tela nova passou a fazer o trabalho inteiro — e manter
+dois caminhos de importação, um deles pior, é convite a usar o errado.
 
 ---
 
@@ -133,7 +195,7 @@ correção de lente, redução de ruído, nitidez e crop.
 
 | Área | Use Cases |
 |------|-----------|
-| Importação | `ImportPhoto`, `ImportPhotos`, `ImportWithOptions`, `PreviewBeforeImport`, `CheckDuplicates`, `GetImportSources` |
+| Importação | `ImportPhoto`, `ImportPhotos`, `ImportWithOptions`, `PreviewBeforeImport`, `CheckDuplicates`, `GetImportSources`, `ScanSource`, `DescribeCandidates` |
 | Organização | `RatePhoto`, `SetColorLabel`, `SetFlag`, `DeletePhoto`, `Organize` |
 | Coleções | `CreateCollection`, `AddPhotoToCollection`, `RemovePhotoFromCollection` |
 | Edição | `SavePhotoEdits`, `Edit` |
@@ -158,8 +220,8 @@ um struct `PhotoEdits` — e o conserto do teste sem essa mudança só adia a pr
   SQLite) / L3 disco, documentada em [08-CACHE-ARCHITECTURE.md](08-CACHE-ARCHITECTURE.md)
 - **RAW**: `raw_processing` com `rsraw` (LibRaw: demosaic, white balance, cor) e `rawloader` como
   fallback ← **onde está o erro 1**
-- **Arquivos**: `file_scanner`, `file_organizer`, `content_hash`, `paths` (`AppPaths` resolve
-  catálogo por SO), `exif_reader`, `thumbnail_generator`, `image_exporter`
+- **Arquivos**: `file_scanner`, `file_organizer`, `source_scanner`, `content_hash`, `paths`
+  (`AppPaths` resolve catálogo por SO), `exif_reader`, `thumbnail_generator`, `image_exporter`
 - **Dispositivos**: `devices/` — detecção de fontes de importação (cartões) + histórico
 
 ### 5️⃣ UI ❌ bloqueada (transitivo)

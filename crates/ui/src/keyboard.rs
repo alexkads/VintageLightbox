@@ -254,7 +254,6 @@ impl KeyboardHandler {
                     Vec::new()
                 }
             }
-            CurrentView::Import => Vec::new(),
         }
     }
 

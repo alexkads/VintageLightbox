@@ -31,13 +31,23 @@ impl FileScanner {
 
     /// Escaneia um diretório recursivamente buscando arquivos de foto
     pub fn scan_directory(&self, path: &Path) -> DomainResult<Vec<PathBuf>> {
+        self.scan_directory_with_depth(path, true)
+    }
+
+    /// Escaneia um diretório, opcionalmente descendo em subpastas
+    ///
+    /// `recursive == false` é o "Include Subfolders" desmarcado da tela de importação:
+    /// varre só o nível pedido, o que num cartão de 64GB é a diferença entre uma tela
+    /// instantânea e uma espera de minutos.
+    pub fn scan_directory_with_depth(&self, path: &Path, recursive: bool) -> DomainResult<Vec<PathBuf>> {
         let mut files = Vec::new();
-        self.scan_recursive(path, &mut files)?;
+        self.scan_level(path, recursive, &mut files)?;
+        files.sort();
         Ok(files)
     }
 
-    /// Função recursiva para escanear diretórios
-    fn scan_recursive(&self, path: &Path, files: &mut Vec<PathBuf>) -> DomainResult<()> {
+    /// Percorre um diretório, descendo em subpastas só quando `recursive`
+    fn scan_level(&self, path: &Path, recursive: bool, files: &mut Vec<PathBuf>) -> DomainResult<()> {
         if !path.exists() {
             return Err(domain::DomainError::InvalidOperation(
                 format!("Path does not exist: {}", path.display())
@@ -74,7 +84,9 @@ impl FileScanner {
 
             if path.is_dir() {
                 // Recursão em subdiretórios
-                self.scan_recursive(&path, files)?;
+                if recursive {
+                    self.scan_level(&path, recursive, files)?;
+                }
             } else if path.is_file() {
                 // Verificar se a extensão é suportada
                 if self.is_supported_file(&path) {
@@ -244,6 +256,34 @@ mod tests {
 
         assert_eq!(files.len(), 1);
         assert!(files[0].to_string_lossy().ends_with(".jpg"));
+    }
+
+    #[test]
+    fn test_scan_sem_subpastas_fica_no_nivel_de_cima() {
+        let temp_dir = create_test_directory();
+        let scanner = FileScanner::new();
+
+        let files = scanner
+            .scan_directory_with_depth(temp_dir.path(), false)
+            .unwrap();
+
+        // Só photo1.jpg, photo2.JPG, photo3.cr2 — nada de subdir1/subdir2
+        assert_eq!(files.len(), 3);
+        assert!(!files.iter().any(|p| p.to_string_lossy().contains("subdir")));
+    }
+
+    #[test]
+    fn test_scan_devolve_ordenado() {
+        let temp_dir = create_test_directory();
+        let scanner = FileScanner::new();
+
+        let files = scanner.scan_directory(temp_dir.path()).unwrap();
+
+        // A grade da importação mostra na ordem em que vem: leitura de diretório não
+        // garante ordem nenhuma, então o scanner ordena.
+        let mut ordenado = files.clone();
+        ordenado.sort();
+        assert_eq!(files, ordenado);
     }
 
     #[test]

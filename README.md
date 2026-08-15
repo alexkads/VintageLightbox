@@ -39,19 +39,20 @@ Este projeto segue **Clean Architecture** e **Test-Driven Development (TDD)**:
 **Fase Atual**: Fase 2 — Funcionalidades Essenciais (importação avançada, edição RAW completa,
 presets, flags, crop, impressão)
 
-> ✅ **Compila, suíte verde (478 testes), app sobe** — depois de dois consertos feitos em
-> 15/ago/2026 e **ainda não commitados**. O quadro completo, incluindo 4 migrations aplicadas em
-> catálogos existentes que não estão no repositório, está em **[docs/STATUS.md](docs/STATUS.md)**.
+> ✅ **Compila, suíte verde (522 testes), app sobe** — depois de dois consertos e da reescrita da
+> tela de importação, feitos em 15/ago/2026 e **ainda não commitados**. O quadro completo, incluindo
+> 4 migrations aplicadas em catálogos existentes que não estão no repositório, está em
+> **[docs/STATUS.md](docs/STATUS.md)**.
 
 - [x] Workspace com Clean Architecture (5 crates)
 - [x] **Domain** — 4 entidades, 13 value objects, **202 testes passando**
-- [x] **Use Cases** — 20 módulos (importação, organização, edição, presets, export, print)
+- [x] **Use Cases** — 22 módulos (importação, organização, edição, presets, export, print)
 - [x] **Infrastructure** — SQLite (15 migrations), cache L1/L2/L3, RAW via LibRaw, EXIF, thumbnails
 - [x] **Adapters** — 6 controllers (⚠️ sem testes)
 - [x] **UI** — egui 0.31 sobre wgpu: 4 views, 26 componentes, docking, multi-monitor, 5 temas
 - [ ] Commitar os consertos e reativar o CI ← **próximo passo**
 
-**478 testes passando · 0 falhas · 3 ignorados**
+**522 testes passando · 0 falhas · 3 ignorados**
 
 **Rodando os testes**:
 ```bash
@@ -61,6 +62,7 @@ cargo test -p domain
 
 # Testes E2E da UI (egui_kittest)
 cargo test -p ui --test crop_feature_e2e_test
+cargo test -p ui --test import_view_e2e_test
 
 # Atualizar snapshots (quando necessário)
 UPDATE_SNAPSHOTS=true cargo test -p ui
@@ -80,10 +82,14 @@ A documentação completa do projeto está organizada na pasta `docs/`:
 ## ✨ Principais Funcionalidades
 
 ### Importação
+- Modal no formato do Lightroom: origem à esquerda, grade de miniaturas ao centro, opções à direita
+- Cartões e pastas recentes detectados automaticamente; "incluir subpastas" opcional
+- Grade com miniaturas marcáveis, ordenação por captura/nome/tamanho/tipo e lupa (`L`)
+- Modos **Add** (catalogar onde está), **Copy** e **Move**
 - Suporte a múltiplos formatos RAW (CR2, NEF, ARW, DNG, etc.)
-- Detecção automática de duplicatas
-- Geração paralela de thumbnails
-- Organização automática por data
+- Detecção automática de duplicatas por hash de conteúdo, com desmarcação na grade
+- Miniaturas geradas sob demanda, só para o que está visível
+- Organização por data, preservando subpastas, ou numa pasta só
 
 ### Edição RAW
 - Ajustes básicos: exposição, contraste, temperatura, matiz

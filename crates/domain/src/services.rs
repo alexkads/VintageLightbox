@@ -58,3 +58,6 @@ pub use preview_storage::*;
 
 pub mod file_organizer;
 pub use file_organizer::FileOrganizer;
+
+pub mod source_scanner;
+pub use source_scanner::SourceScanner;

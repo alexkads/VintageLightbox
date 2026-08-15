@@ -26,4 +26,36 @@ impl AppPaths {
     pub fn preview_cache_dir() -> PathBuf {
         Self::catalog_root().join("Previews.lrdata")
     }
+
+    /// Home do usuário logado, ou `/` se o SO não souber dizer
+    pub fn home_dir() -> PathBuf {
+        UserDirs::new()
+            .map(|d| d.home_dir().to_path_buf())
+            .unwrap_or_else(|| PathBuf::from("/"))
+    }
+
+    /// Onde um seletor de pastas deve abrir por padrão
+    ///
+    /// Pictures do usuário, caindo para a home. Nunca a raiz do disco: abrir em `/` obriga
+    /// o fotógrafo a navegar `Users` → nome → Pictures toda vez, e nenhuma das pastas de
+    /// sistema listadas ali tem foto dele.
+    pub fn default_browse_dir() -> PathBuf {
+        UserDirs::new()
+            .and_then(|d| d.picture_dir().map(|p| p.to_path_buf()))
+            .filter(|p| p.exists())
+            .unwrap_or_else(Self::home_dir)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn seletor_nunca_abre_na_raiz() {
+        let inicial = AppPaths::default_browse_dir();
+
+        assert_ne!(inicial, PathBuf::from("/"));
+        assert!(inicial.exists(), "{:?} tem de existir", inicial);
+    }
 }

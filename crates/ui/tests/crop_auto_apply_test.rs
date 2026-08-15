@@ -3,7 +3,7 @@ use ui::keyboard::KeyboardHandler;
 use adapters::controllers::{EditorController, PhotoController, LibraryController, ExportController, ImportController};
 use adapters::view_models::PhotoViewModel;
 use domain::value_objects::{CropSettings, FilePath, PhotoId, PhotoMetadata, OrganizationStrategy, RenamePattern};
-use domain::services::{ImageExporter, MetadataExtractor, ThumbnailGenerator, PreviewStorage, PreviewType, FileOrganizer};
+use domain::services::{ImageExporter, MetadataExtractor, ThumbnailGenerator, PreviewStorage, PreviewType, FileOrganizer, SourceScanner};
 use domain::import_source::{DeviceRepository, ImportSource};
 use domain::DomainResult;
 use std::sync::Arc;
@@ -41,6 +41,12 @@ impl DeviceRepository for DummyDeviceRepository {
     async fn get_mounted_devices(&self) -> Vec<ImportSource> { vec![] }
     async fn get_history(&self) -> Vec<ImportSource> { vec![] }
     async fn add_to_history(&self, _path: std::path::PathBuf) {}
+}
+
+struct DummySourceScanner;
+#[async_trait::async_trait]
+impl SourceScanner for DummySourceScanner {
+    async fn scan(&self, _root: &str, _include: bool) -> DomainResult<Vec<FilePath>> { Ok(vec![]) }
 }
 
 struct DummyFileOrganizer;
@@ -108,11 +114,6 @@ async fn setup_harness() -> (
          preview_storage.clone()
      ));
      
-     let preview_uc = Arc::new(use_cases::PreviewBeforeImportUseCase::new(
-         meta_extractor.clone(),
-         thumb_gen.clone()
-     ));
-     
      let check_dupes_uc = Arc::new(use_cases::CheckDuplicatesUseCase::new(photo_repo.clone()));
      
      let import_with_opts_uc = Arc::new(use_cases::ImportWithOptionsUseCase::new(
@@ -125,12 +126,16 @@ async fn setup_harness() -> (
      
      let get_sources_uc = Arc::new(use_cases::GetImportSourcesUseCase::new(Arc::new(DummyDeviceRepository)));
 
+     let scan_source_uc = Arc::new(use_cases::ScanSourceUseCase::new(Arc::new(DummySourceScanner)));
+     let describe_uc = Arc::new(use_cases::DescribeCandidatesUseCase::new(meta_extractor.clone()));
+
      let import_controller = Arc::new(ImportController::new(
          import_photo_uc,
-         preview_uc,
          check_dupes_uc,
          import_with_opts_uc,
-         get_sources_uc
+         get_sources_uc,
+         scan_source_uc,
+         describe_uc
      ));
      
      let kb_handler = Arc::new(KeyboardHandler::new());
