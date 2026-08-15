@@ -10,6 +10,7 @@
 //! ⚠️ Nenhuma etapa disso acontece no `render`. O `render` só desenha o que já
 //! chegou — é o que permite arrastar liso enquanto a GPU trabalha atrás.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -17,13 +18,14 @@ use adapters::view_models::PhotoViewModel;
 use gpui::{
     div, img, prelude::*, px, App, Context, Entity, RenderImage, SharedString, Subscription, Window,
 };
+use gpui_component::collapsible::Collapsible;
 use gpui_component::slider::{Slider, SliderEvent, SliderState};
 use gpui_component::ActiveTheme;
 use infrastructure::cache::preview_manager::PreviewManager;
 
 use crate::imagem::para_gpui;
 
-use super::controles::{Definicao, BASICOS};
+use super::controles::{Definicao, Secao, CONTROLES};
 use super::processador::{Ajustes, Pedido, Processador};
 
 /// Largura do painel de ajustes.
@@ -43,6 +45,9 @@ pub struct Revelacao {
     aberta: Option<Aberta>,
     ajustes: Ajustes,
     controles: Vec<Controle>,
+    /// Quais seções estão abertas. Um conjunto, e não um `bool` por seção:
+    /// acrescentar seção nova não pode exigir lembrar de acrescentar campo.
+    abertas: HashSet<Secao>,
     /// O id do pedido que ainda não voltou. `None` é "a tela está em dia".
     aguardando: Option<u64>,
     /// Se já existe um laço de colheita rodando. Sem esta trava, cada arrasto
@@ -85,10 +90,10 @@ impl Revelacao {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let mut controles = Vec::with_capacity(BASICOS.len());
-        let mut assinaturas = Vec::with_capacity(BASICOS.len());
+        let mut controles = Vec::with_capacity(CONTROLES.len());
+        let mut assinaturas = Vec::with_capacity(CONTROLES.len());
 
-        for definicao in BASICOS {
+        for definicao in CONTROLES {
             let estado = cx.new(|_| {
                 SliderState::new()
                     .min(definicao.minimo)
@@ -118,6 +123,10 @@ impl Revelacao {
             aberta: None,
             ajustes: Ajustes::default(),
             controles,
+            abertas: Secao::TODAS
+                .into_iter()
+                .filter(Secao::nasce_aberta)
+                .collect(),
             aguardando: None,
             colhendo: false,
             _assinaturas: assinaturas,
@@ -296,7 +305,7 @@ impl Revelacao {
         }
     }
 
-    fn painel(&self, cx: &App) -> impl IntoElement {
+    fn painel(&self, cx: &mut Context<Self>) -> impl IntoElement {
         // Sem GPU não há revelação, e o painel diz isso em vez de oferecer
         // sliders que não movem nada. `None` é "a thread ainda está abrindo o
         // dispositivo" — não é ausência de placa, e anunciar ausência durante os
@@ -307,7 +316,7 @@ impl Revelacao {
             .id("painel-de-ajustes")
             .flex()
             .flex_col()
-            .gap(px(10.))
+            .gap(px(6.))
             .w(px(LADO_DO_PAINEL))
             .h_full()
             .p(px(12.))
@@ -315,12 +324,6 @@ impl Revelacao {
             .bg(cx.theme().sidebar)
             .border_l_1()
             .border_color(cx.theme().border)
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child("básico"),
-            )
             .when(sem_motor, |painel| {
                 painel.child(
                     div()
@@ -329,32 +332,80 @@ impl Revelacao {
                         .child("Sem GPU disponível — os ajustes não são aplicados"),
                 )
             })
-            .children(self.controles.iter().map(|controle| {
-                let definicao = controle.definicao;
-                let valor = (definicao.ler)(&self.ajustes);
+            .children(
+                Secao::TODAS
+                    .into_iter()
+                    .map(|secao| self.secao(secao, cx))
+                    .collect::<Vec<_>>(),
+            )
+    }
 
+    /// Uma seção sanfonada: o cabeçalho sempre, os controles só quando aberta.
+    ///
+    /// Fechada por padrão (menos o Básico), como no legado. São 42 controles: com
+    /// tudo aberto o painel vira uma coluna de dois metros, e o efeito prático é
+    /// nenhum deles ser encontrado.
+    fn secao(&self, secao: Secao, cx: &mut Context<Self>) -> impl IntoElement {
+        let aberta = self.abertas.contains(&secao);
+
+        Collapsible::new()
+            .open(aberta)
+            .child(
                 div()
+                    .id(SharedString::from(format!("secao-{}", secao.rotulo())))
                     .flex()
-                    .flex_col()
-                    .gap(px(2.))
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .text_xs()
-                            .child(definicao.rotulo)
-                            // O valor fica ao lado do rótulo, e não dentro da
-                            // barra: dentro, ele se move junto com o punho e vira
-                            // um número que foge de quem está tentando lê-lo.
-                            .child(
-                                div()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(SharedString::from(definicao.formatar(valor))),
-                            ),
-                    )
-                    .child(Slider::new(&controle.estado).horizontal())
-            }))
+                    .items_center()
+                    .justify_between()
+                    .py(px(4.))
+                    .cursor_pointer()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(secao.rotulo())
+                    // Triângulo, e não texto: é o que diz "isto abre" sem
+                    // ocupar largura numa coluna de 280px.
+                    .child(if aberta { "▾" } else { "▸" })
+                    .on_click(cx.listener(move |tela, _ev, _window, cx| {
+                        if !tela.abertas.remove(&secao) {
+                            tela.abertas.insert(secao);
+                        }
+                        cx.notify();
+                    })),
+            )
+            .content(
+                div().flex().flex_col().gap(px(8.)).pb(px(8.)).children(
+                    self.controles
+                        .iter()
+                        .filter(|controle| controle.definicao.secao == secao)
+                        .map(|controle| {
+                            let definicao = controle.definicao;
+                            let valor = (definicao.ler)(&self.ajustes);
+
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap(px(2.))
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .justify_between()
+                                        .text_xs()
+                                        .child(definicao.rotulo)
+                                        // O valor fica ao lado do rótulo, e
+                                        // não dentro da barra: dentro, ele se
+                                        // move junto com o punho e vira um
+                                        // número que foge de quem tenta lê-lo.
+                                        .child(
+                                            div().text_color(cx.theme().muted_foreground).child(
+                                                SharedString::from(definicao.formatar(valor)),
+                                            ),
+                                        ),
+                                )
+                                .child(Slider::new(&controle.estado).horizontal())
+                        })
+                        .collect::<Vec<_>>(),
+                ),
+            )
     }
 }
 
