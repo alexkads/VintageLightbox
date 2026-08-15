@@ -6,6 +6,11 @@ members = [
     "crates/adapters",
     "crates/infrastructure",
     "crates/ui",
+    # A interface em GPUI, construída ao lado da de egui — os dois rodam até a
+    # fase 5 (docs/10-MIGRACAO-GPUI.md §7.2). `crates/ui` é o rollback e a
+    # referência de paridade; tirá-lo antes da hora torna abandonar a migração
+    # caro, e é justamente o modo de falha mais provável do plano.
+    "crates/ui-gpui",
 ]
 
 [workspace.package]

@@ -1,0 +1,42 @@
+[package]
+name = "ui-gpui"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+# A interface em GPUI, construída **ao lado** de `crates/ui` e não no lugar
+# dele. Os dois compilam e rodam durante a migração inteira (docs/10-MIGRACAO-GPUI.md
+# §5 e §7.2): `cargo run -p ui` e `cargo run -p ui-gpui`.
+#
+# O `crates/ui` só sai do workspace na fase 5, em commit isolado, para o
+# `git revert` ser um comando. Enquanto isso ele é o rollback e a referência de
+# paridade — abandonar a migração precisa custar zero.
+
+[dependencies]
+gpui = "0.2.2"
+gpui-component = "0.5.1"
+
+# As quatro camadas internas, intactas. Nenhuma delas sabe que a interface
+# mudou — é o que tornou o GPUI mais barato que o Tauri (§2.1).
+infrastructure = { path = "../infrastructure" }
+adapters = { path = "../adapters" }
+use-cases = { path = "../use-cases" }
+domain = { path = "../domain" }
+
+# `image` na mesma versão que o `gpui` resolve. Duas versões na árvore
+# compilariam, mas `DynamicImage` de uma **não é** o tipo da outra, e a ponte de
+# imagem (§3.1) atravessa exatamente essa fronteira.
+image = "0.25"
+# `RenderImage::new` recebe `SmallVec<[Frame; 1]>`, e o `gpui` não reexporta o
+# `smallvec` — quem constrói o argumento precisa da mesma versão que ele usa.
+smallvec = "1"
+tokio.workspace = true
+anyhow = "1.0"
+# Só para ler a versão de migration aplicada na tela de primeira luz — a mesma
+# versão e as mesmas features do `infrastructure`, senão são dois drivers de
+# SQLite na árvore falando com o mesmo arquivo.
+sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "sqlite", "migrate"] }
+
+[dev-dependencies]
+tempfile = "3.8"

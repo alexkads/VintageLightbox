@@ -79,6 +79,17 @@ jobs:
       - name: Run tests (release mode)
         run: cargo test --workspace --release --verbose
 
+      # O clippy do `ui-gpui` roda **aqui**, e não no job `clippy`: aquele fica
+      # no Ubuntu, e compilar este crate lá puxaria o Blade — o caminho que a
+      # matriz acima acabou de deixar de conferir. Só no macOS, porque o Windows
+      # do GPUI ainda é alpha no Zed e não vale travar o CI por ele hoje.
+      #
+      # ⚠️ Ele nasceu limpo, e é muito mais barato mantê-lo assim do que
+      # limpá-lo depois — foi o que custou 125 avisos nas camadas internas.
+      - name: Clippy (ui-gpui)
+        if: runner.os == 'macOS'
+        run: cargo clippy -p ui-gpui --all-targets --all-features -- -D warnings
+
   # Formatação não compila nada, então continua no runner mais barato.
   fmt:
     name: Rustfmt
