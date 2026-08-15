@@ -57,7 +57,7 @@ impl Aplicativo {
         cx: &mut Context<Self>,
     ) -> Self {
         let biblioteca = cx.new(|cx| Biblioteca::nova(fotos, previews.clone(), window, cx));
-        let revelacao = cx.new(|_| Revelacao::nova(previews));
+        let revelacao = cx.new(|cx| Revelacao::nova(previews, window, cx));
 
         Self {
             biblioteca,
@@ -80,12 +80,13 @@ impl Aplicativo {
     ///
     /// Sem seleção não faz nada, e o botão que chama isto fica desligado — a
     /// Revelação vazia não responde nenhuma pergunta.
-    pub fn revelar(&mut self, cx: &mut Context<Self>) {
+    pub fn revelar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(foto) = self.biblioteca.read(cx).foto_selecionada() else {
             return;
         };
 
-        self.revelacao.update(cx, |tela, cx| tela.abrir(foto, cx));
+        self.revelacao
+            .update(cx, |tela, cx| tela.abrir(foto, window, cx));
         self.tela = Tela::Revelacao;
         cx.notify();
     }
@@ -147,8 +148,8 @@ impl Aplicativo {
                     .when(na_revelacao, |b| b.primary())
                     .selected(na_revelacao)
                     .disabled(!tem_selecao)
-                    .on_click(cx.listener(|este, _ev, _window, cx| {
-                        este.revelar(cx);
+                    .on_click(cx.listener(|este, _ev, window, cx| {
+                        este.revelar(window, cx);
                     })),
             )
             .child(
@@ -239,8 +240,8 @@ mod testes {
         });
 
         janela
-            .update(cx, |app, _window, cx| {
-                app.revelar(cx);
+            .update(cx, |app, window, cx| {
+                app.revelar(window, cx);
                 assert_eq!(app.tela(), Tela::Biblioteca);
             })
             .expect("a janela deve estar aberta");
@@ -261,10 +262,10 @@ mod testes {
         });
 
         janela
-            .update(cx, |app, _window, cx| {
+            .update(cx, |app, window, cx| {
                 app.biblioteca
                     .update(cx, |tela, cx| tela.selecionar(Some(1), cx));
-                app.revelar(cx);
+                app.revelar(window, cx);
 
                 assert_eq!(app.tela(), Tela::Revelacao);
                 assert_eq!(
@@ -291,10 +292,10 @@ mod testes {
         });
 
         janela
-            .update(cx, |app, _window, cx| {
+            .update(cx, |app, window, cx| {
                 app.biblioteca
                     .update(cx, |tela, cx| tela.selecionar(Some(1), cx));
-                app.revelar(cx);
+                app.revelar(window, cx);
 
                 app.voltar_para_biblioteca(cx);
                 app.biblioteca
