@@ -75,6 +75,15 @@ VintageLightbox é um clone profissional do Adobe Lightroom desenvolvido em Rust
 
 **Leia se você quer**: Entender as escolhas técnicas e dependências.
 
+### 9. [Migração da UI para Tauri](09-MIGRACAO-TAURI.md) 🆕 📋 proposta
+**Conteúdo**: Planejamento de trocar `crates/ui` (egui) por Tauri 2 + frontend web
+- O que se mexe, medido: 78% do código não é tocado; 146 dos 478 testes morrem com o crate `ui`
+- A decisão que carrega o resto: onde o pixel é renderizado (3 caminhos, com barra de latência)
+- 8 fases com critério de saída, e um **gate de aborto** na fase 1
+- Alternativas — incluindo **ficar no egui**, que é a resposta certa em um dos cenários
+
+**Leia se você quer**: Avaliar a migração. **Nada foi decidido nem começado.**
+
 ## 🗺️ Guia de Leitura
 
 ### Para Usuários e Fotógrafos
