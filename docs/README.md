@@ -75,14 +75,20 @@ VintageLightbox é um clone profissional do Adobe Lightroom desenvolvido em Rust
 
 **Leia se você quer**: Entender as escolhas técnicas e dependências.
 
-### 9. [Migração da UI para Tauri](09-MIGRACAO-TAURI.md) 🆕 📋 proposta
-**Conteúdo**: Planejamento de trocar `crates/ui` (egui) por Tauri 2 + frontend web
-- O que se mexe, medido: 78% do código não é tocado; 146 dos 478 testes morrem com o crate `ui`
-- A decisão que carrega o resto: onde o pixel é renderizado (3 caminhos, com barra de latência)
-- 8 fases com critério de saída, e um **gate de aborto** na fase 1
-- Alternativas — incluindo **ficar no egui**, que é a resposta certa em um dos cenários
+### 9. [Migração da UI para Tauri](09-MIGRACAO-TAURI.md) ❌ descartado
+**Conteúdo**: Avaliação do Tauri 2 + frontend web, **recusada em 15/ago/2026**
 
-**Leia se você quer**: Avaliar a migração. **Nada foi decidido nem começado.**
+**Leia se você quer**: Saber **por que Tauri não** — IPC entre o slider e o pixel, cor entregue ao
+webview, npm no build. O inventário medido (§2) continua válido.
+
+### 10. [Migração da UI para GPUI](10-MIGRACAO-GPUI.md) 🆕 ✅ decidido
+**Conteúdo**: Trocar `crates/ui` (egui) por GPUI + `gpui-component` — o plano em vigor
+- **Spike já compilado e rodando**: `gpui 0.2.2`, ~600 linhas, compilou de primeira
+- O que sobrevive, medido: as 4 camadas internas **e** ~4.300 LOC de `ui/`, com 17 pontos de solda
+- Dois bloqueios reais: `image` 0.24 → 0.25 e a Metal Toolchain do Xcode
+- 6 fases, 11–15 semanas, com o app egui vivo até a última
+
+**Leia se você quer**: Executar a migração. **Comece pela fase 0.**
 
 ## 🗺️ Guia de Leitura
 

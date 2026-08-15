@@ -24,7 +24,7 @@ infrastructure = { path = "../infrastructure" }
 adapters = { path = "../adapters" }
 use-cases = { path = "../use-cases" }
 domain = { path = "../domain" }
-image = "0.24"
+image = "0.25"
 rayon = "1.10"
 parking_lot = "0.12"
 wgpu = "23.0"

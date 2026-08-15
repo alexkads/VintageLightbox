@@ -265,7 +265,12 @@ impl ImageExporter for ImageExporterImpl {
             .map_err(|e| DomainError::InfrastructureError(format!("Failed to create output file: {}", e)))?;
         
         let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(file, 90);
-        encoder.encode(&rgb_img, rgb_img.width(), rgb_img.height(), image::ColorType::Rgb8)
+        encoder.encode(
+            &rgb_img,
+            rgb_img.width(),
+            rgb_img.height(),
+            image::ExtendedColorType::Rgb8,
+        )
             .map_err(|e| DomainError::InfrastructureError(format!("Failed to encode JPEG: {}", e)))?;
 
         Ok(())

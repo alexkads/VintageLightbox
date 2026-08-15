@@ -1,8 +1,18 @@
 # Migração da UI para Tauri — planejamento
 
 **Escrito em**: 15 de agosto de 2026
-**Estado**: 📋 proposta — **nada foi decidido nem começado**
+**Estado**: ❌ **avaliado e descartado no mesmo dia.** A decisão foi **GPUI** —
+veja [10-MIGRACAO-GPUI.md](10-MIGRACAO-GPUI.md)
 **Base**: código em `dev` na data acima (com a árvore suja de 25 arquivos, veja §2.1)
+
+> 🚫 **Este documento não é o plano.** Ele foi escrito antes de a motivação real ficar clara — "o
+> egui fica feio e quebrado, e a IA não me ajuda rápido" — e continua valendo por um motivo só:
+> **é o registro de por que Tauri foi recusado.** O Tauri resolvia o mesmo problema, mas cobrava uma
+> camada de IPC entre o slider e o pixel (§3), gerenciamento de cor entregue ao webview, npm no
+> build, e 15–21 semanas. O GPUI dá o mesmo ganho sem nada disso e preservando mais código.
+>
+> O que continua útil aqui: o inventário medido (§2), o mapa de riscos (§11) e a §15.1, que avaliou
+> o GPUI e o reprovou **por um peso errado** — Windows em alpha, num projeto sem nenhum usuário.
 
 > Este documento planeja **trocar a camada de apresentação** — hoje `crates/ui` em egui 0.31 sobre
 > eframe/wgpu — por uma aplicação **Tauri 2** com frontend web. Ele **não** propõe reescrever o
@@ -499,10 +509,52 @@ meio. A fase 5 é a mais provável de dobrar. E a estimativa **não** inclui ree
 | Alternativa | Por que não |
 |-------------|-------------|
 | **Ficar no egui** e investir no design system | ✅ **É a alternativa séria**, e é a resposta certa se a motivação for só (C) da §1. Custo zero, risco zero, e a segunda passada da tela de importação (15/ago) é prova de que dá para chegar longe |
+| **GPUI** (o framework de UI do Zed) | 🔍 **A alternativa mais séria depois de "ficar no egui"** — e reprovada por uma coisa só. Veja §15.1 |
+| **Blade** (a biblioteca gráfica do kvark) | ❌ **Categoria errada, e obsoleta para este fim.** Blade não é framework de UI — é abstração de GPU, o lugar do `wgpu`. E o Zed **removeu** o Blade em favor do `wgpu` em 13/fev/2026 ([PR #46758](https://github.com/zed-industries/zed/pull/46758)), citando travamentos em NVIDIA/Wayland. O projeto já está em `wgpu 23`, que é exatamente onde o Zed foi parar |
 | **Slint** | É o que a documentação antiga (`02`, `05`, `06`) ainda descreve e que já foi abandonado uma vez na prática. Repetir a troca sem motivo novo é trocar de problema |
 | **Dioxus desktop** | Mesmo webview, ecossistema muito menor, e o Rust no frontend não resolve o problema de IPC da §3 — só o disfarça |
 | **Electron** | Descartado: perderia o binário único e toda a integração nativa em Rust |
 | **Migrar só uma tela para Tauri**, mantendo o resto em egui | ❌ Não existe: são dois processos, dois catálogos abertos no mesmo SQLite, dois caches. Corte é único por aplicativo |
+
+### 15.1 GPUI, em detalhe — por que quase, e por que não
+
+Avaliado em 15/ago/2026, a pedido, antes de decidir por Tauri.
+
+**O que o GPUI resolveria, e não é pouco:**
+
+- 🎯 **Mata a §3 inteira.** Renderização segue no processo, na GPU, sem IPC entre o slider e o pixel.
+  O maior risco do plano Tauri — e o gate da fase 1 — simplesmente deixa de existir.
+- ✅ **Os ~4.400 LOC de Rust da §2.3 ficam onde estão** (`gpu_processor`, `async_loader`,
+  `image_processing`, `state`). No Tauri eles mudam de crate; aqui, nem isso.
+- ✅ **Atende a queixa concreta da §1(A)**: layout flexbox e API de estilo no espírito do Tailwind, em
+  vez da aritmética de retângulo que enche `dock_viewer.rs` e `import_view.rs`.
+- ✅ **`gpui-component`** (longbridge) traz 60+ componentes, incluindo **docking serializável**,
+  tabelas virtualizadas e gráficos — cobrindo §7.2 e boa parte da §6.
+
+**O que reprova, e basta uma linha:**
+
+- 🚨 **Windows.** O suporte do próprio Zed a Windows ainda é **alpha**, com relatos em 2026 de
+  *DirectX device removal* e flicker ([issue #36798](https://github.com/zed-industries/zed/issues/36798)).
+  Este produto declara **Windows 10+ como plataforma de primeira classe** (README e matriz do CI).
+  Apostar a camada de apresentação inteira num renderizador em alpha na metade do público é a única
+  linha que decide sozinha.
+- ⚠️ **Pre-1.0** — `gpui 0.2.0` no crates.io desde out/2025, com quebras assumidas entre versões. Não
+  é pior que o egui (que já obrigou 0.28 → 0.31 aqui), mas também **não é melhor**: troca-se de churn,
+  não se sai dela.
+- ⚠️ **Sem DevTools e sem hot reload.** Metade da motivação (A) — ajustar espaçamento sem recompilar —
+  continua sem resposta. É o ponto em que o Tauri ganha limpo.
+- ⚠️ **Os 146 testes de UI morrem do mesmo jeito** (§8). O GPUI não devolve nada equivalente aos 99
+  `egui_kittest` com snapshot.
+- ❌ **Não serve à motivação (B)** da §1. Se o objetivo for cliente web ou mobile depois, GPUI é
+  desktop nativo e ponto final.
+
+**Veredito**: GPUI só ganha do Tauri se a motivação for (A)+(C) **e** o Windows deixar de ser
+primeira classe. Enquanto o Windows estiver no README e no CI, é não.
+
+⚠️ **E o incômodo que o GPUI expõe**: o ganho principal dele sobre o egui — GPU no processo, Rust
+puro, sem IPC — **o egui já dá hoje**. A troca seria reescrever ~15.000 LOC por ergonomia de layout.
+Isso reforça, não enfraquece, a conclusão da §1: se a motivação não for (A) ou (B), a resposta certa
+é ficar onde está.
 
 ---
 

@@ -27,6 +27,42 @@ pub struct PreviewManager {
     cache_dir: PathBuf,
 }
 
+/// Grava a imagem como JPEG, convertendo para RGB8 antes.
+///
+/// # Por que a conversão não é opcional
+///
+/// **JPEG não tem canal alfa.** Até o `image` 0.24 os dois métodos aqui
+/// passavam `image.color()` direto para o encoder, e uma foto RGBA era aceita
+/// sem reclamação — gravando bytes de 4 canais num formato de 3. O 0.25 recusa
+/// explicitamente:
+///
+/// ```text
+/// The encoder or decoder for Jpeg does not support the color type `Rgba8`
+/// ```
+///
+/// O `image_exporter.rs`, no mesmo crate, sempre fez `to_rgb8()` antes de
+/// encodar — eram dois caminhos para a mesma decisão, e só um estava certo.
+/// Isto aqui é o caminho certo, agora num lugar só.
+///
+/// ⚠️ **Descartar o alfa é a única saída, e é o que já acontecia.** Miniatura e
+/// preview são para exibição, não para reedição — o pixel editável vem do RAW.
+/// Preservar transparência exigiria trocar o formato do cache, que é outra
+/// decisão e outro custo.
+fn encode_jpeg<W: std::io::Write>(
+    encoder: &mut image::codecs::jpeg::JpegEncoder<W>,
+    image: &DynamicImage,
+) -> Result<(), String> {
+    let rgb = image.to_rgb8();
+    encoder
+        .encode(
+            &rgb,
+            rgb.width(),
+            rgb.height(),
+            image::ExtendedColorType::Rgb8,
+        )
+        .map_err(|e| e.to_string())
+}
+
 
 impl PreviewManager {
     pub fn new() -> Self {
@@ -92,8 +128,7 @@ impl PreviewManager {
         let mut bytes: Vec<u8> = Vec::new();
         // Medium quality JPEG for thumbnails
         let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes, 80);
-        encoder.encode(image.as_bytes(), image.width(), image.height(), image.color())
-            .map_err(|e| e.to_string())?;
+        encode_jpeg(&mut encoder, image)?;
 
         let conn = self.conn.lock().unwrap();
         let now = chrono::Utc::now().timestamp();
@@ -135,8 +170,7 @@ impl PreviewManager {
         let mut bytes: Vec<u8> = Vec::new();
         // High quality JPEG for previews
         let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes, 90);
-        encoder.encode(image.as_bytes(), image.width(), image.height(), image.color())
-            .map_err(|e| e.to_string())?;
+        encode_jpeg(&mut encoder, image)?;
 
         let conn = self.conn.lock().unwrap();
         let now = chrono::Utc::now().timestamp();
