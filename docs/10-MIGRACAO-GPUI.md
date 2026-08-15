@@ -242,11 +242,20 @@ de cinco meses.
 | ✅ Miniaturas do cache, sob demanda | `e355676` |
 | ✅ Cache com descarte (LRU), capacidade tirada da janela | `ff3ed2a` |
 | ✅ Filtros de nota e sinalizador | `68dfc9d` |
-| ⬜ Filmstrip, árvore de pastas, filtro por cor e busca na barra | |
+| ✅ Árvore de pastas e filtro por cor | `c7ea9f9` |
+| ✅ Seleção e filmstrip | `7bb02c7` |
+| ⬜ Busca por texto na barra (a lógica existe; falta o campo) | |
 | ⬜ Carregamento assíncrono das fotos (hoje bloqueia a abertura) | |
 
-**Estado medido**: 2.000 fotos abertas, 126 MB residentes, 0,0% de CPU parado. **Os 60fps não
-foram medidos** — isso é rolagem com olho humano, e é o que decide a fase.
+**Estado medido**: 2.000 fotos abertas com árvore, filtros, grade e filmstrip — 102 MB residentes,
+0,3% de CPU parado. **Os 60fps não foram medidos** — isso é rolagem com olho humano, e é o que
+decide a fase.
+
+⚠️ **A busca depende de uma decisão que ainda não foi tomada**: campo de texto exige adotar o
+`input` do `gpui-component`, o que traz junto o tema e o estado global dele
+(`gpui_component::init`). É o caminho que o §4 já prevê — o mapa inteiro de componentes vem de lá —
+mas é adoção de base de UI, e não um campo solto. Fica para o começo da fase 2, junto com os
+sliders, que precisam da mesma base.
 
 #### `semear-catalogo` — como medir sem depender do acervo de ninguém
 
@@ -266,7 +275,7 @@ introduz. As notas vão de 0 a 5 em partes iguais — com 2.000, filtrar por ★
 ⚠️ Ele **recusa** escrever em catálogo que já tem fotos: `VLB_CATALOG` é texto livre e o padrão dele
 é a biblioteca real.
 
-#### As três armadilhas desta fase, todas silenciosas
+#### As armadilhas desta fase, todas silenciosas
 
 1. 🚨 **O GPUI quer BGRA; o crate `image` produz RGBA.** `RenderImage` é documentado como "in BGRA
    format" e o Metal cria as texturas com `BGRA8Unorm`, mas `image::Frame` carrega um `RgbaImage` —
@@ -276,6 +285,10 @@ introduz. As notas vão de 0 a 5 em partes iguais — com 2.000, filtrar por ★
    a foto errada — e continuaria bonita. Só apareceu porque o compilador acusou a variável não usada.
 3. 🚨 **`Flag::as_code` dizia `2` para rejeitada e sempre gravou `-1`.** Um filtro escrito a partir
    da documentação devolveria lista vazia, parecendo "não há nenhuma".
+4. ⚠️ **`Path::parent()` não serve para caminho vindo do banco.** No macOS ele não reconhece `\`, e
+   `C:\Fotos\2024\a.nef` viraria uma pasta só. O corte é por texto, aceitando os dois separadores.
+5. ⚠️ **Cada closure é um tipo concreto**, então `impl IntoElement` não unifica dois botões com
+   ações diferentes num `Vec` — a fronteira que monta lista devolve `AnyElement`.
 
 ⚠️ **E um falso alarme que quase virou achado**: `ps -o pcpu` mostrou 100% com o app parado — ele
 reporta a **média desde o início do processo**. O instantâneo (`top -l 3`) é 0,0%. Número de CPU só
