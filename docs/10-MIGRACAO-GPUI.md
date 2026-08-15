@@ -340,6 +340,36 @@ presets. O `gpu_processor.rs` e o WGSL **não mudam** — só o último passo, q
 ⚠️ Aqui se consertam as duas lacunas que o STATUS registra: a exportação ignora o crop, e o
 undo/redo ignora o crop. Reproduzir defeito conhecido de propósito custa mais do que arrumar.
 
+#### O motor e os primeiros 11 ajustes ✅
+
+`4bd8e7d` (o motor), `e62a041` (os sliders). O caminho de um arrasto está de pé:
+
+```text
+slider → SliderEvent::Change → Ajustes → Pedido → (thread wgpu) → RenderImage
+```
+
+O plano acertou o custo do motor: `gpu_processor.rs` cria a **própria** `wgpu::Instance` numa thread
+de fundo e nunca soube que existia eframe. A única referência a egui nas 578 linhas era o tipo de
+saída.
+
+🚨 **`SliderState::set_value` não emite `Change`** — só o caminho do ponteiro publica o evento. É o
+**oposto** do `InputState::set_value` da busca, que emite. Mesmo nome, dois comportamentos, na mesma
+biblioteca; custou dois testes que passavam por engano. E a assimetria virou carga estrutural: o
+reset ao neutro na abertura da foto usa `set_value` **porque** ele não emite, senão abrir qualquer
+foto viraria 11 pedidos à GPU. Tem teste prendendo isso.
+
+🔑 **Os controles são uma tabela** ([`controles.rs`](../crates/ui-gpui/src/revelacao/controles.rs)),
+não 11 blocos de interface iguais — o painel de HSL sozinho tem 24. E o neutro de cada um vem de
+`Ajustes::default`, não de um número escrito ao lado: dois lugares dizendo qual é o neutro é ter um
+deles errado mais cedo ou mais tarde.
+
+⚠️ **Nem todo neutro é zero.** `contrast` é 1.0, `lens_vignette_midpoint` é 50.0, `sharpen_radius` é
+1.0. Um `#[derive(Default)]` daria zero nos três e **toda** foto abriria alterada — sem erro, e
+parecendo decisão de cor de quem escreveu o shader. É o que
+`o_neutro_devolve_o_pixel_intacto` cobra.
+
+Falta da fase: curva de tons, HSL nos 8 canais, detalhe, lente, crop overlay, undo/redo e presets.
+
 #### 🚨 O critério de saída não media o que a fase 2 constrói
 
 Descoberto em 15/ago, ao portar o motor. **Exportar não passa pelo shader.** São dois caminhos
