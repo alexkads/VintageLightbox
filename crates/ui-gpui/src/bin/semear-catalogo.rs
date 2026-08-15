@@ -151,15 +151,23 @@ async fn main() {
         .await
         .expect("inserir a foto");
 
+        let sintetica = foto_sintetica(i);
         previews
-            .save_thumbnail(&id, &foto_sintetica(i))
+            .save_thumbnail(&id, &sintetica)
             .expect("gravar a miniatura");
+        // O preview "Large" também, e não só a miniatura: é dele que a Revelação
+        // tira a imagem grande. Sem isto o catálogo sintético abriria a
+        // Revelação em "não tem preview no cache" — e a queda para a miniatura
+        // esconderia justamente o caminho que se quer conferir.
+        previews
+            .save_preview(&id, &sintetica)
+            .expect("gravar o preview");
 
         if (i + 1) % 250 == 0 {
             println!("  {} de {quantas}", i + 1);
         }
     }
 
-    println!("✅ {quantas} fotos e {quantas} miniaturas gravadas.");
+    println!("✅ {quantas} fotos, {quantas} miniaturas e {quantas} previews gravados.");
     println!("   VLB_CATALOG={} cargo run -p ui-gpui", catalogo.display());
 }

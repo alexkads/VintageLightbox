@@ -159,6 +159,31 @@ impl Biblioteca {
         self.visiveis = indices_visiveis(&self.fotos, &self.filtros);
     }
 
+    /// A foto selecionada, para quem está de fora.
+    ///
+    /// Devolve uma cópia, e não uma referência: quem pergunta é a raiz, para
+    /// levar a foto até a Revelação, e o que ela leva tem de continuar valendo
+    /// depois que a grade mudar de filtro.
+    pub fn foto_selecionada(&self) -> Option<PhotoViewModel> {
+        self.selecionada.map(|i| self.fotos[i].clone())
+    }
+
+    /// Seleciona por índice **no acervo**.
+    pub fn selecionar(&mut self, no_acervo: Option<usize>, cx: &mut Context<Self>) {
+        self.selecionada = no_acervo;
+        cx.notify();
+    }
+
+    /// Clicar na já selecionada desmarca — é como se desfaz sem procurar botão.
+    pub fn alternar_selecao(&mut self, no_acervo: usize, cx: &mut Context<Self>) {
+        let alvo = if self.selecionada == Some(no_acervo) {
+            None
+        } else {
+            Some(no_acervo)
+        };
+        self.selecionar(alvo, cx);
+    }
+
     fn cabecalho(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let total = self.fotos.len();
         let mostradas = self.visiveis.len();
@@ -385,8 +410,10 @@ impl Biblioteca {
                               _ev: &gpui::ClickEvent,
                               _window,
                               cx: &mut Context<Self>| {
-                            this.selecionada = Some(no_acervo);
-                            cx.notify();
+                            // A faixa **seleciona**, não alterna: quem clica no
+                            // filmstrip está navegando entre vizinhas, e
+                            // desmarcar no meio disso esvaziaria a própria faixa.
+                            this.selecionar(Some(no_acervo), cx);
                         },
                     ))
                     .into_any_element(),
@@ -662,19 +689,7 @@ impl Render for Biblioteca {
                                                     selecionada == Some(no_acervo),
                                                     move |_ev, _window, cx| {
                                                         eu.update(cx, |tela, cx| {
-                                                            // Clicar na já
-                                                            // selecionada
-                                                            // desmarca: é como
-                                                            // se desfaz sem
-                                                            // procurar botão.
-                                                            tela.selecionada = if tela.selecionada
-                                                                == Some(no_acervo)
-                                                            {
-                                                                None
-                                                            } else {
-                                                                Some(no_acervo)
-                                                            };
-                                                            cx.notify();
+                                                            tela.alternar_selecao(no_acervo, cx);
                                                         });
                                                     },
                                                     cx,

@@ -11,7 +11,7 @@ use gpui_component::Root;
 use infrastructure::cache::preview_manager::PreviewManager;
 use infrastructure::paths::AppPaths;
 
-use ui_gpui::biblioteca::tela::Biblioteca;
+use ui_gpui::app::Aplicativo;
 use ui_gpui::tema;
 
 #[tokio::main]
@@ -60,6 +60,8 @@ async fn main() {
         // E logo em seguida o nosso tema, porque o `init` deixa o do shadcn
         // ligado e sincronizado com o claro/escuro do sistema.
         tema::aplicar(cx);
+        // As teclas da raiz — hoje só o `Esc` que sai da Revelação.
+        ui_gpui::app::init(cx);
 
         let bounds = Bounds::centered(None, size(px(1100.), px(720.)), cx);
         cx.open_window(
@@ -68,14 +70,14 @@ async fn main() {
                 ..Default::default()
             },
             |window, cx| {
-                let biblioteca =
-                    cx.new(|cx| Biblioteca::nova(fotos.clone(), previews.clone(), window, cx));
+                let aplicativo =
+                    cx.new(|cx| Aplicativo::novo(fotos.clone(), previews.clone(), window, cx));
                 // A primeira camada da janela **tem** de ser o `Root`: é ele
                 // que hospeda diálogo, gaveta e aviso, e quem sabe qual campo
                 // de texto está com o foco. O `gpui-component` procura por ele
                 // com um `expect` — sem o `Root`, abrir um diálogo derruba o
                 // app em vez de mostrar o diálogo.
-                cx.new(|cx| Root::new(biblioteca, window, cx))
+                cx.new(|cx| Root::new(aplicativo, window, cx))
             },
         )
         .expect("abrir a janela");
