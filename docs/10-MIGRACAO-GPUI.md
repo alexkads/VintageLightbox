@@ -368,7 +368,31 @@ deles errado mais cedo ou mais tarde.
 parecendo decisão de cor de quem escreveu o shader. É o que
 `o_neutro_devolve_o_pixel_intacto` cobra.
 
-Falta da fase: curva de tons, HSL nos 8 canais, detalhe, lente, crop overlay, undo/redo e presets.
+#### Os 42 controles ✅ — e a curva de tons, que não tem nenhum
+
+`2f67abb`. Detalhe (4), HSL/cor (8), HSL/luminância (8), HSL/matiz (8) e Lente (3) entraram como
+**dados na tabela**, não como código de interface: o HSL inteiro são 24 linhas. Seis seções
+sanfonadas, fechadas menos o Básico — como no legado (`default_open(true)` só nele).
+
+🚨 **A curva de tons ficou de fora, e é decisão de paridade.** `Ajustes` tem os quatro `tone_curve_*`
+e o shader os aplica, mas **no legado nenhum controle os escreve**:
+
+```bash
+grep -rn "active_tone_curve" crates/ui/src/   # reset, undo/redo, carga do banco, preset. Nenhum slider.
+```
+
+A seção "Tone Curve" de lá desenha um gráfico calculado a partir de exposição, contraste, altas luzes,
+sombras, brancos e pretos — ela **não toca** nos quatro parâmetros que levam o nome dela. Dar slider a
+eles seria feature nova (§7.1), e o preço não é estético: com feature nova, qualquer diferença entre
+os dois apps deixa de ser conferível, porque não dá para saber se é defeito de porte ou escopo que só
+um lado tem. Há teste prendendo o número — **42 controles para 46 ajustes** — para o impulso de
+"completar a tabela" falhar em vez de passar.
+
+⚠️ Duas faixas que não davam para adivinhar, e por isso foram lidas uma a uma de `dock_viewer.rs`:
+**matiz vai de -180 a 180**, o dobro das outras duas famílias de HSL, porque matiz é um círculo; e o
+**raio da nitidez começa em 0,5**, porque raio zero não tem pixel de vizinhança.
+
+Falta da fase: crop overlay, undo/redo e presets — nenhum deles é slider.
 
 #### 🚨 O critério de saída não media o que a fase 2 constrói
 
