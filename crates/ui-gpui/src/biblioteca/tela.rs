@@ -47,6 +47,13 @@ pub struct Biblioteca {
     /// vive — recalcular a cada quadro seria varrer 2.000 caminhos 60 vezes por
     /// segundo para chegar sempre à mesma lista.
     pastas: Vec<Pasta>,
+    /// Índice **no acervo** da foto selecionada.
+    ///
+    /// No acervo e não na lista filtrada: mudar de filtro não pode trocar qual
+    /// foto está selecionada. Guardando a posição filtrada, escolher outra
+    /// pasta manteria o índice e selecionaria uma foto diferente sem ninguém
+    /// clicar em nada.
+    selecionada: Option<usize>,
 }
 
 /// Quantas linhas cabem na altura da janela.
@@ -87,6 +94,7 @@ impl Biblioteca {
             filtros: Filtros::default(),
             visiveis: Vec::new(),
             pastas: Vec::new(),
+            selecionada: None,
         };
         tela.pastas = pastas_do_acervo(&tela.fotos);
         // Nasce com a lista pronta: sem isto o primeiro quadro mostraria uma
@@ -243,6 +251,104 @@ impl Biblioteca {
             .child(div().flex().gap(px(4.)).children(cores))
     }
 
+    /// A faixa de miniaturas do rodapé.
+    ///
+    /// Mostra a **vizinhança da selecionada**, e não o acervo inteiro: o
+    /// filmstrip existe para responder "o que vem antes e depois desta", que é
+    /// a pergunta de quem está escolhendo entre fotos parecidas. Uma faixa com
+    /// 2.000 itens responderia a mesma coisa que a grade, com menos espaço.
+    ///
+    /// Sem seleção ele mostra o começo da lista — é o que dá para dizer antes
+    /// de alguém escolher alguma coisa.
+    fn filmstrip(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        /// Quantas de cada lado. Ímpar de propósito: a selecionada fica no meio.
+        const VIZINHAS: usize = 7;
+
+        let posicao_atual = self
+            .selecionada
+            .and_then(|no_acervo| self.visiveis.iter().position(|&i| i == no_acervo));
+
+        let inicio = posicao_atual
+            .map(|p| p.saturating_sub(VIZINHAS))
+            .unwrap_or(0);
+        let fim = (inicio + VIZINHAS * 2 + 1).min(self.visiveis.len());
+
+        let mut itens = Vec::new();
+        for posicao in inicio..fim {
+            let no_acervo = self.visiveis[posicao];
+            let foto = &self.fotos[no_acervo];
+            let e_a_selecionada = self.selecionada == Some(no_acervo);
+
+            itens.push(
+                div()
+                    .id(SharedString::from(format!("faixa-{}", foto.id)))
+                    .w(px(56.))
+                    .h(px(56.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(px(3.))
+                    .cursor_pointer()
+                    .border_1()
+                    .border_color(if e_a_selecionada {
+                        rgb(0x6a9ae0)
+                    } else {
+                        rgb(0x2a2a2a)
+                    })
+                    .bg(rgb(0x232323))
+                    .child(
+                        match self
+                            .cache
+                            .lock()
+                            .expect("o cache de miniaturas não deve estar envenenado")
+                            .obter(&self.previews, &foto.id)
+                        {
+                            Miniatura::Pronta(imagem) => {
+                                img(imagem).max_w(px(52.)).max_h(px(52.)).into_any_element()
+                            }
+                            Miniatura::Ausente => div()
+                                .text_xs()
+                                .text_color(rgb(0x5a5a5a))
+                                .child("—")
+                                .into_any_element(),
+                        },
+                    )
+                    .on_click(cx.listener(
+                        move |this: &mut Self,
+                              _ev: &gpui::ClickEvent,
+                              _window,
+                              cx: &mut Context<Self>| {
+                            this.selecionada = Some(no_acervo);
+                            cx.notify();
+                        },
+                    ))
+                    .into_any_element(),
+            );
+        }
+
+        let legenda: SharedString = match self.selecionada {
+            Some(i) => format!("selecionada: {}", self.fotos[i].name).into(),
+            None => "nenhuma foto selecionada".into(),
+        };
+
+        div()
+            .flex()
+            .items_center()
+            .gap(px(12.))
+            .p(px(8.))
+            .border_t_1()
+            .border_color(rgb(0x303030))
+            .child(
+                div()
+                    .w(px(200.))
+                    .text_xs()
+                    .text_color(rgb(0x9a9a9a))
+                    .truncate()
+                    .child(legenda),
+            )
+            .child(div().flex().gap(px(4.)).children(itens))
+    }
+
     /// A coluna de pastas, à esquerda da grade.
     fn arvore_de_pastas(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let escolhida = self.filtros.pasta.clone();
@@ -347,7 +453,9 @@ fn celula(
     foto: &PhotoViewModel,
     previews: &PreviewManager,
     cache: &Mutex<CacheDeMiniaturas>,
-) -> impl IntoElement {
+    selecionada: bool,
+    ao_clicar: impl Fn(&gpui::ClickEvent, &mut Window, &mut gpui::App) + 'static,
+) -> gpui::AnyElement {
     let miniatura = cache
         .lock()
         .expect("o cache de miniaturas não deve estar envenenado")
@@ -379,18 +487,37 @@ fn celula(
     };
 
     div()
+        .id(SharedString::from(format!("celula-{}", foto.id)))
         .flex()
         .flex_col()
         .gap(px(4.))
         .w(px(LADO_DO_ITEM))
+        .p(px(2.))
+        .rounded(px(4.))
+        .cursor_pointer()
+        // A moldura da seleção é **borda**, e não fundo: fundo colorido atrás
+        // de uma foto muda como a foto é percebida, e num programa de revelação
+        // isso é mentir sobre a cor. Pela mesma razão a borda é fina.
+        .border_1()
+        .border_color(if selecionada {
+            rgb(0x6a9ae0)
+        } else {
+            rgb(0x1b1b1b)
+        })
         .child(conteudo)
         .child(
             div()
                 .text_xs()
-                .text_color(rgb(0x9a9a9a))
+                .text_color(if selecionada {
+                    rgb(0xe6e6e6)
+                } else {
+                    rgb(0x9a9a9a)
+                })
                 .truncate()
                 .child(SharedString::from(foto.name.clone())),
         )
+        .on_click(ao_clicar)
+        .into_any_element()
 }
 
 impl Render for Biblioteca {
@@ -413,6 +540,11 @@ impl Render for Biblioteca {
         let visiveis = Arc::new(self.visiveis.clone());
         let previews = self.previews.clone();
         let cache = self.cache.clone();
+        let selecionada = self.selecionada;
+        // O closure do `uniform_list` é `'static` e recebe `&mut App`, não
+        // `&mut self` — para escrever no estado a partir dele, é preciso levar
+        // uma referência à entidade e pedir a ela que se atualize.
+        let eu = cx.entity();
 
         div()
             .flex()
@@ -448,7 +580,31 @@ impl Render for Biblioteca {
                                             // filtro — e a grade continuaria bonita, que
                                             // é o que torna esse defeito caro.
                                             .map(|posicao| {
-                                                celula(&fotos[visiveis[posicao]], &previews, &cache)
+                                                let no_acervo = visiveis[posicao];
+                                                let eu = eu.clone();
+                                                celula(
+                                                    &fotos[no_acervo],
+                                                    &previews,
+                                                    &cache,
+                                                    selecionada == Some(no_acervo),
+                                                    move |_ev, _window, cx| {
+                                                        eu.update(cx, |tela, cx| {
+                                                            // Clicar na já
+                                                            // selecionada
+                                                            // desmarca: é como
+                                                            // se desfaz sem
+                                                            // procurar botão.
+                                                            tela.selecionada = if tela.selecionada
+                                                                == Some(no_acervo)
+                                                            {
+                                                                None
+                                                            } else {
+                                                                Some(no_acervo)
+                                                            };
+                                                            cx.notify();
+                                                        });
+                                                    },
+                                                )
                                             })
                                             .collect::<Vec<_>>(),
                                     )
@@ -459,5 +615,6 @@ impl Render for Biblioteca {
                         .p(px(8.)),
                     ),
             )
+            .child(self.filmstrip(cx))
     }
 }
