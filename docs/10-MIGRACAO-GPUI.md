@@ -377,6 +377,29 @@ com mais de um. `default-run` no `Cargo.toml` fez a instrução escrita passar a
 5% de distância. Numa barra de 15 botões isso é o mesmo que não marcar nenhum, então o filtro aceso
 virou `primary` enquanto não houver decisão melhor.
 
+#### O palco ✅ — a Revelação existe, e a navegação também
+
+`91a80dc`. Nenhum dos ~50 ajustes pode ser conferido sem a foto embaixo, então a Revelação começa
+pelo palco: a imagem grande, e o caminho de ida e volta a partir da Biblioteca.
+
+Com duas telas, alguém precisa saber qual está no ar — e esse alguém não pode ser nenhuma das duas.
+Nasce o [`app.rs`](../crates/ui-gpui/src/app.rs), com o `Aplicativo` como raiz da janela.
+
+🔑 **A selecão é copiada, não compartilhada.** As duas telas escolhem foto por razões diferentes: na
+Biblioteca escolher é *comparar*, na Revelação é *editar*. Um estado só faria voltar à grade e clicar
+noutra miniatura trocar, calado, a foto que está sendo editada — e o próximo ajuste cairia na foto
+errada. Tem teste, e o teste descreve o defeito que impede.
+
+⚠️ **`Esc` não pode ser global.** O campo de busca usa `Esc` para se limpar, e uma ligação sem
+contexto roubaria a tecla dele. Com `key_context("Aplicativo")` o `Esc` só chega à raiz quando nenhum
+campo de texto tem o foco — que é exatamente quando "voltar" é o que se quer. É a primeira vez que
+duas peças disputam uma tecla neste app, e não será a última: a Revelação já tem `\` (antes/depois) e
+`R` (crop) esperando, do lado do egui.
+
+⚠️ **`abrir` lê e decodifica na thread da interface.** Preview "Large" é um JPEG de poucos
+milissegundos, mas quando a Revelação carregar o RAW em resolução plena, é este o ponto que vira
+assíncrono — a mesma pendência que a abertura da Biblioteca ainda tem.
+
 #### ✅ `TestAppContext` está de pé — e a decisão foi tomada antes dos sliders
 
 O substituto que o §6 prevê para os 146 testes de UI **existe e roda** (`544a0cb`). Veio agora, e não
