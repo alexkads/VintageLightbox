@@ -1040,7 +1040,65 @@ têm botão** — nascem desligados, o que é melhor do que um botão que a tela
 ordenação da grade não tem a coluna "tipo de mídia" separada em RAW+JPEG, porque o legado também não
 tem.
 
-### Fase 4 — Impressão, multi-monitor, docking, atalhos (2–3 semanas)
+### Fase 4 — Impressão, multi-monitor, docking, atalhos 🔄 **em andamento**
+
+#### 🚨 Antes de portar: o módulo de impressão do legado não imprime
+
+`print_view.rs` (1.132 LOC) é uma **prévia de papel** — modelo, tamanho, margens, e onde as fotos
+caem. O botão "Print" mostra `"Print feature coming soon!"` num aviso, e o "Export PDF" mostra
+`"PDF export coming soon!"`. Portar é portar a prévia; não há caminho de impressão para preservar.
+
+🔑 **E há dois módulos de impressão lá, um deles morto.** `print_dialog.rs` (288 LOC) tem o próprio
+`PrintLayoutOption`, o próprio `PaperSizeOption` e a própria `OrientationOption` — mas
+`state.show_print_dialog` **nunca é escrito como `true`** e `state.print_dialog_state` nunca recebe
+`Some(...)`: o diálogo não tem como abrir. É o terceiro achado da mesma família (o `GpuEditParams::
+default` da fase 2, o JPEG com alfa da fase 0): **duas versões da mesma decisão, e só uma viva.**
+O que se porta é a viva.
+
+#### A geometria da página ✅ — e três contas que o legado não faz
+
+[`impressao/pagina.rs`](../crates/ui-gpui/src/impressao/pagina.rs): papel, orientação, margem,
+espaçamento e grade, tudo **em milímetro**, sem tela. 16 testes.
+
+🔑 **Milímetro, e não fração do papel** — que era a alternativa óbvia, e traz junto uma armadilha:
+fração não é isotrópica. Numa A4 retrato, `0,5` na horizontal são 105 mm e na vertical são 148,5 mm;
+encaixar foto sem esticar, que é conta de proporção, sairia deformado em silêncio. A tela pede uma
+escala (`escala_para`) e multiplica — é a única ponte entre o módulo e o pixel.
+
+🚨 **A prévia do legado desenha o papel com a proporção da janela.** A folha é
+`available.x * 0.8 × available.y * 0.9`, e `paper_size`/`orientation` **não entram na conta em lugar
+nenhum**: A4 e Tabloide desenham o mesmo retângulo, girar para paisagem não muda nada, e maximizar a
+janela muda o formato do papel. Os dois controles existem, são gravados no estado e nunca chegam a um
+pixel.
+
+**Aqui a proporção é a do papel, e a divergência é decisão** — a mesma do passo de histórico por
+gesto na fase 2: *prévia que muda de forma junto com a janela não é paridade conferível*, e uma
+prévia de impressão que não mostra o papel não responde a única pergunta que ela existe para
+responder.
+
+⚠️ **A margem do legado não é a que o campo diz.** Ela é `margem_mm / 297.0` — a altura da A4 —
+aplicada como fração **nos dois eixos, para qualquer papel**. Pedir 10 mm numa A4 dá 7,1 mm nas
+laterais; num Tabloide dá 9,4 mm nas laterais e 14,5 mm em cima. O campo se chama "Margins (mm)" e
+não descreve nenhuma das duas distâncias. Aqui a margem é a mesma distância nos quatro lados, e há
+teste medindo os quatro.
+
+🚨 **E a grade personalizada conta errado de um jeito que se contradiz na mesma tela.**
+`PrintTemplate::Custom.photos_per_page()` responde **4** para qualquer combinação, porque
+`grid_dimensions` devolve o `(2, 2)` que é só o valor inicial dos campos. A prévia desenha
+`custom_cols × custom_rows` células: numa grade 6 × 8 ela mostra 48 fotos numa folha enquanto o
+rodapé promete 12 páginas para as mesmas 48. Nenhum dos dois números avisa que discorda do outro.
+
+⚠️ **Duas guardas que o legado não tem, e cujo sintoma é o mesmo: a folha aparece vazia.** Margem
+acima de metade do papel (o campo vai até 50 mm, mas nada impede o resto da conta) e espaçamento
+maior que a área útil produzem célula de largura **negativa** — retângulo invertido não falha, ele
+some, e o desenho fica idêntico ao de "nenhuma foto escolhida". Aqui o piso é zero, com teste nos
+dois casos.
+
+⚠️ **O legado desenha a página 1 e só ela.** As células são preenchidas a partir do índice 0 da
+lista e o rodapé diz "Page 1 of 7", sem caminho para as outras seis. `fotos_da_pagina` existe porque
+a folha é a unidade da impressão, mas **botão de página não entra**: seria feature nova (§7.1), e é
+o tipo de coisa que se acrescenta em uma linha no dia em que o dono pedir.
+
 
 ### Fase 5 — Testes e desligamento (1–2 semanas)
 

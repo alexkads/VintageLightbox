@@ -8,5 +8,6 @@ pub mod app;
 pub mod biblioteca;
 pub mod imagem;
 pub mod importacao;
+pub mod impressao;
 pub mod revelacao;
 pub mod tema;
