@@ -16,6 +16,7 @@ use infrastructure::cache::preview_manager::PreviewManager;
 use crate::biblioteca::tela::Biblioteca;
 use crate::importacao::explorador::{Explorador, GeradorDeMiniaturas, Importador, SeletorDePasta};
 use crate::importacao::tela::Importacao;
+use crate::impressao::tela::Impressao;
 use crate::revelacao::persistencia::Gravador;
 use crate::revelacao::presets::GuardaDePresets;
 use crate::revelacao::tela::Revelacao;
@@ -77,11 +78,15 @@ pub fn init(cx: &mut gpui::App) {
 pub enum Tela {
     Biblioteca,
     Revelacao,
+    Impressao,
 }
 
 pub struct Aplicativo {
     biblioteca: Entity<Biblioteca>,
     revelacao: Entity<Revelacao>,
+    /// A folha de impressão. Guarda o leiaute entre uma visita e outra: papel,
+    /// margem e modelo são escolhas sobre o papel, não sobre a foto.
+    impressao: Entity<Impressao>,
     /// O modal de importação. **Sempre existe**, e só aparece quando aberto: ele
     /// guarda a listagem, e recriá-lo a cada abertura jogaria fora o que o
     /// fotógrafo já marcou ao fechar o modal por engano.
@@ -107,6 +112,7 @@ impl Aplicativo {
         // com a chave `import::` na mesma tabela, e dois `PreviewManager` para o
         // mesmo arquivo seriam dois caches do mesmo lugar.
         let previews_para_importar = previews.clone();
+        let previews_para_imprimir = previews.clone();
         let biblioteca = cx.new(|cx| Biblioteca::nova(fotos, previews.clone(), window, cx));
         let revelacao = cx.new(|cx| {
             Revelacao::nova(
@@ -136,6 +142,7 @@ impl Aplicativo {
         Self {
             biblioteca,
             revelacao,
+            impressao: cx.new(|cx| Impressao::nova(previews_para_imprimir, window, cx)),
             importacao: cx.new(|cx| {
                 Importacao::nova(
                     portas.explorador,
@@ -179,6 +186,28 @@ impl Aplicativo {
         // elemento que não está mais na tela, e as teclas da raiz somem: buscar
         // uma foto antes de revelar desligaria o `Cmd+Z`, sem nenhuma pista da
         // relação entre as duas coisas.
+        window.focus(&self.foco);
+        cx.notify();
+    }
+
+    /// Leva para a folha de impressão o que a Biblioteca está mostrando.
+    ///
+    /// 🔑 **O acervo que vai é o filtrado, e a foto selecionada é quem começa a
+    /// coleção** — as duas coisas são o que o legado faz ao entrar no módulo de
+    /// impressão. Sem seleção o botão fica desligado, como o da Revelação: uma
+    /// folha vazia não responde nenhuma pergunta, e os botões de coleção lá
+    /// dentro só valem depois de a tela existir.
+    pub fn imprimir(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(foto) = self.biblioteca.read(cx).foto_selecionada() else {
+            return;
+        };
+        let acervo = self.biblioteca.read(cx).fotos_visiveis();
+
+        self.impressao
+            .update(cx, |tela, cx| tela.abrir(acervo, Some(foto.id), cx));
+        self.tela = Tela::Impressao;
+        // O mesmo motivo da Revelação: o foco pode ter ficado no campo de busca,
+        // que para de ser renderizado aqui — e as teclas da raiz sumiriam.
         window.focus(&self.foco);
         cx.notify();
     }
@@ -288,7 +317,13 @@ impl Aplicativo {
         // Só volta se há de onde voltar. Sem esta guarda, `Esc` na Biblioteca
         // seria uma tecla que consome o evento e não faz nada — e o próximo
         // atalho que quisesse `Esc` ali nasceria quebrado.
-        if self.tela == Tela::Revelacao {
+        //
+        // ⚠️ **O `Esc` sai da Impressão também, e no legado não sai** — lá a
+        // condição é `current_view == CurrentView::Develop`, e do módulo de
+        // impressão só se sai clicando em "Library". A alternativa a esta linha
+        // é uma tecla que responde numa tela e emudece na outra, que é mais
+        // caro de aprender do que qualquer uma das duas regras inteiras.
+        if self.tela != Tela::Biblioteca {
             self.voltar_para_biblioteca(window, cx);
         }
     }
@@ -299,6 +334,7 @@ impl Aplicativo {
         // selection", `app.rs`).
         let tem_selecao = self.biblioteca.read(cx).foto_selecionada().is_some();
         let na_revelacao = self.tela == Tela::Revelacao;
+        let na_impressao = self.tela == Tela::Impressao;
 
         let titulo: SharedString = match (na_revelacao, self.revelacao.read(cx).foto()) {
             (true, Some(foto)) => foto.name.clone().into(),
@@ -318,8 +354,8 @@ impl Aplicativo {
                 Button::new("nav-biblioteca")
                     .label("Biblioteca")
                     .xsmall()
-                    .when(!na_revelacao, |b| b.primary())
-                    .selected(!na_revelacao)
+                    .when(self.tela == Tela::Biblioteca, |b| b.primary())
+                    .selected(self.tela == Tela::Biblioteca)
                     .on_click(cx.listener(|este, _ev, window, cx| {
                         este.voltar_para_biblioteca(window, cx);
                     })),
@@ -333,6 +369,19 @@ impl Aplicativo {
                     .disabled(!tem_selecao)
                     .on_click(cx.listener(|este, _ev, window, cx| {
                         este.revelar(window, cx);
+                    })),
+            )
+            .child(
+                // Paridade: no legado o botão de impressão também só liga com
+                // seleção (`selected_photo_ids` ou a foto da Biblioteca).
+                Button::new("nav-impressao")
+                    .label("Impressão")
+                    .xsmall()
+                    .when(na_impressao, |b| b.primary())
+                    .selected(na_impressao)
+                    .disabled(!tem_selecao)
+                    .on_click(cx.listener(|este, _ev, window, cx| {
+                        este.imprimir(window, cx);
                     })),
             )
             .child(
@@ -431,6 +480,7 @@ impl Render for Aplicativo {
                 div().flex().flex_1().min_h(px(0.)).child(match self.tela {
                     Tela::Biblioteca => self.biblioteca.clone().into_any_element(),
                     Tela::Revelacao => self.revelacao.clone().into_any_element(),
+                    Tela::Impressao => self.impressao.clone().into_any_element(),
                 }),
             )
             .when(self.importando, |raiz| {

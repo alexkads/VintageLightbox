@@ -168,6 +168,22 @@ impl Biblioteca {
         self.selecionada.map(|i| self.fotos[i].clone())
     }
 
+    /// As fotos que a grade está mostrando — já filtradas.
+    ///
+    /// É o que a Impressão leva ao ser aberta, e é o mesmo recorte que o legado
+    /// usa lá (`filmstrip_filter.apply(&state.photos)`): "Todas" quer dizer
+    /// todas as que se estava vendo, e não o acervo inteiro por trás do filtro.
+    ///
+    /// Devolve cópias pelo mesmo motivo de [`Self::foto_selecionada`]: quem
+    /// recebe guarda, e o que guardou tem de continuar valendo depois que a
+    /// grade mudar de filtro.
+    pub fn fotos_visiveis(&self) -> Vec<PhotoViewModel> {
+        self.visiveis
+            .iter()
+            .map(|&i| self.fotos[i].clone())
+            .collect()
+    }
+
     /// Põe o foco no campo de busca, para os testes da raiz.
     ///
     /// Existe por causa de um defeito real: quem busca uma foto deixa o foco no

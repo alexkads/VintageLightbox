@@ -10,3 +10,4 @@
 //! que o campo diz) e a única que dá para conferir sem abrir a tela.
 
 pub mod pagina;
+pub mod tela;

@@ -56,7 +56,7 @@ struct `PhotoEdits` continua sendo o conserto de verdade.
 | Métrica | Valor |
 |---------|-------|
 | `cargo check --workspace --all-targets` | ✅ **limpo** |
-| `cargo test --workspace` | ✅ **746 passando, 0 falhas, 3 ignorados** (16/ago) |
+| `cargo test --workspace` | ✅ **770 passando, 0 falhas, 3 ignorados** (16/ago) |
 | App | ✅ **sobe** — janela 1352×848, `GPU: Initialized successfully with Apple M2 Pro` |
 | Migrations SQLite no repositório | 15 (`001` … `015`) |
 | Crates | 6 (domain, use-cases, adapters, infrastructure, ui, **ui-gpui**) |
@@ -70,7 +70,7 @@ struct `PhotoEdits` continua sendo o conserto de verdade.
 | Adapters | 0 | ⚠️ nenhum teste escrito |
 | Infrastructure | 65 (34 unit + 31 integração em 7 arquivos) | ✅ passando (1 ignorado) |
 | UI (egui) | 146 (47 unit + 99 E2E `egui_kittest` em 18 arquivos) | ✅ passando (2 ignorados) |
-| UI (GPUI) | 220 (217 unit + 3 de integração com banco) | ✅ passando — **fases 2 e 3 concluídas** |
+| UI (GPUI) | 244 (241 unit + 3 de integração com banco) | ✅ passando — fases 2 e 3 concluídas, **fase 4 em andamento** |
 
 ---
 
@@ -300,6 +300,27 @@ Não são erros de compilação; são features que a UI mostra como prontas e qu
    diferente do resto do pipeline de edição, que é GPU.
 4. ⚠️ **Coleções: backend pronto, UI é um TODO** (`library_view.rs:117`).
 5. ⚠️ **Adapters sem nenhum teste**, e `LibraryController` só tem `new`.
+6. 🚨 **O módulo de impressão não imprime, e a prévia dele não mostra o papel.** Medido em
+   16/ago/2026, ao portar a fase 4. Cinco achados no mesmo arquivo (`views/print_view.rs`), nenhum
+   deles falhando em lugar nenhum:
+   - **"Print" e "Export PDF" mostram um aviso de *"coming soon"***. Não há caminho de impressão.
+   - **O papel é desenhado com a proporção da janela** (`available.x * 0.8 × available.y * 0.9`):
+     `paper_size` e `orientation` não entram na conta em lugar nenhum. A4 e Tabloide desenham o mesmo
+     retângulo, e maximizar a janela muda o formato da folha.
+   - **A margem é `margem_mm / 297.0`** — a altura da A4 — aplicada como fração nos dois eixos, para
+     qualquer papel: 10 mm pedidos saem com 7,1 mm nas laterais de uma A4.
+   - **`Custom.photos_per_page()` responde 4 para qualquer grade**: numa 6 × 8 a prévia desenha 48
+     células e o rodapé promete 12 páginas para as mesmas 48 fotos.
+   - **`Invert` embaralha a coleção** (`HashSet::difference`), e é a posição na lista que decide em
+     qual célula cada foto cai.
+7. 🚨 **`components/print_dialog.rs` (288 LOC) é código morto.** `state.show_print_dialog` nunca é
+   escrito como `true` e `print_dialog_state` nunca recebe `Some(...)` — o diálogo não tem como
+   abrir, e ele tem as próprias `PrintLayoutOption`/`PaperSizeOption`/`OrientationOption`,
+   concorrentes das do `print_view`. Terceira vez que aparecem duas versões da mesma decisão com só
+   uma viva (as outras: o JPEG com alfa da fase 0, o `GpuEditParams::default` da fase 2).
+8. ⚠️ **As quatro caixas de "Photo Info" e o campo "Copies" do print são escritos e nunca lidos.** A
+   prévia não desenha texto nenhum debaixo da foto; os únicos leitores são testes que afirmam que a
+   caixa marca.
 
 ---
 
@@ -353,7 +374,7 @@ cita 2 views (são 4).
 ## 🚀 Como rodar os testes
 
 ```bash
-cargo test --workspace          # 478 passando, 0 falhas, 3 ignorados
+cargo test --workspace          # 770 passando, 0 falhas, 3 ignorados
 cargo test -p domain            # 202 testes, ~0.01s
 
 # E2E de UI (egui_kittest)
@@ -363,12 +384,16 @@ UPDATE_SNAPSHOTS=true cargo test -p ui   # atualizar snapshots
 cargo run -p ui                 # sobe o app
 ```
 
-⚠️ **O app usa um caminho fixo de catálogo** (`~/Pictures/VintageLightbox/VintageLightbox Catalog/`,
-via `AppPaths::catalog_root()`), sem variável de ambiente para redirecionar. Não dá para rodar
-contra um catálogo descartável sem mexer no do usuário — o que atrapalha teste manual e vale como
-melhoria.
+✅ **O catálogo se redireciona por `VLB_CATALOG`** (fase 0 da migração para GPUI, `f906451`). Antes
+disso o caminho era fixo (`~/Pictures/VintageLightbox/VintageLightbox Catalog/`) e **rodar
+`cargo test` escrevia no cache real do fotógrafo**.
+
+```bash
+VLB_CATALOG=/tmp/catalogo-de-medicao cargo run -p ui-gpui --bin semear-catalogo -- 2000
+VLB_CATALOG=/tmp/catalogo-de-medicao cargo run --release -p ui-gpui
+```
 
 ---
 
-**Última execução de testes**: 15/ago/2026
-**Resultado**: ✅ 478 passando, 0 falhas, 3 ignorados · app sobe e renderiza
+**Última execução de testes**: 16/ago/2026
+**Resultado**: ✅ 770 passando, 0 falhas, 3 ignorados · os dois apps sobem e renderizam

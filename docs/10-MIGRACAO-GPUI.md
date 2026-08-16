@@ -1099,6 +1099,48 @@ lista e o rodapé diz "Page 1 of 7", sem caminho para as outras seis. `fotos_da_
 a folha é a unidade da impressão, mas **botão de página não entra**: seria feature nova (§7.1), e é
 o tipo de coisa que se acrescenta em uma linha no dia em que o dono pedir.
 
+#### A folha na tela ✅ — a terceira tela do app
+
+[`impressao/tela.rs`](../crates/ui-gpui/src/impressao/tela.rs), ligada à raiz como `Tela::Impressao`.
+Os três painéis do legado: modelos e coleção à esquerda, papel/orientação/medidas à direita, a folha
+no meio. O botão da barra só liga com seleção, como o de lá — e como o da Revelação.
+
+A folha é um `div` de tamanho conhecido com uma célula absoluta para cada foto; a única conta de
+pixel do arquivo é `mm × escala`. 🚨 **E a caixa `relative` é a folha sem padding nenhum** — as
+margens já vêm da geometria, em milímetro, e um respiro no contêiner somaria a elas e faria o número
+do campo deixar de descrever a distância na tela. É a mesma armadilha dos 24 px que o overlay de
+corte encontrou na fase 2.
+
+🚨 **`Invert` do legado embaralha a coleção.** Lá a inversão é `HashSet::difference`, e a ordem de
+saída é a do hash. Como é a **posição na lista** que decide em qual célula cada foto cai, inverter e
+desinverter devolve a mesma coleção com as fotos trocadas de lugar na folha — sem ninguém ter tocado
+no leiaute, e com o desenho novo parecendo tão certo quanto o anterior. Aqui a inversão preserva a
+ordem do acervo.
+
+⚠️ **E o teste disso quase nasceu inútil**: escrito com o acervo de 5 fotos dos outros testes, ele
+**passa** com a versão do legado no lugar — a ordem de um `HashSet` pequeno de inteiros sai crescente
+com frequência alta demais. Com 40 fotos falha nas três execuções seguidas. É a lição do `544a0cb`
+outra vez: só quebrando o código de propósito se descobre qual teste não reclama.
+
+⚠️ **Duas coisas não foram portadas, e as duas são decisão:**
+
+| O que ficou de fora | Por quê |
+|---|---|
+| A seção "Photo Info" (4 caixas) e o campo "Copies" | Escritos no estado e **lidos por ninguém** — a prévia do legado nunca desenha texto debaixo da foto. Portá-los seria portar a promessa |
+| Os botões "Print" e "Export PDF" | O comportamento inteiro dos dois é um aviso de *"coming soon"* |
+
+É a mesma decisão que a fase 3 tomou com pausar e cancelar a importação: melhor nascer sem o botão do
+que com um que não faz o que diz. As duas linhas voltam no dia em que houver impressão de verdade —
+e aí elas terão o que fazer.
+
+⚠️ **O `Esc` sai da Impressão, e no legado não sai** (lá a condição é
+`current_view == CurrentView::Develop`, e do módulo de impressão só se sai clicando em "Library"). A
+alternativa é uma tecla que responde numa tela e emudece na outra — mais cara de aprender do que
+qualquer uma das duas regras inteiras.
+
+⬜ **Falta desta tela**: o filmstrip do rodapé, que no legado é o que permite marcar foto a foto
+(aqui a coleção se monta pelos quatro botões), e o arrasto que reposiciona a foto dentro da célula.
+
 
 ### Fase 5 — Testes e desligamento (1–2 semanas)
 
