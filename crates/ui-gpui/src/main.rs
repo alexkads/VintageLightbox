@@ -11,7 +11,10 @@ use gpui_component::Root;
 use infrastructure::cache::preview_manager::PreviewManager;
 use infrastructure::paths::AppPaths;
 
-use ui_gpui::app::Aplicativo;
+use ui_gpui::app::{Aplicativo, Portas};
+use ui_gpui::importacao::explorador::{
+    Explorador, ExploradorDoDisco, Importador, ImportadorDoDisco, SeletorDePasta, SeletorNativo,
+};
 use ui_gpui::revelacao::persistencia::{Gravador, GravadorDoBanco};
 use ui_gpui::revelacao::presets::{GuardaDePresets, GuardaDoBanco};
 use ui_gpui::tema;
@@ -39,10 +42,10 @@ async fn main() {
     // As quatro camadas internas, intactas — este app fala com elas do mesmo
     // jeito que o de egui fala. É o que tornou o GPUI mais barato que o Tauri:
     // nada precisou virar comando serializável.
-    let repositorio = Arc::new(infrastructure::PhotoRepositoryImpl::new(pool.clone()));
-    let biblioteca = adapters::controllers::LibraryController::new(repositorio.clone());
+    let repositorio_de_fotos = Arc::new(infrastructure::PhotoRepositoryImpl::new(pool.clone()));
+    let biblioteca = adapters::controllers::LibraryController::new(repositorio_de_fotos.clone());
     let editor = Arc::new(adapters::controllers::EditorController::new(Arc::new(
-        use_cases::SavePhotoEditsUseCase::new(repositorio),
+        use_cases::SavePhotoEditsUseCase::new(repositorio_de_fotos.clone()),
     )));
 
     // As fotos são carregadas **antes** da janela, e isso é provisório: num
@@ -78,7 +81,43 @@ async fn main() {
             Vec::new()
         });
 
-    let previews = Arc::new(PreviewManager::new());
+    // A importação: seis use cases, um controller. É a mesma montagem do
+    // `crates/ui`, linha por linha — nada aqui é novo, só está sendo ligado do
+    // outro lado.
+    let extrator = Arc::new(infrastructure::ExifReader);
+    let miniaturas = Arc::new(infrastructure::ThumbnailGeneratorImpl::new());
+    let organizador = Arc::new(infrastructure::FileOrganizerImpl::new(catalogo.clone()));
+    let dispositivos =
+        Arc::new(infrastructure::devices::repository::InfrastructureDeviceRepository::new());
+    let cache_de_previews = Arc::new(PreviewManager::new());
+
+    let importacao = Arc::new(adapters::controllers::ImportController::new(
+        Arc::new(use_cases::ImportPhotoUseCase::new(
+            repositorio_de_fotos.clone(),
+            extrator.clone(),
+            miniaturas.clone(),
+            cache_de_previews.clone(),
+        )),
+        Arc::new(use_cases::CheckDuplicatesUseCase::new(
+            repositorio_de_fotos.clone(),
+        )),
+        Arc::new(use_cases::ImportWithOptionsUseCase::new(
+            repositorio_de_fotos.clone(),
+            extrator.clone(),
+            miniaturas,
+            cache_de_previews.clone(),
+            organizador,
+        )),
+        Arc::new(use_cases::GetImportSourcesUseCase::new(dispositivos)),
+        Arc::new(use_cases::ScanSourceUseCase::new(Arc::new(
+            infrastructure::SourceScannerImpl::new(),
+        ))),
+        Arc::new(use_cases::DescribeCandidatesUseCase::new(extrator)),
+    ));
+
+    // O mesmo cache que a importação usa: duas instâncias apontando para o mesmo
+    // diretório seriam dois caches do mesmo arquivo.
+    let previews = cache_de_previews;
 
     // 🚨 O `Handle` é pego **aqui**, e não lá dentro. `Application::run` toma esta
     // thread e o que roda depois está fora do contexto do runtime: um
@@ -94,6 +133,16 @@ async fn main() {
         controlador_de_presets,
         tokio::runtime::Handle::current(),
     ));
+    let explorador: Arc<dyn Explorador> = Arc::new(ExploradorDoDisco::novo(
+        importacao.clone(),
+        tokio::runtime::Handle::current(),
+    ));
+    let importador: Arc<dyn Importador> = Arc::new(ImportadorDoDisco::novo(
+        importacao,
+        tokio::runtime::Handle::current(),
+    ));
+    let seletor: Arc<dyn SeletorDePasta> =
+        Arc::new(SeletorNativo::novo(tokio::runtime::Handle::current()));
 
     Application::new().run(move |cx: &mut App| {
         // Antes de qualquer janela: é o `init` que cria o `Theme` global, o
@@ -118,9 +167,14 @@ async fn main() {
                     Aplicativo::novo(
                         fotos.clone(),
                         previews.clone(),
-                        gravador.clone(),
-                        guarda_de_presets.clone(),
                         presets.clone(),
+                        Portas {
+                            gravador: gravador.clone(),
+                            guarda_de_presets: guarda_de_presets.clone(),
+                            explorador: explorador.clone(),
+                            importador: importador.clone(),
+                            seletor: seletor.clone(),
+                        },
                         window,
                         cx,
                     )

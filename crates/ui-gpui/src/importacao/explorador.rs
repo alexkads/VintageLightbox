@@ -105,6 +105,49 @@ impl Explorador for ExploradorDoDisco {
     }
 }
 
+/// Quem abre o seletor de pasta do sistema.
+///
+/// 🔑 **Porta própria, e não um método do [`Explorador`].** Abrir diálogo é
+/// interação com o sistema operacional, não leitura de disco — e os testes de
+/// tela precisam escolher pasta sem que nenhuma janela apareça na máquina de quem
+/// roda a suíte.
+pub trait SeletorDePasta: Send + Sync + 'static {
+    /// Responde **sempre**: `OrigemEscolhida` ou `SemEscolha`. Silêncio deixaria
+    /// a tela esperando uma pasta que nunca vem.
+    fn escolher(&self, canal: Sender<Recado>);
+}
+
+/// O seletor do sistema, via `rfd`.
+///
+/// ⚠️ **Janela do sistema, e não do framework.** É a mesma escolha que o legado
+/// fez ao trocar o `egui_file` por `rfd`: um seletor desenhado pelo framework
+/// disputa camada com o modal e aparece escurecido e sem responder ao clique.
+pub struct SeletorNativo {
+    tokio: tokio::runtime::Handle,
+}
+
+impl SeletorNativo {
+    pub fn novo(tokio: tokio::runtime::Handle) -> Self {
+        Self { tokio }
+    }
+}
+
+impl SeletorDePasta for SeletorNativo {
+    fn escolher(&self, canal: Sender<Recado>) {
+        self.tokio.spawn(async move {
+            let recado = match rfd::AsyncFileDialog::new()
+                .set_title("Escolher a origem")
+                .pick_folder()
+                .await
+            {
+                Some(pasta) => Recado::OrigemEscolhida(pasta.path().to_string_lossy().to_string()),
+                None => Recado::SemEscolha,
+            };
+            let _ = canal.send(recado);
+        });
+    }
+}
+
 /// Quem sabe importar de verdade.
 ///
 /// Separado do [`Explorador`] porque é outra decisão: explorar é grátis e
@@ -275,6 +318,30 @@ pub mod mentira {
                     .collect(),
             ));
             let _ = canal.send(Recado::Duplicados(Vec::new()));
+        }
+    }
+
+    /// Um seletor que devolve a pasta que o teste mandar, sem abrir janela.
+    #[derive(Default)]
+    pub struct SeletorDeMentira {
+        pub escolha: Mutex<Option<String>>,
+    }
+
+    impl SeletorDeMentira {
+        pub fn escolhe(caminho: &str) -> Self {
+            Self {
+                escolha: Mutex::new(Some(caminho.to_string())),
+            }
+        }
+    }
+
+    impl SeletorDePasta for SeletorDeMentira {
+        fn escolher(&self, canal: Sender<Recado>) {
+            let recado = match self.escolha.lock().expect("a escolha").clone() {
+                Some(caminho) => Recado::OrigemEscolhida(caminho),
+                None => Recado::SemEscolha,
+            };
+            let _ = canal.send(recado);
         }
     }
 

@@ -25,7 +25,7 @@ use gpui_component::checkbox::Checkbox;
 use gpui_component::{ActiveTheme, Disableable, Selectable, Sizable};
 
 use super::estado::{aplicar, Estado, Ordem, Recado, Seguimento};
-use super::explorador::{Andamento, Explorador, Importador};
+use super::explorador::{Andamento, Explorador, Importador, SeletorDePasta};
 
 /// De quanto em quanto a tela pergunta se chegou recado.
 ///
@@ -38,6 +38,7 @@ pub struct Importacao {
     pub estado: Estado,
     explorador: Arc<dyn Explorador>,
     importador: Arc<dyn Importador>,
+    seletor: Arc<dyn SeletorDePasta>,
     /// Por onde os recados chegam. O `Sender` é clonado a cada pedido.
     recados: (Sender<Recado>, Receiver<Recado>),
     andamentos: (Sender<Andamento>, Receiver<Andamento>),
@@ -46,6 +47,9 @@ pub struct Importacao {
     /// Se há um laço de colheita rodando. Sem esta trava, cada pedido abriria um
     /// laço novo — o mesmo cuidado que a Revelação tem com a GPU.
     colhendo: bool,
+    /// Se há um seletor de pasta aberto. É o que segura o laço de colheita
+    /// enquanto não há leitura nenhuma em curso.
+    esperando_escolha: bool,
     _colheita: Option<Task<()>>,
 }
 
@@ -59,15 +63,21 @@ pub struct Progresso {
 }
 
 impl Importacao {
-    pub fn nova(explorador: Arc<dyn Explorador>, importador: Arc<dyn Importador>) -> Self {
+    pub fn nova(
+        explorador: Arc<dyn Explorador>,
+        importador: Arc<dyn Importador>,
+        seletor: Arc<dyn SeletorDePasta>,
+    ) -> Self {
         Self {
             estado: Estado::default(),
             explorador,
             importador,
+            seletor,
             recados: channel(),
             andamentos: channel(),
             progresso: None,
             colhendo: false,
+            esperando_escolha: false,
             _colheita: None,
         }
     }
@@ -78,6 +88,14 @@ impl Importacao {
     /// resposta atrasada da anterior: o recado carrega a raiz de onde veio, e o
     /// estado compara com esta.
     pub fn abrir_origem(&mut self, raiz: String, cx: &mut Context<Self>) {
+        self.comecar_varredura(raiz);
+        self.acompanhar(cx);
+        cx.notify();
+    }
+
+    /// Troca a origem e pede a varredura. Sem `cx` de propósito: também é chamada
+    /// de dentro da colheita, onde o laço já está de pé.
+    fn comecar_varredura(&mut self, raiz: String) {
         self.estado.esquecer_candidatos();
         self.estado.origem = Some(raiz.clone());
         self.estado.varrendo = true;
@@ -86,6 +104,17 @@ impl Importacao {
         let subpastas = self.estado.opcoes.include_subfolders;
         self.explorador
             .varrer(raiz, subpastas, self.recados.0.clone());
+    }
+
+    /// Abre o seletor do sistema. A resposta chega como recado — sempre, mesmo
+    /// que seja "desisti".
+    pub fn escolher_origem(&mut self, cx: &mut Context<Self>) {
+        self.esperando_escolha = true;
+        self.seletor.escolher(self.recados.0.clone());
+        // 🚨 O laço tem de estar de pé **antes** da resposta: o seletor é uma
+        // janela do sistema e pode voltar a qualquer momento. Sem isto, a pasta
+        // escolhida ficaria parada no canal até alguma outra coisa acordar a
+        // colheita.
         self.acompanhar(cx);
         cx.notify();
     }
@@ -145,8 +174,18 @@ impl Importacao {
 
         while let Ok(recado) = self.recados.1.try_recv() {
             mudou = true;
-            if let Some(Seguimento::Detalhar(arquivos)) = aplicar(&mut self.estado, recado) {
-                self.explorador.detalhar(arquivos, self.recados.0.clone());
+            // A espera pelo seletor acaba com qualquer das duas respostas — a
+            // pasta escolhida ou a desistência.
+            if matches!(recado, Recado::OrigemEscolhida(_) | Recado::SemEscolha) {
+                self.esperando_escolha = false;
+            }
+
+            match aplicar(&mut self.estado, recado) {
+                Some(Seguimento::Detalhar(arquivos)) => {
+                    self.explorador.detalhar(arquivos, self.recados.0.clone());
+                }
+                Some(Seguimento::Varrer(raiz)) => self.comecar_varredura(raiz),
+                None => {}
             }
         }
 
@@ -163,7 +202,8 @@ impl Importacao {
         // acordaria a cada 100ms pelo resto da sessão — e a tela de importação
         // costuma ficar aberta menos que isso importa, mas o modal fechado não
         // pode continuar cobrando relógio.
-        let continua = self.estado.varrendo
+        let continua = self.esperando_escolha
+            || self.estado.varrendo
             || self.estado.descrevendo
             || self.estado.conferindo_duplicatas
             || self.progresso.as_ref().is_some_and(|p| !p.terminou);
@@ -217,7 +257,14 @@ impl Importacao {
             .pb(px(8.))
             .border_b_1()
             .border_color(cx.theme().border)
-            .child(div().text_xs().child("De"))
+            .child(
+                Button::new("escolher-origem")
+                    .label("Escolher pasta…")
+                    .xsmall()
+                    .on_click(cx.listener(|tela, _ev, _window, cx| {
+                        tela.escolher_origem(cx);
+                    })),
+            )
             .child(
                 div()
                     .flex_1()
@@ -463,15 +510,31 @@ mod testes {
 
     use gpui::TestAppContext;
 
-    use super::super::explorador::mentira::{ExploradorDeMentira, ImportadorDeMentira};
+    use super::super::explorador::mentira::{
+        ExploradorDeMentira, ImportadorDeMentira, SeletorDeMentira,
+    };
 
     fn janela(
         cx: &mut TestAppContext,
         explorador: Arc<ExploradorDeMentira>,
         importador: Arc<ImportadorDeMentira>,
     ) -> gpui::WindowHandle<Importacao> {
+        com_seletor(
+            cx,
+            explorador,
+            importador,
+            Arc::new(SeletorDeMentira::default()),
+        )
+    }
+
+    fn com_seletor(
+        cx: &mut TestAppContext,
+        explorador: Arc<ExploradorDeMentira>,
+        importador: Arc<ImportadorDeMentira>,
+        seletor: Arc<SeletorDeMentira>,
+    ) -> gpui::WindowHandle<Importacao> {
         cx.update(gpui_component::init);
-        cx.add_window(move |_window, _cx| Importacao::nova(explorador, importador))
+        cx.add_window(move |_window, _cx| Importacao::nova(explorador, importador, seletor))
     }
 
     /// Deixa a colheita rodar até drenar o que já chegou.
@@ -529,6 +592,76 @@ mod testes {
             ["varrer:/cartao", "detalhar:2"],
             "detalhar só depois de varrer, e só o que a varredura achou"
         );
+    }
+
+    /// 🚨 A pasta escolhida no seletor cai direto na varredura.
+    ///
+    /// O seletor é uma janela do sistema e responde quando quiser — inclusive
+    /// depois de a tela já ter parado de esperar qualquer outra coisa. É por isso
+    /// que escolher liga o laço de colheita antes de abrir o diálogo.
+    #[gpui::test]
+    fn escolher_pasta_dispara_a_varredura(cx: &mut TestAppContext) {
+        let explorador = Arc::new(ExploradorDeMentira::responde(
+            "/escolhida",
+            &["/escolhida/a.NEF"],
+        ));
+        let janela = com_seletor(
+            cx,
+            explorador.clone(),
+            Arc::new(ImportadorDeMentira::default()),
+            Arc::new(SeletorDeMentira::escolhe("/escolhida")),
+        );
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.escolher_origem(cx);
+            })
+            .expect("a janela deve estar aberta");
+
+        colher(cx, &janela);
+
+        janela
+            .update(cx, |tela, _window, _cx| {
+                assert_eq!(tela.estado.origem.as_deref(), Some("/escolhida"));
+                assert_eq!(tela.estado.candidatos.len(), 1);
+            })
+            .expect("a janela deve estar aberta");
+
+        assert_eq!(
+            explorador.pedidos(),
+            ["varrer:/escolhida", "detalhar:1"],
+            "escolher pasta é o começo da mesma sequência"
+        );
+    }
+
+    /// 🚨 Desistir do seletor solta o laço de colheita.
+    ///
+    /// Sem o recado de desistência, a tela esperaria para sempre uma pasta que
+    /// nunca vem — e o laço acordaria a cada 100ms pelo resto da sessão, com o
+    /// modal fechado e ninguém olhando.
+    #[gpui::test]
+    fn desistir_do_seletor_solta_o_laco(cx: &mut TestAppContext) {
+        let janela = com_seletor(
+            cx,
+            Arc::new(ExploradorDeMentira::default()),
+            Arc::new(ImportadorDeMentira::default()),
+            Arc::new(SeletorDeMentira::default()),
+        );
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.escolher_origem(cx);
+                assert!(tela.esperando_escolha);
+            })
+            .expect("a janela deve estar aberta");
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                assert!(!tela.colher(cx), "a desistência chegou e o laço para");
+                assert!(!tela.esperando_escolha);
+                assert!(tela.estado.origem.is_none(), "nada foi escolhido");
+            })
+            .expect("a janela deve estar aberta");
     }
 
     /// Trocar de origem esquece a listagem anterior antes de pedir a nova.

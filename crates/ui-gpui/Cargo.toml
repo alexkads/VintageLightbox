@@ -41,6 +41,10 @@ smallvec = "1"
 lru = "0.16.2"
 tokio.workspace = true
 anyhow = "1.0"
+# O seletor nativo de pasta da importação — a mesma versão do `crates/ui`, que já
+# trocou o `egui_file` por ele. Janela do sistema, e não do framework: é o que
+# evita disputa de camada com o modal (a razão está registrada no STATUS).
+rfd = "0.17.2"
 
 # O motor de revelação (`revelacao/processador.rs`). Nas mesmas versões do
 # `crates/ui`: o critério de saída da fase 2 é igualdade de pixel, e wgpu é

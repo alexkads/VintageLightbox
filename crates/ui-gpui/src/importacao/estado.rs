@@ -100,6 +100,14 @@ pub enum Recado {
     Descritos(Vec<Descricao>),
     /// Os caminhos que já existem no catálogo.
     Duplicados(Vec<String>),
+    /// A pasta que o seletor do sistema devolveu.
+    OrigemEscolhida(String),
+    /// O seletor fechou sem escolha.
+    ///
+    /// 🔑 **Desistir também responde.** Sem este recado, a tela ficaria esperando
+    /// para sempre uma pasta que nunca vem — e o laço de colheita acordaria a cada
+    /// 100ms pelo resto da sessão. Silêncio não é resposta.
+    SemEscolha,
     /// Algo falhou; a mensagem vai para a tela.
     Falhou(String),
 }
@@ -120,6 +128,11 @@ pub struct Descricao {
 pub enum Seguimento {
     /// Ler metadados e conferir duplicatas destes arquivos.
     Detalhar(Vec<String>),
+    /// Varrer esta origem recém-escolhida.
+    ///
+    /// 🔑 O estado **não** varre sozinho: quem tem o explorador em mãos é a tela.
+    /// É o que mantém `aplicar` uma função de estado, testável sem disco.
+    Varrer(String),
 }
 
 /// Tudo que a tela de importação sabe.
@@ -332,6 +345,10 @@ pub fn aplicar(estado: &mut Estado, recado: Recado) -> Option<Seguimento> {
             }
             None
         }
+
+        Recado::OrigemEscolhida(caminho) => Some(Seguimento::Varrer(caminho)),
+
+        Recado::SemEscolha => None,
 
         Recado::Falhou(erro) => {
             estado.varrendo = false;
@@ -689,6 +706,38 @@ mod testes {
         assert_eq!(estado.focado, None);
         assert_eq!(estado.ancora, None);
         assert_eq!(estado.aviso, None);
+    }
+
+    /// A pasta escolhida no seletor vira um pedido de varredura.
+    ///
+    /// 🔑 E o estado **não** varre sozinho — ele devolve o seguimento e a tela
+    /// decide. É o que mantém `aplicar` testável sem disco nenhum.
+    #[test]
+    fn a_pasta_escolhida_vira_pedido_de_varredura() {
+        let mut estado = Estado::default();
+
+        let seguimento = aplicar(&mut estado, Recado::OrigemEscolhida("/cartao".into()));
+
+        assert_eq!(seguimento, Some(Seguimento::Varrer("/cartao".into())));
+        assert_eq!(
+            estado.origem, None,
+            "quem troca a origem é a tela, ao começar a varredura"
+        );
+    }
+
+    /// Desistir do seletor não mexe em nada — mas responde.
+    #[test]
+    fn desistir_do_seletor_nao_muda_nada() {
+        let mut estado = com_arquivos("/cartao", &["a.NEF"]);
+
+        let seguimento = aplicar(&mut estado, Recado::SemEscolha);
+
+        assert_eq!(seguimento, None);
+        assert_eq!(
+            estado.candidatos.len(),
+            1,
+            "a listagem continua onde estava"
+        );
     }
 
     /// A conta que o rodapé mostra: quantos e quantos bytes.

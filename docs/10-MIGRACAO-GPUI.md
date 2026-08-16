@@ -905,11 +905,55 @@ shader; e o `undo` que guarda o corte e não o restaura.
 ⚠️ **O que fica de dívida própria**: o preset recém-salvo com id local, o corte fora do histórico, e o
 carregamento síncrono da foto na abertura (o mesmo que a fase 1 deixou).
 
-### Fase 3 — Importação (2–3 semanas)
+### Fase 3 — Importação 🔄 **em andamento**
 
-O modal de 4 etapas assíncronas (`import_view.rs`, 2.107 LOC), reescrito em 15/ago e ainda fresco.
+O modal de 4 etapas assíncronas (`import_view.rs`, 2.101 LOC), reescrito em 15/ago e ainda fresco.
 A ordem das leituras — escanear, descrever, miniaturar o visível, conferir duplicatas — é regra
 conquistada e se preserva.
+
+#### O estado ✅ — três corridas que ele precisa recusar
+
+[`importacao/estado.rs`](../crates/ui-gpui/src/importacao/estado.rs): sem tela e sem disco, 17
+testes. O desenho é o do legado e é bom — toda descoberta chega como `Recado` e sai como mudança de
+estado mais, às vezes, um `Seguimento` ("agora vá ler isto"). Quem dispara trabalho é a tela, que tem
+o controller em mãos; é o que permite testar a máquina inteira sem runtime, banco ou cartão plugado.
+
+| A corrida | O que acontece sem a defesa |
+|---|---|
+| a varredura da origem **antiga** chega depois da troca | a grade mostra os arquivos da pasta anterior, sem erro e sem pista |
+| as descrições voltam **fora de ordem** (são lidas em paralelo) | casar por índice dá a câmera de uma foto para outra — invisível num cartão só |
+| ordenar por captura **antes** das horas chegarem | ordena por string vazia, e a grade se reembaralha sozinha quando elas chegam |
+
+E o desempate da ordenação é sempre o nome do arquivo: sem ele, uma rajada troca de lugar a cada
+reordenação.
+
+⚠️ **Duas decisões são do usuário, e não da tela**: duplicata só desmarca com "pular duplicatas"
+ligado (quem desligou quer reimportar), e o intervalo do Shift trabalha sobre o que está **visível** —
+contar sobre o acervo marcaria arquivos que a pessoa não está vendo.
+
+#### O modal ✅ — duas portas, e o silêncio que não é resposta
+
+`Explorador` (varrer, detalhar) e `Importador` (importar) são traits **separadas**: explorar é grátis
+e reversível, importar copia ou **move** arquivo. Uma só faria o explorador de mentira dos testes
+precisar saber importar. O seletor de pasta é uma terceira — abrir diálogo é interação com o sistema,
+e nenhum teste pode fazer aparecer janela na máquina de quem roda a suíte.
+
+🔑 **O seletor responde sempre**, inclusive "desisti". Sem esse recado, a tela esperaria para sempre
+uma pasta que nunca vem — e o laço de colheita acordaria a cada 100ms pelo resto da sessão. Silêncio
+não é resposta.
+
+Há teste cobrando a **ordem dos pedidos**, e não só o resultado: `["varrer:/cartao", "detalhar:2"]`.
+E duas guardas: o botão de importar desliga enquanto o lote corre (dois cliques copiariam tudo de
+novo com "pular duplicatas" desligado), e fechar o modal **não** joga a listagem fora — quem fecha
+por engano depois de marcar 300 fotos não pode perder a marcação.
+
+🔑 **`Aplicativo::novo` chegou a dez argumentos e virou `Portas`**: cinco `Arc<dyn …>` posicionais do
+mesmo naipe, cuja ordem não é óbvia para ninguém — trocar dois de lugar compila e falha no primeiro
+clique.
+
+⬜ **Falta**: as miniaturas da grade sob demanda (com a chave `import::<caminho>`, que separa estas
+entradas das fotos catalogadas), o lado "PARA" (modo, destino, organização, renomeação) e os atalhos
+da grade (↑↓ com rolagem, Shift+clique na tela, ⌘A, Enter).
 
 ### Fase 4 — Impressão, multi-monitor, docking, atalhos (2–3 semanas)
 

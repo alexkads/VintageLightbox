@@ -14,9 +14,25 @@ use gpui_component::{ActiveTheme, Disableable, Selectable, Sizable};
 use infrastructure::cache::preview_manager::PreviewManager;
 
 use crate::biblioteca::tela::Biblioteca;
+use crate::importacao::explorador::{Explorador, Importador, SeletorDePasta};
+use crate::importacao::tela::Importacao;
 use crate::revelacao::persistencia::Gravador;
 use crate::revelacao::presets::GuardaDePresets;
 use crate::revelacao::tela::Revelacao;
+
+/// As portas para o mundo de fora, num pacote só.
+///
+/// 🔑 **Existe porque `Aplicativo::novo` chegou a dez argumentos.** Cinco deles
+/// eram `Arc<dyn …>` posicionais, todos do mesmo naipe — a ordem entre eles não é
+/// óbvia para ninguém, e trocar dois de lugar compila e falha em tempo de
+/// execução, no primeiro clique.
+pub struct Portas {
+    pub gravador: Arc<dyn Gravador>,
+    pub guarda_de_presets: Arc<dyn GuardaDePresets>,
+    pub explorador: Arc<dyn Explorador>,
+    pub importador: Arc<dyn Importador>,
+    pub seletor: Arc<dyn SeletorDePasta>,
+}
 
 actions!(
     vintagelightbox,
@@ -65,6 +81,11 @@ pub enum Tela {
 pub struct Aplicativo {
     biblioteca: Entity<Biblioteca>,
     revelacao: Entity<Revelacao>,
+    /// O modal de importação. **Sempre existe**, e só aparece quando aberto: ele
+    /// guarda a listagem, e recriá-lo a cada abertura jogaria fora o que o
+    /// fotógrafo já marcou ao fechar o modal por engano.
+    importacao: Entity<Importacao>,
+    importando: bool,
     tela: Tela,
     /// A raiz precisa de foco próprio para as ações de teclado chegarem nela.
     /// Sem isto, `Esc` só funcionaria enquanto algum filho focável estivesse
@@ -76,15 +97,22 @@ impl Aplicativo {
     pub fn novo(
         fotos: Vec<PhotoViewModel>,
         previews: Arc<PreviewManager>,
-        gravador: Arc<dyn Gravador>,
-        guarda_de_presets: Arc<dyn GuardaDePresets>,
         presets: Vec<Preset>,
+        portas: Portas,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         let biblioteca = cx.new(|cx| Biblioteca::nova(fotos, previews.clone(), window, cx));
-        let revelacao = cx
-            .new(|cx| Revelacao::nova(previews, gravador, guarda_de_presets, presets, window, cx));
+        let revelacao = cx.new(|cx| {
+            Revelacao::nova(
+                previews,
+                portas.gravador,
+                portas.guarda_de_presets,
+                presets,
+                window,
+                cx,
+            )
+        });
 
         // 🚨 **`track_focus` rastreia; ele não dá foco.** Enquanto ninguém focou a
         // raiz, o caminho de foco fica vazio e **nenhuma ação de teclado dela é
@@ -103,6 +131,9 @@ impl Aplicativo {
         Self {
             biblioteca,
             revelacao,
+            importacao: cx
+                .new(|_| Importacao::nova(portas.explorador, portas.importador, portas.seletor)),
+            importando: false,
             tela: Tela::Biblioteca,
             foco,
         }
@@ -152,6 +183,25 @@ impl Aplicativo {
         self.tela = Tela::Biblioteca;
         window.focus(&self.foco);
         cx.notify();
+    }
+
+    /// Abre o modal de importação sobre a Biblioteca.
+    pub fn importar(&mut self, cx: &mut Context<Self>) {
+        self.importando = true;
+        cx.notify();
+    }
+
+    /// Fecha o modal, **sem** jogar a listagem fora.
+    ///
+    /// 🔑 Quem fecha por engano depois de marcar 300 fotos de um cartão não pode
+    /// perder a marcação. A listagem só se perde ao escolher outra origem.
+    pub fn fechar_importacao(&mut self, cx: &mut Context<Self>) {
+        self.importando = false;
+        cx.notify();
+    }
+
+    pub fn importando(&self) -> bool {
+        self.importando
     }
 
     /// `Cmd+Z` e `Cmd+Shift+Z` só existem dentro da Revelação.
@@ -269,6 +319,67 @@ impl Aplicativo {
                     .truncate()
                     .child(titulo),
             )
+            .child(
+                Button::new("nav-importar")
+                    .label("Importar")
+                    .xsmall()
+                    .on_click(cx.listener(|este, _ev, _window, cx| {
+                        este.importar(cx);
+                    })),
+            )
+    }
+
+    /// O modal por cima de tudo, com um véu que escurece o que ficou atrás.
+    ///
+    /// ⚠️ **O véu não é enfeite**: ele diz que o que está atrás não responde. Sem
+    /// ele, clicar numa foto da Biblioteca durante a importação pareceria
+    /// funcionar e não faria nada.
+    fn modal_de_importacao(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .absolute()
+            .inset_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(gpui::rgba(0x00000099))
+            .child(
+                div()
+                    .w(px(760.))
+                    .h(px(560.))
+                    .max_w_full()
+                    .max_h_full()
+                    .flex()
+                    .flex_col()
+                    .border_1()
+                    .border_color(cx.theme().border)
+                    .rounded(px(6.))
+                    .overflow_hidden()
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .px(px(12.))
+                            .py(px(6.))
+                            .bg(cx.theme().title_bar)
+                            .child(div().text_xs().child("Importar fotos"))
+                            .child(
+                                Button::new("fechar-importacao")
+                                    .label("Fechar")
+                                    .xsmall()
+                                    .on_click(cx.listener(|este, _ev, _window, cx| {
+                                        este.fechar_importacao(cx);
+                                    })),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_1()
+                            .min_h(px(0.))
+                            .child(self.importacao.clone()),
+                    ),
+            )
     }
 }
 
@@ -276,6 +387,7 @@ impl Render for Aplicativo {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .key_context(CONTEXTO)
+            .relative()
             .track_focus(&self.foco)
             .on_action(cx.listener(Self::ao_voltar))
             .on_action(cx.listener(Self::ao_desfazer))
@@ -297,6 +409,9 @@ impl Render for Aplicativo {
                     Tela::Revelacao => self.revelacao.clone().into_any_element(),
                 }),
             )
+            .when(self.importando, |raiz| {
+                raiz.child(self.modal_de_importacao(cx))
+            })
     }
 }
 
@@ -308,8 +423,22 @@ mod testes {
     use image::{DynamicImage, Rgba, RgbaImage};
     use tempfile::TempDir;
 
+    use crate::importacao::explorador::mentira::{
+        ExploradorDeMentira, ImportadorDeMentira, SeletorDeMentira,
+    };
     use crate::revelacao::persistencia::mentira::GravadorDeMentira;
     use crate::revelacao::presets::mentira::GuardaDeMentira;
+
+    /// As cinco portas de mentira, que é o que quase todo teste daqui quer.
+    fn portas() -> Portas {
+        Portas {
+            gravador: Arc::new(GravadorDeMentira::default()),
+            guarda_de_presets: Arc::new(GuardaDeMentira::default()),
+            explorador: Arc::new(ExploradorDeMentira::default()),
+            importador: Arc::new(ImportadorDeMentira::default()),
+            seletor: Arc::new(SeletorDeMentira::default()),
+        }
+    }
 
     fn previews_descartaveis() -> (Arc<PreviewManager>, TempDir) {
         let dir = TempDir::new().expect("criar diretório temporário");
@@ -352,17 +481,7 @@ mod testes {
 
         let janela = cx.add_window({
             let previews = previews.clone();
-            |window, cx| {
-                Aplicativo::novo(
-                    acervo(),
-                    previews,
-                    Arc::new(GravadorDeMentira::default()),
-                    Arc::new(GuardaDeMentira::default()),
-                    Vec::new(),
-                    window,
-                    cx,
-                )
-            }
+            |window, cx| Aplicativo::novo(acervo(), previews, Vec::new(), portas(), window, cx)
         });
 
         janela
@@ -384,17 +503,7 @@ mod testes {
 
         let janela = cx.add_window({
             let previews = previews.clone();
-            |window, cx| {
-                Aplicativo::novo(
-                    acervo(),
-                    previews,
-                    Arc::new(GravadorDeMentira::default()),
-                    Arc::new(GuardaDeMentira::default()),
-                    Vec::new(),
-                    window,
-                    cx,
-                )
-            }
+            |window, cx| Aplicativo::novo(acervo(), previews, Vec::new(), portas(), window, cx)
         });
 
         janela
@@ -434,9 +543,11 @@ mod testes {
                 Aplicativo::novo(
                     acervo(),
                     previews,
-                    gravador,
-                    Arc::new(GuardaDeMentira::default()),
                     Vec::new(),
+                    Portas {
+                        gravador,
+                        ..portas()
+                    },
                     window,
                     cx,
                 )
@@ -478,17 +589,7 @@ mod testes {
 
         let janela = cx.add_window({
             let previews = previews.clone();
-            |window, cx| {
-                Aplicativo::novo(
-                    acervo(),
-                    previews,
-                    Arc::new(GravadorDeMentira::default()),
-                    Arc::new(GuardaDeMentira::default()),
-                    Vec::new(),
-                    window,
-                    cx,
-                )
-            }
+            |window, cx| Aplicativo::novo(acervo(), previews, Vec::new(), portas(), window, cx)
         });
 
         janela
@@ -532,17 +633,7 @@ mod testes {
 
         let janela = cx.add_window({
             let previews = previews.clone();
-            |window, cx| {
-                Aplicativo::novo(
-                    acervo(),
-                    previews,
-                    Arc::new(GravadorDeMentira::default()),
-                    Arc::new(GuardaDeMentira::default()),
-                    Vec::new(),
-                    window,
-                    cx,
-                )
-            }
+            |window, cx| Aplicativo::novo(acervo(), previews, Vec::new(), portas(), window, cx)
         });
 
         janela
@@ -586,17 +677,7 @@ mod testes {
 
         let janela = cx.add_window({
             let previews = previews.clone();
-            |window, cx| {
-                Aplicativo::novo(
-                    acervo(),
-                    previews,
-                    Arc::new(GravadorDeMentira::default()),
-                    Arc::new(GuardaDeMentira::default()),
-                    Vec::new(),
-                    window,
-                    cx,
-                )
-            }
+            |window, cx| Aplicativo::novo(acervo(), previews, Vec::new(), portas(), window, cx)
         });
 
         janela
@@ -641,17 +722,7 @@ mod testes {
 
         let janela = cx.add_window({
             let previews = previews.clone();
-            |window, cx| {
-                Aplicativo::novo(
-                    acervo(),
-                    previews,
-                    Arc::new(GravadorDeMentira::default()),
-                    Arc::new(GuardaDeMentira::default()),
-                    Vec::new(),
-                    window,
-                    cx,
-                )
-            }
+            |window, cx| Aplicativo::novo(acervo(), previews, Vec::new(), portas(), window, cx)
         });
 
         janela
@@ -692,17 +763,7 @@ mod testes {
 
         let janela = cx.add_window({
             let previews = previews.clone();
-            |window, cx| {
-                Aplicativo::novo(
-                    acervo(),
-                    previews,
-                    Arc::new(GravadorDeMentira::default()),
-                    Arc::new(GuardaDeMentira::default()),
-                    Vec::new(),
-                    window,
-                    cx,
-                )
-            }
+            |window, cx| Aplicativo::novo(acervo(), previews, Vec::new(), portas(), window, cx)
         });
 
         janela
@@ -723,6 +784,74 @@ mod testes {
             .expect("a janela deve estar aberta");
     }
 
+    /// 🚨 Fechar o modal de importação **não** joga a listagem fora.
+    ///
+    /// Quem fecha por engano depois de marcar 300 fotos de um cartão não pode
+    /// perder a marcação. A listagem só se perde ao escolher outra origem — que é
+    /// quando ela deixou de valer.
+    #[gpui::test]
+    fn fechar_a_importacao_guarda_o_que_ja_foi_marcado(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+
+        let explorador = Arc::new(ExploradorDeMentira::responde(
+            "/cartao",
+            &["/cartao/a.NEF", "/cartao/b.NEF"],
+        ));
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            let explorador = explorador.clone();
+            |window, cx| {
+                Aplicativo::novo(
+                    acervo(),
+                    previews,
+                    Vec::new(),
+                    Portas {
+                        explorador,
+                        ..portas()
+                    },
+                    window,
+                    cx,
+                )
+            }
+        });
+
+        janela
+            .update(cx, |app, _window, cx| {
+                app.importar(cx);
+                assert!(app.importando());
+
+                app.importacao
+                    .update(cx, |tela, cx| tela.abrir_origem("/cartao".into(), cx));
+            })
+            .expect("a janela deve estar aberta");
+
+        for _ in 0..10 {
+            let _ = janela.update(cx, |app, _window, cx| {
+                app.importacao.update(cx, |tela, cx| tela.colher(cx))
+            });
+            cx.run_until_parked();
+        }
+
+        janela
+            .update(cx, |app, _window, cx| {
+                app.importacao.update(cx, |tela, _cx| {
+                    tela.estado.alternar(0);
+                    assert_eq!(tela.estado.marcados(), 1);
+                });
+
+                app.fechar_importacao(cx);
+                assert!(!app.importando());
+
+                app.importar(cx);
+                app.importacao.update(cx, |tela, _cx| {
+                    assert_eq!(tela.estado.candidatos.len(), 2, "a listagem ficou");
+                    assert_eq!(tela.estado.marcados(), 1, "e a marcação também");
+                });
+            })
+            .expect("a janela deve estar aberta");
+    }
+
     /// 🚨 Trocar de foto na grade **não** troca a foto em revelação.
     ///
     /// A seleção é copiada, não compartilhada. Compartilhada, voltar à
@@ -735,17 +864,7 @@ mod testes {
 
         let janela = cx.add_window({
             let previews = previews.clone();
-            |window, cx| {
-                Aplicativo::novo(
-                    acervo(),
-                    previews,
-                    Arc::new(GravadorDeMentira::default()),
-                    Arc::new(GuardaDeMentira::default()),
-                    Vec::new(),
-                    window,
-                    cx,
-                )
-            }
+            |window, cx| Aplicativo::novo(acervo(), previews, Vec::new(), portas(), window, cx)
         });
 
         janela
