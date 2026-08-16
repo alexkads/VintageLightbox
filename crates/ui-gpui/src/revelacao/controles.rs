@@ -386,9 +386,9 @@ mod testes {
 
     /// 🚨 Todo controle nasce no neutro **e** dentro da própria faixa.
     ///
-    /// Dois casos pegam: contraste, neutro `1.0` numa faixa de `0..2`, e o meio
-    /// da vinheta, neutro `50.0` numa faixa de `0..100`. Se alguém copiar a
-    /// faixa do vizinho (`-100..100`), o slider nasceria fora do lugar e a foto
+    /// Dois casos pegam: contraste, neutro `1.0` numa faixa de `0..2`, e o raio
+    /// da nitidez, neutro `1.0` numa faixa que começa em `0,5`. Se alguém copiar
+    /// a faixa do vizinho (`-100..100`), o slider nasceria fora do lugar e a foto
     /// abriria com o ajuste no extremo — sem erro, parecendo escolha de quem
     /// desenhou a tela.
     #[test]

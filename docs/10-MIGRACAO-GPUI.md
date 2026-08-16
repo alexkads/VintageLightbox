@@ -363,10 +363,21 @@ não 11 blocos de interface iguais — o painel de HSL sozinho tem 24. E o neutr
 `Ajustes::default`, não de um número escrito ao lado: dois lugares dizendo qual é o neutro é ter um
 deles errado mais cedo ou mais tarde.
 
-⚠️ **Nem todo neutro é zero.** `contrast` é 1.0, `lens_vignette_midpoint` é 50.0, `sharpen_radius` é
-1.0. Um `#[derive(Default)]` daria zero nos três e **toda** foto abriria alterada — sem erro, e
-parecendo decisão de cor de quem escreveu o shader. É o que
-`o_neutro_devolve_o_pixel_intacto` cobra.
+⚠️ **Nem todo neutro é zero.** `contrast` é 1.0 e `sharpen_radius` é 1.0. Um `#[derive(Default)]`
+daria zero nos dois e **toda** foto abriria alterada — sem erro, e parecendo decisão de cor de quem
+escreveu o shader. É o que `o_neutro_devolve_o_pixel_intacto` cobra.
+
+🚨 **Este parágrafo dizia "`lens_vignette_midpoint` é 50.0", e o 50 estava errado** (corrigido em
+16/ago). Ele veio de `GpuEditParams::default` do `crates/ui` — uma `impl` que o app de lá **nunca
+chama**: o único chamador em todo o repositório é um teste que confere só os 11 campos do Básico. O
+caminho vivo é `AppState::new` e `reset_edits`, e nos dois o meio da vinheta é **`0.0`**. O sintoma
+era o slider "Meio da vinheta" abrir em 50 aqui e em 0 lá, na mesma foto — e a fase 5 acusaria isso
+como divergência de porte.
+
+🔑 **A pergunta que separa os dois** não é "qual é o padrão declarado", é **"qual valor a foto recebe
+quando ninguém mexeu em nada"**. `impl Default` responde a primeira, e ela pode ser código morto —
+foi o segundo achado seguido em que o legado tem duas versões da mesma decisão e só uma está viva (o
+outro foi o JPEG com alfa da fase 0).
 
 #### Os 42 controles ✅ — e a curva de tons, que não tem nenhum
 

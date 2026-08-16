@@ -111,15 +111,25 @@ pub struct Ajustes {
 }
 
 impl Default for Ajustes {
-    /// O neutro, conferido campo a campo contra o `GpuEditParams::default` do
-    /// `crates/ui`.
+    /// O neutro, conferido campo a campo contra o `crates/ui`.
     ///
     /// ⚠️ **Nem todo neutro é zero**, e é por isso que este `Default` é escrito e
-    /// não derivado: `contrast` neutro é `1.0` (é um multiplicador),
-    /// `lens_vignette_midpoint` é `50.0` (é o meio de uma escala de 0 a 100) e
-    /// `sharpen_radius` é `1.0` (raio zero seria não ter pixel). Derivar daria
-    /// zero nos três, e a foto abriria já alterada — sem ninguém ter tocado em
-    /// nada.
+    /// não derivado: `contrast` neutro é `1.0` (é um multiplicador) e
+    /// `sharpen_radius` é `1.0` (raio zero seria não ter pixel de vizinhança).
+    /// Derivar daria zero nos dois, e a foto abriria já alterada — sem ninguém
+    /// ter tocado em nada.
+    ///
+    /// 🚨 **`lens_vignette_midpoint` era `50.0` aqui, e estava errado.** O 50 veio
+    /// de `GpuEditParams::default` do `crates/ui` — que o app de lá **nunca
+    /// chama**: o único chamador em todo o repositório é um teste que confere só
+    /// os 11 campos do Básico. O que o legado de fato usa é
+    /// `AppState::new`/`reset_edits`, e nos dois o meio da vinheta é **`0.0`**.
+    /// Copiar a `impl Default` em vez do caminho vivo fazia o slider "Meio da
+    /// vinheta" abrir em 50 aqui e em 0 lá, na mesma foto.
+    ///
+    /// 🔑 A pergunta que separa os dois: não é "qual é o padrão declarado", é
+    /// **"qual valor a foto recebe quando ninguém mexeu em nada"**. `impl Default`
+    /// responde a primeira, e ela pode ser código morto.
     fn default() -> Self {
         Self {
             exposure: 0.0,
@@ -163,7 +173,7 @@ impl Default for Ajustes {
             hsl_magenta_lum: 0.0,
             lens_distortion: 0.0,
             lens_vignette_amount: 0.0,
-            lens_vignette_midpoint: 50.0,
+            lens_vignette_midpoint: 0.0,
             nr_luminance: 0.0,
             nr_color: 0.0,
             sharpen_amount: 0.0,
@@ -614,18 +624,27 @@ mod testes {
         );
     }
 
-    /// ⚠️ O neutro **não é zero** em três campos.
+    /// ⚠️ O neutro **não é zero** em dois campos — e num terceiro parecia não ser.
     ///
-    /// `contrast` é multiplicador, `lens_vignette_midpoint` é o meio de uma
-    /// escala de 0 a 100 e `sharpen_radius` zero seria não ter pixel. Um
-    /// `#[derive(Default)]` daria zero nos três e a foto abriria alterada sem
-    /// ninguém ter tocado em nada — sem erro, e parecendo decisão de cor.
+    /// `contrast` é multiplicador e `sharpen_radius` zero seria não ter pixel de
+    /// vizinhança: um `#[derive(Default)]` daria zero nos dois e a foto abriria
+    /// alterada sem ninguém ter tocado em nada.
+    ///
+    /// 🚨 `lens_vignette_midpoint` está aqui pelo motivo oposto: ele **é** zero, e
+    /// já esteve em 50 porque foi copiado de `GpuEditParams::default`, uma `impl`
+    /// que o app do legado nunca chama. O que o legado usa — `AppState::new` e
+    /// `reset_edits` — diz `0.0`. O teste cobra o valor do caminho vivo, e não o
+    /// do padrão declarado.
     #[test]
-    fn o_neutro_nao_e_tudo_zero() {
+    fn o_neutro_e_o_do_caminho_vivo_do_legado() {
         let neutro = Ajustes::default();
         assert_eq!(neutro.contrast, 1.0);
-        assert_eq!(neutro.lens_vignette_midpoint, 50.0);
         assert_eq!(neutro.sharpen_radius, 1.0);
+        assert_eq!(
+            neutro.lens_vignette_midpoint, 0.0,
+            "é o que `AppState::new` e `reset_edits` põem no slider; \
+             o 50 de `GpuEditParams::default` é código morto"
+        );
         assert_eq!(neutro.exposure, 0.0);
         assert_eq!(neutro.saturation, 0.0);
     }
