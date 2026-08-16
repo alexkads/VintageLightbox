@@ -175,12 +175,12 @@ impl Aplicativo {
     fn ao_alternar_corte(
         &mut self,
         _acao: &AlternarCorte,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if self.tela == Tela::Revelacao {
             self.revelacao
-                .update(cx, |tela, cx| tela.alternar_corte(cx));
+                .update(cx, |tela, cx| tela.alternar_corte(window, cx));
         }
     }
 

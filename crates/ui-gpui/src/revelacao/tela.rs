@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use adapters::view_models::PhotoViewModel;
 use domain::entities::Preset;
-use domain::value_objects::CropSettings;
+use domain::value_objects::{AspectRatio, CropSettings};
 use gpui::{
     canvas, div, img, prelude::*, px, App, Bounds, Context, Entity, MouseButton, MouseDownEvent,
     MouseMoveEvent, MouseUpEvent, Pixels, Point, RenderImage, SharedString, Subscription, Task,
@@ -37,6 +37,7 @@ use super::historico::Historico;
 use super::persistencia::{self, Corte, Gravador};
 use super::presets::{self, GuardaDePresets};
 use super::processador::{Ajustes, Pedido, Processador};
+use super::transformacao;
 
 /// Largura do painel de ajustes.
 const LADO_DO_PAINEL: f32 = 280.0;
@@ -53,6 +54,30 @@ const LADO_DO_PAINEL: f32 = 280.0;
 /// trocar de foto e ao sair da Revelação, que é o que
 /// [`Revelacao::gravar_o_que_estiver_pendente`] faz.
 const ESPERA_DA_GRAVACAO: Duration = Duration::from_millis(500);
+
+/// As proporções que o legado oferece, na ordem do combo dele
+/// (`crop_panel.rs`).
+///
+/// ⚠️ **Não é a lista inteira do `AspectRatio`.** O enum tem 13 variantes; o combo
+/// do legado mostra estas. Acrescentar uma aqui seria feature nova — e o corte
+/// travado numa proporção que o outro app não tem viraria diferença de pixel sem
+/// explicação na conferência da fase 5.
+const PROPORCOES: [(&str, AspectRatio); 8] = [
+    ("Livre", AspectRatio::Free),
+    ("Original", AspectRatio::Original),
+    ("1:1", AspectRatio::Square),
+    ("4:3", AspectRatio::FourThree),
+    ("3:4", AspectRatio::ThreeFour),
+    ("5:4", AspectRatio::FiveFour),
+    ("16:9", AspectRatio::SixteenNine),
+    ("9:16", AspectRatio::NineSixteen),
+];
+
+/// Até onde o slider de endireitamento vai, em graus. É o limite que o
+/// `CropSettings` impõe (`MAX_ANGLE`), repetido aqui porque a barra precisa dele
+/// para desenhar — e o teste `todo_neutro_cabe_na_faixa` do painel de ajustes já
+/// mostrou o que acontece quando faixa e valor discordam.
+const ANGULO_MAXIMO: f32 = 45.0;
 
 /// De quanto em quanto a tela pergunta se a GPU já respondeu.
 ///
@@ -88,6 +113,8 @@ pub struct Revelacao {
     /// O corte em edição. `None` é "fora do modo de corte" — e é a diferença
     /// entre a foto com overlay por cima e a foto sozinha.
     edicao: Option<Edicao>,
+    /// O slider de endireitamento. Entidade própria, como os 42 do painel.
+    angulo: Entity<SliderState>,
     /// O tamanho do palco no último quadro, medido no `canvas`. Sem ele não dá
     /// para converter pixel de ponteiro em fração de foto.
     palco: Bounds<Pixels>,
@@ -131,6 +158,9 @@ struct Edicao {
     grade: bool,
     /// O que o ponteiro está movendo, e onde ele estava no quadro anterior.
     arrasto: Option<(Arrasto, Point<Pixels>)>,
+    /// A proporção travada. `Free` é o padrão do legado — corte livre até alguém
+    /// escolher outra coisa.
+    proporcao: AspectRatio,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -147,8 +177,11 @@ struct Aberta {
     /// processada. Sem origem não há o que revelar, e os sliders não têm sobre o
     /// que agir.
     origem: Option<Origem>,
-    /// O que está desenhado agora: a revelada, ou a original enquanto o primeiro
-    /// resultado não voltou.
+    /// O que o shader devolveu (ou a foto do cache, antes do primeiro resultado).
+    /// É a foto **inteira**: o corte e o giro entram depois, na exibição.
+    revelada: Option<image::DynamicImage>,
+    /// O que está na tela: a revelada depois de espelhada, girada, endireitada e
+    /// recortada.
     desenhada: Option<Arc<RenderImage>>,
 }
 
@@ -198,6 +231,24 @@ impl Revelacao {
             controles.push(Controle { definicao, estado });
         }
 
+        // O slider de endireitamento nasce junto com os outros, mas fora da
+        // tabela: ele não escreve em `Ajustes` — escreve no corte, que é outro
+        // caminho e outro dono.
+        let angulo = cx.new(|_| {
+            SliderState::new()
+                .min(-ANGULO_MAXIMO)
+                .max(ANGULO_MAXIMO)
+                .default_value(0.0)
+        });
+        assinaturas.push(cx.subscribe_in(
+            &angulo,
+            window,
+            move |tela: &mut Self, _estado, evento: &SliderEvent, _window, cx| {
+                let SliderEvent::Change(valor) = evento;
+                tela.definir_angulo(valor.start(), cx);
+            },
+        ));
+
         Self {
             previews,
             gravador,
@@ -210,6 +261,7 @@ impl Revelacao {
             _gravacao: None,
             controles,
             edicao: None,
+            angulo,
             palco: Bounds::default(),
             guarda_de_presets,
             nome_do_preset: cx.new(|cx| InputState::new(window, cx).placeholder("Nome do preset")),
@@ -278,8 +330,10 @@ impl Revelacao {
         self.aberta = Some(Aberta {
             foto,
             origem,
-            desenhada: bruta.map(para_gpui),
+            revelada: bruta,
+            desenhada: None,
         });
+        self.atualizar_exibicao();
 
         // `set_value` **não emite** `Change` (ao contrário do `InputState` da
         // busca), então mover os 42 sliders aqui não vira 42 pedidos à GPU. Um só
@@ -464,7 +518,7 @@ impl Revelacao {
     /// ⚠️ Sair por aqui **descarta** o que estava sendo cortado, como o `R` de
     /// lá: quem aplica usa o botão. Sem essa distinção, uma tecla teria dois
     /// significados conforme o estado, e nenhum aviso de qual valeu.
-    pub fn alternar_corte(&mut self, cx: &mut Context<Self>) {
+    pub fn alternar_corte(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.edicao.is_some() {
             self.edicao = None;
         } else {
@@ -476,12 +530,25 @@ impl Revelacao {
             else {
                 return;
             };
+            let corte = self.corte_atual();
+            // 🚨 O slider tem de nascer no ângulo da foto, e não em zero: numa
+            // foto já endireitada, uma barra no meio diria que ela está reta — e o
+            // primeiro toque nela desfaria o endireitamento sem aviso.
+            //
+            // `set_value` não emite `Change`, então isto não vira um pedido de
+            // reprocessamento (a mesma assimetria de `abrir`).
+            let graus = corte.angle();
+            self.angulo
+                .update(cx, |estado, cx| estado.set_value(graus, window, cx));
+
             self.edicao = Some(Edicao {
-                corte: self.corte_atual(),
+                corte,
                 grade: false,
                 arrasto: None,
+                proporcao: AspectRatio::Free,
             });
         }
+        self.atualizar_exibicao();
         cx.notify();
     }
 
@@ -525,12 +592,14 @@ impl Revelacao {
         // corte novo colado num ajuste antigo.
         self.gravar_o_que_estiver_pendente();
         self.gravar();
+        self.atualizar_exibicao();
         cx.notify();
     }
 
     /// Sai sem aplicar. O corte da foto continua o que era.
     pub fn cancelar_corte(&mut self, cx: &mut Context<Self>) {
         self.edicao = None;
+        self.atualizar_exibicao();
         cx.notify();
     }
 
@@ -594,6 +663,88 @@ impl Revelacao {
             }) => Some((origem.largura as f32, origem.altura as f32)),
             _ => None,
         }
+    }
+
+    /// Refaz o que está na tela a partir da foto revelada.
+    ///
+    /// 🔑 **Não é chamada durante o arrasto de alça**, e é de propósito: no modo
+    /// de corte a foto aparece inteira, e o retângulo é desenho por cima. O que
+    /// muda com o arrasto é o desenho, não os pixels — recalcular a cada
+    /// milímetro reprocessaria a foto dezenas de vezes por segundo para produzir
+    /// exatamente a mesma imagem.
+    fn atualizar_exibicao(&mut self) {
+        // No modo de corte a foto aparece inteira (girada e endireitada), com o
+        // retângulo por cima; fora dele, recortada. É o `apply_crop_clip` do
+        // legado.
+        let corte = match self.edicao.as_ref() {
+            Some(edicao) => edicao.corte.clone(),
+            None => self.corte_atual(),
+        };
+        let recortar = self.edicao.is_none();
+
+        let Some(aberta) = self.aberta.as_mut() else {
+            return;
+        };
+        aberta.desenhada = aberta
+            .revelada
+            .as_ref()
+            .map(|imagem| para_gpui(transformacao::aplicar(imagem, &corte, recortar)));
+    }
+
+    /// Gira 90° no sentido horário. Só faz sentido dentro do modo de corte.
+    pub fn girar(&mut self, cx: &mut Context<Self>) {
+        self.mexer_no_corte(corte::girar, cx);
+    }
+
+    pub fn espelhar_horizontal(&mut self, cx: &mut Context<Self>) {
+        self.mexer_no_corte(corte::espelhar_horizontal, cx);
+    }
+
+    pub fn espelhar_vertical(&mut self, cx: &mut Context<Self>) {
+        self.mexer_no_corte(corte::espelhar_vertical, cx);
+    }
+
+    /// Muda o ângulo de endireitamento, em graus, a partir do que já está lá.
+    pub fn inclinar(&mut self, graus: f32, cx: &mut Context<Self>) {
+        self.mexer_no_corte(|corte| corte::inclinar(corte, graus), cx);
+    }
+
+    /// Põe o ângulo num valor absoluto — é o que o slider manda.
+    fn definir_angulo(&mut self, graus: f32, cx: &mut Context<Self>) {
+        self.mexer_no_corte(|corte| corte::inclinar(corte, graus - corte.angle()), cx);
+    }
+
+    /// Volta ao corte que ocupa a foto inteira, sem giro nem espelho.
+    ///
+    /// É o "Reset" do painel de corte do legado — e ele **não** aplica: quem
+    /// desiste de vez usa Cancelar, quem quer recomeçar do zero continua no modo.
+    pub fn recomecar_corte(&mut self, cx: &mut Context<Self>) {
+        self.mexer_no_corte(|_| corte::foto_inteira(), cx);
+    }
+
+    pub fn travar_proporcao(&mut self, proporcao: AspectRatio, cx: &mut Context<Self>) {
+        let Some(edicao) = self.edicao.as_mut() else {
+            return;
+        };
+        edicao.proporcao = proporcao;
+        cx.notify();
+    }
+
+    /// 🔑 Toda mudança de corte passa por aqui, e por isso **toda** mudança
+    /// reprocessa a foto exibida. Girar sem reprocessar mudaria um número e
+    /// deixaria a tela igual — o botão pareceria quebrado, e o defeito só
+    /// apareceria ao aplicar.
+    fn mexer_no_corte(
+        &mut self,
+        como: impl Fn(&CropSettings) -> CropSettings,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(edicao) = self.edicao.as_mut() else {
+            return;
+        };
+        edicao.corte = como(&edicao.corte);
+        self.atualizar_exibicao();
+        cx.notify();
     }
 
     pub fn pode_desfazer(&self) -> bool {
@@ -668,8 +819,9 @@ impl Revelacao {
     fn colher(&mut self, cx: &mut Context<Self>) -> bool {
         if let Some(resultado) = self.processador.colher() {
             if let Some(aberta) = self.aberta.as_mut() {
-                aberta.desenhada = Some(para_gpui(resultado.imagem));
+                aberta.revelada = Some(resultado.imagem);
             }
+            self.atualizar_exibicao();
             // Só larga a espera se o que voltou é o último pedido. No meio de um
             // arrasto chegam resultados de valores já ultrapassados, e parar de
             // colher ali deixaria a foto congelada num ajuste que o dedo já
@@ -985,6 +1137,8 @@ impl Revelacao {
     fn barra_de_corte(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
         let edicao = self.edicao.as_ref()?;
         let grade_ligada = edicao.grade;
+        let angulo = edicao.corte.angle();
+        let atual = edicao.proporcao.clone();
 
         Some(
             div()
@@ -1030,6 +1184,74 @@ impl Revelacao {
                                 edicao.grade = !edicao.grade;
                                 cx.notify();
                             }
+                        })),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .gap(px(4.))
+                        .child(
+                            Button::new("corte-girar")
+                                .label("Girar 90°")
+                                .xsmall()
+                                .flex_1()
+                                .on_click(cx.listener(|tela, _ev, _window, cx| {
+                                    tela.girar(cx);
+                                })),
+                        )
+                        .child(Button::new("corte-espelho-h").label("⇄").xsmall().on_click(
+                            cx.listener(|tela, _ev, _window, cx| {
+                                tela.espelhar_horizontal(cx);
+                            }),
+                        ))
+                        .child(Button::new("corte-espelho-v").label("⇅").xsmall().on_click(
+                            cx.listener(|tela, _ev, _window, cx| {
+                                tela.espelhar_vertical(cx);
+                            }),
+                        )),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .text_xs()
+                        .child("Endireitar")
+                        .child(
+                            div()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(SharedString::from(format!("{:+.1}°", angulo))),
+                        ),
+                )
+                .child(Slider::new(&self.angulo).horizontal())
+                .child(
+                    // As proporções que o legado oferece no combo, na mesma ordem.
+                    div().flex().flex_wrap().gap(px(2.)).children(
+                        PROPORCOES
+                            .iter()
+                            .map(|(rotulo, proporcao)| {
+                                let escolhida = *proporcao == atual;
+                                let proporcao = proporcao.clone();
+                                Button::new(SharedString::from(format!("prop-{rotulo}")))
+                                    .label(*rotulo)
+                                    .xsmall()
+                                    .when(escolhida, |b| b.primary())
+                                    .selected(escolhida)
+                                    .on_click(cx.listener(move |tela, _ev, _window, cx| {
+                                        tela.travar_proporcao(proporcao.clone(), cx);
+                                    }))
+                                    .into_any_element()
+                            })
+                            .collect::<Vec<_>>(),
+                    ),
+                )
+                .child(
+                    Button::new("corte-recomecar")
+                        .label("Recomeçar")
+                        .xsmall()
+                        .w_full()
+                        .on_click(cx.listener(|tela, _ev, _window, cx| {
+                            tela.recomecar_corte(cx);
                         })),
                 ),
         )
@@ -2102,7 +2324,7 @@ mod testes {
                 );
 
                 assert!(!tela.cortando());
-                tela.alternar_corte(cx);
+                tela.alternar_corte(window, cx);
                 assert!(tela.cortando());
 
                 let corte = &tela.edicao.as_ref().unwrap().corte;
@@ -2137,7 +2359,7 @@ mod testes {
                     window,
                     cx,
                 );
-                tela.alternar_corte(cx);
+                tela.alternar_corte(window, cx);
 
                 // Mexe no corte em edição e desiste.
                 if let Some(edicao) = tela.edicao.as_mut() {
@@ -2173,7 +2395,7 @@ mod testes {
         janela
             .update(cx, |tela, window, cx| {
                 tela.abrir(foto("retrato.jpg"), window, cx);
-                tela.alternar_corte(cx);
+                tela.alternar_corte(window, cx);
 
                 if let Some(edicao) = tela.edicao.as_mut() {
                     edicao.corte = corte::mover_alca(
@@ -2210,7 +2432,7 @@ mod testes {
         janela
             .update(cx, |tela, window, cx| {
                 tela.abrir(foto("sem-cache.NEF"), window, cx);
-                tela.alternar_corte(cx);
+                tela.alternar_corte(window, cx);
                 assert!(!tela.cortando());
             })
             .expect("a janela deve estar aberta");
@@ -2232,11 +2454,203 @@ mod testes {
         janela
             .update(cx, |tela, window, cx| {
                 tela.abrir(foto("a.jpg"), window, cx);
-                tela.alternar_corte(cx);
+                tela.alternar_corte(window, cx);
                 assert!(tela.cortando());
 
                 tela.abrir(foto("b.jpg"), window, cx);
                 assert!(!tela.cortando(), "o retângulo era da foto a");
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 A foto abre **cortada** quando tem corte gravado.
+    ///
+    /// É a última divergência visível que sobrava em relação ao legado: até aqui
+    /// a Revelação nova mostrava a foto inteira, e quem tinha enquadrado no app
+    /// de egui via o corte desaparecer ao abrir no novo.
+    #[gpui::test]
+    fn a_foto_abre_com_o_corte_aplicado(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        // 16×16 para a metade dar 8×8 redondo.
+        let mut grande = RgbaImage::new(16, 16);
+        for pixel in grande.pixels_mut() {
+            *pixel = Rgba([100, 100, 100, 255]);
+        }
+        previews
+            .save_preview("id-cortada.jpg", &DynamicImage::ImageRgba8(grande))
+            .expect("gravar preview");
+
+        let janela = janela(cx, previews);
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(
+                    PhotoViewModel {
+                        edit_crop_x: Some(0.0),
+                        edit_crop_y: Some(0.0),
+                        edit_crop_width: Some(0.5),
+                        edit_crop_height: Some(0.5),
+                        ..foto("cortada.jpg")
+                    },
+                    window,
+                    cx,
+                );
+
+                let desenhada = tela.aberta.as_ref().unwrap().desenhada.as_ref().unwrap();
+                assert_eq!(
+                    desenhada.size(0).width.0,
+                    8,
+                    "metade de 16 — a foto na tela é a cortada, não a inteira"
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 No modo de corte a foto volta a aparecer **inteira**.
+    ///
+    /// É o `apply_crop_clip` do legado. Sem isso, entrar no corte mostraria só o
+    /// pedaço já cortado — e não haveria como aumentar o enquadramento de volta,
+    /// porque o resto da foto não estaria na tela.
+    #[gpui::test]
+    fn o_modo_de_corte_mostra_a_foto_inteira(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        let mut grande = RgbaImage::new(16, 16);
+        for pixel in grande.pixels_mut() {
+            *pixel = Rgba([100, 100, 100, 255]);
+        }
+        previews
+            .save_preview("id-cortada.jpg", &DynamicImage::ImageRgba8(grande))
+            .expect("gravar preview");
+
+        let janela = janela(cx, previews);
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(
+                    PhotoViewModel {
+                        edit_crop_width: Some(0.5),
+                        edit_crop_height: Some(0.5),
+                        ..foto("cortada.jpg")
+                    },
+                    window,
+                    cx,
+                );
+                tela.alternar_corte(window, cx);
+
+                let desenhada = tela.aberta.as_ref().unwrap().desenhada.as_ref().unwrap();
+                assert_eq!(
+                    desenhada.size(0).width.0,
+                    16,
+                    "inteira, para poder arrastar"
+                );
+
+                tela.cancelar_corte(cx);
+                let desenhada = tela.aberta.as_ref().unwrap().desenhada.as_ref().unwrap();
+                assert_eq!(desenhada.size(0).width.0, 8, "e cortada de volta ao sair");
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 Girar 90° muda a foto na tela, e não só um número.
+    ///
+    /// Um botão que mexe no estado sem reprocessar a imagem parece quebrado — e o
+    /// defeito só apareceria ao aplicar, quando a foto saltasse de orientação.
+    #[gpui::test]
+    fn girar_muda_a_foto_na_tela(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        // 16×8: deitada, para o giro trocar largura por altura de forma visível.
+        let mut deitada = RgbaImage::new(16, 8);
+        for pixel in deitada.pixels_mut() {
+            *pixel = Rgba([100, 100, 100, 255]);
+        }
+        previews
+            .save_preview("id-deitada.jpg", &DynamicImage::ImageRgba8(deitada))
+            .expect("gravar preview");
+
+        let janela = janela(cx, previews);
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("deitada.jpg"), window, cx);
+                tela.alternar_corte(window, cx);
+
+                let antes = tela.aberta.as_ref().unwrap().desenhada.as_ref().unwrap();
+                assert_eq!((antes.size(0).width.0, antes.size(0).height.0), (16, 8));
+
+                tela.girar(cx);
+
+                let depois = tela.aberta.as_ref().unwrap().desenhada.as_ref().unwrap();
+                assert_eq!(
+                    (depois.size(0).width.0, depois.size(0).height.0),
+                    (8, 16),
+                    "girar 90° troca largura por altura na tela"
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 O slider de endireitamento nasce no ângulo da foto.
+    ///
+    /// Numa foto já endireitada, uma barra no meio diria que ela está reta — e o
+    /// primeiro toque nela desfaria o endireitamento sem aviso.
+    #[gpui::test]
+    fn o_slider_de_angulo_abre_no_angulo_da_foto(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-torta.jpg", &foto_cinza())
+            .expect("gravar preview");
+
+        let janela = janela(cx, previews);
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(
+                    PhotoViewModel {
+                        edit_crop_angle: Some(-7.5),
+                        ..foto("torta.jpg")
+                    },
+                    window,
+                    cx,
+                );
+                tela.alternar_corte(window, cx);
+
+                assert_eq!(tela.angulo.read(cx).value().start(), -7.5);
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// A proporção travada vale para o arrasto seguinte.
+    #[gpui::test]
+    fn travar_a_proporcao_muda_o_que_o_arrasto_faz(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_cinza())
+            .expect("gravar preview");
+
+        let janela = janela(cx, previews);
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("retrato.jpg"), window, cx);
+                tela.alternar_corte(window, cx);
+                tela.travar_proporcao(AspectRatio::Square, cx);
+
+                // Encolhe pela esquerda: com 1:1 travado, a altura tem de
+                // acompanhar a largura.
+                if let Some(edicao) = tela.edicao.as_mut() {
+                    let proporcao = corte::proporcao_de(&edicao.proporcao, (100.0, 100.0));
+                    edicao.corte = corte::mover_alca(
+                        &edicao.corte,
+                        Alca::Esquerda,
+                        0.4,
+                        0.0,
+                        (100.0, 100.0),
+                        proporcao,
+                    );
+                }
+
+                let corte = &tela.edicao.as_ref().unwrap().corte;
+                assert!(
+                    (corte.crop_width() - corte.crop_height()).abs() < 1e-4,
+                    "1:1 numa foto quadrada: {} × {}",
+                    corte.crop_width(),
+                    corte.crop_height()
+                );
             })
             .expect("a janela deve estar aberta");
     }

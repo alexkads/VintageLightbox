@@ -11,3 +11,4 @@ pub mod persistencia;
 pub mod presets;
 pub mod processador;
 pub mod tela;
+pub mod transformacao;
