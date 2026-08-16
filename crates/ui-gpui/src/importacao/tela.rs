@@ -24,6 +24,9 @@ use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::checkbox::Checkbox;
 use gpui_component::{ActiveTheme, Disableable, Selectable, Sizable};
 
+use domain::value_objects::{ImportMode, OrganizationStrategy, RenamePattern};
+
+use super::destino;
 use super::estado::{aplicar, Estado, Ordem, Recado, Seguimento};
 use super::explorador::{Andamento, Explorador, Importador, SeletorDePasta};
 
@@ -116,6 +119,31 @@ impl Importacao {
         // escolhida ficaria parada no canal até alguma outra coisa acordar a
         // colheita.
         self.acompanhar(cx);
+        cx.notify();
+    }
+
+    /// Abre o seletor para a pasta de destino.
+    pub fn escolher_destino(&mut self, cx: &mut Context<Self>) {
+        self.esperando_escolha = true;
+        self.seletor.escolher_destino(self.recados.0.clone());
+        self.acompanhar(cx);
+        cx.notify();
+    }
+
+    /// Liga ou desliga "pular duplicatas".
+    ///
+    /// 🚨 **Ligar desmarca as duplicatas na hora.** Coerência com o que a grade
+    /// mostra: se a importação vai pular, a marcação tem de dizer isso **antes**
+    /// de o botão ser apertado — senão o rodapé promete 40 fotos e entram 32.
+    pub fn pular_duplicatas(&mut self, pular: bool, cx: &mut Context<Self>) {
+        self.estado.opcoes.skip_duplicates = pular;
+        if pular {
+            for candidato in self.estado.candidatos.iter_mut() {
+                if candidato.duplicado {
+                    candidato.marcado = false;
+                }
+            }
+        }
         cx.notify();
     }
 
@@ -339,6 +367,152 @@ impl Importacao {
             }))
     }
 
+    /// O lado "PARA": o que fazer com o arquivo, e onde ele vai parar.
+    fn destino(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let modo = self.estado.opcoes.mode;
+        let organizacao = self.estado.opcoes.organization;
+        let renomeacao = self.estado.opcoes.rename_pattern.clone();
+        let pular = self.estado.opcoes.skip_duplicates;
+        let pasta: SharedString = self
+            .estado
+            .opcoes
+            .destination
+            .clone()
+            .unwrap_or_else(|| "o catálogo".into())
+            .into();
+
+        let copia = modo != ImportMode::Add;
+
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(4.))
+            .w(px(240.))
+            .pl(px(10.))
+            .border_l_1()
+            .border_color(cx.theme().border)
+            .child(div().text_xs().child("Para"))
+            .child(div().flex().gap(px(2.)).children(
+                [ImportMode::Add, ImportMode::Copy, ImportMode::Move].map(|opcao| {
+                    let escolhido = opcao == modo;
+                    Button::new(SharedString::from(format!("modo-{}", opcao.label())))
+                        .label(opcao.label())
+                        .xsmall()
+                        .when(escolhido, |b| b.primary())
+                        .selected(escolhido)
+                        .on_click(cx.listener(move |tela, _ev, _window, cx| {
+                            tela.estado.opcoes.mode = opcao;
+                            cx.notify();
+                        }))
+                }),
+            ))
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(modo.description()),
+            )
+            // ⚠️ Destino, organização e renomeação **só aparecem quando copiam**.
+            // No modo `Add` o arquivo fica onde está, e oferecer "organizar por
+            // data" ali seria prometer uma arrumação que não vai acontecer.
+            .when(copia, |painel| {
+                painel
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(4.))
+                            .pt(px(6.))
+                            .child(
+                                Button::new("escolher-destino")
+                                    .label("Destino…")
+                                    .xsmall()
+                                    .on_click(cx.listener(|tela, _ev, _window, cx| {
+                                        tela.escolher_destino(cx);
+                                    })),
+                            )
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .text_xs()
+                                    .truncate()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(pasta),
+                            ),
+                    )
+                    .child(div().pt(px(4.)).text_xs().child("Organizar"))
+                    .child(
+                        div().flex().flex_wrap().gap(px(2.)).children(
+                            [
+                                OrganizationStrategy::ByDate,
+                                OrganizationStrategy::PreserveStructure,
+                                OrganizationStrategy::IntoOneFolder,
+                            ]
+                            .map(|opcao| {
+                                let escolhida = opcao == organizacao;
+                                Button::new(SharedString::from(format!("org-{}", opcao.label())))
+                                    .label(opcao.label())
+                                    .xsmall()
+                                    .when(escolhida, |b| b.primary())
+                                    .selected(escolhida)
+                                    .on_click(cx.listener(move |tela, _ev, _window, cx| {
+                                        tela.estado.opcoes.organization = opcao;
+                                        cx.notify();
+                                    }))
+                            }),
+                        ),
+                    )
+                    .child(div().pt(px(4.)).text_xs().child("Nomear"))
+                    .child(div().flex().flex_wrap().gap(px(2.)).children(
+                        [RenamePattern::Standard, RenamePattern::KeepOriginal].map(|opcao| {
+                            let escolhida = opcao == renomeacao;
+                            let rotulo = opcao.label();
+                            Button::new(SharedString::from(format!("nome-{rotulo}")))
+                                .label(rotulo)
+                                .xsmall()
+                                .when(escolhida, |b| b.primary())
+                                .selected(escolhida)
+                                .on_click(cx.listener(move |tela, _ev, _window, cx| {
+                                    tela.estado.opcoes.rename_pattern = opcao.clone();
+                                    cx.notify();
+                                }))
+                        }),
+                    ))
+            })
+            // 🔑 A prévia é o que transforma quatro escolhas abstratas numa
+            // decisão conferível antes de o botão ser apertado.
+            .when_some(destino::previa(&self.estado), |painel, caminho| {
+                painel.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .pt(px(8.))
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child("A primeira foto vai para"),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().primary)
+                                .child(SharedString::from(caminho)),
+                        ),
+                )
+            })
+            .child(
+                div().pt(px(8.)).child(
+                    Checkbox::new("pular-duplicatas")
+                        .label("Não importar duplicadas")
+                        .checked(pular)
+                        .on_click(cx.listener(|tela, marcado: &bool, _window, cx| {
+                            tela.pular_duplicatas(*marcado, cx);
+                        })),
+                ),
+            )
+    }
+
     fn grade(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let visiveis = self.estado.visiveis();
 
@@ -481,7 +655,15 @@ impl Render for Importacao {
                         .child(SharedString::from(aviso)),
                 )
             })
-            .child(self.grade(cx))
+            .child(
+                div()
+                    .flex()
+                    .flex_1()
+                    .min_h(px(0.))
+                    .gap(px(10.))
+                    .child(self.grade(cx))
+                    .child(self.destino(cx)),
+            )
             .child(self.rodape(cx))
     }
 }
@@ -686,6 +868,88 @@ mod testes {
                 assert_eq!(tela.estado.origem.as_deref(), Some("/b"));
             })
             .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 Ligar "não importar duplicadas" desmarca as duplicatas **na hora**.
+    ///
+    /// Coerência com o que a grade mostra: se a importação vai pular, a marcação
+    /// tem de dizer isso antes de o botão ser apertado — senão o rodapé promete
+    /// 40 fotos e entram 32, e a diferença só aparece no fim.
+    #[gpui::test]
+    fn pular_duplicatas_desmarca_na_hora(cx: &mut TestAppContext) {
+        let explorador = Arc::new(ExploradorDeMentira::responde(
+            "/cartao",
+            &["/cartao/a.NEF", "/cartao/b.NEF"],
+        ));
+        let janela = janela(cx, explorador, Arc::new(ImportadorDeMentira::default()));
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.estado.opcoes.skip_duplicates = false;
+                tela.abrir_origem("/cartao".into(), cx);
+            })
+            .expect("a janela deve estar aberta");
+        colher(cx, &janela);
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                // Uma delas já está no catálogo.
+                tela.estado.candidatos[0].duplicado = true;
+                assert_eq!(tela.estado.marcados(), 2);
+
+                tela.pular_duplicatas(true, cx);
+                assert_eq!(tela.estado.marcados(), 1, "a duplicata saiu da marcação");
+
+                // Desligar de volta **não** remarca: quem desmarcou à mão não
+                // pode ter a escolha desfeita por uma caixa de opção.
+                tela.pular_duplicatas(false, cx);
+                assert_eq!(tela.estado.marcados(), 1);
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// A pasta de destino escolhida entra nas opções da importação.
+    #[gpui::test]
+    fn o_destino_escolhido_chega_a_importacao(cx: &mut TestAppContext) {
+        let explorador = Arc::new(ExploradorDeMentira::responde("/cartao", &["/cartao/a.NEF"]));
+        let importador = Arc::new(ImportadorDeMentira::default());
+        let janela = com_seletor(
+            cx,
+            explorador,
+            importador.clone(),
+            Arc::new(SeletorDeMentira::escolhe("/HD/Fotos")),
+        );
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.abrir_origem("/cartao".into(), cx);
+            })
+            .expect("a janela deve estar aberta");
+        colher(cx, &janela);
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.escolher_destino(cx);
+            })
+            .expect("a janela deve estar aberta");
+        colher(cx, &janela);
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                assert_eq!(
+                    tela.estado.opcoes.destination.as_deref(),
+                    Some("/HD/Fotos"),
+                    "e sem revarrer nada: trocar o destino não muda o que a origem tem"
+                );
+                assert_eq!(tela.estado.candidatos.len(), 1);
+                tela.importar(cx);
+            })
+            .expect("a janela deve estar aberta");
+
+        assert_eq!(
+            importador.importados()[0].1.destination.as_deref(),
+            Some("/HD/Fotos")
+        );
     }
 
     /// 🚨 Importar leva só o que está marcado, e com a origem nas opções.

@@ -115,6 +115,10 @@ pub trait SeletorDePasta: Send + Sync + 'static {
     /// Responde **sempre**: `OrigemEscolhida` ou `SemEscolha`. Silêncio deixaria
     /// a tela esperando uma pasta que nunca vem.
     fn escolher(&self, canal: Sender<Recado>);
+
+    /// O mesmo, para a pasta de destino. Responde `DestinoEscolhido` ou
+    /// `SemEscolha`.
+    fn escolher_destino(&self, canal: Sender<Recado>);
 }
 
 /// O seletor do sistema, via `rfd`.
@@ -130,21 +134,34 @@ impl SeletorNativo {
     pub fn novo(tokio: tokio::runtime::Handle) -> Self {
         Self { tokio }
     }
-}
 
-impl SeletorDePasta for SeletorNativo {
-    fn escolher(&self, canal: Sender<Recado>) {
+    /// Abre o seletor e responde com o recado que a chamada pedir.
+    ///
+    /// 🔑 Um caminho só para as duas pastas: origem e destino diferem no título e
+    /// no recado, e nada mais. Duas cópias divergiriam no primeiro ajuste — e o
+    /// jeito de descobrir seria um dos dois parar de responder ao desistir.
+    fn pedir(&self, titulo: &'static str, canal: Sender<Recado>, como: fn(String) -> Recado) {
         self.tokio.spawn(async move {
             let recado = match rfd::AsyncFileDialog::new()
-                .set_title("Escolher a origem")
+                .set_title(titulo)
                 .pick_folder()
                 .await
             {
-                Some(pasta) => Recado::OrigemEscolhida(pasta.path().to_string_lossy().to_string()),
+                Some(pasta) => como(pasta.path().to_string_lossy().to_string()),
                 None => Recado::SemEscolha,
             };
             let _ = canal.send(recado);
         });
+    }
+}
+
+impl SeletorDePasta for SeletorNativo {
+    fn escolher(&self, canal: Sender<Recado>) {
+        self.pedir("Escolher a origem", canal, Recado::OrigemEscolhida);
+    }
+
+    fn escolher_destino(&self, canal: Sender<Recado>) {
+        self.pedir("Escolher o destino", canal, Recado::DestinoEscolhido);
     }
 }
 
@@ -339,6 +356,14 @@ pub mod mentira {
         fn escolher(&self, canal: Sender<Recado>) {
             let recado = match self.escolha.lock().expect("a escolha").clone() {
                 Some(caminho) => Recado::OrigemEscolhida(caminho),
+                None => Recado::SemEscolha,
+            };
+            let _ = canal.send(recado);
+        }
+
+        fn escolher_destino(&self, canal: Sender<Recado>) {
+            let recado = match self.escolha.lock().expect("a escolha").clone() {
+                Some(caminho) => Recado::DestinoEscolhido(caminho),
                 None => Recado::SemEscolha,
             };
             let _ = canal.send(recado);

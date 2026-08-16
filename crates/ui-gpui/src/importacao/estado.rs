@@ -45,10 +45,17 @@ impl Candidato {
     /// o fotógrafo marcar 2.000 células antes de começar inverteria o trabalho.
     /// Desmarcar é a exceção, e é o que as duplicatas fazem sozinhas.
     pub fn do_caminho(caminho: String) -> Self {
-        let nome = std::path::Path::new(&caminho)
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| caminho.clone());
+        // 🚨 **Corte por texto, com os dois separadores** — e não `Path::file_name`.
+        // Um cartão formatado no Windows chega com `\`, e no macOS o `Path` não o
+        // reconhece: o "nome do arquivo" viraria o caminho inteiro, e a grade
+        // mostraria `C:\Fotos\2024\DSC_1.NEF` na célula. É a mesma armadilha que
+        // a árvore de pastas da fase 1 encontrou, do outro lado do app.
+        let nome = caminho
+            .rsplit(['/', '\\'])
+            .next()
+            .filter(|n| !n.is_empty())
+            .unwrap_or(&caminho)
+            .to_string();
 
         Self {
             caminho,
@@ -102,6 +109,8 @@ pub enum Recado {
     Duplicados(Vec<String>),
     /// A pasta que o seletor do sistema devolveu.
     OrigemEscolhida(String),
+    /// A pasta de destino que o seletor devolveu.
+    DestinoEscolhido(String),
     /// O seletor fechou sem escolha.
     ///
     /// 🔑 **Desistir também responde.** Sem este recado, a tela ficaria esperando
@@ -347,6 +356,11 @@ pub fn aplicar(estado: &mut Estado, recado: Recado) -> Option<Seguimento> {
         }
 
         Recado::OrigemEscolhida(caminho) => Some(Seguimento::Varrer(caminho)),
+
+        Recado::DestinoEscolhido(caminho) => {
+            estado.opcoes.destination = Some(caminho);
+            None
+        }
 
         Recado::SemEscolha => None,
 
@@ -723,6 +737,40 @@ mod testes {
             estado.origem, None,
             "quem troca a origem é a tela, ao começar a varredura"
         );
+    }
+
+    /// 🚨 O nome do arquivo sai de caminho com `\\` também.
+    ///
+    /// `Path::file_name` no macOS não reconhece a barra invertida, e a célula da
+    /// grade mostraria o caminho inteiro no lugar do nome — num cartão formatado
+    /// no Windows, que é o caso comum.
+    #[test]
+    fn o_nome_sai_de_caminho_com_qualquer_separador() {
+        assert_eq!(
+            Candidato::do_caminho("/cartao/DCIM/DSC_1.NEF".into()).nome,
+            "DSC_1.NEF"
+        );
+        assert_eq!(
+            Candidato::do_caminho("C:\\Fotos\\2024\\DSC_1.NEF".into()).nome,
+            "DSC_1.NEF"
+        );
+        assert_eq!(
+            Candidato::do_caminho("solto.jpg".into()).nome,
+            "solto.jpg",
+            "caminho sem pasta nenhuma continua sendo o nome"
+        );
+    }
+
+    /// O destino escolhido entra nas opções, sem mexer na listagem.
+    #[test]
+    fn o_destino_escolhido_entra_nas_opcoes() {
+        let mut estado = com_arquivos("/cartao", &["a.NEF"]);
+
+        let seguimento = aplicar(&mut estado, Recado::DestinoEscolhido("/HD/Fotos".into()));
+
+        assert_eq!(seguimento, None, "trocar o destino não manda revarrer nada");
+        assert_eq!(estado.opcoes.destination.as_deref(), Some("/HD/Fotos"));
+        assert_eq!(estado.candidatos.len(), 1);
     }
 
     /// Desistir do seletor não mexe em nada — mas responde.
