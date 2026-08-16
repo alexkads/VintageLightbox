@@ -16,7 +16,8 @@ use std::time::Duration;
 
 use adapters::view_models::PhotoViewModel;
 use gpui::{
-    div, img, prelude::*, px, App, Context, Entity, RenderImage, SharedString, Subscription, Window,
+    div, img, prelude::*, px, App, Context, Entity, RenderImage, SharedString, Subscription, Task,
+    Window,
 };
 use gpui_component::collapsible::Collapsible;
 use gpui_component::slider::{Slider, SliderEvent, SliderState};
@@ -26,11 +27,24 @@ use infrastructure::cache::preview_manager::PreviewManager;
 use crate::imagem::para_gpui;
 
 use super::controles::{Definicao, Secao, CONTROLES};
-use super::persistencia;
+use super::persistencia::{self, Corte, Gravador};
 use super::processador::{Ajustes, Pedido, Processador};
 
 /// Largura do painel de ajustes.
 const LADO_DO_PAINEL: f32 = 280.0;
+
+/// Quanto a gravação espera depois do último movimento de slider.
+///
+/// Os mesmos 500 ms do legado (`AUTO_SAVE_DEBOUNCE_MS`, `app.rs`), e a razão é a
+/// mesma: um arrasto emite dezenas de `Change` por segundo, e gravar cada um
+/// seria dezenas de `UPDATE` de 54 colunas por segundo. A espera é o que
+/// transforma um arrasto inteiro em uma gravação só.
+///
+/// ⚠️ **E ela é uma janela de perda.** Fechar o app dentro dela perde o último
+/// ajuste — no legado também. O que fecha as outras portas é gravar na hora ao
+/// trocar de foto e ao sair da Revelação, que é o que
+/// [`Revelacao::gravar_o_que_estiver_pendente`] faz.
+const ESPERA_DA_GRAVACAO: Duration = Duration::from_millis(500);
 
 /// De quanto em quanto a tela pergunta se a GPU já respondeu.
 ///
@@ -42,9 +56,22 @@ const INTERVALO_DE_COLHEITA: Duration = Duration::from_millis(8);
 
 pub struct Revelacao {
     previews: Arc<PreviewManager>,
+    gravador: Arc<dyn Gravador>,
     processador: Processador,
     aberta: Option<Aberta>,
     ajustes: Ajustes,
+    /// O corte que veio com a foto, guardado para ser **devolvido** na gravação.
+    /// A Revelação nova ainda não sabe cortar; se ela gravasse `None` aqui,
+    /// mexer num slider apagaria o enquadramento feito no app de egui.
+    corte: Corte,
+    /// Se há ajuste que ainda não foi gravado. Um `bool`, e não "a tarefa existe":
+    /// a tarefa continua existindo depois de terminar, e trocar de foto gravaria
+    /// de novo o que já estava no banco.
+    pendente: bool,
+    /// A espera do próximo salvamento. Guardada porque **descartá-la cancela** —
+    /// é assim que cada movimento novo do slider adia a gravação em vez de
+    /// enfileirar mais uma.
+    _gravacao: Option<Task<()>>,
     controles: Vec<Controle>,
     /// Quais seções estão abertas. Um conjunto, e não um `bool` por seção:
     /// acrescentar seção nova não pode exigir lembrar de acrescentar campo.
@@ -88,6 +115,7 @@ struct Origem {
 impl Revelacao {
     pub fn nova(
         previews: Arc<PreviewManager>,
+        gravador: Arc<dyn Gravador>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -112,6 +140,7 @@ impl Revelacao {
                     let SliderEvent::Change(valor) = evento;
                     (definicao.aplicar)(&mut tela.ajustes, valor.start());
                     tela.pedir_revelacao(cx);
+                    tela.adiar_gravacao(cx);
                 },
             ));
 
@@ -120,9 +149,13 @@ impl Revelacao {
 
         Self {
             previews,
+            gravador,
             processador: Processador::novo(),
             aberta: None,
             ajustes: Ajustes::default(),
+            corte: Corte::default(),
+            pendente: false,
+            _gravacao: None,
             controles,
             abertas: Secao::TODAS
                 .into_iter()
@@ -141,6 +174,13 @@ impl Revelacao {
     /// mas quando a Revelação passar a carregar o RAW em resolução plena, este é
     /// o ponto que tem de virar assíncrono.
     pub fn abrir(&mut self, foto: PhotoViewModel, window: &mut Window, cx: &mut Context<Self>) {
+        // 🚨 **Antes de qualquer coisa**: o que a foto anterior tinha de gravado
+        // ainda pode estar dentro dos 500 ms de espera. Trocar de foto primeiro
+        // faria a gravação atrasada sair com os ajustes já substituídos — a
+        // revelação de uma foto gravada na outra. É a mesma ordem do legado
+        // ("Check if we need to save the CURRENT photo before switching").
+        self.gravar_o_que_estiver_pendente();
+
         // Preview primeiro, miniatura como queda. A miniatura fica borrada numa
         // tela inteira, e é de propósito: mostrar a foto em tamanho errado é
         // melhor do que mostrar retângulo vazio.
@@ -164,6 +204,7 @@ impl Revelacao {
         // anterior aplicaria a revelação de uma foto em outra, e ignorar o banco
         // mostraria o arquivo cru de uma foto que já foi revelada.
         self.ajustes = persistencia::da_foto(&foto);
+        self.corte = persistencia::corte_da_foto(&foto);
         self.aguardando = None;
 
         self.aberta = Some(Aberta {
@@ -206,6 +247,51 @@ impl Revelacao {
 
     pub fn ajustes(&self) -> Ajustes {
         self.ajustes
+    }
+
+    /// Adia a gravação para daqui a [`ESPERA_DA_GRAVACAO`].
+    ///
+    /// Cada chamada **substitui** a espera anterior, e substituir a `Task` a
+    /// cancela — é o que faz um arrasto inteiro virar uma gravação só, em vez de
+    /// uma por milímetro.
+    fn adiar_gravacao(&mut self, cx: &mut Context<Self>) {
+        self.pendente = true;
+        self._gravacao = Some(cx.spawn(async move |esta, cx| {
+            cx.background_executor().timer(ESPERA_DA_GRAVACAO).await;
+            // `update` falha quando a tela morreu; aí não há o que gravar e nem
+            // onde reclamar.
+            let _ = esta.update(cx, |tela, _cx| tela.gravar_o_que_estiver_pendente());
+        }));
+    }
+
+    /// Grava agora, se houver o que gravar.
+    ///
+    /// Chamada de três lugares, e cada um fecha uma porta por onde o trabalho
+    /// sairia: o fim da espera, a troca de foto e a saída da Revelação.
+    pub fn gravar_o_que_estiver_pendente(&mut self) {
+        if !self.pendente {
+            return;
+        }
+        let Some(aberta) = self.aberta.as_ref() else {
+            return;
+        };
+
+        self.pendente = false;
+        self.gravador
+            .gravar(aberta.foto.id.clone(), self.ajustes, self.corte);
+    }
+
+    /// Move um controle sem passar pelo slider, para os testes da raiz.
+    ///
+    /// ⚠️ Ele **não** substitui o `arrastar` dos testes desta tela, que emite o
+    /// `SliderEvent` de verdade e é o único que prova que a inscrição está viva.
+    /// Existe porque um teste em `app.rs` precisa de "havia ajuste pendente"
+    /// dentro de um único `update`, e emitir evento ali exigiria devolver o
+    /// controle ao executor no meio.
+    #[cfg(test)]
+    pub fn aplicar_para_teste(&mut self, controle: usize, valor: f32, cx: &mut Context<Self>) {
+        (self.controles[controle].definicao.aplicar)(&mut self.ajustes, valor);
+        self.adiar_gravacao(cx);
     }
 
     /// Manda os ajustes de agora para a GPU.
@@ -447,6 +533,8 @@ mod testes {
     use image::{DynamicImage, Rgba, RgbaImage};
     use tempfile::TempDir;
 
+    use super::super::persistencia::mentira::GravadorDeMentira;
+
     fn previews_descartaveis() -> (Arc<PreviewManager>, TempDir) {
         let dir = TempDir::new().expect("criar diretório temporário");
         (
@@ -476,8 +564,22 @@ mod testes {
         cx: &mut TestAppContext,
         previews: Arc<PreviewManager>,
     ) -> gpui::WindowHandle<Revelacao> {
+        com_gravador(cx, previews, Arc::new(GravadorDeMentira::default()))
+    }
+
+    fn com_gravador(
+        cx: &mut TestAppContext,
+        previews: Arc<PreviewManager>,
+        gravador: Arc<GravadorDeMentira>,
+    ) -> gpui::WindowHandle<Revelacao> {
         cx.update(gpui_component::init);
-        cx.add_window(move |window, cx| Revelacao::nova(previews, window, cx))
+        cx.add_window(move |window, cx| Revelacao::nova(previews, gravador, window, cx))
+    }
+
+    /// Passa da espera do salvamento, sem esperar de verdade.
+    fn passar_a_espera(cx: &mut TestAppContext) {
+        cx.executor().advance_clock(ESPERA_DA_GRAVACAO * 2);
+        cx.run_until_parked();
     }
 
     #[gpui::test]
@@ -685,6 +787,164 @@ mod testes {
                 );
             })
             .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 Um arrasto inteiro vira **uma** gravação, e só depois da pausa.
+    ///
+    /// Sem a espera, cada `Change` viraria um `UPDATE` de 54 colunas — dezenas
+    /// por segundo enquanto o dedo se move. E gravar antes da pausa não é só
+    /// desperdício: são dezenas de escritas concorrentes na mesma linha, cuja
+    /// ordem de chegada ninguém controla.
+    #[gpui::test]
+    fn o_arrasto_inteiro_vira_uma_gravacao_so(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_cinza())
+            .expect("gravar preview");
+
+        let gravador = Arc::new(GravadorDeMentira::default());
+        let janela = com_gravador(cx, previews, gravador.clone());
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("retrato.jpg"), window, cx);
+            })
+            .expect("a janela deve estar aberta");
+
+        for valor in [0.5, 1.0, 1.5, 2.0] {
+            arrastar(cx, &janela, 0, valor);
+        }
+        assert!(
+            gravador.gravado().is_empty(),
+            "gravar durante o arrasto seria um UPDATE por milímetro de slider"
+        );
+
+        passar_a_espera(cx);
+
+        let gravado = gravador.gravado();
+        assert_eq!(gravado.len(), 1, "quatro movimentos, uma gravação");
+        assert_eq!(gravado[0].0, "id-retrato.jpg");
+        assert_eq!(
+            gravado[0].1.exposure, 2.0,
+            "grava o valor onde o dedo parou"
+        );
+    }
+
+    /// 🚨 Trocar de foto grava a anterior **antes** de trocar.
+    ///
+    /// Este é o teste que separa "grava" de "grava a coisa certa". Se `abrir`
+    /// trocasse os ajustes primeiro, a espera pendente sairia depois com os
+    /// valores da foto nova e o id da... também nova — e a revelação da primeira
+    /// simplesmente sumiria, sem erro nenhum.
+    #[gpui::test]
+    fn trocar_de_foto_grava_a_anterior_antes(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        for id in ["id-a.jpg", "id-b.jpg"] {
+            previews.save_preview(id, &foto_cinza()).expect("gravar");
+        }
+
+        let gravador = Arc::new(GravadorDeMentira::default());
+        let janela = com_gravador(cx, previews, gravador.clone());
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("a.jpg"), window, cx);
+            })
+            .expect("a janela deve estar aberta");
+
+        arrastar(cx, &janela, 0, 1.25);
+
+        // Sem passar a espera: a troca tem de gravar sozinha.
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("b.jpg"), window, cx);
+            })
+            .expect("a janela deve estar aberta");
+
+        let gravado = gravador.gravado();
+        assert_eq!(gravado.len(), 1);
+        assert_eq!(gravado[0].0, "id-a.jpg", "a gravação é da foto que saiu");
+        assert_eq!(gravado[0].1.exposure, 1.25);
+
+        // E a espera cancelada não pode ressuscitar e gravar de novo, agora com
+        // os ajustes da foto b no id dela.
+        passar_a_espera(cx);
+        assert_eq!(gravador.gravado().len(), 1, "gravou duas vezes o mesmo");
+    }
+
+    /// 🚨 Gravar ajuste **não pode apagar o corte** que a foto tinha.
+    ///
+    /// `SavePhotoEditsUseCase` recebe os oito campos de corte como `Option` e a
+    /// entidade os atribui direto — passar `None` apaga. A Revelação nova ainda
+    /// não sabe cortar, o que piora o risco: mexer num slider aqui apagaria,
+    /// calado, o enquadramento feito no app de egui. O corte é lido da foto e
+    /// devolvido igual.
+    #[gpui::test]
+    fn gravar_devolve_o_corte_que_a_foto_ja_tinha(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-cortada.jpg", &foto_cinza())
+            .expect("gravar preview");
+
+        let gravador = Arc::new(GravadorDeMentira::default());
+        let janela = com_gravador(cx, previews, gravador.clone());
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(
+                    PhotoViewModel {
+                        edit_crop_x: Some(0.1),
+                        edit_crop_y: Some(0.2),
+                        edit_crop_width: Some(0.5),
+                        edit_crop_height: Some(0.5),
+                        edit_crop_rotation: Some(90),
+                        edit_crop_flip_h: Some(true),
+                        ..foto("cortada.jpg")
+                    },
+                    window,
+                    cx,
+                );
+            })
+            .expect("a janela deve estar aberta");
+
+        arrastar(cx, &janela, 0, 0.75);
+        passar_a_espera(cx);
+
+        let gravado = gravador.gravado();
+        assert_eq!(gravado.len(), 1);
+        let corte = gravado[0].2;
+        assert_eq!(corte.x, Some(0.1));
+        assert_eq!(corte.largura, Some(0.5));
+        assert_eq!(corte.rotacao, Some(90));
+        assert_eq!(corte.espelho_h, Some(true));
+    }
+
+    /// Abrir e não mexer em nada **não** grava.
+    ///
+    /// 🔑 Se abrir gravasse, o app novo reescreveria os 46 campos de toda foto
+    /// que alguém apenas olhasse — inclusive os 18 que ele mostra mas não aplica.
+    /// Uma passada pela biblioteca viraria uma edição em massa que ninguém pediu.
+    #[gpui::test]
+    fn abrir_e_nao_mexer_em_nada_nao_grava(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_cinza())
+            .expect("gravar preview");
+
+        let gravador = Arc::new(GravadorDeMentira::default());
+        let janela = com_gravador(cx, previews, gravador.clone());
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(
+                    PhotoViewModel {
+                        edit_exposure: Some(1.5),
+                        ..foto("retrato.jpg")
+                    },
+                    window,
+                    cx,
+                );
+            })
+            .expect("a janela deve estar aberta");
+
+        passar_a_espera(cx);
+        assert!(gravador.gravado().is_empty());
     }
 
     /// 🚨 O arrasto da foto anterior não vaza para a próxima **pelo banco**.

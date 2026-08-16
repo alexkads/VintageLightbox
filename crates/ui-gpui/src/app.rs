@@ -13,6 +13,7 @@ use gpui_component::{ActiveTheme, Disableable, Selectable, Sizable};
 use infrastructure::cache::preview_manager::PreviewManager;
 
 use crate::biblioteca::tela::Biblioteca;
+use crate::revelacao::persistencia::Gravador;
 use crate::revelacao::tela::Revelacao;
 
 actions!(vintagelightbox, [VoltarParaBiblioteca]);
@@ -53,11 +54,12 @@ impl Aplicativo {
     pub fn novo(
         fotos: Vec<PhotoViewModel>,
         previews: Arc<PreviewManager>,
+        gravador: Arc<dyn Gravador>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         let biblioteca = cx.new(|cx| Biblioteca::nova(fotos, previews.clone(), window, cx));
-        let revelacao = cx.new(|cx| Revelacao::nova(previews, window, cx));
+        let revelacao = cx.new(|cx| Revelacao::nova(previews, gravador, window, cx));
 
         Self {
             biblioteca,
@@ -91,7 +93,16 @@ impl Aplicativo {
         cx.notify();
     }
 
+    /// Sair da Revelação **grava o que estiver pendente**.
+    ///
+    /// 🚨 Sem isto, arrastar um slider e apertar `Esc` dentro dos 500 ms de
+    /// espera perderia o ajuste: a tela sai, a espera continua contando, e quem
+    /// olha a Biblioteca não tem como saber que a última coisa que fez não foi
+    /// guardada. É a terceira porta — as outras duas são a própria espera e a
+    /// troca de foto.
     pub fn voltar_para_biblioteca(&mut self, cx: &mut Context<Self>) {
+        self.revelacao
+            .update(cx, |tela, _cx| tela.gravar_o_que_estiver_pendente());
         self.tela = Tela::Biblioteca;
         cx.notify();
     }
@@ -195,6 +206,8 @@ mod testes {
     use image::{DynamicImage, Rgba, RgbaImage};
     use tempfile::TempDir;
 
+    use crate::revelacao::persistencia::mentira::GravadorDeMentira;
+
     fn previews_descartaveis() -> (Arc<PreviewManager>, TempDir) {
         let dir = TempDir::new().expect("criar diretório temporário");
         (
@@ -236,7 +249,15 @@ mod testes {
 
         let janela = cx.add_window({
             let previews = previews.clone();
-            |window, cx| Aplicativo::novo(acervo(), previews, window, cx)
+            |window, cx| {
+                Aplicativo::novo(
+                    acervo(),
+                    previews,
+                    Arc::new(GravadorDeMentira::default()),
+                    window,
+                    cx,
+                )
+            }
         });
 
         janela
@@ -258,7 +279,15 @@ mod testes {
 
         let janela = cx.add_window({
             let previews = previews.clone();
-            |window, cx| Aplicativo::novo(acervo(), previews, window, cx)
+            |window, cx| {
+                Aplicativo::novo(
+                    acervo(),
+                    previews,
+                    Arc::new(GravadorDeMentira::default()),
+                    window,
+                    cx,
+                )
+            }
         });
 
         janela
@@ -276,6 +305,47 @@ mod testes {
             .expect("a janela deve estar aberta");
     }
 
+    /// 🚨 Sair da Revelação grava o ajuste que ainda estava esperando.
+    ///
+    /// A espera de 500 ms é uma janela de perda, e `Esc` cai bem no meio dela:
+    /// arrastar um slider e voltar para a Biblioteca é uma sequência de dois
+    /// segundos. Sem esta gravação, o último ajuste sumiria — e sem aviso, porque
+    /// a Biblioteca não tem como mostrar o que não foi guardado.
+    #[gpui::test]
+    fn sair_da_revelacao_grava_o_que_estava_esperando(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_vermelha())
+            .expect("gravar preview");
+        cx.update(gpui_component::init);
+
+        let gravador = Arc::new(GravadorDeMentira::default());
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            let gravador = gravador.clone();
+            |window, cx| Aplicativo::novo(acervo(), previews, gravador, window, cx)
+        });
+
+        janela
+            .update(cx, |app, window, cx| {
+                app.biblioteca
+                    .update(cx, |tela, cx| tela.selecionar(Some(1), cx));
+                app.revelar(window, cx);
+
+                // Um arrasto, e a volta imediata — sem passar a espera.
+                app.revelacao.update(cx, |tela, cx| {
+                    tela.aplicar_para_teste(0, 0.9, cx);
+                });
+                app.voltar_para_biblioteca(cx);
+            })
+            .expect("a janela deve estar aberta");
+
+        let gravado = gravador.gravado();
+        assert_eq!(gravado.len(), 1, "o ajuste tinha de ser gravado na saída");
+        assert_eq!(gravado[0].0, "id-retrato.jpg");
+        assert_eq!(gravado[0].1.exposure, 0.9);
+    }
+
     /// 🚨 Trocar de foto na grade **não** troca a foto em revelação.
     ///
     /// A seleção é copiada, não compartilhada. Compartilhada, voltar à
@@ -288,7 +358,15 @@ mod testes {
 
         let janela = cx.add_window({
             let previews = previews.clone();
-            |window, cx| Aplicativo::novo(acervo(), previews, window, cx)
+            |window, cx| {
+                Aplicativo::novo(
+                    acervo(),
+                    previews,
+                    Arc::new(GravadorDeMentira::default()),
+                    window,
+                    cx,
+                )
+            }
         });
 
         janela

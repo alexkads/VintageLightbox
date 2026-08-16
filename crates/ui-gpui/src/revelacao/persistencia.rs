@@ -14,9 +14,155 @@
 //! [`Ajustes::default`]: um lugar só dizendo qual é o neutro, que é a mesma regra
 //! que [`super::controles::Definicao::neutro`] segue para os sliders.
 
+use std::sync::Arc;
+
+use adapters::controllers::EditorController;
 use adapters::view_models::PhotoViewModel;
 
 use super::processador::Ajustes;
+
+/// Os oito campos de corte, do jeito que o banco os guarda.
+///
+/// 🚨 **Eles existem aqui porque gravar ajuste apaga corte.**
+/// `SavePhotoEditsUseCase::execute` recebe os oito como `Option` e a entidade faz
+/// `self.edit_crop_x = crop_x` — atribuição direta, sem mesclar. Salvar uma
+/// exposição passando `None` neles **apaga o corte** que a foto tinha.
+///
+/// A Revelação em GPUI ainda não tem crop overlay (é o que falta da fase 2), o
+/// que torna o risco pior, e não melhor: sem tela de corte, ninguém aqui sabe que
+/// existe corte — e mexer num slider apagaria, calado, um enquadramento feito no
+/// app de egui. Por isso o corte é **lido da foto e devolvido igual**.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Corte {
+    pub x: Option<f32>,
+    pub y: Option<f32>,
+    pub largura: Option<f32>,
+    pub altura: Option<f32>,
+    pub rotacao: Option<i32>,
+    pub angulo: Option<f32>,
+    pub espelho_h: Option<bool>,
+    pub espelho_v: Option<bool>,
+}
+
+/// O corte que a foto já tinha, para ser devolvido intacto na gravação.
+pub fn corte_da_foto(foto: &PhotoViewModel) -> Corte {
+    Corte {
+        x: foto.edit_crop_x,
+        y: foto.edit_crop_y,
+        largura: foto.edit_crop_width,
+        altura: foto.edit_crop_height,
+        rotacao: foto.edit_crop_rotation,
+        angulo: foto.edit_crop_angle,
+        espelho_h: foto.edit_crop_flip_h,
+        espelho_v: foto.edit_crop_flip_v,
+    }
+}
+
+/// Quem sabe gravar uma revelação.
+///
+/// 🔑 **É uma porta, e não o controller direto**, por dois motivos que se somam:
+/// a tela não precisa saber que existe tokio (o `EditorController` é `async` e o
+/// GPUI não roda futuros de tokio), e os testes de tela precisam afirmar **o que
+/// foi gravado** — inclusive que o corte voltou intacto —, o que com banco de
+/// verdade seria caro e com este `trait` é uma linha.
+///
+/// Não devolve `Result` de propósito: gravar acontece 500 ms depois do arrasto,
+/// longe de quem arrastou, e não há o que a tela faça com a falha naquele
+/// momento. O que existe é registro no terminal — o legado nem isso tem
+/// (`let _ = controller.save_edits(...)` nos quatro pontos que chamam).
+pub trait Gravador: Send + Sync + 'static {
+    fn gravar(&self, id: String, ajustes: Ajustes, corte: Corte);
+}
+
+/// O gravador de verdade: entrega ao `EditorController`, numa tarefa do tokio.
+///
+/// ⚠️ O `Handle` é capturado no `main`, **antes** de `Application::run` tomar a
+/// thread. Sem ele, `tokio::spawn` aqui dentro entra em pânico: o GPUI roda fora
+/// do contexto do runtime, e "não há reator" é o erro que aparece — no meio de um
+/// arrasto, sem relação visível com o que o dedo estava fazendo.
+pub struct GravadorDoBanco {
+    editor: Arc<EditorController>,
+    tokio: tokio::runtime::Handle,
+}
+
+impl GravadorDoBanco {
+    pub fn novo(editor: Arc<EditorController>, tokio: tokio::runtime::Handle) -> Self {
+        Self { editor, tokio }
+    }
+}
+
+impl Gravador for GravadorDoBanco {
+    fn gravar(&self, id: String, ajustes: Ajustes, corte: Corte) {
+        let editor = self.editor.clone();
+        let nome = id.clone();
+
+        self.tokio.spawn(async move {
+            let resultado = editor
+                .save_edits(
+                    id,
+                    ajustes.exposure,
+                    ajustes.contrast,
+                    ajustes.temperature,
+                    ajustes.tint,
+                    ajustes.highlights,
+                    ajustes.shadows,
+                    ajustes.whites,
+                    ajustes.blacks,
+                    ajustes.clarity,
+                    ajustes.vibrance,
+                    ajustes.saturation,
+                    ajustes.tone_curve_shadows,
+                    ajustes.tone_curve_darks,
+                    ajustes.tone_curve_lights,
+                    ajustes.tone_curve_highlights,
+                    ajustes.hsl_red_sat,
+                    ajustes.hsl_orange_sat,
+                    ajustes.hsl_yellow_sat,
+                    ajustes.hsl_green_sat,
+                    ajustes.hsl_aqua_sat,
+                    ajustes.hsl_blue_sat,
+                    ajustes.hsl_purple_sat,
+                    ajustes.hsl_magenta_sat,
+                    ajustes.hsl_red_hue,
+                    ajustes.hsl_orange_hue,
+                    ajustes.hsl_yellow_hue,
+                    ajustes.hsl_green_hue,
+                    ajustes.hsl_aqua_hue,
+                    ajustes.hsl_blue_hue,
+                    ajustes.hsl_purple_hue,
+                    ajustes.hsl_magenta_hue,
+                    ajustes.hsl_red_lum,
+                    ajustes.hsl_orange_lum,
+                    ajustes.hsl_yellow_lum,
+                    ajustes.hsl_green_lum,
+                    ajustes.hsl_aqua_lum,
+                    ajustes.hsl_blue_lum,
+                    ajustes.hsl_purple_lum,
+                    ajustes.hsl_magenta_lum,
+                    ajustes.lens_distortion,
+                    ajustes.lens_vignette_amount,
+                    ajustes.lens_vignette_midpoint,
+                    ajustes.nr_luminance,
+                    ajustes.nr_color,
+                    ajustes.sharpen_amount,
+                    ajustes.sharpen_radius,
+                    corte.x,
+                    corte.y,
+                    corte.largura,
+                    corte.altura,
+                    corte.rotacao,
+                    corte.angulo,
+                    corte.espelho_h,
+                    corte.espelho_v,
+                )
+                .await;
+
+            if let Err(erro) = resultado {
+                eprintln!("⚠️ [Revelação] a revelação de {nome} não foi gravada: {erro}");
+            }
+        });
+    }
+}
 
 /// Lê os ajustes gravados na foto. Campo ausente fica no neutro.
 ///
@@ -87,6 +233,42 @@ pub fn da_foto(foto: &PhotoViewModel) -> Ajustes {
     ajustes
 }
 
+/// Um gravador que só anota o que recebeu.
+///
+/// Existe para os testes de tela poderem afirmar **o que foi gravado** — que o
+/// arrasto virou uma gravação só, que a foto certa foi gravada na troca, e que o
+/// corte voltou intacto. Com banco de verdade, cada uma dessas seria um teste
+/// caro; aqui são três linhas.
+#[cfg(test)]
+pub mod mentira {
+    use std::sync::Mutex;
+
+    use super::{Ajustes, Corte, Gravador};
+
+    #[derive(Default)]
+    pub struct GravadorDeMentira {
+        gravado: Mutex<Vec<(String, Ajustes, Corte)>>,
+    }
+
+    impl GravadorDeMentira {
+        pub fn gravado(&self) -> Vec<(String, Ajustes, Corte)> {
+            self.gravado
+                .lock()
+                .expect("o registro de gravações")
+                .clone()
+        }
+    }
+
+    impl Gravador for GravadorDeMentira {
+        fn gravar(&self, id: String, ajustes: Ajustes, corte: Corte) {
+            self.gravado
+                .lock()
+                .expect("o registro de gravações")
+                .push((id, ajustes, corte));
+        }
+    }
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;
@@ -145,6 +327,46 @@ mod testes {
     /// `Some(0.0)` num campo cujo neutro é 1.0 tem de virar 0.0 — é o fotógrafo
     /// tendo arrastado o contraste até o fim, e não o banco sem resposta. Um
     /// `unwrap_or_default` fora de lugar, ou um `if valor != 0.0`, apagaria isso.
+    /// 🚨 O corte da foto volta inteiro, para poder ser devolvido na gravação.
+    ///
+    /// Os oito campos, e não os quatro do retângulo: rotação, ângulo e os dois
+    /// espelhamentos também se perdem se não forem reenviados, e a foto voltaria
+    /// à orientação original sem ninguém ter pedido.
+    #[test]
+    fn o_corte_da_foto_volta_com_os_oito_campos() {
+        let corte = corte_da_foto(&PhotoViewModel {
+            edit_crop_x: Some(0.1),
+            edit_crop_y: Some(0.2),
+            edit_crop_width: Some(0.7),
+            edit_crop_height: Some(0.6),
+            edit_crop_rotation: Some(90),
+            edit_crop_angle: Some(-2.5),
+            edit_crop_flip_h: Some(true),
+            edit_crop_flip_v: Some(false),
+            ..foto()
+        });
+
+        assert_eq!(
+            corte,
+            Corte {
+                x: Some(0.1),
+                y: Some(0.2),
+                largura: Some(0.7),
+                altura: Some(0.6),
+                rotacao: Some(90),
+                angulo: Some(-2.5),
+                espelho_h: Some(true),
+                espelho_v: Some(false),
+            }
+        );
+    }
+
+    /// Foto sem corte dá corte vazio — e vazio aqui significa "não mexa".
+    #[test]
+    fn foto_sem_corte_da_corte_vazio() {
+        assert_eq!(corte_da_foto(&foto()), Corte::default());
+    }
+
     #[test]
     fn zero_gravado_e_diferente_de_campo_ausente() {
         let ajustes = da_foto(&PhotoViewModel {

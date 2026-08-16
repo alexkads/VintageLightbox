@@ -12,6 +12,7 @@ use infrastructure::cache::preview_manager::PreviewManager;
 use infrastructure::paths::AppPaths;
 
 use ui_gpui::app::Aplicativo;
+use ui_gpui::revelacao::persistencia::{Gravador, GravadorDoBanco};
 use ui_gpui::tema;
 
 #[tokio::main]
@@ -38,7 +39,10 @@ async fn main() {
     // jeito que o de egui fala. É o que tornou o GPUI mais barato que o Tauri:
     // nada precisou virar comando serializável.
     let repositorio = Arc::new(infrastructure::PhotoRepositoryImpl::new(pool.clone()));
-    let biblioteca = adapters::controllers::LibraryController::new(repositorio);
+    let biblioteca = adapters::controllers::LibraryController::new(repositorio.clone());
+    let editor = Arc::new(adapters::controllers::EditorController::new(Arc::new(
+        use_cases::SavePhotoEditsUseCase::new(repositorio),
+    )));
 
     // As fotos são carregadas **antes** da janela, e isso é provisório: num
     // acervo grande a abertura fica esperando o banco. A fase 1 termina com
@@ -50,6 +54,17 @@ async fn main() {
         .expect("ler as fotos do catálogo");
 
     let previews = Arc::new(PreviewManager::new());
+
+    // 🚨 O `Handle` é pego **aqui**, e não lá dentro. `Application::run` toma esta
+    // thread e o que roda depois está fora do contexto do runtime: um
+    // `tokio::spawn` lá dentro entraria em pânico com "there is no reactor
+    // running" — no meio de um arrasto de slider, sem relação visível com o que o
+    // dedo estava fazendo. Com o `Handle` clonado, as tarefas de gravação vão
+    // para as threads do tokio, que continuam vivas.
+    let gravador: Arc<dyn Gravador> = Arc::new(GravadorDoBanco::novo(
+        editor,
+        tokio::runtime::Handle::current(),
+    ));
 
     Application::new().run(move |cx: &mut App| {
         // Antes de qualquer janela: é o `init` que cria o `Theme` global, o
@@ -70,8 +85,15 @@ async fn main() {
                 ..Default::default()
             },
             |window, cx| {
-                let aplicativo =
-                    cx.new(|cx| Aplicativo::novo(fotos.clone(), previews.clone(), window, cx));
+                let aplicativo = cx.new(|cx| {
+                    Aplicativo::novo(
+                        fotos.clone(),
+                        previews.clone(),
+                        gravador.clone(),
+                        window,
+                        cx,
+                    )
+                });
                 // A primeira camada da janela **tem** de ser o `Root`: é ele
                 // que hospeda diálogo, gaveta e aviso, e quem sabe qual campo
                 // de texto está com o foco. O `gpui-component` procura por ele

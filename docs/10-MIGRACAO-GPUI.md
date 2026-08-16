@@ -416,7 +416,8 @@ um lado tem. Há teste prendendo o número — **42 controles para 46 ajustes** 
 **matiz vai de -180 a 180**, o dobro das outras duas famílias de HSL, porque matiz é um círculo; e o
 **raio da nitidez começa em 0,5**, porque raio zero não tem pixel de vizinhança.
 
-Falta da fase: crop overlay, undo/redo e presets — nenhum deles é slider.
+Falta da fase: crop overlay, undo/redo e presets — nenhum deles é slider. A persistência dos ajustes,
+que o plano não listava e sem a qual nada disso se guarda, entrou logo abaixo.
 
 #### A foto abre com a revelação que ela já tinha ✅
 
@@ -459,6 +460,52 @@ banco com esse campo preenchido. Não é revelação, é o padrão da coluna. Os
 então não há divergência — o que fica é que **"difere do neutro" não significa "foi revelada" neste
 banco**, e a otimização de não pedir revelação ao abrir quase nunca dispara com foto de verdade (o
 legado pede sempre, então o pior caso é o comportamento dele).
+
+#### E a volta: o que o slider move é gravado ✅
+
+Os mesmos **500 ms** de espera do legado (`AUTO_SAVE_DEBOUNCE_MS`): um arrasto emite dezenas de
+`Change` por segundo, e cada gravação é um `UPDATE` de 54 colunas. A espera é o que transforma o
+arrasto inteiro em uma gravação só — e no GPUI ela é uma `Task` guardada, porque **descartar uma
+`Task` a cancela**: cada movimento novo substitui a anterior e adia, em vez de enfileirar.
+
+A espera é também uma janela de perda, então há **três portas**, e cada uma tem teste que falha
+quando ela é fechada:
+
+| Porta | O que se perderia sem ela |
+|---|---|
+| o fim da espera | nada — é o caminho normal |
+| **trocar de foto** | a gravação atrasada sairia com os ajustes já substituídos: a revelação de uma foto gravada na outra |
+| **sair da Revelação** (`Esc`) | arrastar e voltar em menos de meio segundo, e o ajuste some sem aviso |
+
+🔑 **O gravador é uma porta (`trait Gravador`), e não o `EditorController` direto** — por duas
+razões que se somam: o controller é `async` do tokio e o GPUI não roda futuros dele, e os testes de
+tela precisam afirmar **o que foi gravado**. Com o gravador de mentira, "quatro movimentos viraram
+uma gravação, com o valor onde o dedo parou" é uma linha.
+
+⚠️ **O `Handle` do tokio é capturado no `main`, antes de `Application::run` tomar a thread.** Um
+`tokio::spawn` de dentro do GPUI entraria em pânico com *there is no reactor running* — no meio de um
+arrasto, sem relação visível com o que o dedo estava fazendo.
+
+#### 🚨 Gravar um ajuste apagava o corte — e a Revelação nova nem sabe cortar
+
+`SavePhotoEditsUseCase` recebe os oito campos de corte como `Option` e a entidade faz
+`self.edit_crop_x = crop_x`: **atribuição direta, sem mesclar**. Gravar uma exposição passando `None`
+neles apaga o enquadramento.
+
+O crop overlay é o que falta da fase 2, e a ausência dele **piora** o risco em vez de diminuir: sem
+tela de corte, a Revelação nova não teria motivo nenhum para mandar corte — e mexer num slider
+apagaria, calado, o enquadramento feito no app de egui, sem erro, sem aviso e sem desfazer. Por isso
+o corte é lido da foto ao abrir e **devolvido igual** em toda gravação.
+
+Isso não dava para conferir com gravador de mentira: o defeito mora do controller para baixo. Três
+testes com **banco de verdade** ([`tests/gravacao_no_banco.rs`](../crates/ui-gpui/tests/gravacao_no_banco.rs)):
+
+1. os 46 campos sobrevivem à ida e volta inteira — `Ajustes` → controller → use case → entidade →
+   SQLite → `row_to_photo` → `PhotoViewModel` → `da_foto`, sete etapas com nomes parecidos demais;
+2. gravar ajuste não apaga o corte;
+3. 🔑 **a contraprova**: sem reenviar o corte, ele **é** apagado. Sem ela, o teste 2 poderia estar
+   passando porque o use case mescla — e a precaução seria adorno em vez de a única coisa que separa
+   o enquadramento de sumir.
 
 #### 🚨 O critério de saída não media o que a fase 2 constrói
 
