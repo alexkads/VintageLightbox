@@ -379,6 +379,14 @@ quando ninguém mexeu em nada"**. `impl Default` responde a primeira, e ela pode
 foi o segundo achado seguido em que o legado tem duas versões da mesma decisão e só uma está viva (o
 outro foi o JPEG com alfa da fase 0).
 
+⚠️ **E a resposta certa, para foto de verdade, estava num quarto lugar: o schema.** Meia hora depois,
+o semeador acusou: `014_add_hsl_lens_fields.sql` cria a coluna com `DEFAULT 50.0`, então **toda** foto
+importada volta do banco com o meio da vinheta preenchido — e é esse 50 que os dois apps mostram. O
+neutro do `Ajustes` decide só o resto (estado antes de abrir foto, o futuro "redefinir", campo
+`NULL`), e ali o legado diz 0.0. Quatro lugares dizendo qual é o neutro do mesmo controle:
+`AppState::new`, `reset_edits`, `GpuEditParams::default` (morto) e a coluna. **Três concordam; o
+morto era o que estava copiado.**
+
 #### Os 42 controles ✅ — e a curva de tons, que não tem nenhum
 
 `2f67abb`. Detalhe (4), HSL/cor (8), HSL/luminância (8), HSL/matiz (8) e Lente (3) entraram como
@@ -409,6 +417,48 @@ um lado tem. Há teste prendendo o número — **42 controles para 46 ajustes** 
 **raio da nitidez começa em 0,5**, porque raio zero não tem pixel de vizinhança.
 
 Falta da fase: crop overlay, undo/redo e presets — nenhum deles é slider.
+
+#### A foto abre com a revelação que ela já tinha ✅
+
+Até aqui a Revelação abria **toda** foto no neutro, inclusive as já trabalhadas. Não é "faltou uma
+tela": é o trabalho do fotógrafo sumindo da vista, com o arquivo cru na frente dele e os 42 sliders
+parados no meio dizendo que está tudo zerado.
+
+[`persistencia.rs`](../crates/ui-gpui/src/revelacao/persistencia.rs) lê os 46 `edit_*` do
+`PhotoViewModel` — a mesma leitura que o legado faz ao selecionar ("Load saved edits FIRST",
+`app.rs`). 🔑 **O padrão de campo ausente vem de `Ajustes::default`, campo a campo, e não de 46
+números digitados**: é a mesma regra do `Definicao::neutro` dos sliders, e é o que evita repetir o
+erro que o próprio legado cometeu com o meio da vinheta.
+
+⚠️ **`unwrap_or` não é `unwrap_or_default`.** Contraste ausente virando `0.0` achataria a foto
+inteira em cinza — e a suspeita cairia no motor de cor, não na leitura do banco. Tem teste, e o
+gêmeo dele também: `Some(0.0)` no contraste **é** o fotógrafo tendo arrastado até o fim, e não pode
+ser confundido com ausência.
+
+#### 🔑 `semear-catalogo` virou a régua da cadeia inteira — e achou o quarto neutro
+
+Nenhum teste unitário alcança a cadeia que importa aqui: são quatro etapas entre a coluna e o
+slider (`row_to_photo` → entidade `Photo` → `PhotoViewModel` → `da_foto`), e **todas engolem campo
+desconhecido em silêncio** — o repositório lê cada um com `.unwrap_or(None)`. Um campo que se perca
+no meio não dá erro: dá "esta foto nunca foi revelada".
+
+Então o semeador passou a gravar revelação em uma foto a cada cinco e, no fim, **reler pelo caminho
+do app** e comparar com o que gravou:
+
+```
+✅ 400 delas voltam com a revelação que foi gravada, lida pelo caminho do app.
+```
+
+Conferido quebrando de propósito (a lição do `544a0cb`): comentar uma linha da macro faz o semeador
+imprimir `gravadas: [-1.5, -1.0]` / `lidas: [0.0, 0.0]` e sair com erro.
+
+🚨 **E foi ele que achou o quarto lugar onde mora o neutro.** A primeira versão contava as fotos com
+`da_foto(foto) != Ajustes::default()` e encontrou **todas** — não uma em cada cinco. O motivo está no
+schema: `edit_lens_vignette_midpoint` é criada com `DEFAULT 50.0`, então toda foto importada volta do
+banco com esse campo preenchido. Não é revelação, é o padrão da coluna. Os dois apps leem o mesmo 50,
+então não há divergência — o que fica é que **"difere do neutro" não significa "foi revelada" neste
+banco**, e a otimização de não pedir revelação ao abrir quase nunca dispara com foto de verdade (o
+legado pede sempre, então o pior caso é o comportamento dele).
 
 #### 🚨 O critério de saída não media o que a fase 2 constrói
 

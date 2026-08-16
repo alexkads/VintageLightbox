@@ -60,7 +60,7 @@ use parking_lot::Mutex;
 /// Os 46 campos ficam aqui assim mesmo: encolher a struct para 28 mudaria o que
 /// a GPU recebe, e a fase 2 se mede por igualdade de pixel com o app de egui.
 #[repr(C)]
-#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Copy, Clone, Debug, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Ajustes {
     pub exposure: f32,
     pub contrast: f32,
@@ -130,6 +130,13 @@ impl Default for Ajustes {
     /// 🔑 A pergunta que separa os dois: não é "qual é o padrão declarado", é
     /// **"qual valor a foto recebe quando ninguém mexeu em nada"**. `impl Default`
     /// responde a primeira, e ela pode ser código morto.
+    ///
+    /// ⚠️ **E a resposta certa, para foto de verdade, é um quarto lugar: o
+    /// schema.** `014_add_hsl_lens_fields.sql` cria a coluna com
+    /// `DEFAULT 50.0`, então toda foto importada volta do banco com o meio da
+    /// vinheta preenchido — e é esse 50 que os dois apps mostram no slider. O que
+    /// este `Default` decide é o resto: o estado antes de abrir qualquer foto, o
+    /// futuro "redefinir", e o campo que vier `NULL`. Nos três o legado diz 0.0.
     fn default() -> Self {
         Self {
             exposure: 0.0,

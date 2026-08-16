@@ -113,6 +113,7 @@ async fn main() {
 
     let previews = PreviewManager::new();
     let agora = chrono::Utc::now().to_rfc3339();
+    let mut exposicoes_gravadas = Vec::new();
 
     for i in 0..quantas {
         // UUID, e não `medicao-00001`: `PhotoId::from_string` recusa qualquer
@@ -122,9 +123,29 @@ async fn main() {
         // casa com o formato é erro, e não vizinho mais próximo.
         let id = uuid::Uuid::new_v4().to_string();
 
+        // Uma em cada cinco nasce **já revelada**, e é a única forma de conferir
+        // que a Revelação carrega o que está no banco: num acervo em que nenhuma
+        // foto tem ajuste gravado, "abre no neutro" e "não lê o banco" são a
+        // mesma tela. Só campos que chegam ao shader — exposição, contraste e
+        // saturação; semear HSL/matiz mostraria um número no painel e nada na
+        // foto (docs/10-MIGRACAO-GPUI.md, §"a tela também não aplica 46").
+        let revelada = i % 5 == 0;
+        let (exposicao, contraste, saturacao) = if revelada {
+            let passo = (i / 5 % 7) as f32;
+            (
+                Some(-1.5 + passo * 0.5),
+                Some(0.8 + passo * 0.1),
+                Some(-0.3 + passo * 0.1),
+            )
+        } else {
+            (None, None, None)
+        };
+        exposicoes_gravadas.extend(exposicao);
+
         sqlx::query(
-            "INSERT INTO photos (id, file_path, rating, color_label, flag, is_edited, imported_at, modified_at, metadata)
-             VALUES (?1, ?2, ?3, ?6, ?7, 0, ?4, ?4, ?5)",
+            "INSERT INTO photos (id, file_path, rating, color_label, flag, is_edited, imported_at, modified_at, metadata,
+                                 edit_exposure, edit_contrast, edit_saturation)
+             VALUES (?1, ?2, ?3, ?6, ?7, ?8, ?4, ?4, ?5, ?9, ?10, ?11)",
         )
         .bind(&id)
         // Espalhadas por pastas, senao a arvore lateral nasce com um item so
@@ -147,6 +168,10 @@ async fn main() {
             1 => Some(-1i64),
             _ => None,
         })
+        .bind(revelada as i64)
+        .bind(exposicao)
+        .bind(contraste)
+        .bind(saturacao)
         .execute(&pool)
         .await
         .expect("inserir a foto");
@@ -169,5 +194,72 @@ async fn main() {
     }
 
     println!("✅ {quantas} fotos, {quantas} miniaturas e {quantas} previews gravados.");
+
+    conferir_a_volta(&pool, &exposicoes_gravadas).await;
+
     println!("   VLB_CATALOG={} cargo run -p ui-gpui", catalogo.display());
+}
+
+/// Relê pelo caminho do app e confere que a revelação gravada volta inteira.
+///
+/// 🔑 **Gravar não é ler.** São 46 colunas atravessando quatro etapas —
+/// `row_to_photo`, a entidade `Photo`, o `PhotoViewModel` do controller e
+/// [`ui_gpui::revelacao::persistencia::da_foto`] — e cada uma delas engole campo
+/// desconhecido em silêncio: o repositório faz `.unwrap_or(None)`, e um campo que
+/// se perca no meio vira "esta foto nunca foi revelada". Nenhum teste unitário
+/// cobre a cadeia toda, porque nenhum deles tem banco.
+///
+/// Por isso a conferência mora aqui: quem semeia sabe o que gravou.
+///
+/// 🚨 **E foi ela que achou o quarto lugar onde mora o neutro.** A primeira
+/// versão contava as fotos com `da_foto(foto) != Ajustes::default()` e encontrou
+/// **todas** — não as que tinham revelação. O motivo está no schema:
+/// `014_add_hsl_lens_fields.sql` cria `edit_lens_vignette_midpoint` com
+/// `DEFAULT 50.0`, então **toda** foto importada nasce com esse campo preenchido.
+/// Não é revelação, é o padrão da coluna.
+///
+/// Os dois apps leem o mesmo 50 e mostram o mesmo slider, então não há
+/// divergência de paridade. O que fica é: contar "tem revelação" comparando com o
+/// neutro **não funciona neste banco**, e a otimização de não pedir revelação no
+/// neutro (`tela.rs`) quase nunca dispara com foto de verdade — o legado também
+/// pede sempre, então o comportamento é o mesmo dele.
+async fn conferir_a_volta(pool: &sqlx::SqlitePool, exposicoes_gravadas: &[f32]) {
+    use std::sync::Arc;
+    use ui_gpui::revelacao::persistencia;
+
+    let repositorio = Arc::new(infrastructure::PhotoRepositoryImpl::new(pool.clone()));
+    let biblioteca = adapters::controllers::LibraryController::new(repositorio);
+    let fotos = biblioteca
+        .get_all_photos()
+        .await
+        .expect("reler as fotos pelo mesmo caminho do app");
+
+    // A exposição, e não "difere do neutro": ela é `REAL` sem `DEFAULT` no
+    // schema, então `Some` ali significa que alguém gravou.
+    let mut lidas: Vec<f32> = fotos
+        .iter()
+        .filter(|foto| foto.edit_exposure.is_some())
+        .map(|foto| persistencia::da_foto(foto).exposure)
+        .collect();
+    lidas.sort_by(f32::total_cmp);
+
+    let mut esperadas = exposicoes_gravadas.to_vec();
+    esperadas.sort_by(f32::total_cmp);
+
+    if lidas != esperadas {
+        // Os valores, e não só a contagem: o modo de falha mais provável é a
+        // exposição voltar como **zero** — que é o que acontece quando `da_foto`
+        // deixa de copiar o campo. Aí as duas listas têm o mesmo tamanho, e uma
+        // mensagem que só contasse diria "2 e 2" e não ajudaria ninguém.
+        eprintln!(
+            "❌ a revelação se perde entre o banco e a tela — a Revelação abriria o arquivo cru.\n   \
+             gravadas: {esperadas:?}\n   lidas:    {lidas:?}"
+        );
+        std::process::exit(1);
+    }
+
+    println!(
+        "✅ {} delas voltam com a revelação que foi gravada, lida pelo caminho do app.",
+        lidas.len()
+    );
 }

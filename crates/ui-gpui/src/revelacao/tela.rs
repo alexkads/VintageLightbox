@@ -26,6 +26,7 @@ use infrastructure::cache::preview_manager::PreviewManager;
 use crate::imagem::para_gpui;
 
 use super::controles::{Definicao, Secao, CONTROLES};
+use super::persistencia;
 use super::processador::{Ajustes, Pedido, Processador};
 
 /// Largura do painel de ajustes.
@@ -133,7 +134,7 @@ impl Revelacao {
         }
     }
 
-    /// Abre uma foto para revelar.
+    /// Abre uma foto para revelar, com a revelação que ela já tinha.
     ///
     /// ⚠️ **Lê e decodifica na thread da interface.** Um preview "Large" é um
     /// JPEG de alguns milissegundos, então isto não trava de forma perceptível —
@@ -157,26 +158,43 @@ impl Revelacao {
             }
         });
 
+        // Os ajustes vêm da **foto**, e não do que estava no painel: é o que o
+        // legado faz ao selecionar (`app.rs`, "Load saved edits FIRST"), e é o
+        // que impede as duas metades do mesmo defeito — herdar o slider da foto
+        // anterior aplicaria a revelação de uma foto em outra, e ignorar o banco
+        // mostraria o arquivo cru de uma foto que já foi revelada.
+        self.ajustes = persistencia::da_foto(&foto);
+        self.aguardando = None;
+
         self.aberta = Some(Aberta {
             foto,
             origem,
             desenhada: bruta.map(para_gpui),
         });
 
-        // Foto nova entra com os ajustes no neutro. Herdar o que estava no
-        // slider anterior aplicaria a revelação de uma foto em outra — e a
-        // segunda abriria alterada sem ninguém ter tocado em nada.
-        //
-        // Nada é pedido à GPU aqui: no neutro o resultado é a própria origem,
-        // que já está desenhada. Uma volta inteira para receber o que se tem é
-        // latência sem contrapartida.
-        self.ajustes = Ajustes::default();
-        self.aguardando = None;
+        // `set_value` **não emite** `Change` (ao contrário do `InputState` da
+        // busca), então mover os 42 sliders aqui não vira 42 pedidos à GPU. Um só
+        // é pedido, e só quando há o que aplicar.
         for controle in &self.controles {
-            let neutro = controle.definicao.neutro();
+            let valor = (controle.definicao.ler)(&self.ajustes);
             controle
                 .estado
-                .update(cx, |estado, cx| estado.set_value(neutro, window, cx));
+                .update(cx, |estado, cx| estado.set_value(valor, window, cx));
+        }
+
+        // No neutro o resultado é a própria origem, que já está desenhada — uma
+        // volta inteira à GPU para receber o que se tem é latência sem
+        // contrapartida. Fora dele, a foto na tela ainda é a original, e é este
+        // pedido que a torna a foto revelada.
+        //
+        // ⚠️ **Com foto de verdade esta guarda quase nunca economiza nada**, e é
+        // o schema que decide isso: `edit_lens_vignette_midpoint` é criada com
+        // `DEFAULT 50.0`, então toda foto importada difere do neutro num campo
+        // que ninguém tocou. Fica assim mesmo — o legado pede sempre, então o
+        // pior caso aqui é o comportamento dele —, mas a guarda não é a defesa
+        // contra abertura lenta que ela parece ser.
+        if self.ajustes != Ajustes::default() {
+            self.pedir_revelacao(cx);
         }
 
         cx.notify();
@@ -555,19 +573,62 @@ mod testes {
             .expect("a janela deve estar aberta");
     }
 
-    /// 🚨 Abrir uma foto **não** dispara os 11 assinantes.
+    /// 🚨 Abrir uma foto já revelada traz a revelação dela.
     ///
-    /// `abrir` chama `set_value` em todos os controles para devolvê-los ao
-    /// neutro, e isso só é barato porque `set_value` **não emite** `Change`. É o
-    /// oposto do `InputState::set_value` da busca, que emite — mesmo nome, dois
-    /// comportamentos, na mesma biblioteca.
-    ///
-    /// Este teste prende essa diferença. Se uma versão nova do `gpui-component`
-    /// fizer o slider passar a emitir, abrir qualquer foto viraria 11 pedidos à
-    /// GPU de valores que ninguém tocou — e o sintoma seria a Revelação demorar
-    /// para abrir, sem nenhuma pista do porquê.
+    /// Sem isto, toda foto abre no neutro — inclusive as que o fotógrafo já
+    /// trabalhou. Não é "faltou uma tela": é o trabalho dele sumindo da vista,
+    /// com o arquivo cru na frente. E o painel diria a mesma mentira, com os 42
+    /// sliders parados no meio.
     #[gpui::test]
-    fn abrir_nao_dispara_pedido_a_toa(cx: &mut TestAppContext) {
+    fn abrir_uma_foto_ja_revelada_traz_os_ajustes_dela(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_cinza())
+            .expect("gravar preview");
+
+        let janela = janela(cx, previews);
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(
+                    PhotoViewModel {
+                        edit_exposure: Some(1.5),
+                        edit_saturation: Some(-0.4),
+                        ..foto("retrato.jpg")
+                    },
+                    window,
+                    cx,
+                );
+
+                assert_eq!(tela.ajustes().exposure, 1.5);
+                assert_eq!(tela.ajustes().saturation, -0.4);
+                assert_eq!(
+                    tela.controles[0].estado.read(cx).value().start(),
+                    1.5,
+                    "o slider tem de abrir onde o ajuste está — senão a barra mente sobre a foto"
+                );
+                assert!(
+                    tela.aguardando.is_some(),
+                    "a foto na tela ainda é a original; sem este pedido ela nunca vira a revelada"
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 Abrir uma foto **sem edição** não dispara os 42 assinantes.
+    ///
+    /// `abrir` chama `set_value` em todos os controles, e isso só é barato porque
+    /// `set_value` **não emite** `Change`. É o oposto do `InputState::set_value`
+    /// da busca, que emite — mesmo nome, dois comportamentos, na mesma
+    /// biblioteca.
+    ///
+    /// Este teste prende essa diferença, e ela ficou mais cara desde que a foto
+    /// traz os ajustes do banco: se uma versão nova do `gpui-component` fizer o
+    /// slider passar a emitir, abrir uma foto revelada viraria 42 pedidos à GPU —
+    /// um por campo, cada um com a foto meio carregada — em vez do único que
+    /// `abrir` faz de propósito. O sintoma seria a Revelação demorar para abrir,
+    /// sem nenhuma pista do porquê.
+    #[gpui::test]
+    fn abrir_sem_edicao_nao_pede_nada_a_gpu(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         previews
             .save_preview("id-retrato.jpg", &foto_cinza())
@@ -585,13 +646,14 @@ mod testes {
             .expect("a janela deve estar aberta");
     }
 
-    /// 🚨 Trocar de foto zera os ajustes.
+    /// 🚨 Trocar de foto não herda o arrasto que estava no painel.
     ///
-    /// Herdar o slider da foto anterior aplicaria a revelação de uma foto em
-    /// outra, e a segunda abriria alterada sem ninguém tocar em nada — o tipo de
-    /// coisa que se atribui ao motor de cor.
+    /// O que a segunda foto recebe é a revelação **dela** — aqui, nenhuma, então
+    /// o neutro. Herdar o slider da foto anterior aplicaria a revelação de uma
+    /// foto em outra, e a segunda abriria alterada sem ninguém tocar em nada — o
+    /// tipo de coisa que se atribui ao motor de cor.
     #[gpui::test]
-    fn abrir_outra_foto_volta_ao_neutro(cx: &mut TestAppContext) {
+    fn abrir_outra_foto_nao_herda_o_arrasto_da_anterior(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         for id in ["id-a.jpg", "id-b.jpg"] {
             previews.save_preview(id, &foto_cinza()).expect("gravar");
@@ -611,11 +673,61 @@ mod testes {
                 assert_eq!(tela.ajustes().exposure, 2.0);
 
                 tela.abrir(foto("b.jpg"), window, cx);
-                assert_eq!(tela.ajustes().exposure, 0.0, "os ajustes voltam ao neutro");
+                assert_eq!(
+                    tela.ajustes().exposure,
+                    0.0,
+                    "a foto b não tem nada gravado — abre no neutro dela"
+                );
                 assert_eq!(
                     tela.controles[0].estado.read(cx).value().start(),
                     0.0,
                     "e o slider volta junto — senão a barra mente sobre o estado"
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 O arrasto da foto anterior não vaza para a próxima **pelo banco**.
+    ///
+    /// A metade que o teste acima não cobre: com os ajustes vindo da foto, abrir
+    /// uma revelada depois de outra revelada tem de trocar os 42 valores, e não
+    /// misturar os dois conjuntos. Um `ajustes` que só recebesse os campos
+    /// gravados na foto nova manteria os da anterior nos demais — e a segunda
+    /// abriria com metade da revelação da primeira.
+    #[gpui::test]
+    fn abrir_outra_revelada_troca_os_ajustes_inteiros(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        for id in ["id-a.jpg", "id-b.jpg"] {
+            previews.save_preview(id, &foto_cinza()).expect("gravar");
+        }
+
+        let janela = janela(cx, previews);
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(
+                    PhotoViewModel {
+                        edit_exposure: Some(1.0),
+                        edit_saturation: Some(0.5),
+                        ..foto("a.jpg")
+                    },
+                    window,
+                    cx,
+                );
+
+                tela.abrir(
+                    PhotoViewModel {
+                        edit_exposure: Some(-1.0),
+                        ..foto("b.jpg")
+                    },
+                    window,
+                    cx,
+                );
+
+                assert_eq!(tela.ajustes().exposure, -1.0);
+                assert_eq!(
+                    tela.ajustes().saturation,
+                    0.0,
+                    "a saturação era da foto a — na b ela não existe, e tem de voltar ao neutro"
                 );
             })
             .expect("a janela deve estar aberta");
