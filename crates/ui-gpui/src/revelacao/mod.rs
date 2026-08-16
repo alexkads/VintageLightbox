@@ -5,6 +5,7 @@
 //! da fase é **igualdade de pixel** com o app de egui.
 
 pub mod controles;
+pub mod corte;
 pub mod historico;
 pub mod persistencia;
 pub mod presets;
