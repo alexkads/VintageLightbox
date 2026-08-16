@@ -416,8 +416,9 @@ um lado tem. Há teste prendendo o número — **42 controles para 46 ajustes** 
 **matiz vai de -180 a 180**, o dobro das outras duas famílias de HSL, porque matiz é um círculo; e o
 **raio da nitidez começa em 0,5**, porque raio zero não tem pixel de vizinhança.
 
-Falta da fase: **o crop overlay**. A persistência dos ajustes, que o plano não listava e sem a qual
-nada disso se guarda, entrou logo abaixo; o undo/redo e os presets vieram na sequência.
+Falta da fase: **a exibição da foto cortada e girada** — o overlay de corte já está de pé (abaixo). A
+persistência dos ajustes, que o plano não listava e sem a qual nada disso se guarda, entrou logo
+depois; o undo/redo e os presets vieram na sequência.
 
 #### A foto abre com a revelação que ela já tinha ✅
 
@@ -788,6 +789,51 @@ O segundo cobrava só o fim: se nada nunca filtra, a grade tem as três fotos no
 exatamente a asserção. Faltava a do meio. 🔑 **Teste de volta precisa provar que houve ida** — e o
 único jeito de descobrir isso é quebrar o código de propósito e olhar qual teste não reclama. Vale
 para os ~50 sliders: cada um vai ter um "arrasta e volta ao padrão".
+
+#### O corte ✅ — a geometria primeiro, a tela depois
+
+O único item da fase 2 sem equivalente pronto no `gpui-component`, e o mais caro: 498 LOC de desenho
+e interação no legado. Entrou em duas metades, e a divisão foi de propósito — a primeira dá para
+conferir sem olhar, a segunda não.
+
+**A geometria** ([`corte.rs`](../crates/ui-gpui/src/revelacao/corte.rs)): onde ficam as oito alças, o
+que cada arrasto faz, o que os limites da foto fazem com o resultado. 16 testes, e o
+`CropSettings` do `domain` intacto como tipo de ida e volta. Três armadilhas ficaram presas, e as
+três foram conferidas quebrando o código de propósito:
+
+| A armadilha | O sintoma na tela |
+|---|---|
+| a alça esquerda move `x` **e** encolhe a largura | só mover `x` faz "o corte andar sozinho quando eu tento apertá-lo" |
+| o lado mínimo (1%) encosta na borda **parada** | do outro jeito, o retângulo salta a largura inteira no último milímetro |
+| reconstruir `CropSettings` preserva os outros 4 campos | esquecê-los devolve a foto à orientação original no meio de um arrasto |
+
+E duas decisões que no legado estão espalhadas: **arrastar o retângulo empurra** no limite, **puxar
+uma alça encolhe** — gestos diferentes, respostas diferentes; e **girar 90° não gira o retângulo
+junto**, porque ele mora no espaço da imagem original e é o `to_visual_space` (no `domain`) que
+traduz para a tela. Girar aqui aplicaria a rotação duas vezes.
+
+**A tela**: escurecimento em quatro faixas, retângulo, grade de terços e as oito alças — tudo `div`
+absoluto. O GPUI não tem pincel e não precisa: retângulo é `div` com fundo, e o layout faz a conta.
+
+🚨 **O arrasto usa `window.on_mouse_event`, e não `div().on_mouse_move`**, porque o ouvinte de um
+`div` só recebe evento **dentro** dele. Arrastar uma alça para fora da foto — que é o gesto normal
+para encolher até a borda — sairia do elemento e o arrasto morreria no meio, deixando o retângulo
+preso a meio caminho. `on_mouse_event` exige a fase de pintura, e é por isso que existe um `canvas`
+ali: ele mede o palco no prepaint e liga os ouvintes no paint.
+
+🚨 **A caixa `relative` é a de dentro do respiro, e não a moldura.** A moldura tem 24px de padding; um
+absoluto ancorado nela se mede pela caixa **com** o respiro, enquanto a foto ocupa a de dentro. Os
+dois sistemas ficariam deslocados de 24px — pouco, e o suficiente para parecer erro de mira de quem
+está clicando.
+
+⚠️ **O que ainda não existe**: girar e espelhar têm a geometria pronta e **não têm botão**, porque a
+foto exibida ainda não é girada — um botão que muda um número invisível é pior do que botão nenhum.
+É a próxima entrega, junto com a foto aparecer **cortada** fora do modo de corte (hoje ela aparece
+inteira, e é a divergência visível que sobra em relação ao legado).
+
+⚠️ **E o corte não entra no histórico.** `Cmd+Z` desfaz ajuste, não enquadramento. É o mesmo que o
+legado entrega — lá o `EditSnapshot` guarda `crop_settings` e nem `undo` nem `redo` o leem —, mas aqui
+é por ausência, e não por engano.
 
 ### Fase 3 — Importação (2–3 semanas)
 

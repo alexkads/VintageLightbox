@@ -289,6 +289,33 @@ pub fn foto_inteira() -> CropSettings {
     CropSettings::new(0.0, 0.0, 1.0, 1.0, 0, 0.0, false, false)
 }
 
+/// Onde a foto fica dentro do palco, em pixels: `(x, y, largura, altura)`.
+///
+/// 🚨 **O overlay precisa deste retângulo, e não do palco.** A foto é desenhada
+/// com `ObjectFit::Contain` — cabe inteira, deixando faixa vazia num dos eixos.
+/// Um overlay do tamanho do palco poria o retângulo de corte sobre a faixa vazia,
+/// e o corte sairia deslocado em relação ao que se vê: em foto deitada numa
+/// janela alta, a diferença é a altura das duas tarjas.
+///
+/// Palco ou foto com lado zero devolve um retângulo vazio na origem — não há
+/// divisão por zero, e o overlay simplesmente não aparece.
+pub fn area_da_foto(palco: (f32, f32), foto: (f32, f32)) -> (f32, f32, f32, f32) {
+    if palco.0 <= 0.0 || palco.1 <= 0.0 || foto.0 <= 0.0 || foto.1 <= 0.0 {
+        return (0.0, 0.0, 0.0, 0.0);
+    }
+
+    let escala = (palco.0 / foto.0).min(palco.1 / foto.1);
+    let largura = foto.0 * escala;
+    let altura = foto.1 * escala;
+
+    (
+        (palco.0 - largura) / 2.0,
+        (palco.1 - altura) / 2.0,
+        largura,
+        altura,
+    )
+}
+
 /// Ajusta a dimensão secundária para manter a proporção.
 ///
 /// Em alça de canto, quem manda é o eixo que mais se moveu — arrastar na
@@ -650,6 +677,43 @@ mod testes {
             vistas.push(posicao);
         }
         assert_eq!(vistas.len(), 8);
+    }
+
+    /// 🚨 A foto deitada num palco alto deixa faixa em cima e embaixo — e o
+    /// overlay tem de ficar sobre a foto, não sobre a faixa.
+    #[test]
+    fn a_area_da_foto_centraliza_e_cabe_inteira() {
+        // Foto 2:1 num palco quadrado: a largura enche, sobra metade da altura.
+        let (x, y, w, h) = area_da_foto((800.0, 800.0), (2000.0, 1000.0));
+        assert!(perto(x, 0.0));
+        assert!(perto(w, 800.0));
+        assert!(perto(h, 400.0));
+        assert!(perto(y, 200.0), "as duas tarjas têm a mesma altura");
+
+        // Foto em pé num palco largo: agora sobra dos lados.
+        let (x, y, w, h) = area_da_foto((800.0, 800.0), (1000.0, 2000.0));
+        assert!(perto(y, 0.0));
+        assert!(perto(h, 800.0));
+        assert!(perto(w, 400.0));
+        assert!(perto(x, 200.0));
+    }
+
+    /// ⚠️ Palco ou foto de lado zero não divide por zero: some.
+    ///
+    /// Acontece de verdade — no primeiro quadro, antes do layout, o palco mede
+    /// zero. Um `NaN` ali viraria um retângulo em lugar nenhum, e o GPUI desenha
+    /// `NaN` como coisa nenhuma, sem reclamar.
+    #[test]
+    fn palco_ou_foto_sem_tamanho_nao_gera_nan() {
+        for caso in [
+            ((0.0, 600.0), (100.0, 100.0)),
+            ((800.0, 0.0), (100.0, 100.0)),
+            ((800.0, 600.0), (0.0, 100.0)),
+            ((800.0, 600.0), (100.0, 0.0)),
+        ] {
+            let (x, y, w, h) = area_da_foto(caso.0, caso.1);
+            assert_eq!((x, y, w, h), (0.0, 0.0, 0.0, 0.0), "caso {caso:?}");
+        }
     }
 
     /// Entrar no modo de corte numa foto sem corte pega a foto inteira.

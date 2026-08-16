@@ -18,7 +18,10 @@ use crate::revelacao::persistencia::Gravador;
 use crate::revelacao::presets::GuardaDePresets;
 use crate::revelacao::tela::Revelacao;
 
-actions!(vintagelightbox, [VoltarParaBiblioteca, Desfazer, Refazer]);
+actions!(
+    vintagelightbox,
+    [VoltarParaBiblioteca, Desfazer, Refazer, AlternarCorte]
+);
 
 /// O contexto de teclado da raiz.
 ///
@@ -40,6 +43,8 @@ pub fn init(cx: &mut gpui::App) {
         // aparece quando alguém tenta refazer.
         gpui::KeyBinding::new("cmd-shift-z", Refazer, Some(CONTEXTO)),
         gpui::KeyBinding::new("cmd-z", Desfazer, Some(CONTEXTO)),
+        // `R` de "recortar", a mesma tecla do legado (`keyboard.rs`).
+        gpui::KeyBinding::new("r", AlternarCorte, Some(CONTEXTO)),
     ]);
 }
 
@@ -166,6 +171,19 @@ impl Aplicativo {
         }
     }
 
+    /// `R` entra e sai do modo de corte, e só dentro da Revelação.
+    fn ao_alternar_corte(
+        &mut self,
+        _acao: &AlternarCorte,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.tela == Tela::Revelacao {
+            self.revelacao
+                .update(cx, |tela, cx| tela.alternar_corte(cx));
+        }
+    }
+
     fn ao_voltar(
         &mut self,
         _acao: &VoltarParaBiblioteca,
@@ -241,6 +259,7 @@ impl Render for Aplicativo {
             .on_action(cx.listener(Self::ao_voltar))
             .on_action(cx.listener(Self::ao_desfazer))
             .on_action(cx.listener(Self::ao_refazer))
+            .on_action(cx.listener(Self::ao_alternar_corte))
             .flex()
             .flex_col()
             .size_full()
@@ -579,6 +598,62 @@ mod testes {
                     0.0,
                     "o Cmd+Z tem de chegar à Revelação"
                 );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 A tecla `R` abre e fecha o modo de corte.
+    ///
+    /// Terceira tecla ligada à raiz, e a primeira que **não** é um atalho de
+    /// sistema: `R` sozinho é exatamente o tipo de ligação que um campo de texto
+    /// engoliria. O teste aperta a tecla de verdade, como o do `Esc` e o do
+    /// `Cmd+Z` — os dois que revelaram que a ligação não existia.
+    #[gpui::test]
+    fn a_tecla_r_abre_e_fecha_o_corte(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_vermelha())
+            .expect("gravar preview");
+        cx.update(gpui_component::init);
+        cx.update(init);
+
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            |window, cx| {
+                Aplicativo::novo(
+                    acervo(),
+                    previews,
+                    Arc::new(GravadorDeMentira::default()),
+                    Arc::new(GuardaDeMentira::default()),
+                    Vec::new(),
+                    window,
+                    cx,
+                )
+            }
+        });
+
+        janela
+            .update(cx, |app, window, cx| {
+                app.biblioteca
+                    .update(cx, |tela, cx| tela.selecionar(Some(1), cx));
+                app.revelar(window, cx);
+            })
+            .expect("a janela deve estar aberta");
+
+        let mut visual = gpui::VisualTestContext::from_window(janela.into(), cx);
+        visual.simulate_keystrokes("r");
+
+        janela
+            .update(cx, |app, _window, cx| {
+                assert!(app.revelacao.read(cx).cortando(), "R tem de abrir o corte");
+            })
+            .expect("a janela deve estar aberta");
+
+        visual.simulate_keystrokes("r");
+
+        janela
+            .update(cx, |app, _window, cx| {
+                assert!(!app.revelacao.read(cx).cortando(), "e fechar de volta");
             })
             .expect("a janela deve estar aberta");
     }

@@ -16,20 +16,23 @@ use std::time::Duration;
 
 use adapters::view_models::PhotoViewModel;
 use domain::entities::Preset;
+use domain::value_objects::CropSettings;
 use gpui::{
-    div, img, prelude::*, px, App, Context, Entity, RenderImage, SharedString, Subscription, Task,
+    canvas, div, img, prelude::*, px, App, Bounds, Context, Entity, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, Pixels, Point, RenderImage, SharedString, Subscription, Task,
     Window,
 };
-use gpui_component::button::Button;
+use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::collapsible::Collapsible;
 use gpui_component::input::{Input, InputState};
 use gpui_component::slider::{Slider, SliderEvent, SliderState};
-use gpui_component::{ActiveTheme, Sizable, WindowExt};
+use gpui_component::{ActiveTheme, Selectable, Sizable, WindowExt};
 use infrastructure::cache::preview_manager::PreviewManager;
 
 use crate::imagem::para_gpui;
 
 use super::controles::{Definicao, Secao, CONTROLES};
+use super::corte::{self, Alca};
 use super::historico::Historico;
 use super::persistencia::{self, Corte, Gravador};
 use super::presets::{self, GuardaDePresets};
@@ -82,6 +85,12 @@ pub struct Revelacao {
     /// enfileirar mais uma.
     _gravacao: Option<Task<()>>,
     controles: Vec<Controle>,
+    /// O corte em edição. `None` é "fora do modo de corte" — e é a diferença
+    /// entre a foto com overlay por cima e a foto sozinha.
+    edicao: Option<Edicao>,
+    /// O tamanho do palco no último quadro, medido no `canvas`. Sem ele não dá
+    /// para converter pixel de ponteiro em fração de foto.
+    palco: Bounds<Pixels>,
     /// Os presets, carregados uma vez na abertura do app. Sistema e usuário
     /// juntos, na ordem que o `ListPresetsUseCase` devolve.
     presets: Vec<Preset>,
@@ -110,6 +119,24 @@ pub struct Revelacao {
 struct Controle {
     definicao: &'static Definicao,
     estado: Entity<SliderState>,
+}
+
+/// O modo de corte, enquanto ele está aberto.
+struct Edicao {
+    /// O corte sendo editado — uma **cópia**. O corte da foto só é substituído em
+    /// "Aplicar": sem isso, cancelar não teria o que restaurar.
+    corte: CropSettings,
+    /// A grade de terços. Desligada por padrão, como no legado
+    /// (`show_composition_grid` nasce `false`).
+    grade: bool,
+    /// O que o ponteiro está movendo, e onde ele estava no quadro anterior.
+    arrasto: Option<(Arrasto, Point<Pixels>)>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Arrasto {
+    Alca(Alca),
+    Retangulo,
 }
 
 struct Aberta {
@@ -182,6 +209,8 @@ impl Revelacao {
             pendente: false,
             _gravacao: None,
             controles,
+            edicao: None,
+            palco: Bounds::default(),
             guarda_de_presets,
             nome_do_preset: cx.new(|cx| InputState::new(window, cx).placeholder("Nome do preset")),
             presets,
@@ -234,6 +263,11 @@ impl Revelacao {
         // mostraria o arquivo cru de uma foto que já foi revelada.
         self.ajustes = persistencia::da_foto(&foto);
         self.corte = persistencia::corte_da_foto(&foto);
+        // 🚨 O modo de corte fecha aqui. O retângulo que está na tela é da foto
+        // que sai; mantê-lo aberto aplicaria, no clique seguinte, o enquadramento
+        // de uma foto na outra — o mesmo defeito que a cópia da seleção e o
+        // histórico por foto já impedem nas outras pontas.
+        self.edicao = None;
         // Histórico novo, começando no que está gravado: o passo zero é o estado
         // da abertura, e é o que faz o **primeiro** `Cmd+Z` ter para onde voltar.
         // No legado não tem — lá o histórico começa depois da primeira mudança, e
@@ -425,6 +459,143 @@ impl Revelacao {
         cx.notify();
     }
 
+    /// Entra ou sai do modo de corte. É o `R` do legado.
+    ///
+    /// ⚠️ Sair por aqui **descarta** o que estava sendo cortado, como o `R` de
+    /// lá: quem aplica usa o botão. Sem essa distinção, uma tecla teria dois
+    /// significados conforme o estado, e nenhum aviso de qual valeu.
+    pub fn alternar_corte(&mut self, cx: &mut Context<Self>) {
+        if self.edicao.is_some() {
+            self.edicao = None;
+        } else {
+            // Sem foto (ou sem pixels no cache) não há o que cortar, e abrir o
+            // overlay sobre o vazio daria alças flutuando em lugar nenhum.
+            let Some(Aberta {
+                origem: Some(_), ..
+            }) = self.aberta.as_ref()
+            else {
+                return;
+            };
+            self.edicao = Some(Edicao {
+                corte: self.corte_atual(),
+                grade: false,
+                arrasto: None,
+            });
+        }
+        cx.notify();
+    }
+
+    /// O corte gravado na foto, ou a foto inteira quando não há nenhum.
+    fn corte_atual(&self) -> CropSettings {
+        CropSettings::new(
+            self.corte.x.unwrap_or(0.0),
+            self.corte.y.unwrap_or(0.0),
+            self.corte.largura.unwrap_or(1.0),
+            self.corte.altura.unwrap_or(1.0),
+            self.corte.rotacao.unwrap_or(0),
+            self.corte.angulo.unwrap_or(0.0),
+            self.corte.espelho_h.unwrap_or(false),
+            self.corte.espelho_v.unwrap_or(false),
+        )
+    }
+
+    /// Confirma o corte: ele vira o corte da foto e vai para o banco.
+    ///
+    /// 🚨 **Gravar aqui não é opcional.** O corte não faz parte de `Ajustes`,
+    /// então nenhum slider vai levá-lo ao banco depois — sem esta gravação, o
+    /// enquadramento só existiria até fechar a tela.
+    pub fn aplicar_corte(&mut self, cx: &mut Context<Self>) {
+        let Some(edicao) = self.edicao.take() else {
+            return;
+        };
+
+        self.corte = Corte {
+            x: Some(edicao.corte.crop_x()),
+            y: Some(edicao.corte.crop_y()),
+            largura: Some(edicao.corte.crop_width()),
+            altura: Some(edicao.corte.crop_height()),
+            rotacao: Some(edicao.corte.rotation_90()),
+            angulo: Some(edicao.corte.angle()),
+            espelho_h: Some(edicao.corte.flip_horizontal()),
+            espelho_v: Some(edicao.corte.flip_vertical()),
+        };
+
+        // O que estiver a meio caminho fecha antes, senão a espera pendente grava
+        // depois com o corte já trocado — e o passo de histórico sairia com o
+        // corte novo colado num ajuste antigo.
+        self.gravar_o_que_estiver_pendente();
+        self.gravar();
+        cx.notify();
+    }
+
+    /// Sai sem aplicar. O corte da foto continua o que era.
+    pub fn cancelar_corte(&mut self, cx: &mut Context<Self>) {
+        self.edicao = None;
+        cx.notify();
+    }
+
+    pub fn cortando(&self) -> bool {
+        self.edicao.is_some()
+    }
+
+    /// Onde a foto está desenhada dentro do palco, em pixels.
+    ///
+    /// `None` quando não há foto, quando o palco ainda não foi medido (primeiro
+    /// quadro) ou quando a foto não tem pixels — nos três casos não há onde pôr
+    /// overlay nenhum.
+    fn area_da_foto(&self) -> Option<(f32, f32, f32, f32)> {
+        let Some(Aberta {
+            origem: Some(origem),
+            ..
+        }) = self.aberta.as_ref()
+        else {
+            return None;
+        };
+
+        let palco = (
+            f32::from(self.palco.size.width),
+            f32::from(self.palco.size.height),
+        );
+        let area = corte::area_da_foto(palco, (origem.largura as f32, origem.altura as f32));
+        (area.2 > 0.0 && area.3 > 0.0).then_some(area)
+    }
+
+    /// Aplica o movimento do ponteiro ao corte em edição.
+    fn mover_corte(&mut self, ponteiro: Point<Pixels>, cx: &mut Context<Self>) {
+        let Some((area, tamanho)) = self.area_da_foto().zip(self.tamanho_da_foto()) else {
+            return;
+        };
+        let Some(edicao) = self.edicao.as_mut() else {
+            return;
+        };
+        let Some((arrasto, anterior)) = edicao.arrasto else {
+            return;
+        };
+
+        // 🔑 O delta é convertido em **fração da foto exibida**, e não em pixels:
+        // é o que faz o mesmo arrasto dar o mesmo corte numa janela grande e numa
+        // pequena.
+        let dx = f32::from(ponteiro.x - anterior.x) / area.2;
+        let dy = f32::from(ponteiro.y - anterior.y) / area.3;
+
+        edicao.corte = match arrasto {
+            Arrasto::Alca(alca) => corte::mover_alca(&edicao.corte, alca, dx, dy, tamanho, None),
+            Arrasto::Retangulo => corte::arrastar(&edicao.corte, dx, dy),
+        };
+        edicao.arrasto = Some((arrasto, ponteiro));
+        cx.notify();
+    }
+
+    fn tamanho_da_foto(&self) -> Option<(f32, f32)> {
+        match self.aberta.as_ref() {
+            Some(Aberta {
+                origem: Some(origem),
+                ..
+            }) => Some((origem.largura as f32, origem.altura as f32)),
+            _ => None,
+        }
+    }
+
     pub fn pode_desfazer(&self) -> bool {
         self.historico.pode_desfazer()
     }
@@ -516,7 +687,7 @@ impl Revelacao {
         continua
     }
 
-    fn palco(&self, cx: &App) -> gpui::AnyElement {
+    fn palco(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
         let moldura = div()
             .flex()
             .flex_1()
@@ -545,7 +716,24 @@ impl Revelacao {
                 desenhada: Some(imagem),
                 ..
             }) => moldura
-                .child(img(imagem.clone()).size_full())
+                .child(
+                    // 🚨 **A caixa `relative` é esta, e não a moldura.** A moldura
+                    // tem 24px de respiro; um absoluto ancorado nela se mede pela
+                    // caixa **com** o respiro, enquanto a foto ocupa a de dentro.
+                    // Os dois sistemas ficariam deslocados de 24px, e o retângulo
+                    // de corte apareceria fora do lugar — pouco, o suficiente para
+                    // parecer erro de mira do usuário. Aqui foto, overlay e
+                    // medição dividem exatamente o mesmo retângulo.
+                    div()
+                        .relative()
+                        .size_full()
+                        .child(img(imagem.clone()).size_full())
+                        .children(self.overlay_de_corte(cx))
+                        // O `canvas` mede o palco e é onde o arrasto se liga:
+                        // registrar ouvinte de mouse exige estar na fase de
+                        // pintura, e um `div` comum não chega lá.
+                        .child(self.medida_e_arrasto(cx)),
+                )
                 .into_any_element(),
             Some(Aberta { foto, .. }) => moldura
                 .child(
@@ -559,6 +747,197 @@ impl Revelacao {
                 )
                 .into_any_element(),
         }
+    }
+
+    /// Mede o palco e, enquanto há arrasto, escuta o ponteiro.
+    ///
+    /// 🚨 **`window.on_mouse_event` só vale na fase de pintura** — daí o
+    /// `canvas`, e não um `div` com `on_mouse_move`. O ouvinte de um `div` só
+    /// recebe evento **dentro** dele; arrastar uma alça para fora da foto (que é
+    /// o gesto normal para encolher até a borda) sairia do elemento e o arrasto
+    /// morreria no meio, deixando o retângulo preso a meio caminho.
+    fn medida_e_arrasto(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let medidor = cx.entity();
+        let ouvinte = cx.entity();
+        let arrastando = self
+            .edicao
+            .as_ref()
+            .is_some_and(|edicao| edicao.arrasto.is_some());
+
+        canvas(
+            move |bounds, _window, cx| {
+                // Só escreve quando muda: `update` marca a entidade como suja, e
+                // gravar o mesmo tamanho a cada quadro redesenharia a tela para
+                // sempre.
+                medidor.update(cx, |tela, _cx| {
+                    if tela.palco != bounds {
+                        tela.palco = bounds;
+                    }
+                });
+            },
+            move |_bounds, _prepaint, window, _cx| {
+                if !arrastando {
+                    return;
+                }
+
+                window.on_mouse_event({
+                    let esta = ouvinte.clone();
+                    move |evento: &MouseMoveEvent, fase, _window, cx| {
+                        if !fase.bubble() {
+                            return;
+                        }
+                        esta.update(cx, |tela, cx| tela.mover_corte(evento.position, cx));
+                    }
+                });
+
+                window.on_mouse_event({
+                    let esta = ouvinte.clone();
+                    move |_evento: &MouseUpEvent, fase, _window, cx| {
+                        if !fase.bubble() {
+                            return;
+                        }
+                        esta.update(cx, |tela, cx| {
+                            if let Some(edicao) = tela.edicao.as_mut() {
+                                edicao.arrasto = None;
+                                cx.notify();
+                            }
+                        });
+                    }
+                });
+            },
+        )
+        .absolute()
+        .size_full()
+    }
+
+    /// O overlay inteiro: escurecimento, retângulo, grade e as oito alças.
+    ///
+    /// Tudo com `div` posicionado — o GPUI não tem pincel, e não precisa: um
+    /// retângulo é um `div` absoluto com fundo, e é o layout que faz a conta.
+    fn overlay_de_corte(&self, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
+        let edicao = self.edicao.as_ref()?;
+        let (ax, ay, aw, ah) = self.area_da_foto()?;
+
+        // O retângulo de corte em pixels de tela, a partir das frações.
+        let cx0 = ax + edicao.corte.crop_x() * aw;
+        let cy0 = ay + edicao.corte.crop_y() * ah;
+        let cw = edicao.corte.crop_width() * aw;
+        let ch = edicao.corte.crop_height() * ah;
+
+        let escuro = gpui::rgba(0x00000078);
+        let mut faixas = Vec::new();
+        // Quatro faixas em volta do corte, e não um retângulo com furo: o GPUI
+        // não recorta buraco, e quatro divs custam o mesmo.
+        for (x, y, w, h) in [
+            (ax, ay, aw, cy0 - ay),                    // acima
+            (ax, cy0 + ch, aw, ay + ah - (cy0 + ch)),  // abaixo
+            (ax, cy0, cx0 - ax, ch),                   // à esquerda
+            (cx0 + cw, cy0, ax + aw - (cx0 + cw), ch), // à direita
+        ] {
+            if w > 0.0 && h > 0.0 {
+                faixas.push(
+                    div()
+                        .absolute()
+                        .left(px(x))
+                        .top(px(y))
+                        .w(px(w))
+                        .h(px(h))
+                        .bg(escuro)
+                        .into_any_element(),
+                );
+            }
+        }
+
+        let mut grade = Vec::new();
+        if edicao.grade {
+            let linha = gpui::rgba(0xffffff66);
+            for i in 1..3 {
+                let fracao = i as f32 / 3.0;
+                grade.push(
+                    div()
+                        .absolute()
+                        .left(px(cx0 + cw * fracao))
+                        .top(px(cy0))
+                        .w(px(1.))
+                        .h(px(ch))
+                        .bg(linha)
+                        .into_any_element(),
+                );
+                grade.push(
+                    div()
+                        .absolute()
+                        .left(px(cx0))
+                        .top(px(cy0 + ch * fracao))
+                        .w(px(cw))
+                        .h(px(1.))
+                        .bg(linha)
+                        .into_any_element(),
+                );
+            }
+        }
+
+        let alcas: Vec<_> = Alca::TODAS
+            .into_iter()
+            .map(|alca| {
+                let (fx, fy) = alca.posicao();
+                // 12px de lado, centrada no ponto — o mesmo `HANDLE_SIZE` do
+                // legado. Menor que isso vira alvo difícil de acertar com o dedo
+                // no trackpad.
+                const LADO: f32 = 12.0;
+                div()
+                    .id(SharedString::from(format!("alca-{alca:?}")))
+                    .absolute()
+                    .left(px(cx0 + cw * fx - LADO / 2.0))
+                    .top(px(cy0 + ch * fy - LADO / 2.0))
+                    .w(px(LADO))
+                    .h(px(LADO))
+                    .bg(gpui::white())
+                    .border_1()
+                    .border_color(gpui::black())
+                    .rounded(px(2.))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |tela, evento: &MouseDownEvent, _window, cx| {
+                            if let Some(edicao) = tela.edicao.as_mut() {
+                                edicao.arrasto = Some((Arrasto::Alca(alca), evento.position));
+                                cx.notify();
+                            }
+                        }),
+                    )
+                    .into_any_element()
+            })
+            .collect();
+
+        Some(
+            div()
+                .absolute()
+                .inset_0()
+                .children(faixas)
+                .child(
+                    // O retângulo: só a borda, para não cobrir a foto.
+                    div()
+                        .id("retangulo-de-corte")
+                        .absolute()
+                        .left(px(cx0))
+                        .top(px(cy0))
+                        .w(px(cw))
+                        .h(px(ch))
+                        .border_2()
+                        .border_color(gpui::white())
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|tela, evento: &MouseDownEvent, _window, cx| {
+                                if let Some(edicao) = tela.edicao.as_mut() {
+                                    edicao.arrasto = Some((Arrasto::Retangulo, evento.position));
+                                    cx.notify();
+                                }
+                            }),
+                        ),
+                )
+                .children(grade)
+                .children(alcas)
+                .into_any_element(),
+        )
     }
 
     fn painel(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -588,6 +967,7 @@ impl Revelacao {
                         .child("Sem GPU disponível — os ajustes não são aplicados"),
                 )
             })
+            .children(self.barra_de_corte(cx))
             .child(self.presets(cx))
             .children(
                 Secao::TODAS
@@ -595,6 +975,64 @@ impl Revelacao {
                     .map(|secao| self.secao(secao, cx))
                     .collect::<Vec<_>>(),
             )
+    }
+
+    /// A barra do modo de corte: o que fazer com o retângulo que está na foto.
+    ///
+    /// Fica no topo do painel, e só existe enquanto o modo está aberto. No legado
+    /// ela vive no painel de revelação junto com tudo o mais; aqui aparecer e
+    /// sumir é o que diz, sem texto, que a tela está noutro estado.
+    fn barra_de_corte(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+        let edicao = self.edicao.as_ref()?;
+        let grade_ligada = edicao.grade;
+
+        Some(
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(6.))
+                .pb(px(8.))
+                .mb(px(4.))
+                .border_b_1()
+                .border_color(cx.theme().border)
+                .child(div().text_xs().child("Corte"))
+                .child(
+                    div()
+                        .flex()
+                        .gap(px(4.))
+                        .child(
+                            Button::new("corte-aplicar")
+                                .label("Aplicar")
+                                .xsmall()
+                                .primary()
+                                .on_click(cx.listener(|tela, _ev, _window, cx| {
+                                    tela.aplicar_corte(cx);
+                                })),
+                        )
+                        .child(
+                            Button::new("corte-cancelar")
+                                .label("Cancelar")
+                                .xsmall()
+                                .on_click(cx.listener(|tela, _ev, _window, cx| {
+                                    tela.cancelar_corte(cx);
+                                })),
+                        ),
+                )
+                .child(
+                    Button::new("corte-grade")
+                        .label("Grade de terços")
+                        .xsmall()
+                        .w_full()
+                        .when(grade_ligada, |b| b.primary())
+                        .selected(grade_ligada)
+                        .on_click(cx.listener(|tela, _ev, _window, cx| {
+                            if let Some(edicao) = tela.edicao.as_mut() {
+                                edicao.grade = !edicao.grade;
+                                cx.notify();
+                            }
+                        })),
+                ),
+        )
     }
 
     /// A lista de presets: os de sistema e os do usuário, como no legado.
@@ -1634,6 +2072,173 @@ mod testes {
             .expect("a janela deve estar aberta");
 
         assert!(guarda.salvos().is_empty());
+    }
+
+    /// 🚨 O modo de corte começa no corte que a foto tem — não na foto inteira.
+    ///
+    /// Abrir o `R` numa foto já cortada e ver o retângulo cobrindo tudo faria
+    /// parecer que o corte se perdeu; e aplicar dali apagaria o enquadramento de
+    /// verdade.
+    #[gpui::test]
+    fn o_corte_comeca_de_onde_a_foto_parou(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-cortada.jpg", &foto_cinza())
+            .expect("gravar preview");
+
+        let janela = janela(cx, previews);
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(
+                    PhotoViewModel {
+                        edit_crop_x: Some(0.2),
+                        edit_crop_y: Some(0.1),
+                        edit_crop_width: Some(0.5),
+                        edit_crop_height: Some(0.6),
+                        ..foto("cortada.jpg")
+                    },
+                    window,
+                    cx,
+                );
+
+                assert!(!tela.cortando());
+                tela.alternar_corte(cx);
+                assert!(tela.cortando());
+
+                let corte = &tela.edicao.as_ref().unwrap().corte;
+                assert_eq!(corte.crop_x(), 0.2);
+                assert_eq!(corte.crop_width(), 0.5);
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 Cancelar devolve o corte que estava gravado.
+    ///
+    /// A edição é uma **cópia**. Se o modo de corte mexesse direto no corte da
+    /// foto, "Cancelar" não teria o que restaurar — e o botão viraria enfeite.
+    #[gpui::test]
+    fn cancelar_o_corte_nao_muda_a_foto(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-cortada.jpg", &foto_cinza())
+            .expect("gravar preview");
+
+        let gravador = Arc::new(GravadorDeMentira::default());
+        let janela = com_gravador(cx, previews, gravador.clone());
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(
+                    PhotoViewModel {
+                        edit_crop_x: Some(0.2),
+                        edit_crop_width: Some(0.5),
+                        ..foto("cortada.jpg")
+                    },
+                    window,
+                    cx,
+                );
+                tela.alternar_corte(cx);
+
+                // Mexe no corte em edição e desiste.
+                if let Some(edicao) = tela.edicao.as_mut() {
+                    edicao.corte = corte::arrastar(&edicao.corte, 0.3, 0.0);
+                }
+                tela.cancelar_corte(cx);
+
+                assert!(!tela.cortando());
+                assert_eq!(tela.corte.x, Some(0.2), "o corte da foto é o de antes");
+            })
+            .expect("a janela deve estar aberta");
+
+        assert!(
+            gravador.gravado().is_empty(),
+            "cancelar não pode gravar nada"
+        );
+    }
+
+    /// 🚨 Aplicar grava — porque nada mais vai gravar por ele.
+    ///
+    /// O corte não faz parte de `Ajustes`, então nenhum slider o leva ao banco
+    /// depois. Sem esta gravação, o enquadramento só existiria até fechar a tela.
+    #[gpui::test]
+    fn aplicar_o_corte_grava_na_hora(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_cinza())
+            .expect("gravar preview");
+
+        let gravador = Arc::new(GravadorDeMentira::default());
+        let janela = com_gravador(cx, previews, gravador.clone());
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("retrato.jpg"), window, cx);
+                tela.alternar_corte(cx);
+
+                if let Some(edicao) = tela.edicao.as_mut() {
+                    edicao.corte = corte::mover_alca(
+                        &edicao.corte,
+                        Alca::Esquerda,
+                        0.25,
+                        0.0,
+                        (100.0, 100.0),
+                        None,
+                    );
+                }
+                tela.aplicar_corte(cx);
+
+                assert!(!tela.cortando(), "aplicar fecha o modo");
+                assert_eq!(tela.corte.x, Some(0.25));
+            })
+            .expect("a janela deve estar aberta");
+
+        let gravado = gravador.gravado();
+        assert_eq!(gravado.len(), 1);
+        assert_eq!(gravado[0].2.x, Some(0.25), "o corte novo foi para o banco");
+        assert_eq!(gravado[0].2.largura, Some(0.75));
+    }
+
+    /// ⚠️ `R` numa foto sem pixels no cache não abre o modo.
+    ///
+    /// Sem imagem não há onde pôr o retângulo, e o overlay sobre o vazio daria
+    /// oito alças flutuando em lugar nenhum — clicáveis, inclusive.
+    #[gpui::test]
+    fn foto_sem_cache_nao_entra_no_modo_de_corte(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        let janela = janela(cx, previews);
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("sem-cache.NEF"), window, cx);
+                tela.alternar_corte(cx);
+                assert!(!tela.cortando());
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 Trocar de foto no meio do corte fecha o modo.
+    ///
+    /// O retângulo é da foto que estava na tela. Mantê-lo aberto aplicaria, no
+    /// clique seguinte, o enquadramento de uma foto na outra — o mesmo defeito
+    /// que a cópia da seleção e o histórico por foto já impedem nas outras pontas.
+    #[gpui::test]
+    fn trocar_de_foto_fecha_o_modo_de_corte(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        for id in ["id-a.jpg", "id-b.jpg"] {
+            previews.save_preview(id, &foto_cinza()).expect("gravar");
+        }
+
+        let janela = janela(cx, previews);
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("a.jpg"), window, cx);
+                tela.alternar_corte(cx);
+                assert!(tela.cortando());
+
+                tela.abrir(foto("b.jpg"), window, cx);
+                assert!(!tela.cortando(), "o retângulo era da foto a");
+            })
+            .expect("a janela deve estar aberta");
     }
 
     /// 🚨 O arrasto da foto anterior não vaza para a próxima **pelo banco**.

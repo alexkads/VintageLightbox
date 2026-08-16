@@ -56,7 +56,7 @@ struct `PhotoEdits` continua sendo o conserto de verdade.
 | Métrica | Valor |
 |---------|-------|
 | `cargo check --workspace --all-targets` | ✅ **limpo** |
-| `cargo test --workspace` | ✅ **635 passando, 0 falhas, 3 ignorados** (16/ago) |
+| `cargo test --workspace` | ✅ **657 passando, 0 falhas, 3 ignorados** (16/ago) |
 | App | ✅ **sobe** — janela 1352×848, `GPU: Initialized successfully with Apple M2 Pro` |
 | Migrations SQLite no repositório | 15 (`001` … `015`) |
 | Crates | 6 (domain, use-cases, adapters, infrastructure, ui, **ui-gpui**) |
@@ -70,7 +70,7 @@ struct `PhotoEdits` continua sendo o conserto de verdade.
 | Adapters | 0 | ⚠️ nenhum teste escrito |
 | Infrastructure | 65 (34 unit + 31 integração em 7 arquivos) | ✅ passando (1 ignorado) |
 | UI (egui) | 146 (47 unit + 99 E2E `egui_kittest` em 18 arquivos) | ✅ passando (2 ignorados) |
-| UI (GPUI) | 109 (106 unit + 3 de integração com banco) | ✅ passando — fase 2 em andamento |
+| UI (GPUI) | 131 (128 unit + 3 de integração com banco) | ✅ passando — fase 2 em andamento |
 
 ---
 
