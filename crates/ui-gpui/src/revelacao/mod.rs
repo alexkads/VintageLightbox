@@ -6,6 +6,7 @@
 
 pub mod controles;
 pub mod corte;
+pub mod histograma;
 pub mod historico;
 pub mod persistencia;
 pub mod presets;

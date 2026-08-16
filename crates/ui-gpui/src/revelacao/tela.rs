@@ -33,6 +33,7 @@ use crate::imagem::para_gpui;
 
 use super::controles::{Definicao, Secao, CONTROLES};
 use super::corte::{self, Alca};
+use super::histograma::Histograma;
 use super::historico::Historico;
 use super::persistencia::{self, Corte, Gravador};
 use super::presets::{self, GuardaDePresets};
@@ -113,6 +114,9 @@ pub struct Revelacao {
     /// O corte em edição. `None` é "fora do modo de corte" — e é a diferença
     /// entre a foto com overlay por cima e a foto sozinha.
     edicao: Option<Edicao>,
+    /// O histograma da foto **como ela está na tela**. Recalculado junto com a
+    /// exibição, e `None` enquanto não há foto.
+    histograma: Option<Histograma>,
     /// O slider de endireitamento. Entidade própria, como os 42 do painel.
     angulo: Entity<SliderState>,
     /// O tamanho do palco no último quadro, medido no `canvas`. Sem ele não dá
@@ -261,6 +265,7 @@ impl Revelacao {
             _gravacao: None,
             controles,
             edicao: None,
+            histograma: None,
             angulo,
             palco: Bounds::default(),
             guarda_de_presets,
@@ -683,12 +688,20 @@ impl Revelacao {
         let recortar = self.edicao.is_none();
 
         let Some(aberta) = self.aberta.as_mut() else {
+            self.histograma = None;
             return;
         };
-        aberta.desenhada = aberta
+
+        let exibida = aberta
             .revelada
             .as_ref()
-            .map(|imagem| para_gpui(transformacao::aplicar(imagem, &corte, recortar)));
+            .map(|imagem| transformacao::aplicar(imagem, &corte, recortar));
+
+        // 🔑 O histograma mede **o que está na tela**, e não a foto crua: com os
+        // sliders mexidos, o histograma do cru descreveria uma imagem que ninguém
+        // está vendo. É o que o legado faz (ele calcula depois do `process_image`).
+        self.histograma = exibida.as_ref().map(Histograma::da_imagem);
+        aberta.desenhada = exibida.map(para_gpui);
     }
 
     /// Gira 90° no sentido horário. Só faz sentido dentro do modo de corte.
@@ -1119,6 +1132,7 @@ impl Revelacao {
                         .child("Sem GPU disponível — os ajustes não são aplicados"),
                 )
             })
+            .child(self.histograma(cx))
             .children(self.barra_de_corte(cx))
             .child(self.presets(cx))
             .children(
@@ -1254,6 +1268,63 @@ impl Revelacao {
                             tela.recomecar_corte(cx);
                         })),
                 ),
+        )
+    }
+
+    /// O histograma, desenhado com `paint_quad` dentro de um `canvas`.
+    ///
+    /// 🔑 **256 colunas × 3 canais não podem ser 768 `div`s.** Cada `div` é um nó
+    /// de layout, e o layout roda a cada quadro; o painel inteiro tem menos de
+    /// cem hoje. Aqui vale a exceção — pintar retângulo direto é o que o `canvas`
+    /// existe para permitir, e é o análogo do `painter` que o legado usa.
+    fn histograma(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        const ALTURA: f32 = 70.0;
+
+        let barras: Vec<(f32, f32, f32)> = match self.histograma.as_ref() {
+            Some(histograma) => histograma.alturas().collect(),
+            None => Vec::new(),
+        };
+        let fundo = cx.theme().background;
+
+        div().h(px(ALTURA)).w_full().mb(px(6.)).child(
+            canvas(
+                |_bounds, _window, _cx| {},
+                move |bounds, _prepaint, window, _cx| {
+                    window.paint_quad(gpui::fill(bounds, fundo));
+
+                    if barras.is_empty() {
+                        return;
+                    }
+
+                    let largura = f32::from(bounds.size.width) / barras.len() as f32;
+                    let base = f32::from(bounds.origin.y) + f32::from(bounds.size.height);
+
+                    for (i, (r, g, b)) in barras.iter().enumerate() {
+                        let x = f32::from(bounds.origin.x) + i as f32 * largura;
+                        // Os três canais somam luz onde se sobrepõem — cinza
+                        // vira branco, que é o que se espera de um
+                        // histograma. Alfa fixo, como no legado (100/255).
+                        for (altura, cor) in [
+                            (r, gpui::rgba(0xff000064)),
+                            (g, gpui::rgba(0x00ff0064)),
+                            (b, gpui::rgba(0x0000ff64)),
+                        ] {
+                            let alta = altura * ALTURA;
+                            if alta <= 0.0 {
+                                continue;
+                            }
+                            window.paint_quad(gpui::fill(
+                                Bounds {
+                                    origin: gpui::point(px(x), px(base - alta)),
+                                    size: gpui::size(px(largura.max(1.0)), px(alta)),
+                                },
+                                cor,
+                            ));
+                        }
+                    }
+                },
+            )
+            .size_full(),
         )
     }
 
@@ -2651,6 +2722,70 @@ mod testes {
                     corte.crop_width(),
                     corte.crop_height()
                 );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 O histograma mede a foto **depois** dos ajustes, e muda com eles.
+    ///
+    /// Um histograma calculado da foto crua descreveria uma imagem que ninguém
+    /// está vendo — e o instrumento que existe para dizer "as altas luzes
+    /// estouraram" passaria a dizer isso da foto errada.
+    #[gpui::test]
+    fn o_histograma_acompanha_o_que_esta_na_tela(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_cinza())
+            .expect("gravar preview");
+
+        let janela = janela(cx, previews);
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("retrato.jpg"), window, cx);
+
+                let histograma = tela.histograma.as_ref().expect("há foto, há histograma");
+                // A foto de teste é cinza 100 chapado.
+                assert_eq!(histograma.vermelho[100], 64);
+                assert_eq!(histograma.vermelho[200], 0);
+            })
+            .expect("a janela deve estar aberta");
+
+        // Exposição +1 dobra o valor: o balde 100 esvazia e o 200 enche.
+        arrastar(cx, &janela, 0, 1.0);
+        cx.run_until_parked();
+
+        // O resultado vem da GPU por um laço assíncrono; espera ele chegar.
+        for _ in 0..200 {
+            let pronto = janela
+                .update(cx, |tela, _window, _cx| {
+                    tela.histograma
+                        .as_ref()
+                        .is_some_and(|h| h.vermelho[200] > 0)
+                })
+                .expect("a janela deve estar aberta");
+            if pronto {
+                return;
+            }
+            // ⚠️ Espera de verdade, e não só relógio: o motor roda numa thread
+            // própria, com wgpu do outro lado. `advance_clock` acorda o laço de
+            // colheita, mas quem tem de terminar primeiro é a GPU — e ela não
+            // sabe do relógio de teste.
+            std::thread::sleep(Duration::from_millis(10));
+            cx.executor().advance_clock(INTERVALO_DE_COLHEITA * 2);
+            cx.run_until_parked();
+        }
+        panic!("o histograma não acompanhou o ajuste");
+    }
+
+    /// Sem foto não há histograma — e não há divisão por zero em lugar nenhum.
+    #[gpui::test]
+    fn sem_foto_nao_ha_histograma(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        let janela = janela(cx, previews);
+
+        janela
+            .update(cx, |tela, _window, _cx| {
+                assert!(tela.histograma.is_none());
             })
             .expect("a janela deve estar aberta");
     }
