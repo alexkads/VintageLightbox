@@ -18,6 +18,24 @@
 //! Dar slider a eles seria **feature nova**, que a regra §7.1 proíbe: com ela,
 //! qualquer diferença entre os dois apps deixa de ser conferível — não dá para
 //! saber se é defeito de porte ou escopo que só um dos lados tem.
+//!
+//! ## 🚨 E 18 destes 42 não movem a foto — nem aqui, nem no `crates/ui`
+//!
+//! O `struct Params` do WGSL declara 28 campos para os 46 que a CPU manda, e o
+//! `uniform` casa por **posição**. O efeito na tabela abaixo:
+//!
+//! - **Básico** (11) e **HSL / cor** (8): chegam certos.
+//! - **HSL / matiz**: vermelho borra (o shader lê aquele campo como
+//!   `nr_luminance`), amarelo e verde aplicam ruído de cor e nitidez, e os outros
+//!   cinco não fazem nada.
+//! - **HSL / luminância** (8), **Detalhe** (4) e **Lente** (3): nada.
+//!
+//! A tabela posição a posição está em
+//! [`super::processador`], presa por
+//! `o_wgsl_declara_28_campos_para_os_46_que_o_rust_manda`. **Não é para
+//! consertar aqui**: o shader é o mesmo arquivo dos dois apps e a fase 2 se mede
+//! por igualdade de pixel com o de egui — conserto é trabalho próprio, nos dois
+//! lados, com o critério da fase ajustado junto.
 
 use super::processador::Ajustes;
 

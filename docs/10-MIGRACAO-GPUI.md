@@ -374,6 +374,11 @@ parecendo decisão de cor de quem escreveu o shader. É o que
 **dados na tabela**, não como código de interface: o HSL inteiro são 24 linhas. Seis seções
 sanfonadas, fechadas menos o Básico — como no legado (`default_open(true)` só nele).
 
+⚠️ **E 18 deles não movem a foto — no legado também não.** Descoberto no dia seguinte: o `uniform`
+do shader tem 28 campos para os 46 que a CPU manda. Detalhe e Lente inteiros não chegam, HSL/matiz
+chega deslocado. O porte está certo; o alvo é que não é o que o nome dizia. A tabela posição a
+posição está mais abaixo, em "a **tela** também não aplica 46".
+
 🚨 **A curva de tons ficou de fora, e é decisão de paridade.** `Ajustes` tem os quatro `tone_curve_*`
 e o shader os aplica, mas **no legado nenhum controle os escreve**:
 
@@ -401,7 +406,7 @@ diferentes, com implementações diferentes da mesma matemática:
 
 | | quem aplica | quantos ajustes |
 |---|---|---|
-| **A tela** (Revelação) | `image_adjustments.wgsl`, na GPU | **46** |
+| **A tela** (Revelação) | `image_adjustments.wgsl`, na GPU | **46** — ⚠️ **não**: são 23, ver logo abaixo |
 | **O arquivo** (exportação) | `ImageExporterImpl::process_image`, na CPU | **15** |
 
 E os dois vivem em lugares diferentes: o shader é o que a fase 2 está portando; o exportador está na
@@ -444,6 +449,72 @@ recebe outra imagem — sem erro, sem aviso.
 durante a fase 2 misturaria "portei errado" com "estava errado". Fica registrado aqui e no STATUS
 para virar trabalho próprio depois do cutover. O que a migração **não** pode fazer é continuar
 medindo a si mesma por ele.
+
+#### 🚨 E o pior: a **tela** também não aplica 46. Aplica 23, e cinco no lugar errado
+
+Descoberto em 16/ago, ao começar a persistência dos ajustes. A frase acima — *"a tela aplica 46"* —
+**estava errada**, e a de cima dela, no `Ajustes`, dizia que "o `uniform` do outro lado declara os
+mesmos 46 na mesma ordem". Basta abrir o arquivo:
+
+```bash
+python3 - <<'PY'
+import re, pathlib
+bloco = pathlib.Path("crates/ui/src/shaders/image_adjustments.wgsl").read_text() \
+    .split("struct Params {")[1].split("}")[0]
+campos = re.findall(r"^\s*(\w+)\s*:\s*f32", bloco, re.M)
+print(len(campos), "campos no WGSL")     # 28
+PY
+```
+
+**28 campos no shader; 46 saem da CPU.** O `uniform` viaja como bytes crus e casa por **posição**,
+então a partir da posição 23 o shader lê o campo do vizinho:
+
+| posição | o Rust manda | o shader lê como | o que o usuário vê |
+|--------:|--------------|------------------|--------------------|
+| 0–22 | Básico (11), curva de tons (4), HSL/cor (8) | os mesmos | ✅ certo |
+| 23 | `hsl_red_hue` | `nr_luminance` | **borra a foto** |
+| 24 | `hsl_orange_hue` | `nr_luminance` **outra vez** — declarado duas vezes | nada |
+| 25 | `hsl_yellow_hue` | `nr_color` | tira ruído de cor |
+| 26 | `hsl_green_hue` | `sharpen_amount` | afia |
+| 27 | `hsl_aqua_hue` | `sharpen_radius` | nada sozinho |
+| 28–45 | matiz (3), HSL/luminância (8), lente (3), ruído (2), nitidez (2) | **nada** | nada |
+
+Ou seja: **18 dos 42 sliders do painel não movem um pixel**, e **5 movem outra coisa**. Os 4
+controles de Detalhe — os únicos que o painel oferece para ruído e nitidez — estão entre os que não
+chegam, enquanto o ruído e a nitidez são aplicados por três sliders de matiz.
+
+🔑 **Nada disso falha em lugar nenhum.** O buffer é maior que o mínimo que o binding exige, então o
+wgpu aceita e ignora a sobra; a duplicata de `nr_luminance` no WGSL o naga também aceita. Não há
+erro, log, nem tela quebrada — há um controle que responde e uma foto que muda pelo motivo errado.
+
+🚨 **E o defeito é do `crates/ui`**, não do porte: é o mesmo shader (arquivo igual byte a byte, com
+teste prendendo) recebendo a mesma struct. Os dois apps erram igual — que é justamente por que o
+critério de saída da fase 2, igualdade de pixel entre os motores, **passaria com isto no lugar**.
+Um critério que compara dois lados só pega o que os distingue.
+
+⚠️ **Fica preso em teste, e não consertado** — mesma razão do exportador: conserto durante o porte
+mistura "portei errado" com "estava errado", e aqui há um agravante. As fotos já reveladas têm
+`hsl_*_hue` gravado no banco; arrumar o alinhamento muda **retroativamente** a aparência delas —
+o que era borrão vira giro de matiz. É trabalho próprio, nos dois lados ao mesmo tempo, com decisão
+de dono sobre o acervo existente.
+
+O que roda hoje, em [`processador.rs`](../crates/ui-gpui/src/revelacao/processador.rs):
+
+| Teste | O que ele fixa |
+|---|---|
+| `o_wgsl_declara_28_campos_para_os_46_que_o_rust_manda` | lê o `.wgsl` e cobra a tabela acima, posição a posição — sem GPU |
+| `os_ajustes_a_partir_do_campo_28_nao_mudam_nenhum_pixel` | a contraprova medida na imagem: os 23 primeiros mudam, os 18 últimos não |
+| `o_matiz_do_vermelho_borra_a_foto_em_vez_de_girar_a_cor` | o contraste local **cai** — assinatura de borrão, que nenhum giro de matiz produz |
+| `detalhe_e_lente_nao_chegam_ao_shader` | os 7 sliders de Detalhe e Lente, um a um |
+
+O primeiro **tem de falhar** no dia em que o WGSL for consertado. É o lembrete de que a tabela, este
+documento e o `crates/ui` mudam juntos.
+
+🔑 **Por que ninguém viu antes**: o teste ao lado se chamava `o_layout_tem_46_campos_de_quatro_bytes`
+e o comentário dele dizia "os 46 campos **que o WGSL declara**". Ele mede `size_of::<Ajustes>()` —
+não sabe que existe shader. Era uma afirmação sobre o outro lado escrita ao lado de um teste que
+nunca a conferiria, e ela se lia como conferida. É a mesma família dos quatro achados da fase 0: o
+que não avisa agora vira "o GPUI quebrou isso" depois.
 
 #### A base do `gpui-component` ✅ — 15/ago/2026
 

@@ -45,12 +45,20 @@ use parking_lot::Mutex;
 ///
 /// 🚨 **Os nomes e a ordem são os do shader, e ficam em inglês de propósito.**
 /// `repr(C)` + `bytemuck` mandam esta struct para a GPU como bytes crus, campo a
-/// campo, por **posição**. O `uniform` do outro lado
-/// (`shaders/image_adjustments.wgsl`) declara os mesmos 46 na mesma ordem, e a
-/// única defesa contra os dois divergirem é poder ler um ao lado do outro.
-/// Traduzir os nomes tiraria essa leitura e não daria nada em troca — um campo
-/// fora de lugar aqui não é erro de compilação, é a foto saindo com o ajuste
-/// errado aplicado.
+/// campo, por **posição**. Um campo fora de lugar aqui não é erro de compilação,
+/// é a foto saindo com o ajuste errado aplicado — e poder ler os dois lados um ao
+/// lado do outro é a única defesa que existe.
+///
+/// 🚨 **E ela já falhou: o `uniform` do outro lado declara 28 campos, não 46.**
+/// Do campo 23 em diante o shader lê o do vizinho (o matiz do vermelho vira
+/// redução de ruído) e do 28 em diante não lê nada — os 4 controles de Detalhe e
+/// os 3 de Lente não fazem efeito nenhum. É defeito herdado do `crates/ui`, que
+/// manda a mesma struct para o mesmo shader; está preso em
+/// `o_wgsl_declara_28_campos_para_os_46_que_o_rust_manda`, com a tabela inteira,
+/// e registrado em `docs/10-MIGRACAO-GPUI.md`.
+///
+/// Os 46 campos ficam aqui assim mesmo: encolher a struct para 28 mudaria o que
+/// a GPU recebe, e a fase 2 se mede por igualdade de pixel com o app de egui.
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Ajustes {
@@ -719,11 +727,293 @@ mod testes {
         assert_eq!(&saida[saida.len() - 4..], &[200, 200, 200, 255]);
     }
 
-    /// O layout que vai para a GPU tem os 46 campos que o WGSL declara.
+    const NOMES: [&str; 46] = [
+        "exposure",
+        "contrast",
+        "temperature",
+        "tint",
+        "highlights",
+        "shadows",
+        "whites",
+        "blacks",
+        "clarity",
+        "vibrance",
+        "saturation",
+        "tone_curve_shadows",
+        "tone_curve_darks",
+        "tone_curve_lights",
+        "tone_curve_highlights",
+        "hsl_red_sat",
+        "hsl_orange_sat",
+        "hsl_yellow_sat",
+        "hsl_green_sat",
+        "hsl_aqua_sat",
+        "hsl_blue_sat",
+        "hsl_purple_sat",
+        "hsl_magenta_sat",
+        "hsl_red_hue",
+        "hsl_orange_hue",
+        "hsl_yellow_hue",
+        "hsl_green_hue",
+        "hsl_aqua_hue",
+        "hsl_blue_hue",
+        "hsl_purple_hue",
+        "hsl_magenta_hue",
+        "hsl_red_lum",
+        "hsl_orange_lum",
+        "hsl_yellow_lum",
+        "hsl_green_lum",
+        "hsl_aqua_lum",
+        "hsl_blue_lum",
+        "hsl_purple_lum",
+        "hsl_magenta_lum",
+        "lens_distortion",
+        "lens_vignette_amount",
+        "lens_vignette_midpoint",
+        "nr_luminance",
+        "nr_color",
+        "sharpen_amount",
+        "sharpen_radius",
+    ];
+
+    /// Uma amostra 16×16 desenhada para que **todo** ajuste do shader tenha onde
+    /// agir: rampa de cinza de 0 a 255 (altas luzes, sombras, brancos, pretos e
+    /// as quatro zonas da curva), as 8 cores do HSL saturadas, e as mesmas 8
+    /// esmaecidas (`vibrance` só age onde `max_diff < 64`). Tudo em xadrez de
+    /// 1px, para haver borda dura em toda parte — sem borda, nitidez e redução de
+    /// ruído não teriam o que fazer.
+    fn amostra() -> Arc<Vec<u8>> {
+        const CORES: [[u8; 3]; 8] = [
+            [220, 40, 40],
+            [230, 140, 30],
+            [230, 220, 40],
+            [40, 200, 60],
+            [40, 210, 200],
+            [50, 80, 220],
+            [140, 50, 210],
+            [220, 50, 180],
+        ];
+        let mut pixels = Vec::with_capacity(16 * 16 * 4);
+        for y in 0u32..16 {
+            for x in 0u32..16 {
+                let cor = match y {
+                    // Rampa de cinza, com um degrau por coluna.
+                    0..=3 => [(x * 17) as u8; 3],
+                    // As 8 cores, uma por linha, em xadrez com cinza médio.
+                    4..=11 if (x + y) % 2 == 0 => CORES[(y - 4) as usize],
+                    4..=11 => [128, 128, 128],
+                    // As mesmas, puxadas para perto do cinza.
+                    _ if (x + y) % 2 == 0 => {
+                        let base = CORES[(y - 12) as usize];
+                        [
+                            (128 + (base[0] as i32 - 128) / 4) as u8,
+                            (128 + (base[1] as i32 - 128) / 4) as u8,
+                            (128 + (base[2] as i32 - 128) / 4) as u8,
+                        ]
+                    }
+                    _ => [128, 128, 128],
+                };
+                pixels.extend_from_slice(&[cor[0], cor[1], cor[2], 255]);
+            }
+        }
+        Arc::new(pixels)
+    }
+
+    /// Escreve **por posição**, e não por nome: é assim que o `uniform` chega à
+    /// GPU, e é a única forma de perguntar "o que o shader faz com o campo *n*"
+    /// sem depender de qual nome o Rust deu a ele.
+    fn com_campos(alterados: &[(usize, f32)]) -> Ajustes {
+        let neutro = Ajustes::default();
+        let mut bytes = bytemuck::bytes_of(&neutro).to_vec();
+        let campos: &mut [f32] = bytemuck::cast_slice_mut(&mut bytes);
+        for (indice, valor) in alterados {
+            campos[*indice] = *valor;
+        }
+        *bytemuck::from_bytes(&bytes)
+    }
+
+    fn com_campo(indice: usize, valor: f32) -> Ajustes {
+        com_campos(&[(indice, valor)])
+    }
+
+    /// Os nomes do `struct Params` do WGSL, na ordem em que ele os declara.
+    fn campos_do_wgsl() -> Vec<String> {
+        let shader = include_str!("../shaders/image_adjustments.wgsl");
+        shader
+            .split("struct Params {")
+            .nth(1)
+            .and_then(|resto| resto.split('}').next())
+            .expect("o shader tem de declarar `struct Params`")
+            .lines()
+            .filter_map(|linha| linha.split(':').next())
+            .map(str::trim)
+            .filter(|nome| !nome.is_empty() && !nome.starts_with("//"))
+            .map(str::to_string)
+            .collect()
+    }
+
+    /// Soma das diferenças entre vizinhos horizontais.
     ///
-    /// Não confere nome nem ordem — confere que ninguém acrescentou ou tirou um
-    /// campo de um lado só. Campo a mais aqui desloca **todos** os seguintes na
-    /// leitura do shader, e o sintoma é a saturação virando nitidez.
+    /// Cai quando a imagem borra, sobe quando ela é afiada — é o que separa
+    /// "mudou alguma coisa" de "virou exatamente o ajuste do vizinho".
+    fn contraste_local(pixels: &[u8]) -> u64 {
+        let mut soma = 0u64;
+        for y in 0..16usize {
+            for x in 1..16usize {
+                for canal in 0..3usize {
+                    let atual = pixels[(y * 16 + x) * 4 + canal] as i32;
+                    let anterior = pixels[(y * 16 + x - 1) * 4 + canal] as i32;
+                    soma += atual.abs_diff(anterior) as u64;
+                }
+            }
+        }
+        soma
+    }
+
+    /// 🚨 **O `struct Params` do WGSL não é o `Ajustes` do Rust.** Ele declara 28
+    /// campos para os 46 que a CPU manda, e a divergência começa no 23.
+    ///
+    /// O `uniform` chega à GPU como bytes crus, **por posição**. Enquanto os
+    /// nomes batem, cada slider move o que promete; a partir do 23 o shader lê o
+    /// campo do vizinho:
+    ///
+    /// | posição | o Rust manda | o shader lê como |
+    /// |--------:|--------------|------------------|
+    /// | 23 | `hsl_red_hue` | `nr_luminance` |
+    /// | 24 | `hsl_orange_hue` | `nr_luminance` **de novo** — declarado duas vezes |
+    /// | 25 | `hsl_yellow_hue` | `nr_color` |
+    /// | 26 | `hsl_green_hue` | `sharpen_amount` |
+    /// | 27 | `hsl_aqua_hue` | `sharpen_radius` |
+    /// | 28–45 | matiz, luminância, lente, ruído, nitidez | **nada** — fora do `uniform` |
+    ///
+    /// Nada disso falha em lugar nenhum: o buffer é maior que o mínimo que o
+    /// binding exige, então o wgpu aceita e ignora a sobra.
+    ///
+    /// ⚠️ **Este teste prende um defeito de propósito** (regra §7.3: portar é
+    /// reescrever com a regra entendida, defeito preservado fica registrado em
+    /// teste). Ele **tem de falhar** no dia em que o WGSL for consertado — e aí a
+    /// tabela acima, o `docs/10-MIGRACAO-GPUI.md` e o `crates/ui` mudam juntos,
+    /// porque o shader é o mesmo arquivo nos dois apps.
+    #[test]
+    fn o_wgsl_declara_28_campos_para_os_46_que_o_rust_manda() {
+        let wgsl = campos_do_wgsl();
+
+        assert_eq!(wgsl.len(), 28, "o `struct Params` do WGSL mudou de tamanho");
+        assert_eq!(NOMES.len(), 46, "o `Ajustes` do Rust mudou de tamanho");
+
+        assert_eq!(
+            wgsl[..23],
+            NOMES[..23],
+            "até o campo 22 os dois lados batem — é o que faz o Básico e o HSL/cor funcionarem"
+        );
+        assert_eq!(
+            wgsl[23..],
+            [
+                "nr_luminance",
+                "nr_luminance",
+                "nr_color",
+                "sharpen_amount",
+                "sharpen_radius"
+            ],
+            "a partir do 23 o shader lê o campo do vizinho — e `nr_luminance` está declarado duas vezes"
+        );
+    }
+
+    /// 🚨 Só os 23 primeiros ajustes chegam à GPU. Os 18 últimos não chegam.
+    ///
+    /// A contraprova do teste acima, medida na imagem em vez de lida no arquivo:
+    /// mexer em cada um dos 46 campos, um por vez, e ver quais mudam algum pixel.
+    #[test]
+    fn os_ajustes_a_partir_do_campo_28_nao_mudam_nenhum_pixel() {
+        let processador = processador_pronto();
+        let entrada = amostra();
+        let neutro = revelar_e_colher(&processador, entrada.clone(), Ajustes::default());
+
+        for (i, nome) in NOMES.iter().enumerate().take(23) {
+            let saida = revelar_e_colher(&processador, entrada.clone(), com_campo(i, 60.0));
+            assert_ne!(
+                saida, neutro,
+                "`{nome}` (campo {i}) devia chegar ao shader e não mudou nada"
+            );
+        }
+
+        for (i, nome) in NOMES.iter().enumerate().skip(28) {
+            let saida = revelar_e_colher(&processador, entrada.clone(), com_campo(i, 60.0));
+            assert_eq!(
+                saida, neutro,
+                "`{nome}` (campo {i}) mudou a foto — o `struct Params` do WGSL cresceu?"
+            );
+        }
+    }
+
+    /// 🚨 O slider "HSL / matiz — Vermelho" **borra a foto**.
+    ///
+    /// É o campo 23, que o shader lê como `nr_luminance`. Um ajuste de matiz gira
+    /// a cor e não pode mexer no contraste entre vizinhos; redução de ruído faz
+    /// exatamente o contrário. O contraste local caindo é a assinatura de um
+    /// borrão, e nenhum giro de matiz produziria isso.
+    ///
+    /// Para quem usa o app, o sintoma é o pior tipo: o controle responde, a foto
+    /// muda, e o que mudou não tem nada a ver com o rótulo.
+    #[test]
+    fn o_matiz_do_vermelho_borra_a_foto_em_vez_de_girar_a_cor() {
+        let processador = processador_pronto();
+        let entrada = amostra();
+
+        let neutro = contraste_local(&revelar_e_colher(
+            &processador,
+            entrada.clone(),
+            Ajustes::default(),
+        ));
+        let com_matiz = contraste_local(&revelar_e_colher(
+            &processador,
+            entrada.clone(),
+            com_campo(23, 60.0),
+        ));
+
+        assert!(
+            com_matiz < neutro,
+            "o campo 23 devia borrar (é lido como `nr_luminance`): contraste local {com_matiz} vs {neutro} no neutro"
+        );
+    }
+
+    /// 🚨 Os 4 controles de Detalhe e os 3 de Lente não fazem **nada**.
+    ///
+    /// Sete sliders que o painel oferece, arrastam, mostram número — e a foto não
+    /// muda, porque os campos deles ficam além do que o `uniform` do shader
+    /// declara. Nitidez é testada com raio junto: raio sozinho nunca faria efeito,
+    /// e o teste passaria por engano.
+    #[test]
+    fn detalhe_e_lente_nao_chegam_ao_shader() {
+        let processador = processador_pronto();
+        let entrada = amostra();
+        let neutro = revelar_e_colher(&processador, entrada.clone(), Ajustes::default());
+
+        let casos: [(&str, &[(usize, f32)]); 5] = [
+            ("Detalhe — Ruído (luminância)", &[(42, 60.0)]),
+            ("Detalhe — Ruído (cor)", &[(43, 60.0)]),
+            ("Detalhe — Nitidez (com raio)", &[(44, 80.0), (45, 2.0)]),
+            ("Lente — Distorção", &[(39, 60.0)]),
+            ("Lente — Vinheta (com meio)", &[(40, 80.0), (41, 30.0)]),
+        ];
+
+        for (rotulo, campos) in casos {
+            let saida = revelar_e_colher(&processador, entrada.clone(), com_campos(campos));
+            assert_eq!(saida, neutro, "`{rotulo}` passou a fazer efeito");
+        }
+    }
+
+    /// O layout que vai para a GPU tem os 46 campos que o `crates/ui` manda.
+    ///
+    /// ⚠️ Este teste dizia "os 46 campos **que o WGSL declara**" — e o WGSL
+    /// declara 28. Ele nunca conferiu isso: `size_of` não sabe do shader. Era uma
+    /// afirmação escrita ao lado de um teste que não a mediaria nunca, e foi assim
+    /// que o desalinhamento sobreviveu à leitura de todo mundo. Quem confere o
+    /// outro lado é `o_wgsl_declara_28_campos_para_os_46_que_o_rust_manda`.
+    ///
+    /// O que ele confere de fato: que ninguém acrescentou ou tirou um campo aqui.
+    /// Campo a mais desloca **todos** os seguintes na leitura do shader, e o
+    /// sintoma é a saturação virando nitidez.
     #[test]
     fn o_layout_tem_46_campos_de_quatro_bytes() {
         assert_eq!(std::mem::size_of::<Ajustes>(), 46 * 4);

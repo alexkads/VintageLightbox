@@ -260,6 +260,18 @@ desde dez/2025.
 
 Não são erros de compilação; são features que a UI mostra como prontas e que não fecham o ciclo.
 
+0. 🚨 **O painel de revelação tem 18 sliders que não fazem nada, e 5 que fazem outra coisa.** O
+   `struct Params` do WGSL (`crates/ui/src/shaders/image_adjustments.wgsl`) declara **28** campos
+   para os **46** que `GpuEditParams` manda, e o `uniform` casa por posição. Do campo 23 em diante o
+   shader lê o do vizinho — "HSL / matiz — Vermelho" **borra a foto**, porque ali o shader espera
+   `nr_luminance`; amarelo e verde aplicam ruído de cor e nitidez. Do 28 em diante nada chega:
+   HSL/luminância inteiro, três matizes, os **4 controles de Detalhe** e os **3 de Lente**. Nada
+   falha: o buffer é maior que o mínimo do binding, então o wgpu ignora a sobra, e a duplicata de
+   `nr_luminance` no WGSL o naga aceita. Medido em 16/ago/2026 e preso por quatro testes em
+   `crates/ui-gpui/src/revelacao/processador.rs`; a tabela posição a posição está em
+   [docs/10-MIGRACAO-GPUI.md](10-MIGRACAO-GPUI.md), §"Fase 2".
+   ⚠️ **Consertar é decisão de dono, não de migração**: as fotos já reveladas têm `hsl_*_hue` gravado
+   no banco, e alinhar o shader muda a aparência delas retroativamente.
 1. 🚨 **A exportação ignora o crop.** `ImageExporterImpl::export` abre o arquivo original, aplica os
    ajustes tonais e grava — sem nenhuma referência a crop, rotação ou flip. O usuário corta a foto,
    vê o corte no viewer e nos thumbnails, exporta e recebe a imagem inteira.
