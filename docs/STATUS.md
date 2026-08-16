@@ -56,7 +56,7 @@ struct `PhotoEdits` continua sendo o conserto de verdade.
 | Métrica | Valor |
 |---------|-------|
 | `cargo check --workspace --all-targets` | ✅ **limpo** |
-| `cargo test --workspace` | ✅ **626 passando, 0 falhas, 3 ignorados** (16/ago) |
+| `cargo test --workspace` | ✅ **635 passando, 0 falhas, 3 ignorados** (16/ago) |
 | App | ✅ **sobe** — janela 1352×848, `GPU: Initialized successfully with Apple M2 Pro` |
 | Migrations SQLite no repositório | 15 (`001` … `015`) |
 | Crates | 6 (domain, use-cases, adapters, infrastructure, ui, **ui-gpui**) |
@@ -70,7 +70,7 @@ struct `PhotoEdits` continua sendo o conserto de verdade.
 | Adapters | 0 | ⚠️ nenhum teste escrito |
 | Infrastructure | 65 (34 unit + 31 integração em 7 arquivos) | ✅ passando (1 ignorado) |
 | UI (egui) | 146 (47 unit + 99 E2E `egui_kittest` em 18 arquivos) | ✅ passando (2 ignorados) |
-| UI (GPUI) | 100 (97 unit + 3 de integração com banco) | ✅ passando — fase 2 em andamento |
+| UI (GPUI) | 109 (106 unit + 3 de integração com banco) | ✅ passando — fase 2 em andamento |
 
 ---
 
@@ -273,6 +273,14 @@ Não são erros de compilação; são features que a UI mostra como prontas e qu
    [docs/10-MIGRACAO-GPUI.md](10-MIGRACAO-GPUI.md), §"Fase 2".
    ⚠️ **Consertar é decisão de dono, não de migração**: as fotos já reveladas têm `hsl_*_hue` gravado
    no banco, e alinhar o shader muda a aparência delas retroativamente.
+0.5. 🚨 **Os cinco presets de sistema estão numa escala que não é a do shader.** `ListPresetsUseCase`
+   constrói "Auto", "B&W", "Warm", "Cool" e "High Contrast" a cada listagem. O "B&W" pede
+   `saturation: -100.0`, mas a saturação do shader é um fator (`1.0 + saturation`): cinza é **-1.0**,
+   e -100 dá fator -99 — cor invertida e estourada, não preto e branco. "High Contrast" pede
+   `contrast: 50.0` numa faixa de 0 a 2; "Warm"/"Cool" pedem ±15 numa faixa de ±10; "Auto" é um
+   `exposure: 0.0` marcado como *Placeholder*. Medido na GPU em 16/ago/2026
+   (`o_preset_bw_do_legado_nao_da_preto_e_branco`, em `crates/ui-gpui`). Vale para os dois apps — os
+   presets vêm do mesmo use case.
 1. 🚨 **A exportação ignora o crop.** `ImageExporterImpl::export` abre o arquivo original, aplica os
    ajustes tonais e grava — sem nenhuma referência a crop, rotação ou flip. O usuário corta a foto,
    vê o corte no viewer e nos thumbnails, exporta e recebe a imagem inteira.

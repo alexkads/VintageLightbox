@@ -7,6 +7,7 @@
 use std::sync::Arc;
 
 use adapters::view_models::PhotoViewModel;
+use domain::entities::Preset;
 use gpui::{actions, div, prelude::*, px, Context, Entity, FocusHandle, SharedString, Window};
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::{ActiveTheme, Disableable, Selectable, Sizable};
@@ -14,6 +15,7 @@ use infrastructure::cache::preview_manager::PreviewManager;
 
 use crate::biblioteca::tela::Biblioteca;
 use crate::revelacao::persistencia::Gravador;
+use crate::revelacao::presets::GuardaDePresets;
 use crate::revelacao::tela::Revelacao;
 
 actions!(vintagelightbox, [VoltarParaBiblioteca, Desfazer, Refazer]);
@@ -62,11 +64,14 @@ impl Aplicativo {
         fotos: Vec<PhotoViewModel>,
         previews: Arc<PreviewManager>,
         gravador: Arc<dyn Gravador>,
+        guarda_de_presets: Arc<dyn GuardaDePresets>,
+        presets: Vec<Preset>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         let biblioteca = cx.new(|cx| Biblioteca::nova(fotos, previews.clone(), window, cx));
-        let revelacao = cx.new(|cx| Revelacao::nova(previews, gravador, window, cx));
+        let revelacao = cx
+            .new(|cx| Revelacao::nova(previews, gravador, guarda_de_presets, presets, window, cx));
 
         // 🚨 **`track_focus` rastreia; ele não dá foco.** Enquanto ninguém focou a
         // raiz, o caminho de foco fica vazio e **nenhuma ação de teclado dela é
@@ -263,6 +268,7 @@ mod testes {
     use tempfile::TempDir;
 
     use crate::revelacao::persistencia::mentira::GravadorDeMentira;
+    use crate::revelacao::presets::mentira::GuardaDeMentira;
 
     fn previews_descartaveis() -> (Arc<PreviewManager>, TempDir) {
         let dir = TempDir::new().expect("criar diretório temporário");
@@ -310,6 +316,8 @@ mod testes {
                     acervo(),
                     previews,
                     Arc::new(GravadorDeMentira::default()),
+                    Arc::new(GuardaDeMentira::default()),
+                    Vec::new(),
                     window,
                     cx,
                 )
@@ -340,6 +348,8 @@ mod testes {
                     acervo(),
                     previews,
                     Arc::new(GravadorDeMentira::default()),
+                    Arc::new(GuardaDeMentira::default()),
+                    Vec::new(),
                     window,
                     cx,
                 )
@@ -379,7 +389,17 @@ mod testes {
         let janela = cx.add_window({
             let previews = previews.clone();
             let gravador = gravador.clone();
-            |window, cx| Aplicativo::novo(acervo(), previews, gravador, window, cx)
+            |window, cx| {
+                Aplicativo::novo(
+                    acervo(),
+                    previews,
+                    gravador,
+                    Arc::new(GuardaDeMentira::default()),
+                    Vec::new(),
+                    window,
+                    cx,
+                )
+            }
         });
 
         janela
@@ -422,6 +442,8 @@ mod testes {
                     acervo(),
                     previews,
                     Arc::new(GravadorDeMentira::default()),
+                    Arc::new(GuardaDeMentira::default()),
+                    Vec::new(),
                     window,
                     cx,
                 )
@@ -474,6 +496,8 @@ mod testes {
                     acervo(),
                     previews,
                     Arc::new(GravadorDeMentira::default()),
+                    Arc::new(GuardaDeMentira::default()),
+                    Vec::new(),
                     window,
                     cx,
                 )
@@ -526,6 +550,8 @@ mod testes {
                     acervo(),
                     previews,
                     Arc::new(GravadorDeMentira::default()),
+                    Arc::new(GuardaDeMentira::default()),
+                    Vec::new(),
                     window,
                     cx,
                 )
@@ -574,6 +600,8 @@ mod testes {
                     acervo(),
                     previews,
                     Arc::new(GravadorDeMentira::default()),
+                    Arc::new(GuardaDeMentira::default()),
+                    Vec::new(),
                     window,
                     cx,
                 )

@@ -13,6 +13,7 @@ use infrastructure::paths::AppPaths;
 
 use ui_gpui::app::Aplicativo;
 use ui_gpui::revelacao::persistencia::{Gravador, GravadorDoBanco};
+use ui_gpui::revelacao::presets::{GuardaDePresets, GuardaDoBanco};
 use ui_gpui::tema;
 
 #[tokio::main]
@@ -53,6 +54,30 @@ async fn main() {
         .await
         .expect("ler as fotos do catálogo");
 
+    // Os presets, uma vez só: são cinco de sistema construídos no use case mais
+    // os do usuário na tabela `presets`. Carregar aqui, junto com as fotos, é o
+    // mesmo caminho do legado (`load_presets` no primeiro quadro) — e evita que a
+    // Revelação precise saber falar com o banco.
+    let presets_repo = Arc::new(infrastructure::SqlitePresetRepository::new(pool.clone()));
+    let controlador_de_presets = Arc::new(adapters::controllers::PresetController::new(
+        Arc::new(use_cases::presets::ListPresetsUseCase::new(
+            presets_repo.clone(),
+        )),
+        Arc::new(use_cases::presets::SavePresetUseCase::new(
+            presets_repo.clone(),
+        )),
+        Arc::new(use_cases::presets::DeletePresetUseCase::new(presets_repo)),
+    ));
+    let presets = controlador_de_presets
+        .list_presets()
+        .await
+        .unwrap_or_else(|erro| {
+            // Sem presets o app abre igual; com um `expect` aqui, um banco velho
+            // impediria de revelar qualquer foto.
+            eprintln!("⚠️ [Presets] não foi possível carregar: {erro}");
+            Vec::new()
+        });
+
     let previews = Arc::new(PreviewManager::new());
 
     // 🚨 O `Handle` é pego **aqui**, e não lá dentro. `Application::run` toma esta
@@ -63,6 +88,10 @@ async fn main() {
     // para as threads do tokio, que continuam vivas.
     let gravador: Arc<dyn Gravador> = Arc::new(GravadorDoBanco::novo(
         editor,
+        tokio::runtime::Handle::current(),
+    ));
+    let guarda_de_presets: Arc<dyn GuardaDePresets> = Arc::new(GuardaDoBanco::nova(
+        controlador_de_presets,
         tokio::runtime::Handle::current(),
     ));
 
@@ -90,6 +119,8 @@ async fn main() {
                         fotos.clone(),
                         previews.clone(),
                         gravador.clone(),
+                        guarda_de_presets.clone(),
+                        presets.clone(),
                         window,
                         cx,
                     )

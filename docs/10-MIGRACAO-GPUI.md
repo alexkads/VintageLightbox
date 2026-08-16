@@ -416,8 +416,8 @@ um lado tem. Há teste prendendo o número — **42 controles para 46 ajustes** 
 **matiz vai de -180 a 180**, o dobro das outras duas famílias de HSL, porque matiz é um círculo; e o
 **raio da nitidez começa em 0,5**, porque raio zero não tem pixel de vizinhança.
 
-Falta da fase: crop overlay e presets. A persistência dos ajustes, que o plano não listava e sem a
-qual nada disso se guarda, entrou logo abaixo; o undo/redo veio na sequência.
+Falta da fase: **o crop overlay**. A persistência dos ajustes, que o plano não listava e sem a qual
+nada disso se guarda, entrou logo abaixo; o undo/redo e os presets vieram na sequência.
 
 #### A foto abre com a revelação que ela já tinha ✅
 
@@ -551,6 +551,36 @@ tela**, e não só na abertura.
 
 🔑 A lição é a mesma da fase 1 (`544a0cb`): **teste que não exercita o caminho de verdade passa com o
 código quebrado.** Aqui foram dois commits inteiros afirmando um atalho que nunca respondeu.
+
+#### Presets ✅ — e o "B&W" do legado não deixa a foto em preto e branco
+
+A entidade, os cinco de sistema e a gravação já existiam nas camadas internas e ficaram intactas;
+[`presets.rs`](../crates/ui-gpui/src/revelacao/presets.rs) é só a ponte entre `PresetAdjustments` e
+`Ajustes`. Lista com os de sistema e os do usuário, clique aplica, e "+ Salvar como preset" abre um
+diálogo com o nome — como no legado, e sem o apagar, que **lá também não existe** (o menu de contexto
+dele só fecha o menu).
+
+⚠️ **Um preset move 15 dos 46 ajustes** — os 11 do Básico e os 4 da curva de tons. Campo `None` não é
+tocado, então aplicar "Warm" sobre uma foto com HSL trabalhado **não apaga o HSL**; é o comportamento
+do legado e tem teste. 🔑 É a mesma contagem de 15 do exportador, e não é coincidência: as duas listas
+foram escritas quando o app tinha só esses ajustes, e nenhuma cresceu junto com o shader.
+
+🚨 **E os presets de sistema estão numa escala que não é a do shader.** "B&W" pede
+`saturation: -100.0`. Mas a saturação do shader é um fator — `factor = 1.0 + saturation` —, então
+cinza é **-1.0**, que é por que o slider vai de -1 a 1. Com -100, o fator é -99: cada canal é jogado
+99 vezes para o lado **oposto** do cinza. Não é ausência de cor, é cor invertida e estourada. Medido
+na GPU, com os dois valores lado a lado, em `o_preset_bw_do_legado_nao_da_preto_e_branco`. "High
+Contrast" (`contrast: 50.0` numa faixa de 0 a 2) e "Warm"/"Cool" (`±15.0` numa faixa de ±10) têm o
+mesmo problema; "Auto" é um `exposure: 0.0` marcado como *Placeholder* e não faz nada.
+
+**Não consertado**, pela regra de sempre: os presets vêm do `ListPresetsUseCase`, os dois apps leem os
+mesmos valores, e mexer neles durante o porte misturaria "portei errado" com "estava errado". Fica o
+teste, que **falha no dia em que alguém arrumar** — e aí os dois lados mudam juntos.
+
+⚠️ **A dívida deste commit**: o preset recém-salvo aparece na lista com **id local**. O
+`SavePresetUseCase` cria o `Preset` lá dentro, com id próprio, e a porta é `fire-and-forget` como a de
+gravação — então até fechar o app o que se vê é um gêmeo com outro id. Nada depende do id hoje
+(apagar preset não existe em nenhum dos dois), mas é a primeira coisa a consertar quando depender.
 
 #### 🚨 O critério de saída não media o que a fase 2 constrói
 

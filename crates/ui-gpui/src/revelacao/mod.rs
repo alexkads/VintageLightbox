@@ -7,5 +7,6 @@
 pub mod controles;
 pub mod historico;
 pub mod persistencia;
+pub mod presets;
 pub mod processador;
 pub mod tela;

@@ -1003,6 +1003,61 @@ mod testes {
         );
     }
 
+    /// 🚨 O preset de sistema **"B&W" não deixa a foto em preto e branco**.
+    ///
+    /// `ListPresetsUseCase` constrói os cinco presets de sistema, e o "B&W" pede
+    /// `saturation: Some(-100.0)`. Mas a saturação do shader é um fator, não uma
+    /// porcentagem:
+    ///
+    /// ```wgsl
+    /// let factor = 1.0 + params.saturation;
+    /// r = lum2 + (r - lum2) * factor;
+    /// ```
+    ///
+    /// Cinza é `factor == 0`, ou seja **`-1.0`** — e é por isso que o slider de
+    /// saturação vai de -1 a 1 (`controles.rs`, lido de `dock_viewer.rs`). Com
+    /// `-100`, o fator é `-99`: cada canal é jogado 99 vezes para o **lado oposto**
+    /// do cinza. Não é ausência de cor, é cor invertida e estourada.
+    ///
+    /// Este teste mede os dois: o `-1.0` deixa os três canais iguais; o `-100.0`
+    /// não. Vale para os dois apps — o preset vem do mesmo use case.
+    #[test]
+    fn o_preset_bw_do_legado_nao_da_preto_e_branco() {
+        let processador = processador_pronto();
+        let entrada = amostra();
+
+        let cinza_de_verdade = revelar_e_colher(
+            &processador,
+            entrada.clone(),
+            Ajustes {
+                saturation: -1.0,
+                ..Default::default()
+            },
+        );
+        for pixel in cinza_de_verdade.chunks_exact(4) {
+            assert_eq!(
+                (pixel[0], pixel[1]),
+                (pixel[1], pixel[2]),
+                "saturação -1.0 é o fator zero: os três canais têm de virar o mesmo valor"
+            );
+        }
+
+        let como_o_preset_pede = revelar_e_colher(
+            &processador,
+            entrada,
+            Ajustes {
+                saturation: -100.0,
+                ..Default::default()
+            },
+        );
+        assert!(
+            como_o_preset_pede
+                .chunks_exact(4)
+                .any(|pixel| pixel[0] != pixel[1] || pixel[1] != pixel[2]),
+            "se isto passar a dar cinza, o shader ou o preset mudaram — e o defeito acabou"
+        );
+    }
+
     /// 🚨 Os 4 controles de Detalhe e os 3 de Lente não fazem **nada**.
     ///
     /// Sete sliders que o painel oferece, arrastam, mostram número — e a foto não

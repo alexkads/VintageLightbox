@@ -15,13 +15,16 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use adapters::view_models::PhotoViewModel;
+use domain::entities::Preset;
 use gpui::{
     div, img, prelude::*, px, App, Context, Entity, RenderImage, SharedString, Subscription, Task,
     Window,
 };
+use gpui_component::button::Button;
 use gpui_component::collapsible::Collapsible;
+use gpui_component::input::{Input, InputState};
 use gpui_component::slider::{Slider, SliderEvent, SliderState};
-use gpui_component::ActiveTheme;
+use gpui_component::{ActiveTheme, Sizable, WindowExt};
 use infrastructure::cache::preview_manager::PreviewManager;
 
 use crate::imagem::para_gpui;
@@ -29,6 +32,7 @@ use crate::imagem::para_gpui;
 use super::controles::{Definicao, Secao, CONTROLES};
 use super::historico::Historico;
 use super::persistencia::{self, Corte, Gravador};
+use super::presets::{self, GuardaDePresets};
 use super::processador::{Ajustes, Pedido, Processador};
 
 /// Largura do painel de ajustes.
@@ -78,6 +82,19 @@ pub struct Revelacao {
     /// enfileirar mais uma.
     _gravacao: Option<Task<()>>,
     controles: Vec<Controle>,
+    /// Os presets, carregados uma vez na abertura do app. Sistema e usuário
+    /// juntos, na ordem que o `ListPresetsUseCase` devolve.
+    presets: Vec<Preset>,
+    guarda_de_presets: Arc<dyn GuardaDePresets>,
+    /// O nome digitado no diálogo de salvar preset. Entidade própria, como a
+    /// busca da Biblioteca: o `InputState` guarda cursor, seleção e histórico de
+    /// edição do campo.
+    nome_do_preset: Entity<InputState>,
+    /// Se a lista de presets está aberta. Nasce **fechada**: são 5 de sistema
+    /// mais os do usuário empurrando os 42 controles para baixo, e o painel aqui
+    /// é uma coluna de 280px — no legado eles moram num dock separado, que esta
+    /// Revelação não tem.
+    presets_abertos: bool,
     /// Quais seções estão abertas. Um conjunto, e não um `bool` por seção:
     /// acrescentar seção nova não pode exigir lembrar de acrescentar campo.
     abertas: HashSet<Secao>,
@@ -121,6 +138,8 @@ impl Revelacao {
     pub fn nova(
         previews: Arc<PreviewManager>,
         gravador: Arc<dyn Gravador>,
+        guarda_de_presets: Arc<dyn GuardaDePresets>,
+        presets: Vec<Preset>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -163,6 +182,10 @@ impl Revelacao {
             pendente: false,
             _gravacao: None,
             controles,
+            guarda_de_presets,
+            nome_do_preset: cx.new(|cx| InputState::new(window, cx).placeholder("Nome do preset")),
+            presets,
+            presets_abertos: false,
             abertas: Secao::TODAS
                 .into_iter()
                 .filter(Secao::nasce_aberta)
@@ -227,12 +250,7 @@ impl Revelacao {
         // `set_value` **não emite** `Change` (ao contrário do `InputState` da
         // busca), então mover os 42 sliders aqui não vira 42 pedidos à GPU. Um só
         // é pedido, e só quando há o que aplicar.
-        for controle in &self.controles {
-            let valor = (controle.definicao.ler)(&self.ajustes);
-            controle
-                .estado
-                .update(cx, |estado, cx| estado.set_value(valor, window, cx));
-        }
+        self.espalhar_nos_sliders(window, cx);
 
         // No neutro o resultado é a própria origem, que já está desenhada — uma
         // volta inteira à GPU para receber o que se tem é latência sem
@@ -341,16 +359,69 @@ impl Revelacao {
         cx: &mut Context<Self>,
     ) {
         self.ajustes = ajustes;
+        self.espalhar_nos_sliders(window, cx);
+        self.pedir_revelacao(cx);
+        self.gravar();
+        cx.notify();
+    }
 
+    /// Leva os ajustes de agora para as 42 barras.
+    ///
+    /// 🚨 Só funciona sem virar 42 pedidos à GPU porque `SliderState::set_value`
+    /// **não emite** `Change` — o oposto do `InputState` da busca. É a assimetria
+    /// que `abrir_sem_edicao_nao_pede_nada_a_gpu` prende.
+    fn espalhar_nos_sliders(&self, window: &mut Window, cx: &mut Context<Self>) {
         for controle in &self.controles {
             let valor = (controle.definicao.ler)(&self.ajustes);
             controle
                 .estado
                 .update(cx, |estado, cx| estado.set_value(valor, window, cx));
         }
+    }
 
+    /// Aplica um preset: 15 dos 46 campos, de uma vez.
+    ///
+    /// É um gesto discreto, como o `Cmd+Z` — vira passo de histórico e vai para o
+    /// banco **na hora**, sem passar pela espera de 500 ms, que existe para juntar
+    /// os eventos de um arrasto.
+    pub fn aplicar_preset(&mut self, preset: &Preset, window: &mut Window, cx: &mut Context<Self>) {
+        // O que estiver a meio caminho fecha primeiro, pelo mesmo motivo do
+        // desfazer: senão a espera pendente grava por cima do preset.
+        self.gravar_o_que_estiver_pendente();
+
+        presets::aplicar(&mut self.ajustes, &preset.adjustments);
+        self.espalhar_nos_sliders(window, cx);
         self.pedir_revelacao(cx);
+        self.historico.registrar(self.ajustes);
         self.gravar();
+        cx.notify();
+    }
+
+    /// Guarda os ajustes de agora como preset do usuário.
+    ///
+    /// 🚨 **Nome vazio não salva.** O legado aceita — o diálogo dele grava o que
+    /// estiver no campo — e o resultado é uma linha sem rótulo na lista, que não
+    /// dá para distinguir nem para apagar (apagar preset não existe em nenhum dos
+    /// dois).
+    ///
+    /// ⚠️ **O preset que aparece na lista tem id local.** O `SavePresetUseCase`
+    /// cria o `Preset` lá dentro, com id próprio, e a porta é `fire-and-forget`
+    /// como a de gravação — então o que se vê até fechar o app é um gêmeo com
+    /// outro id. Nada depende do id hoje (apagar preset não foi portado, e o
+    /// legado também não o tem), mas é a primeira coisa a consertar quando
+    /// depender.
+    pub fn salvar_preset(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let nome = self.nome_do_preset.read(cx).value().trim().to_string();
+        if nome.is_empty() {
+            return;
+        }
+
+        let ajustes = presets::dos_ajustes(&self.ajustes);
+        self.guarda_de_presets.salvar(nome.clone(), ajustes.clone());
+        self.presets.push(Preset::user(nome, ajustes));
+
+        self.nome_do_preset
+            .update(cx, |estado, cx| estado.set_value("", window, cx));
         cx.notify();
     }
 
@@ -517,12 +588,135 @@ impl Revelacao {
                         .child("Sem GPU disponível — os ajustes não são aplicados"),
                 )
             })
+            .child(self.presets(cx))
             .children(
                 Secao::TODAS
                     .into_iter()
                     .map(|secao| self.secao(secao, cx))
                     .collect::<Vec<_>>(),
             )
+    }
+
+    /// A lista de presets: os de sistema e os do usuário, como no legado.
+    ///
+    /// ⚠️ **Fica no mesmo painel dos ajustes, e no legado é um dock à parte.** A
+    /// Revelação nova não tem docking (fase 4), e inventar um painel esquerdo só
+    /// para isto seria decidir agora um layout que a fase 4 vai refazer. O que
+    /// importa para a paridade — quais presets existem, o que cada um aplica — é
+    /// igual.
+    fn presets(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let (sistema, usuario) = presets::separar(&self.presets);
+
+        let mut lista = Vec::new();
+        lista.push(self.rotulo_de_grupo("Sistema", cx).into_any_element());
+        lista.extend(sistema.iter().map(|p| self.botao_de_preset(p, cx)));
+        lista.push(self.rotulo_de_grupo("Meus", cx).into_any_element());
+        if usuario.is_empty() {
+            lista.push(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Nenhum preset salvo")
+                    .into_any_element(),
+            );
+        } else {
+            lista.extend(usuario.iter().map(|p| self.botao_de_preset(p, cx)));
+        }
+
+        Collapsible::new()
+            .open(self.presets_abertos)
+            .child(
+                div()
+                    .id("secao-presets")
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .py(px(4.))
+                    .cursor_pointer()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Presets")
+                    .child(if self.presets_abertos { "▾" } else { "▸" })
+                    .on_click(cx.listener(|tela, _ev, _window, cx| {
+                        tela.presets_abertos = !tela.presets_abertos;
+                        cx.notify();
+                    })),
+            )
+            .content(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(2.))
+                    .pb(px(8.))
+                    .children(lista)
+                    .child(div().pt(px(6.)).child(self.salvar_como_preset(cx))),
+            )
+    }
+
+    /// O botão que abre o diálogo de salvar preset.
+    ///
+    /// ⚠️ **O diálogo é do `gpui-component`, e depende do `Root`** estar na
+    /// primeira camada da janela (`main.rs`) — sem ele, `open_dialog` derruba o
+    /// app num `expect` em vez de abrir o diálogo.
+    fn salvar_como_preset(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        Button::new("salvar-preset")
+            .label("+ Salvar como preset")
+            .xsmall()
+            .w_full()
+            .on_click(cx.listener(|tela, _ev, window, cx| {
+                // O campo começa vazio a cada abertura: o nome do preset anterior
+                // sugerido como padrão convida a salvar dois com o mesmo nome, e
+                // nada no banco impede.
+                tela.nome_do_preset
+                    .update(cx, |estado, cx| estado.set_value("", window, cx));
+
+                let campo = tela.nome_do_preset.clone();
+                let esta = cx.entity();
+
+                window.open_dialog(cx, move |dialogo, _window, _cx| {
+                    let campo = campo.clone();
+                    let esta = esta.clone();
+
+                    dialogo
+                        .title("Salvar como preset")
+                        .confirm()
+                        .child(Input::new(&campo))
+                        .on_ok(move |_ev, window, cx| {
+                            esta.update(cx, |tela, cx| tela.salvar_preset(window, cx));
+                            true
+                        })
+                });
+            }))
+    }
+
+    fn rotulo_de_grupo(&self, texto: &'static str, cx: &App) -> impl IntoElement {
+        div()
+            .pt(px(4.))
+            .text_xs()
+            .text_color(cx.theme().muted_foreground)
+            .child(texto)
+    }
+
+    /// 🔑 O id do elemento é o **id do preset**, e não a posição na lista.
+    ///
+    /// Dois presets com o mesmo nome são possíveis (nada impede salvar "Retrato"
+    /// duas vezes), e id por posição faria o GPUI confundir o estado de dois
+    /// botões quando a lista mudasse de tamanho — salvar um preset novo trocaria
+    /// qual deles parece pressionado.
+    fn botao_de_preset(&self, preset: &Preset, cx: &mut Context<Self>) -> gpui::AnyElement {
+        let id = SharedString::from(format!("preset-{}", preset.id));
+        let nome = SharedString::from(preset.name.clone());
+        let escolhido = preset.clone();
+
+        Button::new(id)
+            .label(nome)
+            .xsmall()
+            .w_full()
+            .justify_start()
+            .on_click(cx.listener(move |tela, _ev, window, cx| {
+                tela.aplicar_preset(&escolhido, window, cx);
+            }))
+            .into_any_element()
     }
 
     /// Uma seção sanfonada: o cabeçalho sempre, os controles só quando aberta.
@@ -614,7 +808,10 @@ mod testes {
     use image::{DynamicImage, Rgba, RgbaImage};
     use tempfile::TempDir;
 
+    use domain::entities::preset::PresetAdjustments;
+
     use super::super::persistencia::mentira::GravadorDeMentira;
+    use super::super::presets::mentira::GuardaDeMentira;
 
     fn previews_descartaveis() -> (Arc<PreviewManager>, TempDir) {
         let dir = TempDir::new().expect("criar diretório temporário");
@@ -653,8 +850,35 @@ mod testes {
         previews: Arc<PreviewManager>,
         gravador: Arc<GravadorDeMentira>,
     ) -> gpui::WindowHandle<Revelacao> {
+        com_presets(cx, previews, gravador, Vec::new())
+    }
+
+    fn com_presets(
+        cx: &mut TestAppContext,
+        previews: Arc<PreviewManager>,
+        gravador: Arc<GravadorDeMentira>,
+        presets: Vec<Preset>,
+    ) -> gpui::WindowHandle<Revelacao> {
+        com_guarda(
+            cx,
+            previews,
+            gravador,
+            Arc::new(GuardaDeMentira::default()),
+            presets,
+        )
+    }
+
+    fn com_guarda(
+        cx: &mut TestAppContext,
+        previews: Arc<PreviewManager>,
+        gravador: Arc<GravadorDeMentira>,
+        guarda: Arc<GuardaDeMentira>,
+        presets: Vec<Preset>,
+    ) -> gpui::WindowHandle<Revelacao> {
         cx.update(gpui_component::init);
-        cx.add_window(move |window, cx| Revelacao::nova(previews, gravador, window, cx))
+        cx.add_window(move |window, cx| {
+            Revelacao::nova(previews, gravador, guarda, presets, window, cx)
+        })
     }
 
     /// Passa da espera do salvamento, sem esperar de verdade.
@@ -1229,6 +1453,187 @@ mod testes {
                 assert!(!tela.pode_refazer(), "chegou ao fim do histórico");
             })
             .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 Clicar num preset move os sliders, a foto, o histórico e o banco.
+    ///
+    /// Os quatro juntos: um preset que mudasse `ajustes` sem mover as barras
+    /// deixaria o painel mentindo; sem passo de histórico, o `Cmd+Z` pularia por
+    /// cima dele; sem gravação, ele sumiria na próxima abertura.
+    #[gpui::test]
+    fn aplicar_preset_move_os_sliders_o_historico_e_o_banco(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_cinza())
+            .expect("gravar preview");
+
+        let gravador = Arc::new(GravadorDeMentira::default());
+        let preset = Preset::system(
+            "Warm",
+            PresetAdjustments {
+                temperature: Some(5.0),
+                ..Default::default()
+            },
+        );
+        let janela = com_presets(cx, previews, gravador.clone(), vec![preset.clone()]);
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("retrato.jpg"), window, cx);
+                tela.aplicar_preset(&preset, window, cx);
+
+                assert_eq!(tela.ajustes().temperature, 5.0);
+                assert_eq!(
+                    tela.controles[2].estado.read(cx).value().start(),
+                    5.0,
+                    "o terceiro controle é a temperatura — a barra tem de acompanhar"
+                );
+                assert!(tela.pode_desfazer(), "o preset é um passo de histórico");
+
+                tela.desfazer(window, cx);
+                assert_eq!(tela.ajustes().temperature, 0.0);
+            })
+            .expect("a janela deve estar aberta");
+
+        let gravado = gravador.gravado();
+        assert_eq!(gravado.len(), 2, "o preset e o desfazer");
+        assert_eq!(gravado[0].1.temperature, 5.0);
+    }
+
+    /// 🚨 O preset não zera o que ele não menciona.
+    ///
+    /// `PresetAdjustments` tem 15 dos 46 campos. Um preset aplicado sobre uma
+    /// foto com HSL trabalhado não pode apagar o HSL — é o comportamento do
+    /// legado (`apply_preset` escreve campo a campo, só o que é `Some`), e o
+    /// contrário destruiria trabalho sem aviso.
+    #[gpui::test]
+    fn o_preset_nao_apaga_os_31_campos_que_ele_nao_tem(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_cinza())
+            .expect("gravar preview");
+
+        let preset = Preset::system(
+            "Cool",
+            PresetAdjustments {
+                temperature: Some(-5.0),
+                ..Default::default()
+            },
+        );
+        let janela = com_presets(
+            cx,
+            previews,
+            Arc::new(GravadorDeMentira::default()),
+            vec![preset.clone()],
+        );
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(
+                    PhotoViewModel {
+                        edit_hsl_blue_lum: Some(-30.0),
+                        ..foto("retrato.jpg")
+                    },
+                    window,
+                    cx,
+                );
+                tela.aplicar_preset(&preset, window, cx);
+
+                assert_eq!(tela.ajustes().temperature, -5.0);
+                assert_eq!(
+                    tela.ajustes().hsl_blue_lum,
+                    -30.0,
+                    "o HSL da foto não está no preset — e não pode ser apagado por ele"
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 Salvar um preset guarda os 15 campos e o mostra na lista.
+    ///
+    /// Os dois: se ele fosse só guardado, quem acabou de salvar não veria nada
+    /// acontecer e salvaria de novo.
+    #[gpui::test]
+    fn salvar_preset_guarda_os_ajustes_e_aparece_na_lista(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_cinza())
+            .expect("gravar preview");
+
+        let guarda = Arc::new(GuardaDeMentira::default());
+        let janela = com_guarda(
+            cx,
+            previews,
+            Arc::new(GravadorDeMentira::default()),
+            guarda.clone(),
+            Vec::new(),
+        );
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("retrato.jpg"), window, cx);
+            })
+            .expect("a janela deve estar aberta");
+
+        arrastar(cx, &janela, 0, 1.5);
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.nome_do_preset.update(cx, |estado, cx| {
+                    estado.set_value("Retrato claro", window, cx)
+                });
+                tela.salvar_preset(window, cx);
+
+                assert_eq!(
+                    tela.presets
+                        .iter()
+                        .map(|p| p.name.as_str())
+                        .collect::<Vec<_>>(),
+                    ["Retrato claro"],
+                    "o preset novo tem de aparecer na lista sem esperar reabrir o app"
+                );
+            })
+            .expect("a janela deve estar aberta");
+
+        let salvos = guarda.salvos();
+        assert_eq!(salvos.len(), 1);
+        assert_eq!(salvos[0].0, "Retrato claro");
+        assert_eq!(salvos[0].1.exposure, Some(1.5), "guarda o que está na tela");
+        assert_eq!(
+            salvos[0].1.contrast,
+            Some(1.0),
+            "os 15 vão inteiros, e não só os que diferem do neutro"
+        );
+    }
+
+    /// 🚨 Nome vazio (ou só espaços) não salva.
+    ///
+    /// O legado aceita, e o resultado é uma linha sem rótulo na lista — que não
+    /// dá para distinguir das outras nem para apagar, porque apagar preset não
+    /// existe em nenhum dos dois apps.
+    #[gpui::test]
+    fn preset_sem_nome_nao_e_salvo(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        let guarda = Arc::new(GuardaDeMentira::default());
+        let janela = com_guarda(
+            cx,
+            previews,
+            Arc::new(GravadorDeMentira::default()),
+            guarda.clone(),
+            Vec::new(),
+        );
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.nome_do_preset
+                    .update(cx, |estado, cx| estado.set_value("   ", window, cx));
+                tela.salvar_preset(window, cx);
+
+                assert!(tela.presets.is_empty());
+            })
+            .expect("a janela deve estar aberta");
+
+        assert!(guarda.salvos().is_empty());
     }
 
     /// 🚨 O arrasto da foto anterior não vaza para a próxima **pelo banco**.
