@@ -19,7 +19,9 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::Duration;
 
-use gpui::{div, prelude::*, px, Context, SharedString, Task, Window};
+use gpui::{
+    actions, div, prelude::*, px, ClickEvent, Context, FocusHandle, SharedString, Task, Window,
+};
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::checkbox::Checkbox;
 use gpui_component::{ActiveTheme, Disableable, Selectable, Sizable};
@@ -29,6 +31,28 @@ use domain::value_objects::{ImportMode, OrganizationStrategy, RenamePattern};
 use super::destino;
 use super::estado::{aplicar, Estado, Ordem, Recado, Seguimento};
 use super::explorador::{Andamento, Explorador, Importador, SeletorDePasta};
+
+actions!(
+    importacao,
+    [MarcarTudo, AlternarFoco, DescerFoco, SubirFoco, Confirmar]
+);
+
+/// O contexto de teclado do modal.
+///
+/// 🔑 **Nomeado, e não global.** As teclas daqui — `Enter`, `espaço`, `⌘A` — são
+/// as mais disputadas que existem: sem contexto, elas roubariam a busca da
+/// Biblioteca desenhada atrás e o `Enter` de qualquer campo de texto futuro.
+const CONTEXTO: &str = "Importacao";
+
+pub fn init(cx: &mut gpui::App) {
+    cx.bind_keys([
+        gpui::KeyBinding::new("cmd-a", MarcarTudo, Some(CONTEXTO)),
+        gpui::KeyBinding::new("space", AlternarFoco, Some(CONTEXTO)),
+        gpui::KeyBinding::new("down", DescerFoco, Some(CONTEXTO)),
+        gpui::KeyBinding::new("up", SubirFoco, Some(CONTEXTO)),
+        gpui::KeyBinding::new("enter", Confirmar, Some(CONTEXTO)),
+    ]);
+}
 
 /// De quanto em quanto a tela pergunta se chegou recado.
 ///
@@ -53,6 +77,8 @@ pub struct Importacao {
     /// Se há um seletor de pasta aberto. É o que segura o laço de colheita
     /// enquanto não há leitura nenhuma em curso.
     esperando_escolha: bool,
+    /// O foco do modal — sem ele, nenhuma das cinco teclas chega.
+    foco: FocusHandle,
     _colheita: Option<Task<()>>,
 }
 
@@ -70,6 +96,7 @@ impl Importacao {
         explorador: Arc<dyn Explorador>,
         importador: Arc<dyn Importador>,
         seletor: Arc<dyn SeletorDePasta>,
+        cx: &mut Context<Self>,
     ) -> Self {
         Self {
             estado: Estado::default(),
@@ -81,7 +108,52 @@ impl Importacao {
             progresso: None,
             colhendo: false,
             esperando_escolha: false,
+            foco: cx.focus_handle(),
             _colheita: None,
+        }
+    }
+
+    /// Põe o foco no modal. Chamado quando ele aparece — `track_focus` rastreia,
+    /// não concede, e foi o que deixou o `Esc` da Revelação morto por dois
+    /// commits.
+    pub fn focar(&self, window: &mut Window) {
+        window.focus(&self.foco);
+    }
+
+    fn ao_marcar_tudo(&mut self, _acao: &MarcarTudo, _window: &mut Window, cx: &mut Context<Self>) {
+        let tudo = self.estado.marcados() == self.estado.candidatos.len();
+        self.estado.marcar_todos(!tudo);
+        cx.notify();
+    }
+
+    fn ao_alternar_foco(
+        &mut self,
+        _acao: &AlternarFoco,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.estado.alternar_o_foco();
+        cx.notify();
+    }
+
+    fn ao_descer(&mut self, _acao: &DescerFoco, _window: &mut Window, cx: &mut Context<Self>) {
+        self.estado.mover_foco(1);
+        cx.notify();
+    }
+
+    fn ao_subir(&mut self, _acao: &SubirFoco, _window: &mut Window, cx: &mut Context<Self>) {
+        self.estado.mover_foco(-1);
+        cx.notify();
+    }
+
+    /// `Enter` importa — mas só quando há o que importar e nada em curso.
+    ///
+    /// ⚠️ A guarda é a mesma do botão, e precisa ser repetida porque tecla não
+    /// passa por botão desligado: sem ela, `Enter` durante a importação começaria
+    /// a segunda cópia do mesmo lote.
+    fn ao_confirmar(&mut self, _acao: &Confirmar, _window: &mut Window, cx: &mut Context<Self>) {
+        if !self.importando() {
+            self.importar(cx);
         }
     }
 
@@ -527,6 +599,7 @@ impl Importacao {
                 let candidato = &self.estado.candidatos[indice];
                 let duplicado = candidato.duplicado;
                 let marcado = candidato.marcado;
+                let em_foco = self.estado.focado == Some(indice);
 
                 div()
                     .id(SharedString::from(format!("candidato-{indice}")))
@@ -539,13 +612,23 @@ impl Importacao {
                     .when(duplicado, |linha| {
                         linha.text_color(cx.theme().muted_foreground)
                     })
+                    .when(em_foco, |linha| linha.bg(cx.theme().accent))
+                    // 🚨 O clique fica na **linha**, e não só na caixinha: é o
+                    // `ClickEvent` que traz os modificadores, e sem eles não há
+                    // Shift+clique. Um alvo de 14px também é pequeno demais para
+                    // marcar 300 fotos.
+                    .on_click(cx.listener(move |tela, evento: &ClickEvent, _window, cx| {
+                        if evento.modifiers().shift {
+                            let marcar = !tela.estado.candidatos[indice].marcado;
+                            tela.estado.marcar_ate(indice, marcar);
+                        } else {
+                            tela.estado.alternar(indice);
+                        }
+                        cx.notify();
+                    }))
                     .child(
                         Checkbox::new(SharedString::from(format!("marca-{indice}")))
-                            .checked(marcado)
-                            .on_click(cx.listener(move |tela, _marcado: &bool, _window, cx| {
-                                tela.estado.alternar(indice);
-                                cx.notify();
-                            })),
+                            .checked(marcado),
                     )
                     .child(
                         div()
@@ -627,6 +710,13 @@ impl Render for Importacao {
         let lendo = self.estado.varrendo || self.estado.descrevendo;
 
         div()
+            .key_context(CONTEXTO)
+            .track_focus(&self.foco)
+            .on_action(cx.listener(Self::ao_marcar_tudo))
+            .on_action(cx.listener(Self::ao_alternar_foco))
+            .on_action(cx.listener(Self::ao_descer))
+            .on_action(cx.listener(Self::ao_subir))
+            .on_action(cx.listener(Self::ao_confirmar))
             .flex()
             .flex_col()
             .size_full()
@@ -716,7 +806,7 @@ mod testes {
         seletor: Arc<SeletorDeMentira>,
     ) -> gpui::WindowHandle<Importacao> {
         cx.update(gpui_component::init);
-        cx.add_window(move |_window, _cx| Importacao::nova(explorador, importador, seletor))
+        cx.add_window(move |_window, cx| Importacao::nova(explorador, importador, seletor, cx))
     }
 
     /// Deixa a colheita rodar até drenar o que já chegou.
@@ -866,6 +956,135 @@ mod testes {
                 tela.abrir_origem("/b".into(), cx);
                 assert!(tela.estado.candidatos.is_empty(), "a grade some na hora");
                 assert_eq!(tela.estado.origem.as_deref(), Some("/b"));
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 As cinco teclas do modal chegam mesmo.
+    ///
+    /// `Enter`, `espaço`, `⌘A` e as setas são as teclas mais disputadas que
+    /// existem, e uma ligação que não casa **não falha** — ela simplesmente não
+    /// faz nada. Foi assim que o `Esc` da Revelação ficou dois commits morto, e
+    /// por isso este teste aperta as teclas de verdade.
+    #[gpui::test]
+    fn as_teclas_do_modal_chegam(cx: &mut TestAppContext) {
+        let explorador = Arc::new(ExploradorDeMentira::responde(
+            "/cartao",
+            &["/cartao/a.NEF", "/cartao/b.NEF", "/cartao/c.NEF"],
+        ));
+        let importador = Arc::new(ImportadorDeMentira::default());
+        cx.update(gpui_component::init);
+        cx.update(init);
+
+        let janela = cx.add_window({
+            let explorador = explorador.clone();
+            let importador = importador.clone();
+            move |_window, cx| {
+                Importacao::nova(
+                    explorador,
+                    importador,
+                    Arc::new(SeletorDeMentira::default()),
+                    cx,
+                )
+            }
+        });
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.focar(window);
+                tela.abrir_origem("/cartao".into(), cx);
+            })
+            .expect("a janela deve estar aberta");
+        colher(cx, &janela);
+
+        let mut visual = gpui::VisualTestContext::from_window(janela.into(), cx);
+
+        // ⌘A com tudo marcado desmarca tudo.
+        visual.simulate_keystrokes("cmd-a");
+        janela
+            .update(cx, |tela, _window, _cx| {
+                assert_eq!(tela.estado.marcados(), 0, "⌘A com tudo marcado desmarca");
+            })
+            .expect("a janela deve estar aberta");
+
+        // Duas descidas e um espaço marcam a segunda célula.
+        visual.simulate_keystrokes("down down space");
+        janela
+            .update(cx, |tela, _window, _cx| {
+                assert_eq!(tela.estado.focado, Some(1), "a seta moveu o foco");
+                assert!(tela.estado.candidatos[1].marcado, "o espaço marcou");
+                assert_eq!(tela.estado.marcados(), 1);
+            })
+            .expect("a janela deve estar aberta");
+
+        // E o Enter importa o que está marcado.
+        visual.simulate_keystrokes("enter");
+        assert_eq!(
+            importador.importados()[0].0,
+            ["/cartao/b.NEF"],
+            "o Enter importa exatamente o que a grade mostra marcado"
+        );
+    }
+
+    /// ⚠️ `Enter` durante a importação não começa a segunda cópia do mesmo lote.
+    ///
+    /// A guarda do botão não vale para a tecla — tecla não passa por botão
+    /// desligado, e sem repetir a checagem o `Enter` copiaria tudo de novo.
+    #[gpui::test]
+    fn enter_durante_a_importacao_nao_repete_o_lote(cx: &mut TestAppContext) {
+        let explorador = Arc::new(ExploradorDeMentira::responde("/cartao", &["/cartao/a.NEF"]));
+        let importador = Arc::new(ImportadorDeMentira::default());
+        let janela = janela(cx, explorador, importador.clone());
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.abrir_origem("/cartao".into(), cx);
+            })
+            .expect("a janela deve estar aberta");
+        colher(cx, &janela);
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.importar(cx);
+                // A importação está em curso: o Enter tem de ser ignorado.
+                tela.ao_confirmar(&Confirmar, window, cx);
+            })
+            .expect("a janela deve estar aberta");
+
+        assert_eq!(importador.importados().len(), 1, "um lote, e não dois");
+    }
+
+    /// 🚨 Shift+clique marca o intervalo a partir da âncora.
+    #[gpui::test]
+    fn shift_clique_marca_o_intervalo(cx: &mut TestAppContext) {
+        let explorador = Arc::new(ExploradorDeMentira::responde(
+            "/cartao",
+            &[
+                "/cartao/a.NEF",
+                "/cartao/b.NEF",
+                "/cartao/c.NEF",
+                "/cartao/d.NEF",
+            ],
+        ));
+        let janela = janela(cx, explorador, Arc::new(ImportadorDeMentira::default()));
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.abrir_origem("/cartao".into(), cx);
+            })
+            .expect("a janela deve estar aberta");
+        colher(cx, &janela);
+
+        janela
+            .update(cx, |tela, _window, _cx| {
+                tela.estado.marcar_todos(false);
+                // Clique comum na primeira: vira âncora.
+                tela.estado.alternar(0);
+                // Shift+clique na terceira: marca o intervalo.
+                tela.estado.marcar_ate(2, true);
+
+                assert_eq!(tela.estado.marcados(), 3);
+                assert!(!tela.estado.candidatos[3].marcado, "a quarta fica fora");
             })
             .expect("a janela deve estar aberta");
     }

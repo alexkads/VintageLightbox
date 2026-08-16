@@ -131,8 +131,9 @@ impl Aplicativo {
         Self {
             biblioteca,
             revelacao,
-            importacao: cx
-                .new(|_| Importacao::nova(portas.explorador, portas.importador, portas.seletor)),
+            importacao: cx.new(|cx| {
+                Importacao::nova(portas.explorador, portas.importador, portas.seletor, cx)
+            }),
             importando: false,
             tela: Tela::Biblioteca,
             foco,
@@ -186,8 +187,12 @@ impl Aplicativo {
     }
 
     /// Abre o modal de importação sobre a Biblioteca.
-    pub fn importar(&mut self, cx: &mut Context<Self>) {
+    pub fn importar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.importando = true;
+        // 🚨 O foco vai para o modal: as cinco teclas dele (`Enter`, `espaço`,
+        // `⌘A`, setas) só chegam a quem está focado, e `track_focus` rastreia sem
+        // conceder. Foi o que deixou o `Esc` da Revelação morto por dois commits.
+        self.importacao.read(cx).focar(window);
         cx.notify();
     }
 
@@ -195,8 +200,11 @@ impl Aplicativo {
     ///
     /// 🔑 Quem fecha por engano depois de marcar 300 fotos de um cartão não pode
     /// perder a marcação. A listagem só se perde ao escolher outra origem.
-    pub fn fechar_importacao(&mut self, cx: &mut Context<Self>) {
+    pub fn fechar_importacao(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.importando = false;
+        // E o foco volta para a raiz, senão `Esc` e `Cmd+Z` param de funcionar
+        // depois de a importação fechar — o mesmo buraco do campo de busca.
+        window.focus(&self.foco);
         cx.notify();
     }
 
@@ -323,8 +331,8 @@ impl Aplicativo {
                 Button::new("nav-importar")
                     .label("Importar")
                     .xsmall()
-                    .on_click(cx.listener(|este, _ev, _window, cx| {
-                        este.importar(cx);
+                    .on_click(cx.listener(|este, _ev, window, cx| {
+                        este.importar(window, cx);
                     })),
             )
     }
@@ -367,8 +375,8 @@ impl Aplicativo {
                                 Button::new("fechar-importacao")
                                     .label("Fechar")
                                     .xsmall()
-                                    .on_click(cx.listener(|este, _ev, _window, cx| {
-                                        este.fechar_importacao(cx);
+                                    .on_click(cx.listener(|este, _ev, window, cx| {
+                                        este.fechar_importacao(window, cx);
                                     })),
                             ),
                     )
@@ -817,8 +825,8 @@ mod testes {
         });
 
         janela
-            .update(cx, |app, _window, cx| {
-                app.importar(cx);
+            .update(cx, |app, window, cx| {
+                app.importar(window, cx);
                 assert!(app.importando());
 
                 app.importacao
@@ -834,16 +842,16 @@ mod testes {
         }
 
         janela
-            .update(cx, |app, _window, cx| {
+            .update(cx, |app, window, cx| {
                 app.importacao.update(cx, |tela, _cx| {
                     tela.estado.alternar(0);
                     assert_eq!(tela.estado.marcados(), 1);
                 });
 
-                app.fechar_importacao(cx);
+                app.fechar_importacao(window, cx);
                 assert!(!app.importando());
 
-                app.importar(cx);
+                app.importar(window, cx);
                 app.importacao.update(cx, |tela, _cx| {
                     assert_eq!(tela.estado.candidatos.len(), 2, "a listagem ficou");
                     assert_eq!(tela.estado.marcados(), 1, "e a marcação também");

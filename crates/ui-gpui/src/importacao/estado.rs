@@ -272,6 +272,41 @@ impl Estado {
         }
     }
 
+    /// Move o foco pela grade, em passos de célula.
+    ///
+    /// 🔑 **Anda sobre os visíveis**, e não sobre o acervo: com "só novos"
+    /// ligado, um passo que caísse numa duplicata escondida pareceria uma seta
+    /// que não fez nada — e duas setas seguidas pulariam duas células.
+    ///
+    /// Sem foco, o primeiro passo pega a primeira célula (ou a última, se for
+    /// para trás): é o que faz a seta funcionar logo depois de a grade aparecer,
+    /// sem exigir um clique antes.
+    pub fn mover_foco(&mut self, passo: isize) {
+        let visiveis = self.visiveis();
+        if visiveis.is_empty() {
+            self.focado = None;
+            return;
+        }
+
+        let posicao = match self
+            .focado
+            .and_then(|f| visiveis.iter().position(|i| *i == f))
+        {
+            Some(atual) => (atual as isize + passo).clamp(0, visiveis.len() as isize - 1) as usize,
+            None if passo >= 0 => 0,
+            None => visiveis.len() - 1,
+        };
+
+        self.focado = Some(visiveis[posicao]);
+    }
+
+    /// Troca a marca da célula em foco — a barra de espaço.
+    pub fn alternar_o_foco(&mut self) {
+        if let Some(indice) = self.focado {
+            self.alternar(indice);
+        }
+    }
+
     /// Esquece a listagem ao trocar de origem.
     pub fn esquecer_candidatos(&mut self) {
         self.candidatos.clear();
@@ -701,6 +736,72 @@ mod testes {
 
         assert!(!estado.varrendo && !estado.descrevendo && !estado.conferindo_duplicatas);
         assert_eq!(estado.aviso.as_deref(), Some("cartão removido"));
+    }
+
+    /// 🚨 As setas andam sobre o que está **visível**.
+    ///
+    /// Com "só novos" ligado, um passo que caísse numa duplicata escondida
+    /// pareceria uma seta que não fez nada — e a seguinte pularia duas células.
+    #[test]
+    fn as_setas_pulam_o_que_esta_escondido() {
+        let mut estado = com_arquivos("/cartao", &["a.NEF", "b.NEF", "c.NEF"]);
+        estado.opcoes.skip_duplicates = false;
+        aplicar(
+            &mut estado,
+            Recado::Duplicados(vec!["/cartao/b.NEF".into()]),
+        );
+        estado.so_novos = true;
+
+        estado.mover_foco(1);
+        assert_eq!(estado.focado, Some(0), "sem foco, a primeira visível");
+
+        estado.mover_foco(1);
+        assert_eq!(estado.focado, Some(2), "pulou a b.NEF escondida");
+
+        estado.mover_foco(1);
+        assert_eq!(estado.focado, Some(2), "e para no fim, sem dar a volta");
+    }
+
+    /// Para trás sem foco pega a última.
+    #[test]
+    fn a_seta_para_tras_sem_foco_pega_a_ultima() {
+        let mut estado = com_arquivos("/cartao", &["a.NEF", "b.NEF"]);
+
+        estado.mover_foco(-1);
+        assert_eq!(estado.focado, Some(1));
+
+        estado.mover_foco(-1);
+        assert_eq!(estado.focado, Some(0));
+        estado.mover_foco(-1);
+        assert_eq!(estado.focado, Some(0), "para no começo");
+    }
+
+    /// Grade vazia não deixa foco pendurado.
+    #[test]
+    fn grade_vazia_nao_tem_foco() {
+        let mut estado = Estado {
+            focado: Some(3),
+            ..Default::default()
+        };
+
+        estado.mover_foco(1);
+
+        assert_eq!(
+            estado.focado, None,
+            "um índice de uma listagem que não existe"
+        );
+    }
+
+    /// A barra de espaço troca a marca de quem está em foco.
+    #[test]
+    fn o_espaco_alterna_a_celula_em_foco() {
+        let mut estado = com_arquivos("/cartao", &["a.NEF", "b.NEF"]);
+        estado.mover_foco(1);
+
+        estado.alternar_o_foco();
+
+        assert!(!estado.candidatos[0].marcado);
+        assert!(estado.candidatos[1].marcado, "a outra não se mexe");
     }
 
     /// Trocar de origem esquece foco e âncora junto com a lista.

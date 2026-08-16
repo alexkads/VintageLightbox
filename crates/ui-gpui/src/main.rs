@@ -155,6 +155,9 @@ async fn main() {
         tema::aplicar(cx);
         // As teclas da raiz — hoje só o `Esc` que sai da Revelação.
         ui_gpui::app::init(cx);
+        // As cinco teclas do modal de importação — em contexto próprio, para não
+        // roubarem Enter e espaço de quem estiver atrás.
+        ui_gpui::importacao::tela::init(cx);
 
         let bounds = Bounds::centered(None, size(px(1100.), px(720.)), cx);
         cx.open_window(
