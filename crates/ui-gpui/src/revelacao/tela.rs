@@ -27,6 +27,7 @@ use infrastructure::cache::preview_manager::PreviewManager;
 use crate::imagem::para_gpui;
 
 use super::controles::{Definicao, Secao, CONTROLES};
+use super::historico::Historico;
 use super::persistencia::{self, Corte, Gravador};
 use super::processador::{Ajustes, Pedido, Processador};
 
@@ -64,6 +65,10 @@ pub struct Revelacao {
     /// A Revelação nova ainda não sabe cortar; se ela gravasse `None` aqui,
     /// mexer num slider apagaria o enquadramento feito no app de egui.
     corte: Corte,
+    /// Os passos de desfazer, **por foto**: trocar de foto começa um histórico
+    /// novo. Um `Cmd+Z` que atravessasse fotos aplicaria a revelação de uma na
+    /// outra — que é o mesmo defeito que a cópia da seleção já impede.
+    historico: Historico,
     /// Se há ajuste que ainda não foi gravado. Um `bool`, e não "a tarefa existe":
     /// a tarefa continua existindo depois de terminar, e trocar de foto gravaria
     /// de novo o que já estava no banco.
@@ -154,6 +159,7 @@ impl Revelacao {
             aberta: None,
             ajustes: Ajustes::default(),
             corte: Corte::default(),
+            historico: Historico::novo(Ajustes::default()),
             pendente: false,
             _gravacao: None,
             controles,
@@ -205,6 +211,11 @@ impl Revelacao {
         // mostraria o arquivo cru de uma foto que já foi revelada.
         self.ajustes = persistencia::da_foto(&foto);
         self.corte = persistencia::corte_da_foto(&foto);
+        // Histórico novo, começando no que está gravado: o passo zero é o estado
+        // da abertura, e é o que faz o **primeiro** `Cmd+Z` ter para onde voltar.
+        // No legado não tem — lá o histórico começa depois da primeira mudança, e
+        // a primeira coisa que se faz numa foto não tem volta.
+        self.historico = Historico::novo(self.ajustes);
         self.aguardando = None;
 
         self.aberta = Some(Aberta {
@@ -264,21 +275,91 @@ impl Revelacao {
         }));
     }
 
-    /// Grava agora, se houver o que gravar.
+    /// Fecha o gesto: vira um passo no histórico e vai para o banco.
     ///
     /// Chamada de três lugares, e cada um fecha uma porta por onde o trabalho
     /// sairia: o fim da espera, a troca de foto e a saída da Revelação.
+    ///
+    /// 🔑 **É aqui que o "um `Cmd+Z` por gesto" acontece.** O legado empurra um
+    /// snapshot por quadro em que algo mudou, então um arrasto vira ~30 passos —
+    /// e, com o teto de 20, o resto do histórico já foi embora. Pior: o número de
+    /// passos de lá depende da taxa de quadros do monitor.
     pub fn gravar_o_que_estiver_pendente(&mut self) {
         if !self.pendente {
             return;
         }
+        self.pendente = false;
+        self.historico.registrar(self.ajustes);
+        self.gravar();
+    }
+
+    /// Manda o estado de agora para o banco, sem passar pelo histórico.
+    fn gravar(&self) {
         let Some(aberta) = self.aberta.as_ref() else {
             return;
         };
-
-        self.pendente = false;
         self.gravador
             .gravar(aberta.foto.id.clone(), self.ajustes, self.corte);
+    }
+
+    /// Volta um passo. `Cmd+Z`.
+    pub fn desfazer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // 🚨 O gesto em curso **fecha antes**. Sem isto, arrastar um slider e
+        // apertar `Cmd+Z` dentro dos 500 ms desfaria o passo *anterior* e deixaria
+        // o arrasto de agora pendente — que gravaria logo depois, por cima do que
+        // acabou de ser desfeito. O `Cmd+Z` pareceria não ter funcionado.
+        self.gravar_o_que_estiver_pendente();
+
+        if let Some(ajustes) = self.historico.desfazer() {
+            self.aplicar_do_historico(ajustes, window, cx);
+        }
+    }
+
+    /// Avança um passo. `Cmd+Shift+Z`.
+    pub fn refazer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.gravar_o_que_estiver_pendente();
+
+        if let Some(ajustes) = self.historico.refazer() {
+            self.aplicar_do_historico(ajustes, window, cx);
+        }
+    }
+
+    /// O estado que veio do histórico vira tela, foto e linha no banco.
+    ///
+    /// ⚠️ **Grava na hora, e não depois de 500 ms.** A espera existe para juntar
+    /// os dezenas de eventos de um arrasto; `Cmd+Z` é um gesto discreto, e adiá-lo
+    /// só criaria uma janela para perder o desfazer. O legado grava por outro
+    /// caminho — o autosave dele nota a diferença no quadro seguinte —, mas grava.
+    ///
+    /// 🔑 **Não registra passo novo no histórico**: desfazer é andar nele, não
+    /// escrever nele. Registrar aqui faria o `Cmd+Z` empilhar um passo igual ao
+    /// que acabou de sair, e o `Cmd+Shift+Z` nunca alcançaria nada.
+    fn aplicar_do_historico(
+        &mut self,
+        ajustes: Ajustes,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.ajustes = ajustes;
+
+        for controle in &self.controles {
+            let valor = (controle.definicao.ler)(&self.ajustes);
+            controle
+                .estado
+                .update(cx, |estado, cx| estado.set_value(valor, window, cx));
+        }
+
+        self.pedir_revelacao(cx);
+        self.gravar();
+        cx.notify();
+    }
+
+    pub fn pode_desfazer(&self) -> bool {
+        self.historico.pode_desfazer()
+    }
+
+    pub fn pode_refazer(&self) -> bool {
+        self.historico.pode_refazer()
     }
 
     /// Move um controle sem passar pelo slider, para os testes da raiz.
@@ -945,6 +1026,209 @@ mod testes {
 
         passar_a_espera(cx);
         assert!(gravador.gravado().is_empty());
+    }
+
+    /// 🚨 `Cmd+Z` devolve os sliders, a foto e o banco ao passo anterior.
+    ///
+    /// Os três juntos, e não só o número: um desfazer que mexesse em `ajustes` e
+    /// deixasse a barra onde estava daria um painel mentindo sobre a foto, e um
+    /// que não gravasse deixaria o banco com o estado desfeito — que volta na
+    /// próxima abertura, como se o `Cmd+Z` não tivesse acontecido.
+    #[gpui::test]
+    fn desfazer_volta_o_slider_a_foto_e_o_banco(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_cinza())
+            .expect("gravar preview");
+
+        let gravador = Arc::new(GravadorDeMentira::default());
+        let janela = com_gravador(cx, previews, gravador.clone());
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("retrato.jpg"), window, cx);
+            })
+            .expect("a janela deve estar aberta");
+
+        arrastar(cx, &janela, 0, 1.5);
+        passar_a_espera(cx);
+
+        janela
+            .update(cx, |tela, window, cx| {
+                assert!(tela.pode_desfazer(), "há um gesto para desfazer");
+
+                tela.desfazer(window, cx);
+
+                assert_eq!(tela.ajustes().exposure, 0.0);
+                assert_eq!(
+                    tela.controles[0].estado.read(cx).value().start(),
+                    0.0,
+                    "o slider volta junto"
+                );
+                assert!(tela.pode_refazer());
+                assert!(!tela.pode_desfazer(), "voltou ao estado da abertura");
+            })
+            .expect("a janela deve estar aberta");
+
+        let gravado = gravador.gravado();
+        assert_eq!(gravado.len(), 2, "o arrasto e o desfazer");
+        assert_eq!(
+            gravado[1].1.exposure, 0.0,
+            "desfazer tem de chegar ao banco — senão volta na próxima abertura"
+        );
+    }
+
+    /// 🚨 Um arrasto inteiro é **um** `Cmd+Z`.
+    ///
+    /// É a diferença de propósito em relação ao legado, que empurra um snapshot
+    /// por quadro em que algo mudou: lá, um arrasto de meio segundo vira ~30
+    /// passos e o `Cmd+Z` desfaz um milímetro por vez — com o teto de 20, o resto
+    /// do histórico já foi embora. E o número de passos de lá depende da taxa de
+    /// quadros do monitor.
+    #[gpui::test]
+    fn um_arrasto_inteiro_e_um_passo_so_de_desfazer(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_cinza())
+            .expect("gravar preview");
+
+        let janela = janela(cx, previews);
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("retrato.jpg"), window, cx);
+            })
+            .expect("a janela deve estar aberta");
+
+        for valor in [0.2, 0.4, 0.6, 0.8, 1.0] {
+            arrastar(cx, &janela, 0, valor);
+        }
+        passar_a_espera(cx);
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.desfazer(window, cx);
+                assert_eq!(
+                    tela.ajustes().exposure,
+                    0.0,
+                    "um Cmd+Z desfaz o arrasto inteiro, e não o último milímetro"
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 `Cmd+Z` no meio da espera desfaz o gesto de agora, e não o anterior.
+    ///
+    /// Sem fechar o gesto em curso antes de andar no histórico, o `Cmd+Z`
+    /// desfaria o passo **anterior** e deixaria o arrasto de agora pendente — que
+    /// gravaria 500 ms depois, por cima do que acabou de ser desfeito. O sintoma é
+    /// o pior: o `Cmd+Z` parece funcionar e depois se desfaz sozinho.
+    #[gpui::test]
+    fn desfazer_no_meio_da_espera_fecha_o_gesto_primeiro(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_cinza())
+            .expect("gravar preview");
+
+        let gravador = Arc::new(GravadorDeMentira::default());
+        let janela = com_gravador(cx, previews, gravador.clone());
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("retrato.jpg"), window, cx);
+            })
+            .expect("a janela deve estar aberta");
+
+        arrastar(cx, &janela, 0, 1.0);
+        passar_a_espera(cx);
+        // Segundo gesto, e o Cmd+Z vem **antes** de a espera terminar.
+        arrastar(cx, &janela, 0, 2.0);
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.desfazer(window, cx);
+                assert_eq!(
+                    tela.ajustes().exposure,
+                    1.0,
+                    "desfez o gesto de agora (2.0), voltando ao anterior"
+                );
+            })
+            .expect("a janela deve estar aberta");
+
+        // E a espera que ficou para trás não pode ressuscitar o 2.0.
+        passar_a_espera(cx);
+        let gravado = gravador.gravado();
+        assert_eq!(
+            gravado.last().map(|g| g.1.exposure),
+            Some(1.0),
+            "a última gravação é a do desfazer"
+        );
+    }
+
+    /// 🚨 O histórico é por foto.
+    ///
+    /// Um `Cmd+Z` que atravessasse fotos aplicaria a revelação de uma na outra —
+    /// o mesmo defeito que a cópia da seleção já impede na outra ponta.
+    #[gpui::test]
+    fn trocar_de_foto_comeca_um_historico_novo(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        for id in ["id-a.jpg", "id-b.jpg"] {
+            previews.save_preview(id, &foto_cinza()).expect("gravar");
+        }
+
+        let janela = janela(cx, previews);
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("a.jpg"), window, cx);
+            })
+            .expect("a janela deve estar aberta");
+
+        arrastar(cx, &janela, 0, 1.5);
+        passar_a_espera(cx);
+
+        janela
+            .update(cx, |tela, window, cx| {
+                assert!(tela.pode_desfazer());
+
+                tela.abrir(foto("b.jpg"), window, cx);
+                assert!(
+                    !tela.pode_desfazer(),
+                    "o arrasto na foto a não pode ser desfeito estando na b"
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🔑 Desfazer e refazer **não** empilham passos novos.
+    ///
+    /// Andar no histórico não é escrever nele. Se o desfazer registrasse, o
+    /// `Cmd+Shift+Z` nunca alcançaria nada — sempre haveria um passo novo igual ao
+    /// que acabou de sair.
+    #[gpui::test]
+    fn refazer_alcanca_o_que_o_desfazer_deixou(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_cinza())
+            .expect("gravar preview");
+
+        let janela = janela(cx, previews);
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("retrato.jpg"), window, cx);
+            })
+            .expect("a janela deve estar aberta");
+
+        arrastar(cx, &janela, 0, 1.5);
+        passar_a_espera(cx);
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.desfazer(window, cx);
+                assert_eq!(tela.ajustes().exposure, 0.0);
+
+                tela.refazer(window, cx);
+                assert_eq!(tela.ajustes().exposure, 1.5);
+                assert_eq!(tela.controles[0].estado.read(cx).value().start(), 1.5);
+                assert!(!tela.pode_refazer(), "chegou ao fim do histórico");
+            })
+            .expect("a janela deve estar aberta");
     }
 
     /// 🚨 O arrasto da foto anterior não vaza para a próxima **pelo banco**.

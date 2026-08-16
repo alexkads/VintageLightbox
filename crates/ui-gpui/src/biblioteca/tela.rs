@@ -168,6 +168,18 @@ impl Biblioteca {
         self.selecionada.map(|i| self.fotos[i].clone())
     }
 
+    /// Põe o foco no campo de busca, para os testes da raiz.
+    ///
+    /// Existe por causa de um defeito real: quem busca uma foto deixa o foco no
+    /// campo, e o campo some da tela ao entrar na Revelação — o caminho de foco
+    /// fica apontando um elemento que não é mais renderizado, e as teclas da raiz
+    /// param de chegar.
+    #[cfg(test)]
+    pub fn focar_busca(&self, window: &mut Window, cx: &mut gpui::App) {
+        use gpui::Focusable;
+        window.focus(&self.busca.read(cx).focus_handle(cx));
+    }
+
     /// Seleciona por índice **no acervo**.
     pub fn selecionar(&mut self, no_acervo: Option<usize>, cx: &mut Context<Self>) {
         self.selecionada = no_acervo;

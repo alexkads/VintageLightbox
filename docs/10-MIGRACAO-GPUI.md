@@ -416,8 +416,8 @@ um lado tem. Há teste prendendo o número — **42 controles para 46 ajustes** 
 **matiz vai de -180 a 180**, o dobro das outras duas famílias de HSL, porque matiz é um círculo; e o
 **raio da nitidez começa em 0,5**, porque raio zero não tem pixel de vizinhança.
 
-Falta da fase: crop overlay, undo/redo e presets — nenhum deles é slider. A persistência dos ajustes,
-que o plano não listava e sem a qual nada disso se guarda, entrou logo abaixo.
+Falta da fase: crop overlay e presets. A persistência dos ajustes, que o plano não listava e sem a
+qual nada disso se guarda, entrou logo abaixo; o undo/redo veio na sequência.
 
 #### A foto abre com a revelação que ela já tinha ✅
 
@@ -506,6 +506,51 @@ testes com **banco de verdade** ([`tests/gravacao_no_banco.rs`](../crates/ui-gpu
 3. 🔑 **a contraprova**: sem reenviar o corte, ele **é** apagado. Sem ela, o teste 2 poderia estar
    passando porque o use case mescla — e a precaução seria adorno em vez de a única coisa que separa
    o enquadramento de sumir.
+
+#### Desfazer e refazer ✅ — `Cmd+Z`, com duas diferenças assumidas
+
+[`historico.rs`](../crates/ui-gpui/src/revelacao/historico.rs): uma pilha de `Ajustes` inteiros (46
+`f32`, 184 bytes por passo, 3,6 KB cheia), teto de 20 como no legado, e o futuro morrendo quando se
+edita depois de desfazer. As teclas são as de lá: `Cmd+Z` e `Cmd+Shift+Z`.
+
+Duas coisas **não** são iguais ao legado, e as duas são decisão:
+
+**1. Um passo por gesto, e não por quadro.** O legado empurra um snapshot a cada quadro do `update`
+em que algum valor difere do anterior: um arrasto de meio segundo vira ~30 passos, e com o teto de 20
+o `Cmd+Z` de lá desfaz um milímetro por vez com o resto do histórico já descartado. 🔑 **E o número
+de passos depende da taxa de quadros** — a 120fps ele grava o dobro. Comportamento que muda com o
+monitor não é paridade conferível. Aqui o passo é registrado no fim do gesto, o mesmo instante da
+gravação.
+
+**2. A primeira edição é desfazível.** Lá, `push_edit_snapshot` só roda quando algo mudou, então o
+primeiro snapshot já é o estado **depois** da mudança — e `undo` faz `if index > 0`. A primeira coisa
+que se faz numa foto no app de egui **não tem volta**. Aqui o estado da abertura é o passo zero.
+
+⚠️ **O corte ainda não entra no histórico**, porque a Revelação nova não sabe cortar. Quando souber,
+entra junto — e vale saber o que se encontra do outro lado: o `EditSnapshot` do legado **tem** o campo
+`crop_settings` e o preenche, mas nem `undo` nem `redo` o leem de volta. É pior do que não guardar,
+porque quem lê o struct conclui que funciona. (O STATUS dizia que o campo não existia; existe, e é
+ignorado.)
+
+#### 🚨 E o `Esc` da Revelação nunca funcionou
+
+Descoberto ao escrever o primeiro teste que aperta uma tecla de verdade
+(`VisualTestContext::simulate_keystrokes`) em vez de chamar o método. **`Cmd+Z` não chegava — e o
+`Esc` também não**, desde o commit que o trouxe (`91a80dc`, dado por pronto com um teste que chamava
+`voltar_para_biblioteca` direto).
+
+A causa é de uma linha: **`track_focus` rastreia o foco, não o concede.** Sem ninguém focar a raiz, o
+caminho de foco fica vazio e nenhuma ação de teclado dela é alcançada. Tecla que não casa não falha —
+ela não faz nada, e a suspeita cai na funcionalidade, não na ligação.
+
+E há uma segunda porta pelo mesmo buraco, que virou teste próprio: **quem digita na busca deixa o
+foco no campo**, e o campo para de ser renderizado ao entrar na Revelação. O caminho de foco passa a
+apontar um elemento fora da tela, e as teclas somem — "buscar uma foto antes de revelar desliga o
+`Cmd+Z`" é uma relação que ninguém adivinharia. Por isso o foco volta para a raiz **a cada troca de
+tela**, e não só na abertura.
+
+🔑 A lição é a mesma da fase 1 (`544a0cb`): **teste que não exercita o caminho de verdade passa com o
+código quebrado.** Aqui foram dois commits inteiros afirmando um atalho que nunca respondeu.
 
 #### 🚨 O critério de saída não media o que a fase 2 constrói
 

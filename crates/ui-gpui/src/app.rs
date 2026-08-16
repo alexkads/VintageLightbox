@@ -16,7 +16,7 @@ use crate::biblioteca::tela::Biblioteca;
 use crate::revelacao::persistencia::Gravador;
 use crate::revelacao::tela::Revelacao;
 
-actions!(vintagelightbox, [VoltarParaBiblioteca]);
+actions!(vintagelightbox, [VoltarParaBiblioteca, Desfazer, Refazer]);
 
 /// O contexto de teclado da raiz.
 ///
@@ -27,11 +27,18 @@ actions!(vintagelightbox, [VoltarParaBiblioteca]);
 const CONTEXTO: &str = "Aplicativo";
 
 pub fn init(cx: &mut gpui::App) {
-    cx.bind_keys([gpui::KeyBinding::new(
-        "escape",
-        VoltarParaBiblioteca,
-        Some(CONTEXTO),
-    )]);
+    cx.bind_keys([
+        gpui::KeyBinding::new("escape", VoltarParaBiblioteca, Some(CONTEXTO)),
+        // As mesmas teclas do legado (`keyboard.rs`): `Cmd+Z` e `Cmd+Shift+Z`.
+        //
+        // ⚠️ **A ordem importa.** O GPUI casa a ligação mais específica primeiro,
+        // mas as duas são declaradas aqui juntas de propósito: separá-las em
+        // chamadas diferentes deixaria fácil alguém acrescentar um `cmd-z` depois
+        // do `cmd-shift-z` e engolir o refazer — que é o tipo de coisa que só
+        // aparece quando alguém tenta refazer.
+        gpui::KeyBinding::new("cmd-shift-z", Refazer, Some(CONTEXTO)),
+        gpui::KeyBinding::new("cmd-z", Desfazer, Some(CONTEXTO)),
+    ]);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,11 +68,25 @@ impl Aplicativo {
         let biblioteca = cx.new(|cx| Biblioteca::nova(fotos, previews.clone(), window, cx));
         let revelacao = cx.new(|cx| Revelacao::nova(previews, gravador, window, cx));
 
+        // 🚨 **`track_focus` rastreia; ele não dá foco.** Enquanto ninguém focou a
+        // raiz, o caminho de foco fica vazio e **nenhuma ação de teclado dela é
+        // alcançada** — o `Esc` da Revelação nunca funcionou, e o commit que o
+        // trouxe deu por pronto porque o teste chamava `voltar_para_biblioteca`
+        // direto, nunca a tecla. Tecla que não casa não falha: ela não faz nada.
+        //
+        // ⚠️ **Nenhum teste exige esta linha aqui**, e é de propósito: as teclas
+        // da raiz só valem dentro da Revelação, e `revelar` refoca. Ela fica
+        // porque a primeira tecla que a **Biblioteca** ganhar (as setas da grade,
+        // no legado) nasceria morta sem foco desde a abertura — e o sintoma seria
+        // idêntico ao que acabou de custar dois commits para aparecer.
+        let foco = cx.focus_handle();
+        window.focus(&foco);
+
         Self {
             biblioteca,
             revelacao,
             tela: Tela::Biblioteca,
-            foco: cx.focus_handle(),
+            foco,
         }
     }
 
@@ -90,6 +111,13 @@ impl Aplicativo {
         self.revelacao
             .update(cx, |tela, cx| tela.abrir(foto, window, cx));
         self.tela = Tela::Revelacao;
+        // 🚨 O foco volta para a raiz a cada troca de tela, e não só na abertura.
+        // Quem usou o campo de busca deixou o foco **nele** — e ele para de ser
+        // renderizado ao entrar na Revelação. O caminho de foco fica apontando um
+        // elemento que não está mais na tela, e as teclas da raiz somem: buscar
+        // uma foto antes de revelar desligaria o `Cmd+Z`, sem nenhuma pista da
+        // relação entre as duas coisas.
+        window.focus(&self.foco);
         cx.notify();
     }
 
@@ -100,24 +128,50 @@ impl Aplicativo {
     /// olha a Biblioteca não tem como saber que a última coisa que fez não foi
     /// guardada. É a terceira porta — as outras duas são a própria espera e a
     /// troca de foto.
-    pub fn voltar_para_biblioteca(&mut self, cx: &mut Context<Self>) {
+    pub fn voltar_para_biblioteca(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.revelacao
             .update(cx, |tela, _cx| tela.gravar_o_que_estiver_pendente());
         self.tela = Tela::Biblioteca;
+        window.focus(&self.foco);
         cx.notify();
+    }
+
+    /// `Cmd+Z` e `Cmd+Shift+Z` só existem dentro da Revelação.
+    ///
+    /// 🔑 As ações moram no contexto da raiz, e não no da Revelação, porque a
+    /// Revelação **não tem foco próprio** — a raiz é quem carrega o
+    /// `FocusHandle`. Quando ela ganhar um (o crop overlay vai precisar), as duas
+    /// ligações mudam de contexto junto e esta guarda some.
+    ///
+    /// ⚠️ Na Biblioteca elas não fazem nada, e é decisão: `Cmd+Z` ali seria
+    /// "desfazer a última nota/sinalizador", que o legado não tem. Fazer com que
+    /// desfizesse a revelação de uma foto que nem está na tela seria pior do que
+    /// não fazer nada.
+    fn ao_desfazer(&mut self, _acao: &Desfazer, window: &mut Window, cx: &mut Context<Self>) {
+        if self.tela == Tela::Revelacao {
+            self.revelacao
+                .update(cx, |tela, cx| tela.desfazer(window, cx));
+        }
+    }
+
+    fn ao_refazer(&mut self, _acao: &Refazer, window: &mut Window, cx: &mut Context<Self>) {
+        if self.tela == Tela::Revelacao {
+            self.revelacao
+                .update(cx, |tela, cx| tela.refazer(window, cx));
+        }
     }
 
     fn ao_voltar(
         &mut self,
         _acao: &VoltarParaBiblioteca,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         // Só volta se há de onde voltar. Sem esta guarda, `Esc` na Biblioteca
         // seria uma tecla que consome o evento e não faz nada — e o próximo
         // atalho que quisesse `Esc` ali nasceria quebrado.
         if self.tela == Tela::Revelacao {
-            self.voltar_para_biblioteca(cx);
+            self.voltar_para_biblioteca(window, cx);
         }
     }
 
@@ -148,8 +202,8 @@ impl Aplicativo {
                     .xsmall()
                     .when(!na_revelacao, |b| b.primary())
                     .selected(!na_revelacao)
-                    .on_click(cx.listener(|este, _ev, _window, cx| {
-                        este.voltar_para_biblioteca(cx);
+                    .on_click(cx.listener(|este, _ev, window, cx| {
+                        este.voltar_para_biblioteca(window, cx);
                     })),
             )
             .child(
@@ -180,6 +234,8 @@ impl Render for Aplicativo {
             .key_context(CONTEXTO)
             .track_focus(&self.foco)
             .on_action(cx.listener(Self::ao_voltar))
+            .on_action(cx.listener(Self::ao_desfazer))
+            .on_action(cx.listener(Self::ao_refazer))
             .flex()
             .flex_col()
             .size_full()
@@ -336,7 +392,7 @@ mod testes {
                 app.revelacao.update(cx, |tela, cx| {
                     tela.aplicar_para_teste(0, 0.9, cx);
                 });
-                app.voltar_para_biblioteca(cx);
+                app.voltar_para_biblioteca(window, cx);
             })
             .expect("a janela deve estar aberta");
 
@@ -344,6 +400,161 @@ mod testes {
         assert_eq!(gravado.len(), 1, "o ajuste tinha de ser gravado na saída");
         assert_eq!(gravado[0].0, "id-retrato.jpg");
         assert_eq!(gravado[0].1.exposure, 0.9);
+    }
+
+    /// 🚨 A tecla `Esc` sai mesmo da Revelação.
+    ///
+    /// O commit que trouxe a Revelação deu isto como pronto, e o teste de lá
+    /// chamava `voltar_para_biblioteca` direto — nunca a tecla.
+    #[gpui::test]
+    fn esc_sai_mesmo_da_revelacao(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_vermelha())
+            .expect("gravar preview");
+        cx.update(gpui_component::init);
+        cx.update(init);
+
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            |window, cx| {
+                Aplicativo::novo(
+                    acervo(),
+                    previews,
+                    Arc::new(GravadorDeMentira::default()),
+                    window,
+                    cx,
+                )
+            }
+        });
+
+        janela
+            .update(cx, |app, window, cx| {
+                app.biblioteca
+                    .update(cx, |tela, cx| tela.selecionar(Some(1), cx));
+                app.revelar(window, cx);
+                assert_eq!(app.tela(), Tela::Revelacao);
+            })
+            .expect("a janela deve estar aberta");
+
+        let mut visual = gpui::VisualTestContext::from_window(janela.into(), cx);
+        visual.simulate_keystrokes("escape");
+
+        janela
+            .update(cx, |app, _window, _cx| {
+                assert_eq!(
+                    app.tela(),
+                    Tela::Biblioteca,
+                    "o Esc tem de sair da Revelação"
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 Buscar uma foto antes de revelar **não** desliga o `Cmd+Z`.
+    ///
+    /// O campo de busca fica com o foco de quem digitou nele, e ele para de ser
+    /// renderizado ao entrar na Revelação: o caminho de foco passa a apontar um
+    /// elemento que não está na tela, e nenhuma tecla da raiz chega. Nada falha —
+    /// as teclas só param de funcionar, e a relação com "eu tinha buscado antes"
+    /// é invisível.
+    #[gpui::test]
+    fn buscar_antes_de_revelar_nao_desliga_as_teclas(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_vermelha())
+            .expect("gravar preview");
+        cx.update(gpui_component::init);
+        cx.update(init);
+
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            |window, cx| {
+                Aplicativo::novo(
+                    acervo(),
+                    previews,
+                    Arc::new(GravadorDeMentira::default()),
+                    window,
+                    cx,
+                )
+            }
+        });
+
+        janela
+            .update(cx, |app, window, cx| {
+                app.biblioteca.update(cx, |tela, cx| {
+                    tela.selecionar(Some(1), cx);
+                    tela.focar_busca(window, cx);
+                });
+                app.revelar(window, cx);
+            })
+            .expect("a janela deve estar aberta");
+
+        let mut visual = gpui::VisualTestContext::from_window(janela.into(), cx);
+        visual.simulate_keystrokes("escape");
+
+        janela
+            .update(cx, |app, _window, _cx| {
+                assert_eq!(
+                    app.tela(),
+                    Tela::Biblioteca,
+                    "o foco ficou no campo de busca e as teclas da raiz sumiram"
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 A tecla `Cmd+Z` chega mesmo à Revelação.
+    ///
+    /// Não é o `desfazer` da tela que este teste mede — esse já tem os dele. É a
+    /// ligação: ação registrada, contexto certo, foco no lugar. Um `KeyBinding`
+    /// que não casa **não falha**: a tecla simplesmente não faz nada, e a
+    /// suspeita cai na funcionalidade, não na ligação.
+    #[gpui::test]
+    fn cmd_z_chega_a_revelacao(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_vermelha())
+            .expect("gravar preview");
+        cx.update(gpui_component::init);
+        cx.update(init);
+
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            |window, cx| {
+                Aplicativo::novo(
+                    acervo(),
+                    previews,
+                    Arc::new(GravadorDeMentira::default()),
+                    window,
+                    cx,
+                )
+            }
+        });
+
+        janela
+            .update(cx, |app, window, cx| {
+                app.biblioteca
+                    .update(cx, |tela, cx| tela.selecionar(Some(1), cx));
+                app.revelar(window, cx);
+                app.revelacao.update(cx, |tela, cx| {
+                    tela.aplicar_para_teste(0, 1.5, cx);
+                });
+            })
+            .expect("a janela deve estar aberta");
+
+        let mut visual = gpui::VisualTestContext::from_window(janela.into(), cx);
+        visual.simulate_keystrokes("cmd-z");
+
+        janela
+            .update(cx, |app, _window, cx| {
+                assert_eq!(
+                    app.revelacao.read(cx).ajustes().exposure,
+                    0.0,
+                    "o Cmd+Z tem de chegar à Revelação"
+                );
+            })
+            .expect("a janela deve estar aberta");
     }
 
     /// 🚨 Trocar de foto na grade **não** troca a foto em revelação.
@@ -375,7 +586,7 @@ mod testes {
                     .update(cx, |tela, cx| tela.selecionar(Some(1), cx));
                 app.revelar(window, cx);
 
-                app.voltar_para_biblioteca(cx);
+                app.voltar_para_biblioteca(window, cx);
                 app.biblioteca
                     .update(cx, |tela, cx| tela.selecionar(Some(0), cx));
 

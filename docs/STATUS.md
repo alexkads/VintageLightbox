@@ -56,7 +56,7 @@ struct `PhotoEdits` continua sendo o conserto de verdade.
 | Métrica | Valor |
 |---------|-------|
 | `cargo check --workspace --all-targets` | ✅ **limpo** |
-| `cargo test --workspace` | ✅ **612 passando, 0 falhas, 3 ignorados** (16/ago) |
+| `cargo test --workspace` | ✅ **626 passando, 0 falhas, 3 ignorados** (16/ago) |
 | App | ✅ **sobe** — janela 1352×848, `GPU: Initialized successfully with Apple M2 Pro` |
 | Migrations SQLite no repositório | 15 (`001` … `015`) |
 | Crates | 6 (domain, use-cases, adapters, infrastructure, ui, **ui-gpui**) |
@@ -70,7 +70,7 @@ struct `PhotoEdits` continua sendo o conserto de verdade.
 | Adapters | 0 | ⚠️ nenhum teste escrito |
 | Infrastructure | 65 (34 unit + 31 integração em 7 arquivos) | ✅ passando (1 ignorado) |
 | UI (egui) | 146 (47 unit + 99 E2E `egui_kittest` em 18 arquivos) | ✅ passando (2 ignorados) |
-| UI (GPUI) | 86 (83 unit + 3 de integração com banco) | ✅ passando — fase 2 em andamento |
+| UI (GPUI) | 100 (97 unit + 3 de integração com banco) | ✅ passando — fase 2 em andamento |
 
 ---
 
@@ -282,9 +282,11 @@ Não são erros de compilação; são features que a UI mostra como prontas e qu
    saturação, matiz e luminância nos 8 canais (24) — e a **lente** (3). Quem revela mexendo em HSL vê
    o resultado na tela, exporta e recebe outra imagem. A conta está em
    [docs/10-MIGRACAO-GPUI.md](10-MIGRACAO-GPUI.md), §"Fase 2", com o script que a refaz.
-2. 🚨 **O undo/redo ignora o crop.** `EditSnapshot` (`crates/ui/src/state.rs:20`) lista os ~50
-   campos de edição, mas nenhum de crop. Cortar não entra no histórico, e desfazer um ajuste
-   posterior não restaura o corte anterior.
+2. 🚨 **O undo/redo ignora o crop — e é pior do que estava escrito aqui.** `EditSnapshot`
+   (`crates/ui/src/state.rs:20`) **tem** o campo `crop_settings`, e `push_edit_snapshot` o preenche;
+   quem lê o struct conclui que funciona. Mas nem `undo` nem `redo` o leem de volta (conferido em
+   16/ago/2026): o corte é guardado e jogado fora. Cortar não entra no histórico, e desfazer um
+   ajuste posterior não restaura o corte anterior.
 3. ⚠️ **Crop no shader GPU foi revertido** (`305466e` → `10dda3f`). O corte roda por mesh/UV no
    viewer e por CPU (`ImageProcessing::apply_crop`) nos thumbnails. Funciona, mas é caminho
    diferente do resto do pipeline de edição, que é GPU.
