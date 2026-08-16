@@ -13,7 +13,8 @@ use infrastructure::paths::AppPaths;
 
 use ui_gpui::app::{Aplicativo, Portas};
 use ui_gpui::importacao::explorador::{
-    Explorador, ExploradorDoDisco, Importador, ImportadorDoDisco, SeletorDePasta, SeletorNativo,
+    Explorador, ExploradorDoDisco, GeradorDeMiniaturas, GeradorDoDisco, Importador,
+    ImportadorDoDisco, SeletorDePasta, SeletorNativo,
 };
 use ui_gpui::revelacao::persistencia::{Gravador, GravadorDoBanco};
 use ui_gpui::revelacao::presets::{GuardaDePresets, GuardaDoBanco};
@@ -86,6 +87,7 @@ async fn main() {
     // outro lado.
     let extrator = Arc::new(infrastructure::ExifReader);
     let miniaturas = Arc::new(infrastructure::ThumbnailGeneratorImpl::new());
+    let gerador_de_miniaturas = miniaturas.clone();
     let organizador = Arc::new(infrastructure::FileOrganizerImpl::new(catalogo.clone()));
     let dispositivos =
         Arc::new(infrastructure::devices::repository::InfrastructureDeviceRepository::new());
@@ -143,6 +145,11 @@ async fn main() {
     ));
     let seletor: Arc<dyn SeletorDePasta> =
         Arc::new(SeletorNativo::novo(tokio::runtime::Handle::current()));
+    let gerador: Arc<dyn GeradorDeMiniaturas> = Arc::new(GeradorDoDisco::novo(
+        gerador_de_miniaturas,
+        previews.clone(),
+        tokio::runtime::Handle::current(),
+    ));
 
     Application::new().run(move |cx: &mut App| {
         // Antes de qualquer janela: é o `init` que cria o `Theme` global, o
@@ -173,6 +180,7 @@ async fn main() {
                         presets.clone(),
                         Portas {
                             gravador: gravador.clone(),
+                            gerador: gerador.clone(),
                             guarda_de_presets: guarda_de_presets.clone(),
                             explorador: explorador.clone(),
                             importador: importador.clone(),

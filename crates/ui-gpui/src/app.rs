@@ -14,7 +14,7 @@ use gpui_component::{ActiveTheme, Disableable, Selectable, Sizable};
 use infrastructure::cache::preview_manager::PreviewManager;
 
 use crate::biblioteca::tela::Biblioteca;
-use crate::importacao::explorador::{Explorador, Importador, SeletorDePasta};
+use crate::importacao::explorador::{Explorador, GeradorDeMiniaturas, Importador, SeletorDePasta};
 use crate::importacao::tela::Importacao;
 use crate::revelacao::persistencia::Gravador;
 use crate::revelacao::presets::GuardaDePresets;
@@ -28,6 +28,7 @@ use crate::revelacao::tela::Revelacao;
 /// execução, no primeiro clique.
 pub struct Portas {
     pub gravador: Arc<dyn Gravador>,
+    pub gerador: Arc<dyn GeradorDeMiniaturas>,
     pub guarda_de_presets: Arc<dyn GuardaDePresets>,
     pub explorador: Arc<dyn Explorador>,
     pub importador: Arc<dyn Importador>,
@@ -102,6 +103,10 @@ impl Aplicativo {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        // O mesmo cache de previews da Biblioteca: a importação grava miniatura
+        // com a chave `import::` na mesma tabela, e dois `PreviewManager` para o
+        // mesmo arquivo seriam dois caches do mesmo lugar.
+        let previews_para_importar = previews.clone();
         let biblioteca = cx.new(|cx| Biblioteca::nova(fotos, previews.clone(), window, cx));
         let revelacao = cx.new(|cx| {
             Revelacao::nova(
@@ -132,7 +137,14 @@ impl Aplicativo {
             biblioteca,
             revelacao,
             importacao: cx.new(|cx| {
-                Importacao::nova(portas.explorador, portas.importador, portas.seletor, cx)
+                Importacao::nova(
+                    portas.explorador,
+                    portas.importador,
+                    portas.seletor,
+                    portas.gerador,
+                    previews_para_importar,
+                    cx,
+                )
             }),
             importando: false,
             tela: Tela::Biblioteca,
@@ -432,7 +444,7 @@ mod testes {
     use tempfile::TempDir;
 
     use crate::importacao::explorador::mentira::{
-        ExploradorDeMentira, ImportadorDeMentira, SeletorDeMentira,
+        ExploradorDeMentira, GeradorDeMentira, ImportadorDeMentira, SeletorDeMentira,
     };
     use crate::revelacao::persistencia::mentira::GravadorDeMentira;
     use crate::revelacao::presets::mentira::GuardaDeMentira;
@@ -441,6 +453,7 @@ mod testes {
     fn portas() -> Portas {
         Portas {
             gravador: Arc::new(GravadorDeMentira::default()),
+            gerador: Arc::new(GeradorDeMentira::default()),
             guarda_de_presets: Arc::new(GuardaDeMentira::default()),
             explorador: Arc::new(ExploradorDeMentira::default()),
             importador: Arc::new(ImportadorDeMentira::default()),

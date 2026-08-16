@@ -15,22 +15,28 @@
 //! Emendar as três numa só faria um cartão de 2.000 RAWs travar a janela por
 //! minutos antes de mostrar qualquer coisa.
 
+use std::num::NonZeroUsize;
 use std::sync::mpsc::{channel, Receiver, Sender};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use gpui::{
-    actions, div, prelude::*, px, ClickEvent, Context, FocusHandle, SharedString, Task, Window,
+    actions, div, img, prelude::*, px, uniform_list, ClickEvent, Context, FocusHandle,
+    SharedString, Task, Window,
 };
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::checkbox::Checkbox;
 use gpui_component::{ActiveTheme, Disableable, Selectable, Sizable};
+use infrastructure::cache::preview_manager::PreviewManager;
 
 use domain::value_objects::{ImportMode, OrganizationStrategy, RenamePattern};
 
 use super::destino;
 use super::estado::{aplicar, Estado, Ordem, Recado, Seguimento};
-use super::explorador::{Andamento, Explorador, Importador, SeletorDePasta};
+use super::explorador::{
+    chave_de_miniatura, Andamento, Explorador, GeradorDeMiniaturas, Importador, SeletorDePasta,
+};
+use crate::biblioteca::miniaturas::{CacheDeMiniaturas, Miniatura};
 
 actions!(
     importacao,
@@ -66,6 +72,17 @@ pub struct Importacao {
     explorador: Arc<dyn Explorador>,
     importador: Arc<dyn Importador>,
     seletor: Arc<dyn SeletorDePasta>,
+    gerador: Arc<dyn GeradorDeMiniaturas>,
+    previews: Arc<PreviewManager>,
+    /// As miniaturas já convertidas. `Mutex` porque o closure do `uniform_list`
+    /// recebe `&mut App`, e não `&mut self` — o mesmo arranjo da Biblioteca.
+    cache: Arc<Mutex<CacheDeMiniaturas>>,
+    /// De quem já foi pedida miniatura, para não pedir duas vezes.
+    ///
+    /// 🚨 Sem isto, **cada quadro** pediria de novo tudo o que está na tela: 60
+    /// pedidos por segundo por célula visível, cada um abrindo o arquivo no
+    /// cartão. É o tipo de laço que só aparece quando o cartão fica lento.
+    pedidas: std::collections::HashSet<String>,
     /// Por onde os recados chegam. O `Sender` é clonado a cada pedido.
     recados: (Sender<Recado>, Receiver<Recado>),
     andamentos: (Sender<Andamento>, Receiver<Andamento>),
@@ -96,6 +113,8 @@ impl Importacao {
         explorador: Arc<dyn Explorador>,
         importador: Arc<dyn Importador>,
         seletor: Arc<dyn SeletorDePasta>,
+        gerador: Arc<dyn GeradorDeMiniaturas>,
+        previews: Arc<PreviewManager>,
         cx: &mut Context<Self>,
     ) -> Self {
         Self {
@@ -103,6 +122,14 @@ impl Importacao {
             explorador,
             importador,
             seletor,
+            gerador,
+            previews,
+            // Uma tela de linhas cabe bem em 128: a grade aqui é uma lista, e não
+            // um mosaico como o da Biblioteca.
+            cache: Arc::new(Mutex::new(CacheDeMiniaturas::nova(
+                NonZeroUsize::new(128).expect("128 não é zero"),
+            ))),
+            pedidas: std::collections::HashSet::new(),
             recados: channel(),
             andamentos: channel(),
             progresso: None,
@@ -172,6 +199,9 @@ impl Importacao {
     /// de dentro da colheita, onde o laço já está de pé.
     fn comecar_varredura(&mut self, raiz: String) {
         self.estado.esquecer_candidatos();
+        // As miniaturas pedidas eram da listagem anterior. Guardá-las faria a
+        // grade nova nunca pedir as dela, se algum caminho se repetisse.
+        self.pedidas.clear();
         self.estado.origem = Some(raiz.clone());
         self.estado.varrendo = true;
         self.progresso = None;
@@ -278,6 +308,16 @@ impl Importacao {
             // pasta escolhida ou a desistência.
             if matches!(recado, Recado::OrigemEscolhida(_) | Recado::SemEscolha) {
                 self.esperando_escolha = false;
+            }
+
+            if let Recado::MiniaturasProntas(caminhos) = &recado {
+                // O cache guarda "ausente" para quem ainda não tinha miniatura;
+                // sem esquecer isso, a foto recém-gerada só apareceria quando a
+                // célula saísse e voltasse à tela.
+                let mut cache = self.cache.lock().expect("o cache");
+                for caminho in caminhos {
+                    cache.esquecer(&chave_de_miniatura(caminho));
+                }
             }
 
             match aplicar(&mut self.estado, recado) {
@@ -585,74 +625,138 @@ impl Importacao {
             )
     }
 
+    /// O lado da miniatura na célula.
+    const LADO_DA_MINIATURA: f32 = 48.0;
+
     fn grade(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let visiveis = self.estado.visiveis();
+        let visiveis = Arc::new(self.estado.visiveis());
+        let candidatos = Arc::new(self.estado.candidatos.clone());
+        let focado = self.estado.focado;
+        let cache = self.cache.clone();
+        let previews = self.previews.clone();
+        let esta = cx.entity();
 
-        div()
-            .id("grade-de-importacao")
-            .flex()
-            .flex_col()
-            .flex_1()
-            .min_h(px(0.))
-            .overflow_y_scroll()
-            .children(visiveis.into_iter().map(|indice| {
-                let candidato = &self.estado.candidatos[indice];
-                let duplicado = candidato.duplicado;
-                let marcado = candidato.marcado;
-                let em_foco = self.estado.focado == Some(indice);
+        let cor_apagada = cx.theme().muted_foreground;
+        let cor_aviso = cx.theme().warning;
+        let cor_foco = cx.theme().accent;
 
-                div()
-                    .id(SharedString::from(format!("candidato-{indice}")))
-                    .flex()
-                    .items_center()
-                    .gap(px(6.))
-                    .px(px(4.))
-                    .py(px(2.))
-                    .text_xs()
-                    .when(duplicado, |linha| {
-                        linha.text_color(cx.theme().muted_foreground)
+        uniform_list(
+            "grade-de-importacao",
+            visiveis.len(),
+            move |faixa, _window, cx| {
+                // 🔑 **É aqui que se sabe o que está na tela.** O `uniform_list`
+                // só chama esta função para as linhas visíveis, e é o que
+                // transforma "gerar 2.000 miniaturas" em "gerar as 20 que se
+                // está olhando".
+                let a_pedir: Vec<String> = faixa
+                    .clone()
+                    .filter_map(|posicao| visiveis.get(posicao))
+                    .map(|indice| candidatos[*indice].caminho.clone())
+                    .collect();
+                esta.update(cx, |tela, _cx| tela.pedir_miniaturas(a_pedir));
+
+                faixa
+                    .filter_map(|posicao| visiveis.get(posicao).copied())
+                    .map(|indice| {
+                        let candidato = &candidatos[indice];
+                        let duplicado = candidato.duplicado;
+                        let marcado = candidato.marcado;
+                        let em_foco = focado == Some(indice);
+
+                        let miniatura = cache
+                            .lock()
+                            .expect("o cache")
+                            .obter(&previews, &chave_de_miniatura(&candidato.caminho));
+
+                        div()
+                            .id(SharedString::from(format!("candidato-{indice}")))
+                            .flex()
+                            .items_center()
+                            .gap(px(6.))
+                            .px(px(4.))
+                            .py(px(2.))
+                            .text_xs()
+                            .when(em_foco, |linha| linha.bg(cor_foco))
+                            .when(duplicado, |linha| linha.text_color(cor_apagada))
+                            // Dentro do `uniform_list` o contexto é `&mut App`, e
+                            // não `Context<Self>`: o clique volta à entidade pelo
+                            // handle, como a grade da Biblioteca faz.
+                            .on_click({
+                                let esta = esta.clone();
+                                move |evento: &ClickEvent, _window, cx| {
+                                    esta.update(cx, |tela, cx| {
+                                        if evento.modifiers().shift {
+                                            let marcar = !tela.estado.candidatos[indice].marcado;
+                                            tela.estado.marcar_ate(indice, marcar);
+                                        } else {
+                                            tela.estado.alternar(indice);
+                                        }
+                                        cx.notify();
+                                    });
+                                }
+                            })
+                            .child(
+                                Checkbox::new(SharedString::from(format!("marca-{indice}")))
+                                    .checked(marcado),
+                            )
+                            .child(
+                                div()
+                                    .w(px(Self::LADO_DA_MINIATURA))
+                                    .h(px(Self::LADO_DA_MINIATURA))
+                                    .flex_shrink_0()
+                                    .bg(cor_foco)
+                                    .when_some(
+                                        match miniatura {
+                                            Miniatura::Pronta(imagem) => Some(imagem),
+                                            // Ausente é normal: a miniatura ainda
+                                            // não foi gerada, e o retângulo vazio
+                                            // é o que diz isso sem alarmar.
+                                            Miniatura::Ausente => None,
+                                        },
+                                        |celula, imagem| celula.child(img(imagem).size_full()),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .truncate()
+                                    .child(SharedString::from(candidato.nome.clone())),
+                            )
+                            .child(
+                                div()
+                                    .w(px(110.))
+                                    .truncate()
+                                    .text_color(cor_apagada)
+                                    .child(SharedString::from(candidato.camera.clone())),
+                            )
+                            .child(
+                                div()
+                                    .w(px(60.))
+                                    .text_color(cor_apagada)
+                                    .child(SharedString::from(tamanho_legivel(candidato.tamanho))),
+                            )
+                            .when(duplicado, |linha| {
+                                linha.child(div().text_color(cor_aviso).child("já no catálogo"))
+                            })
+                            .into_any_element()
                     })
-                    .when(em_foco, |linha| linha.bg(cx.theme().accent))
-                    // 🚨 O clique fica na **linha**, e não só na caixinha: é o
-                    // `ClickEvent` que traz os modificadores, e sem eles não há
-                    // Shift+clique. Um alvo de 14px também é pequeno demais para
-                    // marcar 300 fotos.
-                    .on_click(cx.listener(move |tela, evento: &ClickEvent, _window, cx| {
-                        if evento.modifiers().shift {
-                            let marcar = !tela.estado.candidatos[indice].marcado;
-                            tela.estado.marcar_ate(indice, marcar);
-                        } else {
-                            tela.estado.alternar(indice);
-                        }
-                        cx.notify();
-                    }))
-                    .child(
-                        Checkbox::new(SharedString::from(format!("marca-{indice}")))
-                            .checked(marcado),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .truncate()
-                            .child(SharedString::from(candidato.nome.clone())),
-                    )
-                    .child(
-                        div()
-                            .w(px(120.))
-                            .truncate()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(SharedString::from(candidato.camera.clone())),
-                    )
-                    .child(
-                        div()
-                            .w(px(60.))
-                            .text_color(cx.theme().muted_foreground)
-                            .child(SharedString::from(tamanho_legivel(candidato.tamanho))),
-                    )
-                    .when(duplicado, |linha| {
-                        linha.child(div().text_color(cx.theme().warning).child("já no catálogo"))
-                    })
-            }))
+                    .collect()
+            },
+        )
+        .flex_1()
+        .h_full()
+    }
+
+    /// Pede as miniaturas que ainda não foram pedidas.
+    fn pedir_miniaturas(&mut self, caminhos: Vec<String>) {
+        let novos: Vec<String> = caminhos
+            .into_iter()
+            .filter(|caminho| self.pedidas.insert(caminho.clone()))
+            .collect();
+
+        if !novos.is_empty() {
+            self.gerador.gerar(novos, self.recados.0.clone());
+        }
     }
 
     fn rodape(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -783,7 +887,7 @@ mod testes {
     use gpui::TestAppContext;
 
     use super::super::explorador::mentira::{
-        ExploradorDeMentira, ImportadorDeMentira, SeletorDeMentira,
+        ExploradorDeMentira, GeradorDeMentira, ImportadorDeMentira, SeletorDeMentira,
     };
 
     fn janela(
@@ -806,7 +910,23 @@ mod testes {
         seletor: Arc<SeletorDeMentira>,
     ) -> gpui::WindowHandle<Importacao> {
         cx.update(gpui_component::init);
-        cx.add_window(move |_window, cx| Importacao::nova(explorador, importador, seletor, cx))
+        let dir = tempfile::TempDir::new().expect("diretório temporário");
+        let previews = Arc::new(PreviewManager::new_with_path(dir.path().to_path_buf()));
+        // O `TempDir` é solto de propósito: ele vive o teste inteiro dentro do
+        // `PreviewManager`, e guardá-lo exigiria devolver duas coisas de cada
+        // fábrica de janela.
+        std::mem::forget(dir);
+
+        cx.add_window(move |_window, cx| {
+            Importacao::nova(
+                explorador,
+                importador,
+                seletor,
+                Arc::new(GeradorDeMentira::default()),
+                previews,
+                cx,
+            )
+        })
     }
 
     /// Deixa a colheita rodar até drenar o que já chegou.
@@ -960,6 +1080,97 @@ mod testes {
             .expect("a janela deve estar aberta");
     }
 
+    /// 🚨 A miniatura de cada arquivo é pedida **uma vez só**.
+    ///
+    /// O `uniform_list` chama a função de renderização a cada quadro. Sem a
+    /// lembrança do que já foi pedido, seriam 60 pedidos por segundo por célula
+    /// visível — cada um abrindo o arquivo no cartão. É o tipo de laço que só
+    /// aparece quando o cartão fica lento, e aí parece problema do cartão.
+    #[gpui::test]
+    fn a_miniatura_e_pedida_uma_vez_so(cx: &mut TestAppContext) {
+        let explorador = Arc::new(ExploradorDeMentira::responde(
+            "/cartao",
+            &["/cartao/a.NEF", "/cartao/b.NEF"],
+        ));
+        let gerador = Arc::new(GeradorDeMentira::default());
+        cx.update(gpui_component::init);
+
+        let janela = cx.add_window({
+            let gerador = gerador.clone();
+            move |_window, cx| {
+                let dir = tempfile::TempDir::new().expect("diretório temporário");
+                let previews = Arc::new(PreviewManager::new_with_path(dir.path().to_path_buf()));
+                std::mem::forget(dir);
+
+                Importacao::nova(
+                    explorador,
+                    Arc::new(ImportadorDeMentira::default()),
+                    Arc::new(SeletorDeMentira::default()),
+                    gerador,
+                    previews,
+                    cx,
+                )
+            }
+        });
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.abrir_origem("/cartao".into(), cx);
+            })
+            .expect("a janela deve estar aberta");
+        colher(cx, &janela);
+
+        // Três quadros pedindo as mesmas duas células.
+        janela
+            .update(cx, |tela, _window, _cx| {
+                let visiveis: Vec<String> = tela
+                    .estado
+                    .candidatos
+                    .iter()
+                    .map(|c| c.caminho.clone())
+                    .collect();
+                for _ in 0..3 {
+                    tela.pedir_miniaturas(visiveis.clone());
+                }
+            })
+            .expect("a janela deve estar aberta");
+
+        // ⚠️ A conta é sobre **caminhos repetidos**, e não sobre número de
+        // pedidos: o próprio render já pediu os visíveis dele antes deste laço, e
+        // contar chamadas mediria o desenho em vez da regra.
+        let todos: Vec<String> = gerador.pedidos().into_iter().flatten().collect();
+        let distintos: std::collections::HashSet<&String> = todos.iter().collect();
+
+        assert_eq!(
+            todos.len(),
+            distintos.len(),
+            "algum arquivo foi pedido duas vezes: {todos:?}"
+        );
+        assert!(distintos.len() <= 2, "só existem dois arquivos");
+    }
+
+    /// Trocar de origem esquece o que já foi pedido.
+    ///
+    /// 🔑 As miniaturas pedidas eram da listagem anterior. Guardá-las faria a
+    /// grade nova nunca pedir as dela, se algum caminho se repetisse — o que
+    /// acontece ao revarrer a mesma pasta com "incluir subpastas" trocado.
+    #[gpui::test]
+    fn trocar_de_origem_esquece_os_pedidos(cx: &mut TestAppContext) {
+        let explorador = Arc::new(ExploradorDeMentira::responde("/cartao", &["/cartao/a.NEF"]));
+        let janela = janela(cx, explorador, Arc::new(ImportadorDeMentira::default()));
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.abrir_origem("/cartao".into(), cx);
+                tela.pedir_miniaturas(vec!["/cartao/a.NEF".into()]);
+                assert_eq!(tela.pedidas.len(), 1);
+
+                tela.abrir_origem("/cartao".into(), cx);
+                assert!(tela.pedidas.is_empty());
+            })
+            .expect("a janela deve estar aberta");
+    }
+
     /// 🚨 As cinco teclas do modal chegam mesmo.
     ///
     /// `Enter`, `espaço`, `⌘A` e as setas são as teclas mais disputadas que
@@ -980,10 +1191,16 @@ mod testes {
             let explorador = explorador.clone();
             let importador = importador.clone();
             move |_window, cx| {
+                let dir = tempfile::TempDir::new().expect("diretório temporário");
+                let previews = Arc::new(PreviewManager::new_with_path(dir.path().to_path_buf()));
+                std::mem::forget(dir);
+
                 Importacao::nova(
                     explorador,
                     importador,
                     Arc::new(SeletorDeMentira::default()),
+                    Arc::new(GeradorDeMentira::default()),
+                    previews,
                     cx,
                 )
             }

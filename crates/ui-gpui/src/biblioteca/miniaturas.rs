@@ -121,6 +121,15 @@ impl CacheDeMiniaturas {
     }
 
     /// Quantas miniaturas estão na memória agora.
+    /// Tira uma entrada do cache.
+    ///
+    /// 🔑 Existe por causa da importação: lá a miniatura **nasce ausente** e é
+    /// gerada depois, e o cache guarda a ausência. Sem esquecê-la, a foto
+    /// recém-gerada só apareceria quando a célula saísse e voltasse à tela.
+    pub fn esquecer(&mut self, chave: &str) {
+        self.carregadas.pop(chave);
+    }
+
     pub fn quantas_na_memoria(&self) -> usize {
         self.carregadas.len()
     }

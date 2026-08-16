@@ -165,6 +165,88 @@ impl SeletorDePasta for SeletorNativo {
     }
 }
 
+/// A chave da miniatura de um candidato no cache de previews.
+///
+/// 🚨 **O prefixo separa estas entradas das fotos catalogadas.** A mesma tabela
+/// guarda as duas, e um caminho de cartão sem prefixo poderia colidir com o id de
+/// uma foto — que é um UUID, mas o cache não valida formato. É a mesma decisão do
+/// legado (`thumb_key`).
+pub fn chave_de_miniatura(caminho: &str) -> String {
+    format!("import::{caminho}")
+}
+
+/// Quem gera as miniaturas dos arquivos que ainda não estão no catálogo.
+///
+/// ⚠️ **Elas não existem em lugar nenhum ainda.** As fotos da grade estão no
+/// cartão, fora do catálogo: não há preview gravado, e cada miniatura custa abrir
+/// o arquivo e redimensionar. Por isso só se gera o que a grade está mostrando.
+pub trait GeradorDeMiniaturas: Send + Sync + 'static {
+    fn gerar(&self, caminhos: Vec<String>, canal: Sender<Recado>);
+}
+
+pub struct GeradorDoDisco {
+    miniaturas: Arc<dyn domain::services::ThumbnailGenerator>,
+    previews: Arc<infrastructure::cache::preview_manager::PreviewManager>,
+    tokio: tokio::runtime::Handle,
+}
+
+impl GeradorDoDisco {
+    /// O lado da miniatura da grade de importação.
+    ///
+    /// Menor que a da Biblioteca (320): aqui a célula é uma linha de lista, e
+    /// gerar em 320 custaria o dobro do decode para desenhar em 48.
+    const LADO: u32 = 128;
+
+    pub fn novo(
+        miniaturas: Arc<dyn domain::services::ThumbnailGenerator>,
+        previews: Arc<infrastructure::cache::preview_manager::PreviewManager>,
+        tokio: tokio::runtime::Handle,
+    ) -> Self {
+        Self {
+            miniaturas,
+            previews,
+            tokio,
+        }
+    }
+}
+
+impl GeradorDeMiniaturas for GeradorDoDisco {
+    fn gerar(&self, caminhos: Vec<String>, canal: Sender<Recado>) {
+        let miniaturas = self.miniaturas.clone();
+        let previews = self.previews.clone();
+
+        self.tokio.spawn(async move {
+            let mut prontas = Vec::new();
+
+            for caminho in caminhos {
+                let Ok(arquivo) = domain::value_objects::FilePath::new(&caminho) else {
+                    continue;
+                };
+                let Ok(bytes) = miniaturas.generate(&arquivo, GeradorDoDisco::LADO).await else {
+                    // ⚠️ Arquivo ilegível não interrompe o lote nem vira aviso: a
+                    // célula fica com o retângulo vazio, que é o que a grade já
+                    // mostra para quem ainda não chegou. Um cartão com um arquivo
+                    // corrompido não pode encher a tela de erro.
+                    continue;
+                };
+                let Ok(imagem) = image::load_from_memory(&bytes) else {
+                    continue;
+                };
+                if previews
+                    .save_thumbnail(&chave_de_miniatura(&caminho), &imagem)
+                    .is_ok()
+                {
+                    prontas.push(caminho);
+                }
+            }
+
+            if !prontas.is_empty() {
+                let _ = canal.send(Recado::MiniaturasProntas(prontas));
+            }
+        });
+    }
+}
+
 /// Quem sabe importar de verdade.
 ///
 /// Separado do [`Explorador`] porque é outra decisão: explorar é grátis e
@@ -367,6 +449,28 @@ pub mod mentira {
                 None => Recado::SemEscolha,
             };
             let _ = canal.send(recado);
+        }
+    }
+
+    /// Um gerador que diz "pronto" sem tocar em disco.
+    #[derive(Default)]
+    pub struct GeradorDeMentira {
+        pub pedidos: Mutex<Vec<Vec<String>>>,
+    }
+
+    impl GeradorDeMentira {
+        pub fn pedidos(&self) -> Vec<Vec<String>> {
+            self.pedidos.lock().expect("os pedidos").clone()
+        }
+    }
+
+    impl GeradorDeMiniaturas for GeradorDeMentira {
+        fn gerar(&self, caminhos: Vec<String>, canal: Sender<Recado>) {
+            self.pedidos
+                .lock()
+                .expect("os pedidos")
+                .push(caminhos.clone());
+            let _ = canal.send(Recado::MiniaturasProntas(caminhos));
         }
     }
 

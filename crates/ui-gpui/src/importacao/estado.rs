@@ -111,6 +111,8 @@ pub enum Recado {
     OrigemEscolhida(String),
     /// A pasta de destino que o seletor devolveu.
     DestinoEscolhido(String),
+    /// As miniaturas destes caminhos acabaram de ser gravadas no cache.
+    MiniaturasProntas(Vec<String>),
     /// O seletor fechou sem escolha.
     ///
     /// 🔑 **Desistir também responde.** Sem este recado, a tela ficaria esperando
@@ -396,6 +398,10 @@ pub fn aplicar(estado: &mut Estado, recado: Recado) -> Option<Seguimento> {
             estado.opcoes.destination = Some(caminho);
             None
         }
+
+        // 🔑 A tela é quem sabe o que fazer com isto (invalidar o cache dela); o
+        // estado não guarda imagem nenhuma.
+        Recado::MiniaturasProntas(_) => None,
 
         Recado::SemEscolha => None,
 

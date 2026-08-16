@@ -951,9 +951,52 @@ por engano depois de marcar 300 fotos não pode perder a marcação.
 mesmo naipe, cuja ordem não é óbvia para ninguém — trocar dois de lugar compila e falha no primeiro
 clique.
 
-⬜ **Falta**: as miniaturas da grade sob demanda (com a chave `import::<caminho>`, que separa estas
-entradas das fotos catalogadas), o lado "PARA" (modo, destino, organização, renomeação) e os atalhos
-da grade (↑↓ com rolagem, Shift+clique na tela, ⌘A, Enter).
+#### O lado "PARA" ✅ — e a prévia, que é a peça que vale portar
+
+Modo (Add/Copy/Move), destino, organização, renomeação e "não importar duplicadas". Mas o que decide
+é a **prévia**: mostrar para onde a primeira foto vai transforma quatro escolhas abstratas numa
+decisão conferível antes de o botão ser apertado.
+
+🚨 **O teste da prévia encontrou um defeito no `Candidato`.** `Path::file_name` no macOS não reconhece
+`\`, e um cartão formatado no Windows chega com caminhos assim: o "nome do arquivo" virava o caminho
+**inteiro**, e a célula da grade mostraria `C:\Fotos\2024\DSC_1.NEF`. É a mesma armadilha que a
+árvore de pastas da fase 1 encontrou, do outro lado do app — e o corte agora é por texto, com os dois
+separadores, nos dois lugares.
+
+Duas regras da prévia com teste: sem EXIF vem o **placeholder** (`AAAA/MM/DD/`) e não uma data
+inventada — uma pasta `1970/01/01` pareceria informação verdadeira; e `Add` **não prevê destino**,
+porque ele cataloga onde está. Pelo mesmo motivo, destino, organização e renomeação só aparecem
+quando o modo copia.
+
+⚠️ **Ligar "não importar duplicadas" desmarca na hora.** Se a importação vai pular, a marcação tem de
+dizer isso antes do clique — senão o rodapé promete 40 fotos e entram 32. Desligar de volta **não**
+remarca: quem desmarcou à mão não pode ter a escolha desfeita por uma caixa de opção.
+
+#### Teclas ✅ e miniaturas sob demanda ✅
+
+`Enter`, `espaço`, `⌘A`, `↑↓` e Shift+clique, num contexto de teclado próprio — sem ele, as teclas
+mais disputadas que existem roubariam a busca da Biblioteca desenhada atrás. O teste aperta as teclas
+**de verdade**, pelo motivo de sempre: ligação que não casa não falha, ela não faz nada.
+
+Três regras que só apareceriam usando: as setas andam sobre o que está **visível** (um passo numa
+duplicata escondida pareceria seta que não funciona); `Enter` durante a importação **não** começa a
+segunda cópia do mesmo lote (tecla não passa por botão desligado); e o clique fica na **linha**, não
+na caixinha — é o `ClickEvent` da linha que traz os modificadores, sem os quais não há Shift+clique.
+
+A grade virou `uniform_list`, e é o que transforma "gerar 2.000 miniaturas" em "gerar as 20 que se
+está olhando": só as linhas visíveis são renderizadas, e é ali que a miniatura é pedida. As fotos
+ainda não estão no catálogo — não há preview gravado, e cada uma custa abrir o arquivo no cartão.
+
+🚨 **Cada arquivo é pedido uma vez só.** O `uniform_list` chama a renderização a cada quadro: sem a
+lembrança do que já foi pedido, seriam 60 pedidos por segundo por célula visível. É o tipo de laço
+que só aparece quando o cartão fica lento — e aí parece problema do cartão.
+
+A chave no cache é `import::<caminho>` (a mesma decisão do legado): a tabela guarda as duas coisas, e
+um caminho de cartão sem prefixo poderia colidir com o id de uma foto.
+
+⬜ **Falta para fechar a fase 3**: a lupa (duplo clique mostrando a foto grande), a rolagem
+acompanhando as setas, e os cartões/origens recentes do lado "DE" — hoje a origem só vem do seletor
+de pasta.
 
 ### Fase 4 — Impressão, multi-monitor, docking, atalhos (2–3 semanas)
 
