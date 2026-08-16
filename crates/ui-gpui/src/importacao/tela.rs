@@ -22,7 +22,7 @@ use std::time::Duration;
 
 use gpui::{
     actions, div, img, prelude::*, px, uniform_list, ClickEvent, Context, FocusHandle,
-    SharedString, Task, Window,
+    SharedString, Task, UniformListScrollHandle, Window,
 };
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::checkbox::Checkbox;
@@ -96,6 +96,14 @@ pub struct Importacao {
     esperando_escolha: bool,
     /// O foco do modal — sem ele, nenhuma das cinco teclas chega.
     foco: FocusHandle,
+    /// Por onde a grade é rolada até a célula em foco.
+    ///
+    /// 🚨 **Sem isto a seta parece não funcionar.** O foco anda, a linha destacada
+    /// sai da área visível, e a tela fica parada — quem aperta ↓ dez vezes vê
+    /// exatamente nada acontecer.
+    rolagem: UniformListScrollHandle,
+    /// Qual célula abrir grande. `None` é a lupa fechada.
+    lupa: Option<usize>,
     _colheita: Option<Task<()>>,
 }
 
@@ -136,6 +144,8 @@ impl Importacao {
             colhendo: false,
             esperando_escolha: false,
             foco: cx.focus_handle(),
+            rolagem: UniformListScrollHandle::new(),
+            lupa: None,
             _colheita: None,
         }
     }
@@ -165,12 +175,49 @@ impl Importacao {
 
     fn ao_descer(&mut self, _acao: &DescerFoco, _window: &mut Window, cx: &mut Context<Self>) {
         self.estado.mover_foco(1);
+        self.rolar_ate_o_foco();
         cx.notify();
     }
 
     fn ao_subir(&mut self, _acao: &SubirFoco, _window: &mut Window, cx: &mut Context<Self>) {
         self.estado.mover_foco(-1);
+        self.rolar_ate_o_foco();
         cx.notify();
+    }
+
+    /// Leva a área visível até a célula em foco.
+    ///
+    /// 🔑 **A posição é a da grade filtrada**, e não o índice no acervo: com "só
+    /// novos" ligado, rolar para o índice 40 do acervo pararia numa linha
+    /// diferente da que está destacada — a rolagem e o destaque discordariam, e
+    /// só em algumas listagens.
+    fn rolar_ate_o_foco(&mut self) {
+        let Some(focado) = self.estado.focado else {
+            return;
+        };
+        if let Some(posicao) = self.estado.visiveis().iter().position(|i| *i == focado) {
+            self.rolagem
+                .scroll_to_item(posicao, gpui::ScrollStrategy::Top);
+        }
+    }
+
+    /// Abre ou fecha a lupa — a foto grande sobre a grade.
+    pub fn alternar_lupa(&mut self, indice: usize, cx: &mut Context<Self>) {
+        self.lupa = match self.lupa {
+            Some(atual) if atual == indice => None,
+            _ => Some(indice),
+        };
+        self.estado.focado = Some(indice);
+        cx.notify();
+    }
+
+    pub fn fechar_lupa(&mut self, cx: &mut Context<Self>) {
+        self.lupa = None;
+        cx.notify();
+    }
+
+    pub fn lupa_aberta(&self) -> Option<usize> {
+        self.lupa
     }
 
     /// `Enter` importa — mas só quando há o que importar e nada em curso.
@@ -209,6 +256,18 @@ impl Importacao {
         let subpastas = self.estado.opcoes.include_subfolders;
         self.explorador
             .varrer(raiz, subpastas, self.recados.0.clone());
+    }
+
+    /// Pede a lista de cartões e origens recentes.
+    ///
+    /// 🔑 Chamada quando o modal **aparece**, e não na construção: um cartão
+    /// plugado depois de o app abrir não apareceria numa lista pedida uma vez só,
+    /// e o fotógrafo não tem por que saber que a lista é velha.
+    pub fn pedir_origens(&mut self, cx: &mut Context<Self>) {
+        self.esperando_escolha = true;
+        self.explorador.origens(self.recados.0.clone());
+        self.acompanhar(cx);
+        cx.notify();
     }
 
     /// Abre o seletor do sistema. A resposta chega como recado — sempre, mesmo
@@ -306,7 +365,10 @@ impl Importacao {
             mudou = true;
             // A espera pelo seletor acaba com qualquer das duas respostas — a
             // pasta escolhida ou a desistência.
-            if matches!(recado, Recado::OrigemEscolhida(_) | Recado::SemEscolha) {
+            if matches!(
+                recado,
+                Recado::OrigemEscolhida(_) | Recado::SemEscolha | Recado::Origens { .. }
+            ) {
                 self.esperando_escolha = false;
             }
 
@@ -428,6 +490,57 @@ impl Importacao {
                         cx.notify();
                     })),
             )
+    }
+
+    /// Os cartões montados e as pastas usadas antes — um clique cada.
+    ///
+    /// ⚠️ Só aparece quando há alguma: uma faixa vazia dizendo "Cartões" num
+    /// computador sem cartão plugado é ruído permanente.
+    fn origens(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+        let atual = self.estado.origem.clone();
+        let listas = [
+            ("Cartões", &self.estado.cartoes),
+            ("Recentes", &self.estado.recentes),
+        ];
+        if listas.iter().all(|(_, lista)| lista.is_empty()) {
+            return None;
+        }
+
+        Some(
+            div()
+                .flex()
+                .flex_wrap()
+                .items_center()
+                .gap(px(4.))
+                .py(px(4.))
+                .children(listas.into_iter().flat_map(|(rotulo, lista)| {
+                    let mut itens = Vec::new();
+                    if lista.is_empty() {
+                        return itens;
+                    }
+                    itens.push(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(rotulo)
+                            .into_any_element(),
+                    );
+                    itens.extend(lista.iter().map(|origem| {
+                        let escolhida = atual.as_deref() == Some(origem.caminho.as_str());
+                        let caminho = origem.caminho.clone();
+                        Button::new(SharedString::from(format!("origem-{caminho}")))
+                            .label(SharedString::from(origem.nome.clone()))
+                            .xsmall()
+                            .when(escolhida, |b| b.primary())
+                            .selected(escolhida)
+                            .on_click(cx.listener(move |tela, _ev, _window, cx| {
+                                tela.abrir_origem(caminho.clone(), cx);
+                            }))
+                            .into_any_element()
+                    }));
+                    itens
+                })),
+        )
     }
 
     fn barra_da_grade(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -685,6 +798,14 @@ impl Importacao {
                                 let esta = esta.clone();
                                 move |evento: &ClickEvent, _window, cx| {
                                     esta.update(cx, |tela, cx| {
+                                        // Duplo clique abre a lupa; o simples
+                                        // marca. É a divisão do legado, e a
+                                        // inversa (duplo clique marcando) foi
+                                        // justamente o que ele corrigiu.
+                                        if evento.click_count() >= 2 {
+                                            tela.alternar_lupa(indice, cx);
+                                            return;
+                                        }
                                         if evento.modifiers().shift {
                                             let marcar = !tela.estado.candidatos[indice].marcado;
                                             tela.estado.marcar_ate(indice, marcar);
@@ -743,8 +864,63 @@ impl Importacao {
                     .collect()
             },
         )
+        .track_scroll(self.rolagem.clone())
         .flex_1()
         .h_full()
+    }
+
+    /// A lupa: a miniatura ampliada sobre a grade.
+    ///
+    /// ⚠️ **É a miniatura de 128px esticada, e não a foto.** Ler o RAW inteiro
+    /// para dar uma olhada custaria segundos por foto num cartão — e a lupa da
+    /// importação existe para responder "é esta mesmo?", não para julgar foco.
+    /// Quando ela precisar responder mais, é um preview maior que se pede, e não
+    /// uma escala diferente.
+    fn lupa(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+        let indice = self.lupa?;
+        let candidato = self.estado.candidatos.get(indice)?;
+
+        let miniatura = self
+            .cache
+            .lock()
+            .expect("o cache")
+            .obter(&self.previews, &chave_de_miniatura(&candidato.caminho));
+
+        Some(
+            div()
+                .id("lupa")
+                .absolute()
+                .inset_0()
+                .flex()
+                .flex_col()
+                .items_center()
+                .justify_center()
+                .gap(px(8.))
+                .bg(gpui::rgba(0x000000cc))
+                .on_click(cx.listener(|tela, _ev, _window, cx| {
+                    // Clicar em qualquer lugar fecha: a lupa é uma olhada, e sair
+                    // dela não pode exigir mira.
+                    tela.fechar_lupa(cx);
+                }))
+                .child(match miniatura {
+                    Miniatura::Pronta(imagem) => div()
+                        .w(px(420.))
+                        .h(px(420.))
+                        .child(img(imagem).size_full())
+                        .into_any_element(),
+                    Miniatura::Ausente => div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("A miniatura ainda não foi gerada")
+                        .into_any_element(),
+                })
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().foreground)
+                        .child(SharedString::from(candidato.nome.clone())),
+                ),
+        )
     }
 
     /// Pede as miniaturas que ainda não foram pedidas.
@@ -828,6 +1004,7 @@ impl Render for Importacao {
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .child(self.cabecalho(cx))
+            .children(self.origens(cx))
             .child(self.barra_da_grade(cx))
             .when(lendo, |tela| {
                 tela.child(
@@ -859,6 +1036,7 @@ impl Render for Importacao {
                     .child(self.destino(cx)),
             )
             .child(self.rodape(cx))
+            .children(self.lupa(cx))
     }
 }
 
@@ -886,6 +1064,7 @@ mod testes {
 
     use gpui::TestAppContext;
 
+    use super::super::estado::Origem;
     use super::super::explorador::mentira::{
         ExploradorDeMentira, GeradorDeMentira, ImportadorDeMentira, SeletorDeMentira,
     };
@@ -1076,6 +1255,130 @@ mod testes {
                 tela.abrir_origem("/b".into(), cx);
                 assert!(tela.estado.candidatos.is_empty(), "a grade some na hora");
                 assert_eq!(tela.estado.origem.as_deref(), Some("/b"));
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 Os cartões e as origens recentes chegam sem derrubar o que está listado.
+    ///
+    /// Detectar cartão é ir ao sistema de arquivos, e a resposta pode chegar com
+    /// uma varredura já em curso: quem abriu o modal e escolheu pasta pelo
+    /// seletor não pode ver a grade se esvaziar porque um cartão foi encontrado.
+    #[gpui::test]
+    fn as_origens_chegam_sem_derrubar_a_grade(cx: &mut TestAppContext) {
+        let explorador = Arc::new(ExploradorDeMentira::responde("/cartao", &["/cartao/a.NEF"]));
+        explorador.cartoes.lock().expect("os cartões").push(Origem {
+            nome: "NIKON D850".into(),
+            caminho: "/Volumes/NIKON".into(),
+        });
+
+        let janela = janela(cx, explorador, Arc::new(ImportadorDeMentira::default()));
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.abrir_origem("/cartao".into(), cx);
+                tela.pedir_origens(cx);
+            })
+            .expect("a janela deve estar aberta");
+        colher(cx, &janela);
+
+        janela
+            .update(cx, |tela, _window, _cx| {
+                assert_eq!(tela.estado.cartoes.len(), 1);
+                assert_eq!(tela.estado.candidatos.len(), 1, "a grade continua");
+                assert_eq!(tela.estado.origem.as_deref(), Some("/cartao"));
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// Clicar num cartão troca a origem e revarre.
+    #[gpui::test]
+    fn clicar_num_cartao_varre_ele(cx: &mut TestAppContext) {
+        let explorador = Arc::new(ExploradorDeMentira::responde(
+            "/Volumes/NIKON",
+            &["/Volumes/NIKON/a.NEF", "/Volumes/NIKON/b.NEF"],
+        ));
+        let janela = janela(
+            cx,
+            explorador.clone(),
+            Arc::new(ImportadorDeMentira::default()),
+        );
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.abrir_origem("/Volumes/NIKON".into(), cx);
+            })
+            .expect("a janela deve estar aberta");
+        colher(cx, &janela);
+
+        janela
+            .update(cx, |tela, _window, _cx| {
+                assert_eq!(tela.estado.candidatos.len(), 2);
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 A lupa abre no duplo clique e fecha no seguinte — sem mexer na marcação.
+    ///
+    /// No legado, o duplo clique **alternava a marcação**, contradizendo o clique
+    /// simples; foi um dos consertos da reescrita de 15/ago, e vale portar o
+    /// conserto, e não o defeito.
+    #[gpui::test]
+    fn a_lupa_abre_e_fecha_sem_mexer_na_marcacao(cx: &mut TestAppContext) {
+        let explorador = Arc::new(ExploradorDeMentira::responde(
+            "/cartao",
+            &["/cartao/a.NEF", "/cartao/b.NEF"],
+        ));
+        let janela = janela(cx, explorador, Arc::new(ImportadorDeMentira::default()));
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.abrir_origem("/cartao".into(), cx);
+            })
+            .expect("a janela deve estar aberta");
+        colher(cx, &janela);
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                let marcados = tela.estado.marcados();
+
+                tela.alternar_lupa(1, cx);
+                assert_eq!(tela.lupa_aberta(), Some(1));
+                assert_eq!(tela.estado.focado, Some(1), "e leva o foco junto");
+
+                tela.alternar_lupa(1, cx);
+                assert_eq!(tela.lupa_aberta(), None, "o segundo duplo clique fecha");
+
+                assert_eq!(
+                    tela.estado.marcados(),
+                    marcados,
+                    "abrir a lupa não pode marcar nem desmarcar nada"
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// A lupa de outra célula troca de foto em vez de fechar.
+    #[gpui::test]
+    fn a_lupa_troca_de_foto(cx: &mut TestAppContext) {
+        let explorador = Arc::new(ExploradorDeMentira::responde(
+            "/cartao",
+            &["/cartao/a.NEF", "/cartao/b.NEF"],
+        ));
+        let janela = janela(cx, explorador, Arc::new(ImportadorDeMentira::default()));
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.abrir_origem("/cartao".into(), cx);
+            })
+            .expect("a janela deve estar aberta");
+        colher(cx, &janela);
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.alternar_lupa(0, cx);
+                tela.alternar_lupa(1, cx);
+                assert_eq!(tela.lupa_aberta(), Some(1));
             })
             .expect("a janela deve estar aberta");
     }

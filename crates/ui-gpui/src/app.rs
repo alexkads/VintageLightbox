@@ -201,6 +201,10 @@ impl Aplicativo {
     /// Abre o modal de importação sobre a Biblioteca.
     pub fn importar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.importando = true;
+        // Cartões e recentes são pedidos a cada abertura: um cartão plugado
+        // depois de o app subir não apareceria numa lista buscada uma vez só.
+        self.importacao
+            .update(cx, |tela, cx| tela.pedir_origens(cx));
         // 🚨 O foco vai para o modal: as cinco teclas dele (`Enter`, `espaço`,
         // `⌘A`, setas) só chegam a quem está focado, e `track_focus` rastreia sem
         // conceder. Foi o que deixou o `Esc` da Revelação morto por dois commits.

@@ -107,6 +107,11 @@ pub enum Recado {
     Descritos(Vec<Descricao>),
     /// Os caminhos que já existem no catálogo.
     Duplicados(Vec<String>),
+    /// Os cartões montados e as origens usadas recentemente.
+    Origens {
+        cartoes: Vec<Origem>,
+        recentes: Vec<Origem>,
+    },
     /// A pasta que o seletor do sistema devolveu.
     OrigemEscolhida(String),
     /// A pasta de destino que o seletor devolveu.
@@ -121,6 +126,17 @@ pub enum Recado {
     SemEscolha,
     /// Algo falhou; a mensagem vai para a tela.
     Falhou(String),
+}
+
+/// Uma origem oferecida na lista: um cartão montado ou uma pasta usada antes.
+///
+/// ⚠️ **Não é a `ImportSource` do `domain`.** Aqui só interessam nome e caminho —
+/// o tipo e o id de lá são detalhes de quem detecta dispositivo, e carregá-los
+/// até a tela amarraria o modal ao repositório de dispositivos.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Origem {
+    pub nome: String,
+    pub caminho: String,
 }
 
 /// O que a leitura de metadados devolve, por arquivo.
@@ -168,6 +184,10 @@ pub struct Estado {
     pub focado: Option<usize>,
     /// De onde um Shift+clique conta o intervalo.
     pub ancora: Option<usize>,
+    /// Os cartões montados agora.
+    pub cartoes: Vec<Origem>,
+    /// As pastas de onde já se importou antes.
+    pub recentes: Vec<Origem>,
 }
 
 impl Estado {
@@ -389,6 +409,12 @@ pub fn aplicar(estado: &mut Estado, recado: Recado) -> Option<Seguimento> {
                     }
                 }
             }
+            None
+        }
+
+        Recado::Origens { cartoes, recentes } => {
+            estado.cartoes = cartoes;
+            estado.recentes = recentes;
             None
         }
 
@@ -866,6 +892,36 @@ mod testes {
             "solto.jpg",
             "caminho sem pasta nenhuma continua sendo o nome"
         );
+    }
+
+    /// As origens chegam sem mexer no que já está listado.
+    ///
+    /// 🔑 Elas chegam **depois** da abertura do modal (detectar cartão é ir ao
+    /// sistema de arquivos), e podem chegar com uma varredura já em curso — quem
+    /// abriu o modal e escolheu pasta pelo seletor não pode ver a grade se
+    /// esvaziar porque um cartão foi detectado.
+    #[test]
+    fn as_origens_chegam_sem_mexer_na_listagem() {
+        let mut estado = com_arquivos("/cartao", &["a.NEF"]);
+
+        aplicar(
+            &mut estado,
+            Recado::Origens {
+                cartoes: vec![Origem {
+                    nome: "NIKON D850".into(),
+                    caminho: "/Volumes/NIKON".into(),
+                }],
+                recentes: vec![Origem {
+                    nome: "Ensaio Maria".into(),
+                    caminho: "/Fotos/Maria".into(),
+                }],
+            },
+        );
+
+        assert_eq!(estado.cartoes.len(), 1);
+        assert_eq!(estado.recentes.len(), 1);
+        assert_eq!(estado.candidatos.len(), 1, "a listagem não se mexe");
+        assert_eq!(estado.origem.as_deref(), Some("/cartao"));
     }
 
     /// O destino escolhido entra nas opções, sem mexer na listagem.

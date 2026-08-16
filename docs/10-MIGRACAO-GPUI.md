@@ -994,9 +994,51 @@ que só aparece quando o cartão fica lento — e aí parece problema do cartão
 A chave no cache é `import::<caminho>` (a mesma decisão do legado): a tabela guarda as duas coisas, e
 um caminho de cartão sem prefixo poderia colidir com o id de uma foto.
 
-⬜ **Falta para fechar a fase 3**: a lupa (duplo clique mostrando a foto grande), a rolagem
-acompanhando as setas, e os cartões/origens recentes do lado "DE" — hoje a origem só vem do seletor
-de pasta.
+#### Cartões, lupa e rolagem ✅ — a fase 3 fecha
+
+**Cartões e origens recentes** são pedidos a cada abertura do modal, e não uma vez na construção: um
+cartão plugado depois de o app subir não apareceria numa lista buscada uma vez só, e o fotógrafo não
+tem por que saber que a lista é velha. Eles chegam **sem derrubar** o que está listado — a resposta
+pode voltar com uma varredura já em curso.
+
+⚠️ **A `Origem` daqui não é a `ImportSource` do `domain`**: só nome e caminho. O tipo e o id de lá são
+detalhes de quem detecta dispositivo, e carregá-los até a tela amarraria o modal ao repositório de
+dispositivos.
+
+🚨 **A rolagem acompanha as setas, e a posição é a da grade filtrada.** Sem ela, a seta parece não
+funcionar: o foco anda, a linha destacada sai da área visível, e quem aperta ↓ dez vezes vê
+exatamente nada acontecer. E rolar pelo índice do **acervo** pararia numa linha diferente da
+destacada quando "só novos" estivesse ligado — a rolagem e o destaque discordariam, e só em algumas
+listagens.
+
+**A lupa** abre no duplo clique e fecha no seguinte, sem tocar na marcação. 🔑 No legado o duplo
+clique **alternava a marcação**, contradizendo o clique simples — foi um dos consertos da reescrita de
+15/ago, e o que se porta é o conserto, não o defeito.
+
+⚠️ **Ela mostra a miniatura de 128px ampliada, e não a foto.** Ler o RAW inteiro para dar uma olhada
+custaria segundos por foto num cartão, e a lupa da importação existe para responder "é esta mesmo?",
+não para julgar foco. Quando precisar responder mais, é um preview maior que se pede — e não uma
+escala diferente da mesma imagem.
+
+---
+
+### ✅ Fase 3 concluída — 16/ago/2026
+
+| Item | Onde ficou |
+|---|---|
+| Estado e regras da grade | `importacao/estado.rs` — 24 testes, sem tela e sem disco |
+| Prévia do destino | `importacao/destino.rs` |
+| Portas para o disco | `importacao/explorador.rs` — explorar, importar, escolher pasta, gerar miniatura |
+| O modal | `importacao/tela.rs` |
+
+**A ordem das leituras**, que era a regra conquistada a preservar: varrer → descrever → duplicatas,
+com as miniaturas geradas só para o que está na tela. Há teste cobrando a sequência dos **pedidos**, e
+não só o resultado.
+
+⚠️ **O que fica de fora, e é decisão**: pausar e cancelar a importação existem no controller e **não
+têm botão** — nascem desligados, o que é melhor do que um botão que a tela não sabe desfazer. E a
+ordenação da grade não tem a coluna "tipo de mídia" separada em RAW+JPEG, porque o legado também não
+tem.
 
 ### Fase 4 — Impressão, multi-monitor, docking, atalhos (2–3 semanas)
 

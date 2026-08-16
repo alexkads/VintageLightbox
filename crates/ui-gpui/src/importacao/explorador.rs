@@ -21,12 +21,15 @@ use std::sync::Arc;
 use adapters::controllers::ImportController;
 use domain::value_objects::ImportOptions;
 
-use super::estado::{Descricao, Recado};
+use super::estado::{Descricao, Origem, Recado};
 
 /// O que a tela pede ao mundo de fora.
 pub trait Explorador: Send + Sync + 'static {
     /// Lista os arquivos de uma origem. Responde `Varrido` ou `Falhou`.
     fn varrer(&self, raiz: String, subpastas: bool, canal: Sender<Recado>);
+
+    /// Lista os cartões montados e as origens recentes. Responde `Origens`.
+    fn origens(&self, canal: Sender<Recado>);
 
     /// Lê metadados e confere duplicatas. Responde `Descritos` **e**
     /// `Duplicados` — dois recados, porque as duas leituras terminam em tempos
@@ -47,6 +50,28 @@ impl ExploradorDoDisco {
 }
 
 impl Explorador for ExploradorDoDisco {
+    fn origens(&self, canal: Sender<Recado>) {
+        let importacao = self.importacao.clone();
+
+        self.tokio.spawn(async move {
+            let (dispositivos, historico) = importacao.get_sources().await;
+            let converter = |fontes: Vec<domain::import_source::ImportSource>| {
+                fontes
+                    .into_iter()
+                    .map(|fonte| Origem {
+                        nome: fonte.name,
+                        caminho: fonte.path.to_string_lossy().to_string(),
+                    })
+                    .collect()
+            };
+
+            let _ = canal.send(Recado::Origens {
+                cartoes: converter(dispositivos),
+                recentes: converter(historico),
+            });
+        });
+    }
+
     fn varrer(&self, raiz: String, subpastas: bool, canal: Sender<Recado>) {
         let importacao = self.importacao.clone();
 
@@ -357,6 +382,7 @@ pub mod mentira {
         /// O que responder à próxima varredura, por raiz.
         pub varreduras: Mutex<Vec<(String, Vec<String>)>>,
         pub pedidos: Mutex<Vec<String>>,
+        pub cartoes: Mutex<Vec<Origem>>,
     }
 
     impl ExploradorDeMentira {
@@ -366,7 +392,7 @@ pub mod mentira {
                     raiz.to_string(),
                     arquivos.iter().map(|a| a.to_string()).collect(),
                 )]),
-                pedidos: Mutex::new(Vec::new()),
+                ..Default::default()
             }
         }
 
@@ -376,6 +402,17 @@ pub mod mentira {
     }
 
     impl Explorador for ExploradorDeMentira {
+        fn origens(&self, canal: Sender<Recado>) {
+            self.pedidos
+                .lock()
+                .expect("os pedidos")
+                .push("origens".into());
+            let _ = canal.send(Recado::Origens {
+                cartoes: self.cartoes.lock().expect("os cartões").clone(),
+                recentes: Vec::new(),
+            });
+        }
+
         fn varrer(&self, raiz: String, _subpastas: bool, canal: Sender<Recado>) {
             self.pedidos
                 .lock()
