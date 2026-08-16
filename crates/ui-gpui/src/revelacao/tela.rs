@@ -33,6 +33,7 @@ use crate::imagem::para_gpui;
 
 use super::controles::{Definicao, Secao, CONTROLES};
 use super::corte::{self, Alca};
+use super::curva;
 use super::histograma::Histograma;
 use super::historico::Historico;
 use super::persistencia::{self, Corte, Gravador};
@@ -114,6 +115,9 @@ pub struct Revelacao {
     /// O corte em edição. `None` é "fora do modo de corte" — e é a diferença
     /// entre a foto com overlay por cima e a foto sozinha.
     edicao: Option<Edicao>,
+    /// Se a tela está mostrando o "antes" — a foto sem nenhum ajuste, no mesmo
+    /// enquadramento. É o `\\` do legado.
+    mostrando_original: bool,
     /// O histograma da foto **como ela está na tela**. Recalculado junto com a
     /// exibição, e `None` enquanto não há foto.
     histograma: Option<Histograma>,
@@ -181,6 +185,8 @@ struct Aberta {
     /// processada. Sem origem não há o que revelar, e os sliders não têm sobre o
     /// que agir.
     origem: Option<Origem>,
+    /// A foto como saiu do cache, sem nenhum ajuste. É o "antes" do `\\`.
+    bruta: Option<image::DynamicImage>,
     /// O que o shader devolveu (ou a foto do cache, antes do primeiro resultado).
     /// É a foto **inteira**: o corte e o giro entram depois, na exibição.
     revelada: Option<image::DynamicImage>,
@@ -265,6 +271,7 @@ impl Revelacao {
             _gravacao: None,
             controles,
             edicao: None,
+            mostrando_original: false,
             histograma: None,
             angulo,
             palco: Bounds::default(),
@@ -335,6 +342,7 @@ impl Revelacao {
         self.aberta = Some(Aberta {
             foto,
             origem,
+            bruta: bruta.clone(),
             revelada: bruta,
             desenhada: None,
         });
@@ -678,6 +686,16 @@ impl Revelacao {
     /// milímetro reprocessaria a foto dezenas de vezes por segundo para produzir
     /// exatamente a mesma imagem.
     fn atualizar_exibicao(&mut self) {
+        self.refazer_exibicao(true);
+    }
+
+    /// O mesmo, sem tocar no histograma — para o "antes/depois", que troca a
+    /// imagem e mantém a régua.
+    fn atualizar_exibicao_mantendo_histograma(&mut self) {
+        self.refazer_exibicao(false);
+    }
+
+    fn refazer_exibicao(&mut self, medir: bool) {
         // No modo de corte a foto aparece inteira (girada e endireitada), com o
         // retângulo por cima; fora dele, recortada. É o `apply_crop_clip` do
         // legado.
@@ -688,19 +706,29 @@ impl Revelacao {
         let recortar = self.edicao.is_none();
 
         let Some(aberta) = self.aberta.as_mut() else {
-            self.histograma = None;
+            if medir {
+                self.histograma = None;
+            }
             return;
         };
 
-        let exibida = aberta
-            .revelada
-            .as_ref()
-            .map(|imagem| transformacao::aplicar(imagem, &corte, recortar));
+        // 🔑 O "antes" troca só a **fonte**, e não o enquadramento: comparar cor
+        // com a foto pulando de tamanho na tela não compara nada. É o que o
+        // legado faz — ele troca a textura e mantém o corte, que vive no viewer.
+        let fonte = if self.mostrando_original {
+            aberta.bruta.as_ref()
+        } else {
+            aberta.revelada.as_ref()
+        };
+
+        let exibida = fonte.map(|imagem| transformacao::aplicar(imagem, &corte, recortar));
 
         // 🔑 O histograma mede **o que está na tela**, e não a foto crua: com os
         // sliders mexidos, o histograma do cru descreveria uma imagem que ninguém
         // está vendo. É o que o legado faz (ele calcula depois do `process_image`).
-        self.histograma = exibida.as_ref().map(Histograma::da_imagem);
+        if medir {
+            self.histograma = exibida.as_ref().map(Histograma::da_imagem);
+        }
         aberta.desenhada = exibida.map(para_gpui);
     }
 
@@ -757,6 +785,37 @@ impl Revelacao {
         };
         edicao.corte = como(&edicao.corte);
         self.atualizar_exibicao();
+        cx.notify();
+    }
+
+    /// Alterna entre a foto revelada e a original. É o `\\` do legado.
+    ///
+    /// ⚠️ **Não mexe nos ajustes.** Os 42 sliders continuam onde estavam, e o
+    /// histograma continua o da revelada — quem está comparando quer ver a
+    /// diferença, e um histograma que pula junto tiraria a régua da comparação.
+    pub fn alternar_original(&mut self, cx: &mut Context<Self>) {
+        self.mostrando_original = !self.mostrando_original;
+        self.atualizar_exibicao_mantendo_histograma();
+        cx.notify();
+    }
+
+    pub fn mostrando_original(&self) -> bool {
+        self.mostrando_original
+    }
+
+    /// Devolve os 46 ajustes ao neutro. É o "Reset All" do painel do legado.
+    ///
+    /// 🔑 **O corte não entra.** Lá o `reset_edits` também não o toca: quem quer
+    /// desfazer enquadramento usa "Recomeçar", dentro do modo de corte. Misturar
+    /// os dois faria um botão de cor apagar trabalho de composição.
+    pub fn redefinir_ajustes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.gravar_o_que_estiver_pendente();
+
+        self.ajustes = Ajustes::default();
+        self.espalhar_nos_sliders(window, cx);
+        self.pedir_revelacao(cx);
+        self.historico.registrar(self.ajustes);
+        self.gravar();
         cx.notify();
     }
 
@@ -1132,7 +1191,16 @@ impl Revelacao {
                         .child("Sem GPU disponível — os ajustes não são aplicados"),
                 )
             })
+            .when(self.mostrando_original, |painel| {
+                painel.child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().warning)
+                        .child("Mostrando o original (\\ para voltar)"),
+                )
+            })
             .child(self.histograma(cx))
+            .child(self.curva_de_tons(cx))
             .children(self.barra_de_corte(cx))
             .child(self.presets(cx))
             .children(
@@ -1140,6 +1208,17 @@ impl Revelacao {
                     .into_iter()
                     .map(|secao| self.secao(secao, cx))
                     .collect::<Vec<_>>(),
+            )
+            .child(
+                div().pt(px(8.)).child(
+                    Button::new("redefinir-ajustes")
+                        .label("Redefinir ajustes")
+                        .xsmall()
+                        .w_full()
+                        .on_click(cx.listener(|tela, _ev, window, cx| {
+                            tela.redefinir_ajustes(window, cx);
+                        })),
+                ),
             )
     }
 
@@ -1326,6 +1405,83 @@ impl Revelacao {
             )
             .size_full(),
         )
+    }
+
+    /// A curva de tons: a diagonal tracejada e a curva de agora, por cima.
+    ///
+    /// 🔑 Desenhada como 100 segmentos horizontais de 1px — o GPUI não tem
+    /// primitiva de linha, e `paint_quad` é o que existe. Para uma curva que
+    /// atravessa 280px, um retângulo por passo é indistinguível de uma linha, e
+    /// custa o mesmo que o histograma ao lado.
+    fn curva_de_tons(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        const ALTURA: f32 = 120.0;
+
+        let pontos = curva::curva(&self.ajustes);
+        let fundo = cx.theme().background;
+        let borda = cx.theme().border;
+        let linha = cx.theme().primary;
+
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(2.))
+            .mb(px(6.))
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Curva de tons"),
+            )
+            .child(
+                div().h(px(ALTURA)).w_full().child(
+                    canvas(
+                        |_bounds, _window, _cx| {},
+                        move |bounds, _prepaint, window, _cx| {
+                            window.paint_quad(gpui::fill(bounds, fundo));
+
+                            let x0 = f32::from(bounds.origin.x);
+                            let y0 = f32::from(bounds.origin.y);
+                            let largura = f32::from(bounds.size.width);
+                            let altura = f32::from(bounds.size.height);
+                            let passo = largura / (pontos.len() - 1) as f32;
+
+                            // A diagonal de referência, pontilhada: sem ela não dá
+                            // para ver se a curva está levantando ou baixando.
+                            for i in (0..pontos.len()).step_by(3) {
+                                let t = i as f32 / (pontos.len() - 1) as f32;
+                                window.paint_quad(gpui::fill(
+                                    Bounds {
+                                        origin: gpui::point(
+                                            px(x0 + t * largura),
+                                            px(y0 + (1.0 - t) * altura),
+                                        ),
+                                        size: gpui::size(px(2.), px(1.)),
+                                    },
+                                    borda,
+                                ));
+                            }
+
+                            for i in 0..pontos.len() - 1 {
+                                let y_a = y0 + (1.0 - pontos[i]) * altura;
+                                let y_b = y0 + (1.0 - pontos[i + 1]) * altura;
+                                // O segmento vira um retângulo que cobre a subida
+                                // entre os dois pontos: sem isso, uma curva
+                                // íngreme apareceria como escada de pontos soltos.
+                                let topo = y_a.min(y_b);
+                                let alta = (y_a - y_b).abs().max(2.0);
+                                window.paint_quad(gpui::fill(
+                                    Bounds {
+                                        origin: gpui::point(px(x0 + i as f32 * passo), px(topo)),
+                                        size: gpui::size(px(passo.max(1.0)), px(alta)),
+                                    },
+                                    linha,
+                                ));
+                            }
+                        },
+                    )
+                    .size_full(),
+                ),
+            )
     }
 
     /// A lista de presets: os de sistema e os do usuário, como no legado.
@@ -2788,6 +2944,97 @@ mod testes {
                 assert!(tela.histograma.is_none());
             })
             .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 O "antes" troca a foto e **não** mexe nos ajustes.
+    ///
+    /// Se ele zerasse os sliders para mostrar o original, voltar do "antes"
+    /// exigiria refazer a revelação inteira — e o `\\` seria a tecla mais cara do
+    /// app em vez da mais barata.
+    #[gpui::test]
+    fn o_antes_troca_a_foto_e_nao_os_ajustes(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_cinza())
+            .expect("gravar preview");
+
+        let janela = janela(cx, previews);
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("retrato.jpg"), window, cx);
+            })
+            .expect("a janela deve estar aberta");
+
+        arrastar(cx, &janela, 0, 1.5);
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                assert!(!tela.mostrando_original());
+
+                tela.alternar_original(cx);
+                assert!(tela.mostrando_original());
+                assert_eq!(
+                    tela.ajustes().exposure,
+                    1.5,
+                    "os sliders continuam onde estavam"
+                );
+
+                tela.alternar_original(cx);
+                assert!(!tela.mostrando_original());
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 "Redefinir ajustes" zera os 46 e **não** toca no corte.
+    ///
+    /// No legado o `reset_edits` também não o toca: quem quer desfazer
+    /// enquadramento usa "Recomeçar", dentro do modo de corte. Misturar os dois
+    /// faria um botão de cor apagar trabalho de composição.
+    #[gpui::test]
+    fn redefinir_zera_os_ajustes_e_preserva_o_corte(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-cortada.jpg", &foto_cinza())
+            .expect("gravar preview");
+
+        let gravador = Arc::new(GravadorDeMentira::default());
+        let janela = com_gravador(cx, previews, gravador.clone());
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(
+                    PhotoViewModel {
+                        edit_exposure: Some(2.0),
+                        edit_crop_x: Some(0.2),
+                        edit_crop_width: Some(0.5),
+                        ..foto("cortada.jpg")
+                    },
+                    window,
+                    cx,
+                );
+
+                tela.redefinir_ajustes(window, cx);
+
+                assert_eq!(tela.ajustes().exposure, 0.0);
+                assert_eq!(tela.ajustes().contrast, 1.0, "o neutro, e não zero");
+                assert_eq!(
+                    tela.controles[0].estado.read(cx).value().start(),
+                    0.0,
+                    "os sliders voltam junto"
+                );
+                assert_eq!(tela.corte.x, Some(0.2), "o corte fica");
+                assert!(tela.pode_desfazer(), "redefinir é um passo de histórico");
+            })
+            .expect("a janela deve estar aberta");
+
+        let gravado = gravador.gravado();
+        assert_eq!(gravado.len(), 1);
+        assert_eq!(gravado[0].1.exposure, 0.0);
+        assert_eq!(
+            gravado[0].2.x,
+            Some(0.2),
+            "e vai ao banco com o corte junto"
+        );
     }
 
     /// 🚨 O arrasto da foto anterior não vaza para a próxima **pelo banco**.

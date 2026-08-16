@@ -20,7 +20,13 @@ use crate::revelacao::tela::Revelacao;
 
 actions!(
     vintagelightbox,
-    [VoltarParaBiblioteca, Desfazer, Refazer, AlternarCorte]
+    [
+        VoltarParaBiblioteca,
+        Desfazer,
+        Refazer,
+        AlternarCorte,
+        AlternarOriginal
+    ]
 );
 
 /// O contexto de teclado da raiz.
@@ -45,6 +51,8 @@ pub fn init(cx: &mut gpui::App) {
         gpui::KeyBinding::new("cmd-z", Desfazer, Some(CONTEXTO)),
         // `R` de "recortar", a mesma tecla do legado (`keyboard.rs`).
         gpui::KeyBinding::new("r", AlternarCorte, Some(CONTEXTO)),
+        // `\` mostra o antes/depois, como no legado.
+        gpui::KeyBinding::new("\\", AlternarOriginal, Some(CONTEXTO)),
     ]);
 }
 
@@ -184,6 +192,19 @@ impl Aplicativo {
         }
     }
 
+    /// `\` alterna entre a foto revelada e a original.
+    fn ao_alternar_original(
+        &mut self,
+        _acao: &AlternarOriginal,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.tela == Tela::Revelacao {
+            self.revelacao
+                .update(cx, |tela, cx| tela.alternar_original(cx));
+        }
+    }
+
     fn ao_voltar(
         &mut self,
         _acao: &VoltarParaBiblioteca,
@@ -260,6 +281,7 @@ impl Render for Aplicativo {
             .on_action(cx.listener(Self::ao_desfazer))
             .on_action(cx.listener(Self::ao_refazer))
             .on_action(cx.listener(Self::ao_alternar_corte))
+            .on_action(cx.listener(Self::ao_alternar_original))
             .flex()
             .flex_col()
             .size_full()
@@ -654,6 +676,49 @@ mod testes {
         janela
             .update(cx, |app, _window, cx| {
                 assert!(!app.revelacao.read(cx).cortando(), "e fechar de volta");
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 A tecla `\` alterna o antes/depois.
+    #[gpui::test]
+    fn a_tecla_barra_invertida_mostra_o_original(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_vermelha())
+            .expect("gravar preview");
+        cx.update(gpui_component::init);
+        cx.update(init);
+
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            |window, cx| {
+                Aplicativo::novo(
+                    acervo(),
+                    previews,
+                    Arc::new(GravadorDeMentira::default()),
+                    Arc::new(GuardaDeMentira::default()),
+                    Vec::new(),
+                    window,
+                    cx,
+                )
+            }
+        });
+
+        janela
+            .update(cx, |app, window, cx| {
+                app.biblioteca
+                    .update(cx, |tela, cx| tela.selecionar(Some(1), cx));
+                app.revelar(window, cx);
+            })
+            .expect("a janela deve estar aberta");
+
+        let mut visual = gpui::VisualTestContext::from_window(janela.into(), cx);
+        visual.simulate_keystrokes("\\");
+
+        janela
+            .update(cx, |app, _window, cx| {
+                assert!(app.revelacao.read(cx).mostrando_original());
             })
             .expect("a janela deve estar aberta");
     }

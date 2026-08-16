@@ -826,14 +826,84 @@ absoluto ancorado nela se mede pela caixa **com** o respiro, enquanto a foto ocu
 dois sistemas ficariam deslocados de 24px — pouco, e o suficiente para parecer erro de mira de quem
 está clicando.
 
-⚠️ **O que ainda não existe**: girar e espelhar têm a geometria pronta e **não têm botão**, porque a
-foto exibida ainda não é girada — um botão que muda um número invisível é pior do que botão nenhum.
-É a próxima entrega, junto com a foto aparecer **cortada** fora do modo de corte (hoje ela aparece
-inteira, e é a divergência visível que sobra em relação ao legado).
+✅ **Girar, espelhar, endireitar e as proporções entraram junto com a exibição transformada** (logo
+abaixo) — antes disso seriam botões mexendo num número invisível.
 
 ⚠️ **E o corte não entra no histórico.** `Cmd+Z` desfaz ajuste, não enquadramento. É o mesmo que o
 legado entrega — lá o `EditSnapshot` guarda `crop_settings` e nem `undo` nem `redo` o leem —, mas aqui
 é por ausência, e não por engano.
+
+#### A foto exibida ✅ — e o legado tem duas ordens diferentes para a mesma coisa
+
+A última divergência visível: até aqui a Revelação nova mostrava a foto inteira mesmo com corte
+gravado. Quem enquadrou no app de egui via o corte sumir ao abrir no novo.
+
+🔑 **A ordem sai do `image_viewer.rs`, e não de uma escolha nossa.** O legado desenha o resultado como
+uma malha cujas UVs vão do quadro para a textura — descentraliza, corrige o aspecto, gira por
+`-ângulo`, desfaz o giro de 90°, desfaz os espelhos. Lendo ao contrário, é o caminho de ida:
+
+```text
+original → espelhos → giro de 90° → endireitamento → recorte
+```
+
+⚠️ **E `ImageProcessor::apply_crop`, do mesmo legado, faz outra coisa**: recorta primeiro, espelha
+depois, gira por último — e **ignora o ângulo**. É a função que gera miniatura, e é por isso que uma
+foto endireitada aparece torta na grade e direita no viewer. Aqui vale a do viewer: é a Revelação que
+esta tela porta.
+
+O endireitamento pergunta "de onde vem este pixel" em vez de girar a imagem inteira e recortar depois:
+sem imagem intermediária, e o que cai fora gruda na borda (o `clamp` da malha de lá) em vez de virar
+buraco transparente. **Ângulo zero não passa pela reamostragem** — bilinear com deslocamento inteiro
+ainda mistura vizinho, e toda foto sairia um fio menos nítida sem ninguém ter pedido.
+
+#### Histograma ✅ e curva de tons ✅ — os dois desenhados com `paint_quad`
+
+O histograma mede **a foto que está na tela** (o legado calcula depois do `process_image`), com a
+altura normalizada pelo maior dos três canais — normalizar cada um pelo próprio máximo faria uma foto
+azul-escura desenhar o vermelho tão alto quanto o azul, e o instrumento passaria a mentir sobre a
+única coisa que ele existe para mostrar.
+
+🔑 **256 colunas × 3 canais não podem ser 768 `div`s**: cada um é um nó de layout recalculado a cada
+quadro, num painel que hoje tem menos de cem. `canvas` + `paint_quad` é o análogo do `painter` do egui,
+e a curva de tons usa o mesmo caminho (101 pontos, a diagonal pontilhada e a curva por cima).
+
+⚠️ **A curva de tons não é a dos `tone_curve_*`.** Ela lê exposição, contraste, altas luzes, sombras,
+brancos e pretos e desenha o efeito combinado — é a mesma aproximação do `tone_curve.rs` de lá,
+constante por constante, e **não** é o que o shader faz. Copiar a aproximação é o que mantém os dois
+apps mostrando o mesmo desenho.
+
+#### Antes/depois ✅ e redefinir ✅
+
+`\` troca a **fonte** da imagem e mantém o enquadramento e os sliders: comparar cor com a foto pulando
+de tamanho não compara nada, e um histograma que pulasse junto tiraria a régua da comparação.
+"Redefinir ajustes" zera os 46 e **não** toca no corte — no legado o `reset_edits` também não toca, e
+misturar os dois faria um botão de cor apagar trabalho de composição.
+
+---
+
+### ✅ Fase 2 concluída — 16/ago/2026
+
+| Item que a fase listava | Onde ficou |
+|---|---|
+| Sliders (Básico, Detalhe, HSL ×3, Lente) | `controles.rs` — 42 numa tabela, mais o de endireitar |
+| Histograma | `histograma.rs` + `paint_quad` |
+| Curva de tons | `curva.rs` — o gráfico, que é o que o legado tem |
+| Crop overlay | `corte.rs` (geometria) + o overlay e a barra em `tela.rs` |
+| Undo/redo | `historico.rs` — um passo por gesto |
+| Presets | `presets.rs` — listar, aplicar, salvar |
+| **Persistência** (não estava na lista) | `persistencia.rs` — sem ela nada disso se guarda |
+
+**Critério de saída** (igualdade de pixel entre os motores): garantido por três testes em
+`processador.rs` — o WGSL é o mesmo arquivo byte a byte, o neutro devolve o pixel intacto, e a
+exposição atravessa com o valor certo.
+
+⚠️ **O que a fase 2 encontrou e não consertou** — quatro defeitos do legado, todos presos em teste e
+registrados no STATUS: o `uniform` de 28 campos para 46 (18 sliders sem efeito, 5 aplicando outra
+coisa); a exportação que descarta 31 ajustes; os cinco presets de sistema numa escala que não é a do
+shader; e o `undo` que guarda o corte e não o restaura.
+
+⚠️ **O que fica de dívida própria**: o preset recém-salvo com id local, o corte fora do histórico, e o
+carregamento síncrono da foto na abertura (o mesmo que a fase 1 deixou).
 
 ### Fase 3 — Importação (2–3 semanas)
 
