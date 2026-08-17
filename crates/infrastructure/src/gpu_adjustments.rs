@@ -898,6 +898,60 @@ mod testes {
         );
     }
 
+    /// ✅ **As quatro zonas da curva de tons movem a foto, cada uma na sua.**
+    ///
+    /// 🚨 **O shader sempre as aplicou, e nada as escrevia** — nem aqui, nem no
+    /// app de egui. Era o oposto dos 19 sliders inertes: ali o controle existia
+    /// sem efeito, aqui o efeito existia sem controle. Os dois lados do mesmo
+    /// tipo de defeito, e nenhum dos dois falha em lugar nenhum.
+    ///
+    /// A prova de que cada uma respeita a própria faixa é feita sobre cinzas de
+    /// níveis diferentes: a zona das sombras (centro 0,125) tem de mexer num
+    /// cinza escuro e deixar um claro em paz.
+    #[test]
+    fn cada_zona_da_curva_de_tons_mexe_na_sua_faixa() {
+        let mut motor = motor_pronto();
+
+        let escuro = cinza(16, 32); // ~0,125
+        let claro = cinza(16, 223); // ~0,875
+
+        let com_sombras = Ajustes {
+            tone_curve_shadows: 60.0,
+            ..Default::default()
+        };
+        let com_altas = Ajustes {
+            tone_curve_highlights: 60.0,
+            ..Default::default()
+        };
+
+        let escuro_neutro = revelar_e_colher(&mut motor, escuro.clone(), Ajustes::default());
+        let claro_neutro = revelar_e_colher(&mut motor, claro.clone(), Ajustes::default());
+
+        let escuro_com_sombras = revelar_e_colher(&mut motor, escuro.clone(), com_sombras);
+        assert_ne!(
+            escuro_com_sombras, escuro_neutro,
+            "a zona das sombras não alcançou um cinza de nível 32"
+        );
+
+        let claro_com_sombras = revelar_e_colher(&mut motor, claro.clone(), com_sombras);
+        assert_eq!(
+            claro_com_sombras, claro_neutro,
+            "a zona das sombras alcançou um cinza de nível 223 — a faixa dela vazou"
+        );
+
+        let claro_com_altas = revelar_e_colher(&mut motor, claro, com_altas);
+        assert_ne!(
+            claro_com_altas, claro_neutro,
+            "a zona das altas luzes não alcançou um cinza de nível 223"
+        );
+
+        let escuro_com_altas = revelar_e_colher(&mut motor, escuro, com_altas);
+        assert_eq!(
+            escuro_com_altas, escuro_neutro,
+            "a zona das altas luzes alcançou um cinza de nível 32"
+        );
+    }
+
     /// ✅ **Os 3 controles de Lente movem a foto** — os últimos que faltavam.
     ///
     /// 🔑 **Com estes, os 42 sliders do painel movem a foto.** Eram 23 na manhã

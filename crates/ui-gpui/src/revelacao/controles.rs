@@ -42,11 +42,15 @@ use super::processador::Ajustes;
 /// Os grupos do painel, na ordem em que aparecem.
 ///
 /// A ordem e os nomes são os do `crates/ui` (`dock_viewer.rs`): Básico, Curva de
-/// tons, Detalhe, HSL/Cor, HSL/Luminância, HSL/Matiz, Lente. A curva de tons não
-/// tem entrada aqui porque não tem controle nenhum (ver o topo do arquivo).
+/// tons, Detalhe, HSL/Cor, HSL/Luminância, HSL/Matiz, Lente.
+///
+/// ✅ **A curva de tons ganhou controles em 17/ago/2026.** Ela existia no nome da
+/// seção do legado e em quatro campos que o shader aplicava — sem que nada os
+/// escrevesse, em nenhum dos dois apps.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Secao {
     Basico,
+    CurvaDeTons,
     Detalhe,
     HslCor,
     HslLuminancia,
@@ -55,8 +59,9 @@ pub enum Secao {
 }
 
 impl Secao {
-    pub const TODAS: [Secao; 6] = [
+    pub const TODAS: [Secao; 7] = [
         Secao::Basico,
+        Secao::CurvaDeTons,
         Secao::Detalhe,
         Secao::HslCor,
         Secao::HslLuminancia,
@@ -67,6 +72,7 @@ impl Secao {
     pub fn rotulo(&self) -> &'static str {
         match self {
             Secao::Basico => "Básico",
+            Secao::CurvaDeTons => "Curva de tons",
             Secao::Detalhe => "Detalhe",
             Secao::HslCor => "HSL / cor",
             Secao::HslLuminancia => "HSL / luminância",
@@ -136,7 +142,26 @@ macro_rules! hsl {
     };
 }
 
-/// Os 42 controles.
+/// As quatro zonas da curva de tons.
+///
+/// A faixa é -100 a 100, como no Lightroom, e é a mesma que o shader espera: ele
+/// multiplica por `0.01` para virar fração.
+macro_rules! curva {
+    ($rotulo:literal, $campo:ident) => {
+        Definicao {
+            secao: Secao::CurvaDeTons,
+            rotulo: $rotulo,
+            minimo: -100.0,
+            maximo: 100.0,
+            casas: 0,
+            com_sinal: true,
+            aplicar: |a, v| a.$campo = v,
+            ler: |a| a.$campo,
+        }
+    };
+}
+
+/// Os 46 controles.
 ///
 /// ⚠️ **As faixas são as do `crates/ui`**, lidas uma a uma de
 /// `docking/dock_viewer.rs`. Não são arredondamentos bonitos: contraste vai de 0
@@ -257,6 +282,19 @@ pub const CONTROLES: &[Definicao] = &[
         aplicar: |a, v| a.saturation = v,
         ler: |a| a.saturation,
     },
+    // -------------------------------------------------- Curva de tons
+    // As quatro zonas paramétricas do Lightroom, e as quatro que o shader já
+    // aplicava sozinho: sombras (centro 0,125), escuros (0,375), claros (0,625)
+    // e altas luzes (0,875), cada uma com meia-largura de 0,25.
+    //
+    // 🚨 **Elas existiam no `Ajustes` e no shader desde sempre, e nenhum controle
+    // as escrevia** — nem aqui, nem no app de egui, cuja seção "Tone Curve"
+    // desenhava um gráfico a partir dos ajustes do Básico e não tocava nos
+    // parâmetros que levam o nome dela.
+    curva!("Sombras", tone_curve_shadows),
+    curva!("Escuros", tone_curve_darks),
+    curva!("Claros", tone_curve_lights),
+    curva!("Altas luzes", tone_curve_highlights),
     // --------------------------------------------------------------- Detalhe
     Definicao {
         secao: Secao::Detalhe,
@@ -454,23 +492,27 @@ mod testes {
         }
     }
 
-    /// 🚨 São 42 controles para 46 ajustes, e a diferença é a curva de tons.
+    /// ✅ **Um controle por ajuste: 46 e 46.**
     ///
-    /// Este teste é a trava contra o impulso de "completar" a tabela. Os quatro
-    /// `tone_curve_*` **não têm controle no legado** — só preset, undo/redo e
-    /// carga do banco os escrevem. Dar slider a eles é feature nova, e feature
-    /// nova torna impossível saber se uma diferença entre os apps é defeito de
-    /// porte ou escopo (§7.1).
+    /// 🚨 **Eram 42 para 46 até 17/ago/2026**, e a diferença era a curva de tons:
+    /// os quatro `tone_curve_*` existiam no `Ajustes`, o shader os aplicava, e
+    /// **nada os escrevia** — nem aqui, nem no app de egui, cuja seção "Tone
+    /// Curve" desenhava um gráfico a partir dos ajustes do Básico sem tocar nos
+    /// parâmetros que levam o nome dela.
     ///
-    /// Se um dia o legado ganhar esses controles, este número muda junto — e o
-    /// teste falhando é o lembrete de conferir lá antes.
+    /// O teste antigo travava o número em 42 de propósito, contra o impulso de
+    /// "completar a tabela": enquanto o alvo era o app antigo, dar slider a eles
+    /// era feature nova, e feature nova tornava impossível separar defeito de
+    /// porte de escopo divergente. O alvo passou a ser o Lightroom, que **tem**
+    /// esses quatro controles, e a trava virou o contrário: agora ela cobra que
+    /// nenhum ajuste fique sem quem o escreva.
     #[test]
-    fn a_curva_de_tons_continua_sem_controle() {
-        assert_eq!(CONTROLES.len(), 42);
+    fn todo_ajuste_tem_um_controle() {
+        assert_eq!(CONTROLES.len(), 46);
         assert_eq!(
             std::mem::size_of::<Ajustes>() / 4,
-            46,
-            "os 4 que faltam são os `tone_curve_*`"
+            CONTROLES.len(),
+            "há ajuste sem controle, ou controle a mais"
         );
     }
 

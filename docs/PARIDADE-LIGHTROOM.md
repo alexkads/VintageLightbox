@@ -55,7 +55,7 @@ vez de deixá-la sair limpa.
 
 ---
 
-## Revelação — ✅ **os 42 controles movem a foto**
+## Revelação — ✅ **os 46 controles movem a foto**
 
 | Seção | Controles | Estado |
 |---|--:|---|
@@ -65,7 +65,7 @@ vez de deixá-la sair limpa.
 | HSL / matiz (8 canais) | 8 | ✅ **desde 17/ago** — giram a cor, com o portão do cinza |
 | HSL / luminância (8 canais) | 8 | ✅ **desde 17/ago** |
 | Lente (distorção, vinheta, meio da vinheta) | 3 | ✅ **desde 17/ago** — a distorção reamostra; a vinheta sombreia por posição |
-| Curva de tons paramétrica | 0 | 🚨 o shader **aplica** os 4 `tone_curve_*` e **nenhum controle os escreve** — o gráfico da tela é desenhado a partir dos ajustes do Básico |
+| Curva de tons paramétrica (sombras, escuros, claros, altas luzes) | 4 | ✅ **desde 17/ago** — e o gráfico passou a incluí-las, com a conta do shader |
 
 🔑 **Eram 23 na manhã de 17/ago, e foram dois defeitos em sequência, não um.** Primeiro o
 `struct Params` do WGSL declarava 28 campos para os 46 que a CPU manda, e o `uniform` casa por
@@ -84,7 +84,7 @@ de ser **exata no inteiro**, senão o neutro passa a mover pixel.
 | | |
 |---|---|
 | ⬜ **Ajustes locais** — pincel, gradiente, radial, máscaras | é o que separa "filtro" de "revelação" no Lightroom |
-| ⬜ **Curva de tons por ponto** (a de arrastar) | existe só o desenho |
+| ⬜ **Curva de tons por ponto** (a de arrastar) | a paramétrica existe; a de arrastar ponto, não |
 | ⬜ **Calibração de câmera / perfis** | |
 | ⬜ **Remoção de manchas** | há um `inpainting/` na infraestrutura, sem tela |
 | ✅ **Cópia de ajustes entre fotos** | **desde 17/ago** — `Cmd+Shift+C`/`Cmd+Shift+V`, da Biblioteca, valendo para a seleção inteira. Cada foto conserva o próprio enquadramento |
@@ -149,7 +149,7 @@ galeria do cliente**, e o que é defeito visível na tela.
 | 3 | ~~**Marca d'água e redimensionamento**~~ | ✅ **feito em 17/ago** — dois modos: entrega final e prévia da galeria |
 | 4 | ~~**Coleções na tela**~~ | ✅ **feito em 17/ago** — faltavam o controller e a tela, não o backend |
 | 5 | ~~**Copiar/colar revelação entre fotos**~~ | ✅ **feito em 17/ago** |
-| 6 | **A curva de tons ganha controles** | o shader já aplica os 4 `tone_curve_*`; falta quem escreva |
+| 6 | ~~**A curva de tons ganha controles**~~ | ✅ **feito em 17/ago** |
 | 7 | **DNG com perdas** | compilar a LibRaw com libjpeg, ou cair na prévia embutida |
 | 8 | **Imprimir de verdade, ou tirar o botão** | um dos dois — o que não pode é continuar anunciando |
 
