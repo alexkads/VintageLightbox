@@ -17,6 +17,7 @@ use infrastructure::cache::preview_manager::PreviewManager;
 
 use super::filtros::{indices_visiveis, FiltroDeSinalizador, Filtros, NotaMinima};
 use super::grade::{colunas_que_cabem, fotos_da_linha, linhas_necessarias};
+use super::informacoes::{estatisticas, estrelas};
 use super::marcacao::{cor_ao_teclar, sinalizador_ao_teclar, Marca, Marcador};
 use super::miniaturas::{capacidade_para, CacheDeMiniaturas, Miniatura};
 use super::pastas::{pastas_do_acervo, Pasta};
@@ -31,6 +32,13 @@ const PASSO: f32 = LADO_DO_ITEM + ESPACAMENTO;
 
 /// Largura da coluna de pastas.
 const LADO_DA_ARVORE: f32 = 220.0;
+
+/// Largura da coluna de informações, à direita.
+///
+/// É o painel `Metadata` do dock do legado, mais a parte legível do `Quick
+/// Develop` — nota e cor da foto. Aqui ele é fixo, e lá é uma aba arrastável
+/// (a decisão está registrada em docs/10-MIGRACAO-GPUI.md, fase 4).
+const LADO_DAS_INFORMACOES: f32 = 240.0;
 
 pub struct Biblioteca {
     /// `Arc` porque o closure do `uniform_list` é `'static` e precisa levar as
@@ -115,7 +123,11 @@ fn linhas_visiveis(window: &Window) -> usize {
 /// leitura solta no meio do `render`.
 fn largura_util(window: &Window) -> f32 {
     const MARGEM_LATERAL: f32 = 16.0;
-    f32::from(window.viewport_size().width) - MARGEM_LATERAL - LADO_DA_ARVORE
+    // 🚨 **As duas colunas entram na conta.** A grade fica entre elas, e contar
+    // só uma faria `colunas_que_cabem` responder mais colunas do que cabem — o
+    // sintoma é a última coluna cortada pela borda, que é o mesmo defeito que a
+    // árvore de pastas causou quando entrou.
+    f32::from(window.viewport_size().width) - MARGEM_LATERAL - LADO_DA_ARVORE - LADO_DAS_INFORMACOES
 }
 
 impl Biblioteca {
@@ -618,6 +630,136 @@ impl Biblioteca {
             .child(div().flex().gap(px(4.)).children(cores))
     }
 
+    /// O painel da direita: a foto selecionada e o retrato do acervo.
+    ///
+    /// Junta os dois painéis que no legado são abas do dock — `Metadata` (info da
+    /// foto e estatísticas) e a parte legível do `Quick Develop` (nota e cor).
+    ///
+    /// 🚨 **O `Quick Develop` de lá promete mais do que faz**: ele desenha a
+    /// fileira de cores com `ColorLabels::show(ui, &None, false)` — a cor da foto
+    /// **não** é passada, e o `false` desliga o clique. A fileira aparece sempre
+    /// vazia e não responde a nada, num painel que o nome diz ser para revelar
+    /// rápido. Aqui a cor é a da foto, e continua sem clique: quem marca cor são
+    /// as teclas `6`–`9`.
+    fn painel_de_informacoes(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let foto = self.selecionada.map(|i| &self.fotos[i]);
+        let numeros = estatisticas(&self.fotos);
+        let maior = numeros.por_nota.iter().copied().max().unwrap_or(0).max(1);
+
+        div()
+            .w(px(LADO_DAS_INFORMACOES))
+            .flex_none()
+            .flex()
+            .flex_col()
+            .gap(px(10.))
+            .p(px(12.))
+            .border_l_1()
+            .border_color(cx.theme().border)
+            .child(rotulo_do_grupo("foto", cx))
+            .child(match foto {
+                Some(foto) => div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(2.))
+                    .text_xs()
+                    .child(
+                        div()
+                            .truncate()
+                            .child(SharedString::from(foto.name.clone())),
+                    )
+                    .child(linha_de_dado("data", &foto.date, cx))
+                    .child(linha_de_dado("câmera", &foto.camera, cx))
+                    .child(linha_de_dado("exposição", &foto.exposure, cx))
+                    .child(linha_de_dado("nota", &estrelas(foto.rating), cx))
+                    .child(linha_de_dado(
+                        "cor",
+                        foto.color_label.as_deref().unwrap_or("—"),
+                        cx,
+                    ))
+                    .into_any_element(),
+                None => div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Nenhuma foto selecionada")
+                    .into_any_element(),
+            })
+            .child(rotulo_do_grupo("acervo", cx))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(3.))
+                    // Seis barras são seis `div`s, e isso é barato — o histograma
+                    // da Revelação virou `canvas` porque lá são 768. A régua é o
+                    // número de nós por quadro, não o desenho ser um gráfico.
+                    .children((0..=5).rev().map(|nota: usize| {
+                        let quantas = numeros.por_nota[nota];
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(6.))
+                            .text_xs()
+                            .child(
+                                div()
+                                    .w(px(46.))
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(SharedString::from(if nota == 0 {
+                                        "sem nota".to_string()
+                                    } else {
+                                        estrelas(nota as i32)
+                                    })),
+                            )
+                            .child(
+                                div()
+                                    .h(px(8.))
+                                    // A barra é proporcional à **maior** contagem,
+                                    // e não ao total: com 2.000 fotos e 12 de
+                                    // cinco estrelas, proporcional ao total todas
+                                    // as barras seriam um fio.
+                                    .w(px(120.0 * quantas as f32 / maior as f32))
+                                    .min_w(px(1.))
+                                    .rounded(px(2.))
+                                    .bg(cx.theme().primary),
+                            )
+                            .child(
+                                div()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(SharedString::from(quantas.to_string())),
+                            )
+                    })),
+            )
+            .child(rotulo_do_grupo("câmeras", cx))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(2.))
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .children(if numeros.cameras.is_empty() {
+                        vec![div().child("nenhuma câmera conhecida").into_any_element()]
+                    } else {
+                        numeros
+                            .cameras
+                            .iter()
+                            // ⚠️ **As cinco aparecem com nome.** O legado desenha
+                            // cinco barras e escreve só três nomes embaixo — as
+                            // duas últimas ficam anônimas num gráfico sem rótulo
+                            // de eixo.
+                            .map(|(nome, quantas)| {
+                                div()
+                                    .flex()
+                                    .justify_between()
+                                    .gap(px(6.))
+                                    .child(div().truncate().child(SharedString::from(nome.clone())))
+                                    .child(SharedString::from(quantas.to_string()))
+                                    .into_any_element()
+                            })
+                            .collect::<Vec<_>>()
+                    }),
+            )
+    }
+
     /// A faixa de miniaturas do rodapé.
     ///
     /// Mostra a **vizinhança da selecionada**, e não o acervo inteiro: o
@@ -788,6 +930,26 @@ fn rotulo_do_grupo(texto: &'static str, cx: &App) -> impl IntoElement {
         .text_xs()
         .text_color(cx.theme().muted_foreground)
         .child(texto)
+}
+
+/// Uma linha "rótulo: valor" do painel de informações.
+///
+/// Vazio vira travessão, e não linha em branco: o campo existir e estar vazio é
+/// informação — o EXIF não trouxe aquilo — e uma linha em branco parece falha de
+/// desenho.
+fn linha_de_dado(rotulo: &'static str, valor: &str, cx: &App) -> impl IntoElement {
+    let valor = if valor.trim().is_empty() {
+        "—".to_string()
+    } else {
+        valor.to_string()
+    };
+
+    div()
+        .flex()
+        .justify_between()
+        .gap(px(6.))
+        .child(div().text_color(cx.theme().muted_foreground).child(rotulo))
+        .child(div().truncate().child(SharedString::from(valor)))
 }
 
 /// Um botão de filtro, aceso quando é o escolhido.
@@ -1007,7 +1169,8 @@ impl Render for Biblioteca {
                         })
                         .flex_1()
                         .p(px(8.)),
-                    ),
+                    )
+                    .child(self.painel_de_informacoes(cx)),
             )
             .child(self.filmstrip(cx))
     }
@@ -1096,6 +1259,30 @@ mod testes {
             |window, cx| Biblioteca::nova(fotos, previews, marcador, window, cx)
         });
         (janela, marcador, dir)
+    }
+
+    /// 🚨 A grade desconta **as duas** colunas laterais.
+    ///
+    /// Contar só a das pastas faria `colunas_que_cabem` responder mais colunas do
+    /// que cabem, e o sintoma é a última coluna cortada pela borda — o mesmo
+    /// defeito que a árvore de pastas causou quando entrou. Sem este teste, o
+    /// painel novo passaria despercebido até alguém abrir numa janela estreita.
+    #[gpui::test]
+    fn a_grade_desconta_as_duas_colunas_laterais(cx: &mut TestAppContext) {
+        let (janela, _marcador, _dir) = tela_com(cx, acervo_grande());
+        let visual = gpui::VisualTestContext::from_window(janela.into(), cx);
+        visual.simulate_resize(gpui::size(px(1200.), px(800.)));
+
+        janela
+            .update(cx, |_tela, window, _cx| {
+                let util = largura_util(window);
+                assert!(
+                    util <= 1200.0 - LADO_DA_ARVORE - LADO_DAS_INFORMACOES,
+                    "a largura útil tem de caber entre as duas colunas: {util}"
+                );
+                assert!(util > 0.0);
+            })
+            .expect("a janela deve estar aberta");
     }
 
     /// `Cmd+clique` põe e tira uma foto sem tocar nas outras.

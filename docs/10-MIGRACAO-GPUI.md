@@ -1313,8 +1313,73 @@ coisas conforme quem estivesse com o foco.
 fechar a janela deixaria uma tela preta sem saída visível, num monitor que costuma estar de costas
 para quem a abriu.
 
-⬜ **Falta da fase 4**: o docking (`dock_viewer.rs`, 1.553 LOC) — os painéis arrastáveis da
-Revelação.
+#### 🚨 O docking, lido antes de portar: metade dele não tem como ser aberta
+
+O `egui_dock` **é a tela inteira** do legado — Biblioteca e Revelação são dois `DockState`
+persistidos (`eframe::set_value`), e o que se vê são abas arrastáveis. A leitura de 17/ago encontrou
+três coisas que mudam o que "portar o docking" quer dizer:
+
+1. 🚨 **9 das 19 abas nunca são criadas.** As duas funções de leiaute
+   (`create_library_layout`, `create_develop_layout`) instanciam 10 abas, e **não há UI nenhuma para
+   acrescentar aba** (`grep DockTab:: crates/ui/src` fora do módulo de docking: zero ocorrências).
+   `Collections`, `BasicAdjustments`, `ToneCurve`, `HSLColor`, `HSLHue`, `HSLLuminance`,
+   `LensCorrections`, `Detail` e `CropTool` têm código de desenho e nenhum caminho até a tela.
+2. 🚨 **Fechar uma aba é irreversível** a menos de "Reset Docking Layout", nas Configurações — que
+   joga fora o arranjo inteiro das duas telas. Fechar "AllAdjustments" na Revelação tira os 42
+   controles, e a única volta custa todo o resto.
+3. 🚨 **`views/develop_view.rs` (1.301 LOC) e `views/library_view.rs` (175 LOC) são código morto.**
+   O `app.rs` não os menciona; quem desenha é o dock. O `library_view.rs:117` que o STATUS cita como
+   "Coleções: UI é um TODO" está **dentro do arquivo morto** — o TODO é sobre uma tela que não abre.
+   É a quarta vez que aparecem duas versões da mesma decisão com só uma viva (as outras: o JPEG com
+   alfa, o `GpuEditParams::default`, o `print_dialog.rs`).
+
+⚠️ **O que isso decide**: "portar o docking" vira duas coisas separadas, e só uma delas é urgente.
+
+| Parte | Estado |
+|---|---|
+| **O conteúdo das abas vivas** — as 10 que os leiautes criam | 8 já portadas nas fases 1–3; as que faltavam entram agora |
+| **O rearranjo em si** (arrastar, fechar, redimensionar, persistir) | ⬜ parado, com o custo escrito abaixo |
+
+O rearranjo custa transformar as duas telas em `Entity` por painel, com a `trait Panel` do
+`gpui-component` e um estado compartilhado que as três peças da Biblioteca observem — hoje elas são
+um `struct` só, com os testes todos escritos por cima dele. É refatoração das telas mais testadas do
+app **para entregar a capacidade de arrastar painel**, num app que ainda não tem dono usando. Fica
+para quando o dono pedir; o que ele não pode é ficar sem os painéis, e isso é o que entra agora.
+
+#### O painel de informações ✅ — as duas abas vivas que faltavam
+
+[`biblioteca/informacoes.rs`](../crates/ui-gpui/src/biblioteca/informacoes.rs) (as contas, sem tela) e
+a coluna da direita da Biblioteca: dados da foto selecionada (nome, data, câmera, exposição, nota,
+cor), a distribuição por nota e as câmeras mais usadas. É o `Metadata` do dock mais a parte legível
+do `Quick Develop`.
+
+🚨 **O `Quick Develop` do legado promete mais do que faz.** Ele desenha a fileira de cores com
+`ColorLabels::show(ui, &None, false)`: a cor da foto **não é passada** e o `false` desliga o clique.
+A fileira aparece sempre vazia e não responde a nada, num painel cujo nome diz ser para revelar
+rápido. Aqui a cor é a da foto — e continua sem clique, porque quem marca cor são as teclas `6`–`9`.
+
+🚨 **E o gráfico de câmeras de lá tem cinco barras e três nomes.** `show_camera_usage` desenha as
+cinco mais usadas com `show_axes([false, true])` e lista o nome de **três** embaixo: as duas últimas
+barras são anônimas. Aqui as cinco aparecem com nome e contagem.
+
+🔑 **O empate entre câmeras é desempatado pelo nome, e no legado não é.** Lá a ordenação é só por
+contagem, sobre um `HashMap`: duas câmeras com o mesmo número de fotos trocam de lugar entre
+execuções, e a sexta colocada entra ou não na lista por sorteio. Painel de estatística que muda de
+resposta sem o acervo mudar não é conferível. (Quarto lugar em que a ordem de um `HashMap` chega à
+tela neste porte.)
+
+⚠️ **A conta lê o acervo inteiro, e não a lista filtrada** — é o que o legado faz, e é o que faz
+sentido: a distribuição existe para responder "como está o acervo". Sobre o filtrado, filtrar por
+★★★★ desenharia sempre uma barra só.
+
+⚠️ **E a largura útil da grade passou a descontar as duas colunas.** Contar só a das pastas faria
+`colunas_que_cabem` responder mais colunas do que cabem — a última sairia cortada pela borda, que é o
+mesmo defeito que a árvore causou quando entrou. Tem teste.
+
+⬜ **O que ainda falta das abas vivas**: `Grid Settings` — escolher de 1 a 5 colunas. ⚠️ E ele é uma
+divergência já tomada na fase 1: **o legado usa número fixo de colunas** (`state.grid_columns`, 4 por
+padrão, preso entre 1 e 5) e a grade nova calcula quantas **cabem na janela**. Dar o controle de volta
+é reintroduzir a decisão de lá; deixar como está é assumir a de cá. É decisão de dono, não de porte.
 
 
 ### Fase 5 — Testes e desligamento (1–2 semanas)

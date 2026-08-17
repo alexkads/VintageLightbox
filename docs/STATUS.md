@@ -56,7 +56,7 @@ struct `PhotoEdits` continua sendo o conserto de verdade.
 | Métrica | Valor |
 |---------|-------|
 | `cargo check --workspace --all-targets` | ✅ **limpo** |
-| `cargo test --workspace` | ✅ **799 passando, 0 falhas, 3 ignorados** (16/ago) |
+| `cargo test --workspace` | ✅ **807 passando, 0 falhas, 3 ignorados** (16/ago) |
 | App | ✅ **sobe** — janela 1352×848, `GPU: Initialized successfully with Apple M2 Pro` |
 | Migrations SQLite no repositório | 15 (`001` … `015`) |
 | Crates | 6 (domain, use-cases, adapters, infrastructure, ui, **ui-gpui**) |
@@ -70,7 +70,7 @@ struct `PhotoEdits` continua sendo o conserto de verdade.
 | Adapters | 0 | ⚠️ nenhum teste escrito |
 | Infrastructure | 65 (34 unit + 31 integração em 7 arquivos) | ✅ passando (1 ignorado) |
 | UI (egui) | 146 (47 unit + 99 E2E `egui_kittest` em 18 arquivos) | ✅ passando (2 ignorados) |
-| UI (GPUI) | 273 (270 unit + 3 de integração com banco) | ✅ passando — fases 2 e 3 concluídas, **fase 4 em andamento** |
+| UI (GPUI) | 280 (277 unit + 3 de integração com banco) | ✅ passando — fases 2 e 3 concluídas, **fase 4 em andamento** |
 
 ---
 
@@ -333,6 +333,17 @@ Não são erros de compilação; são features que a UI mostra como prontas e qu
 11. ⚠️ **O sinalizador em lote decide foto a foto.** Com três selecionadas e uma já escolhida, `P`
     desmarca aquela e marca as outras duas — uma tecla, dois desfechos opostos no mesmo gesto. A cor,
     no mesmo arquivo, decide pelo grupo (`all_already_have_color`).
+12. 🚨 **9 das 19 abas do dock nunca são criadas, e não há UI para acrescentar aba.** As duas
+    funções de leiaute instanciam 10; `Collections`, `BasicAdjustments`, `ToneCurve`, `HSLColor`,
+    `HSLHue`, `HSLLuminance`, `LensCorrections`, `Detail` e `CropTool` têm código de desenho e
+    nenhum caminho até a tela. Fechar uma aba viva também é irreversível a menos do "Reset Docking
+    Layout", que joga fora o arranjo das duas telas.
+13. 🚨 **`views/develop_view.rs` (1.301 LOC) e `views/library_view.rs` (175 LOC) são código morto.**
+    O `app.rs` não os menciona — quem desenha as duas telas é o dock. ⚠️ O `library_view.rs:117` que
+    a lacuna 4 cita como "Coleções: UI é um TODO" está dentro do arquivo morto.
+14. ⚠️ **O painel "Quick Develop" mostra a fileira de cores sempre vazia e sem clique**
+    (`ColorLabels::show(ui, &None, false)`), e o gráfico de câmeras desenha cinco barras com três
+    nomes embaixo — as duas últimas ficam anônimas.
 
 ---
 
@@ -386,7 +397,7 @@ cita 2 views (são 4).
 ## 🚀 Como rodar os testes
 
 ```bash
-cargo test --workspace          # 799 passando, 0 falhas, 3 ignorados
+cargo test --workspace          # 807 passando, 0 falhas, 3 ignorados
 cargo test -p domain            # 202 testes, ~0.01s
 
 # E2E de UI (egui_kittest)
@@ -408,4 +419,4 @@ VLB_CATALOG=/tmp/catalogo-de-medicao cargo run --release -p ui-gpui
 ---
 
 **Última execução de testes**: 16/ago/2026
-**Resultado**: ✅ 799 passando, 0 falhas, 3 ignorados · os dois apps sobem e renderizam
+**Resultado**: ✅ 807 passando, 0 falhas, 3 ignorados · os dois apps sobem e renderizam
