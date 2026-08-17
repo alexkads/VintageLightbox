@@ -185,6 +185,9 @@ async fn main() {
         // As cinco teclas do modal de importação — em contexto próprio, para não
         // roubarem Enter e espaço de quem estiver atrás.
         ui_gpui::importacao::tela::init(cx);
+        // E as duas da segunda tela — em contexto próprio, senão o `Esc` dela
+        // e o da janela principal seriam a mesma ligação em janelas diferentes.
+        ui_gpui::cliente::init(cx);
 
         let bounds = Bounds::centered(None, size(px(1100.), px(720.)), cx);
         cx.open_window(

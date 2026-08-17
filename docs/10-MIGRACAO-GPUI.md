@@ -1279,8 +1279,42 @@ abriria uma delas sem que nada na tela tivesse dito qual.
 quando ela já era a única. Desmarcar cinco por engano ao tentar escolher uma delas é o desfecho que
 ninguém quer, e desfazer isso é reselecionar tudo.
 
-⬜ **Falta da fase 4**: multi-monitor (a janela secundária de `secondary_window.rs`) e o docking
-(`dock_viewer.rs`, 1.553 LOC).
+#### A segunda tela ✅ — e o `ViewportDeferred` que virou janela de verdade
+
+[`cliente.rs`](../crates/ui-gpui/src/cliente.rs): a janela que o fotógrafo vira para o cliente. Tela
+cheia no outro monitor, fundo preto, sem barra de título e sem controle — só a foto selecionada na
+janela principal, com o nome e as estrelas num rodapé que `I` liga e desliga, e `Esc` para fechar.
+
+🔑 **O que muda do egui para o GPUI é o caminho de volta.** Lá é um `ViewportDeferred` dentro do
+mesmo `Context`, e as duas telas conversam por `ctx.data_mut` com chaves de texto: o `Esc` da segunda
+janela **não fecha nada** — grava `secondary_window_close_req` na memória global do egui, e o quadro
+seguinte da janela principal lê, consome e fecha. Aqui a janela tem entidade própria: `Esc` chama
+`window.remove_window()`, e acabou.
+
+⚠️ **E some junto o repaint incondicional.** O legado chama `ctx.request_repaint()` nos dois lados
+enquanto a segunda tela estiver aberta, para ela não mostrar imagem velha. Aqui a foto chega por
+chamada de método, quando muda.
+
+🚨 **A inscrição que mantém a segunda tela em dia é a peça que some sem avisar.** É um `cx.observe`
+na Biblioteca; descartado, a janela abre, mostra a primeira foto e **congela ali** — e do outro lado
+do monitor não há como perceber. Conferido quebrando de propósito: o teste falha.
+
+🔑 **O `DisplayId` do GPUI não pode ser construído de fora do crate** (o campo é `pub(crate)`), então
+a regra de qual monitor usar é genérica no tipo do id. Com assinatura concreta, ela só poderia ser
+conferida numa máquina com dois monitores plugados — que é o mesmo que não conferir. A regra é a do
+legado: o primeiro que não for o principal, e o principal se não houver outro (é o que permite ver a
+segunda tela funcionando sem um segundo monitor).
+
+⚠️ **Contexto de teclado próprio.** As duas janelas existem ao mesmo tempo, e `Esc` na principal
+volta para a Biblioteca enquanto `Esc` aqui fecha a janela. Com um contexto só, a tecla faria as duas
+coisas conforme quem estivesse com o foco.
+
+⚠️ **As instruções não dependem do `I`.** Desligar o rodapé e perder junto a única pista de como
+fechar a janela deixaria uma tela preta sem saída visível, num monitor que costuma estar de costas
+para quem a abriu.
+
+⬜ **Falta da fase 4**: o docking (`dock_viewer.rs`, 1.553 LOC) — os painéis arrastáveis da
+Revelação.
 
 
 ### Fase 5 — Testes e desligamento (1–2 semanas)

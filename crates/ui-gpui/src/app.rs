@@ -15,6 +15,7 @@ use infrastructure::cache::preview_manager::PreviewManager;
 
 use crate::biblioteca::marcacao::Marcador;
 use crate::biblioteca::tela::Biblioteca;
+use crate::cliente::{monitor_do_cliente, Cliente};
 use crate::importacao::explorador::{Explorador, GeradorDeMiniaturas, Importador, SeletorDePasta};
 use crate::importacao::tela::Importacao;
 use crate::impressao::tela::Impressao;
@@ -172,6 +173,15 @@ pub struct Aplicativo {
     /// fotógrafo já marcou ao fechar o modal por engano.
     importacao: Entity<Importacao>,
     importando: bool,
+    /// A segunda tela, quando aberta. É uma **janela**, e não uma tela desta —
+    /// as duas existem ao mesmo tempo, em monitores diferentes.
+    cliente: Option<gpui::WindowHandle<Cliente>>,
+    /// O cache de previews, guardado para alimentar a segunda tela.
+    previews: Arc<PreviewManager>,
+    /// 🚨 A inscrição que mantém a segunda tela em dia. Descartada, ela para de
+    /// acompanhar a seleção **sem erro nenhum** — a foto congela no que estava, e
+    /// quem está do outro lado do monitor não tem como saber que congelou.
+    _observador: gpui::Subscription,
     tela: Tela,
     /// A raiz precisa de foco próprio para as ações de teclado chegarem nela.
     /// Sem isto, `Esc` só funcionaria enquanto algum filho focável estivesse
@@ -193,6 +203,7 @@ impl Aplicativo {
         // mesmo arquivo seriam dois caches do mesmo lugar.
         let previews_para_importar = previews.clone();
         let previews_para_imprimir = previews.clone();
+        let previews_do_cliente = previews.clone();
         let biblioteca =
             cx.new(|cx| Biblioteca::nova(fotos, previews.clone(), portas.marcador, window, cx));
         let revelacao = cx.new(|cx| {
@@ -220,6 +231,17 @@ impl Aplicativo {
         let foco = cx.focus_handle();
         window.focus(&foco);
 
+        // A segunda tela acompanha a seleção da Biblioteca. `observe` dispara a
+        // cada `notify` dela — que é exatamente quando a seleção pode ter mudado.
+        let observador = cx.observe(&biblioteca, |raiz, biblioteca, cx| {
+            if raiz.cliente.is_none() {
+                return;
+            }
+            if let Some(foto) = biblioteca.read(cx).foto_selecionada() {
+                raiz.mostrar_ao_cliente(&foto, cx);
+            }
+        });
+
         Self {
             biblioteca,
             revelacao,
@@ -235,6 +257,9 @@ impl Aplicativo {
                 )
             }),
             importando: false,
+            cliente: None,
+            previews: previews_do_cliente,
+            _observador: observador,
             tela: Tela::Biblioteca,
             foco,
         }
@@ -307,6 +332,104 @@ impl Aplicativo {
         self.tela = Tela::Biblioteca;
         window.focus(&self.foco);
         cx.notify();
+    }
+
+    /// Abre ou fecha a segunda tela — a janela que se vira para o cliente.
+    ///
+    /// 🔑 **É uma janela de verdade, e não um painel da principal.** Ela mora no
+    /// outro monitor, sem barra de título e sem controle nenhum: o que o cliente
+    /// vê é a foto, e nada mais. `Esc` dentro dela fecha; o botão daqui também.
+    ///
+    /// ⚠️ **Sem seleção não abre.** Uma segunda tela preta não diz ao cliente
+    /// que nada foi escolhido — diz que o programa quebrou.
+    pub fn alternar_cliente(&mut self, cx: &mut Context<Self>) {
+        if let Some(janela) = self.cliente.take() {
+            // Fechar é remover a janela. Se ela já não existe (o `Esc` de dentro
+            // dela chegou primeiro), o `update` devolve erro e não há o que
+            // fazer além de esquecer o handle — que é o que o `take` já fez.
+            let _ = janela.update(cx, |_cliente, window, _cx| window.remove_window());
+            return;
+        }
+
+        let Some(foto) = self.biblioteca.read(cx).foto_selecionada() else {
+            return;
+        };
+
+        let telas: Vec<gpui::DisplayId> = cx.displays().iter().map(|tela| tela.id()).collect();
+        let principal = cx.primary_display().map(|tela| tela.id());
+        let Some(escolhida) = monitor_do_cliente(&telas, principal) else {
+            return;
+        };
+
+        // A janela nasce em tela cheia, no monitor escolhido, sem barra de
+        // título e sem poder ser movida: quem está do outro lado dela não tem
+        // por que poder arrastá-la, e um título escrito "VintageLightbox" sobre
+        // a foto é exatamente o que uma apresentação não quer.
+        let opcoes = gpui::WindowOptions {
+            window_bounds: Some(gpui::WindowBounds::Fullscreen(
+                cx.displays()
+                    .iter()
+                    .find(|tela| tela.id() == escolhida)
+                    .map(|tela| tela.bounds())
+                    .unwrap_or_default(),
+            )),
+            display_id: Some(escolhida),
+            titlebar: None,
+            is_movable: false,
+            is_resizable: false,
+            is_minimizable: false,
+            window_background: gpui::WindowBackgroundAppearance::Opaque,
+            ..Default::default()
+        };
+
+        match cx.open_window(opcoes, |window, cx| cx.new(|cx| Cliente::novo(window, cx))) {
+            Ok(janela) => {
+                self.cliente = Some(janela);
+                self.mostrar_ao_cliente(&foto, cx);
+            }
+            // Abrir janela é pedido ao sistema, e ele pode recusar. Sem monitor
+            // não há segunda tela — e derrubar o app por causa disso seria trocar
+            // "o botão não fez nada" por "perdi a triagem inteira".
+            Err(erro) => eprintln!("⚠️  Não foi possível abrir a segunda tela: {erro}"),
+        }
+        cx.notify();
+    }
+
+    pub fn cliente_aberto(&self) -> bool {
+        self.cliente.is_some()
+    }
+
+    /// Manda para a segunda tela a foto que está selecionada aqui.
+    ///
+    /// ⚠️ **A imagem é lida e decodificada na thread da interface**, como na
+    /// abertura da Revelação: é um JPEG de preview, de poucos milissegundos. É a
+    /// mesma pendência que a fase 1 deixou, e ela vale para os dois lugares.
+    fn mostrar_ao_cliente(&mut self, foto: &PhotoViewModel, cx: &mut Context<Self>) {
+        let Some(janela) = self.cliente.as_ref() else {
+            return;
+        };
+
+        let imagem = self
+            .previews
+            .get_preview(&foto.id)
+            .or_else(|| self.previews.get_thumbnail(&foto.id))
+            .map(crate::imagem::para_gpui);
+
+        let foto = foto.clone();
+        // 🚨 O `update` falha quando a janela **já foi fechada** — pelo `Esc` de
+        // dentro dela, que a raiz não tem como saber que aconteceu. Aqui é onde
+        // isso é descoberto, e o handle morto é jogado fora; sem isto o botão da
+        // barra continuaria dizendo "fechar" para uma janela que não existe.
+        let viva = janela
+            .update(cx, |cliente, _window, cx| {
+                cliente.mostrar(Some(foto), imagem, cx);
+            })
+            .is_ok();
+
+        if !viva {
+            self.cliente = None;
+            cx.notify();
+        }
     }
 
     /// Abre o modal de importação sobre a Biblioteca.
@@ -497,6 +620,20 @@ impl Aplicativo {
                     .text_color(cx.theme().muted_foreground)
                     .truncate()
                     .child(titulo),
+            )
+            .child(
+                // A segunda tela. Só liga com seleção, como a Revelação e a
+                // Impressão: mostrar preto ao cliente não diz "não escolhi
+                // nada", diz "quebrou".
+                Button::new("nav-cliente")
+                    .label("Segunda tela")
+                    .xsmall()
+                    .when(self.cliente.is_some(), |b| b.primary())
+                    .selected(self.cliente.is_some())
+                    .disabled(!tem_selecao)
+                    .on_click(cx.listener(|este, _ev, _window, cx| {
+                        este.alternar_cliente(cx);
+                    })),
             )
             .child(
                 Button::new("nav-importar")
@@ -1210,6 +1347,93 @@ mod testes {
         let mut visual = gpui::VisualTestContext::from_window(janela.into(), cx);
         visual.simulate_keystrokes("left left");
         assert_eq!(nome(cx).as_deref(), Some("DSC_001.NEF"));
+    }
+
+    /// 🚨 A segunda tela abre, recebe a foto, e **acompanha a seleção**.
+    ///
+    /// A inscrição que faz isso é a peça que some sem avisar: descartada, a
+    /// janela abre, mostra a primeira foto e congela ali. Do outro lado do
+    /// monitor não há como saber que congelou — e quem tria continua achando que
+    /// o cliente está vendo a foto da vez.
+    #[gpui::test]
+    fn a_segunda_tela_acompanha_a_selecao(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-DSC_001.NEF", &foto_vermelha())
+            .expect("gravar preview");
+        previews
+            .save_preview("id-retrato.jpg", &foto_vermelha())
+            .expect("gravar preview");
+        cx.update(gpui_component::init);
+
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            |window, cx| Aplicativo::novo(acervo(), previews, Vec::new(), portas(), window, cx)
+        });
+
+        janela
+            .update(cx, |app, _window, cx| {
+                app.biblioteca
+                    .update(cx, |tela, cx| tela.selecionar(Some(0), cx));
+                app.alternar_cliente(cx);
+                assert!(app.cliente_aberto(), "com seleção, o botão abre a janela");
+            })
+            .expect("a janela deve estar aberta");
+
+        let nome_no_cliente = |cx: &mut TestAppContext| {
+            janela
+                .update(cx, |app, _window, cx| {
+                    app.cliente
+                        .as_ref()
+                        .and_then(|c| c.read(cx).ok().and_then(|c| c.foto_mostrada()))
+                })
+                .expect("a janela deve estar aberta")
+        };
+
+        assert_eq!(nome_no_cliente(cx).as_deref(), Some("DSC_001.NEF"));
+
+        janela
+            .update(cx, |app, _window, cx| {
+                app.biblioteca
+                    .update(cx, |tela, cx| tela.selecionar(Some(1), cx));
+            })
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+
+        assert_eq!(
+            nome_no_cliente(cx).as_deref(),
+            Some("retrato.jpg"),
+            "trocar de foto na grade tem de trocar o que o cliente vê"
+        );
+
+        janela
+            .update(cx, |app, _window, cx| {
+                app.alternar_cliente(cx);
+                assert!(!app.cliente_aberto(), "e o mesmo botão fecha");
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// ⚠️ Sem seleção a segunda tela não abre.
+    ///
+    /// Uma janela preta virada para o cliente não diz "não escolhi nada"; diz
+    /// que o programa quebrou.
+    #[gpui::test]
+    fn sem_selecao_a_segunda_tela_nao_abre(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            |window, cx| Aplicativo::novo(acervo(), previews, Vec::new(), portas(), window, cx)
+        });
+
+        janela
+            .update(cx, |app, _window, cx| {
+                app.alternar_cliente(cx);
+                assert!(!app.cliente_aberto());
+            })
+            .expect("a janela deve estar aberta");
     }
 
     /// 🚨 `Cmd+A` e `Cmd+D` chegam à Biblioteca.
