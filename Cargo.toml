@@ -5,11 +5,13 @@ members = [
     "crates/use-cases",
     "crates/adapters",
     "crates/infrastructure",
-    "crates/ui",
-    # A interface em GPUI, construída ao lado da de egui — os dois rodam até a
-    # fase 5 (docs/10-MIGRACAO-GPUI.md §7.2). `crates/ui` é o rollback e a
-    # referência de paridade; tirá-lo antes da hora torna abandonar a migração
-    # caro, e é justamente o modo de falha mais provável do plano.
+    # A interface, em GPUI. O `crates/ui` (egui) saiu daqui em 17/ago/2026, com a
+    # lista de paridade zerada (docs/PARIDADE-UI.md) — é a fase 5 do plano.
+    #
+    # 🔑 **O que ele era e deixou de ser**: o rollback e a referência de
+    # paridade. O rollback agora é `git revert` do commit que o removeu, que é
+    # um comando e traz os 21.352 LOC de volta inteiros; a referência de
+    # paridade virou documento, e o código continua no histórico.
     "crates/ui-gpui",
 ]
 

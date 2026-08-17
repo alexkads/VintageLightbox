@@ -108,18 +108,16 @@ jobs:
 
   # Clippy sobre as **quatro camadas internas**, com `-D warnings`.
   #
-  # 🚨 O job cobrava o workspace inteiro e **nunca esteve verde**: `crates/ui`
-  # tem centenas de avisos, e como o gatilho apontava para um branch inexistente
-  # ninguém via. Cobrar o `ui` agora seria arrumar, aviso a aviso, um crate que
-  # a fase 5 apaga — trabalho que o plano proíbe por não aproximar o cutover.
+  # 🚨 O job já cobrou o workspace inteiro e **nunca esteve verde**: `crates/ui`
+  # tinha centenas de avisos, e como o gatilho apontava para um branch
+  # inexistente ninguém via. Arrumá-los seria trabalho num crate que a fase 5
+  # apagava — e ela apagou, em 17/ago/2026.
   #
-  # O que fica coberto é o que **sobrevive** à migração: domain, use-cases,
-  # adapters e infrastructure passam com zero avisos, e é aí que uma regressão
-  # importa. Não precisa de Metal Toolchain: nenhuma das quatro toca a GPU, e é
-  # por isso que este job pode ficar no runner barato.
-  #
-  # ⚠️ Quando `crates/ui-gpui` nascer (fase 1), ele entra nesta lista — nasce
-  # limpo, e é muito mais barato mantê-lo assim do que limpá-lo depois.
+  # ⚠️ **E o workspace inteiro passa agora**, conferido no mesmo dia
+  # (`cargo clippy --workspace --all-targets -- -D warnings`, limpo). Este job
+  # continua nas quatro camadas de propósito: elas não tocam a GPU, e é por isso
+  # que ele roda no runner barato, sem Metal Toolchain. O `ui-gpui` tem o job
+  # dele no macOS, onde a GPU existe.
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
@@ -141,9 +139,9 @@ jobs:
   # A cobertura fica no Ubuntu, mas **só sobre as quatro camadas internas** —
   # que não têm GPU, não têm janela e são onde a cobertura diz alguma coisa.
   #
-  # É o que permite manter o runner barato sem compilar `ui` nem, mais adiante,
-  # `ui-gpui`. Medir cobertura de interface por tarpaulin nunca deu número útil
-  # aqui: quem cobre a UI são os testes de UI.
+  # É o que permite manter o runner barato sem compilar `ui-gpui`. Medir
+  # cobertura de interface por tarpaulin nunca deu número útil aqui: quem cobre a
+  # UI são os testes de UI.
   coverage:
     name: Code Coverage
     runs-on: ubuntu-latest

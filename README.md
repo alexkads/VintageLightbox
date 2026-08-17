@@ -1,6 +1,6 @@
 # VintageLightbox 📷
 
-Clone profissional do Adobe Lightroom desenvolvido em Rust com interface egui.
+Clone profissional do Adobe Lightroom desenvolvido em Rust com interface GPUI.
 
 ## 📸 Sobre o Projeto
 
@@ -28,10 +28,10 @@ Este projeto segue **Clean Architecture** e **Test-Driven Development (TDD)**:
 ## 🚀 Tecnologias
 
 - **Linguagem**: Rust (performance e segurança)
-- **Interface**: egui 0.31 (nativa e multiplataforma)
+- **Interface**: GPUI + gpui-component (nativa, na GPU)
 - **RAW Processing**: LibRaw/rawler
 - **Database**: SQLite
-- **Testing**: cargo test, mockall, proptest, criterion, **egui_kittest** (E2E)
+- **Testing**: cargo test, mockall, proptest, criterion, **gpui::TestAppContext** (interface)
 - **Plataformas**: macOS e Windows
 
 ## 🎯 Status do Desenvolvimento
@@ -49,7 +49,7 @@ presets, flags, crop, impressão)
 - [x] **Use Cases** — 22 módulos (importação, organização, edição, presets, export, print)
 - [x] **Infrastructure** — SQLite (15 migrations), cache L1/L2/L3, RAW via LibRaw, EXIF, thumbnails
 - [x] **Adapters** — 6 controllers (⚠️ sem testes)
-- [x] **UI** — egui 0.31 sobre wgpu: 4 views, 26 componentes, docking, multi-monitor, 5 temas
+- [x] **UI** — GPUI: Biblioteca, Revelação, Importação, Impressão, segunda tela, docking com arranjo gravado
 - [ ] Commitar os consertos e reativar o CI ← **próximo passo**
 
 **522 testes passando · 0 falhas · 3 ignorados**
@@ -60,12 +60,12 @@ cargo test --workspace
 
 cargo test -p domain
 
-# Testes E2E da UI (egui_kittest)
-cargo test -p ui --test crop_feature_e2e_test
-cargo test -p ui --test import_view_e2e_test
+# Testes da interface (gpui::TestAppContext)
+cargo test -p ui-gpui --lib revelacao   # a Revelação
+cargo test -p ui-gpui --lib importacao  # a importação
 
 # Atualizar snapshots (quando necessário)
-UPDATE_SNAPSHOTS=true cargo test -p ui
+cargo test -p ui-gpui                   # a interface inteira
 ```
 
 ## 📚 Documentação
@@ -77,7 +77,7 @@ A documentação completa do projeto está organizada na pasta `docs/`:
 - **[03-FUNCIONALIDADES.md](docs/03-FUNCIONALIDADES.md)** - Especificação detalhada de cada funcionalidade
 - **[04-ROADMAP.md](docs/04-ROADMAP.md)** - Planejamento de desenvolvimento em fases
 - **[05-STACK-TECNOLOGICO.md](docs/05-STACK-TECNOLOGICO.md)** - Stack completo e dependências
-- **[07-E2E-TESTING.md](docs/07-E2E-TESTING.md)** - Guia de testes E2E com egui_kittest
+- **[07-E2E-TESTING.md](docs/07-E2E-TESTING.md)** - Guia de testes E2E ⚠️ descreve o `egui_kittest`, que saiu com o `crates/ui`
 
 ## ✨ Principais Funcionalidades
 
@@ -133,7 +133,7 @@ VintageLightbox-Rust/
 │   ├── use-cases/           # Orquestração de regras de negócio
 │   ├── adapters/            # Controllers, presenters, view models
 │   ├── infrastructure/      # SQLite, cache, RAW, EXIF, arquivos, dispositivos
-│   └── ui/                  # egui/eframe (wgpu): views, componentes, design system
+│   └── ui-gpui/             # GPUI: telas, painéis do dock, motor de revelação (wgpu)
 ├── crates/infrastructure/migrations/   # 15 migrations SQLite
 ├── docs/                    # Documentação (comece por STATUS.md)
 └── dev.sh                   # Helper de TDD
@@ -212,7 +212,7 @@ Este projeto é inspirado em:
 - DarkTable
 - RawTherapee
 
-Agradecimentos às comunidades de Rust, egui e processamento de imagens open source.
+Agradecimentos às comunidades de Rust, GPUI e processamento de imagens open source.
 
 ## 📞 Contato
 
