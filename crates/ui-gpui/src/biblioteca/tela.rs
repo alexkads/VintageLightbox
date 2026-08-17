@@ -711,7 +711,7 @@ impl Biblioteca {
                     .child(linha_de_dado("data", &foto.date, cx))
                     .child(linha_de_dado("câmera", &foto.camera, cx))
                     .child(linha_de_dado("exposição", &foto.exposure, cx))
-                    .child(linha_de_dado("nota", &estrelas(foto.rating), cx))
+                    .child(self.estrelas_clicaveis(foto.rating, cx))
                     .child(linha_de_dado(
                         "cor",
                         foto.color_label.as_deref().unwrap_or("—"),
@@ -799,6 +799,41 @@ impl Biblioteca {
                             .collect::<Vec<_>>()
                     }),
             )
+    }
+
+    /// As cinco estrelas, clicáveis — a nota sem passar pelo teclado.
+    ///
+    /// 🔑 **Clicar vale para a seleção inteira**, como as teclas `0`–`5`: é a
+    /// mesma ação, e ter o clique valendo só para uma faria a mesma nota
+    /// significar duas coisas conforme de onde veio.
+    ///
+    /// ⚠️ **Clicar na estrela que já está acesa não apaga a nota** — é o que o
+    /// legado faz (`if new_rating != *rating`), e tirar a nota continua sendo a
+    /// tecla `0`. Alternar aqui seria feature nova, e ela tem um custo real:
+    /// numa triagem, clicar duas vezes por engano na terceira estrela apagaria a
+    /// nota em vez de confirmá-la.
+    fn estrelas_clicaveis(&self, nota: i32, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .flex()
+            .justify_between()
+            .gap(px(6.))
+            .text_xs()
+            .child(div().text_color(cx.theme().muted_foreground).child("nota"))
+            .child(div().flex().gap(px(2.)).children((1..=5).map(|estrela| {
+                let acesa = estrela <= nota;
+                div()
+                    .id(SharedString::from(format!("estrela-{estrela}")))
+                    .cursor_pointer()
+                    .text_color(if acesa {
+                        cx.theme().primary
+                    } else {
+                        cx.theme().muted_foreground.opacity(0.4)
+                    })
+                    .child("★")
+                    .on_click(cx.listener(move |tela, _ev, _window, cx| {
+                        tela.dar_nota(estrela, cx);
+                    }))
+            })))
     }
 
     /// A faixa de miniaturas do rodapé.
@@ -1324,6 +1359,30 @@ mod testes {
                 assert!(util > 0.0);
             })
             .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 Clicar numa estrela dá a nota — e vale para a seleção inteira.
+    ///
+    /// É a mesma ação das teclas `0`–`5`, e ter o clique valendo só para uma
+    /// faria a mesma nota significar duas coisas conforme de onde veio.
+    #[gpui::test]
+    fn clicar_na_estrela_da_a_nota_a_selecao_inteira(cx: &mut TestAppContext) {
+        let (janela, marcador, _dir) = tela_com(cx, acervo_grande());
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.selecionar(Some(1), cx);
+                tela.alternar_uma(2, cx);
+
+                // O que o clique na terceira estrela chama.
+                tela.dar_nota(3, cx);
+
+                assert_eq!(tela.fotos[1].rating, 3);
+                assert_eq!(tela.fotos[2].rating, 3);
+            })
+            .expect("a janela deve estar aberta");
+
+        assert_eq!(marcador.marcado().len(), 2, "uma gravação por foto");
     }
 
     /// 🚨 Rejeitar a foto selecionada com o filtro ligado **anda** para a

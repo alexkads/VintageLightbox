@@ -122,7 +122,7 @@ São 23 testes "este controle existe" (HSL matiz ×8, HSL luminância ×8, lente
 | Comportamento | Onde está agora |
 |---|---|
 | A nota desenha 0 a 5 estrelas | ✅ `informacoes::estrelas` |
-| Clicar numa estrela muda a nota | ⬜ **falta** — hoje a nota se dá pelas teclas `0`–`5` |
+| Clicar numa estrela muda a nota | ✅ no painel de informações — ⚠️ e vale para a **seleção inteira**, como as teclas |
 | Limpar miniaturas / limpar cache pelas Configurações | ⬜ **falta a tela de Configurações inteira** |
 | As estatísticas de cache aparecem no diálogo | ⬜ idem |
 
@@ -139,10 +139,9 @@ Esta é a lista que a fase 5 tem de zerar — ou registrar como decisão de dono
    ao começo a cada rejeição).
 2. ⬜ **A tela de Configurações não existe** (limpar miniaturas, limpar cache, estatísticas, e o
    "Reset Docking Layout" que só faz sentido com dock).
-3. ⬜ **Clicar na estrela para dar nota** — hoje só pelas teclas.
-4. ⬜ **`Grid Settings`** — escolher de 1 a 5 colunas. Decisão de dono: o legado usa número fixo, a
+3. ⬜ **`Grid Settings`** — escolher de 1 a 5 colunas. Decisão de dono: o legado usa número fixo, a
    grade nova calcula quantas cabem.
-5. ⬜ **O rearranjo de painéis (docking)** — parado, com o custo escrito no plano.
+4. ⬜ **O rearranjo de painéis (docking)** — parado, com o custo escrito no plano.
 
 ⚠️ **⚠️ **Uma linha desta lista nasceu errada, e a conferência foi no código**: "cancelar o corte" estava
 marcada como faltando, escrita a partir do **nome** do teste do legado. O `cancelar_corte` existe
