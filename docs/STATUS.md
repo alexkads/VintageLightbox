@@ -1,9 +1,9 @@
 # Status do Projeto - VintageLightbox
 
 **Última atualização**: 17 de agosto de 2026
-**Último commit**: `b83e0dd — 2026-08-17, _"feat(exportacao): o app entrega arquivo — pela primeira vez, em qualquer versão"_`
+**Último commit**: `2584d06 — 2026-08-17, _"feat(impressao): a folha vira PDF, e o PDF vai para a impressora"_`
 **Branch de trabalho**: `dev`, árvore limpa
-**Estado**: ✅ compila · **676 testes, 0 falhando** · `fmt` e `clippy -D warnings` limpos · o app sobe
+**Estado**: ✅ compila · **727 testes, 0 falhando** · `fmt` e `clippy -D warnings` limpos · o app sobe
 
 > 🎯 **O objetivo do projeto mudou em 17/ago/2026** e está em
 > [`00-OBJETIVO.md`](00-OBJETIVO.md): substituir o Lightroom no fluxo do estúdio, para que a edição
@@ -13,15 +13,33 @@
 > **A fila de trabalho é [`PARIDADE-LIGHTROOM.md`](PARIDADE-LIGHTROOM.md).** Este documento é o
 > estado técnico: camadas, testes e lacunas.
 
+## Os cinco critérios de "funcional" — medidos em 17/ago/2026
+
+O objetivo ([`00-OBJETIVO.md`](00-OBJETIVO.md)) define "funcional" em cinco critérios que se medem.
+Este é o estado deles:
+
+| Critério | Estado |
+|---|---|
+| Todo controle da tela move a foto | ✅ **46 de 46** — eram 23 na manhã do mesmo dia |
+| O arquivo exportado é o que a tela mostra | ✅ mesmo `.wgsl`, mesmo enquadramento, com teste que grava e relê |
+| RAW de câmera abre | ⚠️ **menos DNG com compressão *lossy*** — ver lacuna 16 |
+| Nada trava a janela | ✅ abertura em 23–43 ms com 2.000 fotos; rolagem conferida em `--release` |
+| Nenhum botão anuncia o que não faz | ✅ os últimos dois eram "Print" e "Export PDF" |
+
 ## O que mudou em 17/ago/2026
 
 | | |
 |---|---|
 | ✅ **A exportação existe** | e é a primeira vez, em qualquer versão. `ExportPhotoUseCase` e `ExportController` estavam escritos e testados, e **nunca eram construídos no `main.rs`** |
 | ✅ **O arquivo exportado é o que a tela mostra** | ele aplicava 15 dos 46 ajustes, com matemática diferente do shader, e ignorava o corte |
+| ✅ **Entrega final × prévia da galeria** | dois modos de exportação, com marca d'água e redimensionamento |
 | ✅ **O motor de revelação foi para a `infrastructure`** | wgpu é detalhe técnico, e a exportação não pode depender do crate de interface |
-| ✅ **Os 4 controles de Detalhe funcionam** | o `struct Params` do WGSL declarava 28 campos para os 46 que a CPU manda |
+| ✅ **Os 46 controles movem a foto** | o `uniform` declarava 28 campos para 46, e o corpo do shader ignorava matiz, luminância e lente. A curva de tons era o inverso: efeito sem controle |
 | ✅ **Importar aparece na Biblioteca** | as fotos entravam no banco e a grade não relia — só apareciam ao reabrir o app |
+| ✅ **Coleções na tela** | faltavam o controller **e** a tela; o backend estava pronto há meses |
+| ✅ **Copiar/colar revelação** | `Cmd+Shift+C`/`V`, valendo para a seleção, com o enquadramento de cada foto preservado |
+| ✅ **A impressão imprime** | a folha vira PDF e vai para o diálogo do sistema |
+| ⚠️ **DNG com perdas diz o que é** | o suporte continua faltando; a mensagem parou de culpar o arquivo |
 
 > ⚠️ **Este documento foi reescrito em 15/ago/2026 a partir do código, não do histórico**, e os
 > números são medidos rodando `cargo test`/`cargo check`, não copiados.
