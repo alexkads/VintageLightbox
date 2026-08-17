@@ -4,23 +4,41 @@ Bem-vindo à documentação do VintageLightbox! Este índice organiza todos os d
 
 ## 📖 Visão Geral
 
-VintageLightbox é um clone profissional do Adobe Lightroom desenvolvido em Rust com interface **egui/eframe (wgpu)**, focado em fotógrafos profissionais que precisam de uma solução completa para importação, edição, organização e venda de fotos.
+VintageLightbox é **um clone profissional do Adobe Lightroom em Rust**, com interface **GPUI 0.2 +
+gpui-component 0.5**, para fotógrafos que precisam importar, organizar, triar, revelar e entregar
+fotos.
 
-⚠️ **Nota**: vários documentos abaixo ainda descrevem a UI em **Slint**, tecnologia que foi trocada por **egui** durante a implementação. `06-UI-ARCHITECTURE.md` é o caso mais grave — descreve arquivos `.slint` que não existem.
+🔑 **Esta frase é a original do projeto, e voltou a valer em 17/ago/2026.** Entre fev e ago de 2026
+o objetivo foi outro — trocar a interface de egui por GPUI **com paridade**, sem regressão. Aquele
+objetivo foi **alcançado** e virou [história](10-MIGRACAO-GPUI.md); o alvo voltou a ser o Lightroom,
+e não o app anterior. A diferença prática é grande: a regra *"nenhuma feature nova"* caiu, e com ela
+o motivo de 19 sliders da Revelação existirem sem fazer nada.
 
-**Status Atual (15/ago/2026)**: ✅ compila, app sobe | 478 testes passando, 0 falhas  
-**Veja**: [STATUS.md](STATUS.md) — é a fonte de status do projeto
+⚠️ **Vários documentos abaixo descrevem a UI em Slint ou em egui** — as duas já saíram.
+`06-UI-ARCHITECTURE.md` é o caso mais grave: descreve arquivos `.slint` que não existem.
+
+**Estado (17/ago/2026)**: ✅ compila, app sobe | **674 testes passando, 0 falhas**
 
 ## 📚 Documentos Principais
 
-### 0. [Status do Projeto](STATUS.md) 🆕
-**Conteúdo**: Status consolidado da implementação, medido do código
-- Os 2 erros de compilação que travavam build e suíte, e como foram consertados
-- Testes por camada: 478 passando, medidos
-- Progresso real por camada e lacunas encontradas
-- Próximos passos em ordem
+### 0. [O Objetivo](00-OBJETIVO.md) 🆕
+**Conteúdo**: o alvo do projeto, o teste de alinhamento, e o que "funcional" quer dizer em critérios
+mensuráveis. Também explica **qual objetivo ele substituiu e por quê**.
 
-**Leia se você quer**: Ver o progresso atual e próximos passos. **Comece por aqui.**
+**Leia se você quer**: saber se o trabalho que você vai começar é o trabalho certo. **Comece por
+aqui.**
+
+### 0.1. [O que falta para ser um Lightroom](PARIDADE-LIGHTROOM.md) 🆕
+**Conteúdo**: a lista **medida** do que funciona, do que a tela promete e não faz, e do que não
+existe — com a fila de trabalho em ordem.
+
+**Leia se você quer**: escolher a próxima tarefa. É a fila.
+
+### 0.2. [Status do Projeto](STATUS.md)
+**Conteúdo**: o estado do código camada por camada, testes medidos, e as lacunas conhecidas com a
+razão de cada uma.
+
+**Leia se você quer**: entender o estado técnico antes de mexer numa camada.
 
 ### 1. [Requisitos do Sistema](01-REQUISITOS.md)
 **Conteúdo**: Requisitos funcionais e não-funcionais completos

@@ -1,9 +1,22 @@
-# Migração da UI para GPUI
+# Migração da UI para GPUI — história
 
 **Escrito em**: 15 de agosto de 2026
 **Estado**: ✅ **concluída em 17/ago/2026** — as cinco fases fecharam, e o `crates/ui` saiu do
 workspace (fase 5). O plano de Tauri ([09](09-MIGRACAO-TAURI.md)) foi avaliado e descartado.
 **Base**: código em `dev` na data acima, mais um **spike compilado e rodando** (§1)
+
+> 🚨 **Este documento deixou de ser plano e virou história em 17/ago/2026.** O objetivo do projeto
+> mudou no mesmo dia: não é mais "trocar de framework com paridade", é
+> [**um clone funcional do Lightroom**](00-OBJETIVO.md). As **regras da §7 estão revogadas** — em
+> especial *"nenhuma feature nova"*, que existia para separar defeito de porte de escopo divergente e
+> agora só impede o app de ficar pronto.
+>
+> ⚠️ **Mas ele não ficou obsoleto**: é o melhor registro que existe de **por que o código é como é**.
+> O BGRA das texturas, o `uniform` que casa por posição, o `track_focus` que rastreia e não concede,
+> o `SliderState::set_value` que não emite `Change`, a fluidez que só se mede em `--release` — tudo
+> isso continua valendo, e cada linha custou pelo menos um commit para ser aprendida.
+>
+> A fila de trabalho de agora está em [`PARIDADE-LIGHTROOM.md`](PARIDADE-LIGHTROOM.md).
 
 > Trocar `crates/ui` — hoje egui 0.31 sobre eframe/wgpu — por **GPUI**, o framework do Zed, com
 > `gpui-component` por cima. Continua Rust puro, no mesmo processo, na GPU.
@@ -1561,9 +1574,17 @@ metade. Por isso `crates/ui` fica vivo e rodando até a fase 5 — abandonar pre
 
 ---
 
-## 7. Regras durante a migração
+## 7. Regras durante a migração — ⚠️ **revogadas em 17/ago/2026**
 
-1. ❌ **Nenhuma feature nova.** A conferência é paridade; feature nova torna impossível saber se a
+> 🚨 **Não siga esta seção.** Ela valia enquanto o alvo era o app de egui; hoje o alvo é o Lightroom
+> ([`00-OBJETIVO.md`](00-OBJETIVO.md)) e as três primeiras regras dizem o **contrário** do que agora é
+> certo. Ficam registradas porque explicam decisões que estão no código — não porque orientem o
+> próximo commit.
+>
+> A que sobrevive é a 5 (*um incremento por commit, contando o que foi encontrado*), e ela nunca
+> dependeu da migração.
+
+1. ❌ ~~**Nenhuma feature nova.**~~ A conferência é paridade; feature nova torna impossível saber se a
    diferença é defeito ou escopo.
 2. ✅ **O `crates/ui` compila e roda até a fase 5.** É o rollback e a referência de paridade.
 3. ❌ **Nunca traduzir componente egui linha a linha.** Modo imediato traduzido para retido vira o

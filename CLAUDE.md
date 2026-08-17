@@ -1,6 +1,37 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guia de trabalho neste repositório.
+
+## 🎯 Objetivo canônico — fonte única
+
+> **Um editor de fotos completo e funcional, no formato do Lightroom, em Rust com GPUI.**
+>
+> **Completo**: importar, organizar, triar, revelar e **entregar arquivo**.
+> **Funcional**: **todo controle que a tela oferece move a foto.** Um slider que existe e não faz
+> nada é defeito, não pendência.
+
+A integração com a API de pós-venda vem **depois** — o app tem de ser útil sozinho antes de conversar
+com qualquer coisa.
+
+⚠️ **Este objetivo substituiu outro em 17/ago/2026**, e a diferença importa no dia a dia. O anterior
+era migrar a interface de egui para GPUI **com paridade**; ele foi **alcançado** (`8c7df32`, o
+`crates/ui` fora do workspace, zero pacotes `egui` no `Cargo.lock`). Mas as regras dele continuavam
+valendo — em especial **"nenhuma feature nova"**, que é o motivo de o painel de Revelação ter 19
+sliders que não fazem nada: o app antigo também não os aplicava, e o porte foi fiel ao defeito.
+
+**Fidelidade ao app antigo deixou de ser virtude.** Detalhes em
+[`docs/00-OBJETIVO.md`](docs/00-OBJETIVO.md).
+
+### Teste de alinhamento
+
+1. **Um fotógrafo faz isto no Lightroom?** Se não, pergunte antes.
+2. **A tela promete e não entrega?** É **defeito**, e vem antes de funcionalidade nova.
+3. **Dá para conferir sem abrir o app?** Se não dá para escrever um teste que falha hoje, o trabalho
+   ainda não está entendido.
+4. **É o mais barato que destrava mais coisa?**
+
+**Comece sempre por [`docs/PARIDADE-LIGHTROOM.md`](docs/PARIDADE-LIGHTROOM.md)** — é a lista medida
+do que funciona, do que promete e não faz, e do que não existe. É a fila de trabalho.
 
 ## Build and Test Commands
 
@@ -102,10 +133,34 @@ custa 56× mais, e a fase 1 quase condenou o framework por medir no perfil
 errado. As réguas estão em `cargo run --release -p ui-gpui --bin medir-miniaturas`
 e `--bin medir-abertura`.
 
-## Adding New Features
+## Como uma funcionalidade nova atravessa as camadas
 
-1. Define domain entities/value objects in `domain` with tests
-2. Create use case in `use-cases` that depends only on domain traits
-3. Implement infrastructure (repository, file system) in `infrastructure`
-4. Add controller in `adapters` to bridge use case and UI
-5. Wire up in `ui/src/app.rs` and create/update UI components in `components/` or `views/`
+1. Entidade / value object no `domain`, com teste
+2. Use case em `use-cases`, dependendo só de traits do domain
+3. Implementação em `infrastructure` (repositório, disco, GPU)
+4. Controller em `adapters`, ligando use case e interface
+5. **Montagem no `crates/ui-gpui/src/main.rs`** e tela em
+   `crates/ui-gpui/src/{biblioteca,revelacao,importacao,impressao}/`
+
+🚨 **O passo 5 é o que mais some, e some em silêncio.** `ExportPhotoUseCase`, `ExportController` e
+`ImageExporterImpl` existem, estão testados — e **nunca são construídos no `main.rs`**. O app não
+exporta nada, e nada acusa isso: os testes das camadas de dentro passam todos. Camada pronta não é
+funcionalidade entregue; a pergunta é sempre **"que clique chega até aqui?"**.
+
+## Portas para o mundo assíncrono — o padrão da casa
+
+O GPUI **não roda futuros do tokio**, e os controllers são `async`. Toda ponte entre a tela e o banco
+é uma `trait` de porta, com o `Handle` do tokio capturado no `main` (antes de `Application::run`
+tomar a thread — um `tokio::spawn` de dentro do GPUI entra em pânico com *there is no reactor
+running*).
+
+Há quatro para copiar: `Gravador` e `GuardaDePresets` (revelação), `Marcador` (triagem), `Acervo`
+(releitura da Biblioteca), e as quatro da importação (`Explorador`, `Importador`, `SeletorDePasta`,
+`GeradorDeMiniaturas`).
+
+Duas regras que já custaram caro:
+
+- **A porta nunca devolve `Result` para a tela.** Avisar é acessório, e um `?` no meio faria a falha
+  do acessório derrubar o principal.
+- **Cada porta tem uma versão de mentira** (`mod mentira`, sob `#[cfg(test)]`), e é ela que permite
+  ao teste afirmar **o que foi gravado** e **quando** — sem banco, sem disco, sem GPU.
