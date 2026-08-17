@@ -45,8 +45,9 @@ use lru::LruCache;
 /// `o_wgsl_declara_os_mesmos_46_campos_na_mesma_ordem`.
 ///
 /// ⚠️ **Declarado não é aplicado.** Chegar ao shader é a primeira metade; ter
-/// código que os use é a segunda, e o matiz, a luminância e a lente ainda não a
-/// têm (`os_dezenove_ajustes_sem_codigo_no_shader_nao_mudam_nenhum_pixel`).
+/// código que os use é a segunda. O matiz e a luminância do HSL ganharam a sua em
+/// 17/ago/2026 (16 sliders); **a Lente ainda não tem**
+/// (`a_lente_ainda_nao_tem_codigo_no_shader`).
 #[repr(C)]
 #[derive(Copy, Clone, Debug, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Ajustes {
@@ -871,34 +872,23 @@ mod testes {
         }
     }
 
-    /// ⚠️ **Dezenove ajustes chegam ao shader e não têm código que os use.**
+    /// ⚠️ **Três ajustes chegam ao shader e não têm código que os use** — a
+    /// Lente: distorção, vinheta e o meio dela.
     ///
-    /// O alinhamento do `struct Params` resolveu a metade de *chegar*; a de
-    /// *fazer* continua aberta. O matiz nos 8 canais, a luminância nos 8 e os 3
-    /// da Lente estão declarados no `uniform`, viajam com o valor certo, e o
-    /// corpo do shader não os menciona em lugar nenhum.
+    /// 🔑 **Eram dezenove.** O matiz (8) e a luminância (8) do HSL entraram em
+    /// 17/ago/2026; a Lente ficou porque não é o mesmo trabalho: matiz e
+    /// luminância entram no bloco de HSL que já existia, e a distorção precisa
+    /// **reamostrar coordenada**, que muda como o shader lê a textura.
     ///
-    /// 🔑 **É um estado melhor que o anterior, e por um motivo só**: antes cinco
-    /// deles aplicavam **outra coisa** — arrastar "HSL / matiz — Vermelho"
-    /// borrava a foto. Um controle que não faz nada é visível; um que faz o
-    /// avesso do rótulo manda quem revela procurar defeito no motor de cor.
-    ///
-    /// Este teste **tem de falhar** conforme cada família ganhar código, e some
-    /// quando a última entrar.
+    /// Este teste **tem de falhar** no dia em que a Lente entrar, e some com ele.
     #[test]
-    fn os_dezenove_ajustes_sem_codigo_no_shader_nao_mudam_nenhum_pixel() {
+    fn a_lente_ainda_nao_tem_codigo_no_shader() {
         let mut motor = motor_pronto();
         let entrada = amostra();
         let neutro = revelar_e_colher(&mut motor, entrada.clone(), Ajustes::default());
 
-        // 23–30: matiz · 31–38: luminância · 39–41: lente
-        for (i, nome) in NOMES.iter().enumerate().take(42).skip(23) {
-            let saida = revelar_e_colher(&mut motor, entrada.clone(), com_campo(i, 60.0));
-            assert_eq!(
-                saida, neutro,
-                "`{nome}` (campo {i}) passou a mudar a foto — o shader ganhou código para ele?"
-            );
-        }
+        let saida = revelar_e_colher(&mut motor, entrada.clone(), com_campo(39, 60.0));
+        assert_eq!(saida, neutro, "Lente — a distorção passou a fazer efeito");
 
         // A vinheta com o meio junto: o meio sozinho nunca faria efeito, e o
         // teste passaria por engano.
@@ -906,35 +896,86 @@ mod testes {
         assert_eq!(saida, neutro, "Lente — a vinheta passou a fazer efeito");
     }
 
-    /// ✅ O slider "HSL / matiz — Vermelho" **não borra mais a foto**.
+    /// ✅ **Os 16 sliders de matiz e luminância do HSL movem a foto.**
     ///
-    /// Era o campo 23, que o shader lia como `nr_luminance`: um ajuste de matiz
-    /// gira a cor e não pode mexer no contraste entre vizinhos, e redução de
-    /// ruído faz exatamente o contrário. O contraste local caindo era a
-    /// assinatura do borrão, e nenhum giro de matiz a produziria.
+    /// Eles existiam no painel desde sempre e nunca aplicaram nada: primeiro
+    /// porque o `uniform` do shader declarava 28 campos e eles ficavam de fora,
+    /// depois — já alinhados — porque o corpo do shader não os mencionava.
     ///
-    /// ⚠️ **Ele ainda não gira cor nenhuma** — não há código de matiz no shader
-    /// (ver o teste acima). O que este mede é que parou de fazer o avesso, que é
-    /// a metade que o alinhamento resolveu.
+    /// A amostra tem as oito cores do HSL, então cada canal tem onde agir.
     #[test]
-    fn o_matiz_do_vermelho_nao_borra_mais_a_foto() {
+    fn o_matiz_e_a_luminancia_do_hsl_movem_a_foto() {
+        let mut motor = motor_pronto();
+        let entrada = amostra();
+        let neutro = revelar_e_colher(&mut motor, entrada.clone(), Ajustes::default());
+
+        // 23–30 é matiz, 31–38 é luminância — um canal por posição.
+        for (i, nome) in NOMES.iter().enumerate().take(39).skip(23) {
+            let saida = revelar_e_colher(&mut motor, entrada.clone(), com_campo(i, 60.0));
+            assert_ne!(
+                saida, neutro,
+                "`{nome}` (campo {i}) chega ao shader e não moveu um pixel"
+            );
+        }
+    }
+
+    /// 🚨 **A luminância do HSL não pode clarear cinza.**
+    ///
+    /// Um pixel cinza não tem matiz: `delta == 0` dá `hue == 0`, que cai na
+    /// faixa do **vermelho** com peso 1.0. Sem o portão da saturação, arrastar
+    /// "HSL / luminância — Vermelho" clarearia **toda** área neutra da foto — e
+    /// o slider viraria, calado, um controle global de brilho.
+    ///
+    /// Nada falharia: a foto muda, o controle responde, e o que mudou não tem
+    /// relação com o rótulo. É a mesma família do matiz que borrava.
+    #[test]
+    fn a_luminancia_do_vermelho_nao_mexe_no_cinza() {
+        let mut motor = motor_pronto();
+        let cinza_puro = cinza(16, 128);
+
+        let neutro = revelar_e_colher(&mut motor, cinza_puro.clone(), Ajustes::default());
+        let com_lum = revelar_e_colher(
+            &mut motor,
+            cinza_puro,
+            Ajustes {
+                hsl_red_lum: 100.0,
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(
+            com_lum, neutro,
+            "o cinza não tem matiz — a luminância do vermelho não pode tocá-lo"
+        );
+    }
+
+    /// 🔑 **O matiz gira a cor; ele não mexe no contraste entre vizinhos.**
+    ///
+    /// É a mesma medida que acusou o defeito antigo, agora do lado certo: quando
+    /// o campo 23 era lido como `nr_luminance`, o contraste local **caía** —
+    /// assinatura de borrão. Girando de verdade, ele fica onde estava.
+    #[test]
+    fn o_matiz_gira_a_cor_sem_borrar() {
         let mut motor = motor_pronto();
         let entrada = amostra();
 
-        let neutro = contraste_local(&revelar_e_colher(
+        let neutro = revelar_e_colher(&mut motor, entrada.clone(), Ajustes::default());
+        let girado = revelar_e_colher(
             &mut motor,
-            entrada.clone(),
-            Ajustes::default(),
-        ));
-        let com_matiz = contraste_local(&revelar_e_colher(
-            &mut motor,
-            entrada.clone(),
-            com_campo(23, 60.0),
-        ));
+            entrada,
+            Ajustes {
+                hsl_red_hue: 120.0,
+                ..Default::default()
+            },
+        );
 
-        assert_eq!(
-            com_matiz, neutro,
-            "o campo 23 voltou a cair no `nr_luminance`: contraste local {com_matiz} vs {neutro} no neutro"
+        assert_ne!(girado, neutro, "o matiz do vermelho não moveu nada");
+        let (antes, depois) = (contraste_local(&neutro), contraste_local(&girado));
+        // Girar matiz mexe em cor, não em detalhe: a soma de diferenças entre
+        // vizinhos fica na mesma ordem de grandeza. Um borrão a derrubaria.
+        assert!(
+            depois > antes / 2,
+            "o contraste local caiu de {antes} para {depois} — isso é borrão, não giro de matiz"
         );
     }
 

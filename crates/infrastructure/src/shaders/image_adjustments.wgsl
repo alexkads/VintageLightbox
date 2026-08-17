@@ -38,7 +38,7 @@ struct Params {
     hsl_blue_sat: f32,
     hsl_purple_sat: f32,
     hsl_magenta_sat: f32,
-    // HSL hue rotation (-180 to +180) — declarados, ainda sem código no corpo
+    // HSL hue rotation, in degrees (-180 to +180): hue is a circle
     hsl_red_hue: f32,
     hsl_orange_hue: f32,
     hsl_yellow_hue: f32,
@@ -47,7 +47,7 @@ struct Params {
     hsl_blue_hue: f32,
     hsl_purple_hue: f32,
     hsl_magenta_hue: f32,
-    // HSL luminance (-100 to +100) — idem
+    // HSL luminance (-100 to +100)
     hsl_red_lum: f32,
     hsl_orange_lum: f32,
     hsl_yellow_lum: f32,
@@ -56,7 +56,7 @@ struct Params {
     hsl_blue_lum: f32,
     hsl_purple_lum: f32,
     hsl_magenta_lum: f32,
-    // Lens corrections — idem
+    // Lens corrections — ⚠️ declared, still no code in the body
     lens_distortion: f32,
     lens_vignette_amount: f32,
     lens_vignette_midpoint: f32,
@@ -361,12 +361,25 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
     }
     
-    // HSL Color Channel Saturation Adjustments
-    let has_hsl = params.hsl_red_sat != 0.0 || params.hsl_orange_sat != 0.0 
+    // HSL: saturation, hue and luminance, per color band.
+    //
+    // Hue and luminance were dead until 2026-08-17: the fields existed in the
+    // uniform and nothing in this file mentioned them. 18 of the 42 sliders in
+    // the develop panel moved nothing.
+    let has_hsl_sat = params.hsl_red_sat != 0.0 || params.hsl_orange_sat != 0.0
         || params.hsl_yellow_sat != 0.0 || params.hsl_green_sat != 0.0
         || params.hsl_aqua_sat != 0.0 || params.hsl_blue_sat != 0.0
         || params.hsl_purple_sat != 0.0 || params.hsl_magenta_sat != 0.0;
-    
+    let has_hsl_hue = params.hsl_red_hue != 0.0 || params.hsl_orange_hue != 0.0
+        || params.hsl_yellow_hue != 0.0 || params.hsl_green_hue != 0.0
+        || params.hsl_aqua_hue != 0.0 || params.hsl_blue_hue != 0.0
+        || params.hsl_purple_hue != 0.0 || params.hsl_magenta_hue != 0.0;
+    let has_hsl_lum = params.hsl_red_lum != 0.0 || params.hsl_orange_lum != 0.0
+        || params.hsl_yellow_lum != 0.0 || params.hsl_green_lum != 0.0
+        || params.hsl_aqua_lum != 0.0 || params.hsl_blue_lum != 0.0
+        || params.hsl_purple_lum != 0.0 || params.hsl_magenta_lum != 0.0;
+    let has_hsl = has_hsl_sat || has_hsl_hue || has_hsl_lum;
+
     if (has_hsl) {
         // Normalize RGB to 0-1 range
         let r_norm = r / 255.0;
@@ -397,81 +410,137 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             sat = delta / (1.0 - abs(2.0 * lightness - 1.0));
         }
         
-        // Determine HSL adjustment based on hue range
+        // The three adjustments share ONE band weight, computed from the
+        // ORIGINAL hue. Two reasons, and both are bugs if ignored:
+        //
+        // 1. Sharing: a pixel that is 70% "red" must get 70% of red's hue, sat
+        //    AND luminance. Weighing them apart lets the three disagree on how
+        //    red the same pixel is.
+        // 2. Original hue: rotating the hue moves the pixel into another band.
+        //    Recomputing the weight after the shift would feed the adjustment
+        //    back into itself — a small rotation would cascade.
         var sat_adjustment: f32 = 0.0;
-        
+        var hue_adjustment: f32 = 0.0;
+        var lum_adjustment: f32 = 0.0;
+
         // Red (wraps around 0): 345-360, 0-15
         if (hue >= 345.0 || hue < 15.0) {
             var dist_hue: f32;
             if (hue >= 345.0) { dist_hue = hue - 360.0; } else { dist_hue = hue; }
             let weight = 1.0 - min(abs(dist_hue) / 15.0, 1.0);
             sat_adjustment += params.hsl_red_sat * weight;
+            hue_adjustment += params.hsl_red_hue * weight;
+            lum_adjustment += params.hsl_red_lum * weight;
         }
         // Orange: 15-45
         if (hue >= 15.0 && hue < 45.0) {
             let weight = 1.0 - min(abs(hue - 30.0) / 15.0, 1.0);
             sat_adjustment += params.hsl_orange_sat * weight;
+            hue_adjustment += params.hsl_orange_hue * weight;
+            lum_adjustment += params.hsl_orange_lum * weight;
         }
         // Yellow: 45-75
         if (hue >= 45.0 && hue < 75.0) {
             let weight = 1.0 - min(abs(hue - 60.0) / 15.0, 1.0);
             sat_adjustment += params.hsl_yellow_sat * weight;
+            hue_adjustment += params.hsl_yellow_hue * weight;
+            lum_adjustment += params.hsl_yellow_lum * weight;
         }
         // Green: 75-165
         if (hue >= 75.0 && hue < 165.0) {
             let weight = 1.0 - min(abs(hue - 120.0) / 45.0, 1.0);
             sat_adjustment += params.hsl_green_sat * weight;
+            hue_adjustment += params.hsl_green_hue * weight;
+            lum_adjustment += params.hsl_green_lum * weight;
         }
         // Aqua: 165-210
         if (hue >= 165.0 && hue < 210.0) {
             let weight = 1.0 - min(abs(hue - 187.5) / 22.5, 1.0);
             sat_adjustment += params.hsl_aqua_sat * weight;
+            hue_adjustment += params.hsl_aqua_hue * weight;
+            lum_adjustment += params.hsl_aqua_lum * weight;
         }
         // Blue: 210-270
         if (hue >= 210.0 && hue < 270.0) {
             let weight = 1.0 - min(abs(hue - 240.0) / 30.0, 1.0);
             sat_adjustment += params.hsl_blue_sat * weight;
+            hue_adjustment += params.hsl_blue_hue * weight;
+            lum_adjustment += params.hsl_blue_lum * weight;
         }
         // Purple: 270-310
         if (hue >= 270.0 && hue < 310.0) {
             let weight = 1.0 - min(abs(hue - 290.0) / 20.0, 1.0);
             sat_adjustment += params.hsl_purple_sat * weight;
+            hue_adjustment += params.hsl_purple_hue * weight;
+            lum_adjustment += params.hsl_purple_lum * weight;
         }
         // Magenta: 310-345
         if (hue >= 310.0 && hue < 345.0) {
             let weight = 1.0 - min(abs(hue - 327.5) / 17.5, 1.0);
             sat_adjustment += params.hsl_magenta_sat * weight;
+            hue_adjustment += params.hsl_magenta_hue * weight;
+            lum_adjustment += params.hsl_magenta_lum * weight;
         }
-        
-        sat_adjustment *= 0.01; // Convert from -100..100 to -1..1
-        
-        // Apply saturation adjustment and convert back to RGB
-        if (sat_adjustment != 0.0) {
+
+        sat_adjustment *= 0.01; // -100..100 -> -1..1
+        lum_adjustment *= 0.01; // -100..100 -> -1..1
+        // hue_adjustment is already in degrees: the slider goes -180..180,
+        // because hue is a circle. It is NOT scaled.
+
+        // 🚨 A gray pixel has NO hue: delta == 0 gives hue == 0, which lands in
+        // the red band with weight 1.0. Harmless for saturation (sat is 0, so
+        // `adj * sat` is 0), but luminance would brighten EVERY gray in the
+        // photo — "HSL / luminance — Red" would silently become a global
+        // brightness slider.
+        //
+        // The gate is the pixel's own saturation, and not `delta != 0.0`,
+        // because a hard cutoff puts a visible step in any gradient that fades
+        // to gray. Saturation goes to zero smoothly as the color does.
+        let color_strength = clamp(sat, 0.0, 1.0);
+        let effective_hue = hue_adjustment * color_strength;
+        let effective_lum = lum_adjustment * color_strength;
+
+        if (sat_adjustment != 0.0 || effective_hue != 0.0 || effective_lum != 0.0) {
             let new_sat = clamp(sat + sat_adjustment * sat, 0.0, 1.0);
-            
+
+            // Hue wraps: 350 + 20 is 10, not 370.
+            var new_hue = hue + effective_hue;
+            new_hue = new_hue - floor(new_hue / 360.0) * 360.0;
+
+            // Luminance moves toward white or toward black, proportionally, so
+            // it never clips: a pixel already at 1.0 cannot be brightened past
+            // it, and the curve stays symmetric around the current value.
+            var new_lightness = lightness;
+            if (effective_lum > 0.0) {
+                new_lightness = lightness + effective_lum * (1.0 - lightness);
+            } else if (effective_lum < 0.0) {
+                new_lightness = lightness * (1.0 + effective_lum);
+            }
+            new_lightness = clamp(new_lightness, 0.0, 1.0);
+
             // HSL to RGB conversion
-            let c = (1.0 - abs(2.0 * lightness - 1.0)) * new_sat;
-            let x = c * (1.0 - abs((hue / 60.0) % 2.0 - 1.0));
-            let m = lightness - c / 2.0;
-            
+            let c = (1.0 - abs(2.0 * new_lightness - 1.0)) * new_sat;
+            let x = c * (1.0 - abs((new_hue / 60.0) % 2.0 - 1.0));
+            let m = new_lightness - c / 2.0;
+
             var r1: f32 = 0.0;
             var g1: f32 = 0.0;
             var b1: f32 = 0.0;
-            
-            if (hue < 60.0) {
+
+            if (new_hue < 60.0) {
                 r1 = c; g1 = x; b1 = 0.0;
-            } else if (hue < 120.0) {
+            } else if (new_hue < 120.0) {
                 r1 = x; g1 = c; b1 = 0.0;
-            } else if (hue < 180.0) {
+            } else if (new_hue < 180.0) {
                 r1 = 0.0; g1 = c; b1 = x;
-            } else if (hue < 240.0) {
+            } else if (new_hue < 240.0) {
                 r1 = 0.0; g1 = x; b1 = c;
-            } else if (hue < 300.0) {
+            } else if (new_hue < 300.0) {
                 r1 = x; g1 = 0.0; b1 = c;
             } else {
                 r1 = c; g1 = 0.0; b1 = x;
             }
-            
+
             r = (r1 + m) * 255.0;
             g = (g1 + m) * 255.0;
             b = (b1 + m) * 255.0;
