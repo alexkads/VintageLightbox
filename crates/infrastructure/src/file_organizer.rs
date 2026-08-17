@@ -66,8 +66,7 @@ impl FileOrganizerImpl {
                 "photo-{}-{}-{}-{:03}.{}",
                 year, month, day, sequential, extension
             );
-            let path = dir.join(&name);
-            if !tokio::fs::try_exists(&path).await.unwrap_or(false) {
+            if reservar(&dir.join(&name)).await {
                 return name;
             }
             sequential += 1;
@@ -82,10 +81,7 @@ impl FileOrganizerImpl {
 
         // Primeiro tenta sem sufixo
         let first_try = format!("{}.{}", stem, extension);
-        if !tokio::fs::try_exists(dir.join(&first_try))
-            .await
-            .unwrap_or(false)
-        {
+        if reservar(&dir.join(&first_try)).await {
             return first_try;
         }
 
@@ -93,15 +89,39 @@ impl FileOrganizerImpl {
         let mut counter = 1;
         loop {
             let name = format!("{}_{}.{}", stem, counter, extension);
-            if !tokio::fs::try_exists(dir.join(&name))
-                .await
-                .unwrap_or(false)
-            {
+            if reservar(&dir.join(&name)).await {
                 return name;
             }
             counter += 1;
         }
     }
+}
+
+/// Pega o nome para si, criando o arquivo **vazio e exclusivo**.
+///
+/// 🚨 **Perguntar "existe?" e depois copiar perde foto.** A importação roda
+/// **oito arquivos em paralelo** (`Semaphore::new(8)` no
+/// `ImportWithOptionsUseCase`): dois deles perguntam ao mesmo tempo, os dois
+/// ouvem "não existe", e os dois copiam **para o mesmo caminho**. Uma foto
+/// sobrescreve a outra — e quem lê o destino no meio da segunda cópia recebe um
+/// arquivo pela metade, que é o `Not enough bytes, expected 2 but found 0` que
+/// aparecia no lugar da miniatura.
+///
+/// `create_new` é a única forma de perguntar e responder no mesmo movimento: o
+/// sistema de arquivos garante que **um só** dos dois cria. Quem perdeu tenta o
+/// número seguinte.
+///
+/// ⚠️ **O arquivo fica reservado com zero byte** até a cópia acontecer. É de
+/// propósito: é isso que impede o próximo a passar de escolher o mesmo nome. Uma
+/// falha de cópia depois disso deixa um arquivo vazio no destino — o preço, e o
+/// menor dos dois: o outro é a foto do casamento sobrescrita.
+async fn reservar(caminho: &Path) -> bool {
+    tokio::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(caminho)
+        .await
+        .is_ok()
 }
 
 impl FileOrganizerImpl {
@@ -198,6 +218,9 @@ impl FileOrganizerImpl {
 
         let dest_path = dest_dir.join(&filename);
 
+        // A cópia escreve **por cima da reserva** — o `copy` trunca o destino, que
+        // é exatamente o que se quer: o arquivo de zero byte criado por
+        // `reservar` existe só para segurar o nome.
         tokio::fs::copy(source_path, &dest_path)
             .await
             .map_err(|e| DomainError::InfrastructureError(format!("Failed to copy file: {}", e)))?;

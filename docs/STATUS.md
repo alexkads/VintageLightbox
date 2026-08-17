@@ -258,6 +258,33 @@ desde dez/2025.
 
 ---
 
+## 🚨 Importar perdia foto — consertado em 17/ago/2026
+
+O dono disse *"a importação não funciona"*, e funcionava mesmo pela metade: **importar doze fotos
+punha onze no catálogo**, e a que sobrava aparecia com
+`Not enough bytes, expected 2 but found 0` no lugar da miniatura.
+
+A causa está no `FileOrganizerImpl`: o nome do arquivo de destino era escolhido por *"não existe?
+então é meu"* (`try_exists` e depois `copy`), e o `ImportWithOptionsUseCase` roda **oito arquivos em
+paralelo**. Dois perguntavam ao mesmo tempo, os dois ouviam "não existe", e os dois copiavam **para o
+mesmo caminho** — uma foto por cima da outra, e a que estivesse sendo lida no meio da cópia virava
+arquivo truncado.
+
+**Conserto**: o nome é reservado criando o arquivo com `create_new` — a única forma de perguntar e
+responder no mesmo movimento; o sistema de arquivos garante que só um dos dois cria, e quem perdeu
+tenta o número seguinte.
+
+🚨 **Por que 24 testes de importação não pegaram**: todos usam dublê
+(`ExploradorDeMentira`/`ImportadorDeMentira`) — eles conferem a máquina de estados da tela e **nenhum
+toca no disco**. O caminho de verdade (controllers, organizador, banco) não tinha teste nenhum, e é
+o que passou a ter: [`crates/ui-gpui/tests/importacao_de_verdade.rs`](../crates/ui-gpui/tests/importacao_de_verdade.rs),
+com doze fotos para garantir disputa em toda execução.
+
+⚠️ **É defeito do produto, não do porte** — mora na `infrastructure`, que a migração declarou
+intocada, e valia igual no app de egui.
+
+---
+
 ## ⚠️ Lacunas encontradas na leitura do código
 
 Não são erros de compilação; são features que a UI mostra como prontas e que não fecham o ciclo.
