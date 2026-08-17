@@ -187,6 +187,47 @@ impl Biblioteca {
     /// Recalcula o que está visível. Chamado só quando um filtro muda.
     fn refiltrar(&mut self) {
         self.visiveis = indices_visiveis(&self.fotos, &self.filtros);
+        self.sanear_selecao();
+    }
+
+    /// 🚨 A seleção não pode apontar para fora da grade.
+    ///
+    /// Sem isto, dar nota 1 numa foto com o filtro em "★★★ ou mais" tira ela da
+    /// grade e **mantém ela selecionada**: o painel de informações continua
+    /// mostrando-a, as teclas seguintes caem nela, e "Revelação" abre uma foto
+    /// que não está na tela. Nada falha — é a seleção apontando para o invisível.
+    ///
+    /// O legado tem a mesma defesa (`sanitize_develop_selection`), com uma
+    /// diferença: lá a nova escolhida é sempre **a primeira da lista filtrada**.
+    /// ⚠️ **Aqui é a seguinte**, porque numa triagem de 800 fotos voltar ao começo
+    /// a cada foto rejeitada faz perder o lugar — e perder o lugar é o que a
+    /// triagem inteira existe para não fazer.
+    fn sanear_selecao(&mut self) {
+        let visiveis: std::collections::HashSet<usize> = self.visiveis.iter().copied().collect();
+        self.selecionadas.retain(|i| visiveis.contains(i));
+
+        let Some(atual) = self.selecionada else {
+            return;
+        };
+        if visiveis.contains(&atual) {
+            return;
+        }
+
+        // Sobrou alguém da seleção? Então a principal passa a ser a primeira
+        // delas — a seleção manda mais que a posição. Senão, anda para a
+        // seguinte que ainda está na grade.
+        self.selecionada = self.selecionadas.first().copied().or_else(|| {
+            self.visiveis
+                .iter()
+                .copied()
+                .find(|&i| i > atual)
+                .or_else(|| self.visiveis.last().copied())
+        });
+
+        if let Some(nova) = self.selecionada {
+            self.selecionadas.insert(nova);
+        }
+        self.ancora = self.selecionada;
     }
 
     /// A foto selecionada, para quem está de fora.
@@ -1281,6 +1322,107 @@ mod testes {
                     "a largura útil tem de caber entre as duas colunas: {util}"
                 );
                 assert!(util > 0.0);
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 Rejeitar a foto selecionada com o filtro ligado **anda** para a
+    /// seguinte.
+    ///
+    /// Sem isto a seleção fica apontando para uma foto que saiu da grade: o
+    /// painel continua mostrando-a, as teclas seguintes caem nela, e "Revelação"
+    /// abre uma foto que não está na tela. É a defesa que o legado chama de
+    /// `sanitize_develop_selection` — ⚠️ com uma diferença: lá a nova escolhida é
+    /// sempre a **primeira** da lista filtrada, e numa triagem de 800 fotos isso
+    /// devolve quem tria ao começo a cada foto rejeitada.
+    #[gpui::test]
+    fn a_selecao_anda_quando_o_filtro_tira_a_foto_da_grade(cx: &mut TestAppContext) {
+        let (janela, _marcador, _dir) = tela_com(cx, acervo_grande());
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                // Notas: 0,1,2,3,4,0,1,2,3,4 — com "★★★ ou mais" ficam 3,4,8,9.
+                tela.filtros.nota_minima = NotaMinima(3);
+                tela.refiltrar();
+                assert_eq!(
+                    nomes_visiveis(tela),
+                    vec!["03.jpg", "04.jpg", "08.jpg", "09.jpg"]
+                );
+
+                tela.selecionar(Some(3), cx);
+                // Rejeitar: a foto 3 sai da grade na hora.
+                tela.dar_nota(1, cx);
+
+                assert_eq!(
+                    tela.foto_selecionada().map(|f| f.name),
+                    Some("04.jpg".to_string()),
+                    "a seleção tem de andar para a seguinte que ainda está na grade"
+                );
+                assert_eq!(tela.quantas_selecionadas(), 1);
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// E quando nada mais passa no filtro, a seleção some — em vez de apontar
+    /// para uma grade vazia.
+    #[gpui::test]
+    fn sem_nenhuma_foto_na_grade_a_selecao_e_limpa(cx: &mut TestAppContext) {
+        let (janela, _marcador, _dir) = tela_com(cx, acervo_grande());
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.selecionar(Some(4), cx);
+                tela.filtros.nota_minima = NotaMinima(5);
+                tela.refiltrar();
+                assert!(
+                    nomes_visiveis(tela).is_empty(),
+                    "nenhuma tem cinco estrelas"
+                );
+
+                assert!(tela.foto_selecionada().is_none());
+                assert_eq!(tela.quantas_selecionadas(), 0);
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// ⚠️ Quando o filtro aperta, quem manda é a seleção que sobrou.
+    ///
+    /// Com três selecionadas e a principal saindo da grade, a principal passa a
+    /// ser a primeira das que ficaram — e não uma foto de fora da seleção. Andar
+    /// para fora dela faria a tecla seguinte cair onde ninguém escolheu.
+    #[gpui::test]
+    fn ao_apertar_o_filtro_a_principal_passa_a_ser_a_primeira_que_sobrou(cx: &mut TestAppContext) {
+        let (janela, _marcador, _dir) = tela_com(cx, acervo_grande());
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                // Notas 0..4 repetidas: os índices 3, 4, 8 e 9 têm 3, 4, 3 e 4.
+                tela.filtros.nota_minima = NotaMinima(3);
+                tela.refiltrar();
+
+                tela.selecionar(Some(4), cx);
+                tela.alternar_uma(9, cx);
+                tela.alternar_uma(3, cx);
+                assert_eq!(tela.quantas_selecionadas(), 3);
+                assert_eq!(
+                    tela.foto_selecionada().map(|f| f.name),
+                    Some("03.jpg".into())
+                );
+
+                // O filtro aperta: a 3 (nota 3) sai; a 4 e a 9 (nota 4) ficam.
+                tela.filtros.nota_minima = NotaMinima(4);
+                tela.refiltrar();
+
+                assert_eq!(
+                    tela.quantas_selecionadas(),
+                    2,
+                    "a que saiu da grade sai da seleção"
+                );
+                assert_eq!(
+                    tela.foto_selecionada().map(|f| f.name),
+                    Some("04.jpg".to_string()),
+                    "a principal passa a ser a primeira das que sobraram"
+                );
             })
             .expect("a janela deve estar aberta");
     }
