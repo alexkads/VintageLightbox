@@ -1428,10 +1428,14 @@ teste conferido quebrando de propósito.
 ⚠️ **O filmstrip some com uma foto só.** Uma faixa de um item ocupa espaço da foto para não dizer
 nada — e é o que acontece ao abrir a Revelação sem lista.
 
-⬜ **O que ainda falta das abas vivas**: `Grid Settings` — escolher de 1 a 5 colunas. ⚠️ E ele é uma
-divergência já tomada na fase 1: **o legado usa número fixo de colunas** (`state.grid_columns`, 4 por
-padrão, preso entre 1 e 5) e a grade nova calcula quantas **cabem na janela**. Dar o controle de volta
-é reintroduzir a decisão de lá; deixar como está é assumir a de cá. É decisão de dono, não de porte.
+✅ **`Grid Settings` — decidido pelo dono em 17/ago: as duas coisas.** A barra tem **auto** (o padrão,
+quantas couberem na janela) mais 1 a 5. O legado só tem o fixo (`state.grid_columns`, 4 por padrão) e
+a grade nova só tinha o automático; manter os dois é o único arranjo que responde aos dois casos —
+"aproveite a janela toda" e "quero ver estas quatro grandes".
+
+⚠️ **É feature nova**, e a regra §7.1 só a permite assim: com decisão de dono registrada. O que o
+teste prende é que a escolha **ganha da janela** — sem isso o botão acende, o número muda na barra e a
+grade continua com as colunas que cabem.
 
 
 ### Fase 5 — Testes e desligamento (1–2 semanas)

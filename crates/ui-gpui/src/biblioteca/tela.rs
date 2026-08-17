@@ -82,6 +82,16 @@ pub struct Biblioteca {
     selecionadas: std::collections::BTreeSet<usize>,
     /// De onde o próximo `Shift+clique` mede o intervalo.
     ancora: Option<usize>,
+    /// Quantas colunas a grade tem. `None` é **automático** — quantas couberem
+    /// na janela.
+    ///
+    /// 🔑 **As duas coisas existem por decisão do dono, em 17/ago.** O legado só
+    /// tem o número fixo (`state.grid_columns`, 1 a 5, sem automático) e a grade
+    /// nova só tinha o automático. Manter os dois é o único arranjo que responde
+    /// aos dois casos — "aproveite a janela toda" e "quero ver estas quatro
+    /// grandes" — e é **feature nova**, que a regra §7.1 só permite assim: com
+    /// decisão de dono registrada.
+    colunas_escolhidas: Option<u8>,
     /// O campo de busca.
     ///
     /// Entidade própria, e não um `String` no estado da tela: o `InputState` do
@@ -173,6 +183,7 @@ impl Biblioteca {
             selecionada: None,
             selecionadas: std::collections::BTreeSet::new(),
             ancora: None,
+            colunas_escolhidas: None,
             busca,
             _assinaturas: vec![assinatura],
         };
@@ -373,6 +384,28 @@ impl Biblioteca {
     /// `Cmd+D`: limpa a seleção inteira.
     pub fn limpar_selecao(&mut self, cx: &mut Context<Self>) {
         self.selecionar(None, cx);
+    }
+
+    /// Quantas colunas a grade desenha agora.
+    ///
+    /// ⚠️ **O automático é o padrão**, e não um modo escondido: numa janela
+    /// larga ele é a resposta certa, e é a que o app dá antes de alguém escolher
+    /// qualquer coisa.
+    fn colunas(&self, window: &Window) -> usize {
+        match self.colunas_escolhidas {
+            Some(quantas) => quantas.clamp(1, 5) as usize,
+            None => colunas_que_cabem(largura_util(window), PASSO),
+        }
+    }
+
+    pub fn colunas_escolhidas(&self) -> Option<u8> {
+        self.colunas_escolhidas
+    }
+
+    /// `None` volta para o automático.
+    pub fn escolher_colunas(&mut self, quantas: Option<u8>, cx: &mut Context<Self>) {
+        self.colunas_escolhidas = quantas;
+        cx.notify();
     }
 
     /// As setas: um passo na lista **filtrada**, sem dar a volta.
@@ -583,6 +616,36 @@ impl Biblioteca {
             ));
         }
 
+        // Automático primeiro: é o padrão, e ler "auto 1 2 3 4 5" diz na ordem
+        // o que a barra faz — a alternativa (5 4 3 2 1 auto) esconde o padrão no
+        // fim de uma fileira de números.
+        let escolhidas = self.colunas_escolhidas;
+        let mut colunas = vec![botao(
+            "colunas-auto".to_string(),
+            "auto".to_string(),
+            escolhidas.is_none(),
+            cx.listener(
+                move |this: &mut Self, _ev: &gpui::ClickEvent, _window, cx: &mut Context<Self>| {
+                    this.escolher_colunas(None, cx);
+                },
+            ),
+        )];
+        for quantas in 1..=5u8 {
+            colunas.push(botao(
+                format!("colunas-{quantas}"),
+                quantas.to_string(),
+                escolhidas == Some(quantas),
+                cx.listener(
+                    move |this: &mut Self,
+                          _ev: &gpui::ClickEvent,
+                          _window,
+                          cx: &mut Context<Self>| {
+                        this.escolher_colunas(Some(quantas), cx);
+                    },
+                ),
+            ));
+        }
+
         let mut sinalizadores = Vec::new();
         for (qual, rotulo) in [
             (FiltroDeSinalizador::Qualquer, "todos"),
@@ -669,6 +732,8 @@ impl Biblioteca {
             .child(div().flex().gap(px(4.)).children(sinalizadores))
             .child(rotulo_do_grupo("cor", cx))
             .child(div().flex().gap(px(4.)).children(cores))
+            .child(rotulo_do_grupo("colunas", cx))
+            .child(div().flex().gap(px(4.)).children(colunas))
     }
 
     /// O painel da direita: a foto selecionada e o retrato do acervo.
@@ -1144,7 +1209,7 @@ fn celula(
 
 impl Render for Biblioteca {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let colunas = colunas_que_cabem(largura_util(window), PASSO);
+        let colunas = self.colunas(window);
         // O total da grade é o **filtrado**, e não o acervo: são os índices em
         // `visiveis` que o `uniform_list` percorre.
         let total = self.visiveis.len();
@@ -1357,6 +1422,52 @@ mod testes {
                     "a largura útil tem de caber entre as duas colunas: {util}"
                 );
                 assert!(util > 0.0);
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 As colunas: automático por padrão, e fixo quando alguém escolhe.
+    ///
+    /// As duas coisas convivem por decisão do dono (17/ago) — o legado só tem o
+    /// número fixo e a grade nova só tinha o automático. O que este teste prende
+    /// é que a escolha **ganha da janela**: sem isso o botão acende, o número
+    /// muda na barra e a grade continua com as colunas que cabem.
+    #[gpui::test]
+    fn a_escolha_de_colunas_ganha_da_largura_da_janela(cx: &mut TestAppContext) {
+        let (janela, _marcador, _dir) = tela_com(cx, acervo_grande());
+        let visual = gpui::VisualTestContext::from_window(janela.into(), cx);
+        visual.simulate_resize(gpui::size(px(1600.), px(900.)));
+
+        janela
+            .update(cx, |tela, window, cx| {
+                let automatico = tela.colunas(window);
+                assert!(
+                    automatico > 2,
+                    "numa janela de 1600px cabe mais que duas colunas: {automatico}"
+                );
+
+                tela.escolher_colunas(Some(2), cx);
+                assert_eq!(tela.colunas(window), 2);
+
+                // E o automático volta.
+                tela.escolher_colunas(None, cx);
+                assert_eq!(tela.colunas(window), automatico);
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// ⚠️ Fora da faixa de 1 a 5, a escolha é presa — como no legado.
+    #[gpui::test]
+    fn a_escolha_de_colunas_fica_entre_uma_e_cinco(cx: &mut TestAppContext) {
+        let (janela, _marcador, _dir) = tela_com(cx, acervo_grande());
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.escolher_colunas(Some(0), cx);
+                assert_eq!(tela.colunas(window), 1, "zero coluna não desenha nada");
+
+                tela.escolher_colunas(Some(9), cx);
+                assert_eq!(tela.colunas(window), 5);
             })
             .expect("a janela deve estar aberta");
     }

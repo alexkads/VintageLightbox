@@ -95,7 +95,7 @@ webview, npm no build. O inventário medido (§2) continua válido.
 um vive no app novo
 - Existe por causa da regra 4 da migração: **nenhum teste de lá é apagado antes de virar linha aqui**
 - Os 99 E2E não são 99 comportamentos — 26 afirmam "este controle existe" e 31 medem o motor
-- Termina com **a lista que a fase 5 tem de zerar**: hoje são duas linhas
+- Termina com **a lista que a fase 5 tem de zerar**: hoje é uma linha
 
 **Leia se você quer**: Saber o que ainda falta antes de `crates/ui` sair do workspace.
 
