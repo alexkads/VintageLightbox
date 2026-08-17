@@ -506,6 +506,18 @@ impl Biblioteca {
             .collect()
     }
 
+    /// As fotos da seleção múltipla, **na ordem do acervo**.
+    ///
+    /// Vazio quando ninguém marcou nada com `Cmd`/`Shift` — e é o que faz a
+    /// exportação cair em [`Self::fotos_visiveis`] nesse caso, em vez de exportar
+    /// a única foto principal quando a pessoa filtrou 300 e não marcou nenhuma.
+    pub fn fotos_selecionadas(&self) -> Vec<PhotoViewModel> {
+        self.selecionadas
+            .iter()
+            .map(|&i| self.fotos[i].clone())
+            .collect()
+    }
+
     /// Põe o foco no campo de busca, para os testes da raiz.
     ///
     /// Existe por causa de um defeito real: quem busca uma foto deixa o foco no

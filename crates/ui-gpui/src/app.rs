@@ -19,6 +19,8 @@ use crate::biblioteca::marcacao::Marcador;
 use crate::biblioteca::tela::Biblioteca;
 use crate::cliente::{monitor_do_cliente, Cliente};
 use crate::configuracoes::Configuracoes;
+use crate::exportacao::porta::Exportador;
+use crate::exportacao::tela::Exportacao;
 use crate::importacao::explorador::{Explorador, GeradorDeMiniaturas, Importador, SeletorDePasta};
 use crate::importacao::tela::{Importacao, Importou};
 use crate::impressao::tela::Impressao;
@@ -36,6 +38,8 @@ pub struct Portas {
     pub gravador: Arc<dyn Gravador>,
     /// Quem sabe reler o catálogo depois que a importação o muda.
     pub acervo: Arc<dyn Acervo>,
+    /// Quem grava os arquivos exportados.
+    pub exportador: Arc<dyn Exportador>,
     pub marcador: Arc<dyn Marcador>,
     pub gerador: Arc<dyn GeradorDeMiniaturas>,
     pub guarda_de_presets: Arc<dyn GuardaDePresets>,
@@ -178,6 +182,9 @@ pub struct Aplicativo {
     /// fotógrafo já marcou ao fechar o modal por engano.
     importacao: Entity<Importacao>,
     importando: bool,
+    /// O modal de exportação — o único caminho do app até um arquivo no disco.
+    exportacao: Entity<Exportacao>,
+    exportando: bool,
     /// As Configurações, no mesmo formato do modal de importação: elas são um
     /// lugar onde se entra e de onde se sai, e não uma quarta tela.
     configuracoes: Entity<Configuracoes>,
@@ -226,6 +233,10 @@ impl Aplicativo {
         let previews_para_imprimir = previews.clone();
         let previews_do_cliente = previews.clone();
         let previews_das_configuracoes = previews.clone();
+        // O mesmo seletor nativo da importação: escolher pasta é interação com
+        // o sistema, e dois seletores seriam duas janelas do SO para a mesma
+        // pergunta.
+        let seletor_para_exportar = portas.seletor.clone();
         let biblioteca =
             cx.new(|cx| Biblioteca::nova(fotos, previews.clone(), portas.marcador, window, cx));
         // 🚨 O dock é montado **depois** da entidade existir: os quatro painéis
@@ -302,6 +313,8 @@ impl Aplicativo {
             impressao: cx.new(|cx| Impressao::nova(previews_para_imprimir, window, cx)),
             importacao,
             importando: false,
+            exportacao: cx.new(|_| Exportacao::nova(portas.exportador, seletor_para_exportar)),
+            exportando: false,
             configuracoes: cx.new(|_| Configuracoes::nova(previews_das_configuracoes)),
             configurando: false,
             cliente: None,
@@ -561,6 +574,39 @@ impl Aplicativo {
         cx.notify();
     }
 
+    /// Abre a exportação com a seleção da Biblioteca.
+    ///
+    /// 🔑 **Leva `fotos_visiveis` quando não há seleção múltipla**, e a seleção
+    /// quando há — é a mesma regra da Impressão. Exportar sem ter escolhido nada
+    /// é o pedido mais provável de quem acabou de filtrar por ★★★★★.
+    pub fn exportar(&mut self, cx: &mut Context<Self>) {
+        let biblioteca = self.biblioteca.read(cx);
+        let selecionadas = biblioteca.fotos_selecionadas();
+        let fotos = if selecionadas.is_empty() {
+            biblioteca.fotos_visiveis()
+        } else {
+            selecionadas
+        };
+
+        self.exportacao
+            .update(cx, |tela, cx| tela.abrir_para(fotos, cx));
+        self.exportando = true;
+        cx.notify();
+    }
+
+    /// Fecha o modal. ⚠️ **Não cancela o lote em curso** — a `Task` de colheita
+    /// vive na entidade da exportação, que continua existindo. Fechar por engano
+    /// no meio de 400 fotos não pode interromper as 400.
+    pub fn fechar_exportacao(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.exportando = false;
+        window.focus(&self.foco);
+        cx.notify();
+    }
+
+    pub fn exportando(&self) -> bool {
+        self.exportando
+    }
+
     /// Fecha o modal, **sem** jogar a listagem fora.
     ///
     /// 🔑 Quem fecha por engano depois de marcar 300 fotos de um cartão não pode
@@ -690,6 +736,9 @@ impl Aplicativo {
         // seleção na Biblioteca ("Develop button enabled if Library has a
         // selection", `app.rs`).
         let tem_selecao = self.biblioteca.read(cx).foto_selecionada().is_some();
+        // Exportar não exige seleção: com a grade filtrada e nada marcado, o
+        // pedido natural é "exporte o que estou vendo".
+        let tem_o_que_exportar = !self.biblioteca.read(cx).fotos_visiveis().is_empty();
         let na_revelacao = self.tela == Tela::Revelacao;
         let na_impressao = self.tela == Tela::Impressao;
 
@@ -764,6 +813,20 @@ impl Aplicativo {
                     })),
             )
             .child(
+                // 🚨 O primeiro caminho que este app teve até um arquivo no
+                // disco. Liga com seleção **ou** com grade não vazia: exportar
+                // o que se está vendo é o pedido de quem acabou de filtrar.
+                Button::new("nav-exportar")
+                    .label("Exportar")
+                    .xsmall()
+                    .when(self.exportando, |b| b.primary())
+                    .selected(self.exportando)
+                    .disabled(!tem_o_que_exportar)
+                    .on_click(cx.listener(|este, _ev, _window, cx| {
+                        este.exportar(cx);
+                    })),
+            )
+            .child(
                 Button::new("nav-importar")
                     .label("Importar")
                     .xsmall()
@@ -834,6 +897,51 @@ impl Aplicativo {
     /// ⚠️ **O véu não é enfeite**: ele diz que o que está atrás não responde. Sem
     /// ele, clicar numa foto da Biblioteca durante a importação pareceria
     /// funcionar e não faria nada.
+    /// O modal de exportação. Menor que o de importação de propósito: a
+    /// escolha inteira é uma pasta, e uma janela grande em volta de dois botões
+    /// sugere que falta preencher alguma coisa.
+    fn modal_de_exportacao(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .absolute()
+            .inset_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(gpui::rgba(0x00000099))
+            .child(
+                div()
+                    .max_w_full()
+                    .max_h_full()
+                    .flex()
+                    .flex_col()
+                    .bg(cx.theme().background)
+                    .border_1()
+                    .border_color(cx.theme().border)
+                    .rounded(px(6.))
+                    .overflow_hidden()
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .gap(px(24.))
+                            .px(px(12.))
+                            .py(px(6.))
+                            .bg(cx.theme().title_bar)
+                            .child(div().text_xs().child("Exportar fotos"))
+                            .child(
+                                Button::new("fechar-exportacao")
+                                    .label("Fechar")
+                                    .xsmall()
+                                    .on_click(cx.listener(|este, _ev, window, cx| {
+                                        este.fechar_exportacao(window, cx);
+                                    })),
+                            ),
+                    )
+                    .child(self.exportacao.clone()),
+            )
+    }
+
     fn modal_de_importacao(&self, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .absolute()
@@ -973,6 +1081,9 @@ impl Render for Aplicativo {
             .when(self.importando, |raiz| {
                 raiz.child(self.modal_de_importacao(cx))
             })
+            .when(self.exportando, |raiz| {
+                raiz.child(self.modal_de_exportacao(cx))
+            })
             .when(self.configurando, |raiz| {
                 raiz.child(self.modal_de_configuracoes(cx))
             })
@@ -990,6 +1101,7 @@ mod testes {
     use crate::biblioteca::acervo::mentira::AcervoDeMentira;
     use crate::biblioteca::marcacao::mentira::MarcadorDeMentira;
     use crate::biblioteca::marcacao::Marca;
+    use crate::exportacao::porta::mentira::ExportadorDeMentira;
     use crate::importacao::explorador::mentira::{
         ExploradorDeMentira, GeradorDeMentira, ImportadorDeMentira, SeletorDeMentira,
     };
@@ -1001,6 +1113,7 @@ mod testes {
         Portas {
             gravador: Arc::new(GravadorDeMentira::default()),
             acervo: Arc::new(AcervoDeMentira::default()),
+            exportador: Arc::new(ExportadorDeMentira::default()),
             marcador: Arc::new(MarcadorDeMentira::default()),
             gerador: Arc::new(GeradorDeMentira::default()),
             guarda_de_presets: Arc::new(GuardaDeMentira::default()),
@@ -2158,6 +2271,149 @@ mod testes {
                     1,
                     "uma releitura por lote, e não uma por colheita"
                 );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 **Exportar entrega arquivo — o app nunca teve esse caminho.**
+    ///
+    /// `ExportPhotoUseCase`, `ExportController` e `ImageExporterImpl` existiam e
+    /// estavam testados desde antes da migração, e **nunca eram construídos no
+    /// `main.rs`**: as ocorrências de "export" em `crates/ui-gpui/src` eram todas
+    /// comentário. O app de egui também não tinha, e é o que explica a migração
+    /// não ter acusado — paridade com quem não exporta é não exportar.
+    ///
+    /// 🔑 O teste mede o pedido que chega à porta: quantas fotos, com que
+    /// destino. É onde o defeito moraria, porque as camadas de dentro já
+    /// passavam todas.
+    #[gpui::test]
+    fn exportar_manda_a_selecao_para_a_pasta_escolhida(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+
+        let exportador = Arc::new(ExportadorDeMentira::default());
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            let exportador = exportador.clone();
+            |window, cx| {
+                Aplicativo::novo(
+                    acervo(),
+                    previews,
+                    Vec::new(),
+                    Portas {
+                        exportador,
+                        ..portas()
+                    },
+                    window,
+                    cx,
+                )
+            }
+        });
+
+        janela
+            .update(cx, |app, _window, cx| {
+                app.exportar(cx);
+                assert!(app.exportando());
+                app.exportacao.update(cx, |tela, cx| {
+                    assert_eq!(
+                        tela.quantas(),
+                        2,
+                        "sem seleção múltipla, exporta o que a grade está mostrando"
+                    );
+                    // Sem pasta escolhida não sai nada: gravar em algum lugar
+                    // padrão espalharia arquivo onde ninguém foi procurar.
+                    tela.exportar(cx);
+                });
+            })
+            .expect("a janela deve estar aberta");
+
+        assert!(
+            exportador.pedidos().is_empty(),
+            "exportar sem pasta escolhida não pode gravar nada"
+        );
+
+        let pasta = tempfile::tempdir().expect("pasta de saída");
+        janela
+            .update(cx, |app, _window, cx| {
+                app.exportacao.update(cx, |tela, cx| {
+                    tela.escolher_pasta_para_teste(pasta.path().to_path_buf(), cx);
+                    tela.exportar(cx);
+                    tela.colher(cx);
+                });
+            })
+            .expect("a janela deve estar aberta");
+
+        let pedidos = exportador.pedidos();
+        assert_eq!(pedidos.len(), 1, "um lote, e não um pedido por foto");
+        let saidas = &pedidos[0];
+        assert_eq!(saidas.len(), 2);
+        assert_eq!(
+            saidas[0].destino,
+            pasta.path().join("DSC_001.jpg"),
+            "o nome vem da origem, com a extensão do formato de saída"
+        );
+        assert_eq!(saidas[1].destino, pasta.path().join("retrato.jpg"));
+
+        janela
+            .update(cx, |app, _window, cx| {
+                app.exportacao.update(cx, |tela, cx| {
+                    tela.colher(cx);
+                    let p = tela.progresso().expect("o lote começou");
+                    assert!(p.terminou);
+                    assert_eq!((p.feitas, p.falhas), (2, 0));
+                    assert_eq!(tela.resumo(), "2 exportadas");
+                });
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// ⚠️ **A falha de uma foto não some, e não interrompe o lote.**
+    ///
+    /// Parar na 7ª de 400 desperdiça as 393 que sairiam; engolir a falha faz o
+    /// rodapé dizer 400 com 399 na pasta. As duas são piores que contar.
+    #[gpui::test]
+    fn uma_falha_no_meio_aparece_e_o_lote_continua(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+
+        let exportador = Arc::new(ExportadorDeMentira::default());
+        *exportador.falham.lock().expect("as falhas") = 1;
+
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            let exportador = exportador.clone();
+            |window, cx| {
+                Aplicativo::novo(
+                    acervo(),
+                    previews,
+                    Vec::new(),
+                    Portas {
+                        exportador,
+                        ..portas()
+                    },
+                    window,
+                    cx,
+                )
+            }
+        });
+
+        let pasta = tempfile::tempdir().expect("pasta de saída");
+        janela
+            .update(cx, |app, _window, cx| {
+                app.exportar(cx);
+                app.exportacao.update(cx, |tela, cx| {
+                    tela.escolher_pasta_para_teste(pasta.path().to_path_buf(), cx);
+                    tela.exportar(cx);
+                    tela.colher(cx);
+
+                    let p = tela.progresso().expect("o lote começou");
+                    assert_eq!(
+                        (p.feitas, p.falhas),
+                        (1, 1),
+                        "a segunda saiu mesmo com a primeira falhando"
+                    );
+                    assert_eq!(tela.resumo(), "1 exportadas · 1 falharam");
+                });
             })
             .expect("a janela deve estar aberta");
     }

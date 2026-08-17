@@ -14,6 +14,7 @@ use infrastructure::paths::AppPaths;
 use ui_gpui::app::{Aplicativo, Portas};
 use ui_gpui::biblioteca::acervo::{Acervo, AcervoDoBanco};
 use ui_gpui::biblioteca::marcacao::{Marcador, MarcadorDoBanco};
+use ui_gpui::exportacao::porta::{Exportador, ExportadorDoBanco};
 use ui_gpui::importacao::explorador::{
     Explorador, ExploradorDoDisco, GeradorDeMiniaturas, GeradorDoDisco, Importador,
     ImportadorDoDisco, SeletorDePasta, SeletorNativo,
@@ -142,6 +143,21 @@ async fn main() {
         biblioteca.clone(),
         tokio::runtime::Handle::current(),
     ));
+    // 🚨 **A montagem que nunca existiu.** `ExportPhotoUseCase`,
+    // `ExportController` e `ImageExporterImpl` estavam escritos e testados desde
+    // antes da migração, e este `Arc::new` nunca foi escrito: o app não tinha
+    // caminho nenhum até um arquivo no disco. Camada pronta não é funcionalidade
+    // entregue — a pergunta é sempre "que clique chega até aqui?".
+    let exportador: Arc<dyn Exportador> = Arc::new(ExportadorDoBanco::novo(
+        Arc::new(adapters::controllers::ExportController::new(Arc::new(
+            use_cases::ExportPhotoUseCase::new(
+                repositorio_de_fotos.clone(),
+                Arc::new(infrastructure::ImageExporterImpl::new()),
+            ),
+        ))),
+        tokio::runtime::Handle::current(),
+    ));
+
     // As treze teclas de triagem da Biblioteca. O `PhotoController` junta os
     // quatro use cases de marcação — e o de apagar, que **não** tem tecla aqui:
     // `Delete` existe no legado e leva um caminho próprio (confirmação e
@@ -214,6 +230,7 @@ async fn main() {
                         Portas {
                             gravador: gravador.clone(),
                             acervo: acervo.clone(),
+                            exportador: exportador.clone(),
                             marcador: marcador.clone(),
                             gerador: gerador.clone(),
                             guarda_de_presets: guarda_de_presets.clone(),
