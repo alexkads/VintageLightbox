@@ -1180,6 +1180,35 @@ pixel; aqui é um quinto da célula, em milímetro.)
 `Origem`/filtro do filmstrip do legado — a faixa mostra o que a Biblioteca estava mostrando, que é o
 mesmo recorte que os botões de coleção usam.
 
+#### 🚨 E o atalho de recorte estava comendo a letra `r` da busca
+
+Descoberto ao começar os atalhos da Biblioteca, antes de ligar a primeira tecla nova. **Digitar
+"retrato" no campo de busca escrevia `etato`.**
+
+O GPUI procura ligação em **todos os prefixos** do caminho de foco
+(`KeyBindingContextPredicate::depth_of`, `keymap.rs`), então uma ligação declarada no contexto da
+raiz continua casando enquanto se digita num campo de texto lá dentro — e **tecla que vira ação não
+vira letra**. O `r` do recorte (`91a80dc`) estava ligado a `Some("Aplicativo")` desde que nasceu.
+
+🔑 **Nada falhava.** A ação nem chegava a fazer efeito — `ao_alternar_corte` só age dentro da
+Revelação —, então o único sintoma era a letra sumir. E a suspeita cai no campo de busca, que estava
+certo o tempo todo.
+
+**Conserto**: `"Aplicativo && !Input"` no `r` e no `\`. O `Not` do predicado varre a pilha inteira, e
+`Input` é o contexto do campo do `gpui-component`. `Cmd+Z` não precisa (modificador não produz
+letra), e `Esc` também não: o campo tem ligação **própria** para ele, e o GPUI prefere a mais
+profunda.
+
+⚠️ **É pré-requisito dos atalhos que vêm agora**, e não um conserto de caminho: as notas do legado
+são `0`–`5`, as cores `6`–`9` e os sinalizadores `P`/`X`/`U` — treze teclas soltas. Sem esta regra,
+buscar `DSC_0512` na Biblioteca daria nota 5, depois 1, depois 2, em fotos diferentes, enquanto o
+número não aparecia no campo.
+
+⚠️ **E o teste precisou da janela montada com o `Root`**, como a do `main.rs`: o campo procura o
+`Root` com um `expect` ao inserir texto, e sem ele o teste morre antes de responder. É a primeira vez
+que um teste daqui digita de verdade em vez de chamar `set_value` — que é justamente por que o
+defeito sobreviveu a `digitar_na_busca_filtra_a_grade`.
+
 
 ### Fase 5 — Testes e desligamento (1–2 semanas)
 

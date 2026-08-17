@@ -51,9 +51,28 @@ actions!(
 ///
 /// Nomeado porque o `Esc` **não pode** ser global: o campo de busca da
 /// Biblioteca usa `Esc` para se limpar, e uma ligação sem contexto roubaria a
-/// tecla dele. Com contexto, o `Esc` só chega aqui quando nenhum campo de texto
-/// está com o foco — que é exatamente quando "voltar" é o que se quer.
+/// tecla dele.
 const CONTEXTO: &str = "Aplicativo";
+
+/// O contexto da raiz **com nenhum campo de texto no caminho do foco**.
+///
+/// 🚨 **Não é a mesma coisa que `CONTEXTO`, e a diferença custou a letra `r`.**
+/// O GPUI procura ligação em **todos os prefixos** do caminho de foco
+/// (`KeyBindingContextPredicate::depth_of`), então uma ligação no contexto da
+/// raiz continua casando enquanto se digita num campo de texto lá dentro — e
+/// tecla que casa vira ação, **não vira letra**. Com `r` ligado ao recorte,
+/// digitar "retrato" na busca escrevia `etato`: as duas letras sumiam, sem erro,
+/// sem aviso, e a suspeita cai no campo de busca.
+///
+/// O `!Input` é o contexto do `InputState` do `gpui-component`
+/// (`input::CONTEXT`), e o `Not` do predicado varre a pilha **inteira** — é o que
+/// faz a ligação desaparecer enquanto o campo tem o foco.
+///
+/// ⚠️ **Vale para toda tecla sem modificador.** `Cmd+Z` não precisa disto
+/// (`cmd` não produz letra), e `Esc` também não: o campo tem ligação **própria**
+/// para ele, e o GPUI prefere a mais profunda. É a tecla solta que compete com o
+/// texto.
+const SEM_CAMPO_DE_TEXTO: &str = "Aplicativo && !Input";
 
 pub fn init(cx: &mut gpui::App) {
     cx.bind_keys([
@@ -68,9 +87,9 @@ pub fn init(cx: &mut gpui::App) {
         gpui::KeyBinding::new("cmd-shift-z", Refazer, Some(CONTEXTO)),
         gpui::KeyBinding::new("cmd-z", Desfazer, Some(CONTEXTO)),
         // `R` de "recortar", a mesma tecla do legado (`keyboard.rs`).
-        gpui::KeyBinding::new("r", AlternarCorte, Some(CONTEXTO)),
+        gpui::KeyBinding::new("r", AlternarCorte, Some(SEM_CAMPO_DE_TEXTO)),
         // `\` mostra o antes/depois, como no legado.
-        gpui::KeyBinding::new("\\", AlternarOriginal, Some(CONTEXTO)),
+        gpui::KeyBinding::new("\\", AlternarOriginal, Some(SEM_CAMPO_DE_TEXTO)),
     ]);
 }
 
@@ -822,6 +841,65 @@ mod testes {
         janela
             .update(cx, |app, _window, cx| {
                 assert!(!app.revelacao.read(cx).cortando(), "e fechar de volta");
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 Digitar `r` na busca escreve `r` — e não abre o recorte.
+    ///
+    /// O GPUI procura ligação em **todos os prefixos** do caminho de foco, então
+    /// a ligação da raiz continuava casando com o campo de texto focado — e
+    /// tecla que vira ação **não vira letra**. Digitar "retrato" escrevia
+    /// `etato`, sem erro e sem aviso: as letras sumiam e a suspeita caía no campo
+    /// de busca, que estava certo.
+    ///
+    /// ⚠️ **A janela deste teste é montada com o `Root` do `gpui-component`**,
+    /// como a do `main.rs`. É a única forma de digitar de verdade: o campo
+    /// procura o `Root` com um `expect` ao inserir texto, e sem ele o teste morre
+    /// antes de responder qualquer coisa.
+    #[gpui::test]
+    fn digitar_r_na_busca_escreve_r(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+        cx.update(init);
+
+        let mut guardado: Option<Entity<Aplicativo>> = None;
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            let guardado = &mut guardado;
+            move |window, cx| {
+                let app = cx.new(|cx| {
+                    Aplicativo::novo(acervo(), previews, Vec::new(), portas(), window, cx)
+                });
+                *guardado = Some(app.clone());
+                gpui_component::Root::new(app, window, cx)
+            }
+        });
+        let app = guardado.expect("o aplicativo tem de ter sido construído");
+
+        janela
+            .update(cx, |_raiz, window, cx| {
+                app.update(cx, |app, cx| {
+                    app.biblioteca
+                        .update(cx, |tela, cx| tela.focar_busca(window, cx));
+                });
+            })
+            .expect("a janela deve estar aberta");
+
+        let mut visual = gpui::VisualTestContext::from_window(janela.into(), cx);
+        visual.simulate_input("retrato");
+
+        janela
+            .update(cx, |_raiz, _window, cx| {
+                assert_eq!(
+                    app.read(cx).biblioteca.read(cx).texto_da_busca(cx),
+                    "retrato",
+                    "o atalho de recorte estava comendo os `r` da busca"
+                );
+                assert!(
+                    !app.read(cx).revelacao.read(cx).cortando(),
+                    "e digitando não se abre o corte"
+                );
             })
             .expect("a janela deve estar aberta");
     }

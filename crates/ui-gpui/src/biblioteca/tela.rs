@@ -196,6 +196,11 @@ impl Biblioteca {
         window.focus(&self.busca.read(cx).focus_handle(cx));
     }
 
+    #[cfg(test)]
+    pub fn texto_da_busca(&self, cx: &gpui::App) -> String {
+        self.busca.read(cx).value().to_string()
+    }
+
     /// Seleciona por índice **no acervo**.
     pub fn selecionar(&mut self, no_acervo: Option<usize>, cx: &mut Context<Self>) {
         self.selecionada = no_acervo;
