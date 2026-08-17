@@ -46,27 +46,29 @@ Entram juntos, num commit que mexe no `domain`.
 
 ---
 
-## Revelação — 23 dos 42 controles movem a foto
+## Revelação — ✅ **os 42 controles movem a foto**
 
 | Seção | Controles | Estado |
 |---|--:|---|
 | Básico (exposição, contraste, temperatura, matiz, altas luzes, sombras, brancos, pretos, clareza, vibração, saturação) | 11 | ✅ |
 | Detalhe (ruído de luminância, ruído de cor, nitidez, raio) | 4 | ✅ **desde 17/ago** — o alinhamento do `uniform` os devolveu |
 | HSL / cor (saturação nos 8 canais) | 8 | ✅ |
-| HSL / matiz (8 canais) | 8 | 🚨 chegam ao shader, sem código que os use |
-| HSL / luminância (8 canais) | 8 | 🚨 idem |
-| Lente (distorção, vinheta, meio da vinheta) | 3 | 🚨 idem |
+| HSL / matiz (8 canais) | 8 | ✅ **desde 17/ago** — giram a cor, com o portão do cinza |
+| HSL / luminância (8 canais) | 8 | ✅ **desde 17/ago** |
+| Lente (distorção, vinheta, meio da vinheta) | 3 | ✅ **desde 17/ago** — a distorção reamostra; a vinheta sombreia por posição |
 | Curva de tons paramétrica | 0 | 🚨 o shader **aplica** os 4 `tone_curve_*` e **nenhum controle os escreve** — o gráfico da tela é desenhado a partir dos ajustes do Básico |
 
-🔑 **A causa dos 19 é uma só, e já foi metade resolvida.** O `struct Params` do WGSL declarava 28
-campos para os 46 que a CPU manda, e o `uniform` casa por **posição**: a partir do 23 o shader lia o
-campo do vizinho (arrastar "HSL / matiz — Vermelho" *borrava a foto*) e do 28 em diante não lia nada.
-O alinhamento entrou em 17/ago e devolveu o Detalhe inteiro. Os 19 restantes agora **chegam** ao
-shader — falta o corpo dele saber o que fazer com eles.
+🔑 **Eram 23 na manhã de 17/ago, e foram dois defeitos em sequência, não um.** Primeiro o
+`struct Params` do WGSL declarava 28 campos para os 46 que a CPU manda, e o `uniform` casa por
+**posição**: a partir do 23 o shader lia o campo do vizinho (arrastar "HSL / matiz — Vermelho"
+*borrava a foto*) e do 28 em diante não lia nada. Alinhado isso, restava o segundo: **o corpo do
+shader não mencionava matiz, luminância nem lente em lugar nenhum.** Chegar e ser aplicado são duas
+coisas.
 
-⚠️ **É trabalho de matemática de cor, não de ligação.** Matiz e luminância entram no bloco de HSL que
-já existe (a ponderação por faixa de matiz está escrita ali, para a saturação); lente e vinheta são
-novos, e distorção precisa reamostrar coordenada.
+⚠️ **Três decisões deste trabalho erram em silêncio, e cada uma tem teste**: a luminância não pode
+clarear cinza (pixel neutro cai na faixa do vermelho com peso 1.0, e o slider viraria brilho global);
+o matiz não é escalado, porque a faixa -180..180 já é em graus; e a leitura bilinear da distorção tem
+de ser **exata no inteiro**, senão o neutro passa a mover pixel.
 
 ### O que mais falta na Revelação, comparado ao Lightroom
 
@@ -134,7 +136,7 @@ galeria do cliente**, e o que é defeito visível na tela.
 | # | O quê | Por que nesta posição |
 |--:|---|---|
 | 1 | ~~**Exportação: da tela ao arquivo**~~ | ✅ **feito em 17/ago** |
-| 2 | **Os 19 sliders inertes** (matiz 8, luminância 8, lente 3) | a promessa vazia mais visível — 45% do painel de Revelação. Critério 2 do objetivo: defeito antes de funcionalidade |
+| 2 | ~~**Os 19 sliders inertes**~~ | ✅ **feito em 17/ago** — o painel move os 42 |
 | 3 | **Marca d'água e redimensionamento na exportação** | é o que a foto "deixada para trás" precisa para ir ao site sem ser entregue. **Sem isto o upsell não existe** |
 | 4 | **Coleções na tela** | "o ensaio do cliente" **é** uma coleção, e "comprada" × "deixada para trás" é a divisão dentro dela. O backend está pronto e testado há meses |
 | 5 | **Copiar/colar revelação entre fotos** | o atalho que transforma 800 fotos numa sessão viável |

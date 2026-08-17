@@ -44,10 +44,10 @@ use lru::LruCache;
 /// declarar os 46 na mesma ordem, e quem prende isso é
 /// `o_wgsl_declara_os_mesmos_46_campos_na_mesma_ordem`.
 ///
-/// ⚠️ **Declarado não é aplicado.** Chegar ao shader é a primeira metade; ter
-/// código que os use é a segunda. O matiz e a luminância do HSL ganharam a sua em
-/// 17/ago/2026 (16 sliders); **a Lente ainda não tem**
-/// (`a_lente_ainda_nao_tem_codigo_no_shader`).
+/// ✅ **E desde 17/ago/2026 os 46 campos chegam ao shader e todos têm código que
+/// os use.** Chegar e ser aplicado são duas coisas, e as duas custaram um
+/// conserto próprio no mesmo dia: o alinhamento do `uniform`, e depois o corpo do
+/// shader, que não mencionava matiz, luminância nem lente em lugar nenhum.
 #[repr(C)]
 #[derive(Copy, Clone, Debug, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Ajustes {
@@ -872,28 +872,115 @@ mod testes {
         }
     }
 
-    /// ⚠️ **Três ajustes chegam ao shader e não têm código que os use** — a
-    /// Lente: distorção, vinheta e o meio dela.
+    /// 🚨 **O neutro devolve a foto intacta — numa imagem com detalhe.**
     ///
-    /// 🔑 **Eram dezenove.** O matiz (8) e a luminância (8) do HSL entraram em
-    /// 17/ago/2026; a Lente ficou porque não é o mesmo trabalho: matiz e
-    /// luminância entram no bloco de HSL que já existia, e a distorção precisa
-    /// **reamostrar coordenada**, que muda como o shader lê a textura.
+    /// Existe porque `o_neutro_devolve_o_pixel_intacto` **não consegue** ver o
+    /// defeito que este vê: ele usa cinza chapado, e interpolar dois pixels
+    /// iguais devolve o mesmo valor. Um erro de meio pixel na reamostragem passa
+    /// por ele sem tocar em nada.
     ///
-    /// Este teste **tem de falhar** no dia em que a Lente entrar, e some com ele.
+    /// Descoberto quebrando de propósito, ao ligar a distorção de lente: um
+    /// deslocamento na `amostrar` deixou os 13 testes passando. A `amostra` tem
+    /// xadrez de 1px, onde meio pixel de erro vira borrão imediato.
+    ///
+    /// 🔑 **É a diferença entre "o neutro não altera cor" e "o neutro não move
+    /// pixel".** A reamostragem trouxe a segunda pergunta, e ela não tinha dono.
     #[test]
-    fn a_lente_ainda_nao_tem_codigo_no_shader() {
+    fn o_neutro_nao_reamostra_uma_imagem_com_detalhe() {
+        let mut motor = motor_pronto();
+        let entrada = amostra();
+        let saida = revelar_e_colher(&mut motor, entrada.clone(), Ajustes::default());
+
+        assert_eq!(
+            saida.as_slice(),
+            entrada.as_slice(),
+            "o neutro moveu pixel — a leitura bilinear deixou de ser exata no inteiro"
+        );
+    }
+
+    /// ✅ **Os 3 controles de Lente movem a foto** — os últimos que faltavam.
+    ///
+    /// 🔑 **Com estes, os 42 sliders do painel movem a foto.** Eram 23 na manhã
+    /// de 17/ago/2026: o `uniform` do shader declarava 28 campos para os 46 que a
+    /// CPU manda, e mesmo os que chegavam nem sempre tinham código.
+    ///
+    /// ⚠️ **A vinheta é testada com o meio junto**, e a distorção sozinha: o meio
+    /// da vinheta não faz nada sem a intensidade, e um teste que o afirmasse
+    /// passaria por engano.
+    #[test]
+    fn a_lente_move_a_foto() {
         let mut motor = motor_pronto();
         let entrada = amostra();
         let neutro = revelar_e_colher(&mut motor, entrada.clone(), Ajustes::default());
 
-        let saida = revelar_e_colher(&mut motor, entrada.clone(), com_campo(39, 60.0));
-        assert_eq!(saida, neutro, "Lente — a distorção passou a fazer efeito");
+        let distorcida = revelar_e_colher(&mut motor, entrada.clone(), com_campo(39, 60.0));
+        assert_ne!(distorcida, neutro, "Lente — a distorção não moveu nada");
 
-        // A vinheta com o meio junto: o meio sozinho nunca faria efeito, e o
-        // teste passaria por engano.
-        let saida = revelar_e_colher(&mut motor, entrada, com_campos(&[(40, 80.0), (41, 30.0)]));
-        assert_eq!(saida, neutro, "Lente — a vinheta passou a fazer efeito");
+        let vinheta = revelar_e_colher(&mut motor, entrada, com_campos(&[(40, -80.0), (41, 30.0)]));
+        assert_ne!(vinheta, neutro, "Lente — a vinheta não moveu nada");
+    }
+
+    /// 🚨 **A vinheta escurece o canto e deixa o centro em paz.**
+    ///
+    /// É o que separa "vinheta" de "exposição": um fator aplicado à foto inteira
+    /// também mudaria a saída, e `assert_ne!` sozinho não veria a diferença. Aqui
+    /// a medida é a razão entre o canto e o centro.
+    #[test]
+    fn a_vinheta_escurece_o_canto_e_nao_o_centro() {
+        let mut motor = motor_pronto();
+        let cinza_puro = cinza(16, 200);
+
+        let saida = revelar_e_colher(
+            &mut motor,
+            cinza_puro,
+            Ajustes {
+                lens_vignette_amount: -80.0,
+                lens_vignette_midpoint: 0.0,
+                ..Default::default()
+            },
+        );
+
+        let em = |x: usize, y: usize| saida[(y * 16 + x) * 4] as i32;
+        let centro = em(8, 8);
+        let canto = em(0, 0);
+
+        assert!(
+            canto < centro - 20,
+            "o canto ({canto}) tinha de estar bem mais escuro que o centro ({centro})"
+        );
+        assert!(
+            centro >= 190,
+            "o centro ({centro}) mal pode ser tocado — senão isto é exposição, não vinheta"
+        );
+    }
+
+    /// ⚠️ **A vinheta positiva clareia**, e a negativa escurece — é a convenção
+    /// do Lightroom, onde "Vignetting: Amount" negativo é o efeito clássico.
+    #[test]
+    fn o_sinal_da_vinheta_decide_a_direcao() {
+        let mut motor = motor_pronto();
+        let cinza_puro = cinza(16, 128);
+        let canto = |saida: &[u8]| saida[0] as i32;
+
+        let escura = revelar_e_colher(
+            &mut motor,
+            cinza_puro.clone(),
+            Ajustes {
+                lens_vignette_amount: -80.0,
+                ..Default::default()
+            },
+        );
+        let clara = revelar_e_colher(
+            &mut motor,
+            cinza_puro,
+            Ajustes {
+                lens_vignette_amount: 80.0,
+                ..Default::default()
+            },
+        );
+
+        assert!(canto(&escura) < 128, "vinheta negativa tem de escurecer");
+        assert!(canto(&clara) > 128, "vinheta positiva tem de clarear");
     }
 
     /// ✅ **Os 16 sliders de matiz e luminância do HSL movem a foto.**

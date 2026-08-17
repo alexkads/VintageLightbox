@@ -56,7 +56,7 @@ struct Params {
     hsl_blue_lum: f32,
     hsl_purple_lum: f32,
     hsl_magenta_lum: f32,
-    // Lens corrections — ⚠️ declared, still no code in the body
+    // Lens corrections: distortion resamples, vignetting shades by position
     lens_distortion: f32,
     lens_vignette_amount: f32,
     lens_vignette_midpoint: f32,
@@ -71,22 +71,76 @@ struct Params {
 @group(0) @binding(1) var output_texture: texture_storage_2d<rgba8unorm, write>;
 @group(0) @binding(2) var<uniform> params: Params;
 
+/// Bilinear read at a fractional position, clamped to the image.
+///
+/// 🔑 It is EXACT at integer positions: `floor` of an integer float gives the
+/// integer back, `frac` is 0.0, and `mix(a, b, 0.0)` is `a` — bit for bit. That
+/// is what lets lens distortion share this path with every other adjustment
+/// without moving a single pixel when it is neutral.
+fn amostrar(pos: vec2<f32>, dims: vec2<u32>) -> vec4<f32> {
+    let ultimo = vec2<f32>(f32(dims.x) - 1.0, f32(dims.y) - 1.0);
+    let dentro = clamp(pos, vec2<f32>(0.0, 0.0), ultimo);
+
+    let base = floor(dentro);
+    let frac = dentro - base;
+
+    let x0 = i32(base.x);
+    let y0 = i32(base.y);
+    let x1 = min(x0 + 1, i32(dims.x) - 1);
+    let y1 = min(y0 + 1, i32(dims.y) - 1);
+
+    let p00 = textureLoad(input_texture, vec2<i32>(x0, y0), 0);
+    let p10 = textureLoad(input_texture, vec2<i32>(x1, y0), 0);
+    let p01 = textureLoad(input_texture, vec2<i32>(x0, y1), 0);
+    let p11 = textureLoad(input_texture, vec2<i32>(x1, y1), 0);
+
+    return mix(mix(p00, p10, frac.x), mix(p01, p11, frac.x), frac.y);
+}
+
 @compute @workgroup_size(16, 16)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let dims = textureDimensions(input_texture);
-    
+
     // Bounds check
     if (global_id.x >= dims.x || global_id.y >= dims.y) {
         return;
     }
-    
+
+    // Lens distortion: this pixel reads from somewhere ELSE in the source.
+    //
+    // The model is the usual radial one — r' = r * (1 + k*r²) — applied from the
+    // center outward, with the radius normalized so that 1.0 is the corner.
+    // Negative pulls the corners in (corrects barrel), positive pushes them out
+    // (corrects pincushion).
+    //
+    // 🔑 It is the FIRST thing that happens, and it has to be: every other
+    // adjustment reads the neighborhood, and reading a neighborhood of the
+    // undistorted image and then moving the pixel would smear along the wrong
+    // direction.
+    var origem = vec2<f32>(f32(global_id.x), f32(global_id.y));
+    if (params.lens_distortion != 0.0) {
+        let centro = vec2<f32>(f32(dims.x), f32(dims.y)) * 0.5;
+        let escala = max(length(centro), 1.0);
+        let d = (origem - centro) / escala;
+        let k = params.lens_distortion * 0.005; // -100..100 -> -0.5..0.5
+        origem = centro + d * (1.0 + k * dot(d, d)) * escala;
+    }
+
     // Load pixel (values in 0.0-1.0 range)
-    let pixel = textureLoad(input_texture, vec2<i32>(global_id.xy), 0);
+    let pixel = amostrar(origem, dims);
     var r = pixel.r * 255.0;
     var g = pixel.g * 255.0;
     var b = pixel.b * 255.0;
     let a = pixel.a;
-    
+
+    // ⚠️ The neighborhood loop below walks integers around the SOURCE pixel, and
+    // not around this thread's own coordinate. With no distortion the two are
+    // the same value, so nothing changes; with distortion, sampling around the
+    // thread's coordinate would blur a neighborhood the output pixel never came
+    // from.
+    let base_x = i32(round(origem.x));
+    let base_y = i32(round(origem.y));
+
     // 0. Noise Reduction & Sharpening
     // We combine NR and Sharpening (USM) in a single neighborhood loop for efficiency
     let do_nr_lum = params.nr_luminance > 0.0;
@@ -119,8 +173,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         // 5x5 Kernel
         for (var dy: i32 = -2; dy <= 2; dy++) {
             for (var dx: i32 = -2; dx <= 2; dx++) {
-                let nx = i32(global_id.x) + dx;
-                let ny = i32(global_id.y) + dy;
+                let nx = base_x + dx;
+                let ny = base_y + dy;
                 
                 if (nx >= 0 && ny >= 0 && nx < i32(dims.x) && ny < i32(dims.y)) {
                     let neighbor = textureLoad(input_texture, vec2<i32>(nx, ny), 0);
@@ -547,6 +601,34 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
     }
     
+    // Lens vignetting — last, and on purpose.
+    //
+    // 🔑 It is the only adjustment that depends on WHERE the pixel is instead of
+    // WHAT color it is. Running it before the tone and color work would feed the
+    // darkened corners into highlights, shadows and HSL — the band a pixel falls
+    // into would depend on its position in the frame, and two pixels of the same
+    // color would be treated as different colors.
+    if (params.lens_vignette_amount != 0.0) {
+        let centro = vec2<f32>(f32(dims.x), f32(dims.y)) * 0.5;
+        let aqui = vec2<f32>(f32(global_id.x), f32(global_id.y));
+        // 1.0 at the corner, 0.0 at the center.
+        let distancia = length(aqui - centro) / max(length(centro), 1.0);
+
+        // The midpoint is where the falloff STARTS: at 0 it starts at the very
+        // center, at 100 there is nothing left to fall off over.
+        let meio = clamp(params.lens_vignette_midpoint * 0.01, 0.0, 1.0);
+        let t = clamp((distancia - meio) / max(1.0 - meio, 0.001), 0.0, 1.0);
+
+        // Squared so the corner darkens smoothly instead of showing the ring
+        // where the falloff begins.
+        let forca = params.lens_vignette_amount * 0.01;
+        let fator = 1.0 + forca * t * t;
+
+        r *= fator;
+        g *= fator;
+        b *= fator;
+    }
+
     // Clamp values to 0-255 and convert back to 0.0-1.0
     r = clamp(r, 0.0, 255.0) / 255.0;
     g = clamp(g, 0.0, 255.0) / 255.0;

@@ -100,7 +100,7 @@ Não é opinião, e por isso cada um tem como ser medido:
 
 | Critério | Como se confere |
 |---|---|
-| **Todo controle da tela move a foto** | um teste por família, medindo pixel — hoje falha em 19 dos 42 |
+| **Todo controle da tela move a foto** | ✅ **os 42 passam desde 17/ago** — um teste por família, medindo pixel |
 | **O arquivo exportado é o que a tela mostra** | ✅ já vale: `crates/infrastructure/tests/exportacao.rs` |
 | **RAW de câmera abre** | um arquivo por fabricante no acervo de teste |
 | **Nada trava a janela** | rolagem a 60fps em `--release`, `medir-miniaturas` e `medir-abertura` |
