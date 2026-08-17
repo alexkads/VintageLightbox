@@ -20,7 +20,7 @@ cargo test -p infrastructure
 cargo test test_name --workspace
 
 # Run the application
-cargo run -p ui
+cargo run -p ui-gpui
 
 # Check code (faster than build)
 cargo check --workspace
@@ -36,11 +36,11 @@ VintageLightbox follows **Clean Architecture** with 4 layers as separate crates:
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│  ui (egui)                                          │
-│  - main.rs: Application entry, eframe setup         │
-│  - app.rs: Main app loop and state management       │
-│  - components/: Reusable UI widgets                 │
-│  - views/: LibraryView, DevelopView                 │
+│  ui-gpui (GPUI)                                     │
+│  - main.rs: entrada, tema, teclas, janela           │
+│  - app.rs: a raiz — qual tela está no ar            │
+│  - biblioteca/ revelacao/ importacao/ impressao/    │
+│  - cliente.rs: a segunda tela; configuracoes.rs     │
 ├─────────────────────────────────────────────────────┤
 │  adapters                                           │
 │  - controllers/: ImportController, EditorController │
@@ -82,12 +82,25 @@ VintageLightbox follows **Clean Architecture** with 4 layers as separate crates:
 
 ## UI Framework
 
-- **egui 0.28** with eframe (OpenGL backend via glow)
-- UI components in `crates/ui/src/components/`
-- Views in `crates/ui/src/views/`
-- Async file dialogs via `rfd` crate
-- Image processing with `image` crate, textures via egui::TextureHandle
-- Keyboard shortcuts handled in `keyboard.rs`
+**GPUI 0.2 + gpui-component 0.5** — o egui saiu em 17/ago/2026, com a migração
+concluída (`docs/10-MIGRACAO-GPUI.md`). Quem procura o app antigo o encontra no
+histórico do git; o que ele fazia está listado, comportamento a comportamento,
+em `docs/PARIDADE-UI.md`.
+
+- As telas ficam em `crates/ui-gpui/src/{biblioteca,revelacao,importacao,impressao}/`
+- As duas telas grandes vivem num **dock**: os painéis se arrastam e se
+  redimensionam, e o arranjo é gravado ao lado do catálogo (`arranjo-*.json`)
+- Imagem: `DynamicImage → RgbaImage → Frame → RenderImage` (`imagem.rs`)
+  ⚠️ **em BGRA** — o GPUI espera essa ordem e o crate `image` produz RGBA
+- Seletor de arquivos nativo via `rfd`; o motor de revelação é wgpu próprio,
+  numa thread de fundo (`revelacao/processador.rs`)
+- Teclas: as da raiz em `app.rs`, e sempre com contexto — ligação sem `!Input`
+  come a letra de quem está digitando na busca
+
+⚠️ **Toda medida de desempenho é em `--release`**: em `debug` uma miniatura
+custa 56× mais, e a fase 1 quase condenou o framework por medir no perfil
+errado. As réguas estão em `cargo run --release -p ui-gpui --bin medir-miniaturas`
+e `--bin medir-abertura`.
 
 ## Adding New Features
 

@@ -56,11 +56,11 @@ struct `PhotoEdits` continua sendo o conserto de verdade.
 | Métrica | Valor |
 |---------|-------|
 | `cargo check --workspace --all-targets` | ✅ **limpo** |
-| `cargo test --workspace` | ✅ **836 passando, 0 falhas, 4 ignorados** (17/ago) |
+| `cargo test --workspace` | ✅ **668 passando, 0 falhas, 2 ignorados** (17/ago, já sem o `crates/ui`) |
 | App | ✅ **sobe** — janela 1352×848, `GPU: Initialized successfully with Apple M2 Pro` |
 | Migrations SQLite no repositório | 15 (`001` … `015`) |
 | Abertura do app novo com 2.000 fotos | ✅ **23–43 ms** até a janela (`medir-abertura`, release, 17/ago) |
-| Crates | 6 (domain, use-cases, adapters, infrastructure, ui, **ui-gpui**) |
+| Crates | 5 (domain, use-cases, adapters, infrastructure, **ui-gpui**) — o `ui` saiu em 17/ago |
 
 ### Testes por camada
 
@@ -70,8 +70,8 @@ struct `PhotoEdits` continua sendo o conserto de verdade.
 | Use Cases | 65 | ✅ passando |
 | Adapters | 0 | ⚠️ nenhum teste escrito |
 | Infrastructure | 65 (34 unit + 31 integração em 7 arquivos) | ✅ passando (1 ignorado) |
-| UI (egui) | 146 (47 unit + 99 E2E `egui_kittest` em 18 arquivos) | ✅ passando (2 ignorados) |
-| UI (GPUI) | 310 (307 unit + 3 de integração com banco) | ✅ passando — fases 2 e 3 concluídas, **fase 4 em andamento** |
+| UI (egui) | — | 🚫 **saiu do workspace em 17/ago** (fase 5); o que ela fazia está em [PARIDADE-UI.md](PARIDADE-UI.md) |
+| UI (GPUI) | 310 (307 unit + 3 de integração com banco) | ✅ passando — **as cinco fases da migração fecharam** |
 
 ---
 
@@ -398,14 +398,13 @@ cita 2 views (são 4).
 ## 🚀 Como rodar os testes
 
 ```bash
-cargo test --workspace          # 836 passando, 0 falhas, 3 ignorados
+cargo test --workspace          # 668 passando, 0 falhas, 2 ignorados
 cargo test -p domain            # 202 testes, ~0.01s
 
-# E2E de UI (egui_kittest)
-cargo test -p ui --test crop_feature_e2e_test
-UPDATE_SNAPSHOTS=true cargo test -p ui   # atualizar snapshots
+# A interface (gpui::TestAppContext)
+cargo test -p ui-gpui
 
-cargo run -p ui                 # sobe o app
+cargo run -p ui-gpui            # sobe o app
 ```
 
 ✅ **O catálogo se redireciona por `VLB_CATALOG`** (fase 0 da migração para GPUI, `f906451`). Antes
@@ -420,4 +419,9 @@ VLB_CATALOG=/tmp/catalogo-de-medicao cargo run --release -p ui-gpui
 ---
 
 **Última execução de testes**: 16/ago/2026
-**Resultado**: ✅ 836 passando, 0 falhas, 3 ignorados · os dois apps sobem e renderizam
+**Resultado**: ✅ 668 passando, 0 falhas, 2 ignorados · o app sobe e renderiza
+
+⚠️ **As lacunas listadas acima citam arquivos de `crates/ui`, que saiu do workspace em 17/ago.** Elas
+continuam valendo — são defeitos do produto, e o `ui-gpui` herdou os que moram nas camadas internas
+(o `uniform` de 28 campos, a exportação que descarta 31 ajustes, os presets fora de escala). Os
+caminhos citados são do histórico do git, e é lá que se lê o código de lá.

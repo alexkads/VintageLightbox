@@ -1,7 +1,8 @@
 # Migração da UI para GPUI
 
 **Escrito em**: 15 de agosto de 2026
-**Estado**: ✅ **decidido** — GPUI. O plano de Tauri ([09](09-MIGRACAO-TAURI.md)) foi avaliado e descartado.
+**Estado**: ✅ **concluída em 17/ago/2026** — as cinco fases fecharam, e o `crates/ui` saiu do
+workspace (fase 5). O plano de Tauri ([09](09-MIGRACAO-TAURI.md)) foi avaliado e descartado.
 **Base**: código em `dev` na data acima, mais um **spike compilado e rodando** (§1)
 
 > Trocar `crates/ui` — hoje egui 0.31 sobre eframe/wgpu — por **GPUI**, o framework do Zed, com
@@ -1523,11 +1524,29 @@ teste prende é que a escolha **ganha da janela** — sem isso o botão acende, 
 grade continua com as colunas que cabem.
 
 
-### Fase 5 — Testes e desligamento (1–2 semanas)
+### ✅ Fase 5 — desligamento, 17/ago/2026
 
-`crates/ui` sai do workspace **por último**, em commit isolado, para o `git revert` ser um comando.
+`crates/ui` saiu do workspace em commit isolado (`8c7df32`): **21.352 LOC e 146 testes**, num commit
+só, para o `git revert` ser um comando e trazer tudo de volta inteiro.
 
-**Total: 11–15 semanas** de trabalho focado de uma pessoa.
+| A porta que a regra 4 exigia | Como foi cumprida |
+|---|---|
+| Nenhum teste apagado antes de virar linha | [PARIDADE-UI.md](PARIDADE-UI.md) — os 146, comportamento a comportamento |
+| A lista tinha de zerar | Zerou: os últimos cinco itens entraram em 17/ago, e os dois que eram decisão de dono foram decididos |
+| O app novo não podia depender dele | O WGSL já era **cópia** (a fase 2 escolheu copiar em vez de `include_str!` cruzando crates, por causa deste dia), e o teste que compara os dois byte a byte se desliga sozinho quando o outro lado some |
+
+**O que mudou no dia seguinte ao desligamento:**
+
+- `cargo run -p ui` deixou de existir. O app é `cargo run -p ui-gpui`.
+- 🔑 **`cargo clippy --workspace --all-targets -- -D warnings` passa limpo** — o que nunca tinha
+  acontecido. O job do CI cobria só as quatro camadas internas porque o `crates/ui` tinha centenas de
+  avisos, e o gatilho quebrado da fase 0 escondia isso.
+- A referência de paridade passou a ser este documento, o `PARIDADE-UI.md` e o histórico do git.
+
+**Placar**: 668 passando, 0 falhando, 2 ignorados — e o app abre, revela, importa, imprime, tria e
+mostra ao cliente.
+
+**Total: 11–15 semanas** de trabalho focado de uma pessoa era a estimativa.
 
 ---
 
