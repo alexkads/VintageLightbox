@@ -1365,18 +1365,46 @@ três coisas que mudam o que "portar o docking" quer dizer:
    É a quarta vez que aparecem duas versões da mesma decisão com só uma viva (as outras: o JPEG com
    alfa, o `GpuEditParams::default`, o `print_dialog.rs`).
 
-⚠️ **O que isso decide**: "portar o docking" vira duas coisas separadas, e só uma delas é urgente.
+⚠️ **O que isso decide**: "portar o docking" vira duas coisas separadas.
 
 | Parte | Estado |
 |---|---|
-| **O conteúdo das abas vivas** — as 10 que os leiautes criam | 8 já portadas nas fases 1–3; as que faltavam entram agora |
-| **O rearranjo em si** (arrastar, fechar, redimensionar, persistir) | ⬜ parado, com o custo escrito abaixo |
+| **O conteúdo das abas vivas** — as 10 que os leiautes criam | ✅ todas |
+| **O rearranjo em si** (arrastar, redimensionar, persistir) | 🔄 **o dono pediu em 17/ago** — a Biblioteca já está no dock (abaixo) |
 
-O rearranjo custa transformar as duas telas em `Entity` por painel, com a `trait Panel` do
-`gpui-component` e um estado compartilhado que as três peças da Biblioteca observem — hoje elas são
-um `struct` só, com os testes todos escritos por cima dele. É refatoração das telas mais testadas do
-app **para entregar a capacidade de arrastar painel**, num app que ainda não tem dono usando. Fica
-para quando o dono pedir; o que ele não pode é ficar sem os painéis, e isso é o que entra agora.
+#### O dock da Biblioteca ✅ — e o truque que o fez caber num commit
+
+Os quatro painéis (pastas, grade, informações, filmstrip) agora são `Entity` própria com a `trait
+Panel`, dentro de um `DockArea` — arrastáveis e redimensionáveis, no arranjo do
+`create_library_layout` de lá.
+
+🔑 **Os painéis não têm estado próprio: eles chamam métodos da `Biblioteca`.** O desenho de cada um já
+existia lá, e os `cx.listener` de lá esperam `Context<Biblioteca>` — mover o desenho para dentro de
+views novas trocaria **todos** eles por `entidade.update(…)`, umas 600 linhas reescritas só para
+mudar de lugar, com os testes por baixo. Assim o dock custou um arquivo pequeno
+([`paineis.rs`](../crates/ui-gpui/src/biblioteca/paineis.rs)) e **nenhum teste precisou mudar**.
+
+🚨 **A referência de volta é fraca, e não por elegância.** A `Biblioteca` guarda o `DockArea`, o dock
+guarda os painéis, e os painéis apontam para a `Biblioteca`: com `Entity` nos dois sentidos isso é um
+ciclo de contagem de referência — memória que não volta ao fechar a janela. Com `WeakEntity` na volta
+o ciclo se abre, e quando ela não puder ser lida (a janela fechando) o painel desenha vazio em vez de
+derrubar o app.
+
+⚠️ **O dock é montado depois do construtor**, e é uma consequência da mesma coisa: os painéis precisam
+de uma referência à entidade, e dentro de `Biblioteca::nova` ela ainda não foi entregue ao `cx`.
+
+⚠️ **Nenhum painel fecha** — e no legado todos fecham. Voltar de um fechamento lá exige o "Reset
+Docking Layout", que joga fora o arranjo das duas telas de uma vez: fechar a grade por engano custa
+tudo o que se arrumou. Aqui eles se movem e se redimensionam, e some a única forma de perder um painel
+sem querer.
+
+🚨 **Os nomes dos painéis são o que o arranjo gravado guarda** (`biblioteca:grade` e companhia), e
+mudá-los depois faz um leiaute salvo apontar para um painel que não existe. O `gpui-component` avisa
+disso na própria `trait`; há teste para a mudança falhar aqui, e não na máquina de quem usa.
+
+⬜ **Falta**: a barra de cima (busca, filtros, colunas) fica **fora** do dock de propósito — um dock
+que pudesse fechá-la deixaria a Biblioteca sem busca e sem filtro. E faltam a Revelação no dock e a
+**persistência** do arranjo (`dump`/`load`), que é o que faz a arrumação sobreviver a fechar o app.
 
 #### O painel de informações ✅ — as duas abas vivas que faltavam
 

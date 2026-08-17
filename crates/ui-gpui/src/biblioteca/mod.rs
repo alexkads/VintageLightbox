@@ -10,5 +10,6 @@ pub mod grade;
 pub mod informacoes;
 pub mod marcacao;
 pub mod miniaturas;
+pub mod paineis;
 pub mod pastas;
 pub mod tela;

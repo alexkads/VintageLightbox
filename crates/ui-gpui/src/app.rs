@@ -212,6 +212,10 @@ impl Aplicativo {
         let previews_das_configuracoes = previews.clone();
         let biblioteca =
             cx.new(|cx| Biblioteca::nova(fotos, previews.clone(), portas.marcador, window, cx));
+        // 🚨 O dock é montado **depois** da entidade existir: os quatro painéis
+        // guardam uma referência fraca a ela, e dentro do construtor ela ainda
+        // não foi entregue ao `cx`.
+        Biblioteca::montar_o_dock(&biblioteca, window, cx);
         let revelacao = cx.new(|cx| {
             Revelacao::nova(
                 previews,

@@ -7,10 +7,11 @@ use std::sync::{Arc, Mutex};
 
 use adapters::view_models::PhotoViewModel;
 use gpui::{
-    div, img, prelude::*, px, uniform_list, App, Context, Entity, SharedString, Subscription,
-    Window,
+    div, img, prelude::*, px, uniform_list, AnyElement, App, Context, Entity, SharedString,
+    Subscription, Window,
 };
 use gpui_component::button::{Button, ButtonVariants};
+use gpui_component::dock::{DockArea, DockItem};
 use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::{ActiveTheme, Selectable, Sizable};
 use infrastructure::cache::preview_manager::PreviewManager;
@@ -20,6 +21,7 @@ use super::grade::{colunas_que_cabem, fotos_da_linha, linhas_necessarias};
 use super::informacoes::{estatisticas, estrelas};
 use super::marcacao::{cor_ao_teclar, sinalizador_ao_teclar, Marca, Marcador};
 use super::miniaturas::{capacidade_para, CacheDeMiniaturas, Miniatura};
+use super::paineis::{PainelDaBiblioteca, Qual};
 use super::pastas::{pastas_do_acervo, Pasta};
 
 /// Lado da miniatura, mais o espaçamento — a unidade que decide quantas colunas
@@ -32,6 +34,9 @@ const PASSO: f32 = LADO_DO_ITEM + ESPACAMENTO;
 
 /// Largura da coluna de pastas.
 const LADO_DA_ARVORE: f32 = 220.0;
+
+/// Altura da faixa de miniaturas do rodapé.
+const ALTURA_DO_FILMSTRIP: f32 = 84.0;
 
 /// Largura da coluna de informações, à direita.
 ///
@@ -82,6 +87,13 @@ pub struct Biblioteca {
     selecionadas: std::collections::BTreeSet<usize>,
     /// De onde o próximo `Shift+clique` mede o intervalo.
     ancora: Option<usize>,
+    /// O dock: quem arruma os quatro painéis, e quem os deixa ser arrastados.
+    ///
+    /// `Option` porque ele nasce **depois** do resto: os painéis precisam de uma
+    /// referência fraca a esta entidade, e ela só existe quando o construtor
+    /// termina. Montá-lo aqui dentro daria um `WeakEntity` de algo que ainda não
+    /// foi entregue ao `cx`.
+    dock: Option<Entity<DockArea>>,
     /// Quantas colunas a grade tem. `None` é **automático** — quantas couberem
     /// na janela.
     ///
@@ -184,6 +196,7 @@ impl Biblioteca {
             selecionadas: std::collections::BTreeSet::new(),
             ancora: None,
             colunas_escolhidas: None,
+            dock: None,
             busca,
             _assinaturas: vec![assinatura],
         };
@@ -193,6 +206,65 @@ impl Biblioteca {
         // primeiro clique.
         tela.refiltrar();
         tela
+    }
+
+    /// Monta o dock com o arranjo padrão.
+    ///
+    /// 🚨 **Só pode ser chamado depois de a entidade existir** — os painéis
+    /// guardam uma referência fraca a ela, e dentro do construtor ela ainda não
+    /// foi entregue ao `cx`. Por isso é um segundo passo, feito por quem cria a
+    /// Biblioteca.
+    ///
+    /// O arranjo é o do legado (`create_library_layout`): pastas à esquerda,
+    /// grade no meio com o filmstrip embaixo, informações à direita.
+    pub fn montar_o_dock(
+        biblioteca: &Entity<Self>,
+        window: &mut Window,
+        cx: &mut gpui::App,
+    ) -> Entity<DockArea> {
+        let dock = cx.new(|cx| DockArea::new("biblioteca", Some(1), window, cx));
+        let fraca = dock.downgrade();
+
+        let painel = |qual: Qual, cx: &mut gpui::App| {
+            let acervo = biblioteca.downgrade();
+            let entidade = cx.new(|cx| PainelDaBiblioteca::novo(qual, acervo, cx));
+            std::sync::Arc::new(entidade) as std::sync::Arc<dyn gpui_component::dock::PanelView>
+        };
+
+        let pastas = DockItem::tabs(vec![painel(Qual::Pastas, cx)], &fraca, window, cx);
+        let grade = DockItem::tabs(vec![painel(Qual::Grade, cx)], &fraca, window, cx);
+        let filmstrip = DockItem::tabs(vec![painel(Qual::Filmstrip, cx)], &fraca, window, cx);
+        let informacoes = DockItem::tabs(vec![painel(Qual::Informacoes, cx)], &fraca, window, cx);
+
+        // O meio é uma coluna: a grade em cima, o filmstrip embaixo. As duas
+        // laterais nascem com a largura que elas tinham fixas — quem arrastar
+        // depois muda, e é esse o ponto.
+        let meio = DockItem::split_with_sizes(
+            gpui::Axis::Vertical,
+            vec![grade, filmstrip],
+            vec![None, Some(px(ALTURA_DO_FILMSTRIP))],
+            &fraca,
+            window,
+            cx,
+        );
+
+        let centro = DockItem::split_with_sizes(
+            gpui::Axis::Horizontal,
+            vec![pastas, meio, informacoes],
+            vec![
+                Some(px(LADO_DA_ARVORE)),
+                None,
+                Some(px(LADO_DAS_INFORMACOES)),
+            ],
+            &fraca,
+            window,
+            cx,
+        );
+
+        dock.update(cx, |area, cx| area.set_center(centro, window, cx));
+        biblioteca.update(cx, |tela, _cx| tela.dock = Some(dock.clone()));
+
+        dock
     }
 
     /// Recalcula o que está visível. Chamado só quando um filtro muda.
@@ -1208,7 +1280,35 @@ fn celula(
 }
 
 impl Render for Biblioteca {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .flex()
+            .flex_col()
+            .size_full()
+            .bg(cx.theme().background)
+            .text_color(cx.theme().foreground)
+            .child(self.barra(cx))
+            .child(
+                // `min_h(0)`: sem ele o conteúdo rolável de dentro do dock
+                // empurra o pai e a rolagem nunca acontece.
+                div()
+                    .flex()
+                    .flex_1()
+                    .min_h(px(0.))
+                    .children(self.dock.clone()),
+            )
+    }
+}
+
+impl Biblioteca {
+    /// A grade — o painel central do dock.
+    ///
+    /// 🔑 **Os quatro painéis continuam sendo métodos daqui**, e não views com
+    /// estado próprio. É o que fez o dock caber num commit: os `cx.listener`
+    /// deste arquivo esperam `Context<Biblioteca>`, e movê-los para dentro de
+    /// uma view nova trocaria **todos** eles por `entidade.update(...)` — 600
+    /// linhas reescritas para mudar de lugar, com os testes por baixo.
+    pub fn painel_da_grade(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let colunas = self.colunas(window);
         // O total da grade é o **filtrado**, e não o acervo: são os índices em
         // `visiveis` que o `uniform_list` percorre.
@@ -1235,85 +1335,84 @@ impl Render for Biblioteca {
         // uma referência à entidade e pedir a ela que se atualize.
         let eu = cx.entity();
 
-        div()
-            .flex()
-            .flex_col()
-            .size_full()
-            .bg(cx.theme().background)
-            .text_color(cx.theme().foreground)
-            .child(self.cabecalho(cx))
-            // A partir daqui é uma linha: pastas à esquerda, grade à direita.
-            // `min_h(0)` na linha e `flex_1` nos dois filhos — sem o `min_h`, o
-            // conteúdo rolável empurra o pai e a rolagem nunca acontece.
-            .child(
-                div()
-                    .flex()
-                    .flex_1()
-                    .min_h(px(0.))
-                    .child(self.arvore_de_pastas(cx))
-                    .child(
-                        // O `uniform_list` só chama o closure para as linhas visíveis.
-                        // É o que faz 2.000 fotos custarem o mesmo que 20 na hora de
-                        // desenhar — a diferença entre rolar liso e engasgar.
-                        uniform_list("grade-da-biblioteca", linhas, move |faixa, _window, cx| {
-                            faixa
-                                .map(|indice| {
-                                    let desta_linha = fotos_da_linha(indice, colunas, total);
+        // O `uniform_list` só chama o closure para as linhas visíveis. É o que
+        // faz 2.000 fotos custarem o mesmo que 20 na hora de desenhar — a
+        // diferença entre rolar liso e engasgar.
+        uniform_list("grade-da-biblioteca", linhas, move |faixa, _window, cx| {
+            faixa
+                .map(|indice| {
+                    let desta_linha = fotos_da_linha(indice, colunas, total);
 
-                                    div().flex().gap(px(ESPACAMENTO)).p(px(4.)).children(
-                                        desta_linha
-                                            // Dois saltos: a linha dá a posição na lista
-                                            // **filtrada**, e `visiveis` traduz para o
-                                            // índice do acervo. Indexar `fotos` direto
-                                            // mostraria a foto errada assim que houvesse
-                                            // filtro — e a grade continuaria bonita, que
-                                            // é o que torna esse defeito caro.
-                                            .map(|posicao| {
-                                                let no_acervo = visiveis[posicao];
-                                                let eu = eu.clone();
-                                                celula(
-                                                    &fotos[no_acervo],
-                                                    &previews,
-                                                    &cache,
-                                                    selecionadas.contains(&no_acervo),
-                                                    principal == Some(no_acervo),
-                                                    // 🔑 Os modificadores vêm do
-                                                    // `ClickEvent`, e é por isso que
-                                                    // o clique fica na célula
-                                                    // inteira: `Cmd` alterna uma,
-                                                    // `Shift` estende o intervalo, e
-                                                    // sem eles é seleção única.
-                                                    move |evento: &gpui::ClickEvent,
-                                                          _window,
-                                                          cx: &mut gpui::App| {
-                                                        let modificadores =
-                                                            evento.modifiers();
-                                                        eu.update(cx, |tela, cx| {
-                                                            if modificadores.secondary() {
-                                                                tela.alternar_uma(no_acervo, cx);
-                                                            } else if modificadores.shift {
-                                                                tela.selecionar_ate(no_acervo, cx);
-                                                            } else {
-                                                                tela.alternar_selecao(
-                                                                    no_acervo, cx,
-                                                                );
-                                                            }
-                                                        });
-                                                    },
-                                                    cx,
-                                                )
-                                            })
-                                            .collect::<Vec<_>>(),
-                                    )
-                                })
-                                .collect()
-                        })
-                        .flex_1()
-                        .p(px(8.)),
+                    div().flex().gap(px(ESPACAMENTO)).p(px(4.)).children(
+                        desta_linha
+                            // Dois saltos: a linha dá a posição na lista
+                            // **filtrada**, e `visiveis` traduz para o índice do
+                            // acervo. Indexar `fotos` direto mostraria a foto
+                            // errada assim que houvesse filtro — e a grade
+                            // continuaria bonita, que é o que torna esse defeito
+                            // caro.
+                            .map(|posicao| {
+                                let no_acervo = visiveis[posicao];
+                                let eu = eu.clone();
+                                celula(
+                                    &fotos[no_acervo],
+                                    &previews,
+                                    &cache,
+                                    selecionadas.contains(&no_acervo),
+                                    principal == Some(no_acervo),
+                                    // 🔑 Os modificadores vêm do `ClickEvent`, e é
+                                    // por isso que o clique fica na célula
+                                    // inteira: `Cmd` alterna uma, `Shift` estende
+                                    // o intervalo, e sem eles é seleção única.
+                                    move |evento: &gpui::ClickEvent,
+                                          _window,
+                                          cx: &mut gpui::App| {
+                                        let modificadores = evento.modifiers();
+                                        eu.update(cx, |tela, cx| {
+                                            if modificadores.secondary() {
+                                                tela.alternar_uma(no_acervo, cx);
+                                            } else if modificadores.shift {
+                                                tela.selecionar_ate(no_acervo, cx);
+                                            } else {
+                                                tela.alternar_selecao(no_acervo, cx);
+                                            }
+                                        });
+                                    },
+                                    cx,
+                                )
+                            })
+                            .collect::<Vec<_>>(),
                     )
-                    .child(self.painel_de_informacoes(cx)),
-            )
-            .child(self.filmstrip(cx))
+                })
+                .collect()
+        })
+        .size_full()
+        .p(px(8.))
+        .into_any_element()
+    }
+
+    /// A árvore de pastas e os filtros — o painel da esquerda.
+    pub fn painel_das_pastas(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        self.arvore_de_pastas(cx).into_any_element()
+    }
+
+    /// A foto e o acervo em números — o painel da direita.
+    pub fn painel_das_informacoes(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        self.painel_de_informacoes(cx).into_any_element()
+    }
+
+    /// A faixa de miniaturas — o painel de baixo.
+    pub fn painel_do_filmstrip(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        self.filmstrip(cx).into_any_element()
+    }
+
+    /// A barra de cima: busca, filtros e colunas.
+    ///
+    /// ⚠️ **Não é painel do dock**, e no legado também não: ela é a barra da
+    /// janela, e um dock que pudesse fechá-la deixaria a Biblioteca sem busca e
+    /// sem filtro, com "Reset Layout" como única volta.
+    pub fn barra(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        self.cabecalho(cx).into_any_element()
     }
 }
 

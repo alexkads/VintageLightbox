@@ -141,7 +141,8 @@ Esta é a lista que a fase 5 tem de zerar — ou registrar como decisão de dono
 2. ✅ ~~`Grid Settings`~~ — **decidido pelo dono em 17/ago: as duas coisas.** A barra tem "auto" (o
    padrão, quantas couberem) mais 1 a 5. O legado só tem o fixo; a grade nova só tinha o automático.
    É feature nova, e a regra §7.1 só a permite assim — com a decisão registrada.
-3. 🔄 **O rearranjo de painéis (docking)** — **decidido pelo dono em 17/ago: portar.** Em andamento.
+3. 🔄 **O rearranjo de painéis (docking)** — **decidido pelo dono em 17/ago: portar.** A Biblioteca já
+   está no dock (quatro painéis arrastáveis); faltam a Revelação e a persistência do arranjo.
 
 ⚠️ **⚠️ **Uma linha desta lista nasceu errada, e a conferência foi no código**: "cancelar o corte" estava
 marcada como faltando, escrita a partir do **nome** do teste do legado. O `cancelar_corte` existe
