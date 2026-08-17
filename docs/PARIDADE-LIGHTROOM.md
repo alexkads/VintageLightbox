@@ -87,7 +87,7 @@ de ser **exata no inteiro**, senão o neutro passa a mover pixel.
 | ⬜ **Curva de tons por ponto** (a de arrastar) | existe só o desenho |
 | ⬜ **Calibração de câmera / perfis** | |
 | ⬜ **Remoção de manchas** | há um `inpainting/` na infraestrutura, sem tela |
-| ⬜ **Cópia de ajustes entre fotos** ("Copiar/Colar revelação", sincronizar) | é o atalho mais usado numa sessão de 800 fotos |
+| ✅ **Cópia de ajustes entre fotos** | **desde 17/ago** — `Cmd+Shift+C`/`Cmd+Shift+V`, da Biblioteca, valendo para a seleção inteira. Cada foto conserva o próprio enquadramento |
 | ⬜ **Cópias virtuais e instantâneos** | |
 | ✅ Antes/depois, desfazer/refazer, presets, corte/giro/espelho/endireitar, histograma | |
 
@@ -148,14 +148,15 @@ galeria do cliente**, e o que é defeito visível na tela.
 | 2 | ~~**Os 19 sliders inertes**~~ | ✅ **feito em 17/ago** — o painel move os 42 |
 | 3 | ~~**Marca d'água e redimensionamento**~~ | ✅ **feito em 17/ago** — dois modos: entrega final e prévia da galeria |
 | 4 | ~~**Coleções na tela**~~ | ✅ **feito em 17/ago** — faltavam o controller e a tela, não o backend |
-| 5 | **Copiar/colar revelação entre fotos** | o atalho que transforma 800 fotos numa sessão viável |
+| 5 | ~~**Copiar/colar revelação entre fotos**~~ | ✅ **feito em 17/ago** |
 | 6 | **A curva de tons ganha controles** | o shader já aplica os 4 `tone_curve_*`; falta quem escreva |
 | 7 | **DNG com perdas** | compilar a LibRaw com libjpeg, ou cair na prévia embutida |
 | 8 | **Imprimir de verdade, ou tirar o botão** | um dos dois — o que não pode é continuar anunciando |
 
-🔑 **Os itens 3 e 4 são o que a integração com o `recordarfotos.com.br` vai consumir.** Eles não são
-"funcionalidades do Lightroom que faltam": são a forma que a decisão do fotógrafo (esta foi comprada,
-esta não) precisa ter para virar galeria sem passo manual no meio.
+🔑 **A integração com o `recordarfotos.com.br` só começa quando o clone estiver funcional** —
+decisão do dono, 17/ago. Marca d'água e coleções entraram porque são funcionalidades do Lightroom que
+faltavam, e não porque a integração as pediu; que elas sejam também o que a integração vai consumir é
+consequência, não motivo. **Enquanto houver item nesta fila, a fila é o trabalho.**
 
 ⚠️ **Os presets de sistema estão fora de escala e isso atravessa a fila.** "B&W" pede
 `saturation: -100` numa escala em que cinza é `-1.0`: o fator vira `-99` e a foto sai com cor

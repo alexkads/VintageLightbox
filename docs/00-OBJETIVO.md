@@ -43,9 +43,12 @@ em uma foto de cem.
 
 ## O que vem depois — e só depois
 
-A integração com a API de pós-venda. O app tem de ser útil sozinho antes de conversar com qualquer
-coisa: um fluxo que já depende do site para funcionar não tem como ser adotado aos poucos, e adoção
-aos poucos é a única que dá para desfazer.
+A integração com a API de pós-venda — e **"depois" é literal**: ela começa quando o clone estiver
+funcional, e não em paralelo (decisão do dono, 17/ago).
+
+O app tem de ser útil sozinho antes de conversar com qualquer coisa. Um fluxo que já depende do site
+para funcionar não tem como ser adotado aos poucos, e adoção aos poucos é a única que dá para
+desfazer. **Enquanto houver item na [fila](PARIDADE-LIGHTROOM.md), a fila é o trabalho.**
 
 ---
 

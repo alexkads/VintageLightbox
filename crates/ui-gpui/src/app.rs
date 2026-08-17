@@ -25,8 +25,9 @@ use crate::exportacao::tela::Exportacao;
 use crate::importacao::explorador::{Explorador, GeradorDeMiniaturas, Importador, SeletorDePasta};
 use crate::importacao::tela::{Importacao, Importou};
 use crate::impressao::tela::Impressao;
-use crate::revelacao::persistencia::Gravador;
+use crate::revelacao::persistencia::{self, Gravador};
 use crate::revelacao::presets::GuardaDePresets;
+use crate::revelacao::processador::Ajustes;
 use crate::revelacao::tela::Revelacao;
 
 /// As portas para o mundo de fora, num pacote só.
@@ -58,6 +59,8 @@ actions!(
         Desfazer,
         Refazer,
         AlternarCorte,
+        CopiarRevelacao,
+        ColarRevelacao,
         AlternarOriginal,
         // As treze teclas de triagem da Biblioteca, mais as duas setas. São
         // ações sem dado porque o `actions!` só declara struct de unidade — o
@@ -122,6 +125,13 @@ pub fn init(cx: &mut gpui::App) {
         // aparece quando alguém tenta refazer.
         gpui::KeyBinding::new("cmd-shift-z", Refazer, Some(CONTEXTO)),
         gpui::KeyBinding::new("cmd-z", Desfazer, Some(CONTEXTO)),
+        // Copiar e colar revelação — as mesmas teclas do Lightroom.
+        //
+        // 🔑 **Levam `CONTEXTO` e não `SEM_CAMPO_DE_TEXTO`**, como o `Cmd+Z`:
+        // com modificador não há disputa com quem está digitando, porque tecla
+        // com `Cmd` não vira letra.
+        gpui::KeyBinding::new("cmd-shift-c", CopiarRevelacao, Some(CONTEXTO)),
+        gpui::KeyBinding::new("cmd-shift-v", ColarRevelacao, Some(CONTEXTO)),
         // `R` de "recortar", a mesma tecla do legado (`keyboard.rs`).
         gpui::KeyBinding::new("r", AlternarCorte, Some(SEM_CAMPO_DE_TEXTO)),
         // `\` mostra o antes/depois, como no legado.
@@ -208,6 +218,15 @@ pub struct Aplicativo {
     foco: FocusHandle,
     /// Quem relê o catálogo quando a importação termina.
     acervo: Arc<dyn Acervo>,
+    /// Quem grava — aqui usado pelo colar, que escreve em N fotos de uma vez.
+    gravador: Arc<dyn Gravador>,
+    /// A revelação copiada, esperando ser colada.
+    ///
+    /// 🔑 **São os 46 ajustes, e não o corte.** É o que o Lightroom faz, e o
+    /// motivo é forte: colar o enquadramento de uma foto em outras 40 move o
+    /// assunto de todas elas para onde ele estava só na primeira. Cor se repete
+    /// numa sessão; composição não.
+    area_de_transferencia: Option<Ajustes>,
     /// O canal por onde o acervo relido volta. A releitura é assíncrona: o
     /// `LibraryController` é `async` do tokio, e o GPUI não roda futuros dele.
     releituras: (Sender<Vec<PhotoViewModel>>, Receiver<Vec<PhotoViewModel>>),
@@ -240,6 +259,10 @@ impl Aplicativo {
         // o sistema, e dois seletores seriam duas janelas do SO para a mesma
         // pergunta.
         let seletor_para_exportar = portas.seletor.clone();
+        // O mesmo gravador da Revelação: colar escreve pelo caminho que já
+        // existe, e dois gravadores seriam duas esperas de 500 ms sobre a mesma
+        // foto.
+        let gravador_para_colar = portas.gravador.clone();
         let biblioteca = cx.new(|cx| {
             Biblioteca::nova(
                 fotos,
@@ -334,6 +357,8 @@ impl Aplicativo {
             tela: Tela::Biblioteca,
             foco,
             acervo: portas.acervo,
+            gravador: gravador_para_colar,
+            area_de_transferencia: None,
             releituras: channel(),
             _releitura: None,
             _fim_da_importacao: fim_da_importacao,
@@ -585,6 +610,60 @@ impl Aplicativo {
         cx.notify();
     }
 
+    /// Copia a revelação da foto selecionada.
+    ///
+    /// 🔑 **Lê o que está gravado na foto, e não o que a Revelação tem na tela.**
+    /// Assim copiar funciona da Biblioteca, sem abrir foto nenhuma — que é onde
+    /// quem revela 800 fotos está quando decide repetir um ajuste.
+    pub fn copiar_revelacao(&mut self, cx: &mut Context<Self>) {
+        let Some(foto) = self.biblioteca.read(cx).foto_selecionada() else {
+            return;
+        };
+        self.area_de_transferencia = Some(persistencia::da_foto(&foto));
+        cx.notify();
+    }
+
+    /// Cola a revelação copiada em toda a seleção.
+    ///
+    /// 🚨 **Cada foto conserva o próprio corte.** `SavePhotoEditsUseCase` recebe
+    /// os oito campos de corte e a entidade faz atribuição direta, sem mesclar:
+    /// gravar sem reenviá-los **apaga o enquadramento**. Colar em 40 fotos
+    /// apagaria o enquadramento de 40 — sem erro, sem aviso, e sem desfazer.
+    pub fn colar_revelacao(&mut self, cx: &mut Context<Self>) {
+        let Some(ajustes) = self.area_de_transferencia else {
+            return;
+        };
+
+        let alvos = {
+            let biblioteca = self.biblioteca.read(cx);
+            let selecionadas = biblioteca.fotos_selecionadas();
+            if selecionadas.is_empty() {
+                biblioteca.foto_selecionada().into_iter().collect()
+            } else {
+                selecionadas
+            }
+        };
+        if alvos.is_empty() {
+            return;
+        }
+
+        for foto in &alvos {
+            self.gravador
+                .gravar(foto.id.clone(), ajustes, persistencia::corte_da_foto(foto));
+        }
+
+        // 🔑 O acervo em memória ficou velho: as `PhotoViewModel` da grade ainda
+        // têm os ajustes anteriores, e abrir a Revelação numa foto colada
+        // mostraria o estado de antes. Reler é o que existe para isso.
+        self.reler_o_acervo(cx);
+        cx.notify();
+    }
+
+    /// Se há revelação copiada — o que liga o "Colar" na barra.
+    pub fn tem_revelacao_copiada(&self) -> bool {
+        self.area_de_transferencia.is_some()
+    }
+
     /// Abre a exportação com a seleção da Biblioteca.
     ///
     /// 🔑 **Leva `fotos_visiveis` quando não há seleção múltipla**, e a seleção
@@ -645,6 +724,24 @@ impl Aplicativo {
     /// "desfazer a última nota/sinalizador", que o legado não tem. Fazer com que
     /// desfizesse a revelação de uma foto que nem está na tela seria pior do que
     /// não fazer nada.
+    fn ao_copiar_revelacao(
+        &mut self,
+        _acao: &CopiarRevelacao,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.copiar_revelacao(cx);
+    }
+
+    fn ao_colar_revelacao(
+        &mut self,
+        _acao: &ColarRevelacao,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.colar_revelacao(cx);
+    }
+
     fn ao_desfazer(&mut self, _acao: &Desfazer, window: &mut Window, cx: &mut Context<Self>) {
         if self.tela == Tela::Revelacao {
             self.revelacao
@@ -821,6 +918,28 @@ impl Aplicativo {
                     .disabled(!tem_selecao)
                     .on_click(cx.listener(|este, _ev, _window, cx| {
                         este.alternar_cliente(cx);
+                    })),
+            )
+            .child(
+                // Copiar e colar revelação. 🔑 **Têm botão além da tecla** porque
+                // são a resposta a "acabei de acertar esta foto e quero as
+                // outras 40 iguais" — e quem acabou de acertar está com o
+                // ponteiro na tela, não com a mão no `Cmd`.
+                Button::new("nav-copiar-revelacao")
+                    .label("Copiar")
+                    .xsmall()
+                    .disabled(!tem_selecao)
+                    .on_click(cx.listener(|este, _ev, _window, cx| {
+                        este.copiar_revelacao(cx);
+                    })),
+            )
+            .child(
+                Button::new("nav-colar-revelacao")
+                    .label("Colar")
+                    .xsmall()
+                    .disabled(!self.tem_revelacao_copiada() || !tem_selecao)
+                    .on_click(cx.listener(|este, _ev, _window, cx| {
+                        este.colar_revelacao(cx);
                     })),
             )
             .child(
@@ -1013,6 +1132,8 @@ impl Render for Aplicativo {
             .on_action(cx.listener(Self::ao_refazer))
             .on_action(cx.listener(Self::ao_alternar_corte))
             .on_action(cx.listener(Self::ao_alternar_original))
+            .on_action(cx.listener(Self::ao_copiar_revelacao))
+            .on_action(cx.listener(Self::ao_colar_revelacao))
             // A tabela de triagem. Quinze linhas de uma linha: a regra de cada
             // uma está em `biblioteca::marcacao`, e aqui só se diz qual ação
             // chama qual método — como a tabela de `controles.rs` faz com os 42
@@ -2381,7 +2502,176 @@ mod testes {
             .expect("a janela deve estar aberta");
     }
 
-    /// 🚨 **A prévia não sai sem marca d'água.**
+    /// 🚨 **Colar revelação não pode apagar o enquadramento das fotos coladas.**
+    ///
+    /// `SavePhotoEditsUseCase` recebe os oito campos de corte e a entidade faz
+    /// atribuição direta, **sem mesclar**: gravar sem reenviá-los apaga o corte.
+    /// Colar em 40 fotos apagaria o enquadramento de 40 — sem erro, sem aviso e
+    /// sem desfazer, no gesto que existe justamente para poupar trabalho.
+    ///
+    /// 🔑 **E cada foto conserva o SEU corte, não o da origem** — o que o
+    /// Lightroom faz, porque cor se repete numa sessão e composição não.
+    ///
+    /// ⚠️ **Esse segundo caso não é garantido por este teste, e sim pelo tipo**:
+    /// a área de transferência é `Option<Ajustes>`, e `Ajustes` não tem os oito
+    /// campos de corte. Não há como colar o enquadramento da origem porque não
+    /// há onde guardá-lo. Tentei quebrar de propósito para conferir e a quebra
+    /// não passou de um no-op — o que é a resposta certa: uma garantia que o
+    /// tipo dá não precisa de teste, precisa de estar escrita.
+    ///
+    /// O que este teste cobre é o caso que **é** alcançável: o corte do destino
+    /// ser esquecido na gravação.
+    #[gpui::test]
+    fn colar_revelacao_preserva_o_corte_de_cada_foto(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+
+        let gravador = Arc::new(GravadorDeMentira::default());
+
+        let mut origem = foto("DSC_001.NEF");
+        origem.edit_exposure = Some(1.5);
+        origem.edit_crop_x = Some(0.1);
+        origem.edit_crop_width = Some(0.5);
+        let mut destino = foto("retrato.jpg");
+        destino.edit_crop_x = Some(0.4);
+        destino.edit_crop_width = Some(0.2);
+
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            let gravador = gravador.clone();
+            move |window, cx| {
+                Aplicativo::novo(
+                    vec![origem, destino],
+                    previews,
+                    Vec::new(),
+                    Portas {
+                        gravador,
+                        ..portas()
+                    },
+                    window,
+                    cx,
+                )
+            }
+        });
+
+        janela
+            .update(cx, |app, _window, cx| {
+                app.biblioteca
+                    .update(cx, |tela, cx| tela.selecionar(Some(0), cx));
+                app.copiar_revelacao(cx);
+                assert!(app.tem_revelacao_copiada());
+
+                app.biblioteca
+                    .update(cx, |tela, cx| tela.selecionar(Some(1), cx));
+                app.colar_revelacao(cx);
+            })
+            .expect("a janela deve estar aberta");
+
+        let gravado = gravador.gravado();
+        assert_eq!(gravado.len(), 1, "uma gravação, na foto de destino");
+        let (id, ajustes, corte) = &gravado[0];
+
+        assert_eq!(id, "id-retrato.jpg");
+        assert_eq!(
+            ajustes.exposure, 1.5,
+            "a exposição da origem tinha de ser colada"
+        );
+        assert_eq!(
+            (corte.x, corte.largura),
+            (Some(0.4), Some(0.2)),
+            "a foto de destino perdeu o próprio enquadramento — ou recebeu o da origem"
+        );
+    }
+
+    /// 🔑 **Colar vale para a seleção inteira** — é o que torna 800 fotos
+    /// viáveis. Uma gravação por foto, e não uma só na principal.
+    #[gpui::test]
+    fn colar_revelacao_vale_para_a_selecao_inteira(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+
+        let gravador = Arc::new(GravadorDeMentira::default());
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            let gravador = gravador.clone();
+            |window, cx| {
+                Aplicativo::novo(
+                    acervo(),
+                    previews,
+                    Vec::new(),
+                    Portas {
+                        gravador,
+                        ..portas()
+                    },
+                    window,
+                    cx,
+                )
+            }
+        });
+
+        janela
+            .update(cx, |app, _window, cx| {
+                app.biblioteca
+                    .update(cx, |tela, cx| tela.selecionar(Some(0), cx));
+                app.copiar_revelacao(cx);
+
+                // ⚠️ `selecionar` já põe a foto na seleção múltipla, então aqui
+                // basta acrescentar a segunda — alternar a primeira a tiraria.
+                app.biblioteca
+                    .update(cx, |tela, cx| tela.alternar_uma(1, cx));
+                app.colar_revelacao(cx);
+            })
+            .expect("a janela deve estar aberta");
+
+        assert_eq!(
+            gravador.gravado().len(),
+            2,
+            "colar tinha de gravar nas duas selecionadas"
+        );
+    }
+
+    /// ⚠️ **Colar sem ter copiado não grava nada.**
+    ///
+    /// Sem esta guarda, `Cmd+Shift+V` numa sessão recém-aberta gravaria o neutro
+    /// em cima da revelação de todas as selecionadas — e o gesto que apaga o
+    /// trabalho seria vizinho de teclado do que o repete.
+    #[gpui::test]
+    fn colar_sem_copiar_nao_grava_nada(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+
+        let gravador = Arc::new(GravadorDeMentira::default());
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            let gravador = gravador.clone();
+            |window, cx| {
+                Aplicativo::novo(
+                    acervo(),
+                    previews,
+                    Vec::new(),
+                    Portas {
+                        gravador,
+                        ..portas()
+                    },
+                    window,
+                    cx,
+                )
+            }
+        });
+
+        janela
+            .update(cx, |app, _window, cx| {
+                app.biblioteca
+                    .update(cx, |tela, cx| tela.selecionar(Some(0), cx));
+                assert!(!app.tem_revelacao_copiada());
+                app.colar_revelacao(cx);
+            })
+            .expect("a janela deve estar aberta");
+
+        assert!(gravador.gravado().is_empty());
+    }
+
+    /// 🚨 **A prévia não sai sem marca d\'água.**
     ///
     /// É o teste mais importante da exportação, e o defeito que ele impede é o
     /// pior que este aplicativo pode cometer: a foto que o cliente **não
