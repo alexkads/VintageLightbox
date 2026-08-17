@@ -104,7 +104,7 @@ e câmeras mais usadas, dock com painéis arrastáveis e arranjo gravado, segund
 
 | | |
 |---|---|
-| 🚨 **Coleções** | backend, use cases e repositório **prontos e testados**; **nenhuma tela** |
+| ✅ **Coleções** | **desde 17/ago** — lista lateral, criar levando a seleção junto, abrir para filtrar a grade, acrescentar e remover em lote |
 | ⬜ **Palavras-chave** | não existe em nenhuma camada — é uma das colunas da Biblioteca do Lightroom |
 | ⬜ **Pilhas, comparação (tecla `C`), visão de levantamento (`N`)** | |
 | ⬜ **Edição de metadados** (título, legenda, copyright, GPS) | o `ExifReader` lê; nada escreve |
@@ -147,7 +147,7 @@ galeria do cliente**, e o que é defeito visível na tela.
 | 1 | ~~**Exportação: da tela ao arquivo**~~ | ✅ **feito em 17/ago** |
 | 2 | ~~**Os 19 sliders inertes**~~ | ✅ **feito em 17/ago** — o painel move os 42 |
 | 3 | ~~**Marca d'água e redimensionamento**~~ | ✅ **feito em 17/ago** — dois modos: entrega final e prévia da galeria |
-| 4 | **Coleções na tela** | "o ensaio do cliente" **é** uma coleção, e "comprada" × "deixada para trás" é a divisão dentro dela. O backend está pronto e testado há meses |
+| 4 | ~~**Coleções na tela**~~ | ✅ **feito em 17/ago** — faltavam o controller e a tela, não o backend |
 | 5 | **Copiar/colar revelação entre fotos** | o atalho que transforma 800 fotos numa sessão viável |
 | 6 | **A curva de tons ganha controles** | o shader já aplica os 4 `tone_curve_*`; falta quem escreva |
 | 7 | **DNG com perdas** | compilar a LibRaw com libjpeg, ou cair na prévia embutida |

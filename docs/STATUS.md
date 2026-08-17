@@ -349,7 +349,7 @@ Não são erros de compilação; são features que a UI mostra como prontas e qu
 3. ⚠️ **Crop no shader GPU foi revertido** (`305466e` → `10dda3f`). O corte roda por mesh/UV no
    viewer e por CPU (`ImageProcessing::apply_crop`) nos thumbnails. Funciona, mas é caminho
    diferente do resto do pipeline de edição, que é GPU.
-4. ⚠️ **Coleções: backend pronto, UI é um TODO** (`library_view.rs:117`).
+4. ✅ ~~**Coleções: backend pronto, UI é um TODO**~~ — **feito em 17/ago/2026.** Faltavam duas camadas, não uma: o `CollectionController` **não existia** (o `adapters` tinha seis controllers e nenhum de coleção) e a tela também não. Entraram `adapters/controllers/collection_controller.rs`, a porta `Colecoes` e a lista no painel da esquerda.
 5. ⚠️ **Adapters sem nenhum teste**, e `LibraryController` só tem `new`.
 6. 🚨 **O módulo de impressão não imprime, e a prévia dele não mostra o papel.** Medido em
    16/ago/2026, ao portar a fase 4. Cinco achados no mesmo arquivo (`views/print_view.rs`), nenhum

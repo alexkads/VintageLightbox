@@ -13,6 +13,7 @@ use infrastructure::paths::AppPaths;
 
 use ui_gpui::app::{Aplicativo, Portas};
 use ui_gpui::biblioteca::acervo::{Acervo, AcervoDoBanco};
+use ui_gpui::biblioteca::colecoes::{Colecoes, ColecoesDoBanco};
 use ui_gpui::biblioteca::marcacao::{Marcador, MarcadorDoBanco};
 use ui_gpui::exportacao::porta::{Exportador, ExportadorDoBanco};
 use ui_gpui::importacao::explorador::{
@@ -158,6 +159,29 @@ async fn main() {
         tokio::runtime::Handle::current(),
     ));
 
+    // As coleções. 🔑 O ensaio de um cliente **é** uma coleção, e é dela que a
+    // galeria do site vai sair — por isso ela não é "mais uma forma de
+    // organizar": é a estrutura em que a mesma foto pertence a vários lugares
+    // sem ser copiada, que é o que pasta não faz.
+    let repositorio_de_colecoes =
+        Arc::new(infrastructure::CollectionRepositoryImpl::new(pool.clone()));
+    let colecoes: Arc<dyn Colecoes> = Arc::new(ColecoesDoBanco::novo(
+        Arc::new(adapters::controllers::CollectionController::new(
+            repositorio_de_colecoes.clone(),
+            Arc::new(use_cases::CreateCollectionUseCase::new(
+                repositorio_de_colecoes.clone(),
+            )),
+            Arc::new(use_cases::AddPhotoToCollectionUseCase::new(
+                repositorio_de_colecoes.clone(),
+                repositorio_de_fotos.clone(),
+            )),
+            Arc::new(use_cases::RemovePhotoFromCollectionUseCase::new(
+                repositorio_de_colecoes,
+            )),
+        )),
+        tokio::runtime::Handle::current(),
+    ));
+
     // As treze teclas de triagem da Biblioteca. O `PhotoController` junta os
     // quatro use cases de marcação — e o de apagar, que **não** tem tecla aqui:
     // `Delete` existe no legado e leva um caminho próprio (confirmação e
@@ -231,6 +255,7 @@ async fn main() {
                             gravador: gravador.clone(),
                             acervo: acervo.clone(),
                             exportador: exportador.clone(),
+                            colecoes: colecoes.clone(),
                             marcador: marcador.clone(),
                             gerador: gerador.clone(),
                             guarda_de_presets: guarda_de_presets.clone(),

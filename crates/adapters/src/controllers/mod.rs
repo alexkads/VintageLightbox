@@ -1,3 +1,4 @@
+pub mod collection_controller;
 pub mod editor_controller;
 pub mod export_controller;
 pub mod import_controller;
@@ -5,6 +6,7 @@ pub mod library_controller;
 pub mod photo_controller;
 pub mod preset_controller;
 
+pub use collection_controller::{CollectionController, CollectionViewModel};
 pub use editor_controller::EditorController;
 pub use export_controller::ExportController;
 pub use import_controller::ImportController;

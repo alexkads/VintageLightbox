@@ -15,6 +15,7 @@ use gpui_component::{ActiveTheme, Disableable, Selectable, Sizable};
 use infrastructure::cache::preview_manager::PreviewManager;
 
 use crate::biblioteca::acervo::Acervo;
+use crate::biblioteca::colecoes::Colecoes;
 use crate::biblioteca::marcacao::Marcador;
 use crate::biblioteca::tela::Biblioteca;
 use crate::cliente::{monitor_do_cliente, Cliente};
@@ -40,6 +41,8 @@ pub struct Portas {
     pub acervo: Arc<dyn Acervo>,
     /// Quem grava os arquivos exportados.
     pub exportador: Arc<dyn Exportador>,
+    /// As coleções — o ensaio do cliente mora numa.
+    pub colecoes: Arc<dyn Colecoes>,
     pub marcador: Arc<dyn Marcador>,
     pub gerador: Arc<dyn GeradorDeMiniaturas>,
     pub guarda_de_presets: Arc<dyn GuardaDePresets>,
@@ -237,8 +240,16 @@ impl Aplicativo {
         // o sistema, e dois seletores seriam duas janelas do SO para a mesma
         // pergunta.
         let seletor_para_exportar = portas.seletor.clone();
-        let biblioteca =
-            cx.new(|cx| Biblioteca::nova(fotos, previews.clone(), portas.marcador, window, cx));
+        let biblioteca = cx.new(|cx| {
+            Biblioteca::nova(
+                fotos,
+                previews.clone(),
+                portas.marcador,
+                portas.colecoes,
+                window,
+                cx,
+            )
+        });
         // 🚨 O dock é montado **depois** da entidade existir: os quatro painéis
         // guardam uma referência fraca a ela, e dentro do construtor ela ainda
         // não foi entregue ao `cx`.
@@ -1099,6 +1110,7 @@ mod testes {
     use tempfile::TempDir;
 
     use crate::biblioteca::acervo::mentira::AcervoDeMentira;
+    use crate::biblioteca::colecoes::mentira::ColecoesDeMentira;
     use crate::biblioteca::marcacao::mentira::MarcadorDeMentira;
     use crate::biblioteca::marcacao::Marca;
     use crate::exportacao::porta::mentira::ExportadorDeMentira;
@@ -1115,6 +1127,7 @@ mod testes {
             gravador: Arc::new(GravadorDeMentira::default()),
             acervo: Arc::new(AcervoDeMentira::default()),
             exportador: Arc::new(ExportadorDeMentira::default()),
+            colecoes: Arc::new(ColecoesDeMentira::default()),
             marcador: Arc::new(MarcadorDeMentira::default()),
             gerador: Arc::new(GeradorDeMentira::default()),
             guarda_de_presets: Arc::new(GuardaDeMentira::default()),

@@ -7,6 +7,7 @@
 
 pub mod acervo;
 pub mod arranjo;
+pub mod colecoes;
 pub mod filtros;
 pub mod grade;
 pub mod informacoes;

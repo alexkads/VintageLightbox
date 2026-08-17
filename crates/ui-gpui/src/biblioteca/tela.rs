@@ -17,6 +17,7 @@ use gpui_component::{ActiveTheme, Selectable, Sizable};
 use infrastructure::cache::preview_manager::PreviewManager;
 
 use super::arranjo;
+use super::colecoes;
 use super::filtros::{indices_visiveis, FiltroDeSinalizador, Filtros, NotaMinima};
 use super::grade::{colunas_que_cabem, fotos_da_linha, linhas_necessarias};
 use super::informacoes::{estatisticas, estrelas};
@@ -71,6 +72,24 @@ pub struct Biblioteca {
     /// fotos 60 vezes por segundo é trabalho que ninguém pediu, e a resposta é
     /// sempre a mesma enquanto ninguém tocar na barra.
     visiveis: Vec<usize>,
+    /// As coleções: a lista lateral, e qual está aberta.
+    colecoes: colecoes::Estado,
+    /// O campo do nome da coleção nova.
+    nome_da_colecao: Entity<InputState>,
+    porta_de_colecoes: Arc<dyn colecoes::Colecoes>,
+    recados_de_colecao: (
+        std::sync::mpsc::Sender<colecoes::Recado>,
+        std::sync::mpsc::Receiver<colecoes::Recado>,
+    ),
+    colhendo_colecoes: bool,
+    _colheita_de_colecoes: Option<gpui::Task<()>>,
+    /// As fotos que vão para a coleção assim que ela nascer.
+    ///
+    /// 🔑 A criação é assíncrona e o id só existe do outro lado; guardar a
+    /// seleção aqui é o que permite "criar coleção com estas 40" ser um gesto
+    /// só. Sem isso, quem cria precisa selecionar de novo o que já tinha
+    /// selecionado.
+    fotos_para_a_nova_colecao: Vec<String>,
     /// As pastas do acervo, calculadas **uma vez**.
     ///
     /// Elas saem dos caminhos das fotos, e as fotos não mudam enquanto a tela
@@ -170,6 +189,7 @@ impl Biblioteca {
         fotos: Vec<PhotoViewModel>,
         previews: Arc<PreviewManager>,
         marcador: Arc<dyn Marcador>,
+        porta_de_colecoes: Arc<dyn colecoes::Colecoes>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -195,6 +215,9 @@ impl Biblioteca {
             }
         });
 
+        let nome_da_colecao =
+            cx.new(|cx| InputState::new(window, cx).placeholder("nome da coleção"));
+
         let mut tela = Self {
             fotos: Arc::new(fotos),
             previews,
@@ -203,6 +226,13 @@ impl Biblioteca {
             // `render`, quando a janela de verdade já foi medida.
             cache: Arc::new(Mutex::new(CacheDeMiniaturas::nova(capacidade_para(6, 4)))),
             filtros: Filtros::default(),
+            colecoes: colecoes::Estado::default(),
+            nome_da_colecao,
+            porta_de_colecoes,
+            recados_de_colecao: std::sync::mpsc::channel(),
+            colhendo_colecoes: false,
+            _colheita_de_colecoes: None,
+            fotos_para_a_nova_colecao: Vec::new(),
             visiveis: Vec::new(),
             pastas: Vec::new(),
             selecionada: None,
@@ -216,6 +246,11 @@ impl Biblioteca {
             _assinaturas: vec![assinatura],
         };
         tela.pastas = pastas_do_acervo(&tela.fotos);
+        // A lista lateral é pedida na abertura: sem isso ela só apareceria
+        // depois de alguém criar uma coleção, e um painel vazio num catálogo que
+        // tem coleções é indistinguível de um catálogo que não tem nenhuma.
+        tela.porta_de_colecoes
+            .listar(tela.recados_de_colecao.0.clone());
         // Nasce com a lista pronta: sem isto o primeiro quadro mostraria uma
         // grade vazia sobre um acervo cheio, e a tela só se corrigiria no
         // primeiro clique.
@@ -426,7 +461,152 @@ impl Biblioteca {
     /// Recalcula o que está visível. Chamado só quando um filtro muda.
     fn refiltrar(&mut self) {
         self.visiveis = indices_visiveis(&self.fotos, &self.filtros);
+        // 🔑 A coleção filtra **por cima** dos outros filtros, e não no lugar
+        // deles: abrir o ensaio de um cliente e então pedir ★★★★ dentro dele é
+        // a pergunta normal — "quais das dele valem a pena". Substituir faria a
+        // coleção desligar nota, cor e busca sem dizer.
+        if self.colecoes.aberta().is_some() {
+            let fotos = self.fotos.clone();
+            let colecoes = &self.colecoes;
+            self.visiveis.retain(|&i| colecoes.aceita(&fotos[i].id));
+        }
         self.sanear_selecao();
+    }
+
+    pub fn colecoes(&self) -> &colecoes::Estado {
+        &self.colecoes
+    }
+
+    /// Abre (ou fecha) uma coleção, e pede os ids quando precisa.
+    pub fn abrir_colecao(&mut self, id: &str, cx: &mut Context<Self>) {
+        if self.colecoes.abrir(id) {
+            self.porta_de_colecoes
+                .fotos(id.to_string(), self.recados_de_colecao.0.clone());
+            self.acompanhar_colecoes(cx);
+        }
+        self.refiltrar();
+        cx.notify();
+    }
+
+    /// Cria uma coleção com as fotos selecionadas dentro.
+    ///
+    /// 🔑 **Criar e povoar são um gesto só.** Uma coleção nova e vazia obriga a
+    /// selecionar de novo o que já estava selecionado — e é exatamente com uma
+    /// seleção na mão que alguém decide criar o ensaio de um cliente.
+    pub fn criar_colecao(&mut self, nome: String, cx: &mut Context<Self>) {
+        if nome.trim().is_empty() {
+            return;
+        }
+        self.fotos_para_a_nova_colecao = self.ids_selecionados();
+        self.porta_de_colecoes
+            .criar(nome, self.recados_de_colecao.0.clone());
+        self.acompanhar_colecoes(cx);
+        cx.notify();
+    }
+
+    /// Acrescenta a seleção à coleção aberta.
+    pub fn acrescentar_a_colecao_aberta(&mut self, cx: &mut Context<Self>) {
+        let Some(colecao) = self.colecoes.aberta().map(str::to_string) else {
+            return;
+        };
+        let fotos = self.ids_selecionados();
+        if fotos.is_empty() {
+            return;
+        }
+        self.porta_de_colecoes
+            .acrescentar(colecao, fotos, self.recados_de_colecao.0.clone());
+        self.acompanhar_colecoes(cx);
+    }
+
+    /// Tira a seleção da coleção aberta.
+    pub fn remover_da_colecao_aberta(&mut self, cx: &mut Context<Self>) {
+        let Some(colecao) = self.colecoes.aberta().map(str::to_string) else {
+            return;
+        };
+        let fotos = self.ids_selecionados();
+        if fotos.is_empty() {
+            return;
+        }
+        self.porta_de_colecoes
+            .remover(colecao, fotos, self.recados_de_colecao.0.clone());
+        self.acompanhar_colecoes(cx);
+    }
+
+    /// Liga o laço que drena os recados das coleções, se ainda não houver um.
+    fn acompanhar_colecoes(&mut self, cx: &mut Context<Self>) {
+        if self.colhendo_colecoes {
+            return;
+        }
+        self.colhendo_colecoes = true;
+
+        self._colheita_de_colecoes = Some(cx.spawn(async move |esta, cx| {
+            // ⚠️ Um teto, e não um laço eterno: coleção é gesto pontual, e o
+            // laço não pode continuar cobrando relógio pelo resto da sessão.
+            for _ in 0..100 {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_millis(50))
+                    .await;
+                let Ok(continua) = esta.update(cx, |tela, cx| tela.colher_colecoes(cx)) else {
+                    return;
+                };
+                if !continua {
+                    return;
+                }
+            }
+        }));
+    }
+
+    /// Drena os recados. Devolve se vale continuar acordando.
+    pub fn colher_colecoes(&mut self, cx: &mut Context<Self>) -> bool {
+        let mut mudou = false;
+        let mut pendente = false;
+
+        while let Ok(recado) = self.recados_de_colecao.1.try_recv() {
+            mudou = true;
+            match recado {
+                colecoes::Recado::Listadas(lista) => self.colecoes.lista = lista,
+                colecoes::Recado::Fotos { colecao, ids } => {
+                    if self.colecoes.receber_fotos(&colecao, ids) {
+                        self.refiltrar();
+                    }
+                }
+                colecoes::Recado::Criada(nova) => {
+                    let id = nova.id.clone();
+                    self.colecoes.lista.push(nova);
+                    let fotos = std::mem::take(&mut self.fotos_para_a_nova_colecao);
+                    if !fotos.is_empty() {
+                        self.porta_de_colecoes.acrescentar(
+                            id,
+                            fotos,
+                            self.recados_de_colecao.0.clone(),
+                        );
+                        pendente = true;
+                    }
+                }
+                colecoes::Recado::Mudou { colecao, .. } => {
+                    // A contagem da lista lateral e os ids da aberta mudaram —
+                    // os dois são relidos, e não recalculados aqui: o banco é
+                    // quem sabe o que ficou lá dentro.
+                    self.porta_de_colecoes
+                        .listar(self.recados_de_colecao.0.clone());
+                    if self.colecoes.aberta() == Some(colecao.as_str()) {
+                        self.porta_de_colecoes
+                            .fotos(colecao, self.recados_de_colecao.0.clone());
+                    }
+                    pendente = true;
+                }
+                colecoes::Recado::Falhou(erro) => self.colecoes.aviso = Some(erro),
+            }
+        }
+
+        if mudou {
+            cx.notify();
+        }
+        if !pendente && !mudou {
+            self.colhendo_colecoes = false;
+            return false;
+        }
+        true
     }
 
     /// 🚨 A seleção não pode apontar para fora da grade.
@@ -539,6 +719,11 @@ impl Biblioteca {
     /// Quantas fotos o acervo tem — o número que a releitura muda.
     pub fn quantas_fotos(&self) -> usize {
         self.fotos.len()
+    }
+
+    /// Quantas a grade está mostrando — depois de todos os filtros.
+    pub fn quantas_visiveis(&self) -> usize {
+        self.visiveis.len()
     }
 
     pub fn quantas_selecionadas(&self) -> usize {
@@ -1565,8 +1750,132 @@ impl Biblioteca {
     }
 
     /// A árvore de pastas e os filtros — o painel da esquerda.
+    /// A coluna da esquerda: pastas em cima, coleções embaixo.
+    ///
+    /// 🔑 **As duas no mesmo painel, como no Lightroom.** Não é economia de
+    /// espaço: um painel novo no dock não apareceria para quem já tem arranjo
+    /// gravado — o JSON do disco descreve os quatro que existiam, e restaurá-lo
+    /// deixaria as coleções invisíveis exatamente para quem mais usou o app.
     pub fn painel_das_pastas(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        self.arvore_de_pastas(cx).into_any_element()
+        div()
+            .flex()
+            .flex_col()
+            .size_full()
+            .child(
+                div()
+                    .flex_1()
+                    .min_h(px(0.))
+                    .child(self.arvore_de_pastas(cx)),
+            )
+            .child(self.lista_de_colecoes(cx))
+            .into_any_element()
+    }
+
+    /// A lista de coleções, e o campo que cria uma.
+    fn lista_de_colecoes(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+        let aberta = self.colecoes.aberta().map(str::to_string);
+        let tem_selecao = !self.selecionadas.is_empty();
+        let quantas_selecionadas = self.selecionadas.len();
+
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(2.))
+            .border_t_1()
+            .border_color(cx.theme().border)
+            .pt(px(6.))
+            .max_h(px(220.))
+            .child(
+                div()
+                    .px(px(8.))
+                    .pb(px(4.))
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(format!("Coleções ({})", self.colecoes.lista.len())),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(1.))
+                    .overflow_hidden()
+                    .children(
+                        self.colecoes
+                            .lista
+                            .iter()
+                            .map(|colecao| {
+                                let id = colecao.id.clone();
+                                let esta_aberta = aberta.as_deref() == Some(id.as_str());
+                                Button::new(SharedString::from(format!("colecao-{id}")))
+                                    .label(format!("{} ({})", colecao.name, colecao.photo_count))
+                                    .xsmall()
+                                    .when(esta_aberta, |b| b.primary())
+                                    .selected(esta_aberta)
+                                    .on_click(cx.listener(move |tela, _ev, _window, cx| {
+                                        tela.abrir_colecao(&id, cx);
+                                    }))
+                            })
+                            .collect::<Vec<_>>(),
+                    ),
+            )
+            .when(self.colecoes.lista.is_empty(), |raiz| {
+                raiz.child(
+                    div()
+                        .px(px(8.))
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        // ⚠️ Um painel vazio sem esta linha é indistinguível de
+                        // um painel quebrado — e a saída fica escrita junto.
+                        .child("nenhuma ainda · selecione fotos e crie a primeira"),
+                )
+            })
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(4.))
+                    .px(px(6.))
+                    .pt(px(4.))
+                    .child(div().flex_1().child(self.nome_da_colecao.clone()))
+                    .child(
+                        Button::new("colecao-criar")
+                            .label("Criar")
+                            .xsmall()
+                            .on_click(cx.listener(|tela, _ev, window, cx| {
+                                let nome = tela.nome_da_colecao.read(cx).value().to_string();
+                                tela.criar_colecao(nome, cx);
+                                tela.nome_da_colecao.update(cx, |campo, cx| {
+                                    campo.set_value("", window, cx);
+                                });
+                            })),
+                    ),
+            )
+            .when(aberta.is_some() && tem_selecao, |raiz| {
+                raiz.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(4.))
+                        .px(px(6.))
+                        .pt(px(2.))
+                        .child(
+                            Button::new("colecao-acrescentar")
+                                .label(format!("+ {quantas_selecionadas}"))
+                                .xsmall()
+                                .on_click(cx.listener(|tela, _ev, _window, cx| {
+                                    tela.acrescentar_a_colecao_aberta(cx);
+                                })),
+                        )
+                        .child(
+                            Button::new("colecao-remover")
+                                .label(format!("− {quantas_selecionadas}"))
+                                .xsmall()
+                                .on_click(cx.listener(|tela, _ev, _window, cx| {
+                                    tela.remover_da_colecao_aberta(cx);
+                                })),
+                        ),
+                )
+            })
     }
 
     /// A foto e o acervo em números — o painel da direita.
@@ -1611,6 +1920,136 @@ mod testes {
     /// O marcador que não grava nada — quase todo teste daqui não tria.
     fn marcador() -> Arc<dyn Marcador> {
         Arc::new(MarcadorDeMentira::default())
+    }
+
+    /// Sem coleção nenhuma — o estado de quem nunca criou uma.
+    fn colecoes_vazias() -> Arc<dyn colecoes::Colecoes> {
+        Arc::new(colecoes::mentira::ColecoesDeMentira::default())
+    }
+
+    fn tela_com_colecoes(
+        cx: &mut TestAppContext,
+        porta: Arc<colecoes::mentira::ColecoesDeMentira>,
+    ) -> gpui::WindowHandle<Biblioteca> {
+        let (previews, dir) = previews_descartaveis();
+        std::mem::forget(dir);
+        cx.update(gpui_component::init);
+        cx.add_window(move |window, cx| {
+            Biblioteca::nova(acervo(), previews, marcador(), porta, window, cx)
+        })
+    }
+
+    /// 🚨 **Abrir uma coleção filtra a grade; fechar devolve o acervo.**
+    ///
+    /// É a funcionalidade inteira do ponto de vista de quem usa: o ensaio de um
+    /// cliente é uma coleção, e "ver só o dele" é abrir. O backend, o
+    /// repositório e os três use cases estavam prontos e testados há meses —
+    /// **faltava o controller e faltava a tela**, e sem os dois nada disso era
+    /// alcançável por um clique.
+    #[gpui::test]
+    fn abrir_uma_colecao_filtra_a_grade(cx: &mut TestAppContext) {
+        let porta = Arc::new(colecoes::mentira::ColecoesDeMentira::com(vec![
+            adapters::controllers::CollectionViewModel {
+                id: "ensaio-1".into(),
+                name: "Casamento Ana e João".into(),
+                photo_count: 1,
+            },
+        ]));
+        // O acervo de teste tem duas fotos; a coleção tem uma.
+        porta.responde_fotos("ensaio-1", &["id-DSC_001.NEF"]);
+
+        let janela = tela_com_colecoes(cx, porta);
+
+        // A lista lateral é pedida na abertura.
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.colher_colecoes(cx);
+                assert_eq!(tela.colecoes().lista.len(), 1);
+                assert_eq!(tela.quantas_visiveis(), 3, "a grade começa com o acervo");
+
+                tela.abrir_colecao("ensaio-1", cx);
+                tela.colher_colecoes(cx);
+
+                assert_eq!(
+                    tela.quantas_visiveis(),
+                    1,
+                    "abrir a coleção tinha de deixar só a foto dela na grade"
+                );
+                assert_eq!(nomes_visiveis(tela), ["DSC_001.NEF"]);
+                assert_eq!(
+                    tela.colecoes().nome_da_aberta(),
+                    Some("Casamento Ana e João")
+                );
+
+                // Clicar de novo na mesma fecha.
+                tela.abrir_colecao("ensaio-1", cx);
+                assert_eq!(tela.quantas_visiveis(), 3, "fechar devolve o acervo");
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🔑 **Criar uma coleção leva a seleção junto** — é um gesto só.
+    ///
+    /// Uma coleção nova e vazia obrigaria a selecionar de novo o que já estava
+    /// selecionado, e é exatamente com uma seleção na mão que alguém decide
+    /// criar o ensaio de um cliente.
+    #[gpui::test]
+    fn criar_colecao_leva_a_selecao_junto(cx: &mut TestAppContext) {
+        let porta = Arc::new(colecoes::mentira::ColecoesDeMentira::default());
+        let janela = tela_com_colecoes(cx, porta.clone());
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.alternar_uma(0, cx);
+                tela.alternar_uma(1, cx);
+                assert_eq!(tela.quantas_selecionadas(), 2);
+
+                tela.criar_colecao("Cliente X".into(), cx);
+                // Criar responde na hora; a colheita encadeia o acrescentar.
+                tela.colher_colecoes(cx);
+                tela.colher_colecoes(cx);
+            })
+            .expect("a janela deve estar aberta");
+
+        assert_eq!(
+            porta.criadas.lock().expect("as criadas").clone(),
+            ["Cliente X"]
+        );
+        let acrescentados = porta
+            .acrescentados
+            .lock()
+            .expect("os acrescentados")
+            .clone();
+        assert_eq!(
+            acrescentados.len(),
+            1,
+            "um lote, e não uma chamada por foto"
+        );
+        assert_eq!(
+            acrescentados[0].1.len(),
+            2,
+            "as duas selecionadas tinham de ir para a coleção nova"
+        );
+    }
+
+    /// ⚠️ **Nome vazio não cria coleção.**
+    ///
+    /// Uma coleção sem nome aparece na lista como um botão em branco, e a única
+    /// forma de descobrir o que tem dentro é abrir — num painel que existe para
+    /// dizer o que tem onde.
+    #[gpui::test]
+    fn nome_vazio_nao_cria_colecao(cx: &mut TestAppContext) {
+        let porta = Arc::new(colecoes::mentira::ColecoesDeMentira::default());
+        let janela = tela_com_colecoes(cx, porta.clone());
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.criar_colecao("   ".into(), cx);
+                tela.colher_colecoes(cx);
+            })
+            .expect("a janela deve estar aberta");
+
+        assert!(porta.criadas.lock().expect("as criadas").is_empty());
     }
 
     fn previews_descartaveis() -> (Arc<PreviewManager>, TempDir) {
@@ -1669,7 +2108,7 @@ mod testes {
         let marcador = Arc::new(MarcadorDeMentira::default());
         let janela = cx.add_window({
             let marcador = marcador.clone();
-            |window, cx| Biblioteca::nova(fotos, previews, marcador, window, cx)
+            |window, cx| Biblioteca::nova(fotos, previews, marcador, colecoes_vazias(), window, cx)
         });
 
         // 🚨 **O dock é montado aqui também**, e não só no `app.rs`. Sem esta
@@ -2196,7 +2635,14 @@ mod testes {
         cx.update(gpui_component::init);
 
         let janela = cx.add_window(|window, cx| {
-            Biblioteca::nova(acervo(), previews.clone(), marcador(), window, cx)
+            Biblioteca::nova(
+                acervo(),
+                previews.clone(),
+                marcador(),
+                colecoes_vazias(),
+                window,
+                cx,
+            )
         });
 
         janela
@@ -2246,7 +2692,14 @@ mod testes {
         cx.update(gpui_component::init);
 
         let janela = cx.add_window(|window, cx| {
-            Biblioteca::nova(acervo(), previews.clone(), marcador(), window, cx)
+            Biblioteca::nova(
+                acervo(),
+                previews.clone(),
+                marcador(),
+                colecoes_vazias(),
+                window,
+                cx,
+            )
         });
 
         janela
