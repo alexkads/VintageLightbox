@@ -121,7 +121,7 @@ banco e só apareciam ao reabrir o app.
 
 | | |
 |---|---|
-| 🚨 **DNG com compressão *lossy* não abre** | `LibRaw failed to open: FileUnsupported`. A causa não é o arquivo: o `build.rs` do `rsraw-sys` compila a LibRaw **sem `USE_JPEG`**, e é isso que o caminho de DNG com perdas exige. RAW nativo de câmera não passa por ali. |
+| 🚨 **DNG com compressão *lossy* não abre** | ⚠️ **A mensagem foi consertada em 17/ago; o suporte, não.** Nenhum dos dois decodificadores do projeto lê `Compression = 34892`: o `rsraw` responde `FileUnsupported` e o `rawloader` diz *"Don't know how to read DNGs with compression 34892"*. A causa é de **compilação**: o `build.rs` do `rsraw-sys` compila a LibRaw sem `USE_JPEG`. RAW nativo de câmera não passa por ali e abre normalmente. |
 | 🚨 **Pausar e cancelar** | existem no controller e **não têm botão** |
 | ⬜ **Aplicar preset na importação, palavras-chave na importação** | |
 
@@ -150,7 +150,7 @@ galeria do cliente**, e o que é defeito visível na tela.
 | 4 | ~~**Coleções na tela**~~ | ✅ **feito em 17/ago** — faltavam o controller e a tela, não o backend |
 | 5 | ~~**Copiar/colar revelação entre fotos**~~ | ✅ **feito em 17/ago** |
 | 6 | ~~**A curva de tons ganha controles**~~ | ✅ **feito em 17/ago** |
-| 7 | **DNG com perdas** | compilar a LibRaw com libjpeg, ou cair na prévia embutida |
+| 7 | **DNG com perdas: compilar a LibRaw com libjpeg** | ⚠️ é trabalho no `rsraw-sys`, dependência de terceiros. As outras duas saídas foram pesadas e recusadas em 17/ago (ver `infrastructure/src/dng.rs`): decodificar aqui é escrever um conversor de RAW, e cair na prévia embutida daria 256×171 passando por foto |
 | 8 | **Imprimir de verdade, ou tirar o botão** | um dos dois — o que não pode é continuar anunciando |
 
 🔑 **A integração com o `recordarfotos.com.br` só começa quando o clone estiver funcional** —

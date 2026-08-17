@@ -91,8 +91,14 @@ pub fn load_raw_as_dynamic_image(path: &str) -> Result<image::DynamicImage, Stri
     let file_data = std::fs::read(path).map_err(|e| format!("Failed to read RAW file: {}", e))?;
 
     // 2. Open RAW image with LibRaw
-    let mut raw =
-        RawImage::open(&file_data).map_err(|e| format!("LibRaw failed to open: {:?}", e))?;
+    //
+    // 🔑 Quando falha, quem responde é `dng::explicar_falha`: o erro cru da
+    // LibRaw é `FileUnsupported`, que manda quem importa procurar defeito no
+    // próprio arquivo — e no caso conhecido (DNG com compressão *lossy*) o
+    // arquivo está íntegro e quem não sabe abrir é o app.
+    let mut raw = RawImage::open(&file_data).map_err(|e| {
+        crate::dng::explicar_falha(&file_data, &format!("LibRaw failed to open: {:?}", e))
+    })?;
 
     // 3. Unpack the raw data
     raw.unpack()

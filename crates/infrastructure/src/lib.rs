@@ -3,6 +3,8 @@ pub mod database;
 pub mod devices;
 // pub mod fs; // Removing fs as it seems problematic and might not be used directly or empty.
 pub mod content_hash;
+/// Por que um DNG não abre — quando a resposta é "não é o arquivo".
+pub mod dng;
 pub mod exif_reader;
 pub mod file_organizer;
 pub mod file_system;
