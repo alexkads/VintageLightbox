@@ -244,7 +244,7 @@ abaixo. **É aqui que você decide se gosta de morar nisso**, e a decisão foi f
 | ✅ Árvore de pastas e filtro por cor | `c7ea9f9` |
 | ✅ Seleção e filmstrip | `7bb02c7` |
 | ✅ Busca por texto na barra | `cae826a` (já na fase 2 — dependia da base) |
-| ⬜ Carregamento assíncrono das fotos (hoje bloqueia a abertura) | |
+| ✅ Carregamento assíncrono das fotos — **medido, e não era dívida** (abaixo) | `medir-abertura` |
 
 ### ✅ Critério de saída atingido — 15/ago/2026
 
@@ -290,6 +290,37 @@ em release, com árvore, filtros, grade e filmstrip sobre 2.000 fotos.
 do `gpui-component`, o que traz junto o tema e o estado global dele (`gpui_component::init`). Como
 era adoção de base de UI, e não um campo solto, virou o primeiro passo da fase 2 (`98f8822`); o campo
 veio logo atrás (`cae826a`).
+
+#### 🚨 A última pendência da fase 1 não existia — `medir-abertura`, 17/ago/2026
+
+*"Carregamento assíncrono das fotos (hoje bloqueia a abertura)"* atravessou as fases 2, 3 e 4 como
+item aberto, e **ninguém tinha medido quanto ele bloqueia**. Dívida sem número não dá para
+priorizar: 30 ms e 3 s pedem decisões opostas e se parecem na descrição.
+
+```bash
+VLB_CATALOG=/tmp/catalogo-2000 cargo run --release -p ui-gpui --bin medir-abertura
+```
+
+Com **2.000 fotos**, em release, quatro execuções seguidas:
+
+| Etapa | Tempo |
+|---|---:|
+| abrir o banco | 1,5 ms |
+| migrations | 1,4 ms |
+| **ler todas as fotos** | 22–40 ms |
+| ler os presets | 0,2 ms |
+| **antes da janela aparecer** | **23–43 ms** |
+
+✅ **Não é dívida.** A janela abre em menos de 50 ms com o acervo de referência inteiro — bem abaixo
+dos ~100 ms em que a espera passa a ser notada. Tornar isso assíncrono acrescentaria estado ("as
+fotos ainda não chegaram") a todas as telas para economizar 40 ms.
+
+⚠️ **E dá para saber onde ele voltaria a ser dívida**: são **0,020 ms por foto**, então o limite dos
+100 ms cai perto de **5.000 fotos** — aritmética sobre a medida, não outra medida. Um acervo
+profissional passa disso. Quando passar, o binário responde de novo, com o número do dia.
+
+🔑 **A régua é a mesma que a fase 1 usou para separar "o GPUI é lento" de "o binário estava sem
+otimização"** — e serviu de novo, agora para separar "a abertura bloqueia" de "a abertura custa 40 ms".
 
 #### `semear-catalogo` — como medir sem depender do acervo de ninguém
 
@@ -902,8 +933,9 @@ registrados no STATUS: o `uniform` de 28 campos para 46 (18 sliders sem efeito, 
 coisa); a exportação que descarta 31 ajustes; os cinco presets de sistema numa escala que não é a do
 shader; e o `undo` que guarda o corte e não o restaura.
 
-⚠️ **O que fica de dívida própria**: o preset recém-salvo com id local, o corte fora do histórico, e o
-carregamento síncrono da foto na abertura (o mesmo que a fase 1 deixou).
+⚠️ **O que fica de dívida própria**: o preset recém-salvo com id local e o corte fora do histórico. (A
+terceira que estava aqui — o carregamento síncrono na abertura — **foi medida em 17/ago e não era
+dívida**: 23–43 ms com 2.000 fotos. Ver a fase 1.)
 
 ### Fase 3 — Importação 🔄 **em andamento**
 
