@@ -7,7 +7,7 @@ workspace (fase 5). O plano de Tauri ([09](09-MIGRACAO-TAURI.md)) foi avaliado e
 
 > 🚨 **Este documento deixou de ser plano e virou história em 17/ago/2026.** O objetivo do projeto
 > mudou no mesmo dia: não é mais "trocar de framework com paridade", é
-> [**um clone funcional do Lightroom**](00-OBJETIVO.md). As **regras da §7 estão revogadas** — em
+> [**um clone funcional do Lightroom**](../00-OBJETIVO.md). As **regras da §7 estão revogadas** — em
 > especial *"nenhuma feature nova"*, que existia para separar defeito de porte de escopo divergente e
 > agora só impede o app de ficar pronto.
 >
@@ -16,7 +16,7 @@ workspace (fase 5). O plano de Tauri ([09](09-MIGRACAO-TAURI.md)) foi avaliado e
 > o `SliderState::set_value` que não emite `Change`, a fluidez que só se mede em `--release` — tudo
 > isso continua valendo, e cada linha custou pelo menos um commit para ser aprendida.
 >
-> A fila de trabalho de agora está em [`PARIDADE-LIGHTROOM.md`](PARIDADE-LIGHTROOM.md).
+> A fila de trabalho de agora está em [`PARIDADE-LIGHTROOM.md`](../PARIDADE-LIGHTROOM.md).
 
 > Trocar `crates/ui` — hoje egui 0.31 sobre eframe/wgpu — por **GPUI**, o framework do Zed, com
 > `gpui-component` por cima. Continua Rust puro, no mesmo processo, na GPU.
@@ -62,7 +62,7 @@ div().flex().flex_col().gap(px(4.))
     .border_b_1().border_color(rgb(0x303030))
 ```
 
-Compare com o que existe hoje: [`advanced_slider.rs`](../crates/ui/src/components/advanced_slider.rs)
+Compare com o que existe hoje: [`advanced_slider.rs`](../../crates/ui/src/components/advanced_slider.rs)
 são **290 linhas** para *um* slider — `RAIL_HEIGHT`, `KNOB_RADIUS`, `pos2`, `Rect`, e
 `ui.memory(|mem| mem.data.get_temp::<bool>(...))` para lembrar se o campo está em edição. O
 `gpui-component` tem [`slider.rs`](https://github.com/longbridge/gpui-component) pronto.
@@ -211,7 +211,7 @@ reclamava. Vale para o resto da migração: erro novo depois de subir dependênc
 
 1. ✅ **Árvore commitada** — sobraram só os documentos desta decisão, que entraram junto.
 2. ✅ **Migrations 16–19 resolvidas** — o catálogo antigo virou `.bak` e o app criou um limpo com
-   as 15 do repositório ([STATUS](STATUS.md)). Conferido: o banco novo registra `15 migrations,
+   as 15 do repositório ([STATUS](../STATUS.md)). Conferido: o banco novo registra `15 migrations,
    última v15`.
 3. ✅ **Catálogo por variável de ambiente** — `VLB_CATALOG` (`f906451`). 🚨 E não era hipotético:
    `develop_view_controls_e2e_test.rs` chamava `PreviewManager::new()`, então **rodar `cargo test`
@@ -403,7 +403,7 @@ biblioteca; custou dois testes que passavam por engano. E a assimetria virou car
 reset ao neutro na abertura da foto usa `set_value` **porque** ele não emite, senão abrir qualquer
 foto viraria 11 pedidos à GPU. Tem teste prendendo isso.
 
-🔑 **Os controles são uma tabela** ([`controles.rs`](../crates/ui-gpui/src/revelacao/controles.rs)),
+🔑 **Os controles são uma tabela** ([`controles.rs`](../../crates/ui-gpui/src/revelacao/controles.rs)),
 não 11 blocos de interface iguais — o painel de HSL sozinho tem 24. E o neutro de cada um vem de
 `Ajustes::default`, não de um número escrito ao lado: dois lugares dizendo qual é o neutro é ter um
 deles errado mais cedo ou mais tarde.
@@ -471,7 +471,7 @@ Até aqui a Revelação abria **toda** foto no neutro, inclusive as já trabalha
 tela": é o trabalho do fotógrafo sumindo da vista, com o arquivo cru na frente dele e os 42 sliders
 parados no meio dizendo que está tudo zerado.
 
-[`persistencia.rs`](../crates/ui-gpui/src/revelacao/persistencia.rs) lê os 46 `edit_*` do
+[`persistencia.rs`](../../crates/ui-gpui/src/revelacao/persistencia.rs) lê os 46 `edit_*` do
 `PhotoViewModel` — a mesma leitura que o legado faz ao selecionar ("Load saved edits FIRST",
 `app.rs`). 🔑 **O padrão de campo ausente vem de `Ajustes::default`, campo a campo, e não de 46
 números digitados**: é a mesma regra do `Definicao::neutro` dos sliders, e é o que evita repetir o
@@ -544,7 +544,7 @@ apagaria, calado, o enquadramento feito no app de egui, sem erro, sem aviso e se
 o corte é lido da foto ao abrir e **devolvido igual** em toda gravação.
 
 Isso não dava para conferir com gravador de mentira: o defeito mora do controller para baixo. Três
-testes com **banco de verdade** ([`tests/gravacao_no_banco.rs`](../crates/ui-gpui/tests/gravacao_no_banco.rs)):
+testes com **banco de verdade** ([`tests/gravacao_no_banco.rs`](../../crates/ui-gpui/tests/gravacao_no_banco.rs)):
 
 1. os 46 campos sobrevivem à ida e volta inteira — `Ajustes` → controller → use case → entidade →
    SQLite → `row_to_photo` → `PhotoViewModel` → `da_foto`, sete etapas com nomes parecidos demais;
@@ -555,7 +555,7 @@ testes com **banco de verdade** ([`tests/gravacao_no_banco.rs`](../crates/ui-gpu
 
 #### Desfazer e refazer ✅ — `Cmd+Z`, com duas diferenças assumidas
 
-[`historico.rs`](../crates/ui-gpui/src/revelacao/historico.rs): uma pilha de `Ajustes` inteiros (46
+[`historico.rs`](../../crates/ui-gpui/src/revelacao/historico.rs): uma pilha de `Ajustes` inteiros (46
 `f32`, 184 bytes por passo, 3,6 KB cheia), teto de 20 como no legado, e o futuro morrendo quando se
 edita depois de desfazer. As teclas são as de lá: `Cmd+Z` e `Cmd+Shift+Z`.
 
@@ -601,7 +601,7 @@ código quebrado.** Aqui foram dois commits inteiros afirmando um atalho que nun
 #### Presets ✅ — e o "B&W" do legado não deixa a foto em preto e branco
 
 A entidade, os cinco de sistema e a gravação já existiam nas camadas internas e ficaram intactas;
-[`presets.rs`](../crates/ui-gpui/src/revelacao/presets.rs) é só a ponte entre `PresetAdjustments` e
+[`presets.rs`](../../crates/ui-gpui/src/revelacao/presets.rs) é só a ponte entre `PresetAdjustments` e
 `Ajustes`. Lista com os de sistema e os do usuário, clique aplica, e "+ Salvar como preset" abre um
 diálogo com o nome — como no legado, e sem o apagar, que **lá também não existe** (o menu de contexto
 dele só fecha o menu).
@@ -658,7 +658,7 @@ PY
 
 **Critério de saída novo**: a mesma imagem, com os mesmos 46 ajustes, atravessando o motor dos dois
 apps, tem de sair **byte a byte igual**. O que garante isso hoje são três testes em
-[`processador.rs`](../crates/ui-gpui/src/revelacao/processador.rs): o WGSL é o mesmo arquivo
+[`processador.rs`](../../crates/ui-gpui/src/revelacao/processador.rs): o WGSL é o mesmo arquivo
 (conferido byte a byte), o neutro devolve o pixel intacto, e a exposição atravessa com o valor certo
 no primeiro e no último pixel.
 
@@ -778,7 +778,7 @@ virou `primary` enquanto não houver decisão melhor.
 pelo palco: a imagem grande, e o caminho de ida e volta a partir da Biblioteca.
 
 Com duas telas, alguém precisa saber qual está no ar — e esse alguém não pode ser nenhuma das duas.
-Nasce o [`app.rs`](../crates/ui-gpui/src/app.rs), com o `Aplicativo` como raiz da janela.
+Nasce o [`app.rs`](../../crates/ui-gpui/src/app.rs), com o `Aplicativo` como raiz da janela.
 
 🔑 **A selecão é copiada, não compartilhada.** As duas telas escolhem foto por razões diferentes: na
 Biblioteca escolher é *comparar*, na Revelação é *editar*. Um estado só faria voltar à grade e clicar
@@ -800,7 +800,7 @@ assíncrono — a mesma pendência que a abertura da Biblioteca ainda tem.
 O substituto que o §6 prevê para os 146 testes de UI **existe e roda** (`544a0cb`). Veio agora, e não
 depois da Revelação, porque são ~50 controles com a mesma forma de solda pela frente: componente
 emite evento, tela assina, estado muda. O molde está em
-[`tela.rs`](../crates/ui-gpui/src/biblioteca/tela.rs), no `mod testes`.
+[`tela.rs`](../../crates/ui-gpui/src/biblioteca/tela.rs), no `mod testes`.
 
 ```bash
 cargo test -p ui-gpui --lib tela::testes
@@ -831,7 +831,7 @@ O único item da fase 2 sem equivalente pronto no `gpui-component`, e o mais car
 e interação no legado. Entrou em duas metades, e a divisão foi de propósito — a primeira dá para
 conferir sem olhar, a segunda não.
 
-**A geometria** ([`corte.rs`](../crates/ui-gpui/src/revelacao/corte.rs)): onde ficam as oito alças, o
+**A geometria** ([`corte.rs`](../../crates/ui-gpui/src/revelacao/corte.rs)): onde ficam as oito alças, o
 que cada arrasto faz, o que os limites da foto fazem com o resultado. 16 testes, e o
 `CropSettings` do `domain` intacto como tipo de ida e volta. Três armadilhas ficaram presas, e as
 três foram conferidas quebrando o código de propósito:
@@ -949,7 +949,7 @@ conquistada e se preserva.
 
 #### O estado ✅ — três corridas que ele precisa recusar
 
-[`importacao/estado.rs`](../crates/ui-gpui/src/importacao/estado.rs): sem tela e sem disco, 17
+[`importacao/estado.rs`](../../crates/ui-gpui/src/importacao/estado.rs): sem tela e sem disco, 17
 testes. O desenho é o do legado e é bom — toda descoberta chega como `Recado` e sai como mudança de
 estado mais, às vezes, um `Seguimento` ("agora vá ler isto"). Quem dispara trabalho é a tela, que tem
 o controller em mãos; é o que permite testar a máquina inteira sem runtime, banco ou cartão plugado.
@@ -1093,7 +1093,7 @@ O que se porta é a viva.
 
 #### A geometria da página ✅ — e três contas que o legado não faz
 
-[`impressao/pagina.rs`](../crates/ui-gpui/src/impressao/pagina.rs): papel, orientação, margem,
+[`impressao/pagina.rs`](../../crates/ui-gpui/src/impressao/pagina.rs): papel, orientação, margem,
 espaçamento e grade, tudo **em milímetro**, sem tela. 16 testes.
 
 🔑 **Milímetro, e não fração do papel** — que era a alternativa óbvia, e traz junto uma armadilha:
@@ -1137,7 +1137,7 @@ o tipo de coisa que se acrescenta em uma linha no dia em que o dono pedir.
 
 #### A folha na tela ✅ — a terceira tela do app
 
-[`impressao/tela.rs`](../crates/ui-gpui/src/impressao/tela.rs), ligada à raiz como `Tela::Impressao`.
+[`impressao/tela.rs`](../../crates/ui-gpui/src/impressao/tela.rs), ligada à raiz como `Tela::Impressao`.
 Os três painéis do legado: modelos e coleção à esquerda, papel/orientação/medidas à direita, a folha
 no meio. O botão da barra só liga com seleção, como o de lá — e como o da Revelação.
 
@@ -1317,7 +1317,7 @@ ninguém quer, e desfazer isso é reselecionar tudo.
 
 #### A segunda tela ✅ — e o `ViewportDeferred` que virou janela de verdade
 
-[`cliente.rs`](../crates/ui-gpui/src/cliente.rs): a janela que o fotógrafo vira para o cliente. Tela
+[`cliente.rs`](../../crates/ui-gpui/src/cliente.rs): a janela que o fotógrafo vira para o cliente. Tela
 cheia no outro monitor, fundo preto, sem barra de título e sem controle — só a foto selecionada na
 janela principal, com o nome e as estrelas num rodapé que `I` liga e desliga, e `Esc` para fechar.
 
@@ -1386,7 +1386,7 @@ Panel`, dentro de um `DockArea` — arrastáveis e redimensionáveis, no arranjo
 existia lá, e os `cx.listener` de lá esperam `Context<Biblioteca>` — mover o desenho para dentro de
 views novas trocaria **todos** eles por `entidade.update(…)`, umas 600 linhas reescritas só para
 mudar de lugar, com os testes por baixo. Assim o dock custou um arquivo pequeno
-([`paineis.rs`](../crates/ui-gpui/src/biblioteca/paineis.rs)) e **nenhum teste precisou mudar**.
+([`paineis.rs`](../../crates/ui-gpui/src/biblioteca/paineis.rs)) e **nenhum teste precisou mudar**.
 
 🚨 **A referência de volta é fraca, e não por elegância.** A `Biblioteca` guarda o `DockArea`, o dock
 guarda os painéis, e os painéis apontam para a `Biblioteca`: com `Entity` nos dois sentidos isso é um
@@ -1408,7 +1408,7 @@ disso na própria `trait`; há teste para a mudança falhar aqui, e não na máq
 
 #### O arranjo sobrevive a fechar o app ✅
 
-[`biblioteca/arranjo.rs`](../crates/ui-gpui/src/biblioteca/arranjo.rs): o `dump()` do dock vira JSON
+[`biblioteca/arranjo.rs`](../../crates/ui-gpui/src/biblioteca/arranjo.rs): o `dump()` do dock vira JSON
 **ao lado do catálogo** (`arranjo-biblioteca.json`), e volta na abertura. Arrumar a tela e perder a
 arrumação ao fechar é o mesmo que não poder arrumar — e o legado grava o `DockState` das duas telas
 (`eframe::set_value`), então isto é paridade.
@@ -1469,7 +1469,7 @@ propósito — um dock que pudesse fechá-la deixaria a tela sem busca e sem fil
 
 #### O painel de informações ✅ — as duas abas vivas que faltavam
 
-[`biblioteca/informacoes.rs`](../crates/ui-gpui/src/biblioteca/informacoes.rs) (as contas, sem tela) e
+[`biblioteca/informacoes.rs`](../../crates/ui-gpui/src/biblioteca/informacoes.rs) (as contas, sem tela) e
 a coluna da direita da Biblioteca: dados da foto selecionada (nome, data, câmera, exposição, nota,
 cor), a distribuição por nota e as câmeras mais usadas. É o `Metadata` do dock mais a parte legível
 do `Quick Develop`.
@@ -1577,7 +1577,7 @@ metade. Por isso `crates/ui` fica vivo e rodando até a fase 5 — abandonar pre
 ## 7. Regras durante a migração — ⚠️ **revogadas em 17/ago/2026**
 
 > 🚨 **Não siga esta seção.** Ela valia enquanto o alvo era o app de egui; hoje o alvo é o Lightroom
-> ([`00-OBJETIVO.md`](00-OBJETIVO.md)) e as três primeiras regras dizem o **contrário** do que agora é
+> ([`00-OBJETIVO.md`](../00-OBJETIVO.md)) e as três primeiras regras dizem o **contrário** do que agora é
 > certo. Ficam registradas porque explicam decisões que estão no código — não porque orientem o
 > próximo commit.
 >
@@ -1662,12 +1662,12 @@ O terceiro **tem de falhar** conforme cada família ganhar código, e some quand
 
 | Assunto | Onde |
 |---------|------|
-| O tema Vintage Dark, e por que ele não é enfeite | [crates/ui-gpui/src/tema.rs](../crates/ui-gpui/src/tema.rs) |
+| O tema Vintage Dark, e por que ele não é enfeite | [crates/ui-gpui/src/tema.rs](../../crates/ui-gpui/src/tema.rs) |
 | Spike compilado (fora do repositório) | `scratchpad/gpui-spike/src/main.rs` |
-| O slider de 290 linhas que vira um componente | [advanced_slider.rs](../crates/ui/src/components/advanced_slider.rs) |
-| Pipeline GPU que sobrevive | [gpu_processor.rs](../crates/ui/src/gpu_processor.rs) · [image_adjustments.wgsl](../crates/ui/src/shaders/image_adjustments.wgsl) |
-| Estado de edição que sobrevive | [state.rs:20-78](../crates/ui/src/state.rs#L20-L78) |
-| Caminho fixo do catálogo (fase 0) | [paths.rs](../crates/infrastructure/src/paths.rs) |
-| Os 99 E2E que viram lista de paridade | [crates/ui/tests/](../crates/ui/tests/) |
+| O slider de 290 linhas que vira um componente | [advanced_slider.rs](../../crates/ui/src/components/advanced_slider.rs) |
+| Pipeline GPU que sobrevive | [gpu_processor.rs](../../crates/ui/src/gpu_processor.rs) · [image_adjustments.wgsl](../../crates/ui/src/shaders/image_adjustments.wgsl) |
+| Estado de edição que sobrevive | [state.rs:20-78](../../crates/ui/src/state.rs#L20-L78) |
+| Caminho fixo do catálogo (fase 0) | [paths.rs](../../crates/infrastructure/src/paths.rs) |
+| Os 99 E2E que viram lista de paridade | [crates/ui/tests/](../../crates/ui/tests/) |
 | Avaliação do Tauri, descartada | [09-MIGRACAO-TAURI.md](09-MIGRACAO-TAURI.md) |
 | `gpui-component` | https://github.com/longbridge/gpui-component |

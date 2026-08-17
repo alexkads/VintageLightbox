@@ -1,14 +1,30 @@
 # Status do Projeto - VintageLightbox
 
-**Última atualização**: 15 de agosto de 2026
-**Último commit**: `318178d` — 25/jan/2026, _"feat: implement embedded preview extraction for RAW files"_
-**Branch de trabalho**: `dev` (com 3 arquivos alterados e **não commitados** — veja abaixo)
-**Estado**: ✅ compila, suíte verde, app sobe — depois de dois consertos feitos hoje
+**Última atualização**: 17 de agosto de 2026
+**Último commit**: `b83e0dd — 2026-08-17, _"feat(exportacao): o app entrega arquivo — pela primeira vez, em qualquer versão"_`
+**Branch de trabalho**: `dev`, árvore limpa
+**Estado**: ✅ compila · **676 testes, 0 falhando** · `fmt` e `clippy -D warnings` limpos · o app sobe
 
-> ⚠️ **Este documento foi reescrito em 15/ago/2026 a partir do código, não do histórico.**
-> A versão anterior datava de 20/dez/2025 e descrevia um projeto muito menor do que o que existe
-> hoje (dizia "Adapters: não iniciado" — há 6 controllers; dizia 173 testes — há 481 declarados).
-> Os números abaixo foram medidos rodando `cargo test`/`cargo check`, não copiados.
+> 🎯 **O objetivo do projeto mudou em 17/ago/2026** e está em
+> [`00-OBJETIVO.md`](00-OBJETIVO.md): substituir o Lightroom no fluxo do estúdio, para que a edição
+> converse com o `recordarfotos.com.br`. A migração de egui para GPUI — que era o objetivo anterior —
+> **terminou**, e virou [história](historico/10-MIGRACAO-GPUI.md).
+>
+> **A fila de trabalho é [`PARIDADE-LIGHTROOM.md`](PARIDADE-LIGHTROOM.md).** Este documento é o
+> estado técnico: camadas, testes e lacunas.
+
+## O que mudou em 17/ago/2026
+
+| | |
+|---|---|
+| ✅ **A exportação existe** | e é a primeira vez, em qualquer versão. `ExportPhotoUseCase` e `ExportController` estavam escritos e testados, e **nunca eram construídos no `main.rs`** |
+| ✅ **O arquivo exportado é o que a tela mostra** | ele aplicava 15 dos 46 ajustes, com matemática diferente do shader, e ignorava o corte |
+| ✅ **O motor de revelação foi para a `infrastructure`** | wgpu é detalhe técnico, e a exportação não pode depender do crate de interface |
+| ✅ **Os 4 controles de Detalhe funcionam** | o `struct Params` do WGSL declarava 28 campos para os 46 que a CPU manda |
+| ✅ **Importar aparece na Biblioteca** | as fotos entravam no banco e a grade não relia — só apareciam ao reabrir o app |
+
+> ⚠️ **Este documento foi reescrito em 15/ago/2026 a partir do código, não do histórico**, e os
+> números são medidos rodando `cargo test`/`cargo check`, não copiados.
 
 ---
 
@@ -70,7 +86,7 @@ struct `PhotoEdits` continua sendo o conserto de verdade.
 | Use Cases | 65 | ✅ passando |
 | Adapters | 0 | ⚠️ nenhum teste escrito |
 | Infrastructure | 65 (34 unit + 31 integração em 7 arquivos) | ✅ passando (1 ignorado) |
-| UI (egui) | — | 🚫 **saiu do workspace em 17/ago** (fase 5); o que ela fazia está em [PARIDADE-UI.md](PARIDADE-UI.md) |
+| UI (egui) | — | 🚫 **saiu do workspace em 17/ago** (fase 5); o que ela fazia está em [PARIDADE-UI.md](historico/PARIDADE-UI.md) |
 | UI (GPUI) | 310 (307 unit + 3 de integração com banco) | ✅ passando — **as cinco fases da migração fecharam** |
 
 ---
@@ -305,7 +321,7 @@ Não são erros de compilação; são features que a UI mostra como prontas e qu
    🔑 **As duas razões do adiamento caíram com a fase 5**: não há mais dois apps lendo o mesmo shader,
    e o catálogo real tem **0 fotos** (`select count(*) from photos`), então não há aparência para
    mudar retroativamente. A segunda volta a valer quando houver acervo revelado. Detalhes em
-   [docs/10-MIGRACAO-GPUI.md](10-MIGRACAO-GPUI.md), §8.
+   [docs/historico/10-MIGRACAO-GPUI.md](historico/10-MIGRACAO-GPUI.md), §8.
 0.5. 🚨 **Os cinco presets de sistema estão numa escala que não é a do shader.** `ListPresetsUseCase`
    constrói "Auto", "B&W", "Warm", "Cool" e "High Contrast" a cada listagem. O "B&W" pede
    `saturation: -100.0`, mas a saturação do shader é um fator (`1.0 + saturation`): cinza é **-1.0**,

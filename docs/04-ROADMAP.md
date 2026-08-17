@@ -1,5 +1,22 @@
 # Roadmap de Desenvolvimento - VintageLightbox
 
+
+> 🚨 **Este roadmap descreve um plano que terminou.** Ele foi escrito para as fases de construção e
+> depois para a migração de egui para GPUI — que **fechou** em 17/ago/2026
+> ([história](historico/10-MIGRACAO-GPUI.md)).
+>
+> **A fila de trabalho de agora é [`PARIDADE-LIGHTROOM.md`](PARIDADE-LIGHTROOM.md)**, e ela é ordenada
+> pelo [objetivo novo](00-OBJETIVO.md): substituir o Lightroom no fluxo do estúdio, para que a edição
+> converse com o `recordarfotos.com.br`.
+>
+> ⚠️ **E os caminhos `crates/ui/...` que ele cita não existem mais.** Aquele crate saiu do workspace
+> em 17/ago/2026 (−25.783 linhas); o código está no histórico do git, e o que ele fazia está em
+> [`historico/PARIDADE-UI.md`](historico/PARIDADE-UI.md). A interface hoje é `crates/ui-gpui/`.
+>
+> ⚠️ **A diferença de critério importa.** Este documento ordena por fase de construção; a fila nova
+> ordena por *o que destrava mais coisa* — e por isso a exportação, que não aparece com destaque
+> aqui, foi o item 1 de lá: sem ela o app não entrega nada ao site.
+
 ## Visão Geral
 
 Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Architecture** e **Test-Driven Development (TDD)**. Cada funcionalidade é implementada com testes primeiro, garantindo qualidade desde o início.

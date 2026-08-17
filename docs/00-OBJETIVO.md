@@ -2,21 +2,57 @@
 
 **Escrito em**: 17 de agosto de 2026 — o dia em que o objetivo mudou.
 
-> **Um editor de fotos completo e funcional, no formato do Lightroom, em Rust com GPUI.**
+> **Substituir o Lightroom no fluxo do estúdio — para que a edição converse com o
+> `recordarfotos.com.br`.**
 >
-> Completo quer dizer: importar, organizar, triar, revelar e **entregar arquivo**. Funcional quer
-> dizer: **todo controle que a tela oferece move a foto**. Um slider que existe e não faz nada é um
-> defeito, e não uma pendência.
+> Como se chega lá: um editor de fotos completo e funcional, no formato do Lightroom, em Rust com
+> GPUI. **Completo**: importar, organizar, triar, revelar e **entregar arquivo**. **Funcional**:
+> todo controle que a tela oferece move a foto — um slider que existe e não faz nada é defeito, não
+> pendência.
 
-Depois disso, e só depois, vem a integração com a API de pós-venda — o app tem de ser útil sozinho
-antes de conversar com qualquer coisa.
+## 🔑 Por que clonar o Lightroom, e não usar o Lightroom
+
+Esta é a pergunta que o projeto inteiro responde, e ela não estava escrita em lugar nenhum até
+17/ago/2026.
+
+O fluxo do estúdio hoje **passa pelo Lightroom**, e o Lightroom **não conversa com o
+`recordarfotos.com.br`**. O site é onde o cliente:
+
+1. **baixa o ensaio que já comprou** — as fotos adquiridas no estúdio;
+2. **compra as que ficaram para trás** — as que ele viu, não levou, e pode querer depois.
+
+Entre a revelação e essas duas coisas existe hoje um vão que se atravessa **na mão**: exportar,
+separar o que foi comprado do que não foi, subir, montar a galeria do cliente. Cada passo manual é um
+lugar onde a foto errada vai para a galeria errada.
+
+**A ferramenta existe para fechar esse vão.** Não é "um Lightroom melhor" — é o Lightroom **no lugar
+certo do ecossistema**, onde a decisão que o fotógrafo já toma (esta foi comprada, esta não) vira
+diretamente o que o cliente vê no site.
+
+⚠️ **Isso reordena o que importa.** Duas funcionalidades do Lightroom são infraestrutura deste
+objetivo, e não itens de lista:
+
+| | Por quê |
+|---|---|
+| **Exportação** | é o que alimenta a galeria. Sem ela não há nada para o site receber |
+| **Coleções** | "o ensaio do cliente" **é** uma coleção; "comprada" e "deixada para trás" são a divisão dentro dela |
+
+E duas que parecem centrais no Lightroom **não são** aqui: os módulos Livro, Slideshow, Mapa e Web, e
+os ajustes locais com máscara. Um estúdio de retrato entrega revelação global; pincel é o que se usa
+em uma foto de cem.
+
+## O que vem depois — e só depois
+
+A integração com a API de pós-venda. O app tem de ser útil sozinho antes de conversar com qualquer
+coisa: um fluxo que já depende do site para funcionar não tem como ser adotado aos poucos, e adoção
+aos poucos é a única que dá para desfazer.
 
 ---
 
 ## 🚨 O que este documento substitui, e por quê
 
 Até 17/ago/2026 o objetivo canônico era **outro**, e está registrado em
-[`10-MIGRACAO-GPUI.md`](10-MIGRACAO-GPUI.md): trocar a interface de egui por GPUI **com paridade**,
+[`10-MIGRACAO-GPUI.md`](historico/10-MIGRACAO-GPUI.md): trocar a interface de egui por GPUI **com paridade**,
 sem regressão. Esse objetivo foi **alcançado** — as cinco fases fecharam, o `crates/ui` saiu do
 workspace (`8c7df32`, −25.783 linhas) e o `Cargo.lock` não tem um pacote `egui` sequer.
 
@@ -81,7 +117,7 @@ de quem lê a tela.
 1. **[PARIDADE-LIGHTROOM.md](PARIDADE-LIGHTROOM.md)** — a lista medida do que funciona, do que a tela
    promete e não faz, e do que não existe. **Comece por aqui**: é a fila de trabalho.
 2. **[STATUS.md](STATUS.md)** — o estado do código, camada por camada, e as lacunas conhecidas.
-3. **[10-MIGRACAO-GPUI.md](10-MIGRACAO-GPUI.md)** — a história, e o melhor registro das armadilhas do
+3. **[10-MIGRACAO-GPUI.md](historico/10-MIGRACAO-GPUI.md)** — a história, e o melhor registro das armadilhas do
    GPUI que já custaram commit.
 
 ## Convenções que continuam valendo

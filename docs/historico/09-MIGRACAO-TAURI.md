@@ -575,16 +575,16 @@ Isso reforça, não enfraquece, a conclusão da §1: se a motivação não for (
 
 | Assunto | Onde |
 |---------|------|
-| Montagem de dependências a migrar para o `setup` do Tauri | [crates/ui/src/main.rs:33-130](../crates/ui/src/main.rs#L33-L130) |
-| Estado de edição e undo/redo (§5) | [crates/ui/src/state.rs:20-78](../crates/ui/src/state.rs#L20-L78) |
-| Pipeline GPU e parâmetros (§3) | [crates/ui/src/gpu_processor.rs](../crates/ui/src/gpu_processor.rs) |
-| Shader — 456 linhas, compute (§3) | [crates/ui/src/shaders/image_adjustments.wgsl](../crates/ui/src/shaders/image_adjustments.wgsl) |
-| Cache de miniaturas/previews que alimenta o protocolo (§3) | [crates/infrastructure/src/cache/preview_manager.rs](../crates/infrastructure/src/cache/preview_manager.rs) |
-| Carregamento assíncrono que vira eventos (§4.4) | [crates/ui/src/async_loader.rs](../crates/ui/src/async_loader.rs) |
-| View models sem `Serialize` (§4.1) | [crates/adapters/src/view_models.rs:85-109](../crates/adapters/src/view_models.rs#L85-L109) |
-| Janela secundária a reescrever (§7.3) | [crates/ui/src/components/secondary_window.rs](../crates/ui/src/components/secondary_window.rs) |
-| Os 99 E2E que viram lista de paridade (§8) | [crates/ui/tests/](../crates/ui/tests/) |
-| Caminho fixo do catálogo (§2.1) | [crates/infrastructure/src/paths.rs](../crates/infrastructure/src/paths.rs) |
+| Montagem de dependências a migrar para o `setup` do Tauri | [crates/ui/src/main.rs:33-130](../../crates/ui/src/main.rs#L33-L130) |
+| Estado de edição e undo/redo (§5) | [crates/ui/src/state.rs:20-78](../../crates/ui/src/state.rs#L20-L78) |
+| Pipeline GPU e parâmetros (§3) | [crates/ui/src/gpu_processor.rs](../../crates/ui/src/gpu_processor.rs) |
+| Shader — 456 linhas, compute (§3) | [crates/ui/src/shaders/image_adjustments.wgsl](../../crates/ui/src/shaders/image_adjustments.wgsl) |
+| Cache de miniaturas/previews que alimenta o protocolo (§3) | [crates/infrastructure/src/cache/preview_manager.rs](../../crates/infrastructure/src/cache/preview_manager.rs) |
+| Carregamento assíncrono que vira eventos (§4.4) | [crates/ui/src/async_loader.rs](../../crates/ui/src/async_loader.rs) |
+| View models sem `Serialize` (§4.1) | [crates/adapters/src/view_models.rs:85-109](../../crates/adapters/src/view_models.rs#L85-L109) |
+| Janela secundária a reescrever (§7.3) | [crates/ui/src/components/secondary_window.rs](../../crates/ui/src/components/secondary_window.rs) |
+| Os 99 E2E que viram lista de paridade (§8) | [crates/ui/tests/](../../crates/ui/tests/) |
+| Caminho fixo do catálogo (§2.1) | [crates/infrastructure/src/paths.rs](../../crates/infrastructure/src/paths.rs) |
 
 ---
 

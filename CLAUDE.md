@@ -114,9 +114,9 @@ VintageLightbox follows **Clean Architecture** with 4 layers as separate crates:
 ## UI Framework
 
 **GPUI 0.2 + gpui-component 0.5** — o egui saiu em 17/ago/2026, com a migração
-concluída (`docs/10-MIGRACAO-GPUI.md`). Quem procura o app antigo o encontra no
+concluída (`docs/historico/10-MIGRACAO-GPUI.md`). Quem procura o app antigo o encontra no
 histórico do git; o que ele fazia está listado, comportamento a comportamento,
-em `docs/PARIDADE-UI.md`.
+em `docs/historico/PARIDADE-UI.md`.
 
 - As telas ficam em `crates/ui-gpui/src/{biblioteca,revelacao,importacao,impressao}/`
 - As duas telas grandes vivem num **dock**: os painéis se arrastam e se

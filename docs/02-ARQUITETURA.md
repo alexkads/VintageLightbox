@@ -1,10 +1,23 @@
 # Arquitetura do Sistema - VintageLightbox
 
+> ⚠️ **Este documento foi escrito antes do código, e a camada de interface mudou duas vezes desde
+> então.** Onde ele diz **Slint**, leia **GPUI** — o Slint foi avaliado e nunca usado; a UI foi
+> escrita em egui e migrada para GPUI em ago/2026. Os trechos com `.slint`, `bridge.rs` e
+> `main_window.slint` descrevem arquivos que **não existem**.
+>
+> 🔑 **O que continua exato é o miolo**: a regra de dependência, as quatro camadas, o Repository
+> Pattern e a injeção por construtor. Isso o código cumpre — e é o que tornou a troca de framework
+> barata: `domain`, `use-cases` e `adapters` atravessaram a migração inteira com **zero linha
+> alterada**.
+>
+> A arquitetura da interface, medida do código, está em
+> [`06-UI-ARCHITECTURE.md`](06-UI-ARCHITECTURE.md).
+
 ## 1. Visão Geral da Arquitetura
 
 VintageLightbox segue os princípios da **Clean Architecture** (Arquitetura Limpa) proposta por Robert C. Martin, combinada com práticas de **Test-Driven Development (TDD)**. Esta abordagem garante:
 
-- ✅ **Independência de Frameworks**: A lógica de negócio não depende de Slint ou outras bibliotecas externas
+- ✅ **Independência de Frameworks**: A lógica de negócio não depende de GPUI ou outras bibliotecas externas
 - ✅ **Testabilidade**: Todas as camadas são facilmente testáveis de forma isolada
 - ✅ **Independência de UI**: A interface pode ser substituída sem afetar regras de negócio
 - ✅ **Independência de Banco de Dados**: SQLite pode ser trocado por outra solução
@@ -15,7 +28,7 @@ VintageLightbox segue os princípios da **Clean Architecture** (Arquitetura Limp
 ```
 ┌───────────────────────────────────────────────────────────────┐
 │              Frameworks & Drivers (Camada 4)                  │
-│   - Slint UI, SQLite, LibRaw, Sistema de Arquivos            │
+│   - GPUI, SQLite, LibRaw, wgpu, Sistema de Arquivos         │
 │   - Dependências externas e detalhes de implementação        │
 ├───────────────────────────────────────────────────────────────┤
 │           Interface Adapters (Camada 3)                       │
@@ -298,7 +311,7 @@ impl PhotoRepository for SqlitePhotoRepository {
 **Características**:
 - ✅ Pode ser trocada sem afetar regras de negócio
 - ✅ Contém todos os detalhes técnicos
-- ✅ Integração com bibliotecas externas (Slint, SQLite, LibRaw)
+- ✅ Integração com bibliotecas externas (GPUI, SQLite, LibRaw, wgpu)
 
 ## 3. Fluxo de Dados seguindo Clean Architecture
 

@@ -2,6 +2,17 @@
 
 Clone profissional do Adobe Lightroom desenvolvido em Rust com interface GPUI.
 
+## 🎯 Por que ele existe
+
+O fluxo do estúdio passa pelo Lightroom, e o Lightroom **não conversa com o
+`recordarfotos.com.br`** — onde o cliente baixa o ensaio que comprou e compra as fotos que ficaram
+para trás. Entre a revelação e a galeria há um vão que hoje se atravessa na mão: exportar, separar o
+comprado do não comprado, subir, montar a galeria. Cada passo manual é um lugar onde a foto errada
+vai para a galeria errada.
+
+**Esta ferramenta existe para fechar esse vão.** O objetivo inteiro, com o teste de alinhamento e os
+critérios de "funcional", está em **[docs/00-OBJETIVO.md](docs/00-OBJETIVO.md)**.
+
 ## 📸 Sobre o Projeto
 
 VintageLightbox é uma aplicação multiplataforma de gerenciamento e edição de fotos RAW, projetada para fotógrafos profissionais que precisam de:
@@ -22,7 +33,7 @@ Este projeto segue **Clean Architecture** e **Test-Driven Development (TDD)**:
 
 - 🏛️ **4 Camadas**: Domain → Use Cases → Adapters → Infrastructure
 - 🧪 **TDD**: Ciclo Red-Green-Refactor em todo o código
-- 📊 **Domain**: 202 testes, incluindo property-based testing
+- 📊 **Domain**: 205 testes, incluindo property-based testing
 - ⚠️ **Adapters**: sem testes — é o vão de cobertura conhecido
 
 ## 🚀 Tecnologias
@@ -39,20 +50,20 @@ Este projeto segue **Clean Architecture** e **Test-Driven Development (TDD)**:
 **Fase Atual**: Fase 2 — Funcionalidades Essenciais (importação avançada, edição RAW completa,
 presets, flags, crop, impressão)
 
-> ✅ **Compila, suíte verde (522 testes), app sobe** — depois de dois consertos e da reescrita da
+> ✅ **Compila, suíte verde (676 testes), app sobe** — depois de dois consertos e da reescrita da
 > tela de importação, feitos em 15/ago/2026 e **ainda não commitados**. O quadro completo, incluindo
 > 4 migrations aplicadas em catálogos existentes que não estão no repositório, está em
 > **[docs/STATUS.md](docs/STATUS.md)**.
 
 - [x] Workspace com Clean Architecture (5 crates)
-- [x] **Domain** — 4 entidades, 13 value objects, **202 testes passando**
+- [x] **Domain** — 4 entidades, 13 value objects, **205 testes passando**
 - [x] **Use Cases** — 22 módulos (importação, organização, edição, presets, export, print)
 - [x] **Infrastructure** — SQLite (15 migrations), cache L1/L2/L3, RAW via LibRaw, EXIF, thumbnails
 - [x] **Adapters** — 6 controllers (⚠️ sem testes)
 - [x] **UI** — GPUI: Biblioteca, Revelação, Importação, Impressão, segunda tela, docking com arranjo gravado
 - [ ] Commitar os consertos e reativar o CI ← **próximo passo**
 
-**522 testes passando · 0 falhas · 3 ignorados**
+**676 testes passando · 0 falhas** · `fmt` e `clippy -D warnings` limpos
 
 **Rodando os testes**:
 ```bash
@@ -70,14 +81,19 @@ cargo test -p ui-gpui                   # a interface inteira
 
 ## 📚 Documentação
 
-A documentação completa do projeto está organizada na pasta `docs/`:
+A documentação completa está em `docs/` — **comece por
+[00-OBJETIVO.md](docs/00-OBJETIVO.md)** (o alvo) e
+**[PARIDADE-LIGHTROOM.md](docs/PARIDADE-LIGHTROOM.md)** (a fila de trabalho, medida do código):
 
+- **[00-OBJETIVO.md](docs/00-OBJETIVO.md)** - O alvo, o teste de alinhamento, os critérios de "funcional"
+- **[PARIDADE-LIGHTROOM.md](docs/PARIDADE-LIGHTROOM.md)** - O que funciona, o que promete e não faz, o que não existe
+- **[06-UI-ARCHITECTURE.md](docs/06-UI-ARCHITECTURE.md)** - A interface em GPUI, do código ✅ reescrito em 17/ago
 - **[01-REQUISITOS.md](docs/01-REQUISITOS.md)** - Requisitos funcionais e não-funcionais detalhados
 - **[02-ARQUITETURA.md](docs/02-ARQUITETURA.md)** - Arquitetura do sistema, módulos e padrões de design
 - **[03-FUNCIONALIDADES.md](docs/03-FUNCIONALIDADES.md)** - Especificação detalhada de cada funcionalidade
 - **[04-ROADMAP.md](docs/04-ROADMAP.md)** - Planejamento de desenvolvimento em fases
 - **[05-STACK-TECNOLOGICO.md](docs/05-STACK-TECNOLOGICO.md)** - Stack completo e dependências
-- **[07-E2E-TESTING.md](docs/07-E2E-TESTING.md)** - Guia de testes E2E ⚠️ descreve o `egui_kittest`, que saiu com o `crates/ui`
+- **[07-E2E-TESTING.md](docs/07-E2E-TESTING.md)** - Como este projeto testa (`gpui::TestAppContext`) ✅ reescrito em 17/ago
 
 ## ✨ Principais Funcionalidades
 
@@ -135,7 +151,7 @@ VintageLightbox-Rust/
 │   ├── infrastructure/      # SQLite, cache, RAW, EXIF, arquivos, dispositivos
 │   └── ui-gpui/             # GPUI: telas, painéis do dock, motor de revelação (wgpu)
 ├── crates/infrastructure/migrations/   # 15 migrations SQLite
-├── docs/                    # Documentação (comece por STATUS.md)
+├── docs/                    # Documentação (comece por 00-OBJETIVO.md)
 └── dev.sh                   # Helper de TDD
 ```
 
@@ -175,17 +191,17 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
 ### 3. Leia a Documentação
-Comece pelos documentos na pasta `docs/` para entender o projeto:
-- [Requisitos](docs/01-REQUISITOS.md)
-- [Arquitetura](docs/02-ARQUITETURA.md)
-- [Roadmap](docs/04-ROADMAP.md)
+Comece por:
+- [O objetivo](docs/00-OBJETIVO.md) — por que a ferramenta existe, e o que "funcional" quer dizer
+- [A fila de trabalho](docs/PARIDADE-LIGHTROOM.md) — medida do código
+- [A interface em GPUI](docs/06-UI-ARCHITECTURE.md) — e as armadilhas que já custaram commit
 
 ### 4. Setup do Desenvolvimento (Em breve)
 ```bash
 # Será disponibilizado na Fase 0
 cargo build
 cargo test
-cargo run
+cargo run -p ui-gpui
 ```
 
 ## 🤝 Contribuindo
@@ -222,7 +238,7 @@ Agradecimentos às comunidades de Rust, GPUI e processamento de imagens open sou
 
 ---
 
-**Status**: 🟢 Fase 2 em andamento — compila e roda (veja [docs/STATUS.md](docs/STATUS.md))
+**Status**: 🟢 A migração para GPUI terminou; o alvo agora é a paridade com o Lightroom — veja [docs/PARIDADE-LIGHTROOM.md](docs/PARIDADE-LIGHTROOM.md)
 
 **Versão**: 0.1.0
 

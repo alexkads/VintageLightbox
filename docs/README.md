@@ -5,19 +5,23 @@ Bem-vindo à documentação do VintageLightbox! Este índice organiza todos os d
 ## 📖 Visão Geral
 
 VintageLightbox é **um clone profissional do Adobe Lightroom em Rust**, com interface **GPUI 0.2 +
-gpui-component 0.5**, para fotógrafos que precisam importar, organizar, triar, revelar e entregar
-fotos.
+gpui-component 0.5**, para importar, organizar, triar, revelar e **entregar** fotos.
 
-🔑 **Esta frase é a original do projeto, e voltou a valer em 17/ago/2026.** Entre fev e ago de 2026
-o objetivo foi outro — trocar a interface de egui por GPUI **com paridade**, sem regressão. Aquele
-objetivo foi **alcançado** e virou [história](10-MIGRACAO-GPUI.md); o alvo voltou a ser o Lightroom,
-e não o app anterior. A diferença prática é grande: a regra *"nenhuma feature nova"* caiu, e com ela
-o motivo de 19 sliders da Revelação existirem sem fazer nada.
+🔑 **E ele existe por um motivo específico**: o fluxo do estúdio hoje passa pelo Lightroom, e o
+Lightroom não conversa com o `recordarfotos.com.br` — onde o cliente baixa o ensaio que comprou e
+compra as fotos que ficaram para trás. Entre a revelação e a galeria há um vão atravessado na mão. A
+ferramenta existe para fechá-lo. Está inteiro em [`00-OBJETIVO.md`](00-OBJETIVO.md).
 
-⚠️ **Vários documentos abaixo descrevem a UI em Slint ou em egui** — as duas já saíram.
-`06-UI-ARCHITECTURE.md` é o caso mais grave: descreve arquivos `.slint` que não existem.
+⚠️ **Entre fev e ago/2026 o objetivo foi outro** — migrar a interface de egui para GPUI **com
+paridade**. Ele foi alcançado e virou [história](historico/10-MIGRACAO-GPUI.md). A diferença prática
+é grande: a regra *"nenhuma feature nova"* caiu, e com ela o motivo de 19 sliders da Revelação
+existirem sem fazer nada.
 
-**Estado (17/ago/2026)**: ✅ compila, app sobe | **674 testes passando, 0 falhas**
+⚠️ **Alguns documentos abaixo ainda descrevem a UI em Slint** — tecnologia avaliada e **nunca usada**.
+Cada um traz no topo o que está errado nele. Os que foram reescritos do código estão marcados.
+
+**Estado (17/ago/2026)**: ✅ compila, app sobe | **676 testes passando, 0 falhas** | `clippy -D
+warnings` limpo
 
 ## 📚 Documentos Principais
 
@@ -41,81 +45,48 @@ razão de cada uma.
 **Leia se você quer**: entender o estado técnico antes de mexer numa camada.
 
 ### 1. [Requisitos do Sistema](01-REQUISITOS.md)
-**Conteúdo**: Requisitos funcionais e não-funcionais completos
-- 62 requisitos funcionais detalhados
-- Requisitos de performance, usabilidade e compatibilidade
-- Critérios de aceitação para MVP
-- Restrições técnicas
-
-**Leia se você quer**: Entender o que o sistema deve fazer e suas limitações.
+Os 62 requisitos funcionais e não-funcionais. ⚠️ **É o alvo, não o estado** — para saber o que
+existe, [`PARIDADE-LIGHTROOM.md`](PARIDADE-LIGHTROOM.md).
 
 ### 2. [Arquitetura do Sistema](02-ARQUITETURA.md)
-**Conteúdo**: Design técnico e estrutura do código
-- Arquitetura em camadas
-- Estrutura de módulos (10+ módulos)
-- Padrões de design aplicados
-- Fluxo de dados
-- Concorrência e gerenciamento de memória
-- Diagramas e exemplos de código
+Clean Architecture, as quatro camadas, a regra de dependência. ✅ **O miolo confere com o código** —
+`domain`, `use-cases` e `adapters` atravessaram a migração de framework com zero linha alterada.
+⚠️ Onde diz "Slint", leia GPUI.
 
-**Leia se você quer**: Entender como o sistema é construído internamente.
+### 3. [Funcionalidades](03-FUNCIONALIDADES.md)
+Catálogo detalhado do que o produto pretende fazer. ⚠️ Escrito antes do código; não distingue pronto
+de pretendido.
 
-### 3. [Especificação de Funcionalidades](03-FUNCIONALIDADES.md)
-**Conteúdo**: Detalhamento de cada funcionalidade
-- 9 módulos funcionais explicados em detalhe
-- Interfaces de usuário mockadas
-- Fluxos de trabalho típicos
-- Atalhos de teclado
-- Exemplos de uso
-
-**Leia se você quer**: Entender como cada feature funciona do ponto de vista do usuário.
-
-### 4. [Roadmap de Desenvolvimento](04-ROADMAP.md)
-**Conteúdo**: Planejamento de desenvolvimento em 7 fases
-- Timeline: 12-18 meses
-- Fase 0: Setup e POC (2-3 semanas)
-- Fase 1: MVP (2-3 meses)
-- Fases 2-7: Features incrementais até v1.0
-- Métricas de sucesso
-- Gerenciamento de riscos
-
-**Leia se você quer**: Entender o cronograma e prioridades de desenvolvimento.
+### 4. [Roadmap](04-ROADMAP.md) 🚫 encerrado
+O plano de construção e de migração, que terminou em 17/ago/2026. **A fila de agora é a
+[`PARIDADE-LIGHTROOM.md`](PARIDADE-LIGHTROOM.md).**
 
 ### 5. [Stack Tecnológico](05-STACK-TECNOLOGICO.md)
-**Conteúdo**: Tecnologias, bibliotecas e ferramentas
-- Rust como linguagem base
-- Slint para UI
-- LibRaw/rawler para processamento RAW
-- SQLite para banco de dados
-- 20+ crates detalhados
-- Alternativas consideradas
-- Requisitos de sistema
+⚠️ **Defende Slint, que nunca foi usado.** O cabeçalho traz o stack de verdade, medido do
+`Cargo.toml`: GPUI, wgpu, sqlx, rsraw, image, tokio.
 
-**Leia se você quer**: Entender as escolhas técnicas e dependências.
+### 6. [Arquitetura da Interface](06-UI-ARCHITECTURE.md) ✅ reescrito 17/ago
+**GPUI, do código.** O mapa dos módulos, o modelo de entidade/`Render`, as portas para o mundo
+assíncrono, a ponte de imagem em BGRA, a virtualização, o dock e o tema — com as armadilhas que
+custaram commit.
 
-### 9. [Migração da UI para Tauri](09-MIGRACAO-TAURI.md) ❌ descartado
-**Conteúdo**: Avaliação do Tauri 2 + frontend web, **recusada em 15/ago/2026**
+### 7. [Como este projeto testa](07-E2E-TESTING.md) ✅ reescrito 17/ago
+`gpui::TestAppContext` no lugar do `egui_kittest`. E a regra que vale mais que todas: **todo teste é
+conferido quebrando de propósito**.
 
-**Leia se você quer**: Saber **por que Tauri não** — IPC entre o slider e o pixel, cor entregue ao
-webview, npm no build. O inventário medido (§2) continua válido.
+### 8. [Arquitetura de Cache](08-CACHE-ARCHITECTURE.md)
+Miniaturas e previews em SQLite. ✅ Confere com o código.
 
-### 10. [Migração da UI para GPUI](10-MIGRACAO-GPUI.md) 🆕 ✅ decidido
-**Conteúdo**: Trocar `crates/ui` (egui) por GPUI + `gpui-component` — o plano em vigor
-- **Spike já compilado e rodando**: `gpui 0.2.2`, ~600 linhas, compilou de primeira
-- O que sobrevive, medido: as 4 camadas internas **e** ~4.300 LOC de `ui/`, com 17 pontos de solda
-- Dois bloqueios reais: `image` 0.24 → 0.25 e a Metal Toolchain do Xcode
-- 6 fases, 11–15 semanas, com o app egui vivo até a última
+## 🗄️ História — [`historico/`](historico/)
 
-**Leia se você quer**: Executar a migração. **Comece pela fase 0.**
+Documentos que descrevem decisões tomadas, e que não orientam o próximo commit. **Continuam valendo
+como explicação de por que o código é como é.**
 
-### 11. [Paridade da interface](PARIDADE-UI.md) 🆕
-**Conteúdo**: O que os 146 testes do `crates/ui` prendem, comportamento a comportamento, e onde cada
-um vive no app novo
-- Existe por causa da regra 4 da migração: **nenhum teste de lá é apagado antes de virar linha aqui**
-- Os 99 E2E não são 99 comportamentos — 26 afirmam "este controle existe" e 31 medem o motor
-- Termina com **a lista que a fase 5 tem de zerar**: e ela zerou
-
-**Leia se você quer**: Saber o que ainda falta antes de `crates/ui` sair do workspace.
+| | |
+|---|---|
+| [10-MIGRACAO-GPUI.md](historico/10-MIGRACAO-GPUI.md) | A migração de egui para GPUI, fase a fase. **O melhor registro das armadilhas do framework** — BGRA, o `uniform` que casa por posição, o foco que não se concede, a fluidez que só se mede em `--release`. ⚠️ As regras da §7 estão **revogadas** |
+| [09-MIGRACAO-TAURI.md](historico/09-MIGRACAO-TAURI.md) | A alternativa avaliada e **descartada** em ago/2026 |
+| [PARIDADE-UI.md](historico/PARIDADE-UI.md) | Os 146 testes do app de egui virados em lista de comportamentos, antes de ele ser apagado |
 
 ## 🗺️ Guia de Leitura
 

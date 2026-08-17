@@ -14,30 +14,35 @@
 
 ---
 
-## 🚨 O buraco maior: **o app não exporta**
+## Exportação — ✅ **existe desde 17/ago/2026**, e é a ponte para o site
 
-Não é "a exportação tem poucas opções". É que **não há caminho da tela até ela**:
+Até este dia **não havia caminho da tela até ela**: `ExportPhotoUseCase`, `ExportController` e
+`ImageExporterImpl` estavam escritos e testados, e nunca eram construídos no `main.rs`. O app
+importava, organizava, triava, revelava, imprimia a prévia e mostrava ao cliente — e não produzia um
+arquivo.
 
-```bash
-grep -rni "export" crates/ui-gpui/src/   # seis ocorrências, todas em comentário
-grep -rn "ExportPhotoUseCase" crates/    # o use case, o controller, e um teste — nenhuma tela
-```
+⚠️ **E o app de egui também não tinha.** `docs/historico/PARIDADE-UI.md` não menciona exportação em
+linha nenhuma: os 146 testes daquele app não cobriam nenhum caminho de saída. Isto **nunca**
+funcionou, em nenhuma versão — o que explica por que a migração não acusou. Paridade com quem não
+exporta é não exportar.
 
-O `ExportPhotoUseCase`, o `ExportController` e o `ImageExporterImpl` existem, estão testados e
-**nunca são construídos no `main.rs`**. O app importa, organiza, tria, revela, imprime a prévia e
-mostra ao cliente — e não produz um arquivo.
+**O que existe hoje**: botão na barra, modal com pasta de destino, progresso e resumo; exporta a
+seleção — ou a grade visível, quando nada está marcado; JPEG qualidade 90 **com a revelação e o
+enquadramento aplicados**, pelo mesmo `.wgsl` que desenha a tela.
 
-⚠️ **E o app de egui também não tinha.** `docs/PARIDADE-UI.md` não menciona exportação em linha
-nenhuma: os 146 testes daquele app não cobriam nenhum caminho de saída. Ou seja, isto **nunca**
-funcionou, em nenhuma versão — o que explica por que a migração não acusou.
+🔑 **Isto é infraestrutura do objetivo, e não um item de lista** ([`00-OBJETIVO.md`](00-OBJETIVO.md)):
+é a exportação que alimenta a galeria do cliente no `recordarfotos.com.br`.
 
-🔑 **O motor está pronto e certo desde hoje.** A exportação atravessa o mesmo `.wgsl` da tela, com os
-46 ajustes e o enquadramento, com três testes que gravam arquivo e leem de volta
-(`crates/infrastructure/tests/exportacao.rs`). O que falta é botão, diálogo e fila — não matemática.
+| O que falta, e o Lightroom tem | Por que importa aqui |
+|---|---|
+| 🚨 **Marca d'água** | é o que permite mostrar a foto **deixada para trás** sem entregá-la — o upsell inteiro depende disso |
+| 🚨 **Redimensionamento** | a galeria não recebe arquivo de 40 MP; e o tamanho da prévia não é o da foto comprada |
+| ⬜ Formato (TIFF/PNG/DNG), qualidade, espaço de cor | |
+| ⬜ Nitidez de saída, renomeação por padrão | |
+| ⬜ **Predefinições de exportação** | "prévia com marca d'água" e "entrega final" são dois botões, não dois preenchimentos de formulário |
 
-**O que um Lightroom pede aqui**: formato (JPEG/TIFF/PNG/DNG), qualidade, espaço de cor,
-redimensionamento, nitidez de saída, renomeação, destino, marca d'água, e **exportar a seleção**, não
-uma foto.
+⚠️ **Os cinco primeiros mudam a assinatura de `ImageExporter::export`**, que hoje grava JPEG 90 fixo.
+Entram juntos, num commit que mexe no `domain`.
 
 ---
 
@@ -123,17 +128,23 @@ banco e só apareciam ao reabrir o app.
 
 ## Fila de trabalho, na ordem
 
-A ordem sai do teste de alinhamento (critério 4: *o mais barato que destrava mais coisa*).
+A ordem sai do [objetivo](00-OBJETIVO.md): o que aproxima **fechar o vão entre a revelação e a
+galeria do cliente**, e o que é defeito visível na tela.
 
-| # | O quê | Por que agora |
+| # | O quê | Por que nesta posição |
 |--:|---|---|
-| 1 | **Exportação: da tela ao arquivo** | sem isto o app não entrega nada, e o motor já está pronto e testado |
-| 2 | **Os 19 sliders inertes** | é a promessa vazia mais visível — 45% do painel de Revelação |
-| 3 | **A curva de tons ganha controles** | o shader já aplica; falta quem escreva |
-| 4 | **Copiar/colar revelação entre fotos** | o atalho que transforma 800 fotos em uma sessão viável |
-| 5 | **Coleções na tela** | o backend está pronto há meses |
-| 6 | **DNG com perdas** | compilar a LibRaw com libjpeg, ou cair na prévia embutida |
-| 7 | **Imprimir de verdade, ou tirar o botão** | um dos dois — o que não pode é continuar anunciando |
+| 1 | ~~**Exportação: da tela ao arquivo**~~ | ✅ **feito em 17/ago** |
+| 2 | **Os 19 sliders inertes** (matiz 8, luminância 8, lente 3) | a promessa vazia mais visível — 45% do painel de Revelação. Critério 2 do objetivo: defeito antes de funcionalidade |
+| 3 | **Marca d'água e redimensionamento na exportação** | é o que a foto "deixada para trás" precisa para ir ao site sem ser entregue. **Sem isto o upsell não existe** |
+| 4 | **Coleções na tela** | "o ensaio do cliente" **é** uma coleção, e "comprada" × "deixada para trás" é a divisão dentro dela. O backend está pronto e testado há meses |
+| 5 | **Copiar/colar revelação entre fotos** | o atalho que transforma 800 fotos numa sessão viável |
+| 6 | **A curva de tons ganha controles** | o shader já aplica os 4 `tone_curve_*`; falta quem escreva |
+| 7 | **DNG com perdas** | compilar a LibRaw com libjpeg, ou cair na prévia embutida |
+| 8 | **Imprimir de verdade, ou tirar o botão** | um dos dois — o que não pode é continuar anunciando |
+
+🔑 **Os itens 3 e 4 são o que a integração com o `recordarfotos.com.br` vai consumir.** Eles não são
+"funcionalidades do Lightroom que faltam": são a forma que a decisão do fotógrafo (esta foi comprada,
+esta não) precisa ter para virar galeria sem passo manual no meio.
 
 ⚠️ **Os presets de sistema estão fora de escala e isso atravessa a fila.** "B&W" pede
 `saturation: -100` numa escala em que cinza é `-1.0`: o fator vira `-99` e a foto sai com cor
