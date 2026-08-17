@@ -90,6 +90,15 @@ webview, npm no build. O inventário medido (§2) continua válido.
 
 **Leia se você quer**: Executar a migração. **Comece pela fase 0.**
 
+### 11. [Paridade da interface](PARIDADE-UI.md) 🆕
+**Conteúdo**: O que os 146 testes do `crates/ui` prendem, comportamento a comportamento, e onde cada
+um vive no app novo
+- Existe por causa da regra 4 da migração: **nenhum teste de lá é apagado antes de virar linha aqui**
+- Os 99 E2E não são 99 comportamentos — 26 afirmam "este controle existe" e 31 medem o motor
+- Termina com **a lista que a fase 5 tem de zerar**: hoje são seis linhas
+
+**Leia se você quer**: Saber o que ainda falta antes de `crates/ui` sair do workspace.
+
 ## 🗺️ Guia de Leitura
 
 ### Para Usuários e Fotógrafos
