@@ -7,6 +7,7 @@
 
 pub mod filtros;
 pub mod grade;
+pub mod marcacao;
 pub mod miniaturas;
 pub mod pastas;
 pub mod tela;

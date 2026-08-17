@@ -13,6 +13,7 @@ use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::{ActiveTheme, Disableable, Selectable, Sizable};
 use infrastructure::cache::preview_manager::PreviewManager;
 
+use crate::biblioteca::marcacao::Marcador;
 use crate::biblioteca::tela::Biblioteca;
 use crate::importacao::explorador::{Explorador, GeradorDeMiniaturas, Importador, SeletorDePasta};
 use crate::importacao::tela::Importacao;
@@ -29,6 +30,7 @@ use crate::revelacao::tela::Revelacao;
 /// execução, no primeiro clique.
 pub struct Portas {
     pub gravador: Arc<dyn Gravador>,
+    pub marcador: Arc<dyn Marcador>,
     pub gerador: Arc<dyn GeradorDeMiniaturas>,
     pub guarda_de_presets: Arc<dyn GuardaDePresets>,
     pub explorador: Arc<dyn Explorador>,
@@ -43,7 +45,26 @@ actions!(
         Desfazer,
         Refazer,
         AlternarCorte,
-        AlternarOriginal
+        AlternarOriginal,
+        // As treze teclas de triagem da Biblioteca, mais as duas setas. São
+        // ações sem dado porque o `actions!` só declara struct de unidade — o
+        // valor de cada uma está na tabela de ligações, logo abaixo, que é onde
+        // ele fica legível ao lado da tecla.
+        Adiante,
+        Atras,
+        SemNota,
+        UmaEstrela,
+        DuasEstrelas,
+        TresEstrelas,
+        QuatroEstrelas,
+        CincoEstrelas,
+        CorVermelha,
+        CorAmarela,
+        CorVerde,
+        CorAzul,
+        Escolher,
+        Rejeitar,
+        Desmarcar
     ]
 );
 
@@ -90,8 +111,39 @@ pub fn init(cx: &mut gpui::App) {
         gpui::KeyBinding::new("r", AlternarCorte, Some(SEM_CAMPO_DE_TEXTO)),
         // `\` mostra o antes/depois, como no legado.
         gpui::KeyBinding::new("\\", AlternarOriginal, Some(SEM_CAMPO_DE_TEXTO)),
+        // As teclas de triagem da Biblioteca, na tabela do `keyboard.rs` do
+        // legado: setas para andar, `0`–`5` nota, `6`–`9` cor, `P`/`X`/`U`
+        // sinalizador. **Todas** com `!Input`, porque todas são tecla solta —
+        // sem isso, buscar `DSC_0512` daria nota 5, 1 e 2 em fotos diferentes
+        // enquanto o número não aparecia no campo.
+        gpui::KeyBinding::new("right", Adiante, Some(SEM_CAMPO_DE_TEXTO)),
+        gpui::KeyBinding::new("left", Atras, Some(SEM_CAMPO_DE_TEXTO)),
+        gpui::KeyBinding::new("0", SemNota, Some(SEM_CAMPO_DE_TEXTO)),
+        gpui::KeyBinding::new("1", UmaEstrela, Some(SEM_CAMPO_DE_TEXTO)),
+        gpui::KeyBinding::new("2", DuasEstrelas, Some(SEM_CAMPO_DE_TEXTO)),
+        gpui::KeyBinding::new("3", TresEstrelas, Some(SEM_CAMPO_DE_TEXTO)),
+        gpui::KeyBinding::new("4", QuatroEstrelas, Some(SEM_CAMPO_DE_TEXTO)),
+        gpui::KeyBinding::new("5", CincoEstrelas, Some(SEM_CAMPO_DE_TEXTO)),
+        gpui::KeyBinding::new("6", CorVermelha, Some(SEM_CAMPO_DE_TEXTO)),
+        gpui::KeyBinding::new("7", CorAmarela, Some(SEM_CAMPO_DE_TEXTO)),
+        gpui::KeyBinding::new("8", CorVerde, Some(SEM_CAMPO_DE_TEXTO)),
+        gpui::KeyBinding::new("9", CorAzul, Some(SEM_CAMPO_DE_TEXTO)),
+        gpui::KeyBinding::new("p", Escolher, Some(SEM_CAMPO_DE_TEXTO)),
+        gpui::KeyBinding::new("x", Rejeitar, Some(SEM_CAMPO_DE_TEXTO)),
+        gpui::KeyBinding::new("u", Desmarcar, Some(SEM_CAMPO_DE_TEXTO)),
     ]);
 }
+
+/// Os nomes das quatro cores, como o banco os guarda.
+///
+/// ⚠️ **Roxo não tem tecla, e no legado também não** — o `color_labels.rs` de lá
+/// oferece cinco cores no menu e o `keyboard.rs` liga só quatro. Acrescentar a
+/// quinta seria feature nova (§7.1), ainda que a tecla `0` esteja "livre": ela
+/// é a nota zero.
+const VERMELHO: &str = "Red";
+const AMARELO: &str = "Yellow";
+const VERDE: &str = "Green";
+const AZUL: &str = "Blue";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tela {
@@ -132,7 +184,8 @@ impl Aplicativo {
         // mesmo arquivo seriam dois caches do mesmo lugar.
         let previews_para_importar = previews.clone();
         let previews_para_imprimir = previews.clone();
-        let biblioteca = cx.new(|cx| Biblioteca::nova(fotos, previews.clone(), window, cx));
+        let biblioteca =
+            cx.new(|cx| Biblioteca::nova(fotos, previews.clone(), portas.marcador, window, cx));
         let revelacao = cx.new(|cx| {
             Revelacao::nova(
                 previews,
@@ -327,6 +380,30 @@ impl Aplicativo {
         }
     }
 
+    /// As quinze teclas de triagem só valem na Biblioteca.
+    ///
+    /// 🔑 **Elas moram na raiz, e não na Biblioteca**, pela mesma razão que o
+    /// `Cmd+Z` da Revelação: quem tem o `FocusHandle` é a raiz, e ação só é
+    /// alcançada em quem está no **caminho do foco**. Uma ligação declarada no
+    /// contexto da Biblioteca nasceria morta — o caminho vai da raiz até o nó
+    /// focado, e a Biblioteca é filha dele, não ancestral.
+    ///
+    /// ⚠️ **Na Revelação elas não fazem nada, e é decisão.** O legado tria de lá
+    /// também (`get_target_photos` aceita `Develop`), mas a Revelação nova não
+    /// tem filmstrip nem seleção própria de acervo — dar nota lá exigiria
+    /// escolher em qual foto, e a resposta certa depende de uma tela que ainda
+    /// não existe. Fica registrado como pendente da fase 4.
+    fn na_biblioteca(
+        &mut self,
+        cx: &mut Context<Self>,
+        acao: impl FnOnce(&mut Biblioteca, &mut Context<Biblioteca>),
+    ) {
+        if self.tela != Tela::Biblioteca {
+            return;
+        }
+        self.biblioteca.update(cx, |tela, cx| acao(tela, cx));
+    }
+
     fn ao_voltar(
         &mut self,
         _acao: &VoltarParaBiblioteca,
@@ -486,6 +563,55 @@ impl Render for Aplicativo {
             .on_action(cx.listener(Self::ao_refazer))
             .on_action(cx.listener(Self::ao_alternar_corte))
             .on_action(cx.listener(Self::ao_alternar_original))
+            // A tabela de triagem. Quinze linhas de uma linha: a regra de cada
+            // uma está em `biblioteca::marcacao`, e aqui só se diz qual ação
+            // chama qual método — como a tabela de `controles.rs` faz com os 42
+            // sliders da Revelação.
+            .on_action(cx.listener(|este, _: &Adiante, _w, cx| {
+                este.na_biblioteca(cx, |tela, cx| tela.andar(1, cx))
+            }))
+            .on_action(cx.listener(|este, _: &Atras, _w, cx| {
+                este.na_biblioteca(cx, |tela, cx| tela.andar(-1, cx))
+            }))
+            .on_action(cx.listener(|este, _: &SemNota, _w, cx| {
+                este.na_biblioteca(cx, |tela, cx| tela.dar_nota(0, cx))
+            }))
+            .on_action(cx.listener(|este, _: &UmaEstrela, _w, cx| {
+                este.na_biblioteca(cx, |tela, cx| tela.dar_nota(1, cx))
+            }))
+            .on_action(cx.listener(|este, _: &DuasEstrelas, _w, cx| {
+                este.na_biblioteca(cx, |tela, cx| tela.dar_nota(2, cx))
+            }))
+            .on_action(cx.listener(|este, _: &TresEstrelas, _w, cx| {
+                este.na_biblioteca(cx, |tela, cx| tela.dar_nota(3, cx))
+            }))
+            .on_action(cx.listener(|este, _: &QuatroEstrelas, _w, cx| {
+                este.na_biblioteca(cx, |tela, cx| tela.dar_nota(4, cx))
+            }))
+            .on_action(cx.listener(|este, _: &CincoEstrelas, _w, cx| {
+                este.na_biblioteca(cx, |tela, cx| tela.dar_nota(5, cx))
+            }))
+            .on_action(cx.listener(|este, _: &CorVermelha, _w, cx| {
+                este.na_biblioteca(cx, |tela, cx| tela.dar_cor(VERMELHO, cx))
+            }))
+            .on_action(cx.listener(|este, _: &CorAmarela, _w, cx| {
+                este.na_biblioteca(cx, |tela, cx| tela.dar_cor(AMARELO, cx))
+            }))
+            .on_action(cx.listener(|este, _: &CorVerde, _w, cx| {
+                este.na_biblioteca(cx, |tela, cx| tela.dar_cor(VERDE, cx))
+            }))
+            .on_action(cx.listener(|este, _: &CorAzul, _w, cx| {
+                este.na_biblioteca(cx, |tela, cx| tela.dar_cor(AZUL, cx))
+            }))
+            .on_action(cx.listener(|este, _: &Escolher, _w, cx| {
+                este.na_biblioteca(cx, |tela, cx| tela.sinalizar(1, cx))
+            }))
+            .on_action(cx.listener(|este, _: &Rejeitar, _w, cx| {
+                este.na_biblioteca(cx, |tela, cx| tela.sinalizar(-1, cx))
+            }))
+            .on_action(cx.listener(|este, _: &Desmarcar, _w, cx| {
+                este.na_biblioteca(cx, |tela, cx| tela.sinalizar(0, cx))
+            }))
             .flex()
             .flex_col()
             .size_full()
@@ -516,6 +642,8 @@ mod testes {
     use image::{DynamicImage, Rgba, RgbaImage};
     use tempfile::TempDir;
 
+    use crate::biblioteca::marcacao::mentira::MarcadorDeMentira;
+    use crate::biblioteca::marcacao::Marca;
     use crate::importacao::explorador::mentira::{
         ExploradorDeMentira, GeradorDeMentira, ImportadorDeMentira, SeletorDeMentira,
     };
@@ -526,6 +654,7 @@ mod testes {
     fn portas() -> Portas {
         Portas {
             gravador: Arc::new(GravadorDeMentira::default()),
+            marcador: Arc::new(MarcadorDeMentira::default()),
             gerador: Arc::new(GeradorDeMentira::default()),
             guarda_de_presets: Arc::new(GuardaDeMentira::default()),
             explorador: Arc::new(ExploradorDeMentira::default()),
@@ -902,6 +1031,234 @@ mod testes {
                 );
             })
             .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 As teclas de triagem chegam à Biblioteca — e gravam.
+    ///
+    /// Quinze ligações novas, e ligação que não casa **não falha**: a tecla
+    /// simplesmente não faz nada, e a suspeita cai na funcionalidade. Este teste
+    /// aperta as teclas de verdade e confere os dois lados: o que a grade passou
+    /// a mostrar, e o que foi mandado ao banco.
+    #[gpui::test]
+    fn as_teclas_de_triagem_marcam_a_foto_selecionada(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+        cx.update(init);
+
+        let marcador = Arc::new(MarcadorDeMentira::default());
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            let marcador = marcador.clone();
+            |window, cx| {
+                Aplicativo::novo(
+                    acervo(),
+                    previews,
+                    Vec::new(),
+                    Portas {
+                        marcador,
+                        ..portas()
+                    },
+                    window,
+                    cx,
+                )
+            }
+        });
+
+        janela
+            .update(cx, |app, _window, cx| {
+                app.biblioteca
+                    .update(cx, |tela, cx| tela.selecionar(Some(0), cx));
+            })
+            .expect("a janela deve estar aberta");
+
+        let mut visual = gpui::VisualTestContext::from_window(janela.into(), cx);
+        // Nota, cor, sinalizador — uma de cada família.
+        visual.simulate_keystrokes("3 7 p");
+
+        let marcado = marcador.marcado();
+        assert_eq!(
+            marcado,
+            vec![
+                ("id-DSC_001.NEF".to_string(), Marca::Nota(3)),
+                (
+                    "id-DSC_001.NEF".to_string(),
+                    Marca::Cor(Some("Yellow".to_string()))
+                ),
+                ("id-DSC_001.NEF".to_string(), Marca::Sinalizador(1)),
+            ]
+        );
+
+        janela
+            .update(cx, |app, _window, cx| {
+                let foto = app
+                    .biblioteca
+                    .read(cx)
+                    .foto_selecionada()
+                    .expect("a foto selecionada");
+                // E a tela mostra o resultado **antes** do banco responder: numa
+                // triagem se aperta tecla mais rápido do que um `UPDATE` volta.
+                assert_eq!(foto.rating, 3);
+                assert_eq!(foto.color_label.as_deref(), Some("Yellow"));
+                assert_eq!(foto.flag, Some(1));
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 A mesma cor duas vezes tira a cor — pela tecla, não pela função.
+    ///
+    /// A regra de alternância tem teste próprio em `marcacao.rs`; o que se
+    /// confere aqui é que a tela **lê o valor atual** antes de decidir. Lendo o
+    /// valor errado (o da foto errada, ou o de antes da primeira tecla), a
+    /// segunda tecla marcaria de novo em vez de desmarcar.
+    #[gpui::test]
+    fn a_mesma_cor_duas_vezes_desmarca_pela_tecla(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+        cx.update(init);
+
+        let marcador = Arc::new(MarcadorDeMentira::default());
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            let marcador = marcador.clone();
+            |window, cx| {
+                Aplicativo::novo(
+                    acervo(),
+                    previews,
+                    Vec::new(),
+                    Portas {
+                        marcador,
+                        ..portas()
+                    },
+                    window,
+                    cx,
+                )
+            }
+        });
+
+        janela
+            .update(cx, |app, _window, cx| {
+                app.biblioteca
+                    .update(cx, |tela, cx| tela.selecionar(Some(0), cx));
+            })
+            .expect("a janela deve estar aberta");
+
+        let mut visual = gpui::VisualTestContext::from_window(janela.into(), cx);
+        visual.simulate_keystrokes("8 8");
+
+        let marcado = marcador.marcado();
+        assert_eq!(marcado.len(), 2);
+        assert_eq!(marcado[0].1, Marca::Cor(Some("Green".to_string())));
+        assert_eq!(marcado[1].1, Marca::Cor(None), "a segunda tira a cor");
+    }
+
+    /// 🚨 As setas andam pela grade — e a primeira seta escolhe sem seleção.
+    ///
+    /// ⚠️ **Não dão a volta**, como no legado: chegar ao fim e continuar
+    /// apertando fica no fim. Numa triagem longa, voltar ao começo sem aviso
+    /// faria retrabalhar as primeiras fotos sem perceber.
+    #[gpui::test]
+    fn as_setas_andam_pela_grade_sem_dar_a_volta(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+        cx.update(init);
+
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            |window, cx| Aplicativo::novo(acervo(), previews, Vec::new(), portas(), window, cx)
+        });
+
+        let nome = |cx: &mut TestAppContext| {
+            janela
+                .update(cx, |app, _window, cx| {
+                    app.biblioteca.read(cx).foto_selecionada().map(|f| f.name)
+                })
+                .expect("a janela deve estar aberta")
+        };
+
+        let mut visual = gpui::VisualTestContext::from_window(janela.into(), cx);
+        visual.simulate_keystrokes("right");
+        assert_eq!(
+            nome(cx).as_deref(),
+            Some("DSC_001.NEF"),
+            "sem seleção, a primeira seta escolhe a primeira foto"
+        );
+
+        let mut visual = gpui::VisualTestContext::from_window(janela.into(), cx);
+        visual.simulate_keystrokes("right right right");
+        assert_eq!(
+            nome(cx).as_deref(),
+            Some("retrato.jpg"),
+            "e para na última, sem dar a volta"
+        );
+
+        let mut visual = gpui::VisualTestContext::from_window(janela.into(), cx);
+        visual.simulate_keystrokes("left left");
+        assert_eq!(nome(cx).as_deref(), Some("DSC_001.NEF"));
+    }
+
+    /// 🚨 Digitar `5` na busca escreve `5` — não dá nota 5.
+    ///
+    /// O gêmeo do defeito do `r`, e a razão de as quinze ligações nascerem com
+    /// `!Input`: buscar `DSC_0512` daria nota 5, depois 1, depois 2, em fotos
+    /// diferentes, enquanto o número não aparecia no campo.
+    #[gpui::test]
+    fn digitar_numero_na_busca_nao_da_nota(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+        cx.update(init);
+
+        let marcador = Arc::new(MarcadorDeMentira::default());
+        let mut guardado: Option<Entity<Aplicativo>> = None;
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            let marcador = marcador.clone();
+            let guardado = &mut guardado;
+            move |window, cx| {
+                let app = cx.new(|cx| {
+                    Aplicativo::novo(
+                        acervo(),
+                        previews,
+                        Vec::new(),
+                        Portas {
+                            marcador,
+                            ..portas()
+                        },
+                        window,
+                        cx,
+                    )
+                });
+                *guardado = Some(app.clone());
+                gpui_component::Root::new(app, window, cx)
+            }
+        });
+        let app = guardado.expect("o aplicativo tem de ter sido construído");
+
+        janela
+            .update(cx, |_raiz, window, cx| {
+                app.update(cx, |app, cx| {
+                    app.biblioteca.update(cx, |tela, cx| {
+                        tela.selecionar(Some(0), cx);
+                        tela.focar_busca(window, cx);
+                    });
+                });
+            })
+            .expect("a janela deve estar aberta");
+
+        let mut visual = gpui::VisualTestContext::from_window(janela.into(), cx);
+        visual.simulate_input("DSC_0512");
+
+        janela
+            .update(cx, |_raiz, _window, cx| {
+                assert_eq!(
+                    app.read(cx).biblioteca.read(cx).texto_da_busca(cx),
+                    "DSC_0512"
+                );
+            })
+            .expect("a janela deve estar aberta");
+        assert!(
+            marcador.marcado().is_empty(),
+            "digitar na busca não pode marcar foto nenhuma"
+        );
     }
 
     /// 🚨 A tecla `\` alterna o antes/depois.

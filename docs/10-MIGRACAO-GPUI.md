@@ -1209,6 +1209,45 @@ número não aparecia no campo.
 que um teste daqui digita de verdade em vez de chamar `set_value` — que é justamente por que o
 defeito sobreviveu a `digitar_na_busca_filtra_a_grade`.
 
+#### As quinze teclas de triagem ✅ — nota, cor, sinalizador e as setas
+
+`0`–`5` dão nota, `6`–`9` dão cor, `P`/`X`/`U` sinalizam e as setas andam pela grade. São os atalhos
+mais usados de um programa de seleção: quem tria 800 fotos de um casamento passa por eles algumas
+centenas de vezes.
+
+| Peça | Onde |
+|---|---|
+| As três regras de alternância, sem tela | `biblioteca/marcacao.rs` |
+| A porta que grava (`trait Marcador`) e o `MarcadorDoBanco` | idem |
+| Os métodos da grade (`andar`, `dar_nota`, `dar_cor`, `sinalizar`) | `biblioteca/tela.rs` |
+| As quinze ações e a tabela de ligações | `app.rs` |
+
+🔑 **A nota é absoluta; a cor e o sinalizador alternam.** Teclar `7` numa foto já amarela **tira** o
+amarelo, e `P` numa foto já escolhida a desmarca — é o que faz a mesma tecla ser "marcar" e
+"desmarcar" sem uma segunda. `U` desmarca sempre. Errar isso não falha: só deixa de desmarcar.
+
+🔑 **As ações moram na raiz, e não na Biblioteca** — mesma razão do `Cmd+Z` da Revelação: ação só é
+alcançada em quem está no **caminho do foco**, que vai da raiz até o nó focado. Uma ligação declarada
+no contexto da Biblioteca nasceria morta, e o sintoma seria "a tecla não faz nada".
+
+⚠️ **A tela muda antes do banco responder** (o *optimistic update* do legado). Numa triagem se aperta
+tecla mais rápido do que um `UPDATE` volta, e esperar faria a nota aparecer depois de a foto seguinte
+já estar selecionada — o número certo na foto errada, do ponto de vista de quem olha. E marcar
+**refiltra**: com "★★★ ou mais" ligado, baixar uma foto para 1 tira ela da grade na hora.
+
+⚠️ **Na Revelação as teclas não fazem nada, e é decisão.** O legado tria de lá também
+(`get_target_photos` aceita `Develop`), mas a Revelação nova não tem filmstrip nem seleção própria de
+acervo — dar nota ali exigiria escolher em qual foto, e a resposta depende de uma tela que ainda não
+existe.
+
+⚠️ **Roxo não tem tecla, e no legado também não**: o menu de lá oferece cinco cores e o `keyboard.rs`
+liga quatro. E `Delete`/`Backspace` (apagar foto) ficam de fora — apagar leva confirmação e remoção
+de arquivo, que é trabalho próprio e não um atalho a mais.
+
+⬜ **Falta da fase 4**: multi-monitor (a janela secundária de `secondary_window.rs`), o docking
+(`dock_viewer.rs`, 1.553 LOC), e `Cmd+A`/`Cmd+D` — que dependem de seleção múltipla, que a Biblioteca
+nova ainda não tem.
+
 
 ### Fase 5 — Testes e desligamento (1–2 semanas)
 

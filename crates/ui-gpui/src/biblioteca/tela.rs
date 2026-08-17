@@ -17,6 +17,7 @@ use infrastructure::cache::preview_manager::PreviewManager;
 
 use super::filtros::{indices_visiveis, FiltroDeSinalizador, Filtros, NotaMinima};
 use super::grade::{colunas_que_cabem, fotos_da_linha, linhas_necessarias};
+use super::marcacao::{cor_ao_teclar, sinalizador_ao_teclar, Marca, Marcador};
 use super::miniaturas::{capacidade_para, CacheDeMiniaturas, Miniatura};
 use super::pastas::{pastas_do_acervo, Pasta};
 
@@ -37,6 +38,8 @@ pub struct Biblioteca {
     /// inteiro 60 vezes por segundo.
     fotos: Arc<Vec<PhotoViewModel>>,
     previews: Arc<PreviewManager>,
+    /// Quem grava nota, cor e sinalizador — as treze teclas de triagem.
+    marcador: Arc<dyn Marcador>,
     /// `Mutex` porque o closure recebe `&mut App`, e não `&mut self`: o cache
     /// precisa ser escrito de dentro dele.
     cache: Arc<Mutex<CacheDeMiniaturas>>,
@@ -108,6 +111,7 @@ impl Biblioteca {
     pub fn nova(
         fotos: Vec<PhotoViewModel>,
         previews: Arc<PreviewManager>,
+        marcador: Arc<dyn Marcador>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -136,6 +140,7 @@ impl Biblioteca {
         let mut tela = Self {
             fotos: Arc::new(fotos),
             previews,
+            marcador,
             // Nasce do tamanho da janela padrão e se ajusta no primeiro
             // `render`, quando a janela de verdade já foi medida.
             cache: Arc::new(Mutex::new(CacheDeMiniaturas::nova(capacidade_para(6, 4)))),
@@ -204,6 +209,101 @@ impl Biblioteca {
     /// Seleciona por índice **no acervo**.
     pub fn selecionar(&mut self, no_acervo: Option<usize>, cx: &mut Context<Self>) {
         self.selecionada = no_acervo;
+        cx.notify();
+    }
+
+    /// As setas: um passo na lista **filtrada**, sem dar a volta.
+    ///
+    /// 🔑 **Anda na lista filtrada e guarda o índice do acervo** — os dois
+    /// espaços de índice do arquivo, e a razão de `selecionada` ser no acervo.
+    /// Andar sobre o acervo pularia para fotos que não estão na tela, e o
+    /// sintoma seria a seleção sumindo da grade a cada seta.
+    ///
+    /// Sem seleção, a primeira seta escolhe a primeira (adiante) ou a última
+    /// (atrás) — é o que o legado faz (`navigate_library`), e é o que permite
+    /// começar a triagem sem tocar no ponteiro.
+    ///
+    /// ⚠️ **Não dá a volta**, também como no legado: chegar ao fim e continuar
+    /// apertando fica no fim. Numa triagem longa, voltar ao começo sem aviso
+    /// faria retrabalhar as primeiras sem perceber.
+    pub fn andar(&mut self, passo: i32, cx: &mut Context<Self>) {
+        if self.visiveis.is_empty() {
+            return;
+        }
+
+        let posicao = self
+            .selecionada
+            .and_then(|no_acervo| self.visiveis.iter().position(|&i| i == no_acervo));
+
+        let nova = match posicao {
+            Some(atual) if passo > 0 => (atual + 1).min(self.visiveis.len() - 1),
+            Some(atual) => atual.saturating_sub(1),
+            None if passo > 0 => 0,
+            None => self.visiveis.len() - 1,
+        };
+
+        self.selecionar(Some(self.visiveis[nova]), cx);
+    }
+
+    /// A nota da foto selecionada — `0` a `5`, absoluta.
+    pub fn dar_nota(&mut self, nota: i32, cx: &mut Context<Self>) {
+        let Some(no_acervo) = self.selecionada else {
+            return;
+        };
+        self.aplicar(no_acervo, Marca::Nota(nota), cx);
+    }
+
+    /// A cor da foto selecionada — e a mesma cor de novo tira a cor.
+    pub fn dar_cor(&mut self, cor: &str, cx: &mut Context<Self>) {
+        let Some(no_acervo) = self.selecionada else {
+            return;
+        };
+        let atual = self.fotos[no_acervo].color_label.clone();
+        self.aplicar(
+            no_acervo,
+            Marca::Cor(cor_ao_teclar(atual.as_deref(), cor)),
+            cx,
+        );
+    }
+
+    /// O sinalizador da foto selecionada — `1`, `-1` ou `0`.
+    pub fn sinalizar(&mut self, pedido: i32, cx: &mut Context<Self>) {
+        let Some(no_acervo) = self.selecionada else {
+            return;
+        };
+        let atual = self.fotos[no_acervo].flag;
+        self.aplicar(
+            no_acervo,
+            Marca::Sinalizador(sinalizador_ao_teclar(atual, pedido)),
+            cx,
+        );
+    }
+
+    /// Escreve na foto que está na memória **e** manda gravar.
+    ///
+    /// 🔑 **A tela muda antes do banco responder**, como no legado ("optimistic
+    /// update"). Numa triagem se aperta tecla mais rápido do que um `UPDATE`
+    /// volta, e esperar faria a nota aparecer depois da foto seguinte já estar
+    /// selecionada — o número certo na foto errada, do ponto de vista de quem
+    /// olha.
+    ///
+    /// ⚠️ **E refiltra.** Com "★★★ ou mais" ligado, baixar uma foto para 1 tira
+    /// ela da grade na hora: é o que o legado faz ao recarregar o acervo, e é o
+    /// comportamento que se quer — a grade mostra o que passa no filtro, e a
+    /// foto acabou de deixar de passar.
+    fn aplicar(&mut self, no_acervo: usize, marca: Marca, cx: &mut Context<Self>) {
+        let fotos = Arc::make_mut(&mut self.fotos);
+        let foto = &mut fotos[no_acervo];
+
+        match &marca {
+            Marca::Nota(nota) => foto.rating = *nota,
+            Marca::Cor(cor) => foto.color_label = cor.clone(),
+            Marca::Sinalizador(codigo) => foto.flag = Some(*codigo),
+        }
+
+        let id = foto.id.clone();
+        self.marcador.marcar(id, marca);
+        self.refiltrar();
         cx.notify();
     }
 
@@ -745,6 +845,8 @@ impl Render for Biblioteca {
 mod testes {
     use super::*;
 
+    use super::super::marcacao::mentira::MarcadorDeMentira;
+
     use gpui::TestAppContext;
     use tempfile::TempDir;
 
@@ -758,6 +860,11 @@ mod testes {
     /// ⚠️ Nunca `PreviewManager::new()` num teste: aquele resolve
     /// `AppPaths::preview_cache_dir()` e escreve na biblioteca de fotos de quem
     /// rodar a suíte — o defeito que a fase 0 encontrou.
+    /// O marcador que não grava nada — quase todo teste daqui não tria.
+    fn marcador() -> Arc<dyn Marcador> {
+        Arc::new(MarcadorDeMentira::default())
+    }
+
     fn previews_descartaveis() -> (Arc<PreviewManager>, TempDir) {
         let dir = TempDir::new().expect("criar diretório temporário");
         (
@@ -807,8 +914,9 @@ mod testes {
         // o teste morre antes da primeira asserção.
         cx.update(gpui_component::init);
 
-        let janela =
-            cx.add_window(|window, cx| Biblioteca::nova(acervo(), previews.clone(), window, cx));
+        let janela = cx.add_window(|window, cx| {
+            Biblioteca::nova(acervo(), previews.clone(), marcador(), window, cx)
+        });
 
         janela
             .update(cx, |tela, _window, _cx| {
@@ -856,8 +964,9 @@ mod testes {
         let (previews, _dir) = previews_descartaveis();
         cx.update(gpui_component::init);
 
-        let janela =
-            cx.add_window(|window, cx| Biblioteca::nova(acervo(), previews.clone(), window, cx));
+        let janela = cx.add_window(|window, cx| {
+            Biblioteca::nova(acervo(), previews.clone(), marcador(), window, cx)
+        });
 
         janela
             .update(cx, |tela, window, cx| {

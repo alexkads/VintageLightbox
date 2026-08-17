@@ -12,6 +12,7 @@ use infrastructure::cache::preview_manager::PreviewManager;
 use infrastructure::paths::AppPaths;
 
 use ui_gpui::app::{Aplicativo, Portas};
+use ui_gpui::biblioteca::marcacao::{Marcador, MarcadorDoBanco};
 use ui_gpui::importacao::explorador::{
     Explorador, ExploradorDoDisco, GeradorDeMiniaturas, GeradorDoDisco, Importador,
     ImportadorDoDisco, SeletorDePasta, SeletorNativo,
@@ -131,6 +132,25 @@ async fn main() {
         editor,
         tokio::runtime::Handle::current(),
     ));
+    // As treze teclas de triagem da Biblioteca. O `PhotoController` junta os
+    // quatro use cases de marcação — e o de apagar, que **não** tem tecla aqui:
+    // `Delete` existe no legado e leva um caminho próprio (confirmação e
+    // remoção do arquivo), que é trabalho próprio e não um atalho a mais.
+    let marcador: Arc<dyn Marcador> = Arc::new(MarcadorDoBanco::novo(
+        Arc::new(adapters::controllers::PhotoController::new(
+            Arc::new(use_cases::RatePhotoUseCase::new(
+                repositorio_de_fotos.clone(),
+            )),
+            Arc::new(use_cases::SetColorLabelUseCase::new(
+                repositorio_de_fotos.clone(),
+            )),
+            Arc::new(use_cases::SetFlagUseCase::new(repositorio_de_fotos.clone())),
+            Arc::new(use_cases::DeletePhotoUseCase::new(
+                repositorio_de_fotos.clone(),
+            )),
+        )),
+        tokio::runtime::Handle::current(),
+    ));
     let guarda_de_presets: Arc<dyn GuardaDePresets> = Arc::new(GuardaDoBanco::nova(
         controlador_de_presets,
         tokio::runtime::Handle::current(),
@@ -180,6 +200,7 @@ async fn main() {
                         presets.clone(),
                         Portas {
                             gravador: gravador.clone(),
+                            marcador: marcador.clone(),
                             gerador: gerador.clone(),
                             guarda_de_presets: guarda_de_presets.clone(),
                             explorador: explorador.clone(),
