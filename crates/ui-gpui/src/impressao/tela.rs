@@ -21,12 +21,16 @@
 use std::sync::{Arc, Mutex};
 
 use adapters::view_models::PhotoViewModel;
-use gpui::{div, img, prelude::*, px, App, Context, Entity, SharedString, Subscription, Window};
+use gpui::{
+    canvas, div, img, prelude::*, px, uniform_list, App, Context, Entity, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, SharedString, Subscription, Window,
+};
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::slider::{Slider, SliderEvent, SliderState};
 use gpui_component::{ActiveTheme, Selectable, Sizable};
 use infrastructure::cache::preview_manager::PreviewManager;
 
+use crate::biblioteca::grade::{colunas_que_cabem, fotos_da_linha, linhas_necessarias};
 use crate::biblioteca::miniaturas::{CacheDeMiniaturas, Miniatura};
 
 use super::pagina::{encaixar, Celula, Leiaute, Modelo, Orientacao, Papel};
@@ -46,6 +50,21 @@ const FOLGA: f32 = 24.0;
 /// Os tetos dos dois campos, iguais aos do legado (`DragValue::range`).
 const MARGEM_MAXIMA: f32 = 50.0;
 const ESPACO_MAXIMO: f32 = 20.0;
+
+/// A faixa de escolher fotos, no rodapé.
+///
+/// 🚨 **Ela é uma grade que rola na vertical, e no legado é uma fila
+/// horizontal.** O GPUI virtualiza lista **vertical** (`uniform_list`) e só ela:
+/// uma fila horizontal com o acervo inteiro seria 2.000 `div`s e 2.000 consultas
+/// ao cache **por quadro**, que é exatamente o que a fase 1 mediu engasgando. O
+/// egui não tem esse problema porque desenha em modo imediato e recorta o que
+/// sai da área.
+///
+/// Duas linhas visíveis é o que cabe sem tirar espaço da folha, que é a razão de
+/// a tela existir.
+const ALTURA_DA_FAIXA: f32 = 172.0;
+const LADO_DA_ESCOLHA: f32 = 72.0;
+const PASSO_DA_ESCOLHA: f32 = LADO_DA_ESCOLHA + 8.0;
 
 /// Quantas miniaturas ficam na memória.
 ///
@@ -67,6 +86,19 @@ pub struct Impressao {
     leiaute: Leiaute,
     previews: Arc<PreviewManager>,
     cache: Arc<Mutex<CacheDeMiniaturas>>,
+    /// Onde a foto de cada célula foi empurrada, **em milímetro**.
+    ///
+    /// A chave é o índice da célula na folha, como no legado (`cell_offsets`) —
+    /// ou seja, o deslocamento pertence ao **lugar**, e não à foto: trocar de
+    /// modelo mantém o que foi ajustado na primeira célula, e a foto que passar
+    /// a ocupá-la herda o empurrão. É o comportamento de lá.
+    ///
+    /// ⚠️ **Milímetro, e não pixel de tela como no legado.** Guardado em pixel,
+    /// redimensionar a janela mudaria o quanto a foto está deslocada **no
+    /// papel** — o mesmo defeito que o papel com a forma da janela tem, de novo.
+    deslocamentos: std::collections::HashMap<usize, (f32, f32)>,
+    /// A célula em arrasto e a última posição do ponteiro.
+    arrasto: Option<(usize, gpui::Point<gpui::Pixels>)>,
     margem: Entity<SliderState>,
     espaco: Entity<SliderState>,
     /// 🚨 As assinaturas moram aqui. `Subscription` descartada cancela a
@@ -124,6 +156,8 @@ impl Impressao {
             cache: Arc::new(Mutex::new(CacheDeMiniaturas::nova(
                 std::num::NonZeroUsize::new(MINIATURAS_GUARDADAS).expect("96 não é zero"),
             ))),
+            deslocamentos: std::collections::HashMap::new(),
+            arrasto: None,
             margem,
             espaco,
             _assinaturas: assinaturas,
@@ -233,6 +267,94 @@ impl Impressao {
         cx.notify();
     }
 
+    /// Põe ou tira **uma** foto da coleção.
+    ///
+    /// 🔑 **Quem entra, entra no fim** — é o `push` do legado, e não uma inserção
+    /// na ordem do acervo. A ordem da coleção é a ordem das células, então
+    /// clicar em três fotos monta a folha na ordem em que se clicou; obrigar a
+    /// ordem do acervo tiraria de quem escolhe a única forma que existe hoje de
+    /// dizer o que vai onde.
+    pub fn alternar(&mut self, no_acervo: usize, cx: &mut Context<Self>) {
+        match self.escolhidas.iter().position(|&i| i == no_acervo) {
+            Some(posicao) => {
+                self.escolhidas.remove(posicao);
+            }
+            None => self.escolhidas.push(no_acervo),
+        }
+        cx.notify();
+    }
+
+    pub fn deslocamento_de(&self, celula: usize) -> (f32, f32) {
+        self.deslocamentos
+            .get(&celula)
+            .copied()
+            .unwrap_or((0.0, 0.0))
+    }
+
+    pub fn tem_deslocamento(&self) -> bool {
+        !self.deslocamentos.is_empty()
+    }
+
+    /// "Redefinir posições" — o botão que o legado só mostra quando há o que
+    /// redefinir, e que é a única saída de um empurrão que ficou torto.
+    pub fn redefinir_posicoes(&mut self, cx: &mut Context<Self>) {
+        self.deslocamentos.clear();
+        cx.notify();
+    }
+
+    fn comecar_arrasto(
+        &mut self,
+        celula: usize,
+        posicao: gpui::Point<gpui::Pixels>,
+        cx: &mut Context<Self>,
+    ) {
+        self.arrasto = Some((celula, posicao));
+        cx.notify();
+    }
+
+    /// O ponteiro andou: empurra a foto da célula em arrasto.
+    ///
+    /// 🔑 **O delta é medido contra a posição anterior do ponteiro**, e não
+    /// contra o começo do gesto. Assim o limite abaixo trunca o movimento sem
+    /// desalinhar o dedo da foto no gesto seguinte.
+    fn mover_arrasto(
+        &mut self,
+        posicao: gpui::Point<gpui::Pixels>,
+        espaco: (f32, f32),
+        cx: &mut Context<Self>,
+    ) {
+        let Some((celula, anterior)) = self.arrasto else {
+            return;
+        };
+        let escala = self.leiaute.escala_para(espaco);
+        if escala <= 0.0 {
+            return;
+        }
+
+        let dx = f32::from(posicao.x - anterior.x) / escala;
+        let dy = f32::from(posicao.y - anterior.y) / escala;
+        self.arrasto = Some((celula, posicao));
+
+        let Some(retangulo) = self.celulas_da_folha().get(celula).copied() else {
+            return;
+        };
+        let (limite_x, limite_y) = limite_do_empurrao(&retangulo);
+
+        let (x, y) = self.deslocamento_de(celula);
+        self.deslocamentos.insert(
+            celula,
+            (
+                (x + dx).clamp(-limite_x, limite_x),
+                (y + dy).clamp(-limite_y, limite_y),
+            ),
+        );
+        cx.notify();
+    }
+
+    fn celulas_da_folha(&self) -> Vec<Celula> {
+        self.leiaute.celulas()
+    }
+
     /// As fotos da primeira folha — a única que o legado desenha, e a única que
     /// esta tela oferece (§ fase 4 do plano: botão de página seria feature nova).
     fn fotos_da_folha(&self) -> Vec<&PhotoViewModel> {
@@ -253,7 +375,7 @@ impl Impressao {
         const ALTURA_DA_BARRA: f32 = 34.0;
         let tamanho = window.viewport_size();
         let largura = f32::from(tamanho.width) - LADO_ESQUERDO - LADO_DIREITO - 2.0 * FOLGA;
-        let altura = f32::from(tamanho.height) - ALTURA_DA_BARRA - 2.0 * FOLGA;
+        let altura = f32::from(tamanho.height) - ALTURA_DA_BARRA - ALTURA_DA_FAIXA - 2.0 * FOLGA;
         (largura.max(0.0), altura.max(0.0))
     }
 
@@ -269,7 +391,7 @@ impl Impressao {
             .enumerate()
             .map(|(indice, celula)| {
                 let foto = fotos.get(indice).copied();
-                self.celula(celula, foto, escala)
+                self.celula(indice, celula, foto, escala, cx)
             })
             .collect();
 
@@ -293,7 +415,9 @@ impl Impressao {
                     .h(px(altura_mm * escala))
                     .bg(gpui::white())
                     .shadow_md()
-                    .children(desenhadas),
+                    .children(desenhadas)
+                    // Enquanto há arrasto, quem escuta o ponteiro é a janela.
+                    .child(self.ouvinte_do_arrasto(cx)),
             )
             .child(
                 div()
@@ -327,11 +451,77 @@ impl Impressao {
         }
     }
 
+    /// A faixa do rodapé: escolher foto a foto.
+    ///
+    /// Os quatro botões da coluna da esquerda montam a coleção em bloco; aqui é
+    /// onde ela se ajusta uma foto por vez, que é o que o filmstrip do legado
+    /// serve para fazer.
+    fn faixa(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let largura = f32::from(window.viewport_size().width) - 2.0 * FOLGA;
+        let colunas = colunas_que_cabem(largura, PASSO_DA_ESCOLHA);
+        let total = self.acervo.len();
+        let linhas = linhas_necessarias(total, colunas);
+
+        let acervo = self.acervo.clone();
+        let previews = self.previews.clone();
+        let cache = self.cache.clone();
+        // A coleção inteira, e não só quem está na primeira folha: a marcação
+        // tem de aparecer também nas fotos que caíram na folha 2 — senão elas se
+        // parecem com as que não foram escolhidas.
+        let escolhidas: Arc<Vec<usize>> = Arc::new(self.escolhidas.clone());
+        // O closure do `uniform_list` é `'static` e recebe `&mut App`, e não
+        // `&mut self`: escrever no estado exige levar a entidade junto.
+        let eu = cx.entity();
+
+        div()
+            .h(px(ALTURA_DA_FAIXA))
+            .flex_none()
+            .border_t_1()
+            .border_color(cx.theme().border)
+            .child(uniform_list(
+                "escolher-para-imprimir",
+                linhas,
+                move |faixa, _window, cx| {
+                    faixa
+                        .map(|indice| {
+                            let desta_linha = fotos_da_linha(indice, colunas, total);
+                            div()
+                                .flex()
+                                .gap(px(8.))
+                                .p(px(4.))
+                                .children(
+                                    desta_linha
+                                        .map(|no_acervo| {
+                                            let eu = eu.clone();
+                                            escolha(
+                                                &acervo[no_acervo],
+                                                &previews,
+                                                &cache,
+                                                escolhidas.contains(&no_acervo),
+                                                move |_ev, _window, cx| {
+                                                    eu.update(cx, |tela, cx| {
+                                                        tela.alternar(no_acervo, cx);
+                                                    });
+                                                },
+                                                cx,
+                                            )
+                                        })
+                                        .collect::<Vec<_>>(),
+                                )
+                                .into_any_element()
+                        })
+                        .collect()
+                },
+            ))
+    }
+
     fn celula(
         &self,
+        indice: usize,
         celula: &Celula,
         foto: Option<&PhotoViewModel>,
         escala: f32,
+        cx: &mut Context<Self>,
     ) -> gpui::AnyElement {
         let moldura = div()
             .absolute()
@@ -339,6 +529,12 @@ impl Impressao {
             .top(px(celula.y * escala))
             .w(px(celula.largura * escala))
             .h(px(celula.altura * escala))
+            // 🚨 `relative` **e** `overflow_hidden`: a foto é filha da célula e
+            // se posiciona por ela, e o que sai da célula é cortado. Sem o
+            // recorte, arrastar a foto a faria invadir a célula vizinha — e a
+            // folha na tela deixaria de descrever a folha impressa.
+            .relative()
+            .overflow_hidden()
             // O contorno da célula vazia é o do legado: cinza claro sobre o
             // branco do papel, para a grade ser visível antes de haver foto.
             .border_1()
@@ -363,20 +559,84 @@ impl Impressao {
                 // `object_fit` do contêiner: é a mesma conta que decide onde ela
                 // cairia no papel de verdade, e é ela que tem teste.
                 let dentro = encaixar(celula, aspecto);
+                let (dx, dy) = self.deslocamento_de(indice);
 
-                div()
-                    .absolute()
-                    .left(px(dentro.x * escala))
-                    .top(px(dentro.y * escala))
-                    .w(px(dentro.largura * escala))
-                    .h(px(dentro.altura * escala))
-                    .child(img(imagem).size_full())
+                moldura
+                    .cursor_pointer()
+                    .child(
+                        div()
+                            .absolute()
+                            // Relativo à **célula**, e não ao papel: a caixa que
+                            // ancora o absoluto passou a ser a célula, e medir do
+                            // papel deslocaria a foto de tudo o que a margem vale.
+                            .left(px((dentro.x - celula.x + dx) * escala))
+                            .top(px((dentro.y - celula.y + dy) * escala))
+                            .w(px(dentro.largura * escala))
+                            .h(px(dentro.altura * escala))
+                            .child(img(imagem).size_full()),
+                    )
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |tela, evento: &MouseDownEvent, _window, cx| {
+                            tela.comecar_arrasto(indice, evento.position, cx);
+                        }),
+                    )
                     .into_any_element()
             }
             // Sem preview a célula fica vazia, com a moldura. É estado normal —
             // foto recém-importada ainda não tem miniatura gravada — e não erro.
             Miniatura::Ausente => moldura.into_any_element(),
         }
+    }
+
+    /// Escuta o ponteiro enquanto há arrasto — e some quando não há.
+    ///
+    /// 🚨 **`window.on_mouse_event`, e não `div().on_mouse_move`**: o ouvinte de
+    /// um `div` só recebe evento **dentro** dele, e empurrar a foto até encostar
+    /// na borda da célula é justamente o gesto que sai dela. O arrasto morreria
+    /// no meio, com a foto parada a meio caminho. É a mesma lição do overlay de
+    /// corte da fase 2, e por isso também o `canvas`: registrar ouvinte de mouse
+    /// exige a fase de pintura, aonde um `div` comum não chega.
+    fn ouvinte_do_arrasto(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let arrastando = self.arrasto.is_some();
+        let ouvinte = cx.entity();
+
+        canvas(
+            |_bounds, _window, _cx| {},
+            move |_bounds, _prepaint, window, _cx| {
+                if !arrastando {
+                    return;
+                }
+
+                window.on_mouse_event({
+                    let esta = ouvinte.clone();
+                    move |evento: &MouseMoveEvent, fase, window, cx| {
+                        if !fase.bubble() {
+                            return;
+                        }
+                        let espaco = Self::espaco_da_folha(window);
+                        esta.update(cx, |tela, cx| {
+                            tela.mover_arrasto(evento.position, espaco, cx)
+                        });
+                    }
+                });
+
+                window.on_mouse_event({
+                    let esta = ouvinte.clone();
+                    move |_evento: &MouseUpEvent, fase, _window, cx| {
+                        if !fase.bubble() {
+                            return;
+                        }
+                        esta.update(cx, |tela, cx| {
+                            tela.arrasto = None;
+                            cx.notify();
+                        });
+                    }
+                });
+            },
+        )
+        .absolute()
+        .size_full()
     }
 
     fn coluna_esquerda(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -506,6 +766,16 @@ impl Impressao {
             .child(secao("Medidas"))
             .child(medida("Margem", self.leiaute.margem_mm, &self.margem, cx))
             .child(medida("Espaço", self.leiaute.espaco_mm, &self.espaco, cx))
+            // Como no legado: o botão só existe quando há o que redefinir. Um
+            // botão permanente que quase sempre não faz nada ensina a ignorá-lo.
+            .when(self.tem_deslocamento(), |coluna| {
+                coluna.child(botao(
+                    "redefinir-posicoes",
+                    "Redefinir posições",
+                    false,
+                    cx.listener(|tela, _ev, _window, cx| tela.redefinir_posicoes(cx)),
+                ))
+            })
     }
 }
 
@@ -513,13 +783,82 @@ impl Render for Impressao {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .flex()
+            .flex_col()
             .size_full()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
-            .child(self.coluna_esquerda(cx))
-            .child(div().flex_1().min_w(px(0.)).child(self.folha(window, cx)))
-            .child(self.coluna_direita(cx))
+            .child(
+                // `min_h(0)` na linha, senão a faixa de baixo é empurrada para
+                // fora da janela pelo conteúdo do meio — foi o que a Biblioteca
+                // aprendeu com a árvore de pastas.
+                div()
+                    .flex()
+                    .flex_1()
+                    .min_h(px(0.))
+                    .child(self.coluna_esquerda(cx))
+                    .child(div().flex_1().min_w(px(0.)).child(self.folha(window, cx)))
+                    .child(self.coluna_direita(cx)),
+            )
+            .child(self.faixa(window, cx))
     }
+}
+
+/// Uma foto da faixa: a miniatura, e se ela está na coleção.
+fn escolha(
+    foto: &PhotoViewModel,
+    previews: &PreviewManager,
+    cache: &Mutex<CacheDeMiniaturas>,
+    escolhida: bool,
+    ao_clicar: impl Fn(&gpui::ClickEvent, &mut Window, &mut gpui::App) + 'static,
+    cx: &App,
+) -> gpui::AnyElement {
+    let miniatura = cache
+        .lock()
+        .expect("o cache de miniaturas não deve estar envenenado")
+        .obter(previews, &foto.id);
+
+    div()
+        .id(SharedString::from(format!("escolha-{}", foto.id)))
+        .w(px(LADO_DA_ESCOLHA))
+        .h(px(LADO_DA_ESCOLHA))
+        .flex()
+        .items_center()
+        .justify_center()
+        .cursor_pointer()
+        .rounded(cx.theme().radius)
+        .bg(cx.theme().muted)
+        // A borda é a marca, e ela tem **2 px** quando acesa: a diferença de cor
+        // sozinha some numa faixa de miniaturas coloridas, que é justamente o
+        // que enche esta faixa.
+        .when(escolhida, |item| {
+            item.border_2().border_color(cx.theme().primary)
+        })
+        .when(!escolhida, |item| {
+            item.border_1().border_color(cx.theme().border)
+        })
+        .child(match miniatura {
+            Miniatura::Pronta(imagem) => img(imagem)
+                .max_w(px(LADO_DA_ESCOLHA - 6.0))
+                .max_h(px(LADO_DA_ESCOLHA - 6.0))
+                .into_any_element(),
+            Miniatura::Ausente => div()
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .child("—")
+                .into_any_element(),
+        })
+        .on_click(ao_clicar)
+        .into_any_element()
+}
+
+/// Até onde a foto pode ser empurrada dentro da célula, em milímetro.
+///
+/// Um quinto da célula em cada direção, que é aproximadamente o que o legado
+/// permite (lá a conta é `render_width * 0.2` mais metade do que sobra, medida
+/// em pixel de tela). Sem limite, a foto sai inteira da célula e desaparece
+/// atrás do recorte — e quem arrastou não tem como saber para que lado ela foi.
+fn limite_do_empurrao(celula: &Celula) -> (f32, f32) {
+    (celula.largura * 0.2, celula.altura * 0.2)
 }
 
 fn plural(quantas: usize) -> &'static str {
@@ -795,6 +1134,147 @@ mod testes {
                 assert_eq!(impressao.leiaute().papel, Papel::A3);
                 assert_eq!(impressao.leiaute().orientacao, Orientacao::Paisagem);
                 assert_eq!(impressao.leiaute().modelo, Modelo::Grade3x3);
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🔑 Clicar na faixa põe a foto **no fim** da coleção, e clicar de novo tira.
+    ///
+    /// A ordem da coleção é a ordem das células, então entrar no fim é o que
+    /// permite montar a folha na ordem em que se clicou — é o `push` do legado.
+    /// Inserir na ordem do acervo tiraria de quem escolhe a única forma que
+    /// existe hoje de dizer o que vai onde.
+    #[gpui::test]
+    fn clicar_na_faixa_poe_no_fim_e_tira_de_onde_estiver(cx: &mut TestAppContext) {
+        let (janela, _dir) = tela(cx);
+
+        janela
+            .update(cx, |impressao, _window, cx| {
+                impressao.abrir(acervo(), None, cx);
+
+                impressao.alternar(3, cx);
+                impressao.alternar(1, cx);
+                impressao.alternar(4, cx);
+                assert_eq!(impressao.escolhidas, vec![3, 1, 4], "na ordem dos cliques");
+
+                // Tirar a do meio não mexe nas outras duas.
+                impressao.alternar(1, cx);
+                assert_eq!(impressao.escolhidas, vec![3, 4]);
+
+                // E ela volta para o fim, não para o lugar de antes.
+                impressao.alternar(1, cx);
+                assert_eq!(impressao.escolhidas, vec![3, 4, 1]);
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// A foto que cai na folha 2 continua marcada na faixa.
+    ///
+    /// ⚠️ A marcação é lida da coleção inteira, e não das fotos da folha — lê-la
+    /// da folha faria tudo que passa da primeira página parecer não escolhido, e
+    /// o clique seguinte tiraria da coleção o que quem clicou queria acrescentar.
+    #[gpui::test]
+    fn a_marcacao_vale_para_a_colecao_inteira_e_nao_so_para_a_primeira_folha(
+        cx: &mut TestAppContext,
+    ) {
+        let (janela, _dir) = tela(cx);
+
+        janela
+            .update(cx, |impressao, _window, cx| {
+                impressao.abrir(acervo(), None, cx);
+                impressao.escolher_todas(cx);
+                // Modelo "Uma foto": cinco fotos, cinco folhas.
+                assert_eq!(impressao.paginas(), 5);
+                assert_eq!(impressao.fotos_da_folha().len(), 1);
+
+                assert!(
+                    impressao.escolhidas.contains(&4),
+                    "a última está na coleção, ainda que não esteja na folha 1"
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 O empurrão para no limite da célula — a foto não sai por baixo do
+    /// recorte.
+    ///
+    /// Sem limite, um arrasto longo leva a foto inteira para fora da célula: ela
+    /// desaparece atrás do `overflow_hidden`, a célula fica igual a uma vazia, e
+    /// quem arrastou não tem como saber para que lado ela foi nem como trazê-la
+    /// de volta.
+    #[gpui::test]
+    fn o_empurrao_para_no_limite_da_celula(cx: &mut TestAppContext) {
+        let (janela, _dir) = tela(cx);
+
+        janela
+            .update(cx, |impressao, _window, cx| {
+                impressao.abrir(acervo(), Some("id-a.jpg".to_string()), cx);
+                // Uma folha, uma célula: A4 retrato com 10 mm de margem.
+                let celula = impressao.leiaute().celulas()[0];
+                let (limite_x, limite_y) = limite_do_empurrao(&celula);
+
+                // Escala 1 mm = 1 px deixa a conta legível.
+                let espaco = impressao.leiaute().papel_mm();
+
+                impressao.comecar_arrasto(0, gpui::point(px(0.), px(0.)), cx);
+                impressao.mover_arrasto(gpui::point(px(9999.), px(9999.)), espaco, cx);
+
+                let (x, y) = impressao.deslocamento_de(0);
+                assert!(
+                    (x - limite_x).abs() < 1e-3 && (y - limite_y).abs() < 1e-3,
+                    "o empurrão tinha de parar no limite: {x} × {y}"
+                );
+
+                // E para o outro lado, pelo mesmo limite.
+                impressao.mover_arrasto(gpui::point(px(-9999.), px(-9999.)), espaco, cx);
+                let (x, y) = impressao.deslocamento_de(0);
+                assert!((x + limite_x).abs() < 1e-3 && (y + limite_y).abs() < 1e-3);
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// Sem arrasto começado, mover o ponteiro não move nada.
+    ///
+    /// O ouvinte é da **janela**, e não da célula: ele recebe todo movimento do
+    /// ponteiro enquanto está ligado. Sem esta guarda, passar o mouse pela folha
+    /// depois de soltar continuaria empurrando a foto.
+    #[gpui::test]
+    fn sem_arrasto_o_ponteiro_nao_empurra_nada(cx: &mut TestAppContext) {
+        let (janela, _dir) = tela(cx);
+
+        janela
+            .update(cx, |impressao, _window, cx| {
+                impressao.abrir(acervo(), Some("id-a.jpg".to_string()), cx);
+                let espaco = impressao.leiaute().papel_mm();
+
+                impressao.mover_arrasto(gpui::point(px(50.), px(50.)), espaco, cx);
+
+                assert_eq!(impressao.deslocamento_de(0), (0.0, 0.0));
+                assert!(!impressao.tem_deslocamento());
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// "Redefinir posições" desfaz todos os empurrões — e some quando não há
+    /// nenhum, como no legado.
+    #[gpui::test]
+    fn redefinir_posicoes_devolve_todas_as_fotos_ao_centro(cx: &mut TestAppContext) {
+        let (janela, _dir) = tela(cx);
+
+        janela
+            .update(cx, |impressao, _window, cx| {
+                impressao.abrir(acervo(), Some("id-a.jpg".to_string()), cx);
+                assert!(!impressao.tem_deslocamento(), "nasce sem botão");
+
+                let espaco = impressao.leiaute().papel_mm();
+                impressao.comecar_arrasto(0, gpui::point(px(0.), px(0.)), cx);
+                impressao.mover_arrasto(gpui::point(px(10.), px(4.)), espaco, cx);
+                assert!(impressao.tem_deslocamento());
+
+                impressao.redefinir_posicoes(cx);
+
+                assert_eq!(impressao.deslocamento_de(0), (0.0, 0.0));
+                assert!(!impressao.tem_deslocamento(), "e o botão some de novo");
             })
             .expect("a janela deve estar aberta");
     }

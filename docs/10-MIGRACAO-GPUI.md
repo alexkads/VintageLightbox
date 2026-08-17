@@ -1138,8 +1138,47 @@ e aí elas terão o que fazer.
 alternativa é uma tecla que responde numa tela e emudece na outra — mais cara de aprender do que
 qualquer uma das duas regras inteiras.
 
-⬜ **Falta desta tela**: o filmstrip do rodapé, que no legado é o que permite marcar foto a foto
-(aqui a coleção se monta pelos quatro botões), e o arrasto que reposiciona a foto dentro da célula.
+#### A faixa de escolher ✅ — e ela não pode ser uma fila horizontal
+
+O filmstrip do rodapé é onde a coleção se ajusta **uma foto por vez**; os quatro botões da coluna da
+esquerda a montam em bloco.
+
+🚨 **Aqui ela é uma grade que rola na vertical, e no legado é uma fila horizontal.** O GPUI
+virtualiza lista **vertical** (`uniform_list`) e só ela: uma fila horizontal com o acervo inteiro
+seriam 2.000 `div`s e 2.000 consultas ao cache **por quadro** — exatamente o que a fase 1 mediu
+engasgando. O egui não tem esse problema porque desenha em modo imediato e recorta o que sai da área.
+Duas linhas visíveis é o que cabe sem tirar espaço da folha.
+
+🔑 **Quem entra na coleção entra no fim** — é o `push` do legado. A ordem da coleção é a ordem das
+células, então clicar em três fotos monta a folha na ordem dos cliques; inserir na ordem do acervo
+tiraria de quem escolhe a única forma que existe hoje de dizer o que vai onde.
+
+⚠️ **A marcação é lida da coleção inteira, e não das fotos da folha.** Lida da folha, tudo que passa
+da primeira página pareceria não escolhido — e o clique seguinte tiraria da coleção o que quem
+clicou queria acrescentar.
+
+#### O empurrão dentro da célula ✅ — e o `on_mouse_event` de novo
+
+O legado deixa arrastar a foto dentro da célula (`cell_offsets`), e o botão "Reset Photo Positions"
+aparece só quando há o que redefinir. Os dois foram portados.
+
+🚨 **`window.on_mouse_event`, e não `div().on_mouse_move`** — a mesma lição do overlay de corte: o
+ouvinte de um `div` só recebe evento **dentro** dele, e empurrar a foto até encostar na borda da
+célula é justamente o gesto que sai dela. O arrasto morreria no meio, com a foto parada a meio
+caminho. E daí também o `canvas`: registrar ouvinte de mouse exige a fase de pintura.
+
+⚠️ **O deslocamento é guardado em milímetro; no legado é em pixel de tela.** Em pixel, redimensionar
+a janela mudaria o quanto a foto está deslocada **no papel** — o mesmo defeito do papel com a forma
+da janela, outra vez, num campo diferente.
+
+⚠️ **E ele para em 20% da célula**, com recorte na célula (`overflow_hidden`). Sem limite a foto sai
+inteira por baixo do recorte: a célula fica idêntica a uma vazia, e quem arrastou não tem como saber
+para que lado ela foi. (No legado o limite é `render_width * 0.2` mais metade do que sobra, medido em
+pixel; aqui é um quinto da célula, em milímetro.)
+
+⬜ **O que fica de fora desta tela**, e é decisão: navegação entre folhas (feature nova, §7.1), e a
+`Origem`/filtro do filmstrip do legado — a faixa mostra o que a Biblioteca estava mostrando, que é o
+mesmo recorte que os botões de coleção usam.
 
 
 ### Fase 5 — Testes e desligamento (1–2 semanas)
