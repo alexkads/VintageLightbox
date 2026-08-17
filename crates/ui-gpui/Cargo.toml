@@ -46,6 +46,14 @@ anyhow = "1.0"
 # evita disputa de camada com o modal (a razão está registrada no STATUS).
 rfd = "0.17.2"
 
+# A folha de impressão vira PDF. 🔑 O leiaute já é calculado em milímetros
+# (`impressao/pagina.rs`), que é a unidade nativa do PDF — gerar é colocar cada
+# célula na página, sem uma segunda conta de posição.
+#
+# ⚠️ `default-features = false` de propósito: o padrão traz layout de texto e
+# HTML, e aqui não há texto nenhum — só imagens em retângulos.
+printpdf = { version = "0.12", default-features = false }
+
 # O motor de revelação (`revelacao/processador.rs`). Nas mesmas versões do
 # `crates/ui`: o critério de saída da fase 2 é igualdade de pixel, e wgpu é
 # quem compila o WGSL — versão diferente é compilador diferente para o mesmo

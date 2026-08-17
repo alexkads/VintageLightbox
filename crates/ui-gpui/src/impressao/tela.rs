@@ -15,8 +15,8 @@
 //! Portá-los seria portar a promessa: quatro caixas que marcam e não mudam a
 //! folha. É a mesma decisão que a fase 3 tomou com pausar e cancelar a
 //! importação — melhor nascer sem o botão do que com um que não faz o que diz.
-//! O mesmo vale para os botões "Print" e "Export PDF", cujo comportamento
-//! inteiro é um aviso de *"coming soon"*.
+//! ✅ **Os botões "Imprimir" e "Exportar PDF" fazem, desde 17/ago/2026.** O
+//! comportamento inteiro deles era um aviso de *"coming soon"*.
 
 use std::sync::{Arc, Mutex};
 
@@ -27,13 +27,14 @@ use gpui::{
 };
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::slider::{Slider, SliderEvent, SliderState};
-use gpui_component::{ActiveTheme, Selectable, Sizable};
+use gpui_component::{ActiveTheme, Disableable, Selectable, Sizable};
 use infrastructure::cache::preview_manager::PreviewManager;
 
 use crate::biblioteca::grade::{colunas_que_cabem, fotos_da_linha, linhas_necessarias};
 use crate::biblioteca::miniaturas::{CacheDeMiniaturas, Miniatura};
 
 use super::pagina::{encaixar, Celula, Leiaute, Modelo, Orientacao, Papel};
+use super::porta;
 
 /// Largura das duas colunas laterais.
 ///
@@ -105,11 +106,32 @@ pub struct Impressao {
     /// inscrição na hora — e os dois sliders passariam a se mover sem mexer na
     /// folha, sem erro nenhum. Foi o que a Biblioteca aprendeu com a busca.
     _assinaturas: Vec<Subscription>,
+    /// Quem monta o PDF e o entrega.
+    folha: Arc<dyn porta::Folha>,
+    seletor: Arc<dyn crate::importacao::explorador::SeletorDePasta>,
+    recados: (
+        std::sync::mpsc::Sender<porta::Recado>,
+        std::sync::mpsc::Receiver<porta::Recado>,
+    ),
+    recados_do_seletor: (
+        std::sync::mpsc::Sender<crate::importacao::estado::Recado>,
+        std::sync::mpsc::Receiver<crate::importacao::estado::Recado>,
+    ),
+    /// Um lote em curso. É o que desliga os dois botões: dois cliques gerariam a
+    /// folha duas vezes, e a segunda gravaria por cima da primeira.
+    gerando: bool,
+    esperando_pasta: bool,
+    colhendo: bool,
+    _colheita: Option<gpui::Task<()>>,
+    /// O que dizer depois — onde o PDF foi parar, ou por que não foi.
+    aviso: Option<SharedString>,
 }
 
 impl Impressao {
     pub fn nova(
         previews: Arc<PreviewManager>,
+        folha: Arc<dyn porta::Folha>,
+        seletor: Arc<dyn crate::importacao::explorador::SeletorDePasta>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -160,6 +182,15 @@ impl Impressao {
             arrasto: None,
             margem,
             espaco,
+            folha,
+            seletor,
+            recados: std::sync::mpsc::channel(),
+            recados_do_seletor: std::sync::mpsc::channel(),
+            gerando: false,
+            esperando_pasta: false,
+            colhendo: false,
+            _colheita: None,
+            aviso: None,
             _assinaturas: assinaturas,
         }
     }
@@ -422,10 +453,157 @@ impl Impressao {
             )
             .child(
                 div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(SharedString::from(self.rodape())),
+                    .flex()
+                    .items_center()
+                    .gap(px(8.))
+                    .child(
+                        div()
+                            .flex_1()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(SharedString::from(self.rodape())),
+                    )
+                    .child(
+                        // 🚨 Estes dois botões mostravam um aviso de *"coming
+                        // soon"* nos dois apps. Agora fazem.
+                        Button::new("impressao-pdf")
+                            .label("Exportar PDF")
+                            .xsmall()
+                            .disabled(self.escolhidas.is_empty() || self.gerando)
+                            .on_click(cx.listener(|tela, _ev, _window, cx| {
+                                tela.exportar_pdf(cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("impressao-imprimir")
+                            .label("Imprimir")
+                            .xsmall()
+                            .primary()
+                            .disabled(self.escolhidas.is_empty() || self.gerando)
+                            .on_click(cx.listener(|tela, _ev, _window, cx| {
+                                tela.imprimir(cx);
+                            })),
+                    ),
             )
+            .when_some(self.aviso.clone(), |raiz, aviso| {
+                raiz.child(div().text_xs().text_color(cx.theme().danger).child(aviso))
+            })
+    }
+
+    /// Gera o PDF e o entrega ao diálogo de impressão do sistema.
+    pub fn imprimir(&mut self, cx: &mut Context<Self>) {
+        self.pedir_folha(porta::Destino::Impressora, None, cx);
+    }
+
+    /// Gera o PDF e o grava num arquivo escolhido.
+    ///
+    /// ⚠️ **O destino vem do seletor nativo**, e por isso o pedido só sai quando
+    /// a resposta dele chega — é o mesmo laço da exportação e da importação.
+    pub fn exportar_pdf(&mut self, cx: &mut Context<Self>) {
+        self.esperando_pasta = true;
+        self.seletor
+            .escolher_destino(self.recados_do_seletor.0.clone());
+        self.acompanhar(cx);
+        cx.notify();
+    }
+
+    fn pedir_folha(
+        &mut self,
+        destino: porta::Destino,
+        arquivo: Option<std::path::PathBuf>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.escolhidas.is_empty() || self.gerando {
+            return;
+        }
+        // 🔑 **Os ids, e na ordem da coleção** — a mesma ordem que a prévia
+        // desenha. Mandar a ordem do acervo faria o papel sair diferente da
+        // tela que acabou de ser conferida.
+        let fotos: Vec<String> = self
+            .escolhidas
+            .iter()
+            .map(|&i| self.acervo[i].id.clone())
+            .collect();
+
+        self.gerando = true;
+        self.aviso = None;
+        self.folha.gerar(
+            fotos,
+            self.leiaute,
+            destino,
+            arquivo,
+            self.recados.0.clone(),
+        );
+        self.acompanhar(cx);
+        cx.notify();
+    }
+
+    fn acompanhar(&mut self, cx: &mut Context<Self>) {
+        if self.colhendo {
+            return;
+        }
+        self.colhendo = true;
+        self._colheita = Some(cx.spawn(async move |esta, cx| {
+            // ⚠️ Um teto: gerar uma folha é gesto pontual, e o laço não pode
+            // continuar cobrando relógio pelo resto da sessão.
+            for _ in 0..600 {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_millis(100))
+                    .await;
+                let Ok(continua) = esta.update(cx, |tela, cx| tela.colher(cx)) else {
+                    return;
+                };
+                if !continua {
+                    return;
+                }
+            }
+        }));
+    }
+
+    /// Drena os dois canais. Devolve se vale continuar acordando.
+    pub fn colher(&mut self, cx: &mut Context<Self>) -> bool {
+        let mut mudou = false;
+        let mut pedir_com = None;
+
+        while let Ok(recado) = self.recados_do_seletor.1.try_recv() {
+            mudou = true;
+            self.esperando_pasta = false;
+            if let crate::importacao::estado::Recado::DestinoEscolhido(pasta) = recado {
+                // ⚠️ O seletor devolve **pasta**; o PDF é um arquivo. O nome sai
+                // daqui, e não de um segundo diálogo.
+                pedir_com = Some(std::path::PathBuf::from(pasta).join("folha-de-contato.pdf"));
+            }
+        }
+        if let Some(arquivo) = pedir_com {
+            self.pedir_folha(porta::Destino::Arquivo, Some(arquivo), cx);
+        }
+
+        while let Ok(recado) = self.recados.1.try_recv() {
+            mudou = true;
+            self.gerando = false;
+            match recado {
+                porta::Recado::Pronta { onde, imprimindo } => {
+                    self.aviso = Some(
+                        if imprimindo {
+                            "folha enviada ao diálogo de impressão".to_string()
+                        } else {
+                            format!("PDF gravado em {}", onde.display())
+                        }
+                        .into(),
+                    );
+                }
+                porta::Recado::Falhou(erro) => self.aviso = Some(erro.into()),
+            }
+        }
+
+        if mudou {
+            cx.notify();
+        }
+        let continua = self.esperando_pasta || self.gerando;
+        if !continua {
+            self.colhendo = false;
+        }
+        continua
     }
 
     /// O rodapé diz **quantas folhas**, e quantas fotos ficaram de fora.
@@ -1000,11 +1178,109 @@ mod testes {
     fn tela(cx: &mut TestAppContext) -> (gpui::WindowHandle<Impressao>, TempDir) {
         let (previews, dir) = previews_descartaveis();
         cx.update(gpui_component::init);
-        let janela = cx.add_window(|window, cx| Impressao::nova(previews, window, cx));
+        let janela = cx.add_window(|window, cx| {
+            Impressao::nova(
+                previews,
+                Arc::new(porta::mentira::FolhaDeMentira::default()),
+                Arc::new(crate::importacao::explorador::mentira::SeletorDeMentira::default()),
+                window,
+                cx,
+            )
+        });
         (janela, dir)
     }
 
     /// Entrar na impressão leva a foto que estava selecionada — e só ela.
+    /// 🚨 **"Imprimir" e "Exportar PDF" faziam um aviso de *"coming soon"*.**
+    ///
+    /// Nos dois apps. Era o exemplo canônico do critério 5 do objetivo: botão
+    /// que anuncia o que não faz é pior que botão ausente, porque ocupa o lugar
+    /// da funcionalidade e some do inventário de quem lê a tela.
+    ///
+    /// 🔑 **E manda os ids na ordem da coleção**, que é a ordem que a prévia
+    /// desenha. Mandar a ordem do acervo faria o papel sair diferente da tela
+    /// que acabou de ser conferida — e a folha só se confere depois de impressa.
+    #[gpui::test]
+    fn imprimir_manda_a_folha_na_ordem_da_colecao(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+
+        let folha = Arc::new(porta::mentira::FolhaDeMentira::default());
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            let folha = folha.clone();
+            |window, cx| {
+                Impressao::nova(
+                    previews,
+                    folha,
+                    Arc::new(crate::importacao::explorador::mentira::SeletorDeMentira::default()),
+                    window,
+                    cx,
+                )
+            }
+        });
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.abrir(acervo(), Vec::new(), cx);
+                // Escolhidas fora da ordem do acervo, de propósito — a coleção
+                // guarda a ordem dos cliques.
+                tela.alternar(2, cx);
+                tela.alternar(0, cx);
+                tela.imprimir(cx);
+                tela.colher(cx);
+            })
+            .expect("a janela deve estar aberta");
+
+        let pedidos = folha.pedidos();
+        assert_eq!(pedidos.len(), 1, "um pedido, e não um por foto");
+        let (fotos, _leiaute, destino) = &pedidos[0];
+        assert_eq!(*destino, porta::Destino::Impressora);
+        assert_eq!(
+            fotos.len(),
+            2,
+            "as duas escolhidas tinham de ir para a folha"
+        );
+        assert_eq!(
+            fotos,
+            &["id-c.jpg".to_string(), "id-a.jpg".to_string()],
+            "a ordem é a dos cliques (2 e depois 0), e não a do acervo"
+        );
+    }
+
+    /// ⚠️ **Sem foto escolhida não sai folha.** Um PDF de zero páginas é um
+    /// arquivo que não abre em leitor nenhum, e apareceria no disco como se
+    /// tivesse dado certo.
+    #[gpui::test]
+    fn sem_escolha_nao_gera_folha(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+
+        let folha = Arc::new(porta::mentira::FolhaDeMentira::default());
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            let folha = folha.clone();
+            |window, cx| {
+                Impressao::nova(
+                    previews,
+                    folha,
+                    Arc::new(crate::importacao::explorador::mentira::SeletorDeMentira::default()),
+                    window,
+                    cx,
+                )
+            }
+        });
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.abrir(acervo(), Vec::new(), cx);
+                tela.imprimir(cx);
+            })
+            .expect("a janela deve estar aberta");
+
+        assert!(folha.pedidos().is_empty());
+    }
+
     #[gpui::test]
     fn abrir_comeca_com_a_foto_selecionada(cx: &mut TestAppContext) {
         let (janela, _dir) = tela(cx);

@@ -107,7 +107,7 @@ Não é opinião, e por isso cada um tem como ser medido:
 | **O arquivo exportado é o que a tela mostra** | ✅ já vale: `crates/infrastructure/tests/exportacao.rs` |
 | **RAW de câmera abre** | um arquivo por fabricante no acervo de teste |
 | **Nada trava a janela** | rolagem a 60fps em `--release`, `medir-miniaturas` e `medir-abertura` |
-| **Nenhum botão anuncia o que não faz** | `grep -ri "coming soon\|em breve\|TODO" crates/ui-gpui/src` volta vazio |
+| **Nenhum botão anuncia o que não faz** | ✅ **desde 17/ago** — os últimos dois eram "Print" e "Export PDF", e agora imprimem |
 
 ⚠️ **O último é o mais fácil de burlar e o mais importante.** Um botão que abre um aviso de "em
 breve" é pior que um botão ausente: ele ocupa o lugar da funcionalidade e some do inventário mental

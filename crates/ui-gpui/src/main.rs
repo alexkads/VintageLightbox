@@ -159,6 +159,17 @@ async fn main() {
         tokio::runtime::Handle::current(),
     ));
 
+    // A folha de impressão em PDF. 🔑 Ela reusa o **mesmo** exportador da
+    // exportação: a folha tem de sair com a foto revelada e enquadrada, e
+    // imprimir o arquivo original seria o defeito que a exportação teve até
+    // 17/ago — a tela mostrando uma coisa e o papel saindo outra.
+    let folha: Arc<dyn ui_gpui::impressao::porta::Folha> =
+        Arc::new(ui_gpui::impressao::porta::FolhaDoDisco::nova(
+            repositorio_de_fotos.clone(),
+            Arc::new(infrastructure::ImageExporterImpl::new()),
+            tokio::runtime::Handle::current(),
+        ));
+
     // As coleções. 🔑 O ensaio de um cliente **é** uma coleção, e é dela que a
     // galeria do site vai sair — por isso ela não é "mais uma forma de
     // organizar": é a estrutura em que a mesma foto pertence a vários lugares
@@ -256,6 +267,7 @@ async fn main() {
                             acervo: acervo.clone(),
                             exportador: exportador.clone(),
                             colecoes: colecoes.clone(),
+                            folha: folha.clone(),
                             marcador: marcador.clone(),
                             gerador: gerador.clone(),
                             guarda_de_presets: guarda_de_presets.clone(),

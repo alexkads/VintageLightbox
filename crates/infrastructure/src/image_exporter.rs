@@ -179,14 +179,15 @@ fn aplicar_marca(base: &DynamicImage, marca: &Watermark) -> DomainResult<Dynamic
     Ok(DynamicImage::ImageRgba8(saida))
 }
 
-#[async_trait]
-impl ImageExporter for ImageExporterImpl {
-    async fn export(
-        &self,
-        photo: &Photo,
-        output_path: &FilePath,
-        options: &ExportOptions,
-    ) -> DomainResult<()> {
+impl ImageExporterImpl {
+    /// A foto pronta, **em memória** — revelada, enquadrada e com as opções
+    /// aplicadas, sem passar pelo disco.
+    ///
+    /// 🔑 **Existe para a impressão usar o mesmo caminho.** A folha de papel
+    /// precisa da foto do jeito que ela ficou, e não do arquivo cru: imprimir o
+    /// original seria o mesmo defeito que a exportação tinha até hoje de manhã —
+    /// a tela mostrando uma coisa e o resultado sendo outra.
+    pub fn renderizar(&self, photo: &Photo, options: &ExportOptions) -> DomainResult<DynamicImage> {
         let input_path = photo.file_path().as_str()?;
 
         let img = image::open(Path::new(&input_path)).map_err(|e| {
@@ -212,6 +213,20 @@ impl ImageExporter for ImageExporterImpl {
         if let Some(marca) = options.watermark() {
             saida = aplicar_marca(&saida, marca)?;
         }
+
+        Ok(saida)
+    }
+}
+
+#[async_trait]
+impl ImageExporter for ImageExporterImpl {
+    async fn export(
+        &self,
+        photo: &Photo,
+        output_path: &FilePath,
+        options: &ExportOptions,
+    ) -> DomainResult<()> {
+        let saida = self.renderizar(photo, options)?;
 
         let output_path_str = output_path.as_str()?;
         let rgb_img = saida.to_rgb8();

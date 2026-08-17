@@ -44,6 +44,8 @@ pub struct Portas {
     pub exportador: Arc<dyn Exportador>,
     /// As coleções — o ensaio do cliente mora numa.
     pub colecoes: Arc<dyn Colecoes>,
+    /// Quem monta o PDF da folha e o entrega ao disco ou à impressora.
+    pub folha: Arc<dyn crate::impressao::porta::Folha>,
     pub marcador: Arc<dyn Marcador>,
     pub gerador: Arc<dyn GeradorDeMiniaturas>,
     pub guarda_de_presets: Arc<dyn GuardaDePresets>,
@@ -263,6 +265,7 @@ impl Aplicativo {
         // existe, e dois gravadores seriam duas esperas de 500 ms sobre a mesma
         // foto.
         let gravador_para_colar = portas.gravador.clone();
+        let seletor_para_imprimir = portas.seletor.clone();
         let biblioteca = cx.new(|cx| {
             Biblioteca::nova(
                 fotos,
@@ -344,7 +347,15 @@ impl Aplicativo {
         Self {
             biblioteca,
             revelacao,
-            impressao: cx.new(|cx| Impressao::nova(previews_para_imprimir, window, cx)),
+            impressao: cx.new(|cx| {
+                Impressao::nova(
+                    previews_para_imprimir,
+                    portas.folha,
+                    seletor_para_imprimir,
+                    window,
+                    cx,
+                )
+            }),
             importacao,
             importando: false,
             exportacao: cx.new(|_| Exportacao::nova(portas.exportador, seletor_para_exportar)),
@@ -1239,6 +1250,7 @@ mod testes {
     use crate::importacao::explorador::mentira::{
         ExploradorDeMentira, GeradorDeMentira, ImportadorDeMentira, SeletorDeMentira,
     };
+    use crate::impressao::porta::mentira::FolhaDeMentira;
     use crate::revelacao::persistencia::mentira::GravadorDeMentira;
     use crate::revelacao::presets::mentira::GuardaDeMentira;
 
@@ -1249,6 +1261,7 @@ mod testes {
             acervo: Arc::new(AcervoDeMentira::default()),
             exportador: Arc::new(ExportadorDeMentira::default()),
             colecoes: Arc::new(ColecoesDeMentira::default()),
+            folha: Arc::new(FolhaDeMentira::default()),
             marcador: Arc::new(MarcadorDeMentira::default()),
             gerador: Arc::new(GeradorDeMentira::default()),
             guarda_de_presets: Arc::new(GuardaDeMentira::default()),

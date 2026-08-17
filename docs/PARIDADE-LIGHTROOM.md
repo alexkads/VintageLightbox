@@ -133,7 +133,9 @@ banco e só apareciam ao reabrir o app.
 
 | | |
 |---|---|
-| 🚨 **"Print" e "Export PDF" mostram um aviso de *"coming soon"*** | o módulo de impressão **não imprime**. É o exemplo canônico do critério 5 do objetivo |
+| ✅ **"Imprimir" e "Exportar PDF" fazem** | **desde 17/ago.** A folha vira PDF com as fotos **reveladas e enquadradas**, pelo mesmo caminho da exportação; o PDF vai para um arquivo ou para o diálogo de impressão do sistema |
+| ⬜ Navegação entre folhas | a prévia mostra a primeira; o PDF sai com todas |
+| ⚠️ Entregar ao sistema só no macOS | o caminho do Windows entra quando houver onde conferi-lo |
 
 ---
 
@@ -151,7 +153,7 @@ galeria do cliente**, e o que é defeito visível na tela.
 | 5 | ~~**Copiar/colar revelação entre fotos**~~ | ✅ **feito em 17/ago** |
 | 6 | ~~**A curva de tons ganha controles**~~ | ✅ **feito em 17/ago** |
 | 7 | **DNG com perdas: compilar a LibRaw com libjpeg** | ⚠️ é trabalho no `rsraw-sys`, dependência de terceiros. As outras duas saídas foram pesadas e recusadas em 17/ago (ver `infrastructure/src/dng.rs`): decodificar aqui é escrever um conversor de RAW, e cair na prévia embutida daria 256×171 passando por foto |
-| 8 | **Imprimir de verdade, ou tirar o botão** | um dos dois — o que não pode é continuar anunciando |
+| 8 | ~~**Imprimir de verdade, ou tirar o botão**~~ | ✅ **feito em 17/ago** — imprime |
 
 🔑 **A integração com o `recordarfotos.com.br` só começa quando o clone estiver funcional** —
 decisão do dono, 17/ago. Marca d'água e coleções entraram porque são funcionalidades do Lightroom que
