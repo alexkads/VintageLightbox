@@ -1435,8 +1435,33 @@ testes criava a Biblioteca **sem** dock — ou seja, sem painel nenhum embaixo d
 app nunca tem. Qualquer defeito de dock passaria despercebido por 15 testes. Foi o primeiro teste a
 tocar no dock que acusou.
 
-⬜ **Falta**: a barra de cima (busca, filtros, colunas) fica **fora** do dock de propósito — um dock
-que pudesse fechá-la deixaria a Biblioteca sem busca e sem filtro. E falta **a Revelação no dock**.
+#### A Revelação no dock ✅ — e o caminho de gravação que escapou para o catálogo real
+
+Cinco painéis, no arranjo do `create_develop_layout`: presets à esquerda, a foto no centro com o
+filmstrip embaixo, gráficos e ajustes à direita.
+
+⚠️ **Histograma e curva de tons ficam no mesmo painel**, e no legado são lugares diferentes (o
+histograma é aba própria; a curva vive dentro de "AllAdjustments"). Os dois são desenho da mesma
+medida, nenhum tem controle, e separá-los daria uma aba de 120px de altura para um gráfico só.
+
+🚨 **E aqui a gravação do arranjo escapou para o catálogo real.** A troca do caminho fixo por um
+parâmetro **não pegou** numa das substituições, e o que ficou no arquivo continuava chamando
+`arranjo::caminho("biblioteca")` — o catálogo de verdade. O teste que eu tinha acabado de escrever
+apontava para um `TempDir` e falhava dizendo "o arquivo não existe"; a explicação não era a gravação
+não acontecer, era **ela estar acontecendo no lugar errado**. O `arranjo-biblioteca.json` apareceu em
+`~/Pictures/VintageLightbox/`, escrito por `cargo test`.
+
+🔑 **É o defeito da fase 0 de novo** — `PreviewManager::new()` num teste de UI escrevendo no cache do
+fotógrafo —, e a defesa é a mesma: **o caminho entra por parâmetro** (`montar_o_dock_em`), e os testes
+montam num arquivo descartável. A suíte inteira roda agora sem tocar no catálogo real, e isso é
+conferível com um `ls`.
+
+⚠️ **E o susto veio de um diagnóstico que quase acusou o inocente**: as três primeiras hipóteses foram
+sobre o `advance_clock` não disparar o `timer` nos testes. Comparar com a espera da Revelação — que
+dispara — foi o que mostrou que o problema não era o relógio.
+
+⬜ **Falta**: a barra de cima da Biblioteca (busca, filtros, colunas) fica **fora** do dock de
+propósito — um dock que pudesse fechá-la deixaria a tela sem busca e sem filtro.
 
 #### O painel de informações ✅ — as duas abas vivas que faltavam
 

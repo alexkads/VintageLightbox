@@ -26,14 +26,19 @@ use infrastructure::paths::AppPaths;
 /// faz todo mundo voltar ao padrão de uma vez, que é o desfecho certo.
 pub const VERSAO: usize = 1;
 
-/// Onde o arranjo mora: ao lado do catálogo.
+/// Onde o arranjo de uma tela mora: ao lado do catálogo.
 ///
 /// 🔑 **No catálogo, e não numa pasta de configuração do sistema.** O
 /// `VLB_CATALOG` é o que separa o catálogo real do de medição — e com o arranjo
 /// junto, rodar o app contra um catálogo descartável não mexe na arrumação da
 /// tela de quem trabalha.
-pub fn caminho() -> PathBuf {
-    AppPaths::catalog_root().join("arranjo-biblioteca.json")
+///
+/// ⚠️ **Um arquivo por tela**, como no legado (`library_dock_state` e
+/// `develop_dock_state` são duas chaves separadas): arrumar a Revelação não pode
+/// mexer na Biblioteca, e um arquivo só faria a versão de uma invalidar o
+/// arranjo da outra.
+pub fn caminho(tela: &str) -> PathBuf {
+    AppPaths::catalog_root().join(format!("arranjo-{tela}.json"))
 }
 
 /// Lê o arranjo. Qualquer problema devolve `None`, que é "use o padrão".

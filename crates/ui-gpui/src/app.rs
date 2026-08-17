@@ -230,6 +230,11 @@ impl Aplicativo {
             )
         });
 
+        revelacao.update(cx, |tela, cx| {
+            let eu = cx.entity();
+            tela.montar_o_dock(&eu, window, cx);
+        });
+
         // 🚨 **`track_focus` rastreia; ele não dá foco.** Enquanto ninguém focou a
         // raiz, o caminho de foco fica vazio e **nenhuma ação de teclado dela é
         // alcançada** — o `Esc` da Revelação nunca funcionou, e o commit que o

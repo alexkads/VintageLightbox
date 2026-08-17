@@ -105,6 +105,8 @@ pub struct Biblioteca {
     /// A gravação adiada do arranjo. Guardada porque **descartá-la cancela** —
     /// é o que faz um arrasto inteiro de divisória virar uma escrita só.
     _arranjo: Option<gpui::Task<()>>,
+    /// Em qual arquivo o arranjo é gravado. Definido ao montar o dock.
+    arranjo_em: std::path::PathBuf,
     /// Quantas colunas a grade tem. `None` é **automático** — quantas couberem
     /// na janela.
     ///
@@ -209,6 +211,7 @@ impl Biblioteca {
             colunas_escolhidas: None,
             dock: None,
             _arranjo: None,
+            arranjo_em: std::path::PathBuf::new(),
             busca,
             _assinaturas: vec![assinatura],
         };
@@ -251,6 +254,25 @@ impl Biblioteca {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.montar_o_dock_em(eu, arranjo::caminho("biblioteca"), window, cx);
+    }
+
+    /// O mesmo, com o arquivo de arranjo escolhido.
+    ///
+    /// 🚨 **Existe por causa do teste.** O caminho padrão é `AppPaths` — o
+    /// catálogo de verdade —, e um teste que exercitasse a gravação por ele
+    /// escreveria no catálogo de quem roda a suíte. É o mesmo defeito que a fase
+    /// 0 encontrou (`PreviewManager::new()` num teste de UI), e a defesa é a
+    /// mesma: o caminho entra por parâmetro.
+    pub fn montar_o_dock_em(
+        &mut self,
+        eu: &Entity<Self>,
+        arquivo: std::path::PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let arquivo_para_ler = arquivo.clone();
+        self.arranjo_em = arquivo;
         let dock = cx.new(|cx| DockArea::new("biblioteca", Some(arranjo::VERSAO), window, cx));
         let fraca = dock.downgrade();
 
@@ -321,7 +343,7 @@ impl Biblioteca {
             // antes não é desperdício: é o que garante uma tela inteira mesmo
             // quando o arquivo não existe, está corrompido, ou é de outra
             // versão — os três casos em que `ler_de` devolve `None`.
-            if let Some(salvo) = arranjo::ler_de(&arranjo::caminho()) {
+            if let Some(salvo) = arranjo::ler_de(&arquivo_para_ler) {
                 if let Err(erro) = area.load(salvo, window, cx) {
                     eprintln!("⚠️  Arranjo salvo não pôde ser restaurado: {erro}");
                 }
@@ -346,8 +368,8 @@ impl Biblioteca {
                     cx.background_executor()
                         .timer(std::time::Duration::from_millis(ESPERA_DO_ARRANJO_MS))
                         .await;
-                    let _ = tela.update(cx, |_tela, cx| {
-                        arranjo::gravar_em(&arranjo::caminho(), &area.read(cx).dump(cx));
+                    let _ = tela.update(cx, |tela, cx| {
+                        arranjo::gravar_em(&tela.arranjo_em, &area.read(cx).dump(cx));
                     });
                 }));
             },
@@ -1593,10 +1615,17 @@ mod testes {
         // linha os testes desenhavam uma Biblioteca **sem painel nenhum** — uma
         // tela que o app nunca tem, e onde qualquer defeito de dock passaria
         // despercebido. Foi o primeiro teste a tocar no dock que acusou isso.
+        // 🚨 **Num arquivo descartável**, e não no caminho de verdade: montar lê
+        // o arranjo salvo, e um teste que lesse o do catálogo real passaria a
+        // depender da tela que o fotógrafo arrumou ontem — além de gravar nela.
+        let arquivo = std::env::temp_dir().join(format!(
+            "vlb-teste-arranjo-biblioteca-{}.json",
+            std::process::id()
+        ));
         janela
             .update(cx, |tela, window, cx| {
                 let eu = cx.entity();
-                tela.montar_o_dock(&eu, window, cx);
+                tela.montar_o_dock_em(&eu, arquivo.clone(), window, cx);
             })
             .expect("a janela deve estar aberta");
         (janela, marcador, dir)
@@ -1624,6 +1653,58 @@ mod testes {
                 assert!(util > 0.0);
             })
             .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 Mexer no arranjo **grava o arquivo** — depois da espera, e uma vez só.
+    ///
+    /// A gravação é o único jeito de a arrumação sobreviver a fechar o app, e ela
+    /// mora numa `Task` adiada: sem este teste, ela poderia nunca disparar (a
+    /// inscrição descartada, o evento não sendo `LayoutChanged`, a espera nunca
+    /// terminando) e nada avisaria — o arquivo simplesmente não apareceria, e só
+    /// na abertura seguinte alguém notaria que a tela voltou ao padrão.
+    #[gpui::test]
+    fn mexer_no_arranjo_grava_o_arquivo(cx: &mut TestAppContext) {
+        let (janela, _marcador, _dir) = tela_com(cx, acervo_grande());
+        let pasta = TempDir::new().expect("diretório temporário");
+        let arquivo = pasta.path().join("arranjo.json");
+
+        janela
+            .update(cx, |tela, window, cx| {
+                let eu = cx.entity();
+                tela.montar_o_dock_em(&eu, arquivo.clone(), window, cx);
+            })
+            .expect("a janela deve estar aberta");
+
+        assert!(!arquivo.exists(), "montar não grava: só mexer grava");
+
+        // O que um arrasto de divisória emite.
+        janela
+            .update(cx, |tela, _window, cx| {
+                let dock = tela.dock.as_ref().expect("o dock foi montado").clone();
+                dock.update(cx, |_area, cx| {
+                    cx.emit(gpui_component::dock::DockEvent::LayoutChanged);
+                });
+            })
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+
+        assert!(
+            !arquivo.exists(),
+            "e a gravação espera meio segundo antes de escrever"
+        );
+
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(ESPERA_DO_ARRANJO_MS * 2));
+        cx.run_until_parked();
+
+        assert!(
+            arquivo.exists(),
+            "passada a espera, o arranjo está no disco"
+        );
+        assert!(
+            arranjo::ler_de(&arquivo).is_some(),
+            "e volta a ser lido — versão certa, JSON válido"
+        );
     }
 
     /// 🚨 O arranjo gravado volta como **os quatro painéis**, e não como caixas

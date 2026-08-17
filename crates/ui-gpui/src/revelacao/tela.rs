@@ -18,12 +18,13 @@ use adapters::view_models::PhotoViewModel;
 use domain::entities::Preset;
 use domain::value_objects::{AspectRatio, CropSettings};
 use gpui::{
-    canvas, div, img, prelude::*, px, App, Bounds, Context, Entity, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, Pixels, Point, RenderImage, SharedString, Subscription, Task,
-    Window,
+    canvas, div, img, prelude::*, px, AnyElement, App, Bounds, Context, Entity, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, RenderImage, SharedString,
+    Subscription, Task, Window,
 };
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::collapsible::Collapsible;
+use gpui_component::dock::{register_panel, DockArea, DockEvent, DockItem, PanelView};
 use gpui_component::input::{Input, InputState};
 use gpui_component::slider::{Slider, SliderEvent, SliderState};
 use gpui_component::{ActiveTheme, Selectable, Sizable, WindowExt};
@@ -36,13 +37,24 @@ use super::corte::{self, Alca};
 use super::curva;
 use super::histograma::Histograma;
 use super::historico::Historico;
+use super::paineis::{PainelDaRevelacao, Qual};
 use super::persistencia::{self, Corte, Gravador};
 use super::presets::{self, GuardaDePresets};
 use super::processador::{Ajustes, Pedido, Processador};
 use super::transformacao;
+use crate::biblioteca::arranjo;
 
 /// Largura do painel de ajustes.
 const LADO_DO_PAINEL: f32 = 280.0;
+
+/// A coluna dos presets, à esquerda — os 18% do `create_develop_layout`.
+const LADO_DOS_PRESETS: f32 = 200.0;
+
+/// A altura dos dois gráficos, no topo da coluna da direita.
+const ALTURA_DOS_GRAFICOS: f32 = 230.0;
+
+/// A altura da faixa de miniaturas, embaixo do palco.
+const ALTURA_DO_FILMSTRIP: f32 = 84.0;
 
 /// Quanto a gravação espera depois do último movimento de slider.
 ///
@@ -92,6 +104,14 @@ const INTERVALO_DE_COLHEITA: Duration = Duration::from_millis(8);
 pub struct Revelacao {
     previews: Arc<PreviewManager>,
     gravador: Arc<dyn Gravador>,
+    /// O dock: quem arruma os cinco painéis. `Option` porque nasce depois do
+    /// construtor — os painéis precisam da entidade, que ainda não existe lá.
+    dock: Option<Entity<DockArea>>,
+    /// A gravação adiada do arranjo. Descartá-la cancela, e é o que faz um
+    /// arrasto de divisória virar uma escrita só.
+    _arranjo: Option<Task<()>>,
+    /// Em qual arquivo o arranjo é gravado. Definido ao montar o dock.
+    arranjo_em: std::path::PathBuf,
     /// A lista que a Biblioteca estava mostrando, para as setas e o filmstrip.
     /// `Arc` porque o closure do filmstrip a leva consigo.
     acervo: Arc<Vec<PhotoViewModel>>,
@@ -267,6 +287,9 @@ impl Revelacao {
         Self {
             previews,
             gravador,
+            dock: None,
+            _arranjo: None,
+            arranjo_em: std::path::PathBuf::new(),
             acervo: Arc::new(Vec::new()),
             posicao: 0,
             processador: Processador::novo(),
@@ -1239,6 +1262,11 @@ impl Revelacao {
         )
     }
 
+    /// O painel dos ajustes: os 42 controles, o corte e o redefinir.
+    ///
+    /// 🔑 **Os avisos moram aqui**, e não no palco: "sem GPU" e "mostrando o
+    /// original" são recados sobre o que os controles estão fazendo, e sobre a
+    /// foto o palco já fala sozinho.
     fn painel(&self, cx: &mut Context<Self>) -> impl IntoElement {
         // Sem GPU não há revelação, e o painel diz isso em vez de oferecer
         // sliders que não movem nada. `None` é "a thread ainda está abrindo o
@@ -1251,13 +1279,10 @@ impl Revelacao {
             .flex()
             .flex_col()
             .gap(px(6.))
-            .w(px(LADO_DO_PAINEL))
-            .h_full()
+            .size_full()
             .p(px(12.))
             .overflow_y_scroll()
             .bg(cx.theme().sidebar)
-            .border_l_1()
-            .border_color(cx.theme().border)
             .when(sem_motor, |painel| {
                 painel.child(
                     div()
@@ -1274,10 +1299,7 @@ impl Revelacao {
                         .child("Mostrando o original (\\ para voltar)"),
                 )
             })
-            .child(self.histograma(cx))
-            .child(self.curva_de_tons(cx))
             .children(self.barra_de_corte(cx))
-            .child(self.presets(cx))
             .children(
                 Secao::TODAS
                     .into_iter()
@@ -1295,6 +1317,37 @@ impl Revelacao {
                         })),
                 ),
             )
+    }
+
+    /// Os dois gráficos, juntos: o histograma e a curva de tons.
+    ///
+    /// ⚠️ **No legado eles moram em lugares diferentes** — o histograma é aba
+    /// própria e a curva vive dentro de "AllAdjustments". Aqui os dois são
+    /// desenho da mesma coisa (a foto que está na tela, medida), e nenhum tem
+    /// controle: separá-los daria uma aba de 120px de altura para um gráfico só.
+    fn painel_dos_graficos(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(8.))
+            .size_full()
+            .p(px(10.))
+            .bg(cx.theme().sidebar)
+            .child(self.histograma(cx))
+            .child(self.curva_de_tons(cx))
+    }
+
+    /// A lista de presets, sozinha — como a aba `Presets` do legado.
+    fn painel_dos_presets(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .id("painel-de-presets")
+            .flex()
+            .flex_col()
+            .size_full()
+            .p(px(10.))
+            .overflow_y_scroll()
+            .bg(cx.theme().sidebar)
+            .child(self.presets(cx))
     }
 
     /// A barra do modo de corte: o que fazer com o retângulo que está na foto.
@@ -1825,26 +1878,168 @@ impl Revelacao {
     }
 }
 
+impl Revelacao {
+    /// O desenho de um painel, para a view fina do dock chamar.
+    ///
+    /// 🔑 **Os painéis não têm estado próprio** — a mesma decisão da Biblioteca,
+    /// pela mesma razão: os `cx.listener` dos 42 controles esperam
+    /// `Context<Revelacao>`, e movê-los para dentro de views novas trocaria todos
+    /// eles por `entidade.update(…)`.
+    pub fn desenhar_painel(
+        &mut self,
+        qual: Qual,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        match qual {
+            Qual::Palco => self.palco(cx),
+            Qual::Ajustes => self.painel(cx).into_any_element(),
+            Qual::Graficos => self.painel_dos_graficos(cx).into_any_element(),
+            Qual::Presets => self.painel_dos_presets(cx).into_any_element(),
+            // ⚠️ Sem lista, o filmstrip é um painel vazio — e não some, como
+            // sumia antes do dock: um painel que desaparece do arranjo salvo
+            // levaria junto o lugar dele, e a foto seguinte reapareceria noutro
+            // canto da tela.
+            Qual::Filmstrip => self
+                .filmstrip(cx)
+                .unwrap_or_else(|| div().size_full().into_any_element()),
+        }
+    }
+
+    /// Monta o dock com o arranjo padrão, e restaura o salvo por cima.
+    ///
+    /// 🚨 **Só pode ser chamado depois de a entidade existir** — a mesma regra da
+    /// Biblioteca: os painéis guardam uma referência fraca a ela.
+    ///
+    /// O arranjo é o do legado (`create_develop_layout`): presets à esquerda, a
+    /// foto no centro, gráficos e ajustes à direita, filmstrip embaixo.
+    pub fn montar_o_dock(
+        &mut self,
+        eu: &Entity<Self>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.montar_o_dock_em(eu, arranjo::caminho("revelacao"), window, cx);
+    }
+
+    /// O mesmo, com o arquivo de arranjo escolhido.
+    ///
+    /// 🚨 **Existe pela mesma razão da Biblioteca**: o caminho padrão é o
+    /// catálogo de verdade, e um teste que exercitasse a gravação por ele
+    /// escreveria no catálogo de quem roda a suíte — o defeito que a fase 0
+    /// encontrou. E ele não é hipotético aqui: enquanto este dock era escrito, a
+    /// gravação **rodou uma vez contra o catálogo real**, porque a troca do
+    /// caminho não tinha pegado no arquivo.
+    pub fn montar_o_dock_em(
+        &mut self,
+        eu: &Entity<Self>,
+        arquivo: std::path::PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let arquivo_para_ler = arquivo.clone();
+        self.arranjo_em = arquivo;
+        let dock = cx.new(|cx| DockArea::new("revelacao", Some(arranjo::VERSAO), window, cx));
+        let fraca = dock.downgrade();
+
+        for qual in Qual::TODOS {
+            let revelacao = eu.downgrade();
+            register_panel(
+                cx,
+                qual.nome(),
+                move |_dock, _estado, _info, _window, cx| {
+                    let revelacao = revelacao.clone();
+                    Box::new(cx.new(|cx| PainelDaRevelacao::novo(qual, revelacao, cx)))
+                },
+            );
+        }
+
+        let painel = |qual: Qual, eu: &Entity<Self>, cx: &mut gpui::App| {
+            let revelacao = eu.downgrade();
+            let entidade = cx.new(|cx| PainelDaRevelacao::novo(qual, revelacao, cx));
+            std::sync::Arc::new(entidade) as std::sync::Arc<dyn PanelView>
+        };
+
+        let presets = DockItem::tabs(vec![painel(Qual::Presets, eu, cx)], &fraca, window, cx);
+        let palco = DockItem::tabs(vec![painel(Qual::Palco, eu, cx)], &fraca, window, cx);
+        let graficos = DockItem::tabs(vec![painel(Qual::Graficos, eu, cx)], &fraca, window, cx);
+        let ajustes = DockItem::tabs(vec![painel(Qual::Ajustes, eu, cx)], &fraca, window, cx);
+        let filmstrip = DockItem::tabs(vec![painel(Qual::Filmstrip, eu, cx)], &fraca, window, cx);
+
+        // A direita é uma coluna: os gráficos em cima, os ajustes embaixo — a
+        // proporção do legado (20% / 80%), que é o que deixa os 42 controles
+        // com espaço para rolar.
+        let direita = DockItem::split_with_sizes(
+            gpui::Axis::Vertical,
+            vec![graficos, ajustes],
+            vec![Some(px(ALTURA_DOS_GRAFICOS)), None],
+            &fraca,
+            window,
+            cx,
+        );
+
+        let meio = DockItem::split_with_sizes(
+            gpui::Axis::Vertical,
+            vec![palco, filmstrip],
+            vec![None, Some(px(ALTURA_DO_FILMSTRIP))],
+            &fraca,
+            window,
+            cx,
+        );
+
+        let centro = DockItem::split_with_sizes(
+            gpui::Axis::Horizontal,
+            vec![presets, meio, direita],
+            vec![Some(px(LADO_DOS_PRESETS)), None, Some(px(LADO_DO_PAINEL))],
+            &fraca,
+            window,
+            cx,
+        );
+
+        dock.update(cx, |area, cx| {
+            area.set_center(centro, window, cx);
+
+            if let Some(salvo) = arranjo::ler_de(&arquivo_para_ler) {
+                if let Err(erro) = area.load(salvo, window, cx) {
+                    eprintln!("⚠️  Arranjo salvo da Revelação não pôde ser restaurado: {erro}");
+                }
+            }
+        });
+
+        let assinatura = cx.subscribe_in(
+            &dock,
+            window,
+            |tela: &mut Self, area, evento: &DockEvent, _window, cx| {
+                if !matches!(evento, DockEvent::LayoutChanged) {
+                    return;
+                }
+                let area = area.clone();
+                // A mesma espera de 500 ms da Biblioteca e dos ajustes: um
+                // arrasto de divisória emite dezenas de eventos por segundo.
+                tela._arranjo = Some(cx.spawn(async move |tela, cx| {
+                    cx.background_executor()
+                        .timer(std::time::Duration::from_millis(500))
+                        .await;
+                    let _ = tela.update(cx, |tela, cx| {
+                        arranjo::gravar_em(&tela.arranjo_em, &area.read(cx).dump(cx));
+                    });
+                }));
+            },
+        );
+
+        self._assinaturas.push(assinatura);
+        self.dock = Some(dock);
+    }
+}
+
 impl Render for Revelacao {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .flex()
-            .flex_col()
             .size_full()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
-            .child(
-                // `min_h(0)` na linha: sem ele o painel rolável de dentro empurra
-                // o pai e o filmstrip sai da janela — a mesma correção que a
-                // Biblioteca e a Impressão precisaram.
-                div()
-                    .flex()
-                    .flex_1()
-                    .min_h(px(0.))
-                    .child(self.palco(cx))
-                    .child(self.painel(cx)),
-            )
-            .children(self.filmstrip(cx))
+            .children(self.dock.clone())
     }
 }
 
@@ -1924,9 +2119,86 @@ mod testes {
         presets: Vec<Preset>,
     ) -> gpui::WindowHandle<Revelacao> {
         cx.update(gpui_component::init);
-        cx.add_window(move |window, cx| {
+        let janela = cx.add_window(move |window, cx| {
             Revelacao::nova(previews, gravador, guarda, presets, window, cx)
-        })
+        });
+
+        // 🚨 **O dock é montado aqui também.** Sem esta linha os testes
+        // desenhariam uma Revelação **sem painel nenhum** — a mesma armadilha
+        // que os quinze testes da Biblioteca esconderam até o primeiro teste de
+        // dock acusar.
+        // 🚨 **Num arquivo descartável**, e não no caminho de verdade: montar lê
+        // o arranjo salvo, e um teste que lesse o do catálogo real passaria a
+        // depender da tela que o fotógrafo arrumou ontem.
+        let arquivo = std::env::temp_dir().join(format!(
+            "vlb-teste-arranjo-revelacao-{}.json",
+            std::process::id()
+        ));
+        janela
+            .update(cx, |tela, window, cx| {
+                let eu = cx.entity();
+                tela.montar_o_dock_em(&eu, arquivo.clone(), window, cx);
+            })
+            .expect("a janela deve estar aberta");
+
+        janela
+    }
+
+    /// 🚨 Os cinco painéis da Revelação voltam do arranjo gravado.
+    ///
+    /// A conferência é pelos painéis **vivos**, e não pelo retrato: o
+    /// `InvalidPanel::dump` devolve o estado antigo com o nome original dentro,
+    /// então comparar retratos passaria com o registro faltando inteiro. Foi o
+    /// que o mesmo teste da Biblioteca mostrou primeiro.
+    #[gpui::test]
+    fn o_arranjo_da_revelacao_volta_com_os_cinco_paineis(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        let janela = janela(cx, previews);
+
+        fn vivos(item: &gpui_component::dock::DockItem, cx: &gpui::App) -> Vec<&'static str> {
+            use gpui_component::dock::DockItem;
+            match item {
+                DockItem::Tabs { items, .. } => {
+                    items.iter().map(|view| view.panel_name(cx)).collect()
+                }
+                DockItem::Split { items, .. } => {
+                    items.iter().flat_map(|filho| vivos(filho, cx)).collect()
+                }
+                DockItem::Panel { view, .. } => vec![view.panel_name(cx)],
+                DockItem::Tiles { .. } => Vec::new(),
+            }
+        }
+
+        let esperados = vec![
+            "revelacao:presets",
+            "revelacao:palco",
+            "revelacao:filmstrip",
+            "revelacao:graficos",
+            "revelacao:ajustes",
+        ];
+
+        let retrato = janela
+            .update(cx, |tela, _window, cx| {
+                let dock = tela.dock.as_ref().expect("o dock foi montado");
+                assert_eq!(vivos(dock.read(cx).items(), cx), esperados);
+                dock.read(cx).dump(cx)
+            })
+            .expect("a janela deve estar aberta");
+
+        janela
+            .update(cx, |tela, window, cx| {
+                let dock = tela.dock.as_ref().expect("o dock foi montado").clone();
+                dock.update(cx, |area, cx| {
+                    area.load(retrato, window, cx).expect("restaurar o arranjo");
+                });
+
+                assert_eq!(
+                    vivos(dock.read(cx).items(), cx),
+                    esperados,
+                    "restaurar tem de reconstruir os painéis, e não InvalidPanel"
+                );
+            })
+            .expect("a janela deve estar aberta");
     }
 
     /// Passa da espera do salvamento, sem esperar de verdade.
