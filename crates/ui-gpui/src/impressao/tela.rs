@@ -177,17 +177,18 @@ impl Impressao {
     pub fn abrir(
         &mut self,
         acervo: Vec<PhotoViewModel>,
-        selecionada: Option<String>,
+        selecionadas: Vec<String>,
         cx: &mut Context<Self>,
     ) {
-        self.escolhidas = match selecionada {
-            Some(id) => acervo
-                .iter()
-                .position(|foto| foto.id == id)
-                .into_iter()
-                .collect(),
-            None => Vec::new(),
-        };
+        // ⚠️ **Traduz id em posição, e ignora o que não está na grade.** O que
+        // chega é a seleção da Biblioteca; o acervo daqui é o que ela estava
+        // mostrando. Uma foto selecionada antes de o filtro mudar não está na
+        // lista — e guardá-la por id, sem posição, faria a folha ter uma célula
+        // apontando para o nada.
+        self.escolhidas = selecionadas
+            .iter()
+            .filter_map(|id| acervo.iter().position(|foto| &foto.id == id))
+            .collect();
         self.acervo = Arc::new(acervo);
         cx.notify();
     }
@@ -1010,7 +1011,7 @@ mod testes {
 
         janela
             .update(cx, |impressao, _window, cx| {
-                impressao.abrir(acervo(), Some("id-c.jpg".to_string()), cx);
+                impressao.abrir(acervo(), vec!["id-c.jpg".to_string()], cx);
 
                 assert_eq!(impressao.escolhidas(), 1);
                 assert_eq!(impressao.paginas(), 1);
@@ -1027,7 +1028,7 @@ mod testes {
 
         janela
             .update(cx, |impressao, _window, cx| {
-                impressao.abrir(acervo(), None, cx);
+                impressao.abrir(acervo(), Vec::new(), cx);
 
                 assert_eq!(impressao.escolhidas(), 0);
                 assert_eq!(impressao.paginas(), 0);
@@ -1043,7 +1044,7 @@ mod testes {
 
         janela
             .update(cx, |impressao, _window, cx| {
-                impressao.abrir(acervo(), None, cx);
+                impressao.abrir(acervo(), Vec::new(), cx);
 
                 impressao.escolher_todas(cx);
                 assert_eq!(impressao.escolhidas(), 5);
@@ -1077,7 +1078,7 @@ mod testes {
 
         janela
             .update(cx, |impressao, _window, cx| {
-                impressao.abrir(muitas, None, cx);
+                impressao.abrir(muitas, Vec::new(), cx);
                 impressao.escolher_sinalizadas(cx);
                 let antes = impressao.escolhidas.clone();
                 assert_eq!(antes.len(), 14, "uma a cada três, a começar da primeira");
@@ -1124,12 +1125,12 @@ mod testes {
 
         janela
             .update(cx, |impressao, _window, cx| {
-                impressao.abrir(acervo(), None, cx);
+                impressao.abrir(acervo(), Vec::new(), cx);
                 impressao.definir_papel(Papel::A3, cx);
                 impressao.definir_orientacao(Orientacao::Paisagem, cx);
                 impressao.definir_modelo(Modelo::Grade3x3, cx);
 
-                impressao.abrir(acervo(), Some("id-a.jpg".to_string()), cx);
+                impressao.abrir(acervo(), vec!["id-a.jpg".to_string()], cx);
 
                 assert_eq!(impressao.leiaute().papel, Papel::A3);
                 assert_eq!(impressao.leiaute().orientacao, Orientacao::Paisagem);
@@ -1150,7 +1151,7 @@ mod testes {
 
         janela
             .update(cx, |impressao, _window, cx| {
-                impressao.abrir(acervo(), None, cx);
+                impressao.abrir(acervo(), Vec::new(), cx);
 
                 impressao.alternar(3, cx);
                 impressao.alternar(1, cx);
@@ -1181,7 +1182,7 @@ mod testes {
 
         janela
             .update(cx, |impressao, _window, cx| {
-                impressao.abrir(acervo(), None, cx);
+                impressao.abrir(acervo(), Vec::new(), cx);
                 impressao.escolher_todas(cx);
                 // Modelo "Uma foto": cinco fotos, cinco folhas.
                 assert_eq!(impressao.paginas(), 5);
@@ -1208,7 +1209,7 @@ mod testes {
 
         janela
             .update(cx, |impressao, _window, cx| {
-                impressao.abrir(acervo(), Some("id-a.jpg".to_string()), cx);
+                impressao.abrir(acervo(), vec!["id-a.jpg".to_string()], cx);
                 // Uma folha, uma célula: A4 retrato com 10 mm de margem.
                 let celula = impressao.leiaute().celulas()[0];
                 let (limite_x, limite_y) = limite_do_empurrao(&celula);
@@ -1244,7 +1245,7 @@ mod testes {
 
         janela
             .update(cx, |impressao, _window, cx| {
-                impressao.abrir(acervo(), Some("id-a.jpg".to_string()), cx);
+                impressao.abrir(acervo(), vec!["id-a.jpg".to_string()], cx);
                 let espaco = impressao.leiaute().papel_mm();
 
                 impressao.mover_arrasto(gpui::point(px(50.), px(50.)), espaco, cx);
@@ -1263,7 +1264,7 @@ mod testes {
 
         janela
             .update(cx, |impressao, _window, cx| {
-                impressao.abrir(acervo(), Some("id-a.jpg".to_string()), cx);
+                impressao.abrir(acervo(), vec!["id-a.jpg".to_string()], cx);
                 assert!(!impressao.tem_deslocamento(), "nasce sem botão");
 
                 let espaco = impressao.leiaute().papel_mm();
@@ -1290,7 +1291,7 @@ mod testes {
 
         janela
             .update(cx, |impressao, _window, cx| {
-                impressao.abrir(acervo(), Some("id-a.jpg".to_string()), cx);
+                impressao.abrir(acervo(), vec!["id-a.jpg".to_string()], cx);
             })
             .expect("a janela deve estar aberta");
 

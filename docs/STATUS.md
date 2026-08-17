@@ -56,7 +56,7 @@ struct `PhotoEdits` continua sendo o conserto de verdade.
 | Métrica | Valor |
 |---------|-------|
 | `cargo check --workspace --all-targets` | ✅ **limpo** |
-| `cargo test --workspace` | ✅ **784 passando, 0 falhas, 3 ignorados** (16/ago) |
+| `cargo test --workspace` | ✅ **792 passando, 0 falhas, 3 ignorados** (16/ago) |
 | App | ✅ **sobe** — janela 1352×848, `GPU: Initialized successfully with Apple M2 Pro` |
 | Migrations SQLite no repositório | 15 (`001` … `015`) |
 | Crates | 6 (domain, use-cases, adapters, infrastructure, ui, **ui-gpui**) |
@@ -70,7 +70,7 @@ struct `PhotoEdits` continua sendo o conserto de verdade.
 | Adapters | 0 | ⚠️ nenhum teste escrito |
 | Infrastructure | 65 (34 unit + 31 integração em 7 arquivos) | ✅ passando (1 ignorado) |
 | UI (egui) | 146 (47 unit + 99 E2E `egui_kittest` em 18 arquivos) | ✅ passando (2 ignorados) |
-| UI (GPUI) | 258 (255 unit + 3 de integração com banco) | ✅ passando — fases 2 e 3 concluídas, **fase 4 em andamento** |
+| UI (GPUI) | 264 (261 unit + 3 de integração com banco) | ✅ passando — fases 2 e 3 concluídas, **fase 4 em andamento** |
 
 ---
 
@@ -313,6 +313,8 @@ Não são erros de compilação; são features que a UI mostra como prontas e qu
      células e o rodapé promete 12 páginas para as mesmas 48 fotos.
    - **`Invert` embaralha a coleção** (`HashSet::difference`), e é a posição na lista que decide em
      qual célula cada foto cai.
+   ⚠️ E a mesma ordem de hash chega à folha por um segundo caminho: `selected_photo_ids` é um
+   `HashSet`, e é dele que o módulo de impressão monta a coleção ao ser aberto.
 7. 🚨 **`components/print_dialog.rs` (288 LOC) é código morto.** `state.show_print_dialog` nunca é
    escrito como `true` e `print_dialog_state` nunca recebe `Some(...)` — o diálogo não tem como
    abrir, e ele tem as próprias `PrintLayoutOption`/`PaperSizeOption`/`OrientationOption`,
@@ -321,6 +323,16 @@ Não são erros de compilação; são features que a UI mostra como prontas e qu
 8. ⚠️ **As quatro caixas de "Photo Info" e o campo "Copies" do print são escritos e nunca lidos.** A
    prévia não desenha texto nenhum debaixo da foto; os únicos leitores são testes que afirmam que a
    caixa marca.
+9. 🚨 **`Shift+clique` na grade seleciona as fotos erradas quando há filtro.** O índice vem da grade
+   (que enumera `filtered_photos`) e `AppState::select_range` indexa `self.photos` — o acervo
+   inteiro. Nada falha: a grade marca células que ninguém apontou, e algumas das marcadas nem estão
+   na tela. Mesma família do defeito que a fase 1 encontrou na grade em GPUI.
+10. ⚠️ **`Cmd+A` ignora o filtro** (`select_all` percorre `self.photos`), então a tecla de nota
+    seguinte cai também nas fotos que não estão na tela. O "Select All" do módulo de impressão, no
+    mesmo app, usa a lista filtrada.
+11. ⚠️ **O sinalizador em lote decide foto a foto.** Com três selecionadas e uma já escolhida, `P`
+    desmarca aquela e marca as outras duas — uma tecla, dois desfechos opostos no mesmo gesto. A cor,
+    no mesmo arquivo, decide pelo grupo (`all_already_have_color`).
 
 ---
 
@@ -374,7 +386,7 @@ cita 2 views (são 4).
 ## 🚀 Como rodar os testes
 
 ```bash
-cargo test --workspace          # 784 passando, 0 falhas, 3 ignorados
+cargo test --workspace          # 792 passando, 0 falhas, 3 ignorados
 cargo test -p domain            # 202 testes, ~0.01s
 
 # E2E de UI (egui_kittest)
@@ -396,4 +408,4 @@ VLB_CATALOG=/tmp/catalogo-de-medicao cargo run --release -p ui-gpui
 ---
 
 **Última execução de testes**: 16/ago/2026
-**Resultado**: ✅ 784 passando, 0 falhas, 3 ignorados · os dois apps sobem e renderizam
+**Resultado**: ✅ 792 passando, 0 falhas, 3 ignorados · os dois apps sobem e renderizam

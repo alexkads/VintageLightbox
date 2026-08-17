@@ -64,7 +64,9 @@ actions!(
         CorAzul,
         Escolher,
         Rejeitar,
-        Desmarcar
+        Desmarcar,
+        SelecionarTudo,
+        LimparSelecao
     ]
 );
 
@@ -131,6 +133,13 @@ pub fn init(cx: &mut gpui::App) {
         gpui::KeyBinding::new("p", Escolher, Some(SEM_CAMPO_DE_TEXTO)),
         gpui::KeyBinding::new("x", Rejeitar, Some(SEM_CAMPO_DE_TEXTO)),
         gpui::KeyBinding::new("u", Desmarcar, Some(SEM_CAMPO_DE_TEXTO)),
+        // `Cmd+A` e `Cmd+D`, da Biblioteca. Levam `CONTEXTO` e não
+        // `SEM_CAMPO_DE_TEXTO`: com modificador não há disputa com o texto — e
+        // o campo de busca tem o **próprio** `Cmd+A` (selecionar tudo no
+        // campo), que o GPUI prefere por ser mais profundo. Ligá-los com
+        // `!Input` tiraria o `Cmd+A` de dentro do campo sem ganhar nada.
+        gpui::KeyBinding::new("cmd-a", SelecionarTudo, Some(CONTEXTO)),
+        gpui::KeyBinding::new("cmd-d", LimparSelecao, Some(CONTEXTO)),
     ]);
 }
 
@@ -270,13 +279,14 @@ impl Aplicativo {
     /// folha vazia não responde nenhuma pergunta, e os botões de coleção lá
     /// dentro só valem depois de a tela existir.
     pub fn imprimir(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(foto) = self.biblioteca.read(cx).foto_selecionada() else {
+        let escolhidas = self.biblioteca.read(cx).ids_selecionados();
+        if escolhidas.is_empty() {
             return;
-        };
+        }
         let acervo = self.biblioteca.read(cx).fotos_visiveis();
 
         self.impressao
-            .update(cx, |tela, cx| tela.abrir(acervo, Some(foto.id), cx));
+            .update(cx, |tela, cx| tela.abrir(acervo, escolhidas, cx));
         self.tela = Tela::Impressao;
         // O mesmo motivo da Revelação: o foco pode ter ficado no campo de busca,
         // que para de ser renderizado aqui — e as teclas da raiz sumiriam.
@@ -611,6 +621,12 @@ impl Render for Aplicativo {
             }))
             .on_action(cx.listener(|este, _: &Desmarcar, _w, cx| {
                 este.na_biblioteca(cx, |tela, cx| tela.sinalizar(0, cx))
+            }))
+            .on_action(cx.listener(|este, _: &SelecionarTudo, _w, cx| {
+                este.na_biblioteca(cx, |tela, cx| tela.selecionar_tudo(cx))
+            }))
+            .on_action(cx.listener(|este, _: &LimparSelecao, _w, cx| {
+                este.na_biblioteca(cx, |tela, cx| tela.limpar_selecao(cx))
             }))
             .flex()
             .flex_col()
@@ -1194,6 +1210,81 @@ mod testes {
         let mut visual = gpui::VisualTestContext::from_window(janela.into(), cx);
         visual.simulate_keystrokes("left left");
         assert_eq!(nome(cx).as_deref(), Some("DSC_001.NEF"));
+    }
+
+    /// 🚨 `Cmd+A` e `Cmd+D` chegam à Biblioteca.
+    ///
+    /// E `Cmd+A` pega **o que está na grade**: com filtro ligado, o `select_all`
+    /// do legado marca também as que não estão na tela, e a próxima tecla de nota
+    /// cai em todas elas.
+    #[gpui::test]
+    fn cmd_a_e_cmd_d_selecionam_e_limpam(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+        cx.update(init);
+
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            |window, cx| Aplicativo::novo(acervo(), previews, Vec::new(), portas(), window, cx)
+        });
+
+        let mut visual = gpui::VisualTestContext::from_window(janela.into(), cx);
+        visual.simulate_keystrokes("cmd-a");
+
+        janela
+            .update(cx, |app, _window, cx| {
+                assert_eq!(
+                    app.biblioteca.read(cx).quantas_selecionadas(),
+                    2,
+                    "as duas fotos do acervo de teste"
+                );
+            })
+            .expect("a janela deve estar aberta");
+
+        visual.simulate_keystrokes("cmd-d");
+
+        janela
+            .update(cx, |app, _window, cx| {
+                assert_eq!(app.biblioteca.read(cx).quantas_selecionadas(), 0);
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 Uma tecla de nota com várias selecionadas grava **todas**.
+    ///
+    /// É o que a seleção múltipla existe para fazer: triar em lote. Sem isso ela
+    /// seria só um desenho diferente na grade.
+    #[gpui::test]
+    fn a_triagem_em_lote_grava_todas_as_selecionadas(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+        cx.update(init);
+
+        let marcador = Arc::new(MarcadorDeMentira::default());
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            let marcador = marcador.clone();
+            |window, cx| {
+                Aplicativo::novo(
+                    acervo(),
+                    previews,
+                    Vec::new(),
+                    Portas {
+                        marcador,
+                        ..portas()
+                    },
+                    window,
+                    cx,
+                )
+            }
+        });
+
+        let mut visual = gpui::VisualTestContext::from_window(janela.into(), cx);
+        visual.simulate_keystrokes("cmd-a 4");
+
+        let marcado = marcador.marcado();
+        assert_eq!(marcado.len(), 2, "uma gravação por foto selecionada");
+        assert!(marcado.iter().all(|(_, marca)| *marca == Marca::Nota(4)));
     }
 
     /// 🚨 Digitar `5` na busca escreve `5` — não dá nota 5.

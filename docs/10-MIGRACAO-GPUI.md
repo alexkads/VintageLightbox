@@ -1244,9 +1244,43 @@ existe.
 liga quatro. E `Delete`/`Backspace` (apagar foto) ficam de fora — apagar leva confirmação e remoção
 de arquivo, que é trabalho próprio e não um atalho a mais.
 
-⬜ **Falta da fase 4**: multi-monitor (a janela secundária de `secondary_window.rs`), o docking
-(`dock_viewer.rs`, 1.553 LOC), e `Cmd+A`/`Cmd+D` — que dependem de seleção múltipla, que a Biblioteca
-nova ainda não tem.
+#### Seleção múltipla ✅ — e os dois defeitos que ela expôs no legado
+
+`Cmd+clique` alterna uma, `Shift+clique` estende o intervalo, `Cmd+A` seleciona a grade e `Cmd+D`
+limpa. As treze teclas de triagem passam a valer para a seleção inteira — que é o que a triagem em
+lote existe para fazer.
+
+🚨 **`Shift+clique` do legado conta o intervalo no acervo, e a grade enumera o filtrado.** O índice
+que a grade passa vem de `filtered_photos`; o `select_range` indexa `state.photos`. Com qualquer
+filtro ligado, `Shift+clique` seleciona **outras fotos** — as que ocupam aquelas posições no acervo,
+algumas nem visíveis. Nada falha: a grade marca células que ninguém apontou. É a mesma armadilha que
+a grade da fase 1 encontrou.
+
+🚨 **`Cmd+A` do legado seleciona o acervo inteiro**, ignorando o filtro (`select_all` percorre
+`state.photos`) — e a tecla de nota seguinte cai em todas elas, inclusive nas que não estão na tela.
+O próprio legado se contradiz: o "Select All" do módulo de impressão respeita o filtro.
+
+🔑 **A seleção é um `BTreeSet`, e no legado é um `HashSet`** — e a diferença **vaza para a folha de
+impressão**: entrar na Impressão com dez fotos selecionadas monta a coleção em ordem de hash, e a
+posição na lista decide em qual célula cada foto cai. É o terceiro lugar em que a ordem de um
+`HashSet` chega à tela (os outros dois: o `Invert` da impressão e este).
+
+🚨 **O sinalizador em lote decide pelo grupo; no legado decide foto a foto.** Lá o
+`handle_flag_shortcuts` calcula a alternância **dentro do laço**: com três selecionadas e uma já
+escolhida, `P` **desmarca aquela** e marca as outras duas — uma tecla, dois desfechos opostos no mesmo
+gesto. Aqui vale a regra que a cor já tinha (`all_already_have_color`): só desmarca se todas já
+estiverem. Com uma foto só — o caso comum — as duas regras dão o mesmo resultado.
+
+⚠️ **Duas forças de marca na grade**: a principal (a que a Revelação abre) com a borda cheia, as
+outras da seleção com 45% dela. Marcando as dez igual, apertar "Revelação" com dez selecionadas
+abriria uma delas sem que nada na tela tivesse dito qual.
+
+⚠️ **E clicar numa das selecionadas encolhe a seleção para ela**, em vez de limpar tudo — só desmarca
+quando ela já era a única. Desmarcar cinco por engano ao tentar escolher uma delas é o desfecho que
+ninguém quer, e desfazer isso é reselecionar tudo.
+
+⬜ **Falta da fase 4**: multi-monitor (a janela secundária de `secondary_window.rs`) e o docking
+(`dock_viewer.rs`, 1.553 LOC).
 
 
 ### Fase 5 — Testes e desligamento (1–2 semanas)
