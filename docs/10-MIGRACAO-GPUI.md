@@ -1235,10 +1235,10 @@ tecla mais rápido do que um `UPDATE` volta, e esperar faria a nota aparecer dep
 já estar selecionada — o número certo na foto errada, do ponto de vista de quem olha. E marcar
 **refiltra**: com "★★★ ou mais" ligado, baixar uma foto para 1 tira ela da grade na hora.
 
-⚠️ **Na Revelação as teclas não fazem nada, e é decisão.** O legado tria de lá também
-(`get_target_photos` aceita `Develop`), mas a Revelação nova não tem filmstrip nem seleção própria de
-acervo — dar nota ali exigiria escolher em qual foto, e a resposta depende de uma tela que ainda não
-existe.
+⚠️ **Na Revelação as teclas de triagem não fazem nada, e é decisão.** O legado tria de lá também
+(`get_target_photos` aceita `Develop`). ✅ **A Revelação ganhou filmstrip depois disto** (abaixo), então
+o impedimento de então — não haver em qual foto marcar — caiu: dar nota ali passou a ser uma linha, e
+o que falta é a decisão de dono sobre marcar em lote a partir de uma tela que mostra uma foto.
 
 ⚠️ **Roxo não tem tecla, e no legado também não**: o menu de lá oferece cinco cores e o `keyboard.rs`
 liga quatro. E `Delete`/`Backspace` (apagar foto) ficam de fora — apagar leva confirmação e remoção
@@ -1375,6 +1375,26 @@ sentido: a distribuição existe para responder "como está o acervo". Sobre o f
 ⚠️ **E a largura útil da grade passou a descontar as duas colunas.** Contar só a das pastas faria
 `colunas_que_cabem` responder mais colunas do que cabem — a última sairia cortada pela borda, que é o
 mesmo defeito que a árvore causou quando entrou. Tem teste.
+
+#### O filmstrip da Revelação ✅ — revelar é uma sequência
+
+A Revelação abria **uma foto solta**: para ir à seguinte era voltar à grade, clicar e entrar de novo.
+Revelar um casamento assim vira 400 trocas de tela para 200 ajustes.
+
+Agora a lista filtrada vai junto (a mesma que a Impressão recebe), as setas andam nela e o filmstrip
+do rodapé mostra a vizinhança da atual — a mesma decisão do filmstrip da Biblioteca, e a mesma
+pergunta: *o que vem antes e depois desta*.
+
+🔑 **A posição é a de dentro da lista filtrada**, e não o índice no acervo: com filtro ativo, o
+índice do acervo apontaria para outra foto. São os dois espaços de índice que a grade já separava.
+
+⚠️ **Andar grava a foto que sai.** A espera de 500 ms é uma janela de perda e a seta cai bem no meio
+dela — arrastar um slider e apertar `→` é a sequência normal de quem revela em série. É a quarta
+porta da gravação (as outras: o fim da espera, trocar de foto pela grade, e sair com `Esc`), e tem
+teste conferido quebrando de propósito.
+
+⚠️ **O filmstrip some com uma foto só.** Uma faixa de um item ocupa espaço da foto para não dizer
+nada — e é o que acontece ao abrir a Revelação sem lista.
 
 ⬜ **O que ainda falta das abas vivas**: `Grid Settings` — escolher de 1 a 5 colunas. ⚠️ E ele é uma
 divergência já tomada na fase 1: **o legado usa número fixo de colunas** (`state.grid_columns`, 4 por

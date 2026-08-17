@@ -282,9 +282,19 @@ impl Aplicativo {
         let Some(foto) = self.biblioteca.read(cx).foto_selecionada() else {
             return;
         };
+        // A lista que a grade estava mostrando vai junto: é ela que as setas e o
+        // filmstrip da Revelação percorrem. A posição é a da foto escolhida
+        // **dentro dela** — e não o índice no acervo, que com filtro ativo
+        // apontaria para outra foto.
+        let acervo = self.biblioteca.read(cx).fotos_visiveis();
+        let posicao = acervo
+            .iter()
+            .position(|outra| outra.id == foto.id)
+            .unwrap_or(0);
 
-        self.revelacao
-            .update(cx, |tela, cx| tela.abrir(foto, window, cx));
+        self.revelacao.update(cx, |tela, cx| {
+            tela.abrir_no_acervo(acervo, posicao, window, cx)
+        });
         self.tela = Tela::Revelacao;
         // 🚨 O foco volta para a raiz a cada troca de tela, e não só na abertura.
         // Quem usou o campo de busca deixou o foco **nele** — e ele para de ser
@@ -537,6 +547,19 @@ impl Aplicativo {
         self.biblioteca.update(cx, |tela, cx| acao(tela, cx));
     }
 
+    /// Um passo na tela que está no ar.
+    fn andar(&mut self, passo: i32, window: &mut Window, cx: &mut Context<Self>) {
+        match self.tela {
+            Tela::Biblioteca => self.biblioteca.update(cx, |tela, cx| tela.andar(passo, cx)),
+            Tela::Revelacao => self
+                .revelacao
+                .update(cx, |tela, cx| tela.andar(passo, window, cx)),
+            // Na Impressão as setas não andam: quem escolhe ali é a faixa de
+            // baixo, e "a próxima" não quer dizer nada sobre uma folha.
+            Tela::Impressao => {}
+        }
+    }
+
     fn ao_voltar(
         &mut self,
         _acao: &VoltarParaBiblioteca,
@@ -714,11 +737,16 @@ impl Render for Aplicativo {
             // uma está em `biblioteca::marcacao`, e aqui só se diz qual ação
             // chama qual método — como a tabela de `controles.rs` faz com os 42
             // sliders da Revelação.
-            .on_action(cx.listener(|este, _: &Adiante, _w, cx| {
-                este.na_biblioteca(cx, |tela, cx| tela.andar(1, cx))
+            // 🔑 As setas valem nas **duas** telas, e cada uma anda na sua
+            // lista: na Biblioteca a seleção da grade, na Revelação a foto que
+            // está sendo revelada. É o que o legado faz (`navigate_library` e o
+            // ramo `Develop` do mesmo bloco), e é o que permite revelar 200
+            // fotos sem voltar à grade entre uma e outra.
+            .on_action(cx.listener(|este, _: &Adiante, window, cx| {
+                este.andar(1, window, cx);
             }))
-            .on_action(cx.listener(|este, _: &Atras, _w, cx| {
-                este.na_biblioteca(cx, |tela, cx| tela.andar(-1, cx))
+            .on_action(cx.listener(|este, _: &Atras, window, cx| {
+                este.andar(-1, window, cx);
             }))
             .on_action(cx.listener(|este, _: &SemNota, _w, cx| {
                 este.na_biblioteca(cx, |tela, cx| tela.dar_nota(0, cx))
@@ -1347,6 +1375,133 @@ mod testes {
         let mut visual = gpui::VisualTestContext::from_window(janela.into(), cx);
         visual.simulate_keystrokes("left left");
         assert_eq!(nome(cx).as_deref(), Some("DSC_001.NEF"));
+    }
+
+    /// 🚨 As setas andam **dentro da Revelação**, na lista que veio da grade.
+    ///
+    /// É o que transforma revelar 200 fotos em 200 ajustes, e não em 400 trocas
+    /// de tela. E a lista é a **filtrada**: "a próxima" quer dizer a próxima das
+    /// que se estava vendo.
+    #[gpui::test]
+    fn as_setas_andam_pela_revelacao(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        for id in ["id-DSC_001.NEF", "id-retrato.jpg"] {
+            previews
+                .save_preview(id, &foto_vermelha())
+                .expect("gravar preview");
+        }
+        cx.update(gpui_component::init);
+        cx.update(init);
+
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            |window, cx| Aplicativo::novo(acervo(), previews, Vec::new(), portas(), window, cx)
+        });
+
+        janela
+            .update(cx, |app, window, cx| {
+                app.biblioteca
+                    .update(cx, |tela, cx| tela.selecionar(Some(0), cx));
+                app.revelar(window, cx);
+                assert_eq!(
+                    app.revelacao.read(cx).foto().map(|f| f.name.as_str()),
+                    Some("DSC_001.NEF")
+                );
+            })
+            .expect("a janela deve estar aberta");
+
+        let mut visual = gpui::VisualTestContext::from_window(janela.into(), cx);
+        visual.simulate_keystrokes("right");
+
+        janela
+            .update(cx, |app, _window, cx| {
+                assert_eq!(
+                    app.revelacao.read(cx).foto().map(|f| f.name.as_str()),
+                    Some("retrato.jpg"),
+                    "a seta tem de trocar a foto em revelação"
+                );
+            })
+            .expect("a janela deve estar aberta");
+
+        // E não dá a volta: a última continua sendo a última.
+        visual.simulate_keystrokes("right");
+
+        janela
+            .update(cx, |app, _window, cx| {
+                assert_eq!(
+                    app.revelacao.read(cx).foto().map(|f| f.name.as_str()),
+                    Some("retrato.jpg")
+                );
+                assert_eq!(app.revelacao.read(cx).posicao(), 1);
+            })
+            .expect("a janela deve estar aberta");
+
+        visual.simulate_keystrokes("left");
+
+        janela
+            .update(cx, |app, _window, cx| {
+                assert_eq!(
+                    app.revelacao.read(cx).foto().map(|f| f.name.as_str()),
+                    Some("DSC_001.NEF")
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 Andar na Revelação **grava o ajuste pendente da foto que sai**.
+    ///
+    /// A espera de 500 ms é uma janela de perda, e a seta cai bem no meio dela:
+    /// arrastar um slider e apertar → é a sequência normal de quem revela em
+    /// série. Sem esta gravação, a gravação atrasada sairia com os ajustes já
+    /// substituídos — a revelação de uma foto gravada na outra.
+    #[gpui::test]
+    fn andar_na_revelacao_grava_a_foto_que_sai(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        for id in ["id-DSC_001.NEF", "id-retrato.jpg"] {
+            previews
+                .save_preview(id, &foto_vermelha())
+                .expect("gravar preview");
+        }
+        cx.update(gpui_component::init);
+        cx.update(init);
+
+        let gravador = Arc::new(GravadorDeMentira::default());
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            let gravador = gravador.clone();
+            |window, cx| {
+                Aplicativo::novo(
+                    acervo(),
+                    previews,
+                    Vec::new(),
+                    Portas {
+                        gravador,
+                        ..portas()
+                    },
+                    window,
+                    cx,
+                )
+            }
+        });
+
+        janela
+            .update(cx, |app, window, cx| {
+                app.biblioteca
+                    .update(cx, |tela, cx| tela.selecionar(Some(0), cx));
+                app.revelar(window, cx);
+                app.revelacao.update(cx, |tela, cx| {
+                    tela.aplicar_para_teste(0, 1.2, cx);
+                });
+            })
+            .expect("a janela deve estar aberta");
+
+        let mut visual = gpui::VisualTestContext::from_window(janela.into(), cx);
+        visual.simulate_keystrokes("right");
+
+        let gravado = gravador.gravado();
+        assert_eq!(gravado.len(), 1, "a foto que saiu tinha de ser gravada");
+        assert_eq!(gravado[0].0, "id-DSC_001.NEF");
+        assert_eq!(gravado[0].1.exposure, 1.2);
     }
 
     /// 🚨 A segunda tela abre, recebe a foto, e **acompanha a seleção**.

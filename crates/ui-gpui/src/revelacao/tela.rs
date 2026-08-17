@@ -92,6 +92,11 @@ const INTERVALO_DE_COLHEITA: Duration = Duration::from_millis(8);
 pub struct Revelacao {
     previews: Arc<PreviewManager>,
     gravador: Arc<dyn Gravador>,
+    /// A lista que a Biblioteca estava mostrando, para as setas e o filmstrip.
+    /// `Arc` porque o closure do filmstrip a leva consigo.
+    acervo: Arc<Vec<PhotoViewModel>>,
+    /// Onde estamos nela.
+    posicao: usize,
     processador: Processador,
     aberta: Option<Aberta>,
     ajustes: Ajustes,
@@ -262,6 +267,8 @@ impl Revelacao {
         Self {
             previews,
             gravador,
+            acervo: Arc::new(Vec::new()),
+            posicao: 0,
             processador: Processador::novo(),
             aberta: None,
             ajustes: Ajustes::default(),
@@ -295,7 +302,75 @@ impl Revelacao {
     /// JPEG de alguns milissegundos, então isto não trava de forma perceptível —
     /// mas quando a Revelação passar a carregar o RAW em resolução plena, este é
     /// o ponto que tem de virar assíncrono.
+    /// Abre uma foto solta — um acervo de uma.
     pub fn abrir(&mut self, foto: PhotoViewModel, window: &mut Window, cx: &mut Context<Self>) {
+        self.abrir_no_acervo(vec![foto], 0, window, cx);
+    }
+
+    /// Entra na Revelação com a lista que a Biblioteca estava mostrando.
+    ///
+    /// 🔑 **A lista vem junto porque revelar é uma sequência.** Quem revela um
+    /// casamento passa foto a foto pela seta; ter de voltar à grade a cada uma
+    /// transforma 200 ajustes em 400 trocas de tela. É a mesma lista filtrada
+    /// que a Impressão recebe, e pela mesma razão: "a próxima" quer dizer a
+    /// próxima das que se estava vendo.
+    pub fn abrir_no_acervo(
+        &mut self,
+        acervo: Vec<PhotoViewModel>,
+        posicao: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if acervo.is_empty() {
+            return;
+        }
+        self.posicao = posicao.min(acervo.len() - 1);
+        self.acervo = Arc::new(acervo);
+        self.mostrar_a_posicao(window, cx);
+    }
+
+    /// Um passo na lista, sem dar a volta — a mesma regra das setas da grade.
+    ///
+    /// ⚠️ **Trocar de foto aqui grava a anterior**, pelo caminho de sempre: é a
+    /// primeira coisa que `mostrar_a_posicao` faz. Sem isso, andar meio segundo
+    /// depois de mexer num slider deixaria a gravação atrasada sair com os
+    /// ajustes já substituídos.
+    pub fn andar(&mut self, passo: i32, window: &mut Window, cx: &mut Context<Self>) {
+        if self.acervo.is_empty() {
+            return;
+        }
+        let ultima = self.acervo.len() - 1;
+        let nova = if passo > 0 {
+            (self.posicao + 1).min(ultima)
+        } else {
+            self.posicao.saturating_sub(1)
+        };
+
+        if nova != self.posicao {
+            self.posicao = nova;
+            self.mostrar_a_posicao(window, cx);
+        }
+    }
+
+    /// Vai direto para uma posição — o clique no filmstrip.
+    pub fn ir_para(&mut self, posicao: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if posicao >= self.acervo.len() || posicao == self.posicao {
+            return;
+        }
+        self.posicao = posicao;
+        self.mostrar_a_posicao(window, cx);
+    }
+
+    pub fn posicao(&self) -> usize {
+        self.posicao
+    }
+
+    fn mostrar_a_posicao(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let foto = self.acervo[self.posicao].clone();
+        self.mostrar(foto, window, cx);
+    }
+
+    fn mostrar(&mut self, foto: PhotoViewModel, window: &mut Window, cx: &mut Context<Self>) {
         // 🚨 **Antes de qualquer coisa**: o que a foto anterior tinha de gravado
         // ainda pode estar dentro dos 500 ms de espera. Trocar de foto primeiro
         // faria a gravação atrasada sair com os ajustes já substituídos — a
@@ -1675,15 +1750,101 @@ impl Revelacao {
     }
 }
 
+impl Revelacao {
+    /// A faixa do rodapé: onde esta foto está na sequência.
+    ///
+    /// Mostra a **vizinhança** da atual, e não o acervo inteiro — é a mesma
+    /// decisão do filmstrip da Biblioteca, e a mesma pergunta: "o que vem antes
+    /// e depois desta". Uma faixa com 2.000 itens custaria 2.000 consultas ao
+    /// cache por quadro para responder o mesmo.
+    ///
+    /// ⚠️ **Some com um acervo de uma foto.** Uma faixa com um item só ocupa
+    /// espaço da foto para não dizer nada — e é o que acontece ao abrir a
+    /// Revelação sem lista (os testes, e o caminho de `abrir`).
+    fn filmstrip(&self, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
+        /// Quantas de cada lado. Ímpar de propósito: a atual fica no meio.
+        const VIZINHAS: usize = 7;
+        const LADO: f32 = 52.0;
+
+        if self.acervo.len() < 2 {
+            return None;
+        }
+
+        let inicio = self.posicao.saturating_sub(VIZINHAS);
+        let fim = (inicio + VIZINHAS * 2 + 1).min(self.acervo.len());
+
+        let itens: Vec<gpui::AnyElement> = (inicio..fim)
+            .map(|posicao| {
+                let foto = &self.acervo[posicao];
+                let atual = posicao == self.posicao;
+                let miniatura = self
+                    .previews
+                    .get_thumbnail(&foto.id)
+                    .map(crate::imagem::para_gpui);
+
+                div()
+                    .id(SharedString::from(format!("faixa-revelacao-{}", foto.id)))
+                    .w(px(LADO))
+                    .h(px(LADO))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(cx.theme().radius)
+                    .cursor_pointer()
+                    .bg(cx.theme().muted)
+                    .border_1()
+                    .border_color(if atual {
+                        cx.theme().primary
+                    } else {
+                        cx.theme().border
+                    })
+                    .children(
+                        miniatura
+                            .map(|imagem| img(imagem).max_w(px(LADO - 4.0)).max_h(px(LADO - 4.0))),
+                    )
+                    .on_click(cx.listener(move |tela, _ev, window, cx| {
+                        tela.ir_para(posicao, window, cx);
+                    }))
+                    .into_any_element()
+            })
+            .collect();
+
+        Some(
+            div()
+                .flex()
+                .items_center()
+                .justify_center()
+                .gap(px(6.))
+                .h(px(LADO + 16.0))
+                .flex_none()
+                .border_t_1()
+                .border_color(cx.theme().border)
+                .children(itens)
+                .into_any_element(),
+        )
+    }
+}
+
 impl Render for Revelacao {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .flex()
+            .flex_col()
             .size_full()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
-            .child(self.palco(cx))
-            .child(self.painel(cx))
+            .child(
+                // `min_h(0)` na linha: sem ele o painel rolável de dentro empurra
+                // o pai e o filmstrip sai da janela — a mesma correção que a
+                // Biblioteca e a Impressão precisaram.
+                div()
+                    .flex()
+                    .flex_1()
+                    .min_h(px(0.))
+                    .child(self.palco(cx))
+                    .child(self.painel(cx)),
+            )
+            .children(self.filmstrip(cx))
     }
 }
 
