@@ -4,6 +4,7 @@
 //! podia abrir a Biblioteca direto. A partir de duas, alguém precisa saber qual
 //! está no ar — e esse alguém não pode ser nenhuma das duas.
 
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 
 use adapters::view_models::PhotoViewModel;
@@ -13,12 +14,13 @@ use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::{ActiveTheme, Disableable, Selectable, Sizable};
 use infrastructure::cache::preview_manager::PreviewManager;
 
+use crate::biblioteca::acervo::Acervo;
 use crate::biblioteca::marcacao::Marcador;
 use crate::biblioteca::tela::Biblioteca;
 use crate::cliente::{monitor_do_cliente, Cliente};
 use crate::configuracoes::Configuracoes;
 use crate::importacao::explorador::{Explorador, GeradorDeMiniaturas, Importador, SeletorDePasta};
-use crate::importacao::tela::Importacao;
+use crate::importacao::tela::{Importacao, Importou};
 use crate::impressao::tela::Impressao;
 use crate::revelacao::persistencia::Gravador;
 use crate::revelacao::presets::GuardaDePresets;
@@ -32,6 +34,8 @@ use crate::revelacao::tela::Revelacao;
 /// execução, no primeiro clique.
 pub struct Portas {
     pub gravador: Arc<dyn Gravador>,
+    /// Quem sabe reler o catálogo depois que a importação o muda.
+    pub acervo: Arc<dyn Acervo>,
     pub marcador: Arc<dyn Marcador>,
     pub gerador: Arc<dyn GeradorDeMiniaturas>,
     pub guarda_de_presets: Arc<dyn GuardaDePresets>,
@@ -192,6 +196,18 @@ pub struct Aplicativo {
     /// Sem isto, `Esc` só funcionaria enquanto algum filho focável estivesse
     /// ativo — e a tela de Revelação não tem nenhum ainda.
     foco: FocusHandle,
+    /// Quem relê o catálogo quando a importação termina.
+    acervo: Arc<dyn Acervo>,
+    /// O canal por onde o acervo relido volta. A releitura é assíncrona: o
+    /// `LibraryController` é `async` do tokio, e o GPUI não roda futuros dele.
+    releituras: (Sender<Vec<PhotoViewModel>>, Receiver<Vec<PhotoViewModel>>),
+    /// 🚨 A `Task` que espera a releitura chegar. **Descartá-la a cancela** — e
+    /// o sintoma seria a grade nunca receber as fotos importadas, que é
+    /// exatamente o defeito que esta ligação existe para consertar.
+    _releitura: Option<gpui::Task<()>>,
+    /// 🚨 A inscrição no fim da importação. Sem ela nada acusa: o lote entra no
+    /// banco, o modal conta as fotos, e a grade continua vazia.
+    _fim_da_importacao: gpui::Subscription,
 }
 
 impl Aplicativo {
@@ -260,20 +276,31 @@ impl Aplicativo {
             }
         });
 
+        let importacao = cx.new(|cx| {
+            Importacao::nova(
+                portas.explorador,
+                portas.importador,
+                portas.seletor,
+                portas.gerador,
+                previews_para_importar,
+                cx,
+            )
+        });
+
+        // 🚨 **O fio que faltava.** A importação grava no banco e a Biblioteca
+        // carrega a lista uma vez, antes de a janela existir: sem esta
+        // inscrição, o modal conta "65 importadas" e a grade atrás continua
+        // exatamente como estava. Nada falha — e quem importou conclui que a
+        // importação não funciona, com as 65 fotos já no banco e no disco.
+        let fim_da_importacao = cx.subscribe(&importacao, |raiz, _, _: &Importou, cx| {
+            raiz.reler_o_acervo(cx);
+        });
+
         Self {
             biblioteca,
             revelacao,
             impressao: cx.new(|cx| Impressao::nova(previews_para_imprimir, window, cx)),
-            importacao: cx.new(|cx| {
-                Importacao::nova(
-                    portas.explorador,
-                    portas.importador,
-                    portas.seletor,
-                    portas.gerador,
-                    previews_para_importar,
-                    cx,
-                )
-            }),
+            importacao,
             importando: false,
             configuracoes: cx.new(|_| Configuracoes::nova(previews_das_configuracoes)),
             configurando: false,
@@ -282,7 +309,43 @@ impl Aplicativo {
             _observador: observador,
             tela: Tela::Biblioteca,
             foco,
+            acervo: portas.acervo,
+            releituras: channel(),
+            _releitura: None,
+            _fim_da_importacao: fim_da_importacao,
         }
+    }
+
+    /// Pede o catálogo de novo e entrega à Biblioteca quando ele chegar.
+    ///
+    /// ⚠️ **A espera é um laço curto, e ele acaba.** Um laço eterno acordaria a
+    /// cada 100ms pelo resto da sessão; este morre na primeira resposta, e
+    /// desiste depois de 30s — uma releitura que não volta deixa a grade como
+    /// estava, que é o pior desfecho aceitável (ver [`Acervo::recarregar`]).
+    fn reler_o_acervo(&mut self, cx: &mut Context<Self>) {
+        self.acervo.recarregar(self.releituras.0.clone());
+
+        self._releitura = Some(cx.spawn(async move |raiz, cx| {
+            for _ in 0..300 {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_millis(100))
+                    .await;
+                let Ok(chegou) = raiz.update(cx, |raiz, cx| {
+                    let Ok(fotos) = raiz.releituras.1.try_recv() else {
+                        return false;
+                    };
+                    raiz.biblioteca
+                        .update(cx, |tela, cx| tela.trocar_acervo(fotos, cx));
+                    cx.notify();
+                    true
+                }) else {
+                    return;
+                };
+                if chegou {
+                    return;
+                }
+            }
+        }));
     }
 
     pub fn tela(&self) -> Tela {
@@ -924,6 +987,7 @@ mod testes {
     use image::{DynamicImage, Rgba, RgbaImage};
     use tempfile::TempDir;
 
+    use crate::biblioteca::acervo::mentira::AcervoDeMentira;
     use crate::biblioteca::marcacao::mentira::MarcadorDeMentira;
     use crate::biblioteca::marcacao::Marca;
     use crate::importacao::explorador::mentira::{
@@ -932,10 +996,11 @@ mod testes {
     use crate::revelacao::persistencia::mentira::GravadorDeMentira;
     use crate::revelacao::presets::mentira::GuardaDeMentira;
 
-    /// As cinco portas de mentira, que é o que quase todo teste daqui quer.
+    /// As portas de mentira, que é o que quase todo teste daqui quer.
     fn portas() -> Portas {
         Portas {
             gravador: Arc::new(GravadorDeMentira::default()),
+            acervo: Arc::new(AcervoDeMentira::default()),
             marcador: Arc::new(MarcadorDeMentira::default()),
             gerador: Arc::new(GeradorDeMentira::default()),
             guarda_de_presets: Arc::new(GuardaDeMentira::default()),
@@ -1984,6 +2049,115 @@ mod testes {
                     assert_eq!(tela.estado.candidatos.len(), 2, "a listagem ficou");
                     assert_eq!(tela.estado.marcados(), 1, "e a marcação também");
                 });
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 **Terminar de importar recarrega a grade.**
+    ///
+    /// Sem esta ligação a importação grava no banco e a Biblioteca continua com
+    /// a lista lida no `main.rs`, antes de a janela existir: o modal conta "65
+    /// importadas · 1 falharam" e a grade atrás fica exatamente como estava.
+    /// **Nada falha** — e a leitura de quem usa é que a importação não funciona,
+    /// com as fotos já no banco e no disco. Elas só apareciam ao reabrir o app.
+    ///
+    /// 🔑 O teste mede a ponta: o acervo de mentira responde com uma foto a mais
+    /// e a grade tem de passar a mostrá-la. Não afirma nada sobre o caminho.
+    #[gpui::test]
+    fn terminar_de_importar_recarrega_a_grade(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+
+        let explorador = Arc::new(ExploradorDeMentira::responde(
+            "/cartao",
+            &["/cartao/a.NEF", "/cartao/b.NEF"],
+        ));
+        // O que o banco passa a ter depois da importação: as duas de antes mais
+        // as duas do cartão.
+        let acervo_novo = Arc::new(AcervoDeMentira::default());
+        *acervo_novo.fotos.lock().expect("as fotos") = vec![
+            foto("DSC_001.NEF"),
+            foto("retrato.jpg"),
+            foto("a.NEF"),
+            foto("b.NEF"),
+        ];
+
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            let explorador = explorador.clone();
+            let acervo_novo = acervo_novo.clone();
+            |window, cx| {
+                Aplicativo::novo(
+                    acervo(),
+                    previews,
+                    Vec::new(),
+                    Portas {
+                        explorador,
+                        acervo: acervo_novo,
+                        ..portas()
+                    },
+                    window,
+                    cx,
+                )
+            }
+        });
+
+        janela
+            .update(cx, |app, window, cx| {
+                assert_eq!(
+                    app.biblioteca.read(cx).quantas_fotos(),
+                    2,
+                    "a grade começa com o acervo lido na abertura"
+                );
+                app.importar(window, cx);
+                app.importacao
+                    .update(cx, |tela, cx| tela.abrir_origem("/cartao".into(), cx));
+            })
+            .expect("a janela deve estar aberta");
+
+        for _ in 0..10 {
+            let _ = janela.update(cx, |app, _window, cx| {
+                app.importacao.update(cx, |tela, cx| tela.colher(cx))
+            });
+            cx.run_until_parked();
+        }
+
+        janela
+            .update(cx, |app, _window, cx| {
+                app.importacao.update(cx, |tela, cx| {
+                    tela.estado.marcar_todos(true);
+                    tela.importar(cx);
+                });
+            })
+            .expect("a janela deve estar aberta");
+
+        // A colheita vê o `Terminou` e emite o evento; o `cx.emit` enfileira um
+        // efeito, que só chega ao inscrito quando o laço de efeitos roda.
+        for _ in 0..10 {
+            let _ = janela.update(cx, |app, _window, cx| {
+                app.importacao.update(cx, |tela, cx| tela.colher(cx))
+            });
+            cx.run_until_parked();
+        }
+
+        // A releitura é assíncrona, e a espera dela é um `timer` de 100ms.
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(200));
+        cx.run_until_parked();
+
+        janela
+            .update(cx, |app, _window, cx| {
+                assert_eq!(
+                    app.biblioteca.read(cx).quantas_fotos(),
+                    4,
+                    "as duas do cartão entraram no banco e a grade não releu — \
+                     é o defeito de 17/ago: o modal conta as fotos e a grade fica vazia"
+                );
+                assert_eq!(
+                    *acervo_novo.pedidos.lock().expect("os pedidos"),
+                    1,
+                    "uma releitura por lote, e não uma por colheita"
+                );
             })
             .expect("a janela deve estar aberta");
     }

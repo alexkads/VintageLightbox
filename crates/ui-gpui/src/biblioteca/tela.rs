@@ -223,6 +223,50 @@ impl Biblioteca {
         tela
     }
 
+    /// O acervo foi relido: troca a lista inteira e reconstrói o que dependia
+    /// dela.
+    ///
+    /// 🚨 **É o que faltava para a importação aparecer.** As fotos entravam no
+    /// banco e a grade continuava com a lista lida antes da janela existir — o
+    /// modal contava "65 importadas" sobre um acervo que não mudava. Nada
+    /// falhava, e a leitura de quem usa é que a importação não funciona.
+    ///
+    /// 🔑 **A seleção é preservada por id, e não por índice.** Importar
+    /// acrescenta fotos e a ordenação do acervo não é a de chegada: guardar a
+    /// posição faria a foto principal virar outra — e a Revelação abriria a
+    /// errada depois de qualquer importação.
+    ///
+    /// ⚠️ **As pastas são recalculadas.** Importar cria pasta nova
+    /// (`2026/08/17/`), e uma árvore montada sobre o acervo velho não a teria —
+    /// a foto estaria na grade e sem caminho até ela pela árvore.
+    pub fn trocar_acervo(&mut self, fotos: Vec<PhotoViewModel>, cx: &mut Context<Self>) {
+        let principal = self.foto_selecionada().map(|foto| foto.id);
+        let outras: std::collections::HashSet<String> = self
+            .ids_selecionados()
+            .into_iter()
+            .collect::<std::collections::HashSet<_>>();
+
+        self.fotos = Arc::new(fotos);
+        self.pastas = pastas_do_acervo(&self.fotos);
+
+        let onde = |id: &str| self.fotos.iter().position(|foto| foto.id == id);
+        self.selecionada = principal.as_deref().and_then(onde);
+        self.selecionadas = self
+            .fotos
+            .iter()
+            .enumerate()
+            .filter(|(_, foto)| outras.contains(&foto.id))
+            .map(|(i, _)| i)
+            .collect();
+        // A âncora do `Shift+clique` aponta para uma posição do acervo antigo:
+        // mantê-la faria o próximo intervalo começar numa foto que ninguém
+        // apontou. Estender de novo é um clique; estender errado é invisível.
+        self.ancora = None;
+
+        self.refiltrar();
+        cx.notify();
+    }
+
     /// Monta o dock com o arranjo padrão.
     ///
     /// 🚨 **Só pode ser chamado depois de a entidade existir** — os painéis
@@ -480,6 +524,11 @@ impl Biblioteca {
     }
 
     /// Quantas fotos estão selecionadas.
+    /// Quantas fotos o acervo tem — o número que a releitura muda.
+    pub fn quantas_fotos(&self) -> usize {
+        self.fotos.len()
+    }
+
     pub fn quantas_selecionadas(&self) -> usize {
         self.selecionadas.len()
     }

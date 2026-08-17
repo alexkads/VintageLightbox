@@ -21,8 +21,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use gpui::{
-    actions, div, img, prelude::*, px, uniform_list, ClickEvent, Context, FocusHandle,
-    SharedString, Task, UniformListScrollHandle, Window,
+    actions, div, img, prelude::*, px, uniform_list, ClickEvent, Context, EventEmitter,
+    FocusHandle, SharedString, Task, UniformListScrollHandle, Window,
 };
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::checkbox::Checkbox;
@@ -393,7 +393,13 @@ impl Importacao {
 
         while let Ok(andamento) = self.andamentos.1.try_recv() {
             mudou = true;
-            self.anotar(andamento);
+            if self.anotar(andamento) {
+                // 🚨 Sem isto o lote entra no banco e a grade atrás continua com
+                // a lista lida antes de a janela existir: o modal conta "65
+                // importadas" sobre um acervo que não mudou, e a leitura de quem
+                // usa é que a importação não funciona.
+                cx.emit(Importou);
+            }
         }
 
         if mudou {
@@ -415,10 +421,17 @@ impl Importacao {
         continua
     }
 
-    fn anotar(&mut self, andamento: Andamento) {
+    /// Devolve `true` quando **este** andamento fechou o lote — e só uma vez.
+    ///
+    /// 🔑 A transição importa mais que o estado: quem observa quer saber
+    /// "acabou agora" para reler o catálogo, e `progresso.terminou` continua
+    /// verdadeiro pelo resto da sessão. Avisar a cada colheita faria uma
+    /// releitura do acervo a cada 100ms com o modal aberto.
+    fn anotar(&mut self, andamento: Andamento) -> bool {
         let Some(progresso) = self.progresso.as_mut() else {
-            return;
+            return false;
         };
+        let ja_tinha_terminado = progresso.terminou;
 
         match andamento {
             Andamento::Comecou { total } => progresso.total = total,
@@ -441,6 +454,8 @@ impl Importacao {
                 progresso.terminou = true;
             }
         }
+
+        self.progresso.as_ref().is_some_and(|p| p.terminou) && !ja_tinha_terminado
     }
 
     fn cabecalho(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1012,6 +1027,16 @@ impl Importacao {
         self.progresso.as_ref().is_some_and(|p| !p.terminou)
     }
 }
+
+/// O lote de importação acabou — com sucesso, com falhas, ou os dois.
+///
+/// Quem escuta é o [`crate::app::Aplicativo`], para mandar a Biblioteca reler o
+/// catálogo. O evento **notifica, não descreve**: os números de quem entrou e
+/// quem falhou já estão no [`Progresso`], e o que o ouvinte precisa saber é só
+/// que o banco mudou.
+pub struct Importou;
+
+impl EventEmitter<Importou> for Importacao {}
 
 impl Render for Importacao {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
