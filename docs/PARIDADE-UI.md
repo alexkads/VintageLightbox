@@ -56,7 +56,7 @@ São 23 testes "este controle existe" (HSL matiz ×8, HSL luminância ×8, lente
 | Aplicar o corte (botão) | ✅ o corte é aplicado ao vivo; a barra tem o botão |
 | Grade de composição (terços) | ✅ overlay em `revelacao/tela.rs` |
 | `CropSettings` recusa valor fora de faixa | 🚫 é `domain`, intacto |
-| Cancelar o corte volta ao anterior | ⬜ **falta** — hoje sair do modo mantém o que foi mexido |
+| Cancelar o corte volta ao anterior | ✅ `cancelar_corte` — o corte em edição é uma **cópia**, e só "Aplicar" a promove (teste: `cancelar_nao_grava_e_devolve_o_corte_de_antes`) |
 | O corte sobrevive à troca de foto e ao salvamento | ✅ `tests/gravacao_no_banco.rs` (o corte é devolvido intacto) |
 | Navegar com a seta **grava o corte** da foto que sai | ✅ `andar_na_revelacao_grava_a_foto_que_sai` |
 
@@ -140,13 +140,17 @@ Esta é a lista que a fase 5 tem de zerar — ou registrar como decisão de dono
 2. ⬜ **A tela de Configurações não existe** (limpar miniaturas, limpar cache, estatísticas, e o
    "Reset Docking Layout" que só faz sentido com dock).
 3. ⬜ **Clicar na estrela para dar nota** — hoje só pelas teclas.
-4. ⬜ **Cancelar o corte** volta ao enquadramento anterior.
-5. ⬜ **O aviso do modo `Move`** na importação ("os originais serão apagados").
-6. ⬜ **`Grid Settings`** — escolher de 1 a 5 colunas. Decisão de dono: o legado usa número fixo, a
+4. ⬜ **O aviso do modo `Move`** na importação ("os originais serão apagados").
+5. ⬜ **`Grid Settings`** — escolher de 1 a 5 colunas. Decisão de dono: o legado usa número fixo, a
    grade nova calcula quantas cabem.
-7. ⬜ **O rearranjo de painéis (docking)** — parado, com o custo escrito no plano.
+6. ⬜ **O rearranjo de painéis (docking)** — parado, com o custo escrito no plano.
 
-⚠️ **E o que este documento encontrou de quebra**: os 99 testes E2E do legado **não são 99
+⚠️ **⚠️ **Uma linha desta lista nasceu errada, e a conferência foi no código**: "cancelar o corte" estava
+marcada como faltando, escrita a partir do **nome** do teste do legado. O `cancelar_corte` existe
+desde a fase 2, com teste — o corte em edição sempre foi uma cópia. Extrair comportamento de nome de
+teste é rápido e erra; a linha só vale depois de olhar os dois lados.
+
+E o que este documento encontrou de quebra**: os 99 testes E2E do legado **não são 99
 comportamentos**. Vinte e seis deles afirmam "este controle existe", trinta e um medem o motor de
 imagem (que não é interface), e um retrato de tela não tem como ser portado. O que sobra de
 comportamento de interface de verdade cabe nas nove seções acima — e **sete linhas** é tudo o que
