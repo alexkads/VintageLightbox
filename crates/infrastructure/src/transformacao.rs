@@ -27,7 +27,28 @@
 
 use image::{DynamicImage, GenericImageView, Rgba, RgbaImage};
 
+use domain::entities::Photo;
 use domain::value_objects::CropSettings;
+
+/// O enquadramento gravado na foto, ou a foto inteira quando não há nenhum.
+///
+/// 🔑 **Mora aqui, junto de quem o aplica, e não em cada chamador.** A tela e a
+/// exportação precisam do **mesmo** retângulo: dois lugares lendo os oito campos
+/// com oito `unwrap_or` cada é a forma conhecida de um deles ficar com o padrão
+/// errado — e o sintoma seria o arquivo exportado com um enquadramento que a
+/// tela nunca mostrou.
+pub fn corte_da_entidade(foto: &Photo) -> CropSettings {
+    CropSettings::new(
+        foto.edit_crop_x().unwrap_or(0.0),
+        foto.edit_crop_y().unwrap_or(0.0),
+        foto.edit_crop_width().unwrap_or(1.0),
+        foto.edit_crop_height().unwrap_or(1.0),
+        foto.edit_crop_rotation().unwrap_or(0),
+        foto.edit_crop_angle().unwrap_or(0.0),
+        foto.edit_crop_flip_h().unwrap_or(false),
+        foto.edit_crop_flip_v().unwrap_or(false),
+    )
+}
 
 /// A foto pronta para a tela.
 ///

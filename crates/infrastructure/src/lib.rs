@@ -18,6 +18,11 @@ pub mod raw_processing;
 pub mod scan_directory;
 pub mod source_scanner;
 pub mod thumbnail_generator;
+/// Do pixel revelado ao pixel exibido: corte, giro, espelho e endireitamento.
+///
+/// 🔑 Veio do `ui-gpui` pela mesma razão que o motor: a exportação tem de
+/// entregar o arquivo com o mesmo enquadramento que a tela mostra.
+pub mod transformacao;
 
 // Re-exports for main.rs compatibility
 pub use database::{

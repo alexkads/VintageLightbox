@@ -41,8 +41,8 @@ use super::paineis::{PainelDaRevelacao, Qual};
 use super::persistencia::{self, Corte, Gravador};
 use super::presets::{self, GuardaDePresets};
 use super::processador::{Ajustes, Pedido, Processador};
-use super::transformacao;
 use crate::biblioteca::arranjo;
+use infrastructure::transformacao;
 
 /// Largura do painel de ajustes.
 const LADO_DO_PAINEL: f32 = 280.0;

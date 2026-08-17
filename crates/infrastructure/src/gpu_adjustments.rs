@@ -191,6 +191,84 @@ impl Default for Ajustes {
         }
     }
 }
+
+impl Ajustes {
+    /// A revelação que a foto tem gravada.
+    ///
+    /// 🔑 **O padrão de campo ausente vem de [`Ajustes::default`], campo a
+    /// campo, e não de 46 números digitados aqui.** O legado escrevia
+    /// `photo.edit_exposure().unwrap_or(0.0)` quarenta e seis vezes, com o
+    /// neutro repetido em cada linha — e dois deles não são zero (`contrast` e
+    /// `sharpen_radius`). Um `unwrap_or` errado no contraste achataria a foto
+    /// inteira em cinza, e a suspeita cairia no motor de cor, não na leitura.
+    ///
+    /// ⚠️ **`Some(0.0)` no contraste é o fotógrafo tendo arrastado até o fim**, e
+    /// não pode ser confundido com ausência — que é por que isto é `if let
+    /// Some`, e não `unwrap_or_default`.
+    pub fn da_entidade(foto: &domain::entities::Photo) -> Self {
+        let mut ajustes = Self::default();
+
+        macro_rules! ler {
+            ($($campo:ident <- $salvo:ident),* $(,)?) => {
+                $(if let Some(valor) = foto.$salvo() {
+                    ajustes.$campo = valor;
+                })*
+            };
+        }
+
+        ler! {
+            exposure <- edit_exposure,
+            contrast <- edit_contrast,
+            temperature <- edit_temperature,
+            tint <- edit_tint,
+            highlights <- edit_highlights,
+            shadows <- edit_shadows,
+            whites <- edit_whites,
+            blacks <- edit_blacks,
+            clarity <- edit_clarity,
+            vibrance <- edit_vibrance,
+            saturation <- edit_saturation,
+            tone_curve_shadows <- edit_tone_curve_shadows,
+            tone_curve_darks <- edit_tone_curve_darks,
+            tone_curve_lights <- edit_tone_curve_lights,
+            tone_curve_highlights <- edit_tone_curve_highlights,
+            hsl_red_sat <- edit_hsl_red_sat,
+            hsl_orange_sat <- edit_hsl_orange_sat,
+            hsl_yellow_sat <- edit_hsl_yellow_sat,
+            hsl_green_sat <- edit_hsl_green_sat,
+            hsl_aqua_sat <- edit_hsl_aqua_sat,
+            hsl_blue_sat <- edit_hsl_blue_sat,
+            hsl_purple_sat <- edit_hsl_purple_sat,
+            hsl_magenta_sat <- edit_hsl_magenta_sat,
+            hsl_red_hue <- edit_hsl_red_hue,
+            hsl_orange_hue <- edit_hsl_orange_hue,
+            hsl_yellow_hue <- edit_hsl_yellow_hue,
+            hsl_green_hue <- edit_hsl_green_hue,
+            hsl_aqua_hue <- edit_hsl_aqua_hue,
+            hsl_blue_hue <- edit_hsl_blue_hue,
+            hsl_purple_hue <- edit_hsl_purple_hue,
+            hsl_magenta_hue <- edit_hsl_magenta_hue,
+            hsl_red_lum <- edit_hsl_red_lum,
+            hsl_orange_lum <- edit_hsl_orange_lum,
+            hsl_yellow_lum <- edit_hsl_yellow_lum,
+            hsl_green_lum <- edit_hsl_green_lum,
+            hsl_aqua_lum <- edit_hsl_aqua_lum,
+            hsl_blue_lum <- edit_hsl_blue_lum,
+            hsl_purple_lum <- edit_hsl_purple_lum,
+            hsl_magenta_lum <- edit_hsl_magenta_lum,
+            lens_distortion <- edit_lens_distortion,
+            lens_vignette_amount <- edit_lens_vignette_amount,
+            lens_vignette_midpoint <- edit_lens_vignette_midpoint,
+            nr_luminance <- edit_nr_luminance,
+            nr_color <- edit_nr_color,
+            sharpen_amount <- edit_sharpen_amount,
+            sharpen_radius <- edit_sharpen_radius,
+        }
+
+        ajustes
+    }
+}
+
 /// Recursos por tamanho de imagem.
 ///
 /// Trocar de foto no mesmo tamanho reaproveita textura e buffer; trocar de
