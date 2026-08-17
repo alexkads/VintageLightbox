@@ -736,6 +736,34 @@ impl Importacao {
                         })),
                 ),
             )
+            .children(self.avisos(cx))
+    }
+
+    /// Os dois avisos do painel: duplicatas encontradas e originais que somem.
+    ///
+    /// 🚨 **O do `Move` é o único aviso deste app sobre algo irreversível.**
+    /// Importar movendo **apaga o arquivo da origem** depois de copiá-lo — e o
+    /// cartão é o único lugar onde a foto existia até aquele instante. O legado
+    /// escreve "Os originais serão apagados da origem" em vermelho, e essa frase
+    /// é o que separa uma escolha informada de uma descoberta depois.
+    ///
+    /// ⚠️ **Ele só aparece com foto marcada**, como no legado: um aviso sobre
+    /// apagar nada é ruído, e ruído é o que ensina a ignorar aviso.
+    fn avisos(&self, cx: &mut Context<Self>) -> Vec<gpui::AnyElement> {
+        avisos_do_painel(
+            self.estado.opcoes.mode,
+            self.estado.marcados(),
+            self.estado.duplicados(),
+        )
+        .into_iter()
+        .map(|qual| {
+            let cor = match qual {
+                Aviso::JaNoCatalogo(_) => cx.theme().warning,
+                Aviso::OriginaisSeraoApagados => cx.theme().danger,
+            };
+            faixa_de_aviso(&qual.texto(), cor, cx).into_any_element()
+        })
+        .collect()
     }
 
     /// O lado da miniatura na célula.
@@ -1058,9 +1086,116 @@ fn tamanho_legivel(bytes: u64) -> String {
     }
 }
 
+/// O que o painel tem a avisar antes de o botão ser apertado.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Aviso {
+    /// Quantas das listadas já estão no catálogo.
+    JaNoCatalogo(usize),
+    /// 🚨 O único aviso deste app sobre algo **irreversível**.
+    OriginaisSeraoApagados,
+}
+
+impl Aviso {
+    pub fn texto(&self) -> String {
+        match self {
+            // "1 já **está**", "3 já **estão**". O legado escreve sempre
+            // "estão", e "1 já estão no catálogo" faz quem lê desconfiar do
+            // número que vem junto.
+            Aviso::JaNoCatalogo(1) => "1 já está no catálogo".to_string(),
+            Aviso::JaNoCatalogo(quantas) => format!("{quantas} já estão no catálogo"),
+            Aviso::OriginaisSeraoApagados => "Os originais serão apagados da origem".to_string(),
+        }
+    }
+}
+
+/// Quais avisos aparecem, dadas as escolhas e a listagem.
+///
+/// 🚨 **O do `Move` é o único aviso deste app sobre algo irreversível.** Importar
+/// movendo **apaga o arquivo da origem** depois de copiá-lo — e o cartão é o
+/// único lugar onde a foto existia até aquele instante. O legado escreve a mesma
+/// frase em vermelho, e ela é o que separa uma escolha informada de uma
+/// descoberta depois.
+///
+/// ⚠️ **Ele só aparece com foto marcada**, como no legado: avisar sobre apagar
+/// nada é ruído, e ruído é o que ensina a ignorar aviso.
+///
+/// 🔑 **A ordem é a do legado, e ela importa**: o mais grave fica por último,
+/// colado no botão que executa.
+pub fn avisos_do_painel(modo: ImportMode, marcados: usize, duplicados: usize) -> Vec<Aviso> {
+    let mut avisos = Vec::new();
+
+    if duplicados > 0 {
+        avisos.push(Aviso::JaNoCatalogo(duplicados));
+    }
+    if modo == ImportMode::Move && marcados > 0 {
+        avisos.push(Aviso::OriginaisSeraoApagados);
+    }
+
+    avisos
+}
+
+/// Uma faixa de aviso, com a cor dizendo a gravidade.
+fn faixa_de_aviso(texto: &str, cor: gpui::Hsla, cx: &gpui::App) -> impl IntoElement {
+    div()
+        .mt(px(6.))
+        .px(px(6.))
+        .py(px(4.))
+        .rounded(cx.theme().radius)
+        // Fundo tingido da própria cor, e não a cor cheia: um retângulo vermelho
+        // sólido num painel escuro grita mais alto que o texto que ele carrega.
+        .bg(cor.opacity(0.15))
+        .border_l_2()
+        .border_color(cor)
+        .text_xs()
+        .text_color(cor)
+        .child(SharedString::from(texto.to_string()))
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;
+
+    /// 🚨 O aviso do `Move` aparece só quando há o que apagar.
+    ///
+    /// É o único aviso deste app sobre algo irreversível: importar movendo apaga
+    /// o arquivo da origem, e o cartão era o único lugar onde a foto existia. Um
+    /// aviso que não aparece na hora certa é o mesmo que não existir; um que
+    /// aparece sempre ensina a ser ignorado.
+    #[test]
+    fn o_aviso_do_move_depende_do_modo_e_de_haver_foto_marcada() {
+        assert_eq!(
+            avisos_do_painel(ImportMode::Move, 3, 0),
+            vec![Aviso::OriginaisSeraoApagados]
+        );
+        assert!(
+            avisos_do_painel(ImportMode::Move, 0, 0).is_empty(),
+            "sem foto marcada não há o que apagar"
+        );
+        assert!(
+            avisos_do_painel(ImportMode::Copy, 3, 0).is_empty(),
+            "copiar não apaga a origem"
+        );
+        assert!(
+            avisos_do_painel(ImportMode::Add, 3, 0).is_empty(),
+            "e `Add` nem move o arquivo"
+        );
+    }
+
+    /// Os dois avisos convivem, com o mais grave por último — colado no botão.
+    #[test]
+    fn os_dois_avisos_convivem_com_o_mais_grave_por_ultimo() {
+        assert_eq!(
+            avisos_do_painel(ImportMode::Move, 40, 8),
+            vec![Aviso::JaNoCatalogo(8), Aviso::OriginaisSeraoApagados]
+        );
+    }
+
+    /// "1 já **está**", "3 já **estão**" — o legado escreve sempre "estão".
+    #[test]
+    fn o_aviso_de_duplicadas_concorda_com_o_numero() {
+        assert_eq!(Aviso::JaNoCatalogo(1).texto(), "1 já está no catálogo");
+        assert_eq!(Aviso::JaNoCatalogo(3).texto(), "3 já estão no catálogo");
+    }
 
     use gpui::TestAppContext;
 

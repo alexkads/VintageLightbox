@@ -87,7 +87,7 @@ São 23 testes "este controle existe" (HSL matiz ×8, HSL luminância ×8, lente
 | Importar devolve os caminhos marcados | ✅ `importacao/explorador.rs` (porta `Importador`) |
 | Desmarcar todas desabilita a importação | ✅ |
 | Cancelar fecha sem importar | ✅ `fechar_importacao` — ⚠️ e **guarda a marcação**, que o legado joga fora |
-| O modo `Move` avisa que vai apagar os originais | ⬜ **falta o aviso** — o modo existe, o texto de alerta não |
+| O modo `Move` avisa que vai apagar os originais | ✅ `avisos_do_painel` — e só com foto marcada, como no legado |
 | O modo `Add` esconde o destino | ✅ `importacao/destino.rs` |
 | Sem origem escolhida, a grade orienta em vez de ficar vazia | ✅ |
 | Retrato da tela (snapshot) | 🚫 `TestAppContext` não faz snapshot visual (§6 do plano) |
@@ -140,10 +140,9 @@ Esta é a lista que a fase 5 tem de zerar — ou registrar como decisão de dono
 2. ⬜ **A tela de Configurações não existe** (limpar miniaturas, limpar cache, estatísticas, e o
    "Reset Docking Layout" que só faz sentido com dock).
 3. ⬜ **Clicar na estrela para dar nota** — hoje só pelas teclas.
-4. ⬜ **O aviso do modo `Move`** na importação ("os originais serão apagados").
-5. ⬜ **`Grid Settings`** — escolher de 1 a 5 colunas. Decisão de dono: o legado usa número fixo, a
+4. ⬜ **`Grid Settings`** — escolher de 1 a 5 colunas. Decisão de dono: o legado usa número fixo, a
    grade nova calcula quantas cabem.
-6. ⬜ **O rearranjo de painéis (docking)** — parado, com o custo escrito no plano.
+5. ⬜ **O rearranjo de painéis (docking)** — parado, com o custo escrito no plano.
 
 ⚠️ **⚠️ **Uma linha desta lista nasceu errada, e a conferência foi no código**: "cancelar o corte" estava
 marcada como faltando, escrita a partir do **nome** do teste do legado. O `cancelar_corte` existe
