@@ -314,15 +314,17 @@ Não são erros de compilação; são features que a UI mostra como prontas e qu
    `exposure: 0.0` marcado como *Placeholder*. Medido na GPU em 16/ago/2026
    (`o_preset_bw_do_legado_nao_da_preto_e_branco`, em `crates/ui-gpui`). Vale para os dois apps — os
    presets vêm do mesmo use case.
-1. 🚨 **A exportação ignora o crop.** `ImageExporterImpl::export` abre o arquivo original, aplica os
-   ajustes tonais e grava — sem nenhuma referência a crop, rotação ou flip. O usuário corta a foto,
-   vê o corte no viewer e nos thumbnails, exporta e recebe a imagem inteira.
-   🚨 **E é bem maior que o crop** (medido em 15/ago/2026, ao portar o motor para GPUI):
-   `ImageExporterImpl::process_image` aplica **15** ajustes; o shader que desenha a tela aplica
-   **46**. A exportação descarta em silêncio a **curva de tons** inteira (4), o **HSL inteiro** —
-   saturação, matiz e luminância nos 8 canais (24) — e a **lente** (3). Quem revela mexendo em HSL vê
-   o resultado na tela, exporta e recebe outra imagem. A conta está em
-   [docs/10-MIGRACAO-GPUI.md](10-MIGRACAO-GPUI.md), §"Fase 2", com o script que a refaz.
+1. ✅ ~~**A exportação ignora o crop, e descarta 31 dos 46 ajustes.**~~ —
+   **consertado em 17/ago/2026.** Não era "os mesmos ajustes com menos campos": era uma **segunda
+   implementação** da mesma matemática, na CPU, que divergia até nos 15 que aplicava — o ruído do
+   shader é bilateral e o de lá era `img.blur`; a nitidez entrava antes dos tons no shader e depois
+   no exportador. Quem revelava mexendo em HSL via um resultado na tela e recebia outro no disco.
+   🔑 **O conserto não foi acrescentar os 31 que faltavam** — isso seria a terceira implementação. O
+   motor de GPU saiu do `ui-gpui` para a `infrastructure` (`gpu_adjustments.rs`) e a exportação passa
+   pelo **mesmo** `.wgsl` e pela mesma `transformacao` que a tela. Três testes gravam arquivo e leem
+   de volta (`crates/infrastructure/tests/exportacao.rs`).
+   ⚠️ **Custa uma dependência nova**: sem adaptador de GPU, não exporta. O caminho de CPU dava outro
+   resultado, e guardá-lo como reserva seria manter o defeito de pé disfarçado de robustez.
 2. 🚨 **O undo/redo ignora o crop — e é pior do que estava escrito aqui.** `EditSnapshot`
    (`crates/ui/src/state.rs:20`) **tem** o campo `crop_settings`, e `push_edit_snapshot` o preenche;
    quem lê o struct conclui que funciona. Mas nem `undo` nem `redo` o leem de volta (conferido em
@@ -374,6 +376,18 @@ Não são erros de compilação; são features que a UI mostra como prontas e qu
 13. 🚨 **`views/develop_view.rs` (1.301 LOC) e `views/library_view.rs` (175 LOC) são código morto.**
     O `app.rs` não os menciona — quem desenha as duas telas é o dock. ⚠️ O `library_view.rs:117` que
     a lacuna 4 cita como "Coleções: UI é um TODO" está dentro do arquivo morto.
+15. ✅ ~~**Importar não aparecia na Biblioteca.**~~ — **consertado em 17/ago/2026**, relatado com a
+    tela na mão: o modal dizia "65 importadas · 1 falharam" e a grade atrás não mudava. A importação
+    **funcionava** — as 65 estavam no banco e no disco. Faltava o fio de volta: `main.rs` lê o acervo
+    uma vez, antes de a janela existir, e ninguém relia. As fotos só apareciam ao reabrir o app.
+    Entrou a porta `Acervo` (`biblioteca/acervo.rs`), o evento `Importou` e
+    `Biblioteca::trocar_acervo`.
+16. 🚨 **DNG com compressão *lossy* não importa.** Medido em 17/ago/2026 num `_CSF7953.dng` (Nikon
+    D7200, DNG 1.4, SubIFD `Compression = 34892`, 2560×1707 — um DNG exportado com "lossy
+    compressed"). O erro é `LibRaw failed to open: FileUnsupported`. **A causa não é o arquivo**: o
+    `build.rs` do `rsraw-sys` compila a LibRaw **sem** `USE_JPEG` e sem `USE_ZLIB`, e o caminho de
+    DNG com perdas exige libjpeg. RAW nativo de câmera (NEF, CR2) não passa por ali e continua
+    abrindo. As saídas são compilar a LibRaw com libjpeg ou cair na prévia embutida do próprio DNG.
 14. ⚠️ **O painel "Quick Develop" mostra a fileira de cores sempre vazia e sem clique**
     (`ColorLabels::show(ui, &None, false)`), e o gráfico de câmeras desenha cinco barras com três
     nomes embaixo — as duas últimas ficam anônimas.
