@@ -49,11 +49,18 @@ pub trait RawDecoder: Send + Sync {
 /// Serviço para exportação de imagens processadas
 #[async_trait]
 pub trait ImageExporter: Send + Sync {
-    /// Exporta a foto aplicando as edições para o caminho de destino
+    /// Exporta a foto aplicando as edições para o caminho de destino.
+    ///
+    /// 🔑 **As opções não são opcionais.** Elas carregam a marca d'água, que é a
+    /// regra que separa entregar de mostrar: a foto comprada vai inteira, a que
+    /// ficou para trás vai marcada. Um `export` sem opções deixaria "sem marca"
+    /// como caminho mais curto — e o caminho mais curto é o que se pega no dia
+    /// em que a atenção falta.
     async fn export(
         &self,
         photo: &crate::entities::Photo,
         output_path: &FilePath,
+        options: &crate::value_objects::ExportOptions,
     ) -> DomainResult<()>;
 }
 

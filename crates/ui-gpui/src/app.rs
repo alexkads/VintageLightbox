@@ -1102,6 +1102,7 @@ mod testes {
     use crate::biblioteca::marcacao::mentira::MarcadorDeMentira;
     use crate::biblioteca::marcacao::Marca;
     use crate::exportacao::porta::mentira::ExportadorDeMentira;
+    use crate::exportacao::tela::Modo;
     use crate::importacao::explorador::mentira::{
         ExploradorDeMentira, GeradorDeMentira, ImportadorDeMentira, SeletorDeMentira,
     };
@@ -2365,6 +2366,142 @@ mod testes {
                 });
             })
             .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 **A prévia não sai sem marca d'água.**
+    ///
+    /// É o teste mais importante da exportação, e o defeito que ele impede é o
+    /// pior que este aplicativo pode cometer: a foto que o cliente **não
+    /// comprou** indo legível e em tamanho cheio para a galeria. Nada falharia —
+    /// o lote termina, o rodapé conta certo, e os arquivos estão lá.
+    ///
+    /// 🔑 O botão desligado não é a defesa; é o sintoma dela. Quem decide é
+    /// `opcoes()`, que devolve `None` — e `exportar` sai sem pedir nada.
+    #[gpui::test]
+    fn a_previa_nao_sai_sem_marca_dagua(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+
+        let exportador = Arc::new(ExportadorDeMentira::default());
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            let exportador = exportador.clone();
+            |window, cx| {
+                Aplicativo::novo(
+                    acervo(),
+                    previews,
+                    Vec::new(),
+                    Portas {
+                        exportador,
+                        ..portas()
+                    },
+                    window,
+                    cx,
+                )
+            }
+        });
+
+        let pasta = tempfile::tempdir().expect("pasta de saída");
+        janela
+            .update(cx, |app, _window, cx| {
+                app.exportar(cx);
+                app.exportacao.update(cx, |tela, cx| {
+                    tela.escolher_pasta_para_teste(pasta.path().to_path_buf(), cx);
+                    tela.escolher_modo(Modo::Previa, cx);
+                    assert!(
+                        tela.opcoes().is_none(),
+                        "sem marca escolhida não pode haver opções válidas"
+                    );
+                    tela.exportar(cx);
+                });
+            })
+            .expect("a janela deve estar aberta");
+
+        assert!(
+            exportador.pedidos().is_empty(),
+            "a prévia saiu sem marca d'água — a foto não comprada iria legível para a galeria"
+        );
+
+        // Com a marca escolhida, sai — e leva a marca junto.
+        let logo = pasta.path().join("logo.png");
+        janela
+            .update(cx, |app, _window, cx| {
+                app.exportacao.update(cx, |tela, cx| {
+                    tela.escolher_marca_para_teste(logo.clone(), cx);
+                    tela.exportar(cx);
+                });
+            })
+            .expect("a janela deve estar aberta");
+
+        let opcoes = exportador
+            .opcoes
+            .lock()
+            .expect("as opções")
+            .clone()
+            .expect("o lote saiu");
+        let marca = opcoes.watermark().expect("a prévia tem de levar marca");
+        assert_eq!(marca.file().as_str().unwrap(), logo.to_str().unwrap());
+        assert_eq!(
+            opcoes.longest_edge(),
+            Some(2048),
+            "a prévia também reduz — tamanho cheio na galeria é entrega, não prévia"
+        );
+    }
+
+    /// ⚠️ **A entrega final vai inteira e sem marca**, e o modo padrão é ela.
+    ///
+    /// O padrão importa: se fosse a prévia, a primeira exportação de um cliente
+    /// sairia com logotipo em cima — visível, e por isso corrigível. Sendo a
+    /// entrega, o erro possível é o inverso e **não** é visível, e é por isso que
+    /// o modo aparece escrito na tela em vez de ficar implícito.
+    #[gpui::test]
+    fn a_entrega_final_e_o_padrao_e_vai_sem_marca(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+
+        let exportador = Arc::new(ExportadorDeMentira::default());
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            let exportador = exportador.clone();
+            |window, cx| {
+                Aplicativo::novo(
+                    acervo(),
+                    previews,
+                    Vec::new(),
+                    Portas {
+                        exportador,
+                        ..portas()
+                    },
+                    window,
+                    cx,
+                )
+            }
+        });
+
+        let pasta = tempfile::tempdir().expect("pasta de saída");
+        janela
+            .update(cx, |app, _window, cx| {
+                app.exportar(cx);
+                app.exportacao.update(cx, |tela, cx| {
+                    assert_eq!(tela.modo(), Modo::Entrega, "o padrão é a entrega");
+                    tela.escolher_pasta_para_teste(pasta.path().to_path_buf(), cx);
+                    tela.exportar(cx);
+                });
+            })
+            .expect("a janela deve estar aberta");
+
+        let opcoes = exportador
+            .opcoes
+            .lock()
+            .expect("as opções")
+            .clone()
+            .expect("o lote saiu");
+        assert!(opcoes.watermark().is_none(), "a entrega não leva marca");
+        assert_eq!(
+            opcoes.longest_edge(),
+            None,
+            "a entrega vai no tamanho cheio"
+        );
     }
 
     /// ⚠️ **A falha de uma foto não some, e não interrompe o lote.**

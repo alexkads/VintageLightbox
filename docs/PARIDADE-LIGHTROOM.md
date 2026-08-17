@@ -33,16 +33,25 @@ enquadramento aplicados**, pelo mesmo `.wgsl` que desenha a tela.
 🔑 **Isto é infraestrutura do objetivo, e não um item de lista** ([`00-OBJETIVO.md`](00-OBJETIVO.md)):
 é a exportação que alimenta a galeria do cliente no `recordarfotos.com.br`.
 
-| O que falta, e o Lightroom tem | Por que importa aqui |
-|---|---|
-| 🚨 **Marca d'água** | é o que permite mostrar a foto **deixada para trás** sem entregá-la — o upsell inteiro depende disso |
-| 🚨 **Redimensionamento** | a galeria não recebe arquivo de 40 MP; e o tamanho da prévia não é o da foto comprada |
-| ⬜ Formato (TIFF/PNG/DNG), qualidade, espaço de cor | |
-| ⬜ Nitidez de saída, renomeação por padrão | |
-| ⬜ **Predefinições de exportação** | "prévia com marca d'água" e "entrega final" são dois botões, não dois preenchimentos de formulário |
+✅ **E desde 17/ago ela tem os dois modos que o ecossistema pede**, como par de botões e não como
+formulário:
 
-⚠️ **Os cinco primeiros mudam a assinatura de `ImageExporter::export`**, que hoje grava JPEG 90 fixo.
-Entram juntos, num commit que mexe no `domain`.
+| Modo | O que faz | Para quê |
+|---|---|---|
+| **Entrega final** (padrão) | tamanho original, sem marca | o que o cliente comprou |
+| **Prévia da galeria** | lado maior 2048 px, marca d'água no centro a 55% | o que ficou para trás |
+
+🚨 **A prévia não sai sem marca escolhida.** `Exportacao::opcoes` devolve `None` e o botão fica
+desligado — porque o arquivo que sairia é exatamente o que não pode existir: a foto não comprada,
+legível e em tamanho cheio, na galeria. Pelo mesmo motivo, **marca ilegível derruba a exportação** em
+vez de deixá-la sair limpa.
+
+| O que ainda falta, e o Lightroom tem | |
+|---|---|
+| ⬜ Formato (TIFF/PNG/DNG), espaço de cor, nitidez de saída | |
+| ⬜ Qualidade e tamanho ajustáveis pela tela | existem em `ExportOptions`; a tela ainda não os expõe |
+| ⬜ Renomeação por padrão | |
+| ⬜ Posição e opacidade da marca escolhidas na tela | o `domain` aceita as cinco posições |
 
 ---
 
@@ -137,7 +146,7 @@ galeria do cliente**, e o que é defeito visível na tela.
 |--:|---|---|
 | 1 | ~~**Exportação: da tela ao arquivo**~~ | ✅ **feito em 17/ago** |
 | 2 | ~~**Os 19 sliders inertes**~~ | ✅ **feito em 17/ago** — o painel move os 42 |
-| 3 | **Marca d'água e redimensionamento na exportação** | é o que a foto "deixada para trás" precisa para ir ao site sem ser entregue. **Sem isto o upsell não existe** |
+| 3 | ~~**Marca d'água e redimensionamento**~~ | ✅ **feito em 17/ago** — dois modos: entrega final e prévia da galeria |
 | 4 | **Coleções na tela** | "o ensaio do cliente" **é** uma coleção, e "comprada" × "deixada para trás" é a divisão dentro dela. O backend está pronto e testado há meses |
 | 5 | **Copiar/colar revelação entre fotos** | o atalho que transforma 800 fotos numa sessão viável |
 | 6 | **A curva de tons ganha controles** | o shader já aplica os 4 `tone_curve_*`; falta quem escreva |

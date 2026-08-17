@@ -32,7 +32,7 @@
 use async_trait::async_trait;
 use domain::entities::Photo;
 use domain::services::ImageExporter;
-use domain::value_objects::FilePath;
+use domain::value_objects::{ExportOptions, FilePath, Watermark, WatermarkPosition};
 use domain::{DomainError, DomainResult};
 use image::DynamicImage;
 use std::path::Path;
@@ -101,9 +101,92 @@ impl ImageExporterImpl {
     }
 }
 
+/// Limita o lado maior, **sem nunca ampliar**.
+///
+/// ⚠️ **Ampliar é a resposta errada para toda pergunta que a galeria faz.** Pedir
+/// 2048 px numa foto de 1200 devolveria 2048 px de nada — o mesmo detalhe
+/// espalhado, com arquivo maior e nitidez menor. É o "Don't Enlarge" do
+/// Lightroom, e aqui ele não é opção: é o comportamento.
+fn redimensionar(imagem: DynamicImage, lado_maior: u32) -> DynamicImage {
+    let (largura, altura) = (imagem.width(), imagem.height());
+    let maior = largura.max(altura);
+    if maior <= lado_maior {
+        return imagem;
+    }
+
+    let fator = lado_maior as f32 / maior as f32;
+    let nova_largura = ((largura as f32 * fator).round() as u32).max(1);
+    let nova_altura = ((altura as f32 * fator).round() as u32).max(1);
+
+    // Lanczos3 porque o destino é ver: reduzir com filtro rápido devolve serrilha
+    // nas bordas, e a foto da galeria é justamente a que vai ser olhada de perto
+    // por quem está decidindo se compra.
+    imagem.resize_exact(
+        nova_largura,
+        nova_altura,
+        image::imageops::FilterType::Lanczos3,
+    )
+}
+
+/// Compõe a marca d'água por cima da foto.
+///
+/// 🚨 **Se a marca não puder ser aplicada, a exportação falha.** É a única falha
+/// deste arquivo que não é técnica: exportar sem a marca uma foto que devia ir
+/// marcada **entrega a foto que o cliente não comprou**. Um arquivo a menos é um
+/// reexport; um arquivo sem marca na galeria não volta atrás.
+fn aplicar_marca(base: &DynamicImage, marca: &Watermark) -> DomainResult<DynamicImage> {
+    let caminho = marca.file().as_str()?;
+    let logo = image::open(Path::new(&caminho)).map_err(|e| {
+        DomainError::InfrastructureError(format!(
+            "não foi possível abrir a marca d'água ({caminho}): {e}"
+        ))
+    })?;
+
+    let (largura, altura) = (base.width(), base.height());
+    let alvo_largura = ((largura as f32 * marca.scale()).round() as u32).max(1);
+    let fator = alvo_largura as f32 / logo.width().max(1) as f32;
+    let alvo_altura = ((logo.height() as f32 * fator).round() as u32).max(1);
+
+    let logo = logo.resize_exact(
+        alvo_largura.min(largura),
+        alvo_altura.min(altura),
+        image::imageops::FilterType::Lanczos3,
+    );
+
+    let margem = (largura.min(altura) as f32 * marca.margin()).round() as i64;
+    let (lw, lh) = (logo.width() as i64, logo.height() as i64);
+    let (bw, bh) = (largura as i64, altura as i64);
+    let (x, y) = match marca.position() {
+        WatermarkPosition::Center => ((bw - lw) / 2, (bh - lh) / 2),
+        WatermarkPosition::TopLeft => (margem, margem),
+        WatermarkPosition::TopRight => (bw - lw - margem, margem),
+        WatermarkPosition::BottomLeft => (margem, bh - lh - margem),
+        WatermarkPosition::BottomRight => (bw - lw - margem, bh - lh - margem),
+    };
+
+    // 🔑 A opacidade multiplica o alfa **que a marca já tem**, e não substitui.
+    // Substituir faria o retângulo transparente em volta do logotipo virar um
+    // véu cinza sobre a foto — o PNG tem alfa por um motivo.
+    let mut logo = logo.to_rgba8();
+    if marca.opacity() < 1.0 {
+        for pixel in logo.pixels_mut() {
+            pixel[3] = (pixel[3] as f32 * marca.opacity()).round() as u8;
+        }
+    }
+
+    let mut saida = base.to_rgba8();
+    image::imageops::overlay(&mut saida, &logo, x, y);
+    Ok(DynamicImage::ImageRgba8(saida))
+}
+
 #[async_trait]
 impl ImageExporter for ImageExporterImpl {
-    async fn export(&self, photo: &Photo, output_path: &FilePath) -> DomainResult<()> {
+    async fn export(
+        &self,
+        photo: &Photo,
+        output_path: &FilePath,
+        options: &ExportOptions,
+    ) -> DomainResult<()> {
         let input_path = photo.file_path().as_str()?;
 
         let img = image::open(Path::new(&input_path)).map_err(|e| {
@@ -115,17 +198,30 @@ impl ImageExporter for ImageExporterImpl {
         // o que o processador devolveu). Inverter daria uma vinheta centrada no
         // quadro cortado em vez de no original.
         let revelada = self.revelar(&img, &Ajustes::da_entidade(photo))?;
-        let enquadrada =
+        let mut saida =
             transformacao::aplicar(&revelada, &transformacao::corte_da_entidade(photo), true);
 
+        // ⚠️ Redimensionar **antes** da marca, e as duas coisas dependem disso:
+        // reduzir depois reamostraria a marca junto (ela sai borrada, e é o
+        // elemento mais fino da imagem), e o tamanho dela é uma fração do que se
+        // vai ver — não do que se revelou.
+        if let Some(lado_maior) = options.longest_edge() {
+            saida = redimensionar(saida, lado_maior);
+        }
+
+        if let Some(marca) = options.watermark() {
+            saida = aplicar_marca(&saida, marca)?;
+        }
+
         let output_path_str = output_path.as_str()?;
-        let rgb_img = enquadrada.to_rgb8();
+        let rgb_img = saida.to_rgb8();
 
         let file = std::fs::File::create(Path::new(output_path_str)).map_err(|e| {
             DomainError::InfrastructureError(format!("Failed to create output file: {}", e))
         })?;
 
-        let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(file, 90);
+        let mut encoder =
+            image::codecs::jpeg::JpegEncoder::new_with_quality(file, options.quality());
         encoder
             .encode(
                 &rgb_img,

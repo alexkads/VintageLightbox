@@ -25,7 +25,9 @@ use std::time::Duration;
 use adapters::view_models::PhotoViewModel;
 use gpui::{div, prelude::*, px, Context, SharedString, Task, Window};
 use gpui_component::button::{Button, ButtonVariants};
-use gpui_component::{ActiveTheme, Disableable, Sizable};
+use gpui_component::{ActiveTheme, Disableable, Selectable, Sizable};
+
+use domain::value_objects::{ExportOptions, FilePath, Watermark, WatermarkPosition};
 
 use crate::importacao::estado::Recado;
 use crate::importacao::explorador::SeletorDePasta;
@@ -39,6 +41,43 @@ const INTERVALO_DE_COLHEITA: Duration = Duration::from_millis(100);
 /// A extensão de saída. Fixa enquanto o formato não é escolha da tela — e
 /// **declarada aqui, e não espalhada**, para o dia em que virar.
 const EXTENSAO: &str = "jpg";
+
+/// Os dois desfechos de uma exportação neste estúdio.
+///
+/// 🔑 **São dois botões, e não dois preenchimentos do mesmo formulário.** A
+/// diferença entre eles não é de configuração: é *entregar* contra *mostrar*, e
+/// é a decisão que o fotógrafo já toma na triagem — esta foi comprada, esta
+/// ficou para trás. Um formulário com seis campos deixaria a escolha certa
+/// depender de lembrar de seis coisas, e a foto não comprada iria inteira para a
+/// galeria no dia em que alguém esquecesse uma delas.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Modo {
+    /// O que o cliente comprou: tamanho original, sem marca.
+    #[default]
+    Entrega,
+    /// O que ficou para trás: reduzida e marcada, para a galeria.
+    Previa,
+}
+
+impl Modo {
+    pub fn rotulo(self) -> &'static str {
+        match self {
+            Modo::Entrega => "Entrega final",
+            Modo::Previa => "Prévia da galeria",
+        }
+    }
+
+    pub fn explicacao(self) -> &'static str {
+        match self {
+            Modo::Entrega => "tamanho original, sem marca d'água",
+            Modo::Previa => "lado maior 2048 px, com a marca d'água no centro",
+        }
+    }
+}
+
+/// O lado maior da prévia. 2048 px é o que uma galeria mostra em tela cheia num
+/// monitor comum, e é pequeno o bastante para não servir de entrega.
+const LADO_DA_PREVIA: u32 = 2048;
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Progresso {
@@ -58,6 +97,11 @@ pub struct Exportacao {
     /// numa miniatura enquanto ele roda.
     fotos: Vec<PhotoViewModel>,
     pasta: Option<PathBuf>,
+    modo: Modo,
+    /// O arquivo da marca d'água — um PNG com transparência, o logotipo do
+    /// estúdio. Guardado entre exportações: escolher o mesmo logotipo a cada
+    /// lote é atrito puro.
+    marca: Option<PathBuf>,
     progresso: Option<Progresso>,
     /// O último nome gravado, para a tela mostrar que algo está acontecendo.
     ultimo: Option<SharedString>,
@@ -65,6 +109,10 @@ pub struct Exportacao {
     andamentos: (Sender<Andamento>, Receiver<Andamento>),
     recados: (Sender<Recado>, Receiver<Recado>),
     esperando_pasta: bool,
+    /// Para qual campo a resposta do seletor vai. Sem isto, escolher a marca
+    /// d'água mudaria a pasta de destino — e o lote sairia dentro da pasta do
+    /// logotipo.
+    escolhendo_marca: bool,
     colhendo: bool,
     _colheita: Option<Task<()>>,
 }
@@ -76,12 +124,15 @@ impl Exportacao {
             seletor,
             fotos: Vec::new(),
             pasta: None,
+            modo: Modo::default(),
+            marca: None,
             progresso: None,
             ultimo: None,
             aviso: None,
             andamentos: channel(),
             recados: channel(),
             esperando_pasta: false,
+            escolhendo_marca: false,
             colhendo: false,
             _colheita: None,
         }
@@ -109,6 +160,53 @@ impl Exportacao {
         self.pasta.as_ref()
     }
 
+    pub fn modo(&self) -> Modo {
+        self.modo
+    }
+
+    pub fn escolher_modo(&mut self, modo: Modo, cx: &mut Context<Self>) {
+        self.modo = modo;
+        cx.notify();
+    }
+
+    pub fn marca(&self) -> Option<&PathBuf> {
+        self.marca.as_ref()
+    }
+
+    /// As opções que o modo atual pede.
+    ///
+    /// 🚨 **A prévia sem marca escolhida devolve `None`, e o botão fica
+    /// desligado por causa disso.** Exportar prévia sem marca produziria
+    /// exatamente o arquivo que não pode existir: a foto não comprada, legível,
+    /// na galeria. Um `unwrap_or_default` aqui seria o defeito mais caro do
+    /// aplicativo.
+    pub fn opcoes(&self) -> Option<ExportOptions> {
+        match self.modo {
+            Modo::Entrega => Some(ExportOptions::default()),
+            Modo::Previa => {
+                let marca = self.marca.as_ref()?;
+                let arquivo = FilePath::new(marca.to_str()?).ok()?;
+                Some(
+                    ExportOptions::default()
+                        .with_longest_edge(LADO_DA_PREVIA)
+                        .with_watermark(Watermark::new(
+                            arquivo,
+                            WatermarkPosition::Center,
+                            0.35,
+                            0.55,
+                        )),
+                )
+            }
+        }
+    }
+
+    /// A marca d'água, sem passar pelo seletor nativo.
+    #[cfg(test)]
+    pub fn escolher_marca_para_teste(&mut self, marca: PathBuf, cx: &mut Context<Self>) {
+        self.marca = Some(marca);
+        cx.notify();
+    }
+
     pub fn progresso(&self) -> Option<Progresso> {
         self.progresso
     }
@@ -116,7 +214,24 @@ impl Exportacao {
     /// Abre o seletor nativo de pasta.
     pub fn escolher_pasta(&mut self, cx: &mut Context<Self>) {
         self.esperando_pasta = true;
+        self.escolhendo_marca = false;
         self.seletor.escolher_destino(self.recados.0.clone());
+        self.acompanhar(cx);
+        cx.notify();
+    }
+
+    /// Abre o seletor nativo para o arquivo da marca d'água.
+    ///
+    /// ⚠️ **Reusa o seletor de pasta e trata a resposta como caminho de
+    /// arquivo.** O `rfd` do projeto está montado para pasta; abrir um segundo
+    /// diálogo, de arquivo, é uma porta nova — e enquanto ela não existe, apontar
+    /// a pasta que **contém** o logotipo seria pedir à pessoa que confie que o
+    /// app adivinha qual arquivo. Por isso o campo aceita o caminho e a tela diz
+    /// qual arquivo está valendo.
+    pub fn escolher_marca(&mut self, cx: &mut Context<Self>) {
+        self.esperando_pasta = true;
+        self.escolhendo_marca = true;
+        self.seletor.escolher(self.recados.0.clone());
         self.acompanhar(cx);
         cx.notify();
     }
@@ -141,6 +256,10 @@ impl Exportacao {
         let Some(pasta) = self.pasta.clone() else {
             return;
         };
+        let Some(opcoes) = self.opcoes() else {
+            // Prévia sem marca escolhida. Ver `opcoes`.
+            return;
+        };
         if self.fotos.is_empty() || self.correndo() {
             return;
         }
@@ -162,7 +281,8 @@ impl Exportacao {
         self.ultimo = None;
         self.aviso = None;
 
-        self.exportador.exportar(saidas, self.andamentos.0.clone());
+        self.exportador
+            .exportar(saidas, opcoes, self.andamentos.0.clone());
         self.acompanhar(cx);
         cx.notify();
     }
@@ -200,9 +320,16 @@ impl Exportacao {
             // recado a tela esperaria para sempre uma pasta que nunca vem, e o
             // laço acordaria a cada 100ms pelo resto da sessão.
             self.esperando_pasta = false;
-            if let Recado::DestinoEscolhido(caminho) = recado {
-                self.pasta = Some(PathBuf::from(caminho));
+            match recado {
+                Recado::DestinoEscolhido(caminho) if !self.escolhendo_marca => {
+                    self.pasta = Some(PathBuf::from(caminho));
+                }
+                Recado::OrigemEscolhida(caminho) if self.escolhendo_marca => {
+                    self.marca = Some(PathBuf::from(caminho));
+                }
+                _ => {}
             }
+            self.escolhendo_marca = false;
         }
 
         while let Ok(andamento) = self.andamentos.1.try_recv() {
@@ -273,7 +400,13 @@ impl gpui::Render for Exportacao {
             Some(p) => p.to_string_lossy().to_string().into(),
             None => "escolha uma pasta".into(),
         };
-        let pronto = self.pasta.is_some() && !self.fotos.is_empty() && !self.correndo();
+        // 🚨 `opcoes()` é quem decide, e não um `&&` a mais aqui: no modo prévia
+        // ele devolve `None` sem marca d'água escolhida, e o botão desligado é o
+        // que impede a foto não comprada de ir legível para a galeria.
+        let pronto = self.pasta.is_some()
+            && !self.fotos.is_empty()
+            && !self.correndo()
+            && self.opcoes().is_some();
 
         div()
             .flex()
@@ -305,13 +438,68 @@ impl gpui::Render for Exportacao {
                     ),
             )
             .child(
+                // Os dois modos, lado a lado. 🔑 A escolha é entre **entregar** e
+                // **mostrar**, e é por isso que ela é um par de botões e não uma
+                // caixa de opção perdida num formulário.
+                div().flex().items_center().gap(px(6.)).children(
+                    [Modo::Entrega, Modo::Previa].map(|modo| {
+                        Button::new(match modo {
+                            Modo::Entrega => "exportacao-modo-entrega",
+                            Modo::Previa => "exportacao-modo-previa",
+                        })
+                        .label(modo.rotulo())
+                        .xsmall()
+                        .when(self.modo == modo, |b| b.primary())
+                        .selected(self.modo == modo)
+                        .disabled(self.correndo())
+                        .on_click(cx.listener(
+                            move |tela, _ev, _window, cx| {
+                                tela.escolher_modo(modo, cx);
+                            },
+                        ))
+                    }),
+                ),
+            )
+            .child(
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    // O formato é fixo neste incremento, e a tela diz isso em vez
-                    // de deixar quem exporta descobrir abrindo a pasta.
-                    .child("JPEG, qualidade 90 · com a revelação e o enquadramento aplicados"),
+                    .child(format!(
+                        "JPEG qualidade 90 · {} · com a revelação e o enquadramento aplicados",
+                        self.modo.explicacao()
+                    )),
             )
+            .when(self.modo == Modo::Previa, |raiz| {
+                let marca: SharedString = match &self.marca {
+                    Some(m) => m.to_string_lossy().to_string().into(),
+                    None => "nenhuma escolhida — a prévia não sai sem ela".into(),
+                };
+                let falta = self.marca.is_none();
+                raiz.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(8.))
+                        .child(
+                            Button::new("exportacao-escolher-marca")
+                                .label("Marca d'água…")
+                                .xsmall()
+                                .disabled(self.correndo())
+                                .on_click(cx.listener(|tela, _ev, _window, cx| {
+                                    tela.escolher_marca(cx);
+                                })),
+                        )
+                        .child(
+                            div()
+                                .flex_1()
+                                .text_xs()
+                                .truncate()
+                                .when(falta, |d| d.text_color(cx.theme().danger))
+                                .when(!falta, |d| d.text_color(cx.theme().muted_foreground))
+                                .child(marca),
+                        ),
+                )
+            })
             .when_some(self.aviso.clone(), |raiz, aviso| {
                 raiz.child(div().text_xs().text_color(cx.theme().danger).child(aviso))
             })

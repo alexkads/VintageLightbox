@@ -90,7 +90,13 @@ async fn test_e2e_import_edit_export_flow() {
     let export_path = export_dir.join("exported.jpg");
     let export_path_str = export_path.to_str().unwrap().to_string();
 
-    let export_result = export_uc.execute(photo_id, export_path_str.clone()).await;
+    let export_result = export_uc
+        .execute(
+            photo_id,
+            export_path_str.clone(),
+            &domain::value_objects::ExportOptions::default(),
+        )
+        .await;
     assert!(
         export_result.is_ok(),
         "Export failed: {:?}",

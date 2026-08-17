@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use domain::entities::Photo;
 use domain::services::ImageExporter;
-use domain::value_objects::FilePath;
+use domain::value_objects::{ExportOptions, FilePath, Watermark, WatermarkPosition};
 use image::{DynamicImage, GenericImageView, RgbImage};
 use infrastructure::gpu_adjustments::{Ajustes, Motor};
 use infrastructure::image_exporter::ImageExporterImpl;
@@ -99,9 +99,21 @@ fn com_campos(mut foto: Photo, campos: Campos) -> Photo {
 }
 
 async fn exportar(foto: &Photo, destino: &std::path::Path) -> DynamicImage {
+    exportar_com(foto, destino, &ExportOptions::default()).await
+}
+
+async fn exportar_com(
+    foto: &Photo,
+    destino: &std::path::Path,
+    opcoes: &ExportOptions,
+) -> DynamicImage {
     let exportador = ImageExporterImpl::new();
     exportador
-        .export(foto, &FilePath::new(destino.to_str().unwrap()).unwrap())
+        .export(
+            foto,
+            &FilePath::new(destino.to_str().unwrap()).unwrap(),
+            opcoes,
+        )
         .await
         .expect("exportar");
     image::open(destino).expect("reabrir o arquivo exportado")
@@ -228,4 +240,151 @@ async fn o_arquivo_e_o_que_a_tela_mostra() {
         "o arquivo diverge da tela em até {pior} níveis por canal — \
          o JPEG de qualidade 90 explica uns poucos, não isto"
     );
+}
+
+/// Um PNG de marca d'água: um quadrado vermelho opaco no meio de transparência.
+///
+/// O contorno transparente é o ponto: é ele que separa "compor a marca" de
+/// "colar um retângulo por cima da foto".
+fn marca_no_disco(dir: &tempfile::TempDir) -> std::path::PathBuf {
+    let mut logo = image::RgbaImage::new(32, 32);
+    for (x, y, pixel) in logo.enumerate_pixels_mut() {
+        let dentro = (8..24).contains(&x) && (8..24).contains(&y);
+        *pixel = if dentro {
+            image::Rgba([255, 0, 0, 255])
+        } else {
+            image::Rgba([0, 0, 0, 0])
+        };
+    }
+    let caminho = dir.path().join("marca.png");
+    logo.save(&caminho).expect("gravar a marca");
+    caminho
+}
+
+/// 🚨 **A marca d'água chega ao arquivo.**
+///
+/// É a funcionalidade que separa *entregar* de *mostrar*: a foto que o cliente
+/// comprou vai inteira, a que ficou para trás vai marcada. Sem este caminho não
+/// existe upsell — existe distribuição.
+#[tokio::test]
+async fn a_marca_dagua_chega_ao_arquivo() {
+    let dir = tempfile::tempdir().unwrap();
+    let (foto, _) = foto_no_disco(&dir, "origem.png");
+    let marca = marca_no_disco(&dir);
+
+    let sem = exportar(&foto, &dir.path().join("sem.jpg")).await;
+    let com = exportar_com(
+        &foto,
+        &dir.path().join("com.jpg"),
+        // ⚠️ Opacidade **abaixo de 1.0** de propósito: com 1.0 o código nem entra
+        // no ajuste de alfa, e o teste passaria sem nunca exercitá-lo. Foi assim
+        // que uma quebra de propósito não falhou.
+        &ExportOptions::default().with_watermark(Watermark::new(
+            FilePath::new(marca.to_str().unwrap()).unwrap(),
+            WatermarkPosition::Center,
+            0.5,
+            0.5,
+        )),
+    )
+    .await;
+
+    assert_eq!(
+        sem.dimensions(),
+        com.dimensions(),
+        "a marca não pode mudar o tamanho da foto"
+    );
+
+    let (a, b) = (sem.to_rgb8(), com.to_rgb8());
+    let centro_mudou = a.get_pixel(32, 32) != b.get_pixel(32, 32);
+    assert!(centro_mudou, "o centro não recebeu a marca");
+
+    // 🔑 **E o canto tem de continuar igual.** Duas coisas dependem disto, e as
+    // duas somem em silêncio: a composição respeitar o alfa do PNG (senão a
+    // marca chega como um retângulo opaco sobre a foto), e a opacidade
+    // **multiplicar** o alfa em vez de substituí-lo (senão o contorno
+    // transparente vira um véu por cima de tudo). O teste do centro passaria
+    // nos dois casos.
+    // A marca é 32×32 centrada numa foto 64×64, então ela ocupa de (16,16) a
+    // (48,48), com o vermelho no miolo. O pixel (18,18) está **dentro** do
+    // retângulo da marca e **fora** do desenho dela.
+    //
+    // ⚠️ Testar o canto (2,2) não serve, e essa foi a primeira versão: ele fica
+    // fora do retângulo, então prova só que a composição não vaza. As duas
+    // quebras de propósito passaram por ele.
+    assert_eq!(
+        a.get_pixel(18, 18),
+        b.get_pixel(18, 18),
+        "o contorno transparente da marca alterou a foto — o alfa foi ignorado"
+    );
+}
+
+/// ⚠️ **Sem marca d'água legível a exportação falha, em vez de sair limpa.**
+///
+/// É a única falha do exportador que não é técnica. Um logotipo apagado, movido
+/// ou com o caminho errado produziria — em silêncio — exatamente o arquivo que
+/// não pode existir: a foto não comprada, legível, na galeria.
+#[tokio::test]
+async fn marca_dagua_ilegivel_derruba_a_exportacao_em_vez_de_sair_sem_ela() {
+    let dir = tempfile::tempdir().unwrap();
+    let (foto, _) = foto_no_disco(&dir, "origem.png");
+
+    let exportador = ImageExporterImpl::new();
+    let destino = dir.path().join("saida.jpg");
+    let resultado = exportador
+        .export(
+            &foto,
+            &FilePath::new(destino.to_str().unwrap()).unwrap(),
+            &ExportOptions::default().with_watermark(Watermark::new(
+                FilePath::new("/nao/existe/marca.png").unwrap(),
+                WatermarkPosition::Center,
+                0.5,
+                1.0,
+            )),
+        )
+        .await;
+
+    assert!(
+        resultado.is_err(),
+        "devia falhar, e não exportar sem a marca"
+    );
+    assert!(
+        !destino.exists(),
+        "o arquivo sem marca não pode existir nem por um instante"
+    );
+}
+
+/// ⚠️ **Reduzir limita o lado maior e mantém a proporção.**
+#[tokio::test]
+async fn reduzir_limita_o_lado_maior() {
+    let dir = tempfile::tempdir().unwrap();
+    let (foto, _) = foto_no_disco(&dir, "origem.png");
+
+    let reduzida = exportar_com(
+        &foto,
+        &dir.path().join("reduzida.jpg"),
+        &ExportOptions::default().with_longest_edge(32),
+    )
+    .await;
+
+    assert_eq!(reduzida.dimensions(), (32, 32), "a foto é 64×64 quadrada");
+}
+
+/// 🚨 **Reduzir nunca amplia.**
+///
+/// Pedir 2048 px numa foto de 64 devolveria 2048 px de nada: o mesmo detalhe
+/// espalhado, com arquivo maior e nitidez menor. É o "Don't Enlarge" do
+/// Lightroom, e aqui não é opção — é o comportamento.
+#[tokio::test]
+async fn reduzir_nunca_amplia() {
+    let dir = tempfile::tempdir().unwrap();
+    let (foto, _) = foto_no_disco(&dir, "origem.png");
+
+    let pedida_maior = exportar_com(
+        &foto,
+        &dir.path().join("maior.jpg"),
+        &ExportOptions::default().with_longest_edge(2048),
+    )
+    .await;
+
+    assert_eq!(pedida_maior.dimensions(), (64, 64));
 }

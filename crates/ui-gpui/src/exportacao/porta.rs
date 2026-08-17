@@ -15,6 +15,7 @@ use std::sync::mpsc::Sender;
 use std::sync::Arc;
 
 use adapters::controllers::ExportController;
+use domain::value_objects::ExportOptions;
 
 /// Uma foto do lote: o id que o banco conhece e o arquivo que vai ser criado.
 #[derive(Debug, Clone, PartialEq)]
@@ -48,7 +49,12 @@ pub enum Andamento {
 
 pub trait Exportador: Send + Sync + 'static {
     /// Enfileira o lote e **devolve na hora**. O andamento chega pelo canal.
-    fn exportar(&self, saidas: Vec<Saida>, canal: Sender<Andamento>);
+    ///
+    /// 🔑 **As opções valem para o lote inteiro, e não por foto.** É o que
+    /// separa "entrega final" de "prévia da galeria": as duas são o mesmo lote
+    /// com uma decisão diferente na frente, e deixar a decisão por item abriria
+    /// a porta para metade sair marcada e metade não.
+    fn exportar(&self, saidas: Vec<Saida>, opcoes: ExportOptions, canal: Sender<Andamento>);
 }
 
 pub struct ExportadorDoBanco {
@@ -63,7 +69,7 @@ impl ExportadorDoBanco {
 }
 
 impl Exportador for ExportadorDoBanco {
-    fn exportar(&self, saidas: Vec<Saida>, canal: Sender<Andamento>) {
+    fn exportar(&self, saidas: Vec<Saida>, opcoes: ExportOptions, canal: Sender<Andamento>) {
         let controlador = self.controlador.clone();
         self.tokio.spawn(async move {
             let _ = canal.send(Andamento::Comecou {
@@ -81,7 +87,7 @@ impl Exportador for ExportadorDoBanco {
                 }
 
                 let destino = saida.destino.to_string_lossy().to_string();
-                match controlador.export_photo(saida.id, destino).await {
+                match controlador.export_photo(saida.id, destino, &opcoes).await {
                     Ok(()) => {
                         sucesso += 1;
                         let _ = canal.send(Andamento::Feita {
@@ -112,6 +118,9 @@ pub mod mentira {
     #[derive(Default)]
     pub struct ExportadorDeMentira {
         pub pedidos: Mutex<Vec<Vec<Saida>>>,
+        /// As opções do último lote — é como o teste confere que a marca d'água
+        /// pedida na tela chegou até a porta.
+        pub opcoes: Mutex<Option<ExportOptions>>,
         /// Quantas fotos do início do lote devem falhar — para a tela poder ser
         /// testada com falha no meio, que é o caso que ninguém reproduz à mão.
         pub falham: Mutex<usize>,
@@ -124,7 +133,8 @@ pub mod mentira {
     }
 
     impl Exportador for ExportadorDeMentira {
-        fn exportar(&self, saidas: Vec<Saida>, canal: Sender<Andamento>) {
+        fn exportar(&self, saidas: Vec<Saida>, opcoes: ExportOptions, canal: Sender<Andamento>) {
+            *self.opcoes.lock().expect("as opções") = Some(opcoes);
             self.pedidos
                 .lock()
                 .expect("os pedidos")
