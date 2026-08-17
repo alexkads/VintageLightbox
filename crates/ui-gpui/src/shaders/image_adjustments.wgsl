@@ -1,6 +1,17 @@
 // Image Adjustments Compute Shader
 // Processes all adjustments in parallel on the GPU
 
+// 🚨 A ordem aqui é a do `Ajustes` do Rust, campo a campo.
+//
+// O `uniform` viaja como bytes crus e casa por **posição**, não por nome. Este
+// bloco declarava 28 campos para os 46 que a CPU manda: a partir da posição 23
+// o shader lia o campo do vizinho (o matiz do vermelho virava redução de ruído)
+// e da 28 em diante não lia nada — os 4 controles de Detalhe e os 3 de Lente
+// não chegavam. Nada falhava: o buffer é maior que o mínimo do binding, então o
+// wgpu aceita e ignora a sobra, e a duplicata de `nr_luminance` o naga aceitava.
+//
+// Quem confere os dois lados é `o_wgsl_declara_os_mesmos_46_campos_na_mesma_ordem`,
+// que lê este arquivo e compara com a struct.
 struct Params {
     exposure: f32,
     contrast: f32,
@@ -27,7 +38,29 @@ struct Params {
     hsl_blue_sat: f32,
     hsl_purple_sat: f32,
     hsl_magenta_sat: f32,
-    nr_luminance: f32,
+    // HSL hue rotation (-180 to +180) — declarados, ainda sem código no corpo
+    hsl_red_hue: f32,
+    hsl_orange_hue: f32,
+    hsl_yellow_hue: f32,
+    hsl_green_hue: f32,
+    hsl_aqua_hue: f32,
+    hsl_blue_hue: f32,
+    hsl_purple_hue: f32,
+    hsl_magenta_hue: f32,
+    // HSL luminance (-100 to +100) — idem
+    hsl_red_lum: f32,
+    hsl_orange_lum: f32,
+    hsl_yellow_lum: f32,
+    hsl_green_lum: f32,
+    hsl_aqua_lum: f32,
+    hsl_blue_lum: f32,
+    hsl_purple_lum: f32,
+    hsl_magenta_lum: f32,
+    // Lens corrections — idem
+    lens_distortion: f32,
+    lens_vignette_amount: f32,
+    lens_vignette_midpoint: f32,
+    // Detail: noise reduction and sharpening
     nr_luminance: f32,
     nr_color: f32,
     sharpen_amount: f32,

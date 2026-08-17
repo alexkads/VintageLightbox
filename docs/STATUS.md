@@ -289,18 +289,23 @@ intocada, e valia igual no app de egui.
 
 Não são erros de compilação; são features que a UI mostra como prontas e que não fecham o ciclo.
 
-0. 🚨 **O painel de revelação tem 18 sliders que não fazem nada, e 5 que fazem outra coisa.** O
-   `struct Params` do WGSL (`crates/ui/src/shaders/image_adjustments.wgsl`) declara **28** campos
-   para os **46** que `GpuEditParams` manda, e o `uniform` casa por posição. Do campo 23 em diante o
-   shader lê o do vizinho — "HSL / matiz — Vermelho" **borra a foto**, porque ali o shader espera
-   `nr_luminance`; amarelo e verde aplicam ruído de cor e nitidez. Do 28 em diante nada chega:
-   HSL/luminância inteiro, três matizes, os **4 controles de Detalhe** e os **3 de Lente**. Nada
-   falha: o buffer é maior que o mínimo do binding, então o wgpu ignora a sobra, e a duplicata de
-   `nr_luminance` no WGSL o naga aceita. Medido em 16/ago/2026 e preso por quatro testes em
-   `crates/ui-gpui/src/revelacao/processador.rs`; a tabela posição a posição está em
-   [docs/10-MIGRACAO-GPUI.md](10-MIGRACAO-GPUI.md), §"Fase 2".
-   ⚠️ **Consertar é decisão de dono, não de migração**: as fotos já reveladas têm `hsl_*_hue` gravado
-   no banco, e alinhar o shader muda a aparência delas retroativamente.
+0. ✅ ~~**O painel de revelação tem 18 sliders que não fazem nada, e 5 que fazem outra coisa.**~~ —
+   **alinhado em 17/ago/2026.** O `struct Params` do WGSL declarava **28** campos para os **46** que
+   a CPU manda, e o `uniform` casa por posição: do campo 23 em diante o shader lia o do vizinho
+   ("HSL / matiz — Vermelho" **borrava a foto**), e do 28 em diante nada chegava — HSL/luminância
+   inteiro, três matizes, os 4 controles de Detalhe e os 3 de Lente. Nada falhava: o buffer é maior
+   que o mínimo do binding, então o wgpu ignorava a sobra, e a duplicata de `nr_luminance` o naga
+   aceitava.
+   ✅ **O que o conserto devolveu**: os **4 controles de Detalhe** (ruído de luminância, ruído de cor,
+   nitidez e raio) passaram a funcionar — sempre tiveram código no corpo do shader, faltava o valor
+   chegar. E os 5 sliders de matiz pararam de aplicar outra coisa.
+   ⚠️ **Continua faltando código no shader para 19 ajustes**: matiz (8), luminância (8) e lente (3).
+   Eles chegam ao `uniform` e o corpo não os menciona — inertes, mas honestos. Preso em
+   `os_dezenove_ajustes_sem_codigo_no_shader_nao_mudam_nenhum_pixel`.
+   🔑 **As duas razões do adiamento caíram com a fase 5**: não há mais dois apps lendo o mesmo shader,
+   e o catálogo real tem **0 fotos** (`select count(*) from photos`), então não há aparência para
+   mudar retroativamente. A segunda volta a valer quando houver acervo revelado. Detalhes em
+   [docs/10-MIGRACAO-GPUI.md](10-MIGRACAO-GPUI.md), §8.
 0.5. 🚨 **Os cinco presets de sistema estão numa escala que não é a do shader.** `ListPresetsUseCase`
    constrói "Auto", "B&W", "Warm", "Cool" e "High Contrast" a cada listagem. O "B&W" pede
    `saturation: -100.0`, mas a saturação do shader é um fator (`1.0 + saturation`): cinza é **-1.0**,

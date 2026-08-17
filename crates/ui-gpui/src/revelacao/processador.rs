@@ -49,16 +49,18 @@ use parking_lot::Mutex;
 /// é a foto saindo com o ajuste errado aplicado — e poder ler os dois lados um ao
 /// lado do outro é a única defesa que existe.
 ///
-/// 🚨 **E ela já falhou: o `uniform` do outro lado declara 28 campos, não 46.**
-/// Do campo 23 em diante o shader lê o do vizinho (o matiz do vermelho vira
-/// redução de ruído) e do 28 em diante não lê nada — os 4 controles de Detalhe e
-/// os 3 de Lente não fazem efeito nenhum. É defeito herdado do `crates/ui`, que
-/// manda a mesma struct para o mesmo shader; está preso em
-/// `o_wgsl_declara_28_campos_para_os_46_que_o_rust_manda`, com a tabela inteira,
-/// e registrado em `docs/10-MIGRACAO-GPUI.md`.
+/// 🚨 **E ela já falhou uma vez: o `uniform` do outro lado declarava 28 campos.**
+/// Do campo 23 em diante o shader lia o do vizinho (o matiz do vermelho virava
+/// redução de ruído) e do 28 em diante não lia nada — os 4 controles de Detalhe e
+/// os 3 de Lente não faziam efeito nenhum. Defeito herdado do `crates/ui`, que
+/// mandava a mesma struct para o mesmo shader, e **consertado em 17/ago/2026**,
+/// depois que a fase 5 tirou o outro app do caminho: o `struct Params` passou a
+/// declarar os 46 na mesma ordem, e quem prende isso é
+/// `o_wgsl_declara_os_mesmos_46_campos_na_mesma_ordem`.
 ///
-/// Os 46 campos ficam aqui assim mesmo: encolher a struct para 28 mudaria o que
-/// a GPU recebe, e a fase 2 se mede por igualdade de pixel com o app de egui.
+/// ⚠️ **Declarado não é aplicado.** Chegar ao shader é a primeira metade; ter
+/// código que os use é a segunda, e o matiz, a luminância e a lente ainda não a
+/// têm (`os_dezenove_ajustes_sem_codigo_no_shader_nao_mudam_nenhum_pixel`).
 #[repr(C)]
 #[derive(Copy, Clone, Debug, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Ajustes {
@@ -109,6 +111,21 @@ pub struct Ajustes {
     pub sharpen_amount: f32,
     pub sharpen_radius: f32,
 }
+
+/// O tamanho do buffer de `uniform`, arredondado para múltiplo de 16 bytes.
+///
+/// 🚨 **Não é `size_of::<Ajustes>()`, e a diferença é uma regra do WGSL.** No
+/// endereço `uniform` o alinhamento de uma struct é `roundUp(16, …)`, então os
+/// 46 `f32` (184 bytes) ocupam 192 do ponto de vista do shader — e o `bind
+/// group` recusa um buffer menor que isso. Enquanto o `struct Params` declarava
+/// 28 campos (112 bytes, múltiplo de 16) ninguém precisava saber disto.
+///
+/// Os 8 bytes de sobra nunca são escritos nem lidos: a CPU manda os 184 do
+/// `bytemuck::bytes_of`, e o shader não tem campo além do 45.
+const TAMANHO_DO_UNIFORM: wgpu::BufferAddress = {
+    let bytes = std::mem::size_of::<Ajustes>() as wgpu::BufferAddress;
+    bytes.next_multiple_of(16)
+};
 
 impl Default for Ajustes {
     /// O neutro, conferido campo a campo contra o `crates/ui`.
@@ -344,10 +361,13 @@ fn laco(
         return;
     };
 
-    // 🚨 O **mesmo** WGSL do `crates/ui`, e há teste conferindo byte a byte
-    // (`o_shader_e_o_mesmo_do_crates_ui`). O critério de saída da fase 2 é
-    // igualdade de pixel: dois shaders parecidos dariam imagens parecidas, e
-    // "parecida" é justamente o que ninguém consegue julgar olhando.
+    // 🚨 O `struct Params` deste arquivo tem de casar com o `Ajustes`, campo a
+    // campo: o `uniform` viaja como bytes crus e liga por **posição**, não por
+    // nome. Quem prende isso é `o_wgsl_declara_os_mesmos_46_campos_na_mesma_ordem`.
+    //
+    // (Até a fase 5 o arquivo era cópia byte a byte do `crates/ui`, com teste
+    // conferindo. O outro lado saiu do workspace em 17/ago, e o teste foi junto:
+    // ele não tinha mais o que comparar.)
     let modulo = dispositivo.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("Image Adjustments Shader"),
         source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/image_adjustments.wgsl").into()),
@@ -540,7 +560,7 @@ fn criar_recursos(
 
     let buffer_ajustes = dispositivo.create_buffer(&wgpu::BufferDescriptor {
         label: Some("Params Buffer"),
-        size: std::mem::size_of::<Ajustes>() as wgpu::BufferAddress,
+        size: TAMANHO_DO_UNIFORM,
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
@@ -590,46 +610,6 @@ fn criar_recursos(
 #[cfg(test)]
 mod testes {
     use super::*;
-
-    /// 🚨 O shader é o **mesmo arquivo** do `crates/ui`, byte a byte.
-    ///
-    /// O critério de saída da fase 2 é igualdade de pixel. Dois shaders
-    /// "equivalentes" dariam imagens "parecidas" — e parecida é exatamente o que
-    /// ninguém julga olhando: um `1e-3` a mais numa constante de vinheta some
-    /// numa foto e aparece em outra, meses depois.
-    ///
-    /// Cópia, e não `include_str!` cruzando os crates, porque o `crates/ui` sai
-    /// do workspace na fase 5 e levaria o caminho junto. Este teste é a trava
-    /// enquanto os dois existem, e some com ele.
-    #[test]
-    fn o_shader_e_o_mesmo_do_crates_ui() {
-        let aqui = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/src/shaders/image_adjustments.wgsl"
-        );
-        let la = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../ui/src/shaders/image_adjustments.wgsl"
-        );
-
-        let nosso = std::fs::read(aqui).expect("ler o shader do ui-gpui");
-        let Ok(deles) = std::fs::read(la) else {
-            // Depois da fase 5 o `crates/ui` não existe mais, e aí não há o que
-            // comparar. Falhar seria transformar o fim da migração em suíte
-            // vermelha.
-            return;
-        };
-
-        assert_eq!(
-            nosso.len(),
-            deles.len(),
-            "o shader divergiu em tamanho — alguém editou um lado só"
-        );
-        assert!(
-            nosso == deles,
-            "o shader divergiu em conteúdo — a igualdade de pixel da fase 2 depende dele"
-        );
-    }
 
     /// ⚠️ O neutro **não é zero** em dois campos — e num terceiro parecia não ser.
     ///
@@ -896,61 +876,52 @@ mod testes {
         soma
     }
 
-    /// 🚨 **O `struct Params` do WGSL não é o `Ajustes` do Rust.** Ele declara 28
-    /// campos para os 46 que a CPU manda, e a divergência começa no 23.
+    /// O `struct Params` do WGSL declara os mesmos 46 campos do `Ajustes`, na
+    /// mesma ordem.
     ///
-    /// O `uniform` chega à GPU como bytes crus, **por posição**. Enquanto os
-    /// nomes batem, cada slider move o que promete; a partir do 23 o shader lê o
-    /// campo do vizinho:
+    /// 🚨 **Este teste substitui um que prendia o defeito oposto.** Até 17/ago o
+    /// WGSL declarava **28** campos para os 46 que a CPU manda, e como o
+    /// `uniform` chega por **posição** e não por nome, a partir do 23 o shader
+    /// lia o campo do vizinho:
     ///
-    /// | posição | o Rust manda | o shader lê como |
-    /// |--------:|--------------|------------------|
-    /// | 23 | `hsl_red_hue` | `nr_luminance` |
-    /// | 24 | `hsl_orange_hue` | `nr_luminance` **de novo** — declarado duas vezes |
-    /// | 25 | `hsl_yellow_hue` | `nr_color` |
-    /// | 26 | `hsl_green_hue` | `sharpen_amount` |
-    /// | 27 | `hsl_aqua_hue` | `sharpen_radius` |
-    /// | 28–45 | matiz, luminância, lente, ruído, nitidez | **nada** — fora do `uniform` |
+    /// | posição | o Rust mandava | o shader lia como | o usuário via |
+    /// |--------:|----------------|-------------------|---------------|
+    /// | 23 | `hsl_red_hue` | `nr_luminance` | a foto **borrava** |
+    /// | 24 | `hsl_orange_hue` | `nr_luminance` de novo — declarado duas vezes | nada |
+    /// | 25 | `hsl_yellow_hue` | `nr_color` | tirava ruído de cor |
+    /// | 26 | `hsl_green_hue` | `sharpen_amount` | afiava |
+    /// | 27 | `hsl_aqua_hue` | `sharpen_radius` | nada sozinho |
+    /// | 28–45 | matiz (3), luminância (8), lente (3), Detalhe (4) | **nada** | nada |
     ///
-    /// Nada disso falha em lugar nenhum: o buffer é maior que o mínimo que o
-    /// binding exige, então o wgpu aceita e ignora a sobra.
+    /// Nada disso falhava: o buffer é maior que o mínimo que o binding exige,
+    /// então o wgpu aceita e ignora a sobra, e a duplicata de `nr_luminance` no
+    /// WGSL o naga também aceita. Não havia erro, log nem tela quebrada — havia
+    /// um controle que responde e uma foto que muda pelo motivo errado.
     ///
-    /// ⚠️ **Este teste prende um defeito de propósito** (regra §7.3: portar é
-    /// reescrever com a regra entendida, defeito preservado fica registrado em
-    /// teste). Ele **tem de falhar** no dia em que o WGSL for consertado — e aí a
-    /// tabela acima, o `docs/10-MIGRACAO-GPUI.md` e o `crates/ui` mudam juntos,
-    /// porque o shader é o mesmo arquivo nos dois apps.
+    /// 🔑 **A conferência é por leitura do arquivo, e não por medida na imagem**,
+    /// porque campo declarado e campo aplicado são coisas diferentes: quem mede
+    /// a segunda é `os_dezenove_ajustes_sem_codigo_no_shader_nao_mudam_nenhum_pixel`.
     #[test]
-    fn o_wgsl_declara_28_campos_para_os_46_que_o_rust_manda() {
-        let wgsl = campos_do_wgsl();
-
-        assert_eq!(wgsl.len(), 28, "o `struct Params` do WGSL mudou de tamanho");
-        assert_eq!(NOMES.len(), 46, "o `Ajustes` do Rust mudou de tamanho");
-
+    fn o_wgsl_declara_os_mesmos_46_campos_na_mesma_ordem() {
         assert_eq!(
-            wgsl[..23],
-            NOMES[..23],
-            "até o campo 22 os dois lados batem — é o que faz o Básico e o HSL/cor funcionarem"
-        );
-        assert_eq!(
-            wgsl[23..],
-            [
-                "nr_luminance",
-                "nr_luminance",
-                "nr_color",
-                "sharpen_amount",
-                "sharpen_radius"
-            ],
-            "a partir do 23 o shader lê o campo do vizinho — e `nr_luminance` está declarado duas vezes"
+            campos_do_wgsl(),
+            NOMES,
+            "o `struct Params` do WGSL divergiu do `Ajustes` — e o `uniform` casa por posição"
         );
     }
 
-    /// 🚨 Só os 23 primeiros ajustes chegam à GPU. Os 18 últimos não chegam.
+    /// Os 23 primeiros ajustes e os 4 de Detalhe mudam a foto.
     ///
-    /// A contraprova do teste acima, medida na imagem em vez de lida no arquivo:
-    /// mexer em cada um dos 46 campos, um por vez, e ver quais mudam algum pixel.
+    /// ✅ **O Detalhe é o que o alinhamento de 17/ago devolveu**: `nr_luminance`,
+    /// `nr_color` e `sharpen_amount` sempre tiveram código no corpo do shader —
+    /// o que faltava era chegarem lá. Eram quatro sliders que arrastavam,
+    /// mostravam número e não moviam um pixel.
+    ///
+    /// ⚠️ **`sharpen_radius` só conta com `sharpen_amount` junto**: raio sozinho
+    /// nunca mudaria nada (`do_sharpen` é `amount > 0.0`), e o teste passaria por
+    /// engano ao afirmar o contrário.
     #[test]
-    fn os_ajustes_a_partir_do_campo_28_nao_mudam_nenhum_pixel() {
+    fn o_basico_e_o_detalhe_chegam_ao_shader() {
         let processador = processador_pronto();
         let entrada = amostra();
         let neutro = revelar_e_colher(&processador, entrada.clone(), Ajustes::default());
@@ -963,26 +934,64 @@ mod testes {
             );
         }
 
-        for (i, nome) in NOMES.iter().enumerate().skip(28) {
-            let saida = revelar_e_colher(&processador, entrada.clone(), com_campo(i, 60.0));
-            assert_eq!(
-                saida, neutro,
-                "`{nome}` (campo {i}) mudou a foto — o `struct Params` do WGSL cresceu?"
-            );
+        let detalhe: [(&str, &[(usize, f32)]); 3] = [
+            ("Ruído (luminância)", &[(42, 60.0)]),
+            ("Ruído (cor)", &[(43, 60.0)]),
+            ("Nitidez (com raio)", &[(44, 80.0), (45, 2.0)]),
+        ];
+        for (rotulo, campos) in detalhe {
+            let saida = revelar_e_colher(&processador, entrada.clone(), com_campos(campos));
+            assert_ne!(saida, neutro, "Detalhe — `{rotulo}` não fez efeito nenhum");
         }
     }
 
-    /// 🚨 O slider "HSL / matiz — Vermelho" **borra a foto**.
+    /// ⚠️ **Dezenove ajustes chegam ao shader e não têm código que os use.**
     ///
-    /// É o campo 23, que o shader lê como `nr_luminance`. Um ajuste de matiz gira
-    /// a cor e não pode mexer no contraste entre vizinhos; redução de ruído faz
-    /// exatamente o contrário. O contraste local caindo é a assinatura de um
-    /// borrão, e nenhum giro de matiz produziria isso.
+    /// O alinhamento do `struct Params` resolveu a metade de *chegar*; a de
+    /// *fazer* continua aberta. O matiz nos 8 canais, a luminância nos 8 e os 3
+    /// da Lente estão declarados no `uniform`, viajam com o valor certo, e o
+    /// corpo do shader não os menciona em lugar nenhum.
     ///
-    /// Para quem usa o app, o sintoma é o pior tipo: o controle responde, a foto
-    /// muda, e o que mudou não tem nada a ver com o rótulo.
+    /// 🔑 **É um estado melhor que o anterior, e por um motivo só**: antes cinco
+    /// deles aplicavam **outra coisa** — arrastar "HSL / matiz — Vermelho"
+    /// borrava a foto. Um controle que não faz nada é visível; um que faz o
+    /// avesso do rótulo manda quem revela procurar defeito no motor de cor.
+    ///
+    /// Este teste **tem de falhar** conforme cada família ganhar código, e some
+    /// quando a última entrar.
     #[test]
-    fn o_matiz_do_vermelho_borra_a_foto_em_vez_de_girar_a_cor() {
+    fn os_dezenove_ajustes_sem_codigo_no_shader_nao_mudam_nenhum_pixel() {
+        let processador = processador_pronto();
+        let entrada = amostra();
+        let neutro = revelar_e_colher(&processador, entrada.clone(), Ajustes::default());
+
+        // 23–30: matiz · 31–38: luminância · 39–41: lente
+        for (i, nome) in NOMES.iter().enumerate().take(42).skip(23) {
+            let saida = revelar_e_colher(&processador, entrada.clone(), com_campo(i, 60.0));
+            assert_eq!(
+                saida, neutro,
+                "`{nome}` (campo {i}) passou a mudar a foto — o shader ganhou código para ele?"
+            );
+        }
+
+        // A vinheta com o meio junto: o meio sozinho nunca faria efeito, e o
+        // teste passaria por engano.
+        let saida = revelar_e_colher(&processador, entrada, com_campos(&[(40, 80.0), (41, 30.0)]));
+        assert_eq!(saida, neutro, "Lente — a vinheta passou a fazer efeito");
+    }
+
+    /// ✅ O slider "HSL / matiz — Vermelho" **não borra mais a foto**.
+    ///
+    /// Era o campo 23, que o shader lia como `nr_luminance`: um ajuste de matiz
+    /// gira a cor e não pode mexer no contraste entre vizinhos, e redução de
+    /// ruído faz exatamente o contrário. O contraste local caindo era a
+    /// assinatura do borrão, e nenhum giro de matiz a produziria.
+    ///
+    /// ⚠️ **Ele ainda não gira cor nenhuma** — não há código de matiz no shader
+    /// (ver o teste acima). O que este mede é que parou de fazer o avesso, que é
+    /// a metade que o alinhamento resolveu.
+    #[test]
+    fn o_matiz_do_vermelho_nao_borra_mais_a_foto() {
         let processador = processador_pronto();
         let entrada = amostra();
 
@@ -997,9 +1006,9 @@ mod testes {
             com_campo(23, 60.0),
         ));
 
-        assert!(
-            com_matiz < neutro,
-            "o campo 23 devia borrar (é lido como `nr_luminance`): contraste local {com_matiz} vs {neutro} no neutro"
+        assert_eq!(
+            com_matiz, neutro,
+            "o campo 23 voltou a cair no `nr_luminance`: contraste local {com_matiz} vs {neutro} no neutro"
         );
     }
 
@@ -1058,33 +1067,7 @@ mod testes {
         );
     }
 
-    /// 🚨 Os 4 controles de Detalhe e os 3 de Lente não fazem **nada**.
-    ///
-    /// Sete sliders que o painel oferece, arrastam, mostram número — e a foto não
-    /// muda, porque os campos deles ficam além do que o `uniform` do shader
-    /// declara. Nitidez é testada com raio junto: raio sozinho nunca faria efeito,
-    /// e o teste passaria por engano.
-    #[test]
-    fn detalhe_e_lente_nao_chegam_ao_shader() {
-        let processador = processador_pronto();
-        let entrada = amostra();
-        let neutro = revelar_e_colher(&processador, entrada.clone(), Ajustes::default());
-
-        let casos: [(&str, &[(usize, f32)]); 5] = [
-            ("Detalhe — Ruído (luminância)", &[(42, 60.0)]),
-            ("Detalhe — Ruído (cor)", &[(43, 60.0)]),
-            ("Detalhe — Nitidez (com raio)", &[(44, 80.0), (45, 2.0)]),
-            ("Lente — Distorção", &[(39, 60.0)]),
-            ("Lente — Vinheta (com meio)", &[(40, 80.0), (41, 30.0)]),
-        ];
-
-        for (rotulo, campos) in casos {
-            let saida = revelar_e_colher(&processador, entrada.clone(), com_campos(campos));
-            assert_eq!(saida, neutro, "`{rotulo}` passou a fazer efeito");
-        }
-    }
-
-    /// O layout que vai para a GPU tem os 46 campos que o `crates/ui` manda.
+    /// O layout que vai para a GPU tem os 46 campos que o `crates/ui` mandava.
     ///
     /// ⚠️ Este teste dizia "os 46 campos **que o WGSL declara**" — e o WGSL
     /// declara 28. Ele nunca conferiu isso: `size_of` não sabe do shader. Era uma

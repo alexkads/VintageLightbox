@@ -708,23 +708,13 @@ teste prendendo) recebendo a mesma struct. Os dois apps erram igual — que é j
 critério de saída da fase 2, igualdade de pixel entre os motores, **passaria com isto no lugar**.
 Um critério que compara dois lados só pega o que os distingue.
 
-⚠️ **Fica preso em teste, e não consertado** — mesma razão do exportador: conserto durante o porte
-mistura "portei errado" com "estava errado", e aqui há um agravante. As fotos já reveladas têm
+⚠️ **Ficou preso em teste, e não consertado** — mesma razão do exportador: conserto durante o porte
+mistura "portei errado" com "estava errado", e aqui havia um agravante. As fotos já reveladas têm
 `hsl_*_hue` gravado no banco; arrumar o alinhamento muda **retroativamente** a aparência delas —
-o que era borrão vira giro de matiz. É trabalho próprio, nos dois lados ao mesmo tempo, com decisão
-de dono sobre o acervo existente.
+o que era borrão vira giro de matiz.
 
-O que roda hoje, em [`processador.rs`](../crates/ui-gpui/src/revelacao/processador.rs):
-
-| Teste | O que ele fixa |
-|---|---|
-| `o_wgsl_declara_28_campos_para_os_46_que_o_rust_manda` | lê o `.wgsl` e cobra a tabela acima, posição a posição — sem GPU |
-| `os_ajustes_a_partir_do_campo_28_nao_mudam_nenhum_pixel` | a contraprova medida na imagem: os 23 primeiros mudam, os 18 últimos não |
-| `o_matiz_do_vermelho_borra_a_foto_em_vez_de_girar_a_cor` | o contraste local **cai** — assinatura de borrão, que nenhum giro de matiz produz |
-| `detalhe_e_lente_nao_chegam_ao_shader` | os 7 sliders de Detalhe e Lente, um a um |
-
-O primeiro **tem de falhar** no dia em que o WGSL for consertado. É o lembrete de que a tabela, este
-documento e o `crates/ui` mudam juntos.
+✅ **Consertado em 17/ago/2026, depois do desligamento** — as duas razões do adiamento caíram juntas.
+Ver §8.
 
 🔑 **Por que ninguém viu antes**: o teste ao lado se chamava `o_layout_tem_46_campos_de_quatro_bytes`
 e o comentário dele dizia "os 46 campos **que o WGSL declara**". Ele mede `size_of::<Ajustes>()` —
@@ -1583,7 +1573,71 @@ metade. Por isso `crates/ui` fica vivo e rodando até a fase 5 — abandonar pre
 
 ---
 
-## 8. Referências
+## 8. Depois do desligamento — o que a migração adiou de propósito
+
+A fase 2 encontrou quatro defeitos e não consertou nenhum, sempre pela mesma razão: **conserto
+durante o porte mistura "portei errado" com "estava errado"**. Enquanto os dois apps liam o mesmo
+shader e os mesmos presets, qualquer mudança neles tirava a régua do lugar.
+
+Com a fase 5, essa razão acabou — há um app só. Esta seção é a fila que sobrou, e o que já saiu dela.
+
+### ✅ O `uniform` de 28 campos — alinhado em 17/ago/2026
+
+O `struct Params` do WGSL passou a declarar os **46** campos do `Ajustes`, na mesma ordem, sem a
+duplicata de `nr_luminance`. O que isso mudou, medido:
+
+| Antes | Depois |
+|---|---|
+| 5 sliders de matiz aplicavam **outra coisa** (o do vermelho borrava a foto) | não aplicam nada — e não mentem mais |
+| os **4 controles de Detalhe** não chegavam ao shader | ✅ **funcionam** — ruído (luminância e cor) e nitidez, que já tinham código no corpo |
+| 19 ajustes fora do `uniform` | 19 ajustes **dentro** dele, ainda sem código que os use |
+
+🔑 **Chegar e ser aplicado são duas coisas, e só a primeira estava quebrada.** O corpo do shader
+sempre soube o que fazer com `nr_luminance`, `nr_color` e `sharpen_amount`; faltava o valor chegar.
+Matiz, luminância e lente chegam agora e continuam inertes porque **não há código para eles** — que é
+um estado honesto, e visível, em vez de um controle que faz o avesso do rótulo.
+
+🚨 **E apareceu uma regra de alinhamento que ninguém precisava saber antes.** No endereço `uniform` do
+WGSL a struct é arredondada para múltiplo de 16 bytes: 46 `f32` são 184, que **não** é — e o buffer
+precisa ter 192, senão o `bind group` recusa. Com 28 campos (112 bytes) o problema não existia. É a
+`TAMANHO_DO_UNIFORM` em `processador.rs`, e os 8 bytes de sobra nunca são escritos nem lidos.
+
+**As duas razões do adiamento caíram juntas:**
+
+1. *"Nos dois lados ao mesmo tempo"* — não há dois lados. O `crates/ui` saiu do workspace na fase 5.
+2. *"Decisão de dono sobre o acervo existente"* — o acervo é **zero**. `select count(*) from photos`
+   no catálogo real responde `0` desde que ele foi recriado limpo na fase 0, e nenhuma foto tem
+   `hsl_*_hue` gravado. Não há aparência para mudar retroativamente.
+
+⚠️ **A segunda razão volta a valer no dia em que houver acervo revelado**, e o número acima é como se
+confere — não a lembrança de que estava vazio.
+
+Os testes de `processador.rs` acompanharam a virada, e é para isso que existiam:
+
+| Teste | O que ele fixa agora |
+|---|---|
+| `o_wgsl_declara_os_mesmos_46_campos_na_mesma_ordem` | lê o `.wgsl` e compara com o `Ajustes`, campo a campo — sem GPU |
+| `o_basico_e_o_detalhe_chegam_ao_shader` | os 23 primeiros **e** os 4 de Detalhe mudam a foto |
+| `os_dezenove_ajustes_sem_codigo_no_shader_nao_mudam_nenhum_pixel` | matiz (8), luminância (8) e lente (3) — o que falta |
+| `o_matiz_do_vermelho_nao_borra_mais_a_foto` | o contraste local voltou ao do neutro |
+
+O terceiro **tem de falhar** conforme cada família ganhar código, e some quando a última entrar.
+
+### A fila que continua aberta
+
+| O que | Onde mora | Por que ainda não |
+|---|---|---|
+| **Matiz e luminância do HSL** (16 sliders) | `image_adjustments.wgsl` | chegam ao shader, sem código — o bloco de HSL já tem a ponderação por faixa de matiz para a saturação, e é onde entram |
+| **Lente** — distorção e vinheta (3) | idem | idem; distorção precisa reamostrar coordenada, e não é uma linha |
+| **A exportação descarta 31 dos 46 ajustes** | `infrastructure/image_exporter.rs` | é outro caminho, na CPU, com a matemática duplicada — trabalho próprio |
+| **A exportação ignora o crop** | idem | idem |
+| **Os 5 presets de sistema fora de escala** | `use-cases`, `ListPresetsUseCase` | preso em `o_preset_bw_do_legado_nao_da_preto_e_branco`, que falha no dia em que alguém arrumar |
+| **O corte fora do histórico de undo/redo** | `revelacao/historico.rs` | dívida própria do porte |
+| **O preset recém-salvo aparece com id local** | `revelacao/presets.rs` | nada depende do id hoje |
+
+---
+
+## 9. Referências
 
 | Assunto | Onde |
 |---------|------|
