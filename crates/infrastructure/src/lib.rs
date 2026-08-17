@@ -6,6 +6,12 @@ pub mod content_hash;
 pub mod exif_reader;
 pub mod file_organizer;
 pub mod file_system;
+/// O motor de revelação: wgpu, o WGSL e os 46 ajustes.
+///
+/// 🔑 Mora aqui porque a **tela** e o **arquivo exportado** precisam atravessar
+/// o mesmo shader. Enquanto ele vivia no crate de interface, a exportação tinha
+/// a própria implementação da mesma matemática, na CPU, com 15 dos 46 ajustes.
+pub mod gpu_adjustments;
 pub mod image_exporter;
 pub mod paths;
 pub mod raw_processing;
