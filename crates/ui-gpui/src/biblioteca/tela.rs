@@ -11,11 +11,12 @@ use gpui::{
     Subscription, Window,
 };
 use gpui_component::button::{Button, ButtonVariants};
-use gpui_component::dock::{DockArea, DockItem};
+use gpui_component::dock::{register_panel, DockArea, DockEvent, DockItem, PanelView};
 use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::{ActiveTheme, Selectable, Sizable};
 use infrastructure::cache::preview_manager::PreviewManager;
 
+use super::arranjo;
 use super::filtros::{indices_visiveis, FiltroDeSinalizador, Filtros, NotaMinima};
 use super::grade::{colunas_que_cabem, fotos_da_linha, linhas_necessarias};
 use super::informacoes::{estatisticas, estrelas};
@@ -34,6 +35,13 @@ const PASSO: f32 = LADO_DO_ITEM + ESPACAMENTO;
 
 /// Largura da coluna de pastas.
 const LADO_DA_ARVORE: f32 = 220.0;
+
+/// Quanto se espera antes de gravar o arranjo, em milissegundos.
+///
+/// Os mesmos 500 ms da gravação de ajustes da Revelação — arrastar uma divisória
+/// emite dezenas de eventos por segundo, e sem a espera cada um seria um arquivo
+/// escrito.
+const ESPERA_DO_ARRANJO_MS: u64 = 500;
 
 /// Altura da faixa de miniaturas do rodapé.
 const ALTURA_DO_FILMSTRIP: f32 = 84.0;
@@ -94,6 +102,9 @@ pub struct Biblioteca {
     /// termina. Montá-lo aqui dentro daria um `WeakEntity` de algo que ainda não
     /// foi entregue ao `cx`.
     dock: Option<Entity<DockArea>>,
+    /// A gravação adiada do arranjo. Guardada porque **descartá-la cancela** —
+    /// é o que faz um arrasto inteiro de divisória virar uma escrita só.
+    _arranjo: Option<gpui::Task<()>>,
     /// Quantas colunas a grade tem. `None` é **automático** — quantas couberem
     /// na janela.
     ///
@@ -197,6 +208,7 @@ impl Biblioteca {
             ancora: None,
             colunas_escolhidas: None,
             dock: None,
+            _arranjo: None,
             busca,
             _assinaturas: vec![assinatura],
         };
@@ -217,24 +229,65 @@ impl Biblioteca {
     ///
     /// O arranjo é o do legado (`create_library_layout`): pastas à esquerda,
     /// grade no meio com o filmstrip embaixo, informações à direita.
+    /// Monta o dock com o arranjo padrão, e restaura o salvo por cima.
+    ///
+    /// 🚨 **Só pode ser chamado depois de a entidade existir** — os painéis
+    /// guardam uma referência fraca a ela, e dentro do construtor ela ainda não
+    /// foi entregue ao `cx`. Por isso é um segundo passo, feito por quem cria a
+    /// Biblioteca:
+    ///
+    /// ```ignore
+    /// biblioteca.update(cx, |tela, cx| {
+    ///     let eu = cx.entity();
+    ///     tela.montar_o_dock(&eu, window, cx);
+    /// });
+    /// ```
+    ///
+    /// O arranjo é o do legado (`create_library_layout`): pastas à esquerda,
+    /// grade no meio com o filmstrip embaixo, informações à direita.
     pub fn montar_o_dock(
-        biblioteca: &Entity<Self>,
+        &mut self,
+        eu: &Entity<Self>,
         window: &mut Window,
-        cx: &mut gpui::App,
-    ) -> Entity<DockArea> {
-        let dock = cx.new(|cx| DockArea::new("biblioteca", Some(1), window, cx));
+        cx: &mut Context<Self>,
+    ) {
+        let dock = cx.new(|cx| DockArea::new("biblioteca", Some(arranjo::VERSAO), window, cx));
         let fraca = dock.downgrade();
 
-        let painel = |qual: Qual, cx: &mut gpui::App| {
-            let acervo = biblioteca.downgrade();
+        // 🚨 **Restaurar um arranjo salvo passa por aqui.** O `DockArea` guarda
+        // só o **nome** de cada painel; quem sabe construí-lo de volta é este
+        // registro global. Sem ele, um leiaute gravado volta como
+        // `InvalidPanel` — um retângulo com o nome escrito dentro, no lugar da
+        // grade. E isso não falha: o app abre, a tela está lá, e o que sumiu
+        // foram as fotos.
+        for qual in [
+            Qual::Pastas,
+            Qual::Grade,
+            Qual::Informacoes,
+            Qual::Filmstrip,
+        ] {
+            let acervo = eu.downgrade();
+            register_panel(
+                cx,
+                qual.nome(),
+                move |_dock, _estado, _info, _window, cx| {
+                    let acervo = acervo.clone();
+                    Box::new(cx.new(|cx| PainelDaBiblioteca::novo(qual, acervo, cx)))
+                },
+            );
+        }
+
+        let painel = |qual: Qual, eu: &Entity<Self>, cx: &mut gpui::App| {
+            let acervo = eu.downgrade();
             let entidade = cx.new(|cx| PainelDaBiblioteca::novo(qual, acervo, cx));
-            std::sync::Arc::new(entidade) as std::sync::Arc<dyn gpui_component::dock::PanelView>
+            std::sync::Arc::new(entidade) as std::sync::Arc<dyn PanelView>
         };
 
-        let pastas = DockItem::tabs(vec![painel(Qual::Pastas, cx)], &fraca, window, cx);
-        let grade = DockItem::tabs(vec![painel(Qual::Grade, cx)], &fraca, window, cx);
-        let filmstrip = DockItem::tabs(vec![painel(Qual::Filmstrip, cx)], &fraca, window, cx);
-        let informacoes = DockItem::tabs(vec![painel(Qual::Informacoes, cx)], &fraca, window, cx);
+        let pastas = DockItem::tabs(vec![painel(Qual::Pastas, eu, cx)], &fraca, window, cx);
+        let grade = DockItem::tabs(vec![painel(Qual::Grade, eu, cx)], &fraca, window, cx);
+        let filmstrip = DockItem::tabs(vec![painel(Qual::Filmstrip, eu, cx)], &fraca, window, cx);
+        let informacoes =
+            DockItem::tabs(vec![painel(Qual::Informacoes, eu, cx)], &fraca, window, cx);
 
         // O meio é uma coluna: a grade em cima, o filmstrip embaixo. As duas
         // laterais nascem com a largura que elas tinham fixas — quem arrastar
@@ -261,10 +314,47 @@ impl Biblioteca {
             cx,
         );
 
-        dock.update(cx, |area, cx| area.set_center(centro, window, cx));
-        biblioteca.update(cx, |tela, _cx| tela.dock = Some(dock.clone()));
+        dock.update(cx, |area, cx| {
+            area.set_center(centro, window, cx);
 
-        dock
+            // O arranjo salvo entra **por cima** do padrão. Montar o padrão
+            // antes não é desperdício: é o que garante uma tela inteira mesmo
+            // quando o arquivo não existe, está corrompido, ou é de outra
+            // versão — os três casos em que `ler_de` devolve `None`.
+            if let Some(salvo) = arranjo::ler_de(&arranjo::caminho()) {
+                if let Err(erro) = area.load(salvo, window, cx) {
+                    eprintln!("⚠️  Arranjo salvo não pôde ser restaurado: {erro}");
+                }
+            }
+        });
+
+        // ⚠️ **A gravação é adiada.** O próprio `gpui-component` avisa que
+        // `LayoutChanged` "may be emitted too frequently" — um arrasto de
+        // divisória emite dezenas por segundo, e cada uma seria um arquivo
+        // escrito. É a mesma espera da gravação de ajustes da Revelação, e pelo
+        // mesmo motivo: guardar a `Task` faz cada evento novo **adiar** em vez
+        // de enfileirar mais uma escrita.
+        let assinatura = cx.subscribe_in(
+            &dock,
+            window,
+            |tela: &mut Self, area, evento: &DockEvent, _window, cx| {
+                if !matches!(evento, DockEvent::LayoutChanged) {
+                    return;
+                }
+                let area = area.clone();
+                tela._arranjo = Some(cx.spawn(async move |tela, cx| {
+                    cx.background_executor()
+                        .timer(std::time::Duration::from_millis(ESPERA_DO_ARRANJO_MS))
+                        .await;
+                    let _ = tela.update(cx, |_tela, cx| {
+                        arranjo::gravar_em(&arranjo::caminho(), &area.read(cx).dump(cx));
+                    });
+                }));
+            },
+        );
+
+        self._assinaturas.push(assinatura);
+        self.dock = Some(dock);
     }
 
     /// Recalcula o que está visível. Chamado só quando um filtro muda.
@@ -1498,6 +1588,17 @@ mod testes {
             let marcador = marcador.clone();
             |window, cx| Biblioteca::nova(fotos, previews, marcador, window, cx)
         });
+
+        // 🚨 **O dock é montado aqui também**, e não só no `app.rs`. Sem esta
+        // linha os testes desenhavam uma Biblioteca **sem painel nenhum** — uma
+        // tela que o app nunca tem, e onde qualquer defeito de dock passaria
+        // despercebido. Foi o primeiro teste a tocar no dock que acusou isso.
+        janela
+            .update(cx, |tela, window, cx| {
+                let eu = cx.entity();
+                tela.montar_o_dock(&eu, window, cx);
+            })
+            .expect("a janela deve estar aberta");
         (janela, marcador, dir)
     }
 
@@ -1521,6 +1622,79 @@ mod testes {
                     "a largura útil tem de caber entre as duas colunas: {util}"
                 );
                 assert!(util > 0.0);
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 O arranjo gravado volta como **os quatro painéis**, e não como caixas
+    /// vazias.
+    ///
+    /// O `DockArea` guarda só o **nome** de cada painel; quem sabe reconstruí-lo
+    /// é o registro global (`register_panel`). Sem esse registro, restaurar um
+    /// leiaute salvo devolve `InvalidPanel` — um retângulo escrito *"The
+    /// `biblioteca:grade` panel type is not registered"* no lugar da grade. E
+    /// isso não falha em lugar nenhum: o app abre, a tela está lá, e o que sumiu
+    /// foram as fotos.
+    ///
+    /// 🔑 **A conferência é pelos painéis vivos, e não pelo retrato.** O
+    /// `InvalidPanel::dump` devolve **o estado antigo**, com o nome original
+    /// dentro: um teste que gravasse, carregasse e comparasse os dois retratos
+    /// passaria com o registro faltando inteiro. Conferido — foi o primeiro
+    /// jeito que escrevi, e ele passava com o `register_panel` removido.
+    #[gpui::test]
+    fn o_arranjo_gravado_volta_com_os_quatro_paineis(cx: &mut TestAppContext) {
+        let (janela, _marcador, _dir) = tela_com(cx, acervo_grande());
+
+        /// Os nomes dos painéis **vivos** dentro do dock.
+        fn vivos(item: &gpui_component::dock::DockItem, cx: &gpui::App) -> Vec<&'static str> {
+            use gpui_component::dock::DockItem;
+            match item {
+                DockItem::Tabs { items, .. } => {
+                    items.iter().map(|view| view.panel_name(cx)).collect()
+                }
+                DockItem::Split { items, .. } => {
+                    items.iter().flat_map(|filho| vivos(filho, cx)).collect()
+                }
+                DockItem::Panel { view, .. } => vec![view.panel_name(cx)],
+                DockItem::Tiles { .. } => Vec::new(),
+            }
+        }
+
+        let retrato = janela
+            .update(cx, |tela, _window, cx| {
+                let dock = tela.dock.as_ref().expect("o dock foi montado");
+                assert_eq!(
+                    vivos(dock.read(cx).items(), cx),
+                    vec![
+                        "biblioteca:pastas",
+                        "biblioteca:grade",
+                        "biblioteca:filmstrip",
+                        "biblioteca:informacoes"
+                    ],
+                    "o arranjo padrão tem os quatro"
+                );
+                dock.read(cx).dump(cx)
+            })
+            .expect("a janela deve estar aberta");
+
+        // A volta: restaurar o que foi gravado e olhar o que ficou vivo.
+        janela
+            .update(cx, |tela, window, cx| {
+                let dock = tela.dock.as_ref().expect("o dock foi montado").clone();
+                dock.update(cx, |area, cx| {
+                    area.load(retrato, window, cx).expect("restaurar o arranjo");
+                });
+
+                assert_eq!(
+                    vivos(dock.read(cx).items(), cx),
+                    vec![
+                        "biblioteca:pastas",
+                        "biblioteca:grade",
+                        "biblioteca:filmstrip",
+                        "biblioteca:informacoes"
+                    ],
+                    "restaurar tem de reconstruir os painéis, e não InvalidPanel"
+                );
             })
             .expect("a janela deve estar aberta");
     }

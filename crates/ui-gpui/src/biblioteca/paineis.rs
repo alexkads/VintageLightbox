@@ -49,7 +49,7 @@ impl Qual {
     /// `gpui-component` avisa disso na própria `trait` ("once you have defined a
     /// panel name, this must not be changed") — e o legado tem o mesmo contrato
     /// com o `serde` do `DockTab`.
-    fn nome(&self) -> &'static str {
+    pub fn nome(&self) -> &'static str {
         match self {
             Qual::Pastas => "biblioteca:pastas",
             Qual::Grade => "biblioteca:grade",

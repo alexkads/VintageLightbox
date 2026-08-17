@@ -1402,9 +1402,41 @@ sem querer.
 mudá-los depois faz um leiaute salvo apontar para um painel que não existe. O `gpui-component` avisa
 disso na própria `trait`; há teste para a mudança falhar aqui, e não na máquina de quem usa.
 
+#### O arranjo sobrevive a fechar o app ✅
+
+[`biblioteca/arranjo.rs`](../crates/ui-gpui/src/biblioteca/arranjo.rs): o `dump()` do dock vira JSON
+**ao lado do catálogo** (`arranjo-biblioteca.json`), e volta na abertura. Arrumar a tela e perder a
+arrumação ao fechar é o mesmo que não poder arrumar — e o legado grava o `DockState` das duas telas
+(`eframe::set_value`), então isto é paridade.
+
+🔑 **No catálogo, e não numa pasta de configuração do sistema.** O `VLB_CATALOG` é o que separa o
+catálogo real do de medição; com o arranjo junto, rodar o app contra um catálogo descartável não mexe
+na arrumação de quem trabalha.
+
+⚠️ **Ler dali nunca derruba o app.** Arquivo corrompido, de outra versão, ou inexistente — os três
+viram `None`, e `None` é o arranjo padrão. É o oposto da leitura do catálogo, onde falhar alto é o que
+impede escrever em cima do dado de alguém; aqui o pior que um arquivo ruim custa é a arrumação da
+tela. O número de versão existe para o dia em que um painel for dividido: o arranjo salvo passa a
+descrever uma tela que não existe, e restaurá-lo daria uma Biblioteca sem grade.
+
+⚠️ **A gravação é adiada em 500 ms**, a mesma espera dos ajustes da Revelação. O próprio
+`gpui-component` avisa que `LayoutChanged` *"may be emitted too frequently"* — um arrasto de divisória
+emite dezenas por segundo, e cada um seria um arquivo escrito.
+
+🚨 **E o teste desta volta nasceu cego.** A primeira versão gravava, restaurava e comparava os dois
+retratos — e **passava com o `register_panel` removido inteiro**. O motivo está no
+`InvalidPanel::dump`: ele devolve *o estado antigo*, com o nome original dentro. O painel quebrado
+mente no retrato e só se denuncia vivo, então a conferência passou a ser pelos painéis **dentro do
+dock** (`items()`), onde ele responde `InvalidPanel`. Com o registro removido, o teste agora acusa
+`["InvalidPanel", "InvalidPanel", "InvalidPanel", "InvalidPanel"]`.
+
+🚨 **E montar o dock nos testes revelou que eles desenhavam outra tela.** Até aqui o `tela_com` dos
+testes criava a Biblioteca **sem** dock — ou seja, sem painel nenhum embaixo da barra, uma tela que o
+app nunca tem. Qualquer defeito de dock passaria despercebido por 15 testes. Foi o primeiro teste a
+tocar no dock que acusou.
+
 ⬜ **Falta**: a barra de cima (busca, filtros, colunas) fica **fora** do dock de propósito — um dock
-que pudesse fechá-la deixaria a Biblioteca sem busca e sem filtro. E faltam a Revelação no dock e a
-**persistência** do arranjo (`dump`/`load`), que é o que faz a arrumação sobreviver a fechar o app.
+que pudesse fechá-la deixaria a Biblioteca sem busca e sem filtro. E falta **a Revelação no dock**.
 
 #### O painel de informações ✅ — as duas abas vivas que faltavam
 

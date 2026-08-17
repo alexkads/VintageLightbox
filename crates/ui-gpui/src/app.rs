@@ -215,7 +215,10 @@ impl Aplicativo {
         // 🚨 O dock é montado **depois** da entidade existir: os quatro painéis
         // guardam uma referência fraca a ela, e dentro do construtor ela ainda
         // não foi entregue ao `cx`.
-        Biblioteca::montar_o_dock(&biblioteca, window, cx);
+        biblioteca.update(cx, |tela, cx| {
+            let eu = cx.entity();
+            tela.montar_o_dock(&eu, window, cx);
+        });
         let revelacao = cx.new(|cx| {
             Revelacao::nova(
                 previews,
