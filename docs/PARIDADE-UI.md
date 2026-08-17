@@ -123,8 +123,9 @@ São 23 testes "este controle existe" (HSL matiz ×8, HSL luminância ×8, lente
 |---|---|
 | A nota desenha 0 a 5 estrelas | ✅ `informacoes::estrelas` |
 | Clicar numa estrela muda a nota | ✅ no painel de informações — ⚠️ e vale para a **seleção inteira**, como as teclas |
-| Limpar miniaturas / limpar cache pelas Configurações | ⬜ **falta a tela de Configurações inteira** |
-| As estatísticas de cache aparecem no diálogo | ⬜ idem |
+| Limpar miniaturas / limpar cache pelas Configurações | ✅ `configuracoes.rs` — três botões, e cada um apaga só a sua parte |
+| As estatísticas de cache aparecem no diálogo | ✅ e são **relidas ao abrir**, não guardadas |
+| "Reset Docking Layout" | 🚫 não se porta: desfaz um arranjo de painéis que este app não tem |
 
 ---
 
@@ -137,11 +138,9 @@ Esta é a lista que a fase 5 tem de zerar — ou registrar como decisão de dono
    tirava a foto da grade e a mantinha selecionada. Agora a seleção anda para a seguinte que ainda
    está na grade (o legado volta para a **primeira**, que numa triagem de 800 fotos devolve quem tria
    ao começo a cada rejeição).
-2. ⬜ **A tela de Configurações não existe** (limpar miniaturas, limpar cache, estatísticas, e o
-   "Reset Docking Layout" que só faz sentido com dock).
-3. ⬜ **`Grid Settings`** — escolher de 1 a 5 colunas. Decisão de dono: o legado usa número fixo, a
+2. ⬜ **`Grid Settings`** — escolher de 1 a 5 colunas. Decisão de dono: o legado usa número fixo, a
    grade nova calcula quantas cabem.
-4. ⬜ **O rearranjo de painéis (docking)** — parado, com o custo escrito no plano.
+3. ⬜ **O rearranjo de painéis (docking)** — parado, com o custo escrito no plano.
 
 ⚠️ **⚠️ **Uma linha desta lista nasceu errada, e a conferência foi no código**: "cancelar o corte" estava
 marcada como faltando, escrita a partir do **nome** do teste do legado. O `cancelar_corte` existe

@@ -16,6 +16,7 @@ use infrastructure::cache::preview_manager::PreviewManager;
 use crate::biblioteca::marcacao::Marcador;
 use crate::biblioteca::tela::Biblioteca;
 use crate::cliente::{monitor_do_cliente, Cliente};
+use crate::configuracoes::Configuracoes;
 use crate::importacao::explorador::{Explorador, GeradorDeMiniaturas, Importador, SeletorDePasta};
 use crate::importacao::tela::Importacao;
 use crate::impressao::tela::Impressao;
@@ -173,6 +174,10 @@ pub struct Aplicativo {
     /// fotógrafo já marcou ao fechar o modal por engano.
     importacao: Entity<Importacao>,
     importando: bool,
+    /// As Configurações, no mesmo formato do modal de importação: elas são um
+    /// lugar onde se entra e de onde se sai, e não uma quarta tela.
+    configuracoes: Entity<Configuracoes>,
+    configurando: bool,
     /// A segunda tela, quando aberta. É uma **janela**, e não uma tela desta —
     /// as duas existem ao mesmo tempo, em monitores diferentes.
     cliente: Option<gpui::WindowHandle<Cliente>>,
@@ -204,6 +209,7 @@ impl Aplicativo {
         let previews_para_importar = previews.clone();
         let previews_para_imprimir = previews.clone();
         let previews_do_cliente = previews.clone();
+        let previews_das_configuracoes = previews.clone();
         let biblioteca =
             cx.new(|cx| Biblioteca::nova(fotos, previews.clone(), portas.marcador, window, cx));
         let revelacao = cx.new(|cx| {
@@ -257,6 +263,8 @@ impl Aplicativo {
                 )
             }),
             importando: false,
+            configuracoes: cx.new(|_| Configuracoes::nova(previews_das_configuracoes)),
+            configurando: false,
             cliente: None,
             previews: previews_do_cliente,
             _observador: observador,
@@ -440,6 +448,28 @@ impl Aplicativo {
             self.cliente = None;
             cx.notify();
         }
+    }
+
+    /// Abre as Configurações, relendo o cache na hora.
+    ///
+    /// 🔑 **O número é lido ao abrir, e não guardado**: entre uma abertura e
+    /// outra o cache cresce a cada foto revelada, e mostrar o retrato de ontem
+    /// faria o "Limpar tudo" prometer um espaço que não é o que vai sair.
+    pub fn abrir_configuracoes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.configurando = true;
+        self.configuracoes.update(cx, |tela, cx| tela.atualizar(cx));
+        window.focus(&self.foco);
+        cx.notify();
+    }
+
+    pub fn fechar_configuracoes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.configurando = false;
+        window.focus(&self.foco);
+        cx.notify();
+    }
+
+    pub fn configurando(&self) -> bool {
+        self.configurando
     }
 
     /// Abre o modal de importação sobre a Biblioteca.
@@ -666,6 +696,62 @@ impl Aplicativo {
                         este.importar(window, cx);
                     })),
             )
+            .child(
+                Button::new("nav-configuracoes")
+                    .label("Configurações")
+                    .xsmall()
+                    .when(self.configurando, |b| b.primary())
+                    .selected(self.configurando)
+                    .on_click(cx.listener(|este, _ev, window, cx| {
+                        if este.configurando {
+                            este.fechar_configuracoes(window, cx);
+                        } else {
+                            este.abrir_configuracoes(window, cx);
+                        }
+                    })),
+            )
+    }
+
+    /// As Configurações, no mesmo véu do modal de importação.
+    fn modal_de_configuracoes(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .absolute()
+            .inset_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(gpui::rgba(0x00000099))
+            .child(
+                div()
+                    .w(px(520.))
+                    .max_w_full()
+                    .flex()
+                    .flex_col()
+                    .bg(cx.theme().background)
+                    .border_1()
+                    .border_color(cx.theme().border)
+                    .rounded(px(6.))
+                    .overflow_hidden()
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .px(px(12.))
+                            .py(px(6.))
+                            .bg(cx.theme().title_bar)
+                            .child(div().text_xs().child("Configurações"))
+                            .child(
+                                Button::new("fechar-configuracoes")
+                                    .label("Fechar")
+                                    .xsmall()
+                                    .on_click(cx.listener(|este, _ev, window, cx| {
+                                        este.fechar_configuracoes(window, cx);
+                                    })),
+                            ),
+                    )
+                    .child(self.configuracoes.clone()),
+            )
     }
 
     /// O modal por cima de tudo, com um véu que escurece o que ficou atrás.
@@ -811,6 +897,9 @@ impl Render for Aplicativo {
             )
             .when(self.importando, |raiz| {
                 raiz.child(self.modal_de_importacao(cx))
+            })
+            .when(self.configurando, |raiz| {
+                raiz.child(self.modal_de_configuracoes(cx))
             })
     }
 }
@@ -1502,6 +1591,61 @@ mod testes {
         assert_eq!(gravado.len(), 1, "a foto que saiu tinha de ser gravada");
         assert_eq!(gravado[0].0, "id-DSC_001.NEF");
         assert_eq!(gravado[0].1.exposure, 1.2);
+    }
+
+    /// 🚨 Abrir as Configurações **relê o cache**.
+    ///
+    /// Entre uma abertura e outra o cache cresce a cada foto revelada. Guardando
+    /// o retrato da primeira vez, o "Limpar tudo" prometeria um espaço que não é
+    /// o que vai sair — e o número na tela seria mais velho que a decisão que ele
+    /// informa.
+    #[gpui::test]
+    fn abrir_as_configuracoes_rele_o_cache(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            |window, cx| Aplicativo::novo(acervo(), previews, Vec::new(), portas(), window, cx)
+        });
+
+        janela
+            .update(cx, |app, window, cx| {
+                app.abrir_configuracoes(window, cx);
+                assert!(app.configurando());
+                assert_eq!(
+                    app.configuracoes
+                        .read(cx)
+                        .estatisticas()
+                        .expect("leu o cache")
+                        .thumbnail_count,
+                    0
+                );
+            })
+            .expect("a janela deve estar aberta");
+
+        // O cache cresce enquanto a janela está aberta — como quando o fotógrafo
+        // revela uma foto e volta às Configurações.
+        previews
+            .save_thumbnail("id-nova", &foto_vermelha())
+            .expect("gravar miniatura");
+
+        janela
+            .update(cx, |app, window, cx| {
+                app.fechar_configuracoes(window, cx);
+                app.abrir_configuracoes(window, cx);
+
+                assert_eq!(
+                    app.configuracoes
+                        .read(cx)
+                        .estatisticas()
+                        .expect("releu")
+                        .thumbnail_count,
+                    1,
+                    "o número tem de ser o de agora, não o da primeira abertura"
+                );
+            })
+            .expect("a janela deve estar aberta");
     }
 
     /// 🚨 A segunda tela abre, recebe a foto, e **acompanha a seleção**.
