@@ -96,9 +96,25 @@ pub fn load_raw_as_dynamic_image(path: &str) -> Result<image::DynamicImage, Stri
     // LibRaw é `FileUnsupported`, que manda quem importa procurar defeito no
     // próprio arquivo — e no caso conhecido (DNG com compressão *lossy*) o
     // arquivo está íntegro e quem não sabe abrir é o app.
-    let mut raw = RawImage::open(&file_data).map_err(|e| {
-        crate::dng::explicar_falha(&file_data, &format!("LibRaw failed to open: {:?}", e))
-    })?;
+    let mut raw = match RawImage::open(&file_data) {
+        Ok(raw) => raw,
+        Err(erro) => {
+            // 🔑 **A reserva entra só aqui, e só para o DNG com perdas.** A
+            // LibRaw embutida foi compilada sem libjpeg; a do sistema, quando
+            // instalada, tem — e abre o arquivo. Usá-la para todo RAW mudaria a
+            // cor de tudo que já abre, porque são duas invocações diferentes com
+            // padrões diferentes de revelação.
+            if crate::dng::tem_compressao_com_perdas(&file_data) {
+                if let Ok(imagem) = crate::dng::decodificar_com_a_libraw_do_sistema(path) {
+                    return Ok(imagem);
+                }
+            }
+            return Err(crate::dng::explicar_falha(
+                &file_data,
+                &format!("LibRaw failed to open: {:?}", erro),
+            ));
+        }
+    };
 
     // 3. Unpack the raw data
     raw.unpack()

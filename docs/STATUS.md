@@ -22,7 +22,7 @@ Este é o estado deles:
 |---|---|
 | Todo controle da tela move a foto | ✅ **46 de 46** — eram 23 na manhã do mesmo dia |
 | O arquivo exportado é o que a tela mostra | ✅ mesmo `.wgsl`, mesmo enquadramento, com teste que grava e relê |
-| RAW de câmera abre | ⚠️ **menos DNG com compressão *lossy*** — ver lacuna 16 |
+| RAW de câmera abre | ✅ **inclusive DNG com compressão *lossy***, pela LibRaw do sistema quando ela existe |
 | Nada trava a janela | ✅ abertura em 23–43 ms com 2.000 fotos; rolagem conferida em `--release` |
 | Nenhum botão anuncia o que não faz | ✅ os últimos dois eram "Print" e "Export PDF" |
 
@@ -39,7 +39,7 @@ Este é o estado deles:
 | ✅ **Coleções na tela** | faltavam o controller **e** a tela; o backend estava pronto há meses |
 | ✅ **Copiar/colar revelação** | `Cmd+Shift+C`/`V`, valendo para a seleção, com o enquadramento de cada foto preservado |
 | ✅ **A impressão imprime** | a folha vira PDF e vai para o diálogo do sistema |
-| ⚠️ **DNG com perdas diz o que é** | o suporte continua faltando; a mensagem parou de culpar o arquivo |
+| ✅ **DNG com perdas abre** (18/ago) | pela LibRaw do sistema, como reserva; sem ela, a mensagem diz o que é e o que fazer |
 
 > ⚠️ **Este documento foi reescrito em 15/ago/2026 a partir do código, não do histórico**, e os
 > números são medidos rodando `cargo test`/`cargo check`, não copiados.
