@@ -26,6 +26,31 @@ Este é o estado deles:
 | Nada trava a janela | ✅ abertura em 23–43 ms com 2.000 fotos; rolagem conferida em `--release` |
 | Nenhum botão anuncia o que não faz | ✅ os últimos dois eram "Print" e "Export PDF" |
 
+## 🚨 O que o uso de verdade encontrou — 18/ago/2026
+
+Os cinco critérios passavam e o app ainda não era usável. **Os critérios eram
+meus, e mediam o que eu escolhi medir**; o dono abriu e encontrou em minutos duas
+coisas que nenhum deles pega:
+
+| O que ele encontrou | O que era |
+|---|---|
+| "não visualiza as fotos corretamente" | 🚨 **o gerador de preview ampliava**. `DynamicImage::thumbnail` ajusta a imagem à caixa pedida, e o fator é **maior que 1** quando a origem é menor: um arquivo de 137×92 virava um preview de 2560×1719. Medido no catálogo real: **12 de 12** ampliados. A Revelação mostra o preview em tela cheia — quem revelava via um borrão |
+| "está travando" | ⚠️ **em parte, o mesmo defeito**: toda a cadeia (GPU, corte, conversão BGRA) trabalhava sobre 4,4 milhões de pixels que a foto não tem. **Não é a explicação inteira** — ver abaixo |
+| "não consigo excluir fotos" | 🚨 **não havia caminho.** `DeletePhotoUseCase` existia, o `PhotoController` o expunha, e nenhuma tecla ou botão chegava lá |
+
+⚠️ **O travamento não está fechado.** Três candidatos foram medidos e nenhum
+explica sozinho uma trava dura:
+
+| Candidato | Medido |
+|---|---|
+| Preview ampliado | 3–9 ms por quadro em `--release`, 19–30 ms em `debug`, sobre pixels inventados |
+| `journal_mode = delete` no catálogo (não WAL) | 40 gravações: 11,7 ms contra 3,3 ms com WAL — real, mas pequeno |
+| Duas instâncias do app no mesmo catálogo | havia **três** rodando na máquina, uma delas de `debug` e uma de 22 h antes |
+
+🔑 **E o app estava sendo rodado em `debug`.** Este projeto já quase condenou o
+framework por medir fluidez no perfil errado (fase 1 da migração): em `debug` uma
+miniatura custa 56× mais. O primeiro passo é usar `--release`.
+
 ## O que mudou em 17/ago/2026
 
 | | |
