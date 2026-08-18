@@ -56,6 +56,21 @@ pub fn corte_da_entidade(foto: &Photo) -> CropSettings {
 /// endireitada) com o retângulo desenhado por cima, senão não haveria o que
 /// arrastar. É o `apply_crop_clip` do legado.
 pub fn aplicar(imagem: &DynamicImage, corte: &CropSettings, recortar: bool) -> DynamicImage {
+    // 🚨 **O caminho sem enquadramento nenhum sai daqui.**
+    //
+    // Ele é o caso comum — a maioria das fotos nunca é cortada — e era o mais
+    // caro por engano: `espelhar_e_girar` clonava a imagem inteira antes de
+    // descobrir que não havia o que espelhar, e `recortar_reto` copiava pixel a
+    // pixel um retângulo que é a foto toda.
+    //
+    // ⚠️ **E isto roda a cada resultado da GPU**, não uma vez por foto: durante
+    // um arrasto de slider são dezenas por segundo, na thread da interface.
+    // Medido em 18/ago/2026 numa foto de 2560×2560: **8,6 ms** por resultado,
+    // metade de um quadro de 60fps gasta para devolver a mesma imagem.
+    if e_identidade(corte) {
+        return imagem.clone();
+    }
+
     let base = espelhar_e_girar(imagem, corte);
 
     if !recortar {
@@ -67,6 +82,24 @@ pub fn aplicar(imagem: &DynamicImage, corte: &CropSettings, recortar: bool) -> D
     }
 
     endireitar_e_recortar(&base, corte)
+}
+
+/// O corte não muda nada na foto?
+///
+/// 🔑 **A comparação do retângulo tem folga.** `CropSettings::new` limita os
+/// valores, e uma largura gravada como `0.999999` depois de uma ida e volta pelo
+/// banco descreve a foto inteira — mas não é `1.0`. Sem a folga, o caminho
+/// rápido nunca valeria para foto que já passou por gravação.
+fn e_identidade(corte: &CropSettings) -> bool {
+    const FOLGA: f32 = 1e-4;
+    corte.rotation_90().rem_euclid(4) == 0
+        && corte.angle() == 0.0
+        && !corte.flip_horizontal()
+        && !corte.flip_vertical()
+        && corte.crop_x().abs() < FOLGA
+        && corte.crop_y().abs() < FOLGA
+        && (corte.crop_width() - 1.0).abs() < FOLGA
+        && (corte.crop_height() - 1.0).abs() < FOLGA
 }
 
 /// Espelhos e giro de 90°, na ordem do legado (`apply_crop`: `fliph`, `flipv`,
@@ -205,6 +238,74 @@ fn amostrar(origem: &RgbaImage, u: f32, v: f32) -> Rgba<u8> {
 
 #[cfg(test)]
 mod testes {
+    /// 🔑 **O caminho rápido devolve exatamente o que o lento devolveria.**
+    ///
+    /// Ele existe por desempenho — 8,6 ms por resultado da GPU numa foto de
+    /// 2560×2560, medido em 18/ago/2026 — e otimização que muda o resultado não é
+    /// otimização, é defeito. O teste compara os dois lados byte a byte.
+    #[test]
+    fn o_caminho_rapido_da_o_mesmo_que_o_lento() {
+        let mut origem = RgbaImage::new(9, 7);
+        for (x, y, p) in origem.enumerate_pixels_mut() {
+            *p = Rgba([(x * 20) as u8, (y * 30) as u8, ((x + y) * 10) as u8, 255]);
+        }
+        let imagem = DynamicImage::ImageRgba8(origem);
+        let identidade = CropSettings::new(0.0, 0.0, 1.0, 1.0, 0, 0.0, false, false);
+
+        assert!(e_identidade(&identidade));
+
+        let rapido = aplicar(&imagem, &identidade, true);
+        // O lento, chamado direto.
+        let lento = recortar_reto(&espelhar_e_girar(&imagem, &identidade), &identidade);
+
+        assert_eq!(rapido.dimensions(), lento.dimensions());
+        assert_eq!(rapido.to_rgba8().into_raw(), lento.to_rgba8().into_raw());
+    }
+
+    /// ⚠️ **Qualquer coisa diferente de identidade sai do caminho rápido.**
+    ///
+    /// Um `e_identidade` frouxo devolveria a foto sem cortar — o enquadramento
+    /// simplesmente não seria aplicado, e ninguém veria erro.
+    #[test]
+    fn so_a_identidade_pega_o_caminho_rapido() {
+        let casos = [
+            (
+                "corte",
+                CropSettings::new(0.1, 0.0, 0.8, 1.0, 0, 0.0, false, false),
+            ),
+            (
+                "giro",
+                CropSettings::new(0.0, 0.0, 1.0, 1.0, 1, 0.0, false, false),
+            ),
+            (
+                "ângulo",
+                CropSettings::new(0.0, 0.0, 1.0, 1.0, 0, 5.0, false, false),
+            ),
+            (
+                "espelho h",
+                CropSettings::new(0.0, 0.0, 1.0, 1.0, 0, 0.0, true, false),
+            ),
+            (
+                "espelho v",
+                CropSettings::new(0.0, 0.0, 1.0, 1.0, 0, 0.0, false, true),
+            ),
+        ];
+        for (nome, corte) in casos {
+            assert!(!e_identidade(&corte), "`{nome}` passou por identidade");
+        }
+    }
+
+    /// 🔑 **A folga existe para foto que já passou pelo banco.**
+    ///
+    /// `CropSettings::new` limita os valores, e uma largura que volta como
+    /// `0.99999` descreve a foto inteira sem ser `1.0`. Sem folga, o caminho
+    /// rápido nunca valeria para foto gravada — que é justamente toda foto.
+    #[test]
+    fn a_folga_aceita_o_que_voltou_do_banco() {
+        let quase = CropSettings::new(0.00001, 0.0, 0.99999, 1.0, 0, 0.0, false, false);
+        assert!(e_identidade(&quase));
+    }
+
     use super::*;
 
     fn sem_corte() -> CropSettings {

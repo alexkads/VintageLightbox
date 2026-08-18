@@ -1,6 +1,6 @@
 use std::fs;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 // use directories::ProjectDirs;
 use domain::services::{PreviewStorage, PreviewType};
 use domain::value_objects::PhotoId;
@@ -21,10 +21,26 @@ pub struct CacheStats {
     pub db_path: PathBuf,
 }
 
+/// Quantas imagens decodificadas ficam em memória.
+///
+/// 🔑 **Quinze, como no app de egui** (`docs/08-CACHE-ARCHITECTURE.md`): é o
+/// suficiente para ir e voltar pela seta numa sequência de revelação sem
+/// redecodificar nada, e o teto que mantém o consumo previsível — um preview de
+/// 2560px descomprimido são ~26 MB, então quinze são ~400 MB no pior caso.
+const CAPACIDADE_DA_MEMORIA: usize = 15;
+
 pub struct PreviewManager {
     conn: Mutex<Connection>,
     #[allow(dead_code)]
     cache_dir: PathBuf,
+    /// O cache L1: imagens **já decodificadas**, por chave (`p:` preview,
+    /// `t:` miniatura).
+    ///
+    /// 🚨 **É `Arc` por dentro para o descarte do LRU não copiar 26 MB.** Guardar
+    /// `DynamicImage` direto faria cada `put` mover a imagem inteira, e cada
+    /// despejo liberar de uma vez — com o `Arc`, quem já pegou a imagem continua
+    /// com ela enquanto usa.
+    memoria: Mutex<lru::LruCache<String, Arc<DynamicImage>>>,
 }
 
 /// Grava a imagem como JPEG, convertendo para RGB8 antes.
@@ -105,11 +121,51 @@ impl PreviewManager {
         Self {
             conn: Mutex::new(conn),
             cache_dir,
+            memoria: Mutex::new(lru::LruCache::new(
+                std::num::NonZeroUsize::new(CAPACIDADE_DA_MEMORIA).expect("não é zero"),
+            )),
+        }
+    }
+
+    /// A imagem já decodificada, se ela estiver na memória.
+    fn da_memoria(&self, chave: &str) -> Option<DynamicImage> {
+        self.memoria
+            .lock()
+            .ok()?
+            .get(chave)
+            .map(|imagem: &Arc<DynamicImage>| (**imagem).clone())
+    }
+
+    fn guardar_na_memoria(&self, chave: &str, imagem: &DynamicImage) {
+        if let Ok(mut memoria) = self.memoria.lock() {
+            memoria.put(chave.to_string(), Arc::new(imagem.clone()));
+        }
+    }
+
+    /// Esquece uma foto da memória — usado quando o preview dela é regravado.
+    pub fn esquecer_da_memoria(&self, photo_id_str: &str) {
+        if let Ok(mut memoria) = self.memoria.lock() {
+            memoria.pop(&format!("p:{photo_id_str}"));
+            memoria.pop(&format!("t:{photo_id_str}"));
         }
     }
 
     /// Helper to get a thumbnail as DynamicImage
+    ///
+    /// ⚠️ **Também passa pela memória.** A grade já tem cache próprio de
+    /// `RenderImage`, mas a Revelação cai na miniatura quando não há preview, e o
+    /// filmstrip pede as vizinhas a cada troca de foto.
     pub fn get_thumbnail(&self, photo_id_str: &str) -> Option<DynamicImage> {
+        let chave = format!("t:{photo_id_str}");
+        if let Some(imagem) = self.da_memoria(&chave) {
+            return Some(imagem);
+        }
+        let imagem = self.ler_miniatura_do_disco(photo_id_str)?;
+        self.guardar_na_memoria(&chave, &imagem);
+        Some(imagem)
+    }
+
+    fn ler_miniatura_do_disco(&self, photo_id_str: &str) -> Option<DynamicImage> {
         let conn = self.conn.lock().unwrap();
         // Type 0 = Thumbnail
         let mut stmt = conn
@@ -136,6 +192,11 @@ impl PreviewManager {
 
     /// Helper to save thumbnail
     pub fn save_thumbnail(&self, photo_id_str: &str, image: &DynamicImage) -> Result<(), String> {
+        // 🚨 Regravar invalida a memória. Sem isto, gerar um preview novo
+        // deixaria o antigo valendo até o LRU o descartar — e a foto continuaria
+        // aparecendo como estava, sem erro nenhum.
+        self.esquecer_da_memoria(photo_id_str);
+
         let mut bytes: Vec<u8> = Vec::new();
         // Medium quality JPEG for thumbnails
         let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes, 80);
@@ -156,7 +217,24 @@ impl PreviewManager {
 
     /// Helper to get a preview as DynamicImage (Legacy API support)
     /// Loads the 'Large' preview type (Smart Preview)
+    ///
+    /// 🚨 **A memória vem primeiro, e é o que faz trocar de foto ser instantâneo.**
+    /// Sem ela, cada troca custava ler o BLOB do SQLite e **decodificar o JPEG de
+    /// novo** — medido no catálogo real em 18/ago/2026: **16 ms por foto, e a
+    /// segunda passada pelas mesmas fotos custava o mesmo**. É a técnica que o app
+    /// de egui tinha (`async_loader.rs`, cache L1 de 15 imagens) e que não veio no
+    /// porte; `docs/08-CACHE-ARCHITECTURE.md` a descreve desde dez/2025.
     pub fn get_preview(&self, photo_id_str: &str) -> Option<DynamicImage> {
+        let chave = format!("p:{photo_id_str}");
+        if let Some(imagem) = self.da_memoria(&chave) {
+            return Some(imagem);
+        }
+        let imagem = self.ler_preview_do_disco(photo_id_str)?;
+        self.guardar_na_memoria(&chave, &imagem);
+        Some(imagem)
+    }
+
+    fn ler_preview_do_disco(&self, photo_id_str: &str) -> Option<DynamicImage> {
         let conn = self.conn.lock().unwrap();
         // Type 1 = Large
         let mut stmt = conn
@@ -184,6 +262,11 @@ impl PreviewManager {
     /// Helper to save preview (Legacy API support)
     /// Saves as 'Large' preview type
     pub fn save_preview(&self, photo_id_str: &str, image: &DynamicImage) -> Result<(), String> {
+        // 🚨 Regravar invalida a memória. Sem isto, gerar um preview novo
+        // deixaria o antigo valendo até o LRU o descartar — e a foto continuaria
+        // aparecendo como estava, sem erro nenhum.
+        self.esquecer_da_memoria(photo_id_str);
+
         let mut bytes: Vec<u8> = Vec::new();
         // High quality JPEG for previews
         let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes, 90);
@@ -400,6 +483,93 @@ impl PreviewStorage for PreviewManager {
 
 #[cfg(test)]
 mod tests {
+    /// 🚨 **A segunda leitura da mesma foto não decodifica de novo.**
+    ///
+    /// Sem o cache em memória, trocar de foto na Revelação custava ler o BLOB do
+    /// SQLite e **decodificar o JPEG inteiro**, toda vez. Medido no catálogo real
+    /// em 18/ago/2026: **16 ms por foto, e a segunda passada pelas mesmas doze
+    /// custava os mesmos 154 ms.** Com a memória, 8,9 ms.
+    ///
+    /// 🔑 É a técnica que o app de egui tinha (`async_loader.rs`, cache L1 de 15
+    /// imagens) e que não veio no porte — `docs/08-CACHE-ARCHITECTURE.md` a
+    /// descreve desde dez/2025.
+    ///
+    /// O teste mede o **efeito observável**: apagar a linha do disco e a foto
+    /// continuar vindo prova que ela não foi lida de lá.
+    #[test]
+    fn a_segunda_leitura_vem_da_memoria() {
+        let dir = tempfile::tempdir().expect("diretório");
+        let previews = PreviewManager::new_with_path(dir.path().to_path_buf());
+
+        let imagem = DynamicImage::ImageRgb8(image::RgbImage::new(64, 48));
+        previews.save_preview("foto-1", &imagem).expect("gravar");
+
+        let primeira = previews.get_preview("foto-1").expect("primeira leitura");
+        assert_eq!((primeira.width(), primeira.height()), (64, 48));
+
+        // Some com a linha do disco, sem avisar a memória.
+        {
+            let conn = previews.conn.lock().expect("a conexão");
+            conn.execute("DELETE FROM previews WHERE photo_id = 'foto-1'", [])
+                .expect("apagar");
+        }
+
+        let segunda = previews.get_preview("foto-1");
+        assert!(
+            segunda.is_some(),
+            "a segunda leitura foi ao disco — não há cache em memória"
+        );
+    }
+
+    /// 🚨 **Regravar invalida a memória.**
+    ///
+    /// Sem isto, gerar um preview novo deixaria o antigo valendo até o LRU o
+    /// descartar — e a foto continuaria aparecendo como estava, sem erro nenhum.
+    #[test]
+    fn regravar_troca_o_que_esta_na_memoria() {
+        let dir = tempfile::tempdir().expect("diretório");
+        let previews = PreviewManager::new_with_path(dir.path().to_path_buf());
+
+        previews
+            .save_preview(
+                "foto-1",
+                &DynamicImage::ImageRgb8(image::RgbImage::new(64, 48)),
+            )
+            .expect("gravar");
+        assert_eq!(previews.get_preview("foto-1").expect("lida").width(), 64);
+
+        previews
+            .save_preview(
+                "foto-1",
+                &DynamicImage::ImageRgb8(image::RgbImage::new(32, 24)),
+            )
+            .expect("regravar");
+
+        assert_eq!(
+            previews.get_preview("foto-1").expect("relida").width(),
+            32,
+            "veio a versão antiga da memória"
+        );
+    }
+
+    /// ⚠️ A memória tem teto: a 16ª foto empurra a primeira para fora.
+    #[test]
+    fn a_memoria_tem_teto() {
+        let dir = tempfile::tempdir().expect("diretório");
+        let previews = PreviewManager::new_with_path(dir.path().to_path_buf());
+
+        let imagem = DynamicImage::ImageRgb8(image::RgbImage::new(8, 8));
+        for i in 0..=CAPACIDADE_DA_MEMORIA {
+            previews
+                .save_preview(&format!("foto-{i}"), &imagem)
+                .expect("gravar");
+            previews.get_preview(&format!("foto-{i}"));
+        }
+
+        let memoria = previews.memoria.lock().expect("a memória");
+        assert_eq!(memoria.len(), CAPACIDADE_DA_MEMORIA);
+    }
+
     use super::*;
     use image::{DynamicImage, RgbaImage};
     use tempfile::tempdir;

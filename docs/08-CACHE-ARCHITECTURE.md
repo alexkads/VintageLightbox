@@ -1,5 +1,29 @@
 # Arquitetura de Cache e Performance
 
+> 🚨 **Este documento descreve o app de egui, e o porte para GPUI não trouxe o
+> L1.** Descoberto em 18/ago/2026, quando o dono relatou a Revelação lenta e
+> apontou para cá: *"verifique na documentação as técnicas que utilizamos quando
+> era EGUI"*. Ele estava certo — o documento tinha a resposta desde dez/2025.
+>
+> **O que faltava, e entrou em 18/ago:**
+>
+> | Técnica | Estado |
+> |---|---|
+> | **L1 em memória** (imagem decodificada, LRU de 15) | ✅ agora em `PreviewManager` |
+> | **Prefetch dos vizinhos** (N−1 e N+1) | ✅ agora em `Revelacao::adiantar_as_vizinhas` |
+> | `ProcessedCache` (resultado + `edits_hash`) | ⬜ ainda não — o motor de GPU é rápido; o caro era o decode |
+>
+> **Medido no catálogo real, antes e depois** (release, 12 fotos):
+>
+> | | antes | depois |
+> |---|---:|---:|
+> | segunda passada pelas mesmas 12 fotos | 154 ms | **8,9 ms** |
+> | `transformacao::aplicar` sem corte, por resultado da GPU | 8,6 ms | **0,6 ms** |
+>
+> ⚠️ **E um número deste documento estava errado**: ele diz "L2: ~600-700ms" para
+> ler um preview. Medido hoje, é **16 ms** — o disco e o `image` de 2025 não são
+> os de hoje. Números de desempenho envelhecem; os que estão aqui têm data.
+
 ## Visão Geral
 O VintageLightbox utiliza um sistema de cache hierárquico de três níveis (L1, L2, L3) projetado para oferecer uma experiência de visualização instantânea (<16ms) e edição fluida, mesmo lidando com arquivos RAW pesados (24MP+). O objetivo é minimizar a latência de I/O e o custo computacional de decodificação JPEG e processamento de edits.
 

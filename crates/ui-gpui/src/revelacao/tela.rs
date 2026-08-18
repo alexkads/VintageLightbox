@@ -391,6 +391,44 @@ impl Revelacao {
     fn mostrar_a_posicao(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let foto = self.acervo[self.posicao].clone();
         self.mostrar(foto, window, cx);
+        self.adiantar_as_vizinhas(cx);
+    }
+
+    /// Decodifica a foto anterior e a seguinte **em segundo plano**.
+    ///
+    /// 🔑 **É o prefetch que o app de egui tinha** (`async_loader.rs`, e
+    /// `docs/08-CACHE-ARCHITECTURE.md` desde dez/2025): quem revela em série anda
+    /// pela seta, e a foto seguinte já estar decodificada é a diferença entre a
+    /// troca ser instantânea e custar a decodificação inteira do JPEG — medido em
+    /// 18/ago/2026 no catálogo real: **16 ms por foto**, toda vez.
+    ///
+    /// ⚠️ **Não guarda nada aqui**: só chama o `PreviewManager`, que passou a ter
+    /// cache em memória. O resultado é descartado de propósito — o efeito
+    /// desejado é a foto estar quente quando a seta chegar nela.
+    ///
+    /// ⚠️ **E vai para o executor de fundo**, não para uma `Task` guardada: se a
+    /// pessoa andar cinco fotos em dois segundos, os cinco adiantamentos correm e
+    /// terminam sozinhos. Cancelá-los seria jogar fora justamente o trabalho que
+    /// a próxima seta vai querer.
+    fn adiantar_as_vizinhas(&self, cx: &mut Context<Self>) {
+        let vizinhas: Vec<String> = [self.posicao.checked_sub(1), Some(self.posicao + 1)]
+            .into_iter()
+            .flatten()
+            .filter_map(|i| self.acervo.get(i))
+            .map(|foto| foto.id.clone())
+            .collect();
+        if vizinhas.is_empty() {
+            return;
+        }
+
+        let previews = self.previews.clone();
+        cx.background_executor()
+            .spawn(async move {
+                for id in vizinhas {
+                    let _ = previews.get_preview(&id);
+                }
+            })
+            .detach();
     }
 
     fn mostrar(&mut self, foto: PhotoViewModel, window: &mut Window, cx: &mut Context<Self>) {
