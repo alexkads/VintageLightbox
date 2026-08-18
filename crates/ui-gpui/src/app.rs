@@ -63,6 +63,7 @@ actions!(
         AlternarCorte,
         CopiarRevelacao,
         ColarRevelacao,
+        ApagarFotos,
         AlternarOriginal,
         // As treze teclas de triagem da Biblioteca, mais as duas setas. São
         // ações sem dado porque o `actions!` só declara struct de unidade — o
@@ -134,6 +135,11 @@ pub fn init(cx: &mut gpui::App) {
         // com `Cmd` não vira letra.
         gpui::KeyBinding::new("cmd-shift-c", CopiarRevelacao, Some(CONTEXTO)),
         gpui::KeyBinding::new("cmd-shift-v", ColarRevelacao, Some(CONTEXTO)),
+        // Apagar. 🚨 Vai em `SEM_CAMPO_DE_TEXTO` porque `Delete` e `Backspace`
+        // apagam **letra** dentro de um campo de busca — e roubar a tecla de lá
+        // faria digitar virar um pedido para tirar foto do catálogo.
+        gpui::KeyBinding::new("delete", ApagarFotos, Some(SEM_CAMPO_DE_TEXTO)),
+        gpui::KeyBinding::new("backspace", ApagarFotos, Some(SEM_CAMPO_DE_TEXTO)),
         // `R` de "recortar", a mesma tecla do legado (`keyboard.rs`).
         gpui::KeyBinding::new("r", AlternarCorte, Some(SEM_CAMPO_DE_TEXTO)),
         // `\` mostra o antes/depois, como no legado.
@@ -735,6 +741,21 @@ impl Aplicativo {
     /// "desfazer a última nota/sinalizador", que o legado não tem. Fazer com que
     /// desfizesse a revelação de uma foto que nem está na tela seria pior do que
     /// não fazer nada.
+    fn ao_apagar_fotos(
+        &mut self,
+        _acao: &ApagarFotos,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // ⚠️ Só na Biblioteca. Na Revelação a tecla apagaria a foto que está
+        // sendo revelada, deixando a tela com uma foto que já não existe.
+        if self.tela != Tela::Biblioteca {
+            return;
+        }
+        self.biblioteca
+            .update(cx, |tela, cx| tela.pedir_para_apagar(cx));
+    }
+
     fn ao_copiar_revelacao(
         &mut self,
         _acao: &CopiarRevelacao,
@@ -1041,6 +1062,77 @@ impl Aplicativo {
     /// O modal de exportação. Menor que o de importação de propósito: a
     /// escolha inteira é uma pasta, e uma janela grande em volta de dois botões
     /// sugere que falta preencher alguma coisa.
+    /// O aviso de apagar — o segundo aviso deste app sobre algo que não volta.
+    ///
+    /// 🚨 **O que ele precisa dizer, e diz**: quantas fotos, que o **arquivo
+    /// continua no disco**, e que **a revelação vai junto**. Sem a segunda
+    /// frase, quem lê "apagar" imagina perda de arquivo e não clica; sem a
+    /// terceira, clica achando que reimportar desfaz — e reimportar devolve o
+    /// arquivo, não os 46 ajustes.
+    fn aviso_de_apagar(&self, quantas: usize, cx: &mut Context<Self>) -> impl IntoElement {
+        let titulo = if quantas == 1 {
+            "Tirar 1 foto do catálogo?".to_string()
+        } else {
+            format!("Tirar {quantas} fotos do catálogo?")
+        };
+
+        div()
+            .absolute()
+            .inset_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(gpui::rgba(0x000000aa))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(10.))
+                    .p(px(16.))
+                    .max_w(px(420.))
+                    .bg(cx.theme().background)
+                    .border_1()
+                    .border_color(cx.theme().border)
+                    .rounded(px(6.))
+                    .child(div().text_sm().child(titulo))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(
+                                "O arquivo continua no disco — sai só do catálogo. \
+                                 ⚠️ A revelação vai junto: reimportar devolve a foto, \
+                                 não os ajustes.",
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .justify_end()
+                            .gap(px(8.))
+                            .child(
+                                Button::new("apagar-cancelar")
+                                    .label("Cancelar")
+                                    .xsmall()
+                                    .on_click(cx.listener(|este, _ev, _window, cx| {
+                                        este.biblioteca
+                                            .update(cx, |tela, cx| tela.cancelar_apagar(cx));
+                                    })),
+                            )
+                            .child(
+                                Button::new("apagar-confirmar")
+                                    .label("Tirar do catálogo")
+                                    .xsmall()
+                                    .danger()
+                                    .on_click(cx.listener(|este, _ev, _window, cx| {
+                                        este.biblioteca
+                                            .update(cx, |tela, cx| tela.apagar_confirmado(cx));
+                                    })),
+                            ),
+                    ),
+            )
+    }
+
     fn modal_de_exportacao(&self, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .absolute()
@@ -1145,6 +1237,7 @@ impl Render for Aplicativo {
             .on_action(cx.listener(Self::ao_alternar_original))
             .on_action(cx.listener(Self::ao_copiar_revelacao))
             .on_action(cx.listener(Self::ao_colar_revelacao))
+            .on_action(cx.listener(Self::ao_apagar_fotos))
             // A tabela de triagem. Quinze linhas de uma linha: a regra de cada
             // uma está em `biblioteca::marcacao`, e aqui só se diz qual ação
             // chama qual método — como a tabela de `controles.rs` faz com os 42
@@ -1227,6 +1320,11 @@ impl Render for Aplicativo {
             .when(self.exportando, |raiz| {
                 raiz.child(self.modal_de_exportacao(cx))
             })
+            .when_some(
+                self.biblioteca.read(cx).confirmando_apagar(),
+                |raiz, quantas| raiz.child(self.aviso_de_apagar(quantas, cx)),
+            )
+            .when(false, |raiz| raiz)
             .when(self.configurando, |raiz| {
                 raiz.child(self.modal_de_configuracoes(cx))
             })

@@ -106,6 +106,8 @@ e câmeras mais usadas, dock com painéis arrastáveis e arranjo gravado, segund
 |---|---|
 | ✅ **Coleções** | **desde 17/ago** — lista lateral, criar levando a seleção junto, abrir para filtrar a grade, acrescentar e remover em lote |
 | ⬜ **Palavras-chave** | não existe em nenhuma camada — é uma das colunas da Biblioteca do Lightroom |
+| ✅ **Apagar foto** | **desde 18/ago** — `Delete`/`Backspace` com confirmação. Tira do catálogo; o arquivo fica no disco (é o "Remove from Catalog" do Lightroom) |
+| ⬜ **Apagar do disco** | operação de outra natureza: precisa de use case próprio e de um segundo passo no aviso |
 | ⬜ **Pilhas, comparação (tecla `C`), visão de levantamento (`N`)** | |
 | ⬜ **Edição de metadados** (título, legenda, copyright, GPS) | o `ExifReader` lê; nada escreve |
 | ⬜ **Filtro por câmera, lente, ISO, data** | o painel *mostra* essas estatísticas e não filtra por elas |

@@ -76,6 +76,12 @@ pub struct Biblioteca {
     colecoes: colecoes::Estado,
     /// O campo do nome da coleção nova.
     nome_da_colecao: Entity<InputState>,
+    /// Quantas fotos a confirmação de apagar está segurando.
+    ///
+    /// 🚨 **Apagar leva a revelação junto**, e é por isso que pergunta. Os 46
+    /// ajustes moram na linha da foto; tirá-la do catálogo joga fora o trabalho
+    /// de revelação dela, e reimportar devolve o arquivo — não a revelação.
+    confirmando_apagar: Option<usize>,
     porta_de_colecoes: Arc<dyn colecoes::Colecoes>,
     recados_de_colecao: (
         std::sync::mpsc::Sender<colecoes::Recado>,
@@ -228,6 +234,7 @@ impl Biblioteca {
             filtros: Filtros::default(),
             colecoes: colecoes::Estado::default(),
             nome_da_colecao,
+            confirmando_apagar: None,
             porta_de_colecoes,
             recados_de_colecao: std::sync::mpsc::channel(),
             colhendo_colecoes: false,
@@ -716,6 +723,79 @@ impl Biblioteca {
     }
 
     /// Quantas fotos estão selecionadas.
+    /// Pede a confirmação de apagar a seleção.
+    ///
+    /// ⚠️ **Não apaga nada ainda.** A tecla `Delete` fica ao lado das treze de
+    /// triagem, que se apertam às centenas numa sessão; sem o passo de
+    /// confirmação, um dedo fora do lugar tira fotos do catálogo em lote.
+    pub fn pedir_para_apagar(&mut self, cx: &mut Context<Self>) {
+        let quantas = if self.selecionadas.is_empty() {
+            usize::from(self.selecionada.is_some())
+        } else {
+            self.selecionadas.len()
+        };
+        if quantas == 0 {
+            return;
+        }
+        self.confirmando_apagar = Some(quantas);
+        cx.notify();
+    }
+
+    pub fn cancelar_apagar(&mut self, cx: &mut Context<Self>) {
+        self.confirmando_apagar = None;
+        cx.notify();
+    }
+
+    pub fn confirmando_apagar(&self) -> Option<usize> {
+        self.confirmando_apagar
+    }
+
+    /// Tira as fotos selecionadas do catálogo.
+    ///
+    /// 🔑 **O acervo em memória é atualizado na hora**, e não relido: apagar 40
+    /// fotos e esperar a releitura deixaria a grade mostrando o que já não
+    /// existe — e clicar numa delas abriria a Revelação numa foto sem linha no
+    /// banco. É o *optimistic update* que a triagem já usa.
+    ///
+    /// ⚠️ **O arquivo continua no disco.** É o "Remove from Catalog" do
+    /// Lightroom, e a tela diz isso na confirmação: apagar do disco é operação
+    /// de outra natureza, que ninguém deve tomar por engano com a tecla `Delete`.
+    pub fn apagar_confirmado(&mut self, cx: &mut Context<Self>) {
+        self.confirmando_apagar = None;
+
+        let alvos: Vec<usize> = if self.selecionadas.is_empty() {
+            self.selecionada.into_iter().collect()
+        } else {
+            self.selecionadas.iter().copied().collect()
+        };
+        if alvos.is_empty() {
+            return;
+        }
+
+        let ids: Vec<String> = alvos.iter().map(|&i| self.fotos[i].id.clone()).collect();
+        for id in &ids {
+            self.marcador.apagar(id.clone());
+        }
+
+        let apagados: std::collections::HashSet<&String> = ids.iter().collect();
+        let restantes: Vec<PhotoViewModel> = self
+            .fotos
+            .iter()
+            .filter(|foto| !apagados.contains(&foto.id))
+            .cloned()
+            .collect();
+
+        self.fotos = Arc::new(restantes);
+        self.pastas = pastas_do_acervo(&self.fotos);
+        // 🚨 A seleção apontava para posições do acervo antigo. Mantê-la faria a
+        // próxima tecla de triagem cair em fotos que ninguém escolheu.
+        self.selecionada = None;
+        self.selecionadas.clear();
+        self.ancora = None;
+        self.refiltrar();
+        cx.notify();
+    }
+
     /// Quantas fotos o acervo tem — o número que a releitura muda.
     pub fn quantas_fotos(&self) -> usize {
         self.fotos.len()
@@ -1937,6 +2017,113 @@ mod testes {
         cx.add_window(move |window, cx| {
             Biblioteca::nova(acervo(), previews, marcador(), porta, window, cx)
         })
+    }
+
+    /// 🚨 **Apagar pede confirmação, e a tecla sozinha não apaga.**
+    ///
+    /// `Delete` fica ao lado das treze teclas de triagem, que se apertam às
+    /// centenas numa sessão de 800 fotos. Sem o passo de confirmação, um dedo
+    /// fora do lugar tira fotos do catálogo em lote — e leva a revelação delas
+    /// junto, porque os 46 ajustes moram na linha da foto.
+    #[gpui::test]
+    fn a_tecla_de_apagar_sozinha_nao_apaga(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+        let marcador = Arc::new(MarcadorDeMentira::default());
+
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            let marcador = marcador.clone();
+            |window, cx| {
+                Biblioteca::nova(acervo(), previews, marcador, colecoes_vazias(), window, cx)
+            }
+        });
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.selecionar(Some(0), cx);
+                tela.pedir_para_apagar(cx);
+
+                assert_eq!(tela.confirmando_apagar(), Some(1), "tinha de perguntar");
+                assert_eq!(tela.quantas_fotos(), 3, "e não apagar nada ainda");
+            })
+            .expect("a janela deve estar aberta");
+
+        assert!(
+            marcador.apagados().is_empty(),
+            "a tecla sozinha mandou apagar — não pode"
+        );
+    }
+
+    /// ⚠️ **Cancelar não apaga nada**, e é o caminho que mais se usa num aviso.
+    #[gpui::test]
+    fn cancelar_o_aviso_nao_apaga(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+        let marcador = Arc::new(MarcadorDeMentira::default());
+
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            let marcador = marcador.clone();
+            |window, cx| {
+                Biblioteca::nova(acervo(), previews, marcador, colecoes_vazias(), window, cx)
+            }
+        });
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.selecionar(Some(0), cx);
+                tela.pedir_para_apagar(cx);
+                tela.cancelar_apagar(cx);
+                assert!(tela.confirmando_apagar().is_none());
+                assert_eq!(tela.quantas_fotos(), 3);
+            })
+            .expect("a janela deve estar aberta");
+
+        assert!(marcador.apagados().is_empty());
+    }
+
+    /// ✅ **Confirmado, apaga a seleção inteira e a grade some com elas na hora.**
+    ///
+    /// 🔑 A grade é atualizada em memória, e não relida: apagar 40 fotos e
+    /// esperar a releitura deixaria a grade mostrando o que já não existe — e
+    /// clicar numa delas abriria a Revelação numa foto sem linha no banco.
+    #[gpui::test]
+    fn apagar_confirmado_tira_a_selecao_do_catalogo_e_da_grade(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+        let marcador = Arc::new(MarcadorDeMentira::default());
+
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            let marcador = marcador.clone();
+            |window, cx| {
+                Biblioteca::nova(acervo(), previews, marcador, colecoes_vazias(), window, cx)
+            }
+        });
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.selecionar(Some(0), cx);
+                tela.alternar_uma(1, cx);
+                tela.pedir_para_apagar(cx);
+                assert_eq!(tela.confirmando_apagar(), Some(2));
+
+                tela.apagar_confirmado(cx);
+
+                assert_eq!(tela.quantas_fotos(), 1, "sobrou uma das três");
+                assert_eq!(nomes_visiveis(tela), ["retrato.jpg"]);
+                assert_eq!(
+                    tela.quantas_selecionadas(),
+                    0,
+                    "a seleção apontava para posições do acervo antigo"
+                );
+            })
+            .expect("a janela deve estar aberta");
+
+        let mut apagados = marcador.apagados();
+        apagados.sort();
+        assert_eq!(apagados, ["id-DSC_001.NEF", "id-DSC_002.NEF"]);
     }
 
     /// 🚨 **Abrir uma coleção filtra a grade; fechar devolve o acervo.**

@@ -38,6 +38,19 @@ pub enum Marca {
 /// não há o que ela faça com a falha depois disso além de registrar.
 pub trait Marcador: Send + Sync + 'static {
     fn marcar(&self, id: String, marca: Marca);
+
+    /// Tira a foto do catálogo.
+    ///
+    /// 🚨 **Não apaga o arquivo do disco.** `DeletePhotoUseCase` remove só a
+    /// linha do banco — é o "Remove from Catalog" do Lightroom, e é o padrão
+    /// seguro. Apagar do disco é operação de outra natureza: precisa de use case
+    /// próprio, de um segundo passo no aviso, e de uma decisão que ninguém toma
+    /// por engano com a tecla `Delete`.
+    ///
+    /// ⚠️ **A revelação vai junto.** Os 46 ajustes moram na linha da foto; tirar
+    /// a foto do catálogo joga fora o trabalho de revelação dela. Reimportar
+    /// devolve o arquivo, não a revelação — é por isso que isto pede confirmação.
+    fn apagar(&self, id: String);
 }
 
 /// O marcador de verdade: entrega ao `PhotoController`, numa tarefa do tokio.
@@ -81,6 +94,16 @@ impl Marcador for MarcadorDoBanco {
             }
         });
     }
+
+    fn apagar(&self, id: String) {
+        let fotos = self.fotos.clone();
+        let nome = id.clone();
+        self.tokio.spawn(async move {
+            if let Err(erro) = fotos.delete_photo(&id).await {
+                eprintln!("⚠️  Falhou ao apagar {nome} do catálogo: {erro}");
+            }
+        });
+    }
 }
 
 /// A cor que a tecla produz, dada a que a foto já tem.
@@ -118,9 +141,17 @@ pub mod mentira {
     #[derive(Default)]
     pub struct MarcadorDeMentira {
         marcado: Mutex<Vec<(String, Marca)>>,
+        apagados: Mutex<Vec<String>>,
     }
 
     impl MarcadorDeMentira {
+        pub fn apagados(&self) -> Vec<String> {
+            self.apagados
+                .lock()
+                .expect("o marcador de mentira não deve estar envenenado")
+                .clone()
+        }
+
         pub fn marcado(&self) -> Vec<(String, Marca)> {
             self.marcado
                 .lock()
@@ -135,6 +166,13 @@ pub mod mentira {
                 .lock()
                 .expect("o marcador de mentira não deve estar envenenado")
                 .push((id, marca));
+        }
+
+        fn apagar(&self, id: String) {
+            self.apagados
+                .lock()
+                .expect("o marcador de mentira não deve estar envenenado")
+                .push(id);
         }
     }
 }
