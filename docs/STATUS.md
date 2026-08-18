@@ -34,7 +34,8 @@ coisas que nenhum deles pega:
 
 | O que ele encontrou | O que era |
 |---|---|
-| "não visualiza as fotos corretamente" | 🚨 **o gerador de preview ampliava**. `DynamicImage::thumbnail` ajusta a imagem à caixa pedida, e o fator é **maior que 1** quando a origem é menor: um arquivo de 137×92 virava um preview de 2560×1719. Medido no catálogo real: **12 de 12** ampliados. A Revelação mostra o preview em tela cheia — quem revelava via um borrão |
+| **o painel "Foto" aparecia vazio** | 🚨 **a moldura do palco usava `flex_1()`**, que só cresce dentro de um pai flex. Quando a Revelação entrou no dock ela virou a **raiz de um painel**: a altura caiu no conteúdo, o filho `size_full()` virou 100% de zero, e a foto passou a ser desenhada num retângulo sem tamanho. O painel continuava ali, com título e área — vazio. Medido: o `canvas` do palco gravava bounds **0×0** |
+| "não visualiza as fotos corretamente" | 🚨 **e o gerador de preview ampliava**. `DynamicImage::thumbnail` ajusta a imagem à caixa pedida, e o fator é **maior que 1** quando a origem é menor: um arquivo de 137×92 virava um preview de 2560×1719. Medido no catálogo real: **12 de 12** ampliados. A Revelação mostra o preview em tela cheia — quem revelava via um borrão |
 | "está travando" | ⚠️ **em parte, o mesmo defeito**: toda a cadeia (GPU, corte, conversão BGRA) trabalhava sobre 4,4 milhões de pixels que a foto não tem. **Não é a explicação inteira** — ver abaixo |
 | "não consigo excluir fotos" | 🚨 **não havia caminho.** `DeletePhotoUseCase` existia, o `PhotoController` o expunha, e nenhuma tecla ou botão chegava lá |
 

@@ -1010,9 +1010,18 @@ impl Revelacao {
     }
 
     fn palco(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
+        // 🚨 **`size_full`, e não `flex_1`.** Esta moldura era filha de uma
+        // linha flex antes do dock; hoje ela é a **raiz de um painel**, e
+        // `flex_1` sem pai flex não cresce: a altura cai no conteúdo, o filho
+        // `size_full()` vira 100% de zero, e a foto é desenhada num retângulo
+        // sem tamanho. O painel continua ali, com título e área — só que vazio.
+        //
+        // Nada falha. Foi relatado com a tela na mão, e o que denuncia é
+        // `o_palco_tem_tamanho_depois_de_desenhado`, que lê as bounds que o
+        // `canvas` grava.
         let moldura = div()
             .flex()
-            .flex_1()
+            .size_full()
             .min_w(px(0.))
             .items_center()
             .justify_center()
@@ -2142,6 +2151,60 @@ mod testes {
             .expect("a janela deve estar aberta");
 
         janela
+    }
+
+    /// 🚨 **O palco tem de ter tamanho depois de desenhado.**
+    ///
+    /// Relatado com a tela na mão em 18/ago/2026: o painel "Foto" aparecia
+    /// **vazio**, com o filmstrip abaixo mostrando as miniaturas normalmente.
+    ///
+    /// A causa é de uma linha: a moldura do palco usava `flex_1()`, que só faz
+    /// sentido dentro de um pai flex. Quando a Revelação entrou no dock, ela
+    /// virou a **raiz de um painel** — sem pai flex, `flex_1` não cresce, a
+    /// altura fica no conteúdo, e o filho `size_full()` vira 100% de zero.
+    ///
+    /// 🔑 **Nada falha.** O painel existe, tem título, tem área; a foto é
+    /// desenhada num retângulo de tamanho zero. Nem o texto de "escolha uma
+    /// foto" aparece, porque o caminho com imagem não passa por ele.
+    ///
+    /// O `canvas` do palco grava as próprias bounds em `self.palco` — é essa
+    /// medida que este teste cobra.
+    #[gpui::test]
+    fn o_palco_tem_tamanho_depois_de_desenhado(cx: &mut TestAppContext) {
+        let (previews, dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_cinza())
+            .expect("gravar preview");
+        let janela = janela(cx, previews);
+        let _dir = dir;
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("retrato.jpg"), window, cx);
+            })
+            .expect("a janela deve estar aberta");
+
+        // Desenhar de verdade: é o `canvas` da fase de pintura que mede, e ele
+        // só roda quando a janela é pintada.
+        let mut visual = gpui::VisualTestContext::from_window(janela.into(), cx);
+        visual.draw(
+            gpui::Point::default(),
+            gpui::size(px(1200.), px(800.)),
+            |_window, _cx| gpui::Empty,
+        );
+        visual.run_until_parked();
+
+        janela
+            .update(cx, |tela, _window, _cx| {
+                let palco = tela.palco;
+                assert!(
+                    palco.size.width > px(0.) && palco.size.height > px(0.),
+                    "o palco foi desenhado com tamanho {}x{} — a foto some num retângulo de zero",
+                    f32::from(palco.size.width),
+                    f32::from(palco.size.height)
+                );
+            })
+            .expect("a janela deve estar aberta");
     }
 
     /// 🚨 Os cinco painéis da Revelação voltam do arranjo gravado.
