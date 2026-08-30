@@ -158,7 +158,7 @@ VintageLightbox-Rust/
 ## 📋 Requisitos do Sistema
 
 ### Para Desenvolvedores
-- Rust 1.75 ou superior
+- Rust 1.98 ou superior
 - macOS 10.15+ ou Windows 10+
 - 8GB RAM mínimo
 - Xcode Command Line Tools (macOS) ou Visual Studio Build Tools (Windows)

@@ -1151,7 +1151,7 @@ mod testes {
                 ..Default::default()
             },
         );
-        for pixel in cinza_de_verdade.chunks_exact(4) {
+        for pixel in cinza_de_verdade.as_chunks::<4>().0 {
             assert_eq!(
                 (pixel[0], pixel[1]),
                 (pixel[1], pixel[2]),
@@ -1169,7 +1169,9 @@ mod testes {
         );
         assert!(
             como_o_preset_pede
-                .chunks_exact(4)
+                .as_chunks::<4>()
+                .0
+                .iter()
                 .any(|pixel| pixel[0] != pixel[1] || pixel[1] != pixel[2]),
             "se isto passar a dar cinza, o shader ou o preset mudaram — e o defeito acabou"
         );

@@ -33,10 +33,10 @@ impl CollectionRepositoryImpl {
             .try_get("name")
             .map_err(|e| DomainError::InvalidOperation(format!("Failed to get name: {}", e)))?;
 
-        let description: Option<String> =
-            row.try_get("description")
-                .ok()
-                .and_then(|s: String| if s.is_empty() { None } else { Some(s) });
+        let description: Option<String> = row
+            .try_get("description")
+            .ok()
+            .filter(|s: &String| !s.is_empty());
 
         // Parse values
         let collection_id = CollectionId::from_string(&id_str)?;

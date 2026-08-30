@@ -50,9 +50,9 @@ use smallvec::SmallVec;
 pub fn para_gpui(imagem: DynamicImage) -> Arc<RenderImage> {
     let mut bytes = imagem.into_rgba8();
 
-    // `chunks_exact_mut(4)` e não um laço por (x, y): o buffer é contíguo, e o
+    // `as_chunks_mut::<4>()` e não um laço por (x, y): o buffer é contíguo, e o
     // acesso por coordenada refaria a multiplicação a cada pixel.
-    for pixel in bytes.chunks_exact_mut(4) {
+    for pixel in bytes.as_chunks_mut::<4>().0 {
         pixel.swap(0, 2);
     }
 
