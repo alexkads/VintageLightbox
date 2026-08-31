@@ -1120,10 +1120,11 @@ mod testes {
         );
     }
 
-    /// 🚨 O preset de sistema **"B&W" não deixa a foto em preto e branco**.
+    /// ✅ O preset de sistema **"B&W" deixa a foto em preto e branco** — e este
+    /// teste roda o valor que ele pede de verdade, não um número escolhido aqui.
     ///
-    /// `ListPresetsUseCase` constrói os cinco presets de sistema, e o "B&W" pede
-    /// `saturation: Some(-100.0)`. Mas a saturação do shader é um fator, não uma
+    /// 🚨 **Até 30/ago/2026 ele não deixava.** O preset pedia
+    /// `saturation: Some(-100.0)`, e a saturação do shader é um fator, não uma
     /// porcentagem:
     ///
     /// ```wgsl
@@ -1133,33 +1134,43 @@ mod testes {
     ///
     /// Cinza é `factor == 0`, ou seja **`-1.0`** — e é por isso que o slider de
     /// saturação vai de -1 a 1 (`controles.rs`, lido de `dock_viewer.rs`). Com
-    /// `-100`, o fator é `-99`: cada canal é jogado 99 vezes para o **lado oposto**
-    /// do cinza. Não é ausência de cor, é cor invertida e estourada.
+    /// `-100`, o fator é `-99`: cada canal era jogado 99 vezes para o **lado
+    /// oposto** do cinza. Não era ausência de cor, era cor invertida e estourada.
     ///
-    /// Este teste mede os dois: o `-1.0` deixa os três canais iguais; o `-100.0`
-    /// não. Vale para os dois apps — o preset vem do mesmo use case.
+    /// A segunda metade continua medindo a escala velha de propósito: é ela que
+    /// explica por que o valor do preset importa, e falharia se alguém mexesse na
+    /// conta do shader sem mexer no preset.
     #[test]
-    fn o_preset_bw_do_legado_nao_da_preto_e_branco() {
+    fn o_preset_bw_deixa_a_foto_em_preto_e_branco() {
+        let bw = use_cases::presets::presets_de_sistema()
+            .into_iter()
+            .find(|preset| preset.name == "B&W")
+            .expect("o preset de sistema \"B&W\" sumiu da lista");
+        let saturacao = bw
+            .adjustments
+            .saturation
+            .expect("o \"B&W\" é sobre saturação — sem ela ele não é nada");
+
         let mut motor = motor_pronto();
         let entrada = amostra();
 
-        let cinza_de_verdade = revelar_e_colher(
+        let como_o_preset_pede = revelar_e_colher(
             &mut motor,
             entrada.clone(),
             Ajustes {
-                saturation: -1.0,
+                saturation: saturacao,
                 ..Default::default()
             },
         );
-        for pixel in cinza_de_verdade.as_chunks::<4>().0 {
+        for pixel in como_o_preset_pede.as_chunks::<4>().0 {
             assert_eq!(
                 (pixel[0], pixel[1]),
                 (pixel[1], pixel[2]),
-                "saturação -1.0 é o fator zero: os três canais têm de virar o mesmo valor"
+                "o \"B&W\" pede saturação {saturacao}, e isso tem de deixar os três canais iguais"
             );
         }
 
-        let como_o_preset_pede = revelar_e_colher(
+        let na_escala_errada = revelar_e_colher(
             &mut motor,
             entrada,
             Ajustes {
@@ -1168,12 +1179,12 @@ mod testes {
             },
         );
         assert!(
-            como_o_preset_pede
+            na_escala_errada
                 .as_chunks::<4>()
                 .0
                 .iter()
                 .any(|pixel| pixel[0] != pixel[1] || pixel[1] != pixel[2]),
-            "se isto passar a dar cinza, o shader ou o preset mudaram — e o defeito acabou"
+            "-100 é o fator -99, e fator -99 não é cinza: se virou, a conta do shader mudou"
         );
     }
 

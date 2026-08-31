@@ -6,5 +6,5 @@ pub mod save_preset;
 mod tests;
 
 pub use delete_preset::DeletePresetUseCase;
-pub use list_presets::ListPresetsUseCase;
+pub use list_presets::{presets_de_sistema, ListPresetsUseCase};
 pub use save_preset::SavePresetUseCase;

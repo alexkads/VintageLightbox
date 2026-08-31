@@ -94,6 +94,23 @@ de ser **exata no inteiro**, senão o neutro passa a mover pixel.
 ⚠️ **O histórico não guarda o corte**, e o desfazer não o restaura. O `EditSnapshot` do app antigo
 tinha o campo e o ignorava; aqui o corte simplesmente não entra na pilha.
 
+✅ **Os presets de sistema saíram da escala errada em 30/ago/2026.** Os quatro pediam números de
+uma escala que o motor não usa, e o resultado não era pouco efeito, era foto destruída: "B&W" pedia
+`saturation: -100` numa escala em que cinza é `-1.0` (fator `-99`, cor invertida e estourada),
+"High Contrast" pedia `contrast: 50` num multiplicador de 0 a 2, e "Warm"/"Cool" pediam `±15` numa
+faixa de -10 a 10 — ±150 níveis de vermelho ou azul em 0..255.
+
+Agora são `-1.0`, `1.35` e `±1.5`, e quem prende isso são três testes:
+`os_presets_de_sistema_ficam_dentro_da_escala_do_motor` (nenhum preset pede o que nenhum slider
+consegue pedir), `cada_preset_de_sistema_move_alguma_coisa`, e
+`o_preset_bw_deixa_a_foto_em_preto_e_branco`, que roda o valor do preset **pela GPU** e confere os
+três canais iguais.
+
+🚨 **E o "Auto" saiu da lista** — pedia `exposure: Some(0.0)` com um `// Placeholder` ao lado, e
+clicar nele não fazia nada. O lugar dele nunca foi ali: no Lightroom "Auto" é botão do painel
+**Básico**, que lê a foto e escolhe os tons a partir dela. Preset é lista de números fixos, e
+nenhuma lista fixa serve para todas as fotos — voltar como botão é o item 10 da fila.
+
 ---
 
 ## Biblioteca — a parte mais completa
@@ -156,14 +173,12 @@ galeria do cliente**, e o que é defeito visível na tela.
 | 6 | ~~**A curva de tons ganha controles**~~ | ✅ **feito em 17/ago** |
 | 7 | ~~**DNG com perdas**~~ | ✅ **feito em 18/ago** — pela LibRaw do sistema, sem vendorizar nada |
 | 8 | ~~**Imprimir de verdade, ou tirar o botão**~~ | ✅ **feito em 17/ago** — imprime |
+| 9 | ~~**Os presets de sistema fora de escala**~~ | ✅ **feito em 30/ago** — e o "Auto" que não fazia nada saiu da lista |
+| 10 | **Tom automático no painel Básico** | é o "Auto" de volta, no lugar certo: lê o histograma da foto e escolhe exposição, pretos e brancos. Está aqui porque foi o que a saída do preset deixou faltando |
+| 11 | **Pausar e cancelar a importação** | existem no controller e não têm botão — um lote de 2.000 RAWs começa e não se interrompe |
+| 12 | **O desfazer não restaura o corte** | o corte não entra na pilha do histórico; `Cmd+Z` depois de cortar volta tudo menos o enquadramento |
 
 🔑 **A integração com o `recordarfotos.com.br` só começa quando o clone estiver funcional** —
 decisão do dono, 17/ago. Marca d'água e coleções entraram porque são funcionalidades do Lightroom que
 faltavam, e não porque a integração as pediu; que elas sejam também o que a integração vai consumir é
 consequência, não motivo. **Enquanto houver item nesta fila, a fila é o trabalho.**
-
-⚠️ **Os presets de sistema estão fora de escala e isso atravessa a fila.** "B&W" pede
-`saturation: -100` numa escala em que cinza é `-1.0`: o fator vira `-99` e a foto sai com cor
-invertida e estourada. "High Contrast", "Warm" e "Cool" têm o mesmo problema e "Auto" não faz nada.
-Está preso em `o_preset_bw_do_legado_nao_da_preto_e_branco`, que **falha no dia em que alguém
-arrumar** — de propósito.
