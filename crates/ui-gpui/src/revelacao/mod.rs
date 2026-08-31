@@ -4,6 +4,7 @@
 //! Slider sem imagem embaixo não tem como ser conferido — e o critério de saída
 //! da fase é **igualdade de pixel** com o app de egui.
 
+pub mod automatico;
 pub mod controles;
 pub mod corte;
 pub mod curva;

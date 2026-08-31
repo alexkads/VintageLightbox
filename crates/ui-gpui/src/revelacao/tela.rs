@@ -27,11 +27,12 @@ use gpui_component::collapsible::Collapsible;
 use gpui_component::dock::{register_panel, DockArea, DockEvent, DockItem, PanelView};
 use gpui_component::input::{Input, InputState};
 use gpui_component::slider::{Slider, SliderEvent, SliderState};
-use gpui_component::{ActiveTheme, Selectable, Sizable, WindowExt};
+use gpui_component::{ActiveTheme, Disableable, Selectable, Sizable, WindowExt};
 use infrastructure::cache::preview_manager::PreviewManager;
 
 use crate::imagem::para_gpui;
 
+use super::automatico;
 use super::controles::{Definicao, Secao, CONTROLES};
 use super::corte::{self, Alca};
 use super::curva;
@@ -627,6 +628,42 @@ impl Revelacao {
         self.gravar_o_que_estiver_pendente();
 
         presets::aplicar(&mut self.ajustes, &preset.adjustments);
+        self.espalhar_nos_sliders(window, cx);
+        self.pedir_revelacao(cx);
+        self.historico.registrar(self.ajustes);
+        self.gravar();
+        cx.notify();
+    }
+
+    /// O "Auto" do painel Básico: lê a foto e escolhe a exposição.
+    ///
+    /// 🚨 **Ele já existiu como preset, e não fazia nada.** Até 30/ago/2026 a
+    /// lista de presets de sistema trazia um "Auto" que pedia
+    /// `exposure: Some(0.0)` — o próprio neutro. Um preset é uma lista de números
+    /// fixos; o que este botão faz é o contrário disso: mede **esta** foto e
+    /// decide a partir dela ([`automatico`]).
+    ///
+    /// ⚠️ **Mede a foto crua, não a que está na tela.** `Aberta::bruta` é a
+    /// imagem como saiu do cache; o histograma do painel é o da revelada. Medir a
+    /// revelada faria o segundo clique decidir sobre o resultado do primeiro, e o
+    /// botão andaria sozinho a cada toque em vez de convergir.
+    ///
+    /// É gesto discreto, como o preset: vira passo de histórico e vai para o
+    /// banco na hora, sem a espera de 500 ms que existe para juntar arrasto.
+    pub fn tom_automatico(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // Sem foto (ou sem pixels no cache) não há o que medir. O botão já nasce
+        // desligado neste caso; a guarda é para quem chamar por outro caminho.
+        let Some(Aberta {
+            bruta: Some(bruta), ..
+        }) = self.aberta.as_ref()
+        else {
+            return;
+        };
+        let escolha = automatico::escolher(&Histograma::da_imagem(bruta));
+
+        self.gravar_o_que_estiver_pendente();
+        self.ajustes.exposure = escolha.exposure;
+        self.ajustes.highlights = escolha.highlights;
         self.espalhar_nos_sliders(window, cx);
         self.pedir_revelacao(cx);
         self.historico.registrar(self.ajustes);
@@ -1781,6 +1818,24 @@ impl Revelacao {
             .into_any_element()
     }
 
+    /// O botão do tom automático, no topo do Básico.
+    ///
+    /// **Desligado sem foto crua**: sem pixels no cache não há histograma, e um
+    /// botão que aceita o clique para não fazer nada é a promessa vazia que este
+    /// módulo inteiro existe para desfazer.
+    fn botao_do_automatico(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let pronto = matches!(self.aberta.as_ref(), Some(Aberta { bruta: Some(_), .. }));
+
+        Button::new("tom-automatico")
+            .label("Auto")
+            .xsmall()
+            .w_full()
+            .disabled(!pronto)
+            .on_click(cx.listener(|tela, _ev, window, cx| {
+                tela.tom_automatico(window, cx);
+            }))
+    }
+
     /// Uma seção sanfonada: o cabeçalho sempre, os controles só quando aberta.
     ///
     /// Fechada por padrão (menos o Básico), como no legado. São 42 controles: com
@@ -1813,39 +1868,50 @@ impl Revelacao {
                     })),
             )
             .content(
-                div().flex().flex_col().gap(px(8.)).pb(px(8.)).children(
-                    self.controles
-                        .iter()
-                        .filter(|controle| controle.definicao.secao == secao)
-                        .map(|controle| {
-                            let definicao = controle.definicao;
-                            let valor = (definicao.ler)(&self.ajustes);
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(8.))
+                    .pb(px(8.))
+                    // O "Auto" mora no Básico e só nele — é onde ele fica no
+                    // Lightroom, junto dos tons que decide. Fora daqui ele seria
+                    // mais um botão à procura de dono.
+                    .children((secao == Secao::Basico).then(|| self.botao_do_automatico(cx)))
+                    .children(
+                        self.controles
+                            .iter()
+                            .filter(|controle| controle.definicao.secao == secao)
+                            .map(|controle| {
+                                let definicao = controle.definicao;
+                                let valor = (definicao.ler)(&self.ajustes);
 
-                            div()
-                                .flex()
-                                .flex_col()
-                                .gap(px(2.))
-                                .child(
-                                    div()
-                                        .flex()
-                                        .items_center()
-                                        .justify_between()
-                                        .text_xs()
-                                        .child(definicao.rotulo)
-                                        // O valor fica ao lado do rótulo, e
-                                        // não dentro da barra: dentro, ele se
-                                        // move junto com o punho e vira um
-                                        // número que foge de quem tenta lê-lo.
-                                        .child(
-                                            div().text_color(cx.theme().muted_foreground).child(
-                                                SharedString::from(definicao.formatar(valor)),
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap(px(2.))
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .items_center()
+                                            .justify_between()
+                                            .text_xs()
+                                            .child(definicao.rotulo)
+                                            // O valor fica ao lado do rótulo, e
+                                            // não dentro da barra: dentro, ele se
+                                            // move junto com o punho e vira um
+                                            // número que foge de quem tenta lê-lo.
+                                            .child(
+                                                div()
+                                                    .text_color(cx.theme().muted_foreground)
+                                                    .child(SharedString::from(
+                                                        definicao.formatar(valor),
+                                                    )),
                                             ),
-                                        ),
-                                )
-                                .child(Slider::new(&controle.estado).horizontal())
-                        })
-                        .collect::<Vec<_>>(),
-                ),
+                                    )
+                                    .child(Slider::new(&controle.estado).horizontal())
+                            })
+                            .collect::<Vec<_>>(),
+                    ),
             )
     }
 }
@@ -2112,9 +2178,14 @@ mod testes {
     }
 
     fn foto_cinza() -> DynamicImage {
+        foto_uniforme(100)
+    }
+
+    /// Uma foto de um tom só — o que torna previsível o que o histograma dirá.
+    fn foto_uniforme(valor: u8) -> DynamicImage {
         let mut img = RgbaImage::new(8, 8);
         for pixel in img.pixels_mut() {
-            *pixel = Rgba([100, 100, 100, 255]);
+            *pixel = Rgba([valor, valor, valor, 255]);
         }
         DynamicImage::ImageRgba8(img)
     }
@@ -2919,6 +2990,67 @@ mod testes {
         let gravado = gravador.gravado();
         assert_eq!(gravado.len(), 2, "o preset e o desfazer");
         assert_eq!(gravado[0].1.temperature, 5.0);
+    }
+
+    /// 🚨 O "Auto" tem de mover a foto — foi por não mover que ele saiu da lista
+    /// de presets, onde pedia `exposure: Some(0.0)` sobre o neutro `0.0`.
+    ///
+    /// Os quatro juntos, como no preset: os ajustes, a barra, o histórico e o
+    /// banco. Um automático que mudasse `ajustes` sem mover a barra deixaria o
+    /// painel mentindo sobre a foto que ele mesmo acabou de mudar.
+    #[gpui::test]
+    fn o_tom_automatico_move_os_sliders_o_historico_e_o_banco(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_uniforme(30))
+            .expect("gravar preview");
+
+        let gravador = Arc::new(GravadorDeMentira::default());
+        let janela = com_gravador(cx, previews, gravador.clone());
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("retrato.jpg"), window, cx);
+                tela.tom_automatico(window, cx);
+
+                // A mediana é 30, e o alvo é 118: log2(118/30) = 1,98.
+                assert_eq!(tela.ajustes().exposure, 1.98);
+                assert_eq!(
+                    tela.controles[0].estado.read(cx).value().start(),
+                    1.98,
+                    "o primeiro controle é a exposição — a barra tem de acompanhar"
+                );
+                assert!(
+                    tela.pode_desfazer(),
+                    "o automático é um passo de histórico, como o preset"
+                );
+
+                tela.desfazer(window, cx);
+                assert_eq!(tela.ajustes().exposure, 0.0);
+            })
+            .expect("a janela deve estar aberta");
+
+        assert_eq!(gravador.gravado().len(), 2, "o automático e o desfazer");
+    }
+
+    /// Sem foto não há histograma — e um passo de histórico sobre nada seria um
+    /// `Cmd+Z` que não desfaz coisa nenhuma.
+    #[gpui::test]
+    fn o_tom_automatico_sem_foto_nao_faz_nada(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        let gravador = Arc::new(GravadorDeMentira::default());
+        let janela = com_gravador(cx, previews, gravador.clone());
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.tom_automatico(window, cx);
+
+                assert_eq!(tela.ajustes().exposure, 0.0);
+                assert!(!tela.pode_desfazer());
+            })
+            .expect("a janela deve estar aberta");
+
+        assert!(gravador.gravado().is_empty(), "nada para gravar");
     }
 
     /// 🚨 O preset não zera o que ele não menciona.

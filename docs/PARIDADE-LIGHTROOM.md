@@ -88,6 +88,7 @@ de ser **exata no inteiro**, senão o neutro passa a mover pixel.
 | ⬜ **Calibração de câmera / perfis** | |
 | ⬜ **Remoção de manchas** | há um `inpainting/` na infraestrutura, sem tela |
 | ✅ **Cópia de ajustes entre fotos** | **desde 17/ago** — `Cmd+Shift+C`/`Cmd+Shift+V`, da Biblioteca, valendo para a seleção inteira. Cada foto conserva o próprio enquadramento |
+| ✅ **Tom automático ("Auto")** | **desde 30/ago** — botão no topo do Básico: lê o histograma da foto crua e escolhe exposição e altas luzes. Mexe em dois ajustes, e não nos seis do Lightroom, porque "sombras" no shader multiplica **todo** pixel abaixo de 128 e enterraria o meio-tom |
 | ⬜ **Cópias virtuais e instantâneos** | |
 | ✅ Antes/depois, desfazer/refazer, presets, corte/giro/espelho/endireitar, histograma | |
 
@@ -109,7 +110,8 @@ três canais iguais.
 🚨 **E o "Auto" saiu da lista** — pedia `exposure: Some(0.0)` com um `// Placeholder` ao lado, e
 clicar nele não fazia nada. O lugar dele nunca foi ali: no Lightroom "Auto" é botão do painel
 **Básico**, que lê a foto e escolhe os tons a partir dela. Preset é lista de números fixos, e
-nenhuma lista fixa serve para todas as fotos — voltar como botão é o item 10 da fila.
+nenhuma lista fixa serve para todas as fotos. **Voltou como botão no mesmo dia** — no topo do
+Básico, medindo a foto crua.
 
 ---
 
@@ -174,7 +176,7 @@ galeria do cliente**, e o que é defeito visível na tela.
 | 7 | ~~**DNG com perdas**~~ | ✅ **feito em 18/ago** — pela LibRaw do sistema, sem vendorizar nada |
 | 8 | ~~**Imprimir de verdade, ou tirar o botão**~~ | ✅ **feito em 17/ago** — imprime |
 | 9 | ~~**Os presets de sistema fora de escala**~~ | ✅ **feito em 30/ago** — e o "Auto" que não fazia nada saiu da lista |
-| 10 | **Tom automático no painel Básico** | é o "Auto" de volta, no lugar certo: lê o histograma da foto e escolhe exposição, pretos e brancos. Está aqui porque foi o que a saída do preset deixou faltando |
+| 10 | ~~**Tom automático no painel Básico**~~ | ✅ **feito em 30/ago** — o "Auto" de volta no lugar certo, lendo a foto em vez de repetir números fixos |
 | 11 | **Pausar e cancelar a importação** | existem no controller e não têm botão — um lote de 2.000 RAWs começa e não se interrompe |
 | 12 | **O desfazer não restaura o corte** | o corte não entra na pilha do histórico; `Cmd+Z` depois de cortar volta tudo menos o enquadramento |
 

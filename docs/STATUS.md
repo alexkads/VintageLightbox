@@ -3,7 +3,7 @@
 **Última atualização**: 30 de agosto de 2026
 **Último commit**: `cb4f4f4 — 2026-08-30, _"chore(toolchain): sobe o Rust para 1.98 e acerta os lints que ele acendeu"_`
 **Branch de trabalho**: `dev`, árvore limpa
-**Estado**: ✅ compila · **742 testes, 0 falhando** · `fmt` e `clippy -D warnings` limpos · o app sobe
+**Estado**: ✅ compila · **753 testes, 0 falhando** · `fmt` e `clippy -D warnings` limpos · o app sobe
 
 > 🎯 **O objetivo do projeto mudou em 17/ago/2026** e está em
 > [`00-OBJETIVO.md`](00-OBJETIVO.md): substituir o Lightroom no fluxo do estúdio, para que a edição
@@ -58,6 +58,7 @@ miniatura custa 56× mais. O primeiro passo é usar `--release`.
 |---|---|
 | ✅ **Os presets de sistema saíram da escala errada** | os quatro pediam números de uma escala que o motor não usa: `saturation: -100` numa faixa de -1 a 1, `contrast: 50` num multiplicador de 0 a 2, `temperature: ±15` numa faixa de -10 a 10. Clicar em "B&W" não tirava a cor — **invertia** e estourava |
 | 🚨 **E o "Auto" saiu da lista** | pedia `exposure: Some(0.0)` com um `// Placeholder` ao lado: clicar não fazia nada. Preset é lista de números fixos; "Auto" no Lightroom é botão do painel Básico, que lê a foto — volta como item 10 da fila |
+| ✅ **E o "Auto" voltou como botão do Básico** | `revelacao/automatico.rs`: lê o histograma da foto **crua** (`Aberta::bruta`, não a que está na tela — senão o segundo clique decidiria sobre o resultado do primeiro) e escolhe exposição e altas luzes. Dois ajustes, não seis: "sombras" no shader multiplica todo pixel abaixo de 128, e "brancos"/"pretos" têm portão em 192 e 64, onde a foto lavada não tem pixel nenhum |
 | ✅ **Três testes prendem a escala** | `os_presets_de_sistema_ficam_dentro_da_escala_do_motor` (nenhum preset pede o que nenhum slider consegue pedir), `cada_preset_de_sistema_move_alguma_coisa` e `o_preset_bw_deixa_a_foto_em_preto_e_branco`, que roda o valor do preset **pela GPU** |
 
 🔑 **Nenhuma camada reclamava.** O valor viaja como `f32` até o shader, e o shader faz a conta com o
