@@ -220,23 +220,17 @@ impl ImageExporterImpl {
 
 #[async_trait]
 impl ImageExporter for ImageExporterImpl {
-    async fn export(
+    async fn renderizar_jpeg(
         &self,
         photo: &Photo,
-        output_path: &FilePath,
         options: &ExportOptions,
-    ) -> DomainResult<()> {
+    ) -> DomainResult<Vec<u8>> {
         let saida = self.renderizar(photo, options)?;
-
-        let output_path_str = output_path.as_str()?;
         let rgb_img = saida.to_rgb8();
 
-        let file = std::fs::File::create(Path::new(output_path_str)).map_err(|e| {
-            DomainError::InfrastructureError(format!("Failed to create output file: {}", e))
-        })?;
-
+        let mut bytes = Vec::new();
         let mut encoder =
-            image::codecs::jpeg::JpegEncoder::new_with_quality(file, options.quality());
+            image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes, options.quality());
         encoder
             .encode(
                 &rgb_img,
@@ -247,6 +241,25 @@ impl ImageExporter for ImageExporterImpl {
             .map_err(|e| {
                 DomainError::InfrastructureError(format!("Failed to encode JPEG: {}", e))
             })?;
+        Ok(bytes)
+    }
+
+    async fn export(
+        &self,
+        photo: &Photo,
+        output_path: &FilePath,
+        options: &ExportOptions,
+    ) -> DomainResult<()> {
+        // 🔑 O mesmo caminho do pós-venda: o arquivo é o JPEG em memória gravado
+        // no disco, e não uma segunda codificação. Dois codificadores dariam dois
+        // arquivos diferentes para a mesma foto, e a exportação deixaria de ser
+        // a prova do que o site recebe.
+        let jpeg = self.renderizar_jpeg(photo, options).await?;
+
+        let output_path_str = output_path.as_str()?;
+        std::fs::write(Path::new(output_path_str), jpeg).map_err(|e| {
+            DomainError::InfrastructureError(format!("Failed to create output file: {}", e))
+        })?;
 
         Ok(())
     }

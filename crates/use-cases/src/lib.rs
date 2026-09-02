@@ -12,6 +12,7 @@ pub mod import_photos; // Likely legacy but better include
 pub mod import_with_options;
 pub mod marcar_comprada;
 pub mod organize;
+pub mod pos_venda;
 pub mod presets;
 pub mod preview_before_import;
 pub mod rate_photo;

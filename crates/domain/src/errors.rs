@@ -27,6 +27,13 @@ pub enum DomainError {
     #[error("Foto não encontrada")]
     PhotoNotFound,
 
+    /// O site recusou a credencial — e-mail, senha ou sessão vencida.
+    ///
+    /// Variante própria, e não `InfrastructureError`, porque o remédio é outro:
+    /// "sem rede" é esperar; isto é entrar de novo. A tela precisa distinguir.
+    #[error("o site recusou o acesso: confira e-mail e senha")]
+    AcessoRecusado,
+
     #[error("Collection não encontrada")]
     CollectionNotFound,
 

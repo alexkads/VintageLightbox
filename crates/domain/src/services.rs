@@ -62,7 +62,24 @@ pub trait ImageExporter: Send + Sync {
         output_path: &FilePath,
         options: &crate::value_objects::ExportOptions,
     ) -> DomainResult<()>;
+
+    /// A mesma foto pronta, como bytes de JPEG — sem passar pelo disco.
+    ///
+    /// 🔑 **Existe para o pós-venda.** Subir uma galeria de trinta fotos por um
+    /// arquivo temporário cada seria gravar e reler trinta vezes o que já está
+    /// na memória; e o arquivo temporário é justamente o lugar onde a foto não
+    /// comprada fica esquecida, legível, no disco de quem exportou.
+    ///
+    /// As mesmas opções de `export`, pela mesma razão: a marca d'água não é
+    /// opcional por acidente.
+    async fn renderizar_jpeg(
+        &self,
+        photo: &crate::entities::Photo,
+        options: &crate::value_objects::ExportOptions,
+    ) -> DomainResult<Vec<u8>>;
 }
+
+pub mod pos_venda;
 
 pub mod preview_storage;
 pub use preview_storage::*;

@@ -16,6 +16,7 @@ pub mod file_system;
 pub mod gpu_adjustments;
 pub mod image_exporter;
 pub mod paths;
+pub mod pos_venda;
 pub mod raw_processing;
 pub mod scan_directory;
 pub mod source_scanner;
@@ -34,6 +35,7 @@ pub use database::{
 pub use exif_reader::ExifReader;
 pub use file_organizer::FileOrganizerImpl;
 pub use image_exporter::ImageExporterImpl;
+pub use pos_venda::PosVendaApiHttp;
 pub use source_scanner::SourceScannerImpl;
 pub use thumbnail_generator::ThumbnailGeneratorImpl;
 // pub use fs::FileSystemImpl; // Commenting out until verified

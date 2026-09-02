@@ -35,6 +35,15 @@ pollster = "0.4"
 # O cache de recursos por tamanho de imagem.
 lru = "0.16.2"
 
+# O cliente HTTP do pós-venda (`pos_venda/http.rs`) — o único lugar do app que
+# fala com a rede. `native-tls`, e não `rustls`: o `sqlx` acima já traz a pilha
+# TLS do sistema, e uma segunda ao lado dela seria compilar o mesmo trabalho
+# duas vezes.
+reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "native-tls"] }
+
 [dev-dependencies]
 tempfile.workspace = true
 mockall.workspace = true
+# Um servidor HTTP de verdade para o cliente do pós-venda: o que se prova ali é
+# o multipart e o cabeçalho — coisas que nenhum mock do `reqwest` alcança.
+wiremock = "0.6"
