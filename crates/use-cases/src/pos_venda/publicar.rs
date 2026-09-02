@@ -45,6 +45,11 @@ pub enum Progresso {
         nome: String,
         erro: String,
     },
+    /// O e-mail "suas fotos estão prontas" saiu (ou não) — depois do lote.
+    ClienteAvisado {
+        /// `None` = avisado; `Some(motivo)` = o site recusou (sem e-mail, etc.).
+        falha: Option<String>,
+    },
     Terminou {
         galeria_id: String,
         sucesso: usize,
@@ -110,6 +115,20 @@ impl PublicarNoPosVendaUseCase {
                     let _ = canal.send(Progresso::Falhou { nome, erro });
                 }
             }
+        }
+
+        // 📧 O aviso sai **depois** do lote inteiro, e só se alguma foto subiu:
+        // um e-mail dizendo "suas fotos estão prontas" para uma galeria vazia
+        // seria a primeira impressão errada. A falha do aviso não é falha da
+        // publicação — as fotos estão no ar; o operador reenvia pelo painel.
+        if sucesso > 0 {
+            let falha = self
+                .api
+                .avisar_fotos_prontas(&pedido.sessao, &galeria.id)
+                .await
+                .err()
+                .map(|e| e.to_string());
+            let _ = canal.send(Progresso::ClienteAvisado { falha });
         }
 
         let _ = canal.send(Progresso::Terminou {
@@ -212,6 +231,7 @@ mod tests {
         galerias: Mutex<Vec<NovaGaleria>>,
         /// Nomes que devem falhar ao subir.
         falham: Vec<String>,
+        avisadas: Mutex<Vec<String>>,
     }
 
     #[async_trait::async_trait]
@@ -246,6 +266,10 @@ mod tests {
                 .unwrap()
                 .push((foto.nome, foto.estado, foto.ordem));
             Ok(FotoEnviada { id: "f".into() })
+        }
+        async fn avisar_fotos_prontas(&self, _: &Sessao, galeria_id: &str) -> DomainResult<()> {
+            self.avisadas.lock().unwrap().push(galeria_id.to_string());
+            Ok(())
         }
     }
 
@@ -321,6 +345,11 @@ mod tests {
                 ..
             })
         ));
+        // 📧 E o cliente é avisado uma vez, depois do lote.
+        assert_eq!(api.avisadas.lock().unwrap().as_slice(), ["g1"]);
+        assert!(eventos
+            .iter()
+            .any(|e| matches!(e, Progresso::ClienteAvisado { falha: None })));
     }
 
     /// A falha de uma foto não interrompe o lote, e o resumo a conta.

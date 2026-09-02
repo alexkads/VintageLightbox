@@ -8,6 +8,7 @@
 //! | `produtos` | `GET /api/v2/products/admin?limit=200&offset=0` (inclui inativos) |
 //! | `criar_galeria` | `POST /api/v2/pos-venda/galerias` → `201 { id, titulo, … }` |
 //! | `enviar_foto` | `POST /api/v2/pos-venda/galerias/{id}/fotos`, multipart `file` + `estado` + `ordem` |
+//! | `avisar_fotos_prontas` | `POST /api/v2/pos-venda/galerias/{id}/avisar` → `201` |
 //!
 //! ⚠️ **`native-tls`, e não `rustls`.** O `sqlx` deste crate já traz a pilha
 //! TLS do sistema; uma segunda pilha ao lado dela seria compilar duas vezes o
@@ -225,6 +226,21 @@ impl PosVendaApi for PosVendaApiHttp {
         let enviada: FotoDaApi = ler(resposta).await?;
         Ok(FotoEnviada { id: enviada.id })
     }
+
+    async fn avisar_fotos_prontas(&self, sessao: &Sessao, galeria_id: &str) -> DomainResult<()> {
+        let resposta = self
+            .client
+            .post(self.url(&format!("/pos-venda/galerias/{galeria_id}/avisar")))
+            .bearer_auth(&sessao.access_token)
+            .json(&json!({}))
+            .send()
+            .await
+            .map_err(rede)?;
+        if !resposta.status().is_success() {
+            return Err(recusa(resposta).await);
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -325,6 +341,32 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(enviada.id, "f1");
+    }
+
+    #[tokio::test]
+    async fn avisar_chama_a_rota_da_galeria_e_traz_a_recusa_do_site() {
+        let servidor = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/v2/pos-venda/galerias/g1/avisar"))
+            .and(header("authorization", "Bearer tok"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(json!({ "id": "a1" })))
+            .mount(&servidor)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/api/v2/pos-venda/galerias/g2/avisar"))
+            .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+                "error": { "code": "BAD_REQUEST", "message": "a galeria nao tem e-mail para receber o aviso" }
+            })))
+            .mount(&servidor)
+            .await;
+
+        let api = PosVendaApiHttp::nova(servidor.uri());
+        let sessao = Sessao {
+            access_token: "tok".into(),
+        };
+        api.avisar_fotos_prontas(&sessao, "g1").await.unwrap();
+        let erro = api.avisar_fotos_prontas(&sessao, "g2").await.unwrap_err();
+        assert!(erro.to_string().contains("nao tem e-mail"), "{erro}");
     }
 
     /// Sessão vencida no meio do lote é "entre de novo", não "sem rede".

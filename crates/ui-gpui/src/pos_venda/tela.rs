@@ -328,6 +328,17 @@ impl PosVenda {
                 andamento.falhas += 1;
                 self.aviso = Some(format!("{nome}: {erro}").into());
             }
+            Progresso::ClienteAvisado { falha: None } => {
+                self.ultimo = Some("cliente avisado por e-mail".into());
+            }
+            Progresso::ClienteAvisado {
+                falha: Some(motivo),
+            } => {
+                self.aviso = Some(
+                    format!("fotos no ar, mas o aviso não saiu: {motivo} — reenvie pelo painel")
+                        .into(),
+                );
+            }
             Progresso::Terminou {
                 galeria_id,
                 sucesso,

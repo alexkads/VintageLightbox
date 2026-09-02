@@ -118,6 +118,11 @@ pub trait PosVendaApi: Send + Sync {
         galeria_id: &str,
         foto: FotoParaEnviar,
     ) -> DomainResult<FotoEnviada>;
+
+    /// Manda ao cliente o e-mail "suas fotos estão prontas" — com os prazos de
+    /// download e de venda e um link que entra sem senha. É o site quem
+    /// escreve e manda; o app só pede.
+    async fn avisar_fotos_prontas(&self, sessao: &Sessao, galeria_id: &str) -> DomainResult<()>;
 }
 
 #[cfg(test)]

@@ -1,9 +1,9 @@
 # Status do Projeto - VintageLightbox
 
 **Última atualização**: 2 de setembro de 2026
-**Último commit**: `9f9857e — 2026-09-02, _"feat(pos-venda): publicar a galeria do cliente — o vão entre a revelação e o site fecha"_`
+**Último commit**: ver `git log -1` — o de 2/set com o aviso ao cliente ao fim da publicação
 **Branch de trabalho**: `dev`, árvore limpa
-**Estado**: ✅ compila · **771 testes, 0 falhando** · `fmt` e `clippy -D warnings` limpos · o app sobe
+**Estado**: ✅ compila · **772 testes, 0 falhando** · `fmt` e `clippy -D warnings` limpos · o app sobe
 
 > 🎯 **O objetivo do projeto mudou em 17/ago/2026** e está em
 > [`00-OBJETIVO.md`](00-OBJETIVO.md): substituir o Lightroom no fluxo do estúdio, para que a edição
@@ -64,6 +64,7 @@ continuam abertos; a fila deixou de ser pré-requisito.
 | ✅ **A foto sabe se foi levada no balcão** | `Photo::comprada_em` (data, não bool — RF-034), migration 016, tecla `B` alternando pelo grupo como `P`, filtro "balcão" (levadas / à venda) e selo "levada" ao lado do nome. Até aqui essa decisão só existia como qual botão se apertava na exportação, e fechar o app era perdê-la |
 | ✅ **O app fala com o site** | porta `PosVendaApi` no `domain`, `PosVendaApiHttp` na `infrastructure` (`reqwest` com `native-tls` — a mesma pilha TLS do `sqlx`), testada contra um `wiremock` de verdade porque o que se prova é o multipart. `DomainError::AcessoRecusado` separa "senha errada" de "sem rede" |
 | ✅ **O exportador entrega bytes** | `ImageExporter::renderizar_jpeg` — subir trinta fotos por arquivo temporário deixaria a foto não comprada, legível, no disco de quem publicou. `export` virou gravar esses mesmos bytes: a exportação continua sendo a prova do que o site recebe |
+| ✅ **O cliente é avisado ao fim do lote** | `PosVendaApi::avisar_fotos_prontas` — o site manda o e-mail com os prazos de download e de venda e um link que entra sem senha. Só se alguma foto subiu; a falha do aviso vira frase na tela, não falha da publicação |
 | ✅ **O botão "Pós-venda"** | modal irmão da exportação: entrar (a senha nunca é gravada; e-mail e produto ficam em `pos-venda.json` ao lado do catálogo), escolher o produto que dá o preço, título e contato do cliente, publicar a seleção ou a grade. Mostra a conta "N levadas · M à venda" e **não** oferece uma segunda lista para a mesma decisão |
 
 🔑 **O original sobe sem marca, sempre.** É o site que gera a prévia marcada (uma vez, no upload) e

@@ -151,6 +151,7 @@ pub mod mentira {
                     estado: domain::services::pos_venda::EstadoNoBalcao::Disponivel,
                 }));
             }
+            let _ = canal.send(Recado::Andamento(Progresso::ClienteAvisado { falha: None }));
             let _ = canal.send(Recado::Andamento(Progresso::Terminou {
                 galeria_id: "g-de-mentira".into(),
                 sucesso: total,

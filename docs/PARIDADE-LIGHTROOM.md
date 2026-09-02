@@ -199,6 +199,7 @@ a decisão da triagem vira galeria no `recordarfotos.com.br` sem passo manual.
 | Filtro "balcão": levadas / à venda; selo "levada" ao lado do nome | `biblioteca/filtros.rs`, `celula` |
 | Botão "Pós-venda": entrar, produto, título, contato, publicar | `pos_venda/tela.rs` |
 | Cada foto sobe **revelada e enquadrada em memória**, sem marca, com o estado da tecla `B` | `use-cases/pos_venda/publicar.rs`, `ImageExporter::renderizar_jpeg` |
+| Ao fim do lote, o site manda ao cliente "suas fotos estão prontas" (prazos + link sem senha) | `PosVendaApi::avisar_fotos_prontas` — a falha do aviso não é falha da publicação; o painel reenvia |
 | O site: `POST /auth/login`, `GET /products/admin`, `POST /pos-venda/galerias`, `POST …/fotos` | `infrastructure/pos_venda/http.rs` |
 
 | O que ainda falta | |
