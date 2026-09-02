@@ -1,9 +1,9 @@
 # Status do Projeto - VintageLightbox
 
-**Última atualização**: 30 de agosto de 2026
-**Último commit**: `cb4f4f4 — 2026-08-30, _"chore(toolchain): sobe o Rust para 1.98 e acerta os lints que ele acendeu"_`
+**Última atualização**: 2 de setembro de 2026
+**Último commit**: `9f9857e — 2026-09-02, _"feat(pos-venda): publicar a galeria do cliente — o vão entre a revelação e o site fecha"_`
 **Branch de trabalho**: `dev`, árvore limpa
-**Estado**: ✅ compila · **753 testes, 0 falhando** · `fmt` e `clippy -D warnings` limpos · o app sobe
+**Estado**: ✅ compila · **771 testes, 0 falhando** · `fmt` e `clippy -D warnings` limpos · o app sobe
 
 > 🎯 **O objetivo do projeto mudou em 17/ago/2026** e está em
 > [`00-OBJETIVO.md`](00-OBJETIVO.md): substituir o Lightroom no fluxo do estúdio, para que a edição
@@ -51,6 +51,29 @@ explica sozinho uma trava dura:
 🔑 **E o app estava sendo rodado em `debug`.** Este projeto já quase condenou o
 framework por medir fluidez no perfil errado (fase 1 da migração): em `debug` uma
 miniatura custa 56× mais. O primeiro passo é usar `--release`.
+
+## O que mudou em 2/set/2026 — a integração com o pós-venda
+
+🎯 **A decisão de 17/ago ("a integração começa depois da fila") foi revertida pelo dono em
+2/set/2026**, com o pedido literal *"agora faça a integração com o VintageLightbox"* — no mesmo dia
+em que o pós-venda do `recordarfotos.com.br` foi ao ar no backend. Os itens 11 e 12 da fila
+continuam abertos; a fila deixou de ser pré-requisito.
+
+| | |
+|---|---|
+| ✅ **A foto sabe se foi levada no balcão** | `Photo::comprada_em` (data, não bool — RF-034), migration 016, tecla `B` alternando pelo grupo como `P`, filtro "balcão" (levadas / à venda) e selo "levada" ao lado do nome. Até aqui essa decisão só existia como qual botão se apertava na exportação, e fechar o app era perdê-la |
+| ✅ **O app fala com o site** | porta `PosVendaApi` no `domain`, `PosVendaApiHttp` na `infrastructure` (`reqwest` com `native-tls` — a mesma pilha TLS do `sqlx`), testada contra um `wiremock` de verdade porque o que se prova é o multipart. `DomainError::AcessoRecusado` separa "senha errada" de "sem rede" |
+| ✅ **O exportador entrega bytes** | `ImageExporter::renderizar_jpeg` — subir trinta fotos por arquivo temporário deixaria a foto não comprada, legível, no disco de quem publicou. `export` virou gravar esses mesmos bytes: a exportação continua sendo a prova do que o site recebe |
+| ✅ **O botão "Pós-venda"** | modal irmão da exportação: entrar (a senha nunca é gravada; e-mail e produto ficam em `pos-venda.json` ao lado do catálogo), escolher o produto que dá o preço, título e contato do cliente, publicar a seleção ou a grade. Mostra a conta "N levadas · M à venda" e **não** oferece uma segunda lista para a mesma decisão |
+
+🔑 **O original sobe sem marca, sempre.** É o site que gera a prévia marcada (uma vez, no upload) e
+que decide pelo `estado` quem baixa o quê. A "Prévia da galeria" da exportação local é para outro
+destino.
+
+⚠️ **O que não foi conferido**: o fluxo inteiro contra a API de produção, porque exige a senha do
+operador. O cliente HTTP está provado contra o contrato escrito
+(`recordarfotos-e-commerce/docs/POS_VENDA.md`); a primeira publicação real é do dono, e a base pode
+ser trocada por `VLB_POS_VENDA_URL` para ensaiar em homologação.
 
 ## O que mudou em 30/ago/2026
 

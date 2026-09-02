@@ -179,8 +179,30 @@ galeria do cliente**, e o que é defeito visível na tela.
 | 10 | ~~**Tom automático no painel Básico**~~ | ✅ **feito em 30/ago** — o "Auto" de volta no lugar certo, lendo a foto em vez de repetir números fixos |
 | 11 | **Pausar e cancelar a importação** | existem no controller e não têm botão — um lote de 2.000 RAWs começa e não se interrompe |
 | 12 | **O desfazer não restaura o corte** | o corte não entra na pilha do histórico; `Cmd+Z` depois de cortar volta tudo menos o enquadramento |
+| 13 | ~~**Publicar no pós-venda do site**~~ | ✅ **feito em 2/set** — tecla `B`, botão "Pós-venda", `PosVendaApi`. Entrou **antes** de 11 e 12 por decisão do dono no mesmo dia (ver abaixo) |
 
-🔑 **A integração com o `recordarfotos.com.br` só começa quando o clone estiver funcional** —
-decisão do dono, 17/ago. Marca d'água e coleções entraram porque são funcionalidades do Lightroom que
-faltavam, e não porque a integração as pediu; que elas sejam também o que a integração vai consumir é
-consequência, não motivo. **Enquanto houver item nesta fila, a fila é o trabalho.**
+~~🔑 **A integração com o `recordarfotos.com.br` só começa quando o clone estiver funcional** —
+decisão do dono, 17/ago.~~ **Revertida em 2/set/2026**: o dono pediu a integração com os itens 11 e 12
+ainda abertos, no dia em que o pós-venda do site foi ao ar. O que continua valendo da decisão de
+17/ago é o **desenho**: marca d'água e coleções entraram como funcionalidades do Lightroom, e a
+integração consome o que já existia (a exportação em memória, a seleção da grade) em vez de pedir
+telas próprias. O que é só dela: a tecla `B` e o modal "Pós-venda" — ver a seção abaixo.
+
+## Pós-venda — ✅ **publica desde 2/set/2026**
+
+Não tem par no Lightroom, e é a razão de este projeto existir ([`00-OBJETIVO.md`](00-OBJETIVO.md)):
+a decisão da triagem vira galeria no `recordarfotos.com.br` sem passo manual.
+
+| O quê | Onde |
+|---|---|
+| `B` marca a foto **levada no balcão**; alterna pelo grupo como `P` | `biblioteca/marcacao.rs`, `Photo::comprada_em` |
+| Filtro "balcão": levadas / à venda; selo "levada" ao lado do nome | `biblioteca/filtros.rs`, `celula` |
+| Botão "Pós-venda": entrar, produto, título, contato, publicar | `pos_venda/tela.rs` |
+| Cada foto sobe **revelada e enquadrada em memória**, sem marca, com o estado da tecla `B` | `use-cases/pos_venda/publicar.rs`, `ImageExporter::renderizar_jpeg` |
+| O site: `POST /auth/login`, `GET /products/admin`, `POST /pos-venda/galerias`, `POST …/fotos` | `infrastructure/pos_venda/http.rs` |
+
+| O que ainda falta | |
+|---|---|
+| ⬜ Publicar **numa galeria que já existe** (hoje toda publicação cria uma) | a API já lista galerias |
+| ⬜ A coleção como unidade: "publicar esta coleção" em vez de "a seleção" | `docs/00-OBJETIVO.md` diz que o ensaio **é** uma coleção |
+| ⬜ Conferir o fluxo inteiro contra produção — exige a senha do operador | `VLB_POS_VENDA_URL` para homologação |

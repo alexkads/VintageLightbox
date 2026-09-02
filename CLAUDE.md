@@ -10,8 +10,9 @@ Guia de trabalho neste repositório.
 > **Funcional**: **todo controle que a tela oferece move a foto.** Um slider que existe e não faz
 > nada é defeito, não pendência.
 
-A integração com a API de pós-venda vem **depois** — o app tem de ser útil sozinho antes de conversar
-com qualquer coisa.
+A integração com a API de pós-venda **existe desde 2/set/2026** (tecla `B` + botão "Pós-venda";
+`docs/PARIDADE-LIGHTROOM.md`, seção "Pós-venda"). O princípio "o app tem de ser útil sozinho"
+continua: nada da triagem ou da revelação depende do site.
 
 ⚠️ **Este objetivo substituiu outro em 17/ago/2026**, e a diferença importa no dia a dia. O anterior
 era migrar a interface de egui para GPUI **com paridade**; ele foi **alcançado** (`8c7df32`, o

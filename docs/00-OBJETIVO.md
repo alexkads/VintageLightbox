@@ -43,8 +43,11 @@ em uma foto de cem.
 
 ## O que vem depois — e só depois
 
-A integração com a API de pós-venda — e **"depois" é literal**: ela começa quando o clone estiver
-funcional, e não em paralelo (decisão do dono, 17/ago).
+~~A integração com a API de pós-venda — e **"depois" é literal**: ela começa quando o clone estiver
+funcional, e não em paralelo (decisão do dono, 17/ago).~~ **Revertido em 2/set/2026**: o dono pediu
+a integração com dois itens da fila ainda abertos, e ela entrou
+([`PARIDADE-LIGHTROOM.md`](PARIDADE-LIGHTROOM.md), "Pós-venda"). O parágrafo abaixo continua
+verdadeiro como princípio — o app tem de ser útil sozinho — e deixou de ser bloqueio.
 
 O app tem de ser útil sozinho antes de conversar com qualquer coisa. Um fluxo que já depende do site
 para funcionar não tem como ser adotado aos poucos, e adoção aos poucos é a única que dá para
