@@ -18,7 +18,7 @@ use infrastructure::cache::preview_manager::PreviewManager;
 
 use super::arranjo;
 use super::colecoes;
-use super::filtros::{indices_visiveis, FiltroDeSinalizador, Filtros, NotaMinima};
+use super::filtros::{indices_visiveis, FiltroDeCompra, FiltroDeSinalizador, Filtros, NotaMinima};
 use super::grade::{colunas_que_cabem, fotos_da_linha, linhas_necessarias};
 use super::informacoes::{estatisticas, estrelas};
 use super::marcacao::{cor_ao_teclar, sinalizador_ao_teclar, Marca, Marcador};
@@ -995,6 +995,16 @@ impl Biblioteca {
         self.aplicar(Marca::Sinalizador(codigo), cx);
     }
 
+    /// Levada no balcão — a tecla `B`, alternando pelo grupo como `P`.
+    ///
+    /// 🔑 Só desmarca quando **todas** as selecionadas já estão levadas: com
+    /// três selecionadas e uma já marcada, `B` marca as três — é a mesma regra
+    /// do sinalizador, pelo mesmo motivo (uma tecla, um desfecho).
+    pub fn marcar_comprada(&mut self, cx: &mut Context<Self>) {
+        let todas_ja_levadas = self.selecionadas.iter().all(|&i| self.fotos[i].comprada);
+        self.aplicar(Marca::Comprada(!todas_ja_levadas), cx);
+    }
+
     /// Escreve na foto que está na memória **e** manda gravar.
     ///
     /// 🔑 **A tela muda antes do banco responder**, como no legado ("optimistic
@@ -1020,6 +1030,7 @@ impl Biblioteca {
                 Marca::Nota(nota) => foto.rating = *nota,
                 Marca::Cor(cor) => foto.color_label = cor.clone(),
                 Marca::Sinalizador(codigo) => foto.flag = Some(*codigo),
+                Marca::Comprada(sim) => foto.comprada = *sim,
             }
 
             self.marcador.marcar(foto.id.clone(), marca.clone());
@@ -1180,6 +1191,32 @@ impl Biblioteca {
             ));
         }
 
+        // O que o cliente decidiu no balcão — o filtro que separa o que o
+        // pós-venda libera do que ele põe à venda.
+        let compra_atual = self.filtros.compra;
+        let mut compras = Vec::new();
+        for (qual, rotulo) in [
+            (FiltroDeCompra::Qualquer, "todas"),
+            (FiltroDeCompra::LevadasNoBalcao, "levadas"),
+            (FiltroDeCompra::ParaVenda, "à venda"),
+        ] {
+            compras.push(botao(
+                format!("compra-{rotulo}"),
+                rotulo.to_string(),
+                compra_atual == qual,
+                cx.listener(
+                    move |this: &mut Self,
+                          _ev: &gpui::ClickEvent,
+                          _window,
+                          cx: &mut Context<Self>| {
+                        this.filtros.compra = qual;
+                        this.refiltrar();
+                        cx.notify();
+                    },
+                ),
+            ));
+        }
+
         // As cinco do domínio (`ColorLabel`), na grafia que o legado grava na
         // coluna — comparar com outra escrita não casaria com nada.
         let mut cores = vec![botao(
@@ -1240,6 +1277,8 @@ impl Biblioteca {
             .child(div().flex().gap(px(4.)).children(notas))
             .child(rotulo_do_grupo("sinalizador", cx))
             .child(div().flex().gap(px(4.)).children(sinalizadores))
+            .child(rotulo_do_grupo("balcão", cx))
+            .child(div().flex().gap(px(4.)).children(compras))
             .child(rotulo_do_grupo("cor", cx))
             .child(div().flex().gap(px(4.)).children(cores))
             .child(rotulo_do_grupo("colunas", cx))
@@ -1704,14 +1743,34 @@ fn celula(
         .child(conteudo)
         .child(
             div()
-                .text_xs()
-                .text_color(if selecionada {
-                    cx.theme().foreground
-                } else {
-                    cx.theme().muted_foreground
+                .flex()
+                .items_center()
+                .gap(px(4.))
+                // O selo de "levada no balcão" fica ao lado do nome, e não sobre
+                // a foto: sobre a foto ele cobriria justamente o que se está
+                // avaliando, e é a mesma razão de a seleção ser borda e não fundo.
+                .when(foto.comprada, |linha| {
+                    linha.child(
+                        div()
+                            .text_xs()
+                            .px(px(4.))
+                            .rounded(px(3.))
+                            .bg(cx.theme().primary)
+                            .text_color(cx.theme().primary_foreground)
+                            .child("levada"),
+                    )
                 })
-                .truncate()
-                .child(SharedString::from(foto.name.clone())),
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(if selecionada {
+                            cx.theme().foreground
+                        } else {
+                            cx.theme().muted_foreground
+                        })
+                        .truncate()
+                        .child(SharedString::from(foto.name.clone())),
+                ),
         )
         .on_click(ao_clicar)
         .into_any_element()
@@ -2776,6 +2835,40 @@ mod testes {
                 );
             })
             .expect("a janela deve estar aberta");
+    }
+
+    /// `B` decide pelo grupo, como `P`: marca as três se alguma falta, e só
+    /// desmarca quando todas já estão levadas.
+    #[gpui::test]
+    fn levada_no_balcao_decide_pelo_grupo_inteiro(cx: &mut TestAppContext) {
+        let mut fotos = acervo_grande();
+        fotos[1].comprada = true;
+        let (janela, marcador, _dir) = tela_com(cx, fotos);
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.selecionar(Some(1), cx);
+                tela.alternar_uma(2, cx);
+                tela.alternar_uma(3, cx);
+
+                tela.marcar_comprada(cx);
+                assert!(tela.fotos[1].comprada && tela.fotos[2].comprada && tela.fotos[3].comprada);
+
+                tela.marcar_comprada(cx);
+                assert!(
+                    !tela.fotos[1].comprada && !tela.fotos[2].comprada && !tela.fotos[3].comprada
+                );
+            })
+            .expect("a janela deve estar aberta");
+
+        let marcado = marcador.marcado();
+        assert_eq!(marcado.len(), 6, "três marcadas, depois três desmarcadas");
+        assert!(marcado[..3]
+            .iter()
+            .all(|(_, m)| *m == Marca::Comprada(true)));
+        assert!(marcado[3..]
+            .iter()
+            .all(|(_, m)| *m == Marca::Comprada(false)));
     }
 
     /// ⚠️ Clicar numa das selecionadas **encolhe** a seleção para ela.

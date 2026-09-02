@@ -209,6 +209,9 @@ async fn main() {
             Arc::new(use_cases::DeletePhotoUseCase::new(
                 repositorio_de_fotos.clone(),
             )),
+            Arc::new(use_cases::MarcarCompradaUseCase::new(
+                repositorio_de_fotos.clone(),
+            )),
         )),
         tokio::runtime::Handle::current(),
     ));

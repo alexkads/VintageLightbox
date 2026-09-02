@@ -10,6 +10,7 @@ pub mod import;
 pub mod import_photo;
 pub mod import_photos; // Likely legacy but better include
 pub mod import_with_options;
+pub mod marcar_comprada;
 pub mod organize;
 pub mod presets;
 pub mod preview_before_import;
@@ -32,6 +33,7 @@ pub use save_photo_edits::SavePhotoEditsUseCase;
 
 // Exports for PhotoController
 pub use delete_photo::DeletePhotoUseCase;
+pub use marcar_comprada::MarcarCompradaUseCase;
 pub use rate_photo::RatePhotoUseCase;
 pub use set_color_label::SetColorLabelUseCase;
 pub use set_flag::SetFlagUseCase;

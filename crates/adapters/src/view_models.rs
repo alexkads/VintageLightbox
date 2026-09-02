@@ -12,6 +12,8 @@ pub struct PhotoViewModel {
     pub rating: i32,
     pub color_label: Option<String>,
     pub flag: Option<i32>,
+    /// Levada no balcão — o que o pós-venda libera para download.
+    pub comprada: bool,
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub edit_exposure: Option<f32>,

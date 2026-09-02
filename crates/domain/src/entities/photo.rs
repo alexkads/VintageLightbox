@@ -24,6 +24,18 @@ pub struct Photo {
     color_label: Option<ColorLabel>,
     /// Flag (Pick/Reject)
     flag: Option<Flag>,
+    /// Quando o cliente levou esta foto no balcão — pagou na hora do ensaio.
+    ///
+    /// 🔑 **É a decisão que separa o pós-venda em dois.** No site, a foto levada
+    /// vai como `levada_no_balcao` (download liberado) e a que ficou como
+    /// `disponivel` (marca d'água, à venda). Até 2/set/2026 essa decisão só
+    /// existia como *qual botão* o fotógrafo apertava na exportação — e não
+    /// ficava gravada em lugar nenhum: fechar o app era perdê-la.
+    ///
+    /// `Option<DateTime>` e não `bool`: "quando" é o que o RF-034 pede, e custa
+    /// o mesmo que "se".
+    #[serde(default)]
+    comprada_em: Option<DateTime<Utc>>,
     /// Data de importação
     imported_at: DateTime<Utc>,
     /// Data de última modificação
@@ -161,6 +173,7 @@ impl Photo {
         rating: Option<Rating>,
         color_label: Option<ColorLabel>,
         flag: Option<Flag>,
+        comprada_em: Option<DateTime<Utc>>,
         is_edited: bool,
         thumbnail_path: Option<FilePath>,
         preview_path: Option<FilePath>,
@@ -229,6 +242,7 @@ impl Photo {
             rating,
             color_label,
             flag,
+            comprada_em,
             is_edited,
             thumbnail_path,
             preview_path,
@@ -294,9 +308,9 @@ impl Photo {
     pub fn with_id(id: PhotoId, file_path: FilePath) -> Self {
         let now = Utc::now();
         Self::reconstruct(
-            id, file_path, now, now, None, None, None, None, false, None, None, None, None, None,
+            id, file_path, now, now, None, None, None, None, None, false, None, None, None, None,
             None, None, None, None, None, None, None, None, None, None, None, None, None, None,
-            None, None, None, None, None, None, None, // HSL Sat
+            None, None, None, None, None, None, None, None, // HSL Sat
             None, None, None, None, None, None, None, None, // HSL Hue
             None, None, None, None, None, None, None, None, // HSL Lum
             None, None, None, // Lens
@@ -377,6 +391,35 @@ impl Photo {
     /// Verifica se a foto tem flag
     pub fn has_flag(&self) -> bool {
         self.flag.is_some()
+    }
+
+    /// O cliente levou esta foto no balcão?
+    pub fn comprada(&self) -> bool {
+        self.comprada_em.is_some()
+    }
+
+    /// Quando levou, se levou.
+    pub fn comprada_em(&self) -> Option<DateTime<Utc>> {
+        self.comprada_em
+    }
+
+    /// Marca como levada no balcão — agora.
+    ///
+    /// Marcar de novo o que já está marcado **não** muda a data: a primeira
+    /// marcação é a que registra quando o cliente pagou, e uma tecla repetida
+    /// por engano não pode reescrevê-la.
+    pub fn marcar_comprada(&mut self) {
+        if self.comprada_em.is_none() {
+            self.comprada_em = Some(Utc::now());
+            self.modified_at = Utc::now();
+        }
+    }
+
+    pub fn desmarcar_comprada(&mut self) {
+        if self.comprada_em.is_some() {
+            self.comprada_em = None;
+            self.modified_at = Utc::now();
+        }
     }
 
     /// Retorna a data de importação
@@ -1182,5 +1225,21 @@ mod business_logic_tests {
         assert!(photo.is_edited());
         assert!(photo.has_rating());
         assert!(photo.has_color_label());
+    }
+
+    /// 🔑 "Comprada" é data, e a data não se reescreve por tecla repetida.
+    #[test]
+    fn marcar_comprada_duas_vezes_guarda_a_primeira_data() {
+        let mut foto = Photo::new_test();
+        assert!(!foto.comprada());
+
+        foto.marcar_comprada();
+        let primeira = foto.comprada_em().expect("marcada");
+        foto.marcar_comprada();
+        assert_eq!(foto.comprada_em(), Some(primeira));
+
+        foto.desmarcar_comprada();
+        assert!(!foto.comprada());
+        assert_eq!(foto.comprada_em(), None);
     }
 }

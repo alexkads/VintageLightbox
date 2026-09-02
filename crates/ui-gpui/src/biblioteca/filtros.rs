@@ -32,11 +32,28 @@ pub enum FiltroDeSinalizador {
     SemSinalizador,
 }
 
+/// O que o cliente decidiu no balcão.
+///
+/// Existe separado do sinalizador porque são perguntas diferentes: `P` é "a
+/// foto é boa" (decisão do fotógrafo), "levada" é "o cliente pagou" (decisão
+/// do cliente). Uma foto pode ser escolhida e não levada — é exatamente a que
+/// vai à venda no pós-venda.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FiltroDeCompra {
+    #[default]
+    Qualquer,
+    /// Só as que o cliente levou no balcão.
+    LevadasNoBalcao,
+    /// Só as que ficaram para trás — as que o site põe à venda.
+    ParaVenda,
+}
+
 /// Tudo que a barra de filtros decide.
 #[derive(Debug, Clone, Default)]
 pub struct Filtros {
     pub nota_minima: NotaMinima,
     pub sinalizador: FiltroDeSinalizador,
+    pub compra: FiltroDeCompra,
     /// Cor exata, como o legado guarda (`"Red"`, `"Blue"`…). `None` é "qualquer".
     pub cor: Option<String>,
     /// Trecho do nome do arquivo, sem diferenciar maiúsculas.
@@ -51,6 +68,7 @@ impl Filtros {
     pub fn vazio(&self) -> bool {
         self.nota_minima.0 == 0
             && self.sinalizador == FiltroDeSinalizador::Qualquer
+            && self.compra == FiltroDeCompra::Qualquer
             && self.cor.is_none()
             && self.busca.trim().is_empty()
             && self.pasta.is_none()
@@ -68,6 +86,15 @@ impl Filtros {
             FiltroDeSinalizador::SemSinalizador => foto.flag.is_none(),
         };
         if !passa_sinalizador {
+            return false;
+        }
+
+        let passa_compra = match self.compra {
+            FiltroDeCompra::Qualquer => true,
+            FiltroDeCompra::LevadasNoBalcao => foto.comprada,
+            FiltroDeCompra::ParaVenda => !foto.comprada,
+        };
+        if !passa_compra {
             return false;
         }
 
@@ -269,5 +296,32 @@ mod tests {
         let indices = indices_visiveis(&fotos, &filtros);
         assert_eq!(indices, vec![2]);
         assert_eq!(fotos[indices[0]].name, "DSC_003.NEF");
+    }
+
+    /// "Levada" e "escolhida" são perguntas diferentes — uma escolhida que não
+    /// foi levada é justamente a que vai à venda.
+    #[test]
+    fn levada_no_balcao_e_para_venda_dividem_o_acervo() {
+        let mut fotos = acervo();
+        fotos[1].comprada = true;
+
+        let levadas = indices_visiveis(
+            &fotos,
+            &Filtros {
+                compra: FiltroDeCompra::LevadasNoBalcao,
+                ..Default::default()
+            },
+        );
+        assert_eq!(levadas, vec![1]);
+
+        let para_venda = indices_visiveis(
+            &fotos,
+            &Filtros {
+                compra: FiltroDeCompra::ParaVenda,
+                ..Default::default()
+            },
+        );
+        assert!(!para_venda.contains(&1));
+        assert_eq!(para_venda.len(), fotos.len() - 1);
     }
 }

@@ -84,6 +84,7 @@ actions!(
         Escolher,
         Rejeitar,
         Desmarcar,
+        AlternarComprada,
         SelecionarTudo,
         LimparSelecao
     ]
@@ -164,6 +165,9 @@ pub fn init(cx: &mut gpui::App) {
         gpui::KeyBinding::new("p", Escolher, Some(SEM_CAMPO_DE_TEXTO)),
         gpui::KeyBinding::new("x", Rejeitar, Some(SEM_CAMPO_DE_TEXTO)),
         gpui::KeyBinding::new("u", Desmarcar, Some(SEM_CAMPO_DE_TEXTO)),
+        // `B` de balcão: a foto que o cliente levou. Não é tecla do Lightroom —
+        // é a única decisão deste fluxo que ele não tem onde guardar.
+        gpui::KeyBinding::new("b", AlternarComprada, Some(SEM_CAMPO_DE_TEXTO)),
         // `Cmd+A` e `Cmd+D`, da Biblioteca. Levam `CONTEXTO` e não
         // `SEM_CAMPO_DE_TEXTO`: com modificador não há disputa com o texto — e
         // o campo de busca tem o **próprio** `Cmd+A` (selecionar tudo no
@@ -1291,6 +1295,9 @@ impl Render for Aplicativo {
             }))
             .on_action(cx.listener(|este, _: &Desmarcar, _w, cx| {
                 este.na_biblioteca(cx, |tela, cx| tela.sinalizar(0, cx))
+            }))
+            .on_action(cx.listener(|este, _: &AlternarComprada, _w, cx| {
+                este.na_biblioteca(cx, |tela, cx| tela.marcar_comprada(cx))
             }))
             .on_action(cx.listener(|este, _: &SelecionarTudo, _w, cx| {
                 este.na_biblioteca(cx, |tela, cx| tela.selecionar_tudo(cx))

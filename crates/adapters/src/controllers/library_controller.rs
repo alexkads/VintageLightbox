@@ -55,6 +55,7 @@ impl LibraryController {
                     rating,
                     color_label: photo.color_label().map(|c| c.to_string()),
                     flag: photo.flag().map(|f| f.as_code()),
+                    comprada: photo.comprada(),
                     width: metadata.and_then(|m| m.width),
                     height: metadata.and_then(|m| m.height),
                     edit_exposure: photo.edit_exposure(),

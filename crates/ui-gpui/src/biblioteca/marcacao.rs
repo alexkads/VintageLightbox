@@ -24,6 +24,9 @@ pub enum Marca {
     Cor(Option<String>),
     /// Os códigos do legado: `1` escolhida, `-1` rejeitada, `0` sem marca.
     Sinalizador(i32),
+    /// Levada no balcão (`true`) ou deixada para trás (`false`) — a decisão
+    /// que o pós-venda do site consome. Tecla `B`, e alterna como `P`.
+    Comprada(bool),
 }
 
 /// Quem sabe gravar uma marcação.
@@ -87,6 +90,7 @@ impl Marcador for MarcadorDoBanco {
                         .await
                 }
                 Marca::Sinalizador(codigo) => fotos.set_flag(&id, codigo).await,
+                Marca::Comprada(sim) => fotos.set_comprada(&id, sim).await,
             };
 
             if let Err(erro) = resultado {
