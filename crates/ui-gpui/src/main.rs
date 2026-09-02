@@ -20,6 +20,7 @@ use ui_gpui::importacao::explorador::{
     Explorador, ExploradorDoDisco, GeradorDeMiniaturas, GeradorDoDisco, Importador,
     ImportadorDoDisco, SeletorDePasta, SeletorNativo,
 };
+use ui_gpui::pos_venda::porta::{Publicador, PublicadorDaApi};
 use ui_gpui::revelacao::persistencia::{Gravador, GravadorDoBanco};
 use ui_gpui::revelacao::presets::{GuardaDePresets, GuardaDoBanco};
 use ui_gpui::tema;
@@ -159,6 +160,26 @@ async fn main() {
         tokio::runtime::Handle::current(),
     ));
 
+    // 📸 O pós-venda do site — o vão que o projeto existe para fechar. O mesmo
+    // exportador da exportação, em memória: o que sobe é o que a tela mostra,
+    // e o site gera a prévia marcada a partir dele.
+    let publicador: Arc<dyn Publicador> = Arc::new(PublicadorDaApi::novo(
+        Arc::new({
+            let api = Arc::new(infrastructure::PosVendaApiHttp::nova(
+                ui_gpui::pos_venda::config::ler().base_url,
+            ));
+            adapters::controllers::PosVendaController::new(
+                api.clone(),
+                Arc::new(use_cases::pos_venda::PublicarNoPosVendaUseCase::new(
+                    repositorio_de_fotos.clone(),
+                    Arc::new(infrastructure::ImageExporterImpl::new()),
+                    api,
+                )),
+            )
+        }),
+        tokio::runtime::Handle::current(),
+    ));
+
     // A folha de impressão em PDF. 🔑 Ela reusa o **mesmo** exportador da
     // exportação: a folha tem de sair com a foto revelada e enquadrada, e
     // imprimir o arquivo original seria o defeito que a exportação teve até
@@ -269,6 +290,7 @@ async fn main() {
                             gravador: gravador.clone(),
                             acervo: acervo.clone(),
                             exportador: exportador.clone(),
+                            publicador: publicador.clone(),
                             colecoes: colecoes.clone(),
                             folha: folha.clone(),
                             marcador: marcador.clone(),

@@ -25,6 +25,8 @@ use crate::exportacao::tela::Exportacao;
 use crate::importacao::explorador::{Explorador, GeradorDeMiniaturas, Importador, SeletorDePasta};
 use crate::importacao::tela::{Importacao, Importou};
 use crate::impressao::tela::Impressao;
+use crate::pos_venda::porta::Publicador;
+use crate::pos_venda::tela::PosVenda;
 use crate::revelacao::persistencia::{self, Gravador};
 use crate::revelacao::presets::GuardaDePresets;
 use crate::revelacao::processador::Ajustes;
@@ -42,6 +44,8 @@ pub struct Portas {
     pub acervo: Arc<dyn Acervo>,
     /// Quem grava os arquivos exportados.
     pub exportador: Arc<dyn Exportador>,
+    /// Quem fala com o pós-venda do site — o vão que o projeto existe para fechar.
+    pub publicador: Arc<dyn Publicador>,
     /// As coleções — o ensaio do cliente mora numa.
     pub colecoes: Arc<dyn Colecoes>,
     /// Quem monta o PDF da folha e o entrega ao disco ou à impressora.
@@ -210,6 +214,9 @@ pub struct Aplicativo {
     /// O modal de exportação — o único caminho do app até um arquivo no disco.
     exportacao: Entity<Exportacao>,
     exportando: bool,
+    /// O modal do pós-venda — o único caminho do app até o site.
+    pos_venda: Entity<PosVenda>,
+    publicando: bool,
     /// As Configurações, no mesmo formato do modal de importação: elas são um
     /// lugar onde se entra e de onde se sai, e não uma quarta tela.
     configuracoes: Entity<Configuracoes>,
@@ -370,6 +377,15 @@ impl Aplicativo {
             importando: false,
             exportacao: cx.new(|_| Exportacao::nova(portas.exportador, seletor_para_exportar)),
             exportando: false,
+            pos_venda: cx.new(|cx| {
+                PosVenda::nova(
+                    portas.publicador,
+                    crate::pos_venda::config::ler(),
+                    window,
+                    cx,
+                )
+            }),
+            publicando: false,
             configuracoes: cx.new(|_| Configuracoes::nova(previews_das_configuracoes)),
             configurando: false,
             cliente: None,
@@ -718,6 +734,34 @@ impl Aplicativo {
         self.exportando
     }
 
+    /// Abre o pós-venda para a seleção — ou para a grade, sem seleção — pela
+    /// mesma regra da exportação.
+    pub fn publicar(&mut self, cx: &mut Context<Self>) {
+        let biblioteca = self.biblioteca.read(cx);
+        let selecionadas = biblioteca.fotos_selecionadas();
+        let fotos = if selecionadas.is_empty() {
+            biblioteca.fotos_visiveis()
+        } else {
+            selecionadas
+        };
+
+        self.pos_venda
+            .update(cx, |tela, cx| tela.abrir_para(fotos, cx));
+        self.publicando = true;
+        cx.notify();
+    }
+
+    /// Fecha o modal sem cancelar o lote — como a exportação.
+    pub fn fechar_pos_venda(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.publicando = false;
+        window.focus(&self.foco);
+        cx.notify();
+    }
+
+    pub fn publicando(&self) -> bool {
+        self.publicando
+    }
+
     /// Fecha o modal, **sem** jogar a listagem fora.
     ///
     /// 🔑 Quem fecha por engano depois de marcar 300 fotos de um cartão não pode
@@ -993,6 +1037,20 @@ impl Aplicativo {
                     })),
             )
             .child(
+                // 📸 O caminho até o site: a seleção vira galeria do cliente,
+                // com o que a tecla `B` decidiu. Mesma regra de habilitar da
+                // exportação — o lote é o que se está vendo.
+                Button::new("nav-pos-venda")
+                    .label("Pós-venda")
+                    .xsmall()
+                    .when(self.publicando, |b| b.primary())
+                    .selected(self.publicando)
+                    .disabled(!tem_o_que_exportar)
+                    .on_click(cx.listener(|este, _ev, _window, cx| {
+                        este.publicar(cx);
+                    })),
+            )
+            .child(
                 Button::new("nav-importar")
                     .label("Importar")
                     .xsmall()
@@ -1179,6 +1237,48 @@ impl Aplicativo {
             )
     }
 
+    fn modal_de_pos_venda(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .absolute()
+            .inset_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(gpui::rgba(0x00000099))
+            .child(
+                div()
+                    .max_w_full()
+                    .max_h_full()
+                    .flex()
+                    .flex_col()
+                    .bg(cx.theme().background)
+                    .border_1()
+                    .border_color(cx.theme().border)
+                    .rounded(px(6.))
+                    .overflow_hidden()
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .gap(px(24.))
+                            .px(px(12.))
+                            .py(px(6.))
+                            .bg(cx.theme().title_bar)
+                            .child(div().text_xs().child("Publicar no pós-venda"))
+                            .child(
+                                Button::new("fechar-pos-venda")
+                                    .label("Fechar")
+                                    .xsmall()
+                                    .on_click(cx.listener(|este, _ev, window, cx| {
+                                        este.fechar_pos_venda(window, cx);
+                                    })),
+                            ),
+                    )
+                    .child(self.pos_venda.clone()),
+            )
+    }
+
     fn modal_de_importacao(&self, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .absolute()
@@ -1327,6 +1427,9 @@ impl Render for Aplicativo {
             .when(self.exportando, |raiz| {
                 raiz.child(self.modal_de_exportacao(cx))
             })
+            .when(self.publicando, |raiz| {
+                raiz.child(self.modal_de_pos_venda(cx))
+            })
             .when_some(
                 self.biblioteca.read(cx).confirmando_apagar(),
                 |raiz, quantas| raiz.child(self.aviso_de_apagar(quantas, cx)),
@@ -1356,6 +1459,7 @@ mod testes {
         ExploradorDeMentira, GeradorDeMentira, ImportadorDeMentira, SeletorDeMentira,
     };
     use crate::impressao::porta::mentira::FolhaDeMentira;
+    use crate::pos_venda::porta::mentira::PublicadorDeMentira;
     use crate::revelacao::persistencia::mentira::GravadorDeMentira;
     use crate::revelacao::presets::mentira::GuardaDeMentira;
 
@@ -1365,6 +1469,7 @@ mod testes {
             gravador: Arc::new(GravadorDeMentira::default()),
             acervo: Arc::new(AcervoDeMentira::default()),
             exportador: Arc::new(ExportadorDeMentira::default()),
+            publicador: Arc::new(PublicadorDeMentira::default()),
             colecoes: Arc::new(ColecoesDeMentira::default()),
             folha: Arc::new(FolhaDeMentira::default()),
             marcador: Arc::new(MarcadorDeMentira::default()),
@@ -2539,6 +2644,87 @@ mod testes {
     /// 🔑 O teste mede o pedido que chega à porta: quantas fotos, com que
     /// destino. É onde o defeito moraria, porque as camadas de dentro já
     /// passavam todas.
+    /// 📸 O vão fechado: a grade vira um pedido de galeria, com os ids na ordem
+    /// da grade — e sem produto, título ou contato não sai nada.
+    #[gpui::test]
+    fn publicar_manda_a_grade_como_galeria_do_cliente(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+
+        let publicador = Arc::new(PublicadorDeMentira {
+            produtos: vec![domain::services::pos_venda::Produto {
+                id: "p1".into(),
+                nome: "Foto avulsa".into(),
+                preco: "29.90".into(),
+                inativo: true,
+            }],
+            ..Default::default()
+        });
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            let publicador = publicador.clone();
+            |window, cx| {
+                Aplicativo::novo(
+                    acervo(),
+                    previews,
+                    Vec::new(),
+                    Portas {
+                        publicador,
+                        ..portas()
+                    },
+                    window,
+                    cx,
+                )
+            }
+        });
+
+        janela
+            .update(cx, |app, _window, cx| {
+                app.publicar(cx);
+                assert!(app.publicando());
+                app.pos_venda.update(cx, |tela, cx| {
+                    assert_eq!(
+                        tela.quantas(),
+                        2,
+                        "sem seleção, publica o que a grade mostra"
+                    );
+                    // Sem sessão nem formulário, o botão não manda nada.
+                    tela.publicar(cx);
+                    tela.entrar_para_teste(cx);
+                    assert_eq!(tela.produtos().len(), 1);
+                    assert_eq!(
+                        tela.produto_id(),
+                        Some("p1"),
+                        "o único produto já vem escolhido"
+                    );
+                    tela.publicar(cx);
+                });
+            })
+            .expect("a janela deve estar aberta");
+        assert!(
+            publicador.pedidos().is_empty(),
+            "sem título e contato do cliente, não há galeria para criar"
+        );
+
+        janela
+            .update(cx, |app, window, cx| {
+                app.pos_venda.update(cx, |tela, cx| {
+                    tela.preencher_para_teste("Ensaio da Maria", "maria@x.com", window, cx);
+                    tela.publicar(cx);
+                    tela.colher(cx);
+                    assert_eq!(tela.resumo(), "2 publicadas — galeria no ar");
+                });
+            })
+            .expect("a janela deve estar aberta");
+
+        let pedidos = publicador.pedidos();
+        assert_eq!(pedidos.len(), 1, "um lote, e não um pedido por foto");
+        assert_eq!(pedidos[0].galeria.titulo, "Ensaio da Maria");
+        assert_eq!(pedidos[0].galeria.email.as_deref(), Some("maria@x.com"));
+        assert_eq!(pedidos[0].galeria.produto_id, "p1");
+        assert_eq!(pedidos[0].fotos.len(), 2);
+    }
+
     #[gpui::test]
     fn exportar_manda_a_selecao_para_a_pasta_escolhida(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();

@@ -40,6 +40,8 @@ smallvec = "1"
 # suficiente; duas politicas de descarte diferentes para a mesma coisa nao.
 lru = "0.16.2"
 tokio.workspace = true
+# A configuração do pós-venda (`pos_venda/config.rs`) é um JSON ao lado do catálogo.
+serde.workspace = true
 anyhow = "1.0"
 # O seletor nativo de pasta da importação — a mesma versão do `crates/ui`, que já
 # trocou o `egui_file` por ele. Janela do sistema, e não do framework: é o que
