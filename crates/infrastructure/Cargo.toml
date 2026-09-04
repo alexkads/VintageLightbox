@@ -25,14 +25,12 @@ rsraw = "0.1"  # LibRaw binding - demosaic/white balance/color correction integr
 uuid.workspace = true
 sysinfo = "0.36.1"
 
-# O motor de revelação (`gpu_adjustments.rs`), que veio do `ui-gpui` em
-# 17/ago/2026 para que a exportação atravessasse o mesmo shader que a tela.
-# wgpu é quem compila o WGSL — versão diferente é compilador diferente para o
-# mesmo shader, e o critério da fase 2 era igualdade de pixel.
-wgpu = "23.0"
-bytemuck = { version = "1.14", features = ["derive"] }
-pollster = "0.4"
-# O cache de recursos por tamanho de imagem.
+# O motor de revelação: `Ajustes`, o WGSL, `Motor`, o enquadramento e o JPEG.
+# Saiu daqui para um crate próprio em 2026-09-04, para compilar também no
+# navegador; o que fica aqui é a leitura da entidade (`ajustes_da_entidade`,
+# `corte_da_entidade`), que é a única parte que conhece o `domain`.
+revelacao-core = { path = "../revelacao-core" }
+# O cache de prévias (`cache/preview_manager.rs`).
 lru = "0.16.2"
 
 # O cliente HTTP do pós-venda (`pos_venda/http.rs`) — o único lugar do app que

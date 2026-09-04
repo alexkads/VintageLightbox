@@ -1,5 +1,17 @@
-// Image Adjustments Compute Shader
-// Processes all adjustments in parallel on the GPU
+// O corpo da revelação: os 46 ajustes, num pixel.
+//
+// 🔑 **Este arquivo não tem ponto de entrada.** Ele declara o `struct Params`,
+// as texturas e a função `revelar_pixel(coord)`, e é concatenado a uma
+// "entrada" em tempo de compilação do Rust (`motor.rs`):
+//
+//   - `entrada_compute.wgsl`   — `@compute`, escreve numa storage texture.
+//     É o desktop (Metal, Vulkan, DX12).
+//   - `entrada_fragmento.wgsl` — `@vertex` + `@fragment`, escreve no alvo
+//     do render pass. É o navegador: o WebGL2 não tem compute nem storage
+//     texture, e o WebGPU roda os dois.
+//
+// A matemática mora aqui, uma vez só, para que a tela do desktop, o arquivo
+// exportado e a revelação no site atravessem o **mesmo** código.
 
 // 🚨 A ordem aqui é a do `Ajustes` do Rust, campo a campo.
 //
@@ -68,7 +80,6 @@ struct Params {
 }
 
 @group(0) @binding(0) var input_texture: texture_2d<f32>;
-@group(0) @binding(1) var output_texture: texture_storage_2d<rgba8unorm, write>;
 @group(0) @binding(2) var<uniform> params: Params;
 
 /// Bilinear read at a fractional position, clamped to the image.
@@ -97,14 +108,11 @@ fn amostrar(pos: vec2<f32>, dims: vec2<u32>) -> vec4<f32> {
     return mix(mix(p00, p10, frac.x), mix(p01, p11, frac.x), frac.y);
 }
 
-@compute @workgroup_size(16, 16)
-fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+/// Um pixel revelado: o que está em `coord` na entrada, com os 46 ajustes
+/// aplicados, em 0.0–1.0.
+fn revelar_pixel(coord: vec2<u32>) -> vec4<f32> {
     let dims = textureDimensions(input_texture);
 
-    // Bounds check
-    if (global_id.x >= dims.x || global_id.y >= dims.y) {
-        return;
-    }
 
     // Lens distortion: this pixel reads from somewhere ELSE in the source.
     //
@@ -117,7 +125,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     // adjustment reads the neighborhood, and reading a neighborhood of the
     // undistorted image and then moving the pixel would smear along the wrong
     // direction.
-    var origem = vec2<f32>(f32(global_id.x), f32(global_id.y));
+    var origem = vec2<f32>(f32(coord.x), f32(coord.y));
     if (params.lens_distortion != 0.0) {
         let centro = vec2<f32>(f32(dims.x), f32(dims.y)) * 0.5;
         let escala = max(length(centro), 1.0);
@@ -610,7 +618,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     // color would be treated as different colors.
     if (params.lens_vignette_amount != 0.0) {
         let centro = vec2<f32>(f32(dims.x), f32(dims.y)) * 0.5;
-        let aqui = vec2<f32>(f32(global_id.x), f32(global_id.y));
+        let aqui = vec2<f32>(f32(coord.x), f32(coord.y));
         // 1.0 at the corner, 0.0 at the center.
         let distancia = length(aqui - centro) / max(length(centro), 1.0);
 
@@ -634,7 +642,5 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     g = clamp(g, 0.0, 255.0) / 255.0;
     b = clamp(b, 0.0, 255.0) / 255.0;
     
-    // Write output
-    textureStore(output_texture, vec2<i32>(global_id.xy), vec4<f32>(r, g, b, a));
+    return vec4<f32>(r, g, b, a);
 }
-

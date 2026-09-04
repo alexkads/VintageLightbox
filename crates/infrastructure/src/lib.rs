@@ -8,11 +8,12 @@ pub mod dng;
 pub mod exif_reader;
 pub mod file_organizer;
 pub mod file_system;
-/// O motor de revelação: wgpu, o WGSL e os 46 ajustes.
+/// O motor de revelação (`Ajustes`, `Motor`) re-exportado do `revelacao-core`,
+/// mais a leitura da entidade.
 ///
-/// 🔑 Mora aqui porque a **tela** e o **arquivo exportado** precisam atravessar
-/// o mesmo shader. Enquanto ele vivia no crate de interface, a exportação tinha
-/// a própria implementação da mesma matemática, na CPU, com 15 dos 46 ajustes.
+/// 🔑 A tela e o arquivo exportado atravessam o mesmo shader — e, desde
+/// 2026-09-04, o navegador também: o motor mora num crate sem banco nem rede,
+/// que compila para wasm32.
 pub mod gpu_adjustments;
 pub mod image_exporter;
 pub mod paths;
@@ -21,10 +22,8 @@ pub mod raw_processing;
 pub mod scan_directory;
 pub mod source_scanner;
 pub mod thumbnail_generator;
-/// Do pixel revelado ao pixel exibido: corte, giro, espelho e endireitamento.
-///
-/// 🔑 Veio do `ui-gpui` pela mesma razão que o motor: a exportação tem de
-/// entregar o arquivo com o mesmo enquadramento que a tela mostra.
+/// Do pixel revelado ao pixel exibido: a ponte entre `CropSettings` e o
+/// `Corte` do `revelacao-core`, onde a geometria mora desde 2026-09-04.
 pub mod transformacao;
 
 // Re-exports for main.rs compatibility

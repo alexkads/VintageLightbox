@@ -38,7 +38,7 @@ use image::DynamicImage;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use crate::gpu_adjustments::{Ajustes, Motor};
+use crate::gpu_adjustments::{ajustes_da_entidade, Ajustes, Motor};
 use crate::transformacao;
 
 /// O motor é aberto na primeira exportação e reaproveitado.
@@ -198,7 +198,7 @@ impl ImageExporterImpl {
         // enquadramento vem depois (`tela.rs` faz `transformacao::aplicar` sobre
         // o que o processador devolveu). Inverter daria uma vinheta centrada no
         // quadro cortado em vez de no original.
-        let revelada = self.revelar(&img, &Ajustes::da_entidade(photo))?;
+        let revelada = self.revelar(&img, &ajustes_da_entidade(photo))?;
         let mut saida =
             transformacao::aplicar(&revelada, &transformacao::corte_da_entidade(photo), true);
 
@@ -226,22 +226,10 @@ impl ImageExporter for ImageExporterImpl {
         options: &ExportOptions,
     ) -> DomainResult<Vec<u8>> {
         let saida = self.renderizar(photo, options)?;
-        let rgb_img = saida.to_rgb8();
-
-        let mut bytes = Vec::new();
-        let mut encoder =
-            image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes, options.quality());
-        encoder
-            .encode(
-                &rgb_img,
-                rgb_img.width(),
-                rgb_img.height(),
-                image::ExtendedColorType::Rgb8,
-            )
-            .map_err(|e| {
-                DomainError::InfrastructureError(format!("Failed to encode JPEG: {}", e))
-            })?;
-        Ok(bytes)
+        // 🔑 O codificador do `revelacao-core`: o mesmo que o navegador usa.
+        // Dois codificadores dariam dois arquivos para a mesma foto revelada.
+        revelacao_core::jpeg::codificar(&saida, options.quality())
+            .map_err(|e| DomainError::InfrastructureError(format!("Failed to encode JPEG: {}", e)))
     }
 
     async fn export(

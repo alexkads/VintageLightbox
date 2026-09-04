@@ -133,7 +133,7 @@ jobs:
       - name: Run clippy
         run: >
           cargo clippy
-          -p domain -p use-cases -p adapters -p infrastructure
+          -p domain -p use-cases -p adapters -p infrastructure -p revelacao-core
           --all-targets --all-features -- -D warnings
 
   # A cobertura fica no Ubuntu, mas **só sobre as quatro camadas internas** —
@@ -159,7 +159,7 @@ jobs:
       - name: Generate coverage
         run: >
           cargo tarpaulin
-          -p domain -p use-cases -p adapters -p infrastructure
+          -p domain -p use-cases -p adapters -p infrastructure -p revelacao-core
           --out Xml --timeout 300
 
       - name: Upload coverage to Codecov

@@ -5,6 +5,10 @@ members = [
     "crates/use-cases",
     "crates/adapters",
     "crates/infrastructure",
+    # O motor de revelação sem nada em volta (2026-09-04): o que o navegador
+    # precisa e o `infrastructure` não consegue dar, porque puxa sqlx, reqwest e
+    # LibRaw — nada disso compila para wasm32.
+    "crates/revelacao-core",
     # A interface, em GPUI. O `crates/ui` (egui) saiu daqui em 17/ago/2026, com a
     # lista de paridade zerada (docs/PARIDADE-UI.md) — é a fase 5 do plano.
     #
@@ -61,3 +65,4 @@ codegen-units = 1
 
 [profile.test]
 opt-level = 1
+
