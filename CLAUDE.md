@@ -54,6 +54,10 @@ cargo test test_name --workspace
 # Run the application
 cargo run -p ui-gpui
 
+# O motor de revelação para o navegador (entrega ao recordarfotos-e-commerce)
+scripts/construir-web.sh [caminho/do/frontend]
+cargo clippy -p revelacao-web --target wasm32-unknown-unknown -- -D warnings
+
 # Check code (faster than build)
 cargo check --workspace
 
@@ -86,7 +90,15 @@ VintageLightbox follows **Clean Architecture** with 4 layers as separate crates:
 │  - database/: SQLite repositories (sqlx)            │
 │  - exif_reader.rs, thumbnail_generator.rs           │
 │  - raw_processing.rs, image_exporter.rs             │
+│  - gpu_adjustments.rs / transformacao.rs: re-export │
+│    do revelacao-core + leitura da entidade          │
 │  - migrations/: SQL migration files                 │
+├─────────────────────────────────────────────────────┤
+│  revelacao-core (sem domain, sem janela, sem banco) │
+│  - ajustes.rs: os 46, por nome e por posição        │
+│  - shaders/: corpo.wgsl + 2 entradas (compute/frag) │
+│  - motor.rs, transformacao.rs (Corte), jpeg.rs      │
+│  → revelacao-web: o mesmo, em wasm, para o site     │
 ├─────────────────────────────────────────────────────┤
 │  domain (innermost - no external dependencies)      │
 │  - entities/: Photo, Collection                     │

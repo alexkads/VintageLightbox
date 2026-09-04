@@ -246,6 +246,16 @@ impl LibraryController {
 - ✅ Implementa interfaces definidas pelos Use Cases
 - ✅ Coordena interação entre UI e Use Cases
 
+### 2.3½ `revelacao-core` e `revelacao-web` — o motor sem camada (4/set/2026)
+
+O motor de revelação (os 46 ajustes, o WGSL, `Motor`, o enquadramento `Corte` e o JPEG) mora em
+`crates/revelacao-core`, que **não depende de nenhum outro crate do workspace**: entra pixel e número,
+sai pixel. O `infrastructure` re-exporta `Ajustes`/`Motor` e guarda só a leitura da entidade
+(`ajustes_da_entidade`, `corte_da_entidade`), que é a parte que conhece o `domain`.
+`crates/revelacao-web` é o mesmo motor compilado para `wasm32` com `wasm-bindgen`, entregue ao site
+por `scripts/construir-web.sh`. O shader tem um corpo (`corpo.wgsl`) e duas entradas — compute no
+desktop, fragmento no navegador —, concatenadas em tempo de compilação.
+
 ### 2.4 Infrastructure Layer (Camada 4 - Frameworks & Drivers)
 
 **Responsabilidade**: Detalhes de implementação, frameworks, bibliotecas externas.

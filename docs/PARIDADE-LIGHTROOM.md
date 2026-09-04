@@ -207,3 +207,23 @@ a decisão da triagem vira galeria no `recordarfotos.com.br` sem passo manual.
 | ⬜ Publicar **numa galeria que já existe** (hoje toda publicação cria uma) | a API já lista galerias |
 | ⬜ A coleção como unidade: "publicar esta coleção" em vez de "a seleção" | `docs/00-OBJETIVO.md` diz que o ensaio **é** uma coleção |
 | ⬜ Conferir o fluxo inteiro contra produção — exige a senha do operador | `VLB_POS_VENDA_URL` para homologação |
+
+## Revelação no navegador — 🚧 **o motor está pronto desde 4/set/2026; a tela é do site**
+
+Não tem par no Lightroom. É o pedido do dono de 4/set/2026: revelar a foto do pós-venda **dentro do
+painel** do `recordarfotos.com.br`, com o mesmo motor deste app, enquanto o fluxo pelo desktop não
+está validado em produção. O plano e as fases estão no repositório do site
+(`docs/REVELACAO_NO_NAVEGADOR.md`); aqui mora só o motor.
+
+| O quê | Onde |
+|---|---|
+| Os 46 ajustes, o WGSL, o `Motor`, o enquadramento e o JPEG, sem `domain` nem janela | `crates/revelacao-core` |
+| Um corpo de shader, duas entradas (compute no desktop, fragmento no navegador), com teste de igualdade | `revelacao-core/src/shaders/`, `motor::testes` |
+| O motor para o navegador: WebGPU, senão WebGL2; desenha no canvas e exporta JPEG | `crates/revelacao-web` |
+| A entrega ao site (glue + `.wasm` + `nomes.json` + `VERSAO`) | `scripts/construir-web.sh` |
+
+| O que ainda falta | |
+|---|---|
+| ⬜ O corte (giro, endireitar, espelho, retângulo) no navegador — o `Corte` já está no core; falta a tela lá | fase posterior no plano do site |
+| ⬜ Exportar em ladrilhos quando a foto passa do limite de textura (hoje o site reduz e avisa) | o kernel 5×5 pede 2 px de borda por ladrilho |
+

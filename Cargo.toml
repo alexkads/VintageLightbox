@@ -9,6 +9,9 @@ members = [
     # precisa e o `infrastructure` não consegue dar, porque puxa sqlx, reqwest e
     # LibRaw — nada disso compila para wasm32.
     "crates/revelacao-core",
+    # O mesmo motor compilado para o navegador (wasm-bindgen + wgpu). É o que o
+    # `scripts/construir-web.sh` entrega ao `recordarfotos-e-commerce`.
+    "crates/revelacao-web",
     # A interface, em GPUI. O `crates/ui` (egui) saiu daqui em 17/ago/2026, com a
     # lista de paridade zerada (docs/PARIDADE-UI.md) — é a fase 5 do plano.
     #
@@ -66,3 +69,10 @@ codegen-units = 1
 [profile.test]
 opt-level = 1
 
+# O perfil do `.wasm`: tamanho antes de velocidade. O `release` acima é o do
+# desktop e não se toca — `opt-level = 3` num binário que o navegador baixa a
+# cada primeira abertura custaria o dobro de bytes por pouco ganho.
+[profile.release-web]
+inherits = "release"
+opt-level = "z"
+panic = "abort"

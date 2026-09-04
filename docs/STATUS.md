@@ -1,9 +1,9 @@
 # Status do Projeto - VintageLightbox
 
-**Última atualização**: 2 de setembro de 2026
-**Último commit**: ver `git log -1` — o de 2/set com o aviso ao cliente ao fim da publicação
+**Última atualização**: 4 de setembro de 2026
+**Último commit**: ver `git log -1` — os de 4/set com o motor de revelação num crate próprio e compilado para o navegador
 **Branch de trabalho**: `dev`, árvore limpa
-**Estado**: ✅ compila · **772 testes, 0 falhando** · `fmt` e `clippy -D warnings` limpos · o app sobe
+**Estado**: ✅ compila · **780 testes, 0 falhando** · `fmt` e `clippy -D warnings` limpos (nativo **e** `wasm32`) · o app sobe
 
 > 🎯 **O objetivo do projeto mudou em 17/ago/2026** e está em
 > [`00-OBJETIVO.md`](00-OBJETIVO.md): substituir o Lightroom no fluxo do estúdio, para que a edição
@@ -51,6 +51,24 @@ explica sozinho uma trava dura:
 🔑 **E o app estava sendo rodado em `debug`.** Este projeto já quase condenou o
 framework por medir fluidez no perfil errado (fase 1 da migração): em `debug` uma
 miniatura custa 56× mais. O primeiro passo é usar `--release`.
+
+## O que mudou em 4/set/2026 — o motor de revelação sai para o navegador
+
+🎯 **O dono pediu o editor no site** (`recordarfotos-e-commerce`, painel do pós-venda), em Rust
+compilado para WebAssembly, "enquanto o VintageLightbox não fica pronto". O plano inteiro está no
+repositório do site, em `docs/REVELACAO_NO_NAVEGADOR.md`; o que mudou **aqui** é a fase 1 dele.
+
+| | |
+|---|---|
+| ✅ **`crates/revelacao-core`** | o motor sem nada em volta: `Ajustes` (46 `f32`, agora também `serde` por nome e vetor posicional `como_vetor`/`de_vetor`), o WGSL, `Motor`, o enquadramento (`Corte`, o par de `CropSettings` sem depender do `domain`) e o JPEG (`jpeg::codificar`, um codificador para todo destino). Saiu do `infrastructure` porque ele puxa `sqlx`, `reqwest` e LibRaw — nada disso compila para `wasm32`. O `infrastructure` re-exporta e guarda só o que lê a entidade (`ajustes_da_entidade`, `corte_da_entidade`) |
+| ✅ **O shader tem duas entradas e um corpo** | `shaders/corpo.wgsl` (as 46 funções, em `revelar_pixel(coord)`) + `entrada_compute.wgsl` (desktop) + `entrada_fragmento.wgsl` (navegador: o WebGL2 não tem compute nem storage texture). Concatenados por `concat!` em tempo de compilação — não há como divergirem. `o_fragmento_revela_o_mesmo_pixel_que_o_compute` roda os dois sobre a amostra com **todos** os grupos fora do neutro e cobra diferença ≤ 1 nível |
+| ✅ **`Motor` assíncrono** | `abrir_com(adaptador, entrada, limites)` e `revelar_async` — o navegador não bloqueia thread. O desktop continua com `abrir()`/`revelar()` (`pollster`), assinaturas intactas; `ui-gpui` não mudou uma linha. No `wasm32` a leitura de volta cede a vez ao navegador entre um `poll` e outro, porque o WebGL2 só atualiza fences entre tarefas |
+| ✅ **`crates/revelacao-web`** | `wasm-bindgen` sobre o core: `abrir(canvas)` (WebGPU, senão WebGL2), `carregar`, `aplicar` (desenha na superfície do canvas), `exportar_jpeg`, `ajustes_padrao`, `nomes_dos_ajustes`. Vazio em nativo de propósito (`cfg(target_arch = "wasm32")`), para `cargo test --workspace` e o clippy continuarem valendo |
+| ✅ **`scripts/construir-web.sh`** | `wasm-pack --target web` + `wasm-opt -Oz`, entregando glue, `.wasm`, `nomes.json` (a ordem dos 46, que o site testa contra a lista dele) e `VERSAO` em `frontend/public/revelacao/` do e-commerce. Perfil `release-web` (`opt-level = "z"`, `panic = "abort"`); o `release` do desktop não mudou |
+
+⚠️ **O que não foi conferido aqui**: o motor rodando de fato num navegador. O teste compute≈fragmento
+roda em nativo (Metal); a prova nos dois backends do navegador é a página `public/revelacao/teste.html`
+do site, aberta no Chrome (WebGPU) e no Safari/Firefox (WebGL2).
 
 ## O que mudou em 2/set/2026 — a integração com o pós-venda
 
@@ -158,7 +176,7 @@ struct `PhotoEdits` continua sendo o conserto de verdade.
 | App | ✅ **sobe** — janela 1352×848, `GPU: Initialized successfully with Apple M2 Pro` |
 | Migrations SQLite no repositório | 15 (`001` … `015`) |
 | Abertura do app novo com 2.000 fotos | ✅ **23–43 ms** até a janela (`medir-abertura`, release, 17/ago) |
-| Crates | 5 (domain, use-cases, adapters, infrastructure, **ui-gpui**) — o `ui` saiu em 17/ago |
+| Crates | 7 (domain, use-cases, adapters, infrastructure, **revelacao-core**, **revelacao-web**, ui-gpui) — o `ui` saiu em 17/ago; os dois de revelação entraram em 4/set |
 
 ### Testes por camada
 
