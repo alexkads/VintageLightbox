@@ -222,8 +222,13 @@ está validado em produção. O plano e as fases estão no repositório do site
 | O motor para o navegador: WebGPU, senão WebGL2; desenha no canvas e exporta JPEG | `crates/revelacao-web` |
 | A entrega ao site (glue + `.wasm` + `nomes.json` + `VERSAO`) | `scripts/construir-web.sh` |
 
+| O enquadramento no navegador: girar, espelhar, endireitar e recortar | `Corte::retangulo` e `dimensoes_de_saida`, expostos por `enquadramento()` no wasm |
+
+⚠️ **O preview do enquadramento é uma transformação de viewport do navegador**, com os números vindos
+do motor; o arquivo passa pela mesma `transformacao::aplicar` do desktop. O que difere é só a
+reamostragem do ângulo — o navegador interpola com o filtro dele, e o arquivo com a bilinear daqui.
+
 | O que ainda falta | |
 |---|---|
-| ⬜ O corte (giro, endireitar, espelho, retângulo) no navegador — o `Corte` já está no core; falta a tela lá | fase posterior no plano do site |
 | ⬜ Exportar em ladrilhos quando a foto passa do limite de textura (hoje o site reduz e avisa) | o kernel 5×5 pede 2 px de borda por ladrilho |
 

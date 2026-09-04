@@ -3,7 +3,7 @@
 **Última atualização**: 4 de setembro de 2026
 **Último commit**: ver `git log -1` — os de 4/set com o motor de revelação num crate próprio e compilado para o navegador
 **Branch de trabalho**: `dev`, árvore limpa
-**Estado**: ✅ compila · **780 testes, 0 falhando** · `fmt` e `clippy -D warnings` limpos (nativo **e** `wasm32`) · o app sobe
+**Estado**: ✅ compila · **785 testes, 0 falhando** · `fmt` e `clippy -D warnings` limpos (nativo **e** `wasm32`) · o app sobe
 
 > 🎯 **O objetivo do projeto mudou em 17/ago/2026** e está em
 > [`00-OBJETIVO.md`](00-OBJETIVO.md): substituir o Lightroom no fluxo do estúdio, para que a edição
@@ -65,6 +65,13 @@ repositório do site, em `docs/REVELACAO_NO_NAVEGADOR.md`; o que mudou **aqui** 
 | ✅ **`Motor` assíncrono** | `abrir_com(adaptador, entrada, limites)` e `revelar_async` — o navegador não bloqueia thread. O desktop continua com `abrir()`/`revelar()` (`pollster`), assinaturas intactas; `ui-gpui` não mudou uma linha. No `wasm32` a leitura de volta cede a vez ao navegador entre um `poll` e outro, porque o WebGL2 só atualiza fences entre tarefas |
 | ✅ **`crates/revelacao-web`** | `wasm-bindgen` sobre o core: `abrir(canvas)` (WebGPU, senão WebGL2), `carregar`, `aplicar` (desenha na superfície do canvas), `exportar_jpeg`, `ajustes_padrao`, `nomes_dos_ajustes`. Vazio em nativo de propósito (`cfg(target_arch = "wasm32")`), para `cargo test --workspace` e o clippy continuarem valendo |
 | ✅ **`scripts/construir-web.sh`** | `wasm-pack --target web` + `wasm-opt -Oz`, entregando glue, `.wasm`, `nomes.json` (a ordem dos 46, que o site testa contra a lista dele) e `VERSAO` em `frontend/public/revelacao/` do e-commerce. Perfil `release-web` (`opt-level = "z"`, `panic = "abort"`); o `release` do desktop não mudou |
+
+✅ **E o enquadramento foi junto, no mesmo dia**: a geometria do `Corte` saiu para métodos
+(`dimensoes_giradas`, `retangulo`, `dimensoes_de_saida`) que **`recortar_reto` e o navegador leem
+juntos** — o preview desenha o retângulo com os números que recortam o JPEG, e
+`as_dimensoes_de_saida_sao_as_do_arquivo` amarra os dois em sete casos. `exportar_jpeg` aplica
+`transformacao::aplicar` **depois** da revelação, na ordem do desktop, e `enquadramento()` entrega os
+números à tela.
 
 ⚠️ **O que não foi conferido aqui**: o motor rodando de fato num navegador. O teste compute≈fragmento
 roda em nativo (Metal); a prova nos dois backends do navegador é a página `public/revelacao/teste.html`
