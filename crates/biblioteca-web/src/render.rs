@@ -2,8 +2,17 @@
 //!
 //! O egui entrega a cada quadro uma lista de malhas (`ClippedPrimitive`) e as
 //! texturas que mudaram; o `egui_wgpu::Renderer` desenha isso. Não há pipeline
-//! nosso: a grade de fotos, a barra, os painéis e os diálogos são todos malhas
-//! do egui, e as miniaturas são texturas que o egui gerencia.
+//! nosso: os tiles da grade são malhas do egui, e as miniaturas são texturas
+//! que o egui gerencia.
+//!
+//! # O canvas é transparente
+//!
+//! A grade mora dentro de uma página do site, entre o cabeçalho e o painel,
+//! e a página tem tema claro e escuro. Em vez de adivinhar a cor do fundo do
+//! site (os tokens dele são `oklch`), o canvas é composto com alfa
+//! **pré-multiplicado** e limpo com alfa zero: onde não há tile, vê-se a
+//! página. Só quando a superfície não oferece esse modo é que se cai para o
+//! fundo opaco da cor do tema.
 //!
 //! O que sobra de "nosso" aqui é o que já existia no motor de revelação: abrir
 //! WebGPU antes de tocar no canvas, e cair para WebGL2 sem consumi-lo
@@ -20,6 +29,8 @@ pub struct Superficie {
     largura: u32,
     altura: u32,
     backend: &'static str,
+    /// A superfície aceita alfa pré-multiplicado: limpa-se com alfa zero.
+    transparente: bool,
 }
 
 fn erro(mensagem: impl Into<String>) -> String {
@@ -78,7 +89,7 @@ impl Superficie {
         let (dispositivo, fila) = adaptador
             .request_device(
                 &wgpu::DeviceDescriptor {
-                    label: Some("biblioteca"),
+                    label: Some("biblioteca-grade"),
                     required_features: wgpu::Features::empty(),
                     required_limits: adaptador.limits(),
                     memory_hints: Default::default(),
@@ -103,6 +114,10 @@ impl Superficie {
             .or_else(|| capacidades.formats.first().copied())
             .ok_or_else(|| erro("a superfície não ofereceu formato nenhum"))?;
 
+        let transparente = capacidades
+            .alpha_modes
+            .contains(&wgpu::CompositeAlphaMode::PreMultiplied);
+
         let renderer = egui_wgpu::Renderer::new(&dispositivo, formato, None, 1, false);
 
         Ok(Self {
@@ -114,6 +129,7 @@ impl Superficie {
             largura: 0,
             altura: 0,
             backend,
+            transparente,
         })
     }
 
@@ -139,7 +155,11 @@ impl Superficie {
                 width: self.largura,
                 height: self.altura,
                 present_mode: wgpu::PresentMode::Fifo,
-                alpha_mode: wgpu::CompositeAlphaMode::Auto,
+                alpha_mode: if self.transparente {
+                    wgpu::CompositeAlphaMode::PreMultiplied
+                } else {
+                    wgpu::CompositeAlphaMode::Auto
+                },
                 view_formats: vec![],
                 desired_maximum_frame_latency: 2,
             },
@@ -147,7 +167,8 @@ impl Superficie {
     }
 
     /// Desenha um quadro do egui. `false` quando a superfície não está pronta
-    /// (tamanho zero, ou perdida ao voltar de segundo plano).
+    /// (tamanho zero, ou perdida ao voltar de segundo plano). `fundo` só é
+    /// usado quando o canvas não pôde ser transparente.
     pub fn desenhar(
         &mut self,
         ctx: &egui::Context,
@@ -202,11 +223,15 @@ impl Superficie {
                         view: &vista,
                         resolve_target: None,
                         ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color {
-                                r: f64::from(fundo.r()) / 255.0,
-                                g: f64::from(fundo.g()) / 255.0,
-                                b: f64::from(fundo.b()) / 255.0,
-                                a: 1.0,
+                            load: wgpu::LoadOp::Clear(if self.transparente {
+                                wgpu::Color::TRANSPARENT
+                            } else {
+                                wgpu::Color {
+                                    r: f64::from(fundo.r()) / 255.0,
+                                    g: f64::from(fundo.g()) / 255.0,
+                                    b: f64::from(fundo.b()) / 255.0,
+                                    a: 1.0,
+                                }
                             }),
                             store: wgpu::StoreOp::Store,
                         },

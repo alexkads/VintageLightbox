@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "A tela da galeria do pós-venda inteira no navegador: egui sobre wgpu, dirigida pelo biblioteca-core, por wasm-bindgen"
+description = "A grade de miniaturas do pós-venda para o navegador: só o motor — geometria, seleção, miniaturas e o desenho dos tiles; a interface é do site"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -16,7 +16,11 @@ biblioteca-core = { path = "../biblioteca-core" }
 # runtimes de WebGPU disputando o mesmo `navigator.gpu`. O egui-wgpu 0.30 é o
 # que casa com o wgpu 23.
 wgpu = { version = "23.0", features = ["webgl"] }
-egui = "0.30"
+# O egui entra **só como pintor** (`epaint` + `egui_wgpu::Renderer`): retângulos
+# com canto arredondado, textura com recorte e o laço do arrasto. Sem fontes
+# (`default-features = false`) porque nenhum texto é desenhado aqui — o nome e
+# a faixa sob cada foto são DOM do site, com a fonte do site.
+egui = { version = "0.30", default-features = false }
 egui-wgpu = "0.30"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
@@ -25,24 +29,10 @@ web-sys = { version = "0.3", features = [
     "HtmlCanvasElement",
     "console",
     "Window",
-    "Storage",
     "Request",
     "RequestInit",
     "RequestCredentials",
     "Response",
-    "Headers",
-    "IdbFactory",
-    "IdbOpenDbRequest",
-    "IdbDatabase",
-    "IdbTransaction",
-    "IdbTransactionMode",
-    "IdbObjectStore",
-    "IdbRequest",
-    "IdbVersionChangeEvent",
-    "DomStringList",
-    "DomException",
-    "Event",
-    "EventTarget",
 ] }
 console_error_panic_hook = "0.1"
 serde = { workspace = true }

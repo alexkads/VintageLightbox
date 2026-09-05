@@ -4,32 +4,32 @@
 //!
 //! | lado | faz |
 //! |---|---|
-//! | JavaScript (`app.tsx`) | monta o `<canvas>`, entrega os eventos do DOM, roda o laço de quadros, escolhe arquivo, copia, abre aba, fala com o Worker da importação |
-//! | aqui | **a tela inteira**: cabeçalho, envio, barra, grade, painel, diálogos — decididos pelo `biblioteca-core` e desenhados pelo egui sobre o wgpu |
+//! | React (`grade-wasm.tsx`) | cabeçalho, envio, barra, painel, diálogos, o texto sob cada foto, as Server Actions; entrega ponteiro e teclado; rola a página; agenda os quadros |
+//! | aqui | a grade: geometria, seleção, contagens, miniaturas (busca, decodificação, textura) e o desenho dos tiles na GPU |
 //!
-//! 🔑 **O JavaScript não desenha nada e não decide nada.** Ele é o sistema
-//! operacional desta tela: fornece entrada, saída e as duas ou três coisas que
-//! só o DOM faz (`<input type=file>`, área de transferência, `window.open`).
-//! Foi o que o dono pediu em 2026-09-05 — *"todas as funcionalidades dentro do
-//! wasm, não uma coisa híbrida"* — e é o que permite ao VintageLightbox usar as
-//! mesmas telas.
+//! É o mesmo desenho do `revelacao-web` (`abrir(canvas) → Motor`): o wasm é
+//! motor, o site é a tela. **Já foi o contrário** — em 2026-09-05, a pedido
+//! do dono, este crate desenhou a tela inteira em egui; no mesmo dia, vendo o
+//! resultado ao lado do editor, ele reverteu: *"a biblioteca-web deveria usar
+//! as tecnologias da revelacao-web"*. O registro completo, com o que não
+//! refazer, está em `docs/BIBLIOTECA_NO_NAVEGADOR.md` do site.
+//!
+//! ## O protocolo
+//!
+//! Entra JSON pequeno (`definir_fotos`: id, miniatura, estado, apagada, ordem)
+//! e eventos crus. Sai um **bitset** por chamada dizendo o que mudou (ver
+//! [`crate::grade::mudou`]), e getters JSON para cada fatia — o React relê só
+//! a fatia cujo bit acendeu.
 
+use biblioteca_core::grade::{ZOOM_MAX, ZOOM_MIN, ZOOM_PADRAO};
+use biblioteca_core::selecao::Modificadores;
 use wasm_bindgen::prelude::*;
 
-use crate::app::{App as Tela, Pedido};
-use crate::entrada::Entrada;
+use crate::grade::{mudou, Grade as Estado};
 use crate::render::Superficie;
 
 fn erro(mensagem: impl Into<String>) -> JsValue {
     JsValue::from_str(&mensagem.into())
-}
-
-/// A galeria do pós-venda aberta sobre um `<canvas>`.
-#[wasm_bindgen]
-pub struct App {
-    tela: Tela,
-    entrada: Entrada,
-    superficie: Superficie,
 }
 
 /// O esquema do depósito local (nome, versão, lojas) — **a fonte única** que o
@@ -39,80 +39,103 @@ pub fn esquema_local_json() -> String {
     serde_json::to_string(&crate::local::esquema()).unwrap_or_else(|_| "{}".into())
 }
 
-/// Abre a tela sobre o canvas: WebGPU se houver, senão WebGL2.
-///
-/// `estado_json` é a galeria inteira como o site a monta
-/// (`estado-da-galeria.ts`); depois disso a tela relê sozinha, pela rota
-/// `/api/estado`, a cada gravação.
+/// Os limites do zoom, do core — para o slider do site não repetir os números.
 #[wasm_bindgen]
-pub async fn abrir_app(
-    canvas: web_sys::HtmlCanvasElement,
-    galeria_id: String,
-    estado_json: String,
-    tema_escuro: bool,
-) -> Result<App, JsValue> {
+pub fn limites_de_zoom_json() -> String {
+    format!("{{\"min\":{ZOOM_MIN},\"max\":{ZOOM_MAX},\"padrao\":{ZOOM_PADRAO}}}")
+}
+
+/// Os bits de mudança, por nome — lidos uma vez pelo `motor.ts`.
+#[wasm_bindgen]
+pub fn bits_de_mudanca_json() -> String {
+    serde_json::to_string(&mudou::tabela()).unwrap_or_else(|_| "{}".into())
+}
+
+/// A grade aberta sobre um `<canvas>`.
+#[wasm_bindgen]
+pub struct Grade {
+    estado: Estado,
+    superficie: Superficie,
+    inicio: Option<f64>,
+}
+
+/// Abre a grade sobre o canvas: WebGPU se houver, senão WebGL2. Rejeita
+/// quando nenhum dos dois responde — o site mostra o aviso e para.
+#[wasm_bindgen]
+pub async fn abrir(canvas: web_sys::HtmlCanvasElement, escuro: bool) -> Result<Grade, JsValue> {
     console_error_panic_hook::set_once();
-
     let superficie = Superficie::abrir(canvas).await.map_err(erro)?;
-    let tela = Tela::novo(galeria_id, &estado_json, superficie.backend()).map_err(erro)?;
-
-    // O visual é o do editor de revelação, sempre escuro — ver `tema.rs`.
-    // `tema_escuro` fica na assinatura para o hospedeiro não mudar; o valor
-    // não muda nada, como o editor também não muda com o tema do site.
-    let _ = tema_escuro;
-    crate::tema::aplicar(&tela.ctx);
-
-    Ok(App {
-        tela,
-        entrada: Entrada::default(),
+    let estado = Estado::nova(superficie.backend(), escuro);
+    Ok(Grade {
+        estado,
         superficie,
+        inicio: None,
     })
 }
 
+fn modificadores(ctrl: bool, shift: bool, meta: bool) -> Modificadores {
+    Modificadores {
+        aditivo: ctrl || meta,
+        faixa: shift,
+    }
+}
+
 #[wasm_bindgen]
-impl App {
+impl Grade {
     /// `"webgpu"` ou `"webgl"` — o que respondeu.
     pub fn backend(&self) -> String {
-        self.tela.backend.clone()
+        self.estado.backend.clone()
     }
 
-    /// O tamanho do canvas em pixels de CSS e a razão de pixels do dispositivo.
-    pub fn redimensionar(&mut self, largura: f32, altura: f32, dpr: f32) {
-        self.entrada.redimensionar(largura, altura, dpr);
-        let dpr = self.entrada.dpr();
+    /// A função que o hospedeiro quer que seja chamada quando uma miniatura
+    /// chega — ele agenda um quadro nela.
+    pub fn definir_despertador(&mut self, f: js_sys::Function) {
+        self.estado.caixa.definir_despertador(f);
+    }
+
+    pub fn definir_tema(&mut self, escuro: bool) -> u32 {
+        self.estado.definir_tema(escuro)
+    }
+
+    // ----- dados -----
+
+    /// A lista de fotos **já na ordem da grade** (o recorte é feito aqui).
+    pub fn definir_fotos(&mut self, json: &str) -> Result<u32, JsValue> {
+        self.estado.definir_fotos(json).map_err(erro)
+    }
+
+    /// `todas` | `levada_no_balcao` | `disponivel` | `comprada` | `apagadas`.
+    pub fn definir_filtro(&mut self, filtro: &str) -> Result<u32, JsValue> {
+        self.estado.definir_filtro(filtro).map_err(erro)
+    }
+
+    pub fn definir_zoom(&mut self, zoom: f32) -> u32 {
+        self.estado.definir_zoom(zoom)
+    }
+
+    // ----- janela -----
+
+    /// O tamanho do canvas em pixels de CSS (a janela visível) e a razão de
+    /// pixels do dispositivo.
+    pub fn redimensionar(&mut self, largura: f32, altura_visivel: f32, dpr: f32) -> u32 {
+        let bits = self.estado.redimensionar(largura, altura_visivel, dpr);
+        let dpr = self.estado.dpr;
         self.superficie.redimensionar(
             (largura * dpr).round().max(1.0) as u32,
-            (altura * dpr).round().max(1.0) as u32,
+            (altura_visivel * dpr).round().max(1.0) as u32,
         );
-        self.tela.ctx.request_repaint();
+        bits
     }
 
-    /// O tema do site mudou. A biblioteca segue o editor de revelação, que é
-    /// escuro em qualquer tema — então nada muda aqui (ver `tema.rs`).
-    pub fn definir_tema(&mut self, escuro: bool) {
-        let _ = escuro;
+    /// O topo da janela visível, em pixels de conteúdo — a página rolou.
+    pub fn rolar(&mut self, deslocamento: f32) -> u32 {
+        self.estado.rolar(deslocamento)
     }
 
-    /// A função que o hospedeiro quer que seja chamada quando uma resposta
-    /// chega (rede, miniatura) — ele agenda um quadro nela.
-    pub fn definir_despertador(&mut self, f: js_sys::Function) {
-        self.tela.caixa.definir_despertador(f);
-    }
+    // ----- entrada (coordenadas relativas ao canvas, em px de CSS) -----
 
-    // ----- entrada -----
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn ponteiro_moveu(
-        &mut self,
-        x: f32,
-        y: f32,
-        ctrl: bool,
-        shift: bool,
-        alt: bool,
-        meta: bool,
-    ) {
-        self.entrada.ponteiro_moveu(x, y, ctrl, shift, alt, meta);
-        self.tela.ctx.request_repaint();
+    pub fn ponteiro_moveu(&mut self, x: f32, y: f32) -> u32 {
+        self.estado.ponteiro_moveu(x, y)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -124,152 +147,97 @@ impl App {
         apertado: bool,
         ctrl: bool,
         shift: bool,
-        alt: bool,
         meta: bool,
-    ) {
-        self.entrada
-            .ponteiro_botao(x, y, botao, apertado, ctrl, shift, alt, meta);
-        self.tela.ctx.request_repaint();
+    ) -> u32 {
+        self.estado
+            .ponteiro_botao(x, y, botao, apertado, modificadores(ctrl, shift, meta))
     }
 
-    pub fn ponteiro_saiu(&mut self) {
-        self.entrada.ponteiro_saiu();
-        self.tela.ctx.request_repaint();
+    pub fn ponteiro_saiu(&mut self) -> u32 {
+        self.estado.ponteiro_saiu()
     }
 
-    pub fn roda(&mut self, dx: f32, dy: f32, ctrl: bool, shift: bool, alt: bool, meta: bool) {
-        self.entrada.roda(dx, dy, ctrl, shift, alt, meta);
-        self.tela.ctx.request_repaint();
+    /// `KeyboardEvent.key`. Devolve `CONSUMIDA` quando a tecla era da grade.
+    pub fn tecla(&mut self, nome: &str, ctrl: bool, shift: bool, meta: bool) -> u32 {
+        self.estado
+            .tecla(nome, modificadores(ctrl, shift, meta), ctrl || meta)
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub fn tecla(
-        &mut self,
-        nome: &str,
-        apertada: bool,
-        repetida: bool,
-        ctrl: bool,
-        shift: bool,
-        alt: bool,
-        meta: bool,
-    ) {
-        self.entrada
-            .tecla(nome, apertada, repetida, ctrl, shift, alt, meta);
-        self.tela.ctx.request_repaint();
+    pub fn foco(&mut self, tem: bool) -> u32 {
+        self.estado.foco(tem)
     }
 
-    pub fn colar(&mut self, texto: &str) {
-        self.entrada.colar(texto);
-        self.tela.ctx.request_repaint();
+    pub fn alternar_visiveis(&mut self) -> u32 {
+        self.estado.alternar_visiveis()
     }
 
-    pub fn foco(&mut self, tem: bool) {
-        self.entrada.foco(tem);
+    pub fn limpar_selecao(&mut self) -> u32 {
+        self.estado.limpar_selecao()
     }
 
-    /// O egui quer texto do teclado? (Um campo está com o cursor.) O
-    /// hospedeiro usa isto para não roubar as teclas de atalho da página.
-    pub fn quer_teclado(&self) -> bool {
-        self.tela.ctx.wants_keyboard_input()
+    // ----- leitura -----
+
+    /// A foto sob um ponto do canvas; `-1` no vazio.
+    pub fn indice_em(&self, x: f32, y: f32) -> i32 {
+        self.estado.indice_em(x, y).map_or(-1, |n| n as i32)
     }
 
-    // ----- o que o site sabe e a tela mostra -----
-
-    /// A fila de importação, como o Worker do site a vê (`ItemVisivel[]`).
-    pub fn definir_importacao(&mut self, json: &str) {
-        match serde_json::from_str(json) {
-            Ok(itens) => {
-                self.tela.importacao = itens;
-                self.tela.ctx.request_repaint();
-            }
-            Err(e) => self
-                .tela
-                .avisar(format!("a fila voltou ilegível: {e}"), true),
-        }
+    pub fn sob_ponteiro(&self) -> i32 {
+        self.estado.hover.map_or(-1, |n| n as i32)
     }
 
-    pub fn arrastando_arquivos(&mut self, arrastando: bool) {
-        if self.tela.arrastando_arquivos != arrastando {
-            self.tela.arrastando_arquivos = arrastando;
-            self.tela.ctx.request_repaint();
-        }
+    pub fn altura_total(&self) -> f32 {
+        self.estado.layout.altura_total
     }
 
-    /// O que os próximos arquivos viram: estado, faixa e parâmetros. É o que
-    /// o hospedeiro passa ao `enfileirar` quando o operador solta a leva.
-    pub fn leva_json(&self) -> String {
-        serde_json::to_string(&self.tela.leva).unwrap_or_else(|_| "{}".into())
+    pub fn layout_json(&self) -> String {
+        self.estado.layout_json()
     }
 
-    /// A galeria mudou por fora (a importação subiu uma foto): reler.
-    pub fn reler(&mut self) {
-        self.tela.reler();
+    pub fn contagens_json(&self) -> String {
+        self.estado.contagens_json()
     }
 
-    /// O editor de revelação gravou no depósito local: a biblioteca relê o
-    /// que está "editada · não salva".
-    pub fn revelacoes_mudaram(&mut self) {
-        self.tela.revelacoes_mudaram();
+    pub fn selecao_json(&self) -> String {
+        self.estado.selecao_json()
+    }
+
+    pub fn visiveis_json(&self) -> String {
+        self.estado.visiveis_json()
+    }
+
+    /// `[y, h]` do tile a garantir visível (o teclado moveu o foco); vazio
+    /// quando não há. Esvazia ao ler.
+    pub fn alvo_de_rolagem(&mut self) -> Vec<f32> {
+        self.estado.alvo_de_rolagem()
     }
 
     // ----- o quadro -----
 
-    /// Desenha um quadro. Devolve `true` quando a tela quer outro em seguida
-    /// (animação, aviso expirando, resposta a caminho) — o hospedeiro decide
-    /// se agenda o próximo `requestAnimationFrame` ou dorme até o próximo
-    /// evento.
+    /// Desenha um quadro. Devolve `true` quando quer outro em seguida (uma
+    /// miniatura chegou, um arrasto está em curso) — o hospedeiro decide se
+    /// agenda o próximo `requestAnimationFrame` ou dorme até o próximo evento.
     pub fn quadro(&mut self, agora_ms: f64) -> bool {
-        self.tela.receber();
-        let raw = self.entrada.quadro(agora_ms);
-        let ctx = self.tela.ctx.clone();
-        let saida = ctx.run(raw, |c| self.tela.ui(c));
+        self.estado.receber();
 
-        let plataforma = &saida.platform_output;
-        if let Some(url) = &plataforma.open_url {
-            self.tela.pedidos.push(Pedido::AbrirUrl {
-                url: url.url.clone(),
-            });
-        }
-        if !plataforma.copied_text.is_empty() {
-            self.tela.pedidos.push(Pedido::Copiar {
-                texto: plataforma.copied_text.clone(),
-            });
-        }
-        self.tela.pedidos.push(Pedido::Cursor {
-            cursor: cursor_css(plataforma.cursor_icon).to_string(),
-        });
+        let inicio = *self.inicio.get_or_insert(agora_ms);
+        let mut raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::Vec2::new(self.estado.largura, self.estado.altura_visivel),
+            )),
+            time: Some((agora_ms - inicio) / 1000.0),
+            ..Default::default()
+        };
+        raw.viewports
+            .entry(raw.viewport_id)
+            .or_default()
+            .native_pixels_per_point = Some(self.estado.dpr);
 
-        let fundo = ctx.style().visuals.panel_fill;
-        self.superficie.desenhar(&ctx, saida, fundo);
+        let ctx = self.estado.ctx.clone();
+        let estado = &self.estado;
+        let saida = ctx.run(raw, |c| crate::pintor::pintar(c, estado));
+        self.superficie.desenhar(&ctx, saida, estado.cores.fundo);
         ctx.has_requested_repaint()
-    }
-
-    /// O que a tela pede ao hospedeiro desde o último quadro — e esvazia.
-    pub fn pedidos_json(&mut self) -> String {
-        let pedidos = std::mem::take(&mut self.tela.pedidos);
-        serde_json::to_string(&pedidos).unwrap_or_else(|_| "[]".into())
-    }
-}
-
-fn cursor_css(icone: egui::CursorIcon) -> &'static str {
-    use egui::CursorIcon as C;
-    match icone {
-        C::Default => "default",
-        C::PointingHand => "pointer",
-        C::Text => "text",
-        C::Grab => "grab",
-        C::Grabbing => "grabbing",
-        C::Crosshair => "crosshair",
-        C::Move => "move",
-        C::ResizeHorizontal => "ew-resize",
-        C::ResizeVertical => "ns-resize",
-        C::ResizeNeSw => "nesw-resize",
-        C::ResizeNwSe => "nwse-resize",
-        C::NotAllowed => "not-allowed",
-        C::Wait => "wait",
-        C::Progress => "progress",
-        C::Help => "help",
-        C::None => "none",
-        _ => "default",
     }
 }
