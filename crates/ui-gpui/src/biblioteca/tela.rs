@@ -904,7 +904,7 @@ impl Biblioteca {
     fn colunas(&self, window: &Window) -> usize {
         match self.colunas_escolhidas {
             Some(quantas) => quantas.clamp(1, 5) as usize,
-            None => colunas_que_cabem(largura_util(window), PASSO),
+            None => colunas_que_cabem(largura_util(window), LADO_DO_ITEM, ESPACAMENTO),
         }
     }
 

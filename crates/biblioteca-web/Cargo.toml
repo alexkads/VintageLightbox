@@ -1,0 +1,52 @@
+[package]
+name = "biblioteca-web"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "A tela da galeria do pós-venda inteira no navegador: egui sobre wgpu, dirigida pelo biblioteca-core, por wasm-bindgen"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+biblioteca-core = { path = "../biblioteca-core" }
+# 🚨 A mesma versão do resto do workspace — inclusive a do `revelacao-web`, que
+# roda na **mesma página**. Duas versões do wgpu no mesmo bundle são dois
+# runtimes de WebGPU disputando o mesmo `navigator.gpu`. O egui-wgpu 0.30 é o
+# que casa com o wgpu 23.
+wgpu = { version = "23.0", features = ["webgl"] }
+egui = "0.30"
+egui-wgpu = "0.30"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = [
+    "HtmlCanvasElement",
+    "console",
+    "Window",
+    "Storage",
+    "Request",
+    "RequestInit",
+    "RequestCredentials",
+    "Response",
+    "Headers",
+    "IdbFactory",
+    "IdbOpenDbRequest",
+    "IdbDatabase",
+    "IdbTransaction",
+    "IdbTransactionMode",
+    "IdbObjectStore",
+    "IdbRequest",
+    "IdbVersionChangeEvent",
+    "DomStringList",
+    "DomException",
+    "Event",
+    "EventTarget",
+] }
+console_error_panic_hook = "0.1"
+serde = { workspace = true }
+serde_json = { workspace = true }
+# As miniaturas são decodificadas aqui dentro (JPEG e PNG): é o que tira o
+# JavaScript do caminho das imagens. 640 px por miniatura custa milissegundos.
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }

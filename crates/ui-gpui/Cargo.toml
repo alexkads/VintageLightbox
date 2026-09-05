@@ -25,6 +25,9 @@ gpui-component = "0.5.1"
 # As quatro camadas internas, intactas. Nenhuma delas sabe que a interface
 # mudou — é o que tornou o GPUI mais barato que o Tauri (§2.1).
 infrastructure = { path = "../infrastructure" }
+# A grade da Biblioteca: a mesma aritmética que o site usa (2026-09-05). Sem
+# GPU e sem janela dentro — ver `biblioteca/grade.rs`.
+biblioteca-core = { path = "../biblioteca-core" }
 adapters = { path = "../adapters" }
 use-cases = { path = "../use-cases" }
 domain = { path = "../domain" }

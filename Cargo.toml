@@ -12,6 +12,14 @@ members = [
     # O mesmo motor compilado para o navegador (wasm-bindgen + wgpu). É o que o
     # `scripts/construir-web.sh` entrega ao `recordarfotos-e-commerce`.
     "crates/revelacao-web",
+    # A biblioteca de fotos sem tela (2026-09-05): a geometria da grade, a
+    # seleção, o recorte da barra e a política das miniaturas. Existiam três
+    # cópias das mesmas contas — as duas grades do site e a Biblioteca daqui —,
+    # e elas já tinham divergido.
+    "crates/biblioteca-core",
+    # A mesma biblioteca desenhada no navegador (wgpu + wasm-bindgen), entregue
+    # em `frontend/public/biblioteca/` pelo `scripts/construir-biblioteca.sh`.
+    "crates/biblioteca-web",
     # A interface, em GPUI. O `crates/ui` (egui) saiu daqui em 17/ago/2026, com a
     # lista de paridade zerada (docs/PARIDADE-UI.md) — é a fase 5 do plano.
     #

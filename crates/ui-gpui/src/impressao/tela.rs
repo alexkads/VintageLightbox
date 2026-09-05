@@ -65,7 +65,6 @@ const ESPACO_MAXIMO: f32 = 20.0;
 /// a tela existir.
 const ALTURA_DA_FAIXA: f32 = 172.0;
 const LADO_DA_ESCOLHA: f32 = 72.0;
-const PASSO_DA_ESCOLHA: f32 = LADO_DA_ESCOLHA + 8.0;
 
 /// Quantas miniaturas ficam na memória.
 ///
@@ -637,7 +636,7 @@ impl Impressao {
     /// serve para fazer.
     fn faixa(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
         let largura = f32::from(window.viewport_size().width) - 2.0 * FOLGA;
-        let colunas = colunas_que_cabem(largura, PASSO_DA_ESCOLHA);
+        let colunas = colunas_que_cabem(largura, LADO_DA_ESCOLHA, 8.0);
         let total = self.acervo.len();
         let linhas = linhas_necessarias(total, colunas);
 
