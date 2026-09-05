@@ -24,7 +24,9 @@
 use std::collections::{BTreeSet, HashMap};
 
 use biblioteca_core::acervo::{Acervo, Estado, Filtro};
-use biblioteca_core::grade::{Direcao, Layout, Opcoes, Retangulo, ZOOM_MAX, ZOOM_MIN, ZOOM_PADRAO};
+use biblioteca_core::grade::{
+    zoom_que_cabe, Direcao, Layout, Opcoes, Retangulo, ZOOM_MAX, ZOOM_MIN, ZOOM_PADRAO,
+};
 use biblioteca_core::miniaturas::{Cache, Desfecho, Politica};
 use biblioteca_core::selecao::{Modificadores, Selecao};
 use egui::TextureHandle;
@@ -212,6 +214,26 @@ impl Grade {
         }
         self.zoom = z;
         self.recalcular()
+    }
+
+    /// O maior zoom em que **todas** as fotos do recorte cabem na área
+    /// visível — o "ajustar à janela". `None` quando não cabe nem no mínimo.
+    pub fn zoom_para_caber(&self) -> Option<f32> {
+        let z = zoom_que_cabe(
+            self.largura,
+            self.altura_visivel,
+            self.acervo.total_visivel(),
+            Opcoes::default(),
+        );
+        let cabe = Layout::calcular(
+            self.largura,
+            z,
+            self.acervo.total_visivel(),
+            Opcoes::default(),
+        )
+        .altura_total
+            <= self.altura_visivel;
+        cabe.then_some(z)
     }
 
     pub fn definir_tema(&mut self, escuro: bool) -> u32 {

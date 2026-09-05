@@ -113,6 +113,12 @@ impl Grade {
         self.estado.definir_zoom(zoom)
     }
 
+    /// O maior zoom em que todas as fotos do recorte cabem sem rolagem, ou
+    /// `-1` quando não cabem nem no menor tile.
+    pub fn zoom_para_caber(&self) -> f32 {
+        self.estado.zoom_para_caber().unwrap_or(-1.0)
+    }
+
     // ----- janela -----
 
     /// O tamanho do canvas em pixels de CSS (a janela visível) e a razão de

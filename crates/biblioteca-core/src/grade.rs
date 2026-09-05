@@ -324,6 +324,39 @@ impl Layout {
 /// e a grade sumir quando alguém arrasta a borda da janela para a esquerda —
 /// e `NAN as usize` é 0 em Rust, que é como isso chegava aqui no primeiro
 /// quadro, antes de a janela ser medida.
+/// O maior tile em que **todas** as fotos ainda cabem na altura disponível.
+///
+/// # Por que isto existe
+///
+/// Uma galeria de oito fotos com o zoom no mínimo desenha uma fileira fina no
+/// topo e deixa meia tela vazia — foi a reclamação do dono em 2026-09-05
+/// ("tá péssima", com a captura). Quando tudo cabe, o tamanho certo não é o
+/// que o operador escolheu para uma galeria de duzentas: é o maior que ainda
+/// mostra tudo. É o "ajustar à janela" de qualquer visualizador.
+///
+/// Devolve o zoom **preso à faixa** ([`ZOOM_MIN`], [`ZOOM_MAX`]). Quando nem no
+/// mínimo cabe — uma galeria grande —, devolve `ZOOM_MIN`, e quem chama decide
+/// se usa ou se mantém o do operador: com rolagem, o tamanho volta a ser
+/// escolha dele.
+pub fn zoom_que_cabe(largura: f32, altura: f32, total: usize, opcoes: Opcoes) -> f32 {
+    if total == 0 || !largura.is_finite() || !altura.is_finite() || largura <= 0.0 || altura <= 0.0
+    {
+        return ZOOM_PADRAO;
+    }
+    // Do maior para o menor, de 10 em 10: a primeira que couber é a resposta.
+    // São 34 tentativas de aritmética pura — mais barato que resolver a
+    // inequação, que teria de considerar o degrau do rodapé (ele some abaixo
+    // de `RODAPE_A_PARTIR_DE`) e o arredondamento das colunas.
+    let mut zoom = ZOOM_MAX;
+    while zoom > ZOOM_MIN {
+        if Layout::calcular(largura, zoom, total, opcoes).altura_total <= altura {
+            return zoom;
+        }
+        zoom -= 10.0;
+    }
+    ZOOM_MIN
+}
+
 pub fn colunas_que_cabem(largura: f32, lado_alvo: f32, espaco: f32) -> usize {
     if !largura.is_finite() || !lado_alvo.is_finite() || lado_alvo <= 0.0 {
         return 1;
@@ -431,6 +464,62 @@ pub fn caber_em(largura: f32, altura: f32, caixa: Retangulo) -> Retangulo {
 pub fn suavizar(t: f32) -> f32 {
     let k = t.clamp(0.0, 1.0);
     1.0 - (1.0 - k).powi(3)
+}
+
+#[cfg(test)]
+mod testes_do_ajuste {
+    use super::*;
+
+    /// Oito fotos numa janela larga: o ajuste escolhe um tile grande, e todas
+    /// continuam cabendo sem rolagem.
+    #[test]
+    fn com_poucas_fotos_o_tile_cresce_ate_encher_a_altura() {
+        let (largura, altura) = (1300.0, 560.0);
+        let zoom = zoom_que_cabe(largura, altura, 8, Opcoes::default());
+        assert!(
+            zoom > ZOOM_PADRAO,
+            "8 fotos em 560px deveriam crescer, veio {zoom}"
+        );
+        let layout = Layout::calcular(largura, zoom, 8, Opcoes::default());
+        assert!(
+            layout.altura_total <= altura,
+            "com zoom {zoom} a grade tem {} e a área {altura}",
+            layout.altura_total
+        );
+    }
+
+    /// Uma galeria que não cabe de jeito nenhum cai no mínimo — e quem chama
+    /// decide se respeita o zoom do operador.
+    #[test]
+    fn com_muitas_fotos_cai_no_minimo() {
+        let zoom = zoom_que_cabe(1300.0, 560.0, 2000, Opcoes::default());
+        assert_eq!(zoom, ZOOM_MIN);
+    }
+
+    /// Nunca passa do teto, por maior que seja a janela.
+    #[test]
+    fn uma_foto_numa_tela_enorme_para_no_teto() {
+        let zoom = zoom_que_cabe(4000.0, 3000.0, 1, Opcoes::default());
+        assert_eq!(zoom, ZOOM_MAX);
+    }
+
+    /// Galeria vazia e medidas inválidas não viram divisão por zero nem tile
+    /// de tamanho absurdo: devolvem o padrão.
+    #[test]
+    fn sem_fotos_ou_sem_medida_devolve_o_padrao() {
+        assert_eq!(
+            zoom_que_cabe(1300.0, 560.0, 0, Opcoes::default()),
+            ZOOM_PADRAO
+        );
+        assert_eq!(
+            zoom_que_cabe(f32::NAN, 560.0, 8, Opcoes::default()),
+            ZOOM_PADRAO
+        );
+        assert_eq!(
+            zoom_que_cabe(1300.0, 0.0, 8, Opcoes::default()),
+            ZOOM_PADRAO
+        );
+    }
 }
 
 #[cfg(test)]
