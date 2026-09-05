@@ -216,23 +216,22 @@ impl Grade {
         self.recalcular()
     }
 
-    /// O maior zoom em que **todas** as fotos do recorte cabem na área
-    /// visível — o "ajustar à janela". `None` quando não cabe nem no mínimo.
-    pub fn zoom_para_caber(&self) -> Option<f32> {
-        let z = zoom_que_cabe(
-            self.largura,
-            self.altura_visivel,
-            self.acervo.total_visivel(),
-            Opcoes::default(),
-        );
-        let cabe = Layout::calcular(
-            self.largura,
-            z,
-            self.acervo.total_visivel(),
-            Opcoes::default(),
-        )
-        .altura_total
-            <= self.altura_visivel;
+    /// O maior zoom em que **todas** as fotos do recorte cabem em
+    /// `altura_disponivel` — o "ajustar à janela". `None` quando não cabem nem
+    /// no menor tile.
+    ///
+    /// 🚨 **A altura vem de fora, e não é `self.altura_visivel`.** O canvas tem
+    /// a altura do *conteúdo* quando ele é menor que a área (é o que evita um
+    /// canvas gigante para oito fotos), e o conteúdo é justamente o que o zoom
+    /// muda: perguntar "o que cabe na altura do conteúdo" é uma pergunta
+    /// circular, e ela **oscilava** — 430 cabe, então 440; 440 não cabe, então
+    /// 430 — até o React derrubar a tela com "Maximum update depth exceeded".
+    /// A altura da **área** não depende do zoom, e é a resposta estável.
+    pub fn zoom_para_caber(&self, altura_disponivel: f32) -> Option<f32> {
+        let total = self.acervo.total_visivel();
+        let z = zoom_que_cabe(self.largura, altura_disponivel, total, Opcoes::default());
+        let cabe = Layout::calcular(self.largura, z, total, Opcoes::default()).altura_total
+            <= altura_disponivel;
         cabe.then_some(z)
     }
 
