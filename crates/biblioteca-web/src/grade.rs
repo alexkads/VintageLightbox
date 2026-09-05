@@ -283,10 +283,17 @@ impl Grade {
             self.acervo.total_visivel(),
             Opcoes::default(),
         );
+        // 🚨 **Layout que muda implica visíveis que mudam.** O
+        // `atualizar_visiveis` compara só o *intervalo* `(início, fim)`; com o
+        // zoom mudando e as mesmas fotos à vista, ele continua igual — e o
+        // React não relia `visiveis_json`. Os rodapés em DOM ficavam nas
+        // posições e larguras antigas: o texto quebrava, e só um F5 arrumava.
+        // As coordenadas de todo tile mudam quando o layout muda, mesmo que
+        // sejam os mesmos tiles.
         let bits = if novo == self.layout {
             0
         } else {
-            mudou::LAYOUT
+            mudou::LAYOUT | mudou::VISIVEIS
         };
         self.layout = novo;
         self.ctx.request_repaint();
