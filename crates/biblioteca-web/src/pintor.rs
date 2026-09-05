@@ -58,17 +58,23 @@ pub fn pintar(ctx: &egui::Context, g: &Grade) {
 
         let selecionada = g.selecao.tem(n);
         let em_foco = g.tem_foco && g.selecao.foco() == Some(n);
+        // 🚨 **Os anéis são desenhados para dentro do tile.** Um `stroke` do
+        // egui fica metade para cada lado da borda, e o do foco usava
+        // `expand(2)`: na primeira linha e na primeira coluna isso cai fora do
+        // canvas e some — o anel aparecia cortado justamente na foto que o
+        // operador acabou de escolher. Encolher mantém o anel inteiro em
+        // qualquer posição, e o desenho é o mesmo.
         if selecionada {
             p.rect_stroke(
-                imagem,
-                Rounding::same(RAIO),
+                imagem.shrink(1.0),
+                Rounding::same(RAIO - 1.0),
                 Stroke::new(2.0_f32, tema::AMBAR),
             );
         }
         if em_foco {
             p.rect_stroke(
-                imagem.expand(2.0),
-                Rounding::same(RAIO + 2.0),
+                imagem.shrink(3.0),
+                Rounding::same(RAIO - 3.0),
                 Stroke::new(1.5_f32, cores.foco),
             );
         }
