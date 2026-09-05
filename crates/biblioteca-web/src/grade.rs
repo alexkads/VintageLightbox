@@ -463,6 +463,27 @@ impl Grade {
         mudou::SELECAO
     }
 
+    /// Um clique vindo de fora do canvas — a tira de miniaturas do site: foca
+    /// e seleciona só esta foto, como o clique simples na grade. Devolve 0 se
+    /// o id não está no recorte.
+    pub fn focar_id(&mut self, id: &str) -> u32 {
+        let Some(n) = self.acervo.posicao_de(id) else {
+            return 0;
+        };
+        self.selecao.clicar(n, false, Modificadores::default());
+        self.rolar_para = Some(n);
+        self.ctx.request_repaint();
+        mudou::SELECAO | mudou::ROLAR
+    }
+
+    /// Os ids do recorte em vigor, na ordem da grade — a lista que a tira do
+    /// site percorre. É a mesma conta do filtro, lida daqui em vez de refeita
+    /// em TypeScript (armadilha nº 8).
+    pub fn ids_visiveis_json(&self) -> String {
+        let ids: Vec<&str> = self.acervo.visiveis().map(|f| f.id.as_str()).collect();
+        serde_json::to_string(&ids).unwrap_or_else(|_| "[]".into())
+    }
+
     // ----- leitura -----
 
     pub fn indice_em(&self, x: f32, y: f32) -> Option<usize> {

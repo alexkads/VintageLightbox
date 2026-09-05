@@ -175,6 +175,16 @@ impl Grade {
         self.estado.limpar_selecao()
     }
 
+    /// A tira do site clicou nesta foto: foca e seleciona só ela.
+    pub fn focar_id(&mut self, id: &str) -> u32 {
+        self.estado.focar_id(id)
+    }
+
+    /// Os ids do recorte em vigor, na ordem da grade — o que a tira percorre.
+    pub fn ids_visiveis_json(&self) -> String {
+        self.estado.ids_visiveis_json()
+    }
+
     // ----- leitura -----
 
     /// A foto sob um ponto do canvas; `-1` no vazio.
