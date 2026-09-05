@@ -1,6 +1,6 @@
 # Status do Projeto - VintageLightbox
 
-**Última atualização**: 4 de setembro de 2026
+**Última atualização**: 5 de setembro de 2026
 **Último commit**: ver `git log -1` — os de 4/set com o motor de revelação num crate próprio e compilado para o navegador
 **Branch de trabalho**: `dev`, árvore limpa
 **Estado**: ✅ compila · **785 testes, 0 falhando** · `fmt` e `clippy -D warnings` limpos (nativo **e** `wasm32`) · o app sobe
@@ -51,6 +51,19 @@ explica sozinho uma trava dura:
 🔑 **E o app estava sendo rodado em `debug`.** Este projeto já quase condenou o
 framework por medir fluidez no perfil errado (fase 1 da migração): em `debug` uma
 miniatura custa 56× mais. O primeiro passo é usar `--release`.
+
+## O que mudou em 5/set/2026 — a grade da biblioteca sai para o navegador, e volta a ser só motor
+
+🎯 **O dono pediu a galeria do pós-venda do site como um módulo reaproveitável aqui**, "com a mesma
+tecnologia do revelacao-core". Três rodadas no mesmo dia; o registro completo está no e-commerce, em
+`docs/BIBLIOTECA_NO_NAVEGADOR.md`.
+
+| | |
+|---|---|
+| ✅ **`crates/biblioteca-core`** | **zero dependências**: `grade.rs` (Layout: colunas, tiles, intervalo visível, retângulo do arrasto, para onde o foco vai), `selecao.rs` (clique, Shift a partir da âncora, Ctrl, arrasto a partir de uma base, teclado), `acervo.rs` (recorte por situação, contagens do acervo inteiro, permissões do lote), `miniaturas.rs` (política do cache: teto, paralelo, poda por uso), `dinheiro.rs`, `negociacao.rs`, `preco_de_venda.rs`. 86 testes. `ui-gpui/src/biblioteca/grade.rs` virou ponte sobre ele — e ganhou a coluna que faltava (a conta antiga cobrava respiro da última coluna) |
+| ✅ **`crates/biblioteca-web`** | `wasm-bindgen` sobre o core: `abrir(canvas) → Grade` (WebGPU, senão WebGL2), `definir_fotos/filtro/zoom`, `redimensionar/rolar`, ponteiro e teclado, e os getters JSON de seleção, contagens, layout e tiles visíveis. Busca e decodifica as miniaturas em Rust, desenha os tiles na GPU com o `egui` como pintor (sem fontes, sem eventos), canvas com alfa pré-multiplicado. **Nenhum texto, nenhuma interface**: isso é React, no site. 2,48 MB |
+| ⚠️ **O que foi e voltou no mesmo dia** | Ao meio-dia o dono pediu "tudo dentro do wasm, não híbrido" e a tela inteira do site foi desenhada em egui aqui (4,4 MB, Geist embutida, o wasm chamando rotas do site). À tarde ele viu ao lado do editor de revelação — "tá muito feia e desorganizada" — e decidiu: mesmo desenho da revelação, wasm só motor. Não refazer |
+| ✅ **`scripts/construir-biblioteca.sh`** | o irmão do `construir-web.sh`: testa o core, `wasm-pack --target web` no perfil `release-web`, `wasm-opt -Oz`, e entrega glue, `.wasm`, `VERSAO`, `.d.ts` e `versao.ts` ao e-commerce |
 
 ## O que mudou em 4/set/2026 — o motor de revelação sai para o navegador
 
@@ -183,7 +196,7 @@ struct `PhotoEdits` continua sendo o conserto de verdade.
 | App | ✅ **sobe** — janela 1352×848, `GPU: Initialized successfully with Apple M2 Pro` |
 | Migrations SQLite no repositório | 15 (`001` … `015`) |
 | Abertura do app novo com 2.000 fotos | ✅ **23–43 ms** até a janela (`medir-abertura`, release, 17/ago) |
-| Crates | 7 (domain, use-cases, adapters, infrastructure, **revelacao-core**, **revelacao-web**, ui-gpui) — o `ui` saiu em 17/ago; os dois de revelação entraram em 4/set |
+| Crates | 9 (domain, use-cases, adapters, infrastructure, revelacao-core, revelacao-web, **biblioteca-core**, **biblioteca-web**, ui-gpui) — o `ui` saiu em 17/ago; os dois de revelação entraram em 4/set, os dois da biblioteca em 5/set |
 
 ### Testes por camada
 

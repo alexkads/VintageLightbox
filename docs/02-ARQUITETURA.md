@@ -256,6 +256,22 @@ sai pixel. O `infrastructure` re-exporta `Ajustes`/`Motor` e guarda só a leitur
 por `scripts/construir-web.sh`. O shader tem um corpo (`corpo.wgsl`) e duas entradas — compute no
 desktop, fragmento no navegador —, concatenadas em tempo de compilação.
 
+### 2.3¾ `biblioteca-core` e `biblioteca-web` — a grade sem tela (5/set/2026)
+
+A geometria da grade, a seleção (clique, Shift, Ctrl, arrasto, teclado), o recorte por situação com
+contagens e a política das miniaturas moram em `crates/biblioteca-core`, que **não tem dependência
+nenhuma** — nem `domain`. Existiam três cópias da mesma conta (as duas grades do site e a Biblioteca
+daqui) e já tinham divergido: o desktop mostrava uma coluna a menos. `ui-gpui/src/biblioteca/grade.rs`
+virou uma ponte sobre o core.
+
+`crates/biblioteca-web` é o core compilado para `wasm32` com `wasm-bindgen`, entregue ao site por
+`scripts/construir-biblioteca.sh`, e é **só o motor da grade**: busca e decodifica as miniaturas,
+desenha os tiles na GPU (o `egui` entra só como pintor, sem fontes e sem eventos) e responde a cada
+chamada com um bitset do que mudou. O texto sob a foto, o painel, os diálogos e as gravações são
+React, no site — o mesmo desenho do `revelacao-web`. ⚠️ No dia 5/set ele chegou a desenhar a tela
+inteira em egui, e foi revertido no mesmo dia; `docs/BIBLIOTECA_NO_NAVEGADOR.md` do e-commerce diz
+por quê e o que não refazer.
+
 ### 2.4 Infrastructure Layer (Camada 4 - Frameworks & Drivers)
 
 **Responsabilidade**: Detalhes de implementação, frameworks, bibliotecas externas.

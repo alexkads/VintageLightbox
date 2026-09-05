@@ -58,6 +58,10 @@ cargo run -p ui-gpui
 scripts/construir-web.sh [caminho/do/frontend]
 cargo clippy -p revelacao-web --target wasm32-unknown-unknown -- -D warnings
 
+# A grade da biblioteca para o navegador — só o motor; a tela é React lá
+scripts/construir-biblioteca.sh [caminho/do/frontend]
+cargo clippy -p biblioteca-web --target wasm32-unknown-unknown -- -D warnings
+
 # Check code (faster than build)
 cargo check --workspace
 
@@ -100,6 +104,12 @@ VintageLightbox follows **Clean Architecture** with 4 layers as separate crates:
 │  - motor.rs, transformacao.rs (Corte), jpeg.rs      │
 │  → revelacao-web: o mesmo, em wasm, para o site     │
 ├─────────────────────────────────────────────────────┤
+│  biblioteca-core (ZERO dependências)                │
+│  - grade.rs, selecao.rs, acervo.rs, miniaturas.rs   │
+│  - a mesma conta para o site e para ui-gpui         │
+│  → biblioteca-web: só a grade, em wasm, para o site │
+│    (a tela é React lá; egui entra só como pintor)   │
+├─────────────────────────────────────────────────────┤
 │  domain (innermost - no external dependencies)      │
 │  - entities/: Photo, Collection                     │
 │  - value_objects/: PhotoId, Rating, ColorLabel      │
@@ -107,6 +117,11 @@ VintageLightbox follows **Clean Architecture** with 4 layers as separate crates:
 │  - errors.rs: DomainError, DomainResult             │
 └─────────────────────────────────────────────────────┘
 ```
+
+⚠️ **`biblioteca-web` é motor, não tela** — como o `revelacao-web`. Em 5/set/2026 ele desenhou a
+galeria inteira do site em egui, a pedido do dono, e no mesmo dia o dono reverteu ("deveria usar as
+tecnologias de revelacao-web"). O registro, com a lista do que não refazer, está em
+`docs/BIBLIOTECA_NO_NAVEGADOR.md` do `recordarfotos-e-commerce`.
 
 **Dependency Rule**: Inner layers never depend on outer layers. The `domain` crate has no dependencies on other crates; `use-cases` depends only on `domain`; etc.
 
