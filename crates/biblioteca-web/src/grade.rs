@@ -495,11 +495,17 @@ impl Grade {
     /// Um clique vindo de fora do canvas — a tira de miniaturas do site: foca
     /// e seleciona só esta foto, como o clique simples na grade. Devolve 0 se
     /// o id não está no recorte.
-    pub fn focar_id(&mut self, id: &str) -> u32 {
+    /// 🔑 **Os modificadores são os mesmos do canvas** — Ctrl acrescenta, Shift
+    /// estende a partir da âncora. A tira do site é outra vista do mesmo
+    /// acervo, e o dono pediu (2026-09-05) que ela selecione como a grade;
+    /// refazer a regra em TypeScript daria duas seleções que discordam no dia
+    /// em que uma delas mudar (armadilha nº 8).
+    pub fn focar_id(&mut self, id: &str, aditivo: bool, faixa: bool) -> u32 {
         let Some(n) = self.acervo.posicao_de(id) else {
             return 0;
         };
-        self.selecao.clicar(n, false, Modificadores::default());
+        self.selecao
+            .clicar(n, false, Modificadores { aditivo, faixa });
         self.rolar_para = Some(n);
         self.ctx.request_repaint();
         mudou::SELECAO | mudou::ROLAR

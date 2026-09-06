@@ -184,9 +184,10 @@ impl Grade {
         self.estado.limpar_selecao()
     }
 
-    /// A tira do site clicou nesta foto: foca e seleciona só ela.
-    pub fn focar_id(&mut self, id: &str) -> u32 {
-        self.estado.focar_id(id)
+    /// A tira do site clicou nesta foto: foca e seleciona, com os mesmos
+    /// modificadores do canvas (Ctrl acrescenta, Shift estende).
+    pub fn focar_id(&mut self, id: &str, aditivo: bool, faixa: bool) -> u32 {
+        self.estado.focar_id(id, aditivo, faixa)
     }
 
     /// Os ids do recorte em vigor, na ordem da grade — o que a tira percorre.
