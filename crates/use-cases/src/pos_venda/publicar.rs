@@ -103,7 +103,7 @@ impl PublicarNoPosVendaUseCase {
         let (mut sucesso, mut falhas) = (0usize, 0usize);
         for (ordem, id) in pedido.fotos.iter().enumerate() {
             match self
-                .subir(&pedido.sessao, &galeria.id, id, ordem as u32)
+                .subir(&pedido.sessao, &galeria.id, id, ordem as u32, None)
                 .await
             {
                 Ok((nome, estado)) => {
@@ -151,8 +151,9 @@ impl PublicarNoPosVendaUseCase {
         galeria_id: &str,
         id: &PhotoId,
         ordem: u32,
+        estado: Option<EstadoNoBalcao>,
     ) -> Result<String, String> {
-        self.subir(sessao, galeria_id, id, ordem)
+        self.subir(sessao, galeria_id, id, ordem, estado)
             .await
             .map(|(nome, _)| nome)
             .map_err(|(nome, erro)| format!("{nome}: {erro}"))
@@ -187,12 +188,19 @@ impl PublicarNoPosVendaUseCase {
         }
     }
 
+    /// `estado` manda quando vem preenchido.
+    ///
+    /// 🔑 **É a leva escolhida antes dos arquivos**, como na tela da sessão do
+    /// site: "sobe estas como levadas" é uma decisão sobre o lote, e não sobre
+    /// cada foto. `None` cai na marcação da tecla `B` de cada uma — que é o que
+    /// a publicação em lote e a classificação usam.
     async fn subir(
         &self,
         sessao: &Sessao,
         galeria_id: &str,
         id: &PhotoId,
         ordem: u32,
+        estado: Option<EstadoNoBalcao>,
     ) -> Result<(String, EstadoNoBalcao), (String, String)> {
         let mut photo = match self.fotos.find_by_id(id).await {
             Ok(Some(p)) => p,
@@ -201,7 +209,7 @@ impl PublicarNoPosVendaUseCase {
         };
 
         let nome = nome_para_o_site(&photo.file_path().to_string_lossy());
-        let estado = EstadoNoBalcao::da_foto(&photo);
+        let estado = estado.unwrap_or_else(|| EstadoNoBalcao::da_foto(&photo));
 
         let jpeg = self
             .exportador
@@ -364,6 +372,16 @@ mod tests {
         }
         async fn copia_de_trabalho(&self, _: &Sessao, _: &str) -> DomainResult<Vec<u8>> {
             unreachable!("a publicação sobe pixels; não os busca de volta")
+        }
+        async fn miniatura(&self, _: &Sessao, _: &str) -> DomainResult<Vec<u8>> {
+            unreachable!("quem desenha a grade da sessão é a tela, não a publicação")
+        }
+        async fn abrir_galeria(
+            &self,
+            _: &Sessao,
+            _: &str,
+        ) -> DomainResult<domain::services::pos_venda::GaleriaAberta> {
+            unreachable!("a publicação cria a galeria; não a abre")
         }
         async fn link_da_galeria(
             &self,
@@ -640,7 +658,7 @@ mod tests {
             PublicarNoPosVendaUseCase::new(Arc::new(repo), Arc::new(exportador), api.clone());
 
         let nome = caso
-            .enviar_uma(&sessao(), "g1", &id, 0)
+            .enviar_uma(&sessao(), "g1", &id, 0, None)
             .await
             .expect("subiu");
         assert_eq!(nome, "DSC_009.jpg");

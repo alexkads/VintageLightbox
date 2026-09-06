@@ -261,6 +261,32 @@ impl Sessoes {
         cx.notify();
     }
 
+    /// Preenche o formulário de sessão nova — só para os testes da raiz, que
+    /// não alcançam os campos privados.
+    #[cfg(test)]
+    pub fn preencher_para_teste(
+        &mut self,
+        titulo: &str,
+        email: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // A faixa sugerida vem da sessão mais recente; sem nenhuma, do catálogo.
+        if let Some(nova) = self.nova.as_mut() {
+            if nova.produto_id.is_none() {
+                nova.produto_id = Some("p1".into());
+            }
+        }
+        let Some(nova) = self.nova.as_ref() else {
+            return;
+        };
+        let (titulo, email) = (titulo.to_string(), email.to_string());
+        nova.titulo
+            .update(cx, |estado, cx| estado.set_value(titulo, window, cx));
+        nova.email
+            .update(cx, |estado, cx| estado.set_value(email, window, cx));
+    }
+
     fn acompanhar(&mut self, cx: &mut Context<Self>) {
         if self.colhendo {
             return;

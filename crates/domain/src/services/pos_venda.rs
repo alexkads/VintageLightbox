@@ -141,6 +141,68 @@ pub struct LinkDeAcesso {
     pub validade_em_segundos: i64,
 }
 
+/// Como o **site** vê o estado de uma foto.
+///
+/// 🚨 **São três, e o [`EstadoNoBalcao`] tem dois.** A diferença não é
+/// descuido: `Comprada` nasce de um pedido pago no site e **nunca** sai daqui —
+/// mas volta de lá, e a grade da sessão precisa saber desenhá-la. Um enum só
+/// para os dois sentidos deixaria "comprada" representável na escrita, que é
+/// exatamente o que não pode acontecer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EstadoDaFotoNoSite {
+    LevadaNoBalcao,
+    Disponivel,
+    /// Pagou depois, pela galeria — há um pedido por trás.
+    Comprada,
+}
+
+impl EstadoDaFotoNoSite {
+    pub fn do_texto(texto: &str) -> Self {
+        match texto {
+            "levada_no_balcao" => Self::LevadaNoBalcao,
+            "comprada" => Self::Comprada,
+            // ⚠️ O desconhecido cai em "disponível", e não em pânico: um estado
+            // novo no site não pode impedir a grade inteira de desenhar.
+            _ => Self::Disponivel,
+        }
+    }
+
+    pub fn rotulo(self) -> &'static str {
+        match self {
+            Self::LevadaNoBalcao => "levada",
+            Self::Disponivel => "à venda",
+            Self::Comprada => "comprada",
+        }
+    }
+}
+
+/// Uma foto como ela está no site.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FotoDaGaleria {
+    pub id: String,
+    /// O nome que o cliente vê.
+    pub arquivo: String,
+    pub estado: EstadoDaFotoNoSite,
+    pub ordem: i32,
+    /// Quanto entrou de verdade no balcão, decimal em texto. `None` = a faixa.
+    pub preco_negociado: Option<String>,
+    pub observacao_da_negociacao: Option<String>,
+    /// A retenção apagou os arquivos: a linha ficou para a conta de vendas, e
+    /// não há imagem para mostrar.
+    pub apagada: bool,
+}
+
+/// A sessão aberta — o que a tela de uma sessão precisa saber.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GaleriaAberta {
+    pub galeria: GaleriaDoPainel,
+    pub fotos: Vec<FotoDaGaleria>,
+    /// Até quando as não adquiridas ficam à venda.
+    pub vence_venda: Option<i64>,
+    /// Até quando as adquiridas ficam para download.
+    pub vence_download: Option<i64>,
+}
+
 /// O que muda numa foto que **já está** no site.
 ///
 /// 🔑 **Cada campo tem três estados, e os três importam**: `None` não mexe,
@@ -265,6 +327,16 @@ pub trait PosVendaApi: Send + Sync {
         sessao: &Sessao,
         galeria_id: &str,
     ) -> DomainResult<LinkDeAcesso>;
+
+    /// A sessão aberta: a galeria e as fotos que estão nela.
+    ///
+    /// 🔑 É o "entrar na sessão" — o mesmo gesto que na web abre
+    /// `/dashboard/sessoes-fotograficas/{id}`. Sem ele o desktop só sabia
+    /// **mandar** fotos para uma galeria, e nunca ver o que já estava nela.
+    async fn abrir_galeria(&self, sessao: &Sessao, id: &str) -> DomainResult<GaleriaAberta>;
+
+    /// A miniatura de uma foto do site, para desenhar a grade da sessão.
+    async fn miniatura(&self, sessao: &Sessao, foto_id: &str) -> DomainResult<Vec<u8>>;
 
     /// Os bytes da **cópia de trabalho** de uma foto que está no site.
     ///

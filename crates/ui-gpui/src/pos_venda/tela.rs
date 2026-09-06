@@ -317,7 +317,9 @@ impl PosVenda {
                 Recado::Galerias(_)
                 | Recado::Criada(_)
                 | Recado::Sincronizou
-                | Recado::Pixels { .. } => {}
+                | Recado::Pixels { .. }
+                | Recado::Aberta(_)
+                | Recado::Miniatura { .. } => {}
                 Recado::Falhou(erro) => {
                     self.entrando = false;
                     self.pedindo_link = false;

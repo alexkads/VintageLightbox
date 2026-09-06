@@ -133,8 +133,16 @@ fn abrir_o_estudio(cx: &mut TestAppContext, fotos: Vec<PhotoViewModel>) -> Estud
     // 🔑 O passo zero: entrar na conta. Desde 6/set/2026 o app abre na porta, e
     // sem responder a ela nenhum dos onze passos acontece.
     janela
-        .update(cx, |app, _window, cx| {
+        .update(cx, |app, window, cx| {
             app.escolher_modo(Modo::Online(sessao()), cx);
+            // 🚨 **Entrou: a primeira tela é a lista de sessões**, como na web.
+            // Foi a correção de 6/set/2026 — o app abria no catálogo global, e
+            // quem vinha do site achava a coisa "aberta e estranha".
+            assert_eq!(app.tela(), Tela::Sessoes);
+
+            // Os passos que acontecem na grade voltam para ela; os testes daqui
+            // exercitam o trabalho, e não a navegação.
+            app.voltar_para_biblioteca(window, cx);
         })
         .expect("a janela deve estar aberta");
     cx.run_until_parked();
@@ -192,12 +200,24 @@ fn revelar_vem_antes_de_classificar(cx: &mut TestAppContext) {
 fn classificar_filtrar_e_sinalizar(cx: &mut TestAppContext) {
     let estudio = abrir_o_estudio(cx, vec![foto("DSC_001.NEF"), foto("DSC_002.NEF")]);
 
+    // A sessão do cliente, aberta antes: é para onde as fotos vão. Escolher
+    // **entra** nela, como na web.
     estudio
         .janela
         .update(cx, |app, _window, cx| {
-            // A sessão do cliente, aberta antes: é para onde as fotos vão.
             app.sessoes
                 .update(cx, |tela, cx| tela.abrir("g1".into(), cx));
+        })
+        .expect("a janela deve estar aberta");
+    // 🔑 O evento só chega ao assinante quando o `update` fecha — por isso a
+    // troca de tela é conferida aqui, e não lá dentro.
+    cx.run_until_parked();
+
+    estudio
+        .janela
+        .update(cx, |app, window, cx| {
+            assert_eq!(app.tela(), Tela::Sessao, "escolher a sessão entra nela");
+            app.voltar_para_biblioteca(window, cx);
 
             // Passo 3: classifico só a primeira.
             app.na_biblioteca(cx, |tela, cx| tela.selecionar(Some(0), cx));
@@ -414,4 +434,122 @@ fn a_foto_que_esta_no_disco_nao_vai_a_rede(cx: &mut TestAppContext) {
         estudio.publicador.baixadas().is_empty(),
         "estando no disco, nada é pedido ao site"
     );
+}
+
+/// 📸 **O caminho que o dono pediu: lista → cria → entra → sobe → revela.**
+///
+/// 🚨 É a forma, e não a funcionalidade. Tudo isto já existia espalhado — o que
+/// não existia era **entrar** numa sessão: "abrir" só a marcava como destino
+/// das próximas classificadas, e quem vinha da web achava o app *"muito aberto
+/// e estranho"*. Lá a sessão é onde se trabalha; aqui era um rótulo.
+#[gpui::test]
+fn da_lista_ao_revelar_dentro_da_sessao(cx: &mut TestAppContext) {
+    let estudio = abrir_o_estudio(cx, vec![foto("DSC_001.NEF"), foto("DSC_002.NEF")]);
+
+    // 1 · a lista é a primeira tela depois de entrar (conferido no ajudante).
+    // 2 · cria a sessão.
+    estudio
+        .janela
+        .update(cx, |app, window, cx| {
+            app.tela = Tela::Sessoes;
+            app.sessoes.update(cx, |tela, cx| {
+                tela.comecar_nova(window, cx);
+                tela.preencher_para_teste("Ensaio da Ana", "ana@x.com", window, cx);
+                tela.criar(cx);
+                // A colheita anda por relógio; aqui é chamada à mão.
+                tela.colher(cx);
+            });
+        })
+        .expect("a janela deve estar aberta");
+    cx.run_until_parked();
+
+    // 3 · criar já entra na sessão — quem cadastrou o cliente vai subir agora.
+    estudio
+        .janela
+        .update(cx, |app, _window, cx| {
+            assert_eq!(app.tela(), Tela::Sessao, "criar entra na sessão");
+            assert_eq!(
+                estudio.publicador.abertas(),
+                vec!["g1".to_string()],
+                "e entrar pede a galeria ao site"
+            );
+            app.detalhe.update(cx, |tela, cx| tela.colher(cx));
+        })
+        .expect("a janela deve estar aberta");
+
+    // 4 · o upload: a seleção da Biblioteca sobe com a leva escolhida.
+    estudio
+        .janela
+        .update(cx, |app, window, cx| {
+            app.voltar_para_biblioteca(window, cx);
+            app.na_biblioteca(cx, |tela, cx| tela.selecionar_tudo(cx));
+            app.entrar_na_sessao("g1".into(), cx);
+        })
+        .expect("a janela deve estar aberta");
+    cx.run_until_parked();
+
+    estudio
+        .janela
+        .update(cx, |app, _window, cx| {
+            app.detalhe.update(cx, |tela, cx| {
+                tela.colher(cx);
+                tela.enviar(
+                    domain::services::pos_venda::EstadoNoBalcao::LevadaNoBalcao,
+                    cx,
+                );
+            });
+        })
+        .expect("a janela deve estar aberta");
+    cx.run_until_parked();
+
+    let subidas = estudio.publicador.subidas();
+    assert_eq!(subidas.len(), 2, "as duas marcadas subiram");
+    assert!(subidas.iter().all(|(g, _, _)| g == "g1"));
+    // 🔑 **O estado veio da leva, e não da tecla `B` de cada foto** — é a
+    // diferença entre esta tela e o passo 3.
+    assert!(
+        estudio
+            .publicador
+            .estados_pedidos()
+            .iter()
+            .all(|e| *e == Some(domain::services::pos_venda::EstadoNoBalcao::LevadaNoBalcao)),
+        "a leva escolhida manda: {:?}",
+        estudio.publicador.estados_pedidos()
+    );
+
+    // 5 · revelar uma foto **da sessão**: ela não está no catálogo local, e os
+    // pixels vêm do storage (o passo 11).
+    estudio
+        .janela
+        .update(cx, |app, window, cx| {
+            app.atender_a_sessao(
+                &crate::sessoes::detalhe::Pedido::Revelar {
+                    foto_id: "remota-7".into(),
+                    arquivo: "DSC_001.jpg".into(),
+                },
+                window,
+                cx,
+            );
+            assert_eq!(app.tela(), Tela::Revelacao);
+        })
+        .expect("a janela deve estar aberta");
+    cx.run_until_parked();
+
+    for _ in 0..10 {
+        let _ = estudio
+            .janela
+            .update(cx, |app, _window, cx| app.colher_sincronia(cx));
+        cx.run_until_parked();
+    }
+
+    estudio
+        .janela
+        .update(cx, |app, _window, cx| {
+            assert!(
+                app.revelacao.read(cx).tem_pixels(),
+                "a foto da sessão abre na Revelação, com os pixels do storage"
+            );
+        })
+        .expect("a janela deve estar aberta");
+    assert_eq!(estudio.publicador.baixadas(), vec!["remota-7".to_string()]);
 }

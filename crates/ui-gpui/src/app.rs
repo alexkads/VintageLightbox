@@ -35,6 +35,7 @@ use crate::revelacao::persistencia::{self, Gravador};
 use crate::revelacao::presets::GuardaDePresets;
 use crate::revelacao::processador::Ajustes;
 use crate::revelacao::tela::Revelacao;
+use crate::sessoes::detalhe::{Detalhe, Pedido as DetalhePedido};
 use crate::sessoes::tela::{Escolhida, Sessoes};
 
 /// As portas para o mundo de fora, num pacote só.
@@ -210,6 +211,13 @@ pub enum Tela {
     /// para onde se volta o dia inteiro, e um modal obrigaria a fechar a
     /// triagem a cada consulta.
     Sessoes,
+    /// **Dentro** de uma sessão — a rota `[id]` da web.
+    ///
+    /// 🚨 É a família de tela em que o app passa a abrir depois do login, e isso
+    /// é escolha: na web a sessão é **onde se trabalha**, e o desktop abria num
+    /// catálogo global com as sessões de lado. Quem vinha de lá achava a coisa
+    /// "muito aberta e estranha" — e estava certo.
+    Sessao,
 }
 
 pub struct Aplicativo {
@@ -234,6 +242,11 @@ pub struct Aplicativo {
     no_balcao: bool,
     /// A lista de sessões fotográficas.
     pub(crate) sessoes: Entity<Sessoes>,
+    /// Dentro de uma sessão: cabeçalho, envio e a grade do site.
+    pub(crate) detalhe: Entity<Detalhe>,
+    /// 🚨 A inscrição no que a tela da sessão pede. Descartada, o botão de
+    /// voltar e o clique para revelar param de responder — sem erro nenhum.
+    _pedido_da_sessao: gpui::Subscription,
     /// A sessão escolhida para receber as fotos. `None` é "nenhuma aberta".
     sessao_aberta: Option<String>,
     /// Quem fala com o pós-venda do site. Guardado porque a classificação
@@ -276,7 +289,7 @@ pub struct Aplicativo {
     /// acompanhar a seleção **sem erro nenhum** — a foto congela no que estava, e
     /// quem está do outro lado do monitor não tem como saber que congelou.
     _observador: gpui::Subscription,
-    tela: Tela,
+    pub(crate) tela: Tela,
     /// A raiz precisa de foco próprio para as ações de teclado chegarem nela.
     /// Sem isto, `Esc` só funcionaria enquanto algum filho focável estivesse
     /// ativo — e a tela de Revelação não tem nenhum ainda.
@@ -394,6 +407,7 @@ impl Aplicativo {
         let publicador_das_sessoes = portas.publicador.clone();
         let publicador_da_raiz = portas.publicador.clone();
         let publicador_do_balcao = portas.publicador.clone();
+        let publicador_do_detalhe = portas.publicador.clone();
         let entrada = cx.new(|cx| {
             Entrada::nova(
                 portas.publicador,
@@ -416,9 +430,21 @@ impl Aplicativo {
         let balcao = cx.new(|cx| Balcao::nova(publicador_do_balcao, window, cx));
         let sessoes = cx.new(|cx| Sessoes::nova(publicador_das_sessoes, window, cx));
         let sessao_escolhida = cx.subscribe(&sessoes, |raiz, _tela, evento: &Escolhida, cx| {
-            raiz.sessao_aberta = Some(evento.0.clone());
-            cx.notify();
+            raiz.entrar_na_sessao(evento.0.clone(), cx);
         });
+
+        let detalhe = cx.new(|_| Detalhe::nova(publicador_do_detalhe));
+        // 🔑 `subscribe_in`, e não `subscribe`: revelar precisa da janela — os
+        // 42 sliders são espalhados com ela. Sem isso o pedido teria de ficar
+        // guardado até o próximo quadro, e "clique que só responde no quadro
+        // seguinte" é indistinguível de clique perdido.
+        let pedido_da_sessao = cx.subscribe_in(
+            &detalhe,
+            window,
+            |raiz, _tela, pedido: &DetalhePedido, window, cx| {
+                raiz.atender_a_sessao(pedido, window, cx);
+            },
+        );
 
         let importacao = cx.new(|cx| {
             Importacao::nova(
@@ -471,6 +497,8 @@ impl Aplicativo {
             balcao,
             no_balcao: false,
             sessoes,
+            detalhe,
+            _pedido_da_sessao: pedido_da_sessao,
             sessao_aberta: None,
             publicador: publicador_da_raiz,
             sincronias: channel(),
@@ -523,6 +551,67 @@ impl Aplicativo {
                 }
             }
         }));
+    }
+
+    /// Entra numa sessão — o mesmo gesto que abre a rota `[id]` na web.
+    ///
+    /// 🔑 **A seleção da Biblioteca vai junto**: é a leva candidata a subir, e
+    /// levá-la aqui é o que permite a tela da sessão dizer "3 marcadas, escolha
+    /// a leva" em vez de mandar procurar onde se escolhe foto.
+    pub fn entrar_na_sessao(&mut self, galeria_id: String, cx: &mut Context<Self>) {
+        self.sessao_aberta = Some(galeria_id.clone());
+        let selecao = self.biblioteca.read(cx).fotos_selecionadas();
+        self.detalhe
+            .update(cx, |tela, cx| tela.entrar(galeria_id, selecao, cx));
+        self.tela = Tela::Sessao;
+        cx.notify();
+    }
+
+    /// O que a tela da sessão pede — ela não troca de tela nem abre a Revelação.
+    pub(crate) fn atender_a_sessao(
+        &mut self,
+        pedido: &DetalhePedido,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match pedido {
+            DetalhePedido::Voltar => {
+                self.tela = Tela::Sessoes;
+                cx.notify();
+            }
+            DetalhePedido::Revelar { foto_id, arquivo } => {
+                self.revelar_do_site(foto_id.clone(), arquivo.clone(), window, cx);
+            }
+        }
+    }
+
+    /// Abre na Revelação uma foto que **só existe no site**.
+    ///
+    /// 🔑 A foto entra como um `PhotoViewModel` sem caminho local e com o id
+    /// remoto preenchido — e daí o passo 11 faz o resto: sem preview no cache,
+    /// os pixels vêm da cópia de trabalho do storage.
+    ///
+    /// ⚠️ **O id local é derivado do remoto** (`site:…`) e não colide com o do
+    /// catálogo: são espaços de nome diferentes, e misturá-los faria a Revelação
+    /// gravar ajustes numa foto local que ninguém abriu.
+    fn revelar_do_site(
+        &mut self,
+        foto_id: String,
+        arquivo: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let foto = PhotoViewModel {
+            id: format!("site:{foto_id}"),
+            name: arquivo,
+            pos_venda_foto_id: Some(foto_id),
+            ..Default::default()
+        };
+        self.revelacao
+            .update(cx, |tela, cx| tela.abrir(foto, window, cx));
+        self.buscar_os_pixels_na_nuvem(cx);
+        self.tela = Tela::Revelacao;
+        cx.notify();
     }
 
     /// O passo 11 do fluxo: os pixels que só existem no storage.
@@ -621,6 +710,10 @@ impl Aplicativo {
                     galeria.clone(),
                     id.clone(),
                     ordem as u32,
+                    // 🔑 `None`: quem classifica não escolheu leva nenhuma, e o
+                    // estado sai da tecla `B` de cada foto. A escolha por lote
+                    // existe na tela da sessão, onde ela é o gesto.
+                    None,
                     self.sincronias.0.clone(),
                 );
             }
@@ -1030,6 +1123,12 @@ impl Aplicativo {
                 .update(cx, |tela, cx| tela.definir_sessao(sessao.clone(), cx));
             self.balcao
                 .update(cx, |tela, cx| tela.definir_sessao(sessao.clone(), cx));
+            self.detalhe
+                .update(cx, |tela, _cx| tela.definir_sessao(sessao.clone()));
+            // 🔑 **Entrou: a primeira tela é a lista de sessões.** Na web é de
+            // onde tudo parte, e abrir no catálogo global foi o que fez o app
+            // parecer "aberto e estranho" para quem vinha de lá.
+            self.tela = Tela::Sessoes;
         }
         self.modo = Some(modo);
         cx.notify();
@@ -1198,7 +1297,7 @@ impl Aplicativo {
             // Na Impressão as setas não andam: quem escolhe ali é a faixa de
             // baixo, e "a próxima" não quer dizer nada sobre uma folha. Nas
             // Sessões, pelo mesmo motivo: a lista se percorre com a busca.
-            Tela::Impressao | Tela::Sessoes => {}
+            Tela::Impressao | Tela::Sessoes | Tela::Sessao => {}
         }
     }
 
@@ -1800,6 +1899,7 @@ impl Render for Aplicativo {
                     Tela::Revelacao => self.revelacao.clone().into_any_element(),
                     Tela::Impressao => self.impressao.clone().into_any_element(),
                     Tela::Sessoes => self.sessoes.clone().into_any_element(),
+                    Tela::Sessao => self.detalhe.clone().into_any_element(),
                 }),
             )
             .when(self.importando, |raiz| {
@@ -3213,6 +3313,8 @@ mod testes {
                     }),
                     cx,
                 );
+                // Entrar leva à lista de sessões; a triagem acontece na grade.
+                app.voltar_para_biblioteca(_window, cx);
                 assert!(app.entrou() && !app.offline());
                 assert_eq!(app.sessao().map(|s| s.access_token.as_str()), Some("tok"));
 
@@ -3262,9 +3364,21 @@ mod testes {
                     }),
                     cx,
                 );
-                // A sessão fotográfica escolhida é para onde as fotos vão.
+                // Entrar leva à lista de sessões; a triagem acontece na grade.
+                app.voltar_para_biblioteca(_window, cx);
+                // A sessão escolhida é para onde as fotos vão.
                 app.sessoes
                     .update(cx, |tela, cx| tela.abrir("g7".into(), cx));
+            })
+            .expect("a janela deve estar aberta");
+        // 🔑 O evento da escolha só chega ao assinante quando o `update` fecha:
+        // é aqui que a raiz entra na sessão.
+        cx.run_until_parked();
+
+        janela
+            .update(cx, |app, _window, cx| {
+                assert_eq!(app.tela(), Tela::Sessao, "escolher a sessão entra nela");
+                app.voltar_para_biblioteca(_window, cx);
 
                 app.na_biblioteca(cx, |tela, cx| tela.selecionar(Some(0), cx));
                 app.na_biblioteca(cx, |tela, cx| tela.dar_nota(4, cx));
@@ -3339,6 +3453,8 @@ mod testes {
                     }),
                     cx,
                 );
+                // Entrar leva à lista de sessões; a triagem acontece na grade.
+                app.voltar_para_biblioteca(_window, cx);
                 app.na_biblioteca(cx, |tela, cx| tela.selecionar(Some(0), cx));
                 app.na_biblioteca(cx, |tela, cx| tela.dar_nota(3, cx));
             })

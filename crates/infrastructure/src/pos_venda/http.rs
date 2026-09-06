@@ -21,8 +21,9 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use domain::services::pos_venda::{
-    ContagemDeFotos, FotoEnviada, FotoParaEnviar, Galeria, GaleriaDoPainel, LinkDeAcesso,
-    MudancaDaFoto, NovaGaleria, PosVendaApi, Produto, Sessao, TotaisDaGaleria,
+    ContagemDeFotos, EstadoDaFotoNoSite, FotoDaGaleria, FotoEnviada, FotoParaEnviar, Galeria,
+    GaleriaAberta, GaleriaDoPainel, LinkDeAcesso, MudancaDaFoto, NovaGaleria, PosVendaApi, Produto,
+    Sessao, TotaisDaGaleria,
 };
 use domain::{DomainError, DomainResult};
 use serde::Deserialize;
@@ -341,10 +342,60 @@ impl PosVendaApi for PosVendaApiHttp {
         })
     }
 
-    async fn copia_de_trabalho(&self, sessao: &Sessao, foto_id: &str) -> DomainResult<Vec<u8>> {
+    async fn abrir_galeria(&self, sessao: &Sessao, id: &str) -> DomainResult<GaleriaAberta> {
         let resposta = self
             .client
-            .get(self.url(&format!("/pos-venda/fotos/{foto_id}/copia-de-trabalho")))
+            .get(self.url(&format!("/pos-venda/galerias/{id}")))
+            .bearer_auth(&sessao.access_token)
+            .send()
+            .await
+            .map_err(rede)?;
+
+        let aberta: GaleriaAbertaDaApi = ler(resposta).await?;
+        Ok(GaleriaAberta {
+            galeria: GaleriaDoPainel::from(aberta.galeria),
+            fotos: aberta
+                .fotos
+                .into_iter()
+                .map(|f| FotoDaGaleria {
+                    id: f.id,
+                    arquivo: f.arquivo,
+                    estado: EstadoDaFotoNoSite::do_texto(&f.estado),
+                    ordem: f.ordem,
+                    preco_negociado: f.preco_negociado,
+                    observacao_da_negociacao: f.observacao_da_negociacao,
+                    apagada: f.apagada_em.is_some(),
+                })
+                .collect(),
+            vence_venda: aberta.vence_venda.map(|q| q.timestamp()),
+            vence_download: aberta.vence_download.map(|q| q.timestamp()),
+        })
+    }
+
+    async fn miniatura(&self, sessao: &Sessao, foto_id: &str) -> DomainResult<Vec<u8>> {
+        self.bytes_da_imagem(sessao, &format!("/pos-venda/fotos/{foto_id}/miniatura"))
+            .await
+    }
+
+    async fn copia_de_trabalho(&self, sessao: &Sessao, foto_id: &str) -> DomainResult<Vec<u8>> {
+        self.bytes_da_imagem(
+            sessao,
+            &format!("/pos-venda/fotos/{foto_id}/copia-de-trabalho"),
+        )
+        .await
+    }
+}
+
+impl PosVendaApiHttp {
+    /// As rotas de imagem devolvem **bytes**, e não JSON.
+    ///
+    /// 🔑 Passar por `ler` desserializaria e falharia com "resposta ilegível"
+    /// num corpo perfeitamente legível — o tipo de erro que manda procurar
+    /// defeito no site.
+    async fn bytes_da_imagem(&self, sessao: &Sessao, caminho: &str) -> DomainResult<Vec<u8>> {
+        let resposta = self
+            .client
+            .get(self.url(caminho))
             .bearer_auth(&sessao.access_token)
             .send()
             .await
@@ -353,8 +404,6 @@ impl PosVendaApi for PosVendaApiHttp {
         if !resposta.status().is_success() {
             return Err(recusa(resposta).await);
         }
-        // 🔑 Bytes, e não JSON: a rota devolve a imagem. `ler` desserializaria e
-        // falharia com "resposta ilegível" num corpo perfeitamente legível.
         resposta
             .bytes()
             .await
@@ -430,6 +479,36 @@ impl From<GaleriaDoPainelDaApi> for GaleriaDoPainel {
             }),
         }
     }
+}
+
+#[derive(Deserialize)]
+struct GaleriaAbertaDaApi {
+    galeria: GaleriaDoPainelDaApi,
+    fotos: Vec<FotoDaGaleriaDaApi>,
+    #[serde(default)]
+    vence_venda: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default)]
+    vence_download: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+/// A foto como o painel a devolve. O que a grade do desktop não usa (downloads,
+/// pedido, tamanho, os 46 ajustes) fica de fora — o serde ignora o que sobra.
+///
+/// ⚠️ Nome distinto do `FotoDaApi` que a **subida** usa: aquele é a resposta de
+/// `POST …/fotos`, e traz só o id.
+#[derive(Deserialize)]
+struct FotoDaGaleriaDaApi {
+    id: String,
+    arquivo: String,
+    estado: String,
+    #[serde(default)]
+    ordem: i32,
+    #[serde(default)]
+    preco_negociado: Option<String>,
+    #[serde(default)]
+    observacao_da_negociacao: Option<String>,
+    #[serde(default)]
+    apagada_em: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[derive(Deserialize)]

@@ -7,7 +7,8 @@ use std::sync::Arc;
 
 use adapters::controllers::PosVendaController;
 use domain::services::pos_venda::{
-    Galeria, GaleriaDoPainel, LinkDeAcesso, MudancaDaFoto, NovaGaleria, Produto, Sessao,
+    EstadoNoBalcao, Galeria, GaleriaAberta, GaleriaDoPainel, LinkDeAcesso, MudancaDaFoto,
+    NovaGaleria, Produto, Sessao,
 };
 use use_cases::pos_venda::Progresso;
 
@@ -32,6 +33,13 @@ pub enum Recado {
     Galerias(Vec<GaleriaDoPainel>),
     /// Uma sessão recém-aberta, ainda sem foto nenhuma.
     Criada(Galeria),
+    /// A sessão em que se entrou: a galeria e as fotos que estão nela.
+    Aberta(Box<GaleriaAberta>),
+    /// A miniatura de uma foto da sessão.
+    Miniatura {
+        foto_id: String,
+        bytes: Vec<u8>,
+    },
     /// Os pixels de uma foto do site — o passo 11.
     ///
     /// Leva o id da foto junto: um download que volta depois de a seta ter
@@ -63,13 +71,18 @@ pub trait Publicador: Send + Sync + 'static {
     fn galerias(&self, sessao: Sessao, canal: Sender<Recado>);
     /// Abre uma sessão vazia — as fotos vêm depois.
     fn criar_galeria(&self, sessao: Sessao, nova: NovaGaleria, canal: Sender<Recado>);
-    /// O passo 3: a foto foi classificada e sobe para a galeria aberta.
+    /// Sobe uma foto para uma sessão que já existe.
+    ///
+    /// `estado` manda quando vem preenchido — é a leva escolhida antes dos
+    /// arquivos, na tela da sessão. `None` cai na marcação da tecla `B`, que é
+    /// o caminho do passo 3 (classificar sobe).
     fn subir_classificada(
         &self,
         sessao: Sessao,
         galeria_id: String,
         foto_id: String,
         ordem: u32,
+        estado: Option<EstadoNoBalcao>,
         canal: Sender<Recado>,
     );
     /// O passo 3 ao contrário: a classificação foi zerada, a foto sai do storage.
@@ -82,6 +95,10 @@ pub trait Publicador: Send + Sync + 'static {
         mudanca: MudancaDaFoto,
         canal: Sender<Recado>,
     );
+    /// Entrar numa sessão — o mesmo gesto que abre a rota `[id]` na web.
+    fn abrir_galeria(&self, sessao: Sessao, galeria_id: String, canal: Sender<Recado>);
+    /// A miniatura de uma foto da sessão, para a grade.
+    fn miniatura(&self, sessao: Sessao, foto_id: String, canal: Sender<Recado>);
     /// O passo 11: os pixels da foto que só existe no storage.
     ///
     /// `foto_local` é o id **do catálogo**, e volta no recado: é por ele que a
@@ -168,12 +185,13 @@ impl Publicador for PublicadorDaApi {
         galeria_id: String,
         foto_id: String,
         ordem: u32,
+        estado: Option<EstadoNoBalcao>,
         canal: Sender<Recado>,
     ) {
         let controlador = self.controlador.clone();
         self.tokio.spawn(async move {
             let recado = match controlador
-                .enviar_uma(&sessao, &galeria_id, &foto_id, ordem)
+                .enviar_uma(&sessao, &galeria_id, &foto_id, ordem, estado)
                 .await
             {
                 Ok(_) => Recado::Sincronizou,
@@ -205,6 +223,28 @@ impl Publicador for PublicadorDaApi {
         self.tokio.spawn(async move {
             let recado = match controlador.mudar_foto(&sessao, &foto_id, &mudanca).await {
                 Ok(()) => Recado::Sincronizou,
+                Err(erro) => Recado::Falhou(erro),
+            };
+            let _ = canal.send(recado);
+        });
+    }
+
+    fn abrir_galeria(&self, sessao: Sessao, galeria_id: String, canal: Sender<Recado>) {
+        let controlador = self.controlador.clone();
+        self.tokio.spawn(async move {
+            let recado = match controlador.abrir_galeria(&sessao, &galeria_id).await {
+                Ok(aberta) => Recado::Aberta(Box::new(aberta)),
+                Err(erro) => Recado::Falhou(erro),
+            };
+            let _ = canal.send(recado);
+        });
+    }
+
+    fn miniatura(&self, sessao: Sessao, foto_id: String, canal: Sender<Recado>) {
+        let controlador = self.controlador.clone();
+        self.tokio.spawn(async move {
+            let recado = match controlador.miniatura(&sessao, &foto_id).await {
+                Ok(bytes) => Recado::Miniatura { foto_id, bytes },
                 Err(erro) => Recado::Falhou(erro),
             };
             let _ = canal.send(recado);
@@ -284,6 +324,12 @@ pub mod mentira {
         pub negociadas: Mutex<Vec<(String, MudancaDaFoto)>>,
         /// Os ids no site cujos pixels foram pedidos.
         pub baixadas: Mutex<Vec<String>>,
+        /// As sessões em que se entrou.
+        pub abertas: Mutex<Vec<String>>,
+        /// O estado pedido em cada subida — `None` é "o da tecla B".
+        pub estados_pedidos: Mutex<Vec<Option<EstadoNoBalcao>>>,
+        /// O que a sessão aberta vai mostrar.
+        pub fotos_da_sessao: Mutex<Vec<domain::services::pos_venda::FotoDaGaleria>>,
     }
 
     /// Um JPEG 1×1 cinza, codificado de verdade.
@@ -327,6 +373,14 @@ pub mod mentira {
         pub fn baixadas(&self) -> Vec<String> {
             self.baixadas.lock().expect("as baixadas").clone()
         }
+
+        pub fn abertas(&self) -> Vec<String> {
+            self.abertas.lock().expect("as abertas").clone()
+        }
+
+        pub fn estados_pedidos(&self) -> Vec<Option<EstadoNoBalcao>> {
+            self.estados_pedidos.lock().expect("os estados").clone()
+        }
     }
 
     impl Publicador for PublicadorDeMentira {
@@ -365,18 +419,54 @@ pub mod mentira {
             galeria_id: String,
             foto_id: String,
             ordem: u32,
+            estado: Option<EstadoNoBalcao>,
             canal: Sender<Recado>,
         ) {
             self.subidas
                 .lock()
                 .expect("as subidas")
                 .push((galeria_id, foto_id, ordem));
+            self.estados_pedidos
+                .lock()
+                .expect("os estados")
+                .push(estado);
             let _ = canal.send(Recado::Sincronizou);
         }
 
         fn tirar_do_site(&self, _sessao: Sessao, foto_id: String, canal: Sender<Recado>) {
             self.tiradas.lock().expect("as tiradas").push(foto_id);
             let _ = canal.send(Recado::Sincronizou);
+        }
+
+        fn abrir_galeria(&self, _sessao: Sessao, galeria_id: String, canal: Sender<Recado>) {
+            self.abertas
+                .lock()
+                .expect("as abertas")
+                .push(galeria_id.clone());
+            let galeria = self
+                .galerias
+                .lock()
+                .expect("as galerias")
+                .iter()
+                .find(|g| g.id == galeria_id)
+                .cloned();
+            let Some(galeria) = galeria else {
+                let _ = canal.send(Recado::Falhou("essa sessão não existe".into()));
+                return;
+            };
+            let _ = canal.send(Recado::Aberta(Box::new(GaleriaAberta {
+                galeria,
+                fotos: self.fotos_da_sessao.lock().expect("as fotos").clone(),
+                vence_venda: None,
+                vence_download: None,
+            })));
+        }
+
+        fn miniatura(&self, _sessao: Sessao, foto_id: String, canal: Sender<Recado>) {
+            let _ = canal.send(Recado::Miniatura {
+                foto_id,
+                bytes: jpeg_de_um_pixel(),
+            });
         }
 
         fn copia_de_trabalho(

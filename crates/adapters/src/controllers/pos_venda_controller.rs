@@ -4,8 +4,8 @@ use std::sync::mpsc::Sender;
 use std::sync::Arc;
 
 use domain::services::pos_venda::{
-    Galeria, GaleriaDoPainel, LinkDeAcesso, MudancaDaFoto, NovaGaleria, PosVendaApi, Produto,
-    Sessao,
+    EstadoNoBalcao, Galeria, GaleriaAberta, GaleriaDoPainel, LinkDeAcesso, MudancaDaFoto,
+    NovaGaleria, PosVendaApi, Produto, Sessao,
 };
 use domain::value_objects::PhotoId;
 use domain::DomainError;
@@ -105,10 +105,11 @@ impl PosVendaController {
         galeria_id: &str,
         foto_id: &str,
         ordem: u32,
+        estado: Option<EstadoNoBalcao>,
     ) -> Result<String, String> {
         let id = PhotoId::from_string(foto_id).map_err(|e| e.to_string())?;
         self.publicar
-            .enviar_uma(sessao, galeria_id, &id, ordem)
+            .enviar_uma(sessao, galeria_id, &id, ordem, estado)
             .await
     }
 
@@ -116,6 +117,16 @@ impl PosVendaController {
     pub async fn remover_do_site(&self, sessao: &Sessao, foto_id: &str) -> Result<(), String> {
         let id = PhotoId::from_string(foto_id).map_err(|e| e.to_string())?;
         self.publicar.remover_do_site(sessao, &id).await
+    }
+
+    /// Entra numa sessão: a galeria e as fotos que estão nela.
+    pub async fn abrir_galeria(&self, sessao: &Sessao, id: &str) -> Result<GaleriaAberta, String> {
+        self.api.abrir_galeria(sessao, id).await.map_err(frase)
+    }
+
+    /// A miniatura de uma foto do site, para a grade da sessão.
+    pub async fn miniatura(&self, sessao: &Sessao, foto_id: &str) -> Result<Vec<u8>, String> {
+        self.api.miniatura(sessao, foto_id).await.map_err(frase)
     }
 
     /// Os bytes da cópia de trabalho de uma foto do site — o passo 11.
