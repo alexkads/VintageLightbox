@@ -30,6 +30,7 @@ use gpui_component::input::{Input, InputState};
 use gpui_component::{ActiveTheme, Disableable, Selectable, Sizable};
 
 use crate::pos_venda::porta::{Publicador, Recado};
+use crate::selos;
 
 /// De quanto em quanto a tela pergunta se o site respondeu.
 const INTERVALO_DE_COLHEITA: Duration = Duration::from_millis(100);
@@ -658,6 +659,9 @@ impl Sessoes {
                     .pb(px(4.))
                     .border_b_1()
                     .border_color(cx.theme().border)
+                    // O mesmo filete das linhas, sem cor: é o que mantém as
+                    // colunas do cabeçalho alinhadas com as de baixo.
+                    .child(div().w(px(2.)).flex_none())
                     .child(cabecalho("Sessão"))
                     .child(cabecalho("Contato"))
                     .child(cabecalho("Situação"))
@@ -677,8 +681,24 @@ impl Sessoes {
                     .cursor_pointer()
                     .border_b_1()
                     .border_color(cx.theme().border)
-                    .when(e_a_aberta, |linha| linha.bg(cx.theme().muted))
+                    // A sessão aberta é a linha acesa — no degrau de "ativo",
+                    // e não no poço: `muted` virou o fundo de trás de foto
+                    // (`crate::tema`), e uma linha mais escura que a tabela
+                    // pareceria desligada em vez de escolhida.
+                    .when(e_a_aberta, |linha| linha.bg(cx.theme().list_active))
                     .on_click(cx.listener(move |tela, _ev, _window, cx| tela.abrir(id.clone(), cx)))
+                    // 🔑 A marca da aberta é um filete âmbar **dentro** da linha,
+                    // e não uma borda esquerda: `border_color` no GPUI pinta os
+                    // quatro lados de uma vez (a linha de baixo viraria âmbar
+                    // junto), e uma borda que só existe na escolhida empurraria
+                    // o texto dela 2px para o lado.
+                    .child(
+                        div()
+                            .w(px(2.))
+                            .flex_none()
+                            .rounded(px(1.))
+                            .when(e_a_aberta, |marca| marca.bg(crate::tema::cores::quente())),
+                    )
                     .child(
                         div()
                             .flex_1()
@@ -700,12 +720,17 @@ impl Sessoes {
                                     .unwrap_or_else(|| "—".into()),
                             ),
                     )
-                    .child(
-                        div()
-                            .flex_1()
-                            .text_xs()
-                            .child(sessao.situacao(agora).rotulo()),
-                    )
+                    .child({
+                        // 🔑 A situação é a coluna que se lê varrendo a lista de
+                        // cima a baixo — "qual delas precisa de mim hoje" —, e
+                        // era texto do mesmo cinza de todo o resto.
+                        let situacao = sessao.situacao(agora);
+                        div().flex_1().flex().child(selos::selo(
+                            selos::tom_da_situacao(situacao),
+                            situacao.rotulo(),
+                            cx,
+                        ))
+                    })
                     .child(
                         div()
                             .flex_1()

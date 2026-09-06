@@ -990,7 +990,7 @@ impl Importacao {
                 .items_center()
                 .justify_center()
                 .gap(px(8.))
-                .bg(gpui::rgba(0x000000cc))
+                .bg(crate::tema::cores::veu())
                 .on_click(cx.listener(|tela, _ev, _window, cx| {
                     // Clicar em qualquer lugar fecha: a lupa é uma olhada, e sair
                     // dela não pode exigir mira.

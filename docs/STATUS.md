@@ -1,9 +1,9 @@
 # Status do Projeto - VintageLightbox
 
-**Última atualização**: 5 de setembro de 2026
+**Última atualização**: 6 de setembro de 2026
 **Último commit**: ver `git log -1` — os de 4/set com o motor de revelação num crate próprio e compilado para o navegador
 **Branch de trabalho**: `dev`, árvore limpa
-**Estado**: ✅ compila · **785 testes, 0 falhando** · `fmt` e `clippy -D warnings` limpos (nativo **e** `wasm32`) · o app sobe
+**Estado**: ✅ compila · **962 testes, 0 falhando** · `fmt` e `clippy -D warnings` limpos (nativo **e** `wasm32`) · o app sobe
 
 > 🎯 **O objetivo do projeto mudou em 17/ago/2026** e está em
 > [`00-OBJETIVO.md`](00-OBJETIVO.md): substituir o Lightroom no fluxo do estúdio, para que a edição
@@ -51,6 +51,37 @@ explica sozinho uma trava dura:
 🔑 **E o app estava sendo rodado em `debug`.** Este projeto já quase condenou o
 framework por medir fluidez no perfil errado (fase 1 da migração): em `debug` uma
 miniatura custa 56× mais. O primeiro passo é usar `--release`.
+
+## O que mudou em 6/set/2026 — a tela deixa de ser preto, branco e azul
+
+🎯 **O dono olhou o app e disse que dava para ir muito além de "3 cores (P&B) + azul"**, e a causa não
+era o framework: o tema tinha cinco fundos e a tela usava **três** — fundo, borda e texto apagado.
+Tudo o mais era o azul de acento. Um `grep theme()` no crate devolvia treze tokens em uso, dos ~90 que
+o `gpui-component` oferece.
+
+| | |
+|---|---|
+| ✅ **A escada de cinzas, com sete degraus** (`tema.rs`) | do **poço** (`#121212`, o que encosta em foto) até a borda forte. O poço é mais escuro que o app **a favor da foto**: quanto mais escura a vizinhança da imagem, menos ela empurra a percepção de exposição. Um teste (`a_escada_sobe_degrau_a_degrau`) prende a ordem — dois degraus na mesma luminância compilam e desenham uma tela chapada |
+| ✅ **Duas famílias de acento, e o que cada uma quer dizer** | **azul** = ação e seleção (o mesmo do site); **âmbar** = sessão, balcão e pós-venda — tudo que atravessa para o `recordarfotos.com.br` e vira dinheiro. Antes as duas coisas tinham a mesma cor: "esta foto está selecionada" e "esta foto foi vendida" chegavam ao olho pelo mesmo caminho |
+| ✅ **Os selos da triagem na grade** (`src/selos.rs`, novo) | a célula mostrava **o nome do arquivo, e nada mais**. Nota, etiqueta de cor e sinalizador — as três marcas que a triagem produz, as três com tecla dedicada — só apareciam no painel da direita, uma foto por vez. Agora estão no rodapé de cada célula, **nunca sobre a imagem** |
+| ✅ **Cor onde ela carrega significado** | filtro de cor pintado com a própria etiqueta (eram cinco botões cinza escritos "vermelho", "amarelo"…); situação da sessão e estado da foto do site como selo colorido; contagens do cabeçalho do ensaio em âmbar/verde; estrela em ouro, e não no azul de ação |
+| ✅ **A barra do topo em três grupos** (`app.rs`) | eram onze botões idênticos em fila. Navegar, mexer na foto e mexer no dinheiro do cliente não são a mesma natureza — e com o mesmo peso, achar o que se quer custava varrer a barra inteira toda vez |
+| ✅ **~40 tokens novos no tema** | e entre eles os do **dock**: as abas dos painéis das duas telas grandes eram as únicas peças ainda pintadas pelo shadcn, `#0a0a0a` de fábrica dentro de um app `#1a1a1a` |
+| ✅ **Um véu só para todo diálogo** | estava escrito à mão em cada modal (`0x99`, `0xaa`, `0xcc`), e a diferença não era decisão: era ordem de escrita |
+
+🚨 **Duas armadilhas de contraste ficaram presas em teste**, porque nenhuma das duas falha na tela —
+elas só ficam ilegíveis:
+
+- **branco sobre o azul de acento dá 2,8:1**. O texto de botão primário passou a ser escuro (7,3:1),
+  e `contraste_do_texto_sobre_cor` cobra 4,5:1 de cada par da paleta.
+- **não existe um "preto ou branco" que sirva para as cinco etiquetas**: sobre o amarelo, branco dá
+  1,7:1; sobre um roxo cheio, escuro dá 3,2:1. `cores::texto_sobre` compara as duas razões e devolve
+  a maior — e as cinco cores foram clareadas para servir aos dois usos que têm (ponto de 8px sobre o
+  poço, e fundo de botão com rótulo escrito em cima).
+
+⚠️ **O que não mudou, e não deve mudar**: o entorno da foto continua cinza puro, a moldura da
+selecionada continua sendo **borda** e não fundo colorido, e nenhum selo é desenhado sobre a imagem.
+Cor saturada em volta de uma foto muda como a foto é percebida — e este é um programa de revelação.
 
 ## O que mudou em 5/set/2026 — a grade da biblioteca sai para o navegador, e volta a ser só motor
 

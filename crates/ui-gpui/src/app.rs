@@ -38,6 +38,7 @@ use crate::revelacao::tela::Revelacao;
 use crate::sessoes::arquivos::SeletorDeFotos;
 use crate::sessoes::detalhe::{Detalhe, Pedido as DetalhePedido};
 use crate::sessoes::tela::{Escolhida, Sessoes};
+use crate::tema;
 
 /// As portas para o mundo de fora, num pacote só.
 ///
@@ -1543,189 +1544,234 @@ impl Aplicativo {
             (true, Some(foto)) => foto.name.clone().into(),
             _ => "VintageLightbox".into(),
         };
+        let titulo_e_da_foto = na_revelacao && self.revelacao.read(cx).foto().is_some();
 
         div()
             .flex()
             .items_center()
             .gap(px(8.))
-            .px(px(12.))
+            .px(px(10.))
             .py(px(6.))
             .bg(cx.theme().title_bar)
             .border_b_1()
             .border_color(cx.theme().border)
-            // 🚨 Dentro de uma sessão, a saída dela vem primeiro — e ela é a
-            // única coisa que a barra oferece antes de haver uma.
-            .when(self.preso_a_sessao(), |barra| {
-                barra
-                    .child(
-                        Button::new("nav-sessoes")
-                            .label(if self.sessao_aberta.is_some() {
-                                "← Sessões"
-                            } else {
-                                "Sessões"
+            // ── Onde estou ────────────────────────────────────────────────
+            //
+            // 🔑 **A barra passou a ter três grupos separados por divisor**, e
+            // não onze botões iguais em fila. Eles não fazem coisas da mesma
+            // natureza: navegar entre telas, mexer na foto e mexer no dinheiro
+            // do cliente — e quando tudo tem o mesmo peso, achar o que se quer
+            // custa uma varredura da barra inteira, toda vez.
+            .child(
+                grupo()
+                    // 🚨 Dentro de uma sessão, a saída dela vem primeiro — e ela
+                    // é a única coisa que a barra oferece antes de haver uma.
+                    .when(self.preso_a_sessao(), |grupo| {
+                        grupo
+                            .child(
+                                Button::new("nav-sessoes")
+                                    .label(if self.sessao_aberta.is_some() {
+                                        "← Sessões"
+                                    } else {
+                                        "Sessões"
+                                    })
+                                    .xsmall()
+                                    .when(self.tela == Tela::Sessoes, |b| b.primary())
+                                    .selected(self.tela == Tela::Sessoes)
+                                    .on_click(cx.listener(|este, _ev, _window, cx| {
+                                        este.sair_da_sessao(cx);
+                                    })),
+                            )
+                            .when_some(self.nome_da_sessao(cx), |grupo, nome| {
+                                grupo.child(
+                                    // O ensaio aberto é da família âmbar: é o
+                                    // contexto do cliente, e não uma tela a mais.
+                                    Button::new("nav-sessao-aberta")
+                                        .label(nome)
+                                        .xsmall()
+                                        .when(self.tela == Tela::Sessao, |b| {
+                                            b.custom(tema::botao_quente(cx))
+                                        })
+                                        .selected(self.tela == Tela::Sessao)
+                                        .on_click(cx.listener(|este, _ev, _window, cx| {
+                                            este.tela = Tela::Sessao;
+                                            cx.notify();
+                                        })),
+                                )
                             })
-                            .xsmall()
-                            .when(self.tela == Tela::Sessoes, |b| b.primary())
-                            .selected(self.tela == Tela::Sessoes)
-                            .on_click(cx.listener(|este, _ev, _window, cx| {
-                                este.sair_da_sessao(cx);
-                            })),
-                    )
-                    .when_some(self.nome_da_sessao(cx), |barra, nome| {
-                        barra.child(
-                            Button::new("nav-sessao-aberta")
-                                .label(nome)
+                    })
+                    // 🚨 **Dentro de um ensaio não há aba de biblioteca**, e é o
+                    // ponto que custou mais para eu entender: a grade do ensaio
+                    // já está na tela, logo abaixo do cabeçalho. Uma aba
+                    // "Escolher com o cliente" ao lado dizia que a escolha
+                    // acontece em outro lugar — que é exatamente o equívoco.
+                    .when(!self.preso_a_sessao(), |grupo| {
+                        grupo.child(
+                            Button::new("nav-biblioteca")
+                                .label("Biblioteca")
                                 .xsmall()
-                                .when(self.tela == Tela::Sessao, |b| b.primary())
-                                .selected(self.tela == Tela::Sessao)
-                                .on_click(cx.listener(|este, _ev, _window, cx| {
-                                    este.tela = Tela::Sessao;
-                                    cx.notify();
+                                .when(self.tela == Tela::Biblioteca, |b| b.primary())
+                                .selected(self.tela == Tela::Biblioteca)
+                                .disabled(!trabalhando)
+                                .on_click(cx.listener(|este, _ev, window, cx| {
+                                    este.voltar_para_biblioteca(window, cx);
                                 })),
                         )
                     })
-            })
-            // 🚨 **Dentro de um ensaio não há aba de biblioteca**, e é o ponto
-            // que custou mais para eu entender: a grade do ensaio já está na
-            // tela, logo abaixo do cabeçalho. Uma aba "Escolher com o cliente"
-            // ao lado dizia que a escolha acontece em outro lugar — que é
-            // exatamente o equívoco.
-            .when(!self.preso_a_sessao(), |barra| {
-                barra.child(
-                    Button::new("nav-biblioteca")
-                        .label("Biblioteca")
-                        .xsmall()
-                        .when(self.tela == Tela::Biblioteca, |b| b.primary())
-                        .selected(self.tela == Tela::Biblioteca)
-                        .disabled(!trabalhando)
-                        .on_click(cx.listener(|este, _ev, window, cx| {
-                            este.voltar_para_biblioteca(window, cx);
-                        })),
-                )
-            })
-            .child(
-                Button::new("nav-revelacao")
-                    .label("Revelação")
-                    .xsmall()
-                    .when(na_revelacao, |b| b.primary())
-                    .selected(na_revelacao)
-                    .disabled(!tem_selecao)
-                    .on_click(cx.listener(|este, _ev, window, cx| {
-                        este.revelar(window, cx);
-                    })),
+                    .child(
+                        Button::new("nav-revelacao")
+                            .label("Revelação")
+                            .xsmall()
+                            .when(na_revelacao, |b| b.primary())
+                            .selected(na_revelacao)
+                            .disabled(!tem_selecao)
+                            .on_click(cx.listener(|este, _ev, window, cx| {
+                                este.revelar(window, cx);
+                            })),
+                    )
+                    .child(
+                        // Paridade: no legado o botão de impressão também só
+                        // liga com seleção (`selected_photo_ids` ou a foto da
+                        // Biblioteca).
+                        Button::new("nav-impressao")
+                            .label("Impressão")
+                            .xsmall()
+                            .when(na_impressao, |b| b.primary())
+                            .selected(na_impressao)
+                            .disabled(!tem_selecao || !trabalhando)
+                            .on_click(cx.listener(|este, _ev, window, cx| {
+                                este.imprimir(window, cx);
+                            })),
+                    ),
             )
+            .child(divisor(cx))
+            // ── O que faço com a foto ─────────────────────────────────────
             .child(
-                // 🔑 Só com seleção: negociação é acerto sobre fotos
-                // específicas, e a grade inteira não é uma escolha.
-                Button::new("nav-balcao")
-                    .label("Balcão")
-                    .xsmall()
-                    .disabled(!tem_selecao)
-                    .on_click(cx.listener(|este, _ev, _window, cx| {
-                        este.abrir_balcao(cx);
-                    })),
+                grupo()
+                    .child(
+                        // Copiar e colar revelação. 🔑 **Têm botão além da tecla**
+                        // porque são a resposta a "acabei de acertar esta foto e
+                        // quero as outras 40 iguais" — e quem acabou de acertar
+                        // está com o ponteiro na tela, não com a mão no `Cmd`.
+                        Button::new("nav-copiar-revelacao")
+                            .label("Copiar")
+                            .xsmall()
+                            .ghost()
+                            .disabled(!tem_selecao)
+                            .on_click(cx.listener(|este, _ev, _window, cx| {
+                                este.copiar_revelacao(cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("nav-colar-revelacao")
+                            .label("Colar")
+                            .xsmall()
+                            .ghost()
+                            .disabled(!self.tem_revelacao_copiada() || !tem_selecao)
+                            .on_click(cx.listener(|este, _ev, _window, cx| {
+                                este.colar_revelacao(cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("nav-importar")
+                            .label("Importar")
+                            .xsmall()
+                            .ghost()
+                            .disabled(!trabalhando)
+                            .on_click(cx.listener(|este, _ev, window, cx| {
+                                este.importar(window, cx);
+                            })),
+                    )
+                    .child(
+                        // 🚨 O primeiro caminho que este app teve até um arquivo
+                        // no disco. Liga com seleção **ou** com grade não vazia:
+                        // exportar o que se está vendo é o pedido de quem acabou
+                        // de filtrar.
+                        Button::new("nav-exportar")
+                            .label("Exportar")
+                            .xsmall()
+                            .ghost()
+                            .when(self.exportando, |b| b.primary())
+                            .selected(self.exportando)
+                            .disabled(!tem_o_que_exportar)
+                            .on_click(cx.listener(|este, _ev, _window, cx| {
+                                este.exportar(cx);
+                            })),
+                    ),
             )
-            .child(
-                // Paridade: no legado o botão de impressão também só liga com
-                // seleção (`selected_photo_ids` ou a foto da Biblioteca).
-                Button::new("nav-impressao")
-                    .label("Impressão")
-                    .xsmall()
-                    .when(na_impressao, |b| b.primary())
-                    .selected(na_impressao)
-                    .disabled(!tem_selecao || !trabalhando)
-                    .on_click(cx.listener(|este, _ev, window, cx| {
-                        este.imprimir(window, cx);
-                    })),
-            )
+            // ── O nome do que está aberto ─────────────────────────────────
             .child(
                 div()
                     .flex_1()
+                    .px(px(4.))
                     .text_xs()
-                    .text_color(cx.theme().muted_foreground)
                     .truncate()
+                    .text_color(if titulo_e_da_foto {
+                        cx.theme().foreground
+                    } else {
+                        cx.theme().muted_foreground
+                    })
                     .child(titulo),
             )
+            // ── O cliente e o dinheiro ────────────────────────────────────
+            //
+            // 🔑 **Tudo o que atravessa para o site é âmbar**, e fica junto no
+            // fim da barra: balcão, publicação e a tela que o cliente vê. É a
+            // separação que o azul sozinho não fazia — "aplicar na foto" e
+            // "cobrar do cliente" tinham a mesma cor e a mesma vizinhança.
             .child(
-                // A segunda tela. Só liga com seleção, como a Revelação e a
-                // Impressão: mostrar preto ao cliente não diz "não escolhi
-                // nada", diz "quebrou".
-                Button::new("nav-cliente")
-                    .label("Segunda tela")
-                    .xsmall()
-                    .when(self.cliente.is_some(), |b| b.primary())
-                    .selected(self.cliente.is_some())
-                    .disabled(!tem_selecao)
-                    .on_click(cx.listener(|este, _ev, _window, cx| {
-                        este.alternar_cliente(cx);
-                    })),
+                grupo()
+                    .child(
+                        // 🔑 Só com seleção: negociação é acerto sobre fotos
+                        // específicas, e a grade inteira não é uma escolha.
+                        Button::new("nav-balcao")
+                            .label("Balcão")
+                            .xsmall()
+                            .custom(tema::botao_quente(cx))
+                            .disabled(!tem_selecao)
+                            .on_click(cx.listener(|este, _ev, _window, cx| {
+                                este.abrir_balcao(cx);
+                            })),
+                    )
+                    // 📸 **Publicar cria uma galeria nova**, e por isso ele some
+                    // quando já se está dentro de uma: ali o gesto é subir para
+                    // *esta* sessão, e dois caminhos para o mesmo lugar com
+                    // desfechos diferentes é a forma mais cara de confundir.
+                    .when(!self.preso_a_sessao(), |grupo| {
+                        grupo.child(
+                            Button::new("nav-pos-venda")
+                                .label("Pós-venda")
+                                .xsmall()
+                                .custom(tema::botao_quente(cx))
+                                .selected(self.publicando)
+                                .disabled(!tem_o_que_exportar)
+                                .on_click(cx.listener(|este, _ev, _window, cx| {
+                                    este.publicar(cx);
+                                })),
+                        )
+                    })
+                    .child(
+                        // A segunda tela. Só liga com seleção, como a Revelação
+                        // e a Impressão: mostrar preto ao cliente não diz "não
+                        // escolhi nada", diz "quebrou".
+                        Button::new("nav-cliente")
+                            .label("Segunda tela")
+                            .xsmall()
+                            .ghost()
+                            .when(self.cliente.is_some(), |b| b.custom(tema::botao_quente(cx)))
+                            .selected(self.cliente.is_some())
+                            .disabled(!tem_selecao)
+                            .on_click(cx.listener(|este, _ev, _window, cx| {
+                                este.alternar_cliente(cx);
+                            })),
+                    ),
             )
-            .child(
-                // Copiar e colar revelação. 🔑 **Têm botão além da tecla** porque
-                // são a resposta a "acabei de acertar esta foto e quero as
-                // outras 40 iguais" — e quem acabou de acertar está com o
-                // ponteiro na tela, não com a mão no `Cmd`.
-                Button::new("nav-copiar-revelacao")
-                    .label("Copiar")
-                    .xsmall()
-                    .disabled(!tem_selecao)
-                    .on_click(cx.listener(|este, _ev, _window, cx| {
-                        este.copiar_revelacao(cx);
-                    })),
-            )
-            .child(
-                Button::new("nav-colar-revelacao")
-                    .label("Colar")
-                    .xsmall()
-                    .disabled(!self.tem_revelacao_copiada() || !tem_selecao)
-                    .on_click(cx.listener(|este, _ev, _window, cx| {
-                        este.colar_revelacao(cx);
-                    })),
-            )
-            .child(
-                // 🚨 O primeiro caminho que este app teve até um arquivo no
-                // disco. Liga com seleção **ou** com grade não vazia: exportar
-                // o que se está vendo é o pedido de quem acabou de filtrar.
-                Button::new("nav-exportar")
-                    .label("Exportar")
-                    .xsmall()
-                    .when(self.exportando, |b| b.primary())
-                    .selected(self.exportando)
-                    .disabled(!tem_o_que_exportar)
-                    .on_click(cx.listener(|este, _ev, _window, cx| {
-                        este.exportar(cx);
-                    })),
-            )
-            // 📸 **Publicar cria uma galeria nova**, e por isso ele some quando
-            // já se está dentro de uma: ali o gesto é subir para *esta* sessão,
-            // e dois caminhos para o mesmo lugar com desfechos diferentes é a
-            // forma mais cara de confundir.
-            .when(!self.preso_a_sessao(), |barra| {
-                barra.child(
-                    Button::new("nav-pos-venda")
-                        .label("Pós-venda")
-                        .xsmall()
-                        .when(self.publicando, |b| b.primary())
-                        .selected(self.publicando)
-                        .disabled(!tem_o_que_exportar)
-                        .on_click(cx.listener(|este, _ev, _window, cx| {
-                            este.publicar(cx);
-                        })),
-                )
-            })
-            .child(
-                Button::new("nav-importar")
-                    .label("Importar")
-                    .xsmall()
-                    .disabled(!trabalhando)
-                    .on_click(cx.listener(|este, _ev, window, cx| {
-                        este.importar(window, cx);
-                    })),
-            )
+            .child(divisor(cx))
             .child(
                 Button::new("nav-configuracoes")
                     .label("Configurações")
                     .xsmall()
+                    .ghost()
                     .when(self.configurando, |b| b.primary())
                     .selected(self.configurando)
                     .on_click(cx.listener(|este, _ev, window, cx| {
@@ -1746,7 +1792,7 @@ impl Aplicativo {
             .flex()
             .items_center()
             .justify_center()
-            .bg(gpui::rgba(0x00000099))
+            .bg(tema::cores::veu())
             .child(
                 div()
                     .w(px(520.))
@@ -1808,7 +1854,7 @@ impl Aplicativo {
             .flex()
             .items_center()
             .justify_center()
-            .bg(gpui::rgba(0x000000aa))
+            .bg(tema::cores::veu())
             .child(
                 div()
                     .flex()
@@ -1866,7 +1912,7 @@ impl Aplicativo {
             .flex()
             .items_center()
             .justify_center()
-            .bg(gpui::rgba(0x00000099))
+            .bg(tema::cores::veu())
             .child(
                 div()
                     .max_w_full()
@@ -1908,7 +1954,7 @@ impl Aplicativo {
             .flex()
             .items_center()
             .justify_center()
-            .bg(gpui::rgba(0x00000099))
+            .bg(tema::cores::veu())
             .child(
                 div()
                     .max_w_full()
@@ -1950,7 +1996,7 @@ impl Aplicativo {
             .flex()
             .items_center()
             .justify_center()
-            .bg(gpui::rgba(0x00000099))
+            .bg(tema::cores::veu())
             .child(
                 div()
                     .max_w_full()
@@ -1992,7 +2038,7 @@ impl Aplicativo {
             .flex()
             .items_center()
             .justify_center()
-            .bg(gpui::rgba(0x00000099))
+            .bg(tema::cores::veu())
             .child(
                 div()
                     .w(px(760.))
@@ -2254,6 +2300,20 @@ impl Aplicativo {
         app.modo = Some(Modo::Offline);
         app
     }
+}
+
+/// Um grupo de botões da barra: eles se tocam, e o divisor separa do próximo.
+fn grupo() -> gpui::Div {
+    div().flex().items_center().gap(px(2.))
+}
+
+/// A linha entre dois grupos da barra.
+///
+/// 🔑 **Um pixel, e não um espaço maior.** Espaço separa quando há pouca coisa;
+/// com onze botões numa linha só, o que separa é a linha — e ela custa 1px de
+/// largura em vez dos 12 que o respiro pediria.
+fn divisor(cx: &gpui::App) -> gpui::Div {
+    div().w(px(1.)).h(px(16.)).flex_none().bg(cx.theme().border)
 }
 
 #[cfg(test)]

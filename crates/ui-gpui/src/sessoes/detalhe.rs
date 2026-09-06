@@ -42,6 +42,7 @@ use infrastructure::cache::preview_manager::PreviewManager;
 
 use super::arquivos::SeletorDeFotos;
 use crate::pos_venda::porta::{Publicador, Recado};
+use crate::selos;
 
 const INTERVALO_DE_COLHEITA: Duration = Duration::from_millis(100);
 
@@ -728,9 +729,26 @@ impl Detalhe {
             .flex()
             .items_center()
             .gap(px(8.))
-            .pb(px(6.))
-            .border_b_1()
+            .px(px(10.))
+            .py(px(8.))
+            .rounded(cx.theme().radius)
+            // 🔑 **O cabeçalho é uma superfície, e não uma linha com traço
+            // embaixo.** Ele é o único lugar da tela que diz de quem é o ensaio
+            // aberto; encostado no mesmo cinza da grade, ele se lia como a
+            // primeira fileira de fotos.
+            .bg(cx.theme().sidebar)
+            .border_1()
             .border_color(cx.theme().border)
+            .child(
+                // A marca do ensaio, na família âmbar — a mesma que a barra do
+                // topo usa para o botão da sessão aberta.
+                div()
+                    .w(px(3.))
+                    .h(px(16.))
+                    .flex_none()
+                    .rounded(px(2.))
+                    .bg(crate::tema::cores::quente()),
+            )
             .child(div().text_sm().truncate().child(titulo))
             .child(
                 div()
@@ -740,21 +758,33 @@ impl Detalhe {
                     .child(contato),
             )
             .when(ja_abriu, |cabecalho| {
-                cabecalho.child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().primary)
-                        .child("já abriu"),
-                )
+                // 🔑 O sinal que o fotógrafo espera para cobrar — e por isso é
+                // selo, e não mais uma linha de texto pequeno.
+                cabecalho.child(selos::selo(selos::Tom::Bom, "já abriu", cx))
             })
             .child(div().flex_1())
             .child(
+                // As três contagens, cada uma com o tom do que ela conta: âmbar
+                // é o balcão, verde é vendido, o resto é o comum.
                 div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(SharedString::from(format!(
-                        "{levadas} levadas · {a_venda} à venda · {compradas} compradas"
-                    ))),
+                    .flex()
+                    .items_center()
+                    .gap(px(4.))
+                    .child(selos::selo(
+                        selos::Tom::Quente,
+                        format!("{levadas} levadas"),
+                        cx,
+                    ))
+                    .child(selos::selo(
+                        selos::Tom::Neutro,
+                        format!("{a_venda} à venda"),
+                        cx,
+                    ))
+                    .child(selos::selo(
+                        selos::Tom::Bom,
+                        format!("{compradas} compradas"),
+                        cx,
+                    )),
             )
             .child(
                 Button::new("sessao-link")
@@ -1100,21 +1130,14 @@ impl Detalhe {
                     .when_some(miniatura, |quadro, imagem| {
                         quadro.child(img(imagem).h(px(lado * 0.72)))
                     })
-                    // O selo do estado, no canto — como na tela do site.
+                    // O selo do estado, no canto — como na tela do site, e
+                    // agora com a cor do que ele diz (`crate::selos`).
                     .child(
                         div()
                             .absolute()
                             .top(px(4.))
                             .left(px(4.))
-                            .px(px(4.))
-                            .rounded(cx.theme().radius)
-                            .bg(cx.theme().background)
-                            .text_xs()
-                            .child(if foto.apagada {
-                                "Apagada".to_string()
-                            } else {
-                                foto.estado.rotulo().to_string()
-                            }),
+                            .child(selos::selo_do_estado(foto.estado, foto.apagada, cx)),
                     )
                     .when(marcada, |quadro| {
                         quadro.child(
@@ -1122,17 +1145,41 @@ impl Detalhe {
                                 .absolute()
                                 .top(px(4.))
                                 .right(px(4.))
+                                .size(px(14.))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .rounded_full()
+                                .bg(cx.theme().primary)
+                                .text_color(cx.theme().primary_foreground)
                                 .text_xs()
-                                .text_color(cx.theme().warning)
                                 .child("✓"),
                         )
                     }),
             )
-            .child(div().text_xs().truncate().child(SharedString::from(format!(
-                "{}. {}",
-                posicao + 1,
-                foto.arquivo
-            ))))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(4.))
+                    .child(
+                        div()
+                            .flex_1()
+                            .text_xs()
+                            .truncate()
+                            .child(SharedString::from(format!(
+                                "{}. {}",
+                                posicao + 1,
+                                foto.arquivo
+                            ))),
+                    )
+                    // 🚨 **A nota aparece na grade do ensaio**, e é ela que
+                    // autoriza a foto a estar aqui (regra do dono, 5/set/2026:
+                    // só sobe o que foi classificado). Sem nota, a fileira fica
+                    // apagada — é como se encontra o que subiu sem passar pela
+                    // triagem.
+                    .child(selos::estrelas(foto.nota.unwrap_or(0) as i32, cx)),
+            )
             .child(
                 div()
                     .text_xs()

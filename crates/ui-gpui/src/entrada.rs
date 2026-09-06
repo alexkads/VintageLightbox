@@ -205,10 +205,30 @@ impl Render for Entrada {
                     .gap(px(12.))
                     .w(px(360.))
                     .p(px(24.))
-                    .rounded(cx.theme().radius)
+                    .rounded(px(10.))
                     .border_1()
                     .border_color(cx.theme().border)
-                    .child(div().text_lg().child("VintageLightbox"))
+                    // 🔑 O cartão é um degrau acima do fundo, e não um retângulo
+                    // desenhado só com borda. É a primeira tela do app: sem
+                    // elevação nenhuma, a janela abre parecendo uma caixa de
+                    // diálogo que ficou pela metade.
+                    .bg(cx.theme().popover)
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(8.))
+                            // A marca: o âmbar da caixa de luz, o mesmo que
+                            // marca sessão e balcão no resto do app.
+                            .child(
+                                div()
+                                    .w(px(3.))
+                                    .h(px(18.))
+                                    .rounded(px(2.))
+                                    .bg(crate::tema::cores::quente()),
+                            )
+                            .child(div().text_lg().child("VintageLightbox")),
+                    )
                     .child(
                         div()
                             .text_xs()
@@ -218,7 +238,22 @@ impl Render for Entrada {
                     .child(Self::campo("e-mail", &self.email, cx))
                     .child(Self::campo("senha", &self.senha, cx))
                     .when_some(self.erro.clone(), |cartao, erro| {
-                        cartao.child(div().text_xs().text_color(cx.theme().danger).child(erro))
+                        cartao.child(
+                            // ⚠️ Fundo, e não só letra vermelha: o erro aparece
+                            // entre dois campos e uma frase de aviso, todos em
+                            // `text_xs`. Sem uma faixa própria ele é mais uma
+                            // linha pequena no meio de outras três.
+                            div()
+                                .px(px(8.))
+                                .py(px(6.))
+                                .rounded(cx.theme().radius)
+                                .bg(cx.theme().danger.opacity(0.15))
+                                .border_l_2()
+                                .border_color(cx.theme().danger)
+                                .text_xs()
+                                .text_color(cx.theme().foreground)
+                                .child(erro),
+                        )
                     })
                     .child(
                         Button::new("entrada-entrar")
@@ -237,6 +272,9 @@ impl Render for Entrada {
                     // no balcão que nada foi para o site.
                     .child(
                         div()
+                            .pt(px(10.))
+                            .border_t_1()
+                            .border_color(cx.theme().border)
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
                             .child(

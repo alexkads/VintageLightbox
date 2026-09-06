@@ -20,5 +20,8 @@ pub mod importacao;
 pub mod impressao;
 pub mod pos_venda;
 pub mod revelacao;
+/// As marcas da triagem desenhadas: nota, etiqueta, sinalizador e balcão.
+/// Vivem na raiz porque duas telas as usam — a grade da Biblioteca e a do ensaio.
+pub mod selos;
 pub mod sessoes;
 pub mod tema;

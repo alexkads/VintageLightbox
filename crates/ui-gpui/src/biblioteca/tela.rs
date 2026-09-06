@@ -10,7 +10,7 @@ use gpui::{
     div, img, prelude::*, px, uniform_list, AnyElement, App, Context, Entity, SharedString,
     Subscription, Window,
 };
-use gpui_component::button::{Button, ButtonVariants};
+use gpui_component::button::{Button, ButtonCustomVariant, ButtonVariants};
 use gpui_component::dock::{register_panel, DockArea, DockEvent, DockItem, PanelView};
 use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::{ActiveTheme, Selectable, Sizable};
@@ -27,6 +27,8 @@ use super::marcacao::{cor_ao_teclar, sinalizador_ao_teclar, Marca, Marcador};
 use super::miniaturas::{capacidade_para, CacheDeMiniaturas, Miniatura};
 use super::paineis::{PainelDaBiblioteca, Qual};
 use super::pastas::{pastas_do_acervo, Pasta};
+use crate::selos::{self, Selos};
+use crate::tema::cores;
 
 /// Lado da miniatura, mais o espaçamento — a unidade que decide quantas colunas
 /// cabem. Um número só, e não dois somados na hora de contar: separá-los faria
@@ -1387,17 +1389,12 @@ impl Biblioteca {
                 },
             ),
         )];
-        for (valor, rotulo) in [
-            ("Red", "vermelho"),
-            ("Yellow", "amarelo"),
-            ("Green", "verde"),
-            ("Blue", "azul"),
-            ("Purple", "roxo"),
-        ] {
+        for (valor, rotulo) in selos::ETIQUETAS {
             let aceso = self.filtros.cor.as_deref() == Some(valor);
-            cores.push(botao(
+            cores.push(botao_de_etiqueta(
                 format!("cor-{valor}"),
-                rotulo.to_string(),
+                valor,
+                rotulo,
                 aceso,
                 cx.listener(
                     move |this: &mut Self,
@@ -1409,6 +1406,7 @@ impl Biblioteca {
                         cx.notify();
                     },
                 ),
+                cx,
             ));
         }
 
@@ -1482,11 +1480,7 @@ impl Biblioteca {
                     .child(linha_de_dado("câmera", &foto.camera, cx))
                     .child(linha_de_dado("exposição", &foto.exposure, cx))
                     .child(self.estrelas_clicaveis(foto.rating, cx))
-                    .child(linha_de_dado(
-                        "cor",
-                        foto.color_label.as_deref().unwrap_or("—"),
-                        cx,
-                    ))
+                    .child(linha_da_etiqueta(foto.color_label.as_deref(), cx))
                     .into_any_element(),
                 None => div()
                     .text_xs()
@@ -1594,8 +1588,10 @@ impl Biblioteca {
                 div()
                     .id(SharedString::from(format!("estrela-{estrela}")))
                     .cursor_pointer()
+                    // O ouro da nota, o mesmo da grade — e não o azul de ação:
+                    // é julgamento sobre a foto, não controle da interface.
                     .text_color(if acesa {
-                        cx.theme().primary
+                        cores::nota()
                     } else {
                         cx.theme().muted_foreground.opacity(0.4)
                     })
@@ -1779,6 +1775,37 @@ fn rotulo_do_grupo(texto: &'static str, cx: &App) -> impl IntoElement {
         .child(texto)
 }
 
+/// A linha "cor" do painel: a amostra, e o nome em português.
+///
+/// 🚨 **Mostrava o valor cru do banco** — "Yellow", "Purple" —, que é o nome que
+/// a coluna guarda e não o que a barra de filtros logo abaixo escreve. Duas
+/// palavras para a mesma etiqueta, na mesma tela.
+fn linha_da_etiqueta(valor: Option<&str>, cx: &App) -> impl IntoElement {
+    let cor = valor.and_then(cores::etiqueta);
+    let nome = valor
+        .and_then(selos::nome_da_etiqueta)
+        .unwrap_or("—")
+        .to_string();
+
+    div()
+        .flex()
+        .justify_between()
+        .items_center()
+        .gap(px(6.))
+        .text_xs()
+        .child(div().text_color(cx.theme().muted_foreground).child("cor"))
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap(px(4.))
+                .when_some(cor, |linha, cor| {
+                    linha.child(div().size(px(8.)).rounded_full().bg(cor))
+                })
+                .child(nome),
+        )
+}
+
 /// Uma linha "rótulo: valor" do painel de informações.
 ///
 /// Vazio vira travessão, e não linha em branco: o campo existir e estar vazio é
@@ -1829,6 +1856,53 @@ fn botao(
         .on_click(ao_clicar)
 }
 
+/// O botão de filtro de uma das cinco etiquetas — pintado com ela.
+///
+/// 🚨 **Antes eram cinco botões cinza escritos "vermelho", "amarelo"…**, e o
+/// nome da cor era a única cor da barra. Um filtro por cor que não mostra a cor
+/// obriga a ler cinco palavras para achar a que se quer, toda vez, e some junto
+/// com a etiqueta na grade: as duas pontas do mesmo gesto ficavam sem tinta.
+///
+/// Aceso, o botão é a etiqueta cheia; apagado, é o rótulo escrito na cor dela —
+/// visível sem gritar numa barra que tem outros quinze botões.
+fn botao_de_etiqueta(
+    id: String,
+    valor: &str,
+    rotulo: &str,
+    aceso: bool,
+    ao_clicar: impl Fn(&gpui::ClickEvent, &mut Window, &mut gpui::App) + 'static,
+    cx: &App,
+) -> Button {
+    // ⚠️ Etiqueta sem cor conhecida não deveria chegar aqui — a lista é a do
+    // domínio. Se chegar, cai no botão comum em vez de sumir da barra.
+    let Some(cor) = cores::etiqueta(valor) else {
+        return botao(id, rotulo.to_string(), aceso, ao_clicar);
+    };
+
+    let variante = if aceso {
+        ButtonCustomVariant::new(cx)
+            .color(cor)
+            .foreground(cores::texto_sobre(cor))
+            .border(cor)
+            .hover(cor.opacity(0.85))
+            .active(cor)
+    } else {
+        ButtonCustomVariant::new(cx)
+            .color(cx.theme().secondary)
+            .foreground(cor)
+            .border(cx.theme().border)
+            .hover(cx.theme().secondary_hover)
+            .active(cx.theme().secondary_active)
+    };
+
+    Button::new(SharedString::from(id))
+        .label(SharedString::from(rotulo.to_string()))
+        .xsmall()
+        .custom(variante)
+        .selected(aceso)
+        .on_click(ao_clicar)
+}
+
 /// Uma célula da grade: a miniatura, ou o lugar dela.
 fn celula(
     foto: &PhotoViewModel,
@@ -1872,15 +1946,22 @@ fn celula(
         ),
     };
 
+    let selos = Selos::da_foto(foto);
+
     div()
         .id(SharedString::from(format!("celula-{}", foto.id)))
         .flex()
         .flex_col()
-        .gap(px(4.))
+        .gap(px(3.))
         .w(px(LADO_DO_ITEM))
         .p(px(2.))
         .rounded(cx.theme().radius)
         .cursor_pointer()
+        // 🔑 O fundo da célula responde à seleção **sem** encostar na foto: ele
+        // fica atrás do rodapé e da borda, e a imagem continua no poço. É o
+        // degrau que faz a selecionada se destacar quando a moldura fina some
+        // numa foto clara.
+        .when(selecionada, |celula| celula.bg(cx.theme().list_active))
         // A moldura da seleção é **borda**, e não fundo: fundo colorido atrás
         // de uma foto muda como a foto é percebida, e num programa de revelação
         // isso é mentir sobre a cor. Pela mesma razão a borda é fina.
@@ -1899,36 +1980,22 @@ fn celula(
         })
         .child(conteudo)
         .child(
-            div()
-                .flex()
-                .items_center()
-                .gap(px(4.))
-                // O selo de "levada no balcão" fica ao lado do nome, e não sobre
-                // a foto: sobre a foto ele cobriria justamente o que se está
-                // avaliando, e é a mesma razão de a seleção ser borda e não fundo.
-                .when(foto.comprada, |linha| {
-                    linha.child(
-                        div()
-                            .text_xs()
-                            .px(px(4.))
-                            .rounded(px(3.))
-                            .bg(cx.theme().primary)
-                            .text_color(cx.theme().primary_foreground)
-                            .child("levada"),
-                    )
-                })
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(if selecionada {
-                            cx.theme().foreground
-                        } else {
-                            cx.theme().muted_foreground
-                        })
-                        .truncate()
-                        .child(SharedString::from(foto.name.clone())),
-                ),
+            div().flex().items_center().gap(px(4.)).px(px(2.)).child(
+                div()
+                    .flex_1()
+                    .text_xs()
+                    .text_color(if selecionada {
+                        cx.theme().foreground
+                    } else {
+                        cx.theme().muted_foreground
+                    })
+                    .truncate()
+                    .child(SharedString::from(foto.name.clone())),
+            ),
         )
+        // As marcas da triagem, no rodapé e nunca sobre a foto — a regra está em
+        // [`super::selos`].
+        .child(div().px(px(2.)).child(selos::faixa(&selos, cx)))
         .on_click(ao_clicar)
         .into_any_element()
 }
