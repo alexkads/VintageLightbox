@@ -370,6 +370,19 @@ impl PosVenda {
         }
     }
 
+    /// A sessão vem da porta do app, e não de um login próprio.
+    ///
+    /// 🔑 O formulário de entrada daqui continua existindo para o caso de o app
+    /// ter começado offline e a rede voltar — mas com sessão já dada ele não
+    /// aparece, e ninguém entra duas vezes na mesma conta na mesma abertura.
+    pub fn definir_sessao(&mut self, sessao: Sessao, cx: &mut Context<Self>) {
+        self.publicador
+            .produtos(sessao.clone(), self.recados.0.clone());
+        self.sessao = Some(sessao);
+        self.acompanhar(cx);
+        cx.notify();
+    }
+
     /// O passo 7 do fluxo: pede o link do cliente e o copia.
     ///
     /// ⚠️ **Só existe depois de a galeria existir.** Antes de publicar não há

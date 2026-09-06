@@ -20,6 +20,7 @@ use crate::biblioteca::marcacao::Marcador;
 use crate::biblioteca::tela::Biblioteca;
 use crate::cliente::{monitor_do_cliente, Cliente};
 use crate::configuracoes::Configuracoes;
+use crate::entrada::{Entrada, Escolheu, Modo};
 use crate::exportacao::porta::Exportador;
 use crate::exportacao::tela::Exportacao;
 use crate::importacao::explorador::{Explorador, GeradorDeMiniaturas, Importador, SeletorDePasta};
@@ -217,6 +218,18 @@ pub struct Aplicativo {
     /// O modal do pós-venda — o único caminho do app até o site.
     pos_venda: Entity<PosVenda>,
     publicando: bool,
+    /// A porta do app: entrar na conta do site, ou dizer que hoje é sem rede.
+    ///
+    /// 🚨 **Enquanto [`Self::modo`] é `None`, é só ela que aparece.** Foi a
+    /// reversão pedida pelo dono em 6/set/2026 do princípio "o app tem de ser
+    /// útil sozinho" — que não caiu inteiro: virou a escolha explícita de
+    /// trabalhar offline, feita uma vez, em vez de um estado assumido calado.
+    entrada: Entity<Entrada>,
+    /// Como esta abertura vai trabalhar. `None` é "ainda na porta".
+    modo: Option<Modo>,
+    /// 🚨 A inscrição na escolha da porta. Descartada, o app fica na tela de
+    /// login para sempre — com o login funcionando e sem nada acontecendo.
+    _escolha: gpui::Subscription,
     /// As Configurações, no mesmo formato do modal de importação: elas são um
     /// lugar onde se entra e de onde se sai, e não uma quarta tela.
     configuracoes: Entity<Configuracoes>,
@@ -341,6 +354,22 @@ impl Aplicativo {
             }
         });
 
+        // A porta do app. O mesmo `Publicador` do pós-venda: entrar é a mesma
+        // chamada, e dois clientes HTTP para o mesmo site seriam dois lugares
+        // onde a base da API pode divergir.
+        let publicador_do_pos_venda = portas.publicador.clone();
+        let entrada = cx.new(|cx| {
+            Entrada::nova(
+                portas.publicador,
+                crate::pos_venda::config::ler(),
+                window,
+                cx,
+            )
+        });
+        let escolha = cx.subscribe(&entrada, |raiz, _entrada, evento: &Escolheu, cx| {
+            raiz.escolher_modo(evento.0.clone(), cx);
+        });
+
         let importacao = cx.new(|cx| {
             Importacao::nova(
                 portas.explorador,
@@ -379,13 +408,16 @@ impl Aplicativo {
             exportando: false,
             pos_venda: cx.new(|cx| {
                 PosVenda::nova(
-                    portas.publicador,
+                    publicador_do_pos_venda,
                     crate::pos_venda::config::ler(),
                     window,
                     cx,
                 )
             }),
             publicando: false,
+            entrada,
+            modo: None,
+            _escolha: escolha,
             configuracoes: cx.new(|_| Configuracoes::nova(previews_das_configuracoes)),
             configurando: false,
             cliente: None,
@@ -752,6 +784,40 @@ impl Aplicativo {
     }
 
     /// Fecha o modal sem cancelar o lote — como a exportação.
+    /// A porta foi respondida: o app passa a existir.
+    ///
+    /// 🔑 **A sessão desce para o pós-venda aqui**, e não é pedida de novo lá:
+    /// entrar duas vezes na mesma conta, na mesma abertura, é o tipo de atrito
+    /// que faz o operador escolher offline por engano.
+    pub fn escolher_modo(&mut self, modo: Modo, cx: &mut Context<Self>) {
+        if let Modo::Online(sessao) = &modo {
+            let sessao = sessao.clone();
+            self.pos_venda
+                .update(cx, |tela, cx| tela.definir_sessao(sessao, cx));
+        }
+        self.modo = Some(modo);
+        cx.notify();
+    }
+
+    /// A sessão do site, quando há uma. `None` no modo offline **e** na porta.
+    pub fn sessao(&self) -> Option<&domain::services::pos_venda::Sessao> {
+        match &self.modo {
+            Some(Modo::Online(sessao)) => Some(sessao),
+            _ => None,
+        }
+    }
+
+    /// Se o app já passou da porta.
+    pub fn entrou(&self) -> bool {
+        self.modo.is_some()
+    }
+
+    /// Se esta abertura é sem rede — o que a tela usa para desligar o que fala
+    /// com o site, em vez de deixar o botão ligado para dar erro depois.
+    pub fn offline(&self) -> bool {
+        matches!(self.modo, Some(Modo::Offline))
+    }
+
     pub fn fechar_pos_venda(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.publicando = false;
         window.focus(&self.foco);
@@ -1330,6 +1396,16 @@ impl Aplicativo {
 
 impl Render for Aplicativo {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // 🚨 A porta vem antes de tudo, inclusive das teclas: com o app inteiro
+        // desenhado por baixo, as quinze teclas de triagem continuariam
+        // chegando à Biblioteca por trás da tela de login.
+        if self.modo.is_none() {
+            return div()
+                .size_full()
+                .child(self.entrada.clone())
+                .into_any_element();
+        }
+
         div()
             .key_context(CONTEXTO)
             .relative()
@@ -1438,6 +1514,30 @@ impl Render for Aplicativo {
             .when(self.configurando, |raiz| {
                 raiz.child(self.modal_de_configuracoes(cx))
             })
+            .into_any_element()
+    }
+}
+
+/// O app já do lado de dentro da porta.
+///
+/// 🔑 **Existe para os testes que não são sobre a porta**, que são todos menos
+/// um: sem ele, os 33 testes de tecla e de modal passariam a exercitar a tela
+/// de login, porque é só ela que o `render` desenha enquanto ninguém escolheu.
+/// A porta em si é conferida por `a_porta_vem_antes_de_tudo`.
+#[cfg(test)]
+impl Aplicativo {
+    #[allow(clippy::too_many_arguments)]
+    pub fn ja_dentro(
+        fotos: Vec<PhotoViewModel>,
+        previews: Arc<PreviewManager>,
+        presets: Vec<Preset>,
+        portas: Portas,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let mut app = Self::novo(fotos, previews, presets, portas, window, cx);
+        app.modo = Some(Modo::Offline);
+        app
     }
 }
 
@@ -1522,7 +1622,7 @@ mod testes {
 
         let janela = cx.add_window({
             let previews = previews.clone();
-            |window, cx| Aplicativo::novo(acervo(), previews, Vec::new(), portas(), window, cx)
+            |window, cx| Aplicativo::ja_dentro(acervo(), previews, Vec::new(), portas(), window, cx)
         });
 
         janela
@@ -1544,7 +1644,7 @@ mod testes {
 
         let janela = cx.add_window({
             let previews = previews.clone();
-            |window, cx| Aplicativo::novo(acervo(), previews, Vec::new(), portas(), window, cx)
+            |window, cx| Aplicativo::ja_dentro(acervo(), previews, Vec::new(), portas(), window, cx)
         });
 
         janela
@@ -1581,7 +1681,7 @@ mod testes {
             let previews = previews.clone();
             let gravador = gravador.clone();
             |window, cx| {
-                Aplicativo::novo(
+                Aplicativo::ja_dentro(
                     acervo(),
                     previews,
                     Vec::new(),
@@ -1630,7 +1730,7 @@ mod testes {
 
         let janela = cx.add_window({
             let previews = previews.clone();
-            |window, cx| Aplicativo::novo(acervo(), previews, Vec::new(), portas(), window, cx)
+            |window, cx| Aplicativo::ja_dentro(acervo(), previews, Vec::new(), portas(), window, cx)
         });
 
         janela
@@ -1674,7 +1774,7 @@ mod testes {
 
         let janela = cx.add_window({
             let previews = previews.clone();
-            |window, cx| Aplicativo::novo(acervo(), previews, Vec::new(), portas(), window, cx)
+            |window, cx| Aplicativo::ja_dentro(acervo(), previews, Vec::new(), portas(), window, cx)
         });
 
         janela
@@ -1718,7 +1818,7 @@ mod testes {
 
         let janela = cx.add_window({
             let previews = previews.clone();
-            |window, cx| Aplicativo::novo(acervo(), previews, Vec::new(), portas(), window, cx)
+            |window, cx| Aplicativo::ja_dentro(acervo(), previews, Vec::new(), portas(), window, cx)
         });
 
         janela
@@ -1763,7 +1863,7 @@ mod testes {
 
         let janela = cx.add_window({
             let previews = previews.clone();
-            |window, cx| Aplicativo::novo(acervo(), previews, Vec::new(), portas(), window, cx)
+            |window, cx| Aplicativo::ja_dentro(acervo(), previews, Vec::new(), portas(), window, cx)
         });
 
         janela
@@ -1816,7 +1916,7 @@ mod testes {
             let guardado = &mut guardado;
             move |window, cx| {
                 let app = cx.new(|cx| {
-                    Aplicativo::novo(acervo(), previews, Vec::new(), portas(), window, cx)
+                    Aplicativo::ja_dentro(acervo(), previews, Vec::new(), portas(), window, cx)
                 });
                 *guardado = Some(app.clone());
                 gpui_component::Root::new(app, window, cx)
@@ -1868,7 +1968,7 @@ mod testes {
             let previews = previews.clone();
             let marcador = marcador.clone();
             |window, cx| {
-                Aplicativo::novo(
+                Aplicativo::ja_dentro(
                     acervo(),
                     previews,
                     Vec::new(),
@@ -1939,7 +2039,7 @@ mod testes {
             let previews = previews.clone();
             let marcador = marcador.clone();
             |window, cx| {
-                Aplicativo::novo(
+                Aplicativo::ja_dentro(
                     acervo(),
                     previews,
                     Vec::new(),
@@ -1982,7 +2082,7 @@ mod testes {
 
         let janela = cx.add_window({
             let previews = previews.clone();
-            |window, cx| Aplicativo::novo(acervo(), previews, Vec::new(), portas(), window, cx)
+            |window, cx| Aplicativo::ja_dentro(acervo(), previews, Vec::new(), portas(), window, cx)
         });
 
         let nome = |cx: &mut TestAppContext| {
@@ -2032,7 +2132,7 @@ mod testes {
 
         let janela = cx.add_window({
             let previews = previews.clone();
-            |window, cx| Aplicativo::novo(acervo(), previews, Vec::new(), portas(), window, cx)
+            |window, cx| Aplicativo::ja_dentro(acervo(), previews, Vec::new(), portas(), window, cx)
         });
 
         janela
@@ -2107,7 +2207,7 @@ mod testes {
             let previews = previews.clone();
             let gravador = gravador.clone();
             |window, cx| {
-                Aplicativo::novo(
+                Aplicativo::ja_dentro(
                     acervo(),
                     previews,
                     Vec::new(),
@@ -2154,7 +2254,7 @@ mod testes {
 
         let janela = cx.add_window({
             let previews = previews.clone();
-            |window, cx| Aplicativo::novo(acervo(), previews, Vec::new(), portas(), window, cx)
+            |window, cx| Aplicativo::ja_dentro(acervo(), previews, Vec::new(), portas(), window, cx)
         });
 
         janela
@@ -2215,7 +2315,7 @@ mod testes {
 
         let janela = cx.add_window({
             let previews = previews.clone();
-            |window, cx| Aplicativo::novo(acervo(), previews, Vec::new(), portas(), window, cx)
+            |window, cx| Aplicativo::ja_dentro(acervo(), previews, Vec::new(), portas(), window, cx)
         });
 
         janela
@@ -2272,7 +2372,7 @@ mod testes {
 
         let janela = cx.add_window({
             let previews = previews.clone();
-            |window, cx| Aplicativo::novo(acervo(), previews, Vec::new(), portas(), window, cx)
+            |window, cx| Aplicativo::ja_dentro(acervo(), previews, Vec::new(), portas(), window, cx)
         });
 
         janela
@@ -2296,7 +2396,7 @@ mod testes {
 
         let janela = cx.add_window({
             let previews = previews.clone();
-            |window, cx| Aplicativo::novo(acervo(), previews, Vec::new(), portas(), window, cx)
+            |window, cx| Aplicativo::ja_dentro(acervo(), previews, Vec::new(), portas(), window, cx)
         });
 
         let mut visual = gpui::VisualTestContext::from_window(janela.into(), cx);
@@ -2336,7 +2436,7 @@ mod testes {
             let previews = previews.clone();
             let marcador = marcador.clone();
             |window, cx| {
-                Aplicativo::novo(
+                Aplicativo::ja_dentro(
                     acervo(),
                     previews,
                     Vec::new(),
@@ -2377,7 +2477,7 @@ mod testes {
             let guardado = &mut guardado;
             move |window, cx| {
                 let app = cx.new(|cx| {
-                    Aplicativo::novo(
+                    Aplicativo::ja_dentro(
                         acervo(),
                         previews,
                         Vec::new(),
@@ -2435,7 +2535,7 @@ mod testes {
 
         let janela = cx.add_window({
             let previews = previews.clone();
-            |window, cx| Aplicativo::novo(acervo(), previews, Vec::new(), portas(), window, cx)
+            |window, cx| Aplicativo::ja_dentro(acervo(), previews, Vec::new(), portas(), window, cx)
         });
 
         janela
@@ -2474,7 +2574,7 @@ mod testes {
             let previews = previews.clone();
             let explorador = explorador.clone();
             |window, cx| {
-                Aplicativo::novo(
+                Aplicativo::ja_dentro(
                     acervo(),
                     previews,
                     Vec::new(),
@@ -2558,7 +2658,7 @@ mod testes {
             let explorador = explorador.clone();
             let acervo_novo = acervo_novo.clone();
             |window, cx| {
-                Aplicativo::novo(
+                Aplicativo::ja_dentro(
                     acervo(),
                     previews,
                     Vec::new(),
@@ -2664,7 +2764,7 @@ mod testes {
             let previews = previews.clone();
             let publicador = publicador.clone();
             |window, cx| {
-                Aplicativo::novo(
+                Aplicativo::ja_dentro(
                     acervo(),
                     previews,
                     Vec::new(),
@@ -2725,6 +2825,100 @@ mod testes {
         assert_eq!(pedidos[0].fotos.len(), 2);
     }
 
+    /// 🚨 A porta vem antes de tudo — inclusive das teclas.
+    ///
+    /// O dono reverteu em 6/set/2026 o princípio "o app tem de ser útil
+    /// sozinho", com um limite: abre pedindo a conta, e quem está sem rede
+    /// escolhe trabalhar offline. O que este teste prende é o **antes**: com o
+    /// app inteiro desenhado por baixo da tela de login, as quinze teclas de
+    /// triagem continuariam chegando à Biblioteca por trás dela — nota dada
+    /// numa grade que ninguém está vendo.
+    #[gpui::test]
+    fn a_porta_vem_antes_de_tudo(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+
+        // `novo`, e não `ja_dentro`: este é o teste da porta.
+        let janela = cx.add_window(|window, cx| {
+            Aplicativo::novo(acervo(), previews, Vec::new(), portas(), window, cx)
+        });
+
+        janela
+            .update(cx, |app, _window, cx| {
+                assert!(!app.entrou(), "o app abre na porta");
+                assert_eq!(app.sessao(), None);
+
+                app.na_biblioteca(cx, |tela, cx| tela.selecionar(Some(0), cx));
+                app.na_biblioteca(cx, |tela, cx| tela.dar_nota(3, cx));
+                assert_eq!(
+                    app.biblioteca.read(cx).fotos_visiveis()[0].rating,
+                    3,
+                    "o método continua funcionando — quem não chega até ele é a tecla"
+                );
+
+                // A escolha explícita abre o app.
+                app.escolher_modo(crate::entrada::Modo::Offline, cx);
+                assert!(app.entrou());
+                assert!(app.offline(), "offline é um modo, não a ausência de um");
+                assert_eq!(app.sessao(), None, "offline não tem sessão");
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🔑 Entrar na porta desce a sessão para o pós-venda — ninguém entra duas
+    /// vezes na mesma conta na mesma abertura.
+    #[gpui::test]
+    fn entrar_na_porta_desce_a_sessao_para_o_pos_venda(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+
+        let publicador = Arc::new(PublicadorDeMentira {
+            produtos: vec![domain::services::pos_venda::Produto {
+                id: "p1".into(),
+                nome: "Foto avulsa".into(),
+                preco: "29.90".into(),
+                inativo: false,
+            }],
+            ..Default::default()
+        });
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            let publicador = publicador.clone();
+            |window, cx| {
+                Aplicativo::novo(
+                    acervo(),
+                    previews,
+                    Vec::new(),
+                    Portas {
+                        publicador,
+                        ..portas()
+                    },
+                    window,
+                    cx,
+                )
+            }
+        });
+
+        janela
+            .update(cx, |app, _window, cx| {
+                app.escolher_modo(
+                    crate::entrada::Modo::Online(domain::services::pos_venda::Sessao {
+                        access_token: "tok".into(),
+                    }),
+                    cx,
+                );
+                assert!(app.entrou() && !app.offline());
+                assert_eq!(app.sessao().map(|s| s.access_token.as_str()), Some("tok"));
+
+                // E o pós-venda já nasce com a sessão e com os produtos pedidos.
+                app.pos_venda.update(cx, |tela, cx| {
+                    tela.colher(cx);
+                    assert_eq!(tela.produtos().len(), 1);
+                });
+            })
+            .expect("a janela deve estar aberta");
+    }
+
     /// 📸 O passo 7 do fluxo do dono: **gero o link para o cliente**.
     ///
     /// 🚨 **O link não existe antes da galeria**, e o botão não aparece antes
@@ -2751,7 +2945,7 @@ mod testes {
             let previews = previews.clone();
             let publicador = publicador.clone();
             |window, cx| {
-                Aplicativo::novo(
+                Aplicativo::ja_dentro(
                     acervo(),
                     previews,
                     Vec::new(),
@@ -2815,7 +3009,7 @@ mod testes {
             let previews = previews.clone();
             let exportador = exportador.clone();
             |window, cx| {
-                Aplicativo::novo(
+                Aplicativo::ja_dentro(
                     acervo(),
                     previews,
                     Vec::new(),
@@ -2924,7 +3118,7 @@ mod testes {
             let previews = previews.clone();
             let gravador = gravador.clone();
             move |window, cx| {
-                Aplicativo::novo(
+                Aplicativo::ja_dentro(
                     vec![origem, destino],
                     previews,
                     Vec::new(),
@@ -2979,7 +3173,7 @@ mod testes {
             let previews = previews.clone();
             let gravador = gravador.clone();
             |window, cx| {
-                Aplicativo::novo(
+                Aplicativo::ja_dentro(
                     acervo(),
                     previews,
                     Vec::new(),
@@ -3029,7 +3223,7 @@ mod testes {
             let previews = previews.clone();
             let gravador = gravador.clone();
             |window, cx| {
-                Aplicativo::novo(
+                Aplicativo::ja_dentro(
                     acervo(),
                     previews,
                     Vec::new(),
@@ -3074,7 +3268,7 @@ mod testes {
             let previews = previews.clone();
             let exportador = exportador.clone();
             |window, cx| {
-                Aplicativo::novo(
+                Aplicativo::ja_dentro(
                     acervo(),
                     previews,
                     Vec::new(),
@@ -3151,7 +3345,7 @@ mod testes {
             let previews = previews.clone();
             let exportador = exportador.clone();
             |window, cx| {
-                Aplicativo::novo(
+                Aplicativo::ja_dentro(
                     acervo(),
                     previews,
                     Vec::new(),
@@ -3207,7 +3401,7 @@ mod testes {
             let previews = previews.clone();
             let exportador = exportador.clone();
             |window, cx| {
-                Aplicativo::novo(
+                Aplicativo::ja_dentro(
                     acervo(),
                     previews,
                     Vec::new(),
@@ -3254,7 +3448,7 @@ mod testes {
 
         let janela = cx.add_window({
             let previews = previews.clone();
-            |window, cx| Aplicativo::novo(acervo(), previews, Vec::new(), portas(), window, cx)
+            |window, cx| Aplicativo::ja_dentro(acervo(), previews, Vec::new(), portas(), window, cx)
         });
 
         janela

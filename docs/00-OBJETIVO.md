@@ -49,9 +49,18 @@ a integração com dois itens da fila ainda abertos, e ela entrou
 ([`PARIDADE-LIGHTROOM.md`](PARIDADE-LIGHTROOM.md), "Pós-venda"). O parágrafo abaixo continua
 verdadeiro como princípio — o app tem de ser útil sozinho — e deixou de ser bloqueio.
 
-O app tem de ser útil sozinho antes de conversar com qualquer coisa. Um fluxo que já depende do site
-para funcionar não tem como ser adotado aos poucos, e adoção aos poucos é a única que dá para
-desfazer. **Enquanto houver item na [fila](PARIDADE-LIGHTROOM.md), a fila é o trabalho.**
+~~O app tem de ser útil sozinho antes de conversar com qualquer coisa.~~ **Revisto em 6/set/2026**,
+quando o dono pediu autenticação para usar o app. A frase acima descrevia dois princípios colados, e
+só um caiu:
+
+- **caiu** o "sozinho por padrão": o app abre pedindo a conta do site;
+- **ficou** o "sozinho quando preciso": quem está sem rede escolhe **trabalhar offline** na própria
+  tela de entrada, e importa, revela e tria normalmente. O que se perde ao pular está escrito na
+  tela — sem essa frase o botão vira armadilha, e o operador descobre no balcão que nada subiu.
+
+Um fluxo que já depende do site para funcionar não tem como ser adotado aos poucos, e adoção aos
+poucos é a única que dá para desfazer — é por isso que a saída existe, e não por gosto de offline.
+**Enquanto houver item na [fila](PARIDADE-LIGHTROOM.md), a fila é o trabalho.**
 
 ---
 

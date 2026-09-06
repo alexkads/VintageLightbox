@@ -11,8 +11,14 @@ Guia de trabalho neste repositório.
 > nada é defeito, não pendência.
 
 A integração com a API de pós-venda **existe desde 2/set/2026** (tecla `B` + botão "Pós-venda";
-`docs/PARIDADE-LIGHTROOM.md`, seção "Pós-venda"). O princípio "o app tem de ser útil sozinho"
-continua: nada da triagem ou da revelação depende do site.
+`docs/PARIDADE-LIGHTROOM.md`, seção "Pós-venda").
+
+⚠️ **O princípio "o app tem de ser útil sozinho" foi revisto em 6/set/2026, e não caiu.** O dono
+pediu que o app peça a conta do site para ser usado — *"eu preciso autenticar na web para conseguir
+usar o VintageLightbox"* — com um limite que ele mesmo pôs: **abre pedindo a conta, e quem está sem
+rede escolhe "trabalhar offline"** e perde só o que fala com o site. O princípio virou uma escolha
+explícita, feita uma vez na entrada (`crates/ui-gpui/src/entrada.rs`), em vez de um estado que o app
+assume calado. Importar, revelar e triar continuam sem depender de rede.
 
 ⚠️ **Este objetivo substituiu outro em 17/ago/2026**, e a diferença importa no dia a dia. O anterior
 era migrar a interface de egui para GPUI **com paridade**; ele foi **alcançado** (`8c7df32`, o

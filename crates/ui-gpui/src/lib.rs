@@ -9,6 +9,7 @@ pub mod app;
 pub mod biblioteca;
 pub mod cliente;
 pub mod configuracoes;
+pub mod entrada;
 pub mod exportacao;
 pub mod imagem;
 pub mod importacao;
