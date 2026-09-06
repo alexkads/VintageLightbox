@@ -454,6 +454,15 @@ impl Grade {
                     self.selecao.marcar_todas(total);
                     mudou::SELECAO
                 }
+                // Ctrl/⌘+D desmarca — o par do Ctrl+A, e o mesmo atalho do
+                // Lightroom (pedido do dono, 2026-09-05). O Esc já fazia isto,
+                // mas quem vem do Lightroom tenta o D, e no navegador ele é
+                // "adicionar aos favoritos": sem tratá-lo aqui, o gesto abre a
+                // caixa de favoritos do Chrome no meio do atendimento.
+                "d" | "D" if comando => {
+                    self.selecao.desmarcar();
+                    mudou::SELECAO
+                }
                 _ => return 0,
             }
         };
