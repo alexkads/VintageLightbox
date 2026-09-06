@@ -92,8 +92,11 @@ de ser **exata no inteiro**, senão o neutro passa a mover pixel.
 | ⬜ **Cópias virtuais e instantâneos** | |
 | ✅ Antes/depois, desfazer/refazer, presets, corte/giro/espelho/endireitar, histograma | |
 
-⚠️ **O histórico não guarda o corte**, e o desfazer não o restaura. O `EditSnapshot` do app antigo
-tinha o campo e o ignorava; aqui o corte simplesmente não entra na pilha.
+✅ **O histórico guarda o corte desde 6/set/2026** — a pilha passou a ser de `Estado` (os 46 ajustes
+**e** os oito campos do enquadramento), e `Cmd+Z` depois de cortar devolve a foto inteira. A ideia é
+do darktable, onde a pilha é a lista de módulos aplicados e o corte é um módulo como qualquer outro:
+nada tem lugar privilegiado, então não há o que esquecer. O `EditSnapshot` do app antigo tinha o
+campo do corte, gravava nele e nunca o lia de volta.
 
 ✅ **Os presets de sistema saíram da escala errada em 30/ago/2026.** Os quatro pediam números de
 uma escala que o motor não usa, e o resultado não era pouco efeito, era foto destruída: "B&W" pedia
@@ -178,7 +181,7 @@ galeria do cliente**, e o que é defeito visível na tela.
 | 9 | ~~**Os presets de sistema fora de escala**~~ | ✅ **feito em 30/ago** — e o "Auto" que não fazia nada saiu da lista |
 | 10 | ~~**Tom automático no painel Básico**~~ | ✅ **feito em 30/ago** — o "Auto" de volta no lugar certo, lendo a foto em vez de repetir números fixos |
 | 11 | ~~**Pausar e cancelar a importação**~~ | ✅ **feito em 6/set** — os botões, e a espera da pausa que ignorava o cancelamento |
-| 12 | **O desfazer não restaura o corte** | o corte não entra na pilha do histórico; `Cmd+Z` depois de cortar volta tudo menos o enquadramento |
+| 12 | ~~**O desfazer não restaura o corte**~~ | ✅ **feito em 6/set** — a pilha guarda `Estado`, e o formato é o que segura o próximo: ajustes locais e máscaras entram nele sem que ninguém precise lembrar do histórico |
 | 13 | ~~**Publicar no pós-venda do site**~~ | ✅ **feito em 2/set** — tecla `B`, botão "Pós-venda", `PosVendaApi`. Entrou **antes** de 11 e 12 por decisão do dono no mesmo dia (ver abaixo) |
 
 ~~🔑 **A integração com o `recordarfotos.com.br` só começa quando o clone estiver funcional** —

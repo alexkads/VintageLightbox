@@ -25,12 +25,31 @@
 //! histórico como passo zero, e o primeiro `Cmd+Z` devolve a foto ao que estava
 //! gravado.
 //!
-//! ⚠️ **O que ainda não entra aqui é o corte** — a Revelação nova não sabe
-//! cortar. Quando souber, ele entra junto: o `EditSnapshot` do legado tem o campo
-//! `crop_settings`, **guarda** o corte e nem `undo` nem `redo` o leem de volta. É
-//! pior do que não guardar, porque quem lê o struct conclui que funciona.
+//! **3. O passo é a revelação inteira, e não só os sliders.** Foi o item 12 da
+//! fila, e a ideia veio do darktable: lá a pilha de histórico é a lista de
+//! *módulos aplicados*, e o corte é um módulo como qualquer outro — não há o que
+//! esquecer, porque nada tem lugar privilegiado. Aqui o equivalente é
+//! [`Estado`]: os 46 ajustes **e** os oito campos do corte num tipo só.
+//!
+//! 🚨 Até 6/set/2026 a pilha guardava só `Ajustes`, e `Cmd+Z` depois de cortar
+//! voltava tudo menos o enquadramento. O legado erra a mesma coisa de um jeito
+//! pior: o `EditSnapshot` de lá **tem** o campo `crop_settings`, guarda o corte
+//! nele, e nem `undo` nem `redo` o leem de volta — quem lê o struct conclui que
+//! funciona.
+//!
+//! 🔑 **E o formato é o que segura o próximo**: quando existirem ajustes locais
+//! ou máscaras, eles entram no [`Estado`] e o desfazer os alcança sem que ninguém
+//! precise lembrar de mexer aqui.
 
+use super::persistencia::Corte;
 use super::processador::Ajustes;
+
+/// Como a foto está revelada, inteira — é o que um passo do histórico guarda.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Estado {
+    pub ajustes: Ajustes,
+    pub corte: Corte,
+}
 
 /// Quantos passos cabem.
 ///
@@ -41,14 +60,14 @@ const TETO: usize = 20;
 pub struct Historico {
     /// Os estados, do mais antigo ao mais novo. Nunca vazio: nasce com o estado
     /// da abertura.
-    passos: Vec<Ajustes>,
+    passos: Vec<Estado>,
     /// Onde estamos. Desfazer anda para trás, refazer para a frente.
     atual: usize,
 }
 
 impl Historico {
     /// Começa no estado em que a foto abriu — o que está gravado no banco.
-    pub fn novo(inicial: Ajustes) -> Self {
+    pub fn novo(inicial: Estado) -> Self {
         Self {
             passos: vec![inicial],
             atual: 0,
@@ -61,8 +80,8 @@ impl Historico {
     /// e o `Cmd+Z` pareceria não fazer nada por várias teclas seguidas. Acontece
     /// de verdade: soltar o slider exatamente onde ele estava é um gesto completo,
     /// com fim de gesto e tudo.
-    pub fn registrar(&mut self, ajustes: Ajustes) {
-        if self.passos[self.atual] == ajustes {
+    pub fn registrar(&mut self, estado: Estado) {
+        if self.passos[self.atual] == estado {
             return;
         }
 
@@ -70,7 +89,7 @@ impl Historico {
         // havia para refazer. É o que todo editor faz, e o que o legado também
         // faz (`truncate(index + 1)`).
         self.passos.truncate(self.atual + 1);
-        self.passos.push(ajustes);
+        self.passos.push(estado);
 
         if self.passos.len() > TETO {
             // O mais antigo sai. `remove(0)` num Vec de 20 é cópia de 19
@@ -91,7 +110,7 @@ impl Historico {
     }
 
     /// Volta um passo. `None` quando já está no começo.
-    pub fn desfazer(&mut self) -> Option<Ajustes> {
+    pub fn desfazer(&mut self) -> Option<Estado> {
         if !self.pode_desfazer() {
             return None;
         }
@@ -100,7 +119,7 @@ impl Historico {
     }
 
     /// Avança um passo. `None` quando já está no fim.
-    pub fn refazer(&mut self) -> Option<Ajustes> {
+    pub fn refazer(&mut self) -> Option<Estado> {
         if !self.pode_refazer() {
             return None;
         }
@@ -113,10 +132,23 @@ impl Historico {
 mod testes {
     use super::*;
 
-    fn com_exposicao(valor: f32) -> Ajustes {
-        Ajustes {
-            exposure: valor,
-            ..Default::default()
+    fn com_exposicao(valor: f32) -> Estado {
+        Estado {
+            ajustes: Ajustes {
+                exposure: valor,
+                ..Default::default()
+            },
+            corte: Corte::default(),
+        }
+    }
+
+    fn cortada(largura: f32) -> Estado {
+        Estado {
+            corte: Corte {
+                largura: Some(largura),
+                ..Corte::default()
+            },
+            ..Estado::default()
         }
     }
 
@@ -227,17 +259,60 @@ mod testes {
     /// O histórico guarda os 46 campos, e não só o que a tela mostra.
     #[test]
     fn o_passo_guarda_os_ajustes_inteiros() {
-        let cheio = Ajustes {
-            exposure: 1.0,
-            hsl_blue_lum: -40.0,
-            sharpen_amount: 60.0,
-            ..Default::default()
+        let cheio = Estado {
+            ajustes: Ajustes {
+                exposure: 1.0,
+                hsl_blue_lum: -40.0,
+                sharpen_amount: 60.0,
+                ..Default::default()
+            },
+            corte: Corte::default(),
         };
 
-        let mut historico = Historico::novo(Ajustes::default());
+        let mut historico = Historico::novo(Estado::default());
         historico.registrar(cheio);
-        historico.registrar(Ajustes::default());
+        historico.registrar(Estado::default());
 
         assert_eq!(historico.desfazer(), Some(cheio));
+    }
+
+    /// 🚨 O corte é passo de histórico como qualquer outro — o item 12.
+    ///
+    /// Antes de 6/set/2026 a pilha era de `Ajustes`, e cortar não deixava
+    /// marca nenhuma nela: `Cmd+Z` depois de cortar voltava a exposição e
+    /// mantinha o enquadramento novo, como se cortar não fosse uma edição.
+    #[test]
+    fn cortar_e_um_passo_que_o_desfazer_alcanca() {
+        let mut historico = Historico::novo(Estado::default());
+
+        historico.registrar(cortada(0.5));
+        assert!(historico.pode_desfazer());
+
+        assert_eq!(
+            historico.desfazer(),
+            Some(Estado::default()),
+            "desfazer devolve a foto inteira"
+        );
+        assert_eq!(historico.refazer(), Some(cortada(0.5)));
+    }
+
+    /// Dois cortes seguidos são dois passos, e não um.
+    #[test]
+    fn cada_corte_e_o_seu_proprio_passo() {
+        let mut historico = Historico::novo(Estado::default());
+        historico.registrar(cortada(0.8));
+        historico.registrar(cortada(0.5));
+
+        assert_eq!(historico.desfazer(), Some(cortada(0.8)));
+        assert_eq!(historico.desfazer(), Some(Estado::default()));
+    }
+
+    /// ⚠️ Reenquadrar para o mesmo lugar não vira passo — a mesma regra do
+    /// slider solto onde já estava.
+    #[test]
+    fn corte_igual_ao_atual_nao_vira_passo() {
+        let mut historico = Historico::novo(cortada(0.5));
+        historico.registrar(cortada(0.5));
+        assert!(!historico.pode_desfazer());
     }
 }

@@ -37,7 +37,7 @@ use super::controles::{Definicao, Secao, CONTROLES};
 use super::corte::{self, Alca};
 use super::curva;
 use super::histograma::Histograma;
-use super::historico::Historico;
+use super::historico::{Estado, Historico};
 use super::paineis::{PainelDaRevelacao, Qual};
 use super::persistencia::{self, Corte, Gravador};
 use super::presets::{self, GuardaDePresets};
@@ -297,7 +297,7 @@ impl Revelacao {
             aberta: None,
             ajustes: Ajustes::default(),
             corte: Corte::default(),
-            historico: Historico::novo(Ajustes::default()),
+            historico: Historico::novo(Estado::default()),
             pendente: false,
             _gravacao: None,
             controles,
@@ -473,7 +473,7 @@ impl Revelacao {
         // da abertura, e é o que faz o **primeiro** `Cmd+Z` ter para onde voltar.
         // No legado não tem — lá o histórico começa depois da primeira mudança, e
         // a primeira coisa que se faz numa foto não tem volta.
-        self.historico = Historico::novo(self.ajustes);
+        self.historico = Historico::novo(self.estado());
         self.aguardando = None;
 
         self.aberta = Some(Aberta {
@@ -541,12 +541,37 @@ impl Revelacao {
     /// e, com o teto de 20, o resto do histórico já foi embora. Pior: o número de
     /// passos de lá depende da taxa de quadros do monitor.
     pub fn gravar_o_que_estiver_pendente(&mut self) {
+        if self.fechar_o_gesto_pendente() {
+            self.gravar();
+        }
+    }
+
+    /// Fecha o gesto em curso **no histórico**, sem gravar. Devolve se havia um.
+    ///
+    /// ⚠️ Existe separado por causa do corte: `aplicar_corte` precisa fechar o
+    /// gesto anterior com o enquadramento **antigo** e gravar uma vez só, no
+    /// fim. Duas gravações seguidas são duas tarefas do tokio, que terminam na
+    /// ordem que quiserem — e a que chegasse por último levaria o corte velho
+    /// para o banco.
+    fn fechar_o_gesto_pendente(&mut self) -> bool {
         if !self.pendente {
-            return;
+            return false;
         }
         self.pendente = false;
-        self.historico.registrar(self.ajustes);
-        self.gravar();
+        self.historico.registrar(self.estado());
+        true
+    }
+
+    /// Como a foto está revelada agora — ajustes e enquadramento juntos.
+    ///
+    /// 🔑 É o que vai para o histórico. Ler as duas metades de um lugar só é o
+    /// que impede o passo meio velho meio novo: até 6/set/2026 a pilha guardava
+    /// só `Ajustes`, e o corte não entrava nela.
+    fn estado(&self) -> Estado {
+        Estado {
+            ajustes: self.ajustes,
+            corte: self.corte,
+        }
     }
 
     /// Manda o estado de agora para o banco, sem passar pelo histórico.
@@ -566,8 +591,8 @@ impl Revelacao {
         // acabou de ser desfeito. O `Cmd+Z` pareceria não ter funcionado.
         self.gravar_o_que_estiver_pendente();
 
-        if let Some(ajustes) = self.historico.desfazer() {
-            self.aplicar_do_historico(ajustes, window, cx);
+        if let Some(estado) = self.historico.desfazer() {
+            self.aplicar_do_historico(estado, window, cx);
         }
     }
 
@@ -575,8 +600,8 @@ impl Revelacao {
     pub fn refazer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.gravar_o_que_estiver_pendente();
 
-        if let Some(ajustes) = self.historico.refazer() {
-            self.aplicar_do_historico(ajustes, window, cx);
+        if let Some(estado) = self.historico.refazer() {
+            self.aplicar_do_historico(estado, window, cx);
         }
     }
 
@@ -592,13 +617,20 @@ impl Revelacao {
     /// que acabou de sair, e o `Cmd+Shift+Z` nunca alcançaria nada.
     fn aplicar_do_historico(
         &mut self,
-        ajustes: Ajustes,
+        estado: Estado,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.ajustes = ajustes;
+        self.ajustes = estado.ajustes;
+        self.corte = estado.corte;
+        // 🚨 O modo de corte fecha ao desfazer. O retângulo na tela é o de antes
+        // do passo que acabou de sair; deixá-lo aberto faria o botão "Aplicar"
+        // reintroduzir, no clique seguinte, o enquadramento que o `Cmd+Z` tirou.
+        self.edicao = None;
         self.espalhar_nos_sliders(window, cx);
         self.pedir_revelacao(cx);
+        // O corte não passa pela GPU: quem o mostra é a exibição.
+        self.atualizar_exibicao();
         self.gravar();
         cx.notify();
     }
@@ -630,7 +662,7 @@ impl Revelacao {
         presets::aplicar(&mut self.ajustes, &preset.adjustments);
         self.espalhar_nos_sliders(window, cx);
         self.pedir_revelacao(cx);
-        self.historico.registrar(self.ajustes);
+        self.historico.registrar(self.estado());
         self.gravar();
         cx.notify();
     }
@@ -666,7 +698,7 @@ impl Revelacao {
         self.ajustes.highlights = escolha.highlights;
         self.espalhar_nos_sliders(window, cx);
         self.pedir_revelacao(cx);
-        self.historico.registrar(self.ajustes);
+        self.historico.registrar(self.estado());
         self.gravar();
         cx.notify();
     }
@@ -762,7 +794,7 @@ impl Revelacao {
             return;
         };
 
-        self.corte = Corte {
+        let novo = Corte {
             x: Some(edicao.corte.crop_x()),
             y: Some(edicao.corte.crop_y()),
             largura: Some(edicao.corte.crop_width()),
@@ -773,10 +805,14 @@ impl Revelacao {
             espelho_v: Some(edicao.corte.flip_vertical()),
         };
 
-        // O que estiver a meio caminho fecha antes, senão a espera pendente grava
-        // depois com o corte já trocado — e o passo de histórico sairia com o
-        // corte novo colado num ajuste antigo.
-        self.gravar_o_que_estiver_pendente();
+        // 🚨 A ordem aqui é o item 12 inteiro. O gesto a meio caminho fecha
+        // **antes** da troca, para virar um passo com o corte antigo; só então o
+        // corte novo entra e vira o passo seguinte. Fechar depois colaria o
+        // enquadramento novo num ajuste velho, e o `Cmd+Z` pularia por cima do
+        // corte sem nunca o desfazer.
+        self.fechar_o_gesto_pendente();
+        self.corte = novo;
+        self.historico.registrar(self.estado());
         self.gravar();
         self.atualizar_exibicao();
         cx.notify();
@@ -987,7 +1023,7 @@ impl Revelacao {
         self.ajustes = Ajustes::default();
         self.espalhar_nos_sliders(window, cx);
         self.pedir_revelacao(cx);
-        self.historico.registrar(self.ajustes);
+        self.historico.registrar(self.estado());
         self.gravar();
         cx.notify();
     }
@@ -3438,6 +3474,106 @@ mod testes {
                 tela.cancelar_corte(cx);
                 let desenhada = tela.aberta.as_ref().unwrap().desenhada.as_ref().unwrap();
                 assert_eq!(desenhada.size(0).width.0, 8, "e cortada de volta ao sair");
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 `Cmd+Z` depois de cortar devolve o enquadramento — o item 12.
+    ///
+    /// Até 6/set/2026 a pilha do histórico guardava só `Ajustes`, e cortar não
+    /// deixava marca nenhuma nela: desfazer depois de cortar voltava a
+    /// exposição e mantinha o corte novo, como se enquadrar não fosse editar. O
+    /// legado erra pior — o `EditSnapshot` de lá tem o campo do corte, grava
+    /// nele e nunca o lê de volta.
+    #[gpui::test]
+    fn desfazer_depois_de_cortar_devolve_o_enquadramento(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        let mut grande = RgbaImage::new(16, 16);
+        for pixel in grande.pixels_mut() {
+            *pixel = Rgba([100, 100, 100, 255]);
+        }
+        previews
+            .save_preview("id-inteira.jpg", &DynamicImage::ImageRgba8(grande))
+            .expect("gravar preview");
+
+        let janela = janela(cx, previews);
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("inteira.jpg"), window, cx);
+                assert!(
+                    !tela.historico.pode_desfazer(),
+                    "a foto abriu no passo zero"
+                );
+
+                tela.alternar_corte(window, cx);
+                tela.edicao
+                    .as_mut()
+                    .expect("o modo de corte está aberto")
+                    .corte = CropSettings::new(0.0, 0.0, 0.5, 0.5, 0, 0.0, false, false);
+                tela.aplicar_corte(cx);
+
+                assert_eq!(tela.corte.largura, Some(0.5));
+                let desenhada = tela.aberta.as_ref().unwrap().desenhada.as_ref().unwrap();
+                assert_eq!(desenhada.size(0).width.0, 8, "a foto na tela é a cortada");
+                assert!(
+                    tela.historico.pode_desfazer(),
+                    "cortar tem de ser um passo do histórico"
+                );
+
+                tela.desfazer(window, cx);
+
+                assert_eq!(tela.corte, Corte::default(), "o corte voltou a não existir");
+                let desenhada = tela.aberta.as_ref().unwrap().desenhada.as_ref().unwrap();
+                assert_eq!(desenhada.size(0).width.0, 16, "e a foto voltou inteira");
+
+                tela.refazer(window, cx);
+                assert_eq!(tela.corte.largura, Some(0.5), "e o refazer o traz de volta");
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// ⚠️ O corte entra no histórico **depois** do gesto de slider pendente.
+    ///
+    /// São dois passos, nesta ordem: o arrasto que ainda não fechou vira um
+    /// passo com o enquadramento antigo, e só então o corte vira o seguinte.
+    /// Fechar na ordem inversa colaria o corte novo num ajuste velho, e um
+    /// `Cmd+Z` pularia por cima do enquadramento sem nunca o desfazer.
+    #[gpui::test]
+    fn o_gesto_pendente_e_o_corte_sao_dois_passos(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        let mut grande = RgbaImage::new(16, 16);
+        for pixel in grande.pixels_mut() {
+            *pixel = Rgba([100, 100, 100, 255]);
+        }
+        previews
+            .save_preview("id-inteira.jpg", &DynamicImage::ImageRgba8(grande))
+            .expect("gravar preview");
+
+        let janela = janela(cx, previews);
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("inteira.jpg"), window, cx);
+
+                // Um arrasto que ainda não fechou.
+                tela.ajustes.exposure = 1.5;
+                tela.pendente = true;
+
+                tela.alternar_corte(window, cx);
+                tela.edicao
+                    .as_mut()
+                    .expect("o modo de corte está aberto")
+                    .corte = CropSettings::new(0.0, 0.0, 0.5, 0.5, 0, 0.0, false, false);
+                tela.aplicar_corte(cx);
+
+                // Primeiro `Cmd+Z`: sai o corte, fica a exposição.
+                tela.desfazer(window, cx);
+                assert_eq!(tela.corte, Corte::default());
+                assert_eq!(tela.ajustes.exposure, 1.5);
+
+                // Segundo: sai a exposição.
+                tela.desfazer(window, cx);
+                assert_eq!(tela.ajustes.exposure, 0.0);
+                assert_eq!(tela.corte, Corte::default());
             })
             .expect("a janela deve estar aberta");
     }
