@@ -18,6 +18,7 @@ use crate::biblioteca::acervo::Acervo;
 use crate::biblioteca::colecoes::Colecoes;
 use crate::biblioteca::marcacao::Marcador;
 use crate::biblioteca::tela::Biblioteca;
+use crate::biblioteca::tela::Classificou;
 use crate::cliente::{monitor_do_cliente, Cliente};
 use crate::configuracoes::Configuracoes;
 use crate::entrada::{Entrada, Escolheu, Modo};
@@ -27,6 +28,7 @@ use crate::importacao::explorador::{Explorador, GeradorDeMiniaturas, Importador,
 use crate::importacao::tela::{Importacao, Importou};
 use crate::impressao::tela::Impressao;
 use crate::pos_venda::porta::Publicador;
+use crate::pos_venda::porta::Recado as PosVendaRecado;
 use crate::pos_venda::tela::PosVenda;
 use crate::revelacao::persistencia::{self, Gravador};
 use crate::revelacao::presets::GuardaDePresets;
@@ -230,6 +232,18 @@ pub struct Aplicativo {
     sessoes: Entity<Sessoes>,
     /// A sessão escolhida para receber as fotos. `None` é "nenhuma aberta".
     sessao_aberta: Option<String>,
+    /// Quem fala com o pós-venda do site. Guardado porque a classificação
+    /// sobe e tira fotos fora do modal de publicação.
+    publicador: Arc<dyn Publicador>,
+    /// Por onde volta o resultado de subir/tirar uma foto classificada.
+    sincronias: (Sender<PosVendaRecado>, Receiver<PosVendaRecado>),
+    /// 🚨 A `Task` que espera o site responder. **Descartá-la a cancela**, e o
+    /// sintoma seria a grade nunca reler o catálogo depois de uma foto subir —
+    /// o id remoto estaria gravado no banco e ausente da tela.
+    _sincronia: Option<gpui::Task<()>>,
+    /// 🚨 A inscrição na travessia do zero da classificação. Sem ela nada acusa:
+    /// as estrelas entram no banco, e nada sobe nem sai do site.
+    _classificacao: gpui::Subscription,
     /// 🚨 A inscrição na escolha da sessão. Descartada, a tela marca a linha e
     /// o resto do app continua sem saber em qual galeria as fotos entram.
     _sessao_escolhida: gpui::Subscription,
@@ -374,6 +388,7 @@ impl Aplicativo {
         // onde a base da API pode divergir.
         let publicador_do_pos_venda = portas.publicador.clone();
         let publicador_das_sessoes = portas.publicador.clone();
+        let publicador_da_raiz = portas.publicador.clone();
         let entrada = cx.new(|cx| {
             Entrada::nova(
                 portas.publicador,
@@ -384,6 +399,13 @@ impl Aplicativo {
         });
         let escolha = cx.subscribe(&entrada, |raiz, _entrada, evento: &Escolheu, cx| {
             raiz.escolher_modo(evento.0.clone(), cx);
+        });
+
+        // 🔑 A Biblioteca **notifica** que a classificação atravessou o zero, e
+        // não sobe nada: quem tem a sessão e a galeria aberta é esta raiz. É o
+        // que deixa a grade funcionar offline sem saber que existe um site.
+        let classificacao = cx.subscribe(&biblioteca, |raiz, _tela, evento: &Classificou, cx| {
+            raiz.sincronizar_classificacao(evento.clone(), cx);
         });
 
         let sessoes = cx.new(|cx| Sessoes::nova(publicador_das_sessoes, window, cx));
@@ -442,6 +464,10 @@ impl Aplicativo {
             _escolha: escolha,
             sessoes,
             sessao_aberta: None,
+            publicador: publicador_da_raiz,
+            sincronias: channel(),
+            _sincronia: None,
+            _classificacao: classificacao,
             _sessao_escolhida: sessao_escolhida,
             configuracoes: cx.new(|_| Configuracoes::nova(previews_das_configuracoes)),
             configurando: false,
@@ -489,6 +515,95 @@ impl Aplicativo {
                 }
             }
         }));
+    }
+
+    /// O passo 3 do fluxo: o que ganhou nota sobe, o que a perdeu sai.
+    ///
+    /// ⚠️ **Sem galeria aberta não sobe nada, e a tela diz isso.** Classificar
+    /// 200 fotos e descobrir no balcão que nenhuma foi para o site é o desfecho
+    /// que este aviso existe para impedir — silêncio aqui seria pior que erro.
+    fn sincronizar_classificacao(&mut self, evento: Classificou, cx: &mut Context<Self>) {
+        let Some(sessao) = self.sessao().cloned() else {
+            // Offline é uma escolha, e foi feita na porta: avisar a cada estrela
+            // seria cobrar de novo o que já foi respondido.
+            return;
+        };
+
+        // Tirar do site não precisa de galeria aberta: a foto já sabe onde está.
+        for id in &evento.sairam {
+            self.publicador
+                .tirar_do_site(sessao.clone(), id.clone(), self.sincronias.0.clone());
+        }
+
+        if !evento.subiram.is_empty() {
+            let Some(galeria) = self.sessao_aberta.clone() else {
+                let quantas = evento.subiram.len();
+                self.biblioteca.update(cx, |tela, cx| {
+                    tela.avisar(
+                        format!(
+                            "{quantas} foto(s) classificada(s) e nenhuma sessão aberta —                              escolha uma em Sessões para elas subirem"
+                        ),
+                        cx,
+                    )
+                });
+                self.esperar_a_sincronia(cx);
+                return;
+            };
+
+            for (ordem, id) in evento.subiram.iter().enumerate() {
+                self.publicador.subir_classificada(
+                    sessao.clone(),
+                    galeria.clone(),
+                    id.clone(),
+                    ordem as u32,
+                    self.sincronias.0.clone(),
+                );
+            }
+        }
+
+        self.esperar_a_sincronia(cx);
+    }
+
+    /// Espera o site responder e relê o catálogo quando alguma foto muda de
+    /// lado — é o que traz o id remoto para a tela.
+    fn esperar_a_sincronia(&mut self, cx: &mut Context<Self>) {
+        self._sincronia = Some(cx.spawn(async move |raiz, cx| {
+            for _ in 0..300 {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_millis(100))
+                    .await;
+                let Ok(acabou) = raiz.update(cx, |raiz, cx| raiz.colher_sincronia(cx)) else {
+                    return;
+                };
+                if acabou {
+                    return;
+                }
+            }
+        }));
+    }
+
+    /// Drena o que o site respondeu. Devolve se não há mais o que esperar.
+    fn colher_sincronia(&mut self, cx: &mut Context<Self>) -> bool {
+        let mut mudou = false;
+        while let Ok(recado) = self.sincronias.1.try_recv() {
+            match recado {
+                PosVendaRecado::Sincronizou => mudou = true,
+                PosVendaRecado::Falhou(erro) => {
+                    self.biblioteca.update(cx, |tela, cx| tela.avisar(erro, cx));
+                }
+                // Os outros recados são de quem os pediu: esta raiz só sincroniza.
+                _ => {}
+            }
+        }
+        if mudou {
+            // 🔑 A releitura é o que traz o id remoto para a tela. Sem ela a foto
+            // está no site e a grade não sabe — e o próximo gesto que dependa
+            // disso (tirar do storage, negociar) não teria em quem cair.
+            self.reler_o_acervo(cx);
+        }
+        // Uma só rodada de colheita por resposta: quem manda mais fotos religa
+        // o laço.
+        mudou
     }
 
     pub fn tela(&self) -> Tela {
@@ -2961,6 +3076,186 @@ mod testes {
                 });
             })
             .expect("a janela deve estar aberta");
+    }
+
+    /// 📸 O passo 3 do fluxo do dono: **classifico as fotos** — e elas sobem.
+    ///
+    /// 🚨 O que este teste prende é a **travessia**, e não o estado. Ir de 3
+    /// para 4 estrelas não sobe nada: a foto já estava lá. O que conta é sair do
+    /// zero (sobe) e voltar a ele (sai do storage).
+    #[gpui::test]
+    fn classificar_sobe_e_zerar_tira_do_site(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+
+        let publicador = Arc::new(PublicadorDeMentira::default());
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            let publicador = publicador.clone();
+            |window, cx| {
+                Aplicativo::novo(
+                    acervo(),
+                    previews,
+                    Vec::new(),
+                    Portas {
+                        publicador,
+                        ..portas()
+                    },
+                    window,
+                    cx,
+                )
+            }
+        });
+
+        janela
+            .update(cx, |app, _window, cx| {
+                app.escolher_modo(
+                    crate::entrada::Modo::Online(domain::services::pos_venda::Sessao {
+                        access_token: "tok".into(),
+                    }),
+                    cx,
+                );
+                // A sessão fotográfica escolhida é para onde as fotos vão.
+                app.sessoes
+                    .update(cx, |tela, cx| tela.abrir("g7".into(), cx));
+
+                app.na_biblioteca(cx, |tela, cx| tela.selecionar(Some(0), cx));
+                app.na_biblioteca(cx, |tela, cx| tela.dar_nota(4, cx));
+            })
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+
+        let subidas = publicador.subidas();
+        assert_eq!(subidas.len(), 1, "uma foto atravessou o zero");
+        assert_eq!(subidas[0].0, "g7", "para a sessão aberta");
+
+        janela
+            .update(cx, |app, _window, cx| {
+                // De 4 para 5: continua no site, e nada é pedido de novo.
+                app.na_biblioteca(cx, |tela, cx| tela.dar_nota(5, cx));
+            })
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+        assert_eq!(
+            publicador.subidas().len(),
+            1,
+            "mudar de 4 para 5 estrelas não é travessia"
+        );
+
+        janela
+            .update(cx, |app, _window, cx| {
+                app.na_biblioteca(cx, |tela, cx| tela.dar_nota(0, cx));
+            })
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+        assert_eq!(
+            publicador.tiradas().len(),
+            1,
+            "zerar a nota tira a foto do storage"
+        );
+    }
+
+    /// 🚨 Classificar sem sessão aberta **avisa**, e não sobe calado.
+    ///
+    /// Classificar 200 fotos e descobrir no balcão que nenhuma foi para o site é
+    /// o desfecho que este aviso existe para impedir. Silêncio aqui seria pior
+    /// que erro: o operador não teria como saber que faltou um passo.
+    #[gpui::test]
+    fn classificar_sem_sessao_aberta_avisa_em_vez_de_sumir(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+
+        let publicador = Arc::new(PublicadorDeMentira::default());
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            let publicador = publicador.clone();
+            |window, cx| {
+                Aplicativo::novo(
+                    acervo(),
+                    previews,
+                    Vec::new(),
+                    Portas {
+                        publicador,
+                        ..portas()
+                    },
+                    window,
+                    cx,
+                )
+            }
+        });
+
+        janela
+            .update(cx, |app, _window, cx| {
+                app.escolher_modo(
+                    crate::entrada::Modo::Online(domain::services::pos_venda::Sessao {
+                        access_token: "tok".into(),
+                    }),
+                    cx,
+                );
+                app.na_biblioteca(cx, |tela, cx| tela.selecionar(Some(0), cx));
+                app.na_biblioteca(cx, |tela, cx| tela.dar_nota(3, cx));
+            })
+            .expect("a janela deve estar aberta");
+        // 🔑 O evento só chega ao assinante quando os efeitos são drenados — é
+        // por isso que a leitura do aviso vem depois, e não no mesmo `update`.
+        cx.run_until_parked();
+
+        janela
+            .update(cx, |app, _window, cx| {
+                let aviso = app
+                    .biblioteca
+                    .read(cx)
+                    .aviso()
+                    .cloned()
+                    .expect("a tela tinha de avisar");
+                assert!(aviso.contains("nenhuma sessão aberta"), "{aviso}");
+            })
+            .expect("a janela deve estar aberta");
+
+        assert!(
+            publicador.subidas().is_empty(),
+            "sem sessão aberta não há para onde subir"
+        );
+    }
+
+    /// ⚠️ No modo offline a classificação não avisa nada.
+    ///
+    /// Offline foi uma escolha, e ela foi feita na porta do app. Cobrar de novo
+    /// a cada estrela seria repetir uma pergunta já respondida.
+    #[gpui::test]
+    fn offline_a_classificacao_nao_cobra_o_que_ja_foi_respondido(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+
+        let publicador = Arc::new(PublicadorDeMentira::default());
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            let publicador = publicador.clone();
+            |window, cx| {
+                Aplicativo::ja_dentro(
+                    acervo(),
+                    previews,
+                    Vec::new(),
+                    Portas {
+                        publicador,
+                        ..portas()
+                    },
+                    window,
+                    cx,
+                )
+            }
+        });
+
+        janela
+            .update(cx, |app, _window, cx| {
+                assert!(app.offline());
+                app.na_biblioteca(cx, |tela, cx| tela.selecionar(Some(0), cx));
+                app.na_biblioteca(cx, |tela, cx| tela.dar_nota(3, cx));
+                assert_eq!(app.biblioteca.read(cx).aviso(), None);
+            })
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+        assert!(publicador.subidas().is_empty());
     }
 
     /// 📸 O passo 7 do fluxo do dono: **gero o link para o cliente**.

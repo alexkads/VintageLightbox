@@ -34,6 +34,15 @@ pub enum DomainError {
     #[error("o site recusou o acesso: confira e-mail e senha")]
     AcessoRecusado,
 
+    /// O site respondeu `404` — o recurso não está mais lá.
+    ///
+    /// Variante própria pelo mesmo motivo de [`Self::AcessoRecusado`]: o remédio
+    /// é outro. Ao **remover** uma foto do storage, "já não está lá" é o desfecho
+    /// desejado, e não uma falha — tratá-lo como erro faria o app insistir em
+    /// remover, a cada estrela apagada, algo que outra tela já removeu.
+    #[error("o site não encontrou: {0}")]
+    NaoEncontradoNoSite(String),
+
     #[error("Collection não encontrada")]
     CollectionNotFound,
 

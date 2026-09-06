@@ -98,6 +98,26 @@ impl PosVendaController {
         self.api.remover_foto(sessao, foto_id).await.map_err(frase)
     }
 
+    /// Sobe **uma** foto para uma galeria que já existe — o passo 3 do fluxo.
+    pub async fn enviar_uma(
+        &self,
+        sessao: &Sessao,
+        galeria_id: &str,
+        foto_id: &str,
+        ordem: u32,
+    ) -> Result<String, String> {
+        let id = PhotoId::from_string(foto_id).map_err(|e| e.to_string())?;
+        self.publicar
+            .enviar_uma(sessao, galeria_id, &id, ordem)
+            .await
+    }
+
+    /// Tira a foto do storage — o que zerar a classificação faz.
+    pub async fn remover_do_site(&self, sessao: &Sessao, foto_id: &str) -> Result<(), String> {
+        let id = PhotoId::from_string(foto_id).map_err(|e| e.to_string())?;
+        self.publicar.remover_do_site(sessao, &id).await
+    }
+
     /// O link que entra sem senha, para mandar ao cliente.
     pub async fn link_da_galeria(
         &self,

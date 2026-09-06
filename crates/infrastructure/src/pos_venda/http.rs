@@ -115,6 +115,11 @@ async fn recusa(resposta: reqwest::Response) -> DomainError {
     if status == reqwest::StatusCode::UNAUTHORIZED {
         return DomainError::AcessoRecusado;
     }
+    // 🔑 O `404` sai como variante própria porque quem remove precisa distinguir
+    // "já não está lá" (o desfecho desejado) de "não deu para falar com o site".
+    if status == reqwest::StatusCode::NOT_FOUND {
+        return DomainError::NaoEncontradoNoSite(mensagem);
+    }
     DomainError::InfrastructureError(format!("o site respondeu {status}: {mensagem}"))
 }
 

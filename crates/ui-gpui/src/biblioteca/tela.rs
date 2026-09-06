@@ -76,6 +76,12 @@ pub struct Biblioteca {
     visiveis: Vec<usize>,
     /// As coleções: a lista lateral, e qual está aberta.
     colecoes: colecoes::Estado,
+    /// Uma frase para quem está olhando a grade.
+    ///
+    /// 🔑 **Quem escreve aqui é a raiz**, contando o que aconteceu com o site: a
+    /// Biblioteca não fala com ele, mas é onde quem classificou está olhando.
+    /// Silêncio depois de classificar 200 fotos é o pior desfecho possível.
+    aviso: Option<SharedString>,
     /// O campo do nome da coleção nova.
     nome_da_colecao: Entity<InputState>,
     /// Quantas fotos a confirmação de apagar está segurando.
@@ -231,6 +237,7 @@ impl Biblioteca {
             cache: Arc::new(Mutex::new(CacheDeMiniaturas::nova(capacidade_para(6, 4)))),
             filtros: Filtros::default(),
             colecoes: colecoes::Estado::default(),
+            aviso: None,
             nome_da_colecao,
             confirmando_apagar: None,
             porta_de_colecoes,
@@ -771,6 +778,24 @@ impl Biblioteca {
         self.busca.read(cx).value().to_string()
     }
 
+    /// Põe um aviso na tela. É por aqui que a raiz conta o que aconteceu com o
+    /// site — a Biblioteca não fala com ele, mas é onde quem classificou está
+    /// olhando.
+    pub fn avisar(&mut self, texto: String, cx: &mut Context<Self>) {
+        self.aviso = Some(texto.into());
+        cx.notify();
+    }
+
+    pub fn aviso(&self) -> Option<&SharedString> {
+        self.aviso.as_ref()
+    }
+
+    pub fn limpar_aviso(&mut self, cx: &mut Context<Self>) {
+        if self.aviso.take().is_some() {
+            cx.notify();
+        }
+    }
+
     /// Quantas fotos estão selecionadas.
     /// Pede a confirmação de apagar a seleção.
     ///
@@ -1072,6 +1097,17 @@ impl Biblioteca {
             return;
         }
 
+        // 🚨 A travessia do zero é lida **antes** da escrita, e só para a nota.
+        //
+        // No fluxo do dono é a classificação que autoriza a foto a subir para o
+        // site, e zerá-la é tirá-la de lá. Depois de escrever, o "antes" já não
+        // existe — e sem ele não dá para saber quem atravessou, só quem está de
+        // que lado agora.
+        let travessia = match &marca {
+            Marca::Nota(nova) => Some(travessia_do_zero(&self.fotos, &alvos, *nova)),
+            _ => None,
+        };
+
         let fotos = Arc::make_mut(&mut self.fotos);
         for no_acervo in alvos {
             let foto = &mut fotos[no_acervo];
@@ -1087,6 +1123,11 @@ impl Biblioteca {
         }
 
         self.refiltrar();
+        if let Some(classificou) = travessia {
+            if !classificou.vazio() {
+                cx.emit(classificou);
+            }
+        }
         cx.notify();
     }
 
@@ -1824,6 +1865,51 @@ fn celula(
         .into_any_element()
 }
 
+/// Quais fotos atravessaram o zero da classificação — e para que lado.
+///
+/// 🔑 **É o gatilho do passo 3 do fluxo do dono**, e o motivo de a Biblioteca
+/// não falar com o site: ela **notifica** que a classificação mudou de lado, e
+/// quem sabe o que fazer com isso é a raiz, que tem a sessão e a galeria aberta.
+/// Assim a grade continua funcionando offline, sem saber que existe um site.
+///
+/// ⚠️ **A travessia, e não o estado.** Passar de 3 para 4 estrelas não é evento:
+/// a foto já estava no site e continua. O que importa é 0 → nota (sobe) e
+/// nota → 0 (sai).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Classificou {
+    /// Ganharam nota: sobem para a galeria aberta.
+    pub subiram: Vec<String>,
+    /// Ficaram sem nota: saem do storage.
+    pub sairam: Vec<String>,
+}
+
+impl Classificou {
+    pub fn vazio(&self) -> bool {
+        self.subiram.is_empty() && self.sairam.is_empty()
+    }
+}
+
+impl gpui::EventEmitter<Classificou> for Biblioteca {}
+
+/// Quem atravessou o zero, comparando o que está no acervo com a nota nova.
+fn travessia_do_zero(fotos: &[PhotoViewModel], alvos: &[usize], nova: i32) -> Classificou {
+    let mut classificou = Classificou::default();
+    for &no_acervo in alvos {
+        let foto = &fotos[no_acervo];
+        let tinha = foto.rating >= 1;
+        let tera = nova >= 1;
+        if tinha == tera {
+            continue;
+        }
+        if tera {
+            classificou.subiram.push(foto.id.clone());
+        } else {
+            classificou.sairam.push(foto.id.clone());
+        }
+    }
+    classificou
+}
+
 impl Render for Biblioteca {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
@@ -1833,6 +1919,28 @@ impl Render for Biblioteca {
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .child(self.barra(cx))
+            .when_some(self.aviso.clone(), |tela, aviso| {
+                tela.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(6.))
+                        .px(px(10.))
+                        .py(px(4.))
+                        .text_xs()
+                        .text_color(cx.theme().warning)
+                        .child(aviso)
+                        .child(
+                            Button::new("biblioteca-fechar-aviso")
+                                .label("ok")
+                                .xsmall()
+                                .ghost()
+                                .on_click(
+                                    cx.listener(|tela, _ev, _window, cx| tela.limpar_aviso(cx)),
+                                ),
+                        ),
+                )
+            })
             .child(
                 // `min_h(0)`: sem ele o conteúdo rolável de dentro do dock
                 // empurra o pai e a rolagem nunca acontece.

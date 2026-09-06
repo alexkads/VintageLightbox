@@ -139,6 +139,54 @@ impl PublicarNoPosVendaUseCase {
         Ok(galeria)
     }
 
+    /// Sobe **uma** foto para uma galeria que já existe.
+    ///
+    /// 🔑 É o passo 3 do fluxo do dono: classificar autoriza a foto a subir, e a
+    /// galeria já foi escolhida antes. O mesmo caminho de [`Self::execute`], sem
+    /// a criação da galeria e sem o aviso ao cliente — que sai no fim do lote,
+    /// e não a cada estrela.
+    pub async fn enviar_uma(
+        &self,
+        sessao: &Sessao,
+        galeria_id: &str,
+        id: &PhotoId,
+        ordem: u32,
+    ) -> Result<String, String> {
+        self.subir(sessao, galeria_id, id, ordem)
+            .await
+            .map(|(nome, _)| nome)
+            .map_err(|(nome, erro)| format!("{nome}: {erro}"))
+    }
+
+    /// Tira a foto do storage — o que zerar a classificação faz.
+    ///
+    /// 🚨 **O `None` local sai mesmo quando o site diz que não achou.** Um id que
+    /// não existe mais lá significa que alguém já removeu a foto por outra tela;
+    /// insistir em guardá-lo aqui deixaria o catálogo apontando para o vazio e
+    /// tentando remover de novo a cada estrela apagada.
+    ///
+    /// Foto que nunca subiu não é erro: é o caso normal de quem tira a nota de
+    /// uma foto que nunca a teve.
+    pub async fn remover_do_site(&self, sessao: &Sessao, id: &PhotoId) -> Result<(), String> {
+        let Some(mut photo) = self.fotos.find_by_id(id).await.map_err(|e| e.to_string())? else {
+            return Err("foto não está mais no catálogo".into());
+        };
+        let Some(remoto) = photo.id_no_site().map(str::to_string) else {
+            return Ok(());
+        };
+
+        let recusa = self.api.remover_foto(sessao, &remoto).await.err();
+
+        photo.definir_id_no_site(None);
+        self.fotos.update(&photo).await.map_err(|e| e.to_string())?;
+
+        match recusa {
+            // 404 é "já não está lá", e isso é o desfecho desejado.
+            Some(DomainError::NaoEncontradoNoSite(_)) | None => Ok(()),
+            Some(erro) => Err(erro.to_string()),
+        }
+    }
+
     async fn subir(
         &self,
         sessao: &Sessao,
@@ -246,6 +294,9 @@ mod tests {
         /// Nomes que devem falhar ao subir.
         falham: Vec<String>,
         avisadas: Mutex<Vec<String>>,
+        removidas: Mutex<Vec<String>>,
+        /// Ids que o site responde `404` ao remover — alguém já os tirou de lá.
+        some_do_site: Vec<String>,
     }
 
     #[async_trait::async_trait]
@@ -304,8 +355,12 @@ mod tests {
         ) -> DomainResult<()> {
             unreachable!("a publicação sobe a foto já com o estado; não a muda depois")
         }
-        async fn remover_foto(&self, _: &Sessao, _: &str) -> DomainResult<()> {
-            unreachable!("a publicação não remove nada")
+        async fn remover_foto(&self, _: &Sessao, id: &str) -> DomainResult<()> {
+            self.removidas.lock().unwrap().push(id.to_string());
+            if self.some_do_site.contains(&id.to_string()) {
+                return Err(DomainError::NaoEncontradoNoSite("foto".into()));
+            }
+            Ok(())
         }
         async fn link_da_galeria(
             &self,
@@ -469,5 +524,132 @@ mod tests {
         assert_eq!(nome_para_o_site("/ensaio/DSC_001.NEF"), "DSC_001.jpg");
         assert_eq!(nome_para_o_site("C:\\fotos\\IMG.jpeg"), "IMG.jpg");
         assert_eq!(nome_para_o_site("semextensao"), "semextensao.jpg");
+    }
+
+    /// 🚨 Zerar a classificação tira a foto do storage **e** limpa o id local.
+    ///
+    /// É o passo 3 do fluxo do dono ao contrário: foi a classificação que
+    /// autorizou a foto a subir, então tirar a nota é tirá-la de lá. O site
+    /// recusa `nota: null` justamente porque foto do acervo sem nota não existe.
+    #[tokio::test]
+    async fn remover_do_site_tira_a_foto_e_esquece_o_id() {
+        let mut photo = foto("/ensaio/a.NEF", false);
+        photo.definir_id_no_site(Some("remota-1".into()));
+        let id = photo.id();
+
+        let mut repo = MockPhotoRepo::new();
+        repo.expect_find_by_id()
+            .returning(move |_| Ok(Some(photo.clone())));
+        // O id sai do catálogo: a foto voltou a ser só local.
+        repo.expect_update()
+            .times(1)
+            .withf(|f| f.id_no_site().is_none())
+            .returning(|_| Ok(()));
+
+        let api = Arc::new(ApiDeMentira::default());
+        let caso = PublicarNoPosVendaUseCase::new(
+            Arc::new(repo),
+            Arc::new(MockExportador::new()),
+            api.clone(),
+        );
+
+        caso.remover_do_site(&sessao(), &id).await.unwrap();
+        assert_eq!(*api.removidas.lock().unwrap(), vec!["remota-1".to_string()]);
+    }
+
+    /// 🔑 O `404` do site é o desfecho desejado, e não uma falha.
+    ///
+    /// Um id que não existe mais lá significa que alguém já removeu a foto por
+    /// outra tela. Tratar isso como erro faria o app **insistir** — tentando
+    /// remover, a cada estrela apagada, algo que já saiu.
+    #[tokio::test]
+    async fn ja_removida_no_site_nao_e_erro_e_o_id_sai_daqui() {
+        let mut photo = foto("/ensaio/b.NEF", false);
+        photo.definir_id_no_site(Some("sumida".into()));
+        let id = photo.id();
+
+        let mut repo = MockPhotoRepo::new();
+        repo.expect_find_by_id()
+            .returning(move |_| Ok(Some(photo.clone())));
+        repo.expect_update()
+            .times(1)
+            .withf(|f| f.id_no_site().is_none())
+            .returning(|_| Ok(()));
+
+        let api = Arc::new(ApiDeMentira {
+            some_do_site: vec!["sumida".into()],
+            ..Default::default()
+        });
+        let caso =
+            PublicarNoPosVendaUseCase::new(Arc::new(repo), Arc::new(MockExportador::new()), api);
+
+        caso.remover_do_site(&sessao(), &id)
+            .await
+            .expect("já não estar lá é o que se queria");
+    }
+
+    /// ⚠️ Tirar a nota de uma foto que nunca subiu não fala com o site.
+    ///
+    /// É o caso comum — a maioria das fotos de uma triagem nunca é classificada.
+    /// Uma ida à rede por estrela apagada seria ruído puro.
+    #[tokio::test]
+    async fn foto_que_nunca_subiu_nao_gasta_uma_ida_a_rede() {
+        let photo = foto("/ensaio/c.NEF", false);
+        let id = photo.id();
+
+        let mut repo = MockPhotoRepo::new();
+        repo.expect_find_by_id()
+            .returning(move |_| Ok(Some(photo.clone())));
+        // Nenhum `expect_update`: nada muda, então nada é gravado.
+
+        let api = Arc::new(ApiDeMentira::default());
+        let caso = PublicarNoPosVendaUseCase::new(
+            Arc::new(repo),
+            Arc::new(MockExportador::new()),
+            api.clone(),
+        );
+
+        caso.remover_do_site(&sessao(), &id).await.unwrap();
+        assert!(api.removidas.lock().unwrap().is_empty());
+    }
+
+    /// 📸 Classificar sobe a foto para a galeria que já está aberta.
+    #[tokio::test]
+    async fn enviar_uma_sobe_para_a_galeria_aberta_e_guarda_o_id() {
+        let photo = foto("/ensaio/DSC_009.NEF", false);
+        let id = photo.id();
+
+        let mut repo = MockPhotoRepo::new();
+        repo.expect_find_by_id()
+            .returning(move |_| Ok(Some(photo.clone())));
+        repo.expect_update()
+            .times(1)
+            .withf(|f| f.id_no_site() == Some("f"))
+            .returning(|_| Ok(()));
+
+        let mut exportador = MockExportador::new();
+        exportador
+            .expect_renderizar_jpeg()
+            .returning(|_, _| Ok(vec![1]));
+
+        let api = Arc::new(ApiDeMentira::default());
+        let caso =
+            PublicarNoPosVendaUseCase::new(Arc::new(repo), Arc::new(exportador), api.clone());
+
+        let nome = caso
+            .enviar_uma(&sessao(), "g1", &id, 0)
+            .await
+            .expect("subiu");
+        assert_eq!(nome, "DSC_009.jpg");
+        // 🔑 Não cria galeria e não avisa o cliente: o aviso sai no fim do lote,
+        // e não a cada estrela.
+        assert!(api.galerias.lock().unwrap().is_empty());
+        assert!(api.avisadas.lock().unwrap().is_empty());
+    }
+
+    fn sessao() -> Sessao {
+        Sessao {
+            access_token: "tok".into(),
+        }
     }
 }

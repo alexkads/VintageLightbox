@@ -32,6 +32,11 @@ pub enum Recado {
     Galerias(Vec<GaleriaDoPainel>),
     /// Uma sessão recém-aberta, ainda sem foto nenhuma.
     Criada(Galeria),
+    /// O passo 3 terminou para uma foto: ela subiu, ou saiu do storage.
+    ///
+    /// 🔑 **Notifica, não descreve.** Quem escuta só precisa saber que o
+    /// catálogo mudou, para reler — os números estão no banco.
+    Sincronizou,
     /// Uma frase para a tela — login recusado, rede caída, galeria recusada.
     Falhou(String),
 }
@@ -50,6 +55,17 @@ pub trait Publicador: Send + Sync + 'static {
     fn galerias(&self, sessao: Sessao, canal: Sender<Recado>);
     /// Abre uma sessão vazia — as fotos vêm depois.
     fn criar_galeria(&self, sessao: Sessao, nova: NovaGaleria, canal: Sender<Recado>);
+    /// O passo 3: a foto foi classificada e sobe para a galeria aberta.
+    fn subir_classificada(
+        &self,
+        sessao: Sessao,
+        galeria_id: String,
+        foto_id: String,
+        ordem: u32,
+        canal: Sender<Recado>,
+    );
+    /// O passo 3 ao contrário: a classificação foi zerada, a foto sai do storage.
+    fn tirar_do_site(&self, sessao: Sessao, foto_id: String, canal: Sender<Recado>);
 }
 
 pub struct PublicadorDaApi {
@@ -119,6 +135,38 @@ impl Publicador for PublicadorDaApi {
         });
     }
 
+    fn subir_classificada(
+        &self,
+        sessao: Sessao,
+        galeria_id: String,
+        foto_id: String,
+        ordem: u32,
+        canal: Sender<Recado>,
+    ) {
+        let controlador = self.controlador.clone();
+        self.tokio.spawn(async move {
+            let recado = match controlador
+                .enviar_uma(&sessao, &galeria_id, &foto_id, ordem)
+                .await
+            {
+                Ok(_) => Recado::Sincronizou,
+                Err(erro) => Recado::Falhou(erro),
+            };
+            let _ = canal.send(recado);
+        });
+    }
+
+    fn tirar_do_site(&self, sessao: Sessao, foto_id: String, canal: Sender<Recado>) {
+        let controlador = self.controlador.clone();
+        self.tokio.spawn(async move {
+            let recado = match controlador.remover_do_site(&sessao, &foto_id).await {
+                Ok(()) => Recado::Sincronizou,
+                Err(erro) => Recado::Falhou(erro),
+            };
+            let _ = canal.send(recado);
+        });
+    }
+
     fn publicar(&self, pedido: Pedido, canal: Sender<Recado>) {
         let controlador = self.controlador.clone();
         self.tokio.spawn(async move {
@@ -164,6 +212,10 @@ pub mod mentira {
         pub galerias: Mutex<Vec<GaleriaDoPainel>>,
         /// As que foram abertas por esta tela.
         pub criadas: Mutex<Vec<NovaGaleria>>,
+        /// `(galeria, foto, ordem)` de cada classificada que subiu.
+        pub subidas: Mutex<Vec<(String, String, u32)>>,
+        /// As fotos tiradas do storage.
+        pub tiradas: Mutex<Vec<String>>,
     }
 
     impl PublicadorDeMentira {
@@ -177,6 +229,14 @@ pub mod mentira {
 
         pub fn criadas(&self) -> Vec<NovaGaleria> {
             self.criadas.lock().expect("as criadas").clone()
+        }
+
+        pub fn subidas(&self) -> Vec<(String, String, u32)> {
+            self.subidas.lock().expect("as subidas").clone()
+        }
+
+        pub fn tiradas(&self) -> Vec<String> {
+            self.tiradas.lock().expect("as tiradas").clone()
         }
     }
 
@@ -208,6 +268,26 @@ pub mod mentira {
                 url: format!("https://recordarfotos.com.br/entrar?t={galeria_id}"),
                 validade_em_segundos: 604_800,
             }));
+        }
+
+        fn subir_classificada(
+            &self,
+            _sessao: Sessao,
+            galeria_id: String,
+            foto_id: String,
+            ordem: u32,
+            canal: Sender<Recado>,
+        ) {
+            self.subidas
+                .lock()
+                .expect("as subidas")
+                .push((galeria_id, foto_id, ordem));
+            let _ = canal.send(Recado::Sincronizou);
+        }
+
+        fn tirar_do_site(&self, _sessao: Sessao, foto_id: String, canal: Sender<Recado>) {
+            self.tiradas.lock().expect("as tiradas").push(foto_id);
+            let _ = canal.send(Recado::Sincronizou);
         }
 
         fn galerias(&self, _sessao: Sessao, canal: Sender<Recado>) {
