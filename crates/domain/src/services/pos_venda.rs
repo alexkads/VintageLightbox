@@ -190,6 +190,23 @@ pub struct FotoDaGaleria {
     /// A retenção apagou os arquivos: a linha ficou para a conta de vendas, e
     /// não há imagem para mostrar.
     pub apagada: bool,
+    /// A nota de 1 a 5 do fotógrafo. `None` = **não classificada**.
+    ///
+    /// 🚨 **Sem ela a barra da grade mente.** Os recortes por situação exigem
+    /// classificação (`biblioteca_core::acervo::Filtro`), então uma foto que
+    /// chegasse sempre sem nota cairia toda no recorte "Sem nota" e "À venda"
+    /// mostraria zero numa galeria cheia.
+    pub nota: Option<u8>,
+    /// A faixa que **vale** para esta foto: a dela, ou a da galeria.
+    pub produto_efetivo: String,
+    /// O preço fixado para a compra online, decimal em texto. `None` = a faixa.
+    pub preco_de_venda: Option<String>,
+    /// O pedido que a comprou, quando houve um.
+    pub pedido_id: Option<String>,
+    /// Quantas vezes o cliente baixou o original.
+    pub downloads: u32,
+    /// Se ela já foi revelada no navegador — os 46 ajustes estão gravados.
+    pub revelada: bool,
 }
 
 /// A sessão aberta — o que a tela de uma sessão precisa saber.

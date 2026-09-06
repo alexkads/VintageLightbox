@@ -365,6 +365,13 @@ impl PosVendaApi for PosVendaApiHttp {
                     preco_negociado: f.preco_negociado,
                     observacao_da_negociacao: f.observacao_da_negociacao,
                     apagada: f.apagada_em.is_some(),
+                    nota: f.nota,
+                    produto_efetivo: f.produto_efetivo,
+                    preco_de_venda: f.preco_de_venda,
+                    pedido_id: f.pedido_id,
+                    downloads: f.downloads,
+                    // `ajustes` é `null` enquanto ninguém revelou a foto.
+                    revelada: f.ajustes.is_some(),
                 })
                 .collect(),
             vence_venda: aberta.vence_venda.map(|q| q.timestamp()),
@@ -509,6 +516,20 @@ struct FotoDaGaleriaDaApi {
     observacao_da_negociacao: Option<String>,
     #[serde(default)]
     apagada_em: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default)]
+    nota: Option<u8>,
+    #[serde(default)]
+    produto_efetivo: String,
+    #[serde(default)]
+    preco_de_venda: Option<String>,
+    #[serde(default)]
+    pedido_id: Option<String>,
+    #[serde(default)]
+    downloads: u32,
+    /// Os 46 ajustes da revelação feita no navegador. Aqui só interessa se
+    /// existem — quem revela lê os valores do próprio motor.
+    #[serde(default)]
+    ajustes: Option<serde_json::Value>,
 }
 
 #[derive(Deserialize)]
