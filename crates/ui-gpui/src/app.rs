@@ -650,6 +650,7 @@ impl Aplicativo {
             DetalhePedido::Revelar { foto_id, arquivo } => {
                 self.revelar_do_site(foto_id.clone(), arquivo.clone(), window, cx);
             }
+            DetalhePedido::TelaDoCliente => self.alternar_cliente(cx),
             DetalhePedido::MiniaturaPronta(chave) => {
                 let chave = chave.clone();
                 self.biblioteca
@@ -722,6 +723,25 @@ impl Aplicativo {
         self.publicador
             .copia_de_trabalho(sessao, local, no_site, self.sincronias.0.clone());
         self.esperar_a_sincronia(cx);
+    }
+
+    /// Despacha um gesto de triagem para **a grade que está na frente**.
+    ///
+    /// 🚨 **São duas grades, e nunca as duas ao mesmo tempo**: dentro de um
+    /// ensaio é a da sessão; offline, a Biblioteca solta. As teclas da legenda
+    /// (`1`–`5`, `P`, `Ctrl+A`, `Ctrl+D`, setas) valem nas duas — o que muda é
+    /// quem responde.
+    fn na_grade(
+        &mut self,
+        cx: &mut Context<Self>,
+        na_sessao: impl FnOnce(&mut Detalhe, &mut Context<Detalhe>),
+        na_biblioteca: impl FnOnce(&mut Biblioteca, &mut Context<Biblioteca>),
+    ) {
+        match self.tela {
+            Tela::Sessao => self.detalhe.update(cx, na_sessao),
+            Tela::Biblioteca => self.biblioteca.update(cx, na_biblioteca),
+            _ => {}
+        }
     }
 
     /// O passo 6 do fluxo: **o cliente paga no balcão**.
@@ -1418,11 +1438,9 @@ impl Aplicativo {
         cx: &mut Context<Self>,
         acao: impl FnOnce(&mut Biblioteca, &mut Context<Biblioteca>),
     ) {
-        // 🚨 **A grade está em duas telas, e é a mesma.** Logado, ela vive
-        // dentro do ensaio (`Tela::Sessao`); offline, é a Biblioteca solta. As
-        // treze teclas de triagem valem nas duas, porque nas duas é ela que está
-        // na frente de quem aperta.
-        if !matches!(self.tela, Tela::Biblioteca | Tela::Sessao) {
+        // A Biblioteca solta é a tela do modo offline. Dentro de um ensaio a
+        // grade é a da sessão, e quem despacha para ela é `na_grade`.
+        if self.tela != Tela::Biblioteca {
             return;
         }
         self.biblioteca.update(cx, |tela, cx| acao(tela, cx));
@@ -1438,7 +1456,10 @@ impl Aplicativo {
             // Na Impressão as setas não andam: quem escolhe ali é a faixa de
             // baixo, e "a próxima" não quer dizer nada sobre uma folha. Nas
             // Sessões, pelo mesmo motivo: a lista se percorre com a busca.
-            Tela::Impressao | Tela::Sessoes | Tela::Sessao => {}
+            // Na sessão as setas andam na grade dela — é o que a legenda da
+            // tira promete.
+            Tela::Sessao => self.detalhe.update(cx, |tela, cx| tela.andar(passo, cx)),
+            Tela::Impressao | Tela::Sessoes => {}
         }
     }
 
@@ -2053,22 +2074,46 @@ impl Render for Aplicativo {
                 este.andar(-1, window, cx);
             }))
             .on_action(cx.listener(|este, _: &SemNota, _w, cx| {
-                este.na_biblioteca(cx, |tela, cx| tela.dar_nota(0, cx))
+                este.na_grade(
+                    cx,
+                    |sessao, cx| sessao.dar_nota(0, cx),
+                    |grade, cx| grade.dar_nota(0, cx),
+                )
             }))
             .on_action(cx.listener(|este, _: &UmaEstrela, _w, cx| {
-                este.na_biblioteca(cx, |tela, cx| tela.dar_nota(1, cx))
+                este.na_grade(
+                    cx,
+                    |sessao, cx| sessao.dar_nota(1, cx),
+                    |grade, cx| grade.dar_nota(1, cx),
+                )
             }))
             .on_action(cx.listener(|este, _: &DuasEstrelas, _w, cx| {
-                este.na_biblioteca(cx, |tela, cx| tela.dar_nota(2, cx))
+                este.na_grade(
+                    cx,
+                    |sessao, cx| sessao.dar_nota(2, cx),
+                    |grade, cx| grade.dar_nota(2, cx),
+                )
             }))
             .on_action(cx.listener(|este, _: &TresEstrelas, _w, cx| {
-                este.na_biblioteca(cx, |tela, cx| tela.dar_nota(3, cx))
+                este.na_grade(
+                    cx,
+                    |sessao, cx| sessao.dar_nota(3, cx),
+                    |grade, cx| grade.dar_nota(3, cx),
+                )
             }))
             .on_action(cx.listener(|este, _: &QuatroEstrelas, _w, cx| {
-                este.na_biblioteca(cx, |tela, cx| tela.dar_nota(4, cx))
+                este.na_grade(
+                    cx,
+                    |sessao, cx| sessao.dar_nota(4, cx),
+                    |grade, cx| grade.dar_nota(4, cx),
+                )
             }))
             .on_action(cx.listener(|este, _: &CincoEstrelas, _w, cx| {
-                este.na_biblioteca(cx, |tela, cx| tela.dar_nota(5, cx))
+                este.na_grade(
+                    cx,
+                    |sessao, cx| sessao.dar_nota(5, cx),
+                    |grade, cx| grade.dar_nota(5, cx),
+                )
             }))
             .on_action(cx.listener(|este, _: &CorVermelha, _w, cx| {
                 este.na_biblioteca(cx, |tela, cx| tela.dar_cor(VERMELHO, cx))
@@ -2092,13 +2137,25 @@ impl Render for Aplicativo {
                 este.na_biblioteca(cx, |tela, cx| tela.sinalizar(0, cx))
             }))
             .on_action(cx.listener(|este, _: &AlternarComprada, _w, cx| {
-                este.na_biblioteca(cx, |tela, cx| tela.marcar_comprada(cx))
+                este.na_grade(
+                    cx,
+                    |sessao, cx| sessao.alternar_levada(cx),
+                    |grade, cx| grade.marcar_comprada(cx),
+                )
             }))
             .on_action(cx.listener(|este, _: &SelecionarTudo, _w, cx| {
-                este.na_biblioteca(cx, |tela, cx| tela.selecionar_tudo(cx))
+                este.na_grade(
+                    cx,
+                    |sessao, cx| sessao.selecionar_tudo(cx),
+                    |grade, cx| grade.selecionar_tudo(cx),
+                )
             }))
             .on_action(cx.listener(|este, _: &LimparSelecao, _w, cx| {
-                este.na_biblioteca(cx, |tela, cx| tela.limpar_selecao(cx))
+                este.na_grade(
+                    cx,
+                    |sessao, cx| sessao.limpar_selecao(cx),
+                    |grade, cx| grade.limpar_selecao(cx),
+                )
             }))
             .flex()
             .flex_col()
@@ -2115,23 +2172,11 @@ impl Render for Aplicativo {
                     Tela::Revelacao => self.revelacao.clone().into_any_element(),
                     Tela::Impressao => self.impressao.clone().into_any_element(),
                     Tela::Sessoes => self.sessoes.clone().into_any_element(),
-                    // 🚨 **Cabeçalho e envio em cima, e a grade da Biblioteca
-                    // embaixo** — uma grade só, escopada a este ensaio. É o
-                    // modelo da web, e é onde se revela e se escolhe com o
-                    // cliente.
-                    Tela::Sessao => div()
-                        .flex()
-                        .flex_col()
-                        .size_full()
-                        .child(self.detalhe.clone())
-                        .child(
-                            div()
-                                .flex()
-                                .flex_1()
-                                .min_h(px(0.))
-                                .child(self.biblioteca.clone()),
-                        )
-                        .into_any_element(),
+                    // 🚨 **A sessão é uma tela só**, com tudo dentro: cabeçalho,
+                    // envio, barra, grade, painel da foto e a tira. É a rota
+                    // `[id]` do site, e foi o que o dono pediu ao mandar a
+                    // imagem dela: *"não invente nada"*.
+                    Tela::Sessao => self.detalhe.clone().into_any_element(),
                 }),
             )
             .when(self.importando, |raiz| {
@@ -3656,7 +3701,9 @@ mod testes {
         janela
             .update(cx, |app, _window, cx| {
                 assert_eq!(app.tela(), Tela::Sessao, "escolher a sessão entra nela");
-                app.voltar_para_biblioteca(_window, cx);
+                // A triagem deste teste é a do catálogo local — a grade dele é a
+                // Biblioteca.
+                app.tela = Tela::Biblioteca;
 
                 app.na_biblioteca(cx, |tela, cx| tela.selecionar(Some(0), cx));
                 app.na_biblioteca(cx, |tela, cx| tela.dar_nota(4, cx));

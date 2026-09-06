@@ -138,6 +138,14 @@ impl PosVendaController {
         self.api.abrir_galeria(sessao, id).await.map_err(frase)
     }
 
+    /// Manda ao cliente o e-mail "suas fotos estão prontas".
+    pub async fn avisar(&self, sessao: &Sessao, galeria_id: &str) -> Result<(), String> {
+        self.api
+            .avisar_fotos_prontas(sessao, galeria_id)
+            .await
+            .map_err(frase)
+    }
+
     /// A miniatura de uma foto do site, para a grade da sessão.
     pub async fn miniatura(&self, sessao: &Sessao, foto_id: &str) -> Result<Vec<u8>, String> {
         self.api.miniatura(sessao, foto_id).await.map_err(frase)

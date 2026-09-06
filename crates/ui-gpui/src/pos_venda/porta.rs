@@ -109,6 +109,8 @@ pub trait Publicador: Send + Sync + 'static {
     fn abrir_galeria(&self, sessao: Sessao, galeria_id: String, canal: Sender<Recado>);
     /// A miniatura de uma foto da sessão, para a grade.
     fn miniatura(&self, sessao: Sessao, foto_id: String, canal: Sender<Recado>);
+    /// Manda ao cliente o e-mail "suas fotos estão prontas".
+    fn avisar(&self, sessao: Sessao, galeria_id: String, canal: Sender<Recado>);
     /// O passo 11: os pixels da foto que só existe no storage.
     ///
     /// `foto_local` é o id **do catálogo**, e volta no recado: é por ele que a
@@ -283,6 +285,17 @@ impl Publicador for PublicadorDaApi {
         });
     }
 
+    fn avisar(&self, sessao: Sessao, galeria_id: String, canal: Sender<Recado>) {
+        let controlador = self.controlador.clone();
+        self.tokio.spawn(async move {
+            let recado = match controlador.avisar(&sessao, &galeria_id).await {
+                Ok(()) => Recado::Sincronizou,
+                Err(erro) => Recado::Falhou(erro),
+            };
+            let _ = canal.send(recado);
+        });
+    }
+
     fn copia_de_trabalho(
         &self,
         sessao: Sessao,
@@ -358,6 +371,8 @@ pub mod mentira {
         pub baixadas: Mutex<Vec<String>>,
         /// As sessões em que se entrou.
         pub abertas: Mutex<Vec<String>>,
+        /// As galerias cujo cliente foi avisado.
+        pub avisadas: Mutex<Vec<String>>,
         /// O estado pedido em cada subida — `None` é "o da tecla B".
         pub estados_pedidos: Mutex<Vec<Option<EstadoNoBalcao>>>,
         /// O que a sessão aberta vai mostrar.
@@ -514,6 +529,11 @@ pub mod mentira {
                 vence_venda: None,
                 vence_download: None,
             })));
+        }
+
+        fn avisar(&self, _sessao: Sessao, galeria_id: String, canal: Sender<Recado>) {
+            self.avisadas.lock().expect("as avisadas").push(galeria_id);
+            let _ = canal.send(Recado::Sincronizou);
         }
 
         fn miniatura(&self, _sessao: Sessao, foto_id: String, canal: Sender<Recado>) {

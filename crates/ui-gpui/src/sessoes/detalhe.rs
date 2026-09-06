@@ -33,9 +33,9 @@ use biblioteca_core::acervo::{self, Acervo, Filtro};
 use biblioteca_core::dinheiro;
 use biblioteca_core::selecao::{Modificadores, Selecao};
 use domain::services::pos_venda::{
-    EstadoDaFotoNoSite, EstadoNoBalcao, FotoDaGaleria, GaleriaAberta, LinkDeAcesso, Sessao,
+    EstadoDaFotoNoSite, EstadoNoBalcao, FotoDaGaleria, GaleriaAberta, LinkDeAcesso, Produto, Sessao,
 };
-use gpui::{div, prelude::*, px, Context, EventEmitter, SharedString, Task, Window};
+use gpui::{div, img, prelude::*, px, Context, EventEmitter, SharedString, Task, Window};
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::{ActiveTheme, Disableable, Selectable, Sizable};
 use infrastructure::cache::preview_manager::PreviewManager;
@@ -44,6 +44,26 @@ use super::arquivos::SeletorDeFotos;
 use crate::pos_venda::porta::{Publicador, Recado};
 
 const INTERVALO_DE_COLHEITA: Duration = Duration::from_millis(100);
+
+/// O tamanho do tile, em pixels — os mesmos limites da barra do site.
+const ZOOM_MINIMO: f32 = 90.0;
+const ZOOM_MAXIMO: f32 = 320.0;
+const ZOOM_PADRAO: f32 = 160.0;
+const PASSO_DO_ZOOM: f32 = 35.0;
+
+/// Os recortes da barra, na ordem da web.
+///
+/// 🚨 **"Sem nota" é o último de propósito**: é um recorte de exceção — o que
+/// está sem classificação não pode ir à venda, não recebe marca d'água e não
+/// devia estar no storage. Ele existe para esvaziar, não para consultar.
+const FILTROS: [(&str, Filtro); 6] = [
+    ("Todas", Filtro::Todas),
+    ("Levadas", Filtro::Situacao(acervo::Estado::LevadaNoBalcao)),
+    ("À venda", Filtro::Situacao(acervo::Estado::Disponivel)),
+    ("Compradas", Filtro::Situacao(acervo::Estado::Comprada)),
+    ("Apagadas", Filtro::Apagadas),
+    ("Sem nota", Filtro::SemNota),
+];
 
 // 📌 A barra de recortes do site saiu daqui em 6/set/2026, junto com a grade
 // duplicada: a grade passou a ser a da Biblioteca, escopada ao ensaio. Os
@@ -57,6 +77,8 @@ pub enum Pedido {
     Voltar,
     /// A miniatura de uma foto do site chegou ao cache, sob esta chave.
     MiniaturaPronta(String),
+    /// Abrir (ou fechar) a segunda tela, a do cliente.
+    TelaDoCliente,
     /// A sessão abriu (ou foi relida): estas são as fotos que já estão no site.
     ///
     /// 🔑 Quem as põe na grade é a raiz — a grade é uma só, e nela as do site
@@ -85,6 +107,14 @@ pub struct Detalhe {
     pedidas: std::collections::HashSet<String>,
     /// Quantas miniaturas ainda estão a caminho.
     baixando: usize,
+    /// As faixas de preço do catálogo — o `select` da barra de envio.
+    produtos: Vec<Produto>,
+    /// A faixa escolhida para a próxima leva. `None` = a padrão da galeria.
+    faixa: Option<String>,
+    /// O lado do tile, em pixels.
+    zoom: f32,
+    /// Se o aviso ao cliente está a caminho.
+    avisando: bool,
     /// Quem abre a janela **do sistema** para escolher as fotos.
     seletor: Arc<dyn SeletorDeFotos>,
     /// Por onde os caminhos escolhidos voltam.
@@ -134,6 +164,10 @@ impl Detalhe {
             previews,
             pedidas: std::collections::HashSet::new(),
             baixando: 0,
+            produtos: Vec::new(),
+            faixa: None,
+            zoom: ZOOM_PADRAO,
+            avisando: false,
             enviando: 0,
             enviadas: 0,
             link: None,
@@ -237,7 +271,124 @@ impl Detalhe {
     /// (`Foto::editavel`): a comprada tem cobrança atrás dela, e a apagada não
     /// tem arquivo. Mandar assim mesmo traria um erro por foto.
     pub fn marcar_como(&mut self, estado: EstadoNoBalcao, cx: &mut Context<Self>) {
-        let (Some(sessao), Some(_)) = (self.sessao.clone(), self.galeria_id.clone()) else {
+        self.mudar_as_marcadas(
+            domain::services::pos_venda::MudancaDaFoto {
+                estado: Some(estado),
+                ..Default::default()
+            },
+            cx,
+        );
+    }
+
+    pub fn zoom(&self) -> f32 {
+        self.zoom
+    }
+
+    pub fn ajustar_zoom(&mut self, passo: f32, cx: &mut Context<Self>) {
+        self.zoom = (self.zoom + passo).clamp(ZOOM_MINIMO, ZOOM_MAXIMO);
+        cx.notify();
+    }
+
+    pub fn produtos(&self) -> &[Produto] {
+        &self.produtos
+    }
+
+    pub fn faixa(&self) -> Option<&str> {
+        self.faixa.as_deref()
+    }
+
+    pub fn escolher_faixa(&mut self, id: Option<String>, cx: &mut Context<Self>) {
+        self.faixa = id;
+        cx.notify();
+    }
+
+    /// A foto em foco — a que o painel da direita descreve.
+    pub fn em_foco(&self) -> Option<&acervo::Foto> {
+        self.selecao.foco().and_then(|p| self.acervo.visivel(p))
+    }
+
+    pub fn posicao_em_foco(&self) -> Option<usize> {
+        self.selecao.foco()
+    }
+
+    pub fn total_visivel(&self) -> usize {
+        self.acervo.total_visivel()
+    }
+
+    /// As setas da tira: um passo, sem dar a volta.
+    pub fn andar(&mut self, passo: i32, cx: &mut Context<Self>) {
+        let total = self.acervo.total_visivel();
+        if total == 0 {
+            return;
+        }
+        let nova = match (self.selecao.foco(), passo > 0) {
+            (Some(i), true) => (i + 1).min(total - 1),
+            (Some(i), false) => i.saturating_sub(1),
+            (None, true) => 0,
+            (None, false) => total - 1,
+        };
+        self.selecao.clicar(nova, false, Modificadores::default());
+        cx.notify();
+    }
+
+    /// `1`–`5` dão a nota; `0` a tira.
+    ///
+    /// 🚨 **Tirar a nota de uma foto do acervo é removê-la**, e o site recusa
+    /// `nota: null` justamente por isso — foi a classificação que a autorizou a
+    /// subir. Aqui a tecla `0` avisa, em vez de mandar um pedido que voltaria
+    /// recusado.
+    pub fn dar_nota(&mut self, nota: u8, cx: &mut Context<Self>) {
+        if nota == 0 {
+            self.erro =
+                Some("tirar a nota de uma foto do acervo é removê-la do site — use Apagar".into());
+            cx.notify();
+            return;
+        }
+        self.mudar_as_marcadas(
+            domain::services::pos_venda::MudancaDaFoto {
+                nota: Some(Some(nota as i16)),
+                ..Default::default()
+            },
+            cx,
+        );
+    }
+
+    /// `P`: levada no balcão, e o mesmo gesto devolve à venda.
+    pub fn alternar_levada(&mut self, cx: &mut Context<Self>) {
+        let todas_levadas = self
+            .selecao
+            .marcadas()
+            .filter_map(|p| self.acervo.visivel(p))
+            .all(|f| f.estado == acervo::Estado::LevadaNoBalcao);
+        let estado = if todas_levadas {
+            EstadoNoBalcao::Disponivel
+        } else {
+            EstadoNoBalcao::LevadaNoBalcao
+        };
+        self.marcar_como(estado, cx);
+    }
+
+    pub fn limpar_selecao(&mut self, cx: &mut Context<Self>) {
+        self.selecao.desmarcar();
+        cx.notify();
+    }
+
+    pub fn selecionar_tudo(&mut self, cx: &mut Context<Self>) {
+        self.selecao.marcar_todas(self.acervo.total_visivel());
+        cx.notify();
+    }
+
+    /// Manda a mesma mudança para todas as marcadas que ainda podem mudar.
+    ///
+    /// ⚠️ **A comprada e a apagada ficam de fora**, e quem decide é o core
+    /// (`Foto::editavel`): a comprada tem cobrança atrás dela, e a apagada não
+    /// tem arquivo.
+    fn mudar_as_marcadas(
+        &mut self,
+        mudanca: domain::services::pos_venda::MudancaDaFoto,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(sessao) = self.sessao.clone() else {
             return;
         };
         let alvos: Vec<String> = self
@@ -251,10 +402,6 @@ impl Detalhe {
             return;
         }
 
-        let mudanca = domain::services::pos_venda::MudancaDaFoto {
-            estado: Some(estado),
-            ..Default::default()
-        };
         self.erro = None;
         self.enviadas = 0;
         self.enviando = alvos.len();
@@ -351,6 +498,25 @@ impl Detalhe {
                 self.recados.0.clone(),
             );
         }
+        self.acompanhar(cx);
+        cx.notify();
+    }
+
+    /// 📧 Manda o e-mail "suas fotos estão prontas".
+    ///
+    /// ⚠️ **Quem escreve e manda é o site**; o app só pede. A falha do aviso não
+    /// é falha da sessão — as fotos continuam no ar, e o operador reenvia.
+    pub fn avisar(&mut self, cx: &mut Context<Self>) {
+        let (Some(sessao), Some(galeria_id)) = (self.sessao.clone(), self.galeria_id.clone())
+        else {
+            return;
+        };
+        if self.avisando {
+            return;
+        }
+        self.avisando = true;
+        self.publicador
+            .avisar(sessao, galeria_id, self.recados.0.clone());
         self.acompanhar(cx);
         cx.notify();
     }
@@ -454,6 +620,7 @@ impl Detalhe {
                     }
                 }
                 Recado::Sincronizou => {
+                    self.avisando = false;
                     self.enviadas += 1;
                     self.enviando = self.enviando.saturating_sub(1);
                     if self.enviando == 0 {
@@ -490,7 +657,7 @@ impl Detalhe {
         // 🔑 O laço para quando não há mais resposta a esperar. As miniaturas
         // não entram na conta: elas chegam pelo mesmo canal, e o `abriu` religa
         // o laço quando um lote novo é pedido.
-        let continua = self.carregando || self.enviando > 0 || self.baixando > 0;
+        let continua = self.carregando || self.enviando > 0 || self.baixando > 0 || self.avisando;
         if !continua {
             self.colhendo = false;
         }
@@ -504,31 +671,34 @@ impl Render for Detalhe {
             .flex()
             .flex_col()
             .gap(px(10.))
-            // 🚨 **Largura cheia, altura do conteúdo.** Com `size_full` este
-            // bloco comia os 100% da coluna e a grade do ensaio, logo abaixo,
-            // ficava com zero de altura — a sessão abria parecendo vazia mesmo
-            // com 25 fotos no site. Ele é o cabeçalho da tela, não a tela.
-            .w_full()
-            .flex_shrink_0()
+            // 🚨 **Ela é a tela inteira**, e a grade dentro dela é que recebe o
+            // `flex_1`. Foi o contrário disto que deixou a sessão parecendo
+            // vazia: um cabeçalho com `size_full` comendo a coluna toda.
+            .size_full()
             .p(px(12.))
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .child(self.cabecalho(cx))
             .child(self.envio(cx))
+            .child(self.barra_da_grade(cx))
             .when_some(self.erro.clone(), |tela, erro| {
                 tela.child(div().text_xs().text_color(cx.theme().danger).child(erro))
             })
-            // 🚨 **A grade não é desenhada aqui.** Ela é a da Biblioteca,
-            // escopada a este ensaio — o modelo da web: uma grade só, com as
-            // locais e as do acervo juntas, e nela é que se revela e se escolhe
-            // com o cliente. Duas grades para a mesma coisa foi o que fez o app
-            // parecer que tinha dois lugares para o mesmo trabalho.
-            .child(self.resumo_da_grade(cx))
+            .child(self.corpo(cx))
+            .child(self.tira(cx))
     }
 }
 
 impl Detalhe {
+    /// O cabeçalho da sessão: quem é o cliente, o que ela tem, e as duas saídas.
+    ///
+    /// 🔑 **As contagens aqui são por estado, cruas** — `2 levadas · 2 à venda ·
+    /// 0 compradas`. As fichas da barra contam outra coisa: recorte por situação
+    /// **exige classificação**, e por isso uma galeria com 4 levadas sem nota
+    /// mostra `Levadas 0` lá e `4 levadas` aqui. Os dois números estão certos, e
+    /// respondem perguntas diferentes.
     fn cabecalho(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let (levadas, a_venda, compradas) = self.contagem();
         let titulo = self
             .aberta
             .as_ref()
@@ -537,61 +707,78 @@ impl Detalhe {
         let contato = self
             .aberta
             .as_ref()
-            .and_then(|a| {
-                a.galeria
-                    .email
-                    .clone()
-                    .or_else(|| a.galeria.whatsapp.clone())
+            .map(|a| {
+                let mut partes = Vec::new();
+                if let Some(email) = &a.galeria.email {
+                    partes.push(email.clone());
+                }
+                if let Some(zap) = &a.galeria.whatsapp {
+                    partes.push(zap.clone());
+                }
+                partes.join(" · ")
             })
-            .unwrap_or_else(|| "sem contato".into());
+            .unwrap_or_default();
+        let ja_abriu = self
+            .aberta
+            .as_ref()
+            .is_some_and(|a| a.galeria.user_id.is_some());
+        let email = self.aberta.as_ref().and_then(|a| a.galeria.email.clone());
 
         div()
             .flex()
             .items_center()
             .gap(px(8.))
-            .pb(px(8.))
+            .pb(px(6.))
             .border_b_1()
             .border_color(cx.theme().border)
+            .child(div().text_sm().truncate().child(titulo))
             .child(
                 div()
-                    .flex()
-                    .flex_col()
-                    .flex_1()
-                    .child(div().text_sm().child(titulo))
-                    // 🔑 **As contagens não moram aqui**, e sim nas fichas da
-                    // barra: é onde a web as pôs, porque o assunto desta tela é
-                    // a foto, e quatro números no topo custam a altura dela.
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(contato),
-                    )
-                    .when(
-                        self.aberta
-                            .as_ref()
-                            .is_some_and(|a| a.galeria.user_id.is_some()),
-                        |cabecalho| {
-                            cabecalho.child(
-                                div()
-                                    .text_xs()
-                                    .text_color(cx.theme().primary)
-                                    .child("o cliente já abriu"),
-                            )
-                        },
-                    ),
+                    .text_xs()
+                    .truncate()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(contato),
+            )
+            .when(ja_abriu, |cabecalho| {
+                cabecalho.child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().primary)
+                        .child("já abriu"),
+                )
+            })
+            .child(div().flex_1())
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(SharedString::from(format!(
+                        "{levadas} levadas · {a_venda} à venda · {compradas} compradas"
+                    ))),
             )
             .child(
-                Button::new("detalhe-link")
+                Button::new("sessao-link")
                     .label(if self.link.is_some() {
                         "Copiar de novo"
                     } else {
-                        "Copiar link do cliente"
+                        "Copiar link"
                     })
                     .xsmall()
                     .disabled(self.aberta.is_none())
                     .on_click(cx.listener(|tela, _ev, _window, cx| tela.pedir_o_link(cx))),
             )
+            // 📧 O aviso só existe com e-mail: a conta do cliente nasce dele, e
+            // sem ele não há para onde mandar "fotos prontas".
+            .when_some(email, |cabecalho, email| {
+                cabecalho.child(
+                    Button::new("sessao-avisar")
+                        .label(SharedString::from(format!("Avisar {email}: fotos prontas")))
+                        .xsmall()
+                        .primary()
+                        .disabled(self.avisando)
+                        .on_click(cx.listener(|tela, _ev, _window, cx| tela.avisar(cx))),
+                )
+            })
     }
 
     /// A área de envio: **arrastar a pasta**, ou a janela do sistema.
@@ -715,25 +902,431 @@ impl Detalhe {
     }
 
     /// Uma linha dizendo o que a grade abaixo está mostrando.
-    fn resumo_da_grade(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    /// A barra da grade: recortes · zoom · Revelar · Tela do cliente · seleção.
+    fn barra_da_grade(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let contagens = self.contagens();
-        let no_site = contagens.todas;
+        let ativo = self.filtro();
+        let visiveis = self.acervo.total_visivel();
+        let marcadas = self.quantas_marcadas();
+        let todas_marcadas = visiveis > 0 && marcadas == visiveis;
+
         div()
-            .text_xs()
-            .text_color(cx.theme().muted_foreground)
-            .child(if self.carregando {
-                "Lendo a sessão…".to_string()
-            } else if no_site == 0 {
-                "Nenhuma foto no site ainda — importe ou arraste a primeira leva.".to_string()
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .gap(px(4.))
+            .children(FILTROS.into_iter().filter_map(|(rotulo, filtro)| {
+                let quantas = contagens.de(filtro);
+                // 🔑 O recorte vazio some — **menos** quando é o escolhido:
+                // sumir o filtro ativo tiraria o caminho de volta.
+                let mostrar = filtro == Filtro::Todas || quantas > 0 || ativo == filtro;
+                mostrar.then(|| {
+                    Button::new(SharedString::from(format!("sessao-filtro-{rotulo}")))
+                        .label(format!("{rotulo} {quantas}"))
+                        .xsmall()
+                        .selected(ativo == filtro)
+                        .on_click(
+                            cx.listener(move |tela, _ev, _window, cx| tela.filtrar(filtro, cx)),
+                        )
+                })
+            }))
+            .child(div().flex_1())
+            .child(
+                Button::new("sessao-zoom-menos")
+                    .label("−")
+                    .xsmall()
+                    .on_click(
+                        cx.listener(|tela, _ev, _window, cx| tela.ajustar_zoom(-PASSO_DO_ZOOM, cx)),
+                    ),
+            )
+            .child(
+                Button::new("sessao-zoom-mais")
+                    .label("+")
+                    .xsmall()
+                    .on_click(
+                        cx.listener(|tela, _ev, _window, cx| tela.ajustar_zoom(PASSO_DO_ZOOM, cx)),
+                    ),
+            )
+            .child(
+                Button::new("sessao-revelar")
+                    .label("Revelar")
+                    .xsmall()
+                    .disabled(self.em_foco().is_none())
+                    .on_click(cx.listener(|tela, _ev, _window, cx| tela.revelar_a_do_foco(cx))),
+            )
+            .child(
+                Button::new("sessao-tela-do-cliente")
+                    .label("Tela do cliente")
+                    .xsmall()
+                    .on_click(
+                        cx.listener(|_tela, _ev, _window, cx| cx.emit(Pedido::TelaDoCliente)),
+                    ),
+            )
+            .child(
+                Button::new("sessao-selecionar-visiveis")
+                    .label(format!(
+                        "{} as {visiveis} visíveis",
+                        if todas_marcadas {
+                            "Desmarcar"
+                        } else {
+                            "Selecionar"
+                        }
+                    ))
+                    .xsmall()
+                    .disabled(visiveis == 0)
+                    .on_click(cx.listener(|tela, _ev, _window, cx| tela.alternar_todas(cx))),
+            )
+    }
+
+    /// Pede à raiz que revele a foto em foco.
+    pub fn revelar_a_do_foco(&mut self, cx: &mut Context<Self>) {
+        if let Some(foto) = self.em_foco() {
+            cx.emit(Pedido::Revelar {
+                foto_id: foto.id.clone(),
+                arquivo: foto.arquivo.clone(),
+            });
+        }
+    }
+
+    /// A grade e o painel da foto, lado a lado — como na tela do site.
+    fn corpo(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .flex()
+            .flex_1()
+            .min_h(px(0.))
+            .gap(px(8.))
+            .child(self.grade(cx))
+            .children(self.painel(cx))
+    }
+
+    fn grade(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.acervo.total_visivel() == 0 {
+            let frase = if self.aberta.is_none() && self.carregando {
+                "Lendo a sessão…"
+            } else if self.acervo.todas().is_empty() {
+                "Nenhuma foto nesta sessão ainda — arraste a primeira leva acima."
             } else {
-                format!(
-                    "{no_site} no site · {} levada(s) · {} à venda · {} comprada(s). \
-                     A grade abaixo mostra estas e as que ainda não subiram.",
-                    contagens.de(Filtro::Situacao(acervo::Estado::LevadaNoBalcao)),
-                    contagens.de(Filtro::Situacao(acervo::Estado::Disponivel)),
-                    contagens.de(Filtro::Situacao(acervo::Estado::Comprada)),
-                )
+                "Nenhuma foto neste recorte."
+            };
+            return div()
+                .flex_1()
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .child(frase)
+                .into_any_element();
+        }
+
+        div()
+            .flex_1()
+            .min_w(px(0.))
+            .flex()
+            .flex_wrap()
+            .gap(px(8.))
+            .overflow_hidden()
+            .children(
+                self.acervo
+                    .visiveis()
+                    .enumerate()
+                    .map(|(posicao, foto)| self.celula(posicao, foto, cx))
+                    .collect::<Vec<_>>(),
+            )
+            .into_any_element()
+    }
+
+    fn celula(
+        &self,
+        posicao: usize,
+        foto: &acervo::Foto,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let marcada = self.selecao.tem(posicao);
+        let em_foco = self.selecao.foco() == Some(posicao);
+        let lado = self.zoom;
+        let chave = format!("site:{}", foto.id);
+        let miniatura = self
+            .previews
+            .get_preview(&chave)
+            .or_else(|| self.previews.get_thumbnail(&chave))
+            .map(crate::imagem::para_gpui);
+
+        div()
+            .id(SharedString::from(format!("sessao-tile-{}", foto.id)))
+            .w(px(lado))
+            .flex()
+            .flex_col()
+            .gap(px(2.))
+            .cursor_pointer()
+            .on_click(
+                cx.listener(move |tela, evento: &gpui::ClickEvent, _window, cx| {
+                    if evento.click_count() >= 2 {
+                        tela.selecao
+                            .clicar(posicao, false, Modificadores::default());
+                        tela.revelar_a_do_foco(cx);
+                        return;
+                    }
+                    let m = evento.modifiers();
+                    tela.clicar(
+                        posicao,
+                        Modificadores {
+                            aditivo: m.secondary(),
+                            faixa: m.shift,
+                        },
+                        cx,
+                    );
+                }),
+            )
+            .child(
+                div()
+                    .relative()
+                    .h(px(lado * 0.72))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .bg(cx.theme().muted)
+                    .rounded(cx.theme().radius)
+                    .border_1()
+                    // 🔑 A marcação é **borda**, e não fundo: fundo colorido
+                    // mudaria a cor que o olho usa para julgar a foto ao lado.
+                    .border_color(if em_foco {
+                        cx.theme().primary
+                    } else if marcada {
+                        cx.theme().warning
+                    } else {
+                        cx.theme().border
+                    })
+                    .when_some(miniatura, |quadro, imagem| {
+                        quadro.child(img(imagem).h(px(lado * 0.72)))
+                    })
+                    // O selo do estado, no canto — como na tela do site.
+                    .child(
+                        div()
+                            .absolute()
+                            .top(px(4.))
+                            .left(px(4.))
+                            .px(px(4.))
+                            .rounded(cx.theme().radius)
+                            .bg(cx.theme().background)
+                            .text_xs()
+                            .child(if foto.apagada {
+                                "Apagada".to_string()
+                            } else {
+                                foto.estado.rotulo().to_string()
+                            }),
+                    )
+                    .when(marcada, |quadro| {
+                        quadro.child(
+                            div()
+                                .absolute()
+                                .top(px(4.))
+                                .right(px(4.))
+                                .text_xs()
+                                .text_color(cx.theme().warning)
+                                .child("✓"),
+                        )
+                    }),
+            )
+            .child(div().text_xs().truncate().child(SharedString::from(format!(
+                "{}. {}",
+                posicao + 1,
+                foto.arquivo
+            ))))
+            .child(
+                div()
+                    .text_xs()
+                    .truncate()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(SharedString::from(format!(
+                        "{} · {} download(s)",
+                        self.nome_da_faixa(&foto.produto_efetivo),
+                        foto.downloads
+                    ))),
+            )
+    }
+
+    /// O nome da faixa, como o operador a conhece.
+    fn nome_da_faixa(&self, id: &str) -> String {
+        self.produtos
+            .iter()
+            .find(|p| p.id == id)
+            .map(|p| {
+                let centavos = dinheiro::ler_campo(&p.preco).unwrap_or(0);
+                format!("{} — {}", p.nome, dinheiro::formatar(centavos))
             })
+            .unwrap_or_else(|| "Padrão da galeria".to_string())
+    }
+
+    /// O painel da direita: o que se sabe e o que se muda **nesta** foto.
+    fn painel(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+        let foto = self.em_foco()?;
+        let posicao = self.selecao.foco()? + 1;
+        let negociada = foto.tem_negociacao();
+
+        Some(
+            div()
+                .w(px(300.))
+                .flex_shrink_0()
+                .flex()
+                .flex_col()
+                .gap(px(6.))
+                .p(px(10.))
+                .rounded(cx.theme().radius)
+                .border_1()
+                .border_color(cx.theme().border)
+                .child(
+                    div()
+                        .text_sm()
+                        .truncate()
+                        .child(SharedString::from(format!("{posicao}. {}", foto.arquivo))),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(foto.estado.rotulo()),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(match foto.nota {
+                            Some(n) => format!("Nota {}", "★".repeat(n as usize)),
+                            None => "Sem nota".to_string(),
+                        }),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .gap(px(6.))
+                        .child(
+                            Button::new("painel-estado")
+                                .label(if foto.estado == acervo::Estado::LevadaNoBalcao {
+                                    "Pôr à venda"
+                                } else {
+                                    "Levada no balcão"
+                                })
+                                .xsmall()
+                                .disabled(!foto.editavel())
+                                .on_click(
+                                    cx.listener(|tela, _ev, _window, cx| tela.alternar_levada(cx)),
+                                ),
+                        )
+                        .child(
+                            Button::new("painel-revelar")
+                                .label("Revelar")
+                                .xsmall()
+                                .on_click(
+                                    cx.listener(|tela, _ev, _window, cx| {
+                                        tela.revelar_a_do_foco(cx)
+                                    }),
+                                ),
+                        ),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(SharedString::from(format!(
+                            "Faixa: {}",
+                            self.nome_da_faixa(&foto.produto_efetivo)
+                        ))),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(SharedString::from(format!(
+                            "Downloads {} · {}",
+                            foto.downloads,
+                            match foto.preco_de_venda {
+                                Some(centavos) =>
+                                    format!("preço fixado {}", dinheiro::formatar(centavos)),
+                                None => "sem valor fixado: vale o preço da faixa".to_string(),
+                            }
+                        ))),
+                )
+                .when(negociada, |painel| {
+                    painel.child(div().text_xs().text_color(cx.theme().warning).child(
+                        match foto.preco_negociado {
+                            Some(centavos) => format!("Balcão: {}", dinheiro::formatar(centavos)),
+                            None => "Balcão: registrado".to_string(),
+                        },
+                    ))
+                })
+                // 📌 A negociação, o preço de venda e o apagar ficam para o
+                // próximo passo — eles pedem campos e confirmação, e entram
+                // inteiros ou não entram.
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Negociação e preço: pelo Balcão, na barra de cima."),
+                ),
+        )
+    }
+
+    /// A tira e a legenda das teclas — o rodapé da tela do site.
+    fn tira(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let total = self.acervo.total_visivel();
+        let atual = self.selecao.foco().map(|i| i + 1).unwrap_or(0);
+
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(4.))
+            .pt(px(6.))
+            .border_t_1()
+            .border_color(cx.theme().border)
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(SharedString::from(format!(
+                        "{atual} / {total} · ←→ andam · 1–5 nota · P levada no balcão · \
+                         Ctrl ou Shift no clique marcam várias · Ctrl+A marca tudo, \
+                         Ctrl+D desmarca"
+                    ))),
+            )
+            .child(
+                div().flex().gap(px(4.)).overflow_hidden().children(
+                    self.acervo
+                        .visiveis()
+                        .enumerate()
+                        .map(|(posicao, foto)| {
+                            let chave = format!("site:{}", foto.id);
+                            let miniatura = self
+                                .previews
+                                .get_thumbnail(&chave)
+                                .or_else(|| self.previews.get_preview(&chave))
+                                .map(crate::imagem::para_gpui);
+                            div()
+                                .id(SharedString::from(format!("tira-{}", foto.id)))
+                                .w(px(56.))
+                                .h(px(56.))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .rounded(cx.theme().radius)
+                                .cursor_pointer()
+                                .border_1()
+                                .border_color(if self.selecao.foco() == Some(posicao) {
+                                    cx.theme().primary
+                                } else {
+                                    cx.theme().border
+                                })
+                                .bg(cx.theme().muted)
+                                .when_some(miniatura, |celula, imagem| {
+                                    celula.child(img(imagem).h(px(54.)))
+                                })
+                                .on_click(cx.listener(move |tela, _ev, _window, cx| {
+                                    tela.clicar(posicao, Modificadores::default(), cx)
+                                }))
+                        })
+                        .collect::<Vec<_>>(),
+                ),
+            )
     }
 }
 

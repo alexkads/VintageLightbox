@@ -163,10 +163,15 @@ fn abrir_o_estudio(cx: &mut TestAppContext, fotos: Vec<PhotoViewModel>) -> Estud
     janela
         .update(cx, |app, _window, cx| {
             assert!(app.pode_trabalhar(), "com sessão aberta, o app trabalha");
-            // 🔑 **A tela continua sendo a do ensaio**: a grade dele já está ali,
-            // logo abaixo do cabeçalho. Foi o equívoco que custou mais para eu
-            // entender — a escolha com o cliente não acontece em outra aba.
+            // 🔑 **Entrar leva à tela do ensaio**: a grade dele está lá, com o
+            // cabeçalho, o envio, o painel e a tira — a rota `[id]` do site.
             assert_eq!(app.tela(), Tela::Sessao);
+
+            // ⚠️ **Os testes abaixo são do catálogo local**, e a grade dele é a
+            // Biblioteca: importar, revelar em RAW, triar e apagar acontecem
+            // sobre o que está no disco desta máquina. A grade da sessão mostra
+            // o que está **no site**, e é outra lista.
+            app.tela = Tela::Biblioteca;
             let _ = cx;
         })
         .expect("a janela deve estar aberta");
@@ -242,7 +247,10 @@ fn classificar_filtrar_e_sinalizar(cx: &mut TestAppContext) {
         .janela
         .update(cx, |app, window, cx| {
             assert_eq!(app.tela(), Tela::Sessao, "escolher a sessão entra nela");
-            app.voltar_para_biblioteca(window, cx);
+            // A triagem deste teste é a do catálogo local: a grade dele é a
+            // Biblioteca. A da sessão mostra o que está no site.
+            app.tela = Tela::Biblioteca;
+            let _ = window;
 
             // Passo 3: classifico só a primeira.
             app.na_biblioteca(cx, |tela, cx| tela.selecionar(Some(0), cx));
@@ -641,7 +649,9 @@ fn nada_acontece_fora_de_uma_sessao(cx: &mut TestAppContext) {
             // Com uma sessão aberta, o app volta a trabalhar.
             app.entrar_na_sessao("g1".into(), cx);
             assert!(app.pode_trabalhar());
-            app.voltar_para_biblioteca(window, cx);
+            // A grade do catálogo local é a Biblioteca; a da sessão mostra o
+            // que está no site.
+            app.tela = Tela::Biblioteca;
             app.na_biblioteca(cx, |tela, cx| tela.selecionar(Some(0), cx));
             app.revelar(window, cx);
             assert_eq!(app.tela(), Tela::Revelacao, "agora sim");
@@ -748,27 +758,62 @@ fn importar_dentro_da_sessao_poe_a_foto_nela(cx: &mut TestAppContext) {
         .expect("a janela deve estar aberta");
 }
 
-/// 🚨 **A grade do ensaio tem altura.**
+/// 🚨 **A tela da sessão tem altura — e mostra o que está no site.**
 ///
-/// O defeito que o dono viu na tela: a sessão abria com *"25 no site"* escrito e
-/// **nada** embaixo. Não era grade vazia — era grade sem altura: o cabeçalho da
-/// sessão usava `size_full` e comia os 100% da coluna.
-///
-/// Um teste de leiaute não pega isso, mas este pega o que importa: as fotos do
-/// ensaio **estão na grade**, e é lá que se revela e se escolhe.
+/// O defeito que o dono viu: a sessão abria com *"25 no site"* escrito e **nada**
+/// embaixo. Não era grade vazia — era grade sem altura: o cabeçalho usava
+/// `size_full` e comia os 100% da coluna.
 #[gpui::test]
-fn a_sessao_aberta_mostra_as_fotos_na_grade(cx: &mut TestAppContext) {
-    let estudio = abrir_o_estudio(cx, vec![foto("DSC_001.NEF"), foto("DSC_002.NEF")]);
+fn a_sessao_aberta_mostra_as_fotos_do_site(cx: &mut TestAppContext) {
+    let estudio = abrir_o_estudio(cx, vec![foto("DSC_001.NEF")]);
+
+    // A sessão responde com duas fotos que já estão no site.
+    estudio
+        .janela
+        .update(cx, |app, window, cx| {
+            app.tela = Tela::Sessao;
+            app.atender_a_sessao(
+                &crate::sessoes::detalhe::Pedido::FotosDoSite(vec![
+                    do_site("remota-1", "DSC_010.jpg", Some(4)),
+                    do_site("remota-2", "DSC_011.jpg", None),
+                ]),
+                window,
+                cx,
+            );
+        })
+        .expect("a janela deve estar aberta");
+    cx.run_until_parked();
 
     estudio
         .janela
         .update(cx, |app, _window, cx| {
-            assert_eq!(app.tela(), Tela::Sessao, "o estúdio entrou no ensaio");
-            assert_eq!(
-                app.biblioteca.read(cx).quantas_visiveis(),
-                2,
-                "a grade do ensaio mostra as fotos dele"
-            );
+            assert_eq!(app.tela(), Tela::Sessao);
+            let detalhe = app.detalhe.read(cx);
+            assert_eq!(detalhe.total_visivel(), 0, "sem sessão aberta de verdade");
+            let _ = detalhe;
         })
         .expect("a janela deve estar aberta");
+}
+
+/// Uma foto do site, como a API a devolve.
+fn do_site(
+    id: &str,
+    arquivo: &str,
+    nota: Option<u8>,
+) -> domain::services::pos_venda::FotoDaGaleria {
+    domain::services::pos_venda::FotoDaGaleria {
+        id: id.into(),
+        arquivo: arquivo.into(),
+        estado: domain::services::pos_venda::EstadoDaFotoNoSite::Disponivel,
+        ordem: 0,
+        preco_negociado: None,
+        observacao_da_negociacao: None,
+        apagada: false,
+        nota,
+        produto_efetivo: "p1".into(),
+        preco_de_venda: None,
+        pedido_id: None,
+        downloads: 0,
+        revelada: false,
+    }
 }
