@@ -125,7 +125,15 @@ impl Filtro {
         match self {
             Filtro::Todas => true,
             Filtro::Apagadas => foto.apagada,
-            Filtro::Situacao(estado) => !foto.apagada && foto.estado == estado,
+            // 🚨 **Sem classificação não é "à venda" nem "levada".** A regra
+            // do dono (2026-09-05) é que a foto só pode ficar à venda se
+            // estiver classificada; contá-la no recorte de venda dizia o
+            // contrário na primeira linha da tela — *"à venda 8"* numa galeria
+            // em que nenhuma das oito tinha nota, e nenhuma sequer havia
+            // subido. Elas moram no recorte `SemNota`, que existe para isso.
+            Filtro::Situacao(estado) => {
+                !foto.apagada && foto.nota.is_some() && foto.estado == estado
+            }
             Filtro::SemNota => !foto.apagada && foto.nota.is_none(),
         }
     }
@@ -241,10 +249,12 @@ impl Acervo {
         for f in &self.fotos {
             if f.apagada {
                 c.apagadas += 1;
+            } else if f.nota.is_none() {
+                // 🚨 Ela não entra em nenhum recorte de situação — ver
+                // `Filtro::bate`. O número que a barra mostra é o mesmo que o
+                // recorte devolve, sempre.
+                c.sem_nota += 1;
             } else {
-                if f.nota.is_none() {
-                    c.sem_nota += 1;
-                }
                 match f.estado {
                     Estado::LevadaNoBalcao => c.levadas += 1,
                     Estado::Disponivel => c.a_venda += 1,
@@ -361,6 +371,28 @@ mod testes {
         assert_eq!(c.compradas, 1);
         assert_eq!(c.apagadas, 1);
         assert_eq!(a.total_visivel(), 1, "mas o recorte mostra uma só");
+    }
+
+    /// 🚨 **A sem nota não conta como "à venda"** — achado do dono na tela, no
+    /// mesmo dia: *"a contagem do filtro à venda 8 está errada, pois não pode
+    /// ser vendido se não estiver classificado"*. Eram oito fotos da área
+    /// temporária, nenhuma classificada, nenhuma sequer no servidor — e a barra
+    /// anunciava oito à venda.
+    #[test]
+    fn a_sem_nota_nao_entra_nos_recortes_de_situacao() {
+        let mut sem = foto("sem", Estado::Disponivel, false);
+        sem.nota = None;
+        let mut a = Acervo::novo();
+        a.definir(vec![foto("com", Estado::Disponivel, false), sem]);
+
+        let c = a.contagens();
+        assert_eq!(c.a_venda, 1, "so a classificada esta a venda");
+        assert_eq!(c.sem_nota, 1);
+        assert_eq!(c.todas, 2, "as duas continuam existindo");
+
+        a.filtrar(Filtro::Situacao(Estado::Disponivel));
+        assert_eq!(a.total_visivel(), 1);
+        assert_eq!(a.visivel(0).unwrap().id, "com");
     }
 
     /// 🚨 **O recorte das não classificadas** — o pedido do dono de 2026-09-05.
