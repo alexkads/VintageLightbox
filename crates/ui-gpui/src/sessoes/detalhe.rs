@@ -36,9 +36,7 @@ use biblioteca_core::selecao::{Modificadores, Selecao};
 use domain::services::pos_venda::{
     EstadoDaFotoNoSite, EstadoNoBalcao, FotoDaGaleria, GaleriaAberta, LinkDeAcesso, Sessao,
 };
-use gpui::{
-    div, img, prelude::*, px, Context, EventEmitter, RenderImage, SharedString, Task, Window,
-};
+use gpui::{div, prelude::*, px, Context, EventEmitter, RenderImage, SharedString, Task, Window};
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::{ActiveTheme, Disableable, Selectable, Sizable};
 
@@ -47,30 +45,21 @@ use crate::pos_venda::porta::{Publicador, Recado};
 
 const INTERVALO_DE_COLHEITA: Duration = Duration::from_millis(100);
 
-/// O tamanho do tile, em pixels — os mesmos limites da barra do site.
-const ZOOM_MINIMO: f32 = 90.0;
-const ZOOM_MAXIMO: f32 = 320.0;
-const ZOOM_PADRAO: f32 = 150.0;
-const PASSO_DO_ZOOM: f32 = 30.0;
-
-/// Os recortes da barra, na ordem da web.
-///
-/// 🚨 **"Sem nota" é o último de propósito**: é um recorte de exceção — o que
-/// está sem classificação não pode ir à venda, não recebe marca d'água e não
-/// devia estar no storage. Ele existe para esvaziar, não para consultar.
-const FILTROS: [(&str, Filtro); 6] = [
-    ("Todas", Filtro::Todas),
-    ("Levadas", Filtro::Situacao(acervo::Estado::LevadaNoBalcao)),
-    ("À venda", Filtro::Situacao(acervo::Estado::Disponivel)),
-    ("Compradas", Filtro::Situacao(acervo::Estado::Comprada)),
-    ("Apagadas", Filtro::Apagadas),
-    ("Sem nota", Filtro::SemNota),
-];
+// 📌 A barra de recortes do site saiu daqui em 6/set/2026, junto com a grade
+// duplicada: a grade passou a ser a da Biblioteca, escopada ao ensaio. Os
+// recortes por situação (levadas · à venda · compradas · sem nota) são da tela
+// da sessão na web e **ainda não existem na barra da Biblioteca** — é o próximo
+// passo, e o `biblioteca_core::acervo` já os calcula.
 
 /// O que a tela pede à raiz — ela não sabe trocar de tela nem abrir a Revelação.
 pub enum Pedido {
     /// Voltar para a lista de sessões.
     Voltar,
+    /// A sessão abriu (ou foi relida): estas são as fotos que já estão no site.
+    ///
+    /// 🔑 Quem as põe na grade é a raiz — a grade é uma só, e nela as do site
+    /// convivem com as locais, como na web.
+    FotosDoSite(Vec<domain::services::pos_venda::FotoDaGaleria>),
     /// Revelar uma foto **do site**: o id remoto, que a Revelação usa para
     /// buscar a cópia de trabalho.
     Revelar { foto_id: String, arquivo: String },
@@ -106,8 +95,6 @@ pub struct Detalhe {
     acervo: Acervo,
     /// O que está marcado, pelas mesmas regras da grade do site.
     selecao: Selecao,
-    /// O lado do tile, em pixels. O mesmo controle de zoom da barra de lá.
-    zoom: f32,
     enviando: usize,
     enviadas: usize,
     link: Option<LinkDeAcesso>,
@@ -128,7 +115,6 @@ impl Detalhe {
             arrastando: false,
             acervo: Acervo::novo(),
             selecao: Selecao::nova(),
-            zoom: ZOOM_PADRAO,
             sessao: None,
             galeria_id: None,
             aberta: None,
@@ -204,15 +190,6 @@ impl Detalhe {
 
     pub fn contagens(&self) -> acervo::Contagens {
         self.acervo.contagens()
-    }
-
-    pub fn zoom(&self) -> f32 {
-        self.zoom
-    }
-
-    pub fn ajustar_zoom(&mut self, passo: f32, cx: &mut Context<Self>) {
-        self.zoom = (self.zoom + passo).clamp(ZOOM_MINIMO, ZOOM_MAXIMO);
-        cx.notify();
     }
 
     /// O clique numa foto da grade — as regras são as do core.
@@ -443,6 +420,7 @@ impl Detalhe {
                     // Trocar o conteúdo embaralha as posições: a seleção fala em
                     // posição, e mantê-la apontaria para outras fotos.
                     self.selecao.limpar_tudo();
+                    cx.emit(Pedido::FotosDoSite(aberta.fotos.clone()));
                     self.aberta = Some(*aberta);
                     abriu = true;
                 }
@@ -509,11 +487,15 @@ impl Render for Detalhe {
             .text_color(cx.theme().foreground)
             .child(self.cabecalho(cx))
             .child(self.envio(cx))
-            .child(self.barra(cx))
             .when_some(self.erro.clone(), |tela, erro| {
                 tela.child(div().text_xs().text_color(cx.theme().danger).child(erro))
             })
-            .child(self.grade(cx))
+            // 🚨 **A grade não é desenhada aqui.** Ela é a da Biblioteca,
+            // escopada a este ensaio — o modelo da web: uma grade só, com as
+            // locais e as do acervo juntas, e nela é que se revela e se escolhe
+            // com o cliente. Duas grades para a mesma coisa foi o que fez o app
+            // parecer que tinha dois lugares para o mesmo trabalho.
+            .child(self.resumo_da_grade(cx))
     }
 }
 
@@ -710,253 +692,26 @@ impl Detalhe {
             )
     }
 
-    /// A barra da grade — os mesmos controles do site, na mesma ordem.
-    fn barra(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    /// Uma linha dizendo o que a grade abaixo está mostrando.
+    fn resumo_da_grade(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let contagens = self.contagens();
-        let ativo = self.filtro();
-        let visiveis = self.acervo.total_visivel();
-        let marcadas = self.quantas_marcadas();
-        let todas_marcadas = visiveis > 0 && marcadas == visiveis;
-
+        let no_site = contagens.todas;
         div()
-            .flex()
-            .flex_wrap()
-            .items_center()
-            .gap(px(4.))
-            .children(FILTROS.into_iter().filter_map(|(rotulo, filtro)| {
-                let quantas = contagens.de(filtro);
-                // 🔑 O recorte vazio some — **menos** quando é o escolhido:
-                // sumir o filtro ativo tiraria o caminho de volta.
-                let mostrar = filtro == Filtro::Todas || quantas > 0 || ativo == filtro;
-                mostrar.then(|| {
-                    Button::new(SharedString::from(format!("detalhe-filtro-{rotulo}")))
-                        .label(format!("{rotulo} {quantas}"))
-                        .xsmall()
-                        .selected(ativo == filtro)
-                        .on_click(
-                            cx.listener(move |tela, _ev, _window, cx| tela.filtrar(filtro, cx)),
-                        )
-                })
-            }))
-            .child(div().flex_1())
-            // O zoom das miniaturas, como na barra de lá.
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(2.))
-                    .child(
-                        Button::new("detalhe-zoom-menos")
-                            .label("−")
-                            .xsmall()
-                            .on_click(cx.listener(|tela, _ev, _window, cx| {
-                                tela.ajustar_zoom(-PASSO_DO_ZOOM, cx)
-                            })),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child("miniaturas"),
-                    )
-                    .child(
-                        Button::new("detalhe-zoom-mais")
-                            .label("+")
-                            .xsmall()
-                            .on_click(cx.listener(|tela, _ev, _window, cx| {
-                                tela.ajustar_zoom(PASSO_DO_ZOOM, cx)
-                            })),
-                    ),
-            )
-            .child(
-                Button::new("detalhe-selecionar")
-                    .label(format!(
-                        "{} as {visiveis} visíveis",
-                        if todas_marcadas {
-                            "Desmarcar"
-                        } else {
-                            "Selecionar"
-                        }
-                    ))
-                    .xsmall()
-                    .disabled(visiveis == 0)
-                    .on_click(cx.listener(|tela, _ev, _window, cx| tela.alternar_todas(cx))),
-            )
-            // As ações em lote só aparecem com o que operar — um botão ligado
-            // sobre nenhuma foto é convite a procurar o que ele faria.
-            .when(marcadas > 0, |barra| {
-                barra
-                    .child(
-                        Button::new("detalhe-lote-levadas")
-                            .label(format!("Marcar {marcadas} como levadas"))
-                            .xsmall()
-                            .on_click(cx.listener(|tela, _ev, _window, cx| {
-                                tela.marcar_como(EstadoNoBalcao::LevadaNoBalcao, cx)
-                            })),
-                    )
-                    .child(
-                        Button::new("detalhe-lote-a-venda")
-                            .label("Marcar à venda")
-                            .xsmall()
-                            .on_click(cx.listener(|tela, _ev, _window, cx| {
-                                tela.marcar_como(EstadoNoBalcao::Disponivel, cx)
-                            })),
-                    )
-            })
-    }
-
-    fn grade(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        if self.aberta.is_none() {
-            return div()
-                .flex()
-                .items_center()
-                .justify_center()
-                .p(px(24.))
-                .text_xs()
-                .text_color(cx.theme().muted_foreground)
-                .child(if self.carregando {
-                    "Lendo a sessão…"
-                } else {
-                    "Sessão não aberta."
-                })
-                .into_any_element();
-        }
-
-        if self.acervo.total_visivel() == 0 {
-            let frase = if self.acervo.todas().is_empty() {
-                "Nenhuma foto nesta sessão ainda — arraste a primeira leva acima."
+            .text_xs()
+            .text_color(cx.theme().muted_foreground)
+            .child(if self.carregando {
+                "Lendo a sessão…".to_string()
+            } else if no_site == 0 {
+                "Nenhuma foto no site ainda — importe ou arraste a primeira leva.".to_string()
             } else {
-                "Nenhuma foto neste recorte."
-            };
-            return div()
-                .flex()
-                .items_center()
-                .justify_center()
-                .p(px(24.))
-                .rounded(cx.theme().radius)
-                .border_1()
-                .border_color(cx.theme().border)
-                .text_xs()
-                .text_color(cx.theme().muted_foreground)
-                .child(frase)
-                .into_any_element();
-        }
-
-        div()
-            .flex()
-            .flex_wrap()
-            .gap(px(8.))
-            .flex_1()
-            .min_h(px(0.))
-            .children(
-                self.acervo
-                    .visiveis()
-                    .enumerate()
-                    .map(|(posicao, foto)| self.celula(posicao, foto, cx))
-                    .collect::<Vec<_>>(),
-            )
-            .into_any_element()
-    }
-
-    fn celula(
-        &self,
-        posicao: usize,
-        foto: &acervo::Foto,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let id = foto.id.clone();
-        let arquivo = foto.arquivo.clone();
-        let miniatura = self.miniaturas.get(&foto.id).cloned();
-        let apagada = foto.apagada;
-        let marcada = self.selecao.tem(posicao);
-        let lado = self.zoom;
-
-        div()
-            .id(SharedString::from(format!("sessao-foto-{}", foto.id)))
-            .w(px(lado))
-            .flex()
-            .flex_col()
-            .gap(px(2.))
-            .p(px(4.))
-            .rounded(cx.theme().radius)
-            .border_1()
-            // 🔑 A marcação é **borda**, e não fundo colorido: o fundo mudaria a
-            // cor que o olho usa para julgar a foto ao lado.
-            .border_color(if marcada {
-                cx.theme().primary
-            } else {
-                cx.theme().border
-            })
-            .when(!apagada, |celula| celula.cursor_pointer())
-            .when(!apagada, |celula| {
-                celula.on_click(
-                    cx.listener(move |tela, evento: &gpui::ClickEvent, _window, cx| {
-                        let m = evento.modifiers();
-                        // Duplo clique revela; o simples marca. É o gesto da
-                        // grade do site.
-                        if evento.click_count() >= 2 {
-                            cx.emit(Pedido::Revelar {
-                                foto_id: id.clone(),
-                                arquivo: arquivo.clone(),
-                            });
-                            return;
-                        }
-                        tela.clicar(
-                            posicao,
-                            Modificadores {
-                                aditivo: m.secondary(),
-                                faixa: m.shift,
-                            },
-                            cx,
-                        );
-                    }),
+                format!(
+                    "{no_site} no site · {} levada(s) · {} à venda · {} comprada(s). \
+                     A grade abaixo mostra estas e as que ainda não subiram.",
+                    contagens.de(Filtro::Situacao(acervo::Estado::LevadaNoBalcao)),
+                    contagens.de(Filtro::Situacao(acervo::Estado::Disponivel)),
+                    contagens.de(Filtro::Situacao(acervo::Estado::Comprada)),
                 )
             })
-            .child(
-                div()
-                    .h(px(lado * 0.72))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .bg(cx.theme().muted)
-                    .rounded(cx.theme().radius)
-                    .when_some(miniatura, |quadro, imagem| {
-                        quadro.child(img(imagem).h(px(lado * 0.72)))
-                    }),
-            )
-            .child(
-                div()
-                    .text_xs()
-                    .truncate()
-                    .child(SharedString::from(foto.arquivo.clone())),
-            )
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(4.))
-                    .text_xs()
-                    .text_color(if apagada {
-                        cx.theme().danger
-                    } else {
-                        cx.theme().muted_foreground
-                    })
-                    .child(if apagada {
-                        "apagada".to_string()
-                    } else {
-                        foto.estado.rotulo().to_string()
-                    })
-                    // Sem nota é o que não devia estar aqui — e a célula diz.
-                    .when(foto.nota.is_none() && !apagada, |linha| {
-                        linha.child(div().text_color(cx.theme().warning).child("· sem nota"))
-                    })
-                    .when(foto.tem_negociacao(), |linha| {
-                        linha.child(div().child("· balcão"))
-                    })
-                    .when(foto.revelada, |linha| {
-                        linha.child(div().child("· revelada"))
-                    }),
-            )
     }
 }
 

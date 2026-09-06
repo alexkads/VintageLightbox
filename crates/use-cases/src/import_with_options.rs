@@ -304,6 +304,10 @@ impl ImportWithOptionsUseCase {
         // 3. Criar entidade Photo
         let mut photo = Photo::new(dest_path.clone());
         photo.set_metadata(metadata);
+        // 🚨 O ensaio entra **na criação**, e não depois: uma foto que chega ao
+        // catálogo sem ensaio não aparece na grade da sessão que a importou, e o
+        // sintoma é a importação "não ter funcionado".
+        photo.definir_sessao(options.sessao_id.clone());
 
         // 4. Gerar thumbnails
         let thumbnail_300 = thumbnail_generator.generate(&dest_path, 300).await?;

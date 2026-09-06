@@ -25,6 +25,14 @@ pub struct ImportOptions {
     /// Se o scan da origem desce em subpastas
     #[serde(default = "default_true")]
     pub include_subfolders: bool,
+    /// De qual **ensaio** este lote é — o id da galeria no site.
+    ///
+    /// 🚨 **É o que põe a foto dentro da sessão**, e não um metadado: logado, é
+    /// dentro do ensaio que se revela e se escolhe com o cliente, e uma foto sem
+    /// ensaio não teria onde aparecer. `None` é a importação solta do modo
+    /// offline, que continua indo para o catálogo de sempre.
+    #[serde(default)]
+    pub sessao_id: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -85,6 +93,7 @@ impl Default for ImportOptions {
             destination: None,
             source_root: None,
             include_subfolders: true,
+            sessao_id: None,
         }
     }
 }

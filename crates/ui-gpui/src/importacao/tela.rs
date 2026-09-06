@@ -313,6 +313,15 @@ impl Importacao {
         cx.notify();
     }
 
+    /// De qual ensaio será este lote. `None` é a importação solta do offline.
+    ///
+    /// 🔑 Vem da raiz a cada abertura do modal, e não de um campo desta tela: o
+    /// ensaio é o contexto do app, e perguntá-lo aqui seria pedir de novo o que
+    /// já foi escolhido.
+    pub fn importar_para_a_sessao(&mut self, sessao_id: Option<String>) {
+        self.estado.opcoes.sessao_id = sessao_id;
+    }
+
     /// Manda importar o que está marcado.
     pub fn importar(&mut self, cx: &mut Context<Self>) {
         let arquivos = self.estado.caminhos_marcados();

@@ -76,6 +76,16 @@ pub struct Biblioteca {
     visiveis: Vec<usize>,
     /// As coleções: a lista lateral, e qual está aberta.
     colecoes: colecoes::Estado,
+    /// O ensaio que a grade está mostrando. `None` é o catálogo inteiro.
+    ///
+    /// 🚨 **É o que faz a sessão ser o lugar de trabalho.** Logado, é dentro do
+    /// ensaio que se revela e se escolhe com o cliente — e a grade tem de ser a
+    /// dele, não a de todos os clientes juntos. Sem este recorte, a triagem de
+    /// um casamento aconteceria no meio das fotos de outros três.
+    ///
+    /// `None` continua existindo, e é o modo offline: sem conta não há ensaio, e
+    /// o app volta a ser o catálogo local de sempre.
+    sessao: Option<String>,
     /// Uma frase para quem está olhando a grade.
     ///
     /// 🔑 **Quem escreve aqui é a raiz**, contando o que aconteceu com o site: a
@@ -237,6 +247,7 @@ impl Biblioteca {
             cache: Arc::new(Mutex::new(CacheDeMiniaturas::nova(capacidade_para(6, 4)))),
             filtros: Filtros::default(),
             colecoes: colecoes::Estado::default(),
+            sessao: None,
             aviso: None,
             nome_da_colecao,
             confirmando_apagar: None,
@@ -458,6 +469,23 @@ impl Biblioteca {
     }
 
     /// Recalcula o que está visível. Chamado só quando um filtro muda.
+    /// Recorta a grade a um ensaio. `None` volta ao catálogo inteiro.
+    pub fn escopar_na_sessao(&mut self, sessao: Option<String>, cx: &mut Context<Self>) {
+        if self.sessao == sessao {
+            return;
+        }
+        self.sessao = sessao;
+        self.refiltrar();
+        // 🔑 Trocar de ensaio é trocar o conteúdo da grade: a seleção fala em
+        // posição, e mantê-la apontaria fotos de outro cliente.
+        self.selecao = Selecao::nova();
+        cx.notify();
+    }
+
+    pub fn sessao(&self) -> Option<&str> {
+        self.sessao.as_deref()
+    }
+
     fn refiltrar(&mut self) {
         // 🚨 Lido **antes** de `visiveis` mudar: a `Selecao` fala em posições da
         // grade, e a grade está prestes a deixar de ser a mesma.
@@ -465,6 +493,14 @@ impl Biblioteca {
         let principal = self.principal_no_acervo();
 
         self.visiveis = indices_visiveis(&self.fotos, &self.filtros);
+        // 🚨 **O ensaio recorta antes de tudo.** Ele não é mais um filtro da
+        // barra: é o assunto da tela. Uma foto de outro cliente aparecendo aqui
+        // não é ruído, é a triagem errada.
+        if let Some(sessao) = self.sessao.clone() {
+            let fotos = self.fotos.clone();
+            self.visiveis
+                .retain(|&i| fotos[i].sessao_id.as_deref() == Some(sessao.as_str()));
+        }
         // 🔑 A coleção filtra **por cima** dos outros filtros, e não no lugar
         // deles: abrir o ensaio de um cliente e então pedir ★★★★ dentro dele é
         // a pergunta normal — "quais das dele valem a pena". Substituir faria a
@@ -731,6 +767,14 @@ impl Biblioteca {
             .into_iter()
             .map(|i| self.fotos[i].id.clone())
             .collect()
+    }
+
+    /// O acervo inteiro que esta tela conhece, sem filtro nenhum.
+    ///
+    /// É o que a raiz precisa para **recompor** a grade: as locais que já estão
+    /// aqui, mais as que o site respondeu.
+    pub fn todas_as_fotos(&self) -> Vec<PhotoViewModel> {
+        self.fotos.as_ref().clone()
     }
 
     /// As fotos que a grade está mostrando — já filtradas.

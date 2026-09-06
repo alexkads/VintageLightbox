@@ -51,11 +51,14 @@ fn sessao() -> domain::services::pos_venda::Sessao {
     }
 }
 
+/// Uma foto **do ensaio aberto** — desde 6/set/2026 a grade é a da sessão, e
+/// foto sem ensaio não aparece nela.
 fn foto(nome: &str) -> PhotoViewModel {
     PhotoViewModel {
         id: format!("id-{nome}"),
         name: nome.to_string(),
         path: format!("/fotos/{nome}"),
+        sessao_id: Some("g1".into()),
         ..Default::default()
     }
 }
@@ -640,6 +643,105 @@ fn nada_acontece_fora_de_uma_sessao(cx: &mut TestAppContext) {
             app.na_biblioteca(cx, |tela, cx| tela.selecionar(Some(0), cx));
             app.revelar(window, cx);
             assert_eq!(app.tela(), Tela::Revelacao, "agora sim");
+        })
+        .expect("a janela deve estar aberta");
+}
+
+/// 🚨 **A grade é a do ensaio, e é uma só.**
+///
+/// A correção de 6/set/2026, com as palavras do dono: *"dentro da sessão que
+/// fazemos as revelações e escolhemos as fotos com o cliente"*. Antes dela a
+/// grade era o catálogo inteiro e a sessão era uma tela ao lado — o ensaio de um
+/// cliente ficava misturado com o de todos os outros, e havia dois lugares para
+/// o mesmo trabalho.
+///
+/// 🔑 **E as do site entram na mesma lista das locais**, como na web: a foto que
+/// já subiu e a que ainda não subiu aparecem juntas, e é sobre essa lista que a
+/// revelação e a escolha com o cliente acontecem.
+#[gpui::test]
+fn a_grade_e_a_do_ensaio_e_e_uma_so(cx: &mut TestAppContext) {
+    let mut de_outro_cliente = foto("DSC_900.NEF");
+    de_outro_cliente.sessao_id = Some("g9".into());
+
+    let estudio = abrir_o_estudio(
+        cx,
+        vec![foto("DSC_001.NEF"), foto("DSC_002.NEF"), de_outro_cliente],
+    );
+
+    estudio
+        .janela
+        .update(cx, |app, _window, cx| {
+            assert_eq!(
+                app.biblioteca.read(cx).quantas_visiveis(),
+                2,
+                "o ensaio de outro cliente não aparece nesta grade"
+            );
+
+            // A sessão respondeu com uma foto que já está no site: ela entra na
+            // **mesma** grade, e não numa segunda tela.
+            app.atender_a_sessao(
+                &crate::sessoes::detalhe::Pedido::FotosDoSite(vec![
+                    domain::services::pos_venda::FotoDaGaleria {
+                        id: "remota-1".into(),
+                        arquivo: "DSC_010.jpg".into(),
+                        estado: domain::services::pos_venda::EstadoDaFotoNoSite::LevadaNoBalcao,
+                        ordem: 0,
+                        preco_negociado: None,
+                        observacao_da_negociacao: None,
+                        apagada: false,
+                        nota: Some(4),
+                        produto_efetivo: "p1".into(),
+                        preco_de_venda: None,
+                        pedido_id: None,
+                        downloads: 0,
+                        revelada: false,
+                    },
+                ]),
+                _window,
+                cx,
+            );
+        })
+        .expect("a janela deve estar aberta");
+    cx.run_until_parked();
+
+    estudio
+        .janela
+        .update(cx, |app, _window, cx| {
+            let visiveis = app.biblioteca.read(cx).fotos_visiveis();
+            // ⚠️ O `AcervoDeMentira` devolve lista vazia ao reler, então o que
+            // sobra na grade são exatamente as do site — o que este teste quer
+            // ver é que elas **entraram**.
+            assert!(
+                visiveis.iter().any(|f| f.id == "site:remota-1"),
+                "a foto do site entrou na mesma grade: {:?}",
+                visiveis.iter().map(|f| &f.id).collect::<Vec<_>>()
+            );
+            let do_site = visiveis.iter().find(|f| f.id == "site:remota-1").unwrap();
+            assert_eq!(do_site.rating, 4, "a nota veio do site");
+            assert!(do_site.comprada, "levada no balcão é 'comprada' aqui");
+            assert_eq!(do_site.sessao_id.as_deref(), Some("g1"));
+        })
+        .expect("a janela deve estar aberta");
+}
+
+/// 📸 Importar dentro de um ensaio carimba o ensaio no lote.
+///
+/// Sem o carimbo a foto chega ao catálogo sem dono e **não aparece** na grade da
+/// sessão que a importou — e o sintoma é "a importação não funcionou".
+#[gpui::test]
+fn importar_dentro_da_sessao_poe_a_foto_nela(cx: &mut TestAppContext) {
+    let estudio = abrir_o_estudio(cx, vec![foto("DSC_001.NEF")]);
+
+    estudio
+        .janela
+        .update(cx, |app, window, cx| {
+            app.importar(window, cx);
+            assert!(app.importando());
+            assert_eq!(
+                app.importacao.read(cx).estado.opcoes.sessao_id.as_deref(),
+                Some("g1"),
+                "o lote entra no ensaio aberto"
+            );
         })
         .expect("a janela deve estar aberta");
 }

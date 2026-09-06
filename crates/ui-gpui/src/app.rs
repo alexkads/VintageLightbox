@@ -236,7 +236,7 @@ pub struct Aplicativo {
     /// O modal de importação. **Sempre existe**, e só aparece quando aberto: ele
     /// guarda a listagem, e recriá-lo a cada abertura jogaria fora o que o
     /// fotógrafo já marcou ao fechar o modal por engano.
-    importacao: Entity<Importacao>,
+    pub(crate) importacao: Entity<Importacao>,
     importando: bool,
     /// O modal de exportação — o único caminho do app até um arquivo no disco.
     exportacao: Entity<Exportacao>,
@@ -256,6 +256,13 @@ pub struct Aplicativo {
     _pedido_da_sessao: gpui::Subscription,
     /// A sessão escolhida para receber as fotos. `None` é "nenhuma aberta".
     sessao_aberta: Option<String>,
+    /// As fotos que já estão **no site**, do ensaio aberto, na linguagem da
+    /// grade.
+    ///
+    /// 🔑 **A grade é uma só, como na web**: as locais (ainda não enviadas) e as
+    /// do acervo aparecem juntas. Separá-las em duas telas foi o que fez o app
+    /// parecer que tinha dois lugares para a mesma coisa.
+    fotos_do_site: Vec<PhotoViewModel>,
     /// Quem fala com o pós-venda do site. Guardado porque a classificação
     /// sobe e tira fotos fora do modal de publicação.
     publicador: Arc<dyn Publicador>,
@@ -507,6 +514,7 @@ impl Aplicativo {
             detalhe,
             _pedido_da_sessao: pedido_da_sessao,
             sessao_aberta: None,
+            fotos_do_site: Vec::new(),
             publicador: publicador_da_raiz,
             sincronias: channel(),
             _sincronia: None,
@@ -546,8 +554,11 @@ impl Aplicativo {
                     let Ok(fotos) = raiz.releituras.1.try_recv() else {
                         return false;
                     };
+                    // 🔑 As do site entram na mesma lista — a grade é uma só.
+                    let mut todas = fotos;
+                    todas.extend(raiz.fotos_do_site.iter().cloned());
                     raiz.biblioteca
-                        .update(cx, |tela, cx| tela.trocar_acervo(fotos, cx));
+                        .update(cx, |tela, cx| tela.trocar_acervo(todas, cx));
                     cx.notify();
                     true
                 }) else {
@@ -564,9 +575,56 @@ impl Aplicativo {
     ///
     pub fn entrar_na_sessao(&mut self, galeria_id: String, cx: &mut Context<Self>) {
         self.sessao_aberta = Some(galeria_id.clone());
+        // 🚨 **A grade passa a ser a do ensaio.** É o modelo da web: dentro da
+        // sessão é que se revela e se escolhe com o cliente, e a grade tem de
+        // mostrar as fotos dele — não as de todos os clientes juntos.
+        self.biblioteca.update(cx, |tela, cx| {
+            tela.escopar_na_sessao(Some(galeria_id.clone()), cx)
+        });
         self.detalhe
             .update(cx, |tela, cx| tela.entrar(galeria_id, cx));
         self.tela = Tela::Sessao;
+        cx.notify();
+    }
+
+    /// As fotos do site do ensaio aberto entraram: a grade se refaz com elas.
+    ///
+    /// 🔑 **A ordem é a do site**, e as locais vêm antes: é o que a web faz
+    /// ordenando pela `ordem`, e o efeito é o mesmo — a foto que sobe não pula
+    /// de lugar na tela.
+    pub fn absorver_as_do_site(&mut self, fotos: Vec<PhotoViewModel>, cx: &mut Context<Self>) {
+        self.fotos_do_site = fotos;
+
+        // 🚨 **Entram na hora, e não na próxima releitura.** A releitura do
+        // catálogo anda por relógio; esperar por ela deixaria a grade sem as
+        // fotos que o site acabou de responder — e o operador, olhando uma
+        // sessão que parece vazia.
+        let locais: Vec<PhotoViewModel> = self
+            .biblioteca
+            .read(cx)
+            .todas_as_fotos()
+            .into_iter()
+            // As do site anteriores saem: elas vêm de novo, e ficar com as duas
+            // versões duplicaria a foto na grade.
+            .filter(|f| f.pos_venda_foto_id.is_none())
+            .collect();
+        let mut todas = locais;
+        todas.extend(self.fotos_do_site.iter().cloned());
+        self.biblioteca
+            .update(cx, |tela, cx| tela.trocar_acervo(todas, cx));
+
+        // E o catálogo é relido assim mesmo: o que mudou no banco desde a última
+        // leitura entra junto quando chegar.
+        self.reler_o_acervo(cx);
+    }
+
+    /// Sai do ensaio: a grade volta a ser o catálogo, e nada mais trabalha.
+    pub fn sair_da_sessao(&mut self, cx: &mut Context<Self>) {
+        self.sessao_aberta = None;
+        self.fotos_do_site.clear();
+        self.biblioteca
+            .update(cx, |tela, cx| tela.escopar_na_sessao(None, cx));
+        self.tela = Tela::Sessoes;
         cx.notify();
     }
 
@@ -584,6 +642,14 @@ impl Aplicativo {
             }
             DetalhePedido::Revelar { foto_id, arquivo } => {
                 self.revelar_do_site(foto_id.clone(), arquivo.clone(), window, cx);
+            }
+            DetalhePedido::FotosDoSite(fotos) => {
+                let sessao = self.sessao_aberta.clone();
+                let convertidas = fotos
+                    .iter()
+                    .map(|f| do_site_para_a_grade(f, sessao.clone()))
+                    .collect();
+                self.absorver_as_do_site(convertidas, cx);
             }
         }
     }
@@ -1013,6 +1079,7 @@ impl Aplicativo {
     }
 
     /// Abre o modal de importação sobre a Biblioteca.
+    /// Abre a importação. Dentro de um ensaio, o lote entra **nele**.
     pub fn importar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // 🚨 **Logado, nada acontece fora de uma sessão.** A guarda fica aqui, e
         // não só no botão: atalho de teclado chega antes de botão, e foi assim
@@ -1021,6 +1088,12 @@ impl Aplicativo {
             return;
         }
         self.importando = true;
+        // 🚨 **O lote entra no ensaio aberto.** Sem este carimbo a foto chega ao
+        // catálogo sem dono e não aparece na grade da sessão que a importou — e
+        // o sintoma é "a importação não funcionou".
+        let sessao = self.sessao_aberta.clone();
+        self.importacao
+            .update(cx, |tela, _cx| tela.importar_para_a_sessao(sessao));
         // Cartões e recentes são pedidos a cada abertura: um cartão plugado
         // depois de o app subir não apareceria numa lista buscada uma vez só.
         self.importacao
@@ -1447,8 +1520,7 @@ impl Aplicativo {
                             .when(self.tela == Tela::Sessoes, |b| b.primary())
                             .selected(self.tela == Tela::Sessoes)
                             .on_click(cx.listener(|este, _ev, _window, cx| {
-                                este.tela = Tela::Sessoes;
-                                cx.notify();
+                                este.sair_da_sessao(cx);
                             })),
                     )
                     .when_some(self.nome_da_sessao(cx), |barra, nome| {
@@ -2013,7 +2085,23 @@ impl Render for Aplicativo {
                     Tela::Revelacao => self.revelacao.clone().into_any_element(),
                     Tela::Impressao => self.impressao.clone().into_any_element(),
                     Tela::Sessoes => self.sessoes.clone().into_any_element(),
-                    Tela::Sessao => self.detalhe.clone().into_any_element(),
+                    // 🚨 **Cabeçalho e envio em cima, e a grade da Biblioteca
+                    // embaixo** — uma grade só, escopada a este ensaio. É o
+                    // modelo da web, e é onde se revela e se escolhe com o
+                    // cliente.
+                    Tela::Sessao => div()
+                        .flex()
+                        .flex_col()
+                        .size_full()
+                        .child(self.detalhe.clone())
+                        .child(
+                            div()
+                                .flex()
+                                .flex_1()
+                                .min_h(px(0.))
+                                .child(self.biblioteca.clone()),
+                        )
+                        .into_any_element(),
                 }),
             )
             .when(self.importando, |raiz| {
@@ -2035,6 +2123,38 @@ impl Render for Aplicativo {
                 raiz.child(self.modal_de_configuracoes(cx))
             })
             .into_any_element()
+    }
+}
+
+/// Uma foto **do site** na linguagem da grade.
+///
+/// 🔑 **A grade é uma só**, como na web: as locais e as do acervo aparecem
+/// juntas. Para isso a foto do site precisa falar `PhotoViewModel` — e o que ela
+/// não tem (caminho no disco, ajustes locais) fica vazio de propósito.
+///
+/// ⚠️ **O id leva o prefixo `site:`** e não colide com o do catálogo: são
+/// espaços de nome diferentes, e misturá-los faria a Revelação gravar ajustes
+/// numa foto local que ninguém abriu.
+fn do_site_para_a_grade(
+    foto: &domain::services::pos_venda::FotoDaGaleria,
+    sessao_id: Option<String>,
+) -> PhotoViewModel {
+    use domain::services::pos_venda::EstadoDaFotoNoSite;
+    PhotoViewModel {
+        id: format!("site:{}", foto.id),
+        name: foto.arquivo.clone(),
+        // Sem caminho: ela não está no disco desta máquina.
+        path: String::new(),
+        rating: foto.nota.unwrap_or(0) as i32,
+        // A levada no balcão é a que o cliente já pagou na hora — é o que a
+        // tecla `B` marca do lado de cá.
+        comprada: matches!(
+            foto.estado,
+            EstadoDaFotoNoSite::LevadaNoBalcao | EstadoDaFotoNoSite::Comprada
+        ),
+        pos_venda_foto_id: Some(foto.id.clone()),
+        sessao_id,
+        ..Default::default()
     }
 }
 
@@ -2131,6 +2251,17 @@ mod testes {
 
     fn acervo() -> Vec<PhotoViewModel> {
         vec![foto("DSC_001.NEF"), foto("retrato.jpg")]
+    }
+
+    /// O mesmo acervo, mas de um ensaio — a grade escopada só mostra o dele.
+    fn acervo_da_sessao(id: &str) -> Vec<PhotoViewModel> {
+        acervo()
+            .into_iter()
+            .map(|mut f| {
+                f.sessao_id = Some(id.to_string());
+                f
+            })
+            .collect()
     }
 
     /// 🚨 Sem seleção, revelar não faz nada — e não troca de tela.
@@ -3409,7 +3540,7 @@ mod testes {
             let publicador = publicador.clone();
             |window, cx| {
                 Aplicativo::novo(
-                    acervo(),
+                    acervo_da_sessao("g7"),
                     previews,
                     Vec::new(),
                     Portas {
@@ -3460,7 +3591,7 @@ mod testes {
             let publicador = publicador.clone();
             |window, cx| {
                 Aplicativo::novo(
-                    acervo(),
+                    acervo_da_sessao("g7"),
                     previews,
                     Vec::new(),
                     Portas {
@@ -3549,7 +3680,7 @@ mod testes {
             let publicador = publicador.clone();
             |window, cx| {
                 Aplicativo::novo(
-                    acervo(),
+                    acervo_da_sessao("g7"),
                     previews,
                     Vec::new(),
                     Portas {

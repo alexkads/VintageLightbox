@@ -48,6 +48,18 @@ pub struct Photo {
     /// está lá", não como erro.
     #[serde(default)]
     pos_venda_foto_id: Option<String>,
+    /// De qual **ensaio** esta foto é — o id da galeria no site.
+    ///
+    /// 🚨 **É o que faz a sessão ser o lugar de trabalho**, e não um rótulo:
+    /// dentro dela é que se revela e se escolhe com o cliente. Sem isto a grade
+    /// só sabe mostrar o catálogo inteiro, e o ensaio de um cliente fica
+    /// misturado com o de todos os outros.
+    ///
+    /// `None` é foto solta — importada offline, ou de antes desta regra. Ela
+    /// aparece quando não há sessão aberta, que é o modo em que o app é o
+    /// catálogo local de sempre.
+    #[serde(default)]
+    sessao_id: Option<String>,
     /// Data de importação
     imported_at: DateTime<Utc>,
     /// Data de última modificação
@@ -283,6 +295,7 @@ impl Photo {
             // para trocar em silêncio. Quem lê do banco chama
             // `definir_id_no_site` logo depois.
             pos_venda_foto_id: None,
+            sessao_id: None,
             is_edited,
             thumbnail_path,
             preview_path,
@@ -456,6 +469,19 @@ impl Photo {
     /// onde buscar os pixels, e o balcão para saber se há o que negociar.
     pub fn esta_no_site(&self) -> bool {
         self.pos_venda_foto_id.is_some()
+    }
+
+    /// De qual ensaio esta foto é.
+    pub fn sessao(&self) -> Option<&str> {
+        self.sessao_id.as_deref()
+    }
+
+    /// Põe a foto num ensaio — o que a importação dentro de uma sessão faz.
+    pub fn definir_sessao(&mut self, sessao_id: Option<String>) {
+        if self.sessao_id != sessao_id {
+            self.sessao_id = sessao_id;
+            self.modified_at = Utc::now();
+        }
     }
 
     /// Grava (ou apaga) o id remoto. `None` é "saiu do site".

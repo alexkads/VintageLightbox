@@ -21,6 +21,9 @@ pub struct PhotoViewModel {
     /// qual linha ser gravada.
     #[serde(default)]
     pub pos_venda_foto_id: Option<String>,
+    /// De qual ensaio esta foto é. `None` = foto solta, do catálogo.
+    #[serde(default)]
+    pub sessao_id: Option<String>,
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub edit_exposure: Option<f32>,
