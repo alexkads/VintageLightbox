@@ -34,7 +34,8 @@ use domain::value_objects::{ImportMode, OrganizationStrategy, RenamePattern};
 use super::destino;
 use super::estado::{aplicar, Estado, Ordem, Recado, Seguimento};
 use super::explorador::{
-    chave_de_miniatura, Andamento, Explorador, GeradorDeMiniaturas, Importador, SeletorDePasta,
+    chave_de_miniatura, Andamento, Explorador, Freios, GeradorDeMiniaturas, Importador,
+    SeletorDePasta,
 };
 use crate::biblioteca::miniaturas::{CacheDeMiniaturas, Miniatura};
 
@@ -88,6 +89,9 @@ pub struct Importacao {
     andamentos: (Sender<Andamento>, Receiver<Andamento>),
     /// O que a importação em curso já fez. `None` é "não há importação em curso".
     progresso: Option<Progresso>,
+    /// Os freios do lote em curso. Trocados a cada `importar` — reaproveitar os
+    /// do lote anterior faria o novo nascer cancelado.
+    freios: Freios,
     /// Se há um laço de colheita rodando. Sem esta trava, cada pedido abriria um
     /// laço novo — o mesmo cuidado que a Revelação tem com a GPU.
     colhendo: bool,
@@ -141,6 +145,7 @@ impl Importacao {
             recados: channel(),
             andamentos: channel(),
             progresso: None,
+            freios: Freios::default(),
             colhendo: false,
             esperando_escolha: false,
             foco: cx.focus_handle(),
@@ -329,14 +334,51 @@ impl Importacao {
             terminou: false,
         });
 
-        self.importador
-            .importar(arquivos, opcoes, self.andamentos.0.clone());
+        self.freios = Freios::default();
+        self.importador.importar(
+            arquivos,
+            opcoes,
+            self.freios.clone(),
+            self.andamentos.0.clone(),
+        );
         self.acompanhar(cx);
         cx.notify();
     }
 
     pub fn progresso(&self) -> Option<&Progresso> {
         self.progresso.as_ref()
+    }
+
+    /// Se o lote em curso está parado esperando ordem de seguir.
+    pub fn pausada(&self) -> bool {
+        self.importando() && self.freios.pausada()
+    }
+
+    /// Se o cancelamento já foi pedido e o lote ainda não acabou de desistir.
+    pub fn cancelando(&self) -> bool {
+        self.importando() && self.freios.cancelada()
+    }
+
+    /// Levanta ou solta a pausa do lote em curso.
+    pub fn alternar_pausa(&mut self, cx: &mut Context<Self>) {
+        if !self.importando() || self.freios.cancelada() {
+            return;
+        }
+        let pausada = self.freios.pausada();
+        self.freios.pausar(!pausada);
+        cx.notify();
+    }
+
+    /// Pede que o lote pare. Quem conta que acabou continua sendo o importador:
+    /// a tela **não** dá o lote por encerrado aqui, senão o resumo mentiria
+    /// sobre quantas fotos entraram antes de a última tarefa desistir.
+    pub fn cancelar(&mut self, cx: &mut Context<Self>) {
+        if !self.importando() {
+            return;
+        }
+        self.freios.cancelar();
+        self.estado.aviso = None;
+        cx.notify();
     }
 
     /// Liga o laço que drena os dois canais, se ainda não houver um.
@@ -984,11 +1026,9 @@ impl Importacao {
         let total = self.estado.candidatos.len();
 
         let resumo = match self.progresso.as_ref() {
-            Some(progresso) if progresso.terminou => format!(
-                "{} importadas · {} falharam · {} puladas",
-                progresso.feitos, progresso.falhas, progresso.pulados
-            ),
-            Some(progresso) => format!("importando {} de {}…", progresso.feitos, progresso.total),
+            Some(progresso) => {
+                frase_do_lote(progresso, self.freios.pausada(), self.freios.cancelada())
+            }
             None => format!("{marcados} de {total} marcadas · {bytes}"),
         };
 
@@ -1006,16 +1046,46 @@ impl Importacao {
                     .text_color(cx.theme().muted_foreground)
                     .child(SharedString::from(resumo)),
             )
-            .child(
-                Button::new("importar")
-                    .label(SharedString::from(format!("Importar {marcados}")))
-                    .xsmall()
-                    .primary()
-                    .disabled(marcados == 0 || self.importando())
-                    .on_click(cx.listener(|tela, _ev, _window, cx| {
-                        tela.importar(cx);
-                    })),
-            )
+            // 🔑 Os dois freios só existem enquanto há lote, e no lugar do
+            // botão de importar. Um "Cancelar" desligado ao lado de um
+            // "Importar" ligado seria ruído: não há nada para cancelar antes de
+            // começar, e a tela toda se fecha no `Esc`.
+            .when(self.importando(), |rodape| {
+                let cancelando = self.freios.cancelada();
+                let pausada = self.freios.pausada();
+                rodape
+                    .child(
+                        Button::new("pausar")
+                            .label(if pausada { "Retomar" } else { "Pausar" })
+                            .xsmall()
+                            .disabled(cancelando)
+                            .on_click(cx.listener(|tela, _ev, _window, cx| {
+                                tela.alternar_pausa(cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("cancelar")
+                            .label("Cancelar")
+                            .xsmall()
+                            .danger()
+                            .disabled(cancelando)
+                            .on_click(cx.listener(|tela, _ev, _window, cx| {
+                                tela.cancelar(cx);
+                            })),
+                    )
+            })
+            .when(!self.importando(), |rodape| {
+                rodape.child(
+                    Button::new("importar")
+                        .label(SharedString::from(format!("Importar {marcados}")))
+                        .xsmall()
+                        .primary()
+                        .disabled(marcados == 0)
+                        .on_click(cx.listener(|tela, _ev, _window, cx| {
+                            tela.importar(cx);
+                        })),
+                )
+            })
     }
 
     /// Se há importação em curso — o botão fica desligado enquanto isso.
@@ -1090,6 +1160,28 @@ impl Render for Importacao {
             )
             .child(self.rodape(cx))
             .children(self.lupa(cx))
+    }
+}
+
+/// O que o rodapé diz sobre o lote — a frase é o único lugar onde a pausa e o
+/// cancelamento aparecem escritos.
+///
+/// 🚨 **"Cancelada" tem de sobreviver ao fim do lote.** O importador manda
+/// `Terminou` com os números do que deu tempo de entrar; sem a primeira linha
+/// daqui, um lote interrompido no arquivo 12 de 2.000 se despediria com
+/// "12 importadas · 0 falharam" — indistinguível de um lote de 12 fotos que
+/// correu inteiro.
+pub fn frase_do_lote(progresso: &Progresso, pausada: bool, cancelada: bool) -> String {
+    let contagem = format!(
+        "{} importadas · {} falharam · {} puladas",
+        progresso.feitos, progresso.falhas, progresso.pulados
+    );
+    match (progresso.terminou, cancelada, pausada) {
+        (true, true, _) => format!("cancelada · {contagem}"),
+        (true, false, _) => contagem,
+        (false, true, _) => "cancelando…".to_string(),
+        (false, false, true) => format!("pausada em {} de {}", progresso.feitos, progresso.total),
+        (false, false, false) => format!("importando {} de {}…", progresso.feitos, progresso.total),
     }
 }
 
@@ -1976,5 +2068,173 @@ mod testes {
                 assert!(!tela.colhendo);
             })
             .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 O rodapé é o único lugar onde a pausa e o cancelamento se leem.
+    #[test]
+    fn a_frase_do_lote_distingue_pausa_cancelamento_e_fim() {
+        let correndo = Progresso {
+            total: 2000,
+            feitos: 12,
+            falhas: 0,
+            pulados: 0,
+            terminou: false,
+        };
+        assert_eq!(
+            frase_do_lote(&correndo, false, false),
+            "importando 12 de 2000…"
+        );
+        assert_eq!(
+            frase_do_lote(&correndo, true, false),
+            "pausada em 12 de 2000"
+        );
+        assert_eq!(
+            frase_do_lote(&correndo, false, true),
+            "cancelando…",
+            "o cancelamento pedido vale mais que a contagem"
+        );
+
+        let acabou = Progresso {
+            terminou: true,
+            ..correndo
+        };
+        assert_eq!(
+            frase_do_lote(&acabou, false, false),
+            "12 importadas · 0 falharam · 0 puladas"
+        );
+        assert_eq!(
+            frase_do_lote(&acabou, false, true),
+            "cancelada · 12 importadas · 0 falharam · 0 puladas",
+            "um lote interrompido no arquivo 12 não pode se despedir igual a um de 12 fotos"
+        );
+    }
+
+    /// 🚨 O clique tem de chegar em quem obedece.
+    ///
+    /// As bandeiras existiam no `ImportController` desde sempre e nenhuma tela
+    /// as levantava — era o item 11 da fila. O que este teste prende é o
+    /// caminho inteiro: o botão escreve no mesmo `Freios` que o importador
+    /// recebeu, e não numa cópia da tela.
+    #[gpui::test]
+    fn pausar_e_retomar_chegam_ao_importador(cx: &mut TestAppContext) {
+        let importador = Arc::new(ImportadorDeMentira::default());
+        let janela = janela(
+            cx,
+            Arc::new(ExploradorDeMentira::responde(
+                "/cartao",
+                &["/cartao/a.NEF", "/cartao/b.NEF"],
+            )),
+            importador.clone(),
+        );
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.abrir_origem("/cartao".into(), cx);
+            })
+            .expect("a janela deve estar aberta");
+        colher(cx, &janela);
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.importar(cx);
+                assert!(tela.importando(), "o lote está em curso até `Terminou`");
+
+                tela.alternar_pausa(cx);
+                assert!(tela.pausada());
+
+                tela.alternar_pausa(cx);
+                assert!(!tela.pausada(), "o mesmo botão solta a pausa");
+            })
+            .expect("a janela deve estar aberta");
+
+        assert!(
+            !importador.freios().pausada(),
+            "e o importador vê o mesmo estado da tela"
+        );
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.alternar_pausa(cx);
+            })
+            .expect("a janela deve estar aberta");
+        assert!(importador.freios().pausada());
+    }
+
+    /// 🚨 Cancelar não se desfaz, e solta a pausa ao sair.
+    ///
+    /// Quem cancela um lote pausado espera que ele **acabe**. Se o
+    /// cancelamento deixasse a pausa levantada, as tarefas continuariam
+    /// dormindo e o lote nunca contaria que desistiu — o defeito que o teste
+    /// `cancelar_enquanto_pausado_termina_o_lote` prende do outro lado.
+    #[gpui::test]
+    fn cancelar_solta_a_pausa_e_nao_volta_atras(cx: &mut TestAppContext) {
+        let importador = Arc::new(ImportadorDeMentira::default());
+        let janela = janela(
+            cx,
+            Arc::new(ExploradorDeMentira::responde("/cartao", &["/cartao/a.NEF"])),
+            importador.clone(),
+        );
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.abrir_origem("/cartao".into(), cx);
+            })
+            .expect("a janela deve estar aberta");
+        colher(cx, &janela);
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.importar(cx);
+                tela.alternar_pausa(cx);
+                assert!(tela.pausada());
+
+                tela.cancelar(cx);
+                assert!(tela.cancelando());
+                assert!(!tela.pausada(), "cancelar acorda quem estava parado");
+
+                tela.alternar_pausa(cx);
+                assert!(
+                    !tela.pausada(),
+                    "depois do cancelamento a pausa não volta a subir"
+                );
+            })
+            .expect("a janela deve estar aberta");
+
+        let freios = importador.freios();
+        assert!(freios.cancelada() && !freios.pausada());
+    }
+
+    /// Um lote novo não herda os freios do anterior.
+    #[gpui::test]
+    fn cada_lote_comeca_com_os_freios_soltos(cx: &mut TestAppContext) {
+        let importador = Arc::new(ImportadorDeMentira::default());
+        let janela = janela(
+            cx,
+            Arc::new(ExploradorDeMentira::responde("/cartao", &["/cartao/a.NEF"])),
+            importador.clone(),
+        );
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.abrir_origem("/cartao".into(), cx);
+            })
+            .expect("a janela deve estar aberta");
+        colher(cx, &janela);
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.importar(cx);
+                tela.cancelar(cx);
+            })
+            .expect("a janela deve estar aberta");
+        colher(cx, &janela);
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.importar(cx);
+                assert!(!tela.cancelando() && !tela.pausada());
+            })
+            .expect("a janela deve estar aberta");
+        assert!(!importador.freios().cancelada());
     }
 }

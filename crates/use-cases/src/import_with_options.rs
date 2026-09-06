@@ -138,6 +138,13 @@ impl ImportWithOptionsUseCase {
         let mut tasks = Vec::new();
 
         for (index, file_path) in files.iter().enumerate() {
+            // 🔑 Cancelar para de **abrir** trabalho, e não só de fazê-lo. Sem
+            // esta saída, cancelar um lote de 2.000 arquivos ainda criaria as
+            // 2.000 tarefas — cada uma para desistir na primeira linha.
+            if cancel_flag.load(Ordering::Relaxed) {
+                break;
+            }
+
             let permit =
                 semaphore.clone().acquire_owned().await.map_err(|e| {
                     DomainError::InfrastructureError(format!("Semaphore error: {}", e))
@@ -176,12 +183,17 @@ impl ImportWithOptionsUseCase {
                 // Liberar permit ao final
                 let _permit = permit;
 
-                // Check pause flag
-                while pause_flag.load(Ordering::Relaxed) {
+                // 🚨 A espera da pausa também olha o cancelamento.
+                //
+                // Sem a segunda condição, pausar e **depois** cancelar trava o
+                // lote para sempre: as 8 tarefas que seguram as permissões do
+                // semáforo dormem em `pause_flag`, o laço de cima nunca ganha
+                // permissão, `Finished` nunca é mandado — e a tela fica em
+                // "cancelando…" pelo resto da sessão.
+                while pause_flag.load(Ordering::Relaxed) && !cancel_flag.load(Ordering::Relaxed) {
                     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
                 }
 
-                // Check cancel flag
                 if cancel_flag.load(Ordering::Relaxed) {
                     return;
                 }
@@ -787,5 +799,64 @@ mod tests {
                 skipped: 0
             }
         )));
+    }
+
+    /// 🚨 Cancelar **enquanto pausado** tem de terminar o lote.
+    ///
+    /// Este era o motivo de a pausa e o cancelamento continuarem sem botão: as
+    /// tarefas que seguram as 8 permissões do semáforo dormiam em `pause_flag`
+    /// sem olhar `cancel_flag`, o laço que abre trabalho novo nunca ganhava
+    /// permissão de volta, e `Finished` nunca saía. Sem o `timeout` abaixo,
+    /// este teste **não falha: ele pendura**.
+    #[tokio::test]
+    async fn cancelar_enquanto_pausado_termina_o_lote() {
+        // Nenhuma expectativa nos mocks: se qualquer arquivo for processado, o
+        // mockall entra em pânico — que é a segunda coisa afirmada aqui.
+        let use_case = ImportWithOptionsUseCase::new(
+            Arc::new(MockPhotoRepo::new()),
+            Arc::new(MockMetadataExt::new()),
+            Arc::new(MockThumbnailGen::new()),
+            Arc::new(MockPreviewStore::new()),
+            Arc::new(MockFileOrg),
+        );
+
+        let arquivos: Vec<_> = (0..12).map(|_| create_temp_file(b"raw")).collect();
+        let files = arquivos
+            .iter()
+            .map(|a| FilePath::new(a.path().to_str().unwrap()).unwrap())
+            .collect();
+
+        let (tx, _rx) = mpsc::unbounded_channel();
+        // Já nasce pausado: as primeiras 8 tarefas vão direto para o laço da espera.
+        let pause_flag = Arc::new(AtomicBool::new(true));
+        let cancel_flag = Arc::new(AtomicBool::new(false));
+
+        let cancelar = cancel_flag.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+            cancelar.store(true, Ordering::Relaxed);
+        });
+
+        let resultado = tokio::time::timeout(
+            tokio::time::Duration::from_secs(5),
+            use_case.execute(ImportRequest {
+                files,
+                options: ImportOptions {
+                    skip_duplicates: false,
+                    ..ImportOptions::default()
+                },
+                progress_sender: tx,
+                pause_flag,
+                cancel_flag,
+            }),
+        )
+        .await
+        .expect("o lote pausado e depois cancelado tem de terminar, e não pendurar");
+
+        let importacao = resultado.expect("cancelar não é erro");
+        assert_eq!(
+            importacao.successful, 0,
+            "nada entra depois do cancelamento"
+        );
     }
 }

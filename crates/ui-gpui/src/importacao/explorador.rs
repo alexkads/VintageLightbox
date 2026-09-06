@@ -278,7 +278,54 @@ impl GeradorDeMiniaturas for GeradorDoDisco {
 /// reversível, importar copia ou **move** arquivo. Um `trait` só faria o
 /// explorador de mentira dos testes precisar saber importar.
 pub trait Importador: Send + Sync + 'static {
-    fn importar(&self, arquivos: Vec<String>, opcoes: ImportOptions, canal: Sender<Andamento>);
+    fn importar(
+        &self,
+        arquivos: Vec<String>,
+        opcoes: ImportOptions,
+        freios: Freios,
+        canal: Sender<Andamento>,
+    );
+}
+
+/// Os dois freios do lote, que a tela levanta e o importador obedece.
+///
+/// 🔑 **A tela é dona deles, e não o importador.** Um lote que corre numa thread
+/// do tokio não tem como devolver um controle à interface depois de começar; o
+/// arranjo aqui é o contrário — a tela cria as bandeiras, guarda a sua cópia e
+/// entrega a outra. Clicar "Pausar" é escrever num `AtomicBool`, e por isso
+/// nunca falha nem espera.
+///
+/// ⚠️ **Pausar não interrompe o arquivo em curso**: as até 8 tarefas paralelas
+/// param antes do próximo, e a foto que já estava sendo lida termina. É o
+/// mesmo do Lightroom, e é o que evita meia foto no catálogo.
+#[derive(Clone, Default)]
+pub struct Freios {
+    pausa: Arc<std::sync::atomic::AtomicBool>,
+    cancelar: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Freios {
+    pub fn pausada(&self) -> bool {
+        self.pausa.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    pub fn pausar(&self, pausar: bool) {
+        self.pausa
+            .store(pausar, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    pub fn cancelada(&self) -> bool {
+        self.cancelar.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Não tem par que desfaz: um lote cancelado não volta a correr, ele acaba.
+    /// Solta a pausa junto — quem cancelou pausado espera que **acabe**, e as
+    /// tarefas paradas precisam acordar para contar que desistiram.
+    pub fn cancelar(&self) {
+        self.cancelar
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        self.pausar(false);
+    }
 }
 
 /// O que a importação vai contando enquanto trabalha.
@@ -317,17 +364,19 @@ impl ImportadorDoDisco {
 }
 
 impl Importador for ImportadorDoDisco {
-    fn importar(&self, arquivos: Vec<String>, opcoes: ImportOptions, canal: Sender<Andamento>) {
+    fn importar(
+        &self,
+        arquivos: Vec<String>,
+        opcoes: ImportOptions,
+        freios: Freios,
+        canal: Sender<Andamento>,
+    ) {
         let importacao = self.importacao.clone();
 
         self.tokio.spawn(async move {
             let (progresso, mut recebe) = tokio::sync::mpsc::unbounded_channel();
 
-            // As bandeiras de pausa e cancelamento existem no controller e ainda
-            // não têm botão. Nascem desligadas — e é melhor assim do que ter um
-            // botão que a tela não sabe desfazer.
-            let pausa = Arc::new(std::sync::atomic::AtomicBool::new(false));
-            let cancelar = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let Freios { pausa, cancelar } = freios;
 
             let repassar = tokio::spawn(async move {
                 use adapters::view_models::ImportProgressViewModel as Vm;
@@ -514,16 +563,34 @@ pub mod mentira {
     #[derive(Default)]
     pub struct ImportadorDeMentira {
         pub importados: Mutex<Vec<(Vec<String>, ImportOptions)>>,
+        /// Os freios do último lote — é por aqui que o teste confere que o
+        /// clique chegou até quem obedece.
+        pub freios: Mutex<Option<Freios>>,
     }
 
     impl ImportadorDeMentira {
         pub fn importados(&self) -> Vec<(Vec<String>, ImportOptions)> {
             self.importados.lock().expect("os importados").clone()
         }
+
+        pub fn freios(&self) -> Freios {
+            self.freios
+                .lock()
+                .expect("os freios")
+                .clone()
+                .expect("nenhum lote foi pedido")
+        }
     }
 
     impl Importador for ImportadorDeMentira {
-        fn importar(&self, arquivos: Vec<String>, opcoes: ImportOptions, canal: Sender<Andamento>) {
+        fn importar(
+            &self,
+            arquivos: Vec<String>,
+            opcoes: ImportOptions,
+            freios: Freios,
+            canal: Sender<Andamento>,
+        ) {
+            *self.freios.lock().expect("os freios") = Some(freios);
             let total = arquivos.len();
             self.importados
                 .lock()

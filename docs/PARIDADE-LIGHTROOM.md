@@ -143,7 +143,7 @@ banco e só apareciam ao reabrir o app.
 | | |
 |---|---|
 | ✅ **DNG com compressão *lossy* abre** | **desde 18/ago**, pela LibRaw **do sistema**, como reserva. Nenhum decodificador embutido lê `Compression = 34892` — o `build.rs` do `rsraw-sys` compila a LibRaw sem `USE_JPEG`. A do Homebrew tem libjpeg e abre: conferido no arquivo do acervo, 1707×2560. ⚠️ **Depende de a LibRaw do sistema estar instalada**; sem ela, volta a mensagem que diz o que é e o que fazer. |
-| 🚨 **Pausar e cancelar** | existem no controller e **não têm botão** |
+| ✅ **Pausar e cancelar** | **desde 6/set/2026** — os dois botões no rodapé, no lugar do "Importar" enquanto o lote corre. ⚠️ **Pausar não interrompe a foto em curso**: as até 8 tarefas param antes da próxima. 🚨 E o que segurava isto era um defeito, não a tela: pausar e **depois** cancelar pendurava o lote para sempre — as tarefas dormiam no laço da pausa sem olhar o cancelamento, e `Finished` nunca saía |
 | ⬜ **Aplicar preset na importação, palavras-chave na importação** | |
 
 ---
@@ -177,7 +177,7 @@ galeria do cliente**, e o que é defeito visível na tela.
 | 8 | ~~**Imprimir de verdade, ou tirar o botão**~~ | ✅ **feito em 17/ago** — imprime |
 | 9 | ~~**Os presets de sistema fora de escala**~~ | ✅ **feito em 30/ago** — e o "Auto" que não fazia nada saiu da lista |
 | 10 | ~~**Tom automático no painel Básico**~~ | ✅ **feito em 30/ago** — o "Auto" de volta no lugar certo, lendo a foto em vez de repetir números fixos |
-| 11 | **Pausar e cancelar a importação** | existem no controller e não têm botão — um lote de 2.000 RAWs começa e não se interrompe |
+| 11 | ~~**Pausar e cancelar a importação**~~ | ✅ **feito em 6/set** — os botões, e a espera da pausa que ignorava o cancelamento |
 | 12 | **O desfazer não restaura o corte** | o corte não entra na pilha do histórico; `Cmd+Z` depois de cortar volta tudo menos o enquadramento |
 | 13 | ~~**Publicar no pós-venda do site**~~ | ✅ **feito em 2/set** — tecla `B`, botão "Pós-venda", `PosVendaApi`. Entrou **antes** de 11 e 12 por decisão do dono no mesmo dia (ver abaixo) |
 

@@ -31,7 +31,7 @@ use tempfile::TempDir;
 
 use ui_gpui::importacao::estado::Recado;
 use ui_gpui::importacao::explorador::{
-    Andamento, Explorador, ExploradorDoDisco, Importador, ImportadorDoDisco,
+    Andamento, Explorador, ExploradorDoDisco, Freios, Importador, ImportadorDoDisco,
 };
 
 /// Uma foto de verdade em disco — JPEG, como sai de uma câmera.
@@ -217,7 +217,7 @@ async fn importar_poe_todas_as_fotos_no_catalogo() {
         source_root: Some(origem.to_string_lossy().to_string()),
         ..Default::default()
     };
-    importador.importar(arquivos, opcoes, envio);
+    importador.importar(arquivos, opcoes, Freios::default(), envio);
 
     // A importação vai mandando andamento; o que interessa é o fim.
     let mut falhas = Vec::new();
@@ -254,5 +254,74 @@ async fn importar_poe_todas_as_fotos_no_catalogo() {
         caminhos.len(),
         QUANTAS,
         "duas fotos apontando para o mesmo arquivo é uma sobrescrevendo a outra"
+    );
+}
+
+/// 🚨 Pausar e **depois** cancelar tem de terminar o lote, no caminho de verdade.
+///
+/// Os testes da tela conferem que o clique levanta a bandeira; este confere o
+/// outro lado — que o `ImportWithOptionsUseCase`, com disco e banco reais,
+/// **desiste e conta que desistiu**. Antes de 6/set/2026 ele pendurava: as
+/// tarefas dormiam no laço da pausa sem olhar o cancelamento, `Terminou` nunca
+/// saía, e a tela ficava em "cancelando…" pelo resto da sessão. É o motivo de
+/// os dois botões terem esperado tanto para existir.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn cancelar_um_lote_pausado_termina_e_nao_cataloga() {
+    use domain::repositories::PhotoRepository;
+
+    let (_explorador, importador, repositorio, dir) = montar().await;
+
+    let origem = dir.path().join("cartao");
+    std::fs::create_dir_all(&origem).expect("criar a origem");
+    let arquivos: Vec<String> = (1..=12)
+        .map(|i| gravar_jpeg(&origem, &format!("DSC_{i:04}.jpg")))
+        .collect();
+
+    let (envio, recepcao) = channel::<Andamento>();
+    let opcoes = domain::value_objects::ImportOptions {
+        source_root: Some(origem.to_string_lossy().to_string()),
+        ..Default::default()
+    };
+
+    // Já nasce pausado: nenhuma foto chega a ser lida.
+    let freios = Freios::default();
+    freios.pausar(true);
+    importador.importar(arquivos, opcoes, freios.clone(), envio);
+
+    // `Comecou` sai antes do laço das tarefas — é o sinal de que o lote está
+    // de pé e parado, e não de que ainda não começou.
+    let comecou = recepcao
+        .recv_timeout(Duration::from_secs(30))
+        .expect("o começo tinha de chegar");
+    assert!(matches!(comecou, Andamento::Comecou { total: 12 }));
+
+    freios.cancelar();
+
+    let mut terminou = None;
+    for _ in 0..48 {
+        match recepcao.recv_timeout(Duration::from_secs(30)) {
+            Ok(Andamento::Terminou {
+                sucesso,
+                falhas,
+                pulados,
+            }) => {
+                terminou = Some((sucesso, falhas, pulados));
+                break;
+            }
+            Ok(_) => {}
+            Err(erro) => panic!("o lote cancelado tinha de terminar: {erro}"),
+        }
+    }
+
+    assert_eq!(
+        terminou,
+        Some((0, 0, 0)),
+        "cancelar antes da primeira foto não importa, não falha e não pula nada"
+    );
+
+    let depois = repositorio.find_all().await.expect("ler o catálogo");
+    assert!(
+        depois.is_empty(),
+        "o catálogo tem de continuar vazio: {depois:#?}"
     );
 }
