@@ -6,7 +6,7 @@ use std::sync::mpsc::Sender;
 use std::sync::Arc;
 
 use adapters::controllers::PosVendaController;
-use domain::services::pos_venda::{NovaGaleria, Produto, Sessao};
+use domain::services::pos_venda::{LinkDeAcesso, NovaGaleria, Produto, Sessao};
 use use_cases::pos_venda::Progresso;
 
 /// O que a tela pede para publicar.
@@ -24,6 +24,8 @@ pub enum Recado {
     Entrou(Sessao),
     Produtos(Vec<Produto>),
     Andamento(Progresso),
+    /// O link que entra sem senha, pronto para ir ao cliente.
+    Link(LinkDeAcesso),
     /// Uma frase para a tela — login recusado, rede caída, galeria recusada.
     Falhou(String),
 }
@@ -33,6 +35,11 @@ pub trait Publicador: Send + Sync + 'static {
     fn entrar(&self, email: String, senha: String, canal: Sender<Recado>);
     fn produtos(&self, sessao: Sessao, canal: Sender<Recado>);
     fn publicar(&self, pedido: Pedido, canal: Sender<Recado>);
+    /// O passo 7 do fluxo: o link do cliente.
+    ///
+    /// ⚠️ **Pedido ao site, nunca montado aqui.** O endereço da galeria exige
+    /// sessão e o cliente não tem conta — ele saiu do estúdio, não do site.
+    fn link(&self, sessao: Sessao, galeria_id: String, canal: Sender<Recado>);
 }
 
 pub struct PublicadorDaApi {
@@ -63,6 +70,17 @@ impl Publicador for PublicadorDaApi {
         self.tokio.spawn(async move {
             let recado = match controlador.produtos(&sessao).await {
                 Ok(produtos) => Recado::Produtos(produtos),
+                Err(erro) => Recado::Falhou(erro),
+            };
+            let _ = canal.send(recado);
+        });
+    }
+
+    fn link(&self, sessao: Sessao, galeria_id: String, canal: Sender<Recado>) {
+        let controlador = self.controlador.clone();
+        self.tokio.spawn(async move {
+            let recado = match controlador.link_da_galeria(&sessao, &galeria_id).await {
+                Ok(link) => Recado::Link(link),
                 Err(erro) => Recado::Falhou(erro),
             };
             let _ = canal.send(recado);
@@ -108,11 +126,17 @@ pub mod mentira {
         /// A senha que entra; qualquer outra é recusada — para a tela poder ser
         /// testada com login errado.
         pub senha_certa: Option<String>,
+        /// De quais galerias o link foi pedido.
+        pub links: Mutex<Vec<String>>,
     }
 
     impl PublicadorDeMentira {
         pub fn pedidos(&self) -> Vec<Pedido> {
             self.pedidos.lock().expect("os pedidos").clone()
+        }
+
+        pub fn links(&self) -> Vec<String> {
+            self.links.lock().expect("os links").clone()
         }
     }
 
@@ -133,6 +157,17 @@ pub mod mentira {
 
         fn produtos(&self, _sessao: Sessao, canal: Sender<Recado>) {
             let _ = canal.send(Recado::Produtos(self.produtos.clone()));
+        }
+
+        fn link(&self, _sessao: Sessao, galeria_id: String, canal: Sender<Recado>) {
+            self.links
+                .lock()
+                .expect("os links")
+                .push(galeria_id.clone());
+            let _ = canal.send(Recado::Link(LinkDeAcesso {
+                url: format!("https://recordarfotos.com.br/entrar?t={galeria_id}"),
+                validade_em_segundos: 604_800,
+            }));
         }
 
         fn publicar(&self, pedido: Pedido, canal: Sender<Recado>) {

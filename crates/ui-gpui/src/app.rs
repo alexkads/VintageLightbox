@@ -2725,6 +2725,86 @@ mod testes {
         assert_eq!(pedidos[0].fotos.len(), 2);
     }
 
+    /// 📸 O passo 7 do fluxo do dono: **gero o link para o cliente**.
+    ///
+    /// 🚨 **O link não existe antes da galeria**, e o botão não aparece antes
+    /// dela: pedir o link de uma galeria que não foi criada só teria como
+    /// resposta um erro do site. E ele vem **do site**, assinado — montar
+    /// `/meus-ensaios/{id}` aqui daria um endereço que parece certo e leva ao
+    /// `/login`, porque o cliente não tem conta. Foi o defeito que a web teve
+    /// até 4/set/2026.
+    #[gpui::test]
+    fn o_link_do_cliente_so_existe_depois_da_galeria(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+
+        let publicador = Arc::new(PublicadorDeMentira {
+            produtos: vec![domain::services::pos_venda::Produto {
+                id: "p1".into(),
+                nome: "Foto avulsa".into(),
+                preco: "29.90".into(),
+                inativo: false,
+            }],
+            ..Default::default()
+        });
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            let publicador = publicador.clone();
+            |window, cx| {
+                Aplicativo::novo(
+                    acervo(),
+                    previews,
+                    Vec::new(),
+                    Portas {
+                        publicador,
+                        ..portas()
+                    },
+                    window,
+                    cx,
+                )
+            }
+        });
+
+        janela
+            .update(cx, |app, window, cx| {
+                app.publicar(cx);
+                app.pos_venda.update(cx, |tela, cx| {
+                    tela.entrar_para_teste(cx);
+                    tela.preencher_para_teste("Ensaio da Maria", "maria@x.com", window, cx);
+
+                    // Antes de publicar não há galeria — e o pedido não sai.
+                    assert_eq!(tela.galeria_publicada(), None);
+                    tela.pedir_o_link(cx);
+                    tela.colher(cx);
+                    assert_eq!(tela.link(), None);
+
+                    tela.publicar(cx);
+                    tela.colher(cx);
+                    assert_eq!(
+                        tela.galeria_publicada().as_deref(),
+                        Some("g-de-mentira"),
+                        "agora existe galeria"
+                    );
+
+                    tela.pedir_o_link(cx);
+                    tela.colher(cx);
+                    let link = tela.link().expect("o link tinha de ter chegado");
+                    assert_eq!(
+                        link.url,
+                        "https://recordarfotos.com.br/entrar?t=g-de-mentira"
+                    );
+                    assert_eq!(link.validade_em_segundos, 604_800);
+                });
+            })
+            .expect("a janela deve estar aberta");
+
+        assert_eq!(
+            publicador.links(),
+            vec!["g-de-mentira".to_string()],
+            "um pedido só, e depois da galeria existir"
+        );
+    }
+
     #[gpui::test]
     fn exportar_manda_a_selecao_para_a_pasta_escolhida(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();

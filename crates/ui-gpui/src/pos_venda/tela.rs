@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use adapters::view_models::PhotoViewModel;
-use domain::services::pos_venda::{NovaGaleria, Produto, Sessao};
+use domain::services::pos_venda::{LinkDeAcesso, NovaGaleria, Produto, Sessao};
 use gpui::{div, prelude::*, px, Context, SharedString, Task, Window};
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::input::{Input, InputState};
@@ -55,6 +55,10 @@ pub struct PosVenda {
     andamento: Option<Andamento>,
     ultimo: Option<SharedString>,
     aviso: Option<SharedString>,
+    /// O link do cliente, depois de pedido. `None` é "ainda não pedi".
+    link: Option<LinkDeAcesso>,
+    /// Se o pedido do link está no ar — para o botão não ser apertado duas vezes.
+    pedindo_link: bool,
     recados: (Sender<Recado>, Receiver<Recado>),
     colhendo: bool,
     _colheita: Option<Task<()>>,
@@ -101,6 +105,8 @@ impl PosVenda {
             ultimo: None,
             aviso: None,
             recados: channel(),
+            link: None,
+            pedindo_link: false,
             colhendo: false,
             _colheita: None,
         }
@@ -293,9 +299,21 @@ impl PosVenda {
                     self.produto_id = lembrado.or_else(|| produtos.first().map(|p| p.id.clone()));
                     self.produtos = produtos;
                 }
+                Recado::Link(link) => {
+                    self.pedindo_link = false;
+                    // 🔑 **Copia na hora, e mostra assim mesmo.** A área de
+                    // transferência é a razão de o botão existir; o texto na
+                    // tela é o plano B de quando algo a engoliu — perder o link
+                    // é pior que copiá-lo à mão.
+                    cx.write_to_clipboard(gpui::ClipboardItem::new_string(link.url.clone()));
+                    let dias = link.validade_em_segundos / 86_400;
+                    self.ultimo = Some(format!("link copiado ({dias} dias): {}", link.url).into());
+                    self.link = Some(link);
+                }
                 Recado::Andamento(progresso) => self.anotar(progresso),
                 Recado::Falhou(erro) => {
                     self.entrando = false;
+                    self.pedindo_link = false;
                     if let Some(a) = self.andamento.as_mut() {
                         a.terminou = true;
                     }
@@ -350,6 +368,38 @@ impl PosVenda {
                 andamento.terminou = true;
             }
         }
+    }
+
+    /// O passo 7 do fluxo: pede o link do cliente e o copia.
+    ///
+    /// ⚠️ **Só existe depois de a galeria existir.** Antes de publicar não há
+    /// o que linkar, e um botão ligado sobre o nada só teria como resposta um
+    /// erro do site.
+    pub fn pedir_o_link(&mut self, cx: &mut Context<Self>) {
+        let (Some(sessao), Some(galeria_id)) = (self.sessao.clone(), self.galeria_publicada())
+        else {
+            return;
+        };
+        if self.pedindo_link {
+            return;
+        }
+        self.pedindo_link = true;
+        self.publicador
+            .link(sessao, galeria_id, self.recados.0.clone());
+        self.acompanhar(cx);
+        cx.notify();
+    }
+
+    /// O id da galeria que **esta** publicação criou, se ela terminou.
+    pub fn galeria_publicada(&self) -> Option<String> {
+        self.andamento
+            .as_ref()
+            .filter(|a| a.terminou)
+            .and_then(|a| a.galeria_id.clone())
+    }
+
+    pub fn link(&self) -> Option<&LinkDeAcesso> {
+        self.link.as_ref()
     }
 
     pub fn resumo(&self) -> String {
@@ -532,6 +582,23 @@ impl gpui::Render for PosVenda {
                             .text_color(cx.theme().muted_foreground)
                             .child(self.resumo()),
                     )
+                    // O link só aparece quando há galeria — e aí ele é o
+                    // gesto seguinte, no lugar de "Publicar".
+                    .when_some(self.galeria_publicada(), |linha, _| {
+                        linha.child(
+                            Button::new("pos-venda-link")
+                                .label(if self.link.is_some() {
+                                    "Copiar de novo"
+                                } else {
+                                    "Copiar link do cliente"
+                                })
+                                .xsmall()
+                                .disabled(self.pedindo_link)
+                                .on_click(
+                                    cx.listener(|tela, _ev, _window, cx| tela.pedir_o_link(cx)),
+                                ),
+                        )
+                    })
                     .child(
                         Button::new("pos-venda-publicar")
                             .label(format!("Publicar {}", self.fotos.len()))

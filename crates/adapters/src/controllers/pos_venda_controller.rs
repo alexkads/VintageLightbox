@@ -3,7 +3,10 @@
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
 
-use domain::services::pos_venda::{Galeria, NovaGaleria, PosVendaApi, Produto, Sessao};
+use domain::services::pos_venda::{
+    Galeria, GaleriaDoPainel, LinkDeAcesso, MudancaDaFoto, NovaGaleria, PosVendaApi, Produto,
+    Sessao,
+};
 use domain::value_objects::PhotoId;
 use domain::DomainError;
 use use_cases::pos_venda::{Pedido, Progresso, PublicarNoPosVendaUseCase};
@@ -52,6 +55,43 @@ impl PosVendaController {
                 },
                 canal,
             )
+            .await
+            .map_err(frase)
+    }
+
+    /// As galerias que já existem — para subir numa delas em vez de criar uma
+    /// por leva.
+    pub async fn galerias(&self, sessao: &Sessao) -> Result<Vec<GaleriaDoPainel>, String> {
+        self.api.galerias(sessao).await.map_err(frase)
+    }
+
+    /// O que o balcão registra numa foto que já está no site: o estado, a
+    /// negociação, a nota.
+    pub async fn mudar_foto(
+        &self,
+        sessao: &Sessao,
+        foto_id: &str,
+        mudanca: &MudancaDaFoto,
+    ) -> Result<(), String> {
+        self.api
+            .mudar_foto(sessao, foto_id, mudanca)
+            .await
+            .map_err(frase)
+    }
+
+    /// Tira a foto do storage — o que zerar a classificação faz.
+    pub async fn remover_foto(&self, sessao: &Sessao, foto_id: &str) -> Result<(), String> {
+        self.api.remover_foto(sessao, foto_id).await.map_err(frase)
+    }
+
+    /// O link que entra sem senha, para mandar ao cliente.
+    pub async fn link_da_galeria(
+        &self,
+        sessao: &Sessao,
+        galeria_id: &str,
+    ) -> Result<LinkDeAcesso, String> {
+        self.api
+            .link_da_galeria(sessao, galeria_id)
             .await
             .map_err(frase)
     }
