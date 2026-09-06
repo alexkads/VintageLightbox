@@ -201,7 +201,7 @@ Comece por:
 # Será disponibilizado na Fase 0
 cargo build
 cargo test
-cargo run -p ui-gpui
+cargo run --release -p ui-gpui   # 🚨 --release não é opcional: debug é 57× mais lento por miniatura
 ```
 
 ## 🤝 Contribuindo

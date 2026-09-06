@@ -318,7 +318,7 @@ docker exec -i recordarfotos-dev-postgres-1 \
 
 # e o app apontado para ela
 cd ../VintageLightbox-Rust
-VLB_POS_VENDA_URL=http://localhost:8080 cargo run -p ui-gpui
+VLB_POS_VENDA_URL=http://localhost:8080 cargo run --release -p ui-gpui
 ```
 
 ⚠️ **O `VLB_POS_VENDA_URL` não é opcional.** Sem ele o app aponta para

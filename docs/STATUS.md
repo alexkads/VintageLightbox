@@ -52,6 +52,30 @@ explica sozinho uma trava dura:
 framework por medir fluidez no perfil errado (fase 1 da migração): em `debug` uma
 miniatura custa 56× mais. O primeiro passo é usar `--release`.
 
+🚨 **E aconteceu de novo em 6/set/2026** — terceira vez. O dono disse *"o desempenho
+está muito ruim, nem parece que é Rust"* com **duas** instâncias de
+`./target/debug/ui-gpui` abertas ao mesmo tempo (1h18 e 18min), e sem nenhum
+`target/release/ui-gpui` na máquina. Medido no catálogo real, 125 fotos:
+
+| perfil | por miniatura | cabem em 16,7 ms |
+|---|---|---|
+| `debug` | **38,45 ms** | 0,4 — uma linha de 6 colunas não cabe num quadro |
+| `release` | **0,67 ms** | 24,9 ✅ |
+
+**57×**, e o `medir-abertura` mostra por que o sintoma engana: abrir o app custa
+9,7 ms em `debug` contra 4,8 ms em `release` — o SQLite é C e não sente o perfil.
+Só o trabalho de pixel sente, e é ele que o dedo encosta o tempo todo. Na
+Revelação é pior que na grade: cada resultado da GPU varre a imagem inteira
+**três vezes na thread da interface** (`transformacao::aplicar`,
+`Histograma::da_imagem` e o `para_gpui`, que troca RGBA→BGRA byte a byte —
+`revelacao/tela.rs`), e em `debug` isso são centenas de milissegundos por
+milímetro de slider.
+
+Os quatro comandos documentados (`CLAUDE.md`, `README.md`,
+`09-A-SESSAO-FOTOGRAFICA.md` e este) diziam `cargo run -p ui-gpui`, sem
+`--release` — **a armadilha estava no doc**, e foi corrigida em 6/set. Se voltar a
+acontecer, a causa não é o GPUI.
+
 ## O que mudou em 6/set/2026 — a tela deixa de ser preto, branco e azul
 
 🎯 **O dono olhou o app e disse que dava para ir muito além de "3 cores (P&B) + azul"**, e a causa não
@@ -617,7 +641,7 @@ cargo test -p domain            # 202 testes, ~0.01s
 # A interface (gpui::TestAppContext)
 cargo test -p ui-gpui
 
-cargo run -p ui-gpui            # sobe o app
+cargo run --release -p ui-gpui  # sobe o app — 🚨 sem --release, 57× mais lento por miniatura
 ```
 
 ✅ **O catálogo se redireciona por `VLB_CATALOG`** (fase 0 da migração para GPUI, `f906451`). Antes

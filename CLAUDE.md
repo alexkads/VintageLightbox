@@ -58,7 +58,13 @@ cargo test -p infrastructure
 cargo test test_name --workspace
 
 # Run the application
-cargo run -p ui-gpui
+# 🚨 **Sempre com `--release`.** Em `debug` uma miniatura custa 38,45 ms contra
+#    0,67 ms — 57× (medido em 6/set/2026, `medir-miniaturas`, 125 fotos). Um
+#    quadro de 60fps tem 16,7 ms: em `debug` uma miniatura sozinha estoura dois
+#    quadros, e a Revelação, que varre a imagem inteira três vezes por resultado
+#    da GPU, paga isso a cada milímetro de slider. Já foi confundido com "o
+#    framework é lento" duas vezes (docs/STATUS.md).
+cargo run --release -p ui-gpui
 
 # O motor de revelação para o navegador (entrega ao recordarfotos-e-commerce)
 scripts/construir-web.sh [caminho/do/frontend]
