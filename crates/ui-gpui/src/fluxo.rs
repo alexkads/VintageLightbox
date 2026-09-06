@@ -33,7 +33,6 @@ use crate::app::{Aplicativo, Portas, Tela};
 use crate::biblioteca::acervo::mentira::AcervoDeMentira;
 use crate::biblioteca::colecoes::mentira::ColecoesDeMentira;
 use crate::biblioteca::marcacao::mentira::MarcadorDeMentira;
-use crate::entrada::Modo;
 use crate::exportacao::porta::mentira::ExportadorDeMentira;
 use crate::importacao::explorador::mentira::{
     ExploradorDeMentira, GeradorDeMentira, ImportadorDeMentira, SeletorDeMentira,
@@ -48,6 +47,11 @@ use crate::sessoes::arquivos::mentira::SeletorDeMentira as SeletorDeFotosDeMenti
 fn sessao() -> domain::services::pos_venda::Sessao {
     domain::services::pos_venda::Sessao {
         access_token: "tok".into(),
+        refresh_token: "ref".into(),
+        // Prazos folgados: o que estes testes exercem é a tela, não a
+        // renovação — que tem teste próprio em `pos_venda/http.rs`.
+        access_vence_em: i64::MAX,
+        refresh_vence_em: i64::MAX,
     }
 }
 
@@ -146,7 +150,7 @@ fn abrir_o_estudio(cx: &mut TestAppContext, fotos: Vec<PhotoViewModel>) -> Estud
     // sem responder a ela nenhum dos onze passos acontece.
     janela
         .update(cx, |app, _window, cx| {
-            app.escolher_modo(Modo::Online(sessao()), cx);
+            app.entrar_na_conta(sessao(), cx);
             // 🚨 **Entrou: a primeira tela é a lista de sessões**, como na web.
             assert_eq!(app.tela(), Tela::Sessoes);
             // 🚨 **E nada trabalha ainda**: logado, tudo acontece dentro de uma
@@ -630,8 +634,7 @@ fn nada_acontece_fora_de_uma_sessao(cx: &mut TestAppContext) {
 
     janela
         .update(cx, |app, window, cx| {
-            app.escolher_modo(Modo::Online(sessao()), cx);
-            assert!(app.preso_a_sessao());
+            app.entrar_na_conta(sessao(), cx);
             assert!(!app.pode_trabalhar(), "logado e sem sessão: nada trabalha");
 
             // Nenhum dos gestos sai do lugar — nem pela porta do método.

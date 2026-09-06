@@ -25,6 +25,14 @@ rsraw = "0.1"  # LibRaw binding - demosaic/white balance/color correction integr
 uuid.workspace = true
 sysinfo = "0.36.1"
 
+# A autorização pelo navegador (`pos_venda/autorizacao.rs`) e o chaveiro do
+# sistema (`pos_venda/cofre.rs`). O `keyring` é o Keychain no macOS, o
+# Credential Manager no Windows e o Secret Service no Linux — a alternativa era
+# um arquivo com o refresh token de quinze dias dentro.
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
+rand = "0.8"
+base64 = "0.22"
+
 # O motor de revelação: `Ajustes`, o WGSL, `Motor`, o enquadramento e o JPEG.
 # Saiu daqui para um crate próprio em 2026-09-04, para compilar também no
 # navegador; o que fica aqui é a leitura da entidade (`ajustes_da_entidade`,

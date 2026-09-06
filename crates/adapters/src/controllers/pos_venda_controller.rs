@@ -21,11 +21,24 @@ impl PosVendaController {
         Self { api, publicar }
     }
 
-    /// `Err` com a frase que a tela mostra. Credencial recusada e rede caída
-    /// chegam como frases diferentes — é o que a variante do domínio existe
-    /// para permitir.
-    pub async fn entrar(&self, email: &str, senha: &str) -> Result<Sessao, String> {
-        self.api.entrar(email, senha).await.map_err(frase)
+    /// Autoriza este computador pelo navegador. Bloqueia até o operador
+    /// decidir na outra janela — a tela mostra "aguardando o navegador" enquanto
+    /// isso.
+    ///
+    /// `Err` com a frase que a tela mostra. Recusa e rede caída chegam como
+    /// frases diferentes — é o que a variante do domínio existe para permitir.
+    pub async fn autorizar(&self) -> Result<Sessao, String> {
+        self.api.autorizar_pelo_navegador().await.map_err(frase)
+    }
+
+    /// A sessão de ontem, se ainda valer. `Ok(None)` é "precisa autorizar".
+    pub async fn retomar(&self) -> Result<Option<Sessao>, String> {
+        self.api.retomar_sessao().await.map_err(frase)
+    }
+
+    /// Esquece a sessão — o "sair" da tela.
+    pub async fn sair(&self) {
+        self.api.sair().await;
     }
 
     pub async fn produtos(&self, sessao: &Sessao) -> Result<Vec<Produto>, String> {

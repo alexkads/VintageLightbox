@@ -313,7 +313,8 @@ impl Importacao {
         cx.notify();
     }
 
-    /// De qual ensaio será este lote. `None` é a importação solta do offline.
+    /// De qual ensaio será este lote. `None` é lote sem ensaio — o que só
+    /// acontece em teste, desde que tudo passou a ser dentro da sessão.
     ///
     /// 🔑 Vem da raiz a cada abertura do modal, e não de um campo desta tela: o
     /// ensaio é o contexto do app, e perguntá-lo aqui seria pedir de novo o que

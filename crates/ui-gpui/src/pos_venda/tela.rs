@@ -46,8 +46,6 @@ pub struct PosVenda {
     sessao: Option<Sessao>,
     produtos: Vec<Produto>,
     produto_id: Option<String>,
-    email: gpui::Entity<InputState>,
-    senha: gpui::Entity<InputState>,
     titulo: gpui::Entity<InputState>,
     email_do_cliente: gpui::Entity<InputState>,
     whatsapp_do_cliente: gpui::Entity<InputState>,
@@ -71,16 +69,6 @@ impl PosVenda {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let email = cx.new(|cx| InputState::new(window, cx).placeholder("e-mail do operador"));
-        let email_inicial = config.email.clone();
-        if !email_inicial.is_empty() {
-            email.update(cx, |campo, cx| campo.set_value(email_inicial, window, cx));
-        }
-        let senha = cx.new(|cx| {
-            InputState::new(window, cx)
-                .placeholder("senha")
-                .masked(true)
-        });
         let titulo = cx
             .new(|cx| InputState::new(window, cx).placeholder("título da galeria — o cliente lê"));
         let email_do_cliente =
@@ -95,8 +83,6 @@ impl PosVenda {
             fotos: Vec::new(),
             sessao: None,
             produtos: Vec::new(),
-            email,
-            senha,
             titulo,
             email_do_cliente,
             whatsapp_do_cliente,
@@ -150,15 +136,19 @@ impl PosVenda {
         self.andamento.as_ref()
     }
 
+    /// Autoriza pelo navegador — o mesmo gesto da porta do app.
+    ///
+    /// Aqui ele é a exceção: quem chega neste modal já entrou na abertura, e a
+    /// sessão só some se os quinze dias vencerem com o app aberto. O caminho
+    /// continua existindo para esse caso, em vez de o modal ficar inútil até o
+    /// operador descobrir que precisa reiniciar o app.
     pub fn entrar(&mut self, cx: &mut Context<Self>) {
-        let email = self.email.read(cx).value().trim().to_string();
-        let senha = self.senha.read(cx).value().to_string();
-        if email.is_empty() || senha.is_empty() || self.entrando {
+        if self.entrando {
             return;
         }
         self.entrando = true;
         self.aviso = None;
-        self.publicador.entrar(email, senha, self.recados.0.clone());
+        self.publicador.autorizar(self.recados.0.clone());
         self.acompanhar(cx);
         cx.notify();
     }
@@ -168,6 +158,9 @@ impl PosVenda {
     pub fn entrar_para_teste(&mut self, cx: &mut Context<Self>) {
         self.sessao = Some(Sessao {
             access_token: "tok-de-teste".into(),
+            refresh_token: "ref-de-teste".into(),
+            access_vence_em: i64::MAX,
+            refresh_vence_em: i64::MAX,
         });
         self.publicador
             .produtos(self.sessao.clone().unwrap(), self.recados.0.clone());
@@ -282,12 +275,15 @@ impl PosVenda {
             match recado {
                 Recado::Entrou(sessao) => {
                     self.entrando = false;
-                    // O e-mail que entrou é lembrado; a senha, nunca.
-                    self.config.email = self.email.read(cx).value().trim().to_string();
-                    config::gravar(&self.config);
                     self.publicador
                         .produtos(sessao.clone(), self.recados.0.clone());
                     self.sessao = Some(sessao);
+                }
+                // A sessão acabou com o app aberto: o modal volta a mostrar o
+                // convite a autorizar, em vez de tentar publicar sem token.
+                Recado::SemSessao => {
+                    self.entrando = false;
+                    self.sessao = None;
                 }
                 Recado::Produtos(produtos) => {
                     // O produto lembrado vale se ainda existe; senão o primeiro.
@@ -381,9 +377,9 @@ impl PosVenda {
 
     /// A sessão vem da porta do app, e não de um login próprio.
     ///
-    /// 🔑 O formulário de entrada daqui continua existindo para o caso de o app
-    /// ter começado offline e a rede voltar — mas com sessão já dada ele não
-    /// aparece, e ninguém entra duas vezes na mesma conta na mesma abertura.
+    /// 🔑 O formulário de entrada daqui continua existindo para o caso de a
+    /// sessão morrer com o app aberto — mas com sessão já dada ele não aparece,
+    /// e ninguém entra duas vezes na mesma conta na mesma abertura.
     pub fn definir_sessao(&mut self, sessao: Sessao, cx: &mut Context<Self>) {
         self.publicador
             .produtos(sessao.clone(), self.recados.0.clone());
@@ -468,17 +464,19 @@ impl PosVenda {
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child(format!("Entrar em {}", self.config.base_url)),
+                    .child(format!(
+                        "A sessão do estúdio venceu. O navegador vai abrir para \
+                         você entrar em {} de novo.",
+                        self.config.base_url
+                    )),
             )
-            .child(Self::campo("e-mail", &self.email, cx))
-            .child(Self::campo("senha", &self.senha, cx))
             .child(
                 div().flex().justify_end().child(
                     Button::new("pos-venda-entrar")
                         .label(if self.entrando {
-                            "Entrando…"
+                            "Aguardando o navegador…"
                         } else {
-                            "Entrar"
+                            "Entrar pelo navegador"
                         })
                         .xsmall()
                         .primary()

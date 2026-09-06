@@ -54,12 +54,15 @@ quando o dono pediu autenticação para usar o app. A frase acima descrevia dois
 só um caiu:
 
 - **caiu** o "sozinho por padrão": o app abre pedindo a conta do site;
-- **ficou** o "sozinho quando preciso": quem está sem rede escolhe **trabalhar offline** na própria
-  tela de entrada, e importa, revela e tria normalmente. O que se perde ao pular está escrito na
-  tela — sem essa frase o botão vira armadilha, e o operador descobre no balcão que nada subiu.
+- **caiu também o "sozinho quando preciso"**, ainda em 6/set/2026. A saída existiu por algumas horas
+  — um botão **"trabalhar offline"** na tela de entrada — e o dono a tirou com o motivo que decide:
+  *"o propósito dele é integração com o pós-venda da RecordarFotos"*. Um app que abre sem conta é um
+  catálogo local que fala com o site quando dá; um que só abre com conta é parte do pós-venda.
 
-Um fluxo que já depende do site para funcionar não tem como ser adotado aos poucos, e adoção aos
-poucos é a única que dá para desfazer — é por isso que a saída existe, e não por gosto de offline.
+🚨 **Sem rede volta como sincronização, e não como um botão.** O que o dono pediu para depois é o app
+guardar o que foi feito offline e conciliar quando a internet voltar. A diferença não é de conforto:
+o botão desligava o site e não guardava nada, então "sem rede" terminava com 200 fotos triadas que
+nunca subiram. Enquanto a sincronização não existe, **sem rede não se trabalha**.
 **Enquanto houver item na [fila](PARIDADE-LIGHTROOM.md), a fila é o trabalho.**
 
 ---

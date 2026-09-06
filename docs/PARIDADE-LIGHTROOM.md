@@ -259,9 +259,11 @@ A impressão entra pelo mesmo motivo que o resto, e ele é de negócio: revelaç
 emolduramento vão virar **produtos com custo** dentro do ensaio. Uma folha
 impressa fora de uma sessão é trabalho que ninguém tem como cobrar.
 
-⚠️ **Offline é o contrário, e de propósito**: sem conta não há sessão, e o app
-volta a ser o que era — importar, revelar e triar no catálogo local. Quem
-escolheu trabalhar sem rede não pode ficar sem app.
+⚠️ **E não há mais saída pela qual isto fosse opcional.** O botão "trabalhar
+offline" caiu em 6/set/2026, no mesmo dia em que nasceu: *"o propósito dele é
+integração com o pós-venda da RecordarFotos"*. Trabalhar sem rede volta como
+**sincronização** — guardar e conciliar —, e não como um modo que desliga o site
+e não guarda nada.
 
 🔑 **A guarda está no método, e não só no botão** (`Aplicativo::pode_trabalhar`):
 atalho de teclado chega antes de botão, e foi assim que uma nota já caiu numa

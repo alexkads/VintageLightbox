@@ -420,6 +420,11 @@ mod testes {
             let mut tela = Balcao::nova(publicador, window, cx);
             tela.sessao = Some(Sessao {
                 access_token: "tok".into(),
+                refresh_token: "ref".into(),
+                // Prazos folgados: o que estes testes exercem é a tela, não a
+                // renovação — que tem teste próprio em `pos_venda/http.rs`.
+                access_vence_em: i64::MAX,
+                refresh_vence_em: i64::MAX,
             });
             tela
         })

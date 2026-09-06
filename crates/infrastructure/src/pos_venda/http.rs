@@ -4,7 +4,8 @@
 //!
 //! | Porta | Rota |
 //! |---|---|
-//! | `entrar` | `POST /api/v2/auth/login` → `{ access_token, … }` |
+//! | `autorizar_pelo_navegador` | `POST /api/v2/auth/app/token` → o par de tokens |
+//! | (renovação automática) | `POST /api/v2/auth/refresh` |
 //! | `produtos` | `GET /api/v2/products/admin?limit=200&offset=0` (inclui inativos) |
 //! | `criar_galeria` | `POST /api/v2/pos-venda/galerias` → `201 { id, titulo, … }` |
 //! | `enviar_foto` | `POST /api/v2/pos-venda/galerias/{id}/fotos`, multipart `file` + `estado` + `ordem` |
@@ -17,26 +18,47 @@
 //! A base da URL vem pelo construtor, nunca cravada: é o que permite o teste
 //! subir um servidor local, e o estúdio apontar para homologação.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
 use domain::services::pos_venda::{
-    ContagemDeFotos, EstadoDaFotoNoSite, FotoDaGaleria, FotoEnviada, FotoParaEnviar, Galeria,
-    GaleriaAberta, GaleriaDoPainel, LinkDeAcesso, MudancaDaFoto, NovaGaleria, PosVendaApi, Produto,
-    Sessao, TotaisDaGaleria,
+    CofreDeSessao, ContagemDeFotos, EstadoDaFotoNoSite, FotoDaGaleria, FotoEnviada, FotoParaEnviar,
+    Galeria, GaleriaAberta, GaleriaDoPainel, LinkDeAcesso, MudancaDaFoto, NovaGaleria, PosVendaApi,
+    Produto, Sessao, TotaisDaGaleria,
 };
 use domain::{DomainError, DomainResult};
 use serde::Deserialize;
 use serde_json::json;
+
+use crate::pos_venda::autorizacao::{abrir_no_navegador, PedidoDeAutorizacao};
 
 /// O teto de uma chamada. Um original de 30 MB numa subida de estúdio leva
 /// dezenas de segundos; o padrão do `reqwest` (nenhum) deixaria uma conexão
 /// morta pendurada para sempre.
 const TEMPO_LIMITE: Duration = Duration::from_secs(180);
 
+/// Onde o **site** mora — é ele que autentica, e não a API.
+///
+/// Sobrescrito por `VLB_SITE_URL`, para apontar a homologação sem recompilar.
+/// Separado da base da API porque são dois endereços: a API responde em
+/// `api.recordarfotos.com.br`, e quem abre a tela de autorização é o site.
+pub const SITE_PADRAO: &str = "https://recordarfotos.com.br";
+
 pub struct PosVendaApiHttp {
     base: String,
+    site: String,
     client: reqwest::Client,
+    /// A sessão que vale **agora** — renovada por baixo das telas.
+    ///
+    /// 🔑 **`Mutex` do tokio, e o guard é mantido durante a renovação.** Numa
+    /// subida de trinta fotos há trinta chamadas em voo; sem serializar, todas
+    /// veriam o token vencido no mesmo instante e trinta renovações sairiam ao
+    /// mesmo tempo. Com o guard segurado, a primeira renova e as outras já
+    /// encontram o token novo.
+    viva: tokio::sync::Mutex<Option<Sessao>>,
+    /// Onde a sessão dorme entre uma abertura do app e a seguinte.
+    cofre: Arc<dyn CofreDeSessao>,
 }
 
 impl PosVendaApiHttp {
@@ -47,7 +69,30 @@ impl PosVendaApiHttp {
             .timeout(TEMPO_LIMITE)
             .build()
             .expect("o cliente HTTP padrão sempre constrói");
-        Self { base, client }
+        Self {
+            base,
+            site: std::env::var("VLB_SITE_URL")
+                .ok()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| SITE_PADRAO.to_string()),
+            client,
+            viva: tokio::sync::Mutex::new(None),
+            cofre: Arc::new(crate::pos_venda::cofre::CofreEmMemoria::default()),
+        }
+    }
+
+    /// Liga o chaveiro do sistema. Sem isto a sessão morre com o processo — é o
+    /// que o teste usa, e o que vale se o chaveiro não existir na máquina.
+    pub fn com_cofre(mut self, cofre: Arc<dyn CofreDeSessao>) -> Self {
+        self.cofre = cofre;
+        self
+    }
+
+    /// Aponta o site que autentica — o teste manda o próprio servidor local.
+    pub fn com_site(mut self, site: impl Into<String>) -> Self {
+        self.site = site.into().trim_end_matches('/').to_string();
+        self
     }
 
     fn url(&self, caminho: &str) -> String {
@@ -55,9 +100,37 @@ impl PosVendaApiHttp {
     }
 }
 
+/// O que o backend devolve em `/auth/app/token` e `/auth/refresh`.
 #[derive(Deserialize)]
 struct TokenPair {
     access_token: String,
+    refresh_token: String,
+    /// Segundos até o de acesso vencer.
+    expires_in: i64,
+    /// Segundos até o de renovação vencer — quinze dias, para esta classe de
+    /// cliente. Ausente em backend anterior a esta entrega: o padrão conservador
+    /// é sete dias, que era o que ele emitia.
+    #[serde(default = "sete_dias")]
+    refresh_expires_in: i64,
+}
+
+fn sete_dias() -> i64 {
+    7 * 86_400
+}
+
+impl TokenPair {
+    fn em_sessao(self, agora: i64) -> Sessao {
+        Sessao {
+            access_token: self.access_token,
+            refresh_token: self.refresh_token,
+            access_vence_em: agora + self.expires_in,
+            refresh_vence_em: agora + self.refresh_expires_in,
+        }
+    }
+}
+
+fn agora() -> i64 {
+    chrono::Utc::now().timestamp()
 }
 
 #[derive(Deserialize)]
@@ -136,32 +209,69 @@ async fn ler<T: for<'de> Deserialize<'de>>(resposta: reqwest::Response) -> Domai
 
 #[async_trait]
 impl PosVendaApi for PosVendaApiHttp {
-    async fn entrar(&self, email: &str, senha: &str) -> DomainResult<Sessao> {
+    async fn autorizar_pelo_navegador(&self) -> DomainResult<Sessao> {
+        // O servidor local sobe **antes** do navegador: se ele abrisse depois, a
+        // volta poderia chegar numa porta que ainda não escuta, e o operador
+        // veria "não foi possível conectar" numa autorização que deu certo.
+        let pedido = PedidoDeAutorizacao::novo().await?;
+        let url = pedido.url(&self.site);
+
+        if !abrir_no_navegador(&url) {
+            // Não é fim de fluxo: o servidor já espera, e o operador pode abrir
+            // o endereço à mão. Deixar o erro subir cancelaria uma autorização
+            // que ainda é perfeitamente possível.
+            eprintln!("⚠️  Não foi possível abrir o navegador. Abra este endereço:\n{url}");
+        }
+
+        let code = pedido.esperar_codigo().await?;
+
         let resposta = self
             .client
-            .post(self.url("/auth/login"))
-            .json(&json!({ "email": email, "password": senha }))
+            .post(self.url("/auth/app/token"))
+            .json(&json!({ "code": code, "verificador": pedido.verificador }))
             .send()
             .await
             .map_err(rede)?;
 
-        // O site responde 400/422 a e-mail malformado ou senha curta — para quem
-        // está na frente do app é a mesma coisa que credencial recusada.
-        if matches!(resposta.status().as_u16(), 400 | 401 | 422) {
+        // `403` é conta sem direito de operar o estúdio; `400` é código vencido
+        // ou já gasto. Para quem está na frente do app as duas terminam do mesmo
+        // jeito — autorizar de novo, talvez com outra conta.
+        if matches!(resposta.status().as_u16(), 400 | 401 | 403) {
             return Err(DomainError::AcessoRecusado);
         }
 
-        let tokens: TokenPair = ler(resposta).await?;
-        Ok(Sessao {
-            access_token: tokens.access_token,
-        })
+        let par: TokenPair = ler(resposta).await?;
+        let sessao = par.em_sessao(agora());
+        self.adotar(sessao.clone()).await;
+        Ok(sessao)
+    }
+
+    async fn retomar_sessao(&self) -> DomainResult<Option<Sessao>> {
+        let Some(guardada) = self.cofre.ler() else {
+            return Ok(None);
+        };
+
+        // Passou dos quinze dias: não há o que renovar, e insistir só gastaria
+        // uma ida ao servidor para ouvir 401.
+        if !guardada.renovavel(agora()) {
+            self.cofre.esquecer();
+            return Ok(None);
+        }
+
+        *self.viva.lock().await = Some(guardada.clone());
+        Ok(Some(guardada))
+    }
+
+    async fn sair(&self) {
+        *self.viva.lock().await = None;
+        self.cofre.esquecer();
     }
 
     async fn produtos(&self, sessao: &Sessao) -> DomainResult<Vec<Produto>> {
         let resposta = self
             .client
             .get(self.url("/products/admin?limit=200&offset=0"))
-            .bearer_auth(&sessao.access_token)
+            .bearer_auth(self.token(sessao).await?)
             .send()
             .await
             .map_err(rede)?;
@@ -188,7 +298,7 @@ impl PosVendaApi for PosVendaApiHttp {
         let resposta = self
             .client
             .post(self.url("/pos-venda/galerias"))
-            .bearer_auth(&sessao.access_token)
+            .bearer_auth(self.token(sessao).await?)
             .json(&json!({
                 "titulo": nova.titulo,
                 "email": nova.email,
@@ -224,7 +334,7 @@ impl PosVendaApi for PosVendaApiHttp {
         let resposta = self
             .client
             .post(self.url(&format!("/pos-venda/galerias/{galeria_id}/fotos")))
-            .bearer_auth(&sessao.access_token)
+            .bearer_auth(self.token(sessao).await?)
             .multipart(form)
             .send()
             .await
@@ -238,7 +348,7 @@ impl PosVendaApi for PosVendaApiHttp {
         let resposta = self
             .client
             .post(self.url(&format!("/pos-venda/galerias/{galeria_id}/avisar")))
-            .bearer_auth(&sessao.access_token)
+            .bearer_auth(self.token(sessao).await?)
             .json(&json!({}))
             .send()
             .await
@@ -253,7 +363,7 @@ impl PosVendaApi for PosVendaApiHttp {
         let resposta = self
             .client
             .get(self.url("/pos-venda/galerias"))
-            .bearer_auth(&sessao.access_token)
+            .bearer_auth(self.token(sessao).await?)
             .send()
             .await
             .map_err(rede)?;
@@ -294,7 +404,7 @@ impl PosVendaApi for PosVendaApiHttp {
         let resposta = self
             .client
             .patch(self.url(&format!("/pos-venda/fotos/{foto_id}")))
-            .bearer_auth(&sessao.access_token)
+            .bearer_auth(self.token(sessao).await?)
             .json(&serde_json::Value::Object(corpo))
             .send()
             .await
@@ -310,7 +420,7 @@ impl PosVendaApi for PosVendaApiHttp {
         let resposta = self
             .client
             .delete(self.url(&format!("/pos-venda/fotos/{foto_id}")))
-            .bearer_auth(&sessao.access_token)
+            .bearer_auth(self.token(sessao).await?)
             .send()
             .await
             .map_err(rede)?;
@@ -329,7 +439,7 @@ impl PosVendaApi for PosVendaApiHttp {
         let resposta = self
             .client
             .post(self.url(&format!("/pos-venda/galerias/{galeria_id}/link")))
-            .bearer_auth(&sessao.access_token)
+            .bearer_auth(self.token(sessao).await?)
             .json(&json!({}))
             .send()
             .await
@@ -346,7 +456,7 @@ impl PosVendaApi for PosVendaApiHttp {
         let resposta = self
             .client
             .get(self.url(&format!("/pos-venda/galerias/{id}")))
-            .bearer_auth(&sessao.access_token)
+            .bearer_auth(self.token(sessao).await?)
             .send()
             .await
             .map_err(rede)?;
@@ -394,6 +504,66 @@ impl PosVendaApi for PosVendaApiHttp {
 }
 
 impl PosVendaApiHttp {
+    /// O token que a próxima chamada deve carregar — renovado se preciso.
+    ///
+    /// # Por que a sessão recebida não é a autoridade
+    ///
+    /// A tela guarda a sessão de quando entrou e a passa em toda chamada; o
+    /// token dentro dela envelhece em quinze minutos. Quem sabe o token de agora
+    /// é este cliente, que renovou por baixo. A sessão do parâmetro serve para
+    /// **semear** a viva — no primeiro uso depois de o app abrir com o que
+    /// estava no chaveiro.
+    async fn token(&self, sessao: &Sessao) -> DomainResult<String> {
+        let agora = agora();
+        let mut viva = self.viva.lock().await;
+        let atual = viva.get_or_insert_with(|| sessao.clone()).clone();
+
+        if atual.acesso_utilizavel(agora) {
+            return Ok(atual.access_token);
+        }
+
+        // Sem renovação possível a sessão acabou de verdade: `AcessoRecusado`
+        // manda a tela pedir autorização de novo, que é o único remédio.
+        if !atual.renovavel(agora) {
+            self.cofre.esquecer();
+            return Err(DomainError::AcessoRecusado);
+        }
+
+        let renovada = self.renovar(&atual.refresh_token).await?;
+        *viva = Some(renovada.clone());
+        // Guardar depois de a renovação dar certo, nunca antes: gravar um par
+        // que não chegou a valer deixaria o chaveiro apontando para uma sessão
+        // que não existe.
+        self.cofre.guardar(&renovada);
+        Ok(renovada.access_token)
+    }
+
+    /// Troca o refresh token por um par novo. O papel é relido do banco pelo
+    /// backend — quem foi rebaixado não continua operando por quinze dias.
+    async fn renovar(&self, refresh_token: &str) -> DomainResult<Sessao> {
+        let resposta = self
+            .client
+            .post(self.url("/auth/refresh"))
+            .json(&json!({ "refresh_token": refresh_token }))
+            .send()
+            .await
+            .map_err(rede)?;
+
+        if resposta.status() == reqwest::StatusCode::UNAUTHORIZED {
+            self.cofre.esquecer();
+            return Err(DomainError::AcessoRecusado);
+        }
+
+        let par: TokenPair = ler(resposta).await?;
+        Ok(par.em_sessao(agora()))
+    }
+
+    /// Passa a valer esta sessão, aqui e no chaveiro.
+    async fn adotar(&self, sessao: Sessao) {
+        *self.viva.lock().await = Some(sessao.clone());
+        self.cofre.guardar(&sessao);
+    }
+
     /// As rotas de imagem devolvem **bytes**, e não JSON.
     ///
     /// 🔑 Passar por `ler` desserializaria e falharia com "resposta ilegível"
@@ -403,7 +573,7 @@ impl PosVendaApiHttp {
         let resposta = self
             .client
             .get(self.url(caminho))
-            .bearer_auth(&sessao.access_token)
+            .bearer_auth(self.token(sessao).await?)
             .send()
             .await
             .map_err(rede)?;
@@ -541,37 +711,145 @@ struct LinkDaApi {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pos_venda::cofre::CofreEmMemoria;
     use domain::services::pos_venda::EstadoNoBalcao;
     use wiremock::matchers::{body_string_contains, header, method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
+    /// Uma sessão com folga nos dois prazos — o caso comum das chamadas.
+    fn sessao_valida() -> Sessao {
+        Sessao {
+            access_token: "tok".into(),
+            refresh_token: "ref".into(),
+            access_vence_em: agora() + 900,
+            refresh_vence_em: agora() + 15 * 86_400,
+        }
+    }
+
     #[tokio::test]
-    async fn entrar_devolve_a_sessao_e_senha_errada_e_acesso_recusado() {
+    async fn a_sessao_do_chaveiro_e_retomada_e_a_vencida_e_esquecida() {
+        let servidor = MockServer::start().await;
+
+        // Uma sessão de ontem, ainda dentro dos quinze dias.
+        let cofre = Arc::new(CofreEmMemoria::default());
+        cofre.guardar(&Sessao {
+            access_token: "tok-velho".into(),
+            refresh_token: "ref".into(),
+            access_vence_em: agora() - 10,
+            refresh_vence_em: agora() + 10 * 86_400,
+        });
+
+        let api = PosVendaApiHttp::nova(servidor.uri()).com_cofre(cofre.clone());
+        assert_eq!(
+            api.retomar_sessao().await.unwrap().unwrap().refresh_token,
+            "ref"
+        );
+
+        // Passados os quinze dias não há o que renovar, e o chaveiro é limpo:
+        // manter a sessão lá faria toda abertura do app tentar e falhar.
+        cofre.guardar(&Sessao {
+            access_token: "tok".into(),
+            refresh_token: "ref".into(),
+            access_vence_em: agora() - 86_400,
+            refresh_vence_em: agora() - 10,
+        });
+        assert!(api.retomar_sessao().await.unwrap().is_none());
+        assert!(cofre.ler().is_none());
+    }
+
+    /// 🔑 O coração da entrega: token de acesso vencido **não** deixa a sessão
+    /// morrer — o cliente renova sozinho e a chamada segue.
+    #[tokio::test]
+    async fn o_acesso_vencido_e_renovado_por_baixo_e_a_chamada_continua() {
         let servidor = MockServer::start().await;
         Mock::given(method("POST"))
-            .and(path("/api/v2/auth/login"))
-            .and(body_string_contains("\"password\":\"certa\""))
+            .and(path("/api/v2/auth/refresh"))
+            .and(body_string_contains("\"refresh_token\":\"ref-1\""))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "access_token": "tok", "refresh_token": "ref", "expires_in": 3600
+                "access_token": "tok-novo",
+                "refresh_token": "ref-2",
+                "expires_in": 900,
+                "refresh_expires_in": 15 * 86_400
             })))
             .mount(&servidor)
             .await;
+        // A chamada seguinte só passa com o token **novo** — é isso que prova
+        // que a renovação chegou até o cabeçalho.
+        Mock::given(method("GET"))
+            .and(path("/api/v2/products/admin"))
+            .and(header("authorization", "Bearer tok-novo"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+            .mount(&servidor)
+            .await;
+
+        let cofre = Arc::new(CofreEmMemoria::default());
+        let api = PosVendaApiHttp::nova(servidor.uri()).com_cofre(cofre.clone());
+
+        let vencida = Sessao {
+            access_token: "tok-vencido".into(),
+            refresh_token: "ref-1".into(),
+            access_vence_em: agora() - 10,
+            refresh_vence_em: agora() + 15 * 86_400,
+        };
+        api.produtos(&vencida).await.unwrap();
+
+        // E o par novo fica guardado: a próxima abertura do app não reautoriza.
+        let guardada = cofre.ler().expect("a sessão renovada vai para o chaveiro");
+        assert_eq!(guardada.access_token, "tok-novo");
+        assert_eq!(guardada.refresh_token, "ref-2");
+        assert!(guardada.refresh_vence_em - agora() > 14 * 86_400);
+    }
+
+    /// Refresh recusado é sessão acabada: o chaveiro é limpo, para o app não
+    /// tentar de novo amanhã com o que já não vale.
+    #[tokio::test]
+    async fn refresh_recusado_limpa_o_chaveiro_e_pede_autorizacao_de_novo() {
+        let servidor = MockServer::start().await;
         Mock::given(method("POST"))
-            .and(path("/api/v2/auth/login"))
+            .and(path("/api/v2/auth/refresh"))
             .respond_with(ResponseTemplate::new(401).set_body_json(json!({
-                "error": { "code": "UNAUTHORIZED", "message": "credenciais invalidas" }
+                "error": { "code": "UNAUTHORIZED", "message": "expirado" }
             })))
             .mount(&servidor)
             .await;
 
-        let api = PosVendaApiHttp::nova(servidor.uri());
-        let sessao = api.entrar("op@x.com", "certa").await.unwrap();
-        assert_eq!(sessao.access_token, "tok");
+        let cofre = Arc::new(CofreEmMemoria::default());
+        let api = PosVendaApiHttp::nova(servidor.uri()).com_cofre(cofre.clone());
+        let vencida = Sessao {
+            access_token: "tok".into(),
+            refresh_token: "ref".into(),
+            access_vence_em: agora() - 10,
+            refresh_vence_em: agora() + 86_400,
+        };
+        cofre.guardar(&vencida);
 
         assert!(matches!(
-            api.entrar("op@x.com", "errada").await.unwrap_err(),
+            api.produtos(&vencida).await.unwrap_err(),
             DomainError::AcessoRecusado
         ));
+        assert!(cofre.ler().is_none());
+    }
+
+    /// Sem renovação possível, nem se tenta: uma ida ao servidor para ouvir 401
+    /// atrasa a tela sem mudar o desfecho.
+    #[tokio::test]
+    async fn sessao_alem_dos_quinze_dias_nao_chama_o_servidor() {
+        let servidor = MockServer::start().await;
+        let api = PosVendaApiHttp::nova(servidor.uri());
+
+        let morta = Sessao {
+            access_token: "tok".into(),
+            refresh_token: "ref".into(),
+            access_vence_em: agora() - 86_400,
+            refresh_vence_em: agora() - 10,
+        };
+
+        assert!(matches!(
+            api.produtos(&morta).await.unwrap_err(),
+            DomainError::AcessoRecusado
+        ));
+        // Nenhum `Mock` foi montado: se tivesse havido chamada, o wiremock
+        // responderia 404 e o erro seria outro.
     }
 
     #[tokio::test]
@@ -589,9 +867,7 @@ mod tests {
             .await;
 
         let api = PosVendaApiHttp::nova(servidor.uri());
-        let sessao = Sessao {
-            access_token: "tok".into(),
-        };
+        let sessao = sessao_valida();
         let produtos = api.produtos(&sessao).await.unwrap();
         assert_eq!(produtos.len(), 1);
         assert_eq!(produtos[0].id, "p1");
@@ -617,9 +893,7 @@ mod tests {
             .await;
 
         let api = PosVendaApiHttp::nova(servidor.uri());
-        let sessao = Sessao {
-            access_token: "tok".into(),
-        };
+        let sessao = sessao_valida();
         let enviada = api
             .enviar_foto(
                 &sessao,
@@ -656,9 +930,7 @@ mod tests {
             .await;
 
         let api = PosVendaApiHttp::nova(servidor.uri());
-        let sessao = Sessao {
-            access_token: "tok".into(),
-        };
+        let sessao = sessao_valida();
         api.avisar_fotos_prontas(&sessao, "g1").await.unwrap();
         let erro = api.avisar_fotos_prontas(&sessao, "g2").await.unwrap_err();
         assert!(erro.to_string().contains("nao tem e-mail"), "{erro}");
@@ -683,9 +955,7 @@ mod tests {
             .await;
 
         let api = PosVendaApiHttp::nova(servidor.uri());
-        let sessao = Sessao {
-            access_token: "tok".into(),
-        };
+        let sessao = sessao_valida();
         let nova = |produto: &str| NovaGaleria {
             titulo: "Ensaio".into(),
             email: Some("maria@x.com".into()),
@@ -754,12 +1024,7 @@ mod tests {
             .await;
 
         let api = PosVendaApiHttp::nova(servidor.uri());
-        let galerias = api
-            .galerias(&Sessao {
-                access_token: "tok".into(),
-            })
-            .await
-            .unwrap();
+        let galerias = api.galerias(&sessao_valida()).await.unwrap();
 
         assert_eq!(galerias.len(), 2);
         assert_eq!(galerias[0].id, "g1");
@@ -815,9 +1080,7 @@ mod tests {
             .await;
 
         let api = PosVendaApiHttp::nova(servidor.uri());
-        let sessao = Sessao {
-            access_token: "tok".into(),
-        };
+        let sessao = sessao_valida();
 
         api.mudar_foto(
             &sessao,
@@ -852,15 +1115,9 @@ mod tests {
     async fn mudar_foto_com_nada_a_mudar_nao_chama_o_site() {
         let servidor = MockServer::start().await;
         let api = PosVendaApiHttp::nova(servidor.uri());
-        api.mudar_foto(
-            &Sessao {
-                access_token: "tok".into(),
-            },
-            "f1",
-            &MudancaDaFoto::default(),
-        )
-        .await
-        .unwrap();
+        api.mudar_foto(&sessao_valida(), "f1", &MudancaDaFoto::default())
+            .await
+            .unwrap();
         assert!(
             servidor.received_requests().await.unwrap().is_empty(),
             "nada podia ter saído daqui"
@@ -887,9 +1144,7 @@ mod tests {
             .await;
 
         let api = PosVendaApiHttp::nova(servidor.uri());
-        let sessao = Sessao {
-            access_token: "tok".into(),
-        };
+        let sessao = sessao_valida();
         api.remover_foto(&sessao, "f1").await.unwrap();
         let erro = api.remover_foto(&sessao, "f9").await.unwrap_err();
         assert!(erro.to_string().contains("nao encontrada"), "{erro}");
@@ -915,15 +1170,7 @@ mod tests {
             .await;
 
         let api = PosVendaApiHttp::nova(servidor.uri());
-        let link = api
-            .link_da_galeria(
-                &Sessao {
-                    access_token: "tok".into(),
-                },
-                "g1",
-            )
-            .await
-            .unwrap();
+        let link = api.link_da_galeria(&sessao_valida(), "g1").await.unwrap();
 
         assert_eq!(link.url, "https://recordarfotos.com.br/entrar?t=abc123");
         assert_eq!(link.validade_em_segundos, 604_800);
@@ -956,9 +1203,7 @@ mod tests {
             .await;
 
         let api = PosVendaApiHttp::nova(servidor.uri());
-        let sessao = Sessao {
-            access_token: "tok".into(),
-        };
+        let sessao = sessao_valida();
 
         let bytes = api.copia_de_trabalho(&sessao, "f1").await.unwrap();
         assert_eq!(bytes, vec![0xFF, 0xD8, 0xFF, 0xE0], "o começo de um JPEG");

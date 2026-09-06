@@ -13,9 +13,11 @@ ensaio**. Fora dele só existe a lista, que é onde se escolhe em qual entrar.
 Decisão do dono, 6/set/2026, com estas palavras: *"quando estiver logado tudo
 deve ser dentro da sessão! Nenhuma operação poderá ser fora dela"*.
 
-⚠️ **Offline é o contrário, e de propósito.** Sem conta não há sessão, e o app
-volta a ser o que era — importar, revelar e triar no catálogo local. Quem
-escolheu trabalhar sem rede não pode ficar sem app.
+⚠️ **E não há saída pela qual isto seja opcional.** O botão "trabalhar offline"
+existiu por algumas horas em 6/set/2026 e caiu no mesmo dia: *"o propósito dele é
+integração com o pós-venda da RecordarFotos"*. Trabalhar sem rede volta como
+**sincronização** — guardar o que foi feito e conciliar quando a internet voltar
+—, e não como um modo que desliga o site.
 
 ## São quatro telas
 
@@ -26,8 +28,8 @@ escolheu trabalhar sem rede não pode ficar sem app.
 | **Revelação** | os 46 ajustes, o enquadramento, o histórico |
 | **Impressão** | a folha e o PDF |
 
-🚨 **"Biblioteca" não é uma delas.** Ela é a grade do catálogo local, e só existe
-sozinha no **modo offline** — onde não há ensaio a que as fotos pertençam. Foi o
+🚨 **"Biblioteca" não é uma delas.** Ela é a grade do catálogo local **dentro do
+ensaio aberto** — não uma tela por onde se entre. Foi o
 equívoco que mais custou para ser desfeito: por três rodadas o app manteve a
 Biblioteca global como o lugar de revelar e escolher, com a sessão pendurada ao
 lado. O dono precisou repetir três vezes, e a terceira foi a que pegou:
@@ -100,8 +102,8 @@ existe. Tirar a nota é `DELETE /pos-venda/fotos/{id}`.
 
 🔑 **A Biblioteca não fala com o site, e não vai passar a falar.** Ela emite
 `Classificou { subiram, sairam }` e a raiz decide — porque é a raiz que tem a
-sessão e a galeria aberta. É o que deixa a grade funcionar offline sem saber que
-existe um site.
+sessão e a galeria aberta. É o que deixa a grade não precisar saber que existe um
+site.
 
 ⚠️ **A travessia do zero é lida ANTES da escrita.** Depois de gravar a nota nova,
 o "antes" já não existe: dá para saber de que lado cada foto está, não quem
@@ -109,20 +111,45 @@ atravessou. E é a travessia que importa — ir de 3 para 4 estrelas não sobe n
 
 ## A porta do app
 
-O app abre pedindo a conta do site (`crates/ui-gpui/src/entrada.rs`), com uma
-saída explícita: **trabalhar offline**.
+O app abre pedindo a conta do site (`crates/ui-gpui/src/entrada.rs`), e **não há
+outra porta**.
 
-🚨 **A tela diz o que se perde ao pular**, e isso não é enfeite: um botão
-"trabalhar offline" sem essa frase transforma a escolha em armadilha — o operador
-pula por pressa, tria 200 fotos, e descobre no balcão que nada foi para o site.
+🔑 **Quem autentica é o navegador — o app não vê senha** (6/set/2026). A tela tem
+um botão só: ele abre `recordarfotos.com.br/autorizar-app` no navegador, o
+operador confirma lá com o que já usa (senha ou Google), e o app recebe de volta
+um par de tokens por um servidor que ele mesmo subiu em `127.0.0.1`. É o desenho
+do `gh auth login` e do Figma (RFC 8252: loopback + PKCE), e o que ele resolve
+são três coisas de uma vez: a senha do estúdio deixa de ser digitada num
+aplicativo desktop, o Google passa a servir para o app, e a sessão passa a durar
+**quinze dias** em vez de quinze minutos.
+
+⚠️ **O código que volta pelo `localhost` não é sessão.** Ele vale dois minutos,
+uma vez, e só vira tokens nas mãos de quem sabe o verificador — 32 bytes
+sorteados que nunca saem da máquina. Sem isso, quem interceptasse o
+redirecionamento (outro processo na mesma máquina, uma extensão de navegador)
+levaria quinze dias de acesso ao estúdio. Ver
+`infrastructure::pos_venda::autorizacao` e `application::auth::dispositivo`, no
+backend.
+
+🚨 **A saída caiu no mesmo dia em que nasceu** (6/set/2026): *"o propósito dele é
+integração com o pós-venda da RecordarFotos"*. O botão "trabalhar offline"
+desligava o site e não guardava nada — o operador triava 200 fotos e descobria no
+balcão que nada subiu. A tela diz por que não há saída, e o que virá no lugar:
+**sincronização**, que guarda o que foi feito sem rede e concilia quando ela
+volta.
 
 🚨 **A porta vem antes do `render` inteiro**, e não por cima dele. Com o app
 desenhado por baixo, as quinze teclas de triagem continuariam chegando à grade
 por trás da tela de login: nota dada numa grade que ninguém está vendo.
 
-⚠️ **O token não é gravado em disco.** O arquivo de configuração mora ao lado do
-catálogo e vai em todo backup dele. O e-mail é lembrado; a senha é uma por dia de
-trabalho.
+⚠️ **O token continua fora do disco do app — e agora dorme no chaveiro.** O
+arquivo de configuração mora ao lado do catálogo e vai em todo backup dele; o par
+de tokens vai para o Keychain do sistema (`infrastructure::pos_venda::cofre`),
+preso ao usuário do Mac. Na abertura o app tenta retomar de lá antes de desenhar
+qualquer coisa: no caso comum esta tela existe por um piscar. Quando o de acesso
+vence — a cada quinze minutos — o cliente HTTP renova sozinho, antes da chamada,
+e guarda o par novo. Passados os quinze dias do de renovação, o chaveiro é limpo
+e a porta reaparece.
 
 ## A guarda: `Aplicativo::pode_trabalhar`
 
@@ -284,14 +311,14 @@ E fora da tela:
 
 ```
 crates/ui-gpui/src/
-├── entrada.rs              a porta: entrar na conta, ou trabalhar offline
+├── entrada.rs              a porta: entrar na conta do site, e só
 ├── fluxo.rs                os onze passos, de ponta a ponta (só testes)
 ├── sessoes/
 │   ├── tela.rs             a lista de sessões
 │   ├── detalhe.rs          a sessão — a rota [id] do site
 │   └── arquivos.rs         o seletor do sistema, e o que é foto
 ├── balcao/tela.rs          a negociação do balcão
-├── biblioteca/tela.rs      a grade do catálogo local (modo offline)
+├── biblioteca/tela.rs      a grade do catálogo local desta máquina
 └── app.rs                  a raiz: as quatro telas, a guarda, o despacho
 
 crates/biblioteca-core/src/

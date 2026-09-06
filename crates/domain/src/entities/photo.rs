@@ -55,9 +55,9 @@ pub struct Photo {
     /// só sabe mostrar o catálogo inteiro, e o ensaio de um cliente fica
     /// misturado com o de todos os outros.
     ///
-    /// `None` é foto solta — importada offline, ou de antes desta regra. Ela
-    /// aparece quando não há sessão aberta, que é o modo em que o app é o
-    /// catálogo local de sempre.
+    /// `None` é foto solta — de antes desta regra. Ela aparece quando a grade
+    /// não está recortada por ensaio, e não nasce mais pela interface: desde
+    /// 6/set/2026 todo lote importado pertence a uma sessão.
     #[serde(default)]
     sessao_id: Option<String>,
     /// Data de importação

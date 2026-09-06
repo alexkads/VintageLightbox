@@ -13,12 +13,18 @@ Guia de trabalho neste repositório.
 A integração com a API de pós-venda **existe desde 2/set/2026** (tecla `B` + botão "Pós-venda";
 `docs/PARIDADE-LIGHTROOM.md`, seção "Pós-venda").
 
-⚠️ **O princípio "o app tem de ser útil sozinho" foi revisto em 6/set/2026, e não caiu.** O dono
-pediu que o app peça a conta do site para ser usado — *"eu preciso autenticar na web para conseguir
-usar o VintageLightbox"* — com um limite que ele mesmo pôs: **abre pedindo a conta, e quem está sem
-rede escolhe "trabalhar offline"** e perde só o que fala com o site. O princípio virou uma escolha
-explícita, feita uma vez na entrada (`crates/ui-gpui/src/entrada.rs`), em vez de um estado que o app
-assume calado. Importar, revelar e triar continuam sem depender de rede.
+⚠️ **O princípio "o app tem de ser útil sozinho" caiu em 6/set/2026.** O dono pediu que o app peça a
+conta do site para ser usado — *"eu preciso autenticar na web para conseguir usar o
+VintageLightbox"*. A primeira versão da reversão guardou uma saída, o botão **"trabalhar offline"**,
+e a saída **caiu no mesmo dia**, com o motivo que decide: *"o propósito dele é integração com o
+pós-venda da RecordarFotos"*. O app abre pedindo a conta (`crates/ui-gpui/src/entrada.rs`), e não há
+outro jeito de abrir.
+
+🚨 **Trabalhar sem rede não foi descartado — foi adiado com forma própria: sincronização.** O app vai
+guardar o que foi feito sem internet e conciliar quando ela voltar. Um botão que só desliga o site é
+o contrário disso: ele deixa o operador triar 200 fotos e descobrir no balcão que nada subiu, e não
+guarda nada para conciliar depois. **Enquanto a sincronização não existe, sem rede não se trabalha** —
+e é preferível a um app que mente sobre o que salvou.
 
 ⚠️ **Este objetivo substituiu outro em 17/ago/2026**, e a diferença importa no dia a dia. O anterior
 era migrar a interface de egui para GPUI **com paridade**; ele foi **alcançado** (`8c7df32`, o

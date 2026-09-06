@@ -53,13 +53,29 @@ pub enum Recado {
     /// 🔑 **Notifica, não descreve.** Quem escuta só precisa saber que o
     /// catálogo mudou, para reler — os números estão no banco.
     Sincronizou,
-    /// Uma frase para a tela — login recusado, rede caída, galeria recusada.
+    /// Não há sessão guardada (ou ela venceu): a tela mostra o convite a
+    /// autorizar. **Não é falha** — é o estado normal da primeira abertura, e
+    /// tratá-lo como erro pintaria de vermelho um app recém-instalado.
+    SemSessao,
+    /// Uma frase para a tela — autorização recusada, rede caída, galeria
+    /// recusada.
     Falhou(String),
 }
 
 pub trait Publicador: Send + Sync + 'static {
-    /// Todas devolvem na hora; a resposta vem pelo canal.
-    fn entrar(&self, email: String, senha: String, canal: Sender<Recado>);
+    /// Abre o navegador para o operador autorizar este computador.
+    ///
+    /// Todas devolvem na hora; a resposta vem pelo canal — e esta demora o que o
+    /// operador demorar na outra janela, que é justamente por isso que ela não
+    /// pode bloquear a interface.
+    fn autorizar(&self, canal: Sender<Recado>);
+
+    /// A sessão de ontem, do chaveiro. Responde `Entrou` se ainda valer, e
+    /// `SemSessao` se for preciso autorizar.
+    fn retomar(&self, canal: Sender<Recado>);
+
+    /// Esquece a sessão — o "sair" da tela.
+    fn sair(&self, canal: Sender<Recado>);
     fn produtos(&self, sessao: Sessao, canal: Sender<Recado>);
     fn publicar(&self, pedido: Pedido, canal: Sender<Recado>);
     /// O passo 7 do fluxo: o link do cliente.
@@ -136,14 +152,36 @@ impl PublicadorDaApi {
 }
 
 impl Publicador for PublicadorDaApi {
-    fn entrar(&self, email: String, senha: String, canal: Sender<Recado>) {
+    fn autorizar(&self, canal: Sender<Recado>) {
         let controlador = self.controlador.clone();
         self.tokio.spawn(async move {
-            let recado = match controlador.entrar(&email, &senha).await {
+            let recado = match controlador.autorizar().await {
                 Ok(sessao) => Recado::Entrou(sessao),
                 Err(erro) => Recado::Falhou(erro),
             };
             let _ = canal.send(recado);
+        });
+    }
+
+    fn retomar(&self, canal: Sender<Recado>) {
+        let controlador = self.controlador.clone();
+        self.tokio.spawn(async move {
+            let recado = match controlador.retomar().await {
+                Ok(Some(sessao)) => Recado::Entrou(sessao),
+                Ok(None) => Recado::SemSessao,
+                // Falha ao ler o chaveiro não é motivo para assustar ninguém: o
+                // desfecho é o mesmo de não haver sessão — autorizar.
+                Err(_) => Recado::SemSessao,
+            };
+            let _ = canal.send(recado);
+        });
+    }
+
+    fn sair(&self, canal: Sender<Recado>) {
+        let controlador = self.controlador.clone();
+        self.tokio.spawn(async move {
+            controlador.sair().await;
+            let _ = canal.send(Recado::SemSessao);
         });
     }
 
@@ -352,9 +390,14 @@ pub mod mentira {
     pub struct PublicadorDeMentira {
         pub produtos: Vec<Produto>,
         pub pedidos: Mutex<Vec<Pedido>>,
-        /// A senha que entra; qualquer outra é recusada — para a tela poder ser
-        /// testada com login errado.
-        pub senha_certa: Option<String>,
+        /// Liga a recusa do site — para a tela poder ser testada com "não
+        /// autorizado". Invertido de propósito: o `Default` do teste é o caminho
+        /// que dá certo.
+        pub recusa_autorizacao: bool,
+        /// Quantas vezes o navegador foi aberto.
+        pub autorizacoes: Mutex<Vec<()>>,
+        /// O que o chaveiro devolve na retomada.
+        pub sessao_guardada: Mutex<Option<Sessao>>,
         /// De quais galerias o link foi pedido.
         pub links: Mutex<Vec<String>>,
         /// As sessões que a listagem vai encontrar.
@@ -437,18 +480,32 @@ pub mod mentira {
     }
 
     impl Publicador for PublicadorDeMentira {
-        fn entrar(&self, _email: String, senha: String, canal: Sender<Recado>) {
-            let aceita = self
-                .senha_certa
-                .as_deref()
-                .is_none_or(|certa| certa == senha);
-            let _ = canal.send(if aceita {
+        fn autorizar(&self, canal: Sender<Recado>) {
+            self.autorizacoes.lock().expect("as autorizacoes").push(());
+            let _ = canal.send(if !self.recusa_autorizacao {
                 Recado::Entrou(Sessao {
                     access_token: "tok-de-mentira".into(),
+                    refresh_token: "ref-de-mentira".into(),
+                    access_vence_em: i64::MAX,
+                    refresh_vence_em: i64::MAX,
                 })
             } else {
-                Recado::Falhou("e-mail ou senha recusados pelo site".into())
+                Recado::Falhou("o site recusou a autorização".into())
             });
+        }
+
+        fn retomar(&self, canal: Sender<Recado>) {
+            let _ = canal.send(
+                match self.sessao_guardada.lock().expect("a guardada").clone() {
+                    Some(sessao) => Recado::Entrou(sessao),
+                    None => Recado::SemSessao,
+                },
+            );
+        }
+
+        fn sair(&self, canal: Sender<Recado>) {
+            *self.sessao_guardada.lock().expect("a guardada") = None;
+            let _ = canal.send(Recado::SemSessao);
         }
 
         fn produtos(&self, _sessao: Sessao, canal: Sender<Recado>) {

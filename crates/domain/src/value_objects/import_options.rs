@@ -29,8 +29,8 @@ pub struct ImportOptions {
     ///
     /// 🚨 **É o que põe a foto dentro da sessão**, e não um metadado: logado, é
     /// dentro do ensaio que se revela e se escolhe com o cliente, e uma foto sem
-    /// ensaio não teria onde aparecer. `None` é a importação solta do modo
-    /// offline, que continua indo para o catálogo de sempre.
+    /// ensaio não teria onde aparecer. `None` é lote sem ensaio, que continua
+    /// indo para o catálogo de sempre — e não acontece mais pela interface.
     #[serde(default)]
     pub sessao_id: Option<String>,
 }

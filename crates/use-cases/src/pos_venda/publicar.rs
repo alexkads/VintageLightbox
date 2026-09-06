@@ -379,9 +379,13 @@ mod tests {
 
     #[async_trait::async_trait]
     impl PosVendaApi for ApiDeMentira {
-        async fn entrar(&self, _: &str, _: &str) -> DomainResult<Sessao> {
-            unreachable!("o caso de uso não entra; recebe a sessão pronta")
+        async fn autorizar_pelo_navegador(&self) -> DomainResult<Sessao> {
+            unreachable!("o caso de uso não autoriza; recebe a sessão pronta")
         }
+        async fn retomar_sessao(&self) -> DomainResult<Option<Sessao>> {
+            Ok(None)
+        }
+        async fn sair(&self) {}
         async fn produtos(
             &self,
             _: &Sessao,
@@ -474,6 +478,11 @@ mod tests {
         Pedido {
             sessao: Sessao {
                 access_token: "tok".into(),
+                refresh_token: "ref".into(),
+                // Prazos folgados: o que estes testes exercem é a tela, não a
+                // renovação — que tem teste próprio em `pos_venda/http.rs`.
+                access_vence_em: i64::MAX,
+                refresh_vence_em: i64::MAX,
             },
             galeria: NovaGaleria {
                 titulo: "Ensaio".into(),
@@ -761,6 +770,11 @@ mod tests {
     fn sessao() -> Sessao {
         Sessao {
             access_token: "tok".into(),
+            refresh_token: "ref".into(),
+            // Prazos folgados: o que estes testes exercem é a tela, não a
+            // renovação — que tem teste próprio em `pos_venda/http.rs`.
+            access_vence_em: i64::MAX,
+            refresh_vence_em: i64::MAX,
         }
     }
 }

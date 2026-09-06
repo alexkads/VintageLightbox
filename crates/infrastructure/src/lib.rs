@@ -34,7 +34,7 @@ pub use database::{
 pub use exif_reader::ExifReader;
 pub use file_organizer::FileOrganizerImpl;
 pub use image_exporter::ImageExporterImpl;
-pub use pos_venda::PosVendaApiHttp;
+pub use pos_venda::{CofreDoSistema, CofreEmMemoria, PosVendaApiHttp};
 pub use source_scanner::SourceScannerImpl;
 pub use thumbnail_generator::ThumbnailGeneratorImpl;
 // pub use fs::FileSystemImpl; // Commenting out until verified

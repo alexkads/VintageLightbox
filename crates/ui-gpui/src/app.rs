@@ -22,7 +22,7 @@ use crate::biblioteca::tela::Biblioteca;
 use crate::biblioteca::tela::Classificou;
 use crate::cliente::{monitor_do_cliente, Cliente};
 use crate::configuracoes::Configuracoes;
-use crate::entrada::{Entrada, Escolheu, Modo};
+use crate::entrada::{Entrada, Entrou};
 use crate::exportacao::porta::Exportador;
 use crate::exportacao::tela::Exportacao;
 use crate::importacao::explorador::{Explorador, GeradorDeMiniaturas, Importador, SeletorDePasta};
@@ -286,16 +286,19 @@ pub struct Aplicativo {
     /// 🚨 A inscrição na escolha da sessão. Descartada, a tela marca a linha e
     /// o resto do app continua sem saber em qual galeria as fotos entram.
     _sessao_escolhida: gpui::Subscription,
-    /// A porta do app: entrar na conta do site, ou dizer que hoje é sem rede.
+    /// A porta do app: entrar na conta do site. Não há outra.
     ///
-    /// 🚨 **Enquanto [`Self::modo`] é `None`, é só ela que aparece.** Foi a
+    /// 🚨 **Enquanto [`Self::sessao`] é `None`, é só ela que aparece.** Foi a
     /// reversão pedida pelo dono em 6/set/2026 do princípio "o app tem de ser
-    /// útil sozinho" — que não caiu inteiro: virou a escolha explícita de
-    /// trabalhar offline, feita uma vez, em vez de um estado assumido calado.
+    /// útil sozinho" — e a saída dela, o botão "trabalhar offline", caiu no
+    /// mesmo dia: o propósito do app é a integração com o pós-venda, e sem
+    /// conta não há ensaio a que as fotos pertençam. Trabalhar sem rede volta
+    /// como **sincronização**, que guarda e concilia — não como um botão que
+    /// desliga o site.
     entrada: Entity<Entrada>,
-    /// Como esta abertura vai trabalhar. `None` é "ainda na porta".
-    modo: Option<Modo>,
-    /// 🚨 A inscrição na escolha da porta. Descartada, o app fica na tela de
+    /// A conta que entrou nesta abertura. `None` é "ainda na porta".
+    sessao: Option<domain::services::pos_venda::Sessao>,
+    /// 🚨 A inscrição na entrada da porta. Descartada, o app fica na tela de
     /// login para sempre — com o login funcionando e sem nada acontecendo.
     _escolha: gpui::Subscription,
     /// As Configurações, no mesmo formato do modal de importação: elas são um
@@ -439,13 +442,13 @@ impl Aplicativo {
                 cx,
             )
         });
-        let escolha = cx.subscribe(&entrada, |raiz, _entrada, evento: &Escolheu, cx| {
-            raiz.escolher_modo(evento.0.clone(), cx);
+        let escolha = cx.subscribe(&entrada, |raiz, _entrada, evento: &Entrou, cx| {
+            raiz.entrar_na_conta(evento.0.clone(), cx);
         });
 
         // 🔑 A Biblioteca **notifica** que a classificação atravessou o zero, e
         // não sobe nada: quem tem a sessão e a galeria aberta é esta raiz. É o
-        // que deixa a grade funcionar offline sem saber que existe um site.
+        // que deixa a grade não precisar saber que existe um site.
         let classificacao = cx.subscribe(&biblioteca, |raiz, _tela, evento: &Classificou, cx| {
             raiz.sincronizar_classificacao(evento.clone(), cx);
         });
@@ -521,7 +524,7 @@ impl Aplicativo {
             }),
             publicando: false,
             entrada,
-            modo: None,
+            sessao: None,
             _escolha: escolha,
             balcao,
             no_balcao: false,
@@ -735,8 +738,9 @@ impl Aplicativo {
 
     /// Despacha um gesto de triagem para **a grade que está na frente**.
     ///
-    /// 🚨 **São duas grades, e nunca as duas ao mesmo tempo**: dentro de um
-    /// ensaio é a da sessão; offline, a Biblioteca solta. As teclas da legenda
+    /// 🚨 **São duas grades, e nunca as duas ao mesmo tempo**: a do ensaio, que
+    /// mostra o que está no site, e a Biblioteca, que é o catálogo desta
+    /// máquina. As teclas da legenda
     /// (`1`–`5`, `P`, `Ctrl+A`, `Ctrl+D`, setas) valem nas duas — o que muda é
     /// quem responde.
     fn na_grade(
@@ -793,8 +797,8 @@ impl Aplicativo {
     /// que este aviso existe para impedir — silêncio aqui seria pior que erro.
     fn sincronizar_classificacao(&mut self, evento: Classificou, cx: &mut Context<Self>) {
         let Some(sessao) = self.sessao().cloned() else {
-            // Offline é uma escolha, e foi feita na porta: avisar a cada estrela
-            // seria cobrar de novo o que já foi respondido.
+            // Sem conta não se chega aqui: a porta vem antes de tudo, e a
+            // Biblioteca não é desenhada enquanto ela não for respondida.
             return;
         };
 
@@ -991,8 +995,8 @@ impl Aplicativo {
     /// 🔑 **São quatro telas** (decisão do dono, 6/set/2026): a lista de
     /// sessões, a sessão (onde se escolhe com o cliente e se negocia), a
     /// revelação e a impressão. "Biblioteca" não é uma delas: ela é a grade
-    /// **dentro** da sessão — e só existe sozinha no modo offline, onde não há
-    /// ensaio a que pertencer.
+    /// **dentro** da sessão — o catálogo desta máquina, recortado pelo ensaio
+    /// que está aberto.
     pub fn voltar_para_biblioteca(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.revelacao
             .update(cx, |tela, _cx| tela.gravar_o_que_estiver_pendente());
@@ -1276,46 +1280,38 @@ impl Aplicativo {
     /// A porta foi respondida: o app passa a existir.
     ///
     /// 🔑 **A sessão desce para o pós-venda aqui**, e não é pedida de novo lá:
-    /// entrar duas vezes na mesma conta, na mesma abertura, é o tipo de atrito
-    /// que faz o operador escolher offline por engano.
-    pub fn escolher_modo(&mut self, modo: Modo, cx: &mut Context<Self>) {
-        if let Modo::Online(sessao) = &modo {
-            self.pos_venda
-                .update(cx, |tela, cx| tela.definir_sessao(sessao.clone(), cx));
-            // A lista já pede as sessões: quem entrou vai querer ver em qual
-            // galeria está trabalhando antes de qualquer outra coisa.
-            self.sessoes
-                .update(cx, |tela, cx| tela.definir_sessao(sessao.clone(), cx));
-            self.balcao
-                .update(cx, |tela, cx| tela.definir_sessao(sessao.clone(), cx));
-            self.detalhe
-                .update(cx, |tela, _cx| tela.definir_sessao(sessao.clone()));
-            // 🔑 **Entrou: a primeira tela é a lista de sessões.** Na web é de
-            // onde tudo parte, e abrir no catálogo global foi o que fez o app
-            // parecer "aberto e estranho" para quem vinha de lá.
-            self.tela = Tela::Sessoes;
-        }
-        self.modo = Some(modo);
+    /// entrar duas vezes na mesma conta, na mesma abertura, é atrito puro.
+    pub fn entrar_na_conta(
+        &mut self,
+        sessao: domain::services::pos_venda::Sessao,
+        cx: &mut Context<Self>,
+    ) {
+        self.pos_venda
+            .update(cx, |tela, cx| tela.definir_sessao(sessao.clone(), cx));
+        // A lista já pede as sessões: quem entrou vai querer ver em qual
+        // galeria está trabalhando antes de qualquer outra coisa.
+        self.sessoes
+            .update(cx, |tela, cx| tela.definir_sessao(sessao.clone(), cx));
+        self.balcao
+            .update(cx, |tela, cx| tela.definir_sessao(sessao.clone(), cx));
+        self.detalhe
+            .update(cx, |tela, _cx| tela.definir_sessao(sessao.clone()));
+        // 🔑 **Entrou: a primeira tela é a lista de sessões.** Na web é de
+        // onde tudo parte, e abrir no catálogo global foi o que fez o app
+        // parecer "aberto e estranho" para quem vinha de lá.
+        self.tela = Tela::Sessoes;
+        self.sessao = Some(sessao);
         cx.notify();
     }
 
-    /// A sessão do site, quando há uma. `None` no modo offline **e** na porta.
+    /// A conta do site, quando o app já passou da porta.
     pub fn sessao(&self) -> Option<&domain::services::pos_venda::Sessao> {
-        match &self.modo {
-            Some(Modo::Online(sessao)) => Some(sessao),
-            _ => None,
-        }
+        self.sessao.as_ref()
     }
 
     /// Se o app já passou da porta.
     pub fn entrou(&self) -> bool {
-        self.modo.is_some()
-    }
-
-    /// Se esta abertura é sem rede — o que a tela usa para desligar o que fala
-    /// com o site, em vez de deixar o botão ligado para dar erro depois.
-    pub fn offline(&self) -> bool {
-        matches!(self.modo, Some(Modo::Offline))
+        self.sessao.is_some()
     }
 
     pub fn fechar_pos_venda(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1446,8 +1442,8 @@ impl Aplicativo {
         cx: &mut Context<Self>,
         acao: impl FnOnce(&mut Biblioteca, &mut Context<Biblioteca>),
     ) {
-        // A Biblioteca solta é a tela do modo offline. Dentro de um ensaio a
-        // grade é a da sessão, e quem despacha para ela é `na_grade`.
+        // A Biblioteca é o catálogo local; a grade do ensaio mostra o que está
+        // no site, e quem despacha para ela é `na_grade`.
         if self.tela != Tela::Biblioteca {
             return;
         }
@@ -1517,16 +1513,17 @@ impl Aplicativo {
         }
     }
 
-    /// Se este app está preso a uma sessão.
+    /// Se há uma sessão aberta — sem ela, nada trabalha.
     ///
-    /// 🚨 **Logado, tudo acontece dentro de uma sessão** — regra do dono,
-    /// 6/set/2026: importar, revelar, escolher com o cliente, exportar e gerar o
-    /// link são gestos *sobre um ensaio*, e não sobre um catálogo solto. Fora
-    /// dela só existe a lista, que é onde se escolhe em qual entrar.
+    /// 🚨 **Tudo acontece dentro de uma sessão** — regra do dono, 6/set/2026:
+    /// importar, revelar, escolher com o cliente, exportar e gerar o link são
+    /// gestos *sobre um ensaio*, e não sobre um catálogo solto. Fora dela só
+    /// existe a lista, que é onde se escolhe em qual entrar.
     ///
-    /// ⚠️ **Offline é o contrário, e de propósito**: sem conta não há sessão, e
-    /// o app volta a ser o que era — importar, revelar e triar no catálogo
-    /// local. Quem escolheu trabalhar sem rede não pode ficar sem app.
+    /// ⚠️ **E não há mais a saída pela qual isto era opcional.** O botão
+    /// "trabalhar offline" caiu em 6/set/2026, no mesmo dia em que nasceu: o
+    /// propósito do app é a integração com o pós-venda, e catálogo solto não
+    /// pertence a ensaio nenhum. Sem rede volta como sincronização.
     ///
     /// 🔑 **A impressão entra na regra pelo mesmo motivo que o resto**, e o dono
     /// disse por quê: revelação e emolduramento vão virar **produtos com custo**
@@ -1539,13 +1536,8 @@ impl Aplicativo {
     /// pedidos de revelação**. Contar quantas revelações um ensaio teve só é
     /// possível se toda revelação pertencer a um ensaio — e é exatamente isso
     /// que esta guarda passa a garantir, antes de haver o que contar.
-    pub fn preso_a_sessao(&self) -> bool {
-        matches!(self.modo, Some(Modo::Online(_)))
-    }
-
-    /// Se há uma sessão aberta — ou se o modo dispensa uma.
     pub fn pode_trabalhar(&self) -> bool {
-        !self.preso_a_sessao() || self.sessao_aberta.is_some()
+        self.sessao_aberta.is_some()
     }
 
     /// O título da sessão aberta, para a barra dizer onde se está.
@@ -1597,57 +1589,42 @@ impl Aplicativo {
             // custa uma varredura da barra inteira, toda vez.
             .child(
                 grupo()
-                    // 🚨 Dentro de uma sessão, a saída dela vem primeiro — e ela
-                    // é a única coisa que a barra oferece antes de haver uma.
-                    .when(self.preso_a_sessao(), |grupo| {
-                        grupo
-                            .child(
-                                Button::new("nav-sessoes")
-                                    .label(if self.sessao_aberta.is_some() {
-                                        "← Sessões"
-                                    } else {
-                                        "Sessões"
-                                    })
-                                    .xsmall()
-                                    .when(self.tela == Tela::Sessoes, |b| b.primary())
-                                    .selected(self.tela == Tela::Sessoes)
-                                    .on_click(cx.listener(|este, _ev, _window, cx| {
-                                        este.sair_da_sessao(cx);
-                                    })),
-                            )
-                            .when_some(self.nome_da_sessao(cx), |grupo, nome| {
-                                grupo.child(
-                                    // O ensaio aberto é da família âmbar: é o
-                                    // contexto do cliente, e não uma tela a mais.
-                                    Button::new("nav-sessao-aberta")
-                                        .label(nome)
-                                        .xsmall()
-                                        .when(self.tela == Tela::Sessao, |b| {
-                                            b.custom(tema::botao_quente(cx))
-                                        })
-                                        .selected(self.tela == Tela::Sessao)
-                                        .on_click(cx.listener(|este, _ev, _window, cx| {
-                                            este.tela = Tela::Sessao;
-                                            cx.notify();
-                                        })),
-                                )
-                            })
-                    })
+                    // 🚨 A saída da sessão vem primeiro — e ela é a única coisa
+                    // que a barra oferece antes de haver uma sessão aberta.
+                    //
                     // 🚨 **Dentro de um ensaio não há aba de biblioteca**, e é o
                     // ponto que custou mais para eu entender: a grade do ensaio
                     // já está na tela, logo abaixo do cabeçalho. Uma aba
                     // "Escolher com o cliente" ao lado dizia que a escolha
                     // acontece em outro lugar — que é exatamente o equívoco.
-                    .when(!self.preso_a_sessao(), |grupo| {
+                    .child(
+                        Button::new("nav-sessoes")
+                            .label(if self.sessao_aberta.is_some() {
+                                "← Sessões"
+                            } else {
+                                "Sessões"
+                            })
+                            .xsmall()
+                            .when(self.tela == Tela::Sessoes, |b| b.primary())
+                            .selected(self.tela == Tela::Sessoes)
+                            .on_click(cx.listener(|este, _ev, _window, cx| {
+                                este.sair_da_sessao(cx);
+                            })),
+                    )
+                    .when_some(self.nome_da_sessao(cx), |grupo, nome| {
                         grupo.child(
-                            Button::new("nav-biblioteca")
-                                .label("Biblioteca")
+                            // O ensaio aberto é da família âmbar: é o contexto
+                            // do cliente, e não uma tela a mais.
+                            Button::new("nav-sessao-aberta")
+                                .label(nome)
                                 .xsmall()
-                                .when(self.tela == Tela::Biblioteca, |b| b.primary())
-                                .selected(self.tela == Tela::Biblioteca)
-                                .disabled(!trabalhando)
-                                .on_click(cx.listener(|este, _ev, window, cx| {
-                                    este.voltar_para_biblioteca(window, cx);
+                                .when(self.tela == Tela::Sessao, |b| {
+                                    b.custom(tema::botao_quente(cx))
+                                })
+                                .selected(self.tela == Tela::Sessao)
+                                .on_click(cx.listener(|este, _ev, _window, cx| {
+                                    este.tela = Tela::Sessao;
+                                    cx.notify();
                                 })),
                         )
                     })
@@ -1766,23 +1743,12 @@ impl Aplicativo {
                                 este.abrir_balcao(cx);
                             })),
                     )
-                    // 📸 **Publicar cria uma galeria nova**, e por isso ele some
-                    // quando já se está dentro de uma: ali o gesto é subir para
-                    // *esta* sessão, e dois caminhos para o mesmo lugar com
-                    // desfechos diferentes é a forma mais cara de confundir.
-                    .when(!self.preso_a_sessao(), |grupo| {
-                        grupo.child(
-                            Button::new("nav-pos-venda")
-                                .label("Pós-venda")
-                                .xsmall()
-                                .custom(tema::botao_quente(cx))
-                                .selected(self.publicando)
-                                .disabled(!tem_o_que_exportar)
-                                .on_click(cx.listener(|este, _ev, _window, cx| {
-                                    este.publicar(cx);
-                                })),
-                        )
-                    })
+                    // 📸 **Publicar cria uma galeria nova, e não tem botão** —
+                    // dentro de um ensaio o gesto é subir para *esta* sessão, e
+                    // dois caminhos para o mesmo lugar com desfechos diferentes
+                    // é a forma mais cara de confundir. O modal continua, e
+                    // quem o abre é o fluxo do balcão; a galeria nova nasce na
+                    // lista de sessões.
                     .child(
                         // A segunda tela. Só liga com seleção, como a Revelação
                         // e a Impressão: mostrar preto ao cliente não diz "não
@@ -2118,7 +2084,7 @@ impl Render for Aplicativo {
         // 🚨 A porta vem antes de tudo, inclusive das teclas: com o app inteiro
         // desenhado por baixo, as quinze teclas de triagem continuariam
         // chegando à Biblioteca por trás da tela de login.
-        if self.modo.is_none() {
+        if self.sessao.is_none() {
             return div()
                 .size_full()
                 .child(self.entrada.clone())
@@ -2318,12 +2284,33 @@ fn do_site_para_a_grade(
     }
 }
 
-/// O app já do lado de dentro da porta.
+/// A conta de teste. **Um só lugar constrói `Sessao` neste arquivo**: a struct
+/// vive no domínio e ganha campo quando a autorização muda, e cinco cópias da
+/// mesma literal é cinco lugares para consertar por campo novo.
+#[cfg(test)]
+fn sessao_de_teste() -> domain::services::pos_venda::Sessao {
+    domain::services::pos_venda::Sessao {
+        access_token: "tok".into(),
+        refresh_token: "renova".into(),
+        // Longe: teste que renova sozinho no meio do caminho é teste que falha
+        // por relógio, e não pelo que ele diz conferir.
+        access_vence_em: 4_102_444_800,
+        refresh_vence_em: 4_102_444_800,
+    }
+}
+
+/// O app já do lado de dentro da porta, e com um ensaio aberto.
 ///
 /// 🔑 **Existe para os testes que não são sobre a porta**, que são todos menos
 /// um: sem ele, os 33 testes de tecla e de modal passariam a exercitar a tela
-/// de login, porque é só ela que o `render` desenha enquanto ninguém escolheu.
+/// de login, porque é só ela que o `render` desenha enquanto ninguém entrou.
 /// A porta em si é conferida por `a_porta_vem_antes_de_tudo`.
+///
+/// 🚨 **A sessão aberta faz parte do "dentro"**, e não é conveniência de teste:
+/// desde que o botão "trabalhar offline" caiu (6/set/2026), nada trabalha fora
+/// de um ensaio — `pode_trabalhar` é `sessao_aberta.is_some()`. Um app logado e
+/// sem ensaio é a lista de sessões, e é o que `nada_acontece_fora_de_uma_sessao`
+/// confere.
 #[cfg(test)]
 impl Aplicativo {
     #[allow(clippy::too_many_arguments)]
@@ -2336,7 +2323,10 @@ impl Aplicativo {
         cx: &mut Context<Self>,
     ) -> Self {
         let mut app = Self::novo(fotos, previews, presets, portas, window, cx);
-        app.modo = Some(Modo::Offline);
+        app.sessao = Some(sessao_de_teste());
+        // Direto no campo, sem `entrar_na_sessao`: a grade destes testes é o
+        // acervo que eles montaram, e não o que o site devolveria para "g1".
+        app.sessao_aberta = Some("g1".into());
         app
     }
 }
@@ -3656,11 +3646,11 @@ mod testes {
     /// 🚨 A porta vem antes de tudo — inclusive das teclas.
     ///
     /// O dono reverteu em 6/set/2026 o princípio "o app tem de ser útil
-    /// sozinho", com um limite: abre pedindo a conta, e quem está sem rede
-    /// escolhe trabalhar offline. O que este teste prende é o **antes**: com o
-    /// app inteiro desenhado por baixo da tela de login, as quinze teclas de
-    /// triagem continuariam chegando à Biblioteca por trás dela — nota dada
-    /// numa grade que ninguém está vendo.
+    /// sozinho", primeiro com uma saída — "trabalhar offline" — que caiu no
+    /// mesmo dia: o propósito do app é a integração com o pós-venda. O que este
+    /// teste prende é o **antes**: com o app inteiro desenhado por baixo da tela
+    /// de login, as quinze teclas de triagem continuariam chegando à Biblioteca
+    /// por trás dela — nota dada numa grade que ninguém está vendo.
     #[gpui::test]
     fn a_porta_vem_antes_de_tudo(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
@@ -3684,11 +3674,12 @@ mod testes {
                     "o método continua funcionando — quem não chega até ele é a tecla"
                 );
 
-                // A escolha explícita abre o app.
-                app.escolher_modo(crate::entrada::Modo::Offline, cx);
+                // Entrar na conta é o único jeito de abrir o app.
+                app.entrar_na_conta(sessao_de_teste(), cx);
                 assert!(app.entrou());
-                assert!(app.offline(), "offline é um modo, não a ausência de um");
-                assert_eq!(app.sessao(), None, "offline não tem sessão");
+                assert!(app.sessao().is_some(), "passar da porta é ter conta");
+                // 🚨 E entrar **não** é poder trabalhar: falta escolher o ensaio.
+                assert!(!app.pode_trabalhar(), "logado e sem ensaio: só a lista");
             })
             .expect("a janela deve estar aberta");
     }
@@ -3729,15 +3720,10 @@ mod testes {
 
         janela
             .update(cx, |app, _window, cx| {
-                app.escolher_modo(
-                    crate::entrada::Modo::Online(domain::services::pos_venda::Sessao {
-                        access_token: "tok".into(),
-                    }),
-                    cx,
-                );
+                app.entrar_na_conta(sessao_de_teste(), cx);
                 // Entrar leva à lista de sessões; a triagem acontece na grade.
                 app.voltar_para_biblioteca(_window, cx);
-                assert!(app.entrou() && !app.offline());
+                assert!(app.entrou());
                 assert_eq!(app.sessao().map(|s| s.access_token.as_str()), Some("tok"));
 
                 // E o pós-venda já nasce com a sessão e com os produtos pedidos.
@@ -3780,12 +3766,7 @@ mod testes {
 
         janela
             .update(cx, |app, _window, cx| {
-                app.escolher_modo(
-                    crate::entrada::Modo::Online(domain::services::pos_venda::Sessao {
-                        access_token: "tok".into(),
-                    }),
-                    cx,
-                );
+                app.entrar_na_conta(sessao_de_teste(), cx);
                 // Entrar leva à lista de sessões; a triagem acontece na grade.
                 app.voltar_para_biblioteca(_window, cx);
                 // A sessão escolhida é para onde as fotos vão.
@@ -3871,12 +3852,7 @@ mod testes {
 
         janela
             .update(cx, |app, _window, cx| {
-                app.escolher_modo(
-                    crate::entrada::Modo::Online(domain::services::pos_venda::Sessao {
-                        access_token: "tok".into(),
-                    }),
-                    cx,
-                );
+                app.entrar_na_conta(sessao_de_teste(), cx);
                 // Entrar leva à lista de sessões; a triagem acontece na grade.
                 app.voltar_para_biblioteca(_window, cx);
                 app.na_biblioteca(cx, |tela, cx| tela.selecionar(Some(0), cx));
@@ -3903,46 +3879,6 @@ mod testes {
             publicador.subidas().is_empty(),
             "sem sessão aberta não há para onde subir"
         );
-    }
-
-    /// ⚠️ No modo offline a classificação não avisa nada.
-    ///
-    /// Offline foi uma escolha, e ela foi feita na porta do app. Cobrar de novo
-    /// a cada estrela seria repetir uma pergunta já respondida.
-    #[gpui::test]
-    fn offline_a_classificacao_nao_cobra_o_que_ja_foi_respondido(cx: &mut TestAppContext) {
-        let (previews, _dir) = previews_descartaveis();
-        cx.update(gpui_component::init);
-
-        let publicador = Arc::new(PublicadorDeMentira::default());
-        let janela = cx.add_window({
-            let previews = previews.clone();
-            let publicador = publicador.clone();
-            |window, cx| {
-                Aplicativo::ja_dentro(
-                    acervo(),
-                    previews,
-                    Vec::new(),
-                    Portas {
-                        publicador,
-                        ..portas()
-                    },
-                    window,
-                    cx,
-                )
-            }
-        });
-
-        janela
-            .update(cx, |app, _window, cx| {
-                assert!(app.offline());
-                app.na_biblioteca(cx, |tela, cx| tela.selecionar(Some(0), cx));
-                app.na_biblioteca(cx, |tela, cx| tela.dar_nota(3, cx));
-                assert_eq!(app.biblioteca.read(cx).aviso(), None);
-            })
-            .expect("a janela deve estar aberta");
-        cx.run_until_parked();
-        assert!(publicador.subidas().is_empty());
     }
 
     /// 📸 O passo 7 do fluxo do dono: **gero o link para o cliente**.

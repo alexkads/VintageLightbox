@@ -165,9 +165,13 @@ async fn main() {
     // e o site gera a prévia marcada a partir dele.
     let publicador: Arc<dyn Publicador> = Arc::new(PublicadorDaApi::novo(
         Arc::new({
-            let api = Arc::new(infrastructure::PosVendaApiHttp::nova(
-                ui_gpui::pos_venda::config::ler().base_url,
-            ));
+            // 🔑 O chaveiro do sistema é o que faz a sessão sobreviver ao
+            // fechamento do app: sem ele, o refresh de quinze dias morreria com
+            // o processo e o operador reautorizaria toda manhã.
+            let api = Arc::new(
+                infrastructure::PosVendaApiHttp::nova(ui_gpui::pos_venda::config::ler().base_url)
+                    .com_cofre(Arc::new(infrastructure::CofreDoSistema::novo())),
+            );
             adapters::controllers::PosVendaController::new(
                 api.clone(),
                 Arc::new(use_cases::pos_venda::PublicarNoPosVendaUseCase::new(

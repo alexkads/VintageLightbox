@@ -1,10 +1,14 @@
-//! O que o app lembra entre sessões sobre o site: a base da API, o e-mail do
-//! operador e o produto escolhido da última vez.
+//! O que o app lembra entre sessões sobre o site: a base da API e o produto
+//! escolhido da última vez.
 //!
 //! 🚨 **A senha não entra aqui, e o token também não.** O arquivo mora ao lado
 //! do catálogo, em JSON legível; guardar a credencial do estúdio nele seria
-//! deixá-la em todo backup do catálogo. A sessão vive enquanto o app está
-//! aberto — fechar é entrar de novo, que é uma senha por dia de trabalho.
+//! deixá-la em todo backup do catálogo. Onde a sessão dorme é o chaveiro do
+//! sistema — ver `infrastructure::pos_venda::cofre`.
+//!
+//! ⚠️ **O `email` saiu daqui em 2026-09-06.** Ele existia para preencher o campo
+//! da tela de login, e essa tela deixou de ter campo: quem autentica agora é o
+//! navegador, e o e-mail de quem entrou o site já sabe.
 //!
 //! Mesmo molde de `biblioteca/arranjo.rs`: ler nunca derruba (toda falha é o
 //! padrão), gravar falha só imprime.
@@ -24,8 +28,6 @@ pub struct Configuracao {
     #[serde(default = "base_padrao")]
     pub base_url: String,
     #[serde(default)]
-    pub email: String,
-    #[serde(default)]
     pub produto_id: Option<String>,
 }
 
@@ -37,7 +39,6 @@ impl Default for Configuracao {
     fn default() -> Self {
         Self {
             base_url: base_padrao(),
-            email: String::new(),
             produto_id: None,
         }
     }
@@ -91,7 +92,6 @@ mod testes {
 
         let config = Configuracao {
             base_url: "http://localhost:8080".into(),
-            email: "op@x.com".into(),
             produto_id: Some("p1".into()),
         };
         gravar_em(&arquivo, &config);

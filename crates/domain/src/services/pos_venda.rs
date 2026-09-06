@@ -40,14 +40,74 @@ use async_trait::async_trait;
 use crate::entities::Photo;
 use crate::DomainResult;
 
-/// O que fica de um login: o token que as outras chamadas carregam.
+/// O que fica de uma autorização: o par de tokens e quando o de acesso vence.
 ///
-/// Só o de acesso. O de renovação não entra aqui de propósito — a sessão vive
-/// enquanto o app está aberto, e um token de renovação guardado em disco ao
-/// lado do catálogo seria a credencial do estúdio num JSON.
+/// # Por que o de renovação passou a caber aqui
+///
+/// Antes só havia o de acesso, e a nota dizia que guardar o de renovação seria
+/// "deixar a credencial do estúdio num JSON ao lado do catálogo". A objeção
+/// continua certa — o que mudou é **onde** ele é guardado: no chaveiro do
+/// sistema (`CofreDeSessao`), nunca em arquivo do app. Sem ele, a sessão morria
+/// aos quinze minutos do token de acesso e o operador voltava ao login no meio
+/// do balcão.
+///
+/// 🚨 **Isto não vai para `pos-venda.json`.** O teste
+/// `o_arquivo_nao_tem_onde_guardar_senha` continua de pé, e é o que impede a
+/// volta do atalho.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Sessao {
     pub access_token: String,
+    /// O que renova o de acesso sem novo login. Vale quinze dias para o app —
+    /// o site emite sete para o navegador (`ClasseDeCliente`, no backend).
+    pub refresh_token: String,
+    /// Quando o **de acesso** vence, em segundos desde a época.
+    ///
+    /// Absoluto, e não "faltam N segundos": a sessão é guardada e relida depois
+    /// de o app ter ficado fechado a noite inteira, e um prazo relativo gravado
+    /// ontem diria que ainda faltam quinze minutos.
+    pub access_vence_em: i64,
+    /// Quando o **de renovação** vence. Passado ele, não há o que renovar: é
+    /// autorizar de novo.
+    pub refresh_vence_em: i64,
+}
+
+impl Sessao {
+    /// Margem antes do vencimento, em segundos.
+    ///
+    /// Renovar só depois de vencer deixa uma janela em que a chamada sai com um
+    /// token que expira no caminho — e o operador vê "sessão recusada" no meio
+    /// de uma subida de trinta fotos. É o mesmo minuto que o site usa no proxy.
+    pub const MARGEM: i64 = 60;
+
+    /// O de acesso ainda serve para a chamada que vai sair agora?
+    pub fn acesso_utilizavel(&self, agora: i64) -> bool {
+        self.access_vence_em - Self::MARGEM > agora
+    }
+
+    /// Ainda dá para renovar? `false` é autorizar de novo, do zero.
+    pub fn renovavel(&self, agora: i64) -> bool {
+        self.refresh_vence_em - Self::MARGEM > agora
+    }
+}
+
+/// Onde o par de tokens dorme entre uma abertura do app e a seguinte.
+///
+/// # Por que uma porta, e não `std::fs` direto
+///
+/// Porque a implementação certa é o **chaveiro do sistema** (Keychain no macOS),
+/// e chaveiro não existe em teste: o teste não pode pedir a senha do usuário nem
+/// sujar o chaveiro da máquina de quem roda `cargo test`. Com a porta, o teste
+/// usa um cofre em memória e a produção usa o do sistema.
+///
+/// ⚠️ **Nenhum método devolve `Result`.** Guardar a sessão é acessório: se o
+/// chaveiro recusar, o operador perde a comodidade de não reautorizar amanhã —
+/// não perde o dia de trabalho. Um `?` aqui faria a falha do acessório derrubar
+/// o principal, que é o mesmo motivo pelo qual as portas de evento do site não
+/// devolvem `Result`.
+pub trait CofreDeSessao: Send + Sync {
+    fn guardar(&self, sessao: &Sessao);
+    fn ler(&self) -> Option<Sessao>;
+    fn esquecer(&self);
 }
 
 /// Um produto do catálogo do site — o que dá o preço de cada foto à venda.
@@ -299,10 +359,34 @@ pub struct FotoEnviada {
 
 #[async_trait]
 pub trait PosVendaApi: Send + Sync {
-    /// E-mail e senha do operador. Credencial recusada é
-    /// [`crate::DomainError::AcessoRecusado`], e não erro de infraestrutura:
-    /// a tela precisa dizer "senha errada" e não "sem rede".
-    async fn entrar(&self, email: &str, senha: &str) -> DomainResult<Sessao>;
+    /// Autoriza este computador **pelo navegador**, e devolve a sessão.
+    ///
+    /// # Por que não há mais e-mail e senha aqui
+    ///
+    /// Porque a senha do estúdio não precisa passar por um aplicativo desktop
+    /// para o aplicativo ter acesso. Quem autentica é o site, no navegador, com
+    /// o que o operador já usa lá — inclusive o Google, que pela janela do app
+    /// era impossível. O app recebe de volta um código de dois minutos e o troca
+    /// por uma sessão de quinze dias, provando com um segredo que nunca saiu
+    /// desta máquina (PKCE).
+    ///
+    /// Bloqueia enquanto o operador decide na outra janela, e desiste sozinha se
+    /// ele fechar o navegador e ir embora — ver a implementação para o prazo.
+    ///
+    /// Recusa do operador (ou de quem não opera o estúdio) é
+    /// [`crate::DomainError::AcessoRecusado`], e não erro de infraestrutura: a
+    /// tela precisa dizer "não autorizado" e não "sem rede".
+    async fn autorizar_pelo_navegador(&self) -> DomainResult<Sessao>;
+
+    /// A sessão de ontem, se o chaveiro ainda a tiver e ela ainda valer.
+    ///
+    /// `None` é "nunca autorizou aqui" ou "passou dos quinze dias" — os dois
+    /// levam ao mesmo lugar, que é autorizar de novo.
+    async fn retomar_sessao(&self) -> DomainResult<Option<Sessao>>;
+
+    /// Esquece a sessão: apaga o que está no chaveiro e larga o que está na
+    /// memória. Depois disto, entrar é autorizar de novo.
+    async fn sair(&self);
 
     /// O catálogo administrativo — inclusive inativos.
     async fn produtos(&self, sessao: &Sessao) -> DomainResult<Vec<Produto>>;

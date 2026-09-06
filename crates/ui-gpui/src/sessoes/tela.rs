@@ -45,7 +45,8 @@ impl EventEmitter<Escolhida> for Sessoes {}
 
 pub struct Sessoes {
     publicador: Arc<dyn Publicador>,
-    /// `None` no modo offline: a tela existe, e diz que precisa de conta.
+    /// `None` antes de a porta responder: a tela existe, e diz que precisa de
+    /// conta.
     sessao: Option<Sessao>,
     galerias: Vec<GaleriaDoPainel>,
     produtos: Vec<Produto>,
@@ -816,6 +817,9 @@ mod testes {
                 tela.definir_sessao(
                     Sessao {
                         access_token: "tok".into(),
+                        refresh_token: "ref".into(),
+                        access_vence_em: i64::MAX,
+                        refresh_vence_em: i64::MAX,
                     },
                     cx,
                 );
