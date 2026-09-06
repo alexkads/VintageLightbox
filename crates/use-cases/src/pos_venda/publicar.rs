@@ -16,7 +16,8 @@ use domain::services::pos_venda::{
     EstadoNoBalcao, FotoParaEnviar, Galeria, NovaGaleria, PosVendaApi, Sessao,
 };
 use domain::services::ImageExporter;
-use domain::value_objects::{ExportOptions, PhotoId};
+use domain::services::ThumbnailGenerator;
+use domain::value_objects::{ExportOptions, FilePath, PhotoId};
 use domain::{DomainError, DomainResult};
 
 /// O que a tela pede.
@@ -60,20 +61,79 @@ pub enum Progresso {
 pub struct PublicarNoPosVendaUseCase {
     fotos: Arc<dyn PhotoRepository>,
     exportador: Arc<dyn ImageExporter>,
+    /// Quem transforma um arquivo do disco na cópia que sobe.
+    ///
+    /// 🔑 **É o mesmo gerador das miniaturas**, e não um segundo caminho: ele já
+    /// sabe abrir RAW, JPEG, TIFF e HEIC, e já reduz para um lado máximo. Um
+    /// redimensionador próprio aqui seria uma segunda resposta para a mesma
+    /// pergunta — e as duas divergiriam no primeiro formato novo.
+    preparador: Arc<dyn ThumbnailGenerator>,
     api: Arc<dyn PosVendaApi>,
 }
+
+/// O lado maior do que sobe, em pixels.
+///
+/// É o padrão da web (`importacao/parametros.ts`): grande o bastante para
+/// impressão de balcão, pequeno o bastante para uma sessão de duzentas não virar
+/// gigabytes. O original **não** sobe daqui — quem quer o arquivo cheio exporta.
+pub const LADO_DO_ENVIO: u32 = 4000;
 
 impl PublicarNoPosVendaUseCase {
     pub fn new(
         fotos: Arc<dyn PhotoRepository>,
         exportador: Arc<dyn ImageExporter>,
+        preparador: Arc<dyn ThumbnailGenerator>,
         api: Arc<dyn PosVendaApi>,
     ) -> Self {
         Self {
             fotos,
             exportador,
+            preparador,
             api,
         }
+    }
+
+    /// Sobe um **arquivo do disco** para uma sessão — sem passar pelo catálogo.
+    ///
+    /// 🔑 **É o envio da web trazido para cá**: o operador exporta do Lightroom
+    /// para uma pasta e arrasta a pasta para a sessão. A foto entregue ao cliente
+    /// não precisa estar catalogada aqui — o catálogo é da triagem em RAW, e são
+    /// dois trabalhos diferentes.
+    ///
+    /// ⚠️ **O nome que o cliente vê é o do arquivo**, com `.jpg`: o que sobe é
+    /// sempre JPEG, e `DSC_001.NEF` viraria um download `.NEF` contendo um JPEG.
+    pub async fn enviar_arquivo(
+        &self,
+        sessao: &Sessao,
+        galeria_id: &str,
+        caminho: &str,
+        ordem: u32,
+        estado: EstadoNoBalcao,
+    ) -> Result<String, String> {
+        let nome = nome_para_o_site(caminho);
+        let arquivo = FilePath::new(caminho).map_err(|e| format!("{nome}: {e}"))?;
+
+        let jpeg = self
+            .preparador
+            .generate(&arquivo, LADO_DO_ENVIO)
+            .await
+            .map_err(|e| format!("{nome}: {e}"))?;
+
+        self.api
+            .enviar_foto(
+                sessao,
+                galeria_id,
+                FotoParaEnviar {
+                    nome: nome.clone(),
+                    jpeg,
+                    estado,
+                    ordem,
+                },
+            )
+            .await
+            .map_err(|e| format!("{nome}: {e}"))?;
+
+        Ok(nome)
     }
 
     /// Cria a galeria e sobe as fotos, uma a uma, na ordem do pedido.
@@ -294,6 +354,16 @@ mod tests {
         }
     }
 
+    mock! {
+        pub ThumbnailGen {}
+
+        #[async_trait::async_trait]
+        impl ThumbnailGenerator for ThumbnailGen {
+            async fn generate(&self, path: &FilePath, max_size: u32) -> DomainResult<Vec<u8>>;
+            async fn generate_set(&self, path: &FilePath, max_sizes: &[u32]) -> DomainResult<Vec<Vec<u8>>>;
+        }
+    }
+
     /// A API de mentira: registra o que subiu, com o estado de cada foto.
     #[derive(Default)]
     struct ApiDeMentira {
@@ -445,11 +515,15 @@ mod tests {
         let api = Arc::new(ApiDeMentira::default());
 
         let (tx, rx) = channel();
-        let galeria =
-            PublicarNoPosVendaUseCase::new(Arc::new(repo), Arc::new(exportador), api.clone())
-                .execute(pedido(&[&levada, &ficou]), tx)
-                .await
-                .unwrap();
+        let galeria = PublicarNoPosVendaUseCase::new(
+            Arc::new(repo),
+            Arc::new(exportador),
+            Arc::new(MockThumbnailGen::new()),
+            api.clone(),
+        )
+        .execute(pedido(&[&levada, &ficou]), tx)
+        .await
+        .unwrap();
         assert_eq!(galeria.id, "g1");
 
         let enviadas = api.enviadas.lock().unwrap().clone();
@@ -504,10 +578,15 @@ mod tests {
         });
 
         let (tx, rx) = channel();
-        PublicarNoPosVendaUseCase::new(Arc::new(repo), Arc::new(exportador), api.clone())
-            .execute(pedido(&[&a, &b]), tx)
-            .await
-            .unwrap();
+        PublicarNoPosVendaUseCase::new(
+            Arc::new(repo),
+            Arc::new(exportador),
+            Arc::new(MockThumbnailGen::new()),
+            api.clone(),
+        )
+        .execute(pedido(&[&a, &b]), tx)
+        .await
+        .unwrap();
 
         assert_eq!(api.enviadas.lock().unwrap().len(), 1);
         let eventos: Vec<Progresso> = rx.try_iter().collect();
@@ -531,6 +610,7 @@ mod tests {
         let erro = PublicarNoPosVendaUseCase::new(
             Arc::new(MockPhotoRepo::new()),
             Arc::new(MockExportador::new()),
+            Arc::new(MockThumbnailGen::new()),
             api.clone(),
         )
         .execute(pedido(&[]), tx)
@@ -571,6 +651,7 @@ mod tests {
         let caso = PublicarNoPosVendaUseCase::new(
             Arc::new(repo),
             Arc::new(MockExportador::new()),
+            Arc::new(MockThumbnailGen::new()),
             api.clone(),
         );
 
@@ -601,8 +682,12 @@ mod tests {
             some_do_site: vec!["sumida".into()],
             ..Default::default()
         });
-        let caso =
-            PublicarNoPosVendaUseCase::new(Arc::new(repo), Arc::new(MockExportador::new()), api);
+        let caso = PublicarNoPosVendaUseCase::new(
+            Arc::new(repo),
+            Arc::new(MockExportador::new()),
+            Arc::new(MockThumbnailGen::new()),
+            api,
+        );
 
         caso.remover_do_site(&sessao(), &id)
             .await
@@ -627,6 +712,7 @@ mod tests {
         let caso = PublicarNoPosVendaUseCase::new(
             Arc::new(repo),
             Arc::new(MockExportador::new()),
+            Arc::new(MockThumbnailGen::new()),
             api.clone(),
         );
 
@@ -654,8 +740,12 @@ mod tests {
             .returning(|_, _| Ok(vec![1]));
 
         let api = Arc::new(ApiDeMentira::default());
-        let caso =
-            PublicarNoPosVendaUseCase::new(Arc::new(repo), Arc::new(exportador), api.clone());
+        let caso = PublicarNoPosVendaUseCase::new(
+            Arc::new(repo),
+            Arc::new(exportador),
+            Arc::new(MockThumbnailGen::new()),
+            api.clone(),
+        );
 
         let nome = caso
             .enviar_uma(&sessao(), "g1", &id, 0, None)

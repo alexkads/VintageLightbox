@@ -30,7 +30,6 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::Duration;
 
-use adapters::view_models::PhotoViewModel;
 use domain::services::pos_venda::{
     EstadoDaFotoNoSite, EstadoNoBalcao, FotoDaGaleria, GaleriaAberta, LinkDeAcesso, Sessao,
 };
@@ -38,8 +37,9 @@ use gpui::{
     div, img, prelude::*, px, Context, EventEmitter, RenderImage, SharedString, Task, Window,
 };
 use gpui_component::button::{Button, ButtonVariants};
-use gpui_component::{ActiveTheme, Disableable, Sizable};
+use gpui_component::{ActiveTheme, Disableable, Selectable, Sizable};
 
+use super::arquivos::SeletorDeFotos;
 use crate::pos_venda::porta::{Publicador, Recado};
 
 const INTERVALO_DE_COLHEITA: Duration = Duration::from_millis(100);
@@ -64,8 +64,20 @@ pub struct Detalhe {
     miniaturas: HashMap<String, Arc<RenderImage>>,
     /// De quem já foi pedida miniatura, para não pedir duas vezes.
     pedidas: std::collections::HashSet<String>,
-    /// A seleção que está na Biblioteca, entregue pela raiz ao entrar.
-    para_enviar: Vec<PhotoViewModel>,
+    /// Quem abre a janela **do sistema** para escolher as fotos.
+    seletor: Arc<dyn SeletorDeFotos>,
+    /// Por onde os caminhos escolhidos voltam.
+    escolhas: (Sender<Vec<String>>, Receiver<Vec<String>>),
+    /// A leva: como as próximas fotos entram.
+    ///
+    /// 🔑 **`None` é "sem marcação", e é o padrão** — a mesma escolha da web
+    /// (`envio.tsx`, 2026-09-05): *a marcação de verdade nasce no balcão, com o
+    /// cliente olhando*. Escolher aqui, antes de as fotos entrarem, é decidir
+    /// por trinta de uma vez o que se decide uma a uma. Sem marcação a foto vai
+    /// para o acervo **à venda**, que é o estado de quem ainda não foi levada.
+    leva: Option<EstadoNoBalcao>,
+    /// Se há algo sendo arrastado por cima — o destaque da área.
+    arrastando: bool,
     enviando: usize,
     enviadas: usize,
     link: Option<LinkDeAcesso>,
@@ -77,15 +89,18 @@ pub struct Detalhe {
 }
 
 impl Detalhe {
-    pub fn nova(publicador: Arc<dyn Publicador>) -> Self {
+    pub fn nova(publicador: Arc<dyn Publicador>, seletor: Arc<dyn SeletorDeFotos>) -> Self {
         Self {
             publicador,
+            seletor,
+            escolhas: channel(),
+            leva: None,
+            arrastando: false,
             sessao: None,
             galeria_id: None,
             aberta: None,
             miniaturas: HashMap::new(),
             pedidas: std::collections::HashSet::new(),
-            para_enviar: Vec::new(),
             enviando: 0,
             enviadas: 0,
             link: None,
@@ -102,14 +117,7 @@ impl Detalhe {
     }
 
     /// Entra numa sessão: pede a galeria e as fotos dela.
-    ///
-    /// `selecao` é o que está marcado na Biblioteca — a leva candidata a subir.
-    pub fn entrar(
-        &mut self,
-        galeria_id: String,
-        selecao: Vec<PhotoViewModel>,
-        cx: &mut Context<Self>,
-    ) {
+    pub fn entrar(&mut self, galeria_id: String, cx: &mut Context<Self>) {
         let Some(sessao) = self.sessao.clone() else {
             self.erro = Some("esta tela precisa da conta do site".into());
             cx.notify();
@@ -124,7 +132,6 @@ impl Detalhe {
         self.link = None;
         self.enviadas = 0;
         self.erro = None;
-        self.para_enviar = selecao;
         self.carregando = true;
 
         self.publicador
@@ -171,32 +178,66 @@ impl Detalhe {
         (levadas, a_venda, compradas)
     }
 
-    /// Sobe a seleção da Biblioteca com o estado escolhido para **esta leva**.
+    /// A leva escolhida para as próximas fotos.
+    pub fn escolher_leva(&mut self, leva: Option<EstadoNoBalcao>, cx: &mut Context<Self>) {
+        self.leva = leva;
+        cx.notify();
+    }
+
+    pub fn leva(&self) -> Option<EstadoNoBalcao> {
+        self.leva
+    }
+
+    /// Abre a janela **do sistema** para escolher as fotos.
+    pub fn escolher_fotos(&mut self, cx: &mut Context<Self>) {
+        if self.enviando > 0 {
+            return;
+        }
+        self.seletor.escolher(self.escolhas.0.clone());
+        self.acompanhar(cx);
+    }
+
+    pub fn arrastando(&self) -> bool {
+        self.arrastando
+    }
+
+    pub fn destacar(&mut self, arrastando: bool, cx: &mut Context<Self>) {
+        if self.arrastando != arrastando {
+            self.arrastando = arrastando;
+            cx.notify();
+        }
+    }
+
+    /// Sobe os arquivos escolhidos — do seletor ou do que foi arrastado.
     ///
-    /// 🔑 **O estado vem antes dos arquivos**, como na web: "sobe estas como
-    /// levadas" é uma decisão sobre o lote. É diferente do passo 3, onde quem
-    /// decide é a tecla `B` de cada foto.
-    pub fn enviar(&mut self, estado: EstadoNoBalcao, cx: &mut Context<Self>) {
+    /// 🔑 **São arquivos do disco, e não fotos do catálogo.** É o envio da web:
+    /// o operador exporta do Lightroom para uma pasta e manda a pasta. O que vai
+    /// ao cliente não precisa estar catalogado aqui — o catálogo é da triagem em
+    /// RAW, e são dois trabalhos diferentes.
+    pub fn enviar_arquivos(&mut self, caminhos: Vec<String>, cx: &mut Context<Self>) {
         let (Some(sessao), Some(galeria_id)) = (self.sessao.clone(), self.galeria_id.clone())
         else {
             return;
         };
-        if self.para_enviar.is_empty() || self.enviando > 0 {
+        if caminhos.is_empty() || self.enviando > 0 {
             return;
         }
 
+        // A ordem no site continua de onde a sessão parou.
         let ja_na_sessao = self.aberta.as_ref().map(|a| a.fotos.len()).unwrap_or(0);
+        // Sem marcação vai como "à venda" — o estado de quem ainda não foi levada.
+        let estado = self.leva.unwrap_or(EstadoNoBalcao::Disponivel);
 
         self.erro = None;
         self.enviadas = 0;
-        self.enviando = self.para_enviar.len();
-        for (i, foto) in self.para_enviar.iter().enumerate() {
-            self.publicador.subir_classificada(
+        self.enviando = caminhos.len();
+        for (i, caminho) in caminhos.into_iter().enumerate() {
+            self.publicador.enviar_arquivo(
                 sessao.clone(),
                 galeria_id.clone(),
-                foto.id.clone(),
+                caminho,
                 (ja_na_sessao + i) as u32,
-                Some(estado),
+                estado,
                 self.recados.0.clone(),
             );
         }
@@ -261,6 +302,16 @@ impl Detalhe {
     pub fn colher(&mut self, cx: &mut Context<Self>) -> bool {
         let mut mudou = false;
         let mut abriu = false;
+
+        // O que o seletor do sistema devolveu. Lista vazia é desistência, e não
+        // erro: fechar a janela sem escolher é um gesto legítimo.
+        while let Ok(caminhos) = self.escolhas.1.try_recv() {
+            mudou = true;
+            if !caminhos.is_empty() {
+                self.enviar_arquivos(caminhos, cx);
+            }
+        }
+
         while let Ok(recado) = self.recados.1.try_recv() {
             mudou = true;
             match recado {
@@ -400,54 +451,123 @@ impl Detalhe {
             )
     }
 
-    /// A área de envio — e o estado vem **antes** dos arquivos.
+    /// A área de envio: **arrastar a pasta**, ou a janela do sistema.
+    ///
+    /// 🚨 **Não há explorador de arquivos nosso aqui.** O app tem um, no modal de
+    /// importação, e ele existe para a triagem em RAW — escolher entre duzentas
+    /// do cartão. Para mandar fotos ao cliente ele é atrito: quem exportou do
+    /// Lightroom já está com a pasta aberta ao lado. É o gesto da web, e o
+    /// pedido do dono: *"tem que usar o mesmo explorador de arquivos do sistema
+    /// operacional"*.
+    ///
+    /// 🔑 **A leva é escolhida antes dos arquivos**, e o padrão é **sem
+    /// marcação** — ver o campo [`Self::leva`].
     fn envio(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let quantas = self.para_enviar.len();
         let ocupado = self.enviando > 0;
+        let sem_sessao = self.aberta.is_none();
+        let leva = self.leva;
+
+        let ficha = |rotulo: &'static str,
+                     valor: Option<EstadoNoBalcao>,
+                     cx: &mut Context<Self>| {
+            Button::new(SharedString::from(format!("detalhe-leva-{rotulo}")))
+                .label(rotulo)
+                .xsmall()
+                .selected(leva == valor)
+                .disabled(ocupado)
+                .on_click(cx.listener(move |tela, _ev, _window, cx| tela.escolher_leva(valor, cx)))
+        };
 
         div()
             .flex()
-            .items_center()
-            .gap(px(8.))
+            .flex_col()
+            .gap(px(6.))
             .p(px(10.))
             .rounded(cx.theme().radius)
             .border_1()
-            .border_color(cx.theme().border)
+            // O destaque de "solte aqui": borda viva enquanto o arrasto passa.
+            .border_color(if self.arrastando {
+                cx.theme().primary
+            } else {
+                cx.theme().border
+            })
+            .on_drag_move(
+                cx.listener(|tela, _ev: &gpui::DragMoveEvent<()>, _window, cx| {
+                    tela.destacar(true, cx)
+                }),
+            )
+            .on_drop(
+                cx.listener(|tela, arrastados: &gpui::ExternalPaths, _window, cx| {
+                    tela.destacar(false, cx);
+                    // 🔑 Uma pasta solta vira o conteúdo dela: o sistema entrega
+                    // o caminho do diretório, e uma pasta de exportação tem
+                    // arquivos, não subpastas.
+                    let fotos = super::arquivos::so_as_fotos(arrastados.paths());
+                    tela.enviar_arquivos(fotos, cx);
+                }),
+            )
             .child(
                 div()
-                    .flex_1()
+                    .flex()
+                    .items_center()
+                    .gap(px(6.))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Como esta leva entra:"),
+                    )
+                    .child(ficha("Sem marcação", None, cx))
+                    .child(ficha("À venda", Some(EstadoNoBalcao::Disponivel), cx))
+                    .child(ficha(
+                        "Levadas no balcão",
+                        Some(EstadoNoBalcao::LevadaNoBalcao),
+                        cx,
+                    )),
+            )
+            .child(
+                div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child(match (ocupado, self.enviadas, quantas) {
-                        (true, feitas, _) => format!("subindo… {feitas} prontas"),
-                        (false, feitas, _) if feitas > 0 => format!("{feitas} subiram"),
-                        (false, _, 0) => {
-                            "Marque fotos na Biblioteca e volte aqui para subi-las.".to_string()
+                    .child(match leva {
+                        None => {
+                            "Sem marcação vai para o acervo à venda. A marcação de verdade \
+                             nasce no balcão, com o cliente olhando."
                         }
-                        (false, _, n) => format!(
-                            "{n} foto(s) marcada(s) na Biblioteca. \
-                             Escolha a leva: o que o cliente levou, ou o que ficou à venda."
-                        ),
+                        Some(EstadoNoBalcao::Disponivel) => {
+                            "À venda: o cliente vê com marca d'água e pode comprar pela galeria."
+                        }
+                        Some(EstadoNoBalcao::LevadaNoBalcao) => {
+                            "Levadas: o cliente já pagou na hora e baixa o original."
+                        }
                     }),
             )
             .child(
-                Button::new("detalhe-subir-levadas")
-                    .label("Subir como levadas")
-                    .xsmall()
-                    .disabled(quantas == 0 || ocupado || self.aberta.is_none())
-                    .on_click(cx.listener(|tela, _ev, _window, cx| {
-                        tela.enviar(EstadoNoBalcao::LevadaNoBalcao, cx)
-                    })),
-            )
-            .child(
-                Button::new("detalhe-subir-a-venda")
-                    .label("Subir à venda")
-                    .xsmall()
-                    .primary()
-                    .disabled(quantas == 0 || ocupado || self.aberta.is_none())
-                    .on_click(cx.listener(|tela, _ev, _window, cx| {
-                        tela.enviar(EstadoNoBalcao::Disponivel, cx)
-                    })),
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.))
+                    .child(
+                        div()
+                            .flex_1()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(match (ocupado, self.enviadas) {
+                                (true, feitas) => format!("subindo… {feitas} prontas"),
+                                (false, feitas) if feitas > 0 => format!("{feitas} subiram"),
+                                (false, _) => "Arraste as fotos (ou a pasta) para cá.".to_string(),
+                            }),
+                    )
+                    .child(
+                        Button::new("detalhe-escolher")
+                            .label("Escolher fotos…")
+                            .xsmall()
+                            .primary()
+                            .disabled(ocupado || sem_sessao)
+                            .on_click(
+                                cx.listener(|tela, _ev, _window, cx| tela.escolher_fotos(cx)),
+                            ),
+                    ),
             )
     }
 

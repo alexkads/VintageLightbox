@@ -173,6 +173,9 @@ async fn main() {
                 Arc::new(use_cases::pos_venda::PublicarNoPosVendaUseCase::new(
                     repositorio_de_fotos.clone(),
                     Arc::new(infrastructure::ImageExporterImpl::new()),
+                    // O mesmo gerador das miniaturas prepara o que sobe: ele já
+                    // abre RAW, TIFF e HEIC, e já reduz para um lado máximo.
+                    Arc::new(infrastructure::ThumbnailGeneratorImpl::new()),
                     api,
                 )),
             )
@@ -250,6 +253,9 @@ async fn main() {
     ));
     let seletor: Arc<dyn SeletorDePasta> =
         Arc::new(SeletorNativo::novo(tokio::runtime::Handle::current()));
+    let seletor_de_fotos: Arc<dyn ui_gpui::sessoes::arquivos::SeletorDeFotos> = Arc::new(
+        ui_gpui::sessoes::arquivos::SeletorDeFotosNativo::novo(tokio::runtime::Handle::current()),
+    );
     let gerador: Arc<dyn GeradorDeMiniaturas> = Arc::new(GeradorDoDisco::novo(
         gerador_de_miniaturas,
         previews.clone(),
@@ -299,6 +305,9 @@ async fn main() {
                             explorador: explorador.clone(),
                             importador: importador.clone(),
                             seletor: seletor.clone(),
+                            // A janela **do sistema** para escolher as fotos da
+                            // sessão: filtro de imagem e seleção múltipla.
+                            seletor_de_fotos: seletor_de_fotos.clone(),
                         },
                         window,
                         cx,

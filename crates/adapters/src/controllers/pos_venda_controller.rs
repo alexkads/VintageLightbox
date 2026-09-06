@@ -113,6 +113,20 @@ impl PosVendaController {
             .await
     }
 
+    /// Sobe um **arquivo do disco** para a sessão, sem passar pelo catálogo.
+    pub async fn enviar_arquivo(
+        &self,
+        sessao: &Sessao,
+        galeria_id: &str,
+        caminho: &str,
+        ordem: u32,
+        estado: EstadoNoBalcao,
+    ) -> Result<String, String> {
+        self.publicar
+            .enviar_arquivo(sessao, galeria_id, caminho, ordem, estado)
+            .await
+    }
+
     /// Tira a foto do storage — o que zerar a classificação faz.
     pub async fn remover_do_site(&self, sessao: &Sessao, foto_id: &str) -> Result<(), String> {
         let id = PhotoId::from_string(foto_id).map_err(|e| e.to_string())?;

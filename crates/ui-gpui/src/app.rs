@@ -35,6 +35,7 @@ use crate::revelacao::persistencia::{self, Gravador};
 use crate::revelacao::presets::GuardaDePresets;
 use crate::revelacao::processador::Ajustes;
 use crate::revelacao::tela::Revelacao;
+use crate::sessoes::arquivos::SeletorDeFotos;
 use crate::sessoes::detalhe::{Detalhe, Pedido as DetalhePedido};
 use crate::sessoes::tela::{Escolhida, Sessoes};
 
@@ -62,6 +63,12 @@ pub struct Portas {
     pub explorador: Arc<dyn Explorador>,
     pub importador: Arc<dyn Importador>,
     pub seletor: Arc<dyn SeletorDePasta>,
+    /// Quem abre a janela **do sistema** para escolher as fotos da sessão.
+    ///
+    /// ⚠️ Separado do [`Self::seletor`], que escolhe **pastas** para a
+    /// importação: são janelas diferentes do sistema, com filtros diferentes, e
+    /// juntá-las numa porta só faria uma delas mentir sobre o que devolve.
+    pub seletor_de_fotos: Arc<dyn SeletorDeFotos>,
 }
 
 actions!(
@@ -433,7 +440,7 @@ impl Aplicativo {
             raiz.entrar_na_sessao(evento.0.clone(), cx);
         });
 
-        let detalhe = cx.new(|_| Detalhe::nova(publicador_do_detalhe));
+        let detalhe = cx.new(|_| Detalhe::nova(publicador_do_detalhe, portas.seletor_de_fotos));
         // 🔑 `subscribe_in`, e não `subscribe`: revelar precisa da janela — os
         // 42 sliders são espalhados com ela. Sem isso o pedido teria de ficar
         // guardado até o próximo quadro, e "clique que só responde no quadro
@@ -555,14 +562,10 @@ impl Aplicativo {
 
     /// Entra numa sessão — o mesmo gesto que abre a rota `[id]` na web.
     ///
-    /// 🔑 **A seleção da Biblioteca vai junto**: é a leva candidata a subir, e
-    /// levá-la aqui é o que permite a tela da sessão dizer "3 marcadas, escolha
-    /// a leva" em vez de mandar procurar onde se escolhe foto.
     pub fn entrar_na_sessao(&mut self, galeria_id: String, cx: &mut Context<Self>) {
         self.sessao_aberta = Some(galeria_id.clone());
-        let selecao = self.biblioteca.read(cx).fotos_selecionadas();
         self.detalhe
-            .update(cx, |tela, cx| tela.entrar(galeria_id, selecao, cx));
+            .update(cx, |tela, cx| tela.entrar(galeria_id, cx));
         self.tela = Tela::Sessao;
         cx.notify();
     }
@@ -1984,6 +1987,9 @@ mod testes {
             explorador: Arc::new(ExploradorDeMentira::default()),
             importador: Arc::new(ImportadorDeMentira::default()),
             seletor: Arc::new(SeletorDeMentira::default()),
+            seletor_de_fotos: Arc::new(
+                crate::sessoes::arquivos::mentira::SeletorDeMentira::default(),
+            ),
         }
     }
 

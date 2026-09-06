@@ -42,6 +42,7 @@ use crate::impressao::porta::mentira::FolhaDeMentira;
 use crate::pos_venda::porta::mentira::PublicadorDeMentira;
 use crate::revelacao::persistencia::mentira::GravadorDeMentira;
 use crate::revelacao::presets::mentira::GuardaDeMentira;
+use crate::sessoes::arquivos::mentira::SeletorDeMentira as SeletorDeFotosDeMentira;
 
 /// A sessão do operador, já entrada — o passo zero, que a porta do app pede.
 fn sessao() -> domain::services::pos_venda::Sessao {
@@ -78,6 +79,7 @@ fn previews_com(nomes: &[&str]) -> (Arc<PreviewManager>, TempDir) {
 struct Estudio {
     janela: gpui::WindowHandle<Aplicativo>,
     publicador: Arc<PublicadorDeMentira>,
+    seletor_de_fotos: Arc<SeletorDeFotosDeMentira>,
     marcador: Arc<MarcadorDeMentira>,
     gravador: Arc<GravadorDeMentira>,
     _dir: TempDir,
@@ -99,12 +101,18 @@ fn abrir_o_estudio(cx: &mut TestAppContext, fotos: Vec<PhotoViewModel>) -> Estud
     });
     let marcador = Arc::new(MarcadorDeMentira::default());
     let gravador = Arc::new(GravadorDeMentira::default());
+    // O seletor do sistema, de mentira: devolve os caminhos que o teste mandar.
+    let seletor_de_fotos = Arc::new(SeletorDeFotosDeMentira::escolhe(&[
+        "/exportadas/DSC_001.jpg",
+        "/exportadas/DSC_002.jpg",
+    ]));
 
     let janela = cx.add_window({
         let previews = previews.clone();
         let publicador = publicador.clone();
         let marcador = marcador.clone();
         let gravador = gravador.clone();
+        let seletor_de_fotos = seletor_de_fotos.clone();
         move |window, cx| {
             Aplicativo::novo(
                 fotos,
@@ -123,6 +131,7 @@ fn abrir_o_estudio(cx: &mut TestAppContext, fotos: Vec<PhotoViewModel>) -> Estud
                     explorador: Arc::new(ExploradorDeMentira::default()),
                     importador: Arc::new(ImportadorDeMentira::default()),
                     seletor: Arc::new(SeletorDeMentira::default()),
+                    seletor_de_fotos,
                 },
                 window,
                 cx,
@@ -150,6 +159,7 @@ fn abrir_o_estudio(cx: &mut TestAppContext, fotos: Vec<PhotoViewModel>) -> Estud
     Estudio {
         janela,
         publicador,
+        seletor_de_fotos,
         marcador,
         gravador,
         _dir: dir,
@@ -477,44 +487,39 @@ fn da_lista_ao_revelar_dentro_da_sessao(cx: &mut TestAppContext) {
         })
         .expect("a janela deve estar aberta");
 
-    // 4 · o upload: a seleção da Biblioteca sobe com a leva escolhida.
-    estudio
-        .janela
-        .update(cx, |app, window, cx| {
-            app.voltar_para_biblioteca(window, cx);
-            app.na_biblioteca(cx, |tela, cx| tela.selecionar_tudo(cx));
-            app.entrar_na_sessao("g1".into(), cx);
-        })
-        .expect("a janela deve estar aberta");
-    cx.run_until_parked();
-
+    // 4 · o upload: **arquivos do disco**, pelo seletor do sistema.
+    //
+    // 🚨 Não há explorador nosso aqui, e é o pedido do dono: quem exportou do
+    // Lightroom já está com a pasta aberta ao lado.
     estudio
         .janela
         .update(cx, |app, _window, cx| {
             app.detalhe.update(cx, |tela, cx| {
                 tela.colher(cx);
-                tela.enviar(
-                    domain::services::pos_venda::EstadoNoBalcao::LevadaNoBalcao,
-                    cx,
-                );
+                // Sem escolher leva: o padrão é **sem marcação**, como na web.
+                assert_eq!(tela.leva(), None);
+                tela.escolher_fotos(cx);
+                tela.colher(cx);
             });
         })
         .expect("a janela deve estar aberta");
     cx.run_until_parked();
 
-    let subidas = estudio.publicador.subidas();
-    assert_eq!(subidas.len(), 2, "as duas marcadas subiram");
-    assert!(subidas.iter().all(|(g, _, _)| g == "g1"));
-    // 🔑 **O estado veio da leva, e não da tecla `B` de cada foto** — é a
-    // diferença entre esta tela e o passo 3.
+    assert_eq!(
+        estudio.seletor_de_fotos.pedidos(),
+        1,
+        "abriu a janela do sistema uma vez"
+    );
+    let enviados = estudio.publicador.arquivos_enviados();
+    assert_eq!(enviados.len(), 2, "as duas escolhidas subiram");
+    assert!(enviados.iter().all(|(g, _, _, _)| g == "g1"));
+    assert_eq!(enviados[0].1, "/exportadas/DSC_001.jpg");
+    // 🔑 Sem marcação vai como "à venda" — o estado de quem ainda não foi levada.
     assert!(
-        estudio
-            .publicador
-            .estados_pedidos()
+        enviados
             .iter()
-            .all(|e| *e == Some(domain::services::pos_venda::EstadoNoBalcao::LevadaNoBalcao)),
-        "a leva escolhida manda: {:?}",
-        estudio.publicador.estados_pedidos()
+            .all(|(_, _, _, e)| *e == domain::services::pos_venda::EstadoNoBalcao::Disponivel),
+        "sem marcação entra à venda: {enviados:?}"
     );
 
     // 5 · revelar uma foto **da sessão**: ela não está no catálogo local, e os

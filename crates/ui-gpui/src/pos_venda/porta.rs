@@ -95,6 +95,16 @@ pub trait Publicador: Send + Sync + 'static {
         mudanca: MudancaDaFoto,
         canal: Sender<Recado>,
     );
+    /// Sobe um arquivo do disco para a sessão — o envio da web.
+    fn enviar_arquivo(
+        &self,
+        sessao: Sessao,
+        galeria_id: String,
+        caminho: String,
+        ordem: u32,
+        estado: EstadoNoBalcao,
+        canal: Sender<Recado>,
+    );
     /// Entrar numa sessão — o mesmo gesto que abre a rota `[id]` na web.
     fn abrir_galeria(&self, sessao: Sessao, galeria_id: String, canal: Sender<Recado>);
     /// A miniatura de uma foto da sessão, para a grade.
@@ -229,6 +239,28 @@ impl Publicador for PublicadorDaApi {
         });
     }
 
+    fn enviar_arquivo(
+        &self,
+        sessao: Sessao,
+        galeria_id: String,
+        caminho: String,
+        ordem: u32,
+        estado: EstadoNoBalcao,
+        canal: Sender<Recado>,
+    ) {
+        let controlador = self.controlador.clone();
+        self.tokio.spawn(async move {
+            let recado = match controlador
+                .enviar_arquivo(&sessao, &galeria_id, &caminho, ordem, estado)
+                .await
+            {
+                Ok(_) => Recado::Sincronizou,
+                Err(erro) => Recado::Falhou(erro),
+            };
+            let _ = canal.send(recado);
+        });
+    }
+
     fn abrir_galeria(&self, sessao: Sessao, galeria_id: String, canal: Sender<Recado>) {
         let controlador = self.controlador.clone();
         self.tokio.spawn(async move {
@@ -330,6 +362,8 @@ pub mod mentira {
         pub estados_pedidos: Mutex<Vec<Option<EstadoNoBalcao>>>,
         /// O que a sessão aberta vai mostrar.
         pub fotos_da_sessao: Mutex<Vec<domain::services::pos_venda::FotoDaGaleria>>,
+        /// `(galeria, caminho, ordem, estado)` de cada arquivo do disco enviado.
+        pub arquivos_enviados: Mutex<Vec<(String, String, u32, EstadoNoBalcao)>>,
     }
 
     /// Um JPEG 1×1 cinza, codificado de verdade.
@@ -376,6 +410,10 @@ pub mod mentira {
 
         pub fn abertas(&self) -> Vec<String> {
             self.abertas.lock().expect("as abertas").clone()
+        }
+
+        pub fn arquivos_enviados(&self) -> Vec<(String, String, u32, EstadoNoBalcao)> {
+            self.arquivos_enviados.lock().expect("os arquivos").clone()
         }
 
         pub fn estados_pedidos(&self) -> Vec<Option<EstadoNoBalcao>> {
@@ -435,6 +473,22 @@ pub mod mentira {
 
         fn tirar_do_site(&self, _sessao: Sessao, foto_id: String, canal: Sender<Recado>) {
             self.tiradas.lock().expect("as tiradas").push(foto_id);
+            let _ = canal.send(Recado::Sincronizou);
+        }
+
+        fn enviar_arquivo(
+            &self,
+            _sessao: Sessao,
+            galeria_id: String,
+            caminho: String,
+            ordem: u32,
+            estado: EstadoNoBalcao,
+            canal: Sender<Recado>,
+        ) {
+            self.arquivos_enviados
+                .lock()
+                .expect("os arquivos")
+                .push((galeria_id, caminho, ordem, estado));
             let _ = canal.send(Recado::Sincronizou);
         }
 
