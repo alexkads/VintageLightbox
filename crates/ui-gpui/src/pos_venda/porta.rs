@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use adapters::controllers::PosVendaController;
 use domain::services::pos_venda::{
-    Galeria, GaleriaDoPainel, LinkDeAcesso, NovaGaleria, Produto, Sessao,
+    Galeria, GaleriaDoPainel, LinkDeAcesso, MudancaDaFoto, NovaGaleria, Produto, Sessao,
 };
 use use_cases::pos_venda::Progresso;
 
@@ -66,6 +66,14 @@ pub trait Publicador: Send + Sync + 'static {
     );
     /// O passo 3 ao contrário: a classificação foi zerada, a foto sai do storage.
     fn tirar_do_site(&self, sessao: Sessao, foto_id: String, canal: Sender<Recado>);
+    /// O passo 6: o que o cliente acertou no balcão, gravado na foto do site.
+    fn negociar(
+        &self,
+        sessao: Sessao,
+        foto_id: String,
+        mudanca: MudancaDaFoto,
+        canal: Sender<Recado>,
+    );
 }
 
 pub struct PublicadorDaApi {
@@ -167,6 +175,23 @@ impl Publicador for PublicadorDaApi {
         });
     }
 
+    fn negociar(
+        &self,
+        sessao: Sessao,
+        foto_id: String,
+        mudanca: MudancaDaFoto,
+        canal: Sender<Recado>,
+    ) {
+        let controlador = self.controlador.clone();
+        self.tokio.spawn(async move {
+            let recado = match controlador.mudar_foto(&sessao, &foto_id, &mudanca).await {
+                Ok(()) => Recado::Sincronizou,
+                Err(erro) => Recado::Falhou(erro),
+            };
+            let _ = canal.send(recado);
+        });
+    }
+
     fn publicar(&self, pedido: Pedido, canal: Sender<Recado>) {
         let controlador = self.controlador.clone();
         self.tokio.spawn(async move {
@@ -216,6 +241,8 @@ pub mod mentira {
         pub subidas: Mutex<Vec<(String, String, u32)>>,
         /// As fotos tiradas do storage.
         pub tiradas: Mutex<Vec<String>>,
+        /// O que foi negociado, por foto.
+        pub negociadas: Mutex<Vec<(String, MudancaDaFoto)>>,
     }
 
     impl PublicadorDeMentira {
@@ -237,6 +264,10 @@ pub mod mentira {
 
         pub fn tiradas(&self) -> Vec<String> {
             self.tiradas.lock().expect("as tiradas").clone()
+        }
+
+        pub fn negociadas(&self) -> Vec<(String, MudancaDaFoto)> {
+            self.negociadas.lock().expect("as negociadas").clone()
         }
     }
 
@@ -287,6 +318,20 @@ pub mod mentira {
 
         fn tirar_do_site(&self, _sessao: Sessao, foto_id: String, canal: Sender<Recado>) {
             self.tiradas.lock().expect("as tiradas").push(foto_id);
+            let _ = canal.send(Recado::Sincronizou);
+        }
+
+        fn negociar(
+            &self,
+            _sessao: Sessao,
+            foto_id: String,
+            mudanca: MudancaDaFoto,
+            canal: Sender<Recado>,
+        ) {
+            self.negociadas
+                .lock()
+                .expect("as negociadas")
+                .push((foto_id, mudanca));
             let _ = canal.send(Recado::Sincronizou);
         }
 

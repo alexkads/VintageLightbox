@@ -14,6 +14,13 @@ pub struct PhotoViewModel {
     pub flag: Option<i32>,
     /// Levada no balcão — o que o pós-venda libera para download.
     pub comprada: bool,
+    /// Onde a foto está no site. `None` = só existe aqui.
+    ///
+    /// 🔑 É o que a tela usa para saber se **há o que negociar**: a negociação do
+    /// balcão se grava na foto do site, e uma foto que nunca subiu não tem em
+    /// qual linha ser gravada.
+    #[serde(default)]
+    pub pos_venda_foto_id: Option<String>,
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub edit_exposure: Option<f32>,

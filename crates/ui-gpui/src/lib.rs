@@ -6,6 +6,7 @@
 //! o app antigo: é o Lightroom (`docs/00-OBJETIVO.md`).
 
 pub mod app;
+pub mod balcao;
 pub mod biblioteca;
 pub mod cliente;
 pub mod configuracoes;

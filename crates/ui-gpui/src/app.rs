@@ -14,6 +14,7 @@ use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::{ActiveTheme, Disableable, Selectable, Sizable};
 use infrastructure::cache::preview_manager::PreviewManager;
 
+use crate::balcao::tela::Balcao;
 use crate::biblioteca::acervo::Acervo;
 use crate::biblioteca::colecoes::Colecoes;
 use crate::biblioteca::marcacao::Marcador;
@@ -228,6 +229,9 @@ pub struct Aplicativo {
     /// O modal do pós-venda — o único caminho do app até o site.
     pos_venda: Entity<PosVenda>,
     publicando: bool,
+    /// O balcão: o que o cliente acertou ao levar a foto na hora.
+    balcao: Entity<Balcao>,
+    no_balcao: bool,
     /// A lista de sessões fotográficas.
     sessoes: Entity<Sessoes>,
     /// A sessão escolhida para receber as fotos. `None` é "nenhuma aberta".
@@ -389,6 +393,7 @@ impl Aplicativo {
         let publicador_do_pos_venda = portas.publicador.clone();
         let publicador_das_sessoes = portas.publicador.clone();
         let publicador_da_raiz = portas.publicador.clone();
+        let publicador_do_balcao = portas.publicador.clone();
         let entrada = cx.new(|cx| {
             Entrada::nova(
                 portas.publicador,
@@ -408,6 +413,7 @@ impl Aplicativo {
             raiz.sincronizar_classificacao(evento.clone(), cx);
         });
 
+        let balcao = cx.new(|cx| Balcao::nova(publicador_do_balcao, window, cx));
         let sessoes = cx.new(|cx| Sessoes::nova(publicador_das_sessoes, window, cx));
         let sessao_escolhida = cx.subscribe(&sessoes, |raiz, _tela, evento: &Escolhida, cx| {
             raiz.sessao_aberta = Some(evento.0.clone());
@@ -462,6 +468,8 @@ impl Aplicativo {
             entrada,
             modo: None,
             _escolha: escolha,
+            balcao,
+            no_balcao: false,
             sessoes,
             sessao_aberta: None,
             publicador: publicador_da_raiz,
@@ -515,6 +523,34 @@ impl Aplicativo {
                 }
             }
         }));
+    }
+
+    /// O passo 6 do fluxo: **o cliente paga no balcão**.
+    ///
+    /// ⚠️ **Leva a seleção, e não a grade inteira** — ao contrário de publicar.
+    /// Negociação é acerto sobre fotos específicas; aplicá-la ao que estivesse
+    /// visível daria cortesia a duzentas fotos por um filtro mal escolhido.
+    pub fn abrir_balcao(&mut self, cx: &mut Context<Self>) {
+        let fotos = self.biblioteca.read(cx).fotos_selecionadas();
+        if fotos.is_empty() {
+            return;
+        }
+        self.balcao
+            .update(cx, |tela, cx| tela.abrir_para(fotos, cx));
+        self.no_balcao = true;
+        cx.notify();
+    }
+
+    pub fn fechar_balcao(&mut self, cx: &mut Context<Self>) {
+        self.no_balcao = false;
+        // O que foi registrado mudou a foto no site, e a grade mostra o selo do
+        // que está lá: reler é o que faz a mudança aparecer.
+        self.reler_o_acervo(cx);
+        cx.notify();
+    }
+
+    pub fn no_balcao(&self) -> bool {
+        self.no_balcao
     }
 
     /// O passo 3 do fluxo: o que ganhou nota sobe, o que a perdeu sai.
@@ -937,6 +973,8 @@ impl Aplicativo {
             // galeria está trabalhando antes de qualquer outra coisa.
             self.sessoes
                 .update(cx, |tela, cx| tela.definir_sessao(sessao.clone(), cx));
+            self.balcao
+                .update(cx, |tela, cx| tela.definir_sessao(sessao.clone(), cx));
         }
         self.modo = Some(modo);
         cx.notify();
@@ -1173,6 +1211,17 @@ impl Aplicativo {
                     .disabled(!tem_selecao)
                     .on_click(cx.listener(|este, _ev, window, cx| {
                         este.revelar(window, cx);
+                    })),
+            )
+            .child(
+                // 🔑 Só com seleção: negociação é acerto sobre fotos
+                // específicas, e a grade inteira não é uma escolha.
+                Button::new("nav-balcao")
+                    .label("Balcão")
+                    .xsmall()
+                    .disabled(!tem_selecao)
+                    .on_click(cx.listener(|este, _ev, _window, cx| {
+                        este.abrir_balcao(cx);
                     })),
             )
             .child(
@@ -1503,6 +1552,48 @@ impl Aplicativo {
             )
     }
 
+    fn modal_do_balcao(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .absolute()
+            .inset_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(gpui::rgba(0x00000099))
+            .child(
+                div()
+                    .max_w_full()
+                    .max_h_full()
+                    .flex()
+                    .flex_col()
+                    .bg(cx.theme().background)
+                    .border_1()
+                    .border_color(cx.theme().border)
+                    .rounded(px(6.))
+                    .overflow_hidden()
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .gap(px(24.))
+                            .px(px(12.))
+                            .py(px(6.))
+                            .bg(cx.theme().title_bar)
+                            .child(div().text_xs().child("Pago no balcão"))
+                            .child(
+                                Button::new("fechar-balcao")
+                                    .label("Fechar")
+                                    .xsmall()
+                                    .on_click(cx.listener(|este, _ev, _window, cx| {
+                                        este.fechar_balcao(cx);
+                                    })),
+                            ),
+                    )
+                    .child(self.balcao.clone()),
+            )
+    }
+
     fn modal_de_importacao(&self, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .absolute()
@@ -1665,6 +1756,7 @@ impl Render for Aplicativo {
             .when(self.publicando, |raiz| {
                 raiz.child(self.modal_de_pos_venda(cx))
             })
+            .when(self.no_balcao, |raiz| raiz.child(self.modal_do_balcao(cx)))
             .when_some(
                 self.biblioteca.read(cx).confirmando_apagar(),
                 |raiz, quantas| raiz.child(self.aviso_de_apagar(quantas, cx)),
