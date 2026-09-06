@@ -16,6 +16,7 @@
 //! | [`selecao`] | clique, Shift, Ctrl, arrasto e teclado |
 //! | [`acervo`] | o recorte da barra, as contagens e o que ainda pode mudar |
 //! | [`miniaturas`] | quantas carregar por vez, em que ordem e qual descartar |
+//! | [`sessoes`] | a lista de sessões fotográficas: situação, busca, contagens, gráfico |
 //! | [`dinheiro`] | reais em centavos: o que se lê de um campo e o que se escreve na tela |
 //! | [`negociacao`] | cortesia, desconto, site parceiro — o registro do balcão |
 //! | [`preco_de_venda`] | o preço fixado para a compra online, e o que ele recusa |
@@ -40,8 +41,10 @@ pub mod miniaturas;
 pub mod negociacao;
 pub mod preco_de_venda;
 pub mod selecao;
+pub mod sessoes;
 
 pub use acervo::{permissoes, Acervo, Contagens, Estado, Filtro, Foto, Permissoes};
 pub use grade::{Direcao, Layout, Opcoes, Retangulo};
 pub use miniaturas::{Cache as CacheDeMiniaturas, Desfecho, Politica};
 pub use selecao::{Modificadores, Selecao};
+pub use sessoes::{SessaoFotografica, Situacao};
