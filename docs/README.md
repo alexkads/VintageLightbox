@@ -20,8 +20,11 @@ existirem sem fazer nada.
 ⚠️ **Alguns documentos abaixo ainda descrevem a UI em Slint** — tecnologia avaliada e **nunca usada**.
 Cada um traz no topo o que está errado nele. Os que foram reescritos do código estão marcados.
 
-**Estado (17/ago/2026)**: ✅ compila, app sobe | **676 testes passando, 0 falhas** | `clippy -D
+**Estado (6/set/2026)**: ✅ compila, app sobe | **947 testes passando, 0 falhas** | `clippy -D
 warnings` limpo
+
+🆕 **O app é sessão-primeiro desde 6/set/2026.** Logado, ele abre na lista de sessões e nada acontece
+fora de uma — ver [`09-A-SESSAO-FOTOGRAFICA.md`](09-A-SESSAO-FOTOGRAFICA.md).
 
 ## 📚 Documentos Principais
 
@@ -76,6 +79,15 @@ conferido quebrando de propósito**.
 
 ### 8. [Arquitetura de Cache](08-CACHE-ARCHITECTURE.md)
 Miniaturas e previews em SQLite. ✅ Confere com o código.
+
+### 9. [A sessão fotográfica](09-A-SESSAO-FOTOGRAFICA.md) 🆕
+**Conteúdo**: o eixo do app depois de 6/set/2026 — **logado, tudo acontece dentro de uma sessão**.
+As quatro telas, o fluxo do estúdio em onze passos, como uma foto pertence a um ensaio, a porta do
+app, e a tela de sessão desenhada contra a rota `[id]` do site.
+
+**Leia se você quer**: mexer em qualquer coisa que fale com o `recordarfotos.com.br`, ou entender
+por que a "Biblioteca" deixou de ser o lugar onde se escolhe foto. Traz também os defeitos que este
+trabalho encontrou e a lista do que ainda falta para a paridade com a tela de lá.
 
 ## 🗄️ História — [`historico/`](historico/)
 
