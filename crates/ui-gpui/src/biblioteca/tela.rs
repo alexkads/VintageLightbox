@@ -85,8 +85,8 @@ pub struct Biblioteca {
     /// dele, não a de todos os clientes juntos. Sem este recorte, a triagem de
     /// um casamento aconteceria no meio das fotos de outros três.
     ///
-    /// `None` continua existindo, e é o modo offline: sem conta não há ensaio, e
-    /// o app volta a ser o catálogo local de sempre.
+    /// `None` continua existindo, e é o catálogo inteiro: fotos de antes desta
+    /// regra, e a grade dos testes que montam o próprio acervo.
     sessao: Option<String>,
     /// Uma frase para quem está olhando a grade.
     ///
@@ -1050,6 +1050,47 @@ impl Biblioteca {
         }
     }
 
+    /// As colunas de agora, para quem está de fora.
+    ///
+    /// A raiz precisa dela para as setas ↑ e ↓: o passo de uma linha é o número
+    /// de colunas, e quem sabe a largura da janela é ela.
+    pub fn colunas_visiveis(&self, window: &Window) -> usize {
+        self.colunas(window)
+    }
+
+    /// Uma **linha** para cima ou para baixo — as setas ↑ e ↓.
+    ///
+    /// ⚠️ **Não dá a volta nem escorrega de linha**, pela mesma razão de
+    /// [`Biblioteca::andar`]: descer da última linha fica onde está. Pular para
+    /// a última foto porque é "a mais perto" faria ↓ mover na horizontal.
+    pub fn andar_linha(&mut self, passo: i32, colunas: usize, cx: &mut Context<Self>) {
+        let total = self.visiveis.len();
+        let colunas = colunas.max(1);
+        if total == 0 {
+            return;
+        }
+        let Some(atual) = self.selecao.foco() else {
+            let nova = if passo > 0 { 0 } else { total - 1 };
+            self.selecao.clicar(nova, false, Modificadores::default());
+            cx.notify();
+            return;
+        };
+        let destino = if passo > 0 {
+            atual + colunas
+        } else {
+            match atual.checked_sub(colunas) {
+                Some(i) => i,
+                None => return,
+            }
+        };
+        if destino >= total {
+            return;
+        }
+        self.selecao
+            .clicar(destino, false, Modificadores::default());
+        cx.notify();
+    }
+
     pub fn colunas_escolhidas(&self) -> Option<u8> {
         self.colunas_escolhidas
     }
@@ -2005,7 +2046,7 @@ fn celula(
 /// 🔑 **É o gatilho do passo 3 do fluxo do dono**, e o motivo de a Biblioteca
 /// não falar com o site: ela **notifica** que a classificação mudou de lado, e
 /// quem sabe o que fazer com isso é a raiz, que tem a sessão e a galeria aberta.
-/// Assim a grade continua funcionando offline, sem saber que existe um site.
+/// Assim a grade continua sem precisar saber que existe um site.
 ///
 /// ⚠️ **A travessia, e não o estado.** Passar de 3 para 4 estrelas não é evento:
 /// a foto já estava no site e continua. O que importa é 0 → nota (sobe) e

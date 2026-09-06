@@ -120,6 +120,20 @@ impl CacheDeMiniaturas {
         miniatura
     }
 
+    /// A miniatura que **já** está na memória, sem carregar nada.
+    ///
+    /// 🔑 Existe para a grade da sessão, que monta as células com `&self`: lá o
+    /// carregamento acontece uma vez por quadro, em `preparar_miniaturas`, e a
+    /// célula só lê. Sem isto, a alternativa era decodificar dentro do render —
+    /// que é exatamente o defeito que este cache existe para não ter.
+    ///
+    /// `peek` e não `get`: percorrer todas as visíveis a cada quadro reordenaria
+    /// a fila de descarte por completo, e "todas foram usadas por último" não
+    /// diz nada sobre qual descartar.
+    pub fn espiar(&self, chave: &str) -> Option<Miniatura> {
+        self.carregadas.peek(chave).cloned()
+    }
+
     /// Quantas miniaturas estão na memória agora.
     /// Tira uma entrada do cache.
     ///

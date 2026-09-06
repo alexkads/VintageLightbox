@@ -89,6 +89,8 @@ actions!(
         // ele fica legível ao lado da tecla.
         Adiante,
         Atras,
+        Acima,
+        Abaixo,
         SemNota,
         UmaEstrela,
         DuasEstrelas,
@@ -170,6 +172,11 @@ pub fn init(cx: &mut gpui::App) {
         // enquanto o número não aparecia no campo.
         gpui::KeyBinding::new("right", Adiante, Some(SEM_CAMPO_DE_TEXTO)),
         gpui::KeyBinding::new("left", Atras, Some(SEM_CAMPO_DE_TEXTO)),
+        // 🚨 **↑ e ↓ andam uma linha**, e faltavam: numa grade de 7 colunas,
+        // chegar à foto de baixo custava sete ← ou →. É o que o Lightroom faz e
+        // o que a mão espera de qualquer grade.
+        gpui::KeyBinding::new("up", Acima, Some(SEM_CAMPO_DE_TEXTO)),
+        gpui::KeyBinding::new("down", Abaixo, Some(SEM_CAMPO_DE_TEXTO)),
         gpui::KeyBinding::new("0", SemNota, Some(SEM_CAMPO_DE_TEXTO)),
         gpui::KeyBinding::new("1", UmaEstrela, Some(SEM_CAMPO_DE_TEXTO)),
         gpui::KeyBinding::new("2", DuasEstrelas, Some(SEM_CAMPO_DE_TEXTO)),
@@ -1464,6 +1471,32 @@ impl Aplicativo {
         }
     }
 
+    /// Uma linha para cima ou para baixo, na grade que estiver no ar.
+    ///
+    /// 🔑 **Quem sabe quantas colunas cabem é aqui**, e não a tela: a conta
+    /// depende da largura da janela, que é do `Window`. Cada grade tem a sua —
+    /// a da sessão divide a linha com o painel da foto, a da Biblioteca com a
+    /// árvore de pastas.
+    ///
+    /// ⚠️ **Na Revelação as setas ↑↓ não andam.** Lá não há linha: a foto é uma
+    /// só, e ← → já percorrem a tira. Andar de sete em sete numa lista de uma
+    /// dimensão seria um salto sem sentido na tela.
+    fn andar_linha(&mut self, passo: i32, window: &mut Window, cx: &mut Context<Self>) {
+        match self.tela {
+            Tela::Biblioteca => {
+                let colunas = self.biblioteca.read(cx).colunas_visiveis(window);
+                self.biblioteca
+                    .update(cx, |tela, cx| tela.andar_linha(passo, colunas, cx))
+            }
+            Tela::Sessao => {
+                let colunas = self.detalhe.read(cx).colunas_visiveis(window);
+                self.detalhe
+                    .update(cx, |tela, cx| tela.andar_linha(passo, colunas, cx))
+            }
+            Tela::Revelacao | Tela::Impressao | Tela::Sessoes => {}
+        }
+    }
+
     fn ao_voltar(
         &mut self,
         _acao: &VoltarParaBiblioteca,
@@ -2118,6 +2151,12 @@ impl Render for Aplicativo {
             }))
             .on_action(cx.listener(|este, _: &Atras, window, cx| {
                 este.andar(-1, window, cx);
+            }))
+            .on_action(cx.listener(|este, _: &Abaixo, window, cx| {
+                este.andar_linha(1, window, cx);
+            }))
+            .on_action(cx.listener(|este, _: &Acima, window, cx| {
+                este.andar_linha(-1, window, cx);
             }))
             .on_action(cx.listener(|este, _: &SemNota, _w, cx| {
                 este.na_grade(

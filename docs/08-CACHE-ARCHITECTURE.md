@@ -24,6 +24,51 @@
 > ler um preview. Medido hoje, é **16 ms** — o disco e o `image` de 2025 não são
 > os de hoje. Números de desempenho envelhecem; os que estão aqui têm data.
 
+## 🚨 O L1 é da Revelação, e a grade da sessão o usava como se fosse dela — 6/set/2026
+
+O dono relatou a tela da sessão *"cheia de problemas de UX e não fluida"* e
+apontou para cá. Estava certo de novo, e o defeito é o oposto do de agosto: não
+faltava cache — **havia cache demais no lugar errado, e nenhum no certo**.
+
+`Detalhe::celula` e `Detalhe::tira` (`sessoes/detalhe.rs`) chamavam
+`get_preview` + `para_gpui` **por foto, dentro do `render`**. Três coisas se
+somavam:
+
+| O que era | Por quê |
+|---|---|
+| a célula de 160px carregava o preview de **640px** | `Recado::Miniatura` gravava a miniatura vinda do site com `save_preview` (type 1) e **nunca** `save_thumbnail` (type 0) — então o `get_thumbnail` da tira nunca acertava, e o `or_else` da grade nunca era alcançado |
+| **todo quadro** redecodificava as 25 | o L1 descrito acima guarda **15 imagens**, e foi dimensionado para a Revelação, que vai e volta entre fotos vizinhas. Uma grade que varre 25 numa sequência acerta **zero**: cada quadro despeja o que o próximo pede |
+| a tira de baixo pagava tudo **de novo** | ela repete o mesmo laço sobre as mesmas fotos, no mesmo quadro |
+
+🔑 **A regra que faltava**: um LRU menor que a varredura que passa por ele tem
+taxa de acerto zero — não é "cache pequeno", é cache que só custa. O L1 de 15 não
+é um número errado; é um número **da Revelação**, e a grade precisa do seu.
+
+E a grade da Biblioteca já tinha o cache certo desde o porte
+(`biblioteca::miniaturas::CacheDeMiniaturas`, que guarda a **textura já
+convertida** e dimensiona a capacidade pelo que está na tela). Ele só não tinha
+sido ligado na sessão.
+
+**Medido com `medir-grade-da-sessao`** (release, 25 fotos do catálogo real):
+
+| | por quadro |
+|---|---:|
+| antes | **48 ms** — 3× o orçamento de 60fps, e a tira pagava outro tanto |
+| depois | **0,00 ms** — o quadro só lê da memória |
+| custo único, na primeira abertura | 123 ms para gerar as 25 miniaturas que faltavam, **gravadas em disco** |
+
+O conserto é auto-curativo: a miniatura de 320px é gerada na primeira vez que a
+foto aparece e fica no L2, então as sessões que já estão no cache se corrigem
+sozinhas, sem ressincronizar nada.
+
+⚠️ **A grade da sessão não é virtualizada** — ela desenha o recorte inteiro, e
+não só o que cabe na janela. Por isso a capacidade do cache dela acompanha
+`total_visivel()`, e não o que está à vista: com um recorte maior que o cache,
+o defeito acima volta inteiro. Uma sessão de milhares de fotos precisa de
+`uniform_list`, como a Biblioteca tem.
+
+---
+
 ## Visão Geral
 O VintageLightbox utiliza um sistema de cache hierárquico de três níveis (L1, L2, L3) projetado para oferecer uma experiência de visualização instantânea (<16ms) e edição fluida, mesmo lidando com arquivos RAW pesados (24MP+). O objetivo é minimizar a latência de I/O e o custo computacional de decodificação JPEG e processamento de edits.
 

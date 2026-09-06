@@ -7,6 +7,7 @@
 //! também vai consumir — a mesma pergunta ("cadê a galeria da Maria?") não pode
 //! ter duas respostas conforme o app.
 
+pub mod altura_da_tira;
 pub mod arquivos;
 pub mod detalhe;
 pub mod tela;

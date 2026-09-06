@@ -11,6 +11,7 @@
 //! chegou — é o que permite arrastar liso enquanto a GPU trabalha atrás.
 
 use std::collections::HashSet;
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -30,6 +31,7 @@ use gpui_component::slider::{Slider, SliderEvent, SliderState};
 use gpui_component::{ActiveTheme, Disableable, Selectable, Sizable, WindowExt};
 use infrastructure::cache::preview_manager::PreviewManager;
 
+use crate::biblioteca::miniaturas::{CacheDeMiniaturas, Miniatura};
 use crate::imagem::para_gpui;
 
 use super::automatico;
@@ -56,6 +58,14 @@ const ALTURA_DOS_GRAFICOS: f32 = 230.0;
 
 /// A altura da faixa de miniaturas, embaixo do palco.
 const ALTURA_DO_FILMSTRIP: f32 = 84.0;
+
+/// Quantas miniaturas da tira ficam em memória.
+///
+/// A tira mostra o acervo **inteiro**, mas quem paga por quadro é só o que está
+/// à vista; este é o teto do que fica guardado. Uma miniatura de 320px em BGRA
+/// ocupa ~300 KB, então 512 são ~150 MB no pior caso — e o pior caso é ter
+/// rolado a tira inteira de um acervo grande.
+const MINIATURAS_DA_TIRA: usize = 512;
 
 /// Quanto a gravação espera depois do último movimento de slider.
 ///
@@ -116,6 +126,22 @@ pub struct Revelacao {
     /// A lista que a Biblioteca estava mostrando, para as setas e o filmstrip.
     /// `Arc` porque o closure do filmstrip a leva consigo.
     acervo: Arc<Vec<PhotoViewModel>>,
+    /// As miniaturas da tira, convertidas uma vez cada.
+    ///
+    /// 🚨 **A tira chamava `get_thumbnail` + `para_gpui` por item, por quadro** —
+    /// o mesmo defeito que a grade da sessão tinha (`docs/08-CACHE-ARCHITECTURE.md`,
+    /// 6/set/2026). Com 15 itens já eram 15 decodes por quadro; com o acervo
+    /// inteiro seriam todos.
+    ///
+    /// 🔑 **E é ele que torna a tira completa possível.** A faixa mostrava só
+    /// ±7 vizinhas, e o comentário explicava por quê: *"uma faixa com 2.000
+    /// itens custaria 2.000 consultas ao cache por quadro"*. Com o cache, custa
+    /// uma leitura de memória por item — a razão caiu.
+    miniaturas_da_tira: CacheDeMiniaturas,
+    /// A rolagem da tira, para ela seguir a foto aberta.
+    rolagem_da_tira: gpui::ScrollHandle,
+    /// A posição que a tira já mostrou — só rola quando muda.
+    ultima_na_tira: Option<usize>,
     /// Onde estamos nela.
     posicao: usize,
     processador: Processador,
@@ -292,6 +318,11 @@ impl Revelacao {
             _arranjo: None,
             arranjo_em: std::path::PathBuf::new(),
             acervo: Arc::new(Vec::new()),
+            miniaturas_da_tira: CacheDeMiniaturas::nova(
+                NonZeroUsize::new(MINIATURAS_DA_TIRA).expect("não é zero"),
+            ),
+            rolagem_da_tira: gpui::ScrollHandle::new(),
+            ultima_na_tira: None,
             posicao: 0,
             processador: Processador::novo(),
             aberta: None,
@@ -2009,41 +2040,56 @@ impl Revelacao {
 }
 
 impl Revelacao {
-    /// A faixa do rodapé: onde esta foto está na sequência.
+    /// A faixa do rodapé: **o acervo inteiro**, rolável, com a atual em vista.
     ///
-    /// Mostra a **vizinhança** da atual, e não o acervo inteiro — é a mesma
-    /// decisão do filmstrip da Biblioteca, e a mesma pergunta: "o que vem antes
-    /// e depois desta". Uma faixa com 2.000 itens custaria 2.000 consultas ao
-    /// cache por quadro para responder o mesmo.
+    /// # 🚨 Ela mostrava só ±7 vizinhas, e não havia como chegar no resto
+    ///
+    /// O motivo estava escrito e era honesto: *"uma faixa com 2.000 itens
+    /// custaria 2.000 consultas ao cache por quadro"*. Só que a conta era do
+    /// caminho antigo, que decodificava o JPEG dentro do `render`. Com o
+    /// [`CacheDeMiniaturas`] cada item custa **uma leitura de memória**, e a
+    /// razão para esconder o acervo caiu junto.
+    ///
+    /// O que sobrava do jeito antigo: quem revelava a foto 3 de 200 não tinha
+    /// como pular para a 150 sem voltar à grade — e "voltar à grade" é
+    /// exatamente o que o filmstrip existe para evitar.
     ///
     /// ⚠️ **Some com um acervo de uma foto.** Uma faixa com um item só ocupa
     /// espaço da foto para não dizer nada — e é o que acontece ao abrir a
     /// Revelação sem lista (os testes, e o caminho de `abrir`).
-    fn filmstrip(&self, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
-        /// Quantas de cada lado. Ímpar de propósito: a atual fica no meio.
-        const VIZINHAS: usize = 7;
+    fn filmstrip(&mut self, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
         const LADO: f32 = 52.0;
 
         if self.acervo.len() < 2 {
             return None;
         }
 
-        let inicio = self.posicao.saturating_sub(VIZINHAS);
-        let fim = (inicio + VIZINHAS * 2 + 1).min(self.acervo.len());
+        // Carrega o que falta **antes** de montar — o quadro só lê.
+        self.miniaturas_da_tira.ajustar_capacidade(
+            NonZeroUsize::new(self.acervo.len().clamp(1, MINIATURAS_DA_TIRA))
+                .expect("o piso 1 garante que não é zero"),
+        );
+        let ids: Vec<String> = self.acervo.iter().map(|f| f.id.clone()).collect();
+        for id in &ids {
+            if self.miniaturas_da_tira.espiar(id).is_none() {
+                self.miniaturas_da_tira.obter(&self.previews, id);
+            }
+        }
 
-        let itens: Vec<gpui::AnyElement> = (inicio..fim)
+        let itens: Vec<gpui::AnyElement> = (0..self.acervo.len())
             .map(|posicao| {
                 let foto = &self.acervo[posicao];
                 let atual = posicao == self.posicao;
-                let miniatura = self
-                    .previews
-                    .get_thumbnail(&foto.id)
-                    .map(crate::imagem::para_gpui);
+                let miniatura = match self.miniaturas_da_tira.espiar(&foto.id) {
+                    Some(Miniatura::Pronta(imagem)) => Some(imagem),
+                    _ => None,
+                };
 
                 div()
                     .id(SharedString::from(format!("faixa-revelacao-{}", foto.id)))
                     .w(px(LADO))
                     .h(px(LADO))
+                    .flex_none()
                     .flex()
                     .items_center()
                     .justify_center()
@@ -2067,14 +2113,25 @@ impl Revelacao {
             })
             .collect();
 
+        // 🔑 A tira segue a foto aberta, e **só quando ela muda**: pedir a cada
+        // quadro prenderia a barra e o operador não conseguiria arrastá-la para
+        // olhar o resto do acervo.
+        if self.ultima_na_tira != Some(self.posicao) {
+            self.ultima_na_tira = Some(self.posicao);
+            self.rolagem_da_tira.scroll_to_item(self.posicao);
+        }
+
         Some(
             div()
+                .id("faixa-da-revelacao")
+                .track_scroll(&self.rolagem_da_tira)
                 .flex()
                 .items_center()
-                .justify_center()
                 .gap(px(6.))
+                .px(px(6.))
                 .h(px(LADO + 16.0))
                 .flex_none()
+                .overflow_x_scroll()
                 .border_t_1()
                 .border_color(cx.theme().border)
                 .children(itens)

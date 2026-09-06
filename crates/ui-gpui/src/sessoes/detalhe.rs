@@ -25,24 +25,31 @@
 //! estúdio subiu aparece aqui, e a que a retenção apagou aparece como apagada —
 //! coisas que o catálogo local não tem como saber.
 
+use std::num::NonZeroUsize;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::Duration;
 
 use biblioteca_core::acervo::{self, Acervo, Filtro};
 use biblioteca_core::dinheiro;
+use biblioteca_core::grade::colunas_que_cabem;
 use biblioteca_core::selecao::{Modificadores, Selecao};
 use domain::services::pos_venda::{
     EstadoDaFotoNoSite, EstadoNoBalcao, FotoDaGaleria, GaleriaAberta, LinkDeAcesso, Produto, Sessao,
 };
-use gpui::{div, img, prelude::*, px, Context, EventEmitter, SharedString, Task, Window};
+use gpui::{
+    canvas, div, img, prelude::*, px, App, Context, EventEmitter, SharedString, Task, Window,
+};
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::{ActiveTheme, Disableable, Selectable, Sizable};
 use infrastructure::cache::preview_manager::PreviewManager;
 
+use super::altura_da_tira;
 use super::arquivos::SeletorDeFotos;
+use crate::biblioteca::miniaturas::{CacheDeMiniaturas, Miniatura};
 use crate::pos_venda::porta::{Publicador, Recado};
 use crate::selos;
+use crate::tema::cores;
 
 const INTERVALO_DE_COLHEITA: Duration = Duration::from_millis(100);
 
@@ -51,6 +58,24 @@ const ZOOM_MINIMO: f32 = 90.0;
 const ZOOM_MAXIMO: f32 = 320.0;
 const ZOOM_PADRAO: f32 = 160.0;
 const PASSO_DO_ZOOM: f32 = 35.0;
+
+/// O lado da miniatura da sessão, em pixels.
+///
+/// 🔑 **É o `ZOOM_MAXIMO`**, e não um número à parte: no zoom cheio a célula tem
+/// esse tamanho, e uma miniatura menor seria ampliada — que é o defeito que o
+/// `reduzir` do `thumbnail_generator` existe para não cometer. Maior que isso
+/// seria pagar pixel que nenhum zoom mostra.
+const LADO_DA_MINIATURA: u32 = ZOOM_MAXIMO as u32;
+
+/// Quantas miniaturas da sessão ficam na memória.
+///
+/// A grade da sessão **não é virtualizada**: ela desenha todas as visíveis do
+/// recorte. Então o cache precisa caber o recorte inteiro, ou cada quadro
+/// descarta o que o próximo pede de volta — o mesmo defeito que o
+/// `PreviewManager` (15 imagens) já cometia com as 25 desta sessão.
+/// `preparar_miniaturas` cresce isto para o que estiver à vista; este é só o
+/// piso de partida.
+const MINIATURAS_GUARDADAS: usize = 64;
 
 /// Os recortes da barra, na ordem da web.
 ///
@@ -104,6 +129,19 @@ pub struct Detalhe {
     /// desenharia célula vazia para tudo o que já subiu: o nome apareceria, a
     /// foto não.
     previews: Arc<PreviewManager>,
+    /// As miniaturas **já convertidas para textura**, uma vez por foto.
+    ///
+    /// 🚨 **Sem isto a grade decodificava tudo dentro do `render`.** `celula` e
+    /// `tira` chamavam `get_preview` + `para_gpui` por foto, por quadro — e o
+    /// `PreviewManager` guarda 15 imagens contra as 25 desta sessão, então o LRU
+    /// dele acertava **zero**: todo quadro relia o BLOB, redecodificava o JPEG,
+    /// clonava a imagem inteira e trocava RGBA→BGRA byte a byte. Medido em
+    /// 6/set/2026 com `medir-grade-da-sessao`: **51 ms por quadro em release**,
+    /// 3× o orçamento de 60fps, e a tira de baixo pagava o mesmo de novo.
+    ///
+    /// É o mesmo cache da grade da Biblioteca, que nasceu deste problema
+    /// (`biblioteca::miniaturas`) e não tinha sido ligado aqui.
+    miniaturas: CacheDeMiniaturas,
     /// De quem já foi pedida miniatura, para não pedir duas vezes.
     pedidas: std::collections::HashSet<String>,
     /// Quantas miniaturas ainda estão a caminho.
@@ -135,6 +173,23 @@ pub struct Detalhe {
     acervo: Acervo,
     /// O que está marcado, pelas mesmas regras da grade do site.
     selecao: Selecao,
+    /// A rolagem da grade e a da tira, para levá-las até o foco.
+    ///
+    /// 🔑 **Sem isto o foco anda e a tela não segue.** As setas movem a seleção
+    /// pela lista inteira, e a partir da terceira fileira (ou da décima
+    /// miniatura) a foto em foco está fora de vista: o operador aperta ↓ e não
+    /// vê nada acontecer. É o que a tira do editor da web faz.
+    rolagem_da_grade: gpui::ScrollHandle,
+    rolagem_da_tira: gpui::ScrollHandle,
+    /// A altura da tira, que **é** o zoom das miniaturas dela.
+    altura_da_tira: f32,
+    /// O arrasto do puxador: onde o ponteiro desceu e qual era a altura ali.
+    arrasto_da_tira: Option<(gpui::Pixels, f32)>,
+    /// O foco do quadro anterior — só rola quando ele **muda**.
+    ///
+    /// ⚠️ Rolar a cada quadro prenderia a barra: o operador não conseguiria
+    /// arrastar a tira para olhar o resto sem ela voltar sozinha.
+    ultimo_foco: Option<usize>,
     enviando: usize,
     enviadas: usize,
     link: Option<LinkDeAcesso>,
@@ -159,10 +214,18 @@ impl Detalhe {
             arrastando: false,
             acervo: Acervo::novo(),
             selecao: Selecao::nova(),
+            rolagem_da_grade: gpui::ScrollHandle::new(),
+            rolagem_da_tira: gpui::ScrollHandle::new(),
+            altura_da_tira: altura_da_tira::guardada("sessao"),
+            arrasto_da_tira: None,
+            ultimo_foco: None,
             sessao: None,
             galeria_id: None,
             aberta: None,
             previews,
+            miniaturas: CacheDeMiniaturas::nova(
+                NonZeroUsize::new(MINIATURAS_GUARDADAS).expect("não é zero"),
+            ),
             pedidas: std::collections::HashSet::new(),
             baixando: 0,
             produtos: Vec::new(),
@@ -329,6 +392,80 @@ impl Detalhe {
             (None, false) => total - 1,
         };
         self.selecao.clicar(nova, false, Modificadores::default());
+        cx.notify();
+    }
+
+    /// Leva a grade e a tira até a foto em foco, quando ele muda.
+    ///
+    /// 🔑 **Só quando muda.** O `ScrollHandle` guarda o pedido e o atende na
+    /// próxima pintura; repeti-lo a cada quadro deixaria a tira presa no foco e
+    /// impossível de arrastar com a mão.
+    fn seguir_o_foco(&mut self) {
+        let foco = self.selecao.foco();
+        if foco == self.ultimo_foco {
+            return;
+        }
+        self.ultimo_foco = foco;
+        if let Some(posicao) = foco {
+            self.rolagem_da_grade.scroll_to_item(posicao);
+            self.rolagem_da_tira.scroll_to_item(posicao);
+        }
+    }
+
+    /// Quantas colunas a grade da sessão desenha agora.
+    ///
+    /// 🚨 **O painel da foto entra na conta.** Ele tem 300px fixos e divide a
+    /// linha com a grade; ignorá-lo daria mais colunas do que cabem, e a seta ↓
+    /// pularia por cima de uma foto. É o mesmo cuidado que `largura_util` da
+    /// Biblioteca tem com a árvore de pastas.
+    ///
+    /// ⚠️ Quando não há foco não há painel, e a grade é mais larga — mas ↑↓ só
+    /// valem com foco, então a conta com painel é a que importa.
+    pub fn colunas_visiveis(&self, window: &Window) -> usize {
+        /// O `p(px(12.))` da tela, dos dois lados.
+        const MARGEM: f32 = 24.0;
+        /// A largura do painel da foto mais o `gap` do `corpo`.
+        const PAINEL: f32 = 300.0 + 8.0;
+        let largura = f32::from(window.viewport_size().width) - MARGEM - PAINEL;
+        colunas_que_cabem(largura, self.zoom, 8.0)
+    }
+
+    /// Uma **linha** para cima ou para baixo — as setas ↑ e ↓.
+    ///
+    /// 🔑 **O passo é o número de colunas**, e por isso ele vem de fora: quem
+    /// sabe a largura da janela é a raiz, não a tela. A grade é `flex_wrap`, e
+    /// a mesma foto muda de linha quando a janela muda de tamanho.
+    ///
+    /// ⚠️ **Não dá a volta e não escorrega para outra linha.** Descer da última
+    /// linha fica na última — pular para a foto final porque ela é "o mais perto
+    /// que dá" faria a seta ↓ mover a seleção horizontalmente, que é o gesto da
+    /// outra tecla.
+    pub fn andar_linha(&mut self, passo: i32, colunas: usize, cx: &mut Context<Self>) {
+        let total = self.acervo.total_visivel();
+        let colunas = colunas.max(1);
+        if total == 0 {
+            return;
+        }
+        let Some(atual) = self.selecao.foco() else {
+            // Sem foco, a primeira seta escolhe uma ponta — o mesmo que `andar`.
+            let nova = if passo > 0 { 0 } else { total - 1 };
+            self.selecao.clicar(nova, false, Modificadores::default());
+            cx.notify();
+            return;
+        };
+        let destino = if passo > 0 {
+            atual + colunas
+        } else {
+            match atual.checked_sub(colunas) {
+                Some(i) => i,
+                None => return,
+            }
+        };
+        if destino >= total {
+            return;
+        }
+        self.selecao
+            .clicar(destino, false, Modificadores::default());
         cx.notify();
     }
 
@@ -593,15 +730,71 @@ impl Detalhe {
         while let Ok(recado) = self.recados.1.try_recv() {
             mudou = true;
             match recado {
-                Recado::Aberta(aberta) => {
+                Recado::Aberta(mut aberta) => {
                     self.carregando = false;
+                    // 🚨 **Reler a galeria não pode desmanchar o que a mão fez.**
+                    //
+                    // Dar nota ou marcar "levada" manda a mudança e **relê a
+                    // galeria inteira**. Antes, a releitura fazia duas coisas
+                    // que o operador não pediu: aceitava a ordem que o servidor
+                    // devolveu (a foto classificada pulava de lugar) e chamava
+                    // `limpar_tudo` (a seleção sumia). Numa triagem, isso é dar
+                    // nota a uma foto e perder de vista as outras vinte que
+                    // estavam marcadas para receber a mesma.
+                    //
+                    // 🔑 **A seleção é guardada por id, não por posição** — que é
+                    // o que a linha antiga estava certa em temer. O que estava
+                    // errado era a conclusão: em vez de descartar, traduz.
+                    let mesma_galeria = self
+                        .aberta
+                        .as_ref()
+                        .is_some_and(|atual| atual.galeria.id == aberta.galeria.id);
+
+                    let marcadas: Vec<String> = if mesma_galeria {
+                        self.selecao
+                            .marcadas()
+                            .filter_map(|p| self.acervo.visivel(p))
+                            .map(|f| f.id.clone())
+                            .collect()
+                    } else {
+                        Vec::new()
+                    };
+                    let focada = if mesma_galeria {
+                        self.selecao
+                            .foco()
+                            .and_then(|p| self.acervo.visivel(p))
+                            .map(|f| f.id.clone())
+                    } else {
+                        None
+                    };
+
+                    if mesma_galeria {
+                        if let Some(atual) = self.aberta.as_ref() {
+                            ordenar_como_antes(&mut aberta.fotos, &atual.fotos);
+                        }
+                    }
+
                     // 🔑 A conta é do core: recorte, contagens e ordem saem
                     // dele, e não de laços escritos aqui.
                     self.acervo
                         .definir(aberta.fotos.iter().map(para_o_core).collect());
-                    // Trocar o conteúdo embaralha as posições: a seleção fala em
-                    // posição, e mantê-la apontaria para outras fotos.
                     self.selecao.limpar_tudo();
+                    // ⚠️ Quem saiu do recorte não volta: classificar com a ficha
+                    // "Sem nota" aberta tira a foto da lista, e é o que a ficha
+                    // promete. O `posicao_de` responde `None` e ela fica de fora
+                    // — as outras marcadas continuam.
+                    for id in &marcadas {
+                        if let Some(p) = self.acervo.posicao_de(id) {
+                            self.selecao.marcar(p);
+                        }
+                    }
+                    if let Some(p) = focada.as_deref().and_then(|id| self.acervo.posicao_de(id)) {
+                        self.selecao.focar(Some(p));
+                        // A releitura reposiciona; o foco tem de reaparecer na
+                        // tela, e não só no estado.
+                        self.ultimo_foco = None;
+                    }
+
                     cx.emit(Pedido::FotosDoSite(aberta.fotos.clone()));
                     self.aberta = Some(*aberta);
                     abriu = true;
@@ -611,8 +804,18 @@ impl Detalhe {
                     // Miniatura ilegível não derruba a grade: a célula fica sem
                     // imagem, com o nome do arquivo, que é melhor que nada.
                     if let Ok(imagem) = image::load_from_memory(&bytes) {
-                        let chave = format!("site:{foto_id}");
+                        let chave = chave_da_miniatura(&foto_id);
+                        // 🔑 **As duas.** O preview grande é o que a tela do
+                        // cliente e o painel usam; a miniatura é o que a grade e
+                        // a tira desenham. Gravar só o grande — que era o que
+                        // acontecia — fazia a célula de 160px carregar 640px.
+                        let _ = self
+                            .previews
+                            .save_thumbnail(&chave, &reduzir(&imagem, LADO_DA_MINIATURA));
                         if self.previews.save_preview(&chave, &imagem).is_ok() {
+                            // O cache guarda a ausência: sem esquecê-la, a foto
+                            // recém-chegada ficaria vazia até sair e voltar.
+                            self.miniaturas.esquecer(&chave);
                             // A grade guarda "ausente" para quem ainda não tinha
                             // miniatura; sem avisar, a foto recém-baixada só
                             // apareceria quando a célula saísse e voltasse.
@@ -666,8 +869,93 @@ impl Detalhe {
     }
 }
 
+/// A chave da foto do site no cache de previews.
+///
+/// 🔑 Num lugar só: eram três `format!("site:{}")` espalhados, e o dia em que um
+/// mudasse os outros continuariam procurando no lugar antigo — a grade ficaria
+/// vazia sem erro nenhum (armadilha das duas listas da mesma verdade).
+fn chave_da_miniatura(foto_id: &str) -> String {
+    format!("site:{foto_id}")
+}
+
+impl Detalhe {
+    /// Põe na memória a miniatura de cada foto visível — **uma vez por quadro**,
+    /// antes de o render começar.
+    ///
+    /// # Por que isto não está dentro da célula
+    ///
+    /// 🚨 Estava, e era o que travava a tela. `celula` e `tira` chamavam
+    /// `get_preview` + `para_gpui` por foto **a cada quadro**, e o GPUI redesenha
+    /// a cada movimento de mouse. Medido em release, 25 fotos:
+    /// **51 ms por quadro**, contra 16,7 ms de orçamento — e sem melhorar nunca,
+    /// porque a memória do `PreviewManager` guarda 15 imagens e a varredura era
+    /// de 25: um LRU menor que a varredura acerta zero.
+    ///
+    /// # A miniatura que faltava
+    ///
+    /// As fotos da sessão só tinham o preview **grande** (640px) gravado:
+    /// `Recado::Miniatura` chamava `save_preview`, nunca `save_thumbnail`. Então
+    /// a célula de 160px carregava 0,3 MP para desenhar 0,02 MP, e o
+    /// `get_thumbnail` da tira nunca acertava.
+    ///
+    /// Aqui a miniatura é gerada na primeira vez que a foto aparece e **fica
+    /// gravada**: conserta também as que já estão no cache, sem precisar
+    /// ressincronizar a sessão.
+    fn preparar_miniaturas(&mut self) {
+        let visiveis = self.acervo.total_visivel();
+        if visiveis == 0 {
+            return;
+        }
+        // A grade da sessão não é virtualizada — desenha o recorte inteiro —,
+        // então o cache precisa caber o recorte inteiro.
+        self.miniaturas.ajustar_capacidade(
+            NonZeroUsize::new(visiveis.max(MINIATURAS_GUARDADAS)).expect("visiveis > 0"),
+        );
+
+        let chaves: Vec<String> = self
+            .acervo
+            .visiveis()
+            .map(|foto| chave_da_miniatura(&foto.id))
+            .collect();
+
+        for chave in chaves {
+            if self.miniaturas.espiar(&chave).is_some() {
+                continue;
+            }
+            // Sem miniatura gravada: reduz o preview grande uma vez e a grava.
+            // Da segunda abertura em diante o caminho é só o `get_thumbnail`.
+            if self.previews.get_thumbnail(&chave).is_none() {
+                if let Some(grande) = self.previews.get_preview(&chave) {
+                    let pequena = reduzir(&grande, LADO_DA_MINIATURA);
+                    let _ = self.previews.save_thumbnail(&chave, &pequena);
+                }
+            }
+            self.miniaturas.obter(&self.previews, &chave);
+        }
+    }
+}
+
+/// Reduz sem ampliar — a mesma regra do `thumbnail_generator`.
+///
+/// ⚠️ **Ampliar não acrescenta detalhe**: espalha o que existe e faz toda a
+/// cadeia trabalhar sobre pixels que a foto não tem. Uma foto que já é menor que
+/// o lado pedido volta como está.
+fn reduzir(imagem: &image::DynamicImage, lado: u32) -> image::DynamicImage {
+    use image::GenericImageView;
+    let (largura, altura) = imagem.dimensions();
+    if largura <= lado && altura <= lado {
+        return imagem.clone();
+    }
+    imagem.thumbnail(lado, lado)
+}
+
 impl Render for Detalhe {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // 🚨 **Antes de montar qualquer célula.** É o que tira o decode de dentro
+        // do quadro; `celula` e `tira` daqui para baixo só leem da memória.
+        self.preparar_miniaturas();
+        self.seguir_o_foco();
+
         div()
             .flex()
             .flex_col()
@@ -1049,13 +1337,25 @@ impl Detalhe {
                 .into_any_element();
         }
 
+        // 🚨 **`overflow_y_scroll`, e não `overflow_hidden`.** Com o hidden a
+        // grade desenhava as linhas que não cabiam e as **escondia**: a última
+        // fileira aparecia cortada ao meio, sem barra, e o trackpad não rolava
+        // nada — não havia o que rolar, do ponto de vista do GPUI. Uma sessão de
+        // 25 fotos já perdia a quarta linha.
+        //
+        // 🔑 O `.id()` não é enfeite: rolar é estado (a posição), e no GPUI só
+        // elemento com id tem estado. Sem ele o `overflow_y_scroll` compila e
+        // não rola.
         div()
+            .id("grade-da-sessao")
+            .track_scroll(&self.rolagem_da_grade)
             .flex_1()
             .min_w(px(0.))
             .flex()
             .flex_wrap()
+            .content_start()
             .gap(px(8.))
-            .overflow_hidden()
+            .overflow_y_scroll()
             .children(
                 self.acervo
                     .visiveis()
@@ -1075,12 +1375,12 @@ impl Detalhe {
         let marcada = self.selecao.tem(posicao);
         let em_foco = self.selecao.foco() == Some(posicao);
         let lado = self.zoom;
-        let chave = format!("site:{}", foto.id);
-        let miniatura = self
-            .previews
-            .get_preview(&chave)
-            .or_else(|| self.previews.get_thumbnail(&chave))
-            .map(crate::imagem::para_gpui);
+        // 🔑 **Só lê.** Quem carrega é `preparar_miniaturas`, uma vez por quadro,
+        // antes de o render começar — ver o campo `miniaturas`.
+        let miniatura = match self.miniaturas.espiar(&chave_da_miniatura(&foto.id)) {
+            Some(Miniatura::Pronta(imagem)) => Some(imagem),
+            _ => None,
+        };
 
         div()
             .id(SharedString::from(format!("sessao-tile-{}", foto.id)))
@@ -1314,67 +1614,385 @@ impl Detalhe {
         )
     }
 
-    /// A tira e a legenda das teclas — o rodapé da tela do site.
+    /// A tira do rodapé — **o porte da `TiraDaBiblioteca` do site**.
+    ///
+    /// Era um quadrado de 56px com borda e nada dentro. O site
+    /// (`tira-da-biblioteca.tsx`) tem outra coisa, e o dono pediu as duas
+    /// iguais: a mesma tira aparece nas duas telas no mesmo dia de trabalho, e
+    /// duas gramáticas para o mesmo gesto custam mais que qualquer das duas.
+    ///
+    /// O que veio de lá, e por quê:
+    ///
+    /// | | |
+    /// |---|---|
+    /// | miniatura em **paisagem** (`lado × 1,35`), recortada | um quadrado corta a foto no meio; a proporção da tira é a da foto |
+    /// | **puxar a barra é o zoom** | pedido do dono, 5/set: a única dimensão livre da tira é a altura, e um controle separado seria um segundo jeito de dizer o mesmo |
+    /// | nota, balcão e "comprada" **sobre** a foto | numa miniatura de 70px não há rodapé onde caibam. É a exceção consciente à regra 1 de [`crate::selos`] — lá o assunto é a célula da grade, que tem rodapé |
+    /// | contador, teclas e as setas ‹ › | a tira é onde se anda, e andar sem mouse tem de estar escrito onde o gesto acontece |
+    /// | sombras nas pontas | é o que diz que há mais foto fora da vista; sem elas a tira parece terminar na borda |
+    ///
+    /// ⚠️ **A roda vertical rola a tira.** Trackpad e mouse de roda produzem
+    /// `deltaY` sobre uma faixa horizontal, e sem isto o gesto natural não faz
+    /// nada — foi o primeiro relato do dono sobre esta tela.
     fn tira(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let total = self.acervo.total_visivel();
         let atual = self.selecao.foco().map(|i| i + 1).unwrap_or(0);
+        let lado = altura_da_tira::lado_da_miniatura(self.altura_da_tira);
+        let largura = lado * altura_da_tira::PROPORCAO;
+
+        // As pontas: só há sombra onde ainda há foto fora da vista.
+        let deslocamento = -self.rolagem_da_tira.offset().x;
+        let maximo = self.rolagem_da_tira.max_offset().width;
+        let tem_antes = deslocamento > px(4.);
+        let tem_depois = maximo - deslocamento > px(4.);
 
         div()
             .flex()
             .flex_col()
-            .gap(px(4.))
-            .pt(px(6.))
-            .border_t_1()
-            .border_color(cx.theme().border)
+            .flex_none()
+            .child(self.puxador(cx))
             .child(
                 div()
+                    .flex()
+                    .items_center()
+                    .gap(px(6.))
+                    .px(px(10.))
+                    .pt(px(3.))
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child(SharedString::from(format!(
-                        "{atual} / {total} · ←→ andam · 1–5 nota · P levada no balcão · \
-                         Ctrl ou Shift no clique marcam várias · Ctrl+A marca tudo, \
-                         Ctrl+D desmarca"
-                    ))),
+                    .child(SharedString::from(if atual > 0 {
+                        format!("{atual} / {total}")
+                    } else {
+                        format!("{total} foto(s)")
+                    }))
+                    .child(tecla("←", cx))
+                    .child(tecla("→", cx))
+                    .child("andam ·")
+                    .child(tecla("↑", cx))
+                    .child(tecla("↓", cx))
+                    .child("mudam de fileira ·")
+                    .child(tecla("1", cx))
+                    .child("–")
+                    .child(tecla("5", cx))
+                    .child("nota ·")
+                    .child(tecla("P", cx))
+                    .child("levada no balcão ·")
+                    .child(tecla("Ctrl", cx))
+                    .child("ou")
+                    .child(tecla("Shift", cx))
+                    .child("no clique marcam várias ·")
+                    .child(tecla("Ctrl+A", cx))
+                    .child("marca tudo,")
+                    .child(tecla("Ctrl+D", cx))
+                    .child("desmarca")
+                    // As setas ficam na ponta direita, como no site.
+                    .child(
+                        div()
+                            .ml_auto()
+                            .flex()
+                            .gap(px(2.))
+                            .child(
+                                Button::new("tira-anterior")
+                                    .label("‹")
+                                    .xsmall()
+                                    .ghost()
+                                    .disabled(total == 0)
+                                    .on_click(cx.listener(|tela, _ev, _w, cx| tela.andar(-1, cx))),
+                            )
+                            .child(
+                                Button::new("tira-proxima")
+                                    .label("›")
+                                    .xsmall()
+                                    .ghost()
+                                    .disabled(total == 0)
+                                    .on_click(cx.listener(|tela, _ev, _w, cx| tela.andar(1, cx))),
+                            ),
+                    ),
             )
             .child(
-                div().flex().gap(px(4.)).overflow_hidden().children(
-                    self.acervo
-                        .visiveis()
-                        .enumerate()
-                        .map(|(posicao, foto)| {
-                            let chave = format!("site:{}", foto.id);
-                            let miniatura = self
-                                .previews
-                                .get_thumbnail(&chave)
-                                .or_else(|| self.previews.get_preview(&chave))
-                                .map(crate::imagem::para_gpui);
-                            div()
-                                .id(SharedString::from(format!("tira-{}", foto.id)))
-                                .w(px(56.))
-                                .h(px(56.))
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .rounded(cx.theme().radius)
-                                .cursor_pointer()
-                                .border_1()
-                                .border_color(if self.selecao.foco() == Some(posicao) {
-                                    cx.theme().primary
-                                } else {
-                                    cx.theme().border
-                                })
-                                .bg(cx.theme().muted)
-                                .when_some(miniatura, |celula, imagem| {
-                                    celula.child(img(imagem).h(px(54.)))
-                                })
-                                .on_click(cx.listener(move |tela, _ev, _window, cx| {
-                                    tela.clicar(posicao, Modificadores::default(), cx)
-                                }))
-                        })
-                        .collect::<Vec<_>>(),
-                ),
+                div()
+                    .relative()
+                    .flex_none()
+                    .child(
+                        div()
+                            .id("tira-da-sessao")
+                            .track_scroll(&self.rolagem_da_tira)
+                            .flex()
+                            .items_center()
+                            .gap(px(6.))
+                            .px(px(10.))
+                            .pb(px(6.))
+                            .h(px(lado + 8.0))
+                            .overflow_x_scroll()
+                            // 🔑 A roda vertical rola na horizontal: é o gesto
+                            // que a mão faz sobre uma faixa, e o mesmo que o
+                            // site escuta com `passive: false`.
+                            .on_scroll_wheel(cx.listener(
+                                move |tela, evento: &gpui::ScrollWheelEvent, window, cx| {
+                                    let delta = evento.delta.pixel_delta(window.line_height());
+                                    if delta.y.abs() <= delta.x.abs() {
+                                        return;
+                                    }
+                                    let atual = tela.rolagem_da_tira.offset();
+                                    tela.rolagem_da_tira
+                                        .set_offset(gpui::point(atual.x + delta.y, atual.y));
+                                    cx.notify();
+                                },
+                            ))
+                            .children(
+                                self.acervo
+                                    .visiveis()
+                                    .enumerate()
+                                    .map(|(posicao, foto)| {
+                                        self.miniatura_da_tira(posicao, foto, lado, largura, cx)
+                                    })
+                                    .collect::<Vec<_>>(),
+                            ),
+                    )
+                    .when(tem_antes, |moldura| moldura.child(sombra(true, cx)))
+                    .when(tem_depois, |moldura| moldura.child(sombra(false, cx))),
             )
     }
+
+    /// Uma miniatura da tira, com os selos que o site desenha.
+    fn miniatura_da_tira(
+        &self,
+        posicao: usize,
+        foto: &acervo::Foto,
+        lado: f32,
+        largura: f32,
+        cx: &mut Context<Self>,
+    ) -> gpui::AnyElement {
+        let em_foco = self.selecao.foco() == Some(posicao);
+        let marcada = self.selecao.tem(posicao);
+        let miniatura = match self.miniaturas.espiar(&chave_da_miniatura(&foto.id)) {
+            Some(Miniatura::Pronta(imagem)) => Some(imagem),
+            _ => None,
+        };
+        let nota = foto.nota.unwrap_or(0).min(5) as usize;
+        let levada = foto.estado == acervo::Estado::LevadaNoBalcao && !foto.apagada;
+        let comprada = !foto.editavel() && !foto.apagada;
+
+        div()
+            .id(SharedString::from(format!("tira-{}", foto.id)))
+            .relative()
+            .w(px(largura))
+            .h(px(lado))
+            .flex_none()
+            .overflow_hidden()
+            .rounded(cx.theme().radius)
+            .bg(cx.theme().muted)
+            // 🔑 **Borda de 2px, e três estados** — como no site: cheia no foco,
+            // esmaecida na marcada, invisível no resto. Antes eram dois estados
+            // numa borda de 1px, e a tira ficava igual com uma ou dez marcadas.
+            .border_2()
+            .border_color(if em_foco {
+                cx.theme().primary
+            } else if marcada {
+                cx.theme().primary.opacity(0.5)
+            } else {
+                gpui::transparent_black()
+            })
+            .cursor_pointer()
+            .when_some(miniatura, |celula, imagem| {
+                celula.child(
+                    img(imagem)
+                        .size_full()
+                        // `Cover` e não `Contain`: a miniatura preenche o
+                        // retângulo, como o `object-cover` do site. Com
+                        // `Contain` sobrariam duas tarjas do fundo em cada foto.
+                        .object_fit(gpui::ObjectFit::Cover)
+                        .when(foto.apagada, |imagem| imagem.opacity(0.4)),
+                )
+            })
+            .when(nota > 0, |celula| {
+                celula.child(
+                    div()
+                        .absolute()
+                        .top(px(1.))
+                        .left(px(3.))
+                        .text_xs()
+                        .text_color(cores::nota())
+                        .child(SharedString::from("★".repeat(nota))),
+                )
+            })
+            .when(levada, |celula| {
+                celula.child(
+                    div()
+                        .absolute()
+                        .top(px(3.))
+                        .right(px(3.))
+                        .size(px(7.))
+                        .rounded_full()
+                        .bg(cores::quente()),
+                )
+            })
+            .when(comprada, |celula| {
+                celula.child(
+                    div()
+                        .absolute()
+                        .bottom_0()
+                        .left_0()
+                        .right_0()
+                        .py(px(1.))
+                        .text_center()
+                        .text_xs()
+                        .bg(gpui::black().opacity(0.7))
+                        .text_color(cx.theme().foreground)
+                        .child("comprada"),
+                )
+            })
+            .on_click(
+                cx.listener(move |tela, evento: &gpui::ClickEvent, _window, cx| {
+                    if evento.click_count() >= 2 {
+                        tela.selecao
+                            .clicar(posicao, false, Modificadores::default());
+                        tela.revelar_a_do_foco(cx);
+                        return;
+                    }
+                    let m = evento.modifiers();
+                    tela.clicar(
+                        posicao,
+                        Modificadores {
+                            aditivo: m.secondary(),
+                            faixa: m.shift,
+                        },
+                        cx,
+                    )
+                }),
+            )
+            .into_any_element()
+    }
+
+    /// A barra que arrasta a altura da tira — **e a altura é o zoom**.
+    ///
+    /// 🚨 **O arrasto é escutado na janela, não no `div`.** Uma barra de 6px é
+    /// menor que o primeiro movimento rápido do ponteiro: com `on_mouse_move` do
+    /// próprio elemento, o cursor sai dela e o arrasto morre no meio — o defeito
+    /// que faz o operador achar que "não pega". É a mesma razão do `canvas` do
+    /// enquadramento da Revelação, e o mesmo remédio que o
+    /// `setPointerCapture` dá no site.
+    fn puxador(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let ouvinte = cx.entity();
+        let arrastando = self.arrasto_da_tira.is_some();
+
+        div()
+            .id("puxador-da-tira")
+            .relative()
+            .h(px(6.))
+            .flex()
+            .flex_none()
+            .items_center()
+            .justify_center()
+            .border_t_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().muted)
+            .cursor(gpui::CursorStyle::ResizeUpDown)
+            .child(
+                div()
+                    .h(px(2.))
+                    .w(px(32.))
+                    .rounded_full()
+                    .bg(cx.theme().border),
+            )
+            .on_mouse_down(
+                gpui::MouseButton::Left,
+                cx.listener(|tela, evento: &gpui::MouseDownEvent, _w, cx| {
+                    tela.arrasto_da_tira = Some((evento.position.y, tela.altura_da_tira));
+                    cx.notify();
+                }),
+            )
+            .child(canvas(
+                |_bounds, _window, _cx| {},
+                move |_bounds, _prepaint, window, _cx| {
+                    if !arrastando {
+                        return;
+                    }
+                    window.on_mouse_event({
+                        let esta = ouvinte.clone();
+                        move |evento: &gpui::MouseMoveEvent, fase, _window, cx| {
+                            if !fase.bubble() {
+                                return;
+                            }
+                            esta.update(cx, |tela, cx| {
+                                let Some((y, altura)) = tela.arrasto_da_tira else {
+                                    return;
+                                };
+                                // Para cima é maior: a tira cresce contra o miolo.
+                                let nova = altura_da_tira::limitar(
+                                    altura + f32::from(y - evento.position.y),
+                                );
+                                if nova != tela.altura_da_tira {
+                                    tela.altura_da_tira = nova;
+                                    cx.notify();
+                                }
+                            });
+                        }
+                    });
+                    window.on_mouse_event({
+                        let esta = ouvinte.clone();
+                        move |_evento: &gpui::MouseUpEvent, fase, _window, cx| {
+                            if !fase.bubble() {
+                                return;
+                            }
+                            esta.update(cx, |tela, cx| {
+                                if tela.arrasto_da_tira.take().is_some() {
+                                    altura_da_tira::guardar("sessao", tela.altura_da_tira);
+                                    cx.notify();
+                                }
+                            });
+                        }
+                    });
+                },
+            ))
+    }
+}
+
+/// Uma tecla escrita, como os `<kbd>` do site.
+fn tecla(rotulo: &str, cx: &App) -> impl IntoElement {
+    div()
+        .px(px(3.))
+        .rounded(cx.theme().radius)
+        .border_1()
+        .border_color(cx.theme().border)
+        .child(SharedString::from(rotulo.to_string()))
+}
+
+/// A sombra de uma ponta: diz que há foto fora da vista.
+fn sombra(esquerda: bool, cx: &App) -> impl IntoElement {
+    let fundo = cx.theme().background;
+    div()
+        .absolute()
+        .top_0()
+        .bottom_0()
+        .w(px(28.))
+        .when(esquerda, |lado| lado.left_0())
+        .when(!esquerda, |lado| lado.right_0())
+        .bg(gpui::linear_gradient(
+            if esquerda { 90.0 } else { 270.0 },
+            gpui::linear_color_stop(fundo, 0.0),
+            gpui::linear_color_stop(fundo.opacity(0.0), 1.0),
+        ))
+}
+
+/// Põe `novas` na ordem em que `antigas` já estavam.
+///
+/// 🚨 **A ordem da tela é da tela, não da resposta do servidor.** Numa triagem a
+/// grade é um mapa que a mão memoriza: "a terceira da segunda fileira". O
+/// servidor não promete ordem estável entre duas leituras, e dar nota fazia a
+/// foto trocar de lugar — a próxima seta ia para outra foto, e a nota seguinte
+/// caía na errada.
+///
+/// Quem não estava antes vai para o fim, na ordem em que veio: foto nova entra
+/// no fim da grade, que é onde se espera encontrá-la.
+fn ordenar_como_antes(novas: &mut [FotoDaGaleria], antigas: &[FotoDaGaleria]) {
+    use std::collections::HashMap;
+    let posicao: HashMap<&str, usize> = antigas
+        .iter()
+        .enumerate()
+        .map(|(i, f)| (f.id.as_str(), i))
+        .collect();
+    novas.sort_by_key(|f| posicao.get(f.id.as_str()).copied().unwrap_or(usize::MAX));
 }
 
 /// A foto do site na linguagem do core.
@@ -1466,6 +2084,9 @@ mod testes {
                     Detalhe::nova(publicador, Arc::new(SeletorDeMentira::default()), previews);
                 tela.definir_sessao(Sessao {
                     access_token: "tok".into(),
+                    refresh_token: "ref".into(),
+                    access_vence_em: i64::MAX,
+                    refresh_vence_em: i64::MAX,
                 });
                 tela
             }
