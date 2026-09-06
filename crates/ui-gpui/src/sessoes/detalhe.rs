@@ -25,7 +25,6 @@
 //! estúdio subiu aparece aqui, e a que a retenção apagou aparece como apagada —
 //! coisas que o catálogo local não tem como saber.
 
-use std::collections::HashMap;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::Duration;
@@ -36,9 +35,10 @@ use biblioteca_core::selecao::{Modificadores, Selecao};
 use domain::services::pos_venda::{
     EstadoDaFotoNoSite, EstadoNoBalcao, FotoDaGaleria, GaleriaAberta, LinkDeAcesso, Sessao,
 };
-use gpui::{div, prelude::*, px, Context, EventEmitter, RenderImage, SharedString, Task, Window};
+use gpui::{div, prelude::*, px, Context, EventEmitter, SharedString, Task, Window};
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::{ActiveTheme, Disableable, Selectable, Sizable};
+use infrastructure::cache::preview_manager::PreviewManager;
 
 use super::arquivos::SeletorDeFotos;
 use crate::pos_venda::porta::{Publicador, Recado};
@@ -55,6 +55,8 @@ const INTERVALO_DE_COLHEITA: Duration = Duration::from_millis(100);
 pub enum Pedido {
     /// Voltar para a lista de sessões.
     Voltar,
+    /// A miniatura de uma foto do site chegou ao cache, sob esta chave.
+    MiniaturaPronta(String),
     /// A sessão abriu (ou foi relida): estas são as fotos que já estão no site.
     ///
     /// 🔑 Quem as põe na grade é a raiz — a grade é uma só, e nela as do site
@@ -72,10 +74,17 @@ pub struct Detalhe {
     sessao: Option<Sessao>,
     galeria_id: Option<String>,
     aberta: Option<GaleriaAberta>,
-    /// As miniaturas já decodificadas, por id da foto no site.
-    miniaturas: HashMap<String, Arc<RenderImage>>,
+    /// O cache de previews do app — o mesmo que a grade lê.
+    ///
+    /// 🔑 **A miniatura que vem do site é gravada nele**, sob a chave
+    /// `site:<id>`, que é o id com que a foto entra na grade. Sem isso a grade
+    /// desenharia célula vazia para tudo o que já subiu: o nome apareceria, a
+    /// foto não.
+    previews: Arc<PreviewManager>,
     /// De quem já foi pedida miniatura, para não pedir duas vezes.
     pedidas: std::collections::HashSet<String>,
+    /// Quantas miniaturas ainda estão a caminho.
+    baixando: usize,
     /// Quem abre a janela **do sistema** para escolher as fotos.
     seletor: Arc<dyn SeletorDeFotos>,
     /// Por onde os caminhos escolhidos voltam.
@@ -106,7 +115,11 @@ pub struct Detalhe {
 }
 
 impl Detalhe {
-    pub fn nova(publicador: Arc<dyn Publicador>, seletor: Arc<dyn SeletorDeFotos>) -> Self {
+    pub fn nova(
+        publicador: Arc<dyn Publicador>,
+        seletor: Arc<dyn SeletorDeFotos>,
+        previews: Arc<PreviewManager>,
+    ) -> Self {
         Self {
             publicador,
             seletor,
@@ -118,8 +131,9 @@ impl Detalhe {
             sessao: None,
             galeria_id: None,
             aberta: None,
-            miniaturas: HashMap::new(),
+            previews,
             pedidas: std::collections::HashSet::new(),
+            baixando: 0,
             enviando: 0,
             enviadas: 0,
             link: None,
@@ -146,8 +160,8 @@ impl Detalhe {
         // galeria na tela desta seria o pior tipo de erro — o que parece certo.
         self.galeria_id = Some(galeria_id.clone());
         self.aberta = None;
-        self.miniaturas.clear();
         self.pedidas.clear();
+        self.baixando = 0;
         self.link = None;
         self.enviadas = 0;
         self.erro = None;
@@ -371,6 +385,7 @@ impl Detalhe {
 
         for id in faltam {
             self.pedidas.insert(id.clone());
+            self.baixando += 1;
             self.publicador
                 .miniatura(sessao.clone(), id, self.recados.0.clone());
         }
@@ -425,11 +440,17 @@ impl Detalhe {
                     abriu = true;
                 }
                 Recado::Miniatura { foto_id, bytes } => {
+                    self.baixando = self.baixando.saturating_sub(1);
                     // Miniatura ilegível não derruba a grade: a célula fica sem
                     // imagem, com o nome do arquivo, que é melhor que nada.
                     if let Ok(imagem) = image::load_from_memory(&bytes) {
-                        self.miniaturas
-                            .insert(foto_id, crate::imagem::para_gpui(imagem));
+                        let chave = format!("site:{foto_id}");
+                        if self.previews.save_preview(&chave, &imagem).is_ok() {
+                            // A grade guarda "ausente" para quem ainda não tinha
+                            // miniatura; sem avisar, a foto recém-baixada só
+                            // apareceria quando a célula saísse e voltasse.
+                            cx.emit(Pedido::MiniaturaPronta(chave));
+                        }
                     }
                 }
                 Recado::Sincronizou => {
@@ -466,8 +487,10 @@ impl Detalhe {
         if mudou {
             cx.notify();
         }
-        let continua =
-            self.carregando || self.enviando > 0 || self.pedidas.len() > self.miniaturas.len();
+        // 🔑 O laço para quando não há mais resposta a esperar. As miniaturas
+        // não entram na conta: elas chegam pelo mesmo canal, e o `abriu` religa
+        // o laço quando um lote novo é pedido.
+        let continua = self.carregando || self.enviando > 0 || self.baixando > 0;
         if !continua {
             self.colhendo = false;
         }
@@ -481,7 +504,12 @@ impl Render for Detalhe {
             .flex()
             .flex_col()
             .gap(px(10.))
-            .size_full()
+            // 🚨 **Largura cheia, altura do conteúdo.** Com `size_full` este
+            // bloco comia os 100% da coluna e a grade do ensaio, logo abaixo,
+            // ficava com zero de altura — a sessão abria parecendo vazia mesmo
+            // com 25 fotos no site. Ele é o cabeçalho da tela, não a tela.
+            .w_full()
+            .flex_shrink_0()
             .p(px(12.))
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
@@ -524,12 +552,6 @@ impl Detalhe {
             .pb(px(8.))
             .border_b_1()
             .border_color(cx.theme().border)
-            .child(
-                Button::new("detalhe-voltar")
-                    .label("← Sessões")
-                    .xsmall()
-                    .on_click(cx.listener(|_tela, _ev, _window, cx| cx.emit(Pedido::Voltar))),
-            )
             .child(
                 div()
                     .flex()
@@ -797,7 +819,11 @@ mod testes {
         let janela = cx.add_window({
             let publicador = publicador.clone();
             move |_window, _cx| {
-                let mut tela = Detalhe::nova(publicador, Arc::new(SeletorDeMentira::default()));
+                let dir = tempfile::TempDir::new().expect("diretório temporário");
+                let previews = Arc::new(PreviewManager::new_with_path(dir.path().to_path_buf()));
+                std::mem::forget(dir);
+                let mut tela =
+                    Detalhe::nova(publicador, Arc::new(SeletorDeMentira::default()), previews);
                 tela.definir_sessao(Sessao {
                     access_token: "tok".into(),
                 });

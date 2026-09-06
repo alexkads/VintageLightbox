@@ -161,11 +161,13 @@ fn abrir_o_estudio(cx: &mut TestAppContext, fotos: Vec<PhotoViewModel>) -> Estud
     cx.run_until_parked();
 
     janela
-        .update(cx, |app, window, cx| {
+        .update(cx, |app, _window, cx| {
             assert!(app.pode_trabalhar(), "com sessão aberta, o app trabalha");
-            // Os passos que acontecem na grade voltam para ela; os testes daqui
-            // exercitam o trabalho, e não a navegação.
-            app.voltar_para_biblioteca(window, cx);
+            // 🔑 **A tela continua sendo a do ensaio**: a grade dele já está ali,
+            // logo abaixo do cabeçalho. Foi o equívoco que custou mais para eu
+            // entender — a escolha com o cliente não acontece em outra aba.
+            assert_eq!(app.tela(), Tela::Sessao);
+            let _ = cx;
         })
         .expect("a janela deve estar aberta");
 
@@ -741,6 +743,31 @@ fn importar_dentro_da_sessao_poe_a_foto_nela(cx: &mut TestAppContext) {
                 app.importacao.read(cx).estado.opcoes.sessao_id.as_deref(),
                 Some("g1"),
                 "o lote entra no ensaio aberto"
+            );
+        })
+        .expect("a janela deve estar aberta");
+}
+
+/// 🚨 **A grade do ensaio tem altura.**
+///
+/// O defeito que o dono viu na tela: a sessão abria com *"25 no site"* escrito e
+/// **nada** embaixo. Não era grade vazia — era grade sem altura: o cabeçalho da
+/// sessão usava `size_full` e comia os 100% da coluna.
+///
+/// Um teste de leiaute não pega isso, mas este pega o que importa: as fotos do
+/// ensaio **estão na grade**, e é lá que se revela e se escolhe.
+#[gpui::test]
+fn a_sessao_aberta_mostra_as_fotos_na_grade(cx: &mut TestAppContext) {
+    let estudio = abrir_o_estudio(cx, vec![foto("DSC_001.NEF"), foto("DSC_002.NEF")]);
+
+    estudio
+        .janela
+        .update(cx, |app, _window, cx| {
+            assert_eq!(app.tela(), Tela::Sessao, "o estúdio entrou no ensaio");
+            assert_eq!(
+                app.biblioteca.read(cx).quantas_visiveis(),
+                2,
+                "a grade do ensaio mostra as fotos dele"
             );
         })
         .expect("a janela deve estar aberta");

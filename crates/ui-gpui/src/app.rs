@@ -346,6 +346,7 @@ impl Aplicativo {
         let previews_para_importar = previews.clone();
         let previews_para_imprimir = previews.clone();
         let previews_do_cliente = previews.clone();
+        let previews_do_detalhe = previews.clone();
         let previews_das_configuracoes = previews.clone();
         // O mesmo seletor nativo da importação: escolher pasta é interação com
         // o sistema, e dois seletores seriam duas janelas do SO para a mesma
@@ -447,7 +448,13 @@ impl Aplicativo {
             raiz.entrar_na_sessao(evento.0.clone(), cx);
         });
 
-        let detalhe = cx.new(|_| Detalhe::nova(publicador_do_detalhe, portas.seletor_de_fotos));
+        let detalhe = cx.new(|_| {
+            Detalhe::nova(
+                publicador_do_detalhe,
+                portas.seletor_de_fotos,
+                previews_do_detalhe,
+            )
+        });
         // 🔑 `subscribe_in`, e não `subscribe`: revelar precisa da janela — os
         // 42 sliders são espalhados com ela. Sem isso o pedido teria de ficar
         // guardado até o próximo quadro, e "clique que só responde no quadro
@@ -642,6 +649,11 @@ impl Aplicativo {
             }
             DetalhePedido::Revelar { foto_id, arquivo } => {
                 self.revelar_do_site(foto_id.clone(), arquivo.clone(), window, cx);
+            }
+            DetalhePedido::MiniaturaPronta(chave) => {
+                let chave = chave.clone();
+                self.biblioteca
+                    .update(cx, |tela, cx| tela.esquecer_miniatura(&chave, cx));
             }
             DetalhePedido::FotosDoSite(fotos) => {
                 let sessao = self.sessao_aberta.clone();
@@ -946,10 +958,21 @@ impl Aplicativo {
     /// olha a Biblioteca não tem como saber que a última coisa que fez não foi
     /// guardada. É a terceira porta — as outras duas são a própria espera e a
     /// troca de foto.
+    /// Volta para a grade — que é a do ensaio quando há um.
+    ///
+    /// 🔑 **São quatro telas** (decisão do dono, 6/set/2026): a lista de
+    /// sessões, a sessão (onde se escolhe com o cliente e se negocia), a
+    /// revelação e a impressão. "Biblioteca" não é uma delas: ela é a grade
+    /// **dentro** da sessão — e só existe sozinha no modo offline, onde não há
+    /// ensaio a que pertencer.
     pub fn voltar_para_biblioteca(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.revelacao
             .update(cx, |tela, _cx| tela.gravar_o_que_estiver_pendente());
-        self.tela = Tela::Biblioteca;
+        self.tela = if self.sessao_aberta.is_some() {
+            Tela::Sessao
+        } else {
+            Tela::Biblioteca
+        };
         window.focus(&self.foco);
         cx.notify();
     }
@@ -1395,7 +1418,11 @@ impl Aplicativo {
         cx: &mut Context<Self>,
         acao: impl FnOnce(&mut Biblioteca, &mut Context<Biblioteca>),
     ) {
-        if self.tela != Tela::Biblioteca {
+        // 🚨 **A grade está em duas telas, e é a mesma.** Logado, ela vive
+        // dentro do ensaio (`Tela::Sessao`); offline, é a Biblioteca solta. As
+        // treze teclas de triagem valem nas duas, porque nas duas é ela que está
+        // na frente de quem aperta.
+        if !matches!(self.tela, Tela::Biblioteca | Tela::Sessao) {
             return;
         }
         self.biblioteca.update(cx, |tela, cx| acao(tela, cx));
@@ -1537,21 +1564,24 @@ impl Aplicativo {
                         )
                     })
             })
-            .child(
-                Button::new("nav-biblioteca")
-                    .label(if self.preso_a_sessao() {
-                        "Escolher com o cliente"
-                    } else {
-                        "Biblioteca"
-                    })
-                    .xsmall()
-                    .when(self.tela == Tela::Biblioteca, |b| b.primary())
-                    .selected(self.tela == Tela::Biblioteca)
-                    .disabled(!trabalhando)
-                    .on_click(cx.listener(|este, _ev, window, cx| {
-                        este.voltar_para_biblioteca(window, cx);
-                    })),
-            )
+            // 🚨 **Dentro de um ensaio não há aba de biblioteca**, e é o ponto
+            // que custou mais para eu entender: a grade do ensaio já está na
+            // tela, logo abaixo do cabeçalho. Uma aba "Escolher com o cliente"
+            // ao lado dizia que a escolha acontece em outro lugar — que é
+            // exatamente o equívoco.
+            .when(!self.preso_a_sessao(), |barra| {
+                barra.child(
+                    Button::new("nav-biblioteca")
+                        .label("Biblioteca")
+                        .xsmall()
+                        .when(self.tela == Tela::Biblioteca, |b| b.primary())
+                        .selected(self.tela == Tela::Biblioteca)
+                        .disabled(!trabalhando)
+                        .on_click(cx.listener(|este, _ev, window, cx| {
+                            este.voltar_para_biblioteca(window, cx);
+                        })),
+                )
+            })
             .child(
                 Button::new("nav-revelacao")
                     .label("Revelação")

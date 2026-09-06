@@ -769,6 +769,16 @@ impl Biblioteca {
             .collect()
     }
 
+    /// Esquece a miniatura de uma foto: a próxima pintura relê do cache.
+    ///
+    /// 🚨 O cache guarda **"ausente"** para quem ainda não tinha miniatura — é o
+    /// que impede pedir de novo a cada quadro. Sem esquecer, a foto que acabou
+    /// de chegar do site só apareceria quando a célula saísse e voltasse à tela.
+    pub fn esquecer_miniatura(&mut self, chave: &str, cx: &mut Context<Self>) {
+        self.cache.lock().expect("o cache").esquecer(chave);
+        cx.notify();
+    }
+
     /// O acervo inteiro que esta tela conhece, sem filtro nenhum.
     ///
     /// É o que a raiz precisa para **recompor** a grade: as locais que já estão
