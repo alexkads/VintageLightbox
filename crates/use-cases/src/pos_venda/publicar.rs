@@ -271,6 +271,35 @@ mod tests {
             self.avisadas.lock().unwrap().push(galeria_id.to_string());
             Ok(())
         }
+
+        // Os quatro do balcão não entram na publicação: ela cria a galeria e
+        // sobe as fotos, e o que vem depois — negociar, remover, gerar link —
+        // é gesto de outra tela. `unreachable!` em vez de `Ok(())` para que um
+        // caso de uso que passe a usá-los acuse aqui, e não em produção.
+        async fn galerias(
+            &self,
+            _: &Sessao,
+        ) -> DomainResult<Vec<domain::services::pos_venda::GaleriaDoPainel>> {
+            unreachable!("a publicação cria a galeria; não lista as que existem")
+        }
+        async fn mudar_foto(
+            &self,
+            _: &Sessao,
+            _: &str,
+            _: &domain::services::pos_venda::MudancaDaFoto,
+        ) -> DomainResult<()> {
+            unreachable!("a publicação sobe a foto já com o estado; não a muda depois")
+        }
+        async fn remover_foto(&self, _: &Sessao, _: &str) -> DomainResult<()> {
+            unreachable!("a publicação não remove nada")
+        }
+        async fn link_da_galeria(
+            &self,
+            _: &Sessao,
+            _: &str,
+        ) -> DomainResult<domain::services::pos_venda::LinkDeAcesso> {
+            unreachable!("o link é pedido pela tela, depois de publicar")
+        }
     }
 
     fn foto(caminho: &str, comprada: bool) -> Photo {

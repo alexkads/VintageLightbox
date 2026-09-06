@@ -2,9 +2,29 @@
 //!
 //! É o vão que o projeto existe para fechar ([`docs/00-OBJETIVO.md`]): a decisão
 //! que o fotógrafo toma na triagem — esta foi levada, esta ficou — vira galeria
-//! no site sem passo manual. A porta sabe **quatro coisas** e nada mais: entrar,
-//! listar o produto que dá o preço, criar a galeria do cliente, subir uma foto
-//! com o estado dela.
+//! no site sem passo manual.
+//!
+//! # O fluxo inteiro, e não só o envio
+//!
+//! Até 6/set/2026 a porta sabia quatro coisas: entrar, listar o produto que dá o
+//! preço, criar a galeria e subir uma foto. Dava para publicar — e não dava para
+//! **acompanhar** o passo seguinte do balcão, que é onde o dinheiro entra.
+//!
+//! Os quatro métodos que entraram vêm do fluxo do dono, passo a passo, e nenhum
+//! deles pediu rota nova: o backend já expunha as quatro.
+//!
+//! | Passo do fluxo | O que faltava aqui |
+//! |---|---|
+//! | classificar sobe a foto | [`PosVendaApi::galerias`] — para subir **numa galeria que já existe**, em vez de criar uma por leva |
+//! | zerar a nota tira do storage | [`PosVendaApi::remover_foto`] |
+//! | o cliente paga no balcão | [`PosVendaApi::mudar_foto`] — a negociação e o estado |
+//! | gerar o link do cliente | [`PosVendaApi::link_da_galeria`] |
+//!
+//! 🚨 **`nota: null` é recusado pelo site, e isso não é limitação: é a regra.**
+//! Foi a classificação que autorizou a foto a subir, então uma foto do acervo
+//! sem nota não existe. Zerar a nota é [`PosVendaApi::remover_foto`] — a foto sai
+//! do storage e volta a ser só local, que é o mesmo ciclo da área temporária do
+//! navegador.
 //!
 //! 🔑 **O original sobe sem marca, sempre.** É o site que gera a prévia marcada
 //! a partir dele (uma vez, no upload) e que decide, pelo `estado`, se o cliente
@@ -55,6 +75,66 @@ pub struct NovaGaleria {
 pub struct Galeria {
     pub id: String,
     pub titulo: String,
+}
+
+/// Uma galeria que **já existe**, como o painel do site a lista.
+///
+/// 🔑 Traz o contato porque é ele que identifica o cliente no balcão: duas
+/// galerias com o mesmo título e clientes diferentes são o caso comum de um
+/// estúdio, e escolher a errada manda as fotos de um cliente para outro.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GaleriaDoPainel {
+    pub id: String,
+    pub titulo: String,
+    pub email: Option<String>,
+    pub whatsapp: Option<String>,
+    pub produto_id: String,
+}
+
+/// O link que abre a galeria **sem senha**.
+///
+/// ⚠️ **Não é o endereço da galeria.** `/meus-ensaios/{id}` exige sessão, e o
+/// cliente não tem conta — ele saiu do estúdio, não do site. Este link é
+/// assinado pelo backend, cria a conta no primeiro clique e é o mesmo que vai
+/// no e-mail de "fotos prontas".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinkDeAcesso {
+    pub url: String,
+    pub validade_em_segundos: i64,
+}
+
+/// O que muda numa foto que **já está** no site.
+///
+/// 🔑 **Cada campo tem três estados, e os três importam**: `None` não mexe,
+/// `Some(None)` apaga, `Some(Some(v))` grava. É o `Option<Option<_>>` que o
+/// `PATCH` do backend fala — sem ele, "não mexer no preço" e "voltar ao preço
+/// da faixa" seriam a mesma requisição.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MudancaDaFoto {
+    /// `comprada` é recusado pelo site: ele nasce de pedido pago, nunca daqui.
+    pub estado: Option<EstadoNoBalcao>,
+    /// Quanto entrou de verdade no balcão — cortesia, desconto, site parceiro.
+    /// Decimal em texto (`"15.00"`), como o preço do produto.
+    ///
+    /// ⚠️ **Não é o preço de venda**: não muda o que a compra online cobra.
+    pub preco_negociado: Option<Option<String>>,
+    /// O porquê do `preco_negociado`, no formato que o painel lê de volta:
+    /// `"Cortesia — aniversário"`, `"TchêOfertas — cupom 123"`.
+    pub observacao_da_negociacao: Option<Option<String>>,
+    /// A nota de 1 a 5. 🚨 **`Some(None)` é recusado pelo site** — ver o topo
+    /// do módulo; tirar a nota de uma foto do acervo é removê-la.
+    pub nota: Option<Option<i16>>,
+}
+
+impl MudancaDaFoto {
+    /// Se não há nada a mudar. O site recusa um `PATCH` vazio, e mandar um
+    /// seria gastar uma ida à rede para levar um erro de volta.
+    pub fn vazia(&self) -> bool {
+        self.estado.is_none()
+            && self.preco_negociado.is_none()
+            && self.observacao_da_negociacao.is_none()
+            && self.nota.is_none()
+    }
 }
 
 /// O que o cliente decidiu no balcão — os dois estados que uma foto pode ter
@@ -123,6 +203,30 @@ pub trait PosVendaApi: Send + Sync {
     /// download e de venda e um link que entra sem senha. É o site quem
     /// escreve e manda; o app só pede.
     async fn avisar_fotos_prontas(&self, sessao: &Sessao, galeria_id: &str) -> DomainResult<()>;
+
+    /// As galerias que já existem — para subir numa delas em vez de criar uma
+    /// por leva de fotos.
+    async fn galerias(&self, sessao: &Sessao) -> DomainResult<Vec<GaleriaDoPainel>>;
+
+    /// Muda uma foto que já está no site: o estado do balcão, a negociação, a
+    /// nota. Ver [`MudancaDaFoto`] para os três estados de cada campo.
+    async fn mudar_foto(
+        &self,
+        sessao: &Sessao,
+        foto_id: &str,
+        mudanca: &MudancaDaFoto,
+    ) -> DomainResult<()>;
+
+    /// Tira a foto do storage. É o que zerar a classificação faz: ela volta a
+    /// ser só local, pronta para subir de novo quando for classificada.
+    async fn remover_foto(&self, sessao: &Sessao, foto_id: &str) -> DomainResult<()>;
+
+    /// O link que entra sem senha — o passo "gero o link para o cliente".
+    async fn link_da_galeria(
+        &self,
+        sessao: &Sessao,
+        galeria_id: &str,
+    ) -> DomainResult<LinkDeAcesso>;
 }
 
 #[cfg(test)]

@@ -21,7 +21,8 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use domain::services::pos_venda::{
-    FotoEnviada, FotoParaEnviar, Galeria, NovaGaleria, PosVendaApi, Produto, Sessao,
+    FotoEnviada, FotoParaEnviar, Galeria, GaleriaDoPainel, LinkDeAcesso, MudancaDaFoto,
+    NovaGaleria, PosVendaApi, Produto, Sessao,
 };
 use domain::{DomainError, DomainResult};
 use serde::Deserialize;
@@ -241,6 +242,125 @@ impl PosVendaApi for PosVendaApiHttp {
         }
         Ok(())
     }
+
+    async fn galerias(&self, sessao: &Sessao) -> DomainResult<Vec<GaleriaDoPainel>> {
+        let resposta = self
+            .client
+            .get(self.url("/pos-venda/galerias"))
+            .bearer_auth(&sessao.access_token)
+            .send()
+            .await
+            .map_err(rede)?;
+
+        let lista: Vec<GaleriaDoPainelDaApi> = ler(resposta).await?;
+        Ok(lista
+            .into_iter()
+            .map(|g| GaleriaDoPainel {
+                id: g.id,
+                titulo: g.titulo,
+                email: g.email,
+                whatsapp: g.whatsapp,
+                produto_id: g.produto_id,
+            })
+            .collect())
+    }
+
+    async fn mudar_foto(
+        &self,
+        sessao: &Sessao,
+        foto_id: &str,
+        mudanca: &MudancaDaFoto,
+    ) -> DomainResult<()> {
+        // O site recusa um `PATCH` sem campo nenhum, e com razão. Sair aqui é
+        // não gastar uma ida à rede para trazer esse erro de volta.
+        if mudanca.vazia() {
+            return Ok(());
+        }
+
+        let mut corpo = serde_json::Map::new();
+        if let Some(estado) = mudanca.estado {
+            corpo.insert("estado".into(), json!(estado.como_texto()));
+        }
+        // 🔑 Os três estados de cada campo sobrevivem à serialização: ausente do
+        // mapa é "não mexer", `null` no mapa é "apagar". Um `Option` comum
+        // achataria os dois em ausente.
+        if let Some(preco) = &mudanca.preco_negociado {
+            corpo.insert("preco_negociado".into(), json!(preco));
+        }
+        if let Some(observacao) = &mudanca.observacao_da_negociacao {
+            corpo.insert("observacao_da_negociacao".into(), json!(observacao));
+        }
+        if let Some(nota) = &mudanca.nota {
+            corpo.insert("nota".into(), json!(nota));
+        }
+
+        let resposta = self
+            .client
+            .patch(self.url(&format!("/pos-venda/fotos/{foto_id}")))
+            .bearer_auth(&sessao.access_token)
+            .json(&serde_json::Value::Object(corpo))
+            .send()
+            .await
+            .map_err(rede)?;
+
+        if !resposta.status().is_success() {
+            return Err(recusa(resposta).await);
+        }
+        Ok(())
+    }
+
+    async fn remover_foto(&self, sessao: &Sessao, foto_id: &str) -> DomainResult<()> {
+        let resposta = self
+            .client
+            .delete(self.url(&format!("/pos-venda/fotos/{foto_id}")))
+            .bearer_auth(&sessao.access_token)
+            .send()
+            .await
+            .map_err(rede)?;
+
+        if !resposta.status().is_success() {
+            return Err(recusa(resposta).await);
+        }
+        Ok(())
+    }
+
+    async fn link_da_galeria(
+        &self,
+        sessao: &Sessao,
+        galeria_id: &str,
+    ) -> DomainResult<LinkDeAcesso> {
+        let resposta = self
+            .client
+            .post(self.url(&format!("/pos-venda/galerias/{galeria_id}/link")))
+            .bearer_auth(&sessao.access_token)
+            .json(&json!({}))
+            .send()
+            .await
+            .map_err(rede)?;
+
+        let link: LinkDaApi = ler(resposta).await?;
+        Ok(LinkDeAcesso {
+            url: link.link,
+            validade_em_segundos: link.validade_em_segundos,
+        })
+    }
+}
+
+/// A galeria como o painel a lista. Os campos que não interessam ao balcão
+/// (totais, contagens, datas) ficam de fora: o serde ignora o que sobra.
+#[derive(Deserialize)]
+struct GaleriaDoPainelDaApi {
+    id: String,
+    titulo: String,
+    email: Option<String>,
+    whatsapp: Option<String>,
+    produto_id: String,
+}
+
+#[derive(Deserialize)]
+struct LinkDaApi {
+    link: String,
+    validade_em_segundos: i64,
 }
 
 #[cfg(test)]
@@ -410,5 +530,200 @@ mod tests {
             api.criar_galeria(&sessao, &nova("p1")).await.unwrap_err(),
             DomainError::AcessoRecusado
         ));
+    }
+
+    /// A lista de galerias traz o contato, e ignora o que o painel manda a mais.
+    ///
+    /// 🔑 O contato é o que identifica o cliente no balcão: duas galerias com o
+    /// mesmo título e clientes diferentes é o caso comum de um estúdio, e
+    /// escolher a errada manda as fotos de um cliente para outro.
+    #[tokio::test]
+    async fn galerias_lista_as_que_existem_com_o_contato() {
+        let servidor = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/pos-venda/galerias"))
+            .and(header("authorization", "Bearer tok"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+                {
+                    "id": "g1",
+                    "titulo": "Ana — 12/09",
+                    "email": "ana@exemplo.com",
+                    "whatsapp": null,
+                    "produto_id": "p1",
+                    // O painel manda muito mais que isto; o serde ignora.
+                    "criada_em": "2026-09-06T12:00:00Z",
+                    "criada_por": "operador",
+                    "fotos": { "total": 12 },
+                    "totais": { "balcao": 0, "pos_venda": 0 }
+                },
+                {
+                    "id": "g2",
+                    "titulo": "Bruno",
+                    "email": null,
+                    "whatsapp": "5551999998888",
+                    "produto_id": "p1",
+                    "criada_em": "2026-09-06T13:00:00Z",
+                    "criada_por": "operador",
+                    "fotos": { "total": 3 },
+                    "totais": { "balcao": 0, "pos_venda": 0 }
+                }
+            ])))
+            .mount(&servidor)
+            .await;
+
+        let api = PosVendaApiHttp::nova(servidor.uri());
+        let galerias = api
+            .galerias(&Sessao {
+                access_token: "tok".into(),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(galerias.len(), 2);
+        assert_eq!(galerias[0].id, "g1");
+        assert_eq!(galerias[0].email.as_deref(), Some("ana@exemplo.com"));
+        assert_eq!(galerias[1].whatsapp.as_deref(), Some("5551999998888"));
+        assert_eq!(galerias[1].email, None);
+    }
+
+    /// 🚨 Os três estados de cada campo sobrevivem à ida pela rede.
+    ///
+    /// Ausente é "não mexer", `null` é "apagar", valor é "gravar". Se o
+    /// `Option<Option<_>>` fosse achatado num `Option`, "não mexer no preço" e
+    /// "voltar ao preço da faixa" virariam a mesma requisição — e o operador
+    /// que só quisesse anotar o motivo apagaria o valor sem pedir.
+    #[tokio::test]
+    async fn mudar_foto_distingue_ausente_de_nulo() {
+        let servidor = MockServer::start().await;
+        Mock::given(method("PATCH"))
+            .and(path("/api/v2/pos-venda/fotos/f1"))
+            .and(header("authorization", "Bearer tok"))
+            .and(body_string_contains("\"preco_negociado\":\"15.00\""))
+            .and(body_string_contains(
+                "\"observacao_da_negociacao\":\"Desconto",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "id": "f1" })))
+            .mount(&servidor)
+            .await;
+        Mock::given(method("PATCH"))
+            .and(path("/api/v2/pos-venda/fotos/f2"))
+            .and(body_string_contains("\"preco_negociado\":null"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "id": "f2" })))
+            .mount(&servidor)
+            .await;
+
+        let api = PosVendaApiHttp::nova(servidor.uri());
+        let sessao = Sessao {
+            access_token: "tok".into(),
+        };
+
+        api.mudar_foto(
+            &sessao,
+            "f1",
+            &MudancaDaFoto {
+                preco_negociado: Some(Some("15.00".into())),
+                observacao_da_negociacao: Some(Some("Desconto — cliente antigo".into())),
+                ..MudancaDaFoto::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        api.mudar_foto(
+            &sessao,
+            "f2",
+            &MudancaDaFoto {
+                preco_negociado: Some(None),
+                ..MudancaDaFoto::default()
+            },
+        )
+        .await
+        .unwrap();
+    }
+
+    /// ⚠️ Mudança vazia não vira ida à rede.
+    ///
+    /// O site recusa um `PATCH` sem campo nenhum, e com razão. Sair antes é não
+    /// gastar uma viagem para trazer esse erro de volta — e o `MockServer` sem
+    /// nenhuma rota montada é o que prova que ninguém saiu daqui.
+    #[tokio::test]
+    async fn mudar_foto_com_nada_a_mudar_nao_chama_o_site() {
+        let servidor = MockServer::start().await;
+        let api = PosVendaApiHttp::nova(servidor.uri());
+        api.mudar_foto(
+            &Sessao {
+                access_token: "tok".into(),
+            },
+            "f1",
+            &MudancaDaFoto::default(),
+        )
+        .await
+        .unwrap();
+        assert!(
+            servidor.received_requests().await.unwrap().is_empty(),
+            "nada podia ter saído daqui"
+        );
+    }
+
+    /// Remover é o que zerar a classificação faz: a foto sai do storage e volta
+    /// a ser só local. O site responde `204`, sem corpo.
+    #[tokio::test]
+    async fn remover_foto_aceita_o_204_sem_corpo() {
+        let servidor = MockServer::start().await;
+        Mock::given(method("DELETE"))
+            .and(path("/api/v2/pos-venda/fotos/f1"))
+            .and(header("authorization", "Bearer tok"))
+            .respond_with(ResponseTemplate::new(204))
+            .mount(&servidor)
+            .await;
+        Mock::given(method("DELETE"))
+            .and(path("/api/v2/pos-venda/fotos/f9"))
+            .respond_with(ResponseTemplate::new(404).set_body_json(json!({
+                "error": { "code": "NOT_FOUND", "message": "foto nao encontrada" }
+            })))
+            .mount(&servidor)
+            .await;
+
+        let api = PosVendaApiHttp::nova(servidor.uri());
+        let sessao = Sessao {
+            access_token: "tok".into(),
+        };
+        api.remover_foto(&sessao, "f1").await.unwrap();
+        let erro = api.remover_foto(&sessao, "f9").await.unwrap_err();
+        assert!(erro.to_string().contains("nao encontrada"), "{erro}");
+    }
+
+    /// 🚨 O link vem do backend, e não é montado aqui.
+    ///
+    /// `/meus-ensaios/{id}` exige sessão, e o cliente não tem conta — ele saiu
+    /// do estúdio, não do site. Montar o endereço no app daria um link que
+    /// parece certo e leva ao `/login`. Foi o defeito que a web teve até
+    /// 4/set/2026.
+    #[tokio::test]
+    async fn o_link_da_galeria_vem_assinado_do_site() {
+        let servidor = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/v2/pos-venda/galerias/g1/link"))
+            .and(header("authorization", "Bearer tok"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "link": "https://recordarfotos.com.br/entrar?t=abc123",
+                "validade_em_segundos": 604800
+            })))
+            .mount(&servidor)
+            .await;
+
+        let api = PosVendaApiHttp::nova(servidor.uri());
+        let link = api
+            .link_da_galeria(
+                &Sessao {
+                    access_token: "tok".into(),
+                },
+                "g1",
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(link.url, "https://recordarfotos.com.br/entrar?t=abc123");
+        assert_eq!(link.validade_em_segundos, 604_800);
     }
 }
