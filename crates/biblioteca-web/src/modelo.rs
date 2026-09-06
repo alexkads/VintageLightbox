@@ -21,6 +21,9 @@ pub struct FotoJson {
     pub estado: String,
     #[serde(default)]
     pub apagada: bool,
+    /// A nota de 1 a 5; ausente ou nula = não classificada.
+    #[serde(default)]
+    pub nota: Option<u8>,
     #[serde(default)]
     pub ordem: i64,
 }
@@ -43,6 +46,7 @@ impl FotoJson {
             pedido_id: None,
             downloads: 0,
             revelada: false,
+            nota: self.nota,
             ordem: self.ordem,
         })
     }

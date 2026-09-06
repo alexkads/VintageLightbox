@@ -75,6 +75,14 @@ pub struct Foto {
     pub pedido_id: Option<String>,
     pub downloads: u32,
     pub revelada: bool,
+    /// A nota de 1 a 5 do fotógrafo. `None` = **não classificada**.
+    ///
+    /// 🚨 **Sem nota, a foto não devia estar aqui** (regra do dono,
+    /// 2026-09-05): só sobe para o acervo o que foi classificado. Mas `None`
+    /// existe e continua existindo, por duas razões: as fotos que já estavam na
+    /// galeria quando a coluna nasceu, e o recorte que as encontra — que é
+    /// justamente para o operador as classificar ou tirar.
+    pub nota: Option<u8>,
     pub ordem: i64,
 }
 
@@ -100,6 +108,13 @@ pub enum Filtro {
     Todas,
     Situacao(Estado),
     Apagadas,
+    /// As que ninguém classificou — o recorte que o dono pediu em 2026-09-05.
+    ///
+    /// Existe porque elas são um problema a resolver, não um estado normal:
+    /// não podem ir à venda, não recebem marca d'água e não deviam estar no
+    /// storage. Sem um recorte que as junte, achá-las numa galeria de duzentas
+    /// é olhar foto por foto.
+    SemNota,
 }
 
 impl Filtro {
@@ -111,6 +126,7 @@ impl Filtro {
             Filtro::Todas => true,
             Filtro::Apagadas => foto.apagada,
             Filtro::Situacao(estado) => !foto.apagada && foto.estado == estado,
+            Filtro::SemNota => !foto.apagada && foto.nota.is_none(),
         }
     }
 }
@@ -123,6 +139,8 @@ pub struct Contagens {
     pub a_venda: usize,
     pub compradas: usize,
     pub apagadas: usize,
+    /// Quantas estão sem classificação — as do recorte `SemNota`.
+    pub sem_nota: usize,
 }
 
 impl Contagens {
@@ -133,6 +151,7 @@ impl Contagens {
             Filtro::Situacao(Estado::Disponivel) => self.a_venda,
             Filtro::Situacao(Estado::Comprada) => self.compradas,
             Filtro::Apagadas => self.apagadas,
+            Filtro::SemNota => self.sem_nota,
         }
     }
 }
@@ -223,6 +242,9 @@ impl Acervo {
             if f.apagada {
                 c.apagadas += 1;
             } else {
+                if f.nota.is_none() {
+                    c.sem_nota += 1;
+                }
                 match f.estado {
                     Estado::LevadaNoBalcao => c.levadas += 1,
                     Estado::Disponivel => c.a_venda += 1,
@@ -296,6 +318,7 @@ mod testes {
             preco_de_venda: None,
             pedido_id: None,
             downloads: 0,
+            nota: Some(3),
             revelada: false,
             ordem: 0,
         }
@@ -338,6 +361,33 @@ mod testes {
         assert_eq!(c.compradas, 1);
         assert_eq!(c.apagadas, 1);
         assert_eq!(a.total_visivel(), 1, "mas o recorte mostra uma só");
+    }
+
+    /// 🚨 **O recorte das não classificadas** — o pedido do dono de 2026-09-05.
+    ///
+    /// Ele existe para achar o que não devia estar aqui: sem nota a foto não
+    /// pode ir à venda nem receber marca d'água, e não devia ter subido. A
+    /// apagada fica de fora como em todo recorte por situação — ela não tem
+    /// arquivo, e classificar o que não existe não leva a lugar nenhum.
+    #[test]
+    fn o_recorte_sem_nota_junta_o_que_ninguem_classificou() {
+        let mut sem = foto("sem", Estado::Disponivel, false);
+        sem.nota = None;
+        let mut apagada_sem_nota = foto("apagada", Estado::Disponivel, true);
+        apagada_sem_nota.nota = None;
+        let mut a = Acervo::novo();
+        a.definir(vec![
+            foto("com", Estado::Disponivel, false),
+            sem,
+            apagada_sem_nota,
+        ]);
+
+        let c = a.contagens();
+        assert_eq!(c.sem_nota, 1, "a apagada nao entra na conta");
+
+        a.filtrar(Filtro::SemNota);
+        assert_eq!(a.total_visivel(), 1);
+        assert_eq!(a.visivel(0).unwrap().id, "sem");
     }
 
     /// 🚨 A apagada não tem arquivo: oferecê-la como "à venda" seria vender o
