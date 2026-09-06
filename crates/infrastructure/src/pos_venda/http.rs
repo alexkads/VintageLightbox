@@ -21,8 +21,8 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use domain::services::pos_venda::{
-    FotoEnviada, FotoParaEnviar, Galeria, GaleriaDoPainel, LinkDeAcesso, MudancaDaFoto,
-    NovaGaleria, PosVendaApi, Produto, Sessao,
+    ContagemDeFotos, FotoEnviada, FotoParaEnviar, Galeria, GaleriaDoPainel, LinkDeAcesso,
+    MudancaDaFoto, NovaGaleria, PosVendaApi, Produto, Sessao, TotaisDaGaleria,
 };
 use domain::{DomainError, DomainResult};
 use serde::Deserialize;
@@ -253,16 +253,7 @@ impl PosVendaApi for PosVendaApiHttp {
             .map_err(rede)?;
 
         let lista: Vec<GaleriaDoPainelDaApi> = ler(resposta).await?;
-        Ok(lista
-            .into_iter()
-            .map(|g| GaleriaDoPainel {
-                id: g.id,
-                titulo: g.titulo,
-                email: g.email,
-                whatsapp: g.whatsapp,
-                produto_id: g.produto_id,
-            })
-            .collect())
+        Ok(lista.into_iter().map(GaleriaDoPainel::from).collect())
     }
 
     async fn mudar_foto(
@@ -346,8 +337,8 @@ impl PosVendaApi for PosVendaApiHttp {
     }
 }
 
-/// A galeria como o painel a lista. Os campos que não interessam ao balcão
-/// (totais, contagens, datas) ficam de fora: o serde ignora o que sobra.
+/// A galeria como o painel a lista. O que não interessa ao balcão (quem criou,
+/// o ensaio, o estúdio) fica de fora: o serde ignora o que sobra.
 #[derive(Deserialize)]
 struct GaleriaDoPainelDaApi {
     id: String,
@@ -355,6 +346,64 @@ struct GaleriaDoPainelDaApi {
     email: Option<String>,
     whatsapp: Option<String>,
     produto_id: String,
+    #[serde(default)]
+    user_id: Option<String>,
+    criada_em: chrono::DateTime<chrono::Utc>,
+    #[serde(default)]
+    expira_em: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default)]
+    fotos: ContagemDaApi,
+    /// ⚠️ **`Option`, e não zero por padrão**: a galeria de uma API anterior ao
+    /// campo precisa chegar como "não sei", para o rodapé poder dizer que o
+    /// total está menor que o real. Zero calado é a única resposta errada aqui.
+    #[serde(default)]
+    totais: Option<TotaisDaApi>,
+}
+
+#[derive(Deserialize, Default)]
+struct ContagemDaApi {
+    #[serde(default)]
+    levadas_no_balcao: u32,
+    #[serde(default)]
+    disponiveis: u32,
+    #[serde(default)]
+    compradas: u32,
+    #[serde(default)]
+    apagadas: u32,
+}
+
+#[derive(Deserialize)]
+struct TotaisDaApi {
+    balcao: String,
+    pos_venda: String,
+}
+
+impl From<GaleriaDoPainelDaApi> for GaleriaDoPainel {
+    fn from(g: GaleriaDoPainelDaApi) -> Self {
+        Self {
+            id: g.id,
+            titulo: g.titulo,
+            email: g.email,
+            whatsapp: g.whatsapp,
+            produto_id: g.produto_id,
+            user_id: g.user_id,
+            // 🔑 Reduzida ao dia **aqui**, e não na tela: o eixo do gráfico é
+            // por dia, e guardar a hora daria duas galerias do mesmo dia em
+            // degraus diferentes assim que alguém esquecesse de cortar.
+            criada_em_iso: g.criada_em.format("%Y-%m-%d").to_string(),
+            expira_em: g.expira_em.map(|quando| quando.timestamp()),
+            fotos: ContagemDeFotos {
+                levadas_no_balcao: g.fotos.levadas_no_balcao,
+                disponiveis: g.fotos.disponiveis,
+                compradas: g.fotos.compradas,
+                apagadas: g.fotos.apagadas,
+            },
+            totais: g.totais.map(|t| TotaisDaGaleria {
+                balcao: t.balcao,
+                pos_venda: t.pos_venda,
+            }),
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -550,11 +599,20 @@ mod tests {
                     "email": "ana@exemplo.com",
                     "whatsapp": null,
                     "produto_id": "p1",
-                    // O painel manda muito mais que isto; o serde ignora.
+                    "user_id": "u1",
                     "criada_em": "2026-09-06T12:00:00Z",
+                    "expira_em": "2026-10-07T12:00:00Z",
+                    "fotos": {
+                        "levadas_no_balcao": 4,
+                        "disponiveis": 8,
+                        "compradas": 0,
+                        "apagadas": 0
+                    },
+                    "totais": { "balcao": "150.00", "pos_venda": "45.00" },
+                    // O painel manda mais que isto; o serde ignora o que sobra.
                     "criada_por": "operador",
-                    "fotos": { "total": 12 },
-                    "totais": { "balcao": 0, "pos_venda": 0 }
+                    "ensaio_id": null,
+                    "estudio_id": null
                 },
                 {
                     "id": "g2",
@@ -563,9 +621,7 @@ mod tests {
                     "whatsapp": "5551999998888",
                     "produto_id": "p1",
                     "criada_em": "2026-09-06T13:00:00Z",
-                    "criada_por": "operador",
-                    "fotos": { "total": 3 },
-                    "totais": { "balcao": 0, "pos_venda": 0 }
+                    "criada_por": "operador"
                 }
             ])))
             .mount(&servidor)
@@ -584,6 +640,26 @@ mod tests {
         assert_eq!(galerias[0].email.as_deref(), Some("ana@exemplo.com"));
         assert_eq!(galerias[1].whatsapp.as_deref(), Some("5551999998888"));
         assert_eq!(galerias[1].email, None);
+
+        // A data chega reduzida ao dia — é o carimbo do eixo do gráfico.
+        assert_eq!(galerias[0].criada_em_iso, "2026-09-06");
+        assert_eq!(galerias[0].fotos.levadas_no_balcao, 4);
+        assert_eq!(galerias[0].fotos.disponiveis, 8);
+        assert_eq!(
+            galerias[0].totais.as_ref().map(|t| t.balcao.as_str()),
+            Some("150.00")
+        );
+
+        // 🚨 A galeria sem o campo `totais` chega como "não sei", e não como
+        // zero: é o que permite ao rodapé dizer que o total está menor que o
+        // real, em vez de anunciar um número curto como se fosse completo.
+        assert_eq!(galerias[1].totais, None);
+        assert_eq!(galerias[1].expira_em, None, "sem prazo é sem prazo");
+        assert_eq!(
+            galerias[0].expira_em,
+            Some(1_791_374_400),
+            "o prazo vira segundos, que é o que a conta da situação compara"
+        );
     }
 
     /// 🚨 Os três estados de cada campo sobrevivem à ida pela rede.

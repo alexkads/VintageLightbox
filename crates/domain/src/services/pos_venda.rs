@@ -82,6 +82,11 @@ pub struct Galeria {
 /// 🔑 Traz o contato porque é ele que identifica o cliente no balcão: duas
 /// galerias com o mesmo título e clientes diferentes são o caso comum de um
 /// estúdio, e escolher a errada manda as fotos de um cliente para outro.
+///
+/// 🔑 **E traz o que a lista precisa para decidir a situação sozinha** —
+/// contagem por estado, prazo, se o cliente já entrou. Quem calcula a situação
+/// é `biblioteca_core::sessoes`, a mesma conta da lista do site; o que chega
+/// aqui é o dado cru para ela.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GaleriaDoPainel {
     pub id: String,
@@ -89,6 +94,39 @@ pub struct GaleriaDoPainel {
     pub email: Option<String>,
     pub whatsapp: Option<String>,
     pub produto_id: String,
+    /// Preenchido quando o cliente já criou conta pelo link — é o que separa
+    /// "aguardando o cliente" de "cliente já abriu".
+    pub user_id: Option<String>,
+    /// `"2026-09-03"`, já reduzida ao dia: é o carimbo do eixo do gráfico.
+    pub criada_em_iso: String,
+    /// Segundos desde a época. `None` = não expira.
+    pub expira_em: Option<i64>,
+    pub fotos: ContagemDeFotos,
+    /// `None` na galeria de uma API anterior ao campo — e isso é dito na soma,
+    /// em vez de virar zero calado.
+    pub totais: Option<TotaisDaGaleria>,
+}
+
+/// Quantas fotos a galeria tem, por estado.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ContagemDeFotos {
+    pub levadas_no_balcao: u32,
+    pub disponiveis: u32,
+    pub compradas: u32,
+    /// Apagadas pela retenção: a linha ficou, o arquivo não.
+    pub apagadas: u32,
+}
+
+/// Quanto a galeria já rendeu, por porta.
+///
+/// 🔑 **Decimal em texto** (`"150.00"`), como [`Produto::preco`] — é como o site
+/// devolve, e converter aqui exigiria uma escolha de arredondamento que o
+/// `domain` não tem por que tomar. Quem lê para centavos é a tela, com
+/// `biblioteca_core::dinheiro`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TotaisDaGaleria {
+    pub balcao: String,
+    pub pos_venda: String,
 }
 
 /// O link que abre a galeria **sem senha**.

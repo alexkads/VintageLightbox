@@ -65,6 +65,20 @@ impl PosVendaController {
         self.api.galerias(sessao).await.map_err(frase)
     }
 
+    /// Cria uma sessão fotográfica vazia.
+    ///
+    /// 🔑 **Separado de [`Self::publicar`]**, que também cria uma: publicar é
+    /// "sobe estas fotos numa galeria nova", e a lista precisa de "abre a
+    /// galeria agora, as fotos vêm depois" — que é a ordem do fluxo do balcão,
+    /// onde o cadastro do cliente acontece antes de a triagem terminar.
+    pub async fn criar_galeria(
+        &self,
+        sessao: &Sessao,
+        nova: &NovaGaleria,
+    ) -> Result<Galeria, String> {
+        self.api.criar_galeria(sessao, nova).await.map_err(frase)
+    }
+
     /// O que o balcão registra numa foto que já está no site: o estado, a
     /// negociação, a nota.
     pub async fn mudar_foto(

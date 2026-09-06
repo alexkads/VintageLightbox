@@ -6,7 +6,9 @@ use std::sync::mpsc::Sender;
 use std::sync::Arc;
 
 use adapters::controllers::PosVendaController;
-use domain::services::pos_venda::{LinkDeAcesso, NovaGaleria, Produto, Sessao};
+use domain::services::pos_venda::{
+    Galeria, GaleriaDoPainel, LinkDeAcesso, NovaGaleria, Produto, Sessao,
+};
 use use_cases::pos_venda::Progresso;
 
 /// O que a tela pede para publicar.
@@ -26,6 +28,10 @@ pub enum Recado {
     Andamento(Progresso),
     /// O link que entra sem senha, pronto para ir ao cliente.
     Link(LinkDeAcesso),
+    /// As sessões fotográficas que já existem.
+    Galerias(Vec<GaleriaDoPainel>),
+    /// Uma sessão recém-aberta, ainda sem foto nenhuma.
+    Criada(Galeria),
     /// Uma frase para a tela — login recusado, rede caída, galeria recusada.
     Falhou(String),
 }
@@ -40,6 +46,10 @@ pub trait Publicador: Send + Sync + 'static {
     /// ⚠️ **Pedido ao site, nunca montado aqui.** O endereço da galeria exige
     /// sessão e o cliente não tem conta — ele saiu do estúdio, não do site.
     fn link(&self, sessao: Sessao, galeria_id: String, canal: Sender<Recado>);
+    /// A lista de sessões fotográficas.
+    fn galerias(&self, sessao: Sessao, canal: Sender<Recado>);
+    /// Abre uma sessão vazia — as fotos vêm depois.
+    fn criar_galeria(&self, sessao: Sessao, nova: NovaGaleria, canal: Sender<Recado>);
 }
 
 pub struct PublicadorDaApi {
@@ -87,6 +97,28 @@ impl Publicador for PublicadorDaApi {
         });
     }
 
+    fn galerias(&self, sessao: Sessao, canal: Sender<Recado>) {
+        let controlador = self.controlador.clone();
+        self.tokio.spawn(async move {
+            let recado = match controlador.galerias(&sessao).await {
+                Ok(lista) => Recado::Galerias(lista),
+                Err(erro) => Recado::Falhou(erro),
+            };
+            let _ = canal.send(recado);
+        });
+    }
+
+    fn criar_galeria(&self, sessao: Sessao, nova: NovaGaleria, canal: Sender<Recado>) {
+        let controlador = self.controlador.clone();
+        self.tokio.spawn(async move {
+            let recado = match controlador.criar_galeria(&sessao, &nova).await {
+                Ok(galeria) => Recado::Criada(galeria),
+                Err(erro) => Recado::Falhou(erro),
+            };
+            let _ = canal.send(recado);
+        });
+    }
+
     fn publicar(&self, pedido: Pedido, canal: Sender<Recado>) {
         let controlador = self.controlador.clone();
         self.tokio.spawn(async move {
@@ -128,6 +160,10 @@ pub mod mentira {
         pub senha_certa: Option<String>,
         /// De quais galerias o link foi pedido.
         pub links: Mutex<Vec<String>>,
+        /// As sessões que a listagem vai encontrar.
+        pub galerias: Mutex<Vec<GaleriaDoPainel>>,
+        /// As que foram abertas por esta tela.
+        pub criadas: Mutex<Vec<NovaGaleria>>,
     }
 
     impl PublicadorDeMentira {
@@ -137,6 +173,10 @@ pub mod mentira {
 
         pub fn links(&self) -> Vec<String> {
             self.links.lock().expect("os links").clone()
+        }
+
+        pub fn criadas(&self) -> Vec<NovaGaleria> {
+            self.criadas.lock().expect("as criadas").clone()
         }
     }
 
@@ -167,6 +207,37 @@ pub mod mentira {
             let _ = canal.send(Recado::Link(LinkDeAcesso {
                 url: format!("https://recordarfotos.com.br/entrar?t={galeria_id}"),
                 validade_em_segundos: 604_800,
+            }));
+        }
+
+        fn galerias(&self, _sessao: Sessao, canal: Sender<Recado>) {
+            let _ = canal.send(Recado::Galerias(
+                self.galerias.lock().expect("as galerias").clone(),
+            ));
+        }
+
+        fn criar_galeria(&self, _sessao: Sessao, nova: NovaGaleria, canal: Sender<Recado>) {
+            let id = format!("g{}", self.criadas.lock().expect("as criadas").len() + 1);
+            self.criadas.lock().expect("as criadas").push(nova.clone());
+            // A criada entra na lista, como entraria no site.
+            self.galerias
+                .lock()
+                .expect("as galerias")
+                .push(GaleriaDoPainel {
+                    id: id.clone(),
+                    titulo: nova.titulo.clone(),
+                    email: nova.email.clone(),
+                    whatsapp: nova.whatsapp.clone(),
+                    produto_id: nova.produto_id.clone(),
+                    user_id: None,
+                    criada_em_iso: "2026-09-06".into(),
+                    expira_em: None,
+                    fotos: domain::services::pos_venda::ContagemDeFotos::default(),
+                    totais: None,
+                });
+            let _ = canal.send(Recado::Criada(Galeria {
+                id,
+                titulo: nova.titulo,
             }));
         }
 

@@ -311,6 +311,10 @@ impl PosVenda {
                     self.link = Some(link);
                 }
                 Recado::Andamento(progresso) => self.anotar(progresso),
+                // Listar e abrir sessão são gestos da tela de Sessões
+                // Fotográficas; este modal só publica. Se chegarem aqui é
+                // porque alguém compartilhou o canal por engano.
+                Recado::Galerias(_) | Recado::Criada(_) => {}
                 Recado::Falhou(erro) => {
                     self.entrando = false;
                     self.pedindo_link = false;

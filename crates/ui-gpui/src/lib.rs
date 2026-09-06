@@ -16,4 +16,5 @@ pub mod importacao;
 pub mod impressao;
 pub mod pos_venda;
 pub mod revelacao;
+pub mod sessoes;
 pub mod tema;

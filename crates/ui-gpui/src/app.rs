@@ -32,6 +32,7 @@ use crate::revelacao::persistencia::{self, Gravador};
 use crate::revelacao::presets::GuardaDePresets;
 use crate::revelacao::processador::Ajustes;
 use crate::revelacao::tela::Revelacao;
+use crate::sessoes::tela::{Escolhida, Sessoes};
 
 /// As portas para o mundo de fora, num pacote só.
 ///
@@ -199,6 +200,13 @@ pub enum Tela {
     Biblioteca,
     Revelacao,
     Impressao,
+    /// As sessões fotográficas — a mesma tela que o site tem em
+    /// `/dashboard/sessoes-fotograficas`.
+    ///
+    /// 🔑 **É tela, e não modal**, ao contrário da publicação: listar sessões é
+    /// para onde se volta o dia inteiro, e um modal obrigaria a fechar a
+    /// triagem a cada consulta.
+    Sessoes,
 }
 
 pub struct Aplicativo {
@@ -218,6 +226,13 @@ pub struct Aplicativo {
     /// O modal do pós-venda — o único caminho do app até o site.
     pos_venda: Entity<PosVenda>,
     publicando: bool,
+    /// A lista de sessões fotográficas.
+    sessoes: Entity<Sessoes>,
+    /// A sessão escolhida para receber as fotos. `None` é "nenhuma aberta".
+    sessao_aberta: Option<String>,
+    /// 🚨 A inscrição na escolha da sessão. Descartada, a tela marca a linha e
+    /// o resto do app continua sem saber em qual galeria as fotos entram.
+    _sessao_escolhida: gpui::Subscription,
     /// A porta do app: entrar na conta do site, ou dizer que hoje é sem rede.
     ///
     /// 🚨 **Enquanto [`Self::modo`] é `None`, é só ela que aparece.** Foi a
@@ -358,6 +373,7 @@ impl Aplicativo {
         // chamada, e dois clientes HTTP para o mesmo site seriam dois lugares
         // onde a base da API pode divergir.
         let publicador_do_pos_venda = portas.publicador.clone();
+        let publicador_das_sessoes = portas.publicador.clone();
         let entrada = cx.new(|cx| {
             Entrada::nova(
                 portas.publicador,
@@ -368,6 +384,12 @@ impl Aplicativo {
         });
         let escolha = cx.subscribe(&entrada, |raiz, _entrada, evento: &Escolheu, cx| {
             raiz.escolher_modo(evento.0.clone(), cx);
+        });
+
+        let sessoes = cx.new(|cx| Sessoes::nova(publicador_das_sessoes, window, cx));
+        let sessao_escolhida = cx.subscribe(&sessoes, |raiz, _tela, evento: &Escolhida, cx| {
+            raiz.sessao_aberta = Some(evento.0.clone());
+            cx.notify();
         });
 
         let importacao = cx.new(|cx| {
@@ -418,6 +440,9 @@ impl Aplicativo {
             entrada,
             modo: None,
             _escolha: escolha,
+            sessoes,
+            sessao_aberta: None,
+            _sessao_escolhida: sessao_escolhida,
             configuracoes: cx.new(|_| Configuracoes::nova(previews_das_configuracoes)),
             configurando: false,
             cliente: None,
@@ -791,9 +816,12 @@ impl Aplicativo {
     /// que faz o operador escolher offline por engano.
     pub fn escolher_modo(&mut self, modo: Modo, cx: &mut Context<Self>) {
         if let Modo::Online(sessao) = &modo {
-            let sessao = sessao.clone();
             self.pos_venda
-                .update(cx, |tela, cx| tela.definir_sessao(sessao, cx));
+                .update(cx, |tela, cx| tela.definir_sessao(sessao.clone(), cx));
+            // A lista já pede as sessões: quem entrou vai querer ver em qual
+            // galeria está trabalhando antes de qualquer outra coisa.
+            self.sessoes
+                .update(cx, |tela, cx| tela.definir_sessao(sessao.clone(), cx));
         }
         self.modo = Some(modo);
         cx.notify();
@@ -960,8 +988,9 @@ impl Aplicativo {
                 .revelacao
                 .update(cx, |tela, cx| tela.andar(passo, window, cx)),
             // Na Impressão as setas não andam: quem escolhe ali é a faixa de
-            // baixo, e "a próxima" não quer dizer nada sobre uma folha.
-            Tela::Impressao => {}
+            // baixo, e "a próxima" não quer dizer nada sobre uma folha. Nas
+            // Sessões, pelo mesmo motivo: a lista se percorre com a busca.
+            Tela::Impressao | Tela::Sessoes => {}
         }
     }
 
@@ -1029,6 +1058,20 @@ impl Aplicativo {
                     .disabled(!tem_selecao)
                     .on_click(cx.listener(|este, _ev, window, cx| {
                         este.revelar(window, cx);
+                    })),
+            )
+            .child(
+                // ⚠️ **Ligado mesmo offline**, ao contrário dos outros: a tela
+                // existe e diz que precisa de conta. Um botão desligado sem
+                // explicação faria procurar defeito onde há uma escolha.
+                Button::new("nav-sessoes")
+                    .label("Sessões")
+                    .xsmall()
+                    .when(self.tela == Tela::Sessoes, |b| b.primary())
+                    .selected(self.tela == Tela::Sessoes)
+                    .on_click(cx.listener(|este, _ev, _window, cx| {
+                        este.tela = Tela::Sessoes;
+                        cx.notify();
                     })),
             )
             .child(
@@ -1495,6 +1538,7 @@ impl Render for Aplicativo {
                     Tela::Biblioteca => self.biblioteca.clone().into_any_element(),
                     Tela::Revelacao => self.revelacao.clone().into_any_element(),
                     Tela::Impressao => self.impressao.clone().into_any_element(),
+                    Tela::Sessoes => self.sessoes.clone().into_any_element(),
                 }),
             )
             .when(self.importando, |raiz| {
