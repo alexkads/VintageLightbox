@@ -778,6 +778,20 @@ impl Biblioteca {
         self.busca.read(cx).value().to_string()
     }
 
+    /// O filtro por nota mínima — o passo 4 do fluxo: **filtro as classificadas**.
+    ///
+    /// `0` é "todas". A grade recorta na hora; a seleção que sair do recorte é
+    /// reconstruída por id, não por posição.
+    pub fn filtrar_por_nota(&mut self, minima: u8, cx: &mut Context<Self>) {
+        self.filtros.nota_minima = NotaMinima(minima);
+        self.refiltrar();
+        cx.notify();
+    }
+
+    pub fn nota_minima(&self) -> u8 {
+        self.filtros.nota_minima.0
+    }
+
     /// Põe um aviso na tela. É por aqui que a raiz conta o que aconteceu com o
     /// site — a Biblioteca não fala com ele, mas é onde quem classificou está
     /// olhando.

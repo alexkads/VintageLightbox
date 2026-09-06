@@ -362,6 +362,9 @@ mod tests {
             }
             Ok(())
         }
+        async fn copia_de_trabalho(&self, _: &Sessao, _: &str) -> DomainResult<Vec<u8>> {
+            unreachable!("a publicação sobe pixels; não os busca de volta")
+        }
         async fn link_da_galeria(
             &self,
             _: &Sessao,

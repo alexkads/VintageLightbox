@@ -12,6 +12,9 @@ pub mod cliente;
 pub mod configuracoes;
 pub mod entrada;
 pub mod exportacao;
+/// O fluxo dos onze passos, de ponta a ponta. Só testes.
+#[cfg(test)]
+mod fluxo;
 pub mod imagem;
 pub mod importacao;
 pub mod impressao;

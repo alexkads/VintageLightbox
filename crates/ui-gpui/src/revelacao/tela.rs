@@ -512,6 +512,62 @@ impl Revelacao {
         self.aberta.as_ref().map(|a| &a.foto)
     }
 
+    /// Entrega os pixels que vieram **de fora** — hoje, do storage da nuvem.
+    ///
+    /// 🔑 **A Revelação não sabe buscar na nuvem, e não vai passar a saber.**
+    /// Quem tem a sessão do site é a raiz; aqui só se recebe o que ela trouxe.
+    /// É a mesma divisão da classificação: a tela do domínio não fala com o
+    /// site, e continua funcionando sem ele.
+    ///
+    /// 🚨 **Só pinta se a foto ainda for a mesma.** Um download que volta depois
+    /// de a seta ter andado pintaria a foto errada — e o pior é que ela ficaria
+    /// bonita: a imagem de uma foto sob os ajustes de outra, sem erro nenhum.
+    ///
+    /// Devolve se os pixels foram aproveitados.
+    pub fn receber_pixels(
+        &mut self,
+        foto_id: &str,
+        imagem: image::DynamicImage,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(aberta) = self.aberta.as_mut() else {
+            return false;
+        };
+        if aberta.foto.id != foto_id {
+            return false;
+        }
+
+        let rgba = imagem.to_rgba8();
+        aberta.origem = Some(Origem {
+            largura: rgba.width(),
+            altura: rgba.height(),
+            pixels: Arc::new(rgba.into_raw()),
+        });
+        aberta.bruta = Some(imagem.clone());
+        aberta.revelada = Some(imagem);
+        aberta.desenhada = None;
+
+        self.atualizar_exibicao();
+        self.pedir_revelacao(cx);
+        cx.notify();
+        true
+    }
+
+    /// A foto aberta, para quem precisa saber de onde buscar os pixels.
+    pub fn foto_aberta(&self) -> Option<&PhotoViewModel> {
+        self.aberta.as_ref().map(|a| &a.foto)
+    }
+
+    /// Se há pixels para revelar — a foto abriu de verdade.
+    ///
+    /// 🔑 **`false` não é erro, é ausência**: a foto está no catálogo e os
+    /// pixels não estão à mão. Até 6/set/2026 o único lugar de onde eles podiam
+    /// vir era o cache local, e por isso a foto que só existe no storage da
+    /// nuvem abria vazia — sem erro nenhum, que é o que tornava isso caro.
+    pub fn tem_pixels(&self) -> bool {
+        self.aberta.as_ref().is_some_and(|a| a.origem.is_some())
+    }
+
     pub fn ajustes(&self) -> Ajustes {
         self.ajustes
     }

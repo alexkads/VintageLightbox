@@ -216,11 +216,36 @@ a decisão da triagem vira galeria no `recordarfotos.com.br` sem passo manual.
 | Ao fim do lote, o site manda ao cliente "suas fotos estão prontas" (prazos + link sem senha) | `PosVendaApi::avisar_fotos_prontas` — a falha do aviso não é falha da publicação; o painel reenvia |
 | O site: `POST /auth/login`, `GET /products/admin`, `POST /pos-venda/galerias`, `POST …/fotos` | `infrastructure/pos_venda/http.rs` |
 
+### O fluxo dos onze passos — ✅ **fecha no desktop desde 6/set/2026**
+
+O dono descreveu o trabalho dele em onze passos e pediu que ele funcione aqui
+como funciona na web. O que faltava não era rota: **o backend já expunha as
+quatro** que o app não conhecia.
+
+| # | Passo | Onde |
+|--:|---|---|
+| 1 | Importo | `importacao/` |
+| 2 | Revelo — **antes de classificar** | `revelacao/` |
+| 3 | Classifico → **a foto sobe** | `Classificou` na Biblioteca; a raiz despacha |
+| 4 | Filtro as classificadas | `filtrar_por_nota` |
+| 5 | Sinalizo o que o cliente leva | tecla `B` |
+| 6 | Cliente paga no balcão | `balcao/`, com `biblioteca_core::negociacao` |
+| 7 | Gero o link | `POST /galerias/{id}/link`, assinado pelo site |
+| 8 · 9 | Cliente baixa e compra | **só na web**, e isso é da lista do dono |
+| 10 | Nunca apagar a base local | `Delete` tira do catálogo; o arquivo fica |
+| 11 | Revelo local **e** nuvem | `GET /fotos/{id}/copia-de-trabalho` quando o cache local está vazio |
+
+🔑 **`crates/ui-gpui/src/fluxo.rs` confere os onze de ponta a ponta**, e ele
+existe porque passo a passo não é fluxo: o que dói são as juntas — a ordem
+(revelar antes de classificar), o que atravessa (o id do site chegando à foto) e
+o que **não** pode acontecer (o passo 10 é uma proibição).
+
 | O que ainda falta | |
 |---|---|
-| ⬜ Publicar **numa galeria que já existe** (hoje toda publicação cria uma) | a API já lista galerias |
+| ✅ Publicar **numa galeria que já existe** | **desde 6/set** — a tela de Sessões escolhe, e a classificação sobe para ela |
 | ⬜ A coleção como unidade: "publicar esta coleção" em vez de "a seleção" | `docs/00-OBJETIVO.md` diz que o ensaio **é** uma coleção |
 | ⬜ Conferir o fluxo inteiro contra produção — exige a senha do operador | `VLB_POS_VENDA_URL` para homologação |
+| ⬜ Renomear sessão pela tela | a API não expõe `PATCH /galerias/{id}` para título e contato |
 
 ## Revelação no navegador — 🚧 **o motor está pronto desde 4/set/2026; a tela é do site**
 

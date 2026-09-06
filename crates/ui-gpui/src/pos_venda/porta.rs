@@ -32,6 +32,14 @@ pub enum Recado {
     Galerias(Vec<GaleriaDoPainel>),
     /// Uma sessão recém-aberta, ainda sem foto nenhuma.
     Criada(Galeria),
+    /// Os pixels de uma foto do site — o passo 11.
+    ///
+    /// Leva o id da foto junto: um download que volta depois de a seta ter
+    /// andado não pode pintar a foto errada, e quem confere isso é a tela.
+    Pixels {
+        foto_id: String,
+        bytes: Vec<u8>,
+    },
     /// O passo 3 terminou para uma foto: ela subiu, ou saiu do storage.
     ///
     /// 🔑 **Notifica, não descreve.** Quem escuta só precisa saber que o
@@ -72,6 +80,17 @@ pub trait Publicador: Send + Sync + 'static {
         sessao: Sessao,
         foto_id: String,
         mudanca: MudancaDaFoto,
+        canal: Sender<Recado>,
+    );
+    /// O passo 11: os pixels da foto que só existe no storage.
+    ///
+    /// `foto_local` é o id **do catálogo**, e volta no recado: é por ele que a
+    /// tela confere se a foto na frente ainda é a mesma.
+    fn copia_de_trabalho(
+        &self,
+        sessao: Sessao,
+        foto_local: String,
+        foto_no_site: String,
         canal: Sender<Recado>,
     );
 }
@@ -192,6 +211,26 @@ impl Publicador for PublicadorDaApi {
         });
     }
 
+    fn copia_de_trabalho(
+        &self,
+        sessao: Sessao,
+        foto_local: String,
+        foto_no_site: String,
+        canal: Sender<Recado>,
+    ) {
+        let controlador = self.controlador.clone();
+        self.tokio.spawn(async move {
+            let recado = match controlador.copia_de_trabalho(&sessao, &foto_no_site).await {
+                Ok(bytes) => Recado::Pixels {
+                    foto_id: foto_local,
+                    bytes,
+                },
+                Err(erro) => Recado::Falhou(erro),
+            };
+            let _ = canal.send(recado);
+        });
+    }
+
     fn publicar(&self, pedido: Pedido, canal: Sender<Recado>) {
         let controlador = self.controlador.clone();
         self.tokio.spawn(async move {
@@ -243,6 +282,21 @@ pub mod mentira {
         pub tiradas: Mutex<Vec<String>>,
         /// O que foi negociado, por foto.
         pub negociadas: Mutex<Vec<(String, MudancaDaFoto)>>,
+        /// Os ids no site cujos pixels foram pedidos.
+        pub baixadas: Mutex<Vec<String>>,
+    }
+
+    /// Um JPEG 1×1 cinza, codificado de verdade.
+    fn jpeg_de_um_pixel() -> Vec<u8> {
+        let mut bytes = Vec::new();
+        let imagem = image::RgbImage::from_pixel(1, 1, image::Rgb([128, 128, 128]));
+        image::DynamicImage::ImageRgb8(imagem)
+            .write_to(
+                &mut std::io::Cursor::new(&mut bytes),
+                image::ImageFormat::Jpeg,
+            )
+            .expect("codificar um pixel");
+        bytes
     }
 
     impl PublicadorDeMentira {
@@ -268,6 +322,10 @@ pub mod mentira {
 
         pub fn negociadas(&self) -> Vec<(String, MudancaDaFoto)> {
             self.negociadas.lock().expect("as negociadas").clone()
+        }
+
+        pub fn baixadas(&self) -> Vec<String> {
+            self.baixadas.lock().expect("as baixadas").clone()
         }
     }
 
@@ -319,6 +377,25 @@ pub mod mentira {
         fn tirar_do_site(&self, _sessao: Sessao, foto_id: String, canal: Sender<Recado>) {
             self.tiradas.lock().expect("as tiradas").push(foto_id);
             let _ = canal.send(Recado::Sincronizou);
+        }
+
+        fn copia_de_trabalho(
+            &self,
+            _sessao: Sessao,
+            foto_local: String,
+            foto_no_site: String,
+            canal: Sender<Recado>,
+        ) {
+            self.baixadas
+                .lock()
+                .expect("as baixadas")
+                .push(foto_no_site);
+            // Um JPEG 1×1 de verdade: a tela decodifica o que chega, e um vetor
+            // de lixo faria o teste passar por um caminho que a produção não tem.
+            let _ = canal.send(Recado::Pixels {
+                foto_id: foto_local,
+                bytes: jpeg_de_um_pixel(),
+            });
         }
 
         fn negociar(

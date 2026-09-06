@@ -340,6 +340,27 @@ impl PosVendaApi for PosVendaApiHttp {
             validade_em_segundos: link.validade_em_segundos,
         })
     }
+
+    async fn copia_de_trabalho(&self, sessao: &Sessao, foto_id: &str) -> DomainResult<Vec<u8>> {
+        let resposta = self
+            .client
+            .get(self.url(&format!("/pos-venda/fotos/{foto_id}/copia-de-trabalho")))
+            .bearer_auth(&sessao.access_token)
+            .send()
+            .await
+            .map_err(rede)?;
+
+        if !resposta.status().is_success() {
+            return Err(recusa(resposta).await);
+        }
+        // 🔑 Bytes, e não JSON: a rota devolve a imagem. `ler` desserializaria e
+        // falharia com "resposta ilegível" num corpo perfeitamente legível.
+        resposta
+            .bytes()
+            .await
+            .map(|b| b.to_vec())
+            .map_err(|e| DomainError::InfrastructureError(format!("imagem incompleta: {e}")))
+    }
 }
 
 /// A galeria como o painel a lista. O que não interessa ao balcão (quem criou,
@@ -806,5 +827,46 @@ mod tests {
 
         assert_eq!(link.url, "https://recordarfotos.com.br/entrar?t=abc123");
         assert_eq!(link.validade_em_segundos, 604_800);
+    }
+
+    /// 🚨 A cópia de trabalho vem como **bytes**, e não como JSON.
+    ///
+    /// A rota devolve a imagem. Passar a resposta pelo `ler` genérico falharia
+    /// com "resposta ilegível" num corpo perfeitamente legível — o tipo de erro
+    /// que manda procurar defeito no site.
+    #[tokio::test]
+    async fn a_copia_de_trabalho_vem_como_bytes() {
+        let servidor = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/pos-venda/fotos/f1/copia-de-trabalho"))
+            .and(header("authorization", "Bearer tok"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_bytes(vec![0xFF, 0xD8, 0xFF, 0xE0])
+                    .insert_header("content-type", "image/jpeg"),
+            )
+            .mount(&servidor)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/pos-venda/fotos/f9/copia-de-trabalho"))
+            .respond_with(ResponseTemplate::new(404).set_body_json(json!({
+                "error": { "code": "NOT_FOUND", "message": "foto nao encontrada" }
+            })))
+            .mount(&servidor)
+            .await;
+
+        let api = PosVendaApiHttp::nova(servidor.uri());
+        let sessao = Sessao {
+            access_token: "tok".into(),
+        };
+
+        let bytes = api.copia_de_trabalho(&sessao, "f1").await.unwrap();
+        assert_eq!(bytes, vec![0xFF, 0xD8, 0xFF, 0xE0], "o começo de um JPEG");
+
+        let erro = api.copia_de_trabalho(&sessao, "f9").await.unwrap_err();
+        assert!(
+            matches!(erro, DomainError::NaoEncontradoNoSite(_)),
+            "a foto que saiu do site tem desfecho próprio: {erro}"
+        );
     }
 }

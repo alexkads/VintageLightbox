@@ -213,8 +213,8 @@ pub enum Tela {
 }
 
 pub struct Aplicativo {
-    biblioteca: Entity<Biblioteca>,
-    revelacao: Entity<Revelacao>,
+    pub(crate) biblioteca: Entity<Biblioteca>,
+    pub(crate) revelacao: Entity<Revelacao>,
     /// A folha de impressão. Guarda o leiaute entre uma visita e outra: papel,
     /// margem e modelo são escolhas sobre o papel, não sobre a foto.
     impressao: Entity<Impressao>,
@@ -227,13 +227,13 @@ pub struct Aplicativo {
     exportacao: Entity<Exportacao>,
     exportando: bool,
     /// O modal do pós-venda — o único caminho do app até o site.
-    pos_venda: Entity<PosVenda>,
+    pub(crate) pos_venda: Entity<PosVenda>,
     publicando: bool,
     /// O balcão: o que o cliente acertou ao levar a foto na hora.
-    balcao: Entity<Balcao>,
+    pub(crate) balcao: Entity<Balcao>,
     no_balcao: bool,
     /// A lista de sessões fotográficas.
-    sessoes: Entity<Sessoes>,
+    pub(crate) sessoes: Entity<Sessoes>,
     /// A sessão escolhida para receber as fotos. `None` é "nenhuma aberta".
     sessao_aberta: Option<String>,
     /// Quem fala com o pós-venda do site. Guardado porque a classificação
@@ -525,6 +525,35 @@ impl Aplicativo {
         }));
     }
 
+    /// O passo 11 do fluxo: os pixels que só existem no storage.
+    ///
+    /// 🔑 **Só quando não há nada local.** A cópia de trabalho do site custa uma
+    /// ida à rede por foto; pedir sempre transformaria a revelação em série —
+    /// que é como se revela um casamento — em duzentos downloads que o disco já
+    /// tinha respondido.
+    ///
+    /// ⚠️ **E só depois de a Revelação ter tentado abrir.** É ela quem sabe se o
+    /// cache local tinha alguma coisa; perguntar antes seria adivinhar.
+    fn buscar_os_pixels_na_nuvem(&mut self, cx: &mut Context<Self>) {
+        let Some(sessao) = self.sessao().cloned() else {
+            return;
+        };
+        let revelacao = self.revelacao.read(cx);
+        if revelacao.tem_pixels() {
+            return;
+        }
+        let Some(foto) = revelacao.foto_aberta() else {
+            return;
+        };
+        let (Some(no_site), local) = (foto.pos_venda_foto_id.clone(), foto.id.clone()) else {
+            return;
+        };
+
+        self.publicador
+            .copia_de_trabalho(sessao, local, no_site, self.sincronias.0.clone());
+        self.esperar_a_sincronia(cx);
+    }
+
     /// O passo 6 do fluxo: **o cliente paga no balcão**.
     ///
     /// ⚠️ **Leva a seleção, e não a grade inteira** — ao contrário de publicar.
@@ -619,11 +648,33 @@ impl Aplicativo {
     }
 
     /// Drena o que o site respondeu. Devolve se não há mais o que esperar.
-    fn colher_sincronia(&mut self, cx: &mut Context<Self>) -> bool {
+    pub(crate) fn colher_sincronia(&mut self, cx: &mut Context<Self>) -> bool {
         let mut mudou = false;
         while let Ok(recado) = self.sincronias.1.try_recv() {
             match recado {
                 PosVendaRecado::Sincronizou => mudou = true,
+                PosVendaRecado::Pixels { foto_id, bytes } => {
+                    // 🚨 Decodificar pode falhar — resposta truncada, formato
+                    // que o `image` não lê. Falhar aqui deixa a foto como
+                    // estava (vazia), que é o mesmo desfecho de não ter pedido:
+                    // ruim, e honesto.
+                    match image::load_from_memory(&bytes) {
+                        Ok(imagem) => {
+                            let aproveitou = self
+                                .revelacao
+                                .update(cx, |tela, cx| tela.receber_pixels(&foto_id, imagem, cx));
+                            if !aproveitou {
+                                // A seta andou enquanto o download vinha. Não é
+                                // erro: é o motivo de o id vir junto.
+                            }
+                        }
+                        Err(erro) => {
+                            self.biblioteca.update(cx, |tela, cx| {
+                                tela.avisar(format!("a foto do site não abriu: {erro}"), cx)
+                            });
+                        }
+                    }
+                }
                 PosVendaRecado::Falhou(erro) => {
                     self.biblioteca.update(cx, |tela, cx| tela.avisar(erro, cx));
                 }
@@ -672,6 +723,10 @@ impl Aplicativo {
         self.revelacao.update(cx, |tela, cx| {
             tela.abrir_no_acervo(acervo, posicao, window, cx)
         });
+        // 📸 Passo 11: se o cache local não tinha nada e a foto está no site, os
+        // pixels vêm de lá. A pergunta é feita **depois** de abrir, porque é a
+        // Revelação quem sabe se sobrou vazio.
+        self.buscar_os_pixels_na_nuvem(cx);
         self.tela = Tela::Revelacao;
         // 🚨 O foco volta para a raiz a cada troca de tela, e não só na abertura.
         // Quem usou o campo de busca deixou o foco **nele** — e ele para de ser
@@ -1122,7 +1177,7 @@ impl Aplicativo {
     /// tem filmstrip nem seleção própria de acervo — dar nota lá exigiria
     /// escolher em qual foto, e a resposta certa depende de uma tela que ainda
     /// não existe. Fica registrado como pendente da fase 4.
-    fn na_biblioteca(
+    pub(crate) fn na_biblioteca(
         &mut self,
         cx: &mut Context<Self>,
         acao: impl FnOnce(&mut Biblioteca, &mut Context<Biblioteca>),

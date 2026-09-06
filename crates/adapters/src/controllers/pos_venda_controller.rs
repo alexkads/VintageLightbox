@@ -118,6 +118,18 @@ impl PosVendaController {
         self.publicar.remover_do_site(sessao, &id).await
     }
 
+    /// Os bytes da cópia de trabalho de uma foto do site — o passo 11.
+    pub async fn copia_de_trabalho(
+        &self,
+        sessao: &Sessao,
+        foto_id: &str,
+    ) -> Result<Vec<u8>, String> {
+        self.api
+            .copia_de_trabalho(sessao, foto_id)
+            .await
+            .map_err(frase)
+    }
+
     /// O link que entra sem senha, para mandar ao cliente.
     pub async fn link_da_galeria(
         &self,

@@ -265,6 +265,20 @@ pub trait PosVendaApi: Send + Sync {
         sessao: &Sessao,
         galeria_id: &str,
     ) -> DomainResult<LinkDeAcesso>;
+
+    /// Os bytes da **cópia de trabalho** de uma foto que está no site.
+    ///
+    /// 🔑 É o passo 11 do fluxo: a Revelação revela as da base local **e** as do
+    /// storage. A foto que subiu e cujo arquivo não está nesta máquina — outro
+    /// computador do estúdio, cache limpo, foto enviada pelo próprio cliente —
+    /// abre por aqui.
+    ///
+    /// ⚠️ **A cópia de trabalho, e não o original.** São 2048 px, cerca de 1/20
+    /// do arquivo: é o que os sliders animam. O original só faz diferença na
+    /// exportação, e baixá-lo a cada foto da tira seria trafegar dezenas de MB
+    /// para jogar fora antes do primeiro slider se mexer — a mesma decisão que a
+    /// web tomou em `revelacao/fonte.ts`.
+    async fn copia_de_trabalho(&self, sessao: &Sessao, foto_id: &str) -> DomainResult<Vec<u8>>;
 }
 
 #[cfg(test)]
