@@ -146,7 +146,7 @@ impl PublicarNoPosVendaUseCase {
         id: &PhotoId,
         ordem: u32,
     ) -> Result<(String, EstadoNoBalcao), (String, String)> {
-        let photo = match self.fotos.find_by_id(id).await {
+        let mut photo = match self.fotos.find_by_id(id).await {
             Ok(Some(p)) => p,
             Ok(None) => return Err((id.to_string(), "foto não está mais no catálogo".into())),
             Err(e) => return Err((id.to_string(), e.to_string())),
@@ -161,7 +161,8 @@ impl PublicarNoPosVendaUseCase {
             .await
             .map_err(|e| (nome.clone(), e.to_string()))?;
 
-        self.api
+        let enviada = self
+            .api
             .enviar_foto(
                 sessao,
                 galeria_id,
@@ -174,6 +175,19 @@ impl PublicarNoPosVendaUseCase {
             )
             .await
             .map_err(|e| (nome.clone(), e.to_string()))?;
+
+        // 🔑 **O id remoto volta para o catálogo.** Sem ele a publicação seria
+        // um caminho de mão única: dava para subir e não para desfazer — nem
+        // tirar a foto do storage quando a classificação é zerada, nem registrar
+        // a negociação do balcão nela.
+        //
+        // ⚠️ **Falhar aqui não desfaz o envio**: a foto está no site, e dizer
+        // que ela falhou faria o operador subir de novo, criando duplicata. O
+        // preço de não gravar é perder o id — que se recupera relendo a galeria.
+        photo.definir_id_no_site(Some(enviada.id));
+        if let Err(erro) = self.fotos.update(&photo).await {
+            eprintln!("⚠️ [Pós-venda] {nome} subiu, mas o id do site não foi gravado: {erro}");
+        }
 
         Ok((nome, estado))
     }
@@ -341,6 +355,12 @@ mod tests {
                     move |_| Ok(Some(f.clone()))
                 });
         }
+        // 🔑 O id que o site devolveu volta para o catálogo — é o que permite
+        // desfazer depois (tirar do storage, registrar a negociação).
+        repo.expect_update()
+            .times(2)
+            .withf(|foto| foto.id_no_site() == Some("f"))
+            .returning(|_| Ok(()));
         let mut exportador = MockExportador::new();
         exportador
             .expect_renderizar_jpeg()
@@ -394,6 +414,10 @@ mod tests {
                 .withf(move |x| *x == id)
                 .returning(move |_| Ok(Some(f.clone())));
         }
+        // ⚠️ **Uma só**: a foto que falhou no envio não ganha id remoto, porque
+        // ela não está no site. Gravar um id para ela seria mandar o operador
+        // remover, depois, uma foto que nunca subiu.
+        repo.expect_update().times(1).returning(|_| Ok(()));
         let mut exportador = MockExportador::new();
         exportador
             .expect_renderizar_jpeg()

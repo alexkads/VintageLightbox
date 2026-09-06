@@ -1,0 +1,14 @@
+-- Onde esta foto está no site: o id que o pós-venda devolve ao recebê-la.
+--
+-- NULL = a foto só existe aqui, na base local. É esta coluna que permite duas
+-- coisas do fluxo do balcão que antes não tinham como acontecer:
+--
+--   1. zerar a classificação **tirar a foto do storage** (DELETE /pos-venda/
+--      fotos/{id}) — sem saber o id remoto, o app só saberia subir, nunca
+--      desfazer;
+--   2. registrar a negociação do balcão na foto certa (PATCH da mesma rota).
+--
+-- Não é chave estrangeira de nada aqui: o dono do registro é o site, e a foto
+-- pode ser removida de lá por outra tela. Um id que não existe mais no site
+-- volta como 404, e o app trata isso como "já não está lá".
+ALTER TABLE photos ADD COLUMN pos_venda_foto_id TEXT;

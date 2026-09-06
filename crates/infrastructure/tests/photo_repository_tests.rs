@@ -376,3 +376,56 @@ async fn test_save_and_find_photo_with_edits() {
     assert_eq!(updated.edit_exposure(), Some(-0.5));
     assert_eq!(updated.edit_contrast(), Some(1.2));
 }
+
+/// 🚨 O id da foto no site sobrevive ao banco — na gravação **e** na alteração.
+///
+/// É o que permite desfazer: zerar a classificação tira a foto do storage, e sem
+/// o id remoto o app só saberia subir. O defeito que este teste pega é mudo — um
+/// `?` a menos no `INSERT` ou um `.bind` fora de ordem grava a coluna errada, e o
+/// sintoma aparece semanas depois, quando alguém tenta remover uma foto e o site
+/// responde que ela não existe.
+#[tokio::test]
+async fn o_id_no_site_sobrevive_a_gravacao_e_a_alteracao() {
+    let repo = create_test_repository().await;
+    let mut photo = Photo::new(FilePath::new("/photos/ensaio.jpg").unwrap());
+    let id = photo.id();
+
+    // Nasce só local: no fluxo do dono é a classificação que autoriza a subir.
+    assert!(!photo.esta_no_site());
+    repo.save(&photo).await.unwrap();
+    assert_eq!(
+        repo.find_by_id(&id).await.unwrap().unwrap().id_no_site(),
+        None
+    );
+
+    // Subiu: o site devolveu o id dela.
+    photo.definir_id_no_site(Some("foto-remota-1".into()));
+    repo.update(&photo).await.unwrap();
+    let lida = repo.find_by_id(&id).await.unwrap().unwrap();
+    assert_eq!(lida.id_no_site(), Some("foto-remota-1"));
+    assert!(lida.esta_no_site());
+
+    // Zerou a classificação: saiu do storage e volta a ser só local.
+    photo.definir_id_no_site(None);
+    repo.update(&photo).await.unwrap();
+    assert_eq!(
+        repo.find_by_id(&id).await.unwrap().unwrap().id_no_site(),
+        None
+    );
+}
+
+/// E o `INSERT` grava o id quando a foto já nasce sabendo dele.
+#[tokio::test]
+async fn uma_foto_que_ja_nasce_no_site_e_gravada_com_o_id() {
+    let repo = create_test_repository().await;
+    let mut photo = Photo::new(FilePath::new("/photos/outra.jpg").unwrap());
+    photo.definir_id_no_site(Some("foto-remota-2".into()));
+    let id = photo.id();
+
+    repo.save(&photo).await.unwrap();
+
+    assert_eq!(
+        repo.find_by_id(&id).await.unwrap().unwrap().id_no_site(),
+        Some("foto-remota-2")
+    );
+}

@@ -36,6 +36,18 @@ pub struct Photo {
     /// o mesmo que "se".
     #[serde(default)]
     comprada_em: Option<DateTime<Utc>>,
+    /// Onde esta foto está no site — o id que o pós-venda devolveu ao recebê-la.
+    ///
+    /// 🔑 **`None` é "só existe aqui"**, e é o estado normal enquanto a foto não
+    /// foi classificada: no fluxo do dono é a classificação que autoriza a foto
+    /// a subir. Guardar o id é o que permite **desfazer** — zerar a nota tira a
+    /// foto do storage, e sem o id remoto o app só saberia subir.
+    ///
+    /// ⚠️ **O dono do registro é o site.** A foto pode sumir de lá por outra
+    /// tela; um id que não existe mais volta como 404, e isso se lê como "já não
+    /// está lá", não como erro.
+    #[serde(default)]
+    pos_venda_foto_id: Option<String>,
     /// Data de importação
     imported_at: DateTime<Utc>,
     /// Data de última modificação
@@ -243,6 +255,11 @@ impl Photo {
             color_label,
             flag,
             comprada_em,
+            // 🔑 **Fora da lista de argumentos, de propósito.** `reconstruct`
+            // já tem 70 parâmetros posicionais; o 71º seria mais uma posição
+            // para trocar em silêncio. Quem lê do banco chama
+            // `definir_id_no_site` logo depois.
+            pos_venda_foto_id: None,
             is_edited,
             thumbnail_path,
             preview_path,
@@ -396,6 +413,25 @@ impl Photo {
     /// O cliente levou esta foto no balcão?
     pub fn comprada(&self) -> bool {
         self.comprada_em.is_some()
+    }
+
+    /// O id desta foto no site, se ela já subiu.
+    pub fn id_no_site(&self) -> Option<&str> {
+        self.pos_venda_foto_id.as_deref()
+    }
+
+    /// Se ela está no storage da nuvem — o que a Revelação usa para saber de
+    /// onde buscar os pixels, e o balcão para saber se há o que negociar.
+    pub fn esta_no_site(&self) -> bool {
+        self.pos_venda_foto_id.is_some()
+    }
+
+    /// Grava (ou apaga) o id remoto. `None` é "saiu do site".
+    pub fn definir_id_no_site(&mut self, id: Option<String>) {
+        if self.pos_venda_foto_id != id {
+            self.pos_venda_foto_id = id;
+            self.modified_at = Utc::now();
+        }
     }
 
     /// Quando levou, se levou.
