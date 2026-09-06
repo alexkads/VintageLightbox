@@ -18,6 +18,8 @@ use infrastructure::cache::preview_manager::PreviewManager;
 
 use super::arranjo;
 use super::colecoes;
+use biblioteca_core::selecao::{Modificadores, Selecao};
+
 use super::filtros::{indices_visiveis, FiltroDeCompra, FiltroDeSinalizador, Filtros, NotaMinima};
 use super::grade::{colunas_que_cabem, fotos_da_linha, linhas_necessarias};
 use super::informacoes::{estatisticas, estrelas};
@@ -102,24 +104,20 @@ pub struct Biblioteca {
     /// vive — recalcular a cada quadro seria varrer 2.000 caminhos 60 vezes por
     /// segundo para chegar sempre à mesma lista.
     pastas: Vec<Pasta>,
-    /// Índice **no acervo** da foto principal — a que a Revelação abre e a que
-    /// o filmstrip centraliza.
+    /// Quem está marcado e onde está o cursor — **a mesma `Selecao` da grade do
+    /// site** (`biblioteca_core::selecao`).
     ///
-    /// No acervo e não na lista filtrada: mudar de filtro não pode trocar qual
-    /// foto está selecionada. Guardando a posição filtrada, escolher outra
-    /// pasta manteria o índice e selecionaria uma foto diferente sem ninguém
-    /// clicar em nada.
-    selecionada: Option<usize>,
-    /// Todas as selecionadas, incluindo a principal.
+    /// 🔑 **É por posição na grade filtrada, e não por índice do acervo.** Foi a
+    /// troca de 6/set/2026: as regras de clique, Shift, Ctrl e teclado moravam
+    /// aqui em quatro métodos próprios e no site em outros — mesmo gesto, outro
+    /// resultado. Quem sai de `/dashboard/sessoes-fotograficas` e abre este app
+    /// não pode ter de reaprender o Shift.
     ///
-    /// 🔑 **`BTreeSet`, e não `HashSet` como o legado.** Lá a ordem de saída é a
-    /// do hash, e ela **vaza para a folha de impressão**: entrar na Impressão com
-    /// dez fotos selecionadas monta a coleção em ordem de hash, e a posição na
-    /// lista é o que decide em qual célula cada foto cai. Ordenado, "as
-    /// selecionadas" saem sempre na ordem do acervo.
-    selecionadas: std::collections::BTreeSet<usize>,
-    /// De onde o próximo `Shift+clique` mede o intervalo.
-    ancora: Option<usize>,
+    /// ⚠️ **O preço é a tradução nas bordas**: a grade, o filmstrip e as marcas
+    /// falam em índice do acervo, e [`Self::visiveis`] é o dicionário entre os
+    /// dois. Trocar de filtro embaralha as posições — por isso
+    /// [`Self::refiltrar`] reconstrói a seleção **por id**, e não por número.
+    selecao: Selecao,
     /// O dock: quem arruma os quatro painéis, e quem os deixa ser arrastados.
     ///
     /// `Option` porque ele nasce **depois** do resto: os painéis precisam de uma
@@ -242,9 +240,7 @@ impl Biblioteca {
             fotos_para_a_nova_colecao: Vec::new(),
             visiveis: Vec::new(),
             pastas: Vec::new(),
-            selecionada: None,
-            selecionadas: std::collections::BTreeSet::new(),
-            ancora: None,
+            selecao: Selecao::nova(),
             colunas_escolhidas: None,
             dock: None,
             _arranjo: None,
@@ -291,21 +287,10 @@ impl Biblioteca {
         self.fotos = Arc::new(fotos);
         self.pastas = pastas_do_acervo(&self.fotos);
 
-        let onde = |id: &str| self.fotos.iter().position(|foto| foto.id == id);
-        self.selecionada = principal.as_deref().and_then(onde);
-        self.selecionadas = self
-            .fotos
-            .iter()
-            .enumerate()
-            .filter(|(_, foto)| outras.contains(&foto.id))
-            .map(|(i, _)| i)
-            .collect();
-        // A âncora do `Shift+clique` aponta para uma posição do acervo antigo:
-        // mantê-la faria o próximo intervalo começar numa foto que ninguém
-        // apontou. Estender de novo é um clique; estender errado é invisível.
-        self.ancora = None;
-
         self.refiltrar();
+        // A escolha volta **por id**: as posições do acervo antigo não querem
+        // dizer nada no novo. O que sumiu do catálogo simplesmente não volta.
+        self.remarcar_por_id(&outras, principal.as_deref());
         cx.notify();
     }
 
@@ -467,6 +452,11 @@ impl Biblioteca {
 
     /// Recalcula o que está visível. Chamado só quando um filtro muda.
     fn refiltrar(&mut self) {
+        // 🚨 Lido **antes** de `visiveis` mudar: a `Selecao` fala em posições da
+        // grade, e a grade está prestes a deixar de ser a mesma.
+        let marcadas = self.marcadas_no_acervo();
+        let principal = self.principal_no_acervo();
+
         self.visiveis = indices_visiveis(&self.fotos, &self.filtros);
         // 🔑 A coleção filtra **por cima** dos outros filtros, e não no lugar
         // deles: abrir o ensaio de um cliente e então pedir ★★★★ dentro dele é
@@ -477,7 +467,7 @@ impl Biblioteca {
             let colecoes = &self.colecoes;
             self.visiveis.retain(|&i| colecoes.aceita(&fotos[i].id));
         }
-        self.sanear_selecao();
+        self.sanear_selecao(marcadas, principal);
     }
 
     pub fn colecoes(&self) -> &colecoes::Estado {
@@ -628,32 +618,91 @@ impl Biblioteca {
     /// ⚠️ **Aqui é a seguinte**, porque numa triagem de 800 fotos voltar ao começo
     /// a cada foto rejeitada faz perder o lugar — e perder o lugar é o que a
     /// triagem inteira existe para não fazer.
-    fn sanear_selecao(&mut self) {
+    fn sanear_selecao(&mut self, marcadas: Vec<usize>, principal: Option<usize>) {
         let visiveis: std::collections::HashSet<usize> = self.visiveis.iter().copied().collect();
-        self.selecionadas.retain(|i| visiveis.contains(i));
 
-        let Some(atual) = self.selecionada else {
+        self.selecao = Selecao::nova();
+        for no_acervo in marcadas.iter().copied().filter(|i| visiveis.contains(i)) {
+            if let Some(posicao) = self.posicao_de(no_acervo) {
+                self.selecao.marcar(posicao);
+            }
+        }
+
+        let Some(atual) = principal else {
             return;
         };
         if visiveis.contains(&atual) {
+            self.selecao.focar(self.posicao_de(atual));
             return;
         }
 
         // Sobrou alguém da seleção? Então a principal passa a ser a primeira
         // delas — a seleção manda mais que a posição. Senão, anda para a
         // seguinte que ainda está na grade.
-        self.selecionada = self.selecionadas.first().copied().or_else(|| {
-            self.visiveis
-                .iter()
-                .copied()
-                .find(|&i| i > atual)
-                .or_else(|| self.visiveis.last().copied())
-        });
+        let nova = self
+            .selecao
+            .marcadas()
+            .next()
+            .and_then(|posicao| self.no_acervo(posicao))
+            .or_else(|| {
+                self.visiveis
+                    .iter()
+                    .copied()
+                    .find(|&i| i > atual)
+                    .or_else(|| self.visiveis.last().copied())
+            });
 
-        if let Some(nova) = self.selecionada {
-            self.selecionadas.insert(nova);
+        if let Some(no_acervo) = nova {
+            if let Some(posicao) = self.posicao_de(no_acervo) {
+                self.selecao.marcar(posicao);
+                self.selecao.focar(Some(posicao));
+            }
         }
-        self.ancora = self.selecionada;
+    }
+
+    /// A posição na grade filtrada de uma foto do acervo. `None` se ela não
+    /// passa no filtro de agora.
+    fn posicao_de(&self, no_acervo: usize) -> Option<usize> {
+        self.visiveis.iter().position(|&i| i == no_acervo)
+    }
+
+    /// O caminho de volta: a foto do acervo que está naquela posição da grade.
+    fn no_acervo(&self, posicao: usize) -> Option<usize> {
+        self.visiveis.get(posicao).copied()
+    }
+
+    /// As marcadas, traduzidas para o acervo e **na ordem da grade**.
+    ///
+    /// A ordem importa: é ela que decide em qual célula da folha de impressão
+    /// cada foto cai. No legado esta lista sai de um `HashSet`, em ordem de hash.
+    fn marcadas_no_acervo(&self) -> Vec<usize> {
+        self.selecao
+            .marcadas()
+            .filter_map(|posicao| self.no_acervo(posicao))
+            .collect()
+    }
+
+    /// A foto do cursor, no acervo.
+    fn principal_no_acervo(&self) -> Option<usize> {
+        self.selecao.foco().and_then(|p| self.no_acervo(p))
+    }
+
+    /// Refaz a escolha a partir de ids, depois de o acervo inteiro mudar.
+    fn remarcar_por_id(
+        &mut self,
+        marcadas: &std::collections::HashSet<String>,
+        principal: Option<&str>,
+    ) {
+        self.selecao = Selecao::nova();
+        for (posicao, &no_acervo) in self.visiveis.iter().enumerate() {
+            if marcadas.contains(&self.fotos[no_acervo].id) {
+                self.selecao.marcar(posicao);
+            }
+        }
+        if let Some(id) = principal {
+            let onde = self.visiveis.iter().position(|&i| self.fotos[i].id == id);
+            self.selecao.focar(onde);
+        }
     }
 
     /// A foto selecionada, para quem está de fora.
@@ -662,7 +711,7 @@ impl Biblioteca {
     /// levar a foto até a Revelação, e o que ela leva tem de continuar valendo
     /// depois que a grade mudar de filtro.
     pub fn foto_selecionada(&self) -> Option<PhotoViewModel> {
-        self.selecionada.map(|i| self.fotos[i].clone())
+        self.principal_no_acervo().map(|i| self.fotos[i].clone())
     }
 
     /// Os ids das selecionadas, **na ordem do acervo**.
@@ -671,9 +720,9 @@ impl Biblioteca {
     /// porque a posição na lista decide em qual célula da folha cada foto cai.
     /// No legado esta lista sai de um `HashSet`, em ordem de hash.
     pub fn ids_selecionados(&self) -> Vec<String> {
-        self.selecionadas
-            .iter()
-            .map(|&i| self.fotos[i].id.clone())
+        self.marcadas_no_acervo()
+            .into_iter()
+            .map(|i| self.fotos[i].id.clone())
             .collect()
     }
 
@@ -699,9 +748,9 @@ impl Biblioteca {
     /// exportação cair em [`Self::fotos_visiveis`] nesse caso, em vez de exportar
     /// a única foto principal quando a pessoa filtrou 300 e não marcou nenhuma.
     pub fn fotos_selecionadas(&self) -> Vec<PhotoViewModel> {
-        self.selecionadas
-            .iter()
-            .map(|&i| self.fotos[i].clone())
+        self.marcadas_no_acervo()
+            .into_iter()
+            .map(|i| self.fotos[i].clone())
             .collect()
     }
 
@@ -729,10 +778,10 @@ impl Biblioteca {
     /// triagem, que se apertam às centenas numa sessão; sem o passo de
     /// confirmação, um dedo fora do lugar tira fotos do catálogo em lote.
     pub fn pedir_para_apagar(&mut self, cx: &mut Context<Self>) {
-        let quantas = if self.selecionadas.is_empty() {
-            usize::from(self.selecionada.is_some())
+        let quantas = if self.selecao.vazia() {
+            usize::from(self.selecao.foco().is_some())
         } else {
-            self.selecionadas.len()
+            self.selecao.quantas()
         };
         if quantas == 0 {
             return;
@@ -763,10 +812,10 @@ impl Biblioteca {
     pub fn apagar_confirmado(&mut self, cx: &mut Context<Self>) {
         self.confirmando_apagar = None;
 
-        let alvos: Vec<usize> = if self.selecionadas.is_empty() {
-            self.selecionada.into_iter().collect()
+        let alvos: Vec<usize> = if self.selecao.vazia() {
+            self.principal_no_acervo().into_iter().collect()
         } else {
-            self.selecionadas.iter().copied().collect()
+            self.marcadas_no_acervo()
         };
         if alvos.is_empty() {
             return;
@@ -787,11 +836,10 @@ impl Biblioteca {
 
         self.fotos = Arc::new(restantes);
         self.pastas = pastas_do_acervo(&self.fotos);
-        // 🚨 A seleção apontava para posições do acervo antigo. Mantê-la faria a
-        // próxima tecla de triagem cair em fotos que ninguém escolheu.
-        self.selecionada = None;
-        self.selecionadas.clear();
-        self.ancora = None;
+        // 🚨 A seleção apontava para posições de uma grade que não existe mais.
+        // Mantê-la faria a próxima tecla de triagem cair em fotos que ninguém
+        // escolheu.
+        self.selecao = Selecao::nova();
         self.refiltrar();
         cx.notify();
     }
@@ -807,7 +855,7 @@ impl Biblioteca {
     }
 
     pub fn quantas_selecionadas(&self) -> usize {
-        self.selecionadas.len()
+        self.selecao.quantas()
     }
 
     /// Seleciona **uma só**, por índice no acervo — o clique sem modificador.
@@ -817,21 +865,31 @@ impl Biblioteca {
     /// as anteriores faria a próxima tecla de nota cair em fotos que quem
     /// clicou já tinha esquecido.
     pub fn selecionar(&mut self, no_acervo: Option<usize>, cx: &mut Context<Self>) {
-        self.selecionada = no_acervo;
-        self.selecionadas = no_acervo.into_iter().collect();
-        self.ancora = no_acervo;
+        match no_acervo.and_then(|i| self.posicao_de(i)) {
+            Some(posicao) => self
+                .selecao
+                .clicar(posicao, false, Modificadores::default()),
+            None => self.selecao.limpar_tudo(),
+        }
         cx.notify();
     }
 
     /// `Cmd+clique`: põe ou tira uma foto da seleção, sem tocar nas outras.
     pub fn alternar_uma(&mut self, no_acervo: usize, cx: &mut Context<Self>) {
-        if !self.selecionadas.remove(&no_acervo) {
-            self.selecionadas.insert(no_acervo);
-        }
-        // A âncora e a principal andam com o último clique, mesmo quando ele
+        let Some(posicao) = self.posicao_de(no_acervo) else {
+            return;
+        };
+        // A âncora e o cursor andam com o último clique, mesmo quando ele
         // **tirou** a foto da seleção: é dali que o próximo `Shift+clique` mede.
-        self.ancora = Some(no_acervo);
-        self.selecionada = Some(no_acervo);
+        // Quem decide isso é o core, e é a mesma decisão da grade do site.
+        self.selecao.clicar(
+            posicao,
+            false,
+            Modificadores {
+                aditivo: true,
+                faixa: false,
+            },
+        );
         cx.notify();
     }
 
@@ -845,27 +903,17 @@ impl Biblioteca {
     /// algumas das marcadas nem estão na tela. É a mesma armadilha que a grade da
     /// fase 1 encontrou (célula mostrando a foto errada com filtro ativo).
     pub fn selecionar_ate(&mut self, no_acervo: usize, cx: &mut Context<Self>) {
-        let posicao_atual = self.visiveis.iter().position(|&i| i == no_acervo);
-        let posicao_ancora = self
-            .ancora
-            .and_then(|ancora| self.visiveis.iter().position(|&i| i == ancora));
-
-        match (posicao_atual, posicao_ancora) {
-            (Some(atual), Some(ancora)) => {
-                let (inicio, fim) = (atual.min(ancora), atual.max(ancora));
-                for posicao in inicio..=fim {
-                    self.selecionadas.insert(self.visiveis[posicao]);
-                }
-            }
-            // Sem âncora — ou com a âncora fora do filtro atual — o Shift vale
-            // como um clique comum sobre esta foto, que é o que o legado faz.
-            _ => {
-                self.selecionadas.insert(no_acervo);
-                self.ancora = Some(no_acervo);
-            }
-        }
-
-        self.selecionada = Some(no_acervo);
+        let Some(posicao) = self.posicao_de(no_acervo) else {
+            return;
+        };
+        self.selecao.clicar(
+            posicao,
+            false,
+            Modificadores {
+                aditivo: false,
+                faixa: true,
+            },
+        );
         cx.notify();
     }
 
@@ -877,23 +925,22 @@ impl Biblioteca {
     /// cai em todas elas. O próprio legado se contradiz: o "Select All" do módulo
     /// de impressão usa a lista filtrada.
     pub fn selecionar_tudo(&mut self, cx: &mut Context<Self>) {
-        self.selecionadas = self.visiveis.iter().copied().collect();
-        // A principal continua sendo a que já era, se ela sobreviveu ao filtro;
-        // senão, a primeira da grade. Sem isto, `Cmd+A` deixaria a Revelação sem
-        // saber qual abrir.
-        if self
-            .selecionada
-            .is_none_or(|i| !self.selecionadas.contains(&i))
-        {
-            self.selecionada = self.visiveis.first().copied();
-        }
-        self.ancora = self.selecionada;
+        self.selecao.marcar_todas(self.visiveis.len());
+        // O cursor continua onde estava; se não havia nenhum, vai para a
+        // primeira da grade. Sem isto, `Cmd+A` deixaria a Revelação sem saber
+        // qual abrir.
+        self.selecao.focar_primeira_se_vazio(self.visiveis.len());
         cx.notify();
     }
 
-    /// `Cmd+D`: limpa a seleção inteira.
+    /// `Cmd+D`: desmarca tudo.
+    ///
+    /// ⚠️ **O cursor fica onde está**, como no site (`Selecao::desmarcar`). Até
+    /// 6/set/2026 o desktop limpava o foco junto, e a tecla seguinte de triagem
+    /// não tinha em quem cair.
     pub fn limpar_selecao(&mut self, cx: &mut Context<Self>) {
-        self.selecionar(None, cx);
+        self.selecao.desmarcar();
+        cx.notify();
     }
 
     /// Quantas colunas a grade desenha agora.
@@ -937,9 +984,7 @@ impl Biblioteca {
             return;
         }
 
-        let posicao = self
-            .selecionada
-            .and_then(|no_acervo| self.visiveis.iter().position(|&i| i == no_acervo));
+        let posicao = self.selecao.foco();
 
         let nova = match posicao {
             Some(atual) if passo > 0 => (atual + 1).min(self.visiveis.len() - 1),
@@ -948,7 +993,8 @@ impl Biblioteca {
             None => self.visiveis.len() - 1,
         };
 
-        self.selecionar(Some(self.visiveis[nova]), cx);
+        self.selecao.clicar(nova, false, Modificadores::default());
+        cx.notify();
     }
 
     /// A nota das selecionadas — `0` a `5`, absoluta.
@@ -963,7 +1009,7 @@ impl Biblioteca {
     /// que evita uma tecla deixar metade das fotos amarelas e a outra metade sem
     /// cor.
     pub fn dar_cor(&mut self, cor: &str, cx: &mut Context<Self>) {
-        let todas_ja_tem = self.selecionadas.iter().all(|&i| {
+        let todas_ja_tem = self.marcadas_no_acervo().into_iter().all(|i| {
             self.fotos[i]
                 .color_label
                 .as_deref()
@@ -987,9 +1033,9 @@ impl Biblioteca {
     /// A divergência só aparece em lote, que é o que esta entrega trouxe.
     pub fn sinalizar(&mut self, pedido: i32, cx: &mut Context<Self>) {
         let todas_ja_tem = self
-            .selecionadas
-            .iter()
-            .all(|&i| self.fotos[i].flag.unwrap_or(0) == pedido);
+            .marcadas_no_acervo()
+            .into_iter()
+            .all(|i| self.fotos[i].flag.unwrap_or(0) == pedido);
 
         let codigo = sinalizador_ao_teclar(todas_ja_tem.then_some(pedido), pedido);
         self.aplicar(Marca::Sinalizador(codigo), cx);
@@ -1001,7 +1047,10 @@ impl Biblioteca {
     /// três selecionadas e uma já marcada, `B` marca as três — é a mesma regra
     /// do sinalizador, pelo mesmo motivo (uma tecla, um desfecho).
     pub fn marcar_comprada(&mut self, cx: &mut Context<Self>) {
-        let todas_ja_levadas = self.selecionadas.iter().all(|&i| self.fotos[i].comprada);
+        let todas_ja_levadas = self
+            .marcadas_no_acervo()
+            .into_iter()
+            .all(|i| self.fotos[i].comprada);
         self.aplicar(Marca::Comprada(!todas_ja_levadas), cx);
     }
 
@@ -1018,12 +1067,13 @@ impl Biblioteca {
     /// comportamento que se quer — a grade mostra o que passa no filtro, e a
     /// foto acabou de deixar de passar.
     fn aplicar(&mut self, marca: Marca, cx: &mut Context<Self>) {
-        if self.selecionadas.is_empty() {
+        let alvos = self.marcadas_no_acervo();
+        if alvos.is_empty() {
             return;
         }
 
         let fotos = Arc::make_mut(&mut self.fotos);
-        for &no_acervo in &self.selecionadas {
+        for no_acervo in alvos {
             let foto = &mut fotos[no_acervo];
 
             match &marca {
@@ -1040,18 +1090,15 @@ impl Biblioteca {
         cx.notify();
     }
 
-    /// O clique sem modificador.
+    /// O clique sem modificador: seleciona **só** esta.
     ///
-    /// Seleciona **só** esta — e clicar na que já era a única selecionada
-    /// desmarca, que é como se desfaz sem procurar botão. ⚠️ Com várias
-    /// selecionadas, clicar numa delas **não** desmarca tudo: encolhe a seleção
-    /// para a que foi clicada. Desmarcar as cinco por engano ao tentar escolher
-    /// uma delas é o desfecho que ninguém quer, e desfazer isso é reselecionar
-    /// tudo de novo.
+    /// 🚨 **Mudou em 6/set/2026, e mudou de propósito.** Até então clicar na
+    /// única foto selecionada a **desmarcava**, e a grade do site não faz isso —
+    /// mesmo gesto, dois resultados, dependendo do app em que a pessoa está. A
+    /// regra que sobrou é a do site, que é a referência: clique simples marca a
+    /// foto clicada e só ela. Para desmarcar sem clicar em outra há `Cmd+D`.
     pub fn alternar_selecao(&mut self, no_acervo: usize, cx: &mut Context<Self>) {
-        let unica_e_esta = self.selecionadas.len() == 1 && self.selecionadas.contains(&no_acervo);
-        let alvo = if unica_e_esta { None } else { Some(no_acervo) };
-        self.selecionar(alvo, cx);
+        self.selecionar(Some(no_acervo), cx);
     }
 
     fn cabecalho(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1072,8 +1119,8 @@ impl Biblioteca {
         // 🔑 **Quantas estão selecionadas só aparece a partir de duas.** Com uma
         // só, a moldura na grade já diz tudo; o número existe para quando a
         // seleção não cabe na tela — e uma tecla de nota vai cair em todas elas.
-        let selecao: Option<SharedString> = (self.selecionadas.len() > 1)
-            .then(|| format!("{} selecionadas", self.selecionadas.len()).into());
+        let selecao: Option<SharedString> = (self.selecao.quantas() > 1)
+            .then(|| format!("{} selecionadas", self.selecao.quantas()).into());
 
         div()
             .flex()
@@ -1297,7 +1344,7 @@ impl Biblioteca {
     /// rápido. Aqui a cor é a da foto, e continua sem clique: quem marca cor são
     /// as teclas `6`–`9`.
     fn painel_de_informacoes(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let foto = self.selecionada.map(|i| &self.fotos[i]);
+        let foto = self.principal_no_acervo().map(|i| &self.fotos[i]);
         let numeros = estatisticas(&self.fotos);
         let maior = numeros.por_nota.iter().copied().max().unwrap_or(0).max(1);
 
@@ -1463,9 +1510,10 @@ impl Biblioteca {
         /// Quantas de cada lado. Ímpar de propósito: a selecionada fica no meio.
         const VIZINHAS: usize = 7;
 
-        let posicao_atual = self
-            .selecionada
-            .and_then(|no_acervo| self.visiveis.iter().position(|&i| i == no_acervo));
+        // O cursor já é posição na grade — é a mesma conta que o filmstrip
+        // precisa, e não há mais tradução de ida e volta aqui.
+        let posicao_atual = self.selecao.foco();
+        let principal = self.principal_no_acervo();
 
         let inicio = posicao_atual
             .map(|p| p.saturating_sub(VIZINHAS))
@@ -1476,7 +1524,7 @@ impl Biblioteca {
         for posicao in inicio..fim {
             let no_acervo = self.visiveis[posicao];
             let foto = &self.fotos[no_acervo];
-            let e_a_selecionada = self.selecionada == Some(no_acervo);
+            let e_a_selecionada = principal == Some(no_acervo);
 
             itens.push(
                 div()
@@ -1527,7 +1575,7 @@ impl Biblioteca {
             );
         }
 
-        let legenda: SharedString = match self.selecionada {
+        let legenda: SharedString = match principal {
             Some(i) => format!("selecionada: {}", self.fotos[i].name).into(),
             None => "nenhuma foto selecionada".into(),
         };
@@ -1824,9 +1872,11 @@ impl Biblioteca {
         let visiveis = Arc::new(self.visiveis.clone());
         let previews = self.previews.clone();
         let cache = self.cache.clone();
-        let principal = self.selecionada;
-        // A seleção inteira vai para o closure `'static` do `uniform_list`.
-        let selecionadas = Arc::new(self.selecionadas.clone());
+        let principal = self.principal_no_acervo();
+        // A seleção inteira vai para o closure `'static` do `uniform_list`, já
+        // traduzida para índices do acervo — é a linguagem da célula.
+        let selecionadas: Arc<std::collections::BTreeSet<usize>> =
+            Arc::new(self.marcadas_no_acervo().into_iter().collect());
         // O closure do `uniform_list` é `'static` e recebe `&mut App`, não
         // `&mut self` — para escrever no estado a partir dele, é preciso levar
         // uma referência à entidade e pedir a ela que se atualize.
@@ -1913,8 +1963,8 @@ impl Biblioteca {
     /// A lista de coleções, e o campo que cria uma.
     fn lista_de_colecoes(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let aberta = self.colecoes.aberta().map(str::to_string);
-        let tem_selecao = !self.selecionadas.is_empty();
-        let quantas_selecionadas = self.selecionadas.len();
+        let tem_selecao = !self.selecao.vazia();
+        let quantas_selecionadas = self.selecao.quantas();
 
         div()
             .flex()
@@ -2871,13 +2921,16 @@ mod testes {
             .all(|(_, m)| *m == Marca::Comprada(false)));
     }
 
-    /// ⚠️ Clicar numa das selecionadas **encolhe** a seleção para ela.
+    /// 🚨 Clique simples encolhe a seleção para a foto clicada — e **não**
+    /// desmarca quando ela já era a única.
     ///
-    /// Só desmarca quando ela já era a única. Desmarcar as cinco por engano ao
-    /// tentar escolher uma delas é o desfecho que ninguém quer, e desfazer isso
-    /// é reselecionar tudo de novo.
+    /// Até 6/set/2026 o desktop desmarcava nesse segundo caso, e a grade do
+    /// site nunca fez isso: mesmo gesto, dois resultados conforme o app. Quem
+    /// sai de `/dashboard/sessoes-fotograficas` e abre este app não pode ter de
+    /// reaprender o clique. A regra que sobrou é a do site, porque o site é a
+    /// referência; para desmarcar sem clicar em outra foto existe `Cmd+D`.
     #[gpui::test]
-    fn clicar_numa_das_selecionadas_encolhe_em_vez_de_limpar(cx: &mut TestAppContext) {
+    fn clicar_numa_das_selecionadas_encolhe_para_ela(cx: &mut TestAppContext) {
         let (janela, _marcador, _dir) = tela_com(cx, acervo_grande());
 
         janela
@@ -2890,9 +2943,51 @@ mod testes {
                 assert_eq!(tela.quantas_selecionadas(), 1);
                 assert_eq!(tela.ids_selecionados(), vec!["id-02.jpg".to_string()]);
 
-                // E de novo na mesma, agora única: aí sim desmarca.
+                // E de novo na mesma: continua sendo ela, como no site.
                 tela.alternar_selecao(2, cx);
+                assert_eq!(tela.quantas_selecionadas(), 1);
+                assert_eq!(tela.ids_selecionados(), vec!["id-02.jpg".to_string()]);
+
+                // Quem desmarca é o `Cmd+D` — e o cursor fica onde estava.
+                tela.limpar_selecao(cx);
                 assert_eq!(tela.quantas_selecionadas(), 0);
+                assert_eq!(
+                    tela.foto_selecionada().map(|f| f.id),
+                    Some("id-02.jpg".to_string()),
+                    "desmarcar não é perder o lugar"
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 `Shift+clique` **substitui** pela faixa, e não acrescenta a ela.
+    ///
+    /// A outra divergência de 6/set/2026: o desktop somava o intervalo ao que
+    /// já estava marcado, e o site troca pela faixa entre a âncora e o destino.
+    /// Com quatro fotos espalhadas já marcadas, o mesmo gesto dava 4+n de um
+    /// lado e n do outro.
+    #[gpui::test]
+    fn shift_clique_substitui_pela_faixa_como_no_site(cx: &mut TestAppContext) {
+        let (janela, _marcador, _dir) = tela_com(cx, acervo_grande());
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.selecionar(Some(0), cx);
+                tela.alternar_uma(5, cx);
+                assert_eq!(tela.quantas_selecionadas(), 2);
+
+                // A âncora é o último clique — a foto 5. Estender até a 7 dá
+                // três fotos, e não cinco.
+                tela.selecionar_ate(7, cx);
+                assert_eq!(
+                    tela.ids_selecionados(),
+                    vec![
+                        "id-05.jpg".to_string(),
+                        "id-06.jpg".to_string(),
+                        "id-07.jpg".to_string()
+                    ],
+                    "a faixa é a seleção inteira, e mede da âncora"
+                );
             })
             .expect("a janela deve estar aberta");
     }
