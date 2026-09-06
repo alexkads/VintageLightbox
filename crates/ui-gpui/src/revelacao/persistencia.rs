@@ -146,6 +146,13 @@ impl Gravador for GravadorDoBanco {
                     ajustes.nr_color,
                     ajustes.sharpen_amount,
                     ajustes.sharpen_radius,
+                    ajustes.split_shadow_hue,
+                    ajustes.split_shadow_sat,
+                    ajustes.split_highlight_hue,
+                    ajustes.split_highlight_sat,
+                    ajustes.split_balance,
+                    ajustes.grain_amount,
+                    ajustes.grain_size,
                     corte.x,
                     corte.y,
                     corte.largura,
@@ -228,6 +235,13 @@ pub fn da_foto(foto: &PhotoViewModel) -> Ajustes {
         nr_color <- edit_nr_color,
         sharpen_amount <- edit_sharpen_amount,
         sharpen_radius <- edit_sharpen_radius,
+        split_shadow_hue <- edit_split_shadow_hue,
+        split_shadow_sat <- edit_split_shadow_sat,
+        split_highlight_hue <- edit_split_highlight_hue,
+        split_highlight_sat <- edit_split_highlight_sat,
+        split_balance <- edit_split_balance,
+        grain_amount <- edit_grain_amount,
+        grain_size <- edit_grain_size,
     }
 
     ajustes
@@ -377,15 +391,15 @@ mod testes {
         assert_eq!(ajustes.contrast, 0.0);
     }
 
-    /// Os 46 campos estão na macro — nenhum ficou de fora na cópia.
+    /// Os 53 campos estão na macro — nenhum ficou de fora na cópia.
     ///
     /// 🚨 Um campo esquecido não falha: ele simplesmente nunca volta do banco, e
-    /// a foto abre com aquele ajuste no neutro. Com 46 nomes parecidos
+    /// a foto abre com aquele ajuste no neutro. Com 53 nomes parecidos
     /// (`hsl_blue_lum` e `hsl_blue_sat` diferem em três letras), esquecer um é o
     /// erro provável — e o sintoma seria "o app novo perdeu meu HSL", meses
     /// depois.
     #[test]
-    fn todos_os_46_campos_voltam_do_banco() {
+    fn todos_os_campos_voltam_do_banco() {
         // Uma foto com **tudo** gravado num valor que não é o neutro de nenhum
         // campo, e a conferência de que nenhum sobrou no neutro.
         const MARCA: f32 = 7.25;
@@ -436,13 +450,20 @@ mod testes {
             edit_nr_color: Some(MARCA),
             edit_sharpen_amount: Some(MARCA),
             edit_sharpen_radius: Some(MARCA),
+            edit_split_shadow_hue: Some(MARCA),
+            edit_split_shadow_sat: Some(MARCA),
+            edit_split_highlight_hue: Some(MARCA),
+            edit_split_highlight_sat: Some(MARCA),
+            edit_split_balance: Some(MARCA),
+            edit_grain_amount: Some(MARCA),
+            edit_grain_size: Some(MARCA),
             ..foto()
         };
 
         let ajustes = da_foto(&salva);
         let campos: &[f32] = bytemuck::cast_slice(bytemuck::bytes_of(&ajustes));
 
-        assert_eq!(campos.len(), 46);
+        assert_eq!(campos.len(), std::mem::size_of::<Ajustes>() / 4);
         for (i, valor) in campos.iter().enumerate() {
             assert_eq!(
                 *valor, MARCA,

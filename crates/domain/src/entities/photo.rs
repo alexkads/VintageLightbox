@@ -147,6 +147,22 @@ pub struct Photo {
     /// Sharpening: Radius (0.5 to 3.0)
     edit_sharpen_radius: Option<f32>,
 
+    // --- Tonalização e grão ---
+    /// Tonalização: matiz das sombras, em graus (0 a 360)
+    edit_split_shadow_hue: Option<f32>,
+    /// Tonalização: saturação das sombras (0 a 100)
+    edit_split_shadow_sat: Option<f32>,
+    /// Tonalização: matiz das altas luzes, em graus (0 a 360)
+    edit_split_highlight_hue: Option<f32>,
+    /// Tonalização: saturação das altas luzes (0 a 100)
+    edit_split_highlight_sat: Option<f32>,
+    /// Tonalização: onde as sombras cedem às altas luzes (-100 a 100)
+    edit_split_balance: Option<f32>,
+    /// Grão de filme: quantidade (0 a 100)
+    edit_grain_amount: Option<f32>,
+    /// Grão de filme: tamanho do grumo (0 a 100)
+    edit_grain_size: Option<f32>,
+
     // --- Crop & Rotation ---
     edit_crop_x: Option<f32>,
     edit_crop_y: Option<f32>,
@@ -236,6 +252,13 @@ impl Photo {
         edit_nr_color: Option<f32>,
         edit_sharpen_amount: Option<f32>,
         edit_sharpen_radius: Option<f32>,
+        edit_split_shadow_hue: Option<f32>,
+        edit_split_shadow_sat: Option<f32>,
+        edit_split_highlight_hue: Option<f32>,
+        edit_split_highlight_sat: Option<f32>,
+        edit_split_balance: Option<f32>,
+        edit_grain_amount: Option<f32>,
+        edit_grain_size: Option<f32>,
         edit_crop_x: Option<f32>,
         edit_crop_y: Option<f32>,
         edit_crop_width: Option<f32>,
@@ -310,6 +333,13 @@ impl Photo {
             edit_nr_color,
             edit_sharpen_amount,
             edit_sharpen_radius,
+            edit_split_shadow_hue,
+            edit_split_shadow_sat,
+            edit_split_highlight_hue,
+            edit_split_highlight_sat,
+            edit_split_balance,
+            edit_grain_amount,
+            edit_grain_size,
             edit_crop_x,
             edit_crop_y,
             edit_crop_width,
@@ -333,6 +363,8 @@ impl Photo {
             None, None, None, // Lens
             None, None, // NR (2 fields)
             None, None, // Sharpening (2 fields)
+            None, None, None, None, None, // Tonalização (5 fields)
+            None, None, // Grão (2 fields)
             None, None, None, None, None, None, None, None, // Crop & Rotation (8 fields)
         )
     }
@@ -653,6 +685,13 @@ impl Photo {
         nr_color: Option<f32>,
         sharpen_amount: Option<f32>,
         sharpen_radius: Option<f32>,
+        split_shadow_hue: Option<f32>,
+        split_shadow_sat: Option<f32>,
+        split_highlight_hue: Option<f32>,
+        split_highlight_sat: Option<f32>,
+        split_balance: Option<f32>,
+        grain_amount: Option<f32>,
+        grain_size: Option<f32>,
         crop_x: Option<f32>,
         crop_y: Option<f32>,
         crop_width: Option<f32>,
@@ -708,6 +747,13 @@ impl Photo {
         self.edit_nr_color = nr_color;
         self.edit_sharpen_amount = sharpen_amount;
         self.edit_sharpen_radius = sharpen_radius;
+        self.edit_split_shadow_hue = split_shadow_hue;
+        self.edit_split_shadow_sat = split_shadow_sat;
+        self.edit_split_highlight_hue = split_highlight_hue;
+        self.edit_split_highlight_sat = split_highlight_sat;
+        self.edit_split_balance = split_balance;
+        self.edit_grain_amount = grain_amount;
+        self.edit_grain_size = grain_size;
         self.edit_crop_x = crop_x;
         self.edit_crop_y = crop_y;
         self.edit_crop_width = crop_width;
@@ -841,6 +887,41 @@ impl Photo {
     /// Retorna o campo edit_sharpen_radius
     pub fn edit_sharpen_radius(&self) -> Option<f32> {
         self.edit_sharpen_radius
+    }
+
+    /// Retorna o campo edit_split_shadow_hue
+    pub fn edit_split_shadow_hue(&self) -> Option<f32> {
+        self.edit_split_shadow_hue
+    }
+
+    /// Retorna o campo edit_split_shadow_sat
+    pub fn edit_split_shadow_sat(&self) -> Option<f32> {
+        self.edit_split_shadow_sat
+    }
+
+    /// Retorna o campo edit_split_highlight_hue
+    pub fn edit_split_highlight_hue(&self) -> Option<f32> {
+        self.edit_split_highlight_hue
+    }
+
+    /// Retorna o campo edit_split_highlight_sat
+    pub fn edit_split_highlight_sat(&self) -> Option<f32> {
+        self.edit_split_highlight_sat
+    }
+
+    /// Retorna o campo edit_split_balance
+    pub fn edit_split_balance(&self) -> Option<f32> {
+        self.edit_split_balance
+    }
+
+    /// Retorna o campo edit_grain_amount
+    pub fn edit_grain_amount(&self) -> Option<f32> {
+        self.edit_grain_amount
+    }
+
+    /// Retorna o campo edit_grain_size
+    pub fn edit_grain_size(&self) -> Option<f32> {
+        self.edit_grain_size
     }
 
     /// Retorna o campo edit_hsl_red_hue

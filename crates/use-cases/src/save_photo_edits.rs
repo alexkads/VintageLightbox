@@ -71,6 +71,13 @@ impl SavePhotoEditsUseCase {
         nr_color: f32,
         sharpen_amount: f32,
         sharpen_radius: f32,
+        split_shadow_hue: f32,
+        split_shadow_sat: f32,
+        split_highlight_hue: f32,
+        split_highlight_sat: f32,
+        split_balance: f32,
+        grain_amount: f32,
+        grain_size: f32,
         crop_x: Option<f32>,
         crop_y: Option<f32>,
         crop_width: Option<f32>,
@@ -133,6 +140,13 @@ impl SavePhotoEditsUseCase {
             Some(nr_color),
             Some(sharpen_amount),
             Some(sharpen_radius),
+            Some(split_shadow_hue),
+            Some(split_shadow_sat),
+            Some(split_highlight_hue),
+            Some(split_highlight_sat),
+            Some(split_balance),
+            Some(grain_amount),
+            Some(grain_size),
             crop_x,
             crop_y,
             crop_width,
@@ -208,6 +222,9 @@ mod tests {
                 0.0, 0.0, 0.0, // Lens
                 0.0, 0.0, // NR
                 0.0, 1.0, // Sharpening (amount, radius)
+                0.0, 0.0, 0.0, 0.0,
+                0.0, // Tonalização (matiz/sat das duas pontas, balanço)
+                0.0, 0.0, // Grão (quantidade, tamanho)
                 None, None, None, None, // Crop Rect
                 None, None, // Rotation
                 None, None, // Flip
@@ -238,6 +255,9 @@ mod tests {
                 0.0, 0.0, 0.0, // Lens
                 0.0, 0.0, // NR
                 0.0, 1.0, // Sharpening
+                0.0, 0.0, 0.0, 0.0,
+                0.0, // Tonalização (matiz/sat das duas pontas, balanço)
+                0.0, 0.0, // Grão (quantidade, tamanho)
                 None, None, None, None, None, None, None, None, // Crop
             )
             .await;

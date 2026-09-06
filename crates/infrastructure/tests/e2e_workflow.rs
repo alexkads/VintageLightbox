@@ -76,6 +76,8 @@ async fn test_e2e_import_edit_export_flow() {
             0.0, 0.0, 0.0, // Lens
             0.0, 0.0, // NR
             0.0, 1.0, // Sharpening (amount, radius)
+            0.0, 0.0, 0.0, 0.0, 0.0, // Tonalização
+            0.0, 0.0, // Grão
             None, None, None, None, None, None, None, None, // Crop
         )
         .await;

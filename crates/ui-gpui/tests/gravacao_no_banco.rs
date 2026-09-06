@@ -88,7 +88,7 @@ async fn esperar_gravacao(pool: &sqlx::SqlitePool, id: &str) {
     panic!("a gravação não chegou ao banco em 1s");
 }
 
-/// 🚨 O que a tela gravou volta do banco igual, pelos 46 campos.
+/// 🚨 O que a tela gravou volta do banco igual, pelos 53 campos.
 ///
 /// É a ida e volta inteira: `Ajustes` → controller → use case → entidade →
 /// SQLite → `row_to_photo` → `PhotoViewModel` → `da_foto`. Sete etapas, e cada
@@ -114,7 +114,7 @@ async fn a_revelacao_gravada_volta_inteira() {
     let de_volta = persistencia::da_foto(&reler(&pool, &id).await);
     assert_eq!(
         de_volta, ajustes,
-        "algum dos 46 campos não sobreviveu à ida e volta"
+        "algum dos 53 campos não sobreviveu à ida e volta"
     );
 }
 

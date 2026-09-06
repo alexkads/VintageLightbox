@@ -68,6 +68,13 @@ pub struct PhotoViewModel {
     // Sharpening
     pub edit_sharpen_amount: Option<f32>,
     pub edit_sharpen_radius: Option<f32>,
+    pub edit_split_shadow_hue: Option<f32>,
+    pub edit_split_shadow_sat: Option<f32>,
+    pub edit_split_highlight_hue: Option<f32>,
+    pub edit_split_highlight_sat: Option<f32>,
+    pub edit_split_balance: Option<f32>,
+    pub edit_grain_amount: Option<f32>,
+    pub edit_grain_size: Option<f32>,
     // Crop & Rotation
     pub edit_crop_x: Option<f32>,
     pub edit_crop_y: Option<f32>,

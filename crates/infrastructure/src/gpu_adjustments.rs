@@ -85,6 +85,13 @@ pub fn ajustes_da_entidade(foto: &domain::entities::Photo) -> Ajustes {
         nr_color <- edit_nr_color,
         sharpen_amount <- edit_sharpen_amount,
         sharpen_radius <- edit_sharpen_radius,
+        split_shadow_hue <- edit_split_shadow_hue,
+        split_shadow_sat <- edit_split_shadow_sat,
+        split_highlight_hue <- edit_split_highlight_hue,
+        split_highlight_sat <- edit_split_highlight_sat,
+        split_balance <- edit_split_balance,
+        grain_amount <- edit_grain_amount,
+        grain_size <- edit_grain_size,
     }
 
     ajustes

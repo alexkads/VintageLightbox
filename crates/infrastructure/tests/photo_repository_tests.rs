@@ -291,6 +291,13 @@ async fn test_save_and_find_photo_with_edits() {
             None,
             None,
             None,
+            None, // Tonalização
+            None,
+            None, // Grão
+            None,
+            None,
+            None,
+            None,
             None,
             None,
             None,
@@ -359,6 +366,13 @@ async fn test_save_and_find_photo_with_edits() {
             None, // NR
             None,
             None, // Sharpening
+            None,
+            None,
+            None,
+            None,
+            None, // Tonalização
+            None,
+            None, // Grão
             None,
             None,
             None,

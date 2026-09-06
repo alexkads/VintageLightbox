@@ -5,6 +5,16 @@
 //! bloco 42 vezes espalhado por `dock_viewer.rs`; aqui o HSL inteiro — 24
 //! controles — são 24 linhas de dados.
 //!
+//! ## ✅ E desde 2026-09-06 há Tonalização e Efeitos
+//!
+//! Sete controles novos, e eles não vieram do app antigo: o motor ganhou
+//! tonalização (a cor das sombras e a das altas luzes, separadas) e grão de
+//! filme porque **não havia como fazer sépia** — temperatura e matiz agem antes
+//! da saturação, e numa foto em preto e branco a cor que eles pintam é apagada
+//! pelo passo seguinte. O pedido veio do site, que usa o mesmo `revelacao-core`;
+//! aqui eles entram pelo mesmo motivo de sempre: um fotógrafo faz isto no
+//! Lightroom, e a foto revelada nos dois lugares tem de sair igual.
+//!
 //! ## 🚨 A curva de tons não está aqui, e é de propósito
 //!
 //! `Ajustes` tem `tone_curve_shadows`, `_darks`, `_lights` e `_highlights`, e o
@@ -56,10 +66,12 @@ pub enum Secao {
     HslLuminancia,
     HslMatiz,
     Lente,
+    Tonalizacao,
+    Efeitos,
 }
 
 impl Secao {
-    pub const TODAS: [Secao; 7] = [
+    pub const TODAS: [Secao; 9] = [
         Secao::Basico,
         Secao::CurvaDeTons,
         Secao::Detalhe,
@@ -67,6 +79,8 @@ impl Secao {
         Secao::HslLuminancia,
         Secao::HslMatiz,
         Secao::Lente,
+        Secao::Tonalizacao,
+        Secao::Efeitos,
     ];
 
     pub fn rotulo(&self) -> &'static str {
@@ -78,6 +92,8 @@ impl Secao {
             Secao::HslLuminancia => "HSL / luminância",
             Secao::HslMatiz => "HSL / matiz",
             Secao::Lente => "Lente",
+            Secao::Tonalizacao => "Tonalização",
+            Secao::Efeitos => "Efeitos",
         }
     }
 
@@ -416,6 +432,85 @@ pub const CONTROLES: &[Definicao] = &[
         aplicar: |a, v| a.lens_vignette_midpoint = v,
         ler: |a| a.lens_vignette_midpoint,
     },
+    // ---------------------------------------------------------- Tonalização
+    //
+    // 🔑 **O matiz aqui é a roda de cor inteira (0–360°), e não o desvio do
+    // HSL.** Os oito matizes do HSL vão de -180 a 180 porque giram a cor que o
+    // pixel já tem; estes dois **escolhem** a cor que vai entrar — 35° é o
+    // âmbar da sépia, 210° o azul das sombras frias. Copiar a faixa do vizinho
+    // tiraria metade da roda do alcance de quem arrasta, e o slider ainda
+    // andaria: ninguém repararia.
+    Definicao {
+        secao: Secao::Tonalizacao,
+        rotulo: "Sombras — matiz",
+        minimo: 0.0,
+        maximo: 360.0,
+        casas: 0,
+        com_sinal: false,
+        aplicar: |a, v| a.split_shadow_hue = v,
+        ler: |a| a.split_shadow_hue,
+    },
+    Definicao {
+        secao: Secao::Tonalizacao,
+        rotulo: "Sombras — saturação",
+        minimo: 0.0,
+        maximo: 100.0,
+        casas: 0,
+        com_sinal: false,
+        aplicar: |a, v| a.split_shadow_sat = v,
+        ler: |a| a.split_shadow_sat,
+    },
+    Definicao {
+        secao: Secao::Tonalizacao,
+        rotulo: "Altas luzes — matiz",
+        minimo: 0.0,
+        maximo: 360.0,
+        casas: 0,
+        com_sinal: false,
+        aplicar: |a, v| a.split_highlight_hue = v,
+        ler: |a| a.split_highlight_hue,
+    },
+    Definicao {
+        secao: Secao::Tonalizacao,
+        rotulo: "Altas luzes — saturação",
+        minimo: 0.0,
+        maximo: 100.0,
+        casas: 0,
+        com_sinal: false,
+        aplicar: |a, v| a.split_highlight_sat = v,
+        ler: |a| a.split_highlight_sat,
+    },
+    Definicao {
+        secao: Secao::Tonalizacao,
+        rotulo: "Balanço",
+        minimo: -100.0,
+        maximo: 100.0,
+        casas: 0,
+        com_sinal: true,
+        aplicar: |a, v| a.split_balance = v,
+        ler: |a| a.split_balance,
+    },
+    // --------------------------------------------------------------- Efeitos
+    Definicao {
+        secao: Secao::Efeitos,
+        rotulo: "Grão",
+        minimo: 0.0,
+        maximo: 100.0,
+        casas: 0,
+        com_sinal: false,
+        aplicar: |a, v| a.grain_amount = v,
+        ler: |a| a.grain_amount,
+    },
+    Definicao {
+        secao: Secao::Efeitos,
+        rotulo: "Tamanho do grão",
+        minimo: 0.0,
+        maximo: 100.0,
+        casas: 0,
+        com_sinal: false,
+        aplicar: |a, v| a.grain_size = v,
+        ler: |a| a.grain_size,
+    },
 ];
 
 #[cfg(test)]
@@ -492,7 +587,7 @@ mod testes {
         }
     }
 
-    /// ✅ **Um controle por ajuste: 46 e 46.**
+    /// ✅ **Um controle por ajuste: 53 e 53.**
     ///
     /// 🚨 **Eram 42 para 46 até 17/ago/2026**, e a diferença era a curva de tons:
     /// os quatro `tone_curve_*` existiam no `Ajustes`, o shader os aplicava, e
@@ -508,7 +603,7 @@ mod testes {
     /// nenhum ajuste fique sem quem o escreva.
     #[test]
     fn todo_ajuste_tem_um_controle() {
-        assert_eq!(CONTROLES.len(), 46);
+        assert_eq!(CONTROLES.len(), 53);
         assert_eq!(
             std::mem::size_of::<Ajustes>() / 4,
             CONTROLES.len(),

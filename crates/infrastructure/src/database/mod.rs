@@ -43,6 +43,6 @@ mod tests {
     async fn test_run_migrations() {
         let pool = create_pool("sqlite::memory:").await.unwrap();
         let result = run_migrations(&pool).await;
-        assert!(result.is_ok());
+        assert!(result.is_ok(), "{result:?}");
     }
 }

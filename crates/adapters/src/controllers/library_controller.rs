@@ -110,6 +110,13 @@ impl LibraryController {
                     // Sharpening
                     edit_sharpen_amount: photo.edit_sharpen_amount(),
                     edit_sharpen_radius: photo.edit_sharpen_radius(),
+                    edit_split_shadow_hue: photo.edit_split_shadow_hue(),
+                    edit_split_shadow_sat: photo.edit_split_shadow_sat(),
+                    edit_split_highlight_hue: photo.edit_split_highlight_hue(),
+                    edit_split_highlight_sat: photo.edit_split_highlight_sat(),
+                    edit_split_balance: photo.edit_split_balance(),
+                    edit_grain_amount: photo.edit_grain_amount(),
+                    edit_grain_size: photo.edit_grain_size(),
                     // Crop & Rotation
                     edit_crop_x: photo.edit_crop_x(),
                     edit_crop_y: photo.edit_crop_y(),

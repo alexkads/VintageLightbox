@@ -196,6 +196,29 @@ impl PhotoRepositoryImpl {
             .try_get::<Option<f32>, _>("edit_sharpen_radius")
             .unwrap_or(None);
 
+        // Tonalização e grão
+        let edit_split_shadow_hue: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_split_shadow_hue")
+            .unwrap_or(None);
+        let edit_split_shadow_sat: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_split_shadow_sat")
+            .unwrap_or(None);
+        let edit_split_highlight_hue: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_split_highlight_hue")
+            .unwrap_or(None);
+        let edit_split_highlight_sat: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_split_highlight_sat")
+            .unwrap_or(None);
+        let edit_split_balance: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_split_balance")
+            .unwrap_or(None);
+        let edit_grain_amount: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_grain_amount")
+            .unwrap_or(None);
+        let edit_grain_size: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_grain_size")
+            .unwrap_or(None);
+
         // Crop fields
         let edit_crop_x: Option<f32> = row.try_get::<Option<f32>, _>("edit_crop_x").unwrap_or(None);
         let edit_crop_y: Option<f32> = row.try_get::<Option<f32>, _>("edit_crop_y").unwrap_or(None);
@@ -308,6 +331,13 @@ impl PhotoRepositoryImpl {
             edit_nr_color,
             edit_sharpen_amount,
             edit_sharpen_radius,
+            edit_split_shadow_hue,
+            edit_split_shadow_sat,
+            edit_split_highlight_hue,
+            edit_split_highlight_sat,
+            edit_split_balance,
+            edit_grain_amount,
+            edit_grain_size,
             edit_crop_x,
             edit_crop_y,
             edit_crop_width,
@@ -396,13 +426,21 @@ impl PhotoRepository for PhotoRepositoryImpl {
         let edit_nr_color = photo.edit_nr_color();
         let edit_sharpen_amount = photo.edit_sharpen_amount();
         let edit_sharpen_radius = photo.edit_sharpen_radius();
+        // Tonalização e grão
+        let edit_split_shadow_hue = photo.edit_split_shadow_hue();
+        let edit_split_shadow_sat = photo.edit_split_shadow_sat();
+        let edit_split_highlight_hue = photo.edit_split_highlight_hue();
+        let edit_split_highlight_sat = photo.edit_split_highlight_sat();
+        let edit_split_balance = photo.edit_split_balance();
+        let edit_grain_amount = photo.edit_grain_amount();
+        let edit_grain_size = photo.edit_grain_size();
 
         // Serializar metadata para JSON
         let metadata = photo.metadata().and_then(|m| serde_json::to_string(m).ok());
 
         sqlx::query(
-            "INSERT INTO photos (id, file_path, rating, color_label, flag, comprada_em, pos_venda_foto_id, is_edited, imported_at, modified_at, metadata, thumbnail_path, preview_path, edit_exposure, edit_contrast, edit_temperature, edit_tint, edit_highlights, edit_shadows, edit_whites, edit_blacks, edit_clarity, edit_vibrance, edit_saturation, edit_tone_curve_shadows, edit_tone_curve_darks, edit_tone_curve_lights, edit_tone_curve_highlights, content_hash, edit_hsl_red_sat, edit_hsl_orange_sat, edit_hsl_yellow_sat, edit_hsl_green_sat, edit_hsl_aqua_sat, edit_hsl_blue_sat, edit_hsl_purple_sat, edit_hsl_magenta_sat, edit_hsl_red_hue, edit_hsl_orange_hue, edit_hsl_yellow_hue, edit_hsl_green_hue, edit_hsl_aqua_hue, edit_hsl_blue_hue, edit_hsl_purple_hue, edit_hsl_magenta_hue, edit_hsl_red_lum, edit_hsl_orange_lum, edit_hsl_yellow_lum, edit_hsl_green_lum, edit_hsl_aqua_lum, edit_hsl_blue_lum, edit_hsl_purple_lum, edit_hsl_magenta_lum, edit_lens_distortion, edit_lens_vignette_amount, edit_lens_vignette_midpoint, edit_nr_luminance, edit_nr_color, edit_sharpen_amount, edit_sharpen_radius, edit_crop_x, edit_crop_y, edit_crop_width, edit_crop_height, edit_crop_rotation, edit_crop_angle, edit_crop_flip_h, edit_crop_flip_v)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO photos (id, file_path, rating, color_label, flag, comprada_em, pos_venda_foto_id, is_edited, imported_at, modified_at, metadata, thumbnail_path, preview_path, edit_exposure, edit_contrast, edit_temperature, edit_tint, edit_highlights, edit_shadows, edit_whites, edit_blacks, edit_clarity, edit_vibrance, edit_saturation, edit_tone_curve_shadows, edit_tone_curve_darks, edit_tone_curve_lights, edit_tone_curve_highlights, content_hash, edit_hsl_red_sat, edit_hsl_orange_sat, edit_hsl_yellow_sat, edit_hsl_green_sat, edit_hsl_aqua_sat, edit_hsl_blue_sat, edit_hsl_purple_sat, edit_hsl_magenta_sat, edit_hsl_red_hue, edit_hsl_orange_hue, edit_hsl_yellow_hue, edit_hsl_green_hue, edit_hsl_aqua_hue, edit_hsl_blue_hue, edit_hsl_purple_hue, edit_hsl_magenta_hue, edit_hsl_red_lum, edit_hsl_orange_lum, edit_hsl_yellow_lum, edit_hsl_green_lum, edit_hsl_aqua_lum, edit_hsl_blue_lum, edit_hsl_purple_lum, edit_hsl_magenta_lum, edit_lens_distortion, edit_lens_vignette_amount, edit_lens_vignette_midpoint, edit_nr_luminance, edit_nr_color, edit_sharpen_amount, edit_sharpen_radius, edit_split_shadow_hue, edit_split_shadow_sat, edit_split_highlight_hue, edit_split_highlight_sat, edit_split_balance, edit_grain_amount, edit_grain_size, edit_crop_x, edit_crop_y, edit_crop_width, edit_crop_height, edit_crop_rotation, edit_crop_angle, edit_crop_flip_h, edit_crop_flip_v)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         .bind(&id)
         .bind(&file_path)
@@ -464,6 +502,26 @@ impl PhotoRepository for PhotoRepositoryImpl {
         .bind(edit_nr_color)
         .bind(edit_sharpen_amount)
         .bind(edit_sharpen_radius)
+        .bind(edit_split_shadow_hue)
+        .bind(edit_split_shadow_sat)
+        .bind(edit_split_highlight_hue)
+        .bind(edit_split_highlight_sat)
+        .bind(edit_split_balance)
+        .bind(edit_grain_amount)
+        .bind(edit_grain_size)
+        // 🚨 **Os oito do enquadramento faltavam aqui até 2026-09-06.** O
+        // `INSERT` lista 68 colunas e vinculava 60: os `edit_crop_*` ficavam com
+        // o `?` sem valor, que no SQLite entra como NULL. Passava despercebido
+        // porque foto recém-importada não tem enquadramento mesmo — mas `save`
+        // de uma foto que já tinha um o apagava, calado.
+        .bind(photo.edit_crop_x())
+        .bind(photo.edit_crop_y())
+        .bind(photo.edit_crop_width())
+        .bind(photo.edit_crop_height())
+        .bind(photo.edit_crop_rotation())
+        .bind(photo.edit_crop_angle())
+        .bind(photo.edit_crop_flip_h())
+        .bind(photo.edit_crop_flip_v())
         .execute(&self.pool)
         .await
         .map_err(|e| DomainError::InvalidOperation(format!("Failed to save photo: {}", e)))?;
@@ -564,6 +622,14 @@ impl PhotoRepository for PhotoRepositoryImpl {
         // Sharpening fields
         let edit_sharpen_amount = photo.edit_sharpen_amount();
         let edit_sharpen_radius = photo.edit_sharpen_radius();
+        // Tonalização e grão
+        let edit_split_shadow_hue = photo.edit_split_shadow_hue();
+        let edit_split_shadow_sat = photo.edit_split_shadow_sat();
+        let edit_split_highlight_hue = photo.edit_split_highlight_hue();
+        let edit_split_highlight_sat = photo.edit_split_highlight_sat();
+        let edit_split_balance = photo.edit_split_balance();
+        let edit_grain_amount = photo.edit_grain_amount();
+        let edit_grain_size = photo.edit_grain_size();
         // Crop fields
         let edit_crop_x = photo.edit_crop_x();
         let edit_crop_y = photo.edit_crop_y();
@@ -579,7 +645,7 @@ impl PhotoRepository for PhotoRepositoryImpl {
 
         let result = sqlx::query(
             "UPDATE photos
-             SET file_path = ?, rating = ?, color_label = ?, flag = ?, comprada_em = ?, pos_venda_foto_id = ?, is_edited = ?, modified_at = ?, metadata = ?, thumbnail_path = ?, preview_path = ?, edit_exposure = ?, edit_contrast = ?, edit_temperature = ?, edit_tint = ?, edit_highlights = ?, edit_shadows = ?, edit_whites = ?, edit_blacks = ?, edit_clarity = ?, edit_vibrance = ?, edit_saturation = ?, edit_tone_curve_shadows = ?, edit_tone_curve_darks = ?, edit_tone_curve_lights = ?, edit_tone_curve_highlights = ?, content_hash = ?, edit_hsl_red_sat = ?, edit_hsl_orange_sat = ?, edit_hsl_yellow_sat = ?, edit_hsl_green_sat = ?, edit_hsl_aqua_sat = ?, edit_hsl_blue_sat = ?, edit_hsl_purple_sat = ?, edit_hsl_magenta_sat = ?, edit_hsl_red_hue = ?, edit_hsl_orange_hue = ?, edit_hsl_yellow_hue = ?, edit_hsl_green_hue = ?, edit_hsl_aqua_hue = ?, edit_hsl_blue_hue = ?, edit_hsl_purple_hue = ?, edit_hsl_magenta_hue = ?, edit_hsl_red_lum = ?, edit_hsl_orange_lum = ?, edit_hsl_yellow_lum = ?, edit_hsl_green_lum = ?, edit_hsl_aqua_lum = ?, edit_hsl_blue_lum = ?, edit_hsl_purple_lum = ?, edit_hsl_magenta_lum = ?, edit_lens_distortion = ?, edit_lens_vignette_amount = ?, edit_lens_vignette_midpoint = ?, edit_nr_luminance = ?, edit_nr_color = ?, edit_sharpen_amount = ?, edit_sharpen_radius = ?, edit_crop_x = ?, edit_crop_y = ?, edit_crop_width = ?, edit_crop_height = ?, edit_crop_rotation = ?, edit_crop_angle = ?, edit_crop_flip_h = ?, edit_crop_flip_v = ?
+             SET file_path = ?, rating = ?, color_label = ?, flag = ?, comprada_em = ?, pos_venda_foto_id = ?, is_edited = ?, modified_at = ?, metadata = ?, thumbnail_path = ?, preview_path = ?, edit_exposure = ?, edit_contrast = ?, edit_temperature = ?, edit_tint = ?, edit_highlights = ?, edit_shadows = ?, edit_whites = ?, edit_blacks = ?, edit_clarity = ?, edit_vibrance = ?, edit_saturation = ?, edit_tone_curve_shadows = ?, edit_tone_curve_darks = ?, edit_tone_curve_lights = ?, edit_tone_curve_highlights = ?, content_hash = ?, edit_hsl_red_sat = ?, edit_hsl_orange_sat = ?, edit_hsl_yellow_sat = ?, edit_hsl_green_sat = ?, edit_hsl_aqua_sat = ?, edit_hsl_blue_sat = ?, edit_hsl_purple_sat = ?, edit_hsl_magenta_sat = ?, edit_hsl_red_hue = ?, edit_hsl_orange_hue = ?, edit_hsl_yellow_hue = ?, edit_hsl_green_hue = ?, edit_hsl_aqua_hue = ?, edit_hsl_blue_hue = ?, edit_hsl_purple_hue = ?, edit_hsl_magenta_hue = ?, edit_hsl_red_lum = ?, edit_hsl_orange_lum = ?, edit_hsl_yellow_lum = ?, edit_hsl_green_lum = ?, edit_hsl_aqua_lum = ?, edit_hsl_blue_lum = ?, edit_hsl_purple_lum = ?, edit_hsl_magenta_lum = ?, edit_lens_distortion = ?, edit_lens_vignette_amount = ?, edit_lens_vignette_midpoint = ?, edit_nr_luminance = ?, edit_nr_color = ?, edit_sharpen_amount = ?, edit_sharpen_radius = ?, edit_split_shadow_hue = ?, edit_split_shadow_sat = ?, edit_split_highlight_hue = ?, edit_split_highlight_sat = ?, edit_split_balance = ?, edit_grain_amount = ?, edit_grain_size = ?, edit_crop_x = ?, edit_crop_y = ?, edit_crop_width = ?, edit_crop_height = ?, edit_crop_rotation = ?, edit_crop_angle = ?, edit_crop_flip_h = ?, edit_crop_flip_v = ?
              WHERE id = ?"
         )
         .bind(&file_path)
@@ -640,6 +706,13 @@ impl PhotoRepository for PhotoRepositoryImpl {
         .bind(edit_nr_color)
         .bind(edit_sharpen_amount)
         .bind(edit_sharpen_radius)
+        .bind(edit_split_shadow_hue)
+        .bind(edit_split_shadow_sat)
+        .bind(edit_split_highlight_hue)
+        .bind(edit_split_highlight_sat)
+        .bind(edit_split_balance)
+        .bind(edit_grain_amount)
+        .bind(edit_grain_size)
         .bind(edit_crop_x)
         .bind(edit_crop_y)
         .bind(edit_crop_width)

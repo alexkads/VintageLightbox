@@ -55,7 +55,7 @@ vez de deixá-la sair limpa.
 
 ---
 
-## Revelação — ✅ **os 46 controles movem a foto**
+## Revelação — ✅ **os 53 controles movem a foto**
 
 | Seção | Controles | Estado |
 |---|--:|---|
@@ -66,6 +66,8 @@ vez de deixá-la sair limpa.
 | HSL / luminância (8 canais) | 8 | ✅ **desde 17/ago** |
 | Lente (distorção, vinheta, meio da vinheta) | 3 | ✅ **desde 17/ago** — a distorção reamostra; a vinheta sombreia por posição |
 | Curva de tons paramétrica (sombras, escuros, claros, altas luzes) | 4 | ✅ **desde 17/ago** — e o gráfico passou a incluí-las, com a conta do shader |
+| Tonalização (matiz e saturação das sombras e das altas luzes, balanço) | 5 | ✅ **desde 6/set** — o "Split Toning" do Lightroom, e o único caminho para sépia |
+| Efeitos (grão: quantidade e tamanho) | 2 | ✅ **desde 6/set** — determinístico, monocromático, e some nas duas pontas |
 
 🔑 **Eram 23 na manhã de 17/ago, e foram dois defeitos em sequência, não um.** Primeiro o
 `struct Params` do WGSL declarava 28 campos para os 46 que a CPU manda, e o `uniform` casa por
@@ -73,6 +75,15 @@ vez de deixá-la sair limpa.
 *borrava a foto*) e do 28 em diante não lia nada. Alinhado isso, restava o segundo: **o corpo do
 shader não mencionava matiz, luminância nem lente em lugar nenhum.** Chegar e ser aplicado são duas
 coisas.
+
+✅ **A Tonalização e o Grão entraram em 6/set/2026, e não vieram do app antigo.** O pedido veio do
+site — *"faltam controles para transformar uma foto P&B em sépia ou uma edição mais vintage, de forma
+manual sem preset"* —, e a resposta tinha de ser no motor: temperatura e matiz agem **antes** da
+saturação, então numa foto em preto e branco a cor que eles pintam é apagada pelo passo seguinte. Não
+havia como tonalizar um cinza. Os sete campos entraram **no fim** do `Ajustes` (46 → 53), porque a
+posição é o contrato com o shader e inserir no meio faria toda revelação já gravada ler o campo do
+vizinho. O site ganhou os mesmos sete sliders no mesmo dia; o importador de presets do Lightroom
+deixou de ignorar `SplitToning*` e `Grain*` — **342 de 400 presets comerciais usavam split toning**.
 
 ⚠️ **Três decisões deste trabalho erram em silêncio, e cada uma tem teste**: a luminância não pode
 clarear cinza (pixel neutro cai na faixa do vermelho com peso 1.0, e o slider viraria brilho global);

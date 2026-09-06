@@ -91,6 +91,8 @@ fn com_campos(mut foto: Photo, campos: Campos) -> Photo {
         None, None, None, None, None, None, None, None,
         None, None, None,
         None, None, None, None,
+        None, None, None, None, None,
+        None, None,
         campos.crop_x, campos.crop_y, campos.crop_width, campos.crop_height,
         None, None, None, None,
     )
