@@ -652,6 +652,12 @@ impl Aplicativo {
     /// Negociação é acerto sobre fotos específicas; aplicá-la ao que estivesse
     /// visível daria cortesia a duzentas fotos por um filtro mal escolhido.
     pub fn abrir_balcao(&mut self, cx: &mut Context<Self>) {
+        // 🚨 **Logado, nada acontece fora de uma sessão.** A guarda fica aqui, e
+        // não só no botão: atalho de teclado chega antes de botão, e foi assim
+        // que a nota caiu numa grade que ninguém estava vendo.
+        if !self.pode_trabalhar() {
+            return;
+        }
         let fotos = self.biblioteca.read(cx).fotos_selecionadas();
         if fotos.is_empty() {
             return;
@@ -803,6 +809,12 @@ impl Aplicativo {
     /// Sem seleção não faz nada, e o botão que chama isto fica desligado — a
     /// Revelação vazia não responde nenhuma pergunta.
     pub fn revelar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // 🚨 **Logado, nada acontece fora de uma sessão.** A guarda fica aqui, e
+        // não só no botão: atalho de teclado chega antes de botão, e foi assim
+        // que a nota caiu numa grade que ninguém estava vendo.
+        if !self.pode_trabalhar() {
+            return;
+        }
         let Some(foto) = self.biblioteca.read(cx).foto_selecionada() else {
             return;
         };
@@ -842,6 +854,10 @@ impl Aplicativo {
     /// folha vazia não responde nenhuma pergunta, e os botões de coleção lá
     /// dentro só valem depois de a tela existir.
     pub fn imprimir(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // 🚨 Logado, nada acontece fora de uma sessão — ver `pode_trabalhar`.
+        if !self.pode_trabalhar() {
+            return;
+        }
         let escolhidas = self.biblioteca.read(cx).ids_selecionados();
         if escolhidas.is_empty() {
             return;
@@ -881,6 +897,10 @@ impl Aplicativo {
     /// ⚠️ **Sem seleção não abre.** Uma segunda tela preta não diz ao cliente
     /// que nada foi escolhido — diz que o programa quebrou.
     pub fn alternar_cliente(&mut self, cx: &mut Context<Self>) {
+        // 🚨 Logado, nada acontece fora de uma sessão — ver `pode_trabalhar`.
+        if !self.pode_trabalhar() {
+            return;
+        }
         if let Some(janela) = self.cliente.take() {
             // Fechar é remover a janela. Se ela já não existe (o `Esc` de dentro
             // dela chegou primeiro), o `update` devolve erro e não há o que
@@ -994,6 +1014,12 @@ impl Aplicativo {
 
     /// Abre o modal de importação sobre a Biblioteca.
     pub fn importar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // 🚨 **Logado, nada acontece fora de uma sessão.** A guarda fica aqui, e
+        // não só no botão: atalho de teclado chega antes de botão, e foi assim
+        // que a nota caiu numa grade que ninguém estava vendo.
+        if !self.pode_trabalhar() {
+            return;
+        }
         self.importando = true;
         // Cartões e recentes são pedidos a cada abertura: um cartão plugado
         // depois de o app subir não apareceria numa lista buscada uma vez só.
@@ -1066,6 +1092,12 @@ impl Aplicativo {
     /// quando há — é a mesma regra da Impressão. Exportar sem ter escolhido nada
     /// é o pedido mais provável de quem acabou de filtrar por ★★★★★.
     pub fn exportar(&mut self, cx: &mut Context<Self>) {
+        // 🚨 **Logado, nada acontece fora de uma sessão.** A guarda fica aqui, e
+        // não só no botão: atalho de teclado chega antes de botão, e foi assim
+        // que a nota caiu numa grade que ninguém estava vendo.
+        if !self.pode_trabalhar() {
+            return;
+        }
         let biblioteca = self.biblioteca.read(cx);
         let selecionadas = biblioteca.fotos_selecionadas();
         let fotos = if selecionadas.is_empty() {
@@ -1096,6 +1128,12 @@ impl Aplicativo {
     /// Abre o pós-venda para a seleção — ou para a grade, sem seleção — pela
     /// mesma regra da exportação.
     pub fn publicar(&mut self, cx: &mut Context<Self>) {
+        // 🚨 **Logado, nada acontece fora de uma sessão.** A guarda fica aqui, e
+        // não só no botão: atalho de teclado chega antes de botão, e foi assim
+        // que a nota caiu numa grade que ninguém estava vendo.
+        if !self.pode_trabalhar() {
+            return;
+        }
         let biblioteca = self.biblioteca.read(cx);
         let selecionadas = biblioteca.fotos_selecionadas();
         let fotos = if selecionadas.is_empty() {
@@ -1324,6 +1362,45 @@ impl Aplicativo {
         }
     }
 
+    /// Se este app está preso a uma sessão.
+    ///
+    /// 🚨 **Logado, tudo acontece dentro de uma sessão** — regra do dono,
+    /// 6/set/2026: importar, revelar, escolher com o cliente, exportar e gerar o
+    /// link são gestos *sobre um ensaio*, e não sobre um catálogo solto. Fora
+    /// dela só existe a lista, que é onde se escolhe em qual entrar.
+    ///
+    /// ⚠️ **Offline é o contrário, e de propósito**: sem conta não há sessão, e
+    /// o app volta a ser o que era — importar, revelar e triar no catálogo
+    /// local. Quem escolheu trabalhar sem rede não pode ficar sem app.
+    ///
+    /// 🔑 **A impressão entra na regra pelo mesmo motivo que o resto**, e o dono
+    /// disse por quê: revelação e emolduramento vão virar **produtos com custo**
+    /// dentro do ensaio. Uma folha impressa fora de uma sessão seria trabalho
+    /// que ninguém tem como cobrar — e o lugar de descobrir isso não é depois de
+    /// o cliente sair.
+    ///
+    /// 📌 **E é por isso que a trava é o pré-requisito de uma coisa que ainda não
+    /// existe**: o dono avisou em 6/set/2026 que o sistema vai **contabilizar
+    /// pedidos de revelação**. Contar quantas revelações um ensaio teve só é
+    /// possível se toda revelação pertencer a um ensaio — e é exatamente isso
+    /// que esta guarda passa a garantir, antes de haver o que contar.
+    pub fn preso_a_sessao(&self) -> bool {
+        matches!(self.modo, Some(Modo::Online(_)))
+    }
+
+    /// Se há uma sessão aberta — ou se o modo dispensa uma.
+    pub fn pode_trabalhar(&self) -> bool {
+        !self.preso_a_sessao() || self.sessao_aberta.is_some()
+    }
+
+    /// O título da sessão aberta, para a barra dizer onde se está.
+    fn nome_da_sessao(&self, cx: &Context<Self>) -> Option<SharedString> {
+        self.detalhe
+            .read(cx)
+            .aberta()
+            .map(|a| SharedString::from(a.galeria.titulo.clone()))
+    }
+
     fn barra(&self, cx: &mut Context<Self>) -> impl IntoElement {
         // Paridade com o app de egui: o botão de Revelação só liga quando há
         // seleção na Biblioteca ("Develop button enabled if Library has a
@@ -1334,6 +1411,12 @@ impl Aplicativo {
         let tem_o_que_exportar = !self.biblioteca.read(cx).fotos_visiveis().is_empty();
         let na_revelacao = self.tela == Tela::Revelacao;
         let na_impressao = self.tela == Tela::Impressao;
+        // 🚨 Logado e sem sessão aberta, **nada** trabalha: os botões existem
+        // desligados em vez de sumirem, porque sumir esconderia o app inteiro e
+        // deixaria a impressão de que ele quebrou.
+        let trabalhando = self.pode_trabalhar();
+        let tem_selecao = tem_selecao && trabalhando;
+        let tem_o_que_exportar = tem_o_que_exportar && trabalhando;
 
         let titulo: SharedString = match (na_revelacao, self.revelacao.read(cx).foto()) {
             (true, Some(foto)) => foto.name.clone().into(),
@@ -1349,12 +1432,50 @@ impl Aplicativo {
             .bg(cx.theme().title_bar)
             .border_b_1()
             .border_color(cx.theme().border)
+            // 🚨 Dentro de uma sessão, a saída dela vem primeiro — e ela é a
+            // única coisa que a barra oferece antes de haver uma.
+            .when(self.preso_a_sessao(), |barra| {
+                barra
+                    .child(
+                        Button::new("nav-sessoes")
+                            .label(if self.sessao_aberta.is_some() {
+                                "← Sessões"
+                            } else {
+                                "Sessões"
+                            })
+                            .xsmall()
+                            .when(self.tela == Tela::Sessoes, |b| b.primary())
+                            .selected(self.tela == Tela::Sessoes)
+                            .on_click(cx.listener(|este, _ev, _window, cx| {
+                                este.tela = Tela::Sessoes;
+                                cx.notify();
+                            })),
+                    )
+                    .when_some(self.nome_da_sessao(cx), |barra, nome| {
+                        barra.child(
+                            Button::new("nav-sessao-aberta")
+                                .label(nome)
+                                .xsmall()
+                                .when(self.tela == Tela::Sessao, |b| b.primary())
+                                .selected(self.tela == Tela::Sessao)
+                                .on_click(cx.listener(|este, _ev, _window, cx| {
+                                    este.tela = Tela::Sessao;
+                                    cx.notify();
+                                })),
+                        )
+                    })
+            })
             .child(
                 Button::new("nav-biblioteca")
-                    .label("Biblioteca")
+                    .label(if self.preso_a_sessao() {
+                        "Escolher com o cliente"
+                    } else {
+                        "Biblioteca"
+                    })
                     .xsmall()
                     .when(self.tela == Tela::Biblioteca, |b| b.primary())
                     .selected(self.tela == Tela::Biblioteca)
+                    .disabled(!trabalhando)
                     .on_click(cx.listener(|este, _ev, window, cx| {
                         este.voltar_para_biblioteca(window, cx);
                     })),
@@ -1382,20 +1503,6 @@ impl Aplicativo {
                     })),
             )
             .child(
-                // ⚠️ **Ligado mesmo offline**, ao contrário dos outros: a tela
-                // existe e diz que precisa de conta. Um botão desligado sem
-                // explicação faria procurar defeito onde há uma escolha.
-                Button::new("nav-sessoes")
-                    .label("Sessões")
-                    .xsmall()
-                    .when(self.tela == Tela::Sessoes, |b| b.primary())
-                    .selected(self.tela == Tela::Sessoes)
-                    .on_click(cx.listener(|este, _ev, _window, cx| {
-                        este.tela = Tela::Sessoes;
-                        cx.notify();
-                    })),
-            )
-            .child(
                 // Paridade: no legado o botão de impressão também só liga com
                 // seleção (`selected_photo_ids` ou a foto da Biblioteca).
                 Button::new("nav-impressao")
@@ -1403,7 +1510,7 @@ impl Aplicativo {
                     .xsmall()
                     .when(na_impressao, |b| b.primary())
                     .selected(na_impressao)
-                    .disabled(!tem_selecao)
+                    .disabled(!tem_selecao || !trabalhando)
                     .on_click(cx.listener(|este, _ev, window, cx| {
                         este.imprimir(window, cx);
                     })),
@@ -1466,24 +1573,28 @@ impl Aplicativo {
                         este.exportar(cx);
                     })),
             )
-            .child(
-                // 📸 O caminho até o site: a seleção vira galeria do cliente,
-                // com o que a tecla `B` decidiu. Mesma regra de habilitar da
-                // exportação — o lote é o que se está vendo.
-                Button::new("nav-pos-venda")
-                    .label("Pós-venda")
-                    .xsmall()
-                    .when(self.publicando, |b| b.primary())
-                    .selected(self.publicando)
-                    .disabled(!tem_o_que_exportar)
-                    .on_click(cx.listener(|este, _ev, _window, cx| {
-                        este.publicar(cx);
-                    })),
-            )
+            // 📸 **Publicar cria uma galeria nova**, e por isso ele some quando
+            // já se está dentro de uma: ali o gesto é subir para *esta* sessão,
+            // e dois caminhos para o mesmo lugar com desfechos diferentes é a
+            // forma mais cara de confundir.
+            .when(!self.preso_a_sessao(), |barra| {
+                barra.child(
+                    Button::new("nav-pos-venda")
+                        .label("Pós-venda")
+                        .xsmall()
+                        .when(self.publicando, |b| b.primary())
+                        .selected(self.publicando)
+                        .disabled(!tem_o_que_exportar)
+                        .on_click(cx.listener(|este, _ev, _window, cx| {
+                            este.publicar(cx);
+                        })),
+                )
+            })
             .child(
                 Button::new("nav-importar")
                     .label("Importar")
                     .xsmall()
+                    .disabled(!trabalhando)
                     .on_click(cx.listener(|este, _ev, window, cx| {
                         este.importar(window, cx);
                     })),

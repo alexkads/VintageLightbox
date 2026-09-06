@@ -142,19 +142,29 @@ fn abrir_o_estudio(cx: &mut TestAppContext, fotos: Vec<PhotoViewModel>) -> Estud
     // 🔑 O passo zero: entrar na conta. Desde 6/set/2026 o app abre na porta, e
     // sem responder a ela nenhum dos onze passos acontece.
     janela
-        .update(cx, |app, window, cx| {
+        .update(cx, |app, _window, cx| {
             app.escolher_modo(Modo::Online(sessao()), cx);
             // 🚨 **Entrou: a primeira tela é a lista de sessões**, como na web.
-            // Foi a correção de 6/set/2026 — o app abria no catálogo global, e
-            // quem vinha do site achava a coisa "aberta e estranha".
             assert_eq!(app.tela(), Tela::Sessoes);
+            // 🚨 **E nada trabalha ainda**: logado, tudo acontece dentro de uma
+            // sessão. É o que `nada_acontece_fora_de_uma_sessao` prende.
+            assert!(!app.pode_trabalhar());
 
+            // O estúdio abre um ensaio: daí em diante os onze passos acontecem
+            // dentro dele.
+            app.entrar_na_sessao("g1".into(), cx);
+        })
+        .expect("a janela deve estar aberta");
+    cx.run_until_parked();
+
+    janela
+        .update(cx, |app, window, cx| {
+            assert!(app.pode_trabalhar(), "com sessão aberta, o app trabalha");
             // Os passos que acontecem na grade voltam para ela; os testes daqui
             // exercitam o trabalho, e não a navegação.
             app.voltar_para_biblioteca(window, cx);
         })
         .expect("a janela deve estar aberta");
-    cx.run_until_parked();
 
     Estudio {
         janela,
@@ -478,10 +488,10 @@ fn da_lista_ao_revelar_dentro_da_sessao(cx: &mut TestAppContext) {
         .janela
         .update(cx, |app, _window, cx| {
             assert_eq!(app.tela(), Tela::Sessao, "criar entra na sessão");
-            assert_eq!(
-                estudio.publicador.abertas(),
-                vec!["g1".to_string()],
-                "e entrar pede a galeria ao site"
+            assert!(
+                estudio.publicador.abertas().contains(&"g1".to_string()),
+                "e entrar pede a galeria ao site: {:?}",
+                estudio.publicador.abertas()
             );
             app.detalhe.update(cx, |tela, cx| tela.colher(cx));
         })
@@ -557,4 +567,79 @@ fn da_lista_ao_revelar_dentro_da_sessao(cx: &mut TestAppContext) {
         })
         .expect("a janela deve estar aberta");
     assert_eq!(estudio.publicador.baixadas(), vec!["remota-7".to_string()]);
+}
+
+/// 🚨 **Logado, nada acontece fora de uma sessão.**
+///
+/// Regra do dono, 6/set/2026: importar, revelar, escolher com o cliente,
+/// exportar, imprimir e gerar o link são gestos **sobre um ensaio**. Fora dele
+/// só existe a lista, que é onde se escolhe em qual entrar.
+///
+/// 🔑 **A impressão entra pelo mesmo motivo que o resto**, e o dono disse qual:
+/// revelação e emolduramento vão virar produtos com custo dentro do ensaio. Uma
+/// folha impressa fora de uma sessão é trabalho que ninguém tem como cobrar.
+///
+/// ⚠️ E a guarda está no **método**, não só no botão: atalho de teclado chega
+/// antes de botão, e foi assim que uma nota já caiu numa grade que ninguém
+/// estava vendo.
+#[gpui::test]
+fn nada_acontece_fora_de_uma_sessao(cx: &mut TestAppContext) {
+    let (previews, _dir) = previews_com(&["DSC_001.NEF"]);
+    cx.update(gpui_component::init);
+
+    let janela = cx.add_window({
+        let previews = previews.clone();
+        move |window, cx| {
+            Aplicativo::novo(
+                vec![foto("DSC_001.NEF")],
+                previews,
+                Vec::new(),
+                Portas {
+                    gravador: Arc::new(GravadorDeMentira::default()),
+                    acervo: Arc::new(AcervoDeMentira::default()),
+                    exportador: Arc::new(ExportadorDeMentira::default()),
+                    publicador: Arc::new(PublicadorDeMentira::default()),
+                    colecoes: Arc::new(ColecoesDeMentira::default()),
+                    folha: Arc::new(FolhaDeMentira::default()),
+                    marcador: Arc::new(MarcadorDeMentira::default()),
+                    gerador: Arc::new(GeradorDeMentira::default()),
+                    guarda_de_presets: Arc::new(GuardaDeMentira::default()),
+                    explorador: Arc::new(ExploradorDeMentira::default()),
+                    importador: Arc::new(ImportadorDeMentira::default()),
+                    seletor: Arc::new(SeletorDeMentira::default()),
+                    seletor_de_fotos: Arc::new(SeletorDeFotosDeMentira::default()),
+                },
+                window,
+                cx,
+            )
+        }
+    });
+
+    janela
+        .update(cx, |app, window, cx| {
+            app.escolher_modo(Modo::Online(sessao()), cx);
+            assert!(app.preso_a_sessao());
+            assert!(!app.pode_trabalhar(), "logado e sem sessão: nada trabalha");
+
+            // Nenhum dos gestos sai do lugar — nem pela porta do método.
+            app.na_biblioteca(cx, |tela, cx| tela.selecionar(Some(0), cx));
+            app.revelar(window, cx);
+            app.imprimir(window, cx);
+            app.exportar(cx);
+            app.importar(window, cx);
+            app.abrir_balcao(cx);
+            app.alternar_cliente(cx);
+
+            assert_eq!(app.tela(), Tela::Sessoes, "continua na lista");
+            assert!(!app.exportando() && !app.importando() && !app.no_balcao());
+
+            // Com uma sessão aberta, o app volta a trabalhar.
+            app.entrar_na_sessao("g1".into(), cx);
+            assert!(app.pode_trabalhar());
+            app.voltar_para_biblioteca(window, cx);
+            app.na_biblioteca(cx, |tela, cx| tela.selecionar(Some(0), cx));
+            app.revelar(window, cx);
+            assert_eq!(app.tela(), Tela::Revelacao, "agora sim");
+        })
+        .expect("a janela deve estar aberta");
 }

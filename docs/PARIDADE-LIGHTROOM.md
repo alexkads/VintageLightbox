@@ -246,6 +246,27 @@ o que **não** pode acontecer (o passo 10 é uma proibição).
 | ⬜ A coleção como unidade: "publicar esta coleção" em vez de "a seleção" | `docs/00-OBJETIVO.md` diz que o ensaio **é** uma coleção |
 | ⬜ Conferir o fluxo inteiro contra produção — exige a senha do operador | `VLB_POS_VENDA_URL` para homologação |
 | ⬜ Renomear sessão pela tela | a API não expõe `PATCH /galerias/{id}` para título e contato |
+| 📌 **Contabilizar pedidos de revelação** | avisado pelo dono em 6/set/2026, para **depois**. Revelação e emolduramento viram produtos com custo dentro do ensaio, e contar quantos um ensaio teve só é possível porque toda revelação já pertence a um — a trava de 6/set é o pré-requisito disto |
+
+### 🚨 Logado, tudo acontece dentro de uma sessão
+
+Regra do dono, 6/set/2026: *"quando estiver logado tudo deve ser dentro da sessão!
+Nenhuma operação poderá ser fora dela"* — importar, revelar, escolher com o
+cliente, exportar, **imprimir** e gerar o link. Fora dela só existe a lista, que é
+onde se escolhe em qual entrar.
+
+A impressão entra pelo mesmo motivo que o resto, e ele é de negócio: revelação e
+emolduramento vão virar **produtos com custo** dentro do ensaio. Uma folha
+impressa fora de uma sessão é trabalho que ninguém tem como cobrar.
+
+⚠️ **Offline é o contrário, e de propósito**: sem conta não há sessão, e o app
+volta a ser o que era — importar, revelar e triar no catálogo local. Quem
+escolheu trabalhar sem rede não pode ficar sem app.
+
+🔑 **A guarda está no método, e não só no botão** (`Aplicativo::pode_trabalhar`):
+atalho de teclado chega antes de botão, e foi assim que uma nota já caiu numa
+grade que ninguém estava vendo. `fluxo.rs::nada_acontece_fora_de_uma_sessao`
+prende os sete gestos.
 
 ## Revelação no navegador — 🚧 **o motor está pronto desde 4/set/2026; a tela é do site**
 
