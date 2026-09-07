@@ -218,6 +218,9 @@ endif
 #    `empacotamento/packager.toml`. O app compara a propria `CARGO_PKG_VERSION`
 #    com a do manifesto: lancar sem subir a versao nao atualiza ninguem.
 
+publicar: ## Publica o que esta em dist/ no Releases e no Pages (sem CI)
+	@./scripts/lancar-local.sh
+
 lancar: ## Empurra a tag da versao atual — o CI faz o resto
 	@v=$$(sed -n '/^\[workspace\.package\]/,/^\[/p' Cargo.toml | sed -n 's/^version *= *"\(.*\)"/\1/p' | head -1); \
 	 p=$$(sed -n 's/^version *= *"\(.*\)"/\1/p' empacotamento/packager.toml | head -1); \

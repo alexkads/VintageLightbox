@@ -135,8 +135,11 @@ def main() -> None:
     corpo += [f"| {d['sistema']} · {d['arquitetura']} | `{d['arquivo']}` | {d['bytes']/1e6:.0f} MB |"
               for d in downloads]
     corpo += ["", "Baixe em **https://alexkads.github.io/VintageLightbox/**", "",
-              "⚠️ No macOS, na primeira abertura clique com o botão direito no",
-              "aplicativo e escolha *Abrir* — ele não é distribuído pela App Store.", "",
+              "⚠️ **No macOS**, a primeira abertura pede um passo a mais: o sistema dirá",
+              "que não pôde verificar o app. Clique em **OK**, abra **Ajustes do Sistema →",
+              "Privacidade e Segurança**, role até o fim e clique em **Abrir Assim Mesmo**.",
+              "",
+              "O truque antigo de *botão direito → Abrir* não funciona a partir do macOS 15.", "",
               "---", "",
               "Feito pelo **Recordar Fotos Estúdio** — Gramado e Canela, RS."]
     (SITE / "notas-do-lancamento.md").write_text("\n".join(corpo) + "\n")

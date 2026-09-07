@@ -1,6 +1,6 @@
 {
   "versao": "0.1.1",
-  "publicado_em": "2026-09-07T16:58:23+00:00",
+  "publicado_em": "2026-09-07T17:13:32+00:00",
   "notas": "Primeira versão pública. Editor de fotos em Rust, com motor de revelação na GPU.",
   "downloads": [
     {

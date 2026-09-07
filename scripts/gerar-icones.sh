@@ -47,7 +47,7 @@ cp "$ICONES/1024x1024.png" "$ICONES/icone.png"
 # O AppImage e o `.desktop` procuram por `128x128@2x` quando a tela é HiDPI.
 cp "$ICONES/256x256.png" "$ICONES/128x128@2x.png"
 # A página do GitHub Pages usa o mesmo desenho.
-mkdir -p "$RAIZ/docs" && cp "$ICONES/256x256.png" "$RAIZ/docs/icone.png"
+cp "$ICONES/256x256.png" "$RAIZ/docs/icone.png"
 
 echo "🍎 .icns (macOS)"
 CONJUNTO="$(mktemp -d)/icone.iconset"; mkdir -p "$CONJUNTO"

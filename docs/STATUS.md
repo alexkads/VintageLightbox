@@ -96,8 +96,10 @@ máquinas deles. Numa máquina Linux, `make linux`; num Windows 11, `.\scripts\e
 traga o `dist/<plataforma>/` para o Mac e rode `make publicar` — o `ultima.json` é regerado a partir
 do que houver em `dist/`, então acrescentar plataforma é republicar.
 
-⚠️ **O `.dmg` não é assinado pela Apple** (decisão do dono). A primeira abertura exige botão direito
-→ Abrir, e a página avisa isso.
+⚠️ **O `.dmg` não é assinado pela Apple** (decisão do dono), e o Gatekeeper recusa a primeira
+abertura oferecendo só "Mover para o Lixo". 🚨 **A instrução antiga — botão direito → Abrir — deixou
+de funcionar no macOS 15**; hoje é Ajustes do Sistema → Privacidade e Segurança → Abrir Assim Mesmo.
+A página de download explica com os três passos.
 
 🚨 **Dois defeitos só apareceram em produção**, e valem para o próximo trabalho no site:
 
@@ -181,7 +183,8 @@ a 0.3.0.
 ### O que ainda não está fechado
 
 - **Sem assinatura da Apple** (decisão do dono). O `.dmg` abre com "não pode ser verificado" e exige
-  botão direito → Abrir na primeira vez; a página de download avisa isso. `--assinar` já está pronto
+  Ajustes do Sistema → Privacidade e Segurança → Abrir Assim Mesmo na primeira vez (o botão direito
+  não serve mais, desde o macOS 15); a página explica. `--assinar` já está pronto
   para quando houver um "Developer ID Application" — que **não** é App Store.
 - **`SUPABASE_URL` e `SUPABASE_SERVICE_ROLE_KEY`** precisam existir na máquina que publica
   (`~/.vintagelightbox/publicar.env`). São as mesmas do backend no Fly.
