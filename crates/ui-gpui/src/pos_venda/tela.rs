@@ -57,6 +57,17 @@ pub struct PosVenda {
     link: Option<LinkDeAcesso>,
     /// Se o pedido do link está no ar — para o botão não ser apertado duas vezes.
     pedindo_link: bool,
+    /// Quantas respostas da porta ainda estão a caminho.
+    ///
+    /// 🚨 **É isto que mantém a colheita acordada**, e não uma lista de estados
+    /// ao lado. A condição era `entrando || correndo()` — duas listas da mesma
+    /// verdade —, e ela esquecia justamente os dois pedidos que ninguém vê
+    /// acontecer: os produtos e o link. Com a mentira dos testes, que responde
+    /// no mesmo instante, o recado já estava no canal antes do primeiro giro e
+    /// nada aparecia errado; com a rede, a colheita desistia em 100 ms, a
+    /// resposta chegava em 300 e ficava no canal para sempre — a tela dizendo
+    /// "nenhum produto no catálogo" com o catálogo cheio.
+    esperando: usize,
     recados: (Sender<Recado>, Receiver<Recado>),
     colhendo: bool,
     _colheita: Option<Task<()>>,
@@ -93,6 +104,7 @@ impl PosVenda {
             recados: channel(),
             link: None,
             pedindo_link: false,
+            esperando: 0,
             colhendo: false,
             _colheita: None,
         }
@@ -148,6 +160,7 @@ impl PosVenda {
         }
         self.entrando = true;
         self.aviso = None;
+        self.esperar();
         self.publicador.autorizar(self.recados.0.clone());
         self.acompanhar(cx);
         cx.notify();
@@ -162,6 +175,7 @@ impl PosVenda {
             access_vence_em: i64::MAX,
             refresh_vence_em: i64::MAX,
         });
+        self.esperar();
         self.publicador
             .produtos(self.sessao.clone().unwrap(), self.recados.0.clone());
         self.colher(cx);
@@ -251,6 +265,18 @@ impl PosVenda {
         self.andamento.as_ref().is_some_and(|a| !a.terminou)
     }
 
+    /// Um pedido saiu para a porta: a colheita tem o que esperar.
+    fn esperar(&mut self) {
+        self.esperando += 1;
+    }
+
+    /// Uma resposta chegou. `saturating_sub` porque a publicação responde
+    /// muitas vezes (o andamento) para um pedido só, e quem a mantém acordada é
+    /// `correndo()`.
+    fn chegou(&mut self) {
+        self.esperando = self.esperando.saturating_sub(1);
+    }
+
     fn acompanhar(&mut self, cx: &mut Context<Self>) {
         if self.colhendo {
             return;
@@ -275,6 +301,8 @@ impl PosVenda {
             match recado {
                 Recado::Entrou(sessao) => {
                     self.entrando = false;
+                    self.chegou();
+                    self.esperar();
                     self.publicador
                         .produtos(sessao.clone(), self.recados.0.clone());
                     self.sessao = Some(sessao);
@@ -283,9 +311,11 @@ impl PosVenda {
                 // convite a autorizar, em vez de tentar publicar sem token.
                 Recado::SemSessao => {
                     self.entrando = false;
+                    self.chegou();
                     self.sessao = None;
                 }
                 Recado::Produtos(produtos) => {
+                    self.chegou();
                     // O produto lembrado vale se ainda existe; senão o primeiro.
                     let lembrado = self
                         .produto_id
@@ -297,6 +327,7 @@ impl PosVenda {
                 }
                 Recado::Link(link) => {
                     self.pedindo_link = false;
+                    self.chegou();
                     // 🔑 **Copia na hora, e mostra assim mesmo.** A área de
                     // transferência é a razão de o botão existir; o texto na
                     // tela é o plano B de quando algo a engoliu — perder o link
@@ -319,6 +350,7 @@ impl PosVenda {
                 Recado::Falhou(erro) => {
                     self.entrando = false;
                     self.pedindo_link = false;
+                    self.chegou();
                     if let Some(a) = self.andamento.as_mut() {
                         a.terminou = true;
                     }
@@ -329,7 +361,7 @@ impl PosVenda {
         if mudou {
             cx.notify();
         }
-        let continua = self.entrando || self.correndo();
+        let continua = self.esperando > 0 || self.correndo();
         if !continua {
             self.colhendo = false;
         }
@@ -381,6 +413,7 @@ impl PosVenda {
     /// sessão morrer com o app aberto — mas com sessão já dada ele não aparece,
     /// e ninguém entra duas vezes na mesma conta na mesma abertura.
     pub fn definir_sessao(&mut self, sessao: Sessao, cx: &mut Context<Self>) {
+        self.esperar();
         self.publicador
             .produtos(sessao.clone(), self.recados.0.clone());
         self.sessao = Some(sessao);
@@ -402,6 +435,7 @@ impl PosVenda {
             return;
         }
         self.pedindo_link = true;
+        self.esperar();
         self.publicador
             .link(sessao, galeria_id, self.recados.0.clone());
         self.acompanhar(cx);

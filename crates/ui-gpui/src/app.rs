@@ -4091,6 +4091,87 @@ mod testes {
             .expect("a janela deve estar aberta");
     }
 
+    /// 🚨 **A resposta que demora não pode chegar depois de a colheita desistir.**
+    ///
+    /// `definir_sessao` pede os produtos e liga a colheita — que parava no
+    /// primeiro giro de 100 ms, porque a condição de continuar era
+    /// `entrando || correndo()` e nenhuma das duas cobre um pedido no ar. A
+    /// mentira responde no mesmo instante, então nenhum teste via: o recado já
+    /// estava no canal antes do primeiro `colher`. Com a rede, ele chegava
+    /// depois — e ninguém mais o drenava. O que o operador via era
+    /// "nenhum produto no catálogo" com o catálogo cheio, sem erro nenhum.
+    ///
+    /// 🔑 Este teste **não chama `colher` à mão** de propósito: é justamente a
+    /// colheita sozinha que estava quebrada.
+    #[gpui::test]
+    fn a_resposta_que_demora_ainda_chega_a_tela(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+
+        let publicador = Arc::new(PublicadorDeMentira {
+            produtos: vec![domain::services::pos_venda::Produto {
+                id: "p1".into(),
+                nome: "Foto avulsa".into(),
+                preco: "29.90".into(),
+                inativo: false,
+            }],
+            // A rede do estúdio até o Fly leva centenas de milissegundos.
+            demorada: true,
+            ..Default::default()
+        });
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            let publicador = publicador.clone();
+            |window, cx| {
+                Aplicativo::novo(
+                    acervo_da_sessao("g7"),
+                    previews,
+                    Vec::new(),
+                    Portas {
+                        publicador,
+                        ..portas()
+                    },
+                    window,
+                    cx,
+                )
+            }
+        });
+
+        janela
+            .update(cx, |app, _window, cx| {
+                app.entrar_na_conta(sessao_de_teste(), cx);
+            })
+            .expect("a janela deve estar aberta");
+
+        // O tempo passa e a resposta não chegou: a colheita tem de continuar de pé.
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(500));
+        cx.run_until_parked();
+        janela
+            .update(cx, |app, _window, cx| {
+                assert!(
+                    app.pos_venda.read(cx).produtos().is_empty(),
+                    "a rede ainda não respondeu"
+                );
+            })
+            .expect("a janela deve estar aberta");
+
+        publicador.responder();
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(200));
+        cx.run_until_parked();
+
+        janela
+            .update(cx, |app, _window, cx| {
+                assert_eq!(
+                    app.pos_venda.read(cx).produtos().len(),
+                    1,
+                    "o produto que demorou tem de entrar na lista sozinho"
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
     /// 📸 O passo 3 do fluxo do dono: **classifico as fotos** — e elas sobem.
     ///
     /// 🚨 O que este teste prende é a **travessia**, e não o estado. Ir de 3

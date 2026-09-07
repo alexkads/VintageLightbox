@@ -422,6 +422,15 @@ pub mod mentira {
         pub fotos_da_sessao: Mutex<Vec<domain::services::pos_venda::FotoDaGaleria>>,
         /// `(galeria, caminho, ordem, estado)` de cada arquivo do disco enviado.
         pub arquivos_enviados: Mutex<Vec<(String, String, u32, EstadoNoBalcao)>>,
+        /// Segura as respostas em vez de mandá-las na hora — o que a rede faz.
+        ///
+        /// 🚨 **O `Default` responde no mesmo instante, e isso escondia um
+        /// defeito**: a colheita da tela podia desistir antes da resposta e
+        /// nenhum teste reclamava, porque a mentira nunca chegava atrasada. Com
+        /// isto ligado, o recado só sai em [`PublicadorDeMentira::responder`].
+        pub demorada: bool,
+        /// Os recados presos, esperando `responder()`.
+        pub guardados: Mutex<Vec<(Sender<Recado>, Recado)>>,
     }
 
     /// Um JPEG 1×1 cinza, codificado de verdade.
@@ -477,6 +486,24 @@ pub mod mentira {
         pub fn estados_pedidos(&self) -> Vec<Option<EstadoNoBalcao>> {
             self.estados_pedidos.lock().expect("os estados").clone()
         }
+
+        /// Manda o que `demorada` segurou — a rede respondendo, enfim.
+        pub fn responder(&self) {
+            for (canal, recado) in self.guardados.lock().expect("os guardados").drain(..) {
+                let _ = canal.send(recado);
+            }
+        }
+
+        fn responder_ou_guardar(&self, canal: Sender<Recado>, recado: Recado) {
+            if self.demorada {
+                self.guardados
+                    .lock()
+                    .expect("os guardados")
+                    .push((canal, recado));
+            } else {
+                let _ = canal.send(recado);
+            }
+        }
     }
 
     impl Publicador for PublicadorDeMentira {
@@ -509,7 +536,7 @@ pub mod mentira {
         }
 
         fn produtos(&self, _sessao: Sessao, canal: Sender<Recado>) {
-            let _ = canal.send(Recado::Produtos(self.produtos.clone()));
+            self.responder_ou_guardar(canal, Recado::Produtos(self.produtos.clone()));
         }
 
         fn link(&self, _sessao: Sessao, galeria_id: String, canal: Sender<Recado>) {
@@ -517,10 +544,13 @@ pub mod mentira {
                 .lock()
                 .expect("os links")
                 .push(galeria_id.clone());
-            let _ = canal.send(Recado::Link(LinkDeAcesso {
-                url: format!("https://recordarfotos.com.br/entrar?t={galeria_id}"),
-                validade_em_segundos: 604_800,
-            }));
+            self.responder_ou_guardar(
+                canal,
+                Recado::Link(LinkDeAcesso {
+                    url: format!("https://recordarfotos.com.br/entrar?t={galeria_id}"),
+                    validade_em_segundos: 604_800,
+                }),
+            );
         }
 
         fn subir_classificada(
