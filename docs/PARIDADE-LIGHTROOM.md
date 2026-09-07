@@ -148,6 +148,8 @@ tinham sido desenhadas em ordens diferentes. A referência é
 | Desfazer, refazer, "Antes" e "Enquadrar" só como tecla | **Barra em cima da foto**, com a posição no lote |
 | A tira não dizia o que já passou | **Ponto âmbar** na miniatura já revelada |
 | Lista de presets numa sanfona fechada, sem busca | Busca, contagem por grupo, campos por linha, prévia no ponteiro, renomear e apagar |
+| **Dock**: cada painel com aba e título, divisória arrastável, arranjo em disco | **Leiaute fixo**, do tamanho da janela: cabeçalho 48px · 224px · foto · 320px · tira |
+| A barra de navegação do app por cima | Ela **some** na Revelação, como o `fixed inset-0` do site — o `✕` é a volta |
 | Predefinição guardava **15** dos 53 ajustes | Qualquer um dos 53 — migration 020 |
 | Quatro predefinições de sistema em inglês | **As sete do site**, com os mesmos números |
 

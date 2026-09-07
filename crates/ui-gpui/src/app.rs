@@ -34,7 +34,7 @@ use crate::pos_venda::tela::PosVenda;
 use crate::revelacao::persistencia::{self, Gravador};
 use crate::revelacao::presets::GuardaDePresets;
 use crate::revelacao::processador::Ajustes;
-use crate::revelacao::tela::Revelacao;
+use crate::revelacao::tela::{PedidoDaRevelacao, Revelacao};
 use crate::sessoes::arquivos::SeletorDeFotos;
 use crate::sessoes::detalhe::{Detalhe, Pedido as DetalhePedido};
 use crate::sessoes::tela::{Escolhida, Sessoes};
@@ -264,6 +264,8 @@ pub struct Aplicativo {
     /// 🚨 A inscrição no que a tela da sessão pede. Descartada, o botão de
     /// voltar e o clique para revelar param de responder — sem erro nenhum.
     _pedido_da_sessao: gpui::Subscription,
+    /// A barra da Revelação pedindo o que só esta raiz sabe fazer.
+    _pedido_da_revelacao: gpui::Subscription,
     /// A sessão escolhida para receber as fotos. `None` é "nenhuma aberta".
     sessao_aberta: Option<String>,
     /// As fotos que já estão **no site**, do ensaio aberto, na linguagem da
@@ -399,10 +401,16 @@ impl Aplicativo {
             )
         });
 
-        revelacao.update(cx, |tela, cx| {
-            let eu = cx.entity();
-            tela.montar_o_dock(&eu, window, cx);
-        });
+        // 🔑 A Revelação **pede** e não faz: exportar abre um modal com pasta
+        // de destino e publicar fala com o pós-venda — as duas coisas valem
+        // para a seleção inteira e moram aqui.
+        let pedido_da_revelacao = cx.subscribe_in(
+            &revelacao,
+            window,
+            |raiz, _tela, pedido: &PedidoDaRevelacao, window, cx| {
+                raiz.atender_a_revelacao(*pedido, window, cx);
+            },
+        );
 
         // 🚨 **`track_focus` rastreia; ele não dá foco.** Enquanto ninguém focou a
         // raiz, o caminho de foco fica vazio e **nenhuma ação de teclado dela é
@@ -535,6 +543,7 @@ impl Aplicativo {
             sessoes,
             detalhe,
             _pedido_da_sessao: pedido_da_sessao,
+            _pedido_da_revelacao: pedido_da_revelacao,
             sessao_aberta: None,
             fotos_do_site: Vec::new(),
             publicador: publicador_da_raiz,
@@ -1011,6 +1020,31 @@ impl Aplicativo {
         };
         window.focus(&self.foco);
         cx.notify();
+    }
+
+    /// Atende os três botões da barra da Revelação que não são dela.
+    ///
+    /// 🔑 **"Exportar JPEG" e "Publicar e sair" são os dois últimos botões do
+    /// editor do site** ("Baixar JPEG" e "Salvar na galeria e sair"). Lá eles
+    /// valem para a foto aberta; aqui abrem os mesmos modais que a barra do app
+    /// abre — com a diferença de que a foto aberta na Revelação **é** a seleção,
+    /// porque foi ela que trouxe o operador até aqui.
+    fn atender_a_revelacao(
+        &mut self,
+        pedido: PedidoDaRevelacao,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match pedido {
+            PedidoDaRevelacao::Sair => self.voltar_para_biblioteca(window, cx),
+            PedidoDaRevelacao::Exportar => self.exportar(cx),
+            PedidoDaRevelacao::Publicar => {
+                // Publicar **e sair**, como no site: quem publica terminou com
+                // esta foto. O modal fica por cima da tela de onde se veio.
+                self.voltar_para_biblioteca(window, cx);
+                self.publicar(cx);
+            }
+        }
     }
 
     /// Abre ou fecha a segunda tela — a janela que se vira para o cliente.
@@ -2221,7 +2255,11 @@ impl Render for Aplicativo {
             .size_full()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
-            .child(self.barra(cx))
+            // 🚨 **A barra do app some na Revelação**, e é o que faz a tela ser
+            // a do site: lá o editor é `fixed inset-0` e cobre a janela — não há
+            // navegação por cima dele. O caminho de volta é o `✕` da barra dela,
+            // que faz o mesmo que o `Esc`.
+            .children((self.tela != Tela::Revelacao).then(|| self.barra(cx)))
             .child(
                 // `min_h(0)` no contêiner da tela: sem ele, o conteúdo rolável
                 // de dentro empurra o pai e a rolagem nunca acontece. Foi a
@@ -2575,11 +2613,13 @@ mod testes {
 
         janela
             .update(cx, |app, _window, _cx| {
-                assert_eq!(
-                    app.tela(),
-                    Tela::Biblioteca,
-                    "o Esc tem de sair da Revelação"
-                );
+                // 🚨 **`Tela::Sessao`, e não `Biblioteca`** — o `ja_dentro`
+                // abre uma sessão (`sessao_aberta = Some("g1")`), e sair da
+                // Revelação é voltar **de onde se veio**, que é a grade do
+                // ensaio. As duas asserções pediam `Biblioteca` e falhavam
+                // desde que o `ja_dentro` passou a abrir a sessão: o defeito
+                // estava no que o teste esperava, e não no caminho de volta.
+                assert_eq!(app.tela(), Tela::Sessao, "o Esc tem de sair da Revelação");
             })
             .expect("a janela deve estar aberta");
     }
@@ -2622,7 +2662,7 @@ mod testes {
             .update(cx, |app, _window, _cx| {
                 assert_eq!(
                     app.tela(),
-                    Tela::Biblioteca,
+                    Tela::Sessao,
                     "o foco ficou no campo de busca e as teclas da raiz sumiram"
                 );
             })

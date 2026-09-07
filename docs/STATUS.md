@@ -88,6 +88,27 @@ ser igual da WEB"*. O motor já era o mesmo (`revelacao-core`, os 53 ajustes, o 
 duas telas é que tinham sido desenhadas em ordens diferentes, e a diferença aparecia em tudo — de
 onde fica o botão de zerar até o que uma predefinição consegue guardar.
 
+🚨 **A primeira volta arrumou o conteúdo e deixou a moldura**, e o dono repetiu o pedido: *"qual a
+dificuldade de usar a UX da Revelação que já está funcionando perfeitamente na WEB?"*. O que faltava
+era estrutural — **o dock**. Cada painel tinha aba com título ("Foto", "Ajustes", "Presets"),
+divisória arrastável e arranjo gravado em disco, e por cima de tudo continuava a barra de navegação
+do app. No site o editor cobre a janela (`fixed inset-0`) e as três colunas são molduras sem nome.
+
+| | |
+|---|---|
+| ✅ **O dock saiu da Revelação** (`revelacao/paineis.rs`, apagado) | leiaute fixo: cabeçalho de 48px, predefinições 224px, foto, ajustes 320px, tira embaixo — as medidas do site |
+| ✅ **A barra do app some enquanto a Revelação está no ar** | é o que faz a tela ser a do site; o caminho de volta é o `✕` do cabeçalho, que faz o mesmo que o `Esc` |
+| ✅ **O cabeçalho é o do site, na mesma ordem** | `✕ ‹ › ▤` · posição e nome · selo do backend · `↶ ↷` · Antes · Enquadrar · Exportar JPEG · Publicar e sair |
+| ✅ **O `▤` esconde a coluna das predefinições** | como no site: ela some por inteiro, e não vira uma coluna vazia de 224px |
+| ✅ **Selo do backend** (`Motor::backend`) | o `WEBGPU` do site; aqui diz `METAL`. Responde "a GPU está mesmo sendo usada, e por qual caminho" — a pergunta que aparece toda vez que alguém acha o arrasto lento |
+| ✅ **Exportar e publicar viraram `PedidoDaRevelacao`** | a Revelação **pede** à raiz, que é quem tem o modal da pasta de destino e a conversa com o pós-venda |
+
+⚠️ **O histograma ficou, e o site não tem nenhum.** Não é divergência por esquecimento: é o gráfico
+que responde "estourou o branco?", a pergunta que nenhum slider responde, e tirá-lo para igualar
+seria apagar trabalho que funciona. Ele fica onde o Lightroom o põe — no alto da coluna da direita,
+**fora da rolagem**, porque uma medida que se olha *enquanto* se arrasta o slider não pode sumir na
+primeira seção aberta.
+
 | | |
 |---|---|
 | ✅ **Sete painéis, e não nove** (`controles.rs`) | `Secao` continua sendo a família do controle; `Painel` é o que a tela desenha. As três de HSL dividem **um** painel com abas (Cor, Luminância, Matiz) — eram três cabeçalhos quase iguais em sequência numa coluna de 280px. E o Detalhe passou para depois do HSL, que é a ordem do site |

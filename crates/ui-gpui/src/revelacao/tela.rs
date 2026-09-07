@@ -26,7 +26,6 @@ use gpui::{
 };
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::collapsible::Collapsible;
-use gpui_component::dock::{register_panel, DockArea, DockEvent, DockItem, PanelView};
 use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::slider::{Slider, SliderEvent, SliderState};
 use gpui_component::{ActiveTheme, Disableable, Selectable, Sizable, WindowExt};
@@ -43,23 +42,34 @@ use super::curva;
 use super::histograma::Histograma;
 use super::historico::{Estado, Historico};
 use super::lightroom::{self, Arquivo, EscolhaDePresets, Relatorio};
-use super::paineis::{PainelDaRevelacao, Qual};
 use super::persistencia::{self, Corte, Gravador};
 use super::presets::{self, GuardaDePresets};
 use super::processador::{Ajustes, Pedido, Processador};
-use crate::biblioteca::arranjo;
 use infrastructure::transformacao;
 
-/// Largura do painel de ajustes.
-const LADO_DO_PAINEL: f32 = 280.0;
+/// Largura da coluna de ajustes — os `w-80` do site.
+const LADO_DO_PAINEL: f32 = 320.0;
 
-/// A coluna dos presets, à esquerda — os 18% do `create_develop_layout`.
-const LADO_DOS_PRESETS: f32 = 200.0;
+/// A coluna das predefinições, à esquerda — os `w-56` do site.
+const LADO_DOS_PRESETS: f32 = 224.0;
+
+/// A altura da barra do topo — os `h-12` do site.
+const ALTURA_DO_CABECALHO: f32 = 48.0;
 
 /// A altura dos dois gráficos, no topo da coluna da direita.
-const ALTURA_DOS_GRAFICOS: f32 = 230.0;
+///
+/// ⚠️ **O site não tem histograma nenhum**, e este ficou. Não é divergência por
+/// esquecimento: é o gráfico que responde "estourou o branco?" — a pergunta que
+/// nenhum slider responde —, ele existe no Lightroom, e tirá-lo para igualar
+/// seria apagar trabalho que funciona. Fica onde o Lightroom o põe: no alto da
+/// coluna da direita, acima dos painéis.
+const ALTURA_DOS_GRAFICOS: f32 = 200.0;
 
 /// A altura da faixa de miniaturas, embaixo do palco.
+///
+/// ⚠️ **Ela é fixa desde que o dock saiu.** Antes a divisória do dock a
+/// redimensionava; no site a tira tem altura própria (e um puxador que ainda não
+/// existe aqui).
 const ALTURA_DO_FILMSTRIP: f32 = 84.0;
 
 /// Quantas miniaturas da tira ficam em memória.
@@ -118,14 +128,10 @@ const INTERVALO_DE_COLHEITA: Duration = Duration::from_millis(8);
 pub struct Revelacao {
     previews: Arc<PreviewManager>,
     gravador: Arc<dyn Gravador>,
-    /// O dock: quem arruma os cinco painéis. `Option` porque nasce depois do
-    /// construtor — os painéis precisam da entidade, que ainda não existe lá.
-    dock: Option<Entity<DockArea>>,
-    /// A gravação adiada do arranjo. Descartá-la cancela, e é o que faz um
-    /// arrasto de divisória virar uma escrita só.
-    _arranjo: Option<Task<()>>,
-    /// Em qual arquivo o arranjo é gravado. Definido ao montar o dock.
-    arranjo_em: std::path::PathBuf,
+    /// Se a coluna das predefinições está à mostra. É o botão de painel do
+    /// site, e some por inteiro quando fechada — uma coluna vazia de 224px
+    /// roubaria da foto o espaço que ela não usa.
+    presets_a_mostra: bool,
     /// A lista que a Biblioteca estava mostrando, para as setas e o filmstrip.
     /// `Arc` porque o closure do filmstrip a leva consigo.
     acervo: Arc<Vec<PhotoViewModel>>,
@@ -368,9 +374,7 @@ impl Revelacao {
         Self {
             previews,
             gravador,
-            dock: None,
-            _arranjo: None,
-            arranjo_em: std::path::PathBuf::new(),
+            presets_a_mostra: true,
             acervo: Arc::new(Vec::new()),
             miniaturas_da_tira: CacheDeMiniaturas::nova(
                 NonZeroUsize::new(MINIATURAS_DA_TIRA).expect("não é zero"),
@@ -1471,115 +1475,6 @@ impl Revelacao {
         continua
     }
 
-    /// A barra da Revelação, em cima da foto — a do site (`editor.tsx`).
-    ///
-    /// 🚨 **Desfazer, refazer, "Antes" e "Enquadrar" só existiam como tecla.**
-    /// `Cmd+Z`, `\\` e `C` funcionam desde sempre, e nada na tela dizia que
-    /// existiam: quem abria a Revelação pela primeira vez via a foto, os
-    /// sliders, e nenhum caminho de volta. O site tem os quatro na barra, e é
-    /// de lá que este desenho vem.
-    ///
-    /// ⚠️ **Exportar e publicar não estão aqui**, e é diferença de propósito. O
-    /// "Baixar JPEG" e o "Salvar na galeria e sair" do site são os botões
-    /// "Exportar" e "Pós-venda" da barra do app, que valem para a seleção
-    /// inteira e não só para a foto aberta — repeti-los aqui daria dois
-    /// caminhos com desfechos diferentes para o mesmo verbo.
-    fn barra_da_revelacao(&self, cx: &mut Context<Self>) -> AnyElement {
-        let total = self.acervo.len();
-        let posicao = self.posicao();
-        let nome = self
-            .foto()
-            .map(|foto| foto.name.clone())
-            .unwrap_or_default();
-
-        div()
-            .flex()
-            .items_center()
-            .gap(px(4.))
-            .px(px(8.))
-            .py(px(5.))
-            .bg(cx.theme().title_bar)
-            .border_b_1()
-            .border_color(cx.theme().border)
-            .child(
-                Button::new("revelacao-anterior")
-                    .label("‹")
-                    .xsmall()
-                    .ghost()
-                    .tooltip("Foto anterior (seta para a esquerda)")
-                    .disabled(posicao == 0 || total <= 1)
-                    .on_click(cx.listener(|tela, _ev, window, cx| tela.andar(-1, window, cx))),
-            )
-            .child(
-                Button::new("revelacao-proxima")
-                    .label("›")
-                    .xsmall()
-                    .ghost()
-                    .tooltip("Próxima foto (seta para a direita)")
-                    .disabled(total <= 1 || posicao + 1 >= total)
-                    .on_click(cx.listener(|tela, _ev, window, cx| tela.andar(1, window, cx))),
-            )
-            // 🔑 "3/200" antes do nome, e não só o nome: revelar é trabalho de
-            // lote, e a pergunta que se faz a cada foto é "quanto falta".
-            .when(total > 1, |barra| {
-                barra.child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(SharedString::from(format!("{}/{total}", posicao + 1))),
-                )
-            })
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(px(0.))
-                    .truncate()
-                    .text_xs()
-                    .child(SharedString::from(nome)),
-            )
-            .child(
-                Button::new("revelacao-desfazer")
-                    .label("Desfazer")
-                    .xsmall()
-                    .ghost()
-                    .tooltip("Desfazer (Cmd+Z)")
-                    .disabled(!self.pode_desfazer())
-                    .on_click(cx.listener(|tela, _ev, window, cx| tela.desfazer(window, cx))),
-            )
-            .child(
-                Button::new("revelacao-refazer")
-                    .label("Refazer")
-                    .xsmall()
-                    .ghost()
-                    .tooltip("Refazer (Cmd+Shift+Z)")
-                    .disabled(!self.pode_refazer())
-                    .on_click(cx.listener(|tela, _ev, window, cx| tela.refazer(window, cx))),
-            )
-            .child(
-                Button::new("revelacao-antes")
-                    .label("Antes")
-                    .xsmall()
-                    .tooltip("Ver a foto sem ajuste (\\)")
-                    .when(self.mostrando_original, |b| {
-                        b.custom(tema::botao_quente(cx))
-                    })
-                    .selected(self.mostrando_original)
-                    .disabled(self.aberta.is_none())
-                    .on_click(cx.listener(|tela, _ev, _window, cx| tela.alternar_original(cx))),
-            )
-            .child(
-                Button::new("revelacao-enquadrar")
-                    .label("Enquadrar")
-                    .xsmall()
-                    .tooltip("Girar, espelhar, endireitar e recortar (C)")
-                    .when(self.cortando(), |b| b.custom(tema::botao_quente(cx)))
-                    .selected(self.cortando())
-                    .disabled(!self.tem_pixels())
-                    .on_click(cx.listener(|tela, _ev, window, cx| tela.alternar_corte(window, cx))),
-            )
-            .into_any_element()
-    }
-
     fn palco(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
         // 🚨 **`size_full`, e não `flex_1`.** Esta moldura era filha de uma
         // linha flex antes do dock; hoje ela é a **raiz de um painel**, e
@@ -1596,10 +1491,11 @@ impl Revelacao {
             .min_w(px(0.))
             .items_center()
             .justify_center()
-            // O palco é neutro e escuro: o olho julga exposição por comparação
-            // com o que está em volta, e entorno mais claro que a foto faz toda
-            // foto parecer subexposta.
-            .bg(cx.theme().background)
+            // 🔑 **O poço, e não o fundo do app.** O olho julga exposição por
+            // comparação com o que está em volta: entorno mais claro que a foto
+            // faz toda foto parecer subexposta. É o degrau mais escuro da
+            // escada, reservado ao que encosta em imagem.
+            .bg(tema::cores::poco())
             .p(px(24.));
 
         match self.aberta.as_ref() {
@@ -1873,34 +1769,55 @@ impl Revelacao {
                 .collect()
         };
 
+        let graficos = self.painel_dos_graficos(cx);
+
         div()
-            .id("painel-de-ajustes")
             .flex()
             .flex_col()
-            .gap(px(6.))
             .size_full()
-            .p(px(12.))
-            .overflow_y_scroll()
             .bg(cx.theme().sidebar)
-            .when(sem_motor, |painel| {
-                painel.child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().warning)
-                        .child("Sem GPU disponível — os ajustes não são aplicados"),
-                )
-            })
-            .when(self.mostrando_original, |painel| {
-                painel.child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().warning)
-                        .child("Mostrando o original (\\ para voltar)"),
-                )
-            })
-            .children(barra)
-            .children(cabecalho)
-            .children(paineis)
+            // ⚠️ **O histograma fica fora da rolagem**, no alto — é onde o
+            // Lightroom o põe, e é o que ele precisa ser para servir: uma medida
+            // que se olha **enquanto** se arrasta o slider. Rolando junto com os
+            // 53 controles, ele desaparece da tela na primeira seção aberta.
+            .child(
+                div()
+                    .h(px(ALTURA_DOS_GRAFICOS))
+                    .flex_none()
+                    .border_b_1()
+                    .border_color(cx.theme().border)
+                    .child(graficos),
+            )
+            .child(
+                div()
+                    .id("painel-de-ajustes")
+                    .flex()
+                    .flex_col()
+                    .gap(px(6.))
+                    .flex_1()
+                    .min_h(px(0.))
+                    .p(px(12.))
+                    .overflow_y_scroll()
+                    .when(sem_motor, |painel| {
+                        painel.child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().warning)
+                                .child("Sem GPU disponível — os ajustes não são aplicados"),
+                        )
+                    })
+                    .when(self.mostrando_original, |painel| {
+                        painel.child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().warning)
+                                .child("Mostrando o original (\\ para voltar)"),
+                        )
+                    })
+                    .children(barra)
+                    .children(cabecalho)
+                    .children(paineis),
+            )
     }
 
     /// Quantos ajustes estão fora do neutro, e o botão que devolve todos.
@@ -1980,19 +1897,6 @@ impl Revelacao {
             .bg(cx.theme().sidebar)
             .child(self.histograma(cx))
             .child(self.curva_de_tons(cx))
-    }
-
-    /// A lista de presets, sozinha — como a aba `Presets` do legado.
-    fn painel_dos_presets(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .id("painel-de-presets")
-            .flex()
-            .flex_col()
-            .size_full()
-            .p(px(10.))
-            .overflow_y_scroll()
-            .bg(cx.theme().sidebar)
-            .child(self.presets(cx))
     }
 
     /// A barra do modo de corte: o que fazer com o retângulo que está na foto.
@@ -2896,7 +2800,8 @@ impl Revelacao {
     /// espaço da foto para não dizer nada — e é o que acontece ao abrir a
     /// Revelação sem lista (os testes, e o caminho de `abrir`).
     fn filmstrip(&mut self, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
-        const LADO: f32 = 52.0;
+        // A miniatura é o que sobra da altura da faixa, como no site.
+        const LADO: f32 = ALTURA_DO_FILMSTRIP - 16.0;
 
         if self.acervo.len() < 2 {
             return None;
@@ -2987,7 +2892,7 @@ impl Revelacao {
                 .items_center()
                 .gap(px(6.))
                 .px(px(6.))
-                .h(px(LADO + 16.0))
+                .h(px(ALTURA_DO_FILMSTRIP))
                 .flex_none()
                 .overflow_x_scroll()
                 .border_t_1()
@@ -2998,177 +2903,270 @@ impl Revelacao {
     }
 }
 
-impl Revelacao {
-    /// O desenho de um painel, para a view fina do dock chamar.
-    ///
-    /// 🔑 **Os painéis não têm estado próprio** — a mesma decisão da Biblioteca,
-    /// pela mesma razão: os `cx.listener` dos 42 controles esperam
-    /// `Context<Revelacao>`, e movê-los para dentro de views novas trocaria todos
-    /// eles por `entidade.update(…)`.
-    pub fn desenhar_painel(
-        &mut self,
-        qual: Qual,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        match qual {
-            // A barra fica **dentro** do painel da foto, e não numa faixa
-            // própria do dock: ela fala da foto que está aberta, e um painel
-            // arrastável para longe dela diria o contrário.
-            Qual::Palco => div()
-                .flex()
-                .flex_col()
-                .size_full()
-                .child(self.barra_da_revelacao(cx))
-                .child(div().flex_1().min_h(px(0.)).child(self.palco(cx)))
-                .into_any_element(),
-            Qual::Ajustes => self.painel(cx).into_any_element(),
-            Qual::Graficos => self.painel_dos_graficos(cx).into_any_element(),
-            Qual::Presets => self.painel_dos_presets(cx).into_any_element(),
-            // ⚠️ Sem lista, o filmstrip é um painel vazio — e não some, como
-            // sumia antes do dock: um painel que desaparece do arranjo salvo
-            // levaria junto o lugar dele, e a foto seguinte reapareceria noutro
-            // canto da tela.
-            Qual::Filmstrip => self
-                .filmstrip(cx)
-                .unwrap_or_else(|| div().size_full().into_any_element()),
-        }
-    }
-
-    /// Monta o dock com o arranjo padrão, e restaura o salvo por cima.
-    ///
-    /// 🚨 **Só pode ser chamado depois de a entidade existir** — a mesma regra da
-    /// Biblioteca: os painéis guardam uma referência fraca a ela.
-    ///
-    /// O arranjo é o do legado (`create_develop_layout`): presets à esquerda, a
-    /// foto no centro, gráficos e ajustes à direita, filmstrip embaixo.
-    pub fn montar_o_dock(
-        &mut self,
-        eu: &Entity<Self>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.montar_o_dock_em(eu, arranjo::caminho("revelacao"), window, cx);
-    }
-
-    /// O mesmo, com o arquivo de arranjo escolhido.
-    ///
-    /// 🚨 **Existe pela mesma razão da Biblioteca**: o caminho padrão é o
-    /// catálogo de verdade, e um teste que exercitasse a gravação por ele
-    /// escreveria no catálogo de quem roda a suíte — o defeito que a fase 0
-    /// encontrou. E ele não é hipotético aqui: enquanto este dock era escrito, a
-    /// gravação **rodou uma vez contra o catálogo real**, porque a troca do
-    /// caminho não tinha pegado no arquivo.
-    pub fn montar_o_dock_em(
-        &mut self,
-        eu: &Entity<Self>,
-        arquivo: std::path::PathBuf,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let arquivo_para_ler = arquivo.clone();
-        self.arranjo_em = arquivo;
-        let dock = cx.new(|cx| DockArea::new("revelacao", Some(arranjo::VERSAO), window, cx));
-        let fraca = dock.downgrade();
-
-        for qual in Qual::TODOS {
-            let revelacao = eu.downgrade();
-            register_panel(
-                cx,
-                qual.nome(),
-                move |_dock, _estado, _info, _window, cx| {
-                    let revelacao = revelacao.clone();
-                    Box::new(cx.new(|cx| PainelDaRevelacao::novo(qual, revelacao, cx)))
-                },
-            );
-        }
-
-        let painel = |qual: Qual, eu: &Entity<Self>, cx: &mut gpui::App| {
-            let revelacao = eu.downgrade();
-            let entidade = cx.new(|cx| PainelDaRevelacao::novo(qual, revelacao, cx));
-            std::sync::Arc::new(entidade) as std::sync::Arc<dyn PanelView>
-        };
-
-        let presets = DockItem::tabs(vec![painel(Qual::Presets, eu, cx)], &fraca, window, cx);
-        let palco = DockItem::tabs(vec![painel(Qual::Palco, eu, cx)], &fraca, window, cx);
-        let graficos = DockItem::tabs(vec![painel(Qual::Graficos, eu, cx)], &fraca, window, cx);
-        let ajustes = DockItem::tabs(vec![painel(Qual::Ajustes, eu, cx)], &fraca, window, cx);
-        let filmstrip = DockItem::tabs(vec![painel(Qual::Filmstrip, eu, cx)], &fraca, window, cx);
-
-        // A direita é uma coluna: os gráficos em cima, os ajustes embaixo — a
-        // proporção do legado (20% / 80%), que é o que deixa os 42 controles
-        // com espaço para rolar.
-        let direita = DockItem::split_with_sizes(
-            gpui::Axis::Vertical,
-            vec![graficos, ajustes],
-            vec![Some(px(ALTURA_DOS_GRAFICOS)), None],
-            &fraca,
-            window,
-            cx,
-        );
-
-        let meio = DockItem::split_with_sizes(
-            gpui::Axis::Vertical,
-            vec![palco, filmstrip],
-            vec![None, Some(px(ALTURA_DO_FILMSTRIP))],
-            &fraca,
-            window,
-            cx,
-        );
-
-        let centro = DockItem::split_with_sizes(
-            gpui::Axis::Horizontal,
-            vec![presets, meio, direita],
-            vec![Some(px(LADO_DOS_PRESETS)), None, Some(px(LADO_DO_PAINEL))],
-            &fraca,
-            window,
-            cx,
-        );
-
-        dock.update(cx, |area, cx| {
-            area.set_center(centro, window, cx);
-
-            if let Some(salvo) = arranjo::ler_de(&arquivo_para_ler) {
-                if let Err(erro) = area.load(salvo, window, cx) {
-                    eprintln!("⚠️  Arranjo salvo da Revelação não pôde ser restaurado: {erro}");
-                }
-            }
-        });
-
-        let assinatura = cx.subscribe_in(
-            &dock,
-            window,
-            |tela: &mut Self, area, evento: &DockEvent, _window, cx| {
-                if !matches!(evento, DockEvent::LayoutChanged) {
-                    return;
-                }
-                let area = area.clone();
-                // A mesma espera de 500 ms da Biblioteca e dos ajustes: um
-                // arrasto de divisória emite dezenas de eventos por segundo.
-                tela._arranjo = Some(cx.spawn(async move |tela, cx| {
-                    cx.background_executor()
-                        .timer(std::time::Duration::from_millis(500))
-                        .await;
-                    let _ = tela.update(cx, |tela, cx| {
-                        arranjo::gravar_em(&tela.arranjo_em, &area.read(cx).dump(cx));
-                    });
-                }));
-            },
-        );
-
-        self._assinaturas.push(assinatura);
-        self.dock = Some(dock);
-    }
+/// O que a Revelação pede à raiz — os botões que o site tem na barra dele e que
+/// só o [`crate::app::Aplicativo`] sabe cumprir.
+///
+/// ⚠️ O nome é longo porque `Pedido` já é o da GPU
+/// ([`super::processador::Pedido`]), e os dois se cruzam neste arquivo.
+///
+/// 🔑 **Ela não sabe exportar nem publicar, e não deve saber.** Exportar abre um
+/// modal com pasta de destino; publicar fala com o pós-venda do site. As duas
+/// coisas valem para a seleção inteira e moram na raiz — a Revelação só diz "o
+/// operador pediu isto daqui".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PedidoDaRevelacao {
+    /// O `X` da barra: fecha a Revelação e volta de onde se veio.
+    Sair,
+    /// "Baixar JPEG" do site.
+    Exportar,
+    /// "Salvar na galeria e sair" do site.
+    Publicar,
 }
 
+impl gpui::EventEmitter<PedidoDaRevelacao> for Revelacao {}
+
 impl Render for Revelacao {
+    /// A tela inteira, no desenho do editor do site (`editor.tsx`).
+    ///
+    /// # 🚨 Ela era um dock de cinco painéis, e o dono pediu duas vezes que não
+    ///
+    /// *"o Modo revelação precisa ser exatamente igual a interface da Revelação
+    /// WEB"*. O dock dava a cada painel uma **aba com título** — "Foto",
+    /// "Ajustes", "Presets" —, divisórias arrastáveis e um arranjo gravado em
+    /// disco. Nada disso existe no site, e o efeito somado é outro programa: no
+    /// site a foto ocupa a janela e as três colunas são molduras sem nome.
+    ///
+    /// O que se perde é arrastar painel, e é uma perda escolhida: as posições
+    /// eram as mesmas em toda abertura de qualquer jeito, porque revelar é
+    /// sempre o mesmo gesto.
+    ///
+    /// ```text
+    /// ┌──────────────────────────────────────────────────┐
+    /// │ ✕ ‹ › ▤  3/200 img0042.jpg  METAL   ↶ ↷ Antes ⧉ … │  cabeçalho
+    /// ├──────────┬───────────────────────────┬───────────┤
+    /// │ presets  │           foto            │  ajustes  │
+    /// │  224px   │          flex 1           │   320px   │
+    /// ├──────────┴───────────────────────────┴───────────┤
+    /// │                     tira                         │
+    /// └──────────────────────────────────────────────────┘
+    /// ```
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let cabecalho = self.cabecalho(cx);
+        let presets = self
+            .presets_a_mostra
+            .then(|| self.coluna_dos_presets(cx).into_any_element());
+        let palco = self.palco(cx);
+        let ajustes = self.painel(cx).into_any_element();
+        let tira = self.filmstrip(cx);
+
         div()
             .flex()
+            .flex_col()
             .size_full()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
-            .children(self.dock.clone())
+            .child(cabecalho)
+            .child(
+                // `min_h(0)` na faixa do meio: sem ele, as colunas roláveis de
+                // dentro empurram o pai e a rolagem nunca acontece.
+                div()
+                    .flex()
+                    .flex_1()
+                    .min_h(px(0.))
+                    .children(presets)
+                    .child(div().flex().flex_1().min_w(px(0.)).child(palco))
+                    .child(
+                        div()
+                            .w(px(LADO_DO_PAINEL))
+                            .flex_none()
+                            .border_l_1()
+                            .border_color(cx.theme().border)
+                            .child(ajustes),
+                    ),
+            )
+            .children(tira)
+    }
+}
+
+impl Revelacao {
+    /// A barra do topo — a do site, na mesma ordem.
+    ///
+    /// ⚠️ **Ela ocupa a janela inteira**, e não só a largura da foto: no site
+    /// não há barra de aplicativo por cima (o editor é `fixed inset-0`), e a
+    /// raiz esconde a dela enquanto a Revelação está no ar. Por isso o `✕` daqui
+    /// é o único caminho de volta visível — e ele faz o mesmo que o `Esc`.
+    fn cabecalho(&self, cx: &mut Context<Self>) -> AnyElement {
+        let total = self.acervo.len();
+        let posicao = self.posicao();
+        let nome = self
+            .foto()
+            .map(|foto| foto.name.clone())
+            .unwrap_or_default();
+        let tem_foto = self.aberta.is_some();
+
+        div()
+            .flex()
+            .items_center()
+            .gap(px(4.))
+            .h(px(ALTURA_DO_CABECALHO))
+            .flex_none()
+            .px(px(8.))
+            .bg(cx.theme().title_bar)
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .child(
+                Button::new("revelacao-fechar")
+                    .label("✕")
+                    .xsmall()
+                    .ghost()
+                    .tooltip("Fechar a Revelação (Esc)")
+                    .on_click(cx.listener(|_tela, _ev, _window, cx| {
+                        cx.emit(PedidoDaRevelacao::Sair);
+                    })),
+            )
+            .child(
+                Button::new("revelacao-anterior")
+                    .label("‹")
+                    .xsmall()
+                    .ghost()
+                    .tooltip("Foto anterior (seta para a esquerda)")
+                    .disabled(posicao == 0 || total <= 1)
+                    .on_click(cx.listener(|tela, _ev, window, cx| tela.andar(-1, window, cx))),
+            )
+            .child(
+                Button::new("revelacao-proxima")
+                    .label("›")
+                    .xsmall()
+                    .ghost()
+                    .tooltip("Próxima foto (seta para a direita)")
+                    .disabled(total <= 1 || posicao + 1 >= total)
+                    .on_click(cx.listener(|tela, _ev, window, cx| tela.andar(1, window, cx))),
+            )
+            .child(
+                Button::new("revelacao-presets")
+                    .label("▤")
+                    .xsmall()
+                    .ghost()
+                    .tooltip("Mostrar ou esconder as predefinições")
+                    .selected(self.presets_a_mostra)
+                    .on_click(cx.listener(|tela, _ev, _window, cx| {
+                        tela.presets_a_mostra = !tela.presets_a_mostra;
+                        tela.prever(None, cx);
+                        cx.notify();
+                    })),
+            )
+            // 🔑 "3/200" antes do nome, e não só o nome: revelar é trabalho de
+            // lote, e a pergunta que se faz a cada foto é "quanto falta".
+            .when(total > 1, |barra| {
+                barra.child(
+                    div()
+                        .pl(px(4.))
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(SharedString::from(format!("{}/{total}", posicao + 1))),
+                )
+            })
+            .child(
+                div()
+                    .min_w(px(0.))
+                    .truncate()
+                    .text_xs()
+                    .child(SharedString::from(nome)),
+            )
+            // O selo do site, ao lado do nome: lá ele diz WEBGPU ou WEBGL2, que
+            // rendem diferente; aqui ele responde "a GPU está mesmo sendo usada,
+            // e por qual caminho" — a pergunta que aparece toda vez que alguém
+            // acha o arrasto lento.
+            .children(self.processador.backend().map(|backend| {
+                div()
+                    .flex_none()
+                    .px(px(4.))
+                    .py(px(1.))
+                    .rounded(px(3.))
+                    .bg(cx.theme().muted)
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(SharedString::from(backend.to_uppercase()))
+            }))
+            .child(div().flex_1().min_w(px(0.)))
+            .child(
+                Button::new("revelacao-desfazer")
+                    .label("↶")
+                    .xsmall()
+                    .ghost()
+                    .tooltip("Desfazer (Cmd+Z)")
+                    .disabled(!self.pode_desfazer())
+                    .on_click(cx.listener(|tela, _ev, window, cx| tela.desfazer(window, cx))),
+            )
+            .child(
+                Button::new("revelacao-refazer")
+                    .label("↷")
+                    .xsmall()
+                    .ghost()
+                    .tooltip("Refazer (Cmd+Shift+Z)")
+                    .disabled(!self.pode_refazer())
+                    .on_click(cx.listener(|tela, _ev, window, cx| tela.refazer(window, cx))),
+            )
+            .child(
+                Button::new("revelacao-antes")
+                    .label("Antes")
+                    .xsmall()
+                    .tooltip("Ver a foto sem ajuste (\\)")
+                    .when(self.mostrando_original, |b| {
+                        b.custom(tema::botao_quente(cx))
+                    })
+                    .selected(self.mostrando_original)
+                    .disabled(!tem_foto)
+                    .on_click(cx.listener(|tela, _ev, _window, cx| tela.alternar_original(cx))),
+            )
+            .child(
+                Button::new("revelacao-enquadrar")
+                    .label("Enquadrar")
+                    .xsmall()
+                    .tooltip("Girar, espelhar, endireitar e recortar (C)")
+                    .when(self.cortando(), |b| b.custom(tema::botao_quente(cx)))
+                    .selected(self.cortando())
+                    .disabled(!self.tem_pixels())
+                    .on_click(cx.listener(|tela, _ev, window, cx| tela.alternar_corte(window, cx))),
+            )
+            // As duas últimas do site: "Baixar JPEG" e "Salvar na galeria e
+            // sair". Aqui elas **pedem à raiz**, que é quem tem o modal da
+            // pasta de destino e a conversa com o pós-venda.
+            .child(
+                Button::new("revelacao-exportar")
+                    .label("Exportar JPEG")
+                    .xsmall()
+                    .disabled(!tem_foto)
+                    .on_click(cx.listener(|_tela, _ev, _window, cx| {
+                        cx.emit(PedidoDaRevelacao::Exportar);
+                    })),
+            )
+            .child(
+                Button::new("revelacao-publicar")
+                    .label("Publicar e sair")
+                    .xsmall()
+                    .custom(tema::botao_quente(cx))
+                    .disabled(!tem_foto)
+                    .on_click(cx.listener(|_tela, _ev, _window, cx| {
+                        cx.emit(PedidoDaRevelacao::Publicar);
+                    })),
+            )
+            .into_any_element()
+    }
+
+    /// A coluna da esquerda: só as predefinições, sem título e sem aba.
+    fn coluna_dos_presets(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .id("coluna-de-presets")
+            .w(px(LADO_DOS_PRESETS))
+            .flex_none()
+            .h_full()
+            .p(px(8.))
+            .overflow_y_scroll()
+            .bg(cx.theme().sidebar)
+            .border_r_1()
+            .border_color(cx.theme().border)
+            .child(self.presets(cx))
     }
 }
 
@@ -3273,29 +3271,9 @@ mod testes {
         presets: Vec<Preset>,
     ) -> gpui::WindowHandle<Revelacao> {
         cx.update(gpui_component::init);
-        let janela = cx.add_window(move |window, cx| {
+        cx.add_window(move |window, cx| {
             Revelacao::nova(previews, gravador, guarda, escolha, presets, window, cx)
-        });
-
-        // 🚨 **O dock é montado aqui também.** Sem esta linha os testes
-        // desenhariam uma Revelação **sem painel nenhum** — a mesma armadilha
-        // que os quinze testes da Biblioteca esconderam até o primeiro teste de
-        // dock acusar.
-        // 🚨 **Num arquivo descartável**, e não no caminho de verdade: montar lê
-        // o arranjo salvo, e um teste que lesse o do catálogo real passaria a
-        // depender da tela que o fotógrafo arrumou ontem.
-        let arquivo = std::env::temp_dir().join(format!(
-            "vlb-teste-arranjo-revelacao-{}.json",
-            std::process::id()
-        ));
-        janela
-            .update(cx, |tela, window, cx| {
-                let eu = cx.entity();
-                tela.montar_o_dock_em(&eu, arquivo.clone(), window, cx);
-            })
-            .expect("a janela deve estar aberta");
-
-        janela
+        })
     }
 
     /// 🚨 **O palco tem de ter tamanho depois de desenhado.**
@@ -3347,63 +3325,6 @@ mod testes {
                     "o palco foi desenhado com tamanho {}x{} — a foto some num retângulo de zero",
                     f32::from(palco.size.width),
                     f32::from(palco.size.height)
-                );
-            })
-            .expect("a janela deve estar aberta");
-    }
-
-    /// 🚨 Os cinco painéis da Revelação voltam do arranjo gravado.
-    ///
-    /// A conferência é pelos painéis **vivos**, e não pelo retrato: o
-    /// `InvalidPanel::dump` devolve o estado antigo com o nome original dentro,
-    /// então comparar retratos passaria com o registro faltando inteiro. Foi o
-    /// que o mesmo teste da Biblioteca mostrou primeiro.
-    #[gpui::test]
-    fn o_arranjo_da_revelacao_volta_com_os_cinco_paineis(cx: &mut TestAppContext) {
-        let (previews, _dir) = previews_descartaveis();
-        let janela = janela(cx, previews);
-
-        fn vivos(item: &gpui_component::dock::DockItem, cx: &gpui::App) -> Vec<&'static str> {
-            use gpui_component::dock::DockItem;
-            match item {
-                DockItem::Tabs { items, .. } => {
-                    items.iter().map(|view| view.panel_name(cx)).collect()
-                }
-                DockItem::Split { items, .. } => {
-                    items.iter().flat_map(|filho| vivos(filho, cx)).collect()
-                }
-                DockItem::Panel { view, .. } => vec![view.panel_name(cx)],
-                DockItem::Tiles { .. } => Vec::new(),
-            }
-        }
-
-        let esperados = vec![
-            "revelacao:presets",
-            "revelacao:palco",
-            "revelacao:filmstrip",
-            "revelacao:graficos",
-            "revelacao:ajustes",
-        ];
-
-        let retrato = janela
-            .update(cx, |tela, _window, cx| {
-                let dock = tela.dock.as_ref().expect("o dock foi montado");
-                assert_eq!(vivos(dock.read(cx).items(), cx), esperados);
-                dock.read(cx).dump(cx)
-            })
-            .expect("a janela deve estar aberta");
-
-        janela
-            .update(cx, |tela, window, cx| {
-                let dock = tela.dock.as_ref().expect("o dock foi montado").clone();
-                dock.update(cx, |area, cx| {
-                    area.load(retrato, window, cx).expect("restaurar o arranjo");
-                });
-
-                assert_eq!(
-                    vivos(dock.read(cx).items(), cx),
-                    esperados,
-                    "restaurar tem de reconstruir os painéis, e não InvalidPanel"
                 );
             })
             .expect("a janela deve estar aberta");

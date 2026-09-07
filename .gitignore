@@ -1,5 +1,7 @@
 # Rust
 /target/
+# Os instaladores gerados por scripts/empacotar.sh
+/dist/
 **/*.rs.bk
 *.pdb
 

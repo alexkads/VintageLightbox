@@ -164,10 +164,16 @@ VLB_CATALOG=/tmp/medicao cargo run -p ui-gpui --bin semear-catalogo -- 2000
 
 ## 6. O dock
 
-Biblioteca e Revelação vivem num `DockArea` do `gpui-component`: os painéis se arrastam e se
-redimensionam, e o arranjo é gravado **ao lado do catálogo** (`arranjo-biblioteca.json`,
-`arranjo-revelacao.json`) — assim rodar contra um catálogo de medição não mexe na arrumação de quem
-trabalha.
+A **Biblioteca** vive num `DockArea` do `gpui-component`: os painéis se arrastam e se
+redimensionam, e o arranjo é gravado **ao lado do catálogo** (`arranjo-biblioteca.json`) — assim
+rodar contra um catálogo de medição não mexe na arrumação de quem trabalha.
+
+🚨 **A Revelação saiu do dock em 7/set/2026**, a pedido do dono: *"o Modo revelação precisa ser
+exatamente igual a interface da Revelação WEB"*. O dock dava a cada painel uma **aba com título** —
+"Foto", "Ajustes", "Presets" —, divisórias arrastáveis e um `arranjo-revelacao.json`; nada disso
+existe no editor do site, e o efeito somado era outro programa. Hoje ela é um leiaute fixo, do
+tamanho da janela: cabeçalho, três colunas, tira. O que se perdeu foi arrastar painel — e as
+posições eram as mesmas em toda abertura de qualquer jeito, porque revelar é sempre o mesmo gesto.
 
 🔑 **Os painéis não têm estado próprio: eles chamam métodos da tela**, por `WeakEntity`. Estado
 próprio significaria mover ~600 linhas de desenho e trocar todos os `cx.listener`; a referência é

@@ -59,6 +59,8 @@ pub struct Processador {
     /// que já não interessa, e por isso ele é compartilhado, não copiado.
     id_atual: Arc<Mutex<u64>>,
     disponivel: Arc<Mutex<Option<bool>>>,
+    /// Qual API gráfica respondeu — o selo da barra, como no site.
+    backend: Arc<Mutex<Option<&'static str>>>,
 }
 
 impl Processador {
@@ -67,12 +69,20 @@ impl Processador {
         let (envia_resultado, recebe_resultado) = channel::<Resultado>();
         let id_atual = Arc::new(Mutex::new(0u64));
         let disponivel = Arc::new(Mutex::new(None));
+        let backend = Arc::new(Mutex::new(None));
 
         {
             let id_atual = id_atual.clone();
             let disponivel = disponivel.clone();
+            let backend = backend.clone();
             std::thread::spawn(move || {
-                laco(recebe_pedido, envia_resultado, id_atual, disponivel);
+                laco(
+                    recebe_pedido,
+                    envia_resultado,
+                    id_atual,
+                    disponivel,
+                    backend,
+                );
             });
         }
 
@@ -81,6 +91,7 @@ impl Processador {
             resultados: recebe_resultado,
             id_atual,
             disponivel,
+            backend,
         }
     }
 
@@ -91,6 +102,11 @@ impl Processador {
     /// milissegundos de abertura — em toda abertura.
     pub fn disponivel(&self) -> Option<bool> {
         *self.disponivel.lock()
+    }
+
+    /// Qual API gráfica respondeu. `None` enquanto a thread abre o dispositivo.
+    pub fn backend(&self) -> Option<&'static str> {
+        *self.backend.lock()
     }
 
     pub fn proximo_id(&self) -> u64 {
@@ -134,11 +150,13 @@ fn laco(
     resultados: Sender<Resultado>,
     id_atual: Arc<Mutex<u64>>,
     disponivel: Arc<Mutex<Option<bool>>>,
+    backend: Arc<Mutex<Option<&'static str>>>,
 ) {
     let Some(mut motor) = Motor::abrir() else {
         *disponivel.lock() = Some(false);
         return;
     };
+    *backend.lock() = Some(motor.backend());
     *disponivel.lock() = Some(true);
 
     while let Ok(pedido) = pedidos.recv() {
