@@ -38,9 +38,11 @@ use domain::services::pos_venda::{
     EstadoDaFotoNoSite, EstadoNoBalcao, FotoDaGaleria, GaleriaAberta, LinkDeAcesso, Produto, Sessao,
 };
 use gpui::{
-    canvas, div, img, prelude::*, px, App, Context, EventEmitter, SharedString, Task, Window,
+    canvas, div, img, prelude::*, px, App, Context, Entity, EventEmitter, SharedString, Task,
+    Window,
 };
 use gpui_component::button::{Button, ButtonVariants};
+use gpui_component::slider::{Slider, SliderEvent, SliderState};
 use gpui_component::{ActiveTheme, Disableable, Selectable, Sizable};
 use infrastructure::cache::preview_manager::PreviewManager;
 
@@ -152,8 +154,23 @@ pub struct Detalhe {
     faixa: Option<String>,
     /// O lado do tile, em pixels.
     zoom: f32,
+    /// O controle do zoom da grade.
+    ///
+    /// 🔑 **Um slider, e não `−` e `+`** — é o que a rota do site tem
+    /// (`grade.tsx`), e a diferença não é enfeite: com dois botões de passo
+    /// fixo, ir de 90 a 320px são sete cliques, e o operador não vê onde está
+    /// na faixa. O slider mostra e chega em um gesto.
+    zoom_slider: Entity<SliderState>,
     /// Se o aviso ao cliente está a caminho.
     avisando: bool,
+    /// Se a segunda tela — a do cliente — está aberta agora.
+    ///
+    /// 🔑 **O botão é um alternador, e um alternador tem de mostrar o estado.**
+    /// No site ele acende em âmbar com `aria-pressed` (`grade.tsx`); aqui ele
+    /// era um botão comum, e o mesmo clique fechava ou abria sem a tela dizer
+    /// qual dos dois ia acontecer. Quem sabe a resposta é a raiz, que é dona da
+    /// janela — daí vir de fora, por `definir_cliente_aberta`.
+    cliente_aberta: bool,
     /// Quem abre a janela **do sistema** para escolher as fotos.
     seletor: Arc<dyn SeletorDeFotos>,
     /// Por onde os caminhos escolhidos voltam.
@@ -205,8 +222,30 @@ impl Detalhe {
         publicador: Arc<dyn Publicador>,
         seletor: Arc<dyn SeletorDeFotos>,
         previews: Arc<PreviewManager>,
+        cx: &mut Context<Self>,
     ) -> Self {
+        let zoom_slider = cx.new(|_| {
+            SliderState::new()
+                .min(ZOOM_MINIMO)
+                .max(ZOOM_MAXIMO)
+                .step(PASSO_DO_ZOOM)
+                .default_value(ZOOM_PADRAO)
+        });
+        // ⚠️ `subscribe`, e não `subscribe_in`: mudar o tamanho do tile não
+        // precisa da janela, e exigi-la obrigaria a raiz a construir o Detalhe
+        // dentro de um `cx.new` com `window` — que ela não tem ali.
+        cx.subscribe(&zoom_slider, |tela, _estado, evento: &SliderEvent, cx| {
+            let SliderEvent::Change(valor) = evento;
+            let novo = valor.start().clamp(ZOOM_MINIMO, ZOOM_MAXIMO);
+            if novo != tela.zoom {
+                tela.zoom = novo;
+                cx.notify();
+            }
+        })
+        .detach();
+
         Self {
+            zoom_slider,
             publicador,
             seletor,
             escolhas: channel(),
@@ -232,6 +271,7 @@ impl Detalhe {
             faixa: None,
             zoom: ZOOM_PADRAO,
             avisando: false,
+            cliente_aberta: false,
             enviando: 0,
             enviadas: 0,
             link: None,
@@ -348,8 +388,17 @@ impl Detalhe {
         self.zoom
     }
 
-    pub fn ajustar_zoom(&mut self, passo: f32, cx: &mut Context<Self>) {
-        self.zoom = (self.zoom + passo).clamp(ZOOM_MINIMO, ZOOM_MAXIMO);
+    pub fn ajustar_zoom(&mut self, passo: f32, window: &mut Window, cx: &mut Context<Self>) {
+        let novo = (self.zoom + passo).clamp(ZOOM_MINIMO, ZOOM_MAXIMO);
+        if novo == self.zoom {
+            return;
+        }
+        self.zoom = novo;
+        // 🚨 O slider tem de acompanhar quem mexeu no zoom por outro caminho,
+        // ou ele passa a mostrar um número que não é o da grade. `set_value`
+        // não emite `Change`, então isto não volta como um segundo ajuste.
+        self.zoom_slider
+            .update(cx, |estado, cx| estado.set_value(novo, window, cx));
         cx.notify();
     }
 
@@ -504,6 +553,14 @@ impl Detalhe {
             EstadoNoBalcao::LevadaNoBalcao
         };
         self.marcar_como(estado, cx);
+    }
+
+    /// A raiz avisa quando a segunda tela abre ou fecha.
+    pub fn definir_cliente_aberta(&mut self, aberta: bool, cx: &mut Context<Self>) {
+        if self.cliente_aberta != aberta {
+            self.cliente_aberta = aberta;
+            cx.notify();
+        }
     }
 
     pub fn limpar_selecao(&mut self, cx: &mut Context<Self>) {
@@ -1249,21 +1306,21 @@ impl Detalhe {
                 })
             }))
             .child(div().flex_1())
+            // O zoom, como no site: duas lupas e a faixa entre elas.
             .child(
-                Button::new("sessao-zoom-menos")
-                    .label("−")
-                    .xsmall()
-                    .on_click(
-                        cx.listener(|tela, _ev, _window, cx| tela.ajustar_zoom(-PASSO_DO_ZOOM, cx)),
-                    ),
-            )
-            .child(
-                Button::new("sessao-zoom-mais")
-                    .label("+")
-                    .xsmall()
-                    .on_click(
-                        cx.listener(|tela, _ev, _window, cx| tela.ajustar_zoom(PASSO_DO_ZOOM, cx)),
-                    ),
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(4.))
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("⊖")
+                    .child(
+                        div()
+                            .w(px(112.))
+                            .child(Slider::new(&self.zoom_slider).horizontal()),
+                    )
+                    .child("⊕"),
             )
             .child(
                 Button::new("sessao-revelar")
@@ -1274,8 +1331,13 @@ impl Detalhe {
             )
             .child(
                 Button::new("sessao-tela-do-cliente")
-                    .label("Tela do cliente")
+                    .label(if self.cliente_aberta {
+                        "Fechar a tela do cliente"
+                    } else {
+                        "Tela do cliente"
+                    })
                     .xsmall()
+                    .selected(self.cliente_aberta)
                     .on_click(
                         cx.listener(|_tela, _ev, _window, cx| cx.emit(Pedido::TelaDoCliente)),
                     ),
@@ -1349,6 +1411,26 @@ impl Detalhe {
         div()
             .id("grade-da-sessao")
             .track_scroll(&self.rolagem_da_grade)
+            // 🔑 **Ctrl + roda dá zoom**, e é o que o site promete no `title` do
+            // controle de tamanho. Sem o modificador a roda rola, que é o que
+            // ela tem de fazer.
+            .on_scroll_wheel(
+                cx.listener(|tela, evento: &gpui::ScrollWheelEvent, window, cx| {
+                    if !evento.modifiers.secondary() {
+                        return;
+                    }
+                    let delta = evento.delta.pixel_delta(window.line_height());
+                    if delta.y == px(0.) {
+                        return;
+                    }
+                    let passo = if delta.y > px(0.) {
+                        PASSO_DO_ZOOM
+                    } else {
+                        -PASSO_DO_ZOOM
+                    };
+                    tela.ajustar_zoom(passo, window, cx);
+                }),
+            )
             .flex_1()
             .min_w(px(0.))
             .flex()
@@ -2076,12 +2158,16 @@ mod testes {
         });
         let janela = cx.add_window({
             let publicador = publicador.clone();
-            move |_window, _cx| {
+            move |_window, cx| {
                 let dir = tempfile::TempDir::new().expect("diretório temporário");
                 let previews = Arc::new(PreviewManager::new_with_path(dir.path().to_path_buf()));
                 std::mem::forget(dir);
-                let mut tela =
-                    Detalhe::nova(publicador, Arc::new(SeletorDeMentira::default()), previews);
+                let mut tela = Detalhe::nova(
+                    publicador,
+                    Arc::new(SeletorDeMentira::default()),
+                    previews,
+                    cx,
+                );
                 tela.definir_sessao(Sessao {
                     access_token: "tok".into(),
                     refresh_token: "ref".into(),

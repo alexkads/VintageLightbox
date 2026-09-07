@@ -459,11 +459,12 @@ impl Aplicativo {
             raiz.entrar_na_sessao(evento.0.clone(), cx);
         });
 
-        let detalhe = cx.new(|_| {
+        let detalhe = cx.new(|cx| {
             Detalhe::nova(
                 publicador_do_detalhe,
                 portas.seletor_de_fotos,
                 previews_do_detalhe,
+                cx,
             )
         });
         // 🔑 `subscribe_in`, e não `subscribe`: revelar precisa da janela — os
@@ -1027,6 +1028,8 @@ impl Aplicativo {
             // dela chegou primeiro), o `update` devolve erro e não há o que
             // fazer além de esquecer o handle — que é o que o `take` já fez.
             let _ = janela.update(cx, |_cliente, window, _cx| window.remove_window());
+            self.detalhe
+                .update(cx, |tela, cx| tela.definir_cliente_aberta(false, cx));
             return;
         }
 
@@ -1064,6 +1067,8 @@ impl Aplicativo {
         match cx.open_window(opcoes, |window, cx| cx.new(|cx| Cliente::novo(window, cx))) {
             Ok(janela) => {
                 self.cliente = Some(janela);
+                self.detalhe
+                    .update(cx, |tela, cx| tela.definir_cliente_aberta(true, cx));
                 self.mostrar_ao_cliente(&foto, cx);
             }
             // Abrir janela é pedido ao sistema, e ele pode recusar. Sem monitor
