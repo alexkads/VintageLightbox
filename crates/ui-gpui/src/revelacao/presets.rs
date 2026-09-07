@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 use adapters::controllers::PresetController;
 use domain::entities::preset::PresetAdjustments;
-use domain::entities::Preset;
+use domain::entities::{Preset, PresetId};
 
 use super::processador::Ajustes;
 
@@ -33,6 +33,10 @@ use super::processador::Ajustes;
 /// `async` do tokio, e os testes de tela precisam afirmar **o que foi salvo**.
 pub trait GuardaDePresets: Send + Sync + 'static {
     fn salvar(&self, nome: String, ajustes: PresetAdjustments);
+    /// Troca o nome de uma que já existe — a mesma linha, e não uma cópia.
+    fn renomear(&self, id: PresetId, nome: String);
+    /// Apaga uma do fotógrafo. As de sistema nascem em código e não têm linha.
+    fn apagar(&self, id: PresetId);
 }
 
 /// A guarda de verdade: entrega ao `PresetController`, numa tarefa do tokio.
@@ -55,6 +59,27 @@ impl GuardaDePresets for GuardaDoBanco {
         self.tokio.spawn(async move {
             if let Err(erro) = presets.save_preset(nome, ajustes).await {
                 eprintln!("⚠️ [Presets] \"{rotulo}\" não foi salvo: {erro}");
+            }
+        });
+    }
+
+    fn renomear(&self, id: PresetId, nome: String) {
+        let presets = self.presets.clone();
+        let rotulo = nome.clone();
+
+        self.tokio.spawn(async move {
+            if let Err(erro) = presets.rename_preset(&id, nome).await {
+                eprintln!("⚠️ [Presets] o nome \"{rotulo}\" não foi gravado: {erro}");
+            }
+        });
+    }
+
+    fn apagar(&self, id: PresetId) {
+        let presets = self.presets.clone();
+
+        self.tokio.spawn(async move {
+            if let Err(erro) = presets.delete_preset(&id).await {
+                eprintln!("⚠️ [Presets] a predefinição {id} não foi apagada: {erro}");
             }
         });
     }
@@ -159,16 +184,29 @@ pub fn nenhuma_do_usuario(presets: &[Preset]) -> bool {
 pub mod mentira {
     use std::sync::Mutex;
 
-    use super::{GuardaDePresets, PresetAdjustments};
+    use super::{GuardaDePresets, PresetAdjustments, PresetId};
 
     #[derive(Default)]
     pub struct GuardaDeMentira {
         salvos: Mutex<Vec<(String, PresetAdjustments)>>,
+        renomeados: Mutex<Vec<(PresetId, String)>>,
+        apagados: Mutex<Vec<PresetId>>,
     }
 
     impl GuardaDeMentira {
         pub fn salvos(&self) -> Vec<(String, PresetAdjustments)> {
             self.salvos.lock().expect("o registro de presets").clone()
+        }
+
+        pub fn renomeados(&self) -> Vec<(PresetId, String)> {
+            self.renomeados
+                .lock()
+                .expect("o registro de presets")
+                .clone()
+        }
+
+        pub fn apagados(&self) -> Vec<PresetId> {
+            self.apagados.lock().expect("o registro de presets").clone()
         }
     }
 
@@ -178,6 +216,20 @@ pub mod mentira {
                 .lock()
                 .expect("o registro de presets")
                 .push((nome, ajustes));
+        }
+
+        fn renomear(&self, id: PresetId, nome: String) {
+            self.renomeados
+                .lock()
+                .expect("o registro de presets")
+                .push((id, nome));
+        }
+
+        fn apagar(&self, id: PresetId) {
+            self.apagados
+                .lock()
+                .expect("o registro de presets")
+                .push(id);
         }
     }
 }

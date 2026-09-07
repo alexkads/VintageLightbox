@@ -17,7 +17,7 @@ use std::time::Duration;
 
 use adapters::view_models::PhotoViewModel;
 use domain::entities::preset::PresetAdjustments;
-use domain::entities::Preset;
+use domain::entities::{Preset, PresetId};
 use domain::value_objects::{AspectRatio, CropSettings};
 use gpui::{
     canvas, div, img, prelude::*, px, AnyElement, Bounds, Context, Entity, MouseButton,
@@ -192,6 +192,9 @@ pub struct Revelacao {
     /// busca da Biblioteca: o `InputState` guarda cursor, seleção e o histórico
     /// de edição do campo.
     busca_de_presets: Entity<InputState>,
+    /// O nome digitado ao renomear. Campo próprio, e não o de salvar: os dois
+    /// diálogos guardam coisas diferentes, e um começa preenchido.
+    renome_do_preset: Entity<InputState>,
     /// A predefinição sob o ponteiro, enquanto ele está lá.
     ///
     /// 🔑 **Ela muda o que a GPU desenha, e não os ajustes.** Os sliders
@@ -378,6 +381,7 @@ impl Revelacao {
             nome_do_preset: cx.new(|cx| InputState::new(window, cx).placeholder("Nome do preset")),
             presets,
             busca_de_presets,
+            renome_do_preset: cx.new(|cx| InputState::new(window, cx)),
             previa: None,
             preset_inteiro: false,
             abertos: Painel::TODOS
@@ -901,6 +905,53 @@ impl Revelacao {
     /// ⚠️ Sair por aqui **descarta** o que estava sendo cortado, como o `R` de
     /// lá: quem aplica usa o botão. Sem essa distinção, uma tecla teria dois
     /// significados conforme o estado, e nenhum aviso de qual valeu.
+    /// Troca o nome de uma predefinição do fotógrafo.
+    ///
+    /// 🔑 **A lista da tela muda junto com o banco**, e não só depois de
+    /// reabrir o app: `self.presets` é o que a coluna desenha, e deixá-la
+    /// desatualizada faria o nome antigo continuar ali até a próxima abertura —
+    /// com o operador renomeando de novo, achando que o primeiro não pegou.
+    pub fn renomear_preset(&mut self, id: PresetId, nome: String, cx: &mut Context<Self>) {
+        let nome = nome.trim().to_string();
+        if nome.is_empty() {
+            return;
+        }
+
+        let Some(preset) = self
+            .presets
+            .iter_mut()
+            .find(|preset| preset.id == id && !preset.is_system)
+        else {
+            return;
+        };
+        preset.name = nome.clone();
+
+        self.guarda_de_presets.renomear(id, nome);
+        cx.notify();
+    }
+
+    /// Apaga uma predefinição do fotógrafo.
+    ///
+    /// ⚠️ **As de sistema não se apagam** — elas nascem em código a cada
+    /// listagem, e apagar mandaria um `DELETE` para um id que a tabela não tem:
+    /// a linha sumiria da tela e voltaria na abertura seguinte.
+    pub fn apagar_preset(&mut self, id: PresetId, cx: &mut Context<Self>) {
+        if !self
+            .presets
+            .iter()
+            .any(|preset| preset.id == id && !preset.is_system)
+        {
+            return;
+        }
+
+        self.presets.retain(|preset| preset.id != id);
+        // A prévia pode ser justamente a que sumiu — deixá-la faria a foto
+        // continuar mostrando uma predefinição que não existe mais.
+        self.prever(None, cx);
+        self.guarda_de_presets.apagar(id);
+        cx.notify();
+    }
+
     pub fn alternar_corte(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.edicao.is_some() {
             self.edicao = None;
@@ -2315,36 +2366,131 @@ impl Revelacao {
     /// pelo banco, e sair com o ponteiro a desfaz. Sem ela, escolher entre sete
     /// predefinições custa sete aplicações e sete `Cmd+Z`.
     fn botao_de_preset(&self, preset: &Preset, cx: &mut Context<Self>) -> gpui::AnyElement {
-        let id = SharedString::from(format!("preset-{}", preset.id));
         let nome = SharedString::from(preset.name.clone());
         let quantos = SharedString::from(presets::quantos_campos(preset).to_string());
         let escolhido = preset.clone();
         let para_prever = preset.adjustments.clone();
 
         div()
-            .id(id)
+            .id(SharedString::from(format!("preset-{}", preset.id)))
             .flex()
             .items_center()
-            .gap(px(4.))
+            .gap(px(2.))
             .px(px(4.))
-            .py(px(3.))
+            .py(px(1.))
             .rounded(px(4.))
-            .cursor_pointer()
             .text_xs()
             .hover(|estilo| estilo.bg(cx.theme().accent))
-            .child(div().flex_1().truncate().child(nome))
-            .child(div().text_color(cx.theme().muted_foreground).child(quantos))
             .on_hover(cx.listener(move |tela, sobre: &bool, _window, cx| {
                 tela.prever(sobre.then(|| para_prever.clone()), cx);
             }))
-            .on_click(cx.listener(move |tela, _ev, window, cx| {
-                // 🚨 A prévia sai **antes** de aplicar: se ela ficasse, o
-                // resultado na tela seria o preset por cima dele mesmo — igual
-                // por acaso, e diferente assim que o ponteiro saísse.
-                tela.prever(None, cx);
-                tela.aplicar_preset(&escolhido, window, cx);
-            }))
+            // 🚨 **O clique mora no nome, e não na linha.** Renomear e apagar
+            // são filhos dela; com o `on_click` na linha inteira, clicar no
+            // lixo aplicaria a predefinição antes de abrir a pergunta — e a
+            // resposta "cancelar" deixaria a foto alterada mesmo assim.
+            .child(
+                div()
+                    .id(SharedString::from(format!("aplicar-{}", preset.id)))
+                    .flex()
+                    .flex_1()
+                    .min_w(px(0.))
+                    .items_center()
+                    .gap(px(4.))
+                    .py(px(2.))
+                    .cursor_pointer()
+                    .child(div().flex_1().truncate().child(nome))
+                    .child(div().text_color(cx.theme().muted_foreground).child(quantos))
+                    .on_click(cx.listener(move |tela, _ev, window, cx| {
+                        // 🚨 A prévia sai **antes** de aplicar: se ela ficasse,
+                        // o resultado na tela seria o preset por cima dele
+                        // mesmo — igual por acaso, e diferente assim que o
+                        // ponteiro saísse.
+                        tela.prever(None, cx);
+                        tela.aplicar_preset(&escolhido, window, cx);
+                    })),
+            )
+            // ⚠️ **Renomear e apagar só aparecem nas do fotógrafo.** No site
+            // eles ficam escondidos até o ponteiro passar (`opacity-0
+            // group-hover`); aqui ficam visíveis, porque um botão de apagar
+            // invisível continua clicável — no navegador é risco pequeno, num
+            // app de catálogo é o gesto que ninguém desfaz.
+            .children(self.acoes_do_preset(preset, cx))
             .into_any_element()
+    }
+
+    /// Renomear e apagar — só para as do fotógrafo.
+    ///
+    /// Uma do sistema não tem linha no banco para apagar, e o botão mandaria um
+    /// `DELETE` para um id que o repositório não conhece: ela sumiria da tela e
+    /// voltaria na abertura seguinte.
+    fn acoes_do_preset(&self, preset: &Preset, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        if preset.is_system {
+            return Vec::new();
+        }
+
+        let id = preset.id;
+        let nome = preset.name.clone();
+        let para_renomear = nome.clone();
+        let para_apagar = nome.clone();
+
+        vec![
+            Button::new(SharedString::from(format!("renomear-{id}")))
+                .label("✎")
+                .xsmall()
+                .ghost()
+                .tooltip(SharedString::from(format!("Renomear \"{nome}\"")))
+                .on_click(cx.listener(move |tela, _ev, window, cx| {
+                    let nome = para_renomear.clone();
+                    // O campo começa com o nome de agora: renomear é corrigir
+                    // uma palavra, e um campo vazio obrigaria a redigitar tudo.
+                    tela.renome_do_preset.update(cx, |estado, cx| {
+                        estado.set_value(nome.clone(), window, cx);
+                    });
+
+                    let campo = tela.renome_do_preset.clone();
+                    let esta = cx.entity();
+                    window.open_dialog(cx, move |dialogo, _window, _cx| {
+                        let campo = campo.clone();
+                        let esta = esta.clone();
+                        dialogo
+                            .title("Renomear predefinição")
+                            .confirm()
+                            .child(Input::new(&campo))
+                            .on_ok(move |_ev, _window, cx| {
+                                let nome = campo.read(cx).value().to_string();
+                                esta.update(cx, |tela, cx| tela.renomear_preset(id, nome, cx));
+                                true
+                            })
+                    });
+                }))
+                .into_any_element(),
+            Button::new(SharedString::from(format!("apagar-{id}")))
+                .label("🗑")
+                .xsmall()
+                .ghost()
+                .tooltip(SharedString::from(format!("Apagar \"{nome}\"")))
+                .on_click(cx.listener(move |_tela, _ev, window, cx| {
+                    // 🚨 **Apagar pergunta antes**, e é o único gesto desta
+                    // coluna que não se desfaz: a predefinição não está em foto
+                    // nenhuma, então nem o `Cmd+Z` nem reabrir a trazem de volta.
+                    let esta = cx.entity();
+                    let nome = para_apagar.clone();
+                    window.open_dialog(cx, move |dialogo, _window, _cx| {
+                        let esta = esta.clone();
+                        dialogo
+                            .title("Apagar predefinição")
+                            .confirm()
+                            .child(SharedString::from(format!(
+                                "Apagar \"{nome}\"? Ela não volta."
+                            )))
+                            .on_ok(move |_ev, _window, cx| {
+                                esta.update(cx, |tela, cx| tela.apagar_preset(id, cx));
+                                true
+                            })
+                    });
+                }))
+                .into_any_element(),
+        ]
     }
 
     /// O botão do tom automático, no topo do Básico.
@@ -3586,6 +3732,104 @@ mod testes {
     ///
     /// Um `Cmd+Z` que atravessasse fotos aplicaria a revelação de uma na outra —
     /// o mesmo defeito que a cópia da seleção já impede na outra ponta.
+    /// Renomear troca o nome na tela **e** no banco, na mesma linha.
+    ///
+    /// 🚨 O erro que este teste pega é renomear só no banco: `self.presets` é o
+    /// que a coluna desenha, e o nome antigo continuaria ali até a próxima
+    /// abertura — com o operador renomeando de novo, achando que não pegou.
+    #[gpui::test]
+    fn renomear_troca_o_nome_na_lista_e_no_banco(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        let guarda = Arc::new(GuardaDeMentira::default());
+        let minha = Preset::user(
+            "Retrato".into(),
+            PresetAdjustments::vazia().com("clarity", 0.2),
+        );
+        let id = minha.id;
+        let do_sistema = Preset::system("Hora dourada", PresetAdjustments::vazia());
+        let sistema_id = do_sistema.id;
+
+        let janela = com_guarda(
+            cx,
+            previews,
+            Arc::new(GravadorDeMentira::default()),
+            guarda.clone(),
+            vec![do_sistema, minha],
+        );
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.renomear_preset(id, "  Retrato suave  ".into(), cx);
+                tela.renomear_preset(sistema_id, "Outro nome".into(), cx);
+                tela.renomear_preset(id, "   ".into(), cx);
+
+                assert_eq!(
+                    tela.presets
+                        .iter()
+                        .map(|p| p.name.as_str())
+                        .collect::<Vec<_>>(),
+                    ["Hora dourada", "Retrato suave"],
+                    "a do sistema não se renomeia, e nome em branco não vale"
+                );
+            })
+            .expect("a janela deve estar aberta");
+
+        assert_eq!(
+            guarda.renomeados(),
+            vec![(id, "Retrato suave".to_string())],
+            "vai ao banco uma vez só, e sem os espaços"
+        );
+    }
+
+    /// Apagar tira da lista, avisa o banco e desfaz a prévia.
+    ///
+    /// ⚠️ **A prévia é o detalhe que escapa**: se o ponteiro estava sobre a
+    /// predefinição apagada, a foto continuaria mostrando uma que não existe
+    /// mais — e sair com o ponteiro não a desfaria, porque a linha sumiu antes
+    /// de o `on_hover` de saída chegar.
+    #[gpui::test]
+    fn apagar_tira_da_lista_e_desfaz_a_previa(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_cinza())
+            .expect("gravar preview");
+
+        let guarda = Arc::new(GuardaDeMentira::default());
+        let minha = Preset::user(
+            "Meu visual".into(),
+            PresetAdjustments::vazia().com("saturation", -1.0),
+        );
+        let id = minha.id;
+        let do_sistema = Preset::system("Hora dourada", PresetAdjustments::vazia());
+        let sistema_id = do_sistema.id;
+
+        let janela = com_guarda(
+            cx,
+            previews,
+            Arc::new(GravadorDeMentira::default()),
+            guarda.clone(),
+            vec![do_sistema, minha.clone()],
+        );
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("retrato.jpg"), window, cx);
+                tela.prever(Some(minha.adjustments.clone()), cx);
+                assert_eq!(tela.ajustes_na_tela().saturation, -1.0);
+
+                tela.apagar_preset(sistema_id, cx);
+                assert_eq!(tela.presets.len(), 2, "a do sistema não se apaga");
+
+                tela.apagar_preset(id, cx);
+                assert_eq!(tela.presets.len(), 1);
+                assert!(tela.previa().is_none());
+                assert_eq!(tela.ajustes_na_tela().saturation, 0.0);
+            })
+            .expect("a janela deve estar aberta");
+
+        assert_eq!(guarda.apagados(), vec![id]);
+    }
+
     #[gpui::test]
     fn trocar_de_foto_comeca_um_historico_novo(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();

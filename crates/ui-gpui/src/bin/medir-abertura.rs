@@ -84,6 +84,9 @@ async fn main() {
         Arc::new(use_cases::presets::SavePresetUseCase::new(
             presets_repo.clone(),
         )),
+        Arc::new(use_cases::presets::RenamePresetUseCase::new(
+            presets_repo.clone(),
+        )),
         Arc::new(use_cases::presets::DeletePresetUseCase::new(presets_repo)),
     );
 
