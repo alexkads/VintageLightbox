@@ -14,6 +14,8 @@ use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::{ActiveTheme, Disableable, Selectable, Sizable};
 use infrastructure::cache::preview_manager::PreviewManager;
 
+use crate::atualizacao::faixa::{self, Pedido as PedidoDeAtualizacao};
+use crate::atualizacao::porta::{Atualizador, AtualizadorDaWeb, Aviso};
 use crate::balcao::tela::Balcao;
 use crate::biblioteca::acervo::Acervo;
 use crate::biblioteca::colecoes::Colecoes;
@@ -72,6 +74,14 @@ pub struct Portas {
     /// importação: são janelas diferentes do sistema, com filtros diferentes, e
     /// juntá-las numa porta só faria uma delas mentir sobre o que devolve.
     pub seletor_de_fotos: Arc<dyn SeletorDeFotos>,
+    /// Quem descobre que há versão nova e a instala.
+    ///
+    /// 🔑 O app não passa por loja nenhuma — é baixado de
+    /// `recordarfotos.com.br/vintageLightbox` — então **sem esta porta ninguém
+    /// atualiza**: corrigir um defeito viraria pedir a cada fotógrafo que
+    /// reinstale à mão, e o que acontece de verdade é a versão velha rodar por
+    /// meses.
+    pub atualizador: Arc<dyn Atualizador>,
 }
 
 actions!(
@@ -344,6 +354,16 @@ pub struct Aplicativo {
     /// 🚨 A inscrição no fim da importação. Sem ela nada acusa: o lote entra no
     /// banco, o modal conta as fotos, e a grade continua vazia.
     _fim_da_importacao: gpui::Subscription,
+    /// Quem procura versão nova e a instala.
+    atualizador: Arc<dyn Atualizador>,
+    /// O que a faixa do rodapé mostra sobre a atualização.
+    atualizacao: faixa::Estado,
+    /// O canal por onde o resultado da procura e o da instalação voltam.
+    avisos_de_versao: (Sender<Aviso>, Receiver<Aviso>),
+    /// 🚨 A `Task` que espera o aviso chegar. **Descartá-la a cancela**, e o
+    /// sintoma seria a faixa nunca aparecer — versão nova publicada, ninguém
+    /// sabendo.
+    _atualizacao: Option<gpui::Task<()>>,
 }
 
 impl Aplicativo {
@@ -355,6 +375,15 @@ impl Aplicativo {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        // 🔑 **A procura por versão nova começa aqui, na abertura**, e não no
+        // primeiro clique em nada. É o único momento em que o operador não está
+        // no meio de coisa nenhuma — depois disso ele está triando, e a hora de
+        // avisar já passou. `procurar` devolve na hora; a resposta chega pelo
+        // canal, e `esperar_aviso` é quem a recolhe.
+        let avisos_de_versao = channel();
+        portas.atualizador.procurar(avisos_de_versao.0.clone());
+        let atualizacao = Self::esperar_aviso(cx);
+
         // O mesmo cache de previews da Biblioteca: a importação grava miniatura
         // com a chave `import::` na mesma tabela, e dois `PreviewManager` para o
         // mesmo arquivo seriam dois caches do mesmo lugar.
@@ -564,7 +593,84 @@ impl Aplicativo {
             releituras: channel(),
             _releitura: None,
             _fim_da_importacao: fim_da_importacao,
+            atualizador: portas.atualizador,
+            atualizacao: faixa::Estado::default(),
+            avisos_de_versao,
+            _atualizacao: Some(atualizacao),
         }
+    }
+
+    /// Recolhe o próximo aviso de atualização e o põe na faixa.
+    ///
+    /// ⚠️ **O laço acaba.** Como o da releitura, ele morre na primeira resposta
+    /// e desiste depois de 60s — a procura por versão nova é acessória, e um
+    /// laço eterno acordaria a cada 200ms pelo resto da sessão para não dizer
+    /// nada. A instalação começa um laço novo.
+    fn esperar_aviso(cx: &mut Context<Self>) -> gpui::Task<()> {
+        cx.spawn(async move |raiz, cx| {
+            for _ in 0..300 {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_millis(200))
+                    .await;
+                let Ok(chegou) = raiz.update(cx, |raiz, cx| {
+                    let Ok(aviso) = raiz.avisos_de_versao.1.try_recv() else {
+                        return false;
+                    };
+                    raiz.atualizacao.instalando = false;
+                    raiz.atualizacao.aviso = Some(aviso);
+                    cx.notify();
+                    true
+                }) else {
+                    return;
+                };
+                if chegou {
+                    return;
+                }
+            }
+        })
+    }
+
+    /// O que cada botão da faixa faz.
+    fn atender(&mut self, pedido: PedidoDeAtualizacao, cx: &mut Context<Self>) {
+        match pedido {
+            PedidoDeAtualizacao::Instalar => {
+                // A faixa troca para "Baixando…" **antes** de o download
+                // começar: sem isto, um clique num pacote de 60 MB não muda
+                // nada na tela por meio minuto, e o gesto seguinte é clicar de
+                // novo — duas instalações da mesma versão em paralelo.
+                self.atualizacao.instalando = true;
+                self.atualizador.instalar(self.avisos_de_versao.0.clone());
+                self._atualizacao = Some(Self::esperar_aviso(cx));
+            }
+            PedidoDeAtualizacao::Reabrir => AtualizadorDaWeb::reabrir(),
+            PedidoDeAtualizacao::Dispensar => {
+                // 🔑 Guardar **a versão**, e não um booleano: dispensar a 0.2.0
+                // não pode calar a 0.3.0, que pode ser justamente a correção
+                // que ele precisa. E some só nesta abertura — na próxima o
+                // aviso volta.
+                if let Some(Aviso::Disponivel(nova)) = &self.atualizacao.aviso {
+                    self.atualizacao.dispensada = Some(nova.versao.clone());
+                } else {
+                    self.atualizacao.aviso = None;
+                }
+            }
+        }
+        cx.notify();
+    }
+
+    /// A faixa do rodapé, quando há o que dizer.
+    fn faixa_de_atualizacao(&self, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
+        // O `cx.listener` é o que dá à faixa acesso a `&mut Aplicativo` de
+        // dentro de um clique; ela própria não conhece a raiz — só diz qual
+        // [`PedidoDeAtualizacao`] o operador fez.
+        let agir = cx.listener(|este, pedido: &PedidoDeAtualizacao, _window, cx| {
+            este.atender(*pedido, cx);
+        });
+        faixa::desenhar(
+            &self.atualizacao,
+            cx,
+            Arc::new(move |pedido, window, app| agir(&pedido, window, app)),
+        )
     }
 
     /// Pede o catálogo de novo e entrega à Biblioteca quando ele chegar.
@@ -2294,6 +2400,13 @@ impl Render for Aplicativo {
             .when(self.configurando, |raiz| {
                 raiz.child(self.modal_de_configuracoes(cx))
             })
+            // 🔑 **Depois dos modais, e por cima deles.** A faixa é a última
+            // coisa desenhada de propósito: ela ocupa uma linha do rodapé e
+            // precisa continuar legível com o modal de importação aberto — que
+            // é justamente quando um download longo termina.
+            .when_some(self.faixa_de_atualizacao(cx), |raiz, faixa| {
+                raiz.child(faixa)
+            })
             .into_any_element()
     }
 }
@@ -2399,6 +2512,7 @@ mod testes {
     use image::{DynamicImage, Rgba, RgbaImage};
     use tempfile::TempDir;
 
+    use crate::atualizacao::porta::mentira::AtualizadorDeMentira;
     use crate::biblioteca::acervo::mentira::AcervoDeMentira;
     use crate::biblioteca::colecoes::mentira::ColecoesDeMentira;
     use crate::biblioteca::marcacao::mentira::MarcadorDeMentira;
@@ -2433,7 +2547,22 @@ mod testes {
             seletor_de_fotos: Arc::new(
                 crate::sessoes::arquivos::mentira::SeletorDeMentira::default(),
             ),
+            // Silêncio: o padrão do atualizador de mentira é não achar nada, e
+            // é o que quase todo teste daqui quer — a faixa fora do caminho.
+            atualizador: Arc::new(AtualizadorDeMentira::default()),
         }
+    }
+
+    /// As mesmas portas, com uma versão nova esperando para ser vista.
+    fn portas_com_versao(versao: &str) -> (Portas, Arc<AtualizadorDeMentira>) {
+        let atualizador = Arc::new(AtualizadorDeMentira::com_versao(versao));
+        (
+            Portas {
+                atualizador: atualizador.clone(),
+                ..portas()
+            },
+            atualizador,
+        )
     }
 
     fn previews_descartaveis() -> (Arc<PreviewManager>, TempDir) {
@@ -3701,6 +3830,183 @@ mod testes {
     /// teste prende é o **antes**: com o app inteiro desenhado por baixo da tela
     /// de login, as quinze teclas de triagem continuariam chegando à Biblioteca
     /// por trás dela — nota dada numa grade que ninguém está vendo.
+    /// 🔑 **A procura começa na abertura, sem ninguém pedir.** É o único momento
+    /// em que o operador não está no meio de coisa nenhuma. Se este teste falhar,
+    /// o sintoma no app é silencioso: versão nova publicada, ninguém sabendo.
+    #[gpui::test]
+    fn o_app_procura_versao_nova_ao_abrir(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+        let (portas, atualizador) = portas_com_versao("0.2.0");
+
+        let _janela = cx.add_window(|window, cx| {
+            Aplicativo::novo(acervo(), previews, Vec::new(), portas, window, cx)
+        });
+
+        assert_eq!(
+            *atualizador.procuras.lock().expect("as procuras"),
+            1,
+            "abrir o app é procurar versão nova, uma vez"
+        );
+    }
+
+    /// A resposta chega pelo canal e a faixa passa a ter o que dizer.
+    #[gpui::test]
+    fn a_versao_encontrada_chega_a_faixa(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+        let (portas, _atualizador) = portas_com_versao("0.2.0");
+
+        let janela = cx.add_window(|window, cx| {
+            Aplicativo::ja_dentro(acervo(), previews, Vec::new(), portas, window, cx)
+        });
+
+        // O laço de `esperar_aviso` acorda a cada 200ms; deixar o executor rodar
+        // é o que faz o `try_recv` chegar ao canal.
+        cx.executor()
+            .advance_clock(std::time::Duration::from_secs(1));
+        cx.run_until_parked();
+
+        janela
+            .update(cx, |app, _window, _cx| {
+                assert_eq!(
+                    app.atualizacao.texto().as_deref(),
+                    Some("Versão 0.2.0 disponível"),
+                    "a faixa avisa o que a porta encontrou"
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 **"Depois" some com o aviso desta versão, não com o da próxima.** Sem
+    /// isto, quem clicar "Depois" uma vez deixa de ver a correção urgente que
+    /// vier em seguida — e não há nada na tela que revele isso.
+    #[gpui::test]
+    fn depois_dispensa_so_a_versao_avisada(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+        let (portas, _atualizador) = portas_com_versao("0.2.0");
+
+        let janela = cx.add_window(|window, cx| {
+            Aplicativo::ja_dentro(acervo(), previews, Vec::new(), portas, window, cx)
+        });
+        cx.executor()
+            .advance_clock(std::time::Duration::from_secs(1));
+        cx.run_until_parked();
+
+        janela
+            .update(cx, |app, _window, cx| {
+                app.atender(PedidoDeAtualizacao::Dispensar, cx);
+                assert_eq!(app.atualizacao.texto(), None, "a 0.2.0 sai da vista");
+
+                // A 0.3.0 chega depois, pelo mesmo canal.
+                app.atualizacao.aviso =
+                    Some(Aviso::Disponivel(crate::atualizacao::porta::VersaoNova {
+                        versao: "0.3.0".into(),
+                        notas: None,
+                    }));
+                assert_eq!(
+                    app.atualizacao.texto().as_deref(),
+                    Some("Versão 0.3.0 disponível"),
+                    "dispensar uma versão não cala a seguinte"
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// Clicar "Atualizar" pede a instalação **e** muda a frase na hora — sem
+    /// isso um download de 60 MB deixa a tela parada e o gesto seguinte é
+    /// clicar de novo.
+    #[gpui::test]
+    fn atualizar_instala_e_avisa_que_esta_baixando(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+        let (portas, atualizador) = portas_com_versao("0.2.0");
+        // A mentira responde na hora; para ver o estado "baixando" o desfecho
+        // fica em silêncio.
+        *atualizador.desfecho.lock().expect("o desfecho") = None;
+
+        let janela = cx.add_window(|window, cx| {
+            Aplicativo::ja_dentro(acervo(), previews, Vec::new(), portas, window, cx)
+        });
+        cx.executor()
+            .advance_clock(std::time::Duration::from_secs(1));
+        cx.run_until_parked();
+
+        janela
+            .update(cx, |app, _window, cx| {
+                app.atender(PedidoDeAtualizacao::Instalar, cx);
+                assert_eq!(
+                    *atualizador.instalacoes.lock().expect("as instalações"),
+                    1,
+                    "o clique chega até a porta"
+                );
+                assert_eq!(
+                    app.atualizacao.texto().as_deref(),
+                    Some("Baixando a versão 0.2.0…")
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// A falha da instalação aparece — houve um clique esperando resposta.
+    #[gpui::test]
+    fn a_falha_da_instalacao_chega_a_faixa(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+        let (portas, atualizador) = portas_com_versao("0.2.0");
+        *atualizador.desfecho.lock().expect("o desfecho") =
+            Some(Aviso::Falhou("assinatura inválida".into()));
+
+        let janela = cx.add_window(|window, cx| {
+            Aplicativo::ja_dentro(acervo(), previews, Vec::new(), portas, window, cx)
+        });
+        cx.executor()
+            .advance_clock(std::time::Duration::from_secs(1));
+        cx.run_until_parked();
+
+        janela
+            .update(cx, |app, _window, cx| {
+                app.atender(PedidoDeAtualizacao::Instalar, cx);
+            })
+            .expect("a janela deve estar aberta");
+        cx.executor()
+            .advance_clock(std::time::Duration::from_secs(1));
+        cx.run_until_parked();
+
+        janela
+            .update(cx, |app, _window, _cx| {
+                assert_eq!(
+                    app.atualizacao.texto().as_deref(),
+                    Some("Não consegui atualizar: assinatura inválida"),
+                    "a assinatura que não bate é o que impede um pacote trocado \
+                     de ser instalado — e o operador precisa ver isso"
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// ⚠️ **Um app sem versão nova não mostra faixa nenhuma.** Silêncio é a
+    /// resposta normal, e é o que quase toda abertura devolve.
+    #[gpui::test]
+    fn sem_versao_nova_nao_ha_faixa(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+
+        let janela = cx.add_window(|window, cx| {
+            Aplicativo::ja_dentro(acervo(), previews, Vec::new(), portas(), window, cx)
+        });
+        cx.executor()
+            .advance_clock(std::time::Duration::from_secs(1));
+        cx.run_until_parked();
+
+        janela
+            .update(cx, |app, _window, _cx| {
+                assert_eq!(app.atualizacao.texto(), None);
+            })
+            .expect("a janela deve estar aberta");
+    }
+
     #[gpui::test]
     fn a_porta_vem_antes_de_tudo(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();

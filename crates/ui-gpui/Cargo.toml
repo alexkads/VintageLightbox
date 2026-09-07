@@ -78,6 +78,17 @@ sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "sqlite", "mig
 chrono.workspace = true
 uuid.workspace = true
 
+# A atualização automática (`atualizacao/porta.rs`). É o updater do Tauri
+# extraído para servir app que não é Tauri, do mesmo autor do `cargo-packager`
+# que monta os instaladores — então o `.sig` que o empacotamento produz é
+# exatamente o que este crate confere.
+#
+# ⚠️ `default-features = false` + `native-tls`: o padrão dele é `rustls`, e o
+# `sqlx` e o `reqwest` do `infrastructure` já trazem a pilha TLS do sistema.
+# Duas pilhas TLS na mesma árvore é compilar o mesmo trabalho duas vezes — a
+# mesma razão registrada no `infrastructure/Cargo.toml`.
+cargo-packager-updater = { version = "0.2", default-features = false, features = ["native-tls"] }
+
 [dev-dependencies]
 tempfile = "3.8"
 # `TestAppContext` — o substituto que o plano escolheu para os 146 testes de UI

@@ -6,6 +6,8 @@
 //! o app antigo: é o Lightroom (`docs/00-OBJETIVO.md`).
 
 pub mod app;
+/// A atualização automática — o app não passa por loja e se atualiza sozinho.
+pub mod atualizacao;
 pub mod balcao;
 pub mod biblioteca;
 pub mod cliente;

@@ -30,6 +30,7 @@ use infrastructure::cache::preview_manager::PreviewManager;
 use tempfile::TempDir;
 
 use crate::app::{Aplicativo, Portas, Tela};
+use crate::atualizacao::porta::mentira::AtualizadorDeMentira;
 use crate::biblioteca::acervo::mentira::AcervoDeMentira;
 use crate::biblioteca::colecoes::mentira::ColecoesDeMentira;
 use crate::biblioteca::marcacao::mentira::MarcadorDeMentira;
@@ -141,6 +142,7 @@ fn abrir_o_estudio(cx: &mut TestAppContext, fotos: Vec<PhotoViewModel>) -> Estud
                     importador: Arc::new(ImportadorDeMentira::default()),
                     seletor: Arc::new(SeletorDeMentira::default()),
                     seletor_de_fotos,
+                    atualizador: Arc::new(AtualizadorDeMentira::default()),
                 },
                 window,
                 cx,
@@ -628,6 +630,7 @@ fn nada_acontece_fora_de_uma_sessao(cx: &mut TestAppContext) {
                     importador: Arc::new(ImportadorDeMentira::default()),
                     seletor: Arc::new(SeletorDeMentira::default()),
                     seletor_de_fotos: Arc::new(SeletorDeFotosDeMentira::default()),
+                    atualizador: Arc::new(AtualizadorDeMentira::default()),
                 },
                 window,
                 cx,

@@ -269,6 +269,17 @@ async fn main() {
     let seletor_de_fotos: Arc<dyn ui_gpui::sessoes::arquivos::SeletorDeFotos> = Arc::new(
         ui_gpui::sessoes::arquivos::SeletorDeFotosNativo::novo(tokio::runtime::Handle::current()),
     );
+    // 🔑 **A versão que ele compara é a do próprio binário** (`CARGO_PKG_VERSION`,
+    // que vem do `[workspace.package]`). Passá-la por outro caminho — um
+    // arquivo, uma constante escrita à mão — é como um app acaba se achando
+    // desatualizado para sempre, ou nunca.
+    //
+    // ⚠️ Sem `Handle` do tokio, e é a única porta assim: `check_update` é
+    // bloqueante e monta um runtime próprio por dentro. O motivo está em
+    // `atualizacao::porta`.
+    let atualizador: Arc<dyn ui_gpui::atualizacao::porta::Atualizador> = Arc::new(
+        ui_gpui::atualizacao::porta::AtualizadorDaWeb::novo(env!("CARGO_PKG_VERSION")),
+    );
     let gerador: Arc<dyn GeradorDeMiniaturas> = Arc::new(GeradorDoDisco::novo(
         gerador_de_miniaturas,
         previews.clone(),
@@ -322,6 +333,7 @@ async fn main() {
                             // A janela **do sistema** para escolher as fotos da
                             // sessão: filtro de imagem e seleção múltipla.
                             seletor_de_fotos: seletor_de_fotos.clone(),
+                            atualizador: atualizador.clone(),
                         },
                         window,
                         cx,
