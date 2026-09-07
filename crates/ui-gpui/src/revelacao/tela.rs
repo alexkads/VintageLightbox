@@ -891,9 +891,16 @@ impl Revelacao {
             return;
         }
 
-        let ajustes = presets::dos_ajustes(&self.ajustes, false);
-        self.guarda_de_presets.salvar(nome.clone(), ajustes.clone());
-        self.presets.push(Preset::user(nome, ajustes));
+        // 🔑 **O `Preset` nasce aqui, com o id que vai para os dois lados.** A
+        // lista da tela e a tabela do banco passam a falar da mesma linha — sem
+        // isso, renomear ou apagar o que acabou de ser salvo manda o comando
+        // para um id que a tabela não tem.
+        let novo = Preset::user(
+            nome,
+            presets::dos_ajustes(&self.ajustes, self.preset_inteiro),
+        );
+        self.guarda_de_presets.salvar(novo.clone());
+        self.presets.push(novo);
 
         self.nome_do_preset
             .update(cx, |estado, cx| estado.set_value("", window, cx));
@@ -4144,17 +4151,63 @@ mod testes {
 
         let salvos = guarda.salvos();
         assert_eq!(salvos.len(), 1);
-        assert_eq!(salvos[0].0, "Retrato claro");
+        assert_eq!(salvos[0].name, "Retrato claro");
         assert_eq!(
-            salvos[0].1.get("exposure"),
+            salvos[0].adjustments.get("exposure"),
             Some(1.5),
             "guarda o que está na tela"
         );
         // 🔑 **Só o que saiu do neutro**, como no site. Iam os 15 inteiros — e
         // com isso a segunda predefinição aplicada apagava a primeira, porque
         // ela escrevia o neutro por cima do que já estava lá.
-        assert_eq!(salvos[0].1.len(), 1);
-        assert_eq!(salvos[0].1.get("contrast"), None);
+        assert_eq!(salvos[0].adjustments.len(), 1);
+        assert_eq!(salvos[0].adjustments.get("contrast"), None);
+    }
+
+    /// 🚨 **O id que vai para o banco é o mesmo que fica na lista da tela.**
+    ///
+    /// Era o contrário: a tela punha na lista um `Preset::user` com id próprio,
+    /// e o use case criava outro ao gravar. Enquanto salvar era o único gesto,
+    /// ninguém notava — com renomear e apagar, o comando ia para um id que a
+    /// tabela não tem, a linha sumia da tela e voltava na abertura seguinte.
+    #[gpui::test]
+    fn a_predefinicao_salva_tem_o_mesmo_id_na_tela_e_no_banco(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_cinza())
+            .expect("gravar preview");
+
+        let guarda = Arc::new(GuardaDeMentira::default());
+        let janela = com_guarda(
+            cx,
+            previews,
+            Arc::new(GravadorDeMentira::default()),
+            guarda.clone(),
+            Vec::new(),
+        );
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("retrato.jpg"), window, cx);
+            })
+            .expect("a janela deve estar aberta");
+
+        arrastar(cx, &janela, 0, 1.5);
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.nome_do_preset
+                    .update(cx, |estado, cx| estado.set_value("Claro", window, cx));
+                tela.salvar_preset(window, cx);
+
+                let na_tela = tela.presets[0].id;
+                assert_eq!(guarda.salvos()[0].id, na_tela);
+
+                // E o gesto seguinte alcança a mesma linha.
+                tela.renomear_preset(na_tela, "Mais claro".into(), cx);
+                assert_eq!(guarda.renomeados(), vec![(na_tela, "Mais claro".into())]);
+            })
+            .expect("a janela deve estar aberta");
     }
 
     /// 🚨 Nome vazio (ou só espaços) não salva.

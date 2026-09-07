@@ -1,7 +1,7 @@
 // PresetController - Adapters Layer
 // Orchestrates preset operations between UI and Use Cases
 
-use domain::entities::{preset::PresetAdjustments, Preset, PresetId};
+use domain::entities::{Preset, PresetId};
 use std::sync::Arc;
 use use_cases::presets::{
     DeletePresetUseCase, ListPresetsUseCase, RenamePresetUseCase, SavePresetUseCase,
@@ -37,14 +37,10 @@ impl PresetController {
             .map_err(|e| e.to_string())
     }
 
-    /// Save a new user preset
-    pub async fn save_preset(
-        &self,
-        name: String,
-        adjustments: PresetAdjustments,
-    ) -> Result<Preset, String> {
+    /// Grava uma predefinição — a que a tela criou, com o id dela.
+    pub async fn save_preset(&self, preset: &Preset) -> Result<(), String> {
         self.save_preset_use_case
-            .execute(name, adjustments)
+            .execute(preset)
             .await
             .map_err(|e| e.to_string())
     }

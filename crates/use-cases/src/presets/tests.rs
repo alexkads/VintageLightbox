@@ -38,20 +38,22 @@ async fn test_save_preset_success() {
 
     let use_case = SavePresetUseCase::new(Arc::new(mock_repo));
 
-    let adjustments = PresetAdjustments::vazia()
-        .com("exposure", 1.5)
-        .com("contrast", 1.2);
+    let preset = Preset::user(
+        "My Preset".to_string(),
+        PresetAdjustments::vazia()
+            .com("exposure", 1.5)
+            .com("contrast", 1.2),
+    );
 
     // Act
-    let result = use_case.execute("My Preset".to_string(), adjustments).await;
+    let result = use_case.execute(&preset).await;
 
     // Assert
     assert!(result.is_ok());
-    let preset = result.unwrap();
-    assert_eq!(preset.name, "My Preset");
+    // 🔑 A identidade é de quem criou o `Preset`, e não do use case: é o que
+    // faz a lista da tela e a linha do banco serem a mesma coisa.
     assert!(!preset.is_system);
     assert_eq!(preset.adjustments.get("exposure"), Some(1.5));
-    assert_eq!(preset.adjustments.get("contrast"), Some(1.2));
 }
 
 #[tokio::test]
@@ -65,10 +67,10 @@ async fn test_save_preset_repository_error() {
 
     let use_case = SavePresetUseCase::new(Arc::new(mock_repo));
 
-    let adjustments = PresetAdjustments::default();
+    let preset = Preset::user("Test".to_string(), PresetAdjustments::vazia());
 
     // Act
-    let result = use_case.execute("Test".to_string(), adjustments).await;
+    let result = use_case.execute(&preset).await;
 
     // Assert
     assert!(result.is_err());
