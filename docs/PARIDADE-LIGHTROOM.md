@@ -102,6 +102,8 @@ de ser **exata no inteiro**, senão o neutro passa a mover pixel.
 | ✅ **Tom automático ("Auto")** | **desde 30/ago** — botão no topo do Básico: lê o histograma da foto crua e escolhe exposição e altas luzes. Mexe em dois ajustes, e não nos seis do Lightroom, porque "sombras" no shader multiplica **todo** pixel abaixo de 128 e enterraria o meio-tom |
 | ⬜ **Cópias virtuais e instantâneos** | |
 | ✅ Antes/depois, desfazer/refazer, presets, corte/giro/espelho/endireitar, histograma | |
+| ✅ **Importar predefinição do Lightroom** (`.lrtemplate` e `.xmp`) | **desde 7/set** — `revelacao/lightroom.rs`, o porte de `lightroom.ts` do site: converte as escalas e **conta o que ignorou** por arquivo |
+| ✅ **Prévia da predefinição ao passar o ponteiro** | **desde 7/set** — muda a foto, não os ajustes; não entra no histórico nem no banco |
 
 ✅ **O histórico guarda o corte desde 6/set/2026** — a pilha passou a ser de `Estado` (os 46 ajustes
 **e** os oito campos do enquadramento), e `Cmd+Z` depois de cortar devolve a foto inteira. A ideia é
@@ -126,6 +128,44 @@ clicar nele não fazia nada. O lugar dele nunca foi ali: no Lightroom "Auto" é 
 **Básico**, que lê a foto e escolhe os tons a partir dela. Preset é lista de números fixos, e
 nenhuma lista fixa serve para todas as fotos. **Voltou como botão no mesmo dia** — no topo do
 Básico, medindo a foto crua.
+
+---
+
+## A tela da Revelação — ✅ **é a do site desde 7/set/2026**
+
+🎯 O pedido do dono foi curto: *"o Modo revelação do VintageLightbox precisa ser igual da WEB"*. O
+motor já era o mesmo — `revelacao-core`, os 53 ajustes, o mesmo `.wgsl` — e as **telas** é que
+tinham sido desenhadas em ordens diferentes. A referência é
+`recordarfotos-e-commerce/frontend/src/app/(dashboard)/dashboard/sessoes-fotograficas/[id]/revelacao/`.
+
+| O que era aqui | O que é agora |
+|---|---|
+| Nove painéis, HSL ocupando três cabeçalhos quase iguais | **Sete**, com HSL num painel de três abas — `Painel`, ao lado de `Secao` |
+| Detalhe antes do HSL | A ordem do site: Básico, Curva, HSL, Detalhe, Lente, Tonalização, Efeitos |
+| "Redefinir ajustes" no rodapé, atrás de 53 sliders | **"N ajustes fora do neutro" + "Zerar tudo"** no topo |
+| Painel fechado escondia o que tinha dentro | **Ponto âmbar** no painel alterado, sublinhado na aba fechada que foi mexida |
+| Voltar um ajuste ao neutro era acertar o número no arrasto | **Duplo clique no rótulo** |
+| Desfazer, refazer, "Antes" e "Enquadrar" só como tecla | **Barra em cima da foto**, com a posição no lote |
+| A tira não dizia o que já passou | **Ponto âmbar** na miniatura já revelada |
+| Lista de presets numa sanfona fechada, sem busca | Busca, contagem por grupo, campos por linha, prévia no ponteiro, renomear e apagar |
+| Predefinição guardava **15** dos 53 ajustes | Qualquer um dos 53 — migration 020 |
+| Quatro predefinições de sistema em inglês | **As sete do site**, com os mesmos números |
+
+🚨 **A perda dos 38 campos era calada.** A tabela `presets` tinha uma coluna por ajuste, escrita
+quando o motor tinha 15. Salvar uma predefinição com HSL, nitidez ou tonalização gravava o nome e
+descartava o resto sem erro nenhum — e é por isso que **"Sépia à moda antiga" não existia aqui**: a
+sépia se faz com tonalização, que não tinha coluna.
+
+🔑 **O tradutor do Lightroom é o mesmo caso da escala, de novo.** `Contrast2012` vai de -100 a 100 e
+o `contrast` daqui é multiplicador de 0 a 2 com neutro em 1; a nitidez da Adobe vai a 150; o matiz do
+HSL vira **graus**, a 0,3 por ponto — o extremo do slider deles desloca ~30°, e não meia volta.
+Copiar o número sem converter não dá erro: dá foto destruída que parece decisão de cor. É o defeito
+que os presets de sistema tiveram por meses, e agora tem teste dos dois lados.
+
+⚠️ **Duas coisas do site ficaram de fora, e é decisão.** "Baixar JPEG" e "Salvar na galeria e sair"
+são o "Exportar" e o "Pós-venda" da barra do app, que valem para a seleção inteira; e os botões de
+renomear/apagar ficam visíveis na linha em vez de aparecerem só sob o ponteiro — um botão de apagar
+invisível continua clicável, e num app de catálogo é o gesto que ninguém desfaz.
 
 ---
 

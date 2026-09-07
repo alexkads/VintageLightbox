@@ -1,9 +1,14 @@
 # Status do Projeto - VintageLightbox
 
-**Última atualização**: 6 de setembro de 2026
-**Último commit**: ver `git log -1` — os de 4/set com o motor de revelação num crate próprio e compilado para o navegador
+**Última atualização**: 7 de setembro de 2026
+**Último commit**: ver `git log -1` — os de 7/set com a Revelação alinhada ao editor do site
 **Branch de trabalho**: `dev`, árvore limpa
-**Estado**: ✅ compila · **962 testes, 0 falhando** · `fmt` e `clippy -D warnings` limpos (nativo **e** `wasm32`) · o app sobe
+**Estado**: ✅ compila · **938 testes, 2 falhando** · `fmt` e `clippy -D warnings` limpos (nativo **e** `wasm32`) · o app sobe
+
+> 🚨 **As duas que falham são anteriores a este trabalho** e não são da Revelação:
+> `app::testes::esc_sai_mesmo_da_revelacao` e
+> `app::testes::buscar_antes_de_revelar_nao_desliga_as_teclas` — as duas esperam voltar para
+> `Tela::Biblioteca` e recebem `Tela::Sessao`. Conferido em `34ee1f6`, com a árvore limpa.
 
 > 🎯 **O objetivo do projeto mudou em 17/ago/2026** e está em
 > [`00-OBJETIVO.md`](00-OBJETIVO.md): substituir o Lightroom no fluxo do estúdio, para que a edição
@@ -75,6 +80,51 @@ Os quatro comandos documentados (`CLAUDE.md`, `README.md`,
 `09-A-SESSAO-FOTOGRAFICA.md` e este) diziam `cargo run -p ui-gpui`, sem
 `--release` — **a armadilha estava no doc**, e foi corrigida em 6/set. Se voltar a
 acontecer, a causa não é o GPUI.
+
+## O que mudou em 7/set/2026 — a Revelação passa a ser a do site
+
+🎯 **O dono mandou o editor do site como referência**: *"o Modo revelação do VintageLightbox precisa
+ser igual da WEB"*. O motor já era o mesmo (`revelacao-core`, os 53 ajustes, o mesmo `.wgsl`); as
+duas telas é que tinham sido desenhadas em ordens diferentes, e a diferença aparecia em tudo — de
+onde fica o botão de zerar até o que uma predefinição consegue guardar.
+
+| | |
+|---|---|
+| ✅ **Sete painéis, e não nove** (`controles.rs`) | `Secao` continua sendo a família do controle; `Painel` é o que a tela desenha. As três de HSL dividem **um** painel com abas (Cor, Luminância, Matiz) — eram três cabeçalhos quase iguais em sequência numa coluna de 280px. E o Detalhe passou para depois do HSL, que é a ordem do site |
+| ✅ **"N ajustes fora do neutro" e "Zerar tudo" no topo** | era "Redefinir ajustes" **no rodapé**, atrás de 53 sliders. O número é a única coisa na tela que responde "esta foto foi mexida?" sem abrir sete painéis |
+| ✅ **Ponto âmbar no painel alterado**, e sublinhado na aba fechada que foi mexida | fechado, um painel escondia inclusive o ajuste que alguém deixou lá dentro |
+| ✅ **Duplo clique no rótulo devolve o neutro** | o gesto do Lightroom. Sem ele, voltar um ajuste exige acertar um número que a barra nem sempre alcança — o raio da nitidez tem neutro 1,0 numa faixa de 0,5 a 3,0 |
+| ✅ **Barra em cima da foto** (`tela.rs`) | desfazer, refazer, "Antes" e "Enquadrar" existiam **só como tecla**, e nada na tela dizia que existiam. Com a posição no lote ("3/200") antes do nome |
+| ✅ **Ponto âmbar na tira** para o que já foi revelado | numa sessão de duzentas, "onde eu parei" não tinha resposta senão abrir foto por foto |
+| ✅ **A coluna de predefinições virou a do site** | busca, contagem por grupo, o número de campos ao lado de cada nome, **prévia ao passar o ponteiro**, renomear e apagar. A lista inteira era uma sanfona **fechada**, num painel do dock que existe só para ela |
+| ✅ **Importar do Lightroom** (`lightroom.rs`, novo) | o porte de `lightroom.ts`: `.lrtemplate` (tabela Lua) e `.xmp`, com a tabela de conversão de escalas e o relatório do que ficou de fora. 22 testes, os mesmos casos do site |
+
+🚨 **Uma predefinição guardava 15 ajustes dos 53, e a perda era calada.** A tabela `presets` tinha
+uma coluna por campo e a lista parou em fev/2026 — os 11 do Básico e os 4 da curva de tons. Salvar
+uma com HSL, nitidez ou tonalização gravava o nome e **descartava** o resto. É por isso que "Sépia à
+moda antiga" não existia aqui: a sépia se faz com tonalização, e não havia onde pôr.
+
+A migration **020** troca as colunas por um mapa `nome → valor` em JSON, com os nomes de
+`Ajustes::NOMES`. O `WHERE campo.value IS NOT NULL` da conversão é o que preserva o significado
+antigo: coluna nula queria dizer "não mexe neste campo", e um `json_object` cru a levaria como
+`null` — que na leitura viraria campo presente, com valor inventado.
+
+✅ **E as predefinições de sistema passaram a ser as sete do site**, com os mesmos números
+(Preto e branco clássico, Sépia à moda antiga, Retrato suave, Luz de estúdio, Hora dourada,
+Alta-chave, Nitidez para impressão). Eram quatro em inglês, herdadas do app antigo: duas listas para
+o mesmo motor, e "aplique a Sépia" queria dizer coisas diferentes conforme a tela.
+
+🚨 **Encontrado no caminho: a predefinição salva tinha dois ids.** A tela punha na lista um
+`Preset::user` com id próprio e o `SavePresetUseCase` criava **outro** ao gravar. Enquanto salvar era
+o único gesto, ninguém notava — a lista certa voltava do banco na abertura seguinte. Com renomear e
+apagar não passa: o comando ia para um id que a tabela não tem. A identidade passou a nascer onde a
+predefinição nasce.
+
+⚠️ **O que não veio do site, e por quê**: "Baixar JPEG" e "Salvar na galeria e sair" são o
+"Exportar" e o "Pós-venda" da barra do app, que valem para a seleção inteira e não só para a foto
+aberta — repeti-los na Revelação daria dois caminhos com desfechos diferentes para o mesmo verbo. E
+renomear/apagar ficam **visíveis** na linha, em vez de aparecerem só sob o ponteiro como lá: um botão
+de apagar invisível continua clicável, e num app de catálogo é o gesto que ninguém desfaz.
 
 ## O que mudou em 6/set/2026 — a tela deixa de ser preto, branco e azul
 
