@@ -253,14 +253,14 @@ jobs:
         with:
           tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('v{0}', steps.manifesto.outputs.versao) }}
           name: VintageLightbox ${{ steps.manifesto.outputs.versao }}
-          body_path: site/notas-do-lancamento.md
+          body_path: docs/notas-do-lancamento.md
           files: dist/*/*
           fail_on_unmatched_files: true
           draft: false
 
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: site
+          path: docs
 
   # ── A página, no GitHub Pages ─────────────────────────────────────────────
   pagina:

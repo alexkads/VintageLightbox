@@ -2,12 +2,17 @@
 """Monta o `latest.json` e a página, a partir do que o CI empacotou.
 
 Roda no job `lancar` do `.github/workflows/instaladores.yml`, depois que as três
-plataformas terminaram. Lê `dist/instalador-*/`, escreve `site/`.
+plataformas terminaram. Lê `dist/`, escreve `docs/` — que é de onde o GitHub Pages serve.
 
 🔑 **É o que substituiu o `publicar.py`.** Aquele subia para o Supabase Storage e
    precisava da `service_role`; este não toca credencial nenhuma — os arquivos
    vão para o Releases do próprio repositório e o manifesto para o Pages. A
    mudança tirou a última chave sensível do caminho de lançamento (7/set/2026).
+
+⚠️ **Roda no CI e roda na mão, e é de propósito.** Enquanto o Actions esteve
+   bloqueado por cobrança (7/set/2026), o lançamento saiu daqui mesmo: gerar com
+   `make mac`, rodar este script, commitar `docs/` e `gh release create`. O
+   `docs/` é servido pelo Pages **direto do branch**, sem Actions no caminho.
 
 ⚠️ **O `latest.json` é estático, e é o app que compara as versões.** Não há
    endpoint decidindo `204`: o manifesto traz todas as plataformas, e o updater
@@ -24,7 +29,7 @@ from datetime import datetime, timezone
 
 RAIZ = pathlib.Path(__file__).resolve().parent.parent
 DIST = RAIZ / "dist"
-SITE = RAIZ / "site"
+SITE = RAIZ / "docs"
 
 # 🔑 **A ordem é prioridade**, e resolve o caso de haver `.exe` e `.msi` no mesmo
 #    `dist/`: os dois disputam `windows-x86_64`. O NSIS vem antes porque é o
