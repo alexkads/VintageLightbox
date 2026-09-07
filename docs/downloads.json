@@ -1,0 +1,14 @@
+{
+  "versao": "0.1.1",
+  "publicado_em": "2026-09-07T16:58:23+00:00",
+  "notas": "Primeira versão pública. Editor de fotos em Rust, com motor de revelação na GPU.",
+  "downloads": [
+    {
+      "sistema": "macOS",
+      "arquitetura": "Intel e Apple Silicon",
+      "arquivo": "VintageLightbox_0.1.1_universal.dmg",
+      "url": "https://github.com/alexkads/VintageLightbox/releases/download/v0.1.1/VintageLightbox_0.1.1_universal.dmg",
+      "bytes": 28750632
+    }
+  ]
+}
