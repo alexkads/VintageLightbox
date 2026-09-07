@@ -122,11 +122,36 @@ pub fn quantos_campos(preset: &Preset) -> usize {
 
 /// Separa os de sistema dos do usuário, mantendo a ordem de cada grupo.
 ///
-/// Duas listas na tela, como no legado — e a divisão é por `is_system`, que vem
-/// do use case: os cinco de sistema são construídos ali a cada listagem, e os do
+/// Duas listas na tela, como no site — e a divisão é por `is_system`, que vem do
+/// use case: os sete de sistema são construídos ali a cada listagem, e os do
 /// usuário saem da tabela `presets`.
 pub fn separar(presets: &[Preset]) -> (Vec<&Preset>, Vec<&Preset>) {
     presets.iter().partition(|preset| preset.is_system)
+}
+
+/// O mesmo, deixando de fora o que a busca não alcança.
+///
+/// Busca vazia é "mostre tudo", e não "não mostre nada". A comparação é por
+/// pedaço do nome, sem caixa — o mesmo `toLocaleLowerCase().includes()` do site.
+///
+/// ⚠️ **Sem dobra de acento, como no site.** "Sepia" não acha "Sépia à moda
+/// antiga", e é uma diferença conhecida: fazer diferente aqui daria dois
+/// resultados para a mesma digitação, dependendo da tela.
+pub fn separar_filtrando<'a>(
+    presets: &'a [Preset],
+    busca: &str,
+) -> (Vec<&'a Preset>, Vec<&'a Preset>) {
+    let alvo = busca.trim().to_lowercase();
+    presets
+        .iter()
+        .filter(|preset| alvo.is_empty() || preset.name.to_lowercase().contains(&alvo))
+        .partition(|preset| preset.is_system)
+}
+
+/// Se o fotógrafo ainda não salvou nenhuma — o que decide entre "não achei" e
+/// "não existe".
+pub fn nenhuma_do_usuario(presets: &[Preset]) -> bool {
+    !presets.iter().any(|preset| !preset.is_system)
 }
 
 /// Uma guarda que só anota o que recebeu.
@@ -322,6 +347,56 @@ mod testes {
                 );
             }
         }
+    }
+
+    /// ⚠️ **Busca vazia mostra tudo.** O engano fácil é filtrar por
+    /// `contains("")` num caminho e por igualdade noutro: com a lista vazia ao
+    /// abrir o painel, o operador conclui que perdeu as predefinições.
+    #[test]
+    fn a_busca_vazia_mostra_as_duas_listas_inteiras() {
+        let presets = vec![
+            Preset::system("Sépia à moda antiga", PresetAdjustments::vazia()),
+            Preset::user("Meu retrato".into(), PresetAdjustments::vazia()),
+        ];
+
+        let (sistema, usuario) = separar_filtrando(&presets, "   ");
+        assert_eq!(sistema.len(), 1);
+        assert_eq!(usuario.len(), 1);
+    }
+
+    /// E ela acha por pedaço do nome, sem caixa, nos dois grupos ao mesmo
+    /// tempo.
+    #[test]
+    fn a_busca_acha_por_pedaco_do_nome_nos_dois_grupos() {
+        let presets = vec![
+            Preset::system("Preto e branco clássico", PresetAdjustments::vazia()),
+            Preset::system("Hora dourada", PresetAdjustments::vazia()),
+            Preset::user("Dourado meu".into(), PresetAdjustments::vazia()),
+        ];
+
+        let (sistema, usuario) = separar_filtrando(&presets, "DOURAD");
+        assert_eq!(
+            sistema.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(),
+            ["Hora dourada"]
+        );
+        assert_eq!(
+            usuario.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(),
+            ["Dourado meu"]
+        );
+    }
+
+    /// 🔑 "Não achei" e "não tenho nenhuma" são mensagens diferentes, e a
+    /// segunda explica como criar a primeira.
+    #[test]
+    fn nenhuma_do_usuario_olha_a_lista_inteira_e_nao_a_filtrada() {
+        let so_de_sistema = vec![Preset::system("Hora dourada", PresetAdjustments::vazia())];
+        assert!(nenhuma_do_usuario(&so_de_sistema));
+
+        let com_uma_minha = vec![
+            Preset::system("Hora dourada", PresetAdjustments::vazia()),
+            Preset::user("Meu".into(), PresetAdjustments::vazia()),
+        ];
+        assert!(!nenhuma_do_usuario(&com_uma_minha));
     }
 
     #[test]

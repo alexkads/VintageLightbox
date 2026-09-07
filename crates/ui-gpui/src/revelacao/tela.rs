@@ -16,17 +16,18 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use adapters::view_models::PhotoViewModel;
+use domain::entities::preset::PresetAdjustments;
 use domain::entities::Preset;
 use domain::value_objects::{AspectRatio, CropSettings};
 use gpui::{
-    canvas, div, img, prelude::*, px, AnyElement, App, Bounds, Context, Entity, MouseButton,
+    canvas, div, img, prelude::*, px, AnyElement, Bounds, Context, Entity, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, RenderImage, SharedString,
     Subscription, Task, Window,
 };
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::collapsible::Collapsible;
 use gpui_component::dock::{register_panel, DockArea, DockEvent, DockItem, PanelView};
-use gpui_component::input::{Input, InputState};
+use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::slider::{Slider, SliderEvent, SliderState};
 use gpui_component::{ActiveTheme, Disableable, Selectable, Sizable, WindowExt};
 use infrastructure::cache::preview_manager::PreviewManager;
@@ -187,11 +188,21 @@ pub struct Revelacao {
     /// busca da Biblioteca: o `InputState` guarda cursor, seleção e histórico de
     /// edição do campo.
     nome_do_preset: Entity<InputState>,
-    /// Se a lista de presets está aberta. Nasce **fechada**: são 5 de sistema
-    /// mais os do usuário empurrando os 42 controles para baixo, e o painel aqui
-    /// é uma coluna de 280px — no legado eles moram num dock separado, que esta
-    /// Revelação não tem.
-    presets_abertos: bool,
+    /// O texto digitado na busca de predefinições. Entidade própria, como a
+    /// busca da Biblioteca: o `InputState` guarda cursor, seleção e o histórico
+    /// de edição do campo.
+    busca_de_presets: Entity<InputState>,
+    /// A predefinição sob o ponteiro, enquanto ele está lá.
+    ///
+    /// 🔑 **Ela muda o que a GPU desenha, e não os ajustes.** Os sliders
+    /// continuam mostrando o que a foto tem: a prévia é uma pergunta ("como
+    /// ficaria?"), e não uma resposta. Sair com o ponteiro devolve a foto sem
+    /// passar pelo histórico — é o gesto do Lightroom, e o do site
+    /// (`editor.tsx`: `previa ? {...ajustes, ...previa} : ajustes`).
+    previa: Option<PresetAdjustments>,
+    /// Se a próxima predefinição salva guarda os 53 (e não só o que saiu do
+    /// neutro) — a caixa "Zerar os outros ajustes ao aplicar" do site.
+    preset_inteiro: bool,
     /// Quais painéis estão abertos. Um conjunto, e não um `bool` por painel:
     /// acrescentar painel novo não pode exigir lembrar de acrescentar campo.
     abertos: HashSet<Painel>,
@@ -300,6 +311,25 @@ impl Revelacao {
             controles.push(Controle { definicao, estado });
         }
 
+        // A busca de predefinições. A tela não lê o campo a cada quadro: ela é
+        // avisada quando o texto muda.
+        let busca_de_presets = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("Buscar predefinição")
+                // Esc limpa o campo, como na Biblioteca: desfazer uma busca não
+                // pode custar apagar caractere por caractere.
+                .clean_on_escape()
+        });
+        assinaturas.push(cx.subscribe(
+            &busca_de_presets,
+            |_tela: &mut Self, _campo, evento: &InputEvent, cx| {
+                // Só `Change`. `Focus` e `Blur` também chegam aqui.
+                if matches!(evento, InputEvent::Change) {
+                    cx.notify();
+                }
+            },
+        ));
+
         // O slider de endireitamento nasce junto com os outros, mas fora da
         // tabela: ele não escreve em `Ajustes` — escreve no corte, que é outro
         // caminho e outro dono.
@@ -347,7 +377,9 @@ impl Revelacao {
             guarda_de_presets,
             nome_do_preset: cx.new(|cx| InputState::new(window, cx).placeholder("Nome do preset")),
             presets,
-            presets_abertos: false,
+            busca_de_presets,
+            previa: None,
+            preset_inteiro: false,
             abertos: Painel::TODOS
                 .into_iter()
                 .filter(Painel::nasce_aberto)
@@ -742,6 +774,44 @@ impl Revelacao {
                 .estado
                 .update(cx, |estado, cx| estado.set_value(valor, window, cx));
         }
+    }
+
+    /// O que a GPU desenha: os ajustes de verdade, ou eles com a predefinição
+    /// sob o ponteiro por cima.
+    ///
+    /// 🔑 **A prévia não entra em `self.ajustes`**, e é o que a mantém
+    /// reversível de graça: nada precisa ser guardado para desfazê-la, e um
+    /// travamento com o ponteiro em cima de uma predefinição não deixa a foto
+    /// alterada.
+    fn ajustes_na_tela(&self) -> Ajustes {
+        match &self.previa {
+            Some(preset) => {
+                let mut ajustes = self.ajustes;
+                presets::aplicar(&mut ajustes, preset);
+                ajustes
+            }
+            None => self.ajustes,
+        }
+    }
+
+    /// Mostra (ou tira) a prévia de uma predefinição.
+    ///
+    /// Sem foto aberta não há o que prever, e sem mudança não há o que
+    /// redesenhar — pedir à GPU o mesmo quadro a cada movimento do ponteiro
+    /// sobre a mesma linha seria trabalho por nada.
+    pub fn prever(&mut self, preset: Option<PresetAdjustments>, cx: &mut Context<Self>) {
+        if self.previa == preset {
+            return;
+        }
+        self.previa = preset;
+        self.pedir_revelacao(cx);
+        cx.notify();
+    }
+
+    /// A predefinição que está sendo prevista, para os testes.
+    #[cfg(test)]
+    pub fn previa(&self) -> Option<&PresetAdjustments> {
+        self.previa.as_ref()
     }
 
     /// Aplica um preset: 15 dos 46 campos, de uma vez.
@@ -1190,7 +1260,7 @@ impl Revelacao {
             pixels: origem.pixels.clone(),
             largura: origem.largura,
             altura: origem.altura,
-            ajustes: self.ajustes,
+            ajustes: self.ajustes_na_tela(),
         });
         self.aguardando = Some(id);
         self.acompanhar(cx);
@@ -1929,53 +1999,124 @@ impl Revelacao {
     /// para isto seria decidir agora um layout que a fase 4 vai refazer. O que
     /// importa para a paridade — quais presets existem, o que cada um aplica — é
     /// igual.
+    /// A lista de predefinições — o desenho do site (`painel-presets.tsx`).
+    ///
+    /// Busca em cima com o botão de salvar ao lado, dois grupos com contagem
+    /// ("Do sistema 7", "Minhas 0"), o número de campos que cada uma escreve à
+    /// direita do nome, e o rodapé dizendo o que o ponteiro faz.
+    ///
+    /// 🚨 **A lista inteira era uma sanfona fechada.** O motivo estava escrito e
+    /// tinha data: ela dividia a coluna de 280px com os 42 sliders. Só que ela
+    /// não divide mais nada desde que virou painel próprio do dock — e fechada
+    /// por padrão, num painel que existe só para ela, o que se via ao abrir a
+    /// Revelação era a palavra "Presets" e um triângulo.
     fn presets(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let (sistema, usuario) = presets::separar(&self.presets);
-
-        let mut lista = Vec::new();
-        lista.push(self.rotulo_de_grupo("Sistema", cx).into_any_element());
-        lista.extend(sistema.iter().map(|p| self.botao_de_preset(p, cx)));
-        lista.push(self.rotulo_de_grupo("Meus", cx).into_any_element());
-        if usuario.is_empty() {
-            lista.push(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child("Nenhum preset salvo")
-                    .into_any_element(),
-            );
+        let busca = self.busca_de_presets.read(cx).value().to_string();
+        let (do_sistema, minhas) = presets::separar_filtrando(&self.presets, &busca);
+        let nenhuma = do_sistema.is_empty() && minhas.is_empty();
+        let busca = busca.trim().to_string();
+        // ⚠️ **"Nenhuma com esse nome" e "nenhuma ainda" são coisas diferentes.**
+        // Sem a distinção, quem digitasse errado leria que o app não tem
+        // predefinição nenhuma — e iria criar a que já existe.
+        let vazio = if busca.is_empty() {
+            "Nenhuma predefinição ainda."
         } else {
-            lista.extend(usuario.iter().map(|p| self.botao_de_preset(p, cx)));
-        }
+            "Nenhuma predefinição com esse nome."
+        };
 
-        Collapsible::new()
-            .open(self.presets_abertos)
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(10.))
             .child(
                 div()
-                    .id("secao-presets")
                     .flex()
                     .items_center()
-                    .justify_between()
-                    .py(px(4.))
-                    .cursor_pointer()
+                    .gap(px(4.))
+                    .child(
+                        div()
+                            .flex_1()
+                            .child(Input::new(&self.busca_de_presets).xsmall()),
+                    )
+                    .child(self.salvar_como_preset(cx)),
+            )
+            .when(nenhuma, |painel| {
+                painel.child(
+                    div()
+                        .py(px(8.))
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(vazio),
+                )
+            })
+            .when(!nenhuma, |painel| {
+                painel
+                    .child(self.grupo_de_presets("Do sistema", &do_sistema, None, cx))
+                    .child(
+                        self.grupo_de_presets(
+                            "Minhas",
+                            &minhas,
+                            // Só quando não há nenhuma salva — com a busca vazia de
+                            // resultados, a explicação de como criar seria resposta
+                            // à pergunta errada.
+                            presets::nenhuma_do_usuario(&self.presets)
+                                .then_some("Ajuste uma foto e use o + para guardar."),
+                            cx,
+                        ),
+                    )
+            })
+            .child(
+                div()
+                    .pt(px(4.))
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Presets")
-                    .child(if self.presets_abertos { "▾" } else { "▸" })
-                    .on_click(cx.listener(|tela, _ev, _window, cx| {
-                        tela.presets_abertos = !tela.presets_abertos;
-                        cx.notify();
-                    })),
+                    .child(
+                        "Passe o ponteiro para ver na foto, clique para aplicar. \
+                         Cada uma escreve só os controles que define — os outros ficam como estão.",
+                    ),
             )
-            .content(
+    }
+
+    /// Um bloco da lista, com o título e a contagem — o desenho do Lightroom.
+    fn grupo_de_presets(
+        &self,
+        titulo: &'static str,
+        presets: &[&Preset],
+        vazio: Option<&'static str>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(2.))
+            .child(
                 div()
                     .flex()
-                    .flex_col()
-                    .gap(px(2.))
-                    .pb(px(8.))
-                    .children(lista)
-                    .child(div().pt(px(6.)).child(self.salvar_como_preset(cx))),
+                    .items_center()
+                    .gap(px(5.))
+                    .pb(px(2.))
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(SharedString::from(titulo.to_uppercase()))
+                    .child(SharedString::from(presets.len().to_string())),
             )
+            .children(match (presets.is_empty(), vazio) {
+                (true, Some(texto)) => Some(
+                    div()
+                        .pb(px(4.))
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(texto),
+                ),
+                _ => None,
+            })
+            .children(
+                presets
+                    .iter()
+                    .map(|preset| self.botao_de_preset(preset, cx))
+                    .collect::<Vec<_>>(),
+            )
+            .into_any_element()
     }
 
     /// O botão que abre o diálogo de salvar preset.
@@ -1985,27 +2126,66 @@ impl Revelacao {
     /// app num `expect` em vez de abrir o diálogo.
     fn salvar_como_preset(&self, cx: &mut Context<Self>) -> impl IntoElement {
         Button::new("salvar-preset")
-            .label("+ Salvar como preset")
+            .label("+")
             .xsmall()
-            .w_full()
+            .tooltip("Salvar os ajustes atuais como predefinição")
             .on_click(cx.listener(|tela, _ev, window, cx| {
                 // O campo começa vazio a cada abertura: o nome do preset anterior
                 // sugerido como padrão convida a salvar dois com o mesmo nome, e
                 // nada no banco impede.
                 tela.nome_do_preset
                     .update(cx, |estado, cx| estado.set_value("", window, cx));
+                tela.preset_inteiro = false;
 
                 let campo = tela.nome_do_preset.clone();
                 let esta = cx.entity();
+                let quantos = tela.quantos_alterados();
 
-                window.open_dialog(cx, move |dialogo, _window, _cx| {
+                window.open_dialog(cx, move |dialogo, _window, cx| {
                     let campo = campo.clone();
                     let esta = esta.clone();
+                    let inteiro = esta.read(cx).preset_inteiro;
+                    let para_marcar = esta.clone();
 
                     dialogo
-                        .title("Salvar como preset")
+                        .title("Salvar como predefinição")
                         .confirm()
                         .child(Input::new(&campo))
+                        // 🔑 **A caixa do site, e ela não precisa de campo novo
+                        // no banco**: guardar os 53 — inclusive os que estão no
+                        // neutro — já é "zerar o resto ao aplicar". É a
+                        // predefinição que é um visual inteiro, e não um retoque
+                        // para somar.
+                        .child(
+                            div()
+                                .id("preset-inteiro")
+                                .pt(px(8.))
+                                .cursor_pointer()
+                                .text_xs()
+                                .child(SharedString::from(format!(
+                                    "{} Zerar os outros ajustes ao aplicar",
+                                    if inteiro { "☑" } else { "☐" }
+                                )))
+                                .on_click(move |_ev, _window, cx| {
+                                    para_marcar.update(cx, |tela, cx| {
+                                        tela.preset_inteiro = !tela.preset_inteiro;
+                                        cx.notify();
+                                    });
+                                }),
+                        )
+                        .child(
+                            div()
+                                .pt(px(4.))
+                                .text_xs()
+                                .child(SharedString::from(if inteiro {
+                                    "Guarda os 53 ajustes: aplicar devolve ao neutro o que ela não pede."
+                                        .to_string()
+                                } else if quantos == 0 {
+                                    "Nenhum ajuste fora do neutro: não há o que guardar.".to_string()
+                                } else {
+                                    format!("Guarda {quantos} ajustes — os que saíram do neutro.")
+                                })),
+                        )
                         .on_ok(move |_ev, window, cx| {
                             esta.update(cx, |tela, cx| tela.salvar_preset(window, cx));
                             true
@@ -2014,31 +2194,45 @@ impl Revelacao {
             }))
     }
 
-    fn rotulo_de_grupo(&self, texto: &'static str, cx: &App) -> impl IntoElement {
-        div()
-            .pt(px(4.))
-            .text_xs()
-            .text_color(cx.theme().muted_foreground)
-            .child(texto)
-    }
-
     /// 🔑 O id do elemento é o **id do preset**, e não a posição na lista.
     ///
     /// Dois presets com o mesmo nome são possíveis (nada impede salvar "Retrato"
     /// duas vezes), e id por posição faria o GPUI confundir o estado de dois
     /// botões quando a lista mudasse de tamanho — salvar um preset novo trocaria
     /// qual deles parece pressionado.
+    ///
+    /// ⚠️ **O ponteiro em cima mostra na foto, e o clique aplica.** São dois
+    /// caminhos diferentes de propósito: a prévia não passa pelo histórico nem
+    /// pelo banco, e sair com o ponteiro a desfaz. Sem ela, escolher entre sete
+    /// predefinições custa sete aplicações e sete `Cmd+Z`.
     fn botao_de_preset(&self, preset: &Preset, cx: &mut Context<Self>) -> gpui::AnyElement {
         let id = SharedString::from(format!("preset-{}", preset.id));
         let nome = SharedString::from(preset.name.clone());
+        let quantos = SharedString::from(presets::quantos_campos(preset).to_string());
         let escolhido = preset.clone();
+        let para_prever = preset.adjustments.clone();
 
-        Button::new(id)
-            .label(nome)
-            .xsmall()
-            .w_full()
-            .justify_start()
+        div()
+            .id(id)
+            .flex()
+            .items_center()
+            .gap(px(4.))
+            .px(px(4.))
+            .py(px(3.))
+            .rounded(px(4.))
+            .cursor_pointer()
+            .text_xs()
+            .hover(|estilo| estilo.bg(cx.theme().accent))
+            .child(div().flex_1().truncate().child(nome))
+            .child(div().text_color(cx.theme().muted_foreground).child(quantos))
+            .on_hover(cx.listener(move |tela, sobre: &bool, _window, cx| {
+                tela.prever(sobre.then(|| para_prever.clone()), cx);
+            }))
             .on_click(cx.listener(move |tela, _ev, window, cx| {
+                // 🚨 A prévia sai **antes** de aplicar: se ela ficasse, o
+                // resultado na tela seria o preset por cima dele mesmo — igual
+                // por acaso, e diferente assim que o ponteiro saísse.
+                tela.prever(None, cx);
                 tela.aplicar_preset(&escolhido, window, cx);
             }))
             .into_any_element()
@@ -3289,6 +3483,59 @@ mod testes {
     /// Andar no histórico não é escrever nele. Se o desfazer registrasse, o
     /// `Cmd+Shift+Z` nunca alcançaria nada — sempre haveria um passo novo igual ao
     /// que acabou de sair.
+    /// 🔑 A prévia muda **a foto**, e não os ajustes.
+    ///
+    /// É o gesto do Lightroom, e o do site: o ponteiro sobre uma predefinição
+    /// mostra como ficaria, e sair devolve o que estava. Se ela escrevesse em
+    /// `self.ajustes`, passar o ponteiro pela lista deixaria a foto alterada —
+    /// e o `Cmd+Z` não teria o que desfazer, porque nenhum gesto foi
+    /// registrado.
+    #[gpui::test]
+    fn a_previa_muda_a_foto_e_nao_os_ajustes(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_cinza())
+            .expect("gravar preview");
+
+        let gravador = Arc::new(GravadorDeMentira::default());
+        let preset = Preset::system(
+            "Sépia à moda antiga",
+            PresetAdjustments::vazia()
+                .com("saturation", -1.0)
+                .com("split_shadow_hue", 35.0),
+        );
+        let janela = com_presets(cx, previews, gravador.clone(), vec![preset.clone()]);
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(
+                    PhotoViewModel {
+                        edit_exposure: Some(1.0),
+                        ..foto("retrato.jpg")
+                    },
+                    window,
+                    cx,
+                );
+
+                tela.prever(Some(preset.adjustments.clone()), cx);
+
+                assert_eq!(tela.ajustes().saturation, 0.0, "os ajustes não mudam");
+                assert_eq!(tela.ajustes_na_tela().saturation, -1.0, "a foto muda");
+                assert_eq!(
+                    tela.ajustes_na_tela().exposure,
+                    1.0,
+                    "e o que a predefinição não menciona continua na prévia"
+                );
+                assert!(!tela.pode_desfazer(), "prévia não é gesto");
+
+                tela.prever(None, cx);
+                assert_eq!(tela.ajustes_na_tela().saturation, 0.0, "sair devolve");
+            })
+            .expect("a janela deve estar aberta");
+
+        assert!(gravador.gravado().is_empty(), "e nada disso chega ao banco");
+    }
+
     #[gpui::test]
     fn refazer_alcanca_o_que_o_desfazer_deixou(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
