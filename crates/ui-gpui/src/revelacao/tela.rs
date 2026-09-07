@@ -2610,6 +2610,8 @@ impl Revelacao {
                     Some(Miniatura::Pronta(imagem)) => Some(imagem),
                     _ => None,
                 };
+                let revelada = persistencia::ja_revelada(foto);
+                let dica = SharedString::from(format!("{}. {}", posicao + 1, foto.name));
 
                 div()
                     .id(SharedString::from(format!("faixa-revelacao-{}", foto.id)))
@@ -2628,10 +2630,28 @@ impl Revelacao {
                     } else {
                         cx.theme().border
                     })
+                    .relative()
+                    .tooltip(move |window, cx| {
+                        gpui_component::tooltip::Tooltip::new(dica.clone()).build(window, cx)
+                    })
                     .children(
                         miniatura
                             .map(|imagem| img(imagem).max_w(px(LADO - 4.0)).max_h(px(LADO - 4.0))),
                     )
+                    // ✅ O ponto âmbar de "já revelada" — o mesmo do site. Numa
+                    // sessão de duzentas, é a única coisa que responde "onde eu
+                    // parei" sem abrir foto por foto.
+                    .when(revelada, |item| {
+                        item.child(
+                            div()
+                                .absolute()
+                                .top(px(3.))
+                                .right(px(3.))
+                                .size(px(6.))
+                                .rounded_full()
+                                .bg(tema::cores::quente()),
+                        )
+                    })
                     .on_click(cx.listener(move |tela, _ev, window, cx| {
                         tela.ir_para(posicao, window, cx);
                     }))

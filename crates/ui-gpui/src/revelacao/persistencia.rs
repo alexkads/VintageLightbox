@@ -247,6 +247,19 @@ pub fn da_foto(foto: &PhotoViewModel) -> Ajustes {
     ajustes
 }
 
+/// Se esta foto já foi revelada — algum ajuste fora do neutro, ou algum
+/// enquadramento.
+///
+/// 🔑 **É o ponto âmbar da tira**, o mesmo do site (`reveladaEm`). Numa sessão
+/// de duzentas fotos, "quais já passaram" não tem outra resposta senão abrir
+/// uma a uma — e o operador que volta do café não sabe onde parou.
+///
+/// ⚠️ **Contra o neutro, e não contra zero.** Contraste e raio da nitidez têm
+/// neutro 1,0: comparar com zero acenderia o ponto em toda foto do acervo.
+pub fn ja_revelada(foto: &PhotoViewModel) -> bool {
+    da_foto(foto) != Ajustes::default() || corte_da_foto(foto) != Corte::default()
+}
+
 /// Um gravador que só anota o que recebeu.
 ///
 /// Existe para os testes de tela poderem afirmar **o que foi gravado** — que o
@@ -293,6 +306,40 @@ mod testes {
             name: "retrato.jpg".into(),
             ..Default::default()
         }
+    }
+
+    /// 🚨 **Contra o neutro, e não contra zero.**
+    ///
+    /// Contraste e raio da nitidez têm neutro 1,0. Um `ja_revelada` que
+    /// perguntasse "tem algum campo diferente de zero" acenderia o ponto âmbar
+    /// em **toda** foto do acervo — inclusive nas que ninguém abriu —, e o
+    /// sinal de "onde eu parei" viraria ruído no primeiro uso.
+    #[test]
+    fn crua_nao_conta_como_revelada() {
+        assert!(!ja_revelada(&foto()));
+        assert!(
+            !ja_revelada(&PhotoViewModel {
+                edit_contrast: Some(1.0),
+                edit_sharpen_radius: Some(1.0),
+                ..foto()
+            }),
+            "os dois neutros que não são zero"
+        );
+    }
+
+    /// E um ajuste, ou só um enquadramento, já a marca: recortar é revelar
+    /// tanto quanto mover a exposição, e uma foto cortada que aparecesse como
+    /// intocada mandaria o operador refazer o corte.
+    #[test]
+    fn ajuste_ou_enquadramento_marcam_a_foto() {
+        assert!(ja_revelada(&PhotoViewModel {
+            edit_exposure: Some(0.5),
+            ..foto()
+        }));
+        assert!(ja_revelada(&PhotoViewModel {
+            edit_crop_width: Some(0.5),
+            ..foto()
+        }));
     }
 
     #[test]
