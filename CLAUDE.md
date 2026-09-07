@@ -48,6 +48,22 @@ do que funciona, do que promete e não faz, e do que não existe. É a fila de t
 
 ## Build and Test Commands
 
+**Comece por `make`** — sem argumento ele lista tudo que segue, com uma linha cada:
+
+```bash
+make            # a lista dos alvos
+make testar     # cargo test --workspace
+make lint       # fmt + clippy -D warnings, como no CI
+make rodar      # abre o app (sempre em release)
+make mac        # .app + .dmg universal
+make linux      # .deb + .AppImage, por Docker
+make windows    # explica por que o Windows sai do .ps1, e nao daqui
+make publicar   # sobe dist/ para o site
+make faxina     # apaga o cache de debug do cargo
+```
+
+Os comandos crus, para quando for preciso desviar do atalho:
+
 ```bash
 # Build the entire workspace
 cargo build --workspace
@@ -79,6 +95,20 @@ cargo clippy -p revelacao-web --target wasm32-unknown-unknown -- -D warnings
 # A grade da biblioteca para o navegador — só o motor; a tela é React lá
 scripts/construir-biblioteca.sh [caminho/do/frontend]
 cargo clippy -p biblioteca-web --target wasm32-unknown-unknown -- -D warnings
+
+# Os instaladores, e a publicação — fora das lojas
+./scripts/empacotar.sh mac-universal --publicar   # gera e sobe para o site
+./scripts/empacotar.sh linux                      # .deb + .AppImage, por Docker
+./scripts/publicar.py --seco                      # o que seria publicado
+# 🔑 **São dois scripts, um por plataforma, e isso é decisão de desenho**
+#    (dono, 7/set/2026): `empacotar.sh` faz macOS e Linux; `empacotar.ps1` faz
+#    Windows, numa máquina Windows de verdade. Cada alvo é gerado onde pode ser
+#    gerado **e conferido**.
+#
+# 🚫 Cross-compilação para Windows **funciona e foi recusada**. O `cargo-xwin`
+#    gerou um `.exe` de 34,9 MB em 7/set/2026, ao custo de bifurcar o `gpui` e o
+#    `rsraw-sys` e de entregar um binário que ninguém aqui abre para conferir.
+#    Decisão do dono: tudo nativo. Não refazer — `empacotamento/README.md`.
 
 # Check code (faster than build)
 cargo check --workspace
@@ -192,6 +222,25 @@ e `--bin medir-abertura`.
 `ImageExporterImpl` existem, estão testados — e **nunca são construídos no `main.rs`**. O app não
 exporta nada, e nada acusa isso: os testes das camadas de dentro passam todos. Camada pronta não é
 funcionalidade entregue; a pergunta é sempre **"que clique chega até aqui?"**.
+
+## A distribuição: fora das lojas, e o app se atualiza sozinho
+
+O app **não passa pela App Store nem pela Microsoft Store** (decisão do dono, 7/set/2026). Ele é
+gerado aqui, publicado em `recordarfotos.com.br/vintageLightbox` e, a partir da primeira instalação,
+se atualiza sozinho. O caminho inteiro está em [`empacotamento/README.md`](empacotamento/README.md).
+
+🔑 **O que substitui a loja é a assinatura minisign.** Cada pacote é assinado por
+`scripts/empacotar.sh`; a chave **pública** é compilada dentro do app
+(`atualizacao::porta::CHAVE_PUBLICA`), a **privada** mora em `~/.vintagelightbox/atualizacao.key`,
+fora do repositório. O app baixa, confere e só então instala.
+
+🚨 **Perder a chave privada quebra a atualização de todo app já instalado** — os que estão na rua só
+aceitam pacote assinado por ela, e isso não se conserta pelo software. Trocar `chave-publica.txt` por
+uma que não corresponda transforma toda atualização em "assinatura inválida", em silêncio.
+
+⚠️ **Publicar sem subir a versão do `[workspace.package]` não faz nada**: o app compara a própria
+`CARGO_PKG_VERSION` com a do manifesto. E `packager.toml` carrega a mesma versão — o script aborta se
+as duas divergirem.
 
 ## Portas para o mundo assíncrono — o padrão da casa
 

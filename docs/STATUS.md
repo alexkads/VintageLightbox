@@ -81,6 +81,80 @@ Os quatro comandos documentados (`CLAUDE.md`, `README.md`,
 `--release` — **a armadilha estava no doc**, e foi corrigida em 6/set. Se voltar a
 acontecer, a causa não é o GPUI.
 
+## O que mudou em 7/set/2026 — o app passa a ser distribuído e a se atualizar sozinho
+
+O app existia e não tinha como chegar a ninguém: quem quisesse usá-lo compilava. Entrou a cadeia
+inteira, **toda nesta máquina** — sem GitHub Actions, por pedido do dono — e **fora das lojas**, por
+decisão dele: nem App Store, nem Microsoft Store.
+
+| Peça | Onde | O que faz |
+|---|---|---|
+| `scripts/gerar-icones.sh` | novo | Um SVG vira `.icns` (10 medidas), `.ico` (6) e os PNGs do Linux |
+| `empacotamento/packager.toml` | novo | A configuração única dos seis formatos |
+| `scripts/empacotar.sh` | novo | `.app`/`.dmg` (Intel, ARM e universal), `.deb`/`.AppImage` por Docker |
+| `scripts/empacotar.ps1` | novo | `.msi`/`.exe`, para rodar numa máquina Windows |
+| `scripts/publicar.py` | novo | Sobe para o Supabase Storage e escreve `ultima.json` |
+| `crates/ui-gpui/src/atualizacao/` | novo | A porta que procura versão nova e a faixa que avisa |
+| `/vintageLightbox` + `/api/vintagelightbox/atualizacao` | no e-commerce | A página de download e o endpoint que o app consulta |
+
+**O empacotador é o `cargo-packager`** e o updater do app é o `cargo-packager-updater`, do mesmo
+autor — é por isso que o `.sig` que sai do empacotamento é exatamente o que o app sabe conferir.
+
+### 🔑 O que substitui a loja
+
+Cada pacote é assinado com **minisign** (ed25519); a chave pública é compilada dentro do app
+(`atualizacao::porta::CHAVE_PUBLICA`) e a privada mora em `~/.vintagelightbox/`, fora do repositório.
+O app baixa, confere e **só então** instala. Quem tomasse o servidor de download conseguiria *negar*
+atualizações; não conseguiria instalar nada.
+
+⚠️ **Perder a chave privada quebra a atualização de todo app já instalado.** Não há conserto pelo
+software.
+
+### 🚫 O Windows sai de um Windows — por decisão, não por impossibilidade
+
+**A cross-compilação foi testada, funcionou, e foi recusada.** Vale registrar as duas metades, porque
+só a segunda costuma sobreviver na memória.
+
+| Tentativa | Resultado |
+|---|---|
+| `mingw-w64` + `windows-gnu` | ⛔ `couldn't read .../shaders_bytes.rs` |
+| `cargo-zigbuild` + zig 0.16 | ⛔ o mesmo erro, byte por byte |
+| `cross-rs …-windows-msvc` | ⛔ a imagem não existe (só a `-gnu`, que é Linux) |
+| **`cargo-xwin` + LLVM + 2 remendos** | ✅ **`ui-gpui.exe`, 34,9 MB, `PE32+ x86-64`, zero erros** |
+
+O caminho que funcionou exigia: `brew install llvm`; remendar o `rsraw-sys` (tirar
+`panic!("MSVC is not supported")`, `-pthread` → `-DLIBRAW_NODLL`); e remendar o `gpui 0.2.2` para
+compilar o HLSL **na abertura do app**, do fonte embutido, em vez de ler bytes que o `fxc.exe` gera
+em tempo de build.
+
+🚨 **Recusado pelo dono em 7/set/2026** — *"quero deixar tudo nativo mesmo"*. As três razões que a
+própria tentativa expôs:
+
+1. **Dois crates bifurcados para manter**, um deles o framework da interface inteira.
+2. **O caminho de shader remendado é o que o upstream usa só em desenvolvimento.** Entregar por ele
+   muda o renderizador — a peça de que tudo depende.
+3. **Nada disso se confere aqui.** O `.exe` saiu e ninguém neste Mac consegue abri-lo.
+
+O que ficou: `scripts/empacotar.ps1`, para rodar num Windows 11 de verdade. Ele confere cada
+pré-requisito (Rust, g++ do MinGW, `fxc.exe`), usa a mesma `packager.toml` e a mesma chave, e o build
+é conferido na máquina que o gerou. Tudo foi desinstalado depois do teste — não sobrou xwin, zig,
+mingw nem LLVM na máquina.
+
+### O que a faixa faz, e por que é faixa
+
+*Avisa e pergunta* — escolha do dono. Faixa no rodapé, não modal: quem está triando 200 fotos não
+pode ser interrompido por janela que exige clique, porque o desfecho conhecido é aprender a fechar
+sem ler. "Depois" guarda **a versão** dispensada, não um booleano — dispensar a 0.2.0 não pode calar
+a 0.3.0.
+
+### O que ainda não está fechado
+
+- **Sem assinatura da Apple** (decisão do dono). O `.dmg` abre com "não pode ser verificado" e exige
+  botão direito → Abrir na primeira vez; a página de download avisa isso. `--assinar` já está pronto
+  para quando houver um "Developer ID Application" — que **não** é App Store.
+- **`SUPABASE_URL` e `SUPABASE_SERVICE_ROLE_KEY`** precisam existir na máquina que publica
+  (`~/.vintagelightbox/publicar.env`). São as mesmas do backend no Fly.
+
 ## O que mudou em 7/set/2026 — a Revelação passa a ser a do site
 
 🎯 **O dono mandou o editor do site como referência**: *"o Modo revelação do VintageLightbox precisa

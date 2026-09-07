@@ -175,7 +175,44 @@ VintageLightbox-Rust/
 - **Multi-Monitor**: Recurso essencial para fotógrafos
 - **Gestão de Vendas**: Integrada diretamente no workflow
 - **Open Source**: Transparência e comunidade
-- **Cross-Platform**: Funciona nativamente em macOS e Windows
+- **Cross-Platform**: Funciona nativamente em macOS, Windows e Linux
+- **Atualiza sozinho**: fora das lojas, com pacote assinado e conferido antes de instalar
+
+## ⬇️ Baixar
+
+**https://recordarfotos.com.br/vintageLightbox** — macOS (Intel e Apple Silicon), Windows e Linux.
+
+O app **não passa pela App Store nem pela Microsoft Store**: ele é baixado dali e, a partir da
+primeira instalação, **se atualiza sozinho** — cada atualização é conferida por assinatura antes de
+ser instalada.
+
+> ⚠️ **No macOS**, na primeira abertura clique com o botão direito no aplicativo e escolha *Abrir*.
+> O aviso do Gatekeeper aparece porque ele não é distribuído pela loja.
+
+### Para gerar os instaladores
+
+Sem CI: cada plataforma é gerada na máquina que consegue gerá-la **e conferi-la**.
+
+```bash
+make            # lista tudo
+make mac        # .app + .dmg universal (Intel e Apple Silicon)
+make linux      # .deb + .AppImage, num contêiner Docker
+make publicar   # sobe para recordarfotos.com.br/vintageLightbox
+```
+
+O **Windows tem script próprio**, e roda numa máquina Windows:
+
+```powershell
+.\scripts\empacotar.ps1 -Conferir    # diz o que falta instalar
+.\scripts\empacotar.ps1              # gera o .msi e o .exe
+```
+
+⚠️ **Cross-compilar o Windows a partir do Mac funciona — e foi recusado.** O
+`cargo-xwin` chegou a gerar um `.exe` válido em 7/set/2026, ao custo de bifurcar
+o `gpui` e o `rsraw-sys` e de entregar um binário que ninguém no Mac consegue
+abrir para conferir. A decisão foi manter tudo nativo. O registro completo está
+em [`empacotamento/README.md`](empacotamento/README.md) — leia antes de tentar de
+novo.
 
 ## 📖 Para Começar
 

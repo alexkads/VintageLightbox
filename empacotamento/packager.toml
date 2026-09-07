@@ -4,10 +4,10 @@
 #    `cargo-packager` faz `set_current_dir` para a pasta do `-c` antes de
 #    trabalhar. Quem escrever `target/release/...` aqui não acha nada.
 #
-# Quem chama isto é `scripts/empacotar.sh`, que compila o binário, aponta
-# `--binaries-dir` para onde ele saiu e escolhe os formatos por alvo. Rodar
+# Quem chama isto é `scripts/empacotar.sh`, que compila o binário, o copia para
+# `binaries-dir` (abaixo) e escolhe os formatos por alvo. Rodar
 # `cargo packager -c empacotamento/packager.toml` na mão também funciona, desde
-# que o binário já exista.
+# que o binário já esteja lá.
 #
 # ⚠️ `version` é conferida contra o `Cargo.toml` do workspace pelo script, que
 #    aborta se as duas divergirem. Um instalador com a versão errada dentro é o
@@ -36,8 +36,9 @@ category = "Photography"
 
 out-dir = "../dist"
 
-# O nome do executável, não o caminho: `--binaries-dir` diz onde procurá-lo, e é
-# isso que permite a mesma configuração servir `aarch64`, `x86_64` e o universal.
+# O nome do executável, não o caminho: `binaries-dir` abaixo diz onde procurá-lo,
+# e é isso que permite a mesma configuração servir `aarch64`, `x86_64` e o
+# universal.
 #
 # ⚠️ Em linha, e não como `[[binaries]]`: num TOML tudo que vem depois de uma
 #    tabela pertence a ela, e `icons` logo abaixo viraria campo de `binaries`.
@@ -94,6 +95,11 @@ languages = ["pt-BR", "en-US"]
 
 # ─────────────────────────────── Linux ───────────────────────────────
 [deb]
+# ⚠️ **Sem isto o pacote sai como `ui-gpui_0.1.0_amd64.deb`.** O cargo-packager
+#    nomeia o `.deb` pelo **binário**, e não pelo `name` lá de cima — foi o que
+#    apareceu na primeira geração, em 7/set/2026. Minúsculo porque é a convenção
+#    do Debian para nome de pacote.
+package-name = "vintagelightbox"
 section = "graphics"
 priority = "optional"
 # O que o GPUI abre com `dlopen` e o `.deb` não carrega sozinho: X11/Wayland,

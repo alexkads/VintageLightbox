@@ -1,15 +1,22 @@
 #!/usr/bin/env bash
 #
-# O gerador de instaladores — um comando, os quatro alvos, tudo nesta máquina.
+# O gerador de instaladores do **macOS e do Linux**. O Windows é outro script.
 #
 #   ./scripts/empacotar.sh mac-arm        → .app + .dmg (Apple Silicon)
 #   ./scripts/empacotar.sh mac-intel      → .app + .dmg (Intel)
 #   ./scripts/empacotar.sh mac-universal  → .app + .dmg (as duas arquiteturas num binário)
 #   ./scripts/empacotar.sh linux          → .deb + .AppImage (x86_64, via Docker)
-#   ./scripts/empacotar.sh windows        → .msi + .exe  (exige Windows — leia a mensagem)
-#   ./scripts/empacotar.sh tudo           → o que esta máquina consegue
+#   ./scripts/empacotar.sh linux-arm      → .deb + .AppImage (aarch64, via Docker)
+#   ./scripts/empacotar.sh tudo           → mac-universal + linux
+#
+# 🔑 **O Windows tem script próprio: `scripts/empacotar.ps1`**, e roda num
+#    Windows de verdade. Não é divisão por gosto nem falta de saída: a
+#    cross-compilação **funciona** (provada em 7/set/2026 com `cargo-xwin`) e foi
+#    **recusada** — decisão do dono, *"quero deixar tudo nativo mesmo"*. O
+#    registro do que ela custava está em `empacotamento/README.md`.
 #
 # Opções:
+#   --publicar    sobe o resultado para recordarfotos.com.br/vintageLightbox
 #   --assinar     assina e notariza o macOS (exige Developer ID + credenciais)
 #   --limpo       apaga dist/ antes
 #   --seco        mostra o que faria, sem compilar nada
@@ -26,14 +33,26 @@ DIST="$RAIZ/dist"
 CRATE="ui-gpui"
 BIN="ui-gpui"
 
-ASSINAR=0; LIMPO=0; SECO=0; ALVOS=()
+# 🔑 A chave que **assina a atualização** — minisign (ed25519), e nada a ver com
+#    a Apple ou a Microsoft. É ela que faz o app instalado recusar um pacote que
+#    não saiu daqui: sem essa assinatura, quem controlasse o link de download
+#    controlaria o que roda na máquina do fotógrafo.
+#
+# ⚠️ Fica **fora do repositório**, em ~/.vintagelightbox/. A pública está em
+#    `empacotamento/chave-publica.txt` e é compilada dentro do app. Perder a
+#    privada significa que nenhum app já instalado aceita atualização de novo —
+#    guarde uma cópia em lugar seguro.
+CHAVE="${VLB_CHAVE_ATUALIZACAO:-$HOME/.vintagelightbox/atualizacao.key}"
+
+ASSINAR=0; LIMPO=0; SECO=0; PUBLICAR=0; ALVOS=()
 
 for arg in "$@"; do
   case "$arg" in
+    --publicar) PUBLICAR=1 ;;
     --assinar) ASSINAR=1 ;;
     --limpo)   LIMPO=1 ;;
     --seco)    SECO=1 ;;
-    -h|--help) sed -n '2,26p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,32p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*)        echo "❌ opção desconhecida: $arg"; exit 1 ;;
     *)         ALVOS+=("$arg") ;;
   esac
@@ -123,18 +142,58 @@ empacotar() {          # empacotar <pasta-do-binário> <triple> <subpasta-dist> 
   # ⚠️ `--formats` recebe **um valor por vez**: `--formats app dmg` faz o clap
   #    ler "dmg" como subcomando e morrer com "unrecognized subcommand".
   local flags=(); for f in "$@"; do flags+=(--formats "$f"); done
+  # 🔑 `-k` faz duas coisas de uma vez, e as duas são necessárias para o
+  #    autoupdate: assina cada pacote (o `.sig` que o app confere antes de
+  #    instalar) e, quando a saída é uma **pasta** — o `.app` do macOS —, cria o
+  #    `VintageLightbox.app.tar.gz` que é o formato que o updater sabe aplicar.
+  #    Sem a chave sai instalador, mas não sai atualização.
+  local assinatura=()
+  if [[ -f "$CHAVE" ]]; then
+    # 🚨 `--password` **sempre**, mesmo vazio. Sem ele o minisign pede a senha
+    #    no terminal, e num shell não interativo a leitura de `/dev/tty` falha
+    #    com `Device not configured (os error 6)` — que é o que se vê no lugar
+    #    de "faltou a senha". O efeito é pior que um erro: os pacotes saem, e é
+    #    só o `.sig` que não sai. Instalador pronto, atualização morta.
+    assinatura=(-k "$CHAVE" --password "${VLB_SENHA_DA_CHAVE:-}")
+  else
+    aviso "sem chave de atualização em $CHAVE — os pacotes saem sem .sig,"
+    echo  "     e nenhum app instalado vai aceitar esta versão como atualização."
+    echo  "     Gere uma com: cargo packager signer generate --path \"$CHAVE\""
+  fi
+
   # `--target` aqui não escolhe compilador nenhum (o binário já existe): é o que
   # põe a arquitetura no nome do arquivo — `_aarch64.dmg`, `_universal.dmg`.
   diga "empacotando → dist/$saida"
-  correr cargo packager -c "$CONFIG" --target "$triple" -o "$DIST/$saida" "${flags[@]}"
+  correr cargo packager -c "$CONFIG" --target "$triple" -o "$DIST/$saida" \
+    "${flags[@]}" ${assinatura[@]+"${assinatura[@]}"}
 }
 
 # ── macOS ────────────────────────────────────────────────────────────────────
+#
+# 🚨 **Desmontar o que ficou de uma tentativa anterior, antes de tentar de novo.**
+#
+# Montar o .dmg é a última etapa, e ela falha por fora do nosso controle: o
+# Spotlight indexa o volume recém-montado e o `hdiutil detach` responde
+# *Resource busy*. Quando isso acontece o volume **fica montado** — e a próxima
+# tentativa não falha pelo mesmo motivo, falha por já existir
+# `/Volumes/VintageLightbox`, que é um erro que não aponta para a causa.
+#
+# Aconteceu na primeira geração deste projeto (7/set/2026) e custou uma rodada
+# inteira de compilação para ser entendido.
+desmontar_restos() {
+  local volume="/Volumes/VintageLightbox"
+  if [[ -d "$volume" ]]; then
+    aviso "sobrou $volume de uma tentativa anterior — desmontando"
+    correr hdiutil detach "$volume" -force >/dev/null 2>&1 || true
+  fi
+}
+
 mac() {                # mac <triple> <subpasta>
   local triple="$1" saida="$2"
   [[ "$(uname -s)" == "Darwin" ]] || { erro "'$saida' só se gera no macOS."; return 1; }
   rustup target list --installed | grep -qx "$triple" || correr rustup target add "$triple"
   compilar "$triple"
+  desmontar_restos
   empacotar "$RAIZ/target/$triple/release" "$triple" "$saida" app dmg
 }
 
@@ -155,10 +214,40 @@ mac_universal() {
     "$RAIZ/target/x86_64-apple-darwin/release/$BIN" \
     -output "$uni/$BIN"
   [[ $SECO -eq 0 ]] && lipo -info "$uni/$BIN" | sed 's/^/   /'
+  desmontar_restos
   empacotar "$uni" "universal-apple-darwin" "macos-universal" app dmg
 }
 
 # ── Linux, via Docker ────────────────────────────────────────────────────────
+#
+# 🚨 **`--bin ui-gpui` e `--jobs 2`, e os dois por causa de memória.**
+#
+# O `-p ui-gpui` sozinho compila **cinco** binários: o app e os quatro de
+# medição (`medir-*`, `semear-catalogo`). Com `lto = true` e `codegen-units = 1`
+# cada um deles linka o programa inteiro — e quatro `rustc` em paralelo numa VM
+# de 7,7 GiB estouram a memória. Em 7/set/2026 o build morreu com
+# `signal: 9, SIGKILL` compilando `medir-grade-da-sessao`, que **o instalador
+# não usa**.
+#
+# ⚠️ O sintoma não aponta para a causa: `SIGKILL` parece defeito do compilador,
+#    e o binário citado na mensagem é de uma ferramenta que ninguém pediu.
+#
+# A chave de atualização mora no `$HOME` do Mac, e o contêiner não enxerga o
+# `$HOME` do Mac: ela entra por bind mount, somente leitura.
+#
+# ⚠️ **A decisão de assinar é tomada aqui, no host, e não dentro do contêiner.**
+#    O comando do contêiner vai numa string entre aspas duplas, então tudo que
+#    parece variável dele é expandido **aqui** antes de o docker rodar. Um
+#    `${VLB_CHAVE:+…}` escrito lá dentro leria a variável do Mac, que não
+#    existe, e sumiria em silêncio — levando junto o `-k` e, com ele, a
+#    atualização automática do Linux.
+CHAVE_MONTADA=()
+FLAG_CHAVE=""
+if [[ -f "$CHAVE" ]]; then
+  CHAVE_MONTADA=(-v "$CHAVE:/chave.key:ro")
+  FLAG_CHAVE="-k /chave.key --password '${VLB_SENHA_DA_CHAVE:-}'"
+fi
+
 linux() {
   command -v docker >/dev/null || { erro "'linux' precisa do Docker — https://docker.com"; return 1; }
   docker info >/dev/null 2>&1 || { erro "o Docker está instalado mas não está no ar."; return 1; }
@@ -178,13 +267,15 @@ linux() {
   correr docker run --rm --platform linux/amd64 \
     -v "$RAIZ:/projeto" \
     -v vintagelightbox-cargo:/root/.cargo/registry \
+    ${CHAVE_MONTADA[@]+"${CHAVE_MONTADA[@]}"} \
     -e CARGO_TARGET_DIR=/projeto/target/linux-x86_64 \
     -w /projeto vintagelightbox-linux \
-    bash -c "cargo build --release -p $CRATE && \
+    bash -c "cargo build --release -p $CRATE --bin $BIN --jobs 2 && \
              mkdir -p /projeto/target/empacotamento && \
              cp /projeto/target/linux-x86_64/release/$BIN /projeto/target/empacotamento/ && \
              cargo packager -c empacotamento/packager.toml --target x86_64-unknown-linux-gnu \
-               -o /projeto/dist/linux-x86_64 --formats deb --formats appimage"
+               -o /projeto/dist/linux-x86_64 --formats deb --formats appimage \
+               $FLAG_CHAVE"
 }
 
 linux_arm() {
@@ -196,46 +287,53 @@ linux_arm() {
   correr docker run --rm --platform linux/arm64 \
     -v "$RAIZ:/projeto" \
     -v vintagelightbox-cargo-arm64:/root/.cargo/registry \
+    ${CHAVE_MONTADA[@]+"${CHAVE_MONTADA[@]}"} \
     -e CARGO_TARGET_DIR=/projeto/target/linux-aarch64 \
     -w /projeto vintagelightbox-linux-arm64 \
-    bash -c "cargo build --release -p $CRATE && \
+    bash -c "cargo build --release -p $CRATE --bin $BIN --jobs 2 && \
              mkdir -p /projeto/target/empacotamento && \
              cp /projeto/target/linux-aarch64/release/$BIN /projeto/target/empacotamento/ && \
              cargo packager -c empacotamento/packager.toml --target aarch64-unknown-linux-gnu \
-               -o /projeto/dist/linux-aarch64 --formats deb --formats appimage"
+               -o /projeto/dist/linux-aarch64 --formats deb --formats appimage \
+               $FLAG_CHAVE"
 }
 
-# ── Windows ──────────────────────────────────────────────────────────────────
+# ── Windows: não é aqui ──────────────────────────────────────────────────────
+#
+# Este script gera macOS e Linux. O Windows é `scripts/empacotar.ps1`, e roda
+# numa máquina Windows — VM neste Mac ou qualquer PC.
+#
+# 🚨 **Cross-compilação funciona, e foi recusada.** Não é falta de tentativa nem
+#    falta de saída — é decisão do dono, 7/set/2026: *"quero deixar tudo nativo
+#    mesmo"*.
+#
+#      mingw-w64 + windows-gnu       → falha em `shaders_bytes.rs`
+#      cargo-zigbuild + zig          → o mesmo erro, byte por byte
+#      cross-rs …-windows-msvc       → a imagem nem existe
+#      cargo-xwin + LLVM + 2 remendos → ✅ **gerou um .exe de 34,9 MB**
+#
+#    O que o caminho que deu certo custava: bifurcar o `gpui` (o framework da
+#    interface inteira) e o `rsraw-sys`, e entregar por um caminho de shader que
+#    o upstream só usa em desenvolvimento. E, o que decide, **nada disso se
+#    confere aqui**: o .exe saiu e ninguém neste Mac consegue abri-lo.
+#
+#    Uma máquina Windows resolve as três coisas de uma vez, e o build é
+#    conferido onde foi gerado. `empacotamento/README.md` tem o registro inteiro.
 windows() {
-  if [[ "$(uname -s)" == MINGW* || "$(uname -s)" == MSYS* || "$(uname -s)" == CYGWIN* ]]; then
-    compilar x86_64-pc-windows-msvc
-    empacotar "$RAIZ/target/x86_64-pc-windows-msvc/release" x86_64-pc-windows-msvc \
-      "windows-x86_64" wix nsis
-    return
-  fi
-  erro "o instalador do Windows não se gera no macOS — e não é falta de ferramenta."
+  erro "o Windows não sai deste script — use scripts/empacotar.ps1, numa máquina Windows."
   cat <<'MOTIVO'
 
-   Dois impedimentos, os dois no código de terceiros:
+   Lá dentro, um comando:
 
-   1. gpui 0.2.2 — o build.rs compila os shaders HLSL dentro de
-      `#[cfg(target_os = "windows")]`, que num build script é a máquina que
-      **compila**, não a que **roda**. Cruzando do macOS esse trecho nunca
-      executa, e o binário sai sem shader nenhum.
-      (~/.cargo/registry/src/*/gpui-0.2.2/build.rs, linhas 24-27)
+       .\scripts\empacotar.ps1 -Conferir    # diz o que falta instalar
+       .\scripts\empacotar.ps1              # gera o .msi e o .exe
 
-   2. rsraw-sys 0.1 — o build.rs monta os ~200 .cpp do LibRaw e faz
-      `panic!("MSVC is not supported")` quando o compilador é o da Microsoft.
-      Sobraria o alvo `-gnu`, que o GPUI no Windows não sustenta.
+   Ele usa a MESMA empacotamento/packager.toml e a MESMA chave de assinatura —
+   copie ~/.vintagelightbox/atualizacao.key para %USERPROFILE%\.vintagelightbox\
+   na máquina Windows. Chave diferente faz todo Windows instalado recusar a
+   atualização, e o operador vê só "não consegui atualizar".
 
-   O caminho que funciona **nesta máquina**: uma VM Windows (UTM é gratuito,
-   Parallels e VMware Fusion também servem), com Rust + Visual Studio Build
-   Tools + WiX v3 dentro. O repositório se compartilha com a VM e roda-se lá:
-
-       ./scripts/empacotar.sh windows      # em Git Bash, dentro da VM
-
-   Este mesmo script e o mesmo empacotamento/packager.toml — ele detecta que
-   está no Windows e segue.
+   Depois traga dist\windows-x86_64\ de volta e rode ./scripts/publicar.py.
 MOTIVO
   return 1
 }
@@ -256,11 +354,14 @@ for alvo in "${ALVOS[@]}"; do
     mac-universal) mac_universal                          || FALHOU+=("$alvo") ;;
     linux)         linux                                  || FALHOU+=("$alvo") ;;
     linux-arm)     linux_arm                              || FALHOU+=("$alvo") ;;
-    windows)       windows                                || FALHOU+=("$alvo") ;;
+    windows)       windows; exit 1 ;;
     tudo)
+      # 🔑 `tudo` é **o que este script faz**: macOS e Linux. O Windows sai por
+      #    `empacotar.ps1`, e não entra aqui nem como falha — contá-lo como tal
+      #    faria `--publicar` nunca publicar daqui, que é o oposto de "tudo".
       mac_universal || FALHOU+=("mac-universal")
       linux         || FALHOU+=("linux")
-      windows       || FALHOU+=("windows")
+      aviso "o Windows sai por scripts/empacotar.ps1, numa máquina Windows"
       ;;
     *) erro "alvo desconhecido: $alvo"; exit 1 ;;
   esac
@@ -270,13 +371,29 @@ echo
 if [[ -d "$DIST" ]]; then
   diga "o que saiu em dist/"
   find "$DIST" -type f \( -name '*.dmg' -o -name '*.deb' -o -name '*.AppImage' \
-       -o -name '*.msi' -o -name '*.exe' \) -exec ls -lh {} \; \
+       -o -name '*.msi' -o -name '*.exe' -o -name '*.tar.gz' \) -exec ls -lh {} \; \
     | awk '{printf "   %-8s %s\n", $5, $NF}'
   find "$DIST" -maxdepth 2 -name '*.app' -exec echo "   (bundle) {}" \;
+  SIGS=$(find "$DIST" -name '*.sig' | wc -l | tr -d ' ')
+  echo "   $SIGS assinatura(s) de atualização (.sig)"
 fi
 
 if [[ ${#FALHOU[@]} -gt 0 ]]; then
   echo; aviso "não saíram: ${FALHOU[*]}"
+  # 🚨 Não publica pela metade. Um lançamento com o macOS dentro e o Windows
+  # fora vira `ultima.json` sem `windows-x86_64`, e todo Windows instalado passa
+  # a receber 204 — "nada novo" — para uma versão que existe. Publicar é ato
+  # separado justamente para poder ser refeito depois que o alvo que faltou sair.
+  [[ $PUBLICAR -eq 1 ]] && aviso "e por isso não publiquei — rode ./scripts/publicar.py quando estiver completo"
   exit 1
+fi
+
+if [[ $PUBLICAR -eq 1 ]]; then
+  diga "publicando em recordarfotos.com.br/vintageLightbox"
+  if [[ $SECO -eq 1 ]]; then
+    correr "$RAIZ/scripts/publicar.py" --seco
+  else
+    "$RAIZ/scripts/publicar.py"
+  fi
 fi
 ok "pronto"
