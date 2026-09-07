@@ -56,7 +56,7 @@ scripts/empacotar.sh                 scripts/publicar.py            o app instal
 |---|---|
 | `packager.toml` | **A configuração, única.** Nome, identificador, ícones, entitlements, dependências do `.deb`, geometria do `.dmg`, idiomas do instalador do Windows |
 | `chave-publica.txt` | A chave que **confere** a assinatura. É compilada dentro do app (`atualizacao/porta.rs`) |
-| `icones/icone.svg` | **A fonte do ícone.** Todo o resto é derivado por `scripts/gerar-icones.sh` |
+| `icones/icone-mestre.png` | **A fonte do ícone**, 1024×1024. O `.icns`, o `.ico`, os PNGs e o do site são derivados por `scripts/gerar-icones.sh` — nenhum se edita à mão |
 | `macos/entitlements.plist` | Os entitlements do Hardened Runtime, um por um com o motivo |
 | `linux/Dockerfile` | A toolchain Linux inteira, para o `.deb` e o `.AppImage` saírem daqui |
 
@@ -296,8 +296,11 @@ app instalado que o pacote é o mesmo que saiu daqui.
 
 ## Trocar o ícone
 
-Edite `icones/icone.svg` e rode `./scripts/gerar-icones.sh`. O `.icns` (10 medidas), o `.ico` (6) e
-os PNGs do Linux saem todos dele.
+Troque `icones/icone-mestre.png` (quadrado, mínimo 1024×1024) e rode `./scripts/gerar-icones.sh`. O
+`.icns` (10 medidas), o `.ico` (6), os PNGs do Linux e o do site saem todos dele.
+
+⚠️ O script **recusa** mestre não-quadrado ou menor que 1024: ampliar entrega um ícone borrado
+justamente no tamanho em que ele mais aparece.
 
 ## Subir a versão
 

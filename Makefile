@@ -150,7 +150,7 @@ endif
 
 # ──────────────────────────── Os instaladores ────────────────────────────────
 
-icones: ## Regera .icns, .ico e os PNGs a partir de empacotamento/icones/icone.svg
+icones: ## Regera .icns, .ico e os PNGs a partir do icone-mestre.png
 	./scripts/gerar-icones.sh
 
 # Um alvo por plataforma, e cada um recusa fora da sua. A recusa e imediata: ela
