@@ -1128,11 +1128,10 @@ impl Aplicativo {
 
     /// Atende os três botões da barra da Revelação que não são dela.
     ///
-    /// 🔑 **"Exportar JPEG" e "Publicar e sair" são os dois últimos botões do
-    /// editor do site** ("Baixar JPEG" e "Salvar na galeria e sair"). Lá eles
-    /// valem para a foto aberta; aqui abrem os mesmos modais que a barra do app
-    /// abre — com a diferença de que a foto aberta na Revelação **é** a seleção,
-    /// porque foi ela que trouxe o operador até aqui.
+    /// 🔑 **São os dois últimos botões do editor do site, com os nomes de lá**:
+    /// "Baixar JPEG" (aqui, "Exportar JPEG", porque no desktop ele escreve num
+    /// disco) e "Salvar na galeria e sair". Valem para a foto aberta, que na
+    /// Revelação **é** a seleção — foi ela que trouxe o operador até aqui.
     pub(crate) fn atender_a_revelacao(
         &mut self,
         pedido: PedidoDaRevelacao,
@@ -1142,7 +1141,7 @@ impl Aplicativo {
         match pedido {
             PedidoDaRevelacao::Sair => self.voltar_para_biblioteca(window, cx),
             PedidoDaRevelacao::Exportar => self.exportar(cx),
-            PedidoDaRevelacao::Publicar => self.salvar_na_galeria(window, cx),
+            PedidoDaRevelacao::SalvarNaGaleria => self.salvar_na_galeria(window, cx),
         }
     }
 

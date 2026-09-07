@@ -2918,18 +2918,19 @@ impl Revelacao {
 /// ⚠️ O nome é longo porque `Pedido` já é o da GPU
 /// ([`super::processador::Pedido`]), e os dois se cruzam neste arquivo.
 ///
-/// 🔑 **Ela não sabe exportar nem publicar, e não deve saber.** Exportar abre um
-/// modal com pasta de destino; publicar fala com o pós-venda do site. As duas
-/// coisas valem para a seleção inteira e moram na raiz — a Revelação só diz "o
-/// operador pediu isto daqui".
+/// 🔑 **Ela não sabe exportar nem falar com o site, e não deve saber.** Exportar
+/// abre um modal com pasta de destino; salvar na galeria baixa o original,
+/// revela e sobe. As duas moram na raiz — a Revelação só diz "o operador pediu
+/// isto daqui".
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PedidoDaRevelacao {
     /// O `X` da barra: fecha a Revelação e volta de onde se veio.
     Sair,
     /// "Baixar JPEG" do site.
     Exportar,
-    /// "Salvar na galeria e sair" do site.
-    Publicar,
+    /// "Salvar na galeria e sair" do site: o revelado entra no lugar do
+    /// original, na foto que já é da galeria aberta.
+    SalvarNaGaleria,
 }
 
 impl gpui::EventEmitter<PedidoDaRevelacao> for Revelacao {}
@@ -3151,13 +3152,13 @@ impl Revelacao {
                     })),
             )
             .child(
-                Button::new("revelacao-publicar")
-                    .label("Publicar e sair")
+                Button::new("revelacao-salvar-na-galeria")
+                    .label("Salvar na galeria e sair")
                     .xsmall()
                     .custom(tema::botao_quente(cx))
                     .disabled(!tem_foto)
                     .on_click(cx.listener(|_tela, _ev, _window, cx| {
-                        cx.emit(PedidoDaRevelacao::Publicar);
+                        cx.emit(PedidoDaRevelacao::SalvarNaGaleria);
                     })),
             )
             .into_any_element()

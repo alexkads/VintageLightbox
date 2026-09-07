@@ -595,7 +595,7 @@ fn da_lista_ao_revelar_dentro_da_sessao(cx: &mut TestAppContext) {
         .janela
         .update(cx, |app, window, cx| {
             app.atender_a_revelacao(
-                crate::revelacao::tela::PedidoDaRevelacao::Publicar,
+                crate::revelacao::tela::PedidoDaRevelacao::SalvarNaGaleria,
                 window,
                 cx,
             );

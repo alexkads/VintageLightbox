@@ -206,7 +206,7 @@ do app. No site o editor cobre a janela (`fixed inset-0`) e as três colunas sã
 |---|---|
 | ✅ **O dock saiu da Revelação** (`revelacao/paineis.rs`, apagado) | leiaute fixo: cabeçalho de 48px, predefinições 224px, foto, ajustes 320px, tira embaixo — as medidas do site |
 | ✅ **A barra do app some enquanto a Revelação está no ar** | é o que faz a tela ser a do site; o caminho de volta é o `✕` do cabeçalho, que faz o mesmo que o `Esc` |
-| ✅ **O cabeçalho é o do site, na mesma ordem** | `✕ ‹ › ▤` · posição e nome · selo do backend · `↶ ↷` · Antes · Enquadrar · Exportar JPEG · Publicar e sair |
+| ✅ **O cabeçalho é o do site, na mesma ordem** | `✕ ‹ › ▤` · posição e nome · selo do backend · `↶ ↷` · Antes · Enquadrar · Exportar JPEG · Salvar na galeria e sair |
 | ✅ **O `▤` esconde a coluna das predefinições** | como no site: ela some por inteiro, e não vira uma coluna vazia de 224px |
 | ✅ **Selo do backend** (`Motor::backend`) | o `WEBGPU` do site; aqui diz `METAL`. Responde "a GPU está mesmo sendo usada, e por qual caminho" — a pergunta que aparece toda vez que alguém acha o arrasto lento |
 | ✅ **Exportar e publicar viraram `PedidoDaRevelacao`** | a Revelação **pede** à raiz, que é quem tem o modal da pasta de destino e a conversa com o pós-venda |
