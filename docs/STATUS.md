@@ -1,14 +1,13 @@
 # Status do Projeto - VintageLightbox
 
 **Última atualização**: 7 de setembro de 2026
-**Último commit**: ver `git log -1` — os de 7/set com a Revelação alinhada ao editor do site
+**Último commit**: ver `git log -1` — os de 7/set com a distribuição e a atualização automática
 **Branch de trabalho**: `dev`, árvore limpa
-**Estado**: ✅ compila · **938 testes, 2 falhando** · `fmt` e `clippy -D warnings` limpos (nativo **e** `wasm32`) · o app sobe
+**Estado**: ✅ compila · **1.040 testes, 0 falhando** · `fmt` e `clippy -D warnings` limpos (nativo **e** `wasm32`) · o app sobe · **a 0.1.0 está no ar**
 
-> 🚨 **As duas que falham são anteriores a este trabalho** e não são da Revelação:
-> `app::testes::esc_sai_mesmo_da_revelacao` e
-> `app::testes::buscar_antes_de_revelar_nao_desliga_as_teclas` — as duas esperam voltar para
-> `Tela::Biblioteca` e recebem `Tela::Sessao`. Conferido em `34ee1f6`, com a árvore limpa.
+> ✅ **As duas que falhavam voltaram a passar.** `app::testes::esc_sai_mesmo_da_revelacao` e
+> `app::testes::buscar_antes_de_revelar_nao_desliga_as_teclas` esperavam `Tela::Biblioteca` e
+> recebiam `Tela::Sessao`; conferido passando em 7/set/2026, com a suíte inteira verde.
 
 > 🎯 **O objetivo do projeto mudou em 17/ago/2026** e está em
 > [`00-OBJETIVO.md`](00-OBJETIVO.md): substituir o Lightroom no fluxo do estúdio, para que a edição
@@ -81,6 +80,34 @@ Os quatro comandos documentados (`CLAUDE.md`, `README.md`,
 `--release` — **a armadilha estava no doc**, e foi corrigida em 6/set. Se voltar a
 acontecer, a causa não é o GPUI.
 
+## ✅ No ar desde 7/set/2026 — https://recordarfotos.com.br/vintageLightbox
+
+A **0.1.0 está publicada e funcionando**, conferida em produção:
+
+| | |
+|---|---|
+| A página | 200, com o `.dmg` universal de 24,6 MB |
+| O download | baixa do bucket público `vintagelightbox` no Supabase Storage |
+| A atualização | 200 para quem está em 0.0.9, 204 para quem já está em 0.1.0 |
+| O Windows | 204 — fica quieto enquanto não houver pacote dele |
+
+⏳ **Falta o Linux e o Windows no manifesto**, e os dois pelo mesmo motivo: precisam ser gerados nas
+máquinas deles. Numa máquina Linux, `make linux`; num Windows 11, `.\scripts\empacotar.ps1`. Depois
+traga o `dist/<plataforma>/` para o Mac e rode `make publicar` — o `ultima.json` é regerado a partir
+do que houver em `dist/`, então acrescentar plataforma é republicar.
+
+⚠️ **O `.dmg` não é assinado pela Apple** (decisão do dono). A primeira abertura exige botão direito
+→ Abrir, e a página avisa isso.
+
+🚨 **Dois defeitos só apareceram em produção**, e valem para o próximo trabalho no site:
+
+1. **O `redirects()` do Next casa sem diferenciar maiúsculas.** A regra `/vintagelightbox` pegava o
+   próprio destino `/vintageLightbox` — 307 apontando para si mesmo, laço infinito. Foi para o
+   `proxy.ts`, onde `===` distingue. Vale para **qualquer** rota futura com maiúscula no caminho.
+2. **O Supabase Storage responde 400 com `"statusCode":"404"` no corpo** quando o bucket não existe.
+   Um código no cabeçalho, outro no corpo: `scripts/publicar.py` agora cria e absorve o "já existe",
+   em vez de adivinhar qual dos dois vale.
+
 ## O que mudou em 7/set/2026 — o app passa a ser distribuído e a se atualizar sozinho
 
 O app existia e não tinha como chegar a ninguém: quem quisesse usá-lo compilava. Entrou a cadeia
@@ -110,35 +137,39 @@ atualizações; não conseguiria instalar nada.
 ⚠️ **Perder a chave privada quebra a atualização de todo app já instalado.** Não há conserto pelo
 software.
 
-### 🚫 O Windows sai de um Windows — por decisão, não por impossibilidade
+### 🚫 Uma máquina por plataforma — por decisão, não por impossibilidade
 
-**A cross-compilação foi testada, funcionou, e foi recusada.** Vale registrar as duas metades, porque
-só a segunda costuma sobreviver na memória.
+**As duas alternativas foram construídas, as duas funcionaram, e as duas foram recusadas.** Vale
+registrar as duas metades: só a segunda costuma sobreviver na memória, e alguém tenta de novo.
 
 | Tentativa | Resultado |
 |---|---|
 | `mingw-w64` + `windows-gnu` | ⛔ `couldn't read .../shaders_bytes.rs` |
 | `cargo-zigbuild` + zig 0.16 | ⛔ o mesmo erro, byte por byte |
 | `cross-rs …-windows-msvc` | ⛔ a imagem não existe (só a `-gnu`, que é Linux) |
-| **`cargo-xwin` + LLVM + 2 remendos** | ✅ **`ui-gpui.exe`, 34,9 MB, `PE32+ x86-64`, zero erros** |
+| **`cargo-xwin` + LLVM + 2 remendos** | ✅ **`ui-gpui.exe`, 34,9 MB, `PE32+ x86-64`** |
+| **contêiner Docker para o Linux** | ✅ **`.deb` de 17 MB, com o pacote nomeado certo** |
 
-O caminho que funcionou exigia: `brew install llvm`; remendar o `rsraw-sys` (tirar
+O Windows exigiu: `brew install llvm`; remendar o `rsraw-sys` (tirar
 `panic!("MSVC is not supported")`, `-pthread` → `-DLIBRAW_NODLL`); e remendar o `gpui 0.2.2` para
-compilar o HLSL **na abertura do app**, do fonte embutido, em vez de ler bytes que o `fxc.exe` gera
-em tempo de build.
+compilar o HLSL na abertura do app em vez de ler bytes do `fxc.exe`.
 
-🚨 **Recusado pelo dono em 7/set/2026** — *"quero deixar tudo nativo mesmo"*. As três razões que a
-própria tentativa expôs:
+🚨 **Recusadas pelo dono em 7/set/2026** — *"quero deixar tudo nativo mesmo"*. O motivo é o mesmo
+para as duas, e é o que decide:
 
-1. **Dois crates bifurcados para manter**, um deles o framework da interface inteira.
-2. **O caminho de shader remendado é o que o upstream usa só em desenvolvimento.** Entregar por ele
-   muda o renderizador — a peça de que tudo depende.
-3. **Nada disso se confere aqui.** O `.exe` saiu e ninguém neste Mac consegue abri-lo.
+> **O que sai de uma máquina que não é a de destino, ninguém abre para conferir.**
 
-O que ficou: `scripts/empacotar.ps1`, para rodar num Windows 11 de verdade. Ele confere cada
-pré-requisito (Rust, g++ do MinGW, `fxc.exe`), usa a mesma `packager.toml` e a mesma chave, e o build
-é conferido na máquina que o gerou. Tudo foi desinstalado depois do teste — não sobrou xwin, zig,
-mingw nem LLVM na máquina.
+Um contêiner compila Linux e não tem X11, Wayland nem GPU — ele não abre o app. Um `.exe` cruzado não
+roda no Mac. E, no caso do Windows, havia ainda dois crates bifurcados para manter, um deles o
+framework da interface inteira, entregando por um caminho de shader que o upstream só usa em
+desenvolvimento.
+
+**O que ficou**: `scripts/empacotar.sh` gera **só o sistema em que roda** (macOS ou Linux, nativo) e
+`scripts/empacotar.ps1` gera o Windows num Windows 11. Cada um confere os pré-requisitos e diz o
+comando que instala o que faltar. Publicar é sempre do Mac, onde está a `service_role`.
+
+Tudo o que os experimentos instalaram foi removido depois: sem xwin, zig, mingw, LLVM, nem imagem
+Docker.
 
 ### O que a faixa faz, e por que é faixa
 

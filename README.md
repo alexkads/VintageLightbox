@@ -193,26 +193,23 @@ ser instalada.
 
 Sem CI: cada plataforma é gerada na máquina que consegue gerá-la **e conferi-la**.
 
-```bash
-make            # lista tudo
-make mac        # .app + .dmg universal (Intel e Apple Silicon)
-make linux      # .deb + .AppImage, num contêiner Docker
-make publicar   # sobe para recordarfotos.com.br/vintageLightbox
-```
+| Onde você está | O comando |
+|---|---|
+| macOS | `make mac` → `.app` + `.dmg` universal |
+| Linux | `make linux` → `.deb` + `.AppImage` |
+| Windows 11 | `.\scripts\empacotar.ps1` → `.msi` + `.exe` |
 
-O **Windows tem script próprio**, e roda numa máquina Windows:
+`make publicar` sobe para o site, e roda **sempre do Mac** — é onde fica a chave do Storage.
 
-```powershell
-.\scripts\empacotar.ps1 -Conferir    # diz o que falta instalar
-.\scripts\empacotar.ps1              # gera o .msi e o .exe
-```
+⚠️ **Gerar de uma máquina para outra funciona — e foi recusado.** Em 7/set/2026
+o `cargo-xwin` gerou um `.exe` válido a partir do Mac, e um contêiner Docker
+gerou o `.deb`. As duas saíram de cena pelo mesmo motivo, e é o que decide: **o
+que sai de uma máquina que não é a de destino, ninguém abre para conferir** — um
+contêiner não tem X11 nem GPU, e um `.exe` não roda no Mac. Uma máquina de
+verdade gera **e** confere, e conferir é metade do trabalho num app gráfico.
 
-⚠️ **Cross-compilar o Windows a partir do Mac funciona — e foi recusado.** O
-`cargo-xwin` chegou a gerar um `.exe` válido em 7/set/2026, ao custo de bifurcar
-o `gpui` e o `rsraw-sys` e de entregar um binário que ninguém no Mac consegue
-abrir para conferir. A decisão foi manter tudo nativo. O registro completo está
-em [`empacotamento/README.md`](empacotamento/README.md) — leia antes de tentar de
-novo.
+O registro do que cada alternativa custava está em
+[`empacotamento/README.md`](empacotamento/README.md).
 
 ## 📖 Para Começar
 

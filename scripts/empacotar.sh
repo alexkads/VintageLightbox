@@ -1,19 +1,25 @@
 #!/usr/bin/env bash
 #
-# O gerador de instaladores do **macOS e do Linux**. O Windows é outro script.
+# O gerador de instaladores. **Ele gera só o sistema em que está rodando.**
 #
-#   ./scripts/empacotar.sh mac-arm        → .app + .dmg (Apple Silicon)
-#   ./scripts/empacotar.sh mac-intel      → .app + .dmg (Intel)
-#   ./scripts/empacotar.sh mac-universal  → .app + .dmg (as duas arquiteturas num binário)
-#   ./scripts/empacotar.sh linux          → .deb + .AppImage (x86_64, via Docker)
-#   ./scripts/empacotar.sh linux-arm      → .deb + .AppImage (aarch64, via Docker)
-#   ./scripts/empacotar.sh tudo           → mac-universal + linux
+#   no macOS:  ./scripts/empacotar.sh mac-universal  → .app + .dmg (Intel e ARM)
+#              ./scripts/empacotar.sh mac-arm        → só Apple Silicon
+#              ./scripts/empacotar.sh mac-intel      → só Intel
+#   no Linux:  ./scripts/empacotar.sh linux          → .deb + .AppImage
+#   no Windows: .\scripts\empacotar.ps1              → .msi + .exe
 #
-# 🔑 **O Windows tem script próprio: `scripts/empacotar.ps1`**, e roda num
-#    Windows de verdade. Não é divisão por gosto nem falta de saída: a
-#    cross-compilação **funciona** (provada em 7/set/2026 com `cargo-xwin`) e foi
-#    **recusada** — decisão do dono, *"quero deixar tudo nativo mesmo"*. O
-#    registro do que ela custava está em `empacotamento/README.md`.
+# 🔑 **Nativo em toda plataforma, e isso é desenho — decisão do dono,
+#    7/set/2026: *"quero deixar tudo nativo mesmo"*.**
+#
+#    Não é falta de saída. As duas alternativas foram construídas e funcionaram:
+#    o Windows por `cargo-xwin` (gerou um .exe de 34,9 MB) e o Linux por um
+#    contêiner Docker (gerou o .deb). As duas foram recusadas pelo mesmo motivo,
+#    e é o que decide: **o que sai delas ninguém abre para conferir.** Um
+#    contêiner compila Linux e não tem X11, Wayland nem GPU; um .exe cruzado não
+#    roda no Mac. Uma máquina de verdade gera **e** confere.
+#
+#    O registro do que cada alternativa custava está em
+#    `empacotamento/README.md` — leia antes de reconstruir qualquer uma delas.
 #
 # Opções:
 #   --publicar    sobe o resultado para recordarfotos.com.br/vintageLightbox
@@ -218,84 +224,110 @@ mac_universal() {
   empacotar "$uni" "universal-apple-darwin" "macos-universal" app dmg
 }
 
-# ── Linux, via Docker ────────────────────────────────────────────────────────
+# ── Linux, nativo ────────────────────────────────────────────────────────────
 #
-# 🚨 **`--bin ui-gpui` e `--jobs 2`, e os dois por causa de memória.**
+# 🔑 **Nativo, num Linux de verdade** — igual ao Windows. Decisão do dono,
+#    7/set/2026: cada alvo é gerado onde pode ser gerado **e conferido**.
 #
-# O `-p ui-gpui` sozinho compila **cinco** binários: o app e os quatro de
-# medição (`medir-*`, `semear-catalogo`). Com `lto = true` e `codegen-units = 1`
-# cada um deles linka o programa inteiro — e quatro `rustc` em paralelo numa VM
-# de 7,7 GiB estouram a memória. Em 7/set/2026 o build morreu com
-# `signal: 9, SIGKILL` compilando `medir-grade-da-sessao`, que **o instalador
-# não usa**.
+#    Antes isto rodava num contêiner Docker a partir do Mac, e funcionava. Saiu
+#    pelo mesmo motivo que a cross-compilação do Windows: o `.deb` que saía dali
+#    ninguém abria para ver se instala e roda. Um contêiner compila Linux; ele
+#    não tem X11, nem Wayland, nem GPU — não abre o app.
 #
-# ⚠️ O sintoma não aponta para a causa: `SIGKILL` parece defeito do compilador,
-#    e o binário citado na mensagem é de uma ferramenta que ninguém pediu.
+# O que a máquina Linux precisa ter, e o que cada coisa resolve. Em Debian ou
+# Ubuntu (22.04 ou mais novo):
 #
-# A chave de atualização mora no `$HOME` do Mac, e o contêiner não enxerga o
-# `$HOME` do Mac: ela entra por bind mount, somente leitura.
+#   build-essential pkg-config curl   o básico de compilar
+#   clang libclang-dev                🚨 o `rsraw-sys` gera as ligações do LibRaw
+#                                     com bindgen, que carrega a `libclang.so` em
+#                                     tempo de execução — sem ela o build morre
+#                                     com "Unable to find libclang", que não
+#                                     parece falta de pacote
+#   libx11-dev libxkbcommon-dev       o que o GPUI abre no Linux
+#   libxkbcommon-x11-dev libxcb1-dev
+#   libwayland-dev wayland-protocols
+#   libxcursor-dev libxrandr-dev libxi-dev
+#   libfontconfig1-dev libfreetype6-dev
+#   libasound2-dev libssl-dev libvulkan-dev
+#   libdbus-1-dev libsecret-1-dev     o chaveiro (Secret Service), que o `keyring` usa
+#   patchelf fuse libfuse2 appstream  🚨 o AppImage. O `linuxdeploy` usa o
+#   desktop-file-utils zsync           `patchelf` para consertar rpaths, e sem ele
+#                                      morre com "subprocess failed (exit code 2)"
+#                                      — mensagem que não cita o que faltou
 #
-# ⚠️ **A decisão de assinar é tomada aqui, no host, e não dentro do contêiner.**
-#    O comando do contêiner vai numa string entre aspas duplas, então tudo que
-#    parece variável dele é expandido **aqui** antes de o docker rodar. Um
-#    `${VLB_CHAVE:+…}` escrito lá dentro leria a variável do Mac, que não
-#    existe, e sumiria em silêncio — levando junto o `-k` e, com ele, a
-#    atualização automática do Linux.
-CHAVE_MONTADA=()
-FLAG_CHAVE=""
-if [[ -f "$CHAVE" ]]; then
-  CHAVE_MONTADA=(-v "$CHAVE:/chave.key:ro")
-  FLAG_CHAVE="-k /chave.key --password '${VLB_SENHA_DA_CHAVE:-}'"
-fi
-
-linux() {
-  command -v docker >/dev/null || { erro "'linux' precisa do Docker — https://docker.com"; return 1; }
-  docker info >/dev/null 2>&1 || { erro "o Docker está instalado mas não está no ar."; return 1; }
-
-  # ⚠️ `--platform linux/amd64` explícito nos dois comandos: num Mac ARM o Docker
-  #    escolhe arm64 por padrão, e o alvo aqui é o PC do fotógrafo. Sai por
-  #    emulação (lento) — mas sai certo. Para o ARM64 nativo, use `linux-arm`.
-  diga "construindo a imagem da toolchain Linux (a primeira vez demora)"
-  correr docker build --platform linux/amd64 \
-    -f "$RAIZ/empacotamento/linux/Dockerfile" -t vintagelightbox-linux "$RAIZ/empacotamento/linux"
-
-  # 🚨 `CARGO_TARGET_DIR` próprio, e não o `target/` do Mac. O repositório entra
-  #    no contêiner por bind mount, então os dois enxergam a **mesma** pasta — e
-  #    `target/release` de um Linux por cima de `target/release` de um macOS faz
-  #    o cargo recompilar tudo a cada troca, quando não deixa estado quebrado.
-  diga "compilando e empacotando dentro do contêiner (x86_64)"
-  correr docker run --rm --platform linux/amd64 \
-    -v "$RAIZ:/projeto" \
-    -v vintagelightbox-cargo:/root/.cargo/registry \
-    ${CHAVE_MONTADA[@]+"${CHAVE_MONTADA[@]}"} \
-    -e CARGO_TARGET_DIR=/projeto/target/linux-x86_64 \
-    -w /projeto vintagelightbox-linux \
-    bash -c "cargo build --release -p $CRATE --bin $BIN --jobs 2 && \
-             mkdir -p /projeto/target/empacotamento && \
-             cp /projeto/target/linux-x86_64/release/$BIN /projeto/target/empacotamento/ && \
-             cargo packager -c empacotamento/packager.toml --target x86_64-unknown-linux-gnu \
-               -o /projeto/dist/linux-x86_64 --formats deb --formats appimage \
-               $FLAG_CHAVE"
+# ⚠️ **A glibc da máquina que compila vira o piso do binário.** Compilar num
+#    Ubuntu 24.04 gera um `.deb` que não instala no 22.04. Use a distribuição
+#    mais **velha** que você pretende atender — 22.04 (glibc 2.35) cobre Ubuntu
+#    22.04+, Debian 12+ e Fedora 36+.
+conferir_linux() {
+  local faltam=()
+  command -v cc  >/dev/null || faltam+=("build-essential")
+  command -v clang >/dev/null || faltam+=("clang libclang-dev")
+  command -v patchelf >/dev/null || faltam+=("patchelf  (o AppImage morre sem ele, e sem dizer que foi ele)")
+  for lib in x11 xkbcommon wayland-client fontconfig vulkan openssl dbus-1; do
+    pkg-config --exists "$lib" 2>/dev/null || faltam+=("lib${lib}-dev")
+  done
+  if [[ ${#faltam[@]} -gt 0 ]]; then
+    erro "faltam ${#faltam[@]} pré-requisito(s) nesta máquina Linux:"
+    printf '     %s\n' "${faltam[@]}"
+    echo
+    echo "   Em Debian/Ubuntu, o pacotão que resolve tudo:"
+    echo "     sudo apt install build-essential pkg-config clang libclang-dev \\"
+    echo "       libx11-dev libxkbcommon-dev libxkbcommon-x11-dev libxcb1-dev \\"
+    echo "       libwayland-dev wayland-protocols libxcursor-dev libxrandr-dev libxi-dev \\"
+    echo "       libfontconfig1-dev libfreetype6-dev libasound2-dev libssl-dev \\"
+    echo "       libvulkan-dev libdbus-1-dev libsecret-1-dev \\"
+    echo "       patchelf fuse libfuse2 desktop-file-utils zsync appstream"
+    return 1
+  fi
+  return 0
 }
 
-linux_arm() {
-  command -v docker >/dev/null || { erro "'linux-arm' precisa do Docker."; return 1; }
-  diga "construindo a imagem da toolchain Linux (arm64)"
-  correr docker build --platform linux/arm64 -f "$RAIZ/empacotamento/linux/Dockerfile" \
-    -t vintagelightbox-linux-arm64 "$RAIZ/empacotamento/linux"
-  diga "compilando e empacotando dentro do contêiner (aarch64)"
-  correr docker run --rm --platform linux/arm64 \
-    -v "$RAIZ:/projeto" \
-    -v vintagelightbox-cargo-arm64:/root/.cargo/registry \
-    ${CHAVE_MONTADA[@]+"${CHAVE_MONTADA[@]}"} \
-    -e CARGO_TARGET_DIR=/projeto/target/linux-aarch64 \
-    -w /projeto vintagelightbox-linux-arm64 \
-    bash -c "cargo build --release -p $CRATE --bin $BIN --jobs 2 && \
-             mkdir -p /projeto/target/empacotamento && \
-             cp /projeto/target/linux-aarch64/release/$BIN /projeto/target/empacotamento/ && \
-             cargo packager -c empacotamento/packager.toml --target aarch64-unknown-linux-gnu \
-               -o /projeto/dist/linux-aarch64 --formats deb --formats appimage \
-               $FLAG_CHAVE"
+linux() {
+  if [[ "$(uname -s)" != "Linux" ]]; then
+    erro "o Linux não sai deste sistema — rode este mesmo script numa máquina Linux."
+    cat <<'MOTIVO'
+
+   Lá, o comando é o mesmo:
+
+       ./scripts/empacotar.sh linux      # .deb + .AppImage
+
+   Ele confere os pré-requisitos e diz o `apt install` que resolve o que faltar.
+
+   ⚠️ Copie ~/.vintagelightbox/atualizacao.key para a máquina Linux — tem de ser
+   a MESMA chave, senão todo Linux instalado recusa a atualização.
+
+   Depois traga dist/linux-*/ de volta e rode ./scripts/publicar.py.
+
+MOTIVO
+    return 1
+  fi
+
+  conferir_linux || return 1
+
+  local arco saida
+  arco="$(uname -m)"
+  case "$arco" in
+    x86_64)  saida="linux-x86_64";  triple="x86_64-unknown-linux-gnu" ;;
+    aarch64) saida="linux-aarch64"; triple="aarch64-unknown-linux-gnu" ;;
+    *) erro "arquitetura não prevista: $arco"; return 1 ;;
+  esac
+
+  # 🚨 `--bin ui-gpui`: o `-p ui-gpui` compila **cinco** binários (o app e os
+  #    quatro de medição), e com `lto = true` cada um linka o programa inteiro.
+  #    Numa máquina modesta isso estoura a memória e o `rustc` morre com
+  #    `SIGKILL` — o instalador não usa nenhum dos quatro.
+  diga "compilando $CRATE nativo ($arco)"
+  correr cargo build --release -p "$CRATE" --bin "$BIN" --manifest-path "$RAIZ/Cargo.toml"
+
+  # ⚠️ **Duas chamadas, e não uma com dois `--formats`.** O cargo-packager
+  #    aborta a execução inteira no primeiro formato que falha, e o AppImage é o
+  #    frágil dos dois (baixa o `linuxdeploy` da rede e monta um squashfs). Numa
+  #    chamada só, uma falha dele levava junto o `.deb` **e a assinatura de
+  #    ambos**, que só roda no fim.
+  empacotar "$RAIZ/target/release" "$triple" "$saida" deb
+  empacotar "$RAIZ/target/release" "$triple" "$saida" appimage \
+    || aviso "o AppImage não saiu; o .deb saiu e está assinado"
 }
 
 # ── Windows: não é aqui ──────────────────────────────────────────────────────
@@ -353,15 +385,17 @@ for alvo in "${ALVOS[@]}"; do
     mac-intel)     mac x86_64-apple-darwin  macos-x86_64 || FALHOU+=("$alvo") ;;
     mac-universal) mac_universal                          || FALHOU+=("$alvo") ;;
     linux)         linux                                  || FALHOU+=("$alvo") ;;
-    linux-arm)     linux_arm                              || FALHOU+=("$alvo") ;;
     windows)       windows; exit 1 ;;
+    # 🔑 `tudo` é **o que esta máquina gera**, e numa máquina isso é um sistema
+    #    só. Não existe "tudo" que atravesse plataforma — foi justamente o que
+    #    saiu de cena em 7/set/2026.
     tudo)
-      # 🔑 `tudo` é **o que este script faz**: macOS e Linux. O Windows sai por
-      #    `empacotar.ps1`, e não entra aqui nem como falha — contá-lo como tal
-      #    faria `--publicar` nunca publicar daqui, que é o oposto de "tudo".
-      mac_universal || FALHOU+=("mac-universal")
-      linux         || FALHOU+=("linux")
-      aviso "o Windows sai por scripts/empacotar.ps1, numa máquina Windows"
+      case "$(uname -s)" in
+        Darwin) mac_universal || FALHOU+=("mac-universal") ;;
+        Linux)  linux         || FALHOU+=("linux") ;;
+        *)      erro "sistema não previsto: $(uname -s)"; exit 1 ;;
+      esac
+      aviso "os outros sistemas saem nas máquinas deles — veja empacotamento/README.md"
       ;;
     *) erro "alvo desconhecido: $alvo"; exit 1 ;;
   esac

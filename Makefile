@@ -1,15 +1,15 @@
 # Atalhos do dia a dia. `make` sem argumento lista os alvos.
 #
-# 🔑 **O mesmo Makefile serve as três plataformas, e cada alvo só roda onde
-#    pode.** `make mac` e `make linux` saem do macOS; `make windows` sai de um
-#    Windows 11 de verdade.
+# 🔑 **O mesmo Makefile serve as três plataformas, e cada máquina gera a sua.**
+#    No macOS sai o macOS; no Linux, o Linux; no Windows, o Windows. Um alvo de
+#    outro sistema **recusa de imediato**, antes de compilar nada.
 #
-# ⚠️ **Não é falta de saída — a cross-compilação foi testada, funcionou, e foi
-#    recusada.** Em 7/set/2026 o `cargo-xwin` gerou um `.exe` de 34,9 MB a partir
-#    deste Mac; o custo eram dois crates bifurcados (um deles o framework da
-#    interface) e um binário que ninguém aqui consegue abrir para conferir.
-#    Decisão do dono: *"quero deixar tudo nativo mesmo"*. O registro completo
-#    está em `empacotamento/README.md` — leia antes de tentar de novo.
+# ⚠️ **Não é falta de saída — as duas alternativas foram construídas, e as duas
+#    funcionaram.** Em 7/set/2026 o `cargo-xwin` gerou um `.exe` de 34,9 MB
+#    deste Mac, e um contêiner Docker gerou o `.deb`. As duas foram recusadas
+#    pelo mesmo motivo, e é o que decide: **o que sai delas ninguém abre para
+#    conferir**. Decisão do dono: *"quero deixar tudo nativo mesmo"*. O registro
+#    está em `empacotamento/README.md` — leia antes de reconstruir qualquer uma.
 #
 # ⚠️ Num alvo que não pertence a este sistema, o Makefile **recusa e diz onde
 #    rodar** em vez de tentar e falhar no meio. Uma compilação de meia hora que
@@ -77,18 +77,26 @@ ajuda: ## Lista os alvos disponiveis
 	@echo   windows          Gera .msi + .exe - voce esta no Windows, este alvo roda
 	@echo   conferir-windows Diz o que falta instalar para gerar o Windows
 	@echo.
-	@echo   Este sistema e windows: aqui saem os instaladores do Windows.
-	@echo   O macOS e o Linux saem do Mac.
+	@echo   Este sistema e windows: aqui sai o instalador do Windows.
+	@echo   O macOS sai de um Mac; o Linux, de um Linux. Cada maquina gera a sua.
 
 else
 
 ajuda: ## Lista os alvos disponiveis
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | awk -F':.*?## ' '{printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
-	@printf "  \033[36m%-16s\033[0m %s\n" "windows" "Explica onde gerar o Windows (aqui nao da — leia o porque)"
-	@printf "  \033[36m%-16s\033[0m %s\n" "conferir-windows" "O mesmo: a conferencia de pre-requisitos e la"
+ifeq ($(SISTEMA),linux)
+	@printf "  \033[36m%-16s\033[0m %s\n" "linux" "Gera .deb + .AppImage — voce esta no Linux, este alvo roda"
+	@printf "  \033[36m%-16s\033[0m %s\n" "windows" "Explica onde gerar o Windows (nao e aqui)"
 	@echo ""
-	@echo "  Este sistema e \033[1m$(SISTEMA)\033[0m: aqui saem os instaladores do macOS e do Linux."
-	@echo "  O Windows sai num Windows 11 de verdade: \033[36mmake windows\033[0m la."
+	@echo "  Este sistema e \033[1m$(SISTEMA)\033[0m: \033[1maqui sai o instalador do Linux\033[0m."
+	@echo "  O macOS sai de um Mac; o Windows, de um Windows 11. Cada maquina gera a sua."
+else
+	@printf "  \033[36m%-16s\033[0m %s\n" "linux" "Explica onde gerar o Linux (nao e aqui)"
+	@printf "  \033[36m%-16s\033[0m %s\n" "windows" "Explica onde gerar o Windows (nao e aqui)"
+	@echo ""
+	@echo "  Este sistema e \033[1m$(SISTEMA)\033[0m: \033[1maqui saem os instaladores do macOS\033[0m."
+	@echo "  O Linux sai de um Linux; o Windows, de um Windows 11. Cada maquina gera a sua."
+endif
 
 endif
 
@@ -147,11 +155,14 @@ icones: ## Regera .icns, .ico e os PNGs a partir de empacotamento/icones/icone.s
 
 # Um alvo por plataforma, e cada um recusa fora da sua. A recusa e imediata: ela
 # vem antes de qualquer compilacao.
+# 🔑 Os alvos de outro sistema existem em toda plataforma para **responder**, e
+#    nao para tentar: quem procurar "linux" no Makefile do Mac precisa encontrar
+#    o caminho, e nao silencio nem meia hora de compilacao perdida.
 ifeq ($(SISTEMA),windows)
 
-mac mac-arm mac-intel linux linux-arm tudo:
-	@echo "\033[1;31mX\033[0m '$@' nao roda no Windows — ele sai do Mac."
-	@echo "   Aqui, o alvo e: \033[36mmake windows\033[0m"
+mac mac-arm mac-intel linux:
+	@echo X '$@' nao sai do Windows - cada maquina gera a sua.
+	@echo    Aqui o alvo e: make windows
 	@exit 1
 
 windows:
@@ -159,6 +170,23 @@ windows:
 
 conferir-windows:
 	$(PWSH) scripts\empacotar.ps1 -Conferir
+
+tudo: windows
+
+else ifeq ($(SISTEMA),linux)
+
+mac mac-arm mac-intel:
+	@printf "\033[1;31mX\033[0m '$@' nao sai do Linux — ele sai de um Mac.\n"
+	@printf "   Aqui o alvo e: \033[36mmake linux\033[0m\n"
+	@exit 1
+
+linux:
+	./scripts/empacotar.sh linux
+
+tudo: linux
+
+windows conferir-windows:
+	@./scripts/empacotar.sh windows || true
 
 else
 
@@ -171,22 +199,11 @@ mac-arm: ## .app + .dmg so para Apple Silicon
 mac-intel: ## .app + .dmg so para Intel
 	./scripts/empacotar.sh mac-intel
 
-linux: ## .deb + .AppImage x86_64, dentro de um conteiner Docker
-	./scripts/empacotar.sh linux
-
-linux-arm: ## .deb + .AppImage aarch64, dentro de um conteiner Docker
-	./scripts/empacotar.sh linux-arm
-
-tudo: ## mac-universal + linux (o que este sistema consegue)
+tudo: ## o que esta maquina gera — aqui, o macOS universal
 	./scripts/empacotar.sh tudo
 
-# 🔑 O alvo existe aqui para **responder**, e nao para tentar: quem procurar
-#    "windows" no Makefile precisa encontrar o caminho em vez de silencio.
-windows:
-	@./scripts/empacotar.sh windows || true
-
-conferir-windows:
-	@./scripts/empacotar.sh windows || true
+linux windows conferir-windows:
+	@./scripts/empacotar.sh $@ 2>/dev/null || ./scripts/empacotar.sh windows || true
 
 endif
 
@@ -214,7 +231,7 @@ publicar-seco: ## Mostra o que seria publicado, sem subir nada e sem tocar a red
 #    que e descartavel; `dist/` e os alvos de release ficam.
 ifeq ($(SISTEMA),windows)
 
-faxina: ## Apaga o cache de debug do cargo (o que mais engorda o disco)
+faxina:
 	@powershell -NoProfile -Command "'antes:  {0:N1} GiB em target\' -f ((Get-ChildItem target -Recurse -File -EA 0 | Measure-Object Length -Sum).Sum / 1GB)"
 	@powershell -NoProfile -Command "'target\debug\incremental','target\debug\deps','target\debug\build' | ForEach-Object { if (Test-Path $$_) { Remove-Item -Recurse -Force $$_ } }"
 	@powershell -NoProfile -Command "'depois: {0:N1} GiB em target\' -f ((Get-ChildItem target -Recurse -File -EA 0 | Measure-Object Length -Sum).Sum / 1GB)"

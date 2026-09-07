@@ -133,18 +133,32 @@ dele entra no manifesto, que é como o updater espera receber a assinatura.
 nada: um `ultima.json` sem `windows-x86_64` faz todo Windows instalado receber "nada novo" para uma
 versão que existe.
 
-## O que sai, alvo por alvo
+## Uma máquina por plataforma — e isso é o desenho
 
-| Alvo | Formatos | Onde compila | Estado |
-|---|---|---|---|
-| `mac-arm` | `.app`, `.dmg` | aqui, nativo | ✅ |
-| `mac-intel` | `.app`, `.dmg` | aqui, cruzando para x86_64 | ✅ |
-| `mac-universal` | `.app`, `.dmg` | aqui — as duas costuradas com `lipo` | ✅ **é o que se distribui** |
-| `linux` | `.deb`, `.AppImage` | contêiner Docker `linux/amd64` | ✅ |
-| `linux-arm` | `.deb`, `.AppImage` | contêiner Docker `linux/arm64` | ✅ |
-| `windows` | `.msi`, `.exe` | **numa máquina Windows**, por `scripts/empacotar.ps1` | ⚠️ veja abaixo |
+| Onde você está | O comando | O que sai |
+|---|---|---|
+| **macOS** | `make mac` | `.app` + `.dmg` universal (Intel e Apple Silicon) |
+| **Linux** | `make linux` | `.deb` + `.AppImage`, nativo |
+| **Windows 11** | `.\scripts\empacotar.ps1` | `.msi` + `.exe` |
 
-### Por que o Windows exige uma máquina Windows
+Um alvo de outro sistema **recusa de imediato** e diz onde rodar — antes de compilar nada.
+
+🚨 **Não é falta de saída: as duas alternativas foram construídas, e as duas funcionaram.** Em
+7/set/2026 o `cargo-xwin` gerou um `.exe` de 34,9 MB a partir do Mac, e um contêiner Docker gerou o
+`.deb`. As duas foram recusadas pelo dono — *"quero deixar tudo nativo mesmo"* — e o motivo é o
+mesmo nos dois casos, e é o que decide:
+
+> **O que sai de uma máquina que não é a de destino, ninguém abre para conferir.**
+
+Um contêiner compila Linux e não tem X11, Wayland nem GPU: ele não abre o app. Um `.exe` cruzado não
+roda no Mac. Uma máquina de verdade **gera e confere** — e conferir é metade do trabalho, porque o
+que se distribui aqui é um app gráfico, não uma biblioteca.
+
+⏳ **Publicar é sempre do Mac**, porque é lá que fica a `service_role` do Storage. Traga
+`dist/<plataforma>/` da máquina que gerou e rode `make publicar` — o `ultima.json` é regerado a
+partir do que houver em `dist/`, então acrescentar plataforma é republicar.
+
+### Por que o Windows exige uma máquina Windows### Por que o Windows exige uma máquina Windows
 
 O impedimento é um só, e é preciso: **o `fxc.exe`**.
 

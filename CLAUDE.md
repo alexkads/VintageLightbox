@@ -96,19 +96,21 @@ cargo clippy -p revelacao-web --target wasm32-unknown-unknown -- -D warnings
 scripts/construir-biblioteca.sh [caminho/do/frontend]
 cargo clippy -p biblioteca-web --target wasm32-unknown-unknown -- -D warnings
 
-# Os instaladores, e a publicação — fora das lojas
-./scripts/empacotar.sh mac-universal --publicar   # gera e sobe para o site
-./scripts/empacotar.sh linux                      # .deb + .AppImage, por Docker
-./scripts/publicar.py --seco                      # o que seria publicado
-# 🔑 **São dois scripts, um por plataforma, e isso é decisão de desenho**
-#    (dono, 7/set/2026): `empacotar.sh` faz macOS e Linux; `empacotar.ps1` faz
-#    Windows, numa máquina Windows de verdade. Cada alvo é gerado onde pode ser
-#    gerado **e conferido**.
+# Os instaladores — **cada máquina gera a sua**, e nada atravessa plataforma
+make mac                 # .app + .dmg universal (só no macOS)
+make linux               # .deb + .AppImage    (só num Linux)
+.\scripts\empacotar.ps1  # .msi + .exe         (só num Windows 11)
+make publicar            # sobe dist/ para o site — sempre do Mac, é onde está a chave
+# 🔑 **Uma máquina por plataforma, e isso é decisão de desenho** (dono,
+#    7/set/2026: *"quero deixar tudo nativo mesmo"*). O `empacotar.sh` gera **só
+#    o sistema em que ele roda**; um alvo de outro sistema recusa de imediato.
 #
-# 🚫 Cross-compilação para Windows **funciona e foi recusada**. O `cargo-xwin`
-#    gerou um `.exe` de 34,9 MB em 7/set/2026, ao custo de bifurcar o `gpui` e o
-#    `rsraw-sys` e de entregar um binário que ninguém aqui abre para conferir.
-#    Decisão do dono: tudo nativo. Não refazer — `empacotamento/README.md`.
+# 🚫 **As duas alternativas foram construídas, funcionaram, e foram recusadas**
+#    em 7/set/2026: o Windows por `cargo-xwin` (gerou um `.exe` de 34,9 MB) e o
+#    Linux por contêiner Docker (gerou o `.deb`). O motivo é o mesmo nos dois, e
+#    é o que decide: **o que sai de uma máquina que não é a de destino, ninguém
+#    abre para conferir** — um contêiner não tem X11 nem GPU; um `.exe` cruzado
+#    não roda no Mac. Não refazer: `empacotamento/README.md` tem o registro.
 
 # Check code (faster than build)
 cargo check --workspace
