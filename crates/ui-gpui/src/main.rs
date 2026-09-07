@@ -187,6 +187,10 @@ async fn main() {
                 )),
             )
         }),
+        // 🔑 O mesmo exportador da exportação e da impressão: é ele que revela
+        // o original quando o editor salva na galeria, e a foto do cliente não
+        // pode depender de qual dos caminhos a produziu.
+        Arc::new(infrastructure::ImageExporterImpl::new()),
         tokio::runtime::Handle::current(),
     ));
 

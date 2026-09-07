@@ -219,6 +219,34 @@ impl PublicarNoPosVendaUseCase {
             .map_err(|(nome, erro)| format!("{nome}: {erro}"))
     }
 
+    /// **Salvar na galeria**: o JPEG revelado entra no lugar do original.
+    ///
+    /// 🔑 É o botão do editor, e o caminho é o mesmo do site: um bilhete de uma
+    /// hora emitido para *esta* foto, e o envio por ele. A foto já é da galeria
+    /// — nada aqui cria galeria, escolhe produto ou pergunta pelo cliente, que
+    /// é o que o editor da web também não faz.
+    ///
+    /// ⚠️ **Os pixels vêm de fora, prontos.** Quem revela é a tela, com o mesmo
+    /// motor que desenhou o que o operador está vendo; revelar de novo aqui, do
+    /// arquivo, entregaria ao cliente uma imagem que ninguém conferiu.
+    pub async fn salvar_revelacao(
+        &self,
+        sessao: &Sessao,
+        foto_no_site: &str,
+        jpeg: Vec<u8>,
+        ajustes: serde_json::Value,
+    ) -> Result<(), String> {
+        let bilhete = self
+            .api
+            .bilhete_de_revelacao(sessao, foto_no_site)
+            .await
+            .map_err(|e| e.to_string())?;
+        self.api
+            .salvar_revelacao(&bilhete, jpeg, ajustes)
+            .await
+            .map_err(|e| e.to_string())
+    }
+
     /// Tira a foto do storage — o que zerar a classificação faz.
     ///
     /// 🚨 **O `None` local sai mesmo quando o site diz que não achou.** Um id que
@@ -375,6 +403,8 @@ mod tests {
         removidas: Mutex<Vec<String>>,
         /// Ids que o site responde `404` ao remover — alguém já os tirou de lá.
         some_do_site: Vec<String>,
+        /// `(bilhete, tamanho do JPEG, ajustes)` de cada revelação salva.
+        reveladas: Mutex<Vec<(String, usize, serde_json::Value)>>,
     }
 
     #[async_trait::async_trait]
@@ -463,6 +493,24 @@ mod tests {
             _: &str,
         ) -> DomainResult<domain::services::pos_venda::LinkDeAcesso> {
             unreachable!("o link é pedido pela tela, depois de publicar")
+        }
+        async fn original(&self, _: &Sessao, _: &str) -> DomainResult<Vec<u8>> {
+            unreachable!("quem baixa o original é a porta do app, que tem o motor de GPU")
+        }
+        async fn bilhete_de_revelacao(&self, _: &Sessao, foto_id: &str) -> DomainResult<String> {
+            Ok(format!("bilhete-de-{foto_id}"))
+        }
+        async fn salvar_revelacao(
+            &self,
+            bilhete: &str,
+            jpeg: Vec<u8>,
+            ajustes: serde_json::Value,
+        ) -> DomainResult<()> {
+            self.reveladas
+                .lock()
+                .unwrap()
+                .push((bilhete.to_string(), jpeg.len(), ajustes));
+            Ok(())
         }
     }
 
@@ -727,6 +775,36 @@ mod tests {
 
         caso.remover_do_site(&sessao(), &id).await.unwrap();
         assert!(api.removidas.lock().unwrap().is_empty());
+    }
+
+    /// 📸 **"Salvar na galeria e sair"**: o revelado entra no lugar do original.
+    ///
+    /// 🔑 O que este teste prende é que o caminho é o do site — bilhete emitido
+    /// para *aquela* foto, e o JPEG por ele — e que **nada mais acontece**: nem
+    /// galeria criada, nem catálogo lido, nem produto escolhido. Os dois mocks
+    /// vazios são a afirmação: se o caso de uso passar a tocar o repositório ou
+    /// o exportador, o `mockall` acusa aqui.
+    #[tokio::test]
+    async fn salvar_revelacao_sobe_o_jpeg_por_um_bilhete_daquela_foto() {
+        let api = Arc::new(ApiDeMentira::default());
+        let caso = PublicarNoPosVendaUseCase::new(
+            Arc::new(MockPhotoRepo::new()),
+            Arc::new(MockExportador::new()),
+            Arc::new(MockThumbnailGen::new()),
+            api.clone(),
+        );
+
+        let ajustes = serde_json::json!({ "exposure": 0.5, "corte_x": 0.1 });
+        caso.salvar_revelacao(&sessao(), "foto-do-site", vec![9; 42], ajustes.clone())
+            .await
+            .unwrap();
+
+        let reveladas = api.reveladas.lock().unwrap();
+        assert_eq!(
+            &*reveladas,
+            &[("bilhete-de-foto-do-site".to_string(), 42, ajustes)],
+            "o bilhete é o daquela foto, e os ajustes vão inteiros"
+        );
     }
 
     /// 📸 Classificar sobe a foto para a galeria que já está aberta.

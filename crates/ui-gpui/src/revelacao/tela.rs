@@ -1096,6 +1096,15 @@ impl Revelacao {
     }
 
     /// O corte gravado na foto, ou a foto inteira quando não há nenhum.
+    /// O enquadramento de agora, para quem vai revelar fora desta tela.
+    ///
+    /// 🔑 Vai junto com [`Self::ajustes`] ao salvar na galeria: revelar sem ele
+    /// mandaria ao cliente a foto inteira, com o horizonte torto que o operador
+    /// acabou de endireitar.
+    pub fn enquadramento(&self) -> CropSettings {
+        self.corte_atual()
+    }
+
     fn corte_atual(&self) -> CropSettings {
         CropSettings::new(
             self.corte.x.unwrap_or(0.0),

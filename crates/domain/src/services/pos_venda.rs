@@ -36,6 +36,7 @@
 //! testes do caso de uso rodam com um dublê desta trait.
 
 use async_trait::async_trait;
+use serde_json::Value;
 
 use crate::entities::Photo;
 use crate::DomainResult;
@@ -452,6 +453,40 @@ pub trait PosVendaApi: Send + Sync {
     /// para jogar fora antes do primeiro slider se mexer — a mesma decisão que a
     /// web tomou em `revelacao/fonte.ts`.
     async fn copia_de_trabalho(&self, sessao: &Sessao, foto_id: &str) -> DomainResult<Vec<u8>>;
+
+    /// Os bytes do **original** — o arquivo cheio que o cliente baixa.
+    ///
+    /// ⚠️ **Não é a cópia de trabalho.** Ela é 2048 px, e serve para os sliders
+    /// andarem; salvar a revelação a partir dela entregaria ao cliente uma foto
+    /// de 2048 px no lugar do original — uma perda que ninguém veria acontecer.
+    /// É a mesma separação que o editor do site faz entre `fonte` e
+    /// `baixarOriginal`.
+    async fn original(&self, sessao: &Sessao, foto_id: &str) -> DomainResult<Vec<u8>>;
+
+    /// O bilhete que autoriza **substituir o original** desta foto pelo revelado.
+    ///
+    /// 🔑 É a porta de saída do editor, e ela é a mesma do site: o painel emite
+    /// um bilhete de uma hora para a foto, e o envio do JPEG vai por ele. Vale
+    /// uma foto só, e o site recusa a que o cliente já comprou — ele pode ter
+    /// baixado o original.
+    async fn bilhete_de_revelacao(&self, sessao: &Sessao, foto_id: &str) -> DomainResult<String>;
+
+    /// Sobe o JPEG revelado no lugar do original, com o bilhete na mão.
+    ///
+    /// `ajustes` é o JSON **por nome** — os mesmos campos que o editor do site
+    /// grava, mais os `corte_*` do enquadramento. É o que faz a foto voltar a
+    /// abrir revelada, aqui e lá.
+    ///
+    /// ⚠️ **Sem sessão de propósito.** A rota é pública e o bilhete é a
+    /// credencial: é assim que o navegador do site sobe, e ter dois caminhos
+    /// para o mesmo envio seria a segunda resposta que diverge na primeira
+    /// mudança.
+    async fn salvar_revelacao(
+        &self,
+        bilhete: &str,
+        jpeg: Vec<u8>,
+        ajustes: Value,
+    ) -> DomainResult<()>;
 }
 
 #[cfg(test)]

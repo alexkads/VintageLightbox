@@ -10,6 +10,9 @@ use domain::services::pos_venda::{
     EstadoNoBalcao, Galeria, GaleriaAberta, GaleriaDoPainel, LinkDeAcesso, MudancaDaFoto,
     NovaGaleria, Produto, Sessao,
 };
+use domain::value_objects::CropSettings;
+use infrastructure::gpu_adjustments::Ajustes;
+use infrastructure::ImageExporterImpl;
 use use_cases::pos_venda::Progresso;
 
 /// O que a tela pede para publicar.
@@ -48,6 +51,8 @@ pub enum Recado {
         foto_id: String,
         bytes: Vec<u8>,
     },
+    /// O revelado entrou no lugar do original — "Salvar na galeria e sair".
+    RevelacaoSalva,
     /// O passo 3 terminou para uma foto: ela subiu, ou saiu do storage.
     ///
     /// 🔑 **Notifica, não descreve.** Quem escuta só precisa saber que o
@@ -125,6 +130,25 @@ pub trait Publicador: Send + Sync + 'static {
     fn abrir_galeria(&self, sessao: Sessao, galeria_id: String, canal: Sender<Recado>);
     /// A miniatura de uma foto da sessão, para a grade.
     fn miniatura(&self, sessao: Sessao, foto_id: String, canal: Sender<Recado>);
+    /// **Salvar na galeria**: o revelado entra no lugar do original.
+    ///
+    /// 🔑 É o botão do editor, e não uma publicação: a foto já é da galeria
+    /// aberta, e nada aqui cria galeria nem pergunta pelo cliente.
+    ///
+    /// 🚨 **O original é baixado e revelado aqui, e não na tela.** A tela tem a
+    /// cópia de trabalho de 2048 px — é dela que os sliders andam —, e subir
+    /// aquilo entregaria ao cliente uma foto de 2048 px no lugar do original.
+    /// É o mesmo caminho do `revelarIntegral` do site, e ele mora nesta porta
+    /// porque é aqui que existe tokio para a rede e o motor de GPU para revelar,
+    /// os dois fora da thread que desenha.
+    fn salvar_revelacao(
+        &self,
+        sessao: Sessao,
+        foto_no_site: String,
+        ajustes: Ajustes,
+        corte: CropSettings,
+        canal: Sender<Recado>,
+    );
     /// Manda ao cliente o e-mail "suas fotos estão prontas".
     fn avisar(&self, sessao: Sessao, galeria_id: String, canal: Sender<Recado>);
     /// O passo 11: os pixels da foto que só existe no storage.
@@ -142,13 +166,92 @@ pub trait Publicador: Send + Sync + 'static {
 
 pub struct PublicadorDaApi {
     controlador: Arc<PosVendaController>,
+    /// O mesmo motor da exportação e da impressão — um só, e não um por gesto.
+    /// Abrir um `Motor` custa um dispositivo wgpu; três caminhos com três
+    /// dispositivos dariam três respostas possíveis para a mesma foto.
+    exportador: Arc<ImageExporterImpl>,
     tokio: tokio::runtime::Handle,
 }
 
 impl PublicadorDaApi {
-    pub fn novo(controlador: Arc<PosVendaController>, tokio: tokio::runtime::Handle) -> Self {
-        Self { controlador, tokio }
+    pub fn novo(
+        controlador: Arc<PosVendaController>,
+        exportador: Arc<ImageExporterImpl>,
+        tokio: tokio::runtime::Handle,
+    ) -> Self {
+        Self {
+            controlador,
+            exportador,
+            tokio,
+        }
     }
+}
+
+/// A qualidade do JPEG que vai para a galeria.
+///
+/// 🔑 **92, o mesmo do editor do site** (`QUALIDADE` em `editor.tsx`). O que o
+/// cliente baixa não pode depender de por qual das duas telas a foto passou.
+const QUALIDADE: u8 = 92;
+
+/// Baixa o original, revela com o que está na tela e sobe no lugar dele.
+///
+/// ⚠️ **Revelar é síncrono e come CPU e GPU**, então ele corre num
+/// `spawn_blocking`: dentro de uma tarefa do tokio ele seguraria a thread do
+/// executor, e com ela toda a rede do app — inclusive o upload que vem logo
+/// depois.
+async fn revelar_e_salvar(
+    controlador: &PosVendaController,
+    exportador: &Arc<ImageExporterImpl>,
+    sessao: &Sessao,
+    foto_no_site: &str,
+    ajustes: Ajustes,
+    corte: CropSettings,
+) -> Result<(), String> {
+    let original = controlador.original(sessao, foto_no_site).await?;
+
+    let exportador = exportador.clone();
+    let para_revelar = corte.clone();
+    let jpeg = tokio::task::spawn_blocking(move || {
+        exportador.renderizar_bytes(&original, &ajustes, &para_revelar, QUALIDADE)
+    })
+    .await
+    .map_err(|e| format!("a revelação não terminou: {e}"))?
+    .map_err(|e| e.to_string())?;
+
+    controlador
+        .salvar_revelacao(
+            sessao,
+            foto_no_site,
+            jpeg,
+            ajustes_em_json(&ajustes, &corte),
+        )
+        .await
+}
+
+/// Os ajustes e o enquadramento como o site os grava: um objeto só, por nome.
+///
+/// 🔑 **O corte entra com o prefixo `corte_`**, que é o que `corteParaJson` do
+/// editor faz — e é assim que a web lê de volta. Um segundo formato aqui faria
+/// a foto revelada no app abrir sem enquadramento no navegador.
+fn ajustes_em_json(ajustes: &Ajustes, corte: &CropSettings) -> serde_json::Value {
+    let mut json = serde_json::to_value(ajustes).unwrap_or_else(|_| serde_json::json!({}));
+    if let Some(objeto) = json.as_object_mut() {
+        objeto.insert("corte_x".into(), corte.crop_x().into());
+        objeto.insert("corte_y".into(), corte.crop_y().into());
+        objeto.insert("corte_largura".into(), corte.crop_width().into());
+        objeto.insert("corte_altura".into(), corte.crop_height().into());
+        objeto.insert("corte_giro90".into(), corte.rotation_90().into());
+        objeto.insert("corte_angulo".into(), corte.angle().into());
+        objeto.insert(
+            "corte_espelho_h".into(),
+            i32::from(corte.flip_horizontal()).into(),
+        );
+        objeto.insert(
+            "corte_espelho_v".into(),
+            i32::from(corte.flip_vertical()).into(),
+        );
+    }
+    json
 }
 
 impl Publicador for PublicadorDaApi {
@@ -190,6 +293,34 @@ impl Publicador for PublicadorDaApi {
         self.tokio.spawn(async move {
             let recado = match controlador.produtos(&sessao).await {
                 Ok(produtos) => Recado::Produtos(produtos),
+                Err(erro) => Recado::Falhou(erro),
+            };
+            let _ = canal.send(recado);
+        });
+    }
+
+    fn salvar_revelacao(
+        &self,
+        sessao: Sessao,
+        foto_no_site: String,
+        ajustes: Ajustes,
+        corte: CropSettings,
+        canal: Sender<Recado>,
+    ) {
+        let controlador = self.controlador.clone();
+        let exportador = self.exportador.clone();
+        self.tokio.spawn(async move {
+            let recado = match revelar_e_salvar(
+                &controlador,
+                &exportador,
+                &sessao,
+                &foto_no_site,
+                ajustes,
+                corte,
+            )
+            .await
+            {
+                Ok(()) => Recado::RevelacaoSalva,
                 Err(erro) => Recado::Falhou(erro),
             };
             let _ = canal.send(recado);
@@ -422,6 +553,8 @@ pub mod mentira {
         pub fotos_da_sessao: Mutex<Vec<domain::services::pos_venda::FotoDaGaleria>>,
         /// `(galeria, caminho, ordem, estado)` de cada arquivo do disco enviado.
         pub arquivos_enviados: Mutex<Vec<(String, String, u32, EstadoNoBalcao)>>,
+        /// `(foto no site, ajustes, corte)` de cada revelação salva.
+        pub reveladas: Mutex<Vec<(String, Ajustes, CropSettings)>>,
         /// Segura as respostas em vez de mandá-las na hora — o que a rede faz.
         ///
         /// 🚨 **O `Default` responde no mesmo instante, e isso escondia um
@@ -487,6 +620,10 @@ pub mod mentira {
             self.estados_pedidos.lock().expect("os estados").clone()
         }
 
+        pub fn reveladas(&self) -> Vec<(String, Ajustes, CropSettings)> {
+            self.reveladas.lock().expect("as reveladas").clone()
+        }
+
         /// Manda o que `demorada` segurou — a rede respondendo, enfim.
         pub fn responder(&self) {
             for (canal, recado) in self.guardados.lock().expect("os guardados").drain(..) {
@@ -537,6 +674,21 @@ pub mod mentira {
 
         fn produtos(&self, _sessao: Sessao, canal: Sender<Recado>) {
             self.responder_ou_guardar(canal, Recado::Produtos(self.produtos.clone()));
+        }
+
+        fn salvar_revelacao(
+            &self,
+            _sessao: Sessao,
+            foto_no_site: String,
+            ajustes: Ajustes,
+            corte: CropSettings,
+            canal: Sender<Recado>,
+        ) {
+            self.reveladas
+                .lock()
+                .expect("as reveladas")
+                .push((foto_no_site, ajustes, corte));
+            self.responder_ou_guardar(canal, Recado::RevelacaoSalva);
         }
 
         fn link(&self, _sessao: Sessao, galeria_id: String, canal: Sender<Recado>) {

@@ -343,6 +343,7 @@ impl PosVenda {
                 // porque alguém compartilhou o canal por engano.
                 Recado::Galerias(_)
                 | Recado::Criada(_)
+                | Recado::RevelacaoSalva
                 | Recado::Sincronizou
                 | Recado::Pixels { .. }
                 | Recado::Aberta(_)

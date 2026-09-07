@@ -323,6 +323,16 @@ impl Detalhe {
         self.link.as_ref()
     }
 
+    /// Um recado da raiz para esta tela — o que aconteceu com o site.
+    ///
+    /// 🔑 Cai no mesmo lugar do erro porque é o mesmo lugar de olhar: a linha
+    /// do cabeçalho. Dois lugares para dizer "algo aconteceu" fariam o operador
+    /// aprender a ignorar um deles.
+    pub fn recado(&mut self, texto: String, cx: &mut Context<Self>) {
+        self.erro = Some(texto.into());
+        cx.notify();
+    }
+
     pub fn erro(&self) -> Option<&SharedString> {
         self.erro.as_ref()
     }

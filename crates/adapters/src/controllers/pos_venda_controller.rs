@@ -176,6 +176,28 @@ impl PosVendaController {
             .map_err(frase)
     }
 
+    /// O **original** — o arquivo cheio, e não a cópia de trabalho de 2048 px.
+    /// É dele que a revelação salva na galeria sai.
+    pub async fn original(&self, sessao: &Sessao, foto_id: &str) -> Result<Vec<u8>, String> {
+        self.api.original(sessao, foto_id).await.map_err(frase)
+    }
+
+    /// **Salvar na galeria**: o JPEG revelado entra no lugar do original.
+    ///
+    /// `foto_no_site` é o id **remoto** — o do storage, e não o do catálogo
+    /// local: quem está sendo substituída é a foto que o cliente vai baixar.
+    pub async fn salvar_revelacao(
+        &self,
+        sessao: &Sessao,
+        foto_no_site: &str,
+        jpeg: Vec<u8>,
+        ajustes: serde_json::Value,
+    ) -> Result<(), String> {
+        self.publicar
+            .salvar_revelacao(sessao, foto_no_site, jpeg, ajustes)
+            .await
+    }
+
     /// O link que entra sem senha, para mandar ao cliente.
     pub async fn link_da_galeria(
         &self,

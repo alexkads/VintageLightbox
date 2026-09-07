@@ -32,7 +32,7 @@
 use async_trait::async_trait;
 use domain::entities::Photo;
 use domain::services::ImageExporter;
-use domain::value_objects::{ExportOptions, FilePath, Watermark, WatermarkPosition};
+use domain::value_objects::{CropSettings, ExportOptions, FilePath, Watermark, WatermarkPosition};
 use domain::{DomainError, DomainResult};
 use image::DynamicImage;
 use std::path::Path;
@@ -77,6 +77,30 @@ impl ImageExporterImpl {
         let motor = Arc::new(Mutex::new(motor));
         *guarda = Some(motor.clone());
         Ok(motor)
+    }
+
+    /// Revela **bytes de imagem** — a foto que não está no catálogo desta máquina.
+    ///
+    /// 🔑 É o `revelarIntegral` do editor do site: o original chega inteiro, os
+    /// ajustes e o enquadramento vêm da tela, e o que sai é o JPEG que vai para
+    /// a galeria. Sem `Photo` porque não há: a foto do storage não é do
+    /// catálogo local, e forçá-la a virar uma entidade só para revelar criaria
+    /// um registro que ninguém pediu.
+    ///
+    /// A ordem é a de [`Self::renderizar`] — revelar inteiro, enquadrar depois.
+    pub fn renderizar_bytes(
+        &self,
+        bytes: &[u8],
+        ajustes: &Ajustes,
+        corte: &CropSettings,
+        qualidade: u8,
+    ) -> DomainResult<Vec<u8>> {
+        let imagem = image::load_from_memory(bytes)
+            .map_err(|e| DomainError::InfrastructureError(format!("o original não abriu: {e}")))?;
+        let revelada = self.revelar(&imagem, ajustes)?;
+        let saida = transformacao::aplicar(&revelada, corte, true);
+        revelacao_core::jpeg::codificar(&saida, qualidade)
+            .map_err(|e| DomainError::InfrastructureError(format!("o JPEG não saiu: {e}")))
     }
 
     /// Os 46 ajustes, no mesmo shader que desenha a Revelação.

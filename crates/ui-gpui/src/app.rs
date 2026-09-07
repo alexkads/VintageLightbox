@@ -1006,8 +1006,19 @@ impl Aplicativo {
                         }
                     }
                 }
+                // 🔑 O revelado entrou no lugar do original: a sessão relê,
+                // e é a releitura que troca a miniatura da grade pela foto
+                // revelada. Sem ela o operador salvaria e continuaria vendo o
+                // "antes" — o pior desfecho, porque parece que não salvou.
+                PosVendaRecado::RevelacaoSalva => {
+                    self.avisar_onde_esta_olhando("revelação salva na galeria".into(), cx);
+                    if let Some(galeria) = self.sessao_aberta.clone() {
+                        self.detalhe.update(cx, |tela, cx| tela.entrar(galeria, cx));
+                    }
+                    mudou = true;
+                }
                 PosVendaRecado::Falhou(erro) => {
-                    self.biblioteca.update(cx, |tela, cx| tela.avisar(erro, cx));
+                    self.avisar_onde_esta_olhando(erro, cx);
                 }
                 // Os outros recados são de quem os pediu: esta raiz só sincroniza.
                 _ => {}
@@ -1135,7 +1146,7 @@ impl Aplicativo {
     /// valem para a foto aberta; aqui abrem os mesmos modais que a barra do app
     /// abre — com a diferença de que a foto aberta na Revelação **é** a seleção,
     /// porque foi ela que trouxe o operador até aqui.
-    fn atender_a_revelacao(
+    pub(crate) fn atender_a_revelacao(
         &mut self,
         pedido: PedidoDaRevelacao,
         window: &mut Window,
@@ -1144,12 +1155,7 @@ impl Aplicativo {
         match pedido {
             PedidoDaRevelacao::Sair => self.voltar_para_biblioteca(window, cx),
             PedidoDaRevelacao::Exportar => self.exportar(cx),
-            PedidoDaRevelacao::Publicar => {
-                // Publicar **e sair**, como no site: quem publica terminou com
-                // esta foto. O modal fica por cima da tela de onde se veio.
-                self.voltar_para_biblioteca(window, cx);
-                self.publicar(cx);
-            }
+            PedidoDaRevelacao::Publicar => self.salvar_na_galeria(window, cx),
         }
     }
 
@@ -1399,6 +1405,88 @@ impl Aplicativo {
 
     pub fn exportando(&self) -> bool {
         self.exportando
+    }
+
+    /// **Salvar na galeria e sair** — o botão do editor, no fluxo do site.
+    ///
+    /// 🚨 **Não abre modal nenhum, e é essa a correção.** Até 7/set/2026 este
+    /// gesto abria "Publicar no pós-venda", que **cria galeria nova**: quem
+    /// entrava na revelação a partir de uma sessão levava na cara um formulário
+    /// pedindo título, e-mail e produto de uma galeria que já existia — com a
+    /// frase "nenhum produto no catálogo" por cima. A rota
+    /// `/dashboard/sessoes-fotograficas/{id}/revelacao` não tem esse popup: lá o
+    /// botão grava o revelado **na foto que já é da galeria**, e volta.
+    ///
+    /// # A foto que ainda não subiu
+    ///
+    /// Ela não vai para o site — é a mesma regra do editor da web
+    /// (`salvarNaAreaTemporaria`), e o motivo é do dono: foto sem classificação
+    /// indica que o cliente não gostou. O que este caminho faz é gravar os
+    /// ajustes; ela sobe já revelada quando ganhar nota.
+    ///
+    /// # Por que sai antes de o site responder
+    ///
+    /// Porque o que se perderia é nada: os ajustes já foram para o banco local,
+    /// e uma falha volta como aviso na tela da sessão — de onde o operador abre
+    /// a foto e salva de novo. Segurar o editor aberto por uma ida à rede de
+    /// segundos, no meio de uma revelação em série, custaria mais do que
+    /// protege.
+    pub fn salvar_na_galeria(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // 🚨 Logado, nada acontece fora de uma sessão — ver `pode_trabalhar`.
+        if !self.pode_trabalhar() {
+            return;
+        }
+
+        let Some(foto) = self
+            .revelacao
+            .read(cx)
+            .foto_aberta()
+            .map(|f| (f.id.clone(), f.pos_venda_foto_id.clone()))
+        else {
+            return;
+        };
+        let (ajustes, corte) = {
+            let revelacao = self.revelacao.read(cx);
+            (revelacao.ajustes(), revelacao.enquadramento())
+        };
+        let (_local, no_site) = foto;
+
+        // O que está pendente vai para o banco antes de sair — é o que
+        // `voltar_para_biblioteca` já faria, e aqui ele precisa vir **antes** do
+        // envio: os mesmos ajustes que sobem ficam gravados aqui.
+        self.voltar_para_biblioteca(window, cx);
+
+        let (Some(sessao), Some(no_site)) = (self.sessao().cloned(), no_site) else {
+            self.avisar_onde_esta_olhando(
+                "revelação guardada — ela sobe revelada quando a foto for classificada".into(),
+                cx,
+            );
+            return;
+        };
+
+        self.publicador.salvar_revelacao(
+            sessao,
+            no_site,
+            ajustes,
+            corte,
+            self.sincronias.0.clone(),
+        );
+        self.avisar_onde_esta_olhando("salvando a revelação na galeria…".into(), cx);
+        self.esperar_a_sincronia(cx);
+    }
+
+    /// Põe o aviso na tela que está na frente.
+    ///
+    /// 🔑 A Biblioteca sempre teve `avisar`, e ela era o único destino — mas
+    /// depois de salvar na galeria quem está olhando é a **sessão**, e o aviso
+    /// caía numa tela que ninguém estava vendo.
+    fn avisar_onde_esta_olhando(&mut self, texto: String, cx: &mut Context<Self>) {
+        match self.tela {
+            Tela::Sessao => self.detalhe.update(cx, |tela, cx| tela.recado(texto, cx)),
+            _ => self
+                .biblioteca
+                .update(cx, |tela, cx| tela.avisar(texto, cx)),
+        }
     }
 
     /// Abre o pós-venda para a seleção — ou para a grade, sem seleção — pela

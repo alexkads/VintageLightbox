@@ -10,6 +10,9 @@
 //! | `criar_galeria` | `POST /api/v2/pos-venda/galerias` → `201 { id, titulo, … }` |
 //! | `enviar_foto` | `POST /api/v2/pos-venda/galerias/{id}/fotos`, multipart `file` + `estado` + `ordem` |
 //! | `avisar_fotos_prontas` | `POST /api/v2/pos-venda/galerias/{id}/avisar` → `201` |
+//! | `original` | `GET /api/v2/pos-venda/fotos/{id}/original` — o arquivo cheio, não a cópia de trabalho |
+//! | `bilhete_de_revelacao` | `POST /api/v2/pos-venda/fotos/{id}/bilhete-de-revelacao` → o bilhete de uma hora |
+//! | `salvar_revelacao` | `POST /api/v2/public/pos-venda/revelacao/{bilhete}`, multipart `file` + `ajustes` (sem token) |
 //!
 //! ⚠️ **`native-tls`, e não `rustls`.** O `sqlx` deste crate já traz a pilha
 //! TLS do sistema; uma segunda pilha ao lado dela seria compilar duas vezes o
@@ -189,6 +192,14 @@ struct EnvelopeDeErro {
 #[derive(Deserialize)]
 struct CorpoDeErro {
     message: Option<String>,
+}
+
+/// A resposta do bilhete de revelação. O `caminho` e a validade vêm junto e não
+/// são lidos: quem monta a URL do envio é este cliente, e um caminho vindo do
+/// servidor seria uma segunda verdade sobre a mesma rota.
+#[derive(Deserialize)]
+struct BilheteDaApi {
+    bilhete: String,
 }
 
 fn rede(e: reqwest::Error) -> DomainError {
@@ -523,6 +534,56 @@ impl PosVendaApi for PosVendaApiHttp {
             &format!("/pos-venda/fotos/{foto_id}/copia-de-trabalho"),
         )
         .await
+    }
+
+    async fn original(&self, sessao: &Sessao, foto_id: &str) -> DomainResult<Vec<u8>> {
+        self.bytes_da_imagem(sessao, &format!("/pos-venda/fotos/{foto_id}/original"))
+            .await
+    }
+
+    async fn bilhete_de_revelacao(&self, sessao: &Sessao, foto_id: &str) -> DomainResult<String> {
+        let resposta = self
+            .client
+            .post(self.url(&format!("/pos-venda/fotos/{foto_id}/bilhete-de-revelacao")))
+            .bearer_auth(self.token(sessao).await?)
+            .json(&json!({}))
+            .send()
+            .await
+            .map_err(rede)?;
+
+        let bilhete: BilheteDaApi = ler(resposta).await?;
+        Ok(bilhete.bilhete)
+    }
+
+    async fn salvar_revelacao(
+        &self,
+        bilhete: &str,
+        jpeg: Vec<u8>,
+        ajustes: serde_json::Value,
+    ) -> DomainResult<()> {
+        let arquivo = reqwest::multipart::Part::bytes(jpeg)
+            .file_name("revelada.jpg")
+            .mime_str("image/jpeg")
+            .map_err(|e| DomainError::InfrastructureError(e.to_string()))?;
+        let form = reqwest::multipart::Form::new()
+            .text("ajustes", ajustes.to_string())
+            .part("file", arquivo);
+
+        // 🔑 **Sem `bearer_auth`**: a rota é pública e o bilhete é a credencial,
+        // como no navegador. Mandar o token junto não daria erro — daria um
+        // segundo caminho de autorização para a mesma rota.
+        let resposta = self
+            .client
+            .post(self.url(&format!("/public/pos-venda/revelacao/{bilhete}")))
+            .multipart(form)
+            .send()
+            .await
+            .map_err(rede)?;
+
+        if !resposta.status().is_success() {
+            return Err(recusa(resposta).await);
+        }
+        Ok(())
     }
 }
 

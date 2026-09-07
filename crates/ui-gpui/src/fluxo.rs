@@ -588,6 +588,41 @@ fn da_lista_ao_revelar_dentro_da_sessao(cx: &mut TestAppContext) {
         })
         .expect("a janela deve estar aberta");
     assert_eq!(estudio.publicador.baixadas(), vec!["remota-7".to_string()]);
+
+    // 6 · **"Salvar na galeria e sair"** — o último botão do editor.
+    //
+    // 🚨 **Aqui não aparece popup nenhum**, e é o pedido do dono (7/set/2026):
+    // *"você deve fazer o mesmo fluxo da rota /dashboard/sessoes-fotograficas, e
+    // esse popup não tem por lá"*. Até então este botão abria "Publicar no
+    // pós-venda" — o formulário de **criar galeria nova**, com título, e-mail e
+    // produto — para quem já estava dentro de uma galeria.
+    estudio
+        .janela
+        .update(cx, |app, window, cx| {
+            app.atender_a_revelacao(
+                crate::revelacao::tela::PedidoDaRevelacao::Publicar,
+                window,
+                cx,
+            );
+            assert!(
+                !app.publicando(),
+                "o gesto de salvar na galeria não abre modal de publicação"
+            );
+            assert_eq!(
+                app.tela(),
+                Tela::Sessao,
+                "e volta para a sessão, como no site"
+            );
+        })
+        .expect("a janela deve estar aberta");
+    cx.run_until_parked();
+
+    let reveladas = estudio.publicador.reveladas();
+    assert_eq!(reveladas.len(), 1, "uma revelação salva: {reveladas:?}");
+    assert_eq!(
+        reveladas[0].0, "remota-7",
+        "no lugar do original **daquela** foto, e não numa galeria nova"
+    );
 }
 
 /// 🚨 **Logado, nada acontece fora de uma sessão.**
