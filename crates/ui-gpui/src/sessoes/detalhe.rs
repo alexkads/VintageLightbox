@@ -163,6 +163,9 @@ pub struct Detalhe {
     zoom_slider: Entity<SliderState>,
     /// Se o aviso ao cliente está a caminho.
     avisando: bool,
+    /// Se o pedido do link está no ar — é o que mantém a colheita acordada até
+    /// ele voltar, e o que impede dois pedidos pelo mesmo botão.
+    pedindo_link: bool,
     /// Se a segunda tela — a do cliente — está aberta agora.
     ///
     /// 🔑 **O botão é um alternador, e um alternador tem de mostrar o estado.**
@@ -271,6 +274,7 @@ impl Detalhe {
             faixa: None,
             zoom: ZOOM_PADRAO,
             avisando: false,
+            pedindo_link: false,
             cliente_aberta: false,
             enviando: 0,
             enviadas: 0,
@@ -285,6 +289,11 @@ impl Detalhe {
 
     pub fn definir_sessao(&mut self, sessao: Sessao) {
         self.sessao = Some(sessao);
+    }
+
+    /// Se a conta do site já desceu até aqui — esta tela não sabe pedi-la.
+    pub fn tem_sessao(&self) -> bool {
+        self.sessao.is_some()
     }
 
     /// Entra numa sessão: pede a galeria e as fotos dela.
@@ -731,6 +740,15 @@ impl Detalhe {
         else {
             return;
         };
+        if self.pedindo_link {
+            return;
+        }
+        // 🚨 **Sem isto o link nunca chegava.** A colheita para quando não há
+        // resposta a esperar, e "esperar" era `carregando || enviando ||
+        // baixando || avisando` — uma lista que esquecia o link. O pedido saía,
+        // a resposta voltava 300 ms depois e ninguém mais drenava o canal: o
+        // botão do passo 7 não copiava nada, e não dizia nada.
+        self.pedindo_link = true;
         self.publicador
             .link(sessao, galeria_id, self.recados.0.clone());
         self.acompanhar(cx);
@@ -907,11 +925,13 @@ impl Detalhe {
                     }
                 }
                 Recado::Link(link) => {
+                    self.pedindo_link = false;
                     cx.write_to_clipboard(gpui::ClipboardItem::new_string(link.url.clone()));
                     self.link = Some(link);
                 }
                 Recado::Falhou(erro) => {
                     self.carregando = false;
+                    self.pedindo_link = false;
                     self.enviando = self.enviando.saturating_sub(1);
                     self.erro = Some(erro.into());
                 }
@@ -928,7 +948,11 @@ impl Detalhe {
         // 🔑 O laço para quando não há mais resposta a esperar. As miniaturas
         // não entram na conta: elas chegam pelo mesmo canal, e o `abriu` religa
         // o laço quando um lote novo é pedido.
-        let continua = self.carregando || self.enviando > 0 || self.baixando > 0 || self.avisando;
+        let continua = self.carregando
+            || self.enviando > 0
+            || self.baixando > 0
+            || self.avisando
+            || self.pedindo_link;
         if !continua {
             self.colhendo = false;
         }

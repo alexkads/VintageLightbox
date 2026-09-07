@@ -2,4 +2,4 @@
 
 pub mod publicar;
 
-pub use publicar::{Pedido, Progresso, PublicarNoPosVendaUseCase};
+pub use publicar::PublicarNoPosVendaUseCase;

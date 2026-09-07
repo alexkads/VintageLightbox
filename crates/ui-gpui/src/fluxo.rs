@@ -330,17 +330,12 @@ fn pagar_no_balcao_e_gerar_o_link(cx: &mut TestAppContext) {
     assert_eq!(negociadas.len(), 1, "o acerto foi para a foto do site");
     assert_eq!(negociadas[0].0, "remota-1");
 
-    // Passo 7: o link do cliente. Ele só existe depois de a galeria existir, e
-    // aqui ela nasce da publicação.
+    // Passo 7: o link do cliente — pedido **de dentro da sessão**, que é de onde
+    // o gesto sai na web (`copiar-link.tsx`, no cabeçalho da galeria).
     estudio
         .janela
-        .update(cx, |app, window, cx| {
-            app.publicar(cx);
-            app.pos_venda.update(cx, |tela, cx| {
-                tela.entrar_para_teste(cx);
-                tela.preencher_para_teste("Ensaio da Ana", "ana@x.com", window, cx);
-                tela.publicar(cx);
-                tela.colher(cx);
+        .update(cx, |app, _window, cx| {
+            app.detalhe.update(cx, |tela, cx| {
                 tela.pedir_o_link(cx);
                 tela.colher(cx);
                 assert!(
@@ -604,14 +599,10 @@ fn da_lista_ao_revelar_dentro_da_sessao(cx: &mut TestAppContext) {
                 window,
                 cx,
             );
-            assert!(
-                !app.publicando(),
-                "o gesto de salvar na galeria não abre modal de publicação"
-            );
             assert_eq!(
                 app.tela(),
                 Tela::Sessao,
-                "e volta para a sessão, como no site"
+                "volta para a sessão, como no site — e não há modal nenhum no caminho"
             );
         })
         .expect("a janela deve estar aberta");

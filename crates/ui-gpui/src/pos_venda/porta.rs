@@ -13,23 +13,12 @@ use domain::services::pos_venda::{
 use domain::value_objects::CropSettings;
 use infrastructure::gpu_adjustments::Ajustes;
 use infrastructure::ImageExporterImpl;
-use use_cases::pos_venda::Progresso;
-
-/// O que a tela pede para publicar.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Pedido {
-    pub sessao: Sessao,
-    pub galeria: NovaGaleria,
-    /// Os ids da grade, na ordem em que vão aparecer no site.
-    pub fotos: Vec<String>,
-}
 
 /// O que volta pelo canal.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Recado {
     Entrou(Sessao),
     Produtos(Vec<Produto>),
-    Andamento(Progresso),
     /// O link que entra sem senha, pronto para ir ao cliente.
     Link(LinkDeAcesso),
     /// As sessões fotográficas que já existem.
@@ -82,7 +71,6 @@ pub trait Publicador: Send + Sync + 'static {
     /// Esquece a sessão — o "sair" da tela.
     fn sair(&self, canal: Sender<Recado>);
     fn produtos(&self, sessao: Sessao, canal: Sender<Recado>);
-    fn publicar(&self, pedido: Pedido, canal: Sender<Recado>);
     /// O passo 7 do fluxo: o link do cliente.
     ///
     /// ⚠️ **Pedido ao site, nunca montado aqui.** O endereço da galeria exige
@@ -484,30 +472,6 @@ impl Publicador for PublicadorDaApi {
             let _ = canal.send(recado);
         });
     }
-
-    fn publicar(&self, pedido: Pedido, canal: Sender<Recado>) {
-        let controlador = self.controlador.clone();
-        self.tokio.spawn(async move {
-            // O andamento do caso de uso chega por um canal próprio e é
-            // repassado embrulhado: a tela tem um receptor só.
-            let (tx, rx) = std::sync::mpsc::channel();
-            let repasse = canal.clone();
-            let ponte = std::thread::spawn(move || {
-                for progresso in rx {
-                    let _ = repasse.send(Recado::Andamento(progresso));
-                }
-            });
-
-            let resultado = controlador
-                .publicar(pedido.sessao, pedido.galeria, pedido.fotos, tx)
-                .await;
-            let _ = ponte.join();
-
-            if let Err(erro) = resultado {
-                let _ = canal.send(Recado::Falhou(erro));
-            }
-        });
-    }
 }
 
 #[cfg(test)]
@@ -520,7 +484,6 @@ pub mod mentira {
     #[derive(Default)]
     pub struct PublicadorDeMentira {
         pub produtos: Vec<Produto>,
-        pub pedidos: Mutex<Vec<Pedido>>,
         /// Liga a recusa do site — para a tela poder ser testada com "não
         /// autorizado". Invertido de propósito: o `Default` do teste é o caminho
         /// que dá certo.
@@ -580,10 +543,6 @@ pub mod mentira {
     }
 
     impl PublicadorDeMentira {
-        pub fn pedidos(&self) -> Vec<Pedido> {
-            self.pedidos.lock().expect("os pedidos").clone()
-        }
-
         pub fn links(&self) -> Vec<String> {
             self.links.lock().expect("os links").clone()
         }
@@ -843,30 +802,6 @@ pub mod mentira {
             let _ = canal.send(Recado::Criada(Galeria {
                 id,
                 titulo: nova.titulo,
-            }));
-        }
-
-        fn publicar(&self, pedido: Pedido, canal: Sender<Recado>) {
-            self.pedidos
-                .lock()
-                .expect("os pedidos")
-                .push(pedido.clone());
-            let total = pedido.fotos.len();
-            let _ = canal.send(Recado::Andamento(Progresso::Comecou { total }));
-            let _ = canal.send(Recado::Andamento(Progresso::GaleriaCriada {
-                id: "g-de-mentira".into(),
-            }));
-            for id in &pedido.fotos {
-                let _ = canal.send(Recado::Andamento(Progresso::Enviada {
-                    nome: format!("{id}.jpg"),
-                    estado: domain::services::pos_venda::EstadoNoBalcao::Disponivel,
-                }));
-            }
-            let _ = canal.send(Recado::Andamento(Progresso::ClienteAvisado { falha: None }));
-            let _ = canal.send(Recado::Andamento(Progresso::Terminou {
-                galeria_id: "g-de-mentira".into(),
-                sucesso: total,
-                falhas: 0,
             }));
         }
     }

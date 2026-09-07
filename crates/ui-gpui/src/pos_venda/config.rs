@@ -41,9 +41,12 @@ pub struct Configuracao {
     /// código foi assinado com o segredo de um servidor e apresentado a outro.
     #[serde(default)]
     pub site_url: Option<String>,
-    #[serde(default)]
-    pub produto_id: Option<String>,
 }
+
+// 📌 Havia um `produto_id` aqui: o modal de publicação lembrava o produto da
+// última galeria para não perguntar de novo. O modal saiu em 7/set/2026, e o
+// produto passou a ser escolhido onde a web o escolhe — ao criar a sessão. Um
+// `produto_id` sobrando num `pos-venda.json` antigo é ignorado na leitura.
 
 /// O site que combina com esta API.
 ///
@@ -97,7 +100,6 @@ impl Default for Configuracao {
         Self {
             base_url: base_padrao(),
             site_url: None,
-            produto_id: None,
         }
     }
 }
@@ -156,7 +158,6 @@ mod testes {
         let config = Configuracao {
             base_url: "http://localhost:8080".into(),
             site_url: None,
-            produto_id: Some("p1".into()),
         };
         gravar_em(&arquivo, &config);
         assert_eq!(ler_de(&arquivo), Some(config));
@@ -198,7 +199,6 @@ mod testes {
         let config = Configuracao {
             base_url: "http://localhost:8080".into(),
             site_url: Some("http://localhost:3000/".into()),
-            produto_id: None,
         };
         assert_eq!(config.site(), "http://localhost:3000");
     }

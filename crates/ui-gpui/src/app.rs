@@ -32,7 +32,6 @@ use crate::importacao::tela::{Importacao, Importou};
 use crate::impressao::tela::Impressao;
 use crate::pos_venda::porta::Publicador;
 use crate::pos_venda::porta::Recado as PosVendaRecado;
-use crate::pos_venda::tela::PosVenda;
 use crate::revelacao::persistencia::{self, Gravador};
 use crate::revelacao::presets::GuardaDePresets;
 use crate::revelacao::processador::Ajustes;
@@ -262,8 +261,6 @@ pub struct Aplicativo {
     exportacao: Entity<Exportacao>,
     exportando: bool,
     /// O modal do pós-venda — o único caminho do app até o site.
-    pub(crate) pos_venda: Entity<PosVenda>,
-    publicando: bool,
     /// O balcão: o que o cliente acertou ao levar a foto na hora.
     pub(crate) balcao: Entity<Balcao>,
     no_balcao: bool,
@@ -469,7 +466,6 @@ impl Aplicativo {
         // A porta do app. O mesmo `Publicador` do pós-venda: entrar é a mesma
         // chamada, e dois clientes HTTP para o mesmo site seriam dois lugares
         // onde a base da API pode divergir.
-        let publicador_do_pos_venda = portas.publicador.clone();
         let publicador_das_sessoes = portas.publicador.clone();
         let publicador_da_raiz = portas.publicador.clone();
         let publicador_do_balcao = portas.publicador.clone();
@@ -555,15 +551,6 @@ impl Aplicativo {
             importando: false,
             exportacao: cx.new(|_| Exportacao::nova(portas.exportador, seletor_para_exportar)),
             exportando: false,
-            pos_venda: cx.new(|cx| {
-                PosVenda::nova(
-                    publicador_do_pos_venda,
-                    crate::pos_venda::config::ler(),
-                    window,
-                    cx,
-                )
-            }),
-            publicando: false,
             entrada,
             sessao: None,
             _escolha: escolha,
@@ -1489,41 +1476,16 @@ impl Aplicativo {
         }
     }
 
-    /// Abre o pós-venda para a seleção — ou para a grade, sem seleção — pela
-    /// mesma regra da exportação.
-    pub fn publicar(&mut self, cx: &mut Context<Self>) {
-        // 🚨 **Logado, nada acontece fora de uma sessão.** A guarda fica aqui, e
-        // não só no botão: atalho de teclado chega antes de botão, e foi assim
-        // que a nota caiu numa grade que ninguém estava vendo.
-        if !self.pode_trabalhar() {
-            return;
-        }
-        let biblioteca = self.biblioteca.read(cx);
-        let selecionadas = biblioteca.fotos_selecionadas();
-        let fotos = if selecionadas.is_empty() {
-            biblioteca.fotos_visiveis()
-        } else {
-            selecionadas
-        };
-
-        self.pos_venda
-            .update(cx, |tela, cx| tela.abrir_para(fotos, cx));
-        self.publicando = true;
-        cx.notify();
-    }
-
-    /// Fecha o modal sem cancelar o lote — como a exportação.
     /// A porta foi respondida: o app passa a existir.
     ///
-    /// 🔑 **A sessão desce para o pós-venda aqui**, e não é pedida de novo lá:
-    /// entrar duas vezes na mesma conta, na mesma abertura, é atrito puro.
+    /// 🔑 **A sessão desce para as telas aqui**, e não é pedida de novo em
+    /// nenhuma delas: entrar duas vezes na mesma conta, na mesma abertura, é
+    /// atrito puro.
     pub fn entrar_na_conta(
         &mut self,
         sessao: domain::services::pos_venda::Sessao,
         cx: &mut Context<Self>,
     ) {
-        self.pos_venda
-            .update(cx, |tela, cx| tela.definir_sessao(sessao.clone(), cx));
         // A lista já pede as sessões: quem entrou vai querer ver em qual
         // galeria está trabalhando antes de qualquer outra coisa.
         self.sessoes
@@ -1548,16 +1510,6 @@ impl Aplicativo {
     /// Se o app já passou da porta.
     pub fn entrou(&self) -> bool {
         self.sessao.is_some()
-    }
-
-    pub fn fechar_pos_venda(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.publicando = false;
-        window.focus(&self.foco);
-        cx.notify();
-    }
-
-    pub fn publicando(&self) -> bool {
-        self.publicando
     }
 
     /// Fecha o modal, **sem** jogar a listagem fora.
@@ -2182,48 +2134,6 @@ impl Aplicativo {
             )
     }
 
-    fn modal_de_pos_venda(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .absolute()
-            .inset_0()
-            .flex()
-            .items_center()
-            .justify_center()
-            .bg(tema::cores::veu())
-            .child(
-                div()
-                    .max_w_full()
-                    .max_h_full()
-                    .flex()
-                    .flex_col()
-                    .bg(cx.theme().background)
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    .rounded(px(6.))
-                    .overflow_hidden()
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .gap(px(24.))
-                            .px(px(12.))
-                            .py(px(6.))
-                            .bg(cx.theme().title_bar)
-                            .child(div().text_xs().child("Publicar no pós-venda"))
-                            .child(
-                                Button::new("fechar-pos-venda")
-                                    .label("Fechar")
-                                    .xsmall()
-                                    .on_click(cx.listener(|este, _ev, window, cx| {
-                                        este.fechar_pos_venda(window, cx);
-                                    })),
-                            ),
-                    )
-                    .child(self.pos_venda.clone()),
-            )
-    }
-
     fn modal_do_balcao(&self, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .absolute()
@@ -2476,9 +2386,6 @@ impl Render for Aplicativo {
             .when(self.exportando, |raiz| {
                 raiz.child(self.modal_de_exportacao(cx))
             })
-            .when(self.publicando, |raiz| {
-                raiz.child(self.modal_de_pos_venda(cx))
-            })
             .when(self.no_balcao, |raiz| raiz.child(self.modal_do_balcao(cx)))
             .when_some(
                 self.biblioteca.read(cx).confirmando_apagar(),
@@ -2534,6 +2441,24 @@ fn do_site_para_a_grade(
 /// A conta de teste. **Um só lugar constrói `Sessao` neste arquivo**: a struct
 /// vive no domínio e ganha campo quando a autorização muda, e cinco cópias da
 /// mesma literal é cinco lugares para consertar por campo novo.
+/// Uma sessão fotográfica como a listagem do site a devolve — só o id importa
+/// nos testes que apenas precisam que ela exista.
+#[cfg(test)]
+fn galeria_do_painel(id: &str) -> domain::services::pos_venda::GaleriaDoPainel {
+    domain::services::pos_venda::GaleriaDoPainel {
+        id: id.into(),
+        titulo: "Ensaio".into(),
+        email: Some("cliente@exemplo.com".into()),
+        whatsapp: None,
+        produto_id: "p1".into(),
+        user_id: None,
+        criada_em_iso: "2026-09-07".into(),
+        expira_em: None,
+        fotos: Default::default(),
+        totais: None,
+    }
+}
+
 #[cfg(test)]
 fn sessao_de_teste() -> domain::services::pos_venda::Sessao {
     domain::services::pos_venda::Sessao {
@@ -3829,87 +3754,6 @@ mod testes {
     /// 🔑 O teste mede o pedido que chega à porta: quantas fotos, com que
     /// destino. É onde o defeito moraria, porque as camadas de dentro já
     /// passavam todas.
-    /// 📸 O vão fechado: a grade vira um pedido de galeria, com os ids na ordem
-    /// da grade — e sem produto, título ou contato não sai nada.
-    #[gpui::test]
-    fn publicar_manda_a_grade_como_galeria_do_cliente(cx: &mut TestAppContext) {
-        let (previews, _dir) = previews_descartaveis();
-        cx.update(gpui_component::init);
-
-        let publicador = Arc::new(PublicadorDeMentira {
-            produtos: vec![domain::services::pos_venda::Produto {
-                id: "p1".into(),
-                nome: "Foto avulsa".into(),
-                preco: "29.90".into(),
-                inativo: true,
-            }],
-            ..Default::default()
-        });
-        let janela = cx.add_window({
-            let previews = previews.clone();
-            let publicador = publicador.clone();
-            |window, cx| {
-                Aplicativo::ja_dentro(
-                    acervo(),
-                    previews,
-                    Vec::new(),
-                    Portas {
-                        publicador,
-                        ..portas()
-                    },
-                    window,
-                    cx,
-                )
-            }
-        });
-
-        janela
-            .update(cx, |app, _window, cx| {
-                app.publicar(cx);
-                assert!(app.publicando());
-                app.pos_venda.update(cx, |tela, cx| {
-                    assert_eq!(
-                        tela.quantas(),
-                        2,
-                        "sem seleção, publica o que a grade mostra"
-                    );
-                    // Sem sessão nem formulário, o botão não manda nada.
-                    tela.publicar(cx);
-                    tela.entrar_para_teste(cx);
-                    assert_eq!(tela.produtos().len(), 1);
-                    assert_eq!(
-                        tela.produto_id(),
-                        Some("p1"),
-                        "o único produto já vem escolhido"
-                    );
-                    tela.publicar(cx);
-                });
-            })
-            .expect("a janela deve estar aberta");
-        assert!(
-            publicador.pedidos().is_empty(),
-            "sem título e contato do cliente, não há galeria para criar"
-        );
-
-        janela
-            .update(cx, |app, window, cx| {
-                app.pos_venda.update(cx, |tela, cx| {
-                    tela.preencher_para_teste("Ensaio da Maria", "maria@x.com", window, cx);
-                    tela.publicar(cx);
-                    tela.colher(cx);
-                    assert_eq!(tela.resumo(), "2 publicadas — galeria no ar");
-                });
-            })
-            .expect("a janela deve estar aberta");
-
-        let pedidos = publicador.pedidos();
-        assert_eq!(pedidos.len(), 1, "um lote, e não um pedido por foto");
-        assert_eq!(pedidos[0].galeria.titulo, "Ensaio da Maria");
-        assert_eq!(pedidos[0].galeria.email.as_deref(), Some("maria@x.com"));
-        assert_eq!(pedidos[0].galeria.produto_id, "p1");
-        assert_eq!(pedidos[0].fotos.len(), 2);
-    }
-
     /// 🚨 A porta vem antes de tudo — inclusive das teclas.
     ///
     /// O dono reverteu em 6/set/2026 o princípio "o app tem de ser útil
@@ -4170,39 +4014,36 @@ mod testes {
                 assert!(app.entrou());
                 assert_eq!(app.sessao().map(|s| s.access_token.as_str()), Some("tok"));
 
-                // E o pós-venda já nasce com a sessão e com os produtos pedidos.
-                app.pos_venda.update(cx, |tela, cx| {
-                    tela.colher(cx);
-                    assert_eq!(tela.produtos().len(), 1);
-                });
+                // E a sessão da sessão fotográfica já nasce com ela: nenhuma
+                // das telas volta a pedir a conta.
+                assert!(app.detalhe.read(cx).tem_sessao());
             })
             .expect("a janela deve estar aberta");
     }
 
     /// 🚨 **A resposta que demora não pode chegar depois de a colheita desistir.**
     ///
-    /// `definir_sessao` pede os produtos e liga a colheita — que parava no
-    /// primeiro giro de 100 ms, porque a condição de continuar era
-    /// `entrando || correndo()` e nenhuma das duas cobre um pedido no ar. A
-    /// mentira responde no mesmo instante, então nenhum teste via: o recado já
-    /// estava no canal antes do primeiro `colher`. Com a rede, ele chegava
-    /// depois — e ninguém mais o drenava. O que o operador via era
-    /// "nenhum produto no catálogo" com o catálogo cheio, sem erro nenhum.
+    /// Pedir o link liga a colheita — o laço que drena o canal a cada 100 ms —,
+    /// e a condição de continuar acordado era
+    /// `carregando || enviando || baixando || avisando`: uma lista de estados
+    /// ao lado, que esquecia justamente o link. No primeiro giro, 100 ms depois,
+    /// a resposta do Fly ainda não voltou; o laço morria, e o `Recado::Link`
+    /// chegava a um canal que ninguém mais drenava. O botão do passo 7 não
+    /// copiava nada e não dizia nada.
     ///
-    /// 🔑 Este teste **não chama `colher` à mão** de propósito: é justamente a
-    /// colheita sozinha que estava quebrada.
+    /// Nenhum teste via porque o `PublicadorDeMentira` responde no mesmo
+    /// instante — o recado já estava no canal antes do primeiro `colher` — e
+    /// porque os testes chamavam `colher` à mão. Este **não chama**, de
+    /// propósito: é a colheita sozinha que estava quebrada.
     #[gpui::test]
     fn a_resposta_que_demora_ainda_chega_a_tela(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         cx.update(gpui_component::init);
 
         let publicador = Arc::new(PublicadorDeMentira {
-            produtos: vec![domain::services::pos_venda::Produto {
-                id: "p1".into(),
-                nome: "Foto avulsa".into(),
-                preco: "29.90".into(),
-                inativo: false,
-            }],
+            // A galeria precisa existir: `entrar` a abre, e a sessão que não
+            // existe responde `Falhou` — que encerra a espera do link junto.
+            galerias: std::sync::Mutex::new(vec![galeria_do_painel("g7")]),
             // A rede do estúdio até o Fly leva centenas de milissegundos.
             demorada: true,
             ..Default::default()
@@ -4228,6 +4069,10 @@ mod testes {
         janela
             .update(cx, |app, _window, cx| {
                 app.entrar_na_conta(sessao_de_teste(), cx);
+                app.detalhe.update(cx, |tela, cx| {
+                    tela.entrar("g7".into(), cx);
+                    tela.pedir_o_link(cx);
+                });
             })
             .expect("a janela deve estar aberta");
 
@@ -4238,7 +4083,7 @@ mod testes {
         janela
             .update(cx, |app, _window, cx| {
                 assert!(
-                    app.pos_venda.read(cx).produtos().is_empty(),
+                    app.detalhe.read(cx).link().is_none(),
                     "a rede ainda não respondeu"
                 );
             })
@@ -4252,9 +4097,9 @@ mod testes {
         janela
             .update(cx, |app, _window, cx| {
                 assert_eq!(
-                    app.pos_venda.read(cx).produtos().len(),
-                    1,
-                    "o produto que demorou tem de entrar na lista sozinho"
+                    app.detalhe.read(cx).link().map(|l| l.url.as_str()),
+                    Some("https://recordarfotos.com.br/entrar?t=g7"),
+                    "o link que demorou tem de chegar à tela sozinho"
                 );
             })
             .expect("a janela deve estar aberta");
@@ -4403,86 +4248,6 @@ mod testes {
         assert!(
             publicador.subidas().is_empty(),
             "sem sessão aberta não há para onde subir"
-        );
-    }
-
-    /// 📸 O passo 7 do fluxo do dono: **gero o link para o cliente**.
-    ///
-    /// 🚨 **O link não existe antes da galeria**, e o botão não aparece antes
-    /// dela: pedir o link de uma galeria que não foi criada só teria como
-    /// resposta um erro do site. E ele vem **do site**, assinado — montar
-    /// `/meus-ensaios/{id}` aqui daria um endereço que parece certo e leva ao
-    /// `/login`, porque o cliente não tem conta. Foi o defeito que a web teve
-    /// até 4/set/2026.
-    #[gpui::test]
-    fn o_link_do_cliente_so_existe_depois_da_galeria(cx: &mut TestAppContext) {
-        let (previews, _dir) = previews_descartaveis();
-        cx.update(gpui_component::init);
-
-        let publicador = Arc::new(PublicadorDeMentira {
-            produtos: vec![domain::services::pos_venda::Produto {
-                id: "p1".into(),
-                nome: "Foto avulsa".into(),
-                preco: "29.90".into(),
-                inativo: false,
-            }],
-            ..Default::default()
-        });
-        let janela = cx.add_window({
-            let previews = previews.clone();
-            let publicador = publicador.clone();
-            |window, cx| {
-                Aplicativo::ja_dentro(
-                    acervo(),
-                    previews,
-                    Vec::new(),
-                    Portas {
-                        publicador,
-                        ..portas()
-                    },
-                    window,
-                    cx,
-                )
-            }
-        });
-
-        janela
-            .update(cx, |app, window, cx| {
-                app.publicar(cx);
-                app.pos_venda.update(cx, |tela, cx| {
-                    tela.entrar_para_teste(cx);
-                    tela.preencher_para_teste("Ensaio da Maria", "maria@x.com", window, cx);
-
-                    // Antes de publicar não há galeria — e o pedido não sai.
-                    assert_eq!(tela.galeria_publicada(), None);
-                    tela.pedir_o_link(cx);
-                    tela.colher(cx);
-                    assert_eq!(tela.link(), None);
-
-                    tela.publicar(cx);
-                    tela.colher(cx);
-                    assert_eq!(
-                        tela.galeria_publicada().as_deref(),
-                        Some("g-de-mentira"),
-                        "agora existe galeria"
-                    );
-
-                    tela.pedir_o_link(cx);
-                    tela.colher(cx);
-                    let link = tela.link().expect("o link tinha de ter chegado");
-                    assert_eq!(
-                        link.url,
-                        "https://recordarfotos.com.br/entrar?t=g-de-mentira"
-                    );
-                    assert_eq!(link.validade_em_segundos, 604_800);
-                });
-            })
-            .expect("a janela deve estar aberta");
-
-        assert_eq!(
-            publicador.links(),
-            vec!["g-de-mentira".to_string()],
-            "um pedido só, e depois da galeria existir"
         );
     }
 

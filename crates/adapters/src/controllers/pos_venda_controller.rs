@@ -1,6 +1,5 @@
 //! A fronteira da interface com o pós-venda: `Result<_, String>`, como os outros.
 
-use std::sync::mpsc::Sender;
 use std::sync::Arc;
 
 use domain::services::pos_venda::{
@@ -9,7 +8,7 @@ use domain::services::pos_venda::{
 };
 use domain::value_objects::PhotoId;
 use domain::DomainError;
-use use_cases::pos_venda::{Pedido, Progresso, PublicarNoPosVendaUseCase};
+use use_cases::pos_venda::PublicarNoPosVendaUseCase;
 
 pub struct PosVendaController {
     api: Arc<dyn PosVendaApi>,
@@ -43,33 +42,6 @@ impl PosVendaController {
 
     pub async fn produtos(&self, sessao: &Sessao) -> Result<Vec<Produto>, String> {
         self.api.produtos(sessao).await.map_err(frase)
-    }
-
-    /// `fotos` são os ids como a grade os conhece, na ordem em que devem
-    /// aparecer no site.
-    pub async fn publicar(
-        &self,
-        sessao: Sessao,
-        galeria: NovaGaleria,
-        fotos: Vec<String>,
-        canal: Sender<Progresso>,
-    ) -> Result<Galeria, String> {
-        let fotos = fotos
-            .iter()
-            .map(|id| PhotoId::from_string(id).map_err(|e| e.to_string()))
-            .collect::<Result<Vec<_>, _>>()?;
-
-        self.publicar
-            .execute(
-                Pedido {
-                    sessao,
-                    galeria,
-                    fotos,
-                },
-                canal,
-            )
-            .await
-            .map_err(frase)
     }
 
     /// As galerias que já existem — para subir numa delas em vez de criar uma
