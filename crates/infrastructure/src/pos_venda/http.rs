@@ -59,6 +59,14 @@ pub struct PosVendaApiHttp {
     viva: tokio::sync::Mutex<Option<Sessao>>,
     /// Onde a sessão dorme entre uma abertura do app e a seguinte.
     cofre: Arc<dyn CofreDeSessao>,
+    /// Quem leva o operador à tela de autorização.
+    ///
+    /// Injetável por um motivo prático: em produção isto abre o navegador da
+    /// máquina, e um teste que exercitasse o fluxo abriria uma janela de verdade
+    /// na cara de quem roda `cargo test`. Com a porta aqui, o teste faz o papel
+    /// do navegador — e, de quebra, o fluxo inteiro passa a ser exercitável,
+    /// incluindo a costura entre a URL anunciada e a porta que está escutando.
+    abridor: Arc<dyn Fn(&str) + Send + Sync>,
 }
 
 impl PosVendaApiHttp {
@@ -79,7 +87,20 @@ impl PosVendaApiHttp {
             client,
             viva: tokio::sync::Mutex::new(None),
             cofre: Arc::new(crate::pos_venda::cofre::CofreEmMemoria::default()),
+            abridor: Arc::new(|url: &str| {
+                if !abrir_no_navegador(url) {
+                    // Não é fim de fluxo: o servidor local já espera, e o
+                    // operador ainda pode abrir o endereço à mão.
+                    eprintln!("⚠️  Não foi possível abrir o navegador. Abra este endereço:\n{url}");
+                }
+            }),
         }
+    }
+
+    /// Troca quem leva o operador à tela — ver [`PosVendaApiHttp::abridor`].
+    pub fn com_abridor(mut self, abridor: Arc<dyn Fn(&str) + Send + Sync>) -> Self {
+        self.abridor = abridor;
+        self
     }
 
     /// Liga o chaveiro do sistema. Sem isto a sessão morre com o processo — é o
@@ -214,14 +235,7 @@ impl PosVendaApi for PosVendaApiHttp {
         // volta poderia chegar numa porta que ainda não escuta, e o operador
         // veria "não foi possível conectar" numa autorização que deu certo.
         let pedido = PedidoDeAutorizacao::novo().await?;
-        let url = pedido.url(&self.site);
-
-        if !abrir_no_navegador(&url) {
-            // Não é fim de fluxo: o servidor já espera, e o operador pode abrir
-            // o endereço à mão. Deixar o erro subir cancelaria uma autorização
-            // que ainda é perfeitamente possível.
-            eprintln!("⚠️  Não foi possível abrir o navegador. Abra este endereço:\n{url}");
-        }
+        (self.abridor)(&pedido.url(&self.site));
 
         let code = pedido.esperar_codigo().await?;
 
