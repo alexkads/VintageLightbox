@@ -185,8 +185,11 @@ VintageLightbox-Rust/
 O app **não passa por loja nenhuma** e, a partir da primeira instalação, **se atualiza sozinho** —
 cada atualização é conferida por assinatura antes de ser instalada.
 
-> ⚠️ **No macOS**, na primeira abertura clique com o botão direito no aplicativo e escolha *Abrir*.
-> O aviso do Gatekeeper aparece porque ele não é distribuído pela App Store.
+> ⚠️ **No macOS**, a primeira abertura pede um passo a mais: o sistema dirá que não pôde verificar o
+> app e oferecerá só *Mover para o Lixo*. Clique em **OK**, abra **Ajustes do Sistema → Privacidade e
+> Segurança**, role até o fim e clique em **Abrir Assim Mesmo**. É uma vez só.
+>
+> O truque antigo de *botão direito → Abrir* **não funciona a partir do macOS 15**.
 
 ### Como os instaladores são gerados
 

@@ -270,8 +270,18 @@ Depois, traga `dist\windows-x86_64\` de volta para o Mac e rode `./scripts/publi
 ## Assinatura do macOS — e por que ela não é "passar pela loja"
 
 Hoje o app sai **sem assinatura da Apple**, por decisão do dono. O efeito prático é o Gatekeeper
-dizendo "não pode ser verificado" na primeira abertura; o caminho é botão direito → Abrir, e a página
-de download avisa isso.
+recusando a primeira abertura com *"não pôde verificar se o item está livre de malware"* — e
+oferecendo **só "Mover para o Lixo"**.
+
+🚨 **O caminho de escape mudou, e a instrução antiga engana.** Até o macOS 14 bastava botão direito →
+Abrir; **a partir do 15 isso não funciona mais**. Hoje é: clicar em **OK**, ir a **Ajustes do Sistema
+→ Privacidade e Segurança**, rolar até o fim e clicar em **Abrir Assim Mesmo**. A página de download
+explica assim, com os três passos.
+
+⚠️ **Não há como evitar isso sem pagar a Apple.** O app está apenas com assinatura *ad-hoc* — a que o
+linker do Rust põe sozinha, com `TeamIdentifier=not set`. Tirar o aviso exige **Developer ID +
+notarização**, que exigem o Apple Developer Program (US$ 99/ano). Qualquer outro "jeito" é trabalho
+que o **cliente** tem de fazer, não você.
 
 ⚠️ **"Developer ID Application" não é App Store.** É o certificado de distribuição **fora** da loja —
 o mesmo que Zed, Docker e Figma usam. Quando existir, é um flag:
