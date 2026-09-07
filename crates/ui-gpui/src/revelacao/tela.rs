@@ -33,9 +33,10 @@ use infrastructure::cache::preview_manager::PreviewManager;
 
 use crate::biblioteca::miniaturas::{CacheDeMiniaturas, Miniatura};
 use crate::imagem::para_gpui;
+use crate::tema;
 
 use super::automatico;
-use super::controles::{Definicao, Secao, CONTROLES};
+use super::controles::{Definicao, Painel, Secao, CONTROLES};
 use super::corte::{self, Alca};
 use super::curva;
 use super::histograma::Histograma;
@@ -191,9 +192,15 @@ pub struct Revelacao {
     /// é uma coluna de 280px — no legado eles moram num dock separado, que esta
     /// Revelação não tem.
     presets_abertos: bool,
-    /// Quais seções estão abertas. Um conjunto, e não um `bool` por seção:
-    /// acrescentar seção nova não pode exigir lembrar de acrescentar campo.
-    abertas: HashSet<Secao>,
+    /// Quais painéis estão abertos. Um conjunto, e não um `bool` por painel:
+    /// acrescentar painel novo não pode exigir lembrar de acrescentar campo.
+    abertos: HashSet<Painel>,
+    /// Qual das três famílias do HSL está à mostra.
+    ///
+    /// 🔑 **Uma aba, e não três painéis** — o desenho do site e o do Lightroom.
+    /// Guardar a escolha (em vez de voltar a "Cor" a cada abertura) é o que
+    /// permite passar trinta fotos mexendo só na luminância.
+    aba_hsl: Secao,
     /// O id do pedido que ainda não voltou. `None` é "a tela está em dia".
     aguardando: Option<u64>,
     /// Se já existe um laço de colheita rodando. Sem esta trava, cada arrasto
@@ -341,10 +348,11 @@ impl Revelacao {
             nome_do_preset: cx.new(|cx| InputState::new(window, cx).placeholder("Nome do preset")),
             presets,
             presets_abertos: false,
-            abertas: Secao::TODAS
+            abertos: Painel::TODOS
                 .into_iter()
-                .filter(Secao::nasce_aberta)
+                .filter(Painel::nasce_aberto)
                 .collect(),
+            aba_hsl: Secao::HslCor,
             aguardando: None,
             colhendo: false,
             _assinaturas: assinaturas,
@@ -1115,6 +1123,36 @@ impl Revelacao {
         cx.notify();
     }
 
+    /// Devolve **um** controle ao neutro — o duplo clique no rótulo.
+    ///
+    /// É um gesto discreto, como aplicar preset: fecha o que estava a meio
+    /// caminho, vira um passo de histórico e vai para o banco na hora. Sem
+    /// fechar o pendente, um duplo clique no meio de um arrasto juntaria os
+    /// dois num passo só, e o `Cmd+Z` desfaria mais do que o olho viu.
+    pub fn devolver_ao_neutro(
+        &mut self,
+        indice: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(controle) = self.controles.get(indice) else {
+            return;
+        };
+        let definicao = controle.definicao;
+        let neutro = definicao.neutro();
+        if (definicao.ler)(&self.ajustes) == neutro {
+            return;
+        }
+
+        self.gravar_o_que_estiver_pendente();
+        (definicao.aplicar)(&mut self.ajustes, neutro);
+        self.espalhar_nos_sliders(window, cx);
+        self.pedir_revelacao(cx);
+        self.historico.registrar(self.estado());
+        self.gravar();
+        cx.notify();
+    }
+
     pub fn pode_desfazer(&self) -> bool {
         self.historico.pode_desfazer()
     }
@@ -1474,12 +1512,31 @@ impl Revelacao {
     /// 🔑 **Os avisos moram aqui**, e não no palco: "sem GPU" e "mostrando o
     /// original" são recados sobre o que os controles estão fazendo, e sobre a
     /// foto o palco já fala sozinho.
+    /// A coluna da direita: o cabeçalho, os sete painéis e nada mais.
+    ///
+    /// 🔑 **No modo de enquadramento ela troca de conteúdo**, como no site
+    /// (`editor.tsx`: `enquadrando ? <PainelDeCorte/> : <Paineis/>`). Antes a
+    /// barra de corte entrava por cima dos 53 sliders, e quem estava cortando
+    /// rolava por uma coluna inteira de controles que não tinham nada a ver com
+    /// o gesto em curso.
     fn painel(&self, cx: &mut Context<Self>) -> impl IntoElement {
         // Sem GPU não há revelação, e o painel diz isso em vez de oferecer
         // sliders que não movem nada. `None` é "a thread ainda está abrindo o
         // dispositivo" — não é ausência de placa, e anunciar ausência durante os
         // milissegundos de abertura seria mentir em toda abertura.
         let sem_motor = self.processador.disponivel() == Some(false);
+        let enquadrando = self.edicao.is_some();
+
+        let barra = self.barra_de_corte(cx).map(IntoElement::into_any_element);
+        let cabecalho = (!enquadrando).then(|| self.cabecalho_dos_ajustes(cx));
+        let paineis: Vec<AnyElement> = if enquadrando {
+            Vec::new()
+        } else {
+            Painel::TODOS
+                .into_iter()
+                .map(|painel| self.painel_sanfonado(painel, cx))
+                .collect()
+        };
 
         div()
             .id("painel-de-ajustes")
@@ -1506,24 +1563,70 @@ impl Revelacao {
                         .child("Mostrando o original (\\ para voltar)"),
                 )
             })
-            .children(self.barra_de_corte(cx))
-            .children(
-                Secao::TODAS
-                    .into_iter()
-                    .map(|secao| self.secao(secao, cx))
-                    .collect::<Vec<_>>(),
+            .children(barra)
+            .children(cabecalho)
+            .children(paineis)
+    }
+
+    /// Quantos ajustes estão fora do neutro, e o botão que devolve todos.
+    ///
+    /// 🔑 **Fora dos painéis sanfonados, e no topo** — é o desenho do site.
+    /// Zerar tudo é o gesto de "recomeçar" e não pertence a nenhuma seção:
+    /// dentro de uma delas pareceria zerar só aquela. Ele estava no **rodapé**,
+    /// depois de 53 sliders, com o rótulo "Redefinir ajustes" — para chegar
+    /// nele era preciso rolar a coluna inteira.
+    ///
+    /// E o número diz o que se perde: "10 ajustes fora do neutro" é a única
+    /// coisa na tela que responde "esta foto foi mexida?" sem abrir sete
+    /// painéis.
+    fn cabecalho_dos_ajustes(&self, cx: &mut Context<Self>) -> AnyElement {
+        let alterados = self.quantos_alterados();
+        let texto = match alterados {
+            0 => "Nenhum ajuste fora do neutro".to_string(),
+            1 => "1 ajuste fora do neutro".to_string(),
+            n => format!("{n} ajustes fora do neutro"),
+        };
+
+        div()
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap(px(6.))
+            .child(
+                div()
+                    .flex_1()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(SharedString::from(texto)),
             )
             .child(
-                div().pt(px(8.)).child(
-                    Button::new("redefinir-ajustes")
-                        .label("Redefinir ajustes")
-                        .xsmall()
-                        .w_full()
-                        .on_click(cx.listener(|tela, _ev, window, cx| {
-                            tela.redefinir_ajustes(window, cx);
-                        })),
-                ),
+                Button::new("zerar-tudo")
+                    .label("Zerar tudo")
+                    .xsmall()
+                    .disabled(alterados == 0)
+                    .tooltip("Devolve os 53 ajustes ao neutro. O enquadramento não muda.")
+                    .on_click(cx.listener(|tela, _ev, window, cx| {
+                        tela.redefinir_ajustes(window, cx);
+                    })),
             )
+            .into_any_element()
+    }
+
+    /// Quantos dos 53 estão fora do próprio neutro.
+    fn quantos_alterados(&self) -> usize {
+        CONTROLES
+            .iter()
+            .filter(|definicao| (definicao.ler)(&self.ajustes) != definicao.neutro())
+            .count()
+    }
+
+    /// Se alguma coisa desta família saiu do neutro — o ponto âmbar do
+    /// cabeçalho.
+    fn secao_alterada(&self, secao: Secao) -> bool {
+        CONTROLES
+            .iter()
+            .filter(|definicao| definicao.secao == secao)
+            .any(|definicao| (definicao.ler)(&self.ajustes) != definicao.neutro())
     }
 
     /// Os dois gráficos, juntos: o histograma e a curva de tons.
@@ -1959,33 +2062,58 @@ impl Revelacao {
             }))
     }
 
-    /// Uma seção sanfonada: o cabeçalho sempre, os controles só quando aberta.
+    /// Um painel sanfonado: o cabeçalho sempre, os controles só quando aberto.
     ///
-    /// Fechada por padrão (menos o Básico), como no legado. São 42 controles: com
-    /// tudo aberto o painel vira uma coluna de dois metros, e o efeito prático é
-    /// nenhum deles ser encontrado.
-    fn secao(&self, secao: Secao, cx: &mut Context<Self>) -> impl IntoElement {
-        let aberta = self.abertas.contains(&secao);
+    /// Fechado por padrão (menos o Básico), como no site e como no legado. São
+    /// 53 controles: com tudo aberto a coluna vira dois metros de sliders, e o
+    /// efeito prático é nenhum deles ser encontrado.
+    ///
+    /// 🔑 **O ponto âmbar no cabeçalho é o que faz a sanfona valer.** Fechado,
+    /// um painel esconde o que tem dentro — inclusive um ajuste que alguém
+    /// deixou lá. O ponto responde "mexeram nisto" sem abrir, e é o mesmo sinal
+    /// do site (`<span className="bg-amber-400" aria-label="alterado" />`).
+    fn painel_sanfonado(&self, painel: Painel, cx: &mut Context<Self>) -> AnyElement {
+        let aberto = self.abertos.contains(&painel);
+        let secoes = painel.secoes();
+        let alterado = secoes.iter().any(|secao| self.secao_alterada(*secao));
+
+        // Com mais de uma família, quem manda é a aba escolhida; com uma só, a
+        // aba não existe e a família é a própria.
+        let visivel = if secoes.len() > 1 {
+            self.aba_hsl
+        } else {
+            secoes[0]
+        };
+        let abas = (secoes.len() > 1).then(|| self.abas(secoes, visivel, cx));
 
         Collapsible::new()
-            .open(aberta)
+            .open(aberto)
             .child(
                 div()
-                    .id(SharedString::from(format!("secao-{}", secao.rotulo())))
+                    .id(SharedString::from(format!("painel-{}", painel.rotulo())))
                     .flex()
                     .items_center()
-                    .justify_between()
+                    .gap(px(6.))
                     .py(px(4.))
                     .cursor_pointer()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child(secao.rotulo())
+                    .child(div().flex_1().child(painel.rotulo()))
+                    .when(alterado, |cabecalho| {
+                        cabecalho.child(
+                            div()
+                                .size(px(5.))
+                                .rounded_full()
+                                .bg(tema::cores::quente())
+                                .flex_shrink_0(),
+                        )
+                    })
                     // Triângulo, e não texto: é o que diz "isto abre" sem
                     // ocupar largura numa coluna de 280px.
-                    .child(if aberta { "▾" } else { "▸" })
+                    .child(if aberto { "▾" } else { "▸" })
                     .on_click(cx.listener(move |tela, _ev, _window, cx| {
-                        if !tela.abertas.remove(&secao) {
-                            tela.abertas.insert(secao);
+                        if !tela.abertos.remove(&painel) {
+                            tela.abertos.insert(painel);
                         }
                         cx.notify();
                     })),
@@ -1996,46 +2124,141 @@ impl Revelacao {
                     .flex_col()
                     .gap(px(8.))
                     .pb(px(8.))
+                    .children(abas)
                     // O "Auto" mora no Básico e só nele — é onde ele fica no
                     // Lightroom, junto dos tons que decide. Fora daqui ele seria
                     // mais um botão à procura de dono.
-                    .children((secao == Secao::Basico).then(|| self.botao_do_automatico(cx)))
-                    .children(
-                        self.controles
-                            .iter()
-                            .filter(|controle| controle.definicao.secao == secao)
-                            .map(|controle| {
-                                let definicao = controle.definicao;
-                                let valor = (definicao.ler)(&self.ajustes);
+                    .children((painel == Painel::Basico).then(|| self.botao_do_automatico(cx)))
+                    .children(self.controles_da_secao(visivel, cx)),
+            )
+            .into_any_element()
+    }
 
-                                div()
-                                    .flex()
-                                    .flex_col()
-                                    .gap(px(2.))
-                                    .child(
-                                        div()
-                                            .flex()
-                                            .items_center()
-                                            .justify_between()
-                                            .text_xs()
-                                            .child(definicao.rotulo)
-                                            // O valor fica ao lado do rótulo, e
-                                            // não dentro da barra: dentro, ele se
-                                            // move junto com o punho e vira um
-                                            // número que foge de quem tenta lê-lo.
-                                            .child(
-                                                div()
-                                                    .text_color(cx.theme().muted_foreground)
-                                                    .child(SharedString::from(
-                                                        definicao.formatar(valor),
-                                                    )),
-                                            ),
-                                    )
-                                    .child(Slider::new(&controle.estado).horizontal())
+    /// A fileira de abas do HSL — Cor, Luminância, Matiz.
+    ///
+    /// ⚠️ **A aba que não está à mostra também precisa se anunciar.** Uma
+    /// alteração na luminância fica invisível enquanto a aba aberta é a de cor,
+    /// e o ponto do cabeçalho diz "algum HSL foi mexido" sem dizer qual. O
+    /// sublinhado âmbar na aba fechada é o que fecha essa lacuna — é o que o
+    /// site faz (`underline decoration-amber-400`).
+    fn abas(&self, secoes: &'static [Secao], visivel: Secao, cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .flex()
+            .gap(px(4.))
+            .children(
+                secoes
+                    .iter()
+                    .map(|secao| {
+                        let secao = *secao;
+                        let escolhida = secao == visivel;
+                        let alterada = self.secao_alterada(secao);
+
+                        div()
+                            .id(SharedString::from(format!("aba-{}", secao.rotulo())))
+                            .px(px(6.))
+                            .py(px(2.))
+                            .rounded(px(4.))
+                            .cursor_pointer()
+                            .text_xs()
+                            .when(escolhida, |aba| {
+                                aba.bg(cx.theme().accent)
+                                    .text_color(cx.theme().accent_foreground)
                             })
-                            .collect::<Vec<_>>(),
+                            .when(!escolhida, |aba| {
+                                aba.text_color(cx.theme().muted_foreground)
+                            })
+                            .when(alterada && !escolhida, |aba| {
+                                aba.underline().text_decoration_color(tema::cores::quente())
+                            })
+                            .child(Painel::aba(secao))
+                            .on_click(cx.listener(move |tela, _ev, _window, cx| {
+                                tela.aba_hsl = secao;
+                                cx.notify();
+                            }))
+                            .into_any_element()
+                    })
+                    .collect::<Vec<_>>(),
+            )
+            .into_any_element()
+    }
+
+    /// Os sliders de uma família, na ordem da tabela.
+    fn controles_da_secao(&self, secao: Secao, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        self.controles
+            .iter()
+            .enumerate()
+            .filter(|(_, controle)| controle.definicao.secao == secao)
+            .map(|(i, controle)| self.linha_do_controle(i, controle, cx))
+            .collect()
+    }
+
+    /// Um controle: o rótulo, o valor e a barra.
+    ///
+    /// 🔑 **Duplo clique no rótulo devolve o neutro** — o gesto do Lightroom, e
+    /// o que o dono pediu ao site em 2026-09-05 (*"quando der dois cliques no
+    /// meio do slide deve zerar o efeito"*). Sem ele, voltar um único ajuste ao
+    /// lugar exige arrastar até acertar um número que a barra nem sempre
+    /// alcança: `sharpen_radius` neutro é 1,0 numa faixa de 0,5 a 3,0.
+    ///
+    /// ⚠️ **E o rótulo muda de cor quando o controle sai do neutro.** Com sete
+    /// painéis fechando e abrindo, "o que eu mexi aqui dentro" não tem outra
+    /// resposta senão comparar 53 números com 53 neutros de cabeça.
+    fn linha_do_controle(
+        &self,
+        indice: usize,
+        controle: &Controle,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let definicao = controle.definicao;
+        let valor = (definicao.ler)(&self.ajustes);
+        let neutro = definicao.neutro();
+        let no_neutro = valor == neutro;
+
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(2.))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .text_xs()
+                    .child(
+                        div()
+                            .id(SharedString::from(format!("rotulo-{indice}")))
+                            .cursor_pointer()
+                            .tooltip(|window, cx| {
+                                gpui_component::tooltip::Tooltip::new(
+                                    "Duplo clique volta ao neutro",
+                                )
+                                .build(window, cx)
+                            })
+                            .text_color(if no_neutro {
+                                cx.theme().muted_foreground
+                            } else {
+                                cx.theme().foreground
+                            })
+                            .child(definicao.rotulo)
+                            .on_click(cx.listener(
+                                move |tela, evento: &gpui::ClickEvent, window, cx| {
+                                    if evento.click_count() >= 2 {
+                                        tela.devolver_ao_neutro(indice, window, cx);
+                                    }
+                                },
+                            )),
+                    )
+                    // O valor fica ao lado do rótulo, e não dentro da barra:
+                    // dentro, ele se move junto com o punho e vira um número
+                    // que foge de quem tenta lê-lo.
+                    .child(
+                        div()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(SharedString::from(definicao.formatar(valor))),
                     ),
             )
+            .child(Slider::new(&controle.estado).horizontal())
+            .into_any_element()
     }
 }
 
@@ -3905,6 +4128,123 @@ mod testes {
     /// No legado o `reset_edits` também não o toca: quem quer desfazer
     /// enquadramento usa "Recomeçar", dentro do modo de corte. Misturar os dois
     /// faria um botão de cor apagar trabalho de composição.
+    /// 🔑 O duplo clique no rótulo volta **um** controle, e não a foto inteira.
+    ///
+    /// O erro fácil aqui é chamar `redefinir_ajustes` de dentro do duplo
+    /// clique: os dois "voltam ao neutro", e o teste que só olhasse o controle
+    /// clicado passaria com os outros 52 apagados junto.
+    #[gpui::test]
+    fn o_duplo_clique_devolve_so_aquele_controle(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-uma.jpg", &foto_cinza())
+            .expect("gravar preview");
+
+        let gravador = Arc::new(GravadorDeMentira::default());
+        let janela = com_gravador(cx, previews, gravador.clone());
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(
+                    PhotoViewModel {
+                        edit_exposure: Some(2.0),
+                        edit_contrast: Some(1.4),
+                        ..foto("uma.jpg")
+                    },
+                    window,
+                    cx,
+                );
+
+                tela.devolver_ao_neutro(0, window, cx);
+
+                assert_eq!(tela.ajustes().exposure, 0.0, "o clicado volta");
+                assert_eq!(tela.ajustes().contrast, 1.4, "e só ele");
+                assert_eq!(
+                    tela.controles[0].estado.read(cx).value().start(),
+                    0.0,
+                    "o slider acompanha"
+                );
+                assert!(tela.pode_desfazer(), "é um passo de histórico");
+            })
+            .expect("a janela deve estar aberta");
+
+        let gravado = gravador.gravado();
+        assert_eq!(gravado.len(), 1, "vai ao banco na hora, sem a espera");
+        assert_eq!(gravado[0].1.exposure, 0.0);
+        assert_eq!(gravado[0].1.contrast, 1.4);
+    }
+
+    /// ⚠️ **Duplo clique no que já está no neutro não escreve nada.**
+    ///
+    /// Sem esta guarda, clicar duas vezes num slider parado empilharia um passo
+    /// de histórico idêntico ao anterior e mandaria um `UPDATE` ao banco — e o
+    /// `Cmd+Z` seguinte pareceria não fazer nada, porque desfaria um passo que
+    /// não mudou nada.
+    #[gpui::test]
+    fn duplo_clique_no_neutro_nao_grava(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-parada.jpg", &foto_cinza())
+            .expect("gravar preview");
+
+        let gravador = Arc::new(GravadorDeMentira::default());
+        let janela = com_gravador(cx, previews, gravador.clone());
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("parada.jpg"), window, cx);
+                tela.devolver_ao_neutro(0, window, cx);
+                assert!(!tela.pode_desfazer(), "não houve gesto");
+            })
+            .expect("a janela deve estar aberta");
+
+        assert!(gravador.gravado().is_empty());
+    }
+
+    /// O número do cabeçalho e o ponto âmbar dos painéis saem da mesma medida.
+    ///
+    /// 🚨 **Neutro não é zero em dois dos 53** (contraste e raio da nitidez), e
+    /// contar "quantos são diferentes de zero" acusaria dois ajustes numa foto
+    /// que ninguém tocou — com o ponto âmbar aceso em Básico e Detalhe desde a
+    /// abertura.
+    #[gpui::test]
+    fn o_cabecalho_e_o_ponto_ambar_contam_o_que_saiu_do_neutro(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-medida.jpg", &foto_cinza())
+            .expect("gravar preview");
+
+        let janela = com_gravador(cx, previews, Arc::new(GravadorDeMentira::default()));
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("medida.jpg"), window, cx);
+                assert_eq!(tela.quantos_alterados(), 0, "foto crua não tem ajuste");
+                for secao in Secao::TODAS {
+                    assert!(!tela.secao_alterada(secao), "`{}`", secao.rotulo());
+                }
+
+                tela.abrir(
+                    PhotoViewModel {
+                        edit_exposure: Some(1.0),
+                        edit_hsl_blue_lum: Some(30.0),
+                        ..foto("medida.jpg")
+                    },
+                    window,
+                    cx,
+                );
+
+                assert_eq!(tela.quantos_alterados(), 2);
+                assert!(tela.secao_alterada(Secao::Basico));
+                assert!(
+                    tela.secao_alterada(Secao::HslLuminancia),
+                    "a aba fechada também se anuncia"
+                );
+                assert!(!tela.secao_alterada(Secao::HslCor), "e a vizinha não");
+            })
+            .expect("a janela deve estar aberta");
+    }
+
     #[gpui::test]
     fn redefinir_zera_os_ajustes_e_preserva_o_corte(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();

@@ -49,22 +49,20 @@
 
 use super::processador::Ajustes;
 
-/// Os grupos do painel, na ordem em que aparecem.
+/// A família de um controle — o que ele move, e não onde ele é desenhado.
 ///
-/// A ordem e os nomes são os do `crates/ui` (`dock_viewer.rs`): Básico, Curva de
-/// tons, Detalhe, HSL/Cor, HSL/Luminância, HSL/Matiz, Lente.
-///
-/// ✅ **A curva de tons ganhou controles em 17/ago/2026.** Ela existia no nome da
-/// seção do legado e em quatro campos que o shader aplicava — sem que nada os
-/// escrevesse, em nenhum dos dois apps.
+/// ⚠️ **Seção não é painel desde 7/set/2026.** As três famílias de HSL
+/// continuam separadas aqui (um controle sabe se move saturação, luminância ou
+/// matiz), mas na tela elas dividem **um** painel com três abas — o desenho do
+/// site, e o do Lightroom. Quem decide o que aparece é [`Painel`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Secao {
     Basico,
     CurvaDeTons,
-    Detalhe,
     HslCor,
     HslLuminancia,
     HslMatiz,
+    Detalhe,
     Lente,
     Tonalizacao,
     Efeitos,
@@ -74,34 +72,117 @@ impl Secao {
     pub const TODAS: [Secao; 9] = [
         Secao::Basico,
         Secao::CurvaDeTons,
-        Secao::Detalhe,
         Secao::HslCor,
         Secao::HslLuminancia,
         Secao::HslMatiz,
+        Secao::Detalhe,
         Secao::Lente,
         Secao::Tonalizacao,
         Secao::Efeitos,
     ];
 
+    /// O nome inteiro, para diagnóstico de teste e para o `title` da aba.
     pub fn rotulo(&self) -> &'static str {
         match self {
             Secao::Basico => "Básico",
             Secao::CurvaDeTons => "Curva de tons",
-            Secao::Detalhe => "Detalhe",
             Secao::HslCor => "HSL / cor",
             Secao::HslLuminancia => "HSL / luminância",
             Secao::HslMatiz => "HSL / matiz",
+            Secao::Detalhe => "Detalhe",
             Secao::Lente => "Lente",
             Secao::Tonalizacao => "Tonalização",
             Secao::Efeitos => "Efeitos",
         }
     }
 
-    /// Só o Básico nasce aberto — é o que o legado faz (`default_open(true)` no
-    /// Basic, `false` em todas as outras). Com 42 controles, abrir tudo daria
-    /// uma coluna de dois metros e nenhuma delas seria encontrada.
-    pub fn nasce_aberta(&self) -> bool {
-        matches!(self, Secao::Basico)
+    /// Em que painel ela é desenhada.
+    pub fn painel(&self) -> Painel {
+        match self {
+            Secao::Basico => Painel::Basico,
+            Secao::CurvaDeTons => Painel::CurvaDeTons,
+            Secao::HslCor | Secao::HslLuminancia | Secao::HslMatiz => Painel::Hsl,
+            Secao::Detalhe => Painel::Detalhe,
+            Secao::Lente => Painel::Lente,
+            Secao::Tonalizacao => Painel::Tonalizacao,
+            Secao::Efeitos => Painel::Efeitos,
+        }
+    }
+}
+
+/// Um painel sanfonado da coluna da direita, na ordem em que ele aparece.
+///
+/// 🔑 **São os sete do site**, na ordem do site
+/// (`revelacao/paineis.tsx`): Básico, Curva de tons, HSL, Detalhe, Lente,
+/// Tonalização e Efeitos. Aqui eram nove, com HSL ocupando três — e a coluna
+/// de 280px ficava com três cabeçalhos quase iguais em sequência, que é
+/// exatamente o que as abas resolvem.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Painel {
+    Basico,
+    CurvaDeTons,
+    Hsl,
+    Detalhe,
+    Lente,
+    Tonalizacao,
+    Efeitos,
+}
+
+impl Painel {
+    pub const TODOS: [Painel; 7] = [
+        Painel::Basico,
+        Painel::CurvaDeTons,
+        Painel::Hsl,
+        Painel::Detalhe,
+        Painel::Lente,
+        Painel::Tonalizacao,
+        Painel::Efeitos,
+    ];
+
+    pub fn rotulo(&self) -> &'static str {
+        match self {
+            Painel::Basico => "Básico",
+            Painel::CurvaDeTons => "Curva de tons",
+            Painel::Hsl => "HSL",
+            Painel::Detalhe => "Detalhe",
+            Painel::Lente => "Lente",
+            Painel::Tonalizacao => "Tonalização",
+            Painel::Efeitos => "Efeitos",
+        }
+    }
+
+    /// As famílias que ele desenha. Uma só, menos o HSL — que tem as três, e é
+    /// por isso que ele tem abas.
+    pub fn secoes(&self) -> &'static [Secao] {
+        match self {
+            Painel::Basico => &[Secao::Basico],
+            Painel::CurvaDeTons => &[Secao::CurvaDeTons],
+            Painel::Hsl => &[Secao::HslCor, Secao::HslLuminancia, Secao::HslMatiz],
+            Painel::Detalhe => &[Secao::Detalhe],
+            Painel::Lente => &[Secao::Lente],
+            Painel::Tonalizacao => &[Secao::Tonalizacao],
+            Painel::Efeitos => &[Secao::Efeitos],
+        }
+    }
+
+    /// O rótulo da aba, quando o painel tem mais de uma família.
+    ///
+    /// São os do site: "Cor", "Luminância" e "Matiz" — e não "HSL / cor", que
+    /// repetiria o nome do painel dentro dele três vezes.
+    pub fn aba(secao: Secao) -> &'static str {
+        match secao {
+            Secao::HslCor => "Cor",
+            Secao::HslLuminancia => "Luminância",
+            Secao::HslMatiz => "Matiz",
+            outra => outra.rotulo(),
+        }
+    }
+
+    /// Só o Básico nasce aberto — é o que o site faz (`<Secao … aberta />` só
+    /// no primeiro) e o que o legado fazia. Com 53 controles, abrir tudo daria
+    /// uma coluna de dois metros e nenhum deles seria encontrado.
+    pub fn nasce_aberto(&self) -> bool {
+        matches!(self, Painel::Basico)
     }
 }
 
@@ -177,7 +258,12 @@ macro_rules! curva {
     };
 }
 
-/// Os 46 controles.
+/// Os 53 controles, na ordem em que a coluna da direita os desenha.
+///
+/// 🔑 **A ordem é a do site** (`ajustes.ts`, `TODOS_OS_CONTROLES`): Básico,
+/// Curva de tons, HSL nas três famílias, Detalhe, Lente, Tonalização e
+/// Efeitos. Aqui o Detalhe vinha antes do HSL, e a coluna da direita saía com
+/// os painéis em ordem diferente da do site — mesmo trabalho, dois desenhos.
 ///
 /// ⚠️ **As faixas são as do `crates/ui`**, lidas uma a uma de
 /// `docking/dock_viewer.rs`. Não são arredondamentos bonitos: contraste vai de 0
@@ -311,49 +397,6 @@ pub const CONTROLES: &[Definicao] = &[
     curva!("Escuros", tone_curve_darks),
     curva!("Claros", tone_curve_lights),
     curva!("Altas luzes", tone_curve_highlights),
-    // --------------------------------------------------------------- Detalhe
-    Definicao {
-        secao: Secao::Detalhe,
-        rotulo: "Ruído (luminância)",
-        minimo: 0.0,
-        maximo: 100.0,
-        casas: 0,
-        com_sinal: false,
-        aplicar: |a, v| a.nr_luminance = v,
-        ler: |a| a.nr_luminance,
-    },
-    Definicao {
-        secao: Secao::Detalhe,
-        rotulo: "Ruído (cor)",
-        minimo: 0.0,
-        maximo: 100.0,
-        casas: 0,
-        com_sinal: false,
-        aplicar: |a, v| a.nr_color = v,
-        ler: |a| a.nr_color,
-    },
-    Definicao {
-        secao: Secao::Detalhe,
-        rotulo: "Nitidez",
-        minimo: 0.0,
-        maximo: 100.0,
-        casas: 0,
-        com_sinal: false,
-        aplicar: |a, v| a.sharpen_amount = v,
-        ler: |a| a.sharpen_amount,
-    },
-    // Começa em 0,5 e não em 0: raio zero seria não ter pixel de vizinhança para
-    // comparar, e a nitidez não faria nada com o controle no mínimo.
-    Definicao {
-        secao: Secao::Detalhe,
-        rotulo: "Raio da nitidez",
-        minimo: 0.5,
-        maximo: 3.0,
-        casas: 1,
-        com_sinal: false,
-        aplicar: |a, v| a.sharpen_radius = v,
-        ler: |a| a.sharpen_radius,
-    },
     // -------------------------------------------------------------- HSL / cor
     hsl!(Secao::HslCor, "Vermelho", hsl_red_sat, -100.0, 100.0),
     hsl!(Secao::HslCor, "Laranja", hsl_orange_sat, -100.0, 100.0),
@@ -401,6 +444,49 @@ pub const CONTROLES: &[Definicao] = &[
     hsl!(Secao::HslMatiz, "Azul", hsl_blue_hue, -180.0, 180.0),
     hsl!(Secao::HslMatiz, "Roxo", hsl_purple_hue, -180.0, 180.0),
     hsl!(Secao::HslMatiz, "Magenta", hsl_magenta_hue, -180.0, 180.0),
+    // --------------------------------------------------------------- Detalhe
+    Definicao {
+        secao: Secao::Detalhe,
+        rotulo: "Ruído (luminância)",
+        minimo: 0.0,
+        maximo: 100.0,
+        casas: 0,
+        com_sinal: false,
+        aplicar: |a, v| a.nr_luminance = v,
+        ler: |a| a.nr_luminance,
+    },
+    Definicao {
+        secao: Secao::Detalhe,
+        rotulo: "Ruído (cor)",
+        minimo: 0.0,
+        maximo: 100.0,
+        casas: 0,
+        com_sinal: false,
+        aplicar: |a, v| a.nr_color = v,
+        ler: |a| a.nr_color,
+    },
+    Definicao {
+        secao: Secao::Detalhe,
+        rotulo: "Nitidez",
+        minimo: 0.0,
+        maximo: 100.0,
+        casas: 0,
+        com_sinal: false,
+        aplicar: |a, v| a.sharpen_amount = v,
+        ler: |a| a.sharpen_amount,
+    },
+    // Começa em 0,5 e não em 0: raio zero seria não ter pixel de vizinhança para
+    // comparar, e a nitidez não faria nada com o controle no mínimo.
+    Definicao {
+        secao: Secao::Detalhe,
+        rotulo: "Raio da nitidez",
+        minimo: 0.5,
+        maximo: 3.0,
+        casas: 1,
+        com_sinal: false,
+        aplicar: |a, v| a.sharpen_radius = v,
+        ler: |a| a.sharpen_radius,
+    },
     // ----------------------------------------------------------------- Lente
     Definicao {
         secao: Secao::Lente,
@@ -622,6 +708,62 @@ mod testes {
                 secao.rotulo()
             );
         }
+    }
+
+    /// 🔑 Cada seção mora em **um** painel, e nenhum painel promete seção que
+    /// não existe.
+    ///
+    /// Um painel sem seção seria um cabeçalho vazio; uma seção em dois painéis
+    /// desenharia os mesmos oito sliders duas vezes, com um dos dois grupos
+    /// respondendo — o defeito mais caro de achar olhando, porque os dois
+    /// parecem certos.
+    #[test]
+    fn cada_secao_mora_em_um_painel_so() {
+        for secao in Secao::TODAS {
+            let donos: Vec<Painel> = Painel::TODOS
+                .into_iter()
+                .filter(|painel| painel.secoes().contains(&secao))
+                .collect();
+            assert_eq!(
+                donos.len(),
+                1,
+                "`{}` aparece em {} painéis",
+                secao.rotulo(),
+                donos.len()
+            );
+            assert_eq!(
+                donos[0],
+                secao.painel(),
+                "`{}` diz um e é desenhada noutro",
+                secao.rotulo()
+            );
+        }
+
+        for painel in Painel::TODOS {
+            assert!(
+                !painel.secoes().is_empty(),
+                "o painel `{}` não desenha nada",
+                painel.rotulo()
+            );
+        }
+    }
+
+    /// 🚨 **A ordem dos painéis é a ordem da tabela**, e é a do site.
+    ///
+    /// A coluna desenha `Painel::TODOS` em sequência e cada painel filtra a
+    /// tabela. Se as duas ordens divergirem, nada falha: a tela sai com os
+    /// painéis numa ordem e o site na outra, e a diferença só aparece com as
+    /// duas telas lado a lado.
+    #[test]
+    fn os_paineis_seguem_a_ordem_da_tabela() {
+        let mut vistos: Vec<Painel> = Vec::new();
+        for def in CONTROLES {
+            let painel = def.secao.painel();
+            if vistos.last() != Some(&painel) && !vistos.contains(&painel) {
+                vistos.push(painel);
+            }
+        }
+        assert_eq!(vistos, Painel::TODOS.to_vec());
     }
 
     /// Os controles estão **agrupados** na tabela, e não intercalados.
