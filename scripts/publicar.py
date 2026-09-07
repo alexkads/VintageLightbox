@@ -100,16 +100,27 @@ def garantir_bucket(base: str, key: str, seco: bool) -> None:
     if seco:
         print(f"   [seco] conferiria (e criaria, se preciso) o bucket público '{BUCKET}'")
         return
-    try:
-        requisicao("GET", f"{base}/storage/v1/bucket/{BUCKET}", key)
-        print(f"   bucket '{BUCKET}' já existe")
-        return
-    except urllib.error.HTTPError as e:
-        if e.code != 404:
-            raise
+
+    # 🔑 **Tenta criar primeiro, e trata "já existe" como sucesso.**
+    #
+    # A ordem natural seria perguntar antes (`GET .../bucket/<nome>`) e criar se
+    # não houver — mas o Supabase responde **400** a essa pergunta quando o
+    # bucket não existe, com `"statusCode":"404"` **no corpo**. Um código no
+    # corpo e outro no cabeçalho: quem confiar no `e.code` erra, e foi o que
+    # aconteceu na primeira publicação (7/set/2026).
+    #
+    # Criar e absorver o conflito não depende de adivinhar qual dos dois códigos
+    # o servidor vai usar hoje.
     corpo = json.dumps({"name": BUCKET, "id": BUCKET, "public": True}).encode()
-    requisicao("POST", f"{base}/storage/v1/bucket", key, corpo, "application/json")
-    print(f"   bucket '{BUCKET}' criado (público)")
+    try:
+        requisicao("POST", f"{base}/storage/v1/bucket", key, corpo, "application/json")
+        print(f"   bucket '{BUCKET}' criado (público)")
+    except urllib.error.HTTPError as e:
+        detalhe = e.read().decode(errors="replace")
+        if "already exists" in detalhe or "Duplicate" in detalhe:
+            print(f"   bucket '{BUCKET}' já existe")
+            return
+        raise RuntimeError(f"não consegui criar o bucket ({e.code}): {detalhe[:300]}") from e
 
 
 def subir(base: str, key: str, caminho: Path, destino: str, seco: bool) -> str:
