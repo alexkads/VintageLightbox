@@ -42,6 +42,7 @@ use super::corte::{self, Alca};
 use super::curva;
 use super::histograma::Histograma;
 use super::historico::{Estado, Historico};
+use super::lightroom::{self, Arquivo, EscolhaDePresets, Relatorio};
 use super::paineis::{PainelDaRevelacao, Qual};
 use super::persistencia::{self, Corte, Gravador};
 use super::presets::{self, GuardaDePresets};
@@ -192,6 +193,18 @@ pub struct Revelacao {
     /// busca da Biblioteca: o `InputState` guarda cursor, seleção e o histórico
     /// de edição do campo.
     busca_de_presets: Entity<InputState>,
+    /// Quem abre o seletor do sistema para importar `.lrtemplate` e `.xmp`.
+    escolha_de_presets: Arc<dyn EscolhaDePresets>,
+    /// Por onde os arquivos escolhidos voltam. O seletor é uma janela do
+    /// sistema e responde quando quiser — inclusive nunca, se desistirem.
+    arquivos: (
+        std::sync::mpsc::Sender<Vec<Arquivo>>,
+        std::sync::mpsc::Receiver<Vec<Arquivo>>,
+    ),
+    /// Se há um seletor aberto — o botão fica desligado enquanto houver.
+    escolhendo_arquivos: bool,
+    /// O que a última importação aproveitou, enquanto ninguém o fecha.
+    relatorio: Option<Relatorio>,
     /// O nome digitado ao renomear. Campo próprio, e não o de salvar: os dois
     /// diálogos guardam coisas diferentes, e um começa preenchido.
     renome_do_preset: Entity<InputState>,
@@ -282,6 +295,7 @@ impl Revelacao {
         previews: Arc<PreviewManager>,
         gravador: Arc<dyn Gravador>,
         guarda_de_presets: Arc<dyn GuardaDePresets>,
+        escolha_de_presets: Arc<dyn EscolhaDePresets>,
         presets: Vec<Preset>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -381,6 +395,10 @@ impl Revelacao {
             nome_do_preset: cx.new(|cx| InputState::new(window, cx).placeholder("Nome do preset")),
             presets,
             busca_de_presets,
+            escolha_de_presets,
+            arquivos: std::sync::mpsc::channel(),
+            escolhendo_arquivos: false,
+            relatorio: None,
             renome_do_preset: cx.new(|cx| InputState::new(window, cx)),
             previa: None,
             preset_inteiro: false,
@@ -912,6 +930,86 @@ impl Revelacao {
     /// ⚠️ Sair por aqui **descarta** o que estava sendo cortado, como o `R` de
     /// lá: quem aplica usa o botão. Sem essa distinção, uma tecla teria dois
     /// significados conforme o estado, e nenhum aviso de qual valeu.
+    /// Abre o seletor do sistema para importar predefinições do Lightroom.
+    ///
+    /// 🚨 **O laço de colheita sobe antes da resposta**, e não depois: o seletor
+    /// é uma janela do sistema e pode voltar a qualquer momento. Sem isto, os
+    /// arquivos escolhidos ficariam parados no canal até alguma outra coisa
+    /// acordar a tela — um arrasto de slider, por acaso.
+    pub fn importar_do_lightroom(&mut self, cx: &mut Context<Self>) {
+        if self.escolhendo_arquivos {
+            return;
+        }
+        self.escolhendo_arquivos = true;
+        self.relatorio = None;
+        self.escolha_de_presets.escolher(self.arquivos.0.clone());
+        self.esperar_arquivos(cx);
+        cx.notify();
+    }
+
+    /// Acorda a tela de tempos em tempos enquanto o seletor está aberto.
+    fn esperar_arquivos(&mut self, cx: &mut Context<Self>) {
+        cx.spawn(async move |tela, cx| {
+            loop {
+                // ⚠️ Uma espera bem mais longa que a da GPU: aqui do outro lado
+                // há uma pessoa procurando arquivo numa janela do sistema, e
+                // acordar a 8 ms para descobrir que ela ainda não escolheu é
+                // gastar quadro por nada.
+                cx.background_executor()
+                    .timer(Duration::from_millis(120))
+                    .await;
+                let continua = tela
+                    .update(cx, |tela, cx| tela.colher_arquivos(cx))
+                    .unwrap_or(false);
+                if !continua {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    /// Drena o que o seletor mandou. Devolve se vale continuar acordando.
+    fn colher_arquivos(&mut self, cx: &mut Context<Self>) -> bool {
+        let mut chegou = false;
+        while let Ok(arquivos) = self.arquivos.1.try_recv() {
+            chegou = true;
+            self.importar(arquivos, cx);
+        }
+        if chegou {
+            self.escolhendo_arquivos = false;
+            cx.notify();
+        }
+        self.escolhendo_arquivos
+    }
+
+    /// Traduz o que foi lido e guarda o que virou predefinição.
+    ///
+    /// ⚠️ **A lista da tela recebe as novas na hora.** Elas já estão no banco
+    /// pela porta, mas quem acabou de importar quer aplicá-las agora — esperar a
+    /// próxima abertura do app é o mesmo que não ter importado.
+    pub fn importar(&mut self, arquivos: Vec<Arquivo>, cx: &mut Context<Self>) {
+        let nomes: Vec<String> = self.presets.iter().map(|p| p.name.clone()).collect();
+        let (novas, relatorio) = lightroom::preparar(&arquivos, &nomes);
+
+        for traduzida in novas {
+            let preset = Preset::user(traduzida.nome, traduzida.ajustes);
+            self.guarda_de_presets.salvar(preset.clone());
+            self.presets.push(preset);
+        }
+
+        // Nada escolhido não é resultado: quem desiste do seletor não precisa
+        // ler "0 arquivos lidos".
+        self.relatorio = (relatorio.arquivos > 0).then_some(relatorio);
+        cx.notify();
+    }
+
+    /// Fecha o resultado da última importação.
+    pub fn fechar_relatorio(&mut self, cx: &mut Context<Self>) {
+        self.relatorio = None;
+        cx.notify();
+    }
+
     /// Troca o nome de uma predefinição do fotógrafo.
     ///
     /// 🔑 **A lista da tela muda junto com o banco**, e não só depois de
@@ -2205,8 +2303,19 @@ impl Revelacao {
                             .flex_1()
                             .child(Input::new(&self.busca_de_presets).xsmall()),
                     )
-                    .child(self.salvar_como_preset(cx)),
+                    .child(self.salvar_como_preset(cx))
+                    .child(
+                        Button::new("importar-do-lightroom")
+                            .label("↑")
+                            .xsmall()
+                            .tooltip("Importar do Lightroom (.lrtemplate, .xmp)")
+                            .disabled(self.escolhendo_arquivos)
+                            .on_click(cx.listener(|tela, _ev, _window, cx| {
+                                tela.importar_do_lightroom(cx);
+                            })),
+                    ),
             )
+            .children(self.resultado_da_importacao(cx))
             .when(nenhuma, |painel| {
                 painel.child(
                     div()
@@ -2242,6 +2351,56 @@ impl Revelacao {
                          Cada uma escreve só os controles que define — os outros ficam como estão.",
                     ),
             )
+    }
+
+    /// O que a última importação aproveitou — e o que não.
+    ///
+    /// 🔑 **Fica na coluna, e não num diálogo que se fecha sozinho.** A lista de
+    /// recursos ignorados é longa quando os presets são de coleção comercial, e
+    /// ela é a resposta para "por que este preset mudou tão pouco?" — pergunta
+    /// que só aparece depois de aplicar o primeiro.
+    fn resultado_da_importacao(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let relatorio = self.relatorio.as_ref()?;
+
+        Some(
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(2.))
+                .p(px(6.))
+                .rounded(px(4.))
+                .bg(cx.theme().muted)
+                .text_xs()
+                .child(
+                    div()
+                        .flex()
+                        .items_start()
+                        .gap(px(4.))
+                        .child(div().flex_1().child(SharedString::from(relatorio.resumo())))
+                        .child(
+                            Button::new("fechar-relatorio")
+                                .label("✕")
+                                .xsmall()
+                                .ghost()
+                                .tooltip("Fechar o resultado")
+                                .on_click(cx.listener(|tela, _ev, _window, cx| {
+                                    tela.fechar_relatorio(cx);
+                                })),
+                        ),
+                )
+                .children(
+                    relatorio
+                        .linhas()
+                        .into_iter()
+                        .map(|linha| {
+                            div()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(SharedString::from(linha))
+                        })
+                        .collect::<Vec<_>>(),
+                )
+                .into_any_element(),
+        )
     }
 
     /// Um bloco da lista, com o título e a contagem — o desenho do Lightroom.
@@ -3023,6 +3182,7 @@ mod testes {
 
     use domain::entities::preset::PresetAdjustments;
 
+    use super::super::lightroom::mentira::EscolhaDeMentira;
     use super::super::persistencia::mentira::GravadorDeMentira;
     use super::super::presets::mentira::GuardaDeMentira;
 
@@ -3093,9 +3253,28 @@ mod testes {
         guarda: Arc<GuardaDeMentira>,
         presets: Vec<Preset>,
     ) -> gpui::WindowHandle<Revelacao> {
+        com_escolha(
+            cx,
+            previews,
+            gravador,
+            guarda,
+            Arc::new(EscolhaDeMentira::default()),
+            presets,
+        )
+    }
+
+    /// O mesmo, com o seletor de arquivos escolhido — para a importação.
+    fn com_escolha(
+        cx: &mut TestAppContext,
+        previews: Arc<PreviewManager>,
+        gravador: Arc<GravadorDeMentira>,
+        guarda: Arc<GuardaDeMentira>,
+        escolha: Arc<dyn EscolhaDePresets>,
+        presets: Vec<Preset>,
+    ) -> gpui::WindowHandle<Revelacao> {
         cx.update(gpui_component::init);
         let janela = cx.add_window(move |window, cx| {
-            Revelacao::nova(previews, gravador, guarda, presets, window, cx)
+            Revelacao::nova(previews, gravador, guarda, escolha, presets, window, cx)
         });
 
         // 🚨 **O dock é montado aqui também.** Sem esta linha os testes
@@ -3835,6 +4014,160 @@ mod testes {
             .expect("a janela deve estar aberta");
 
         assert_eq!(guarda.apagados(), vec![id]);
+    }
+
+    /// A importação do Lightroom, de ponta a ponta: escolher, traduzir, salvar.
+    ///
+    /// 🔑 **As novas entram na lista da tela na hora.** Elas já vão ao banco
+    /// pela porta, mas quem acabou de importar quer aplicá-las agora — esperar a
+    /// próxima abertura do app é o mesmo que não ter importado.
+    #[gpui::test]
+    fn importar_do_lightroom_traduz_grava_e_entra_na_lista(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        let guarda = Arc::new(GuardaDeMentira::default());
+        let escolha = Arc::new(EscolhaDeMentira::com(vec![
+            Arquivo {
+                nome: "Sepia.xmp".into(),
+                texto: Some(
+                    r#"<x crs:PresetName="Sépia do Estúdio" crs:Saturation="-100"
+                          crs:SplitToningShadowHue="35" crs:SplitToningShadowSaturation="40"
+                          crs:ToneCurvePV2012="0, 22"/>"#
+                        .into(),
+                ),
+            },
+            // Ilegível: nem `.lrtemplate` nem `.xmp` reconhecem.
+            Arquivo {
+                nome: "Foto.jpg".into(),
+                texto: Some("isto não é preset".into()),
+            },
+            // Não deu para ler do disco — outra coisa, e o relatório separa.
+            Arquivo {
+                nome: "Travado.xmp".into(),
+                texto: None,
+            },
+        ]));
+
+        let janela = com_escolha(
+            cx,
+            previews,
+            Arc::new(GravadorDeMentira::default()),
+            guarda.clone(),
+            escolha,
+            Vec::new(),
+        );
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.importar_do_lightroom(cx);
+            })
+            .expect("a janela deve estar aberta");
+
+        // O seletor responde por canal, e a tela colhe num laço acordado.
+        cx.executor().advance_clock(Duration::from_millis(200));
+        cx.run_until_parked();
+
+        janela
+            .update(cx, |tela, _window, _cx| {
+                assert_eq!(
+                    tela.presets
+                        .iter()
+                        .map(|p| p.name.as_str())
+                        .collect::<Vec<_>>(),
+                    ["Sépia do Estúdio"]
+                );
+                let ajustes = &tela.presets[0].adjustments;
+                assert_eq!(ajustes.get("saturation"), Some(-1.0), "-100 vira -1");
+                assert_eq!(ajustes.get("split_shadow_hue"), Some(35.0));
+
+                let relatorio = tela.relatorio.as_ref().expect("houve importação");
+                assert_eq!(relatorio.arquivos, 3);
+                assert_eq!(relatorio.criadas, 1);
+                assert_eq!(relatorio.ilegiveis.len(), 2, "o ilegível e o que não abriu");
+                assert_eq!(relatorio.ignorados, vec![("curva por ponto", 1)]);
+            })
+            .expect("a janela deve estar aberta");
+
+        let salvos = guarda.salvos();
+        assert_eq!(salvos.len(), 1);
+        assert_eq!(salvos[0].name, "Sépia do Estúdio");
+    }
+
+    /// ⚠️ **Nome repetido é pulado, e não sobrescrito.**
+    ///
+    /// Reimportar a mesma pasta é gesto comum — e sobrescrever apagaria o ajuste
+    /// que o fotógrafo fez em cima da predefinição depois de importá-la.
+    #[gpui::test]
+    fn reimportar_a_mesma_pasta_nao_sobrescreve(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        let guarda = Arc::new(GuardaDeMentira::default());
+        let escolha = Arc::new(EscolhaDeMentira::com(vec![Arquivo {
+            nome: "Claro.xmp".into(),
+            texto: Some(r#"<x crs:PresetName="Claro" crs:Exposure2012="0.5"/>"#.into()),
+        }]));
+
+        let janela = com_escolha(
+            cx,
+            previews,
+            Arc::new(GravadorDeMentira::default()),
+            guarda.clone(),
+            escolha,
+            // A mesma predefinição já está lá, com outro valor.
+            vec![Preset::user(
+                "Claro".into(),
+                PresetAdjustments::vazia().com("exposure", 2.0),
+            )],
+        );
+
+        janela
+            .update(cx, |tela, _window, cx| tela.importar_do_lightroom(cx))
+            .expect("a janela deve estar aberta");
+        cx.executor().advance_clock(Duration::from_millis(200));
+        cx.run_until_parked();
+
+        janela
+            .update(cx, |tela, _window, _cx| {
+                assert_eq!(tela.presets.len(), 1);
+                assert_eq!(
+                    tela.presets[0].adjustments.get("exposure"),
+                    Some(2.0),
+                    "a que estava lá continua como estava"
+                );
+                assert_eq!(tela.relatorio.as_ref().expect("houve").repetidas, 1);
+            })
+            .expect("a janela deve estar aberta");
+
+        assert!(guarda.salvos().is_empty());
+    }
+
+    /// Desistir do seletor não deixa relatório: ninguém precisa ler "0 arquivos
+    /// lidos" por ter fechado uma janela.
+    #[gpui::test]
+    fn desistir_do_seletor_nao_deixa_relatorio(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        let janela = com_escolha(
+            cx,
+            previews,
+            Arc::new(GravadorDeMentira::default()),
+            Arc::new(GuardaDeMentira::default()),
+            Arc::new(EscolhaDeMentira::default()),
+            Vec::new(),
+        );
+
+        janela
+            .update(cx, |tela, _window, cx| tela.importar_do_lightroom(cx))
+            .expect("a janela deve estar aberta");
+        cx.executor().advance_clock(Duration::from_millis(200));
+        cx.run_until_parked();
+
+        janela
+            .update(cx, |tela, _window, _cx| {
+                assert!(tela.relatorio.is_none());
+                assert!(
+                    !tela.escolhendo_arquivos,
+                    "e o botão volta a ligar — senão ele fica morto até fechar o app"
+                );
+            })
+            .expect("a janela deve estar aberta");
     }
 
     #[gpui::test]

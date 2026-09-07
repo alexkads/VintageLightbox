@@ -250,6 +250,12 @@ async fn main() {
         controlador_de_presets,
         tokio::runtime::Handle::current(),
     ));
+    // A janela do sistema para escolher `.lrtemplate` e `.xmp`. Porta própria,
+    // e não um método da guarda: guardar é banco, escolher arquivo é sistema
+    // operacional.
+    let escolha_de_presets: Arc<dyn ui_gpui::revelacao::lightroom::EscolhaDePresets> = Arc::new(
+        ui_gpui::revelacao::lightroom::EscolhaNativa::nova(tokio::runtime::Handle::current()),
+    );
     let explorador: Arc<dyn Explorador> = Arc::new(ExploradorDoDisco::novo(
         importacao.clone(),
         tokio::runtime::Handle::current(),
@@ -309,6 +315,7 @@ async fn main() {
                             marcador: marcador.clone(),
                             gerador: gerador.clone(),
                             guarda_de_presets: guarda_de_presets.clone(),
+                            escolha_de_presets: escolha_de_presets.clone(),
                             explorador: explorador.clone(),
                             importador: importador.clone(),
                             seletor: seletor.clone(),

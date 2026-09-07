@@ -39,6 +39,7 @@ use crate::importacao::explorador::mentira::{
 };
 use crate::impressao::porta::mentira::FolhaDeMentira;
 use crate::pos_venda::porta::mentira::PublicadorDeMentira;
+use crate::revelacao::lightroom::mentira::EscolhaDeMentira;
 use crate::revelacao::persistencia::mentira::GravadorDeMentira;
 use crate::revelacao::presets::mentira::GuardaDeMentira;
 use crate::sessoes::arquivos::mentira::SeletorDeMentira as SeletorDeFotosDeMentira;
@@ -135,6 +136,7 @@ fn abrir_o_estudio(cx: &mut TestAppContext, fotos: Vec<PhotoViewModel>) -> Estud
                     marcador,
                     gerador: Arc::new(GeradorDeMentira::default()),
                     guarda_de_presets: Arc::new(GuardaDeMentira::default()),
+                    escolha_de_presets: Arc::new(EscolhaDeMentira::default()),
                     explorador: Arc::new(ExploradorDeMentira::default()),
                     importador: Arc::new(ImportadorDeMentira::default()),
                     seletor: Arc::new(SeletorDeMentira::default()),
@@ -621,6 +623,7 @@ fn nada_acontece_fora_de_uma_sessao(cx: &mut TestAppContext) {
                     marcador: Arc::new(MarcadorDeMentira::default()),
                     gerador: Arc::new(GeradorDeMentira::default()),
                     guarda_de_presets: Arc::new(GuardaDeMentira::default()),
+                    escolha_de_presets: Arc::new(EscolhaDeMentira::default()),
                     explorador: Arc::new(ExploradorDeMentira::default()),
                     importador: Arc::new(ImportadorDeMentira::default()),
                     seletor: Arc::new(SeletorDeMentira::default()),

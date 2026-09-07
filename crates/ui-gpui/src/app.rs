@@ -61,6 +61,8 @@ pub struct Portas {
     pub marcador: Arc<dyn Marcador>,
     pub gerador: Arc<dyn GeradorDeMiniaturas>,
     pub guarda_de_presets: Arc<dyn GuardaDePresets>,
+    /// Quem abre a janela do sistema para escolher `.lrtemplate` e `.xmp`.
+    pub escolha_de_presets: Arc<dyn crate::revelacao::lightroom::EscolhaDePresets>,
     pub explorador: Arc<dyn Explorador>,
     pub importador: Arc<dyn Importador>,
     pub seletor: Arc<dyn SeletorDePasta>,
@@ -390,6 +392,7 @@ impl Aplicativo {
                 previews,
                 portas.gravador,
                 portas.guarda_de_presets,
+                portas.escolha_de_presets,
                 presets,
                 window,
                 cx,
@@ -2369,6 +2372,7 @@ mod testes {
     };
     use crate::impressao::porta::mentira::FolhaDeMentira;
     use crate::pos_venda::porta::mentira::PublicadorDeMentira;
+    use crate::revelacao::lightroom::mentira::EscolhaDeMentira;
     use crate::revelacao::persistencia::mentira::GravadorDeMentira;
     use crate::revelacao::presets::mentira::GuardaDeMentira;
 
@@ -2384,6 +2388,7 @@ mod testes {
             marcador: Arc::new(MarcadorDeMentira::default()),
             gerador: Arc::new(GeradorDeMentira::default()),
             guarda_de_presets: Arc::new(GuardaDeMentira::default()),
+            escolha_de_presets: Arc::new(EscolhaDeMentira::default()),
             explorador: Arc::new(ExploradorDeMentira::default()),
             importador: Arc::new(ImportadorDeMentira::default()),
             seletor: Arc::new(SeletorDeMentira::default()),
