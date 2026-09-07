@@ -1315,6 +1315,115 @@ impl Revelacao {
         continua
     }
 
+    /// A barra da Revelação, em cima da foto — a do site (`editor.tsx`).
+    ///
+    /// 🚨 **Desfazer, refazer, "Antes" e "Enquadrar" só existiam como tecla.**
+    /// `Cmd+Z`, `\\` e `C` funcionam desde sempre, e nada na tela dizia que
+    /// existiam: quem abria a Revelação pela primeira vez via a foto, os
+    /// sliders, e nenhum caminho de volta. O site tem os quatro na barra, e é
+    /// de lá que este desenho vem.
+    ///
+    /// ⚠️ **Exportar e publicar não estão aqui**, e é diferença de propósito. O
+    /// "Baixar JPEG" e o "Salvar na galeria e sair" do site são os botões
+    /// "Exportar" e "Pós-venda" da barra do app, que valem para a seleção
+    /// inteira e não só para a foto aberta — repeti-los aqui daria dois
+    /// caminhos com desfechos diferentes para o mesmo verbo.
+    fn barra_da_revelacao(&self, cx: &mut Context<Self>) -> AnyElement {
+        let total = self.acervo.len();
+        let posicao = self.posicao();
+        let nome = self
+            .foto()
+            .map(|foto| foto.name.clone())
+            .unwrap_or_default();
+
+        div()
+            .flex()
+            .items_center()
+            .gap(px(4.))
+            .px(px(8.))
+            .py(px(5.))
+            .bg(cx.theme().title_bar)
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .child(
+                Button::new("revelacao-anterior")
+                    .label("‹")
+                    .xsmall()
+                    .ghost()
+                    .tooltip("Foto anterior (seta para a esquerda)")
+                    .disabled(posicao == 0 || total <= 1)
+                    .on_click(cx.listener(|tela, _ev, window, cx| tela.andar(-1, window, cx))),
+            )
+            .child(
+                Button::new("revelacao-proxima")
+                    .label("›")
+                    .xsmall()
+                    .ghost()
+                    .tooltip("Próxima foto (seta para a direita)")
+                    .disabled(total <= 1 || posicao + 1 >= total)
+                    .on_click(cx.listener(|tela, _ev, window, cx| tela.andar(1, window, cx))),
+            )
+            // 🔑 "3/200" antes do nome, e não só o nome: revelar é trabalho de
+            // lote, e a pergunta que se faz a cada foto é "quanto falta".
+            .when(total > 1, |barra| {
+                barra.child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(SharedString::from(format!("{}/{total}", posicao + 1))),
+                )
+            })
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.))
+                    .truncate()
+                    .text_xs()
+                    .child(SharedString::from(nome)),
+            )
+            .child(
+                Button::new("revelacao-desfazer")
+                    .label("Desfazer")
+                    .xsmall()
+                    .ghost()
+                    .tooltip("Desfazer (Cmd+Z)")
+                    .disabled(!self.pode_desfazer())
+                    .on_click(cx.listener(|tela, _ev, window, cx| tela.desfazer(window, cx))),
+            )
+            .child(
+                Button::new("revelacao-refazer")
+                    .label("Refazer")
+                    .xsmall()
+                    .ghost()
+                    .tooltip("Refazer (Cmd+Shift+Z)")
+                    .disabled(!self.pode_refazer())
+                    .on_click(cx.listener(|tela, _ev, window, cx| tela.refazer(window, cx))),
+            )
+            .child(
+                Button::new("revelacao-antes")
+                    .label("Antes")
+                    .xsmall()
+                    .tooltip("Ver a foto sem ajuste (\\)")
+                    .when(self.mostrando_original, |b| {
+                        b.custom(tema::botao_quente(cx))
+                    })
+                    .selected(self.mostrando_original)
+                    .disabled(self.aberta.is_none())
+                    .on_click(cx.listener(|tela, _ev, _window, cx| tela.alternar_original(cx))),
+            )
+            .child(
+                Button::new("revelacao-enquadrar")
+                    .label("Enquadrar")
+                    .xsmall()
+                    .tooltip("Girar, espelhar, endireitar e recortar (C)")
+                    .when(self.cortando(), |b| b.custom(tema::botao_quente(cx)))
+                    .selected(self.cortando())
+                    .disabled(!self.tem_pixels())
+                    .on_click(cx.listener(|tela, _ev, window, cx| tela.alternar_corte(window, cx))),
+            )
+            .into_any_element()
+    }
+
     fn palco(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
         // 🚨 **`size_full`, e não `flex_1`.** Esta moldura era filha de uma
         // linha flex antes do dock; hoje ela é a **raiz de um painel**, e
@@ -2571,7 +2680,16 @@ impl Revelacao {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         match qual {
-            Qual::Palco => self.palco(cx),
+            // A barra fica **dentro** do painel da foto, e não numa faixa
+            // própria do dock: ela fala da foto que está aberta, e um painel
+            // arrastável para longe dela diria o contrário.
+            Qual::Palco => div()
+                .flex()
+                .flex_col()
+                .size_full()
+                .child(self.barra_da_revelacao(cx))
+                .child(div().flex_1().min_h(px(0.)).child(self.palco(cx)))
+                .into_any_element(),
             Qual::Ajustes => self.painel(cx).into_any_element(),
             Qual::Graficos => self.painel_dos_graficos(cx).into_any_element(),
             Qual::Presets => self.painel_dos_presets(cx).into_any_element(),
