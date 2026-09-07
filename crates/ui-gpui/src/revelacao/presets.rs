@@ -1,19 +1,22 @@
 //! Presets: um punhado de ajustes com nome, aplicados de uma vez.
 //!
-//! A entidade, os cinco de sistema e a gravação já existem nas camadas internas
-//! (`domain::entities::Preset`, `use_cases::presets`), intactas — aqui é só a
-//! ponte entre [`PresetAdjustments`] e os [`Ajustes`] que o motor usa.
+//! A entidade, os sete de sistema e a gravação existem nas camadas internas
+//! (`domain::entities::Preset`, `use_cases::presets`) — aqui é a ponte entre o
+//! mapa `nome → valor` que elas guardam e os [`Ajustes`] que o motor usa.
 //!
-//! ## ⚠️ Um preset move 15 dos 46 ajustes
+//! ## ✅ Um preset move qualquer um dos 53 — desde 7/set/2026
 //!
-//! `PresetAdjustments` tem os 11 do Básico e os 4 da curva de tons. HSL, lente,
-//! ruído e nitidez não estão lá — aplicar um preset **não zera** o que eles têm
-//! hoje, e é o comportamento do legado (`dock_viewer::apply_preset` só escreve o
-//! que o preset traz, campo a campo, e só quando é `Some`).
+//! 🚨 **Eram 15**: os 11 do Básico e os 4 da curva de tons, uma coluna por
+//! campo numa tabela escrita quando o motor só tinha esses ajustes. Ela não
+//! cresceu junto com o shader, e o efeito era mudo — salvar uma predefinição
+//! com HSL, nitidez ou tonalização gravava o nome e **descartava** os campos
+//! que não tinham coluna. É por isso que "Sépia à moda antiga" não existia
+//! aqui: a sépia se faz com tonalização.
 //!
-//! 🔑 É a mesma contagem de 15 do exportador, e não é coincidência: as duas
-//! listas foram escritas quando o app só tinha esses ajustes, e nenhuma das duas
-//! cresceu junto com o shader.
+//! Agora é um mapa esparso (`PresetAdjustments`), com os nomes de
+//! [`Ajustes::NOMES`] — os mesmos que o shader lê por posição e que o site
+//! manda em `nomes.json`. **Nome desconhecido é ignorado**, e campo ausente
+//! continua não sendo tocado.
 
 use std::sync::Arc;
 
@@ -59,62 +62,62 @@ impl GuardaDePresets for GuardaDoBanco {
 
 /// Aplica o preset sobre os ajustes de agora.
 ///
-/// Campo `None` **não** é tocado: o preset diz o que muda, e o que ele não
-/// menciona continua como está. É o que permite aplicar "Warm" sobre uma foto já
-/// revelada sem perder o resto do trabalho.
+/// Campo ausente **não** é tocado: o preset diz o que muda, e o que ele não
+/// menciona continua como está. É o que permite aplicar "Hora dourada" sobre uma
+/// foto já revelada sem perder o resto do trabalho — e é o que o site faz.
+///
+/// ⚠️ **Nome que o motor não conhece é ignorado, e não é erro.** Um preset
+/// gravado por uma versão mais nova (ou traduzido de um `.xmp` do Lightroom com
+/// recurso que este motor não tem) aplica o que dá e deixa o resto quieto. O
+/// contrário — recusar o preset inteiro — perderia oito ajustes bons por causa
+/// de um nome desconhecido.
 pub fn aplicar(ajustes: &mut Ajustes, preset: &PresetAdjustments) {
-    macro_rules! escrever {
-        ($($campo:ident),* $(,)?) => {
-            $(if let Some(valor) = preset.$campo {
-                ajustes.$campo = valor;
-            })*
-        };
+    let mut vetor = ajustes.como_vetor();
+    for (campo, valor) in preset.iter() {
+        if let Some(posicao) = posicao_de(campo) {
+            vetor[posicao] = valor;
+        }
     }
+    *ajustes =
+        Ajustes::de_vetor(&vetor).expect("o vetor saiu de `como_vetor`, tem o tamanho certo");
+}
 
-    escrever!(
-        exposure,
-        contrast,
-        temperature,
-        tint,
-        highlights,
-        shadows,
-        whites,
-        blacks,
-        clarity,
-        vibrance,
-        saturation,
-        tone_curve_shadows,
-        tone_curve_darks,
-        tone_curve_lights,
-        tone_curve_highlights,
-    );
+/// A posição de um campo no vetor do shader, pelo nome.
+///
+/// 🔑 **É a única ponte entre o texto que o banco guarda e o `f32` que a GPU
+/// recebe.** `Ajustes::NOMES` é a mesma lista que o `struct Params` do WGSL
+/// declara por posição e que o site recebe em `nomes.json`.
+fn posicao_de(campo: &str) -> Option<usize> {
+    Ajustes::NOMES.iter().position(|nome| *nome == campo)
 }
 
 /// O que virar preset a partir do que está na tela.
 ///
-/// Todos os 15 como `Some`, e não só o que difere do neutro: um preset que
-/// gravasse apenas o alterado se comportaria diferente conforme a foto em que
-/// foi criado — "Warm" feito numa foto contrastada carregaria o contraste dela;
-/// feito numa foto neutra, não. O legado grava a partir de `&Photo`, que também
-/// leva os campos todos.
-pub fn dos_ajustes(ajustes: &Ajustes) -> PresetAdjustments {
-    PresetAdjustments {
-        exposure: Some(ajustes.exposure),
-        contrast: Some(ajustes.contrast),
-        temperature: Some(ajustes.temperature),
-        tint: Some(ajustes.tint),
-        highlights: Some(ajustes.highlights),
-        shadows: Some(ajustes.shadows),
-        whites: Some(ajustes.whites),
-        blacks: Some(ajustes.blacks),
-        clarity: Some(ajustes.clarity),
-        vibrance: Some(ajustes.vibrance),
-        saturation: Some(ajustes.saturation),
-        tone_curve_shadows: Some(ajustes.tone_curve_shadows),
-        tone_curve_darks: Some(ajustes.tone_curve_darks),
-        tone_curve_lights: Some(ajustes.tone_curve_lights),
-        tone_curve_highlights: Some(ajustes.tone_curve_highlights),
-    }
+/// 🔑 **Só o que saiu do neutro**, como no site (`soOsAlterados`). Um preset é
+/// "o que eu mexi", e não "o estado desta foto": guardar os 53 faria a segunda
+/// predefinição aplicada apagar a primeira, e uma de nitidez por cima de uma de
+/// cor devolveria a cor ao neutro sem dizer nada.
+///
+/// ⚠️ **`inteiro` é o contrário disso, e é escolha de quem salva.** É a caixa
+/// "Zerar os outros ajustes ao aplicar" do site: a predefinição que é um visual
+/// completo guarda os 53 — inclusive os neutros — e aplicar devolve ao neutro o
+/// que ela não menciona. Não precisa de campo novo: guardar tudo já é isso.
+pub fn dos_ajustes(ajustes: &Ajustes, inteiro: bool) -> PresetAdjustments {
+    let neutro = Ajustes::default().como_vetor();
+    let valores = ajustes.como_vetor();
+
+    Ajustes::NOMES
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| inteiro || valores[*i] != neutro[*i])
+        .map(|(i, nome)| (*nome, valores[i]))
+        .collect()
+}
+
+/// Quantos dos 53 este preset escreve — o número que a lista mostra ao lado do
+/// nome, como no site.
+pub fn quantos_campos(preset: &Preset) -> usize {
+    preset.adjustments.len()
 }
 
 /// Separa os de sistema dos do usuário, mantendo a ordem de cada grupo.
@@ -169,57 +172,93 @@ mod testes {
 
         aplicar(
             &mut ajustes,
-            &PresetAdjustments {
-                temperature: Some(15.0),
-                ..Default::default()
-            },
+            &PresetAdjustments::vazia().com("temperature", 5.0),
         );
 
-        assert_eq!(ajustes.temperature, 15.0);
+        assert_eq!(ajustes.temperature, 5.0);
         assert_eq!(ajustes.exposure, 1.0, "o que o preset não menciona fica");
         assert_eq!(ajustes.saturation, 0.5);
-        assert_eq!(
-            ajustes.hsl_blue_lum, -30.0,
-            "HSL não está em PresetAdjustments — nem para escrever, nem para zerar"
-        );
+        assert_eq!(ajustes.hsl_blue_lum, -30.0);
     }
 
-    /// 🔑 Ida e volta: o que vira preset volta igual.
+    /// ✅ **Agora um preset alcança HSL, nitidez, lente, tonalização e grão.**
+    ///
+    /// 🚨 Este teste era `os_quinze_campos_atravessam_a_ida_e_a_volta`, e a
+    /// última asserção dele afirmava o defeito: *"os 31 de fora do preset não
+    /// viajam"*. Viajavam para lugar nenhum porque a tabela não tinha coluna
+    /// para eles — salvar era perder, calado.
     #[test]
-    fn os_quinze_campos_atravessam_a_ida_e_a_volta() {
+    fn os_53_campos_atravessam_a_ida_e_a_volta() {
         let original = Ajustes {
             exposure: 1.25,
             contrast: 1.4,
             temperature: -3.0,
-            tint: 2.0,
-            highlights: -40.0,
-            shadows: 30.0,
-            whites: 10.0,
-            blacks: -10.0,
-            clarity: 0.3,
-            vibrance: 0.2,
-            saturation: -0.5,
-            tone_curve_shadows: 5.0,
-            tone_curve_darks: -5.0,
-            tone_curve_lights: 8.0,
-            tone_curve_highlights: -8.0,
-            // Um dos 31 que o preset não carrega, para provar que ele não volta.
+            hsl_red_sat: 60.0,
+            hsl_blue_lum: -20.0,
+            sharpen_amount: 40.0,
+            lens_vignette_amount: -25.0,
+            split_shadow_hue: 35.0,
+            split_shadow_sat: 45.0,
+            grain_amount: 30.0,
+            ..Default::default()
+        };
+
+        let preset = dos_ajustes(&original, false);
+        let mut destino = Ajustes::default();
+        aplicar(&mut destino, &preset);
+
+        assert_eq!(destino, original, "os 53, campo a campo");
+    }
+
+    /// ⚠️ **Só o que saiu do neutro vira preset** — é o que o site guarda.
+    ///
+    /// Guardar os 53 sempre faria a segunda predefinição aplicada apagar a
+    /// primeira: uma de nitidez por cima de uma de cor devolveria a cor ao
+    /// neutro, sem que nada acusasse.
+    #[test]
+    fn o_preset_guarda_so_o_que_saiu_do_neutro() {
+        let ajustes = Ajustes {
+            exposure: 1.25,
             hsl_red_sat: 60.0,
             ..Default::default()
         };
 
-        let preset = dos_ajustes(&original);
-        let mut destino = Ajustes::default();
-        aplicar(&mut destino, &preset);
-
-        assert_eq!(destino.exposure, 1.25);
-        assert_eq!(destino.contrast, 1.4);
-        assert_eq!(destino.saturation, -0.5);
-        assert_eq!(destino.tone_curve_highlights, -8.0);
+        let preset = dos_ajustes(&ajustes, false);
+        assert_eq!(preset.len(), 2);
+        assert_eq!(preset.get("exposure"), Some(1.25));
+        assert_eq!(preset.get("hsl_red_sat"), Some(60.0));
         assert_eq!(
-            destino.hsl_red_sat, 0.0,
-            "os 31 de fora do preset não viajam — inclusive quando a origem os tinha"
+            preset.get("contrast"),
+            None,
+            "o contraste está no neutro (1,0), e neutro não é alteração"
         );
+    }
+
+    /// E o preset "inteiro" guarda os 53 — a caixa "Zerar os outros ajustes ao
+    /// aplicar" do site. Aplicar um destes devolve ao neutro o que ele não
+    /// menciona, porque ele menciona tudo.
+    #[test]
+    fn o_preset_inteiro_guarda_os_53_e_apaga_o_que_havia() {
+        let visual = dos_ajustes(
+            &Ajustes {
+                saturation: -1.0,
+                ..Default::default()
+            },
+            true,
+        );
+        assert_eq!(visual.len(), 53);
+
+        let mut destino = Ajustes {
+            exposure: 2.0,
+            hsl_red_sat: 60.0,
+            ..Default::default()
+        };
+        aplicar(&mut destino, &visual);
+
+        assert_eq!(destino.saturation, -1.0);
+        assert_eq!(destino.exposure, 0.0, "o que ele não pediu volta ao neutro");
+        assert_eq!(destino.hsl_red_sat, 0.0);
+        assert_eq!(destino.contrast, 1.0, "e neutro é 1,0, não zero");
     }
 
     /// ⚠️ Aplicar preset **por cima** de outro não acumula: o segundo manda nos
@@ -230,33 +269,67 @@ mod testes {
 
         aplicar(
             &mut ajustes,
-            &PresetAdjustments {
-                temperature: Some(15.0),
-                saturation: Some(-1.0),
-                ..Default::default()
-            },
+            &PresetAdjustments::vazia()
+                .com("temperature", 5.0)
+                .com("saturation", -1.0),
         );
         aplicar(
             &mut ajustes,
-            &PresetAdjustments {
-                temperature: Some(-15.0),
-                ..Default::default()
-            },
+            &PresetAdjustments::vazia().com("temperature", -5.0),
         );
 
-        assert_eq!(ajustes.temperature, -15.0);
+        assert_eq!(ajustes.temperature, -5.0);
         assert_eq!(
             ajustes.saturation, -1.0,
             "o que o segundo não traz sobrevive"
         );
     }
 
+    /// 🚨 **Nome que o motor não conhece não derruba o preset.**
+    ///
+    /// O banco guarda texto, e nada impede um campo escrito por uma versão mais
+    /// nova — ou traduzido de um `.xmp` do Lightroom com recurso que este motor
+    /// não tem. Recusar o preset inteiro por causa de um nome perderia os oito
+    /// ajustes bons junto com o desconhecido.
+    #[test]
+    fn campo_desconhecido_e_ignorado_sem_levar_os_outros() {
+        let mut ajustes = Ajustes::default();
+
+        aplicar(
+            &mut ajustes,
+            &PresetAdjustments::vazia()
+                .com("dehaze", 40.0)
+                .com("exposure", 1.0),
+        );
+
+        assert_eq!(ajustes.exposure, 1.0);
+    }
+
+    /// 🔑 **Toda predefinição de sistema escreve num campo que o motor tem.**
+    ///
+    /// Os sete nascem no `use-cases`, que não conhece o `revelacao-core` — o
+    /// nome de campo lá é texto solto, e um erro de digitação em
+    /// `"split_shadow_hue"` daria uma predefinição que aplica **quase** tudo,
+    /// sem erro nenhum. Este é o único lugar do workspace que vê as duas listas.
+    #[test]
+    fn nenhuma_predefinicao_de_sistema_escreve_em_campo_inventado() {
+        for preset in use_cases::presets::presets_de_sistema() {
+            for campo in preset.adjustments.campos() {
+                assert!(
+                    posicao_de(campo).is_some(),
+                    "\"{}\" escreve em `{campo}`, que não está em `Ajustes::NOMES`",
+                    preset.name
+                );
+            }
+        }
+    }
+
     #[test]
     fn separar_respeita_a_ordem_de_cada_grupo() {
         let presets = vec![
-            Preset::system("Warm", PresetAdjustments::default()),
-            Preset::user("Meu".into(), PresetAdjustments::default()),
-            Preset::system("Cool", PresetAdjustments::default()),
+            Preset::system("Warm", PresetAdjustments::vazia()),
+            Preset::user("Meu".into(), PresetAdjustments::vazia()),
+            Preset::system("Cool", PresetAdjustments::vazia()),
         ];
 
         let (sistema, usuario) = separar(&presets);

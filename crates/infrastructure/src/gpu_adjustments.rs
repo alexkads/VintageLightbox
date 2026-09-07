@@ -173,12 +173,12 @@ mod testes {
     fn o_preset_bw_deixa_a_foto_em_preto_e_branco() {
         let bw = use_cases::presets::presets_de_sistema()
             .into_iter()
-            .find(|preset| preset.name == "B&W")
-            .expect("o preset de sistema \"B&W\" sumiu da lista");
+            .find(|preset| preset.name == "Preto e branco clássico")
+            .expect("o preset de sistema \"Preto e branco clássico\" sumiu da lista");
         let saturacao = bw
             .adjustments
-            .saturation
-            .expect("o \"B&W\" é sobre saturação — sem ela ele não é nada");
+            .get("saturation")
+            .expect("ele é sobre saturação — sem ela não é preto e branco nenhum");
 
         let mut motor = motor_pronto();
         let entrada = amostra();

@@ -817,7 +817,7 @@ impl Revelacao {
             return;
         }
 
-        let ajustes = presets::dos_ajustes(&self.ajustes);
+        let ajustes = presets::dos_ajustes(&self.ajustes, false);
         self.guarda_de_presets.salvar(nome.clone(), ajustes.clone());
         self.presets.push(Preset::user(nome, ajustes));
 
@@ -3333,11 +3333,8 @@ mod testes {
 
         let gravador = Arc::new(GravadorDeMentira::default());
         let preset = Preset::system(
-            "Warm",
-            PresetAdjustments {
-                temperature: Some(5.0),
-                ..Default::default()
-            },
+            "Hora dourada",
+            PresetAdjustments::vazia().com("temperature", 5.0),
         );
         let janela = com_presets(cx, previews, gravador.clone(), vec![preset.clone()]);
 
@@ -3427,24 +3424,20 @@ mod testes {
 
     /// 🚨 O preset não zera o que ele não menciona.
     ///
-    /// `PresetAdjustments` tem 15 dos 46 campos. Um preset aplicado sobre uma
-    /// foto com HSL trabalhado não pode apagar o HSL — é o comportamento do
-    /// legado (`apply_preset` escreve campo a campo, só o que é `Some`), e o
-    /// contrário destruiria trabalho sem aviso.
+    /// ⚠️ Um preset escreve **o que ele traz**, e o resto fica.
+    ///
+    /// Um aplicado sobre uma foto com HSL trabalhado não pode apagar o HSL. Era
+    /// verdade por acidente — `PresetAdjustments` não tinha campo de HSL para
+    /// escrever —, e agora é verdade por decisão: campo ausente do mapa não é
+    /// tocado. Quem quiser apagar guarda os 53, e é escolha de quem salva.
     #[gpui::test]
-    fn o_preset_nao_apaga_os_31_campos_que_ele_nao_tem(cx: &mut TestAppContext) {
+    fn o_preset_nao_apaga_o_que_ele_nao_menciona(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         previews
             .save_preview("id-retrato.jpg", &foto_cinza())
             .expect("gravar preview");
 
-        let preset = Preset::system(
-            "Cool",
-            PresetAdjustments {
-                temperature: Some(-5.0),
-                ..Default::default()
-            },
-        );
+        let preset = Preset::system("Frio", PresetAdjustments::vazia().com("temperature", -5.0));
         let janela = com_presets(
             cx,
             previews,
@@ -3523,12 +3516,16 @@ mod testes {
         let salvos = guarda.salvos();
         assert_eq!(salvos.len(), 1);
         assert_eq!(salvos[0].0, "Retrato claro");
-        assert_eq!(salvos[0].1.exposure, Some(1.5), "guarda o que está na tela");
         assert_eq!(
-            salvos[0].1.contrast,
-            Some(1.0),
-            "os 15 vão inteiros, e não só os que diferem do neutro"
+            salvos[0].1.get("exposure"),
+            Some(1.5),
+            "guarda o que está na tela"
         );
+        // 🔑 **Só o que saiu do neutro**, como no site. Iam os 15 inteiros — e
+        // com isso a segunda predefinição aplicada apagava a primeira, porque
+        // ela escrevia o neutro por cima do que já estava lá.
+        assert_eq!(salvos[0].1.len(), 1);
+        assert_eq!(salvos[0].1.get("contrast"), None);
     }
 
     /// 🚨 Nome vazio (ou só espaços) não salva.
