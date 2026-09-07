@@ -251,6 +251,15 @@ impl PosVendaApi for PosVendaApiHttp {
         // ou já gasto. Para quem está na frente do app as duas terminam do mesmo
         // jeito — autorizar de novo, talvez com outra conta.
         if matches!(resposta.status().as_u16(), 400 | 401 | 403) {
+            // 🚨 Os dois endereços vão para o log, e é por causa de um caso real
+            // (6/set/2026): o operador autorizou em **produção**, viu
+            // "Computador autorizado" no navegador, e o app recusou — porque
+            // apresentou o código à API **local**, que não assinou nada daquilo.
+            // Da tela, os dois desfechos são a mesma frase; aqui eles se separam.
+            eprintln!(
+                "⚠️  Autorização recusada. Site que autorizou: {} · API que recusou: {}",
+                self.site, self.base
+            );
             return Err(DomainError::AcessoRecusado);
         }
 

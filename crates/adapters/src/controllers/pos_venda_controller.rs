@@ -191,7 +191,16 @@ impl PosVendaController {
 
 fn frase(erro: DomainError) -> String {
     match erro {
-        DomainError::AcessoRecusado => "e-mail ou senha recusados pelo site".to_string(),
+        // ⚠️ Esta frase falava de **senha** até 6/set/2026, e a senha deixou de
+        // passar por aqui — o operador via "e-mail ou senha recusados" depois de
+        // um fluxo em que não digitou nem um nem outro. As três causas reais são
+        // as citadas: conta sem acesso, sessão vencida, ou o código que expirou
+        // enquanto a janela do navegador ficava aberta.
+        DomainError::AcessoRecusado => {
+            "o site recusou a autorização — confira se entrou com a conta do estúdio, \
+             e tente de novo"
+                .to_string()
+        }
         outro => outro.to_string(),
     }
 }

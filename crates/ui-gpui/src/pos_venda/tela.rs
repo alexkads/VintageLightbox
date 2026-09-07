@@ -467,7 +467,7 @@ impl PosVenda {
                     .child(format!(
                         "A sessão do estúdio venceu. O navegador vai abrir para \
                          você entrar em {} de novo.",
-                        self.config.base_url
+                        self.config.site()
                     )),
             )
             .child(

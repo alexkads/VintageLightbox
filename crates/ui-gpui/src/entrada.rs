@@ -229,10 +229,15 @@ impl Render for Entrada {
                                  Esta janela continua sozinha quando você voltar."
                                     .to_string()
                             } else {
+                                // O endereço mostrado é o do **site**, não o da
+                                // API: é nele que o operador vai entrar, e
+                                // anunciar a API aqui foi o que fez o dono ler
+                                // "entrar em http://localhost:8080" numa tela
+                                // que ia abrir produção (6/set/2026).
                                 format!(
                                     "O navegador vai abrir para você entrar em {}. \
                                      A senha não passa por aqui.",
-                                    self.config.base_url
+                                    self.config.site()
                                 )
                             }),
                     )

@@ -123,6 +123,15 @@ são três coisas de uma vez: a senha do estúdio deixa de ser digitada num
 aplicativo desktop, o Google passa a servir para o app, e a sessão passa a durar
 **quinze dias** em vez de quinze minutos.
 
+🚨 **O site e a API são dois endereços, e misturá-los falha sem dizer por quê**
+(achado do dono no primeiro uso, 6/set/2026). Com a API em `localhost:8080` e o
+site em produção, o operador autoriza, o navegador diz **"Computador
+autorizado"** — e o app responde "recusado": o código foi assinado pelo servidor
+de produção e apresentado ao local, que não assinou nada daquilo. Desde então o
+site é **deduzido da API** (`config::site_para`: `api.recordarfotos.com.br` →
+`recordarfotos.com.br`; `localhost:8080` → `localhost:8001`), a tela anuncia o
+**site** e não a API, e a recusa imprime os dois endereços no log.
+
 ⚠️ **O código que volta pelo `localhost` não é sessão.** Ele vale dois minutos,
 uma vez, e só vira tokens nas mãos de quem sabe o verificador — 32 bytes
 sorteados que nunca saem da máquina. Sem isso, quem interceptasse o
