@@ -100,7 +100,7 @@ cargo clippy -p biblioteca-web --target wasm32-unknown-unknown -- -D warnings
 make mac                 # .app + .dmg universal (só no macOS)
 make linux               # .deb + .AppImage    (só num Linux)
 .\scripts\empacotar.ps1  # .msi + .exe         (só num Windows 11)
-make publicar            # sobe dist/ para o site — sempre do Mac, é onde está a chave
+make lancar              # marca a tag; o GitHub Actions gera as tres e publica
 # 🔑 **Uma máquina por plataforma, e isso é decisão de desenho** (dono,
 #    7/set/2026: *"quero deixar tudo nativo mesmo"*). O `empacotar.sh` gera **só
 #    o sistema em que ele roda**; um alvo de outro sistema recusa de imediato.
@@ -225,11 +225,17 @@ e `--bin medir-abertura`.
 exporta nada, e nada acusa isso: os testes das camadas de dentro passam todos. Camada pronta não é
 funcionalidade entregue; a pergunta é sempre **"que clique chega até aqui?"**.
 
-## A distribuição: fora das lojas, e o app se atualiza sozinho
+## A distribuição: projeto aberto, fora das lojas, e o app se atualiza sozinho
 
-O app **não passa pela App Store nem pela Microsoft Store** (decisão do dono, 7/set/2026). Ele é
-gerado aqui, publicado em `recordarfotos.com.br/vintageLightbox` e, a partir da primeira instalação,
-se atualiza sozinho. O caminho inteiro está em [`empacotamento/README.md`](empacotamento/README.md).
+O VintageLightbox é **software livre sob licença MIT** (7/set/2026) e **não passa por loja nenhuma**.
+Ele é baixado de `alexkads.github.io/VintageLightbox` e, a partir da primeira instalação, se atualiza
+sozinho. O caminho inteiro está em [`empacotamento/README.md`](empacotamento/README.md).
+
+**Lançar é `make lancar`** — ele empurra a tag, e o GitHub Actions compila as três plataformas, cada
+uma no sistema dela, cria o Release e publica o manifesto no Pages.
+
+🔑 **Não há credencial de nuvem no lançamento.** Foi o ganho da mudança: a versão anterior publicava
+no Supabase Storage e exigia a `SUPABASE_SERVICE_ROLE_KEY`. Hoje a única chave é a minisign.
 
 🔑 **O que substitui a loja é a assinatura minisign.** Cada pacote é assinado por
 `scripts/empacotar.sh`; a chave **pública** é compilada dentro do app
@@ -240,9 +246,9 @@ fora do repositório. O app baixa, confere e só então instala.
 aceitam pacote assinado por ela, e isso não se conserta pelo software. Trocar `chave-publica.txt` por
 uma que não corresponda transforma toda atualização em "assinatura inválida", em silêncio.
 
-⚠️ **Publicar sem subir a versão do `[workspace.package]` não faz nada**: o app compara a própria
-`CARGO_PKG_VERSION` com a do manifesto. E `packager.toml` carrega a mesma versão — o script aborta se
-as duas divergirem.
+⚠️ **Lançar sem subir a versão do `[workspace.package]` não atualiza ninguém**: o app compara a
+própria `CARGO_PKG_VERSION` com a do manifesto. O `packager.toml` carrega a mesma versão, e o
+`make lancar` recusa se as duas divergirem — ou se a árvore estiver suja.
 
 ## Portas para o mundo assíncrono — o padrão da casa
 

@@ -22,7 +22,6 @@
 #    `empacotamento/README.md` — leia antes de reconstruir qualquer uma delas.
 #
 # Opções:
-#   --publicar    sobe o resultado para recordarfotos.com.br/vintageLightbox
 #   --assinar     assina e notariza o macOS (exige Developer ID + credenciais)
 #   --limpo       apaga dist/ antes
 #   --seco        mostra o que faria, sem compilar nada
@@ -50,11 +49,10 @@ BIN="ui-gpui"
 #    guarde uma cópia em lugar seguro.
 CHAVE="${VLB_CHAVE_ATUALIZACAO:-$HOME/.vintagelightbox/atualizacao.key}"
 
-ASSINAR=0; LIMPO=0; SECO=0; PUBLICAR=0; ALVOS=()
+ASSINAR=0; LIMPO=0; SECO=0; ALVOS=()
 
 for arg in "$@"; do
   case "$arg" in
-    --publicar) PUBLICAR=1 ;;
     --assinar) ASSINAR=1 ;;
     --limpo)   LIMPO=1 ;;
     --seco)    SECO=1 ;;
@@ -414,20 +412,7 @@ fi
 
 if [[ ${#FALHOU[@]} -gt 0 ]]; then
   echo; aviso "não saíram: ${FALHOU[*]}"
-  # 🚨 Não publica pela metade. Um lançamento com o macOS dentro e o Windows
-  # fora vira `ultima.json` sem `windows-x86_64`, e todo Windows instalado passa
-  # a receber 204 — "nada novo" — para uma versão que existe. Publicar é ato
-  # separado justamente para poder ser refeito depois que o alvo que faltou sair.
-  [[ $PUBLICAR -eq 1 ]] && aviso "e por isso não publiquei — rode ./scripts/publicar.py quando estiver completo"
   exit 1
 fi
 
-if [[ $PUBLICAR -eq 1 ]]; then
-  diga "publicando em recordarfotos.com.br/vintageLightbox"
-  if [[ $SECO -eq 1 ]]; then
-    correr "$RAIZ/scripts/publicar.py" --seco
-  else
-    "$RAIZ/scripts/publicar.py"
-  fi
-fi
 ok "pronto"

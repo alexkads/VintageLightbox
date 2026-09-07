@@ -113,25 +113,42 @@ causa.
    fragmentos de linha. O sintoma foi `line 309: --publicar: command not found`, numa linha que não
    tem nada disso.
 
-## Publicar
+## Lançar
 
-`scripts/publicar.py` precisa de duas variáveis — no ambiente ou em
-`~/.vintagelightbox/publicar.env`, que fica fora do repositório:
+**Lançar é empurrar uma tag.** O GitHub Actions compila as três plataformas — `macos-14`,
+`ubuntu-22.04`, `windows-latest` —, cria o Release com os instaladores e publica o `latest.json` no
+GitHub Pages.
 
+```bash
+make lancar     # confere a versão, marca vX.Y.Z e empurra
 ```
-SUPABASE_URL=https://<projeto>.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=<a service_role>
+
+🔑 **Não há credencial de nuvem no caminho.** Os arquivos vão para o Releases e o manifesto para o
+Pages, os dois do próprio repositório. A única chave que o CI toca é a **minisign**, que assina a
+atualização — e ela não dá acesso a nada além disso.
+
+Até 7/set/2026 isto passava pelo Supabase Storage e exigia a `SUPABASE_SERVICE_ROLE_KEY` na máquina
+que publicava. A mudança para o GitHub tirou essa chave do caminho por completo, e foi o motivo dela.
+
+⚠️ **Suba a versão antes**, nos **dois** lugares: `[workspace.package]` do `Cargo.toml` e
+`packager.toml`. O app compara a própria `CARGO_PKG_VERSION` com a do manifesto — lançar sem subir a
+versão não atualiza ninguém. O `make lancar` recusa se os dois divergirem, e recusa também com a
+árvore suja: uma tag marcando um estado que não existe no repositório é pior que nenhuma tag.
+
+### O secret que o CI precisa
+
+Um só: **`VLB_CHAVE_ATUALIZACAO`**, com o conteúdo de `~/.vintagelightbox/atualizacao.key`.
+
+```bash
+gh secret set VLB_CHAVE_ATUALIZACAO < ~/.vintagelightbox/atualizacao.key
 ```
 
-A `anon` não serve: o Storage recusa escrita com ela. É a mesma chave que o backend usa no Fly.
+🚨 **Tem de ser a mesma chave nas três plataformas e em todo lançamento.** Uma chave diferente faz
+todo app já instalado recusar a atualização por assinatura inválida — e o operador vê só "não
+consegui atualizar". Perder a privada não tem conserto pelo software.
 
-Ele cria o bucket público `vintagelightbox` na primeira vez, sobe cada arquivo para
-`versoes/<versao>/` e escreve `ultima.json` na raiz. **O `.sig` não sobe como arquivo** — o conteúdo
-dele entra no manifesto, que é como o updater espera receber a assinatura.
-
-🚨 **`--publicar` não publica lançamento pela metade.** Se um alvo falhar, o script avisa e não sobe
-nada: um `ultima.json` sem `windows-x86_64` faz todo Windows instalado receber "nada novo" para uma
-versão que existe.
+⚠️ Os gatilhos do workflow são **tag** e **disparo manual**, nunca `pull_request`. É isso que torna
+seguro o repositório ser público: PR de fork não alcança secret nenhum.
 
 ## Uma máquina por plataforma — e isso é o desenho
 

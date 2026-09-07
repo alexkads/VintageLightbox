@@ -1,0 +1,275 @@
+# Os instaladores das três plataformas, cada um no sistema dele.
+#
+# 🔑 **Por que o GitHub, se o princípio é "cada máquina gera a sua".**
+#
+#    Porque os runners **são** as máquinas: `macos-14` é um Mac de verdade,
+#    `ubuntu-22.04` um Linux, `windows-latest` um Windows. O princípio nunca foi
+#    "não usar CI" — era **não gerar de uma plataforma para outra**, porque o que
+#    sai assim ninguém abre para conferir. Aqui cada binário é compilado no seu
+#    próprio sistema, nativo.
+#
+# 💰 **Grátis, e sem limite de minutos**, porque o repositório é público. Em
+#    repositório privado o Windows contaria 2× e o macOS 10× da cota mensal.
+#
+# 🚨 **A única chave que este workflow toca é a minisign**, que assina a
+#    atualização. Não há credencial de banco, de storage nem de nuvem: os
+#    arquivos vão para o Releases e o manifesto para o Pages, os dois do próprio
+#    GitHub. Foi o que a mudança de 7/set/2026 comprou.
+#
+# ⚠️ Os gatilhos são **tag** e **disparo manual**, nunca `pull_request`: PR de
+#    fork não alcança secret nenhum, e é isso que torna seguro o repositório ser
+#    público.
+name: Instaladores
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      notas:
+        description: "O texto que o app mostra ao avisar da versão nova"
+        type: string
+        default: ""
+
+permissions:
+  contents: write   # criar o Release e anexar os arquivos
+  pages: write      # publicar a página e o latest.json
+  id-token: write   # o deploy do Pages exige
+
+env:
+  CARGO_TERM_COLOR: always
+  # Uma versão só do empacotador nas três plataformas: versões diferentes
+  # produziriam instaladores diferentes para a mesma versão do app.
+  PACKAGER_VERSION: "0.11.8"
+
+jobs:
+  # ── Compilar e empacotar, uma plataforma por runner ───────────────────────
+  instalador:
+    name: ${{ matrix.nome }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      # ⚠️ Se o Windows quebrar, o macOS e o Linux ainda saem. São plataformas
+      #    independentes, e o manifesto aceita o que houver.
+      fail-fast: false
+      matrix:
+        include:
+          - nome: macOS (universal)
+            runner: macos-14
+            sistema: macos
+            saida: macos-universal
+            formatos: app dmg
+          - nome: Linux (.deb + .AppImage)
+            runner: ubuntu-22.04
+            sistema: linux
+            saida: linux-x86_64
+            alvo: x86_64-unknown-linux-gnu
+            formatos: deb appimage
+          - nome: Windows (.msi + .exe)
+            runner: windows-latest
+            sistema: windows
+            saida: windows-x86_64
+            alvo: x86_64-pc-windows-gnu
+            formatos: wix nsis
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # 🚨 O GPUI compila os shaders Metal em **tempo de build**, e o runner não
+      #    traz a toolchain. Sem isto o build morre com
+      #    `cannot execute tool 'metal' due to missing Metal Toolchain`.
+      - name: Metal Toolchain
+        if: matrix.sistema == 'macos'
+        run: xcodebuild -downloadComponent MetalToolchain
+
+      # ⚠️ **Ubuntu 22.04 fixo, e não `ubuntu-latest`.** A glibc da máquina que
+      #    compila vira o piso do binário: um `.deb` do 24.04 não instala no
+      #    22.04. 22.04 (glibc 2.35) cobre Ubuntu 22.04+, Debian 12+, Fedora 36+.
+      - name: Dependências do Linux
+        if: matrix.sistema == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config clang libclang-dev \
+            libx11-dev libxkbcommon-dev libxkbcommon-x11-dev libxcb1-dev \
+            libwayland-dev wayland-protocols libxcursor-dev libxrandr-dev libxi-dev \
+            libfontconfig1-dev libfreetype6-dev libasound2-dev libssl-dev \
+            libvulkan-dev libdbus-1-dev libsecret-1-dev \
+            patchelf fuse libfuse2 desktop-file-utils zsync appstream
+
+      # 🚨 `-gnu`, nunca `-msvc`: o `rsraw-sys` monta os ~200 `.cpp` do LibRaw e
+      #    faz `panic!("MSVC is not supported")` — no Windows também, não só
+      #    cruzando.
+      - name: Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      # O macOS universal precisa das duas arquiteturas. Cruzar entre elas é
+      # nativo no Xcode — não é cross-compilação de plataforma.
+      - name: Alvos do Rust
+        shell: bash
+        run: |
+          if [ "${{ matrix.sistema }}" = macos ]; then
+            rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          else
+            rustup target add ${{ matrix.alvo }}
+          fi
+
+      # As duas coisas que o Windows precisa e que o runner tem **fora do PATH**.
+      # Falhar aqui, no começo, é muito melhor que falhar depois de 30 minutos
+      # com uma mensagem que não cita o que faltou.
+      - name: O g++ do MinGW e o fxc.exe
+        if: matrix.sistema == 'windows'
+        shell: pwsh
+        run: |
+          # O g++ compila os ~200 .cpp do LibRaw. O MinGW que o rustup traz serve
+          # para **ligar** Rust, não para compilar C++.
+          $mingw = "C:\msys64\mingw64\bin"
+          if (-not (Get-Command g++ -EA SilentlyContinue)) {
+            if (Test-Path "$mingw\g++.exe") {
+              Add-Content $env:GITHUB_PATH $mingw
+              Write-Host "g++: $mingw (acrescentado ao PATH)"
+            } else {
+              Write-Error "g++ do MinGW nao encontrado — o rsraw-sys nao compila sem ele"; exit 1
+            }
+          } else { Write-Host "g++: ja no PATH" }
+
+          # O `fxc.exe` compila os sete shaders HLSL do gpui. Vem no Windows SDK.
+          $fxc = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Filter fxc.exe -Recurse -EA SilentlyContinue |
+                 Where-Object { $_.FullName -match '\\x64\\' } |
+                 Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $fxc) { Write-Error "fxc.exe nao encontrado no runner"; exit 1 }
+          Add-Content $env:GITHUB_ENV "GPUI_FXC_PATH=$fxc"
+          Write-Host "fxc.exe: $fxc"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.sistema }}
+
+      - name: cargo-packager
+        run: cargo install cargo-packager --locked --version ${{ env.PACKAGER_VERSION }}
+
+      # 🚨 `--bin ui-gpui`: o `-p ui-gpui` compila **cinco** binários (o app e os
+      #    quatro de medição), e com `lto = true` cada um linka o programa
+      #    inteiro. Os runners têm 7 GB de RAM — foi assim que um build morreu
+      #    com `SIGKILL`, e o instalador não usa nenhum dos quatro.
+      - name: Compilar
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.sistema }}" = macos ]; then
+            for t in aarch64-apple-darwin x86_64-apple-darwin; do
+              cargo build --release -p ui-gpui --bin ui-gpui --target "$t"
+            done
+            # 🔑 Um binário universal é **um** arquivo com as duas arquiteturas
+            #    dentro; o `lipo` costura dois binários já otimizados, cada um
+            #    com o seu LTO inteiro. Nada é comprometido para caber.
+            mkdir -p target/universal-apple-darwin/release
+            lipo -create \
+              target/aarch64-apple-darwin/release/ui-gpui \
+              target/x86_64-apple-darwin/release/ui-gpui \
+              -output target/universal-apple-darwin/release/ui-gpui
+            lipo -info target/universal-apple-darwin/release/ui-gpui
+          else
+            cargo build --release -p ui-gpui --bin ui-gpui --target ${{ matrix.alvo }}
+          fi
+
+      # A chave que assina a atualização. **A mesma nas três plataformas** — uma
+      # chave diferente faz o app instalado recusar por assinatura inválida.
+      - name: A chave de atualização
+        shell: bash
+        env:
+          CHAVE: ${{ secrets.VLB_CHAVE_ATUALIZACAO }}
+        run: |
+          if [ -z "$CHAVE" ]; then
+            echo "::error::falta o secret VLB_CHAVE_ATUALIZACAO — sem ele os pacotes saem sem .sig e nenhum app aceita a atualizacao"
+            exit 1
+          fi
+          printf '%s' "$CHAVE" > "$RUNNER_TEMP/atualizacao.key"
+
+      # ⚠️ **Um `cargo packager` por formato, e não um com vários `--formats`.**
+      #    Ele aborta a execução inteira no primeiro formato que falha, e o
+      #    AppImage é o frágil — numa chamada só, uma falha dele levaria junto o
+      #    `.deb` **e a assinatura de ambos**, que só roda no fim.
+      #
+      # 🚨 `--password=` num token só, mesmo vazio: sem ele o minisign pede a
+      #    senha no terminal e falha com `Device not configured`. O efeito é pior
+      #    que um erro — os pacotes saem, e só o `.sig` não sai.
+      - name: Empacotar
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=ui-gpui; ALVO="${{ matrix.alvo }}"
+          if [ "${{ matrix.sistema }}" = macos ]; then ALVO=universal-apple-darwin; fi
+          if [ "${{ matrix.sistema }}" = windows ]; then BIN=ui-gpui.exe; fi
+          mkdir -p target/empacotamento
+          cp "target/$ALVO/release/$BIN" "target/empacotamento/$BIN"
+          for f in ${{ matrix.formatos }}; do
+            cargo packager -c empacotamento/packager.toml \
+              --target "$ALVO" -o "dist/${{ matrix.saida }}" --formats "$f" \
+              -k "$RUNNER_TEMP/atualizacao.key" --password= \
+              || echo "::warning::o formato $f nao saiu"
+          done
+          # O `.app` é uma pasta e não vai como artefato; o que atualiza o macOS
+          # é o `.app.tar.gz` que a assinatura gera ao lado dele.
+          rm -rf "dist/${{ matrix.saida }}"/*.app "dist/${{ matrix.saida }}/.cargo-packager"
+          ls -lh "dist/${{ matrix.saida }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: instalador-${{ matrix.saida }}
+          path: dist/${{ matrix.saida }}/*
+          if-no-files-found: error
+
+  # ── Juntar tudo: o Release e o manifesto ──────────────────────────────────
+  lancar:
+    name: Release e manifesto
+    needs: instalador
+    # ⚠️ `always()` com a conferência de sucesso parcial: se uma plataforma
+    #    falhar, as outras ainda são publicadas. O manifesto aceita o que houver
+    #    — quem ficou de fora recebe "nada novo" e continua na versão que tem.
+    if: always() && contains(needs.instalador.result, 'success')
+    runs-on: ubuntu-latest
+    outputs:
+      versao: ${{ steps.manifesto.outputs.versao }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: instalador-*
+
+      - name: Montar o latest.json
+        id: manifesto
+        run: |
+          python3 scripts/montar-manifesto.py \
+            --notas "${{ inputs.notas }}" \
+            --repo "${{ github.repository }}" \
+            --tag "${GITHUB_REF_NAME}"
+
+      - name: O Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('v{0}', steps.manifesto.outputs.versao) }}
+          name: VintageLightbox ${{ steps.manifesto.outputs.versao }}
+          body_path: site/notas-do-lancamento.md
+          files: dist/*/*
+          fail_on_unmatched_files: true
+          draft: false
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  # ── A página, no GitHub Pages ─────────────────────────────────────────────
+  pagina:
+    name: GitHub Pages
+    needs: lancar
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

@@ -180,18 +180,29 @@ VintageLightbox-Rust/
 
 ## ⬇️ Baixar
 
-**https://recordarfotos.com.br/vintageLightbox** — macOS (Intel e Apple Silicon), Windows e Linux.
+**https://alexkads.github.io/VintageLightbox/** — macOS (Intel e Apple Silicon), Windows e Linux.
 
-O app **não passa pela App Store nem pela Microsoft Store**: ele é baixado dali e, a partir da
-primeira instalação, **se atualiza sozinho** — cada atualização é conferida por assinatura antes de
-ser instalada.
+O app **não passa por loja nenhuma** e, a partir da primeira instalação, **se atualiza sozinho** —
+cada atualização é conferida por assinatura antes de ser instalada.
 
 > ⚠️ **No macOS**, na primeira abertura clique com o botão direito no aplicativo e escolha *Abrir*.
-> O aviso do Gatekeeper aparece porque ele não é distribuído pela loja.
+> O aviso do Gatekeeper aparece porque ele não é distribuído pela App Store.
 
-### Para gerar os instaladores
+### Como os instaladores são gerados
 
-Sem CI: cada plataforma é gerada na máquina que consegue gerá-la **e conferi-la**.
+Por **GitHub Actions**, e cada plataforma no sistema dela: `macos-14`, `ubuntu-22.04` e
+`windows-latest`. O princípio nunca foi "não usar CI" — era **não gerar de uma plataforma para
+outra**, porque o que sai assim ninguém abre para conferir.
+
+Lançar é empurrar uma tag:
+
+```bash
+make lancar     # confere a versão, marca vX.Y.Z e empurra
+```
+
+O CI compila as três, cria o Release com os instaladores e publica o `latest.json` no Pages.
+
+Para gerar na sua própria máquina — útil para testar antes de lançar:
 
 | Onde você está | O comando |
 |---|---|
@@ -199,17 +210,10 @@ Sem CI: cada plataforma é gerada na máquina que consegue gerá-la **e conferi-
 | Linux | `make linux` → `.deb` + `.AppImage` |
 | Windows 11 | `.\scripts\empacotar.ps1` → `.msi` + `.exe` |
 
-`make publicar` sobe para o site, e roda **sempre do Mac** — é onde fica a chave do Storage.
-
-⚠️ **Gerar de uma máquina para outra funciona — e foi recusado.** Em 7/set/2026
-o `cargo-xwin` gerou um `.exe` válido a partir do Mac, e um contêiner Docker
-gerou o `.deb`. As duas saíram de cena pelo mesmo motivo, e é o que decide: **o
-que sai de uma máquina que não é a de destino, ninguém abre para conferir** — um
-contêiner não tem X11 nem GPU, e um `.exe` não roda no Mac. Uma máquina de
-verdade gera **e** confere, e conferir é metade do trabalho num app gráfico.
-
-O registro do que cada alternativa custava está em
-[`empacotamento/README.md`](empacotamento/README.md).
+⚠️ **Gerar de uma máquina para outra funciona — e foi recusado.** Em 7/set/2026 o `cargo-xwin` gerou
+um `.exe` válido a partir do Mac, e um contêiner Docker gerou o `.deb`. As duas saíram de cena pelo
+mesmo motivo: **o que sai de uma máquina que não é a de destino, ninguém abre para conferir.** O
+registro está em [`empacotamento/README.md`](empacotamento/README.md).
 
 ## 📖 Para Começar
 
@@ -250,10 +254,11 @@ Contribuições são bem-vindas! Por favor:
 
 ## 📄 Licença
 
-A ser definida. Opções consideradas:
-- GPL-3.0 (para projeto completamente open source)
-- MIT (para maior permissividade)
-- Dual License (GPL + Commercial)
+**MIT** — veja [LICENSE](LICENSE). Use, modifique e redistribua, inclusive comercialmente; só
+mantenha o aviso de copyright.
+
+Feito pelo **Recordar Fotos Estúdio**, em Gramado e Canela (RS). Nasceu da necessidade de um estúdio
+de verdade, e é aberto para quem tiver a mesma.
 
 ## 🙏 Agradecimentos
 

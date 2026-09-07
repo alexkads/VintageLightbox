@@ -39,13 +39,20 @@ pub const CHAVE_PUBLICA: &str = include_str!("../../../../empacotamento/chave-pu
 
 /// Onde o app pergunta se há versão nova.
 ///
-/// 🔑 As três chaves entre `{{}}` são substituídas pelo próprio updater antes da
-/// requisição: `{{target}}` vira `macos`/`windows`/`linux`, `{{arch}}` vira
-/// `aarch64`/`x86_64`, e `{{current_version}}` a versão instalada. É o servidor
-/// que decide se responde `204 No Content` (nada novo) ou o manifesto — o que
-/// permite segurar um lançamento sem publicar app nenhum.
-pub const ENDERECO: &str = "https://recordarfotos.com.br/api/vintagelightbox/atualizacao\
-     ?alvo={{target}}&arquitetura={{arch}}&versao={{current_version}}";
+/// 🔑 **Um arquivo estático, e não um endpoint.** O `latest.json` traz **todas**
+/// as plataformas de uma vez, e quem compara as versões é o próprio app: o
+/// updater lê o `version` do manifesto, confronta com a instalada e escolhe a
+/// entrada de `platforms` que corresponde a esta máquina.
+///
+/// Isso é o que permite o projeto não ter servidor nenhum. Antes isto apontava
+/// para uma rota do `recordarfotos.com.br`, que respondia `204` quando não havia
+/// novidade; a rota saiu quando a distribuição foi para o GitHub, e com ela saiu
+/// a última credencial que o lançamento precisava (7/set/2026).
+///
+/// ⚠️ **O GitHub Pages serve com cache curto, mas serve com cache.** Um
+/// lançamento pode levar alguns minutos para chegar a todo mundo — o que é
+/// irrelevante para algo que o app consulta uma vez por abertura.
+pub const ENDERECO: &str = "https://alexkads.github.io/VintageLightbox/latest.json";
 
 /// O que a tela precisa saber sobre uma versão nova.
 #[derive(Clone, Debug, PartialEq, Eq)]

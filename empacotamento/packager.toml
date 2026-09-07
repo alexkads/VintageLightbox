@@ -31,8 +31,7 @@ authors = ["VintageLightbox Team"]
 publisher = "RecordarFotos"
 copyright = "© 2026 RecordarFotos"
 category = "Photography"
-# `license-file` fica de fora até o repositório ter um: o README diz "a ser
-# definida", e apontar para um arquivo inexistente aborta o empacotamento.
+license-file = "../LICENSE"
 
 out-dir = "../dist"
 

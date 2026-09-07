@@ -207,21 +207,27 @@ linux windows conferir-windows:
 
 endif
 
-# ───────────────────────────── Publicar ──────────────────────────────────────
+# ───────────────────────────── Lancar ────────────────────────────────────────
 #
-# ⚠️ Exige SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY — no ambiente ou em
-#    ~/.vintagelightbox/publicar.env, que fica fora do repositorio. A `anon` nao
-#    serve: o Storage recusa escrita com ela.
+# 🔑 **Lancar e empurrar uma tag.** O GitHub Actions compila as tres plataformas,
+#    cada uma no sistema dela, cria o Release com os instaladores e publica o
+#    `latest.json` no Pages. Nao ha credencial de nuvem no caminho — a unica
+#    chave que o CI toca e a minisign, que assina a atualizacao.
 #
-# 🔑 Publicar funciona nas duas plataformas de proposito: quem gerou o Windows
-#    pode subir de la, sem levar 200 MB de instalador de volta para o Mac. O que
-#    tem de viajar junto e a credencial, nao o arquivo.
+# ⚠️ **Suba a versao antes**, em `[workspace.package]` do Cargo.toml **e** no
+#    `empacotamento/packager.toml`. O app compara a propria `CARGO_PKG_VERSION`
+#    com a do manifesto: lancar sem subir a versao nao atualiza ninguem.
 
-publicar: ## Sobe dist/ para recordarfotos.com.br/vintageLightbox
-	$(PY) scripts/publicar.py
-
-publicar-seco: ## Mostra o que seria publicado, sem subir nada e sem tocar a rede
-	$(PY) scripts/publicar.py --seco
+lancar: ## Empurra a tag da versao atual — o CI faz o resto
+	@v=$$(sed -n '/^\[workspace\.package\]/,/^\[/p' Cargo.toml | sed -n 's/^version *= *"\(.*\)"/\1/p' | head -1); \
+	 p=$$(sed -n 's/^version *= *"\(.*\)"/\1/p' empacotamento/packager.toml | head -1); \
+	 if [ "$$v" != "$$p" ]; then \
+	   echo "X versao divergente: Cargo.toml diz $$v, packager.toml diz $$p"; exit 1; fi; \
+	 if [ -n "$$(git status --porcelain)" ]; then \
+	   echo "X a arvore tem mudanca nao commitada — a tag marcaria um estado que nao existe"; exit 1; fi; \
+	 echo "marcando v$$v e empurrando..."; \
+	 git tag -a "v$$v" -m "VintageLightbox $$v" && git push origin "v$$v"; \
+	 echo "acompanhe em: https://github.com/alexkads/VintageLightbox/actions"
 
 # ────────────────────────────── Manutencao ───────────────────────────────────
 #

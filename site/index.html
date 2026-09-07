@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VintageLightbox — editor de fotos em Rust</title>
+<meta name="description" content="Importe, organize, trie, revele e entregue. Editor de fotos livre, em Rust, feito pelo Recordar Fotos Estúdio em Gramado e Canela.">
+<link rel="icon" href="icone.png">
+<style>
+  :root{--fundo:#faf8f4;--tinta:#1b1e24;--suave:#6b6f78;--borda:#e4e0d8;--destaque:#c96f3f}
+  @media (prefers-color-scheme:dark){:root{--fundo:#14161b;--tinta:#f2efe6;--suave:#9aa0aa;--borda:#2b2f38}}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--fundo);color:var(--tinta);
+       font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif}
+  .folha{max-width:52rem;margin:0 auto;padding:4rem 1.25rem}
+  header{display:flex;align-items:center;gap:1rem;margin-bottom:.5rem}
+  header img{width:72px;height:72px}
+  h1{font-size:2rem;margin:0;letter-spacing:-.02em}
+  .chamada{color:var(--suave);max-width:38rem;margin:.5rem 0 2.5rem}
+  .principal{display:inline-flex;align-items:center;gap:.75rem;background:var(--tinta);
+       color:var(--fundo);padding:.9rem 1.6rem;border-radius:.6rem;text-decoration:none;
+       font-weight:600;transition:opacity .15s}
+  .principal:hover{opacity:.88}
+  .principal small{font-weight:400;opacity:.7}
+  .versao{color:var(--suave);font-size:.875rem;margin-top:.9rem}
+  h2{font-size:1.05rem;margin:3rem 0 .75rem;font-weight:600}
+  table{width:100%;border-collapse:collapse;font-size:.9rem}
+  th{text-align:left;color:var(--suave);font-weight:500;padding:.5rem .25rem;
+     border-bottom:1px solid var(--borda)}
+  td{padding:.65rem .25rem;border-bottom:1px solid var(--borda)}
+  td a{color:var(--destaque)}
+  .nota{background:color-mix(in srgb,var(--borda) 45%,transparent);border-radius:.5rem;
+        padding:1rem 1.1rem;font-size:.875rem;color:var(--suave);margin-top:2rem}
+  footer{margin-top:4rem;padding-top:1.5rem;border-top:1px solid var(--borda);
+         font-size:.875rem;color:var(--suave)}
+  footer a{color:var(--destaque)}
+  code{background:color-mix(in srgb,var(--borda) 55%,transparent);padding:.15em .4em;
+       border-radius:.25em;font-size:.9em}
+</style>
+</head>
+<body>
+<div class="folha">
+
+  <header>
+    <img src="icone.png" alt="">
+    <div>
+      <h1>VintageLightbox</h1>
+      <div style="color:var(--suave);font-size:.9rem">Editor de fotos em Rust, livre e nativo</div>
+    </div>
+  </header>
+
+  <p class="chamada">
+    Importe do cartão, tria, revele e entregue — com o ensaio do cliente aberto ao lado.
+    Motor de revelação na GPU, catálogo local, sem nuvem obrigatória.
+  </p>
+
+  <div id="baixar"></div>
+  <div class="versao" id="versao">carregando…</div>
+
+  <h2>Todos os arquivos</h2>
+  <table><thead><tr><th>Sistema</th><th>Arquitetura</th><th>Tamanho</th><th></th></tr></thead>
+    <tbody id="lista"><tr><td colspan="4" style="color:var(--suave)">carregando…</td></tr></tbody>
+  </table>
+
+  <div class="nota">
+    <strong>No macOS</strong>, na primeira abertura clique com o botão direito no aplicativo e
+    escolha <em>Abrir</em>. O aviso aparece porque ele não é distribuído pela App Store — depois
+    disso o aplicativo se atualiza sozinho, e cada atualização é conferida por assinatura antes
+    de ser instalada.
+  </div>
+
+  <footer>
+    <p>
+      Feito pelo <strong>Recordar Fotos Estúdio</strong> — Gramado e Canela, RS.<br>
+      Nasceu da necessidade de um estúdio de verdade, e é aberto para quem tiver a mesma.
+    </p>
+    <p>
+      Código e licença MIT em <a href="https://github.com/alexkads/VintageLightbox">github.com/alexkads/VintageLightbox</a> ·
+      Ensaios em <a href="https://recordarfotos.com.br">recordarfotos.com.br</a>
+    </p>
+  </footer>
+
+</div>
+
+<script>
+// 🔑 A detecção é no cliente, e a lista completa fica logo abaixo. Um servidor
+//    que decidisse pelo User-Agent erraria em VPN e em Linux ARM — e o erro é
+//    caro: o visitante baixa 25 MB do arquivo errado e conclui que não funciona.
+//    Quando a detecção falha, o botão some e a tabela continua lá.
+const escolher = (ds, ua) => {
+  const doSistema = s => ds.filter(d => d.sistema === s);
+  const preferir = (s, re) => doSistema(s).find(d => re.test(d.arquitetura)) ?? doSistema(s)[0];
+  if (/Mac|iPhone|iPad/i.test(ua)) return preferir("macOS", /Intel e Apple Silicon/);
+  if (/Windows/i.test(ua))         return preferir("Windows", /\.exe/);
+  if (/Linux|X11/i.test(ua))       return preferir("Linux", /arm|aarch64/i.test(ua) ? /ARM64 \(\.deb\)/ : /x86-64 \(\.deb\)/);
+  return null;
+};
+const mb = b => (b / 1e6).toFixed(0) + " MB";
+
+fetch("downloads.json", {cache: "no-cache"}).then(r => r.json()).then(d => {
+  const escolhido = escolher(d.downloads, navigator.userAgent);
+  if (escolhido) {
+    document.getElementById("baixar").innerHTML =
+      `<a class="principal" href="${escolhido.url}" download>Baixar para ${escolhido.sistema}
+         <small>${escolhido.arquitetura} · ${mb(escolhido.bytes)}</small></a>`;
+  }
+  const data = d.publicado_em ? new Date(d.publicado_em).toLocaleDateString("pt-BR") : "";
+  document.getElementById("versao").textContent =
+    `Versão ${d.versao}${data ? " · " + data : ""}${d.notas ? " · " + d.notas : ""}`;
+  document.getElementById("lista").innerHTML = d.downloads.map(x =>
+    `<tr><td>${x.sistema}</td><td>${x.arquitetura}</td><td>${mb(x.bytes)}</td>
+     <td><a href="${x.url}" download>Baixar</a></td></tr>`).join("")
+    || `<tr><td colspan="4" style="color:var(--suave)">Ainda não há versão publicada.</td></tr>`;
+}).catch(() => {
+  document.getElementById("versao").textContent = "Não consegui ler a lista de versões.";
+  document.getElementById("lista").innerHTML =
+    `<tr><td colspan="4"><a href="https://github.com/alexkads/VintageLightbox/releases">Ver os arquivos no GitHub Releases</a></td></tr>`;
+});
+</script>
+</body>
+</html>
