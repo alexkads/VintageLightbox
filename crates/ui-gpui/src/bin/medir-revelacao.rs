@@ -311,6 +311,50 @@ async fn main() {
         "decodifica o JPEG de 2560px",
     );
 
+    // 8 · **A sessão contra a Revelação, na mesma máquina e no mesmo catálogo.**
+    //     O dono aponta a sessão como referencia — *"lá está ótimo"* — e a
+    //     comparação diz por quê num número só: o tamanho do que cada tela
+    //     converte por quadro.
+    println!("\n=== a sessão contra a Revelação ===");
+
+    // A sessão: uma célula por foto, a partir da miniatura.
+    let inicio = Instant::now();
+    let mut px_sessao = 0u64;
+    for id in ids.iter().take(25) {
+        if let Some(mini) = previews.get_thumbnail(id) {
+            px_sessao += (mini.width() as u64) * (mini.height() as u64);
+            let _ = ui_gpui::imagem::para_gpui(mini);
+        }
+    }
+    let sessao = inicio.elapsed().as_secs_f64() * 1000.0;
+
+    // A Revelação: uma foto só, mas inteira, e **por quadro** enquanto se edita.
+    let grande = previews.get_preview(alvo).expect("o preview");
+    let px_revelacao = (grande.width() as u64) * (grande.height() as u64);
+    let inicio = Instant::now();
+    let exibida = infrastructure::transformacao::aplicar(
+        &grande,
+        &domain::value_objects::CropSettings::default(),
+        true,
+    );
+    let _ = ui_gpui::revelacao::histograma::Histograma::da_imagem(&exibida);
+    let _ = ui_gpui::imagem::para_gpui(exibida);
+    let revelacao = inicio.elapsed().as_secs_f64() * 1000.0;
+
+    println!(
+        "  sessão   · 25 células, {:.2} Mpx no total  → {sessao:.2} ms",
+        px_sessao as f64 / 1e6
+    );
+    println!(
+        "  revelação· 1 foto,     {:.2} Mpx de uma vez → {revelacao:.2} ms  \
+         (e isto por quadro, enquanto o slider anda)",
+        px_revelacao as f64 / 1e6
+    );
+    println!(
+        "  → a Revelação converte {:.0}x mais pixels que a grade inteira da sessão",
+        px_revelacao as f64 / px_sessao.max(1) as f64
+    );
+
     println!("\nO orçamento de um quadro a 60fps é {QUADRO_MS} ms.");
 }
 

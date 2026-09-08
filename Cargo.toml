@@ -31,7 +31,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.6"
+version = "0.1.7"
 edition = "2021"
 authors = ["VintageLightbox Team"]
 license = "MIT"
@@ -68,6 +68,42 @@ chrono = { version = "0.4", features = ["serde"] }
 [profile.dev]
 opt-level = 0
 debug = true
+
+# 🚨 **As dependências saem otimizadas mesmo em `dev`, e isto não é detalhe.**
+#
+# `opt-level = 0` vale para o código deste repositório — que é o que se depura —,
+# mas em `dev` ele também valia para o `image`, o `jpeg-decoder` e o `rusqlite`,
+# que são quem faz o trabalho pesado. Medido em 8/set/2026 (`medir-revelacao`,
+# catálogo real): decodificar um preview de 2560px custava **414 ms** e o
+# `to_rgba8` dele **768 ms** — contra 24 ms e 4 ms em `release`. Uma seta na
+# tira custava quase um segundo, e o CLAUDE.md registra que isso já foi
+# confundido com "o framework é lento" duas vezes.
+#
+# 🔑 **Elas compilam uma vez.** Otimizar dependência não custa tempo de
+# recompilação no dia a dia: o que se mexe é o código daqui, que continua em
+# `opt-level = 0`, com nome de função e linha no backtrace.
+[profile.dev.package."*"]
+opt-level = 3
+
+# 🚨 **E os laços de pixel deste repositório também.** `opt-level = 0` num laço
+# que percorre 4,4 milhões de pixels não é "sem otimização", é 30× mais lento:
+# o histograma da Revelação custava 211 ms em `dev` contra 0,3 ms em `release`,
+# e o `para_gpui` 100 ms contra 4 ms — por quadro, enquanto um slider anda.
+#
+# 🔑 **`opt-level = 1` mantém o que se depura**: nome de função, número de linha
+# e backtrace continuam lá; o que sai é a ausência de vetorização e o excesso de
+# cópias que o nível zero deixa. É o meio-termo que faz `cargo run` sem
+# `--release` ser utilizável num app que trabalha com imagem — e o CLAUDE.md
+# registra que a lentidão do perfil já foi confundida com "o framework é lento"
+# duas vezes.
+[profile.dev.package.ui-gpui]
+opt-level = 2
+
+[profile.dev.package.revelacao-core]
+opt-level = 2
+
+[profile.dev.package.infrastructure]
+opt-level = 2
 
 [profile.release]
 opt-level = 3
