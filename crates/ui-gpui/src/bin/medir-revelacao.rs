@@ -252,6 +252,65 @@ async fn main() {
         }
     );
 
+    // 7 · **Trocar de foto na tira** — o gesto que o dono chamou de extremamente
+    //     lento. `mostrar` faz tudo isto na thread da interface, por seta.
+    println!("\n--- trocar de foto (o que `mostrar` faz, por seta) ---");
+    let vizinha = ids.get(1).unwrap_or(alvo);
+
+    // A vizinha adiantada pelo prefetch: e o caso comum de andar pela seta.
+    let _ = previews.get_preview(vizinha);
+    let inicio = Instant::now();
+    let bruta = previews.get_preview(vizinha).expect("o preview");
+    let ler_quente = inicio.elapsed().as_secs_f64() * 1000.0;
+
+    let inicio = Instant::now();
+    let _ = bruta.to_rgba8().into_raw();
+    let origem = inicio.elapsed().as_secs_f64() * 1000.0;
+
+    let inicio = Instant::now();
+    let copia = bruta.clone();
+    let clone = inicio.elapsed().as_secs_f64() * 1000.0;
+
+    let inicio = Instant::now();
+    let exibida = infrastructure::transformacao::aplicar(
+        &copia,
+        &domain::value_objects::CropSettings::default(),
+        true,
+    );
+    let _ = ui_gpui::revelacao::histograma::Histograma::da_imagem(&exibida);
+    let _ = ui_gpui::imagem::para_gpui(exibida);
+    let exibir = inicio.elapsed().as_secs_f64() * 1000.0;
+
+    veredito(
+        "  ler o preview (adiantado pela vizinha)",
+        ler_quente,
+        "cache L1",
+    );
+    veredito("  to_rgba8 para a origem da GPU", origem, "aloca 17,5 MB");
+    veredito("  clonar a bruta (o \"antes\")", clone, "copia 13 MB");
+    veredito(
+        "  atualizar_exibicao",
+        exibir,
+        "aplicar + histograma + BGRA",
+    );
+    veredito(
+        "  = por seta apertada",
+        ler_quente + origem + clone + exibir,
+        "na thread da interface",
+    );
+
+    // E quando a vizinha **nao** foi adiantada — clicar numa celula distante da
+    // tira, que e o gesto que nao tem prefetch nenhum.
+    let distante = ids.last().expect("uma foto");
+    previews.esquecer_da_memoria(distante);
+    let inicio = Instant::now();
+    let _ = previews.get_preview(distante);
+    veredito(
+        "  (clicar numa celula distante: sem prefetch)",
+        inicio.elapsed().as_secs_f64() * 1000.0,
+        "decodifica o JPEG de 2560px",
+    );
+
     println!("\nO orçamento de um quadro a 60fps é {QUADRO_MS} ms.");
 }
 

@@ -90,6 +90,90 @@ disco foi consultado uma vez, na abertura; o que o `Gravador` devolve é o espel
 em memória, que anda junto com cada gesto — esperar o banco faria a sessão
 reaberta mostrar a receita de antes do último arrasto.
 
+## 🚨 A tira da Revelação repetiu os dois defeitos da grade da sessão — 8/set/2026
+
+O dono relatou, em sequência: *"foi entrar em modo revelação e agora ficou muito
+mais lento"*, *"até os controles de edição estão lentos"*, *"ainda está
+extremamente lento trocar as fotos na tira"*. E fechou apontando o caminho: *"a
+tira e a galeria dentro da sessão está com o desempenho muito bom — você precisa
+ver o que foi feito nessa tela."* Estava certo: a tira da Revelação tinha os dois
+defeitos que a grade da sessão já havia curado em 6/set, mais um terceiro que só
+apareceu depois.
+
+**Por que só apareceu agora.** Até 8/set a foto da sessão virava foto do site na
+Revelação (`site:<id>`), não achava nada no cache e a tira ficava preta. Uma
+varredura que não lê nada não custa nada. Consertada a abertura, a tira passou a
+ler de verdade — e três coisas que já estavam erradas passaram a doer.
+
+### 1 · Um LRU menor que a varredura acerta zero — de novo, e ao contrário
+
+É a mesma regra da seção abaixo, com os papéis trocados. Previews grandes e
+miniaturas dividiam **um LRU só, de 15**. A tira lê **uma miniatura por foto do
+ensaio** ao montar; essa varredura despejava o preview de 2560px que o palco
+tinha acabado de pôr lá, e a seta seguinte redecodificava o JPEG inteiro.
+
+| reler o preview do palco | |
+|---|---:|
+| com ele na memória | 1,42 ms |
+| depois de a tira passar | **13,41 ms** |
+| com os dois LRUs separados | **0,35 ms** |
+
+🔑 **A correção é a mesma de sempre, do outro lado**: quem varre muito não pode
+dividir teto com quem guarda pouco e grande. Hoje são `PREVIEWS_NA_MEMORIA` (15,
+~390 MB) e `MINIATURAS_NA_MEMORIA` (256, ~77 MB), separados.
+
+### 2 · O carregamento estava dentro do `render` — o defeito de 6/set, na outra tela
+
+`filmstrip` tinha um laço sobre `self.acervo` **inteiro** antes de montar: entrar
+num ensaio de 125 fotos lia e convertia as 125 miniaturas antes do primeiro
+quadro — 45,7 ms de um gesto de 57,9 ms. É literalmente o que
+`Detalhe::preparar_miniaturas` existe para não fazer, e a Revelação nunca tinha
+recebido a lição.
+
+Hoje quem carrega é `Revelacao::carregar_a_tira`: uma tarefa que decodifica no
+**executor de fundo**, uma foto por vez, do palco para fora. O `render` só lê.
+
+### 3 · `update` de dentro de uma tarefa é um salto de thread, e ele estava no laço
+
+Este é novo, e é o que o dono chamou de *"extremamente lento trocar as fotos"*. A
+tarefa da tira recomeça a cada troca de foto — de propósito, para reordenar a
+partir do palco novo — e perguntava "esta miniatura falta?" **de dentro dela**,
+com um `esta.update` por foto. `update` de uma tarefa é um salto agendado na
+thread principal, que só corre entre quadros.
+
+Com a tira já cheia, andar uma foto custava **um salto por foto do ensaio** só
+para descobrir que não havia nada a fazer.
+
+🔑 **A peneira mora onde o cache mora.** `miniaturas_faltando()` roda na thread da
+tela, onde `espiar` é um `peek`, e a tarefa só nasce se sobrar alguma coisa.
+
+### 4 · O que mais estava caro por quadro, e não era cache
+
+Medido com `medir-revelacao` (release, catálogo real):
+
+| | antes | depois |
+|---|---:|---:|
+| o que **bloqueia** entrar na Revelação | 57,95 ms | **11,19 ms** |
+| por quadro de arrasto de slider | 9,14 ms | **4,70 ms** |
+| ‣ `Histograma::da_imagem` | 4,46 ms | 0,30 ms |
+| ‣ `para_gpui` | 4,32 ms | 3,93 ms |
+| por seta apertada (troca de foto) | — | 12,05 ms |
+
+- **O histograma** varria os 4,4 Mpx para desenhar 256 barras, e ainda clonava
+  13 MB num `to_rgb8` de uma imagem que **já era** Rgb8. Empresta em vez de
+  clonar, e amostra 250 mil pixels — cada barra recebe ~1.000, muito além do que
+  200 pixels de altura distinguem.
+- **`para_gpui`** dizia contar com `into_rgba8` reaproveitar o buffer *"porque a
+  miniatura vem em RGBA8"*. Ela não vem: JPEG não tem alfa, e tudo que sai do
+  cache é Rgb8 — então ele alocava 17,5 MB, expandia, e só então uma segunda
+  varredura trocava R por B. Expandir e trocar viraram a mesma passada, e isso
+  vale para toda miniatura da grade também.
+
+O que sobra por quadro é quase todo `para_gpui`: 17,5 MB escritos, ~4,5 GB/s — é
+limite de memória, não de código. Sair disso é o shader devolver BGRA direto.
+
+---
+
 ## 🚨 O L1 é da Revelação, e a grade da sessão o usava como se fosse dela — 6/set/2026
 
 O dono relatou a tela da sessão *"cheia de problemas de UX e não fluida"* e
@@ -148,7 +232,7 @@ O VintageLightbox utiliza um sistema de cache hierárquico de três níveis (L1,
     *   `DynamicImage` já decodificada (bitmap puro)
     *   `HistogramData` pré-calculado
     *   **`ProcessedCache`** (novo): ColorImage processado + hash dos edits
-*   **Capacidade**: Últimas **15 imagens** visualizadas (LRU - Least Recently Used). Aprox. 600MB de RAM.
+*   **Capacidade**: **dois** LRUs desde 8/set/2026 — 15 previews grandes (~390 MB) e 256 miniaturas (~77 MB). Eram um só, de 15, e a tira da Revelação despejava o preview do palco a cada montagem (ver a seção de 8/set/2026, acima).
 *   **Performance**:
     *   **0.01ms** para FULL PROCESSED CACHE HIT (foto + edits já processados)
     *   **0.3ms** para RAM CACHE HIT (imagem base, precisa processar edits)

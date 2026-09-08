@@ -19,7 +19,7 @@
 #    executável e o do pacote `.deb`); `product-name` é o que o usuário lê.
 name = "vintagelightbox"
 product-name = "VintageLightbox"
-version = "0.1.5"
+version = "0.1.6"
 identifier = "br.com.recordarfotos.vintagelightbox"
 description = "Editor de fotos no formato do Lightroom, em Rust"
 long-description = """

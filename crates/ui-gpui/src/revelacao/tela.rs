@@ -1041,26 +1041,29 @@ impl Revelacao {
         if self.acervo.len() < 2 {
             return;
         }
-        let ordem: Vec<String> = self
-            .da_posicao_para_fora()
-            .filter_map(|i| self.acervo.get(i))
-            .map(|foto| foto.id.clone())
-            .collect();
+
+        // 🚨 **A peneira é aqui, e não lá dentro.** O cache mora nesta tela, e
+        // este método já roda na thread dela: perguntar "falta?" aqui custa um
+        // `peek` por foto. Perguntar de dentro da tarefa custava um
+        // `esta.update` por foto — e `update` de uma tarefa é um salto agendado
+        // na thread principal, que só corre entre quadros.
+        //
+        // Com a tira já carregada (o caso comum, a partir da segunda troca de
+        // foto) eram **125 saltos por seta apertada** para descobrir que não
+        // havia nada a fazer. A tira ficou "extremamente lenta" para trocar de
+        // foto, e o motivo não estava em nada que desenha.
+        let faltando = self.miniaturas_faltando();
+
+        // 🔑 **Nada faltando, tarefa nenhuma.** Substituir o campo cancelaria a
+        // que estivesse rodando; sair antes é o que faz a troca de foto não
+        // custar nada quando a tira já está pronta.
+        if faltando.is_empty() {
+            return;
+        }
         let previews = self.previews.clone();
 
         self._tira = Some(cx.spawn(async move |esta, cx| {
-            for id in ordem {
-                // Já perguntada? `espiar` devolvendo `Some` inclui o `Ausente`,
-                // e é isso que impede de repetir a pergunta a cada troca de foto.
-                let Ok(falta) = esta.update(cx, |tela, _cx| {
-                    tela.miniaturas_da_tira.espiar(&id).is_none()
-                }) else {
-                    return;
-                };
-                if !falta {
-                    continue;
-                }
-
+            for id in faltando {
                 let pronta = {
                     let previews = previews.clone();
                     let id = id.clone();
@@ -1087,6 +1090,25 @@ impl Revelacao {
                 }
             }
         }));
+    }
+
+    /// Quais miniaturas da tira ainda não foram lidas — na ordem de urgência.
+    ///
+    /// 🚨 **Esta pergunta é feita aqui, e não de dentro da tarefa.** O cache mora
+    /// nesta tela e `espiar` é um `peek`; perguntar de dentro da tarefa exigia um
+    /// `esta.update` por foto, e `update` de uma tarefa é um salto agendado na
+    /// thread principal, que só corre entre quadros. Com a tira já carregada — o
+    /// caso comum a partir da segunda troca de foto — eram **125 saltos por seta
+    /// apertada** para descobrir que não havia nada a fazer.
+    pub(crate) fn miniaturas_faltando(&self) -> Vec<String> {
+        self.da_posicao_para_fora()
+            .filter_map(|i| self.acervo.get(i))
+            // `espiar` devolvendo `Some` inclui o `Ausente`: já perguntada é já
+            // perguntada, e é isso que impede de repetir a leitura a cada troca
+            // de foto.
+            .filter(|foto| self.miniaturas_da_tira.espiar(&foto.id).is_none())
+            .map(|foto| foto.id.clone())
+            .collect()
     }
 
     /// As posições do acervo a partir do palco, **para fora**: 0, +1, −1, +2, −2…
@@ -4049,6 +4071,55 @@ mod testes {
                         Miniatura::Pronta(_)
                     ),
                     "a célula ficou presa no `Ausente` que ela tinha guardado"
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 **Trocar de foto não pode custar nada quando a tira já está pronta.**
+    ///
+    /// A tarefa que carrega a tira recomeça a cada troca de foto — de propósito,
+    /// para reordenar a partir do palco novo. Ela perguntava "esta falta?" de
+    /// dentro dela mesma, e cada pergunta era um `esta.update`: um salto
+    /// agendado na thread principal, que só corre entre quadros. Com a tira
+    /// cheia, andar uma foto custava um salto **por foto do ensaio** só para
+    /// descobrir que não havia nada a fazer, e trocar de foto ficou
+    /// "extremamente lento" sem que nada do que desenha tivesse mudado.
+    #[gpui::test]
+    fn a_tira_carregada_nao_pede_nada_ao_trocar_de_foto(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        for nome in ["a.jpg", "b.jpg", "c.jpg"] {
+            previews
+                .save_thumbnail(&format!("id-{nome}"), &foto_cinza())
+                .expect("gravar miniatura");
+        }
+        let janela = janela(cx, previews.clone());
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir_no_acervo(
+                    vec![foto("a.jpg"), foto("b.jpg"), foto("c.jpg")],
+                    0,
+                    window,
+                    cx,
+                );
+                assert_eq!(
+                    tela.miniaturas_faltando().len(),
+                    3,
+                    "ao abrir, nenhuma foi lida ainda"
+                );
+
+                // A tira acaba de carregar — é o que a tarefa faz, uma por uma.
+                for nome in ["a.jpg", "b.jpg", "c.jpg"] {
+                    let id = format!("id-{nome}");
+                    tela.miniaturas_da_tira.obter(&previews, &id);
+                }
+
+                tela.andar(1, window, cx);
+                assert!(
+                    tela.miniaturas_faltando().is_empty(),
+                    "a seta voltou a pedir o que já estava na tira: {:?}",
+                    tela.miniaturas_faltando()
                 );
             })
             .expect("a janela deve estar aberta");
