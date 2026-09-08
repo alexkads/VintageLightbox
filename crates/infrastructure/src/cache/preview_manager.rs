@@ -21,26 +21,46 @@ pub struct CacheStats {
     pub db_path: PathBuf,
 }
 
-/// Quantas imagens decodificadas ficam em memória.
+/// Quantos **previews grandes** ficam decodificados em memória.
 ///
 /// 🔑 **Quinze, como no app de egui** (`docs/08-CACHE-ARCHITECTURE.md`): é o
 /// suficiente para ir e voltar pela seta numa sequência de revelação sem
 /// redecodificar nada, e o teto que mantém o consumo previsível — um preview de
 /// 2560px descomprimido são ~26 MB, então quinze são ~400 MB no pior caso.
-const CAPACIDADE_DA_MEMORIA: usize = 15;
+const PREVIEWS_NA_MEMORIA: usize = 15;
+
+/// E quantas **miniaturas**.
+///
+/// 🚨 **Elas não podem dividir o teto com os previews, e a conta diz por quê.**
+/// Eram um LRU só, de quinze: a tira da Revelação monta lendo **uma miniatura
+/// por foto do ensaio** — 21, 125, 200 —, e com quinze vagas essa varredura
+/// despeja tudo, inclusive o preview de 2560px que o palco acabou de pôr lá.
+/// A seta seguinte não achava mais nada em memória e redecodificava o JPEG
+/// inteiro.
+///
+/// Medido em 8/set/2026 no catálogo real (`medir-revelacao`): reler o preview
+/// custava **1,42 ms** com ele na memória e **13,41 ms** depois de a tira
+/// passar — 9,4× por tecla, para sempre, e ninguém teria achado o motivo
+/// olhando a Revelação.
+///
+/// 256 miniaturas de 300px descomprimidas são ~77 MB: uma ordem de grandeza
+/// abaixo dos previews, e mais do que cabe numa tira.
+const MINIATURAS_NA_MEMORIA: usize = 256;
 
 pub struct PreviewManager {
     conn: Mutex<Connection>,
     #[allow(dead_code)]
     cache_dir: PathBuf,
-    /// O cache L1: imagens **já decodificadas**, por chave (`p:` preview,
-    /// `t:` miniatura).
+    /// O cache L1 dos previews grandes: imagens **já decodificadas**, por id.
     ///
     /// 🚨 **É `Arc` por dentro para o descarte do LRU não copiar 26 MB.** Guardar
     /// `DynamicImage` direto faria cada `put` mover a imagem inteira, e cada
     /// despejo liberar de uma vez — com o `Arc`, quem já pegou a imagem continua
     /// com ela enquanto usa.
-    memoria: Mutex<lru::LruCache<String, Arc<DynamicImage>>>,
+    previews: Mutex<lru::LruCache<String, Arc<DynamicImage>>>,
+    /// O mesmo para as miniaturas, **em outro LRU**. Ver
+    /// [`MINIATURAS_NA_MEMORIA`]: juntas, as pequenas expulsavam as grandes.
+    miniaturas: Mutex<lru::LruCache<String, Arc<DynamicImage>>>,
 }
 
 /// Grava a imagem como JPEG, convertendo para RGB8 antes.
@@ -121,32 +141,44 @@ impl PreviewManager {
         Self {
             conn: Mutex::new(conn),
             cache_dir,
-            memoria: Mutex::new(lru::LruCache::new(
-                std::num::NonZeroUsize::new(CAPACIDADE_DA_MEMORIA).expect("não é zero"),
+            previews: Mutex::new(lru::LruCache::new(
+                std::num::NonZeroUsize::new(PREVIEWS_NA_MEMORIA).expect("não é zero"),
+            )),
+            miniaturas: Mutex::new(lru::LruCache::new(
+                std::num::NonZeroUsize::new(MINIATURAS_NA_MEMORIA).expect("não é zero"),
             )),
         }
     }
 
+    /// Qual dos dois LRUs guarda este tipo.
+    fn memoria_de(&self, tipo: PreviewType) -> &Mutex<lru::LruCache<String, Arc<DynamicImage>>> {
+        match tipo {
+            PreviewType::Large => &self.previews,
+            PreviewType::Thumbnail => &self.miniaturas,
+        }
+    }
+
     /// A imagem já decodificada, se ela estiver na memória.
-    fn da_memoria(&self, chave: &str) -> Option<DynamicImage> {
-        self.memoria
+    fn da_memoria(&self, tipo: PreviewType, id: &str) -> Option<DynamicImage> {
+        self.memoria_de(tipo)
             .lock()
             .ok()?
-            .get(chave)
+            .get(id)
             .map(|imagem: &Arc<DynamicImage>| (**imagem).clone())
     }
 
-    fn guardar_na_memoria(&self, chave: &str, imagem: &DynamicImage) {
-        if let Ok(mut memoria) = self.memoria.lock() {
-            memoria.put(chave.to_string(), Arc::new(imagem.clone()));
+    fn guardar_na_memoria(&self, tipo: PreviewType, id: &str, imagem: &DynamicImage) {
+        if let Ok(mut memoria) = self.memoria_de(tipo).lock() {
+            memoria.put(id.to_string(), Arc::new(imagem.clone()));
         }
     }
 
     /// Esquece uma foto da memória — usado quando o preview dela é regravado.
     pub fn esquecer_da_memoria(&self, photo_id_str: &str) {
-        if let Ok(mut memoria) = self.memoria.lock() {
-            memoria.pop(&format!("p:{photo_id_str}"));
-            memoria.pop(&format!("t:{photo_id_str}"));
+        for tipo in [PreviewType::Large, PreviewType::Thumbnail] {
+            if let Ok(mut memoria) = self.memoria_de(tipo).lock() {
+                memoria.pop(photo_id_str);
+            }
         }
     }
 
@@ -189,12 +221,11 @@ impl PreviewManager {
     /// `RenderImage`, mas a Revelação cai na miniatura quando não há preview, e o
     /// filmstrip pede as vizinhas a cada troca de foto.
     pub fn get_thumbnail(&self, photo_id_str: &str) -> Option<DynamicImage> {
-        let chave = format!("t:{photo_id_str}");
-        if let Some(imagem) = self.da_memoria(&chave) {
+        if let Some(imagem) = self.da_memoria(PreviewType::Thumbnail, photo_id_str) {
             return Some(imagem);
         }
         let imagem = self.ler_miniatura_do_disco(photo_id_str)?;
-        self.guardar_na_memoria(&chave, &imagem);
+        self.guardar_na_memoria(PreviewType::Thumbnail, photo_id_str, &imagem);
         Some(imagem)
     }
 
@@ -258,12 +289,11 @@ impl PreviewManager {
     /// de egui tinha (`async_loader.rs`, cache L1 de 15 imagens) e que não veio no
     /// porte; `docs/08-CACHE-ARCHITECTURE.md` a descreve desde dez/2025.
     pub fn get_preview(&self, photo_id_str: &str) -> Option<DynamicImage> {
-        let chave = format!("p:{photo_id_str}");
-        if let Some(imagem) = self.da_memoria(&chave) {
+        if let Some(imagem) = self.da_memoria(PreviewType::Large, photo_id_str) {
             return Some(imagem);
         }
         let imagem = self.ler_preview_do_disco(photo_id_str)?;
-        self.guardar_na_memoria(&chave, &imagem);
+        self.guardar_na_memoria(PreviewType::Large, photo_id_str, &imagem);
         Some(imagem)
     }
 
@@ -592,15 +622,54 @@ mod tests {
         let previews = PreviewManager::new_with_path(dir.path().to_path_buf());
 
         let imagem = DynamicImage::ImageRgb8(image::RgbImage::new(8, 8));
-        for i in 0..=CAPACIDADE_DA_MEMORIA {
+        for i in 0..=PREVIEWS_NA_MEMORIA {
             previews
                 .save_preview(&format!("foto-{i}"), &imagem)
                 .expect("gravar");
             previews.get_preview(&format!("foto-{i}"));
         }
 
-        let memoria = previews.memoria.lock().expect("a memória");
-        assert_eq!(memoria.len(), CAPACIDADE_DA_MEMORIA);
+        let memoria = previews.previews.lock().expect("a memória");
+        assert_eq!(memoria.len(), PREVIEWS_NA_MEMORIA);
+    }
+
+    /// 🚨 **A tira não pode despejar o preview do palco.**
+    ///
+    /// Eram um LRU só, de quinze: a tira da Revelação lê uma miniatura por foto
+    /// do ensaio ao montar, e essa varredura empurrava para fora o preview de
+    /// 2560px que o palco tinha acabado de pôr lá. A seta seguinte
+    /// redecodificava o JPEG inteiro — 13,41 ms contra 1,42 ms, medido no
+    /// catálogo real em 8/set/2026 (`medir-revelacao`).
+    ///
+    /// O defeito só apareceu quando a Revelação passou a abrir de verdade as
+    /// fotos que só estão no disco: antes a tira não achava miniatura nenhuma,
+    /// e uma varredura que não lê nada não despeja nada.
+    #[test]
+    fn as_miniaturas_nao_despejam_os_previews() {
+        let dir = tempfile::tempdir().expect("diretório");
+        let previews = PreviewManager::new_with_path(dir.path().to_path_buf());
+        let imagem = DynamicImage::ImageRgb8(image::RgbImage::new(8, 8));
+
+        previews.save_preview("no-palco", &imagem).expect("gravar");
+        previews.get_preview("no-palco");
+
+        // A tira monta: uma miniatura por foto do ensaio, muito além do teto
+        // dos previews.
+        for i in 0..(PREVIEWS_NA_MEMORIA * 3) {
+            previews
+                .save_thumbnail(&format!("da-tira-{i}"), &imagem)
+                .expect("gravar");
+            previews.get_thumbnail(&format!("da-tira-{i}"));
+        }
+
+        assert!(
+            previews
+                .previews
+                .lock()
+                .expect("a memória")
+                .contains("no-palco"),
+            "a tira despejou o preview do palco — cada seta volta a decodificar"
+        );
     }
 
     use super::*;
