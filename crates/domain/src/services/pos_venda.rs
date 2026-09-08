@@ -268,6 +268,15 @@ pub struct FotoDaGaleria {
     pub downloads: u32,
     /// Se ela já foi revelada no navegador — os 46 ajustes estão gravados.
     pub revelada: bool,
+    /// A receita da revelação, como o site a guarda: os ajustes por nome e o
+    /// enquadramento com prefixo `corte_`. `None` = nunca revelada.
+    ///
+    /// 🚨 **Era só o `bool` acima, e a receita ficava pelo caminho.** Uma foto já
+    /// revelada abria no app com os sliders no neutro e a miniatura revelada
+    /// como se fosse o bruto — e "sincronizar" a partir dela mandava o neutro às
+    /// outras. É o `ajustes` que reabre o editor do site com os sliders no
+    /// lugar (`completar(foto.ajustes)`), e tem de reabrir o daqui também.
+    pub ajustes: Option<serde_json::Value>,
 }
 
 /// A sessão aberta — o que a tela de uma sessão precisa saber.

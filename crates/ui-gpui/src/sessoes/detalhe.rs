@@ -2245,6 +2245,7 @@ mod testes {
             pedido_id: None,
             downloads: 0,
             revelada: false,
+            ajustes: None,
         }
     }
 

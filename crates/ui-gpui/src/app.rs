@@ -850,10 +850,11 @@ impl Aplicativo {
         if acervo.is_empty() {
             return;
         }
+        // Os pixels do storage são pedidos por `AbriuOutraFoto`, que o
+        // `abrir_no_acervo` emite — o mesmo caminho da seta e da tira.
         self.revelacao.update(cx, |tela, cx| {
             tela.abrir_no_acervo(acervo, inicial, window, cx)
         });
-        self.buscar_os_pixels_na_nuvem(cx);
         self.tela = Tela::Revelacao;
         // O foco volta para a raiz a cada troca de tela — ver `revelar`.
         window.focus(&self.foco);
@@ -1129,13 +1130,11 @@ impl Aplicativo {
             .position(|outra| outra.id == foto.id)
             .unwrap_or(0);
 
+        // 📸 Passo 11 — os pixels do storage, quando o cache não tem o bruto —
+        // é pedido por `AbriuOutraFoto`, que `abrir_no_acervo` emite.
         self.revelacao.update(cx, |tela, cx| {
             tela.abrir_no_acervo(acervo, posicao, window, cx)
         });
-        // 📸 Passo 11: se o cache local não tinha nada e a foto está no site, os
-        // pixels vêm de lá. A pergunta é feita **depois** de abrir, porque é a
-        // Revelação quem sabe se sobrou vazio.
-        self.buscar_os_pixels_na_nuvem(cx);
         self.tela = Tela::Revelacao;
         // 🚨 O foco volta para a raiz a cada troca de tela, e não só na abertura.
         // Quem usou o campo de busca deixou o foco **nele** — e ele para de ser
@@ -1217,6 +1216,11 @@ impl Aplicativo {
             PedidoDaRevelacao::Exportar => self.exportar(cx),
             PedidoDaRevelacao::SalvarNaGaleria => self.salvar_na_galeria(window, cx),
             PedidoDaRevelacao::Sincronizar => self.sincronizar_revelacao(window, cx),
+            // 📸 Passo 11 a cada troca de foto, e não só na abertura: se o
+            // cache local não tem o bruto e a foto está no site, os pixels vêm
+            // de lá. A pergunta é feita **depois** de a Revelação abrir a
+            // foto, porque é ela quem sabe se sobrou vazio.
+            PedidoDaRevelacao::AbriuOutraFoto => self.buscar_os_pixels_na_nuvem(cx),
         }
     }
 
@@ -2610,7 +2614,7 @@ fn do_site_para_a_grade(
     sessao_id: Option<String>,
 ) -> PhotoViewModel {
     use domain::services::pos_venda::EstadoDaFotoNoSite;
-    PhotoViewModel {
+    let mut vm = PhotoViewModel {
         id: format!("site:{}", foto.id),
         name: foto.arquivo.clone(),
         // Sem caminho: ela não está no disco desta máquina.
@@ -2625,7 +2629,15 @@ fn do_site_para_a_grade(
         pos_venda_foto_id: Some(foto.id.clone()),
         sessao_id,
         ..Default::default()
+    };
+    // 🔑 **A receita vem junto.** É o `completar(foto.ajustes)` do editor do
+    // site: sem isto a foto já revelada abria aqui com os 53 sliders no
+    // neutro, e "sincronizar" a partir dela mandava o neutro às outras.
+    if let Some(json) = &foto.ajustes {
+        let (ajustes, corte) = persistencia::de_json(json);
+        persistencia::na_foto(&mut vm, ajustes, corte);
     }
+    vm
 }
 
 /// A conta de teste. **Um só lugar constrói `Sessao` neste arquivo**: a struct
@@ -2782,6 +2794,201 @@ mod testes {
             *pixel = Rgba([255, 0, 0, 255]);
         }
         DynamicImage::ImageRgba8(img)
+    }
+
+    /// Uma foto do site como a API a devolve, com ou sem receita.
+    fn foto_do_site(
+        id: &str,
+        ajustes: Option<serde_json::Value>,
+    ) -> domain::services::pos_venda::FotoDaGaleria {
+        domain::services::pos_venda::FotoDaGaleria {
+            id: id.into(),
+            arquivo: format!("{id}.jpg"),
+            estado: domain::services::pos_venda::EstadoDaFotoNoSite::Disponivel,
+            ordem: 0,
+            preco_negociado: None,
+            observacao_da_negociacao: None,
+            apagada: false,
+            nota: Some(4),
+            produto_efetivo: "p1".into(),
+            preco_de_venda: None,
+            pedido_id: None,
+            downloads: 0,
+            revelada: ajustes.is_some(),
+            ajustes,
+        }
+    }
+
+    /// 🚨 **O cenário do dono, 7/set/2026: "a sincronização não funciona".**
+    ///
+    /// Três fotos do site na tira, a primeira já revelada em sépia. Ela abria
+    /// com os sliders no neutro (a receita ficava no `http.rs`) e mostrando a
+    /// miniatura revelada da galeria como se fosse o bruto; "Sincronizar 3"
+    /// mandava esse neutro às outras duas — e nada mudava. Este teste anda o
+    /// caminho inteiro: abrir, trocar de foto pela seta, voltar, sincronizar.
+    #[gpui::test]
+    fn sincronizar_a_partir_da_foto_do_site_leva_a_receita_dela_e_nao_o_neutro(
+        cx: &mut TestAppContext,
+    ) {
+        use crate::revelacao::sincronizacao::Escolha;
+        use crate::sessoes::detalhe::FotoARevelar;
+
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+        let publicador = Arc::new(PublicadorDeMentira::default());
+
+        let janela = cx.add_window({
+            let publicador = publicador.clone();
+            move |window, cx| {
+                Aplicativo::ja_dentro(
+                    Vec::new(),
+                    previews,
+                    Vec::new(),
+                    Portas {
+                        publicador,
+                        ..portas()
+                    },
+                    window,
+                    cx,
+                )
+            }
+        });
+
+        let a_revelar = |id: &str| FotoARevelar {
+            id: id.into(),
+            arquivo: format!("{id}.jpg"),
+        };
+
+        janela
+            .update(cx, |app, window, cx| {
+                // A sessão respondeu: a primeira já foi revelada em sépia.
+                app.atender_a_sessao(
+                    &DetalhePedido::FotosDoSite(vec![
+                        foto_do_site(
+                            "remota-1",
+                            Some(serde_json::json!({
+                                "saturation": -1.0,
+                                "split_shadow_hue": 35,
+                                "split_shadow_sat": 45
+                            })),
+                        ),
+                        foto_do_site("remota-2", None),
+                        foto_do_site("remota-3", None),
+                    ]),
+                    window,
+                    cx,
+                );
+                app.atender_a_sessao(
+                    &DetalhePedido::Revelar {
+                        fotos: vec![
+                            a_revelar("remota-1"),
+                            a_revelar("remota-2"),
+                            a_revelar("remota-3"),
+                        ],
+                        inicial: 0,
+                    },
+                    window,
+                    cx,
+                );
+                assert_eq!(app.tela(), Tela::Revelacao);
+
+                let revelacao = app.revelacao.read(cx);
+                assert_eq!(
+                    revelacao.ajustes().saturation,
+                    -1.0,
+                    "a revelada abre com os sliders no lugar, como no site"
+                );
+                assert!(
+                    !revelacao.tem_pixels(),
+                    "e não usa a miniatura da galeria como origem"
+                );
+            })
+            .expect("a janela deve estar aberta");
+
+        janela
+            .update(cx, |app, _window, cx| {
+                app.colher_sincronia(cx);
+                assert!(
+                    app.revelacao.read(cx).tem_pixels(),
+                    "a cópia de trabalho chegou do storage"
+                );
+            })
+            .expect("a janela deve estar aberta");
+        assert_eq!(publicador.baixadas(), vec!["remota-1".to_string()]);
+
+        // 🔑 A seta também busca o bruto — antes só a abertura buscava, e a
+        // segunda foto ficava com a miniatura de 640px como origem.
+        janela
+            .update(cx, |app, window, cx| {
+                app.revelacao
+                    .update(cx, |tela, cx| tela.andar(1, window, cx));
+            })
+            .expect("a janela deve estar aberta");
+        janela
+            .update(cx, |app, _window, cx| {
+                app.colher_sincronia(cx);
+            })
+            .expect("a janela deve estar aberta");
+        assert_eq!(
+            publicador.baixadas(),
+            vec!["remota-1".to_string(), "remota-2".to_string()],
+            "trocar de foto pede o bruto da nova"
+        );
+
+        // De volta à revelada: marca as três e sincroniza.
+        janela
+            .update(cx, |app, window, cx| {
+                app.revelacao.update(cx, |tela, cx| {
+                    tela.andar(-1, window, cx);
+                    assert_eq!(tela.ajustes().saturation, -1.0, "a receita voltou com ela");
+                    tela.marcar_todas(cx);
+                    tela.definir_escolha_da_sincronizacao(Escolha::default());
+                    assert_eq!(tela.alvos_da_sincronizacao().len(), 3);
+                });
+                app.sincronizar_revelacao(window, cx);
+            })
+            .expect("a janela deve estar aberta");
+
+        let reveladas = publicador.reveladas();
+        assert_eq!(reveladas.len(), 3, "as três foram ao site: {reveladas:?}");
+        for (id, ajustes, _) in &reveladas {
+            assert_eq!(
+                ajustes.saturation, -1.0,
+                "{id} recebe a receita da aberta — era o neutro que ia"
+            );
+            assert_eq!(ajustes.split_shadow_hue, 35.0, "{id}");
+        }
+    }
+
+    /// 🚨 **A receita do site chega à grade — e por ela à Revelação.**
+    ///
+    /// A API sempre mandou os ajustes por nome; o `http.rs` guardava só "tem ou
+    /// não tem". A foto já revelada abria aqui com os 53 sliders no neutro, e
+    /// era essa receita vazia que "sincronizar" levava às outras.
+    #[test]
+    fn a_foto_do_site_traz_a_receita_para_a_grade() {
+        let com_receita = do_site_para_a_grade(
+            &foto_do_site(
+                "remota-1",
+                Some(serde_json::json!({
+                    "saturation": -1.0,
+                    "split_shadow_hue": 35,
+                    "corte_x": 0.1, "corte_y": 0.0, "corte_largura": 0.8, "corte_altura": 1.0,
+                    "corte_giro90": 0, "corte_angulo": 0, "corte_espelho_h": 0, "corte_espelho_v": 0
+                })),
+            ),
+            Some("g1".into()),
+        );
+        assert_eq!(com_receita.edit_saturation, Some(-1.0));
+        assert_eq!(com_receita.edit_split_shadow_hue, Some(35.0));
+        assert_eq!(com_receita.edit_contrast, Some(1.0), "ausente é o neutro");
+        assert_eq!(com_receita.edit_crop_x, Some(0.1));
+        assert!(persistencia::ja_revelada(&com_receita));
+        assert!(persistencia::so_existe_no_site(&com_receita));
+
+        let nunca_revelada = do_site_para_a_grade(&foto_do_site("remota-2", None), None);
+        assert_eq!(nunca_revelada.edit_saturation, None);
+        assert!(!persistencia::ja_revelada(&nunca_revelada));
     }
 
     fn foto(nome: &str) -> PhotoViewModel {

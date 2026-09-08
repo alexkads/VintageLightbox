@@ -297,6 +297,61 @@ pub fn para_crop_settings(corte: &Corte) -> CropSettings {
     )
 }
 
+/// A receita como o site a guarda — os ajustes por nome e o corte com prefixo
+/// `corte_` — de volta para o que a tela usa.
+///
+/// É o `completar(foto.ajustes)` + `corteDeJson` do editor do site, e o inverso
+/// exato de `ajustes_em_json` (`pos_venda/porta.rs`), que é o que sobe. Campo
+/// ausente recebe o **neutro** de [`Ajustes::default`]; campo com valor que não
+/// é número finito também — um `NaN` no vetor apagaria a foto. Nome desconhecido
+/// é ignorado: uma revelação gravada por uma versão mais nova aplica o que dá.
+///
+/// 🚨 **Sem isto, a foto já revelada abria no neutro.** A API mandava a receita e
+/// o `http.rs` guardava só "tem ou não tem" — e a Revelação mostrava a miniatura
+/// revelada da galeria como se fosse o bruto, com os 53 sliders parados no
+/// meio. Sincronizar a partir dela mandava o neutro às outras.
+pub fn de_json(json: &serde_json::Value) -> (Ajustes, Corte) {
+    let numero = |chave: &str| {
+        json.get(chave)
+            .and_then(serde_json::Value::as_f64)
+            .filter(|v| v.is_finite())
+            .map(|v| v as f32)
+    };
+
+    let mut vetor = Ajustes::default().como_vetor();
+    for (posicao, nome) in Ajustes::NOMES.iter().enumerate() {
+        if let Some(valor) = numero(nome) {
+            vetor[posicao] = valor;
+        }
+    }
+    let ajustes = Ajustes::de_vetor(&vetor).expect("o vetor saiu de `como_vetor`");
+
+    // O corte só existe no JSON quando não é a foto inteira (`corteParaJson`
+    // devolve `{}` para o corte inteiro); ausente é `Corte::default()`.
+    let corte = Corte {
+        x: numero("corte_x"),
+        y: numero("corte_y"),
+        largura: numero("corte_largura"),
+        altura: numero("corte_altura"),
+        rotacao: numero("corte_giro90").map(|v| v.round() as i32),
+        angulo: numero("corte_angulo"),
+        espelho_h: numero("corte_espelho_h").map(|v| v == 1.0),
+        espelho_v: numero("corte_espelho_v").map(|v| v == 1.0),
+    };
+
+    (ajustes, corte)
+}
+
+/// Se a foto **só existe no site** — sem arquivo neste disco.
+///
+/// 🔑 É o que decide de onde vêm os pixels da Revelação. Para a local, o cache
+/// de previews tem o bruto importado. Para a do site, o que o cache tem é a
+/// **miniatura da galeria** — que, depois de "Salvar na galeria", é a foto
+/// **revelada**. Usá-la como origem aplicaria a receita duas vezes, em 640px.
+pub fn so_existe_no_site(foto: &PhotoViewModel) -> bool {
+    foto.pos_venda_foto_id.is_some() && foto.path.is_empty()
+}
+
 /// Se esta foto já foi revelada — algum ajuste fora do neutro, ou algum
 /// enquadramento.
 ///
@@ -424,6 +479,95 @@ mod testes {
             edit_crop_width: Some(0.5),
             ..foto()
         }));
+    }
+
+    /// O JSON do site, como o `corteParaJson` + `soOsAlterados` do editor o
+    /// gravam: só o que saiu do neutro, e o corte com prefixo.
+    #[test]
+    fn a_receita_do_site_volta_com_o_neutro_no_que_falta() {
+        let json = serde_json::json!({
+            "saturation": -1.0,
+            "split_shadow_hue": 35,
+            "split_shadow_sat": 45,
+            "corte_x": 0.1, "corte_y": 0.2, "corte_largura": 0.5, "corte_altura": 0.6,
+            "corte_giro90": 1, "corte_angulo": 2.5, "corte_espelho_h": 1, "corte_espelho_v": 0,
+            "dehaze": 40,
+            "exposure": "muito"
+        });
+
+        let (ajustes, corte) = de_json(&json);
+
+        assert_eq!(ajustes.saturation, -1.0);
+        assert_eq!(ajustes.split_shadow_hue, 35.0);
+        assert_eq!(
+            ajustes.contrast, 1.0,
+            "ausente é o neutro, e o neutro do contraste é 1"
+        );
+        assert_eq!(
+            ajustes.exposure, 0.0,
+            "texto onde devia haver número vira neutro"
+        );
+        assert_eq!(corte.x, Some(0.1));
+        assert_eq!(corte.largura, Some(0.5));
+        assert_eq!(corte.rotacao, Some(1));
+        assert_eq!(corte.angulo, Some(2.5));
+        assert_eq!(corte.espelho_h, Some(true));
+        assert_eq!(corte.espelho_v, Some(false));
+    }
+
+    /// Foto revelada sem enquadramento: o site grava `{}` para o corte inteiro.
+    #[test]
+    fn sem_corte_no_json_o_corte_e_o_padrao() {
+        let (_, corte) = de_json(&serde_json::json!({ "exposure": 0.5 }));
+        assert_eq!(corte, Corte::default());
+    }
+
+    /// 🔑 **O que sobe é o que volta.** `ajustes_em_json` (a subida) e `de_json`
+    /// (a volta) são as duas pontas do mesmo contrato com o site; divergirem em
+    /// um nome de chave faz a foto revelada no app abrir sem aquele ajuste.
+    #[test]
+    fn a_ida_e_a_volta_pelo_json_do_site_se_fecham() {
+        let ajustes = Ajustes {
+            exposure: 0.75,
+            contrast: 1.2,
+            hsl_blue_lum: -20.0,
+            split_shadow_hue: 35.0,
+            grain_amount: 30.0,
+            ..Ajustes::default()
+        };
+        let corte = Corte {
+            x: Some(0.1),
+            y: Some(0.0),
+            largura: Some(0.8),
+            altura: Some(0.9),
+            rotacao: Some(1),
+            angulo: Some(-3.0),
+            espelho_h: Some(true),
+            espelho_v: Some(false),
+        };
+
+        let json = crate::pos_venda::porta::ajustes_em_json(&ajustes, &para_crop_settings(&corte));
+        let (de_volta, corte_de_volta) = de_json(&json);
+
+        assert_eq!(de_volta, ajustes);
+        assert_eq!(corte_de_volta, corte);
+    }
+
+    #[test]
+    fn a_foto_do_site_nao_tem_caminho_neste_disco() {
+        assert!(so_existe_no_site(&PhotoViewModel {
+            id: "site:x".into(),
+            pos_venda_foto_id: Some("x".into()),
+            ..Default::default()
+        }));
+        assert!(
+            !so_existe_no_site(&PhotoViewModel {
+                path: "/fotos/a.jpg".into(),
+                pos_venda_foto_id: Some("x".into()),
+                ..Default::default()
+            }),
+            "a local publicada tem o bruto aqui"
+        );
     }
 
     #[test]

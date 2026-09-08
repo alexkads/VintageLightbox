@@ -761,6 +761,7 @@ fn a_grade_e_a_do_ensaio_e_e_uma_so(cx: &mut TestAppContext) {
                         pedido_id: None,
                         downloads: 0,
                         revelada: false,
+                        ajustes: None,
                     },
                 ]),
                 _window,
@@ -869,5 +870,6 @@ fn do_site(
         pedido_id: None,
         downloads: 0,
         revelada: false,
+        ajustes: None,
     }
 }

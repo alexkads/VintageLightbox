@@ -189,6 +189,28 @@ a 0.3.0.
 - **`SUPABASE_URL` e `SUPABASE_SERVICE_ROLE_KEY`** precisam existir na máquina que publica
   (`~/.vintagelightbox/publicar.env`). São as mesmas do backend no Fly.
 
+## 🚨 "A sincronização não funciona" — 7/set/2026, à noite
+
+O dono abriu uma sessão, marcou três fotos na tira e clicou em "Sincronizar 3": nada mudou. Não
+era a sincronização — eram **dois defeitos na abertura de uma foto do site**, que juntos faziam a
+receita que viajava ser o neutro:
+
+| | Onde | O que era |
+|---|---|---|
+| 🚨 **A receita ficava pelo caminho** | `pos_venda/http.rs` | a API sempre mandou `ajustes` (os 53 por nome + `corte_*`); o `http.rs` guardava só `revelada: bool`. Uma foto já revelada abria com os sliders **no neutro** — "Nenhum ajuste fora do neutro" numa foto sépia — e "sincronizar" a partir dela mandava esse neutro às outras |
+| 🚨 **A miniatura da galeria era usada como bruto** | `revelacao/tela.rs` `mostrar` | a grade da sessão guarda em `site:<id>` a **miniatura** do site — que, depois de "Salvar na galeria", é a foto **revelada**. A Revelação a servia ao shader como origem: receita por cima de receita, em 640px. E como "tinha pixels", a cópia de trabalho nunca era pedida |
+| ⚠️ **Só a abertura buscava o bruto** | `app.rs` | a seta e a tira trocavam de foto sem a raiz saber; a segunda foto do site ficava com a miniatura como origem para sempre |
+
+O conserto segue o editor do site ponto a ponto: `FotoDaGaleria.ajustes` atravessa o `http.rs`;
+`persistencia::de_json` é o `completar(foto.ajustes)` + `corteDeJson` de lá, e é o inverso exato
+de `ajustes_em_json` (a subida) — há teste de ida e volta; a foto do site nunca usa o cache como
+origem (a miniatura fica só como espera na tela); e a Revelação emite `AbriuOutraFoto` a cada troca,
+que é quando a raiz busca a cópia de trabalho — o passo 11 a cada foto, e não só na abertura.
+
+`sincronizar_a_partir_da_foto_do_site_leva_a_receita_dela_e_nao_o_neutro` anda o cenário do dono
+de ponta a ponta: abre a revelada com os sliders no lugar, troca de foto pela seta (e o bruto da nova
+é pedido), volta, marca as três, sincroniza — e as três recebem a sépia, não o neutro.
+
 ## O que mudou em 7/set/2026 — a Revelação passa a ser a do site
 
 🎯 **O dono mandou o editor do site como referência**: *"o Modo revelação do VintageLightbox precisa

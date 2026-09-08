@@ -765,14 +765,26 @@ impl Revelacao {
             .get_preview(&foto.id)
             .or_else(|| self.previews.get_thumbnail(&foto.id));
 
-        let origem = bruta.as_ref().map(|imagem| {
-            let rgba = imagem.to_rgba8();
-            Origem {
-                largura: rgba.width(),
-                altura: rgba.height(),
-                pixels: Arc::new(rgba.into_raw()),
-            }
-        });
+        // 🚨 **A foto do site não tem bruto neste cache.** O que a grade da
+        // sessão guardou em `site:<id>` é a **miniatura da galeria** — que,
+        // depois de "Salvar na galeria", é a foto **revelada**. Servir isso ao
+        // shader aplicaria a receita duas vezes, em 640px, e era o que a tela
+        // fazia: a sépia salva ontem aparecia com os sliders no neutro, e
+        // "sincronizar" a partir dela mandava o neutro às outras. A miniatura
+        // fica só como **espera** na tela; a origem é a cópia de trabalho, que
+        // a raiz busca ao receber `AbriuOutraFoto`.
+        let origem = if persistencia::so_existe_no_site(&foto) {
+            None
+        } else {
+            bruta.as_ref().map(|imagem| {
+                let rgba = imagem.to_rgba8();
+                Origem {
+                    largura: rgba.width(),
+                    altura: rgba.height(),
+                    pixels: Arc::new(rgba.into_raw()),
+                }
+            })
+        };
 
         // Os ajustes vêm da **foto**, e não do que estava no painel: é o que o
         // legado faz ao selecionar (`app.rs`, "Load saved edits FIRST"), e é o
@@ -822,6 +834,9 @@ impl Revelacao {
             self.pedir_revelacao(cx);
         }
 
+        // Quem quiser buscar os pixels desta foto em outro lugar fica sabendo
+        // agora — e não só na abertura da tela.
+        cx.emit(PedidoDaRevelacao::AbriuOutraFoto);
         cx.notify();
     }
 
@@ -3175,6 +3190,14 @@ pub enum PedidoDaRevelacao {
     /// "Sincronizar N" do site: os ajustes desta foto vão para as marcadas na
     /// tira — a receita para o catálogo, e a foto revelada para o site.
     Sincronizar,
+    /// Outra foto entrou no palco — pela seta, pela tira ou ao abrir.
+    ///
+    /// 🔑 **A Revelação não sabe buscar na nuvem, e não vai passar a saber**;
+    /// mas é ela quem sabe quando a foto trocou. Sem este aviso a raiz só
+    /// buscava os pixels da foto do site **na abertura**: a seta seguinte
+    /// caía numa foto sem bruto, e o que aparecia era a miniatura revelada da
+    /// galeria — em 640px e com a receita por cima da receita.
+    AbriuOutraFoto,
 }
 
 impl gpui::EventEmitter<PedidoDaRevelacao> for Revelacao {}
@@ -3623,6 +3646,52 @@ mod testes {
                 assert_eq!(tela.foto().map(|f| f.name.as_str()), Some("retrato.jpg"));
                 assert!(tela.aberta.as_ref().unwrap().desenhada.is_some());
                 assert!(tela.aberta.as_ref().unwrap().origem.is_some());
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 **A foto do site não usa a miniatura da galeria como origem.**
+    ///
+    /// O que a grade da sessão guarda em `site:<id>` é a miniatura da galeria —
+    /// que, depois de "Salvar na galeria", é a foto **revelada**. Servir isso ao
+    /// shader aplicava a receita duas vezes, em 640px: a sépia salva ontem
+    /// aparecia com os sliders no neutro, e "sincronizar" a partir dela mandava
+    /// o neutro às outras. A miniatura fica só como espera na tela; a origem
+    /// chega pela cópia de trabalho (`receber_pixels`).
+    #[gpui::test]
+    fn a_foto_do_site_espera_a_copia_de_trabalho_em_vez_de_usar_a_miniatura(
+        cx: &mut TestAppContext,
+    ) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("site:remota-1", &foto_cinza())
+            .expect("gravar a miniatura da galeria");
+
+        let janela = janela(cx, previews);
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(
+                    PhotoViewModel {
+                        id: "site:remota-1".into(),
+                        name: "DSC_001.jpg".into(),
+                        pos_venda_foto_id: Some("remota-1".into()),
+                        ..Default::default()
+                    },
+                    window,
+                    cx,
+                );
+
+                assert!(
+                    !tela.tem_pixels(),
+                    "a miniatura da galeria não é origem — é o que faz a raiz buscar o bruto"
+                );
+                assert!(
+                    tela.aberta.as_ref().unwrap().desenhada.is_some(),
+                    "mas ela aparece enquanto o bruto não chega"
+                );
+
+                assert!(tela.receber_pixels("site:remota-1", foto_cinza(), cx));
+                assert!(tela.tem_pixels(), "a cópia de trabalho é a origem");
             })
             .expect("a janela deve estar aberta");
     }

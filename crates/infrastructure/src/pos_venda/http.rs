@@ -516,6 +516,7 @@ impl PosVendaApi for PosVendaApiHttp {
                     downloads: f.downloads,
                     // `ajustes` é `null` enquanto ninguém revelou a foto.
                     revelada: f.ajustes.is_some(),
+                    ajustes: f.ajustes,
                 })
                 .collect(),
             vence_venda: aberta.vence_venda.map(|q| q.timestamp()),
@@ -780,8 +781,10 @@ struct FotoDaGaleriaDaApi {
     pedido_id: Option<String>,
     #[serde(default)]
     downloads: u32,
-    /// Os 46 ajustes da revelação feita no navegador. Aqui só interessa se
-    /// existem — quem revela lê os valores do próprio motor.
+    /// Os 53 ajustes da revelação (por nome) e o enquadramento (`corte_*`).
+    ///
+    /// ⚠️ Passam **inteiros** para a tela: é com eles que uma foto já revelada
+    /// reabre com os sliders no lugar, aqui como no editor do site.
     #[serde(default)]
     ajustes: Option<serde_json::Value>,
 }

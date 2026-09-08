@@ -221,7 +221,7 @@ async fn revelar_e_salvar(
 /// 🔑 **O corte entra com o prefixo `corte_`**, que é o que `corteParaJson` do
 /// editor faz — e é assim que a web lê de volta. Um segundo formato aqui faria
 /// a foto revelada no app abrir sem enquadramento no navegador.
-fn ajustes_em_json(ajustes: &Ajustes, corte: &CropSettings) -> serde_json::Value {
+pub(crate) fn ajustes_em_json(ajustes: &Ajustes, corte: &CropSettings) -> serde_json::Value {
     let mut json = serde_json::to_value(ajustes).unwrap_or_else(|_| serde_json::json!({}));
     if let Some(objeto) = json.as_object_mut() {
         objeto.insert("corte_x".into(), corte.crop_x().into());
