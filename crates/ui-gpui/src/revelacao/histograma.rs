@@ -30,16 +30,45 @@ pub struct Histograma {
     pub maximo: u32,
 }
 
+/// Quantos pixels bastam para o desenho não mudar.
+///
+/// 🚨 **Isto roda uma vez por quadro enquanto o slider está sendo arrastado**, e
+/// varrer os 4,4 Mpx de um preview de 2560px custava 4,46 ms — mais de um quarto
+/// do orçamento de 16,7 ms, gasto num gráfico de 256 barras (medido em
+/// 8/set/2026, `medir-revelacao`).
+///
+/// 🔑 **Um histograma é uma distribuição, e distribuição se estima.** Com 250 mil
+/// amostras espalhadas pela imagem, cada uma das 256 barras recebe ~1.000 —
+/// muito além do que 200 pixels de altura conseguem distinguir. O desenho é o
+/// mesmo; o custo cai com o passo.
+///
+/// ⚠️ **O passo é sobre o total, não fixo**: numa imagem pequena ele vira 1 e
+/// todos os pixels entram, que é o que os testes cobram e o que mantém a conta
+/// exata onde ela é barata.
+const AMOSTRAS: usize = 250_000;
+
 impl Histograma {
     pub fn da_imagem(imagem: &DynamicImage) -> Self {
         let mut vermelho = [0u32; NIVEIS];
         let mut verde = [0u32; NIVEIS];
         let mut azul = [0u32; NIVEIS];
 
-        // `to_rgb8` e não `to_rgba8`: o alfa não entra em histograma de
-        // exposição, e converter para três canais evita percorrer um quarto de
-        // bytes à toa numa foto de 24 megapixels.
-        for pixel in imagem.to_rgb8().pixels() {
+        // 🔑 **`as_rgb8` antes de `to_rgb8`.** O resultado do shader já chega em
+        // Rgb8, e `to_rgb8` num Rgb8 **clona os 13 MB** para devolver o que já
+        // estava ali. Emprestar é o caminho normal; converter é a exceção.
+        let convertida;
+        let rgb = match imagem.as_rgb8() {
+            Some(rgb) => rgb,
+            None => {
+                convertida = imagem.to_rgb8();
+                &convertida
+            }
+        };
+
+        // O alfa não entra em histograma de exposição — daí três canais, e não
+        // quatro.
+        let passo = (rgb.pixels().len() / AMOSTRAS).max(1);
+        for pixel in rgb.pixels().step_by(passo) {
             vermelho[pixel[0] as usize] += 1;
             verde[pixel[1] as usize] += 1;
             azul[pixel[2] as usize] += 1;

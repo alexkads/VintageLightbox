@@ -40,23 +40,61 @@ use smallvec::SmallVec;
 /// `swap(0, 2)` em cada pixel. Copiar a regra de quem já fala com essa API é
 /// mais barato do que descobri-la olhando a foto ficar azul.
 ///
-/// # Uma cópia, e não duas
+/// # Uma passada, e não duas
 ///
-/// `into_rgba8()` consome o `DynamicImage` e reaproveita o buffer quando ele já
-/// é RGBA8 — que é o caso de toda miniatura vinda do cache, gravada em JPEG e
-/// decodificada aqui. A troca de canais é feita **no lugar**, sem alocar de
-/// novo: numa grade de 2.000 fotos, uma alocação a mais por miniatura é a
-/// diferença entre rolar liso e engasgar.
+/// 🚨 **O que chega do cache é Rgb8, e não Rgba8** — JPEG não tem canal alfa, e
+/// tanto a miniatura quanto o preview grande são JPEG. A versão anterior dizia
+/// o contrário e contava com `into_rgba8()` reaproveitar o buffer; na prática
+/// ele **alocava 17,5 MB e expandia** os 13 MB de RGB, e só então uma segunda
+/// varredura trocava R por B. Duas passadas completas sobre a imagem, uma vez
+/// por miniatura da grade e **uma vez por quadro** enquanto um slider é
+/// arrastado — 4,32 ms de um orçamento de 16,7 ms, medido em 8/set/2026
+/// (`medir-revelacao`).
+///
+/// Expandir e trocar são a mesma passada: lê três bytes, escreve quatro na
+/// ordem que o Metal quer. O caminho de baixo continua existindo para o que
+/// realmente chega em RGBA (PNG com alfa, imagem sintética dos testes).
 pub fn para_gpui(imagem: DynamicImage) -> Arc<RenderImage> {
-    let mut bytes = imagem.into_rgba8();
-
-    // `as_chunks_mut::<4>()` e não um laço por (x, y): o buffer é contíguo, e o
-    // acesso por coordenada refaria a multiplicação a cada pixel.
-    for pixel in bytes.as_chunks_mut::<4>().0 {
-        pixel.swap(0, 2);
-    }
+    let bytes = match imagem {
+        DynamicImage::ImageRgb8(rgb) => bgra_de_rgb8(rgb),
+        outra => {
+            let mut bytes = outra.into_rgba8();
+            // `as_chunks_mut::<4>()` e não um laço por (x, y): o buffer é
+            // contíguo, e o acesso por coordenada refaria a multiplicação a
+            // cada pixel.
+            for pixel in bytes.as_chunks_mut::<4>().0 {
+                pixel.swap(0, 2);
+            }
+            bytes
+        }
+    };
 
     Arc::new(RenderImage::new(SmallVec::from_elem(Frame::new(bytes), 1)))
+}
+
+/// RGB de três bytes vira BGRA de quatro, numa passada só.
+///
+/// `chunks_exact(3)` deixa o compilador saber o tamanho do passo; o alfa é
+/// opaco porque a origem não tem transparência para preservar — é a mesma
+/// decisão que o cache já toma ao gravar em JPEG.
+fn bgra_de_rgb8(rgb: image::RgbImage) -> image::RgbaImage {
+    let (largura, altura) = rgb.dimensions();
+    let origem = rgb.into_raw();
+
+    // 🔑 **Buffer do tamanho final, e escrita por fatia.** `Vec::push` /
+    // `extend_from_slice` conferem capacidade a cada pixel e impedem o
+    // compilador de vetorizar; com o destino já dimensionado e o alfa já opaco,
+    // o laço vira três escritas em posições conhecidas — e o `zip` de dois
+    // `chunks_exact` dá ao compilador os dois passos como constantes.
+    let mut destino = vec![255u8; origem.len() / 3 * 4];
+    for (saida, pixel) in destino.chunks_exact_mut(4).zip(origem.chunks_exact(3)) {
+        saida[0] = pixel[2];
+        saida[1] = pixel[1];
+        saida[2] = pixel[0];
+    }
+
+    image::RgbaImage::from_raw(largura, altura, destino)
+        .expect("o tamanho do destino vem do da origem")
 }
 
 #[cfg(test)]

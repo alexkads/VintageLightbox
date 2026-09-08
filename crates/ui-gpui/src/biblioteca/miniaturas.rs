@@ -134,6 +134,21 @@ impl CacheDeMiniaturas {
         self.carregadas.peek(chave).cloned()
     }
 
+    /// Guarda uma miniatura que **já veio pronta** de outro lugar.
+    ///
+    /// 🔑 **Existe para quem carrega fora da thread da interface.** A tira da
+    /// Revelação lê e converte as miniaturas do ensaio inteiro; fazer isso aqui
+    /// dentro, em [`Self::obter`], é fazê-lo na thread que desenha — e um ensaio
+    /// de 125 fotos custava 49,77 ms antes do primeiro quadro (medido em
+    /// 8/set/2026, `medir-revelacao`). Com este método o trabalho vai para o
+    /// executor de fundo e o resultado entra aqui, uma foto por vez.
+    ///
+    /// ⚠️ **`Ausente` também se guarda**, pelo mesmo motivo de sempre: sem isso
+    /// a foto sem miniatura seria pedida de novo a cada quadro.
+    pub fn guardar(&mut self, chave: &str, miniatura: Miniatura) {
+        self.carregadas.put(chave.to_string(), miniatura);
+    }
+
     /// Quantas miniaturas estão na memória agora.
     /// Tira uma entrada do cache.
     ///

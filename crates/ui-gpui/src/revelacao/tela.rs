@@ -277,6 +277,11 @@ pub struct Revelacao {
     /// abriria um laço novo e a tela acabaria com dezenas deles perguntando a
     /// mesma coisa.
     colhendo: bool,
+    /// 🚨 A tarefa que carrega a tira. **Descartá-la a cancela**, e é de
+    /// propósito: trocar de foto começa uma tarefa nova, que recomeça a ordem no
+    /// palco novo. A antiga estaria enchendo a tira a partir de onde o operador
+    /// não está mais olhando.
+    _tira: Option<Task<()>>,
     /// Se alguém está indo buscar os pixels que faltam — do disco ou do site.
     ///
     /// 🔑 **A tela não busca, mas precisa saber que estão buscando.** Sem isto
@@ -460,6 +465,7 @@ impl Revelacao {
             aba_hsl: Secao::HslCor,
             aguardando: None,
             colhendo: false,
+            _tira: None,
             repondo: false,
             _assinaturas: assinaturas,
         }
@@ -891,6 +897,11 @@ impl Revelacao {
             self.pedir_revelacao(cx);
         }
 
+        // 🔑 **A tira recomeça no palco novo.** A tarefa anterior é cancelada ao
+        // ser substituída: ela estaria enchendo a tira a partir de onde o
+        // operador não está mais olhando, e o que já carregou continua no cache.
+        self.carregar_a_tira(cx);
+
         // Quem quiser buscar os pixels desta foto em outro lugar fica sabendo
         // agora — e não só na abertura da tela.
         cx.emit(PedidoDaRevelacao::AbriuOutraFoto);
@@ -993,20 +1004,11 @@ impl Revelacao {
     /// deles deixa foto para trás: a varredura recomeça no palco novo a cada
     /// troca, então o que ficou de fora entra quando a seta chegar perto.
     pub fn fotos_a_repor(&self) -> Vec<APor> {
-        // Do centro para fora: 0, +1, −1, +2, −2… O `posicao` é o que está no
-        // palco, e a `Revelacao` sem lista (o caminho de `abrir`) tem acervo de
-        // um, então o laço cobre os dois casos sem ramificar.
-        let alcance = RAIO_DA_REPOSICAO.min(self.acervo.len());
-        let daqui = std::iter::once(self.posicao).chain((1..=alcance).flat_map(|passo| {
-            [
-                self.posicao.checked_add(passo),
-                self.posicao.checked_sub(passo),
-            ]
-            .into_iter()
-            .flatten()
-        }));
-
-        daqui
+        self.da_posicao_para_fora()
+            // 🚨 O teto é sobre as **posições visitadas**, e não sobre o que
+            // sobra do filtro: sem ele, um acervo em que nada falta faria a
+            // varredura inteira — duas consultas por foto, a cada tecla.
+            .take(RAIO_DA_REPOSICAO * 2 + 1)
             .filter_map(|i| self.acervo.get(i))
             .filter(|foto| !foto.path.is_empty())
             .filter(|foto| !self.esta_no_cache(&foto.id))
@@ -1016,6 +1018,94 @@ impl Revelacao {
             })
             .take(A_REPOR_POR_VEZ)
             .collect()
+    }
+
+    /// Carrega as miniaturas da tira **fora da thread que desenha**.
+    ///
+    /// 🚨 **Era síncrono, dentro do render, e o ensaio inteiro de uma vez.**
+    /// Entrar na Revelação de um ensaio de 125 fotos lia e convertia as 125
+    /// miniaturas antes do primeiro quadro: 49,77 ms de um gesto de 68,37 ms
+    /// (medido em 8/set/2026, `medir-revelacao`). A janela ficava parada, e a
+    /// culpa parecia ser da foto grande — que custa metade disso.
+    ///
+    /// 🔑 **O caro vai para o executor de fundo, uma foto por vez.** Ler o JPEG
+    /// do cache e convertê-lo para BGRA são ~0,4 ms cada; o que não pode
+    /// acontecer é os 125 caírem no mesmo quadro. Aqui cada um espera o de
+    /// antes, e entre eles a interface desenha — a tira **aparece enchendo**, do
+    /// palco para fora, em vez de a janela travar e aparecer pronta.
+    ///
+    /// ⚠️ **O cache mora na tela, e só ela o toca.** O que atravessa a fronteira
+    /// é a imagem pronta; guardar do outro lado exigiria um `Mutex` no cache e
+    /// devolveria a contenção que este desenho existe para não ter.
+    fn carregar_a_tira(&mut self, cx: &mut Context<Self>) {
+        if self.acervo.len() < 2 {
+            return;
+        }
+        let ordem: Vec<String> = self
+            .da_posicao_para_fora()
+            .filter_map(|i| self.acervo.get(i))
+            .map(|foto| foto.id.clone())
+            .collect();
+        let previews = self.previews.clone();
+
+        self._tira = Some(cx.spawn(async move |esta, cx| {
+            for id in ordem {
+                // Já perguntada? `espiar` devolvendo `Some` inclui o `Ausente`,
+                // e é isso que impede de repetir a pergunta a cada troca de foto.
+                let Ok(falta) = esta.update(cx, |tela, _cx| {
+                    tela.miniaturas_da_tira.espiar(&id).is_none()
+                }) else {
+                    return;
+                };
+                if !falta {
+                    continue;
+                }
+
+                let pronta = {
+                    let previews = previews.clone();
+                    let id = id.clone();
+                    cx.background_executor()
+                        .spawn(async move { previews.get_thumbnail(&id).map(para_gpui) })
+                        .await
+                };
+
+                // `update` falha quando a tela morreu — sair da Revelação no meio
+                // do carregamento não pode deixar uma tarefa lendo o ensaio
+                // inteiro para ninguém.
+                let atualizou = esta.update(cx, |tela, cx| {
+                    tela.miniaturas_da_tira.guardar(
+                        &id,
+                        match pronta {
+                            Some(imagem) => Miniatura::Pronta(imagem),
+                            None => Miniatura::Ausente,
+                        },
+                    );
+                    cx.notify();
+                });
+                if atualizou.is_err() {
+                    return;
+                }
+            }
+        }));
+    }
+
+    /// As posições do acervo a partir do palco, **para fora**: 0, +1, −1, +2, −2…
+    ///
+    /// 🔑 **A ordem é a mesma para as duas varreduras** — a que repõe o cache e a
+    /// que carrega a tira — porque a pergunta é a mesma: o que o olho está vendo,
+    /// e para onde a seta vai. Duas ordens diferentes fariam uma delas encher a
+    /// tira pelo começo do ensaio enquanto o operador olha o meio.
+    ///
+    /// A `Revelacao` sem lista (o caminho de `abrir`) tem acervo de um, e o laço
+    /// cobre os dois casos sem ramificar. Posições fora da lista saem no
+    /// `acervo.get`, de quem consome.
+    fn da_posicao_para_fora(&self) -> impl Iterator<Item = usize> + '_ {
+        let posicao = self.posicao;
+        std::iter::once(posicao).chain((1..=self.acervo.len()).flat_map(move |passo| {
+            [posicao.checked_add(passo), posicao.checked_sub(passo)]
+                .into_iter()
+                .flatten()
+        }))
     }
 
     /// Se o cache tem as **duas** entradas desta foto.
@@ -3240,12 +3330,13 @@ impl Revelacao {
             NonZeroUsize::new(self.acervo.len().clamp(1, MINIATURAS_DA_TIRA))
                 .expect("o piso 1 garante que não é zero"),
         );
-        let ids: Vec<String> = self.acervo.iter().map(|f| f.id.clone()).collect();
-        for id in &ids {
-            if self.miniaturas_da_tira.espiar(id).is_none() {
-                self.miniaturas_da_tira.obter(&self.previews, id);
-            }
-        }
+        // 🔑 **O quadro só lê.** Quem carrega é [`Self::carregar_a_tira`], numa
+        // tarefa que decodifica no executor de fundo e entrega uma foto por vez.
+        // Isto já foi um laço sobre `self.acervo` inteiro, aqui dentro: entrar
+        // na Revelação de um ensaio de 125 fotos lia e convertia as 125 antes do
+        // primeiro quadro — 49,77 ms de um gesto de 68,37 ms, tudo na thread que
+        // desenha (medido em 8/set/2026, `medir-revelacao`). A tela ficava
+        // parada e a culpa parecia ser da foto grande, que custa a metade disso.
 
         let itens: Vec<gpui::AnyElement> = (0..self.acervo.len())
             .map(|posicao| {

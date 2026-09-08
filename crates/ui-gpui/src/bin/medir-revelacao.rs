@@ -151,6 +151,107 @@ async fn main() {
         },
     );
 
+    // 5 · **Entrar na Revelação**, passo a passo. É o gesto que o dono chamou de
+    //     lento, e ele é a soma de coisas que ninguém tinha medido separadas.
+    println!("\n--- entrar na Revelação (o gesto inteiro) ---");
+    let entrada = Instant::now();
+
+    let inicio = Instant::now();
+    let bruta = previews.get_preview(alvo).expect("o preview");
+    let ler = inicio.elapsed().as_secs_f64() * 1000.0;
+
+    let inicio = Instant::now();
+    let _origem = bruta.to_rgba8().into_raw();
+    let origem = inicio.elapsed().as_secs_f64() * 1000.0;
+
+    let inicio = Instant::now();
+    let exibida = infrastructure::transformacao::aplicar(
+        &bruta,
+        &domain::value_objects::CropSettings::default(),
+        true,
+    );
+    let transformar = inicio.elapsed().as_secs_f64() * 1000.0;
+
+    let inicio = Instant::now();
+    let _ = ui_gpui::revelacao::histograma::Histograma::da_imagem(&exibida);
+    let histograma = inicio.elapsed().as_secs_f64() * 1000.0;
+
+    let inicio = Instant::now();
+    let _ = ui_gpui::imagem::para_gpui(exibida);
+    let bgra = inicio.elapsed().as_secs_f64() * 1000.0;
+
+    // A tira monta lendo **todas** as fotos do ensaio e convertendo cada uma
+    // para o que o GPUI desenha.
+    let inicio = Instant::now();
+    let mut convertidas = 0;
+    for id in &ids {
+        if let Some(mini) = previews.get_thumbnail(id) {
+            let _ = ui_gpui::imagem::para_gpui(mini);
+            convertidas += 1;
+        }
+    }
+    let tira = inicio.elapsed().as_secs_f64() * 1000.0;
+
+    let total = entrada.elapsed().as_secs_f64() * 1000.0;
+
+    veredito("  1 · ler o preview do cache", ler, "decodifica o JPEG");
+    veredito("  2 · to_rgba8 (os pixels da GPU)", origem, "17,5 MB");
+    veredito("  3 · transformacao::aplicar", transformar, "corte e giro");
+    veredito("  4 · Histograma::da_imagem", histograma, "varre 4,4 Mpx");
+    veredito("  5 · para_gpui do palco", bgra, "RGBA → BGRA, 4,4 Mpx");
+    // ⚠️ A tira **não** bloqueia mais: `Revelacao::carregar_a_tira` faz isto no
+    // executor de fundo, uma foto por vez. O número continua aqui porque é ele
+    // que diz quanto trabalho foi tirado do caminho — e quanto voltaria a pesar
+    // se alguém devolvesse a leitura para dentro do render.
+    println!(
+        "   6 · a tira inteira: {tira:.2} ms  ({convertidas} miniaturas) \
+         — hoje no executor de fundo, não bloqueia"
+    );
+    veredito(
+        "  = o que bloqueia a entrada",
+        total - tira,
+        "passos 1 a 5, na thread da interface",
+    );
+
+    // 6 · **Mexer num slider.** Cada resultado da GPU passa por estas tres
+    //     etapas na thread da interface, e um arrasto produz um resultado por
+    //     quadro. E o que o dono chamou de "ate os controles estao lentos".
+    println!("\n--- um resultado da GPU (por quadro, arrastando) ---");
+    let revelada = previews.get_preview(alvo).expect("o preview");
+
+    let inicio = Instant::now();
+    let exibida = infrastructure::transformacao::aplicar(
+        &revelada,
+        &domain::value_objects::CropSettings::default(),
+        true,
+    );
+    let transformar = inicio.elapsed().as_secs_f64() * 1000.0;
+
+    let inicio = Instant::now();
+    let _ = ui_gpui::revelacao::histograma::Histograma::da_imagem(&exibida);
+    let histograma = inicio.elapsed().as_secs_f64() * 1000.0;
+
+    let inicio = Instant::now();
+    let _ = ui_gpui::imagem::para_gpui(exibida.clone());
+    let bgra = inicio.elapsed().as_secs_f64() * 1000.0;
+
+    veredito("  transformacao::aplicar", transformar, "corte e giro");
+    veredito("  Histograma::da_imagem", histograma, "varre 4,4 Mpx");
+    veredito("  para_gpui", bgra, "RGBA → BGRA, 4,4 Mpx");
+    veredito(
+        "  = por quadro de arrasto",
+        transformar + histograma + bgra,
+        "na thread da interface",
+    );
+    println!(
+        "     (o formato que chega: {})",
+        match &exibida {
+            image::DynamicImage::ImageRgb8(_) => "Rgb8 — para_gpui expande para RGBA",
+            image::DynamicImage::ImageRgba8(_) => "Rgba8 — para_gpui só troca R e B",
+            _ => "outro",
+        }
+    );
+
     println!("\nO orçamento de um quadro a 60fps é {QUADRO_MS} ms.");
 }
 
