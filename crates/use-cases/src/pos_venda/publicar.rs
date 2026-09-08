@@ -109,6 +109,17 @@ impl PublicarNoPosVendaUseCase {
     /// galeria já foi escolhida antes. O mesmo caminho de [`Self::execute`], sem
     /// a criação da galeria e sem o aviso ao cliente — que sai no fim do lote,
     /// e não a cada estrela.
+    /// 🚨 **`nota` vem de quem classificou, e não do banco.** Quem sobe a foto é
+    /// a travessia do zero, que acontece na mesma tecla que grava a nota — e a
+    /// gravação é uma tarefa do tokio que ninguém espera. Ler o banco aqui é uma
+    /// corrida com ela: quando a leitura chega primeiro, o que sobe é o valor
+    /// **anterior**, e o site devolve `400` — *"nota invalida: 0 (use de 1 a
+    /// 5)"* quando o anterior era zero, *"informe a nota de 1 a 5"* quando era
+    /// ausente. Nos dois casos a foto não sobe e a mensagem fala de uma nota que
+    /// o app tinha na mão.
+    ///
+    /// `None` mantém o comportamento de ler do banco, que é o certo para quem
+    /// publica em lote uma foto já classificada há tempos.
     pub async fn enviar_uma(
         &self,
         sessao: &Sessao,
@@ -116,8 +127,9 @@ impl PublicarNoPosVendaUseCase {
         id: &PhotoId,
         ordem: u32,
         estado: Option<EstadoNoBalcao>,
+        nota: Option<u8>,
     ) -> Result<String, String> {
-        self.subir(sessao, galeria_id, id, ordem, estado)
+        self.subir(sessao, galeria_id, id, ordem, estado, nota)
             .await
             .map(|(nome, _)| nome)
             .map_err(|(nome, erro)| format!("{nome}: {erro}"))
@@ -210,6 +222,7 @@ impl PublicarNoPosVendaUseCase {
         id: &PhotoId,
         ordem: u32,
         estado: Option<EstadoNoBalcao>,
+        nota: Option<u8>,
     ) -> Result<(String, EstadoNoBalcao), (String, String)> {
         let mut photo = match self.fotos.find_by_id(id).await {
             Ok(Some(p)) => p,
@@ -224,6 +237,16 @@ impl PublicarNoPosVendaUseCase {
         // de pé toda foto importada antes desta coluna.
         let nome = nome_para_o_site(photo.file_name().unwrap_or_default());
         let estado = estado.unwrap_or_else(|| EstadoNoBalcao::da_foto(&photo));
+
+        // 🔑 **A de quem classificou vence a do banco.** O `photo` acima foi
+        // lido enquanto a gravação da nota ainda corria noutra tarefa; sem este
+        // `or_else` o que sobe é o valor anterior. Ver `enviar_uma`.
+        //
+        // ⚠️ **E não se recusa aqui o que o site recusa.** Uma guarda local
+        // "só sobe de 1 a 5" pareceria melhora e derrubaria a publicação em
+        // lote, que sobe foto do ensaio inteiro sem passar pela travessia do
+        // zero. Quem decide o que o acervo aceita é o site.
+        let nota = nota.or_else(|| photo.rating().map(|r| r.value()));
 
         let jpeg = self
             .exportador
@@ -246,7 +269,8 @@ impl PublicarNoPosVendaUseCase {
                     // *"a foto sobe classificada: informe a nota de 1 a 5"*.
                     // Ela faltava, e com ela faltando **toda** classificação
                     // voltava `400`.
-                    nota: photo.rating().map(|r| r.value()),
+                    //
+                    nota,
                     // 🔑 **A chave é o id da foto no catálogo local**, e não um
                     // valor novo por tentativa: é isso que faz o reenvio ser
                     // reconhecido em vez de virar uma segunda cópia na galeria
@@ -513,7 +537,7 @@ mod tests {
             api.clone(),
         );
         for (ordem, foto) in [&levada, &ficou].iter().enumerate() {
-            caso.enviar_uma(&sessao(), "g1", &foto.id(), ordem as u32, None)
+            caso.enviar_uma(&sessao(), "g1", &foto.id(), ordem as u32, None, None)
                 .await
                 .unwrap();
         }
@@ -724,7 +748,7 @@ mod tests {
         );
 
         let nome = caso
-            .enviar_uma(&sessao(), "g1", &id, 0, None)
+            .enviar_uma(&sessao(), "g1", &id, 0, None, None)
             .await
             .expect("subiu");
         assert_eq!(
@@ -759,7 +783,7 @@ mod tests {
         );
 
         let nome = caso
-            .enviar_uma(&sessao(), "g1", &id, 0, None)
+            .enviar_uma(&sessao(), "g1", &id, 0, None, None)
             .await
             .expect("subiu");
         assert_eq!(nome, "DSC_0001.jpg");
@@ -804,7 +828,7 @@ mod tests {
             api.clone(),
         );
 
-        caso.enviar_uma(&sessao(), "g1", &id, 0, None)
+        caso.enviar_uma(&sessao(), "g1", &id, 0, None, None)
             .await
             .expect("subiu");
 
@@ -815,6 +839,56 @@ mod tests {
             foto.chave_do_cliente.as_deref(),
             Some(id.to_string().as_str()),
             "a chave tem de ser o id do catálogo, estável entre tentativas"
+        );
+    }
+
+    /// 🚨 **A nota de quem classificou vence a do banco — e o motivo é uma
+    /// corrida.**
+    ///
+    /// Gravar a nota é uma tarefa do tokio que ninguém espera, e o envio lê a
+    /// foto do repositório na mesma tecla. Quando a leitura chega primeiro, o
+    /// que sobe é o valor **anterior**: o site devolve `400` — *"nota invalida:
+    /// 0 (use de 1 a 5)"* — e a mensagem fala de uma nota que o app tinha na
+    /// mão. Foi o que o dono viu ao classificar em 8/set/2026.
+    ///
+    /// Aqui o repositório devolve de propósito a foto **como ela era antes** da
+    /// gravação; o que tem de subir é o 5 que veio pelo parâmetro.
+    #[tokio::test]
+    async fn a_nota_recem_dada_vence_a_que_o_banco_ainda_nao_gravou() {
+        // O banco ainda tem o valor anterior: nota zero.
+        let mut photo = foto("/Ensaios/Teste - g1/uuid.jpg", false);
+        photo
+            .rate(domain::value_objects::Rating::new(0).unwrap())
+            .unwrap();
+        let id = photo.id();
+
+        let mut repo = MockPhotoRepo::new();
+        repo.expect_find_by_id()
+            .returning(move |_| Ok(Some(photo.clone())));
+        repo.expect_update().returning(|_| Ok(()));
+
+        let mut exportador = MockExportador::new();
+        exportador
+            .expect_renderizar_jpeg()
+            .returning(|_, _| Ok(vec![1]));
+
+        let api = Arc::new(ApiDeMentira::default());
+        let caso = PublicarNoPosVendaUseCase::new(
+            Arc::new(repo),
+            Arc::new(exportador),
+            Arc::new(MockThumbnailGen::new()),
+            api.clone(),
+        );
+
+        caso.enviar_uma(&sessao(), "g1", &id, 0, None, Some(5))
+            .await
+            .expect("subiu");
+
+        let recebidas = api.recebidas.lock().unwrap();
+        assert_eq!(
+            recebidas.first().expect("uma foto subiu").nota,
+            Some(5),
+            "subiu a nota velha do banco: é o 400 de 8/set"
         );
     }
 
@@ -846,7 +920,7 @@ mod tests {
         );
 
         let nome = caso
-            .enviar_uma(&sessao(), "g1", &id, 0, None)
+            .enviar_uma(&sessao(), "g1", &id, 0, None, None)
             .await
             .expect("subiu");
         assert_eq!(nome, "DSC_009.jpg");

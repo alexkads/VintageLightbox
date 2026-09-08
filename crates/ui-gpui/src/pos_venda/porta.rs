@@ -99,6 +99,10 @@ pub trait Publicador: Send + Sync + 'static {
         foto_id: String,
         ordem: u32,
         estado: Option<EstadoNoBalcao>,
+        // A nota **que acabou de ser dada**, e não a que o banco tem: a
+        // gravação dela é outra tarefa do tokio, e ninguém a espera — quem lê
+        // o banco aqui corre com ela e pode subir o valor anterior.
+        nota: Option<u8>,
         canal: Sender<Recado>,
     );
     /// O passo 3 ao contrário: a classificação foi zerada, a foto sai do storage.
@@ -374,12 +378,16 @@ impl Publicador for PublicadorDaApi {
         foto_id: String,
         ordem: u32,
         estado: Option<EstadoNoBalcao>,
+        // A nota **que acabou de ser dada**, e não a que o banco tem: a
+        // gravação dela é outra tarefa do tokio, e ninguém a espera — quem lê
+        // o banco aqui corre com ela e pode subir o valor anterior.
+        nota: Option<u8>,
         canal: Sender<Recado>,
     ) {
         let controlador = self.controlador.clone();
         self.tokio.spawn(async move {
             let recado = match controlador
-                .enviar_uma(&sessao, &galeria_id, &foto_id, ordem, estado)
+                .enviar_uma(&sessao, &galeria_id, &foto_id, ordem, estado, nota)
                 .await
             {
                 Ok(_) => Recado::Sincronizou,
@@ -531,6 +539,9 @@ pub mod mentira {
         pub avisadas: Mutex<Vec<String>>,
         /// O estado pedido em cada subida — `None` é "o da tecla B".
         pub estados_pedidos: Mutex<Vec<Option<EstadoNoBalcao>>>,
+        /// A nota que acompanhou cada subida — é o que prende a corrida entre a
+        /// gravação da nota e o envio.
+        pub notas_pedidas: Mutex<Vec<Option<u8>>>,
         /// O que a sessão aberta vai mostrar.
         pub fotos_da_sessao: Mutex<Vec<domain::services::pos_venda::FotoDaGaleria>>,
         /// `(galeria, caminho, ordem, estado)` de cada arquivo do disco enviado.
@@ -596,6 +607,10 @@ pub mod mentira {
 
         pub fn estados_pedidos(&self) -> Vec<Option<EstadoNoBalcao>> {
             self.estados_pedidos.lock().expect("os estados").clone()
+        }
+
+        pub fn notas_pedidas(&self) -> Vec<Option<u8>> {
+            self.notas_pedidas.lock().expect("as notas").clone()
         }
 
         pub fn reveladas(&self) -> Vec<(String, Ajustes, CropSettings)> {
@@ -706,6 +721,7 @@ pub mod mentira {
             foto_id: String,
             ordem: u32,
             estado: Option<EstadoNoBalcao>,
+            nota: Option<u8>,
             canal: Sender<Recado>,
         ) {
             self.subidas
@@ -716,6 +732,7 @@ pub mod mentira {
                 .lock()
                 .expect("os estados")
                 .push(estado);
+            self.notas_pedidas.lock().expect("as notas").push(nota);
             let _ = canal.send(Recado::Sincronizou);
         }
 

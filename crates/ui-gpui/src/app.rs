@@ -928,14 +928,23 @@ impl Aplicativo {
     /// foto. Até 7/set/2026 a sessão mandava **uma** foto, e a Revelação abria
     /// com uma tira de uma.
     ///
-    /// Cada foto entra como um `PhotoViewModel` sem caminho local e com o id
-    /// remoto preenchido — o que a grade já tem em `fotos_do_site`, reaproveitado
-    /// quando está lá — e daí o passo 11 faz o resto: sem preview no cache, os
-    /// pixels vêm da cópia de trabalho do storage.
+    /// 🚨 **A grade tem duas famílias, e tratá-las igual foi o defeito de
+    /// 8/set/2026 repetido uma tela adiante.** A foto do site entra como
+    /// `PhotoViewModel` sem caminho e com o id remoto (`site:…`), e daí o passo
+    /// 11 busca a cópia de trabalho no storage. A foto que **só está no disco**
+    /// entra como ela é no catálogo: id cru, caminho do arquivo, receita já
+    /// gravada.
     ///
-    /// ⚠️ **O id local é derivado do remoto** (`site:…`) e não colide com o do
-    /// catálogo: são espaços de nome diferentes, e misturá-los faria a Revelação
-    /// gravar ajustes numa foto local que ninguém abriu.
+    /// Antes disto, toda foto da sessão virava foto do site: o id do catálogo
+    /// ganhava `site:` na frente, o caminho era zerado, e a Revelação ia pedir
+    /// à nuvem uma cópia de trabalho de uma foto que nunca subiu. Abria em "não
+    /// tem preview no cache" — com o JPEG e o preview no disco, a um passo — e
+    /// com a tira inteira preta, porque a miniatura dela também mora sob o id
+    /// cru. Foi o que o dono viu com as 21 fotos importadas do ensaio.
+    ///
+    /// ⚠️ **O id `site:` não colide com o do catálogo**, e é isso que faz as
+    /// duas famílias caberem na mesma tira: são espaços de nome diferentes, e
+    /// misturá-los faria a Revelação gravar ajustes numa foto que ninguém abriu.
     fn revelar_da_sessao(
         &mut self,
         fotos: &[FotoARevelar],
@@ -948,9 +957,19 @@ impl Aplicativo {
             return;
         }
         let sessao_id = self.sessao_aberta.clone();
+        let do_catalogo = self.biblioteca.read(cx).todas_as_fotos();
         let acervo: Vec<PhotoViewModel> = fotos
             .iter()
             .map(|foto| {
+                // 🔑 **A local vale pela linha do catálogo**, e não por uma
+                // cópia montada aqui: é ela que carrega o caminho do arquivo, a
+                // receita já gravada e o id sob o qual as previews estão no
+                // cache. Recriá-la à mão perderia os três de uma vez.
+                if foto.no_disco {
+                    if let Some(local) = do_catalogo.iter().find(|f| f.id == foto.id) {
+                        return local.clone();
+                    }
+                }
                 let id = format!("{}{}", persistencia::PREFIXO_DO_SITE, foto.id);
                 self.fotos_do_site
                     .iter()
@@ -1266,6 +1285,10 @@ impl Aplicativo {
                     // estado sai da tecla `B` de cada foto. A escolha por lote
                     // existe na tela da sessão, onde ela é o gesto.
                     None,
+                    // 🚨 **A nota vem do evento, e não do banco.** Ver
+                    // `Classificou::nota`: a gravação dela ainda pode estar
+                    // correndo quando o envio lê a linha da foto.
+                    evento.nota,
                     self.sincronias.0.clone(),
                 );
             }
@@ -3168,6 +3191,7 @@ mod testes {
         let a_revelar = |id: &str| FotoARevelar {
             id: id.into(),
             arquivo: format!("{id}.jpg"),
+            no_disco: false,
         };
 
         janela
@@ -3314,6 +3338,7 @@ mod testes {
                     fotos: vec![FotoARevelar {
                         id: "remota-1".into(),
                         arquivo: "DSC_001.jpg".into(),
+                        no_disco: false,
                     }],
                     inicial: 0,
                 },
@@ -3530,6 +3555,134 @@ mod testes {
                     app.revelacao.read(cx).foto().map(|f| f.name.as_str()),
                     Some("retrato.jpg")
                 );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 **A foto que só está no disco não é foto do site — e a sessão tratava
+    /// as duas igual.**
+    ///
+    /// O que o dono viu em 8/set/2026, com as 21 fotos importadas do ensaio: a
+    /// Revelação abrindo em "não tem preview no cache" e a tira inteira preta,
+    /// com o JPEG e o preview no disco, a um passo. A grade da sessão mostra
+    /// duas famílias — a do site, baixada e gravada sob `site:<id>`, e a que só
+    /// existe aqui, gravada pelo importador sob o id cru do catálogo — e o
+    /// pedido de revelar mandava as duas como se fossem do site: id prefixado,
+    /// caminho zerado, e uma cópia de trabalho pedida à nuvem para uma foto que
+    /// nunca subiu.
+    ///
+    /// É o mesmo defeito que `Detalhe::chave_da_foto` já conhecia na célula,
+    /// repetido uma tela adiante.
+    #[gpui::test]
+    fn revelar_da_sessao_abre_a_foto_local_pelo_catalogo_e_nao_como_do_site(
+        cx: &mut TestAppContext,
+    ) {
+        let (previews, _dir) = previews_descartaveis();
+        // O preview está no cache sob o id **do catálogo**, que é onde o
+        // importador o grava.
+        previews
+            .save_preview("id-retrato.jpg", &foto_vermelha())
+            .expect("gravar preview");
+        previews
+            .save_thumbnail("id-retrato.jpg", &foto_vermelha())
+            .expect("gravar miniatura");
+        cx.update(gpui_component::init);
+
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            |window, cx| {
+                Aplicativo::ja_dentro(
+                    acervo_da_sessao("g1"),
+                    previews,
+                    Vec::new(),
+                    portas(),
+                    window,
+                    cx,
+                )
+            }
+        });
+
+        janela
+            .update(cx, |app, window, cx| {
+                app.atender_a_sessao(
+                    &DetalhePedido::Revelar {
+                        fotos: vec![FotoARevelar {
+                            id: "id-retrato.jpg".into(),
+                            arquivo: "retrato.jpg".into(),
+                            no_disco: true,
+                        }],
+                        inicial: 0,
+                    },
+                    window,
+                    cx,
+                );
+
+                let aberta = app
+                    .revelacao
+                    .read(cx)
+                    .foto_aberta()
+                    .cloned()
+                    .expect("a Revelação abriu com uma foto");
+                assert_eq!(
+                    aberta.id, "id-retrato.jpg",
+                    "o id do catálogo não pode virar `site:…` — é sob ele que a \
+                     preview está no cache"
+                );
+                assert_eq!(
+                    aberta.path, "/fotos/retrato.jpg",
+                    "o caminho do arquivo se perdia, e com ele a única fonte local"
+                );
+                assert!(
+                    aberta.pos_venda_foto_id.is_none(),
+                    "ela nunca subiu: dar-lhe um id no site manda pedir à nuvem \
+                     uma cópia de trabalho que não existe"
+                );
+                assert!(
+                    app.revelacao.read(cx).tem_pixels(),
+                    "com o id certo, o preview do cache responde na hora"
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// ⚠️ **A do site continua vindo do site.** O mesmo caminho, a outra família:
+    /// id prefixado, sem caminho local, e a cópia de trabalho pedida à nuvem.
+    #[gpui::test]
+    fn revelar_da_sessao_mantem_a_foto_do_site_como_do_site(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            |window, cx| {
+                Aplicativo::ja_dentro(Vec::new(), previews, Vec::new(), portas(), window, cx)
+            }
+        });
+
+        janela
+            .update(cx, |app, window, cx| {
+                app.atender_a_sessao(
+                    &DetalhePedido::Revelar {
+                        fotos: vec![FotoARevelar {
+                            id: "remota-1".into(),
+                            arquivo: "DSC_001.jpg".into(),
+                            no_disco: false,
+                        }],
+                        inicial: 0,
+                    },
+                    window,
+                    cx,
+                );
+
+                let aberta = app
+                    .revelacao
+                    .read(cx)
+                    .foto_aberta()
+                    .cloned()
+                    .expect("a Revelação abriu com uma foto");
+                assert_eq!(aberta.id, "site:remota-1");
+                assert!(aberta.path.is_empty(), "ela não está neste disco");
+                assert_eq!(aberta.pos_venda_foto_id.as_deref(), Some("remota-1"));
             })
             .expect("a janela deve estar aberta");
     }

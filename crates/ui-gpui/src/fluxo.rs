@@ -583,10 +583,12 @@ fn da_lista_ao_revelar_dentro_da_sessao(cx: &mut TestAppContext) {
                         FotoARevelar {
                             id: "remota-6".into(),
                             arquivo: "DSC_000.jpg".into(),
+                            no_disco: false,
                         },
                         FotoARevelar {
                             id: "remota-7".into(),
                             arquivo: "DSC_001.jpg".into(),
+                            no_disco: false,
                         },
                     ],
                     inicial: 1,

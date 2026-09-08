@@ -153,12 +153,26 @@ pub enum Pedido {
     Exportar,
 }
 
-/// Uma foto do site, no que a Revelação precisa para abri-la: o id remoto — de
-/// onde vem a cópia de trabalho — e o nome do arquivo, que a tira escreve.
+/// Uma foto da grade da sessão, no que a Revelação precisa para abri-la.
+///
+/// 🚨 **`no_disco` não é enfeite, é a chave do cache.** A grade é uma só e tem
+/// duas famílias dentro: a do site, cuja imagem foi baixada e gravada sob
+/// `site:<id>`, e a que só existe no disco, gravada pelo importador sob o id do
+/// catálogo, cru. É a mesma distinção que [`Detalhe::chave_da_foto`] já fazia
+/// para desenhar a célula — e que faltava aqui.
+///
+/// Sem ela, a raiz tratava **toda** foto da sessão como do site: prefixava
+/// `site:` no id do catálogo, zerava o caminho do arquivo e mandava buscar uma
+/// cópia de trabalho que nunca existiu. O resultado era a Revelação abrindo em
+/// "não tem preview no cache" com o JPEG e o preview ali do lado, no disco —
+/// e a tira inteira preta. É o defeito de 8/set/2026 repetido uma tela adiante.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FotoARevelar {
     pub id: String,
     pub arquivo: String,
+    /// Se esta foto **ainda não subiu**: o id é o do catálogo local, e o arquivo
+    /// está neste disco.
+    pub no_disco: bool,
 }
 
 /// O andamento de uma importação: quantas foram pedidas e quantas responderam.
@@ -1887,6 +1901,7 @@ impl Detalhe {
             .map(|f| FotoARevelar {
                 id: f.id.clone(),
                 arquivo: f.arquivo.clone(),
+                no_disco: self.ids_locais.contains(&f.id),
             })
             .collect();
         if fotos.is_empty() {

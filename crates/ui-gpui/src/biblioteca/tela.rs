@@ -2076,6 +2076,16 @@ pub struct Classificou {
     pub subiram: Vec<String>,
     /// Ficaram sem nota: saem do storage.
     pub sairam: Vec<String>,
+    /// A nota que acabou de ser dada — a que faz as de cima subirem.
+    ///
+    /// 🚨 **Ela viaja no evento porque o banco ainda pode não tê-la.** Gravar a
+    /// nota é uma tarefa do tokio que ninguém espera, e quem sobe a foto lê a
+    /// nota do banco: quando a leitura ganha a corrida, sobe o valor
+    /// **anterior** e o site devolve `400` — *"nota invalida: 0 (use de 1 a
+    /// 5)"*. Foi o que o dono viu ao classificar em 8/set/2026.
+    ///
+    /// `None` quando ninguém subiu (só saídas), que é quando ela não é usada.
+    pub nota: Option<u8>,
 }
 
 impl Classificou {
@@ -2088,7 +2098,11 @@ impl gpui::EventEmitter<Classificou> for Biblioteca {}
 
 /// Quem atravessou o zero, comparando o que está no acervo com a nota nova.
 fn travessia_do_zero(fotos: &[PhotoViewModel], alvos: &[usize], nova: i32) -> Classificou {
-    let mut classificou = Classificou::default();
+    let mut classificou = Classificou {
+        // Só as de 1 a 5 sobem; a nota que zera não acompanha subida nenhuma.
+        nota: u8::try_from(nova).ok().filter(|n| (1..=5).contains(n)),
+        ..Default::default()
+    };
     for &no_acervo in alvos {
         let foto = &fotos[no_acervo];
         let tinha = foto.rating >= 1;

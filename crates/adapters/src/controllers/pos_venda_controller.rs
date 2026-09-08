@@ -91,10 +91,11 @@ impl PosVendaController {
         foto_id: &str,
         ordem: u32,
         estado: Option<EstadoNoBalcao>,
+        nota: Option<u8>,
     ) -> Result<String, String> {
         let id = PhotoId::from_string(foto_id).map_err(|e| e.to_string())?;
         self.publicar
-            .enviar_uma(sessao, galeria_id, &id, ordem, estado)
+            .enviar_uma(sessao, galeria_id, &id, ordem, estado, nota)
             .await
     }
 
