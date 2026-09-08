@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use adapters::controllers::EditorController;
 use adapters::view_models::PhotoViewModel;
+use domain::value_objects::CropSettings;
 
 use super::processador::Ajustes;
 
@@ -171,24 +172,14 @@ impl Gravador for GravadorDoBanco {
     }
 }
 
-/// Lê os ajustes gravados na foto. Campo ausente fica no neutro.
+/// A tabela ajuste ↔ coluna da foto, escrita **uma** vez.
 ///
-/// ⚠️ **Ausente não é zero, e não é "nunca revelada".** O legado grava os 46 de
-/// uma vez, então uma foto ou tem todos ou não tem nenhum — mas ler campo a campo
-/// é o que sobrevive a um `NULL` solto no banco, que nenhum dos dois apps sabe
-/// produzir hoje e o SQLite aceita sem reclamar.
-pub fn da_foto(foto: &PhotoViewModel) -> Ajustes {
-    let mut ajustes = Ajustes::default();
-
-    macro_rules! ler {
-        ($($campo:ident <- $salvo:ident),* $(,)?) => {
-            $(if let Some(valor) = foto.$salvo {
-                ajustes.$campo = valor;
-            })*
-        };
-    }
-
-    ler! {
+/// 🔑 Duas listas (uma para ler, outra para escrever) seriam duas listas para
+/// esquecer um campo — e o sintoma é mudo: o ajuste some entre a Revelação e a
+/// grade sem erro nenhum. `$m` recebe a lista inteira e decide a direção.
+macro_rules! com_os_campos {
+    ($m:ident) => {
+        $m! {
         exposure <- edit_exposure,
         contrast <- edit_contrast,
         temperature <- edit_temperature,
@@ -242,9 +233,68 @@ pub fn da_foto(foto: &PhotoViewModel) -> Ajustes {
         split_balance <- edit_split_balance,
         grain_amount <- edit_grain_amount,
         grain_size <- edit_grain_size,
+        }
+    };
+}
+
+/// Lê os ajustes gravados na foto. Campo ausente fica no neutro.
+///
+/// ⚠️ **Ausente não é zero, e não é "nunca revelada".** O legado grava os 46 de
+/// uma vez, então uma foto ou tem todos ou não tem nenhum — mas ler campo a campo
+/// é o que sobrevive a um `NULL` solto no banco, que nenhum dos dois apps sabe
+/// produzir hoje e o SQLite aceita sem reclamar.
+pub fn da_foto(foto: &PhotoViewModel) -> Ajustes {
+    let mut ajustes = Ajustes::default();
+
+    macro_rules! ler {
+        ($($campo:ident <- $salvo:ident),* $(,)?) => {
+            $(if let Some(valor) = foto.$salvo {
+                ajustes.$campo = valor;
+            })*
+        };
     }
 
+    com_os_campos!(ler);
+
     ajustes
+}
+
+/// O contrário de [`da_foto`]: escreve ajustes e corte **na** foto da grade.
+///
+/// Existe para a sincronização: a Revelação grava a receita nas marcadas e
+/// precisa que as cópias que ela tem em memória digam o mesmo que o banco —
+/// senão a seta seguinte abriria a foto recém-sincronizada com os sliders de
+/// antes.
+pub fn na_foto(foto: &mut PhotoViewModel, ajustes: Ajustes, corte: Corte) {
+    macro_rules! escrever {
+        ($($campo:ident <- $salvo:ident),* $(,)?) => {
+            $(foto.$salvo = Some(ajustes.$campo);)*
+        };
+    }
+    com_os_campos!(escrever);
+
+    foto.edit_crop_x = corte.x;
+    foto.edit_crop_y = corte.y;
+    foto.edit_crop_width = corte.largura;
+    foto.edit_crop_height = corte.altura;
+    foto.edit_crop_rotation = corte.rotacao;
+    foto.edit_crop_angle = corte.angulo;
+    foto.edit_crop_flip_h = corte.espelho_h;
+    foto.edit_crop_flip_v = corte.espelho_v;
+}
+
+/// O corte como o domínio o entende: campo ausente é a foto inteira.
+pub fn para_crop_settings(corte: &Corte) -> CropSettings {
+    CropSettings::new(
+        corte.x.unwrap_or(0.0),
+        corte.y.unwrap_or(0.0),
+        corte.largura.unwrap_or(1.0),
+        corte.altura.unwrap_or(1.0),
+        corte.rotacao.unwrap_or(0),
+        corte.angulo.unwrap_or(0.0),
+        corte.espelho_h.unwrap_or(false),
+        corte.espelho_v.unwrap_or(false),
+    )
 }
 
 /// Se esta foto já foi revelada — algum ajuste fora do neutro, ou algum
@@ -298,6 +348,40 @@ pub mod mentira {
 
 #[cfg(test)]
 mod testes {
+
+    /// 🔑 Escrever e ler são a mesma tabela: o que entra por `na_foto` sai
+    /// igual por `da_foto`, nos 53 e no corte.
+    #[test]
+    fn na_foto_e_da_foto_sao_inversos() {
+        let ajustes = Ajustes {
+            exposure: 0.7,
+            hsl_magenta_lum: -12.0,
+            grain_size: 33.0,
+            split_balance: 15.0,
+            ..Ajustes::default()
+        };
+        let corte = Corte {
+            x: Some(0.1),
+            largura: Some(0.5),
+            angulo: Some(2.5),
+            espelho_h: Some(true),
+            ..Corte::default()
+        };
+
+        let mut foto = PhotoViewModel::default();
+        assert!(!ja_revelada(&foto));
+        na_foto(&mut foto, ajustes, corte);
+
+        assert_eq!(da_foto(&foto), ajustes);
+        assert_eq!(corte_da_foto(&foto), corte);
+        assert!(ja_revelada(&foto));
+
+        let dominio = para_crop_settings(&corte);
+        assert_eq!(dominio.crop_x(), 0.1);
+        assert_eq!(dominio.crop_width(), 0.5);
+        assert_eq!(dominio.crop_height(), 1.0, "ausente é a foto inteira");
+        assert!(dominio.flip_horizontal());
+    }
     use super::*;
 
     fn foto() -> PhotoViewModel {

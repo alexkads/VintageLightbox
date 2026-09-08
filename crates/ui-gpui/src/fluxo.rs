@@ -548,20 +548,39 @@ fn da_lista_ao_revelar_dentro_da_sessao(cx: &mut TestAppContext) {
         "sem marcação entra à venda: {enviados:?}"
     );
 
-    // 5 · revelar uma foto **da sessão**: ela não está no catálogo local, e os
-    // pixels vêm do storage (o passo 11).
+    // 5 · revelar **na sessão**: a foto não está no catálogo local, e os
+    // pixels vêm do storage (o passo 11). É o botão do painel: abre a segunda,
+    // e **a sessão inteira vai para a tira** — como na web, onde a lista vai
+    // junto nos dois botões e "a próxima" é a próxima do ensaio.
     estudio
         .janela
         .update(cx, |app, window, cx| {
+            use crate::sessoes::detalhe::FotoARevelar;
             app.atender_a_sessao(
                 &crate::sessoes::detalhe::Pedido::Revelar {
-                    foto_id: "remota-7".into(),
-                    arquivo: "DSC_001.jpg".into(),
+                    fotos: vec![
+                        FotoARevelar {
+                            id: "remota-6".into(),
+                            arquivo: "DSC_000.jpg".into(),
+                        },
+                        FotoARevelar {
+                            id: "remota-7".into(),
+                            arquivo: "DSC_001.jpg".into(),
+                        },
+                    ],
+                    inicial: 1,
                 },
                 window,
                 cx,
             );
             assert_eq!(app.tela(), Tela::Revelacao);
+            let revelacao = app.revelacao.read(cx);
+            assert_eq!(revelacao.acervo().len(), 2, "a tira tem a sessão inteira");
+            assert_eq!(revelacao.posicao(), 1, "aberta na que o painel pediu");
+            assert_eq!(
+                revelacao.foto_aberta().map(|f| f.id.as_str()),
+                Some("site:remota-7")
+            );
         })
         .expect("a janela deve estar aberta");
     cx.run_until_parked();

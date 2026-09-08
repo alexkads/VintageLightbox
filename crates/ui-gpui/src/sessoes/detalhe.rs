@@ -112,9 +112,30 @@ pub enum Pedido {
     /// 🔑 Quem as põe na grade é a raiz — a grade é uma só, e nela as do site
     /// convivem com as locais, como na web.
     FotosDoSite(Vec<domain::services::pos_venda::FotoDaGaleria>),
-    /// Revelar uma foto **do site**: o id remoto, que a Revelação usa para
-    /// buscar a cópia de trabalho.
-    Revelar { foto_id: String, arquivo: String },
+    /// Entrar na Revelação com **a sessão inteira na tira**, começando por
+    /// `inicial`.
+    ///
+    /// 🔑 **Na web são dois botões, e cada um faz uma coisa**
+    /// (`abrir-revelacao.tsx`): o da **barra da grade** entra no modo sem
+    /// escolher foto — *"revelar é trabalho de lote, e exigir escolher uma foto
+    /// antes era um passo a mais para começar"* —, e o do **painel** abre a
+    /// foto em foco. Nos dois casos a galeria inteira vai junto: a tira, as
+    /// setas e os botões do editor percorrem a mesma lista, e "a próxima" é a
+    /// próxima da sessão. Até 7/set/2026 os dois botões faziam o mesmo aqui,
+    /// mandavam **uma** foto — a tira era de uma — e o da barra ficava
+    /// desligado sem foco, que é justamente o caso em que a web o usa.
+    Revelar {
+        fotos: Vec<FotoARevelar>,
+        inicial: usize,
+    },
+}
+
+/// Uma foto do site, no que a Revelação precisa para abri-la: o id remoto — de
+/// onde vem a cópia de trabalho — e o nome do arquivo, que a tira escreve.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FotoARevelar {
+    pub id: String,
+    pub arquivo: String,
 }
 
 impl EventEmitter<Pedido> for Detalhe {}
@@ -1357,11 +1378,14 @@ impl Detalhe {
                     .child("⊕"),
             )
             .child(
+                // 🔑 **Sem exigir foco**, como o botão da barra do site: entra
+                // no modo e a tira faz o resto. Só desliga quando não há o que
+                // revelar — sessão vazia, ou só apagadas.
                 Button::new("sessao-revelar")
                     .label("Revelar")
                     .xsmall()
-                    .disabled(self.em_foco().is_none())
-                    .on_click(cx.listener(|tela, _ev, _window, cx| tela.revelar_a_do_foco(cx))),
+                    .disabled(!self.tem_o_que_revelar())
+                    .on_click(cx.listener(|tela, _ev, _window, cx| tela.revelar_todas(cx))),
             )
             .child(
                 Button::new("sessao-tela-do-cliente")
@@ -1392,13 +1416,64 @@ impl Detalhe {
             )
     }
 
-    /// Pede à raiz que revele a foto em foco.
+    /// As fotos que vão para a tira da Revelação: **as da sessão, na ordem da
+    /// grade, sem as apagadas**.
+    ///
+    /// ⚠️ **O recorte da barra não encurta a lista.** É o que a web faz
+    /// (`grade.tsx` passa `fotos`, a lista inteira, e `abrir-revelacao.tsx` só
+    /// tira as apagadas): o operador filtra "sem nota" para achar uma foto, e
+    /// dentro do editor ainda anda pelas outras. A apagada pela retenção não
+    /// tem arquivo — não há o que revelar nem mostrar.
+    fn fotos_a_revelar(&self) -> impl Iterator<Item = &acervo::Foto> {
+        self.acervo.todas().iter().filter(|f| !f.apagada)
+    }
+
+    fn tem_o_que_revelar(&self) -> bool {
+        self.fotos_a_revelar().next().is_some()
+    }
+
+    /// O pedido de entrar na Revelação — a sessão inteira, e onde começar.
+    ///
+    /// `comecar_em = None` é o botão da barra: a primeira que ainda pode ser
+    /// revelada; se todas foram compradas, a primeira mesmo — a tira mostra a
+    /// comprada marcada e não revelável, como no site. Com um id, é a posição
+    /// dele na lista; um id que não está nela (a apagada em foco) não abre nada.
+    fn pedido_de_revelar(&self, comecar_em: Option<&str>) -> Option<Pedido> {
+        let fotos: Vec<FotoARevelar> = self
+            .fotos_a_revelar()
+            .map(|f| FotoARevelar {
+                id: f.id.clone(),
+                arquivo: f.arquivo.clone(),
+            })
+            .collect();
+        if fotos.is_empty() {
+            return None;
+        }
+        let inicial = match comecar_em {
+            Some(id) => fotos.iter().position(|f| f.id == id)?,
+            None => self
+                .fotos_a_revelar()
+                .position(acervo::Foto::editavel)
+                .unwrap_or(0),
+        };
+        Some(Pedido::Revelar { fotos, inicial })
+    }
+
+    /// O botão da barra: entra na Revelação **sem escolher foto**.
+    pub fn revelar_todas(&mut self, cx: &mut Context<Self>) {
+        if let Some(pedido) = self.pedido_de_revelar(None) {
+            cx.emit(pedido);
+        }
+    }
+
+    /// O botão do painel e o duplo clique: abre a foto em foco, com a sessão
+    /// inteira na tira.
     pub fn revelar_a_do_foco(&mut self, cx: &mut Context<Self>) {
-        if let Some(foto) = self.em_foco() {
-            cx.emit(Pedido::Revelar {
-                foto_id: foto.id.clone(),
-                arquivo: foto.arquivo.clone(),
-            });
+        let Some(id) = self.em_foco().map(|f| f.id.clone()) else {
+            return;
+        };
+        if let Some(pedido) = self.pedido_de_revelar(Some(&id)) {
+            cx.emit(pedido);
         }
     }
 
@@ -1677,9 +1752,13 @@ impl Detalhe {
                                 ),
                         )
                         .child(
+                            // A web só oferece o botão quando a foto é
+                            // editável: a comprada não se revela (o site
+                            // responde 409 — o cliente pode já ter baixado).
                             Button::new("painel-revelar")
                                 .label("Revelar")
                                 .xsmall()
+                                .disabled(!foto.editavel())
                                 .on_click(
                                     cx.listener(|tela, _ev, _window, cx| {
                                         tela.revelar_a_do_foco(cx)
@@ -2314,5 +2393,114 @@ mod testes {
         let negociadas = publicador.negociadas();
         assert_eq!(negociadas.len(), 1, "só a que ainda pode mudar");
         assert_eq!(negociadas[0].0, "a");
+    }
+
+    fn apagada(id: &str) -> FotoDaGaleria {
+        FotoDaGaleria {
+            apagada: true,
+            ..foto(id, EstadoDaFotoNoSite::Disponivel, Some(3))
+        }
+    }
+
+    fn ids_e_inicial(pedido: Option<Pedido>) -> (Vec<String>, usize) {
+        match pedido {
+            Some(Pedido::Revelar { fotos, inicial }) => {
+                (fotos.into_iter().map(|f| f.id).collect(), inicial)
+            }
+            _ => panic!("esperava um pedido de revelar"),
+        }
+    }
+
+    /// 🔑 **O botão da barra entra sem escolher foto, com a sessão inteira na
+    /// tira** — o gesto do cabeçalho da web. Começa pela primeira que ainda pode
+    /// ser revelada: a comprada fica na tira, marcada, mas não é por ela que se
+    /// começa. A apagada nem entra: não tem arquivo.
+    #[gpui::test]
+    fn o_botao_da_barra_leva_a_sessao_inteira(cx: &mut TestAppContext) {
+        let (janela, _) = janela(
+            cx,
+            vec![
+                foto("a", EstadoDaFotoNoSite::Comprada, Some(5)),
+                apagada("b"),
+                foto("c", EstadoDaFotoNoSite::Disponivel, None),
+                foto("d", EstadoDaFotoNoSite::LevadaNoBalcao, Some(4)),
+            ],
+        );
+        entrar(cx, &janela);
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                assert!(tela.em_foco().is_none(), "nada em foco, e mesmo assim:");
+                assert!(tela.tem_o_que_revelar());
+
+                let (ids, inicial) = ids_e_inicial(tela.pedido_de_revelar(None));
+                assert_eq!(ids, vec!["a", "c", "d"], "a apagada fica de fora");
+                assert_eq!(
+                    inicial, 1,
+                    "começa na primeira editável — a sem nota é revelável"
+                );
+
+                // 🚨 O recorte da barra não encurta a tira: filtrado em "sem
+                // nota" a grade mostra uma, e a Revelação recebe as três.
+                tela.filtrar(Filtro::SemNota, cx);
+                assert_eq!(tela.acervo.total_visivel(), 1);
+                let (ids, _) = ids_e_inicial(tela.pedido_de_revelar(None));
+                assert_eq!(ids.len(), 3);
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// O botão do painel abre **a foto em foco**, e a sessão vai junto: a
+    /// posição é a dela na lista da tira, não na grade filtrada.
+    #[gpui::test]
+    fn o_botao_do_painel_abre_a_do_foco_com_a_sessao_na_tira(cx: &mut TestAppContext) {
+        let (janela, _) = janela(
+            cx,
+            vec![
+                foto("a", EstadoDaFotoNoSite::Disponivel, Some(4)),
+                foto("b", EstadoDaFotoNoSite::Disponivel, None),
+                foto("c", EstadoDaFotoNoSite::Disponivel, Some(3)),
+            ],
+        );
+        entrar(cx, &janela);
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.filtrar(Filtro::SemNota, cx);
+                tela.selecao.clicar(0, false, Modificadores::default());
+                assert_eq!(tela.em_foco().map(|f| f.id.as_str()), Some("b"));
+
+                let foco = tela.em_foco().map(|f| f.id.clone()).unwrap();
+                let (ids, inicial) = ids_e_inicial(tela.pedido_de_revelar(Some(&foco)));
+                assert_eq!(ids, vec!["a", "b", "c"]);
+                assert_eq!(
+                    inicial, 1,
+                    "a posição de 'b' na sessão, e não 0 na grade filtrada"
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// Só compradas: o botão da barra ainda entra — a tira mostra o que há —,
+    /// e só apagadas (ou nada) é o único caso em que ele fica desligado.
+    #[gpui::test]
+    fn sem_o_que_revelar_o_botao_desliga(cx: &mut TestAppContext) {
+        let (so_apagadas, _) = janela(cx, vec![apagada("a"), apagada("b")]);
+        entrar(cx, &so_apagadas);
+        so_apagadas
+            .update(cx, |tela, _window, _cx| {
+                assert!(!tela.tem_o_que_revelar());
+                assert!(tela.pedido_de_revelar(None).is_none());
+            })
+            .expect("a janela deve estar aberta");
+
+        let (so_compradas, _) = janela(cx, vec![foto("a", EstadoDaFotoNoSite::Comprada, Some(5))]);
+        entrar(cx, &so_compradas);
+        so_compradas
+            .update(cx, |tela, _window, _cx| {
+                let (ids, inicial) = ids_e_inicial(tela.pedido_de_revelar(None));
+                assert_eq!((ids, inicial), (vec!["a".to_string()], 0));
+            })
+            .expect("a janela deve estar aberta");
     }
 }

@@ -25,7 +25,7 @@ integração com o pós-venda da RecordarFotos"*. Trabalhar sem rede volta como
 |---|---|
 | **Sessões** | listar, buscar, filtrar por situação, abrir uma nova |
 | **Sessão** | **onde se escolhe com o cliente e se negocia** — a grade está aqui |
-| **Revelação** | os 46 ajustes, o enquadramento, o histórico |
+| **Revelação** | os 53 ajustes, o enquadramento, o histórico, e o lote da tira para sincronizar |
 | **Impressão** | a folha e o PDF |
 
 🚨 **"Biblioteca" não é uma delas.** Ela é a grade do catálogo local **dentro do
@@ -186,17 +186,40 @@ ensaio teve só é possível se toda revelação pertencer a um ensaio.
 ## A tela de sessão, parte por parte
 
 Desenhada contra a rota `/dashboard/sessoes-fotograficas/{id}` do site, com a
-imagem dela na mão (*"não invente nada"*). São seis blocos, nesta ordem — e a
-ordem é o fluxo do balcão:
+imagem dela na mão (*"não invente nada"*). O que a rota faz por baixo — da lista
+até o editor, arquivo por arquivo e rota por rota — está em
+[`10-A-ROTA-DO-SITE-ATE-A-REVELACAO.md`](10-A-ROTA-DO-SITE-ATE-A-REVELACAO.md).
+São seis blocos, nesta ordem — e a ordem é o fluxo do balcão:
 
 | Bloco | O que tem |
 |---|---|
 | **cabeçalho** | título · contato · selo "já abriu" · `N levadas · N à venda · N compradas` · Copiar link · `Avisar <e-mail>: fotos prontas` |
 | **envio** | "Escolher fotos" (janela do sistema) · "Entram como" · arrastar a pasta |
-| **barra da grade** | recortes com contagem · zoom · Revelar · Tela do cliente · "Selecionar as N visíveis" |
+| **barra da grade** | recortes com contagem · zoom · **Revelar** (entra sem escolher foto, com a sessão inteira na tira) · Tela do cliente · "Selecionar as N visíveis" |
 | **grade** | selo do estado, visto na marcada, `13. DSC_2578.JPG`, faixa e downloads |
 | **painel da foto** | estado, nota, "Pôr à venda"/"Revelar", faixa, downloads, preço, registro do balcão |
 | **tira** | `13 / 23` e a legenda das teclas, com as miniaturas |
+
+### 🔑 Dois botões "Revelar", e cada um faz uma coisa
+
+É o desenho da web (`abrir-revelacao.tsx`), e até 7/set/2026 o app não o tinha:
+os dois botões chamavam a mesma função, a Revelação recebia **uma** foto — a
+tira era de uma — e o da barra ficava desligado sem foco, que é justamente o
+caso em que a web o usa. Achado do dono, olhando as duas telas lado a lado:
+*"existem dois botões na web, cada um faz uma coisa específica"*.
+
+| Botão | O que faz |
+|---|---|
+| **barra da grade** | entra no modo **sem escolher foto**, na primeira que ainda pode ser revelada |
+| **painel da foto** (e o duplo clique) | abre **a foto em foco** |
+
+Nos dois casos **a sessão inteira vai para a tira**, na ordem da grade e sem as
+apagadas — e o recorte da barra **não** encurta a lista: filtrado em "sem nota"
+para achar uma foto, o operador ainda anda pelas outras de dentro do editor. A
+comprada fica na tira, marcada e não revelável, como no site. O contrato é
+`Pedido::Revelar { fotos, inicial }` em `sessoes/detalhe.rs`, e a raiz o atende
+em `revelar_da_sessao`. O caminho inteiro da web está em
+[`10-A-ROTA-DO-SITE-ATE-A-REVELACAO.md`](10-A-ROTA-DO-SITE-ATE-A-REVELACAO.md).
 
 ### 🚨 Dois jeitos de contar, e os dois certos
 

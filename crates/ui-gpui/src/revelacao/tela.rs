@@ -10,12 +10,13 @@
 //! ⚠️ Nenhuma etapa disso acontece no `render`. O `render` só desenha o que já
 //! chegou — é o que permite arrastar liso enquanto a GPU trabalha atrás.
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
 
 use adapters::view_models::PhotoViewModel;
+use biblioteca_core::selecao::Modificadores;
 use domain::entities::preset::PresetAdjustments;
 use domain::entities::{Preset, PresetId};
 use domain::value_objects::{AspectRatio, CropSettings};
@@ -45,6 +46,7 @@ use super::lightroom::{self, Arquivo, EscolhaDePresets, Relatorio};
 use super::persistencia::{self, Corte, Gravador};
 use super::presets::{self, GuardaDePresets};
 use super::processador::{Ajustes, Pedido, Processador};
+use super::sincronizacao::{self, Escolha, Grupo};
 use infrastructure::transformacao;
 
 /// Largura da coluna de ajustes — os `w-80` do site.
@@ -153,6 +155,17 @@ pub struct Revelacao {
     ultima_na_tira: Option<usize>,
     /// Onde estamos nela.
     posicao: usize,
+    /// As marcadas na tira — o lote da sincronização, em posições do acervo.
+    ///
+    /// 🔑 **Seleção não é a foto aberta.** No Lightroom são coisas separadas:
+    /// uma está no canvas, várias estão marcadas, e o "sincronizar" leva os
+    /// ajustes da primeira para as outras. É o desenho do site, e a aberta
+    /// está sempre dentro (`sincronizacao::alternar`).
+    marcadas: BTreeSet<usize>,
+    /// O que sincronizar. `None` = ainda não lida do disco — a leitura fica
+    /// para a primeira abertura da caixa, para os testes nunca tocarem o
+    /// arquivo de quem trabalha.
+    escolha: Option<Escolha>,
     processador: Processador,
     aberta: Option<Aberta>,
     ajustes: Ajustes,
@@ -382,6 +395,8 @@ impl Revelacao {
             rolagem_da_tira: gpui::ScrollHandle::new(),
             ultima_na_tira: None,
             posicao: 0,
+            marcadas: BTreeSet::new(),
+            escolha: None,
             processador: Processador::novo(),
             aberta: None,
             ajustes: Ajustes::default(),
@@ -486,7 +501,212 @@ impl Revelacao {
         self.posicao
     }
 
+    /// A lista que a tira percorre.
+    pub fn acervo(&self) -> &[PhotoViewModel] {
+        &self.acervo
+    }
+
+    // ------------------------------------------------ o lote da sincronização
+
+    /// O clique na tira: sozinho troca de foto, com Ctrl marca, com Shift marca
+    /// a faixa — como no Lightroom e no site.
+    ///
+    /// ⚠️ **Ctrl e Shift não trocam a foto aberta.** Trocar grava a anterior e
+    /// recomeça o lote; montar um lote de dez fotos trocando dez vezes deixaria
+    /// o operador sempre com uma só marcada. Quem manda no canvas é o clique
+    /// simples.
+    pub fn clicar_na_tira(
+        &mut self,
+        posicao: usize,
+        modificadores: Modificadores,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if posicao >= self.acervo.len() {
+            return;
+        }
+        if modificadores.aditivo {
+            sincronizacao::alternar(&mut self.marcadas, self.posicao, posicao);
+            cx.notify();
+        } else if modificadores.faixa {
+            self.marcadas = sincronizacao::faixa(self.posicao, posicao);
+            cx.notify();
+        } else {
+            self.ir_para(posicao, window, cx);
+        }
+    }
+
+    /// `Cmd+A`: a tira inteira.
+    pub fn marcar_todas(&mut self, cx: &mut Context<Self>) {
+        if self.acervo.is_empty() {
+            return;
+        }
+        self.marcadas = sincronizacao::todas(self.acervo.len());
+        cx.notify();
+    }
+
+    /// `Cmd+D`: só a aberta.
+    pub fn desmarcar(&mut self, cx: &mut Context<Self>) {
+        if self.acervo.is_empty() {
+            return;
+        }
+        self.marcadas = sincronizacao::so(self.posicao);
+        cx.notify();
+    }
+
+    pub fn marcadas(&self) -> &BTreeSet<usize> {
+        &self.marcadas
+    }
+
+    /// As fotos que vão receber os ajustes desta — a aberta inclusive, na
+    /// ordem da tira. Se ela tem ajuste não salvo, sair daqui com as outras
+    /// salvas e ela não seria o resultado que o operador viu.
+    pub fn alvos_da_sincronizacao(&self) -> Vec<PhotoViewModel> {
+        if self.acervo.is_empty() {
+            return Vec::new();
+        }
+        let mut posicoes = self.marcadas.clone();
+        posicoes.insert(self.posicao);
+        posicoes
+            .into_iter()
+            .filter_map(|p| self.acervo.get(p).cloned())
+            .collect()
+    }
+
+    pub fn escolha_da_sincronizacao(&self) -> Escolha {
+        self.escolha.unwrap_or_default()
+    }
+
+    pub fn definir_escolha_da_sincronizacao(&mut self, escolha: Escolha) {
+        self.escolha = Some(escolha);
+    }
+
+    fn escolha_mut(&mut self) -> &mut Escolha {
+        self.escolha.get_or_insert_with(Escolha::default)
+    }
+
+    /// O enquadramento da foto aberta, como a persistência o guarda.
+    pub fn corte(&self) -> Corte {
+        self.corte
+    }
+
+    /// A raiz gravou a receita nas marcadas: as cópias da tira passam a dizer
+    /// o mesmo que o banco. Sem isto a seta seguinte abriria a foto
+    /// recém-sincronizada com os sliders de antes.
+    pub fn aplicar_sincronizadas(
+        &mut self,
+        gravadas: &[(String, Ajustes, Corte)],
+        cx: &mut Context<Self>,
+    ) {
+        let acervo = Arc::make_mut(&mut self.acervo);
+        for (id, ajustes, corte) in gravadas {
+            if let Some(foto) = acervo.iter_mut().find(|f| &f.id == id) {
+                persistencia::na_foto(foto, *ajustes, *corte);
+            }
+        }
+        cx.notify();
+    }
+
+    /// A caixa do "Sincronizar N" — as flags do Lightroom, como no site
+    /// (`sincronizar-dialogo.tsx`, pedido do dono de 2026-09-05: *"coloque
+    /// flags, escolhe tudo e desmarcar algumas coisas"*).
+    ///
+    /// ⚠️ O diálogo é do `gpui-component`, e depende do `Root` na primeira
+    /// camada da janela — o mesmo aviso do diálogo de salvar preset.
+    pub fn abrir_sincronizacao(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let quantas = self.alvos_da_sincronizacao().len();
+        if quantas < 2 {
+            return;
+        }
+        // A escolha da última vez, lida do disco uma vez por abertura do app.
+        if self.escolha.is_none() {
+            self.escolha = Some(sincronizacao::ler());
+        }
+        let esta = cx.entity();
+
+        window.open_dialog(cx, move |dialogo, _window, cx| {
+            let escolha = esta.read(cx).escolha_da_sincronizacao();
+            let tudo = escolha.tudo();
+            let para_tudo = esta.clone();
+            let para_ok = esta.clone();
+
+            dialogo
+                .title(SharedString::from(format!("Sincronizar {quantas} fotos")))
+                .confirm()
+                .child(
+                    div().text_xs().child(
+                        "O que estiver marcado vai desta foto para as outras escolhidas na tira. \
+                         O resto fica como está em cada uma.",
+                    ),
+                )
+                .child(
+                    div()
+                        .id("sincronizar-tudo")
+                        .pt(px(8.))
+                        .cursor_pointer()
+                        .text_xs()
+                        .child(if tudo { "Desmarcar tudo" } else { "Marcar tudo" })
+                        .on_click(move |_ev, _window, cx| {
+                            para_tudo.update(cx, |tela, cx| {
+                                tela.escolha_mut().marcar_tudo(!tudo);
+                                cx.notify();
+                            });
+                        }),
+                )
+                .children(Grupo::TODOS.into_iter().map(|grupo| {
+                    let ligado = escolha.ligado(grupo);
+                    let para_alternar = esta.clone();
+                    div()
+                        .id(SharedString::from(format!("sincronizar-{}", grupo.chave())))
+                        .pt(px(4.))
+                        .cursor_pointer()
+                        .text_sm()
+                        .child(SharedString::from(format!(
+                            "{} {}",
+                            if ligado { "☑" } else { "☐" },
+                            grupo.rotulo()
+                        )))
+                        .children(grupo.detalhe().map(|detalhe| {
+                            div().pl(px(18.)).text_xs().child(detalhe)
+                        }))
+                        // 🚨 O único que costuma estar errado no destino, e a
+                        // caixa diz isso quando ele é ligado.
+                        .when(grupo == Grupo::Enquadramento && ligado, |item| {
+                            item.child(div().pl(px(18.)).text_xs().child(
+                                "O recorte desta foto vale para todas — confira se a composição é a mesma.",
+                            ))
+                        })
+                        .on_click(move |_ev, _window, cx| {
+                            para_alternar.update(cx, |tela, cx| {
+                                tela.escolha_mut().alternar(grupo);
+                                cx.notify();
+                            });
+                        })
+                }))
+                .child(div().pt(px(8.)).text_xs().child(
+                    "A receita vai para cada foto marcada; as que já estão no site são \
+                     reveladas em resolução cheia e salvas na galeria.",
+                ))
+                .on_ok(move |_ev, _window, cx| {
+                    para_ok.update(cx, |tela, cx| {
+                        let escolha = tela.escolha_da_sincronizacao();
+                        // Nada marcado é nada a fazer — o site desliga o botão;
+                        // aqui a caixa fecha sem sincronizar.
+                        if !escolha.tem_algo() {
+                            return;
+                        }
+                        sincronizacao::gravar(&escolha);
+                        cx.emit(PedidoDaRevelacao::Sincronizar);
+                    });
+                    true
+                })
+        });
+    }
+
     fn mostrar_a_posicao(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // Trocar de foto recomeça o lote: herdar o anterior sincronizaria fotos
+        // que o operador já tinha esquecido de ter marcado.
+        self.marcadas = sincronizacao::so(self.posicao);
         let foto = self.acervo[self.posicao].clone();
         self.mostrar(foto, window, cx);
         self.adiantar_as_vizinhas(cx);
@@ -2832,6 +3052,9 @@ impl Revelacao {
             .map(|posicao| {
                 let foto = &self.acervo[posicao];
                 let atual = posicao == self.posicao;
+                // A marcada para sincronizar: âmbar, como no site; a aberta
+                // continua com a cor de sempre.
+                let marcada = !atual && self.marcadas.contains(&posicao);
                 let miniatura = match self.miniaturas_da_tira.espiar(&foto.id) {
                     Some(Miniatura::Pronta(imagem)) => Some(imagem),
                     _ => None,
@@ -2853,6 +3076,8 @@ impl Revelacao {
                     .border_1()
                     .border_color(if atual {
                         cx.theme().primary
+                    } else if marcada {
+                        tema::cores::quente()
                     } else {
                         cx.theme().border
                     })
@@ -2878,9 +3103,25 @@ impl Revelacao {
                                 .bg(tema::cores::quente()),
                         )
                     })
-                    .on_click(cx.listener(move |tela, _ev, window, cx| {
-                        tela.ir_para(posicao, window, cx);
-                    }))
+                    .on_click(
+                        cx.listener(move |tela, evento: &gpui::ClickEvent, window, cx| {
+                            let m = evento.modifiers();
+                            // 🚨 Ctrl **e** Cmd acrescentam, como na web
+                            // (`ctrlKey || metaKey`). No macOS `secondary()` é
+                            // só o Cmd, e o Ctrl+clique chega como clique
+                            // esquerdo com `control` — ignorá-lo deixava o
+                            // dono sem lote nenhum (7/set/2026).
+                            tela.clicar_na_tira(
+                                posicao,
+                                Modificadores {
+                                    aditivo: m.secondary() || m.control,
+                                    faixa: m.shift,
+                                },
+                                window,
+                                cx,
+                            );
+                        }),
+                    )
                     .into_any_element()
             })
             .collect();
@@ -2931,6 +3172,9 @@ pub enum PedidoDaRevelacao {
     /// "Salvar na galeria e sair" do site: o revelado entra no lugar do
     /// original, na foto que já é da galeria aberta.
     SalvarNaGaleria,
+    /// "Sincronizar N" do site: os ajustes desta foto vão para as marcadas na
+    /// tira — a receita para o catálogo, e a foto revelada para o site.
+    Sincronizar,
 }
 
 impl gpui::EventEmitter<PedidoDaRevelacao> for Revelacao {}
@@ -3139,6 +3383,25 @@ impl Revelacao {
                     .disabled(!self.tem_pixels())
                     .on_click(cx.listener(|tela, _ev, window, cx| tela.alternar_corte(window, cx))),
             )
+            // "Sincronizar N": só aparece quando há lote — um botão que quase
+            // sempre está desligado vira ruído numa barra que já tem sete
+            // controles. É o do site, no mesmo lugar.
+            .when(self.marcadas.len() > 1, |barra| {
+                let quantas = self.marcadas.len();
+                barra.child(
+                    Button::new("revelacao-sincronizar")
+                        .label(format!("Sincronizar {quantas}"))
+                        .xsmall()
+                        .tooltip(
+                            "Aplicar os ajustes desta foto nas outras marcadas na tira \
+                             (Ctrl no clique marca, Shift marca a faixa, Cmd+A marca todas, Cmd+D desmarca)",
+                        )
+                        .disabled(!tem_foto)
+                        .on_click(cx.listener(|tela, _ev, window, cx| {
+                            tela.abrir_sincronizacao(window, cx)
+                        })),
+                )
+            })
             // As duas últimas do site: "Baixar JPEG" e "Salvar na galeria e
             // sair". Aqui elas **pedem à raiz**, que é quem tem o modal da
             // pasta de destino e a conversa com o pós-venda.
@@ -4215,6 +4478,97 @@ mod testes {
                 assert_eq!(tela.ajustes().exposure, 1.5);
                 assert_eq!(tela.controles[0].estado.read(cx).value().start(), 1.5);
                 assert!(!tela.pode_refazer(), "chegou ao fim do histórico");
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🔑 **Cmd+A, Cmd+D, Ctrl e Shift no clique montam o lote na tira** — as
+    /// regras do site (`escolherNaTira`): nenhum deles troca a foto aberta, a
+    /// aberta nunca sai do lote, e trocar de foto recomeça.
+    #[gpui::test]
+    fn a_marcacao_da_tira_segue_o_site(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        let janela = janela(cx, previews);
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir_no_acervo(
+                    vec![foto("a.jpg"), foto("b.jpg"), foto("c.jpg"), foto("d.jpg")],
+                    1,
+                    window,
+                    cx,
+                );
+                assert_eq!(
+                    *tela.marcadas(),
+                    BTreeSet::from([1]),
+                    "abre só com a aberta"
+                );
+                assert_eq!(tela.alvos_da_sincronizacao().len(), 1);
+
+                tela.marcar_todas(cx);
+                assert_eq!(tela.alvos_da_sincronizacao().len(), 4, "Cmd+A");
+                assert_eq!(tela.posicao(), 1, "e a aberta não mudou");
+
+                tela.desmarcar(cx);
+                assert_eq!(
+                    *tela.marcadas(),
+                    BTreeSet::from([1]),
+                    "Cmd+D deixa só a aberta"
+                );
+
+                let ctrl = Modificadores {
+                    aditivo: true,
+                    faixa: false,
+                };
+                tela.clicar_na_tira(3, ctrl, window, cx);
+                assert_eq!(tela.posicao(), 1, "Ctrl não troca a aberta");
+                assert_eq!(*tela.marcadas(), BTreeSet::from([1, 3]));
+
+                tela.clicar_na_tira(1, ctrl, window, cx);
+                assert!(tela.marcadas().contains(&1), "Ctrl na aberta não a tira");
+
+                let shift = Modificadores {
+                    aditivo: false,
+                    faixa: true,
+                };
+                tela.clicar_na_tira(3, shift, window, cx);
+                assert_eq!(
+                    *tela.marcadas(),
+                    BTreeSet::from([1, 2, 3]),
+                    "Shift substitui pela faixa"
+                );
+
+                tela.clicar_na_tira(0, Modificadores::default(), window, cx);
+                assert_eq!(tela.posicao(), 0, "o clique simples troca");
+                assert_eq!(*tela.marcadas(), BTreeSet::from([0]), "e recomeça o lote");
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// A raiz gravou nas marcadas; as cópias da tira têm de dizer o mesmo.
+    #[gpui::test]
+    fn as_sincronizadas_atualizam_as_copias_da_tira(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        let janela = janela(cx, previews);
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir_no_acervo(vec![foto("a.jpg"), foto("b.jpg")], 0, window, cx);
+                let ajustes = Ajustes {
+                    exposure: 1.25,
+                    ..Ajustes::default()
+                };
+                let corte = Corte {
+                    x: Some(0.2),
+                    ..Corte::default()
+                };
+                tela.aplicar_sincronizadas(&[("id-b.jpg".to_string(), ajustes, corte)], cx);
+
+                let b = &tela.acervo()[1];
+                assert_eq!(b.edit_exposure, Some(1.25));
+                assert_eq!(b.edit_crop_x, Some(0.2));
+                assert!(persistencia::ja_revelada(b), "e o ponto âmbar acende");
+                assert_eq!(tela.acervo()[0].edit_exposure, None, "a outra não mexe");
             })
             .expect("a janela deve estar aberta");
     }

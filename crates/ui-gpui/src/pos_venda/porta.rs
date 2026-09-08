@@ -583,6 +583,21 @@ pub mod mentira {
             self.reveladas.lock().expect("as reveladas").clone()
         }
 
+        /// Manda **uma** das guardadas, a mais antiga.
+        ///
+        /// 🔑 Existe para provar o que `responder` não prova: num lote, as
+        /// respostas chegam **espalhadas no tempo**, uma por foto. Soltar todas
+        /// de uma vez esconderia exatamente o defeito de quem para de escutar
+        /// na primeira.
+        pub fn responder_uma(&self) {
+            let mut guardados = self.guardados.lock().expect("os guardados");
+            if guardados.is_empty() {
+                return;
+            }
+            let (canal, recado) = guardados.remove(0);
+            let _ = canal.send(recado);
+        }
+
         /// Manda o que `demorada` segurou — a rede respondendo, enfim.
         pub fn responder(&self) {
             for (canal, recado) in self.guardados.lock().expect("os guardados").drain(..) {

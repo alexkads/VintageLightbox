@@ -6,7 +6,9 @@
 
 use std::sync::Arc;
 
-use gpui::{px, size, App, AppContext, Application, Bounds, WindowBounds, WindowOptions};
+use gpui::{
+    px, size, AnyWindowHandle, App, AppContext, Application, Bounds, WindowBounds, WindowOptions,
+};
 use gpui_component::Root;
 use infrastructure::cache::preview_manager::PreviewManager;
 use infrastructure::paths::AppPaths;
@@ -309,49 +311,64 @@ async fn main() {
         ui_gpui::cliente::init(cx);
 
         let bounds = Bounds::centered(None, size(px(1100.), px(720.)), cx);
-        cx.open_window(
-            WindowOptions {
-                window_bounds: Some(WindowBounds::Windowed(bounds)),
-                ..Default::default()
-            },
-            |window, cx| {
-                let aplicativo = cx.new(|cx| {
-                    Aplicativo::novo(
-                        fotos.clone(),
-                        previews.clone(),
-                        presets.clone(),
-                        Portas {
-                            gravador: gravador.clone(),
-                            acervo: acervo.clone(),
-                            exportador: exportador.clone(),
-                            publicador: publicador.clone(),
-                            colecoes: colecoes.clone(),
-                            folha: folha.clone(),
-                            marcador: marcador.clone(),
-                            gerador: gerador.clone(),
-                            guarda_de_presets: guarda_de_presets.clone(),
-                            escolha_de_presets: escolha_de_presets.clone(),
-                            explorador: explorador.clone(),
-                            importador: importador.clone(),
-                            seletor: seletor.clone(),
-                            // A janela **do sistema** para escolher as fotos da
-                            // sessão: filtro de imagem e seleção múltipla.
-                            seletor_de_fotos: seletor_de_fotos.clone(),
-                            atualizador: atualizador.clone(),
-                        },
-                        window,
-                        cx,
-                    )
-                });
-                // A primeira camada da janela **tem** de ser o `Root`: é ele
-                // que hospeda diálogo, gaveta e aviso, e quem sabe qual campo
-                // de texto está com o foco. O `gpui-component` procura por ele
-                // com um `expect` — sem o `Root`, abrir um diálogo derruba o
-                // app em vez de mostrar o diálogo.
-                cx.new(|cx| Root::new(aplicativo, window, cx))
-            },
-        )
-        .expect("abrir a janela");
+        let principal = cx
+            .open_window(
+                WindowOptions {
+                    window_bounds: Some(WindowBounds::Windowed(bounds)),
+                    ..Default::default()
+                },
+                |window, cx| {
+                    let aplicativo = cx.new(|cx| {
+                        Aplicativo::novo(
+                            fotos.clone(),
+                            previews.clone(),
+                            presets.clone(),
+                            Portas {
+                                gravador: gravador.clone(),
+                                acervo: acervo.clone(),
+                                exportador: exportador.clone(),
+                                publicador: publicador.clone(),
+                                colecoes: colecoes.clone(),
+                                folha: folha.clone(),
+                                marcador: marcador.clone(),
+                                gerador: gerador.clone(),
+                                guarda_de_presets: guarda_de_presets.clone(),
+                                escolha_de_presets: escolha_de_presets.clone(),
+                                explorador: explorador.clone(),
+                                importador: importador.clone(),
+                                seletor: seletor.clone(),
+                                // A janela **do sistema** para escolher as fotos da
+                                // sessão: filtro de imagem e seleção múltipla.
+                                seletor_de_fotos: seletor_de_fotos.clone(),
+                                atualizador: atualizador.clone(),
+                            },
+                            window,
+                            cx,
+                        )
+                    });
+                    // A primeira camada da janela **tem** de ser o `Root`: é ele
+                    // que hospeda diálogo, gaveta e aviso, e quem sabe qual campo
+                    // de texto está com o foco. O `gpui-component` procura por ele
+                    // com um `expect` — sem o `Root`, abrir um diálogo derruba o
+                    // app em vez de mostrar o diálogo.
+                    cx.new(|cx| Root::new(aplicativo, window, cx))
+                },
+            )
+            .expect("abrir a janela");
+
+        // Fechar a janela principal encerra o app. Sem isto o macOS mantém o
+        // processo vivo com o ícone na Dock e nenhuma janela — e como não
+        // registramos menu de aplicativo, não sobra nem Cmd+Q: só resta matar o
+        // processo. O porquê do critério ser a janela principal, e não "sobrou
+        // alguma janela", está em `ui_gpui::encerramento`.
+        let principal = AnyWindowHandle::from(principal);
+        cx.on_window_closed(move |cx| {
+            if ui_gpui::encerramento::deve_encerrar(&principal, &cx.windows()) {
+                cx.quit();
+            }
+        })
+        .detach();
+
         cx.activate(true);
     });
 }

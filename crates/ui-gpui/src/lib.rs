@@ -12,6 +12,8 @@ pub mod balcao;
 pub mod biblioteca;
 pub mod cliente;
 pub mod configuracoes;
+/// Quando o app acaba — fechar a janela principal encerra o processo.
+pub mod encerramento;
 pub mod entrada;
 pub mod exportacao;
 /// O fluxo dos onze passos, de ponta a ponta. Só testes.

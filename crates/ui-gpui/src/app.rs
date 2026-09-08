@@ -35,9 +35,10 @@ use crate::pos_venda::porta::Recado as PosVendaRecado;
 use crate::revelacao::persistencia::{self, Gravador};
 use crate::revelacao::presets::GuardaDePresets;
 use crate::revelacao::processador::Ajustes;
+use crate::revelacao::sincronizacao;
 use crate::revelacao::tela::{PedidoDaRevelacao, Revelacao};
 use crate::sessoes::arquivos::SeletorDeFotos;
-use crate::sessoes::detalhe::{Detalhe, Pedido as DetalhePedido};
+use crate::sessoes::detalhe::{Detalhe, FotoARevelar, Pedido as DetalhePedido};
 use crate::sessoes::tela::{Escolhida, Sessoes};
 use crate::tema;
 
@@ -211,6 +212,12 @@ pub fn init(cx: &mut gpui::App) {
         // `!Input` tiraria o `Cmd+A` de dentro do campo sem ganhar nada.
         gpui::KeyBinding::new("cmd-a", SelecionarTudo, Some(CONTEXTO)),
         gpui::KeyBinding::new("cmd-d", LimparSelecao, Some(CONTEXTO)),
+        // 🚨 **E com Ctrl também**, como a web (`e.ctrlKey || e.metaKey`): o
+        // dono aperta Ctrl+A na tira da Revelação, e com `cmd-a` só o lote
+        // nunca se formava — o botão "Sincronizar N" não aparecia e parecia
+        // que a sincronização não existia (7/set/2026).
+        gpui::KeyBinding::new("ctrl-a", SelecionarTudo, Some(CONTEXTO)),
+        gpui::KeyBinding::new("ctrl-d", LimparSelecao, Some(CONTEXTO)),
     ]);
 }
 
@@ -291,6 +298,16 @@ pub struct Aplicativo {
     /// sintoma seria a grade nunca reler o catálogo depois de uma foto subir —
     /// o id remoto estaria gravado no banco e ausente da tela.
     _sincronia: Option<gpui::Task<()>>,
+    /// Quantas respostas do site ainda são esperadas.
+    ///
+    /// 🚨 **Sem esta conta o laço parava na primeira.** Ele desligava assim que
+    /// `colher_sincronia` dizia "chegou alguma coisa" — e num lote as respostas
+    /// chegam **espalhadas no tempo**, uma por foto, cada uma depois de baixar,
+    /// revelar e subir. Da segunda em diante ninguém as lia: a grade mostrava
+    /// só a primeira revelada, e os erros das outras não apareciam em lugar
+    /// nenhum. Era o "não está sincronizando" de 7/set/2026, e valia também
+    /// para classificar trinta fotos de uma vez.
+    sincronias_pendentes: usize,
     /// 🚨 A inscrição na travessia do zero da classificação. Sem ela nada acusa:
     /// as estrelas entram no banco, e nada sobe nem sai do site.
     _classificacao: gpui::Subscription,
@@ -565,6 +582,7 @@ impl Aplicativo {
             publicador: publicador_da_raiz,
             sincronias: channel(),
             _sincronia: None,
+            sincronias_pendentes: 0,
             _classificacao: classificacao,
             _sessao_escolhida: sessao_escolhida,
             configuracoes: cx.new(|_| Configuracoes::nova(previews_das_configuracoes)),
@@ -764,8 +782,8 @@ impl Aplicativo {
                 self.tela = Tela::Sessoes;
                 cx.notify();
             }
-            DetalhePedido::Revelar { foto_id, arquivo } => {
-                self.revelar_do_site(foto_id.clone(), arquivo.clone(), window, cx);
+            DetalhePedido::Revelar { fotos, inicial } => {
+                self.revelar_da_sessao(fotos, *inicial, window, cx);
             }
             DetalhePedido::TelaDoCliente => self.alternar_cliente(cx),
             DetalhePedido::MiniaturaPronta(chave) => {
@@ -784,32 +802,61 @@ impl Aplicativo {
         }
     }
 
-    /// Abre na Revelação uma foto que **só existe no site**.
+    /// Entra na Revelação com **a sessão na tira**, aberta em `inicial`.
     ///
-    /// 🔑 A foto entra como um `PhotoViewModel` sem caminho local e com o id
-    /// remoto preenchido — e daí o passo 11 faz o resto: sem preview no cache,
-    /// os pixels vêm da cópia de trabalho do storage.
+    /// 🔑 **A lista inteira vai junto**, como nos dois botões da web
+    /// (`abrir-revelacao.tsx`): a tira, as setas e os botões do editor percorrem
+    /// o ensaio, e "a próxima" é a próxima do ensaio — sem voltar à grade a cada
+    /// foto. Até 7/set/2026 a sessão mandava **uma** foto, e a Revelação abria
+    /// com uma tira de uma.
+    ///
+    /// Cada foto entra como um `PhotoViewModel` sem caminho local e com o id
+    /// remoto preenchido — o que a grade já tem em `fotos_do_site`, reaproveitado
+    /// quando está lá — e daí o passo 11 faz o resto: sem preview no cache, os
+    /// pixels vêm da cópia de trabalho do storage.
     ///
     /// ⚠️ **O id local é derivado do remoto** (`site:…`) e não colide com o do
     /// catálogo: são espaços de nome diferentes, e misturá-los faria a Revelação
     /// gravar ajustes numa foto local que ninguém abriu.
-    fn revelar_do_site(
+    fn revelar_da_sessao(
         &mut self,
-        foto_id: String,
-        arquivo: String,
+        fotos: &[FotoARevelar],
+        inicial: usize,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let foto = PhotoViewModel {
-            id: format!("site:{foto_id}"),
-            name: arquivo,
-            pos_venda_foto_id: Some(foto_id),
-            ..Default::default()
-        };
-        self.revelacao
-            .update(cx, |tela, cx| tela.abrir(foto, window, cx));
+        // 🚨 A mesma guarda de `revelar`: logado e sem sessão, nada trabalha.
+        if !self.pode_trabalhar() {
+            return;
+        }
+        let sessao_id = self.sessao_aberta.clone();
+        let acervo: Vec<PhotoViewModel> = fotos
+            .iter()
+            .map(|foto| {
+                let id = format!("site:{}", foto.id);
+                self.fotos_do_site
+                    .iter()
+                    .find(|da_grade| da_grade.id == id)
+                    .cloned()
+                    .unwrap_or_else(|| PhotoViewModel {
+                        id,
+                        name: foto.arquivo.clone(),
+                        pos_venda_foto_id: Some(foto.id.clone()),
+                        sessao_id: sessao_id.clone(),
+                        ..Default::default()
+                    })
+            })
+            .collect();
+        if acervo.is_empty() {
+            return;
+        }
+        self.revelacao.update(cx, |tela, cx| {
+            tela.abrir_no_acervo(acervo, inicial, window, cx)
+        });
         self.buscar_os_pixels_na_nuvem(cx);
         self.tela = Tela::Revelacao;
+        // O foco volta para a raiz a cada troca de tela — ver `revelar`.
+        window.focus(&self.foco);
         cx.notify();
     }
 
@@ -839,7 +886,7 @@ impl Aplicativo {
 
         self.publicador
             .copia_de_trabalho(sessao, local, no_site, self.sincronias.0.clone());
-        self.esperar_a_sincronia(cx);
+        self.esperar_a_sincronia(1, cx);
     }
 
     /// Despacha um gesto de triagem para **a grade que está na frente**.
@@ -913,6 +960,8 @@ impl Aplicativo {
             self.publicador
                 .tirar_do_site(sessao.clone(), id.clone(), self.sincronias.0.clone());
         }
+        // Uma resposta por pedido: é o que o laço de espera conta.
+        let mut esperadas = evento.sairam.len();
 
         if !evento.subiram.is_empty() {
             let Some(galeria) = self.sessao_aberta.clone() else {
@@ -925,7 +974,7 @@ impl Aplicativo {
                         cx,
                     )
                 });
-                self.esperar_a_sincronia(cx);
+                self.esperar_a_sincronia(esperadas, cx);
                 return;
             };
 
@@ -942,20 +991,34 @@ impl Aplicativo {
                     self.sincronias.0.clone(),
                 );
             }
+            esperadas += evento.subiram.len();
         }
 
-        self.esperar_a_sincronia(cx);
+        self.esperar_a_sincronia(esperadas, cx);
     }
 
     /// Espera o site responder e relê o catálogo quando alguma foto muda de
     /// lado — é o que traz o id remoto para a tela.
-    fn esperar_a_sincronia(&mut self, cx: &mut Context<Self>) {
+    ///
+    /// `quantas` é o número de pedidos que acabaram de sair. Ele **soma** ao que
+    /// já estava pendente, e o laço só desliga quando a conta zera: quem manda
+    /// dez fotos espera dez respostas, e não uma.
+    ///
+    /// ⏱️ O teto é de 30 s por resposta esperada. Um lote de dez fotos pode
+    /// levar minutos — cada uma baixa o original, revela na GPU e sobe — e um
+    /// teto fixo cortaria o lote pela metade, em silêncio.
+    fn esperar_a_sincronia(&mut self, quantas: usize, cx: &mut Context<Self>) {
+        self.sincronias_pendentes += quantas;
+        let voltas = 300 * self.sincronias_pendentes.max(1);
         self._sincronia = Some(cx.spawn(async move |raiz, cx| {
-            for _ in 0..300 {
+            for _ in 0..voltas {
                 cx.background_executor()
                     .timer(std::time::Duration::from_millis(100))
                     .await;
-                let Ok(acabou) = raiz.update(cx, |raiz, cx| raiz.colher_sincronia(cx)) else {
+                let Ok(acabou) = raiz.update(cx, |raiz, cx| {
+                    raiz.colher_sincronia(cx);
+                    raiz.sincronias_pendentes == 0
+                }) else {
                     return;
                 };
                 if acabou {
@@ -969,6 +1032,11 @@ impl Aplicativo {
     pub(crate) fn colher_sincronia(&mut self, cx: &mut Context<Self>) -> bool {
         let mut mudou = false;
         while let Ok(recado) = self.sincronias.1.try_recv() {
+            // 🔑 **Todo recado fecha o pedido que o gerou.** É a conta que
+            // mantém o laço de pé até a última foto do lote responder — e o
+            // `saturating_sub` é o que impede uma resposta a mais (um recado
+            // que ninguém pediu) de a fazer dar a volta.
+            self.sincronias_pendentes = self.sincronias_pendentes.saturating_sub(1);
             match recado {
                 PosVendaRecado::Sincronizou => mudou = true,
                 PosVendaRecado::Pixels { foto_id, bytes } => {
@@ -1024,6 +1092,12 @@ impl Aplicativo {
 
     pub fn tela(&self) -> Tela {
         self.tela
+    }
+
+    /// Quantas respostas do site ainda faltam — é o que mantém o laço de pé.
+    #[cfg(test)]
+    pub(crate) fn sincronias_pendentes(&self) -> usize {
+        self.sincronias_pendentes
     }
 
     /// Leva a foto selecionada na Biblioteca para a Revelação.
@@ -1142,7 +1216,113 @@ impl Aplicativo {
             PedidoDaRevelacao::Sair => self.voltar_para_biblioteca(window, cx),
             PedidoDaRevelacao::Exportar => self.exportar(cx),
             PedidoDaRevelacao::SalvarNaGaleria => self.salvar_na_galeria(window, cx),
+            PedidoDaRevelacao::Sincronizar => self.sincronizar_revelacao(window, cx),
         }
+    }
+
+    /// Leva os ajustes da foto aberta para as outras marcadas na tira — o
+    /// "Sincronizar" do Lightroom e do site (pedido do dono, 2026-09-05).
+    ///
+    /// # O que acontece com cada marcada
+    ///
+    /// A **receita** dela recebe os grupos escolhidos na caixa e vai para o
+    /// catálogo; o que não foi escolhido fica como estava, e o enquadramento
+    /// só viaja se o operador o ligou (`sincronizacao::mesclar`). É o que
+    /// `colar_revelacao` já fazia sem flags — e com a mesma regra: **cada
+    /// foto conserva o próprio corte**, porque gravar sem reenviá-lo apaga o
+    /// enquadramento.
+    ///
+    /// 🚨 **E a que já está no site é revelada de verdade.** O site guarda o
+    /// JPEG revelado, não a receita — então para ela sincronizar é o mesmo
+    /// caminho do "Salvar na galeria": baixar o original, revelar e subir, um
+    /// pedido por foto ao publicador, que faz isso fora da thread que desenha.
+    /// A que ainda não subiu fica só com a receita, e sobe revelada quando for
+    /// classificada — como o próprio "Salvar na galeria" avisa.
+    pub fn sincronizar_revelacao(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        // 🚨 Logado, nada acontece fora de uma sessão — ver `pode_trabalhar`.
+        if !self.pode_trabalhar() {
+            return;
+        }
+        // O gesto a meio caminho fecha antes: a receita que viaja é a que o
+        // operador está vendo, inclusive o arrasto de meio segundo atrás.
+        self.revelacao
+            .update(cx, |tela, _cx| tela.gravar_o_que_estiver_pendente());
+
+        let (aberta, ajustes, corte, escolha, alvos) = {
+            let revelacao = self.revelacao.read(cx);
+            (
+                revelacao.foto_aberta().cloned(),
+                revelacao.ajustes(),
+                revelacao.corte(),
+                revelacao.escolha_da_sincronizacao(),
+                revelacao.alvos_da_sincronizacao(),
+            )
+        };
+        let Some(aberta) = aberta else {
+            return;
+        };
+        if alvos.len() < 2 || !escolha.tem_algo() {
+            return;
+        }
+
+        let sessao = self.sessao().cloned();
+        let mut gravadas: Vec<(String, Ajustes, persistencia::Corte)> = Vec::new();
+        let mut subindo = 0;
+        for alvo in &alvos {
+            let e_a_aberta = alvo.id == aberta.id;
+            let (finais, corte_final) = if e_a_aberta {
+                // A aberta já está no banco com o que está na tela.
+                (ajustes, corte)
+            } else {
+                let finais = sincronizacao::mesclar(persistencia::da_foto(alvo), ajustes, &escolha);
+                let corte_final = if escolha.enquadramento {
+                    corte
+                } else {
+                    persistencia::corte_da_foto(alvo)
+                };
+                self.gravador.gravar(alvo.id.clone(), finais, corte_final);
+                gravadas.push((alvo.id.clone(), finais, corte_final));
+                (finais, corte_final)
+            };
+
+            if let (Some(sessao), Some(no_site)) = (sessao.clone(), alvo.pos_venda_foto_id.clone())
+            {
+                self.publicador.salvar_revelacao(
+                    sessao,
+                    no_site,
+                    finais,
+                    persistencia::para_crop_settings(&corte_final),
+                    self.sincronias.0.clone(),
+                );
+                subindo += 1;
+            }
+        }
+
+        // 🔑 As cópias da tira e a grade ficaram velhas: sem isto a seta
+        // seguinte abriria a foto sincronizada com os sliders de antes.
+        self.revelacao
+            .update(cx, |tela, cx| tela.aplicar_sincronizadas(&gravadas, cx));
+        self.reler_o_acervo(cx);
+        // 🔑 **O lote precisa dizer que começou.** Cada foto leva segundos, e
+        // sem uma linha na tela o gesto parece não ter acontecido — que é como
+        // ele foi reportado em 7/set/2026. O fim de cada uma chega depois, pelo
+        // `RevelacaoSalva`.
+        if subindo > 0 {
+            self.avisar_onde_esta_olhando(
+                format!("sincronizando {subindo} foto(s) com a galeria…"),
+                cx,
+            );
+            self.esperar_a_sincronia(subindo, cx);
+        } else {
+            self.avisar_onde_esta_olhando(
+                format!(
+                    "{} foto(s) sincronizadas aqui — elas sobem quando forem classificadas",
+                    gravadas.len()
+                ),
+                cx,
+            );
+        }
+        cx.notify();
     }
 
     /// Abre ou fecha a segunda tela — a janela que se vira para o cliente.
@@ -1458,7 +1638,7 @@ impl Aplicativo {
             self.sincronias.0.clone(),
         );
         self.avisar_onde_esta_olhando("salvando a revelação na galeria…".into(), cx);
-        self.esperar_a_sincronia(cx);
+        self.esperar_a_sincronia(1, cx);
     }
 
     /// Põe o aviso na tela que está na frente.
@@ -2339,7 +2519,14 @@ impl Render for Aplicativo {
                     |grade, cx| grade.marcar_comprada(cx),
                 )
             }))
+            // 🔑 Na Revelação, `Cmd+A` e `Cmd+D` são da **tira**: marcam o
+            // lote da sincronização, como no site — e nenhum dos dois troca a
+            // foto aberta.
             .on_action(cx.listener(|este, _: &SelecionarTudo, _w, cx| {
+                if este.tela == Tela::Revelacao {
+                    este.revelacao.update(cx, |tela, cx| tela.marcar_todas(cx));
+                    return;
+                }
                 este.na_grade(
                     cx,
                     |sessao, cx| sessao.selecionar_tudo(cx),
@@ -2347,6 +2534,10 @@ impl Render for Aplicativo {
                 )
             }))
             .on_action(cx.listener(|este, _: &LimparSelecao, _w, cx| {
+                if este.tela == Tela::Revelacao {
+                    este.revelacao.update(cx, |tela, cx| tela.desmarcar(cx));
+                    return;
+                }
                 este.na_grade(
                     cx,
                     |sessao, cx| sessao.limpar_selecao(cx),
@@ -4456,6 +4647,224 @@ mod testes {
             gravador.gravado().len(),
             2,
             "colar tinha de gravar nas duas selecionadas"
+        );
+    }
+
+    /// 🔑 **Sincronizar grava a receita nas marcadas, respeita as flags e
+    /// preserva o corte de cada uma** — o "Sincronizar" do site. E a tira já
+    /// sabe: a seta seguinte abre a sincronizada com os sliders novos.
+    #[gpui::test]
+    fn sincronizar_grava_nas_marcadas_e_preserva_o_corte(cx: &mut TestAppContext) {
+        use crate::revelacao::sincronizacao::Escolha;
+        use domain::entities::preset::PresetAdjustments;
+
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+
+        let gravador = Arc::new(GravadorDeMentira::default());
+        let mut destino = foto("retrato.jpg");
+        destino.edit_crop_x = Some(0.4);
+        destino.edit_sharpen_amount = Some(30.0);
+
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            let gravador = gravador.clone();
+            move |window, cx| {
+                Aplicativo::ja_dentro(
+                    vec![foto("DSC_001.NEF"), destino],
+                    previews,
+                    Vec::new(),
+                    Portas {
+                        gravador,
+                        ..portas()
+                    },
+                    window,
+                    cx,
+                )
+            }
+        });
+
+        janela
+            .update(cx, |app, window, cx| {
+                app.biblioteca
+                    .update(cx, |tela, cx| tela.selecionar(Some(0), cx));
+                app.revelar(window, cx);
+                assert_eq!(app.tela(), Tela::Revelacao);
+
+                let preset = Preset::system(
+                    "Clareia e afia",
+                    PresetAdjustments::vazia()
+                        .com("exposure", 1.5)
+                        .com("sharpen_amount", 80.0),
+                );
+                app.revelacao.update(cx, |tela, cx| {
+                    tela.aplicar_preset(&preset, window, cx);
+                    tela.marcar_todas(cx);
+                    assert_eq!(tela.alvos_da_sincronizacao().len(), 2);
+                    tela.definir_escolha_da_sincronizacao(Escolha {
+                        detalhe: false,
+                        ..Escolha::default()
+                    });
+                });
+                app.sincronizar_revelacao(window, cx);
+
+                let revelacao = app.revelacao.read(cx);
+                let outra = revelacao
+                    .acervo()
+                    .iter()
+                    .find(|f| f.id == "id-retrato.jpg")
+                    .expect("a outra continua na tira");
+                assert_eq!(outra.edit_exposure, Some(1.5), "a tira já sabe");
+            })
+            .expect("a janela deve estar aberta");
+
+        let gravado = gravador.gravado();
+        let (_, ajustes, corte) = gravado
+            .iter()
+            .rfind(|(id, _, _)| id == "id-retrato.jpg")
+            .expect("a marcada foi gravada");
+        assert_eq!(ajustes.exposure, 1.5, "Básico viaja");
+        assert_eq!(
+            ajustes.sharpen_amount, 30.0,
+            "Detalhe desmarcado fica o dela"
+        );
+        assert_eq!(corte.x, Some(0.4), "o corte é o dela, não o da aberta");
+    }
+
+    /// 🚨 `Cmd+A`, `Ctrl+A` e `Cmd+D` chegam à **tira da Revelação** — e não à
+    /// grade da Biblioteca por trás dela. Sem isto o lote nunca se forma, o
+    /// botão "Sincronizar N" não aparece, e a caixa de flags nunca abre.
+    #[gpui::test]
+    fn na_revelacao_cmd_a_e_ctrl_a_marcam_a_tira(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+        cx.update(init);
+
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            |window, cx| Aplicativo::ja_dentro(acervo(), previews, Vec::new(), portas(), window, cx)
+        });
+        janela
+            .update(cx, |app, window, cx| {
+                app.biblioteca
+                    .update(cx, |tela, cx| tela.selecionar(Some(0), cx));
+                app.revelar(window, cx);
+                assert_eq!(app.tela(), Tela::Revelacao);
+                assert_eq!(app.revelacao.read(cx).marcadas().len(), 1);
+            })
+            .expect("a janela deve estar aberta");
+
+        let mut visual = gpui::VisualTestContext::from_window(janela.into(), cx);
+        for (tecla, esperado) in [("cmd-a", 2), ("cmd-d", 1), ("ctrl-a", 2), ("ctrl-d", 1)] {
+            visual.simulate_keystrokes(tecla);
+            janela
+                .update(cx, |app, _window, cx| {
+                    assert_eq!(
+                        app.revelacao.read(cx).marcadas().len(),
+                        esperado,
+                        "{tecla} na Revelação"
+                    );
+                    assert_eq!(
+                        app.biblioteca.read(cx).quantas_selecionadas(),
+                        1,
+                        "{tecla} não mexe na grade por trás"
+                    );
+                })
+                .expect("a janela deve estar aberta");
+        }
+    }
+
+    /// 🚨 **O laço espera uma resposta por foto, e não só a primeira.**
+    ///
+    /// Num lote, cada foto baixa, revela e sobe — as respostas chegam
+    /// espalhadas por segundos. O laço antigo desligava assim que a primeira
+    /// chegava, e as outras ficavam no canal sem ninguém para lê-las: a grade
+    /// mostrava uma revelada, e o erro das demais não aparecia. Era o "não está
+    /// sincronizando" de 7/set/2026.
+    #[gpui::test]
+    fn a_espera_conta_uma_resposta_por_foto_do_lote(cx: &mut TestAppContext) {
+        use crate::revelacao::sincronizacao::Escolha;
+
+        let (previews, _dir) = previews_descartaveis();
+        // Com prévia no cache, a Revelação não pede pixels à nuvem (o passo 11)
+        // — e o contador fica só com o que o lote mandou.
+        previews
+            .save_preview("id-DSC_001.NEF", &foto_vermelha())
+            .expect("gravar preview");
+        previews
+            .save_preview("id-retrato.jpg", &foto_vermelha())
+            .expect("gravar preview");
+        cx.update(gpui_component::init);
+
+        // A rede que **segura** as respostas: é assim que elas chegam uma a uma.
+        let publicador = Arc::new(PublicadorDeMentira {
+            demorada: true,
+            ..Default::default()
+        });
+
+        let mut primeira = foto("DSC_001.NEF");
+        primeira.pos_venda_foto_id = Some("remota-1".into());
+        let mut segunda = foto("retrato.jpg");
+        segunda.pos_venda_foto_id = Some("remota-2".into());
+
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            let publicador = publicador.clone();
+            move |window, cx| {
+                Aplicativo::ja_dentro(
+                    vec![primeira, segunda],
+                    previews,
+                    Vec::new(),
+                    Portas {
+                        publicador,
+                        ..portas()
+                    },
+                    window,
+                    cx,
+                )
+            }
+        });
+
+        janela
+            .update(cx, |app, window, cx| {
+                app.biblioteca
+                    .update(cx, |tela, cx| tela.selecionar(Some(0), cx));
+                app.revelar(window, cx);
+                app.revelacao.update(cx, |tela, cx| {
+                    tela.marcar_todas(cx);
+                    tela.definir_escolha_da_sincronizacao(Escolha::default());
+                });
+                app.sincronizar_revelacao(window, cx);
+
+                assert_eq!(
+                    app.sincronias_pendentes(),
+                    2,
+                    "duas fotos no site, duas respostas a esperar"
+                );
+            })
+            .expect("a janela deve estar aberta");
+
+        // A primeira responde: **o laço não pode desligar aqui**.
+        publicador.responder_uma();
+        janela
+            .update(cx, |app, _window, cx| {
+                app.colher_sincronia(cx);
+                assert_eq!(app.sincronias_pendentes(), 1, "ainda falta uma");
+            })
+            .expect("a janela deve estar aberta");
+
+        publicador.responder_uma();
+        janela
+            .update(cx, |app, _window, cx| {
+                app.colher_sincronia(cx);
+                assert_eq!(app.sincronias_pendentes(), 0, "agora o lote acabou");
+            })
+            .expect("a janela deve estar aberta");
+
+        assert_eq!(
+            publicador.reveladas().len(),
+            2,
+            "as duas foram mandadas ao site"
         );
     }
 

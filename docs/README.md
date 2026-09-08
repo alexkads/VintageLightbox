@@ -89,6 +89,15 @@ app, e a tela de sessão desenhada contra a rota `[id]` do site.
 por que a "Biblioteca" deixou de ser o lugar onde se escolhe foto. Traz também os defeitos que este
 trabalho encontrou e a lista do que ainda falta para a paridade com a tela de lá.
 
+### 10. [A rota do site, da lista até a Revelação](10-A-ROTA-DO-SITE-ATE-A-REVELACAO.md) 🆕
+**Conteúdo**: o que `/dashboard/sessoes-fotograficas` faz na web, passo a passo — a porta, a lista,
+a sessão (grade em wasm, área temporária, painel, os proxies de imagem), a passagem para o editor e
+o que a Revelação faz por baixo (fonte dos pixels, os 53 ajustes, salvar por bilhete, sincronizar).
+Com a rota da API de cada gesto e os comentários do dono que explicam cada decisão.
+
+**Leia se você quer**: conferir uma tela de cá contra a de lá sem abrir o site — é a referência de
+"mesmo gesto, mesmo resultado".
+
 ## 🗄️ História — [`historico/`](historico/)
 
 Documentos que descrevem decisões tomadas, e que não orientam o próximo commit. **Continuam valendo

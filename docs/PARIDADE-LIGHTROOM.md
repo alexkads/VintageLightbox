@@ -164,6 +164,25 @@ HSL vira **graus**, a 0,3 por ponto — o extremo do slider deles desloca ~30°,
 Copiar o número sem converter não dá erro: dá foto destruída que parece decisão de cor. É o defeito
 que os presets de sistema tiveram por meses, e agora tem teste dos dois lados.
 
+✅ **"Sincronizar N" é o do site desde 7/set/2026.** A tira ganhou o lote do Lightroom — `Ctrl` no
+clique marca, `Shift` marca a faixa, `Cmd+A` marca todas, `Cmd+D` deixa só a aberta, e nenhum dos
+quatro troca a foto aberta — e o botão do cabeçalho abre a caixa de flags por painel (o enquadramento
+nasce desmarcado). A escolha fica em `sincronizacao.json`, ao lado do catálogo. O que muda de lado
+para lado é o que "sincronizar" grava: aqui a **receita** vai para cada marcada (com o corte dela,
+salvo se o enquadramento foi ligado), e a que já está no site é revelada e salva na galeria pelo
+mesmo caminho do "Salvar na galeria" — porque o site guarda o JPEG, não a receita. Achado do dono:
+*"tá faltando o control+A e control+D na tira para ser utilizado a função de sincronizar"*.
+`revelacao/sincronizacao.rs` é a parte pura; `Aplicativo::sincronizar_revelacao` grava e sobe.
+
+🚨 **E o lote esperava uma resposta só.** Achado no mesmo dia, depois de o dono dizer que ainda não
+sincronizava: `esperar_a_sincronia` desligava assim que **a primeira** foto respondia
+(`colher_sincronia` devolvia "chegou alguma coisa"), e num lote as respostas chegam espalhadas por
+segundos — cada foto baixa, revela e sobe. Da segunda em diante ninguém as lia: a grade mostrava uma
+revelada, e o erro das outras não aparecia em lugar nenhum. Agora a espera **conta**
+(`sincronias_pendentes`): soma um por pedido despachado, tira um por recado recebido, e só desliga
+quando zera — com teto de 30 s por resposta esperada, porque um lote de dez leva minutos. O mesmo
+laço serve a classificar trinta fotos de uma vez, que tinha o defeito idêntico.
+
 ⚠️ **Duas coisas do site ficaram de fora, e é decisão.** "Baixar JPEG" e "Salvar na galeria e sair"
 são o "Exportar" e o "Pós-venda" da barra do app, que valem para a seleção inteira; e os botões de
 renomear/apagar ficam visíveis na linha em vez de aparecerem só sob o ponteiro — um botão de apagar
