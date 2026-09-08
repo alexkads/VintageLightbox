@@ -21,6 +21,7 @@ use domain::entities::preset::PresetAdjustments;
 use domain::entities::{Preset, PresetId};
 use domain::services::PreviewType;
 use domain::value_objects::{AspectRatio, CropSettings};
+use gpui::AnimationExt;
 use gpui::{
     canvas, div, img, prelude::*, px, AnyElement, Bounds, Context, Entity, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, RenderImage, SharedString,
@@ -142,6 +143,24 @@ const PROPORCOES: [(&str, AspectRatio); 8] = [
 /// para desenhar — e o teste `todo_neutro_cabe_na_faixa` do painel de ajustes já
 /// mostrou o que acontece quando faixa e valor discordam.
 const ANGULO_MAXIMO: f32 = 45.0;
+
+/// Quanto dura o cruzamento entre a foto de antes e a de depois.
+///
+/// 🚨 **Troca seca de imagem lê-se como engasgo, não como resultado.** É UX
+/// antes de ser desempenho, e é o que sobrou depois de o quadro estar medido em
+/// 3,94 ms e o passo dos sliders consertado: aplicar uma predefinição, desfazer
+/// ou zerar no duplo clique substitui a foto inteira de um quadro para o outro,
+/// e o olho registra um salto — que ele lê como travada. Com o cruzamento, a
+/// mesma troca lê-se como a revelação **acontecendo**.
+///
+/// 🔑 **140 ms é a faixa em que o olho vê a passagem sem esperar por ela.** Mais
+/// curto não se distingue de um corte; mais longo atrapalha quem passa trinta
+/// fotos.
+///
+/// ⚠️ **Não vale para o arrasto do slider.** Ali o resultado chega a cada poucos
+/// milissegundos e cruzar dois quadros deixaria fantasma — pior do que o corte,
+/// e justamente no gesto onde a resposta imediata é o valor.
+const CRUZAMENTO_DA_FOTO: Duration = Duration::from_millis(140);
 
 /// De quanto em quanto a tela pergunta se a GPU já respondeu.
 ///
@@ -277,6 +296,28 @@ pub struct Revelacao {
     /// abriria um laço novo e a tela acabaria com dezenas deles perguntando a
     /// mesma coisa.
     colhendo: bool,
+    /// A foto **de antes**, enquanto a de depois entra por cima.
+    ///
+    /// 🔑 Guardada só nas trocas que valem cruzamento (predefinição, desfazer,
+    /// zerar, automático) — ver [`CRUZAMENTO_DA_FOTO`]. `None` é o caso comum: o
+    /// arrasto, em que a foto nova substitui a anterior direto.
+    ///
+    /// ⚠️ **Ela sai sozinha, e é de propósito que ninguém a apague por tempo.**
+    /// Guardar uma `Task` para isso acordaria a tela ao fim da animação só para
+    /// jogar fora um `Arc`; ela é substituída na troca seguinte, e ocupa uma
+    /// imagem de palco — a mesma que o cache já guarda quinze vezes.
+    saindo: Option<Arc<RenderImage>>,
+    /// Se a **próxima** foto que chegar merece cruzamento.
+    ///
+    /// 🔑 Ligado pelas trocas discretas (predefinição, desfazer, zerar,
+    /// automático) e desligado quando a foto nova é montada. O arrasto do slider
+    /// não o liga: ali o resultado chega a cada poucos milissegundos.
+    cruzar: bool,
+    /// Qual cruzamento é este. **O `ElementId` da animação precisa mudar**, ou o
+    /// GPUI reaproveita o estado da anterior e a segunda troca aparece já no
+    /// fim — sem erro nenhum, e com a impressão de que o efeito "às vezes não
+    /// funciona".
+    cruzamento: usize,
     /// 🚨 A tarefa que carrega a tira. **Descartá-la a cancela**, e é de
     /// propósito: trocar de foto começa uma tarefa nova, que recomeça a ordem no
     /// palco novo. A antiga estaria enchendo a tira a partir de onde o operador
@@ -364,6 +405,11 @@ impl Revelacao {
                 SliderState::new()
                     .min(definicao.minimo)
                     .max(definicao.maximo)
+                    // 🚨 **Sem isto o passo é 1,0** — o padrão do
+                    // `gpui-component`, que arredonda o valor a ele. A exposição
+                    // tinha onze posições de −5 a +5 e o contraste três; ver
+                    // `Definicao::passo`.
+                    .step(definicao.passo())
                     .default_value(definicao.neutro())
             });
 
@@ -465,6 +511,9 @@ impl Revelacao {
             aba_hsl: Secao::HslCor,
             aguardando: None,
             colhendo: false,
+            saindo: None,
+            cruzar: false,
+            cruzamento: 0,
             _tira: None,
             repondo: false,
             _assinaturas: assinaturas,
@@ -1307,7 +1356,7 @@ impl Revelacao {
         // reintroduzir, no clique seguinte, o enquadramento que o `Cmd+Z` tirou.
         self.edicao = None;
         self.espalhar_nos_sliders(window, cx);
-        self.pedir_revelacao(cx);
+        self.pedir_revelacao_cruzando(cx);
         // O corte não passa pela GPU: quem o mostra é a exibição.
         self.atualizar_exibicao();
         self.gravar();
@@ -1378,7 +1427,7 @@ impl Revelacao {
 
         presets::aplicar(&mut self.ajustes, &preset.adjustments);
         self.espalhar_nos_sliders(window, cx);
-        self.pedir_revelacao(cx);
+        self.pedir_revelacao_cruzando(cx);
         self.historico.registrar(self.estado());
         self.gravar();
         cx.notify();
@@ -1773,6 +1822,7 @@ impl Revelacao {
             None => self.corte_atual(),
         };
         let recortar = self.edicao.is_none();
+        let cruzar = std::mem::take(&mut self.cruzar);
 
         let Some(aberta) = self.aberta.as_mut() else {
             if medir {
@@ -1798,7 +1848,19 @@ impl Revelacao {
         if medir {
             self.histograma = exibida.as_ref().map(Histograma::da_imagem);
         }
+
+        // 🔑 **A que sai é guardada antes de a que entra ocupar o lugar.** O
+        // palco desenha as duas empilhadas por [`CRUZAMENTO_DA_FOTO`], com a
+        // nova ganhando opacidade — é o que transforma "a imagem trocou" em "a
+        // revelação aconteceu".
+        let anterior = aberta.desenhada.take();
         aberta.desenhada = exibida.map(para_gpui);
+        let entrou = aberta.desenhada.is_some();
+
+        self.saindo = if cruzar && entrou { anterior } else { None };
+        if self.saindo.is_some() {
+            self.cruzamento = self.cruzamento.wrapping_add(1);
+        }
     }
 
     /// Gira 90° no sentido horário. Só faz sentido dentro do modo de corte.
@@ -1882,7 +1944,7 @@ impl Revelacao {
 
         self.ajustes = Ajustes::default();
         self.espalhar_nos_sliders(window, cx);
-        self.pedir_revelacao(cx);
+        self.pedir_revelacao_cruzando(cx);
         self.historico.registrar(self.estado());
         self.gravar();
         cx.notify();
@@ -1912,7 +1974,7 @@ impl Revelacao {
         self.gravar_o_que_estiver_pendente();
         (definicao.aplicar)(&mut self.ajustes, neutro);
         self.espalhar_nos_sliders(window, cx);
-        self.pedir_revelacao(cx);
+        self.pedir_revelacao_cruzando(cx);
         self.historico.registrar(self.estado());
         self.gravar();
         cx.notify();
@@ -1940,6 +2002,16 @@ impl Revelacao {
     }
 
     /// Manda os ajustes de agora para a GPU.
+    /// O mesmo pedido, com a foto **cruzando** em vez de trocar seca.
+    ///
+    /// 🚨 **É para o salto, e não para o arrasto.** Ver [`CRUZAMENTO_DA_FOTO`]:
+    /// cruzar dois resultados que chegam a cada poucos milissegundos deixaria
+    /// fantasma justamente no gesto em que a resposta imediata é o valor.
+    fn pedir_revelacao_cruzando(&mut self, cx: &mut Context<Self>) {
+        self.cruzar = true;
+        self.pedir_revelacao(cx);
+    }
+
     fn pedir_revelacao(&mut self, cx: &mut Context<Self>) {
         let Some(Aberta {
             origem: Some(origem),
@@ -1960,6 +2032,39 @@ impl Revelacao {
         self.aguardando = Some(id);
         self.acompanhar(cx);
         cx.notify();
+    }
+
+    /// Põe na tira a foto **como ela está sendo revelada**.
+    ///
+    /// 🚨 **Sem isto a tira mente, e mente por muito tempo.** A célula continua
+    /// com a imagem que o importador gravou: o operador deixa a foto em preto e
+    /// branco no palco e a tira mostra a colorida, lado a lado, na mesma tela.
+    /// Numa sequência de vinte fotos é o que ele usa para saber onde parou — e
+    /// era a única coisa ali que não acompanhava o trabalho.
+    ///
+    /// ⚠️ **Só a memória da tira, e não o cache em disco.** O `PreviewManager`
+    /// guarda o **arquivo**, e a receita vive separada, na linha da foto: gravar
+    /// a revelada lá dentro faria a próxima abertura tratar o revelado como
+    /// bruto e aplicar a receita duas vezes — que é exatamente o defeito de
+    /// 7/set com a foto do site (ver `persistencia::chave_do_trabalho`).
+    fn atualizar_a_tira_com_o_revelado(&mut self) {
+        let Some(Aberta {
+            foto,
+            revelada: Some(revelada),
+            ..
+        }) = self.aberta.as_ref()
+        else {
+            return;
+        };
+
+        // A célula tem 68px; reduzir para o lado dela é o mesmo princípio da
+        // grade da sessão — converter no tamanho em que se desenha, e não no
+        // tamanho em que se guarda.
+        let lado = (ALTURA_DO_FILMSTRIP - 16.0) as u32;
+        let pequena = revelada.thumbnail(lado * 2, lado * 2);
+        let id = foto.id.clone();
+        self.miniaturas_da_tira
+            .guardar(&id, Miniatura::Pronta(para_gpui(pequena)));
     }
 
     /// Liga o laço que pergunta pelo resultado, se ainda não houver um.
@@ -1999,6 +2104,12 @@ impl Revelacao {
             // passou.
             if self.aguardando == Some(resultado.id) {
                 self.aguardando = None;
+                // 🔑 **Chegou o último: a tira mostra o que o palco mostra.**
+                // Este é o único instante em que a foto revelada está pronta e
+                // parada — no meio de um arrasto os resultados são de valores
+                // que o dedo já passou, e reduzir cada um seria refazer a
+                // miniatura sessenta vezes por segundo para mostrar a penúltima.
+                self.atualizar_a_tira_com_o_revelado();
             }
             cx.notify();
         }
@@ -2060,7 +2171,29 @@ impl Revelacao {
                     div()
                         .relative()
                         .size_full()
-                        .child(img(imagem.clone()).size_full())
+                        // 🔑 **A foto de antes fica embaixo, inteira, e a nova
+                        // entra ganhando opacidade por cima.** Sem a de baixo o
+                        // efeito seria a foto surgir do fundo preto — que é pior
+                        // do que o corte seco, porque pisca. Ver
+                        // `CRUZAMENTO_DA_FOTO`.
+                        .children(self.saindo.clone().map(|anterior| {
+                            div().absolute().inset_0().child(img(anterior).size_full())
+                        }))
+                        .child(match self.saindo.as_ref() {
+                            None => img(imagem.clone()).size_full().into_any_element(),
+                            Some(_) => img(imagem.clone())
+                                .size_full()
+                                .with_animation(
+                                    // 🚨 O id muda a cada cruzamento: repetido, o
+                                    // GPUI reaproveita o estado da animação
+                                    // anterior e a segunda troca nasce no fim.
+                                    SharedString::from(format!("cruzamento-{}", self.cruzamento)),
+                                    gpui::Animation::new(CRUZAMENTO_DA_FOTO)
+                                        .with_easing(gpui::ease_out_quint()),
+                                    |foto, quanto| foto.opacity(quanto),
+                                )
+                                .into_any_element(),
+                        })
                         .children(self.overlay_de_corte(cx))
                         // O `canvas` mede o palco e é onde o arrasto se liga:
                         // registrar ouvinte de mouse exige estar na fase de
@@ -4120,6 +4253,199 @@ mod testes {
                     tela.miniaturas_faltando().is_empty(),
                     "a seta voltou a pedir o que já estava na tira: {:?}",
                     tela.miniaturas_faltando()
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// A régua do quadro da Revelação — **o quadro inteiro, com janela**.
+    ///
+    /// As outras medidas (`medir-revelacao`) contam pixels: quanto custa
+    /// decodificar, converter, medir o histograma. Elas não veem o que o GPUI
+    /// faz depois — montar a árvore de elementos, medir e pintar. E é aí que
+    /// mora a pergunta que sobrou: *"os controles de edição não estão fluidos"*,
+    /// com o caminho dos pixels já dentro do orçamento.
+    ///
+    /// Um arrasto de slider marca a tela suja a cada resultado da GPU, e o
+    /// quadro seguinte **remonta tudo**: 53 sliders, a coluna de predefinições,
+    /// o palco e uma célula de tira por foto do ensaio.
+    ///
+    /// ```bash
+    /// cargo test --release -p ui-gpui -- --ignored --nocapture medir_o_quadro
+    /// ```
+    #[gpui::test]
+    #[ignore = "régua, não asserção — roda à mão com --nocapture"]
+    fn medir_o_quadro_da_revelacao(cx: &mut TestAppContext) {
+        const QUADROS: usize = 40;
+
+        // Uma foto do tamanho que a Revelação abre de verdade.
+        let (previews, _dir) = previews_descartaveis();
+        let grande = image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+            2560,
+            1707,
+            image::Rgb([120, 90, 60]),
+        ));
+        for i in 0..125 {
+            previews
+                .save_thumbnail(&format!("id-f{i}.jpg"), &foto_cinza())
+                .expect("gravar miniatura");
+        }
+        previews
+            .save_preview("id-f0.jpg", &grande)
+            .expect("gravar preview");
+
+        for (rotulo, quantas) in [("tira de 125", 125usize), ("tira de 1", 1)] {
+            let janela = janela(cx, previews.clone());
+            janela
+                .update(cx, |tela, window, cx| {
+                    let acervo: Vec<PhotoViewModel> =
+                        (0..quantas).map(|i| foto(&format!("f{i}.jpg"))).collect();
+                    tela.abrir_no_acervo(acervo, 0, window, cx);
+                })
+                .expect("a janela deve estar aberta");
+
+            let mut visual = gpui::VisualTestContext::from_window(janela.into(), cx);
+            visual.draw(
+                gpui::Point::default(),
+                gpui::size(px(2000.), px(1300.)),
+                |_window, _cx| gpui::Empty,
+            );
+            visual.run_until_parked();
+
+            let inicio = std::time::Instant::now();
+            for _ in 0..QUADROS {
+                // O que um arrasto faz: marca sujo e o quadro remonta tudo.
+                janela
+                    .update(cx, |_tela, _window, cx| cx.notify())
+                    .expect("a janela deve estar aberta");
+                visual.draw(
+                    gpui::Point::default(),
+                    gpui::size(px(2000.), px(1300.)),
+                    |_window, _cx| gpui::Empty,
+                );
+            }
+            let por_quadro = inicio.elapsed().as_secs_f64() * 1000.0 / QUADROS as f64;
+
+            println!(
+                "{} {rotulo}: {por_quadro:.2} ms por quadro  (orçamento 60fps: 16,7 ms)",
+                if por_quadro > 16.7 { "🚨" } else { "✅" }
+            );
+        }
+    }
+
+    /// 🚨 **Troca seca de imagem lê-se como engasgo, não como resultado.**
+    ///
+    /// É UX antes de ser desempenho, e foi o que sobrou depois de o quadro estar
+    /// medido em 3,94 ms e o passo dos sliders consertado: aplicar uma
+    /// predefinição ou desfazer substitui a foto inteira de um quadro para o
+    /// outro, e o olho lê o salto como travada. O palco guarda a foto que sai
+    /// para desenhar as duas empilhadas enquanto a nova ganha opacidade.
+    #[gpui::test]
+    fn desfazer_cruza_a_foto_em_vez_de_trocar_seca(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_cinza())
+            .expect("gravar preview");
+        let janela = janela(cx, previews);
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("retrato.jpg"), window, cx);
+                assert!(
+                    tela.saindo.is_none(),
+                    "abrir não cruza: não há foto anterior na tela"
+                );
+
+                // Um gesto, e o desfazer dele.
+                tela.ajustes.exposure = 1.5;
+                tela.pedir_revelacao(cx);
+                tela.historico.registrar(tela.estado());
+                assert!(
+                    tela.saindo.is_none(),
+                    "o arrasto troca direto: cruzar deixaria fantasma"
+                );
+
+                tela.desfazer(window, cx);
+                assert!(
+                    tela.saindo.is_some(),
+                    "desfazer trocou a foto sem cruzamento"
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// ⚠️ **Cada cruzamento precisa de um id próprio.**
+    ///
+    /// O `ElementId` da animação é o que o GPUI usa para achar o estado dela.
+    /// Repetido, a segunda troca nasce no fim da animação — sem erro nenhum, e
+    /// com a impressão de que o efeito "às vezes não funciona".
+    #[gpui::test]
+    fn cada_cruzamento_tem_um_id_proprio(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_cinza())
+            .expect("gravar preview");
+        let janela = janela(cx, previews);
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("retrato.jpg"), window, cx);
+                tela.ajustes.exposure = 1.5;
+                tela.historico.registrar(tela.estado());
+
+                tela.desfazer(window, cx);
+                let primeiro = tela.cruzamento;
+                tela.refazer(window, cx);
+
+                assert_ne!(
+                    tela.cruzamento, primeiro,
+                    "dois cruzamentos com o mesmo id: o segundo nasce pronto"
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 **A tira mostrava a foto de antes enquanto o palco mostrava a de
+    /// depois.**
+    ///
+    /// O operador deixa a foto em preto e branco no palco e a célula da tira
+    /// continua colorida, lado a lado, na mesma tela — com a imagem que o
+    /// importador gravou. Numa sequência de vinte fotos a tira é o que diz onde
+    /// ele parou, e era a única coisa ali que não acompanhava o trabalho.
+    #[gpui::test]
+    fn a_tira_passa_a_mostrar_a_foto_revelada(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_cinza())
+            .expect("gravar preview");
+        // Sem miniatura no cache: a célula nasce vazia, e é o que separa
+        // "a tira leu do disco" de "a tira recebeu o revelado".
+        let janela = janela(cx, previews.clone());
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("retrato.jpg"), window, cx);
+                tela.miniaturas_da_tira.obter(&previews, "id-retrato.jpg");
+                assert!(
+                    matches!(
+                        tela.miniaturas_da_tira.espiar("id-retrato.jpg"),
+                        Some(Miniatura::Ausente)
+                    ),
+                    "o cache não tem miniatura desta foto"
+                );
+
+                // O que a GPU devolve ao fim de um gesto.
+                if let Some(aberta) = tela.aberta.as_mut() {
+                    aberta.revelada = Some(foto_cinza());
+                }
+                tela.atualizar_a_tira_com_o_revelado();
+
+                assert!(
+                    matches!(
+                        tela.miniaturas_da_tira.espiar("id-retrato.jpg"),
+                        Some(Miniatura::Pronta(_))
+                    ),
+                    "a célula da tira não recebeu a foto revelada"
                 );
             })
             .expect("a janela deve estar aberta");

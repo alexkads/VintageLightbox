@@ -202,6 +202,15 @@ pub struct Definicao {
     pub ler: fn(&Ajustes) -> f32,
 }
 
+/// Quantas posições distintas toda barra precisa oferecer.
+///
+/// 🔑 **É cerca de uma por pixel de barra.** O painel tem 320px e a barra ocupa
+/// pouco mais de 200 deles; abaixo disso o punho pula pixels visivelmente, e o
+/// que se sente não é "grosso", é **lento** — foi como o defeito chegou
+/// (*"os controles não estão fluidos"*), depois de o quadro já estar medido em
+/// 3,94 ms.
+const POSICOES_MINIMAS: f32 = 200.0;
+
 impl Definicao {
     /// Onde o slider nasce.
     ///
@@ -212,6 +221,38 @@ impl Definicao {
     /// no meio, parecendo certo.
     pub fn neutro(&self) -> f32 {
         (self.ler)(&Ajustes::default())
+    }
+
+    /// O menor movimento que este controle aceita.
+    ///
+    /// 🚨 **O padrão do `Slider` é 1,0, e ele arredonda o valor ao passo**
+    /// (`(valor / passo).round() * passo`, `gpui-component`). Com ele, a
+    /// exposição — que vai de −5 a +5 — tinha **onze posições na barra inteira**,
+    /// e o contraste, que vive entre 0 e 2 em torno de 1,0, tinha três. O painel
+    /// mostrava `+0.00` com duas casas e não havia gesto capaz de produzir
+    /// `+1.55`: arrastar dava saltos, e a sensação era de controle emperrado —
+    /// que foi como o dono descreveu (*"ele faz de 1 em 1 e não quebra 1.01"*).
+    ///
+    /// 🔑 **Sai de [`Self::casas`], e não de uma tabela nova.** O número de casas
+    /// já é a decisão de quanto este controle distingue: se a tela mostra duas,
+    /// o passo não pode ser mais grosso que 0,01. Uma segunda tabela seria um
+    /// segundo lugar dizendo a mesma coisa, com os dois divergindo no dia em que
+    /// alguém mexesse só num.
+    ///
+    /// 🚨 **Mas o rótulo é um piso, e não a resposta.** No Lightroom o arrasto é
+    /// contínuo e o número ao lado é a **leitura arredondada** dele — não o
+    /// contrário. Derivar o passo só das casas deixava o raio da nitidez com 25
+    /// posições em toda a barra (0,5 a 3,0 de 0,1 em 0,1): o punho anda aos
+    /// saltos, e saltar parece travar. Daí o segundo termo: nenhum controle tem
+    /// menos de [`POSICOES_MINIMAS`] posições, que é cerca de uma por pixel de
+    /// barra — o que faz o arrasto ser contínuo aos olhos.
+    ///
+    /// O resultado é o do Lightroom: exposição andando fino e escrita `+1,55`,
+    /// altas luzes andando de um em um e escritas `−41`.
+    pub fn passo(&self) -> f32 {
+        let pelo_rotulo = 10f32.powi(-(self.casas as i32));
+        let pela_barra = (self.maximo - self.minimo) / POSICOES_MINIMAS;
+        pelo_rotulo.min(pela_barra)
     }
 
     pub fn formatar(&self, valor: f32) -> String {
@@ -598,6 +639,73 @@ pub const CONTROLES: &[Definicao] = &[
         ler: |a| a.grain_size,
     },
 ];
+
+#[cfg(test)]
+mod passo_dos_controles {
+    use super::*;
+
+    /// 🚨 **O Lightroom chega a `+1,55` na exposição, e o app não chegava.**
+    ///
+    /// O `Slider` do `gpui-component` nasce com passo 1,0 e arredonda o valor a
+    /// ele. A exposição vai de −5 a +5: eram **onze posições na barra inteira**,
+    /// e o painel mostrando `+0.00` prometia duas casas que gesto nenhum
+    /// produzia. Foi o que o dono descreveu como controle não fluido — *"ele faz
+    /// de 1 em 1 e não quebra 1.01"*.
+    #[test]
+    fn a_exposicao_alcanca_um_virgula_cinco_cinco() {
+        let exposicao = CONTROLES
+            .iter()
+            .find(|d| d.rotulo == "Exposição")
+            .expect("a exposição está na tabela");
+
+        let passo = exposicao.passo();
+        let alcancado = (1.55 / passo).round() * passo;
+        assert!(
+            (alcancado - 1.55).abs() < 1e-4,
+            "com passo {passo} o mais perto de +1,55 é {alcancado}"
+        );
+    }
+
+    /// ⚠️ **O passo nunca pode ser mais grosso que a precisão que o rótulo
+    /// mostra.**
+    ///
+    /// Mostrar duas casas e andar de um em um é prometer uma precisão que o
+    /// gesto não entrega. O contrário — passo mais fino que o rótulo — é o
+    /// desenho do Lightroom, e é o que faz o arrasto ser contínuo com um número
+    /// legível ao lado.
+    #[test]
+    fn o_passo_nunca_e_mais_grosso_que_o_rotulo() {
+        for definicao in CONTROLES {
+            let do_rotulo = 10f32.powi(-(definicao.casas as i32));
+            assert!(
+                definicao.passo() <= do_rotulo + 1e-6,
+                "{}: passo {} para um rótulo de {} casas",
+                definicao.rotulo,
+                definicao.passo(),
+                definicao.casas
+            );
+        }
+    }
+
+    /// ⚠️ **Barra que pula pixel não parece grossa, parece lenta.**
+    ///
+    /// Três posições no contraste (0, 1, 2) era o caso extremo: o neutro é 1,0,
+    /// e o único movimento possível era dobrar ou zerar. Vinte e cinco no raio
+    /// da nitidez era o caso silencioso — andava, mas aos saltos.
+    #[test]
+    fn toda_barra_tem_uma_posicao_por_pixel() {
+        for definicao in CONTROLES {
+            let posicoes = (definicao.maximo - definicao.minimo) / definicao.passo();
+            assert!(
+                posicoes >= POSICOES_MINIMAS - 1.0,
+                "{}: {posicoes:.0} posições de {} a {}",
+                definicao.rotulo,
+                definicao.minimo,
+                definicao.maximo
+            );
+        }
+    }
+}
 
 #[cfg(test)]
 mod testes {

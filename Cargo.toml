@@ -31,7 +31,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.7"
+version = "0.1.8"
 edition = "2021"
 authors = ["VintageLightbox Team"]
 license = "MIT"
@@ -67,7 +67,17 @@ chrono = { version = "0.4", features = ["serde"] }
 
 [profile.dev]
 opt-level = 0
-debug = true
+# 🚨 **`debug = true` era o que enchia o disco.** Ele grava a tabela de símbolos
+# inteira de cada crate, e neste repositório isso se multiplica por oito árvores
+# (`debug/`, `release/`, as duas arquiteturas do Mac, a universal, o Linux, o
+# wasm e o empacotamento). Em 2026-09-08 o disco encheu **duas vezes no mesmo
+# dia**, a segunda a ponto de nenhum comando conseguir gravar a própria saída.
+#
+# 🔑 **`line-tables-only` mantém o que se usa de verdade**: arquivo e linha em
+# `panic!`, em backtrace e no `assert` de um teste que falhou. O que sai é o que
+# só um depurador de passo a passo lê — inspecionar variável, avaliar expressão —
+# e para isso basta voltar esta linha para `true` no dia em que for preciso.
+debug = "line-tables-only"
 
 # 🚨 **As dependências saem otimizadas mesmo em `dev`, e isto não é detalhe.**
 #
@@ -84,6 +94,9 @@ debug = true
 # `opt-level = 0`, com nome de função e linha no backtrace.
 [profile.dev.package."*"]
 opt-level = 3
+# E sem símbolo nenhum: ninguém depura passo a passo dentro do `image` ou do
+# `sqlx`, e são eles que respondem pela maior parte dos bytes.
+debug = false
 
 # 🚨 **E os laços de pixel deste repositório também.** `opt-level = 0` num laço
 # que percorre 4,4 milhões de pixels não é "sem otimização", é 30× mais lento:

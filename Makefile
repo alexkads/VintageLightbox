@@ -106,6 +106,7 @@ sistema: ## Diz que sistema o Makefile detectou (e o que ele gera aqui)
 # ─────────────────────────────── Desenvolver ─────────────────────────────────
 
 testar: ## Testes do workspace inteiro
+	@./scripts/faxina-se-preciso.sh
 	cargo test --workspace
 
 # `-D warnings` como no CI. Sem ele este alvo passa com avisos que quebram o
@@ -121,7 +122,8 @@ fmt: ## Formata tudo
 #    0,67 ms — 57x (medido em 6/set/2026). Um quadro de 60fps tem 16,7 ms: em
 #    debug uma miniatura sozinha estoura dois quadros, e ja foi confundido com
 #    "o framework e lento" duas vezes (docs/STATUS.md).
-rodar: ## Abre o app (sempre em release; debug e 57x mais lento por miniatura)
+rodar: ## Abre o app em release
+	@./scripts/faxina-se-preciso.sh
 	cargo run --release -p ui-gpui
 
 medir: ## As reguas de desempenho (miniaturas e abertura)
@@ -247,9 +249,7 @@ faxina:
 
 else
 
-faxina: ## Apaga o cache de debug do cargo (o que mais engorda o disco)
-	@echo "antes:  $$(du -sh target 2>/dev/null | cut -f1) em target/"
-	rm -rf target/debug/incremental target/debug/deps target/debug/build
-	@echo "depois: $$(du -sh target 2>/dev/null | cut -f1) em target/"
+faxina: ## Apaga os fragmentos incrementais de todas as arvores de target/
+	@./scripts/faxina-se-preciso.sh --agora
 
 endif
