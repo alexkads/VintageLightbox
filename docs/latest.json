@@ -1,16 +1,16 @@
 {
-  "version": "0.1.1",
-  "notes": "Primeira vers\u00e3o p\u00fablica. Editor de fotos em Rust, com motor de revela\u00e7\u00e3o na GPU.",
-  "pub_date": "2026-09-07T17:13:32+00:00",
+  "version": "0.1.2",
+  "notes": "Fechar a janela agora encerra o app \u2014 antes ele ficava na Dock sem janela e sem menu, e s\u00f3 sa\u00eda matando o processo. E a Revela\u00e7\u00e3o ganhou o \"Sincronizar\" do Lightroom: os ajustes da foto aberta v\u00e3o para as outras marcadas na tira, pelos mesmos grupos que os pain\u00e9is usam.",
+  "pub_date": "2026-09-08T00:39:22+00:00",
   "platforms": {
     "macos-aarch64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIGNhcmdvLXBhY2thZ2VyIHNlY3JldCBrZXkKUlVSSk9VNzBRQkxYTS9JOHB3cXNqVmhWNSsxdFd0ZnVtNnRCOGF2VEQ2VGhiWHhlVGdRamsxeHZKNUc1ZEx3MTMwcTZZMEpVYzl5Q2hYV0RPYXlXU2wrRE1pMExhcThDQmdrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4ODAwMjc0CWZpbGU6VmludGFnZUxpZ2h0Ym94LmFwcC50YXIuZ3oKZkdZOUl1UlZJMUVHZXZiVzRqeDB5a0lLNy9TU3RsQkk4bEI5MXF1dFN3bTNvSi9tanlsVXRLTXlPbU9VNHNQbU16NEJTSWZGS3lpV05jeXA4MXFtQkE9PQo=",
-      "url": "https://github.com/alexkads/VintageLightbox/releases/download/v0.1.1/VintageLightbox.app.tar.gz",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIGNhcmdvLXBhY2thZ2VyIHNlY3JldCBrZXkKUlVSSk9VNzBRQkxYTXhJNzA4K3FiU3N1UzRtMFpITllXVTB0UGFhbTVUY1hNM3dFeGtZVCtVeDNNUW5sZ2JrK3ZMU1RiU0gvMStvRlU1Ym9TK2k0R1ltODNrQk1lVXhKdXdJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4ODI3ODgyCWZpbGU6VmludGFnZUxpZ2h0Ym94LmFwcC50YXIuZ3oKbjRZbTBLS0hvMitJczBpSGtJZS8ydVRxazZkelNUYnRmVVkvZHo4dHYrYnJQb2s0YklqSldKc3NFT3hUcUxZak9WUnJrbDFuVVBQeUlYUGt3R2lPQ2c9PQo=",
+      "url": "https://github.com/alexkads/VintageLightbox/releases/download/v0.1.2/VintageLightbox.app.tar.gz",
       "format": "app"
     },
     "macos-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIGNhcmdvLXBhY2thZ2VyIHNlY3JldCBrZXkKUlVSSk9VNzBRQkxYTS9JOHB3cXNqVmhWNSsxdFd0ZnVtNnRCOGF2VEQ2VGhiWHhlVGdRamsxeHZKNUc1ZEx3MTMwcTZZMEpVYzl5Q2hYV0RPYXlXU2wrRE1pMExhcThDQmdrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4ODAwMjc0CWZpbGU6VmludGFnZUxpZ2h0Ym94LmFwcC50YXIuZ3oKZkdZOUl1UlZJMUVHZXZiVzRqeDB5a0lLNy9TU3RsQkk4bEI5MXF1dFN3bTNvSi9tanlsVXRLTXlPbU9VNHNQbU16NEJTSWZGS3lpV05jeXA4MXFtQkE9PQo=",
-      "url": "https://github.com/alexkads/VintageLightbox/releases/download/v0.1.1/VintageLightbox.app.tar.gz",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIGNhcmdvLXBhY2thZ2VyIHNlY3JldCBrZXkKUlVSSk9VNzBRQkxYTXhJNzA4K3FiU3N1UzRtMFpITllXVTB0UGFhbTVUY1hNM3dFeGtZVCtVeDNNUW5sZ2JrK3ZMU1RiU0gvMStvRlU1Ym9TK2k0R1ltODNrQk1lVXhKdXdJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4ODI3ODgyCWZpbGU6VmludGFnZUxpZ2h0Ym94LmFwcC50YXIuZ3oKbjRZbTBLS0hvMitJczBpSGtJZS8ydVRxazZkelNUYnRmVVkvZHo4dHYrYnJQb2s0YklqSldKc3NFT3hUcUxZak9WUnJrbDFuVVBQeUlYUGt3R2lPQ2c9PQo=",
+      "url": "https://github.com/alexkads/VintageLightbox/releases/download/v0.1.2/VintageLightbox.app.tar.gz",
       "format": "app"
     }
   }
