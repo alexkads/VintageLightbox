@@ -360,6 +360,20 @@ pub struct FotoParaEnviar {
     pub jpeg: Vec<u8>,
     pub estado: EstadoNoBalcao,
     pub ordem: u32,
+    /// A nota de 1 a 5. **O site recusa envio sem ela.**
+    ///
+    /// 🚨 *"a foto sobe classificada: informe a nota de 1 a 5"* — é a regra do
+    /// dono de 2026-09-05, e o backend a aplica na primeira linha do envio. Este
+    /// campo faltava, e com ele faltando **o passo 3 do desktop devolvia `400`
+    /// em toda foto**: classificar não subia nada, e o erro falava de uma nota
+    /// que o app tinha e não mandava.
+    pub nota: Option<u8>,
+    /// A chave de idempotência desta foto — o id dela no catálogo local.
+    ///
+    /// 🔑 **É o que faz reenviar ser seguro.** A mesma chave na mesma galeria
+    /// devolve a foto que já está lá, em vez de uma segunda cópia na galeria de
+    /// quem pagou. Ver `docs/11-OFFLINE-E-SINCRONIZACAO.md`.
+    pub chave_do_cliente: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

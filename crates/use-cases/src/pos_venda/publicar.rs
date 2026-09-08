@@ -87,6 +87,14 @@ impl PublicarNoPosVendaUseCase {
                     jpeg,
                     estado,
                     ordem,
+                    // ⚠️ **Sem nota e sem chave, e é o que este caminho é.** Ele
+                    // sobe um arquivo do disco que não passou pelo catálogo:
+                    // não há linha de onde tirar a classificação, nem id que
+                    // sobreviva a uma segunda tentativa. O site vai recusá-lo
+                    // enquanto exigir foto classificada — e isso é correto: o
+                    // que autoriza uma foto a subir é o passo 3.
+                    nota: None,
+                    chave_do_cliente: None,
                 },
             )
             .await
@@ -209,7 +217,12 @@ impl PublicarNoPosVendaUseCase {
             Err(e) => return Err((id.to_string(), e.to_string())),
         };
 
-        let nome = nome_para_o_site(&photo.file_path().to_string_lossy());
+        // 🚨 **`file_name()`, e não o caminho.** Desde a migration 022 o arquivo
+        // no disco se chama `<uuid>.jpg`: tirar o nome do caminho entregaria ao
+        // cliente uma galeria de UUIDs. `file_name()` devolve o nome de origem
+        // quando ele existe, e cai no caminho quando não — que é o que mantém
+        // de pé toda foto importada antes desta coluna.
+        let nome = nome_para_o_site(photo.file_name().unwrap_or_default());
         let estado = estado.unwrap_or_else(|| EstadoNoBalcao::da_foto(&photo));
 
         let jpeg = self
@@ -228,6 +241,17 @@ impl PublicarNoPosVendaUseCase {
                     jpeg,
                     estado,
                     ordem,
+                    // 🚨 **A nota vai junto do arquivo.** É ela que autoriza a
+                    // foto a subir (passo 3), e o site recusa o envio sem ela —
+                    // *"a foto sobe classificada: informe a nota de 1 a 5"*.
+                    // Ela faltava, e com ela faltando **toda** classificação
+                    // voltava `400`.
+                    nota: photo.rating().map(|r| r.value()),
+                    // 🔑 **A chave é o id da foto no catálogo local**, e não um
+                    // valor novo por tentativa: é isso que faz o reenvio ser
+                    // reconhecido em vez de virar uma segunda cópia na galeria
+                    // do cliente. Ver `docs/11-OFFLINE-E-SINCRONIZACAO.md`.
+                    chave_do_cliente: Some(id.to_string()),
                 },
             )
             .await
@@ -309,6 +333,11 @@ mod tests {
     #[derive(Default)]
     struct ApiDeMentira {
         enviadas: Mutex<Vec<(String, EstadoNoBalcao, u32)>>,
+        /// 🔑 **O envio inteiro**, para o teste poder cobrar o que a tupla acima
+        /// não carrega — a nota (sem ela o site devolve `400`) e a chave de
+        /// idempotência. A tupla continua porque outros testes afirmam ordem e
+        /// estado por ela, e trocá-la mudaria testes que não têm nada a ver.
+        recebidas: Mutex<Vec<FotoParaEnviar>>,
         galerias: Mutex<Vec<NovaGaleria>>,
         /// Nomes que devem falhar ao subir.
         falham: Vec<String>,
@@ -356,7 +385,8 @@ mod tests {
             self.enviadas
                 .lock()
                 .unwrap()
-                .push((foto.nome, foto.estado, foto.ordem));
+                .push((foto.nome.clone(), foto.estado, foto.ordem));
+            self.recebidas.lock().unwrap().push(foto);
             Ok(FotoEnviada { id: "f".into() })
         }
         async fn avisar_fotos_prontas(&self, _: &Sessao, galeria_id: &str) -> DomainResult<()> {
@@ -652,6 +682,139 @@ mod tests {
         assert!(
             api.reveladas.lock().unwrap().is_empty(),
             "restaurar não sobe JPEG nenhum"
+        );
+    }
+
+    /// 🚨 **O cliente não pode receber uma galeria de UUIDs.**
+    ///
+    /// Desde a migration 022 o arquivo no disco se chama `<uuid>.jpg`, e o nome
+    /// que a câmera deu mora em `photos.nome_original`. Este é o ponto em que a
+    /// diferença chega ao cliente: `subir` tirava o nome do **caminho**, e com o
+    /// arquivo renomeado isso entregaria `0f8c….jpg` na galeria dele — no lugar
+    /// de `DSC_2571.JPG`.
+    ///
+    /// ⚠️ **Não falha em lugar nenhum**: o envio dá certo, o id volta, a foto
+    /// aparece. Só o nome é outro — e quem descobre é o cliente, olhando a
+    /// galeria que ele pagou.
+    #[tokio::test]
+    async fn o_cliente_recebe_o_nome_da_camera_e_nao_o_uuid_do_disco() {
+        let mut photo = foto(
+            "/Ensaios/Teste - g1/0f8c1a2b-3c4d-5e6f-7a8b-9c0d1e2f3a4b.jpg",
+            false,
+        );
+        photo.definir_nome_original(Some("DSC_2571.JPG".into()));
+        let id = photo.id();
+
+        let mut repo = MockPhotoRepo::new();
+        repo.expect_find_by_id()
+            .returning(move |_| Ok(Some(photo.clone())));
+        repo.expect_update().returning(|_| Ok(()));
+
+        let mut exportador = MockExportador::new();
+        exportador
+            .expect_renderizar_jpeg()
+            .returning(|_, _| Ok(vec![1]));
+
+        let api = Arc::new(ApiDeMentira::default());
+        let caso = PublicarNoPosVendaUseCase::new(
+            Arc::new(repo),
+            Arc::new(exportador),
+            Arc::new(MockThumbnailGen::new()),
+            api.clone(),
+        );
+
+        let nome = caso
+            .enviar_uma(&sessao(), "g1", &id, 0, None)
+            .await
+            .expect("subiu");
+        assert_eq!(
+            nome, "DSC_2571.jpg",
+            "o cliente recebeu o nome do disco em vez do nome da câmera"
+        );
+    }
+
+    /// ⚠️ **A foto de antes da migration 022 sobe com o nome do caminho** — que
+    /// é o único que ela tem. É a mesma queda de `Photo::file_name()`, e sem ela
+    /// toda foto do catálogo antigo subiria sem nome nenhum.
+    #[tokio::test]
+    async fn a_foto_sem_nome_guardado_sobe_com_o_nome_do_caminho() {
+        let photo = foto("/Pictures/Catalog/2026/09/08/DSC_0001.NEF", false);
+        let id = photo.id();
+
+        let mut repo = MockPhotoRepo::new();
+        repo.expect_find_by_id()
+            .returning(move |_| Ok(Some(photo.clone())));
+        repo.expect_update().returning(|_| Ok(()));
+
+        let mut exportador = MockExportador::new();
+        exportador
+            .expect_renderizar_jpeg()
+            .returning(|_, _| Ok(vec![1]));
+
+        let caso = PublicarNoPosVendaUseCase::new(
+            Arc::new(repo),
+            Arc::new(exportador),
+            Arc::new(MockThumbnailGen::new()),
+            Arc::new(ApiDeMentira::default()),
+        );
+
+        let nome = caso
+            .enviar_uma(&sessao(), "g1", &id, 0, None)
+            .await
+            .expect("subiu");
+        assert_eq!(nome, "DSC_0001.jpg");
+    }
+
+    /// 🚨 **A nota e a chave sobem junto do arquivo — as duas faltavam.**
+    ///
+    /// A **nota** é o que autoriza a foto a subir (passo 3), e o site recusa o
+    /// envio sem ela: *"a foto sobe classificada: informe a nota de 1 a 5"*.
+    /// `FotoParaEnviar` não tinha o campo, então **toda** classificação feita no
+    /// app voltava `400` — e a mensagem falava de uma nota que o app tinha na
+    /// mão e não mandava.
+    ///
+    /// A **chave** é o id da foto no catálogo, e é o que faz reenviar ser
+    /// reconhecido em vez de virar uma segunda cópia na galeria de quem pagou.
+    /// Ela precisa ser a mesma em toda tentativa — um valor novo por envio
+    /// seria idempotência nenhuma.
+    #[tokio::test]
+    async fn a_nota_e_a_chave_sobem_junto_do_arquivo() {
+        let mut photo = foto("/Ensaios/Teste - g1/uuid.jpg", false);
+        photo.definir_nome_original(Some("DSC_2571.JPG".into()));
+        photo
+            .rate(domain::value_objects::Rating::new(4).unwrap())
+            .unwrap();
+        let id = photo.id();
+
+        let mut repo = MockPhotoRepo::new();
+        repo.expect_find_by_id()
+            .returning(move |_| Ok(Some(photo.clone())));
+        repo.expect_update().returning(|_| Ok(()));
+
+        let mut exportador = MockExportador::new();
+        exportador
+            .expect_renderizar_jpeg()
+            .returning(|_, _| Ok(vec![1]));
+
+        let api = Arc::new(ApiDeMentira::default());
+        let caso = PublicarNoPosVendaUseCase::new(
+            Arc::new(repo),
+            Arc::new(exportador),
+            Arc::new(MockThumbnailGen::new()),
+            api.clone(),
+        );
+
+        caso.enviar_uma(&sessao(), "g1", &id, 0, None)
+            .await
+            .expect("subiu");
+
+        let recebidas = api.recebidas.lock().unwrap();
+        let foto = recebidas.first().expect("uma foto subiu");
+        assert_eq!(foto.nota, Some(4), "sem a nota o site devolve 400");
+        assert_eq!(
+            foto.chave_do_cliente.as_deref(),
+            Some(id.to_string().as_str()),
+            "a chave tem de ser o id do catálogo, estável entre tentativas"
         );
     }
 

@@ -405,6 +405,10 @@ impl Aplicativo {
         let previews_para_imprimir = previews.clone();
         let previews_do_cliente = previews.clone();
         let previews_do_detalhe = previews.clone();
+        // 🔑 **O mesmo importador do modal.** A tela da sessão grava no mesmo
+        // catálogo, com o mesmo caminho: o que muda é a porta de entrada, e não
+        // o destino.
+        let importador_do_detalhe = portas.importador.clone();
         let previews_das_configuracoes = previews.clone();
         // O mesmo seletor nativo da importação: escolher pasta é interação com
         // o sistema, e dois seletores seriam duas janelas do SO para a mesma
@@ -516,6 +520,7 @@ impl Aplicativo {
             Detalhe::nova(
                 publicador_do_detalhe,
                 portas.seletor_de_fotos,
+                importador_do_detalhe,
                 previews_do_detalhe,
                 cx,
             )
@@ -696,6 +701,12 @@ impl Aplicativo {
                     let Ok(fotos) = raiz.releituras.1.try_recv() else {
                         return false;
                     };
+                    // 🔑 **A tela da sessão recebe as locais deste ensaio.**
+                    // Sem isto a foto importada ficaria gravada e invisível —
+                    // o mesmo desfecho de não ter importado. Antes das do
+                    // site entrarem na lista: a partir daí não dá mais para
+                    // separar quem é quem.
+                    raiz.mostrar_as_locais_na_sessao(&fotos, cx);
                     // 🔑 As do site entram na mesma lista — a grade é uma só.
                     let mut todas = fotos;
                     todas.extend(raiz.fotos_do_site.iter().cloned());
@@ -711,6 +722,31 @@ impl Aplicativo {
                 }
             }
         }));
+    }
+
+    /// Entrega à tela da sessão as fotos **deste ensaio que só existem aqui**.
+    ///
+    /// 🚨 **A que já subiu fica de fora.** Ela existe dos dois lados — linha no
+    /// SQLite e linha no site —, e mandar as duas mostraria a mesma foto duas
+    /// vezes na grade, com estados diferentes. Vale a do site: é a que tem nota,
+    /// preço e negociação.
+    ///
+    /// 🔑 **A nota não atravessa.** Uma foto local com nota é uma que ainda não
+    /// terminou de subir; na grade da sessão ela entra como não classificada,
+    /// que é o que o recorte "Sem nota" existe para encontrar.
+    fn mostrar_as_locais_na_sessao(&mut self, fotos: &[PhotoViewModel], cx: &mut Context<Self>) {
+        let Some(galeria) = self.sessao_aberta.clone() else {
+            return;
+        };
+        let locais: Vec<biblioteca_core::acervo::Foto> = fotos
+            .iter()
+            .filter(|f| f.sessao_id.as_deref() == Some(galeria.as_str()))
+            .filter(|f| f.pos_venda_foto_id.is_none())
+            .enumerate()
+            .map(|(i, f)| local_para_a_grade(f, i as i64))
+            .collect();
+        self.detalhe
+            .update(cx, |tela, cx| tela.definir_locais(locais, cx));
     }
 
     /// Entra numa sessão — o mesmo gesto que abre a rota `[id]` na web.
@@ -823,6 +859,17 @@ impl Aplicativo {
             }
             DetalhePedido::TelaDoCliente => self.alternar_cliente(cx),
             DetalhePedido::Exportar => self.exportar(cx),
+            // 🔑 **A importação da sessão grava no catálogo local**, e as fotos
+            // só aparecem depois desta releitura — a porta do acervo é daqui.
+            DetalhePedido::CatalogoMudou => self.reler_o_acervo(cx),
+            // 🔑 **A Biblioteca é quem classifica**, mesmo quando o gesto veio
+            // da grade da sessão: é ela que grava a nota, lê a travessia do zero
+            // e emite `Classificou` — que é o que faz a foto subir (passo 3).
+            DetalhePedido::Classificar { ids, nota } => {
+                let (ids, nota) = (ids.clone(), *nota);
+                self.biblioteca
+                    .update(cx, |tela, cx| tela.classificar_ids(&ids, nota, cx));
+            }
             DetalhePedido::MiniaturaPronta(chave) => {
                 let chave = chave.clone();
                 self.biblioteca
@@ -2650,6 +2697,31 @@ impl Render for Aplicativo {
 /// ⚠️ **O id leva o prefixo `site:`** e não colide com o do catálogo: são
 /// espaços de nome diferentes, e misturá-los faria a Revelação gravar ajustes
 /// numa foto local que ninguém abriu.
+/// Uma foto **do disco** na linguagem da grade da sessão.
+///
+/// 🔑 **Ela nasce "à venda" e sem nota**, e os dois são deliberados: `Estado` só
+/// sabe falar do que existe no site (levada · à venda · comprada), e destes o
+/// único honesto para quem ainda não subiu é o neutro. A nota vazia é o que a
+/// põe no recorte "Sem nota" — o lugar de onde o operador a classifica, que é o
+/// gesto que a faz subir.
+fn local_para_a_grade(foto: &PhotoViewModel, ordem: i64) -> biblioteca_core::acervo::Foto {
+    biblioteca_core::acervo::Foto {
+        id: foto.id.clone(),
+        arquivo: foto.name.clone(),
+        estado: biblioteca_core::acervo::Estado::Disponivel,
+        apagada: false,
+        produto_efetivo: String::new(),
+        preco_negociado: None,
+        tem_observacao: false,
+        preco_de_venda: None,
+        pedido_id: None,
+        downloads: 0,
+        revelada: persistencia::ja_revelada(foto),
+        nota: None,
+        ordem,
+    }
+}
+
 fn do_site_para_a_grade(
     foto: &domain::services::pos_venda::FotoDaGaleria,
     sessao_id: Option<String>,

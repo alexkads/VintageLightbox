@@ -31,9 +31,15 @@ com o código quebrado:
 | `o_layout_tem_46_campos_de_quatro_bytes`, ao lado de um comentário dizendo "os 46 campos que o WGSL declara" | ele mede `size_of` — **não sabe que existe shader**. O WGSL declarava 28 |
 | O teste de restaurar o arranjo do dock | passava com `register_panel` removido: `InvalidPanel::dump` devolve o estado antigo, com o nome certo dentro |
 | 15 testes da Biblioteca | montavam a tela **sem dock** — uma tela que o app nunca tem |
+| **Todos** os testes do "Escolher fotos…"/"Importar" | o seletor de mentira respondia **na mesma linha** em que era chamado. A janela do sistema fica aberta *segundos*, e nesse tempo a colheita da tela desistia: no app, o clique não fazia nada (8/set/2026, achado pelo dono) |
 
 🔑 **A forma é sempre a mesma**: o teste mede algo próximo do que interessa, mas não o caminho de
 verdade. Quebrar de propósito é a única pergunta que separa "protege" de "parece proteger".
+
+⚠️ **E a última linha tem uma forma própria, que vale conhecer**: a mentira respondia rápido demais.
+Um defeito que só existe **no tempo** — um laço que desiste, uma resposta que chega tarde — é
+invisível para um teste em que nada demora. É por isso que `PublicadorDeMentira` tem `demorada` e
+`SeletorDeMentira` tem `demorado`: eles existem para deixar o tempo passar dentro do teste.
 
 ---
 

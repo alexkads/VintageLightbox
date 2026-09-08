@@ -566,11 +566,55 @@ pub mod mentira {
         /// Os freios do último lote — é por aqui que o teste confere que o
         /// clique chegou até quem obedece.
         pub freios: Mutex<Option<Freios>>,
+        /// Segura o andamento em vez de contá-lo na hora — o disco trabalhando.
+        ///
+        /// 🚨 **O `Default` responde no mesmo instante, e isso apaga o meio do
+        /// lote.** Importar 500 fotos leva minutos, e é *durante* eles que o
+        /// operador classifica e negocia. Sem isto, o lote nasce e morre dentro
+        /// da mesma linha do teste, e esse estado não existe para ninguém.
+        pub demorado: bool,
+        pub guardados: Mutex<Vec<(Sender<Andamento>, Andamento)>>,
     }
 
     impl ImportadorDeMentira {
+        /// O mesmo, mas contando o lote só quando o teste mandar.
+        pub fn demorado() -> Self {
+            Self {
+                demorado: true,
+                ..Default::default()
+            }
+        }
+
         pub fn importados(&self) -> Vec<(Vec<String>, ImportOptions)> {
             self.importados.lock().expect("os importados").clone()
+        }
+
+        /// Solta **um** passo do lote — o arquivo seguinte terminou.
+        pub fn responder_uma(&self) {
+            let mut guardados = self.guardados.lock().expect("os guardados");
+            if guardados.is_empty() {
+                return;
+            }
+            let (canal, andamento) = guardados.remove(0);
+            let _ = canal.send(andamento);
+        }
+
+        /// Solta o lote inteiro.
+        pub fn responder(&self) {
+            for (canal, andamento) in self.guardados.lock().expect("os guardados").drain(..) {
+                let _ = canal.send(andamento);
+            }
+        }
+
+        fn contar(&self, canal: &Sender<Andamento>, andamento: Andamento) {
+            if self.demorado {
+                self.guardados
+                    .lock()
+                    .expect("os guardados")
+                    .push((canal.clone(), andamento));
+            } else {
+                let _ = canal.send(andamento);
+            }
         }
 
         pub fn freios(&self) -> Freios {
@@ -597,15 +641,18 @@ pub mod mentira {
                 .expect("os importados")
                 .push((arquivos.clone(), opcoes));
 
-            let _ = canal.send(Andamento::Comecou { total });
+            self.contar(&canal, Andamento::Comecou { total });
             for (indice, caminho) in arquivos.into_iter().enumerate() {
-                let _ = canal.send(Andamento::Feito { indice, caminho });
+                self.contar(&canal, Andamento::Feito { indice, caminho });
             }
-            let _ = canal.send(Andamento::Terminou {
-                sucesso: total,
-                falhas: 0,
-                pulados: 0,
-            });
+            self.contar(
+                &canal,
+                Andamento::Terminou {
+                    sucesso: total,
+                    falhas: 0,
+                    pulados: 0,
+                },
+            );
         }
     }
 }

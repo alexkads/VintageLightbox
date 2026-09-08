@@ -43,7 +43,7 @@ A lista é do dono, e é o critério de pronto. Os passos 8 e 9 são do site.
 
 | # | Passo | Onde, no desktop |
 |--:|---|---|
-| 1 | Importo as fotos | **"Importar"** — a janela do sistema — ou o arrastar da sessão |
+| 1 | Importo as fotos | **"Importar"** — janela do sistema → cópia em `Ensaios/<ensaio>` + SQLite; nada sobe |
 | 2 | Revelo e edito | `Tela::Revelacao` — **antes de classificar** |
 | 3 | Classifico | a nota **sobe a foto** para a sessão aberta |
 | 4 | Filtro as classificadas | fichas de recorte da barra |
@@ -232,6 +232,121 @@ Não é contradição: são perguntas diferentes, e foi assim que a tela do site
 apareceu na imagem que o dono mandou. Quem calcula os recortes é
 `biblioteca_core::acervo`, o mesmo do site.
 
+### A importação vai para o **SQLite**, e não para o storage
+
+🚨 **Nada sobe no passo 1** — regra do dono, 8/set/2026: *"a importação não vai
+imediatamente para o storage cloud, pois o cliente precisa classificar a foto;
+ela fica local usando sqlite"*.
+
+Até esse dia o botão chamava `Publicador::enviar_arquivo`, e o site respondia com
+todas as letras:
+
+```
+400 Bad Request: a foto sobe classificada: informe a nota de 1 a 5
+```
+
+**21 de 21 arquivos**, e a sessão vazia na tela. O site estava certo: quem
+autoriza a foto a ir para o storage é o **passo 3** — a classificação —, e não o
+passo 1. O passo 1 grava no catálogo desta máquina, carimbado com `sessao_id`.
+
+| O que muda | Onde |
+|---|---|
+| O clique chama `Importador::importar`, com `ImportOptions { sessao_id }` | `Detalhe::enviar_arquivos` |
+| O arquivo é **copiado** para `<catálogo>/Ensaios/<título> - <id>` | `pasta_do_ensaio` |
+| A barra lê `Andamento`, do lote local | `Detalhe::colher` |
+| No fim do lote a tela pede `Pedido::CatalogoMudou`, e a **raiz** relê o acervo | `Aplicativo::atender_a_sessao` |
+| As locais deste ensaio descem para a grade da sessão | `Aplicativo::mostrar_as_locais_na_sessao` → `Detalhe::definir_locais` |
+
+#### O arquivo é copiado, e vai para uma pasta previsível
+
+🚨 **Nunca `ImportMode::Add`** — regra do dono, 8/set/2026: *"precisa ser para
+pasta padrão, pois o usuário pode usar um cartão de memória e seria perigoso para
+a operação de carga e descarga de fotos, e precisa estar numa pasta de forma
+previsível"*.
+
+O perigo é concreto e não avisa: catalogando onde está, o banco guardaria
+`/Volumes/NIKON D750/DCIM/DSC_2571.jpg` — e a foto **sumiria do app no instante
+em que o cartão saísse**, no meio da sessão, com o cliente na frente. Formatar o
+cartão para o próximo ensaio apagaria o anterior, sem volta.
+
+O destino é `<catálogo>/Ensaios/<título saneado> - <id da galeria>`, **numa pasta
+só**, com os nomes que saíram da câmera. Os três padrões do `ImportOptions`
+diriam outra coisa, e por isso os três são escritos à mão:
+
+| Padrão | O que faria | Por que não serve |
+|---|---|---|
+| `ImportMode::Copy` ✅ | (já é o padrão) | escrito mesmo assim: se o padrão mudar um dia, o silêncio catalogaria o cartão |
+| `OrganizationStrategy::ByDate` | `YYYY/MM/DD` da EXIF | um ensaio de dois dias vira duas pastas; um cartão com fotos antigas se espalha por meses |
+| `RenamePattern::Standard` | `photo-2026-09-08-001.jpg` | o operador procura por `DSC_2571.jpg` — o nome que a câmera deu e que ele vê no Lightroom |
+
+#### O arquivo se chama UUID; o nome da câmera mora no banco
+
+🚨 **Proposta do dono, 2026-09-08**: *"no storage local e cloud a foto poderia
+ficar com UUID no nome do arquivo e o banco de dados ficaria mais robusto"*. A
+**nuvem já fazia assim** — `pos-venda/<uuid-galeria>/originais/<uuid>.jpg`
+(`painel.rs`), com o nome do cliente numa coluna à parte. Quem estava fora do
+padrão era o desktop.
+
+O que o UUID compra é **o caminho parar de carregar significado**. Com
+`KeepOriginal`, duas `DSC_2571.jpg` de dois cartões no mesmo ensaio faziam a
+segunda virar `DSC_2571_1.jpg` (`generate_unique_name`) — e o app passava a
+chamá-la por um nome que não existe em lugar nenhum além do nosso disco.
+
+⚠️ **E ele só é possível porque o nome de origem passou a ter onde morar.**
+`Photo::file_name()` era **derivado do caminho**: a grade, a tira, o painel, o
+título da Revelação, a tela do cliente, o nome exportado e **o nome com que a
+foto sobe para a galeria do cliente** (`publicar::subir`) saíam todos dali.
+Renomear o arquivo sem a coluna teria trocado `DSC_2571.JPG` por um UUID em
+todos eles — inclusive na galeria que o cliente pagou.
+
+| Peça | Onde |
+|---|---|
+| `photos.nome_original` + backfill do caminho | `022_nome_original_das_fotos.sql` |
+| `file_name()` prefere o guardado e **cai no caminho** quando não há | `Photo::file_name` |
+| `<uuid>.<ext>` no disco, extensão preservada | `RenamePattern::Uuid` |
+| O nome é gravado na importação — a última hora em que ele existe | `import_with_options.rs` |
+| O cliente recebe o nome da câmera, não o do disco | `publicar::subir` |
+
+🔑 **A queda para o caminho não é zelo: é o que mantém de pé o catálogo antigo.**
+O backfill lê o basename em SQL puro e erra em caminho do Windows; nenhuma foto
+depende dele para ter nome.
+
+🔑 **O id é o que torna a pasta previsível; o título é o que a torna achável.** Só
+o id daria um nome de UUID que ninguém reconhece no Finder; só o título daria
+colisão entre dois "Ensaio da Ana". Renomear o ensaio no site manda o **próximo**
+lote para uma pasta nova — o que já entrou fica onde está e continua catalogado,
+porque o caminho de cada foto está no banco, e não no nome da pasta.
+
+⚠️ **A miniatura da importada tem outra chave, e isso já custou a tela toda
+preta.** A do site é baixada da API e gravada sob `site:<id>`; a local é gravada
+pelo importador sob o id do catálogo, **cru**
+(`preview_storage.save(&photo.id(), …)`). No dia em que a importação passou a
+entrar na grade, ela procurava tudo sob `site:` — e o resultado foram 21 células
+com nome, estado, faixa e contagem de downloads, e **nenhuma imagem**. Não falha:
+`espiar` devolve `None` e a célula desenha o retângulo vazio. Quem escolhe a
+chave é `Detalhe::chave_da_foto`, pelo conjunto `ids_locais`.
+
+⚠️ **E ela não é "à venda".** O `acervo::Estado` só sabe falar do que existe no
+site (levada · à venda · comprada), e a importada entra no menos errado dos três
+— mas o cliente não a vê, não pode comprá-la, e ela nem chegou ao storage. Na
+célula ela leva o selo **"No disco"** (`selos::selo_de_so_no_disco`), e o painel
+de envio conta *"21 importadas"*, nunca *"21 subiram"*.
+
+🚨 **A importada aparece na grade, no recorte "Sem nota".** Gravada e invisível é
+o mesmo desfecho de não ter importado — e foi o que a tela mostrou no dia do
+defeito: *"Nenhuma foto nesta sessão ainda"*, com 21 arquivos já no disco. Entre
+o passo 1 e o passo 3, a grade da sessão é o **único** lugar em que a foto existe
+para o operador, e é dali que ele a classifica.
+
+⚠️ **A que já subiu não entra duas vezes.** Uma foto classificada existe dos dois
+lados — linha no SQLite *e* linha no site —; vale a do site, que é a que tem
+nota, preço e negociação.
+
+⚠️ **Sinalizar "levada" numa foto que ainda não subiu é recusado, com frase.** A
+negociação do balcão se grava na foto do site, e uma que nunca subiu não tem em
+qual linha ser gravada. A tela diz *"estas fotos ainda não subiram — classifique-as
+(1 a 5) antes de marcar no balcão"*, em vez de não fazer nada.
+
 ### O envio usa o seletor **do sistema**
 
 O app tem um explorador de arquivos próprio, no modal de importação — origens,
@@ -241,7 +356,9 @@ RAW, onde se escolhe entre duzentas do cartão.
 **Para mandar fotos ao cliente ele é atrito**: quem exportou do Lightroom já está
 com a pasta aberta ao lado. Pedido do dono: *"tem que usar o mesmo explorador de
 arquivos do sistema operacional"*. Então a sessão recebe **arquivos do disco**,
-como na web — arrastando a pasta, ou pela janela do `rfd`.
+como na web — arrastando a pasta, ou pela janela do `rfd`. O que muda em relação
+ao modal é **a janela**, e não o destino: os dois gravam no mesmo catálogo, pelo
+mesmo `Importador`.
 
 🚨 **Quem faz a importação é o botão "Importar"** — decisão do dono,
 8/set/2026, nestas palavras. Não é um caminho paralelo à importação: **é** a
@@ -279,24 +396,32 @@ O conserto são duas separações:
 | O quê | Por quê |
 |---|---|
 | `Importacao { total, feitas, falhas }`, separado de `mudando` | são trabalhos que acontecem ao mesmo tempo; um contador só faz um mentir sobre o outro |
-| Um canal de `Recado` **só da importação** (`envios`) | `Recado::Sincronizou` não diz quem terminou — é o mesmo "pronto" de subir, negociar, classificar e tirar do site |
+| Um canal **só do lote** (`andamentos`) | o `Recado` do site não diz quem terminou — é o mesmo "pronto" de negociar, classificar e tirar do site |
 
 🔑 **A barra de progresso lê `Importacao`**, e some quando o lote acaba: uma
 barra parada em 100% é ruído que o operador aprende a ignorar. A **falha conta
-como pronta** — o que ela mede é o que falta *esperar*, e uma foto recusada não
-vai responder de novo; fora da conta, a barra prenderia em 499 de 500 para
-sempre.
+como pronta**, e a **pulada** (a duplicata que o importador descarta) também — o
+que ela mede é o que falta *esperar*, e nenhuma das duas vai responder de novo;
+fora da conta, a barra prenderia em 499 de 500 para sempre.
 
 ⚠️ **Só o próprio "Importar" fica desligado durante o lote**, porque o lote é um
 só: um segundo por cima faria a barra recomeçar do zero no meio do primeiro.
 
 ⚠️ **O que ainda não acontece**: as fotos novas só aparecem na grade **quando o
-lote acaba**, porque é aí que a galeria é relida. Durante a importação o operador
-trabalha com o que já estava na sessão — reler a cada foto seria um pedido ao
-site por foto. Se aparecer a necessidade de vê-las chegando, o lugar é uma
-releitura a cada N respostas, e não a cada uma.
+lote acaba**, porque é aí que o catálogo é relido. Durante a importação o operador
+trabalha com o que já estava na sessão. Se aparecer a necessidade de vê-las
+chegando, o lugar é uma releitura a cada N arquivos, e não a cada um.
 
-**Onde isso é conferido**: quatro testes e2e em `sessoes::detalhe::testes`, que
+🚨 **A colheita precisa continuar acordada enquanto a janela do sistema está aberta.** Foi
+o defeito que o dono encontrou rodando o app em 8/set/2026 — *"cliquei em importar,
+selecionei as fotos e não aconteceu nada"*. O laço da tela acorda a cada 100 ms e
+desiste quando não há mais nada a esperar; "esperar o operador escolher" não estava
+na conta, então ele morria com a janela ainda aberta e os caminhos chegavam a um
+canal que ninguém mais drenava. Hoje quem o segura é o campo `escolhendo`, e ele
+desliga **também na desistência** — senão o `Cancelar` deixaria o laço acordando
+para sempre.
+
+**Onde isso é conferido**: dez testes em `sessoes::detalhe::testes`, que
 clicam nos botões pelas coordenadas do quadro desenhado (`debug_selector` +
 `simulate_click`) em vez de chamar o método por baixo — inclusive o teto de **um
 quadro (16 ms)** por clique, medido em ~2 ms no `debug`.

@@ -18,6 +18,18 @@ pub struct Photo {
     id: PhotoId,
     /// Caminho do arquivo
     file_path: FilePath,
+    /// O nome que o arquivo tinha quando entrou — o que a câmera deu.
+    ///
+    /// 🚨 **O disco guarda UUID; o nome do operador mora aqui.** Sem isto,
+    /// renomear o arquivo apagaria `DSC_2571.JPG` de dentro do app também: a
+    /// grade, a tira, o painel, o título da Revelação, o nome exportado e o
+    /// nome com que a foto sobe para a galeria do cliente saíam **todos** do
+    /// caminho (migration 022).
+    ///
+    /// `None` é foto de antes desta coluna, ou de um caminho que o backfill não
+    /// soube ler — e aí [`Self::file_name`] volta a olhar o caminho, que é
+    /// exatamente o que ela fazia antes.
+    nome_original: Option<String>,
     /// Classificação por estrelas (0-5)
     rating: Option<Rating>,
     /// Etiqueta de cor
@@ -283,6 +295,7 @@ impl Photo {
         Self {
             id,
             file_path,
+            nome_original: None,
             imported_at,
             modified_at,
             metadata,
@@ -554,8 +567,33 @@ impl Photo {
     }
 
     /// Retorna o nome do arquivo
+    /// O nome da foto **para as pessoas** — o que a câmera deu, não o do disco.
+    ///
+    /// 🚨 **Cai no caminho quando a coluna está vazia**, e não é detalhe: é o que
+    /// mantém de pé toda foto importada antes da migration 022, e toda linha que
+    /// o backfill não soube ler (caminho do Windows, prefixo repetido). Uma
+    /// grade de nomes vazios seria pior do que uma de nomes derivados.
     pub fn file_name(&self) -> Option<&str> {
-        self.file_path.file_name()
+        self.nome_original
+            .as_deref()
+            .filter(|n| !n.trim().is_empty())
+            .or_else(|| self.file_path.file_name())
+    }
+
+    /// O nome guardado, sem a queda para o caminho — o que vai para o banco.
+    pub fn nome_original(&self) -> Option<&str> {
+        self.nome_original.as_deref()
+    }
+
+    /// Grava o nome de origem. **Chamado uma vez, na importação.**
+    ///
+    /// ⚠️ **Não mexe em `modified_at`**, ao contrário de `definir_sessao` e
+    /// `definir_id_no_site`: isto não é uma decisão do operador sobre a foto, é
+    /// o registro de um fato que já era verdade quando ela entrou. O repositório
+    /// também o chama ao reconstruir do banco, e ali marcar modificação seria
+    /// mentira pura.
+    pub fn definir_nome_original(&mut self, nome: Option<String>) {
+        self.nome_original = nome.filter(|n| !n.trim().is_empty());
     }
 
     /// Retorna a extensão do arquivo
@@ -1384,5 +1422,57 @@ mod business_logic_tests {
         foto.desmarcar_comprada();
         assert!(!foto.comprada());
         assert_eq!(foto.comprada_em(), None);
+    }
+}
+
+#[cfg(test)]
+mod nome_original_testes {
+    use super::*;
+
+    fn foto(caminho: &str) -> Photo {
+        Photo::new(FilePath::new(caminho).expect("caminho"))
+    }
+
+    /// 🚨 **O nome que as pessoas veem sai do catálogo, não do disco.**
+    ///
+    /// Desde a migration 022 o arquivo se chama `<uuid>.jpg`. Se `file_name()`
+    /// continuasse lendo o caminho, o operador perderia `DSC_2571.JPG` na grade,
+    /// na tira, no painel, na Revelação e na exportação — e o cliente veria um
+    /// UUID na galeria dele (`publicar::subir`).
+    #[test]
+    fn o_nome_guardado_vence_o_do_disco() {
+        let mut photo = foto("/Ensaios/Teste - g1/0f8c…-uuid.jpg");
+        photo.definir_nome_original(Some("DSC_2571.JPG".into()));
+
+        assert_eq!(photo.file_name(), Some("DSC_2571.JPG"));
+        assert_eq!(photo.nome_original(), Some("DSC_2571.JPG"));
+    }
+
+    /// ⚠️ **Sem nome guardado, o caminho volta a valer** — e é o que mantém de
+    /// pé toda foto importada antes da migration 022, e toda linha que o
+    /// backfill não soube ler (caminho do Windows, prefixo repetido). Uma grade
+    /// de nomes vazios seria pior do que uma de nomes derivados.
+    #[test]
+    fn sem_nome_guardado_o_caminho_ainda_responde() {
+        let antiga = foto("/Pictures/Catalog/2026/09/08/DSC_0001.NEF");
+        assert_eq!(antiga.nome_original(), None);
+        assert_eq!(antiga.file_name(), Some("DSC_0001.NEF"));
+
+        // Vazio conta como ausente: uma coluna preenchida com "" pelo backfill
+        // não pode deixar a foto sem nome nenhum.
+        let mut vazia = foto("/Pictures/Catalog/DSC_0002.NEF");
+        vazia.definir_nome_original(Some("   ".into()));
+        assert_eq!(vazia.file_name(), Some("DSC_0002.NEF"));
+    }
+
+    /// ⚠️ **Gravar o nome de origem não é modificar a foto.** É o registro de um
+    /// fato que já era verdade quando ela entrou — e o repositório chama isto ao
+    /// **reconstruir do banco**, onde marcar modificação seria mentira pura.
+    #[test]
+    fn guardar_o_nome_nao_marca_a_foto_como_modificada() {
+        let mut photo = foto("/Ensaios/uuid.jpg");
+        let antes = photo.modified_at();
+        photo.definir_nome_original(Some("DSC_2571.JPG".into()));
+        assert_eq!(photo.modified_at(), antes);
     }
 }

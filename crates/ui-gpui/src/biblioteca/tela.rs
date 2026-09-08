@@ -1203,7 +1203,26 @@ impl Biblioteca {
     /// comportamento que se quer — a grade mostra o que passa no filtro, e a
     /// foto acabou de deixar de passar.
     fn aplicar(&mut self, marca: Marca, cx: &mut Context<Self>) {
-        let alvos = self.marcadas_no_acervo();
+        self.aplicar_em(self.marcadas_no_acervo(), marca, cx);
+    }
+
+    /// Classifica **estas** fotos, por id — o pedido que vem da tela da sessão.
+    ///
+    /// 🚨 **A grade da sessão é outra, mas o catálogo é o mesmo.** Quem grava a
+    /// nota e decide quem sobe é esta tela (`travessia_do_zero` → `Classificou`
+    /// → `subir_classificada` na raiz), e reescrever isso do outro lado faria
+    /// duas verdades sobre a mesma coluna. Daqui a foto importada faz o passo 3
+    /// sem passar pela seleção desta grade — que é de quem está olhando **esta**
+    /// tela, e não pode mudar sozinha.
+    pub fn classificar_ids(&mut self, ids: &[String], nota: i32, cx: &mut Context<Self>) {
+        let alvos: Vec<usize> = ids
+            .iter()
+            .filter_map(|id| self.fotos.iter().position(|f| &f.id == id))
+            .collect();
+        self.aplicar_em(alvos, Marca::Nota(nota), cx);
+    }
+
+    fn aplicar_em(&mut self, alvos: Vec<usize>, marca: Marca, cx: &mut Context<Self>) {
         if alvos.is_empty() {
             return;
         }

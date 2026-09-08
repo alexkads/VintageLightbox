@@ -279,6 +279,17 @@ pub fn selo_do_estado(estado: Estado, apagada: bool, cx: &App) -> impl IntoEleme
     selo(tom_do_estado(estado, apagada), texto, cx)
 }
 
+/// O selo da foto **que só existe no disco** — a importada, antes do passo 3.
+///
+/// 🚨 **Ela não é "à venda", e dizer que é seria mentir na cor certa.** O
+/// `acervo::Estado` só sabe falar do que existe no site (levada · à venda ·
+/// comprada), e a importada entra no menos errado dos três — mas o cliente não a
+/// vê, não pode comprá-la, e ela nem chegou ao storage. Quem olha a grade
+/// precisa saber a diferença: é ela que diz o que ainda falta fazer.
+pub fn selo_de_so_no_disco(cx: &App) -> impl IntoElement {
+    selo(Tom::Neutro, "No disco", cx)
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;

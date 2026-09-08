@@ -89,6 +89,8 @@ struct Estudio {
     janela: gpui::WindowHandle<Aplicativo>,
     publicador: Arc<PublicadorDeMentira>,
     seletor_de_fotos: Arc<SeletorDeFotosDeMentira>,
+    /// Quem grava a foto no catálogo local — o destino do passo 1.
+    importador: Arc<ImportadorDeMentira>,
     marcador: Arc<MarcadorDeMentira>,
     gravador: Arc<GravadorDeMentira>,
     _dir: TempDir,
@@ -111,6 +113,7 @@ fn abrir_o_estudio(cx: &mut TestAppContext, fotos: Vec<PhotoViewModel>) -> Estud
     let marcador = Arc::new(MarcadorDeMentira::default());
     let gravador = Arc::new(GravadorDeMentira::default());
     // O seletor do sistema, de mentira: devolve os caminhos que o teste mandar.
+    let importador = Arc::new(ImportadorDeMentira::default());
     let seletor_de_fotos = Arc::new(SeletorDeFotosDeMentira::escolhe(&[
         "/exportadas/DSC_001.jpg",
         "/exportadas/DSC_002.jpg",
@@ -122,6 +125,7 @@ fn abrir_o_estudio(cx: &mut TestAppContext, fotos: Vec<PhotoViewModel>) -> Estud
         let marcador = marcador.clone();
         let gravador = gravador.clone();
         let seletor_de_fotos = seletor_de_fotos.clone();
+        let importador = importador.clone();
         move |window, cx| {
             Aplicativo::novo(
                 fotos,
@@ -139,7 +143,7 @@ fn abrir_o_estudio(cx: &mut TestAppContext, fotos: Vec<PhotoViewModel>) -> Estud
                     guarda_de_presets: Arc::new(GuardaDeMentira::default()),
                     escolha_de_presets: Arc::new(EscolhaDeMentira::default()),
                     explorador: Arc::new(ExploradorDeMentira::default()),
-                    importador: Arc::new(ImportadorDeMentira::default()),
+                    importador,
                     seletor: Arc::new(SeletorDeMentira::default()),
                     seletor_de_fotos,
                     atualizador: Arc::new(AtualizadorDeMentira::default()),
@@ -188,6 +192,7 @@ fn abrir_o_estudio(cx: &mut TestAppContext, fotos: Vec<PhotoViewModel>) -> Estud
         janela,
         publicador,
         seletor_de_fotos,
+        importador,
         marcador,
         gravador,
         _dir: dir,
@@ -513,10 +518,16 @@ fn da_lista_ao_revelar_dentro_da_sessao(cx: &mut TestAppContext) {
         })
         .expect("a janela deve estar aberta");
 
-    // 4 · o upload: **arquivos do disco**, pelo seletor do sistema.
+    // 4 · a importação: **arquivos do disco**, pelo seletor do sistema, para o
+    // catálogo **local**.
     //
     // 🚨 Não há explorador nosso aqui, e é o pedido do dono: quem exportou do
     // Lightroom já está com a pasta aberta ao lado.
+    //
+    // 🚨 **E nada sobe neste passo** (regra do dono, 8/set/2026): a foto fica no
+    // SQLite até ser classificada. O site recusa o contrário, com todas as
+    // letras — `400 Bad Request: a foto sobe classificada: informe a nota de 1 a
+    // 5`. Quem a leva ao storage é o passo 3, logo abaixo.
     estudio
         .janela
         .update(cx, |app, _window, cx| {
@@ -536,16 +547,18 @@ fn da_lista_ao_revelar_dentro_da_sessao(cx: &mut TestAppContext) {
         1,
         "abriu a janela do sistema uma vez"
     );
-    let enviados = estudio.publicador.arquivos_enviados();
-    assert_eq!(enviados.len(), 2, "as duas escolhidas subiram");
-    assert!(enviados.iter().all(|(g, _, _, _)| g == "g1"));
-    assert_eq!(enviados[0].1, "/exportadas/DSC_001.jpg");
-    // 🔑 Sem marcação vai como "à venda" — o estado de quem ainda não foi levada.
+    let lotes = estudio.importador.importados();
+    assert_eq!(lotes.len(), 1, "um lote foi para o catálogo local");
+    let (arquivos, opcoes) = &lotes[0];
+    assert_eq!(arquivos.len(), 2, "as duas escolhidas entraram no catálogo");
+    assert_eq!(arquivos[0], "/exportadas/DSC_001.jpg");
+    // 🚨 **O carimbo do ensaio entra na criação.** Sem ele a foto chega ao
+    // catálogo sem dono e não aparece na grade da sessão que a importou — e o
+    // sintoma é "a importação não funcionou".
+    assert_eq!(opcoes.sessao_id.as_deref(), Some("g1"));
     assert!(
-        enviados
-            .iter()
-            .all(|(_, _, _, e)| *e == domain::services::pos_venda::EstadoNoBalcao::Disponivel),
-        "sem marcação entra à venda: {enviados:?}"
+        estudio.publicador.arquivos_enviados().is_empty(),
+        "a importação não sobe nada: quem autoriza a foto a ir ao site é a nota"
     );
 
     // 5 · revelar **na sessão**: a foto não está no catálogo local, e os

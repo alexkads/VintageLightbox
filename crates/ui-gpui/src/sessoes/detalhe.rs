@@ -50,9 +50,11 @@ use infrastructure::cache::preview_manager::PreviewManager;
 use super::altura_da_tira;
 use super::arquivos::SeletorDeFotos;
 use crate::biblioteca::miniaturas::{CacheDeMiniaturas, Miniatura};
+use crate::importacao::explorador::{Andamento, Freios, Importador};
 use crate::pos_venda::porta::{Publicador, Recado};
 use crate::selos;
 use crate::tema::cores;
+use domain::value_objects::{ImportMode, ImportOptions, OrganizationStrategy, RenamePattern};
 
 const INTERVALO_DE_COLHEITA: Duration = Duration::from_millis(100);
 
@@ -129,6 +131,19 @@ pub enum Pedido {
         fotos: Vec<FotoARevelar>,
         inicial: usize,
     },
+    /// Classificar fotos que **só existem no disco** — o passo 3, pedido da
+    /// grade da sessão.
+    ///
+    /// 🔑 **Quem grava a nota e decide quem sobe é a Biblioteca**, que é a dona
+    /// do catálogo (`Classificou` → `subir_classificada`). Esta tela só diz
+    /// quais e quanto.
+    Classificar { ids: Vec<String>, nota: i32 },
+    /// A importação gravou no catálogo local: a raiz precisa reler o acervo e
+    /// devolver as fotos deste ensaio.
+    ///
+    /// 🔑 **A tela não fala com o banco**, como não fala com o site: quem tem a
+    /// porta do acervo é a raiz.
+    CatalogoMudou,
     /// Abrir a exportação com o que está na grade — o botão que desceu da barra
     /// do app em 8/set/2026, para o lado do "Importar".
     ///
@@ -285,6 +300,57 @@ pub struct Detalhe {
     /// 🚨 **Nada aqui conta importação, e é essa a separação inteira.** Ver
     /// [`Self::importacao`].
     mudando: usize,
+    /// Se a janela do sistema está aberta, esperando o operador escolher.
+    ///
+    /// 🚨 **Sem isto o clique no "Importar" não fazia nada** (achado pelo dono
+    /// em 8/set/2026, com o app rodando). A colheita é um laço que acorda a cada
+    /// 100 ms e **desiste quando não há mais nada a esperar** — e "esperar o
+    /// operador escolher" não estava na conta. No primeiro tique depois do
+    /// clique nada estava carregando, subindo nem baixando: o laço morria com a
+    /// janela ainda aberta, e os caminhos chegavam a um canal que ninguém mais
+    /// drenava. Nenhum erro, nenhum pisco — o gesto simplesmente não existia.
+    ///
+    /// ⚠️ **É seguro porque o seletor responde sempre** ([`SeletorDeFotos`]):
+    /// lista vazia é a desistência de quem fechou a janela. Um seletor que
+    /// engolisse a resposta deixaria este laço acordado para sempre — e é por
+    /// isso que aquele contrato está escrito na `trait`, e não só combinado.
+    escolhendo: bool,
+    /// As fotos que o site já tem — a metade de cima do acervo.
+    do_site: Vec<acervo::Foto>,
+    /// As fotos **deste ensaio que só existem no disco** — importadas e ainda
+    /// não classificadas.
+    ///
+    /// 🚨 **Sem elas a importação seria invisível**, que é o mesmo desfecho de
+    /// não ter importado. A foto entra no catálogo pelo passo 1 e só vai ao
+    /// site no passo 3; entre um e outro, a grade da sessão é o **único** lugar
+    /// em que ela existe para o operador — e é dali que ele a classifica.
+    ///
+    /// 🔑 **Quem as traz é a raiz**, por [`Detalhe::definir_locais`]: a porta do
+    /// catálogo é dela, como a do site.
+    locais: Vec<acervo::Foto>,
+    /// Os ids de [`Self::locais`], para decidir a chave da miniatura em O(1).
+    ///
+    /// 🚨 **A chave da foto local é o id cru; a da foto do site leva o prefixo
+    /// `site:`.** Elas moram em caches diferentes porque vêm de lugares
+    /// diferentes: a do site é baixada da API, a local é gravada pelo
+    /// importador (`preview_storage.save(&photo.id(), …)`). Procurar a local
+    /// sob `site:<id>` não acha nada, e o sintoma é a **célula preta** — a foto
+    /// aparece na grade, com nome, estado e faixa, e sem imagem.
+    ids_locais: std::collections::HashSet<String>,
+    /// Quem grava a foto **no catálogo local** — o SQLite desta máquina.
+    ///
+    /// 🚨 **A importação não sobe nada**, e essa é a regra do dono (8/set/2026):
+    /// *"a importação não vai imediatamente para o storage cloud, pois o cliente
+    /// precisa classificar a foto; ela fica local usando sqlite"*. Até esse dia
+    /// o botão chamava `Publicador::enviar_arquivo`, e o site devolvia **400
+    /// Bad Request: a foto sobe classificada, informe a nota de 1 a 5** — 21 de
+    /// 21 falhavam, e a sessão ficava vazia. O site estava certo: quem autoriza
+    /// a foto a subir é o passo 3, e não o passo 1.
+    importador: Arc<dyn Importador>,
+    /// O canal por onde o lote conta o que já fez.
+    andamentos: (Sender<Andamento>, Receiver<Andamento>),
+    /// Pausa e cancelamento do lote — a tela é dona deles.
+    freios: Freios,
     /// O andamento da importação — o que a barra de progresso desenha.
     ///
     /// 🚨 **Ela vive separada de [`Self::mudando`] porque o operador trabalha
@@ -300,14 +366,6 @@ pub struct Detalhe {
     carregando: bool,
     erro: Option<SharedString>,
     recados: (Sender<Recado>, Receiver<Recado>),
-    /// O canal **só da importação**.
-    ///
-    /// 🔑 **`Recado::Sincronizou` não diz quem terminou** — é o mesmo "pronto"
-    /// de subir arquivo, negociar, classificar e tirar do site. Enquanto os dois
-    /// trabalhos dividiam o canal, não havia como contar um sem contar o outro:
-    /// classificar no meio da importação adiantava a barra. Dois canais separam
-    /// sem tocar no `enum`, que é de todo mundo.
-    envios: (Sender<Recado>, Receiver<Recado>),
     colhendo: bool,
     _colheita: Option<Task<()>>,
 }
@@ -316,6 +374,7 @@ impl Detalhe {
     pub fn nova(
         publicador: Arc<dyn Publicador>,
         seletor: Arc<dyn SeletorDeFotos>,
+        importador: Arc<dyn Importador>,
         previews: Arc<PreviewManager>,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -368,13 +427,19 @@ impl Detalhe {
             avisando: false,
             pedindo_link: false,
             cliente_aberta: false,
+            do_site: Vec::new(),
+            locais: Vec::new(),
+            ids_locais: std::collections::HashSet::new(),
+            importador,
+            andamentos: channel(),
+            freios: Freios::default(),
             mudando: 0,
+            escolhendo: false,
             importacao: None,
             link: None,
             carregando: false,
             erro: None,
             recados: channel(),
-            envios: channel(),
             colhendo: false,
             _colheita: None,
         }
@@ -705,6 +770,33 @@ impl Detalhe {
             .filter(|f| f.editavel())
             .map(|f| f.id.clone())
             .collect();
+
+        // 🚨 **A foto que só existe no disco faz outro caminho, e é o passo 3.**
+        // Ela não tem linha no site: mandar `negociar` com o id local devolveria
+        // erro para todas. O que a leva ao site é a **nota** — e é por isso que
+        // só a classificação atravessa daqui. Sinalizar "levada" numa foto que
+        // ainda não subiu não tem onde ser gravado, e o silêncio seria a pior
+        // resposta: a linha de erro abaixo diz o que fazer antes.
+        let (locais, alvos): (Vec<String>, Vec<String>) = alvos
+            .into_iter()
+            .partition(|id| self.locais.iter().any(|f| &f.id == id));
+        if !locais.is_empty() {
+            match mudanca.nota {
+                Some(Some(nota)) => cx.emit(Pedido::Classificar {
+                    ids: locais,
+                    nota: nota as i32,
+                }),
+                _ => {
+                    self.erro = Some(
+                        "estas fotos ainda não subiram — classifique-as (1 a 5) antes \
+                         de marcar no balcão"
+                            .into(),
+                    );
+                    cx.notify();
+                }
+            }
+        }
+
         // 🚨 **A importação não entra nesta guarda**, e é o conserto de
         // 8/set/2026: com 500 fotos subindo, classificar, sinalizar e negociar
         // desistiam aqui em silêncio. O que ainda faz esperar é outra rodada
@@ -764,8 +856,62 @@ impl Detalhe {
         if self.importando() {
             return;
         }
+        // 🚨 **Antes de abrir a janela, e não depois.** É isto que segura a
+        // colheita de pé pelos segundos em que o operador procura a pasta.
+        self.escolhendo = true;
         self.seletor.escolher(self.escolhas.0.clone());
         self.acompanhar(cx);
+    }
+
+    /// As fotos deste ensaio que a raiz achou no catálogo local.
+    ///
+    /// 🚨 **Só as que ainda não subiram.** Uma foto classificada existe dos dois
+    /// lados — linha no SQLite *e* linha no site —, e pôr as duas na grade
+    /// mostraria a mesma foto duas vezes, com estados diferentes. Quem já subiu
+    /// vale pela do site, que é a que tem preço, nota e negociação.
+    pub fn definir_locais(&mut self, fotos: Vec<acervo::Foto>, cx: &mut Context<Self>) {
+        if self.locais == fotos {
+            return;
+        }
+        self.locais = fotos;
+        self.ids_locais = self.locais.iter().map(|f| f.id.clone()).collect();
+        self.recompor_acervo();
+        cx.notify();
+    }
+
+    /// Monta o acervo da grade: **o que está no site, e o que só está no disco**.
+    ///
+    /// 🔑 **As locais vêm depois**, e é de propósito: a ordem da grade é a ordem
+    /// da sessão, e o que acabou de ser importado é o mais novo. Quem importa
+    /// 500 quer vê-las onde as deixou — no fim.
+    fn recompor_acervo(&mut self) {
+        let marcadas = self.ids_marcados();
+        let focada = self.em_foco().map(|f| f.id.clone());
+
+        let mut todas = self.do_site.clone();
+        todas.extend(self.locais.iter().cloned());
+        self.acervo.definir(todas);
+
+        // A seleção fala em **posição**, e a lista mudou de tamanho: quem
+        // continua visível volta marcado, e quem saiu do recorte fica de fora.
+        self.selecao.limpar_tudo();
+        for id in &marcadas {
+            if let Some(p) = self.acervo.posicao_de(id) {
+                self.selecao.marcar(p);
+            }
+        }
+        if let Some(p) = focada.as_deref().and_then(|id| self.acervo.posicao_de(id)) {
+            self.selecao.focar(Some(p));
+            self.ultimo_foco = None;
+        }
+    }
+
+    fn ids_marcados(&self) -> Vec<String> {
+        self.selecao
+            .marcadas()
+            .filter_map(|p| self.acervo.visivel(p))
+            .map(|f| f.id.clone())
+            .collect()
     }
 
     /// Se há uma importação em curso — a que segura o botão e desenha a barra.
@@ -789,25 +935,47 @@ impl Detalhe {
         }
     }
 
-    /// Sobe os arquivos escolhidos — do seletor ou do que foi arrastado.
+    /// Grava os arquivos escolhidos **no catálogo local** — o passo 1.
     ///
-    /// 🔑 **São arquivos do disco, e não fotos do catálogo.** É o envio da web:
-    /// o operador exporta do Lightroom para uma pasta e manda a pasta. O que vai
-    /// ao cliente não precisa estar catalogado aqui — o catálogo é da triagem em
-    /// RAW, e são dois trabalhos diferentes.
+    /// 🚨 **Nada sobe aqui, e é a regra do dono** (8/set/2026): *"a importação
+    /// não vai imediatamente para o storage cloud, pois o cliente precisa
+    /// classificar a foto; ela fica local usando sqlite"*. Quem autoriza a foto
+    /// a ir para o site é o **passo 3** — classificar —, e o site já dizia isso
+    /// sozinho: `400 Bad Request: a foto sobe classificada: informe a nota de 1
+    /// a 5`, 21 vezes em 21 arquivos.
+    ///
+    /// 🔑 **A foto entra carimbada com o ensaio** (`sessao_id`). Sem o carimbo
+    /// ela chega ao catálogo sem dono e não aparece na grade da sessão que a
+    /// importou — e o sintoma é "a importação não funcionou".
+    ///
+    /// 🚨 **O arquivo é COPIADO para a pasta do ensaio, e nunca catalogado onde
+    /// está** (regra do dono, 8/set/2026). O motivo é o cartão de memória: com
+    /// `ImportMode::Add` o catálogo guardaria `/Volumes/NIKON D750/DCIM/…`, e a
+    /// foto **desapareceria do app no instante em que o cartão saísse** — no
+    /// meio de uma sessão, com o cliente na frente. Pior: formatar o cartão
+    /// para a próxima sessão apagaria o ensaio inteiro, sem aviso e sem volta.
+    ///
+    /// 🔑 **E vai para um lugar previsível**: `<catálogo>/Ensaios/<ensaio>`, numa
+    /// pasta só, com os nomes que saíram da câmera. É o que responde *"onde
+    /// estão as fotos do Teste 003?"* sem abrir o app. Os padrões do
+    /// `ImportOptions` diriam outra coisa, e por isso os três são escritos aqui:
+    ///
+    /// | Padrão | O que faria | Por que não serve aqui |
+    /// |---|---|---|
+    /// | `ByDate` | `YYYY/MM/DD` da EXIF | um ensaio de dois dias vira duas pastas, e um cartão com fotos antigas se espalha por meses |
+    /// | `Standard` | renomeia para `photo-2026-09-08-001.jpg` | o operador procura por `DSC_2571.jpg`, que é o que a câmera deu e o que ele vê no Lightroom |
+    ///
+    /// ⚠️ **A pasta é decidida pelo id da galeria**, com o título junto só para
+    /// ser achável no Finder. Renomear o ensaio no site faz o **próximo** lote
+    /// ir para uma pasta nova; o que já entrou fica onde está, e continua
+    /// catalogado — o caminho de cada foto está no banco, não no nome da pasta.
     pub fn enviar_arquivos(&mut self, caminhos: Vec<String>, cx: &mut Context<Self>) {
-        let (Some(sessao), Some(galeria_id)) = (self.sessao.clone(), self.galeria_id.clone())
-        else {
+        let Some(galeria_id) = self.galeria_id.clone() else {
             return;
         };
         if caminhos.is_empty() || self.importando() {
             return;
         }
-
-        // A ordem no site continua de onde a sessão parou.
-        let ja_na_sessao = self.aberta.as_ref().map(|a| a.fotos.len()).unwrap_or(0);
-        // Sem marcação vai como "à venda" — o estado de quem ainda não foi levada.
-        let estado = self.leva.unwrap_or(EstadoNoBalcao::Disponivel);
 
         self.erro = None;
         self.importacao = Some(Importacao {
@@ -815,17 +983,33 @@ impl Detalhe {
             feitas: 0,
             falhas: 0,
         });
-        for (i, caminho) in caminhos.into_iter().enumerate() {
-            self.publicador.enviar_arquivo(
-                sessao.clone(),
-                galeria_id.clone(),
-                caminho,
-                (ja_na_sessao + i) as u32,
-                estado,
-                // 🔑 **Pelo canal da importação**, e não pelo de todo mundo.
-                self.envios.0.clone(),
-            );
-        }
+        self.freios = Freios::default();
+        let titulo = self
+            .aberta
+            .as_ref()
+            .map(|a| a.galeria.titulo.as_str())
+            .unwrap_or_default();
+        self.importador.importar(
+            caminhos,
+            ImportOptions {
+                sessao_id: Some(galeria_id.clone()),
+                // 🚨 Copiar, nunca catalogar onde está — ver o aviso acima.
+                mode: ImportMode::Copy,
+                destination: Some(
+                    pasta_do_ensaio(titulo, &galeria_id)
+                        .to_string_lossy()
+                        .into_owned(),
+                ),
+                organization: OrganizationStrategy::IntoOneFolder,
+                // 🚨 **UUID no disco, nome de origem no catálogo** — proposta
+                // do dono, 8/set/2026, e o que a nuvem já fazia. Ver
+                // `RenamePattern::Uuid` e a migration 022.
+                rename_pattern: RenamePattern::Uuid,
+                ..Default::default()
+            },
+            self.freios.clone(),
+            self.andamentos.0.clone(),
+        );
         self.acompanhar(cx);
         cx.notify();
     }
@@ -921,45 +1105,70 @@ impl Detalhe {
         // erro: fechar a janela sem escolher é um gesto legítimo.
         while let Ok(caminhos) = self.escolhas.1.try_recv() {
             mudou = true;
+            // ⚠️ **Desliga também na lista vazia.** Fechar a janela sem escolher
+            // é um gesto legítimo, e é o único jeito de o laço voltar a poder
+            // parar depois dele.
+            self.escolhendo = false;
             if !caminhos.is_empty() {
                 self.enviar_arquivos(caminhos, cx);
             }
         }
 
-        // ── As respostas da importação ───────────────────────────────────
+        // ── O andamento da importação ────────────────────────────────────
         //
-        // 🚨 **Canal próprio, contador próprio.** O que chega aqui é resposta de
-        // `enviar_arquivo`, e só. Enquanto isto dividia o canal com o resto, uma
+        // 🚨 **Canal próprio, contador próprio.** O que chega aqui é o lote do
+        // catálogo local, e só. Enquanto isto dividia canal com o resto, uma
         // classificação feita durante o lote adiantava a barra em uma foto — e
-        // 500 classificações a levavam ao fim com metade das fotos ainda no
-        // disco.
-        while let Ok(recado) = self.envios.1.try_recv() {
+        // 500 classificações a levavam ao fim com metade das fotos por gravar.
+        while let Ok(andamento) = self.andamentos.1.try_recv() {
             mudou = true;
-            match recado {
-                Recado::Sincronizou => {
+            match andamento {
+                // O importador conta de novo o que já sabemos: um lote pode ser
+                // menor que a lista (duplicata que ele descarta antes).
+                Andamento::Comecou { total } => {
+                    if let Some(lote) = self.importacao.as_mut() {
+                        lote.total = total;
+                    }
+                }
+                Andamento::Feito { .. } => {
                     if let Some(lote) = self.importacao.as_mut() {
                         lote.feitas += 1;
                     }
                 }
-                // ⚠️ **A falha de uma foto não derruba o lote**, e nem para a
-                // barra: o operador mandou 500, e "uma não subiu" é um recado —
-                // as outras 499 continuam.
-                Recado::Falhou(erro) => {
+                // ⚠️ **A pulada conta como pronta.** Ela é a duplicata que já
+                // está no catálogo: não vai responder de novo, e fora da conta
+                // prenderia a barra a um passo do fim para sempre.
+                Andamento::Pulado { .. } => {
                     if let Some(lote) = self.importacao.as_mut() {
                         lote.falhas += 1;
                     }
-                    self.erro = Some(erro.into());
                 }
-                _ => {}
+                // ⚠️ **A falha de um arquivo não derruba o lote**, e nem para a
+                // barra: o operador mandou 500, e "uma não entrou" é um recado —
+                // as outras 499 continuam.
+                Andamento::Falhou { caminho, erro } => {
+                    if let Some(lote) = self.importacao.as_mut() {
+                        lote.falhas += 1;
+                    }
+                    self.erro = Some(format!("{caminho}: {erro}").into());
+                }
+                Andamento::Terminou {
+                    sucesso,
+                    falhas,
+                    pulados,
+                } => {
+                    self.importacao = Some(Importacao {
+                        total: sucesso + falhas + pulados,
+                        feitas: sucesso,
+                        falhas: falhas + pulados,
+                    });
+                }
             }
             if self.importacao.is_some_and(|l| l.terminou()) {
-                // O lote acabou: reler a sessão é o que faz as novas aparecerem
-                // na grade.
-                if let (Some(sessao), Some(id)) = (self.sessao.clone(), self.galeria_id.clone()) {
-                    self.publicador
-                        .abrir_galeria(sessao, id, self.recados.0.clone());
-                    self.carregando = true;
-                }
+                // 🔑 **Quem relê o catálogo é a raiz** — ela é que tem a porta
+                // do acervo. Sem esta linha as fotos ficariam gravadas e
+                // invisíveis, que é o mesmo desfecho de não ter importado.
+                cx.emit(Pedido::CatalogoMudou);
             }
         }
 
@@ -1012,8 +1221,8 @@ impl Detalhe {
 
                     // 🔑 A conta é do core: recorte, contagens e ordem saem
                     // dele, e não de laços escritos aqui.
-                    self.acervo
-                        .definir(aberta.fotos.iter().map(para_o_core).collect());
+                    self.do_site = aberta.fotos.iter().map(para_o_core).collect();
+                    self.recompor_acervo();
                     self.selecao.limpar_tudo();
                     // ⚠️ Quem saiu do recorte não volta: classificar com a ficha
                     // "Sem nota" aberta tira a foto da lista, e é o que a ficha
@@ -1040,7 +1249,7 @@ impl Detalhe {
                     // Miniatura ilegível não derruba a grade: a célula fica sem
                     // imagem, com o nome do arquivo, que é melhor que nada.
                     if let Ok(imagem) = image::load_from_memory(&bytes) {
-                        let chave = chave_da_miniatura(&foto_id);
+                        let chave = chave_do_site(&foto_id);
                         // 🔑 **As duas.** O preview grande é o que a tela do
                         // cliente e o painel usam; a miniatura é o que a grade e
                         // a tira desenham. Gravar só o grande — que era o que
@@ -1099,6 +1308,7 @@ impl Detalhe {
         // não entram na conta: elas chegam pelo mesmo canal, e o `abriu` religa
         // o laço quando um lote novo é pedido.
         let continua = self.carregando
+            || self.escolhendo
             || self.mudando > 0
             || self.importando()
             || self.baixando > 0
@@ -1116,7 +1326,7 @@ impl Detalhe {
 /// 🔑 Num lugar só: eram três `format!("site:{}")` espalhados, e o dia em que um
 /// mudasse os outros continuariam procurando no lugar antigo — a grade ficaria
 /// vazia sem erro nenhum (armadilha das duas listas da mesma verdade).
-fn chave_da_miniatura(foto_id: &str) -> String {
+fn chave_do_site(foto_id: &str) -> String {
     format!(
         "{}{foto_id}",
         crate::revelacao::persistencia::PREFIXO_DO_SITE
@@ -1124,6 +1334,21 @@ fn chave_da_miniatura(foto_id: &str) -> String {
 }
 
 impl Detalhe {
+    /// A chave desta foto no cache de previews.
+    ///
+    /// 🚨 **Depende de onde ela mora, e não há como adivinhar pelo id.** A do
+    /// site foi baixada da API e gravada sob `site:<id>`; a local foi gravada
+    /// pelo importador sob o id do catálogo, cru. Uma chave só para as duas
+    /// deixa metade da grade preta — foi o que aconteceu no dia em que a
+    /// importação passou a entrar na grade (8/set/2026): 21 fotos com nome,
+    /// estado e faixa, e nenhuma imagem.
+    fn chave_da_foto(&self, foto_id: &str) -> String {
+        if self.ids_locais.contains(foto_id) {
+            return foto_id.to_string();
+        }
+        chave_do_site(foto_id)
+    }
+
     /// Põe na memória a miniatura de cada foto visível — **uma vez por quadro**,
     /// antes de o render começar.
     ///
@@ -1160,7 +1385,7 @@ impl Detalhe {
         let chaves: Vec<String> = self
             .acervo
             .visiveis()
-            .map(|foto| chave_da_miniatura(&foto.id))
+            .map(|foto| self.chave_da_foto(&foto.id))
             .collect();
 
         for chave in chaves {
@@ -1476,10 +1701,16 @@ impl Detalhe {
                                                 l.total
                                             )
                                         }
-                                        Some(l) if l.falhas > 0 => {
-                                            format!("{} subiram · {} falharam", l.feitas, l.falhas)
-                                        }
-                                        Some(l) => format!("{} subiram", l.feitas),
+                                        // ⚠️ **"importadas", e não "subiram"** —
+                                        // nada sobe no passo 1, e a palavra
+                                        // errada faria o operador esperar o
+                                        // cliente ver fotos que ainda não
+                                        // saíram do disco.
+                                        Some(l) if l.falhas > 0 => format!(
+                                            "{} importadas · {} não entraram",
+                                            l.feitas, l.falhas
+                                        ),
+                                        Some(l) => format!("{} importadas", l.feitas),
                                         None => {
                                             "Arraste as fotos (ou a pasta) para cá.".to_string()
                                         }
@@ -1780,7 +2011,7 @@ impl Detalhe {
         let lado = self.zoom;
         // 🔑 **Só lê.** Quem carrega é `preparar_miniaturas`, uma vez por quadro,
         // antes de o render começar — ver o campo `miniaturas`.
-        let miniatura = match self.miniaturas.espiar(&chave_da_miniatura(&foto.id)) {
+        let miniatura = match self.miniaturas.espiar(&self.chave_da_foto(&foto.id)) {
             Some(Miniatura::Pronta(imagem)) => Some(imagem),
             _ => None,
         };
@@ -1840,7 +2071,14 @@ impl Detalhe {
                             .absolute()
                             .top(px(4.))
                             .left(px(4.))
-                            .child(selos::selo_do_estado(foto.estado, foto.apagada, cx)),
+                            // 🚨 A importada não é "à venda": ela nem chegou ao
+                            // site. Ver `selos::selo_de_so_no_disco`.
+                            .child(if self.ids_locais.contains(&foto.id) {
+                                selos::selo_de_so_no_disco(cx).into_any_element()
+                            } else {
+                                selos::selo_do_estado(foto.estado, foto.apagada, cx)
+                                    .into_any_element()
+                            }),
                     )
                     .when(marcada, |quadro| {
                         quadro.child(
@@ -2172,7 +2410,7 @@ impl Detalhe {
     ) -> gpui::AnyElement {
         let em_foco = self.selecao.foco() == Some(posicao);
         let marcada = self.selecao.tem(posicao);
-        let miniatura = match self.miniaturas.espiar(&chave_da_miniatura(&foto.id)) {
+        let miniatura = match self.miniaturas.espiar(&self.chave_da_foto(&foto.id)) {
             Some(Miniatura::Pronta(imagem)) => Some(imagem),
             _ => None,
         };
@@ -2407,6 +2645,41 @@ fn ordenar_como_antes(novas: &mut [FotoDaGaleria], antigas: &[FotoDaGaleria]) {
 /// 🔑 **A conversão mora num lugar só.** Ela é onde o decimal em texto do site
 /// vira centavos e o estado vira o enum do core — e espalhá-la faria os dois
 /// darem respostas diferentes para a mesma foto.
+/// A pasta deste ensaio dentro do catálogo — `<catálogo>/Ensaios/<título> - <id>`.
+///
+/// 🔑 **O id é o que a torna previsível; o título é o que a torna achável.** Só
+/// o id daria uma pasta com nome de UUID, que ninguém reconhece no Finder; só o
+/// título daria colisão entre dois "Ensaio da Ana" e mudaria de lugar a cada
+/// correção de nome.
+///
+/// ⚠️ **O título passa por [`sanear`] antes de virar caminho.** Uma barra no
+/// nome do ensaio ("Ana / Bruno") criaria uma subpasta sem ninguém pedir, e dois
+/// pontos quebram o caminho no macOS.
+pub fn pasta_do_ensaio(titulo: &str, galeria_id: &str) -> std::path::PathBuf {
+    let nome = match sanear(titulo) {
+        t if t.is_empty() => galeria_id.to_string(),
+        t => format!("{t} - {galeria_id}"),
+    };
+    infrastructure::paths::AppPaths::catalog_root()
+        .join("Ensaios")
+        .join(nome)
+}
+
+/// Deixa só o que é seguro num nome de pasta, nos três sistemas.
+fn sanear(texto: &str) -> String {
+    let limpo: String = texto
+        .chars()
+        .map(|c| match c {
+            c if c.is_alphanumeric() => c,
+            ' ' | '-' | '_' | '.' => c,
+            _ => '-',
+        })
+        .collect();
+    // Espaço e ponto no fim somem no Windows, e um nome que termina em ponto
+    // vira outro nome sem ninguém saber.
+    limpo.trim().trim_end_matches('.').trim().to_string()
+}
+
 fn para_o_core(foto: &FotoDaGaleria) -> acervo::Foto {
     acervo::Foto {
         id: foto.id.clone(),
@@ -2438,6 +2711,7 @@ fn para_o_core(foto: &FotoDaGaleria) -> acervo::Foto {
 #[cfg(test)]
 mod testes {
     use super::*;
+    use crate::importacao::explorador::mentira::ImportadorDeMentira;
     use crate::pos_venda::porta::mentira::PublicadorDeMentira;
     use crate::sessoes::arquivos::mentira::SeletorDeMentira;
     use gpui::TestAppContext;
@@ -2503,12 +2777,40 @@ mod testes {
         publicador: Arc<PublicadorDeMentira>,
         seletor: Arc<SeletorDeMentira>,
     ) -> gpui::WindowHandle<Detalhe> {
+        janela_completa(
+            cx,
+            publicador,
+            seletor,
+            Arc::new(ImportadorDeMentira::default()),
+        )
+    }
+
+    fn janela_completa(
+        cx: &mut TestAppContext,
+        publicador: Arc<PublicadorDeMentira>,
+        seletor: Arc<SeletorDeMentira>,
+        importador: Arc<ImportadorDeMentira>,
+    ) -> gpui::WindowHandle<Detalhe> {
+        let dir = tempfile::TempDir::new().expect("diretório temporário");
+        let previews = Arc::new(PreviewManager::new_with_path(dir.path().to_path_buf()));
+        std::mem::forget(dir);
+        janela_com_previews(cx, publicador, seletor, importador, previews)
+    }
+
+    /// 🚨 **O cache entra por parâmetro**, e não é detalhe de teste: um
+    /// `PreviewManager::new()` aqui gravaria no cache **do fotógrafo** durante o
+    /// `cargo test` — já aconteceu duas vezes neste repositório
+    /// (`docs/07-E2E-TESTING.md` §4).
+    fn janela_com_previews(
+        cx: &mut TestAppContext,
+        publicador: Arc<PublicadorDeMentira>,
+        seletor: Arc<SeletorDeMentira>,
+        importador: Arc<ImportadorDeMentira>,
+        previews: Arc<PreviewManager>,
+    ) -> gpui::WindowHandle<Detalhe> {
         cx.update(gpui_component::init);
         cx.add_window(move |_window, cx| {
-            let dir = tempfile::TempDir::new().expect("diretório temporário");
-            let previews = Arc::new(PreviewManager::new_with_path(dir.path().to_path_buf()));
-            std::mem::forget(dir);
-            let mut tela = Detalhe::nova(publicador, seletor, previews, cx);
+            let mut tela = Detalhe::nova(publicador, seletor, importador, previews, cx);
             tela.definir_sessao(Sessao {
                 access_token: "tok".into(),
                 refresh_token: "ref".into(),
@@ -2789,27 +3091,35 @@ mod testes {
         colher_ate_parar(cx, janela);
     }
 
-    fn caminhos(quantos: usize) -> Vec<String> {
+    fn caminhos_de_teste(quantos: usize) -> Vec<String> {
         (0..quantos)
             .map(|i| format!("/fotos/DSC_{i:04}.jpg"))
             .collect()
     }
 
-    /// 🚨 **O clique no "Importar" abre o seletor do sistema e sobe o lote.**
+    /// 🚨 **O clique no "Importar" grava no catálogo local — e não sobe nada.**
     ///
-    /// Este é o teste que o `docs/07-E2E-TESTING.md` §1 pede: o botão trocou de
+    /// Duas coisas num teste só, porque são a mesma regra vista dos dois lados.
+    ///
+    /// A primeira é a que o `docs/07-E2E-TESTING.md` §1 pede: o botão trocou de
     /// nome e de método em 8/set/2026 (`escolher_fotos` → `importar`), e um
     /// `on_click` que aponta para o lugar errado **não falha** — ele só não faz
-    /// nada. O clique aqui é nas coordenadas do botão desenhado, e não uma
-    /// chamada ao método por baixo.
+    /// nada. O clique aqui é nas coordenadas do botão desenhado.
+    ///
+    /// A segunda é o **destino**, regra do dono do mesmo dia: *"a importação não
+    /// vai imediatamente para o storage cloud, pois o cliente precisa
+    /// classificar a foto; ela fica local usando sqlite"*. Até então o botão
+    /// chamava `enviar_arquivo`, e o site devolvia **400 Bad Request: a foto
+    /// sobe classificada** — 21 de 21 arquivos, e a sessão vazia na tela.
     #[gpui::test]
-    fn o_clique_no_importar_abre_o_seletor_e_sobe_o_lote(cx: &mut TestAppContext) {
+    fn o_clique_no_importar_grava_no_catalogo_e_nao_sobe_nada(cx: &mut TestAppContext) {
         let seletor = Arc::new(SeletorDeMentira::escolhe(&["/fotos/a.jpg", "/fotos/b.NEF"]));
         let publicador = publicador_com(
             vec![foto("x", EstadoDaFotoNoSite::Disponivel, Some(4))],
             false,
         );
-        let janela = janela_com(cx, publicador.clone(), seletor.clone());
+        let importador = Arc::new(ImportadorDeMentira::default());
+        let janela = janela_completa(cx, publicador.clone(), seletor.clone(), importador.clone());
         entrar(cx, &janela);
 
         assert_eq!(seletor.pedidos(), 0, "nada abre sozinho");
@@ -2827,15 +3137,19 @@ mod testes {
 
         colher_ate_parar(cx, &janela);
 
-        let enviados: Vec<String> = publicador
-            .arquivos_enviados()
-            .into_iter()
-            .map(|(_, caminho, _, _)| caminho)
-            .collect();
+        let lotes = importador.importados();
+        assert_eq!(lotes.len(), 1, "um lote foi para o catálogo local");
+        let (arquivos, opcoes) = &lotes[0];
         assert_eq!(
-            enviados,
-            vec!["/fotos/a.jpg".to_string(), "/fotos/b.NEF".into()],
-            "o que o seletor devolveu tinha de subir para a galeria"
+            arquivos,
+            &vec!["/fotos/a.jpg".to_string(), "/fotos/b.NEF".into()]
+        );
+        // 🚨 O carimbo do ensaio entra na criação: sem ele a foto chega ao
+        // catálogo sem dono e não aparece na grade da sessão que a importou.
+        assert_eq!(opcoes.sessao_id.as_deref(), Some("g1"));
+        assert!(
+            publicador.arquivos_enviados().is_empty(),
+            "a importação subiu para o site — quem autoriza a foto a subir é a nota"
         );
     }
 
@@ -2898,8 +3212,8 @@ mod testes {
         cx: &mut TestAppContext,
     ) {
         let seletor = Arc::new(SeletorDeMentira {
-            escolha: std::sync::Mutex::new(caminhos(500)),
-            pedidos: std::sync::Mutex::new(0),
+            escolha: std::sync::Mutex::new(caminhos_de_teste(500)),
+            ..Default::default()
         });
         let publicador = publicador_com(
             vec![
@@ -2908,7 +3222,8 @@ mod testes {
             ],
             true,
         );
-        let janela = janela_com(cx, publicador.clone(), seletor.clone());
+        let importador = Arc::new(ImportadorDeMentira::demorado());
+        let janela = janela_completa(cx, publicador.clone(), seletor.clone(), importador.clone());
         entrar_demorado(cx, &janela, &publicador);
 
         // O lote sai — e fica no meio, que é onde o cenário acontece.
@@ -2925,7 +3240,7 @@ mod testes {
             .update(cx, |tela, _window, cx| {
                 let lote = tela.importacao().expect("o lote começou");
                 assert_eq!(lote.total, 500);
-                assert_eq!(lote.prontas(), 0, "nenhuma respondeu ainda");
+                assert_eq!(lote.prontas(), 0, "nenhum arquivo respondeu ainda");
                 assert!(tela.importando());
 
                 // ── Revelar ──────────────────────────────────────────────
@@ -2996,20 +3311,24 @@ mod testes {
     #[gpui::test]
     fn a_barra_anda_com_o_lote_e_a_falha_conta_como_pronta(cx: &mut TestAppContext) {
         let seletor = Arc::new(SeletorDeMentira {
-            escolha: std::sync::Mutex::new(caminhos(4)),
-            pedidos: std::sync::Mutex::new(0),
+            escolha: std::sync::Mutex::new(caminhos_de_teste(4)),
+            ..Default::default()
         });
         let publicador = publicador_com(
             vec![foto("a", EstadoDaFotoNoSite::Disponivel, Some(4))],
             true,
         );
-        let janela = janela_com(cx, publicador.clone(), seletor.clone());
+        let importador = Arc::new(ImportadorDeMentira::demorado());
+        let janela = janela_completa(cx, publicador.clone(), seletor.clone(), importador.clone());
         entrar_demorado(cx, &janela, &publicador);
 
         clicar(cx, &janela, "detalhe-importar");
-        janela
-            .update(cx, |tela, _window, cx| tela.colher(cx))
-            .expect("a janela deve estar aberta");
+        let colher = |cx: &mut TestAppContext| {
+            janela
+                .update(cx, |tela, _window, cx| tela.colher(cx))
+                .expect("a janela deve estar aberta")
+        };
+        colher(cx);
 
         let porcento = |cx: &mut TestAppContext| {
             janela
@@ -3018,32 +3337,56 @@ mod testes {
                 })
                 .expect("a janela deve estar aberta")
         };
+
+        // O `Comecou` do importador: ele conta o lote de novo, e é ele que vale
+        // — a lista pode encolher (duplicata que o importador descarta antes).
+        importador.responder_uma();
+        colher(cx);
         assert_eq!(porcento(cx), 0.);
 
-        // Duas respondem — a barra vai à metade.
-        publicador.responder_uma();
-        publicador.responder_uma();
-        janela
-            .update(cx, |tela, _window, cx| tela.colher(cx))
-            .expect("a janela deve estar aberta");
+        // Dois arquivos entram — a barra vai à metade.
+        importador.responder_uma();
+        importador.responder_uma();
+        colher(cx);
         assert_eq!(porcento(cx), 50.);
 
-        // Uma falha. Ela **conta**: o que a barra mede é o que falta esperar.
+        // Um falha. Ela **conta**: o que a barra mede é o que falta esperar.
         {
-            let mut guardados = publicador.guardados.lock().expect("os guardados");
-            let (canal, _) = guardados.remove(0);
-            let _ = canal.send(Recado::Falhou("o site recusou".into()));
+            let mut guardados = importador.guardados.lock().expect("os guardados");
+            guardados[0].1 = Andamento::Falhou {
+                caminho: "/fotos/DSC_0002.jpg".into(),
+                erro: "o disco recusou".into(),
+            };
         }
-        janela
-            .update(cx, |tela, _window, cx| tela.colher(cx))
-            .expect("a janela deve estar aberta");
+        importador.responder_uma();
+        colher(cx);
         assert_eq!(porcento(cx), 75.);
+        janela
+            .update(cx, |tela, _window, _cx| {
+                let lote = tela.importacao().expect("o lote");
+                assert_eq!((lote.feitas, lote.falhas), (2, 1));
+                assert!(tela.importando(), "ainda falta uma");
+            })
+            .expect("a janela deve estar aberta");
 
-        // A última. O lote acaba, e a galeria é relida para as novas
-        // aparecerem na grade.
-        let releituras_antes = publicador.abertas().len();
-        publicador.responder_uma();
-        colher_ate_parar(cx, &janela);
+        // A última. O lote acaba, e a raiz é chamada para reler o catálogo —
+        // sem isso as fotos ficariam gravadas e invisíveis.
+        let tela = janela.root(cx).expect("a raiz da janela");
+        let releituras = Arc::new(std::sync::Mutex::new(0usize));
+        let _inscricao = cx.update({
+            let releituras = releituras.clone();
+            move |cx| {
+                cx.subscribe(&tela, move |_tela, pedido: &Pedido, _cx| {
+                    if matches!(pedido, Pedido::CatalogoMudou) {
+                        *releituras.lock().expect("as releituras") += 1;
+                    }
+                })
+            }
+        });
+
+        importador.responder_uma();
+        colher(cx);
+        cx.run_until_parked();
 
         janela
             .update(cx, |tela, _window, _cx| {
@@ -3053,9 +3396,368 @@ mod testes {
                 assert!(!tela.importando(), "a barra tinha de sair da tela");
             })
             .expect("a janela deve estar aberta");
-        assert!(
-            publicador.abertas().len() > releituras_antes,
-            "o fim do lote tem de reler a galeria — sem isso as fotos novas não aparecem"
+        assert_eq!(
+            *releituras.lock().expect("as releituras"),
+            1,
+            "o fim do lote tem de pedir a releitura do catálogo à raiz"
         );
+    }
+
+    /// 🚨 **"Cliquei em importar, selecionei as fotos, e não aconteceu nada."**
+    ///
+    /// Relatado pelo dono em 8/set/2026, com o app rodando — e nenhum teste
+    /// pegava, porque todos eles tinham um seletor que respondia **na mesma
+    /// linha** em que era chamado. A janela do sistema não responde na mesma
+    /// linha: ela fica aberta os segundos que o operador levar para achar a
+    /// pasta.
+    ///
+    /// O que acontecia nesses segundos: a colheita da tela é um laço que acorda
+    /// a cada 100 ms e **desiste quando não há mais nada a esperar**
+    /// (`colher` devolve `continua`). "Esperar o operador escolher" não estava
+    /// na lista. Primeiro tique depois do clique: nada carregando, nada
+    /// subindo, nada baixando — o laço morria. Quando os caminhos enfim
+    /// chegavam ao canal, **não havia mais ninguém drenando**: eles ficavam lá,
+    /// para sempre, e a tela não piscava.
+    ///
+    /// ⚠️ **A resposta imediata da mentira é o que escondia isto**, e é a mesma
+    /// lição que o `demorada` do publicador já tinha ensinado
+    /// (`docs/07-E2E-TESTING.md` §4): o teste que não deixa o tempo passar não
+    /// pode ver um defeito que só existe no tempo.
+    #[gpui::test]
+    fn escolher_as_fotos_com_calma_ainda_sobe_o_lote(cx: &mut TestAppContext) {
+        let seletor = Arc::new(SeletorDeMentira::demorado(&[
+            "/fotos/a.jpg",
+            "/fotos/b.jpg",
+        ]));
+        let publicador = publicador_com(
+            vec![foto("x", EstadoDaFotoNoSite::Disponivel, Some(4))],
+            false,
+        );
+        let importador = Arc::new(ImportadorDeMentira::default());
+        let janela = janela_completa(cx, publicador.clone(), seletor.clone(), importador.clone());
+        entrar(cx, &janela);
+
+        clicar(cx, &janela, "detalhe-importar");
+        assert_eq!(seletor.pedidos(), 1, "a janela do sistema abriu");
+
+        // O operador procura a pasta. Cinco segundos — nada demais.
+        cx.executor()
+            .advance_clock(std::time::Duration::from_secs(5));
+        cx.run_until_parked();
+
+        // E enfim escolhe.
+        seletor.responder();
+        cx.executor()
+            .advance_clock(std::time::Duration::from_secs(1));
+        cx.run_until_parked();
+
+        let lotes = importador.importados();
+        assert_eq!(
+            lotes.len(),
+            1,
+            "as fotos escolhidas ficaram no canal: a colheita desistiu enquanto \
+             a janela do sistema estava aberta"
+        );
+        assert_eq!(
+            lotes[0].0,
+            vec!["/fotos/a.jpg".to_string(), "/fotos/b.jpg".into()]
+        );
+    }
+
+    /// ⚠️ **Fechar a janela sem escolher deixa a colheita parar.**
+    ///
+    /// A contraprova do teste acima, e ela não é adorno: o que segura o laço de
+    /// pé é `escolhendo`, e um `escolhendo` que só desligasse na lista **não
+    /// vazia** deixaria o laço acordando a cada 100 ms para sempre depois de um
+    /// `Cancelar` — sem sintoma nenhum além do ventilador. Desistir é um gesto
+    /// legítimo, e o seletor responde a ele com lista vazia.
+    #[gpui::test]
+    fn fechar_a_janela_sem_escolher_deixa_a_colheita_parar(cx: &mut TestAppContext) {
+        let seletor = Arc::new(SeletorDeMentira::demorado(&[]));
+        let publicador = publicador_com(Vec::new(), false);
+        let importador = Arc::new(ImportadorDeMentira::default());
+        let janela = janela_completa(cx, publicador, seletor.clone(), importador.clone());
+        entrar(cx, &janela);
+
+        clicar(cx, &janela, "detalhe-importar");
+        seletor.responder();
+        cx.executor()
+            .advance_clock(std::time::Duration::from_secs(1));
+        cx.run_until_parked();
+
+        let continua = janela
+            .update(cx, |tela, _window, cx| tela.colher(cx))
+            .expect("a janela deve estar aberta");
+        assert!(
+            !continua,
+            "o Cancelar deixou a colheita acordando a cada 100 ms, para sempre"
+        );
+        assert!(importador.importados().is_empty(), "não importou nada");
+    }
+
+    /// A foto que a raiz achou no catálogo, na linguagem da grade.
+    fn local(id: &str) -> acervo::Foto {
+        acervo::Foto {
+            id: id.into(),
+            arquivo: format!("{id}.jpg"),
+            estado: acervo::Estado::Disponivel,
+            apagada: false,
+            produto_efetivo: String::new(),
+            preco_negociado: None,
+            tem_observacao: false,
+            preco_de_venda: None,
+            pedido_id: None,
+            downloads: 0,
+            revelada: false,
+            nota: None,
+            ordem: 0,
+        }
+    }
+
+    /// 🚨 **A foto importada aparece na grade, no recorte "Sem nota".**
+    ///
+    /// É o que fecha o passo 1: ela fica no SQLite até ser classificada, e entre
+    /// um e outro a grade da sessão é o **único** lugar em que ela existe para o
+    /// operador. Gravada e invisível é o mesmo desfecho de não ter importado —
+    /// e foi o que a tela mostrou no dia em que a importação subia direto:
+    /// *"Nenhuma foto nesta sessão ainda"*, com 21 arquivos no disco.
+    #[gpui::test]
+    fn a_foto_importada_entra_na_grade_sem_nota(cx: &mut TestAppContext) {
+        let (janela, _) = janela(
+            cx,
+            vec![foto("no-site", EstadoDaFotoNoSite::Disponivel, Some(4))],
+        );
+        entrar(cx, &janela);
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                assert_eq!(tela.acervo.total_visivel(), 1, "só a do site, por enquanto");
+
+                tela.definir_locais(vec![local("nova-1"), local("nova-2")], cx);
+
+                assert_eq!(
+                    tela.acervo.total_visivel(),
+                    3,
+                    "as importadas entraram na grade"
+                );
+                let contagens = tela.contagens();
+                assert_eq!(
+                    contagens.de(Filtro::SemNota),
+                    2,
+                    "a importada nasce sem nota — é o recorte de onde ela é classificada"
+                );
+                assert_eq!(
+                    contagens.de(Filtro::Situacao(acervo::Estado::Disponivel)),
+                    1,
+                    "e não entra em 'à venda': quem está à venda é quem subiu"
+                );
+
+                // 🔑 **No fim da lista**: quem importou 500 quer vê-las onde as
+                // deixou, e a ordem da grade é a ordem da sessão.
+                tela.filtrar(Filtro::Todas, cx);
+                let ids: Vec<String> = tela.acervo.todas().iter().map(|f| f.id.clone()).collect();
+                assert_eq!(ids, vec!["no-site", "nova-1", "nova-2"]);
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 **Classificar a foto importada é o que a manda para o site — passo 3.**
+    ///
+    /// ⚠️ **E sinalizar "levada" nela, não.** A negociação do balcão se grava na
+    /// foto **do site**, e uma que nunca subiu não tem em qual linha ser
+    /// gravada: mandar `negociar` com o id local devolveria erro para todas. O
+    /// que este teste segura é que a tela **diz isso**, em vez de não fazer nada
+    /// — o silêncio é a pior resposta possível a um gesto que o operador acabou
+    /// de fazer com o cliente ao lado.
+    #[gpui::test]
+    fn classificar_a_importada_pede_o_passo_3_e_sinalizar_avisa(cx: &mut TestAppContext) {
+        let (janela, publicador) = janela(cx, Vec::new());
+        entrar(cx, &janela);
+
+        let tela = janela.root(cx).expect("a raiz da janela");
+        let pedidos = Arc::new(std::sync::Mutex::new(Vec::<(Vec<String>, i32)>::new()));
+        let _inscricao = cx.update({
+            let pedidos = pedidos.clone();
+            move |cx| {
+                cx.subscribe(&tela, move |_tela, pedido: &Pedido, _cx| {
+                    if let Pedido::Classificar { ids, nota } = pedido {
+                        pedidos
+                            .lock()
+                            .expect("os pedidos")
+                            .push((ids.clone(), *nota));
+                    }
+                })
+            }
+        });
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.definir_locais(vec![local("nova-1"), local("nova-2")], cx);
+                tela.selecionar_tudo(cx);
+                tela.dar_nota(4, cx);
+            })
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+
+        assert_eq!(
+            *pedidos.lock().expect("os pedidos"),
+            vec![(vec!["nova-1".to_string(), "nova-2".into()], 4)],
+            "classificar a importada não pediu o passo 3 à raiz"
+        );
+        assert!(
+            publicador.negociadas().is_empty(),
+            "a foto local não tem linha no site: negociar com o id local daria erro"
+        );
+
+        // O mesmo gesto, mas de balcão: a tela recusa e diz por quê.
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.selecionar_tudo(cx);
+                tela.alternar_levada(cx);
+                assert!(
+                    tela.erro
+                        .as_deref()
+                        .is_some_and(|e| e.contains("ainda não subiram")),
+                    "sinalizar uma foto que não subiu não pode falhar em silêncio: {:?}",
+                    tela.erro
+                );
+            })
+            .expect("a janela deve estar aberta");
+        assert!(publicador.negociadas().is_empty());
+    }
+
+    /// 🚨 **O arquivo é copiado para a pasta do ensaio — nunca catalogado no
+    /// cartão.**
+    ///
+    /// Regra do dono, 8/set/2026: *"precisa ser para pasta padrão, pois o
+    /// usuário pode usar um cartão de memória e seria perigoso para a operação
+    /// de carga e descarga de fotos, e precisa estar numa pasta de forma
+    /// previsível"*.
+    ///
+    /// O perigo é concreto e não avisa: com `ImportMode::Add` o catálogo
+    /// guardaria `/Volumes/NIKON D750/DCIM/…`, e a foto sumiria do app no
+    /// instante em que o cartão saísse — no meio da sessão, com o cliente na
+    /// frente. Formatar o cartão para o próximo ensaio apagaria o anterior.
+    ///
+    /// ⚠️ **Os padrões do `ImportOptions` são o oposto do previsível**, e é por
+    /// isso que este teste afirma cada um: `ByDate` espalharia o ensaio por
+    /// `YYYY/MM/DD` da EXIF, e `Standard` renomearia para
+    /// `photo-2026-09-08-001.jpg` — um nome que ninguém procura e que também não
+    /// é estável.
+    #[gpui::test]
+    fn a_importacao_copia_para_a_pasta_previsivel_do_ensaio(cx: &mut TestAppContext) {
+        let seletor = Arc::new(SeletorDeMentira::escolhe(&[
+            "/Volumes/NIKON D750/DCIM/DSC_2571.jpg",
+        ]));
+        let importador = Arc::new(ImportadorDeMentira::default());
+        let janela = janela_completa(
+            cx,
+            publicador_com(Vec::new(), false),
+            seletor,
+            importador.clone(),
+        );
+        entrar(cx, &janela);
+
+        clicar(cx, &janela, "detalhe-importar");
+        colher_ate_parar(cx, &janela);
+
+        let (_, opcoes) = importador.importados().remove(0);
+        assert_eq!(
+            opcoes.mode,
+            ImportMode::Copy,
+            "catalogar no cartão faz a foto sumir quando ele sai"
+        );
+        assert_eq!(
+            opcoes.organization,
+            OrganizationStrategy::IntoOneFolder,
+            "por data, um ensaio de dois dias vira duas pastas"
+        );
+        // 🚨 **UUID no disco desde 8/set/2026** — e o operador continua vendo
+        // `DSC_2571.jpg`, que agora mora em `photos.nome_original`
+        // (migration 022). Com `KeepOriginal`, dois cartões com a mesma
+        // `DSC_2571.jpg` no mesmo ensaio faziam a segunda virar `DSC_2571_1.jpg`
+        // — um nome que não existe em lugar nenhum além do nosso disco.
+        assert_eq!(opcoes.rename_pattern, RenamePattern::Uuid);
+
+        let destino = std::path::PathBuf::from(opcoes.destination.expect("a pasta do ensaio"));
+        assert!(
+            destino.starts_with(infrastructure::paths::AppPaths::catalog_root()),
+            "a pasta tem de ficar dentro do catálogo: {destino:?}"
+        );
+        assert!(
+            destino.ends_with("Ensaios/Ensaio - g1"),
+            "a pasta tem de ser previsível pelo ensaio: {destino:?}"
+        );
+    }
+
+    /// ⚠️ **O título do ensaio vira nome de pasta, e nem todo título pode.**
+    ///
+    /// Uma barra em "Ana / Bruno" criaria uma subpasta que ninguém pediu — e as
+    /// fotos do ensaio ficariam num lugar diferente do que a regra promete. Dois
+    /// pontos quebram o caminho no macOS, e ponto no fim vira outro nome no
+    /// Windows.
+    #[test]
+    fn o_titulo_do_ensaio_vira_pasta_sem_quebrar_o_caminho() {
+        assert!(pasta_do_ensaio("Ana / Bruno", "g1").ends_with("Ensaios/Ana - Bruno - g1"));
+        assert!(pasta_do_ensaio("15:30 · praia", "g2").ends_with("Ensaios/15-30 - praia - g2"));
+        assert!(pasta_do_ensaio("Ensaio.", "g3").ends_with("Ensaios/Ensaio - g3"));
+        // 🔑 Sem título, o id sozinho — que é o que garante a previsibilidade.
+        assert!(pasta_do_ensaio("   ", "g4").ends_with("Ensaios/g4"));
+    }
+
+    /// 🚨 **A foto importada não pode aparecer preta na grade.**
+    ///
+    /// Relatado pelo dono em 8/set/2026, com o app rodando: 21 fotos
+    /// importadas, cada célula com nome, "À venda", faixa e contagem de
+    /// downloads — e **nenhuma imagem**.
+    ///
+    /// A causa é uma chave só para dois caches. A miniatura da foto **do site**
+    /// é baixada da API e gravada sob `site:<id>`; a da foto **local** é gravada
+    /// pelo importador sob o id do catálogo, cru
+    /// (`preview_storage.save(&photo.id(), …)`). A grade procurava tudo sob
+    /// `site:` — e para a local isso não acha nada.
+    ///
+    /// ⚠️ **E não falha**: `espiar` devolve `None`, a célula desenha o retângulo
+    /// vazio, e o resto da linha continua certo. É o pior formato de defeito —
+    /// tudo funciona, menos a única coisa que o operador foi ver.
+    #[gpui::test]
+    fn a_foto_importada_nao_aparece_preta(cx: &mut TestAppContext) {
+        let dir = tempfile::TempDir::new().expect("diretório temporário");
+        let previews = Arc::new(PreviewManager::new_with_path(dir.path().to_path_buf()));
+        // A miniatura que o importador gravou: sob o id do catálogo, sem prefixo.
+        let imagem = image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+            8,
+            8,
+            image::Rgb([200, 30, 30]),
+        ));
+        previews
+            .save_thumbnail("id-do-catalogo", &imagem)
+            .expect("gravar a miniatura da importada");
+
+        let janela = janela_com_previews(
+            cx,
+            publicador_com(Vec::new(), false),
+            Arc::new(SeletorDeMentira::default()),
+            Arc::new(ImportadorDeMentira::default()),
+            previews,
+        );
+        entrar(cx, &janela);
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.definir_locais(vec![local("id-do-catalogo")], cx);
+                tela.preparar_miniaturas();
+
+                assert!(
+                    tela.miniaturas.espiar("id-do-catalogo").is_some(),
+                    "a célula da foto importada ficou preta: a grade procurou a \
+                     miniatura sob 'site:', onde só mora a do site"
+                );
+                assert!(
+                    tela.miniaturas.espiar("site:id-do-catalogo").is_none(),
+                    "a local não mora sob o prefixo do site"
+                );
+            })
+            .expect("a janela deve estar aberta");
     }
 }

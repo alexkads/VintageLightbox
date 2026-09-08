@@ -161,6 +161,22 @@ pub enum RenamePattern {
     Standard,
     /// Manter nome original do arquivo
     KeepOriginal,
+    /// O arquivo no disco vira `<uuid>.ext`, e o nome de origem vai para
+    /// `photos.nome_original` (migration 022).
+    ///
+    /// 🚨 **É o modo do ensaio, e existe para o caminho parar de carregar
+    /// significado.** Proposta do dono (2026-09-08): a nuvem já guardava assim
+    /// — `pos-venda/<uuid>/originais/<uuid>.jpg`, com o nome do cliente numa
+    /// coluna — e o desktop era quem estava fora do padrão.
+    ///
+    /// 🔑 **Some com a colisão, e com o nome inventado que ela produzia.** Duas
+    /// `DSC_2571.jpg` de dois cartões no mesmo ensaio: `KeepOriginal` resolvia
+    /// renomeando a segunda para `DSC_2571_1.jpg`, e o app passava a chamá-la
+    /// por um nome que não existe em lugar nenhum além do nosso disco.
+    ///
+    /// ⚠️ **A extensão é preservada**: ela não é enfeite — é por ela que o
+    /// sistema, o `image` e o LibRaw sabem o que estão abrindo.
+    Uuid,
     /// Padrão customizado (v2 feature)
     Custom(String),
 }
@@ -171,6 +187,10 @@ impl RenamePattern {
         match self {
             Self::Standard => "photo-YYYY-MM-DD-001",
             Self::KeepOriginal => "Manter nome original",
+            // O rótulo diz o que o operador ganha, e não o que o disco faz: o
+            // nome de origem continua sendo o que ele vê em toda a interface —
+            // ele só deixa de ser o nome do arquivo.
+            Self::Uuid => "UUID no disco, nome original no catálogo",
             Self::Custom(_) => "Customizado",
         }
     }

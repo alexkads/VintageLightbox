@@ -209,6 +209,11 @@ impl FileOrganizerImpl {
             RenamePattern::KeepOriginal => {
                 Self::generate_unique_name(&dest_dir, original_name).await
             }
+            // 🔑 **Não passa por `generate_unique_name`, e não precisa.** O
+            // sufixo `_1` existe para resolver colisão de nome; um UUID v4 não
+            // colide, e chamar a reserva aqui só acrescentaria um `stat` por
+            // arquivo num lote de 500.
+            RenamePattern::Uuid => format!("{}.{extension}", uuid::Uuid::new_v4()),
             RenamePattern::Custom(_) => {
                 // v2 feature - por enquanto usa Standard
                 let (year, month, day) = Self::extract_date(metadata);
@@ -472,5 +477,79 @@ mod tests {
         // Verificar que diretórios foram criados
         let expected_dir = temp_dest.path().join("2024").join("03").join("15");
         assert!(tokio::fs::try_exists(&expected_dir).await.unwrap());
+    }
+}
+
+#[cfg(test)]
+mod nome_uuid_testes {
+    use super::*;
+    use domain::value_objects::ImportMode;
+
+    fn opcoes_do_ensaio(destino: &Path) -> ImportOptions {
+        ImportOptions {
+            mode: ImportMode::Copy,
+            destination: Some(destino.to_string_lossy().into_owned()),
+            organization: OrganizationStrategy::IntoOneFolder,
+            rename_pattern: RenamePattern::Uuid,
+            ..Default::default()
+        }
+    }
+
+    /// 🚨 **Duas fotos com o mesmo nome, de dois cartões, no mesmo ensaio.**
+    ///
+    /// Com `KeepOriginal` a segunda virava `DSC_2571_1.jpg`, e o app passava a
+    /// chamá-la por um nome que não existe em lugar nenhum além do nosso disco.
+    /// Com UUID as duas entram inteiras, e o nome que o operador vê continua
+    /// sendo `DSC_2571.jpg` para as duas — que é a verdade.
+    #[tokio::test]
+    async fn duas_fotos_de_mesmo_nome_entram_sem_inventar_nome() {
+        let origem = tempfile::TempDir::new().expect("origem");
+        let destino = tempfile::TempDir::new().expect("destino");
+        let organizador = FileOrganizerImpl::new(destino.path().to_path_buf());
+
+        let mut caminhos = Vec::new();
+        for cartao in ["cartao-a", "cartao-b"] {
+            let pasta = origem.path().join(cartao);
+            std::fs::create_dir_all(&pasta).expect("pasta");
+            let arquivo = pasta.join("DSC_2571.JPG");
+            std::fs::write(&arquivo, b"pixels").expect("gravar");
+            caminhos.push(FilePath::new(arquivo.to_str().unwrap()).expect("caminho"));
+        }
+
+        let mut nomes = Vec::new();
+        for caminho in &caminhos {
+            let destino_final = organizador
+                .organize_file_with(caminho, None, &opcoes_do_ensaio(destino.path()))
+                .await
+                .expect("organizar");
+            let nome = Path::new(destino_final.as_str().unwrap_or_default())
+                .file_name()
+                .and_then(|n| n.to_str())
+                .expect("nome")
+                .to_string();
+            nomes.push(nome);
+        }
+
+        assert_ne!(nomes[0], nomes[1], "dois UUID não colidem");
+        for nome in &nomes {
+            let (base, extensao) = nome.rsplit_once('.').expect("nome com extensão");
+            // 🔑 A extensão é preservada: é por ela que o sistema, o `image` e o
+            // LibRaw sabem o que estão abrindo.
+            assert_eq!(extensao, "jpg", "a extensão tem de sobreviver: {nome}");
+            uuid::Uuid::parse_str(base)
+                .unwrap_or_else(|_| panic!("o nome no disco tem de ser um UUID: {nome}"));
+            assert!(
+                !nome.contains("DSC_2571"),
+                "o nome de origem não entra no disco — ele vai para o catálogo"
+            );
+        }
+
+        // 🚨 **As duas fotos existem.** O ponto de tudo isto é não perder foto:
+        // um `_1` a menos não pode virar um arquivo sobrescrito.
+        let entradas: Vec<_> = std::fs::read_dir(destino.path())
+            .expect("ler o destino")
+            .flatten()
+            .collect();
+        assert_eq!(entradas.len(), 2, "as duas fotos têm de estar no disco");
     }
 }

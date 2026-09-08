@@ -443,3 +443,59 @@ async fn uma_foto_que_ja_nasce_no_site_e_gravada_com_o_id() {
         Some("foto-remota-2")
     );
 }
+
+/// 🚨 **O nome de origem tem de atravessar o banco.**
+///
+/// Desde a migration 022 o arquivo no disco se chama `<uuid>.jpg`, e o nome que
+/// a câmera deu mora só nesta coluna. Um `bind` esquecido no INSERT ou no UPDATE
+/// **não falha**: a foto salva, e o nome volta `None` na próxima abertura — a
+/// grade passa a mostrar UUID, e o cliente também. É a armadilha das sete etapas
+/// que engolem campo desconhecido em silêncio (`docs/07-E2E-TESTING.md` §3).
+#[tokio::test]
+async fn o_nome_de_origem_atravessa_o_banco() {
+    let repo = create_test_repository().await;
+
+    let mut photo = Photo::new(FilePath::new("/Ensaios/Teste - g1/abc-uuid.jpg").unwrap());
+    let id = photo.id();
+    photo.definir_nome_original(Some("DSC_2571.JPG".into()));
+    repo.save(&photo).await.expect("gravar");
+
+    let lida = repo.find_by_id(&id).await.unwrap().expect("a foto existe");
+    assert_eq!(lida.nome_original(), Some("DSC_2571.JPG"));
+    assert_eq!(
+        lida.file_name(),
+        Some("DSC_2571.JPG"),
+        "o app tem de continuar chamando a foto pelo nome da câmera"
+    );
+
+    // E o `update` também: a foto muda de nota, de ensaio e de dono o dia
+    // inteiro, e cada gravação passa pelo mesmo SET.
+    let mut mudada = lida;
+    mudada.rate(Rating::new(4).unwrap()).unwrap();
+    repo.update(&mudada).await.expect("atualizar");
+
+    let relida = repo.find_by_id(&id).await.unwrap().expect("a foto existe");
+    assert_eq!(
+        relida.nome_original(),
+        Some("DSC_2571.JPG"),
+        "o UPDATE apagou o nome de origem"
+    );
+}
+
+/// ⚠️ **A foto de antes da migration 022 continua tendo nome.**
+///
+/// O backfill preenche a coluna a partir do caminho, mas ele é conveniência e
+/// não correção: um caminho do Windows sai errado dele. Quem garante o nome é a
+/// queda de `file_name()` para o caminho — e é ela que este teste segura.
+#[tokio::test]
+async fn a_foto_antiga_sem_a_coluna_continua_com_nome() {
+    let repo = create_test_repository().await;
+
+    let photo = Photo::new(FilePath::new("/Pictures/Catalog/2026/09/08/DSC_0001.NEF").unwrap());
+    let id = photo.id();
+    repo.save(&photo).await.expect("gravar");
+
+    let lida = repo.find_by_id(&id).await.unwrap().expect("a foto existe");
+    assert_eq!(lida.nome_original(), None, "nada foi guardado");
+    assert_eq!(lida.file_name(), Some("DSC_0001.NEF"), "e ela tem nome");
+}

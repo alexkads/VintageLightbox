@@ -304,6 +304,18 @@ impl ImportWithOptionsUseCase {
         // 3. Criar entidade Photo
         let mut photo = Photo::new(dest_path.clone());
         photo.set_metadata(metadata);
+        // 🚨 **O nome de origem é gravado aqui, e é a única chance.** Com
+        // `RenamePattern::Uuid` o `dest_path` já é `<uuid>.jpg`, e daqui para a
+        // frente não há de onde tirar `DSC_2571.JPG`: `source` é a última coisa
+        // que ainda sabe. Sem esta linha o operador perderia o nome na grade, na
+        // tira, no painel, na Revelação e na exportação — e o cliente veria um
+        // UUID na galeria dele (migration 022).
+        photo.definir_nome_original(
+            std::path::Path::new(&source.to_string_lossy().to_string())
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(str::to_string),
+        );
         // 🚨 O ensaio entra **na criação**, e não depois: uma foto que chega ao
         // catálogo sem ensaio não aparece na grade da sessão que a importou, e o
         // sintoma é a importação "não ter funcionado".

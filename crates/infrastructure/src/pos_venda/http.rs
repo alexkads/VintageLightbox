@@ -361,10 +361,21 @@ impl PosVendaApi for PosVendaApiHttp {
             .file_name(foto.nome.clone())
             .mime_str("image/jpeg")
             .map_err(|e| DomainError::InfrastructureError(e.to_string()))?;
-        let form = reqwest::multipart::Form::new()
+        let mut form = reqwest::multipart::Form::new()
             .text("estado", foto.estado.como_texto())
-            .text("ordem", foto.ordem.to_string())
-            .part("file", arquivo);
+            .text("ordem", foto.ordem.to_string());
+        // 🚨 **Sem a nota o site recusa com `400`** — *"a foto sobe
+        // classificada: informe a nota de 1 a 5"*. Ela faltava aqui, e o passo 3
+        // do app não subia foto nenhuma.
+        if let Some(nota) = foto.nota {
+            form = form.text("nota", nota.to_string());
+        }
+        // 🔑 A chave de idempotência: reenviar a mesma foto devolve a que já
+        // está lá, em vez de uma segunda cópia na galeria do cliente.
+        if let Some(chave) = foto.chave_do_cliente.clone() {
+            form = form.text("chave_do_cliente", chave);
+        }
+        let form = form.part("file", arquivo);
 
         let resposta = self
             .client
@@ -982,7 +993,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn enviar_foto_manda_o_multipart_com_o_estado_do_balcao() {
+    async fn enviar_foto_manda_o_multipart_com_estado_nota_e_chave() {
         let servidor = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/api/v2/pos-venda/galerias/g1/fotos"))
@@ -990,6 +1001,13 @@ mod tests {
             .and(body_string_contains("name=\"estado\""))
             .and(body_string_contains("levada_no_balcao"))
             .and(body_string_contains("name=\"ordem\""))
+            // 🚨 **Sem a `nota` o site responde `400`** — *"a foto sobe
+            // classificada"*. O campo faltava no multipart, e com ele faltando
+            // o passo 3 do app não subia foto nenhuma.
+            .and(body_string_contains("name=\"nota\""))
+            // 🔑 A chave de idempotência: reenviar devolve a foto que já está lá.
+            .and(body_string_contains("name=\"chave_do_cliente\""))
+            .and(body_string_contains("3f1c9a6e-0000-4000-8000-000000000001"))
             .and(body_string_contains("filename=\"DSC_001.jpg\""))
             .respond_with(ResponseTemplate::new(201).set_body_json(json!({
                 "id": "f1", "galeria_id": "g1", "arquivo": "DSC_001.jpg",
@@ -1011,6 +1029,8 @@ mod tests {
                     jpeg: b"jpeg-de-mentira".to_vec(),
                     estado: EstadoNoBalcao::LevadaNoBalcao,
                     ordem: 3,
+                    nota: Some(4),
+                    chave_do_cliente: Some("3f1c9a6e-0000-4000-8000-000000000001".into()),
                 },
             )
             .await

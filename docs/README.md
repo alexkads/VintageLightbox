@@ -98,6 +98,17 @@ Com a rota da API de cada gesto e os comentários do dono que explicam cada deci
 **Leia se você quer**: conferir uma tela de cá contra a de lá sem abrir o site — é a referência de
 "mesmo gesto, mesmo resultado".
 
+### 11. [Offline com sincronização](11-OFFLINE-E-SINCRONIZACAO.md) 🆕
+**Conteúdo**: o modelo que o desktop e o navegador já seguem — os bytes esperam localmente, a
+classificação autoriza a subida —, e o problema que ele ainda tem: **a chave da sincronização é o
+nome do arquivo**. Duas `DSC_2571.jpg` de dois cartões não cabem na mesma galeria, e a idempotência
+da retomada depende de um dado que não é único. Traz a proposta (chave UUID gerada pelo cliente) em
+três fases, e o que cada uma custa.
+
+**Leia se você quer**: mexer no envio de qualquer um dos dois clientes, ou entender por que um
+`409 já existe uma foto chamada X` aparece no meio de uma sessão. ⚠️ **É plano, não é código** —
+nada dele foi implementado.
+
 ## 🗄️ História — [`historico/`](historico/)
 
 Documentos que descrevem decisões tomadas, e que não orientam o próximo commit. **Continuam valendo

@@ -111,24 +111,53 @@ pub mod mentira {
     pub struct SeletorDeMentira {
         pub escolha: Mutex<Vec<String>>,
         pub pedidos: Mutex<usize>,
+        /// Segura a resposta até [`SeletorDeMentira::responder`] — a janela do
+        /// sistema que fica aberta enquanto o operador procura a pasta.
+        ///
+        /// 🚨 **O `Default` responde no mesmo instante, e isso escondeu um
+        /// defeito por completo** (8/set/2026): a janela real fica aberta
+        /// *segundos*, e nesse tempo a colheita da tela desistia. Com a
+        /// resposta imediata não havia esse tempo — nenhum teste podia ver.
+        pub demorado: bool,
+        pub guardado: Mutex<Option<Sender<Vec<String>>>>,
     }
 
     impl SeletorDeMentira {
         pub fn escolhe(caminhos: &[&str]) -> Self {
             Self {
                 escolha: Mutex::new(caminhos.iter().map(|c| c.to_string()).collect()),
-                pedidos: Mutex::new(0),
+                ..Default::default()
+            }
+        }
+
+        /// O mesmo, mas só responde quando o teste mandar.
+        pub fn demorado(caminhos: &[&str]) -> Self {
+            Self {
+                demorado: true,
+                ..Self::escolhe(caminhos)
             }
         }
 
         pub fn pedidos(&self) -> usize {
             *self.pedidos.lock().expect("os pedidos")
         }
+
+        /// O operador enfim escolheu, e apertou "Abrir".
+        pub fn responder(&self) {
+            let canal = self.guardado.lock().expect("o guardado").take();
+            if let Some(canal) = canal {
+                let _ = canal.send(self.escolha.lock().expect("a escolha").clone());
+            }
+        }
     }
 
     impl SeletorDeFotos for SeletorDeMentira {
         fn escolher(&self, canal: Sender<Vec<String>>) {
             *self.pedidos.lock().expect("os pedidos") += 1;
+            if self.demorado {
+                *self.guardado.lock().expect("o guardado") = Some(canal);
+                return;
+            }
             let _ = canal.send(self.escolha.lock().expect("a escolha").clone());
         }
     }
