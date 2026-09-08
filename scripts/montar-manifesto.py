@@ -140,6 +140,12 @@ def main() -> None:
               "Privacidade e Segurança**, role até o fim e clique em **Abrir Assim Mesmo**.",
               "",
               "O truque antigo de *botão direito → Abrir* não funciona a partir do macOS 15.", "",
+              # 🔑 A saída sem o aviso, e sem pagar os US$ 99 da Apple: quem compila
+              #    na própria máquina não recebe arquivo com marca de quarentena, que
+              #    é o que o Gatekeeper interroga. O script está em `docs/instalar.sh`.
+              "Ou **compile na sua máquina** — aí não há aviso nenhum:", "",
+              "```bash", "curl -fsSL https://alexkads.github.io/VintageLightbox/instalar.sh | sh", "```", "",
+              "Exige o Xcode (grátis) e leva de 15 a 40 minutos na primeira vez.", "",
               "---", "",
               "Feito pelo **Recordar Fotos Estúdio** — Gramado e Canela, RS."]
     (SITE / "notas-do-lancamento.md").write_text("\n".join(corpo) + "\n")

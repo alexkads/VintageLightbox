@@ -278,10 +278,46 @@ Abrir; **a partir do 15 isso não funciona mais**. Hoje é: clicar em **OK**, ir
 → Privacidade e Segurança**, rolar até o fim e clicar em **Abrir Assim Mesmo**. A página de download
 explica assim, com os três passos.
 
-⚠️ **Não há como evitar isso sem pagar a Apple.** O app está apenas com assinatura *ad-hoc* — a que o
-linker do Rust põe sozinha, com `TeamIdentifier=not set`. Tirar o aviso exige **Developer ID +
-notarização**, que exigem o Apple Developer Program (US$ 99/ano). Qualquer outro "jeito" é trabalho
-que o **cliente** tem de fazer, não você.
+⚠️ **Não há como tirar o aviso de um `.dmg` baixado sem pagar a Apple.** O app está apenas com
+assinatura *ad-hoc* — a que o linker do Rust põe sozinha, com `TeamIdentifier=not set`. Tirar o aviso
+**do arquivo que se baixa** exige **Developer ID + notarização**, e os dois exigem o Apple Developer
+Program (US$ 99/ano).
+
+### 🔑 Há uma saída, e ela não é um truque: compilar na máquina de quem vai usar
+
+O Gatekeeper não interroga aplicativo não assinado — ele interroga **arquivo marcado com
+`com.apple.quarantine`**, e quem põe essa marca é o navegador, ao baixar. Um `.app` que saiu do
+compilador da própria máquina nunca a teve, e abre no primeiro duplo-clique. É a mesma razão pela
+qual `cargo run` sempre funcionou aqui e o `.dmg` não.
+
+Daí o **[`docs/instalar.sh`](../docs/instalar.sh)**, o segundo caminho de distribuição
+(8/set/2026):
+
+```bash
+curl -fsSL https://alexkads.github.io/VintageLightbox/instalar.sh | sh
+```
+
+Ele baixa o tarball da versão publicada, compila `ui-gpui` só para a arquitetura da máquina, monta o
+`.app` e o instala. Custa 15 a 40 minutos e ~10 GiB de quem instala; **não custa nada** a quem
+publica — nenhuma credencial, nenhum certificado, nenhum passo a mais no lançamento.
+
+⚠️ **Ele mora em `docs/`, e não em `scripts/`, porque `docs/` é o que o Pages publica** (o
+`upload-pages-artifact` do `instaladores.yml` sobe essa pasta inteira). É isso que dá a ele um
+endereço curto de uma linha; movê-lo para `scripts/` quebraria o comando que está na página de
+download, no README e nas notas de lançamento.
+
+🚨 **Ele carrega uma cópia do `Info.plist`, e ela precisa continuar batendo com o `packager.toml`.**
+São os mesmos campos que o `cargo-packager` gera — e o que **não pode** divergir é o
+`CFBundleIdentifier` (`br.com.recordarfotos.vintagelightbox`): é por ele que o macOS lembra as
+permissões já concedidas, e é por ele que uma atualização automática reconhece o app instalado. Ao
+mexer em `name`, `identifier`, `product-name` ou nos ícones aqui, acerte o `instalar.sh` junto.
+
+⚠️ **Só macOS, de propósito.** No Linux e no Windows os instaladores abrem sem esse interrogatório —
+compilar meia hora para chegar ao mesmo lugar seria custo sem troco, e o script recusa fora do macOS.
+
+O `.app` compilado assim **continua se atualizando sozinho**: o updater baixa o pacote do Releases e
+o instala ele mesmo, sem passar pelo navegador — ou seja, sem marca de quarentena — e ainda confere a
+assinatura minisign antes.
 
 ⚠️ **"Developer ID Application" não é App Store.** É o certificado de distribuição **fora** da loja —
 o mesmo que Zed, Docker e Figma usam. Quando existir, é um flag:

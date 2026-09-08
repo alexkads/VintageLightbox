@@ -36,6 +36,11 @@
   footer a{color:var(--destaque)}
   code{background:color-mix(in srgb,var(--borda) 55%,transparent);padding:.15em .4em;
        border-radius:.25em;font-size:.9em}
+  pre{background:color-mix(in srgb,var(--borda) 55%,transparent);padding:.9rem 1rem;
+      border-radius:.5rem;overflow-x:auto;font-size:.85rem;margin:.75rem 0}
+  pre code{background:none;padding:0;font-size:1em}
+  .fonte{border:1px solid var(--borda);border-radius:.5rem;padding:1.1rem 1.2rem;margin-top:1rem}
+  .fonte ul{margin:.6rem 0 0;padding-left:1.2rem;font-size:.875rem;color:var(--suave)}
 </style>
 </head>
 <body>
@@ -79,6 +84,45 @@
     <p style="margin:.6rem 0 0;font-size:.95em">
       ⚠️ O truque antigo de <em>botão direito → Abrir</em> <strong>não funciona mais</strong> a
       partir do macOS 15.
+    </p>
+    <p style="margin:.6rem 0 0;font-size:.95em">
+      👉 Ou <a href="#compilar">compile na sua máquina</a> — aí o aviso não aparece nenhuma vez.
+    </p>
+  </div>
+
+  <h2 id="compilar">Sem aviso nenhum: compile na sua máquina</h2>
+
+  <p style="color:var(--suave);font-size:.9375rem;margin:0">
+    O macOS só interroga o que <strong>chegou pela rede</strong> — é a marca de quarentena que o
+    navegador põe no arquivo baixado. Um aplicativo que saiu do compilador do seu próprio Mac nunca
+    teve essa marca: ele abre no primeiro duplo-clique, e nada muda depois disso. O comando baixa o
+    código, compila e instala em <code>/Applications</code>:
+  </p>
+
+  <pre><code>curl -fsSL https://alexkads.github.io/VintageLightbox/instalar.sh | sh</code></pre>
+
+  <div class="fonte">
+    <strong>O que ele pede, e o que custa</strong>
+    <ul>
+      <li><strong>Xcode</strong>, grátis na App Store, com o componente Metal
+          (<code>xcodebuild -downloadComponent MetalToolchain</code>) — o app compila os shaders
+          durante a build. Se faltar, o script diz exatamente isso antes de compilar qualquer coisa.</li>
+      <li><strong>Rust</strong>, que ele instala sozinho pelo <code>rustup</code>, dentro da sua
+          pasta pessoal e sem <code>sudo</code>.</li>
+      <li><strong>15 a 40 minutos</strong> na primeira vez, e ~10 GiB em
+          <code>~/.vintagelightbox</code> — que dá para apagar depois.</li>
+      <li>Só macOS. No Linux e no Windows os instaladores acima já abrem sem esse passo, e
+          compilar não teria troco.</li>
+    </ul>
+    <p style="margin:.7rem 0 0;font-size:.875rem;color:var(--suave)">
+      Ler um script antes de executá-lo é sensato, e este não se ofende:
+      <code>curl -fsSL …/instalar.sh -o instalar.sh</code>, leia, depois <code>sh instalar.sh</code>.
+      Opções: <code>sh -s -- --versao main</code> compila o topo do desenvolvimento,
+      <code>--seco</code> mostra o que faria sem fazer.
+    </p>
+    <p style="margin:.7rem 0 0;font-size:.875rem;color:var(--suave)">
+      Depois da primeira vez, <strong>não é preciso recompilar</strong>: o aplicativo se atualiza
+      sozinho, conferindo a assinatura de cada atualização.
     </p>
   </div>
 

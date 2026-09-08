@@ -191,6 +191,38 @@ cada atualização é conferida por assinatura antes de ser instalada.
 >
 > O truque antigo de *botão direito → Abrir* **não funciona a partir do macOS 15**.
 
+### Ou compile na sua máquina — e o aviso do macOS não aparece
+
+```bash
+curl -fsSL https://alexkads.github.io/VintageLightbox/instalar.sh | sh
+```
+
+🔑 **Por que isso resolve.** O Gatekeeper interroga o que chegou pela rede **com a marca de
+quarentena** (`com.apple.quarantine`), que quem põe é o navegador. Um app que saiu do compilador da
+própria máquina nunca teve essa marca: abre no primeiro duplo-clique, sem passar por Ajustes do
+Sistema. O aviso acima existe porque o `.dmg` não é assinado com um **Developer ID** — que custa
+US$ 99 por ano à Apple, e que este projeto decidiu não pagar (8/set/2026).
+
+O script está em [`docs/instalar.sh`](docs/instalar.sh) — no `docs/`, que é o que o Pages publica, e
+é por isso que ele tem um endereço curto. Ele baixa o código da versão publicada, compila só para a
+arquitetura desta máquina, monta o `.app` com o mesmo `Info.plist` do instalador oficial e o instala
+em `/Applications`.
+
+| | |
+|---|---|
+| **Exige** | Xcode (grátis) com o componente Metal — o GPUI compila os shaders na build |
+| **Instala sozinho** | o Rust, pelo `rustup`, em `~/.cargo`, sem `sudo` |
+| **Custa** | 15 a 40 minutos na primeira vez, ~10 GiB em `~/.vintagelightbox` |
+| **Opções** | `sh -s -- --versao main`, `--destino <pasta>`, `--seco`, `--ajuda` |
+
+⚠️ **Só macOS, e é de propósito.** No Linux o `.deb` e o `.AppImage` instalam sem interrogatório
+nenhum, e no Windows o `.msi` pede *Executar assim mesmo* uma vez — nenhum dos dois tem o problema
+que compilar resolve. O script **recusa** fora do macOS, em vez de gastar meia hora para chegar ao
+mesmo lugar.
+
+Depois da primeira vez não é preciso recompilar: o app se atualiza sozinho, e a atualização continua
+sendo conferida por assinatura minisign — essa parte nunca dependeu da Apple.
+
 ### Como os instaladores são gerados
 
 Por **GitHub Actions**, e cada plataforma no sistema dela: `macos-14`, `ubuntu-22.04` e
