@@ -14,5 +14,6 @@ pub mod lightroom;
 pub mod persistencia;
 pub mod presets;
 pub mod processador;
+pub mod reposicao;
 pub mod sincronizacao;
 pub mod tela;

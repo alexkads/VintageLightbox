@@ -308,10 +308,19 @@ async fn main() {
         ui_gpui::atualizacao::porta::AtualizadorDaWeb::novo(env!("CARGO_PKG_VERSION")),
     );
     let gerador: Arc<dyn GeradorDeMiniaturas> = Arc::new(GeradorDoDisco::novo(
-        gerador_de_miniaturas,
+        gerador_de_miniaturas.clone(),
         previews.clone(),
         tokio::runtime::Handle::current(),
     ));
+    // 🔑 **O mesmo gerador, outra chave.** O de cima grava sob
+    // `import::<caminho>`, para arquivo que ainda não está no catálogo; este
+    // grava sob o id da foto, refazendo o que o cache perdeu.
+    let repositor: Arc<dyn ui_gpui::revelacao::reposicao::Repositor> =
+        Arc::new(ui_gpui::revelacao::reposicao::RepositorDoDisco::novo(
+            gerador_de_miniaturas,
+            previews.clone(),
+            tokio::runtime::Handle::current(),
+        ));
 
     Application::new().run(move |cx: &mut App| {
         // Antes de qualquer janela: é o `init` que cria o `Theme` global, o
@@ -353,6 +362,7 @@ async fn main() {
                                 folha: folha.clone(),
                                 marcador: marcador.clone(),
                                 gerador: gerador.clone(),
+                                repositor: repositor.clone(),
                                 guarda_de_presets: guarda_de_presets.clone(),
                                 escolha_de_presets: escolha_de_presets.clone(),
                                 explorador: explorador.clone(),

@@ -35,6 +35,7 @@ use crate::pos_venda::porta::Recado as PosVendaRecado;
 use crate::revelacao::persistencia::{self, Gravador};
 use crate::revelacao::presets::GuardaDePresets;
 use crate::revelacao::processador::Ajustes;
+use crate::revelacao::reposicao::{APor, Recado as ReposicaoRecado, Repositor};
 use crate::revelacao::sincronizacao;
 use crate::revelacao::tela::{PedidoDaRevelacao, Revelacao};
 use crate::sessoes::arquivos::SeletorDeFotos;
@@ -62,6 +63,14 @@ pub struct Portas {
     pub folha: Arc<dyn crate::impressao::porta::Folha>,
     pub marcador: Arc<dyn Marcador>,
     pub gerador: Arc<dyn GeradorDeMiniaturas>,
+    /// Quem refaz o preview de uma foto catalogada a partir do arquivo.
+    ///
+    /// ⚠️ **Separado do [`Self::gerador`], que é da importação**: aquele gera
+    /// miniatura de arquivo que ainda **não** está no catálogo, e grava sob a
+    /// chave `import::<caminho>`. Este grava sob o id da foto. Juntar os dois
+    /// numa porta só faria um deles escrever na chave do outro — e o sintoma
+    /// seria a grade mostrar a foto certa no lugar errado.
+    pub repositor: Arc<dyn Repositor>,
     pub guarda_de_presets: Arc<dyn GuardaDePresets>,
     /// Quem abre a janela do sistema para escolher `.lrtemplate` e `.xmp`.
     pub escolha_de_presets: Arc<dyn crate::revelacao::lightroom::EscolhaDePresets>,
@@ -308,6 +317,26 @@ pub struct Aplicativo {
     /// nenhum. Era o "não está sincronizando" de 7/set/2026, e valia também
     /// para classificar trinta fotos de uma vez.
     sincronias_pendentes: usize,
+    /// Quem refaz o preview que o cache perdeu, e por onde a resposta volta.
+    repositor: Arc<dyn Repositor>,
+    reposicoes: (Sender<ReposicaoRecado>, Receiver<ReposicaoRecado>),
+    /// Quantas fotos ainda faltam voltar do disco.
+    ///
+    /// 🚨 **Sem esta conta o laço parava na primeira** — o mesmo defeito que
+    /// `sincronias_pendentes` documenta, e aqui a lista é a tira inteira.
+    reposicoes_pendentes: usize,
+    /// As fotos já pedidas ao disco e que ainda não voltaram.
+    ///
+    /// 🚨 **A varredura roda a cada troca de foto, e o cache só muda quando a
+    /// reposição termina.** Sem esta lembrança, andar cinco fotos pela seta
+    /// enquanto a primeira ainda decodifica pediria as mesmas cinco outra vez, a
+    /// cada tecla — o repositor trabalha em série, então a fila cresceria mais
+    /// depressa do que anda, e a foto do palco ficaria atrás de dezenas de
+    /// duplicatas dela mesma.
+    reposicoes_pedidas: std::collections::HashSet<String>,
+    /// 🚨 A `Task` que espera o disco responder. **Descartá-la a cancela**, e a
+    /// foto ficaria em "Preparando…" com o preview já gravado no cache.
+    _reposicao: Option<gpui::Task<()>>,
     /// 🚨 A inscrição na travessia do zero da classificação. Sem ela nada acusa:
     /// as estrelas entram no banco, e nada sobe nem sai do site.
     _classificacao: gpui::Subscription,
@@ -588,6 +617,11 @@ impl Aplicativo {
             sincronias: channel(),
             _sincronia: None,
             sincronias_pendentes: 0,
+            repositor: portas.repositor,
+            reposicoes: channel(),
+            reposicoes_pendentes: 0,
+            reposicoes_pedidas: std::collections::HashSet::new(),
+            _reposicao: None,
             _classificacao: classificacao,
             _sessao_escolhida: sessao_escolhida,
             configuracoes: cx.new(|_| Configuracoes::nova(previews_das_configuracoes)),
@@ -945,6 +979,161 @@ impl Aplicativo {
         cx.notify();
     }
 
+    /// De onde vêm os pixels que faltam — a decisão, antes de ir buscá-los.
+    ///
+    /// 🔑 **Duas origens, e a foto diz qual é a dela.** Com `path` preenchido o
+    /// original está neste disco e o que faltou foi o **cache** (apagado nas
+    /// Configurações, catálogo copiado sem o `Previews.lrdata`, importação que
+    /// gravou a foto e não o preview) — refazer é ler o arquivo. Sem `path` a
+    /// foto só existe no site, e o bruto dela vem da cópia de trabalho: é o
+    /// passo 11, que já existia.
+    ///
+    /// 🚨 **A local não tinha saída nenhuma até aqui.** A Revelação dizia "não
+    /// tem preview no cache" e parava — com o JPEG de 6 MB no disco, a um
+    /// decode de distância. O beco sem saída era o defeito, não a ausência.
+    fn repor_os_pixels(&mut self, cx: &mut Context<Self>) {
+        // 🔑 **A tira entra mesmo com o palco cheio.** Quando "Limpar
+        // miniaturas" leva só as pequenas, a foto aberta desenha e a tira fica
+        // uma fileira de retângulos pretos — sem isto, ninguém repõe nunca,
+        // porque a única pergunta feita era sobre o palco.
+        let a_repor: Vec<APor> = self
+            .revelacao
+            .read(cx)
+            .fotos_a_repor()
+            .into_iter()
+            .filter(|foto| !self.reposicoes_pedidas.contains(&foto.foto_id))
+            .collect();
+        if !a_repor.is_empty() {
+            self.refazer_o_cache_do_disco(a_repor, cx);
+        }
+
+        let revelacao = self.revelacao.read(cx);
+        if revelacao.tem_pixels() {
+            return;
+        }
+        // Sem arquivo neste disco, os pixels só existem no storage: passo 11.
+        // Com arquivo, a reposição acima já está a caminho, e a foto do palco é
+        // a primeira da fila.
+        if revelacao.foto_aberta().is_some_and(|f| f.path.is_empty()) {
+            self.buscar_os_pixels_na_nuvem(cx);
+        }
+    }
+
+    /// Manda refazer o cache das fotos que o disco ainda tem.
+    ///
+    /// ⚠️ **Fora da thread da interface, sempre.** Decodificar um JPEG de 6 MB
+    /// custa dezenas de milissegundos, e um `--release` esconde o quanto: em
+    /// `debug` são 57× mais (`CLAUDE.md`), o bastante para a janela travar
+    /// visivelmente — e aqui não é uma foto, é a tira inteira.
+    fn refazer_o_cache_do_disco(&mut self, a_repor: Vec<APor>, cx: &mut Context<Self>) {
+        // Só o palco tem frase a mostrar. Se ele já está desenhado, a reposição
+        // é da tira e acontece em silêncio, célula a célula.
+        if !self.revelacao.read(cx).tem_pixels() {
+            self.revelacao
+                .update(cx, |tela, cx| tela.avisar_que_os_pixels_vem_vindo(cx));
+        }
+        self.reposicoes_pendentes += a_repor.len();
+        self.reposicoes_pedidas
+            .extend(a_repor.iter().map(|foto| foto.foto_id.clone()));
+        self.repositor.repor(a_repor, self.reposicoes.0.clone());
+        self.esperar_a_reposicao(cx);
+    }
+
+    /// Espera o disco responder — **uma foto de cada vez, até a última**.
+    ///
+    /// 🚨 **O laço não pode morrer na primeira resposta.** É a mesma lição de
+    /// `esperar_a_sincronia`, e aqui ela vale ainda mais: as respostas chegam
+    /// espalhadas no tempo por construção, uma por decodificação, e desligar na
+    /// primeira deixaria a tira acender uma célula e parar.
+    ///
+    /// ⏱️ O teto é de 60 s por foto esperada — um RAW é o pior caso conhecido e
+    /// cabe folgado.
+    fn esperar_a_reposicao(&mut self, cx: &mut Context<Self>) {
+        let voltas = 600 * self.reposicoes_pendentes.max(1);
+        self._reposicao = Some(cx.spawn(async move |raiz, cx| {
+            for _ in 0..voltas {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_millis(100))
+                    .await;
+                let Ok(acabou) = raiz.update(cx, |raiz, cx| {
+                    raiz.colher_reposicao(cx);
+                    raiz.reposicoes_pendentes == 0
+                }) else {
+                    return;
+                };
+                if acabou {
+                    return;
+                }
+            }
+        }));
+    }
+
+    /// Drena o que o disco respondeu, e pinta o que chegou.
+    pub(crate) fn colher_reposicao(&mut self, cx: &mut Context<Self>) -> bool {
+        let mut chegou = false;
+        while let Ok(recado) = self.reposicoes.1.try_recv() {
+            chegou = true;
+            self.reposicoes_pendentes = self.reposicoes_pendentes.saturating_sub(1);
+            // Respondida, sai da lembrança: se ela voltar a faltar (o cache
+            // apagado de novo), a varredura seguinte pode pedi-la outra vez.
+            self.reposicoes_pedidas.remove(match &recado {
+                ReposicaoRecado::Reposta { foto_id, .. } => foto_id,
+                ReposicaoRecado::Falhou { foto_id, .. } => foto_id,
+            });
+            match recado {
+                ReposicaoRecado::Reposta { foto_id, imagem } => {
+                    // 🔑 **O mesmo `receber_pixels` do passo 11**, e não um
+                    // caminho paralelo: é ele que confere se a foto ainda é a
+                    // do palco. Uma reposição que termina depois de a seta ter
+                    // andado pintaria a foto errada — e ficaria bonita, que é o
+                    // que torna esse defeito caro.
+                    //
+                    // `false` é o caso comum aqui, e não é falha: são as fotos
+                    // da tira, que ninguém está olhando de perto. Elas só
+                    // precisam que a célula releia o cache.
+                    let era_do_palco = self
+                        .revelacao
+                        .update(cx, |tela, cx| tela.receber_pixels(&foto_id, *imagem, cx));
+                    if !era_do_palco {
+                        self.revelacao
+                            .update(cx, |tela, cx| tela.miniatura_reposta(&foto_id, cx));
+                    }
+                }
+                ReposicaoRecado::Falhou { foto_id, erro } => {
+                    // 🔑 **O disco falhou, mas pode haver cópia no site.** É a
+                    // foto que já subiu e cujo arquivo daqui saiu de baixo —
+                    // movida para outro disco, cartão desmontado, pasta
+                    // renomeada. Ela tem `path` (por isso veio parar aqui) e tem
+                    // id no site, então o passo 11 ainda responde.
+                    //
+                    // ⚠️ **Só quando o palco está vazio, e só para a foto dele.**
+                    // A tira também passa por aqui, e uma rede por miniatura
+                    // que faltou transformaria "abriu numa pasta antiga" em
+                    // duzentos downloads.
+                    let e_o_palco_vazio = {
+                        let revelacao = self.revelacao.read(cx);
+                        !revelacao.tem_pixels()
+                            && revelacao.foto_aberta().is_some_and(|f| f.id == foto_id)
+                    };
+                    // 🚨 **Não achou saída, a tela para de prometer.** Ela volta
+                    // a dizer "não tem preview no cache", que passou a ser a
+                    // verdade — um "Preparando…" eterno é pior do que a frase
+                    // seca, porque quem lê continua esperando.
+                    //
+                    // ⚠️ E só a falha **da foto do palco** apaga a promessa: a
+                    // dele é a primeira da fila, então uma da tira falhando
+                    // enquanto ele espera não é motivo para desistir por ele.
+                    if e_o_palco_vazio && !self.buscar_os_pixels_na_nuvem(cx) {
+                        self.revelacao
+                            .update(cx, |tela, cx| tela.desistir_dos_pixels(cx));
+                    }
+                    self.avisar_onde_esta_olhando(erro, cx);
+                }
+            }
+        }
+        chegou
+    }
+
     /// O passo 11 do fluxo: os pixels que só existem no storage.
     ///
     /// 🔑 **Só quando não há nada local.** A cópia de trabalho do site custa uma
@@ -954,24 +1143,28 @@ impl Aplicativo {
     ///
     /// ⚠️ **E só depois de a Revelação ter tentado abrir.** É ela quem sabe se o
     /// cache local tinha alguma coisa; perguntar antes seria adivinhar.
-    fn buscar_os_pixels_na_nuvem(&mut self, cx: &mut Context<Self>) {
+    ///
+    /// Devolve se o download foi mesmo pedido — quem chama precisa saber, para
+    /// não deixar a tela em "Preparando…" esperando o que ninguém foi buscar.
+    fn buscar_os_pixels_na_nuvem(&mut self, cx: &mut Context<Self>) -> bool {
         let Some(sessao) = self.sessao().cloned() else {
-            return;
+            return false;
         };
         let revelacao = self.revelacao.read(cx);
         if revelacao.tem_pixels() {
-            return;
+            return false;
         }
         let Some(foto) = revelacao.foto_aberta() else {
-            return;
+            return false;
         };
         let (Some(no_site), local) = (foto.pos_venda_foto_id.clone(), foto.id.clone()) else {
-            return;
+            return false;
         };
 
         self.publicador
             .copia_de_trabalho(sessao, local, no_site, self.sincronias.0.clone());
         self.esperar_a_sincronia(1, cx);
+        true
     }
 
     /// Despacha um gesto de triagem para **a grade que está na frente**.
@@ -1364,7 +1557,7 @@ impl Aplicativo {
             // cache local não tem o bruto e a foto está no site, os pixels vêm
             // de lá. A pergunta é feita **depois** de a Revelação abrir a
             // foto, porque é ela quem sabe se sobrou vazio.
-            PedidoDaRevelacao::AbriuOutraFoto => self.buscar_os_pixels_na_nuvem(cx),
+            PedidoDaRevelacao::AbriuOutraFoto => self.repor_os_pixels(cx),
         }
     }
 
@@ -2855,6 +3048,7 @@ mod testes {
     use crate::revelacao::lightroom::mentira::EscolhaDeMentira;
     use crate::revelacao::persistencia::mentira::GravadorDeMentira;
     use crate::revelacao::presets::mentira::GuardaDeMentira;
+    use crate::revelacao::reposicao::mentira::RepositorDeMentira;
 
     /// As portas de mentira, que é o que quase todo teste daqui quer.
     fn portas() -> Portas {
@@ -2867,6 +3061,10 @@ mod testes {
             folha: Arc::new(FolhaDeMentira::default()),
             marcador: Arc::new(MarcadorDeMentira::default()),
             gerador: Arc::new(GeradorDeMentira::default()),
+            // O padrão de mentira não devolve imagem nenhuma: quem quiser
+            // afirmar sobre a reposição troca esta porta por
+            // `RepositorDeMentira::que_devolve`.
+            repositor: Arc::new(RepositorDeMentira::default()),
             guarda_de_presets: Arc::new(GuardaDeMentira::default()),
             escolha_de_presets: Arc::new(EscolhaDeMentira::default()),
             explorador: Arc::new(ExploradorDeMentira::default()),
@@ -3334,6 +3532,226 @@ mod testes {
                 );
             })
             .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 **O beco sem saída de "não tem preview no cache".**
+    ///
+    /// A foto está catalogada, o arquivo está no disco e o cache perdeu o
+    /// preview — "Limpar previews" nas Configurações basta. A Revelação abria
+    /// numa frase e ficava lá: nada era pedido a ninguém, e o único jeito de
+    /// sair era reimportar a foto.
+    #[gpui::test]
+    fn abrir_sem_cache_manda_refazer_o_preview_do_disco(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        let repositor = Arc::new(RepositorDeMentira::que_devolve(foto_vermelha()));
+        cx.update(gpui_component::init);
+
+        let janela = cx.add_window({
+            let (previews, repositor) = (previews.clone(), repositor.clone());
+            |window, cx| {
+                Aplicativo::ja_dentro(
+                    acervo(),
+                    previews,
+                    Vec::new(),
+                    Portas {
+                        repositor,
+                        ..portas()
+                    },
+                    window,
+                    cx,
+                )
+            }
+        });
+
+        janela
+            .update(cx, |app, window, cx| {
+                app.biblioteca
+                    .update(cx, |tela, cx| tela.selecionar(Some(1), cx));
+                app.revelar(window, cx);
+                assert!(
+                    !app.revelacao.read(cx).tem_pixels(),
+                    "o cache está vazio: o palco abre sem imagem"
+                );
+            })
+            .expect("a janela deve estar aberta");
+        // 🔑 O `AbriuOutraFoto` é um evento, e evento não chega dentro do mesmo
+        // `update` que o emitiu — é no efeito seguinte que a raiz o atende.
+        cx.run_until_parked();
+
+        janela
+            .update(cx, |app, _window, cx| {
+                // O laço de espera anda por relógio; aqui a colheita é chamada
+                // à mão, como nos outros testes de porta.
+                app.colher_reposicao(cx);
+                assert!(
+                    app.revelacao.read(cx).tem_pixels(),
+                    "o preview refeito do disco tem de chegar ao palco"
+                );
+            })
+            .expect("a janela deve estar aberta");
+
+        assert_eq!(
+            repositor.pedidos().first().map(|a| a.foto_id.clone()),
+            Some("id-retrato.jpg".into()),
+            "a foto do palco é a primeira da fila: {:?}",
+            repositor.pedidos()
+        );
+    }
+
+    /// 🚨 **A tira entra no mesmo pedido, atrás do palco.**
+    ///
+    /// Quando o cache some, some inteiro: a foto aberta e as vinte da tira. Se
+    /// só o palco fosse reposto, o fotógrafo ficaria com uma foto boa cercada de
+    /// retângulos pretos — e sem nada acontecendo, porque a única pergunta feita
+    /// era sobre o palco.
+    #[gpui::test]
+    fn a_tira_inteira_entra_na_reposicao_atras_do_palco(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        let repositor = Arc::new(RepositorDeMentira::que_devolve(foto_vermelha()));
+        cx.update(gpui_component::init);
+
+        let janela = cx.add_window({
+            let (previews, repositor) = (previews.clone(), repositor.clone());
+            |window, cx| {
+                Aplicativo::ja_dentro(
+                    acervo(),
+                    previews,
+                    Vec::new(),
+                    Portas {
+                        repositor,
+                        ..portas()
+                    },
+                    window,
+                    cx,
+                )
+            }
+        });
+
+        janela
+            .update(cx, |app, window, cx| {
+                app.biblioteca
+                    .update(cx, |tela, cx| tela.selecionar(Some(1), cx));
+                app.revelar(window, cx);
+            })
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+
+        let pedidas: Vec<String> = repositor.pedidos().into_iter().map(|a| a.foto_id).collect();
+        assert_eq!(
+            pedidas,
+            vec!["id-retrato.jpg", "id-DSC_001.NEF"],
+            "o palco na frente, a vizinha da tira em seguida"
+        );
+    }
+
+    /// 🚨 **Andar pela seta não pode reenfileirar o que já foi pedido.**
+    ///
+    /// `AbriuOutraFoto` dispara a cada troca de foto, e o cache só muda quando a
+    /// reposição termina — então a varredura seguinte veria as mesmas faltas.
+    /// Com o repositor trabalhando em série, a fila cresceria mais depressa do
+    /// que anda, e a foto do palco acabaria atrás de dezenas de duplicatas dela
+    /// mesma.
+    #[gpui::test]
+    fn andar_pela_tira_nao_pede_a_mesma_foto_duas_vezes(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        let repositor = Arc::new(RepositorDeMentira::que_devolve(foto_vermelha()));
+        cx.update(gpui_component::init);
+
+        let janela = cx.add_window({
+            let (previews, repositor) = (previews.clone(), repositor.clone());
+            |window, cx| {
+                Aplicativo::ja_dentro(
+                    acervo(),
+                    previews,
+                    Vec::new(),
+                    Portas {
+                        repositor,
+                        ..portas()
+                    },
+                    window,
+                    cx,
+                )
+            }
+        });
+
+        janela
+            .update(cx, |app, window, cx| {
+                app.biblioteca
+                    .update(cx, |tela, cx| tela.selecionar(Some(0), cx));
+                app.revelar(window, cx);
+            })
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+        assert_eq!(repositor.pedidos().len(), 2, "as duas do acervo, uma vez");
+
+        // A seta anda **sem** que ninguém tenha colhido as respostas: é o caso
+        // real, porque a colheita só acontece de 100 em 100 ms.
+        janela
+            .update(cx, |app, window, cx| {
+                app.revelacao
+                    .update(cx, |tela, cx| tela.andar(1, window, cx));
+            })
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+
+        assert_eq!(
+            repositor.pedidos().len(),
+            2,
+            "a seta pediu de novo o que já estava na fila: {:?}",
+            repositor.pedidos()
+        );
+    }
+
+    /// ⚠️ **O que já está no cache não é refeito.**
+    ///
+    /// Repor é decodificar o arquivo inteiro. Fazer isso na abertura de toda
+    /// foto transformaria a revelação em série — que é como se revela um
+    /// casamento — em duzentas decodificações que o cache já tinha respondido.
+    #[gpui::test]
+    fn o_que_esta_no_cache_nao_e_refeito(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        for id in ["id-retrato.jpg", "id-DSC_001.NEF"] {
+            previews
+                .save_preview(id, &foto_vermelha())
+                .expect("gravar preview");
+            previews
+                .save_thumbnail(id, &foto_vermelha())
+                .expect("gravar miniatura");
+        }
+        let repositor = Arc::new(RepositorDeMentira::que_devolve(foto_vermelha()));
+        cx.update(gpui_component::init);
+
+        let janela = cx.add_window({
+            let (previews, repositor) = (previews.clone(), repositor.clone());
+            |window, cx| {
+                Aplicativo::ja_dentro(
+                    acervo(),
+                    previews,
+                    Vec::new(),
+                    Portas {
+                        repositor,
+                        ..portas()
+                    },
+                    window,
+                    cx,
+                )
+            }
+        });
+
+        janela
+            .update(cx, |app, window, cx| {
+                app.biblioteca
+                    .update(cx, |tela, cx| tela.selecionar(Some(1), cx));
+                app.revelar(window, cx);
+            })
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+
+        assert!(
+            repositor.pedidos().is_empty(),
+            "o cache respondeu por todas: {:?}",
+            repositor.pedidos()
+        );
     }
 
     /// 🚨 Sair da Revelação grava o ajuste que ainda estava esperando.

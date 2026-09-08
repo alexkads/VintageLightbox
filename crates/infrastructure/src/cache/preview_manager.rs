@@ -150,6 +150,39 @@ impl PreviewManager {
         }
     }
 
+    /// Se o cache **tem** esta entrada, sem trazer a imagem.
+    ///
+    /// 🔑 **Existe para quem precisa perguntar por muitas fotos.** `get_*`
+    /// decodifica o JPEG e ainda o guarda na memória: varrer uma tira de 200
+    /// fotos com eles seria 200 decodes e o LRU inteiro trocado só para
+    /// descobrir o que falta. Aqui é um `SELECT 1` num índice — e o `PRIMARY
+    /// KEY (photo_id, type)` é justamente esse índice.
+    ///
+    /// ⚠️ **Não mexe no `last_accessed_at`.** Perguntar não é usar, e contar
+    /// como uso faria a varredura proteger do `cleanup_lru` exatamente as fotos
+    /// que ninguém abriu.
+    pub fn tem(&self, photo_id_str: &str, tipo: PreviewType) -> bool {
+        let Ok(conn) = self.conn.lock() else {
+            return false;
+        };
+        // O número da coluna sai de um `match`, como nos outros três pontos do
+        // arquivo — e não de um `as i32`: a ordem de declaração do enum viraria
+        // silenciosamente o valor gravado no banco.
+        let tipo = match tipo {
+            PreviewType::Thumbnail => 0,
+            PreviewType::Large => 1,
+        };
+        conn.query_row(
+            "SELECT 1 FROM previews WHERE photo_id = ?1 AND type = ?2",
+            params![photo_id_str, tipo],
+            |_| Ok(()),
+        )
+        .optional()
+        .ok()
+        .flatten()
+        .is_some()
+    }
+
     /// Helper to get a thumbnail as DynamicImage
     ///
     /// ⚠️ **Também passa pela memória.** A grade já tem cache próprio de

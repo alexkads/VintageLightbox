@@ -19,6 +19,7 @@ use adapters::view_models::PhotoViewModel;
 use biblioteca_core::selecao::Modificadores;
 use domain::entities::preset::PresetAdjustments;
 use domain::entities::{Preset, PresetId};
+use domain::services::PreviewType;
 use domain::value_objects::{AspectRatio, CropSettings};
 use gpui::{
     canvas, div, img, prelude::*, px, AnyElement, Bounds, Context, Entity, MouseButton,
@@ -46,6 +47,7 @@ use super::lightroom::{self, Arquivo, EscolhaDePresets, Relatorio};
 use super::persistencia::{self, Corte, Gravador};
 use super::presets::{self, GuardaDePresets};
 use super::processador::{Ajustes, Pedido, Processador};
+use super::reposicao::APor;
 use super::sincronizacao::{self, Escolha, Grupo};
 use infrastructure::transformacao;
 
@@ -81,6 +83,28 @@ const ALTURA_DO_FILMSTRIP: f32 = 84.0;
 /// ocupa ~300 KB, então 512 são ~150 MB no pior caso — e o pior caso é ter
 /// rolado a tira inteira de um acervo grande.
 const MINIATURAS_DA_TIRA: usize = 512;
+
+/// Até onde a varredura de reposição olha, para cada lado do palco.
+///
+/// 🚨 **Não é um limite de qualidade, é um limite de custo por tecla.** A
+/// varredura roda a cada troca de foto, na thread da interface, e pergunta duas
+/// coisas ao cache por foto: sem teto, um acervo de duas mil fotos seriam
+/// quatro mil consultas por seta apertada. Sessenta para cada lado cobrem umas
+/// seis telas de tira — muito além do que se vê — e custam cerca de um
+/// milissegundo.
+///
+/// ⚠️ **Nada fica para trás por causa dele.** A varredura recomeça no palco
+/// novo a cada troca, então a foto que ficou fora do alcance entra assim que a
+/// seta chegar perto dela.
+const RAIO_DA_REPOSICAO: usize = 60;
+
+/// Quantas fotos vão num pedido de reposição.
+///
+/// Cerca de uma tira cheia. Mandar mais não adianta: quem repõe entrega uma por
+/// vez, e as do fim da fila esperariam o mesmo tanto — só que **enfileiradas**,
+/// e portanto sem poder ceder a vez para a foto que a seta abrir no meio do
+/// caminho.
+const A_REPOR_POR_VEZ: usize = 24;
 
 /// Quanto a gravação espera depois do último movimento de slider.
 ///
@@ -253,6 +277,14 @@ pub struct Revelacao {
     /// abriria um laço novo e a tela acabaria com dezenas deles perguntando a
     /// mesma coisa.
     colhendo: bool,
+    /// Se alguém está indo buscar os pixels que faltam — do disco ou do site.
+    ///
+    /// 🔑 **A tela não busca, mas precisa saber que estão buscando.** Sem isto
+    /// ela só sabia dizer "não tem preview no cache", e dizia isso durante a
+    /// reposição inteira: uma frase de beco sem saída no exato momento em que o
+    /// beco estava sendo aberto. Quem lê conclui que não há o que esperar, sai
+    /// da foto — e cancela a única coisa que ia resolver.
+    repondo: bool,
     _assinaturas: Vec<Subscription>,
 }
 
@@ -428,6 +460,7 @@ impl Revelacao {
             aba_hsl: Secao::HslCor,
             aguardando: None,
             colhendo: false,
+            repondo: false,
             _assinaturas: assinaturas,
         }
     }
@@ -823,6 +856,11 @@ impl Revelacao {
         // a primeira coisa que se faz numa foto não tem volta.
         self.historico = Historico::novo(self.estado());
         self.aguardando = None;
+        // 🚨 **A reposição da foto anterior não vale para esta.** Herdar o
+        // sinalizador faria a foto nova abrir dizendo "preparando" sem ninguém
+        // ter pedido nada — e ficar assim para sempre, porque o `Reposto` que
+        // apagaria o sinalizador é o da outra.
+        self.repondo = false;
 
         self.aberta = Some(Aberta {
             foto,
@@ -897,6 +935,13 @@ impl Revelacao {
         aberta.bruta = Some(imagem.clone());
         aberta.revelada = Some(imagem);
         aberta.desenhada = None;
+        self.repondo = false;
+
+        // 🔑 **A tira também guardou a ausência.** O `CacheDeMiniaturas` é um
+        // LRU de resultados, e `Ausente` é um resultado: sem este esquecimento
+        // a célula desta foto continuaria um retângulo preto ao lado da foto
+        // que acabou de aparecer, até a rolagem despejá-la por acaso.
+        self.miniaturas_da_tira.esquecer(foto_id);
 
         self.atualizar_exibicao();
         self.pedir_revelacao(cx);
@@ -904,9 +949,99 @@ impl Revelacao {
         true
     }
 
+    /// Alguém foi buscar os pixels que faltam — do disco ou do site.
+    ///
+    /// 🔑 **Quem sabe buscar é a raiz**, aqui e no passo 11: esta tela só passa
+    /// a dizer que a espera tem fim. Ver [`Self::desistir_dos_pixels`], que é o
+    /// outro desfecho.
+    pub fn avisar_que_os_pixels_vem_vindo(&mut self, cx: &mut Context<Self>) {
+        self.repondo = true;
+        cx.notify();
+    }
+
+    /// A busca acabou sem pixels. A tela volta a dizer a verdade.
+    ///
+    /// 🚨 **Sem isto o "preparando" fica para sempre.** Uma falha silenciosa que
+    /// se parece com carregamento é pior do que a mensagem seca de antes: quem
+    /// olha espera indefinidamente por algo que já terminou.
+    pub fn desistir_dos_pixels(&mut self, cx: &mut Context<Self>) {
+        self.repondo = false;
+        cx.notify();
+    }
+
     /// A foto aberta, para quem precisa saber de onde buscar os pixels.
     pub fn foto_aberta(&self) -> Option<&PhotoViewModel> {
         self.aberta.as_ref().map(|a| &a.foto)
+    }
+
+    /// As fotos da tira que o cache não tem — **da mais urgente para a menos**.
+    ///
+    /// 🔑 **A ordem é o produto aqui, e não a lista.** Quem repõe entrega uma
+    /// por vez, então quem sai primeiro é quem estiver na frente: o palco, e
+    /// depois as vizinhas para fora, que é para onde a seta vai. Ordenar pelo
+    /// acervo faria a foto que está na tela esperar as vinte anteriores — o
+    /// mesmo motivo de `adiantar_as_vizinhas` existir.
+    ///
+    /// ⚠️ **Só foto com arquivo neste disco.** A do site tem `path` vazio e o
+    /// bruto dela vem da cópia de trabalho do storage; incluí-la aqui mandaria o
+    /// repositor abrir um caminho que não existe, uma vez por foto.
+    ///
+    /// 🚨 **É chamada a cada troca de foto, então tem de ser barata.** Quem anda
+    /// pela seta chama isto dezenas de vezes por minuto, na thread da interface:
+    /// varrer um acervo de duas mil fotos seriam quatro mil consultas por
+    /// tecla. Daí os dois tetos abaixo — o alcance e a quantidade —, e nenhum
+    /// deles deixa foto para trás: a varredura recomeça no palco novo a cada
+    /// troca, então o que ficou de fora entra quando a seta chegar perto.
+    pub fn fotos_a_repor(&self) -> Vec<APor> {
+        // Do centro para fora: 0, +1, −1, +2, −2… O `posicao` é o que está no
+        // palco, e a `Revelacao` sem lista (o caminho de `abrir`) tem acervo de
+        // um, então o laço cobre os dois casos sem ramificar.
+        let alcance = RAIO_DA_REPOSICAO.min(self.acervo.len());
+        let daqui = std::iter::once(self.posicao).chain((1..=alcance).flat_map(|passo| {
+            [
+                self.posicao.checked_add(passo),
+                self.posicao.checked_sub(passo),
+            ]
+            .into_iter()
+            .flatten()
+        }));
+
+        daqui
+            .filter_map(|i| self.acervo.get(i))
+            .filter(|foto| !foto.path.is_empty())
+            .filter(|foto| !self.esta_no_cache(&foto.id))
+            .map(|foto| APor {
+                foto_id: foto.id.clone(),
+                caminho: foto.path.clone(),
+            })
+            .take(A_REPOR_POR_VEZ)
+            .collect()
+    }
+
+    /// Se o cache tem as **duas** entradas desta foto.
+    ///
+    /// 🚨 **As duas, e não uma qualquer.** Elas são gravadas no mesmo passo da
+    /// importação mas apagadas por botões diferentes ("Limpar miniaturas" e
+    /// "Limpar previews", nas Configurações): quem tem só a miniatura abre a
+    /// Revelação num borrão em tela cheia, e quem tem só o preview grande vê a
+    /// tira vazia ao lado de um palco cheio.
+    ///
+    /// ⚠️ Pergunta com [`PreviewManager::tem`], que **não** decodifica: uma tira
+    /// de duzentas fotos com `get_*` seriam duzentos decodes só para descobrir
+    /// o que falta, e o LRU inteiro trocado no caminho.
+    fn esta_no_cache(&self, id: &str) -> bool {
+        self.previews.tem(id, PreviewType::Large) && self.previews.tem(id, PreviewType::Thumbnail)
+    }
+
+    /// A miniatura desta foto voltou ao cache: a célula da tira pode reler.
+    ///
+    /// 🔑 **É o que faz a tira acender uma a uma.** O `CacheDeMiniaturas` é um
+    /// LRU de resultados e `Ausente` é um resultado: sem este esquecimento a
+    /// célula continuaria preta até a rolagem despejá-la por acaso — e a
+    /// reposição inteira pareceria não ter acontecido.
+    pub fn miniatura_reposta(&mut self, foto_id: &str, cx: &mut Context<Self>) {
+        self.miniaturas_da_tira.esquecer(foto_id);
+        cx.notify();
     }
 
     /// Se há pixels para revelar — a foto abriu de verdade.
@@ -1821,15 +1956,20 @@ impl Revelacao {
                         .child(self.medida_e_arrasto(cx)),
                 )
                 .into_any_element(),
+            // 🔑 **Duas frases, e a diferença é se há o que esperar.** Enquanto
+            // a raiz repõe (do disco, ou da cópia de trabalho do site), o que a
+            // tela deve dizer é que a foto está vindo; a frase seca de antes só
+            // vale quando ninguém está buscando — e aí ela é a verdade.
             Some(Aberta { foto, .. }) => moldura
                 .child(
                     div()
                         .text_sm()
                         .text_color(cx.theme().muted_foreground)
-                        .child(SharedString::from(format!(
-                            "{} não tem preview no cache",
-                            foto.name
-                        ))),
+                        .child(SharedString::from(if self.repondo {
+                            format!("Preparando {}…", foto.name)
+                        } else {
+                            format!("{} não tem preview no cache", foto.name)
+                        })),
                 )
                 .into_any_element(),
         }
@@ -3665,6 +3805,159 @@ mod testes {
                     "o palco foi desenhado com tamanho {}x{} — a foto some num retângulo de zero",
                     f32::from(palco.size.width),
                     f32::from(palco.size.height)
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 **"Não tem preview no cache" era um beco sem saída.**
+    ///
+    /// A foto está catalogada, o JPEG está no disco, e a Revelação parava numa
+    /// frase — sem botão, sem recuperação, sem nada acontecendo. Este teste
+    /// cobra a lista que a raiz usa para repor: a foto sem cache tem de
+    /// aparecer nela, com o caminho do arquivo.
+    #[gpui::test]
+    fn a_foto_sem_cache_entra_na_lista_de_reposicao(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        let janela = janela(cx, previews);
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("retrato.jpg"), window, cx);
+                assert_eq!(
+                    tela.fotos_a_repor(),
+                    vec![APor {
+                        foto_id: "id-retrato.jpg".into(),
+                        caminho: "/fotos/retrato.jpg".into(),
+                    }],
+                    "a foto sem preview tem arquivo no disco — há de onde repor"
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 **As duas entradas, e não uma qualquer.**
+    ///
+    /// Miniatura e preview são gravados no mesmo passo da importação, mas
+    /// apagados por botões diferentes nas Configurações. Quem tem só o preview
+    /// grande abre o palco cheio com a tira preta ao lado — e era exatamente
+    /// esse o estado que ninguém repunha, porque a única pergunta feita era
+    /// sobre o palco.
+    #[gpui::test]
+    fn so_o_preview_grande_nao_basta(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_cinza())
+            .expect("gravar preview");
+        let janela = janela(cx, previews);
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("retrato.jpg"), window, cx);
+                assert_eq!(
+                    tela.fotos_a_repor().len(),
+                    1,
+                    "falta a miniatura: a célula da tira fica preta"
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🔑 **A ordem é o produto: o palco primeiro, depois para fora.**
+    ///
+    /// Quem repõe entrega uma por vez. Ordenar pelo acervo faria a foto que
+    /// está na tela — a única que alguém está olhando — esperar as anteriores
+    /// todas; do centro para fora ela sai primeiro, e as seguintes chegam na
+    /// ordem em que a seta vai pedi-las.
+    #[gpui::test]
+    fn a_reposicao_comeca_pelo_palco_e_vai_para_fora(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        let janela = janela(cx, previews);
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir_no_acervo(
+                    vec![foto("a.jpg"), foto("b.jpg"), foto("c.jpg"), foto("d.jpg")],
+                    2,
+                    window,
+                    cx,
+                );
+                let ordem: Vec<String> = tela
+                    .fotos_a_repor()
+                    .into_iter()
+                    .map(|a| a.foto_id)
+                    .collect();
+                assert_eq!(
+                    ordem,
+                    vec!["id-c.jpg", "id-d.jpg", "id-b.jpg", "id-a.jpg"],
+                    "o palco é o `c`; depois dele, as vizinhas para fora"
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// ⚠️ **A foto do site não tem arquivo neste disco.**
+    ///
+    /// O bruto dela vem da cópia de trabalho do storage — o passo 11. Mandá-la
+    /// ao repositor faria ele abrir um caminho vazio, uma vez por foto, e
+    /// encher a tela de avisos por uma reposição que nunca poderia dar certo.
+    #[gpui::test]
+    fn a_foto_do_site_fica_de_fora_da_reposicao(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        let janela = janela(cx, previews);
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(
+                    PhotoViewModel {
+                        id: "site:remota-1".into(),
+                        name: "remota.jpg".into(),
+                        path: String::new(),
+                        pos_venda_foto_id: Some("remota-1".into()),
+                        ..Default::default()
+                    },
+                    window,
+                    cx,
+                );
+                assert!(
+                    tela.fotos_a_repor().is_empty(),
+                    "sem arquivo aqui, não há o que refazer do disco"
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 **A tira também guardou a ausência.**
+    ///
+    /// O `CacheDeMiniaturas` é um LRU de resultados, e `Ausente` é um
+    /// resultado: sem o esquecimento, a célula continuaria preta depois de a
+    /// miniatura voltar ao cache — e a reposição inteira pareceria não ter
+    /// acontecido.
+    #[gpui::test]
+    fn a_miniatura_reposta_faz_a_celula_da_tira_reler(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        let janela = janela(cx, previews.clone());
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("retrato.jpg"), window, cx);
+                // A tira pergunta e guarda "não tem".
+                assert!(matches!(
+                    tela.miniaturas_da_tira.obter(&previews, "id-retrato.jpg"),
+                    Miniatura::Ausente
+                ));
+
+                previews
+                    .save_thumbnail("id-retrato.jpg", &foto_cinza())
+                    .expect("gravar miniatura");
+                tela.miniatura_reposta("id-retrato.jpg", cx);
+
+                assert!(
+                    matches!(
+                        tela.miniaturas_da_tira.obter(&previews, "id-retrato.jpg"),
+                        Miniatura::Pronta(_)
+                    ),
+                    "a célula ficou presa no `Ausente` que ela tinha guardado"
                 );
             })
             .expect("a janela deve estar aberta");

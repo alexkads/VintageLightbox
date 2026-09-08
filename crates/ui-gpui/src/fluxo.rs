@@ -43,6 +43,7 @@ use crate::pos_venda::porta::mentira::PublicadorDeMentira;
 use crate::revelacao::lightroom::mentira::EscolhaDeMentira;
 use crate::revelacao::persistencia::mentira::GravadorDeMentira;
 use crate::revelacao::presets::mentira::GuardaDeMentira;
+use crate::revelacao::reposicao::mentira::RepositorDeMentira;
 use crate::sessoes::arquivos::mentira::SeletorDeMentira as SeletorDeFotosDeMentira;
 
 /// A sessão do operador, já entrada — o passo zero, que a porta do app pede.
@@ -140,6 +141,7 @@ fn abrir_o_estudio(cx: &mut TestAppContext, fotos: Vec<PhotoViewModel>) -> Estud
                     folha: Arc::new(FolhaDeMentira::default()),
                     marcador,
                     gerador: Arc::new(GeradorDeMentira::default()),
+                    repositor: Arc::new(RepositorDeMentira::default()),
                     guarda_de_presets: Arc::new(GuardaDeMentira::default()),
                     escolha_de_presets: Arc::new(EscolhaDeMentira::default()),
                     explorador: Arc::new(ExploradorDeMentira::default()),
@@ -429,10 +431,16 @@ fn a_revelacao_abre_a_foto_que_so_existe_na_nuvem(cx: &mut TestAppContext) {
 
     // O laço de espera anda por relógio; aqui a colheita é chamada à mão, como
     // nos outros testes de porta.
+    //
+    // 🔑 **São duas colheitas, e a ordem é a do app.** O disco é tentado
+    // primeiro — esta foto tem `path`, ainda que o arquivo não exista — e é a
+    // falha dele que manda buscar no site. Drenar só a sincronização deixaria a
+    // primeira etapa parada no canal, e o download nunca seria pedido.
     for _ in 0..10 {
-        let _ = estudio
-            .janela
-            .update(cx, |app, _window, cx| app.colher_sincronia(cx));
+        let _ = estudio.janela.update(cx, |app, _window, cx| {
+            app.colher_reposicao(cx);
+            app.colher_sincronia(cx)
+        });
         cx.run_until_parked();
     }
 
@@ -682,6 +690,7 @@ fn nada_acontece_fora_de_uma_sessao(cx: &mut TestAppContext) {
                     folha: Arc::new(FolhaDeMentira::default()),
                     marcador: Arc::new(MarcadorDeMentira::default()),
                     gerador: Arc::new(GeradorDeMentira::default()),
+                    repositor: Arc::new(RepositorDeMentira::default()),
                     guarda_de_presets: Arc::new(GuardaDeMentira::default()),
                     escolha_de_presets: Arc::new(EscolhaDeMentira::default()),
                     explorador: Arc::new(ExploradorDeMentira::default()),
