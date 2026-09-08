@@ -1,5 +1,29 @@
 # Stack Tecnológico - VintageLightbox
 
+> ⚠️ **A escolha de interface deste documento está errada há muito tempo.** Ele defende **Slint**,
+> que foi avaliado e **nunca usado**. A UI foi escrita em **egui 0.31 + eframe/wgpu** e migrada para
+> **GPUI 0.2.2 + gpui-component 0.5.1** em ago/2026 — a avaliação de Tauri e a decisão por GPUI estão
+> em [`historico/09-MIGRACAO-TAURI.md`](historico/09-MIGRACAO-TAURI.md) e
+> [`historico/10-MIGRACAO-GPUI.md`](historico/10-MIGRACAO-GPUI.md).
+>
+> **O stack de verdade, medido do `Cargo.toml` em 17/ago/2026:**
+>
+> | Camada | O que é |
+> |---|---|
+> | Interface | `gpui 0.2.2` + `gpui-component 0.5.1` |
+> | Motor de revelação | `wgpu 23` + WGSL próprio, em `infrastructure::gpu_adjustments` |
+> | Banco | SQLite via `sqlx 0.7` (e `rusqlite` no cache de previews) |
+> | RAW | `rsraw` (LibRaw) com `rawloader` de reserva |
+> | Imagem | `image 0.25` |
+> | EXIF | `kamadak-exif 0.6` |
+> | Async | `tokio` — ⚠️ **o GPUI não roda futuros dele**; a ponte são as portas (ver `06`) |
+> | Diálogos do sistema | `rfd 0.17` |
+>
+> 🚨 **Uma dependência de *build* que não estava prevista**: o GPUI compila os shaders Metal em tempo
+> de build, e sem a Metal Toolchain (`xcodebuild -downloadComponent MetalToolchain`) o build falha.
+> Vale para o CI também. E o Ubuntu saiu da matriz: o `gpui 0.2.2` ainda resolve `blade-graphics` no
+> Linux, e o produto declara macOS e Windows.
+
 ## Visão Geral
 
 Este documento detalha todas as tecnologias, bibliotecas e ferramentas utilizadas no desenvolvimento do VintageLightbox.
@@ -25,7 +49,13 @@ Este documento detalha todas as tecnologias, bibliotecas e ferramentas utilizada
 - ✅ **Ecossistema**: Crates.io com bibliotecas de qualidade
 - ✅ **Tooling**: Cargo, rustfmt, clippy - ferramentas de primeira classe
 
-**Versão Mínima**: Rust 1.75+ (ou latest stable)
+**Versão Mínima**: Rust 1.98+ (ou latest stable)
+
+> Subiu de 1.75 para 1.98 em 2026-08-30, junto com o toolchain de
+> desenvolvimento. O número diz o que é construído e testado, não um piso
+> medido: o workspace não declara `rust-version`, então nada no CI ou no
+> `cargo` reprova quem usar uma versão anterior — vai descobrir na falha de
+> compilação. O código já usa API que 1.75 não tem (`slice::as_chunks`).
 
 ---
 
@@ -919,6 +949,14 @@ jobs:
 
 ### Cargo.toml Principal
 
+> ⚠️ **Este bloco e ficcao da fase de projeto, e nao foi atualizado com o
+> codigo.** Ele descreve uma UI em `slint` e os crates `vintage-core`,
+> `vintage-raw`, `vintage-ui`, `vintage-import` e `vintage-export` — nada disso
+> existe. O workspace real esta em `Cargo.toml` na raiz, com `domain`,
+> `use-cases`, `adapters`, `infrastructure` e `ui-gpui`, e a interface e GPUI.
+> Deixado aqui, marcado, em vez de corrigido linha a linha: so a raiz e fonte de
+> verdade sobre dependencia.
+
 ```toml
 [package]
 name = "vintage-lightbox"
@@ -1016,7 +1054,7 @@ opt-level = 1  # Faster dev builds
 - MSVC toolchain
 
 **Ambos**:
-- Rust 1.75+
+- Rust 1.98+
 - 8GB RAM mínimo
 - 10GB espaço em disco
 

@@ -1,10 +1,23 @@
 # Arquitetura do Sistema - VintageLightbox
 
+> ⚠️ **Este documento foi escrito antes do código, e a camada de interface mudou duas vezes desde
+> então.** Onde ele diz **Slint**, leia **GPUI** — o Slint foi avaliado e nunca usado; a UI foi
+> escrita em egui e migrada para GPUI em ago/2026. Os trechos com `.slint`, `bridge.rs` e
+> `main_window.slint` descrevem arquivos que **não existem**.
+>
+> 🔑 **O que continua exato é o miolo**: a regra de dependência, as quatro camadas, o Repository
+> Pattern e a injeção por construtor. Isso o código cumpre — e é o que tornou a troca de framework
+> barata: `domain`, `use-cases` e `adapters` atravessaram a migração inteira com **zero linha
+> alterada**.
+>
+> A arquitetura da interface, medida do código, está em
+> [`06-UI-ARCHITECTURE.md`](06-UI-ARCHITECTURE.md).
+
 ## 1. Visão Geral da Arquitetura
 
 VintageLightbox segue os princípios da **Clean Architecture** (Arquitetura Limpa) proposta por Robert C. Martin, combinada com práticas de **Test-Driven Development (TDD)**. Esta abordagem garante:
 
-- ✅ **Independência de Frameworks**: A lógica de negócio não depende de Slint ou outras bibliotecas externas
+- ✅ **Independência de Frameworks**: A lógica de negócio não depende de GPUI ou outras bibliotecas externas
 - ✅ **Testabilidade**: Todas as camadas são facilmente testáveis de forma isolada
 - ✅ **Independência de UI**: A interface pode ser substituída sem afetar regras de negócio
 - ✅ **Independência de Banco de Dados**: SQLite pode ser trocado por outra solução
@@ -15,7 +28,7 @@ VintageLightbox segue os princípios da **Clean Architecture** (Arquitetura Limp
 ```
 ┌───────────────────────────────────────────────────────────────┐
 │              Frameworks & Drivers (Camada 4)                  │
-│   - Slint UI, SQLite, LibRaw, Sistema de Arquivos            │
+│   - GPUI, SQLite, LibRaw, wgpu, Sistema de Arquivos         │
 │   - Dependências externas e detalhes de implementação        │
 ├───────────────────────────────────────────────────────────────┤
 │           Interface Adapters (Camada 3)                       │
@@ -233,6 +246,32 @@ impl LibraryController {
 - ✅ Implementa interfaces definidas pelos Use Cases
 - ✅ Coordena interação entre UI e Use Cases
 
+### 2.3½ `revelacao-core` e `revelacao-web` — o motor sem camada (4/set/2026)
+
+O motor de revelação (os 46 ajustes, o WGSL, `Motor`, o enquadramento `Corte` e o JPEG) mora em
+`crates/revelacao-core`, que **não depende de nenhum outro crate do workspace**: entra pixel e número,
+sai pixel. O `infrastructure` re-exporta `Ajustes`/`Motor` e guarda só a leitura da entidade
+(`ajustes_da_entidade`, `corte_da_entidade`), que é a parte que conhece o `domain`.
+`crates/revelacao-web` é o mesmo motor compilado para `wasm32` com `wasm-bindgen`, entregue ao site
+por `scripts/construir-web.sh`. O shader tem um corpo (`corpo.wgsl`) e duas entradas — compute no
+desktop, fragmento no navegador —, concatenadas em tempo de compilação.
+
+### 2.3¾ `biblioteca-core` e `biblioteca-web` — a grade sem tela (5/set/2026)
+
+A geometria da grade, a seleção (clique, Shift, Ctrl, arrasto, teclado), o recorte por situação com
+contagens e a política das miniaturas moram em `crates/biblioteca-core`, que **não tem dependência
+nenhuma** — nem `domain`. Existiam três cópias da mesma conta (as duas grades do site e a Biblioteca
+daqui) e já tinham divergido: o desktop mostrava uma coluna a menos. `ui-gpui/src/biblioteca/grade.rs`
+virou uma ponte sobre o core.
+
+`crates/biblioteca-web` é o core compilado para `wasm32` com `wasm-bindgen`, entregue ao site por
+`scripts/construir-biblioteca.sh`, e é **só o motor da grade**: busca e decodifica as miniaturas,
+desenha os tiles na GPU (o `egui` entra só como pintor, sem fontes e sem eventos) e responde a cada
+chamada com um bitset do que mudou. O texto sob a foto, o painel, os diálogos e as gravações são
+React, no site — o mesmo desenho do `revelacao-web`. ⚠️ No dia 5/set ele chegou a desenhar a tela
+inteira em egui, e foi revertido no mesmo dia; `docs/BIBLIOTECA_NO_NAVEGADOR.md` do e-commerce diz
+por quê e o que não refazer.
+
 ### 2.4 Infrastructure Layer (Camada 4 - Frameworks & Drivers)
 
 **Responsabilidade**: Detalhes de implementação, frameworks, bibliotecas externas.
@@ -298,7 +337,7 @@ impl PhotoRepository for SqlitePhotoRepository {
 **Características**:
 - ✅ Pode ser trocada sem afetar regras de negócio
 - ✅ Contém todos os detalhes técnicos
-- ✅ Integração com bibliotecas externas (Slint, SQLite, LibRaw)
+- ✅ Integração com bibliotecas externas (GPUI, SQLite, LibRaw, wgpu)
 
 ## 3. Fluxo de Dados seguindo Clean Architecture
 

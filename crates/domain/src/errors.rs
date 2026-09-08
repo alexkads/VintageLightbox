@@ -27,6 +27,22 @@ pub enum DomainError {
     #[error("Foto não encontrada")]
     PhotoNotFound,
 
+    /// O site recusou a credencial — e-mail, senha ou sessão vencida.
+    ///
+    /// Variante própria, e não `InfrastructureError`, porque o remédio é outro:
+    /// "sem rede" é esperar; isto é entrar de novo. A tela precisa distinguir.
+    #[error("o site recusou o acesso: confira e-mail e senha")]
+    AcessoRecusado,
+
+    /// O site respondeu `404` — o recurso não está mais lá.
+    ///
+    /// Variante própria pelo mesmo motivo de [`Self::AcessoRecusado`]: o remédio
+    /// é outro. Ao **remover** uma foto do storage, "já não está lá" é o desfecho
+    /// desejado, e não uma falha — tratá-lo como erro faria o app insistir em
+    /// remover, a cada estrela apagada, algo que outra tela já removeu.
+    #[error("o site não encontrou: {0}")]
+    NaoEncontradoNoSite(String),
+
     #[error("Collection não encontrada")]
     CollectionNotFound,
 

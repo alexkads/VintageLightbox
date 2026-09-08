@@ -1,5 +1,14 @@
 # Especificação de Funcionalidades - VintageLightbox
 
+
+> ⚠️ **Catálogo de funcionalidades pretendidas, escrito antes do código.** Descreve o alvo com
+> riqueza de detalhe — e não diz o que está pronto.
+>
+> 🚨 **O estado real está em [`PARIDADE-LIGHTROOM.md`](PARIDADE-LIGHTROOM.md)**, medido do código. A
+> diferença não é acadêmica: há funcionalidades aqui que **a tela oferece e não fazem nada** (19
+> sliders da Revelação até 17/ago/2026), e outras que existem em todas as camadas de dentro e nunca
+> foram ligadas a um clique (a exportação, até 17/ago/2026).
+
 ## 📊 Status de Implementação
 
 **Última atualização**: 16 de dezembro de 2025

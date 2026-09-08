@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VintageLightbox — editor de fotos em Rust</title>
+<meta name="description" content="Importe, organize, trie, revele e entregue. Editor de fotos livre, em Rust, feito pelo Recordar Fotos Estúdio em Gramado e Canela.">
+<link rel="icon" href="icone.png">
+<style>
+  :root{--fundo:#faf8f4;--tinta:#1b1e24;--suave:#6b6f78;--borda:#e4e0d8;--destaque:#c96f3f}
+  @media (prefers-color-scheme:dark){:root{--fundo:#14161b;--tinta:#f2efe6;--suave:#9aa0aa;--borda:#2b2f38}}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--fundo);color:var(--tinta);
+       font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif}
+  .folha{max-width:52rem;margin:0 auto;padding:4rem 1.25rem}
+  header{display:flex;align-items:center;gap:1rem;margin-bottom:.5rem}
+  header img{width:72px;height:72px}
+  h1{font-size:2rem;margin:0;letter-spacing:-.02em}
+  .chamada{color:var(--suave);max-width:38rem;margin:.5rem 0 2.5rem}
+  .principal{display:inline-flex;align-items:center;gap:.75rem;background:var(--tinta);
+       color:var(--fundo);padding:.9rem 1.6rem;border-radius:.6rem;text-decoration:none;
+       font-weight:600;transition:opacity .15s}
+  .principal:hover{opacity:.88}
+  .principal small{font-weight:400;opacity:.7}
+  .versao{color:var(--suave);font-size:.875rem;margin-top:.9rem}
+  h2{font-size:1.05rem;margin:3rem 0 .75rem;font-weight:600}
+  table{width:100%;border-collapse:collapse;font-size:.9rem}
+  th{text-align:left;color:var(--suave);font-weight:500;padding:.5rem .25rem;
+     border-bottom:1px solid var(--borda)}
+  td{padding:.65rem .25rem;border-bottom:1px solid var(--borda)}
+  td a{color:var(--destaque)}
+  .nota{background:color-mix(in srgb,var(--borda) 45%,transparent);border-radius:.5rem;
+        padding:1rem 1.1rem;font-size:.875rem;color:var(--suave);margin-top:2rem}
+  footer{margin-top:4rem;padding-top:1.5rem;border-top:1px solid var(--borda);
+         font-size:.875rem;color:var(--suave)}
+  footer a{color:var(--destaque)}
+  code{background:color-mix(in srgb,var(--borda) 55%,transparent);padding:.15em .4em;
+       border-radius:.25em;font-size:.9em}
+  pre{background:color-mix(in srgb,var(--borda) 55%,transparent);padding:.9rem 1rem;
+      border-radius:.5rem;overflow-x:auto;font-size:.85rem;margin:.75rem 0}
+  pre code{background:none;padding:0;font-size:1em}
+  .fonte{border:1px solid var(--borda);border-radius:.5rem;padding:1.1rem 1.2rem;margin-top:1rem}
+  .fonte ul{margin:.6rem 0 0;padding-left:1.2rem;font-size:.875rem;color:var(--suave)}
+</style>
+</head>
+<body>
+<div class="folha">
+
+  <header>
+    <img src="icone.png" alt="">
+    <div>
+      <h1>VintageLightbox</h1>
+      <div style="color:var(--suave);font-size:.9rem">Editor de fotos em Rust, livre e nativo</div>
+    </div>
+  </header>
+
+  <p class="chamada">
+    Importe do cartão, tria, revele e entregue — com o ensaio do cliente aberto ao lado.
+    Motor de revelação na GPU, catálogo local, sem nuvem obrigatória.
+  </p>
+
+  <div id="baixar"></div>
+  <div class="versao" id="versao">carregando…</div>
+
+  <h2>Todos os arquivos</h2>
+  <table><thead><tr><th>Sistema</th><th>Arquitetura</th><th>Tamanho</th><th></th></tr></thead>
+    <tbody id="lista"><tr><td colspan="4" style="color:var(--suave)">carregando…</td></tr></tbody>
+  </table>
+
+  <div class="nota">
+    <strong>No macOS, a primeira abertura pede um passo a mais.</strong> O sistema vai dizer que
+    <em>“não pôde verificar se o item está livre de malware”</em> e oferecer só <em>Mover para o
+    Lixo</em>. Não é o app ter problema — é ele não ser assinado com um certificado pago da Apple.
+    Para abrir:
+    <ol style="margin:.6rem 0 0;padding-left:1.2rem">
+      <li>Clique em <strong>OK</strong> no aviso — <em>não</em> em “Mover para o Lixo”.</li>
+      <li>Abra <strong>Ajustes do Sistema → Privacidade e Segurança</strong>.</li>
+      <li>Role até o fim e clique em <strong>Abrir Assim Mesmo</strong>.</li>
+    </ol>
+    <p style="margin:.6rem 0 0">
+      É uma vez só. Depois o aplicativo se atualiza sozinho, e <strong>cada atualização é conferida
+      por assinatura</strong> antes de ser instalada — essa parte não depende da Apple.
+    </p>
+    <p style="margin:.6rem 0 0;font-size:.95em">
+      ⚠️ O truque antigo de <em>botão direito → Abrir</em> <strong>não funciona mais</strong> a
+      partir do macOS 15.
+    </p>
+    <p style="margin:.6rem 0 0;font-size:.95em">
+      👉 Ou <a href="#compilar">compile na sua máquina</a> — aí o aviso não aparece nenhuma vez.
+    </p>
+  </div>
+
+  <h2 id="compilar">Sem aviso nenhum: compile na sua máquina</h2>
+
+  <p style="color:var(--suave);font-size:.9375rem;margin:0">
+    O macOS só interroga o que <strong>chegou pela rede</strong> — é a marca de quarentena que o
+    navegador põe no arquivo baixado. Um aplicativo que saiu do compilador do seu próprio Mac nunca
+    teve essa marca: ele abre no primeiro duplo-clique, e nada muda depois disso. O comando baixa o
+    código, compila e instala em <code>/Applications</code>:
+  </p>
+
+  <pre><code>curl -fsSL https://alexkads.github.io/VintageLightbox/instalar.sh | sh</code></pre>
+
+  <div class="fonte">
+    <strong>O que ele pede, e o que custa</strong>
+    <ul>
+      <li><strong>Xcode</strong>, grátis na App Store, com o componente Metal
+          (<code>xcodebuild -downloadComponent MetalToolchain</code>) — o app compila os shaders
+          durante a build. Se faltar, o script diz exatamente isso antes de compilar qualquer coisa.</li>
+      <li><strong>Rust</strong>, que ele instala sozinho pelo <code>rustup</code>, dentro da sua
+          pasta pessoal e sem <code>sudo</code>.</li>
+      <li><strong>15 a 40 minutos</strong> na primeira vez, e ~10 GiB em
+          <code>~/.vintagelightbox</code> — que dá para apagar depois.</li>
+      <li>Só macOS. No Linux e no Windows os instaladores acima já abrem sem esse passo, e
+          compilar não teria troco.</li>
+    </ul>
+    <p style="margin:.7rem 0 0;font-size:.875rem;color:var(--suave)">
+      Ler um script antes de executá-lo é sensato, e este não se ofende:
+      <code>curl -fsSL …/instalar.sh -o instalar.sh</code>, leia, depois <code>sh instalar.sh</code>.
+      Opções: <code>sh -s -- --versao main</code> compila o topo do desenvolvimento,
+      <code>--seco</code> mostra o que faria sem fazer.
+    </p>
+    <p style="margin:.7rem 0 0;font-size:.875rem;color:var(--suave)">
+      Depois da primeira vez, <strong>não é preciso recompilar</strong>: o aplicativo se atualiza
+      sozinho, conferindo a assinatura de cada atualização.
+    </p>
+  </div>
+
+  <footer>
+    <p>
+      Feito pelo <strong>Recordar Fotos Estúdio</strong> — Gramado e Canela, RS.<br>
+      Nasceu da necessidade de um estúdio de verdade, e é aberto para quem tiver a mesma.
+    </p>
+    <p>
+      Código e licença MIT em <a href="https://github.com/alexkads/VintageLightbox">github.com/alexkads/VintageLightbox</a> ·
+      Ensaios em <a href="https://recordarfotos.com.br">recordarfotos.com.br</a>
+    </p>
+  </footer>
+
+</div>
+
+<script>
+// 🔑 A detecção é no cliente, e a lista completa fica logo abaixo. Um servidor
+//    que decidisse pelo User-Agent erraria em VPN e em Linux ARM — e o erro é
+//    caro: o visitante baixa 25 MB do arquivo errado e conclui que não funciona.
+//    Quando a detecção falha, o botão some e a tabela continua lá.
+const escolher = (ds, ua) => {
+  const doSistema = s => ds.filter(d => d.sistema === s);
+  const preferir = (s, re) => doSistema(s).find(d => re.test(d.arquitetura)) ?? doSistema(s)[0];
+  if (/Mac|iPhone|iPad/i.test(ua)) return preferir("macOS", /Intel e Apple Silicon/);
+  if (/Windows/i.test(ua))         return preferir("Windows", /\.exe/);
+  if (/Linux|X11/i.test(ua))       return preferir("Linux", /arm|aarch64/i.test(ua) ? /ARM64 \(\.deb\)/ : /x86-64 \(\.deb\)/);
+  return null;
+};
+const mb = b => (b / 1e6).toFixed(0) + " MB";
+
+fetch("downloads.json", {cache: "no-cache"}).then(r => r.json()).then(d => {
+  const escolhido = escolher(d.downloads, navigator.userAgent);
+  if (escolhido) {
+    document.getElementById("baixar").innerHTML =
+      `<a class="principal" href="${escolhido.url}" download>Baixar para ${escolhido.sistema}
+         <small>${escolhido.arquitetura} · ${mb(escolhido.bytes)}</small></a>`;
+  }
+  const data = d.publicado_em ? new Date(d.publicado_em).toLocaleDateString("pt-BR") : "";
+  document.getElementById("versao").textContent =
+    `Versão ${d.versao}${data ? " · " + data : ""}${d.notas ? " · " + d.notas : ""}`;
+  document.getElementById("lista").innerHTML = d.downloads.map(x =>
+    `<tr><td>${x.sistema}</td><td>${x.arquitetura}</td><td>${mb(x.bytes)}</td>
+     <td><a href="${x.url}" download>Baixar</a></td></tr>`).join("")
+    || `<tr><td colspan="4" style="color:var(--suave)">Ainda não há versão publicada.</td></tr>`;
+}).catch(() => {
+  document.getElementById("versao").textContent = "Não consegui ler a lista de versões.";
+  document.getElementById("lista").innerHTML =
+    `<tr><td colspan="4"><a href="https://github.com/alexkads/VintageLightbox/releases">Ver os arquivos no GitHub Releases</a></td></tr>`;
+});
+</script>
+</body>
+</html>

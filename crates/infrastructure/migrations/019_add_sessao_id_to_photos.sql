@@ -1,0 +1,15 @@
+-- De qual ensaio esta foto é — o id da galeria no site.
+--
+-- 🚨 **É o que faz a sessão ser o lugar de trabalho.** Regra do dono
+-- (2026-09-06): *"dentro da sessão que fazemos as revelações e escolhemos as
+-- fotos com o cliente"*. Sem esta coluna a grade só sabe mostrar o catálogo
+-- inteiro, e o ensaio de um cliente fica misturado com o de todos os outros.
+--
+-- NULL = foto solta, de antes desta regra ou importada no modo offline. Ela
+-- continua aparecendo quando não há sessão aberta, que é o modo em que o app é
+-- o catálogo local de sempre.
+--
+-- ⚠️ **Não é chave estrangeira**: a galeria vive no site, e pode ser apagada de
+-- lá. Uma foto apontando para um ensaio que não existe mais continua sendo uma
+-- foto no disco — o que se perde é o agrupamento, não o arquivo.
+ALTER TABLE photos ADD COLUMN sessao_id TEXT;

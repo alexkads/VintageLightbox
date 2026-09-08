@@ -25,16 +25,18 @@ impl CollectionRepositoryImpl {
 
     /// Helper para converter row do banco em Collection
     async fn row_to_collection(&self, row: &sqlx::sqlite::SqliteRow) -> DomainResult<Collection> {
-        let id_str: String = row.try_get("id").map_err(|e| {
-            DomainError::InvalidOperation(format!("Failed to get id: {}", e))
-        })?;
-        
-        let name: String = row.try_get("name").map_err(|e| {
-            DomainError::InvalidOperation(format!("Failed to get name: {}", e))
-        })?;
-        
-        let description: Option<String> = row.try_get("description").ok()
-            .and_then(|s: String| if s.is_empty() { None } else { Some(s) });
+        let id_str: String = row
+            .try_get("id")
+            .map_err(|e| DomainError::InvalidOperation(format!("Failed to get id: {}", e)))?;
+
+        let name: String = row
+            .try_get("name")
+            .map_err(|e| DomainError::InvalidOperation(format!("Failed to get name: {}", e)))?;
+
+        let description: Option<String> = row
+            .try_get("description")
+            .ok()
+            .filter(|s: &String| !s.is_empty());
 
         // Parse values
         let collection_id = CollectionId::from_string(&id_str)?;
@@ -44,7 +46,7 @@ impl CollectionRepositoryImpl {
 
         // Criar collection com ID
         let collection = Collection::new(name);
-        
+
         // Reconstruir com ID correto e descrição
         let collection = Collection::with_id(
             collection_id,
@@ -59,14 +61,19 @@ impl CollectionRepositoryImpl {
     }
 
     /// Busca os IDs de fotos associados a uma coleção
-    async fn fetch_photo_ids(&self, collection_id: &CollectionId) -> DomainResult<HashSet<PhotoId>> {
+    async fn fetch_photo_ids(
+        &self,
+        collection_id: &CollectionId,
+    ) -> DomainResult<HashSet<PhotoId>> {
         let collection_id_str = collection_id.to_string();
 
         let rows = sqlx::query("SELECT photo_id FROM collection_photos WHERE collection_id = ?")
             .bind(&collection_id_str)
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| DomainError::InvalidOperation(format!("Failed to fetch photo_ids: {}", e)))?;
+            .map_err(|e| {
+                DomainError::InvalidOperation(format!("Failed to fetch photo_ids: {}", e))
+            })?;
 
         let mut photo_ids = HashSet::new();
         for row in rows {
@@ -81,7 +88,11 @@ impl CollectionRepositoryImpl {
     }
 
     /// Salva os photo_ids na tabela de junção
-    async fn save_photo_ids(&self, collection_id: &CollectionId, photo_ids: &HashSet<PhotoId>) -> DomainResult<()> {
+    async fn save_photo_ids(
+        &self,
+        collection_id: &CollectionId,
+        photo_ids: &HashSet<PhotoId>,
+    ) -> DomainResult<()> {
         let collection_id_str = collection_id.to_string();
 
         // Primeiro, remover todas as associações existentes
@@ -89,7 +100,9 @@ impl CollectionRepositoryImpl {
             .bind(&collection_id_str)
             .execute(&self.pool)
             .await
-            .map_err(|e| DomainError::InvalidOperation(format!("Failed to delete photo associations: {}", e)))?;
+            .map_err(|e| {
+                DomainError::InvalidOperation(format!("Failed to delete photo associations: {}", e))
+            })?;
 
         // Inserir novas associações
         for photo_id in photo_ids {
@@ -99,7 +112,12 @@ impl CollectionRepositoryImpl {
                 .bind(&photo_id_str)
                 .execute(&self.pool)
                 .await
-                .map_err(|e| DomainError::InvalidOperation(format!("Failed to insert photo association: {}", e)))?;
+                .map_err(|e| {
+                    DomainError::InvalidOperation(format!(
+                        "Failed to insert photo association: {}",
+                        e
+                    ))
+                })?;
         }
 
         Ok(())
@@ -117,7 +135,7 @@ impl CollectionRepository for CollectionRepositoryImpl {
 
         sqlx::query(
             "INSERT INTO collections (id, name, description, created_at, modified_at)
-             VALUES (?, ?, ?, ?, ?)"
+             VALUES (?, ?, ?, ?, ?)",
         )
         .bind(&id)
         .bind(&name)
@@ -129,7 +147,8 @@ impl CollectionRepository for CollectionRepositoryImpl {
         .map_err(|e| DomainError::InvalidOperation(format!("Failed to save collection: {}", e)))?;
 
         // Salvar photo_ids
-        self.save_photo_ids(collection.id(), collection.photo_ids()).await?;
+        self.save_photo_ids(collection.id(), collection.photo_ids())
+            .await?;
 
         Ok(())
     }
@@ -141,7 +160,9 @@ impl CollectionRepository for CollectionRepositoryImpl {
             .bind(&id_str)
             .fetch_optional(&self.pool)
             .await
-            .map_err(|e| DomainError::InvalidOperation(format!("Failed to find collection: {}", e)))?;
+            .map_err(|e| {
+                DomainError::InvalidOperation(format!("Failed to find collection: {}", e))
+            })?;
 
         match row {
             Some(r) => Ok(Some(self.row_to_collection(&r).await?)),
@@ -153,7 +174,9 @@ impl CollectionRepository for CollectionRepositoryImpl {
         let rows = sqlx::query("SELECT * FROM collections ORDER BY created_at DESC")
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| DomainError::InvalidOperation(format!("Failed to fetch collections: {}", e)))?;
+            .map_err(|e| {
+                DomainError::InvalidOperation(format!("Failed to fetch collections: {}", e))
+            })?;
 
         let mut collections = Vec::new();
         for row in rows {
@@ -170,9 +193,9 @@ impl CollectionRepository for CollectionRepositoryImpl {
         let modified_at = collection.modified_at().to_rfc3339();
 
         let result = sqlx::query(
-            "UPDATE collections 
+            "UPDATE collections
              SET name = ?, description = ?, modified_at = ?
-             WHERE id = ?"
+             WHERE id = ?",
         )
         .bind(&name)
         .bind(&description)
@@ -180,14 +203,17 @@ impl CollectionRepository for CollectionRepositoryImpl {
         .bind(&id)
         .execute(&self.pool)
         .await
-        .map_err(|e| DomainError::InvalidOperation(format!("Failed to update collection: {}", e)))?;
+        .map_err(|e| {
+            DomainError::InvalidOperation(format!("Failed to update collection: {}", e))
+        })?;
 
         if result.rows_affected() == 0 {
             return Err(DomainError::CollectionNotFound);
         }
 
         // Atualizar photo_ids
-        self.save_photo_ids(collection.id(), collection.photo_ids()).await?;
+        self.save_photo_ids(collection.id(), collection.photo_ids())
+            .await?;
 
         Ok(())
     }
@@ -199,7 +225,9 @@ impl CollectionRepository for CollectionRepositoryImpl {
             .bind(&id_str)
             .execute(&self.pool)
             .await
-            .map_err(|e| DomainError::InvalidOperation(format!("Failed to delete collection: {}", e)))?;
+            .map_err(|e| {
+                DomainError::InvalidOperation(format!("Failed to delete collection: {}", e))
+            })?;
 
         if result.rows_affected() == 0 {
             return Err(DomainError::CollectionNotFound);
@@ -217,12 +245,14 @@ impl CollectionRepository for CollectionRepositoryImpl {
             "SELECT c.* FROM collections c
              INNER JOIN collection_photos cp ON c.id = cp.collection_id
              WHERE cp.photo_id = ?
-             ORDER BY c.created_at DESC"
+             ORDER BY c.created_at DESC",
         )
         .bind(&photo_id_str)
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| DomainError::InvalidOperation(format!("Failed to find collections by photo: {}", e)))?;
+        .map_err(|e| {
+            DomainError::InvalidOperation(format!("Failed to find collections by photo: {}", e))
+        })?;
 
         let mut collections = Vec::new();
         for row in rows {

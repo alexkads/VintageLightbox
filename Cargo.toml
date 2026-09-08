@@ -5,11 +5,33 @@ members = [
     "crates/use-cases",
     "crates/adapters",
     "crates/infrastructure",
-    "crates/ui",
+    # O motor de revelação sem nada em volta (2026-09-04): o que o navegador
+    # precisa e o `infrastructure` não consegue dar, porque puxa sqlx, reqwest e
+    # LibRaw — nada disso compila para wasm32.
+    "crates/revelacao-core",
+    # O mesmo motor compilado para o navegador (wasm-bindgen + wgpu). É o que o
+    # `scripts/construir-web.sh` entrega ao `recordarfotos-e-commerce`.
+    "crates/revelacao-web",
+    # A biblioteca de fotos sem tela (2026-09-05): a geometria da grade, a
+    # seleção, o recorte da barra e a política das miniaturas. Existiam três
+    # cópias das mesmas contas — as duas grades do site e a Biblioteca daqui —,
+    # e elas já tinham divergido.
+    "crates/biblioteca-core",
+    # A mesma biblioteca desenhada no navegador (wgpu + wasm-bindgen), entregue
+    # em `frontend/public/biblioteca/` pelo `scripts/construir-biblioteca.sh`.
+    "crates/biblioteca-web",
+    # A interface, em GPUI. O `crates/ui` (egui) saiu daqui em 17/ago/2026, com a
+    # lista de paridade zerada (docs/PARIDADE-UI.md) — é a fase 5 do plano.
+    #
+    # 🔑 **O que ele era e deixou de ser**: o rollback e a referência de
+    # paridade. O rollback agora é `git revert` do commit que o removeu, que é
+    # um comando e traz os 21.352 LOC de volta inteiros; a referência de
+    # paridade virou documento, e o código continua no histórico.
+    "crates/ui-gpui",
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.3"
 edition = "2021"
 authors = ["VintageLightbox Team"]
 license = "MIT"
@@ -54,3 +76,11 @@ codegen-units = 1
 
 [profile.test]
 opt-level = 1
+
+# O perfil do `.wasm`: tamanho antes de velocidade. O `release` acima é o do
+# desktop e não se toca — `opt-level = 3` num binário que o navegador baixa a
+# cada primeira abertura custaria o dobro de bytes por pouco ganho.
+[profile.release-web]
+inherits = "release"
+opt-level = "z"
+panic = "abort"

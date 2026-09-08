@@ -1,6 +1,6 @@
-use std::sync::Arc;
-use domain::repositories::PhotoRepository;
 use crate::view_models::PhotoViewModel;
+use domain::repositories::PhotoRepository;
+use std::sync::Arc;
 
 pub struct LibraryController {
     photo_repository: Arc<dyn PhotoRepository>,
@@ -12,101 +12,125 @@ impl LibraryController {
     }
 
     pub async fn get_all_photos(&self) -> Result<Vec<PhotoViewModel>, String> {
-        let photos = self.photo_repository.find_all().await
+        let photos = self
+            .photo_repository
+            .find_all()
+            .await
             .map_err(|e| e.to_string())?;
 
-        let view_models = photos.into_iter().map(|photo| {
-                    let metadata = photo.metadata();
-                    let date = metadata.and_then(|m| m.date_time.clone()).unwrap_or_default();
-                    let camera = metadata.and_then(|m| m.camera_model.clone()).unwrap_or_default();
-                    let exposure = if let Some(meta) = metadata {
-                        format!("ISO {} {} {}", 
-                            meta.iso.unwrap_or(0), 
-                            meta.aperture.map(|f| format!("f/{:.1}", f)).unwrap_or_default(), 
-                            meta.shutter_speed.clone().unwrap_or_default()
-                        ).trim().to_string()
-                    } else {
-                        String::new()
-                    };
-                    let rating = photo.rating().map(|r| r.value() as i32).unwrap_or(0);
+        let view_models = photos
+            .into_iter()
+            .map(|photo| {
+                let metadata = photo.metadata();
+                let date = metadata
+                    .and_then(|m| m.date_time.clone())
+                    .unwrap_or_default();
+                let camera = metadata
+                    .and_then(|m| m.camera_model.clone())
+                    .unwrap_or_default();
+                let exposure = if let Some(meta) = metadata {
+                    format!(
+                        "ISO {} {} {}",
+                        meta.iso.unwrap_or(0),
+                        meta.aperture
+                            .map(|f| format!("f/{:.1}", f))
+                            .unwrap_or_default(),
+                        meta.shutter_speed.clone().unwrap_or_default()
+                    )
+                    .trim()
+                    .to_string()
+                } else {
+                    String::new()
+                };
+                let rating = photo.rating().map(|r| r.value() as i32).unwrap_or(0);
 
-                    PhotoViewModel {
-                        id: photo.id().to_string(),
-                        name: photo.file_name().unwrap_or_default().to_string(),
-                        path: photo.file_path().to_string(),
-                        thumbnail_path: photo.thumbnail_path().map(|p| p.to_string()),
-                        date,
-                        camera,
-                        exposure,
-                        rating,
-                        color_label: photo.color_label().map(|c| c.to_string()),
-                        flag: photo.flag().map(|f| f.as_code()),
-                        width: metadata.and_then(|m| m.width),
-                        height: metadata.and_then(|m| m.height),
-                        edit_exposure: photo.edit_exposure(),
-                        edit_contrast: photo.edit_contrast(),
-                        edit_temperature: photo.edit_temperature(),
-                        edit_tint: photo.edit_tint(),
-                        edit_highlights: photo.edit_highlights(),
-                        edit_shadows: photo.edit_shadows(),
-                        edit_whites: photo.edit_whites(),
-                        edit_blacks: photo.edit_blacks(),
-                        edit_clarity: photo.edit_clarity(),
-                        edit_vibrance: photo.edit_vibrance(),
-                        edit_saturation: photo.edit_saturation(),
-                        edit_tone_curve_shadows: photo.edit_tone_curve_shadows(),
-                        edit_tone_curve_darks: photo.edit_tone_curve_darks(),
-                        edit_tone_curve_lights: photo.edit_tone_curve_lights(),
-                        edit_tone_curve_highlights: photo.edit_tone_curve_highlights(),
-                        // HSL Saturation
-                        edit_hsl_red_sat: photo.edit_hsl_red_sat(),
-                        edit_hsl_orange_sat: photo.edit_hsl_orange_sat(),
-                        edit_hsl_yellow_sat: photo.edit_hsl_yellow_sat(),
-                        edit_hsl_green_sat: photo.edit_hsl_green_sat(),
-                        edit_hsl_aqua_sat: photo.edit_hsl_aqua_sat(),
-                        edit_hsl_blue_sat: photo.edit_hsl_blue_sat(),
-                        edit_hsl_purple_sat: photo.edit_hsl_purple_sat(),
-                        edit_hsl_magenta_sat: photo.edit_hsl_magenta_sat(),
-                        // HSL Hue
-                        edit_hsl_red_hue: photo.edit_hsl_red_hue(),
-                        edit_hsl_orange_hue: photo.edit_hsl_orange_hue(),
-                        edit_hsl_yellow_hue: photo.edit_hsl_yellow_hue(),
-                        edit_hsl_green_hue: photo.edit_hsl_green_hue(),
-                        edit_hsl_aqua_hue: photo.edit_hsl_aqua_hue(),
-                        edit_hsl_blue_hue: photo.edit_hsl_blue_hue(),
-                        edit_hsl_purple_hue: photo.edit_hsl_purple_hue(),
-                        edit_hsl_magenta_hue: photo.edit_hsl_magenta_hue(),
-                        // HSL Lum
-                        edit_hsl_red_lum: photo.edit_hsl_red_lum(),
-                        edit_hsl_orange_lum: photo.edit_hsl_orange_lum(),
-                        edit_hsl_yellow_lum: photo.edit_hsl_yellow_lum(),
-                        edit_hsl_green_lum: photo.edit_hsl_green_lum(),
-                        edit_hsl_aqua_lum: photo.edit_hsl_aqua_lum(),
-                        edit_hsl_blue_lum: photo.edit_hsl_blue_lum(),
-                        edit_hsl_purple_lum: photo.edit_hsl_purple_lum(),
-                        edit_hsl_magenta_lum: photo.edit_hsl_magenta_lum(),
-                        // Lens
-                        edit_lens_distortion: photo.edit_lens_distortion(),
-                        edit_lens_vignette_amount: photo.edit_lens_vignette_amount(),
-                        edit_lens_vignette_midpoint: photo.edit_lens_vignette_midpoint(),
-                        // NR
-                        edit_nr_luminance: photo.edit_nr_luminance(),
-                        edit_nr_color: photo.edit_nr_color(),
-                        // Sharpening
-                        edit_sharpen_amount: photo.edit_sharpen_amount(),
-                        edit_sharpen_radius: photo.edit_sharpen_radius(),
-                        // Crop & Rotation
-                        edit_crop_x: photo.edit_crop_x(),
-                        edit_crop_y: photo.edit_crop_y(),
-                        edit_crop_width: photo.edit_crop_width(),
-                        edit_crop_height: photo.edit_crop_height(),
-                        edit_crop_rotation: photo.edit_crop_rotation(),
-                        edit_crop_angle: photo.edit_crop_angle(),
-                        edit_crop_flip_h: photo.edit_crop_flip_h(),
-                        edit_crop_flip_v: photo.edit_crop_flip_v(),
-                    }
-                })
-                .collect();
+                PhotoViewModel {
+                    id: photo.id().to_string(),
+                    name: photo.file_name().unwrap_or_default().to_string(),
+                    path: photo.file_path().to_string(),
+                    thumbnail_path: photo.thumbnail_path().map(|p| p.to_string()),
+                    date,
+                    camera,
+                    exposure,
+                    rating,
+                    color_label: photo.color_label().map(|c| c.to_string()),
+                    flag: photo.flag().map(|f| f.as_code()),
+                    comprada: photo.comprada(),
+                    pos_venda_foto_id: photo.id_no_site().map(str::to_string),
+                    sessao_id: photo.sessao().map(str::to_string),
+                    width: metadata.and_then(|m| m.width),
+                    height: metadata.and_then(|m| m.height),
+                    edit_exposure: photo.edit_exposure(),
+                    edit_contrast: photo.edit_contrast(),
+                    edit_temperature: photo.edit_temperature(),
+                    edit_tint: photo.edit_tint(),
+                    edit_highlights: photo.edit_highlights(),
+                    edit_shadows: photo.edit_shadows(),
+                    edit_whites: photo.edit_whites(),
+                    edit_blacks: photo.edit_blacks(),
+                    edit_clarity: photo.edit_clarity(),
+                    edit_vibrance: photo.edit_vibrance(),
+                    edit_saturation: photo.edit_saturation(),
+                    edit_tone_curve_shadows: photo.edit_tone_curve_shadows(),
+                    edit_tone_curve_darks: photo.edit_tone_curve_darks(),
+                    edit_tone_curve_lights: photo.edit_tone_curve_lights(),
+                    edit_tone_curve_highlights: photo.edit_tone_curve_highlights(),
+                    // HSL Saturation
+                    edit_hsl_red_sat: photo.edit_hsl_red_sat(),
+                    edit_hsl_orange_sat: photo.edit_hsl_orange_sat(),
+                    edit_hsl_yellow_sat: photo.edit_hsl_yellow_sat(),
+                    edit_hsl_green_sat: photo.edit_hsl_green_sat(),
+                    edit_hsl_aqua_sat: photo.edit_hsl_aqua_sat(),
+                    edit_hsl_blue_sat: photo.edit_hsl_blue_sat(),
+                    edit_hsl_purple_sat: photo.edit_hsl_purple_sat(),
+                    edit_hsl_magenta_sat: photo.edit_hsl_magenta_sat(),
+                    // HSL Hue
+                    edit_hsl_red_hue: photo.edit_hsl_red_hue(),
+                    edit_hsl_orange_hue: photo.edit_hsl_orange_hue(),
+                    edit_hsl_yellow_hue: photo.edit_hsl_yellow_hue(),
+                    edit_hsl_green_hue: photo.edit_hsl_green_hue(),
+                    edit_hsl_aqua_hue: photo.edit_hsl_aqua_hue(),
+                    edit_hsl_blue_hue: photo.edit_hsl_blue_hue(),
+                    edit_hsl_purple_hue: photo.edit_hsl_purple_hue(),
+                    edit_hsl_magenta_hue: photo.edit_hsl_magenta_hue(),
+                    // HSL Lum
+                    edit_hsl_red_lum: photo.edit_hsl_red_lum(),
+                    edit_hsl_orange_lum: photo.edit_hsl_orange_lum(),
+                    edit_hsl_yellow_lum: photo.edit_hsl_yellow_lum(),
+                    edit_hsl_green_lum: photo.edit_hsl_green_lum(),
+                    edit_hsl_aqua_lum: photo.edit_hsl_aqua_lum(),
+                    edit_hsl_blue_lum: photo.edit_hsl_blue_lum(),
+                    edit_hsl_purple_lum: photo.edit_hsl_purple_lum(),
+                    edit_hsl_magenta_lum: photo.edit_hsl_magenta_lum(),
+                    // Lens
+                    edit_lens_distortion: photo.edit_lens_distortion(),
+                    edit_lens_vignette_amount: photo.edit_lens_vignette_amount(),
+                    edit_lens_vignette_midpoint: photo.edit_lens_vignette_midpoint(),
+                    // NR
+                    edit_nr_luminance: photo.edit_nr_luminance(),
+                    edit_nr_color: photo.edit_nr_color(),
+                    // Sharpening
+                    edit_sharpen_amount: photo.edit_sharpen_amount(),
+                    edit_sharpen_radius: photo.edit_sharpen_radius(),
+                    edit_split_shadow_hue: photo.edit_split_shadow_hue(),
+                    edit_split_shadow_sat: photo.edit_split_shadow_sat(),
+                    edit_split_highlight_hue: photo.edit_split_highlight_hue(),
+                    edit_split_highlight_sat: photo.edit_split_highlight_sat(),
+                    edit_split_balance: photo.edit_split_balance(),
+                    edit_grain_amount: photo.edit_grain_amount(),
+                    edit_grain_size: photo.edit_grain_size(),
+                    // Crop & Rotation
+                    edit_crop_x: photo.edit_crop_x(),
+                    edit_crop_y: photo.edit_crop_y(),
+                    edit_crop_width: photo.edit_crop_width(),
+                    edit_crop_height: photo.edit_crop_height(),
+                    edit_crop_rotation: photo.edit_crop_rotation(),
+                    edit_crop_angle: photo.edit_crop_angle(),
+                    edit_crop_flip_h: photo.edit_crop_flip_h(),
+                    edit_crop_flip_v: photo.edit_crop_flip_v(),
+                }
+            })
+            .collect();
 
         Ok(view_models)
     }

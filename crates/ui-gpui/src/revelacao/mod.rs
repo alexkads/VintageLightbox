@@ -1,0 +1,19 @@
+//! A Revelação — a fase 2 da migração (docs/10-MIGRACAO-GPUI.md §5).
+//!
+//! Começa pelo que tem de existir antes dos ~50 ajustes: a foto grande na tela.
+//! Slider sem imagem embaixo não tem como ser conferido — e o critério de saída
+//! da fase é **igualdade de pixel** com o app de egui.
+
+pub mod automatico;
+pub mod controles;
+pub mod corte;
+pub mod curva;
+pub mod histograma;
+pub mod historico;
+pub mod lightroom;
+pub mod persistencia;
+pub mod presets;
+pub mod processador;
+pub mod reposicao;
+pub mod sincronizacao;
+pub mod tela;

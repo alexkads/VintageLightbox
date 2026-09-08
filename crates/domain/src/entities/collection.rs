@@ -13,19 +13,19 @@ use std::collections::HashSet;
 pub struct Collection {
     /// Identificador único da coleção
     id: CollectionId,
-    
+
     /// Nome da coleção
     name: String,
-    
+
     /// Descrição opcional da coleção
     description: Option<String>,
-    
+
     /// IDs das fotos nesta coleção
     photo_ids: HashSet<PhotoId>,
-    
+
     /// Data de criação
     created_at: DateTime<Utc>,
-    
+
     /// Data da última modificação
     modified_at: DateTime<Utc>,
 }
@@ -34,7 +34,7 @@ impl Collection {
     /// Cria uma nova coleção vazia
     pub fn new(name: impl Into<String>) -> Self {
         let now = Utc::now();
-        
+
         Self {
             id: CollectionId::new(),
             name: name.into(),
@@ -161,7 +161,7 @@ mod tests {
     #[test]
     fn test_collection_creation() {
         let collection = Collection::new("My Photos");
-        
+
         assert_eq!(collection.name(), "My Photos");
         assert_eq!(collection.description(), None);
         assert_eq!(collection.photo_count(), 0);
@@ -172,10 +172,10 @@ mod tests {
     fn test_collection_rename() {
         let mut collection = Collection::new("Old Name");
         let initial_modified = collection.modified_at();
-        
+
         std::thread::sleep(std::time::Duration::from_millis(10));
         collection.rename("New Name");
-        
+
         assert_eq!(collection.name(), "New Name");
         assert!(collection.modified_at() > initial_modified);
     }
@@ -183,9 +183,9 @@ mod tests {
     #[test]
     fn test_collection_set_description() {
         let mut collection = Collection::new("My Collection");
-        
+
         collection.set_description("A beautiful collection");
-        
+
         assert_eq!(collection.description(), Some("A beautiful collection"));
     }
 
@@ -193,9 +193,9 @@ mod tests {
     fn test_collection_clear_description() {
         let mut collection = Collection::new("My Collection");
         collection.set_description("Test description");
-        
+
         collection.clear_description();
-        
+
         assert_eq!(collection.description(), None);
     }
 
@@ -203,9 +203,9 @@ mod tests {
     fn test_collection_add_photo() {
         let mut collection = Collection::new("Test");
         let photo_id = PhotoId::new();
-        
+
         let added = collection.add_photo(photo_id);
-        
+
         assert!(added);
         assert_eq!(collection.photo_count(), 1);
         assert!(collection.contains_photo(&photo_id));
@@ -215,10 +215,10 @@ mod tests {
     fn test_collection_add_duplicate_photo() {
         let mut collection = Collection::new("Test");
         let photo_id = PhotoId::new();
-        
+
         collection.add_photo(photo_id);
         let added_again = collection.add_photo(photo_id);
-        
+
         assert!(!added_again);
         assert_eq!(collection.photo_count(), 1);
     }
@@ -228,9 +228,9 @@ mod tests {
         let mut collection = Collection::new("Test");
         let photo_id = PhotoId::new();
         collection.add_photo(photo_id);
-        
+
         let removed = collection.remove_photo(&photo_id);
-        
+
         assert!(removed);
         assert_eq!(collection.photo_count(), 0);
         assert!(!collection.contains_photo(&photo_id));
@@ -240,9 +240,9 @@ mod tests {
     fn test_collection_remove_nonexistent_photo() {
         let mut collection = Collection::new("Test");
         let photo_id = PhotoId::new();
-        
+
         let removed = collection.remove_photo(&photo_id);
-        
+
         assert!(!removed);
     }
 
@@ -251,9 +251,9 @@ mod tests {
         let mut collection = Collection::new("Test");
         let photo_id1 = PhotoId::new();
         let photo_id2 = PhotoId::new();
-        
+
         collection.add_photo(photo_id1);
-        
+
         assert!(collection.contains_photo(&photo_id1));
         assert!(!collection.contains_photo(&photo_id2));
     }
@@ -261,12 +261,12 @@ mod tests {
     #[test]
     fn test_collection_photo_count() {
         let mut collection = Collection::new("Test");
-        
+
         assert_eq!(collection.photo_count(), 0);
-        
+
         collection.add_photo(PhotoId::new());
         assert_eq!(collection.photo_count(), 1);
-        
+
         collection.add_photo(PhotoId::new());
         assert_eq!(collection.photo_count(), 2);
     }
@@ -274,9 +274,9 @@ mod tests {
     #[test]
     fn test_collection_is_empty() {
         let mut collection = Collection::new("Test");
-        
+
         assert!(collection.is_empty());
-        
+
         collection.add_photo(PhotoId::new());
         assert!(!collection.is_empty());
     }
@@ -286,9 +286,9 @@ mod tests {
         let mut collection = Collection::new("Test");
         collection.add_photo(PhotoId::new());
         collection.add_photo(PhotoId::new());
-        
+
         collection.clear_photos();
-        
+
         assert!(collection.is_empty());
         assert_eq!(collection.photo_count(), 0);
     }
@@ -297,10 +297,10 @@ mod tests {
     fn test_collection_modification_updates_date() {
         let mut collection = Collection::new("Test");
         let initial_modified = collection.modified_at();
-        
+
         std::thread::sleep(std::time::Duration::from_millis(10));
         collection.add_photo(PhotoId::new());
-        
+
         assert!(collection.modified_at() > initial_modified);
     }
 
@@ -309,25 +309,13 @@ mod tests {
         let id = CollectionId::new();
         let created_at = Utc::now();
         let modified_at = Utc::now();
-        
-        let collection1 = Collection::with_id(
-            id,
-            "Test",
-            None,
-            HashSet::new(),
-            created_at,
-            modified_at,
-        );
-        
-        let collection2 = Collection::with_id(
-            id,
-            "Test",
-            None,
-            HashSet::new(),
-            created_at,
-            modified_at,
-        );
-        
+
+        let collection1 =
+            Collection::with_id(id, "Test", None, HashSet::new(), created_at, modified_at);
+
+        let collection2 =
+            Collection::with_id(id, "Test", None, HashSet::new(), created_at, modified_at);
+
         assert_eq!(collection1, collection2);
     }
 
@@ -335,16 +323,16 @@ mod tests {
     fn test_collection_clone() {
         let mut collection1 = Collection::new("Test");
         collection1.add_photo(PhotoId::new());
-        
+
         let collection2 = collection1.clone();
-        
+
         assert_eq!(collection1, collection2);
     }
 
     #[test]
     fn test_collection_created_and_modified_dates() {
         let collection = Collection::new("Test");
-        
+
         assert_eq!(collection.created_at(), collection.modified_at());
     }
 }
@@ -358,23 +346,23 @@ mod business_logic_tests {
         // Criar coleção
         let mut collection = Collection::new("Vacation 2024");
         collection.set_description("Photos from summer vacation");
-        
+
         // Adicionar fotos
         let photo1 = PhotoId::new();
         let photo2 = PhotoId::new();
         let photo3 = PhotoId::new();
-        
+
         collection.add_photo(photo1);
         collection.add_photo(photo2);
         collection.add_photo(photo3);
-        
+
         assert_eq!(collection.photo_count(), 3);
-        
+
         // Remover uma foto
         collection.remove_photo(&photo2);
         assert_eq!(collection.photo_count(), 2);
         assert!(!collection.contains_photo(&photo2));
-        
+
         // Renomear
         collection.rename("Summer Vacation 2024");
         assert_eq!(collection.name(), "Summer Vacation 2024");
@@ -383,17 +371,17 @@ mod business_logic_tests {
     #[test]
     fn test_multiple_collections_same_photo() {
         let photo_id = PhotoId::new();
-        
+
         let mut collection1 = Collection::new("Collection 1");
         let mut collection2 = Collection::new("Collection 2");
-        
+
         // Mesma foto pode estar em múltiplas coleções
         collection1.add_photo(photo_id);
         collection2.add_photo(photo_id);
-        
+
         assert!(collection1.contains_photo(&photo_id));
         assert!(collection2.contains_photo(&photo_id));
-        
+
         // Remover de uma não afeta a outra
         collection1.remove_photo(&photo_id);
         assert!(!collection1.contains_photo(&photo_id));
@@ -403,16 +391,16 @@ mod business_logic_tests {
     #[test]
     fn test_collection_bulk_operations() {
         let mut collection = Collection::new("Bulk Test");
-        
+
         // Adicionar várias fotos
         let photo_ids: Vec<PhotoId> = (0..100).map(|_| PhotoId::new()).collect();
-        
+
         for &photo_id in &photo_ids {
             collection.add_photo(photo_id);
         }
-        
+
         assert_eq!(collection.photo_count(), 100);
-        
+
         // Limpar todas
         collection.clear_photos();
         assert!(collection.is_empty());

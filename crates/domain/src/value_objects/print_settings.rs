@@ -23,7 +23,10 @@ impl PaperSize {
         match self {
             PaperSize::A4 => (210, 297),
             PaperSize::Letter => (216, 279), // 8.5" x 11" = 215.9mm x 279.4mm
-            PaperSize::Custom { width_mm, height_mm } => (*width_mm, *height_mm),
+            PaperSize::Custom {
+                width_mm,
+                height_mm,
+            } => (*width_mm, *height_mm),
         }
     }
 }
@@ -60,7 +63,7 @@ impl Margins {
                 "Margins must be less than 100mm".to_string(),
             ));
         }
-        
+
         Ok(Margins {
             top,
             bottom,
@@ -107,7 +110,7 @@ impl PrintSettings {
         color_mode: ColorMode,
     ) -> DomainResult<Self> {
         // Valida DPI
-        if dpi < Self::MIN_DPI || dpi > Self::MAX_DPI {
+        if !(Self::MIN_DPI..=Self::MAX_DPI).contains(&dpi) {
             return Err(DomainError::InvalidPrintSettings(format!(
                 "DPI must be between {} and {}",
                 Self::MIN_DPI,
@@ -382,7 +385,7 @@ mod property_tests {
 
             let (width, height) = settings.printable_area_mm();
             let (paper_width, paper_height) = PaperSize::A4.dimensions_mm();
-            
+
             prop_assert!(width <= paper_width);
             prop_assert!(height <= paper_height);
         }

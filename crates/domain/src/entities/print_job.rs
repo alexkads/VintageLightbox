@@ -147,14 +147,14 @@ impl PrintJob {
     /// Calcula o número de páginas necessárias
     pub fn page_count(&self) -> usize {
         let photos_per_page = self.layout.photos_per_page() as usize;
-        (self.photo_count() + photos_per_page - 1) / photos_per_page
+        self.photo_count().div_ceil(photos_per_page)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::value_objects::{PaperSize, Orientation, ColorMode, Margins};
+    use crate::value_objects::{ColorMode, Margins, Orientation, PaperSize};
 
     // 🔴 RED -> 🟢 GREEN -> 🔵 REFACTOR
 

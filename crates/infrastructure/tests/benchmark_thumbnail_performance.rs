@@ -1,6 +1,6 @@
-use infrastructure::thumbnail_generator::ThumbnailGeneratorImpl;
 use domain::services::ThumbnailGenerator;
 use domain::value_objects::FilePath;
+use infrastructure::thumbnail_generator::ThumbnailGeneratorImpl;
 use std::time::Instant;
 
 #[tokio::test]
@@ -8,10 +8,10 @@ async fn benchmark_raw_thumbnail_generation() {
     // This benchmark requires a real RAW file to be meaningful.
     // Ensure you have a 'test_assets/sample.nef' or similar.
     // For now we will try to find a sample file or skip.
-    
+
     let home = std::env::var("HOME").unwrap();
     let sample_path = format!("{}/Pictures/VintageLightbox_Benchmark/sample.NEF", home);
-    
+
     if !std::path::Path::new(&sample_path).exists() {
         println!("Skipping benchmark: {} not found", sample_path);
         return;
@@ -33,5 +33,8 @@ async fn benchmark_raw_thumbnail_generation() {
     let duration_old = start.elapsed();
     println!("2x generate took: {:?}", duration_old);
 
-    println!("Speedup: {:.2}x", duration_old.as_secs_f64() / duration_new.as_secs_f64());
+    println!(
+        "Speedup: {:.2}x",
+        duration_old.as_secs_f64() / duration_new.as_secs_f64()
+    );
 }

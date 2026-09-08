@@ -1,0 +1,103 @@
+[package]
+name = "ui-gpui"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+# `cargo run -p ui-gpui` — o comando que a fase 1 documenta — não escolhia nada:
+# o crate tem três binários (o app, `medir-miniaturas` e `semear-catalogo`) e o
+# cargo desiste quando há mais de um. Sem esta linha, a instrução escrita em
+# docs/10-MIGRACAO-GPUI.md §5 e no `semear-catalogo` respondia com uma lista.
+default-run = "ui-gpui"
+
+# A interface em GPUI, construída **ao lado** de `crates/ui` e não no lugar
+# dele. Os dois compilam e rodam durante a migração inteira (docs/10-MIGRACAO-GPUI.md
+# §5 e §7.2): `cargo run -p ui` e `cargo run -p ui-gpui`.
+#
+# O `crates/ui` só sai do workspace na fase 5, em commit isolado, para o
+# `git revert` ser um comando. Enquanto isso ele é o rollback e a referência de
+# paridade — abandonar a migração precisa custar zero.
+
+[dependencies]
+gpui = "0.2.2"
+gpui-component = "0.5.1"
+
+# As quatro camadas internas, intactas. Nenhuma delas sabe que a interface
+# mudou — é o que tornou o GPUI mais barato que o Tauri (§2.1).
+infrastructure = { path = "../infrastructure" }
+# A grade da Biblioteca: a mesma aritmética que o site usa (2026-09-05). Sem
+# GPU e sem janela dentro — ver `biblioteca/grade.rs`.
+biblioteca-core = { path = "../biblioteca-core" }
+adapters = { path = "../adapters" }
+use-cases = { path = "../use-cases" }
+domain = { path = "../domain" }
+
+# `image` na mesma versão que o `gpui` resolve. Duas versões na árvore
+# compilariam, mas `DynamicImage` de uma **não é** o tipo da outra, e a ponte de
+# imagem (§3.1) atravessa exatamente essa fronteira.
+image = "0.25"
+# `RenderImage::new` recebe `SmallVec<[Frame; 1]>`, e o `gpui` não reexporta o
+# `smallvec` — quem constrói o argumento precisa da mesma versão que ele usa.
+smallvec = "1"
+# O mesmo `lru` que o `crates/ui` usa — um cache de imagem por crate ja e
+# suficiente; duas politicas de descarte diferentes para a mesma coisa nao.
+lru = "0.16.2"
+tokio.workspace = true
+# A configuração do pós-venda (`pos_venda/config.rs`) é um JSON ao lado do catálogo.
+serde.workspace = true
+anyhow = "1.0"
+# O seletor nativo de pasta da importação — a mesma versão do `crates/ui`, que já
+# trocou o `egui_file` por ele. Janela do sistema, e não do framework: é o que
+# evita disputa de camada com o modal (a razão está registrada no STATUS).
+rfd = "0.17.2"
+
+# A folha de impressão vira PDF. 🔑 O leiaute já é calculado em milímetros
+# (`impressao/pagina.rs`), que é a unidade nativa do PDF — gerar é colocar cada
+# célula na página, sem uma segunda conta de posição.
+#
+# ⚠️ `default-features = false` de propósito: o padrão traz layout de texto e
+# HTML, e aqui não há texto nenhum — só imagens em retângulos.
+printpdf = { version = "0.12", default-features = false }
+
+# O motor de revelação (`revelacao/processador.rs`). Nas mesmas versões do
+# `crates/ui`: o critério de saída da fase 2 é igualdade de pixel, e wgpu é
+# quem compila o WGSL — versão diferente é compilador diferente para o mesmo
+# shader. No macOS isto não conflita com o GPUI, que fala Metal direto.
+wgpu = "23.0"
+bytemuck = { version = "1.14", features = ["derive"] }
+pollster = "0.4"
+parking_lot = "0.12"
+# O tema. `ThemeConfigColors` tem campos privados, então literal de struct não
+# compila de fora do crate — e o JSON é o formato nativo do `gpui-component`
+# para tema, não um contorno (`crates/ui-gpui/src/tema.rs`).
+serde_json.workspace = true
+# Só para ler a versão de migration aplicada na tela de primeira luz — a mesma
+# versão e as mesmas features do `infrastructure`, senão são dois drivers de
+# SQLite na árvore falando com o mesmo arquivo.
+sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "sqlite", "migrate"] }
+chrono.workspace = true
+uuid.workspace = true
+
+# A atualização automática (`atualizacao/porta.rs`). É o updater do Tauri
+# extraído para servir app que não é Tauri, do mesmo autor do `cargo-packager`
+# que monta os instaladores — então o `.sig` que o empacotamento produz é
+# exatamente o que este crate confere.
+#
+# ⚠️ `default-features = false` + `native-tls`: o padrão dele é `rustls`, e o
+# `sqlx` e o `reqwest` do `infrastructure` já trazem a pilha TLS do sistema.
+# Duas pilhas TLS na mesma árvore é compilar o mesmo trabalho duas vezes — a
+# mesma razão registrada no `infrastructure/Cargo.toml`.
+cargo-packager-updater = { version = "0.2", default-features = false, features = ["native-tls"] }
+
+[dev-dependencies]
+tempfile = "3.8"
+# `TestAppContext` — o substituto que o plano escolheu para os 146 testes de UI
+# que morrem na fase 5 (§6). É como o Zed testa a própria interface: dirige
+# janela e afirma sobre estado, sem snapshot visual.
+#
+# ⚠️ Em `[dev-dependencies]`, e **não** em `[dependencies]`, mesmo custando uma
+# segunda compilação do gpui: `test-support` liga junto o `leak-detection`, que
+# grava backtrace a cada handle de entidade. Num app onde a fase 1 quase
+# condenou o framework por medir fluidez no perfil errado, carregar detector de
+# vazamento no binário do produto é repetir o mesmo erro de outro jeito.
+gpui = { version = "0.2.2", features = ["test-support"] }

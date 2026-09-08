@@ -16,7 +16,7 @@ chrono.workspace = true
 sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "sqlite", "migrate"] }
 async-trait.workspace = true
 kamadak-exif = "0.6"
-image = "0.24"
+image = "0.25"
 rawloader = "0.37.1"  # Mantido para fallback se rsraw falhar
 directories = "6.0.0"
 sha2 = "0.10"
@@ -25,6 +25,31 @@ rsraw = "0.1"  # LibRaw binding - demosaic/white balance/color correction integr
 uuid.workspace = true
 sysinfo = "0.36.1"
 
+# A autorização pelo navegador (`pos_venda/autorizacao.rs`) e o chaveiro do
+# sistema (`pos_venda/cofre.rs`). O `keyring` é o Keychain no macOS, o
+# Credential Manager no Windows e o Secret Service no Linux — a alternativa era
+# um arquivo com o refresh token de quinze dias dentro.
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
+rand = "0.8"
+base64 = "0.22"
+
+# O motor de revelação: `Ajustes`, o WGSL, `Motor`, o enquadramento e o JPEG.
+# Saiu daqui para um crate próprio em 2026-09-04, para compilar também no
+# navegador; o que fica aqui é a leitura da entidade (`ajustes_da_entidade`,
+# `corte_da_entidade`), que é a única parte que conhece o `domain`.
+revelacao-core = { path = "../revelacao-core" }
+# O cache de prévias (`cache/preview_manager.rs`).
+lru = "0.16.2"
+
+# O cliente HTTP do pós-venda (`pos_venda/http.rs`) — o único lugar do app que
+# fala com a rede. `native-tls`, e não `rustls`: o `sqlx` acima já traz a pilha
+# TLS do sistema, e uma segunda ao lado dela seria compilar o mesmo trabalho
+# duas vezes.
+reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "native-tls"] }
+
 [dev-dependencies]
 tempfile.workspace = true
 mockall.workspace = true
+# Um servidor HTTP de verdade para o cliente do pós-venda: o que se prova ali é
+# o multipart e o cabeçalho — coisas que nenhum mock do `reqwest` alcança.
+wiremock = "0.6"

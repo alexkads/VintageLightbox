@@ -23,11 +23,11 @@ pub trait ThumbnailGenerator: Send + Sync {
     /// Gera múltiplos thumbnails de uma vez, otimizando a leitura do arquivo
     /// Retorna os bytes de cada thumbnail na ordem solicitada
     async fn generate_set(&self, path: &FilePath, max_sizes: &[u32]) -> DomainResult<Vec<Vec<u8>>> {
-         let mut results = Vec::new();
-         for size in max_sizes {
-             results.push(self.generate(path, *size).await?);
-         }
-         Ok(results)
+        let mut results = Vec::new();
+        for size in max_sizes {
+            results.push(self.generate(path, *size).await?);
+        }
+        Ok(results)
     }
 }
 
@@ -49,12 +49,43 @@ pub trait RawDecoder: Send + Sync {
 /// Serviço para exportação de imagens processadas
 #[async_trait]
 pub trait ImageExporter: Send + Sync {
-    /// Exporta a foto aplicando as edições para o caminho de destino
-    async fn export(&self, photo: &crate::entities::Photo, output_path: &FilePath) -> DomainResult<()>;
+    /// Exporta a foto aplicando as edições para o caminho de destino.
+    ///
+    /// 🔑 **As opções não são opcionais.** Elas carregam a marca d'água, que é a
+    /// regra que separa entregar de mostrar: a foto comprada vai inteira, a que
+    /// ficou para trás vai marcada. Um `export` sem opções deixaria "sem marca"
+    /// como caminho mais curto — e o caminho mais curto é o que se pega no dia
+    /// em que a atenção falta.
+    async fn export(
+        &self,
+        photo: &crate::entities::Photo,
+        output_path: &FilePath,
+        options: &crate::value_objects::ExportOptions,
+    ) -> DomainResult<()>;
+
+    /// A mesma foto pronta, como bytes de JPEG — sem passar pelo disco.
+    ///
+    /// 🔑 **Existe para o pós-venda.** Subir uma galeria de trinta fotos por um
+    /// arquivo temporário cada seria gravar e reler trinta vezes o que já está
+    /// na memória; e o arquivo temporário é justamente o lugar onde a foto não
+    /// comprada fica esquecida, legível, no disco de quem exportou.
+    ///
+    /// As mesmas opções de `export`, pela mesma razão: a marca d'água não é
+    /// opcional por acidente.
+    async fn renderizar_jpeg(
+        &self,
+        photo: &crate::entities::Photo,
+        options: &crate::value_objects::ExportOptions,
+    ) -> DomainResult<Vec<u8>>;
 }
+
+pub mod pos_venda;
 
 pub mod preview_storage;
 pub use preview_storage::*;
 
 pub mod file_organizer;
 pub use file_organizer::FileOrganizer;
+
+pub mod source_scanner;
+pub use source_scanner::SourceScanner;

@@ -1,0 +1,40 @@
+[package]
+name = "revelacao-web"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "O motor de revelação compilado para o navegador: wasm-bindgen sobre o revelacao-core, com WebGPU e WebGL2"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# O `webgl` é para o navegador sem WebGPU (Safari e Firefox antigos, Android).
+revelacao-core = { path = "../revelacao-core", features = ["webgl"] }
+wgpu = "23.0"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = ["HtmlCanvasElement", "console"] }
+# Um `panic` vira mensagem legível no console em vez de `unreachable executed`.
+console_error_panic_hook = "0.1"
+serde_json.workspace = true
+# 📸 **Os formatos da fotografia que o navegador não abre.**
+#
+# O `createImageBitmap` cobre JPEG, PNG, GIF, WebP e (no Chrome) AVIF; **TIFF
+# não**, e é o formato que sai de scanner e de lab. Estes decodificadores são a
+# rede de baixo: o JavaScript tenta o nativo primeiro, que é 5 a 10× mais
+# rápido, e só cai aqui quando ele recusa o arquivo.
+#
+# ⚠️ Cada formato custa binário. Ficaram de fora: `avif` (o dav1d em wasm é
+# maior que todo o resto junto, e o navegador já abre AVIF), `hdr`, `exr` e
+# `pnm` (ninguém entrega foto de estúdio neles).
+image = { version = "0.25", default-features = false, features = [
+  "jpeg",
+  "png",
+  "tiff",
+  "webp",
+  "bmp",
+  "gif",
+] }

@@ -15,10 +15,12 @@ impl FilePath {
     /// Cria um novo FilePath validado
     pub fn new<P: AsRef<Path>>(path: P) -> DomainResult<Self> {
         let path = path.as_ref();
-        
+
         // Validações básicas
         if path.as_os_str().is_empty() {
-            return Err(DomainError::InvalidFilePath("Path cannot be empty".to_string()));
+            return Err(DomainError::InvalidFilePath(
+                "Path cannot be empty".to_string(),
+            ));
         }
 
         Ok(Self(path.to_path_buf()))
@@ -42,16 +44,12 @@ impl FilePath {
 
     /// Retorna o nome do arquivo
     pub fn file_name(&self) -> Option<&str> {
-        self.0
-            .file_name()
-            .and_then(|os_str| os_str.to_str())
+        self.0.file_name().and_then(|os_str| os_str.to_str())
     }
 
     /// Retorna a extensão do arquivo
     pub fn extension(&self) -> Option<&str> {
-        self.0
-            .extension()
-            .and_then(|os_str| os_str.to_str())
+        self.0.extension().and_then(|os_str| os_str.to_str())
     }
 
     /// Retorna o diretório pai

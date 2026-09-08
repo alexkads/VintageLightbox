@@ -3,13 +3,13 @@
 //! Entidade central do domínio representando uma fotografia.
 //! Implementado usando TDD.
 
+use crate::value_objects::PhotoMetadata;
 use crate::{
     value_objects::{ColorLabel, FilePath, Flag, PhotoId, Rating},
     DomainResult,
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use crate::value_objects::PhotoMetadata;
 
 /// Entidade Photo - representa uma fotografia no catálogo
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -18,12 +18,60 @@ pub struct Photo {
     id: PhotoId,
     /// Caminho do arquivo
     file_path: FilePath,
+    /// O nome que o arquivo tinha quando entrou — o que a câmera deu.
+    ///
+    /// 🚨 **O disco guarda UUID; o nome do operador mora aqui.** Sem isto,
+    /// renomear o arquivo apagaria `DSC_2571.JPG` de dentro do app também: a
+    /// grade, a tira, o painel, o título da Revelação, o nome exportado e o
+    /// nome com que a foto sobe para a galeria do cliente saíam **todos** do
+    /// caminho (migration 022).
+    ///
+    /// `None` é foto de antes desta coluna, ou de um caminho que o backfill não
+    /// soube ler — e aí [`Self::file_name`] volta a olhar o caminho, que é
+    /// exatamente o que ela fazia antes.
+    nome_original: Option<String>,
     /// Classificação por estrelas (0-5)
     rating: Option<Rating>,
     /// Etiqueta de cor
     color_label: Option<ColorLabel>,
     /// Flag (Pick/Reject)
     flag: Option<Flag>,
+    /// Quando o cliente levou esta foto no balcão — pagou na hora do ensaio.
+    ///
+    /// 🔑 **É a decisão que separa o pós-venda em dois.** No site, a foto levada
+    /// vai como `levada_no_balcao` (download liberado) e a que ficou como
+    /// `disponivel` (marca d'água, à venda). Até 2/set/2026 essa decisão só
+    /// existia como *qual botão* o fotógrafo apertava na exportação — e não
+    /// ficava gravada em lugar nenhum: fechar o app era perdê-la.
+    ///
+    /// `Option<DateTime>` e não `bool`: "quando" é o que o RF-034 pede, e custa
+    /// o mesmo que "se".
+    #[serde(default)]
+    comprada_em: Option<DateTime<Utc>>,
+    /// Onde esta foto está no site — o id que o pós-venda devolveu ao recebê-la.
+    ///
+    /// 🔑 **`None` é "só existe aqui"**, e é o estado normal enquanto a foto não
+    /// foi classificada: no fluxo do dono é a classificação que autoriza a foto
+    /// a subir. Guardar o id é o que permite **desfazer** — zerar a nota tira a
+    /// foto do storage, e sem o id remoto o app só saberia subir.
+    ///
+    /// ⚠️ **O dono do registro é o site.** A foto pode sumir de lá por outra
+    /// tela; um id que não existe mais volta como 404, e isso se lê como "já não
+    /// está lá", não como erro.
+    #[serde(default)]
+    pos_venda_foto_id: Option<String>,
+    /// De qual **ensaio** esta foto é — o id da galeria no site.
+    ///
+    /// 🚨 **É o que faz a sessão ser o lugar de trabalho**, e não um rótulo:
+    /// dentro dela é que se revela e se escolhe com o cliente. Sem isto a grade
+    /// só sabe mostrar o catálogo inteiro, e o ensaio de um cliente fica
+    /// misturado com o de todos os outros.
+    ///
+    /// `None` é foto solta — de antes desta regra. Ela aparece quando a grade
+    /// não está recortada por ensaio, e não nasce mais pela interface: desde
+    /// 6/set/2026 todo lote importado pertence a uma sessão.
+    #[serde(default)]
+    sessao_id: Option<String>,
     /// Data de importação
     imported_at: DateTime<Utc>,
     /// Data de última modificação
@@ -85,7 +133,7 @@ pub struct Photo {
     edit_hsl_purple_sat: Option<f32>,
     /// HSL: Magenta channel saturation adjustment (-100 to +100)
     edit_hsl_magenta_sat: Option<f32>,
-    
+
     // --- HSL Hue (-100 to +100) ---
     edit_hsl_red_hue: Option<f32>,
     edit_hsl_orange_hue: Option<f32>,
@@ -123,6 +171,22 @@ pub struct Photo {
     /// Sharpening: Radius (0.5 to 3.0)
     edit_sharpen_radius: Option<f32>,
 
+    // --- Tonalização e grão ---
+    /// Tonalização: matiz das sombras, em graus (0 a 360)
+    edit_split_shadow_hue: Option<f32>,
+    /// Tonalização: saturação das sombras (0 a 100)
+    edit_split_shadow_sat: Option<f32>,
+    /// Tonalização: matiz das altas luzes, em graus (0 a 360)
+    edit_split_highlight_hue: Option<f32>,
+    /// Tonalização: saturação das altas luzes (0 a 100)
+    edit_split_highlight_sat: Option<f32>,
+    /// Tonalização: onde as sombras cedem às altas luzes (-100 a 100)
+    edit_split_balance: Option<f32>,
+    /// Grão de filme: quantidade (0 a 100)
+    edit_grain_amount: Option<f32>,
+    /// Grão de filme: tamanho do grumo (0 a 100)
+    edit_grain_size: Option<f32>,
+
     // --- Crop & Rotation ---
     edit_crop_x: Option<f32>,
     edit_crop_y: Option<f32>,
@@ -141,6 +205,17 @@ impl Photo {
     }
 
     /// Reconstrói uma foto a partir de dados persistidos (uso interno/infraestrutura)
+    // ⚠️ Dívida reconhecida, não descuido — docs/10-MIGRACAO-GPUI.md §2.1.
+    //
+    // A cadeia de ajustes de revelação (exposição, contraste, HSL nos 8 canais,
+    // detalhe, lente…) viaja como parâmetro solto do controller até o caso de
+    // uso. Agrupá-la num tipo é o conserto certo e é **outro commit**: mexe em
+    // quatro camadas de uma vez, e a migração para GPUI não depende disso — o
+    // plano registra explicitamente que virou dívida, e não pré-requisito.
+    //
+    // O `allow` fica na função, e não no crate, para que uma assinatura nova
+    // longa continue sendo cobrada pelo lint.
+    #[allow(clippy::too_many_arguments)]
     pub fn reconstruct(
         id: PhotoId,
         file_path: FilePath,
@@ -150,6 +225,7 @@ impl Photo {
         rating: Option<Rating>,
         color_label: Option<ColorLabel>,
         flag: Option<Flag>,
+        comprada_em: Option<DateTime<Utc>>,
         is_edited: bool,
         thumbnail_path: Option<FilePath>,
         preview_path: Option<FilePath>,
@@ -200,6 +276,13 @@ impl Photo {
         edit_nr_color: Option<f32>,
         edit_sharpen_amount: Option<f32>,
         edit_sharpen_radius: Option<f32>,
+        edit_split_shadow_hue: Option<f32>,
+        edit_split_shadow_sat: Option<f32>,
+        edit_split_highlight_hue: Option<f32>,
+        edit_split_highlight_sat: Option<f32>,
+        edit_split_balance: Option<f32>,
+        edit_grain_amount: Option<f32>,
+        edit_grain_size: Option<f32>,
         edit_crop_x: Option<f32>,
         edit_crop_y: Option<f32>,
         edit_crop_width: Option<f32>,
@@ -212,12 +295,20 @@ impl Photo {
         Self {
             id,
             file_path,
+            nome_original: None,
             imported_at,
             modified_at,
             metadata,
             rating,
             color_label,
             flag,
+            comprada_em,
+            // 🔑 **Fora da lista de argumentos, de propósito.** `reconstruct`
+            // já tem 70 parâmetros posicionais; o 71º seria mais uma posição
+            // para trocar em silêncio. Quem lê do banco chama
+            // `definir_id_no_site` logo depois.
+            pos_venda_foto_id: None,
+            sessao_id: None,
             is_edited,
             thumbnail_path,
             preview_path,
@@ -268,6 +359,13 @@ impl Photo {
             edit_nr_color,
             edit_sharpen_amount,
             edit_sharpen_radius,
+            edit_split_shadow_hue,
+            edit_split_shadow_sat,
+            edit_split_highlight_hue,
+            edit_split_highlight_sat,
+            edit_split_balance,
+            edit_grain_amount,
+            edit_grain_size,
             edit_crop_x,
             edit_crop_y,
             edit_crop_width,
@@ -283,15 +381,16 @@ impl Photo {
     pub fn with_id(id: PhotoId, file_path: FilePath) -> Self {
         let now = Utc::now();
         Self::reconstruct(
-            id, file_path, now, now, None, None, None, None, false, None, None,
-            None, None, None, None, None, None, None, None, None, None, None,
-            None, None, None, None, None,
+            id, file_path, now, now, None, None, None, None, None, false, None, None, None, None,
+            None, None, None, None, None, None, None, None, None, None, None, None, None, None,
             None, None, None, None, None, None, None, None, // HSL Sat
             None, None, None, None, None, None, None, None, // HSL Hue
             None, None, None, None, None, None, None, None, // HSL Lum
             None, None, None, // Lens
             None, None, // NR (2 fields)
             None, None, // Sharpening (2 fields)
+            None, None, None, None, None, // Tonalização (5 fields)
+            None, None, // Grão (2 fields)
             None, None, None, None, None, None, None, None, // Crop & Rotation (8 fields)
         )
     }
@@ -369,6 +468,67 @@ impl Photo {
         self.flag.is_some()
     }
 
+    /// O cliente levou esta foto no balcão?
+    pub fn comprada(&self) -> bool {
+        self.comprada_em.is_some()
+    }
+
+    /// O id desta foto no site, se ela já subiu.
+    pub fn id_no_site(&self) -> Option<&str> {
+        self.pos_venda_foto_id.as_deref()
+    }
+
+    /// Se ela está no storage da nuvem — o que a Revelação usa para saber de
+    /// onde buscar os pixels, e o balcão para saber se há o que negociar.
+    pub fn esta_no_site(&self) -> bool {
+        self.pos_venda_foto_id.is_some()
+    }
+
+    /// De qual ensaio esta foto é.
+    pub fn sessao(&self) -> Option<&str> {
+        self.sessao_id.as_deref()
+    }
+
+    /// Põe a foto num ensaio — o que a importação dentro de uma sessão faz.
+    pub fn definir_sessao(&mut self, sessao_id: Option<String>) {
+        if self.sessao_id != sessao_id {
+            self.sessao_id = sessao_id;
+            self.modified_at = Utc::now();
+        }
+    }
+
+    /// Grava (ou apaga) o id remoto. `None` é "saiu do site".
+    pub fn definir_id_no_site(&mut self, id: Option<String>) {
+        if self.pos_venda_foto_id != id {
+            self.pos_venda_foto_id = id;
+            self.modified_at = Utc::now();
+        }
+    }
+
+    /// Quando levou, se levou.
+    pub fn comprada_em(&self) -> Option<DateTime<Utc>> {
+        self.comprada_em
+    }
+
+    /// Marca como levada no balcão — agora.
+    ///
+    /// Marcar de novo o que já está marcado **não** muda a data: a primeira
+    /// marcação é a que registra quando o cliente pagou, e uma tecla repetida
+    /// por engano não pode reescrevê-la.
+    pub fn marcar_comprada(&mut self) {
+        if self.comprada_em.is_none() {
+            self.comprada_em = Some(Utc::now());
+            self.modified_at = Utc::now();
+        }
+    }
+
+    pub fn desmarcar_comprada(&mut self) {
+        if self.comprada_em.is_some() {
+            self.comprada_em = None;
+            self.modified_at = Utc::now();
+        }
+    }
+
     /// Retorna a data de importação
     pub fn imported_at(&self) -> DateTime<Utc> {
         self.imported_at
@@ -407,8 +567,33 @@ impl Photo {
     }
 
     /// Retorna o nome do arquivo
+    /// O nome da foto **para as pessoas** — o que a câmera deu, não o do disco.
+    ///
+    /// 🚨 **Cai no caminho quando a coluna está vazia**, e não é detalhe: é o que
+    /// mantém de pé toda foto importada antes da migration 022, e toda linha que
+    /// o backfill não soube ler (caminho do Windows, prefixo repetido). Uma
+    /// grade de nomes vazios seria pior do que uma de nomes derivados.
     pub fn file_name(&self) -> Option<&str> {
-        self.file_path.file_name()
+        self.nome_original
+            .as_deref()
+            .filter(|n| !n.trim().is_empty())
+            .or_else(|| self.file_path.file_name())
+    }
+
+    /// O nome guardado, sem a queda para o caminho — o que vai para o banco.
+    pub fn nome_original(&self) -> Option<&str> {
+        self.nome_original.as_deref()
+    }
+
+    /// Grava o nome de origem. **Chamado uma vez, na importação.**
+    ///
+    /// ⚠️ **Não mexe em `modified_at`**, ao contrário de `definir_sessao` e
+    /// `definir_id_no_site`: isto não é uma decisão do operador sobre a foto, é
+    /// o registro de um fato que já era verdade quando ela entrou. O repositório
+    /// também o chama ao reconstruir do banco, e ali marcar modificação seria
+    /// mentira pura.
+    pub fn definir_nome_original(&mut self, nome: Option<String>) {
+        self.nome_original = nome.filter(|n| !n.trim().is_empty());
     }
 
     /// Retorna a extensão do arquivo
@@ -505,6 +690,17 @@ impl Photo {
     }
 
     /// Define os ajustes de edição e marca como editada
+    // ⚠️ Dívida reconhecida, não descuido — docs/10-MIGRACAO-GPUI.md §2.1.
+    //
+    // A cadeia de ajustes de revelação (exposição, contraste, HSL nos 8 canais,
+    // detalhe, lente…) viaja como parâmetro solto do controller até o caso de
+    // uso. Agrupá-la num tipo é o conserto certo e é **outro commit**: mexe em
+    // quatro camadas de uma vez, e a migração para GPUI não depende disso — o
+    // plano registra explicitamente que virou dívida, e não pré-requisito.
+    //
+    // O `allow` fica na função, e não no crate, para que uma assinatura nova
+    // longa continue sendo cobrada pelo lint.
+    #[allow(clippy::too_many_arguments)]
     pub fn set_edits(
         &mut self,
         exposure: Option<f32>,
@@ -553,6 +749,13 @@ impl Photo {
         nr_color: Option<f32>,
         sharpen_amount: Option<f32>,
         sharpen_radius: Option<f32>,
+        split_shadow_hue: Option<f32>,
+        split_shadow_sat: Option<f32>,
+        split_highlight_hue: Option<f32>,
+        split_highlight_sat: Option<f32>,
+        split_balance: Option<f32>,
+        grain_amount: Option<f32>,
+        grain_size: Option<f32>,
         crop_x: Option<f32>,
         crop_y: Option<f32>,
         crop_width: Option<f32>,
@@ -608,6 +811,13 @@ impl Photo {
         self.edit_nr_color = nr_color;
         self.edit_sharpen_amount = sharpen_amount;
         self.edit_sharpen_radius = sharpen_radius;
+        self.edit_split_shadow_hue = split_shadow_hue;
+        self.edit_split_shadow_sat = split_shadow_sat;
+        self.edit_split_highlight_hue = split_highlight_hue;
+        self.edit_split_highlight_sat = split_highlight_sat;
+        self.edit_split_balance = split_balance;
+        self.edit_grain_amount = grain_amount;
+        self.edit_grain_size = grain_size;
         self.edit_crop_x = crop_x;
         self.edit_crop_y = crop_y;
         self.edit_crop_width = crop_width;
@@ -622,7 +832,6 @@ impl Photo {
 
         Ok(())
     }
-
 
     /// Retorna o campo edit_tone_curve_shadows
     pub fn edit_tone_curve_shadows(&self) -> Option<f32> {
@@ -744,34 +953,105 @@ impl Photo {
         self.edit_sharpen_radius
     }
 
+    /// Retorna o campo edit_split_shadow_hue
+    pub fn edit_split_shadow_hue(&self) -> Option<f32> {
+        self.edit_split_shadow_hue
+    }
+
+    /// Retorna o campo edit_split_shadow_sat
+    pub fn edit_split_shadow_sat(&self) -> Option<f32> {
+        self.edit_split_shadow_sat
+    }
+
+    /// Retorna o campo edit_split_highlight_hue
+    pub fn edit_split_highlight_hue(&self) -> Option<f32> {
+        self.edit_split_highlight_hue
+    }
+
+    /// Retorna o campo edit_split_highlight_sat
+    pub fn edit_split_highlight_sat(&self) -> Option<f32> {
+        self.edit_split_highlight_sat
+    }
+
+    /// Retorna o campo edit_split_balance
+    pub fn edit_split_balance(&self) -> Option<f32> {
+        self.edit_split_balance
+    }
+
+    /// Retorna o campo edit_grain_amount
+    pub fn edit_grain_amount(&self) -> Option<f32> {
+        self.edit_grain_amount
+    }
+
+    /// Retorna o campo edit_grain_size
+    pub fn edit_grain_size(&self) -> Option<f32> {
+        self.edit_grain_size
+    }
+
     /// Retorna o campo edit_hsl_red_hue
-    pub fn edit_hsl_red_hue(&self) -> Option<f32> { self.edit_hsl_red_hue }
-    pub fn edit_hsl_orange_hue(&self) -> Option<f32> { self.edit_hsl_orange_hue }
-    pub fn edit_hsl_yellow_hue(&self) -> Option<f32> { self.edit_hsl_yellow_hue }
-    pub fn edit_hsl_green_hue(&self) -> Option<f32> { self.edit_hsl_green_hue }
-    pub fn edit_hsl_aqua_hue(&self) -> Option<f32> { self.edit_hsl_aqua_hue }
-    pub fn edit_hsl_blue_hue(&self) -> Option<f32> { self.edit_hsl_blue_hue }
-    pub fn edit_hsl_purple_hue(&self) -> Option<f32> { self.edit_hsl_purple_hue }
-    pub fn edit_hsl_magenta_hue(&self) -> Option<f32> { self.edit_hsl_magenta_hue }
+    pub fn edit_hsl_red_hue(&self) -> Option<f32> {
+        self.edit_hsl_red_hue
+    }
+    pub fn edit_hsl_orange_hue(&self) -> Option<f32> {
+        self.edit_hsl_orange_hue
+    }
+    pub fn edit_hsl_yellow_hue(&self) -> Option<f32> {
+        self.edit_hsl_yellow_hue
+    }
+    pub fn edit_hsl_green_hue(&self) -> Option<f32> {
+        self.edit_hsl_green_hue
+    }
+    pub fn edit_hsl_aqua_hue(&self) -> Option<f32> {
+        self.edit_hsl_aqua_hue
+    }
+    pub fn edit_hsl_blue_hue(&self) -> Option<f32> {
+        self.edit_hsl_blue_hue
+    }
+    pub fn edit_hsl_purple_hue(&self) -> Option<f32> {
+        self.edit_hsl_purple_hue
+    }
+    pub fn edit_hsl_magenta_hue(&self) -> Option<f32> {
+        self.edit_hsl_magenta_hue
+    }
 
     /// Retorna o campo edit_hsl_red_lum
-    pub fn edit_hsl_red_lum(&self) -> Option<f32> { self.edit_hsl_red_lum }
-    pub fn edit_hsl_orange_lum(&self) -> Option<f32> { self.edit_hsl_orange_lum }
-    pub fn edit_hsl_yellow_lum(&self) -> Option<f32> { self.edit_hsl_yellow_lum }
-    pub fn edit_hsl_green_lum(&self) -> Option<f32> { self.edit_hsl_green_lum }
-    pub fn edit_hsl_aqua_lum(&self) -> Option<f32> { self.edit_hsl_aqua_lum }
-    pub fn edit_hsl_blue_lum(&self) -> Option<f32> { self.edit_hsl_blue_lum }
-    pub fn edit_hsl_purple_lum(&self) -> Option<f32> { self.edit_hsl_purple_lum }
-    pub fn edit_hsl_magenta_lum(&self) -> Option<f32> { self.edit_hsl_magenta_lum }
+    pub fn edit_hsl_red_lum(&self) -> Option<f32> {
+        self.edit_hsl_red_lum
+    }
+    pub fn edit_hsl_orange_lum(&self) -> Option<f32> {
+        self.edit_hsl_orange_lum
+    }
+    pub fn edit_hsl_yellow_lum(&self) -> Option<f32> {
+        self.edit_hsl_yellow_lum
+    }
+    pub fn edit_hsl_green_lum(&self) -> Option<f32> {
+        self.edit_hsl_green_lum
+    }
+    pub fn edit_hsl_aqua_lum(&self) -> Option<f32> {
+        self.edit_hsl_aqua_lum
+    }
+    pub fn edit_hsl_blue_lum(&self) -> Option<f32> {
+        self.edit_hsl_blue_lum
+    }
+    pub fn edit_hsl_purple_lum(&self) -> Option<f32> {
+        self.edit_hsl_purple_lum
+    }
+    pub fn edit_hsl_magenta_lum(&self) -> Option<f32> {
+        self.edit_hsl_magenta_lum
+    }
 
     /// Retorna o campo edit_lens_distortion
-    pub fn edit_lens_distortion(&self) -> Option<f32> { self.edit_lens_distortion }
+    pub fn edit_lens_distortion(&self) -> Option<f32> {
+        self.edit_lens_distortion
+    }
     /// Retorna o campo edit_lens_vignette_amount
-    pub fn edit_lens_vignette_amount(&self) -> Option<f32> { self.edit_lens_vignette_amount }
+    pub fn edit_lens_vignette_amount(&self) -> Option<f32> {
+        self.edit_lens_vignette_amount
+    }
     /// Retorna o campo edit_lens_vignette_midpoint
-    pub fn edit_lens_vignette_midpoint(&self) -> Option<f32> { self.edit_lens_vignette_midpoint }
-
-
+    pub fn edit_lens_vignette_midpoint(&self) -> Option<f32> {
+        self.edit_lens_vignette_midpoint
+    }
 
     /// Retorna o hash de conteúdo do arquivo (SHA-256)
     pub fn content_hash(&self) -> Option<&str> {
@@ -944,9 +1224,7 @@ mod tests {
     #[test]
     fn test_photo_file_name() {
         // Arrange
-        let photo = Photo::new(
-            FilePath::new("/path/to/my_photo.jpg").unwrap(),
-        );
+        let photo = Photo::new(FilePath::new("/path/to/my_photo.jpg").unwrap());
 
         // Act
         let name = photo.file_name();
@@ -958,12 +1236,8 @@ mod tests {
     #[test]
     fn test_photo_extension() {
         // Arrange
-        let photo1 = Photo::new(
-            FilePath::new("/path/photo.jpg").unwrap(),
-        );
-        let photo2 = Photo::new(
-            FilePath::new("/path/photo.RAW").unwrap(),
-        );
+        let photo1 = Photo::new(FilePath::new("/path/photo.jpg").unwrap());
+        let photo2 = Photo::new(FilePath::new("/path/photo.RAW").unwrap());
 
         // Assert
         assert_eq!(photo1.extension(), Some("jpg"));
@@ -1050,7 +1324,7 @@ mod business_logic_tests {
 
         // Act & Assert - Workflow completo de rating
         assert!(!photo.has_rating());
-        
+
         photo.rate(Rating::THREE).unwrap();
         assert!(photo.has_rating());
         assert_eq!(photo.rating(), Some(Rating::THREE));
@@ -1132,5 +1406,73 @@ mod business_logic_tests {
         assert!(photo.is_edited());
         assert!(photo.has_rating());
         assert!(photo.has_color_label());
+    }
+
+    /// 🔑 "Comprada" é data, e a data não se reescreve por tecla repetida.
+    #[test]
+    fn marcar_comprada_duas_vezes_guarda_a_primeira_data() {
+        let mut foto = Photo::new_test();
+        assert!(!foto.comprada());
+
+        foto.marcar_comprada();
+        let primeira = foto.comprada_em().expect("marcada");
+        foto.marcar_comprada();
+        assert_eq!(foto.comprada_em(), Some(primeira));
+
+        foto.desmarcar_comprada();
+        assert!(!foto.comprada());
+        assert_eq!(foto.comprada_em(), None);
+    }
+}
+
+#[cfg(test)]
+mod nome_original_testes {
+    use super::*;
+
+    fn foto(caminho: &str) -> Photo {
+        Photo::new(FilePath::new(caminho).expect("caminho"))
+    }
+
+    /// 🚨 **O nome que as pessoas veem sai do catálogo, não do disco.**
+    ///
+    /// Desde a migration 022 o arquivo se chama `<uuid>.jpg`. Se `file_name()`
+    /// continuasse lendo o caminho, o operador perderia `DSC_2571.JPG` na grade,
+    /// na tira, no painel, na Revelação e na exportação — e o cliente veria um
+    /// UUID na galeria dele (`publicar::subir`).
+    #[test]
+    fn o_nome_guardado_vence_o_do_disco() {
+        let mut photo = foto("/Ensaios/Teste - g1/0f8c…-uuid.jpg");
+        photo.definir_nome_original(Some("DSC_2571.JPG".into()));
+
+        assert_eq!(photo.file_name(), Some("DSC_2571.JPG"));
+        assert_eq!(photo.nome_original(), Some("DSC_2571.JPG"));
+    }
+
+    /// ⚠️ **Sem nome guardado, o caminho volta a valer** — e é o que mantém de
+    /// pé toda foto importada antes da migration 022, e toda linha que o
+    /// backfill não soube ler (caminho do Windows, prefixo repetido). Uma grade
+    /// de nomes vazios seria pior do que uma de nomes derivados.
+    #[test]
+    fn sem_nome_guardado_o_caminho_ainda_responde() {
+        let antiga = foto("/Pictures/Catalog/2026/09/08/DSC_0001.NEF");
+        assert_eq!(antiga.nome_original(), None);
+        assert_eq!(antiga.file_name(), Some("DSC_0001.NEF"));
+
+        // Vazio conta como ausente: uma coluna preenchida com "" pelo backfill
+        // não pode deixar a foto sem nome nenhum.
+        let mut vazia = foto("/Pictures/Catalog/DSC_0002.NEF");
+        vazia.definir_nome_original(Some("   ".into()));
+        assert_eq!(vazia.file_name(), Some("DSC_0002.NEF"));
+    }
+
+    /// ⚠️ **Gravar o nome de origem não é modificar a foto.** É o registro de um
+    /// fato que já era verdade quando ela entrou — e o repositório chama isto ao
+    /// **reconstruir do banco**, onde marcar modificação seria mentira pura.
+    #[test]
+    fn guardar_o_nome_nao_marca_a_foto_como_modificada() {
+        let mut photo = foto("/Ensaios/uuid.jpg");
+        let antes = photo.modified_at();
+        photo.definir_nome_original(Some("DSC_2571.JPG".into()));
+        assert_eq!(photo.modified_at(), antes);
     }
 }

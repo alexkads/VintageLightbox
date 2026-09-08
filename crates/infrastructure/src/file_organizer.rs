@@ -3,12 +3,12 @@
 //! Implementação do serviço de organização de arquivos.
 //! Suporta diferentes estratégias de organização e padrões de renomeação.
 
+use async_trait::async_trait;
 use domain::{
     services::FileOrganizer,
-    value_objects::{FilePath, PhotoMetadata, OrganizationStrategy, RenamePattern},
+    value_objects::{FilePath, ImportOptions, OrganizationStrategy, PhotoMetadata, RenamePattern},
     DomainError, DomainResult,
 };
-use async_trait::async_trait;
 use std::path::{Path, PathBuf};
 
 /// Implementação do FileOrganizer
@@ -31,10 +31,7 @@ impl FileOrganizerImpl {
         if let Some(meta) = metadata {
             if let Some(ref dt_str) = meta.date_time {
                 // Parse EXIF date format "YYYY:MM:DD HH:MM:SS"
-                let parts: Vec<&str> = dt_str.split(' ').next()
-                    .unwrap_or("")
-                    .split(':')
-                    .collect();
+                let parts: Vec<&str> = dt_str.split(' ').next().unwrap_or("").split(':').collect();
 
                 if parts.len() >= 3 {
                     return (
@@ -65,9 +62,11 @@ impl FileOrganizerImpl {
     ) -> String {
         let mut sequential = 1;
         loop {
-            let name = format!("photo-{}-{}-{}-{:03}.{}", year, month, day, sequential, extension);
-            let path = dir.join(&name);
-            if !tokio::fs::try_exists(&path).await.unwrap_or(false) {
+            let name = format!(
+                "photo-{}-{}-{}-{:03}.{}",
+                year, month, day, sequential, extension
+            );
+            if reservar(&dir.join(&name)).await {
                 return name;
             }
             sequential += 1;
@@ -77,16 +76,12 @@ impl FileOrganizerImpl {
     /// Gera nome único adicionando sufixo _1, _2, etc.
     async fn generate_unique_name(dir: &Path, original_name: &str) -> String {
         let path = Path::new(original_name);
-        let stem = path.file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("file");
-        let extension = path.extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("jpg");
+        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("file");
+        let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("jpg");
 
         // Primeiro tenta sem sufixo
         let first_try = format!("{}.{}", stem, extension);
-        if !tokio::fs::try_exists(dir.join(&first_try)).await.unwrap_or(false) {
+        if reservar(&dir.join(&first_try)).await {
             return first_try;
         }
 
@@ -94,11 +89,148 @@ impl FileOrganizerImpl {
         let mut counter = 1;
         loop {
             let name = format!("{}_{}.{}", stem, counter, extension);
-            if !tokio::fs::try_exists(dir.join(&name)).await.unwrap_or(false) {
+            if reservar(&dir.join(&name)).await {
                 return name;
             }
             counter += 1;
         }
+    }
+}
+
+/// Pega o nome para si, criando o arquivo **vazio e exclusivo**.
+///
+/// 🚨 **Perguntar "existe?" e depois copiar perde foto.** A importação roda
+/// **oito arquivos em paralelo** (`Semaphore::new(8)` no
+/// `ImportWithOptionsUseCase`): dois deles perguntam ao mesmo tempo, os dois
+/// ouvem "não existe", e os dois copiam **para o mesmo caminho**. Uma foto
+/// sobrescreve a outra — e quem lê o destino no meio da segunda cópia recebe um
+/// arquivo pela metade, que é o `Not enough bytes, expected 2 but found 0` que
+/// aparecia no lugar da miniatura.
+///
+/// `create_new` é a única forma de perguntar e responder no mesmo movimento: o
+/// sistema de arquivos garante que **um só** dos dois cria. Quem perdeu tenta o
+/// número seguinte.
+///
+/// ⚠️ **O arquivo fica reservado com zero byte** até a cópia acontecer. É de
+/// propósito: é isso que impede o próximo a passar de escolher o mesmo nome. Uma
+/// falha de cópia depois disso deixa um arquivo vazio no destino — o preço, e o
+/// menor dos dois: o outro é a foto do casamento sobrescrita.
+async fn reservar(caminho: &Path) -> bool {
+    tokio::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(caminho)
+        .await
+        .is_ok()
+}
+
+impl FileOrganizerImpl {
+    /// Diretório onde o arquivo deve cair, já criado no disco
+    ///
+    /// É o ponto em que as três estratégias divergem — o resto (nome, cópia) é igual.
+    async fn destination_dir(
+        &self,
+        source_path: &Path,
+        metadata: Option<&PhotoMetadata>,
+        strategy: OrganizationStrategy,
+        base_dir: &Path,
+        source_root: Option<&str>,
+    ) -> DomainResult<PathBuf> {
+        let dest_dir = match strategy {
+            OrganizationStrategy::ByDate => {
+                let (year, month, day) = Self::extract_date(metadata);
+                base_dir.join(year).join(month).join(day)
+            }
+
+            OrganizationStrategy::PreserveStructure => {
+                // Preserva o pedaço do caminho que fica *abaixo* da raiz de origem:
+                // /Volumes/CARTAO/DCIM/100CANON/IMG.CR2 com raiz /Volumes/CARTAO
+                // vira <destino>/DCIM/100CANON/IMG.CR2.
+                //
+                // Sem raiz de origem informada não há o que preservar — o caminho
+                // absoluto inteiro viraria subpasta —, então cai em pasta única.
+                let relativo = source_root
+                    .map(Path::new)
+                    .and_then(|root| source_path.parent()?.strip_prefix(root).ok())
+                    .filter(|rel| !rel.as_os_str().is_empty());
+
+                match relativo {
+                    Some(rel) => base_dir.join(rel),
+                    None => base_dir.to_path_buf(),
+                }
+            }
+
+            OrganizationStrategy::IntoOneFolder => base_dir.to_path_buf(),
+        };
+
+        tokio::fs::create_dir_all(&dest_dir).await.map_err(|e| {
+            DomainError::InfrastructureError(format!(
+                "Failed to create directory {}: {}",
+                dest_dir.display(),
+                e
+            ))
+        })?;
+
+        Ok(dest_dir)
+    }
+
+    /// Copia o arquivo para o destino resolvido pelas opções
+    async fn organize_into(
+        &self,
+        source: &FilePath,
+        metadata: Option<&PhotoMetadata>,
+        strategy: OrganizationStrategy,
+        rename_pattern: RenamePattern,
+        base_dir: &Path,
+        source_root: Option<&str>,
+    ) -> DomainResult<FilePath> {
+        let source_path: &Path = source.as_ref();
+
+        let extension = source_path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("jpg")
+            .to_lowercase();
+
+        let dest_dir = self
+            .destination_dir(source_path, metadata, strategy, base_dir, source_root)
+            .await?;
+
+        let original_name = source_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("photo.jpg");
+
+        let filename = match rename_pattern {
+            RenamePattern::Standard => {
+                let (year, month, day) = Self::extract_date(metadata);
+                Self::generate_sequential_name(&dest_dir, &year, &month, &day, &extension).await
+            }
+            RenamePattern::KeepOriginal => {
+                Self::generate_unique_name(&dest_dir, original_name).await
+            }
+            // 🔑 **Não passa por `generate_unique_name`, e não precisa.** O
+            // sufixo `_1` existe para resolver colisão de nome; um UUID v4 não
+            // colide, e chamar a reserva aqui só acrescentaria um `stat` por
+            // arquivo num lote de 500.
+            RenamePattern::Uuid => format!("{}.{extension}", uuid::Uuid::new_v4()),
+            RenamePattern::Custom(_) => {
+                // v2 feature - por enquanto usa Standard
+                let (year, month, day) = Self::extract_date(metadata);
+                Self::generate_sequential_name(&dest_dir, &year, &month, &day, &extension).await
+            }
+        };
+
+        let dest_path = dest_dir.join(&filename);
+
+        // A cópia escreve **por cima da reserva** — o `copy` trunca o destino, que
+        // é exatamente o que se quer: o arquivo de zero byte criado por
+        // `reservar` existe só para segurar o nome.
+        tokio::fs::copy(source_path, &dest_path)
+            .await
+            .map_err(|e| DomainError::InfrastructureError(format!("Failed to copy file: {}", e)))?;
+
+        FilePath::new(dest_path.to_str().unwrap())
     }
 }
 
@@ -111,101 +243,43 @@ impl FileOrganizer for FileOrganizerImpl {
         strategy: OrganizationStrategy,
         rename_pattern: RenamePattern,
     ) -> DomainResult<FilePath> {
-        let source_path: &Path = source.as_ref();
+        let base_dir = self.base_dir.clone();
+        self.organize_into(source, metadata, strategy, rename_pattern, &base_dir, None)
+            .await
+    }
 
-        // Extrair extensão
-        let extension = source_path.extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("jpg")
-            .to_lowercase();
+    async fn organize_file_with(
+        &self,
+        source: &FilePath,
+        metadata: Option<&PhotoMetadata>,
+        options: &ImportOptions,
+    ) -> DomainResult<FilePath> {
+        // Destino escolhido na tela vence o catálogo padrão; vazio conta como não escolhido.
+        let base_dir = options
+            .destination
+            .as_deref()
+            .map(str::trim)
+            .filter(|d| !d.is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| self.base_dir.clone());
 
-        match strategy {
-            OrganizationStrategy::ByDate => {
-                // Extrair data dos metadados
-                let (year, month, day) = Self::extract_date(metadata);
-
-                // Criar diretório: base_dir/YYYY/MM/DD/
-                let dest_dir = self.base_dir.join(&year).join(&month).join(&day);
-                tokio::fs::create_dir_all(&dest_dir).await
-                    .map_err(|e| DomainError::InfrastructureError(
-                        format!("Failed to create directory {}: {}", dest_dir.display(), e)
-                    ))?;
-
-                // Gerar nome do arquivo baseado no padrão
-                let filename = match rename_pattern {
-                    RenamePattern::Standard => {
-                        Self::generate_sequential_name(&dest_dir, &year, &month, &day, &extension).await
-                    }
-                    RenamePattern::KeepOriginal => {
-                        let original_name = source_path.file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or("photo.jpg");
-                        Self::generate_unique_name(&dest_dir, original_name).await
-                    }
-                    RenamePattern::Custom(_) => {
-                        // v2 feature - por enquanto usa Standard
-                        Self::generate_sequential_name(&dest_dir, &year, &month, &day, &extension).await
-                    }
-                };
-
-                let dest_path = dest_dir.join(&filename);
-
-                // Copiar arquivo
-                tokio::fs::copy(source_path, &dest_path).await
-                    .map_err(|e| DomainError::InfrastructureError(
-                        format!("Failed to copy file: {}", e)
-                    ))?;
-
-                FilePath::new(dest_path.to_str().unwrap())
-            }
-
-            OrganizationStrategy::PreserveStructure => {
-                // Preservar estrutura de diretórios original
-                // Extrai o caminho relativo do arquivo (se possível)
-                let original_name = source_path.file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("photo.jpg");
-
-                // Para preservar estrutura, usamos apenas o nome do arquivo
-                // (uma implementação mais complexa poderia preservar hierarquia completa)
-                let dest_dir = self.base_dir.clone();
-                tokio::fs::create_dir_all(&dest_dir).await
-                    .map_err(|e| DomainError::InfrastructureError(
-                        format!("Failed to create directory: {}", e)
-                    ))?;
-
-                let filename = match rename_pattern {
-                    RenamePattern::KeepOriginal => {
-                        Self::generate_unique_name(&dest_dir, original_name).await
-                    }
-                    RenamePattern::Standard => {
-                        let (year, month, day) = Self::extract_date(metadata);
-                        Self::generate_sequential_name(&dest_dir, &year, &month, &day, &extension).await
-                    }
-                    RenamePattern::Custom(_) => {
-                        Self::generate_unique_name(&dest_dir, original_name).await
-                    }
-                };
-
-                let dest_path = dest_dir.join(&filename);
-
-                // Copiar arquivo
-                tokio::fs::copy(source_path, &dest_path).await
-                    .map_err(|e| DomainError::InfrastructureError(
-                        format!("Failed to copy file: {}", e)
-                    ))?;
-
-                FilePath::new(dest_path.to_str().unwrap())
-            }
-        }
+        self.organize_into(
+            source,
+            metadata,
+            options.organization,
+            options.rename_pattern.clone(),
+            &base_dir,
+            options.source_root.as_deref(),
+        )
+        .await
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
     use std::io::Write;
+    use tempfile::TempDir;
 
     // Helper para criar arquivo temporário
     fn create_test_file(dir: &Path, name: &str, content: &[u8]) -> PathBuf {
@@ -224,18 +298,22 @@ mod tests {
         let source_file = create_test_file(temp_source.path(), "photo.jpg", b"test content");
         let source_path = FilePath::new(source_file.to_str().unwrap()).unwrap();
 
-        let mut metadata = PhotoMetadata::default();
-        metadata.date_time = Some("2024:03:15 10:30:45".to_string());
+        let metadata = PhotoMetadata {
+            date_time: Some("2024:03:15 10:30:45".to_string()),
+            ..Default::default()
+        };
 
         let organizer = FileOrganizerImpl::new(temp_dest.path().to_path_buf());
 
         // Act
-        let result = organizer.organize_file(
-            &source_path,
-            Some(&metadata),
-            OrganizationStrategy::ByDate,
-            RenamePattern::Standard,
-        ).await;
+        let result = organizer
+            .organize_file(
+                &source_path,
+                Some(&metadata),
+                OrganizationStrategy::ByDate,
+                RenamePattern::Standard,
+            )
+            .await;
 
         // Assert
         assert!(result.is_ok());
@@ -263,12 +341,14 @@ mod tests {
         let organizer = FileOrganizerImpl::new(temp_dest.path().to_path_buf());
 
         // Act
-        let result = organizer.organize_file(
-            &source_path,
-            None, // Sem metadados
-            OrganizationStrategy::ByDate,
-            RenamePattern::Standard,
-        ).await;
+        let result = organizer
+            .organize_file(
+                &source_path,
+                None, // Sem metadados
+                OrganizationStrategy::ByDate,
+                RenamePattern::Standard,
+            )
+            .await;
 
         // Assert
         assert!(result.is_ok());
@@ -289,18 +369,21 @@ mod tests {
         let temp_source = TempDir::new().unwrap();
         let temp_dest = TempDir::new().unwrap();
 
-        let source_file = create_test_file(temp_source.path(), "original_name.jpg", b"test content");
+        let source_file =
+            create_test_file(temp_source.path(), "original_name.jpg", b"test content");
         let source_path = FilePath::new(source_file.to_str().unwrap()).unwrap();
 
         let organizer = FileOrganizerImpl::new(temp_dest.path().to_path_buf());
 
         // Act
-        let result = organizer.organize_file(
-            &source_path,
-            None,
-            OrganizationStrategy::PreserveStructure,
-            RenamePattern::KeepOriginal,
-        ).await;
+        let result = organizer
+            .organize_file(
+                &source_path,
+                None,
+                OrganizationStrategy::PreserveStructure,
+                RenamePattern::KeepOriginal,
+            )
+            .await;
 
         // Assert
         assert!(result.is_ok());
@@ -323,25 +406,31 @@ mod tests {
         let source_path1 = FilePath::new(source_file1.to_str().unwrap()).unwrap();
         let source_path2 = FilePath::new(source_file2.to_str().unwrap()).unwrap();
 
-        let mut metadata = PhotoMetadata::default();
-        metadata.date_time = Some("2024:03:15 10:30:45".to_string());
+        let metadata = PhotoMetadata {
+            date_time: Some("2024:03:15 10:30:45".to_string()),
+            ..Default::default()
+        };
 
         let organizer = FileOrganizerImpl::new(temp_dest.path().to_path_buf());
 
         // Act - Import dois arquivos com mesma data
-        let result1 = organizer.organize_file(
-            &source_path1,
-            Some(&metadata),
-            OrganizationStrategy::ByDate,
-            RenamePattern::Standard,
-        ).await;
+        let result1 = organizer
+            .organize_file(
+                &source_path1,
+                Some(&metadata),
+                OrganizationStrategy::ByDate,
+                RenamePattern::Standard,
+            )
+            .await;
 
-        let result2 = organizer.organize_file(
-            &source_path2,
-            Some(&metadata),
-            OrganizationStrategy::ByDate,
-            RenamePattern::Standard,
-        ).await;
+        let result2 = organizer
+            .organize_file(
+                &source_path2,
+                Some(&metadata),
+                OrganizationStrategy::ByDate,
+                RenamePattern::Standard,
+            )
+            .await;
 
         // Assert
         assert!(result1.is_ok());
@@ -365,18 +454,22 @@ mod tests {
         let source_file = create_test_file(temp_source.path(), "photo.jpg", b"test");
         let source_path = FilePath::new(source_file.to_str().unwrap()).unwrap();
 
-        let mut metadata = PhotoMetadata::default();
-        metadata.date_time = Some("2024:03:15 10:30:45".to_string());
+        let metadata = PhotoMetadata {
+            date_time: Some("2024:03:15 10:30:45".to_string()),
+            ..Default::default()
+        };
 
         let organizer = FileOrganizerImpl::new(temp_dest.path().to_path_buf());
 
         // Act
-        let result = organizer.organize_file(
-            &source_path,
-            Some(&metadata),
-            OrganizationStrategy::ByDate,
-            RenamePattern::Standard,
-        ).await;
+        let result = organizer
+            .organize_file(
+                &source_path,
+                Some(&metadata),
+                OrganizationStrategy::ByDate,
+                RenamePattern::Standard,
+            )
+            .await;
 
         // Assert
         assert!(result.is_ok());
@@ -384,5 +477,79 @@ mod tests {
         // Verificar que diretórios foram criados
         let expected_dir = temp_dest.path().join("2024").join("03").join("15");
         assert!(tokio::fs::try_exists(&expected_dir).await.unwrap());
+    }
+}
+
+#[cfg(test)]
+mod nome_uuid_testes {
+    use super::*;
+    use domain::value_objects::ImportMode;
+
+    fn opcoes_do_ensaio(destino: &Path) -> ImportOptions {
+        ImportOptions {
+            mode: ImportMode::Copy,
+            destination: Some(destino.to_string_lossy().into_owned()),
+            organization: OrganizationStrategy::IntoOneFolder,
+            rename_pattern: RenamePattern::Uuid,
+            ..Default::default()
+        }
+    }
+
+    /// 🚨 **Duas fotos com o mesmo nome, de dois cartões, no mesmo ensaio.**
+    ///
+    /// Com `KeepOriginal` a segunda virava `DSC_2571_1.jpg`, e o app passava a
+    /// chamá-la por um nome que não existe em lugar nenhum além do nosso disco.
+    /// Com UUID as duas entram inteiras, e o nome que o operador vê continua
+    /// sendo `DSC_2571.jpg` para as duas — que é a verdade.
+    #[tokio::test]
+    async fn duas_fotos_de_mesmo_nome_entram_sem_inventar_nome() {
+        let origem = tempfile::TempDir::new().expect("origem");
+        let destino = tempfile::TempDir::new().expect("destino");
+        let organizador = FileOrganizerImpl::new(destino.path().to_path_buf());
+
+        let mut caminhos = Vec::new();
+        for cartao in ["cartao-a", "cartao-b"] {
+            let pasta = origem.path().join(cartao);
+            std::fs::create_dir_all(&pasta).expect("pasta");
+            let arquivo = pasta.join("DSC_2571.JPG");
+            std::fs::write(&arquivo, b"pixels").expect("gravar");
+            caminhos.push(FilePath::new(arquivo.to_str().unwrap()).expect("caminho"));
+        }
+
+        let mut nomes = Vec::new();
+        for caminho in &caminhos {
+            let destino_final = organizador
+                .organize_file_with(caminho, None, &opcoes_do_ensaio(destino.path()))
+                .await
+                .expect("organizar");
+            let nome = Path::new(destino_final.as_str().unwrap_or_default())
+                .file_name()
+                .and_then(|n| n.to_str())
+                .expect("nome")
+                .to_string();
+            nomes.push(nome);
+        }
+
+        assert_ne!(nomes[0], nomes[1], "dois UUID não colidem");
+        for nome in &nomes {
+            let (base, extensao) = nome.rsplit_once('.').expect("nome com extensão");
+            // 🔑 A extensão é preservada: é por ela que o sistema, o `image` e o
+            // LibRaw sabem o que estão abrindo.
+            assert_eq!(extensao, "jpg", "a extensão tem de sobreviver: {nome}");
+            uuid::Uuid::parse_str(base)
+                .unwrap_or_else(|_| panic!("o nome no disco tem de ser um UUID: {nome}"));
+            assert!(
+                !nome.contains("DSC_2571"),
+                "o nome de origem não entra no disco — ele vai para o catálogo"
+            );
+        }
+
+        // 🚨 **As duas fotos existem.** O ponto de tudo isto é não perder foto:
+        // um `_1` a menos não pode virar um arquivo sobrescrito.
+        let entradas: Vec<_> = std::fs::read_dir(destino.path())
+            .expect("ler o destino")
+            .flatten()
+            .collect();
+        assert_eq!(entradas.len(), 2, "as duas fotos têm de estar no disco");
     }
 }

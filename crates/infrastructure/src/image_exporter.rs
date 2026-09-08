@@ -1,274 +1,278 @@
-use async_trait::async_trait;
-use domain::services::ImageExporter;
-use domain::entities::Photo;
-use domain::value_objects::FilePath;
-use domain::{DomainError, DomainResult};
-use std::path::Path;
-use image::{DynamicImage, Rgba, Pixel};
+//! A exportação: do arquivo original ao JPEG revelado.
+//!
+//! ## 🚨 O que este arquivo era, e por que mudou
+//!
+//! Ele tinha a **própria** implementação dos ajustes de revelação, na CPU, e ela
+//! não era "o shader com menos campos" — era outra resposta para a mesma
+//! pergunta. Medido em 17/ago/2026:
+//!
+//! | | a tela | o arquivo (antes) |
+//! |---|---|---|
+//! | quantos ajustes | 46 | **15** |
+//! | ruído de luminância | bilateral, com `sigma_r` do valor | `img.blur(v * 0.02)`, gaussiano puro |
+//! | ruído de cor | gaussiano no U/V | borra e restaura a luminância por razão |
+//! | nitidez | máscara de desfoque **antes** dos tons | `imageops::unsharpen` **depois** deles |
+//! | corte, giro, espelho | aplicados | **ignorados** |
+//!
+//! Quem revelava mexendo em HSL via o resultado na tela, exportava e recebia
+//! outra imagem — sem erro, sem aviso. E o que faltava não era pouco: a curva de
+//! tons inteira (4), o HSL inteiro nos 8 canais (24) e a lente (3).
+//!
+//! 🔑 **O conserto não foi acrescentar os 31 que faltavam.** Isso escreveria uma
+//! terceira implementação da mesma matemática, para divergir de novo no próximo
+//! ajuste. A exportação passa pelo **mesmo** `.wgsl` que desenha a tela
+//! ([`crate::gpu_adjustments`]) e pelo **mesmo** enquadramento
+//! ([`crate::transformacao`]) — um caminho, uma resposta.
+//!
+//! ⚠️ **E isso custa uma dependência nova: sem adaptador de GPU, não exporta.**
+//! É deliberado. O caminho de CPU existia e dava outro resultado; mantê-lo como
+//! reserva seria manter o defeito de pé, disfarçado de robustez. Falhar alto é o
+//! que impede um lote inteiro de sair errado sem ninguém notar.
 
-pub struct ImageExporterImpl;
+use async_trait::async_trait;
+use domain::entities::Photo;
+use domain::services::ImageExporter;
+use domain::value_objects::{CropSettings, ExportOptions, FilePath, Watermark, WatermarkPosition};
+use domain::{DomainError, DomainResult};
+use image::DynamicImage;
+use std::path::Path;
+use std::sync::{Arc, Mutex};
+
+use crate::gpu_adjustments::{ajustes_da_entidade, Ajustes, Motor};
+use crate::transformacao;
+
+/// O motor é aberto na primeira exportação e reaproveitado.
+///
+/// ⚠️ **Abrir custa dezenas de milissegundos** (`request_adapter` mais
+/// `request_device`), e exportar uma seleção é uma chamada por foto: abrir um
+/// motor por foto transformaria um custo fixo em custo por item.
+#[derive(Default)]
+pub struct ImageExporterImpl {
+    motor: Mutex<Option<Arc<Mutex<Motor>>>>,
+}
 
 impl ImageExporterImpl {
     pub fn new() -> Self {
-        Self
+        Self::default()
     }
 
-    /// Apply all 11 adjustments to an image
-    /// This mirrors the logic in crates/ui/src/image_processing.rs
-    fn process_image(
-        img: &DynamicImage,
-        exposure: f32,
-        contrast: f32,
-        temperature: f32,
-        tint: f32,
-        highlights: f32,
-        shadows: f32,
-        whites: f32,
-        blacks: f32,
-        clarity: f32,
-        vibrance: f32,
-        saturation: f32,
-        nr_luminance: f32,
-        nr_color: f32,
-        sharpen_amount: f32,
-        sharpen_radius: f32,
-    ) -> DynamicImage {
-        // 0. Noise Reduction
-        // 0.1 Luminance NR (Simple partial blur)
-        let img_luminance_filtered = if nr_luminance > 0.0 {
-            // Map 0-100 range to sigma 0.0 - 2.0
-            let sigma = nr_luminance * 0.02; 
-            img.blur(sigma)
-        } else {
-            img.clone()
-        };
+    fn motor(&self) -> DomainResult<Arc<Mutex<Motor>>> {
+        let mut guarda = self
+            .motor
+            .lock()
+            .map_err(|_| DomainError::InfrastructureError("motor de GPU envenenado".into()))?;
 
-        // 0.2 Color NR (Blur then Restore Luminance)
-        let img_to_process = if nr_color > 0.0 {
-             let sigma = nr_color * 0.05; // 0-100 -> 0-5.0 sigma
-             let blurred = img_luminance_filtered.blur(sigma);
-             
-             let mut recombined = img_luminance_filtered.to_rgba8();
-             let blurred_rgba = blurred.to_rgba8();
-             let (width, height) = recombined.dimensions();
-             
-             for y in 0..height {
-                 for x in 0..width {
-                     let orig = recombined.get_pixel(x, y);
-                     let blur = blurred_rgba.get_pixel(x, y);
-                     
-                     let y_orig = 0.299 * orig[0] as f32 + 0.587 * orig[1] as f32 + 0.114 * orig[2] as f32;
-                     let y_blur = 0.299 * blur[0] as f32 + 0.587 * blur[1] as f32 + 0.114 * blur[2] as f32;
-                     
-                     if y_blur > 0.001 {
-                         let ratio = y_orig / y_blur;
-                         let r = (blur[0] as f32 * ratio).clamp(0.0, 255.0) as u8;
-                         let g = (blur[1] as f32 * ratio).clamp(0.0, 255.0) as u8;
-                         let b = (blur[2] as f32 * ratio).clamp(0.0, 255.0) as u8;
-                         recombined.put_pixel(x, y, Rgba([r, g, b, orig[3]]));
-                     } else {
-                         recombined.put_pixel(x, y, *orig);
-                     }
-                 }
-             }
-             DynamicImage::ImageRgba8(recombined)
-        } else {
-             img_luminance_filtered
-        };
-
-        let mut result = img_to_process.to_rgba8();
-        let (width, height) = result.dimensions();
-
-        // Apply adjustments pixel by pixel
-        for y in 0..height {
-            for x in 0..width {
-                let pixel = result.get_pixel(x, y);
-                let rgba = pixel.channels();
-                let (mut r, mut g, mut b, a) = (rgba[0] as f32, rgba[1] as f32, rgba[2] as f32, rgba[3]);
-
-                // 1. Exposure (brightness adjustment)
-                if exposure != 0.0 {
-                    let factor = 2.0_f32.powf(exposure);
-                    r *= factor;
-                    g *= factor;
-                    b *= factor;
-                }
-
-                // 2. Contrast
-                if contrast != 1.0 {
-                    let factor = contrast;
-                    r = (r - 128.0) * factor + 128.0;
-                    g = (g - 128.0) * factor + 128.0;
-                    b = (b - 128.0) * factor + 128.0;
-                }
-
-                // 3. Temperature (warm/cool balance)
-                if temperature != 0.0 {
-                    r += temperature * 10.0;
-                    b -= temperature * 10.0;
-                }
-
-                // 4. Tint (green/magenta balance)
-                if tint != 0.0 {
-                    if tint > 0.0 {
-                        // More magenta: increase red and blue
-                        r += tint * 5.0;
-                        b += tint * 5.0;
-                        g -= tint * 5.0;
-                    } else {
-                        // More green
-                        g -= tint * 5.0;
-                        r += tint * 5.0;
-                        b += tint * 5.0;
-                    }
-                }
-
-                // 5. Highlights (adjust bright areas)
-                if highlights != 0.0 {
-                    let luminance = (r + g + b) / 3.0;
-                    if luminance > 128.0 {
-                        let factor = 1.0 + (highlights * 0.01);
-                        r *= factor;
-                        g *= factor;
-                        b *= factor;
-                    }
-                }
-
-                // 6. Shadows (adjust dark areas)
-                if shadows != 0.0 {
-                    let luminance = (r + g + b) / 3.0;
-                    if luminance < 128.0 {
-                        let factor = 1.0 + (shadows * 0.01);
-                        r *= factor;
-                        g *= factor;
-                        b *= factor;
-                    }
-                }
-
-                // 7. Whites (adjust brightest areas)
-                if whites != 0.0 {
-                    let luminance = (r + g + b) / 3.0;
-                    if luminance > 192.0 {
-                        let factor = 1.0 + (whites * 0.01);
-                        r *= factor;
-                        g *= factor;
-                        b *= factor;
-                    }
-                }
-
-                // 8. Blacks (adjust darkest areas)
-                if blacks != 0.0 {
-                    let luminance = (r + g + b) / 3.0;
-                    if luminance < 64.0 {
-                        let factor = 1.0 + (blacks * 0.01);
-                        r *= factor;
-                        g *= factor;
-                        b *= factor;
-                    }
-                }
-
-                // 9. Saturation (overall color intensity)
-                if saturation != 0.0 {
-                    let luminance = (r + g + b) / 3.0;
-                    let factor = 1.0 + saturation;
-                    r = luminance + (r - luminance) * factor;
-                    g = luminance + (g - luminance) * factor;
-                    b = luminance + (b - luminance) * factor;
-                }
-
-                // 10. Vibrance (intelligent saturation - affects muted colors more)
-                if vibrance != 0.0 {
-                    let luminance = (r + g + b) / 3.0;
-                    let max_diff = ((r - luminance).abs().max((g - luminance).abs())).max((b - luminance).abs());
-                    if max_diff < 64.0 {  // Only affect less saturated colors
-                        let factor = 1.0 + vibrance * 2.0;
-                        r = luminance + (r - luminance) * factor;
-                        g = luminance + (g - luminance) * factor;
-                        b = luminance + (b - luminance) * factor;
-                    }
-                }
-
-                // 11. Clarity (local contrast - simplified)
-                if clarity != 0.0 {
-                    let factor = 1.0 + (clarity * 0.5);
-                    let luminance = (r + g + b) / 3.0;
-                    r = luminance + (r - luminance) * factor;
-                    g = luminance + (g - luminance) * factor;
-                    b = luminance + (b - luminance) * factor;
-                }
-
-                // Clamp values to 0-255
-                r = r.clamp(0.0, 255.0);
-                g = g.clamp(0.0, 255.0);
-                b = b.clamp(0.0, 255.0);
-
-                result.put_pixel(x, y, Rgba([r as u8, g as u8, b as u8, a]));
-            }
+        if let Some(motor) = guarda.as_ref() {
+            return Ok(motor.clone());
         }
 
-        let final_image = if sharpen_amount > 0.0 {
-            // Apply unsharp mask logic
-            // image::imageops::unsharpen takes (image, sigma, amount)
-            // Amount in image crate is i32? Let's check or cast. 
-            // Actually image crate unsharpen signature: (image, sigma, amount) where amount is i32
-            // But typical amount is small integer? 
-            // Let's assume input 0-100 maps to something reasonable.
-            image::imageops::unsharpen(&result, sharpen_radius, sharpen_amount as i32)
-        } else {
-            result
-        };
+        let motor = Motor::abrir().ok_or_else(|| {
+            DomainError::InfrastructureError(
+                "nenhum adaptador de GPU: a exportação usa o mesmo shader da tela, \
+                 e sem ele o arquivo sairia diferente do que foi revelado"
+                    .into(),
+            )
+        })?;
 
-        DynamicImage::ImageRgba8(final_image)
+        let motor = Arc::new(Mutex::new(motor));
+        *guarda = Some(motor.clone());
+        Ok(motor)
+    }
+
+    /// Revela **bytes de imagem** — a foto que não está no catálogo desta máquina.
+    ///
+    /// 🔑 É o `revelarIntegral` do editor do site: o original chega inteiro, os
+    /// ajustes e o enquadramento vêm da tela, e o que sai é o JPEG que vai para
+    /// a galeria. Sem `Photo` porque não há: a foto do storage não é do
+    /// catálogo local, e forçá-la a virar uma entidade só para revelar criaria
+    /// um registro que ninguém pediu.
+    ///
+    /// A ordem é a de [`Self::renderizar`] — revelar inteiro, enquadrar depois.
+    pub fn renderizar_bytes(
+        &self,
+        bytes: &[u8],
+        ajustes: &Ajustes,
+        corte: &CropSettings,
+        qualidade: u8,
+    ) -> DomainResult<Vec<u8>> {
+        let imagem = image::load_from_memory(bytes)
+            .map_err(|e| DomainError::InfrastructureError(format!("o original não abriu: {e}")))?;
+        let revelada = self.revelar(&imagem, ajustes)?;
+        let saida = transformacao::aplicar(&revelada, corte, true);
+        revelacao_core::jpeg::codificar(&saida, qualidade)
+            .map_err(|e| DomainError::InfrastructureError(format!("o JPEG não saiu: {e}")))
+    }
+
+    /// Os 46 ajustes, no mesmo shader que desenha a Revelação.
+    fn revelar(&self, imagem: &DynamicImage, ajustes: &Ajustes) -> DomainResult<DynamicImage> {
+        // 🚨 RGBA de 8 bits é o que a textura de entrada espera
+        // (`Rgba8Unorm`). Um `to_rgb8` aqui daria três canais para um formato de
+        // quatro, e a foto sairia com as linhas deslocadas.
+        let rgba = imagem.to_rgba8();
+        let (largura, altura) = (rgba.width(), rgba.height());
+        let pixels = Arc::new(rgba.into_raw());
+
+        let motor = self.motor()?;
+        let mut motor = motor
+            .lock()
+            .map_err(|_| DomainError::InfrastructureError("motor de GPU envenenado".into()))?;
+
+        motor
+            .revelar(&pixels, largura, altura, ajustes)
+            .ok_or_else(|| {
+                DomainError::InfrastructureError("a GPU não devolveu a imagem revelada".into())
+            })
+    }
+}
+
+/// Limita o lado maior, **sem nunca ampliar**.
+///
+/// ⚠️ **Ampliar é a resposta errada para toda pergunta que a galeria faz.** Pedir
+/// 2048 px numa foto de 1200 devolveria 2048 px de nada — o mesmo detalhe
+/// espalhado, com arquivo maior e nitidez menor. É o "Don't Enlarge" do
+/// Lightroom, e aqui ele não é opção: é o comportamento.
+fn redimensionar(imagem: DynamicImage, lado_maior: u32) -> DynamicImage {
+    let (largura, altura) = (imagem.width(), imagem.height());
+    let maior = largura.max(altura);
+    if maior <= lado_maior {
+        return imagem;
+    }
+
+    let fator = lado_maior as f32 / maior as f32;
+    let nova_largura = ((largura as f32 * fator).round() as u32).max(1);
+    let nova_altura = ((altura as f32 * fator).round() as u32).max(1);
+
+    // Lanczos3 porque o destino é ver: reduzir com filtro rápido devolve serrilha
+    // nas bordas, e a foto da galeria é justamente a que vai ser olhada de perto
+    // por quem está decidindo se compra.
+    imagem.resize_exact(
+        nova_largura,
+        nova_altura,
+        image::imageops::FilterType::Lanczos3,
+    )
+}
+
+/// Compõe a marca d'água por cima da foto.
+///
+/// 🚨 **Se a marca não puder ser aplicada, a exportação falha.** É a única falha
+/// deste arquivo que não é técnica: exportar sem a marca uma foto que devia ir
+/// marcada **entrega a foto que o cliente não comprou**. Um arquivo a menos é um
+/// reexport; um arquivo sem marca na galeria não volta atrás.
+fn aplicar_marca(base: &DynamicImage, marca: &Watermark) -> DomainResult<DynamicImage> {
+    let caminho = marca.file().as_str()?;
+    let logo = image::open(Path::new(&caminho)).map_err(|e| {
+        DomainError::InfrastructureError(format!(
+            "não foi possível abrir a marca d'água ({caminho}): {e}"
+        ))
+    })?;
+
+    let (largura, altura) = (base.width(), base.height());
+    let alvo_largura = ((largura as f32 * marca.scale()).round() as u32).max(1);
+    let fator = alvo_largura as f32 / logo.width().max(1) as f32;
+    let alvo_altura = ((logo.height() as f32 * fator).round() as u32).max(1);
+
+    let logo = logo.resize_exact(
+        alvo_largura.min(largura),
+        alvo_altura.min(altura),
+        image::imageops::FilterType::Lanczos3,
+    );
+
+    let margem = (largura.min(altura) as f32 * marca.margin()).round() as i64;
+    let (lw, lh) = (logo.width() as i64, logo.height() as i64);
+    let (bw, bh) = (largura as i64, altura as i64);
+    let (x, y) = match marca.position() {
+        WatermarkPosition::Center => ((bw - lw) / 2, (bh - lh) / 2),
+        WatermarkPosition::TopLeft => (margem, margem),
+        WatermarkPosition::TopRight => (bw - lw - margem, margem),
+        WatermarkPosition::BottomLeft => (margem, bh - lh - margem),
+        WatermarkPosition::BottomRight => (bw - lw - margem, bh - lh - margem),
+    };
+
+    // 🔑 A opacidade multiplica o alfa **que a marca já tem**, e não substitui.
+    // Substituir faria o retângulo transparente em volta do logotipo virar um
+    // véu cinza sobre a foto — o PNG tem alfa por um motivo.
+    let mut logo = logo.to_rgba8();
+    if marca.opacity() < 1.0 {
+        for pixel in logo.pixels_mut() {
+            pixel[3] = (pixel[3] as f32 * marca.opacity()).round() as u8;
+        }
+    }
+
+    let mut saida = base.to_rgba8();
+    image::imageops::overlay(&mut saida, &logo, x, y);
+    Ok(DynamicImage::ImageRgba8(saida))
+}
+
+impl ImageExporterImpl {
+    /// A foto pronta, **em memória** — revelada, enquadrada e com as opções
+    /// aplicadas, sem passar pelo disco.
+    ///
+    /// 🔑 **Existe para a impressão usar o mesmo caminho.** A folha de papel
+    /// precisa da foto do jeito que ela ficou, e não do arquivo cru: imprimir o
+    /// original seria o mesmo defeito que a exportação tinha até hoje de manhã —
+    /// a tela mostrando uma coisa e o resultado sendo outra.
+    pub fn renderizar(&self, photo: &Photo, options: &ExportOptions) -> DomainResult<DynamicImage> {
+        let input_path = photo.file_path().as_str()?;
+
+        let img = image::open(Path::new(&input_path)).map_err(|e| {
+            DomainError::InfrastructureError(format!("Failed to open source image: {}", e))
+        })?;
+
+        // 🔑 A ordem é a da tela: o shader devolve a foto inteira, e o
+        // enquadramento vem depois (`tela.rs` faz `transformacao::aplicar` sobre
+        // o que o processador devolveu). Inverter daria uma vinheta centrada no
+        // quadro cortado em vez de no original.
+        let revelada = self.revelar(&img, &ajustes_da_entidade(photo))?;
+        let mut saida =
+            transformacao::aplicar(&revelada, &transformacao::corte_da_entidade(photo), true);
+
+        // ⚠️ Redimensionar **antes** da marca, e as duas coisas dependem disso:
+        // reduzir depois reamostraria a marca junto (ela sai borrada, e é o
+        // elemento mais fino da imagem), e o tamanho dela é uma fração do que se
+        // vai ver — não do que se revelou.
+        if let Some(lado_maior) = options.longest_edge() {
+            saida = redimensionar(saida, lado_maior);
+        }
+
+        if let Some(marca) = options.watermark() {
+            saida = aplicar_marca(&saida, marca)?;
+        }
+
+        Ok(saida)
     }
 }
 
 #[async_trait]
 impl ImageExporter for ImageExporterImpl {
-    async fn export(&self, photo: &Photo, output_path: &FilePath) -> DomainResult<()> {
-        let input_path = photo.file_path().as_str()?;
-        
-        // Load original image
-        let img = image::open(Path::new(&input_path))
-            .map_err(|e| DomainError::InfrastructureError(format!("Failed to open source image: {}", e)))?;
+    async fn renderizar_jpeg(
+        &self,
+        photo: &Photo,
+        options: &ExportOptions,
+    ) -> DomainResult<Vec<u8>> {
+        let saida = self.renderizar(photo, options)?;
+        // 🔑 O codificador do `revelacao-core`: o mesmo que o navegador usa.
+        // Dois codificadores dariam dois arquivos para a mesma foto revelada.
+        revelacao_core::jpeg::codificar(&saida, options.quality())
+            .map_err(|e| DomainError::InfrastructureError(format!("Failed to encode JPEG: {}", e)))
+    }
 
-        // Get all adjustments from photo
-        let exposure = photo.edit_exposure().unwrap_or(0.0);
-        let contrast = photo.edit_contrast().unwrap_or(1.0);
-        let temperature = photo.edit_temperature().unwrap_or(0.0);
-        let tint = photo.edit_tint().unwrap_or(0.0);
-        let highlights = photo.edit_highlights().unwrap_or(0.0);
-        let shadows = photo.edit_shadows().unwrap_or(0.0);
-        let whites = photo.edit_whites().unwrap_or(0.0);
-        let blacks = photo.edit_blacks().unwrap_or(0.0);
-        let clarity = photo.edit_clarity().unwrap_or(0.0);
-        let vibrance = photo.edit_vibrance().unwrap_or(0.0);
-        let saturation = photo.edit_saturation().unwrap_or(0.0);
-        let nr_luminance = photo.edit_nr_luminance().unwrap_or(0.0);
-        let nr_color = photo.edit_nr_color().unwrap_or(0.0);
-        let sharpen_amount = photo.edit_sharpen_amount().unwrap_or(0.0);
-        let sharpen_radius = photo.edit_sharpen_radius().unwrap_or(1.0);
+    async fn export(
+        &self,
+        photo: &Photo,
+        output_path: &FilePath,
+        options: &ExportOptions,
+    ) -> DomainResult<()> {
+        // 🔑 O mesmo caminho do pós-venda: o arquivo é o JPEG em memória gravado
+        // no disco, e não uma segunda codificação. Dois codificadores dariam dois
+        // arquivos diferentes para a mesma foto, e a exportação deixaria de ser
+        // a prova do que o site recebe.
+        let jpeg = self.renderizar_jpeg(photo, options).await?;
 
-        // Apply all adjustments
-        let processed = Self::process_image(
-            &img, exposure, contrast, temperature, tint,
-            highlights, shadows, whites, blacks,
-            clarity, vibrance, saturation,
-            nr_luminance, nr_color,
-            sharpen_amount, sharpen_radius
-        );
-
-        // Save as JPEG with quality 90
         let output_path_str = output_path.as_str()?;
-        let rgb_img = processed.to_rgb8();
-        
-        let file = std::fs::File::create(Path::new(output_path_str))
-            .map_err(|e| DomainError::InfrastructureError(format!("Failed to create output file: {}", e)))?;
-        
-        let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(file, 90);
-        encoder.encode(&rgb_img, rgb_img.width(), rgb_img.height(), image::ColorType::Rgb8)
-            .map_err(|e| DomainError::InfrastructureError(format!("Failed to encode JPEG: {}", e)))?;
+        std::fs::write(Path::new(output_path_str), jpeg).map_err(|e| {
+            DomainError::InfrastructureError(format!("Failed to create output file: {}", e))
+        })?;
 
         Ok(())
     }
 }
-

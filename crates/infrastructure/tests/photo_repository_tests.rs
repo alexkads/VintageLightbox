@@ -5,7 +5,7 @@
 use domain::{
     entities::Photo,
     repositories::PhotoRepository,
-    value_objects::{ColorLabel, FilePath, Rating, PhotoMetadata},
+    value_objects::{ColorLabel, FilePath, PhotoMetadata, Rating},
 };
 use infrastructure::{create_pool, run_migrations, PhotoRepositoryImpl};
 
@@ -14,11 +14,11 @@ async fn create_test_repository() -> PhotoRepositoryImpl {
     let pool = create_pool("sqlite::memory:")
         .await
         .expect("Failed to create pool");
-    
+
     run_migrations(&pool)
         .await
         .expect("Failed to run migrations");
-    
+
     PhotoRepositoryImpl::new(pool)
 }
 
@@ -28,7 +28,7 @@ async fn test_save_and_find_photo() {
     let repo = create_test_repository().await;
     let file_path = FilePath::new("/photos/test.jpg").unwrap();
     let photo = Photo::new(file_path.clone());
-    let photo_id = photo.id().clone();
+    let photo_id = photo.id();
 
     // Act - Save
     let save_result = repo.save(&photo).await;
@@ -50,7 +50,7 @@ async fn test_update_photo_rating() {
     let repo = create_test_repository().await;
     let file_path = FilePath::new("/photos/test.jpg").unwrap();
     let mut photo = Photo::new(file_path);
-    let photo_id = photo.id().clone();
+    let photo_id = photo.id();
 
     // Save initial photo
     repo.save(&photo).await.unwrap();
@@ -73,7 +73,7 @@ async fn test_delete_photo() {
     let repo = create_test_repository().await;
     let file_path = FilePath::new("/photos/test.jpg").unwrap();
     let photo = Photo::new(file_path);
-    let photo_id = photo.id().clone();
+    let photo_id = photo.id();
 
     // Save photo
     repo.save(&photo).await.unwrap();
@@ -93,7 +93,7 @@ async fn test_delete_photo() {
 async fn test_find_all_photos() {
     // Arrange
     let repo = create_test_repository().await;
-    
+
     let photo1 = Photo::new(FilePath::new("/photos/photo1.jpg").unwrap());
     let photo2 = Photo::new(FilePath::new("/photos/photo2.jpg").unwrap());
     let photo3 = Photo::new(FilePath::new("/photos/photo3.jpg").unwrap());
@@ -128,7 +128,7 @@ async fn test_exists_photo() {
     let repo = create_test_repository().await;
     let file_path = FilePath::new("/photos/test.jpg").unwrap();
     let photo = Photo::new(file_path);
-    let photo_id = photo.id().clone();
+    let photo_id = photo.id();
 
     // Photo doesn't exist yet
     let exists_before = repo.exists(&photo_id).await.unwrap();
@@ -150,7 +150,7 @@ async fn test_update_photo_color_label() {
     let repo = create_test_repository().await;
     let file_path = FilePath::new("/photos/test.jpg").unwrap();
     let mut photo = Photo::new(file_path);
-    let photo_id = photo.id().clone();
+    let photo_id = photo.id();
 
     repo.save(&photo).await.unwrap();
 
@@ -196,7 +196,7 @@ async fn test_save_and_find_photo_with_metadata() {
     let repo = create_test_repository().await;
     let file_path = FilePath::new("/photos/test_meta.jpg").unwrap();
     let mut photo = Photo::new(file_path);
-    let photo_id = photo.id().clone();
+    let photo_id = photo.id();
 
     // Create metadata
     let metadata = PhotoMetadata {
@@ -222,7 +222,7 @@ async fn test_save_and_find_photo_with_metadata() {
     // Assert
     assert!(found.metadata().is_some());
     let found_metadata = found.metadata().unwrap();
-    
+
     // Check key fields
     assert_eq!(found_metadata.camera_make, Some("Canon".to_string()));
     assert_eq!(found_metadata.camera_model, Some("EOS R5".to_string()));
@@ -236,20 +236,74 @@ async fn test_save_and_find_photo_with_edits() {
     let repo = create_test_repository().await;
     let file_path = FilePath::new("/photos/test_edits.jpg").unwrap();
     let mut photo = Photo::new(file_path);
-    let photo_id = photo.id().clone();
+    let photo_id = photo.id();
 
     // Set edits
-    photo.set_edits(
-        Some(1.5), Some(0.8), None, None, None, None, None, None, None, None, None,
-        None, None, None, None,
-        None, None, None, None, None, None, None, None, // HSL (Sat)
-        None, None, None, None, None, None, None, None, // HSL (Hue)
-        None, None, None, None, None, None, None, None, // HSL (Lum)
-        None, None, None, // Lens
-        None, None, // NR
-        None, None, // Sharpening
-        None, None, None, None, None, None, None, None // Crop
-    ).unwrap();
+    photo
+        .set_edits(
+            Some(1.5),
+            Some(0.8),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None, // HSL (Sat)
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None, // HSL (Hue)
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None, // HSL (Lum)
+            None,
+            None,
+            None, // Lens
+            None,
+            None, // NR
+            None,
+            None, // Sharpening
+            None,
+            None,
+            None,
+            None,
+            None, // Tonalização
+            None,
+            None, // Grão
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None, // Crop
+        )
+        .unwrap();
 
     // Act - Save
     repo.save(&photo).await.unwrap();
@@ -264,21 +318,184 @@ async fn test_save_and_find_photo_with_edits() {
 
     // Act - Update (modify edits)
     let mut found_mut = found;
-    found_mut.set_edits(
-        Some(-0.5), Some(1.2), None, None, None, None, None, None, None, None, None,
-        None, None, None, None,
-        None, None, None, None, None, None, None, None, // HSL (Sat)
-        None, None, None, None, None, None, None, None, // HSL (Hue)
-        None, None, None, None, None, None, None, None, // HSL (Lum)
-        None, None, None, // Lens
-        None, None, // NR
-        None, None, // Sharpening
-        None, None, None, None, None, None, None, None // Crop
-    ).unwrap();
+    found_mut
+        .set_edits(
+            Some(-0.5),
+            Some(1.2),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None, // HSL (Sat)
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None, // HSL (Hue)
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None, // HSL (Lum)
+            None,
+            None,
+            None, // Lens
+            None,
+            None, // NR
+            None,
+            None, // Sharpening
+            None,
+            None,
+            None,
+            None,
+            None, // Tonalização
+            None,
+            None, // Grão
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None, // Crop
+        )
+        .unwrap();
     repo.update(&found_mut).await.unwrap();
 
     // Verify Update
     let updated = repo.find_by_id(&photo_id).await.unwrap().unwrap();
     assert_eq!(updated.edit_exposure(), Some(-0.5));
     assert_eq!(updated.edit_contrast(), Some(1.2));
+}
+
+/// 🚨 O id da foto no site sobrevive ao banco — na gravação **e** na alteração.
+///
+/// É o que permite desfazer: zerar a classificação tira a foto do storage, e sem
+/// o id remoto o app só saberia subir. O defeito que este teste pega é mudo — um
+/// `?` a menos no `INSERT` ou um `.bind` fora de ordem grava a coluna errada, e o
+/// sintoma aparece semanas depois, quando alguém tenta remover uma foto e o site
+/// responde que ela não existe.
+#[tokio::test]
+async fn o_id_no_site_sobrevive_a_gravacao_e_a_alteracao() {
+    let repo = create_test_repository().await;
+    let mut photo = Photo::new(FilePath::new("/photos/ensaio.jpg").unwrap());
+    let id = photo.id();
+
+    // Nasce só local: no fluxo do dono é a classificação que autoriza a subir.
+    assert!(!photo.esta_no_site());
+    repo.save(&photo).await.unwrap();
+    assert_eq!(
+        repo.find_by_id(&id).await.unwrap().unwrap().id_no_site(),
+        None
+    );
+
+    // Subiu: o site devolveu o id dela.
+    photo.definir_id_no_site(Some("foto-remota-1".into()));
+    repo.update(&photo).await.unwrap();
+    let lida = repo.find_by_id(&id).await.unwrap().unwrap();
+    assert_eq!(lida.id_no_site(), Some("foto-remota-1"));
+    assert!(lida.esta_no_site());
+
+    // Zerou a classificação: saiu do storage e volta a ser só local.
+    photo.definir_id_no_site(None);
+    repo.update(&photo).await.unwrap();
+    assert_eq!(
+        repo.find_by_id(&id).await.unwrap().unwrap().id_no_site(),
+        None
+    );
+}
+
+/// E o `INSERT` grava o id quando a foto já nasce sabendo dele.
+#[tokio::test]
+async fn uma_foto_que_ja_nasce_no_site_e_gravada_com_o_id() {
+    let repo = create_test_repository().await;
+    let mut photo = Photo::new(FilePath::new("/photos/outra.jpg").unwrap());
+    photo.definir_id_no_site(Some("foto-remota-2".into()));
+    let id = photo.id();
+
+    repo.save(&photo).await.unwrap();
+
+    assert_eq!(
+        repo.find_by_id(&id).await.unwrap().unwrap().id_no_site(),
+        Some("foto-remota-2")
+    );
+}
+
+/// 🚨 **O nome de origem tem de atravessar o banco.**
+///
+/// Desde a migration 022 o arquivo no disco se chama `<uuid>.jpg`, e o nome que
+/// a câmera deu mora só nesta coluna. Um `bind` esquecido no INSERT ou no UPDATE
+/// **não falha**: a foto salva, e o nome volta `None` na próxima abertura — a
+/// grade passa a mostrar UUID, e o cliente também. É a armadilha das sete etapas
+/// que engolem campo desconhecido em silêncio (`docs/07-E2E-TESTING.md` §3).
+#[tokio::test]
+async fn o_nome_de_origem_atravessa_o_banco() {
+    let repo = create_test_repository().await;
+
+    let mut photo = Photo::new(FilePath::new("/Ensaios/Teste - g1/abc-uuid.jpg").unwrap());
+    let id = photo.id();
+    photo.definir_nome_original(Some("DSC_2571.JPG".into()));
+    repo.save(&photo).await.expect("gravar");
+
+    let lida = repo.find_by_id(&id).await.unwrap().expect("a foto existe");
+    assert_eq!(lida.nome_original(), Some("DSC_2571.JPG"));
+    assert_eq!(
+        lida.file_name(),
+        Some("DSC_2571.JPG"),
+        "o app tem de continuar chamando a foto pelo nome da câmera"
+    );
+
+    // E o `update` também: a foto muda de nota, de ensaio e de dono o dia
+    // inteiro, e cada gravação passa pelo mesmo SET.
+    let mut mudada = lida;
+    mudada.rate(Rating::new(4).unwrap()).unwrap();
+    repo.update(&mudada).await.expect("atualizar");
+
+    let relida = repo.find_by_id(&id).await.unwrap().expect("a foto existe");
+    assert_eq!(
+        relida.nome_original(),
+        Some("DSC_2571.JPG"),
+        "o UPDATE apagou o nome de origem"
+    );
+}
+
+/// ⚠️ **A foto de antes da migration 022 continua tendo nome.**
+///
+/// O backfill preenche a coluna a partir do caminho, mas ele é conveniência e
+/// não correção: um caminho do Windows sai errado dele. Quem garante o nome é a
+/// queda de `file_name()` para o caminho — e é ela que este teste segura.
+#[tokio::test]
+async fn a_foto_antiga_sem_a_coluna_continua_com_nome() {
+    let repo = create_test_repository().await;
+
+    let photo = Photo::new(FilePath::new("/Pictures/Catalog/2026/09/08/DSC_0001.NEF").unwrap());
+    let id = photo.id();
+    repo.save(&photo).await.expect("gravar");
+
+    let lida = repo.find_by_id(&id).await.unwrap().expect("a foto existe");
+    assert_eq!(lida.nome_original(), None, "nada foi guardado");
+    assert_eq!(lida.file_name(), Some("DSC_0001.NEF"), "e ela tem nome");
 }

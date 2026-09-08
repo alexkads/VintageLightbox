@@ -33,10 +33,14 @@ impl PrintJobId {
         self.0
     }
 
-    /// Converte para string
-    pub fn to_string(&self) -> String {
-        self.0.to_string()
-    }
+    // ⚠️ Havia aqui um `pub fn to_string(&self) -> String` inerente, e ele
+    // **sombreava** o `Display` logo abaixo: método inerente vence o do trait,
+    // então `id.to_string()` e `format!("{id}")` eram dois caminhos diferentes
+    // para o mesmo texto — iguais por coincidência, e livres para divergir na
+    // primeira vez que alguém editasse um dos dois.
+    //
+    // `ToString` vem de graça a partir de `Display`, então nada se perde ao
+    // remover: as chamadas continuam compilando e passam a ter uma só fonte.
 }
 
 impl Default for PrintJobId {
@@ -103,9 +107,11 @@ mod tests {
 
     #[test]
     fn test_print_job_id_display() {
+        // Este teste comparava duas implementações — o `Display` e o
+        // `to_string` inerente que o sombreava. Com uma fonte só, ele afirma o
+        // que interessa: o texto é o UUID, e não a forma de depuração.
         let id = PrintJobId::new();
-        let display = format!("{}", id);
-        assert_eq!(display, id.to_string());
+        assert_eq!(format!("{}", id), id.value().to_string());
     }
 
     #[test]

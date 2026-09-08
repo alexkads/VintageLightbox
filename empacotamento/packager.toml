@@ -1,0 +1,128 @@
+# A configuração de empacotamento — uma só, para os quatro alvos.
+#
+# 🔑 **Os caminhos daqui são relativos a `empacotamento/`**, e não à raiz: o
+#    `cargo-packager` faz `set_current_dir` para a pasta do `-c` antes de
+#    trabalhar. Quem escrever `target/release/...` aqui não acha nada.
+#
+# Quem chama isto é `scripts/empacotar.sh`, que compila o binário, o copia para
+# `binaries-dir` (abaixo) e escolhe os formatos por alvo. Rodar
+# `cargo packager -c empacotamento/packager.toml` na mão também funciona, desde
+# que o binário já esteja lá.
+#
+# ⚠️ `version` é conferida contra o `Cargo.toml` do workspace pelo script, que
+#    aborta se as duas divergirem. Um instalador com a versão errada dentro é o
+#    tipo de defeito que só aparece na máquina do cliente.
+
+# ⚠️ `name` é obrigatório na prática, mesmo sendo opcional no schema: sem ele o
+#    cargo-packager tenta adivinhá-lo entrando na pasta do config — e entra no
+#    **arquivo**, com `Not a directory (os error 20)`. É o nome curto (o do
+#    executável e o do pacote `.deb`); `product-name` é o que o usuário lê.
+name = "vintagelightbox"
+product-name = "VintageLightbox"
+version = "0.1.3"
+identifier = "br.com.recordarfotos.vintagelightbox"
+description = "Editor de fotos no formato do Lightroom, em Rust"
+long-description = """
+VintageLightbox importa, organiza, tria, revela e entrega arquivo — com o motor
+de revelação em GPU e integração com o pós-venda da RecordarFotos.
+"""
+homepage = "https://recordarfotos.com.br"
+authors = ["VintageLightbox Team"]
+publisher = "RecordarFotos"
+copyright = "© 2026 RecordarFotos"
+category = "Photography"
+license-file = "../LICENSE"
+
+out-dir = "../dist"
+
+# O nome do executável, não o caminho: `binaries-dir` abaixo diz onde procurá-lo,
+# e é isso que permite a mesma configuração servir `aarch64`, `x86_64` e o
+# universal.
+#
+# ⚠️ Em linha, e não como `[[binaries]]`: num TOML tudo que vem depois de uma
+#    tabela pertence a ela, e `icons` logo abaixo viraria campo de `binaries`.
+binaries = [{ path = "ui-gpui", main = true }]
+
+# A pasta onde o binário é procurado. **O script põe o binário certo aqui** antes
+# de chamar o empacotador — é o que permite uma configuração só servir
+# `aarch64`, `x86_64`, o universal, o Linux e o Windows.
+#
+# ⚠️ Está aqui e não na linha de comando porque o `--binaries-dir` do
+#    cargo-packager 0.11.8 **é aceito e ignorado**: o CLI o lê para a struct e
+#    nunca o copia para a config (src/cli/mod.rs não menciona `binaries_dir`
+#    depois do parse). Sem esta linha ele procura o binário dentro de `out-dir`,
+#    e falha com "No such file or directory".
+binaries-dir = "../target/empacotamento"
+
+# A ordem importa: o `.icns` vem primeiro para o macOS não escolher um PNG, e o
+# `.ico` antes dos PNGs pelo mesmo motivo no Windows.
+icons = [
+  "icones/icone.icns",
+  "icones/icone.ico",
+  "icones/32x32.png",
+  "icones/128x128.png",
+  "icones/128x128@2x.png",
+  "icones/256x256.png",
+  "icones/512x512.png",
+]
+
+# ─────────────────────────────── macOS ───────────────────────────────
+[macos]
+# 10.15 é o que o README promete (RNF-011). Abaixo disso o `cocoa` do GPUI não
+# compila mesmo.
+minimum-system-version = "10.15"
+entitlements = "macos/entitlements.plist"
+# A identidade de assinatura **não** fica aqui: ela é `APPLE_SIGNING_IDENTITY` no
+# ambiente, injetada por `scripts/empacotar.sh --assinar`. Nome de certificado em
+# arquivo versionado é como ele acaba errado na máquina de outra pessoa.
+
+[dmg]
+# 660×400 é o tamanho em que os dois ícones abaixo cabem sem sobra feia.
+window-size = { width = 660, height = 400 }
+app-position = { x = 180, y = 170 }
+application-folder-position = { x = 480, y = 170 }
+
+# ────────────────────────────── Windows ──────────────────────────────
+[nsis]
+installer-mode = "both"
+languages = ["PortugueseBR", "English"]
+installer-icon = "icones/icone.ico"
+compression = "lzma"
+
+[wix]
+languages = ["pt-BR", "en-US"]
+
+# ─────────────────────────────── Linux ───────────────────────────────
+[deb]
+# ⚠️ **Sem isto o pacote sai como `ui-gpui_0.1.0_amd64.deb`.** O cargo-packager
+#    nomeia o `.deb` pelo **binário**, e não pelo `name` lá de cima — foi o que
+#    apareceu na primeira geração, em 7/set/2026. Minúsculo porque é a convenção
+#    do Debian para nome de pacote.
+package-name = "vintagelightbox"
+section = "graphics"
+priority = "optional"
+# O que o GPUI abre com `dlopen` e o `.deb` não carrega sozinho: X11/Wayland,
+# teclado, fontes e Vulkan. Sem estes o app instala e não abre.
+depends = [
+  "libx11-6",
+  "libxkbcommon0",
+  "libxkbcommon-x11-0",
+  "libxcb1",
+  "libwayland-client0",
+  "libfontconfig1",
+  "libfreetype6",
+  "libasound2",
+  "libssl3",
+  "libvulkan1",
+  "zlib1g",
+]
+
+[appimage]
+# O AppImage carrega as bibliotecas dentro de si; estas são as que o
+# `linuxdeploy` não descobre sozinho porque o binário só as abre em runtime.
+libs = [
+  "libvulkan.so.1",
+  "libwayland-client.so.0",
+  "libxkbcommon.so.0",
+  "libxkbcommon-x11.so.0",
+]

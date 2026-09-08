@@ -1,7 +1,7 @@
-use std::sync::Arc;
+use domain::errors::DomainResult;
 use domain::repositories::PhotoRepository;
 use domain::value_objects::PhotoId;
-use domain::errors::DomainResult;
+use std::sync::Arc;
 
 pub struct DeletePhotoUseCase {
     photo_repository: Arc<dyn PhotoRepository>,
@@ -20,7 +20,7 @@ impl DeletePhotoUseCase {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use domain::{repositories::PhotoRepository, entities::Photo, value_objects::FilePath};
+    use domain::{entities::Photo, repositories::PhotoRepository, value_objects::FilePath};
     use mockall::mock;
     use mockall::predicate::*;
 
@@ -45,13 +45,13 @@ mod tests {
         // Arrange
         let file_path = FilePath::new("/photos/test.jpg").unwrap();
         let photo = Photo::new(file_path);
-        let photo_id = photo.id().clone();
+        let photo_id = photo.id();
 
         let mut mock_repo = MockPhotoRepo::new();
 
         mock_repo
             .expect_delete()
-            .with(eq(photo_id.clone()))
+            .with(eq(photo_id))
             .times(1)
             .returning(|_| Ok(()));
 

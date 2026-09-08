@@ -1,11 +1,9 @@
-use domain::{
-    value_objects::FilePath,
-    services::{RawDecoder, RawImage},
-    DomainResult,
-    DomainError,
-};
 use async_trait::async_trait;
-
+use domain::{
+    services::{RawDecoder, RawImage},
+    value_objects::FilePath,
+    DomainError, DomainResult,
+};
 
 /// Implementação do RawDecoder usando a crate `rawloader`
 pub struct RawDecoderImpl;
@@ -25,17 +23,24 @@ impl Default for RawDecoderImpl {
 #[async_trait]
 impl RawDecoder for RawDecoderImpl {
     fn decode(&self, path: &FilePath) -> DomainResult<RawImage> {
-        let path_str = path.as_ref().to_str()
+        let path_str = path
+            .as_ref()
+            .to_str()
             .ok_or_else(|| DomainError::InvalidOperation("Invalid path encoding".to_string()))?;
 
         // rawloader::decode_file returns Result<RawImage, RAWError>
-        let raw_image = rawloader::decode_file(path_str)
-            .map_err(|e| DomainError::InfrastructureError(format!("Failed to decode RAW file: {}", e)))?;
+        let raw_image = rawloader::decode_file(path_str).map_err(|e| {
+            DomainError::InfrastructureError(format!("Failed to decode RAW file: {}", e))
+        })?;
 
         // Convert rawloader::RawImage to domain::RawImage
         let data = match raw_image.data {
             rawloader::RawImageData::Integer(v) => v,
-            _ => return Err(DomainError::InfrastructureError("Unsupported RAW data format".to_string())),
+            _ => {
+                return Err(DomainError::InfrastructureError(
+                    "Unsupported RAW data format".to_string(),
+                ))
+            }
         };
 
         Ok(RawImage {
@@ -55,12 +60,25 @@ pub fn is_raw_file(path: &str) -> bool {
         .map(|e| e.to_lowercase());
     matches!(
         ext.as_deref(),
-        Some("nef" | "cr2" | "cr3" | "arw" | "dng" | "orf" | "raw" | "rw2" | "raf" | "pef" | "srw" | "x3f")
+        Some(
+            "nef"
+                | "cr2"
+                | "cr3"
+                | "arw"
+                | "dng"
+                | "orf"
+                | "raw"
+                | "rw2"
+                | "raf"
+                | "pef"
+                | "srw"
+                | "x3f"
+        )
     )
 }
 
 /// Carrega um arquivo RAW e converte para DynamicImage RGB
-/// 
+///
 /// Esta função usa LibRaw (via rsraw) que já faz:
 /// 1. Demosaic de alta qualidade
 /// 2. White balance automático
@@ -68,71 +86,134 @@ pub fn is_raw_file(path: &str) -> bool {
 /// 4. Retorna DynamicImage::ImageRgb8
 pub fn load_raw_as_dynamic_image(path: &str) -> Result<image::DynamicImage, String> {
     use rsraw::{RawImage, BIT_DEPTH_8};
-    
+
     // 1. Read file to buffer
-    let file_data = std::fs::read(path)
-        .map_err(|e| format!("Failed to read RAW file: {}", e))?;
-    
+    let file_data = std::fs::read(path).map_err(|e| format!("Failed to read RAW file: {}", e))?;
+
     // 2. Open RAW image with LibRaw
-    let mut raw = RawImage::open(&file_data)
-        .map_err(|e| format!("LibRaw failed to open: {:?}", e))?;
-    
+    //
+    // 🔑 Quando falha, quem responde é `dng::explicar_falha`: o erro cru da
+    // LibRaw é `FileUnsupported`, que manda quem importa procurar defeito no
+    // próprio arquivo — e no caso conhecido (DNG com compressão *lossy*) o
+    // arquivo está íntegro e quem não sabe abrir é o app.
+    let mut raw = match RawImage::open(&file_data) {
+        Ok(raw) => raw,
+        Err(erro) => {
+            // 🔑 **A reserva entra só aqui, e só para o DNG com perdas.** A
+            // LibRaw embutida foi compilada sem libjpeg; a do sistema, quando
+            // instalada, tem — e abre o arquivo. Usá-la para todo RAW mudaria a
+            // cor de tudo que já abre, porque são duas invocações diferentes com
+            // padrões diferentes de revelação.
+            if crate::dng::tem_compressao_com_perdas(&file_data) {
+                if let Ok(imagem) = crate::dng::decodificar_com_a_libraw_do_sistema(path) {
+                    return Ok(imagem);
+                }
+            }
+            return Err(crate::dng::explicar_falha(
+                &file_data,
+                &format!("LibRaw failed to open: {:?}", erro),
+            ));
+        }
+    };
+
     // 3. Unpack the raw data
     raw.unpack()
         .map_err(|e| format!("LibRaw unpack failed: {:?}", e))?;
-    
+
     // 4. Get dimensions before processing
     let width = raw.width();
     let height = raw.height();
-    
+
     // 5. Process with LibRaw (demosaic, white balance, color correction)
-    let processed = raw.process::<BIT_DEPTH_8>()
+    let processed = raw
+        .process::<BIT_DEPTH_8>()
         .map_err(|e| format!("LibRaw process failed: {:?}", e))?;
-    
+
     // 6. Get RGB data from processed image
     // ProcessedImage<8> implements Deref<Target=[u8]>
     let rgb_data: Vec<u8> = processed.to_vec();
-    
-    // 7. Create RGB image 
+
+    // 7. Create RGB image
     // LibRaw returns RGB data, 3 bytes per pixel
     let img_buffer = image::RgbImage::from_raw(width, height, rgb_data)
         .ok_or_else(|| "Failed to create image buffer from LibRaw data".to_string())?;
-    
+
     Ok(image::DynamicImage::ImageRgb8(img_buffer))
 }
 
 /// Extrai o preview JPEG embutido no arquivo RAW (muito mais rápido que raw decoding)
-pub fn extract_embedded_preview(_path: &str) -> Option<Vec<u8>> {
-    // TODO: Implement using a crate that supports embedded preview extraction
-    // rsraw v0.1.0 does not expose thumbnail() method directly on RawImage.
-    // We might need to upgrade rsraw or use a different crate like `rawloader` if it supports it, 
-    // or parse the file structure manually (TIFF/IFD).
-    None
+///
+/// Câmeras gravam mais de um preview no mesmo arquivo (de 160px a resolução cheia).
+/// `min_height` diz o menor tamanho que serve para quem chamou: devolve o **menor**
+/// preview que ainda atende, e só cai no maior disponível se nenhum atender. Pegar
+/// sempre o maior jogaria fora o ganho de velocidade — decodificar um JPEG 6000×4000
+/// para gerar um thumbnail de 320px custa mais do que o preview certo.
+///
+/// Só previews em JPEG são devolvidos: os outros formatos do LibRaw (bitmap cru,
+/// H.265) não passam por `image::load_from_memory`, que é o que o chamador faz.
+///
+/// Não chama `unpack()` de propósito — o preview embutido sai direto do arquivo,
+/// sem demosaic. É esse o caminho rápido.
+pub fn extract_embedded_preview(path: &str, min_height: u32) -> Option<Vec<u8>> {
+    use rsraw::{RawImage, ThumbFormat};
+
+    let file_data = std::fs::read(path).ok()?;
+    let mut raw = RawImage::open(&file_data).ok()?;
+
+    let mut jpegs: Vec<_> = raw
+        .extract_thumbs()
+        .ok()?
+        .into_iter()
+        .filter(|t| t.format == ThumbFormat::Jpeg && !t.data.is_empty())
+        .collect();
+
+    if jpegs.is_empty() {
+        return None;
+    }
+
+    // `extract_thumbs` já devolve ordenado por altura crescente, mas o filtro acima
+    // não garante ordem se a fonte mudar — ordenar aqui é barato e torna a escolha
+    // independente disso.
+    jpegs.sort_by_key(|t| t.height);
+
+    let escolhido = jpegs
+        .iter()
+        .position(|t| t.height >= min_height)
+        .unwrap_or(jpegs.len() - 1);
+
+    Some(jpegs.swap_remove(escolhido).data)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::NamedTempFile;
     use std::io::Write;
+    use tempfile::NamedTempFile;
 
     #[test]
     fn test_decode_invalid_file() {
         let decoder = RawDecoderImpl::new();
         let mut file = NamedTempFile::new().unwrap();
         writeln!(file, "Not a RAW file").unwrap();
-        
+
         let path = FilePath::new(file.path().to_str().unwrap()).unwrap();
         let result = decoder.decode(&path);
-        
-        assert!(result.is_err());
-        match result {
-            Err(DomainError::InfrastructureError(_)) => assert!(true),
-            _ => assert!(false, "Expected InfrastructureError"),
-        }
+
+        // `assert!(true)` no braço certo e `assert!(false)` no outro diziam a
+        // coisa certa de um jeito que o compilador não conferia. `matches!`
+        // afirma o mesmo e ainda mostra o que veio quando falha.
+        //
+        // Sobre o `.err()`: `RawImage` não implementa `Debug`, então o
+        // `Result` inteiro não é formatável — e o caso de sucesso não tem o que
+        // relatar aqui além de "não deveria ter dado certo".
+        let erro = result.err();
+        assert!(
+            matches!(erro, Some(DomainError::InfrastructureError(_))),
+            "Expected InfrastructureError, got {erro:?}"
+        );
     }
-    
-    // Note: Testing successful decoding requires a real RAW file, 
+
+    // Note: Testing successful decoding requires a real RAW file,
     // which we don't have in the repo. This would be covered by integration tests
     // with test assets in a real environment.
 }

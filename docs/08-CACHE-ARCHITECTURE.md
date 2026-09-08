@@ -1,5 +1,140 @@
 # Arquitetura de Cache e Performance
 
+> 🚨 **Este documento descreve o app de egui, e o porte para GPUI não trouxe o
+> L1.** Descoberto em 18/ago/2026, quando o dono relatou a Revelação lenta e
+> apontou para cá: *"verifique na documentação as técnicas que utilizamos quando
+> era EGUI"*. Ele estava certo — o documento tinha a resposta desde dez/2025.
+>
+> **O que faltava, e entrou em 18/ago:**
+>
+> | Técnica | Estado |
+> |---|---|
+> | **L1 em memória** (imagem decodificada, LRU de 15) | ✅ agora em `PreviewManager` |
+> | **Prefetch dos vizinhos** (N−1 e N+1) | ✅ agora em `Revelacao::adiantar_as_vizinhas` |
+> | `ProcessedCache` (resultado + `edits_hash`) | ⬜ ainda não — o motor de GPU é rápido; o caro era o decode |
+>
+> **Medido no catálogo real, antes e depois** (release, 12 fotos):
+>
+> | | antes | depois |
+> |---|---:|---:|
+> | segunda passada pelas mesmas 12 fotos | 154 ms | **8,9 ms** |
+> | `transformacao::aplicar` sem corte, por resultado da GPU | 8,6 ms | **0,6 ms** |
+>
+> ⚠️ **E um número deste documento estava errado**: ele diz "L2: ~600-700ms" para
+> ler um preview. Medido hoje, é **16 ms** — o disco e o `image` de 2025 não são
+> os de hoje. Números de desempenho envelhecem; os que estão aqui têm data.
+
+## 🚨 A foto do site ficou **fora** do cache por um dia — 8/set/2026
+
+O dono: *"você parou de usar o cache pois voltou ficar lento e parece que os
+parâmetros de edição não estão sendo gravados! Assim como o Lightroom faz!"*.
+As duas metades estavam certas, e são defeitos diferentes.
+
+**1. O cache desligado.** Em 7/set a Revelação parou de usar o cache como origem
+da foto do site (`so_existe_no_site` → `origem: None`), e por um bom motivo: em
+`site:<id>` a grade da sessão guarda a **imagem da galeria**, que depois de
+"Salvar na galeria" é a foto **revelada e com marca**. Servi-la ao shader
+aplicava a receita duas vezes, em 640 px. O conserto certo não era desligar o
+cache — era parar de guardar **duas imagens diferentes na mesma chave**, que é a
+mesma lição de 6/set logo abaixo, uma linha acima na mesma tabela.
+
+| Chave | O que mora nela | Quem lê |
+|---|---|---|
+| `site:<id>` | a imagem da galeria (revelada, com marca) | a grade e a tira da sessão |
+| `trabalho:<id>` | a **cópia de trabalho** (nasce do bruto no servidor) | a Revelação, como origem do shader |
+
+Com a chave separada, o download volta a acontecer **uma vez por foto**: o L1
+responde na volta da seta e o L2 (SQLite) atravessa o fechar do app. O prefetch
+das vizinhas também passou a usar a chave certa — ele aquecia `site:<id>`, que a
+Revelação nem usa, e deixava fria justamente a que a seta ia pedir.
+
+🔑 **A regra**: quando um cache precisa ser desligado para um caso, a pergunta
+antes de desligar é *"qual chave está errada?"*. Desligar é o conserto que
+funciona hoje e cobra amanhã — aqui cobrou em menos de 24 horas.
+
+**2. Os parâmetros que não eram gravados.** Independente do cache, e pior. Dois
+buracos:
+
+- `Revelacao::gravar` escrevia **só no banco**, e `mostrar` lê os sliders da
+  `PhotoViewModel` do acervo — um retrato de quando a tela abriu. Ir para a
+  próxima foto pela seta e voltar trazia a foto **no neutro**, com o trabalho
+  perdido e sem erro nenhum. Valia para toda foto, local inclusive
+  (`andar_e_voltar_preserva_o_que_foi_ajustado` prende isso).
+- Para a foto do site nem o banco respondia: o id dela é `site:<uuid>`, que não
+  é linha do catálogo — `save_edits` devolve `PhotoNotFound`, e o `Gravador` não
+  tem como contar isso a ninguém (não devolve `Result`, de propósito). A receita
+  só existia na cópia em memória, que morre quando a tela fecha.
+
+Hoje `gravar` escreve nos dois lugares (banco e acervo em memória), e sair da
+Revelação devolve as receitas às fotos do site que a raiz guarda.
+
+✅ **E ela atravessa o fechar do app** — a terceira parte, no mesmo dia. A
+receita da foto do site vai para `revelacoes_do_site`, **no mesmo SQLite do
+catálogo** (migration 021): não em `photos`, porque as migrations 017 e 019 dizem,
+cada uma à sua maneira, que ali mora "uma foto no disco", e esta não está neste
+disco. É o equivalente ao depósito que o site guarda no navegador
+(`lib/biblioteca/local.ts`, pedido do dono em 5/set: *"a edição das fotos não
+precisa depender do botão salvar na galeria para persistir"*).
+
+O ciclo tem três pontas, e todas moram na porta `Gravador` — que já era "quem
+sabe gravar uma revelação":
+
+| Quando | O que acontece |
+|---|---|
+| o gesto | `gravar` vê o prefixo `site:` e escreve no depósito, no formato que sobe para a API |
+| a abertura | o `main.rs` lê o depósito uma vez, como faz com os presets, e a sessão o aplica **por cima** do que a API respondeu |
+| o envio | `RevelacaoSalva` traz o id, e a linha sai: a verdade daquela foto passa a ser o servidor |
+
+🔑 **A leitura é síncrona porque quem lê é a grade, no meio de um quadro.** O
+disco foi consultado uma vez, na abertura; o que o `Gravador` devolve é o espelho
+em memória, que anda junto com cada gesto — esperar o banco faria a sessão
+reaberta mostrar a receita de antes do último arrasto.
+
+## 🚨 O L1 é da Revelação, e a grade da sessão o usava como se fosse dela — 6/set/2026
+
+O dono relatou a tela da sessão *"cheia de problemas de UX e não fluida"* e
+apontou para cá. Estava certo de novo, e o defeito é o oposto do de agosto: não
+faltava cache — **havia cache demais no lugar errado, e nenhum no certo**.
+
+`Detalhe::celula` e `Detalhe::tira` (`sessoes/detalhe.rs`) chamavam
+`get_preview` + `para_gpui` **por foto, dentro do `render`**. Três coisas se
+somavam:
+
+| O que era | Por quê |
+|---|---|
+| a célula de 160px carregava o preview de **640px** | `Recado::Miniatura` gravava a miniatura vinda do site com `save_preview` (type 1) e **nunca** `save_thumbnail` (type 0) — então o `get_thumbnail` da tira nunca acertava, e o `or_else` da grade nunca era alcançado |
+| **todo quadro** redecodificava as 25 | o L1 descrito acima guarda **15 imagens**, e foi dimensionado para a Revelação, que vai e volta entre fotos vizinhas. Uma grade que varre 25 numa sequência acerta **zero**: cada quadro despeja o que o próximo pede |
+| a tira de baixo pagava tudo **de novo** | ela repete o mesmo laço sobre as mesmas fotos, no mesmo quadro |
+
+🔑 **A regra que faltava**: um LRU menor que a varredura que passa por ele tem
+taxa de acerto zero — não é "cache pequeno", é cache que só custa. O L1 de 15 não
+é um número errado; é um número **da Revelação**, e a grade precisa do seu.
+
+E a grade da Biblioteca já tinha o cache certo desde o porte
+(`biblioteca::miniaturas::CacheDeMiniaturas`, que guarda a **textura já
+convertida** e dimensiona a capacidade pelo que está na tela). Ele só não tinha
+sido ligado na sessão.
+
+**Medido com `medir-grade-da-sessao`** (release, 25 fotos do catálogo real):
+
+| | por quadro |
+|---|---:|
+| antes | **48 ms** — 3× o orçamento de 60fps, e a tira pagava outro tanto |
+| depois | **0,00 ms** — o quadro só lê da memória |
+| custo único, na primeira abertura | 123 ms para gerar as 25 miniaturas que faltavam, **gravadas em disco** |
+
+O conserto é auto-curativo: a miniatura de 320px é gerada na primeira vez que a
+foto aparece e fica no L2, então as sessões que já estão no cache se corrigem
+sozinhas, sem ressincronizar nada.
+
+⚠️ **A grade da sessão não é virtualizada** — ela desenha o recorte inteiro, e
+não só o que cabe na janela. Por isso a capacidade do cache dela acompanha
+`total_visivel()`, e não o que está à vista: com um recorte maior que o cache,
+o defeito acima volta inteiro. Uma sessão de milhares de fotos precisa de
+`uniform_list`, como a Biblioteca tem.
+
+---
+
 ## Visão Geral
 O VintageLightbox utiliza um sistema de cache hierárquico de três níveis (L1, L2, L3) projetado para oferecer uma experiência de visualização instantânea (<16ms) e edição fluida, mesmo lidando com arquivos RAW pesados (24MP+). O objetivo é minimizar a latência de I/O e o custo computacional de decodificação JPEG e processamento de edits.
 

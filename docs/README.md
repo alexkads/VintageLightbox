@@ -4,75 +4,121 @@ Bem-vindo à documentação do VintageLightbox! Este índice organiza todos os d
 
 ## 📖 Visão Geral
 
-VintageLightbox é um clone profissional do Adobe Lightroom desenvolvido em Rust com interface Slint, focado em fotógrafos profissionais que precisam de uma solução completa para importação, edição, organização e venda de fotos.
+VintageLightbox é **um clone profissional do Adobe Lightroom em Rust**, com interface **GPUI 0.2 +
+gpui-component 0.5**, para importar, organizar, triar, revelar e **entregar** fotos.
 
-**Status Atual**: 103 testes passando | Domain Layer completo | Use Cases iniciado  
-**Veja**: [STATUS.md](STATUS.md) para progresso detalhado
+🔑 **E ele existe por um motivo específico**: o fluxo do estúdio hoje passa pelo Lightroom, e o
+Lightroom não conversa com o `recordarfotos.com.br` — onde o cliente baixa o ensaio que comprou e
+compra as fotos que ficaram para trás. Entre a revelação e a galeria há um vão atravessado na mão. A
+ferramenta existe para fechá-lo. Está inteiro em [`00-OBJETIVO.md`](00-OBJETIVO.md).
+
+⚠️ **Entre fev e ago/2026 o objetivo foi outro** — migrar a interface de egui para GPUI **com
+paridade**. Ele foi alcançado e virou [história](historico/10-MIGRACAO-GPUI.md). A diferença prática
+é grande: a regra *"nenhuma feature nova"* caiu, e com ela o motivo de 19 sliders da Revelação
+existirem sem fazer nada.
+
+⚠️ **Alguns documentos abaixo ainda descrevem a UI em Slint** — tecnologia avaliada e **nunca usada**.
+Cada um traz no topo o que está errado nele. Os que foram reescritos do código estão marcados.
+
+**Estado (6/set/2026)**: ✅ compila, app sobe | **947 testes passando, 0 falhas** | `clippy -D
+warnings` limpo
+
+🆕 **O app é sessão-primeiro desde 6/set/2026.** Logado, ele abre na lista de sessões e nada acontece
+fora de uma — ver [`09-A-SESSAO-FOTOGRAFICA.md`](09-A-SESSAO-FOTOGRAFICA.md).
 
 ## 📚 Documentos Principais
 
-### 0. [Status do Projeto](STATUS.md) 🆕
-**Conteúdo**: Status consolidado da implementação
-- 103 testes passando (99 domain + 4 use-cases)
-- Progresso por camada (Domain ✅, Use Cases 🚧)
-- Métricas e conquistas
-- Próximas milestones
-- Guia de contribuição
+### 0. [O Objetivo](00-OBJETIVO.md) 🆕
+**Conteúdo**: o alvo do projeto, o teste de alinhamento, e o que "funcional" quer dizer em critérios
+mensuráveis. Também explica **qual objetivo ele substituiu e por quê**.
 
-**Leia se você quer**: Ver o progresso atual e próximos passos.
+**Leia se você quer**: saber se o trabalho que você vai começar é o trabalho certo. **Comece por
+aqui.**
+
+### 0.1. [O que falta para ser um Lightroom](PARIDADE-LIGHTROOM.md) 🆕
+**Conteúdo**: a lista **medida** do que funciona, do que a tela promete e não faz, e do que não
+existe — com a fila de trabalho em ordem.
+
+**Leia se você quer**: escolher a próxima tarefa. É a fila.
+
+### 0.2. [Status do Projeto](STATUS.md)
+**Conteúdo**: o estado do código camada por camada, testes medidos, e as lacunas conhecidas com a
+razão de cada uma.
+
+**Leia se você quer**: entender o estado técnico antes de mexer numa camada.
 
 ### 1. [Requisitos do Sistema](01-REQUISITOS.md)
-**Conteúdo**: Requisitos funcionais e não-funcionais completos
-- 62 requisitos funcionais detalhados
-- Requisitos de performance, usabilidade e compatibilidade
-- Critérios de aceitação para MVP
-- Restrições técnicas
-
-**Leia se você quer**: Entender o que o sistema deve fazer e suas limitações.
+Os 62 requisitos funcionais e não-funcionais. ⚠️ **É o alvo, não o estado** — para saber o que
+existe, [`PARIDADE-LIGHTROOM.md`](PARIDADE-LIGHTROOM.md).
 
 ### 2. [Arquitetura do Sistema](02-ARQUITETURA.md)
-**Conteúdo**: Design técnico e estrutura do código
-- Arquitetura em camadas
-- Estrutura de módulos (10+ módulos)
-- Padrões de design aplicados
-- Fluxo de dados
-- Concorrência e gerenciamento de memória
-- Diagramas e exemplos de código
+Clean Architecture, as quatro camadas, a regra de dependência. ✅ **O miolo confere com o código** —
+`domain`, `use-cases` e `adapters` atravessaram a migração de framework com zero linha alterada.
+⚠️ Onde diz "Slint", leia GPUI.
 
-**Leia se você quer**: Entender como o sistema é construído internamente.
+### 3. [Funcionalidades](03-FUNCIONALIDADES.md)
+Catálogo detalhado do que o produto pretende fazer. ⚠️ Escrito antes do código; não distingue pronto
+de pretendido.
 
-### 3. [Especificação de Funcionalidades](03-FUNCIONALIDADES.md)
-**Conteúdo**: Detalhamento de cada funcionalidade
-- 9 módulos funcionais explicados em detalhe
-- Interfaces de usuário mockadas
-- Fluxos de trabalho típicos
-- Atalhos de teclado
-- Exemplos de uso
-
-**Leia se você quer**: Entender como cada feature funciona do ponto de vista do usuário.
-
-### 4. [Roadmap de Desenvolvimento](04-ROADMAP.md)
-**Conteúdo**: Planejamento de desenvolvimento em 7 fases
-- Timeline: 12-18 meses
-- Fase 0: Setup e POC (2-3 semanas)
-- Fase 1: MVP (2-3 meses)
-- Fases 2-7: Features incrementais até v1.0
-- Métricas de sucesso
-- Gerenciamento de riscos
-
-**Leia se você quer**: Entender o cronograma e prioridades de desenvolvimento.
+### 4. [Roadmap](04-ROADMAP.md) 🚫 encerrado
+O plano de construção e de migração, que terminou em 17/ago/2026. **A fila de agora é a
+[`PARIDADE-LIGHTROOM.md`](PARIDADE-LIGHTROOM.md).**
 
 ### 5. [Stack Tecnológico](05-STACK-TECNOLOGICO.md)
-**Conteúdo**: Tecnologias, bibliotecas e ferramentas
-- Rust como linguagem base
-- Slint para UI
-- LibRaw/rawler para processamento RAW
-- SQLite para banco de dados
-- 20+ crates detalhados
-- Alternativas consideradas
-- Requisitos de sistema
+⚠️ **Defende Slint, que nunca foi usado.** O cabeçalho traz o stack de verdade, medido do
+`Cargo.toml`: GPUI, wgpu, sqlx, rsraw, image, tokio.
 
-**Leia se você quer**: Entender as escolhas técnicas e dependências.
+### 6. [Arquitetura da Interface](06-UI-ARCHITECTURE.md) ✅ reescrito 17/ago
+**GPUI, do código.** O mapa dos módulos, o modelo de entidade/`Render`, as portas para o mundo
+assíncrono, a ponte de imagem em BGRA, a virtualização, o dock e o tema — com as armadilhas que
+custaram commit.
+
+### 7. [Como este projeto testa](07-E2E-TESTING.md) ✅ reescrito 17/ago
+`gpui::TestAppContext` no lugar do `egui_kittest`. E a regra que vale mais que todas: **todo teste é
+conferido quebrando de propósito**.
+
+### 8. [Arquitetura de Cache](08-CACHE-ARCHITECTURE.md)
+Miniaturas e previews em SQLite. ✅ Confere com o código.
+
+### 9. [A sessão fotográfica](09-A-SESSAO-FOTOGRAFICA.md) 🆕
+**Conteúdo**: o eixo do app depois de 6/set/2026 — **logado, tudo acontece dentro de uma sessão**.
+As quatro telas, o fluxo do estúdio em onze passos, como uma foto pertence a um ensaio, a porta do
+app, e a tela de sessão desenhada contra a rota `[id]` do site.
+
+**Leia se você quer**: mexer em qualquer coisa que fale com o `recordarfotos.com.br`, ou entender
+por que a "Biblioteca" deixou de ser o lugar onde se escolhe foto. Traz também os defeitos que este
+trabalho encontrou e a lista do que ainda falta para a paridade com a tela de lá.
+
+### 10. [A rota do site, da lista até a Revelação](10-A-ROTA-DO-SITE-ATE-A-REVELACAO.md) 🆕
+**Conteúdo**: o que `/dashboard/sessoes-fotograficas` faz na web, passo a passo — a porta, a lista,
+a sessão (grade em wasm, área temporária, painel, os proxies de imagem), a passagem para o editor e
+o que a Revelação faz por baixo (fonte dos pixels, os 53 ajustes, salvar por bilhete, sincronizar).
+Com a rota da API de cada gesto e os comentários do dono que explicam cada decisão.
+
+**Leia se você quer**: conferir uma tela de cá contra a de lá sem abrir o site — é a referência de
+"mesmo gesto, mesmo resultado".
+
+### 11. [Offline com sincronização](11-OFFLINE-E-SINCRONIZACAO.md) 🆕
+**Conteúdo**: o modelo que o desktop e o navegador já seguem — os bytes esperam localmente, a
+classificação autoriza a subida —, e o problema que ele ainda tem: **a chave da sincronização é o
+nome do arquivo**. Duas `DSC_2571.jpg` de dois cartões não cabem na mesma galeria, e a idempotência
+da retomada depende de um dado que não é único. Traz a proposta (chave UUID gerada pelo cliente) em
+três fases, e o que cada uma custa.
+
+**Leia se você quer**: mexer no envio de qualquer um dos dois clientes, ou entender por que um
+`409 já existe uma foto chamada X` aparece no meio de uma sessão. ⚠️ **É plano, não é código** —
+nada dele foi implementado.
+
+## 🗄️ História — [`historico/`](historico/)
+
+Documentos que descrevem decisões tomadas, e que não orientam o próximo commit. **Continuam valendo
+como explicação de por que o código é como é.**
+
+| | |
+|---|---|
+| [10-MIGRACAO-GPUI.md](historico/10-MIGRACAO-GPUI.md) | A migração de egui para GPUI, fase a fase. **O melhor registro das armadilhas do framework** — BGRA, o `uniform` que casa por posição, o foco que não se concede, a fluidez que só se mede em `--release`. ⚠️ As regras da §7 estão **revogadas** |
+| [09-MIGRACAO-TAURI.md](historico/09-MIGRACAO-TAURI.md) | A alternativa avaliada e **descartada** em ago/2026 |
+| [PARIDADE-UI.md](historico/PARIDADE-UI.md) | Os 146 testes do app de egui virados em lista de comportamentos, antes de ele ser apagado |
 
 ## 🗺️ Guia de Leitura
 
@@ -205,4 +251,4 @@ Consulte o [Roadmap](04-ROADMAP.md) para detalhes completos.
 
 **Mantenedores**: Adicione seu nome aqui quando contribuir significativamente para a documentação.
 
-**Última Revisão**: Dezembro 2025
+**Última Revisão**: 15 de agosto de 2026

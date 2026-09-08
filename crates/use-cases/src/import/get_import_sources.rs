@@ -1,4 +1,4 @@
-use domain::import_source::{ImportSource, DeviceRepository};
+use domain::import_source::{DeviceRepository, ImportSource};
 use std::sync::Arc;
 
 pub struct GetImportSourcesUseCase {
