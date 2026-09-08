@@ -52,10 +52,13 @@ async fn banco_com_uma_foto(dir: &tempfile::TempDir, id: &str) -> sqlx::SqlitePo
 
 fn gravador_de(pool: &sqlx::SqlitePool) -> GravadorDoBanco {
     let repositorio = Arc::new(infrastructure::PhotoRepositoryImpl::new(pool.clone()));
-    let editor = Arc::new(EditorController::new(Arc::new(SavePhotoEditsUseCase::new(
-        repositorio,
-    ))));
-    GravadorDoBanco::novo(editor, tokio::runtime::Handle::current())
+    let editor = Arc::new(EditorController::new(
+        Arc::new(SavePhotoEditsUseCase::new(repositorio)),
+        Arc::new(use_cases::pos_venda::RevelacoesLocaisUseCase::new(
+            Arc::new(infrastructure::SqliteRevelacoesDoSite::new(pool.clone())),
+        )),
+    ));
+    GravadorDoBanco::novo(editor, tokio::runtime::Handle::current(), Vec::new())
 }
 
 /// Relê a foto pelo mesmo caminho que o app usa para abrir a Revelação.
@@ -194,4 +197,64 @@ async fn sem_reenviar_o_corte_ele_e_apagado() {
         foto.edit_crop_x, None,
         "se isto passar a sobreviver, o use case mudou — e o reenvio do corte deixou de ser necessário"
     );
+}
+
+/// 🚨 **A foto do site grava no depósito, e não em `photos`.**
+///
+/// Achado do dono em 8/set/2026: *"parece que os parâmetros de edição não estão
+/// sendo gravados"*. O id de uma foto aberta de uma sessão do pós-venda é
+/// `site:<uuid>`, que não é linha do catálogo — `SavePhotoEditsUseCase`
+/// respondia `PhotoNotFound` e o `Gravador` engolia (não devolve `Result`, de
+/// propósito: gravar acontece 500 ms depois do arrasto, longe de quem
+/// arrastou). Cada gesto escrevia na água.
+///
+/// O teste confere as duas metades: o que **entra** no depósito e o que **não
+/// entra** no catálogo — uma linha em `photos` para uma foto que não está neste
+/// disco seria o outro erro possível.
+#[tokio::test]
+async fn a_revelacao_da_foto_do_site_vai_para_o_deposito() {
+    let dir = tempfile::TempDir::new().expect("diretório temporário");
+    let id = uuid::Uuid::new_v4().to_string();
+    let pool = banco_com_uma_foto(&dir, &id).await;
+
+    gravador_de(&pool).gravar(
+        "site:remota-1".to_string(),
+        Ajustes {
+            exposure: 1.25,
+            ..Default::default()
+        },
+        Corte::default(),
+    );
+
+    let guardado = esperar_o_deposito(&pool, "remota-1").await;
+    let ajustes: serde_json::Value = serde_json::from_str(&guardado).expect("é JSON");
+    assert_eq!(ajustes["exposure"], 1.25);
+    // 🔑 O enquadramento vai no mesmo objeto, com prefixo `corte_` — o formato
+    // que sobe para a API. Um segundo formato aqui faria a foto revelada no app
+    // abrir sem enquadramento no navegador.
+    assert_eq!(ajustes["corte_largura"], 1.0);
+
+    let fotos: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM photos")
+        .fetch_one(&pool)
+        .await
+        .expect("contar as fotos");
+    assert_eq!(fotos, 1, "a foto do site não vira linha do catálogo local");
+}
+
+/// Espera o depósito responder — a gravação é assíncrona, como a do catálogo.
+async fn esperar_o_deposito(pool: &sqlx::SqlitePool, foto_no_site: &str) -> String {
+    for _ in 0..50 {
+        let guardado: Option<String> = sqlx::query_scalar(
+            "SELECT ajustes FROM revelacoes_do_site WHERE pos_venda_foto_id = ?1",
+        )
+        .bind(foto_no_site)
+        .fetch_optional(pool)
+        .await
+        .expect("ler o depósito");
+        if let Some(ajustes) = guardado {
+            return ajustes;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    panic!("o depósito não recebeu a revelação de {foto_no_site}");
 }

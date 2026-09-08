@@ -496,6 +496,18 @@ pub trait PosVendaApi: Send + Sync {
         jpeg: Vec<u8>,
         ajustes: Value,
     ) -> DomainResult<()>;
+
+    /// Desfaz a revelação: o **bruto** guardado no site volta a ser o original.
+    ///
+    /// 🔑 É o "Zerar tudo" salvo, e ele não sobe arquivo nenhum. Revelar o
+    /// bruto com os ajustes neutros e substituir daria ao cliente uma geração a
+    /// mais de JPEG no lugar do arquivo que ele deveria receber — e ainda
+    /// pagaria o download do original e o upload do resultado para chegar lá.
+    ///
+    /// Vai com sessão, e não com bilhete: o bilhete autoriza *substituir*, e
+    /// aqui nada é enviado. Foto que nunca foi revelada responde certo — zerar
+    /// o que já estava zerado não é erro.
+    async fn restaurar_original(&self, sessao: &Sessao, foto_id: &str) -> DomainResult<()>;
 }
 
 #[cfg(test)]

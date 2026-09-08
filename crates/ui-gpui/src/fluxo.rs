@@ -524,7 +524,7 @@ fn da_lista_ao_revelar_dentro_da_sessao(cx: &mut TestAppContext) {
                 tela.colher(cx);
                 // Sem escolher leva: o padrão é **sem marcação**, como na web.
                 assert_eq!(tela.leva(), None);
-                tela.escolher_fotos(cx);
+                tela.importar(cx);
                 tela.colher(cx);
             });
         })

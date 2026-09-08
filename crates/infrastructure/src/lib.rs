@@ -29,7 +29,7 @@ pub mod transformacao;
 // Re-exports for main.rs compatibility
 pub use database::{
     create_pool, run_migrations, CollectionRepositoryImpl, PhotoRepositoryImpl,
-    SqlitePresetRepository,
+    SqlitePresetRepository, SqliteRevelacoesDoSite,
 };
 pub use exif_reader::ExifReader;
 pub use file_organizer::FileOrganizerImpl;

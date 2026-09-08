@@ -13,6 +13,7 @@
 //! | `original` | `GET /api/v2/pos-venda/fotos/{id}/original` — o arquivo cheio, não a cópia de trabalho |
 //! | `bilhete_de_revelacao` | `POST /api/v2/pos-venda/fotos/{id}/bilhete-de-revelacao` → o bilhete de uma hora |
 //! | `salvar_revelacao` | `POST /api/v2/public/pos-venda/revelacao/{bilhete}`, multipart `file` + `ajustes` (sem token) |
+//! | `restaurar_original` | `POST /api/v2/pos-venda/fotos/{id}/restaurar-original` — o bruto volta ao lugar, sem upload |
 //!
 //! ⚠️ **`native-tls`, e não `rustls`.** O `sqlx` deste crate já traz a pilha
 //! TLS do sistema; uma segunda pilha ao lado dela seria compilar duas vezes o
@@ -577,6 +578,24 @@ impl PosVendaApi for PosVendaApiHttp {
             .client
             .post(self.url(&format!("/public/pos-venda/revelacao/{bilhete}")))
             .multipart(form)
+            .send()
+            .await
+            .map_err(rede)?;
+
+        if !resposta.status().is_success() {
+            return Err(recusa(resposta).await);
+        }
+        Ok(())
+    }
+
+    async fn restaurar_original(&self, sessao: &Sessao, foto_id: &str) -> DomainResult<()> {
+        // Com token, e não com bilhete: nada sobe aqui. O bilhete existe para o
+        // upload que o servidor do site não aguenta — este pedido é vazio.
+        let resposta = self
+            .client
+            .post(self.url(&format!("/pos-venda/fotos/{foto_id}/restaurar-original")))
+            .bearer_auth(self.token(sessao).await?)
+            .json(&json!({}))
             .send()
             .await
             .map_err(rede)?;

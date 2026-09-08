@@ -54,9 +54,18 @@ async fn main() {
     let biblioteca = Arc::new(adapters::controllers::LibraryController::new(
         repositorio_de_fotos.clone(),
     ));
-    let editor = Arc::new(adapters::controllers::EditorController::new(Arc::new(
-        use_cases::SavePhotoEditsUseCase::new(repositorio_de_fotos.clone()),
-    )));
+    // 🔑 **Duas metades da mesma porta.** `SavePhotoEditsUseCase` grava a
+    // revelação da foto **deste disco**, em `photos`; `RevelacoesLocaisUseCase`
+    // guarda a da foto que **só existe no site**, que não tem linha lá — e sem
+    // ela cada gesto numa foto do pós-venda se perdia calado (8/set/2026).
+    let editor = Arc::new(adapters::controllers::EditorController::new(
+        Arc::new(use_cases::SavePhotoEditsUseCase::new(
+            repositorio_de_fotos.clone(),
+        )),
+        Arc::new(use_cases::pos_venda::RevelacoesLocaisUseCase::new(
+            Arc::new(infrastructure::SqliteRevelacoesDoSite::new(pool.clone())),
+        )),
+    ));
 
     // As fotos são carregadas **antes** da janela, e isso é provisório: num
     // acervo grande a abertura fica esperando o banco. A fase 1 termina com
@@ -139,9 +148,21 @@ async fn main() {
     // running" — no meio de um arrasto de slider, sem relação visível com o que o
     // dedo estava fazendo. Com o `Handle` clonado, as tarefas de gravação vão
     // para as threads do tokio, que continuam vivas.
+    // 📸 **O que ficou por subir, lido uma vez** — como os presets, e pelo mesmo
+    // motivo: quem consulta é a grade, no meio de um quadro. São as revelações
+    // de fotos que só existem no site e que o operador ainda não salvou na
+    // galeria; sem elas, reabrir o app mostrava a foto com a receita do
+    // servidor e o trabalho da véspera sumia.
+    let guardadas = editor.revelacoes_do_site().await.unwrap_or_else(|erro| {
+        // Sem o depósito o app abre igual, e o que se perde é a receita não
+        // enviada — não a foto. Um `expect` aqui impediria de revelar.
+        eprintln!("⚠️ [Revelação] o depósito das fotos do site não abriu: {erro}");
+        Vec::new()
+    });
     let gravador: Arc<dyn Gravador> = Arc::new(GravadorDoBanco::novo(
         editor,
         tokio::runtime::Handle::current(),
+        guardadas,
     ));
     // 🚨 A releitura do catálogo, pelo mesmo `LibraryController` que leu a lista
     // acima. Sem ela a importação grava no banco e a grade continua com a lista

@@ -143,6 +143,23 @@ impl PublicarNoPosVendaUseCase {
             .map_err(|e| e.to_string())
     }
 
+    /// Devolve a foto do site ao **original**: o bruto volta ao lugar dele.
+    ///
+    /// 🔑 É o "Zerar tudo" salvo, e o par de [`Self::salvar_revelacao`]. Sem
+    /// bilhete e sem pixels: nada sobe. Subir o bruto revelado com os ajustes
+    /// neutros entregaria ao cliente uma geração a mais de JPEG no lugar do
+    /// arquivo dele — que é justamente o que "voltar ao original" quer evitar.
+    pub async fn restaurar_original(
+        &self,
+        sessao: &Sessao,
+        foto_no_site: &str,
+    ) -> Result<(), String> {
+        self.api
+            .restaurar_original(sessao, foto_no_site)
+            .await
+            .map_err(|e| e.to_string())
+    }
+
     /// Tira a foto do storage — o que zerar a classificação faz.
     ///
     /// 🚨 **O `None` local sai mesmo quando o site diz que não achou.** Um id que
@@ -301,6 +318,8 @@ mod tests {
         some_do_site: Vec<String>,
         /// `(bilhete, tamanho do JPEG, ajustes)` de cada revelação salva.
         reveladas: Mutex<Vec<(String, usize, serde_json::Value)>>,
+        /// As fotos que voltaram ao original — o "Zerar tudo" salvo.
+        restauradas: Mutex<Vec<String>>,
     }
 
     #[async_trait::async_trait]
@@ -406,6 +425,10 @@ mod tests {
                 .lock()
                 .unwrap()
                 .push((bilhete.to_string(), jpeg.len(), ajustes));
+            Ok(())
+        }
+        async fn restaurar_original(&self, _: &Sessao, foto_id: &str) -> DomainResult<()> {
+            self.restauradas.lock().unwrap().push(foto_id.to_string());
             Ok(())
         }
     }
@@ -602,6 +625,33 @@ mod tests {
             &*reveladas,
             &[("bilhete-de-foto-do-site".to_string(), 42, ajustes)],
             "o bilhete é o daquela foto, e os ajustes vão inteiros"
+        );
+    }
+
+    /// 📸 **"Zerar tudo" salvo**: o bruto volta ao lugar, e nada sobe.
+    ///
+    /// 🔑 O que este teste prende é a ausência: nenhum bilhete emitido, nenhum
+    /// JPEG enviado. O caminho pelo bilhete entregaria ao cliente uma geração a
+    /// mais de perda no lugar do arquivo dele — que é o oposto de "voltar ao
+    /// original".
+    #[tokio::test]
+    async fn restaurar_original_nao_pede_bilhete_nem_sobe_arquivo() {
+        let api = Arc::new(ApiDeMentira::default());
+        let caso = PublicarNoPosVendaUseCase::new(
+            Arc::new(MockPhotoRepo::new()),
+            Arc::new(MockExportador::new()),
+            Arc::new(MockThumbnailGen::new()),
+            api.clone(),
+        );
+
+        caso.restaurar_original(&sessao(), "foto-do-site")
+            .await
+            .unwrap();
+
+        assert_eq!(&*api.restauradas.lock().unwrap(), &["foto-do-site"]);
+        assert!(
+            api.reveladas.lock().unwrap().is_empty(),
+            "restaurar não sobe JPEG nenhum"
         );
     }
 

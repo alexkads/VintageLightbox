@@ -41,7 +41,14 @@ pub enum Recado {
         bytes: Vec<u8>,
     },
     /// O revelado entrou no lugar do original — "Salvar na galeria e sair".
-    RevelacaoSalva,
+    ///
+    /// 🔑 **Leva o id da foto no site**, e não é enfeite: é ele que tira a
+    /// receita do depósito local (`Gravador::esquecer_do_site`). A partir daqui
+    /// a verdade daquela foto é o servidor, e guardar as duas abriria a
+    /// pergunta de qual vale.
+    RevelacaoSalva {
+        foto_no_site: String,
+    },
     /// O passo 3 terminou para uma foto: ela subiu, ou saiu do storage.
     ///
     /// 🔑 **Notifica, não descreve.** Quem escuta só precisa saber que o
@@ -195,6 +202,16 @@ async fn revelar_e_salvar(
     ajustes: Ajustes,
     corte: CropSettings,
 ) -> Result<(), String> {
+    // 🔑 **Zerou tudo: o bruto volta ao lugar dele, e nada sobe.** Pelo caminho
+    // de baixo isto seria baixar o original, revelá-lo com os ajustes neutros e
+    // subir o resultado — entregando ao cliente uma geração a mais de JPEG no
+    // lugar do arquivo que ele deveria receber. É o mesmo atalho que o editor
+    // do site faz (`semRevelacao` em `editor.tsx`); o gesto é o mesmo nos dois,
+    // e o resultado tem de ser também.
+    if ajustes == Ajustes::default() && corte == CropSettings::default() {
+        return controlador.restaurar_original(sessao, foto_no_site).await;
+    }
+
     let original = controlador.original(sessao, foto_no_site).await?;
 
     let exportador = exportador.clone();
@@ -308,7 +325,9 @@ impl Publicador for PublicadorDaApi {
             )
             .await
             {
-                Ok(()) => Recado::RevelacaoSalva,
+                Ok(()) => Recado::RevelacaoSalva {
+                    foto_no_site: foto_no_site.clone(),
+                },
                 Err(erro) => Recado::Falhou(erro),
             };
             let _ = canal.send(recado);
@@ -658,11 +677,12 @@ pub mod mentira {
             corte: CropSettings,
             canal: Sender<Recado>,
         ) {
-            self.reveladas
-                .lock()
-                .expect("as reveladas")
-                .push((foto_no_site, ajustes, corte));
-            self.responder_ou_guardar(canal, Recado::RevelacaoSalva);
+            self.reveladas.lock().expect("as reveladas").push((
+                foto_no_site.clone(),
+                ajustes,
+                corte,
+            ));
+            self.responder_ou_guardar(canal, Recado::RevelacaoSalva { foto_no_site });
         }
 
         fn link(&self, _sessao: Sessao, galeria_id: String, canal: Sender<Recado>) {
@@ -717,7 +737,12 @@ pub mod mentira {
                 .lock()
                 .expect("os arquivos")
                 .push((galeria_id, caminho, ordem, estado));
-            let _ = canal.send(Recado::Sincronizou);
+            // 🔑 **Respeita o `demorada`** — desde 8/set/2026. Uma importação
+            // que responde no mesmo instante em que é pedida não tem "meio", e
+            // é justamente no meio dela que o operador precisa continuar
+            // classificando e negociando. Sem isto não há como afirmar sobre
+            // esse estado: o lote nasce e morre dentro da mesma linha do teste.
+            self.responder_ou_guardar(canal, Recado::Sincronizou);
         }
 
         fn abrir_galeria(&self, _sessao: Sessao, galeria_id: String, canal: Sender<Recado>) {

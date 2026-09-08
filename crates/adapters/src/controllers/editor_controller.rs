@@ -1,16 +1,61 @@
 use domain::value_objects::PhotoId;
 use std::sync::Arc;
+use use_cases::pos_venda::RevelacoesLocaisUseCase;
 use use_cases::SavePhotoEditsUseCase;
 
 pub struct EditorController {
     save_photo_edits_use_case: Arc<SavePhotoEditsUseCase>,
+    /// O depósito das fotos que **só existem no site** — ver
+    /// [`Self::guardar_revelacao_do_site`].
+    revelacoes_do_site: Arc<RevelacoesLocaisUseCase>,
 }
 
 impl EditorController {
-    pub fn new(save_photo_edits_use_case: Arc<SavePhotoEditsUseCase>) -> Self {
+    pub fn new(
+        save_photo_edits_use_case: Arc<SavePhotoEditsUseCase>,
+        revelacoes_do_site: Arc<RevelacoesLocaisUseCase>,
+    ) -> Self {
         Self {
             save_photo_edits_use_case,
+            revelacoes_do_site,
         }
+    }
+
+    /// Guarda a receita de uma foto que **não é do catálogo desta máquina**.
+    ///
+    /// 🚨 **É a outra metade de [`Self::save_edits`], e existe porque aquela não
+    /// tem onde escrever.** A foto aberta de uma sessão do pós-venda tem o id
+    /// `site:<uuid>` e nenhuma linha em `photos` — `save_edits` respondia
+    /// `PhotoNotFound` a cada gesto, calado, e a receita morria com a tela. Foi
+    /// o *"os parâmetros de edição não estão sendo gravados"* de 8/set/2026.
+    ///
+    /// `ajustes` é o JSON que sobe para a API e volta dela: os 53 por nome mais
+    /// o enquadramento com prefixo `corte_`. Um formato só nos dois sentidos.
+    pub async fn guardar_revelacao_do_site(
+        &self,
+        foto_no_site: &str,
+        ajustes: &str,
+    ) -> Result<(), String> {
+        self.revelacoes_do_site
+            .guardar(foto_no_site, ajustes)
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    /// Tudo o que ficou por subir — lido de uma vez na abertura do app.
+    pub async fn revelacoes_do_site(&self) -> Result<Vec<(String, String)>, String> {
+        self.revelacoes_do_site
+            .todas()
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    /// A revelação subiu: o servidor passa a ser a verdade desta foto.
+    pub async fn esquecer_revelacao_do_site(&self, foto_no_site: &str) -> Result<(), String> {
+        self.revelacoes_do_site
+            .esquecer(foto_no_site)
+            .await
+            .map_err(|e| e.to_string())
     }
 
     // ⚠️ Dívida reconhecida, não descuido — docs/10-MIGRACAO-GPUI.md §2.1.

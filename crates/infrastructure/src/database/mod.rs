@@ -5,10 +5,12 @@
 pub mod collection_repository;
 pub mod photo_repository;
 pub mod preset_repository;
+pub mod revelacoes_do_site;
 
 pub use collection_repository::CollectionRepositoryImpl;
 pub use photo_repository::PhotoRepositoryImpl;
 pub use preset_repository::SqlitePresetRepository;
+pub use revelacoes_do_site::SqliteRevelacoesDoSite;
 
 use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
 

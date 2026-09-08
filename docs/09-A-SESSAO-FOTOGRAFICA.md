@@ -43,7 +43,7 @@ A lista é do dono, e é o critério de pronto. Os passos 8 e 9 são do site.
 
 | # | Passo | Onde, no desktop |
 |--:|---|---|
-| 1 | Importo as fotos | modal de importação, ou o arrastar da sessão |
+| 1 | Importo as fotos | **"Importar"** — a janela do sistema — ou o arrastar da sessão |
 | 2 | Revelo e edito | `Tela::Revelacao` — **antes de classificar** |
 | 3 | Classifico | a nota **sobe a foto** para a sessão aberta |
 | 4 | Filtro as classificadas | fichas de recorte da barra |
@@ -194,7 +194,7 @@ São seis blocos, nesta ordem — e a ordem é o fluxo do balcão:
 | Bloco | O que tem |
 |---|---|
 | **cabeçalho** | título · contato · selo "já abriu" · `N levadas · N à venda · N compradas` · Copiar link · `Avisar <e-mail>: fotos prontas` |
-| **envio** | "Escolher fotos" (janela do sistema) · "Entram como" · arrastar a pasta |
+| **envio** | "Importar" (janela do sistema) · "Exportar" · "Entram como" · arrastar a pasta |
 | **barra da grade** | recortes com contagem · zoom · **Revelar** (entra sem escolher foto, com a sessão inteira na tira) · Tela do cliente · "Selecionar as N visíveis" |
 | **grade** | selo do estado, visto na marcada, `13. DSC_2578.JPG`, faixa e downloads |
 | **painel da foto** | estado, nota, "Pôr à venda"/"Revelar", faixa, downloads, preço, registro do balcão |
@@ -242,6 +242,70 @@ RAW, onde se escolhe entre duzentas do cartão.
 com a pasta aberta ao lado. Pedido do dono: *"tem que usar o mesmo explorador de
 arquivos do sistema operacional"*. Então a sessão recebe **arquivos do disco**,
 como na web — arrastando a pasta, ou pela janela do `rfd`.
+
+🚨 **Quem faz a importação é o botão "Importar"** — decisão do dono,
+8/set/2026, nestas palavras. Não é um caminho paralelo à importação: **é** a
+importação do ensaio. Escolher os arquivos na janela do sistema (ou arrastar a
+pasta) é como uma foto entra num ensaio, e o passo 1 do fluxo é este.
+
+Por isso o botão **"Importar" da barra do app saiu** no mesmo dia. Ele abria o
+explorador do framework ao lado de um botão que abre o do sistema:
+dois botões para o mesmo gesto, e o de cima era o que a decisão acima já dizia
+ser o errado para este trabalho — *"é o Escolher fotos… que faz a ação correta e
+o Importar usa o padrão do framework, esse deve ser removido"*.
+
+🔑 **E o que ficou herdou o nome.** Até 8/set/2026 ele se chamava "Escolher
+fotos…", e o dono desfez isso no mesmo dia em que o "Exportar" veio para o lado:
+*"esse nome confunde, pois ao lado vai ter o botão Exportar"*. "Escolher fotos…"
+descreve o **meio** — abre uma janela, escolhe-se —, e "Exportar" descreve o
+**fim**. Lado a lado, um par que não é par: os dois passaram a dizer a direção.
+
+### A importação corre por baixo, e o estúdio não para
+
+🚨 **Com 500 fotos subindo, tudo o mais continua funcionando** — decisão do dono,
+8/set/2026: *"no meio dessa importação o usuário precisa conseguir ir revelando e
+negociando com o cliente, fazendo classificações e sinalizações"*.
+
+Até esse dia **não funcionava, e falhava em silêncio.** `Detalhe` tinha um
+contador só (`enviando`) para dois trabalhos diferentes, e `mudar_as_marcadas` —
+o caminho de `dar_nota` e de `alternar_levada` — abria com
+`if alvos.is_empty() || self.enviando > 0 { return; }`. Durante um lote, apertar
+`4` ou `P` não fazia nada: sem erro, sem aviso, e sem nenhuma pista de que a
+culpa era da importação. E quando a negociação passava, ela **zerava o contador
+do lote**, e a importação se dava por terminada no meio.
+
+O conserto são duas separações:
+
+| O quê | Por quê |
+|---|---|
+| `Importacao { total, feitas, falhas }`, separado de `mudando` | são trabalhos que acontecem ao mesmo tempo; um contador só faz um mentir sobre o outro |
+| Um canal de `Recado` **só da importação** (`envios`) | `Recado::Sincronizou` não diz quem terminou — é o mesmo "pronto" de subir, negociar, classificar e tirar do site |
+
+🔑 **A barra de progresso lê `Importacao`**, e some quando o lote acaba: uma
+barra parada em 100% é ruído que o operador aprende a ignorar. A **falha conta
+como pronta** — o que ela mede é o que falta *esperar*, e uma foto recusada não
+vai responder de novo; fora da conta, a barra prenderia em 499 de 500 para
+sempre.
+
+⚠️ **Só o próprio "Importar" fica desligado durante o lote**, porque o lote é um
+só: um segundo por cima faria a barra recomeçar do zero no meio do primeiro.
+
+⚠️ **O que ainda não acontece**: as fotos novas só aparecem na grade **quando o
+lote acaba**, porque é aí que a galeria é relida. Durante a importação o operador
+trabalha com o que já estava na sessão — reler a cada foto seria um pedido ao
+site por foto. Se aparecer a necessidade de vê-las chegando, o lugar é uma
+releitura a cada N respostas, e não a cada uma.
+
+**Onde isso é conferido**: quatro testes e2e em `sessoes::detalhe::testes`, que
+clicam nos botões pelas coordenadas do quadro desenhado (`debug_selector` +
+`simulate_click`) em vez de chamar o método por baixo — inclusive o teto de **um
+quadro (16 ms)** por clique, medido em ~2 ms no `debug`.
+
+⚠️ **O que o modal ainda guardava, e ficou sem porta**: `crates/ui-gpui/src/importacao/`
+continua no código, com `Aplicativo::importar` chamado só por teste. O que morava
+lá e não mora no "Importar" é a **triagem em RAW pelo cartão** — origens,
+varredura, grade com caixinhas, opções de organização e destino. Enquanto essa
+triagem não tiver outro lugar, o módulo fica; ele só não é mais um botão.
 
 ### 🔑 A leva nasce **sem marcação**
 

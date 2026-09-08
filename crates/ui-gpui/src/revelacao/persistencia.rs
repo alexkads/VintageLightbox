@@ -73,6 +73,26 @@ pub fn corte_da_foto(foto: &PhotoViewModel) -> Corte {
 /// (`let _ = controller.save_edits(...)` nos quatro pontos que chamam).
 pub trait Gravador: Send + Sync + 'static {
     fn gravar(&self, id: String, ajustes: Ajustes, corte: Corte);
+
+    /// As revelações de fotos do site que **ainda não subiram**, por id de lá.
+    ///
+    /// 🔑 **As três pontas do mesmo ciclo moram na mesma porta**: o gesto grava,
+    /// a abertura lê, o envio esquece. Separá-las seria dar à tela duas coisas
+    /// para pedir sobre o mesmo assunto — e a chance de uma delas ficar sem ser
+    /// ligada no `main.rs`, que é como a exportação passou meses sem existir.
+    ///
+    /// Devolve o que está **em memória**, e por isso é síncrona: quem lê é a
+    /// grade, no meio de um quadro. O disco foi consultado uma vez, na abertura
+    /// do app.
+    ///
+    /// O padrão vazio serve o `GravadorDeMentira` dos testes de tela, que não
+    /// tem depósito nenhum — e é o mesmo desfecho de um app sem fotos do site.
+    fn guardadas_do_site(&self) -> Vec<(String, String)> {
+        Vec::new()
+    }
+
+    /// Esta subiu para a galeria: o servidor passa a ser a verdade dela.
+    fn esquecer_do_site(&self, _foto_no_site: String) {}
 }
 
 /// O gravador de verdade: entrega ao `EditorController`, numa tarefa do tokio.
@@ -84,11 +104,28 @@ pub trait Gravador: Send + Sync + 'static {
 pub struct GravadorDoBanco {
     editor: Arc<EditorController>,
     tokio: tokio::runtime::Handle,
+    /// O depósito das fotos do site **em memória**, espelho da tabela.
+    ///
+    /// 🔑 Existe porque quem lê é a tela, no meio de um quadro, e o disco é
+    /// assíncrono. Ele é carregado uma vez na abertura (`main.rs`, junto dos
+    /// presets) e acompanha cada gravação daqui em diante — assim a sessão
+    /// reaberta mostra o que o operador acabou de ajustar, sem ida ao banco.
+    do_site: Arc<std::sync::Mutex<std::collections::HashMap<String, String>>>,
 }
 
 impl GravadorDoBanco {
-    pub fn novo(editor: Arc<EditorController>, tokio: tokio::runtime::Handle) -> Self {
-        Self { editor, tokio }
+    /// `guardadas` é o que a tabela tinha na abertura do app — ver
+    /// [`Gravador::guardadas_do_site`].
+    pub fn novo(
+        editor: Arc<EditorController>,
+        tokio: tokio::runtime::Handle,
+        guardadas: Vec<(String, String)>,
+    ) -> Self {
+        Self {
+            editor,
+            tokio,
+            do_site: Arc::new(std::sync::Mutex::new(guardadas.into_iter().collect())),
+        }
     }
 }
 
@@ -96,6 +133,32 @@ impl Gravador for GravadorDoBanco {
     fn gravar(&self, id: String, ajustes: Ajustes, corte: Corte) {
         let editor = self.editor.clone();
         let nome = id.clone();
+
+        // 🚨 **A foto do site não tem linha em `photos`**, e por isso não vai
+        // por `save_edits`: o id dela é `site:<uuid>`, o use case responde
+        // `PhotoNotFound`, e este `Gravador` não devolve `Result` para ninguém
+        // notar. Era o *"os parâmetros de edição não estão sendo gravados"* de
+        // 8/set/2026 — cada gesto escrevendo na água. A receita dela vai para o
+        // depósito das do site, no **mesmo** SQLite do catálogo, no formato que
+        // sobe para a API.
+        if let Some(no_site) = id_no_site(&id) {
+            let no_site = no_site.to_string();
+            let json =
+                crate::pos_venda::porta::ajustes_em_json(&ajustes, &para_crop_settings(&corte))
+                    .to_string();
+            // O espelho em memória anda **na hora**: quem reabre a sessão no
+            // segundo seguinte lê daqui, e esperar o disco faria a foto voltar
+            // com a receita de antes do último gesto.
+            if let Ok(mut deposito) = self.do_site.lock() {
+                deposito.insert(no_site.clone(), json.clone());
+            }
+            self.tokio.spawn(async move {
+                if let Err(erro) = editor.guardar_revelacao_do_site(&no_site, &json).await {
+                    eprintln!("⚠️ [Revelação] a revelação de {nome} não foi guardada: {erro}");
+                }
+            });
+            return;
+        }
 
         self.tokio.spawn(async move {
             let resultado = editor
@@ -167,6 +230,33 @@ impl Gravador for GravadorDoBanco {
 
             if let Err(erro) = resultado {
                 eprintln!("⚠️ [Revelação] a revelação de {nome} não foi gravada: {erro}");
+            }
+        });
+    }
+
+    fn guardadas_do_site(&self) -> Vec<(String, String)> {
+        self.do_site
+            .lock()
+            .map(|d| {
+                d.iter()
+                    .map(|(id, ajustes)| (id.clone(), ajustes.clone()))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn esquecer_do_site(&self, foto_no_site: String) {
+        if let Ok(mut deposito) = self.do_site.lock() {
+            deposito.remove(&foto_no_site);
+        }
+        let editor = self.editor.clone();
+        self.tokio.spawn(async move {
+            if let Err(erro) = editor.esquecer_revelacao_do_site(&foto_no_site).await {
+                // Sobrou linha no depósito de uma foto que já subiu. Não é
+                // perda: na próxima abertura ela volta como "receita local" e
+                // diz o mesmo que o servidor — o que ela deixa de fazer é sair
+                // do caminho.
+                eprintln!("⚠️ [Revelação] {foto_no_site} subiu, mas ficou no depósito: {erro}");
             }
         });
     }
@@ -352,6 +442,40 @@ pub fn so_existe_no_site(foto: &PhotoViewModel) -> bool {
     foto.pos_venda_foto_id.is_some() && foto.path.is_empty()
 }
 
+/// O que o id de uma foto do site tem na frente — `site:<uuid>`.
+///
+/// 🔑 **Num lugar só.** O prefixo é montado em três pontos e lido em outro; um
+/// deles mudar sozinho deixaria os outros procurando no lugar antigo, sem erro
+/// nenhum. Ver `chave_da_miniatura` na sessão, que já dizia isso.
+pub const PREFIXO_DO_SITE: &str = "site:";
+
+/// O id **no site** de uma foto que veio de lá — `None` para a foto local.
+///
+/// É a direção de leitura do prefixo, e quem precisa dela é quem grava: a
+/// receita de uma foto do site não vai para `photos` (ela não tem arquivo neste
+/// disco), e o depósito que a recebe é indexado pelo id de lá.
+pub fn id_no_site(id: &str) -> Option<&str> {
+    id.strip_prefix(PREFIXO_DO_SITE)
+}
+
+/// A chave do **bruto** de uma foto do site no cache de previews.
+///
+/// 🚨 **Tem de ser diferente da chave da miniatura, e é essa a lição.** Em
+/// `site:<id>` a grade da sessão guarda a imagem da galeria — que, depois de
+/// "Salvar na galeria", é a foto **revelada e com marca**. Enquanto a Revelação
+/// lia essa mesma chave, ela servia ao shader uma foto já revelada: receita por
+/// cima de receita, em 640 px. O conserto de 7/set foi desligar o cache para a
+/// foto do site (`so_existe_no_site` → `origem: None`), e o preço apareceu no
+/// dia seguinte — *"voltou a ficar lento"*: cada seta virava um download.
+///
+/// 🔑 Duas imagens diferentes, duas chaves. Aqui mora **só** a cópia de
+/// trabalho que veio de `/copia-de-trabalho`, que nasce do bruto no servidor e
+/// é o que o editor do site também usa. Com ela no cache, ir e voltar pela seta
+/// não custa rede nenhuma — e, porque o L2 é SQLite, fechar o app também não.
+pub fn chave_do_trabalho(foto_id: &str) -> String {
+    format!("trabalho:{foto_id}")
+}
+
 /// Se esta foto já foi revelada — algum ajuste fora do neutro, ou algum
 /// enquadramento.
 ///
@@ -380,6 +504,8 @@ pub mod mentira {
     #[derive(Default)]
     pub struct GravadorDeMentira {
         gravado: Mutex<Vec<(String, Ajustes, Corte)>>,
+        /// O depósito das fotos do site, como se já estivesse no disco.
+        do_site: Mutex<Vec<(String, String)>>,
     }
 
     impl GravadorDeMentira {
@@ -389,6 +515,19 @@ pub mod mentira {
                 .expect("o registro de gravações")
                 .clone()
         }
+
+        /// Semeia o depósito — o que "o app achou lá ao abrir".
+        pub fn com_o_deposito(guardadas: Vec<(String, String)>) -> Self {
+            Self {
+                gravado: Mutex::default(),
+                do_site: Mutex::new(guardadas),
+            }
+        }
+
+        /// O que sobrou no depósito. Vazio depois de a revelação subir.
+        pub fn deposito(&self) -> Vec<(String, String)> {
+            self.do_site.lock().expect("o depósito").clone()
+        }
     }
 
     impl Gravador for GravadorDeMentira {
@@ -397,6 +536,17 @@ pub mod mentira {
                 .lock()
                 .expect("o registro de gravações")
                 .push((id, ajustes, corte));
+        }
+
+        fn guardadas_do_site(&self) -> Vec<(String, String)> {
+            self.deposito()
+        }
+
+        fn esquecer_do_site(&self, foto_no_site: String) {
+            self.do_site
+                .lock()
+                .expect("o depósito")
+                .retain(|(id, _)| id != &foto_no_site);
         }
     }
 }

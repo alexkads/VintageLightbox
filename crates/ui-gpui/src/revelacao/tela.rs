@@ -733,7 +733,16 @@ impl Revelacao {
             .into_iter()
             .flatten()
             .filter_map(|i| self.acervo.get(i))
-            .map(|foto| foto.id.clone())
+            // 🔑 **A chave é a de onde o bruto daquela foto mora.** Adiantar
+            // `site:<id>` aquecia a imagem da galeria — que a Revelação nem usa
+            // como origem —, e deixava fria justamente a que a seta vai pedir.
+            .map(|foto| {
+                if persistencia::so_existe_no_site(foto) {
+                    persistencia::chave_do_trabalho(&foto.id)
+                } else {
+                    foto.id.clone()
+                }
+            })
             .collect();
         if vizinhas.is_empty() {
             return;
@@ -757,34 +766,44 @@ impl Revelacao {
         // ("Check if we need to save the CURRENT photo before switching").
         self.gravar_o_que_estiver_pendente();
 
+        // 🚨 **A foto do site tem bruto em outra chave.** Em `site:<id>` a
+        // grade da sessão guarda a imagem da **galeria** — depois de "Salvar na
+        // galeria", a foto revelada e com marca. Servir isso ao shader aplica a
+        // receita duas vezes, em 640px, e era o que a tela fazia até 7/set.
+        //
+        // O bruto dela é a **cópia de trabalho**, que a raiz busca no storage e
+        // guarda em `trabalho:<id>` (ver `chave_do_trabalho`). Duas imagens,
+        // duas chaves: aqui a origem sai da segunda, e a da galeria fica só como
+        // **espera** na tela enquanto o download não volta.
+        let do_site = persistencia::so_existe_no_site(&foto);
+        let trabalho = do_site
+            .then(|| {
+                self.previews
+                    .get_preview(&persistencia::chave_do_trabalho(&foto.id))
+            })
+            .flatten();
+
         // Preview primeiro, miniatura como queda. A miniatura fica borrada numa
         // tela inteira, e é de propósito: mostrar a foto em tamanho errado é
         // melhor do que mostrar retângulo vazio.
-        let bruta = self
-            .previews
-            .get_preview(&foto.id)
-            .or_else(|| self.previews.get_thumbnail(&foto.id));
+        let bruta = trabalho.clone().or_else(|| {
+            self.previews
+                .get_preview(&foto.id)
+                .or_else(|| self.previews.get_thumbnail(&foto.id))
+        });
 
-        // 🚨 **A foto do site não tem bruto neste cache.** O que a grade da
-        // sessão guardou em `site:<id>` é a **miniatura da galeria** — que,
-        // depois de "Salvar na galeria", é a foto **revelada**. Servir isso ao
-        // shader aplicaria a receita duas vezes, em 640px, e era o que a tela
-        // fazia: a sépia salva ontem aparecia com os sliders no neutro, e
-        // "sincronizar" a partir dela mandava o neutro às outras. A miniatura
-        // fica só como **espera** na tela; a origem é a cópia de trabalho, que
-        // a raiz busca ao receber `AbriuOutraFoto`.
-        let origem = if persistencia::so_existe_no_site(&foto) {
-            None
-        } else {
-            bruta.as_ref().map(|imagem| {
-                let rgba = imagem.to_rgba8();
-                Origem {
-                    largura: rgba.width(),
-                    altura: rgba.height(),
-                    pixels: Arc::new(rgba.into_raw()),
-                }
-            })
-        };
+        // 🔑 **Sem cópia de trabalho, a foto do site não tem origem** — e é a
+        // ausência de origem que faz a raiz ir buscá-la (`tem_pixels`). Com ela,
+        // a seta de volta não custa rede nenhuma.
+        let para_origem = if do_site { trabalho } else { bruta.clone() };
+        let origem = para_origem.as_ref().map(|imagem| {
+            let rgba = imagem.to_rgba8();
+            Origem {
+                largura: rgba.width(),
+                altura: rgba.height(),
+                pixels: Arc::new(rgba.into_raw()),
+            }
+        });
 
         // Os ajustes vêm da **foto**, e não do que estava no painel: é o que o
         // legado faz ao selecionar (`app.rs`, "Load saved edits FIRST"), e é o
@@ -963,12 +982,37 @@ impl Revelacao {
     }
 
     /// Manda o estado de agora para o banco, sem passar pelo histórico.
-    fn gravar(&self) {
+    /// Grava a receita da foto aberta — no banco **e na cópia que está em
+    /// memória**.
+    ///
+    /// 🚨 **As duas, e a segunda foi a que faltou.** `mostrar` lê os sliders da
+    /// `PhotoViewModel` do acervo (`persistencia::da_foto`), não do banco — é o
+    /// que impede herdar o slider da foto anterior. Só que o acervo é um
+    /// retrato de quando a tela abriu: gravar apenas no banco deixava a cópia em
+    /// memória dizendo o que a foto era **antes** do ajuste, e a seta de ida e
+    /// volta trazia a foto de volta no neutro. Trabalho perdido sem erro nenhum,
+    /// e a cada troca de foto.
+    ///
+    /// ⚠️ **E para a foto do site o banco não responde**: o id dela é
+    /// `site:<uuid>`, que não é linha do catálogo — `save_edits` devolve
+    /// `PhotoNotFound`, e o `Gravador` não tem como dizer isso a ninguém (não
+    /// devolve `Result`, de propósito). Sem a escrita em memória, revelar uma
+    /// foto do site era escrever na água.
+    fn gravar(&mut self) {
         let Some(aberta) = self.aberta.as_ref() else {
             return;
         };
-        self.gravador
-            .gravar(aberta.foto.id.clone(), self.ajustes, self.corte);
+        let id = aberta.foto.id.clone();
+        self.gravador.gravar(id.clone(), self.ajustes, self.corte);
+
+        let (ajustes, corte) = (self.ajustes, self.corte);
+        if let Some(aberta) = self.aberta.as_mut() {
+            persistencia::na_foto(&mut aberta.foto, ajustes, corte);
+        }
+        let acervo = Arc::make_mut(&mut self.acervo);
+        if let Some(foto) = acervo.iter_mut().find(|f| f.id == id) {
+            persistencia::na_foto(foto, ajustes, corte);
+        }
     }
 
     /// Volta um passo. `Cmd+Z`.
@@ -3696,6 +3740,58 @@ mod testes {
             .expect("a janela deve estar aberta");
     }
 
+    /// 🚨 **A segunda abertura da foto do site não pede pixels de novo.**
+    ///
+    /// A cópia de trabalho que a raiz baixou fica em `trabalho:<id>` — chave
+    /// separada da miniatura da galeria, que continua sendo outra imagem. Sem
+    /// isso, cada seta era um download: foi o *"voltou a ficar lento"* de
+    /// 8/set, um dia depois de o cache ser desligado para esta foto.
+    #[gpui::test]
+    fn a_copia_de_trabalho_do_site_fica_no_cache_e_a_volta_nao_baixa(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        // A imagem da galeria, na chave da grade: é a revelada, e não serve de
+        // origem — se ela vazar para o shader, a receita entra duas vezes.
+        previews
+            .save_preview("site:remota-1", &foto_cinza())
+            .expect("gravar a miniatura da galeria");
+        // E a cópia de trabalho, na chave do bruto: é esta que vale.
+        previews
+            .save_preview(
+                &persistencia::chave_do_trabalho("site:remota-1"),
+                &foto_uniforme(200),
+            )
+            .expect("gravar a copia de trabalho");
+
+        let janela = janela(cx, previews);
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(
+                    PhotoViewModel {
+                        id: "site:remota-1".into(),
+                        name: "DSC_001.jpg".into(),
+                        pos_venda_foto_id: Some("remota-1".into()),
+                        ..Default::default()
+                    },
+                    window,
+                    cx,
+                );
+
+                assert!(
+                    tela.tem_pixels(),
+                    "com a copia de trabalho no cache, a raiz nao precisa buscar nada"
+                );
+                // 200 é a cópia de trabalho; 100 seria a imagem da galeria. A
+                // folga é do JPEG do cache, que não devolve o byte exato.
+                let origem = tela.aberta.as_ref().unwrap().origem.as_ref().unwrap();
+                assert!(
+                    origem.pixels[0].abs_diff(200) < 5,
+                    "a origem e a copia de trabalho, nao a imagem da galeria: {}",
+                    origem.pixels[0]
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
     /// Foto sem nada no cache abre assim mesmo — e sem origem para revelar.
     #[gpui::test]
     fn foto_sem_cache_abre_sem_imagem(cx: &mut TestAppContext) {
@@ -3964,6 +4060,37 @@ mod testes {
         // os ajustes da foto b no id dela.
         passar_a_espera(cx);
         assert_eq!(gravador.gravado().len(), 1, "gravou duas vezes o mesmo");
+    }
+
+    /// 🚨 **Andar pela seta e voltar tem de trazer os ajustes de volta.**
+    #[gpui::test]
+    fn andar_e_voltar_preserva_o_que_foi_ajustado(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        for id in ["id-a.jpg", "id-b.jpg"] {
+            previews.save_preview(id, &foto_cinza()).expect("gravar");
+        }
+        let janela = janela(cx, previews);
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir_no_acervo(vec![foto("a.jpg"), foto("b.jpg")], 0, window, cx);
+            })
+            .expect("a janela deve estar aberta");
+
+        arrastar(cx, &janela, 0, 1.25);
+        janela
+            .update(cx, |tela, window, cx| tela.andar(1, window, cx))
+            .expect("a janela deve estar aberta");
+        janela
+            .update(cx, |tela, window, cx| tela.andar(-1, window, cx))
+            .expect("a janela deve estar aberta");
+
+        let exposicao = janela
+            .update(cx, |tela, _window, _cx| tela.ajustes().exposure)
+            .expect("a janela deve estar aberta");
+        assert_eq!(
+            exposicao, 1.25,
+            "a exposicao voltou ao neutro na ida e volta"
+        );
     }
 
     /// 🚨 Gravar ajuste **não pode apagar o corte** que a foto tinha.

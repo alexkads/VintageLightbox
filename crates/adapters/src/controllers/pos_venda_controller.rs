@@ -170,6 +170,17 @@ impl PosVendaController {
             .await
     }
 
+    /// **Zerar tudo salvo**: o bruto volta a ser o original desta foto no site.
+    ///
+    /// 🔑 Não sobe arquivo nenhum — ver `PublicarNoPosVendaUseCase::restaurar_original`.
+    pub async fn restaurar_original(
+        &self,
+        sessao: &Sessao,
+        foto_no_site: &str,
+    ) -> Result<(), String> {
+        self.publicar.restaurar_original(sessao, foto_no_site).await
+    }
+
     /// O link que entra sem senha, para mandar ao cliente.
     pub async fn link_da_galeria(
         &self,

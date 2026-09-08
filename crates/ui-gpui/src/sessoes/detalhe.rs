@@ -42,6 +42,7 @@ use gpui::{
     Window,
 };
 use gpui_component::button::{Button, ButtonVariants};
+use gpui_component::progress::Progress;
 use gpui_component::slider::{Slider, SliderEvent, SliderState};
 use gpui_component::{ActiveTheme, Disableable, Selectable, Sizable};
 use infrastructure::cache::preview_manager::PreviewManager;
@@ -128,6 +129,13 @@ pub enum Pedido {
         fotos: Vec<FotoARevelar>,
         inicial: usize,
     },
+    /// Abrir a exportação com o que está na grade — o botão que desceu da barra
+    /// do app em 8/set/2026, para o lado do "Importar".
+    ///
+    /// 🔑 **A tela não escolhe as fotos**, como não escolhe nada que atravesse
+    /// para fora dela: quem sabe o que a grade tem marcado, e o que sobra
+    /// quando nada está, é a raiz.
+    Exportar,
 }
 
 /// Uma foto do site, no que a Revelação precisa para abri-la: o id remoto — de
@@ -136,6 +144,45 @@ pub enum Pedido {
 pub struct FotoARevelar {
     pub id: String,
     pub arquivo: String,
+}
+
+/// O andamento de uma importação: quantas foram pedidas e quantas responderam.
+///
+/// 🔑 **A falha conta como pronta.** A barra mede o que falta *esperar*, não o
+/// que deu certo: uma foto que o site recusou não vai responder de novo, e
+/// deixá-la fora da conta prenderia a barra em 499/500 para sempre.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Importacao {
+    /// Quantos arquivos entraram no lote.
+    pub total: usize,
+    /// Quantos subiram.
+    pub feitas: usize,
+    /// Quantos o site recusou.
+    pub falhas: usize,
+}
+
+impl Importacao {
+    /// Quantas já responderam — as que subiram e as que falharam.
+    pub fn prontas(&self) -> usize {
+        self.feitas + self.falhas
+    }
+
+    pub fn terminou(&self) -> bool {
+        self.prontas() >= self.total
+    }
+
+    /// O quanto a barra preenche, de 0 a 100.
+    ///
+    /// ⚠️ **Lote vazio devolve 100**, e não divide por zero. Ele não chega a
+    /// existir (`enviar_arquivos` recusa lista vazia), mas um tipo que responde
+    /// `NaN` num caso impossível vira `width: NaN%` no dia em que o caso deixa
+    /// de ser impossível — e aí a barra some sem ninguém entender por quê.
+    pub fn porcento(&self) -> f32 {
+        if self.total == 0 {
+            return 100.;
+        }
+        (self.prontas() as f32 / self.total as f32) * 100.
+    }
 }
 
 impl EventEmitter<Pedido> for Detalhe {}
@@ -231,12 +278,36 @@ pub struct Detalhe {
     /// ⚠️ Rolar a cada quadro prenderia a barra: o operador não conseguiria
     /// arrastar a tira para olhar o resto sem ela voltar sozinha.
     ultimo_foco: Option<usize>,
-    enviando: usize,
-    enviadas: usize,
+    /// Quantas **mudanças em lote** ainda esperam resposta — nota, levada,
+    /// negociação. Elas correm em série de propósito: são a mesma seleção, e
+    /// duas rodadas sobre as mesmas fotos disputariam a última palavra.
+    ///
+    /// 🚨 **Nada aqui conta importação, e é essa a separação inteira.** Ver
+    /// [`Self::importacao`].
+    mudando: usize,
+    /// O andamento da importação — o que a barra de progresso desenha.
+    ///
+    /// 🚨 **Ela vive separada de [`Self::mudando`] porque o operador trabalha
+    /// durante ela.** Até 8/set/2026 os dois eram um contador só (`enviando`), e
+    /// o preço era exatamente o cenário do dono: com 500 fotos subindo,
+    /// `mudar_as_marcadas` desistia em silêncio (`if … || self.enviando > 0 {
+    /// return; }`) e **classificar, sinalizar "levada" e negociar paravam de
+    /// responder** — sem erro, sem aviso, sem relação visível com a importação.
+    /// Pior: quando a negociação passava, ela zerava o contador do lote e a
+    /// importação se dava por terminada no meio.
+    importacao: Option<Importacao>,
     link: Option<LinkDeAcesso>,
     carregando: bool,
     erro: Option<SharedString>,
     recados: (Sender<Recado>, Receiver<Recado>),
+    /// O canal **só da importação**.
+    ///
+    /// 🔑 **`Recado::Sincronizou` não diz quem terminou** — é o mesmo "pronto"
+    /// de subir arquivo, negociar, classificar e tirar do site. Enquanto os dois
+    /// trabalhos dividiam o canal, não havia como contar um sem contar o outro:
+    /// classificar no meio da importação adiantava a barra. Dois canais separam
+    /// sem tocar no `enum`, que é de todo mundo.
+    envios: (Sender<Recado>, Receiver<Recado>),
     colhendo: bool,
     _colheita: Option<Task<()>>,
 }
@@ -297,12 +368,13 @@ impl Detalhe {
             avisando: false,
             pedindo_link: false,
             cliente_aberta: false,
-            enviando: 0,
-            enviadas: 0,
+            mudando: 0,
+            importacao: None,
             link: None,
             carregando: false,
             erro: None,
             recados: channel(),
+            envios: channel(),
             colhendo: false,
             _colheita: None,
         }
@@ -331,7 +403,7 @@ impl Detalhe {
         self.pedidas.clear();
         self.baixando = 0;
         self.link = None;
-        self.enviadas = 0;
+        self.importacao = None;
         self.erro = None;
         self.carregando = true;
 
@@ -633,13 +705,16 @@ impl Detalhe {
             .filter(|f| f.editavel())
             .map(|f| f.id.clone())
             .collect();
-        if alvos.is_empty() || self.enviando > 0 {
+        // 🚨 **A importação não entra nesta guarda**, e é o conserto de
+        // 8/set/2026: com 500 fotos subindo, classificar, sinalizar e negociar
+        // desistiam aqui em silêncio. O que ainda faz esperar é outra rodada
+        // *desta mesma* operação, sobre a mesma seleção.
+        if alvos.is_empty() || self.mudando > 0 {
             return;
         }
 
         self.erro = None;
-        self.enviadas = 0;
-        self.enviando = alvos.len();
+        self.mudando = alvos.len();
         for id in alvos {
             self.publicador
                 .negociar(sessao.clone(), id, mudanca.clone(), self.recados.0.clone());
@@ -681,12 +756,26 @@ impl Detalhe {
     }
 
     /// Abre a janela **do sistema** para escolher as fotos.
-    pub fn escolher_fotos(&mut self, cx: &mut Context<Self>) {
-        if self.enviando > 0 {
+    pub fn importar(&mut self, cx: &mut Context<Self>) {
+        // ⚠️ **Uma importação de cada vez.** Não é para poupar o servidor: é que
+        // o lote é um só (`Importacao`), e um segundo lote por cima faria a
+        // barra recomeçar do zero no meio do primeiro. O resto da tela continua
+        // solto — importar é o único gesto que a importação segura.
+        if self.importando() {
             return;
         }
         self.seletor.escolher(self.escolhas.0.clone());
         self.acompanhar(cx);
+    }
+
+    /// Se há uma importação em curso — a que segura o botão e desenha a barra.
+    pub fn importando(&self) -> bool {
+        self.importacao.is_some_and(|i| !i.terminou())
+    }
+
+    /// O andamento da última importação, terminada ou não.
+    pub fn importacao(&self) -> Option<Importacao> {
+        self.importacao
     }
 
     pub fn arrastando(&self) -> bool {
@@ -711,7 +800,7 @@ impl Detalhe {
         else {
             return;
         };
-        if caminhos.is_empty() || self.enviando > 0 {
+        if caminhos.is_empty() || self.importando() {
             return;
         }
 
@@ -721,8 +810,11 @@ impl Detalhe {
         let estado = self.leva.unwrap_or(EstadoNoBalcao::Disponivel);
 
         self.erro = None;
-        self.enviadas = 0;
-        self.enviando = caminhos.len();
+        self.importacao = Some(Importacao {
+            total: caminhos.len(),
+            feitas: 0,
+            falhas: 0,
+        });
         for (i, caminho) in caminhos.into_iter().enumerate() {
             self.publicador.enviar_arquivo(
                 sessao.clone(),
@@ -730,7 +822,8 @@ impl Detalhe {
                 caminho,
                 (ja_na_sessao + i) as u32,
                 estado,
-                self.recados.0.clone(),
+                // 🔑 **Pelo canal da importação**, e não pelo de todo mundo.
+                self.envios.0.clone(),
             );
         }
         self.acompanhar(cx);
@@ -833,6 +926,43 @@ impl Detalhe {
             }
         }
 
+        // ── As respostas da importação ───────────────────────────────────
+        //
+        // 🚨 **Canal próprio, contador próprio.** O que chega aqui é resposta de
+        // `enviar_arquivo`, e só. Enquanto isto dividia o canal com o resto, uma
+        // classificação feita durante o lote adiantava a barra em uma foto — e
+        // 500 classificações a levavam ao fim com metade das fotos ainda no
+        // disco.
+        while let Ok(recado) = self.envios.1.try_recv() {
+            mudou = true;
+            match recado {
+                Recado::Sincronizou => {
+                    if let Some(lote) = self.importacao.as_mut() {
+                        lote.feitas += 1;
+                    }
+                }
+                // ⚠️ **A falha de uma foto não derruba o lote**, e nem para a
+                // barra: o operador mandou 500, e "uma não subiu" é um recado —
+                // as outras 499 continuam.
+                Recado::Falhou(erro) => {
+                    if let Some(lote) = self.importacao.as_mut() {
+                        lote.falhas += 1;
+                    }
+                    self.erro = Some(erro.into());
+                }
+                _ => {}
+            }
+            if self.importacao.is_some_and(|l| l.terminou()) {
+                // O lote acabou: reler a sessão é o que faz as novas aparecerem
+                // na grade.
+                if let (Some(sessao), Some(id)) = (self.sessao.clone(), self.galeria_id.clone()) {
+                    self.publicador
+                        .abrir_galeria(sessao, id, self.recados.0.clone());
+                    self.carregando = true;
+                }
+            }
+        }
+
         while let Ok(recado) = self.recados.1.try_recv() {
             mudou = true;
             match recado {
@@ -931,11 +1061,10 @@ impl Detalhe {
                 }
                 Recado::Sincronizou => {
                     self.avisando = false;
-                    self.enviadas += 1;
-                    self.enviando = self.enviando.saturating_sub(1);
-                    if self.enviando == 0 {
-                        // O lote acabou: reler a sessão é o que faz as novas
-                        // aparecerem na grade.
+                    self.mudando = self.mudando.saturating_sub(1);
+                    if self.mudando == 0 {
+                        // A rodada de mudanças acabou: reler a sessão é o que
+                        // traz de volta o que o site gravou nelas.
                         if let (Some(sessao), Some(id)) =
                             (self.sessao.clone(), self.galeria_id.clone())
                         {
@@ -953,7 +1082,7 @@ impl Detalhe {
                 Recado::Falhou(erro) => {
                     self.carregando = false;
                     self.pedindo_link = false;
-                    self.enviando = self.enviando.saturating_sub(1);
+                    self.mudando = self.mudando.saturating_sub(1);
                     self.erro = Some(erro.into());
                 }
                 _ => {}
@@ -970,7 +1099,8 @@ impl Detalhe {
         // não entram na conta: elas chegam pelo mesmo canal, e o `abriu` religa
         // o laço quando um lote novo é pedido.
         let continua = self.carregando
-            || self.enviando > 0
+            || self.mudando > 0
+            || self.importando()
             || self.baixando > 0
             || self.avisando
             || self.pedindo_link;
@@ -987,7 +1117,10 @@ impl Detalhe {
 /// mudasse os outros continuariam procurando no lugar antigo — a grade ficaria
 /// vazia sem erro nenhum (armadilha das duas listas da mesma verdade).
 fn chave_da_miniatura(foto_id: &str) -> String {
-    format!("site:{foto_id}")
+    format!(
+        "{}{foto_id}",
+        crate::revelacao::persistencia::PREFIXO_DO_SITE
+    )
 }
 
 impl Detalhe {
@@ -1213,6 +1346,12 @@ impl Detalhe {
 
     /// A área de envio: **arrastar a pasta**, ou a janela do sistema.
     ///
+    /// 🚨 **É aqui que se importa.** *"Quem faz a importação é o botão 'Escolher
+    /// fotos…'"* — dono, 8/set/2026. Não é um caminho ao lado da importação: é
+    /// ela, e por isso o botão passou a se chamar **"Importar"** no mesmo dia. O
+    /// "Importar" que existia na barra do app saiu junto: era o segundo botão
+    /// para o mesmo gesto, e o que abria o explorador errado.
+    ///
     /// 🚨 **Não há explorador de arquivos nosso aqui.** O app tem um, no modal de
     /// importação, e ele existe para a triagem em RAW — escolher entre duzentas
     /// do cartão. Para mandar fotos ao cliente ele é atrito: quem exportou do
@@ -1223,9 +1362,11 @@ impl Detalhe {
     /// 🔑 **A leva é escolhida antes dos arquivos**, e o padrão é **sem
     /// marcação** — ver o campo [`Self::leva`].
     fn envio(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let ocupado = self.enviando > 0;
+        let lote = self.importacao;
+        let ocupado = self.importando();
         let sem_sessao = self.aberta.is_none();
         let leva = self.leva;
+        let visiveis = self.acervo.total_visivel();
 
         let ficha = |rotulo: &'static str,
                      valor: Option<EstadoNoBalcao>,
@@ -1310,22 +1451,93 @@ impl Detalhe {
                     .child(
                         div()
                             .flex_1()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(match (ocupado, self.enviadas) {
-                                (true, feitas) => format!("subindo… {feitas} prontas"),
-                                (false, feitas) if feitas > 0 => format!("{feitas} subiram"),
-                                (false, _) => "Arraste as fotos (ou a pasta) para cá.".to_string(),
+                            .flex()
+                            .flex_col()
+                            .gap(px(4.))
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(match lote {
+                                        // 🔑 **O número inteiro, e não só o que
+                                        // já foi.** Quem mandou 500 quer saber
+                                        // que são 500: "37 prontas" sozinho não
+                                        // diz se falta pouco ou muito, e é essa
+                                        // a única pergunta de quem espera.
+                                        Some(l) if !l.terminou() => {
+                                            let falhas = if l.falhas > 0 {
+                                                format!(" · {} falharam", l.falhas)
+                                            } else {
+                                                String::new()
+                                            };
+                                            format!(
+                                                "importando… {} de {}{falhas}",
+                                                l.prontas(),
+                                                l.total
+                                            )
+                                        }
+                                        Some(l) if l.falhas > 0 => {
+                                            format!("{} subiram · {} falharam", l.feitas, l.falhas)
+                                        }
+                                        Some(l) => format!("{} subiram", l.feitas),
+                                        None => {
+                                            "Arraste as fotos (ou a pasta) para cá.".to_string()
+                                        }
+                                    }),
+                            )
+                            // 🔑 **A barra só existe enquanto o lote corre.** Uma
+                            // barra parada em 100% é ruído que o operador
+                            // aprende a ignorar — e no dia em que ela importa,
+                            // ele não olha.
+                            .when_some(lote.filter(|l| !l.terminou()), |linha, l| {
+                                linha.child(Progress::new().value(l.porcento()).h(px(4.)))
                             }),
                     )
                     .child(
-                        Button::new("detalhe-escolher")
-                            .label("Escolher fotos…")
+                        // 🔑 **"Importar", e não "Escolher fotos…"** — dono,
+                        // 8/set/2026: *"esse nome confunde, pois ao lado vai ter
+                        // o botão Exportar"*. E confundia mesmo. "Escolher
+                        // fotos…" descreve o **meio** (abre uma janela e se
+                        // escolhe), enquanto o vizinho descreve o **fim**
+                        // (exportar); lado a lado, um par que não é par faz
+                        // procurar a entrada em outro lugar. Agora os dois
+                        // dizem a direção: por aqui entra, por ali sai.
+                        Button::new("detalhe-importar")
+                            .label("Importar")
                             .xsmall()
                             .primary()
                             .disabled(ocupado || sem_sessao)
+                            // 🔑 **Para o teste poder clicar onde o dedo clica.**
+                            // `debug_selector` grava as coordenadas deste
+                            // elemento no quadro desenhado, e é assim que o e2e
+                            // acha o botão em vez de chamar o método por baixo —
+                            // a diferença entre "a função existe" e "o clique
+                            // chega até ela". **Não custa nada fora de teste**:
+                            // sem a `feature = "test-support"` do gpui, o método
+                            // é um `self` que devolve `self`.
+                            .debug_selector(|| "detalhe-importar".into())
+                            .on_click(cx.listener(|tela, _ev, _window, cx| tela.importar(cx))),
+                    )
+                    .child(
+                        // 🔑 **Exportar mora ao lado de Importar**, e não
+                        // na barra do app (de onde desceu em 8/set/2026, a
+                        // pedido do dono). São o par: por aqui as fotos entram
+                        // no ensaio, por aqui elas saem para o disco — e uma
+                        // barra de distância entre os dois fazia procurar a
+                        // saída em outro lugar da tela.
+                        //
+                        // ⚠️ **Sem seleção exporta o que a grade mostra**, como o
+                        // botão da barra fazia: quem acabou de filtrar por
+                        // "levadas" está pedindo essas. Quem escolhe as fotos
+                        // ganha delas — a conta é da raiz, que é quem tem a
+                        // grade; daqui só sai o pedido.
+                        Button::new("detalhe-exportar")
+                            .label("Exportar")
+                            .xsmall()
+                            .disabled(sem_sessao || visiveis == 0)
+                            .debug_selector(|| "detalhe-exportar".into())
                             .on_click(
-                                cx.listener(|tela, _ev, _window, cx| tela.escolher_fotos(cx)),
+                                cx.listener(|_tela, _ev, _window, cx| cx.emit(Pedido::Exportar)),
                             ),
                     ),
             )
@@ -2253,8 +2465,22 @@ mod testes {
         cx: &mut TestAppContext,
         fotos: Vec<FotoDaGaleria>,
     ) -> (gpui::WindowHandle<Detalhe>, Arc<PublicadorDeMentira>) {
-        cx.update(gpui_component::init);
-        let publicador = Arc::new(PublicadorDeMentira {
+        let publicador = publicador_com(fotos, false);
+        let janela = janela_com(
+            cx,
+            publicador.clone(),
+            Arc::new(SeletorDeMentira::default()),
+        );
+        (janela, publicador)
+    }
+
+    /// O publicador de mentira já com a galeria "g1" e as fotos dela.
+    ///
+    /// `demorada` segura as respostas até `responder()` — é o que permite
+    /// afirmar sobre o **meio** de uma importação, e não só sobre o fim dela.
+    fn publicador_com(fotos: Vec<FotoDaGaleria>, demorada: bool) -> Arc<PublicadorDeMentira> {
+        Arc::new(PublicadorDeMentira {
+            demorada,
             galerias: std::sync::Mutex::new(vec![domain::services::pos_venda::GaleriaDoPainel {
                 id: "g1".into(),
                 titulo: "Ensaio".into(),
@@ -2269,29 +2495,70 @@ mod testes {
             }]),
             fotos_da_sessao: std::sync::Mutex::new(fotos),
             ..Default::default()
-        });
-        let janela = cx.add_window({
-            let publicador = publicador.clone();
-            move |_window, cx| {
-                let dir = tempfile::TempDir::new().expect("diretório temporário");
-                let previews = Arc::new(PreviewManager::new_with_path(dir.path().to_path_buf()));
-                std::mem::forget(dir);
-                let mut tela = Detalhe::nova(
-                    publicador,
-                    Arc::new(SeletorDeMentira::default()),
-                    previews,
-                    cx,
-                );
-                tela.definir_sessao(Sessao {
-                    access_token: "tok".into(),
-                    refresh_token: "ref".into(),
-                    access_vence_em: i64::MAX,
-                    refresh_vence_em: i64::MAX,
-                });
-                tela
-            }
-        });
-        (janela, publicador)
+        })
+    }
+
+    fn janela_com(
+        cx: &mut TestAppContext,
+        publicador: Arc<PublicadorDeMentira>,
+        seletor: Arc<SeletorDeMentira>,
+    ) -> gpui::WindowHandle<Detalhe> {
+        cx.update(gpui_component::init);
+        cx.add_window(move |_window, cx| {
+            let dir = tempfile::TempDir::new().expect("diretório temporário");
+            let previews = Arc::new(PreviewManager::new_with_path(dir.path().to_path_buf()));
+            std::mem::forget(dir);
+            let mut tela = Detalhe::nova(publicador, seletor, previews, cx);
+            tela.definir_sessao(Sessao {
+                access_token: "tok".into(),
+                refresh_token: "ref".into(),
+                access_vence_em: i64::MAX,
+                refresh_vence_em: i64::MAX,
+            });
+            tela
+        })
+    }
+
+    /// O orçamento de um quadro a 60fps — o mesmo de `medir-grade-da-sessao`.
+    ///
+    /// 🚨 **É o teto de um clique, e não uma meta.** Enquanto o gesto não
+    /// devolve, a janela não redesenha: passar disto é largar um quadro, e o
+    /// operador vê a interface "engasgar" no momento exato em que mandou 500
+    /// fotos. Folgado de propósito para o `debug` do CI — o que este número pega
+    /// não é meio milissegundo a mais, é o dia em que alguém puser trabalho
+    /// **de lote** dentro do `on_click`.
+    const ORCAMENTO_DE_UM_QUADRO: std::time::Duration = std::time::Duration::from_millis(16);
+
+    /// Clica **no botão**, onde o dedo clicaria — e devolve quanto o clique
+    /// demorou a ser respondido.
+    ///
+    /// 🔑 **É o que separa "a função existe" de "o clique chega até ela"**
+    /// (`docs/07-E2E-TESTING.md` §1). O caminho medido é o inteiro: achar o
+    /// elemento no quadro desenhado, descer o botão do mouse nas coordenadas
+    /// dele, subir, e deixar os efeitos chegarem.
+    fn clicar(
+        cx: &mut TestAppContext,
+        janela: &gpui::WindowHandle<Detalhe>,
+        alvo: &'static str,
+    ) -> std::time::Duration {
+        let mut visual = gpui::VisualTestContext::from_window((*janela).into(), cx);
+        visual.run_until_parked();
+        let onde = visual
+            .debug_bounds(alvo)
+            .unwrap_or_else(|| panic!("o botão {alvo} não está desenhado na tela"));
+        let comeco = std::time::Instant::now();
+        visual.simulate_click(onde.center(), gpui::Modifiers::none());
+        let gasto = comeco.elapsed();
+        visual.run_until_parked();
+        gasto
+    }
+
+    /// Deixa a colheita rodar — ela responde a cada `INTERVALO_DE_COLHEITA`.
+    fn colher_ate_parar(cx: &mut TestAppContext, janela: &gpui::WindowHandle<Detalhe>) {
+        for _ in 0..20 {
+            let _ = janela.update(cx, |tela, _window, cx| tela.colher(cx));
+            cx.run_until_parked();
+        }
     }
 
     fn entrar(cx: &mut TestAppContext, janela: &gpui::WindowHandle<Detalhe>) {
@@ -2503,5 +2770,292 @@ mod testes {
                 assert_eq!((ids, inicial), (vec!["a".to_string()], 0));
             })
             .expect("a janela deve estar aberta");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  Os dois botões do painel de envio, clicados de verdade
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// Entra numa galeria cujo publicador segura as respostas.
+    fn entrar_demorado(
+        cx: &mut TestAppContext,
+        janela: &gpui::WindowHandle<Detalhe>,
+        publicador: &PublicadorDeMentira,
+    ) {
+        janela
+            .update(cx, |tela, _window, cx| tela.entrar("g1".into(), cx))
+            .expect("a janela deve estar aberta");
+        publicador.responder();
+        colher_ate_parar(cx, janela);
+    }
+
+    fn caminhos(quantos: usize) -> Vec<String> {
+        (0..quantos)
+            .map(|i| format!("/fotos/DSC_{i:04}.jpg"))
+            .collect()
+    }
+
+    /// 🚨 **O clique no "Importar" abre o seletor do sistema e sobe o lote.**
+    ///
+    /// Este é o teste que o `docs/07-E2E-TESTING.md` §1 pede: o botão trocou de
+    /// nome e de método em 8/set/2026 (`escolher_fotos` → `importar`), e um
+    /// `on_click` que aponta para o lugar errado **não falha** — ele só não faz
+    /// nada. O clique aqui é nas coordenadas do botão desenhado, e não uma
+    /// chamada ao método por baixo.
+    #[gpui::test]
+    fn o_clique_no_importar_abre_o_seletor_e_sobe_o_lote(cx: &mut TestAppContext) {
+        let seletor = Arc::new(SeletorDeMentira::escolhe(&["/fotos/a.jpg", "/fotos/b.NEF"]));
+        let publicador = publicador_com(
+            vec![foto("x", EstadoDaFotoNoSite::Disponivel, Some(4))],
+            false,
+        );
+        let janela = janela_com(cx, publicador.clone(), seletor.clone());
+        entrar(cx, &janela);
+
+        assert_eq!(seletor.pedidos(), 0, "nada abre sozinho");
+
+        let gasto = clicar(cx, &janela, "detalhe-importar");
+        assert_eq!(
+            seletor.pedidos(),
+            1,
+            "o clique no botão não chegou ao seletor do sistema"
+        );
+        assert!(
+            gasto < ORCAMENTO_DE_UM_QUADRO,
+            "abrir o seletor custou {gasto:?}, mais que um quadro"
+        );
+
+        colher_ate_parar(cx, &janela);
+
+        let enviados: Vec<String> = publicador
+            .arquivos_enviados()
+            .into_iter()
+            .map(|(_, caminho, _, _)| caminho)
+            .collect();
+        assert_eq!(
+            enviados,
+            vec!["/fotos/a.jpg".to_string(), "/fotos/b.NEF".into()],
+            "o que o seletor devolveu tinha de subir para a galeria"
+        );
+    }
+
+    /// 🚨 **O clique no "Exportar" pede a exportação à raiz.**
+    ///
+    /// Ele desceu da barra do app em 8/set/2026 e, com a mudança, deixou de
+    /// chamar um método: agora emite um `Pedido`. Uma ligação a mais para se
+    /// perder — e o desfecho de perdê-la é um botão que não responde.
+    #[gpui::test]
+    fn o_clique_no_exportar_pede_a_exportacao(cx: &mut TestAppContext) {
+        let (janela, _) = janela(
+            cx,
+            vec![
+                foto("a", EstadoDaFotoNoSite::Disponivel, Some(4)),
+                foto("b", EstadoDaFotoNoSite::Disponivel, Some(5)),
+            ],
+        );
+        entrar(cx, &janela);
+
+        let tela = janela.root(cx).expect("a raiz da janela");
+        let pedidos = Arc::new(std::sync::Mutex::new(0usize));
+        let _inscricao = cx.update({
+            let pedidos = pedidos.clone();
+            move |cx| {
+                cx.subscribe(&tela, move |_tela, pedido: &Pedido, _cx| {
+                    if matches!(pedido, Pedido::Exportar) {
+                        *pedidos.lock().expect("os pedidos") += 1;
+                    }
+                })
+            }
+        });
+
+        let gasto = clicar(cx, &janela, "detalhe-exportar");
+
+        assert_eq!(
+            *pedidos.lock().expect("os pedidos"),
+            1,
+            "o clique no Exportar não virou pedido à raiz"
+        );
+        assert!(
+            gasto < ORCAMENTO_DE_UM_QUADRO,
+            "pedir a exportação custou {gasto:?}, mais que um quadro"
+        );
+    }
+
+    /// 🚨 **Com 500 fotos subindo, o estúdio continua trabalhando.**
+    ///
+    /// É o cenário do dono, 8/set/2026: *"imagine uma importação de 500 fotos;
+    /// no meio dela o usuário precisa conseguir ir revelando e negociando com o
+    /// cliente, fazendo classificações e sinalizações"*.
+    ///
+    /// Até este commit ele **não acontecia**, e falhava do pior jeito: em
+    /// silêncio. `mudar_as_marcadas` — o caminho de `dar_nota` e
+    /// `alternar_levada` — começava com `if alvos.is_empty() || self.enviando >
+    /// 0 { return; }`, e `enviando` era o mesmo contador da importação. Durante
+    /// o lote, apertar `4` ou `P` não fazia nada: sem erro, sem aviso, e sem
+    /// nenhuma pista de que a culpa era da importação.
+    #[gpui::test]
+    fn com_a_importacao_correndo_classificar_sinalizar_e_revelar_continuam(
+        cx: &mut TestAppContext,
+    ) {
+        let seletor = Arc::new(SeletorDeMentira {
+            escolha: std::sync::Mutex::new(caminhos(500)),
+            pedidos: std::sync::Mutex::new(0),
+        });
+        let publicador = publicador_com(
+            vec![
+                foto("a", EstadoDaFotoNoSite::Disponivel, Some(4)),
+                foto("b", EstadoDaFotoNoSite::Disponivel, Some(4)),
+            ],
+            true,
+        );
+        let janela = janela_com(cx, publicador.clone(), seletor.clone());
+        entrar_demorado(cx, &janela, &publicador);
+
+        // O lote sai — e fica no meio, que é onde o cenário acontece.
+        let gasto = clicar(cx, &janela, "detalhe-importar");
+        assert!(
+            gasto < ORCAMENTO_DE_UM_QUADRO,
+            "o clique que dispara 500 fotos custou {gasto:?}, mais que um quadro"
+        );
+        janela
+            .update(cx, |tela, _window, cx| tela.colher(cx))
+            .expect("a janela deve estar aberta");
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                let lote = tela.importacao().expect("o lote começou");
+                assert_eq!(lote.total, 500);
+                assert_eq!(lote.prontas(), 0, "nenhuma respondeu ainda");
+                assert!(tela.importando());
+
+                // ── Revelar ──────────────────────────────────────────────
+                assert!(
+                    tela.pedido_de_revelar(None).is_some(),
+                    "revelar parou de responder durante a importação"
+                );
+
+                // ── Classificar ──────────────────────────────────────────
+                tela.selecionar_tudo(cx);
+                tela.dar_nota(5, cx);
+            })
+            .expect("a janela deve estar aberta");
+
+        let notas: Vec<Option<Option<i16>>> = publicador
+            .negociadas()
+            .into_iter()
+            .map(|(_, m)| m.nota)
+            .collect();
+        assert_eq!(
+            notas,
+            vec![Some(Some(5)), Some(Some(5))],
+            "classificar não chegou ao site durante a importação"
+        );
+
+        // 🔑 A rodada de classificação responde na hora — `negociar` não é dos
+        // que o `demorada` segura —, e é o que solta a próxima: duas rodadas
+        // sobre a mesma seleção correm em série de propósito.
+        colher_ate_parar(cx, &janela);
+
+        // ── Sinalizar "levada no balcão" ─────────────────────────────────
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.selecionar_tudo(cx);
+                tela.alternar_levada(cx);
+            })
+            .expect("a janela deve estar aberta");
+
+        let levadas = publicador
+            .negociadas()
+            .into_iter()
+            .filter(|(_, m)| m.estado == Some(EstadoNoBalcao::LevadaNoBalcao))
+            .count();
+        assert_eq!(
+            levadas, 2,
+            "sinalizar levada não chegou ao site durante a importação"
+        );
+
+        // ── E a barra não andou por causa de nada disso ───────────────────
+        janela
+            .update(cx, |tela, _window, _cx| {
+                let lote = tela.importacao().expect("o lote continua");
+                assert_eq!(
+                    lote.prontas(),
+                    0,
+                    "classificar e sinalizar adiantaram a barra da importação"
+                );
+                assert!(tela.importando(), "a importação se deu por terminada");
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🔑 **A barra anda com o lote, e termina relendo a galeria.**
+    ///
+    /// ⚠️ **A falha conta como pronta.** Uma foto que o site recusou não
+    /// responde de novo: deixá-la fora da conta prenderia a barra em 499 de 500
+    /// para sempre — e o "importando…" nunca sairia da tela.
+    #[gpui::test]
+    fn a_barra_anda_com_o_lote_e_a_falha_conta_como_pronta(cx: &mut TestAppContext) {
+        let seletor = Arc::new(SeletorDeMentira {
+            escolha: std::sync::Mutex::new(caminhos(4)),
+            pedidos: std::sync::Mutex::new(0),
+        });
+        let publicador = publicador_com(
+            vec![foto("a", EstadoDaFotoNoSite::Disponivel, Some(4))],
+            true,
+        );
+        let janela = janela_com(cx, publicador.clone(), seletor.clone());
+        entrar_demorado(cx, &janela, &publicador);
+
+        clicar(cx, &janela, "detalhe-importar");
+        janela
+            .update(cx, |tela, _window, cx| tela.colher(cx))
+            .expect("a janela deve estar aberta");
+
+        let porcento = |cx: &mut TestAppContext| {
+            janela
+                .update(cx, |tela, _window, _cx| {
+                    tela.importacao().expect("o lote").porcento()
+                })
+                .expect("a janela deve estar aberta")
+        };
+        assert_eq!(porcento(cx), 0.);
+
+        // Duas respondem — a barra vai à metade.
+        publicador.responder_uma();
+        publicador.responder_uma();
+        janela
+            .update(cx, |tela, _window, cx| tela.colher(cx))
+            .expect("a janela deve estar aberta");
+        assert_eq!(porcento(cx), 50.);
+
+        // Uma falha. Ela **conta**: o que a barra mede é o que falta esperar.
+        {
+            let mut guardados = publicador.guardados.lock().expect("os guardados");
+            let (canal, _) = guardados.remove(0);
+            let _ = canal.send(Recado::Falhou("o site recusou".into()));
+        }
+        janela
+            .update(cx, |tela, _window, cx| tela.colher(cx))
+            .expect("a janela deve estar aberta");
+        assert_eq!(porcento(cx), 75.);
+
+        // A última. O lote acaba, e a galeria é relida para as novas
+        // aparecerem na grade.
+        let releituras_antes = publicador.abertas().len();
+        publicador.responder_uma();
+        colher_ate_parar(cx, &janela);
+
+        janela
+            .update(cx, |tela, _window, _cx| {
+                let lote = tela.importacao().expect("o lote terminou");
+                assert_eq!((lote.feitas, lote.falhas), (3, 1));
+                assert!(lote.terminou());
+                assert!(!tela.importando(), "a barra tinha de sair da tela");
+            })
+            .expect("a janela deve estar aberta");
+        assert!(
+            publicador.abertas().len() > releituras_antes,
+            "o fim do lote tem de reler a galeria — sem isso as fotos novas não aparecem"
+        );
     }
 }

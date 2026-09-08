@@ -736,6 +736,7 @@ impl Aplicativo {
     /// de lugar na tela.
     pub fn absorver_as_do_site(&mut self, fotos: Vec<PhotoViewModel>, cx: &mut Context<Self>) {
         self.fotos_do_site = fotos;
+        self.aplicar_o_deposito_do_site();
 
         // 🚨 **Entram na hora, e não na próxima releitura.** A releitura do
         // catálogo anda por relógio; esperar por ela deixaria a grade sem as
@@ -758,6 +759,41 @@ impl Aplicativo {
         // E o catálogo é relido assim mesmo: o que mudou no banco desde a última
         // leitura entra junto quando chegar.
         self.reler_o_acervo(cx);
+    }
+
+    /// Escreve, sobre o que a API respondeu, a revelação que **ainda não
+    /// subiu** — o depósito local ganha da galeria.
+    ///
+    /// 🔑 **É a mesma regra do editor do site** (`editor.tsx`: o que está no
+    /// depósito e não está sincronizado é o que volta para os sliders). A foto
+    /// que o operador revelou ontem e não salvou tem de abrir hoje como ele a
+    /// deixou; abrir com o que o servidor tem seria mostrar o trabalho de
+    /// anteontem e chamar isso de "a foto".
+    ///
+    /// ⚠️ **Só o que está no depósito é tocado.** A foto sem linha lá abre com a
+    /// receita da API, que é a verdade dela — e é o caso da grande maioria.
+    fn aplicar_o_deposito_do_site(&mut self) {
+        let guardadas = self.gravador.guardadas_do_site();
+        if guardadas.is_empty() {
+            return;
+        }
+        for (no_site, ajustes) in guardadas {
+            let Some(foto) = self
+                .fotos_do_site
+                .iter_mut()
+                .find(|f| f.pos_venda_foto_id.as_deref() == Some(no_site.as_str()))
+            else {
+                continue;
+            };
+            // JSON estragado não apaga a receita da API: ele é ignorado, e a
+            // foto abre com o que o servidor tem — que é pior que o depósito e
+            // muito melhor que o neutro.
+            let Ok(json) = serde_json::from_str::<serde_json::Value>(&ajustes) else {
+                continue;
+            };
+            let (ajustes, corte) = persistencia::de_json(&json);
+            persistencia::na_foto(foto, ajustes, corte);
+        }
     }
 
     /// Sai do ensaio: a grade volta a ser o catálogo, e nada mais trabalha.
@@ -786,6 +822,7 @@ impl Aplicativo {
                 self.revelar_da_sessao(fotos, *inicial, window, cx);
             }
             DetalhePedido::TelaDoCliente => self.alternar_cliente(cx),
+            DetalhePedido::Exportar => self.exportar(cx),
             DetalhePedido::MiniaturaPronta(chave) => {
                 let chave = chave.clone();
                 self.biblioteca
@@ -833,7 +870,7 @@ impl Aplicativo {
         let acervo: Vec<PhotoViewModel> = fotos
             .iter()
             .map(|foto| {
-                let id = format!("site:{}", foto.id);
+                let id = format!("{}{}", persistencia::PREFIXO_DO_SITE, foto.id);
                 self.fotos_do_site
                     .iter()
                     .find(|da_grade| da_grade.id == id)
@@ -1047,6 +1084,19 @@ impl Aplicativo {
                     // ruim, e honesto.
                     match image::load_from_memory(&bytes) {
                         Ok(imagem) => {
+                            // 🔑 **Vai para o cache antes de ir para a tela.** É
+                            // o que faz a seta de volta não pagar outro
+                            // download: o L1 responde na hora e o L2 (SQLite)
+                            // atravessa o fechar do app. A chave é a do bruto,
+                            // separada da miniatura da galeria — ver
+                            // `persistencia::chave_do_trabalho`.
+                            //
+                            // ⚠️ Falha de gravação não impede de mostrar: o
+                            // cache é acelerador, e a foto na mão é o que o
+                            // operador pediu.
+                            let _ = self
+                                .previews
+                                .save_preview(&persistencia::chave_do_trabalho(&foto_id), &imagem);
                             let aproveitou = self
                                 .revelacao
                                 .update(cx, |tela, cx| tela.receber_pixels(&foto_id, imagem, cx));
@@ -1066,7 +1116,13 @@ impl Aplicativo {
                 // e é a releitura que troca a miniatura da grade pela foto
                 // revelada. Sem ela o operador salvaria e continuaria vendo o
                 // "antes" — o pior desfecho, porque parece que não salvou.
-                PosVendaRecado::RevelacaoSalva => {
+                PosVendaRecado::RevelacaoSalva { foto_no_site } => {
+                    // 🔑 **Subiu: sai do depósito.** A partir daqui a receita
+                    // desta foto é a do servidor, e deixá-la também aqui faria
+                    // a abertura seguinte preferir uma cópia que ninguém mais
+                    // atualiza — a foto voltaria ao que era antes do envio no
+                    // dia em que a galeria mudasse por outra tela.
+                    self.gravador.esquecer_do_site(foto_no_site);
                     self.avisar_onde_esta_olhando("revelação salva na galeria".into(), cx);
                     if let Some(galeria) = self.sessao_aberta.clone() {
                         self.detalhe.update(cx, |tela, cx| tela.entrar(galeria, cx));
@@ -1190,6 +1246,7 @@ impl Aplicativo {
     pub fn voltar_para_biblioteca(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.revelacao
             .update(cx, |tela, _cx| tela.gravar_o_que_estiver_pendente());
+        self.guardar_as_receitas_do_site(cx);
         self.tela = if self.sessao_aberta.is_some() {
             Tela::Sessao
         } else {
@@ -1197,6 +1254,46 @@ impl Aplicativo {
         };
         window.focus(&self.foco);
         cx.notify();
+    }
+
+    /// Traz de volta, para as fotos do site que a raiz guarda, o que a
+    /// Revelação ajustou nelas.
+    ///
+    /// 🚨 **A foto do site não tem linha no catálogo**: o id dela é
+    /// `site:<uuid>`, e `save_edits` responde `PhotoNotFound` — calado, porque o
+    /// `Gravador` não devolve `Result`. Então o único lugar em que a receita
+    /// dela existe é a cópia em memória, e a cópia da Revelação morre quando a
+    /// tela fecha. Sem isto, revelar uma foto do site e apertar Esc perdia tudo:
+    /// a próxima abertura remontava o acervo a partir de `fotos_do_site`, que
+    /// veio da API.
+    ///
+    /// ⚠️ **O disco é a outra metade, e é o `Gravador` quem cuida dela**: cada
+    /// gesto numa foto do site vai para `revelacoes_do_site`, no mesmo SQLite do
+    /// catálogo. Isto aqui é o espelho da tela; aquilo é o que atravessa o
+    /// fechar do app.
+    fn guardar_as_receitas_do_site(&mut self, cx: &mut Context<Self>) {
+        if self.fotos_do_site.is_empty() {
+            return;
+        }
+        let receitas: Vec<(String, Ajustes, persistencia::Corte)> = self
+            .revelacao
+            .read(cx)
+            .acervo()
+            .iter()
+            .filter(|f| persistencia::so_existe_no_site(f))
+            .map(|f| {
+                (
+                    f.id.clone(),
+                    persistencia::da_foto(f),
+                    persistencia::corte_da_foto(f),
+                )
+            })
+            .collect();
+        for (id, ajustes, corte) in receitas {
+            if let Some(foto) = self.fotos_do_site.iter_mut().find(|f| f.id == id) {
+                persistencia::na_foto(foto, ajustes, corte);
+            }
+        }
     }
 
     /// Atende os três botões da barra da Revelação que não são dela.
@@ -1924,9 +2021,6 @@ impl Aplicativo {
         // seleção na Biblioteca ("Develop button enabled if Library has a
         // selection", `app.rs`).
         let tem_selecao = self.biblioteca.read(cx).foto_selecionada().is_some();
-        // Exportar não exige seleção: com a grade filtrada e nada marcado, o
-        // pedido natural é "exporte o que estou vendo".
-        let tem_o_que_exportar = !self.biblioteca.read(cx).fotos_visiveis().is_empty();
         let na_revelacao = self.tela == Tela::Revelacao;
         let na_impressao = self.tela == Tela::Impressao;
         // 🚨 Logado e sem sessão aberta, **nada** trabalha: os botões existem
@@ -1934,13 +2028,6 @@ impl Aplicativo {
         // deixaria a impressão de que ele quebrou.
         let trabalhando = self.pode_trabalhar();
         let tem_selecao = tem_selecao && trabalhando;
-        let tem_o_que_exportar = tem_o_que_exportar && trabalhando;
-
-        let titulo: SharedString = match (na_revelacao, self.revelacao.read(cx).foto()) {
-            (true, Some(foto)) => foto.name.clone().into(),
-            _ => "VintageLightbox".into(),
-        };
-        let titulo_e_da_foto = na_revelacao && self.revelacao.read(cx).foto().is_some();
 
         div()
             .flex()
@@ -1953,11 +2040,12 @@ impl Aplicativo {
             .border_color(cx.theme().border)
             // ── Onde estou ────────────────────────────────────────────────
             //
-            // 🔑 **A barra passou a ter três grupos separados por divisor**, e
-            // não onze botões iguais em fila. Eles não fazem coisas da mesma
-            // natureza: navegar entre telas, mexer na foto e mexer no dinheiro
-            // do cliente — e quando tudo tem o mesmo peso, achar o que se quer
-            // custa uma varredura da barra inteira, toda vez.
+            // 🔑 **A barra é feita de grupos separados por divisor**, e não de
+            // botões iguais em fila. Eles não fazem coisas da mesma natureza:
+            // navegar entre telas e mexer no dinheiro do cliente — e quando tudo
+            // tem o mesmo peso, achar o que se quer custa uma varredura da barra
+            // inteira, toda vez. O grupo do meio, "o que faço com a foto", era o
+            // terceiro; ele saiu em 8/set/2026 e o vão abaixo diz para onde.
             .child(
                 grupo()
                     // 🚨 A saída da sessão vem primeiro — e ela é a única coisa
@@ -2025,75 +2113,28 @@ impl Aplicativo {
                             })),
                     ),
             )
-            .child(divisor(cx))
-            // ── O que faço com a foto ─────────────────────────────────────
-            .child(
-                grupo()
-                    .child(
-                        // Copiar e colar revelação. 🔑 **Têm botão além da tecla**
-                        // porque são a resposta a "acabei de acertar esta foto e
-                        // quero as outras 40 iguais" — e quem acabou de acertar
-                        // está com o ponteiro na tela, não com a mão no `Cmd`.
-                        Button::new("nav-copiar-revelacao")
-                            .label("Copiar")
-                            .xsmall()
-                            .ghost()
-                            .disabled(!tem_selecao)
-                            .on_click(cx.listener(|este, _ev, _window, cx| {
-                                este.copiar_revelacao(cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("nav-colar-revelacao")
-                            .label("Colar")
-                            .xsmall()
-                            .ghost()
-                            .disabled(!self.tem_revelacao_copiada() || !tem_selecao)
-                            .on_click(cx.listener(|este, _ev, _window, cx| {
-                                este.colar_revelacao(cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("nav-importar")
-                            .label("Importar")
-                            .xsmall()
-                            .ghost()
-                            .disabled(!trabalhando)
-                            .on_click(cx.listener(|este, _ev, window, cx| {
-                                este.importar(window, cx);
-                            })),
-                    )
-                    .child(
-                        // 🚨 O primeiro caminho que este app teve até um arquivo
-                        // no disco. Liga com seleção **ou** com grade não vazia:
-                        // exportar o que se está vendo é o pedido de quem acabou
-                        // de filtrar.
-                        Button::new("nav-exportar")
-                            .label("Exportar")
-                            .xsmall()
-                            .ghost()
-                            .when(self.exportando, |b| b.primary())
-                            .selected(self.exportando)
-                            .disabled(!tem_o_que_exportar)
-                            .on_click(cx.listener(|este, _ev, _window, cx| {
-                                este.exportar(cx);
-                            })),
-                    ),
-            )
-            // ── O nome do que está aberto ─────────────────────────────────
-            .child(
-                div()
-                    .flex_1()
-                    .px(px(4.))
-                    .text_xs()
-                    .truncate()
-                    .text_color(if titulo_e_da_foto {
-                        cx.theme().foreground
-                    } else {
-                        cx.theme().muted_foreground
-                    })
-                    .child(titulo),
-            )
+            // ── O vão até o cliente ───────────────────────────────────────
+            //
+            // 🚨 **O grupo "o que faço com a foto" saiu daqui em 8/set/2026**, a
+            // pedido do dono, e com ele o rótulo "VintageLightbox" que ocupava
+            // este vão. Os quatro botões diziam coisas que a sessão já diz
+            // melhor, ou não dizia nenhuma:
+            //
+            // - **Copiar e Colar revelação** são gestos *da* Revelação, e a
+            //   barra não existe lá (`self.tela != Tela::Revelacao`). Ficavam
+            //   apagados o tempo todo, prometendo um trabalho que dali não
+            //   começava. As teclas continuam — `⌘C`/`⌘V`, em `ao_copiar_revelacao`.
+            // - **Importar** abria o explorador *do framework*, ao lado de um
+            //   "Escolher fotos…" que usa o do sistema. Dois botões para o mesmo
+            //   gesto, e o certo era o de baixo: *"é o Escolher fotos… que faz a
+            //   ação correta"*. O de baixo herdou o nome, e hoje é o "Importar"
+            //   da tela da sessão.
+            // - **Exportar** desceu para junto dele, na tela da sessão: entrar e
+            //   sair de um ensaio são o mesmo par de gestos, e estavam a uma
+            //   barra de distância um do outro.
+            // - O **título** era papel de parede: fora da Revelação ele só sabia
+            //   escrever o nome do app, e a barra nunca aparece dentro dela.
+            .child(div().flex_1())
             // ── O cliente e o dinheiro ────────────────────────────────────
             //
             // 🔑 **Tudo o que atravessa para o site é âmbar**, e fica junto no
@@ -2615,7 +2656,7 @@ fn do_site_para_a_grade(
 ) -> PhotoViewModel {
     use domain::services::pos_venda::EstadoDaFotoNoSite;
     let mut vm = PhotoViewModel {
-        id: format!("site:{}", foto.id),
+        id: format!("{}{}", persistencia::PREFIXO_DO_SITE, foto.id),
         name: foto.arquivo.clone(),
         // Sem caminho: ela não está no disco desta máquina.
         path: String::new(),
@@ -2713,8 +2754,8 @@ fn grupo() -> gpui::Div {
 /// A linha entre dois grupos da barra.
 ///
 /// 🔑 **Um pixel, e não um espaço maior.** Espaço separa quando há pouca coisa;
-/// com onze botões numa linha só, o que separa é a linha — e ela custa 1px de
-/// largura em vez dos 12 que o respiro pediria.
+/// com a barra cheia, o que separa é a linha — e ela custa 1px de largura em vez
+/// dos 12 que o respiro pediria.
 fn divisor(cx: &gpui::App) -> gpui::Div {
     div().w(px(1.)).h(px(16.)).flex_none().bg(cx.theme().border)
 }
@@ -2958,6 +2999,162 @@ mod testes {
             );
             assert_eq!(ajustes.split_shadow_hue, 35.0, "{id}");
         }
+    }
+
+    /// 🚨 **Revelar uma foto do site, sair e voltar: a receita tem de estar
+    /// lá.**
+    ///
+    /// Achado do dono em 8/set: *"parece que os parâmetros de edição não estão
+    /// sendo gravados"*. E não estavam mesmo — em lugar nenhum. O id da foto do
+    /// site é `site:<uuid>`, que não é linha do catálogo: `save_edits` responde
+    /// `PhotoNotFound` e o `Gravador` engole (não devolve `Result`, de
+    /// propósito). O que restava era a cópia em memória do acervo da Revelação,
+    /// que morre com a tela.
+    ///
+    /// O teste anda o gesto inteiro: revela, sai pela barra, e manda revelar de
+    /// novo — que remonta o acervo a partir de `fotos_do_site`.
+    #[gpui::test]
+    fn revelar_a_foto_do_site_sair_e_voltar_traz_a_receita(cx: &mut TestAppContext) {
+        use crate::sessoes::detalhe::FotoARevelar;
+
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+        let publicador = Arc::new(PublicadorDeMentira::default());
+
+        let janela = cx.add_window({
+            let publicador = publicador.clone();
+            move |window, cx| {
+                Aplicativo::ja_dentro(
+                    Vec::new(),
+                    previews,
+                    Vec::new(),
+                    Portas {
+                        publicador,
+                        ..portas()
+                    },
+                    window,
+                    cx,
+                )
+            }
+        });
+
+        let revelar = |app: &mut Aplicativo, window: &mut Window, cx: &mut Context<Aplicativo>| {
+            app.atender_a_sessao(
+                &DetalhePedido::Revelar {
+                    fotos: vec![FotoARevelar {
+                        id: "remota-1".into(),
+                        arquivo: "DSC_001.jpg".into(),
+                    }],
+                    inicial: 0,
+                },
+                window,
+                cx,
+            );
+        };
+
+        janela
+            .update(cx, |app, window, cx| {
+                app.atender_a_sessao(
+                    &DetalhePedido::FotosDoSite(vec![foto_do_site("remota-1", None)]),
+                    window,
+                    cx,
+                );
+                revelar(app, window, cx);
+                // O operador mexe num slider e sai pela barra.
+                app.revelacao
+                    .update(cx, |tela, cx| tela.aplicar_para_teste(0, 1.25, cx));
+                app.atender_a_revelacao(PedidoDaRevelacao::Sair, window, cx);
+                assert_eq!(app.tela(), Tela::Sessao);
+
+                revelar(app, window, cx);
+                assert_eq!(
+                    app.revelacao.read(cx).ajustes().exposure,
+                    1.25,
+                    "a revelacao da foto do site nao sobreviveu a sair da tela"
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 **O depósito local ganha da galeria — e sai quando a foto sobe.**
+    ///
+    /// É a última metade do *"os parâmetros de edição não estão sendo
+    /// gravados"* (dono, 8/set/2026): a receita de uma foto do site que ainda
+    /// não subiu tem de atravessar o fechar do app. Ela mora em
+    /// `revelacoes_do_site`, no mesmo SQLite do catálogo, e é lida na abertura;
+    /// aqui o `GravadorDeMentira` faz o papel de "o app achou isto lá".
+    ///
+    /// O teste anda as duas pontas que sobram: a leitura vencendo a API, e a
+    /// linha saindo do depósito quando a revelação sobe.
+    #[gpui::test]
+    fn o_deposito_local_ganha_da_galeria_e_sai_quando_a_foto_sobe(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+        let publicador = Arc::new(PublicadorDeMentira::default());
+        // No disco: o operador revelou ontem e não salvou.
+        let gravador = Arc::new(GravadorDeMentira::com_o_deposito(vec![(
+            "remota-1".to_string(),
+            r#"{"exposure":1.25}"#.to_string(),
+        )]));
+
+        let janela = cx.add_window({
+            let publicador = publicador.clone();
+            let gravador = gravador.clone();
+            move |window, cx| {
+                Aplicativo::ja_dentro(
+                    Vec::new(),
+                    previews,
+                    Vec::new(),
+                    Portas {
+                        publicador,
+                        gravador,
+                        ..portas()
+                    },
+                    window,
+                    cx,
+                )
+            }
+        });
+
+        janela
+            .update(cx, |app, window, cx| {
+                // A API responde a receita **de quando a foto subiu** — outra.
+                app.atender_a_sessao(
+                    &DetalhePedido::FotosDoSite(vec![foto_do_site(
+                        "remota-1",
+                        Some(serde_json::json!({ "exposure": 0.25 })),
+                    )]),
+                    window,
+                    cx,
+                );
+
+                let na_grade = app
+                    .fotos_do_site
+                    .iter()
+                    .find(|f| f.pos_venda_foto_id.as_deref() == Some("remota-1"))
+                    .expect("a foto do site está na grade");
+                assert_eq!(
+                    persistencia::da_foto(na_grade).exposure,
+                    1.25,
+                    "o que nao subiu ganha do que a API tem"
+                );
+            })
+            .expect("a janela deve estar aberta");
+
+        // E quando ela sobe, sai do depósito: a verdade passa a ser o servidor.
+        janela
+            .update(cx, |app, _window, cx| {
+                let _ = app.sincronias.0.send(PosVendaRecado::RevelacaoSalva {
+                    foto_no_site: "remota-1".into(),
+                });
+                app.colher_sincronia(cx);
+            })
+            .expect("a janela deve estar aberta");
+        assert!(
+            gravador.deposito().is_empty(),
+            "a que subiu tem de sair do deposito: {:?}",
+            gravador.deposito()
+        );
     }
 
     /// 🚨 **A receita do site chega à grade — e por ela à Revelação.**
@@ -4724,6 +4921,39 @@ mod testes {
                     assert!(p.terminou);
                     assert_eq!((p.feitas, p.falhas), (2, 0));
                     assert_eq!(tela.resumo(), "2 exportadas");
+                });
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 **O Exportar da sessão abre a mesma exportação que o da barra abria.**
+    ///
+    /// O botão desceu da barra do app para o lado do "Importar"
+    /// (8/set/2026), e com isso deixou de chamar `exportar` direto: agora ele
+    /// emite um pedido, e é a raiz que atende. Uma ligação a mais para se
+    /// perder, e um botão que não faz nada é indistinguível de um clique
+    /// perdido — por isso o pedido tem teste, e não só o método.
+    #[gpui::test]
+    fn o_exportar_da_sessao_abre_a_exportacao(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            |window, cx| Aplicativo::ja_dentro(acervo(), previews, Vec::new(), portas(), window, cx)
+        });
+
+        janela
+            .update(cx, |app, window, cx| {
+                assert!(!app.exportando(), "a exportação começa fechada");
+                app.atender_a_sessao(&DetalhePedido::Exportar, window, cx);
+                assert!(app.exportando(), "o pedido da sessão não abriu a exportação");
+                app.exportacao.update(cx, |tela, _cx| {
+                    assert_eq!(
+                        tela.quantas(),
+                        2,
+                        "sem seleção, vai o que a grade está mostrando — como o botão da barra fazia"
+                    );
                 });
             })
             .expect("a janela deve estar aberta");
