@@ -85,9 +85,18 @@ fn bgra_de_rgb8(rgb: image::RgbImage) -> image::RgbaImage {
     // `extend_from_slice` conferem capacidade a cada pixel e impedem o
     // compilador de vetorizar; com o destino já dimensionado e o alfa já opaco,
     // o laço vira três escritas em posições conhecidas — e o `zip` de dois
-    // `chunks_exact` dá ao compilador os dois passos como constantes.
+    // `as_chunks` dá ao compilador os dois passos como constantes.
+    //
+    // ⚠️ **`as_chunks`, e não `chunks_exact`**: com o tamanho do passo escrito
+    // no tipo (`[u8; 4]`, `[u8; 3]`), o índice é conferido na compilação e não
+    // a cada pixel. É o mesmo par de linhas da função acima.
     let mut destino = vec![255u8; origem.len() / 3 * 4];
-    for (saida, pixel) in destino.chunks_exact_mut(4).zip(origem.chunks_exact(3)) {
+    for (saida, pixel) in destino
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .zip(origem.as_chunks::<3>().0)
+    {
         saida[0] = pixel[2];
         saida[1] = pixel[1];
         saida[2] = pixel[0];

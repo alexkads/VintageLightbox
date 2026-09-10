@@ -63,6 +63,25 @@ pub enum Recado {
     Falhou(String),
 }
 
+/// O que subir sobre **uma** foto — os quatro campos que a descrevem.
+///
+/// 🔑 **Eles andam juntos porque descrevem a mesma coisa**, e não para encurtar
+/// a assinatura: a foto, onde ela entra na sessão, em que leva está e que nota
+/// levou. Soltos, viravam quatro posições seguidas em que trocar duas de lugar
+/// compila — `ordem` e `nota` são ambos numéricos e opcionais o bastante para
+/// isso passar batido numa revisão.
+pub struct FotoClassificada {
+    pub foto_id: String,
+    pub ordem: u32,
+    /// A leva escolhida antes dos arquivos, na tela da sessão. `None` cai na
+    /// marcação da tecla `B`, que é o caminho do passo 3 (classificar sobe).
+    pub estado: Option<EstadoNoBalcao>,
+    /// A nota **que acabou de ser dada**, e não a que o banco tem: a gravação
+    /// dela é outra tarefa do tokio, e ninguém a espera — quem lê o banco aqui
+    /// corre com ela e pode subir o valor anterior.
+    pub nota: Option<u8>,
+}
+
 pub trait Publicador: Send + Sync + 'static {
     /// Abre o navegador para o operador autorizar este computador.
     ///
@@ -87,22 +106,12 @@ pub trait Publicador: Send + Sync + 'static {
     fn galerias(&self, sessao: Sessao, canal: Sender<Recado>);
     /// Abre uma sessão vazia — as fotos vêm depois.
     fn criar_galeria(&self, sessao: Sessao, nova: NovaGaleria, canal: Sender<Recado>);
-    /// Sobe uma foto para uma sessão que já existe.
-    ///
-    /// `estado` manda quando vem preenchido — é a leva escolhida antes dos
-    /// arquivos, na tela da sessão. `None` cai na marcação da tecla `B`, que é
-    /// o caminho do passo 3 (classificar sobe).
+    /// Sobe uma foto para uma sessão que já existe. Ver [`FotoClassificada`].
     fn subir_classificada(
         &self,
         sessao: Sessao,
         galeria_id: String,
-        foto_id: String,
-        ordem: u32,
-        estado: Option<EstadoNoBalcao>,
-        // A nota **que acabou de ser dada**, e não a que o banco tem: a
-        // gravação dela é outra tarefa do tokio, e ninguém a espera — quem lê
-        // o banco aqui corre com ela e pode subir o valor anterior.
-        nota: Option<u8>,
+        foto: FotoClassificada,
         canal: Sender<Recado>,
     );
     /// O passo 3 ao contrário: a classificação foi zerada, a foto sai do storage.
@@ -375,17 +384,17 @@ impl Publicador for PublicadorDaApi {
         &self,
         sessao: Sessao,
         galeria_id: String,
-        foto_id: String,
-        ordem: u32,
-        estado: Option<EstadoNoBalcao>,
-        // A nota **que acabou de ser dada**, e não a que o banco tem: a
-        // gravação dela é outra tarefa do tokio, e ninguém a espera — quem lê
-        // o banco aqui corre com ela e pode subir o valor anterior.
-        nota: Option<u8>,
+        foto: FotoClassificada,
         canal: Sender<Recado>,
     ) {
         let controlador = self.controlador.clone();
         self.tokio.spawn(async move {
+            let FotoClassificada {
+                foto_id,
+                ordem,
+                estado,
+                nota,
+            } = foto;
             let recado = match controlador
                 .enviar_uma(&sessao, &galeria_id, &foto_id, ordem, estado, nota)
                 .await
@@ -718,21 +727,18 @@ pub mod mentira {
             &self,
             _sessao: Sessao,
             galeria_id: String,
-            foto_id: String,
-            ordem: u32,
-            estado: Option<EstadoNoBalcao>,
-            nota: Option<u8>,
+            foto: FotoClassificada,
             canal: Sender<Recado>,
         ) {
             self.subidas
                 .lock()
                 .expect("as subidas")
-                .push((galeria_id, foto_id, ordem));
+                .push((galeria_id, foto.foto_id, foto.ordem));
             self.estados_pedidos
                 .lock()
                 .expect("os estados")
-                .push(estado);
-            self.notas_pedidas.lock().expect("as notas").push(nota);
+                .push(foto.estado);
+            self.notas_pedidas.lock().expect("as notas").push(foto.nota);
             let _ = canal.send(Recado::Sincronizou);
         }
 

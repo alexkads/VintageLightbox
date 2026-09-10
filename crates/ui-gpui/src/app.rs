@@ -1279,16 +1279,18 @@ impl Aplicativo {
                 self.publicador.subir_classificada(
                     sessao.clone(),
                     galeria.clone(),
-                    id.clone(),
-                    ordem as u32,
-                    // 🔑 `None`: quem classifica não escolheu leva nenhuma, e o
-                    // estado sai da tecla `B` de cada foto. A escolha por lote
-                    // existe na tela da sessão, onde ela é o gesto.
-                    None,
-                    // 🚨 **A nota vem do evento, e não do banco.** Ver
-                    // `Classificou::nota`: a gravação dela ainda pode estar
-                    // correndo quando o envio lê a linha da foto.
-                    evento.nota,
+                    crate::pos_venda::porta::FotoClassificada {
+                        foto_id: id.clone(),
+                        ordem: ordem as u32,
+                        // 🔑 `None`: quem classifica não escolheu leva nenhuma,
+                        // e o estado sai da tecla `B` de cada foto. A escolha
+                        // por lote existe na tela da sessão, onde ela é o gesto.
+                        estado: None,
+                        // 🚨 **A nota vem do evento, e não do banco.** Ver
+                        // `Classificou::nota`: a gravação dela ainda pode estar
+                        // correndo quando o envio lê a linha da foto.
+                        nota: evento.nota,
+                    },
                     self.sincronias.0.clone(),
                 );
             }

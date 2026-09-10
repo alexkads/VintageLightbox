@@ -267,12 +267,16 @@ impl Render for Cliente {
             // o GPUI 0.2.2 só oferece `with_transformation` em `svg`, e
             // `div`/`img` não têm escala. O cruzamento — que é o que tira o
             // lampejo preto do meio — sai igual nas duas.
-            .children(self.saindo.clone().map(|saindo| {
-                Self::camada("cliente-saindo", self.troca, saindo, true)
-            }))
-            .children(self.imagem.clone().map(|imagem| {
-                Self::camada("cliente-entrando", self.troca, imagem, false)
-            }))
+            .children(
+                self.saindo
+                    .clone()
+                    .map(|saindo| Self::camada("cliente-saindo", self.troca, saindo, true)),
+            )
+            .children(
+                self.imagem
+                    .clone()
+                    .map(|imagem| Self::camada("cliente-entrando", self.troca, imagem, false)),
+            )
             .children(info.map(|(nome, estrelas)| {
                 div()
                     .absolute()
