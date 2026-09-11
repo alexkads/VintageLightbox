@@ -85,6 +85,9 @@ impl PublicarNoPosVendaUseCase {
                 FotoParaEnviar {
                     nome: nome.clone(),
                     jpeg,
+                    // Este caminho não passa pelo catálogo e não revela nada: o
+                    // que sobe é o arquivo do disco, que já é o bruto dele.
+                    bruto: None,
                     estado,
                     ordem,
                     // ⚠️ **Sem nota e sem chave, e é o que este caminho é.** Ele
@@ -254,6 +257,17 @@ impl PublicarNoPosVendaUseCase {
             .await
             .map_err(|e| (nome.clone(), e.to_string()))?;
 
+        // 🚨 **E o arquivo de antes, quando esta foto já foi revelada.** O que
+        // subiu acima já vem tratado; sem esta segunda cópia o site passa a
+        // tratar o revelado como original, e "Zerar tudo" lá não tem para onde
+        // voltar (achado do dono, 11/set/2026). `None` é a foto no neutro — o
+        // envio dela **é** o bruto.
+        let bruto = self
+            .exportador
+            .renderizar_bruto_jpeg(&photo, &ExportOptions::default())
+            .await
+            .map_err(|e| (nome.clone(), e.to_string()))?;
+
         let enviada = self
             .api
             .enviar_foto(
@@ -262,6 +276,7 @@ impl PublicarNoPosVendaUseCase {
                 FotoParaEnviar {
                     nome: nome.clone(),
                     jpeg,
+                    bruto,
                     estado,
                     ordem,
                     // 🚨 **A nota vai junto do arquivo.** É ela que autoriza a
@@ -340,6 +355,7 @@ mod tests {
         impl ImageExporter for Exportador {
             async fn export(&self, photo: &Photo, output_path: &FilePath, options: &ExportOptions) -> DomainResult<()>;
             async fn renderizar_jpeg(&self, photo: &Photo, options: &ExportOptions) -> DomainResult<Vec<u8>>;
+            async fn renderizar_bruto_jpeg(&self, photo: &Photo, options: &ExportOptions) -> DomainResult<Option<Vec<u8>>>;
         }
     }
 
@@ -528,6 +544,9 @@ mod tests {
             .expect_renderizar_jpeg()
             .withf(|_, opcoes| opcoes.watermark().is_none() && opcoes.longest_edge().is_none())
             .returning(|_, _| Ok(vec![1, 2, 3]));
+        exportador
+            .expect_renderizar_bruto_jpeg()
+            .returning(|_, _| Ok(None));
         let api = Arc::new(ApiDeMentira::default());
 
         let caso = PublicarNoPosVendaUseCase::new(
@@ -659,6 +678,55 @@ mod tests {
     /// galeria criada, nem catálogo lido, nem produto escolhido. Os dois mocks
     /// vazios são a afirmação: se o caso de uso passar a tocar o repositório ou
     /// o exportador, o `mockall` acusa aqui.
+    /// 🚨 **A foto revelada sobe com o arquivo de antes ao lado.**
+    ///
+    /// O envio renderiza com os ajustes do catálogo: o que chega ao site já é a
+    /// foto tratada. Sem esta segunda cópia o servidor passa a tratá-la como o
+    /// original, e "Zerar tudo" na web não tem para onde voltar — a edição fica
+    /// definitiva sem ninguém ser avisado. Foi o que o dono encontrou em
+    /// 11/set/2026: *"teve edições que não consegui voltar ao estado inicial"*.
+    ///
+    /// ⚠️ A foto no neutro não paga por isso: o exportador devolve `None`, e o
+    /// que subiu **é** o bruto dela.
+    #[tokio::test]
+    async fn a_foto_revelada_sobe_com_o_bruto_junto() {
+        // A nota vai por parâmetro do `enviar_uma`, como a classificação faz.
+        let foto = foto("/ensaio/DSC_001.jpg", false);
+        let mut repo = MockPhotoRepo::new();
+        let guardada = foto.clone();
+        repo.expect_find_by_id()
+            .returning(move |_| Ok(Some(guardada.clone())));
+        repo.expect_update().returning(|_| Ok(()));
+
+        let mut exportador = MockExportador::new();
+        exportador
+            .expect_renderizar_jpeg()
+            .returning(|_, _| Ok(b"revelada".to_vec()));
+        exportador
+            .expect_renderizar_bruto_jpeg()
+            .times(1)
+            .returning(|_, _| Ok(Some(b"como entrou".to_vec())));
+
+        let api = Arc::new(ApiDeMentira::default());
+        let caso = PublicarNoPosVendaUseCase::new(
+            Arc::new(repo),
+            Arc::new(exportador),
+            Arc::new(MockThumbnailGen::new()),
+            api.clone(),
+        );
+
+        caso.enviar_uma(&sessao(), "g1", &foto.id(), 0, None, Some(4))
+            .await
+            .expect("a foto sobe");
+
+        let recebidas = api.recebidas.lock().unwrap();
+        assert_eq!(
+            recebidas[0].bruto.as_deref(),
+            Some(b"como entrou".as_slice()),
+            "sem o bruto o Zerar tudo do site não teria o que restaurar"
+        );
+    }
+
     #[tokio::test]
     async fn salvar_revelacao_sobe_o_jpeg_por_um_bilhete_daquela_foto() {
         let api = Arc::new(ApiDeMentira::default());
@@ -738,6 +806,9 @@ mod tests {
         exportador
             .expect_renderizar_jpeg()
             .returning(|_, _| Ok(vec![1]));
+        exportador
+            .expect_renderizar_bruto_jpeg()
+            .returning(|_, _| Ok(None));
 
         let api = Arc::new(ApiDeMentira::default());
         let caso = PublicarNoPosVendaUseCase::new(
@@ -774,6 +845,9 @@ mod tests {
         exportador
             .expect_renderizar_jpeg()
             .returning(|_, _| Ok(vec![1]));
+        exportador
+            .expect_renderizar_bruto_jpeg()
+            .returning(|_, _| Ok(None));
 
         let caso = PublicarNoPosVendaUseCase::new(
             Arc::new(repo),
@@ -819,6 +893,9 @@ mod tests {
         exportador
             .expect_renderizar_jpeg()
             .returning(|_, _| Ok(vec![1]));
+        exportador
+            .expect_renderizar_bruto_jpeg()
+            .returning(|_, _| Ok(None));
 
         let api = Arc::new(ApiDeMentira::default());
         let caso = PublicarNoPosVendaUseCase::new(
@@ -871,6 +948,9 @@ mod tests {
         exportador
             .expect_renderizar_jpeg()
             .returning(|_, _| Ok(vec![1]));
+        exportador
+            .expect_renderizar_bruto_jpeg()
+            .returning(|_, _| Ok(None));
 
         let api = Arc::new(ApiDeMentira::default());
         let caso = PublicarNoPosVendaUseCase::new(
@@ -910,6 +990,9 @@ mod tests {
         exportador
             .expect_renderizar_jpeg()
             .returning(|_, _| Ok(vec![1]));
+        exportador
+            .expect_renderizar_bruto_jpeg()
+            .returning(|_, _| Ok(None));
 
         let api = Arc::new(ApiDeMentira::default());
         let caso = PublicarNoPosVendaUseCase::new(

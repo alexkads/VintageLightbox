@@ -375,7 +375,17 @@ impl PosVendaApi for PosVendaApiHttp {
         if let Some(chave) = foto.chave_do_cliente.clone() {
             form = form.text("chave_do_cliente", chave);
         }
-        let form = form.part("file", arquivo);
+        let mut form = form.part("file", arquivo);
+        // 🚨 **O bruto sobe junto quando a foto vai revelada.** Sem ele o site
+        // recebe só o JPEG tratado e passa a tratá-lo como o original: "Zerar
+        // tudo" lá não tem o que restaurar. Ver `FotoParaEnviar::bruto`.
+        if let Some(bytes) = foto.bruto {
+            let parte = reqwest::multipart::Part::bytes(bytes)
+                .file_name(foto.nome.clone())
+                .mime_str("image/jpeg")
+                .map_err(|e| DomainError::InfrastructureError(e.to_string()))?;
+            form = form.part("file_bruto", parte);
+        }
 
         let resposta = self
             .client
@@ -1027,6 +1037,7 @@ mod tests {
                     // ASCII de propósito: o `body_string_contains` do wiremock
                     // não casa corpo que não é UTF-8, e um JPEG de verdade não é.
                     jpeg: b"jpeg-de-mentira".to_vec(),
+                    bruto: None,
                     estado: EstadoNoBalcao::LevadaNoBalcao,
                     ordem: 3,
                     nota: Some(4),

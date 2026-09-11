@@ -77,6 +77,27 @@ pub trait ImageExporter: Send + Sync {
         photo: &crate::entities::Photo,
         options: &crate::value_objects::ExportOptions,
     ) -> DomainResult<Vec<u8>>;
+
+    /// A foto **sem revelação nenhuma**, como bytes de JPEG.
+    ///
+    /// 🚨 **É o arquivo de volta do "Zerar tudo".** O envio ao site renderiza
+    /// com os ajustes do catálogo, então o que sobe já vem tratado; sem esta
+    /// segunda cópia o servidor passa a tratar o revelado como se fosse o
+    /// original, e a edição fica sem volta de lá (achado do dono, 11/set/2026).
+    ///
+    /// Sem ajustes **e sem corte**: enquadrar também é edição, e um bruto
+    /// recortado devolveria metade do arrependimento.
+    ///
+    /// 🔑 **`None` quando a foto está no neutro**, e a decisão mora aqui de
+    /// propósito: quem sabe ler os 53 campos da entidade é a implementação, e
+    /// quem chama não deve reimplementar "isto está editado?" para escolher se
+    /// pede. Nesse caso o próprio envio **é** o bruto — renderizar de novo
+    /// seria uma geração de JPEG a mais para produzir o mesmo arquivo.
+    async fn renderizar_bruto_jpeg(
+        &self,
+        photo: &crate::entities::Photo,
+        options: &crate::value_objects::ExportOptions,
+    ) -> DomainResult<Option<Vec<u8>>>;
 }
 
 pub mod pos_venda;

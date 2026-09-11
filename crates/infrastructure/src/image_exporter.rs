@@ -256,6 +256,39 @@ impl ImageExporter for ImageExporterImpl {
             .map_err(|e| DomainError::InfrastructureError(format!("Failed to encode JPEG: {}", e)))
     }
 
+    /// 🔑 **Mesmo caminho, ajustes e corte no neutro.** Ele passa pelo shader
+    /// como qualquer outro: o que sai daqui tem de ser byte a byte o que
+    /// subiria se a foto nunca tivesse sido revelada — inclusive a marca
+    /// d'água e o redimensionamento, que são do envio e não da edição.
+    async fn renderizar_bruto_jpeg(
+        &self,
+        photo: &Photo,
+        options: &ExportOptions,
+    ) -> DomainResult<Option<Vec<u8>>> {
+        // Nada revelado, nada a guardar: o próprio envio é o bruto.
+        let corte = transformacao::corte_da_entidade(photo);
+        if ajustes_da_entidade(photo) == Ajustes::default() && corte == CropSettings::default() {
+            return Ok(None);
+        }
+
+        let input_path = photo.file_path().as_str()?;
+        let img = image::open(Path::new(&input_path)).map_err(|e| {
+            DomainError::InfrastructureError(format!("Failed to open source image: {}", e))
+        })?;
+
+        let revelada = self.revelar(&img, &Ajustes::default())?;
+        let mut saida = transformacao::aplicar(&revelada, &CropSettings::default(), true);
+        if let Some(lado_maior) = options.longest_edge() {
+            saida = redimensionar(saida, lado_maior);
+        }
+        if let Some(marca) = options.watermark() {
+            saida = aplicar_marca(&saida, marca)?;
+        }
+        revelacao_core::jpeg::codificar(&saida, options.quality())
+            .map(Some)
+            .map_err(|e| DomainError::InfrastructureError(format!("Failed to encode JPEG: {}", e)))
+    }
+
     async fn export(
         &self,
         photo: &Photo,

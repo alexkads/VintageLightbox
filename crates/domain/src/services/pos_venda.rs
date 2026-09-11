@@ -358,6 +358,18 @@ pub struct FotoParaEnviar {
     /// O nome que o cliente vê no site — o do arquivo de origem, com `.jpg`.
     pub nome: String,
     pub jpeg: Vec<u8>,
+    /// A mesma foto **sem revelação nenhuma**, quando `jpeg` já vem tratado.
+    ///
+    /// 🚨 **É o que torna a revelação reversível no site.** O envio do desktop
+    /// renderiza com os ajustes do catálogo: o que sobe já é a foto tratada, e
+    /// sem esta segunda cópia o servidor nunca teve o arquivo como ele entrou.
+    /// "Zerar tudo" na web não teria para onde voltar — o mesmo buraco que a
+    /// área temporária do navegador tinha, e que o dono encontrou em
+    /// 11/set/2026.
+    ///
+    /// `None` quando a foto está no neutro: aí `jpeg` **é** o bruto dela, e
+    /// mandar duas cópias iguais é banda e armazenamento por nada.
+    pub bruto: Option<Vec<u8>>,
     pub estado: EstadoNoBalcao,
     pub ordem: u32,
     /// A nota de 1 a 5. **O site recusa envio sem ela.**
