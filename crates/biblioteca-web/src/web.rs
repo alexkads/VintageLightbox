@@ -105,7 +105,7 @@ impl Grade {
     }
 
     /// `todas` | `levada_no_balcao` | `disponivel` | `comprada` | `apagadas` |
-    /// `sem_nota` | `classificadas` | `sinalizadas`.
+    /// `sem_nota` | `classificadas`.
     pub fn definir_filtro(&mut self, filtro: &str) -> Result<u32, JsValue> {
         self.estado.definir_filtro(filtro).map_err(erro)
     }

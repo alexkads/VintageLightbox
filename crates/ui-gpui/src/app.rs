@@ -2936,10 +2936,6 @@ fn local_para_a_grade(foto: &PhotoViewModel, ordem: i64) -> biblioteca_core::ace
         downloads: 0,
         revelada: persistencia::ja_revelada(foto),
         nota: None,
-        // A local do desktop entra como "à venda" (ver acima) — não é o caso
-        // de "sem marcação", que é a foto que o balcão do site importou sem
-        // dizer o que ela é.
-        sem_marcacao: false,
         ordem,
     }
 }

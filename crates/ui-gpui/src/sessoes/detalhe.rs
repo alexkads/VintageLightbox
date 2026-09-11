@@ -87,15 +87,18 @@ const MINIATURAS_GUARDADAS: usize = 64;
 /// 🚨 **"Sem nota" é o último de propósito**: é um recorte de exceção — o que
 /// está sem classificação não pode ir à venda, não recebe marca d'água e não
 /// devia estar no storage. Ele existe para esvaziar, não para consultar.
-const FILTROS: [(&str, Filtro); 8] = [
+const FILTROS: [(&str, Filtro); 7] = [
     ("Todas", Filtro::Todas),
     // 🔑 **Os dois passos do balcão, na ordem em que acontecem**: classificar
-    // (a nota) e sinalizar (marcar levada ou à venda). Sinalizar exige
-    // classificar — regra do dono —, então o que separa os dois números é o que
-    // já tem nota e ainda espera a marcação.
+    // (a nota, que é o que sobe a foto) e sinalizar (a tecla P). "Sinalizada"
+    // **é** a levada no balcão — *"as levadas são as sinalizadas"* (dono,
+    // 2026-09-11) —, então o chip é o recorte de sempre com o nome que se usa
+    // no balcão, e não um segundo caminho para a mesma conta.
     ("Classificadas", Filtro::Classificadas),
-    ("Sinalizadas", Filtro::Sinalizadas),
-    ("Levadas", Filtro::Situacao(acervo::Estado::LevadaNoBalcao)),
+    (
+        "Sinalizadas",
+        Filtro::Situacao(acervo::Estado::LevadaNoBalcao),
+    ),
     ("À venda", Filtro::Situacao(acervo::Estado::Disponivel)),
     ("Compradas", Filtro::Situacao(acervo::Estado::Comprada)),
     ("Apagadas", Filtro::Apagadas),
@@ -2731,9 +2734,6 @@ fn para_o_core(foto: &FotoDaGaleria) -> acervo::Foto {
         downloads: foto.downloads,
         revelada: foto.revelada,
         nota: foto.nota,
-        // A foto que veio do site já subiu, e subir carrega um estado: a
-        // marcação existe. "Sem marcação" só acontece na área temporária.
-        sem_marcacao: false,
         ordem: foto.ordem as i64,
     }
 }
