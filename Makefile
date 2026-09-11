@@ -118,15 +118,21 @@ lint: ## fmt + clippy, como no CI
 fmt: ## Formata tudo
 	cargo fmt --all
 
-# 🚨 `--release` nao e opcional. Em `debug` uma miniatura custa 38,45 ms contra
-#    0,67 ms — 57x (medido em 6/set/2026). Um quadro de 60fps tem 16,7 ms: em
-#    debug uma miniatura sozinha estoura dois quadros, e ja foi confundido com
-#    "o framework e lento" duas vezes (docs/STATUS.md).
+# 🚨 `--release` nao e opcional, e vale para **todos** os alvos daqui de baixo —
+#    o app e os binarios de medicao. Em `debug` uma miniatura custa 38,45 ms
+#    contra 0,67 ms — 57x (medido em 6/set/2026). Um quadro de 60fps tem
+#    16,7 ms: em debug uma miniatura sozinha estoura dois quadros, e isso ja foi
+#    confundido com "o framework e lento" duas vezes (docs/STATUS.md).
+#
+#    Na **regua** o motivo e outro, e mais grave: um numero medido em debug nao
+#    mede este codigo, mede o que o compilador deixou de fazer. Ele entra no
+#    STATUS como se fosse desempenho do app, e a comparacao seguinte — feita em
+#    release, como manda — parece uma melhora de 57x que ninguem escreveu.
 rodar: ## Abre o app em release
 	@./scripts/faxina-se-preciso.sh
 	cargo run --release -p ui-gpui
 
-medir: ## As reguas de desempenho (miniaturas e abertura)
+medir: ## As reguas de desempenho (miniaturas e abertura) — tambem em release
 	cargo run --release -p ui-gpui --bin medir-miniaturas
 	cargo run --release -p ui-gpui --bin medir-abertura
 
