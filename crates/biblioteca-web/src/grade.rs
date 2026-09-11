@@ -184,7 +184,18 @@ impl Grade {
             .focar(foco.and_then(|id| self.acervo.posicao_de(&id)));
         self.hover = None;
 
-        Ok(mudou::SELECAO | mudou::CONTAGENS | self.recalcular())
+        // 🚨 **Acervo que muda implica visíveis que mudam**, e `VISIVEIS` entra
+        // aqui de mão beijada. O `recalcular` só o acende quando o *layout*
+        // muda, e o `atualizar_visiveis` só quando o *intervalo* muda — e
+        // nenhum dos dois muda quando a lista troca de **conteúdo** mantendo o
+        // tamanho: trinta fotos continuam trinta, nas mesmas posições. Mas
+        // `visiveis_json` leva os **ids**, e é por eles que o React acha o
+        // texto de cada tile. Quando a foto da área temporária subia e virava
+        // foto do acervo (`local:…` → o id do servidor), o React ficava com os
+        // ids velhos: o tile perdia nome, estrelas e faixa, e só voltava quando
+        // alguém mexia no zoom — que muda o layout. É o irmão do caso que o
+        // comentário do `recalcular` conta.
+        Ok(mudou::SELECAO | mudou::CONTAGENS | mudou::VISIVEIS | self.recalcular())
     }
 
     /// O recorte da barra. **Trocar limpa a seleção**: as posições passam a
