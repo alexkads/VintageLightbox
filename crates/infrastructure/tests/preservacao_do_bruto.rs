@@ -215,3 +215,61 @@ async fn so_o_corte_ja_pede_o_bruto() {
         "e o bruto guardado é a foto inteira"
     );
 }
+
+/// 🛡️ **A garantia central do desktop: revelar não toca no arquivo de origem.**
+///
+/// Aqui não há "cópia bruta" para guardar, e é de propósito — o bruto **é** o
+/// arquivo que está no disco do operador, e a revelação grava só a receita no
+/// catálogo. Toda a preservação do desktop depende de uma única coisa: que
+/// nenhum caminho reescreva aquele arquivo.
+///
+/// Isso não é uma função que dê para testar; é uma propriedade do conjunto. Por
+/// isso o caso exercita o ciclo inteiro — revelar para a tela, exportar para o
+/// disco, renderizar o JPEG que sobe e renderizar o bruto — e no fim pergunta a
+/// única coisa que importa: **os bytes de origem ainda são os mesmos?**
+///
+/// ⚠️ Um `assert_eq!` de `Vec<u8>` de 12 KB é o teste inteiro. Se um dia alguém
+/// fizer a exportação gravar "no lugar" por engano, ou a revelação normalizar o
+/// arquivo de entrada, é esta linha que acusa — e não a tela, que continuaria
+/// mostrando tudo certo por semanas.
+#[tokio::test]
+async fn o_ciclo_inteiro_nao_reescreve_o_arquivo_de_origem() {
+    let dir = tempfile::tempdir().unwrap();
+    let (origem, _) = foto_no_disco(&dir, "origem.png");
+    let caminho = origem.file_path().to_string();
+    let antes = std::fs::read(&caminho).expect("ler a origem");
+
+    let foto = com_revelacao(origem);
+    let exportador = ImageExporterImpl::new();
+    let opcoes = ExportOptions::default();
+
+    // O que a tela mostra.
+    exportador.renderizar(&foto, &opcoes).expect("revelar");
+    // O que sobe para a galeria.
+    exportador
+        .renderizar_jpeg(&foto, &opcoes)
+        .await
+        .expect("o JPEG da galeria");
+    // O que é guardado como original no site.
+    exportador
+        .renderizar_bruto_jpeg(&foto, &opcoes)
+        .await
+        .expect("o bruto");
+    // E a exportação para um arquivo, que é o único caminho que grava em disco.
+    let destino = dir.path().join("saida.jpg");
+    exportador
+        .export(
+            &foto,
+            &FilePath::new(destino.to_str().unwrap()).unwrap(),
+            &opcoes,
+        )
+        .await
+        .expect("exportar");
+
+    let depois = std::fs::read(&caminho).expect("ler a origem de novo");
+    assert_eq!(
+        antes, depois,
+        "o arquivo de origem foi reescrito em algum ponto do ciclo"
+    );
+    assert!(destino.exists(), "e a exportação saiu no destino dela");
+}
