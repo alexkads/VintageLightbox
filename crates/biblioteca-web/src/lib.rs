@@ -19,8 +19,11 @@
 
 #[cfg(target_arch = "wasm32")]
 mod grade;
-#[cfg(target_arch = "wasm32")]
-mod local;
+// 🔑 **Sem `cfg`, e de propósito**: o esquema do depósito é constante e
+// `serde`, sem nada de navegador — compilá-lo no host é o que permite provar,
+// em `cargo test`, que a lista de lojas e a versão andam juntas. Todo o resto
+// deste crate depende de `HtmlCanvasElement` e fica fora.
+pub mod local;
 #[cfg(target_arch = "wasm32")]
 mod modelo;
 #[cfg(target_arch = "wasm32")]
