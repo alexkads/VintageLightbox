@@ -297,6 +297,95 @@ mod tests {
         assert_ne!(photo.file_path(), &file_path);
     }
 
+    /// 🚨 **Duas fotos do mesmo lote não podem receber o mesmo destino.**
+    ///
+    /// O nome de saída é `photo-AAAA-MM-DD-NNN`, e o número vinha de perguntar
+    /// ao disco "já existe?" — copiando **depois**. Entre a pergunta e a cópia
+    /// cabe outro arquivo do mesmo lote: os dois acham o mesmo número livre,
+    /// os dois copiam para lá, e um apaga o outro. É a armadilha nº 67 na
+    /// versão do sistema de arquivos.
+    ///
+    /// ⚠️ Era pior do que sobrescrever: quando o destino já existia, este
+    /// caminho **não copiava** e gravava no catálogo o caminho do arquivo do
+    /// outro — a foto importada apontava para uma imagem que não é a dela.
+    ///
+    /// # 🔑 Por que o teste é concorrente, e tinha de ser
+    ///
+    /// A primeira versão deste caso importava duas fotos **em sequência** e
+    /// passava com o código defeituoso: a primeira já tinha criado o arquivo,
+    /// então a segunda via "existe" e ia para o número seguinte. O defeito só
+    /// aparece quando as duas escolhem **ao mesmo tempo** — que é como uma
+    /// importação de lote roda. Um teste que não reprova o defeito não vale
+    /// nada, e este foi reescrito depois de ser pego passando.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn fotos_importadas_ao_mesmo_tempo_nao_disputam_o_mesmo_arquivo() {
+        use std::io::Write;
+
+        fn caso() -> ImportPhotoUseCase {
+            let mut repo = MockPhotoRepo::new();
+            repo.expect_save().returning(|_| Ok(()));
+            let mut extrator = MockMetadataExtractor::new();
+            extrator
+                .expect_extract()
+                .returning(|_| Ok(PhotoMetadata::default()));
+            let mut miniaturas = MockThumbnailGenerator::new();
+            miniaturas
+                .expect_generate_set()
+                .returning(|_, _| Ok(vec![vec![1], vec![2]]));
+            let mut previas = MockPreviewStorage::new();
+            previas.expect_save().returning(|_, _, _| Ok(()));
+            ImportPhotoUseCase::new(
+                Arc::new(repo),
+                Arc::new(extrator),
+                Arc::new(miniaturas),
+                Arc::new(previas),
+            )
+        }
+
+        // Oito origens com conteúdos distintos: é o conteúdo que denuncia a
+        // troca, e não o nome.
+        const QUANTAS: usize = 8;
+        let mut origens = Vec::new();
+        for i in 0..QUANTAS {
+            let mut arquivo = NamedTempFile::with_suffix(".jpg").unwrap();
+            write!(arquivo, "foto numero {i}").unwrap();
+            origens.push(arquivo);
+        }
+
+        let mut tarefas = Vec::new();
+        for (i, origem) in origens.iter().enumerate() {
+            let caminho = FilePath::new(origem.path().to_str().unwrap()).unwrap();
+            tarefas.push(tokio::spawn(
+                async move { (i, caso().execute(caminho).await) },
+            ));
+        }
+
+        let mut destinos = Vec::new();
+        for tarefa in tarefas {
+            let (i, resultado) = tarefa.await.expect("a tarefa não entra em pânico");
+            let foto = resultado.expect("a importação não falha");
+            destinos.push((i, foto.file_path().to_string()));
+        }
+
+        let unicos: std::collections::HashSet<&String> =
+            destinos.iter().map(|(_, caminho)| caminho).collect();
+        assert_eq!(
+            unicos.len(),
+            QUANTAS,
+            "duas fotos caíram no mesmo arquivo: {destinos:?}"
+        );
+
+        for (i, caminho) in &destinos {
+            let conteudo = std::fs::read_to_string(caminho).unwrap();
+            assert_eq!(
+                conteudo,
+                format!("foto numero {i}"),
+                "a foto {i} aponta para os bytes de outra"
+            );
+            let _ = std::fs::remove_file(caminho);
+        }
+    }
+
     #[tokio::test]
     async fn test_import_photo_repository_error() {
         // Arrange
