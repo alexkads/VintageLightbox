@@ -531,6 +531,43 @@ impl Grade {
         mudou::SELECAO | mudou::ROLAR
     }
 
+    /// Remonta seleção e foco a partir de ids — o que a tela guardou antes de
+    /// a lista trocar de **identidade**.
+    ///
+    /// 🚨 **Existe porque a mesma foto troca de id no meio do fluxo.** A da
+    /// área temporária sobe e vira foto do acervo; a do acervo que perde a nota
+    /// volta como `local:…`. O `definir_fotos` preserva seleção e foco por id,
+    /// e por id não há o que preservar: o antigo não existe mais. Quem sabe que
+    /// as duas são a mesma foto é a tela, que cruza as listas pelo nome do
+    /// arquivo — então é ela que devolve os ids novos, e aqui eles viram
+    /// posições.
+    ///
+    /// **Não rola.** `focar_id` rola porque é navegação — alguém pediu para ir
+    /// até aquela foto. Isto é restauração: a foto já estava onde estava, e
+    /// puxar a grade por baixo de quem está olhando seria inventar um gesto que
+    /// ninguém fez.
+    ///
+    /// Id que não existe mais é ignorado, e não é erro: a foto pode ter sido
+    /// apagada no mesmo gesto.
+    pub fn restaurar_selecao(
+        &mut self,
+        ids_json: &str,
+        foco: Option<String>,
+    ) -> Result<u32, String> {
+        let ids: Vec<String> =
+            serde_json::from_str(ids_json).map_err(|e| format!("ids ilegíveis: {e}"))?;
+        self.selecao.limpar_tudo();
+        for id in &ids {
+            if let Some(n) = self.acervo.posicao_de(id) {
+                self.selecao.marcar(n);
+            }
+        }
+        self.selecao
+            .focar(foco.and_then(|id| self.acervo.posicao_de(&id)));
+        self.ctx.request_repaint();
+        Ok(mudou::SELECAO)
+    }
+
     /// Os ids do recorte em vigor, na ordem da grade — a lista que a tira do
     /// site percorre. É a mesma conta do filtro, lida daqui em vez de refeita
     /// em TypeScript (armadilha nº 8).

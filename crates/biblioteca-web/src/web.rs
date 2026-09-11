@@ -186,6 +186,15 @@ impl Grade {
 
     /// A tira do site clicou nesta foto: foca e seleciona, com os mesmos
     /// modificadores do canvas (Ctrl acrescenta, Shift estende).
+    /// Remonta seleção e foco por id, sem rolar — ver [`Grade::restaurar_selecao`].
+    pub fn restaurar_selecao(
+        &mut self,
+        ids_json: &str,
+        foco: Option<String>,
+    ) -> Result<u32, JsValue> {
+        self.estado.restaurar_selecao(ids_json, foco).map_err(erro)
+    }
+
     pub fn focar_id(&mut self, id: &str, aditivo: bool, faixa: bool) -> u32 {
         self.estado.focar_id(id, aditivo, faixa)
     }
