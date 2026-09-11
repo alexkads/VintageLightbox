@@ -1415,16 +1415,29 @@ impl Revelacao {
         self.previa.as_ref()
     }
 
-    /// Aplica um preset: 15 dos 46 campos, de uma vez.
+    /// Aplica um preset — qualquer um dos 53 campos, de uma vez.
     ///
     /// É um gesto discreto, como o `Cmd+Z` — vira passo de histórico e vai para o
     /// banco **na hora**, sem passar pela espera de 500 ms, que existe para juntar
     /// os eventos de um arrasto.
+    ///
+    /// 🔑 **Somar ou substituir, e quem decide é a predefinição.** O padrão é
+    /// somar — escreve só os campos que define e deixa o resto —, que é o do
+    /// Lightroom e o certo para o que acrescenta. A que define o *look* parte do
+    /// **neutro**: sem isso, "Preto e branco" sobre "Sépia" deixava a
+    /// tonalização âmbar de pé e a foto não ficava preto e branco. Ver
+    /// `Preset::replaces`.
+    ///
+    /// ⚠️ **O enquadramento nunca entra**, nos dois casos: recortar é outra
+    /// decisão, e é a mesma regra do "Zerar tudo".
     pub fn aplicar_preset(&mut self, preset: &Preset, window: &mut Window, cx: &mut Context<Self>) {
         // O que estiver a meio caminho fecha primeiro, pelo mesmo motivo do
         // desfazer: senão a espera pendente grava por cima do preset.
         self.gravar_o_que_estiver_pendente();
 
+        if preset.replaces {
+            self.ajustes = Ajustes::default();
+        }
         presets::aplicar(&mut self.ajustes, &preset.adjustments);
         self.espalhar_nos_sliders(window, cx);
         self.pedir_revelacao_cruzando(cx);

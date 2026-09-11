@@ -111,5 +111,10 @@ fn map_row_to_preset(row: &sqlx::sqlite::SqliteRow) -> DomainResult<Preset> {
         name,
         adjustments,
         is_system,
+        // 🔑 **A do operador soma**, e não há coluna para isto: substituir é
+        // marca das de sistema, que nascem em `presets_de_sistema()` e nunca
+        // passam por aqui. Guardar a marca de uma que ele salvou mudaria por
+        // baixo o que ele já tinha — ver `Preset::replaces`.
+        replaces: false,
     })
 }

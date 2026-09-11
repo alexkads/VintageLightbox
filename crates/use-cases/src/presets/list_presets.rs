@@ -44,7 +44,16 @@ use std::sync::Arc;
 /// que lê a foto e escolhe os tons a partir dela. Um preset é uma lista de
 /// números fixos, e nenhuma lista fixa serve para todas as fotos.
 pub fn presets_de_sistema() -> Vec<Preset> {
+    // 🚨 **As que definem o *look* substituem; as que acrescentam, somam.**
+    // Somar é o certo para "Nitidez para impressão" — ela se aplica depois de
+    // qualquer tratamento. Não é o certo para as outras seis: a sépia escreve a
+    // tonalização, o preto e branco escreve a dessaturação e não desfaz a
+    // tonalização, e o que saía era uma foto âmbar com nome de preto e branco
+    // (dono, 2026-09-11, na web). Ver `Preset::replaces`.
     let monte = |nome: &str, campos: &[(&str, f32)]| {
+        Preset::system_replacing(nome, campos.iter().copied().collect::<PresetAdjustments>())
+    };
+    let monte_somando = |nome: &str, campos: &[(&str, f32)]| {
         Preset::system(nome, campos.iter().copied().collect::<PresetAdjustments>())
     };
 
@@ -140,7 +149,12 @@ pub fn presets_de_sistema() -> Vec<Preset> {
         ),
         // ⚠️ O raio começa em 0,5 porque raio zero não tem pixel de vizinhança —
         // e nitidez sem ruído junto é o que o papel pede.
-        monte(
+        //
+        // 🔑 **A única que soma**, e é o que ela é: nitidez para o papel não
+        // decide a cara da foto — ela se aplica **depois** de qualquer look, e
+        // zerar o look para acrescentar nitidez seria o contrário do que o
+        // gesto quer dizer.
+        monte_somando(
             "Nitidez para impressão",
             &[
                 ("sharpen_amount", 55.0),

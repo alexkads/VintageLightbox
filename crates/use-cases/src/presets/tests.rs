@@ -340,3 +340,45 @@ async fn test_delete_preset_repository_error() {
     // Assert
     assert!(result.is_err());
 }
+
+/// 🚨 O caso que deu origem à marca: "Preto e branco clássico" aplicado sobre
+/// "Sépia à moda antiga" não ficava preto e branco — a dessaturação era
+/// escrita, a tonalização âmbar da sépia **não** era desfeita, e saía uma foto
+/// âmbar com nome de preto e branco (dono, 2026-09-11, na web).
+#[test]
+fn as_que_definem_o_look_substituem_e_a_nitidez_soma() {
+    let sistema = presets_de_sistema();
+    let por_nome = |nome: &str| {
+        sistema
+            .iter()
+            .find(|p| p.name == nome)
+            .unwrap_or_else(|| panic!("{nome} tem que existir"))
+    };
+
+    for nome in [
+        "Preto e branco clássico",
+        "Sépia à moda antiga",
+        "Retrato suave",
+        "Luz de estúdio",
+        "Hora dourada",
+        "Alta-chave",
+    ] {
+        assert!(por_nome(nome).replaces, "{nome} define o visual");
+    }
+
+    assert!(
+        !por_nome("Nitidez para impressão").replaces,
+        "nitidez se aplica depois de qualquer look — zerar o look para acrescentá-la \
+         seria o contrário do que o gesto quer dizer"
+    );
+}
+
+/// A predefinição que o operador salva **soma**, como sempre somou.
+#[test]
+fn a_do_operador_nao_substitui() {
+    let dele = Preset::user("Meu jeito".into(), PresetAdjustments::vazia());
+    assert!(
+        !dele.replaces,
+        "mudar isso reescreveria o que ele ja salvou"
+    );
+}

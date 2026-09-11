@@ -115,6 +115,26 @@ pub struct Preset {
     pub name: String,
     pub adjustments: PresetAdjustments,
     pub is_system: bool,
+    /// Esta predefinição **substitui** o tratamento em vez de somar a ele.
+    ///
+    /// 🚨 **Existe porque "Preto e branco" sobre "Sépia" não ficava preto e
+    /// branco.** O padrão é somar — cada predefinição escreve só os campos que
+    /// define e deixa o resto, que é o do Lightroom —, e isso é o certo para as
+    /// que **acrescentam** (nitidez, ruído). Para as que definem o **look**,
+    /// somar é outra coisa: a sépia escreve a tonalização, o preto e branco
+    /// escreve a dessaturação e **não** desfaz a tonalização, e o que sai é uma
+    /// foto âmbar com nome de preto e branco (dono, 2026-09-11, na web; aqui
+    /// pela regra de paridade).
+    ///
+    /// Quando marcada, aplicar parte do **neutro**: os 53 voltam ao padrão e só
+    /// então os campos dela são escritos. O **enquadramento não entra** —
+    /// recortar é outra decisão, e é a mesma regra do "Zerar tudo".
+    ///
+    /// ⚠️ `#[serde(default)]`: as predefinições **do operador**, que já estão
+    /// gravadas, somam — é o que elas sempre fizeram, e mudar isso por baixo
+    /// seria reescrever o que ele salvou.
+    #[serde(default)]
+    pub replaces: bool,
 }
 
 impl Preset {
@@ -124,11 +144,20 @@ impl Preset {
             name,
             adjustments,
             is_system,
+            replaces: false,
         }
     }
 
     pub fn system(name: &str, adjustments: PresetAdjustments) -> Self {
         Self::new(name.to_string(), adjustments, true)
+    }
+
+    /// Uma de sistema que **substitui** o tratamento — ver [`Preset::replaces`].
+    pub fn system_replacing(name: &str, adjustments: PresetAdjustments) -> Self {
+        Self {
+            replaces: true,
+            ..Self::system(name, adjustments)
+        }
     }
 
     pub fn user(name: String, adjustments: PresetAdjustments) -> Self {
