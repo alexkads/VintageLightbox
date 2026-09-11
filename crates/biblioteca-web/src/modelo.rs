@@ -24,6 +24,10 @@ pub struct FotoJson {
     /// A nota de 1 a 5; ausente ou nula = não classificada.
     #[serde(default)]
     pub nota: Option<u8>,
+    /// A foto da área temporária que ainda não recebeu a marcação do balcão —
+    /// o que separa *sinalizada* de *classificada*. Ausente = já tem.
+    #[serde(default)]
+    pub sem_marcacao: bool,
     #[serde(default)]
     pub ordem: i64,
 }
@@ -47,6 +51,7 @@ impl FotoJson {
             downloads: 0,
             revelada: false,
             nota: self.nota,
+            sem_marcacao: self.sem_marcacao,
             ordem: self.ordem,
         })
     }

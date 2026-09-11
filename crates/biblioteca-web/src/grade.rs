@@ -205,6 +205,8 @@ impl Grade {
             "todas" => Filtro::Todas,
             "apagadas" => Filtro::Apagadas,
             "sem_nota" => Filtro::SemNota,
+            "classificadas" => Filtro::Classificadas,
+            "sinalizadas" => Filtro::Sinalizadas,
             outro => Estado::do_texto(outro)
                 .map(Filtro::Situacao)
                 .ok_or_else(|| format!("filtro desconhecido: {outro}"))?,
@@ -627,6 +629,8 @@ impl Grade {
             compradas: usize,
             apagadas: usize,
             sem_nota: usize,
+            classificadas: usize,
+            sinalizadas: usize,
             visiveis: usize,
         }
         let c = self.acervo.contagens();
@@ -637,6 +641,8 @@ impl Grade {
             compradas: c.compradas,
             apagadas: c.apagadas,
             sem_nota: c.sem_nota,
+            classificadas: c.classificadas,
+            sinalizadas: c.sinalizadas,
             visiveis: self.acervo.total_visivel(),
         })
         .unwrap_or_else(|_| "{}".into())

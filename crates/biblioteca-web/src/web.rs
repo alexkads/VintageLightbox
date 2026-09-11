@@ -104,7 +104,8 @@ impl Grade {
         self.estado.definir_fotos(json).map_err(erro)
     }
 
-    /// `todas` | `levada_no_balcao` | `disponivel` | `comprada` | `apagadas`.
+    /// `todas` | `levada_no_balcao` | `disponivel` | `comprada` | `apagadas` |
+    /// `sem_nota` | `classificadas` | `sinalizadas`.
     pub fn definir_filtro(&mut self, filtro: &str) -> Result<u32, JsValue> {
         self.estado.definir_filtro(filtro).map_err(erro)
     }

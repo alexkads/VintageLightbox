@@ -83,6 +83,14 @@ pub struct Foto {
     /// galeria quando a coluna nasceu, e o recorte que as encontra — que é
     /// justamente para o operador as classificar ou tirar.
     pub nota: Option<u8>,
+    /// Esta foto entrou **sem decisão do balcão** — ninguém disse se é levada
+    /// ou se vai à venda.
+    ///
+    /// 🔑 Só existe na área temporária: a foto que sobe leva um estado consigo,
+    /// e o da API é `disponivel`. Enquanto ela está aqui, dizer "à venda" seria
+    /// a tela inventando uma decisão que ninguém tomou — e é o que separa
+    /// *sinalizada* de *classificada* no recorte da barra.
+    pub sem_marcacao: bool,
     pub ordem: i64,
 }
 
@@ -115,6 +123,18 @@ pub enum Filtro {
     /// storage. Sem um recorte que as junte, achá-las numa galeria de duzentas
     /// é olhar foto por foto.
     SemNota,
+    /// As que **têm nota** — o oposto de [`Filtro::SemNota`].
+    ///
+    /// Serve à pergunta que o operador faz no fim do atendimento: *"o que já
+    /// está classificado?"*. Sem ele, a resposta é somar três chips de cabeça.
+    Classificadas,
+    /// As que já receberam uma **marcação de balcão** — levada ou à venda.
+    ///
+    /// 🔑 **Sinalizar é a segunda decisão, e ela exige a primeira** (regra do
+    /// dono: *"não posso sinalizar uma foto se ela não estiver classificada"*).
+    /// Por isso este recorte é um subconjunto de [`Filtro::Classificadas`]: o
+    /// que sobra entre os dois é o que já tem nota e ainda espera a tecla P.
+    Sinalizadas,
 }
 
 impl Filtro {
@@ -135,6 +155,8 @@ impl Filtro {
                 !foto.apagada && foto.nota.is_some() && foto.estado == estado
             }
             Filtro::SemNota => !foto.apagada && foto.nota.is_none(),
+            Filtro::Classificadas => !foto.apagada && foto.nota.is_some(),
+            Filtro::Sinalizadas => !foto.apagada && foto.nota.is_some() && !foto.sem_marcacao,
         }
     }
 }
@@ -149,6 +171,10 @@ pub struct Contagens {
     pub apagadas: usize,
     /// Quantas estão sem classificação — as do recorte `SemNota`.
     pub sem_nota: usize,
+    /// Quantas têm nota.
+    pub classificadas: usize,
+    /// Quantas têm nota **e** marcação de balcão.
+    pub sinalizadas: usize,
 }
 
 impl Contagens {
@@ -160,6 +186,8 @@ impl Contagens {
             Filtro::Situacao(Estado::Comprada) => self.compradas,
             Filtro::Apagadas => self.apagadas,
             Filtro::SemNota => self.sem_nota,
+            Filtro::Classificadas => self.classificadas,
+            Filtro::Sinalizadas => self.sinalizadas,
         }
     }
 }
@@ -255,6 +283,10 @@ impl Acervo {
                 // recorte devolve, sempre.
                 c.sem_nota += 1;
             } else {
+                c.classificadas += 1;
+                if !f.sem_marcacao {
+                    c.sinalizadas += 1;
+                }
                 match f.estado {
                     Estado::LevadaNoBalcao => c.levadas += 1,
                     Estado::Disponivel => c.a_venda += 1,
@@ -330,8 +362,71 @@ mod testes {
             downloads: 0,
             nota: Some(3),
             revelada: false,
+            sem_marcacao: false,
             ordem: 0,
         }
+    }
+
+    /// A foto da área temporária que ainda espera a tecla P.
+    fn sem_marcacao(id: &str) -> Foto {
+        Foto {
+            sem_marcacao: true,
+            ..foto(id, Estado::Disponivel, false)
+        }
+    }
+
+    fn sem_nota(id: &str) -> Foto {
+        Foto {
+            nota: None,
+            ..foto(id, Estado::Disponivel, false)
+        }
+    }
+
+    #[test]
+    fn classificadas_sao_as_que_tem_nota_e_nada_mais() {
+        let mut a = Acervo::novo();
+        a.definir(vec![
+            foto("com-nota", Estado::Disponivel, false),
+            sem_nota("sem"),
+            foto("apagada", Estado::Disponivel, true),
+        ]);
+        a.filtrar(Filtro::Classificadas);
+        assert_eq!(
+            a.visiveis().map(|f| f.id.as_str()).collect::<Vec<_>>(),
+            ["com-nota"]
+        );
+        let c = a.contagens();
+        assert_eq!((c.classificadas, c.sem_nota), (1, 1));
+    }
+
+    /// 🔑 Sinalizar exige classificar antes — é regra do dono, e o recorte a
+    /// respeita: o que separa os dois números é o que já tem nota e ainda
+    /// espera a tecla P.
+    #[test]
+    fn sinalizadas_sao_as_classificadas_que_ja_tem_marcacao_de_balcao() {
+        let mut a = Acervo::novo();
+        a.definir(vec![
+            foto("marcada", Estado::LevadaNoBalcao, false),
+            sem_marcacao("esperando-o-p"),
+            sem_nota("sem-nota"),
+        ]);
+        a.filtrar(Filtro::Sinalizadas);
+        assert_eq!(
+            a.visiveis().map(|f| f.id.as_str()).collect::<Vec<_>>(),
+            ["marcada"]
+        );
+        let c = a.contagens();
+        assert_eq!((c.classificadas, c.sinalizadas), (2, 1));
+    }
+
+    #[test]
+    fn a_sem_marcacao_continua_contando_como_a_venda_nos_outros_recortes() {
+        // Ela sobe como "à venda" (o padrão da API) e a barra ja a contava ali;
+        // o recorte novo nao muda os antigos.
+        let mut a = Acervo::novo();
+        a.definir(vec![sem_marcacao("x")]);
+        let c = a.contagens();
+        assert_eq!((c.a_venda, c.sinalizadas, c.classificadas), (1, 0, 1));
     }
 
     fn acervo_de_teste() -> Acervo {
