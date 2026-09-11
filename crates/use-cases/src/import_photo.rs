@@ -90,44 +90,56 @@ impl ImportPhotoUseCase {
             .map(|e| e.to_string_lossy().to_string())
             .unwrap_or_else(|| "jpg".to_string());
 
-        // Gerar nome padronizado: photo-YYYY-MM-DD-NNN
-        // Encontrar o próximo número sequencial disponível
+        // Nome padronizado `photo-YYYY-MM-DD-NNN`, com o número reservado.
+        //
+        // 🚨 **`create_new`, e não `exists()`.** Perguntar ao disco "este nome
+        // está livre?" e copiar depois deixa a janela em que outro arquivo do
+        // mesmo lote escolhe o mesmo nome: os dois copiam para lá e um
+        // sobrescreve o outro. É a armadilha nº 67 na versão do sistema de
+        // arquivos, e o `file_organizer` — o caminho por onde a importação
+        // **realmente** passa hoje — já a resolve assim. Este aqui é o caminho
+        // legado (`ImportController::import_files`, que nenhuma tela chama):
+        // ficar inseguro só porque está adormecido seria deixar a armadilha
+        // armada para quem o religar.
+        //
+        // ⚠️ O arquivo nasce com zero byte e só então recebe a cópia. Uma falha
+        // no meio deixa um arquivo vazio no destino — o menor dos dois preços,
+        // porque o outro é a foto de alguém por cima da foto de outro.
         let mut sequential = 1;
-        loop {
-            let new_name = format!(
+        let dest_path = loop {
+            let tentativa = dest_dir.join(format!(
                 "photo-{}-{}-{}-{:03}.{}",
                 year, month, day, sequential, extension
-            );
-            let dest_path = dest_dir.join(&new_name);
-            if !dest_path.exists() {
-                break;
+            ));
+            let livre = tokio::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&tentativa)
+                .await
+                .is_ok();
+            if livre {
+                break tentativa;
             }
             sequential += 1;
-        }
-
-        let new_file_name = format!(
-            "photo-{}-{}-{}-{:03}.{}",
-            year, month, day, sequential, extension
-        );
-        let dest_path = dest_dir.join(&new_file_name);
-
-        // Copiar o arquivo para o destino com novo nome
-        let final_path = if dest_path.exists() {
-            println!("File already exists at: {}", dest_path.display());
-            dest_path
-        } else {
-            tokio::fs::copy(source_path, &dest_path)
-                .await
-                .map_err(|e| {
-                    domain::DomainError::InfrastructureError(format!(
-                        "Failed to copy file to {}: {}",
-                        dest_path.display(),
-                        e
-                    ))
-                })?;
-            println!("Copied to: {}", dest_path.display());
-            dest_path
+            if sequential > 9_999 {
+                return Err(domain::DomainError::InfrastructureError(format!(
+                    "não há nome livre para {} em {}",
+                    source_path.display(),
+                    dest_dir.display()
+                )));
+            }
         };
+
+        tokio::fs::copy(source_path, &dest_path)
+            .await
+            .map_err(|e| {
+                domain::DomainError::InfrastructureError(format!(
+                    "Failed to copy file to {}: {}",
+                    dest_path.display(),
+                    e
+                ))
+            })?;
+        let final_path = dest_path;
 
         // Criar FilePath com o novo caminho
         let new_file_path = FilePath::new(final_path.to_string_lossy().as_ref())?;
