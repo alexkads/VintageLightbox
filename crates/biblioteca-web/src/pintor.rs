@@ -59,6 +59,12 @@ pub fn pintar(ctx: &egui::Context, g: &Grade) {
             let raio = RAIO.min(a.w / 2.0).min(a.h / 2.0);
             let mut forma = RectShape::filled(dentro, Rounding::same(raio), Color32::WHITE);
             forma.fill_texture_id = tex.id();
+            // 🚨 **A `uv` é obrigatória, mesmo sendo a textura inteira.**
+            // `RectShape::filled` nasce com `uv: Rect::ZERO`, e um retângulo com
+            // textura e `uv` degenerada é pintado como cor sólida: a galeria
+            // ficou **branca** no primeiro build do contain, porque a cor de
+            // preenchimento é branca (ela existe para multiplicar a textura).
+            forma.uv = Rect::from_min_size(Pos2::ZERO, Vec2::new(1.0, 1.0));
             p.add(Shape::Rect(forma));
         }
         if foto.apagada {
