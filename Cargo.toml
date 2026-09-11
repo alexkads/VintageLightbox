@@ -20,6 +20,11 @@ members = [
     # A mesma biblioteca desenhada no navegador (wgpu + wasm-bindgen), entregue
     # em `frontend/public/biblioteca/` pelo `scripts/construir-biblioteca.sh`.
     "crates/biblioteca-web",
+    # A tela do cliente do balcão (2026-09-11, decisão do dono registrada em
+    # STATUS §2.88): a foto revelada sobre preto no segundo monitor, e o
+    # cruzamento entre uma foto e a seguinte. O único caso em que a tela **é** o
+    # canvas — ela não tem interface nenhuma para divergir do site.
+    "crates/tela-do-cliente-web",
     # A interface, em GPUI. O `crates/ui` (egui) saiu daqui em 17/ago/2026, com a
     # lista de paridade zerada (docs/PARIDADE-UI.md) — é a fase 5 do plano.
     #
