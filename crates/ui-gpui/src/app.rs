@@ -1613,6 +1613,7 @@ impl Aplicativo {
             PedidoDaRevelacao::Exportar => self.exportar(cx),
             PedidoDaRevelacao::SalvarNaGaleria => self.salvar_na_galeria(window, cx),
             PedidoDaRevelacao::Sincronizar => self.sincronizar_revelacao(window, cx),
+            PedidoDaRevelacao::ZerarAsMarcadas => self.zerar_as_marcadas(cx),
             // 📸 Passo 11 a cada troca de foto, e não só na abertura: se o
             // cache local não tem o bruto e a foto está no site, os pixels vêm
             // de lá. A pergunta é feita **depois** de a Revelação abrir a
@@ -1714,6 +1715,55 @@ impl Aplicativo {
         self.avisar_onde_esta_olhando(
             format!(
                 "{} foto(s) receberam estes ajustes — elas sobem quando você salvar na galeria",
+                gravadas.len()
+            ),
+            cx,
+        );
+        cx.notify();
+    }
+
+    /// Devolve ao neutro as fotos marcadas na tira — o "Zerar tudo" em lote.
+    ///
+    /// 🔑 **É o caminho do [`Self::sincronizar_revelacao`], com o neutro no
+    /// lugar da receita da foto aberta**: grava, atualiza as cópias da tira e
+    /// enfileira para subir. A que está no palco não vem por aqui — a tela já a
+    /// zerou pelo histórico, para o `Cmd+Z` desfazer.
+    ///
+    /// ⚠️ **O enquadramento de cada uma fica**, como no gesto de uma foto só:
+    /// "não gostei do tratamento" e "errei o corte" são coisas diferentes, e
+    /// gravar sem reenviar o corte o apagaria.
+    pub fn zerar_as_marcadas(&mut self, cx: &mut Context<Self>) {
+        // 🚨 Logado, nada acontece fora de uma sessão — ver `pode_trabalhar`.
+        if !self.pode_trabalhar() {
+            return;
+        }
+        let alvos = self.revelacao.read(cx).outras_a_zerar();
+        if alvos.is_empty() {
+            return;
+        }
+
+        let mut gravadas: Vec<(String, Ajustes, persistencia::Corte)> = Vec::new();
+        for alvo in &alvos {
+            let corte = persistencia::corte_da_foto(alvo);
+            self.gravador
+                .gravar(alvo.id.clone(), Ajustes::default(), corte);
+            gravadas.push((alvo.id.clone(), Ajustes::default(), corte));
+            if let Some(no_site) = alvo.pos_venda_foto_id.clone() {
+                self.enfileirar_para_subir(
+                    no_site,
+                    Ajustes::default(),
+                    persistencia::para_crop_settings(&corte),
+                );
+            }
+        }
+
+        self.revelacao
+            .update(cx, |tela, cx| tela.aplicar_sincronizadas(&gravadas, cx));
+        self.reler_o_acervo(cx);
+        self.recontar_o_que_falta_subir(cx);
+        self.avisar_onde_esta_olhando(
+            format!(
+                "{} foto(s) voltaram ao neutro — elas sobem quando você salvar na galeria",
                 gravadas.len()
             ),
             cx,

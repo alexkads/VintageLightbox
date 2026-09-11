@@ -670,6 +670,25 @@ impl Revelacao {
             .collect()
     }
 
+    /// As **outras** marcadas que o "Zerar tudo" também limpa.
+    ///
+    /// 🚨 **Só as que têm o que zerar.** Incluir uma que já está no neutro
+    /// gravaria no catálogo uma mudança para o mesmo valor, e o "Salvar na
+    /// galeria" depois subiria um arquivo por nada. É a mesma regra do
+    /// `zerar-em-lote.ts` da web.
+    ///
+    /// A foto aberta fica de fora: ela é zerada por [`Self::redefinir_ajustes`],
+    /// que passa pelo histórico — as outras não têm histórico, e é por isso que
+    /// o botão diz quantas vão junto antes do clique.
+    pub fn outras_a_zerar(&self) -> Vec<PhotoViewModel> {
+        let aberta = self.foto_aberta().map(|f| f.id.clone());
+        self.alvos_da_sincronizacao()
+            .into_iter()
+            .filter(|f| Some(&f.id) != aberta.as_ref())
+            .filter(|f| persistencia::da_foto(f) != Ajustes::default())
+            .collect()
+    }
+
     pub fn escolha_da_sincronizacao(&self) -> Escolha {
         self.escolha.unwrap_or_default()
     }
@@ -2541,6 +2560,12 @@ impl Revelacao {
             1 => "1 ajuste fora do neutro".to_string(),
             n => format!("{n} ajustes fora do neutro"),
         };
+        // 🚨 **O botão não pode decidir sozinho se há o que zerar.** Olhando só
+        // os ajustes da foto no palco, ele se apagava com ela no neutro — mesmo
+        // com quatro marcadas atrás cheias de ajuste, que era justamente o que
+        // o operador queria limpar (dono, 2026-09-11).
+        let outras = self.outras_a_zerar().len();
+        let quantas_fotos = usize::from(alterados > 0) + outras;
 
         div()
             .flex()
@@ -2556,12 +2581,25 @@ impl Revelacao {
             )
             .child(
                 Button::new("zerar-tudo")
-                    .label("Zerar tudo")
+                    .label(if quantas_fotos > 1 {
+                        SharedString::from(format!("Zerar {quantas_fotos} fotos"))
+                    } else {
+                        SharedString::from("Zerar tudo")
+                    })
                     .xsmall()
-                    .disabled(alterados == 0)
-                    .tooltip("Devolve os 53 ajustes ao neutro. O enquadramento não muda.")
+                    .disabled(quantas_fotos == 0)
+                    .tooltip(if outras > 0 {
+                        "Devolve ao neutro esta foto e as marcadas na tira. O enquadramento de cada uma não muda."
+                    } else {
+                        "Devolve os 53 ajustes ao neutro. O enquadramento não muda."
+                    })
                     .on_click(cx.listener(|tela, _ev, window, cx| {
-                        tela.redefinir_ajustes(window, cx);
+                        if tela.quantos_alterados() > 0 {
+                            tela.redefinir_ajustes(window, cx);
+                        }
+                        if !tela.outras_a_zerar().is_empty() {
+                            cx.emit(PedidoDaRevelacao::ZerarAsMarcadas);
+                        }
                     })),
             )
             .into_any_element()
@@ -3650,6 +3688,13 @@ pub enum PedidoDaRevelacao {
     /// "Sincronizar N" do site: os ajustes desta foto vão para as marcadas na
     /// tira — a receita para o catálogo, e a foto revelada para o site.
     Sincronizar,
+    /// "Zerar N fotos": as marcadas na tira voltam ao neutro.
+    ///
+    /// 🔑 **É a contrapartida do `Sincronizar`** — um leva a receita desta foto
+    /// para as marcadas, o outro devolve todas ao neutro (pedido do dono,
+    /// 2026-09-11). A foto aberta não vem por aqui: ela é zerada na própria
+    /// tela, por `redefinir_ajustes`, para o `Cmd+Z` desfazer o gesto.
+    ZerarAsMarcadas,
     /// Outra foto entrou no palco — pela seta, pela tira ou ao abrir.
     ///
     /// 🔑 **A Revelação não sabe buscar na nuvem, e não vai passar a saber**;
@@ -4892,6 +4937,51 @@ mod testes {
     }
 
     /// 🚨 **Andar pela seta e voltar tem de trazer os ajustes de volta.**
+    /// 🚨 **O "Zerar tudo" em lote escolhe o que apaga, e isso se prova.**
+    ///
+    /// Pedido do dono em 2026-09-11: o botão precisa funcionar com a tira
+    /// inteira marcada. Três condições decidem quem entra, e nenhuma delas é
+    /// visível na tela depois do clique — por isso ficam presas aqui.
+    #[gpui::test]
+    fn o_zerar_em_lote_pega_as_marcadas_com_ajuste(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        for id in ["id-a.jpg", "id-b.jpg", "id-c.jpg", "id-d.jpg"] {
+            previews.save_preview(id, &foto_cinza()).expect("gravar");
+        }
+
+        let aberta = foto("a.jpg");
+        // Mexida: entra.
+        let mut mexida = foto("b.jpg");
+        mexida.edit_exposure = Some(1.5);
+        // No neutro: fica de fora — gravar nela seria mudar para o mesmo valor,
+        // e o "Salvar na galeria" subiria um arquivo por nada.
+        let ja_neutra = foto("c.jpg");
+        // Mexida, mas não marcada: fica de fora.
+        let mut de_fora = foto("d.jpg");
+        de_fora.edit_exposure = Some(-2.0);
+
+        let janela = janela(cx, previews);
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir_no_acervo(vec![aberta, mexida, ja_neutra, de_fora], 0, window, cx);
+                // Marca a mexida e a que já está no neutro — não a última.
+                let ctrl = Modificadores {
+                    aditivo: true,
+                    faixa: false,
+                };
+                tela.clicar_na_tira(1, ctrl, window, cx);
+                tela.clicar_na_tira(2, ctrl, window, cx);
+
+                let quais: Vec<String> = tela.outras_a_zerar().into_iter().map(|f| f.id).collect();
+                assert_eq!(
+                    quais,
+                    vec!["id-b.jpg".to_string()],
+                    "só a marcada que tem o que zerar"
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
     #[gpui::test]
     fn andar_e_voltar_preserva_o_que_foi_ajustado(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
