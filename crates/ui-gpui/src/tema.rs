@@ -477,6 +477,21 @@ fn cores_do_esquema() -> Value {
     )
 }
 
+/// Como **escrever** a tecla modificadora dos atalhos.
+///
+/// 🔑 **Os atalhos aceitam as duas** — cada ação tem o par `cmd-` e `ctrl-`
+/// registrado em `app.rs`. O que muda de sistema para sistema é o que a tela
+/// deve **dizer**: no Windows e no Linux ninguém aperta ⌘, e uma dica que
+/// ensina a tecla errada é pior do que dica nenhuma (dono, 2026-09-11, na web;
+/// aqui pela regra de paridade).
+pub fn modificador() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "Cmd"
+    } else {
+        "Ctrl"
+    }
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;
@@ -722,20 +737,5 @@ mod testes {
             }
         };
         (mais + 0.05) / (menos + 0.05)
-    }
-}
-
-/// Como **escrever** a tecla modificadora dos atalhos.
-///
-/// 🔑 **Os atalhos aceitam as duas** — cada ação tem o par `cmd-` e `ctrl-`
-/// registrado em `app.rs`. O que muda de sistema para sistema é o que a tela
-/// deve **dizer**: no Windows e no Linux ninguém aperta ⌘, e uma dica que
-/// ensina a tecla errada é pior do que dica nenhuma (dono, 2026-09-11, na web;
-/// aqui pela regra de paridade).
-pub fn modificador() -> &'static str {
-    if cfg!(target_os = "macos") {
-        "Cmd"
-    } else {
-        "Ctrl"
     }
 }

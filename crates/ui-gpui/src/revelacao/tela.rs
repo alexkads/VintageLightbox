@@ -235,6 +235,14 @@ pub struct Revelacao {
     /// Se a tela está mostrando o "antes" — a foto sem nenhum ajuste, no mesmo
     /// enquadramento. É o `\\` do legado.
     mostrando_original: bool,
+    /// Quantas fotos deste ensaio têm receita nova que o site ainda não recebeu.
+    ///
+    /// 🔑 **Quem conta é a raiz** — a fila de envio é dela (`a_subir` e o
+    /// depósito), e esta tela só a mostra. Existe porque desde 2026-09-11 o
+    /// "Sincronizar" copia parâmetros sem subir nada: sem um número no botão de
+    /// salvar, o operador sairia do ensaio achando que o cliente já está vendo o
+    /// que ele acabou de fazer.
+    nao_salvas: usize,
     /// O histograma da foto **como ela está na tela**. Recalculado junto com a
     /// exibição, e `None` enquanto não há foto.
     histograma: Option<Histograma>,
@@ -490,6 +498,7 @@ impl Revelacao {
             controles,
             edicao: None,
             mostrando_original: false,
+            nao_salvas: 0,
             histograma: None,
             angulo,
             palco: Bounds::default(),
@@ -676,6 +685,14 @@ impl Revelacao {
     /// O enquadramento da foto aberta, como a persistência o guarda.
     pub fn corte(&self) -> Corte {
         self.corte
+    }
+
+    /// A raiz avisa quantas revelações deste ensaio ainda não foram ao site.
+    pub fn definir_nao_salvas(&mut self, quantas: usize, cx: &mut Context<Self>) {
+        if self.nao_salvas != quantas {
+            self.nao_salvas = quantas;
+            cx.notify();
+        }
     }
 
     /// A raiz gravou a receita nas marcadas: as cópias da tira passam a dizer
@@ -3888,7 +3905,19 @@ impl Revelacao {
             )
             .child(
                 Button::new("revelacao-salvar-na-galeria")
-                    .label("Salvar na galeria e sair")
+                    // 🔑 **O número é o aviso de que sincronizar não subiu
+                    // nada.** Sem ele o gesto parece completo, e o operador sai
+                    // do ensaio com o cliente vendo o JPEG de antes.
+                    .label(if self.nao_salvas > 1 {
+                        format!("Salvar {} na galeria e sair", self.nao_salvas)
+                    } else {
+                        "Salvar na galeria e sair".to_string()
+                    })
+                    .tooltip(if self.nao_salvas > 1 {
+                        "Sobem a foto aberta e as que receberam ajustes pelo Sincronizar"
+                    } else {
+                        "O revelado entra no lugar do original na galeria do cliente"
+                    })
                     .xsmall()
                     .custom(tema::botao_quente(cx))
                     .disabled(!tem_foto)

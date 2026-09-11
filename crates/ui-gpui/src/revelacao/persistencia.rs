@@ -532,6 +532,20 @@ pub mod mentira {
 
     impl Gravador for GravadorDeMentira {
         fn gravar(&self, id: String, ajustes: Ajustes, corte: Corte) {
+            // 🔑 **A foto do site cai no depósito, como no gravador de
+            // verdade.** Sem isto o teste do "Sincronizar" veria uma gaveta
+            // vazia logo depois de gravar nela, e o lote do "Salvar na galeria"
+            // passaria verde sem ter nada para subir.
+            if let Some(no_site) = super::id_no_site(&id) {
+                let json = crate::pos_venda::porta::ajustes_em_json(
+                    &ajustes,
+                    &super::para_crop_settings(&corte),
+                )
+                .to_string();
+                let mut deposito = self.do_site.lock().expect("o depósito");
+                deposito.retain(|(outra, _)| outra != no_site);
+                deposito.push((no_site.to_string(), json));
+            }
             self.gravado
                 .lock()
                 .expect("o registro de gravações")

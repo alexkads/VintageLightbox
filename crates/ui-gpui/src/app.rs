@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use adapters::view_models::PhotoViewModel;
 use domain::entities::Preset;
+use domain::value_objects::CropSettings;
 use gpui::{actions, div, prelude::*, px, Context, Entity, FocusHandle, SharedString, Window};
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::{ActiveTheme, Disableable, Selectable, Sizable};
@@ -326,6 +327,19 @@ pub struct Aplicativo {
     /// nenhum. Era o "não está sincronizando" de 7/set/2026, e valia também
     /// para classificar trinta fotos de uma vez.
     sincronias_pendentes: usize,
+    /// As fotos que receberam receita nova aqui e cujo JPEG no site ainda é o
+    /// de antes — a fila que o "Salvar na galeria" esvazia.
+    ///
+    /// 🚨 **Ela existe porque a foto do catálogo não tem depósito.** A que só
+    /// existe no site guarda a receita não enviada em
+    /// `Gravador::guardadas_do_site`, que é tabela e sobrevive a fechar o app; a
+    /// que foi importada aqui e depois subiu grava no catálogo, e lá não há
+    /// coluna dizendo "isto ainda não foi para o site". Enquanto não houver,
+    /// esta lista é o que sabe — e o que ela sabe morre com a sessão aberta.
+    /// Fechar o app antes de salvar não perde ajuste nenhum (a receita está
+    /// gravada, e a foto reabre com ela); perde o **aviso** de que o cliente
+    /// ainda vê o JPEG antigo.
+    a_subir: Vec<(String, Ajustes, CropSettings)>,
     /// Quem refaz o preview que o cache perdeu, e por onde a resposta volta.
     repositor: Arc<dyn Repositor>,
     reposicoes: (Sender<ReposicaoRecado>, Receiver<ReposicaoRecado>),
@@ -630,6 +644,7 @@ impl Aplicativo {
             sincronias: channel(),
             _sincronia: None,
             sincronias_pendentes: 0,
+            a_subir: Vec::new(),
             repositor: portas.repositor,
             reposicoes: channel(),
             reposicoes_pendentes: 0,
@@ -883,6 +898,9 @@ impl Aplicativo {
     pub fn sair_da_sessao(&mut self, cx: &mut Context<Self>) {
         self.sessao_aberta = None;
         self.fotos_do_site.clear();
+        // A fila é do ensaio que estava aberto: levá-la para o próximo mandaria
+        // ao site fotos de outro cliente no primeiro "Salvar na galeria" de lá.
+        self.a_subir.clear();
         self.biblioteca
             .update(cx, |tela, cx| tela.escopar_na_sessao(None, cx));
         self.tela = Tela::Sessoes;
@@ -1006,6 +1024,7 @@ impl Aplicativo {
             tela.abrir_no_acervo(acervo, inicial, window, cx)
         });
         self.tela = Tela::Revelacao;
+        self.recontar_o_que_falta_subir(cx);
         // O foco volta para a raiz a cada troca de tela — ver `revelar`.
         window.focus(&self.foco);
         cx.notify();
@@ -1400,7 +1419,9 @@ impl Aplicativo {
                     // a abertura seguinte preferir uma cópia que ninguém mais
                     // atualiza — a foto voltaria ao que era antes do envio no
                     // dia em que a galeria mudasse por outra tela.
+                    self.a_subir.retain(|(ja, _, _)| ja != &foto_no_site);
                     self.gravador.esquecer_do_site(foto_no_site);
+                    self.recontar_o_que_falta_subir(cx);
                     self.avisar_onde_esta_olhando("revelação salva na galeria".into(), cx);
                     if let Some(galeria) = self.sessao_aberta.clone() {
                         self.detalhe.update(cx, |tela, cx| tela.entrar(galeria, cx));
@@ -1470,6 +1491,7 @@ impl Aplicativo {
             tela.abrir_no_acervo(acervo, posicao, window, cx)
         });
         self.tela = Tela::Revelacao;
+        self.recontar_o_que_falta_subir(cx);
         // 🚨 O foco volta para a raiz a cada troca de tela, e não só na abertura.
         // Quem usou o campo de busca deixou o foco **nele** — e ele para de ser
         // renderizado ao entrar na Revelação. O caminho de foco fica apontando um
@@ -1611,12 +1633,21 @@ impl Aplicativo {
     /// foto conserva o próprio corte**, porque gravar sem reenviá-lo apaga o
     /// enquadramento.
     ///
-    /// 🚨 **E a que já está no site é revelada de verdade.** O site guarda o
-    /// JPEG revelado, não a receita — então para ela sincronizar é o mesmo
-    /// caminho do "Salvar na galeria": baixar o original, revelar e subir, um
-    /// pedido por foto ao publicador, que faz isso fora da thread que desenha.
-    /// A que ainda não subiu fica só com a receita, e sobe revelada quando for
-    /// classificada — como o próprio "Salvar na galeria" avisa.
+    /// # 🚨 Ele copia parâmetros, e não revela nada
+    ///
+    /// Até 2026-09-11 a foto que já estava no site era **revelada e subida**
+    /// aqui mesmo: baixar o original em resolução cheia, decodificar 24 MP,
+    /// codificar um JPEG e enviá-lo — por foto. Sincronizar sete custava
+    /// minutos, e o dono estranhou com razão: *"não faz sentido, é somente uma
+    /// casca de parâmetros que é passado"*. A web foi corrigida no mesmo dia
+    /// (`sincronizar` em `editor.tsx`), e o gesto tem de custar o mesmo nas
+    /// duas.
+    ///
+    /// O trabalho pesado não sumiu — mudou para onde ele é inevitável: o
+    /// "Salvar na galeria", que agora sobe a aberta **e** as que ficaram no
+    /// depósito (`Gravador::guardadas_do_site`). Até lá a receita está gravada,
+    /// a tira e a grade já mostram o resultado, e o cliente continua vendo o
+    /// JPEG de antes — que é exatamente o que "ainda não salvei" significa.
     pub fn sincronizar_revelacao(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         // 🚨 Logado, nada acontece fora de uma sessão — ver `pode_trabalhar`.
         if !self.pode_trabalhar() {
@@ -1644,36 +1675,33 @@ impl Aplicativo {
             return;
         }
 
-        let sessao = self.sessao().cloned();
         let mut gravadas: Vec<(String, Ajustes, persistencia::Corte)> = Vec::new();
-        let mut subindo = 0;
         for alvo in &alvos {
-            let e_a_aberta = alvo.id == aberta.id;
-            let (finais, corte_final) = if e_a_aberta {
-                // A aberta já está no banco com o que está na tela.
-                (ajustes, corte)
+            // A aberta já está no banco com o que está na tela: reescrevê-la
+            // aqui seria gravar o que o autosave acabou de gravar.
+            if alvo.id == aberta.id {
+                continue;
+            }
+            let finais = sincronizacao::mesclar(persistencia::da_foto(alvo), ajustes, &escolha);
+            let corte_final = if escolha.enquadramento {
+                corte
             } else {
-                let finais = sincronizacao::mesclar(persistencia::da_foto(alvo), ajustes, &escolha);
-                let corte_final = if escolha.enquadramento {
-                    corte
-                } else {
-                    persistencia::corte_da_foto(alvo)
-                };
-                self.gravador.gravar(alvo.id.clone(), finais, corte_final);
-                gravadas.push((alvo.id.clone(), finais, corte_final));
-                (finais, corte_final)
+                persistencia::corte_da_foto(alvo)
             };
+            // 🚨 **Só a receita.** Para a que só existe no site isto a põe no
+            // depósito; para a do catálogo, no catálogo. Nos dois casos o que
+            // está no servidor continua sendo o JPEG de antes — e é por isso
+            // que o aviso abaixo diz onde elas estão.
+            self.gravador.gravar(alvo.id.clone(), finais, corte_final);
+            gravadas.push((alvo.id.clone(), finais, corte_final));
 
-            if let (Some(sessao), Some(no_site)) = (sessao.clone(), alvo.pos_venda_foto_id.clone())
-            {
-                self.publicador.salvar_revelacao(
-                    sessao,
+            // A que já tem lugar na galeria entra na fila de envio.
+            if let Some(no_site) = alvo.pos_venda_foto_id.clone() {
+                self.enfileirar_para_subir(
                     no_site,
                     finais,
                     persistencia::para_crop_settings(&corte_final),
-                    self.sincronias.0.clone(),
                 );
-                subindo += 1;
             }
         }
 
@@ -1682,25 +1710,14 @@ impl Aplicativo {
         self.revelacao
             .update(cx, |tela, cx| tela.aplicar_sincronizadas(&gravadas, cx));
         self.reler_o_acervo(cx);
-        // 🔑 **O lote precisa dizer que começou.** Cada foto leva segundos, e
-        // sem uma linha na tela o gesto parece não ter acontecido — que é como
-        // ele foi reportado em 7/set/2026. O fim de cada uma chega depois, pelo
-        // `RevelacaoSalva`.
-        if subindo > 0 {
-            self.avisar_onde_esta_olhando(
-                format!("sincronizando {subindo} foto(s) com a galeria…"),
-                cx,
-            );
-            self.esperar_a_sincronia(subindo, cx);
-        } else {
-            self.avisar_onde_esta_olhando(
-                format!(
-                    "{} foto(s) sincronizadas aqui — elas sobem quando forem classificadas",
-                    gravadas.len()
-                ),
-                cx,
-            );
-        }
+        self.recontar_o_que_falta_subir(cx);
+        self.avisar_onde_esta_olhando(
+            format!(
+                "{} foto(s) receberam estes ajustes — elas sobem quando você salvar na galeria",
+                gravadas.len()
+            ),
+            cx,
+        );
         cx.notify();
     }
 
@@ -1975,6 +1992,15 @@ impl Aplicativo {
     /// indica que o cliente não gostou. O que este caminho faz é gravar os
     /// ajustes; ela sobe já revelada quando ganhar nota.
     ///
+    /// # E as que o "Sincronizar" deixou pendentes
+    ///
+    /// 🔑 **Sobem aqui, junto.** Desde 2026-09-11 o "Sincronizar" copia só a
+    /// receita (ver [`Self::sincronizar_revelacao`]), e este é o momento em que
+    /// revelar é inevitável: o que estiver no depósito e for desta sessão entra
+    /// no mesmo lote da aberta. Sem isto, sincronizar seria um botão que grava
+    /// numa gaveta que ninguém esvazia — e o cliente continuaria vendo o JPEG
+    /// de antes sem ninguém perceber.
+    ///
     /// # Por que sai antes de o site responder
     ///
     /// Porque o que se perderia é nada: os ajustes já foram para o banco local,
@@ -2007,23 +2033,127 @@ impl Aplicativo {
         // envio: os mesmos ajustes que sobem ficam gravados aqui.
         self.voltar_para_biblioteca(window, cx);
 
-        let (Some(sessao), Some(no_site)) = (self.sessao().cloned(), no_site) else {
+        let Some(sessao) = self.sessao().cloned() else {
+            return;
+        };
+
+        // A aberta primeiro, quando ela é do site; e em seguida as que o
+        // "Sincronizar" deixou só com a receita, das duas procedências.
+        let mut lote: Vec<(String, Ajustes, CropSettings)> = Vec::new();
+        if let Some(no_site) = no_site.clone() {
+            lote.push((no_site, ajustes, corte));
+        }
+        // 🚨 **A fila não é esvaziada aqui, e sim quando a foto chega.** Quem a
+        // tira é o `RevelacaoSalva`, e a que falhou fica — senão um lote com
+        // uma rede ruim no meio apagaria da lista a foto que não subiu, e o
+        // número no botão diria que já não há o que salvar.
+        for (outra, ajustes_dela, corte_dela) in self.a_subir.clone() {
+            if lote.iter().any(|(ja, _, _)| ja == &outra) {
+                continue;
+            }
+            lote.push((outra, ajustes_dela, corte_dela));
+        }
+        for (outra, json) in self.pendentes_do_site() {
+            if lote.iter().any(|(ja, _, _)| ja == &outra) {
+                continue;
+            }
+            let Ok(valor) = serde_json::from_str::<serde_json::Value>(&json) else {
+                continue;
+            };
+            let (ajustes_dela, corte_dela) = persistencia::de_json(&valor);
+            lote.push((
+                outra,
+                ajustes_dela,
+                persistencia::para_crop_settings(&corte_dela),
+            ));
+        }
+
+        if lote.is_empty() {
             self.avisar_onde_esta_olhando(
                 "revelação guardada — ela sobe revelada quando a foto for classificada".into(),
                 cx,
             );
             return;
-        };
+        }
 
-        self.publicador.salvar_revelacao(
-            sessao,
-            no_site,
-            ajustes,
-            corte,
-            self.sincronias.0.clone(),
+        let quantas = lote.len();
+        for (no_site, ajustes, corte) in lote {
+            self.publicador.salvar_revelacao(
+                sessao.clone(),
+                no_site,
+                ajustes,
+                corte,
+                self.sincronias.0.clone(),
+            );
+        }
+        self.avisar_onde_esta_olhando(
+            if quantas == 1 {
+                "salvando a revelação na galeria…".into()
+            } else {
+                format!("salvando {quantas} revelações na galeria…")
+            },
+            cx,
         );
-        self.avisar_onde_esta_olhando("salvando a revelação na galeria…".into(), cx);
-        self.esperar_a_sincronia(1, cx);
+        self.esperar_a_sincronia(quantas, cx);
+    }
+
+    /// Põe uma foto da galeria na fila de envio — a última receita ganha.
+    ///
+    /// 🔑 **Uma entrada por foto.** Sincronizar duas vezes seguidas com ajustes
+    /// diferentes mandaria a foto duas vezes ao site, a segunda desfazendo a
+    /// primeira depois de dois downloads e dois JPEGs — e a ordem de chegada
+    /// decidiria o que o cliente vê.
+    fn enfileirar_para_subir(&mut self, no_site: String, ajustes: Ajustes, corte: CropSettings) {
+        self.a_subir.retain(|(ja, _, _)| ja != &no_site);
+        self.a_subir.push((no_site, ajustes, corte));
+    }
+
+    /// Quantas fotos deste ensaio esperam ir ao site — o número no botão de
+    /// salvar da Revelação.
+    ///
+    /// 🚨 **É a conta do lote, e não a das listas.** O número aparece no botão
+    /// "Salvar na galeria", e ele tem de dizer quantas fotos aquele clique
+    /// manda — por isso a aberta entra (ela sempre vai) e por isso as duas
+    /// procedências contam uma vez só: a foto que só existe no site está na
+    /// fila **e** no depósito depois de um sincronizar.
+    fn quantas_a_subir(&self, aberta: Option<&str>) -> usize {
+        let mut ids: Vec<&str> = self.a_subir.iter().map(|(id, _, _)| id.as_str()).collect();
+        let do_deposito = self.pendentes_do_site();
+        ids.extend(do_deposito.iter().map(|(id, _)| id.as_str()));
+        ids.extend(aberta);
+        ids.sort_unstable();
+        ids.dedup();
+        ids.len()
+    }
+
+    /// Reescreve o número no botão "Salvar na galeria" da Revelação.
+    fn recontar_o_que_falta_subir(&mut self, cx: &mut Context<Self>) {
+        let aberta = self
+            .revelacao
+            .read(cx)
+            .foto_aberta()
+            .and_then(|f| f.pos_venda_foto_id.clone());
+        let quantas = self.quantas_a_subir(aberta.as_deref());
+        self.revelacao
+            .update(cx, |tela, cx| tela.definir_nao_salvas(quantas, cx));
+    }
+
+    /// As revelações **desta sessão** que ainda não subiram, por id do site.
+    ///
+    /// 🔑 **O depósito é do app inteiro, e o lote é da galeria aberta.** Quem
+    /// revelou ontem o ensaio de outro cliente e não salvou não pode ver aquelas
+    /// fotos subirem porque hoje clicou em salvar aqui — é o mesmo recorte que o
+    /// `salvarESair` da web faz ao filtrar por `fotos` em vez de pelo depósito.
+    fn pendentes_do_site(&self) -> Vec<(String, String)> {
+        self.gravador
+            .guardadas_do_site()
+            .into_iter()
+            .filter(|(no_site, _)| {
+                self.fotos_do_site
+                    .iter()
+                    .any(|f| f.pos_venda_foto_id.as_deref() == Some(no_site.as_str()))
+            })
+            .collect()
     }
 
     /// Põe o aviso na tela que está na frente.
@@ -3302,6 +3432,23 @@ mod testes {
                     assert_eq!(tela.alvos_da_sincronizacao().len(), 3);
                 });
                 app.sincronizar_revelacao(window, cx);
+            })
+            .expect("a janela deve estar aberta");
+
+        // 🚨 **Sincronizar não sobe nada** — ele copia a receita, e só. Era o
+        // "muito lento" de 11/set/2026: três fotos, três downloads do original
+        // e três JPEGs de 24 MP para um gesto que é uma casca de parâmetros.
+        assert!(
+            publicador.reveladas().is_empty(),
+            "o sincronizar revelou e subiu: {:?}",
+            publicador.reveladas()
+        );
+
+        // E é o "Salvar na galeria" que esvazia a gaveta: a aberta e as duas
+        // que ficaram só com a receita sobem no mesmo lote.
+        janela
+            .update(cx, |app, window, cx| {
+                app.salvar_na_galeria(window, cx);
             })
             .expect("a janela deve estar aberta");
 
@@ -5936,6 +6083,9 @@ mod testes {
                     tela.definir_escolha_da_sincronizacao(Escolha::default());
                 });
                 app.sincronizar_revelacao(window, cx);
+                // Sincronizar copia a receita; quem manda ao site é o salvar.
+                assert_eq!(app.sincronias_pendentes(), 0, "o sincronizar não sobe nada");
+                app.salvar_na_galeria(window, cx);
 
                 assert_eq!(
                     app.sincronias_pendentes(),
