@@ -30,10 +30,14 @@ use gpui::{
 
 /// Quanto dura o cruzamento entre uma foto e a seguinte.
 ///
-/// O mesmo meio segundo da tela do cliente na web
-/// (`tela-do-cliente/tela.tsx`), e pelo mesmo motivo: um segundo fica lindo
-/// numa foto só e vira melado quando o operador atravessa a tira com a seta.
-const CRUZAMENTO: Duration = Duration::from_millis(500);
+/// 🔑 **Um segundo, como na web desde 2026-09-11.** Meio segundo era o número
+/// herdado da galeria, onde o operador atravessa a tira com a seta e a
+/// transição vira melado — mas esta é a tela do **cliente**: quem olha não está
+/// navegando, está decidindo se leva a foto, e o que ele viu foi *"tá muito
+/// rápido"* (dono). O `ease_in_out` da animação é o que faz o tempo maior ser
+/// percebido como apresentação e não como lentidão: o `ease_out` sai do zero a
+/// toda velocidade e a foto aparece de estalo.
+const CRUZAMENTO: Duration = Duration::from_millis(1000);
 
 actions!(vintagelightbox, [FecharCliente, AlternarInfoDoCliente]);
 
@@ -91,6 +95,8 @@ pub struct Cliente {
     /// foto apareceria de uma vez. É o mesmo papel da `chave` das camadas na
     /// web.
     troca: usize,
+    /// Onde a foto está na sequência do operador, e de quantas. Ver `info`.
+    posicao: Option<(usize, usize)>,
     mostrar_info: bool,
     /// A janela precisa de foco próprio para `Esc` e `I` chegarem — a mesma
     /// lição que custou dois commits na Revelação: `track_focus` rastreia o
@@ -108,6 +114,7 @@ impl Cliente {
             imagem: None,
             saindo: None,
             troca: 0,
+            posicao: None,
             // Nasce ligado, como no legado — quem mostra ao cliente costuma
             // querer o nome do arquivo à vista, e desligar é uma tecla.
             mostrar_info: true,
@@ -136,8 +143,10 @@ impl Cliente {
         &mut self,
         foto: Option<PhotoViewModel>,
         imagem: Option<Arc<RenderImage>>,
+        posicao: Option<(usize, usize)>,
         cx: &mut Context<Self>,
     ) {
+        self.posicao = posicao;
         if self.e_a_mesma_foto(foto.as_ref()) {
             self.foto = foto;
             self.imagem = imagem;
@@ -194,16 +203,41 @@ impl Cliente {
         self.alternar_info(cx);
     }
 
-    /// Nome do arquivo e a nota em estrelas — o mesmo rodapé do legado.
-    fn info(&self) -> Option<(SharedString, SharedString)> {
+    /// O que o rodapé conta: onde estamos, o nome, a nota e se o cliente já
+    /// levou esta foto.
+    ///
+    /// 🔑 **Os três dados respondem a perguntas que o cliente faz em voz alta**
+    /// — *"em qual estamos?"*, *"esta é das boas?"*, *"essa eu já levo?"* —, e
+    /// entraram na web em 2026-09-11. Sem eles, quem está do outro lado
+    /// acompanha o operador no escuro e pergunta a cada foto.
+    ///
+    /// ⚠️ **As cinco estrelas sempre aparecem**, as vazias em cinza: é o que
+    /// deixa a nota ser lida de longe, sem contar o que não está lá. O legado
+    /// mostrava só as cheias, e três estrelas a dois metros viram "algumas".
+    fn info(&self) -> Option<InfoDoRodape> {
         let foto = self.foto.as_ref()?;
-        let estrelas = if foto.rating > 0 {
-            "★".repeat(foto.rating.max(0) as usize)
-        } else {
-            String::new()
-        };
-        Some((foto.name.clone().into(), estrelas.into()))
+        let nota = foto.rating.clamp(0, 5) as usize;
+        Some(InfoDoRodape {
+            nome: foto.name.clone().into(),
+            cheias: "★".repeat(nota).into(),
+            vazias: "★".repeat(5 - nota).into(),
+            posicao: self
+                .posicao
+                .map(|(i, total)| format!("{i} / {total}").into()),
+            // `comprada` no view model é **levada no balcão** (ver o campo): é a
+            // foto que o cliente já disse que leva.
+            escolhida: foto.comprada,
+        })
     }
+}
+
+/// O que o rodapé da segunda tela mostra.
+struct InfoDoRodape {
+    nome: SharedString,
+    cheias: SharedString,
+    vazias: SharedString,
+    posicao: Option<SharedString>,
+    escolhida: bool,
 }
 
 impl Cliente {
@@ -277,7 +311,7 @@ impl Render for Cliente {
                     .clone()
                     .map(|imagem| Self::camada("cliente-entrando", self.troca, imagem, false)),
             )
-            .children(info.map(|(nome, estrelas)| {
+            .children(info.map(|info| {
                 div()
                     .absolute()
                     .left(px(20.))
@@ -288,12 +322,48 @@ impl Render for Cliente {
                     .bg(gpui::rgba(0x000000b4))
                     .flex()
                     .flex_col()
-                    .child(div().text_sm().text_color(gpui::white()).child(nome))
+                    .gap(px(2.))
                     .child(
                         div()
-                            .text_xs()
-                            .text_color(gpui::rgb(0xd0d0d0))
-                            .child(estrelas),
+                            .flex()
+                            .items_baseline()
+                            .gap(px(8.))
+                            .children(info.posicao.map(|posicao| {
+                                div()
+                                    .text_sm()
+                                    .text_color(gpui::rgb(0x9a9a9a))
+                                    .child(posicao)
+                            }))
+                            .child(div().text_sm().text_color(gpui::white()).child(info.nome)),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(8.))
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(gpui::rgb(0xfbbf24))
+                                    .child(info.cheias),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(gpui::rgb(0x4a4a4a))
+                                    .child(info.vazias),
+                            )
+                            .when(info.escolhida, |linha| {
+                                linha.child(
+                                    div()
+                                        .px(px(6.))
+                                        .rounded(px(999.))
+                                        .bg(gpui::rgb(0xfbbf24))
+                                        .text_xs()
+                                        .text_color(gpui::black())
+                                        .child("Escolhida"),
+                                )
+                            }),
                     )
             }))
             .child(
@@ -365,24 +435,54 @@ mod testes {
         assert_eq!(monitor_do_cliente::<u32>(&[], None), None);
     }
 
-    /// A nota vira estrelas, e nota zero não vira nada.
+    /// O rodapé conta onde estamos, o nome e a nota — as cinco estrelas.
+    ///
+    /// 🔑 **As vazias entram**, e é a diferença que a web trouxe: a nota se lê
+    /// de longe sem contar o que não está lá.
     #[gpui::test]
-    fn o_rodape_mostra_o_nome_e_as_estrelas(cx: &mut TestAppContext) {
+    fn o_rodape_mostra_a_posicao_o_nome_e_as_cinco_estrelas(cx: &mut TestAppContext) {
         let janela = cx.add_window(Cliente::novo);
 
         janela
             .update(cx, |cliente, _window, cx| {
-                cliente.mostrar(Some(foto("retrato.jpg", 3)), None, cx);
-                let (nome, estrelas) = cliente.info().expect("há foto");
-                assert_eq!(nome, "retrato.jpg");
-                assert_eq!(estrelas, "★★★");
+                cliente.mostrar(Some(foto("retrato.jpg", 3)), None, Some((7, 25)), cx);
+                let info = cliente.info().expect("há foto");
+                assert_eq!(info.nome, "retrato.jpg");
+                assert_eq!(info.cheias, "★★★");
+                assert_eq!(info.vazias, "★★", "as vazias completam cinco");
+                assert_eq!(info.posicao.as_ref().map(|p| p.as_ref()), Some("7 / 25"));
 
-                cliente.mostrar(Some(foto("crua.NEF", 0)), None, cx);
-                let (_, estrelas) = cliente.info().expect("há foto");
-                assert_eq!(estrelas, "", "nota zero não desenha estrela vazia");
+                cliente.mostrar(Some(foto("crua.NEF", 0)), None, None, cx);
+                let info = cliente.info().expect("há foto");
+                assert_eq!(info.cheias, "");
+                assert_eq!(info.vazias, "★★★★★", "sem nota, cinco vazias");
+                assert!(info.posicao.is_none(), "sem posição, o rodapé não inventa");
 
-                cliente.mostrar(None, None, cx);
+                cliente.mostrar(None, None, None, cx);
                 assert!(cliente.info().is_none(), "sem foto não há rodapé");
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// A foto que o cliente já disse que leva aparece marcada.
+    #[gpui::test]
+    fn a_levada_no_balcao_aparece_como_escolhida(cx: &mut TestAppContext) {
+        let janela = cx.add_window(Cliente::novo);
+
+        janela
+            .update(cx, |cliente, _window, cx| {
+                cliente.mostrar(Some(foto("a.jpg", 5)), None, None, cx);
+                assert!(!cliente.info().expect("há foto").escolhida);
+
+                let levada = PhotoViewModel {
+                    comprada: true,
+                    ..foto("b.jpg", 5)
+                };
+                cliente.mostrar(Some(levada), None, None, cx);
+                assert!(
+                    cliente.info().expect("há foto").escolhida,
+                    "`comprada` no view model é levada no balcão — ver o campo"
+                );
             })
             .expect("a janela deve estar aberta");
     }
@@ -405,14 +505,14 @@ mod testes {
         janela
             .update(cx, |cliente, _window, cx| {
                 let primeira = imagem();
-                cliente.mostrar(Some(foto("a.jpg", 3)), Some(primeira.clone()), cx);
+                cliente.mostrar(Some(foto("a.jpg", 3)), Some(primeira.clone()), None, cx);
                 assert!(
                     cliente.saindo.is_none(),
                     "a primeira foto não tem de quem sair"
                 );
                 let troca_da_primeira = cliente.troca;
 
-                cliente.mostrar(Some(foto("b.jpg", 4)), Some(imagem()), cx);
+                cliente.mostrar(Some(foto("b.jpg", 4)), Some(imagem()), None, cx);
                 assert!(
                     cliente
                         .saindo
@@ -441,12 +541,12 @@ mod testes {
 
         janela
             .update(cx, |cliente, _window, cx| {
-                cliente.mostrar(Some(foto("a.jpg", 3)), Some(imagem()), cx);
+                cliente.mostrar(Some(foto("a.jpg", 3)), Some(imagem()), None, cx);
                 let troca = cliente.troca;
 
                 // Cada chamada traz um `Arc` diferente, como a raiz faz de verdade.
                 let revelada = imagem();
-                cliente.mostrar(Some(foto("a.jpg", 3)), Some(revelada.clone()), cx);
+                cliente.mostrar(Some(foto("a.jpg", 3)), Some(revelada.clone()), None, cx);
                 assert_eq!(
                     cliente.troca, troca,
                     "mesma foto, nenhum cruzamento — senão ela pisca a cada repintura"

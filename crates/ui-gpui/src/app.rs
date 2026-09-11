@@ -508,8 +508,12 @@ impl Aplicativo {
             if raiz.cliente.is_none() {
                 return;
             }
-            if let Some(foto) = biblioteca.read(cx).foto_selecionada() {
-                raiz.mostrar_ao_cliente(&foto, cx);
+            let (foto, posicao) = {
+                let b = biblioteca.read(cx);
+                (b.foto_selecionada(), b.posicao_da_selecao())
+            };
+            if let Some(foto) = foto {
+                raiz.mostrar_ao_cliente(&foto, posicao, cx);
             }
         });
 
@@ -1750,7 +1754,8 @@ impl Aplicativo {
                 self.cliente = Some(janela);
                 self.detalhe
                     .update(cx, |tela, cx| tela.definir_cliente_aberta(true, cx));
-                self.mostrar_ao_cliente(&foto, cx);
+                let posicao = self.biblioteca.read(cx).posicao_da_selecao();
+                self.mostrar_ao_cliente(&foto, posicao, cx);
             }
             // Abrir janela é pedido ao sistema, e ele pode recusar. Sem monitor
             // não há segunda tela — e derrubar o app por causa disso seria trocar
@@ -1769,7 +1774,12 @@ impl Aplicativo {
     /// ⚠️ **A imagem é lida e decodificada na thread da interface**, como na
     /// abertura da Revelação: é um JPEG de preview, de poucos milissegundos. É a
     /// mesma pendência que a fase 1 deixou, e ela vale para os dois lugares.
-    fn mostrar_ao_cliente(&mut self, foto: &PhotoViewModel, cx: &mut Context<Self>) {
+    fn mostrar_ao_cliente(
+        &mut self,
+        foto: &PhotoViewModel,
+        posicao: Option<(usize, usize)>,
+        cx: &mut Context<Self>,
+    ) {
         let Some(janela) = self.cliente.as_ref() else {
             return;
         };
@@ -1787,7 +1797,7 @@ impl Aplicativo {
         // barra continuaria dizendo "fechar" para uma janela que não existe.
         let viva = janela
             .update(cx, |cliente, _window, cx| {
-                cliente.mostrar(Some(foto), imagem, cx);
+                cliente.mostrar(Some(foto), imagem, posicao, cx);
             })
             .is_ok();
 

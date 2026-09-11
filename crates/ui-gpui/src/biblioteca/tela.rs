@@ -759,6 +759,17 @@ impl Biblioteca {
         self.principal_no_acervo().map(|i| self.fotos[i].clone())
     }
 
+    /// Onde a foto do cursor está na sequência que o operador percorre, e de
+    /// quantas — o `7 / 25` da segunda tela.
+    ///
+    /// 🔑 **É a posição no recorte em vigor**, e não no acervo: é o mesmo número
+    /// que ele tem do lado dele, e as duas telas contando diferente no mesmo
+    /// balcão seria pior do que não contar. Mesma regra da web.
+    pub fn posicao_da_selecao(&self) -> Option<(usize, usize)> {
+        let posicao = self.selecao.foco()?;
+        Some((posicao + 1, self.visiveis.len()))
+    }
+
     /// Os ids das selecionadas, **na ordem do acervo**.
     ///
     /// É o que a Impressão recebe para montar a coleção — e a ordem importa,
