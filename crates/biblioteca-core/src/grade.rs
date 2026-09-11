@@ -401,8 +401,46 @@ pub fn faixa_entre(a: usize, b: usize) -> std::ops::RangeInclusive<usize> {
     a.min(b)..=a.max(b)
 }
 
+/// A área, dentro de `w × h`, em que a imagem **inteira** cabe sem deformar
+/// (`object-fit: contain`) — devolvida como deslocamento e tamanho em pixels do
+/// alvo, a partir do canto dele.
+///
+/// 🚨 **É o que faz a grade mostrar a mesma foto que o resto do sistema.** O
+/// tile desenhava em *cover*, cortando as bordas para preencher: numa foto
+/// **enquadrada** — que é justamente a que já foi recortada de propósito — isso
+/// corta de novo, e a mesma foto aparecia com um pedaço a menos na galeria e
+/// inteira no editor, na tira da revelação e na tela do cliente. Do lado de
+/// fora isso é *"parece que está dando um zoom"* (o dono, 2026-09-11). Quem
+/// enquadrou já escolheu o que fica na foto; a grade não escolhe de novo.
+///
+/// O espaço que sobra nas laterais é o fundo do tile, como no Lightroom.
+pub fn area_contida(largura_imagem: f32, altura_imagem: f32, w: f32, h: f32) -> Retangulo {
+    let cheio = Retangulo {
+        x: 0.0,
+        y: 0.0,
+        w,
+        h,
+    };
+    if largura_imagem <= 0.0 || altura_imagem <= 0.0 || w <= 0.0 || h <= 0.0 {
+        return cheio;
+    }
+    let escala = (w / largura_imagem).min(h / altura_imagem);
+    let largura = largura_imagem * escala;
+    let altura = altura_imagem * escala;
+    Retangulo {
+        x: (w - largura) / 2.0,
+        y: (h - altura) / 2.0,
+        w: largura,
+        h: altura,
+    }
+}
+
 /// O recorte de origem que faz a imagem cobrir `w × h` sem deformar
 /// (`object-fit: cover`), em coordenadas **normalizadas** (0–1).
+///
+/// ⚠️ **A grade não usa mais isto** — ver [`area_contida`] e o motivo. Fica
+/// porque a conta é a de `cover` e o dia em que alguma tela a quiser, ela está
+/// aqui testada.
 ///
 /// 🔑 Normalizadas, e não em pixels, porque é assim que a GPU as consome: o
 /// mesmo número vira `uv` no shader do navegador e recorte no desktop.
@@ -761,6 +799,38 @@ mod testes {
     fn recorte_de_imagem_sem_tamanho_e_a_imagem_inteira() {
         let r = recorte_cobrir(0.0, 0.0, 100.0, 100.0);
         assert_eq!((r.x, r.y, r.w, r.h), (0.0, 0.0, 1.0, 1.0));
+    }
+
+    /// 🚨 O que estes três prendem é a foto **enquadrada** aparecendo cortada
+    /// na galeria e inteira em todo o resto — ver `area_contida`.
+    #[test]
+    fn contida_deixa_faixa_em_cima_e_embaixo_na_imagem_mais_larga() {
+        let r = area_contida(2000.0, 1000.0, 100.0, 100.0);
+        assert_eq!((r.x, r.w), (0.0, 100.0), "encosta nas laterais");
+        assert!((r.h - 50.0).abs() < 0.001);
+        assert!((r.y - 25.0).abs() < 0.001, "centralizada na vertical");
+    }
+
+    #[test]
+    fn contida_deixa_faixa_nas_laterais_na_imagem_mais_alta() {
+        let r = area_contida(1000.0, 2000.0, 100.0, 100.0);
+        assert_eq!((r.y, r.h), (0.0, 100.0));
+        assert!((r.w - 50.0).abs() < 0.001);
+        assert!((r.x - 25.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn contida_de_imagem_sem_tamanho_ocupa_o_alvo_inteiro() {
+        // Sem miniatura ainda não há proporção: o tile fica como estava.
+        let r = area_contida(0.0, 0.0, 100.0, 80.0);
+        assert_eq!((r.x, r.y, r.w, r.h), (0.0, 0.0, 100.0, 80.0));
+    }
+
+    #[test]
+    fn contida_na_mesma_proporcao_nao_sobra_faixa_nenhuma() {
+        let r = area_contida(600.0, 400.0, 150.0, 100.0);
+        assert_eq!((r.x, r.y), (0.0, 0.0));
+        assert!((r.w - 150.0).abs() < 0.001 && (r.h - 100.0).abs() < 0.001);
     }
 
     #[test]

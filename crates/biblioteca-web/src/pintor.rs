@@ -1,7 +1,7 @@
 //! O desenho da grade — retângulos e texturas, e nada de texto.
 //!
-//! Por tile à vista: o fundo (enquanto a miniatura não chega), a miniatura em
-//! *cover* com cantos arredondados, o véu da apagada, o anel âmbar da
+//! Por tile à vista: o fundo (que também é a moldura em volta da foto), a
+//! miniatura **inteira** encaixada nele com cantos arredondados, o véu da apagada, o anel âmbar da
 //! selecionada, o anel do foco (só quando o canvas tem o teclado), a caixinha
 //! de marcar no hover e na selecionada — e o laço do arrasto por cima de tudo.
 //!
@@ -12,7 +12,7 @@
 //! Coordenadas: o core fala em conteúdo; o canvas mostra a janela que começa
 //! em `deslocamento`. Subtrair é tudo o que este arquivo faz de geometria.
 
-use biblioteca_core::grade::recorte_cobrir;
+use biblioteca_core::grade::area_contida;
 use egui::epaint::RectShape;
 use egui::{Color32, Pos2, Rect, Rounding, Shape, Stroke, Vec2};
 
@@ -45,11 +45,20 @@ pub fn pintar(ctx: &egui::Context, g: &Grade) {
         p.rect_filled(imagem, Rounding::same(RAIO), cores.fundo_do_tile);
 
         if let Some(tex) = g.miniaturas.get(&foto.id).and_then(|u| g.texturas.get(u)) {
+            // 🚨 **A foto inteira, encaixada** — e não em *cover*, que cortava
+            // as bordas para preencher o tile. Numa foto **enquadrada**, que já
+            // foi recortada de propósito, isso corta de novo: a mesma foto
+            // aparecia com um pedaço a menos aqui e inteira no editor, na tira
+            // da revelação e na tela do cliente. Quem enquadrou já escolheu o
+            // que fica na foto. Ver `area_contida`.
             let tam = tex.size_vec2();
-            let uv = recorte_cobrir(tam.x, tam.y, imagem.width(), imagem.height());
-            let mut forma = RectShape::filled(imagem, Rounding::same(RAIO), Color32::WHITE);
+            let a = area_contida(tam.x, tam.y, imagem.width(), imagem.height());
+            let dentro = Rect::from_min_size(imagem.min + Vec2::new(a.x, a.y), Vec2::new(a.w, a.h));
+            // O canto arredondado acompanha a foto, e não o tile: numa faixa
+            // estreita ele comeria a imagem em vez da moldura.
+            let raio = RAIO.min(a.w / 2.0).min(a.h / 2.0);
+            let mut forma = RectShape::filled(dentro, Rounding::same(raio), Color32::WHITE);
             forma.fill_texture_id = tex.id();
-            forma.uv = Rect::from_min_size(Pos2::new(uv.x, uv.y), Vec2::new(uv.w, uv.h));
             p.add(Shape::Rect(forma));
         }
         if foto.apagada {

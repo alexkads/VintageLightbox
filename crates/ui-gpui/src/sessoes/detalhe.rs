@@ -2458,10 +2458,16 @@ impl Detalhe {
                 celula.child(
                     img(imagem)
                         .size_full()
-                        // `Cover` e não `Contain`: a miniatura preenche o
-                        // retângulo, como o `object-cover` do site. Com
-                        // `Contain` sobrariam duas tarjas do fundo em cada foto.
-                        .object_fit(gpui::ObjectFit::Cover)
+                        // 🚨 `Contain`, e não `Cover`. Preencher o retângulo
+                        // custa **cortar**, e numa foto que já foi
+                        // **enquadrada** isso corta o que o operador escolheu
+                        // manter: a mesma foto aparecia com um pedaço a menos
+                        // aqui e inteira no editor e na tela do cliente (o
+                        // dono, 2026-09-11). É a mesma decisão que a
+                        // Biblioteca já tinha tomado ao lado — *"num estúdio
+                        // de retrato o recorte centralizado tira a cabeça
+                        // primeiro"* —, e as duas tarjas de fundo são o preço.
+                        .object_fit(gpui::ObjectFit::Contain)
                         .when(foto.apagada, |imagem| imagem.opacity(0.4)),
                 )
             })
