@@ -170,6 +170,13 @@ pub fn init(cx: &mut gpui::App) {
         // aparece quando alguém tenta refazer.
         gpui::KeyBinding::new("cmd-shift-z", Refazer, Some(CONTEXTO)),
         gpui::KeyBinding::new("cmd-z", Desfazer, Some(CONTEXTO)),
+        // 🚨 **E com Ctrl, pelo mesmo motivo do `Cmd+A` lá embaixo**: este app
+        // roda em Windows e Linux, onde desfazer é `Ctrl+Z` e mais nada. Com
+        // só o `cmd-`, o gesto mais universal que existe não fazia nada fora do
+        // Mac — e ninguem reclama de um desfazer que nao funciona, apenas para
+        // de confiar no programa (dono, 2026-09-11).
+        gpui::KeyBinding::new("ctrl-shift-z", Refazer, Some(CONTEXTO)),
+        gpui::KeyBinding::new("ctrl-z", Desfazer, Some(CONTEXTO)),
         // Copiar e colar revelação — as mesmas teclas do Lightroom.
         //
         // 🔑 **Levam `CONTEXTO` e não `SEM_CAMPO_DE_TEXTO`**, como o `Cmd+Z`:
@@ -177,6 +184,8 @@ pub fn init(cx: &mut gpui::App) {
         // com `Cmd` não vira letra.
         gpui::KeyBinding::new("cmd-shift-c", CopiarRevelacao, Some(CONTEXTO)),
         gpui::KeyBinding::new("cmd-shift-v", ColarRevelacao, Some(CONTEXTO)),
+        gpui::KeyBinding::new("ctrl-shift-c", CopiarRevelacao, Some(CONTEXTO)),
+        gpui::KeyBinding::new("ctrl-shift-v", ColarRevelacao, Some(CONTEXTO)),
         // Apagar. 🚨 Vai em `SEM_CAMPO_DE_TEXTO` porque `Delete` e `Backspace`
         // apagam **letra** dentro de um campo de busca — e roubar a tecla de lá
         // faria digitar virar um pedido para tirar foto do catálogo.

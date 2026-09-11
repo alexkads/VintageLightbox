@@ -54,6 +54,9 @@ const CONTEXTO: &str = "Importacao";
 pub fn init(cx: &mut gpui::App) {
     cx.bind_keys([
         gpui::KeyBinding::new("cmd-a", MarcarTudo, Some(CONTEXTO)),
+        // Ctrl também: em Windows e Linux é a única tecla de "marcar tudo", e
+        // sem ela a caixa da importação só respondia no Mac.
+        gpui::KeyBinding::new("ctrl-a", MarcarTudo, Some(CONTEXTO)),
         gpui::KeyBinding::new("space", AlternarFoco, Some(CONTEXTO)),
         gpui::KeyBinding::new("down", DescerFoco, Some(CONTEXTO)),
         gpui::KeyBinding::new("up", SubirFoco, Some(CONTEXTO)),

@@ -3814,7 +3814,10 @@ impl Revelacao {
                     .label("↶")
                     .xsmall()
                     .ghost()
-                    .tooltip("Desfazer (Cmd+Z)")
+                    .tooltip(SharedString::from(format!(
+                        "Desfazer ({}+Z)",
+                        tema::modificador()
+                    )))
                     .disabled(!self.pode_desfazer())
                     .on_click(cx.listener(|tela, _ev, window, cx| tela.desfazer(window, cx))),
             )
@@ -3823,7 +3826,10 @@ impl Revelacao {
                     .label("↷")
                     .xsmall()
                     .ghost()
-                    .tooltip("Refazer (Cmd+Shift+Z)")
+                    .tooltip(SharedString::from(format!(
+                        "Refazer ({}+Shift+Z)",
+                        tema::modificador()
+                    )))
                     .disabled(!self.pode_refazer())
                     .on_click(cx.listener(|tela, _ev, window, cx| tela.refazer(window, cx))),
             )
