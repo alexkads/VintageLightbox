@@ -5,6 +5,14 @@ members = [
     "crates/use-cases",
     "crates/adapters",
     "crates/infrastructure",
+    # 📸 O codificador de foto, sozinho (2026-09-12). Ele era um módulo do
+    # `revelacao-core` e saiu de lá para poder virar wasm **sem GPU**: o
+    # download do cliente converte WebP em JPEG no navegador dele, e o
+    # `revelacao-core` traz o `wgpu` a reboque.
+    "crates/foto-codec",
+    # O mesmo codificador compilado para o navegador do **cliente** — sem GPU,
+    # só para converter o WebP guardado no JPEG que ele leva ao laboratório.
+    "crates/conversao-web",
     # O motor de revelação sem nada em volta (2026-09-04): o que o navegador
     # precisa e o `infrastructure` não consegue dar, porque puxa sqlx, reqwest e
     # LibRaw — nada disso compila para wasm32.
