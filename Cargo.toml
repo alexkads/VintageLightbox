@@ -131,10 +131,24 @@ codegen-units = 1
 [profile.test]
 opt-level = 1
 
-# O perfil do `.wasm`: tamanho antes de velocidade. O `release` acima é o do
-# desktop e não se toca — `opt-level = 3` num binário que o navegador baixa a
-# cada primeira abertura custaria o dobro de bytes por pouco ganho.
+# O perfil do `.wasm`.
+#
+# 🚨 **Era `opt-level = "z"`, com a justificativa de que velocidade "custaria o
+# dobro de bytes por pouco ganho".** Medido em 2026-09-12, no navegador, com os
+# dois módulos na mesma página e alternados: codificar uma foto de 24 MP em
+# JPEG q92 custava **1068 ms** com `z` e passou a **624 ms** com `3` mais
+# `+simd128` — **1,71×**, e o arquivo que sai é byte a byte o mesmo. O preço
+# real foi **+21%** de wasm (2,70 → 3,27 MB), e não o dobro.
+#
+# 🔑 **E os bytes se pagam uma vez.** O site serve os motores com
+# `Cache-Control: immutable` (a URL leva `?v=<commit>`) e começa a baixar o da
+# revelação no passar do mouse sobre "Revelar". O que não se paga uma vez é o
+# codificador: ele roda a cada foto salva, e o lote do balcão tem trinta.
+#
+# ⚠️ O `+simd128` é passado por `RUSTFLAGS` em `construir-web.sh`, e não aqui:
+# ele vale para o motor de revelação, que só roda em tela de operador. SIMD em
+# wasm pede Chrome 91+ ou Safari 16.4+.
 [profile.release-web]
 inherits = "release"
-opt-level = "z"
+opt-level = 3
 panic = "abort"
