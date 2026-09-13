@@ -43,6 +43,16 @@ pub enum DomainError {
     #[error("o site não encontrou: {0}")]
     NaoEncontradoNoSite(String),
 
+    /// 🔚 O site recusou o fim da sessão — gerar o link ou avisar — porque a
+    /// galeria não tem e-mail (`422`, desde 2026-09-13): sem contato nenhum, ou
+    /// só com WhatsApp. O link entra na conta do e-mail, e o aviso vai por ele.
+    ///
+    /// Variante própria pelo mesmo motivo das outras: o remédio é outro. Não é
+    /// "tente de novo" nem "entre de novo" — é pedir o e-mail ao operador e
+    /// seguir com o gesto. A frase é a do site.
+    #[error("{0}")]
+    FaltaEmail(String),
+
     #[error("Collection não encontrada")]
     CollectionNotFound,
 

@@ -31,17 +31,20 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use biblioteca_core::acervo::{self, Acervo, Filtro};
+use biblioteca_core::dados_do_cliente::{self, DadosDoCliente};
 use biblioteca_core::dinheiro;
 use biblioteca_core::grade::colunas_que_cabem;
 use biblioteca_core::selecao::{Modificadores, Selecao};
 use domain::services::pos_venda::{
-    EstadoDaFotoNoSite, EstadoNoBalcao, FotoDaGaleria, GaleriaAberta, LinkDeAcesso, Produto, Sessao,
+    EstadoDaFotoNoSite, EstadoNoBalcao, FotoDaGaleria, GaleriaAberta, LinkDeAcesso,
+    MudancaDaGaleria, Produto, Sessao,
 };
 use gpui::{
-    canvas, div, img, prelude::*, px, App, Context, Entity, EventEmitter, SharedString, Task,
-    Window,
+    canvas, div, img, prelude::*, px, App, Context, Entity, EventEmitter, Focusable, SharedString,
+    Task, Window,
 };
 use gpui_component::button::{Button, ButtonVariants};
+use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::progress::Progress;
 use gpui_component::slider::{Slider, SliderEvent, SliderState};
 use gpui_component::{ActiveTheme, Disableable, Selectable, Sizable};
@@ -51,7 +54,7 @@ use super::altura_da_tira;
 use super::arquivos::SeletorDeFotos;
 use crate::biblioteca::miniaturas::{CacheDeMiniaturas, Miniatura};
 use crate::importacao::explorador::{Andamento, Freios, Importador};
-use crate::pos_venda::porta::{Publicador, Recado};
+use crate::pos_venda::porta::{GestoDoFim, Publicador, Recado};
 use crate::selos;
 use crate::tema::cores;
 use domain::value_objects::{ImportMode, ImportOptions, OrganizationStrategy, RenamePattern};
@@ -386,11 +389,63 @@ pub struct Detalhe {
     /// importação se dava por terminada no meio.
     importacao: Option<Importacao>,
     link: Option<LinkDeAcesso>,
+    /// ✏️ O formulário dos dados do cliente, quando aparece — o "Editar" e o
+    /// pedido de contato do fim da sessão. Ver [`FormularioDoCliente`].
+    dados_do_cliente: Option<FormularioDoCliente>,
+    /// O que foi mandado ao site e ainda não voltou: o motivo (para seguir o
+    /// gesto) e os dados conferidos (para aplicar à sessão aberta). Fora do
+    /// formulário de propósito — fechá-lo no meio não perde a resposta.
+    gravando_dados: Option<(MotivoDoFormulario, DadosDoCliente)>,
     carregando: bool,
     erro: Option<SharedString>,
     recados: (Sender<Recado>, Receiver<Recado>),
     colhendo: bool,
     _colheita: Option<Task<()>>,
+}
+
+/// Por que o formulário dos dados do cliente está aberto — e o que fazer depois
+/// de gravar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MotivoDoFormulario {
+    /// "Editar": título, e-mail e WhatsApp. O contato pode ficar vazio.
+    Editar,
+    /// 🔚 O "Copiar link" pediu o contato; depois de gravar, pede o link.
+    ContatoParaOLink,
+    /// 🔚 O "Avisar" pediu o contato; depois de gravar, avisa (se veio e-mail).
+    ContatoParaAvisar,
+}
+
+/// ✏️ Um formulário só para os dados do cliente, nos dois modos — o mesmo
+/// desenho do `dados-do-cliente-dialog.tsx` da web (dono, 2026-09-13).
+struct FormularioDoCliente {
+    motivo: MotivoDoFormulario,
+    /// `None` até a primeira pintura com janela — ver
+    /// `Detalhe::preparar_formulario_do_cliente`.
+    campos: Option<CamposDoCliente>,
+    /// A frase da recusa: a conferência local, o `400` do site, ou o `422`
+    /// que abriu o pedido.
+    erro: Option<SharedString>,
+}
+
+struct CamposDoCliente {
+    titulo: Entity<InputState>,
+    email: Entity<InputState>,
+    whatsapp: Entity<InputState>,
+    /// Enter grava — as inscrições vivem enquanto os campos viverem.
+    _enter: [gpui::Subscription; 3],
+}
+
+/// Um campo já com o valor que a sessão tem.
+fn campo_preenchido(
+    valor: &str,
+    dica: &'static str,
+    window: &mut Window,
+    cx: &mut Context<Detalhe>,
+) -> Entity<InputState> {
+    let estado = cx.new(|cx| InputState::new(window, cx).placeholder(dica));
+    let valor = valor.to_string();
+    estado.update(cx, |campo, cx| campo.set_value(valor, window, cx));
+    estado
 }
 
 impl Detalhe {
@@ -460,6 +515,8 @@ impl Detalhe {
             escolhendo: false,
             importacao: None,
             link: None,
+            dados_do_cliente: None,
+            gravando_dados: None,
             carregando: false,
             erro: None,
             recados: channel(),
@@ -491,6 +548,9 @@ impl Detalhe {
         self.pedidas.clear();
         self.baixando = 0;
         self.link = None;
+        // O formulário de outro cliente aberto na tela deste seria o mesmo erro.
+        self.dados_do_cliente = None;
+        self.gravando_dados = None;
         self.importacao = None;
         self.erro = None;
         self.carregando = true;
@@ -1049,6 +1109,11 @@ impl Detalhe {
         if self.avisando {
             return;
         }
+        // 🔚 Fim da sessão sem e-mail: pede o e-mail e segue depois de gravar.
+        if self.aberta.is_some() && !self.tem_email() {
+            self.abrir_formulario_do_cliente(MotivoDoFormulario::ContatoParaAvisar, None, cx);
+            return;
+        }
         self.avisando = true;
         self.publicador
             .avisar(sessao, galeria_id, self.recados.0.clone());
@@ -1064,6 +1129,11 @@ impl Detalhe {
         if self.pedindo_link {
             return;
         }
+        // 🔚 Fim da sessão sem e-mail: pede o e-mail e segue depois de gravar.
+        if self.aberta.is_some() && !self.tem_email() {
+            self.abrir_formulario_do_cliente(MotivoDoFormulario::ContatoParaOLink, None, cx);
+            return;
+        }
         // 🚨 **Sem isto o link nunca chegava.** A colheita para quando não há
         // resposta a esperar, e "esperar" era `carregando || enviando ||
         // baixando || avisando` — uma lista que esquecia o link. O pedido saía,
@@ -1074,6 +1144,216 @@ impl Detalhe {
             .link(sessao, galeria_id, self.recados.0.clone());
         self.acompanhar(cx);
         cx.notify();
+    }
+
+    // ── Os dados do cliente: título, e-mail e WhatsApp ──────────────────────
+
+    /// A sessão aberta tem e-mail — o que o link e o aviso exigem?
+    ///
+    /// 🚨 O WhatsApp não conta: o link entra na conta do e-mail, e o aviso vai
+    /// por e-mail (usuários em produção, 2026-09-13).
+    pub fn tem_email(&self) -> bool {
+        self.aberta
+            .as_ref()
+            .is_some_and(|a| dados_do_cliente::tem_email(a.galeria.email.as_deref()))
+    }
+
+    /// Por que o formulário dos dados do cliente está aberto — `None` fechado.
+    pub fn motivo_do_formulario(&self) -> Option<MotivoDoFormulario> {
+        self.dados_do_cliente.as_ref().map(|f| f.motivo)
+    }
+
+    /// ✏️ "Editar": título, e-mail e WhatsApp da sessão aberta.
+    ///
+    /// *"Dentro da sessão precisa ser possível mudar o Título, email e o
+    /// whatsapp."* — dono, 2026-09-13. O mesmo gesto da web: o botão ao lado do
+    /// título, ou o clique no próprio título.
+    pub fn editar_dados_do_cliente(&mut self, cx: &mut Context<Self>) {
+        self.abrir_formulario_do_cliente(MotivoDoFormulario::Editar, None, cx);
+    }
+
+    fn abrir_formulario_do_cliente(
+        &mut self,
+        motivo: MotivoDoFormulario,
+        aviso: Option<SharedString>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.aberta.is_none() {
+            return;
+        }
+        match self.dados_do_cliente.as_mut() {
+            // Reabrir pelo mesmo motivo mantém o que já foi digitado.
+            Some(formulario) if formulario.motivo == motivo => {
+                if aviso.is_some() {
+                    formulario.erro = aviso;
+                }
+            }
+            _ => {
+                self.dados_do_cliente = Some(FormularioDoCliente {
+                    motivo,
+                    campos: None,
+                    erro: aviso,
+                })
+            }
+        }
+        cx.notify();
+    }
+
+    pub fn fechar_formulario_do_cliente(&mut self, cx: &mut Context<Self>) {
+        self.dados_do_cliente = None;
+        cx.notify();
+    }
+
+    fn dados_atuais(&self) -> Option<DadosDoCliente> {
+        let galeria = &self.aberta.as_ref()?.galeria;
+        Some(DadosDoCliente {
+            titulo: galeria.titulo.clone(),
+            email: galeria.email.clone(),
+            whatsapp: galeria.whatsapp.clone(),
+        })
+    }
+
+    /// Cria os campos na primeira pintura com janela.
+    ///
+    /// ⚠️ **Não na abertura**: o `422` chega pela colheita, que não tem
+    /// `Window`, e um `InputState` não nasce sem ela.
+    fn preparar_formulario_do_cliente(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(motivo) = self
+            .dados_do_cliente
+            .as_ref()
+            .filter(|f| f.campos.is_none())
+            .map(|f| f.motivo)
+        else {
+            return;
+        };
+        let Some(atual) = self.dados_atuais() else {
+            return;
+        };
+
+        let titulo = campo_preenchido(&atual.titulo, "Ensaio da Maria", window, cx);
+        let email = campo_preenchido(
+            atual.email.as_deref().unwrap_or(""),
+            "cliente@exemplo.com",
+            window,
+            cx,
+        );
+        let whatsapp = campo_preenchido(
+            atual.whatsapp.as_deref().unwrap_or(""),
+            "(47) 99999-8888",
+            window,
+            cx,
+        );
+        // Enter grava, em qualquer um dos três.
+        let enter = [&titulo, &email, &whatsapp].map(|estado| {
+            cx.subscribe(
+                estado,
+                |tela: &mut Detalhe, _estado, evento: &InputEvent, cx| {
+                    if matches!(evento, InputEvent::PressEnter { .. }) {
+                        tela.gravar_dados_do_cliente(cx);
+                    }
+                },
+            )
+        });
+        // Editar começa pelo título; o pedido do fim da sessão, pelo e-mail.
+        let foco = if motivo == MotivoDoFormulario::Editar {
+            &titulo
+        } else {
+            &email
+        };
+        // ⚠️ **Foco só com o `Root` na janela.** O `Input` do `gpui-component`
+        // focado lê `Root::read(window, cx)` ao pintar, e aquilo é `unwrap()`:
+        // numa janela sem `Root` (as de teste desta tela) o foco derrubava a
+        // pintura. No app a primeira camada é sempre o `Root` (`main.rs`). O
+        // foco é conforto — gravar e o Enter não dependem dele.
+        if window.root::<gpui_component::Root>().flatten().is_some() {
+            window.focus(&foco.read(cx).focus_handle(cx));
+        }
+
+        if let Some(formulario) = self.dados_do_cliente.as_mut() {
+            formulario.campos = Some(CamposDoCliente {
+                titulo,
+                email,
+                whatsapp,
+                _enter: enter,
+            });
+        }
+    }
+
+    /// Grava o formulário: confere, manda **só o que mudou** e — quando o fim da
+    /// sessão o abriu — segue com o gesto.
+    pub fn gravar_dados_do_cliente(&mut self, cx: &mut Context<Self>) {
+        if self.gravando_dados.is_some() {
+            return;
+        }
+        let (Some(sessao), Some(galeria_id), Some(atual)) = (
+            self.sessao.clone(),
+            self.galeria_id.clone(),
+            self.dados_atuais(),
+        ) else {
+            return;
+        };
+        let Some(formulario) = self.dados_do_cliente.as_ref() else {
+            return;
+        };
+        let Some(campos) = formulario.campos.as_ref() else {
+            return;
+        };
+        let motivo = formulario.motivo;
+        let titulo = campos.titulo.read(cx).value().to_string();
+        let email = campos.email.read(cx).value().to_string();
+        let whatsapp = campos.whatsapp.read(cx).value().to_string();
+        let modo = if motivo == MotivoDoFormulario::Editar {
+            dados_do_cliente::Modo::Editar
+        } else {
+            dados_do_cliente::Modo::PedirEmail
+        };
+
+        let novo = match dados_do_cliente::conferir(modo, &titulo, &email, &whatsapp) {
+            Ok(novo) => novo,
+            Err(recusa) => {
+                if let Some(formulario) = self.dados_do_cliente.as_mut() {
+                    formulario.erro = Some(recusa.frase.into());
+                }
+                cx.notify();
+                return;
+            }
+        };
+
+        let mudancas = dados_do_cliente::mudancas(&atual, &novo);
+        if mudancas.vazia() {
+            // Nada mudou: não vai à rede — mas o gesto que abriu segue.
+            self.dados_do_cliente = None;
+            self.seguir_o_gesto(motivo, cx);
+            cx.notify();
+            return;
+        }
+
+        if let Some(formulario) = self.dados_do_cliente.as_mut() {
+            formulario.erro = None;
+        }
+        self.gravando_dados = Some((motivo, novo));
+        self.publicador.atualizar_galeria(
+            sessao,
+            galeria_id,
+            MudancaDaGaleria {
+                titulo: mudancas.titulo,
+                email: mudancas.email,
+                whatsapp: mudancas.whatsapp,
+            },
+            self.recados.0.clone(),
+        );
+        self.acompanhar(cx);
+        cx.notify();
+    }
+
+    /// Depois de gravar: o gesto do fim da sessão que pediu o contato.
+    fn seguir_o_gesto(&mut self, motivo: MotivoDoFormulario, cx: &mut Context<Self>) {
+        match motivo {
+            MotivoDoFormulario::Editar => {}
+            MotivoDoFormulario::ContatoParaOLink => self.pedir_o_link(cx),
+            // O formulário exige o e-mail neste motivo: o aviso tem para onde ir.
+            MotivoDoFormulario::ContatoParaAvisar => self.avisar(cx),
+        }
     }
 
     /// Pede as miniaturas que ainda faltam — uma vez cada.
@@ -1311,6 +1591,49 @@ impl Detalhe {
                     cx.write_to_clipboard(gpui::ClipboardItem::new_string(link.url.clone()));
                     self.link = Some(link);
                 }
+                Recado::FaltaEmail { gesto, frase } => {
+                    // 🔚 A tela achava que havia contato e o site diz que não
+                    // (tela velha, ou outra máquina apagou): o mesmo pedido.
+                    let motivo = match gesto {
+                        GestoDoFim::Link => {
+                            self.pedindo_link = false;
+                            MotivoDoFormulario::ContatoParaOLink
+                        }
+                        GestoDoFim::Avisar => {
+                            self.avisando = false;
+                            MotivoDoFormulario::ContatoParaAvisar
+                        }
+                    };
+                    self.abrir_formulario_do_cliente(motivo, Some(frase.into()), cx);
+                }
+                Recado::GaleriaAtualizada => {
+                    if let Some((motivo, novo)) = self.gravando_dados.take() {
+                        if let Some(aberta) = self.aberta.as_mut() {
+                            aberta.galeria.titulo = novo.titulo;
+                            aberta.galeria.email = novo.email;
+                            aberta.galeria.whatsapp = novo.whatsapp;
+                        }
+                        self.dados_do_cliente = None;
+                        // 🔑 O recado não é a verdade: relê. O site normaliza
+                        // (e-mail em minúsculas, WhatsApp só dígitos), e é o que
+                        // ele gravou que o cabeçalho deve mostrar.
+                        if let (Some(sessao), Some(id)) =
+                            (self.sessao.clone(), self.galeria_id.clone())
+                        {
+                            self.publicador
+                                .abrir_galeria(sessao, id, self.recados.0.clone());
+                            self.carregando = true;
+                        }
+                        self.seguir_o_gesto(motivo, cx);
+                    }
+                }
+                Recado::GaleriaNaoAtualizada(frase) => {
+                    self.gravando_dados = None;
+                    match self.dados_do_cliente.as_mut() {
+                        Some(formulario) => formulario.erro = Some(frase.into()),
+                        None => self.erro = Some(frase.into()),
+                    }
+                }
                 Recado::Falhou(erro) => {
                     self.carregando = false;
                     self.pedindo_link = false;
@@ -1336,7 +1659,8 @@ impl Detalhe {
             || self.importando()
             || self.baixando > 0
             || self.avisando
-            || self.pedindo_link;
+            || self.pedindo_link
+            || self.gravando_dados.is_some();
         if !continua {
             self.colhendo = false;
         }
@@ -1443,11 +1767,12 @@ fn reduzir(imagem: &image::DynamicImage, lado: u32) -> image::DynamicImage {
 }
 
 impl Render for Detalhe {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // 🚨 **Antes de montar qualquer célula.** É o que tira o decode de dentro
         // do quadro; `celula` e `tira` daqui para baixo só leem da memória.
         self.preparar_miniaturas();
         self.seguir_o_foco();
+        self.preparar_formulario_do_cliente(window, cx);
 
         div()
             .flex()
@@ -1461,6 +1786,7 @@ impl Render for Detalhe {
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .child(self.cabecalho(cx))
+            .children(self.formulario_do_cliente(cx))
             .child(self.envio(cx))
             .child(self.barra_da_grade(cx))
             .when_some(self.erro.clone(), |tela, erro| {
@@ -1505,6 +1831,9 @@ impl Detalhe {
             .as_ref()
             .is_some_and(|a| a.galeria.user_id.is_some());
         let email = self.aberta.as_ref().and_then(|a| a.galeria.email.clone());
+        // 🔚 A sessão pode nascer sem contato (dono, 2026-09-13); o selo avisa
+        // sem travar nada — quem pede é o link e o aviso.
+        let sem_email = self.aberta.is_some() && !self.tem_email();
 
         div()
             .flex()
@@ -1530,7 +1859,28 @@ impl Detalhe {
                     .rounded(px(2.))
                     .bg(crate::tema::cores::quente()),
             )
-            .child(div().text_sm().truncate().child(titulo))
+            .child(
+                // ✏️ Clicar no título edita — o mesmo gesto da web.
+                div()
+                    .id("sessao-titulo")
+                    .text_sm()
+                    .truncate()
+                    .cursor_pointer()
+                    .child(titulo)
+                    .on_click(
+                        cx.listener(|tela, _ev, _window, cx| tela.editar_dados_do_cliente(cx)),
+                    ),
+            )
+            .child(
+                Button::new("sessao-editar-cliente")
+                    .label("Editar")
+                    .xsmall()
+                    .disabled(self.aberta.is_none())
+                    .tooltip("Título, e-mail e WhatsApp do cliente")
+                    .on_click(
+                        cx.listener(|tela, _ev, _window, cx| tela.editar_dados_do_cliente(cx)),
+                    ),
+            )
             .child(
                 div()
                     .text_xs()
@@ -1538,6 +1888,9 @@ impl Detalhe {
                     .text_color(cx.theme().muted_foreground)
                     .child(contato),
             )
+            .when(sem_email, |cabecalho| {
+                cabecalho.child(selos::selo(selos::Tom::Quente, "sem e-mail", cx))
+            })
             .when(ja_abriu, |cabecalho| {
                 // 🔑 O sinal que o fotógrafo espera para cobrar — e por isso é
                 // selo, e não mais uma linha de texto pequeno.
@@ -1583,13 +1936,124 @@ impl Detalhe {
             .when_some(email, |cabecalho, email| {
                 cabecalho.child(
                     Button::new("sessao-avisar")
-                        .label(SharedString::from(format!("Avisar {email}: fotos prontas")))
+                        // Rótulo curto, o e-mail no tooltip — o mesmo da web, onde
+                        // o e-mail no texto espremia o título até sumir.
+                        .label("Avisar cliente")
+                        .tooltip(SharedString::from(format!(
+                            "Avisar cliente por e-mail: {email}"
+                        )))
                         .xsmall()
                         .primary()
                         .disabled(self.avisando)
                         .on_click(cx.listener(|tela, _ev, _window, cx| tela.avisar(cx))),
                 )
             })
+            // 🔚 Sem contato nenhum o "Avisar" aparece e pede o contato — o mesmo
+            // gesto da web. Só com WhatsApp continua sem botão: há contato, e o
+            // aviso vai por e-mail.
+            .when(sem_email, |cabecalho| {
+                cabecalho.child(
+                    Button::new("sessao-avisar")
+                        .label("Avisar cliente")
+                        .tooltip("Falta o e-mail do cliente — o aviso vai por e-mail")
+                        .xsmall()
+                        .primary()
+                        .disabled(self.avisando)
+                        .on_click(cx.listener(|tela, _ev, _window, cx| tela.avisar(cx))),
+                )
+            })
+    }
+
+    /// ✏️ O formulário dos dados do cliente — embutido sob o cabeçalho, como o
+    /// "Nova sessão fotográfica" da lista (`tela.rs`).
+    ///
+    /// ⚠️ **Embutido, e não `open_dialog`**: o diálogo do `gpui-component` exige
+    /// o `Root` na janela, e as janelas de teste desta tela não o têm — o
+    /// pedido de contato ficaria sem teste justamente no caminho do `422`.
+    fn formulario_do_cliente(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+        let formulario = self.dados_do_cliente.as_ref()?;
+        let campos = formulario.campos.as_ref()?;
+        let gravando = self.gravando_dados.is_some();
+        let (titulo, dica, rotulo_de_gravar) = match formulario.motivo {
+            MotivoDoFormulario::Editar => (
+                "Dados do cliente",
+                "E-mail e WhatsApp podem ficar vazios agora: o link e o aviso pedem o e-mail no fim da sessão.",
+                "Gravar",
+            ),
+            MotivoDoFormulario::ContatoParaOLink => (
+                "Falta o e-mail do cliente para gerar o link",
+                "O link que entra sem senha nasce do e-mail do cliente. O WhatsApp é opcional.",
+                "Gravar e gerar o link",
+            ),
+            MotivoDoFormulario::ContatoParaAvisar => (
+                "Falta o e-mail do cliente para avisar",
+                "O aviso de fotos prontas vai por e-mail. O WhatsApp é opcional.",
+                "Gravar e avisar",
+            ),
+        };
+        let apagado = cx.theme().muted_foreground;
+        let perigo = cx.theme().danger;
+        let campo = |rotulo: &'static str, estado: &Entity<InputState>| {
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(2.))
+                .flex_1()
+                .child(div().text_xs().text_color(apagado).child(rotulo))
+                .child(Input::new(estado).xsmall())
+        };
+        let linha = div()
+            .flex()
+            .gap(px(8.))
+            .child(campo("título", &campos.titulo))
+            .child(campo("e-mail do cliente", &campos.email))
+            .child(campo("WhatsApp", &campos.whatsapp));
+
+        Some(
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(6.))
+                .p(px(10.))
+                .rounded(cx.theme().radius)
+                .border_1()
+                .border_color(cx.theme().border)
+                .child(div().text_xs().child(titulo))
+                .child(linha)
+                .child(div().text_xs().text_color(apagado).child(dica))
+                .when_some(formulario.erro.clone(), |bloco, erro| {
+                    bloco.child(div().text_xs().text_color(perigo).child(erro))
+                })
+                .child(
+                    div()
+                        .flex()
+                        .justify_end()
+                        .gap(px(6.))
+                        .child(
+                            Button::new("sessao-cliente-cancelar")
+                                .label("Cancelar")
+                                .xsmall()
+                                .disabled(gravando)
+                                .on_click(cx.listener(|tela, _ev, _window, cx| {
+                                    tela.fechar_formulario_do_cliente(cx)
+                                })),
+                        )
+                        .child(
+                            Button::new("sessao-cliente-gravar")
+                                .label(if gravando {
+                                    "Gravando…"
+                                } else {
+                                    rotulo_de_gravar
+                                })
+                                .xsmall()
+                                .primary()
+                                .disabled(gravando)
+                                .on_click(cx.listener(|tela, _ev, _window, cx| {
+                                    tela.gravar_dados_do_cliente(cx)
+                                })),
+                        ),
+                ),
+        )
     }
 
     /// A área de envio: **arrastar a pasta**, ou a janela do sistema.
@@ -2901,6 +3365,266 @@ mod testes {
             let _ = janela.update(cx, |tela, _window, cx| tela.colher(cx));
             cx.run_until_parked();
         }
+    }
+
+    /// A galeria "g1" do publicador sem contato nenhum — como o site a teria.
+    fn tirar_o_contato(publicador: &PublicadorDeMentira) {
+        let mut galerias = publicador.galerias.lock().expect("as galerias");
+        galerias[0].email = None;
+        galerias[0].whatsapp = None;
+    }
+
+    /// Os três campos do formulário, já criados.
+    fn campos_do_cliente(
+        tela: &mut Detalhe,
+        window: &mut Window,
+        cx: &mut Context<Detalhe>,
+    ) -> (Entity<InputState>, Entity<InputState>, Entity<InputState>) {
+        tela.preparar_formulario_do_cliente(window, cx);
+        let campos = tela
+            .dados_do_cliente
+            .as_ref()
+            .and_then(|f| f.campos.as_ref())
+            .expect("o formulário tem campos");
+        (
+            campos.titulo.clone(),
+            campos.email.clone(),
+            campos.whatsapp.clone(),
+        )
+    }
+
+    /// 🔚 Dono, 2026-09-13: *"Essas informações são obrigatórias no final da
+    /// sessão."* O "Copiar link" numa sessão sem contato **não pede o link**:
+    /// abre o pedido de contato, grava por `PATCH` só o e-mail e segue com o
+    /// gesto — o link sai sem um segundo clique.
+    #[gpui::test]
+    fn copiar_o_link_sem_email_pede_o_contato_grava_e_segue_o_gesto(cx: &mut TestAppContext) {
+        let (janela, publicador) = janela(cx, vec![]);
+        tirar_o_contato(&publicador);
+        entrar(cx, &janela);
+
+        janela
+            .update(cx, |tela, window, cx| {
+                assert!(!tela.tem_email());
+                tela.pedir_o_link(cx);
+                assert_eq!(
+                    tela.motivo_do_formulario(),
+                    Some(MotivoDoFormulario::ContatoParaOLink)
+                );
+                assert!(!tela.pedindo_link, "sem contato o pedido não sai");
+
+                // Sem nada preenchido, o pedido não grava.
+                let (_, email, _) = campos_do_cliente(tela, window, cx);
+                tela.gravar_dados_do_cliente(cx);
+                assert!(tela.gravando_dados.is_none());
+                assert!(tela
+                    .dados_do_cliente
+                    .as_ref()
+                    .is_some_and(|f| f.erro.is_some()));
+
+                email.update(cx, |campo, cx| {
+                    campo.set_value("ana@exemplo.com", window, cx)
+                });
+                tela.gravar_dados_do_cliente(cx);
+            })
+            .expect("a janela deve estar aberta");
+        colher_ate_parar(cx, &janela);
+
+        assert_eq!(
+            *publicador.atualizacoes.lock().expect("as atualizacoes"),
+            vec![(
+                "g1".to_string(),
+                MudancaDaGaleria {
+                    email: Some(Some("ana@exemplo.com".into())),
+                    ..Default::default()
+                }
+            )],
+            "só o e-mail vai no PATCH"
+        );
+        assert_eq!(
+            *publicador.links.lock().expect("os links"),
+            vec!["g1".to_string()],
+            "depois de gravar, o gesto seguiu"
+        );
+        janela
+            .update(cx, |tela, _window, _cx| {
+                assert!(tela.link().is_some());
+                assert!(tela.tem_email());
+                assert!(tela.motivo_do_formulario().is_none());
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🔚 A tela velha acha que há contato e o site responde `422`: o mesmo
+    /// pedido de contato abre, com a frase do site — e a colheita não fica
+    /// presa esperando um aviso que não vem.
+    #[gpui::test]
+    fn o_422_do_site_abre_o_mesmo_pedido_de_contato(cx: &mut TestAppContext) {
+        let (janela, publicador) = janela(cx, vec![]);
+        tirar_o_contato(&publicador);
+        entrar(cx, &janela);
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                if let Some(aberta) = tela.aberta.as_mut() {
+                    aberta.galeria.email = Some("ana@x.com".into());
+                }
+                tela.avisar(cx);
+                assert!(tela.avisando, "a tela achou que havia contato");
+            })
+            .expect("a janela deve estar aberta");
+        colher_ate_parar(cx, &janela);
+
+        assert!(publicador.avisadas.lock().expect("as avisadas").is_empty());
+        janela
+            .update(cx, |tela, _window, _cx| {
+                assert_eq!(
+                    tela.motivo_do_formulario(),
+                    Some(MotivoDoFormulario::ContatoParaAvisar)
+                );
+                assert!(tela
+                    .dados_do_cliente
+                    .as_ref()
+                    .and_then(|f| f.erro.clone())
+                    .is_some_and(|frase| frase.contains("informe o e-mail")));
+                assert!(!tela.avisando);
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 **Só com WhatsApp o link também pede o e-mail** (usuários em
+    /// produção, 2026-09-13: *"ensaios sem e-mail estão gerando problema ao
+    /// gerar o link"*). O WhatsApp vem preenchido e o PATCH leva só o e-mail.
+    #[gpui::test]
+    fn so_com_whatsapp_o_link_pede_o_email(cx: &mut TestAppContext) {
+        let (janela, publicador) = janela(cx, vec![]);
+        {
+            let mut galerias = publicador.galerias.lock().expect("as galerias");
+            galerias[0].email = None;
+            galerias[0].whatsapp = Some("5547999998888".into());
+        }
+        entrar(cx, &janela);
+
+        janela
+            .update(cx, |tela, window, cx| {
+                assert!(!tela.tem_email());
+                tela.pedir_o_link(cx);
+                assert_eq!(
+                    tela.motivo_do_formulario(),
+                    Some(MotivoDoFormulario::ContatoParaOLink)
+                );
+                let (_, email, whatsapp) = campos_do_cliente(tela, window, cx);
+                assert_eq!(whatsapp.read(cx).value().to_string(), "5547999998888");
+
+                // Só o WhatsApp não grava neste motivo.
+                tela.gravar_dados_do_cliente(cx);
+                assert!(tela.gravando_dados.is_none());
+
+                email.update(cx, |campo, cx| {
+                    campo.set_value("ana@exemplo.com", window, cx)
+                });
+                tela.gravar_dados_do_cliente(cx);
+            })
+            .expect("a janela deve estar aberta");
+        colher_ate_parar(cx, &janela);
+
+        assert_eq!(
+            *publicador.atualizacoes.lock().expect("as atualizacoes"),
+            vec![(
+                "g1".to_string(),
+                MudancaDaGaleria {
+                    email: Some(Some("ana@exemplo.com".into())),
+                    ..Default::default()
+                }
+            )]
+        );
+        assert_eq!(
+            *publicador.links.lock().expect("os links"),
+            vec!["g1".to_string()]
+        );
+    }
+
+    /// ✏️ *"Dentro da sessão precisa ser possível mudar o Título, email e o
+    /// whatsapp."* — dono, 2026-09-13. Os campos vêm com o que a sessão tem, e
+    /// o `PATCH` leva só o que mudou.
+    #[gpui::test]
+    fn editar_os_dados_do_cliente_manda_so_o_que_mudou(cx: &mut TestAppContext) {
+        let (janela, publicador) = janela(cx, vec![]);
+        entrar(cx, &janela);
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.editar_dados_do_cliente(cx);
+                let (titulo, email, _) = campos_do_cliente(tela, window, cx);
+                assert_eq!(titulo.read(cx).value().to_string(), "Ensaio");
+                assert_eq!(email.read(cx).value().to_string(), "ana@x.com");
+                titulo.update(cx, |campo, cx| campo.set_value("Ensaio da Ana", window, cx));
+                tela.gravar_dados_do_cliente(cx);
+            })
+            .expect("a janela deve estar aberta");
+        colher_ate_parar(cx, &janela);
+
+        assert_eq!(
+            *publicador.atualizacoes.lock().expect("as atualizacoes"),
+            vec![(
+                "g1".to_string(),
+                MudancaDaGaleria {
+                    titulo: Some("Ensaio da Ana".into()),
+                    ..Default::default()
+                }
+            )]
+        );
+        assert!(
+            publicador.links.lock().expect("os links").is_empty(),
+            "editar não segue gesto nenhum"
+        );
+        janela
+            .update(cx, |tela, _window, _cx| {
+                assert_eq!(
+                    tela.aberta().map(|a| a.galeria.titulo.clone()),
+                    Some("Ensaio da Ana".to_string())
+                );
+                assert!(tela.motivo_do_formulario().is_none());
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// ✏️ Na edição o título vazio não grava, e o **último contato se apaga** —
+    /// ele só é exigido no fim da sessão.
+    #[gpui::test]
+    fn na_edicao_titulo_vazio_nao_grava_e_o_ultimo_contato_se_apaga(cx: &mut TestAppContext) {
+        let (janela, publicador) = janela(cx, vec![]);
+        entrar(cx, &janela);
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.editar_dados_do_cliente(cx);
+                let (titulo, email, _) = campos_do_cliente(tela, window, cx);
+
+                titulo.update(cx, |campo, cx| campo.set_value("   ", window, cx));
+                tela.gravar_dados_do_cliente(cx);
+                assert!(tela.gravando_dados.is_none(), "título vazio não vai à rede");
+
+                titulo.update(cx, |campo, cx| campo.set_value("Ensaio", window, cx));
+                email.update(cx, |campo, cx| campo.set_value("", window, cx));
+                tela.gravar_dados_do_cliente(cx);
+            })
+            .expect("a janela deve estar aberta");
+        colher_ate_parar(cx, &janela);
+
+        assert_eq!(
+            *publicador.atualizacoes.lock().expect("as atualizacoes"),
+            vec![(
+                "g1".to_string(),
+                MudancaDaGaleria {
+                    email: Some(None),
+                    ..Default::default()
+                }
+            )]
+        );
+        janela
+            .update(cx, |tela, _window, _cx| assert!(!tela.tem_email()))
+            .expect("a janela deve estar aberta");
     }
 
     /// 🚨 **Sem classificação não é "à venda" nem "levada".**

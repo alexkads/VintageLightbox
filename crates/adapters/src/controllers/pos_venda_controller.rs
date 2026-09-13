@@ -3,12 +3,33 @@
 use std::sync::Arc;
 
 use domain::services::pos_venda::{
-    EstadoNoBalcao, Galeria, GaleriaAberta, GaleriaDoPainel, LinkDeAcesso, MudancaDaFoto,
-    NovaGaleria, PosVendaApi, Produto, Sessao,
+    EstadoNoBalcao, Estudio, Galeria, GaleriaAberta, GaleriaDoPainel, LinkDeAcesso, MudancaDaFoto,
+    MudancaDaGaleria, NovaGaleria, PosVendaApi, Produto, Sessao,
 };
 use domain::value_objects::PhotoId;
 use domain::DomainError;
 use use_cases::pos_venda::PublicarNoPosVendaUseCase;
+
+/// 🔚 Por que o link ou o aviso não saíram.
+///
+/// A exceção à fronteira `Result<_, String>`: "falta o e-mail do cliente"
+/// (`422`, desde 2026-09-13) **não é erro para mostrar**, é o pedido do e-mail
+/// que a tela abre antes de seguir com o gesto. Achatado em frase, a tela teria
+/// de ler o texto para decidir — e texto muda sem aviso.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RecusaDoFimDaSessao {
+    /// A sessão não tem e-mail (sem contato, ou só WhatsApp). A frase é a do site.
+    FaltaEmail(String),
+    /// Qualquer outra recusa, já na frase que a tela mostra.
+    Outra(String),
+}
+
+fn recusa_do_fim(erro: DomainError) -> RecusaDoFimDaSessao {
+    match erro {
+        DomainError::FaltaEmail(frase) => RecusaDoFimDaSessao::FaltaEmail(frase),
+        outro => RecusaDoFimDaSessao::Outra(frase(outro)),
+    }
+}
 
 pub struct PosVendaController {
     api: Arc<dyn PosVendaApi>,
@@ -42,6 +63,11 @@ impl PosVendaController {
 
     pub async fn produtos(&self, sessao: &Sessao) -> Result<Vec<Produto>, String> {
         self.api.produtos(sessao).await.map_err(frase)
+    }
+
+    /// Os estúdios ativos — a escolha obrigatória ao abrir sessão.
+    pub async fn estudios(&self, sessao: &Sessao) -> Result<Vec<Estudio>, String> {
+        self.api.estudios(sessao).await.map_err(frase)
     }
 
     /// As galerias que já existem — para subir numa delas em vez de criar uma
@@ -125,9 +151,28 @@ impl PosVendaController {
     }
 
     /// Manda ao cliente o e-mail "suas fotos estão prontas".
-    pub async fn avisar(&self, sessao: &Sessao, galeria_id: &str) -> Result<(), String> {
+    ///
+    /// 🔚 Sessão sem e-mail volta como [`RecusaDoFimDaSessao::FaltaEmail`].
+    pub async fn avisar(
+        &self,
+        sessao: &Sessao,
+        galeria_id: &str,
+    ) -> Result<(), RecusaDoFimDaSessao> {
         self.api
             .avisar_fotos_prontas(sessao, galeria_id)
+            .await
+            .map_err(recusa_do_fim)
+    }
+
+    /// Muda título, e-mail ou WhatsApp da sessão — só o que veio.
+    pub async fn atualizar_galeria(
+        &self,
+        sessao: &Sessao,
+        galeria_id: &str,
+        mudanca: &MudancaDaGaleria,
+    ) -> Result<(), String> {
+        self.api
+            .atualizar_galeria(sessao, galeria_id, mudanca)
             .await
             .map_err(frase)
     }
@@ -183,15 +228,17 @@ impl PosVendaController {
     }
 
     /// O link que entra sem senha, para mandar ao cliente.
+    ///
+    /// 🔚 Sessão sem e-mail volta como [`RecusaDoFimDaSessao::FaltaEmail`].
     pub async fn link_da_galeria(
         &self,
         sessao: &Sessao,
         galeria_id: &str,
-    ) -> Result<LinkDeAcesso, String> {
+    ) -> Result<LinkDeAcesso, RecusaDoFimDaSessao> {
         self.api
             .link_da_galeria(sessao, galeria_id)
             .await
-            .map_err(frase)
+            .map_err(recusa_do_fim)
     }
 }
 

@@ -406,6 +406,12 @@ mod tests {
         ) -> DomainResult<Vec<domain::services::pos_venda::Produto>> {
             Ok(vec![])
         }
+        async fn estudios(
+            &self,
+            _: &Sessao,
+        ) -> DomainResult<Vec<domain::services::pos_venda::Estudio>> {
+            Ok(vec![])
+        }
         async fn criar_galeria(&self, _: &Sessao, nova: &NovaGaleria) -> DomainResult<Galeria> {
             self.galerias.lock().unwrap().push(nova.clone());
             Ok(Galeria {
@@ -478,6 +484,14 @@ mod tests {
             _: &str,
         ) -> DomainResult<domain::services::pos_venda::LinkDeAcesso> {
             unreachable!("o link é pedido pela tela, depois de publicar")
+        }
+        async fn atualizar_galeria(
+            &self,
+            _: &Sessao,
+            _: &str,
+            _: &domain::services::pos_venda::MudancaDaGaleria,
+        ) -> DomainResult<()> {
+            unreachable!("título e contato se editam na tela da sessão, não na publicação")
         }
         async fn original(&self, _: &Sessao, _: &str) -> DomainResult<Vec<u8>> {
             unreachable!("quem baixa o original é a porta do app, que tem o motor de GPU")

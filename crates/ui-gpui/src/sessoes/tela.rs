@@ -19,15 +19,19 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::Duration;
 
+use biblioteca_core::dados_do_cliente;
 use biblioteca_core::dinheiro;
 use biblioteca_core::sessoes::{
     self, ContagemDeFotos, Criterio, SessaoFotografica, Situacao, Totais,
 };
-use domain::services::pos_venda::{GaleriaDoPainel, NovaGaleria, Produto, Sessao};
+use domain::services::pos_venda::{Estudio, GaleriaDoPainel, NovaGaleria, Produto, Sessao};
 use gpui::{div, prelude::*, px, Context, EventEmitter, SharedString, Task, Window};
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::input::{Input, InputState};
 use gpui_component::{ActiveTheme, Disableable, Selectable, Sizable};
+use infrastructure::paths::AppPaths;
+use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 
 use crate::pos_venda::porta::{Publicador, Recado};
 use crate::selos;
@@ -50,6 +54,10 @@ pub struct Sessoes {
     sessao: Option<Sessao>,
     galerias: Vec<GaleriaDoPainel>,
     produtos: Vec<Produto>,
+    /// Os estúdios ativos — a escolha obrigatória ao abrir sessão.
+    estudios: Vec<Estudio>,
+    /// Onde o último estúdio escolhido fica lembrado nesta máquina.
+    lembranca: PathBuf,
     /// Qual sessão está aberta para receber fotos.
     aberta: Option<String>,
     busca: gpui::Entity<InputState>,
@@ -69,7 +77,64 @@ struct Nova {
     email: gpui::Entity<InputState>,
     whatsapp: gpui::Entity<InputState>,
     produto_id: Option<String>,
+    estudio_id: Option<String>,
     enviando: bool,
+}
+
+/// 🎯 O que esta máquina lembra de uma sessão nova para a próxima.
+///
+/// *"Grave o último preset selecionado e o corte utilizado e o estúdio."* —
+/// dono, 2026-09-13. A criação do desktop não escolhe preset nem corte (eles
+/// nascem na revelação), então aqui fica **só o estúdio**: um balcão atende
+/// no mesmo estúdio o dia inteiro.
+///
+/// Mesmo molde de `altura_da_tira` e `pos_venda::config`: um arquivo ao lado do
+/// catálogo; ler nunca derruba, gravar que falha só não lembra.
+#[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+struct Lembranca {
+    #[serde(default)]
+    estudio_id: Option<String>,
+}
+
+#[cfg(not(test))]
+fn caminho_da_lembranca() -> PathBuf {
+    AppPaths::catalog_root().join("sessao-nova.json")
+}
+
+/// 🚨 Nos testes, um arquivo temporário **por tela**: gravar no catálogo do
+/// fotógrafo durante o `cargo test` já aconteceu neste repositório, e um
+/// arquivo por processo faria os testes em paralelo lembrarem uns dos outros.
+#[cfg(test)]
+fn caminho_da_lembranca() -> PathBuf {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static PROXIMA: AtomicUsize = AtomicUsize::new(0);
+    let _ = AppPaths::catalog_root;
+    std::env::temp_dir().join(format!(
+        "vlb-sessao-nova-teste-{}-{}.json",
+        std::process::id(),
+        PROXIMA.fetch_add(1, Ordering::SeqCst)
+    ))
+}
+
+fn estudio_lembrado(caminho: &Path) -> Option<String> {
+    let texto = std::fs::read_to_string(caminho).ok()?;
+    serde_json::from_str::<Lembranca>(&texto)
+        .ok()?
+        .estudio_id
+        .filter(|id| !id.trim().is_empty())
+}
+
+fn lembrar_estudio(caminho: &Path, estudio_id: &str) {
+    let lembranca = Lembranca {
+        estudio_id: Some(estudio_id.to_string()),
+    };
+    let Ok(texto) = serde_json::to_string_pretty(&lembranca) else {
+        return;
+    };
+    if let Some(pasta) = caminho.parent() {
+        let _ = std::fs::create_dir_all(pasta);
+    }
+    let _ = std::fs::write(caminho, texto);
 }
 
 impl Sessoes {
@@ -85,6 +150,8 @@ impl Sessoes {
             sessao: None,
             galerias: Vec::new(),
             produtos: Vec::new(),
+            estudios: Vec::new(),
+            lembranca: caminho_da_lembranca(),
             aberta: None,
             busca,
             situacao: None,
@@ -111,6 +178,8 @@ impl Sessoes {
         self.erro = None;
         self.publicador
             .galerias(sessao.clone(), self.recados.0.clone());
+        self.publicador
+            .estudios(sessao.clone(), self.recados.0.clone());
         self.publicador.produtos(sessao, self.recados.0.clone());
         self.acompanhar(cx);
         cx.notify();
@@ -172,9 +241,9 @@ impl Sessoes {
     /// Abre a sessão para receber fotos. É o "editar" desta tela: o site edita
     /// a galeria entrando nela, e aqui entrar é escolhê-la como destino.
     ///
-    /// ⚠️ **Título e contato não se editam por aqui**, e não é esquecimento: a
-    /// API não expõe `PATCH /galerias/{id}` para eles. O que ela expõe é o
-    /// estúdio, e isso é escolha de outra tela.
+    /// ⚠️ **Título e contato não se editam por aqui**: editam-se **dentro** da
+    /// sessão (`Detalhe`, "Editar"), pelo `PATCH /galerias/{id}` — o mesmo gesto
+    /// da web (dono, 2026-09-13).
     pub fn abrir(&mut self, id: String, cx: &mut Context<Self>) {
         self.aberta = Some(id.clone());
         cx.emit(Escolhida(id));
@@ -194,21 +263,44 @@ impl Sessoes {
     /// 🔑 **A sugestão é o produto da sessão mais recente**, como no site: um
     /// estúdio cobra a mesma faixa a semana inteira, e a alternativa seria
     /// escolher de novo a cada cliente.
+    ///
+    /// 🎯 **O estúdio sugerido é o último escolhido nesta máquina** — e só se
+    /// ele ainda estiver entre os ativos; senão fica sem escolha, porque
+    /// escolher é obrigatório (dono, 2026-09-13).
     pub fn comecar_nova(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let sugerido = self
             .galerias
             .first()
             .map(|g| g.produto_id.clone())
             .or_else(|| self.produtos.first().map(|p| p.id.clone()));
+        let estudio = estudio_lembrado(&self.lembranca)
+            .filter(|id| self.estudios.iter().any(|e| &e.id == id));
 
         self.nova = Some(Nova {
             titulo: cx.new(|cx| InputState::new(window, cx).placeholder("Ensaio da Maria")),
             email: cx.new(|cx| InputState::new(window, cx).placeholder("cliente@exemplo.com")),
             whatsapp: cx.new(|cx| InputState::new(window, cx).placeholder("(47) 99999-8888")),
             produto_id: sugerido,
+            estudio_id: estudio,
             enviando: false,
         });
         cx.notify();
+    }
+
+    /// O preço por foto da sessão nova — a ficha clicada.
+    pub fn escolher_faixa(&mut self, produto_id: String, cx: &mut Context<Self>) {
+        if let Some(nova) = self.nova.as_mut() {
+            nova.produto_id = Some(produto_id);
+            cx.notify();
+        }
+    }
+
+    /// O estúdio da sessão nova — a ficha clicada.
+    pub fn escolher_estudio(&mut self, estudio_id: String, cx: &mut Context<Self>) {
+        if let Some(nova) = self.nova.as_mut() {
+            nova.estudio_id = Some(estudio_id);
+            cx.notify();
+        }
     }
 
     pub fn cancelar_nova(&mut self, cx: &mut Context<Self>) {
@@ -222,9 +314,12 @@ impl Sessoes {
 
     /// Manda abrir a sessão no site.
     ///
-    /// ⚠️ **Ao menos um contato**, e quem confere de verdade é o site: sem
-    /// e-mail nem WhatsApp não há como o cliente receber o link, e a galeria
-    /// nasceria inalcançável.
+    /// 🔚 **Só o título é obrigatório** (dono, 2026-09-13: *"Não tem que
+    /// obrigar o email e whatsapp para criar a sessão. Essas informações são
+    /// obrigatórias no final da sessão."*). O contato é pedido pelo "Copiar
+    /// link" e pelo "Avisar", dentro da sessão. O e-mail **preenchido** pela
+    /// metade continua recusado — a mesma conferência do site
+    /// (`biblioteca_core::dados_do_cliente`).
     pub fn criar(&mut self, cx: &mut Context<Self>) {
         let (Some(sessao), Some(nova)) = (self.sessao.clone(), self.nova.as_mut()) else {
             return;
@@ -236,13 +331,27 @@ impl Sessoes {
         let titulo = nova.titulo.read(cx).value().trim().to_string();
         let email = nao_vazio(&nova.email.read(cx).value());
         let whatsapp = nao_vazio(&nova.whatsapp.read(cx).value());
+        // 🎯 Preço por foto e estúdio são obrigatórios (dono, 2026-09-13).
         let Some(produto_id) = nova.produto_id.clone() else {
-            self.erro = Some("nenhuma faixa de preço disponível — confira o catálogo".into());
+            self.erro = Some("escolha o preço por foto da sessão".into());
             cx.notify();
             return;
         };
-        if titulo.is_empty() || (email.is_none() && whatsapp.is_none()) {
-            self.erro = Some("dê um título e ao menos um contato do cliente".into());
+        let Some(estudio_id) = nova.estudio_id.clone() else {
+            self.erro = Some("escolha o estúdio da sessão".into());
+            cx.notify();
+            return;
+        };
+        if titulo.is_empty() {
+            self.erro = Some("dê um título à sessão — o contato pode ficar para o fim".into());
+            cx.notify();
+            return;
+        }
+        if email
+            .as_deref()
+            .is_some_and(|e| !dados_do_cliente::email_plausivel(e))
+        {
+            self.erro = Some("o e-mail do cliente não parece completo".into());
             cx.notify();
             return;
         }
@@ -256,6 +365,7 @@ impl Sessoes {
                 email,
                 whatsapp,
                 produto_id,
+                estudio_id: Some(estudio_id),
             },
             self.recados.0.clone(),
         );
@@ -277,6 +387,9 @@ impl Sessoes {
         if let Some(nova) = self.nova.as_mut() {
             if nova.produto_id.is_none() {
                 nova.produto_id = Some("p1".into());
+            }
+            if nova.estudio_id.is_none() {
+                nova.estudio_id = Some("s1".into());
             }
         }
         let Some(nova) = self.nova.as_ref() else {
@@ -316,7 +429,13 @@ impl Sessoes {
                     self.galerias = lista;
                 }
                 Recado::Produtos(lista) => self.produtos = lista,
+                Recado::Estudios(lista) => self.estudios = lista,
                 Recado::Criada(galeria) => {
+                    // 🎯 O estúdio fica lembrado **depois** de a sessão existir:
+                    // lembrar uma escolha que o site recusou sugeriria o erro.
+                    if let Some(estudio) = self.nova.as_ref().and_then(|n| n.estudio_id.clone()) {
+                        lembrar_estudio(&self.lembranca, &estudio);
+                    }
                     self.nova = None;
                     // A sessão recém-aberta já fica escolhida: quem a criou vai
                     // subir foto nela agora, e não daqui a três telas.
@@ -545,6 +664,85 @@ impl Sessoes {
             })
     }
 
+    /// 🎯 Preço por foto e estúdio, em fichas — os dois obrigatórios (dono,
+    /// 2026-09-13). Fichas, e não um `Select`, pelo mesmo motivo da barra: são
+    /// poucas opções, e a escolhida tem de se ver sem abrir nada.
+    fn escolhas_da_nova(&self, nova: &Nova, cx: &mut Context<Self>) -> impl IntoElement {
+        let apagado = cx.theme().muted_foreground;
+        let rotulo =
+            |texto: &'static str| div().w(px(110.)).text_xs().text_color(apagado).child(texto);
+
+        let faixas = div()
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .gap(px(4.))
+            .child(rotulo("preço por foto *"))
+            .when(self.produtos.is_empty(), |linha| {
+                linha.child(
+                    div()
+                        .text_xs()
+                        .text_color(apagado)
+                        .child("carregando o catálogo…"),
+                )
+            })
+            .children(self.produtos.iter().map(|produto| {
+                let id = produto.id.clone();
+                Button::new(SharedString::from(format!("sessoes-faixa-{}", produto.id)))
+                    .label(format!(
+                        "{} — R$ {}",
+                        produto.nome,
+                        produto.preco.replace('.', ",")
+                    ))
+                    .xsmall()
+                    .selected(nova.produto_id.as_deref() == Some(produto.id.as_str()))
+                    .on_click(cx.listener(move |tela, _ev, _window, cx| {
+                        tela.escolher_faixa(id.clone(), cx)
+                    }))
+            }));
+
+        let estudios =
+            div()
+                .flex()
+                .flex_wrap()
+                .items_center()
+                .gap(px(4.))
+                .child(rotulo("estúdio *"))
+                .when(self.estudios.is_empty(), |linha| {
+                    linha.child(
+                        div()
+                            .text_xs()
+                            .text_color(apagado)
+                            .child("nenhum estúdio ativo no site"),
+                    )
+                })
+                .children(self.estudios.iter().map(|estudio| {
+                    let id = estudio.id.clone();
+                    let nome = if estudio.cidade.trim().is_empty() {
+                        estudio.nome.clone()
+                    } else {
+                        format!("{} — {}", estudio.nome, estudio.cidade)
+                    };
+                    Button::new(SharedString::from(format!(
+                        "sessoes-estudio-{}",
+                        estudio.id
+                    )))
+                    .label(nome)
+                    .xsmall()
+                    .selected(nova.estudio_id.as_deref() == Some(estudio.id.as_str()))
+                    .on_click(cx.listener(move |tela, _ev, _window, cx| {
+                        tela.escolher_estudio(id.clone(), cx)
+                    }))
+                }));
+
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(4.))
+            .child(faixas)
+            .child(estudios)
+    }
+
     fn formulario(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
         let nova = self.nova.as_ref()?;
         let campo = |rotulo: &str, estado: &gpui::Entity<InputState>| {
@@ -580,11 +778,14 @@ impl Sessoes {
                         .child(campo("e-mail do cliente", &nova.email))
                         .child(campo("WhatsApp", &nova.whatsapp)),
                 )
+                .child(self.escolhas_da_nova(nova, cx))
                 .child(
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child("Ao menos um contato: é por ele que o cliente recebe o link."),
+                        .child(
+                            "O contato pode ficar para o fim: o link e o aviso pedem o e-mail antes de sair.",
+                        ),
                 )
                 .child(
                     div()
@@ -796,6 +997,14 @@ mod testes {
         }
     }
 
+    fn estudio() -> Estudio {
+        Estudio {
+            id: "s1".into(),
+            nome: "Gramado".into(),
+            cidade: "Gramado".into(),
+        }
+    }
+
     fn janela(
         cx: &mut TestAppContext,
         publicador: Arc<PublicadorDeMentira>,
@@ -868,12 +1077,12 @@ mod testes {
             .expect("a janela deve estar aberta");
     }
 
-    /// ⚠️ Sem título ou sem contato nenhum, a sessão não sai.
-    ///
-    /// Quem confere de verdade é o site — mas deixar sair daqui gastaria uma
-    /// ida à rede para trazer de volta um erro que a tela já sabia.
+    /// 🔚 **Só o título é obrigatório** (dono, 2026-09-13): sem contato a
+    /// sessão sai, e o contato é pedido no fim. Sem título, ou com o e-mail
+    /// escrito pela metade, não sai — o site recusaria, e deixar sair daqui
+    /// gastaria uma ida à rede para trazer de volta um erro que a tela já sabia.
     #[gpui::test]
-    fn abrir_sessao_exige_titulo_e_ao_menos_um_contato(cx: &mut TestAppContext) {
+    fn abrir_sessao_exige_so_o_titulo_e_recusa_email_pela_metade(cx: &mut TestAppContext) {
         let publicador = Arc::new(PublicadorDeMentira::default());
         let janela = janela(cx, publicador.clone());
         com_sessao(cx, &janela);
@@ -886,31 +1095,63 @@ mod testes {
                     preco: "29.90".into(),
                     inativo: false,
                 }];
+                tela.estudios = vec![estudio()];
                 tela.comecar_nova(window, cx);
+                let nova = tela.nova.as_ref().expect("o formulário está aberto");
+                assert_eq!(
+                    nova.produto_id.as_deref(),
+                    Some("p1"),
+                    "a faixa vem sugerida"
+                );
+                assert_eq!(nova.estudio_id, None, "sem lembrança, o estúdio é escolha");
 
                 // Vazio: não sai.
                 tela.criar(cx);
                 assert!(tela.erro.is_some());
 
-                // Só título, sem contato: também não.
+                // Com título e o e-mail pela metade: também não.
                 let nova = tela.nova.as_ref().expect("o formulário está aberto");
                 nova.titulo.update(cx, |estado, cx| {
                     estado.set_value("Ensaio da Ana", window, cx)
                 });
+                nova.email
+                    .update(cx, |estado, cx| estado.set_value("ana@", window, cx));
+                tela.erro = None;
                 tela.criar(cx);
+                assert!(tela.erro.is_some(), "e-mail pela metade é recusado");
             })
             .expect("a janela deve estar aberta");
         assert!(
             publicador.criadas().is_empty(),
-            "sem contato o cliente não teria como receber o link"
+            "sem título ou com e-mail torto a sessão não sai"
         );
 
+        // 🎯 Sem contato, com título e faixa, mas **sem estúdio**: não sai; e
+        // sem faixa também não (dono, 2026-09-13).
         janela
             .update(cx, |tela, window, cx| {
                 let nova = tela.nova.as_ref().expect("o formulário continua aberto");
-                nova.email.update(cx, |estado, cx| {
-                    estado.set_value("ana@exemplo.com", window, cx)
-                });
+                nova.email
+                    .update(cx, |estado, cx| estado.set_value("", window, cx));
+                tela.erro = None;
+                tela.criar(cx);
+                assert!(tela.erro.is_some(), "sem estúdio não sai");
+
+                tela.escolher_estudio("s1".into(), cx);
+                if let Some(nova) = tela.nova.as_mut() {
+                    nova.produto_id = None;
+                }
+                tela.erro = None;
+                tela.criar(cx);
+                assert!(tela.erro.is_some(), "sem preço por foto não sai");
+            })
+            .expect("a janela deve estar aberta");
+        assert!(publicador.criadas().is_empty());
+
+        // Título, faixa e estúdio, sem contato nenhum: sai.
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.escolher_faixa("p1".into(), cx);
                 tela.criar(cx);
             })
             .expect("a janela deve estar aberta");
@@ -919,8 +1160,62 @@ mod testes {
         let criadas = publicador.criadas();
         assert_eq!(criadas.len(), 1);
         assert_eq!(criadas[0].titulo, "Ensaio da Ana");
-        assert_eq!(criadas[0].email.as_deref(), Some("ana@exemplo.com"));
-        assert_eq!(criadas[0].produto_id, "p1", "a faixa sugerida foi junto");
+        assert_eq!(criadas[0].email, None);
+        assert_eq!(criadas[0].whatsapp, None);
+        assert_eq!(criadas[0].produto_id, "p1");
+        assert_eq!(criadas[0].estudio_id.as_deref(), Some("s1"));
+    }
+
+    /// 🎯 *"Grave o último preset selecionado e o corte utilizado e o
+    /// estúdio."* — dono, 2026-09-13. A criação do desktop não tem preset nem
+    /// corte; o estúdio escolhido volta sugerido na próxima sessão — e some da
+    /// sugestão se deixar de estar ativo.
+    #[gpui::test]
+    fn o_ultimo_estudio_volta_sugerido_na_proxima_sessao(cx: &mut TestAppContext) {
+        let publicador = Arc::new(PublicadorDeMentira::default());
+        let janela = janela(cx, publicador);
+        com_sessao(cx, &janela);
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.produtos = vec![Produto {
+                    id: "p1".into(),
+                    nome: "Foto avulsa".into(),
+                    preco: "29.90".into(),
+                    inativo: false,
+                }];
+                tela.estudios = vec![estudio()];
+                tela.comecar_nova(window, cx);
+                let nova = tela.nova.as_ref().expect("o formulário está aberto");
+                nova.titulo.update(cx, |estado, cx| {
+                    estado.set_value("Ensaio da Ana", window, cx)
+                });
+                tela.escolher_estudio("s1".into(), cx);
+                tela.criar(cx);
+            })
+            .expect("a janela deve estar aberta");
+        colher(cx, &janela);
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.estudios = vec![estudio()];
+                tela.comecar_nova(window, cx);
+                assert_eq!(
+                    tela.nova.as_ref().and_then(|n| n.estudio_id.as_deref()),
+                    Some("s1"),
+                    "o estúdio da última sessão volta sugerido"
+                );
+
+                tela.estudios = vec![];
+                tela.comecar_nova(window, cx);
+                assert_eq!(
+                    tela.nova.as_ref().and_then(|n| n.estudio_id.clone()),
+                    None,
+                    "estúdio que saiu da lista não é sugerido"
+                );
+                let _ = std::fs::remove_file(&tela.lembranca);
+            })
+            .expect("a janela deve estar aberta");
     }
 
     /// 🔑 A sessão recém-aberta **já fica escolhida**.
@@ -942,6 +1237,7 @@ mod testes {
                     preco: "29.90".into(),
                     inativo: false,
                 }];
+                tela.estudios = vec![estudio()];
                 tela.comecar_nova(window, cx);
                 let nova = tela.nova.as_ref().expect("o formulário está aberto");
                 nova.titulo.update(cx, |estado, cx| {
@@ -950,6 +1246,7 @@ mod testes {
                 nova.email.update(cx, |estado, cx| {
                     estado.set_value("ana@exemplo.com", window, cx)
                 });
+                tela.escolher_estudio("s1".into(), cx);
                 tela.criar(cx);
             })
             .expect("a janela deve estar aberta");

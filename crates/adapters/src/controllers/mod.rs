@@ -13,5 +13,5 @@ pub use export_controller::ExportController;
 pub use import_controller::ImportController;
 pub use library_controller::LibraryController;
 pub use photo_controller::PhotoController;
-pub use pos_venda_controller::PosVendaController;
+pub use pos_venda_controller::{PosVendaController, RecusaDoFimDaSessao};
 pub use preset_controller::PresetController;

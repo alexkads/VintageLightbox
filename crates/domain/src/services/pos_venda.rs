@@ -122,14 +122,30 @@ pub struct Produto {
     pub inativo: bool,
 }
 
+/// Um estúdio do site — onde a sessão foi feita (`studios`).
+///
+/// *"Deve ser obrigatório informar o Preço por Foto e o Estúdio."* — dono,
+/// 2026-09-13. Só os ativos chegam aqui: estúdio desativado não recebe sessão.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Estudio {
+    pub id: String,
+    pub nome: String,
+    /// Pode vir vazia: o cadastro do site não a exige.
+    pub cidade: String,
+}
+
 /// A galeria do cliente, como o balcão a descreve.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NovaGaleria {
     pub titulo: String,
-    /// Ao menos um dos dois; quem confere é o site, e a recusa volta como erro.
+    /// Opcional, como o WhatsApp (dono, 2026-09-13): a sessão nasce sem
+    /// contato, e o link e o aviso o pedem no fim. Mal formado o site recusa.
     pub email: Option<String>,
     pub whatsapp: Option<String>,
     pub produto_id: String,
+    /// Em qual estúdio a sessão foi feita (`studios.id`). A tela do desktop o
+    /// exige (dono, 2026-09-13); a API o aceita ausente por compatibilidade.
+    pub estudio_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -324,6 +340,30 @@ impl MudancaDaFoto {
     }
 }
 
+/// O que muda nos dados do cliente de uma sessão que já existe — o
+/// `PATCH /galerias/{id}` do site.
+///
+/// *"Dentro da sessão precisa ser possível mudar o Título, email e o
+/// whatsapp."* — dono, 2026-09-13.
+///
+/// O mesmo `Option<Option<_>>` de [`MudancaDaFoto`]: `None` não mexe,
+/// `Some(None)` apaga. `titulo` é `Option` simples porque não se apaga (o site
+/// responde `400`). E-mail e WhatsApp **se apagam, inclusive o último**: o
+/// contato é exigido no fim da sessão, não na edição.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MudancaDaGaleria {
+    pub titulo: Option<String>,
+    pub email: Option<Option<String>>,
+    pub whatsapp: Option<Option<String>>,
+}
+
+impl MudancaDaGaleria {
+    /// Nada a mudar — não se gasta uma ida à rede.
+    pub fn vazia(&self) -> bool {
+        self.titulo.is_none() && self.email.is_none() && self.whatsapp.is_none()
+    }
+}
+
 /// O que o cliente decidiu no balcão — os dois estados que uma foto pode ter
 /// ao entrar no site. `comprada` nasce lá, de pedido pago, nunca daqui.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -427,6 +467,9 @@ pub trait PosVendaApi: Send + Sync {
     /// O catálogo administrativo — inclusive inativos.
     async fn produtos(&self, sessao: &Sessao) -> DomainResult<Vec<Produto>>;
 
+    /// Os estúdios **ativos** — onde a sessão pode ser feita.
+    async fn estudios(&self, sessao: &Sessao) -> DomainResult<Vec<Estudio>>;
+
     async fn criar_galeria(&self, sessao: &Sessao, nova: &NovaGaleria) -> DomainResult<Galeria>;
 
     async fn enviar_foto(
@@ -439,6 +482,9 @@ pub trait PosVendaApi: Send + Sync {
     /// Manda ao cliente o e-mail "suas fotos estão prontas" — com os prazos de
     /// download e de venda e um link que entra sem senha. É o site quem
     /// escreve e manda; o app só pede.
+    ///
+    /// 🔚 Galeria sem e-mail volta como
+    /// [`crate::DomainError::FaltaEmail`] (`422`).
     async fn avisar_fotos_prontas(&self, sessao: &Sessao, galeria_id: &str) -> DomainResult<()>;
 
     /// As galerias que já existem — para subir numa delas em vez de criar uma
@@ -459,11 +505,23 @@ pub trait PosVendaApi: Send + Sync {
     async fn remover_foto(&self, sessao: &Sessao, foto_id: &str) -> DomainResult<()>;
 
     /// O link que entra sem senha — o passo "gero o link para o cliente".
+    ///
+    /// 🔚 Galeria sem e-mail volta como
+    /// [`crate::DomainError::FaltaEmail`] (`422`).
     async fn link_da_galeria(
         &self,
         sessao: &Sessao,
         galeria_id: &str,
     ) -> DomainResult<LinkDeAcesso>;
+
+    /// Muda título, e-mail ou WhatsApp da sessão — só o que veio. Ver
+    /// [`MudancaDaGaleria`].
+    async fn atualizar_galeria(
+        &self,
+        sessao: &Sessao,
+        galeria_id: &str,
+        mudanca: &MudancaDaGaleria,
+    ) -> DomainResult<()>;
 
     /// A sessão aberta: a galeria e as fotos que estão nela.
     ///

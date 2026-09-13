@@ -27,9 +27,9 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use domain::services::pos_venda::{
-    CofreDeSessao, ContagemDeFotos, EstadoDaFotoNoSite, FotoDaGaleria, FotoEnviada, FotoParaEnviar,
-    Galeria, GaleriaAberta, GaleriaDoPainel, LinkDeAcesso, MudancaDaFoto, NovaGaleria, PosVendaApi,
-    Produto, Sessao, TotaisDaGaleria,
+    CofreDeSessao, ContagemDeFotos, EstadoDaFotoNoSite, Estudio, FotoDaGaleria, FotoEnviada,
+    FotoParaEnviar, Galeria, GaleriaAberta, GaleriaDoPainel, LinkDeAcesso, MudancaDaFoto,
+    MudancaDaGaleria, NovaGaleria, PosVendaApi, Produto, Sessao, TotaisDaGaleria,
 };
 use domain::{DomainError, DomainResult};
 use serde::Deserialize;
@@ -169,6 +169,23 @@ struct ProdutoDaApi {
     deleted_at: Option<String>,
 }
 
+/// Um estúdio como `GET /bookings/studios` devolve — só o que a tela usa.
+#[derive(Deserialize)]
+struct EstudioDaApi {
+    id: String,
+    name: String,
+    #[serde(default)]
+    city: String,
+    /// A rota já devolve só os ativos; o filtro aqui é defesa, e o padrão é
+    /// `true` para uma resposta sem o campo não esvaziar a lista.
+    #[serde(default = "verdadeiro")]
+    is_active: bool,
+}
+
+fn verdadeiro() -> bool {
+    true
+}
+
 #[derive(Deserialize)]
 struct ProdutoComCategoria {
     product: ProdutoDaApi,
@@ -226,6 +243,13 @@ async fn recusa(resposta: reqwest::Response) -> DomainError {
     // "já não está lá" (o desfecho desejado) de "não deu para falar com o site".
     if status == reqwest::StatusCode::NOT_FOUND {
         return DomainError::NaoEncontradoNoSite(mensagem);
+    }
+    // 🔚 `422` é "falta o contato do cliente para concluir" — a resposta do link
+    // e do aviso a uma sessão sem e-mail (2026-09-13). Nas rotas
+    // que este cliente chama, é o único `422` de regra: o outro (JSON que não
+    // cabe no tipo) seria defeito daqui, e o corpo é montado por nós.
+    if status == reqwest::StatusCode::UNPROCESSABLE_ENTITY {
+        return DomainError::FaltaEmail(mensagem);
     }
     DomainError::InfrastructureError(format!("o site respondeu {status}: {mensagem}"))
 }
@@ -329,6 +353,27 @@ impl PosVendaApi for PosVendaApiHttp {
             .collect())
     }
 
+    async fn estudios(&self, sessao: &Sessao) -> DomainResult<Vec<Estudio>> {
+        let resposta = self
+            .client
+            .get(self.url("/bookings/studios"))
+            .bearer_auth(self.token(sessao).await?)
+            .send()
+            .await
+            .map_err(rede)?;
+
+        let lista: Vec<EstudioDaApi> = ler(resposta).await?;
+        Ok(lista
+            .into_iter()
+            .filter(|e| e.is_active)
+            .map(|e| Estudio {
+                id: e.id,
+                nome: e.name,
+                cidade: e.city,
+            })
+            .collect())
+    }
+
     async fn criar_galeria(&self, sessao: &Sessao, nova: &NovaGaleria) -> DomainResult<Galeria> {
         let resposta = self
             .client
@@ -339,6 +384,7 @@ impl PosVendaApi for PosVendaApiHttp {
                 "email": nova.email,
                 "whatsapp": nova.whatsapp,
                 "produto_id": nova.produto_id,
+                "estudio_id": nova.estudio_id,
             }))
             .send()
             .await
@@ -506,6 +552,45 @@ impl PosVendaApi for PosVendaApiHttp {
             url: link.link,
             validade_em_segundos: link.validade_em_segundos,
         })
+    }
+
+    async fn atualizar_galeria(
+        &self,
+        sessao: &Sessao,
+        galeria_id: &str,
+        mudanca: &MudancaDaGaleria,
+    ) -> DomainResult<()> {
+        // O mesmo cuidado de `mudar_foto`: nada a mudar não vai à rede.
+        if mudanca.vazia() {
+            return Ok(());
+        }
+
+        // 🔑 Ausente do mapa é "não mexer", `null` no mapa é "apagar" — é o que
+        // deixa apagar o último contato (armadilha nº 26 do site).
+        let mut corpo = serde_json::Map::new();
+        if let Some(titulo) = &mudanca.titulo {
+            corpo.insert("titulo".into(), json!(titulo));
+        }
+        if let Some(email) = &mudanca.email {
+            corpo.insert("email".into(), json!(email));
+        }
+        if let Some(whatsapp) = &mudanca.whatsapp {
+            corpo.insert("whatsapp".into(), json!(whatsapp));
+        }
+
+        let resposta = self
+            .client
+            .patch(self.url(&format!("/pos-venda/galerias/{galeria_id}")))
+            .bearer_auth(self.token(sessao).await?)
+            .json(&serde_json::Value::Object(corpo))
+            .send()
+            .await
+            .map_err(rede)?;
+
+        if !resposta.status().is_success() {
+            return Err(recusa(resposta).await);
+        }
+        Ok(())
     }
 
     async fn abrir_galeria(&self, sessao: &Sessao, id: &str) -> DomainResult<GaleriaAberta> {
@@ -1098,6 +1183,7 @@ mod tests {
             email: Some("maria@x.com".into()),
             whatsapp: None,
             produto_id: produto.into(),
+            estudio_id: None,
         };
 
         let erro = api
@@ -1311,6 +1397,125 @@ mod tests {
 
         assert_eq!(link.url, "https://recordarfotos.com.br/entrar?t=abc123");
         assert_eq!(link.validade_em_segundos, 604_800);
+    }
+
+    /// 🔚 Sessão sem contato: o `422` do link e do aviso chega como
+    /// `FaltaEmail`, com a frase do site — é o que a tela lê para pedir o
+    /// contato em vez de mostrar erro.
+    #[tokio::test]
+    async fn sem_email_o_link_e_o_aviso_voltam_como_falta_de_email() {
+        let servidor = MockServer::start().await;
+        let corpo = json!({
+            "error": {
+                "code": "UNPROCESSABLE_ENTITY",
+                "message": "informe o e-mail do cliente antes de gerar o link"
+            }
+        });
+        Mock::given(method("POST"))
+            .and(path("/api/v2/pos-venda/galerias/g1/link"))
+            .respond_with(ResponseTemplate::new(422).set_body_json(corpo.clone()))
+            .mount(&servidor)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/api/v2/pos-venda/galerias/g1/avisar"))
+            .respond_with(ResponseTemplate::new(422).set_body_json(corpo))
+            .mount(&servidor)
+            .await;
+
+        let api = PosVendaApiHttp::nova(servidor.uri());
+        let sessao = sessao_valida();
+
+        let erro = api.link_da_galeria(&sessao, "g1").await.unwrap_err();
+        assert!(
+            matches!(&erro, DomainError::FaltaEmail(frase) if frase.contains("informe o e-mail")),
+            "{erro}"
+        );
+        let erro = api.avisar_fotos_prontas(&sessao, "g1").await.unwrap_err();
+        assert!(matches!(erro, DomainError::FaltaEmail(_)), "{erro}");
+    }
+
+    /// *"Deve ser obrigatório informar o Preço por Foto e o Estúdio."* — dono,
+    /// 2026-09-13. A lista traz só os ativos, e a criação leva o estúdio.
+    #[tokio::test]
+    async fn os_estudios_ativos_chegam_e_a_criacao_leva_o_estudio() {
+        let servidor = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/bookings/studios"))
+            .and(header("authorization", "Bearer tok"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+                { "id": "s1", "name": "Gramado", "city": "Gramado", "is_active": true },
+                { "id": "s2", "name": "Fechado", "city": "Canela", "is_active": false }
+            ])))
+            .mount(&servidor)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/api/v2/pos-venda/galerias"))
+            .and(body_string_contains("\"estudio_id\":\"s1\""))
+            .respond_with(
+                ResponseTemplate::new(201).set_body_json(json!({ "id": "g1", "titulo": "Ensaio" })),
+            )
+            .expect(1)
+            .mount(&servidor)
+            .await;
+
+        let api = PosVendaApiHttp::nova(servidor.uri());
+        let sessao = sessao_valida();
+
+        assert_eq!(
+            api.estudios(&sessao).await.unwrap(),
+            vec![Estudio {
+                id: "s1".into(),
+                nome: "Gramado".into(),
+                cidade: "Gramado".into(),
+            }]
+        );
+        api.criar_galeria(
+            &sessao,
+            &NovaGaleria {
+                titulo: "Ensaio".into(),
+                email: None,
+                whatsapp: None,
+                produto_id: "p1".into(),
+                estudio_id: Some("s1".into()),
+            },
+        )
+        .await
+        .unwrap();
+    }
+
+    /// O `PATCH` da sessão leva só o que mudou, e `null` apaga — inclusive o
+    /// último contato. Mudança vazia não vai à rede (o `expect(1)` reprova).
+    #[tokio::test]
+    async fn o_patch_da_galeria_leva_so_o_que_mudou_e_null_apaga() {
+        let servidor = MockServer::start().await;
+        Mock::given(method("PATCH"))
+            .and(path("/api/v2/pos-venda/galerias/g1"))
+            .and(header("authorization", "Bearer tok"))
+            .and(wiremock::matchers::body_json(
+                json!({ "titulo": "Ensaio da Ana", "email": null }),
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "id": "g1" })))
+            .expect(1)
+            .mount(&servidor)
+            .await;
+
+        let api = PosVendaApiHttp::nova(servidor.uri());
+        let sessao = sessao_valida();
+
+        api.atualizar_galeria(
+            &sessao,
+            "g1",
+            &MudancaDaGaleria {
+                titulo: Some("Ensaio da Ana".into()),
+                email: Some(None),
+                whatsapp: None,
+            },
+        )
+        .await
+        .unwrap();
+        api.atualizar_galeria(&sessao, "g1", &MudancaDaGaleria::default())
+            .await
+            .unwrap();
     }
 
     /// 🚨 A cópia de trabalho vem como **bytes**, e não como JSON.

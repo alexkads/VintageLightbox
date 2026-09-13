@@ -20,6 +20,7 @@
 //! | [`dinheiro`] | reais em centavos: o que se lê de um campo e o que se escreve na tela |
 //! | [`negociacao`] | cortesia, desconto, site parceiro — o registro do balcão |
 //! | [`preco_de_venda`] | o preço fixado para a compra online, e o que ele recusa |
+//! | [`dados_do_cliente`] | título, e-mail e WhatsApp da sessão: o que se confere e o que mudou |
 //!
 //! # O que ele **não** faz, e por quê
 //!
@@ -35,6 +36,7 @@
 //! uma fonte aqui pesaria no `.wasm` e daria um texto pior que o dos dois.
 
 pub mod acervo;
+pub mod dados_do_cliente;
 pub mod dinheiro;
 pub mod grade;
 pub mod miniaturas;

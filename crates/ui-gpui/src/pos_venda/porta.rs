@@ -5,11 +5,18 @@
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
 
-use adapters::controllers::PosVendaController;
+use adapters::controllers::{PosVendaController, RecusaDoFimDaSessao};
 use domain::services::pos_venda::{
-    EstadoNoBalcao, Galeria, GaleriaAberta, GaleriaDoPainel, LinkDeAcesso, MudancaDaFoto,
-    NovaGaleria, Produto, Sessao,
+    EstadoNoBalcao, Estudio, Galeria, GaleriaAberta, GaleriaDoPainel, LinkDeAcesso, MudancaDaFoto,
+    MudancaDaGaleria, NovaGaleria, Produto, Sessao,
 };
+
+/// 🔚 Os dois gestos do fim da sessão — os que só saem com o contato do cliente.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GestoDoFim {
+    Link,
+    Avisar,
+}
 use domain::value_objects::CropSettings;
 use infrastructure::gpu_adjustments::Ajustes;
 use infrastructure::ImageExporterImpl;
@@ -19,8 +26,23 @@ use infrastructure::ImageExporterImpl;
 pub enum Recado {
     Entrou(Sessao),
     Produtos(Vec<Produto>),
+    /// Os estúdios ativos — a escolha obrigatória ao abrir sessão.
+    Estudios(Vec<Estudio>),
     /// O link que entra sem senha, pronto para ir ao cliente.
     Link(LinkDeAcesso),
+    /// 🔚 O site recusou o link ou o aviso porque a sessão não tem e-mail
+    /// (`422`) — sem contato nenhum, ou só com WhatsApp. **Não é falha**: a
+    /// tela pede o e-mail e segue com o gesto (2026-09-13).
+    FaltaEmail {
+        gesto: GestoDoFim,
+        frase: String,
+    },
+    /// Título ou contato gravados na sessão (`PATCH /galerias/{id}`).
+    GaleriaAtualizada,
+    /// O site recusou a edição. Separado de [`Recado::Falhou`] para a frase ir
+    /// ao formulário, e não ao erro geral — onde uma falha de outro gesto no
+    /// mesmo instante seria atribuída a ele.
+    GaleriaNaoAtualizada(String),
     /// As sessões fotográficas que já existem.
     Galerias(Vec<GaleriaDoPainel>),
     /// Uma sessão recém-aberta, ainda sem foto nenhuma.
@@ -97,11 +119,23 @@ pub trait Publicador: Send + Sync + 'static {
     /// Esquece a sessão — o "sair" da tela.
     fn sair(&self, canal: Sender<Recado>);
     fn produtos(&self, sessao: Sessao, canal: Sender<Recado>);
+    /// Os estúdios ativos. Responde `Estudios`.
+    fn estudios(&self, sessao: Sessao, canal: Sender<Recado>);
     /// O passo 7 do fluxo: o link do cliente.
     ///
     /// ⚠️ **Pedido ao site, nunca montado aqui.** O endereço da galeria exige
     /// sessão e o cliente não tem conta — ele saiu do estúdio, não do site.
     fn link(&self, sessao: Sessao, galeria_id: String, canal: Sender<Recado>);
+    /// Muda título, e-mail ou WhatsApp da sessão — o "Editar" e o pedido de
+    /// contato do fim da sessão. Responde `GaleriaAtualizada` ou
+    /// `GaleriaNaoAtualizada`.
+    fn atualizar_galeria(
+        &self,
+        sessao: Sessao,
+        galeria_id: String,
+        mudanca: MudancaDaGaleria,
+        canal: Sender<Recado>,
+    );
     /// A lista de sessões fotográficas.
     fn galerias(&self, sessao: Sessao, canal: Sender<Recado>);
     /// Abre uma sessão vazia — as fotos vêm depois.
@@ -317,6 +351,17 @@ impl Publicador for PublicadorDaApi {
         });
     }
 
+    fn estudios(&self, sessao: Sessao, canal: Sender<Recado>) {
+        let controlador = self.controlador.clone();
+        self.tokio.spawn(async move {
+            let recado = match controlador.estudios(&sessao).await {
+                Ok(estudios) => Recado::Estudios(estudios),
+                Err(erro) => Recado::Falhou(erro),
+            };
+            let _ = canal.send(recado);
+        });
+    }
+
     fn salvar_revelacao(
         &self,
         sessao: Sessao,
@@ -352,7 +397,31 @@ impl Publicador for PublicadorDaApi {
         self.tokio.spawn(async move {
             let recado = match controlador.link_da_galeria(&sessao, &galeria_id).await {
                 Ok(link) => Recado::Link(link),
-                Err(erro) => Recado::Falhou(erro),
+                Err(RecusaDoFimDaSessao::FaltaEmail(frase)) => Recado::FaltaEmail {
+                    gesto: GestoDoFim::Link,
+                    frase,
+                },
+                Err(RecusaDoFimDaSessao::Outra(erro)) => Recado::Falhou(erro),
+            };
+            let _ = canal.send(recado);
+        });
+    }
+
+    fn atualizar_galeria(
+        &self,
+        sessao: Sessao,
+        galeria_id: String,
+        mudanca: MudancaDaGaleria,
+        canal: Sender<Recado>,
+    ) {
+        let controlador = self.controlador.clone();
+        self.tokio.spawn(async move {
+            let recado = match controlador
+                .atualizar_galeria(&sessao, &galeria_id, &mudanca)
+                .await
+            {
+                Ok(()) => Recado::GaleriaAtualizada,
+                Err(erro) => Recado::GaleriaNaoAtualizada(erro),
             };
             let _ = canal.send(recado);
         });
@@ -483,7 +552,11 @@ impl Publicador for PublicadorDaApi {
         self.tokio.spawn(async move {
             let recado = match controlador.avisar(&sessao, &galeria_id).await {
                 Ok(()) => Recado::Sincronizou,
-                Err(erro) => Recado::Falhou(erro),
+                Err(RecusaDoFimDaSessao::FaltaEmail(frase)) => Recado::FaltaEmail {
+                    gesto: GestoDoFim::Avisar,
+                    frase,
+                },
+                Err(RecusaDoFimDaSessao::Outra(erro)) => Recado::Falhou(erro),
             };
             let _ = canal.send(recado);
         });
@@ -520,6 +593,8 @@ pub mod mentira {
     #[derive(Default)]
     pub struct PublicadorDeMentira {
         pub produtos: Vec<Produto>,
+        /// Os estúdios que a lista vai encontrar.
+        pub estudios: Vec<Estudio>,
         /// Liga a recusa do site — para a tela poder ser testada com "não
         /// autorizado". Invertido de propósito: o `Default` do teste é o caminho
         /// que dá certo.
@@ -566,6 +641,8 @@ pub mod mentira {
         pub demorada: bool,
         /// Os recados presos, esperando `responder()`.
         pub guardados: Mutex<Vec<(Sender<Recado>, Recado)>>,
+        /// `(galeria, mudança)` de cada `PATCH` dos dados do cliente.
+        pub atualizacoes: Mutex<Vec<(String, MudancaDaGaleria)>>,
     }
 
     /// Um JPEG 1×1 cinza, codificado de verdade.
@@ -648,6 +725,23 @@ pub mod mentira {
             }
         }
 
+        /// 🔚 A galeria existe e não tem e-mail — quando o site responde `422`
+        /// ao link e ao aviso, com WhatsApp ou sem.
+        fn sem_email(&self, galeria_id: &str) -> bool {
+            self.galerias
+                .lock()
+                .expect("as galerias")
+                .iter()
+                .any(|g| g.id == galeria_id && g.email.is_none())
+        }
+
+        fn falta_email(gesto: GestoDoFim) -> Recado {
+            Recado::FaltaEmail {
+                gesto,
+                frase: "informe o e-mail do cliente antes de gerar o link".into(),
+            }
+        }
+
         fn responder_ou_guardar(&self, canal: Sender<Recado>, recado: Recado) {
             if self.demorada {
                 self.guardados
@@ -693,6 +787,10 @@ pub mod mentira {
             self.responder_ou_guardar(canal, Recado::Produtos(self.produtos.clone()));
         }
 
+        fn estudios(&self, _sessao: Sessao, canal: Sender<Recado>) {
+            self.responder_ou_guardar(canal, Recado::Estudios(self.estudios.clone()));
+        }
+
         fn salvar_revelacao(
             &self,
             _sessao: Sessao,
@@ -710,6 +808,11 @@ pub mod mentira {
         }
 
         fn link(&self, _sessao: Sessao, galeria_id: String, canal: Sender<Recado>) {
+            // 🔚 Como o site: sem contato não há link, e nada se registra.
+            if self.sem_email(&galeria_id) {
+                self.responder_ou_guardar(canal, Self::falta_email(GestoDoFim::Link));
+                return;
+            }
             self.links
                 .lock()
                 .expect("os links")
@@ -793,8 +896,46 @@ pub mod mentira {
         }
 
         fn avisar(&self, _sessao: Sessao, galeria_id: String, canal: Sender<Recado>) {
+            // 🔚 Como o site: sem contato não há aviso, e nada se registra.
+            if self.sem_email(&galeria_id) {
+                let _ = canal.send(Self::falta_email(GestoDoFim::Avisar));
+                return;
+            }
             self.avisadas.lock().expect("as avisadas").push(galeria_id);
             let _ = canal.send(Recado::Sincronizou);
+        }
+
+        /// Grava na galeria guardada — a próxima abertura e o próximo link a
+        /// veem como o site veria.
+        fn atualizar_galeria(
+            &self,
+            _sessao: Sessao,
+            galeria_id: String,
+            mudanca: MudancaDaGaleria,
+            canal: Sender<Recado>,
+        ) {
+            if let Some(galeria) = self
+                .galerias
+                .lock()
+                .expect("as galerias")
+                .iter_mut()
+                .find(|g| g.id == galeria_id)
+            {
+                if let Some(titulo) = &mudanca.titulo {
+                    galeria.titulo = titulo.clone();
+                }
+                if let Some(email) = &mudanca.email {
+                    galeria.email = email.clone();
+                }
+                if let Some(whatsapp) = &mudanca.whatsapp {
+                    galeria.whatsapp = whatsapp.clone();
+                }
+            }
+            self.atualizacoes
+                .lock()
+                .expect("as atualizacoes")
+                .push((galeria_id, mudanca));
+            self.responder_ou_guardar(canal, Recado::GaleriaAtualizada);
         }
 
         fn miniatura(&self, _sessao: Sessao, foto_id: String, canal: Sender<Recado>) {
