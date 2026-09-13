@@ -1716,6 +1716,9 @@ impl Revelacao {
             });
         }
         self.atualizar_exibicao();
+        // Sair do modo de corte pelo atalho é cancelar: a vinheta volta ao corte
+        // da foto. Entrar não muda o corte, e o pedido sai igual ao anterior.
+        self.revelar_de_novo_se_a_vinheta_segue_o_corte(cx);
         cx.notify();
     }
 
@@ -1773,6 +1776,7 @@ impl Revelacao {
         self.historico.registrar(self.estado());
         self.gravar();
         self.atualizar_exibicao();
+        self.revelar_de_novo_se_a_vinheta_segue_o_corte(cx);
         cx.notify();
     }
 
@@ -1780,6 +1784,8 @@ impl Revelacao {
     pub fn cancelar_corte(&mut self, cx: &mut Context<Self>) {
         self.edicao = None;
         self.atualizar_exibicao();
+        // A vinheta volta para o corte da foto, que o arrasto tinha deixado.
+        self.revelar_de_novo_se_a_vinheta_segue_o_corte(cx);
         cx.notify();
     }
 
@@ -1832,6 +1838,10 @@ impl Revelacao {
             Arrasto::Retangulo => corte::arrastar(&edicao.corte, dx, dy),
         };
         edicao.arrasto = Some((arrasto, ponteiro));
+        // 🔑 Os pixels da exibição não mudam no arrasto (ver
+        // `atualizar_exibicao`), mas a vinheta muda: ela segue o retângulo,
+        // como no editor do site. Sem vinheta, nada é pedido.
+        self.revelar_de_novo_se_a_vinheta_segue_o_corte(cx);
         cx.notify();
     }
 
@@ -1965,6 +1975,7 @@ impl Revelacao {
         };
         edicao.corte = como(&edicao.corte);
         self.atualizar_exibicao();
+        self.revelar_de_novo_se_a_vinheta_segue_o_corte(cx);
         cx.notify();
     }
 
@@ -2077,10 +2088,36 @@ impl Revelacao {
             largura: origem.largura,
             altura: origem.altura,
             ajustes: self.ajustes_na_tela(),
+            corte: transformacao::corte(&self.corte_na_tela()),
         });
         self.aguardando = Some(id);
         self.acompanhar(cx);
         cx.notify();
+    }
+
+    /// O enquadramento que a tela mostra: o do modo de corte, se ele estiver
+    /// aberto; senão, o da foto.
+    fn corte_na_tela(&self) -> CropSettings {
+        match self.edicao.as_ref() {
+            Some(edicao) => edicao.corte.clone(),
+            None => self.corte_atual(),
+        }
+    }
+
+    /// O corte da tela mudou: com vinheta ligada, a foto é revelada de novo.
+    ///
+    /// 🚨 **As duas vinhetas são medidas no recorte** (`Motor::definir_corte`),
+    /// então mudar o corte muda pixel revelado — e só refazer a exibição
+    /// recortaria a revelação velha, com a vinheta ainda no enquadramento de
+    /// antes. É o que o editor do site faz ao arrastar uma alça: a vinheta
+    /// acompanha o retângulo.
+    ///
+    /// 🔑 **Sem vinheta, não pede nada**: o enquadramento sozinho não muda o que
+    /// o shader devolve, e revelar a cada milímetro de alça seria GPU por nada.
+    fn revelar_de_novo_se_a_vinheta_segue_o_corte(&mut self, cx: &mut Context<Self>) {
+        if self.ajustes_na_tela().vinheta_ligada() {
+            self.pedir_revelacao(cx);
+        }
     }
 
     /// Põe na tira a foto **como ela está sendo revelada**.

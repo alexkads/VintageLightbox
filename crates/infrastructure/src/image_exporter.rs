@@ -97,14 +97,24 @@ impl ImageExporterImpl {
     ) -> DomainResult<Vec<u8>> {
         let imagem = image::load_from_memory(bytes)
             .map_err(|e| DomainError::InfrastructureError(format!("o original não abriu: {e}")))?;
-        let revelada = self.revelar(&imagem, ajustes)?;
+        let revelada = self.revelar(&imagem, ajustes, corte)?;
         let saida = transformacao::aplicar(&revelada, corte, true);
         revelacao_core::jpeg::codificar(&saida, qualidade)
             .map_err(|e| DomainError::InfrastructureError(format!("o JPEG não saiu: {e}")))
     }
 
     /// Os 46 ajustes, no mesmo shader que desenha a Revelação.
-    fn revelar(&self, imagem: &DynamicImage, ajustes: &Ajustes) -> DomainResult<DynamicImage> {
+    ///
+    /// 🔑 **O corte entra aqui, e os pixels saem inteiros mesmo assim.** Quem
+    /// recorta continua sendo `transformacao::aplicar`, depois; o motor só o usa
+    /// para medir as duas vinhetas no recorte (`Motor::definir_corte`). É
+    /// definido a cada chamada porque o motor é compartilhado entre fotos.
+    fn revelar(
+        &self,
+        imagem: &DynamicImage,
+        ajustes: &Ajustes,
+        corte: &CropSettings,
+    ) -> DomainResult<DynamicImage> {
         // 🚨 RGBA de 8 bits é o que a textura de entrada espera
         // (`Rgba8Unorm`). Um `to_rgb8` aqui daria três canais para um formato de
         // quatro, e a foto sairia com as linhas deslocadas.
@@ -117,6 +127,7 @@ impl ImageExporterImpl {
             .lock()
             .map_err(|_| DomainError::InfrastructureError("motor de GPU envenenado".into()))?;
 
+        motor.definir_corte(&transformacao::corte(corte));
         motor
             .revelar(&pixels, largura, altura, ajustes)
             .ok_or_else(|| {
@@ -220,11 +231,11 @@ impl ImageExporterImpl {
 
         // 🔑 A ordem é a da tela: o shader devolve a foto inteira, e o
         // enquadramento vem depois (`tela.rs` faz `transformacao::aplicar` sobre
-        // o que o processador devolveu). Inverter daria uma vinheta centrada no
-        // quadro cortado em vez de no original.
-        let revelada = self.revelar(&img, &ajustes_da_entidade(photo))?;
-        let mut saida =
-            transformacao::aplicar(&revelada, &transformacao::corte_da_entidade(photo), true);
+        // o que o processador devolveu). O corte vai ao motor também, mas só
+        // para as vinhetas serem medidas no recorte — os pixels saem inteiros.
+        let corte = transformacao::corte_da_entidade(photo);
+        let revelada = self.revelar(&img, &ajustes_da_entidade(photo), &corte)?;
+        let mut saida = transformacao::aplicar(&revelada, &corte, true);
 
         // ⚠️ Redimensionar **antes** da marca, e as duas coisas dependem disso:
         // reduzir depois reamostraria a marca junto (ela sai borrada, e é o
@@ -276,7 +287,7 @@ impl ImageExporter for ImageExporterImpl {
             DomainError::InfrastructureError(format!("Failed to open source image: {}", e))
         })?;
 
-        let revelada = self.revelar(&img, &Ajustes::default())?;
+        let revelada = self.revelar(&img, &Ajustes::default(), &CropSettings::default())?;
         let mut saida = transformacao::aplicar(&revelada, &CropSettings::default(), true);
         if let Some(lado_maior) = options.longest_edge() {
             saida = redimensionar(saida, lado_maior);

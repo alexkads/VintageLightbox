@@ -31,6 +31,7 @@ use parking_lot::Mutex;
 
 pub use infrastructure::gpu_adjustments::Ajustes;
 use infrastructure::gpu_adjustments::Motor;
+pub use infrastructure::transformacao::Corte;
 
 /// Um pedido de revelação.
 pub struct Pedido {
@@ -43,6 +44,12 @@ pub struct Pedido {
     pub largura: u32,
     pub altura: u32,
     pub ajustes: Ajustes,
+    /// O enquadramento **da tela** — o do modo de corte, se ele estiver aberto.
+    ///
+    /// 🔑 Os pixels continuam saindo inteiros (quem recorta é `refazer_exibicao`,
+    /// depois), mas as duas vinhetas são medidas no recorte: sem o corte, a foto
+    /// recortada mostrava a vinheta da foto inteira.
+    pub corte: Corte,
 }
 
 /// O que volta.
@@ -167,6 +174,7 @@ fn laco(
         }
 
         let comeco = std::time::Instant::now();
+        motor.definir_corte(&pedido.corte);
         if let Some(imagem) = motor.revelar(
             &pedido.pixels,
             pedido.largura,

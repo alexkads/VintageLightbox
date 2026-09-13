@@ -212,6 +212,10 @@ async fn o_arquivo_e_o_que_a_tela_mostra() {
     let mut motor = Motor::abrir().expect("nenhum adaptador de GPU");
     let rgba = original.to_rgba8();
     let (largura, altura) = (rgba.width(), rgba.height());
+    // A tela manda o corte ao motor, para as vinhetas: o mesmo que a exportação.
+    motor.definir_corte(&transformacao::corte(&transformacao::corte_da_entidade(
+        &foto,
+    )));
     let revelada = motor
         .revelar(
             &Arc::new(rgba.into_raw()),
