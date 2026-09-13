@@ -640,6 +640,27 @@ pub const CONTROLES: &[Definicao] = &[
     },
 ];
 
+/// Em que campo do [`Ajustes`] este controle lê — pelo que ele devolve, e não
+/// por um nome escrito à mão.
+///
+/// 🔑 Cada posição do vetor recebe um valor que só ela tem; o que o `ler`
+/// devolve diz de onde leu. É o que deixa os testes conferirem a tabela contra
+/// `Ajustes::NOMES` sem uma segunda lista de nomes para desencontrar da primeira.
+#[cfg(test)]
+pub(crate) fn campo_do_controle(def: &Definicao) -> &'static str {
+    const BASE: f32 = 10_000.0;
+    let vetor: Vec<f32> = (0..Ajustes::NOMES.len()).map(|i| BASE + i as f32).collect();
+    let ajustes = Ajustes::de_vetor(&vetor).expect("o vetor tem o tamanho de `NOMES`");
+    let lido = (def.ler)(&ajustes);
+    let posicao = (lido - BASE) as usize;
+    assert!(
+        vetor.get(posicao) == Some(&lido),
+        "`{}` não lê campo nenhum do `Ajustes`",
+        def.rotulo
+    );
+    Ajustes::NOMES[posicao]
+}
+
 #[cfg(test)]
 mod passo_dos_controles {
     use super::*;
@@ -781,28 +802,62 @@ mod testes {
         }
     }
 
-    /// ✅ **Um controle por ajuste: 53 e 53.**
+    /// ✅ **Todo ajuste tem controle no desktop — ou está declarado entre os que
+    /// ainda só o site oferece.**
     ///
     /// 🚨 **Eram 42 para 46 até 17/ago/2026**, e a diferença era a curva de tons:
     /// os quatro `tone_curve_*` existiam no `Ajustes`, o shader os aplicava, e
-    /// **nada os escrevia** — nem aqui, nem no app de egui, cuja seção "Tone
-    /// Curve" desenhava um gráfico a partir dos ajustes do Básico sem tocar nos
-    /// parâmetros que levam o nome dela.
+    /// **nada os escrevia**. Depois veio a trava "53 e 53", que contava a tabela e
+    /// o tamanho da struct — e quebrou calada quando o motor passou de 53 para 171
+    /// ajustes (calibração, preto e branco, curva por ponto, a tonalização completa
+    /// e os Controles RGB, de `5b27d88` a `4d543ff`): os controles não vieram junto,
+    /// e o teste ficou vermelho sem dizer quais faltavam.
     ///
-    /// O teste antigo travava o número em 42 de propósito, contra o impulso de
-    /// "completar a tabela": enquanto o alvo era o app antigo, dar slider a eles
-    /// era feature nova, e feature nova tornava impossível separar defeito de
-    /// porte de escopo divergente. O alvo passou a ser o Lightroom, que **tem**
-    /// esses quatro controles, e a trava virou o contrário: agora ela cobra que
-    /// nenhum ajuste fique sem quem o escreva.
+    /// 🔑 **A fonte agora é `Ajustes::NOMES`**, nome por nome. Cada controle diz em
+    /// que campo lê ([`campo_do_controle`]); cada nome tem de ter exatamente um
+    /// controle **ou** estar em `AINDA_SO_NO_SITE`. Ajuste novo sem uma das duas
+    /// coisas falha aqui, com o nome.
+    ///
+    /// ⚠️ **`AINDA_SO_NO_SITE` é defeito de paridade, e não decisão.** O site tem
+    /// slider para todos (`revelacao/ajustes.ts`); aqui esses 118 só chegam por
+    /// preset, pela receita do site ou por sincronização. Eles não ganharam
+    /// slider junto com esta correção porque o banco local também só tem coluna
+    /// para os 53 (`persistencia::SEM_COLUNA_NO_BANCO_LOCAL`), e um slider cujo
+    /// valor some ao reabrir a foto do catálogo é pior que não ter slider. Cada
+    /// controle novo tira uma entrada da lista — e o teste cobra que a tire.
     #[test]
     fn todo_ajuste_tem_um_controle() {
-        assert_eq!(CONTROLES.len(), 53);
-        assert_eq!(
-            std::mem::size_of::<Ajustes>() / 4,
-            CONTROLES.len(),
-            "há ajuste sem controle, ou controle a mais"
-        );
+        const AINDA_SO_NO_SITE: [&str; 7] = [
+            "calib_",
+            "split_midtone_",
+            "split_global_",
+            "split_blending",
+            "bw_",
+            "curva_",
+            "dt_",
+        ];
+        let so_no_site = |nome: &str| AINDA_SO_NO_SITE.iter().any(|p| nome.starts_with(p));
+
+        let mut com_controle = std::collections::BTreeMap::new();
+        for def in CONTROLES.iter() {
+            let nome = campo_do_controle(def);
+            if let Some(outro) = com_controle.insert(nome, def.rotulo) {
+                panic!("`{nome}` tem dois controles: `{outro}` e `{}`", def.rotulo);
+            }
+        }
+
+        for nome in Ajustes::NOMES {
+            match (com_controle.contains_key(nome), so_no_site(nome)) {
+                (true, true) => {
+                    panic!("`{nome}` ganhou controle: tire-o de `AINDA_SO_NO_SITE`")
+                }
+                (false, false) => panic!(
+                    "`{nome}` não tem controle no desktop — dê um a ele, ou declare-o em \
+                     `AINDA_SO_NO_SITE`"
+                ),
+                _ => {}
+            }
+        }
     }
 
     /// Toda seção declarada tem pelo menos um controle, e todo controle está

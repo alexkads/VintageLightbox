@@ -262,33 +262,34 @@ mod testes {
         assert_eq!(ajustes.hsl_blue_lum, -30.0);
     }
 
-    /// ✅ **Agora um preset alcança HSL, nitidez, lente, tonalização e grão.**
+    /// ✅ **Um preset alcança todos os ajustes do motor, e não só os do Básico.**
     ///
     /// 🚨 Este teste era `os_quinze_campos_atravessam_a_ida_e_a_volta`, e a
     /// última asserção dele afirmava o defeito: *"os 31 de fora do preset não
-    /// viajam"*. Viajavam para lugar nenhum porque a tabela não tinha coluna
-    /// para eles — salvar era perder, calado.
+    /// viajavam"*. Depois virou "os 53", com dez campos escolhidos à mão — e os
+    /// 118 que o motor ganhou depois (calibração, P&B, curva por ponto, Controles
+    /// RGB) nunca foram conferidos. Agora a fonte é `Ajustes::NOMES`: cada ajuste
+    /// recebe um valor que só ele tem, e tem de voltar com ele.
     #[test]
-    fn os_53_campos_atravessam_a_ida_e_a_volta() {
-        let original = Ajustes {
-            exposure: 1.25,
-            contrast: 1.4,
-            temperature: -3.0,
-            hsl_red_sat: 60.0,
-            hsl_blue_lum: -20.0,
-            sharpen_amount: 40.0,
-            lens_vignette_amount: -25.0,
-            split_shadow_hue: 35.0,
-            split_shadow_sat: 45.0,
-            grain_amount: 30.0,
-            ..Default::default()
-        };
+    fn todos_os_campos_atravessam_a_ida_e_a_volta() {
+        let vetor: Vec<f32> = (0..Ajustes::NOMES.len())
+            .map(|i| 1_000.0 + i as f32)
+            .collect();
+        let original = Ajustes::de_vetor(&vetor).expect("o vetor tem o tamanho de `NOMES`");
 
         let preset = dos_ajustes(&original, false);
+        assert_eq!(
+            preset.len(),
+            Ajustes::NOMES.len(),
+            "nenhum estava no neutro"
+        );
         let mut destino = Ajustes::default();
         aplicar(&mut destino, &preset);
 
-        assert_eq!(destino, original, "os 53, campo a campo");
+        let destino = destino.como_vetor();
+        for (i, nome) in Ajustes::NOMES.iter().enumerate() {
+            assert_eq!(destino[i], vetor[i], "`{nome}` não atravessou o preset");
+        }
     }
 
     /// ⚠️ **Só o que saiu do neutro vira preset** — é o que o site guarda.
@@ -315,11 +316,14 @@ mod testes {
         );
     }
 
-    /// E o preset "inteiro" guarda os 53 — a caixa "Zerar os outros ajustes ao
-    /// aplicar" do site. Aplicar um destes devolve ao neutro o que ele não
-    /// menciona, porque ele menciona tudo.
+    /// E o preset "inteiro" guarda **todos** os ajustes do motor — a caixa "Zerar
+    /// os outros ajustes ao aplicar" do site. Aplicar um destes devolve ao neutro
+    /// o que ele não menciona, porque ele menciona tudo.
+    ///
+    /// ⚠️ A conta era `53`, e quebrou quando o motor passou a 171: o código já
+    /// guardava todos, e o número escrito no teste é que tinha ficado para trás.
     #[test]
-    fn o_preset_inteiro_guarda_os_53_e_apaga_o_que_havia() {
+    fn o_preset_inteiro_guarda_todos_e_apaga_o_que_havia() {
         let visual = dos_ajustes(
             &Ajustes {
                 saturation: -1.0,
@@ -327,7 +331,13 @@ mod testes {
             },
             true,
         );
-        assert_eq!(visual.len(), 53);
+        assert_eq!(visual.len(), Ajustes::NOMES.len());
+        for nome in Ajustes::NOMES {
+            assert!(
+                visual.get(nome).is_some(),
+                "o preset inteiro não guardou `{nome}`"
+            );
+        }
 
         let mut destino = Ajustes {
             exposure: 2.0,

@@ -6,7 +6,7 @@
 //! a parte **pura**: o que está marcado na tira, o que viaja e o que fica, e a
 //! escolha guardada entre aberturas. Quem grava e sobe é a raiz.
 //!
-//! 🔑 **Os grupos são os painéis**, não uma divisão nova. O operador acabou de
+//! 🔑 **Os grupos são os do site**, não uma divisão nova. O operador acabou de
 //! mexer em "Básico" e "HSL"; a caixa que pergunta o que sincronizar tem de usar
 //! os mesmos nomes, na mesma ordem, senão ele traduz mentalmente a cada uso. O
 //! enquadramento anda separado porque não é ajuste — e porque é o único que
@@ -62,20 +62,36 @@ pub fn so(aberta: usize) -> BTreeSet<usize> {
 
 // -------------------------------------------------------------- a escolha
 
-/// Um grupo da caixa de sincronizar: os sete painéis e o enquadramento.
+/// Um grupo da caixa de sincronizar — os do site, na ordem do site.
+///
+/// 🚨 **Não são só os sete painéis da coluna.** O site sincroniza doze grupos
+/// (`GRUPOS_DA_SINCRONIZACAO`, em `revelacao/sincronizacao.ts`): os sete painéis,
+/// os Controles RGB, a curva por ponto, o preto e branco, a calibração e o
+/// enquadramento. Até 2026-09-13 esta lista tinha só os painéis, e o mapa por
+/// nome mandava ao Básico todo ajuste que não reconhecia — 113 dos 171, entre
+/// eles o estilo inteiro dos Controles RGB. Sincronizar só o Básico levava o
+/// estilo junto; desmarcar o Básico o deixava para trás.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Grupo {
+    ControlesRgb,
     Painel(Painel),
+    CurvaPorPonto,
+    PretoEBranco,
+    Calibracao,
     Enquadramento,
 }
 
 impl Grupo {
-    pub const TODOS: [Grupo; 8] = [
+    pub const TODOS: [Grupo; 12] = [
+        Grupo::ControlesRgb,
         Grupo::Painel(Painel::Basico),
         Grupo::Painel(Painel::CurvaDeTons),
+        Grupo::CurvaPorPonto,
         Grupo::Painel(Painel::Hsl),
+        Grupo::PretoEBranco,
         Grupo::Painel(Painel::Detalhe),
         Grupo::Painel(Painel::Lente),
+        Grupo::Calibracao,
         Grupo::Painel(Painel::Tonalizacao),
         Grupo::Painel(Painel::Efeitos),
         Grupo::Enquadramento,
@@ -83,7 +99,11 @@ impl Grupo {
 
     pub fn rotulo(self) -> &'static str {
         match self {
+            Grupo::ControlesRgb => "Controles RGB",
             Grupo::Painel(painel) => painel.rotulo(),
+            Grupo::CurvaPorPonto => "Curva por ponto",
+            Grupo::PretoEBranco => "Preto e branco",
+            Grupo::Calibracao => "Calibração",
             Grupo::Enquadramento => "Enquadramento",
         }
     }
@@ -91,24 +111,34 @@ impl Grupo {
     /// O que ele descreve, em uma linha — some quando for óbvio.
     pub fn detalhe(self) -> Option<&'static str> {
         match self {
+            Grupo::ControlesRgb => {
+                Some("exposição, sombras e realces, monocromático, vinhetagem e color balance")
+            }
+            Grupo::CurvaPorPonto => Some("os quatro canais"),
             Grupo::Painel(Painel::Hsl) => Some("cor, luminância e matiz das oito faixas"),
+            Grupo::PretoEBranco => Some("conversão e mixer por cor"),
             Grupo::Painel(Painel::Detalhe) => Some("ruído e nitidez"),
             Grupo::Painel(Painel::Lente) => Some("distorção e vinheta"),
+            Grupo::Calibracao => Some("os primários da câmera"),
             Grupo::Painel(Painel::Tonalizacao) => Some("a cor das sombras e a das altas luzes"),
             Grupo::Painel(Painel::Efeitos) => Some("grão"),
             Grupo::Enquadramento => Some("giro, espelho, endireitar e recorte"),
-            _ => None,
+            Grupo::Painel(Painel::Basico) | Grupo::Painel(Painel::CurvaDeTons) => None,
         }
     }
 
     /// Um id estável para o elemento da caixa.
     pub fn chave(self) -> &'static str {
         match self {
+            Grupo::ControlesRgb => "controles-rgb",
             Grupo::Painel(Painel::Basico) => "basico",
             Grupo::Painel(Painel::CurvaDeTons) => "curva",
+            Grupo::CurvaPorPonto => "curva-por-ponto",
             Grupo::Painel(Painel::Hsl) => "hsl",
+            Grupo::PretoEBranco => "preto-e-branco",
             Grupo::Painel(Painel::Detalhe) => "detalhe",
             Grupo::Painel(Painel::Lente) => "lente",
+            Grupo::Calibracao => "calibracao",
             Grupo::Painel(Painel::Tonalizacao) => "tonalizacao",
             Grupo::Painel(Painel::Efeitos) => "efeitos",
             Grupo::Enquadramento => "enquadramento",
@@ -126,24 +156,34 @@ impl Grupo {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Escolha {
+    pub controles_rgb: bool,
     pub basico: bool,
     pub curva: bool,
+    pub curva_por_ponto: bool,
     pub hsl: bool,
+    pub preto_e_branco: bool,
     pub detalhe: bool,
     pub lente: bool,
+    pub calibracao: bool,
     pub tonalizacao: bool,
     pub efeitos: bool,
     pub enquadramento: bool,
 }
 
 impl Default for Escolha {
+    /// 🔑 O `#[serde(default)]` da struct usa isto campo a campo: uma escolha
+    /// gravada antes de um grupo existir abre com ele **marcado**, como o site.
     fn default() -> Self {
         Self {
+            controles_rgb: true,
             basico: true,
             curva: true,
+            curva_por_ponto: true,
             hsl: true,
+            preto_e_branco: true,
             detalhe: true,
             lente: true,
+            calibracao: true,
             tonalizacao: true,
             efeitos: true,
             enquadramento: false,
@@ -154,11 +194,15 @@ impl Default for Escolha {
 impl Escolha {
     fn campo(&mut self, grupo: Grupo) -> &mut bool {
         match grupo {
+            Grupo::ControlesRgb => &mut self.controles_rgb,
             Grupo::Painel(Painel::Basico) => &mut self.basico,
             Grupo::Painel(Painel::CurvaDeTons) => &mut self.curva,
+            Grupo::CurvaPorPonto => &mut self.curva_por_ponto,
             Grupo::Painel(Painel::Hsl) => &mut self.hsl,
+            Grupo::PretoEBranco => &mut self.preto_e_branco,
             Grupo::Painel(Painel::Detalhe) => &mut self.detalhe,
             Grupo::Painel(Painel::Lente) => &mut self.lente,
+            Grupo::Calibracao => &mut self.calibracao,
             Grupo::Painel(Painel::Tonalizacao) => &mut self.tonalizacao,
             Grupo::Painel(Painel::Efeitos) => &mut self.efeitos,
             Grupo::Enquadramento => &mut self.enquadramento,
@@ -181,7 +225,7 @@ impl Escolha {
         }
     }
 
-    /// Os oito ligados — o rótulo do atalho da caixa vira "Desmarcar tudo".
+    /// Todos ligados — o rótulo do atalho da caixa vira "Desmarcar tudo".
     pub fn tudo(&self) -> bool {
         Grupo::TODOS.into_iter().all(|g| self.ligado(g))
     }
@@ -190,33 +234,61 @@ impl Escolha {
     pub fn tem_algo(&self) -> bool {
         Grupo::TODOS.into_iter().any(|g| self.ligado(g))
     }
-
-    pub fn leva(&self, painel: Painel) -> bool {
-        self.ligado(Grupo::Painel(painel))
-    }
 }
 
-/// Em que painel um ajuste mora, pelo nome do `uniform`.
+/// Em que grupo da sincronização um ajuste viaja, pelo nome do `uniform`.
 ///
-/// 🔑 **Pelo nome, e não pela tabela de controles**: `CONTROLES` descreve
-/// sliders, e a curva de tons tem widget próprio. Os nomes são o contrato com o
-/// shader (`Ajustes::NOMES`) e cobrem os 53 — o teste abaixo conta.
-pub fn painel_do_ajuste(nome: &str) -> Painel {
-    if nome.starts_with("tone_curve_") {
-        Painel::CurvaDeTons
-    } else if nome.starts_with("hsl_") {
-        Painel::Hsl
-    } else if nome.starts_with("nr_") || nome.starts_with("sharpen_") {
-        Painel::Detalhe
-    } else if nome.starts_with("lens_") {
-        Painel::Lente
-    } else if nome.starts_with("split_") {
-        Painel::Tonalizacao
-    } else if nome.starts_with("grain_") {
-        Painel::Efeitos
+/// 🔑 **Pelo nome, e não pela tabela de controles**: `CONTROLES` descreve os
+/// sliders do desktop, e boa parte dos ajustes ainda só tem slider no site. Os
+/// nomes são o contrato com o shader (`Ajustes::NOMES`), e os prefixos são os
+/// grupos do site.
+///
+/// 🚨 **Sem "o resto vai para o Básico".** Era assim até 2026-09-13, e quando o
+/// motor ganhou calibração, P&B, curva por ponto e os Controles RGB, todos eles
+/// passaram a viajar como se fossem exposição. O Básico é a lista dos onze; nome
+/// que nenhum grupo reconhece devolve `None` e não viaja — e
+/// `cada_ajuste_viaja_em_um_grupo` falha antes de isso chegar a uma sessão.
+pub fn grupo_do_ajuste(nome: &str) -> Option<Grupo> {
+    const BASICO: [&str; 11] = [
+        "exposure",
+        "contrast",
+        "temperature",
+        "tint",
+        "highlights",
+        "shadows",
+        "whites",
+        "blacks",
+        "clarity",
+        "vibrance",
+        "saturation",
+    ];
+    let com = |prefixo: &str| nome.starts_with(prefixo);
+    let grupo = if BASICO.contains(&nome) {
+        Grupo::Painel(Painel::Basico)
+    } else if com("tone_curve_") {
+        Grupo::Painel(Painel::CurvaDeTons)
+    } else if com("curva_") {
+        Grupo::CurvaPorPonto
+    } else if com("hsl_") {
+        Grupo::Painel(Painel::Hsl)
+    } else if com("bw_") {
+        Grupo::PretoEBranco
+    } else if com("nr_") || com("sharpen_") {
+        Grupo::Painel(Painel::Detalhe)
+    } else if com("lens_") {
+        Grupo::Painel(Painel::Lente)
+    } else if com("calib_") {
+        Grupo::Calibracao
+    } else if com("split_") {
+        Grupo::Painel(Painel::Tonalizacao)
+    } else if com("grain_") {
+        Grupo::Painel(Painel::Efeitos)
+    } else if com("dt_") {
+        Grupo::ControlesRgb
     } else {
-        Painel::Basico
-    }
+        return None;
+    };
+    Some(grupo)
 }
 
 /// Os ajustes do destino com os grupos escolhidos trocados pelos da origem.
@@ -228,7 +300,7 @@ pub fn mesclar(destino: Ajustes, origem: Ajustes, escolha: &Escolha) -> Ajustes 
     let mut saida = destino.como_vetor();
     let de = origem.como_vetor();
     for (posicao, nome) in Ajustes::NOMES.iter().enumerate() {
-        if escolha.leva(painel_do_ajuste(nome)) {
+        if grupo_do_ajuste(nome).is_some_and(|grupo| escolha.ligado(grupo)) {
             saida[posicao] = de[posicao];
         }
     }
@@ -317,23 +389,112 @@ mod testes {
         assert!(!tudo.tem_algo());
     }
 
-    /// 🚨 O mapa por nome cobre os 53, com as contagens dos painéis do site.
+    /// 🚨 **Todo ajuste viaja em exatamente um grupo**, e nenhum por sobra.
+    ///
+    /// Este teste contava 53 e travava as contagens dos sete painéis — e quebrou
+    /// quando o motor passou a 171, com o Básico contando 124. A fonte agora é
+    /// `Ajustes::NOMES`: ajuste novo sem grupo falha aqui, com o nome, antes de
+    /// ser levado (ou esquecido) por uma sincronização.
     #[test]
-    fn cada_um_dos_53_ajustes_mora_em_um_painel() {
-        let conta = |painel: Painel| {
-            Ajustes::NOMES
-                .iter()
-                .filter(|nome| painel_do_ajuste(nome) == painel)
-                .count()
+    fn cada_ajuste_viaja_em_um_grupo() {
+        for nome in Ajustes::NOMES {
+            let grupo = grupo_do_ajuste(nome);
+            assert!(grupo.is_some(), "`{nome}` não viaja em grupo nenhum");
+            assert_ne!(
+                grupo,
+                Some(Grupo::Enquadramento),
+                "`{nome}`: o enquadramento não é ajuste"
+            );
+        }
+        // Toda caixa de ajuste leva alguma coisa: caixa que não leva nada é
+        // mentira na tela.
+        for grupo in Grupo::TODOS
+            .into_iter()
+            .filter(|g| *g != Grupo::Enquadramento)
+        {
+            assert!(
+                Ajustes::NOMES
+                    .iter()
+                    .any(|n| grupo_do_ajuste(n) == Some(grupo)),
+                "`{}` não leva ajuste nenhum",
+                grupo.rotulo()
+            );
+        }
+        // O estilo dos Controles RGB viaja inteiro, e em grupo próprio.
+        for nome in Ajustes::NOMES.iter().filter(|n| n.starts_with("dt_")) {
+            assert_eq!(grupo_do_ajuste(nome), Some(Grupo::ControlesRgb), "`{nome}`");
+        }
+    }
+
+    /// 🔑 **O grupo de um ajuste é o painel onde o slider dele mora.**
+    ///
+    /// Sem isto, a caixa diria "Detalhe" e levaria um slider que o operador vê
+    /// em "Lente". A conferência é contra a tabela de controles, pelo campo que
+    /// cada um lê (`campo_do_controle`), e não contra uma lista escrita aqui.
+    #[test]
+    fn o_grupo_de_cada_controle_e_o_painel_dele() {
+        use crate::revelacao::controles::{campo_do_controle, CONTROLES};
+        for def in CONTROLES.iter() {
+            let nome = campo_do_controle(def);
+            assert_eq!(
+                grupo_do_ajuste(nome),
+                Some(Grupo::Painel(def.secao.painel())),
+                "`{}` ({nome}) mora em `{}`",
+                def.rotulo,
+                def.secao.painel().rotulo()
+            );
+        }
+    }
+
+    /// 🚨 **Sincronizar só o Básico não leva o estilo, e desmarcar o Básico não
+    /// o deixa para trás.** Era o defeito de o mapa mandar ao Básico todo ajuste
+    /// que não reconhecia.
+    #[test]
+    fn o_estilo_e_a_calibracao_viajam_nos_proprios_grupos() {
+        let origem = Ajustes {
+            exposure: 1.5,
+            dt_vignette_ativo: 1.0,
+            dt_vignette_brightness: 0.9,
+            calib_red_hue: 20.0,
+            bw_ativo: 1.0,
+            curva_m4: 150.0,
+            ..Ajustes::default()
         };
-        assert_eq!(conta(Painel::Basico), 11);
-        assert_eq!(conta(Painel::CurvaDeTons), 4);
-        assert_eq!(conta(Painel::Hsl), 24);
-        assert_eq!(conta(Painel::Detalhe), 4);
-        assert_eq!(conta(Painel::Lente), 3);
-        assert_eq!(conta(Painel::Tonalizacao), 5);
-        assert_eq!(conta(Painel::Efeitos), 2);
-        assert_eq!(Ajustes::NOMES.len(), 53);
+        let destino = Ajustes::default();
+
+        let mut so_basico = Escolha::default();
+        so_basico.marcar_tudo(false);
+        so_basico.basico = true;
+        let final_ = mesclar(destino, origem, &so_basico);
+        assert_eq!(final_.exposure, 1.5, "o Básico viaja");
+        assert_eq!(
+            final_.dt_vignette_ativo, 0.0,
+            "o estilo não anda com o Básico"
+        );
+        assert_eq!(
+            final_.calib_red_hue, 0.0,
+            "a calibração não anda com o Básico"
+        );
+        assert_eq!(final_.bw_ativo, 0.0, "o P&B não anda com o Básico");
+        assert_eq!(
+            final_.curva_m4, destino.curva_m4,
+            "a curva por ponto não anda com o Básico"
+        );
+
+        let sem_basico = Escolha {
+            basico: false,
+            ..Escolha::default()
+        };
+        let final_ = mesclar(destino, origem, &sem_basico);
+        assert_eq!(
+            final_.exposure, 0.0,
+            "o Básico desmarcado fica o do destino"
+        );
+        assert_eq!(final_.dt_vignette_ativo, 1.0, "o estilo viaja sem o Básico");
+        assert_eq!(final_.dt_vignette_brightness, 0.9);
+        assert_eq!(final_.calib_red_hue, 20.0);
+        assert_eq!(final_.bw_ativo, 1.0);
+        assert_eq!(final_.curva_m4, 150.0);
     }
 
     /// 🔑 Sincronizar não é substituir: o grupo desmarcado fica como estava no
@@ -392,5 +553,9 @@ mod testes {
         let lida = ler_de(&caminho).unwrap();
         assert!(!lida.basico);
         assert!(lida.curva && !lida.enquadramento);
+        // E os grupos que vieram depois nascem marcados, como no site.
+        assert!(
+            lida.controles_rgb && lida.curva_por_ponto && lida.preto_e_branco && lida.calibracao
+        );
     }
 }

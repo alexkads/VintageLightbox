@@ -717,6 +717,32 @@ mod testes {
         assert_eq!(corte_de_volta, corte);
     }
 
+    /// 🚨 **Os 171 sobem e voltam pelo JSON do site, e não só os do Básico.**
+    ///
+    /// É o caminho que guarda o que o banco local não guarda
+    /// (`SEM_COLUNA_NO_BANCO_LOCAL`). Cada ajuste recebe um valor que só ele tem:
+    /// uma chave com nome trocado entre `ajustes_em_json` e `de_json` faria o
+    /// ajuste voltar no neutro — ou com o valor do vizinho.
+    #[test]
+    fn todos_os_ajustes_sobem_e_voltam_pelo_json_do_site() {
+        let vetor: Vec<f32> = (0..Ajustes::NOMES.len())
+            .map(|i| 1_000.0 + i as f32)
+            .collect();
+        let ajustes = Ajustes::de_vetor(&vetor).expect("o vetor tem o tamanho de `NOMES`");
+        let json = crate::pos_venda::porta::ajustes_em_json(
+            &ajustes,
+            &para_crop_settings(&Corte::default()),
+        );
+        let (de_volta, _) = de_json(&json);
+        let de_volta = de_volta.como_vetor();
+        for (i, nome) in Ajustes::NOMES.iter().enumerate() {
+            assert_eq!(
+                de_volta[i], vetor[i],
+                "`{nome}` não fez a ida e a volta pelo JSON do site"
+            );
+        }
+    }
+
     #[test]
     fn a_foto_do_site_nao_tem_caminho_neste_disco() {
         assert!(so_existe_no_site(&PhotoViewModel {
@@ -830,13 +856,20 @@ mod testes {
         assert_eq!(ajustes.contrast, 0.0);
     }
 
-    /// Os 53 campos estão na macro — nenhum ficou de fora na cópia.
+    /// Todo ajuste com coluna em `photos` está na macro — e todo ajuste sem
+    /// coluna está declarado em [`SEM_COLUNA_NO_BANCO_LOCAL`].
     ///
     /// 🚨 Um campo esquecido não falha: ele simplesmente nunca volta do banco, e
-    /// a foto abre com aquele ajuste no neutro. Com 53 nomes parecidos
+    /// a foto abre com aquele ajuste no neutro. Com nomes parecidos
     /// (`hsl_blue_lum` e `hsl_blue_sat` diferem em três letras), esquecer um é o
     /// erro provável — e o sintoma seria "o app novo perdeu meu HSL", meses
     /// depois.
+    ///
+    /// 🔑 **A fonte é `Ajustes::NOMES`**, e não "a struct inteira tem de voltar
+    /// marcada". Essa era a conta até 2026-09-13, e ela quebrou quando o motor
+    /// passou de 53 para 171 ajustes sem que `photos` ganhasse coluna para os
+    /// novos. Agora cada nome cai num dos dois lados, e ajuste novo sem lado
+    /// falha aqui, com o nome.
     #[test]
     fn todos_os_campos_voltam_do_banco() {
         // Uma foto com **tudo** gravado num valor que não é o neutro de nenhum
@@ -899,15 +932,45 @@ mod testes {
             ..foto()
         };
 
-        let ajustes = da_foto(&salva);
-        let campos: &[f32] = bytemuck::cast_slice(bytemuck::bytes_of(&ajustes));
-
-        assert_eq!(campos.len(), std::mem::size_of::<Ajustes>() / 4);
-        for (i, valor) in campos.iter().enumerate() {
-            assert_eq!(
-                *valor, MARCA,
-                "o campo {i} não foi lido do banco — falta uma linha na macro `ler!`"
-            );
+        let lidos = da_foto(&salva).como_vetor();
+        let neutro = Ajustes::default().como_vetor();
+        for (i, nome) in Ajustes::NOMES.iter().enumerate() {
+            if SEM_COLUNA_NO_BANCO_LOCAL
+                .iter()
+                .any(|p| nome.starts_with(p))
+            {
+                assert_eq!(
+                    lidos[i], neutro[i],
+                    "`{nome}` voltou do banco: ganhou coluna — tire-o de \
+                     `SEM_COLUNA_NO_BANCO_LOCAL`"
+                );
+            } else {
+                assert_eq!(
+                    lidos[i], MARCA,
+                    "`{nome}` não foi lido do banco — falta uma linha na macro \
+                     `com_os_campos!`, ou ele não tem coluna e vai em \
+                     `SEM_COLUNA_NO_BANCO_LOCAL`"
+                );
+            }
         }
     }
+
+    /// Os ajustes que **ainda não têm coluna** em `photos`, por prefixo.
+    ///
+    /// ⚠️ **É defeito, e não decisão.** São os 118 que o motor ganhou depois dos
+    /// 53 — calibração, preto e branco, curva por ponto, a tonalização completa
+    /// e os Controles RGB. Numa foto do catálogo local eles não são gravados por
+    /// `SavePhotoEditsUseCase` (que recebe os 53 um a um), e somem ao reabrir. Na
+    /// foto do site eles viajam inteiros pelo JSON da receita
+    /// (`todos_os_ajustes_sobem_e_voltam_pelo_json_do_site`). Dar coluna a eles é
+    /// migração, entidade e caso de uso — cada prefixo que ganhar sai daqui.
+    const SEM_COLUNA_NO_BANCO_LOCAL: [&str; 7] = [
+        "calib_",
+        "split_midtone_",
+        "split_global_",
+        "split_blending",
+        "bw_",
+        "curva_",
+        "dt_",
+    ];
 }
