@@ -51,8 +51,8 @@ do que funciona, do que promete e não faz, e do que não existe. É a fila de t
 O que o app sobe e lê do pós-venda segue o contrato do site:
 `../recordarfotos-e-commerce/docs/CONTRATO_DA_FOTO.md` — **bruto** (nunca muda), **parâmetros** (os
 171 por nome, nenhum descartado), **versão revelada** (arquivo próprio) e **caches**. Desclassificar devolve
-bruto + parâmetros ao SQLite antes de a nuvem apagar (C21). As divergências deste app estão lá como
-D7, D8 e D14. Onde o código diverge do contrato, o código está errado.
+bruto + parâmetros ao SQLite antes de a nuvem apagar (C21), e cada versão dos parâmetros fica no
+histórico, que anda com a foto (C23–C26). As divergências deste app estão lá como D7, D8, D14 e D15. Onde o código diverge do contrato, o código está errado.
 
 ## Build and Test Commands
 
