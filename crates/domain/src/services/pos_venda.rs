@@ -410,6 +410,10 @@ pub struct FotoParaEnviar {
     /// `None` quando a foto está no neutro: aí `jpeg` **é** o bruto dela, e
     /// mandar duas cópias iguais é banda e armazenamento por nada.
     pub bruto: Option<Vec<u8>>,
+    /// A receita com que `jpeg` foi revelado a partir do `bruto`, no formato do
+    /// site (sobe em JSON, para a coluna `ajustes`). Só vai com o bruto: sem ele, `jpeg` **é** a foto
+    /// como entrou. Ver `ImageExporter::receita_para_o_site`.
+    pub ajustes: Option<serde_json::Value>,
     pub estado: EstadoNoBalcao,
     pub ordem: u32,
     /// A nota de 1 a 5. **O site recusa envio sem ela.**

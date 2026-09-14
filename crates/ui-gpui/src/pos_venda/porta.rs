@@ -280,31 +280,9 @@ async fn revelar_e_salvar(
         .await
 }
 
-/// Os ajustes e o enquadramento como o site os grava: um objeto só, por nome.
-///
-/// 🔑 **O corte entra com o prefixo `corte_`**, que é o que `corteParaJson` do
-/// editor faz — e é assim que a web lê de volta. Um segundo formato aqui faria
-/// a foto revelada no app abrir sem enquadramento no navegador.
-pub(crate) fn ajustes_em_json(ajustes: &Ajustes, corte: &CropSettings) -> serde_json::Value {
-    let mut json = serde_json::to_value(ajustes).unwrap_or_else(|_| serde_json::json!({}));
-    if let Some(objeto) = json.as_object_mut() {
-        objeto.insert("corte_x".into(), corte.crop_x().into());
-        objeto.insert("corte_y".into(), corte.crop_y().into());
-        objeto.insert("corte_largura".into(), corte.crop_width().into());
-        objeto.insert("corte_altura".into(), corte.crop_height().into());
-        objeto.insert("corte_giro90".into(), corte.rotation_90().into());
-        objeto.insert("corte_angulo".into(), corte.angle().into());
-        objeto.insert(
-            "corte_espelho_h".into(),
-            i32::from(corte.flip_horizontal()).into(),
-        );
-        objeto.insert(
-            "corte_espelho_v".into(),
-            i32::from(corte.flip_vertical()).into(),
-        );
-    }
-    json
-}
+/// A receita como o site a grava — mora no `infrastructure`, junto com a
+/// compressão com que ela sobe. Ver `infrastructure::pos_venda::receita`.
+pub(crate) use infrastructure::pos_venda::receita::ajustes_em_json;
 
 impl Publicador for PublicadorDaApi {
     fn autorizar(&self, canal: Sender<Recado>) {

@@ -3,6 +3,7 @@
 pub mod autorizacao;
 pub mod cofre;
 pub mod http;
+pub mod receita;
 
 pub use cofre::{CofreDoSistema, CofreEmMemoria};
 pub use http::PosVendaApiHttp;

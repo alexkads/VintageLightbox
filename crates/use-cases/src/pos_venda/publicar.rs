@@ -88,6 +88,7 @@ impl PublicarNoPosVendaUseCase {
                     // Este caminho não passa pelo catálogo e não revela nada: o
                     // que sobe é o arquivo do disco, que já é o bruto dele.
                     bruto: None,
+                    ajustes: None,
                     estado,
                     ordem,
                     // ⚠️ **Sem nota e sem chave, e é o que este caminho é.** Ele
@@ -276,6 +277,11 @@ impl PublicarNoPosVendaUseCase {
                 FotoParaEnviar {
                     nome: nome.clone(),
                     jpeg,
+                    // 🔑 A receita anda com o bruto: é com ela que a foto reabre
+                    // revelada no editor do site, e não no neutro.
+                    ajustes: bruto
+                        .as_ref()
+                        .and_then(|_| self.exportador.receita_para_o_site(&photo)),
                     bruto,
                     estado,
                     ordem,

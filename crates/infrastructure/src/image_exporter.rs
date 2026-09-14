@@ -267,6 +267,15 @@ impl ImageExporter for ImageExporterImpl {
             .map_err(|e| DomainError::InfrastructureError(format!("Failed to encode JPEG: {}", e)))
     }
 
+    fn receita_para_o_site(&self, photo: &Photo) -> Option<serde_json::Value> {
+        let ajustes = ajustes_da_entidade(photo);
+        let corte = transformacao::corte_da_entidade(photo);
+        if ajustes == Ajustes::default() && corte == CropSettings::default() {
+            return None;
+        }
+        Some(crate::pos_venda::receita::ajustes_em_json(&ajustes, &corte))
+    }
+
     /// 🔑 **Mesmo caminho, ajustes e corte no neutro.** Ele passa pelo shader
     /// como qualquer outro: o que sai daqui tem de ser byte a byte o que
     /// subiria se a foto nunca tivesse sido revelada — inclusive a marca
