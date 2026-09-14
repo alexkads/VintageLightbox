@@ -1,6 +1,4 @@
-use std::collections::BTreeSet;
-
-use crate::grade::{faixa_entre, Direcao, Layout};
+use crate::grade::{Direcao, Layout};
 
 /// Escolher fotos numa grade — clique, Shift, Ctrl, arrasto e teclado.
 ///
@@ -22,9 +20,19 @@ use crate::grade::{faixa_entre, Direcao, Layout};
 /// A seleção trabalha por posição **na grade em vigor** (já filtrada). Quem
 /// chama traduz para id na hora de agir — e é por isso que trocar o filtro
 /// limpa a seleção: as posições passam a apontar para outras fotos.
+///
+/// # A ordem é a da marcação, e não a da grade
+///
+/// 🚨 *"A ordem da seleção das fotos no filmstrip deve ser mantida quando abrir
+/// o modo revelação, pois o index 0 do array precisa ser utilizado no botão
+/// sincronizar como padrão"* (dono, 2026-09-14). Guardadas num conjunto
+/// ordenado, as marcadas saíam sempre na ordem da grade: a primeira que o
+/// operador escolheu — a que ele quer copiar para as outras — se perdia antes de
+/// chegar à revelação. A primeira marcada vem primeiro; o Shift começa na
+/// âncora; o que se acrescenta vai para o fim.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Selecao {
-    marcadas: BTreeSet<usize>,
+    marcadas: Vec<usize>,
     foco: Option<usize>,
     /// De onde o Shift estende. **Não é o foco**: clicar em A, mover com as
     /// setas até D e apertar Shift+seta estende de A, e não de D.
@@ -92,7 +100,7 @@ impl Selecao {
 
         if modificadores.faixa {
             if let Some(ancora) = self.ancora {
-                self.marcadas = faixa_entre(ancora, indice).collect();
+                self.marcadas = faixa_a_partir(ancora, indice);
                 self.foco = Some(indice);
                 return;
             }
@@ -120,14 +128,15 @@ impl Selecao {
     /// aditivo; senão o arrasto substitui. Recalcular a partir da base a cada
     /// quadro é o que permite **desfazer** ao voltar com o ponteiro, em vez de
     /// ir acumulando o rastro.
-    pub fn arrastar(&mut self, base: &BTreeSet<usize>, dentro_do_retangulo: &[usize]) {
-        let mut novo = base.clone();
-        novo.extend(dentro_do_retangulo.iter().copied());
-        self.marcadas = novo;
+    pub fn arrastar(&mut self, base: &[usize], dentro_do_retangulo: &[usize]) {
+        self.marcadas = base.to_vec();
+        for &indice in dentro_do_retangulo {
+            self.acrescentar(indice);
+        }
     }
 
     /// A seleção de agora, para virar `base` de um arrasto que começa.
-    pub fn instantaneo(&self) -> BTreeSet<usize> {
+    pub fn instantaneo(&self) -> Vec<usize> {
         self.marcadas.clone()
     }
 
@@ -140,19 +149,25 @@ impl Selecao {
     }
 
     /// Ctrl+A: marca a grade inteira, sem mexer no foco.
+    ///
+    /// 🔑 **As que já estavam marcadas continuam na frente**: a primeira da
+    /// seleção é a que a revelação sincroniza, e marcar o resto não a troca.
     pub fn marcar_todas(&mut self, total: usize) {
-        self.marcadas = (0..total).collect();
+        self.marcadas.retain(|&i| i < total);
+        for i in 0..total {
+            self.acrescentar(i);
+        }
     }
 
     /// O botão "Selecionar as N visíveis" — que também **desmarca** quando
     /// todas já estão marcadas, porque é o mesmo botão.
     pub fn alternar_todas(&mut self, total: usize) {
         if total > 0 && (0..total).all(|i| self.marcadas.contains(&i)) {
-            for i in 0..total {
-                self.marcadas.remove(&i);
-            }
+            self.marcadas.retain(|&i| i >= total);
         } else {
-            self.marcadas.extend(0..total);
+            for i in 0..total {
+                self.acrescentar(i);
+            }
         }
     }
 
@@ -163,7 +178,7 @@ impl Selecao {
     /// operador já tinha marcado. Quem chama traduz os ids de volta para
     /// posições — e o que sumiu do recorte simplesmente não volta.
     pub fn marcar(&mut self, indice: usize) {
-        self.marcadas.insert(indice);
+        self.acrescentar(indice);
     }
 
     /// Põe o cursor numa posição, sem mexer no que está marcado.
@@ -232,7 +247,7 @@ impl Selecao {
         if modificadores.faixa {
             let ancora = self.ancora.unwrap_or(self.foco.unwrap_or(destino));
             self.ancora = Some(ancora);
-            self.marcadas = faixa_entre(ancora, destino).collect();
+            self.marcadas = faixa_a_partir(ancora, destino);
         } else if modificadores.aditivo {
             // Só o cursor anda.
         } else {
@@ -243,9 +258,30 @@ impl Selecao {
     }
 
     fn alternar(&mut self, indice: usize) {
-        if !self.marcadas.insert(indice) {
-            self.marcadas.remove(&indice);
+        match self.marcadas.iter().position(|&i| i == indice) {
+            Some(posicao) => {
+                self.marcadas.remove(posicao);
+            }
+            None => self.marcadas.push(indice),
         }
+    }
+
+    /// Acrescenta no fim, se ainda não estiver marcada.
+    fn acrescentar(&mut self, indice: usize) {
+        if !self.marcadas.contains(&indice) {
+            self.marcadas.push(indice);
+        }
+    }
+}
+
+/// A faixa do Shift **começando na âncora** — em direção ao destino, para
+/// qualquer lado. A âncora é a foto de onde o operador estendeu, e é ela que
+/// fica em primeiro.
+fn faixa_a_partir(ancora: usize, destino: usize) -> Vec<usize> {
+    if ancora <= destino {
+        (ancora..=destino).collect()
+    } else {
+        (destino..=ancora).rev().collect()
     }
 }
 
@@ -314,12 +350,39 @@ mod testes {
         assert_eq!(marcadas(&s), vec![2, 3, 4, 5]);
     }
 
+    /// Para trás também — e a âncora continua em primeiro.
     #[test]
     fn shift_estende_nas_duas_direcoes() {
         let mut s = Selecao::nova();
         s.clicar(5, false, SOZINHO);
         s.clicar(2, false, SHIFT);
-        assert_eq!(marcadas(&s), vec![2, 3, 4, 5]);
+        assert_eq!(marcadas(&s), vec![5, 4, 3, 2]);
+    }
+
+    /// 🚨 A ordem da marcação, e não a da grade (dono, 2026-09-14): a primeira
+    /// escolhida é a que a revelação sincroniza para as outras.
+    #[test]
+    fn as_marcadas_saem_na_ordem_em_que_foram_marcadas() {
+        let mut s = Selecao::nova();
+        s.clicar(7, false, SOZINHO);
+        s.clicar(2, false, CTRL);
+        s.clicar(5, true, SOZINHO);
+        assert_eq!(marcadas(&s), vec![7, 2, 5]);
+        s.clicar(2, false, CTRL);
+        assert_eq!(marcadas(&s), vec![7, 5], "desmarcar não reordena o resto");
+        s.marcar_todas(8);
+        assert_eq!(marcadas(&s)[..2], [7, 5], "marcar todas deixa as escolhidas na frente");
+        assert_eq!(s.quantas(), 8);
+    }
+
+    #[test]
+    fn remarcar_por_id_devolve_a_ordem_de_quem_chama() {
+        let mut s = Selecao::nova();
+        for i in [9, 1, 4] {
+            s.marcar(i);
+        }
+        s.marcar(1);
+        assert_eq!(marcadas(&s), vec![9, 1, 4], "a repetida não entra de novo");
     }
 
     /// 🚨 A âncora **não é o foco**: mover o cursor com Ctrl e depois estender
@@ -379,7 +442,7 @@ mod testes {
         s.clicar(9, false, SOZINHO);
         let base = s.instantaneo();
         s.arrastar(&base, &[1, 2]);
-        assert_eq!(marcadas(&s), vec![1, 2, 9]);
+        assert_eq!(marcadas(&s), vec![9, 1, 2], "a que já estava fica na frente");
     }
 
     #[test]
@@ -434,7 +497,7 @@ mod testes {
         let mut s = Selecao::nova();
         s.clicar(3, false, SOZINHO);
         s.marcar_todas(6);
-        assert_eq!(marcadas(&s), vec![0, 1, 2, 3, 4, 5]);
+        assert_eq!(marcadas(&s), vec![3, 0, 1, 2, 4, 5]);
         assert_eq!(s.foco(), Some(3));
     }
 

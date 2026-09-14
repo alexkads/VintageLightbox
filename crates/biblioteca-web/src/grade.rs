@@ -21,7 +21,7 @@
 //! o próximo quadro. Os valores vivem aqui e são exportados por
 //! `bits_de_mudanca_json` — o TypeScript não os repete (armadilha nº 8).
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 
 use biblioteca_core::acervo::{Acervo, Estado, Filtro};
 use biblioteca_core::grade::{
@@ -88,7 +88,7 @@ pub struct Arrasto {
     pub origem: (f32, f32),
     pub atual: (f32, f32),
     /// A seleção de quando começou (só quando o gesto era aditivo).
-    pub base: BTreeSet<usize>,
+    pub base: Vec<usize>,
     /// Passou do limiar: é laço, não clique.
     pub ativo: bool,
 }
@@ -392,7 +392,7 @@ impl Grade {
                 base: if modificadores.aditivo || modificadores.faixa {
                     self.selecao.instantaneo()
                 } else {
-                    BTreeSet::new()
+                    Vec::new()
                 },
                 ativo: false,
             });
