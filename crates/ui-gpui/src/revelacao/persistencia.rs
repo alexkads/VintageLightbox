@@ -955,6 +955,19 @@ mod testes {
         }
     }
 
+    /// 🚧 **Divergência D7 do contrato da foto** (`../recordarfotos-e-commerce/docs/CONTRATO_DA_FOTO.md`,
+    /// C8): nenhum cliente descarta parâmetro. Enquanto houver prefixo sem coluna
+    /// no catálogo local, uma foto do SQLite perde parâmetros ao reabrir. Quando a
+    /// lista abaixo esvaziar, tire o `#[ignore]`.
+    #[test]
+    #[ignore = "Divergência D7 do contrato da foto: o SQLite guarda só 53 dos 171 parâmetros"]
+    fn contrato_d7_nenhum_parametro_fica_sem_coluna_no_sqlite() {
+        assert!(
+            SEM_COLUNA_NO_BANCO_LOCAL.is_empty(),
+            "ainda sem coluna: {SEM_COLUNA_NO_BANCO_LOCAL:?}"
+        );
+    }
+
     /// Os ajustes que **ainda não têm coluna** em `photos`, por prefixo.
     ///
     /// ⚠️ **É defeito, e não decisão.** São os 118 que o motor ganhou depois dos

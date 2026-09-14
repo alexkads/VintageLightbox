@@ -237,6 +237,11 @@ banco e só apareciam ao reabrir o app.
 
 ## Fila de trabalho, na ordem
 
+> 🚨 **O contrato da foto vem antes de qualquer item novo** (dono, 14/set/2026). O que o app sobe e
+> lê do pós-venda segue `../recordarfotos-e-commerce/docs/CONTRATO_DA_FOTO.md`; os itens 14–17 são as
+> divergências deste app, e cada uma tem um teste `#[ignore]` que só sai quando ela for resolvida.
+> Até lá, é a API que garante o contrato para as fotos que este app envia.
+
 A ordem sai do [objetivo](00-OBJETIVO.md): o que aproxima **fechar o vão entre a revelação e a
 galeria do cliente**, e o que é defeito visível na tela.
 
@@ -255,6 +260,10 @@ galeria do cliente**, e o que é defeito visível na tela.
 | 11 | ~~**Pausar e cancelar a importação**~~ | ✅ **feito em 6/set** — os botões, e a espera da pausa que ignorava o cancelamento |
 | 12 | ~~**O desfazer não restaura o corte**~~ | ✅ **feito em 6/set** — a pilha guarda `Estado`, e o formato é o que segura o próximo: ajustes locais e máscaras entram nele sem que ninguém precise lembrar do histórico |
 | 13 | ~~**Publicar no pós-venda do site**~~ | ✅ **feito em 2/set** — tecla `B`, botão "Pós-venda", `PosVendaApi`. Entrou **antes** de 11 e 12 por decisão do dono no mesmo dia (ver abaixo) |
+| 14 | 🚨 **Contrato da foto — D7: os 171 parâmetros no SQLite** | O catálogo local só guarda 53; os outros somem ao reabrir (C8). Teste: `contrato_d7_nenhum_parametro_fica_sem_coluna_no_sqlite` |
+| 15 | 🚨 **Contrato da foto — D8: bruto das parametrizações e revelada em arquivo próprio** | O envio sobe o render com efeitos como `file` e um render neutro q90 como bruto (C1, C10). Teste: `contrato_d8_…` |
+| 16 | 🚨 **Contrato da foto — D14: desclassificar devolve tudo ao SQLite** | Hoje a tecla `0` numa foto do site é recusada e "Apagar" não traz nada de volta (C21, C22). Teste: `contrato_d14_…` |
+| 17 | 🚨 **Contrato da foto — D15: linha do tempo local** | Os gestos da foto não são guardados nem sobem com ela (C23, C26). Teste: `contrato_d15_…` |
 
 ~~🔑 **A integração com o `recordarfotos.com.br` só começa quando o clone estiver funcional** —
 decisão do dono, 17/ago.~~ **Revertida em 2/set/2026**: o dono pediu a integração com os itens 11 e 12

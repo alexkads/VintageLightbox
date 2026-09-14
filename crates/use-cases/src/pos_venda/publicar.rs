@@ -362,6 +362,7 @@ mod tests {
             async fn export(&self, photo: &Photo, output_path: &FilePath, options: &ExportOptions) -> DomainResult<()>;
             async fn renderizar_jpeg(&self, photo: &Photo, options: &ExportOptions) -> DomainResult<Vec<u8>>;
             async fn renderizar_bruto_jpeg(&self, photo: &Photo, options: &ExportOptions) -> DomainResult<Option<Vec<u8>>>;
+            fn receita_para_o_site(&self, photo: &Photo) -> Option<serde_json::Value>;
         }
     }
 
@@ -591,6 +592,76 @@ mod tests {
         );
     }
 
+    /// 🛡️ **Contrato da foto, C7** (`../recordarfotos-e-commerce/docs/CONTRATO_DA_FOTO.md`):
+    /// a foto que sobe revelada leva a receita junto com o bruto. Sem ela, o editor
+    /// do site abre o bruto no neutro — a regressão de 14/set/2026.
+    #[tokio::test]
+    async fn contrato_c7_a_foto_revelada_sobe_com_a_receita_e_o_bruto() {
+        let foto = foto("/ensaio/DSC_010.NEF", false);
+        let mut repo = MockPhotoRepo::new();
+        repo.expect_find_by_id().returning({
+            let f = foto.clone();
+            move |_| Ok(Some(f.clone()))
+        });
+        repo.expect_update().returning(|_| Ok(()));
+        let mut exportador = MockExportador::new();
+        exportador
+            .expect_renderizar_jpeg()
+            .returning(|_, _| Ok(vec![1]));
+        exportador
+            .expect_renderizar_bruto_jpeg()
+            .returning(|_, _| Ok(Some(vec![2])));
+        exportador
+            .expect_receita_para_o_site()
+            .returning(|_| Some(serde_json::json!({ "exposure": 0.5 })));
+        let api = Arc::new(ApiDeMentira::default());
+
+        let caso = PublicarNoPosVendaUseCase::new(
+            Arc::new(repo),
+            Arc::new(exportador),
+            Arc::new(MockThumbnailGen::new()),
+            api.clone(),
+        );
+        caso.enviar_uma(&sessao(), "g1", &foto.id(), 0, None, Some(4))
+            .await
+            .unwrap();
+
+        let recebidas = api.recebidas.lock().unwrap();
+        assert_eq!(recebidas[0].bruto, Some(vec![2]), "o bruto sobe");
+        assert_eq!(
+            recebidas[0].ajustes,
+            Some(serde_json::json!({ "exposure": 0.5 })),
+            "e a receita sobe com ele"
+        );
+    }
+
+    /// 🚧 **Divergência D8 do contrato da foto** — o bruto que sobe é uma
+    /// renderização neutra em qualidade 90 e tamanho cheio, e não o bruto das
+    /// parametrizações da importação (C1); e a revelada não sobe em arquivo
+    /// próprio (`file_revelada`, C10). Este teste fica ignorado até a correção.
+    #[test]
+    #[ignore = "Divergência D8 do contrato da foto: bruto fora das parametrizações e sem revelada em arquivo próprio"]
+    fn contrato_d8_o_bruto_nasce_das_parametrizacoes_e_a_revelada_sobe_separada() {
+        panic!("D8 aberta: ver docs/PARIDADE-LIGHTROOM.md, fila do contrato da foto");
+    }
+
+    /// 🚧 **Divergência D14 do contrato da foto** — desclassificar uma foto do site
+    /// não traz o bruto nem os parâmetros para o SQLite antes de a nuvem apagar
+    /// (C21), e classificar de novo não sobe tudo outra vez (C22).
+    #[test]
+    #[ignore = "Divergência D14 do contrato da foto: desclassificar não devolve bruto + parâmetros ao SQLite"]
+    fn contrato_d14_desclassificar_devolve_tudo_ao_sqlite_antes_de_apagar() {
+        panic!("D14 aberta: ver docs/PARIDADE-LIGHTROOM.md, fila do contrato da foto");
+    }
+
+    /// 🚧 **Divergência D15 do contrato da foto** — o app não guarda linha do tempo
+    /// local dos gestos da foto, nem a sobe com ela (C23, C26).
+    #[test]
+    #[ignore = "Divergência D15 do contrato da foto: sem linha do tempo local"]
+    fn contrato_d15_a_linha_do_tempo_local_anda_com_a_foto() {
+        panic!("D15 aberta: ver docs/PARIDADE-LIGHTROOM.md, fila do contrato da foto");
+    }
+
     #[test]
     fn o_nome_no_site_e_o_da_origem_com_jpg() {
         assert_eq!(nome_para_o_site("/ensaio/DSC_001.NEF"), "DSC_001.jpg");
@@ -726,6 +797,8 @@ mod tests {
             .expect_renderizar_bruto_jpeg()
             .times(1)
             .returning(|_, _| Ok(Some(b"como entrou".to_vec())));
+        // A receita que acompanha o bruto (contrato C7) não é o assunto aqui.
+        exportador.expect_receita_para_o_site().returning(|_| None);
 
         let api = Arc::new(ApiDeMentira::default());
         let caso = PublicarNoPosVendaUseCase::new(
