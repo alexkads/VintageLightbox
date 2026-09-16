@@ -12,6 +12,7 @@
 mod comandos;
 mod erro;
 mod navegacao;
+mod origem;
 mod pasta_de_saida;
 mod raizes;
 mod tela_do_cliente;
@@ -34,6 +35,10 @@ fn main() {
             comandos::escolher_raw,
             comandos::ler_raw,
             comandos::converter_raw,
+            comandos::cartoes_montados,
+            comandos::escolher_origem,
+            comandos::listar_origem,
+            comandos::ler_da_origem,
             comandos::pasta_de_saida,
             comandos::escolher_pasta,
             comandos::esquecer_pasta,

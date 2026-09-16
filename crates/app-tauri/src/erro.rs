@@ -29,6 +29,8 @@ pub enum ErroDaPonte {
     PedidoIncompleto,
     #[error("não foi possível abrir a janela: {0}")]
     Janela(String),
+    #[error("não foi possível ler: {0}")]
+    Leitura(String),
 }
 
 impl Serialize for ErroDaPonte {

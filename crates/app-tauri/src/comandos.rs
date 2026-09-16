@@ -11,12 +11,13 @@ use tauri_plugin_dialog::DialogExt;
 use infrastructure::raw_processing::{is_raw_file, load_raw_as_dynamic_image, load_raw_from_bytes};
 
 use crate::erro::ErroDaPonte;
+use crate::origem::{self, ArquivoDaOrigem, Origem};
 use crate::pasta_de_saida::{Pasta, PastaDeSaida};
 use crate::raizes::RaizesPermitidas;
 use crate::tela_do_cliente;
 
 /// As extensões que o seletor mostra. São as mesmas que `is_raw_file` aceita.
-const EXTENSOES_RAW: &[&str] = &[
+pub const EXTENSOES_RAW: &[&str] = &[
     "nef", "cr2", "cr3", "arw", "dng", "orf", "raw", "rw2", "raf", "pef", "srw", "x3f",
 ];
 
@@ -66,6 +67,79 @@ pub async fn ler_raw(
         .await
         .map_err(|_| ErroDaPonte::Interrompida)??;
     Ok(Response::new(pixels))
+}
+
+/// Os cartões e discos removíveis montados agora.
+#[tauri::command]
+pub async fn cartoes_montados() -> Vec<Origem> {
+    tauri::async_runtime::spawn_blocking(origem::cartoes)
+        .await
+        .unwrap_or_default()
+}
+
+/// Escolhe de onde importar: um cartão montado, pelo caminho que
+/// `cartoes_montados` devolveu, ou uma pasta pelo seletor nativo (sem caminho).
+/// Devolve `None` quando o operador desiste do seletor.
+#[tauri::command]
+pub async fn escolher_origem(
+    app: AppHandle,
+    caminho: Option<String>,
+    raizes: State<'_, RaizesPermitidas>,
+) -> Result<Option<Origem>, ErroDaPonte> {
+    let escolhida = match caminho {
+        Some(caminho) => {
+            // 🔒 Um caminho vindo da página só vale se for um cartão montado.
+            let cartao = origem::cartao_montado(&caminho).ok_or(ErroDaPonte::ForaDasRaizes)?;
+            Origem {
+                caminho: raizes
+                    .permitir_pasta(Path::new(&cartao.caminho))?
+                    .to_string_lossy()
+                    .into_owned(),
+                nome: cartao.nome,
+            }
+        }
+        None => {
+            let Some(pasta) = app
+                .dialog()
+                .file()
+                .set_title("De onde importar as fotos")
+                .blocking_pick_folder()
+            else {
+                return Ok(None);
+            };
+            let pasta = pasta
+                .into_path()
+                .map_err(|_| ErroDaPonte::ArquivoInexistente)?;
+            Origem::de(&raizes.permitir_pasta(&pasta)?, None)
+        }
+    };
+    Ok(Some(escolhida))
+}
+
+/// O que a importação sabe abrir dentro de uma origem escolhida.
+#[tauri::command]
+pub async fn listar_origem(
+    caminho: String,
+    raizes: State<'_, RaizesPermitidas>,
+) -> Result<Vec<ArquivoDaOrigem>, ErroDaPonte> {
+    let pasta = raizes.conferir_pasta(&caminho)?;
+    tauri::async_runtime::spawn_blocking(move || origem::listar(&pasta))
+        .await
+        .map_err(|_| ErroDaPonte::Interrompida)?
+}
+
+/// Um arquivo de uma origem escolhida, pronto para a fila: o RAW já revelado em
+/// JPEG, e o resto como está no disco.
+#[tauri::command]
+pub async fn ler_da_origem(
+    caminho: String,
+    raizes: State<'_, RaizesPermitidas>,
+) -> Result<Response, ErroDaPonte> {
+    let arquivo = raizes.conferir(&caminho)?;
+    let bytes = tauri::async_runtime::spawn_blocking(move || origem::ler(&arquivo))
+        .await
+        .map_err(|_| ErroDaPonte::Interrompida)??;
+    Ok(Response::new(bytes))
 }
 
 /// A pasta de saída guardada, se houver.
