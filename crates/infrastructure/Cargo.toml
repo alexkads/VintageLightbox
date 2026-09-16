@@ -49,6 +49,8 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "mul
 
 [dev-dependencies]
 tempfile.workspace = true
+# Só para ler a etiqueta de rotação da LibRaw em `tests/raw_em_retrato.rs`.
+rsraw-sys = "0.1"
 mockall.workspace = true
 # Um servidor HTTP de verdade para o cliente do pós-venda: o que se prova ali é
 # o multipart e o cabeçalho — coisas que nenhum mock do `reqwest` alcança.

@@ -85,18 +85,29 @@ pub fn is_raw_file(path: &str) -> bool {
 /// 3. Color correction
 /// 4. Retorna DynamicImage::ImageRgb8
 pub fn load_raw_as_dynamic_image(path: &str) -> Result<image::DynamicImage, String> {
+    let file_data = std::fs::read(path).map_err(|e| format!("Failed to read RAW file: {}", e))?;
+    decodificar_raw(&file_data, Some(path))
+}
+
+/// O mesmo que [`load_raw_as_dynamic_image`], a partir dos bytes do arquivo.
+///
+/// É o caminho do app Tauri: a página entrega os bytes do `File` que o operador
+/// escolheu ou soltou, e não um caminho no disco.
+///
+/// ⚠️ Sem caminho não há a reserva do DNG com perdas, que precisa da LibRaw do
+/// sistema abrindo o arquivo pelo nome.
+pub fn load_raw_from_bytes(file_data: &[u8]) -> Result<image::DynamicImage, String> {
+    decodificar_raw(file_data, None)
+}
+
+fn decodificar_raw(file_data: &[u8], path: Option<&str>) -> Result<image::DynamicImage, String> {
     use rsraw::{RawImage, BIT_DEPTH_8};
 
-    // 1. Read file to buffer
-    let file_data = std::fs::read(path).map_err(|e| format!("Failed to read RAW file: {}", e))?;
-
-    // 2. Open RAW image with LibRaw
-    //
     // 🔑 Quando falha, quem responde é `dng::explicar_falha`: o erro cru da
     // LibRaw é `FileUnsupported`, que manda quem importa procurar defeito no
     // próprio arquivo — e no caso conhecido (DNG com compressão *lossy*) o
     // arquivo está íntegro e quem não sabe abrir é o app.
-    let mut raw = match RawImage::open(&file_data) {
+    let mut raw = match RawImage::open(file_data) {
         Ok(raw) => raw,
         Err(erro) => {
             // 🔑 **A reserva entra só aqui, e só para o DNG com perdas.** A
@@ -104,37 +115,38 @@ pub fn load_raw_as_dynamic_image(path: &str) -> Result<image::DynamicImage, Stri
             // instalada, tem — e abre o arquivo. Usá-la para todo RAW mudaria a
             // cor de tudo que já abre, porque são duas invocações diferentes com
             // padrões diferentes de revelação.
-            if crate::dng::tem_compressao_com_perdas(&file_data) {
-                if let Ok(imagem) = crate::dng::decodificar_com_a_libraw_do_sistema(path) {
-                    return Ok(imagem);
+            if let Some(path) = path {
+                if crate::dng::tem_compressao_com_perdas(file_data) {
+                    if let Ok(imagem) = crate::dng::decodificar_com_a_libraw_do_sistema(path) {
+                        return Ok(imagem);
+                    }
                 }
             }
             return Err(crate::dng::explicar_falha(
-                &file_data,
+                file_data,
                 &format!("LibRaw failed to open: {:?}", erro),
             ));
         }
     };
 
-    // 3. Unpack the raw data
     raw.unpack()
         .map_err(|e| format!("LibRaw unpack failed: {:?}", e))?;
 
-    // 4. Get dimensions before processing
-    let width = raw.width();
-    let height = raw.height();
-
-    // 5. Process with LibRaw (demosaic, white balance, color correction)
+    // Demosaico, balanço de branco e matriz de cor.
     let processed = raw
         .process::<BIT_DEPTH_8>()
         .map_err(|e| format!("LibRaw process failed: {:?}", e))?;
 
-    // 6. Get RGB data from processed image
-    // ProcessedImage<8> implements Deref<Target=[u8]>
+    // 🚨 **As dimensões são as da imagem processada, e não as do RAW.**
+    // `libraw_dcraw_make_mem_image` já devolve a foto girada pela etiqueta da
+    // câmera: numa foto em retrato, largura e altura trocam de lugar. Ler
+    // `raw.width()` antes do processamento dava as medidas de paisagem, e como o
+    // total de pixels é o mesmo o `from_raw` aceitava — e a foto saía
+    // embaralhada em faixas diagonais.
+    let width = processed.width();
+    let height = processed.height();
     let rgb_data: Vec<u8> = processed.to_vec();
 
-    // 7. Create RGB image
-    // LibRaw returns RGB data, 3 bytes per pixel
     let img_buffer = image::RgbImage::from_raw(width, height, rgb_data)
         .ok_or_else(|| "Failed to create image buffer from LibRaw data".to_string())?;
 
