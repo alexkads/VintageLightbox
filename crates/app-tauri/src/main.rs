@@ -9,6 +9,7 @@
 // Sem console no Windows em release.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod ambiente;
 mod api;
 mod bytes;
 mod catalogo;
@@ -198,6 +199,12 @@ fn mostrar_principal(app: &tauri::AppHandle) {
 ///
 /// Fixa, para ser previsível. `VLB_CATALOGO_TAURI` só vale em depuração.
 fn abrir_catalogo(app: &App) -> Result<catalogo::Catalogo, catalogo::ErroDoCatalogo> {
+    // A pilha local tem o próprio catálogo: a fila dele leva bilhetes dela.
+    let nome = if ambiente::na_pilha_local() {
+        "Catalogo Tauri (pilha local)"
+    } else {
+        "Catalogo Tauri"
+    };
     let raiz = DESENVOLVIMENTO
         .then(|| std::env::var_os("VLB_CATALOGO_TAURI"))
         .flatten()
@@ -206,16 +213,17 @@ fn abrir_catalogo(app: &App) -> Result<catalogo::Catalogo, catalogo::ErroDoCatal
             app.path()
                 .picture_dir()
                 .ok()
-                .map(|imagens| imagens.join("VintageLightbox").join("Catalogo Tauri"))
+                .map(|imagens| imagens.join("VintageLightbox").join(nome))
         })
-        .unwrap_or_else(|| std::path::PathBuf::from("Catalogo Tauri"));
+        .unwrap_or_else(|| std::path::PathBuf::from(nome));
     catalogo::Catalogo::abrir(&raiz)
 }
 
 fn abrir_principal(app: &App) -> tauri::Result<()> {
     // 🚫 A tela é a empacotada, nunca o site remoto (DESKTOP_TAURI §0).
-    let mut janela = WebviewWindowBuilder::new(app, "principal", tela(ROTA_INICIAL))
-        .title("VintageLightbox")
+    let construtor = WebviewWindowBuilder::new(app, "principal", tela(ROTA_INICIAL));
+    let mut janela = ambiente::armazenamento(construtor, app.path().app_data_dir().ok())
+        .title(ambiente::titulo("VintageLightbox"))
         .inner_size(1440.0, 900.0)
         .maximized(true)
         .on_navigation(decidir)

@@ -49,20 +49,27 @@ impl ContaDoApp {
     pub fn nova(pasta: Option<std::path::PathBuf>) -> Self {
         // `VLB_POS_VENDA_URL` e `VLB_SITE_URL` só valem em depuração, como no
         // resto do app: o binário do balcão fala com produção, sempre.
-        let (api, site) = if DESENVOLVIMENTO {
-            (
-                std::env::var("VLB_POS_VENDA_URL").unwrap_or_else(|_| API.to_string()),
-                std::env::var("VLB_SITE_URL").unwrap_or_else(|_| SITE.to_string()),
-            )
-        } else {
-            (API.to_string(), SITE.to_string())
+        let local = crate::ambiente::api_local();
+        let (api, site) = match &local {
+            Some(api) => (
+                api.clone(),
+                std::env::var("VLB_SITE_URL").unwrap_or_else(|_| "http://localhost:8001".into()),
+            ),
+            None => (API.to_string(), SITE.to_string()),
         };
         // 🔧 Em depuração, cada recompilação é outro binário para o macOS, que
         // pergunta de novo pelo chaveiro. A sessão fica num arquivo do app.
         let cofre: Arc<dyn CofreDeSessao> = match pasta {
-            Some(pasta) if DESENVOLVIMENTO => {
-                Arc::new(CofreEmArquivo(pasta.join("sessao-dev.json")))
-            }
+            // A pilha local tem a própria sessão, e não herda a do GPUI, que é
+            // de produção.
+            Some(pasta) if local.is_some() => Arc::new(CofreEmArquivo {
+                arquivo: pasta.join("sessao-local.json"),
+                herdar_do_gpui: false,
+            }),
+            Some(pasta) if DESENVOLVIMENTO => Arc::new(CofreEmArquivo {
+                arquivo: pasta.join("sessao-dev.json"),
+                herdar_do_gpui: true,
+            }),
             _ => Arc::new(CofreDoSistema::com_servico(SERVICO_NO_CHAVEIRO)),
         };
         ContaDoApp {
@@ -96,7 +103,11 @@ impl ContaDoApp {
 /// 🔒 O arquivo nasce com permissão só do usuário. Ele existe para o
 /// desenvolvimento não parar a cada recompilação; o binário do balcão usa o
 /// chaveiro do sistema.
-struct CofreEmArquivo(std::path::PathBuf);
+struct CofreEmArquivo {
+    arquivo: std::path::PathBuf,
+    /// Sem arquivo ainda, traz a sessão do app GPUI (só em produção).
+    herdar_do_gpui: bool,
+}
 
 #[derive(Serialize, Deserialize)]
 struct SessaoEmArquivo {
@@ -117,21 +128,24 @@ impl CofreDeSessao for CofreEmArquivo {
         let Ok(texto) = serde_json::to_string(&guardada) else {
             return;
         };
-        if let Some(pai) = self.0.parent() {
+        if let Some(pai) = self.arquivo.parent() {
             let _ = std::fs::create_dir_all(pai);
         }
-        let _ = std::fs::write(&self.0, texto);
+        let _ = std::fs::write(&self.arquivo, texto);
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o600));
+            let _ = std::fs::set_permissions(&self.arquivo, std::fs::Permissions::from_mode(0o600));
         }
     }
 
     fn ler(&self) -> Option<Sessao> {
-        let Ok(bytes) = std::fs::read(&self.0) else {
+        let Ok(bytes) = std::fs::read(&self.arquivo) else {
             // Sem arquivo ainda: traz, uma vez, a sessão do app GPUI no chaveiro.
             // O macOS pergunta essa vez, e o arquivo evita todas as seguintes.
+            if !self.herdar_do_gpui {
+                return None;
+            }
             let do_gpui = CofreDoSistema::novo().ler()?;
             self.guardar(&do_gpui);
             return Some(do_gpui);
@@ -146,7 +160,7 @@ impl CofreDeSessao for CofreEmArquivo {
     }
 
     fn esquecer(&self) {
-        let _ = std::fs::remove_file(&self.0);
+        let _ = std::fs::remove_file(&self.arquivo);
     }
 }
 
@@ -232,7 +246,10 @@ mod testes {
     #[test]
     fn o_cofre_de_arquivo_guarda_le_e_esquece() {
         let pasta = tempfile::tempdir().unwrap();
-        let cofre = CofreEmArquivo(pasta.path().join("sub").join("sessao-dev.json"));
+        let cofre = CofreEmArquivo {
+            arquivo: pasta.path().join("sub").join("sessao-local.json"),
+            herdar_do_gpui: false,
+        };
         let sessao = Sessao {
             access_token: "a".into(),
             refresh_token: "r".into(),
@@ -246,10 +263,15 @@ mod testes {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let modo = std::fs::metadata(&cofre.0).unwrap().permissions().mode();
+            let modo = std::fs::metadata(&cofre.arquivo)
+                .unwrap()
+                .permissions()
+                .mode();
             assert_eq!(modo & 0o777, 0o600);
         }
         cofre.esquecer();
-        assert!(!cofre.0.exists());
+        assert!(!cofre.arquivo.exists());
+        // A pilha local não traz a sessão de produção do app GPUI.
+        assert!(cofre.ler().is_none());
     }
 }
