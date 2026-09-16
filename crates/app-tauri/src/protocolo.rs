@@ -127,6 +127,9 @@ pub async fn tratar<R: Runtime>(app: &AppHandle<R>, pedido: Request<Vec<u8>>) ->
     if let Some(publico) = caminho.strip_prefix(ENVIO) {
         return repassar_envio(app, &pedido, publico).await;
     }
+    if caminho.starts_with(crate::rotas_do_catalogo::PREFIXO) {
+        return crate::rotas_do_catalogo::tratar(app, pedido).await;
+    }
     if let Some(destino) = rota_interna(&caminho) {
         return repassar(app, &pedido, destino).await;
     }

@@ -21,6 +21,7 @@ mod origem;
 mod pasta_de_saida;
 mod protocolo;
 mod raizes;
+mod rotas_do_catalogo;
 mod sincronizacao;
 mod tela_do_cliente;
 

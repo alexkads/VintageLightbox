@@ -29,13 +29,17 @@ const MIGRACOES: &[(&str, &str)] = &[
         "0002_espera_da_fila",
         include_str!("migracoes/0002_espera_da_fila.sql"),
     ),
+    (
+        "0003_area_temporaria",
+        include_str!("migracoes/0003_area_temporaria.sql"),
+    ),
 ];
 
 pub const ARQUIVO_DO_BANCO: &str = "catalogo.db";
 const ARQUIVO_DA_TRAVA: &str = ".trava";
 /// As pastas do catálogo. `caches/` pode ser apagada a qualquer hora (C14).
 /// `envios/` guarda os arquivos da fila até o servidor confirmar.
-pub const PASTAS: &[&str] = &["fotos", "reveladas", "caches", "envios"];
+pub const PASTAS: &[&str] = &["fotos", "reveladas", "caches", "envios", importacao::PASTA];
 
 #[derive(Debug, thiserror::Error)]
 pub enum ErroDoCatalogo {
@@ -178,6 +182,7 @@ fn migrar_com(
 }
 
 pub mod fila;
+pub mod importacao;
 
 #[cfg(test)]
 mod testes;
