@@ -32,6 +32,9 @@ url = "2"
 percent-encoding = "2"
 base64 = "0.22"
 tokio = { workspace = true }
+# O catálogo do app (etapa D). A mesma versão do `infrastructure`.
+rusqlite = { version = "0.30.0", features = ["bundled"] }
+tauri-plugin-single-instance = "2.4"
 image = "0.25"
 
 # O RAW é decodificado pela mesma LibRaw que o `ui-gpui` usa: é a regra que os

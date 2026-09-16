@@ -11,6 +11,7 @@
 
 mod api;
 mod bytes;
+mod catalogo;
 mod comandos;
 mod depuracao;
 mod erro;
@@ -34,6 +35,17 @@ fn main() {
     let diagnostico = std::env::args().any(|argumento| argumento == "--diagnostico");
 
     tauri::Builder::default()
+        // G1: uma instância só. Ele vem primeiro, como o plugin pede: a segunda
+        // abertura só traz a janela da primeira para frente, e termina.
+        .plugin(tauri_plugin_single_instance::init(
+            |app, _argumentos, _pasta| {
+                if let Some(janela) = app.get_webview_window("principal") {
+                    let _ = janela.unminimize();
+                    let _ = janela.show();
+                    let _ = janela.set_focus();
+                }
+            },
+        ))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
@@ -97,6 +109,28 @@ fn main() {
                 }
             }
 
+            // G2: o catálogo abre antes da janela. Se não abrir, o app diz por
+            // quê e termina, em vez de trabalhar sem onde guardar.
+            match abrir_catalogo(app) {
+                Ok(catalogo) => {
+                    if DESENVOLVIMENTO {
+                        eprintln!("[catálogo] {:?}", catalogo.situacao());
+                    }
+                    app.manage(std::sync::Mutex::new(catalogo));
+                }
+                Err(erro) => {
+                    use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+                    eprintln!("[catálogo] {erro}");
+                    let identificador = app.handle().clone();
+                    app.dialog()
+                        .message(erro.to_string())
+                        .title("O VintageLightbox não pôde abrir o catálogo")
+                        .kind(MessageDialogKind::Error)
+                        .show(move |_| identificador.exit(1));
+                    return Ok(());
+                }
+            }
+
             abrir_principal(app)?;
             if diagnostico {
                 let mut janela = WebviewWindowBuilder::new(
@@ -115,6 +149,24 @@ fn main() {
         })
         .run(tauri::generate_context!())
         .expect("o VintageLightbox (Tauri) não conseguiu abrir");
+}
+
+/// A pasta do catálogo: `Imagens/VintageLightbox/Catalogo Tauri` (D13).
+///
+/// Fixa, para ser previsível. `VLB_CATALOGO_TAURI` só vale em depuração.
+fn abrir_catalogo(app: &App) -> Result<catalogo::Catalogo, catalogo::ErroDoCatalogo> {
+    let raiz = DESENVOLVIMENTO
+        .then(|| std::env::var_os("VLB_CATALOGO_TAURI"))
+        .flatten()
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            app.path()
+                .picture_dir()
+                .ok()
+                .map(|imagens| imagens.join("VintageLightbox").join("Catalogo Tauri"))
+        })
+        .unwrap_or_else(|| std::path::PathBuf::from("Catalogo Tauri"));
+    catalogo::Catalogo::abrir(&raiz)
 }
 
 fn abrir_principal(app: &App) -> tauri::Result<()> {
