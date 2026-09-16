@@ -99,6 +99,14 @@ pub async fn escolher_origem(
                 nome: cartao.nome,
             }
         }
+        // 🔧 Um roteiro de depuração não responde a seletor nativo: com
+        // `VLB_ORIGEM_DE_TESTE`, a pasta é essa (já permitida na abertura).
+        None if crate::navegacao::DESENVOLVIMENTO
+            && std::env::var_os("VLB_ORIGEM_DE_TESTE").is_some() =>
+        {
+            let pasta = std::path::PathBuf::from(std::env::var_os("VLB_ORIGEM_DE_TESTE").unwrap());
+            Origem::de(&raizes.permitir_pasta(&pasta)?, None)
+        }
         None => {
             let Some(pasta) = app
                 .dialog()
