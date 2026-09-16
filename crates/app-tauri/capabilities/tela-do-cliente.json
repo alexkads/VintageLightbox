@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "tela-do-cliente",
+  "description": "A tela do cliente só pode pedir para ser fechada. Ela não lê nem grava nada.",
+  "windows": ["tela-do-cliente"],
+  "remote": {
+    "urls": ["https://recordarfotos.com.br/*"]
+  },
+  "permissions": ["allow-fechar-tela-do-cliente"]
+}

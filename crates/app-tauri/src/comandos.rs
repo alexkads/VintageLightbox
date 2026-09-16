@@ -4,14 +4,16 @@
 
 use std::path::Path;
 
-use tauri::ipc::Response;
+use tauri::ipc::{InvokeBody, Request, Response};
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 
 use infrastructure::raw_processing::{is_raw_file, load_raw_as_dynamic_image};
 
 use crate::erro::ErroDaPonte;
+use crate::pasta_de_saida::{Pasta, PastaDeSaida};
 use crate::raizes::RaizesPermitidas;
+use crate::tela_do_cliente;
 
 /// As extensões que o seletor mostra. São as mesmas que `is_raw_file` aceita.
 const EXTENSOES_RAW: &[&str] = &[
@@ -64,6 +66,84 @@ pub async fn ler_raw(
         .await
         .map_err(|_| ErroDaPonte::Interrompida)??;
     Ok(Response::new(pixels))
+}
+
+/// A pasta de saída guardada, se houver.
+#[tauri::command]
+pub fn pasta_de_saida(pasta: State<'_, PastaDeSaida>) -> Option<Pasta> {
+    pasta.atual()
+}
+
+/// Abre o seletor nativo de pastas. Devolve `None` quando o operador desiste,
+/// e aí a escolha anterior continua valendo.
+#[tauri::command]
+pub async fn escolher_pasta(
+    app: AppHandle,
+    pasta: State<'_, PastaDeSaida>,
+) -> Result<Option<Pasta>, ErroDaPonte> {
+    let mut dialogo = app
+        .dialog()
+        .file()
+        .set_title("Onde salvar as fotos exportadas");
+    if let Some(atual) = pasta.atual() {
+        dialogo = dialogo.set_directory(atual.caminho);
+    }
+    let Some(escolhida) = dialogo.blocking_pick_folder() else {
+        return Ok(None);
+    };
+    let caminho = escolhida
+        .into_path()
+        .map_err(|_| ErroDaPonte::ArquivoInexistente)?;
+    pasta.escolher(&caminho).map(Some)
+}
+
+#[tauri::command]
+pub fn esquecer_pasta(pasta: State<'_, PastaDeSaida>) {
+    pasta.esquecer();
+}
+
+#[tauri::command]
+pub async fn nomes_na_pasta(pasta: State<'_, PastaDeSaida>) -> Result<Vec<String>, ErroDaPonte> {
+    pasta.nomes()
+}
+
+/// Grava um arquivo exportado na pasta escolhida.
+///
+/// O corpo é o arquivo, cru, e o nome vem no cabeçalho `x-nome`, codificado
+/// como componente de URL. Mandar 70 MB de TIFF como array JSON custaria mais
+/// que a própria conversão.
+#[tauri::command]
+pub async fn gravar_na_pasta(
+    request: Request<'_>,
+    pasta: State<'_, PastaDeSaida>,
+) -> Result<(), ErroDaPonte> {
+    let InvokeBody::Raw(bytes) = request.body() else {
+        return Err(ErroDaPonte::PedidoIncompleto);
+    };
+    let nome = request
+        .headers()
+        .get("x-nome")
+        .and_then(|valor| valor.to_str().ok())
+        .and_then(|valor| {
+            percent_encoding::percent_decode_str(valor)
+                .decode_utf8()
+                .ok()
+        })
+        .ok_or(ErroDaPonte::PedidoIncompleto)?;
+    pasta.gravar(&nome, bytes)
+}
+
+/// Abre a tela do cliente no monitor que não é o do operador.
+#[tauri::command]
+pub async fn abrir_tela_do_cliente(app: AppHandle) -> Result<(), ErroDaPonte> {
+    tela_do_cliente::abrir(&app).await
+}
+
+/// Fecha a tela do cliente. A página dela chama isto no lugar de
+/// `window.close()`, que o webview recusa numa janela que o script não abriu.
+#[tauri::command]
+pub fn fechar_tela_do_cliente(app: AppHandle) {
+    tela_do_cliente::fechar(&app);
 }
 
 /// A decodificação, sem nada de Tauri em volta.

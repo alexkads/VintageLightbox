@@ -6,5 +6,15 @@
   "remote": {
     "urls": ["https://recordarfotos.com.br/*"]
   },
-  "permissions": ["allow-escolher-raw", "allow-ler-raw"]
+  "permissions": [
+    "allow-escolher-raw",
+    "allow-ler-raw",
+    "allow-pasta-de-saida",
+    "allow-escolher-pasta",
+    "allow-esquecer-pasta",
+    "allow-nomes-na-pasta",
+    "allow-gravar-na-pasta",
+    "allow-abrir-tela-do-cliente",
+    "allow-fechar-tela-do-cliente"
+  ]
 }

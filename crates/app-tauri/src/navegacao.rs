@@ -51,6 +51,35 @@ pub fn destino(url: &Url, desenvolvimento: bool) -> Destino {
     }
 }
 
+/// A pilha local só existe em build de depuração (§6, regra 1).
+pub const DESENVOLVIMENTO: bool = cfg!(debug_assertions);
+
+/// Um endereço do site, na rota pedida.
+///
+/// `VLB_SITE_URL` só vale em depuração: o binário do balcão abre produção, sempre.
+pub fn endereco(rota: &str) -> Url {
+    let site = if DESENVOLVIMENTO {
+        std::env::var("VLB_SITE_URL").unwrap_or_else(|_| SITE.to_string())
+    } else {
+        SITE.to_string()
+    };
+    let mut url = Url::parse(&site).expect("VLB_SITE_URL não é um endereço");
+    url.set_path(rota);
+    url
+}
+
+/// Aplica a regra de navegação, abrindo no navegador do sistema o que é de fora.
+pub fn decidir(url: &Url) -> bool {
+    match destino(url, DESENVOLVIMENTO) {
+        Destino::NaJanela => true,
+        Destino::NoNavegador => {
+            let _ = tauri_plugin_opener::open_url(url.as_str(), None::<&str>);
+            false
+        }
+        Destino::Recusado => false,
+    }
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;

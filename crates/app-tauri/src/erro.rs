@@ -17,6 +17,18 @@ pub enum ErroDaPonte {
     Decodificacao(String),
     #[error("a leitura foi interrompida")]
     Interrompida,
+    #[error("nenhuma pasta de saída escolhida")]
+    SemPasta,
+    #[error("nome de arquivo inválido")]
+    NomeInvalido,
+    #[error("já existe um arquivo com esse nome na pasta")]
+    JaExiste,
+    #[error("não foi possível gravar: {0}")]
+    Gravacao(String),
+    #[error("o pedido chegou sem o arquivo ou sem o nome")]
+    PedidoIncompleto,
+    #[error("não foi possível abrir a janela: {0}")]
+    Janela(String),
 }
 
 impl Serialize for ErroDaPonte {
