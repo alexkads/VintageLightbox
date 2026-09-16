@@ -258,6 +258,15 @@ async fn repassar_envio<R: Runtime>(
         Some(q) => format!("{caminho}?{q}"),
         None => caminho.to_string(),
     };
+    if crate::navegacao::DESENVOLVIMENTO {
+        eprintln!(
+            "[envio] {} {} corpo {} bytes, tipo {:?}",
+            pedido.method(),
+            caminho,
+            pedido.body().len(),
+            pedido.headers().get(header::CONTENT_TYPE)
+        );
+    }
     let conta = app.state::<ContaDoApp>();
     match conta
         .api
