@@ -20,6 +20,7 @@ mod origem;
 mod pasta_de_saida;
 mod protocolo;
 mod raizes;
+mod sincronizacao;
 mod tela_do_cliente;
 
 use tauri::webview::{DownloadEvent, NewWindowResponse};
@@ -38,18 +39,13 @@ fn main() {
         // G1: uma instância só. Ele vem primeiro, como o plugin pede: a segunda
         // abertura só traz a janela da primeira para frente, e termina.
         .plugin(tauri_plugin_single_instance::init(
-            |app, _argumentos, _pasta| {
-                if let Some(janela) = app.get_webview_window("principal") {
-                    let _ = janela.unminimize();
-                    let _ = janela.show();
-                    let _ = janela.set_focus();
-                }
-            },
+            |app, _argumentos, _pasta| mostrar_principal(app),
         ))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .manage(RaizesPermitidas::default())
+        .manage(sincronizacao::Sincronizador::default())
         // A tela empacotada e as rotas internas dela (`protocolo.rs`).
         .register_asynchronous_uri_scheme_protocol(
             protocolo::ESQUEMA,
@@ -80,6 +76,12 @@ fn main() {
             api::entrar,
             api::sair,
             api::chamar_api,
+            sincronizacao::guardar_envio,
+            sincronizacao::fila_de_envios,
+            sincronizacao::tentar_envios_agora,
+            sincronizacao::esquecer_envio,
+            sincronizacao::envios_recusados,
+            sincronizacao::pendentes_na_pagina,
         ])
         .setup(move |app| {
             if DESENVOLVIMENTO {
@@ -117,6 +119,7 @@ fn main() {
                         eprintln!("[catálogo] {:?}", catalogo.situacao());
                     }
                     app.manage(std::sync::Mutex::new(catalogo));
+                    sincronizacao::iniciar(app.handle());
                 }
                 Err(erro) => {
                     use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
@@ -147,8 +150,47 @@ fn main() {
             }
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("o VintageLightbox (Tauri) não conseguiu abrir");
+        .on_window_event(|janela, evento| {
+            // G9: fechar com envio na fila só esconde a janela. O laço dos
+            // envios termina o app quando a fila esvazia.
+            if let tauri::WindowEvent::CloseRequested { api, .. } = evento {
+                if janela.label() == "principal"
+                    && sincronizacao::ha_envio_pendente(janela.app_handle())
+                {
+                    api.prevent_close();
+                    let _ = janela.hide();
+                    janela
+                        .app_handle()
+                        .state::<sincronizacao::Sincronizador>()
+                        .fechar_ao_esvaziar();
+                    for (rotulo, outra) in janela.app_handle().webview_windows() {
+                        if rotulo != "principal" {
+                            let _ = outra.close();
+                        }
+                    }
+                }
+            }
+        })
+        .build(tauri::generate_context!())
+        .expect("o VintageLightbox (Tauri) não conseguiu abrir")
+        .run(|_app, _evento| {
+            // No macOS, clicar no ícone do Dock com a janela escondida a traz de volta.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = _evento {
+                mostrar_principal(_app);
+            }
+        });
+}
+
+/// Traz a janela principal de volta, e com ela o app deixa de terminar sozinho
+/// quando a fila esvaziar.
+fn mostrar_principal(app: &tauri::AppHandle) {
+    if let Some(janela) = app.get_webview_window("principal") {
+        app.state::<sincronizacao::Sincronizador>().manter_aberto();
+        let _ = janela.unminimize();
+        let _ = janela.show();
+        let _ = janela.set_focus();
+    }
 }
 
 /// A pasta do catálogo: `Imagens/VintageLightbox/Catalogo Tauri` (D13).

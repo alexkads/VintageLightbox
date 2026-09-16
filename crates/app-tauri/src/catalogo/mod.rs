@@ -23,13 +23,19 @@ use rusqlite::Connection;
 /// As migrations, na ordem. A versão do esquema é o tamanho desta lista.
 ///
 /// ⚠️ Só se acrescenta no fim. Uma migration publicada nunca muda nem sai.
-const MIGRACOES: &[(&str, &str)] =
-    &[("0001_catalogo", include_str!("migracoes/0001_catalogo.sql"))];
+const MIGRACOES: &[(&str, &str)] = &[
+    ("0001_catalogo", include_str!("migracoes/0001_catalogo.sql")),
+    (
+        "0002_espera_da_fila",
+        include_str!("migracoes/0002_espera_da_fila.sql"),
+    ),
+];
 
 pub const ARQUIVO_DO_BANCO: &str = "catalogo.db";
 const ARQUIVO_DA_TRAVA: &str = ".trava";
 /// As pastas do catálogo. `caches/` pode ser apagada a qualquer hora (C14).
-pub const PASTAS: &[&str] = &["fotos", "reveladas", "caches"];
+/// `envios/` guarda os arquivos da fila até o servidor confirmar.
+pub const PASTAS: &[&str] = &["fotos", "reveladas", "caches", "envios"];
 
 #[derive(Debug, thiserror::Error)]
 pub enum ErroDoCatalogo {
@@ -46,6 +52,8 @@ pub enum ErroDoCatalogo {
     VersaoMaisNova { encontrada: usize, conhecida: usize },
     #[error("não foi possível guardar a cópia do catálogo antes de atualizá-lo: {0}")]
     Copia(rusqlite::Error),
+    #[error("{0}")]
+    Entrada(String),
     #[error("a atualização {nome} do catálogo falhou, e nada foi alterado: {erro}")]
     Migracao {
         nome: &'static str,
@@ -110,7 +118,7 @@ impl Catalogo {
         })
     }
 
-    /// O banco, para os passos seguintes da etapa D (e os testes).
+    /// O banco, para os testes.
     #[cfg(test)]
     pub fn banco(&self) -> &Connection {
         &self.banco
@@ -168,6 +176,8 @@ fn migrar_com(
     }
     Ok(())
 }
+
+pub mod fila;
 
 #[cfg(test)]
 mod testes;

@@ -25,6 +25,12 @@
     "allow-entrar",
     "allow-sair",
     "allow-chamar-api",
+    "allow-guardar-envio",
+    "allow-fila-de-envios",
+    "allow-tentar-envios-agora",
+    "allow-esquecer-envio",
+    "allow-envios-recusados",
+    "allow-pendentes-na-pagina",
     "notification:allow-is-permission-granted",
     "notification:allow-request-permission",
     "notification:allow-notify"

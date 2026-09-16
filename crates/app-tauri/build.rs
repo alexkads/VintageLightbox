@@ -22,6 +22,12 @@ fn main() {
         "entrar",
         "sair",
         "chamar_api",
+        "guardar_envio",
+        "fila_de_envios",
+        "tentar_envios_agora",
+        "esquecer_envio",
+        "envios_recusados",
+        "pendentes_na_pagina",
     ]);
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(comandos))
         .expect("o tauri-build falhou");

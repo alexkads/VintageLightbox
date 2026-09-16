@@ -37,7 +37,7 @@ pub const ESQUEMA: &str = "vlb";
 /// O prefixo das rotas internas da tela, igual ao do site.
 const ROTA: &str = "/dashboard/sessoes-fotograficas/";
 /// O repasse do envio por bilhete (rota pública da API).
-const ENVIO: &str = "/envio-publico";
+pub const ENVIO: &str = "/envio-publico";
 
 /// O endereço da tela empacotada, na rota pedida.
 ///
