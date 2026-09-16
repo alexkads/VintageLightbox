@@ -5,11 +5,22 @@
 #    `app-tauri --diagnostico` (recordarfotos-e-commerce/docs/DESKTOP_TAURI.md §8).
 #    O empacotamento de verdade é a Fase 4.
 #
-# ⚠️ Só por disparo manual: não há o que publicar, e o artefato some em 7 dias.
+# ⚠️ Não publica nada, e o artefato some em 7 dias.
+#
+# 🔑 **Roda também em push no `dev`, quando o `app-tauri` ou o que ele usa
+#    muda.** O disparo manual só existe para workflow que já está no branch
+#    padrão (`main`), e este nasceu no `dev`.
 name: Fase 0 do Tauri
 
 on:
   workflow_dispatch:
+  push:
+    branches: [dev, main]
+    paths:
+      - "crates/app-tauri/**"
+      - "crates/infrastructure/**"
+      - "crates/foto-codec/**"
+      - ".github/workflows/fase0-tauri.yml"
 
 env:
   CARGO_TERM_COLOR: always
