@@ -72,6 +72,7 @@ fn main() {
             comandos::abrir_tela_do_cliente,
             comandos::fechar_tela_do_cliente,
             depuracao::registrar_no_terminal,
+            depuracao::fotografar_janela,
             api::ha_sessao,
             api::entrar,
             api::sair,

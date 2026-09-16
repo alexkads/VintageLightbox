@@ -7,6 +7,7 @@
     "diagnostico"
   ],
   "permissions": [
-    "allow-registrar-no-terminal"
+    "allow-registrar-no-terminal",
+    "allow-fotografar-janela"
   ]
 }

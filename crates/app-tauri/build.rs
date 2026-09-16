@@ -18,6 +18,7 @@ fn main() {
         "abrir_tela_do_cliente",
         "fechar_tela_do_cliente",
         "registrar_no_terminal",
+        "fotografar_janela",
         "ha_sessao",
         "entrar",
         "sair",
