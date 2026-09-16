@@ -11,15 +11,13 @@ faz o que o navegador não consegue:
 Não há instalador pronto. **Cada máquina compila o próprio app**, com **um arquivo só**, que funciona
 em Windows, Linux e macOS e instala sozinho tudo o que falta:
 
-**[instalar-vintagelightbox.cmd](https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox.cmd)**
+**[instalar-vintagelightbox.cmd](https://github.com/alexkads/VintageLightbox/releases/download/instalador-tauri/instalar-vintagelightbox.cmd)**
 
 ---
 
 ## Windows
 
-1. **[Clique aqui para baixar o instalador](https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox.cmd)**.
-   Se o navegador abrir o texto em vez de baixar, clique com o botão direito na página e escolha
-   **Salvar como…**.
+1. **[Clique aqui para baixar o instalador](https://github.com/alexkads/VintageLightbox/releases/download/instalador-tauri/instalar-vintagelightbox.cmd)**.
 2. Na pasta **Downloads**, dê **dois cliques** em `instalar-vintagelightbox.cmd`.
 3. Se o Windows mostrar *"O Windows protegeu o computador"*, clique em **Mais informações** e depois
    em **Executar assim mesmo**. Isso só acontece na primeira vez.
@@ -84,6 +82,11 @@ sh instalar.cmd
 - o `sh` do Linux e do macOS pula esses dois blocos e roda o resto.
 
 O arquivo precisa ter fins de linha LF, e o `.gitattributes` garante isso.
+
+A cópia do link do Windows fica no Release
+[`instalador-tauri`](https://github.com/alexkads/VintageLightbox/releases/tag/instalador-tauri), que
+entrega o arquivo como download. Ela não envelhece: ao rodar, o trecho do Windows baixa a versão mais
+nova do script, e só usa a própria cópia se estiver sem internet.
 
 ## Onde as coisas ficam
 

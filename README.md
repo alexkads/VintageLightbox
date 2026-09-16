@@ -184,7 +184,7 @@ A janela do balcão que abre o pós-venda da RecordarFotos, com RAW, cartão da 
 fixa e tela do cliente no segundo monitor. **Cada máquina compila o próprio app**, com um arquivo só,
 que instala sozinho tudo o que falta:
 
-- **Windows**: baixe **[instalar-vintagelightbox.cmd](https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox.cmd)**
+- **Windows**: baixe **[instalar-vintagelightbox.cmd](https://github.com/alexkads/VintageLightbox/releases/download/instalador-tauri/instalar-vintagelightbox.cmd)**
   e dê **dois cliques** nele.
 - **Linux e macOS**: no Terminal, cole
 
