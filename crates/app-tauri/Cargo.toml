@@ -31,11 +31,13 @@ thiserror.workspace = true
 url = "2"
 percent-encoding = "2"
 base64 = "0.22"
+tokio = { workspace = true }
 image = "0.25"
 
 # O RAW é decodificado pela mesma LibRaw que o `ui-gpui` usa: é a regra que os
 # dois apps precisam aplicar igual para um validar o outro.
 infrastructure = { path = "../infrastructure" }
+domain = { path = "../domain" }
 # O mesmo codificador de JPEG do desktop, do editor e do download do cliente.
 foto-codec = { path = "../foto-codec" }
 

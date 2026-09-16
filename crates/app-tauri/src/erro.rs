@@ -31,6 +31,10 @@ pub enum ErroDaPonte {
     Janela(String),
     #[error("não foi possível ler: {0}")]
     Leitura(String),
+    #[error("a sessão acabou: entre de novo")]
+    SemSessao,
+    #[error("{0}")]
+    Api(String),
 }
 
 impl Serialize for ErroDaPonte {

@@ -1,23 +1,19 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
-  "identifier": "producao",
-  "description": "A ponte, só para o site de produção (DESKTOP_TAURI §6, regra 1).",
+  "identifier": "tela",
+  "description": "A tela empacotada (interface/). Nenhuma janela do app carrega página da internet (DESKTOP_TAURI §0).",
   "windows": [
     "principal"
   ],
-  "remote": {
-    "urls": [
-      "https://recordarfotos.com.br/*"
-    ]
-  },
   "permissions": [
+    "core:default",
     "allow-escolher-raw",
     "allow-ler-raw",
     "allow-converter-raw",
-    "allow-ler-da-origem",
-    "allow-listar-origem",
-    "allow-escolher-origem",
     "allow-cartoes-montados",
+    "allow-escolher-origem",
+    "allow-listar-origem",
+    "allow-ler-da-origem",
     "allow-pasta-de-saida",
     "allow-escolher-pasta",
     "allow-esquecer-pasta",
@@ -25,6 +21,10 @@
     "allow-gravar-na-pasta",
     "allow-abrir-tela-do-cliente",
     "allow-fechar-tela-do-cliente",
+    "allow-ha-sessao",
+    "allow-entrar",
+    "allow-sair",
+    "allow-chamar-api",
     "notification:allow-is-permission-granted",
     "notification:allow-request-permission",
     "notification:allow-notify"

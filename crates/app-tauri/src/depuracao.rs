@@ -37,8 +37,10 @@ pub const CONSOLE_NO_TERMINAL: &str = r#"
     const original = console[nivel].bind(console);
     console[nivel] = (...partes) => { original(...partes); enviar(nivel, partes); };
   }
-  window.addEventListener("error", (e) => enviar("erro", [e.error || e.message, `${e.filename}:${e.lineno}`]));
-  window.addEventListener("unhandledrejection", (e) => enviar("promessa", [e.reason]));
+  window.__vlbErros = [];
+  const guardar = (texto) => { if (window.__vlbErros.length < 20) window.__vlbErros.push(String(texto).slice(0, 500)); };
+  window.addEventListener("error", (e) => { guardar(`${e.message} ${e.filename}:${e.lineno}`); enviar("erro", [e.error || e.message, `${e.filename}:${e.lineno}`]); });
+  window.addEventListener("unhandledrejection", (e) => { guardar(e.reason && e.reason.stack || e.reason); enviar("promessa", [e.reason]); });
 })();
 "#;
 
@@ -54,6 +56,21 @@ pub fn rodar_roteiro<R: Runtime>(janela: &WebviewWindow<R>, evento: PageLoadEven
         return;
     }
     eprintln!("[{} carregou] {}", janela.label(), url);
+    // `VLB_SONDA=1`: o que a página mostra, lido pelo próprio webview, sem
+    // depender da ponte. É o que responde quando o console fica mudo.
+    if std::env::var("VLB_SONDA").is_ok() {
+        let janela = janela.clone();
+        std::thread::spawn(move || {
+            for espera in [6, 14] {
+                std::thread::sleep(std::time::Duration::from_secs(espera));
+                let rotulo = janela.label().to_string();
+                let _ = janela.as_ref().eval_with_callback(
+                "JSON.stringify({url: location.href, ponte: !!window.__TAURI__, erros: window.__vlbErros || null, texto: (document.body && document.body.innerText || '').replace(/\\s+/g, ' ').slice(0, 500)})",
+                move |resposta| eprintln!("[{rotulo} sonda] {resposta}"),
+            );
+            }
+        });
+    }
     let Ok(caminho) = std::env::var("VLB_ROTEIRO") else {
         return;
     };

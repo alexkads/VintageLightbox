@@ -3,7 +3,7 @@
   "productName": "VintageLightbox (Tauri)",
   "identifier": "br.com.recordarfotos.vintagelightbox.tauri",
   "build": {
-    "frontendDist": "diagnostico"
+    "frontendDist": "interface"
   },
   "app": {
     "withGlobalTauri": true,

@@ -7,10 +7,10 @@
 
 use url::Url;
 
-/// O site que a janela abre em produção.
+/// O site, que só aparece fora do app: autorização e links abertos no navegador.
 pub const SITE: &str = "https://recordarfotos.com.br";
 
-/// A tela que a janela abre.
+/// A tela que a janela principal abre.
 pub const ROTA_INICIAL: &str = "/dashboard/sessoes-fotograficas";
 
 #[derive(Debug, PartialEq, Eq)]
@@ -54,18 +54,21 @@ pub fn destino(url: &Url, desenvolvimento: bool) -> Destino {
 /// A pilha local só existe em build de depuração (§6, regra 1).
 pub const DESENVOLVIMENTO: bool = cfg!(debug_assertions);
 
-/// Um endereço do site, na rota pedida.
+/// A tela empacotada, na rota pedida (DESKTOP_TAURI §0).
 ///
-/// `VLB_SITE_URL` só vale em depuração: o binário do balcão abre produção, sempre.
-pub fn endereco(rota: &str) -> Url {
-    let site = if DESENVOLVIMENTO {
-        std::env::var("VLB_SITE_URL").unwrap_or_else(|_| SITE.to_string())
-    } else {
-        SITE.to_string()
-    };
-    let mut url = Url::parse(&site).expect("VLB_SITE_URL não é um endereço");
-    url.set_path(rota);
-    url
+/// 🚫 **Nunca o site remoto.** Em depuração, `VLB_TELA_URL` aponta para o
+/// servidor do Vite desta máquina (`pnpm --filter @recordarfotos/desktop dev`),
+/// que serve o mesmo código da tela empacotada, para editar sem recompilar.
+pub fn tela(rota: &str) -> tauri::WebviewUrl {
+    if DESENVOLVIMENTO {
+        if let Ok(base) = std::env::var("VLB_TELA_URL") {
+            if let Ok(mut url) = Url::parse(&base) {
+                url.set_path(rota);
+                return tauri::WebviewUrl::External(url);
+            }
+        }
+    }
+    tauri::WebviewUrl::App(rota.trim_start_matches('/').into())
 }
 
 /// Aplica a regra de navegação, abrindo no navegador do sistema o que é de fora.

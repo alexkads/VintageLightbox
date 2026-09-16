@@ -779,6 +779,58 @@ impl PosVendaApiHttp {
         self.cofre.guardar(&sessao);
     }
 
+    /// Um pedido qualquer à API, com o token de agora, e a resposta crua.
+    ///
+    /// É a porta da tela empacotada do app Tauri (DESKTOP_TAURI §0): as funções
+    /// de `lib/api/*` do site montam o pedido, e este cliente põe o token,
+    /// renova quando vence e devolve o status e os bytes, sem interpretar nada.
+    /// Uma resposta `4xx` ou `5xx` volta como resposta, e não como erro: quem lê
+    /// o envelope de erro é o cliente do site.
+    ///
+    /// 🔒 `caminho` é sempre relativo a `/api/v2` desta API. Um endereço
+    /// completo, ou que tente subir de pasta, é recusado.
+    pub async fn chamar(
+        &self,
+        sessao: &Sessao,
+        metodo: &str,
+        caminho: &str,
+        corpo: Option<String>,
+    ) -> DomainResult<RespostaCrua> {
+        if !caminho.starts_with('/') || caminho.contains("://") || caminho.contains("..") {
+            return Err(DomainError::InvalidOperation(format!(
+                "caminho de API recusado: {caminho}"
+            )));
+        }
+        let metodo = reqwest::Method::from_bytes(metodo.as_bytes())
+            .map_err(|_| DomainError::InvalidOperation(format!("método recusado: {metodo}")))?;
+        let mut pedido = self
+            .client
+            .request(metodo, self.url(caminho))
+            .bearer_auth(self.token(sessao).await?);
+        if let Some(corpo) = corpo {
+            pedido = pedido
+                .header(reqwest::header::CONTENT_TYPE, "application/json")
+                .body(corpo);
+        }
+        let resposta = pedido.send().await.map_err(rede)?;
+        let status = resposta.status().as_u16();
+        let tipo = resposta
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_string);
+        let bytes = resposta
+            .bytes()
+            .await
+            .map_err(|e| DomainError::InfrastructureError(format!("resposta incompleta: {e}")))?
+            .to_vec();
+        Ok(RespostaCrua {
+            status,
+            tipo,
+            bytes,
+        })
+    }
+
     /// As rotas de imagem devolvem **bytes**, e não JSON.
     ///
     /// 🔑 Passar por `ler` desserializaria e falharia com "resposta ilegível"
@@ -802,6 +854,14 @@ impl PosVendaApiHttp {
             .map(|b| b.to_vec())
             .map_err(|e| DomainError::InfrastructureError(format!("imagem incompleta: {e}")))
     }
+}
+
+/// O que [`PosVendaApiHttp::chamar`] devolve.
+#[derive(Debug)]
+pub struct RespostaCrua {
+    pub status: u16,
+    pub tipo: Option<String>,
+    pub bytes: Vec<u8>,
 }
 
 /// A galeria como o painel a lista. O que não interessa ao balcão (quem criou,

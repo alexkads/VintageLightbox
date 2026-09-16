@@ -1,9 +1,0 @@
-{
-  "identifier": "depuracao-remota",
-  "description": "Console no terminal, para o site. Só existe em build de depuração.",
-  "windows": ["principal", "tela-do-cliente"],
-  "remote": {
-    "urls": ["https://recordarfotos.com.br/*", "http://localhost:*/*", "http://127.0.0.1:*/*"]
-  },
-  "permissions": ["allow-registrar-no-terminal"]
-}

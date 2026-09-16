@@ -1,6 +1,6 @@
 {
-  "identifier": "pilha-local",
-  "description": "A pilha local (make up do e-commerce). Fica fora de capabilities/ de propósito: o main.rs só a adiciona em build de desenvolvimento (§6, regra 1).",
+  "identifier": "tela-do-vite",
+  "description": "A tela servida pelo Vite desta máquina (VLB_TELA_URL). Só existe em build de depuração.",
   "windows": [
     "principal",
     "tela-do-cliente"
@@ -12,13 +12,14 @@
     ]
   },
   "permissions": [
+    "core:default",
     "allow-escolher-raw",
     "allow-ler-raw",
     "allow-converter-raw",
-    "allow-ler-da-origem",
-    "allow-listar-origem",
-    "allow-escolher-origem",
     "allow-cartoes-montados",
+    "allow-escolher-origem",
+    "allow-listar-origem",
+    "allow-ler-da-origem",
     "allow-pasta-de-saida",
     "allow-escolher-pasta",
     "allow-esquecer-pasta",
@@ -26,8 +27,13 @@
     "allow-gravar-na-pasta",
     "allow-abrir-tela-do-cliente",
     "allow-fechar-tela-do-cliente",
+    "allow-ha-sessao",
+    "allow-entrar",
+    "allow-sair",
+    "allow-chamar-api",
     "notification:allow-is-permission-granted",
     "notification:allow-request-permission",
-    "notification:allow-notify"
+    "notification:allow-notify",
+    "allow-registrar-no-terminal"
   ]
 }

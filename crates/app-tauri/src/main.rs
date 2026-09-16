@@ -1,14 +1,15 @@
 //! VintageLightbox em Tauri (recordarfotos-e-commerce/docs/DESKTOP_TAURI.md).
 //!
 //! ```text
-//! cargo run -p app-tauri                     # a janela no site de produção
+//! cargo run -p app-tauri                     # a tela empacotada (interface/)
 //! cargo run -p app-tauri -- --diagnostico    # e a página que responde P1–P9
-//! VLB_SITE_URL=http://localhost:3001 cargo run -p app-tauri   # pilha local (só em debug)
+//! VLB_TELA_URL=http://localhost:5174 cargo run -p app-tauri   # a tela do Vite (só em debug)
 //! ```
 
 // Sem console no Windows em release.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod api;
 mod bytes;
 mod comandos;
 mod depuracao;
@@ -22,7 +23,9 @@ mod tela_do_cliente;
 use tauri::webview::{DownloadEvent, NewWindowResponse};
 use tauri::{App, Manager, WebviewUrl, WebviewWindowBuilder};
 
-use navegacao::{decidir, endereco, DESENVOLVIMENTO, ROTA_INICIAL};
+use api::ContaDoApp;
+
+use navegacao::{decidir, tela, DESENVOLVIMENTO, ROTA_INICIAL};
 use pasta_de_saida::PastaDeSaida;
 use raizes::RaizesPermitidas;
 
@@ -34,6 +37,7 @@ fn main() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .manage(RaizesPermitidas::default())
+        .manage(ContaDoApp::nova())
         .invoke_handler(tauri::generate_handler![
             comandos::escolher_raw,
             comandos::ler_raw,
@@ -50,11 +54,14 @@ fn main() {
             comandos::abrir_tela_do_cliente,
             comandos::fechar_tela_do_cliente,
             depuracao::registrar_no_terminal,
+            api::ha_sessao,
+            api::entrar,
+            api::sair,
+            api::chamar_api,
         ])
         .setup(move |app| {
             if DESENVOLVIMENTO {
                 app.add_capability(include_str!("../capacidades-dev/local.json"))?;
-                app.add_capability(include_str!("../capacidades-dev/depuracao-remota.json"))?;
                 app.add_capability(include_str!("../capacidades-dev/depuracao-local.json"))?;
                 // Um roteiro não abre seletor: a pasta de teste já nasce permitida.
                 if let Ok(pasta) = std::env::var("VLB_ORIGEM_DE_TESTE") {
@@ -84,7 +91,7 @@ fn main() {
                 let mut janela = WebviewWindowBuilder::new(
                     app,
                     "diagnostico",
-                    WebviewUrl::App("index.html".into()),
+                    WebviewUrl::App("diagnostico.html".into()),
                 )
                 .title("VintageLightbox — diagnóstico da Fase 0")
                 .inner_size(760.0, 900.0);
@@ -100,46 +107,43 @@ fn main() {
 }
 
 fn abrir_principal(app: &App) -> tauri::Result<()> {
-    let mut janela = WebviewWindowBuilder::new(
-        app,
-        "principal",
-        WebviewUrl::External(endereco(ROTA_INICIAL)),
-    )
-    .title("VintageLightbox")
-    .inner_size(1440.0, 900.0)
-    .maximized(true)
-    .on_navigation(decidir)
-    // 🚨 **O arrastar e soltar é da página.** Com o tratador do Tauri ligado (o
-    // padrão), o webview não entrega o `drop` ao HTML, e soltar fotos na
-    // galeria deixaria de funcionar.
-    .disable_drag_drop_handler()
-    .on_new_window(|url, _recursos| {
-        // A tela do cliente não passa por aqui: no desktop ela nasce em
-        // `abrir_tela_do_cliente`. O que sobra é pop-up da própria página.
-        if decidir(&url) {
-            NewWindowResponse::Allow
-        } else {
-            NewWindowResponse::Deny
-        }
-    })
-    .on_download(|webview, evento| {
-        // Sem destino, o webview de alguns sistemas descarta o download em
-        // silêncio. A reserva da web é a pasta de downloads, e aqui também.
-        if let DownloadEvent::Requested { url, destination } = evento {
-            if let Ok(pasta) = webview.app_handle().path().download_dir() {
-                let nome = destination
-                    .file_name()
-                    .map(|n| n.to_os_string())
-                    .or_else(|| {
-                        url.path_segments()
-                            .and_then(|mut s| s.next_back().map(Into::into))
-                    })
-                    .unwrap_or_else(|| "download".into());
-                *destination = pasta.join(nome);
+    // 🚫 A tela é a empacotada, nunca o site remoto (DESKTOP_TAURI §0).
+    let mut janela = WebviewWindowBuilder::new(app, "principal", tela(ROTA_INICIAL))
+        .title("VintageLightbox")
+        .inner_size(1440.0, 900.0)
+        .maximized(true)
+        .on_navigation(decidir)
+        // 🚨 **O arrastar e soltar é da página.** Com o tratador do Tauri ligado (o
+        // padrão), o webview não entrega o `drop` ao HTML, e soltar fotos na
+        // galeria deixaria de funcionar.
+        .disable_drag_drop_handler()
+        .on_new_window(|url, _recursos| {
+            // A tela do cliente não passa por aqui: no desktop ela nasce em
+            // `abrir_tela_do_cliente`. O que sobra é pop-up da própria página.
+            if decidir(&url) {
+                NewWindowResponse::Allow
+            } else {
+                NewWindowResponse::Deny
             }
-        }
-        true
-    });
+        })
+        .on_download(|webview, evento| {
+            // Sem destino, o webview de alguns sistemas descarta o download em
+            // silêncio. A reserva da web é a pasta de downloads, e aqui também.
+            if let DownloadEvent::Requested { url, destination } = evento {
+                if let Ok(pasta) = webview.app_handle().path().download_dir() {
+                    let nome = destination
+                        .file_name()
+                        .map(|n| n.to_os_string())
+                        .or_else(|| {
+                            url.path_segments()
+                                .and_then(|mut s| s.next_back().map(Into::into))
+                        })
+                        .unwrap_or_else(|| "download".into());
+                    *destination = pasta.join(nome);
+                }
+            }
+            true
+        });
     if DESENVOLVIMENTO {
         janela = janela
             .initialization_script(depuracao::CONSOLE_NO_TERMINAL)

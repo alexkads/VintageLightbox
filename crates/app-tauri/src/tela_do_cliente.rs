@@ -5,13 +5,14 @@
 //! não sabe em qual tela ficar. Aqui a janela nasce no Rust, que conhece os
 //! monitores, e vai em tela cheia para o que não é o do operador.
 //!
-//! A página que ela mostra é a mesma `/tela-do-cliente` do site, e conversa com
-//! a galeria pelo mesmo `BroadcastChannel`.
+//! A página que ela mostra é a `/tela-do-cliente` da tela empacotada, com o
+//! código da mesma rota do site, e conversa com a galeria pelo mesmo
+//! `BroadcastChannel`.
 
-use tauri::{AppHandle, Manager, PhysicalPosition, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager, PhysicalPosition, WebviewWindowBuilder};
 
 use crate::erro::ErroDaPonte;
-use crate::navegacao::{decidir, endereco, DESENVOLVIMENTO};
+use crate::navegacao::{decidir, tela, DESENVOLVIMENTO};
 
 pub const ROTULO: &str = "tela-do-cliente";
 const ROTA: &str = "/tela-do-cliente";
@@ -44,12 +45,11 @@ pub async fn abrir(app: &AppHandle) -> Result<(), ErroDaPonte> {
         return Ok(());
     }
 
-    let mut construtor =
-        WebviewWindowBuilder::new(app, ROTULO, WebviewUrl::External(endereco(ROTA)))
-            .title("Tela do cliente")
-            .inner_size(1280.0, 800.0)
-            .visible(false)
-            .on_navigation(decidir);
+    let mut construtor = WebviewWindowBuilder::new(app, ROTULO, tela(ROTA))
+        .title("Tela do cliente")
+        .inner_size(1280.0, 800.0)
+        .visible(false)
+        .on_navigation(decidir);
     if DESENVOLVIMENTO {
         construtor = construtor.initialization_script(crate::depuracao::CONSOLE_NO_TERMINAL);
     }
