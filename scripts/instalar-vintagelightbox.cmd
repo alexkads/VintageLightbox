@@ -6,10 +6,12 @@ rem  Um arquivo so para os tres sistemas:
 rem    Windows ........ baixe e de dois cliques neste arquivo
 rem    Linux e macOS .. curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox.cmd | sh
 rem
-rem  No Windows, esta parte chama o PowerShell que esta mais abaixo, neste mesmo
-rem  arquivo, e espera uma tecla no fim para a janela nao sumir com a mensagem.
+rem  No Windows, esta parte roda o PowerShell que esta mais abaixo e espera uma
+rem  tecla no fim, para a janela nao sumir com a mensagem. O PowerShell vem da
+rem  versao mais nova do arquivo no GitHub; sem internet, desta copia. Assim a
+rem  copia baixada do Release nunca fica velha.
 title Instalando o VintageLightbox (Tauri)
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$t=[IO.File]::ReadAllText('%~f0'); $n=[char]10; $i=$t.IndexOf($n+'#==POWERSHELL=='); $f=$t.IndexOf($n+'#==FIM-POWERSHELL==',$i); try { Invoke-Expression $t.Substring($i, $f-$i) } catch { Write-Host ''; Write-Host ('X ' + $_) -ForegroundColor Red; exit 1 }"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; $t=$null; try { $t=(Invoke-WebRequest -UseBasicParsing 'https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox.cmd').Content } catch { }; if (-not $t) { $t=[IO.File]::ReadAllText('%~f0') }; $n=[char]10; $i=$t.IndexOf($n+'#==POWERSHELL=='); $f=$t.IndexOf($n+'#==FIM-POWERSHELL==',$i); try { Invoke-Expression $t.Substring($i, $f-$i) } catch { Write-Host ''; Write-Host ('X ' + $_) -ForegroundColor Red; exit 1 }"
 echo.
 pause
 goto :eof
