@@ -24,6 +24,9 @@
     "allow-nomes-na-pasta",
     "allow-gravar-na-pasta",
     "allow-abrir-tela-do-cliente",
-    "allow-fechar-tela-do-cliente"
+    "allow-fechar-tela-do-cliente",
+    "notification:allow-is-permission-granted",
+    "notification:allow-request-permission",
+    "notification:allow-notify"
   ]
 }

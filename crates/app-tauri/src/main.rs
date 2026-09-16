@@ -32,6 +32,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
         .manage(RaizesPermitidas::default())
         .invoke_handler(tauri::generate_handler![
             comandos::escolher_raw,
@@ -69,6 +70,14 @@ fn main() {
                 .ok()
                 .map(|pasta| pasta.join("pasta-de-saida.txt"));
             app.manage(PastaDeSaida::carregar(registro));
+            if DESENVOLVIMENTO {
+                if let Ok(pasta) = std::env::var("VLB_PASTA_DE_TESTE") {
+                    let escolhida = app
+                        .state::<PastaDeSaida>()
+                        .escolher(std::path::Path::new(&pasta));
+                    eprintln!("[depuração] pasta de saída de teste {pasta}: {escolhida:?}");
+                }
+            }
 
             abrir_principal(app)?;
             if diagnostico {

@@ -70,7 +70,11 @@ pub fn endereco(rota: &str) -> Url {
 
 /// Aplica a regra de navegação, abrindo no navegador do sistema o que é de fora.
 pub fn decidir(url: &Url) -> bool {
-    match destino(url, DESENVOLVIMENTO) {
+    let decisao = destino(url, DESENVOLVIMENTO);
+    if DESENVOLVIMENTO && decisao != Destino::NaJanela {
+        eprintln!("[navegação {decisao:?}] {url}");
+    }
+    match decisao {
         Destino::NaJanela => true,
         Destino::NoNavegador => {
             let _ = tauri_plugin_opener::open_url(url.as_str(), None::<&str>);
