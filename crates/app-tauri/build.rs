@@ -17,6 +17,7 @@ fn main() {
         "gravar_na_pasta",
         "abrir_tela_do_cliente",
         "fechar_tela_do_cliente",
+        "registrar_no_terminal",
     ]);
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(comandos))
         .expect("o tauri-build falhou");

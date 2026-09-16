@@ -4,12 +4,13 @@
 
 use std::path::Path;
 
-use tauri::ipc::{InvokeBody, Request, Response};
+use tauri::ipc::Request;
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 
 use infrastructure::raw_processing::{is_raw_file, load_raw_as_dynamic_image, load_raw_from_bytes};
 
+use crate::bytes::{self, Bytes};
 use crate::erro::ErroDaPonte;
 use crate::origem::{self, ArquivoDaOrigem, Origem};
 use crate::pasta_de_saida::{Pasta, PastaDeSaida};
@@ -61,12 +62,12 @@ pub async fn escolher_raw(
 pub async fn ler_raw(
     caminho: String,
     raizes: State<'_, RaizesPermitidas>,
-) -> Result<Response, ErroDaPonte> {
+) -> Result<Bytes, ErroDaPonte> {
     let arquivo = raizes.conferir(&caminho)?;
     let pixels = tauri::async_runtime::spawn_blocking(move || decodificar(&arquivo))
         .await
         .map_err(|_| ErroDaPonte::Interrompida)??;
-    Ok(Response::new(pixels))
+    Ok(pixels.into())
 }
 
 /// Os cartões e discos removíveis montados agora.
@@ -134,12 +135,12 @@ pub async fn listar_origem(
 pub async fn ler_da_origem(
     caminho: String,
     raizes: State<'_, RaizesPermitidas>,
-) -> Result<Response, ErroDaPonte> {
+) -> Result<Bytes, ErroDaPonte> {
     let arquivo = raizes.conferir(&caminho)?;
-    let bytes = tauri::async_runtime::spawn_blocking(move || origem::ler(&arquivo))
+    let conteudo = tauri::async_runtime::spawn_blocking(move || origem::ler(&arquivo))
         .await
         .map_err(|_| ErroDaPonte::Interrompida)??;
-    Ok(Response::new(bytes))
+    Ok(conteudo.into())
 }
 
 /// A pasta de saída guardada, se houver.
@@ -183,19 +184,16 @@ pub async fn nomes_na_pasta(pasta: State<'_, PastaDeSaida>) -> Result<Vec<String
 
 /// Grava um arquivo exportado na pasta escolhida.
 ///
-/// O corpo é o arquivo, cru, e o nome vem no cabeçalho `x-nome`, codificado
-/// como componente de URL. Mandar 70 MB de TIFF como array JSON custaria mais
-/// que a própria conversão.
+/// O corpo é o arquivo (em base64 ou cru, ver `bytes.rs`), e o nome vem no
+/// cabeçalho `x-nome`, codificado como componente de URL.
 #[tauri::command]
 pub async fn gravar_na_pasta(
     request: Request<'_>,
     pasta: State<'_, PastaDeSaida>,
 ) -> Result<(), ErroDaPonte> {
-    let InvokeBody::Raw(bytes) = request.body() else {
-        return Err(ErroDaPonte::PedidoIncompleto);
-    };
+    let conteudo = bytes::do_pedido(&request)?;
     let nome = nome_do_cabecalho(&request)?;
-    pasta.gravar(&nome, bytes)
+    pasta.gravar(&nome, &conteudo)
 }
 
 /// Abre a tela do cliente no monitor que não é o do operador.
@@ -229,19 +227,16 @@ pub const QUALIDADE_DO_RAW_REVELADO: u8 = 95;
 /// Os bytes chegam crus, e o nome vem em `x-nome`, só para conferir a extensão.
 /// Nenhum caminho do disco é aberto.
 #[tauri::command]
-pub async fn converter_raw(request: Request<'_>) -> Result<Response, ErroDaPonte> {
-    let InvokeBody::Raw(bytes) = request.body() else {
-        return Err(ErroDaPonte::PedidoIncompleto);
-    };
+pub async fn converter_raw(request: Request<'_>) -> Result<Bytes, ErroDaPonte> {
     let nome = nome_do_cabecalho(&request)?;
     if !is_raw_file(&nome) {
         return Err(ErroDaPonte::NaoERaw);
     }
-    let bytes = bytes.clone();
-    let jpeg = tauri::async_runtime::spawn_blocking(move || revelar_raw(&bytes))
+    let raw = bytes::do_pedido(&request)?;
+    let jpeg = tauri::async_runtime::spawn_blocking(move || revelar_raw(&raw))
         .await
         .map_err(|_| ErroDaPonte::Interrompida)??;
-    Ok(Response::new(jpeg))
+    Ok(jpeg.into())
 }
 
 /// O RAW em JPEG, sem nada de Tauri em volta.

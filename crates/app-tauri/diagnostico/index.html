@@ -298,14 +298,16 @@ $("raw").onclick = async () => {
     if (!caminho) return;
     linha("ponte", "arquivo", caminho);
     const inicio = performance.now();
-    const corpo = await invoke("ler_raw", { caminho });
+    const resposta = await invoke("ler_raw", { caminho });
     const ms = performance.now() - inicio;
-    const buffer = corpo instanceof ArrayBuffer ? corpo : new Uint8Array(corpo).buffer;
+    const buffer = Uint8Array.fromBase64
+      ? Uint8Array.fromBase64(resposta.base64).buffer
+      : Uint8Array.from(atob(resposta.base64), (c) => c.charCodeAt(0)).buffer;
     const cabecalho = new DataView(buffer, 0, 8);
     const largura = cabecalho.getUint32(0, true);
     const altura = cabecalho.getUint32(4, true);
     linha("ponte", "imagem", `${largura}×${altura} (${(largura * altura / 1e6).toFixed(1)} MP)`);
-    linha("ponte", "bytes recebidos", `${mb(buffer.byteLength)} · ${corpo instanceof ArrayBuffer ? "ArrayBuffer" : "array JSON (lento)"}`, corpo instanceof ArrayBuffer ? "ok" : "nao");
+    linha("ponte", "bytes recebidos", `${mb(buffer.byteLength)} (base64: ${Uint8Array.fromBase64 ? "nativo" : "atob"})`);
     linha("ponte", "decodificar + atravessar", `${Math.round(ms)} ms`);
 
     const pixels = new ImageData(new Uint8ClampedArray(buffer, 8, largura * altura * 4), largura, altura);

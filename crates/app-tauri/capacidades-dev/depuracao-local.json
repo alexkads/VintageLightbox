@@ -1,0 +1,6 @@
+{
+  "identifier": "depuracao-local",
+  "description": "Console no terminal, para as páginas do próprio app. Só existe em build de depuração.",
+  "windows": ["diagnostico"],
+  "permissions": ["allow-registrar-no-terminal"]
+}

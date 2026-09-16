@@ -9,7 +9,9 @@
 // Sem console no Windows em release.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod bytes;
 mod comandos;
+mod depuracao;
 mod erro;
 mod navegacao;
 mod origem;
@@ -46,10 +48,20 @@ fn main() {
             comandos::gravar_na_pasta,
             comandos::abrir_tela_do_cliente,
             comandos::fechar_tela_do_cliente,
+            depuracao::registrar_no_terminal,
         ])
         .setup(move |app| {
             if DESENVOLVIMENTO {
                 app.add_capability(include_str!("../capacidades-dev/local.json"))?;
+                app.add_capability(include_str!("../capacidades-dev/depuracao-remota.json"))?;
+                app.add_capability(include_str!("../capacidades-dev/depuracao-local.json"))?;
+                // Um roteiro não abre seletor: a pasta de teste já nasce permitida.
+                if let Ok(pasta) = std::env::var("VLB_ORIGEM_DE_TESTE") {
+                    let permitida = app
+                        .state::<RaizesPermitidas>()
+                        .permitir_pasta(std::path::Path::new(&pasta));
+                    eprintln!("[depuração] origem de teste {pasta}: {permitida:?}");
+                }
             }
             let registro = app
                 .path()
@@ -60,10 +72,17 @@ fn main() {
 
             abrir_principal(app)?;
             if diagnostico {
-                WebviewWindowBuilder::new(app, "diagnostico", WebviewUrl::App("index.html".into()))
-                    .title("VintageLightbox — diagnóstico da Fase 0")
-                    .inner_size(760.0, 900.0)
-                    .build()?;
+                let mut janela = WebviewWindowBuilder::new(
+                    app,
+                    "diagnostico",
+                    WebviewUrl::App("index.html".into()),
+                )
+                .title("VintageLightbox — diagnóstico da Fase 0")
+                .inner_size(760.0, 900.0);
+                if DESENVOLVIMENTO {
+                    janela = janela.initialization_script(depuracao::CONSOLE_NO_TERMINAL);
+                }
+                janela.build()?;
             }
             Ok(())
         })
@@ -72,7 +91,7 @@ fn main() {
 }
 
 fn abrir_principal(app: &App) -> tauri::Result<()> {
-    WebviewWindowBuilder::new(
+    let mut janela = WebviewWindowBuilder::new(
         app,
         "principal",
         WebviewUrl::External(endereco(ROTA_INICIAL)),
@@ -111,7 +130,14 @@ fn abrir_principal(app: &App) -> tauri::Result<()> {
             }
         }
         true
-    })
-    .build()?;
+    });
+    if DESENVOLVIMENTO {
+        janela = janela
+            .initialization_script(depuracao::CONSOLE_NO_TERMINAL)
+            .on_page_load(|janela, carga| {
+                depuracao::rodar_roteiro(&janela, carga.event(), carga.url().as_str())
+            });
+    }
+    janela.build()?;
     Ok(())
 }

@@ -11,7 +11,7 @@
 use tauri::{AppHandle, Manager, PhysicalPosition, WebviewUrl, WebviewWindowBuilder};
 
 use crate::erro::ErroDaPonte;
-use crate::navegacao::{decidir, endereco};
+use crate::navegacao::{decidir, endereco, DESENVOLVIMENTO};
 
 pub const ROTULO: &str = "tela-do-cliente";
 const ROTA: &str = "/tela-do-cliente";
@@ -44,11 +44,16 @@ pub async fn abrir(app: &AppHandle) -> Result<(), ErroDaPonte> {
         return Ok(());
     }
 
-    let janela = WebviewWindowBuilder::new(app, ROTULO, WebviewUrl::External(endereco(ROTA)))
-        .title("Tela do cliente")
-        .inner_size(1280.0, 800.0)
-        .visible(false)
-        .on_navigation(decidir)
+    let mut construtor =
+        WebviewWindowBuilder::new(app, ROTULO, WebviewUrl::External(endereco(ROTA)))
+            .title("Tela do cliente")
+            .inner_size(1280.0, 800.0)
+            .visible(false)
+            .on_navigation(decidir);
+    if DESENVOLVIMENTO {
+        construtor = construtor.initialization_script(crate::depuracao::CONSOLE_NO_TERMINAL);
+    }
+    let janela = construtor
         .build()
         .map_err(|e| ErroDaPonte::Janela(e.to_string()))?;
 
