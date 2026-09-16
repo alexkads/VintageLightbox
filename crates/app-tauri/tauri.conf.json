@@ -1,0 +1,25 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "VintageLightbox (Tauri)",
+  "identifier": "br.com.recordarfotos.vintagelightbox.tauri",
+  "build": {
+    "frontendDist": "diagnostico"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": false,
+    "icon": [
+      "icones/32x32.png",
+      "icones/128x128.png",
+      "icones/128x128@2x.png",
+      "../../empacotamento/icones/icone.icns",
+      "../../empacotamento/icones/icone.ico"
+    ]
+  }
+}

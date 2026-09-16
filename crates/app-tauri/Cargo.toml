@@ -1,0 +1,38 @@
+[package]
+name = "app-tauri"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+# A janela Tauri que abre `/dashboard/sessoes-fotograficas` do site
+# (recordarfotos-e-commerce/docs/DESKTOP_TAURI.md). Convive com o `ui-gpui` para
+# sempre: as duas interfaces executam o mesmo fluxo por caminhos diferentes, e uma
+# valida a outra (D7).
+#
+# 🧪 **Hoje é a Fase 0, o teste descartável**: uma janela no site, as travas da
+# §6 ligadas, um comando de verdade (`ler_raw`) e uma página de diagnóstico que
+# responde P1–P9 na máquina do balcão (`--diagnostico`).
+
+[[bin]]
+name = "app-tauri"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2.6", features = [] }
+
+[dependencies]
+tauri = { version = "2.11", features = [] }
+tauri-plugin-dialog = "2.7"
+tauri-plugin-opener = "2.5"
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+url = "2"
+image = "0.25"
+
+# O RAW é decodificado pela mesma LibRaw que o `ui-gpui` usa: é a regra que os
+# dois apps precisam aplicar igual para um validar o outro.
+infrastructure = { path = "../infrastructure" }
+
+[dev-dependencies]
+tempfile.workspace = true

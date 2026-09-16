@@ -72,6 +72,7 @@ make            # a lista dos alvos
 make testar     # cargo test --workspace
 make lint       # fmt + clippy -D warnings, como no CI
 make rodar      # abre o app (sempre em release)
+make tauri-diagnostico  # a janela Tauri (Fase 0) e a página que responde P1–P9
 make mac        # .app + .dmg universal
 make linux      # .deb + .AppImage, por Docker
 make windows    # explica por que o Windows sai do .ps1, e nao daqui
@@ -104,6 +105,13 @@ cargo test test_name --workspace
 #    da GPU, paga isso a cada milímetro de slider. Já foi confundido com "o
 #    framework é lento" duas vezes (docs/STATUS.md).
 cargo run --release -p ui-gpui
+
+# A segunda interface, em Tauri (Fase 0 — recordarfotos-e-commerce/docs/DESKTOP_TAURI.md).
+# Abre /dashboard/sessoes-fotograficas do site; `--diagnostico` abre também a página
+# que mede o webview do sistema. As medidas só valem numa máquina do balcão
+# (Windows e Linux); o binário delas sai do workflow manual `fase0-tauri.yml`.
+cargo run -p app-tauri -- --diagnostico
+VLB_SITE_URL=http://localhost:3001 cargo run -p app-tauri   # pilha local, só em debug
 
 # O motor de revelação para o navegador (entrega ao recordarfotos-e-commerce)
 scripts/construir-web.sh [caminho/do/frontend]

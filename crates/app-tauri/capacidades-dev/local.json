@@ -1,0 +1,9 @@
+{
+  "identifier": "pilha-local",
+  "description": "A pilha local (make up do e-commerce). Fica fora de capabilities/ de propósito: o main.rs só a adiciona em build de desenvolvimento (§6, regra 1).",
+  "windows": ["principal"],
+  "remote": {
+    "urls": ["http://localhost:*/*", "http://127.0.0.1:*/*"]
+  },
+  "permissions": ["allow-escolher-raw", "allow-ler-raw"]
+}

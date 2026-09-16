@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Diagnóstico da Fase 0</title>
+<!--
+  A página que responde às perguntas da Fase 0 (DESKTOP_TAURI §8) **na máquina do
+  balcão**. Ela vem dentro do app, e não do site: mede o webview do sistema
+  (WebView2 no Windows, WebKitGTK no Linux), que é o mesmo que carrega o site na
+  janela principal. Descartável, como a fase.
+-->
+<style>
+  :root { color-scheme: light dark; --borda: #8884; --ok: #1a7f37; --nao: #cf222e; --talvez: #9a6700; }
+  body { font: 14px/1.45 system-ui, sans-serif; margin: 16px; max-width: 720px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 20px 0 6px; }
+  p.nota { margin: 0 0 12px; opacity: .75; }
+  table { border-collapse: collapse; width: 100%; }
+  td { border-top: 1px solid var(--borda); padding: 4px 6px; vertical-align: top; }
+  td:first-child { width: 42%; }
+  .ok { color: var(--ok); } .nao { color: var(--nao); } .talvez { color: var(--talvez); }
+  button { font: inherit; padding: 4px 10px; margin: 4px 4px 4px 0; }
+  canvas { max-width: 100%; border: 1px solid var(--borda); margin-top: 6px; }
+  textarea { width: 100%; height: 160px; font: 12px ui-monospace, monospace; }
+</style>
+</head>
+<body>
+<h1>Diagnóstico da Fase 0</h1>
+<p class="nota">Rode numa máquina Windows e numa Linux do balcão. No fim, "Copiar relatório" e cole em DESKTOP_TAURI §8.</p>
+
+<h2>Sistema</h2>
+<table id="sistema"></table>
+
+<h2>P1 · GPU (WebGPU e WebGL2)</h2>
+<table id="p1"></table>
+
+<h2>P2 · P3 · Service worker e IndexedDB</h2>
+<table id="p23"></table>
+<button id="gravar">Gravar 30 × 10 MB no IndexedDB</button>
+<button id="apagar">Apagar o que foi gravado</button>
+<p class="nota">Depois de gravar, feche o app e abra de novo: a linha "Guardado de antes" deve continuar com 30.</p>
+
+<h2>P4 · Cronômetro da régua (30 fotos em ~5 min)</h2>
+<button id="cr-iniciar">Iniciar</button><button id="cr-marcar" disabled>Marcar passo</button><button id="cr-parar" disabled>Parar</button>
+<table id="p4"></table>
+
+<h2>P5 · Login</h2>
+<p class="nota">Entre na janela principal, feche o app e abra de novo. A resposta vai no relatório à mão.</p>
+<label><input type="checkbox" id="p5"> O login continuou depois de reabrir</label>
+
+<h2>P6 · Notificação</h2>
+<table id="p6"></table>
+<button id="notificar">Pedir permissão e notificar</button>
+
+<h2>P7 · Memória</h2>
+<table id="p7"></table>
+
+<h2>P8 · Desenho contínuo</h2>
+<button id="quadros">Medir 5 s de quadros</button>
+<table id="p8"></table>
+<canvas id="tela-p8" width="640" height="160"></canvas>
+
+<h2>P9 · Monitores e tela do cliente</h2>
+<table id="p9"></table>
+
+<h2>Ponte · ler_raw</h2>
+<button id="raw">Escolher um RAW e ler pela ponte</button>
+<table id="ponte"></table>
+<canvas id="tela-raw" width="640" height="10"></canvas>
+
+<h2>Relatório</h2>
+<button id="copiar">Copiar relatório</button>
+<textarea id="relatorio" readonly></textarea>
+
+<script>
+"use strict";
+const respostas = {};
+const $ = (id) => document.getElementById(id);
+
+function linha(tabela, chave, valor, classe) {
+  respostas[tabela] ??= {};
+  respostas[tabela][chave] = String(valor);
+  let tr = document.querySelector(`#${tabela} tr[data-chave="${CSS.escape(chave)}"]`);
+  if (!tr) {
+    tr = document.createElement("tr");
+    tr.dataset.chave = chave;
+    tr.innerHTML = "<td></td><td></td>";
+    $(tabela).appendChild(tr);
+  }
+  tr.children[0].textContent = chave;
+  tr.children[1].textContent = String(valor);
+  tr.children[1].className = classe ?? "";
+  montarRelatorio();
+}
+const sim = (tabela, chave, valor) => linha(tabela, chave, valor ? "sim" : "não", valor ? "ok" : "nao");
+const mb = (bytes) => `${(bytes / 1048576).toFixed(1)} MB`;
+
+function montarRelatorio() {
+  const partes = [];
+  for (const [tabela, pares] of Object.entries(respostas)) {
+    partes.push(`[${tabela}]`);
+    for (const [k, v] of Object.entries(pares)) partes.push(`  ${k}: ${v}`);
+  }
+  partes.push(`[p5]\n  login persistiu: ${$("p5").checked ? "sim" : "não conferido / não"}`);
+  $("relatorio").value = partes.join("\n");
+}
+$("p5").addEventListener("change", montarRelatorio);
+
+// ── Sistema ───────────────────────────────────────────────────────────────
+linha("sistema", "userAgent", navigator.userAgent);
+linha("sistema", "plataforma", navigator.userAgentData?.platform ?? navigator.platform);
+linha("sistema", "contexto seguro", window.isSecureContext ? "sim" : "não");
+linha("sistema", "ponte Tauri", window.__TAURI__ ? "presente" : "ausente", window.__TAURI__ ? "ok" : "nao");
+sim("sistema", "showDirectoryPicker", "showDirectoryPicker" in window);
+
+// ── P1 ────────────────────────────────────────────────────────────────────
+(async () => {
+  if (!("gpu" in navigator)) {
+    linha("p1", "WebGPU", "não existe (o motor cai para WebGL2)", "talvez");
+  } else {
+    try {
+      const adaptador = await navigator.gpu.requestAdapter();
+      if (!adaptador) {
+        linha("p1", "WebGPU", "existe, mas sem adaptador", "talvez");
+      } else {
+        const info = adaptador.info ?? {};
+        linha("p1", "WebGPU", "sim", "ok");
+        linha("p1", "adaptador WebGPU", [info.vendor, info.architecture, info.description].filter(Boolean).join(" · ") || "(sem detalhes)");
+      }
+    } catch (e) {
+      linha("p1", "WebGPU", `erro: ${e}`, "nao");
+    }
+  }
+  const gl = document.createElement("canvas").getContext("webgl2");
+  sim("p1", "WebGL2", !!gl);
+  if (gl) {
+    const ext = gl.getExtension("WEBGL_debug_renderer_info");
+    linha("p1", "renderizador WebGL2", ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER));
+    const software = /swiftshader|llvmpipe|software/i.test(respostas.p1["renderizador WebGL2"]);
+    if (software) linha("p1", "atenção", "renderização por software: a régua vai sofrer", "nao");
+  }
+})();
+
+// ── P2 · P3 ───────────────────────────────────────────────────────────────
+sim("p23", "serviceWorker (API)", "serviceWorker" in navigator);
+linha("p23", "service worker no site", "conferir na janela principal: o site registra o sw.js sozinho", "talvez");
+sim("p23", "IndexedDB", "indexedDB" in window);
+
+function abrirBanco() {
+  return new Promise((ok, falha) => {
+    const pedido = indexedDB.open("diagnostico-fase0", 1);
+    pedido.onupgradeneeded = () => pedido.result.createObjectStore("blocos");
+    pedido.onsuccess = () => ok(pedido.result);
+    pedido.onerror = () => falha(pedido.error);
+  });
+}
+function contar(banco) {
+  return new Promise((ok, falha) => {
+    const pedido = banco.transaction("blocos").objectStore("blocos").count();
+    pedido.onsuccess = () => ok(pedido.result);
+    pedido.onerror = () => falha(pedido.error);
+  });
+}
+async function atualizarArmazenamento() {
+  try {
+    const banco = await abrirBanco();
+    linha("p23", "Guardado de antes", `${await contar(banco)} blocos`);
+    banco.close();
+  } catch (e) {
+    linha("p23", "Guardado de antes", `erro: ${e}`, "nao");
+  }
+  if (navigator.storage?.estimate) {
+    const { usage, quota } = await navigator.storage.estimate();
+    linha("p23", "uso / cota", `${mb(usage)} / ${mb(quota)}`);
+  }
+  if (navigator.storage?.persisted) {
+    linha("p23", "armazenamento persistente", (await navigator.storage.persisted()) ? "sim" : "não (pode ser apagado sob pressão)");
+  }
+}
+atualizarArmazenamento();
+
+$("gravar").onclick = async () => {
+  try {
+    await navigator.storage?.persist?.();
+    const banco = await abrirBanco();
+    const inicio = performance.now();
+    for (let i = 0; i < 30; i++) {
+      const bloco = new Uint8Array(10 * 1048576);
+      crypto.getRandomValues(bloco.subarray(0, 65536));
+      await new Promise((ok, falha) => {
+        const tx = banco.transaction("blocos", "readwrite");
+        tx.objectStore("blocos").put(new Blob([bloco], { type: "image/jpeg" }), i);
+        tx.oncomplete = ok;
+        tx.onerror = () => falha(tx.error);
+      });
+    }
+    linha("p23", "gravar 300 MB", `${Math.round(performance.now() - inicio)} ms`, "ok");
+    banco.close();
+  } catch (e) {
+    linha("p23", "gravar 300 MB", `erro: ${e}`, "nao");
+  }
+  atualizarArmazenamento();
+};
+$("apagar").onclick = async () => {
+  indexedDB.deleteDatabase("diagnostico-fase0");
+  setTimeout(atualizarArmazenamento, 300);
+};
+
+// ── P4 ────────────────────────────────────────────────────────────────────
+let cronometro = null;
+$("cr-iniciar").onclick = () => {
+  cronometro = { inicio: performance.now(), ultimo: performance.now(), passo: 0 };
+  $("p4").innerHTML = "";
+  delete respostas.p4;
+  $("cr-marcar").disabled = $("cr-parar").disabled = false;
+};
+$("cr-marcar").onclick = () => {
+  const agora = performance.now();
+  cronometro.passo += 1;
+  linha("p4", `passo ${cronometro.passo}`, `${((agora - cronometro.ultimo) / 1000).toFixed(1)} s`);
+  cronometro.ultimo = agora;
+};
+$("cr-parar").onclick = () => {
+  const total = (performance.now() - cronometro.inicio) / 1000;
+  linha("p4", "total", `${(total / 60).toFixed(1)} min`, total <= 330 ? "ok" : "nao");
+  $("cr-marcar").disabled = $("cr-parar").disabled = true;
+};
+
+// ── P6 ────────────────────────────────────────────────────────────────────
+sim("p6", "Notification", "Notification" in window);
+sim("p6", "PushManager (Web Push)", "PushManager" in window);
+linha("p6", "permissão", window.Notification?.permission ?? "—");
+$("notificar").onclick = async () => {
+  try {
+    const permissao = await Notification.requestPermission();
+    linha("p6", "permissão", permissao, permissao === "granted" ? "ok" : "nao");
+    if (permissao === "granted") new Notification("VintageLightbox", { body: "Notificação do diagnóstico" });
+  } catch (e) {
+    linha("p6", "notificar", `erro: ${e}`, "nao");
+  }
+};
+
+// ── P7 ────────────────────────────────────────────────────────────────────
+linha("p7", "deviceMemory", navigator.deviceMemory ? `${navigator.deviceMemory} GB` : "—");
+if (performance.memory) {
+  linha("p7", "heap JS usado / limite", `${mb(performance.memory.usedJSHeapSize)} / ${mb(performance.memory.jsHeapSizeLimit)}`);
+}
+linha("p7", "memória do processo", "Gerenciador de Tarefas (Windows) ou top/smem (Linux) durante P4");
+
+// ── P8 ────────────────────────────────────────────────────────────────────
+$("quadros").onclick = () => {
+  const ctx = $("tela-p8").getContext("2d");
+  const inicio = performance.now();
+  let quadros = 0, pior = 0, anterior = inicio;
+  function quadro(agora) {
+    quadros += 1;
+    pior = Math.max(pior, agora - anterior);
+    anterior = agora;
+    const t = (agora - inicio) / 1000;
+    const imagem = ctx.createImageData(640, 160);
+    for (let i = 0; i < imagem.data.length; i += 4) {
+      const x = (i / 4) % 640;
+      imagem.data[i] = (x + t * 200) % 255;
+      imagem.data[i + 1] = (x * 0.5) % 255;
+      imagem.data[i + 2] = (t * 50) % 255;
+      imagem.data[i + 3] = 255;
+    }
+    ctx.putImageData(imagem, 0, 0);
+    if (agora - inicio < 5000) {
+      requestAnimationFrame(quadro);
+    } else {
+      const fps = quadros / ((agora - inicio) / 1000);
+      linha("p8", "quadros por segundo", fps.toFixed(1), fps >= 50 ? "ok" : "nao");
+      linha("p8", "pior intervalo", `${pior.toFixed(0)} ms`, pior <= 50 ? "ok" : "nao");
+      linha("p8", "defeitos visíveis", "anote à mão: tela preta, piscar, rasgos");
+    }
+  }
+  requestAnimationFrame(quadro);
+};
+
+// ── P9 ────────────────────────────────────────────────────────────────────
+sim("p9", "getScreenDetails", "getScreenDetails" in window);
+linha("p9", "tela desta janela", `${screen.width}×${screen.height} @${devicePixelRatio}x`);
+linha("p9", "sessão gráfica (Linux)", /Linux/.test(navigator.userAgent) ? "conferir: echo $XDG_SESSION_TYPE (x11 ou wayland)" : "—");
+(async () => {
+  try {
+    const monitores = await window.__TAURI__.window.availableMonitors();
+    linha("p9", "monitores (pelo Tauri)", monitores.map((m) => `${m.name ?? "?"} ${m.size.width}×${m.size.height} em (${m.position.x},${m.position.y})`).join(" | ") || "nenhum");
+  } catch (e) {
+    linha("p9", "monitores (pelo Tauri)", `erro: ${e}`, "nao");
+  }
+})();
+
+// ── Ponte ─────────────────────────────────────────────────────────────────
+$("raw").onclick = async () => {
+  const { invoke } = window.__TAURI__.core;
+  try {
+    const caminho = await invoke("escolher_raw");
+    if (!caminho) return;
+    linha("ponte", "arquivo", caminho);
+    const inicio = performance.now();
+    const corpo = await invoke("ler_raw", { caminho });
+    const ms = performance.now() - inicio;
+    const buffer = corpo instanceof ArrayBuffer ? corpo : new Uint8Array(corpo).buffer;
+    const cabecalho = new DataView(buffer, 0, 8);
+    const largura = cabecalho.getUint32(0, true);
+    const altura = cabecalho.getUint32(4, true);
+    linha("ponte", "imagem", `${largura}×${altura} (${(largura * altura / 1e6).toFixed(1)} MP)`);
+    linha("ponte", "bytes recebidos", `${mb(buffer.byteLength)} · ${corpo instanceof ArrayBuffer ? "ArrayBuffer" : "array JSON (lento)"}`, corpo instanceof ArrayBuffer ? "ok" : "nao");
+    linha("ponte", "decodificar + atravessar", `${Math.round(ms)} ms`);
+
+    const pixels = new ImageData(new Uint8ClampedArray(buffer, 8, largura * altura * 4), largura, altura);
+    const bitmap = await createImageBitmap(pixels, { resizeWidth: 640, resizeHeight: Math.round(640 * altura / largura) });
+    const tela = $("tela-raw");
+    tela.height = bitmap.height;
+    tela.getContext("2d").drawImage(bitmap, 0, 0);
+  } catch (e) {
+    linha("ponte", "erro", String(e), "nao");
+  }
+};
+
+// Uma página de fora não pode pedir arquivo que o operador não escolheu.
+(async () => {
+  if (!window.__TAURI__) {
+    linha("ponte", "recusa fora das raízes", "sem ponte: página fora do app", "talvez");
+    return;
+  }
+  try {
+    await window.__TAURI__.core.invoke("ler_raw", { caminho: "/etc/hosts" });
+    linha("ponte", "recusa fora das raízes", "NÃO recusou", "nao");
+  } catch (e) {
+    linha("ponte", "recusa fora das raízes", `recusou: ${e}`, "ok");
+  }
+})();
+
+// ── Relatório ─────────────────────────────────────────────────────────────
+$("copiar").onclick = async () => {
+  montarRelatorio();
+  try {
+    await navigator.clipboard.writeText($("relatorio").value);
+  } catch {
+    $("relatorio").select();
+    document.execCommand("copy");
+  }
+};
+</script>
+</body>
+</html>

@@ -57,7 +57,7 @@ else
 endif
 
 .DEFAULT_GOAL := ajuda
-.PHONY: ajuda sistema testar lint fmt rodar medir icones mac mac-arm mac-intel \
+.PHONY: ajuda sistema testar lint fmt rodar medir tauri tauri-diagnostico tauri-local icones mac mac-arm mac-intel \
         linux linux-arm windows conferir-windows tudo publicar publicar-seco \
         web biblioteca faxina
 
@@ -135,6 +135,22 @@ rodar: ## Abre o app em release
 medir: ## As reguas de desempenho (miniaturas e abertura) — tambem em release
 	cargo run --release -p ui-gpui --bin medir-miniaturas
 	cargo run --release -p ui-gpui --bin medir-abertura
+
+# ───────────────────────── A janela Tauri (Fase 0) ───────────────────────────
+#
+# A segunda interface: uma janela que abre /dashboard/sessoes-fotograficas do
+# site (recordarfotos-e-commerce/docs/DESKTOP_TAURI.md). O pixel nasce no wasm do
+# site, e nao aqui, entao `debug` nao distorce o que se ve na tela; o que a
+# regua mede se mede no balcao, com o binario de release.
+
+tauri: ## A janela Tauri no site de producao
+	cargo run -p app-tauri
+
+tauri-diagnostico: ## A janela Tauri e a pagina que responde P1-P9 da Fase 0
+	cargo run -p app-tauri -- --diagnostico
+
+tauri-local: ## A janela Tauri na pilha local do e-commerce (make up, Next em :3001)
+	VLB_SITE_URL=http://localhost:3001 cargo run -p app-tauri
 
 # ───────────────────────── O motor no navegador ──────────────────────────────
 

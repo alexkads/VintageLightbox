@@ -41,6 +41,11 @@ members = [
     # um comando e traz os 21.352 LOC de volta inteiros; a referência de
     # paridade virou documento, e o código continua no histórico.
     "crates/ui-gpui",
+    # A segunda interface, em Tauri (2026-09-16): uma janela que abre
+    # `/dashboard/sessoes-fotograficas` do site, com uma ponte curta para o que só
+    # o desktop faz. **Não substitui o `ui-gpui`**: os dois existem sempre, e um
+    # valida o outro (recordarfotos-e-commerce/docs/DESKTOP_TAURI.md, D7).
+    "crates/app-tauri",
 ]
 
 [workspace.package]
