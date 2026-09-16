@@ -17,6 +17,7 @@ mod erro;
 mod navegacao;
 mod origem;
 mod pasta_de_saida;
+mod protocolo;
 mod raizes;
 mod tela_do_cliente;
 
@@ -38,6 +39,16 @@ fn main() {
         .plugin(tauri_plugin_notification::init())
         .manage(RaizesPermitidas::default())
         .manage(ContaDoApp::nova())
+        // A tela empacotada e as rotas internas dela (`protocolo.rs`).
+        .register_asynchronous_uri_scheme_protocol(
+            protocolo::ESQUEMA,
+            |contexto, pedido, responder| {
+                let app = contexto.app_handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    responder.respond(protocolo::tratar(&app, pedido).await);
+                });
+            },
+        )
         .invoke_handler(tauri::generate_handler![
             comandos::escolher_raw,
             comandos::ler_raw,

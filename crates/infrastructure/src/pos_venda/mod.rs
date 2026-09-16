@@ -6,4 +6,4 @@ pub mod http;
 pub mod receita;
 
 pub use cofre::{CofreDoSistema, CofreEmMemoria};
-pub use http::PosVendaApiHttp;
+pub use http::{CorpoCru, PosVendaApiHttp, RespostaCrua};

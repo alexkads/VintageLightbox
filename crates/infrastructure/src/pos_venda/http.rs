@@ -788,13 +788,14 @@ impl PosVendaApiHttp {
     /// o envelope de erro é o cliente do site.
     ///
     /// 🔒 `caminho` é sempre relativo a `/api/v2` desta API. Um endereço
-    /// completo, ou que tente subir de pasta, é recusado.
+    /// completo, ou que tente subir de pasta, é recusado. Sem `sessao`, o
+    /// pedido vai sem token (rota pública).
     pub async fn chamar(
         &self,
-        sessao: &Sessao,
+        sessao: Option<&Sessao>,
         metodo: &str,
         caminho: &str,
-        corpo: Option<String>,
+        corpo: Option<CorpoCru>,
     ) -> DomainResult<RespostaCrua> {
         if !caminho.starts_with('/') || caminho.contains("://") || caminho.contains("..") {
             return Err(DomainError::InvalidOperation(format!(
@@ -803,14 +804,16 @@ impl PosVendaApiHttp {
         }
         let metodo = reqwest::Method::from_bytes(metodo.as_bytes())
             .map_err(|_| DomainError::InvalidOperation(format!("método recusado: {metodo}")))?;
-        let mut pedido = self
-            .client
-            .request(metodo, self.url(caminho))
-            .bearer_auth(self.token(sessao).await?);
+        let mut pedido = self.client.request(metodo, self.url(caminho));
+        // Sem sessão é rota pública (o envio por bilhete): o bilhete é a
+        // autorização, e mandar o token junto não acrescentaria nada.
+        if let Some(sessao) = sessao {
+            pedido = pedido.bearer_auth(self.token(sessao).await?);
+        }
         if let Some(corpo) = corpo {
             pedido = pedido
-                .header(reqwest::header::CONTENT_TYPE, "application/json")
-                .body(corpo);
+                .header(reqwest::header::CONTENT_TYPE, corpo.tipo)
+                .body(corpo.bytes);
         }
         let resposta = pedido.send().await.map_err(rede)?;
         let status = resposta.status().as_u16();
@@ -854,6 +857,13 @@ impl PosVendaApiHttp {
             .map(|b| b.to_vec())
             .map_err(|e| DomainError::InfrastructureError(format!("imagem incompleta: {e}")))
     }
+}
+
+/// O corpo de um pedido de [`PosVendaApiHttp::chamar`], com o tipo dele.
+#[derive(Debug)]
+pub struct CorpoCru {
+    pub tipo: String,
+    pub bytes: Vec<u8>,
 }
 
 /// O que [`PosVendaApiHttp::chamar`] devolve.

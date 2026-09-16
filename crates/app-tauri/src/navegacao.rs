@@ -37,10 +37,13 @@ pub fn destino(url: &Url, desenvolvimento: bool) -> Destino {
         // `/auth/google/callback`. Barrar aqui quebraria o login. A ponte não
         // corre risco: a capacidade `producao` só vale para `recordarfotos.com.br`.
         "https" if host == "accounts.google.com" => Destino::NaJanela,
-        // As páginas que vêm dentro do próprio app (o diagnóstico da Fase 0):
-        // `tauri://localhost` no macOS e no Linux, `http://tauri.localhost` no Windows.
-        "tauri" => Destino::NaJanela,
-        "http" | "https" if host == "tauri.localhost" => Destino::NaJanela,
+        // As páginas que vêm dentro do próprio app (a tela empacotada e o
+        // diagnóstico): `tauri://` e `vlb://` no macOS e no Linux, e
+        // `http://tauri.localhost` e `http://vlb.localhost` no Windows.
+        "tauri" | "vlb" => Destino::NaJanela,
+        "http" | "https" if host == "tauri.localhost" || host == "vlb.localhost" => {
+            Destino::NaJanela
+        }
         "http" if desenvolvimento && (host == "localhost" || host == "127.0.0.1") => {
             Destino::NaJanela
         }
@@ -54,7 +57,8 @@ pub fn destino(url: &Url, desenvolvimento: bool) -> Destino {
 /// A pilha local só existe em build de depuração (§6, regra 1).
 pub const DESENVOLVIMENTO: bool = cfg!(debug_assertions);
 
-/// A tela empacotada, na rota pedida (DESKTOP_TAURI §0).
+/// A tela empacotada, na rota pedida, servida pelo esquema `vlb://`
+/// (`protocolo.rs`, DESKTOP_TAURI §0).
 ///
 /// 🚫 **Nunca o site remoto.** Em depuração, `VLB_TELA_URL` aponta para o
 /// servidor do Vite desta máquina (`pnpm --filter @recordarfotos/desktop dev`),
@@ -68,7 +72,7 @@ pub fn tela(rota: &str) -> tauri::WebviewUrl {
             }
         }
     }
-    tauri::WebviewUrl::App(rota.trim_start_matches('/').into())
+    tauri::WebviewUrl::CustomProtocol(crate::protocolo::endereco(rota))
 }
 
 /// Aplica a regra de navegação, abrindo no navegador do sistema o que é de fora.
@@ -155,6 +159,14 @@ mod testes {
     #[test]
     fn as_paginas_do_app_ficam_na_janela() {
         assert_eq!(de("tauri://localhost/index.html", false), Destino::NaJanela);
+        assert_eq!(
+            de("vlb://localhost/dashboard/sessoes-fotograficas", false),
+            Destino::NaJanela
+        );
+        assert_eq!(
+            de("http://vlb.localhost/dashboard", false),
+            Destino::NaJanela
+        );
         assert_eq!(
             de("http://tauri.localhost/index.html", false),
             Destino::NaJanela

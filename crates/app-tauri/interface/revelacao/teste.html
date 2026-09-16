@@ -1,0 +1,85 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Motor de revelação — teste dos dois backends</title>
+<style>
+  body { font: 14px system-ui, sans-serif; margin: 2rem; background: #111; color: #eee; }
+  canvas { border: 1px solid #444; image-rendering: pixelated; width: 256px; height: 256px; }
+  pre { background: #222; padding: 1rem; }
+  .ok { color: #7f7; } .falhou { color: #f77; }
+</style>
+<h1>Motor de revelação</h1>
+<p>
+  Prova manual dos dois backends. No Chrome deve dizer <code>webgpu</code>; no Safari/Firefox
+  sem WebGPU, ou no Chrome com <code>--disable-features=WebGPU</code>, deve dizer <code>webgl</code>.
+  Nos dois, o gradiente tem de aparecer <strong>escuro em cima e claro embaixo</strong>, e o cinza
+  100 com exposição +1 tem de sair 200.
+</p>
+<canvas id="tela"></canvas>
+<pre id="saida">carregando…</pre>
+<script type="module">
+  const saida = document.getElementById("saida");
+  const linhas = [];
+  const log = (t, classe) => { linhas.push(classe ? `<span class="${classe}">${t}</span>` : t); saida.innerHTML = linhas.join("\n"); };
+  try {
+    const glue = await import("./revelacao_web.js");
+    await glue.default({ module_or_path: "./revelacao_web_bg.wasm" });
+    const motor = await glue.abrir(document.getElementById("tela"));
+    log(`backend: ${motor.backend()}`);
+    log(`limite de textura: ${motor.limite_de_textura()} px`);
+    const nomes = JSON.parse(glue.Motor.nomes_dos_ajustes());
+    log(`ajustes: ${nomes.length} (${nomes[0]} … ${nomes[nomes.length - 1]})`);
+
+    // Um gradiente: linha y tem verde = y, coluna x tem vermelho = x. O canto
+    // superior esquerdo é preto, o inferior direito é amarelo. Se o render
+    // pass invertesse o Y, o canvas mostraria o claro em cima.
+    const lado = 256;
+    const rgba = new Uint8Array(lado * lado * 4);
+    for (let y = 0; y < lado; y++) for (let x = 0; x < lado; x++) {
+      const i = (y * lado + x) * 4;
+      rgba[i] = x; rgba[i + 1] = y; rgba[i + 2] = 40; rgba[i + 3] = 255;
+    }
+    motor.carregar(lado, lado, rgba);
+    const padrao = glue.Motor.ajustes_padrao();
+    motor.aplicar(padrao);
+    log("gradiente desenhado — confira: escuro em cima, claro embaixo");
+
+    // Cinza 100 com exposição +1 → 200 (pow(2, 1) dobra). Vai pela
+    // exportação, que lê de volta da GPU e codifica o JPEG; o JPEG é
+    // decodificado pelo navegador para conferir o pixel.
+    const cinza = new Uint8Array(64 * 64 * 4).fill(100);
+    for (let i = 3; i < cinza.length; i += 4) cinza[i] = 255;
+    const comExposicao = Float32Array.from(padrao);
+    comExposicao[nomes.indexOf("exposure")] = 1.0;
+    const inteiro = glue.corte_inteiro();
+    const jpeg = await motor.exportar_jpeg(64, 64, cinza, comExposicao, inteiro, 100);
+    log(`JPEG exportado: ${jpeg.length} bytes`);
+    const bitmap = await createImageBitmap(new Blob([jpeg], { type: "image/jpeg" }));
+    const c = new OffscreenCanvas(64, 64).getContext("2d");
+    c.drawImage(bitmap, 0, 0);
+    const p = c.getImageData(32, 32, 1, 1).data;
+    const ok = Math.abs(p[0] - 200) <= 2 && Math.abs(p[1] - 200) <= 2 && Math.abs(p[2] - 200) <= 2;
+    log(`cinza 100 + exposição 1 → ${p[0]},${p[1]},${p[2]} (esperado 200) ${ok ? "OK" : "FALHOU"}`, ok ? "ok" : "falhou");
+
+    // O gradiente lido de volta: (0,0) tem de ser (0,0,40) e (255,255) tem de
+    // ser (255,255,40) — prova a orientação sem depender do olho.
+    const jpeg2 = await motor.exportar_jpeg(lado, lado, rgba, padrao, inteiro, 100);
+    const b2 = await createImageBitmap(new Blob([jpeg2], { type: "image/jpeg" }));
+    const c2 = new OffscreenCanvas(lado, lado).getContext("2d");
+    c2.drawImage(b2, 0, 0);
+    const topo = c2.getImageData(2, 2, 1, 1).data, fundo = c2.getImageData(253, 253, 1, 1).data;
+    const orientado = topo[1] < 20 && fundo[1] > 235 && topo[0] < 20 && fundo[0] > 235;
+    log(`orientação: canto superior esquerdo ${topo[0]},${topo[1]} · inferior direito ${fundo[0]},${fundo[1]} ${orientado ? "OK" : "FALHOU"}`, orientado ? "ok" : "falhou");
+
+    // 🚨 O enquadramento: metade direita da metade de baixo. O que sai tem de
+    // ter um quarto da area, e o pixel de cima e o que estava no meio.
+    const meio = Float32Array.from([0.5, 0.5, 0.5, 0.5, 0, 0, 0, 0]);
+    const geo = glue.enquadramento(meio, lado, lado);
+    const jpeg3 = await motor.exportar_jpeg(lado, lado, rgba, padrao, meio, 100);
+    const b3 = await createImageBitmap(new Blob([jpeg3], { type: "image/jpeg" }));
+    const certo = b3.width === geo[6] && b3.height === geo[7] && b3.width === lado / 2;
+    log(`enquadramento: o motor anuncia ${geo[6]}×${geo[7]}, o arquivo tem ${b3.width}×${b3.height} ${certo ? "OK" : "FALHOU"}`, certo ? "ok" : "falhou");
+  } catch (erro) {
+    log(`erro: ${erro?.message ?? erro}`, "falhou");
+    console.error(erro);
+  }
+</script>

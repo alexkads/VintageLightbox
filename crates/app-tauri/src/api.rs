@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use domain::services::pos_venda::{CofreDeSessao, PosVendaApi, Sessao};
 use domain::DomainError;
-use infrastructure::{CofreDoSistema, PosVendaApiHttp};
+use infrastructure::{CofreDoSistema, CorpoCru, PosVendaApiHttp};
 use serde::Serialize;
 use tauri::State;
 
@@ -24,7 +24,7 @@ use crate::navegacao::{DESENVOLVIMENTO, SITE};
 const API: &str = "https://api.recordarfotos.com.br";
 
 pub struct ContaDoApp {
-    api: PosVendaApiHttp,
+    pub(crate) api: PosVendaApiHttp,
     cofre: Arc<CofreDoSistema>,
     /// A sessão lida do chaveiro, guardada depois da primeira leitura.
     ///
@@ -61,7 +61,7 @@ impl ContaDoApp {
         }
     }
 
-    async fn sessao(&self) -> Option<Sessao> {
+    pub(crate) async fn sessao(&self) -> Option<Sessao> {
         let mut guardada = self.sessao.lock().await;
         if guardada.is_none() {
             let cofre = self.cofre.clone();
@@ -123,7 +123,15 @@ pub async fn chamar_api(
     let sessao = conta.sessao().await.ok_or(ErroDaPonte::SemSessao)?;
     let resposta = conta
         .api
-        .chamar(&sessao, &metodo, &caminho, corpo)
+        .chamar(
+            Some(&sessao),
+            &metodo,
+            &caminho,
+            corpo.map(|texto| CorpoCru {
+                tipo: "application/json".into(),
+                bytes: texto.into_bytes(),
+            }),
+        )
         .await
         .map_err(da_api)?;
     Ok(RespostaDaApi {
