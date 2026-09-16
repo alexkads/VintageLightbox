@@ -108,8 +108,8 @@ cargo run --release -p ui-gpui
 
 # A segunda interface, em Tauri (Fase 0 — recordarfotos-e-commerce/docs/DESKTOP_TAURI.md).
 # Abre /dashboard/sessoes-fotograficas do site; `--diagnostico` abre também a página
-# que mede o webview do sistema. As medidas só valem numa máquina do balcão
-# (Windows e Linux); o binário delas sai do workflow manual `fase0-tauri.yml`.
+# que mede o webview do sistema. **Testes sempre no Mac, e sem GitHub** (dono,
+# 2026-09-16): não há workflow para o app Tauri.
 cargo run -p app-tauri -- --diagnostico
 VLB_SITE_URL=http://localhost:3001 cargo run -p app-tauri   # pilha local, só em debug
 

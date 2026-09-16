@@ -140,8 +140,8 @@ medir: ## As reguas de desempenho (miniaturas e abertura) — tambem em release
 #
 # A segunda interface: uma janela que abre /dashboard/sessoes-fotograficas do
 # site (recordarfotos-e-commerce/docs/DESKTOP_TAURI.md). O pixel nasce no wasm do
-# site, e nao aqui, entao `debug` nao distorce o que se ve na tela; o que a
-# regua mede se mede no balcao, com o binario de release.
+# site, e nao aqui, entao `debug` nao distorce o que se ve na tela. Os testes
+# sao sempre no Mac (DESKTOP_TAURI, D10).
 
 tauri: ## A janela Tauri no site de producao
 	cargo run -p app-tauri
