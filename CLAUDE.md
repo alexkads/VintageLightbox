@@ -32,6 +32,15 @@ era migrar a interface de egui para GPUI **com paridade**; ele foi **alcançado*
 valendo — em especial **"nenhuma feature nova"**, que é o motivo de o painel de Revelação ter 19
 sliders que não fazem nada: o app antigo também não os aplicava, e o porte foi fiel ao defeito.
 
+> 🔁 **`crates/ui-gpui` e `crates/app-tauri` vão existir sempre, e um valida o outro** (dono,
+> 2026-09-16). O fluxo de `/dashboard/sessoes-fotograficas` sempre vai precisar de validação: a
+> mesma sessão levada pelos dois apps tem de dar o mesmo resultado, e quando não dá, um deles tem
+> defeito. O Tauri (uma janela que abre a tela do site) vem primeiro porque entrega mais rápido.
+> Enquanto isso, o `ui-gpui` fica em pausa, recebendo só correção de defeito, e continua
+> compilando. **Um dia ele vai ser concluído.** Regra de negócio vai para `use-cases`, onde os dois
+> a encontram. O plano está em `recordarfotos-e-commerce/docs/DESKTOP_TAURI.md`.
+> O objetivo acima, "em Rust com GPUI", continua sendo o destino.
+
 **Fidelidade ao app antigo deixou de ser virtude.** Detalhes em
 [`docs/00-OBJETIVO.md`](docs/00-OBJETIVO.md).
 
@@ -199,6 +208,14 @@ tecnologias de revelacao-web"). O registro, com a lista do que não refazer, est
 
 ## UI Framework
 
+🔁 **`crates/ui-gpui` e `crates/app-tauri` vão existir sempre, e um valida o outro** (dono,
+2026-09-16). O fluxo de `/dashboard/sessoes-fotograficas` sempre vai precisar de validação: a
+mesma sessão levada pelos dois apps tem de dar o mesmo resultado, e quando não dá, um deles tem
+defeito. O Tauri (uma janela que abre a tela do site) vem primeiro porque entrega mais rápido.
+Enquanto isso, o `ui-gpui` fica em pausa, recebendo só correção de defeito, e continua
+compilando. **Um dia ele vai ser concluído.** Regra de negócio vai para `use-cases`, onde os dois
+a encontram. O plano está em `recordarfotos-e-commerce/docs/DESKTOP_TAURI.md`.
+
 **GPUI 0.2 + gpui-component 0.5** — o egui saiu em 17/ago/2026, com a migração
 concluída (`docs/historico/10-MIGRACAO-GPUI.md`). Quem procura o app antigo o encontra no
 histórico do git; o que ele fazia está listado, comportamento a comportamento,
@@ -226,7 +243,8 @@ e `--bin medir-abertura`.
 3. Implementação em `infrastructure` (repositório, disco, GPU)
 4. Controller em `adapters`, ligando use case e interface
 5. **Montagem no `crates/ui-gpui/src/main.rs`** e tela em
-   `crates/ui-gpui/src/{biblioteca,revelacao,importacao,impressao}/`
+   `crates/ui-gpui/src/{biblioteca,revelacao,importacao,impressao}/`. Enquanto o `ui-gpui`
+   estiver em pausa, tela **nova** nasce no site e chega ao desktop pelo Tauri.
 
 🚨 **O passo 5 é o que mais some, e some em silêncio.** `ExportPhotoUseCase`, `ExportController` e
 `ImageExporterImpl` existem, estão testados — e **nunca são construídos no `main.rs`**. O app não

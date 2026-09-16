@@ -6,6 +6,11 @@
 > em [`historico/09-MIGRACAO-TAURI.md`](historico/09-MIGRACAO-TAURI.md) e
 > [`historico/10-MIGRACAO-GPUI.md`](historico/10-MIGRACAO-GPUI.md).
 >
+> 🔁 **Em 2026-09-16 a recusa do Tauri foi revertida para ganhar velocidade de entrega.** O Tauri
+> não substitui o GPUI: as duas interfaces vão existir sempre, uma validando a outra. O
+> `crates/ui-gpui/` fica em pausa e um dia vai ser concluído. O plano está em
+> `recordarfotos-e-commerce/docs/DESKTOP_TAURI.md`.
+>
 > **O stack de verdade, medido do `Cargo.toml` em 17/ago/2026:**
 >
 > | Camada | O que é |
