@@ -178,6 +178,24 @@ VintageLightbox-Rust/
 - **Cross-Platform**: Funciona nativamente em macOS, Windows e Linux
 - **Atualiza sozinho**: fora das lojas, com pacote assinado e conferido antes de instalar
 
+## 🖥️ VintageLightbox (Tauri) — um arquivo instala tudo
+
+A janela do balcão que abre o pós-venda da RecordarFotos, com RAW, cartão da câmera, pasta de saída
+fixa e tela do cliente no segundo monitor. **Cada máquina compila o próprio app**, com um arquivo só,
+que instala sozinho tudo o que falta:
+
+- **Windows**: baixe **[instalar-vintagelightbox.cmd](https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox.cmd)**
+  e dê **dois cliques** nele.
+- **Linux e macOS**: no Terminal, cole
+
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox.cmd | sh
+  ```
+
+A primeira vez leva de 10 a 30 minutos. Para atualizar, repita o mesmo passo. O passo a passo com
+as telas do Windows, as opções e o que fazer quando algo dá errado estão em
+**[docs/INSTALAR-TAURI.md](docs/INSTALAR-TAURI.md)**.
+
 ## ⬇️ Baixar
 
 **https://alexkads.github.io/VintageLightbox/** — macOS (Intel e Apple Silicon), Windows e Linux.
