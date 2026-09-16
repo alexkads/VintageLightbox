@@ -33,6 +33,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             comandos::escolher_raw,
             comandos::ler_raw,
+            comandos::converter_raw,
             comandos::pasta_de_saida,
             comandos::escolher_pasta,
             comandos::esquecer_pasta,
@@ -75,6 +76,10 @@ fn abrir_principal(app: &App) -> tauri::Result<()> {
     .inner_size(1440.0, 900.0)
     .maximized(true)
     .on_navigation(decidir)
+    // 🚨 **O arrastar e soltar é da página.** Com o tratador do Tauri ligado (o
+    // padrão), o webview não entrega o `drop` ao HTML, e soltar fotos na
+    // galeria deixaria de funcionar.
+    .disable_drag_drop_handler()
     .on_new_window(|url, _recursos| {
         // A tela do cliente não passa por aqui: no desktop ela nasce em
         // `abrir_tela_do_cliente`. O que sobra é pop-up da própria página.

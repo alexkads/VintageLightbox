@@ -8,7 +8,7 @@ use tauri::ipc::{InvokeBody, Request, Response};
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 
-use infrastructure::raw_processing::{is_raw_file, load_raw_as_dynamic_image};
+use infrastructure::raw_processing::{is_raw_file, load_raw_as_dynamic_image, load_raw_from_bytes};
 
 use crate::erro::ErroDaPonte;
 use crate::pasta_de_saida::{Pasta, PastaDeSaida};
@@ -120,16 +120,7 @@ pub async fn gravar_na_pasta(
     let InvokeBody::Raw(bytes) = request.body() else {
         return Err(ErroDaPonte::PedidoIncompleto);
     };
-    let nome = request
-        .headers()
-        .get("x-nome")
-        .and_then(|valor| valor.to_str().ok())
-        .and_then(|valor| {
-            percent_encoding::percent_decode_str(valor)
-                .decode_utf8()
-                .ok()
-        })
-        .ok_or(ErroDaPonte::PedidoIncompleto)?;
+    let nome = nome_do_cabecalho(&request)?;
     pasta.gravar(&nome, bytes)
 }
 
@@ -144,6 +135,60 @@ pub async fn abrir_tela_do_cliente(app: AppHandle) -> Result<(), ErroDaPonte> {
 #[tauri::command]
 pub fn fechar_tela_do_cliente(app: AppHandle) {
     tela_do_cliente::fechar(&app);
+}
+
+/// A qualidade do JPEG que sai do RAW.
+///
+/// Ele não é o bruto: é o arquivo que entra na fila de importação no lugar do
+/// RAW, e a compressão das parametrizações (C1) o recodifica ao classificar. Alta
+/// para que essa segunda geração não some perda visível à primeira.
+pub const QUALIDADE_DO_RAW_REVELADO: u8 = 95;
+
+/// Revela um RAW que a página entregou em bytes e devolve um JPEG em tamanho
+/// cheio, sem efeito nenhum.
+///
+/// 🔑 **O RAW não é o bruto** (CONTRATO_DA_FOTO, glossário e C1): o bruto é a
+/// foto já nas parametrizações, e o backend, o editor e o download do cliente só
+/// abrem JPEG, PNG e WebP. Este JPEG entra na fila como um arquivo comum, e daí
+/// em diante o caminho é o mesmo de qualquer foto.
+///
+/// Os bytes chegam crus, e o nome vem em `x-nome`, só para conferir a extensão.
+/// Nenhum caminho do disco é aberto.
+#[tauri::command]
+pub async fn converter_raw(request: Request<'_>) -> Result<Response, ErroDaPonte> {
+    let InvokeBody::Raw(bytes) = request.body() else {
+        return Err(ErroDaPonte::PedidoIncompleto);
+    };
+    let nome = nome_do_cabecalho(&request)?;
+    if !is_raw_file(&nome) {
+        return Err(ErroDaPonte::NaoERaw);
+    }
+    let bytes = bytes.clone();
+    let jpeg = tauri::async_runtime::spawn_blocking(move || revelar_raw(&bytes))
+        .await
+        .map_err(|_| ErroDaPonte::Interrompida)??;
+    Ok(Response::new(jpeg))
+}
+
+/// O RAW em JPEG, sem nada de Tauri em volta.
+pub fn revelar_raw(bytes: &[u8]) -> Result<Vec<u8>, ErroDaPonte> {
+    let imagem = load_raw_from_bytes(bytes).map_err(ErroDaPonte::Decodificacao)?;
+    foto_codec::codificar(&imagem, QUALIDADE_DO_RAW_REVELADO)
+        .map_err(|e| ErroDaPonte::Decodificacao(e.to_string()))
+}
+
+fn nome_do_cabecalho(request: &Request<'_>) -> Result<String, ErroDaPonte> {
+    request
+        .headers()
+        .get("x-nome")
+        .and_then(|valor| valor.to_str().ok())
+        .and_then(|valor| {
+            percent_encoding::percent_decode_str(valor)
+                .decode_utf8()
+                .ok()
+                .map(|nome| nome.into_owned())
+        })
+        .ok_or(ErroDaPonte::PedidoIncompleto)
 }
 
 /// A decodificação, sem nada de Tauri em volta.
@@ -182,6 +227,38 @@ mod testes {
         let jpeg = pasta.path().join("foto.jpg");
         std::fs::write(&jpeg, b"x").unwrap();
         assert_eq!(decodificar(&jpeg), Err(ErroDaPonte::NaoERaw));
+    }
+
+    #[test]
+    fn bytes_que_nao_sao_raw_viram_erro() {
+        assert!(matches!(
+            revelar_raw(b"nao sou um raw"),
+            Err(ErroDaPonte::Decodificacao(_))
+        ));
+    }
+
+    /// Um RAW de verdade vira um JPEG que o navegador abre. Precisa das
+    /// amostras em `~/Documents/RAWSample` (ou `VLB_RAW`).
+    #[test]
+    #[ignore]
+    fn um_raw_de_verdade_vira_jpeg() {
+        let caminho = std::env::var("VLB_RAW").unwrap_or_else(|_| {
+            format!(
+                "{}/Documents/RAWSample/nikon_d7200_09.nef",
+                std::env::var("HOME").unwrap()
+            )
+        });
+        let jpeg = revelar_raw(&std::fs::read(&caminho).unwrap()).unwrap();
+        assert_eq!(&jpeg[..2], &[0xFF, 0xD8]);
+        let imagem = foto_codec::decodificar(&jpeg).unwrap();
+        assert!(imagem.width() > 1000, "{}", imagem.width());
+        eprintln!(
+            "{}: {}×{}, {:.1} MB de JPEG",
+            caminho,
+            imagem.width(),
+            imagem.height(),
+            jpeg.len() as f64 / 1e6
+        );
     }
 
     #[test]

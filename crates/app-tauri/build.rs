@@ -5,6 +5,7 @@ fn main() {
     let comandos = tauri_build::AppManifest::new().commands(&[
         "escolher_raw",
         "ler_raw",
+        "converter_raw",
         "pasta_de_saida",
         "escolher_pasta",
         "esquecer_pasta",

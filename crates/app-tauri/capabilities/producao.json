@@ -2,13 +2,18 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "producao",
   "description": "A ponte, só para o site de produção (DESKTOP_TAURI §6, regra 1).",
-  "windows": ["principal"],
+  "windows": [
+    "principal"
+  ],
   "remote": {
-    "urls": ["https://recordarfotos.com.br/*"]
+    "urls": [
+      "https://recordarfotos.com.br/*"
+    ]
   },
   "permissions": [
     "allow-escolher-raw",
     "allow-ler-raw",
+    "allow-converter-raw",
     "allow-pasta-de-saida",
     "allow-escolher-pasta",
     "allow-esquecer-pasta",

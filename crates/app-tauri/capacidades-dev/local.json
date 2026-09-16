@@ -14,6 +14,7 @@
   "permissions": [
     "allow-escolher-raw",
     "allow-ler-raw",
+    "allow-converter-raw",
     "allow-pasta-de-saida",
     "allow-escolher-pasta",
     "allow-esquecer-pasta",
