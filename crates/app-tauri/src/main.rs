@@ -38,7 +38,6 @@ fn main() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .manage(RaizesPermitidas::default())
-        .manage(ContaDoApp::nova())
         // A tela empacotada e as rotas internas dela (`protocolo.rs`).
         .register_asynchronous_uri_scheme_protocol(
             protocolo::ESQUEMA,
@@ -88,6 +87,7 @@ fn main() {
                 .ok()
                 .map(|pasta| pasta.join("pasta-de-saida.txt"));
             app.manage(PastaDeSaida::carregar(registro));
+            app.manage(ContaDoApp::nova(app.path().app_data_dir().ok()));
             if DESENVOLVIMENTO {
                 if let Ok(pasta) = std::env::var("VLB_PASTA_DE_TESTE") {
                     let escolhida = app

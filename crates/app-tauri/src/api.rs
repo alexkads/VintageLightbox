@@ -13,6 +13,7 @@ use std::sync::Arc;
 use domain::services::pos_venda::{CofreDeSessao, PosVendaApi, Sessao};
 use domain::DomainError;
 use infrastructure::{CofreDoSistema, CorpoCru, PosVendaApiHttp};
+use serde::Deserialize;
 use serde::Serialize;
 use tauri::State;
 
@@ -25,7 +26,7 @@ const API: &str = "https://api.recordarfotos.com.br";
 
 pub struct ContaDoApp {
     pub(crate) api: PosVendaApiHttp,
-    cofre: Arc<CofreDoSistema>,
+    cofre: Arc<dyn CofreDeSessao>,
     /// A sessão lida do chaveiro, guardada depois da primeira leitura.
     ///
     /// 🚨 **Ler o chaveiro pode demorar o quanto o operador quiser.** Na
@@ -39,8 +40,13 @@ pub struct ContaDoApp {
     sessao: tokio::sync::Mutex<Option<Sessao>>,
 }
 
+/// O item do app Tauri no chaveiro, separado do app GPUI.
+const SERVICO_NO_CHAVEIRO: &str = "br.com.recordarfotos.vintagelightbox.tauri";
+
 impl ContaDoApp {
-    pub fn nova() -> Self {
+    /// `pasta` é a pasta de dados do app, onde o build de depuração guarda a
+    /// sessão (ver [`CofreEmArquivo`]).
+    pub fn nova(pasta: Option<std::path::PathBuf>) -> Self {
         // `VLB_POS_VENDA_URL` e `VLB_SITE_URL` só valem em depuração, como no
         // resto do app: o binário do balcão fala com produção, sempre.
         let (api, site) = if DESENVOLVIMENTO {
@@ -51,7 +57,14 @@ impl ContaDoApp {
         } else {
             (API.to_string(), SITE.to_string())
         };
-        let cofre = Arc::new(CofreDoSistema::novo());
+        // 🔧 Em depuração, cada recompilação é outro binário para o macOS, que
+        // pergunta de novo pelo chaveiro. A sessão fica num arquivo do app.
+        let cofre: Arc<dyn CofreDeSessao> = match pasta {
+            Some(pasta) if DESENVOLVIMENTO => {
+                Arc::new(CofreEmArquivo(pasta.join("sessao-dev.json")))
+            }
+            _ => Arc::new(CofreDoSistema::com_servico(SERVICO_NO_CHAVEIRO)),
+        };
         ContaDoApp {
             api: PosVendaApiHttp::nova(api)
                 .com_site(site)
@@ -65,12 +78,75 @@ impl ContaDoApp {
         let mut guardada = self.sessao.lock().await;
         if guardada.is_none() {
             let cofre = self.cofre.clone();
+            let inicio = std::time::Instant::now();
             *guardada = tauri::async_runtime::spawn_blocking(move || cofre.ler())
                 .await
                 .ok()
                 .flatten();
+            if DESENVOLVIMENTO {
+                eprintln!("[tempo] chaveiro: {:?}", inicio.elapsed());
+            }
         }
         guardada.clone()
+    }
+}
+
+/// A sessão num arquivo, só em build de depuração.
+///
+/// 🔒 O arquivo nasce com permissão só do usuário. Ele existe para o
+/// desenvolvimento não parar a cada recompilação; o binário do balcão usa o
+/// chaveiro do sistema.
+struct CofreEmArquivo(std::path::PathBuf);
+
+#[derive(Serialize, Deserialize)]
+struct SessaoEmArquivo {
+    access_token: String,
+    refresh_token: String,
+    access_vence_em: i64,
+    refresh_vence_em: i64,
+}
+
+impl CofreDeSessao for CofreEmArquivo {
+    fn guardar(&self, sessao: &Sessao) {
+        let guardada = SessaoEmArquivo {
+            access_token: sessao.access_token.clone(),
+            refresh_token: sessao.refresh_token.clone(),
+            access_vence_em: sessao.access_vence_em,
+            refresh_vence_em: sessao.refresh_vence_em,
+        };
+        let Ok(texto) = serde_json::to_string(&guardada) else {
+            return;
+        };
+        if let Some(pai) = self.0.parent() {
+            let _ = std::fs::create_dir_all(pai);
+        }
+        let _ = std::fs::write(&self.0, texto);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o600));
+        }
+    }
+
+    fn ler(&self) -> Option<Sessao> {
+        let Ok(bytes) = std::fs::read(&self.0) else {
+            // Sem arquivo ainda: traz, uma vez, a sessão do app GPUI no chaveiro.
+            // O macOS pergunta essa vez, e o arquivo evita todas as seguintes.
+            let do_gpui = CofreDoSistema::novo().ler()?;
+            self.guardar(&do_gpui);
+            return Some(do_gpui);
+        };
+        let g: SessaoEmArquivo = serde_json::from_slice(&bytes).ok()?;
+        Some(Sessao {
+            access_token: g.access_token,
+            refresh_token: g.refresh_token,
+            access_vence_em: g.access_vence_em,
+            refresh_vence_em: g.refresh_vence_em,
+        })
+    }
+
+    fn esquecer(&self) {
+        let _ = std::fs::remove_file(&self.0);
     }
 }
 
@@ -121,6 +197,7 @@ pub async fn chamar_api(
     corpo: Option<String>,
 ) -> Result<RespostaDaApi, ErroDaPonte> {
     let sessao = conta.sessao().await.ok_or(ErroDaPonte::SemSessao)?;
+    let inicio = std::time::Instant::now();
     let resposta = conta
         .api
         .chamar(
@@ -134,9 +211,45 @@ pub async fn chamar_api(
         )
         .await
         .map_err(da_api)?;
+    if DESENVOLVIMENTO {
+        eprintln!(
+            "[tempo] {metodo} {caminho}: {:?} ({})",
+            inicio.elapsed(),
+            resposta.status
+        );
+    }
     Ok(RespostaDaApi {
         status: resposta.status,
         tipo: resposta.tipo,
         corpo: resposta.bytes.into(),
     })
+}
+
+#[cfg(test)]
+mod testes {
+    use super::*;
+
+    #[test]
+    fn o_cofre_de_arquivo_guarda_le_e_esquece() {
+        let pasta = tempfile::tempdir().unwrap();
+        let cofre = CofreEmArquivo(pasta.path().join("sub").join("sessao-dev.json"));
+        let sessao = Sessao {
+            access_token: "a".into(),
+            refresh_token: "r".into(),
+            access_vence_em: 10,
+            refresh_vence_em: 20,
+        };
+        cofre.guardar(&sessao);
+        let lida = cofre.ler().unwrap();
+        assert_eq!(lida.access_token, "a");
+        assert_eq!(lida.refresh_vence_em, 20);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let modo = std::fs::metadata(&cofre.0).unwrap().permissions().mode();
+            assert_eq!(modo & 0o777, 0o600);
+        }
+        cofre.esquecer();
+        assert!(!cofre.0.exists());
+    }
 }
