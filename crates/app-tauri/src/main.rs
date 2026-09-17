@@ -39,6 +39,8 @@ use raizes::RaizesPermitidas;
 fn main() {
     let diagnostico = std::env::args().any(|argumento| argumento == "--diagnostico");
 
+    #[cfg(target_os = "macos")]
+    menu::sem_itens_do_sistema();
     let construtor = tauri::Builder::default();
     #[cfg(target_os = "macos")]
     let construtor = construtor.menu(menu::do_app);

@@ -227,6 +227,9 @@ REPO="https://github.com/alexkads/VintageLightbox"
 CASA="${VLB_CASA:-$HOME/.vintagelightbox}"
 FONTE="$CASA/fonte-tauri"
 NOME="VintageLightbox (Tauri)"
+# O que a barra de menus e o Dock mostram. O arquivo continua com o nome acima,
+# porque o app GPUI já se chama VintageLightbox.app na mesma pasta.
+NOME_EXIBIDO="VintageLightbox"
 IDENTIFICADOR="br.com.recordarfotos.vintagelightbox.tauri"
 
 REF="dev"; DESTINO=""; SECO=0
@@ -412,7 +415,7 @@ if [ "$SISTEMA" = "Darwin" ]; then
 <plist version="1.0">
 <dict>
 	<key>CFBundleDisplayName</key>
-	<string>$NOME</string>
+	<string>$NOME_EXIBIDO</string>
 	<key>CFBundleExecutable</key>
 	<string>app-tauri</string>
 	<key>CFBundleIconFile</key>
@@ -422,7 +425,7 @@ if [ "$SISTEMA" = "Darwin" ]; then
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>$NOME</string>
+	<string>$NOME_EXIBIDO</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
