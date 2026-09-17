@@ -4,10 +4,14 @@
 #
 #     curl -fsSL https://alexkads.github.io/VintageLightbox/instalar.sh | sh
 #
-# ⚠️ **Este é o VintageLightbox antigo (GPUI).** O app do balcão é o
-#    VintageLightbox (Tauri), que tem o próprio instalador
-#    (`scripts/instalar-vintagelightbox.cmd`, docs/INSTALAR-TAURI.md) e não
-#    precisa do Xcode.
+# ⚠️ **Este é o VintageLightbox antigo (GPUI), só macOS, na versão publicada.**
+#    Desde 2026-09-17 cada app tem um instalador de arquivo único para os três
+#    sistemas, que compila a branch `dev`:
+#      - o app do balcão, VintageLightbox (Tauri), que não precisa do Xcode:
+#        `scripts/instalar-vintagelightbox-tauri.cmd` (docs/INSTALAR-TAURI.md);
+#      - este mesmo app GPUI, que também prepara o Xcode sozinho:
+#        `scripts/instalar-vintagelightbox-gpui.cmd` (docs/INSTALAR-GPUI.md).
+#    Este script continua publicado porque o endereço curto está em uso.
 #
 # 🔑 **Por que este caminho existe.** O `.dmg` pronto abre com um susto: o macOS
 #    diz que "não pôde verificar se o item está livre de malware" e oferece só
@@ -96,7 +100,10 @@ Exige o Xcode (grátis) com o componente Metal; o Rust ele instala se faltar.
 
 ⚠️ Este é o VintageLightbox antigo (GPUI). O app do balcão, VintageLightbox
 (Tauri), é outro, não precisa do Xcode e se instala com:
-  curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox.cmd | sh
+  curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox-tauri.cmd | sh
+
+Este mesmo app GPUI, compilado da branch dev e em qualquer sistema:
+  curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox-gpui.cmd | sh
 AJUDA
 }
 
@@ -166,7 +173,7 @@ if ! xcrun -f metal >/dev/null 2>&1; then
   #    comando e não precisa do Xcode (dono, 2026-09-16).
   printf "   ${N}Procurava o app do balcão, o VintageLightbox (Tauri)?${Z} Ele é outro, e não\n"
   echo "   precisa do Xcode nem do Metal:"
-  echo "      curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox.cmd | sh"
+  echo "      curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox-tauri.cmd | sh"
   exit 1
 fi
 ok "Xcode e Metal: $(xcode-select -p)"

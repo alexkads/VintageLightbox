@@ -72,8 +72,30 @@
 
   <p class="chamada">
     Importe do cartão, tria, revele e entregue — com o ensaio do cliente aberto ao lado.
-    Há dois apps com este nome: <a href="#tauri">o app do balcão</a>, que é o de uso diário, e
-    <a href="#gpui">o editor antigo</a>.
+    Há <strong>dois apps</strong> com este nome, os dois mantidos e com o mesmo desenho:
+    <a href="#tauri">VintageLightbox (Tauri)</a>, o app do balcão, e
+    <a href="#gpui">VintageLightbox (Zed GPUI)</a>, o editor nativo. Cada um tem o próprio instalador.
+  </p>
+
+  <h2 id="escolher">Qual instalar?</h2>
+  <div class="rolar">
+  <table>
+    <thead><tr><th></th><th><a href="#tauri">VintageLightbox (Tauri)</a></th><th><a href="#gpui">VintageLightbox (Zed GPUI)</a></th></tr></thead>
+    <tbody>
+      <tr><td>Para quem</td><td><strong>O balcão, no dia a dia.</strong> Na dúvida, é este.</td><td>Quem quer o editor nativo, com o motor de revelação na GPU</td></tr>
+      <tr><td>As telas</td><td>As do painel da RecordarFotos, empacotadas dentro do app</td><td>Desenhadas em Rust (GPUI), com a mesma cara do app Tauri</td></tr>
+      <tr><td>Só dele</td><td>Bandeja com envio em segundo plano, catálogo próprio, assistente de nova sessão</td><td>Catálogo local do editor antigo e o motor de revelação nativo</td></tr>
+      <tr><td>Instalador</td><td><code>instalar-vintagelightbox-tauri.cmd</code></td><td><code>instalar-vintagelightbox-gpui.cmd</code></td></tr>
+      <tr><td>No macOS precisa de</td><td>Só as Command Line Tools</td><td>O <strong>Xcode inteiro</strong> (o compilador Metal)</td></tr>
+      <tr><td>Primeira compilação</td><td>10 a 30 minutos</td><td>15 a 40 minutos</td></tr>
+      <tr><td>Nome instalado</td><td>VintageLightbox (Tauri)</td><td>VintageLightbox (Zed GPUI)</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p class="texto">
+    Os dois convivem na mesma máquina: nomes, pastas, caches e catálogos são separados. Os dois
+    instaladores funcionam do mesmo jeito — <strong>um arquivo só</strong> para Windows, macOS e
+    Linux, que compila o app no próprio computador e instala sozinho o que faltar.
   </p>
 
   <h2 id="tauri">Instalar o app do balcão: VintageLightbox (Tauri)</h2>
@@ -83,8 +105,7 @@
     <strong>RAW</strong>, <strong>cartão da câmera</strong>, <strong>pasta fixa de exportação</strong>,
     <strong>tela do cliente</strong> no segundo monitor e envio que continua <strong>na bandeja</strong>.
     Não há instalador pronto: cada computador compila o próprio app, com um arquivo só, que instala
-    sozinho o que faltar. <strong>Não precisa do Xcode.</strong> Ele convive com o editor antigo, mais
-    abaixo, sem substituí-lo.
+    sozinho o que faltar. <strong>Não precisa do Xcode.</strong>
   </p>
 
   <nav class="indice" aria-label="Nesta seção">
@@ -106,7 +127,7 @@
   <div class="fonte" id="windows">
     <h3>Windows 10 e 11</h3>
     <ol>
-      <li>Baixe <a href="https://github.com/alexkads/VintageLightbox/releases/download/instalador-tauri/instalar-vintagelightbox.cmd">instalar-vintagelightbox.cmd</a>.
+      <li>Baixe <a href="https://github.com/alexkads/VintageLightbox/releases/download/instalador-tauri/instalar-vintagelightbox-tauri.cmd">instalar-vintagelightbox-tauri.cmd</a>.
           Se o navegador disser que o arquivo pode ser perigoso, escolha <strong>Manter</strong>.</li>
       <li>Na pasta <strong>Downloads</strong>, dê <strong>dois cliques</strong> no arquivo.</li>
       <li>Se aparecer <em>“O Windows protegeu o computador”</em>, clique em <strong>Mais informações</strong>
@@ -128,7 +149,7 @@
       <li>Abra o <strong>Terminal</strong>: aperte <kbd>⌘</kbd> <kbd>Espaço</kbd>, digite
           <code>Terminal</code> e aperte <kbd>Enter</kbd>.</li>
       <li>Cole esta linha e aperte <kbd>Enter</kbd>:
-        <pre class="quebra"><code>curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox.cmd | sh</code></pre></li>
+        <pre class="quebra"><code>curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox-tauri.cmd | sh</code></pre></li>
       <li>Se ele disser que <strong>faltam as Command Line Tools</strong>, rode
           <code>xcode-select --install</code>, clique em <strong>Instalar</strong> na janela que abrir,
           espere terminar e cole a linha do passo 2 de novo.</li>
@@ -138,7 +159,7 @@
           segurança.</li>
     </ol>
     <p>Precisa só das <strong>Command Line Tools</strong>; o Rust o instalador põe sozinho, na sua pasta
-       pessoal e sem senha. ⚠️ Não use o <code>instalar.sh</code> do editor antigo: aquele pede o Xcode
+       pessoal e sem senha. ⚠️ Não use o instalador do <a href="#gpui">GPUI</a> por engano: aquele pede o Xcode
        inteiro e é outro app.</p>
   </div>
 
@@ -147,7 +168,7 @@
     <ol>
       <li>Abra o <strong>Terminal</strong>.</li>
       <li>Cole esta linha e aperte <kbd>Enter</kbd>:
-        <pre class="quebra"><code>curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox.cmd | sh</code></pre></li>
+        <pre class="quebra"><code>curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox-tauri.cmd | sh</code></pre></li>
       <li>Quando pedir, digite <strong>a sua senha</strong> (ela não aparece enquanto você digita). Ela
           serve para instalar as bibliotecas do sistema.</li>
       <li>Espere aparecer <strong>“instalado”</strong>.</li>
@@ -200,10 +221,10 @@
     <code>| sh</code> final. <strong>No Windows</strong>, as opções só valem se o arquivo for rodado
     <strong>da mesma janela</strong> em que foram definidas (dois cliques não as enxergam): abra o
     <strong>Prompt de Comando</strong>, digite o <code>set</code> e depois
-    <code>"%USERPROFILE%\Downloads\instalar-vintagelightbox.cmd"</code>.
+    <code>"%USERPROFILE%\Downloads\instalar-vintagelightbox-tauri.cmd"</code>.
   </p>
   <p class="texto">Para ler o instalador antes de rodar:</p>
-  <pre class="quebra"><code>curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox.cmd -o instalar.cmd
+  <pre class="quebra"><code>curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox-tauri.cmd -o instalar.cmd
 less instalar.cmd
 sh instalar.cmd</code></pre>
 
@@ -239,7 +260,7 @@ sh instalar.cmd</code></pre>
   <table>
     <thead><tr><th>O que aparece</th><th>O que fazer</th></tr></thead>
     <tbody>
-      <tr><td><code>falta o compilador Metal</code> (macOS)</td><td>Esse é o instalador do <strong>editor antigo</strong>. Use a linha do <a href="#macos">macOS</a> acima.</td></tr>
+      <tr><td><code>falta o compilador Metal</code> (macOS)</td><td>Esse é o instalador do <strong>GPUI</strong>. Para o app do balcão, use a linha do <a href="#macos">macOS</a> acima.</td></tr>
       <tr><td><code>faltam as Command Line Tools do Xcode</code> (macOS)</td><td>Rode <code>xcode-select --install</code>, espere terminar e repita a instalação.</td></tr>
       <tr><td><code>command not found: curl</code> (Linux)</td><td>Instale o curl (<code>sudo apt install curl</code>, ou o equivalente) e repita.</td></tr>
       <tr><td><code>não reconheci o gerenciador de pacotes</code> (Linux)</td><td>Instale à mão os pacotes que a mensagem lista e repita.</td></tr>
@@ -280,25 +301,202 @@ sh instalar.cmd</code></pre>
     <a href="https://github.com/alexkads/VintageLightbox/blob/dev/docs/INSTALAR-TAURI.md">INSTALAR-TAURI.md</a>.
   </p>
 
-  <h2 id="gpui">O editor antigo: VintageLightbox (GPUI)</h2>
+  <h2 id="gpui">Instalar o editor nativo: VintageLightbox (Zed GPUI)</h2>
+
+  <p class="texto">
+    É o editor escrito inteiro em Rust, com a interface desenhada pelo <strong>GPUI</strong> e o motor de
+    revelação na GPU. Desde 17/09/2026 ele <strong>segue o desenho do app Tauri</strong>: as mesmas
+    cores, a mesma moldura e as mesmas telas. Os dois apps continuam independentes, e um serve para
+    conferir o outro.
+  </p>
+
+  <nav class="indice" aria-label="Nesta seção">
+    <strong>Qual é o seu computador?</strong>
+    <a href="#gpui-windows">Windows</a> · <a href="#gpui-macos">macOS</a> · <a href="#gpui-linux">Linux</a>
+    <br>
+    <strong>Depois:</strong>
+    <a href="#gpui-telas">As telas</a> · <a href="#gpui-atalhos">Atalhos</a> ·
+    <a href="#gpui-onde">Onde as coisas ficam</a> · <a href="#gpui-problemas">Quando algo dá errado</a> ·
+    <a href="#pacotes">Pacotes prontos (versão antiga)</a>
+  </nav>
+
+  <p class="texto">
+    <strong>Antes de começar:</strong> internet ligada, alguns GiB livres no disco e
+    <strong>15 a 40 minutos</strong> na primeira vez. Atualizar é repetir o mesmo passo, e as opções
+    (<code>--seco</code>, <code>--versao</code>, <code>--destino</code>, e no Windows
+    <code>VLB_SECO</code>, <code>VLB_VERSAO</code>, <code>VLB_DESTINO</code>) são as mesmas do
+    <a href="#opcoes">app do balcão</a>.
+  </p>
+
+  <div class="fonte" id="gpui-windows">
+    <h3>Windows 10 e 11</h3>
+    <ol>
+      <li>Baixe <a href="https://github.com/alexkads/VintageLightbox/releases/download/instalador-tauri/instalar-vintagelightbox-gpui.cmd">instalar-vintagelightbox-gpui.cmd</a>.
+          Se o navegador disser que o arquivo pode ser perigoso, escolha <strong>Manter</strong>.</li>
+      <li>Na pasta <strong>Downloads</strong>, dê <strong>dois cliques</strong> no arquivo. Os avisos do
+          Windows são os mesmos do <a href="#windows">app do balcão</a>.</li>
+      <li>Espere a janela preta terminar. No fim, aperte qualquer tecla.</li>
+      <li>Abra pelo <strong>Menu Iniciar</strong>: <strong>VintageLightbox (Zed GPUI)</strong>.</li>
+    </ol>
+    <p>Além do Rust <code>-gnu</code> e do <strong>MSYS2</strong> (compilador, libclang e o
+       <code>windres</code>), este instalador põe pelo <strong>winget</strong> o
+       <strong>Windows SDK</strong>, de onde vem o <code>fxc.exe</code> que compila os shaders.</p>
+  </div>
+
+  <div class="fonte" id="gpui-macos">
+    <h3>macOS</h3>
+    <ol>
+      <li>Instale o <a href="https://apps.apple.com/app/xcode/id497799835">Xcode</a> pela App Store
+          (grátis) e abra-o uma vez.</li>
+      <li>No <strong>Terminal</strong>, cole esta linha e aperte <kbd>Enter</kbd>:
+        <pre class="quebra"><code>curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox-gpui.cmd | sh</code></pre></li>
+      <li>Quando pedir, digite a senha do Mac: ela aponta as ferramentas para o Xcode, aceita a
+          licença e baixa o componente <strong>Metal</strong>, sozinho.</li>
+      <li>Espere aparecer <strong>“instalado em /Applications”</strong> e abra
+          <strong>VintageLightbox</strong> pelo Launchpad. Ele abre no primeiro clique, sem aviso de
+          segurança.</li>
+    </ol>
+    <p>Ele instala o <code>VintageLightbox (Zed GPUI).app</code>, com o identificador dos pacotes
+       prontos: as permissões já concedidas continuam valendo. Um <code>VintageLightbox.app</code>
+       antigo não é apagado.</p>
+  </div>
+
+  <div class="fonte" id="gpui-linux">
+    <h3>Linux</h3>
+    <ol>
+      <li>No <strong>Terminal</strong>, cole esta linha e aperte <kbd>Enter</kbd>:
+        <pre class="quebra"><code>curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox-gpui.cmd | sh</code></pre></li>
+      <li>Quando pedir, digite <strong>a sua senha</strong>.</li>
+      <li>Abra pelo menu de aplicativos: <strong>VintageLightbox (Zed GPUI)</strong>.</li>
+    </ol>
+    <p>Com <strong>apt</strong>, <strong>dnf</strong> ou <strong>pacman</strong>, o instalador põe o
+       compilador, a libclang e as bibliotecas que o GPUI abre: X11, Wayland, xkbcommon, fontconfig,
+       ALSA, OpenSSL, D-Bus, libsecret e o <strong>Vulkan</strong> (com o driver Mesa). Sem um driver
+       Vulkan a janela não abre, mesmo com tudo compilado.</p>
+  </div>
+
+  <h3 id="gpui-telas">As telas</h3>
+  <ul class="texto">
+    <li><strong>Entrada:</strong> a capa do estúdio, com o botão para entrar pela conta RecordarFotos no
+        navegador.</li>
+    <li><strong>Moldura:</strong> menu lateral recolhível (<kbd>⌘</kbd> <kbd>B</kbd>, ou
+        <kbd>Ctrl</kbd> <kbd>B</kbd>) com <strong>Sessões fotográficas</strong> e <strong>Caixa</strong>,
+        cabeçalho no topo e, embaixo, o menu da conta, com o tema <strong>Claro</strong>,
+        <strong>Escuro</strong> ou <strong>Sistema</strong> e o <strong>Sair</strong>.</li>
+    <li><strong>Sessões fotográficas:</strong> os cartões de totais, os recortes e a lista em tabela. No
+        cabeçalho, <strong>Espaço</strong> (o cache) e <strong>Retenção</strong> (a tela de configurações
+        do site).</li>
+    <li><strong>Galeria:</strong> importar fotos, recortes, zoom, <strong>Revelar</strong> e
+        <strong>Tela do cliente</strong>. Com fotos marcadas, aparecem <strong>Negociação…</strong> e
+        <strong>Imprimir…</strong>. No canto, a fila de envios e os recusados.</li>
+    <li><strong>Caixa:</strong> o PDV do balcão, o mesmo do painel, com as teclas F (abaixo).</li>
+    <li><strong>Tela do cliente:</strong> abre em janela própria e ocupa o outro monitor. Acompanha a foto
+        em foco na galeria e a aberta na revelação, com transição entre as fotos, e mostra a foto
+        revelada, sem marca d'água.</li>
+    <li><strong>Revelação:</strong> zoom no palco com o navegador ao lado, antes e depois, recorte com
+        endireitar, desfazer e refazer, copiar e colar ajustes. A barra de cima e as cores seguem o site;
+        os painéis de ajuste ainda são os do GPUI.</li>
+  </ul>
+  <p class="texto">
+    Ainda <strong>só no app do balcão</strong>: o assistente de nova sessão em sete passos (no GPUI é o
+    formulário na lista), a bandeja do sistema e o catálogo próprio.
+  </p>
+
+  <h3 id="gpui-atalhos">Atalhos</h3>
+  <p class="texto">No Windows e no Linux, onde está <kbd>⌘</kbd> use <kbd>Ctrl</kbd>. As teclas soltas
+     não valem enquanto se digita num campo.</p>
+  <div class="rolar">
+  <table>
+    <thead><tr><th>Onde</th><th>Tecla</th><th>O que faz</th></tr></thead>
+    <tbody>
+      <tr><td>Em todo o app</td><td><kbd>⌘</kbd> <kbd>B</kbd></td><td>Recolhe ou abre o menu lateral</td></tr>
+      <tr><td></td><td><kbd>⌘</kbd> <kbd>Z</kbd> · <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>Z</kbd></td><td>Desfazer · refazer</td></tr>
+      <tr><td></td><td><kbd>⌘</kbd> <kbd>A</kbd> · <kbd>⌘</kbd> <kbd>D</kbd></td><td>Marcar todas · desmarcar</td></tr>
+      <tr><td></td><td><kbd>Esc</kbd></td><td>Sai da revelação ou da impressão e volta</td></tr>
+      <tr><td>Galeria e revelação</td><td><kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd></td><td>Anda pelas fotos</td></tr>
+      <tr><td></td><td><kbd>0</kbd>–<kbd>5</kbd></td><td>Nota (0 tira)</td></tr>
+      <tr><td></td><td><kbd>6</kbd> <kbd>7</kbd> <kbd>8</kbd> <kbd>9</kbd></td><td>Cor: vermelha, amarela, verde, azul</td></tr>
+      <tr><td></td><td><kbd>P</kbd> · <kbd>X</kbd> · <kbd>U</kbd></td><td>Escolhida · rejeitada · sem sinalizador</td></tr>
+      <tr><td></td><td><kbd>B</kbd></td><td>Marca ou desmarca como levada no balcão</td></tr>
+      <tr><td></td><td><kbd>Delete</kbd> ou <kbd>⌫</kbd></td><td>Apaga as fotos marcadas</td></tr>
+      <tr><td>Revelação</td><td><kbd>R</kbd></td><td>Recorte e endireitar</td></tr>
+      <tr><td></td><td><kbd>\</kbd></td><td>Antes e depois</td></tr>
+      <tr><td></td><td><kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>C</kbd> · <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>V</kbd></td><td>Copiar · colar a revelação</td></tr>
+      <tr><td>Tela do cliente</td><td><kbd>Esc</kbd> · <kbd>I</kbd></td><td>Fecha · mostra ou esconde as informações</td></tr>
+      <tr><td>Importação</td><td><kbd>Espaço</kbd> · <kbd>↑</kbd> <kbd>↓</kbd> · <kbd>Enter</kbd></td><td>Marca a foto · anda · confirma</td></tr>
+      <tr><td>Caixa</td><td><kbd>F1</kbd> · <kbd>F2</kbd> · <kbd>F3</kbd></td><td>Atalhos · desconto · pessoas</td></tr>
+      <tr><td></td><td><kbd>F4</kbd></td><td>Finalizar (no pagamento, conclui a venda)</td></tr>
+      <tr><td></td><td><kbd>F6</kbd> · <kbd>F7</kbd> · <kbd>F8</kbd></td><td>Sangria e suprimento · vendas · abrir ou fechar o caixa</td></tr>
+      <tr><td></td><td><kbd>1</kbd>–<kbd>8</kbd> · <kbd>⌫</kbd></td><td>No pagamento: escolhe a forma · tira o último lançado</td></tr>
+      <tr><td></td><td><kbd>%</kbd> · <kbd>R</kbd></td><td>No desconto: em percentual · em reais</td></tr>
+      <tr><td></td><td><kbd>S</kbd> · <kbd>U</kbd></td><td>No movimento: sangria · suprimento</td></tr>
+      <tr><td>macOS</td><td><kbd>⌘</kbd> <kbd>H</kbd> · <kbd>⌥</kbd> <kbd>⌘</kbd> <kbd>H</kbd> · <kbd>⌘</kbd> <kbd>Q</kbd></td><td>Ocultar · ocultar os outros · sair</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3 id="gpui-onde">Onde as coisas ficam</h3>
+  <div class="rolar">
+  <table>
+    <thead><tr><th></th><th>macOS</th><th>Linux</th><th>Windows</th></tr></thead>
+    <tbody>
+      <tr><td>O app</td><td><code>/Applications/VintageLightbox (Zed GPUI).app</code></td><td><code>~/.local/bin/vintagelightbox-gpui</code></td><td><code>%LOCALAPPDATA%\Programs\VintageLightbox-GPUI</code></td></tr>
+      <tr><td>O catálogo</td><td colspan="3"><strong>Imagens › VintageLightbox › VintageLightbox Catalog</strong>, na sua pasta pessoal</td></tr>
+      <tr><td>Cache do compilador</td><td colspan="2"><code>~/.vintagelightbox/target-gpui</code></td><td><code>%USERPROFILE%\.vintagelightbox\target-gpui</code></td></tr>
+      <tr><td>Código baixado</td><td colspan="2"><code>~/.vintagelightbox/fonte-gpui</code></td><td><code>%USERPROFILE%\.vintagelightbox\fonte-gpui</code></td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p class="texto">
+    Para desinstalar: no macOS, <code>VintageLightbox</code> para o Lixo; no Windows, a pasta acima e o
+    atalho <strong>VintageLightbox (Zed GPUI)</strong>; no Linux,
+    <code>~/.local/bin/vintagelightbox-gpui</code>,
+    <code>~/.local/share/applications/vintagelightbox-gpui.desktop</code> e o ícone de mesmo nome.
+  </p>
+
+  <h3 id="gpui-problemas">Quando algo dá errado</h3>
+  <div class="rolar">
+  <table>
+    <thead><tr><th>O que aparece</th><th>O que fazer</th></tr></thead>
+    <tbody>
+      <tr><td><code>falta o Xcode</code> (macOS)</td><td>Instale o Xcode pela App Store, abra-o uma vez e repita. Se queria o app do balcão, use o <a href="#macos">instalador do Tauri</a>, que não precisa dele.</td></tr>
+      <tr><td><code>o compilador Metal continua faltando</code> (macOS)</td><td>Rode, um de cada vez: <code>sudo xcode-select -s /Applications/Xcode.app/Contents/Developer</code>, <code>sudo xcodebuild -license accept</code> e <code>xcodebuild -downloadComponent MetalToolchain</code>. Depois repita.</td></tr>
+      <tr><td><code>o fxc.exe continua faltando</code> (Windows)</td><td>Instale o <a href="https://developer.microsoft.com/windows/downloads/windows-sdk/">Windows SDK</a>, ou defina <code>GPUI_FXC_PATH</code> com o caminho do <code>fxc.exe</code>, e repita.</td></tr>
+      <tr><td><code>o windres do MinGW continua faltando</code> (Windows)</td><td>No terminal do MSYS2, rode <code>pacman -S mingw-w64-x86_64-binutils</code>. Depois repita.</td></tr>
+      <tr><td>A janela não abre (Linux)</td><td>Falta um driver Vulkan: instale <code>mesa-vulkan-drivers</code> (ou o da sua placa).</td></tr>
+      <tr><td>Rust, winget, MSYS2, libclang ou pacotes do Linux</td><td>As mesmas saídas do <a href="#problemas">app do balcão</a>.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3 id="endereco-antigo">O endereço antigo do instalador</h3>
+  <p class="texto">
+    Quem já tem <code>instalar-vintagelightbox.cmd</code>, ou copiou o comando com esse nome, continua
+    recebendo o <strong>app do balcão (Tauri)</strong>: o arquivo antigo agora só baixa o instalador certo
+    e o roda. Para ele instalar o GPUI, use <code>VLB_APP=gpui</code>
+    (<code>curl … | VLB_APP=gpui sh</code>, ou <code>set VLB_APP=gpui</code> no Prompt de Comando antes
+    de rodar o arquivo). Para instalação nova, use os dois arquivos acima.
+  </p>
+
+  <h2 id="pacotes">Pacotes prontos do GPUI (versão antiga)</h2>
 
   <p class="nota" style="margin-top:0">
-    ⚠️ <strong>Este não é o app do balcão.</strong> É o editor nativo, com motor de revelação na GPU
-    e catálogo local. Para o pós-venda, instale o <a href="#tauri">VintageLightbox (Tauri)</a>, acima.
+    ⚠️ Os pacotes abaixo são da <strong>última versão publicada</strong>, anterior ao desenho novo. Para
+    o GPUI atual, <a href="#gpui">compile pelo instalador</a>, acima.
   </p>
 
   <div id="baixar"></div>
   <div class="versao" id="versao">carregando…</div>
 
-  <h2>Todos os arquivos do editor antigo</h2>
+  <h3>Todos os arquivos</h3>
   <table><thead><tr><th>Sistema</th><th>Arquitetura</th><th>Tamanho</th><th></th></tr></thead>
     <tbody id="lista"><tr><td colspan="4" style="color:var(--suave)">carregando…</td></tr></tbody>
   </table>
 
   <div class="nota">
-    <strong>No macOS, a primeira abertura pede um passo a mais.</strong> O sistema vai dizer que
-    <em>“não pôde verificar se o item está livre de malware”</em> e oferecer só <em>Mover para o
-    Lixo</em>. Não é o app ter problema — é ele não ser assinado com um certificado pago da Apple.
+    <strong>No macOS, a primeira abertura do pacote pronto pede um passo a mais.</strong> O sistema vai
+    dizer que <em>“não pôde verificar se o item está livre de malware”</em> e oferecer só <em>Mover para
+    o Lixo</em>. Não é o app ter problema — é ele não ser assinado com um certificado pago da Apple.
     Para abrir:
     <ol style="margin:.6rem 0 0;padding-left:1.2rem">
       <li>Clique em <strong>OK</strong> no aviso — <em>não</em> em “Mover para o Lixo”.</li>
@@ -314,45 +512,17 @@ sh instalar.cmd</code></pre>
       partir do macOS 15.
     </p>
     <p style="margin:.6rem 0 0;font-size:.95em">
-      👉 Ou <a href="#compilar">compile na sua máquina</a> — aí o aviso não aparece nenhuma vez.
+      👉 Compilado na sua máquina, pelo <a href="#gpui-macos">instalador do GPUI</a>, o aviso não
+      aparece nenhuma vez: o macOS só interroga o que chegou pela rede.
     </p>
   </div>
 
-  <h2 id="compilar">Editor antigo sem aviso nenhum: compile na sua máquina</h2>
-
-  <p style="color:var(--suave);font-size:.9375rem;margin:0">
-    O macOS só interroga o que <strong>chegou pela rede</strong> — é a marca de quarentena que o
-    navegador põe no arquivo baixado. Um aplicativo que saiu do compilador do seu próprio Mac nunca
-    teve essa marca: ele abre no primeiro duplo-clique, e nada muda depois disso. O comando baixa o
-    código, compila e instala em <code>/Applications</code>:
+  <p class="texto" id="compilar">
+    O script antigo só para macOS, <code>curl -fsSL https://alexkads.github.io/VintageLightbox/instalar.sh | sh</code>,
+    continua no ar e instala o mesmo <code>VintageLightbox.app</code>, mas pede que o Xcode e o
+    componente Metal já estejam prontos. O <a href="#gpui-macos">instalador do GPUI</a> faz essa parte
+    sozinho.
   </p>
-
-  <pre><code>curl -fsSL https://alexkads.github.io/VintageLightbox/instalar.sh | sh</code></pre>
-
-  <div class="fonte">
-    <strong>O que ele pede, e o que custa</strong>
-    <ul>
-      <li><strong>Xcode</strong>, grátis na App Store, com o componente Metal
-          (<code>xcodebuild -downloadComponent MetalToolchain</code>) — o app compila os shaders
-          durante a build. Se faltar, o script diz exatamente isso antes de compilar qualquer coisa.</li>
-      <li><strong>Rust</strong>, que ele instala sozinho pelo <code>rustup</code>, dentro da sua
-          pasta pessoal e sem <code>sudo</code>.</li>
-      <li><strong>15 a 40 minutos</strong> na primeira vez, e ~10 GiB em
-          <code>~/.vintagelightbox</code> — que dá para apagar depois.</li>
-      <li>Só macOS, e só para o editor antigo. O app do balcão tem
-          <a href="#tauri">o próprio comando</a>, acima, que não pede o Xcode.</li>
-    </ul>
-    <p style="margin:.7rem 0 0;font-size:.875rem;color:var(--suave)">
-      Ler um script antes de executá-lo é sensato, e este não se ofende:
-      <code>curl -fsSL …/instalar.sh -o instalar.sh</code>, leia, depois <code>sh instalar.sh</code>.
-      Opções: <code>sh -s -- --versao dev</code> compila o topo do desenvolvimento,
-      <code>--seco</code> mostra o que faria sem fazer.
-    </p>
-    <p style="margin:.7rem 0 0;font-size:.875rem;color:var(--suave)">
-      Depois da primeira vez, <strong>não é preciso recompilar</strong>: o aplicativo se atualiza
-      sozinho, conferindo a assinatura de cada atualização.
-    </p>
-  </div>
 
   <footer>
     <p>
@@ -386,7 +556,7 @@ fetch("downloads.json", {cache: "no-cache"}).then(r => r.json()).then(d => {
   const escolhido = escolher(d.downloads, navigator.userAgent);
   if (escolhido) {
     document.getElementById("baixar").innerHTML =
-      `<a class="principal" href="${escolhido.url}" download>Baixar o editor antigo para ${escolhido.sistema}
+      `<a class="principal" href="${escolhido.url}" download>Baixar o pacote pronto para ${escolhido.sistema}
          <small>${escolhido.arquitetura} · ${mb(escolhido.bytes)}</small></a>`;
   }
   const data = d.publicado_em ? new Date(d.publicado_em).toLocaleDateString("pt-BR") : "";
