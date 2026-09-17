@@ -24,6 +24,9 @@ pub mod entrada;
 /// O app inteiro de ponta a ponta, com as portas de mentira. Só testes.
 #[cfg(test)]
 mod e2e;
+/// O estresse: volume, repetição e desordem, com números medidos. Só testes.
+#[cfg(test)]
+mod estresse;
 /// As peças do shadcn do site (botões, selos, cabeçalho de página).
 pub mod estilo;
 pub mod exportacao;

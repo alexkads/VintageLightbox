@@ -1511,26 +1511,29 @@ impl Aplicativo {
     /// já estava pendente, e o laço só desliga quando a conta zera: quem manda
     /// dez fotos espera dez respostas, e não uma.
     ///
-    /// ⏱️ O teto é de 30 s por resposta esperada. Um lote de dez fotos pode
-    /// levar minutos — cada uma baixa o original, revela na GPU e sobe — e um
-    /// teto fixo cortaria o lote pela metade, em silêncio.
+    /// 🚨 **Sem teto: o laço só para quando a conta zera.** Havia um — 30 s
+    /// por resposta esperada —, e ele prendia o contador: o `reqwest` da API
+    /// espera até 180 s **por pedido**, e salvar uma foto são três deles
+    /// (original, bilhete, JPEG). A resposta que chegava depois do teto ficava
+    /// no canal sem ninguém para lê-la, e com ela o botão parado em "Salvando
+    /// 0/1", o salvar recusando clique novo e o G9 segurando a janela escondida
+    /// para sempre (achado pelo estresse, 17/set/2026). Toda porta de verdade
+    /// responde cada pedido — com sucesso ou `Falhou` —, então esperar é
+    /// seguro, e custa uma pergunta a cada 100 ms.
     fn esperar_a_sincronia(&mut self, quantas: usize, cx: &mut Context<Self>) {
         self.sincronias_pendentes += quantas;
-        let voltas = 300 * self.sincronias_pendentes.max(1);
-        self._sincronia = Some(cx.spawn(async move |raiz, cx| {
-            for _ in 0..voltas {
-                cx.background_executor()
-                    .timer(std::time::Duration::from_millis(100))
-                    .await;
-                let Ok(acabou) = raiz.update(cx, |raiz, cx| {
-                    raiz.colher_sincronia(cx);
-                    raiz.sincronias_pendentes == 0
-                }) else {
-                    return;
-                };
-                if acabou {
-                    return;
-                }
+        self._sincronia = Some(cx.spawn(async move |raiz, cx| loop {
+            cx.background_executor()
+                .timer(std::time::Duration::from_millis(100))
+                .await;
+            let Ok(acabou) = raiz.update(cx, |raiz, cx| {
+                raiz.colher_sincronia(cx);
+                raiz.sincronias_pendentes == 0
+            }) else {
+                return;
+            };
+            if acabou {
+                return;
             }
         }));
     }
@@ -1652,6 +1655,13 @@ impl Aplicativo {
     #[cfg(test)]
     pub(crate) fn sincronias_pendentes(&self) -> usize {
         self.sincronias_pendentes
+    }
+
+    /// Por onde o site responde — para o estresse mandar recados que ninguém
+    /// pediu (um eco atrasado) e conferir que o contador não dá a volta.
+    #[cfg(test)]
+    pub(crate) fn canal_da_sincronia_para_teste(&self) -> Sender<PosVendaRecado> {
+        self.sincronias.0.clone()
     }
 
     /// Leva a foto selecionada na Biblioteca para a Revelação.

@@ -65,6 +65,9 @@ mod painel;
 mod para_e2e;
 /// A tira do rodapé: recortes, puxador, menu e miniaturas (ver `tira.rs`).
 mod tira;
+/// O estresse de dentro da tela: tira grande, sliders, Enquadrar e zoom.
+#[cfg(test)]
+mod estresse;
 
 use enquadrar::Edicao;
 
@@ -280,6 +283,23 @@ pub struct Revelacao {
     preset_inteiro: bool,
     /// O id do pedido que ainda não voltou. `None` é "a tela está em dia".
     aguardando: Option<u64>,
+    /// Resultado com id até este é **de outra foto**, e não entra no palco.
+    ///
+    /// 🚨 Mexer num slider e apertar a seta antes de a GPU responder deixava a
+    /// resposta da foto que saiu a caminho; o laço de colheita continuava de pé
+    /// e a punha no palco da foto nova — a imagem de uma foto sob o nome de
+    /// outra, e numa foto sem ajuste ninguém pedia outra revelação para
+    /// corrigir (achado pelo estresse, 17/set/2026).
+    descartar_ate: u64,
+    /// O enquadramento mudou e a foto na tela ainda não foi refeita.
+    ///
+    /// 🚨 **O endireitar gira a foto na CPU**, e um evento do slider de ângulo
+    /// (ou um passo de 0,1° do transferidor) custava um giro inteiro da cópia
+    /// de trabalho: ~50 ms por evento em 2048 px, medido pelo estresse em
+    /// 17/set/2026. O ponteiro manda mais eventos que isso por segundo, e a
+    /// tela ficava atrás do dedo. Marcado aqui, o giro acontece **uma vez por
+    /// quadro**, no `render`, com o ângulo mais recente.
+    exibicao_atrasada: bool,
     /// Se já existe um laço de colheita rodando. Sem esta trava, cada arrasto
     /// abriria um laço novo e a tela acabaria com dezenas deles perguntando a
     /// mesma coisa.
@@ -500,6 +520,8 @@ impl Revelacao {
             previa: None,
             preset_inteiro: false,
             aguardando: None,
+            descartar_ate: 0,
+            exibicao_atrasada: false,
             colhendo: false,
             saindo: None,
             cruzar: false,
@@ -955,6 +977,9 @@ impl Revelacao {
         self.esquecer_a_resolucao();
         self.receita_ao_abrir = Some(self.estado());
         self.aguardando = None;
+        // 🔑 O que a GPU ainda devolver é da foto que saiu. Tomar um id novo
+        // também faz a thread largar o pedido velho, se ele não começou.
+        self.descartar_ate = self.processador.proximo_id();
         // 🚨 **A reposição da foto anterior não vale para esta.** Herdar o
         // sinalizador faria a foto nova abrir dizendo "preparando" sem ninguém
         // ter pedido nada — e ficar assim para sempre, porque o `Reposto` que
@@ -1414,6 +1439,8 @@ impl Revelacao {
     }
 
     fn refazer_exibicao(&mut self, medir: bool) {
+        // Refeita agora, com o estado de agora: o pedido do quadro está atendido.
+        self.exibicao_atrasada = false;
         // No modo de corte a foto aparece inteira (girada e endireitada), com o
         // retângulo por cima; fora dele, recortada. É o `apply_crop_clip` do
         // legado.
@@ -1513,6 +1540,12 @@ impl Revelacao {
         self.historico.pode_refazer()
     }
 
+    /// O "Salvando k/N" do botão, para quem confere o lote de fora.
+    #[cfg(test)]
+    pub fn salvando_para_teste(&self) -> Option<(usize, usize)> {
+        self.salvando
+    }
+
     /// Move um controle sem passar pelo slider, para os testes da raiz.
     ///
     /// ⚠️ Ele **não** substitui o `arrastar` dos testes desta tela, que emite o
@@ -1608,7 +1641,12 @@ impl Revelacao {
     /// Pega o resultado mais recente, se houver. Devolve se vale continuar
     /// perguntando.
     fn colher(&mut self, cx: &mut Context<Self>) -> bool {
-        if let Some(resultado) = self.processador.colher() {
+        let descartar_ate = self.descartar_ate;
+        if let Some(resultado) = self
+            .processador
+            .colher()
+            .filter(|resultado| resultado.id > descartar_ate)
+        {
             if let Some(aberta) = self.aberta.as_mut() {
                 aberta.revelada = Some(resultado.imagem);
             }
@@ -1891,6 +1929,9 @@ impl Render for Revelacao {
     /// ```
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.navegacao.dpr = window.scale_factor();
+        if self.exibicao_atrasada {
+            self.atualizar_exibicao();
+        }
         self.acompanhar_a_resolucao(cx);
         let cabecalho = self.cabecalho(cx);
         let presets = self

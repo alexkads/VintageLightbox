@@ -275,7 +275,9 @@ impl Revelacao {
         let novo = corte::endireitar(&atual, graus, espaco, Some(alvo));
         self.corte = corte_de(&novo);
         self.pendente = true;
-        self.atualizar_exibicao();
+        // 🔑 O giro da foto fica para o quadro: um por desenho, e não um por
+        // evento (ver `exibicao_atrasada`).
+        self.exibicao_atrasada = true;
         self.revelar_de_novo_se_a_vinheta_segue_o_corte(cx);
         cx.notify();
     }

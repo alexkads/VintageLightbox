@@ -2447,3 +2447,8 @@ mod testes {
 #[cfg(test)]
 #[path = "testes_do_painel.rs"]
 mod testes_do_painel;
+
+/// O cupom de 400 fotos e a negociação em lote sob desordem. Só testes.
+#[cfg(test)]
+#[path = "estresse_do_lote.rs"]
+mod estresse_do_lote;

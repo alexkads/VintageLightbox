@@ -37,6 +37,9 @@ use super::super::persistencia;
 use super::super::sincronizacao;
 use super::{Aberta, PedidoDaRevelacao, Revelacao, MINIATURAS_DA_TIRA};
 
+/// O vão entre duas miniaturas, e entre a primeira e a borda — o `gap-2 px-2`.
+const VAO: f32 = 8.0;
+
 /// Onde a altura fica guardada — o `qual` do site.
 const QUAL: &str = "revelacao";
 
@@ -83,6 +86,9 @@ pub(super) struct EstadoDaTira {
     centrar: u8,
     /// As fotos (id no site) com receita que a galeria ainda não recebeu.
     pendentes: BTreeSet<String>,
+    /// O primeiro item da tira que virou elemento no último quadro — os que
+    /// vêm antes são um espaçador (ver [`faixa_desenhada`]).
+    primeira_desenhada: usize,
     /// O menu aberto pelo roteiro de depuração, e onde.
     menu_do_roteiro: Option<(
         gpui::Entity<gpui_component::menu::PopupMenu>,
@@ -106,6 +112,7 @@ impl EstadoDaTira {
             a_baixar: Vec::new(),
             centrar: 0,
             pendentes: BTreeSet::new(),
+            primeira_desenhada: 0,
             menu_do_roteiro: None,
         }
     }
@@ -239,6 +246,33 @@ pub fn selecao_ao_abrir(
     } else {
         sincronizacao::so(aberta)
     }
+}
+
+/// Quais itens da tira viram elemento neste quadro: `[de, ate)`.
+///
+/// 🚨 **A tira desenhava o acervo inteiro a cada quadro**, e cada miniatura
+/// custa ~30 µs para montar (id, dica, marcas, ouvintes): 7,9 ms com 125
+/// fotos, 22 ms com 500 e 65 ms com 2.000 (medido pelo estresse em
+/// 17/set/2026, perfil de teste). Um ensaio de casamento já passava do quadro
+/// de 60 fps — e todo arrasto de slider redesenha a tela.
+///
+/// 🔑 Os itens têm largura fixa, então a posição de cada um é conta: só o que
+/// está à vista, mais **uma tela para cada lado**, é montado; o resto vira dois
+/// espaçadores do mesmo tamanho, e a rolagem não percebe a diferença.
+pub fn faixa_desenhada(total: usize, passo: f32, deslocamento: f32, vista: f32) -> (usize, usize) {
+    if total == 0
+        || passo.is_nan()
+        || passo <= 0.
+        || !vista.is_finite()
+        || !deslocamento.is_finite()
+    {
+        return (0, total);
+    }
+    let vista = vista.max(0.);
+    let de = ((deslocamento - VAO - vista) / passo).floor().max(0.) as usize;
+    let ate = ((deslocamento + 2. * vista) / passo).ceil().max(0.) as usize + 1;
+    let de = de.min(total);
+    (de, ate.clamp(de, total))
 }
 
 /// O id com que a grade da sessão conhece a foto: o do site, ou o do catálogo.
@@ -435,6 +469,7 @@ impl Revelacao {
         if self.acervo.len() < 2 {
             return;
         }
+        self.segurar_as_vizinhas();
         // 🚨 **A peneira é aqui, e não lá dentro**: perguntar de dentro da
         // tarefa custava um `esta.update` por foto — 125 saltos por seta com a
         // tira já carregada. Nada faltando, tarefa nenhuma.
@@ -471,12 +506,37 @@ impl Revelacao {
         }));
     }
 
+    /// As vizinhas do palco que já estão no cache passam à frente na fila de
+    /// descarte — da mais longe para a mais perto, que fica por último.
+    ///
+    /// 🚨 **Com o acervo maior que o cache, o LRU descartava justo o palco.**
+    /// O carregamento guarda do palco para fora; as primeiras guardadas eram as
+    /// primeiras a sair quando as de longe chegavam, e ao fim de cada seta o
+    /// cache tinha as 512 **mais distantes** — a tira em volta da foto aberta
+    /// ficava preta, e a seta seguinte lia tudo de novo (achado pelo estresse,
+    /// 17/set/2026, com 10.000 fotos).
+    fn segurar_as_vizinhas(&mut self) {
+        let perto: Vec<usize> = self
+            .da_posicao_para_fora()
+            .take(MINIATURAS_DA_TIRA)
+            .collect();
+        for i in perto.into_iter().rev() {
+            if let Some(foto) = self.acervo.get(i) {
+                self.miniaturas_da_tira.tocar(&foto.id);
+            }
+        }
+    }
+
     /// Quais miniaturas da tira ainda não foram lidas — na ordem de urgência.
     ///
     /// `espiar` devolvendo `Some` inclui o `Ausente`: já perguntada é já
     /// perguntada, e é isso que impede de repetir a leitura a cada troca.
+    ///
+    /// ⚠️ **Só as que cabem no cache**, a partir do palco: pedir mais que isso
+    /// é ler do disco o que o LRU vai jogar fora na mesma volta.
     pub(crate) fn miniaturas_faltando(&self) -> Vec<String> {
         self.da_posicao_para_fora()
+            .take(MINIATURAS_DA_TIRA)
             .filter_map(|i| self.acervo.get(i))
             .filter(|foto| self.miniaturas_da_tira.espiar(&foto.id).is_none())
             .map(|foto| foto.id.clone())
@@ -1033,6 +1093,7 @@ impl Revelacao {
     fn centralizar_a_aberta(
         &mut self,
         tira: &[usize],
+        largura: f32,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -1048,15 +1109,16 @@ impl Revelacao {
             return;
         };
         let caixa = self.rolagem_da_tira.bounds();
-        if let Some(item) = self.rolagem_da_tira.bounds_for_item(indice) {
-            if caixa.size.width > px(0.) {
-                // As posições dos filhos são as do leiaute, sem a rolagem.
-                let alvo = caixa.center().x - item.center().x;
-                let maximo = self.rolagem_da_tira.max_offset().width;
-                let x = alvo.min(px(0.)).max(-maximo);
-                let atual = self.rolagem_da_tira.offset();
-                self.rolagem_da_tira.set_offset(gpui::point(x, atual.y));
-            }
+        if caixa.size.width > px(0.) {
+            // 🔑 **Por conta, e não pelo leiaute**: o item pode nem ter virado
+            // elemento (ver `faixa_desenhada`). A largura é fixa, e o centro
+            // dele fica a `VAO + i·passo + largura/2` do começo da faixa.
+            let centro = VAO + indice as f32 * (largura + VAO) + largura / 2.;
+            let alvo = px(f32::from(caixa.size.width) / 2. - centro);
+            let maximo = self.rolagem_da_tira.max_offset().width;
+            let x = alvo.min(px(0.)).max(-maximo);
+            let atual = self.rolagem_da_tira.offset();
+            self.rolagem_da_tira.set_offset(gpui::point(x, atual.y));
         }
         self.tira.centrar -= 1;
         cx.on_next_frame(window, |_tela, _window, cx| cx.notify());
@@ -1081,15 +1143,43 @@ impl Revelacao {
         // 🔑 **O quadro só lê.** Quem carrega é [`Self::carregar_a_tira`].
 
         let tira = self.na_tira();
-        self.centralizar_a_aberta(&tira, window, cx);
-
         let lado = altura_da_tira::lado_da_miniatura(self.tira.altura);
         let largura = (lado * altura_da_tira::PROPORCAO).round();
-        let itens: Vec<AnyElement> = tira
-            .iter()
-            .enumerate()
-            .map(|(i, posicao)| self.miniatura_na_tira(*posicao, i + 1, lado, largura, cx))
-            .collect();
+        self.centralizar_a_aberta(&tira, largura, window, cx);
+
+        // Só o pedaço à vista vira elemento (`faixa_desenhada`). No primeiro
+        // quadro a faixa ainda não tem medida, e a janela é o teto dela.
+        let passo = largura + VAO;
+        let vista = match f32::from(self.rolagem_da_tira.bounds().size.width) {
+            v if v > 0. => v,
+            _ => f32::from(window.viewport_size().width),
+        };
+        let (de, ate) = faixa_desenhada(
+            tira.len(),
+            passo,
+            -f32::from(self.rolagem_da_tira.offset().x),
+            vista,
+        );
+        self.tira.primeira_desenhada = de;
+        let espacador = |itens: usize| {
+            div()
+                .flex_none()
+                .w(px(itens as f32 * passo - VAO))
+                .h(px(1.))
+                .into_any_element()
+        };
+        let mut itens: Vec<AnyElement> = Vec::with_capacity(ate - de + 2);
+        if de > 0 {
+            itens.push(espacador(de));
+        }
+        itens.extend(
+            tira[de..ate].iter().enumerate().map(|(i, posicao)| {
+                self.miniatura_na_tira(*posicao, de + i + 1, lado, largura, cx)
+            }),
+        );
+        if ate < tira.len() {
+            itens.push(espacador(tira.len() - ate));
+        }
 
         let deslocamento = -self.rolagem_da_tira.offset().x;
         let maximo = self.rolagem_da_tira.max_offset().width;
@@ -1106,8 +1196,8 @@ impl Revelacao {
                     .track_scroll(&self.rolagem_da_tira)
                     .flex()
                     .items_center()
-                    .gap(px(8.))
-                    .px(px(8.))
+                    .gap(px(VAO))
+                    .px(px(VAO))
                     .h(px(lado + 12.0))
                     .overflow_x_scroll()
                     // 🔑 A roda vertical rola na horizontal — o `wheel` com
@@ -1223,10 +1313,16 @@ impl Revelacao {
             // janela não é público: o roteiro monta **o mesmo** menu e o
             // desenha sobre a miniatura.
             "menu" => {
-                let indice = numero as usize;
-                let (Some(posicao), Some(item)) =
-                    (na_posicao, self.rolagem_da_tira.bounds_for_item(indice))
-                else {
+                // O item é o `indice` da tira, mas o elemento conta a partir do
+                // primeiro desenhado — com o espaçador na frente, se houver.
+                let primeira = self.tira.primeira_desenhada;
+                let elemento = (numero as usize)
+                    .checked_sub(primeira)
+                    .map(|k| k + usize::from(primeira > 0));
+                let (Some(posicao), Some(item)) = (
+                    na_posicao,
+                    elemento.and_then(|k| self.rolagem_da_tira.bounds_for_item(k)),
+                ) else {
                     return;
                 };
                 let Some(dados) = self.menu_da_tira(posicao) else {
@@ -1366,6 +1462,23 @@ mod testes {
             foto("c", 5, true, false),
             foto("d", 2, true, true),
         ]
+    }
+
+    #[test]
+    fn a_faixa_desenhada_cobre_a_vista_e_uma_tela_de_cada_lado() {
+        // 10.000 itens de 100 px (passo 108), vista de 1.000 px.
+        let passo = 108.;
+        assert_eq!(faixa_desenhada(10_000, passo, 0., 1000.), (0, 20));
+        let (de, ate) = faixa_desenhada(10_000, passo, 540_000., 1000.);
+        assert!(de * 108 <= 540_000 - 1000, "uma tela antes");
+        assert!(ate as f32 * passo >= 540_000. + 2000., "uma tela depois");
+        assert!(ate - de < 40, "{de}..{ate}: só o que se vê");
+        // No fim, não passa do total.
+        assert_eq!(faixa_desenhada(10_000, passo, 1e9, 1000.).1, 10_000);
+        // Sem medida, tudo (o caminho seguro).
+        assert_eq!(faixa_desenhada(50, 0., 0., 1000.), (0, 50));
+        assert_eq!(faixa_desenhada(50, passo, f32::NAN, 1000.), (0, 50));
+        assert_eq!(faixa_desenhada(0, passo, 0., 1000.), (0, 0));
     }
 
     #[test]

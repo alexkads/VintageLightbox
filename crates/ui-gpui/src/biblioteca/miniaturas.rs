@@ -149,7 +149,15 @@ impl CacheDeMiniaturas {
         self.carregadas.put(chave.to_string(), miniatura);
     }
 
-    /// Quantas miniaturas estão na memória agora.
+    /// Marca uma miniatura como usada agora, sem carregar nada.
+    ///
+    /// 🔑 Existe para quem carrega **em ordem de urgência** e guarda com
+    /// [`Self::guardar`]: sem isto, a primeira guardada (a mais urgente) é a
+    /// primeira que o LRU descarta quando o lote passa da capacidade.
+    pub fn tocar(&mut self, chave: &str) {
+        let _ = self.carregadas.get(chave);
+    }
+
     /// Tira uma entrada do cache.
     ///
     /// 🔑 Existe por causa da importação: lá a miniatura **nasce ausente** e é
@@ -159,6 +167,7 @@ impl CacheDeMiniaturas {
         self.carregadas.pop(chave);
     }
 
+    /// Quantas miniaturas estão na memória agora.
     pub fn quantas_na_memoria(&self) -> usize {
         self.carregadas.len()
     }
