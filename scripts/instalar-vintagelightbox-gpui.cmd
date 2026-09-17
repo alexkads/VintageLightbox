@@ -364,13 +364,13 @@ if (-not $env:CARGO_BUILD_JOBS) {
 # 🚨 Se falhar, tenta de novo uma vez: sem os restos do LibRaw (um .o pela metade,
 #    travado pelo antivirus, derruba a segunda tentativa tambem) e com uma
 #    compilacao de cada vez, que e o que sobra quando falta memoria.
-$compilar = { cargo "+$Toolchain" build --release --manifest-path (Join-Path $Fonte "Cargo.toml") -p ui-gpui --bin ui-gpui --target $Alvo }
+$compilar = { cargo "+$Toolchain" build --profile instalador --manifest-path (Join-Path $Fonte "Cargo.toml") -p ui-gpui --bin ui-gpui --target $Alvo }
 try {
     Correr $compilar
 } catch {
     if ($Seco) { throw }
     Aviso "a compilacao falhou. Tentando de novo, uma compilacao de cada vez."
-    Get-ChildItem (Join-Path $env:CARGO_TARGET_DIR "$Alvo\release\build") -Directory -Filter "rsraw-sys-*" -ErrorAction SilentlyContinue |
+    Get-ChildItem (Join-Path $env:CARGO_TARGET_DIR "$Alvo\instalador\build") -Directory -Filter "rsraw-sys-*" -ErrorAction SilentlyContinue |
         Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
     $env:CARGO_BUILD_JOBS = "1"
     try {
@@ -384,7 +384,7 @@ try {
         throw
     }
 }
-$binario = Join-Path $env:CARGO_TARGET_DIR "$Alvo\release\ui-gpui.exe"
+$binario = Join-Path $env:CARGO_TARGET_DIR "$Alvo\instalador\ui-gpui.exe"
 if ($Seco) { Write-Host "`n   [seco] nada foi feito."; return }
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path $binario)) {
     throw "a compilacao falhou, ou nao deixou $binario"
@@ -852,7 +852,9 @@ fi
 # O código de saída do cargo chega a quem chamou (o despachante e os testes o
 # conferem).
 # shellcheck disable=SC2086
-if correr cargo build --release --manifest-path "$FONTE/Cargo.toml" -p ui-gpui --bin ui-gpui $RECURSOS; then
+# `--profile instalador`: thin LTO e 16 unidades (ver o `Cargo.toml`) — a
+# compilação na máquina do balcão, e não o pacote distribuído.
+if correr cargo build --profile instalador --manifest-path "$FONTE/Cargo.toml" -p ui-gpui --bin ui-gpui $RECURSOS; then
   :
 else
   CODIGO=$?
@@ -863,7 +865,7 @@ else
   exit "$CODIGO"
 fi
 
-BINARIO="$CARGO_TARGET_DIR/release/ui-gpui"
+BINARIO="$CARGO_TARGET_DIR/instalador/ui-gpui"
 if [ "$SECO" -eq 0 ] && [ ! -x "$BINARIO" ]; then
   erro "a compilação terminou mas não há binário em $BINARIO"
   exit 1

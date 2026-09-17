@@ -147,6 +147,23 @@ opt-level = 3
 lto = true
 codegen-units = 1
 
+# O perfil de quem compila o app na própria máquina (`scripts/instalar-*.cmd`).
+#
+# 🚨 **O `release` é lento de propósito, e para o balcão lento demais.** Com
+# `lto = true` e `codegen-units = 1`, cada crate grande (gpui, wgpu, naga) é
+# gerado numa linha só e a ligação final junta o programa inteiro: num Fedora
+# com 8 GiB a primeira compilação passava de uma hora, e o `rustc` do ui-gpui
+# morria sem memória (dono, 2026-09-17).
+#
+# 🔑 **Thin LTO e 16 unidades** dividem o trabalho entre os núcleos e gastam
+# bem menos memória na ligação. O `opt-level` continua 3: os laços de pixel
+# rodam praticamente iguais. Os pacotes distribuídos (`empacotar.sh`) seguem no
+# `release` completo.
+[profile.instalador]
+inherits = "release"
+lto = "thin"
+codegen-units = 16
+
 [profile.test]
 opt-level = 1
 
