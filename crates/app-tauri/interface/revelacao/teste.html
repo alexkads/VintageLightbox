@@ -16,6 +16,169 @@
 </p>
 <canvas id="tela"></canvas>
 <pre id="saida">carregando…</pre>
+<h2>Diagnóstico do WebGL</h2>
+<p>
+  O motor não conta o que o driver recusou: um shader que não compila vira tela preta, em silêncio.
+  Aqui a página escuta o WebGL por fora e mostra a GPU, os limites e cada erro. É o que se manda
+  quando a revelação fica preta num computador.
+</p>
+<pre id="diagnostico">nenhum contexto WebGL ainda</pre>
+<h2>Onde a cor some</h2>
+<p>
+  Só no WebGL. O motor é aberto de novo várias vezes, e em cada uma o shader devolve a cor
+  <strong>antes</strong> de um bloco do pixel. O cinza 100 tem de chegar 100 até a exposição e 200
+  depois dela. <code>NaN</code> quer dizer que a conta daquele ponto virou "não é número"; o
+  primeiro ponto que sai errado é onde a GPU e o motor discordam.
+</p>
+<pre id="sondas">aguardando o teste acima</pre>
+<script>
+  // 🔑 As sondas mexem no GLSL que o wgpu gera, antes de compilar: nenhum wasm
+  // novo é preciso para achar o bloco que zera a cor numa GPU que não temos.
+  (() => {
+    const shaderSource = WebGL2RenderingContext.prototype.shaderSource;
+    WebGL2RenderingContext.prototype.shaderSource = function (shader, fonte) {
+      const transformar = window.__transformar;
+      if (transformar && fonte.includes("vec4 revelar_pixel(uvec2")) {
+        fonte = transformar(fonte.split("\n")).join("\n");
+      }
+      return shaderSource.call(this, shader, fonte);
+    };
+    // Os pontos: antes de cada `if` de primeiro nível de `revelar_pixel`, e antes
+    // da divisão final por 255. O nome é o do primeiro ajuste lido logo acima.
+    window.__pontosDaSonda = (linhas) => {
+      const inicio = linhas.findIndex((l) => l.startsWith("vec4 revelar_pixel(uvec2"));
+      const fim = linhas.findIndex((l, i) => i > inicio && l === "}");
+      const pontos = [];
+      const leitura = linhas.findIndex((l, i) => i > inicio && /= amostrar\(/.test(l));
+      for (let i = inicio; i < fim; i++) {
+        const final = /^    r = \(clamp\(_e\d+, 0\.0, 255\.0\) \/ 255\.0\);$/.test(linhas[i]);
+        if (!/^    if \(/.test(linhas[i]) && !final) continue;
+        const linha = final ? i - 1 : i;
+        let nome = final ? "fim (antes de /255)" : "?";
+        for (let j = i; !final && j > i - 12 && j > inicio; j--) {
+          const m = linhas[j].match(/_group_0_binding_2_fs\.(\w+)/);
+          if (m) { nome = m[1]; break; }
+          const v = linhas[j].match(/^    if \(\(?(\w+)/);
+          if (j === i && v && !/^_e\d+$/.test(v[1])) { nome = v[1]; break; }
+        }
+        pontos.push({ linha, nome, antesDaLeitura: leitura > 0 && linha < leitura });
+      }
+      return pontos;
+    };
+  })();
+</script>
+<script>
+  // 🔑 Roda antes do módulo do motor (scripts de módulo são adiados): as
+  // chamadas de WebGL que o wgpu fizer já passam por aqui.
+  (() => {
+    const caixa = document.getElementById("diagnostico");
+    const linhas = [];
+    const anotar = (t, classe) => {
+      linhas.push(classe ? `<span class="${classe}">${t.replace(/</g, "&lt;")}</span>` : t.replace(/</g, "&lt;"));
+      caixa.innerHTML = linhas.join("\n");
+      (classe === "falhou" ? console.error : console.log)("[diagnóstico]", t);
+    };
+    const G = window.WebGL2RenderingContext;
+    if (!G) return anotar("este navegador não tem WebGL2", "falhou");
+
+    let descrito = false;
+    const descrever = (gl) => {
+      gl.canvas.addEventListener?.("webglcontextlost", () => {
+        if (!window.__sondando) anotar("o contexto WebGL foi perdido", "falhou");
+      });
+      if (descrito) return;
+      descrito = true;
+      const info = gl.getExtension("WEBGL_debug_renderer_info");
+      anotar(`navegador: ${navigator.userAgent}`);
+      anotar(`GPU: ${info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER)}`);
+      anotar(`fabricante: ${info ? gl.getParameter(info.UNMASKED_VENDOR_WEBGL) : gl.getParameter(gl.VENDOR)}`);
+      anotar(`versão: ${gl.getParameter(gl.VERSION)} · ${gl.getParameter(gl.SHADING_LANGUAGE_VERSION)}`);
+      for (const nome of [
+        "MAX_TEXTURE_SIZE", "MAX_TEXTURE_IMAGE_UNITS", "MAX_COMBINED_TEXTURE_IMAGE_UNITS",
+        "MAX_FRAGMENT_UNIFORM_BLOCKS", "MAX_VERTEX_UNIFORM_BLOCKS", "MAX_UNIFORM_BUFFER_BINDINGS",
+        "MAX_UNIFORM_BLOCK_SIZE", "MAX_FRAGMENT_UNIFORM_COMPONENTS", "MAX_DRAW_BUFFERS",
+        "MAX_COLOR_ATTACHMENTS", "MAX_RENDERBUFFER_SIZE",
+      ]) anotar(`${nome}: ${gl.getParameter(gl[nome])}`);
+      anotar(`extensões: ${(gl.getSupportedExtensions() || []).join(", ")}`);
+    };
+
+    const getContext = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = function (tipo, ...resto) {
+      const gl = getContext.call(this, tipo, ...resto);
+      if (gl instanceof G) descrever(gl);
+      return gl;
+    };
+    if (window.OffscreenCanvas) {
+      const getContextOff = OffscreenCanvas.prototype.getContext;
+      OffscreenCanvas.prototype.getContext = function (tipo, ...resto) {
+        const gl = getContextOff.call(this, tipo, ...resto);
+        if (gl instanceof G) descrever(gl);
+        return gl;
+      };
+    }
+
+    const p = G.prototype;
+    const compileShader = p.compileShader;
+    p.compileShader = function (shader) {
+      compileShader.call(this, shader);
+      if (this.getShaderParameter(shader, this.COMPILE_STATUS)) return;
+      const tipo = this.getShaderParameter(shader, this.SHADER_TYPE) === this.VERTEX_SHADER ? "vértice" : "fragmento";
+      const log = this.getShaderInfoLog(shader) || "(o driver não explicou)";
+      anotar(`shader de ${tipo} NÃO COMPILOU:\n${log}`, "falhou");
+      // As linhas que o driver apontou, com o número, para achar no WGSL.
+      const fonte = (this.getShaderSource(shader) || "").split("\n");
+      const citadas = new Set([...log.matchAll(/\d+:(\d+)/g)].map((m) => Number(m[1])));
+      for (const n of [...citadas].slice(0, 5)) {
+        for (let i = Math.max(1, n - 2); i <= Math.min(fonte.length, n + 2); i++) {
+          anotar(`${i === n ? ">" : " "} ${i}: ${fonte[i - 1]}`);
+        }
+      }
+      anotar(`(o shader tem ${fonte.length} linhas)`);
+    };
+    const linkProgram = p.linkProgram;
+    p.linkProgram = function (programa) {
+      linkProgram.call(this, programa);
+      if (!this.getProgramParameter(programa, this.LINK_STATUS)) {
+        anotar(`programa NÃO LIGOU: ${this.getProgramInfoLog(programa) || "(sem explicação)"}`, "falhou");
+      }
+    };
+
+    // Os erros que o wgpu não pergunta: cada chamada que costuma recusar algo
+    // confere `getError` logo depois. Custa desempenho, e esta página é só teste.
+    let erros = 0;
+    const nomesDeErro = {};
+    for (const n of ["INVALID_ENUM", "INVALID_VALUE", "INVALID_OPERATION", "INVALID_FRAMEBUFFER_OPERATION", "OUT_OF_MEMORY", "CONTEXT_LOST_WEBGL"]) {
+      nomesDeErro[G[n]] = n;
+    }
+    for (const nome of [
+      "texStorage2D", "texStorage3D", "texImage2D", "texSubImage2D", "framebufferTexture2D",
+      "framebufferTextureLayer", "drawArrays", "drawElements", "readPixels", "bufferData",
+      "bufferSubData", "bindBufferRange", "uniformBlockBinding", "useProgram", "blitFramebuffer",
+      "clearBufferfv", "drawBuffers",
+    ]) {
+      const original = p[nome];
+      if (!original) continue;
+      p[nome] = function (...args) {
+        const r = original.apply(this, args);
+        const e = this.getError();
+        if (e !== this.NO_ERROR && erros < 30) {
+          erros++;
+          anotar(`${nome} → ${nomesDeErro[e] || e}`, "falhou");
+        }
+        if ((nome === "drawArrays" || nome === "drawElements") && erros < 30) {
+          const estado = this.checkFramebufferStatus(this.DRAW_FRAMEBUFFER);
+          if (estado !== this.FRAMEBUFFER_COMPLETE) {
+            erros++;
+            anotar(`${nome}: framebuffer incompleto (${estado})`, "falhou");
+          }
+        }
+        return r;
+      };
+    }
+    window.addEventListener("error", (e) => anotar(`erro: ${e.message}`, "falhou"));
+    window.addEventListener("unhandledrejection", (e) => anotar(`promessa rejeitada: ${e.reason?.message ?? e.reason}`, "falhou"));
+  })();
+</script>
 <script type="module">
   const saida = document.getElementById("saida");
   const linhas = [];
@@ -78,8 +241,237 @@
     const b3 = await createImageBitmap(new Blob([jpeg3], { type: "image/jpeg" }));
     const certo = b3.width === geo[6] && b3.height === geo[7] && b3.width === lado / 2;
     log(`enquadramento: o motor anuncia ${geo[6]}×${geo[7]}, o arquivo tem ${b3.width}×${b3.height} ${certo ? "OK" : "FALHOU"}`, certo ? "ok" : "falhou");
+    if (motor.backend() === "webgl") await sondar(glue, nomes);
+    else document.getElementById("sondas").textContent = `não se aplica: o backend é ${motor.backend()}`;
   } catch (erro) {
     log(`erro: ${erro?.message ?? erro}`, "falhou");
     console.error(erro);
+  }
+
+  async function sondar(glue, nomes) {
+    const caixa = document.getElementById("sondas");
+    const linhas = [];
+    const anotar = (t, classe) => {
+      linhas.push(classe ? `<span class="${classe}">${t}</span>` : t);
+      caixa.innerHTML = linhas.join("\n");
+    };
+    // A lista de pontos sai do próprio GLSL, lido uma vez por uma sonda vazia.
+    let fonte = null;
+    const original = WebGL2RenderingContext.prototype.shaderSource;
+    WebGL2RenderingContext.prototype.shaderSource = function (s, f) {
+      if (f.includes("vec4 revelar_pixel(uvec2")) fonte = f;
+      return original.call(this, s, f);
+    };
+    const padrao = glue.Motor.ajustes_padrao();
+    const ajustes = Float32Array.from(padrao);
+    ajustes[nomes.indexOf("exposure")] = 1.0;
+    const cinza = new Uint8Array(16 * 16 * 4).fill(100);
+    for (let i = 3; i < cinza.length; i += 4) cinza[i] = 255;
+
+    const medir = async (transformar) => {
+      window.__transformar = transformar;
+      window.__sondando = true;
+      const tela = document.createElement("canvas");
+      tela.width = tela.height = 16;
+      const m = await glue.abrir(tela);
+      try {
+        const jpeg = await m.exportar_jpeg(16, 16, cinza, ajustes, glue.corte_inteiro(), 100);
+        const b = await createImageBitmap(new Blob([jpeg], { type: "image/jpeg" }));
+        const c = document.createElement("canvas");
+        c.width = c.height = 16;
+        const x = c.getContext("2d");
+        x.drawImage(b, 0, 0);
+        return [...x.getImageData(8, 8, 1, 1).data.slice(0, 3)];
+      } finally {
+        window.__transformar = null;
+        tela.getContext("webgl2")?.getExtension("WEBGL_lose_context")?.loseContext();
+        m.free?.();
+      }
+    };
+
+    try {
+      const semSonda = await medir(null);
+      WebGL2RenderingContext.prototype.shaderSource = original;
+      if (!fonte) return anotar("não achei o shader do motor", "falhou");
+      const pontos = window.__pontosDaSonda(fonte.split("\n"));
+      anotar(`sem sonda: ${semSonda.join(",")} · ${pontos.length} pontos`);
+      const devolverAqui = [
+        "    if (isnan(r) || isnan(g) || isnan(b) || isinf(r) || isinf(g) || isinf(b)) { return vec4(1.0, 0.0, 1.0, 1.0); }",
+        "    return vec4(clamp(r / 255.0, 0.0, 1.0), clamp(g / 255.0, 0.0, 1.0), clamp(b / 255.0, 0.0, 1.0), 1.0);",
+      ];
+      const naLinha = (k, novas) => (l) => {
+        const alvo = window.__pontosDaSonda(l)[k];
+        const c = l.slice();
+        c.splice(alvo.linha, 0, ...novas);
+        return c;
+      };
+      let antes = true; // antes da exposição o esperado é 100
+      for (let k = 0; k < pontos.length; k++) {
+        const p = pontos[k];
+        const [r, g, b] = await medir(naLinha(k, devolverAqui));
+        const nan = r > 200 && g < 50 && b > 200;
+        if (p.nome === "exposure") antes = true;
+        // Antes de ler o pixel, r, g e b ainda valem 0.
+        const esperado = p.antesDaLeitura ? 0 : antes ? 100 : 200;
+        const certo = !nan && Math.abs(r - esperado) <= 3 && Math.abs(g - esperado) <= 3 && Math.abs(b - esperado) <= 3;
+        anotar(`${String(k).padStart(2)} antes de ${p.nome.padEnd(28)} → ${nan ? "NaN" : `${r},${g},${b}`} ${certo ? "" : `(esperado ${esperado})`}`, certo ? "ok" : "falhou");
+        if (p.nome === "exposure") antes = false;
+      }
+      await variantes(fonte, pontos, medir, anotar, ajustes, nomes, devolverAqui);
+    } catch (erro) {
+      anotar(`as sondas pararam: ${erro?.message ?? erro}`, "falhou");
+    } finally {
+      window.__sondando = false;
+    }
+  }
+
+  // 🔑 As três perguntas que separam "o driver lê o uniform errado" de "o
+  // driver compila o bloco errado".
+  async function variantes(fonte, pontos, medir, anotar, ajustes, nomes, devolverAqui) {
+    anotar("");
+    const linhas = fonte.split("\n");
+    const k = pontos.findIndex((p) => p.nome === "dt_cb_ativo");
+    if (k < 0) return anotar("não achei o bloco do darktable", "falhou");
+    const linhaDoIf = pontos[k].linha;
+    const U = "_group_0_binding_2_fs";
+
+    // Os campos da struct, na ordem do GLSL, com o valor que a CPU mandou.
+    const ini = linhas.findIndex((l) => l === "struct Params {");
+    const campos = [];
+    for (let i = ini + 1; linhas[i] !== "};"; i++) {
+      const m = linhas[i].match(/^\s+float (\w+);$/);
+      if (!m) continue;
+      // O naga põe um `_` no fim do nome que termina em dígito (`curva_m0_`).
+      const j = nomes.indexOf(m[1].replace(/(\d)_$/, "$1"));
+      if (j >= 0) campos.push({ ordem: campos.length, nome: m[1], valor: ajustes[j] });
+    }
+    const literal = (v) => (Number.isInteger(v) ? v.toFixed(1) : v.toExponential(9));
+    const confere = (c) => `(abs(${U}.${c.nome} - ${literal(c.valor)}) <= 0.001 * max(1.0, abs(${literal(c.valor)})))`;
+    // Um número de 0 a 199 em duas cores largas, que o JPEG não confunde:
+    // dezenas no vermelho, unidades no verde.
+    const cor = (comandos) => [
+      "    { int n_sonda = 0;",
+      ...comandos.map((c) => `      ${c}`),
+      "      return vec4(float(n_sonda / 10) * 12.0 / 255.0, float(n_sonda % 10) * 25.0 / 255.0, 1.0, 1.0); }",
+    ];
+    const ler = ([r, g]) => Math.round(r / 12) * 10 + Math.round(g / 25);
+
+
+    const comparar = (expr) => (l) => {
+      const c = l.slice();
+      c.splice(linhaDoIf, 0, ...cor(expr));
+      return c;
+    };
+    // 🔑 As perguntas baratas primeiro: um shader com uma comparação por campo
+    // pode demorar ou falhar num driver antigo, e não pode esconder as outras.
+    const etapa = (t) => { caixaDeEtapa.textContent = t ? `rodando: ${t}…` : ""; };
+    const caixaDeEtapa = document.createElement("div");
+    caixaDeEtapa.style.color = "#aaa";
+    document.getElementById("sondas").after(caixaDeEtapa);
+
+    etapa("o bloco do darktable roda?");
+    const entrou = await medir((l) => {
+      const c = l.slice();
+      c.splice(linhaDoIf + 1, 0, "        return vec4(0.0, 1.0, 0.0, 1.0);");
+      return c;
+    });
+    const verde = entrou[1] > 200 && entrou[0] < 60 && entrou[2] < 60;
+    anotar(`o bloco do darktable rodou com as chaves desligadas? ${verde ? "SIM" : "não"} (${entrou.join(",")})`, verde ? "falhou" : "ok");
+
+    etapa("a cor sem o bloco do darktable");
+    const semBloco = await medir((l) => {
+      const c = l.slice();
+      c[linhaDoIf] = "    if (false) {";
+      return c;
+    });
+    const certo = semBloco.every((v) => Math.abs(v - 200) <= 3);
+    anotar(`com o bloco do darktable desligado à força: ${semBloco.join(",")} (esperado 200)`, certo ? "ok" : "falhou");
+
+    etapa("a régua");
+    const regua = ler(await medir(comparar([`if (!(abs(${U}.contrast - 999.0) <= 0.001)) { n_sonda = 42; }`])));
+    anotar(`prova da régua: ${regua} (esperado 42)`, regua === 42 ? "ok" : "falhou");
+
+    // As cinco chaves, cada uma num bit: 0 é "todas desligadas", como a CPU mandou.
+    etapa("as chaves do darktable");
+    const chaves = ["dt_exposure_ativo", "dt_shadhi_ativo", "dt_monochrome_ativo", "dt_vignette_ativo", "dt_cb_ativo"];
+    const bits = ler(await medir(comparar(chaves.map((c, i) => `if (${U}.${c} != 0.0) { n_sonda += ${1 << i}; }`))));
+    anotar(`chaves do darktable que a GPU lê ligadas: ${bits === 0 ? "nenhuma" : chaves.filter((_, i) => bits & (1 << i)).join(", ")}`, bits === 0 ? "ok" : "falhou");
+
+    // 🔑 **Com o darktable vivo.** Nas perguntas acima o `return` antes do
+    // bloco deixa o código dele morto, e o compilador o descarta junto com as
+    // texturas das grades e o uniform `DadosDasGrades` — mede o shader já
+    // "consertado". Daqui em diante o retorno fica atrás de uma condição que o
+    // compilador não prova (`exposure > -1000`), e o bloco continua no programa.
+    anotar("");
+    anotar("com o bloco do darktable vivo no shader:");
+    const talvez = (comandos) => [`    if (${U}.exposure > -1000.0) {`, ...comandos.map((c) => `    ${c}`), "    }"];
+    const antesVivo = (comandos) => (l) => {
+      const c = l.slice();
+      c.splice(linhaDoIf, 0, ...talvez(comandos));
+      return c;
+    };
+    const mostrar = (rotulo, cor, esperado) => {
+      const certo = cor.every((v) => Math.abs(v - esperado) <= 3);
+      anotar(`  ${rotulo}: ${cor.join(",")} (esperado ${esperado})`, certo ? "ok" : "falhou");
+    };
+
+    etapa("a cor antes do bloco, com ele vivo");
+    mostrar("a cor logo antes do bloco", await medir(antesVivo(devolverAqui)), 100);
+
+    etapa("as chaves, com o bloco vivo");
+    const bitsVivo = ler(await medir(antesVivo(cor(chaves.map((c, i) => `if (${U}.${c} != 0.0) { n_sonda += ${1 << i}; }`)))));
+    anotar(`  chaves lidas ligadas: ${bitsVivo === 0 ? "nenhuma" : chaves.filter((_, i) => bitsVivo & (1 << i)).join(", ")}`, bitsVivo === 0 ? "ok" : "falhou");
+
+    etapa("o contraste, com o bloco vivo");
+    const contrasteVivo = ler(await medir(antesVivo(cor([`if (abs(${U}.contrast - ${literal(ajustes[nomes.indexOf("contrast")])}) > 0.001) { n_sonda = 1; }`]))));
+    anotar(`  o contraste chega certo? ${contrasteVivo === 0 ? "sim" : "NÃO"}`, contrasteVivo === 0 ? "ok" : "falhou");
+
+    etapa("o bloco roda, com ele vivo?");
+    const entrouVivo = await medir((l) => {
+      const c = l.slice();
+      c.splice(linhaDoIf + 1, 0, `        if (${U}.exposure > -1000.0) { return vec4(0.0, 1.0, 0.0, 1.0); }`);
+      return c;
+    });
+    const verdeVivo = entrouVivo[1] > 200 && entrouVivo[0] < 60 && entrouVivo[2] < 60;
+    anotar(`  o bloco rodou? ${verdeVivo ? "SIM" : "não"} (${entrouVivo.join(",")})`, verdeVivo ? "falhou" : "ok");
+
+    // O que tirar do bloco para a cor voltar: cada variante corta uma peça e
+    // mede a foto inteira. A que dá 200 é a peça que a GPU não suporta.
+    const trocar = (troca) => (l) => l.map(troca);
+    const semGrades = (x) => x.replace(/= texelFetch\(_group_0_binding_[34]_fs,.*;$/, "= vec4(0.0);");
+    const semDados = (x) => x.replace(/_group_0_binding_5_fs\.\w+/g, "vec4(1.0)");
+    const semModulo = (nome) => (x) => x.replace(new RegExp(`= ${nome}\\((_e\\d+)(, coord_\\d+)?\\);$`), "= $1;");
+    // O color balance é a peça (Mac Intel, 2026-09-17). Dentro dele, as duas
+    // suspeitas: a tabela global de 512 números e a função que devolve array.
+    // Desde a9b8939 a tabela já sai `const`; a variante mostra a forma antiga.
+    const ehTabela = (x) => /^(const )?float DT_GAMUT\[512\]/.test(x);
+    const semTabela = (x) => ehTabela(x) ? "" : x.replace(/DT_GAMUT\[\w+\]/g, "1.0");
+    const tabelaConst = (x) => ehTabela(x) ? `const ${x.replace(/^const /, "")}` : x;
+    const tabelaVar = (x) => ehTabela(x) ? x.replace(/^const /, "") : x;
+    const semMascaras = (x) => x.replace(/^(\s+vec3 _e\d+\[2\]) = dt_mascaras\(.*\);$/, "$1 = vec3[2](vec3(0.5), vec3(0.5));");
+    const pecas = [
+      ["sem a tabela DT_GAMUT", semTabela],
+      ["com a tabela DT_GAMUT como const", tabelaConst],
+      ["com a tabela DT_GAMUT como variável (a forma de antes)", tabelaVar],
+      ["sem dt_mascaras", semMascaras],
+      ["sem ler as texturas das grades", semGrades],
+      ["sem o uniform DadosDasGrades", semDados],
+      ["sem as grades e sem DadosDasGrades", (x) => semDados(semGrades(x))],
+      ["sem dt_exposure", semModulo("dt_exposure")],
+      ["sem dt_shadhi", semModulo("dt_shadhi")],
+      ["sem dt_monochrome", semModulo("dt_monochrome")],
+      ["sem dt_vignette", semModulo("dt_vignette")],
+      ["sem dt_color_balance_rgb", semModulo("dt_color_balance_rgb")],
+      ["sem shadhi, monochrome e color balance", (x) => semModulo("dt_shadhi")(semModulo("dt_monochrome")(semModulo("dt_color_balance_rgb")(x)))],
+    ];
+    anotar("");
+    anotar("o que tirar do shader para a foto voltar (esperado 200):");
+    for (const [rotulo, troca] of pecas) {
+      etapa(rotulo);
+      const alterado = trocar(troca)(linhas);
+      if (alterado.join("\n") === linhas.join("\n")) { anotar(`  ${rotulo}: a troca não achou o que trocar`, "falhou"); continue; }
+      mostrar(rotulo, await medir(trocar(troca)), 200);
+    }
+    etapa("");
   }
 </script>
