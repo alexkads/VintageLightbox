@@ -44,15 +44,25 @@ async fn navegador_confirma(url_do_app: &str, code: &str) {
     tokio::spawn(async move {
         // O favicon vem primeiro, como vem de um navegador de verdade.
         let _ = reqwest::get(format!("http://127.0.0.1:{porta}/favicon.ico")).await;
-        let resposta = reqwest::get(format!(
-            "http://127.0.0.1:{porta}/?code={code}&estado={estado}"
-        ))
-        .await
-        .expect("o servidor do app responde");
-        let corpo = resposta.text().await.unwrap();
+        // A aba segue para a página de "pronto" do site, que mostra o desfecho
+        // com a cara do estúdio. Sem seguir o redirecionamento: o site do teste
+        // não existe.
+        let cliente = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap();
+        let resposta = cliente
+            .get(format!(
+                "http://127.0.0.1:{porta}/?code={code}&estado={estado}"
+            ))
+            .send()
+            .await
+            .expect("o servidor do app responde");
+        assert_eq!(resposta.status().as_u16(), 303);
+        let destino = resposta.headers()["location"].to_str().unwrap().to_string();
         assert!(
-            corpo.contains("Computador autorizado"),
-            "o operador precisa ver que deu certo, e não uma aba em branco: {corpo}"
+            destino.ends_with("/autorizar-app/pronto?situacao=autorizado"),
+            "o operador precisa ver que deu certo, e não uma aba em branco: {destino}"
         );
     });
 }
@@ -167,7 +177,7 @@ async fn o_codigo_que_volta_pelo_loopback_vira_sessao_de_quinze_dias() {
     // Passos 3 e 4: o operador confirma, e o site manda o navegador ao loopback.
     navegador_confirma(&url, "codigo-do-site").await;
     let code = pedido
-        .esperar_codigo()
+        .esperar_codigo("http://site.test")
         .await
         .expect("o app recebe o código");
     assert_eq!(code, "codigo-do-site");
@@ -204,7 +214,7 @@ async fn quando_o_operador_cancela_o_app_sabe_na_hora() {
     });
 
     assert!(matches!(
-        pedido.esperar_codigo().await,
+        pedido.esperar_codigo("http://site.test").await,
         Err(domain::DomainError::AcessoRecusado)
     ));
 }

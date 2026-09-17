@@ -232,6 +232,9 @@ fn abrir_principal(app: &App) -> tauri::Result<()> {
     let construtor = WebviewWindowBuilder::new(app, "principal", tela(ROTA_INICIAL));
     let mut janela = ambiente::armazenamento(construtor, app.path().app_data_dir().ok())
         .title(ambiente::titulo("VintageLightbox"))
+        // A cor da capa de entrada: a janela não pisca branca antes de a tela
+        // chegar (dono, 2026-09-16).
+        .background_color(tauri::window::Color(20, 13, 9, 255))
         .inner_size(1440.0, 900.0)
         .maximized(true)
         .on_navigation(decidir)

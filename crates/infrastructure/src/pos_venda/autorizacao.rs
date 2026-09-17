@@ -102,17 +102,26 @@ impl PedidoDeAutorizacao {
     /// sozinho, e uma aba velha pode chegar com outro `estado`: nos dois casos o
     /// servidor responde e **continua esperando**, em vez de tratar aquilo como
     /// o desfecho.
-    pub async fn esperar_codigo(&self) -> DomainResult<String> {
-        tokio::time::timeout(PRAZO_PARA_AUTORIZAR, self.aceitar_ate_o_codigo())
-            .await
-            .map_err(|_| {
-                DomainError::InfrastructureError(
-                    "a autorização não foi concluída no navegador".into(),
-                )
-            })?
+    /// Espera a volta do navegador. `base_do_site` é para onde a aba segue
+    /// depois: a página de "pronto" do site, com a cara do estúdio.
+    pub async fn esperar_codigo(&self, base_do_site: &str) -> DomainResult<String> {
+        tokio::time::timeout(
+            PRAZO_PARA_AUTORIZAR,
+            self.aceitar_ate_o_codigo(base_do_site),
+        )
+        .await
+        .map_err(|_| {
+            DomainError::InfrastructureError("a autorização não foi concluída no navegador".into())
+        })?
     }
 
-    async fn aceitar_ate_o_codigo(&self) -> DomainResult<String> {
+    async fn aceitar_ate_o_codigo(&self, base_do_site: &str) -> DomainResult<String> {
+        let pronto = |situacao: &str| {
+            format!(
+                "{}/autorizar-app/pronto?situacao={situacao}",
+                base_do_site.trim_end_matches('/')
+            )
+        };
         loop {
             let (mut conexao, _) = self.ouvinte.accept().await.map_err(|e| {
                 DomainError::InfrastructureError(format!("o navegador não chegou: {e}"))
@@ -125,11 +134,11 @@ impl PedidoDeAutorizacao {
 
             match ler_resposta(&alvo, &self.estado) {
                 Resposta::Codigo(code) => {
-                    responder(&mut conexao, PAGINA_DE_SUCESSO).await;
+                    redirecionar(&mut conexao, &pronto("autorizado")).await;
                     return Ok(code);
                 }
                 Resposta::Recusado => {
-                    responder(&mut conexao, PAGINA_DE_RECUSA).await;
+                    redirecionar(&mut conexao, &pronto("cancelado")).await;
                     return Err(DomainError::AcessoRecusado);
                 }
                 // Favicon, aba velha, alguém curioso batendo na porta: responde e
@@ -199,6 +208,20 @@ async fn primeira_linha(conexao: &mut TcpStream) -> Option<String> {
     partes.next().map(str::to_string)
 }
 
+/// Manda a aba para a página do site que conta o desfecho.
+///
+/// 🔑 **O servidor local não desenha tela.** A página de "pronto" mora no site,
+/// com a mesma capa da entrada do app (dono, 2026-09-16: a de antes, texto
+/// cinza num fundo preto, "também precisa melhorar"). O navegador acabou de
+/// falar com o site, então a rede está lá.
+async fn redirecionar(conexao: &mut TcpStream, destino: &str) {
+    let resposta = format!(
+        "HTTP/1.1 303 See Other\r\nLocation: {destino}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+    );
+    let _ = conexao.write_all(resposta.as_bytes()).await;
+    let _ = conexao.shutdown().await;
+}
+
 async fn responder(conexao: &mut TcpStream, corpo: &str) {
     let resposta = format!(
         "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{corpo}",
@@ -239,9 +262,9 @@ fn desafio_de(verificador: &str) -> String {
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(Sha256::digest(verificador.as_bytes()))
 }
 
-const PAGINA_DE_SUCESSO: &str = "<!doctype html><meta charset=utf-8><title>Autorizado</title><body style=\"font-family:system-ui;background:#0a0a0a;color:#e5e5e5;display:grid;place-items:center;height:100vh;margin:0\"><div style=\"text-align:center\"><h1>Computador autorizado</h1><p>Pode fechar esta aba e voltar ao VintageLightbox.</p></div>";
-const PAGINA_DE_RECUSA: &str = "<!doctype html><meta charset=utf-8><title>Cancelado</title><body style=\"font-family:system-ui;background:#0a0a0a;color:#e5e5e5;display:grid;place-items:center;height:100vh;margin:0\"><div style=\"text-align:center\"><h1>Autorização cancelada</h1><p>Nada foi liberado. Pode fechar esta aba.</p></div>";
-const PAGINA_DE_ERRO: &str = "<!doctype html><meta charset=utf-8><title>VintageLightbox</title><body style=\"font-family:system-ui;background:#0a0a0a;color:#e5e5e5;display:grid;place-items:center;height:100vh;margin:0\"><p>Esta janela é do VintageLightbox. Volte ao aplicativo para autorizar.</p>";
+/// O que vê quem chega a esta porta sem ser a volta da autorização (o favicon,
+/// uma aba velha). Sem imagem de fora: é uma página do próprio app.
+const PAGINA_DE_ERRO: &str = "<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width'><title>VintageLightbox</title><body style=\"margin:0;min-height:100vh;display:grid;place-items:center;background:radial-gradient(ellipse at 60% 40%,#3a2616,#140d09 70%);color:#eadcc3;font-family:Georgia,serif\"><div style=\"text-align:center;padding:24px\"><div style=\"letter-spacing:.35em;font:600 11px system-ui;color:#d9a441;text-transform:uppercase\">VintageLightbox</div><p style=\"font-size:20px;margin:16px 0 0\">Esta janela é do VintageLightbox. Volte ao aplicativo para autorizar.</p></div>";
 
 #[cfg(test)]
 mod testes {
@@ -324,6 +347,7 @@ mod testes {
         let estado = pedido.estado.clone();
 
         let navegador = tokio::spawn(async move {
+            let mut respostas = Vec::new();
             // Primeiro o favicon, que o navegador pede sozinho: se ele encerrasse
             // a espera, a autorização morreria antes do código.
             for alvo in [
@@ -336,10 +360,23 @@ mod testes {
                     .unwrap();
                 let mut resposta = String::new();
                 c.read_to_string(&mut resposta).await.unwrap();
+                respostas.push(resposta);
             }
+            respostas
         });
 
-        assert_eq!(pedido.esperar_codigo().await.unwrap(), "cod-1");
-        navegador.await.unwrap();
+        assert_eq!(
+            pedido.esperar_codigo("http://site.test/").await.unwrap(),
+            "cod-1"
+        );
+        let respostas = navegador.await.unwrap();
+        assert!(respostas[0].starts_with("HTTP/1.1 200"), "{}", respostas[0]);
+        assert!(respostas[1].starts_with("HTTP/1.1 303"), "{}", respostas[1]);
+        assert!(
+            respostas[1]
+                .contains("Location: http://site.test/autorizar-app/pronto?situacao=autorizado"),
+            "{}",
+            respostas[1]
+        );
     }
 }

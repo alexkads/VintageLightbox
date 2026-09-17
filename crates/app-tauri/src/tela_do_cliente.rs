@@ -48,6 +48,7 @@ pub async fn abrir(app: &AppHandle) -> Result<(), ErroDaPonte> {
     let construtor = WebviewWindowBuilder::new(app, ROTULO, tela(ROTA));
     let mut construtor = crate::ambiente::armazenamento(construtor, app.path().app_data_dir().ok())
         .title(crate::ambiente::titulo("Tela do cliente"))
+        .background_color(tauri::window::Color(0, 0, 0, 255))
         .inner_size(1280.0, 800.0)
         .visible(false)
         .on_navigation(decidir);

@@ -273,7 +273,7 @@ impl PosVendaApi for PosVendaApiHttp {
         let pedido = PedidoDeAutorizacao::novo().await?;
         (self.abridor)(&pedido.url(&self.site));
 
-        let code = pedido.esperar_codigo().await?;
+        let code = pedido.esperar_codigo(&self.site).await?;
 
         let resposta = self
             .client

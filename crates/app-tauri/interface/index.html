@@ -4,8 +4,12 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>VintageLightbox</title>
-    <script type="module" crossorigin src="/assets/index-4KUmO0Ro.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-KE5FZYxv.css">
+    <!-- A cor da capa enquanto o app confere a sessão: sem clarão branco na
+         abertura (dono, 2026-09-16). A janela nativa nasce com a mesma cor
+         (main.rs). Depois disso vale o tema (`app.tsx` marca `pronto`). -->
+    <style>html:not(.pronto),html:not(.pronto) body{--lightningcss-light: ;--lightningcss-dark:initial;color-scheme:dark;background:#140d09}</style>
+    <script type="module" crossorigin src="/assets/index-BUQvdcI4.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-Bi5mNo2r.css">
   </head>
   <body class="antialiased">
     <div id="raiz"></div>
