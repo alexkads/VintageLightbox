@@ -104,8 +104,9 @@ impl Revelacao {
     }
 
     fn quer_o_bruto(&self) -> bool {
-        self.vista()
-            .is_some_and(|(cena, vista)| zoom::precisa_do_bruto(&self.navegacao.zoom, &vista, &cena))
+        self.vista().is_some_and(|(cena, vista)| {
+            zoom::precisa_do_bruto(&self.navegacao.zoom, &vista, &cena)
+        })
     }
 
     /// Chamado a cada quadro: decide se é hora de buscar ou de largar o bruto.
@@ -208,7 +209,8 @@ impl Revelacao {
             return;
         };
         if let Some(aberta) = self.aberta.as_mut() {
-            let rgba = image::RgbaImage::from_raw(copia.largura, copia.altura, (*copia.pixels).clone());
+            let rgba =
+                image::RgbaImage::from_raw(copia.largura, copia.altura, (*copia.pixels).clone());
             aberta.bruta = rgba.map(image::DynamicImage::ImageRgba8);
             aberta.origem = Some(copia);
         }

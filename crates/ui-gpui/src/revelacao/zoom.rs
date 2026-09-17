@@ -427,7 +427,10 @@ mod testes {
         let centro = centro_em_torno_de(&v, 2., ponto, &c);
         let nova = posicionar(2., centro, &c);
         let antes = ((ponto.x - v.x) / v.escala, (ponto.y - v.y) / v.escala);
-        let depois = ((ponto.x - nova.x) / nova.escala, (ponto.y - nova.y) / nova.escala);
+        let depois = (
+            (ponto.x - nova.x) / nova.escala,
+            (ponto.y - nova.y) / nova.escala,
+        );
         assert!((antes.0 - depois.0).abs() < 0.01 && (antes.1 - depois.1).abs() < 0.01);
     }
 
@@ -455,8 +458,11 @@ mod testes {
     fn a_caixa_pequena_nao_amplia_e_a_grande_enche_a_area() {
         let c = cena();
         let v = posicionar(0.5, Ponto::CENTRO, &c);
-        assert!(zoom_da_caixa(&v, Ponto { x: 10., y: 10. }, Ponto { x: 14., y: 30. }, &c).is_none());
-        let z = zoom_da_caixa(&v, Ponto { x: 0., y: 150. }, Ponto { x: 500., y: 400. }, &c).unwrap();
+        assert!(
+            zoom_da_caixa(&v, Ponto { x: 10., y: 10. }, Ponto { x: 14., y: 30. }, &c).is_none()
+        );
+        let z =
+            zoom_da_caixa(&v, Ponto { x: 0., y: 150. }, Ponto { x: 500., y: 400. }, &c).unwrap();
         assert_eq!(z.nivel, Nivel::Razao(2.));
     }
 

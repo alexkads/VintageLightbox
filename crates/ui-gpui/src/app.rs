@@ -41,7 +41,7 @@ use crate::biblioteca::marcacao::Marcador;
 use crate::biblioteca::tela::Biblioteca;
 use crate::biblioteca::tela::Classificou;
 use crate::caixa::tela::{Caixa, PedidoDoCaixa};
-use crate::cliente::{monitor_do_cliente, Cliente, ParaRevelar};
+use crate::cliente::{area_do_cliente, monitor_do_cliente, Cliente, ParaRevelar};
 use crate::configuracoes::Configuracoes;
 use crate::entrada::{Entrada, Entrou};
 use crate::exportacao::porta::Exportador;
@@ -59,8 +59,8 @@ use crate::revelacao::sincronizacao;
 use crate::revelacao::tela::{PedidoDaRevelacao, Revelacao};
 use crate::sessoes::arquivos::SeletorDeFotos;
 use crate::sessoes::detalhe::{Detalhe, FotoARevelar, Pedido as DetalhePedido};
-use crate::sessoes::retencao::{PedidoDaRetencao, Retencao};
 use crate::sessoes::nova::tela::{NovaSessao, PedidoDaNova, PortasDaNova};
+use crate::sessoes::retencao::{PedidoDaRetencao, Retencao};
 use crate::sessoes::tela::{Escolhida, NovaPedida, Sessoes};
 use crate::tema;
 
@@ -2231,22 +2231,38 @@ impl Aplicativo {
             return;
         };
 
-        // A janela nasce em tela cheia, no monitor escolhido, sem barra de
-        // título e sem poder ser movida: quem está do outro lado dela não tem
-        // por que poder arrastá-la, e um título escrito "VintageLightbox" sobre
-        // a foto é exatamente o que uma apresentação não quer.
+        // 🚨 **Nunca em tela cheia** (dono, 17/set/2026). Tela cheia no macOS é
+        // um *Space* próprio, e num Mac de um monitor só — que é como esta tela
+        // se confere (D10) — ela engolia o app inteiro. `area_do_cliente` decide
+        // o tamanho pelo que existe: o monitor todo quando ela tem um só para
+        // ela, uma prévia centrada quando divide a tela com o app.
+        let monitor_proprio = Some(escolhida) != principal;
+        let area = cx
+            .displays()
+            .iter()
+            .find(|tela| tela.id() == escolhida)
+            .map(|tela| area_do_cliente(tela.bounds(), monitor_proprio))
+            // Sem os limites do monitor não há como posicionar nada — e uma
+            // janela de tamanho zero é pior que uma no meio da tela.
+            .unwrap_or_else(|| {
+                gpui::Bounds::centered(None, gpui::size(gpui::px(1100.), gpui::px(720.)), cx)
+            });
+
+        // Com monitor próprio ela é a tela do cliente: sem barra de título e sem
+        // poder ser movida, porque quem está do outro lado não tem por que
+        // arrastá-la e um título escrito "VintageLightbox" sobre a foto é o que
+        // uma apresentação não quer. Dividindo a tela com o app ela é prévia do
+        // **operador**, e precisa dos dois — sem barra não há por onde pegar, e
+        // uma prévia que não sai da frente é estorvo.
         let opcoes = gpui::WindowOptions {
-            window_bounds: Some(gpui::WindowBounds::Fullscreen(
-                cx.displays()
-                    .iter()
-                    .find(|tela| tela.id() == escolhida)
-                    .map(|tela| tela.bounds())
-                    .unwrap_or_default(),
-            )),
+            window_bounds: Some(gpui::WindowBounds::Windowed(area)),
             display_id: Some(escolhida),
-            titlebar: None,
-            is_movable: false,
-            is_resizable: false,
+            titlebar: (!monitor_proprio).then(|| gpui::TitlebarOptions {
+                title: Some("Tela do cliente".into()),
+                ..Default::default()
+            }),
+            is_movable: !monitor_proprio,
+            is_resizable: !monitor_proprio,
             is_minimizable: false,
             window_background: gpui::WindowBackgroundAppearance::Opaque,
             ..Default::default()

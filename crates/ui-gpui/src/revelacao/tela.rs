@@ -21,9 +21,8 @@ use domain::services::PreviewType;
 use domain::value_objects::CropSettings;
 use gpui::AnimationExt;
 use gpui::{
-    canvas, div, prelude::*, px, AnyElement, Bounds, Context, Entity, MouseButton,
-    MouseMoveEvent, MouseUpEvent, Pixels, RenderImage, SharedString,
-    Subscription, Task, Window,
+    canvas, div, prelude::*, px, AnyElement, Bounds, Context, Entity, MouseButton, MouseMoveEvent,
+    MouseUpEvent, Pixels, RenderImage, SharedString, Subscription, Task, Window,
 };
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::input::{InputEvent, InputState};
@@ -53,10 +52,10 @@ use infrastructure::transformacao;
 mod enquadrar;
 /// O zoom no palco e o Navegador.
 mod navegacao;
-/// O bruto em resolução cheia quando o zoom passa da cópia.
-mod resolucao;
 /// A coluna das predefinições.
 mod predefinicoes;
+/// O bruto em resolução cheia quando o zoom passa da cópia.
+mod resolucao;
 
 /// A coluna da direita: cabeçalho, abas sRGB/RGB, painéis e gráficos.
 mod painel;
@@ -1732,43 +1731,43 @@ impl Revelacao {
                             .overflow_hidden(),
                         cx,
                     )
-                        // 🔑 **A foto de antes fica embaixo, inteira, e a nova
-                        // entra ganhando opacidade por cima.** Sem a de baixo o
-                        // efeito seria a foto surgir do fundo preto — que é pior
-                        // do que o corte seco, porque pisca. Ver
-                        // `CRUZAMENTO_DA_FOTO`.
-                        .children(
-                            self.saindo
-                                .clone()
-                                .map(|anterior| self.foto_na_vista(anterior)),
-                        )
-                        .child(match self.saindo.as_ref() {
-                            None => self.foto_na_vista(imagem.clone()).into_any_element(),
-                            Some(_) => self
-                                .foto_na_vista(imagem.clone())
-                                .with_animation(
-                                    // 🚨 O id muda a cada cruzamento: repetido, o
-                                    // GPUI reaproveita o estado da animação
-                                    // anterior e a segunda troca nasce no fim.
-                                    SharedString::from(format!("cruzamento-{}", self.cruzamento)),
-                                    gpui::Animation::new(CRUZAMENTO_DA_FOTO)
-                                        .with_easing(gpui::ease_out_quint()),
-                                    |foto, quanto| foto.opacity(quanto),
-                                )
-                                .into_any_element(),
-                        })
-                        .children(self.caixa_de_zoom())
-                        .children(self.overlay_de_corte(cx))
-                        // O `canvas` mede o palco e é onde o arrasto se liga:
-                        // registrar ouvinte de mouse exige estar na fase de
-                        // pintura, e um `div` comum não chega lá.
-                        .child(self.medida_e_arrasto(cx))
-                        // "− Encaixar +", como no canto do palco do site; no
-                        // Enquadrar não há zoom, e o lugar é do transferidor.
-                        .when(self.edicao.is_none(), |palco| {
-                            palco.child(self.controle_de_zoom(cx))
-                        })
-                        .children(self.folha_de_atalhos(cx)),
+                    // 🔑 **A foto de antes fica embaixo, inteira, e a nova
+                    // entra ganhando opacidade por cima.** Sem a de baixo o
+                    // efeito seria a foto surgir do fundo preto — que é pior
+                    // do que o corte seco, porque pisca. Ver
+                    // `CRUZAMENTO_DA_FOTO`.
+                    .children(
+                        self.saindo
+                            .clone()
+                            .map(|anterior| self.foto_na_vista(anterior)),
+                    )
+                    .child(match self.saindo.as_ref() {
+                        None => self.foto_na_vista(imagem.clone()).into_any_element(),
+                        Some(_) => self
+                            .foto_na_vista(imagem.clone())
+                            .with_animation(
+                                // 🚨 O id muda a cada cruzamento: repetido, o
+                                // GPUI reaproveita o estado da animação
+                                // anterior e a segunda troca nasce no fim.
+                                SharedString::from(format!("cruzamento-{}", self.cruzamento)),
+                                gpui::Animation::new(CRUZAMENTO_DA_FOTO)
+                                    .with_easing(gpui::ease_out_quint()),
+                                |foto, quanto| foto.opacity(quanto),
+                            )
+                            .into_any_element(),
+                    })
+                    .children(self.caixa_de_zoom())
+                    .children(self.overlay_de_corte(cx))
+                    // O `canvas` mede o palco e é onde o arrasto se liga:
+                    // registrar ouvinte de mouse exige estar na fase de
+                    // pintura, e um `div` comum não chega lá.
+                    .child(self.medida_e_arrasto(cx))
+                    // "− Encaixar +", como no canto do palco do site; no
+                    // Enquadrar não há zoom, e o lugar é do transferidor.
+                    .when(self.edicao.is_none(), |palco| {
+                        palco.child(self.controle_de_zoom(cx))
+                    })
+                    .children(self.folha_de_atalhos(cx)),
                 )
                 .into_any_element(),
             // 🔑 **Duas frases, e a diferença é se há o que esperar.** Enquanto
@@ -1824,7 +1823,9 @@ impl Revelacao {
                         if !fase.bubble() {
                             return;
                         }
-                        esta.update(cx, |tela, cx| tela.mover_no_corte(evento.position, window, cx));
+                        esta.update(cx, |tela, cx| {
+                            tela.mover_no_corte(evento.position, window, cx)
+                        });
                     }
                 });
 
@@ -1852,7 +1853,6 @@ impl Revelacao {
         self.edicao.as_ref()?;
         Some(self.painel_de_corte(cx))
     }
-
 }
 
 /// O que a Revelação pede à raiz — os botões que o site tem na barra dele e que
@@ -2287,7 +2287,9 @@ fn pilula(
         .py(px(4.))
         .rounded(px(4.))
         .text_xs()
-        .when(ligada, |b| b.bg(gpui::rgb(0xfbbf24)).text_color(gpui::black()))
+        .when(ligada, |b| {
+            b.bg(gpui::rgb(0xfbbf24)).text_color(gpui::black())
+        })
         .when(!ligada, |b| {
             b.bg(fundo)
                 .text_color(texto.opacity(0.9))
@@ -2300,8 +2302,8 @@ fn pilula(
 #[cfg(test)]
 mod testes {
     use super::*;
-    use biblioteca_core::selecao::Modificadores;
     use crate::biblioteca::miniaturas::Miniatura;
+    use biblioteca_core::selecao::Modificadores;
 
     use gpui::TestAppContext;
     use image::{DynamicImage, Rgba, RgbaImage};
@@ -4017,7 +4019,11 @@ mod testes {
 
                 tela.recortar(biblioteca_core::acervo::Filtro::Todas, cx);
                 tela.clicar_na_tira(3, Modificadores::default(), window, cx);
-                assert_eq!(*tela.marcadas(), BTreeSet::from([3]), "fora do lote recomeça");
+                assert_eq!(
+                    *tela.marcadas(),
+                    BTreeSet::from([3]),
+                    "fora do lote recomeça"
+                );
             })
             .expect("a janela deve estar aberta");
     }
@@ -4235,7 +4241,11 @@ mod testes {
 
                 tela.prever(None, cx);
                 tela.aplicar_preset(&pb, window, cx);
-                assert_eq!(tela.ajustes_na_tela(), na_previa, "o clique dá a mesma foto");
+                assert_eq!(
+                    tela.ajustes_na_tela(),
+                    na_previa,
+                    "o clique dá a mesma foto"
+                );
             })
             .expect("a janela deve estar aberta");
     }
@@ -4298,7 +4308,10 @@ mod testes {
     #[gpui::test]
     fn apagar_pergunta_e_so_o_sim_apaga(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
-        let minha = Preset::user("Retrato".into(), PresetAdjustments::vazia().com("exposure", 1.0));
+        let minha = Preset::user(
+            "Retrato".into(),
+            PresetAdjustments::vazia().com("exposure", 1.0),
+        );
         let id = minha.id;
         let guarda = Arc::new(GuardaDeMentira::default());
         let janela = com_guarda(
@@ -4368,7 +4381,10 @@ mod testes {
     #[gpui::test]
     fn renomear_no_lugar_comeca_com_o_nome_e_fecha_ao_confirmar(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
-        let minha = Preset::user("Retrato".into(), PresetAdjustments::vazia().com("exposure", 1.0));
+        let minha = Preset::user(
+            "Retrato".into(),
+            PresetAdjustments::vazia().com("exposure", 1.0),
+        );
         let id = minha.id;
         let guarda = Arc::new(GuardaDeMentira::default());
         let janela = com_guarda(
@@ -4431,7 +4447,10 @@ mod testes {
                 assert_eq!(nomes(tela, cx)[0], "Preto e branco clássico");
 
                 tela.deslocar_preset(Grupo::Sistema, "sistema:sepia", -1, cx);
-                assert_eq!(nomes(tela, cx)[..2], ["Sépia à moda antiga", "Preto e branco clássico"]);
+                assert_eq!(
+                    nomes(tela, cx)[..2],
+                    ["Sépia à moda antiga", "Preto e branco clássico"]
+                );
 
                 // O estilo do estúdio vai para o topo, como no gabarito.
                 tela.comecar_arrasto_de_preset(
@@ -4699,7 +4718,11 @@ mod testes {
             .expect("a janela deve estar aberta");
 
         let gravado = gravador.gravado();
-        assert_eq!(gravado.len(), 1, "girar gravou uma vez, sair não grava de novo");
+        assert_eq!(
+            gravado.len(),
+            1,
+            "girar gravou uma vez, sair não grava de novo"
+        );
         assert_eq!(gravado[0].2.rotacao, Some(1));
     }
 
@@ -4723,9 +4746,16 @@ mod testes {
                 tela.palco = Bounds::new(gpui::point(px(0.), px(0.)), gpui::size(px(80.), px(80.)));
                 tela.alternar_corte(window, cx);
 
-                tela.comecar_arrasto(Some(corte::Alca::Esquerda), gpui::point(px(0.), px(40.)), cx);
+                tela.comecar_arrasto(
+                    Some(corte::Alca::Esquerda),
+                    gpui::point(px(0.), px(40.)),
+                    cx,
+                );
                 tela.mover_no_corte(gpui::point(px(20.), px(40.)), window, cx);
-                assert!(gravador.gravado().is_empty(), "no meio do arrasto não grava");
+                assert!(
+                    gravador.gravado().is_empty(),
+                    "no meio do arrasto não grava"
+                );
                 tela.soltar_no_corte(cx);
 
                 assert!(tela.cortando(), "soltar não fecha a ferramenta");
@@ -4760,7 +4790,10 @@ mod testes {
                 tela.definir_angulo(10., cx);
                 let torto = tela.corte_atual();
                 assert_eq!(torto.angle(), 10.);
-                assert!(torto.crop_width() < 1., "encolheu para não mostrar canto vazio");
+                assert!(
+                    torto.crop_width() < 1.,
+                    "encolheu para não mostrar canto vazio"
+                );
 
                 tela.definir_angulo(0., cx);
                 let reto = tela.corte_atual();
@@ -5112,7 +5145,8 @@ mod testes {
         janela
             .update(cx, |tela, window, cx| {
                 tela.abrir(foto("retrato.jpg"), window, cx);
-                tela.palco = Bounds::new(gpui::point(px(0.), px(0.)), gpui::size(px(160.), px(80.)));
+                tela.palco =
+                    Bounds::new(gpui::point(px(0.), px(0.)), gpui::size(px(160.), px(80.)));
                 tela.alternar_corte(window, cx);
                 tela.travar_proporcao(Some(1.), cx);
 
@@ -5124,7 +5158,11 @@ mod testes {
                 assert!((w - h).abs() <= 1., "1:1 na hora: {w} × {h}");
 
                 // Encolhe pela esquerda: a altura acompanha a largura.
-                tela.comecar_arrasto(Some(corte::Alca::Esquerda), gpui::point(px(40.), px(40.)), cx);
+                tela.comecar_arrasto(
+                    Some(corte::Alca::Esquerda),
+                    gpui::point(px(40.), px(40.)),
+                    cx,
+                );
                 tela.mover_no_corte(gpui::point(px(60.), px(40.)), window, cx);
                 tela.soltar_no_corte(cx);
                 let (w, h) = quadrado(tela);
@@ -5360,7 +5398,9 @@ mod testes {
     fn foto_comprada_nao_se_zera_e_a_so_enquadrada_conta(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         for id in ["id-comprada.jpg", "id-girada.jpg"] {
-            previews.save_preview(id, &foto_cinza()).expect("gravar preview");
+            previews
+                .save_preview(id, &foto_cinza())
+                .expect("gravar preview");
         }
 
         let gravador = Arc::new(GravadorDeMentira::default());

@@ -18,17 +18,17 @@ pub mod cliente;
 pub mod configuracoes;
 /// Fotografar a janela e seguir um roteiro, só em build de depuração.
 pub mod depuracao;
-/// Quando o app acaba — fechar a janela principal encerra o processo.
-pub mod encerramento;
-pub mod entrada;
 /// O app inteiro de ponta a ponta, com as portas de mentira. Só testes.
 #[cfg(test)]
 mod e2e;
+/// Quando o app acaba — fechar a janela principal encerra o processo.
+pub mod encerramento;
+pub mod entrada;
+/// As peças do shadcn do site (botões, selos, cabeçalho de página).
+pub mod estilo;
 /// O estresse: volume, repetição e desordem, com números medidos. Só testes.
 #[cfg(test)]
 mod estresse;
-/// As peças do shadcn do site (botões, selos, cabeçalho de página).
-pub mod estilo;
 pub mod exportacao;
 /// O fluxo dos onze passos, de ponta a ponta. Só testes.
 #[cfg(test)]
@@ -42,10 +42,10 @@ pub mod pos_venda;
 /// Os ícones do site e as imagens da capa, embutidos.
 pub mod recursos;
 pub mod revelacao;
+/// O trabalho que continua com a janela minimizada ou fechada (a bandeja).
+pub mod segundo_plano;
 /// As marcas da triagem desenhadas: nota, etiqueta, sinalizador e balcão.
 /// Vivem na raiz porque duas telas as usam — a grade da Biblioteca e a do ensaio.
 pub mod selos;
-/// O trabalho que continua com a janela minimizada ou fechada (a bandeja).
-pub mod segundo_plano;
 pub mod sessoes;
 pub mod tema;

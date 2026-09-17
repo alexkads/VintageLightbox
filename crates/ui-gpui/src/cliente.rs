@@ -25,8 +25,8 @@ use std::time::Duration;
 use adapters::view_models::PhotoViewModel;
 use domain::value_objects::CropSettings;
 use gpui::{
-    actions, div, ease_in_out, img, prelude::*, px, relative, Animation, AnimationExt, Context,
-    FocusHandle, RenderImage, SharedString, Task, Window,
+    actions, div, ease_in_out, img, point, prelude::*, px, relative, size, Animation, AnimationExt,
+    Bounds, Context, FocusHandle, Pixels, RenderImage, SharedString, Task, Window,
 };
 use infrastructure::transformacao;
 
@@ -103,6 +103,51 @@ pub fn monitor_do_cliente<T: Copy + PartialEq>(todos: &[T], principal: Option<T>
         .find(|id| Some(**id) != principal)
         .or_else(|| todos.first())
         .copied()
+}
+
+/// O tamanho da janela quando **não** há segundo monitor.
+///
+/// 🔑 **É o do app Tauri** (`app-tauri/src/tela_do_cliente.rs`, `inner_size`):
+/// as duas interfaces mostram a mesma tela, e a de cá segue o desenho da de lá
+/// (dono, 2026-09-17). Um número igual dos dois lados também é o que permite
+/// conferir por foto das duas janelas lado a lado.
+const PREVIA: (f32, f32) = (1280., 800.);
+
+/// Onde a segunda tela nasce — e **nunca em tela cheia**.
+///
+/// 🚨 **Era `WindowBounds::Fullscreen`, e isso foi defeito** (dono,
+/// 17/set/2026). Tela cheia no macOS não é uma janela grande: é um *Space*
+/// próprio, que o sistema tira do monitor onde a janela ia nascer e joga por
+/// cima de tudo. Num Mac com um monitor só — que é como esta tela se confere
+/// (D10) — o resultado era o app sumir atrás dela.
+///
+/// Aqui a janela é sempre `Windowed`, e o que muda é o tamanho:
+///
+/// - **Com monitor próprio**, ela recebe os limites dele inteiros, origem
+///   incluída. A origem é o que a coloca no monitor certo: os `Bounds` do GPUI
+///   são globais, e um `display_id` sem origem deixa o sistema escolher.
+/// - **Sem monitor próprio**, ela é uma janela comum de [`PREVIA`], centrada —
+///   como no app Tauri, onde `monitor_do_cliente` devolve `None` com um monitor
+///   só e a janela nasce arrastável. Quem está olhando é o operador, e o que ele
+///   precisa é comparar com o app, não perdê-lo de vista.
+///
+/// Numa tela menor que [`PREVIA`] a janela não estoura o monitor: o tamanho é
+/// limitado ao que existe. Sem isso a origem centrada ficaria **negativa** e a
+/// janela nasceria com o canto fora da tela.
+pub fn area_do_cliente(tela: Bounds<Pixels>, monitor_proprio: bool) -> Bounds<Pixels> {
+    if monitor_proprio {
+        return tela;
+    }
+
+    let largura = px(PREVIA.0).min(tela.size.width);
+    let altura = px(PREVIA.1).min(tela.size.height);
+    Bounds {
+        origin: point(
+            tela.origin.x + (tela.size.width - largura) / 2.,
+            tela.origin.y + (tela.size.height - altura) / 2.,
+        ),
+        size: size(largura, altura),
+    }
 }
 
 pub struct Cliente {
@@ -328,6 +373,18 @@ impl Cliente {
     }
 }
 
+/// O tamanho da camada que entra, como fração da janela, ao longo do cruzamento.
+///
+/// 🚨 **Ela vai de 0,97 a 1 — nunca acima** (dono, 17/set/2026: *"a foto tá
+/// ficando cortada"*). Era de 1,03 a 1, e o zoom começando **acima** da moldura
+/// deixava a camada maior que a janela durante o cruzamento inteiro: o
+/// `ObjectFit::Contain` de dentro fazia a foto caber na camada, e a camada não
+/// cabia na tela. O movimento percebido é o mesmo vindo de baixo, e assim a foto
+/// nunca passa da tela.
+fn escala_de_entrada(delta: f32) -> f32 {
+    0.97 + 0.03 * delta
+}
+
 /// O que o rodapé da segunda tela mostra.
 struct InfoDoRodape {
     nome: SharedString,
@@ -344,6 +401,11 @@ impl Cliente {
     /// cruzamento. `ObjectFit::Contain` é o padrão do `img`: a foto cabe
     /// inteira, sem corte e sem esticar. Numa apresentação, cobrir a tela
     /// cortaria justamente o enquadramento que se está mostrando.
+    ///
+    /// 🚨 **`Contain` só garante isso se a moldura couber na tela.** A camada é
+    /// dimensionada pela animação abaixo, e enquanto ela começava em 1,03 a foto
+    /// cabia numa moldura maior que a janela — o `Contain` fazia o trabalho dele
+    /// e o resultado saía pelas bordas assim mesmo.
     ///
     /// ⚠️ **A que sai continua desenhada com opacidade zero** depois do
     /// cruzamento, e é de propósito: tirá-la no mesmo quadro em que a de cima
@@ -364,9 +426,13 @@ impl Cliente {
                 (id, troca),
                 Animation::new(CRUZAMENTO).with_easing(ease_in_out),
                 move |camada, delta| {
-                    // ✨ O passo à frente do site: a que entra chega de 1,03 a
-                    // 1; a que sai fica onde está e some.
-                    let escala = if saindo { 1.0 } else { 1.03 - 0.03 * delta };
+                    // ✨ O passo à frente do site: a que entra cresce até o
+                    // tamanho da moldura; a que sai fica onde está e some.
+                    let escala = if saindo {
+                        1.0
+                    } else {
+                        escala_de_entrada(delta)
+                    };
                     let sobra = (1.0 - escala) / 2.0;
                     camada
                         .top(relative(sobra))
@@ -537,6 +603,107 @@ mod testes {
     #[test]
     fn sem_monitor_nao_ha_onde_abrir() {
         assert_eq!(monitor_do_cliente::<u32>(&[], None), None);
+    }
+
+    /// Uma tela de 2560x1440 com origem em (1920, 0): o segundo monitor à
+    /// direita do principal.
+    fn segundo_monitor() -> Bounds<Pixels> {
+        Bounds {
+            origin: point(px(1920.), px(0.)),
+            size: size(px(2560.), px(1440.)),
+        }
+    }
+
+    /// Com monitor próprio, a janela toma o monitor inteiro — **origem
+    /// incluída**.
+    ///
+    /// 🔑 A origem é o que a coloca lá. Os `Bounds` do GPUI são globais; devolver
+    /// só o tamanho abriria uma janela do tamanho certo no monitor errado, que é
+    /// exatamente a queixa de quem plugou o segundo monitor e não viu nada nele.
+    #[test]
+    fn com_monitor_proprio_ela_toma_o_monitor_inteiro() {
+        let tela = segundo_monitor();
+        assert_eq!(area_do_cliente(tela, true), tela);
+    }
+
+    /// Sem monitor próprio ela é prévia: centrada, e **não engole a tela**.
+    ///
+    /// 🚨 É a queixa do dono de 17/set/2026 — em tela cheia, num Mac de um
+    /// monitor só, a segunda tela cobria o app e não havia mais triagem atrás
+    /// dela.
+    #[test]
+    fn sem_monitor_proprio_ela_e_uma_previa_centrada() {
+        let tela = segundo_monitor();
+        let area = area_do_cliente(tela, false);
+
+        assert_eq!(
+            (f32::from(area.size.width), f32::from(area.size.height)),
+            PREVIA,
+            "o tamanho é o do app Tauri, para as duas janelas serem comparáveis"
+        );
+        assert!(
+            area.size.width < tela.size.width && area.size.height < tela.size.height,
+            "a prévia não pode ocupar a tela toda: {area:?}"
+        );
+        assert!(
+            area.origin.x > tela.origin.x && area.origin.y > tela.origin.y,
+            "ela nasce dentro da tela, não colada no canto: {area:?}"
+        );
+
+        // Centrada: a sobra de cada lado é a mesma. Meio pixel de tolerância
+        // porque a conta é em `f32` — exigir igualdade exata aqui seria um teste
+        // sobre aritmética de ponto flutuante, e não sobre onde a janela nasce.
+        let centrada =
+            |antes: Pixels, depois: Pixels| (f32::from(antes) - f32::from(depois)).abs() < 0.5;
+        assert!(
+            centrada(
+                area.origin.x - tela.origin.x,
+                (tela.origin.x + tela.size.width) - (area.origin.x + area.size.width)
+            ),
+            "sobra desigual na horizontal: {area:?}"
+        );
+        assert!(
+            centrada(
+                area.origin.y - tela.origin.y,
+                (tela.origin.y + tela.size.height) - (area.origin.y + area.size.height)
+            ),
+            "sobra desigual na vertical: {area:?}"
+        );
+    }
+
+    /// Numa tela menor que a janela, ela encolhe em vez de sair pela borda.
+    ///
+    /// ⚠️ Sem o limite, a conta da centralização daria origem **negativa** e o
+    /// canto da janela nasceria fora da tela — sem barra de título à vista para
+    /// trazê-la de volta.
+    #[test]
+    fn numa_tela_pequena_a_janela_cabe_nela() {
+        let pequena = Bounds {
+            origin: point(px(0.), px(0.)),
+            size: size(px(1024.), px(640.)),
+        };
+        let area = area_do_cliente(pequena, false);
+
+        assert_eq!(area.size, pequena.size);
+        assert_eq!(area.origin, pequena.origin);
+    }
+
+    /// A escala do cruzamento **nunca passa de 1** — senão a moldura é maior que
+    /// a janela e a foto entra cortada (dono, 17/set/2026).
+    #[test]
+    fn a_foto_que_entra_nunca_e_maior_que_a_tela() {
+        for passo in 0..=100 {
+            let delta = passo as f32 / 100.0;
+            let escala = escala_de_entrada(delta);
+            assert!(
+                escala <= 1.0,
+                "com delta {delta} a camada ficou em {escala}, maior que a tela"
+            );
+            assert!(escala > 0.0);
+        }
+        // E ela termina exatamente na moldura: parar antes deixaria uma tarja
+        // preta permanente em volta da foto.
+        assert_eq!(escala_de_entrada(1.0), 1.0);
     }
 
     /// O rodapé conta onde estamos, o nome e a nota — as cinco estrelas.
