@@ -11,6 +11,7 @@
 
 mod ambiente;
 mod api;
+mod bandeja;
 mod bytes;
 mod catalogo;
 mod comandos;
@@ -145,6 +146,11 @@ fn main() {
             }
 
             abrir_principal(app)?;
+            bandeja::criar(app.handle())?;
+            bandeja::vigiar_minimizar(app.handle());
+            // A bandeja nasce depois da primeira volta dos envios: já com o
+            // estado de agora, e não "tudo sincronizado" até a próxima.
+            sincronizacao::avisar_contagem(app.handle());
             if diagnostico {
                 let mut janela = WebviewWindowBuilder::new(
                     app,
@@ -168,7 +174,8 @@ fn main() {
                     && sincronizacao::ha_envio_pendente(janela.app_handle())
                 {
                     api.prevent_close();
-                    let _ = janela.hide();
+                    // A bandeja fica mostrando o que ainda sobe.
+                    bandeja::para_a_bandeja(janela.app_handle());
                     janela
                         .app_handle()
                         .state::<sincronizacao::Sincronizador>()
@@ -179,6 +186,18 @@ fn main() {
                         }
                     }
                 }
+            }
+            // Minimizar leva o app para a bandeja (dono, 2026-09-16). O Tauri
+            // não tem evento de "minimizou": a janela avisa que mudou de
+            // tamanho ou perdeu o foco, e aí se pergunta.
+            if janela.label() == "principal"
+                && matches!(
+                    evento,
+                    tauri::WindowEvent::Resized(_) | tauri::WindowEvent::Focused(false)
+                )
+                && janela.is_minimized().unwrap_or(false)
+            {
+                bandeja::para_a_bandeja(janela.app_handle());
             }
         })
         .build(tauri::generate_context!())
@@ -195,12 +214,7 @@ fn main() {
 /// Traz a janela principal de volta, e com ela o app deixa de terminar sozinho
 /// quando a fila esvaziar.
 fn mostrar_principal(app: &tauri::AppHandle) {
-    if let Some(janela) = app.get_webview_window("principal") {
-        app.state::<sincronizacao::Sincronizador>().manter_aberto();
-        let _ = janela.unminimize();
-        let _ = janela.show();
-        let _ = janela.set_focus();
-    }
+    bandeja::mostrar_janela(app);
 }
 
 /// A pasta do catálogo: `Imagens/VintageLightbox/Catalogo Tauri` (D13).

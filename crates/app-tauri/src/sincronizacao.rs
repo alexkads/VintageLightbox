@@ -364,9 +364,17 @@ pub fn contagem(app: &AppHandle) -> Contagem {
         .unwrap_or_default()
 }
 
+/// O que a área temporária da importação ainda tem a fazer.
+pub fn area_temporaria(app: &AppHandle) -> crate::catalogo::importacao::Situacao {
+    app.try_state::<Mutex<Catalogo>>()
+        .and_then(|c| c.lock().expect("catálogo").importacao_situacao().ok())
+        .unwrap_or_default()
+}
+
 /// Há trabalho que fechar a janela interromperia: na fila ou ainda na página.
 pub fn ha_envio_pendente(app: &AppHandle) -> bool {
     contagem(app).pendentes > 0
+        || area_temporaria(app).a_subir > 0
         || app
             .state::<Sincronizador>()
             .na_pagina
@@ -376,9 +384,14 @@ pub fn ha_envio_pendente(app: &AppHandle) -> bool {
 
 /// Avisa as janelas e, se o operador já fechou a janela, termina o app quando a
 /// fila esvazia.
-fn avisar_contagem(app: &AppHandle) {
+pub fn avisar_contagem(app: &AppHandle) {
     let atual = contagem(app);
     let _ = app.emit("fila-de-envios", &atual);
+    let na_pagina = app
+        .state::<Sincronizador>()
+        .na_pagina
+        .load(Ordering::SeqCst);
+    crate::bandeja::atualizar(app, &atual, na_pagina, &area_temporaria(app));
     let fechar = app
         .state::<Sincronizador>()
         .fechar_ao_esvaziar

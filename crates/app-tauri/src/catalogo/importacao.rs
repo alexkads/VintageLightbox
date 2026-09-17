@@ -140,6 +140,15 @@ impl Item {
     }
 }
 
+/// O que falta na área temporária.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct Situacao {
+    /// Classificadas que ainda não subiram (o worker da página as sobe).
+    pub a_subir: i64,
+    /// Esperando nota: ficam aqui até alguém classificar.
+    pub sem_nota: i64,
+}
+
 /// Um id que vira nome de pasta sem surpresa.
 fn id_seguro(id: &str) -> bool {
     !id.is_empty()
@@ -349,6 +358,28 @@ impl Catalogo {
     }
 
     /// Apaga todos os itens de uma galeria. Devolve os ids.
+    /// O que a área temporária ainda tem a fazer: as classificadas que não
+    /// subiram, e as que esperam nota (essas não sobem sozinhas).
+    pub fn importacao_situacao(&self) -> Result<Situacao, ErroDoCatalogo> {
+        Ok(self.banco.query_row(
+            "SELECT
+                 coalesce(sum(json_extract(item, '$.decidida') = 1
+                     AND coalesce(json_extract(item, '$.estado'), '') <> 'pronta'
+                     AND coalesce(json_extract(item, '$.sessaoExcluida'), 0) = 0
+                     AND arquivo IS NOT NULL), 0),
+                 coalesce(sum(coalesce(json_extract(item, '$.decidida'), 0) = 0
+                     AND arquivo IS NOT NULL), 0)
+             FROM importacao",
+            [],
+            |l| {
+                Ok(Situacao {
+                    a_subir: l.get(0)?,
+                    sem_nota: l.get(1)?,
+                })
+            },
+        )?)
+    }
+
     pub fn importacao_apagar_galeria(
         &mut self,
         galeria: &str,
@@ -690,6 +721,39 @@ mod testes {
             c.importacao_gravar(vec![so_novo(novo("a", "g2"))], "t")
                 .unwrap(),
             vec![Gravado::Conflito { id: "a".into() }]
+        );
+    }
+
+    #[test]
+    fn a_situacao_conta_o_que_sobe_e_o_que_espera_nota() {
+        let (_r, mut c) = catalogo();
+        let com = |id: &str, campos: serde_json::Value| {
+            let mut g = novo(id, "g1");
+            for (k, v) in campos.as_object().unwrap() {
+                g.campos.insert(k.clone(), v.clone());
+            }
+            g
+        };
+        c.importacao_gravar(
+            vec![
+                com("a", json!({"decidida": true, "estado": "aguardando"})),
+                com("b", json!({"decidida": true, "estado": "pronta"})),
+                com(
+                    "c",
+                    json!({"decidida": true, "estado": "erro", "sessaoExcluida": true}),
+                ),
+                com("d", json!({"decidida": false})),
+                com("e", json!({})),
+            ],
+            "t",
+        )
+        .unwrap();
+        assert_eq!(
+            c.importacao_situacao().unwrap(),
+            Situacao {
+                a_subir: 1,
+                sem_nota: 2
+            }
         );
     }
 
