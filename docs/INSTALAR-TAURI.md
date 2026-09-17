@@ -77,8 +77,8 @@ O instalador cuida sozinho de:
 - **Silverblue, Kinoite ou Bazzite:** o sistema é imutável e recusa `dnf install`. O instalador
   para e mostra um `sudo rpm-ostree install …`: rode-o, reinicie e rode o instalador de novo.
 - A primeira instalação baixa cerca de 2 GiB de pacotes; a compilação usa mais uns 10 GiB de
-  disco. Com 8 GiB de memória ela funciona, mais devagar: o instalador abre uma compilação por
-  3 GiB. Se ainda assim aparecer `signal: 9` (`SIGKILL`), repita com `… | CARGO_BUILD_JOBS=1 sh`.
+  disco. O instalador abre uma compilação por 4 GiB de memória; com 8 GiB ou menos, feche os
+  outros programas antes. Se ainda assim aparecer `signal: 9` (`SIGKILL`), repita com `… | CARGO_BUILD_JOBS=1 sh`.
 
 ---
 

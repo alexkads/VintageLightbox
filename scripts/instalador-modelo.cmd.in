@@ -816,10 +816,10 @@ diga "compilando (@@MINUTOS@@ minutos na primeira vez)"
 CARGO_TARGET_DIR="$CASA/target-@@APP@@"
 export CARGO_TARGET_DIR
 
-# 🚨 **Uma compilação por 3 GiB de memória.** O cargo abre uma por núcleo, e
+# 🚨 **Uma compilação por 4 GiB de memória.** O cargo abre uma por núcleo, e
 #    com `lto = true` e `codegen-units = 1` cada `rustc` grande passa de 2 GiB.
 #    Num Fedora com 8 GiB e 4 núcleos o `rustc` do gpui morreu por falta de
-#    memória (`signal: 9, SIGKILL`) no meio da compilação. Um CARGO_BUILD_JOBS
+#    memória (`signal: 9, SIGKILL`); com 2 de cada vez, morreu o do ui-gpui. Um CARGO_BUILD_JOBS
 #    já definido vale mais do que esta conta.
 if [ -z "${CARGO_BUILD_JOBS:-}" ]; then
   MEMORIA_GIB=""
@@ -832,7 +832,7 @@ if [ -z "${CARGO_BUILD_JOBS:-}" ]; then
   case "$MEMORIA_GIB:$NUCLEOS" in
     *[!0-9:]*|:*|*:) : ;;
     *)
-      TRABALHOS=$(( MEMORIA_GIB / 3 ))
+      TRABALHOS=$(( MEMORIA_GIB / 4 ))
       [ "$TRABALHOS" -ge 1 ] || TRABALHOS=1
       if [ "$TRABALHOS" -lt "$NUCLEOS" ]; then
         CARGO_BUILD_JOBS="$TRABALHOS"

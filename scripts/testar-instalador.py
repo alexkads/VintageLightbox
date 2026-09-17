@@ -256,7 +256,7 @@ class CasosDoInstalador:
         self.assertEqual((app / "anterior").read_text(), "preservar")
         self.assertIn("CARGO_BUILD_JOBS=1 sh", result.stdout)
 
-    def test_compila_uma_por_3_gib_de_memoria(self):
+    def test_compila_uma_por_4_gib_de_memoria(self):
         self.mock("uname", "echo Linux")
         self.mock("sysctl", "echo 8589934592")
         self.mock("getconf", "echo 8")
