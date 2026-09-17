@@ -123,6 +123,7 @@ struct SessaoEmArquivo {
 
 impl CofreDeSessao for CofreEmArquivo {
     fn guardar(&self, sessao: &Sessao) {
+        let _ = std::fs::remove_file(self.marca_de_saida());
         let guardada = SessaoEmArquivo {
             access_token: sessao.access_token.clone(),
             refresh_token: sessao.refresh_token.clone(),
@@ -147,7 +148,10 @@ impl CofreDeSessao for CofreEmArquivo {
         let Ok(bytes) = std::fs::read(&self.arquivo) else {
             // Sem arquivo ainda: traz, uma vez, a sessão do app GPUI no chaveiro.
             // O macOS pergunta essa vez, e o arquivo evita todas as seguintes.
-            if !self.herdar_do_gpui {
+            // 🚨 **Quem saiu não volta sozinho** (dono, 2026-09-16: "não estou
+            // conseguindo deslogar"). Sem esta marca, sair apagava o arquivo e
+            // a leitura seguinte trazia de novo a sessão do GPUI.
+            if !self.herdar_do_gpui || self.marca_de_saida().exists() {
                 return None;
             }
             let do_gpui = CofreDoSistema::novo().ler()?;
@@ -165,6 +169,14 @@ impl CofreDeSessao for CofreEmArquivo {
 
     fn esquecer(&self) {
         let _ = std::fs::remove_file(&self.arquivo);
+        let _ = std::fs::write(self.marca_de_saida(), b"");
+    }
+}
+
+impl CofreEmArquivo {
+    /// Existe depois de "Sair", e some na próxima entrada.
+    fn marca_de_saida(&self) -> std::path::PathBuf {
+        self.arquivo.with_extension("saiu")
     }
 }
 
@@ -270,6 +282,28 @@ mod testes {
     use super::*;
 
     #[test]
+    fn quem_saiu_nao_herda_a_sessao_do_gpui_ate_entrar_de_novo() {
+        let pasta = tempfile::tempdir().unwrap();
+        // `herdar_do_gpui` ligado: sem a marca, a leitura iria ao chaveiro.
+        let cofre = CofreEmArquivo {
+            arquivo: pasta.path().join("sessao-dev.json"),
+            herdar_do_gpui: true,
+        };
+        let sessao = Sessao {
+            access_token: "a".into(),
+            refresh_token: "r".into(),
+            access_vence_em: 10,
+            refresh_vence_em: 20,
+        };
+        cofre.guardar(&sessao);
+        cofre.esquecer();
+        assert!(cofre.ler().is_none(), "saiu, e a sessão do GPUI não volta");
+        cofre.guardar(&sessao);
+        assert!(!cofre.marca_de_saida().exists());
+        assert_eq!(cofre.ler().unwrap().access_token, "a");
+    }
+
+    #[test]
     fn o_email_sai_da_resposta_do_auth_me() {
         assert_eq!(
             email_da_resposta(br#"{"email":"a@b.c","role":"ADMIN"}"#).as_deref(),
@@ -310,6 +344,7 @@ mod testes {
         }
         cofre.esquecer();
         assert!(!cofre.arquivo.exists());
+        assert!(cofre.marca_de_saida().exists());
         // A pilha local não traz a sessão de produção do app GPUI.
         assert!(cofre.ler().is_none());
     }
