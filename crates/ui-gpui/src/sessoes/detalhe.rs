@@ -47,7 +47,7 @@ use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::progress::Progress;
 use gpui_component::slider::{Slider, SliderEvent, SliderState};
-use gpui_component::{ActiveTheme, Disableable, Selectable, Sizable};
+use gpui_component::{ActiveTheme, Disableable, Sizable};
 use infrastructure::cache::preview_manager::PreviewManager;
 
 use super::altura_da_tira;
@@ -116,8 +116,15 @@ const FILTROS: [(&str, Filtro); 7] = [
 
 /// O que a tela pede à raiz — ela não sabe trocar de tela nem abrir a Revelação.
 pub enum Pedido {
-    /// Voltar para a lista de sessões.
+    /// Voltar para a lista de sessões (ou para o caixa, se veio de lá).
     Voltar,
+    /// Abrir ou recolher o menu lateral: nesta tela o botão dele mora na
+    /// barra de cima, porque a galeria não tem o cabeçalho do painel.
+    AlternarMenu,
+    /// "Negociação…": o balcão com as fotos marcadas.
+    Negociar(Vec<String>),
+    /// "Imprimir…": a folha de impressão com as fotos marcadas (só no desktop).
+    Imprimir(Vec<String>),
     /// A miniatura de uma foto do site chegou ao cache, sob esta chave.
     MiniaturaPronta(String),
     /// Abrir (ou fechar) a segunda tela, a do cliente.
@@ -569,6 +576,34 @@ impl Detalhe {
         self.aberta.as_ref()
     }
 
+    /// A conta do site — o caixa flutuante fala com a API em nome dela.
+    pub fn sessao(&self) -> Option<&Sessao> {
+        self.sessao.as_ref()
+    }
+
+    /// Leva a grade até uma foto — o clique num item do cupom do caixa. Ela
+    /// fica sozinha marcada e em foco, como o `focar` da grade do site. A foto
+    /// fora do recorte fica onde está: trocar o recorte por baixo do operador
+    /// seria pior que não seguir.
+    pub fn focar_foto(&mut self, id: &str, cx: &mut Context<Self>) {
+        if let Some(p) = self.acervo.posicao_de(id) {
+            self.selecao.clicar(p, false, Modificadores::default());
+            cx.notify();
+        }
+    }
+
+    /// Relê a galeria aberta **sem sair dela** — seleção e foco ficam, pela
+    /// mesma tradução por id da releitura depois de uma nota. É o que o caixa
+    /// pede depois de gravar faixa ou negociação por fora desta tela.
+    pub fn reler(&mut self, cx: &mut Context<Self>) {
+        let (Some(sessao), Some(id)) = (self.sessao.clone(), self.galeria_id.clone()) else {
+            return;
+        };
+        self.publicador
+            .abrir_galeria(sessao, id, self.recados.0.clone());
+        self.acompanhar(cx);
+    }
+
     pub fn link(&self) -> Option<&LinkDeAcesso> {
         self.link.as_ref()
     }
@@ -629,6 +664,20 @@ impl Detalhe {
             .collect()
     }
 
+    /// Marca estas fotos (ids da grade) — a seleção que volta da Revelação.
+    ///
+    /// 🔑 *"As fotos selecionadas no Filmstrip da sessão precisam serem
+    /// selecionadas também no filmstrip da revelação"* (dono, 2026-09-14): a
+    /// seleção é uma só, nas duas direções. As que o recorte esconde ficam de
+    /// fora, como na grade.
+    pub fn marcar_ids(&mut self, ids: &[String], cx: &mut Context<Self>) {
+        self.selecao.limpar_tudo();
+        for posicao in ids.iter().filter_map(|id| self.acervo.posicao_de(id)) {
+            self.selecao.marcar(posicao);
+        }
+        cx.notify();
+    }
+
     /// Muda o estado das marcadas — as ações em lote da barra.
     ///
     /// ⚠️ **A comprada e a apagada ficam de fora**, e quem decide isso é o core
@@ -678,6 +727,11 @@ impl Detalhe {
     /// A foto em foco — a que o painel da direita descreve.
     pub fn em_foco(&self) -> Option<&acervo::Foto> {
         self.selecao.foco().and_then(|p| self.acervo.visivel(p))
+    }
+
+    /// A primeira foto do recorte — o que a tela do cliente mostra sem foco.
+    pub fn primeira_visivel(&self) -> Option<&acervo::Foto> {
+        self.acervo.visivel(0)
     }
 
     pub fn posicao_em_foco(&self) -> Option<usize> {
@@ -1774,38 +1828,59 @@ impl Render for Detalhe {
         self.seguir_o_foco();
         self.preparar_formulario_do_cliente(window, cx);
 
+        // 🎨 **As faixas do site**: o cabeçalho de 48 px, a barra da importação
+        // e a dos recortes, cada uma com o traço de baixo, e a grade encostada
+        // nas bordas (`-m-4` na galeria do site). A galeria não tem o cabeçalho
+        // do painel: o botão do menu mora na faixa de cima.
         div()
             .flex()
             .flex_col()
-            .gap(px(10.))
             // 🚨 **Ela é a tela inteira**, e a grade dentro dela é que recebe o
-            // `flex_1`. Foi o contrário disto que deixou a sessão parecendo
-            // vazia: um cabeçalho com `size_full` comendo a coluna toda.
+            // `flex_1`.
             .size_full()
-            .p(px(12.))
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .child(self.cabecalho(cx))
-            .children(self.formulario_do_cliente(cx))
+            .children(
+                self.formulario_do_cliente(cx)
+                    .map(|f| div().p(px(12.)).child(f)),
+            )
             .child(self.envio(cx))
             .child(self.barra_da_grade(cx))
             .when_some(self.erro.clone(), |tela, erro| {
-                tela.child(div().text_xs().text_color(cx.theme().danger).child(erro))
+                tela.child(
+                    div()
+                        .px(px(12.))
+                        .pt(px(8.))
+                        .child(crate::estilo::aviso(erro, true, cx)),
+                )
             })
-            .child(self.corpo(cx))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_h(px(0.))
+                    .p(px(12.))
+                    .child(self.corpo(cx)),
+            )
             .child(self.tira(cx))
     }
 }
 
 impl Detalhe {
-    /// O cabeçalho da sessão: quem é o cliente, o que ela tem, e as duas saídas.
+    /// O cabeçalho da sessão: quem é o cliente, o que ela tem, e as saídas —
+    /// numa faixa de 48 px, como o `header` de `tela-da-galeria.tsx`.
     ///
     /// 🔑 **As contagens aqui são por estado, cruas** — `2 levadas · 2 à venda ·
     /// 0 compradas`. As fichas da barra contam outra coisa: recorte por situação
-    /// **exige classificação**, e por isso uma galeria com 4 levadas sem nota
-    /// mostra `Levadas 0` lá e `4 levadas` aqui. Os dois números estão certos, e
-    /// respondem perguntas diferentes.
+    /// **exige classificação**. Os dois números estão certos, e respondem
+    /// perguntas diferentes.
     fn cabecalho(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        use crate::estilo;
+        use crate::recursos::Icone;
+        use gpui_component::Icon;
+
         let (levadas, a_venda, compradas) = self.contagem();
         let titulo = self
             .aberta
@@ -1834,133 +1909,142 @@ impl Detalhe {
         // 🔚 A sessão pode nascer sem contato (dono, 2026-09-13); o selo avisa
         // sem travar nada — quem pede é o link e o aviso.
         let sem_email = self.aberta.is_some() && !self.tem_email();
+        let tema = cx.theme();
+        let (borda, apagado, texto, campo) = (
+            tema.border,
+            tema.muted_foreground,
+            tema.foreground,
+            tema.input,
+        );
+        let sem_galeria = self.aberta.is_none();
+
+        let selo = |cores: (gpui::Hsla, gpui::Hsla, gpui::Hsla), rotulo: &'static str| {
+            let (fundo, _, frente) = cores;
+            div()
+                .flex_none()
+                .px(px(6.))
+                .rounded_full()
+                .bg(fundo)
+                .text_color(frente)
+                .text_size(px(10.))
+                .child(rotulo)
+        };
 
         div()
             .flex()
+            .flex_none()
             .items_center()
-            .gap(px(8.))
-            .px(px(10.))
-            .py(px(8.))
-            .rounded(cx.theme().radius)
-            // 🔑 **O cabeçalho é uma superfície, e não uma linha com traço
-            // embaixo.** Ele é o único lugar da tela que diz de quem é o ensaio
-            // aberto; encostado no mesmo cinza da grade, ele se lia como a
-            // primeira fileira de fotos.
-            .bg(cx.theme().sidebar)
-            .border_1()
-            .border_color(cx.theme().border)
+            .gap(px(12.))
+            .h(px(48.))
+            .px(px(12.))
+            .overflow_hidden()
+            .border_b_1()
+            .border_color(borda)
             .child(
-                // A marca do ensaio, na família âmbar — a mesma que a barra do
-                // topo usa para o botão da sessão aberta.
+                estilo::botao_do_menu("galeria-menu", cx)
+                    .on_click(cx.listener(|_tela, _ev, _window, cx| cx.emit(Pedido::AlternarMenu))),
+            )
+            .child(
                 div()
-                    .w(px(3.))
-                    .h(px(16.))
+                    .id("galeria-voltar")
                     .flex_none()
-                    .rounded(px(2.))
-                    .bg(crate::tema::cores::quente()),
+                    .cursor_pointer()
+                    .text_color(apagado)
+                    .hover(move |s| s.text_color(texto))
+                    .child(Icon::new(Icone::ChevronLeft).size(px(20.)))
+                    .on_click(cx.listener(|_tela, _ev, _window, cx| cx.emit(Pedido::Voltar))),
             )
             .child(
                 // ✏️ Clicar no título edita — o mesmo gesto da web.
                 div()
                     .id("sessao-titulo")
-                    .text_sm()
-                    .truncate()
+                    .flex()
+                    .flex_none()
+                    .items_center()
+                    .gap(px(8.))
                     .cursor_pointer()
-                    .child(titulo)
-                    .on_click(
-                        cx.listener(|tela, _ev, _window, cx| tela.editar_dados_do_cliente(cx)),
-                    ),
-            )
-            .child(
-                Button::new("sessao-editar-cliente")
-                    .label("Editar")
-                    .xsmall()
-                    .disabled(self.aberta.is_none())
-                    .tooltip("Título, e-mail e WhatsApp do cliente")
+                    .child(Icon::new(Icone::Pencil).size(px(14.)).text_color(apagado))
+                    .child(
+                        div()
+                            .max_w(px(320.))
+                            .text_sm()
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .truncate()
+                            .child(titulo),
+                    )
                     .on_click(
                         cx.listener(|tela, _ev, _window, cx| tela.editar_dados_do_cliente(cx)),
                     ),
             )
             .child(
                 div()
+                    .min_w(px(0.))
                     .text_xs()
                     .truncate()
-                    .text_color(cx.theme().muted_foreground)
+                    .text_color(apagado)
                     .child(contato),
             )
             .when(sem_email, |cabecalho| {
-                cabecalho.child(selos::selo(selos::Tom::Quente, "sem e-mail", cx))
+                cabecalho.child(selo(cores::selo_ambar(), "sem e-mail"))
             })
             .when(ja_abriu, |cabecalho| {
-                // 🔑 O sinal que o fotógrafo espera para cobrar — e por isso é
-                // selo, e não mais uma linha de texto pequeno.
-                cabecalho.child(selos::selo(selos::Tom::Bom, "já abriu", cx))
+                // 🔑 O sinal que o fotógrafo espera para cobrar.
+                cabecalho.child(selo(cores::selo_esmeralda(), "já abriu"))
             })
             .child(div().flex_1())
             .child(
-                // As três contagens, cada uma com o tom do que ela conta: âmbar
-                // é o balcão, verde é vendido, o resto é o comum.
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(4.))
-                    .child(selos::selo(
-                        selos::Tom::Quente,
-                        format!("{levadas} levadas"),
-                        cx,
-                    ))
-                    .child(selos::selo(
-                        selos::Tom::Neutro,
-                        format!("{a_venda} à venda"),
-                        cx,
-                    ))
-                    .child(selos::selo(
-                        selos::Tom::Bom,
-                        format!("{compradas} compradas"),
-                        cx,
+                // Os números da galeria, como o "detalhes" do site.
+                estilo::botao_contorno("sessao-contagem", cx)
+                    .text_xs()
+                    .text_color(apagado)
+                    .cursor_default()
+                    .child(Icon::new(Icone::Info).size(px(14.)))
+                    .child(format!(
+                        "{levadas} levadas · {a_venda} à venda · {compradas} compradas"
                     )),
             )
-            .child(
-                Button::new("sessao-link")
-                    .label(if self.link.is_some() {
+            .child(estilo::desligado(
+                estilo::botao_fantasma("sessao-editar-cliente", cx)
+                    .border_1()
+                    .border_color(campo)
+                    .child(Icon::new(Icone::ClipboardList).size(px(16.)))
+                    .child("Dados do cliente")
+                    .when(!sem_galeria, |b| {
+                        b.on_click(
+                            cx.listener(|tela, _ev, _window, cx| tela.editar_dados_do_cliente(cx)),
+                        )
+                    }),
+                sem_galeria,
+            ))
+            .child(estilo::desligado(
+                estilo::botao_contorno("sessao-link", cx)
+                    .child(Icon::new(Icone::Link2).size(px(16.)))
+                    .child(if self.link.is_some() {
                         "Copiar de novo"
                     } else {
                         "Copiar link"
                     })
-                    .xsmall()
-                    .disabled(self.aberta.is_none())
-                    .on_click(cx.listener(|tela, _ev, _window, cx| tela.pedir_o_link(cx))),
-            )
-            // 📧 O aviso só existe com e-mail: a conta do cliente nasce dele, e
-            // sem ele não há para onde mandar "fotos prontas".
-            .when_some(email, |cabecalho, email| {
-                cabecalho.child(
-                    Button::new("sessao-avisar")
-                        // Rótulo curto, o e-mail no tooltip — o mesmo da web, onde
-                        // o e-mail no texto espremia o título até sumir.
-                        .label("Avisar cliente")
-                        .tooltip(SharedString::from(format!(
-                            "Avisar cliente por e-mail: {email}"
-                        )))
-                        .xsmall()
-                        .primary()
-                        .disabled(self.avisando)
-                        .on_click(cx.listener(|tela, _ev, _window, cx| tela.avisar(cx))),
-                )
-            })
-            // 🔚 Sem contato nenhum o "Avisar" aparece e pede o contato — o mesmo
-            // gesto da web. Só com WhatsApp continua sem botão: há contato, e o
-            // aviso vai por e-mail.
-            .when(sem_email, |cabecalho| {
-                cabecalho.child(
-                    Button::new("sessao-avisar")
-                        .label("Avisar cliente")
-                        .tooltip("Falta o e-mail do cliente — o aviso vai por e-mail")
-                        .xsmall()
-                        .primary()
-                        .disabled(self.avisando)
-                        .on_click(cx.listener(|tela, _ev, _window, cx| tela.avisar(cx))),
-                )
+                    .when(!sem_galeria, |b| {
+                        b.on_click(cx.listener(|tela, _ev, _window, cx| tela.pedir_o_link(cx)))
+                    }),
+                sem_galeria,
+            ))
+            // 📧 O aviso sai por e-mail; sem contato nenhum ele aparece e pede o
+            // contato — o mesmo gesto da web. Só com WhatsApp, sem botão.
+            .when(email.is_some() || sem_email, |cabecalho| {
+                cabecalho.child(estilo::desligado(
+                    estilo::botao_contorno("sessao-avisar", cx)
+                        .child(Icon::new(Icone::Send).size(px(16.)))
+                        .child(if self.avisando {
+                            "Avisando…"
+                        } else {
+                            "Avisar cliente"
+                        })
+                        .when(!self.avisando, |b| {
+                            b.on_click(cx.listener(|tela, _ev, _window, cx| tela.avisar(cx)))
+                        }),
+                    self.avisando,
+                ))
             })
     }
 
@@ -2074,36 +2158,82 @@ impl Detalhe {
     /// 🔑 **A leva é escolhida antes dos arquivos**, e o padrão é **sem
     /// marcação** — ver o campo [`Self::leva`].
     fn envio(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        use crate::estilo;
+        use crate::recursos::Icone;
+        use gpui_component::Icon;
+
         let lote = self.importacao;
         let ocupado = self.importando();
         let sem_sessao = self.aberta.is_none();
         let leva = self.leva;
         let visiveis = self.acervo.total_visivel();
+        let tema = cx.theme();
+        let (borda, apagado, primaria, acento) = (
+            tema.border,
+            tema.muted_foreground,
+            tema.primary,
+            tema.accent,
+        );
 
+        // "Entram como": as fichas do site, a escolhida em âmbar.
         let ficha = |rotulo: &'static str,
                      valor: Option<EstadoNoBalcao>,
                      cx: &mut Context<Self>| {
-            Button::new(SharedString::from(format!("detalhe-leva-{rotulo}")))
-                .label(rotulo)
-                .xsmall()
-                .selected(leva == valor)
-                .disabled(ocupado)
-                .on_click(cx.listener(move |tela, _ev, _window, cx| tela.escolher_leva(valor, cx)))
+            pilula(
+                SharedString::from(format!("detalhe-leva-{rotulo}")),
+                rotulo,
+                None,
+                leva == valor,
+                cx,
+            )
+            .when(!ocupado, |p| {
+                p.on_click(cx.listener(move |tela, _ev, _window, cx| tela.escolher_leva(valor, cx)))
+            })
+        };
+
+        let andamento = match lote {
+            // 🔑 **O número inteiro, e não só o que já foi.** Quem mandou 500
+            // quer saber que são 500.
+            Some(l) if !l.terminou() => {
+                let falhas = if l.falhas > 0 {
+                    format!(" · {} falharam", l.falhas)
+                } else {
+                    String::new()
+                };
+                format!("importando… {} de {}{falhas}", l.prontas(), l.total)
+            }
+            // ⚠️ **"importadas", e não "subiram"** — nada sobe no passo 1.
+            Some(l) if l.falhas > 0 => {
+                format!("{} importadas · {} não entraram", l.feitas, l.falhas)
+            }
+            Some(l) => format!("{} importadas", l.feitas),
+            None => match leva {
+                None => "Arraste as fotos (ou a pasta) para cá. Sem marcação vai para o \
+                         acervo à venda; a marcação de verdade nasce no balcão."
+                    .to_string(),
+                Some(EstadoNoBalcao::Disponivel) => {
+                    "À venda: o cliente vê com marca d'água e pode comprar pela galeria."
+                        .to_string()
+                }
+                Some(EstadoNoBalcao::LevadaNoBalcao) => {
+                    "Levadas: o cliente já pagou na hora e baixa o original.".to_string()
+                }
+            },
         };
 
         div()
+            .id("detalhe-envio")
             .flex()
-            .flex_col()
-            .gap(px(6.))
-            .p(px(10.))
-            .rounded(cx.theme().radius)
-            .border_1()
-            // O destaque de "solte aqui": borda viva enquanto o arrasto passa.
-            .border_color(if self.arrastando {
-                cx.theme().primary
-            } else {
-                cx.theme().border
-            })
+            .flex_none()
+            .flex_wrap()
+            .items_center()
+            .gap(px(8.))
+            .px(px(12.))
+            .py(px(8.))
+            .border_b_1()
+            // O destaque de "solte aqui": a faixa acende enquanto o arrasto passa.
+            .border_color(if self.arrastando { primaria } else { borda })
+            .when(self.arrastando, |d| d.bg(acento))
             .on_drag_move(
                 cx.listener(|tela, _ev: &gpui::DragMoveEvent<()>, _window, cx| {
                     tela.destacar(true, cx)
@@ -2112,182 +2242,101 @@ impl Detalhe {
             .on_drop(
                 cx.listener(|tela, arrastados: &gpui::ExternalPaths, _window, cx| {
                     tela.destacar(false, cx);
-                    // 🔑 Uma pasta solta vira o conteúdo dela: o sistema entrega
-                    // o caminho do diretório, e uma pasta de exportação tem
-                    // arquivos, não subpastas.
+                    // 🔑 Uma pasta solta vira o conteúdo dela.
                     let fotos = super::arquivos::so_as_fotos(arrastados.paths());
                     tela.enviar_arquivos(fotos, cx);
                 }),
             )
+            // 🔑 **"Importar fotos"**, o botão do site: abre a janela do
+            // sistema, e as fotos entram no catálogo desta máquina, na leva
+            // escolhida. `debug_selector` é o que deixa o teste clicar onde o
+            // dedo clica.
+            .child(estilo::desligado(
+                estilo::botao_primario("detalhe-importar", cx)
+                    .debug_selector(|| "detalhe-importar".into())
+                    .child(Icon::new(Icone::Upload).size(px(16.)))
+                    .child("Importar fotos")
+                    .when(!(ocupado || sem_sessao), |b| {
+                        b.on_click(cx.listener(|tela, _ev, _window, cx| tela.importar(cx)))
+                    }),
+                ocupado || sem_sessao,
+            ))
+            // ⚠️ **Exportar mora ao lado de Importar**: por aqui as fotos
+            // entram, por ali saem. Sem seleção exporta o que a grade mostra.
+            .child(estilo::desligado(
+                estilo::botao_contorno("detalhe-exportar", cx)
+                    .debug_selector(|| "detalhe-exportar".into())
+                    .child(Icon::new(Icone::FolderInput).size(px(16.)))
+                    .child("Exportar")
+                    .when(!(sem_sessao || visiveis == 0), |b| {
+                        b.on_click(cx.listener(|_tela, _ev, _window, cx| cx.emit(Pedido::Exportar)))
+                    }),
+                sem_sessao || visiveis == 0,
+            ))
+            .child(div().text_sm().text_color(apagado).child("Entram como"))
+            .child(ficha("sem marcação", None, cx))
+            .child(ficha("à venda", Some(EstadoNoBalcao::Disponivel), cx))
+            .child(ficha("levadas", Some(EstadoNoBalcao::LevadaNoBalcao), cx))
             .child(
                 div()
                     .flex()
-                    .items_center()
-                    .gap(px(6.))
+                    .flex_col()
+                    .flex_1()
+                    .min_w(px(200.))
+                    .gap(px(4.))
                     .child(
                         div()
                             .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child("Como esta leva entra:"),
+                            .text_color(apagado)
+                            .truncate()
+                            .child(andamento),
                     )
-                    .child(ficha("Sem marcação", None, cx))
-                    .child(ficha("À venda", Some(EstadoNoBalcao::Disponivel), cx))
-                    .child(ficha(
-                        "Levadas no balcão",
-                        Some(EstadoNoBalcao::LevadaNoBalcao),
-                        cx,
-                    )),
-            )
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(match leva {
-                        None => {
-                            "Sem marcação vai para o acervo à venda. A marcação de verdade \
-                             nasce no balcão, com o cliente olhando."
-                        }
-                        Some(EstadoNoBalcao::Disponivel) => {
-                            "À venda: o cliente vê com marca d'água e pode comprar pela galeria."
-                        }
-                        Some(EstadoNoBalcao::LevadaNoBalcao) => {
-                            "Levadas: o cliente já pagou na hora e baixa o original."
-                        }
+                    // 🔑 **A barra só existe enquanto o lote corre.**
+                    .when_some(lote.filter(|l| !l.terminou()), |linha, l| {
+                        linha.child(Progress::new().value(l.porcento()).h(px(4.)))
                     }),
-            )
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(8.))
-                    .child(
-                        div()
-                            .flex_1()
-                            .flex()
-                            .flex_col()
-                            .gap(px(4.))
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(match lote {
-                                        // 🔑 **O número inteiro, e não só o que
-                                        // já foi.** Quem mandou 500 quer saber
-                                        // que são 500: "37 prontas" sozinho não
-                                        // diz se falta pouco ou muito, e é essa
-                                        // a única pergunta de quem espera.
-                                        Some(l) if !l.terminou() => {
-                                            let falhas = if l.falhas > 0 {
-                                                format!(" · {} falharam", l.falhas)
-                                            } else {
-                                                String::new()
-                                            };
-                                            format!(
-                                                "importando… {} de {}{falhas}",
-                                                l.prontas(),
-                                                l.total
-                                            )
-                                        }
-                                        // ⚠️ **"importadas", e não "subiram"** —
-                                        // nada sobe no passo 1, e a palavra
-                                        // errada faria o operador esperar o
-                                        // cliente ver fotos que ainda não
-                                        // saíram do disco.
-                                        Some(l) if l.falhas > 0 => format!(
-                                            "{} importadas · {} não entraram",
-                                            l.feitas, l.falhas
-                                        ),
-                                        Some(l) => format!("{} importadas", l.feitas),
-                                        None => {
-                                            "Arraste as fotos (ou a pasta) para cá.".to_string()
-                                        }
-                                    }),
-                            )
-                            // 🔑 **A barra só existe enquanto o lote corre.** Uma
-                            // barra parada em 100% é ruído que o operador
-                            // aprende a ignorar — e no dia em que ela importa,
-                            // ele não olha.
-                            .when_some(lote.filter(|l| !l.terminou()), |linha, l| {
-                                linha.child(Progress::new().value(l.porcento()).h(px(4.)))
-                            }),
-                    )
-                    .child(
-                        // 🔑 **"Importar", e não "Escolher fotos…"** — dono,
-                        // 8/set/2026: *"esse nome confunde, pois ao lado vai ter
-                        // o botão Exportar"*. E confundia mesmo. "Escolher
-                        // fotos…" descreve o **meio** (abre uma janela e se
-                        // escolhe), enquanto o vizinho descreve o **fim**
-                        // (exportar); lado a lado, um par que não é par faz
-                        // procurar a entrada em outro lugar. Agora os dois
-                        // dizem a direção: por aqui entra, por ali sai.
-                        Button::new("detalhe-importar")
-                            .label("Importar")
-                            .xsmall()
-                            .primary()
-                            .disabled(ocupado || sem_sessao)
-                            // 🔑 **Para o teste poder clicar onde o dedo clica.**
-                            // `debug_selector` grava as coordenadas deste
-                            // elemento no quadro desenhado, e é assim que o e2e
-                            // acha o botão em vez de chamar o método por baixo —
-                            // a diferença entre "a função existe" e "o clique
-                            // chega até ela". **Não custa nada fora de teste**:
-                            // sem a `feature = "test-support"` do gpui, o método
-                            // é um `self` que devolve `self`.
-                            .debug_selector(|| "detalhe-importar".into())
-                            .on_click(cx.listener(|tela, _ev, _window, cx| tela.importar(cx))),
-                    )
-                    .child(
-                        // 🔑 **Exportar mora ao lado de Importar**, e não
-                        // na barra do app (de onde desceu em 8/set/2026, a
-                        // pedido do dono). São o par: por aqui as fotos entram
-                        // no ensaio, por aqui elas saem para o disco — e uma
-                        // barra de distância entre os dois fazia procurar a
-                        // saída em outro lugar da tela.
-                        //
-                        // ⚠️ **Sem seleção exporta o que a grade mostra**, como o
-                        // botão da barra fazia: quem acabou de filtrar por
-                        // "levadas" está pedindo essas. Quem escolhe as fotos
-                        // ganha delas — a conta é da raiz, que é quem tem a
-                        // grade; daqui só sai o pedido.
-                        Button::new("detalhe-exportar")
-                            .label("Exportar")
-                            .xsmall()
-                            .disabled(sem_sessao || visiveis == 0)
-                            .debug_selector(|| "detalhe-exportar".into())
-                            .on_click(
-                                cx.listener(|_tela, _ev, _window, cx| cx.emit(Pedido::Exportar)),
-                            ),
-                    ),
             )
     }
 
-    /// Uma linha dizendo o que a grade abaixo está mostrando.
     /// A barra da grade: recortes · zoom · Revelar · Tela do cliente · seleção.
     fn barra_da_grade(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        use crate::estilo;
+        use crate::recursos::Icone;
+        use gpui_component::Icon;
+
         let contagens = self.contagens();
         let ativo = self.filtro();
         let visiveis = self.acervo.total_visivel();
         let marcadas = self.quantas_marcadas();
         let todas_marcadas = visiveis > 0 && marcadas == visiveis;
+        let tema = cx.theme();
+        let (borda, apagado, acento) = (tema.border, tema.muted_foreground, tema.accent);
+        let pode_revelar = self.tem_o_que_revelar();
 
         div()
             .flex()
+            .flex_none()
             .flex_wrap()
             .items_center()
-            .gap(px(4.))
+            .gap(px(6.))
+            .px(px(12.))
+            .py(px(8.))
+            .border_b_1()
+            .border_color(borda)
             .children(FILTROS.into_iter().filter_map(|(rotulo, filtro)| {
                 let quantas = contagens.de(filtro);
                 // 🔑 O recorte vazio some — **menos** quando é o escolhido:
                 // sumir o filtro ativo tiraria o caminho de volta.
                 let mostrar = filtro == Filtro::Todas || quantas > 0 || ativo == filtro;
                 mostrar.then(|| {
-                    Button::new(SharedString::from(format!("sessao-filtro-{rotulo}")))
-                        .label(format!("{rotulo} {quantas}"))
-                        .xsmall()
-                        .selected(ativo == filtro)
-                        .on_click(
-                            cx.listener(move |tela, _ev, _window, cx| tela.filtrar(filtro, cx)),
-                        )
+                    pilula(
+                        SharedString::from(format!("sessao-filtro-{rotulo}")),
+                        rotulo,
+                        Some(quantas),
+                        ativo == filtro,
+                        cx,
+                    )
+                    .on_click(cx.listener(move |tela, _ev, _window, cx| tela.filtrar(filtro, cx)))
                 })
             }))
             .child(div().flex_1())
@@ -2296,43 +2345,74 @@ impl Detalhe {
                 div()
                     .flex()
                     .items_center()
-                    .gap(px(4.))
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child("⊖")
+                    .gap(px(6.))
+                    .text_color(apagado)
+                    .child(Icon::new(Icone::ZoomOut).size(px(16.)))
                     .child(
                         div()
                             .w(px(112.))
                             .child(Slider::new(&self.zoom_slider).horizontal()),
                     )
-                    .child("⊕"),
+                    .child(Icon::new(Icone::ZoomIn).size(px(16.))),
             )
+            // 🔑 **Sem exigir foco**, como o botão da barra do site: entra no
+            // modo e a tira faz o resto.
+            .child(estilo::desligado(
+                estilo::botao_fantasma("sessao-revelar", cx)
+                    .bg(acento)
+                    .child(Icon::new(Icone::SlidersHorizontal).size(px(16.)))
+                    .child("Revelar")
+                    .when(pode_revelar, |b| {
+                        b.on_click(cx.listener(|tela, _ev, _window, cx| tela.revelar_todas(cx)))
+                    }),
+                !pode_revelar,
+            ))
             .child(
-                // 🔑 **Sem exigir foco**, como o botão da barra do site: entra
-                // no modo e a tira faz o resto. Só desliga quando não há o que
-                // revelar — sessão vazia, ou só apagadas.
-                Button::new("sessao-revelar")
-                    .label("Revelar")
-                    .xsmall()
-                    .disabled(!self.tem_o_que_revelar())
-                    .on_click(cx.listener(|tela, _ev, _window, cx| tela.revelar_todas(cx))),
-            )
-            .child(
-                Button::new("sessao-tela-do-cliente")
-                    .label(if self.cliente_aberta {
+                estilo::botao_contorno("sessao-tela-do-cliente", cx)
+                    .when(self.cliente_aberta, |b| b.bg(acento))
+                    .child(Icon::new(Icone::Monitor).size(px(16.)))
+                    .child(if self.cliente_aberta {
                         "Fechar a tela do cliente"
                     } else {
                         "Tela do cliente"
                     })
-                    .xsmall()
-                    .selected(self.cliente_aberta)
                     .on_click(
                         cx.listener(|_tela, _ev, _window, cx| cx.emit(Pedido::TelaDoCliente)),
                     ),
             )
-            .child(
-                Button::new("sessao-selecionar-visiveis")
-                    .label(format!(
+            // 🖨️ O que se faz **com as marcadas**: a negociação do balcão (o
+            // "Negociação…" do site) e a folha de impressão, que só o desktop tem.
+            .when(marcadas > 0, |barra| {
+                barra
+                    .child(
+                        estilo::botao_contorno("sessao-negociar", cx)
+                            .child(Icon::new(Icone::ShoppingCart).size(px(16.)))
+                            .child(format!("Negociação… ({marcadas})"))
+                            .on_click(cx.listener(|tela, _ev, _window, cx| {
+                                cx.emit(Pedido::Negociar(tela.marcadas()))
+                            })),
+                    )
+                    .child(
+                        estilo::botao_contorno("sessao-imprimir", cx)
+                            .child(Icon::new(Icone::Printer).size(px(16.)))
+                            .child("Imprimir…")
+                            .on_click(cx.listener(|tela, _ev, _window, cx| {
+                                cx.emit(Pedido::Imprimir(tela.marcadas()))
+                            })),
+                    )
+            })
+            .child(estilo::desligado(
+                estilo::botao_fantasma("sessao-selecionar-visiveis", cx)
+                    .text_color(apagado)
+                    .child(
+                        Icon::new(if todas_marcadas {
+                            Icone::SquareCheck
+                        } else {
+                            Icone::Square
+                        })
+                        .size(px(16.)),
+                    )
+                    .child(format!(
                         "{} as {visiveis} visíveis",
                         if todas_marcadas {
                             "Desmarcar"
@@ -2340,10 +2420,11 @@ impl Detalhe {
                             "Selecionar"
                         }
                     ))
-                    .xsmall()
-                    .disabled(visiveis == 0)
-                    .on_click(cx.listener(|tela, _ev, _window, cx| tela.alternar_todas(cx))),
-            )
+                    .when(visiveis > 0, |b| {
+                        b.on_click(cx.listener(|tela, _ev, _window, cx| tela.alternar_todas(cx)))
+                    }),
+                visiveis == 0,
+            ))
     }
 
     /// As fotos que vão para a tira da Revelação: **as da sessão, na ordem da
@@ -2382,10 +2463,19 @@ impl Detalhe {
         }
         let inicial = match comecar_em {
             Some(id) => fotos.iter().position(|f| f.id == id)?,
-            None => self
-                .fotos_a_revelar()
-                .position(acervo::Foto::editavel)
-                .unwrap_or(0),
+            // 🚨 O botão da barra abre **na primeira marcada**, depois na em
+            // foco, e só então na primeira editável (`fotoParaAbrir` do site):
+            // é dela que o "Sincronizar" copia.
+            None => {
+                let marcadas = self.marcadas();
+                let foco = self.em_foco().map(|f| f.id.clone());
+                marcadas
+                    .iter()
+                    .find_map(|id| fotos.iter().position(|f| &f.id == id))
+                    .or_else(|| foco.and_then(|id| fotos.iter().position(|f| f.id == id)))
+                    .or_else(|| self.fotos_a_revelar().position(acervo::Foto::editavel))
+                    .unwrap_or(0)
+            }
         };
         Some(Pedido::Revelar { fotos, inicial })
     }
@@ -2537,20 +2627,22 @@ impl Detalhe {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .bg(cx.theme().muted)
-                    .rounded(cx.theme().radius)
-                    .border_1()
+                    .overflow_hidden()
+                    // 🎨 O cartão do site: canto de 10 px, a foto sobre o poço.
+                    .bg(cores::poco())
+                    .rounded(px(10.))
                     // 🔑 A marcação é **borda**, e não fundo: fundo colorido
                     // mudaria a cor que o olho usa para julgar a foto ao lado.
+                    .border_2()
                     .border_color(if em_foco {
                         cx.theme().primary
                     } else if marcada {
-                        cx.theme().warning
+                        cores::quente()
                     } else {
-                        cx.theme().border
+                        gpui::transparent_black()
                     })
                     .when_some(miniatura, |quadro, imagem| {
-                        quadro.child(img(imagem).h(px(lado * 0.72)))
+                        quadro.child(img(imagem).size_full().object_fit(gpui::ObjectFit::Contain))
                     })
                     // O selo do estado, no canto — como na tela do site, e
                     // agora com a cor do que ele diz (`crate::selos`).
@@ -3088,6 +3180,47 @@ impl Detalhe {
 }
 
 /// Uma tecla escrita, como os `<kbd>` do site.
+/// Uma ficha da galeria do site: pílula com borda, a acesa em âmbar.
+fn pilula(
+    id: SharedString,
+    rotulo: &'static str,
+    quantas: Option<usize>,
+    acesa: bool,
+    cx: &App,
+) -> gpui::Stateful<gpui::Div> {
+    let tema = cx.theme();
+    let (borda, apagado, acento) = (tema.border, tema.muted_foreground, tema.accent);
+    div()
+        .id(id)
+        .flex()
+        .flex_none()
+        .items_center()
+        .gap(px(6.))
+        .h(px(28.))
+        .px(px(10.))
+        .rounded_full()
+        .border_1()
+        .text_sm()
+        .cursor_pointer()
+        .when(acesa, |p| {
+            p.bg(cores::quente())
+                .border_color(cores::quente())
+                .text_color(cores::sobre_quente())
+        })
+        .when(!acesa, |p| {
+            p.border_color(borda).hover(move |s| s.bg(acento))
+        })
+        .child(rotulo)
+        .when_some(quantas, |p, n| {
+            p.child(
+                div()
+                    .when(!acesa, |d| d.text_color(apagado))
+                    .when(acesa, |d| d.opacity(0.75))
+                    .child(n.to_string()),
+            )
+        })
+}
+
 fn tecla(rotulo: &str, cx: &App) -> impl IntoElement {
     div()
         .px(px(3.))

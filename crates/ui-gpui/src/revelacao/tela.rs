@@ -10,47 +10,60 @@
 //! ⚠️ Nenhuma etapa disso acontece no `render`. O `render` só desenha o que já
 //! chegou — é o que permite arrastar liso enquanto a GPU trabalha atrás.
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::BTreeSet;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
 
 use adapters::view_models::PhotoViewModel;
-use biblioteca_core::selecao::Modificadores;
-use domain::entities::preset::PresetAdjustments;
-use domain::entities::{Preset, PresetId};
+use domain::entities::Preset;
 use domain::services::PreviewType;
-use domain::value_objects::{AspectRatio, CropSettings};
+use domain::value_objects::CropSettings;
 use gpui::AnimationExt;
 use gpui::{
-    canvas, div, img, prelude::*, px, AnyElement, Bounds, Context, Entity, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, RenderImage, SharedString,
+    canvas, div, prelude::*, px, AnyElement, Bounds, Context, Entity, MouseButton,
+    MouseMoveEvent, MouseUpEvent, Pixels, RenderImage, SharedString,
     Subscription, Task, Window,
 };
 use gpui_component::button::{Button, ButtonVariants};
-use gpui_component::collapsible::Collapsible;
-use gpui_component::input::{Input, InputEvent, InputState};
-use gpui_component::slider::{Slider, SliderEvent, SliderState};
+use gpui_component::input::{InputEvent, InputState};
+use gpui_component::slider::{SliderEvent, SliderState};
+use gpui_component::tooltip::Tooltip;
 use gpui_component::{ActiveTheme, Disableable, Selectable, Sizable, WindowExt};
 use infrastructure::cache::preview_manager::PreviewManager;
 
-use crate::biblioteca::miniaturas::{CacheDeMiniaturas, Miniatura};
+use crate::biblioteca::miniaturas::CacheDeMiniaturas;
 use crate::imagem::para_gpui;
 use crate::tema;
 
 use super::automatico;
-use super::controles::{Definicao, Painel, Secao, CONTROLES};
-use super::corte::{self, Alca};
-use super::curva;
+use super::controles::{Definicao, CONTROLES};
+use super::corte;
 use super::histograma::Histograma;
 use super::historico::{Estado, Historico};
-use super::lightroom::{self, Arquivo, EscolhaDePresets, Relatorio};
+use super::lightroom::{Arquivo, EscolhaDePresets, Relatorio};
 use super::persistencia::{self, Corte, Gravador};
-use super::presets::{self, GuardaDePresets};
+use super::presets::GuardaDePresets;
 use super::processador::{Ajustes, Pedido, Processador};
 use super::reposicao::APor;
 use super::sincronizacao::{self, Escolha, Grupo};
 use infrastructure::transformacao;
+
+/// O Enquadrar: retângulo, alças, transferidor e o painel dele.
+mod enquadrar;
+/// O zoom no palco e o Navegador.
+mod navegacao;
+/// O bruto em resolução cheia quando o zoom passa da cópia.
+mod resolucao;
+/// A coluna das predefinições.
+mod predefinicoes;
+
+/// A coluna da direita: cabeçalho, abas sRGB/RGB, painéis e gráficos.
+mod painel;
+/// A tira do rodapé: recortes, puxador, menu e miniaturas (ver `tira.rs`).
+mod tira;
+
+use enquadrar::Edicao;
 
 /// Largura da coluna de ajustes — os `w-80` do site.
 const LADO_DO_PAINEL: f32 = 320.0;
@@ -60,22 +73,6 @@ const LADO_DOS_PRESETS: f32 = 224.0;
 
 /// A altura da barra do topo — os `h-12` do site.
 const ALTURA_DO_CABECALHO: f32 = 48.0;
-
-/// A altura dos dois gráficos, no topo da coluna da direita.
-///
-/// ⚠️ **O site não tem histograma nenhum**, e este ficou. Não é divergência por
-/// esquecimento: é o gráfico que responde "estourou o branco?" — a pergunta que
-/// nenhum slider responde —, ele existe no Lightroom, e tirá-lo para igualar
-/// seria apagar trabalho que funciona. Fica onde o Lightroom o põe: no alto da
-/// coluna da direita, acima dos painéis.
-const ALTURA_DOS_GRAFICOS: f32 = 200.0;
-
-/// A altura da faixa de miniaturas, embaixo do palco.
-///
-/// ⚠️ **Ela é fixa desde que o dock saiu.** Antes a divisória do dock a
-/// redimensionava; no site a tira tem altura própria (e um puxador que ainda não
-/// existe aqui).
-const ALTURA_DO_FILMSTRIP: f32 = 84.0;
 
 /// Quantas miniaturas da tira ficam em memória.
 ///
@@ -120,29 +117,8 @@ const A_REPOR_POR_VEZ: usize = 24;
 /// [`Revelacao::gravar_o_que_estiver_pendente`] faz.
 const ESPERA_DA_GRAVACAO: Duration = Duration::from_millis(500);
 
-/// As proporções que o legado oferece, na ordem do combo dele
-/// (`crop_panel.rs`).
-///
-/// ⚠️ **Não é a lista inteira do `AspectRatio`.** O enum tem 13 variantes; o combo
-/// do legado mostra estas. Acrescentar uma aqui seria feature nova — e o corte
-/// travado numa proporção que o outro app não tem viraria diferença de pixel sem
-/// explicação na conferência da fase 5.
-const PROPORCOES: [(&str, AspectRatio); 8] = [
-    ("Livre", AspectRatio::Free),
-    ("Original", AspectRatio::Original),
-    ("1:1", AspectRatio::Square),
-    ("4:3", AspectRatio::FourThree),
-    ("3:4", AspectRatio::ThreeFour),
-    ("5:4", AspectRatio::FiveFour),
-    ("16:9", AspectRatio::SixteenNine),
-    ("9:16", AspectRatio::NineSixteen),
-];
-
-/// Até onde o slider de endireitamento vai, em graus. É o limite que o
-/// `CropSettings` impõe (`MAX_ANGLE`), repetido aqui porque a barra precisa dele
-/// para desenhar — e o teste `todo_neutro_cabe_na_faixa` do painel de ajustes já
-/// mostrou o que acontece quando faixa e valor discordam.
-const ANGULO_MAXIMO: f32 = 45.0;
+/// Até onde o slider de endireitamento vai, em graus.
+const ANGULO_MAXIMO: f32 = corte::ANGULO_MAXIMO;
 
 /// Quanto dura o cruzamento entre a foto de antes e a de depois.
 ///
@@ -243,6 +219,16 @@ pub struct Revelacao {
     /// salvar, o operador sairia do ensaio achando que o cliente já está vendo o
     /// que ele acabou de fazer.
     nao_salvas: usize,
+    /// A foto aberta está no depósito, esperando subir — quem sabe é a raiz.
+    aberta_no_deposito: bool,
+    /// A receita com que a foto abriu: diferente dela, há o que salvar.
+    receita_ao_abrir: Option<Estado>,
+    /// A tela do cliente está aberta? O botão fica âmbar, como no site.
+    cliente_aberto: bool,
+    /// "Gerando o JPEG…" no botão de baixar.
+    gerando_jpeg: bool,
+    /// O "Salvar na galeria e sair" em curso: `(respondidas, total)`.
+    salvando: Option<(usize, usize)>,
     /// O histograma da foto **como ela está na tela**. Recalculado junto com a
     /// exibição, e `None` enquanto não há foto.
     histograma: Option<Histograma>,
@@ -285,19 +271,10 @@ pub struct Revelacao {
     /// ficaria?"), e não uma resposta. Sair com o ponteiro devolve a foto sem
     /// passar pelo histórico — é o gesto do Lightroom, e o do site
     /// (`editor.tsx`: `previa ? {...ajustes, ...previa} : ajustes`).
-    previa: Option<PresetAdjustments>,
+    previa: Option<Preset>,
     /// Se a próxima predefinição salva guarda os 53 (e não só o que saiu do
     /// neutro) — a caixa "Zerar os outros ajustes ao aplicar" do site.
     preset_inteiro: bool,
-    /// Quais painéis estão abertos. Um conjunto, e não um `bool` por painel:
-    /// acrescentar painel novo não pode exigir lembrar de acrescentar campo.
-    abertos: HashSet<Painel>,
-    /// Qual das três famílias do HSL está à mostra.
-    ///
-    /// 🔑 **Uma aba, e não três painéis** — o desenho do site e o do Lightroom.
-    /// Guardar a escolha (em vez de voltar a "Cor" a cada abertura) é o que
-    /// permite passar trinta fotos mexendo só na luminância.
-    aba_hsl: Secao,
     /// O id do pedido que ainda não voltou. `None` é "a tela está em dia".
     aguardando: Option<u64>,
     /// Se já existe um laço de colheita rodando. Sem esta trava, cada arrasto
@@ -340,32 +317,20 @@ pub struct Revelacao {
     /// da foto — e cancela a única coisa que ia resolver.
     repondo: bool,
     _assinaturas: Vec<Subscription>,
+    /// O zoom e o navegador (ver `navegacao.rs`).
+    navegacao: navegacao::Navegacao,
+    /// A coluna das predefinições (ver `predefinicoes.rs`).
+    predefinicoes: predefinicoes::Predefinicoes,
+    /// O que a coluna da direita lembra (ver `painel.rs`).
+    estado_do_painel: painel::EstadoDoPainel,
+    /// O recorte, a altura e o menu da tira (ver `tira.rs`).
+    tira: tira::EstadoDaTira,
+    resolucao: resolucao::Resolucao,
 }
 
 struct Controle {
     definicao: &'static Definicao,
     estado: Entity<SliderState>,
-}
-
-/// O modo de corte, enquanto ele está aberto.
-struct Edicao {
-    /// O corte sendo editado — uma **cópia**. O corte da foto só é substituído em
-    /// "Aplicar": sem isso, cancelar não teria o que restaurar.
-    corte: CropSettings,
-    /// A grade de terços. Desligada por padrão, como no legado
-    /// (`show_composition_grid` nasce `false`).
-    grade: bool,
-    /// O que o ponteiro está movendo, e onde ele estava no quadro anterior.
-    arrasto: Option<(Arrasto, Point<Pixels>)>,
-    /// A proporção travada. `Free` é o padrão do legado — corte livre até alguém
-    /// escolher outra coisa.
-    proporcao: AspectRatio,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum Arrasto {
-    Alca(Alca),
-    Retangulo,
 }
 
 struct Aberta {
@@ -440,6 +405,18 @@ impl Revelacao {
 
         // A busca de predefinições. A tela não lê o campo a cada quadro: ela é
         // avisada quando o texto muda.
+        // Os campos de nome das predefinições: o de criar e o de renomear.
+        let nome_do_preset =
+            cx.new(|cx| InputState::new(window, cx).placeholder("Nome da predefinição"));
+        let renome_do_preset = cx.new(|cx| InputState::new(window, cx));
+        assinaturas.extend(predefinicoes::assinar(
+            &nome_do_preset,
+            &renome_do_preset,
+            window,
+            cx,
+        ));
+        predefinicoes::ligar_atalhos(cx);
+
         let busca_de_presets = cx.new(|cx| {
             InputState::new(window, cx)
                 .placeholder("Buscar predefinição")
@@ -464,6 +441,7 @@ impl Revelacao {
             SliderState::new()
                 .min(-ANGULO_MAXIMO)
                 .max(ANGULO_MAXIMO)
+                .step(enquadrar::PASSO_DO_ANGULO)
                 .default_value(0.0)
         });
         assinaturas.push(cx.subscribe_in(
@@ -471,7 +449,7 @@ impl Revelacao {
             window,
             move |tela: &mut Self, _estado, evento: &SliderEvent, _window, cx| {
                 let SliderEvent::Change(valor) = evento;
-                tela.definir_angulo(valor.start(), cx);
+                tela.angulo_do_slider(valor.start(), cx);
             },
         ));
 
@@ -499,25 +477,25 @@ impl Revelacao {
             edicao: None,
             mostrando_original: false,
             nao_salvas: 0,
+            aberta_no_deposito: false,
+            receita_ao_abrir: None,
+            cliente_aberto: false,
+            gerando_jpeg: false,
+            salvando: None,
             histograma: None,
             angulo,
             palco: Bounds::default(),
             guarda_de_presets,
-            nome_do_preset: cx.new(|cx| InputState::new(window, cx).placeholder("Nome do preset")),
+            nome_do_preset,
             presets,
             busca_de_presets,
             escolha_de_presets,
             arquivos: std::sync::mpsc::channel(),
             escolhendo_arquivos: false,
             relatorio: None,
-            renome_do_preset: cx.new(|cx| InputState::new(window, cx)),
+            renome_do_preset,
             previa: None,
             preset_inteiro: false,
-            abertos: Painel::TODOS
-                .into_iter()
-                .filter(Painel::nasce_aberto)
-                .collect(),
-            aba_hsl: Secao::HslCor,
             aguardando: None,
             colhendo: false,
             saindo: None,
@@ -526,6 +504,11 @@ impl Revelacao {
             _tira: None,
             repondo: false,
             _assinaturas: assinaturas,
+            navegacao: navegacao::Navegacao::default(),
+            predefinicoes: predefinicoes::Predefinicoes::default(),
+            estado_do_painel: painel::EstadoDoPainel::default(),
+            tira: tira::EstadoDaTira::novo(),
+            resolucao: Default::default(),
         }
     }
 
@@ -559,6 +542,9 @@ impl Revelacao {
         }
         self.posicao = posicao.min(acervo.len() - 1);
         self.acervo = Arc::new(acervo);
+        // Acervo novo, posições novas: o lote antigo não aponta para nada.
+        self.marcadas = sincronizacao::so(self.posicao);
+        self.ultima_na_tira = None;
         self.mostrar_a_posicao(window, cx);
     }
 
@@ -569,17 +555,9 @@ impl Revelacao {
     /// depois de mexer num slider deixaria a gravação atrasada sair com os
     /// ajustes já substituídos.
     pub fn andar(&mut self, passo: i32, window: &mut Window, cx: &mut Context<Self>) {
-        if self.acervo.is_empty() {
-            return;
-        }
-        let ultima = self.acervo.len() - 1;
-        let nova = if passo > 0 {
-            (self.posicao + 1).min(ultima)
-        } else {
-            self.posicao.saturating_sub(1)
-        };
-
-        if nova != self.posicao {
+        // 🔑 **A seta anda sobre a tira**, e não sobre o acervo: com um recorte
+        // aceso, "a próxima" é a próxima que se vê (`naTira` do site).
+        if let Some(nova) = tira::vizinha(&self.na_tira(), self.posicao, passo) {
             self.posicao = nova;
             self.mostrar_a_posicao(window, cx);
         }
@@ -605,52 +583,6 @@ impl Revelacao {
 
     // ------------------------------------------------ o lote da sincronização
 
-    /// O clique na tira: sozinho troca de foto, com Ctrl marca, com Shift marca
-    /// a faixa — como no Lightroom e no site.
-    ///
-    /// ⚠️ **Ctrl e Shift não trocam a foto aberta.** Trocar grava a anterior e
-    /// recomeça o lote; montar um lote de dez fotos trocando dez vezes deixaria
-    /// o operador sempre com uma só marcada. Quem manda no canvas é o clique
-    /// simples.
-    pub fn clicar_na_tira(
-        &mut self,
-        posicao: usize,
-        modificadores: Modificadores,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if posicao >= self.acervo.len() {
-            return;
-        }
-        if modificadores.aditivo {
-            sincronizacao::alternar(&mut self.marcadas, self.posicao, posicao);
-            cx.notify();
-        } else if modificadores.faixa {
-            self.marcadas = sincronizacao::faixa(self.posicao, posicao);
-            cx.notify();
-        } else {
-            self.ir_para(posicao, window, cx);
-        }
-    }
-
-    /// `Cmd+A`: a tira inteira.
-    pub fn marcar_todas(&mut self, cx: &mut Context<Self>) {
-        if self.acervo.is_empty() {
-            return;
-        }
-        self.marcadas = sincronizacao::todas(self.acervo.len());
-        cx.notify();
-    }
-
-    /// `Cmd+D`: só a aberta.
-    pub fn desmarcar(&mut self, cx: &mut Context<Self>) {
-        if self.acervo.is_empty() {
-            return;
-        }
-        self.marcadas = sincronizacao::so(self.posicao);
-        cx.notify();
-    }
-
     pub fn marcadas(&self) -> &BTreeSet<usize> {
         &self.marcadas
     }
@@ -664,10 +596,20 @@ impl Revelacao {
         }
         let mut posicoes = self.marcadas.clone();
         posicoes.insert(self.posicao);
+        // 🚨 A comprada fica de fora, como no site (`alvosDaSincronizacao`).
         posicoes
             .into_iter()
             .filter_map(|p| self.acervo.get(p).cloned())
+            .filter(|foto| !foto.revelacao_travada)
             .collect()
+    }
+
+    /// A foto aberta pode ser revelada? A comprada não — o `podeRevelar` do
+    /// site.
+    pub fn pode_revelar(&self) -> bool {
+        self.aberta
+            .as_ref()
+            .is_some_and(|aberta| !aberta.foto.revelacao_travada)
     }
 
     /// As **outras** marcadas que o "Zerar tudo" também limpa.
@@ -681,11 +623,26 @@ impl Revelacao {
     /// que passa pelo histórico — as outras não têm histórico, e é por isso que
     /// o botão diz quantas vão junto antes do clique.
     pub fn outras_a_zerar(&self) -> Vec<PhotoViewModel> {
+        // O "Zerar N fotos" do menu da tira tem alvo próprio (ver `tira.rs`).
+        if let Some(ids) = self.zerar_do_menu() {
+            return self
+                .acervo
+                .iter()
+                .filter(|f| ids.contains(&f.id))
+                .cloned()
+                .collect();
+        }
         let aberta = self.foto_aberta().map(|f| f.id.clone());
         self.alvos_da_sincronizacao()
             .into_iter()
             .filter(|f| Some(&f.id) != aberta.as_ref())
-            .filter(|f| persistencia::da_foto(f) != Ajustes::default())
+            // Ajuste **ou** enquadramento fora do neutro — o `temOQueZerar`.
+            .filter(|f| {
+                persistencia::da_foto(f) != Ajustes::default()
+                    || !corte::e_inteiro(&persistencia::para_crop_settings(
+                        &persistencia::corte_da_foto(f),
+                    ))
+            })
             .collect()
     }
 
@@ -707,9 +664,56 @@ impl Revelacao {
     }
 
     /// A raiz avisa quantas revelações deste ensaio ainda não foram ao site.
-    pub fn definir_nao_salvas(&mut self, quantas: usize, cx: &mut Context<Self>) {
-        if self.nao_salvas != quantas {
-            self.nao_salvas = quantas;
+    /// `outras`: as fotos da sessão, **fora a aberta**, que esperam subir.
+    pub fn definir_nao_salvas(
+        &mut self,
+        outras: usize,
+        aberta_no_deposito: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if (self.nao_salvas, self.aberta_no_deposito) != (outras, aberta_no_deposito) {
+            self.nao_salvas = outras;
+            self.aberta_no_deposito = aberta_no_deposito;
+            cx.notify();
+        }
+    }
+
+    /// A foto aberta tem receita que a galeria ainda não recebeu — o `sujo &&
+    /// podeRevelar` do site.
+    pub fn aberta_a_salvar(&self) -> bool {
+        self.pode_revelar()
+            && (self.aberta_no_deposito
+                || self
+                    .receita_ao_abrir
+                    .is_some_and(|receita| receita != self.estado()))
+    }
+
+    /// Há o que salvar na galeria? Sem isso o botão se apaga.
+    pub fn ha_o_que_salvar(&self) -> bool {
+        self.aberta_a_salvar() || self.nao_salvas > 0
+    }
+
+    pub fn definir_gerando_jpeg(&mut self, gerando: bool, cx: &mut Context<Self>) {
+        if self.gerando_jpeg != gerando {
+            self.gerando_jpeg = gerando;
+            cx.notify();
+        }
+    }
+
+    pub fn definir_salvando(&mut self, salvando: Option<(usize, usize)>, cx: &mut Context<Self>) {
+        if self.salvando != salvando {
+            self.salvando = salvando;
+            cx.notify();
+        }
+    }
+
+    pub fn gerando_jpeg(&self) -> bool {
+        self.gerando_jpeg
+    }
+
+    pub fn definir_cliente_aberto(&mut self, aberto: bool, cx: &mut Context<Self>) {
+        if self.cliente_aberto != aberto {
+            self.cliente_aberto = aberto;
             cx.notify();
         }
     }
@@ -828,9 +832,8 @@ impl Revelacao {
     }
 
     fn mostrar_a_posicao(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        // Trocar de foto recomeça o lote: herdar o anterior sincronizaria fotos
-        // que o operador já tinha esquecido de ter marcado.
-        self.marcadas = sincronizacao::so(self.posicao);
+        // Dentro do lote, o lote fica; fora dele, recomeça (`selecaoAoTrocar`).
+        self.marcadas = tira::ao_trocar(&self.marcadas, self.posicao);
         let foto = self.acervo[self.posicao].clone();
         self.mostrar(foto, window, cx);
         self.adiantar_as_vizinhas(cx);
@@ -946,6 +949,8 @@ impl Revelacao {
         // No legado não tem — lá o histórico começa depois da primeira mudança, e
         // a primeira coisa que se faz numa foto não tem volta.
         self.historico = Historico::novo(self.estado());
+        self.esquecer_a_resolucao();
+        self.receita_ao_abrir = Some(self.estado());
         self.aguardando = None;
         // 🚨 **A reposição da foto anterior não vale para esta.** Herdar o
         // sinalizador faria a foto nova abrir dizendo "preparando" sem ninguém
@@ -1023,6 +1028,7 @@ impl Revelacao {
         }
 
         let rgba = imagem.to_rgba8();
+        self.resolucao.recomecar_na_copia();
         aberta.origem = Some(Origem {
             largura: rgba.width(),
             altura: rgba.height(),
@@ -1105,97 +1111,6 @@ impl Revelacao {
             .collect()
     }
 
-    /// Carrega as miniaturas da tira **fora da thread que desenha**.
-    ///
-    /// 🚨 **Era síncrono, dentro do render, e o ensaio inteiro de uma vez.**
-    /// Entrar na Revelação de um ensaio de 125 fotos lia e convertia as 125
-    /// miniaturas antes do primeiro quadro: 49,77 ms de um gesto de 68,37 ms
-    /// (medido em 8/set/2026, `medir-revelacao`). A janela ficava parada, e a
-    /// culpa parecia ser da foto grande — que custa metade disso.
-    ///
-    /// 🔑 **O caro vai para o executor de fundo, uma foto por vez.** Ler o JPEG
-    /// do cache e convertê-lo para BGRA são ~0,4 ms cada; o que não pode
-    /// acontecer é os 125 caírem no mesmo quadro. Aqui cada um espera o de
-    /// antes, e entre eles a interface desenha — a tira **aparece enchendo**, do
-    /// palco para fora, em vez de a janela travar e aparecer pronta.
-    ///
-    /// ⚠️ **O cache mora na tela, e só ela o toca.** O que atravessa a fronteira
-    /// é a imagem pronta; guardar do outro lado exigiria um `Mutex` no cache e
-    /// devolveria a contenção que este desenho existe para não ter.
-    fn carregar_a_tira(&mut self, cx: &mut Context<Self>) {
-        if self.acervo.len() < 2 {
-            return;
-        }
-
-        // 🚨 **A peneira é aqui, e não lá dentro.** O cache mora nesta tela, e
-        // este método já roda na thread dela: perguntar "falta?" aqui custa um
-        // `peek` por foto. Perguntar de dentro da tarefa custava um
-        // `esta.update` por foto — e `update` de uma tarefa é um salto agendado
-        // na thread principal, que só corre entre quadros.
-        //
-        // Com a tira já carregada (o caso comum, a partir da segunda troca de
-        // foto) eram **125 saltos por seta apertada** para descobrir que não
-        // havia nada a fazer. A tira ficou "extremamente lenta" para trocar de
-        // foto, e o motivo não estava em nada que desenha.
-        let faltando = self.miniaturas_faltando();
-
-        // 🔑 **Nada faltando, tarefa nenhuma.** Substituir o campo cancelaria a
-        // que estivesse rodando; sair antes é o que faz a troca de foto não
-        // custar nada quando a tira já está pronta.
-        if faltando.is_empty() {
-            return;
-        }
-        let previews = self.previews.clone();
-
-        self._tira = Some(cx.spawn(async move |esta, cx| {
-            for id in faltando {
-                let pronta = {
-                    let previews = previews.clone();
-                    let id = id.clone();
-                    cx.background_executor()
-                        .spawn(async move { previews.get_thumbnail(&id).map(para_gpui) })
-                        .await
-                };
-
-                // `update` falha quando a tela morreu — sair da Revelação no meio
-                // do carregamento não pode deixar uma tarefa lendo o ensaio
-                // inteiro para ninguém.
-                let atualizou = esta.update(cx, |tela, cx| {
-                    tela.miniaturas_da_tira.guardar(
-                        &id,
-                        match pronta {
-                            Some(imagem) => Miniatura::Pronta(imagem),
-                            None => Miniatura::Ausente,
-                        },
-                    );
-                    cx.notify();
-                });
-                if atualizou.is_err() {
-                    return;
-                }
-            }
-        }));
-    }
-
-    /// Quais miniaturas da tira ainda não foram lidas — na ordem de urgência.
-    ///
-    /// 🚨 **Esta pergunta é feita aqui, e não de dentro da tarefa.** O cache mora
-    /// nesta tela e `espiar` é um `peek`; perguntar de dentro da tarefa exigia um
-    /// `esta.update` por foto, e `update` de uma tarefa é um salto agendado na
-    /// thread principal, que só corre entre quadros. Com a tira já carregada — o
-    /// caso comum a partir da segunda troca de foto — eram **125 saltos por seta
-    /// apertada** para descobrir que não havia nada a fazer.
-    pub(crate) fn miniaturas_faltando(&self) -> Vec<String> {
-        self.da_posicao_para_fora()
-            .filter_map(|i| self.acervo.get(i))
-            // `espiar` devolvendo `Some` inclui o `Ausente`: já perguntada é já
-            // perguntada, e é isso que impede de repetir a leitura a cada troca
-            // de foto.
-            .filter(|foto| self.miniaturas_da_tira.espiar(&foto.id).is_none())
-            .map(|foto| foto.id.clone())
-            .collect()
-    }
-
     /// As posições do acervo a partir do palco, **para fora**: 0, +1, −1, +2, −2…
     ///
     /// 🔑 **A ordem é a mesma para as duas varreduras** — a que repõe o cache e a
@@ -1228,17 +1143,6 @@ impl Revelacao {
     /// o que falta, e o LRU inteiro trocado no caminho.
     fn esta_no_cache(&self, id: &str) -> bool {
         self.previews.tem(id, PreviewType::Large) && self.previews.tem(id, PreviewType::Thumbnail)
-    }
-
-    /// A miniatura desta foto voltou ao cache: a célula da tira pode reler.
-    ///
-    /// 🔑 **É o que faz a tira acender uma a uma.** O `CacheDeMiniaturas` é um
-    /// LRU de resultados e `Ausente` é um resultado: sem este esquecimento a
-    /// célula continuaria preta até a rolagem despejá-la por acaso — e a
-    /// reposição inteira pareceria não ter acontecido.
-    pub fn miniatura_reposta(&mut self, foto_id: &str, cx: &mut Context<Self>) {
-        self.miniaturas_da_tira.esquecer(foto_id);
-        cx.notify();
     }
 
     /// Se há pixels para revelar — a foto abriu de verdade.
@@ -1334,6 +1238,10 @@ impl Revelacao {
         let Some(aberta) = self.aberta.as_ref() else {
             return;
         };
+        // 🚨 A comprada não se revela: nada dela vai para o banco.
+        if aberta.foto.revelacao_travada {
+            return;
+        }
         let id = aberta.foto.id.clone();
         self.gravador.gravar(id.clone(), self.ajustes, self.corte);
 
@@ -1387,10 +1295,17 @@ impl Revelacao {
     ) {
         self.ajustes = estado.ajustes;
         self.corte = estado.corte;
-        // 🚨 O modo de corte fecha ao desfazer. O retângulo na tela é o de antes
-        // do passo que acabou de sair; deixá-lo aberto faria o botão "Aplicar"
-        // reintroduzir, no clique seguinte, o enquadramento que o `Cmd+Z` tirou.
-        self.edicao = None;
+        // O Enquadrar continua aberto, como no site: o retângulo é lido do
+        // corte da foto, e o pedido do operador recomeça do que voltou.
+        if let Some(edicao) = self.edicao.as_mut() {
+            *edicao = Edicao {
+                proporcao: edicao.proporcao,
+                ..Edicao::default()
+            };
+        }
+        let graus = self.corte_atual().angle();
+        self.angulo
+            .update(cx, |estado, cx| estado.set_value(graus, window, cx));
         self.espalhar_nos_sliders(window, cx);
         self.pedir_revelacao_cruzando(cx);
         // O corte não passa pela GPU: quem o mostra é a exibição.
@@ -1411,75 +1326,6 @@ impl Revelacao {
                 .estado
                 .update(cx, |estado, cx| estado.set_value(valor, window, cx));
         }
-    }
-
-    /// O que a GPU desenha: os ajustes de verdade, ou eles com a predefinição
-    /// sob o ponteiro por cima.
-    ///
-    /// 🔑 **A prévia não entra em `self.ajustes`**, e é o que a mantém
-    /// reversível de graça: nada precisa ser guardado para desfazê-la, e um
-    /// travamento com o ponteiro em cima de uma predefinição não deixa a foto
-    /// alterada.
-    fn ajustes_na_tela(&self) -> Ajustes {
-        match &self.previa {
-            Some(preset) => {
-                let mut ajustes = self.ajustes;
-                presets::aplicar(&mut ajustes, preset);
-                ajustes
-            }
-            None => self.ajustes,
-        }
-    }
-
-    /// Mostra (ou tira) a prévia de uma predefinição.
-    ///
-    /// Sem foto aberta não há o que prever, e sem mudança não há o que
-    /// redesenhar — pedir à GPU o mesmo quadro a cada movimento do ponteiro
-    /// sobre a mesma linha seria trabalho por nada.
-    pub fn prever(&mut self, preset: Option<PresetAdjustments>, cx: &mut Context<Self>) {
-        if self.previa == preset {
-            return;
-        }
-        self.previa = preset;
-        self.pedir_revelacao(cx);
-        cx.notify();
-    }
-
-    /// A predefinição que está sendo prevista, para os testes.
-    #[cfg(test)]
-    pub fn previa(&self) -> Option<&PresetAdjustments> {
-        self.previa.as_ref()
-    }
-
-    /// Aplica um preset — qualquer um dos 53 campos, de uma vez.
-    ///
-    /// É um gesto discreto, como o `Cmd+Z` — vira passo de histórico e vai para o
-    /// banco **na hora**, sem passar pela espera de 500 ms, que existe para juntar
-    /// os eventos de um arrasto.
-    ///
-    /// 🔑 **Somar ou substituir, e quem decide é a predefinição.** O padrão é
-    /// somar — escreve só os campos que define e deixa o resto —, que é o do
-    /// Lightroom e o certo para o que acrescenta. A que define o *look* parte do
-    /// **neutro**: sem isso, "Preto e branco" sobre "Sépia" deixava a
-    /// tonalização âmbar de pé e a foto não ficava preto e branco. Ver
-    /// `Preset::replaces`.
-    ///
-    /// ⚠️ **O enquadramento nunca entra**, nos dois casos: recortar é outra
-    /// decisão, e é a mesma regra do "Zerar tudo".
-    pub fn aplicar_preset(&mut self, preset: &Preset, window: &mut Window, cx: &mut Context<Self>) {
-        // O que estiver a meio caminho fecha primeiro, pelo mesmo motivo do
-        // desfazer: senão a espera pendente grava por cima do preset.
-        self.gravar_o_que_estiver_pendente();
-
-        if preset.replaces {
-            self.ajustes = Ajustes::default();
-        }
-        presets::aplicar(&mut self.ajustes, &preset.adjustments);
-        self.espalhar_nos_sliders(window, cx);
-        self.pedir_revelacao_cruzando(cx);
-        self.historico.registrar(self.estado());
-        self.gravar();
-        cx.notify();
     }
 
     /// O "Auto" do painel Básico: lê a foto e escolhe a exposição.
@@ -1518,210 +1364,6 @@ impl Revelacao {
         cx.notify();
     }
 
-    /// Guarda os ajustes de agora como preset do usuário.
-    ///
-    /// 🚨 **Nome vazio não salva.** O legado aceita — o diálogo dele grava o que
-    /// estiver no campo — e o resultado é uma linha sem rótulo na lista, que não
-    /// dá para distinguir nem para apagar (apagar preset não existe em nenhum dos
-    /// dois).
-    ///
-    /// ⚠️ **O preset que aparece na lista tem id local.** O `SavePresetUseCase`
-    /// cria o `Preset` lá dentro, com id próprio, e a porta é `fire-and-forget`
-    /// como a de gravação — então o que se vê até fechar o app é um gêmeo com
-    /// outro id. Nada depende do id hoje (apagar preset não foi portado, e o
-    /// legado também não o tem), mas é a primeira coisa a consertar quando
-    /// depender.
-    pub fn salvar_preset(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let nome = self.nome_do_preset.read(cx).value().trim().to_string();
-        if nome.is_empty() {
-            return;
-        }
-
-        // 🔑 **O `Preset` nasce aqui, com o id que vai para os dois lados.** A
-        // lista da tela e a tabela do banco passam a falar da mesma linha — sem
-        // isso, renomear ou apagar o que acabou de ser salvo manda o comando
-        // para um id que a tabela não tem.
-        let novo = Preset::user(
-            nome,
-            presets::dos_ajustes(&self.ajustes, self.preset_inteiro),
-        );
-        self.guarda_de_presets.salvar(novo.clone());
-        self.presets.push(novo);
-
-        self.nome_do_preset
-            .update(cx, |estado, cx| estado.set_value("", window, cx));
-        cx.notify();
-    }
-
-    /// Entra ou sai do modo de corte. É o `R` do legado.
-    ///
-    /// ⚠️ Sair por aqui **descarta** o que estava sendo cortado, como o `R` de
-    /// lá: quem aplica usa o botão. Sem essa distinção, uma tecla teria dois
-    /// significados conforme o estado, e nenhum aviso de qual valeu.
-    /// Abre o seletor do sistema para importar predefinições do Lightroom.
-    ///
-    /// 🚨 **O laço de colheita sobe antes da resposta**, e não depois: o seletor
-    /// é uma janela do sistema e pode voltar a qualquer momento. Sem isto, os
-    /// arquivos escolhidos ficariam parados no canal até alguma outra coisa
-    /// acordar a tela — um arrasto de slider, por acaso.
-    pub fn importar_do_lightroom(&mut self, cx: &mut Context<Self>) {
-        if self.escolhendo_arquivos {
-            return;
-        }
-        self.escolhendo_arquivos = true;
-        self.relatorio = None;
-        self.escolha_de_presets.escolher(self.arquivos.0.clone());
-        self.esperar_arquivos(cx);
-        cx.notify();
-    }
-
-    /// Acorda a tela de tempos em tempos enquanto o seletor está aberto.
-    fn esperar_arquivos(&mut self, cx: &mut Context<Self>) {
-        cx.spawn(async move |tela, cx| {
-            loop {
-                // ⚠️ Uma espera bem mais longa que a da GPU: aqui do outro lado
-                // há uma pessoa procurando arquivo numa janela do sistema, e
-                // acordar a 8 ms para descobrir que ela ainda não escolheu é
-                // gastar quadro por nada.
-                cx.background_executor()
-                    .timer(Duration::from_millis(120))
-                    .await;
-                let continua = tela
-                    .update(cx, |tela, cx| tela.colher_arquivos(cx))
-                    .unwrap_or(false);
-                if !continua {
-                    break;
-                }
-            }
-        })
-        .detach();
-    }
-
-    /// Drena o que o seletor mandou. Devolve se vale continuar acordando.
-    fn colher_arquivos(&mut self, cx: &mut Context<Self>) -> bool {
-        let mut chegou = false;
-        while let Ok(arquivos) = self.arquivos.1.try_recv() {
-            chegou = true;
-            self.importar(arquivos, cx);
-        }
-        if chegou {
-            self.escolhendo_arquivos = false;
-            cx.notify();
-        }
-        self.escolhendo_arquivos
-    }
-
-    /// Traduz o que foi lido e guarda o que virou predefinição.
-    ///
-    /// ⚠️ **A lista da tela recebe as novas na hora.** Elas já estão no banco
-    /// pela porta, mas quem acabou de importar quer aplicá-las agora — esperar a
-    /// próxima abertura do app é o mesmo que não ter importado.
-    pub fn importar(&mut self, arquivos: Vec<Arquivo>, cx: &mut Context<Self>) {
-        let nomes: Vec<String> = self.presets.iter().map(|p| p.name.clone()).collect();
-        let (novas, relatorio) = lightroom::preparar(&arquivos, &nomes);
-
-        for traduzida in novas {
-            let preset = Preset::user(traduzida.nome, traduzida.ajustes);
-            self.guarda_de_presets.salvar(preset.clone());
-            self.presets.push(preset);
-        }
-
-        // Nada escolhido não é resultado: quem desiste do seletor não precisa
-        // ler "0 arquivos lidos".
-        self.relatorio = (relatorio.arquivos > 0).then_some(relatorio);
-        cx.notify();
-    }
-
-    /// Fecha o resultado da última importação.
-    pub fn fechar_relatorio(&mut self, cx: &mut Context<Self>) {
-        self.relatorio = None;
-        cx.notify();
-    }
-
-    /// Troca o nome de uma predefinição do fotógrafo.
-    ///
-    /// 🔑 **A lista da tela muda junto com o banco**, e não só depois de
-    /// reabrir o app: `self.presets` é o que a coluna desenha, e deixá-la
-    /// desatualizada faria o nome antigo continuar ali até a próxima abertura —
-    /// com o operador renomeando de novo, achando que o primeiro não pegou.
-    pub fn renomear_preset(&mut self, id: PresetId, nome: String, cx: &mut Context<Self>) {
-        let nome = nome.trim().to_string();
-        if nome.is_empty() {
-            return;
-        }
-
-        let Some(preset) = self
-            .presets
-            .iter_mut()
-            .find(|preset| preset.id == id && !preset.is_system)
-        else {
-            return;
-        };
-        preset.name = nome.clone();
-
-        self.guarda_de_presets.renomear(id, nome);
-        cx.notify();
-    }
-
-    /// Apaga uma predefinição do fotógrafo.
-    ///
-    /// ⚠️ **As de sistema não se apagam** — elas nascem em código a cada
-    /// listagem, e apagar mandaria um `DELETE` para um id que a tabela não tem:
-    /// a linha sumiria da tela e voltaria na abertura seguinte.
-    pub fn apagar_preset(&mut self, id: PresetId, cx: &mut Context<Self>) {
-        if !self
-            .presets
-            .iter()
-            .any(|preset| preset.id == id && !preset.is_system)
-        {
-            return;
-        }
-
-        self.presets.retain(|preset| preset.id != id);
-        // A prévia pode ser justamente a que sumiu — deixá-la faria a foto
-        // continuar mostrando uma predefinição que não existe mais.
-        self.prever(None, cx);
-        self.guarda_de_presets.apagar(id);
-        cx.notify();
-    }
-
-    pub fn alternar_corte(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.edicao.is_some() {
-            self.edicao = None;
-        } else {
-            // Sem foto (ou sem pixels no cache) não há o que cortar, e abrir o
-            // overlay sobre o vazio daria alças flutuando em lugar nenhum.
-            let Some(Aberta {
-                origem: Some(_), ..
-            }) = self.aberta.as_ref()
-            else {
-                return;
-            };
-            let corte = self.corte_atual();
-            // 🚨 O slider tem de nascer no ângulo da foto, e não em zero: numa
-            // foto já endireitada, uma barra no meio diria que ela está reta — e o
-            // primeiro toque nela desfaria o endireitamento sem aviso.
-            //
-            // `set_value` não emite `Change`, então isto não vira um pedido de
-            // reprocessamento (a mesma assimetria de `abrir`).
-            let graus = corte.angle();
-            self.angulo
-                .update(cx, |estado, cx| estado.set_value(graus, window, cx));
-
-            self.edicao = Some(Edicao {
-                corte,
-                grade: false,
-                arrasto: None,
-                proporcao: AspectRatio::Free,
-            });
-        }
-        self.atualizar_exibicao();
-        // Sair do modo de corte pelo atalho é cancelar: a vinheta volta ao corte
-        // da foto. Entrar não muda o corte, e o pedido sai igual ao anterior.
-        self.revelar_de_novo_se_a_vinheta_segue_o_corte(cx);
-        cx.notify();
-    }
-
     /// O corte gravado na foto, ou a foto inteira quando não há nenhum.
     /// O enquadramento de agora, para quem vai revelar fora desta tela.
     ///
@@ -1745,114 +1387,10 @@ impl Revelacao {
         )
     }
 
-    /// Confirma o corte: ele vira o corte da foto e vai para o banco.
-    ///
-    /// 🚨 **Gravar aqui não é opcional.** O corte não faz parte de `Ajustes`,
-    /// então nenhum slider vai levá-lo ao banco depois — sem esta gravação, o
-    /// enquadramento só existiria até fechar a tela.
-    pub fn aplicar_corte(&mut self, cx: &mut Context<Self>) {
-        let Some(edicao) = self.edicao.take() else {
-            return;
-        };
-
-        let novo = Corte {
-            x: Some(edicao.corte.crop_x()),
-            y: Some(edicao.corte.crop_y()),
-            largura: Some(edicao.corte.crop_width()),
-            altura: Some(edicao.corte.crop_height()),
-            rotacao: Some(edicao.corte.rotation_90()),
-            angulo: Some(edicao.corte.angle()),
-            espelho_h: Some(edicao.corte.flip_horizontal()),
-            espelho_v: Some(edicao.corte.flip_vertical()),
-        };
-
-        // 🚨 A ordem aqui é o item 12 inteiro. O gesto a meio caminho fecha
-        // **antes** da troca, para virar um passo com o corte antigo; só então o
-        // corte novo entra e vira o passo seguinte. Fechar depois colaria o
-        // enquadramento novo num ajuste velho, e o `Cmd+Z` pularia por cima do
-        // corte sem nunca o desfazer.
-        self.fechar_o_gesto_pendente();
-        self.corte = novo;
-        self.historico.registrar(self.estado());
-        self.gravar();
-        self.atualizar_exibicao();
-        self.revelar_de_novo_se_a_vinheta_segue_o_corte(cx);
-        cx.notify();
-    }
-
-    /// Sai sem aplicar. O corte da foto continua o que era.
-    pub fn cancelar_corte(&mut self, cx: &mut Context<Self>) {
-        self.edicao = None;
-        self.atualizar_exibicao();
-        // A vinheta volta para o corte da foto, que o arrasto tinha deixado.
-        self.revelar_de_novo_se_a_vinheta_segue_o_corte(cx);
-        cx.notify();
-    }
-
-    pub fn cortando(&self) -> bool {
-        self.edicao.is_some()
-    }
-
-    /// Onde a foto está desenhada dentro do palco, em pixels.
-    ///
-    /// `None` quando não há foto, quando o palco ainda não foi medido (primeiro
-    /// quadro) ou quando a foto não tem pixels — nos três casos não há onde pôr
-    /// overlay nenhum.
-    fn area_da_foto(&self) -> Option<(f32, f32, f32, f32)> {
-        let Some(Aberta {
-            origem: Some(origem),
-            ..
-        }) = self.aberta.as_ref()
-        else {
-            return None;
-        };
-
-        let palco = (
-            f32::from(self.palco.size.width),
-            f32::from(self.palco.size.height),
-        );
-        let area = corte::area_da_foto(palco, (origem.largura as f32, origem.altura as f32));
-        (area.2 > 0.0 && area.3 > 0.0).then_some(area)
-    }
-
-    /// Aplica o movimento do ponteiro ao corte em edição.
-    fn mover_corte(&mut self, ponteiro: Point<Pixels>, cx: &mut Context<Self>) {
-        let Some((area, tamanho)) = self.area_da_foto().zip(self.tamanho_da_foto()) else {
-            return;
-        };
-        let Some(edicao) = self.edicao.as_mut() else {
-            return;
-        };
-        let Some((arrasto, anterior)) = edicao.arrasto else {
-            return;
-        };
-
-        // 🔑 O delta é convertido em **fração da foto exibida**, e não em pixels:
-        // é o que faz o mesmo arrasto dar o mesmo corte numa janela grande e numa
-        // pequena.
-        let dx = f32::from(ponteiro.x - anterior.x) / area.2;
-        let dy = f32::from(ponteiro.y - anterior.y) / area.3;
-
-        edicao.corte = match arrasto {
-            Arrasto::Alca(alca) => corte::mover_alca(&edicao.corte, alca, dx, dy, tamanho, None),
-            Arrasto::Retangulo => corte::arrastar(&edicao.corte, dx, dy),
-        };
-        edicao.arrasto = Some((arrasto, ponteiro));
-        // 🔑 Os pixels da exibição não mudam no arrasto (ver
-        // `atualizar_exibicao`), mas a vinheta muda: ela segue o retângulo,
-        // como no editor do site. Sem vinheta, nada é pedido.
-        self.revelar_de_novo_se_a_vinheta_segue_o_corte(cx);
-        cx.notify();
-    }
-
+    /// O tamanho da **cópia de trabalho**, mesmo com o bruto na tela: é nele
+    /// que o Enquadrar e o "A foto sai com" medem.
     fn tamanho_da_foto(&self) -> Option<(f32, f32)> {
-        match self.aberta.as_ref() {
-            Some(Aberta {
-                origem: Some(origem),
-                ..
-            }) => Some((origem.largura as f32, origem.altura as f32)),
-            _ => None,
-        }
+        self.tamanho_da_copia()
     }
 
     /// Refaz o que está na tela a partir da foto revelada.
@@ -1876,10 +1414,7 @@ impl Revelacao {
         // No modo de corte a foto aparece inteira (girada e endireitada), com o
         // retângulo por cima; fora dele, recortada. É o `apply_crop_clip` do
         // legado.
-        let corte = match self.edicao.as_ref() {
-            Some(edicao) => edicao.corte.clone(),
-            None => self.corte_atual(),
-        };
+        let corte = self.corte_atual();
         let recortar = self.edicao.is_none();
         let cruzar = std::mem::take(&mut self.cruzar);
 
@@ -1922,63 +1457,6 @@ impl Revelacao {
         }
     }
 
-    /// Gira 90° no sentido horário. Só faz sentido dentro do modo de corte.
-    pub fn girar(&mut self, cx: &mut Context<Self>) {
-        self.mexer_no_corte(corte::girar, cx);
-    }
-
-    pub fn espelhar_horizontal(&mut self, cx: &mut Context<Self>) {
-        self.mexer_no_corte(corte::espelhar_horizontal, cx);
-    }
-
-    pub fn espelhar_vertical(&mut self, cx: &mut Context<Self>) {
-        self.mexer_no_corte(corte::espelhar_vertical, cx);
-    }
-
-    /// Muda o ângulo de endireitamento, em graus, a partir do que já está lá.
-    pub fn inclinar(&mut self, graus: f32, cx: &mut Context<Self>) {
-        self.mexer_no_corte(|corte| corte::inclinar(corte, graus), cx);
-    }
-
-    /// Põe o ângulo num valor absoluto — é o que o slider manda.
-    fn definir_angulo(&mut self, graus: f32, cx: &mut Context<Self>) {
-        self.mexer_no_corte(|corte| corte::inclinar(corte, graus - corte.angle()), cx);
-    }
-
-    /// Volta ao corte que ocupa a foto inteira, sem giro nem espelho.
-    ///
-    /// É o "Reset" do painel de corte do legado — e ele **não** aplica: quem
-    /// desiste de vez usa Cancelar, quem quer recomeçar do zero continua no modo.
-    pub fn recomecar_corte(&mut self, cx: &mut Context<Self>) {
-        self.mexer_no_corte(|_| corte::foto_inteira(), cx);
-    }
-
-    pub fn travar_proporcao(&mut self, proporcao: AspectRatio, cx: &mut Context<Self>) {
-        let Some(edicao) = self.edicao.as_mut() else {
-            return;
-        };
-        edicao.proporcao = proporcao;
-        cx.notify();
-    }
-
-    /// 🔑 Toda mudança de corte passa por aqui, e por isso **toda** mudança
-    /// reprocessa a foto exibida. Girar sem reprocessar mudaria um número e
-    /// deixaria a tela igual — o botão pareceria quebrado, e o defeito só
-    /// apareceria ao aplicar.
-    fn mexer_no_corte(
-        &mut self,
-        como: impl Fn(&CropSettings) -> CropSettings,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(edicao) = self.edicao.as_mut() else {
-            return;
-        };
-        edicao.corte = como(&edicao.corte);
-        self.atualizar_exibicao();
-        self.revelar_de_novo_se_a_vinheta_segue_o_corte(cx);
-        cx.notify();
-    }
-
     /// Alterna entre a foto revelada e a original. É o `\\` do legado.
     ///
     /// ⚠️ **Não mexe nos ajustes.** Os 42 sliders continuam onde estavam, e o
@@ -1992,22 +1470,6 @@ impl Revelacao {
 
     pub fn mostrando_original(&self) -> bool {
         self.mostrando_original
-    }
-
-    /// Devolve os 46 ajustes ao neutro. É o "Reset All" do painel do legado.
-    ///
-    /// 🔑 **O corte não entra.** Lá o `reset_edits` também não o toca: quem quer
-    /// desfazer enquadramento usa "Recomeçar", dentro do modo de corte. Misturar
-    /// os dois faria um botão de cor apagar trabalho de composição.
-    pub fn redefinir_ajustes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.gravar_o_que_estiver_pendente();
-
-        self.ajustes = Ajustes::default();
-        self.espalhar_nos_sliders(window, cx);
-        self.pedir_revelacao_cruzando(cx);
-        self.historico.registrar(self.estado());
-        self.gravar();
-        cx.notify();
     }
 
     /// Devolve **um** controle ao neutro — o duplo clique no rótulo.
@@ -2098,10 +1560,7 @@ impl Revelacao {
     /// O enquadramento que a tela mostra: o do modo de corte, se ele estiver
     /// aberto; senão, o da foto.
     fn corte_na_tela(&self) -> CropSettings {
-        match self.edicao.as_ref() {
-            Some(edicao) => edicao.corte.clone(),
-            None => self.corte_atual(),
-        }
+        self.corte_atual()
     }
 
     /// O corte da tela mudou: com vinheta ligada, a foto é revelada de novo.
@@ -2118,39 +1577,6 @@ impl Revelacao {
         if self.ajustes_na_tela().vinheta_ligada() {
             self.pedir_revelacao(cx);
         }
-    }
-
-    /// Põe na tira a foto **como ela está sendo revelada**.
-    ///
-    /// 🚨 **Sem isto a tira mente, e mente por muito tempo.** A célula continua
-    /// com a imagem que o importador gravou: o operador deixa a foto em preto e
-    /// branco no palco e a tira mostra a colorida, lado a lado, na mesma tela.
-    /// Numa sequência de vinte fotos é o que ele usa para saber onde parou — e
-    /// era a única coisa ali que não acompanhava o trabalho.
-    ///
-    /// ⚠️ **Só a memória da tira, e não o cache em disco.** O `PreviewManager`
-    /// guarda o **arquivo**, e a receita vive separada, na linha da foto: gravar
-    /// a revelada lá dentro faria a próxima abertura tratar o revelado como
-    /// bruto e aplicar a receita duas vezes — que é exatamente o defeito de
-    /// 7/set com a foto do site (ver `persistencia::chave_do_trabalho`).
-    fn atualizar_a_tira_com_o_revelado(&mut self) {
-        let Some(Aberta {
-            foto,
-            revelada: Some(revelada),
-            ..
-        }) = self.aberta.as_ref()
-        else {
-            return;
-        };
-
-        // A célula tem 68px; reduzir para o lado dela é o mesmo princípio da
-        // grade da sessão — converter no tamanho em que se desenha, e não no
-        // tamanho em que se guarda.
-        let lado = (ALTURA_DO_FILMSTRIP - 16.0) as u32;
-        let pequena = revelada.thumbnail(lado * 2, lado * 2);
-        let id = foto.id.clone();
-        self.miniaturas_da_tira
-            .guardar(&id, Miniatura::Pronta(para_gpui(pequena)));
     }
 
     /// Liga o laço que pergunta pelo resultado, se ainda não houver um.
@@ -2219,8 +1645,8 @@ impl Revelacao {
         // `canvas` grava.
         let moldura = div()
             .flex()
-            .size_full()
-            .min_w(px(0.))
+            .absolute()
+            .inset_0()
             .items_center()
             .justify_center()
             // 🔑 **O poço, e não o fundo do app.** O olho julga exposição por
@@ -2254,21 +1680,29 @@ impl Revelacao {
                     // de corte apareceria fora do lugar — pouco, o suficiente para
                     // parecer erro de mira do usuário. Aqui foto, overlay e
                     // medição dividem exatamente o mesmo retângulo.
-                    div()
-                        .relative()
-                        .size_full()
+                    self.com_gestos_de_zoom(
+                        div()
+                            .id("palco-da-foto")
+                            .relative()
+                            .size_full()
+                            // O zoom mostra só o pedaço da foto que cabe.
+                            .overflow_hidden(),
+                        cx,
+                    )
                         // 🔑 **A foto de antes fica embaixo, inteira, e a nova
                         // entra ganhando opacidade por cima.** Sem a de baixo o
                         // efeito seria a foto surgir do fundo preto — que é pior
                         // do que o corte seco, porque pisca. Ver
                         // `CRUZAMENTO_DA_FOTO`.
-                        .children(self.saindo.clone().map(|anterior| {
-                            div().absolute().inset_0().child(img(anterior).size_full())
-                        }))
+                        .children(
+                            self.saindo
+                                .clone()
+                                .map(|anterior| self.foto_na_vista(anterior)),
+                        )
                         .child(match self.saindo.as_ref() {
-                            None => img(imagem.clone()).size_full().into_any_element(),
-                            Some(_) => img(imagem.clone())
-                                .size_full()
+                            None => self.foto_na_vista(imagem.clone()).into_any_element(),
+                            Some(_) => self
+                                .foto_na_vista(imagem.clone())
                                 .with_animation(
                                     // 🚨 O id muda a cada cruzamento: repetido, o
                                     // GPUI reaproveita o estado da animação
@@ -2280,11 +1714,18 @@ impl Revelacao {
                                 )
                                 .into_any_element(),
                         })
+                        .children(self.caixa_de_zoom())
                         .children(self.overlay_de_corte(cx))
                         // O `canvas` mede o palco e é onde o arrasto se liga:
                         // registrar ouvinte de mouse exige estar na fase de
                         // pintura, e um `div` comum não chega lá.
-                        .child(self.medida_e_arrasto(cx)),
+                        .child(self.medida_e_arrasto(cx))
+                        // "− Encaixar +", como no canto do palco do site; no
+                        // Enquadrar não há zoom, e o lugar é do transferidor.
+                        .when(self.edicao.is_none(), |palco| {
+                            palco.child(self.controle_de_zoom(cx))
+                        })
+                        .children(self.folha_de_atalhos(cx)),
                 )
                 .into_any_element(),
             // 🔑 **Duas frases, e a diferença é se há o que esperar.** Enquanto
@@ -2316,10 +1757,7 @@ impl Revelacao {
     fn medida_e_arrasto(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let medidor = cx.entity();
         let ouvinte = cx.entity();
-        let arrastando = self
-            .edicao
-            .as_ref()
-            .is_some_and(|edicao| edicao.arrasto.is_some());
+        let arrastando = self.arrastando_no_corte();
 
         canvas(
             move |bounds, _window, cx| {
@@ -2339,11 +1777,11 @@ impl Revelacao {
 
                 window.on_mouse_event({
                     let esta = ouvinte.clone();
-                    move |evento: &MouseMoveEvent, fase, _window, cx| {
+                    move |evento: &MouseMoveEvent, fase, window, cx| {
                         if !fase.bubble() {
                             return;
                         }
-                        esta.update(cx, |tela, cx| tela.mover_corte(evento.position, cx));
+                        esta.update(cx, |tela, cx| tela.mover_no_corte(evento.position, window, cx));
                     }
                 });
 
@@ -2353,12 +1791,7 @@ impl Revelacao {
                         if !fase.bubble() {
                             return;
                         }
-                        esta.update(cx, |tela, cx| {
-                            if let Some(edicao) = tela.edicao.as_mut() {
-                                edicao.arrasto = None;
-                                cx.notify();
-                            }
-                        });
+                        esta.update(cx, |tela, cx| tela.soltar_no_corte(cx));
                     }
                 });
             },
@@ -2367,1340 +1800,16 @@ impl Revelacao {
         .size_full()
     }
 
-    /// O overlay inteiro: escurecimento, retângulo, grade e as oito alças.
-    ///
-    /// Tudo com `div` posicionado — o GPUI não tem pincel, e não precisa: um
-    /// retângulo é um `div` absoluto com fundo, e é o layout que faz a conta.
-    fn overlay_de_corte(&self, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
-        let edicao = self.edicao.as_ref()?;
-        let (ax, ay, aw, ah) = self.area_da_foto()?;
-
-        // O retângulo de corte em pixels de tela, a partir das frações.
-        let cx0 = ax + edicao.corte.crop_x() * aw;
-        let cy0 = ay + edicao.corte.crop_y() * ah;
-        let cw = edicao.corte.crop_width() * aw;
-        let ch = edicao.corte.crop_height() * ah;
-
-        let escuro = gpui::rgba(0x00000078);
-        let mut faixas = Vec::new();
-        // Quatro faixas em volta do corte, e não um retângulo com furo: o GPUI
-        // não recorta buraco, e quatro divs custam o mesmo.
-        for (x, y, w, h) in [
-            (ax, ay, aw, cy0 - ay),                    // acima
-            (ax, cy0 + ch, aw, ay + ah - (cy0 + ch)),  // abaixo
-            (ax, cy0, cx0 - ax, ch),                   // à esquerda
-            (cx0 + cw, cy0, ax + aw - (cx0 + cw), ch), // à direita
-        ] {
-            if w > 0.0 && h > 0.0 {
-                faixas.push(
-                    div()
-                        .absolute()
-                        .left(px(x))
-                        .top(px(y))
-                        .w(px(w))
-                        .h(px(h))
-                        .bg(escuro)
-                        .into_any_element(),
-                );
-            }
-        }
-
-        let mut grade = Vec::new();
-        if edicao.grade {
-            let linha = gpui::rgba(0xffffff66);
-            for i in 1..3 {
-                let fracao = i as f32 / 3.0;
-                grade.push(
-                    div()
-                        .absolute()
-                        .left(px(cx0 + cw * fracao))
-                        .top(px(cy0))
-                        .w(px(1.))
-                        .h(px(ch))
-                        .bg(linha)
-                        .into_any_element(),
-                );
-                grade.push(
-                    div()
-                        .absolute()
-                        .left(px(cx0))
-                        .top(px(cy0 + ch * fracao))
-                        .w(px(cw))
-                        .h(px(1.))
-                        .bg(linha)
-                        .into_any_element(),
-                );
-            }
-        }
-
-        let alcas: Vec<_> = Alca::TODAS
-            .into_iter()
-            .map(|alca| {
-                let (fx, fy) = alca.posicao();
-                // 12px de lado, centrada no ponto — o mesmo `HANDLE_SIZE` do
-                // legado. Menor que isso vira alvo difícil de acertar com o dedo
-                // no trackpad.
-                const LADO: f32 = 12.0;
-                div()
-                    .id(SharedString::from(format!("alca-{alca:?}")))
-                    .absolute()
-                    .left(px(cx0 + cw * fx - LADO / 2.0))
-                    .top(px(cy0 + ch * fy - LADO / 2.0))
-                    .w(px(LADO))
-                    .h(px(LADO))
-                    .bg(gpui::white())
-                    .border_1()
-                    .border_color(gpui::black())
-                    .rounded(px(2.))
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |tela, evento: &MouseDownEvent, _window, cx| {
-                            if let Some(edicao) = tela.edicao.as_mut() {
-                                edicao.arrasto = Some((Arrasto::Alca(alca), evento.position));
-                                cx.notify();
-                            }
-                        }),
-                    )
-                    .into_any_element()
-            })
-            .collect();
-
-        Some(
-            div()
-                .absolute()
-                .inset_0()
-                .children(faixas)
-                .child(
-                    // O retângulo: só a borda, para não cobrir a foto.
-                    div()
-                        .id("retangulo-de-corte")
-                        .absolute()
-                        .left(px(cx0))
-                        .top(px(cy0))
-                        .w(px(cw))
-                        .h(px(ch))
-                        .border_2()
-                        .border_color(gpui::white())
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|tela, evento: &MouseDownEvent, _window, cx| {
-                                if let Some(edicao) = tela.edicao.as_mut() {
-                                    edicao.arrasto = Some((Arrasto::Retangulo, evento.position));
-                                    cx.notify();
-                                }
-                            }),
-                        ),
-                )
-                .children(grade)
-                .children(alcas)
-                .into_any_element(),
-        )
-    }
-
-    /// O painel dos ajustes: os 42 controles, o corte e o redefinir.
-    ///
-    /// 🔑 **Os avisos moram aqui**, e não no palco: "sem GPU" e "mostrando o
-    /// original" são recados sobre o que os controles estão fazendo, e sobre a
-    /// foto o palco já fala sozinho.
-    /// A coluna da direita: o cabeçalho, os sete painéis e nada mais.
-    ///
-    /// 🔑 **No modo de enquadramento ela troca de conteúdo**, como no site
-    /// (`editor.tsx`: `enquadrando ? <PainelDeCorte/> : <Paineis/>`). Antes a
-    /// barra de corte entrava por cima dos 53 sliders, e quem estava cortando
-    /// rolava por uma coluna inteira de controles que não tinham nada a ver com
-    /// o gesto em curso.
-    fn painel(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        // Sem GPU não há revelação, e o painel diz isso em vez de oferecer
-        // sliders que não movem nada. `None` é "a thread ainda está abrindo o
-        // dispositivo" — não é ausência de placa, e anunciar ausência durante os
-        // milissegundos de abertura seria mentir em toda abertura.
-        let sem_motor = self.processador.disponivel() == Some(false);
-        let enquadrando = self.edicao.is_some();
-
-        let barra = self.barra_de_corte(cx).map(IntoElement::into_any_element);
-        let cabecalho = (!enquadrando).then(|| self.cabecalho_dos_ajustes(cx));
-        let paineis: Vec<AnyElement> = if enquadrando {
-            Vec::new()
-        } else {
-            Painel::TODOS
-                .into_iter()
-                .map(|painel| self.painel_sanfonado(painel, cx))
-                .collect()
-        };
-
-        let graficos = self.painel_dos_graficos(cx);
-
-        div()
-            .flex()
-            .flex_col()
-            .size_full()
-            .bg(cx.theme().sidebar)
-            // ⚠️ **O histograma fica fora da rolagem**, no alto — é onde o
-            // Lightroom o põe, e é o que ele precisa ser para servir: uma medida
-            // que se olha **enquanto** se arrasta o slider. Rolando junto com os
-            // 53 controles, ele desaparece da tela na primeira seção aberta.
-            .child(
-                div()
-                    .h(px(ALTURA_DOS_GRAFICOS))
-                    .flex_none()
-                    .border_b_1()
-                    .border_color(cx.theme().border)
-                    .child(graficos),
-            )
-            .child(
-                div()
-                    .id("painel-de-ajustes")
-                    .flex()
-                    .flex_col()
-                    .gap(px(6.))
-                    .flex_1()
-                    .min_h(px(0.))
-                    .p(px(12.))
-                    .overflow_y_scroll()
-                    .when(sem_motor, |painel| {
-                        painel.child(
-                            div()
-                                .text_xs()
-                                .text_color(cx.theme().warning)
-                                .child("Sem GPU disponível — os ajustes não são aplicados"),
-                        )
-                    })
-                    .when(self.mostrando_original, |painel| {
-                        painel.child(
-                            div()
-                                .text_xs()
-                                .text_color(cx.theme().warning)
-                                .child("Mostrando o original (\\ para voltar)"),
-                        )
-                    })
-                    .children(barra)
-                    .children(cabecalho)
-                    .children(paineis),
-            )
-    }
-
-    /// Quantos ajustes estão fora do neutro, e o botão que devolve todos.
-    ///
-    /// 🔑 **Fora dos painéis sanfonados, e no topo** — é o desenho do site.
-    /// Zerar tudo é o gesto de "recomeçar" e não pertence a nenhuma seção:
-    /// dentro de uma delas pareceria zerar só aquela. Ele estava no **rodapé**,
-    /// depois de 53 sliders, com o rótulo "Redefinir ajustes" — para chegar
-    /// nele era preciso rolar a coluna inteira.
-    ///
-    /// E o número diz o que se perde: "10 ajustes fora do neutro" é a única
-    /// coisa na tela que responde "esta foto foi mexida?" sem abrir sete
-    /// painéis.
-    fn cabecalho_dos_ajustes(&self, cx: &mut Context<Self>) -> AnyElement {
-        let alterados = self.quantos_alterados();
-        let texto = match alterados {
-            0 => "Nenhum ajuste fora do neutro".to_string(),
-            1 => "1 ajuste fora do neutro".to_string(),
-            n => format!("{n} ajustes fora do neutro"),
-        };
-        // 🚨 **O botão não pode decidir sozinho se há o que zerar.** Olhando só
-        // os ajustes da foto no palco, ele se apagava com ela no neutro — mesmo
-        // com quatro marcadas atrás cheias de ajuste, que era justamente o que
-        // o operador queria limpar (dono, 2026-09-11).
-        let outras = self.outras_a_zerar().len();
-        let quantas_fotos = usize::from(alterados > 0) + outras;
-
-        div()
-            .flex()
-            .items_center()
-            .justify_between()
-            .gap(px(6.))
-            .child(
-                div()
-                    .flex_1()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(SharedString::from(texto)),
-            )
-            .child(
-                Button::new("zerar-tudo")
-                    .label(if quantas_fotos > 1 {
-                        SharedString::from(format!("Zerar {quantas_fotos} fotos"))
-                    } else {
-                        SharedString::from("Zerar tudo")
-                    })
-                    .xsmall()
-                    .disabled(quantas_fotos == 0)
-                    .tooltip(if outras > 0 {
-                        "Devolve ao neutro esta foto e as marcadas na tira. O enquadramento de cada uma não muda."
-                    } else {
-                        "Devolve os 53 ajustes ao neutro. O enquadramento não muda."
-                    })
-                    .on_click(cx.listener(|tela, _ev, window, cx| {
-                        if tela.quantos_alterados() > 0 {
-                            tela.redefinir_ajustes(window, cx);
-                        }
-                        if !tela.outras_a_zerar().is_empty() {
-                            cx.emit(PedidoDaRevelacao::ZerarAsMarcadas);
-                        }
-                    })),
-            )
-            .into_any_element()
-    }
-
-    /// Quantos dos 53 estão fora do próprio neutro.
-    fn quantos_alterados(&self) -> usize {
-        CONTROLES
-            .iter()
-            .filter(|definicao| (definicao.ler)(&self.ajustes) != definicao.neutro())
-            .count()
-    }
-
-    /// Se alguma coisa desta família saiu do neutro — o ponto âmbar do
-    /// cabeçalho.
-    fn secao_alterada(&self, secao: Secao) -> bool {
-        CONTROLES
-            .iter()
-            .filter(|definicao| definicao.secao == secao)
-            .any(|definicao| (definicao.ler)(&self.ajustes) != definicao.neutro())
-    }
-
-    /// Os dois gráficos, juntos: o histograma e a curva de tons.
-    ///
-    /// ⚠️ **No legado eles moram em lugares diferentes** — o histograma é aba
-    /// própria e a curva vive dentro de "AllAdjustments". Aqui os dois são
-    /// desenho da mesma coisa (a foto que está na tela, medida), e nenhum tem
-    /// controle: separá-los daria uma aba de 120px de altura para um gráfico só.
-    fn painel_dos_graficos(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(8.))
-            .size_full()
-            .p(px(10.))
-            .bg(cx.theme().sidebar)
-            .child(self.histograma(cx))
-            .child(self.curva_de_tons(cx))
-    }
-
     /// A barra do modo de corte: o que fazer com o retângulo que está na foto.
     ///
     /// Fica no topo do painel, e só existe enquanto o modo está aberto. No legado
     /// ela vive no painel de revelação junto com tudo o mais; aqui aparecer e
     /// sumir é o que diz, sem texto, que a tela está noutro estado.
     fn barra_de_corte(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
-        let edicao = self.edicao.as_ref()?;
-        let grade_ligada = edicao.grade;
-        let angulo = edicao.corte.angle();
-        let atual = edicao.proporcao.clone();
-
-        Some(
-            div()
-                .flex()
-                .flex_col()
-                .gap(px(6.))
-                .pb(px(8.))
-                .mb(px(4.))
-                .border_b_1()
-                .border_color(cx.theme().border)
-                .child(div().text_xs().child("Corte"))
-                .child(
-                    div()
-                        .flex()
-                        .gap(px(4.))
-                        .child(
-                            Button::new("corte-aplicar")
-                                .label("Aplicar")
-                                .xsmall()
-                                .primary()
-                                .on_click(cx.listener(|tela, _ev, _window, cx| {
-                                    tela.aplicar_corte(cx);
-                                })),
-                        )
-                        .child(
-                            Button::new("corte-cancelar")
-                                .label("Cancelar")
-                                .xsmall()
-                                .on_click(cx.listener(|tela, _ev, _window, cx| {
-                                    tela.cancelar_corte(cx);
-                                })),
-                        ),
-                )
-                .child(
-                    Button::new("corte-grade")
-                        .label("Grade de terços")
-                        .xsmall()
-                        .w_full()
-                        .when(grade_ligada, |b| b.primary())
-                        .selected(grade_ligada)
-                        .on_click(cx.listener(|tela, _ev, _window, cx| {
-                            if let Some(edicao) = tela.edicao.as_mut() {
-                                edicao.grade = !edicao.grade;
-                                cx.notify();
-                            }
-                        })),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .gap(px(4.))
-                        .child(
-                            Button::new("corte-girar")
-                                .label("Girar 90°")
-                                .xsmall()
-                                .flex_1()
-                                .on_click(cx.listener(|tela, _ev, _window, cx| {
-                                    tela.girar(cx);
-                                })),
-                        )
-                        .child(Button::new("corte-espelho-h").label("⇄").xsmall().on_click(
-                            cx.listener(|tela, _ev, _window, cx| {
-                                tela.espelhar_horizontal(cx);
-                            }),
-                        ))
-                        .child(Button::new("corte-espelho-v").label("⇅").xsmall().on_click(
-                            cx.listener(|tela, _ev, _window, cx| {
-                                tela.espelhar_vertical(cx);
-                            }),
-                        )),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .justify_between()
-                        .text_xs()
-                        .child("Endireitar")
-                        .child(
-                            div()
-                                .text_color(cx.theme().muted_foreground)
-                                .child(SharedString::from(format!("{:+.1}°", angulo))),
-                        ),
-                )
-                .child(Slider::new(&self.angulo).horizontal())
-                .child(
-                    // As proporções que o legado oferece no combo, na mesma ordem.
-                    div().flex().flex_wrap().gap(px(2.)).children(
-                        PROPORCOES
-                            .iter()
-                            .map(|(rotulo, proporcao)| {
-                                let escolhida = *proporcao == atual;
-                                let proporcao = proporcao.clone();
-                                Button::new(SharedString::from(format!("prop-{rotulo}")))
-                                    .label(*rotulo)
-                                    .xsmall()
-                                    .when(escolhida, |b| b.primary())
-                                    .selected(escolhida)
-                                    .on_click(cx.listener(move |tela, _ev, _window, cx| {
-                                        tela.travar_proporcao(proporcao.clone(), cx);
-                                    }))
-                                    .into_any_element()
-                            })
-                            .collect::<Vec<_>>(),
-                    ),
-                )
-                .child(
-                    Button::new("corte-recomecar")
-                        .label("Recomeçar")
-                        .xsmall()
-                        .w_full()
-                        .on_click(cx.listener(|tela, _ev, _window, cx| {
-                            tela.recomecar_corte(cx);
-                        })),
-                ),
-        )
+        self.edicao.as_ref()?;
+        Some(self.painel_de_corte(cx))
     }
 
-    /// O histograma, desenhado com `paint_quad` dentro de um `canvas`.
-    ///
-    /// 🔑 **256 colunas × 3 canais não podem ser 768 `div`s.** Cada `div` é um nó
-    /// de layout, e o layout roda a cada quadro; o painel inteiro tem menos de
-    /// cem hoje. Aqui vale a exceção — pintar retângulo direto é o que o `canvas`
-    /// existe para permitir, e é o análogo do `painter` que o legado usa.
-    fn histograma(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        const ALTURA: f32 = 70.0;
-
-        let barras: Vec<(f32, f32, f32)> = match self.histograma.as_ref() {
-            Some(histograma) => histograma.alturas().collect(),
-            None => Vec::new(),
-        };
-        let fundo = cx.theme().background;
-
-        div().h(px(ALTURA)).w_full().mb(px(6.)).child(
-            canvas(
-                |_bounds, _window, _cx| {},
-                move |bounds, _prepaint, window, _cx| {
-                    window.paint_quad(gpui::fill(bounds, fundo));
-
-                    if barras.is_empty() {
-                        return;
-                    }
-
-                    let largura = f32::from(bounds.size.width) / barras.len() as f32;
-                    let base = f32::from(bounds.origin.y) + f32::from(bounds.size.height);
-
-                    for (i, (r, g, b)) in barras.iter().enumerate() {
-                        let x = f32::from(bounds.origin.x) + i as f32 * largura;
-                        // Os três canais somam luz onde se sobrepõem — cinza
-                        // vira branco, que é o que se espera de um
-                        // histograma. Alfa fixo, como no legado (100/255).
-                        for (altura, cor) in [
-                            (r, gpui::rgba(0xff000064)),
-                            (g, gpui::rgba(0x00ff0064)),
-                            (b, gpui::rgba(0x0000ff64)),
-                        ] {
-                            let alta = altura * ALTURA;
-                            if alta <= 0.0 {
-                                continue;
-                            }
-                            window.paint_quad(gpui::fill(
-                                Bounds {
-                                    origin: gpui::point(px(x), px(base - alta)),
-                                    size: gpui::size(px(largura.max(1.0)), px(alta)),
-                                },
-                                cor,
-                            ));
-                        }
-                    }
-                },
-            )
-            .size_full(),
-        )
-    }
-
-    /// A curva de tons: a diagonal tracejada e a curva de agora, por cima.
-    ///
-    /// 🔑 Desenhada como 100 segmentos horizontais de 1px — o GPUI não tem
-    /// primitiva de linha, e `paint_quad` é o que existe. Para uma curva que
-    /// atravessa 280px, um retângulo por passo é indistinguível de uma linha, e
-    /// custa o mesmo que o histograma ao lado.
-    fn curva_de_tons(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        const ALTURA: f32 = 120.0;
-
-        let pontos = curva::curva(&self.ajustes);
-        let fundo = cx.theme().background;
-        let borda = cx.theme().border;
-        let linha = cx.theme().primary;
-
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(2.))
-            .mb(px(6.))
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child("Curva de tons"),
-            )
-            .child(
-                div().h(px(ALTURA)).w_full().child(
-                    canvas(
-                        |_bounds, _window, _cx| {},
-                        move |bounds, _prepaint, window, _cx| {
-                            window.paint_quad(gpui::fill(bounds, fundo));
-
-                            let x0 = f32::from(bounds.origin.x);
-                            let y0 = f32::from(bounds.origin.y);
-                            let largura = f32::from(bounds.size.width);
-                            let altura = f32::from(bounds.size.height);
-                            let passo = largura / (pontos.len() - 1) as f32;
-
-                            // A diagonal de referência, pontilhada: sem ela não dá
-                            // para ver se a curva está levantando ou baixando.
-                            for i in (0..pontos.len()).step_by(3) {
-                                let t = i as f32 / (pontos.len() - 1) as f32;
-                                window.paint_quad(gpui::fill(
-                                    Bounds {
-                                        origin: gpui::point(
-                                            px(x0 + t * largura),
-                                            px(y0 + (1.0 - t) * altura),
-                                        ),
-                                        size: gpui::size(px(2.), px(1.)),
-                                    },
-                                    borda,
-                                ));
-                            }
-
-                            for i in 0..pontos.len() - 1 {
-                                let y_a = y0 + (1.0 - pontos[i]) * altura;
-                                let y_b = y0 + (1.0 - pontos[i + 1]) * altura;
-                                // O segmento vira um retângulo que cobre a subida
-                                // entre os dois pontos: sem isso, uma curva
-                                // íngreme apareceria como escada de pontos soltos.
-                                let topo = y_a.min(y_b);
-                                let alta = (y_a - y_b).abs().max(2.0);
-                                window.paint_quad(gpui::fill(
-                                    Bounds {
-                                        origin: gpui::point(px(x0 + i as f32 * passo), px(topo)),
-                                        size: gpui::size(px(passo.max(1.0)), px(alta)),
-                                    },
-                                    linha,
-                                ));
-                            }
-                        },
-                    )
-                    .size_full(),
-                ),
-            )
-    }
-
-    /// A lista de presets: os de sistema e os do usuário, como no legado.
-    ///
-    /// ⚠️ **Fica no mesmo painel dos ajustes, e no legado é um dock à parte.** A
-    /// Revelação nova não tem docking (fase 4), e inventar um painel esquerdo só
-    /// para isto seria decidir agora um layout que a fase 4 vai refazer. O que
-    /// importa para a paridade — quais presets existem, o que cada um aplica — é
-    /// igual.
-    /// A lista de predefinições — o desenho do site (`painel-presets.tsx`).
-    ///
-    /// Busca em cima com o botão de salvar ao lado, dois grupos com contagem
-    /// ("Do sistema 7", "Minhas 0"), o número de campos que cada uma escreve à
-    /// direita do nome, e o rodapé dizendo o que o ponteiro faz.
-    ///
-    /// 🚨 **A lista inteira era uma sanfona fechada.** O motivo estava escrito e
-    /// tinha data: ela dividia a coluna de 280px com os 42 sliders. Só que ela
-    /// não divide mais nada desde que virou painel próprio do dock — e fechada
-    /// por padrão, num painel que existe só para ela, o que se via ao abrir a
-    /// Revelação era a palavra "Presets" e um triângulo.
-    fn presets(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let busca = self.busca_de_presets.read(cx).value().to_string();
-        let (do_sistema, minhas) = presets::separar_filtrando(&self.presets, &busca);
-        let nenhuma = do_sistema.is_empty() && minhas.is_empty();
-        let busca = busca.trim().to_string();
-        // ⚠️ **"Nenhuma com esse nome" e "nenhuma ainda" são coisas diferentes.**
-        // Sem a distinção, quem digitasse errado leria que o app não tem
-        // predefinição nenhuma — e iria criar a que já existe.
-        let vazio = if busca.is_empty() {
-            "Nenhuma predefinição ainda."
-        } else {
-            "Nenhuma predefinição com esse nome."
-        };
-
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(10.))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(4.))
-                    .child(
-                        div()
-                            .flex_1()
-                            .child(Input::new(&self.busca_de_presets).xsmall()),
-                    )
-                    .child(self.salvar_como_preset(cx))
-                    .child(
-                        Button::new("importar-do-lightroom")
-                            .label("↑")
-                            .xsmall()
-                            .tooltip("Importar do Lightroom (.lrtemplate, .xmp)")
-                            .disabled(self.escolhendo_arquivos)
-                            .on_click(cx.listener(|tela, _ev, _window, cx| {
-                                tela.importar_do_lightroom(cx);
-                            })),
-                    ),
-            )
-            .children(self.resultado_da_importacao(cx))
-            .when(nenhuma, |painel| {
-                painel.child(
-                    div()
-                        .py(px(8.))
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(vazio),
-                )
-            })
-            .when(!nenhuma, |painel| {
-                painel
-                    .child(self.grupo_de_presets("Do sistema", &do_sistema, None, cx))
-                    .child(
-                        self.grupo_de_presets(
-                            "Minhas",
-                            &minhas,
-                            // Só quando não há nenhuma salva — com a busca vazia de
-                            // resultados, a explicação de como criar seria resposta
-                            // à pergunta errada.
-                            presets::nenhuma_do_usuario(&self.presets)
-                                .then_some("Ajuste uma foto e use o + para guardar."),
-                            cx,
-                        ),
-                    )
-            })
-            .child(
-                div()
-                    .pt(px(4.))
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(
-                        "Passe o ponteiro para ver na foto, clique para aplicar. \
-                         Cada uma escreve só os controles que define — os outros ficam como estão.",
-                    ),
-            )
-    }
-
-    /// O que a última importação aproveitou — e o que não.
-    ///
-    /// 🔑 **Fica na coluna, e não num diálogo que se fecha sozinho.** A lista de
-    /// recursos ignorados é longa quando os presets são de coleção comercial, e
-    /// ela é a resposta para "por que este preset mudou tão pouco?" — pergunta
-    /// que só aparece depois de aplicar o primeiro.
-    fn resultado_da_importacao(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let relatorio = self.relatorio.as_ref()?;
-
-        Some(
-            div()
-                .flex()
-                .flex_col()
-                .gap(px(2.))
-                .p(px(6.))
-                .rounded(px(4.))
-                .bg(cx.theme().muted)
-                .text_xs()
-                .child(
-                    div()
-                        .flex()
-                        .items_start()
-                        .gap(px(4.))
-                        .child(div().flex_1().child(SharedString::from(relatorio.resumo())))
-                        .child(
-                            Button::new("fechar-relatorio")
-                                .label("✕")
-                                .xsmall()
-                                .ghost()
-                                .tooltip("Fechar o resultado")
-                                .on_click(cx.listener(|tela, _ev, _window, cx| {
-                                    tela.fechar_relatorio(cx);
-                                })),
-                        ),
-                )
-                .children(
-                    relatorio
-                        .linhas()
-                        .into_iter()
-                        .map(|linha| {
-                            div()
-                                .text_color(cx.theme().muted_foreground)
-                                .child(SharedString::from(linha))
-                        })
-                        .collect::<Vec<_>>(),
-                )
-                .into_any_element(),
-        )
-    }
-
-    /// Um bloco da lista, com o título e a contagem — o desenho do Lightroom.
-    fn grupo_de_presets(
-        &self,
-        titulo: &'static str,
-        presets: &[&Preset],
-        vazio: Option<&'static str>,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(2.))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(5.))
-                    .pb(px(2.))
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(SharedString::from(titulo.to_uppercase()))
-                    .child(SharedString::from(presets.len().to_string())),
-            )
-            .children(match (presets.is_empty(), vazio) {
-                (true, Some(texto)) => Some(
-                    div()
-                        .pb(px(4.))
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(texto),
-                ),
-                _ => None,
-            })
-            .children(
-                presets
-                    .iter()
-                    .map(|preset| self.botao_de_preset(preset, cx))
-                    .collect::<Vec<_>>(),
-            )
-            .into_any_element()
-    }
-
-    /// O botão que abre o diálogo de salvar preset.
-    ///
-    /// ⚠️ **O diálogo é do `gpui-component`, e depende do `Root`** estar na
-    /// primeira camada da janela (`main.rs`) — sem ele, `open_dialog` derruba o
-    /// app num `expect` em vez de abrir o diálogo.
-    fn salvar_como_preset(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        Button::new("salvar-preset")
-            .label("+")
-            .xsmall()
-            .tooltip("Salvar os ajustes atuais como predefinição")
-            .on_click(cx.listener(|tela, _ev, window, cx| {
-                // O campo começa vazio a cada abertura: o nome do preset anterior
-                // sugerido como padrão convida a salvar dois com o mesmo nome, e
-                // nada no banco impede.
-                tela.nome_do_preset
-                    .update(cx, |estado, cx| estado.set_value("", window, cx));
-                tela.preset_inteiro = false;
-
-                let campo = tela.nome_do_preset.clone();
-                let esta = cx.entity();
-                let quantos = tela.quantos_alterados();
-
-                window.open_dialog(cx, move |dialogo, _window, cx| {
-                    let campo = campo.clone();
-                    let esta = esta.clone();
-                    let inteiro = esta.read(cx).preset_inteiro;
-                    let para_marcar = esta.clone();
-
-                    dialogo
-                        .title("Salvar como predefinição")
-                        .confirm()
-                        .child(Input::new(&campo))
-                        // 🔑 **A caixa do site, e ela não precisa de campo novo
-                        // no banco**: guardar os 53 — inclusive os que estão no
-                        // neutro — já é "zerar o resto ao aplicar". É a
-                        // predefinição que é um visual inteiro, e não um retoque
-                        // para somar.
-                        .child(
-                            div()
-                                .id("preset-inteiro")
-                                .pt(px(8.))
-                                .cursor_pointer()
-                                .text_xs()
-                                .child(SharedString::from(format!(
-                                    "{} Zerar os outros ajustes ao aplicar",
-                                    if inteiro { "☑" } else { "☐" }
-                                )))
-                                .on_click(move |_ev, _window, cx| {
-                                    para_marcar.update(cx, |tela, cx| {
-                                        tela.preset_inteiro = !tela.preset_inteiro;
-                                        cx.notify();
-                                    });
-                                }),
-                        )
-                        .child(
-                            div()
-                                .pt(px(4.))
-                                .text_xs()
-                                .child(SharedString::from(if inteiro {
-                                    "Guarda os 53 ajustes: aplicar devolve ao neutro o que ela não pede."
-                                        .to_string()
-                                } else if quantos == 0 {
-                                    "Nenhum ajuste fora do neutro: não há o que guardar.".to_string()
-                                } else {
-                                    format!("Guarda {quantos} ajustes — os que saíram do neutro.")
-                                })),
-                        )
-                        .on_ok(move |_ev, window, cx| {
-                            esta.update(cx, |tela, cx| tela.salvar_preset(window, cx));
-                            true
-                        })
-                });
-            }))
-    }
-
-    /// 🔑 O id do elemento é o **id do preset**, e não a posição na lista.
-    ///
-    /// Dois presets com o mesmo nome são possíveis (nada impede salvar "Retrato"
-    /// duas vezes), e id por posição faria o GPUI confundir o estado de dois
-    /// botões quando a lista mudasse de tamanho — salvar um preset novo trocaria
-    /// qual deles parece pressionado.
-    ///
-    /// ⚠️ **O ponteiro em cima mostra na foto, e o clique aplica.** São dois
-    /// caminhos diferentes de propósito: a prévia não passa pelo histórico nem
-    /// pelo banco, e sair com o ponteiro a desfaz. Sem ela, escolher entre sete
-    /// predefinições custa sete aplicações e sete `Cmd+Z`.
-    fn botao_de_preset(&self, preset: &Preset, cx: &mut Context<Self>) -> gpui::AnyElement {
-        let nome = SharedString::from(preset.name.clone());
-        let quantos = SharedString::from(presets::quantos_campos(preset).to_string());
-        let escolhido = preset.clone();
-        let para_prever = preset.adjustments.clone();
-
-        div()
-            .id(SharedString::from(format!("preset-{}", preset.id)))
-            .flex()
-            .items_center()
-            .gap(px(2.))
-            .px(px(4.))
-            .py(px(1.))
-            .rounded(px(4.))
-            .text_xs()
-            .hover(|estilo| estilo.bg(cx.theme().accent))
-            .on_hover(cx.listener(move |tela, sobre: &bool, _window, cx| {
-                tela.prever(sobre.then(|| para_prever.clone()), cx);
-            }))
-            // 🚨 **O clique mora no nome, e não na linha.** Renomear e apagar
-            // são filhos dela; com o `on_click` na linha inteira, clicar no
-            // lixo aplicaria a predefinição antes de abrir a pergunta — e a
-            // resposta "cancelar" deixaria a foto alterada mesmo assim.
-            .child(
-                div()
-                    .id(SharedString::from(format!("aplicar-{}", preset.id)))
-                    .flex()
-                    .flex_1()
-                    .min_w(px(0.))
-                    .items_center()
-                    .gap(px(4.))
-                    .py(px(2.))
-                    .cursor_pointer()
-                    .child(div().flex_1().truncate().child(nome))
-                    .child(div().text_color(cx.theme().muted_foreground).child(quantos))
-                    .on_click(cx.listener(move |tela, _ev, window, cx| {
-                        // 🚨 A prévia sai **antes** de aplicar: se ela ficasse,
-                        // o resultado na tela seria o preset por cima dele
-                        // mesmo — igual por acaso, e diferente assim que o
-                        // ponteiro saísse.
-                        tela.prever(None, cx);
-                        tela.aplicar_preset(&escolhido, window, cx);
-                    })),
-            )
-            // ⚠️ **Renomear e apagar só aparecem nas do fotógrafo.** No site
-            // eles ficam escondidos até o ponteiro passar (`opacity-0
-            // group-hover`); aqui ficam visíveis, porque um botão de apagar
-            // invisível continua clicável — no navegador é risco pequeno, num
-            // app de catálogo é o gesto que ninguém desfaz.
-            .children(self.acoes_do_preset(preset, cx))
-            .into_any_element()
-    }
-
-    /// Renomear e apagar — só para as do fotógrafo.
-    ///
-    /// Uma do sistema não tem linha no banco para apagar, e o botão mandaria um
-    /// `DELETE` para um id que o repositório não conhece: ela sumiria da tela e
-    /// voltaria na abertura seguinte.
-    fn acoes_do_preset(&self, preset: &Preset, cx: &mut Context<Self>) -> Vec<AnyElement> {
-        if preset.is_system {
-            return Vec::new();
-        }
-
-        let id = preset.id;
-        let nome = preset.name.clone();
-        let para_renomear = nome.clone();
-        let para_apagar = nome.clone();
-
-        vec![
-            Button::new(SharedString::from(format!("renomear-{id}")))
-                .label("✎")
-                .xsmall()
-                .ghost()
-                .tooltip(SharedString::from(format!("Renomear \"{nome}\"")))
-                .on_click(cx.listener(move |tela, _ev, window, cx| {
-                    let nome = para_renomear.clone();
-                    // O campo começa com o nome de agora: renomear é corrigir
-                    // uma palavra, e um campo vazio obrigaria a redigitar tudo.
-                    tela.renome_do_preset.update(cx, |estado, cx| {
-                        estado.set_value(nome.clone(), window, cx);
-                    });
-
-                    let campo = tela.renome_do_preset.clone();
-                    let esta = cx.entity();
-                    window.open_dialog(cx, move |dialogo, _window, _cx| {
-                        let campo = campo.clone();
-                        let esta = esta.clone();
-                        dialogo
-                            .title("Renomear predefinição")
-                            .confirm()
-                            .child(Input::new(&campo))
-                            .on_ok(move |_ev, _window, cx| {
-                                let nome = campo.read(cx).value().to_string();
-                                esta.update(cx, |tela, cx| tela.renomear_preset(id, nome, cx));
-                                true
-                            })
-                    });
-                }))
-                .into_any_element(),
-            Button::new(SharedString::from(format!("apagar-{id}")))
-                .label("🗑")
-                .xsmall()
-                .ghost()
-                .tooltip(SharedString::from(format!("Apagar \"{nome}\"")))
-                .on_click(cx.listener(move |_tela, _ev, window, cx| {
-                    // 🚨 **Apagar pergunta antes**, e é o único gesto desta
-                    // coluna que não se desfaz: a predefinição não está em foto
-                    // nenhuma, então nem o `Cmd+Z` nem reabrir a trazem de volta.
-                    let esta = cx.entity();
-                    let nome = para_apagar.clone();
-                    window.open_dialog(cx, move |dialogo, _window, _cx| {
-                        let esta = esta.clone();
-                        dialogo
-                            .title("Apagar predefinição")
-                            .confirm()
-                            .child(SharedString::from(format!(
-                                "Apagar \"{nome}\"? Ela não volta."
-                            )))
-                            .on_ok(move |_ev, _window, cx| {
-                                esta.update(cx, |tela, cx| tela.apagar_preset(id, cx));
-                                true
-                            })
-                    });
-                }))
-                .into_any_element(),
-        ]
-    }
-
-    /// O botão do tom automático, no topo do Básico.
-    ///
-    /// **Desligado sem foto crua**: sem pixels no cache não há histograma, e um
-    /// botão que aceita o clique para não fazer nada é a promessa vazia que este
-    /// módulo inteiro existe para desfazer.
-    fn botao_do_automatico(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let pronto = matches!(self.aberta.as_ref(), Some(Aberta { bruta: Some(_), .. }));
-
-        Button::new("tom-automatico")
-            .label("Auto")
-            .xsmall()
-            .w_full()
-            .disabled(!pronto)
-            .on_click(cx.listener(|tela, _ev, window, cx| {
-                tela.tom_automatico(window, cx);
-            }))
-    }
-
-    /// Um painel sanfonado: o cabeçalho sempre, os controles só quando aberto.
-    ///
-    /// Fechado por padrão (menos o Básico), como no site e como no legado. São
-    /// 53 controles: com tudo aberto a coluna vira dois metros de sliders, e o
-    /// efeito prático é nenhum deles ser encontrado.
-    ///
-    /// 🔑 **O ponto âmbar no cabeçalho é o que faz a sanfona valer.** Fechado,
-    /// um painel esconde o que tem dentro — inclusive um ajuste que alguém
-    /// deixou lá. O ponto responde "mexeram nisto" sem abrir, e é o mesmo sinal
-    /// do site (`<span className="bg-amber-400" aria-label="alterado" />`).
-    fn painel_sanfonado(&self, painel: Painel, cx: &mut Context<Self>) -> AnyElement {
-        let aberto = self.abertos.contains(&painel);
-        let secoes = painel.secoes();
-        let alterado = secoes.iter().any(|secao| self.secao_alterada(*secao));
-
-        // Com mais de uma família, quem manda é a aba escolhida; com uma só, a
-        // aba não existe e a família é a própria.
-        let visivel = if secoes.len() > 1 {
-            self.aba_hsl
-        } else {
-            secoes[0]
-        };
-        let abas = (secoes.len() > 1).then(|| self.abas(secoes, visivel, cx));
-
-        Collapsible::new()
-            .open(aberto)
-            .child(
-                div()
-                    .id(SharedString::from(format!("painel-{}", painel.rotulo())))
-                    .flex()
-                    .items_center()
-                    .gap(px(6.))
-                    .py(px(4.))
-                    .cursor_pointer()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(div().flex_1().child(painel.rotulo()))
-                    .when(alterado, |cabecalho| {
-                        cabecalho.child(
-                            div()
-                                .size(px(5.))
-                                .rounded_full()
-                                .bg(tema::cores::quente())
-                                .flex_shrink_0(),
-                        )
-                    })
-                    // Triângulo, e não texto: é o que diz "isto abre" sem
-                    // ocupar largura numa coluna de 280px.
-                    .child(if aberto { "▾" } else { "▸" })
-                    .on_click(cx.listener(move |tela, _ev, _window, cx| {
-                        if !tela.abertos.remove(&painel) {
-                            tela.abertos.insert(painel);
-                        }
-                        cx.notify();
-                    })),
-            )
-            .content(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(8.))
-                    .pb(px(8.))
-                    .children(abas)
-                    // O "Auto" mora no Básico e só nele — é onde ele fica no
-                    // Lightroom, junto dos tons que decide. Fora daqui ele seria
-                    // mais um botão à procura de dono.
-                    .children((painel == Painel::Basico).then(|| self.botao_do_automatico(cx)))
-                    .children(self.controles_da_secao(visivel, cx)),
-            )
-            .into_any_element()
-    }
-
-    /// A fileira de abas do HSL — Cor, Luminância, Matiz.
-    ///
-    /// ⚠️ **A aba que não está à mostra também precisa se anunciar.** Uma
-    /// alteração na luminância fica invisível enquanto a aba aberta é a de cor,
-    /// e o ponto do cabeçalho diz "algum HSL foi mexido" sem dizer qual. O
-    /// sublinhado âmbar na aba fechada é o que fecha essa lacuna — é o que o
-    /// site faz (`underline decoration-amber-400`).
-    fn abas(&self, secoes: &'static [Secao], visivel: Secao, cx: &mut Context<Self>) -> AnyElement {
-        div()
-            .flex()
-            .gap(px(4.))
-            .children(
-                secoes
-                    .iter()
-                    .map(|secao| {
-                        let secao = *secao;
-                        let escolhida = secao == visivel;
-                        let alterada = self.secao_alterada(secao);
-
-                        div()
-                            .id(SharedString::from(format!("aba-{}", secao.rotulo())))
-                            .px(px(6.))
-                            .py(px(2.))
-                            .rounded(px(4.))
-                            .cursor_pointer()
-                            .text_xs()
-                            .when(escolhida, |aba| {
-                                aba.bg(cx.theme().accent)
-                                    .text_color(cx.theme().accent_foreground)
-                            })
-                            .when(!escolhida, |aba| {
-                                aba.text_color(cx.theme().muted_foreground)
-                            })
-                            .when(alterada && !escolhida, |aba| {
-                                aba.underline().text_decoration_color(tema::cores::quente())
-                            })
-                            .child(Painel::aba(secao))
-                            .on_click(cx.listener(move |tela, _ev, _window, cx| {
-                                tela.aba_hsl = secao;
-                                cx.notify();
-                            }))
-                            .into_any_element()
-                    })
-                    .collect::<Vec<_>>(),
-            )
-            .into_any_element()
-    }
-
-    /// Os sliders de uma família, na ordem da tabela.
-    fn controles_da_secao(&self, secao: Secao, cx: &mut Context<Self>) -> Vec<AnyElement> {
-        self.controles
-            .iter()
-            .enumerate()
-            .filter(|(_, controle)| controle.definicao.secao == secao)
-            .map(|(i, controle)| self.linha_do_controle(i, controle, cx))
-            .collect()
-    }
-
-    /// Um controle: o rótulo, o valor e a barra.
-    ///
-    /// 🔑 **Duplo clique no rótulo devolve o neutro** — o gesto do Lightroom, e
-    /// o que o dono pediu ao site em 2026-09-05 (*"quando der dois cliques no
-    /// meio do slide deve zerar o efeito"*). Sem ele, voltar um único ajuste ao
-    /// lugar exige arrastar até acertar um número que a barra nem sempre
-    /// alcança: `sharpen_radius` neutro é 1,0 numa faixa de 0,5 a 3,0.
-    ///
-    /// ⚠️ **E o rótulo muda de cor quando o controle sai do neutro.** Com sete
-    /// painéis fechando e abrindo, "o que eu mexi aqui dentro" não tem outra
-    /// resposta senão comparar 53 números com 53 neutros de cabeça.
-    fn linha_do_controle(
-        &self,
-        indice: usize,
-        controle: &Controle,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let definicao = controle.definicao;
-        let valor = (definicao.ler)(&self.ajustes);
-        let neutro = definicao.neutro();
-        let no_neutro = valor == neutro;
-
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(2.))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .text_xs()
-                    .child(
-                        div()
-                            .id(SharedString::from(format!("rotulo-{indice}")))
-                            .cursor_pointer()
-                            .tooltip(|window, cx| {
-                                gpui_component::tooltip::Tooltip::new(
-                                    "Duplo clique volta ao neutro",
-                                )
-                                .build(window, cx)
-                            })
-                            .text_color(if no_neutro {
-                                cx.theme().muted_foreground
-                            } else {
-                                cx.theme().foreground
-                            })
-                            .child(definicao.rotulo)
-                            .on_click(cx.listener(
-                                move |tela, evento: &gpui::ClickEvent, window, cx| {
-                                    if evento.click_count() >= 2 {
-                                        tela.devolver_ao_neutro(indice, window, cx);
-                                    }
-                                },
-                            )),
-                    )
-                    // O valor fica ao lado do rótulo, e não dentro da barra:
-                    // dentro, ele se move junto com o punho e vira um número
-                    // que foge de quem tenta lê-lo.
-                    .child(
-                        div()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(SharedString::from(definicao.formatar(valor))),
-                    ),
-            )
-            .child(Slider::new(&controle.estado).horizontal())
-            .into_any_element()
-    }
-}
-
-impl Revelacao {
-    /// A faixa do rodapé: **o acervo inteiro**, rolável, com a atual em vista.
-    ///
-    /// # 🚨 Ela mostrava só ±7 vizinhas, e não havia como chegar no resto
-    ///
-    /// O motivo estava escrito e era honesto: *"uma faixa com 2.000 itens
-    /// custaria 2.000 consultas ao cache por quadro"*. Só que a conta era do
-    /// caminho antigo, que decodificava o JPEG dentro do `render`. Com o
-    /// [`CacheDeMiniaturas`] cada item custa **uma leitura de memória**, e a
-    /// razão para esconder o acervo caiu junto.
-    ///
-    /// O que sobrava do jeito antigo: quem revelava a foto 3 de 200 não tinha
-    /// como pular para a 150 sem voltar à grade — e "voltar à grade" é
-    /// exatamente o que o filmstrip existe para evitar.
-    ///
-    /// ⚠️ **Some com um acervo de uma foto.** Uma faixa com um item só ocupa
-    /// espaço da foto para não dizer nada — e é o que acontece ao abrir a
-    /// Revelação sem lista (os testes, e o caminho de `abrir`).
-    fn filmstrip(&mut self, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
-        // A miniatura é o que sobra da altura da faixa, como no site.
-        const LADO: f32 = ALTURA_DO_FILMSTRIP - 16.0;
-
-        if self.acervo.len() < 2 {
-            return None;
-        }
-
-        // Carrega o que falta **antes** de montar — o quadro só lê.
-        self.miniaturas_da_tira.ajustar_capacidade(
-            NonZeroUsize::new(self.acervo.len().clamp(1, MINIATURAS_DA_TIRA))
-                .expect("o piso 1 garante que não é zero"),
-        );
-        // 🔑 **O quadro só lê.** Quem carrega é [`Self::carregar_a_tira`], numa
-        // tarefa que decodifica no executor de fundo e entrega uma foto por vez.
-        // Isto já foi um laço sobre `self.acervo` inteiro, aqui dentro: entrar
-        // na Revelação de um ensaio de 125 fotos lia e convertia as 125 antes do
-        // primeiro quadro — 49,77 ms de um gesto de 68,37 ms, tudo na thread que
-        // desenha (medido em 8/set/2026, `medir-revelacao`). A tela ficava
-        // parada e a culpa parecia ser da foto grande, que custa a metade disso.
-
-        let itens: Vec<gpui::AnyElement> = (0..self.acervo.len())
-            .map(|posicao| {
-                let foto = &self.acervo[posicao];
-                let atual = posicao == self.posicao;
-                // A marcada para sincronizar: âmbar, como no site; a aberta
-                // continua com a cor de sempre.
-                let marcada = !atual && self.marcadas.contains(&posicao);
-                let miniatura = match self.miniaturas_da_tira.espiar(&foto.id) {
-                    Some(Miniatura::Pronta(imagem)) => Some(imagem),
-                    _ => None,
-                };
-                let revelada = persistencia::ja_revelada(foto);
-                let dica = SharedString::from(format!("{}. {}", posicao + 1, foto.name));
-
-                div()
-                    .id(SharedString::from(format!("faixa-revelacao-{}", foto.id)))
-                    .w(px(LADO))
-                    .h(px(LADO))
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .rounded(cx.theme().radius)
-                    .cursor_pointer()
-                    .bg(cx.theme().muted)
-                    .border_1()
-                    .border_color(if atual {
-                        cx.theme().primary
-                    } else if marcada {
-                        tema::cores::quente()
-                    } else {
-                        cx.theme().border
-                    })
-                    .relative()
-                    .tooltip(move |window, cx| {
-                        gpui_component::tooltip::Tooltip::new(dica.clone()).build(window, cx)
-                    })
-                    .children(
-                        miniatura
-                            .map(|imagem| img(imagem).max_w(px(LADO - 4.0)).max_h(px(LADO - 4.0))),
-                    )
-                    // ✅ O ponto âmbar de "já revelada" — o mesmo do site. Numa
-                    // sessão de duzentas, é a única coisa que responde "onde eu
-                    // parei" sem abrir foto por foto.
-                    .when(revelada, |item| {
-                        item.child(
-                            div()
-                                .absolute()
-                                .top(px(3.))
-                                .right(px(3.))
-                                .size(px(6.))
-                                .rounded_full()
-                                .bg(tema::cores::quente()),
-                        )
-                    })
-                    .on_click(
-                        cx.listener(move |tela, evento: &gpui::ClickEvent, window, cx| {
-                            let m = evento.modifiers();
-                            // 🚨 Ctrl **e** Cmd acrescentam, como na web
-                            // (`ctrlKey || metaKey`). No macOS `secondary()` é
-                            // só o Cmd, e o Ctrl+clique chega como clique
-                            // esquerdo com `control` — ignorá-lo deixava o
-                            // dono sem lote nenhum (7/set/2026).
-                            tela.clicar_na_tira(
-                                posicao,
-                                Modificadores {
-                                    aditivo: m.secondary() || m.control,
-                                    faixa: m.shift,
-                                },
-                                window,
-                                cx,
-                            );
-                        }),
-                    )
-                    .into_any_element()
-            })
-            .collect();
-
-        // 🔑 A tira segue a foto aberta, e **só quando ela muda**: pedir a cada
-        // quadro prenderia a barra e o operador não conseguiria arrastá-la para
-        // olhar o resto do acervo.
-        if self.ultima_na_tira != Some(self.posicao) {
-            self.ultima_na_tira = Some(self.posicao);
-            self.rolagem_da_tira.scroll_to_item(self.posicao);
-        }
-
-        Some(
-            div()
-                .id("faixa-da-revelacao")
-                .track_scroll(&self.rolagem_da_tira)
-                .flex()
-                .items_center()
-                .gap(px(6.))
-                .px(px(6.))
-                .h(px(ALTURA_DO_FILMSTRIP))
-                .flex_none()
-                .overflow_x_scroll()
-                .border_t_1()
-                .border_color(cx.theme().border)
-                .children(itens)
-                .into_any_element(),
-        )
-    }
 }
 
 /// O que a Revelação pede à raiz — os botões que o site tem na barra dele e que
@@ -3719,6 +1828,8 @@ pub enum PedidoDaRevelacao {
     Sair,
     /// "Baixar JPEG" do site.
     Exportar,
+    /// "Tela do cliente" do site: abre ou fecha a tela do segundo monitor.
+    TelaDoCliente,
     /// "Salvar na galeria e sair" do site: o revelado entra no lugar do
     /// original, na foto que já é da galeria aberta.
     SalvarNaGaleria,
@@ -3732,6 +1843,9 @@ pub enum PedidoDaRevelacao {
     /// 2026-09-11). A foto aberta não vem por aqui: ela é zerada na própria
     /// tela, por `redefinir_ajustes`, para o `Cmd+Z` desfazer o gesto.
     ZerarAsMarcadas,
+    /// "Baixar como… (N)" do menu da tira: a exportação com essas fotos
+    /// (`Revelacao::levar_a_baixar`).
+    BaixarComo,
     /// Outra foto entrou no palco — pela seta, pela tira ou ao abrir.
     ///
     /// 🔑 **A Revelação não sabe buscar na nuvem, e não vai passar a saber**;
@@ -3740,6 +1854,9 @@ pub enum PedidoDaRevelacao {
     /// caía numa foto sem bruto, e o que aparecia era a miniatura revelada da
     /// galeria — em 640px e com a receita por cima da receita.
     AbriuOutraFoto,
+    /// O zoom passou da cópia de trabalho: a tela quer o bruto da foto aberta
+    /// em resolução cheia ([`Revelacao::receber_bruto`]).
+    QueroOBruto,
 }
 
 impl gpui::EventEmitter<PedidoDaRevelacao> for Revelacao {}
@@ -3769,14 +1886,16 @@ impl Render for Revelacao {
     /// │                     tira                         │
     /// └──────────────────────────────────────────────────┘
     /// ```
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.navegacao.dpr = window.scale_factor();
+        self.acompanhar_a_resolucao(cx);
         let cabecalho = self.cabecalho(cx);
         let presets = self
             .presets_a_mostra
             .then(|| self.coluna_dos_presets(cx).into_any_element());
         let palco = self.palco(cx);
         let ajustes = self.painel(cx).into_any_element();
-        let tira = self.filmstrip(cx);
+        let tira = self.filmstrip(window, cx);
 
         div()
             .flex()
@@ -3793,7 +1912,11 @@ impl Render for Revelacao {
                     .flex_1()
                     .min_h(px(0.))
                     .children(presets)
-                    .child(div().flex().flex_1().min_w(px(0.)).child(palco))
+                    // 🚨 **Relativo, com a moldura absoluta dentro.** Com
+                    // `size_full` num item flex sem altura definida, a foto
+                    // crescia até o tamanho natural e passava por baixo da tira
+                    // (dono, 2026-09-17: "a foto precisa caber").
+                    .child(div().relative().flex_1().min_w(px(0.)).child(palco))
                     .child(
                         div()
                             .w(px(LADO_DO_PAINEL))
@@ -3815,13 +1938,18 @@ impl Revelacao {
     /// raiz esconde a dela enquanto a Revelação está no ar. Por isso o `✕` daqui
     /// é o único caminho de volta visível — e ele faz o mesmo que o `Esc`.
     fn cabecalho(&self, cx: &mut Context<Self>) -> AnyElement {
-        let total = self.acervo.len();
-        let posicao = self.posicao();
+        use crate::recursos::Icone;
+        use gpui_component::Icon;
+
+        // 🔑 "i/n" conta **a tira** (o recorte), como o site: as setas andam
+        // por ela.
+        let (posicao, total) = self.posicao_na_tira();
         let nome = self
             .foto()
             .map(|foto| foto.name.clone())
             .unwrap_or_default();
-        let tem_foto = self.aberta.is_some();
+        let pronto = self.tem_pixels();
+        let pode_revelar = self.pode_revelar();
 
         div()
             .flex()
@@ -3829,14 +1957,14 @@ impl Revelacao {
             .gap(px(4.))
             .h(px(ALTURA_DO_CABECALHO))
             .flex_none()
-            .px(px(8.))
-            .bg(cx.theme().title_bar)
+            .px(px(12.))
+            .bg(cx.theme().background)
             .border_b_1()
             .border_color(cx.theme().border)
             .child(
                 Button::new("revelacao-fechar")
-                    .label("✕")
-                    .xsmall()
+                    .icon(Icon::new(Icone::X))
+                    .small()
                     .ghost()
                     .tooltip("Fechar a Revelação (Esc)")
                     .on_click(cx.listener(|_tela, _ev, _window, cx| {
@@ -3845,8 +1973,8 @@ impl Revelacao {
             )
             .child(
                 Button::new("revelacao-anterior")
-                    .label("‹")
-                    .xsmall()
+                    .icon(Icon::new(Icone::ChevronLeft))
+                    .small()
                     .ghost()
                     .tooltip("Foto anterior (seta para a esquerda)")
                     .disabled(posicao == 0 || total <= 1)
@@ -3854,8 +1982,8 @@ impl Revelacao {
             )
             .child(
                 Button::new("revelacao-proxima")
-                    .label("›")
-                    .xsmall()
+                    .icon(Icon::new(Icone::ChevronRight))
+                    .small()
                     .ghost()
                     .tooltip("Próxima foto (seta para a direita)")
                     .disabled(total <= 1 || posicao + 1 >= total)
@@ -3863,8 +1991,8 @@ impl Revelacao {
             )
             .child(
                 Button::new("revelacao-presets")
-                    .label("▤")
-                    .xsmall()
+                    .icon(Icon::new(Icone::PanelLeft))
+                    .small()
                     .ghost()
                     .tooltip("Mostrar ou esconder as predefinições")
                     .selected(self.presets_a_mostra)
@@ -3876,7 +2004,7 @@ impl Revelacao {
             )
             // 🔑 "3/200" antes do nome, e não só o nome: revelar é trabalho de
             // lote, e a pergunta que se faz a cada foto é "quanto falta".
-            .when(total > 1, |barra| {
+            .when(total > 0, |barra| {
                 barra.child(
                     div()
                         .pl(px(4.))
@@ -3910,8 +2038,8 @@ impl Revelacao {
             .child(div().flex_1().min_w(px(0.)))
             .child(
                 Button::new("revelacao-desfazer")
-                    .label("↶")
-                    .xsmall()
+                    .icon(Icon::new(Icone::Undo2))
+                    .small()
                     .ghost()
                     .tooltip(SharedString::from(format!(
                         "Desfazer ({}+Z)",
@@ -3922,37 +2050,85 @@ impl Revelacao {
             )
             .child(
                 Button::new("revelacao-refazer")
-                    .label("↷")
-                    .xsmall()
+                    .icon(Icon::new(Icone::Redo2))
+                    .small()
                     .ghost()
                     .tooltip(SharedString::from(format!(
-                        "Refazer ({}+Shift+Z)",
+                        "Refazer (Shift+{}+Z)",
                         tema::modificador()
                     )))
                     .disabled(!self.pode_refazer())
                     .on_click(cx.listener(|tela, _ev, window, cx| tela.refazer(window, cx))),
             )
+            // 🔑 **Segurar, e não alternar**, como no site: soltar o botão (ou
+            // sair de cima dele) devolve a foto revelada.
             .child(
-                Button::new("revelacao-antes")
-                    .label("Antes")
-                    .xsmall()
-                    .tooltip("Ver a foto sem ajuste (\\)")
-                    .when(self.mostrando_original, |b| {
-                        b.custom(tema::botao_quente(cx))
+                pilula("revelacao-antes", self.mostrando_original, !pronto, cx)
+                    .child("Antes")
+                    .tooltip(|w, cx| {
+                        Tooltip::new("Segure para ver a foto sem ajuste (ou a tecla \\)").build(w, cx)
                     })
-                    .selected(self.mostrando_original)
-                    .disabled(!tem_foto)
-                    .on_click(cx.listener(|tela, _ev, _window, cx| tela.alternar_original(cx))),
+                    .when(pronto, |b| {
+                        b.on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|tela, _, _, cx| tela.ver_o_antes(true, cx)),
+                        )
+                        .on_mouse_up(
+                            MouseButton::Left,
+                            cx.listener(|tela, _, _, cx| tela.ver_o_antes(false, cx)),
+                        )
+                        .on_mouse_up_out(
+                            MouseButton::Left,
+                            cx.listener(|tela, _, _, cx| tela.ver_o_antes(false, cx)),
+                        )
+                        .on_hover(cx.listener(|tela, dentro: &bool, _, cx| {
+                            if !dentro {
+                                tela.ver_o_antes(false, cx);
+                            }
+                        }))
+                    }),
             )
             .child(
-                Button::new("revelacao-enquadrar")
-                    .label("Enquadrar")
-                    .xsmall()
-                    .tooltip("Girar, espelhar, endireitar e recortar (C)")
-                    .when(self.cortando(), |b| b.custom(tema::botao_quente(cx)))
-                    .selected(self.cortando())
-                    .disabled(!self.tem_pixels())
-                    .on_click(cx.listener(|tela, _ev, window, cx| tela.alternar_corte(window, cx))),
+                pilula(
+                    "revelacao-enquadrar",
+                    self.cortando(),
+                    !pronto || !pode_revelar,
+                    cx,
+                )
+                .child(Icon::new(Icone::Crop).size(px(14.)))
+                .child("Enquadrar")
+                .tooltip(|w, cx| {
+                    Tooltip::new("Girar, espelhar, endireitar e recortar (tecla R)").build(w, cx)
+                })
+                .when(pronto && pode_revelar, |b| {
+                    b.on_click(cx.listener(|tela, _ev, window, cx| {
+                        tela.prever(None, cx);
+                        tela.alternar_corte(window, cx)
+                    }))
+                }),
+            )
+            .child(
+                pilula("revelacao-tela-do-cliente", self.cliente_aberto, false, cx)
+                    .child(
+                        Icon::new(if self.cliente_aberto {
+                            Icone::MonitorOff
+                        } else {
+                            Icone::Monitor
+                        })
+                        .size(px(14.)),
+                    )
+                    .child("Tela do cliente")
+                    .tooltip({
+                        let texto = if self.cliente_aberto {
+                            "Fechar a tela do cliente"
+                        } else {
+                            "Abrir a tela do cliente no outro monitor: ela mostra esta foto, revelada, enquanto você ajusta"
+                        };
+                        move |w, cx| Tooltip::new(texto).build(w, cx)
+                    })
+                    .on_click(cx.listener(|_tela, _ev, _window, cx| {
+                        cx.emit(PedidoDaRevelacao::TelaDoCliente);
+                    })),
             )
             // "Sincronizar N": só aparece quando há lote — um botão que quase
             // sempre está desligado vira ruído numa barra que já tem sete
@@ -3961,13 +2137,14 @@ impl Revelacao {
                 let quantas = self.marcadas.len();
                 barra.child(
                     Button::new("revelacao-sincronizar")
+                        .icon(Icon::new(Icone::Copy))
                         .label(format!("Sincronizar {quantas}"))
-                        .xsmall()
+                        .small()
+                        .outline()
                         .tooltip(
-                            "Aplicar os ajustes desta foto nas outras marcadas na tira \
-                             (Ctrl no clique marca, Shift marca a faixa, Cmd+A marca todas, Cmd+D desmarca)",
+                            "Copiar os ajustes desta foto para as outras escolhidas na tira — elas sobem quando você salvar",
                         )
-                        .disabled(!tem_foto)
+                        .disabled(!pronto || !pode_revelar)
                         .on_click(cx.listener(|tela, _ev, window, cx| {
                             tela.abrir_sincronizacao(window, cx)
                         })),
@@ -3978,35 +2155,53 @@ impl Revelacao {
             // pasta de destino e a conversa com o pós-venda.
             .child(
                 Button::new("revelacao-exportar")
-                    .label("Exportar JPEG")
-                    .xsmall()
-                    .disabled(!tem_foto)
+                    .when(!self.gerando_jpeg, |b| b.icon(Icon::new(Icone::Download)))
+                    .loading(self.gerando_jpeg)
+                    .label(if self.gerando_jpeg {
+                        "Gerando o JPEG…"
+                    } else {
+                        "Baixar JPEG"
+                    })
+                    .small()
+                    .outline()
+                    .disabled(!pronto || self.gerando_jpeg)
                     .on_click(cx.listener(|_tela, _ev, _window, cx| {
                         cx.emit(PedidoDaRevelacao::Exportar);
                     })),
             )
-            .child(
+            .child({
+                let ha = self.ha_o_que_salvar();
+                let outras = self.nao_salvas;
+                let dica = if !ha {
+                    "Nada a salvar: o que está no canvas já está na galeria".to_string()
+                } else if outras > 0 {
+                    if pode_revelar {
+                        format!("Salva esta e mais {outras} com edição pendente, e fecha o editor")
+                    } else {
+                        format!(
+                            "Esta foi comprada e não se revela; salva as {outras} pendentes e fecha o editor"
+                        )
+                    }
+                } else {
+                    "Salva esta foto na galeria e fecha o editor".to_string()
+                };
+                let rotulo = match self.salvando {
+                    None => "Salvar na galeria e sair".to_string(),
+                    Some((_, 1)) => "Gravando…".to_string(),
+                    Some((feitas, total)) => format!("Salvando {}/{total}…", (feitas + 1).min(total)),
+                };
                 Button::new("revelacao-salvar-na-galeria")
-                    // 🔑 **O número é o aviso de que sincronizar não subiu
-                    // nada.** Sem ele o gesto parece completo, e o operador sai
-                    // do ensaio com o cliente vendo o JPEG de antes.
-                    .label(if self.nao_salvas > 1 {
-                        format!("Salvar {} na galeria e sair", self.nao_salvas)
-                    } else {
-                        "Salvar na galeria e sair".to_string()
-                    })
-                    .tooltip(if self.nao_salvas > 1 {
-                        "Sobem a foto aberta e as que receberam ajustes pelo Sincronizar"
-                    } else {
-                        "O revelado entra no lugar do original na galeria do cliente"
-                    })
-                    .xsmall()
-                    .custom(tema::botao_quente(cx))
-                    .disabled(!tem_foto)
+                    .when(self.salvando.is_none(), |b| b.icon(Icon::new(Icone::Save)))
+                    .loading(self.salvando.is_some())
+                    .label(rotulo)
+                    .tooltip(dica)
+                    .small()
+                    .primary()
+                    .disabled(!pronto || !ha || self.salvando.is_some())
                     .on_click(cx.listener(|_tela, _ev, _window, cx| {
                         cx.emit(PedidoDaRevelacao::SalvarNaGaleria);
-                    })),
-            )
+                    }))
+            })
             .into_any_element()
     }
 
@@ -4022,13 +2217,45 @@ impl Revelacao {
             .bg(cx.theme().sidebar)
             .border_r_1()
             .border_color(cx.theme().border)
+            // O Navegador vem antes das predefinições, como no site.
+            .child(self.navegador(cx))
             .child(self.presets(cx))
     }
+}
+
+/// Os botões pequenos da barra do site (`rounded px-2 py-1 text-xs`):
+/// cinza, ou âmbar quando ligados.
+fn pilula(
+    id: &'static str,
+    ligada: bool,
+    desligada: bool,
+    cx: &mut Context<Revelacao>,
+) -> gpui::Stateful<gpui::Div> {
+    let (fundo, texto) = (cx.theme().muted, cx.theme().foreground);
+    div()
+        .id(id)
+        .flex()
+        .items_center()
+        .gap(px(4.))
+        .px(px(8.))
+        .py(px(4.))
+        .rounded(px(4.))
+        .text_xs()
+        .when(ligada, |b| b.bg(gpui::rgb(0xfbbf24)).text_color(gpui::black()))
+        .when(!ligada, |b| {
+            b.bg(fundo)
+                .text_color(texto.opacity(0.9))
+                .hover(move |s| s.text_color(texto))
+        })
+        .when(desligada, |b| b.opacity(0.4))
+        .when(!desligada, |b| b.cursor_pointer())
 }
 
 #[cfg(test)]
 mod testes {
     use super::*;
+    use biblioteca_core::selecao::Modificadores;
+    use crate::biblioteca::miniaturas::Miniatura;
 
     use gpui::TestAppContext;
     use image::{DynamicImage, Rgba, RgbaImage};
@@ -4036,9 +2263,12 @@ mod testes {
 
     use domain::entities::preset::PresetAdjustments;
 
+    use super::super::controles::Secao;
     use super::super::lightroom::mentira::EscolhaDeMentira;
     use super::super::persistencia::mentira::GravadorDeMentira;
     use super::super::presets::mentira::GuardaDeMentira;
+    use super::super::presets::ordem::Grupo;
+    use gpui::App;
 
     fn previews_descartaveis() -> (Arc<PreviewManager>, TempDir) {
         let dir = TempDir::new().expect("criar diretório temporário");
@@ -5346,7 +3576,7 @@ mod testes {
         janela
             .update(cx, |tela, window, cx| {
                 tela.abrir(foto("retrato.jpg"), window, cx);
-                tela.prever(Some(minha.adjustments.clone()), cx);
+                tela.prever(Some(&minha), cx);
                 assert_eq!(tela.ajustes_na_tela().saturation, -1.0);
 
                 tela.apagar_preset(sistema_id, cx);
@@ -5429,7 +3659,10 @@ mod testes {
                 assert_eq!(relatorio.arquivos, 3);
                 assert_eq!(relatorio.criadas, 1);
                 assert_eq!(relatorio.ilegiveis.len(), 2, "o ilegível e o que não abriu");
-                assert_eq!(relatorio.ignorados, vec![("curva por ponto", 1)]);
+                // A curva em atributo é um texto só, e não a lista de pontos:
+                // fica de fora calada, como no site (`lerXmp`), e não é
+                // "recurso que o motor não tem" — o motor tem.
+                assert!(relatorio.ignorados.is_empty());
             })
             .expect("a janela deve estar aberta");
 
@@ -5585,7 +3818,7 @@ mod testes {
                     cx,
                 );
 
-                tela.prever(Some(preset.adjustments.clone()), cx);
+                tela.prever(Some(&preset), cx);
 
                 assert_eq!(tela.ajustes().saturation, 0.0, "os ajustes não mudam");
                 assert_eq!(tela.ajustes_na_tela().saturation, -1.0, "a foto muda");
@@ -5693,6 +3926,52 @@ mod testes {
                 tela.clicar_na_tira(0, Modificadores::default(), window, cx);
                 assert_eq!(tela.posicao(), 0, "o clique simples troca");
                 assert_eq!(*tela.marcadas(), BTreeSet::from([0]), "e recomeça o lote");
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🔑 **A tira segue o site**: a seta anda sobre o recorte, o lote fica ao
+    /// trocar dentro dele, e o `Cmd+A` marca só o que a tira mostra.
+    #[gpui::test]
+    fn a_tira_recorta_e_guarda_o_lote(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        let janela = janela(cx, previews);
+        let com_nota = |nome: &str, nota: i32| PhotoViewModel {
+            rating: nota,
+            ..foto(nome)
+        };
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir_no_acervo(
+                    vec![
+                        com_nota("a.jpg", 3),
+                        com_nota("b.jpg", 0),
+                        com_nota("c.jpg", 4),
+                        com_nota("d.jpg", 0),
+                    ],
+                    0,
+                    window,
+                    cx,
+                );
+                tela.recortar(biblioteca_core::acervo::Filtro::Classificadas, cx);
+                assert_eq!(tela.na_tira(), vec![0, 2]);
+                assert_eq!(tela.posicao_na_tira(), (0, 2));
+
+                tela.marcar_todas(cx);
+                assert_eq!(*tela.marcadas(), BTreeSet::from([0, 2]), "só o recorte");
+
+                tela.andar(1, window, cx);
+                assert_eq!(tela.posicao(), 2, "a seta pula a sem nota");
+                assert_eq!(
+                    *tela.marcadas(),
+                    BTreeSet::from([0, 2]),
+                    "andar dentro do lote o mantém"
+                );
+
+                tela.recortar(biblioteca_core::acervo::Filtro::Todas, cx);
+                tela.clicar_na_tira(3, Modificadores::default(), window, cx);
+                assert_eq!(*tela.marcadas(), BTreeSet::from([3]), "fora do lote recomeça");
             })
             .expect("a janela deve estar aberta");
     }
@@ -5873,6 +4152,304 @@ mod testes {
             .expect("a janela deve estar aberta");
     }
 
+    /// 🚨 **A prévia de uma predefinição que substitui parte do neutro** — e é
+    /// a mesma foto que o clique dá. Somando sempre, "Preto e branco" sobre uma
+    /// sépia mostrava âmbar no ponteiro e cinza depois do clique.
+    #[gpui::test]
+    fn a_previa_que_substitui_e_a_mesma_foto_do_clique(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_cinza())
+            .expect("gravar preview");
+        let pb = Preset::system_replacing(
+            "Preto e branco clássico",
+            PresetAdjustments::vazia().com("saturation", -1.0),
+        );
+        let janela = com_presets(
+            cx,
+            previews,
+            Arc::new(GravadorDeMentira::default()),
+            vec![pb.clone()],
+        );
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(
+                    PhotoViewModel {
+                        edit_exposure: Some(1.0),
+                        ..foto("retrato.jpg")
+                    },
+                    window,
+                    cx,
+                );
+                tela.prever(Some(&pb), cx);
+                let na_previa = tela.ajustes_na_tela();
+                assert_eq!(na_previa.exposure, 0.0, "recomeça do neutro");
+                assert_eq!(na_previa.saturation, -1.0);
+
+                tela.prever(None, cx);
+                tela.aplicar_preset(&pb, window, cx);
+                assert_eq!(tela.ajustes_na_tela(), na_previa, "o clique dá a mesma foto");
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// O formulário embutido: o `+` abre e fecha, e salvar fecha.
+    ///
+    /// 🚨 **Sem nada fora do neutro não salva** — a menos que a caixa "zerar os
+    /// outros" esteja marcada. O diálogo antigo tinha o OK sempre ligado e
+    /// gravava uma predefinição vazia.
+    #[gpui::test]
+    fn o_formulario_so_salva_o_que_tem_o_que_guardar(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_cinza())
+            .expect("gravar preview");
+        let guarda = Arc::new(GuardaDeMentira::default());
+        let janela = com_guarda(
+            cx,
+            previews,
+            Arc::new(GravadorDeMentira::default()),
+            guarda.clone(),
+            Vec::new(),
+        );
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("retrato.jpg"), window, cx);
+                tela.alternar_formulario_de_preset(window, cx);
+                assert!(tela.predefinicoes.criando);
+                tela.nome_do_preset
+                    .update(cx, |estado, cx| estado.set_value("Nada", window, cx));
+
+                tela.salvar_preset(window, cx);
+                assert!(tela.presets.is_empty(), "nada fora do neutro");
+                assert!(tela.predefinicoes.criando, "o formulário continua aberto");
+
+                // Com a caixa marcada, guarda todos — e aplicar devolve ao original.
+                tela.alternar_preset_inteiro(cx);
+                tela.salvar_preset(window, cx);
+                assert_eq!(tela.presets.len(), 1);
+                assert_eq!(
+                    tela.presets[0].adjustments.len(),
+                    crate::revelacao::processador::Ajustes::NOMES.len()
+                );
+                assert!(!tela.predefinicoes.criando, "salvar fecha");
+                assert!(!tela.preset_inteiro, "a caixa volta desmarcada");
+                assert_eq!(tela.nome_do_preset.read(cx).value().as_ref(), "");
+
+                tela.alternar_formulario_de_preset(window, cx);
+                tela.alternar_formulario_de_preset(window, cx);
+                assert!(!tela.predefinicoes.criando, "o + fecha o que abriu");
+            })
+            .expect("a janela deve estar aberta");
+        assert_eq!(guarda.salvos().len(), 1);
+    }
+
+    /// 🚨 **Apagar pergunta antes** — "Apagar "X"? A predefinição sai da
+    /// lista." —, e só "Apagar" apaga. É o único gesto da coluna que não se
+    /// desfaz.
+    #[gpui::test]
+    fn apagar_pergunta_e_so_o_sim_apaga(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        let minha = Preset::user("Retrato".into(), PresetAdjustments::vazia().com("exposure", 1.0));
+        let id = minha.id;
+        let guarda = Arc::new(GuardaDeMentira::default());
+        let janela = com_guarda(
+            cx,
+            previews,
+            Arc::new(GravadorDeMentira::default()),
+            guarda.clone(),
+            vec![minha],
+        );
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.pedir_para_apagar(id, window, cx);
+                assert_eq!(
+                    tela.predefinicoes.pergunta,
+                    Some((id, "Retrato".to_string()))
+                );
+                tela.responder_pergunta(false, cx);
+                assert!(tela.predefinicoes.pergunta.is_none());
+                assert_eq!(tela.presets.len(), 1, "cancelar não apaga");
+
+                tela.pedir_para_apagar(id, window, cx);
+                tela.responder_pergunta(true, cx);
+                assert!(tela.presets.is_empty());
+            })
+            .expect("a janela deve estar aberta");
+        assert_eq!(guarda.apagados(), vec![id]);
+    }
+
+    /// O aviso de "entrou nas predefinições" aparece no canto e some sozinho.
+    #[gpui::test]
+    fn o_aviso_de_salvar_some_sozinho(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_cinza())
+            .expect("gravar preview");
+        let janela = janela(cx, previews);
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("retrato.jpg"), window, cx);
+                tela.alternar_preset_inteiro(cx);
+                tela.nome_do_preset
+                    .update(cx, |estado, cx| estado.set_value("Neutro", window, cx));
+                tela.salvar_preset(window, cx);
+                assert_eq!(
+                    tela.predefinicoes
+                        .avisos
+                        .iter()
+                        .map(|a| a.texto.as_str())
+                        .collect::<Vec<_>>(),
+                    ["\"Neutro\" entrou nas predefinições."]
+                );
+            })
+            .expect("a janela deve estar aberta");
+
+        cx.executor().advance_clock(Duration::from_secs(5));
+        cx.run_until_parked();
+        janela
+            .update(cx, |tela, _window, _cx| {
+                assert!(tela.predefinicoes.avisos.is_empty());
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// Renomear no lugar: a linha vira campo com o nome de agora, e confirmar
+    /// fecha o campo.
+    #[gpui::test]
+    fn renomear_no_lugar_comeca_com_o_nome_e_fecha_ao_confirmar(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        let minha = Preset::user("Retrato".into(), PresetAdjustments::vazia().com("exposure", 1.0));
+        let id = minha.id;
+        let guarda = Arc::new(GuardaDeMentira::default());
+        let janela = com_guarda(
+            cx,
+            previews,
+            Arc::new(GravadorDeMentira::default()),
+            guarda.clone(),
+            vec![minha],
+        );
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.comecar_a_renomear(id, window, cx);
+                assert_eq!(tela.predefinicoes.renomeando, Some(id));
+                assert_eq!(tela.renome_do_preset.read(cx).value().as_ref(), "Retrato");
+
+                // Em branco não vale, e o campo fica.
+                tela.renomear_preset(id, "  ".into(), cx);
+                assert_eq!(tela.predefinicoes.renomeando, Some(id));
+
+                tela.renomear_preset(id, "Retrato claro".into(), cx);
+                assert_eq!(tela.predefinicoes.renomeando, None);
+                assert_eq!(tela.presets[0].name, "Retrato claro");
+
+                tela.comecar_a_renomear(id, window, cx);
+                tela.cancelar_renome(cx);
+                assert_eq!(tela.predefinicoes.renomeando, None);
+                assert_eq!(tela.presets[0].name, "Retrato claro", "cancelar não muda");
+            })
+            .expect("a janela deve estar aberta");
+        assert_eq!(guarda.renomeados(), vec![(id, "Retrato claro".into())]);
+    }
+
+    /// Reordenar: ↑ ↓ andam uma posição, soltar põe antes ou depois, e "ordem
+    /// padrão" desfaz. Com a busca ativa, nada se move.
+    #[gpui::test]
+    fn reordenar_anda_solta_e_volta_a_ordem_padrao(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_cinza())
+            .expect("gravar preview");
+        let presets = use_cases::presets::presets_de_sistema();
+        let janela = com_presets(
+            cx,
+            previews,
+            Arc::new(GravadorDeMentira::default()),
+            presets,
+        );
+        let nomes = |tela: &Revelacao, cx: &App| -> Vec<String> {
+            tela.grupos_da_coluna(cx)
+                .0
+                .iter()
+                .map(|p| p.name.clone())
+                .collect()
+        };
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("retrato.jpg"), window, cx);
+                assert_eq!(nomes(tela, cx)[0], "Preto e branco clássico");
+
+                tela.deslocar_preset(Grupo::Sistema, "sistema:sepia", -1, cx);
+                assert_eq!(nomes(tela, cx)[..2], ["Sépia à moda antiga", "Preto e branco clássico"]);
+
+                // O estilo do estúdio vai para o topo, como no gabarito.
+                tela.comecar_arrasto_de_preset(
+                    Grupo::Sistema,
+                    "sistema:recordarfotos-pb".into(),
+                    cx,
+                );
+                tela.passar_sobre_preset("sistema:sepia", false, cx);
+                tela.soltar_preset(cx);
+                assert_eq!(nomes(tela, cx)[0], "RecordarFotos P&B");
+                assert!(tela.predefinicoes.arrasto.is_none());
+
+                // Com a busca ativa, não se reordena.
+                tela.busca_de_presets
+                    .update(cx, |campo, cx| campo.set_value("a", window, cx));
+                let antes = nomes(tela, cx);
+                tela.deslocar_preset(Grupo::Sistema, "sistema:recordarfotos-pb", 1, cx);
+                assert_eq!(nomes(tela, cx), antes);
+                tela.busca_de_presets
+                    .update(cx, |campo, cx| campo.set_value("", window, cx));
+
+                tela.definir_ordem_dos_presets(Grupo::Sistema, None, cx);
+                assert_eq!(nomes(tela, cx)[0], "Preto e branco clássico");
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// Sem foto pronta (ou com a revelação travada no site) a coluna trava: o
+    /// `+`, a prévia, o aplicar e o reordenar — o `desabilitado` do site. A
+    /// levada no balcão continua revelável.
+    #[gpui::test]
+    fn sem_foto_ou_com_foto_vendida_a_coluna_trava(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-vendida.jpg", &foto_cinza())
+            .expect("gravar preview");
+        let janela = janela(cx, previews);
+
+        janela
+            .update(cx, |tela, window, cx| {
+                assert!(tela.predefinicoes_desligadas(), "sem foto");
+                tela.abrir(
+                    PhotoViewModel {
+                        comprada: true,
+                        ..foto("vendida.jpg")
+                    },
+                    window,
+                    cx,
+                );
+                assert!(!tela.predefinicoes_desligadas(), "levada no balcão");
+                tela.abrir(
+                    PhotoViewModel {
+                        revelacao_travada: true,
+                        ..foto("vendida.jpg")
+                    },
+                    window,
+                    cx,
+                );
+                assert!(tela.predefinicoes_desligadas(), "travada no site");
+                assert!(!tela.reordenar_ligado(cx));
+            })
+            .expect("a janela deve estar aberta");
+    }
+
     /// 🚨 Salvar um preset guarda os 15 campos e o mostra na lista.
     ///
     /// Os dois: se ele fosse só guardado, quem acabou de salvar não veria nada
@@ -6041,19 +4618,19 @@ mod testes {
                 tela.alternar_corte(window, cx);
                 assert!(tela.cortando());
 
-                let corte = &tela.edicao.as_ref().unwrap().corte;
+                let corte = tela.corte_atual();
                 assert_eq!(corte.crop_x(), 0.2);
                 assert_eq!(corte.crop_width(), 0.5);
             })
             .expect("a janela deve estar aberta");
     }
 
-    /// 🚨 Cancelar devolve o corte que estava gravado.
+    /// 🚨 `Esc` só sai da ferramenta — o que foi feito nela fica, como no site.
     ///
-    /// A edição é uma **cópia**. Se o modo de corte mexesse direto no corte da
-    /// foto, "Cancelar" não teria o que restaurar — e o botão viraria enfeite.
+    /// Não há "Cancelar": cada gesto já é o enquadramento da foto, e quem se
+    /// arrepende usa `⌘Z`.
     #[gpui::test]
-    fn cancelar_o_corte_nao_muda_a_foto(cx: &mut TestAppContext) {
+    fn sair_do_enquadrar_mantem_o_que_foi_feito(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         previews
             .save_preview("id-cortada.jpg", &foto_cinza())
@@ -6064,40 +4641,28 @@ mod testes {
 
         janela
             .update(cx, |tela, window, cx| {
-                tela.abrir(
-                    PhotoViewModel {
-                        edit_crop_x: Some(0.2),
-                        edit_crop_width: Some(0.5),
-                        ..foto("cortada.jpg")
-                    },
-                    window,
-                    cx,
-                );
+                tela.abrir(foto("cortada.jpg"), window, cx);
                 tela.alternar_corte(window, cx);
-
-                // Mexe no corte em edição e desiste.
-                if let Some(edicao) = tela.edicao.as_mut() {
-                    edicao.corte = corte::arrastar(&edicao.corte, 0.3, 0.0);
-                }
+                tela.girar(cx);
                 tela.cancelar_corte(cx);
 
                 assert!(!tela.cortando());
-                assert_eq!(tela.corte.x, Some(0.2), "o corte da foto é o de antes");
+                assert_eq!(tela.corte.rotacao, Some(1), "o giro ficou");
+                assert!(tela.historico.pode_desfazer());
             })
             .expect("a janela deve estar aberta");
 
-        assert!(
-            gravador.gravado().is_empty(),
-            "cancelar não pode gravar nada"
-        );
+        let gravado = gravador.gravado();
+        assert_eq!(gravado.len(), 1, "girar gravou uma vez, sair não grava de novo");
+        assert_eq!(gravado[0].2.rotacao, Some(1));
     }
 
-    /// 🚨 Aplicar grava — porque nada mais vai gravar por ele.
+    /// 🚨 Arrastar uma alça grava ao soltar — porque nada mais vai gravar por ele.
     ///
-    /// O corte não faz parte de `Ajustes`, então nenhum slider o leva ao banco
-    /// depois. Sem esta gravação, o enquadramento só existiria até fechar a tela.
+    /// O palco tem 80 px para uma foto de 8: cada 10 px de arrasto é um pixel
+    /// da foto.
     #[gpui::test]
-    fn aplicar_o_corte_grava_na_hora(cx: &mut TestAppContext) {
+    fn arrastar_a_alca_grava_ao_soltar(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         previews
             .save_preview("id-retrato.jpg", &foto_cinza())
@@ -6109,21 +4674,15 @@ mod testes {
         janela
             .update(cx, |tela, window, cx| {
                 tela.abrir(foto("retrato.jpg"), window, cx);
+                tela.palco = Bounds::new(gpui::point(px(0.), px(0.)), gpui::size(px(80.), px(80.)));
                 tela.alternar_corte(window, cx);
 
-                if let Some(edicao) = tela.edicao.as_mut() {
-                    edicao.corte = corte::mover_alca(
-                        &edicao.corte,
-                        Alca::Esquerda,
-                        0.25,
-                        0.0,
-                        (100.0, 100.0),
-                        None,
-                    );
-                }
-                tela.aplicar_corte(cx);
+                tela.comecar_arrasto(Some(corte::Alca::Esquerda), gpui::point(px(0.), px(40.)), cx);
+                tela.mover_no_corte(gpui::point(px(20.), px(40.)), window, cx);
+                assert!(gravador.gravado().is_empty(), "no meio do arrasto não grava");
+                tela.soltar_no_corte(cx);
 
-                assert!(!tela.cortando(), "aplicar fecha o modo");
+                assert!(tela.cortando(), "soltar não fecha a ferramenta");
                 assert_eq!(tela.corte.x, Some(0.25));
             })
             .expect("a janela deve estar aberta");
@@ -6132,6 +4691,68 @@ mod testes {
         assert_eq!(gravado.len(), 1);
         assert_eq!(gravado[0].2.x, Some(0.25), "o corte novo foi para o banco");
         assert_eq!(gravado[0].2.largura, Some(0.75));
+    }
+
+    /// 🚨 O endireitar encolhe o retângulo para caber, e cresce de volta.
+    #[gpui::test]
+    fn endireitar_encolhe_e_volta(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        let mut grande = RgbaImage::new(100, 80);
+        for pixel in grande.pixels_mut() {
+            *pixel = Rgba([100, 100, 100, 255]);
+        }
+        previews
+            .save_preview("id-torta.jpg", &DynamicImage::ImageRgba8(grande))
+            .expect("gravar preview");
+
+        let janela = janela(cx, previews);
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("torta.jpg"), window, cx);
+                tela.alternar_corte(window, cx);
+
+                tela.definir_angulo(10., cx);
+                let torto = tela.corte_atual();
+                assert_eq!(torto.angle(), 10.);
+                assert!(torto.crop_width() < 1., "encolheu para não mostrar canto vazio");
+
+                tela.definir_angulo(0., cx);
+                let reto = tela.corte_atual();
+                assert!((reto.crop_width() - 1.).abs() < 1e-3, "cresceu de volta");
+                assert!((reto.crop_height() - 1.).abs() < 1e-3);
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 A foto comprada no site não se revela: nada dela vai para o banco,
+    /// e o Enquadrar não abre pelo botão.
+    #[gpui::test]
+    fn a_foto_comprada_nao_grava(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-vendida.jpg", &foto_cinza())
+            .expect("gravar preview");
+
+        let gravador = Arc::new(GravadorDeMentira::default());
+        let janela = com_gravador(cx, previews, gravador.clone());
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(
+                    PhotoViewModel {
+                        revelacao_travada: true,
+                        ..foto("vendida.jpg")
+                    },
+                    window,
+                    cx,
+                );
+                assert!(!tela.pode_revelar());
+                assert!(!tela.ha_o_que_salvar());
+                tela.ajustes.exposure = 1.;
+                tela.pendente = true;
+                tela.gravar_o_que_estiver_pendente();
+            })
+            .expect("a janela deve estar aberta");
+        assert!(gravador.gravado().is_empty(), "a comprada não grava");
     }
 
     /// ⚠️ `R` numa foto sem pixels no cache não abre o modo.
@@ -6291,10 +4912,10 @@ mod testes {
                 );
 
                 tela.alternar_corte(window, cx);
-                tela.edicao
-                    .as_mut()
-                    .expect("o modo de corte está aberto")
-                    .corte = CropSettings::new(0.0, 0.0, 0.5, 0.5, 0, 0.0, false, false);
+                tela.gesto_do_corte(
+                    CropSettings::new(0.0, 0.0, 0.5, 0.5, 0, 0.0, false, false),
+                    cx,
+                );
                 tela.aplicar_corte(cx);
 
                 assert_eq!(tela.corte.largura, Some(0.5));
@@ -6344,10 +4965,10 @@ mod testes {
                 tela.pendente = true;
 
                 tela.alternar_corte(window, cx);
-                tela.edicao
-                    .as_mut()
-                    .expect("o modo de corte está aberto")
-                    .corte = CropSettings::new(0.0, 0.0, 0.5, 0.5, 0, 0.0, false, false);
+                tela.gesto_do_corte(
+                    CropSettings::new(0.0, 0.0, 0.5, 0.5, 0, 0.0, false, false),
+                    cx,
+                );
                 tela.aplicar_corte(cx);
 
                 // Primeiro `Cmd+Z`: sai o corte, fica a exposição.
@@ -6429,42 +5050,40 @@ mod testes {
             .expect("a janela deve estar aberta");
     }
 
-    /// A proporção travada vale para o arrasto seguinte.
+    /// A proporção remodela o retângulo na hora, e vale para o arrasto seguinte.
     #[gpui::test]
-    fn travar_a_proporcao_muda_o_que_o_arrasto_faz(cx: &mut TestAppContext) {
+    fn travar_a_proporcao_remodela_e_muda_o_arrasto(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
+        let mut deitada = RgbaImage::new(160, 80);
+        for pixel in deitada.pixels_mut() {
+            *pixel = Rgba([100, 100, 100, 255]);
+        }
         previews
-            .save_preview("id-retrato.jpg", &foto_cinza())
+            .save_preview("id-retrato.jpg", &DynamicImage::ImageRgba8(deitada))
             .expect("gravar preview");
 
         let janela = janela(cx, previews);
         janela
             .update(cx, |tela, window, cx| {
                 tela.abrir(foto("retrato.jpg"), window, cx);
+                tela.palco = Bounds::new(gpui::point(px(0.), px(0.)), gpui::size(px(160.), px(80.)));
                 tela.alternar_corte(window, cx);
-                tela.travar_proporcao(AspectRatio::Square, cx);
+                tela.travar_proporcao(Some(1.), cx);
 
-                // Encolhe pela esquerda: com 1:1 travado, a altura tem de
-                // acompanhar a largura.
-                if let Some(edicao) = tela.edicao.as_mut() {
-                    let proporcao = corte::proporcao_de(&edicao.proporcao, (100.0, 100.0));
-                    edicao.corte = corte::mover_alca(
-                        &edicao.corte,
-                        Alca::Esquerda,
-                        0.4,
-                        0.0,
-                        (100.0, 100.0),
-                        proporcao,
-                    );
-                }
+                let quadrado = |tela: &Revelacao| {
+                    let c = tela.corte_atual();
+                    (c.crop_width() * 160., c.crop_height() * 80.)
+                };
+                let (w, h) = quadrado(tela);
+                assert!((w - h).abs() <= 1., "1:1 na hora: {w} × {h}");
 
-                let corte = &tela.edicao.as_ref().unwrap().corte;
-                assert!(
-                    (corte.crop_width() - corte.crop_height()).abs() < 1e-4,
-                    "1:1 numa foto quadrada: {} × {}",
-                    corte.crop_width(),
-                    corte.crop_height()
-                );
+                // Encolhe pela esquerda: a altura acompanha a largura.
+                tela.comecar_arrasto(Some(corte::Alca::Esquerda), gpui::point(px(40.), px(40.)), cx);
+                tela.mover_no_corte(gpui::point(px(60.), px(40.)), window, cx);
+                tela.soltar_no_corte(cx);
+                let (w, h) = quadrado(tela);
+                assert!((w - h).abs() <= 1., "1:1 depois do arrasto: {w} × {h}");
+                assert!(w < 80.);
             })
             .expect("a janela deve estar aberta");
     }
@@ -6572,11 +5191,6 @@ mod testes {
             .expect("a janela deve estar aberta");
     }
 
-    /// 🚨 "Redefinir ajustes" zera os 46 e **não** toca no corte.
-    ///
-    /// No legado o `reset_edits` também não o toca: quem quer desfazer
-    /// enquadramento usa "Recomeçar", dentro do modo de corte. Misturar os dois
-    /// faria um botão de cor apagar trabalho de composição.
     /// 🔑 O duplo clique no rótulo volta **um** controle, e não a foto inteira.
     ///
     /// O erro fácil aqui é chamar `redefinir_ajustes` de dentro do duplo
@@ -6694,8 +5308,61 @@ mod testes {
             .expect("a janela deve estar aberta");
     }
 
+    /// 🚨 **Foto comprada não se zera** — o `podeRevelar` do site. E uma foto
+    /// só enquadrada conta como "fora do neutro" para o botão.
     #[gpui::test]
-    fn redefinir_zera_os_ajustes_e_preserva_o_corte(cx: &mut TestAppContext) {
+    fn foto_comprada_nao_se_zera_e_a_so_enquadrada_conta(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        for id in ["id-comprada.jpg", "id-girada.jpg"] {
+            previews.save_preview(id, &foto_cinza()).expect("gravar preview");
+        }
+
+        let gravador = Arc::new(GravadorDeMentira::default());
+        let janela = com_gravador(cx, previews, gravador.clone());
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(
+                    PhotoViewModel {
+                        edit_hsl_blue_lum: Some(30.0),
+                        revelacao_travada: true,
+                        ..foto("comprada.jpg")
+                    },
+                    window,
+                    cx,
+                );
+                assert!(!tela.pode_revelar());
+                tela.redefinir_ajustes(window, cx);
+                assert_eq!(tela.ajustes().hsl_blue_lum, 30.0, "comprada não muda");
+
+                tela.abrir(
+                    PhotoViewModel {
+                        edit_crop_rotation: Some(90),
+                        edit_hsl_blue_lum: Some(30.0),
+                        ..foto("girada.jpg")
+                    },
+                    window,
+                    cx,
+                );
+                assert!(tela.enquadrada(), "girada é enquadrada");
+                assert_eq!(tela.quantos_alterados(), 1);
+                tela.redefinir_ajustes(window, cx);
+                assert_eq!(tela.quantos_alterados(), 0);
+                assert!(!tela.enquadrada());
+            })
+            .expect("a janela deve estar aberta");
+
+        let gravado = gravador.gravado();
+        assert_eq!(gravado.len(), 1, "só o zerar da revelável grava");
+        assert_eq!(gravado[0].0, "id-girada.jpg");
+    }
+
+    /// 🚨 **"Zerar tudo" é tudo mesmo, inclusive o enquadramento** (dono,
+    /// 2026-09-12, `editor.tsx:2106`). E o corte vai ao banco **escrito** como a
+    /// foto inteira: o `Corte::default` quer dizer "não mexa", e deixaria o
+    /// recorte de antes de pé.
+    #[gpui::test]
+    fn zerar_tudo_zera_os_ajustes_e_o_enquadramento(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         previews
             .save_preview("id-cortada.jpg", &foto_cinza())
@@ -6726,18 +5393,23 @@ mod testes {
                     0.0,
                     "os sliders voltam junto"
                 );
-                assert_eq!(tela.corte.x, Some(0.2), "o corte fica");
+                assert_eq!(tela.corte.x, Some(0.0), "o corte volta à foto inteira");
+                assert_eq!(tela.corte.largura, Some(1.0));
+                assert!(!tela.enquadrada());
                 assert!(tela.pode_desfazer(), "redefinir é um passo de histórico");
+                tela.desfazer(window, cx);
+                assert_eq!(tela.corte.x, Some(0.2), "e o Cmd+Z devolve o corte junto");
+                assert_eq!(tela.ajustes().exposure, 2.0);
             })
             .expect("a janela deve estar aberta");
 
         let gravado = gravador.gravado();
-        assert_eq!(gravado.len(), 1);
+        assert_eq!(gravado.len(), 2, "o zerar e o desfazer");
         assert_eq!(gravado[0].1.exposure, 0.0);
         assert_eq!(
-            gravado[0].2.x,
-            Some(0.2),
-            "e vai ao banco com o corte junto"
+            gravado[0].2.largura,
+            Some(1.0),
+            "e vai ao banco com o corte inteiro escrito"
         );
     }
 

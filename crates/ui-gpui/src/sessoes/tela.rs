@@ -25,7 +25,7 @@ use biblioteca_core::sessoes::{
     self, ContagemDeFotos, Criterio, SessaoFotografica, Situacao, Totais,
 };
 use domain::services::pos_venda::{Estudio, GaleriaDoPainel, NovaGaleria, Produto, Sessao};
-use gpui::{div, prelude::*, px, Context, EventEmitter, SharedString, Task, Window};
+use gpui::{div, prelude::*, px, App, Context, EventEmitter, SharedString, Task, Window};
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::input::{Input, InputState};
 use gpui_component::{ActiveTheme, Disableable, Selectable, Sizable};
@@ -34,7 +34,6 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 use crate::pos_venda::porta::{Publicador, Recado};
-use crate::selos;
 
 /// De quanto em quanto a tela pergunta se o site respondeu.
 const INTERVALO_DE_COLHEITA: Duration = Duration::from_millis(100);
@@ -258,6 +257,13 @@ impl Sessoes {
         self.galerias.len()
     }
 
+    /// O id da N-ésima sessão, na ordem em que o site a lista (de 1).
+    pub fn id_na_posicao(&self, posicao: usize) -> Option<String> {
+        self.galerias
+            .get(posicao.checked_sub(1)?)
+            .map(|g| g.id.clone())
+    }
+
     /// Abre o formulário de sessão nova, com o produto da última já escolhido.
     ///
     /// 🔑 **A sugestão é o produto da sessão mais recente**, como no site: um
@@ -478,52 +484,135 @@ impl Render for Sessoes {
         let visiveis = sessoes::filtrar(&todas, &self.criterio(cx), agora);
         let soma = sessoes::somar_totais(&visiveis);
         let filtrando = self.filtrando(cx);
+        let apagado = cx.theme().muted_foreground;
+        let rodape = format!("{} de {} sessões", visiveis.len(), todas.len());
 
+        // 📐 O esqueleto da página do site (`Pagina alturaCheia`): 24 px de
+        // respiro, e só a tabela rola.
         div()
             .flex()
             .flex_col()
-            .gap(px(10.))
+            .gap(px(16.))
             .size_full()
-            .p(px(12.))
+            .p(px(24.))
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .child(self.barra(&contagens, cx))
             .child(self.indicadores(&soma, visiveis.len(), filtrando, cx))
             .when_some(self.erro.clone(), |tela, erro| {
-                tela.child(div().text_xs().text_color(cx.theme().danger).child(erro))
+                tela.child(crate::estilo::aviso(erro, true, cx))
             })
             .when(self.sessao.is_none(), |tela| {
-                tela.child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(
-                            "Esta tela precisa da conta do site. Feche e abra o app para entrar.",
-                        ),
-                )
+                tela.child(crate::estilo::aviso(
+                    "Esta tela precisa da conta do site. Feche e abra o app para entrar.",
+                    false,
+                    cx,
+                ))
             })
             .children(self.formulario(cx))
             .child(self.tabela(&visiveis, agora, cx))
+            .child(div().text_xs().text_color(apagado).child(rodape))
     }
+}
+
+/// O selo de situação, com as cores de `COR_DA_SITUACAO` do site.
+fn selo_da_situacao(situacao: Situacao, cx: &App) -> impl IntoElement {
+    use crate::tema::cores;
+    let tema = cx.theme();
+    let cores = match situacao {
+        Situacao::SemFotos => cores::selo_ambar(),
+        Situacao::AguardandoCliente => cores::selo_ceu(),
+        Situacao::AbertaPeloCliente => cores::selo_esmeralda(),
+        Situacao::Vencida => (tema.muted, tema.border, tema.muted_foreground),
+    };
+    crate::estilo::selo_colorido(cores).child(situacao.rotulo())
+}
+
+/// `2026-09-16T13:04:00Z` → `16/09/2026`, no fuso do estúdio.
+fn data_br(iso: &str) -> String {
+    let brasilia = chrono::FixedOffset::west_opt(3 * 3600).expect("fuso fixo");
+    chrono::DateTime::parse_from_rfc3339(iso)
+        .map(|d| d.with_timezone(&brasilia).format("%d/%m/%Y").to_string())
+        .or_else(|_| {
+            chrono::NaiveDate::parse_from_str(&iso[..iso.len().min(10)], "%Y-%m-%d")
+                .map(|d| d.format("%d/%m/%Y").to_string())
+        })
+        .unwrap_or_else(|_| iso.to_string())
 }
 
 impl Sessoes {
     fn barra(&self, contagens: &sessoes::Contagens, cx: &mut Context<Self>) -> impl IntoElement {
+        use crate::estilo;
+        use crate::recursos::Icone;
+        use gpui_component::Icon;
+
         let filtrando = self.filtrando(cx);
         let ativa = self.situacao;
+        let tema = cx.theme();
+        let (borda, texto, fundo, apagado, acento) = (
+            tema.border,
+            tema.foreground,
+            tema.background,
+            tema.muted_foreground,
+            tema.accent,
+        );
+        // Os recortes do site: pílulas, a escolhida em cores invertidas.
+        let pilula = move |id: SharedString, rotulo: &'static str, quantas: usize, acesa: bool| {
+            div()
+                .id(id)
+                .flex()
+                .items_center()
+                .gap(px(6.))
+                .h(px(28.))
+                .px(px(10.))
+                .rounded_full()
+                .border_1()
+                .border_color(borda)
+                .text_xs()
+                .cursor_pointer()
+                .when(acesa, |p| p.bg(texto).text_color(fundo).border_color(texto))
+                .when(!acesa, |p| p.hover(move |s| s.bg(acento)))
+                .child(rotulo)
+                .child(
+                    div()
+                        .when(!acesa, |d| d.text_color(apagado))
+                        .when(acesa, |d| d.opacity(0.7))
+                        .child(quantas.to_string()),
+                )
+        };
 
+        let sem_conta = self.sessao.is_none() || self.abrindo_nova();
         div()
             .flex()
             .flex_wrap()
             .items_center()
-            .gap(px(6.))
-            .child(div().w(px(260.)).child(Input::new(&self.busca).xsmall()))
+            .gap(px(8.))
+            .child(estilo::desligado(
+                estilo::botao_primario("sessoes-nova", cx)
+                    .child(Icon::new(Icone::Plus).size(px(16.)))
+                    .child("Nova sessão")
+                    .when(!sem_conta, |b| {
+                        b.on_click(
+                            cx.listener(|tela, _ev, window, cx| tela.comecar_nova(window, cx)),
+                        )
+                    }),
+                sem_conta,
+            ))
             .child(
-                Button::new("sessoes-todas")
-                    .label(format!("Todas {}", contagens.todas))
-                    .xsmall()
-                    .selected(ativa.is_none())
-                    .on_click(cx.listener(|tela, _ev, _window, cx| tela.filtrar_por(None, cx))),
+                div().w(px(320.)).child(
+                    Input::new(&self.busca)
+                        .prefix(Icon::new(Icone::Search).size(px(16.)).text_color(apagado))
+                        .cleanable(true),
+                ),
+            )
+            .child(
+                pilula(
+                    "sessoes-todas".into(),
+                    "Todas",
+                    contagens.todas,
+                    ativa.is_none(),
+                )
+                .on_click(cx.listener(|tela, _ev, _window, cx| tela.filtrar_por(None, cx))),
             )
             .children(Situacao::TODAS.into_iter().filter_map(|situacao| {
                 let quantas = contagens.de(situacao);
@@ -533,13 +622,12 @@ impl Sessoes {
                     return None;
                 }
                 Some(
-                    Button::new(SharedString::from(format!(
-                        "sessoes-{}",
-                        situacao.como_texto()
-                    )))
-                    .label(format!("{} {quantas}", situacao.rotulo()))
-                    .xsmall()
-                    .selected(ativa == Some(situacao))
+                    pilula(
+                        SharedString::from(format!("sessoes-{}", situacao.como_texto())),
+                        situacao.rotulo(),
+                        quantas,
+                        ativa == Some(situacao),
+                    )
                     .on_click(cx.listener(move |tela, _ev, _window, cx| {
                         tela.filtrar_por(Some(situacao), cx)
                     })),
@@ -547,35 +635,25 @@ impl Sessoes {
             }))
             .when(filtrando, |barra| {
                 barra.child(
-                    Button::new("sessoes-limpar")
-                        .label("limpar")
-                        .xsmall()
-                        .ghost()
+                    estilo::botao_fantasma("sessoes-limpar", cx)
+                        .text_color(apagado)
+                        .child("Limpar")
                         .on_click(
                             cx.listener(|tela, _ev, window, cx| tela.limpar_filtros(window, cx)),
                         ),
                 )
             })
             .child(div().flex_1())
-            .child(
-                Button::new("sessoes-nova")
-                    .label("Nova sessão")
-                    .xsmall()
-                    .primary()
-                    .disabled(self.sessao.is_none() || self.abrindo_nova())
-                    .on_click(cx.listener(|tela, _ev, window, cx| tela.comecar_nova(window, cx))),
-            )
-            .child(
-                Button::new("sessoes-recarregar")
-                    .label(if self.carregando {
+            .child(estilo::desligado(
+                estilo::botao_contorno("sessoes-recarregar", cx)
+                    .child(if self.carregando {
                         "Lendo…"
                     } else {
                         "Recarregar"
                     })
-                    .xsmall()
-                    .disabled(self.sessao.is_none() || self.carregando)
                     .on_click(cx.listener(|tela, _ev, _window, cx| tela.recarregar(cx))),
-            )
+                self.sessao.is_none() || self.carregando,
+            ))
     }
 
     fn indicadores(
@@ -585,29 +663,34 @@ impl Sessoes {
         filtrando: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let cartao = |rotulo: String, valor: String, nota: &'static str, cx: &mut Context<Self>| {
+        let tema = cx.theme();
+        let (borda, apagado) = (tema.border, tema.muted_foreground);
+        let (fundo_bom, borda_boa, texto_bom) = crate::tema::cores::destaque_esmeralda();
+        let cartao = move |rotulo: String, valor: String, nota: &'static str, destaque: bool| {
             div()
                 .flex_1()
                 .flex()
                 .flex_col()
                 .gap(px(2.))
-                .p(px(10.))
-                .rounded(cx.theme().radius)
+                .p(px(12.))
+                .rounded(px(10.))
                 .border_1()
-                .border_color(cx.theme().border)
+                .border_color(if destaque { borda_boa } else { borda })
+                .when(destaque, |c| c.bg(fundo_bom))
                 .child(
                     div()
                         .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(rotulo),
+                        .text_color(apagado)
+                        .child(rotulo.to_uppercase()),
                 )
-                .child(div().text_lg().child(valor))
                 .child(
                     div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(nota),
+                        .text_2xl()
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .when(destaque, |d| d.text_color(texto_bom))
+                        .child(valor),
                 )
+                .child(div().text_xs().text_color(apagado).child(nota))
         };
 
         div()
@@ -617,7 +700,7 @@ impl Sessoes {
             .child(
                 div()
                     .flex()
-                    .gap(px(8.))
+                    .gap(px(12.))
                     .child(cartao(
                         if filtrando {
                             "Balcão, no recorte".into()
@@ -625,8 +708,8 @@ impl Sessoes {
                             "Pago no balcão".to_string()
                         },
                         dinheiro::formatar(soma.balcao),
-                        "fotos levadas na hora, pelo preço cheio ou pelo negociado",
-                        cx,
+                        "fotos levadas na hora, pelo preço cheio ou pelo que foi negociado",
+                        false,
                     ))
                     .child(cartao(
                         if filtrando {
@@ -636,12 +719,10 @@ impl Sessoes {
                         },
                         dinheiro::formatar(soma.pos_venda),
                         "fotos que o cliente voltou e comprou pela galeria",
-                        cx,
+                        true,
                     )),
             )
-            // 💰 A tela dizendo de qual conjunto o número é. Sem esta linha, um
-            // total de recorte ao lado de uma lista filtrada responde outra
-            // pergunta — e ninguém tem como saber qual.
+            // 💰 A tela dizendo de qual conjunto o número é.
             .when(filtrando || soma.sem_totais > 0, |bloco| {
                 let mut frase = String::new();
                 if filtrando {
@@ -655,12 +736,7 @@ impl Sessoes {
                         soma.sem_totais
                     ));
                 }
-                bloco.child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(frase),
-                )
+                bloco.child(div().text_xs().text_color(apagado).child(frase))
             })
     }
 
@@ -822,143 +898,145 @@ impl Sessoes {
         agora: i64,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
+        let tema = cx.theme();
+        let (borda, apagado, realce, fundo) = (
+            tema.border,
+            tema.muted_foreground,
+            tema.muted,
+            tema.background,
+        );
         if visiveis.is_empty() {
             let frase = if self.galerias.is_empty() {
-                "Nenhuma sessão ainda. Abra a primeira em \"Nova sessão\"."
+                "Nenhuma galeria ainda. A primeira nasce no botão \"Nova sessão\"."
             } else {
-                "Nenhuma sessão bate com a busca."
+                "Nenhuma sessão com esse nome ou nessa situação."
             };
-            return div()
+            return crate::estilo::cartao(cx)
                 .flex()
                 .items_center()
                 .justify_center()
-                .p(px(24.))
-                .rounded(cx.theme().radius)
-                .border_1()
-                .border_color(cx.theme().border)
-                .text_xs()
-                .text_color(cx.theme().muted_foreground)
+                .p(px(32.))
+                .text_sm()
+                .text_color(apagado)
                 .child(frase)
                 .into_any_element();
         }
 
-        let cabecalho = |texto: &'static str| {
-            div()
-                .flex_1()
-                .text_xs()
-                .text_color(cx.theme().muted_foreground)
-                .child(texto)
+        // As colunas do site que o app tem (as de "máquinas" são do relato do
+        // navegador, e não existem aqui). Largura fixa nos números, alinhados
+        // à direita como no site.
+        const LARGURAS: [f32; 6] = [84., 84., 104., 112., 112., 104.];
+        let numero = |largura: f32| div().w(px(largura)).flex_none().flex().justify_end();
+        let titulo_da_coluna = |texto: &'static str, largura: Option<f32>| match largura {
+            Some(l) => numero(l).child(texto).into_any_element(),
+            None => div().flex_1().min_w(px(0.)).child(texto).into_any_element(),
+        };
+        let valor_ou_traco = |centavos: Option<i64>| match centavos {
+            Some(c) if c > 0 => dinheiro::formatar(c),
+            _ => "—".to_string(),
         };
 
-        div()
+        let cabecalho = div()
+            .flex()
+            .items_center()
+            .gap(px(16.))
+            .h(px(40.))
+            .px(px(8.))
+            .border_b_1()
+            .border_color(borda)
+            .text_sm()
+            .font_weight(gpui::FontWeight::MEDIUM)
+            .child(titulo_da_coluna("Galeria", None))
+            .child(titulo_da_coluna("Contato", None))
+            .child(div().w(px(160.)).flex_none().child("Situação"))
+            .child(titulo_da_coluna("Levadas", Some(LARGURAS[0])))
+            .child(titulo_da_coluna("À venda", Some(LARGURAS[1])))
+            .child(titulo_da_coluna("Compradas", Some(LARGURAS[2])))
+            .child(titulo_da_coluna("Balcão", Some(LARGURAS[3])))
+            .child(titulo_da_coluna("Pós-venda", Some(LARGURAS[4])))
+            .child(titulo_da_coluna("Criada", Some(LARGURAS[5])));
+
+        let linhas = visiveis.iter().map(|sessao| {
+            let id = sessao.id.clone();
+            let e_a_aberta = self.aberta.as_deref() == Some(sessao.id.as_str());
+            let (balcao, pos_venda) = match &sessao.totais {
+                Some(t) => (Some(t.balcao), Some(t.pos_venda)),
+                None => (None, None),
+            };
+            div()
+                .id(SharedString::from(format!("sessao-{}", sessao.id)))
+                .flex()
+                .items_center()
+                .gap(px(16.))
+                .min_h(px(52.))
+                .px(px(8.))
+                .py(px(6.))
+                .border_b_1()
+                .border_color(borda)
+                .text_sm()
+                .cursor_pointer()
+                .hover(move |s| s.bg(realce.opacity(0.5)))
+                .when(e_a_aberta, |linha| linha.bg(realce.opacity(0.5)))
+                .on_click(cx.listener(move |tela, _ev, _window, cx| tela.abrir(id.clone(), cx)))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w(px(0.))
+                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .truncate()
+                        .child(sessao.titulo.clone()),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w(px(0.))
+                        .flex()
+                        .flex_col()
+                        .text_xs()
+                        .text_color(apagado)
+                        .when(sessao.email.is_none() && sessao.whatsapp.is_none(), |d| {
+                            d.child("—")
+                        })
+                        .children(sessao.email.clone().map(|e| div().truncate().child(e)))
+                        .children(sessao.whatsapp.clone().map(|w| div().truncate().child(w))),
+                )
+                .child(
+                    div()
+                        .w(px(160.))
+                        .flex_none()
+                        .flex()
+                        .child(selo_da_situacao(sessao.situacao(agora), cx)),
+                )
+                .child(numero(LARGURAS[0]).child(sessao.fotos.levadas_no_balcao.to_string()))
+                .child(numero(LARGURAS[1]).child(sessao.fotos.disponiveis.to_string()))
+                .child(numero(LARGURAS[2]).child(sessao.fotos.compradas.to_string()))
+                .child(numero(LARGURAS[3]).child(valor_ou_traco(balcao)))
+                .child(numero(LARGURAS[4]).child(valor_ou_traco(pos_venda)))
+                .child(
+                    numero(LARGURAS[5])
+                        .text_xs()
+                        .text_color(apagado)
+                        .child(data_br(&sessao.criada_em_iso)),
+                )
+        });
+
+        crate::estilo::cartao(cx)
             .flex()
             .flex_col()
-            .gap(px(2.))
+            .flex_1()
+            .min_h(px(0.))
+            .bg(fundo)
+            .child(cabecalho)
             .child(
                 div()
+                    .id("sessoes-linhas")
                     .flex()
-                    .gap(px(8.))
-                    .pb(px(4.))
-                    .border_b_1()
-                    .border_color(cx.theme().border)
-                    // O mesmo filete das linhas, sem cor: é o que mantém as
-                    // colunas do cabeçalho alinhadas com as de baixo.
-                    .child(div().w(px(2.)).flex_none())
-                    .child(cabecalho("Sessão"))
-                    .child(cabecalho("Contato"))
-                    .child(cabecalho("Situação"))
-                    .child(cabecalho("Levadas"))
-                    .child(cabecalho("À venda"))
-                    .child(cabecalho("Compradas"))
-                    .child(cabecalho("Criada")),
+                    .flex_col()
+                    .flex_1()
+                    .min_h(px(0.))
+                    .overflow_y_scroll()
+                    .children(linhas),
             )
-            .children(visiveis.iter().map(|sessao| {
-                let id = sessao.id.clone();
-                let e_a_aberta = self.aberta.as_deref() == Some(sessao.id.as_str());
-                div()
-                    .id(SharedString::from(format!("sessao-{}", sessao.id)))
-                    .flex()
-                    .gap(px(8.))
-                    .py(px(6.))
-                    .cursor_pointer()
-                    .border_b_1()
-                    .border_color(cx.theme().border)
-                    // A sessão aberta é a linha acesa — no degrau de "ativo",
-                    // e não no poço: `muted` virou o fundo de trás de foto
-                    // (`crate::tema`), e uma linha mais escura que a tabela
-                    // pareceria desligada em vez de escolhida.
-                    .when(e_a_aberta, |linha| linha.bg(cx.theme().list_active))
-                    .on_click(cx.listener(move |tela, _ev, _window, cx| tela.abrir(id.clone(), cx)))
-                    // 🔑 A marca da aberta é um filete âmbar **dentro** da linha,
-                    // e não uma borda esquerda: `border_color` no GPUI pinta os
-                    // quatro lados de uma vez (a linha de baixo viraria âmbar
-                    // junto), e uma borda que só existe na escolhida empurraria
-                    // o texto dela 2px para o lado.
-                    .child(
-                        div()
-                            .w(px(2.))
-                            .flex_none()
-                            .rounded(px(1.))
-                            .when(e_a_aberta, |marca| marca.bg(crate::tema::cores::quente())),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .text_xs()
-                            .truncate()
-                            .child(sessao.titulo.clone()),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .text_xs()
-                            .truncate()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(
-                                sessao
-                                    .email
-                                    .clone()
-                                    .or_else(|| sessao.whatsapp.clone())
-                                    .unwrap_or_else(|| "—".into()),
-                            ),
-                    )
-                    .child({
-                        // 🔑 A situação é a coluna que se lê varrendo a lista de
-                        // cima a baixo — "qual delas precisa de mim hoje" —, e
-                        // era texto do mesmo cinza de todo o resto.
-                        let situacao = sessao.situacao(agora);
-                        div().flex_1().flex().child(selos::selo(
-                            selos::tom_da_situacao(situacao),
-                            situacao.rotulo(),
-                            cx,
-                        ))
-                    })
-                    .child(
-                        div()
-                            .flex_1()
-                            .text_xs()
-                            .child(sessao.fotos.levadas_no_balcao.to_string()),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .text_xs()
-                            .child(sessao.fotos.disponiveis.to_string()),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .text_xs()
-                            .child(sessao.fotos.compradas.to_string()),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(sessao.criada_em_iso.clone()),
-                    )
-            }))
             .into_any_element()
     }
 }

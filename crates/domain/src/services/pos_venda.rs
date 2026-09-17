@@ -468,6 +468,28 @@ pub trait PosVendaApi: Send + Sync {
     /// memória. Depois disto, entrar é autorizar de novo.
     async fn sair(&self);
 
+    /// Um pedido JSON em nome da conta (`caminho` relativo a `/api/v2`), com a
+    /// resposta crua em JSON.
+    ///
+    /// 🔑 É a porta das telas do painel que só leem e gravam JSON e não têm
+    /// regra própria no app: a conta (`/auth/me`), o caixa e a retenção. Elas
+    /// são as mesmas do site, que também só repassa o JSON (2026-09-17, a
+    /// moldura do app Tauri levada ao GPUI).
+    ///
+    /// Uma resposta fora de `2xx` vira erro, com a frase do envelope do site.
+    async fn pedir_json(
+        &self,
+        sessao: &Sessao,
+        metodo: &str,
+        caminho: &str,
+        corpo: Option<serde_json::Value>,
+    ) -> DomainResult<serde_json::Value> {
+        let _ = (sessao, metodo, caminho, corpo);
+        Err(crate::DomainError::InvalidOperation(
+            "esta API não atende pedido JSON".into(),
+        ))
+    }
+
     /// O catálogo administrativo — inclusive inativos.
     async fn produtos(&self, sessao: &Sessao) -> DomainResult<Vec<Produto>>;
 

@@ -10,4 +10,6 @@
 pub mod altura_da_tira;
 pub mod arquivos;
 pub mod detalhe;
+/// A política de retenção do pós-venda (a rota `configuracoes` do site).
+pub mod retencao;
 pub mod tela;

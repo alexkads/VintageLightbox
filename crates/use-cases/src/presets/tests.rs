@@ -104,10 +104,11 @@ async fn test_list_presets_returns_system_and_user() {
     assert!(result.is_ok());
     let presets = result.unwrap();
 
-    // Os sete de sistema mais o do usuário. Eram quatro até 7/set/2026, com os
-    // nomes em inglês do app antigo; agora são os do site, e o que a lista
-    // devolve tem de trazer os dois grupos.
-    assert_eq!(presets.len(), 8);
+    // Os oito de sistema mais o do usuário. Eram quatro até 7/set/2026, com os
+    // nomes em inglês do app antigo; agora são os do site — com o estilo do
+    // estúdio no darktable desde 17/set/2026 —, e o que a lista devolve tem de
+    // trazer os dois grupos.
+    assert_eq!(presets.len(), 9);
 
     let system_names: Vec<_> = presets
         .iter()
@@ -123,6 +124,7 @@ async fn test_list_presets_returns_system_and_user() {
             "Luz de estúdio",
             "Hora dourada",
             "Alta-chave",
+            "RecordarFotos P&B",
             "Nitidez para impressão",
         ]
     );
@@ -265,12 +267,12 @@ fn cada_preset_de_sistema_move_alguma_coisa() {
 
 /// ⚠️ **A lista é a mesma do site, e na mesma ordem.**
 ///
-/// São sete nomes escritos em dois lugares (aqui e em
+/// São oito nomes escritos em dois lugares (aqui e em
 /// `revelacao/presets-do-sistema.ts`), e nada liga um ao outro em tempo de
 /// compilação. Um nome trocado aqui não quebra nada: só faz o fotógrafo
 /// procurar no app a predefinição que ele usou no navegador.
 #[test]
-fn os_sete_do_sistema_sao_os_do_site() {
+fn os_oito_do_sistema_sao_os_do_site() {
     let nomes: Vec<String> = presets_de_sistema()
         .into_iter()
         .map(|preset| preset.name)
@@ -285,6 +287,7 @@ fn os_sete_do_sistema_sao_os_do_site() {
             "Luz de estúdio",
             "Hora dourada",
             "Alta-chave",
+            "RecordarFotos P&B",
             "Nitidez para impressão",
         ]
     );
@@ -299,7 +302,7 @@ fn cada_uma_escreve_a_mesma_quantidade_de_campos_do_site() {
         .map(|preset| preset.adjustments.len())
         .collect();
 
-    assert_eq!(quantos, vec![5, 8, 9, 6, 7, 7, 4]);
+    assert_eq!(quantos, vec![5, 8, 9, 6, 7, 7, 24, 4]);
 }
 
 // ============================================

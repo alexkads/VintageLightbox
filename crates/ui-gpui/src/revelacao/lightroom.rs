@@ -1,4 +1,5 @@
-//! Ler predefinições do Lightroom — `.lrtemplate` e `.xmp`.
+//! Ler predefinições do Lightroom — `.lrtemplate` e `.xmp` — e, pela porta de
+//! [`darktable`], os estilos do darktable (`.dtstyle` e o `.xmp` dele).
 //!
 //! É o porte de `revelacao/lightroom.ts` do site, e existe pelo mesmo motivo:
 //! quem revela tem uma coleção de presets comprados, e recriá-los slider a
@@ -15,15 +16,19 @@
 //!
 //! # O que este motor não tem
 //!
-//! Curva por ponto, calibração de câmera, remoção de névoa e as correções de
-//! lente por perfil. Numa amostra de 400 presets comerciais, **321 usavam curva
-//! por ponto**. Por isso a importação **conta o que ignorou**, por arquivo:
-//! dizer "importado" e entregar outra imagem seria o pior desfecho — o operador
-//! procuraria defeito no próprio olho.
+//! Remoção de névoa, textura e as correções de lente por perfil. Por isso a
+//! importação **conta o que ignorou**, por arquivo: dizer "importado" e entregar
+//! outra imagem seria o pior desfecho — o operador procuraria defeito no próprio
+//! olho.
 //!
-//! ✅ **Split toning e grão não estão na lista de ignorados**, porque o motor
-//! ganhou os dois em 6/set/2026. Eram o buraco maior: **342 dos mesmos 400
-//! presets usavam split toning**.
+//! ✅ **A curva por ponto, a calibração de câmera, os tons médios e o global do
+//! Color Grading e o mixer de preto e branco saíram desta lista** — no site em
+//! 2026-09-12, aqui em 17/set/2026, quando esta tradução alcançou a de lá. Numa
+//! amostra de 400 presets comerciais, **321 usavam curva por ponto**: o preset
+//! chegava sem o pé de contraste que o define.
+//!
+//! ✅ **Split toning e grão também não estão na lista**, desde 6/set/2026. Eram
+//! **342 dos mesmos 400**.
 //!
 //! # ⚠️ Sem `regex`, e de propósito
 //!
@@ -37,6 +42,9 @@ use std::collections::BTreeMap;
 use domain::entities::preset::PresetAdjustments;
 
 use super::processador::Ajustes;
+
+/// Os estilos do darktable (`darktable.ts`).
+pub mod darktable;
 
 /// Um valor lido do arquivo, antes de traduzir.
 ///
@@ -84,7 +92,10 @@ pub struct PresetTraduzido {
     pub nome: String,
     pub ajustes: PresetAdjustments,
     /// Recursos que mudam a imagem e este motor não tem, sem repetição.
-    pub ignorados: Vec<&'static str>,
+    ///
+    /// Texto próprio, e não `&'static str`: o darktable diz **qual** módulo e
+    /// **qual** versão ficou de fora.
+    pub ignorados: Vec<String>,
 }
 
 /// Do número do Lightroom para o do shader, com a faixa do slider.
@@ -140,23 +151,32 @@ fn conversao(chave: &str) -> Option<Conversao> {
         if let Some(familia) = chave.strip_suffix(deles) {
             return match familia {
                 "SaturationAdjustment" => Some(Conversao {
-                    campo: campo_hsl(nosso, "sat"),
+                    campo: campo_do_motor(&format!("hsl_{nosso}_sat")),
                     minimo: -100.0,
                     maximo: 100.0,
                     converter: |v| v,
                 }),
                 "LuminanceAdjustment" => Some(Conversao {
-                    campo: campo_hsl(nosso, "lum"),
+                    campo: campo_do_motor(&format!("hsl_{nosso}_lum")),
                     minimo: -100.0,
                     maximo: 100.0,
                     converter: |v| v,
                 }),
                 "HueAdjustment" => Some(Conversao {
-                    campo: campo_hsl(nosso, "hue"),
+                    campo: campo_do_motor(&format!("hsl_{nosso}_hue")),
                     minimo: -180.0,
                     maximo: 180.0,
                     converter: |v| v * GRAUS_POR_PONTO_DE_MATIZ,
                 }),
+                // ⚠️ **Estes oito só agem com `bw_ativo`**, que
+                // `ConvertToGrayscale` liga (ver [`traduzir`]). Um preset de cor
+                // que traga `GrayMixer` dentro — e há — não pode dessaturar a
+                // foto de ninguém.
+                "GrayMixer" => Some(direto(
+                    campo_do_motor(&format!("bw_{nosso}")),
+                    -100.0,
+                    100.0,
+                )),
                 _ => None,
             };
         }
@@ -217,6 +237,26 @@ fn conversao(chave: &str) -> Option<Conversao> {
             direto("split_highlight_sat", 0.0, 100.0)
         }
         "SplitToningBalance" => direto("split_balance", -100.0, 100.0),
+        // ------------------------------- Color Grading: os eixos que faltavam
+        "ColorGradeMidtoneHue" => direto("split_midtone_hue", 0.0, 360.0),
+        "ColorGradeMidtoneSat" => direto("split_midtone_sat", 0.0, 100.0),
+        "ColorGradeGlobalHue" => direto("split_global_hue", 0.0, 360.0),
+        "ColorGradeGlobalSat" => direto("split_global_sat", 0.0, 100.0),
+        // 🔑 A mistura da Adobe já vem em 0–100 e o neutro dela é 50, igual ao
+        // daqui.
+        "ColorGradeBlending" => direto("split_blending", 0.0, 100.0),
+        // -------------------------------------------- Calibração de câmera
+        // 🚨 **A base da maioria dos presets de filme.** As escalas batem: matiz
+        // e saturação de −100 a 100 nos dois lados. O que muda é o significado
+        // do extremo — a daqui é rotação de matiz por primário, a da Adobe é
+        // matriz no espaço do perfil da câmera.
+        "RedHue" => direto("calib_red_hue", -100.0, 100.0),
+        "RedSaturation" => direto("calib_red_sat", -100.0, 100.0),
+        "GreenHue" => direto("calib_green_hue", -100.0, 100.0),
+        "GreenSaturation" => direto("calib_green_sat", -100.0, 100.0),
+        "BlueHue" => direto("calib_blue_hue", -100.0, 100.0),
+        "BlueSaturation" => direto("calib_blue_sat", -100.0, 100.0),
+        "ShadowTint" => direto("calib_shadow_tint", -100.0, 100.0),
         // -------------------------------------------------------------- Grão
         "GrainAmount" => direto("grain_amount", 0.0, 100.0),
         "GrainSize" => direto("grain_size", 0.0, 100.0),
@@ -224,22 +264,18 @@ fn conversao(chave: &str) -> Option<Conversao> {
     })
 }
 
-/// O nome do campo de HSL, sem alocar em tempo de execução.
+/// O nome de um campo do motor, como `&'static str`.
 ///
-/// São 24 combinações fixas, e o `PresetAdjustments` guarda `String` — mas quem
-/// escreve aqui é uma tabela de `&'static str`, e devolver um `String` montado
-/// convidaria a um erro de digitação que só apareceria na foto.
-fn campo_hsl(cor: &'static str, familia: &'static str) -> &'static str {
-    for nome in Ajustes::NOMES {
-        if nome.starts_with("hsl_")
-            && nome[4..].starts_with(cor)
-            && nome.ends_with(familia)
-            && nome.len() == 4 + cor.len() + 1 + familia.len()
-        {
-            return nome;
-        }
-    }
-    unreachable!("as oito cores e as três famílias estão em `Ajustes::NOMES`")
+/// O `PresetAdjustments` guarda `String`, mas a tabela de conversões é de
+/// `&'static str` — e procurar o nome montado em `Ajustes::NOMES` é o que faz um
+/// erro de digitação (`hsl_orenge_sat`) derrubar o teste em vez de virar um
+/// preset que importa "com sucesso" e não move nada.
+fn campo_do_motor(nome: &str) -> &'static str {
+    Ajustes::NOMES
+        .iter()
+        .find(|campo| **campo == nome)
+        .copied()
+        .unwrap_or_else(|| unreachable!("`{nome}` não está em `Ajustes::NOMES`"))
 }
 
 /// O que muda a imagem no Lightroom e **não existe** neste motor.
@@ -254,11 +290,6 @@ fn campo_hsl(cor: &'static str, familia: &'static str) -> &'static str {
 /// ficou tem de ser específico o bastante para não engolir a chave que hoje é
 /// traduzida — `GrainAmount` começa com "Grain".
 const SEM_EQUIVALENTE: &[(&str, &str)] = &[
-    ("ToneCurvePV2012", "curva por ponto"),
-    ("ToneCurve", "curva por ponto"),
-    ("ColorGradeMidtone", "gradação dos tons médios"),
-    ("ColorGradeGlobal", "gradação global"),
-    ("ColorGradeBlending", "mistura da gradação"),
     ("GrainFrequency", "aspereza do grão"),
     ("Dehaze", "remoção de névoa"),
     ("Texture", "textura (LR moderno)"),
@@ -276,30 +307,186 @@ const SEM_EQUIVALENTE: &[(&str, &str)] = &[
         "PostCropVignetteHighlightContrast",
         "vinheta nas altas luzes",
     ),
-    ("RedHue", "calibração de câmera"),
-    ("RedSaturation", "calibração de câmera"),
-    ("GreenHue", "calibração de câmera"),
-    ("GreenSaturation", "calibração de câmera"),
-    ("BlueHue", "calibração de câmera"),
-    ("BlueSaturation", "calibração de câmera"),
-    ("ShadowTint", "calibração de câmera"),
     ("Temperature", "temperatura (depende do balanço da foto)"),
     ("Tint", "matiz do balanço de branco"),
 ];
 
+/// De que chave do arquivo sai cada canal da curva por ponto.
+///
+/// 🔑 **`ToneCurvePV2012` é a do processo 2012 e `ToneCurve` a antiga**, e as
+/// duas existem no mesmo arquivo quando o preset foi salvo por uma versão de
+/// transição. A nova manda; a velha só entra quando a nova não veio — o mesmo
+/// critério do `Exposure2012` contra o `Exposure`.
+const CURVAS_DO_LIGHTROOM: [(char, [&str; 2]); 4] = [
+    ('m', ["ToneCurvePV2012", "ToneCurve"]),
+    ('r', ["ToneCurvePV2012Red", "ToneCurveRed"]),
+    ('g', ["ToneCurvePV2012Green", "ToneCurveGreen"]),
+    ('b', ["ToneCurvePV2012Blue", "ToneCurveBlue"]),
+];
+
+/// Quantos pontos a curva por ponto tem, por canal (`curva_m0`…`curva_m8`).
+const PONTOS_DA_CURVA: usize = 9;
+
+/// A altura do ponto `i` da curva neutra: a reta `y = x`.
+fn neutro_da_curva(i: usize) -> f32 {
+    i as f32 * 255.0 / (PONTOS_DA_CURVA - 1) as f32
+}
+
+/// Esta curva devolve a foto como ela entrou?
+fn curva_eh_neutra(alturas: &[f32]) -> bool {
+    alturas
+        .iter()
+        .enumerate()
+        .all(|(i, v)| (v - neutro_da_curva(i)).abs() < 0.01)
+}
+
+/// Os pontos de uma `ToneCurvePV2012`, já em números — o
+/// `lerPontosDoLightroom` do site.
+///
+/// # 🚨 São dois formatos, e o mesmo campo
+///
+/// Uma lista de textos `"x, y"` (um ponto por item), ou a lista **plana** do
+/// `.lrtemplate` — `{0, 22, 254, 202}` são os pontos (0, 22) e (254, 202). É a
+/// vírgula dentro do item que separa os dois. Ponto ilegível é descartado em vez
+/// de derrubar o preset.
+fn pontos_da_curva(itens: &[String]) -> Vec<(f32, f32)> {
+    let preso = |v: f32| v.clamp(0.0, 255.0);
+    let numero = |t: &str| t.trim().parse::<f32>().ok().filter(|v| v.is_finite());
+    let mut pontos: Vec<(f32, f32)> = if itens.iter().any(|item| item.contains(',')) {
+        itens
+            .iter()
+            .filter_map(|item| {
+                let mut partes = item.split(',');
+                let x = numero(partes.next()?)?;
+                let y = numero(partes.next()?)?;
+                Some((preso(x), preso(y)))
+            })
+            .collect()
+    } else {
+        itens
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .filter_map(|[x, y]| Some((preso(numero(x)?), preso(numero(y)?))))
+            .collect()
+    };
+    pontos.sort_by(|a, b| a.0.total_cmp(&b.0));
+    pontos
+}
+
+/// Reduz a curva de pontos livres do Lightroom às nove alturas daqui — o
+/// `daCurvaDoLightroom` do site.
+///
+/// Amostrar a curva dele nos nossos nove x é a redução honesta: o traço geral se
+/// mantém, e o que se perde é uma inflexão mais estreita que 32 níveis. ⚠️
+/// **Menos de dois pontos não é curva**: devolve a identidade em vez de uma reta
+/// horizontal, que apagaria a foto.
+fn da_curva_do_lightroom(pontos: &[(f32, f32)]) -> [f32; PONTOS_DA_CURVA] {
+    let mut alturas = [0.0; PONTOS_DA_CURVA];
+    for (i, altura) in alturas.iter_mut().enumerate() {
+        *altura = if pontos.len() < 2 {
+            neutro_da_curva(i)
+        } else {
+            avaliar_entre_pontos(pontos, neutro_da_curva(i))
+        };
+    }
+    alturas
+}
+
+/// A curva do Lightroom em `x`, pelos pontos dele: Hermite monótono
+/// (Fritsch–Carlson), a mesma interpolação do shader. Fora do intervalo dos
+/// pontos ela gruda na ponta, que é o que o Lightroom faz.
+fn avaliar_entre_pontos(pontos: &[(f32, f32)], x: f32) -> f32 {
+    let n = pontos.len();
+    let (xs, ys): (Vec<f32>, Vec<f32>) = pontos.iter().copied().unzip();
+    if x <= xs[0] {
+        return ys[0];
+    }
+    if x >= xs[n - 1] {
+        return ys[n - 1];
+    }
+    let mut i = 0;
+    while i < n - 2 && x > xs[i + 1] {
+        i += 1;
+    }
+    let h = xs[i + 1] - xs[i];
+    if h <= 0.0 {
+        return ys[i];
+    }
+    let t = (x - xs[i]) / h;
+    let d = (ys[i + 1] - ys[i]) / h;
+    let d_anterior = if i > 0 {
+        (ys[i] - ys[i - 1]) / (xs[i] - xs[i - 1])
+    } else {
+        d
+    };
+    let d_proximo = if i < n - 2 {
+        (ys[i + 2] - ys[i + 1]) / (xs[i + 2] - xs[i + 1])
+    } else {
+        d
+    };
+    let m0 = if d_anterior * d > 0.0 {
+        2.0 * d_anterior * d / (d_anterior + d)
+    } else {
+        0.0
+    };
+    let m1 = if d * d_proximo > 0.0 {
+        2.0 * d * d_proximo / (d + d_proximo)
+    } else {
+        0.0
+    };
+    let t2 = t * t;
+    let t3 = t2 * t;
+    let y = (2.0 * t3 - 3.0 * t2 + 1.0) * ys[i]
+        + (t3 - 2.0 * t2 + t) * m0 * h
+        + (-2.0 * t3 + 3.0 * t2) * ys[i + 1]
+        + (t3 - t2) * m1 * h;
+    y.clamp(0.0, 255.0)
+}
+
 /// Traduz um preset bruto.
 ///
-/// `ConvertToGrayscale` vira saturação -1 (cinza), que é o que ele faz — e é a
-/// mesma conversão da predefinição "Preto e branco clássico" daqui.
+/// `ConvertToGrayscale` acende o mixer de preto e branco **e** leva a saturação
+/// a −1. Os dois: o mixer decide a luminância de cada faixa de matiz, e a
+/// dessaturação tira a cor. Só o segundo dava cinza chapado, sem a mistura por
+/// canal que separa um P&B de retrato de um P&B sem graça.
 pub fn traduzir(bruto: &PresetBruto) -> PresetTraduzido {
     let neutro = Ajustes::default();
     let neutro = neutro.como_vetor();
     let mut ajustes = PresetAdjustments::vazia();
-    let mut ignorados: Vec<&'static str> = Vec::new();
+    let mut ignorados: Vec<String> = Vec::new();
+
+    // 🚨 **A curva por ponto, que era o maior buraco deste importador.** ⚠️ A
+    // curva neutra não é gravada: muitos presets trazem `0,0 → 255,255` mesmo
+    // intocada, e ela não deve "reencostar" a curva de quem aplicar.
+    for (canal, chaves) in CURVAS_DO_LIGHTROOM {
+        let Some(itens) = chaves
+            .iter()
+            .find_map(|chave| match bruto.ajustes.get(*chave) {
+                Some(Valor::Tabela(itens)) => Some(itens),
+                _ => None,
+            })
+        else {
+            continue;
+        };
+        let alturas = da_curva_do_lightroom(&pontos_da_curva(itens));
+        if curva_eh_neutra(&alturas) {
+            continue;
+        }
+        for (i, altura) in alturas.iter().enumerate() {
+            ajustes = ajustes.com(format!("curva_{canal}{i}"), arredondar(*altura));
+        }
+    }
 
     for (chave, valor) in &bruto.ajustes {
+        if CURVAS_DO_LIGHTROOM
+            .iter()
+            .any(|(_, chaves)| chaves.contains(&chave.as_str()))
+        {
+            continue;
+        }
         if chave == "ConvertToGrayscale" && *valor == Valor::Booleano(true) {
-            ajustes = ajustes.com("saturation", -1.0);
+            ajustes = ajustes.com("bw_ativo", 1.0).com("saturation", -1.0);
             continue;
         }
 
@@ -328,8 +515,8 @@ pub fn traduzir(bruto: &PresetBruto) -> PresetTraduzido {
             .iter()
             .find(|(prefixo, _)| chave.starts_with(prefixo))
         {
-            if !ignorados.contains(rotulo) {
-                ignorados.push(rotulo);
+            if !ignorados.iter().any(|i| i == rotulo) {
+                ignorados.push(rotulo.to_string());
             }
         }
     }
@@ -700,8 +887,11 @@ impl EscolhaDePresets for EscolhaNativa {
     fn escolher(&self, canal: std::sync::mpsc::Sender<Vec<Arquivo>>) {
         self.tokio.spawn(async move {
             let escolhidos = rfd::AsyncFileDialog::new()
-                .set_title("Importar predefinições do Lightroom")
-                .add_filter("Predefinições do Lightroom", &["lrtemplate", "xmp"])
+                .set_title("Importar do Lightroom ou do darktable")
+                .add_filter(
+                    "Predefinições do Lightroom e estilos do darktable",
+                    &["lrtemplate", "xmp", "dtstyle"],
+                )
                 .pick_files()
                 .await
                 .unwrap_or_default();
@@ -742,10 +932,11 @@ pub struct Relatorio {
     pub repetidas: usize,
     /// Lidas, e sem nenhum ajuste que este motor aplique.
     pub sem_ajuste: Vec<String>,
-    /// Nem o `.lrtemplate` nem o `.xmp` reconheceram o conteúdo.
+    /// Nenhum dos leitores reconheceu o conteúdo.
     pub ilegiveis: Vec<String>,
-    /// Recurso que este motor não tem, e em quantos arquivos apareceu.
-    pub ignorados: Vec<(&'static str, usize)>,
+    /// Recurso que este motor não tem, e em quantos arquivos apareceu — o que
+    /// apareceu em mais arquivos primeiro.
+    pub ignorados: Vec<(String, usize)>,
 }
 
 /// Lê os arquivos escolhidos e diz o que fazer com cada um.
@@ -764,21 +955,33 @@ pub fn preparar(arquivos: &[Arquivo], ja_existem: &[String]) -> (Vec<PresetTradu
     };
     let mut nomes: Vec<String> = ja_existem.to_vec();
     let mut criar = Vec::new();
-    let mut contagem: BTreeMap<&'static str, usize> = BTreeMap::new();
+    // Na ordem em que apareceram, como o `Map` do site: o desempate da
+    // ordenação por contagem é esse.
+    let mut contagem: Vec<(String, usize)> = Vec::new();
 
     for arquivo in arquivos {
         let Some(texto) = arquivo.texto.as_deref() else {
             relatorio.ilegiveis.push(arquivo.nome.clone());
             continue;
         };
-        let Some(bruto) = ler_arquivo(texto, &arquivo.nome) else {
+        // 🔑 **O darktable vem primeiro, e decidido pelo conteúdo**: o `.xmp`
+        // dele e o do Lightroom têm a mesma extensão, e o leitor do Lightroom
+        // leria o do darktable como um preset sem ajuste nenhum.
+        let traduzido = if darktable::eh_do_darktable(texto, &arquivo.nome) {
+            darktable::ler(texto, &arquivo.nome)
+        } else {
+            ler_arquivo(texto, &arquivo.nome).map(|bruto| traduzir(&bruto))
+        };
+        let Some(traduzido) = traduzido else {
             relatorio.ilegiveis.push(arquivo.nome.clone());
             continue;
         };
 
-        let traduzido = traduzir(&bruto);
         for rotulo in &traduzido.ignorados {
-            *contagem.entry(rotulo).or_default() += 1;
+            match contagem.iter_mut().find(|(r, _)| r == rotulo) {
+                Some((_, quantos)) => *quantos += 1,
+                None => contagem.push((rotulo.clone(), 1)),
+            }
         }
 
         if traduzido.ajustes.is_empty() {
@@ -795,7 +998,7 @@ pub fn preparar(arquivos: &[Arquivo], ja_existem: &[String]) -> (Vec<PresetTradu
     }
 
     relatorio.criadas = criar.len();
-    relatorio.ignorados = contagem.into_iter().collect();
+    relatorio.ignorados = contagem;
     // O que apareceu em mais arquivos primeiro: é o que mais falta ao motor.
     relatorio
         .ignorados
@@ -815,7 +1018,7 @@ impl Relatorio {
         }
         if !self.sem_ajuste.is_empty() {
             linhas.push(format!(
-                "{} não tinham nenhum ajuste que este motor aplica{}.",
+                "{} não tinham nenhum ajuste que este motor aplica e ficaram de fora{}.",
                 self.sem_ajuste.len(),
                 if self.sem_ajuste.len() <= 3 {
                     format!(" ({})", self.sem_ajuste.join(", "))
@@ -827,10 +1030,15 @@ impl Relatorio {
         if !self.ilegiveis.is_empty() {
             linhas.push(format!("{} não puderam ser lidos.", self.ilegiveis.len()));
         }
-        for (rotulo, quantos) in &self.ignorados {
-            linhas.push(format!("{quantos}× {rotulo} — este motor não tem"));
-        }
         linhas
+    }
+
+    /// Os recursos que ficaram de fora, um por linha — `"3× remoção de névoa"`.
+    pub fn linhas_dos_ignorados(&self) -> Vec<String> {
+        self.ignorados
+            .iter()
+            .map(|(rotulo, quantos)| format!("{quantos}× {rotulo}"))
+            .collect()
     }
 
     /// O cabeçalho: quantos arquivos entraram e quantas predefinições saíram.
@@ -1135,19 +1343,175 @@ mod testes {
         assert_eq!(traduzido.ajustes.len(), 1);
     }
 
+    /// 🚨 **Um preset P&B acende o mixer, e não só dessatura.** Só a
+    /// dessaturação dava cinza chapado, e os oito `GrayMixer*` do mesmo arquivo
+    /// não tinham onde agir.
     #[test]
-    fn converter_para_cinza_vira_saturacao_menos_um() {
-        assert_eq!(
-            traduzir_chaves(&[("ConvertToGrayscale", Valor::Booleano(true))])
-                .ajustes
-                .get("saturation"),
-            Some(-1.0)
-        );
+    fn o_preto_e_branco_acende_o_mixer_e_traz_a_mistura_por_canal() {
+        let traduzido = traduzir_chaves(&[
+            ("ConvertToGrayscale", Valor::Booleano(true)),
+            ("GrayMixerRed", n(40.0)),
+            ("GrayMixerBlue", n(-60.0)),
+        ]);
+        assert_eq!(traduzido.ajustes.get("bw_ativo"), Some(1.0));
+        assert_eq!(traduzido.ajustes.get("saturation"), Some(-1.0));
+        assert_eq!(traduzido.ajustes.get("bw_red"), Some(40.0));
+        assert_eq!(traduzido.ajustes.get("bw_blue"), Some(-60.0));
         assert!(
             traduzir_chaves(&[("ConvertToGrayscale", Valor::Booleano(false))])
                 .ajustes
                 .is_empty()
         );
+    }
+
+    /// ✅ **A calibração de câmera atravessa** — a base da maioria dos presets
+    /// de filme, contada como "ignorada" até aqui.
+    #[test]
+    fn a_calibracao_de_camera_vira_os_sete_controles_de_calibracao() {
+        let traduzido = traduzir_chaves(&[
+            ("RedHue", n(12.0)),
+            ("RedSaturation", n(-8.0)),
+            ("GreenHue", n(-20.0)),
+            ("GreenSaturation", n(15.0)),
+            ("BlueHue", n(30.0)),
+            ("BlueSaturation", n(-25.0)),
+            ("ShadowTint", n(6.0)),
+        ]);
+        let esperado: PresetAdjustments = [
+            ("calib_red_hue", 12.0),
+            ("calib_red_sat", -8.0),
+            ("calib_green_hue", -20.0),
+            ("calib_green_sat", 15.0),
+            ("calib_blue_hue", 30.0),
+            ("calib_blue_sat", -25.0),
+            ("calib_shadow_tint", 6.0),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(traduzido.ajustes, esperado);
+        assert!(traduzido.ignorados.is_empty());
+    }
+
+    #[test]
+    fn contraste_nos_extremos_e_no_meio() {
+        let contraste = |v| {
+            traduzir_chaves(&[("Contrast2012", n(v))])
+                .ajustes
+                .get("contrast")
+        };
+        assert_eq!(contraste(-100.0), Some(0.0));
+        assert_eq!(contraste(25.0), Some(1.25));
+        assert_eq!(contraste(50.0), Some(1.5));
+    }
+
+    #[test]
+    fn a_exposicao_ja_vem_na_mesma_unidade_e_as_zonas_passam_direto() {
+        let traduzido = traduzir_chaves(&[
+            ("Exposure2012", n(1.35)),
+            ("Highlights2012", n(-60.0)),
+            ("Shadows2012", n(40.0)),
+            ("Whites2012", n(10.0)),
+            ("Blacks2012", n(-15.0)),
+            ("ParametricLights", n(22.0)),
+        ]);
+        assert_eq!(traduzido.ajustes.get("exposure"), Some(1.35));
+        assert_eq!(traduzido.ajustes.get("highlights"), Some(-60.0));
+        assert_eq!(traduzido.ajustes.get("shadows"), Some(40.0));
+        assert_eq!(traduzido.ajustes.get("whites"), Some(10.0));
+        assert_eq!(traduzido.ajustes.get("blacks"), Some(-15.0));
+        assert_eq!(traduzido.ajustes.get("tone_curve_lights"), Some(22.0));
+        assert_eq!(
+            traduzir_chaves(&[("Exposure2012", n(99.0))])
+                .ajustes
+                .get("exposure"),
+            Some(5.0)
+        );
+    }
+
+    /// Um campo no neutro não é ajuste — inclusive o raio de nitidez, cujo
+    /// neutro é 1 e não zero.
+    #[test]
+    fn valor_neutro_nao_entra_na_predefinicao() {
+        let traduzido = traduzir_chaves(&[
+            ("Exposure2012", n(0.0)),
+            ("Saturation", n(0.0)),
+            ("SharpenRadius", n(1.0)),
+            ("ColorGradeBlending", n(50.0)),
+        ]);
+        assert!(traduzido.ajustes.is_empty());
+    }
+
+    /// 🚨 **A curva por ponto chega ao motor**, e era o maior buraco: 321 dos
+    /// 400 presets da amostra a usavam.
+    #[test]
+    fn a_curva_por_ponto_vira_as_nove_alturas_do_canal() {
+        // O formato do XMP: um ponto por item, "x, y".
+        let traduzido = traduzir_chaves(&[(
+            "ToneCurvePV2012",
+            Valor::Tabela(vec!["0, 20".into(), "128, 128".into(), "255, 235".into()]),
+        )]);
+        assert_eq!(traduzido.ajustes.get("curva_m0"), Some(20.0));
+        assert_eq!(traduzido.ajustes.get("curva_m8"), Some(235.0));
+        assert_eq!(traduzido.ajustes.len(), 9);
+        assert!(traduzido.ignorados.is_empty());
+
+        // A curva intocada, que o Lightroom grava mesmo assim, não entra.
+        let neutra = traduzir_chaves(&[(
+            "ToneCurvePV2012",
+            Valor::Tabela(vec!["0, 0".into(), "255, 255".into()]),
+        )]);
+        assert!(neutra.ajustes.is_empty());
+
+        // A nova manda; a antiga só vale sem a nova.
+        let duas = traduzir_chaves(&[
+            (
+                "ToneCurvePV2012Red",
+                Valor::Tabela(vec!["0, 30".into(), "255, 255".into()]),
+            ),
+            (
+                "ToneCurveRed",
+                Valor::Tabela(vec!["0, 90".into(), "255, 255".into()]),
+            ),
+        ]);
+        assert_eq!(duas.ajustes.get("curva_r0"), Some(30.0));
+
+        // Menos de dois pontos não é curva.
+        assert!(
+            traduzir_chaves(&[("ToneCurve", Valor::Tabela(vec!["0, 40".into()]))])
+                .ajustes
+                .is_empty()
+        );
+    }
+
+    /// Os quatro eixos do Color Grading e a mistura.
+    #[test]
+    fn os_quatro_eixos_do_color_grading_viram_tonalizacao() {
+        let traduzido = traduzir_chaves(&[
+            ("ColorGradeShadowHue", n(210.0)),
+            ("ColorGradeShadowSat", n(30.0)),
+            ("ColorGradeMidtoneHue", n(120.0)),
+            ("ColorGradeMidtoneSat", n(20.0)),
+            ("ColorGradeHighlightHue", n(45.0)),
+            ("ColorGradeHighlightSat", n(15.0)),
+            ("ColorGradeGlobalHue", n(30.0)),
+            ("ColorGradeGlobalSat", n(10.0)),
+            ("ColorGradeBlending", n(80.0)),
+        ]);
+        let esperado: PresetAdjustments = [
+            ("split_shadow_hue", 210.0),
+            ("split_shadow_sat", 30.0),
+            ("split_midtone_hue", 120.0),
+            ("split_midtone_sat", 20.0),
+            ("split_highlight_hue", 45.0),
+            ("split_highlight_sat", 15.0),
+            ("split_global_hue", 30.0),
+            ("split_global_sat", 10.0),
+            ("split_blending", 80.0),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(traduzido.ajustes, esperado);
+        assert!(traduzido.ignorados.is_empty());
     }
 
     /// 🚨 **Valor que não é número é ignorado sem quebrar**, e valor fora da
@@ -1173,24 +1537,19 @@ mod testes {
                 "ToneCurvePV2012Blue",
                 Valor::Tabela(vec!["0".into(), "22".into()]),
             ),
-            ("ToneCurvePV2012Red", Valor::Tabela(vec!["0".into()])),
             ("ColorGradeMidtoneHue", n(120.0)),
             ("GrainFrequency", n(40.0)),
             ("Dehaze", n(10.0)),
+            ("DehazeExtra", n(3.0)),
             ("RedHue", n(5.0)),
             ("Contrast2012", n(20.0)),
         ]);
 
+        // ✅ Curva por ponto, tons médios e calibração não são mais "ignorados":
+        // agem. E o mesmo rótulo não se repete por duas chaves da família.
         assert_eq!(
             traduzido.ignorados,
-            vec![
-                "aspereza do grão",
-                "calibração de câmera",
-                "curva por ponto",
-                "gradação dos tons médios",
-                "remoção de névoa",
-            ],
-            "sem repetir o rótulo por causa de duas chaves da mesma família"
+            vec!["aspereza do grão", "remoção de névoa"]
         );
     }
 
@@ -1216,22 +1575,6 @@ mod testes {
         assert_eq!(traduzido.ajustes.get("split_shadow_hue"), Some(35.0));
         assert_eq!(traduzido.ajustes.get("grain_amount"), Some(25.0));
         assert!(traduzido.ignorados.is_empty());
-    }
-
-    /// O "Color Grading" do LR 10 em diante traz as duas pontas com outro nome.
-    #[test]
-    fn as_duas_pontas_do_color_grading_viram_tonalizacao() {
-        let traduzido = traduzir_chaves(&[
-            ("ColorGradeShadowHue", n(210.0)),
-            ("ColorGradeShadowSat", n(30.0)),
-            ("ColorGradeHighlightHue", n(45.0)),
-            ("ColorGradeHighlightSat", n(15.0)),
-            ("ColorGradeGlobalSat", n(10.0)),
-        ]);
-
-        assert_eq!(traduzido.ajustes.len(), 4);
-        assert_eq!(traduzido.ajustes.get("split_shadow_hue"), Some(210.0));
-        assert_eq!(traduzido.ignorados, vec!["gradação global"]);
     }
 
     /// Zero e `false` não mudam nada — avisar sobre eles seria ruído.
@@ -1267,7 +1610,13 @@ mod testes {
         assert_eq!(traduzido.ajustes.get("split_shadow_hue"), Some(210.0));
         assert_eq!(traduzido.ajustes.get("split_shadow_sat"), Some(30.0));
         assert_eq!(traduzido.ajustes.get("grain_amount"), Some(25.0));
-        assert_eq!(traduzido.ignorados, vec!["curva por ponto"]);
+        // ✅ **E a curva por ponto chega**: a deste preset é só no azul, e é
+        // dela que sai o "cross process" — preto azulado levantado, alta-luz
+        // contida. O canal mestre fica na reta.
+        assert!(traduzido.ignorados.is_empty());
+        assert!(traduzido.ajustes.get("curva_b0").expect("curva azul") > 20.0);
+        assert!(traduzido.ajustes.get("curva_b8").expect("curva azul") < 220.0);
+        assert_eq!(traduzido.ajustes.get("curva_m0"), None);
     }
 
     /// 🔑 **Todo campo que a tradução escreve existe no motor.**
@@ -1310,6 +1659,18 @@ mod testes {
             "ColorGradeShadowSat",
             "ColorGradeHighlightHue",
             "ColorGradeHighlightSat",
+            "ColorGradeMidtoneHue",
+            "ColorGradeMidtoneSat",
+            "ColorGradeGlobalHue",
+            "ColorGradeGlobalSat",
+            "ColorGradeBlending",
+            "RedHue",
+            "RedSaturation",
+            "GreenHue",
+            "GreenSaturation",
+            "BlueHue",
+            "BlueSaturation",
+            "ShadowTint",
             "GrainAmount",
             "GrainSize",
         ];
@@ -1328,6 +1689,7 @@ mod testes {
                 "SaturationAdjustment",
                 "LuminanceAdjustment",
                 "HueAdjustment",
+                "GrayMixer",
             ] {
                 let chave = format!("{familia}{deles}");
                 let conversao =

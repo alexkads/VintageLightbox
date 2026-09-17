@@ -54,6 +54,22 @@ pub enum Recado {
         foto_id: String,
         bytes: Vec<u8>,
     },
+    /// O bruto de uma foto do site, como está no storage — para medir o lado
+    /// dele e, no zoom, para a tela em resolução cheia.
+    Original {
+        foto_no_site: String,
+        bytes: std::sync::Arc<Vec<u8>>,
+    },
+    /// O bruto não veio. Não é recusa de gesto: a tela fica na cópia.
+    OriginalIndisponivel {
+        foto_no_site: String,
+    },
+    /// "Baixar JPEG": a foto aberta revelada em resolução cheia, com o que
+    /// está na tela — o `revelarIntegral` do site.
+    JpegRevelado {
+        foto_no_site: String,
+        bytes: Vec<u8>,
+    },
     /// Os pixels de uma foto do site — o passo 11.
     ///
     /// Leva o id da foto junto: um download que volta depois de a seta ter
@@ -83,6 +99,46 @@ pub enum Recado {
     /// Uma frase para a tela — autorização recusada, rede caída, galeria
     /// recusada.
     Falhou(String),
+    /// A resposta de [`Publicador::pedir_json`]. O `rotulo` é o que a tela
+    /// escolheu para saber a qual pedido ela responde.
+    Json {
+        rotulo: &'static str,
+        resultado: Result<serde_json::Value, String>,
+    },
+}
+
+/// Um pedido JSON à API, com o rótulo que volta na resposta.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PedidoJson {
+    pub rotulo: &'static str,
+    pub metodo: &'static str,
+    pub caminho: String,
+    pub corpo: Option<serde_json::Value>,
+}
+
+impl PedidoJson {
+    pub fn ler(rotulo: &'static str, caminho: impl Into<String>) -> Self {
+        Self {
+            rotulo,
+            metodo: "GET",
+            caminho: caminho.into(),
+            corpo: None,
+        }
+    }
+
+    pub fn gravar(
+        rotulo: &'static str,
+        metodo: &'static str,
+        caminho: impl Into<String>,
+        corpo: serde_json::Value,
+    ) -> Self {
+        Self {
+            rotulo,
+            metodo,
+            caminho: caminho.into(),
+            corpo: Some(corpo),
+        }
+    }
 }
 
 /// O que subir sobre **uma** foto — os quatro campos que a descrevem.
@@ -115,6 +171,17 @@ pub trait Publicador: Send + Sync + 'static {
     /// A sessão de ontem, do chaveiro. Responde `Entrou` se ainda valer, e
     /// `SemSessao` se for preciso autorizar.
     fn retomar(&self, canal: Sender<Recado>);
+
+    /// Um pedido JSON em nome da conta (`caminho` relativo a `/api/v2`), para
+    /// as telas que só repassam JSON, como no site: a conta, o caixa e a
+    /// retenção. Responde [`Recado::Json`] com o mesmo `rotulo`.
+    fn pedir_json(&self, sessao: Sessao, pedido: PedidoJson, canal: Sender<Recado>) {
+        let _ = sessao;
+        let _ = canal.send(Recado::Json {
+            rotulo: pedido.rotulo,
+            resultado: Err("este publicador não atende pedido JSON".into()),
+        });
+    }
 
     /// Esquece a sessão — o "sair" da tela.
     fn sair(&self, canal: Sender<Recado>);
@@ -193,6 +260,24 @@ pub trait Publicador: Send + Sync + 'static {
     );
     /// Manda ao cliente o e-mail "suas fotos estão prontas".
     fn avisar(&self, sessao: Sessao, galeria_id: String, canal: Sender<Recado>);
+    /// Baixa o bruto de uma foto do site. Volta como [`Recado::Original`].
+    fn original(&self, _sessao: Sessao, foto_no_site: String, canal: Sender<Recado>) {
+        let _ = canal.send(Recado::OriginalIndisponivel { foto_no_site });
+    }
+    /// Baixa o original e o revela com a receita dada, **sem subir nada** —
+    /// o "Baixar JPEG" do editor. Volta como [`Recado::JpegRevelado`].
+    fn revelar_integral(
+        &self,
+        _sessao: Sessao,
+        _foto_no_site: String,
+        _ajustes: Ajustes,
+        _corte: CropSettings,
+        canal: Sender<Recado>,
+    ) {
+        let _ = canal.send(Recado::Falhou(
+            "este publicador não sabe revelar em resolução cheia".into(),
+        ));
+    }
     /// O passo 11: os pixels da foto que só existe no storage.
     ///
     /// `foto_local` é o id **do catálogo**, e volta no recado: é por ele que a
@@ -318,6 +403,19 @@ impl Publicador for PublicadorDaApi {
         });
     }
 
+    fn pedir_json(&self, sessao: Sessao, pedido: PedidoJson, canal: Sender<Recado>) {
+        let controlador = self.controlador.clone();
+        self.tokio.spawn(async move {
+            let resultado = controlador
+                .pedir_json(&sessao, pedido.metodo, &pedido.caminho, pedido.corpo)
+                .await;
+            let _ = canal.send(Recado::Json {
+                rotulo: pedido.rotulo,
+                resultado,
+            });
+        });
+    }
+
     fn produtos(&self, sessao: Sessao, canal: Sender<Recado>) {
         let controlador = self.controlador.clone();
         self.tokio.spawn(async move {
@@ -365,6 +463,51 @@ impl Publicador for PublicadorDaApi {
                     foto_no_site: foto_no_site.clone(),
                 },
                 Err(erro) => Recado::Falhou(erro),
+            };
+            let _ = canal.send(recado);
+        });
+    }
+
+    fn original(&self, sessao: Sessao, foto_no_site: String, canal: Sender<Recado>) {
+        let controlador = self.controlador.clone();
+        self.tokio.spawn(async move {
+            let recado = match controlador.original(&sessao, &foto_no_site).await {
+                Ok(bytes) => Recado::Original {
+                    foto_no_site,
+                    bytes: std::sync::Arc::new(bytes),
+                },
+                Err(_) => Recado::OriginalIndisponivel { foto_no_site },
+            };
+            let _ = canal.send(recado);
+        });
+    }
+
+    fn revelar_integral(
+        &self,
+        sessao: Sessao,
+        foto_no_site: String,
+        ajustes: Ajustes,
+        corte: CropSettings,
+        canal: Sender<Recado>,
+    ) {
+        let controlador = self.controlador.clone();
+        let exportador = self.exportador.clone();
+        self.tokio.spawn(async move {
+            let revelado = async {
+                let original = controlador.original(&sessao, &foto_no_site).await?;
+                tokio::task::spawn_blocking(move || {
+                    exportador.renderizar_bytes(&original, &ajustes, &corte, QUALIDADE)
+                })
+                .await
+                .map_err(|e| format!("a revelação não terminou: {e}"))?
+                .map_err(|e| e.to_string())
+            };
+            let recado = match revelado.await {
+                Ok(bytes) => Recado::JpegRevelado {
+                    foto_no_site,
+                    bytes,
+                },
+                Err(erro) => Recado::Falhou(format!("Não foi possível gerar o JPEG: {erro}")),
             };
             let _ = canal.send(recado);
         });
@@ -621,6 +764,11 @@ pub mod mentira {
         pub guardados: Mutex<Vec<(Sender<Recado>, Recado)>>,
         /// `(galeria, mudança)` de cada `PATCH` dos dados do cliente.
         pub atualizacoes: Mutex<Vec<(String, MudancaDaGaleria)>>,
+        /// Os pedidos JSON feitos, na ordem.
+        pub pedidos_json: Mutex<Vec<PedidoJson>>,
+        /// A resposta de cada rótulo; sem resposta, o pedido falha com "sem rede".
+        pub respostas_json:
+            Mutex<std::collections::HashMap<&'static str, Result<serde_json::Value, String>>>,
     }
 
     /// Um JPEG 1×1 cinza, codificado de verdade.
@@ -637,6 +785,21 @@ pub mod mentira {
     }
 
     impl PublicadorDeMentira {
+        pub fn responder_json(
+            &self,
+            rotulo: &'static str,
+            resposta: Result<serde_json::Value, String>,
+        ) {
+            self.respostas_json
+                .lock()
+                .expect("as respostas")
+                .insert(rotulo, resposta);
+        }
+
+        pub fn pedidos_json(&self) -> Vec<PedidoJson> {
+            self.pedidos_json.lock().expect("os pedidos").clone()
+        }
+
         pub fn links(&self) -> Vec<String> {
             self.links.lock().expect("os links").clone()
         }
@@ -733,6 +896,20 @@ pub mod mentira {
     }
 
     impl Publicador for PublicadorDeMentira {
+        fn pedir_json(&self, _sessao: Sessao, pedido: PedidoJson, canal: Sender<Recado>) {
+            let resultado = self
+                .respostas_json
+                .lock()
+                .expect("as respostas")
+                .get(pedido.rotulo)
+                .cloned()
+                .unwrap_or_else(|| Err("sem rede".into()));
+            let rotulo = pedido.rotulo;
+            self.pedidos_json.lock().expect("os pedidos").push(pedido);
+            let recado = Recado::Json { rotulo, resultado };
+            self.responder_ou_guardar(canal, recado);
+        }
+
         fn autorizar(&self, canal: Sender<Recado>) {
             self.autorizacoes.lock().expect("as autorizacoes").push(());
             let _ = canal.send(if !self.recusa_autorizacao {

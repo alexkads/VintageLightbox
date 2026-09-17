@@ -23,10 +23,38 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use adapters::view_models::PhotoViewModel;
+use domain::value_objects::CropSettings;
 use gpui::{
-    actions, div, ease_in_out, img, prelude::*, px, Animation, AnimationExt, Context, FocusHandle,
-    RenderImage, SharedString, Window,
+    actions, div, ease_in_out, img, prelude::*, px, relative, Animation, AnimationExt, Context,
+    FocusHandle, RenderImage, SharedString, Task, Window,
 };
+use infrastructure::transformacao;
+
+use crate::revelacao::processador::{Ajustes, Pedido, Processador};
+
+/// O que a raiz manda revelar na segunda tela: a foto **sem marca** e a
+/// receita dela.
+///
+/// 🔑 **É o desenho do site** (`FotoNaTelaDoCliente`): a imagem é a cópia de
+/// trabalho, sem marca d'água, e a janela do cliente tem o próprio motor, que
+/// aplica os ajustes. Até 2026-09-17 ia a prévia do cache, que para foto do
+/// site é a da galeria — com a marca d'água que o cliente não deveria ver no
+/// balcão (dono: *"mostrou com marca d'agua"*).
+pub struct ParaRevelar {
+    pub foto: PhotoViewModel,
+    pub posicao: Option<(usize, usize)>,
+    /// Os pixels sem marca, em RGBA8. `Arc` porque a identidade dele diz ao
+    /// motor se a textura precisa subir de novo.
+    pub pixels: Arc<Vec<u8>>,
+    pub largura: u32,
+    pub altura: u32,
+    pub ajustes: Ajustes,
+    pub corte: CropSettings,
+}
+
+/// O pedido no motor: o id dele, a foto, onde ela está na sequência e o
+/// enquadramento a aplicar no resultado.
+type EmRevelacao = (u64, PhotoViewModel, Option<(usize, usize)>, CropSettings);
 
 /// Quanto dura o cruzamento entre uma foto e a seguinte.
 ///
@@ -98,6 +126,11 @@ pub struct Cliente {
     /// Onde a foto está na sequência do operador, e de quantas. Ver `info`.
     posicao: Option<(usize, usize)>,
     mostrar_info: bool,
+    /// O motor desta janela, aberto na primeira foto.
+    processador: Option<Processador>,
+    /// O pedido que está no motor, e o que fazer com o resultado.
+    revelando: Option<EmRevelacao>,
+    _colheita: Option<Task<()>>,
     /// A janela precisa de foco próprio para `Esc` e `I` chegarem — a mesma
     /// lição que custou dois commits na Revelação: `track_focus` rastreia o
     /// foco, não o concede.
@@ -118,8 +151,67 @@ impl Cliente {
             // Nasce ligado, como no legado — quem mostra ao cliente costuma
             // querer o nome do arquivo à vista, e desligar é uma tecla.
             mostrar_info: true,
+            processador: None,
+            revelando: None,
+            _colheita: None,
             foco,
         }
+    }
+
+    /// Revela esta foto com a receita dela e a mostra quando o motor responder.
+    ///
+    /// 🔑 **A foto anterior fica na tela até a nova estar pronta**, e só então
+    /// cruza: nunca aparece um quadro preto nem a foto crua no meio.
+    pub fn revelar(&mut self, pedido: ParaRevelar, cx: &mut Context<Self>) {
+        let processador = self.processador.get_or_insert_with(Processador::novo);
+        let id = processador.proximo_id();
+        processador.pedir(Pedido {
+            id,
+            pixels: pedido.pixels,
+            largura: pedido.largura,
+            altura: pedido.altura,
+            ajustes: pedido.ajustes,
+            corte: transformacao::corte(&pedido.corte),
+        });
+        self.revelando = Some((id, pedido.foto, pedido.posicao, pedido.corte));
+        if self._colheita.is_none() {
+            self._colheita = Some(cx.spawn(async move |tela, cx| loop {
+                cx.background_executor()
+                    .timer(Duration::from_millis(16))
+                    .await;
+                let Ok(continua) = tela.update(cx, |tela, cx| tela.colher(cx)) else {
+                    break;
+                };
+                if !continua {
+                    break;
+                }
+            }));
+        }
+    }
+
+    /// Pega o resultado mais novo do motor. Devolve se ainda há o que esperar.
+    fn colher(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(processador) = self.processador.as_ref() else {
+            self._colheita = None;
+            return false;
+        };
+        if let Some(resultado) = processador.colher() {
+            if let Some((id, foto, posicao, corte)) = self.revelando.take() {
+                if id == resultado.id {
+                    let exibida = transformacao::aplicar(&resultado.imagem, &corte, true);
+                    let imagem = crate::imagem::para_gpui(exibida);
+                    self.mostrar(Some(foto), Some(imagem), posicao, cx);
+                } else {
+                    // Chegou um resultado velho: o pedido novo continua na fila.
+                    self.revelando = Some((id, foto, posicao, corte));
+                }
+            }
+        }
+        if self.revelando.is_none() {
+            self._colheita = None;
+            return false;
+        }
+        true
     }
 
     /// Troca a foto que está na tela — **uma atravessando a outra**.
@@ -169,9 +261,14 @@ impl Cliente {
         }
     }
 
-    /// O nome da foto que está na tela — para a raiz poder afirmar sobre ela.
+    /// O nome da foto que está na tela — ou que o motor está revelando para
+    /// entrar nela. É para a raiz poder afirmar sobre ela.
     pub fn foto_mostrada(&self) -> Option<String> {
-        self.foto.as_ref().map(|foto| foto.name.clone())
+        self.revelando
+            .as_ref()
+            .map(|(_, foto, _, _)| foto)
+            .or(self.foto.as_ref())
+            .map(|foto| foto.name.clone())
     }
 
     pub fn mostrando_info(&self) -> bool {
@@ -261,14 +358,23 @@ impl Cliente {
         div()
             .absolute()
             .size_full()
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(img(imagem).max_w_full().max_h_full())
+            // A foto ocupa a tela inteira, sem distorcer.
+            .child(img(imagem).size_full().object_fit(gpui::ObjectFit::Contain))
             .with_animation(
                 (id, troca),
                 Animation::new(CRUZAMENTO).with_easing(ease_in_out),
-                move |camada, delta| camada.opacity(if saindo { 1.0 - delta } else { delta }),
+                move |camada, delta| {
+                    // ✨ O passo à frente do site: a que entra chega de 1,03 a
+                    // 1; a que sai fica onde está e some.
+                    let escala = if saindo { 1.0 } else { 1.03 - 0.03 * delta };
+                    let sobra = (1.0 - escala) / 2.0;
+                    camada
+                        .top(relative(sobra))
+                        .left(relative(sobra))
+                        .w(relative(escala))
+                        .h(relative(escala))
+                        .opacity(if saindo { 1.0 - delta } else { delta })
+                },
             )
     }
 }
@@ -297,10 +403,8 @@ impl Render for Cliente {
             // regra de paridade entre as duas plataformas). A que sai some
             // enquanto a que entra aparece, no mesmo meio segundo.
             //
-            // ⚠️ **Sem o passo à frente que a web tem** (a escala de 1,03 a 1):
-            // o GPUI 0.2.2 só oferece `with_transformation` em `svg`, e
-            // `div`/`img` não têm escala. O cruzamento — que é o que tira o
-            // lampejo preto do meio — sai igual nas duas.
+            // O passo à frente da web (a escala de 1,03 a 1) sai pelo tamanho
+            // da camada: o GPUI 0.2.2 não tem escala em `div`/`img`.
             .children(
                 self.saindo
                     .clone()

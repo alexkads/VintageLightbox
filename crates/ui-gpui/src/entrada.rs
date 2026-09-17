@@ -41,8 +41,7 @@ use std::time::Duration;
 
 use domain::services::pos_venda::Sessao;
 use gpui::{div, prelude::*, px, Context, EventEmitter, SharedString, Task, Window};
-use gpui_component::button::{Button, ButtonVariants};
-use gpui_component::{ActiveTheme, Disableable, Sizable};
+use gpui_component::ActiveTheme;
 
 use crate::pos_venda::config::Configuracao;
 use crate::pos_venda::porta::{Publicador, Recado};
@@ -179,116 +178,300 @@ impl Entrada {
     }
 }
 
+/// A capa do estúdio, com as cores e as medidas de
+/// `frontend/src/components/marca/capa-do-estudio.tsx` (dono, 2026-09-16: a
+/// entrada *"tem que ser muito linda com uma imagem vintage de fundo"*). É a
+/// mesma capa da entrada do app Tauri e de `/autorizar-app`.
+///
+/// 🔑 **Nada vem da rede.** A foto (já com o filtro sépia do site aplicado,
+/// porque o GPUI não tem filtro de imagem) e o selo estão embutidos
+/// (`imagens/`), e as serifadas são as que o macOS já tem.
+mod capa {
+    use gpui::{rgb, rgba, Hsla};
+
+    pub const FUNDO: u32 = 0x140d09;
+    pub const TEXTO: u32 = 0xf3e6cf;
+    pub const OURO: u32 = 0xd9a441;
+    pub const TITULO: u32 = 0xecc57c;
+    pub const PARAGRAFO: u32 = 0xeadcc3;
+    pub const BOTAO_CIMA: u32 = 0xf0c86a;
+    pub const BOTAO_BAIXO: u32 = 0xc8912f;
+    pub const SOBRE_O_BOTAO: u32 = 0x2a1a0e;
+    /// `'Didot', 'Bodoni 72', …`: a primeira que o sistema tiver.
+    pub const SERIFADA: &str = "Didot";
+
+    pub fn cor(c: u32) -> Hsla {
+        rgb(c).into()
+    }
+
+    /// O fundo da capa com transparência (`rgba(20,12,8,a)`).
+    pub fn veu(alfa: f32) -> Hsla {
+        let a = (alfa.clamp(0., 1.) * 255.).round() as u32;
+        rgba(0x140c0800 | a).into()
+    }
+}
+
+impl Entrada {
+    /// Uma faixa do véu horizontal da capa, de `de` a `ate` (0–1 da largura).
+    fn faixa(de: f32, ate: f32, alfa_de: f32, alfa_ate: f32) -> gpui::Div {
+        div()
+            .absolute()
+            .top_0()
+            .bottom_0()
+            .left(gpui::relative(de))
+            .w(gpui::relative(ate - de))
+            .bg(gpui::linear_gradient(
+                90.,
+                gpui::linear_color_stop(capa::veu(alfa_de), 0.),
+                gpui::linear_color_stop(capa::veu(alfa_ate), 1.),
+            ))
+    }
+}
+
 impl Render for Entrada {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .flex()
-            .flex_col()
-            .items_center()
-            .justify_center()
-            .size_full()
-            .bg(cx.theme().background)
-            .text_color(cx.theme().foreground)
+        use capa::cor;
+        use gpui::{
+            img, linear_color_stop, linear_gradient, relative, Animation, AnimationExt, FontWeight,
+            ObjectFit, StyledImage,
+        };
+        use gpui_component::{h_flex, v_flex, Icon};
+
+        use crate::recursos::Icone;
+
+        let rotulo = if self.no_navegador {
+            "Confirme no navegador…"
+        } else if self.entrando {
+            "Verificando…"
+        } else {
+            "Entrar com a conta RecordarFotos"
+        };
+        let dica = if self.no_navegador {
+            "Confirme a entrada na janela que abriu no navegador e volte para cá.".to_string()
+        } else {
+            format!(
+                "O navegador abre para você confirmar a conta em {}. Depois é só voltar para cá.",
+                self.config.site().trim_start_matches("https://")
+            )
+        };
+        let ocupado = self.entrando;
+
+        let botao = h_flex()
+            .id("entrada-entrar")
+            .h(px(56.))
+            .px(px(32.))
+            .gap(px(12.))
+            .rounded_full()
+            .bg(linear_gradient(
+                180.,
+                linear_color_stop(cor(capa::BOTAO_CIMA), 0.),
+                linear_color_stop(cor(capa::BOTAO_BAIXO), 1.),
+            ))
+            .shadow_lg()
+            .text_color(cor(capa::SOBRE_O_BOTAO))
+            .text_size(px(16.))
+            .font_weight(FontWeight::SEMIBOLD)
+            .when(!ocupado, |b| {
+                b.cursor_pointer()
+                    .hover(|s| s.opacity(0.92))
+                    .on_click(cx.listener(|tela, _ev, _window, cx| tela.entrar(cx)))
+            })
+            .when(ocupado, |b| {
+                b.cursor_default().child(
+                    Icon::new(Icone::LoaderCircle).size(px(18.)).with_animation(
+                        "entrada-girando",
+                        Animation::new(std::time::Duration::from_secs(1)).repeat(),
+                        |icone, delta| {
+                            icone.transform(gpui::Transformation::rotate(gpui::percentage(delta)))
+                        },
+                    ),
+                )
+            })
+            .child(rotulo)
+            .when(!ocupado, |b| {
+                b.child(Icon::new(Icone::ArrowRight).size(px(20.)))
+            });
+
+        let conteudo = v_flex()
+            .max_w(px(576.))
+            .child(
+                img("imagens/selo.png")
+                    .w(px(208.))
+                    .h(px(167.))
+                    .object_fit(ObjectFit::Contain)
+                    .mb(px(32.)),
+            )
+            .child(
+                h_flex()
+                    .mb(px(16.))
+                    .gap(px(12.))
+                    .child(div().w(px(40.)).h(px(1.)).bg(linear_gradient(
+                        90.,
+                        linear_color_stop(capa::veu(0.), 0.),
+                        linear_color_stop(cor(capa::OURO), 1.),
+                    )))
+                    .child(
+                        div()
+                            .text_size(px(11.))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(cor(capa::OURO))
+                            .child("R E V E L A Ç Ã O   ·   C L A S S I F I C A Ç Ã O   ·   B A L C Ã O"),
+                    ),
+            )
             .child(
                 div()
-                    .flex()
-                    .flex_col()
+                    .font_family(capa::SERIFADA)
+                    .text_size(px(72.))
+                    .line_height(relative(1.05))
+                    .font_weight(FontWeight::BOLD)
+                    .text_color(cor(capa::TITULO))
+                    .child("Vintage")
+                    .child("Lightbox"),
+            )
+            .child(
+                h_flex()
+                    .my(px(28.))
                     .gap(px(12.))
-                    .w(px(360.))
-                    .p(px(24.))
-                    .rounded(px(10.))
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    // 🔑 O cartão é um degrau acima do fundo, e não um retângulo
-                    // desenhado só com borda. É a primeira tela do app: sem
-                    // elevação nenhuma, a janela abre parecendo uma caixa de
-                    // diálogo que ficou pela metade.
-                    .bg(cx.theme().popover)
+                    .child(div().w(px(64.)).h(px(1.)).bg(cor(capa::OURO).opacity(0.6)))
                     .child(
                         div()
-                            .flex()
-                            .items_center()
-                            .gap(px(8.))
-                            // A marca: o âmbar da caixa de luz, o mesmo que
-                            // marca sessão e balcão no resto do app.
-                            .child(
-                                div()
-                                    .w(px(3.))
-                                    .h(px(18.))
-                                    .rounded(px(2.))
-                                    .bg(crate::tema::cores::quente()),
-                            )
-                            .child(div().text_lg().child("VintageLightbox")),
+                            .text_size(px(8.))
+                            .text_color(cor(capa::OURO))
+                            .child("◆"),
                     )
+                    .child(div().w(px(64.)).h(px(1.)).bg(cor(capa::OURO).opacity(0.6))),
+            )
+            .child(
+                div()
+                    .max_w(px(448.))
+                    .font_family(capa::SERIFADA)
+                    .text_size(px(18.))
+                    .line_height(relative(1.6))
+                    .text_color(cor(capa::PARAGRAFO).opacity(0.9))
+                    .child(
+                        "Do cartão da câmera à galeria do cliente: as fotos do ensaio reveladas, \
+                         escolhidas e vendidas ali mesmo, no balcão.",
+                    ),
+            )
+            .child(
+                v_flex()
+                    .mt(px(40.))
+                    .items_start()
+                    .child(botao)
                     .child(
                         div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(if self.no_navegador {
-                                "Confirme no navegador que acabou de abrir. \
-                                 Esta janela continua sozinha quando você voltar."
-                                    .to_string()
-                            } else {
-                                // O endereço mostrado é o do **site**, não o da
-                                // API: é nele que o operador vai entrar, e
-                                // anunciar a API aqui foi o que fez o dono ler
-                                // "entrar em http://localhost:8080" numa tela
-                                // que ia abrir produção (6/set/2026).
-                                format!(
-                                    "O navegador vai abrir para você entrar em {}. \
-                                     A senha não passa por aqui.",
-                                    self.config.site()
-                                )
-                            }),
+                            .mt(px(16.))
+                            .max_w(px(448.))
+                            .text_sm()
+                            .text_color(cor(capa::PARAGRAFO).opacity(0.6))
+                            .child(dica),
                     )
-                    .when_some(self.erro.clone(), |cartao, erro| {
-                        cartao.child(
-                            // ⚠️ Fundo, e não só letra vermelha: o erro aparece
-                            // entre dois campos e uma frase de aviso, todos em
-                            // `text_xs`. Sem uma faixa própria ele é mais uma
-                            // linha pequena no meio de outras três.
+                    .when_some(self.erro.clone(), |d, erro| {
+                        d.child(
                             div()
-                                .px(px(8.))
-                                .py(px(6.))
-                                .rounded(cx.theme().radius)
-                                .bg(cx.theme().danger.opacity(0.15))
-                                .border_l_2()
-                                .border_color(cx.theme().danger)
-                                .text_xs()
-                                .text_color(cx.theme().foreground)
+                                .mt(px(16.))
+                                .max_w(px(448.))
+                                .px(px(12.))
+                                .py(px(8.))
+                                .rounded(px(8.))
+                                .bg(cx.theme().danger.opacity(0.2))
+                                .border_1()
+                                .border_color(cx.theme().danger.opacity(0.6))
+                                .text_sm()
+                                .text_color(cor(capa::TEXTO))
                                 .child(erro),
                         )
-                    })
+                    }),
+            )
+            .with_animation(
+                "entrada-surgir",
+                Animation::new(std::time::Duration::from_millis(900))
+                    .with_easing(gpui::ease_out_quint()),
+                |conteudo, delta| conteudo.opacity(delta).mt(px(14. * (1. - delta))),
+            );
+
+        div()
+            .relative()
+            .size_full()
+            .overflow_hidden()
+            .bg(cor(capa::FUNDO))
+            .text_color(cor(capa::TEXTO))
+            // A foto ocupa a direita e some em direção ao texto.
+            .child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .bottom_0()
+                    .right_0()
+                    .w(relative(0.78))
                     .child(
-                        Button::new("entrada-entrar")
-                            .label(if self.no_navegador {
-                                "Aguardando o navegador…"
-                            } else if self.entrando {
-                                "Verificando…"
-                            } else {
-                                "Entrar pelo navegador"
-                            })
-                            .small()
-                            .primary()
-                            .disabled(self.entrando)
-                            .on_click(cx.listener(|tela, _ev, _window, cx| tela.entrar(cx))),
-                    )
-                    // 🚨 A frase diz por que não há saída, e não é decoração:
-                    // sem ela a tela parece um login que alguém esqueceu de
-                    // deixar pular. O app trabalha **dentro** de um ensaio do
-                    // site — sem conta não há ensaio a que as fotos pertençam.
+                        img("imagens/capa-canela.jpeg")
+                            .size_full()
+                            .object_fit(ObjectFit::Cover),
+                    ),
+            )
+            // A máscara do site (transparente → 60% em 22% → cheia em 45% da
+            // foto), feita com o fundo por cima, que dá o mesmo resultado.
+            .child(Self::faixa(0.22, 0.22 + 0.78 * 0.22, 1., 0.4))
+            .child(Self::faixa(0.22 + 0.78 * 0.22, 0.22 + 0.78 * 0.45, 0.4, 0.))
+            // O véu que escurece o lado do texto (`linear-gradient(90deg, …)`).
+            .child(Self::faixa(0., 0.32, 0.92, 0.78))
+            .child(Self::faixa(0.32, 0.50, 0.78, 0.25))
+            .child(Self::faixa(0.50, 0.72, 0.25, 0.))
+            .child(Self::faixa(0.72, 1.0, 0., 0.3))
+            // O fecho de cima e de baixo, no lugar do gradiente radial.
+            .child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .right_0()
+                    .h(relative(0.3))
+                    .bg(linear_gradient(
+                        180.,
+                        linear_color_stop(capa::veu(0.55), 0.),
+                        linear_color_stop(capa::veu(0.), 1.),
+                    )),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .bottom_0()
+                    .left_0()
+                    .right_0()
+                    .h(relative(0.3))
+                    .bg(linear_gradient(
+                        0.,
+                        linear_color_stop(capa::veu(0.7), 0.),
+                        linear_color_stop(capa::veu(0.), 1.),
+                    )),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .inset_0()
+                    .flex()
+                    .flex_col()
+                    .justify_center()
+                    .px(px(96.))
+                    .py(px(48.))
+                    .child(conteudo),
+            )
+            .child(
+                h_flex()
+                    .absolute()
+                    .bottom(px(24.))
+                    .left(px(96.))
+                    .right(px(96.))
+                    .justify_between()
+                    .text_xs()
+                    .text_color(cor(capa::PARAGRAFO).opacity(0.45))
+                    .child("G R A M A D O   ·   C A N E L A")
                     .child(
                         div()
-                            .pt(px(10.))
-                            .border_t_1()
-                            .border_color(cx.theme().border)
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(
-                                "Importar, revelar, escolher com o cliente e entregar \
-                                 acontecem dentro de um ensaio do site. Trabalhar sem rede \
-                                 vai existir por sincronização — ainda não existe.",
-                            ),
+                            .font_family(capa::SERIFADA)
+                            .italic()
+                            .child("Ensaio no estúdio de Canela"),
                     ),
             )
     }

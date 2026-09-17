@@ -643,12 +643,23 @@ fn da_lista_ao_revelar_dentro_da_sessao(cx: &mut TestAppContext) {
             );
             assert_eq!(
                 app.tela(),
+                Tela::Revelacao,
+                "fica enquanto o envio não responde, como o `salvarESair` do site"
+            );
+        })
+        .expect("a janela deve estar aberta");
+    cx.run_until_parked();
+    estudio
+        .janela
+        .update(cx, |app, _window, cx| {
+            app.colher_sincronia(cx);
+            assert_eq!(
+                app.tela(),
                 Tela::Sessao,
                 "volta para a sessão, como no site — e não há modal nenhum no caminho"
             );
         })
         .expect("a janela deve estar aberta");
-    cx.run_until_parked();
 
     let reveladas = estudio.publicador.reveladas();
     assert_eq!(reveladas.len(), 1, "uma revelação salva: {reveladas:?}");

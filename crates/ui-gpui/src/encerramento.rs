@@ -3,9 +3,10 @@
 //! No macOS, fechar a última janela **não** encerra o processo: o ícone fica na
 //! Dock e o app segue vivo. Num editor com documentos isso faz sentido — clicar
 //! no ícone reabre a janela. Aqui não: a janela principal é o app inteiro, não
-//! há menu de aplicativo (nunca chamamos `set_menus`), e sem ela sobra um ícone
-//! que não responde a nada e um Cmd+Q que não existe. Quem fechou a janela
-//! precisou matar o processo — foi o defeito relatado em 7/set/2026.
+//! havia menu de aplicativo (até 2026-09-17 nunca chamamos `set_menus`; hoje há
+//! o de `menu.rs`), e sem ela sobrava um ícone que não respondia a nada. Quem
+//! fechou a janela precisou matar o processo — foi o defeito relatado em
+//! 7/set/2026. O critério continua: sem a janela principal, o app acaba.
 //!
 //! A segunda tela (`cliente`) não conta como "o app está aberto": ela é a
 //! apresentação do que está na janela principal, em tela cheia, sem barra de

@@ -87,6 +87,213 @@ pub fn curva(ajustes: &Ajustes) -> [f32; PONTOS] {
     saida
 }
 
+// ------------------------------------------------------- a curva por ponto
+
+/// Quantos pontos a curva por ponto tem, por canal.
+pub const PONTOS_DA_CURVA: usize = 9;
+
+/// A curva que devolve a foto como entrou: `y = x` nos nove x fixos.
+pub fn curva_neutra() -> [f32; PONTOS_DA_CURVA] {
+    std::array::from_fn(|i| i as f32 * 255.0 / 8.0)
+}
+
+/// Os quatro canais, na ordem em que a tela os oferece — `CANAIS_DA_CURVA`
+/// do site.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Canal {
+    Rgb,
+    Vermelho,
+    Verde,
+    Azul,
+}
+
+impl Canal {
+    pub const TODOS: [Canal; 4] = [Canal::Rgb, Canal::Vermelho, Canal::Verde, Canal::Azul];
+
+    pub fn rotulo(self) -> &'static str {
+        match self {
+            Canal::Rgb => "RGB",
+            Canal::Vermelho => "Vermelho",
+            Canal::Verde => "Verde",
+            Canal::Azul => "Azul",
+        }
+    }
+
+    /// A cor do traço: o tom 400 do Tailwind nos três de cor, como no site.
+    /// `None` é o RGB, que segue a cor do texto do tema.
+    pub fn cor(self) -> Option<u32> {
+        match self {
+            Canal::Rgb => None,
+            Canal::Vermelho => Some(0xf87171),
+            Canal::Verde => Some(0x4ade80),
+            Canal::Azul => Some(0x60a5fa),
+        }
+    }
+
+    /// As nove alturas deste canal.
+    pub fn alturas(self, a: &Ajustes) -> [f32; PONTOS_DA_CURVA] {
+        match self {
+            Canal::Rgb => [
+                a.curva_m0, a.curva_m1, a.curva_m2, a.curva_m3, a.curva_m4, a.curva_m5, a.curva_m6,
+                a.curva_m7, a.curva_m8,
+            ],
+            Canal::Vermelho => [
+                a.curva_r0, a.curva_r1, a.curva_r2, a.curva_r3, a.curva_r4, a.curva_r5, a.curva_r6,
+                a.curva_r7, a.curva_r8,
+            ],
+            Canal::Verde => [
+                a.curva_g0, a.curva_g1, a.curva_g2, a.curva_g3, a.curva_g4, a.curva_g5, a.curva_g6,
+                a.curva_g7, a.curva_g8,
+            ],
+            Canal::Azul => [
+                a.curva_b0, a.curva_b1, a.curva_b2, a.curva_b3, a.curva_b4, a.curva_b5, a.curva_b6,
+                a.curva_b7, a.curva_b8,
+            ],
+        }
+    }
+
+    /// Escreve a altura de um ponto.
+    pub fn definir(self, a: &mut Ajustes, ponto: usize, valor: f32) {
+        let campo = match (self, ponto) {
+            (Canal::Rgb, 0) => &mut a.curva_m0,
+            (Canal::Rgb, 1) => &mut a.curva_m1,
+            (Canal::Rgb, 2) => &mut a.curva_m2,
+            (Canal::Rgb, 3) => &mut a.curva_m3,
+            (Canal::Rgb, 4) => &mut a.curva_m4,
+            (Canal::Rgb, 5) => &mut a.curva_m5,
+            (Canal::Rgb, 6) => &mut a.curva_m6,
+            (Canal::Rgb, 7) => &mut a.curva_m7,
+            (Canal::Rgb, 8) => &mut a.curva_m8,
+            (Canal::Vermelho, 0) => &mut a.curva_r0,
+            (Canal::Vermelho, 1) => &mut a.curva_r1,
+            (Canal::Vermelho, 2) => &mut a.curva_r2,
+            (Canal::Vermelho, 3) => &mut a.curva_r3,
+            (Canal::Vermelho, 4) => &mut a.curva_r4,
+            (Canal::Vermelho, 5) => &mut a.curva_r5,
+            (Canal::Vermelho, 6) => &mut a.curva_r6,
+            (Canal::Vermelho, 7) => &mut a.curva_r7,
+            (Canal::Vermelho, 8) => &mut a.curva_r8,
+            (Canal::Verde, 0) => &mut a.curva_g0,
+            (Canal::Verde, 1) => &mut a.curva_g1,
+            (Canal::Verde, 2) => &mut a.curva_g2,
+            (Canal::Verde, 3) => &mut a.curva_g3,
+            (Canal::Verde, 4) => &mut a.curva_g4,
+            (Canal::Verde, 5) => &mut a.curva_g5,
+            (Canal::Verde, 6) => &mut a.curva_g6,
+            (Canal::Verde, 7) => &mut a.curva_g7,
+            (Canal::Verde, 8) => &mut a.curva_g8,
+            (Canal::Azul, 0) => &mut a.curva_b0,
+            (Canal::Azul, 1) => &mut a.curva_b1,
+            (Canal::Azul, 2) => &mut a.curva_b2,
+            (Canal::Azul, 3) => &mut a.curva_b3,
+            (Canal::Azul, 4) => &mut a.curva_b4,
+            (Canal::Azul, 5) => &mut a.curva_b5,
+            (Canal::Azul, 6) => &mut a.curva_b6,
+            (Canal::Azul, 7) => &mut a.curva_b7,
+            (Canal::Azul, 8) => &mut a.curva_b8,
+            _ => return,
+        };
+        *campo = valor;
+    }
+}
+
+/// Esta curva devolve a foto como ela entrou? A tolerância do shader
+/// (`curva_e_neutra`) e do site (`curvaEhNeutra`).
+pub fn curva_eh_neutra(alturas: &[f32; PONTOS_DA_CURVA]) -> bool {
+    alturas
+        .iter()
+        .zip(curva_neutra())
+        .all(|(v, n)| (v - n).abs() < 0.01)
+}
+
+/// A altura da curva em `x` (0–255).
+///
+/// 🔑 **É a tradução linha a linha de `curva_por_ponto` do `corpo.wgsl`** —
+/// Hermite monótono (Fritsch–Carlson), igual a `avaliarCurva` do site. Um
+/// traço na tela diferente da conta do motor daria ao operador uma curva
+/// olhando e outra no papel.
+pub fn avaliar_curva(alturas: &[f32; PONTOS_DA_CURVA], x: f32) -> f32 {
+    let ultimo = PONTOS_DA_CURVA - 1;
+    let t0 = x.clamp(0.0, 255.0) / 255.0 * ultimo as f32;
+    let i = (t0.floor() as usize).min(ultimo - 1);
+    let t = t0 - i as f32;
+
+    let y0 = alturas[i];
+    let y1 = alturas[i + 1];
+    let d = y1 - y0;
+    let d_anterior = if i > 0 { y0 - alturas[i - 1] } else { d };
+    let d_proximo = if i < ultimo - 1 {
+        alturas[i + 2] - y1
+    } else {
+        d
+    };
+
+    let m0 = if d_anterior * d > 0.0 {
+        2.0 * d_anterior * d / (d_anterior + d)
+    } else {
+        0.0
+    };
+    let m1 = if d * d_proximo > 0.0 {
+        2.0 * d * d_proximo / (d + d_proximo)
+    } else {
+        0.0
+    };
+
+    let t2 = t * t;
+    let t3 = t2 * t;
+    let y = (2.0 * t3 - 3.0 * t2 + 1.0) * y0
+        + (t3 - 2.0 * t2 + t) * m0
+        + (-2.0 * t3 + 3.0 * t2) * y1
+        + (t3 - t2) * m1;
+    y.clamp(0.0, 255.0)
+}
+
+#[cfg(test)]
+mod curva_por_ponto {
+    use super::*;
+
+    #[test]
+    fn o_neutro_e_a_identidade() {
+        let neutra = curva_neutra();
+        assert!(curva_eh_neutra(&neutra));
+        for x in 0..=255 {
+            let y = avaliar_curva(&neutra, x as f32);
+            assert!((y - x as f32).abs() < 0.01, "{x} saiu {y}");
+        }
+        for canal in Canal::TODOS {
+            assert_eq!(canal.alturas(&Ajustes::default()), neutra);
+        }
+    }
+
+    /// 🚨 Monótono: a curva nunca sai do intervalo entre dois nós.
+    #[test]
+    fn nao_passa_por_fora_dos_nos() {
+        let alturas = [0.0, 12.0, 40.0, 80.0, 81.0, 180.0, 215.0, 240.0, 255.0];
+        for x in 0..=255 {
+            let t0 = x as f32 / 255.0 * 8.0;
+            let i = (t0.floor() as usize).min(7);
+            let (a, b) = (alturas[i], alturas[i + 1]);
+            let y = avaliar_curva(&alturas, x as f32);
+            assert!(y >= a.min(b) - 1e-3 && y <= a.max(b) + 1e-3, "{x}: {y}");
+        }
+    }
+
+    #[test]
+    fn cada_canal_escreve_nos_seus_nove_campos() {
+        for canal in Canal::TODOS {
+            let mut a = Ajustes::default();
+            for p in 0..PONTOS_DA_CURVA {
+                canal.definir(&mut a, p, 100.0 + p as f32);
+            }
+            let esperado: [f32; 9] = std::array::from_fn(|p| 100.0 + p as f32);
+            assert_eq!(canal.alturas(&a), esperado, "{}", canal.rotulo());
+            for outro in Canal::TODOS.into_iter().filter(|c| *c != canal) {
+                assert!(curva_eh_neutra(&outro.alturas(&a)));
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;

@@ -334,6 +334,13 @@ macro_rules! com_os_campos {
 /// é o que sobrevive a um `NULL` solto no banco, que nenhum dos dois apps sabe
 /// produzir hoje e o SQLite aceita sem reclamar.
 pub fn da_foto(foto: &PhotoViewModel) -> Ajustes {
+    // 🔑 A foto do site traz a receita inteira, com os módulos que as colunas
+    // não têm; quando ela existe, é ela que vale.
+    if let Some(completos) = foto.ajustes_completos.as_deref() {
+        if let Some(ajustes) = Ajustes::de_vetor(completos) {
+            return ajustes;
+        }
+    }
     let mut ajustes = Ajustes::default();
 
     macro_rules! ler {
@@ -362,6 +369,10 @@ pub fn na_foto(foto: &mut PhotoViewModel, ajustes: Ajustes, corte: Corte) {
         };
     }
     com_os_campos!(escrever);
+    // A foto do site guarda também a receita inteira (ver `da_foto`).
+    if foto.ajustes_completos.is_some() || id_no_site(&foto.id).is_some() {
+        foto.ajustes_completos = Some(ajustes.como_vetor().to_vec());
+    }
 
     foto.edit_crop_x = corte.x;
     foto.edit_crop_y = corte.y;
@@ -986,4 +997,32 @@ mod testes {
         "curva_",
         "dt_",
     ];
+
+    /// 🚨 A receita do site tem os módulos novos (`dt_*`), que as colunas
+    /// `edit_*` não têm: eles precisam atravessar a grade e voltar inteiros.
+    #[test]
+    fn os_modulos_novos_da_foto_do_site_nao_se_perdem() {
+        let json = serde_json::json!({
+            "exposure": 0.25,
+            "dt_cb_ativo": 1,
+            "dt_cb_shadows_h": 71.5,
+            "corte_largura": 0.89
+        });
+        let (ajustes, corte) = de_json(&json);
+        let mut foto = PhotoViewModel {
+            id: format!("{PREFIXO_DO_SITE}55d3"),
+            ..Default::default()
+        };
+        na_foto(&mut foto, ajustes, corte);
+        let lidos = da_foto(&foto);
+        assert_eq!(lidos.dt_cb_ativo, 1.0);
+        assert_eq!(lidos.dt_cb_shadows_h, 71.5);
+        assert_eq!(lidos.exposure, 0.25);
+        assert_eq!(corte_da_foto(&foto).largura, Some(0.89));
+
+        // A foto do disco continua pelas colunas.
+        let mut local = PhotoViewModel::default();
+        na_foto(&mut local, ajustes, corte);
+        assert!(local.ajustes_completos.is_none());
+    }
 }

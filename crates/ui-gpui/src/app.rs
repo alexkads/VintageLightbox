@@ -1,8 +1,25 @@
-//! A raiz: a barra de navegação e qual tela está embaixo dela.
+//! A raiz: a moldura do painel (menu lateral e cabeçalho) e qual tela está
+//! dentro dela.
 //!
 //! Nasceu com a Revelação, porque até a fase 1 só havia uma tela e a janela
 //! podia abrir a Biblioteca direto. A partir de duas, alguém precisa saber qual
 //! está no ar — e esse alguém não pode ser nenhuma das duas.
+//!
+//! 🎨 **A moldura é a do dashboard do site** desde 2026-09-17 (`painel.rs`), a
+//! mesma que o app Tauri mostra: até ali havia uma barra de botões no topo
+//! (Sessões, Revelação, Impressão, Balcão, Segunda tela, Configurações), que o
+//! site nunca teve. Os gestos dela continuam, cada um no lugar em que o site o
+//! tem: a revelação e a tela do cliente na barra da galeria, o espaço do cache
+//! no cabeçalho da lista.
+
+mod atalhos_da_revelacao;
+mod resolucao_cheia;
+mod painel;
+mod roteiro;
+/// O que a raiz conta à bandeja (`crate::segundo_plano`).
+mod segundo_plano;
+
+pub use painel::Conta;
 
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
@@ -10,9 +27,9 @@ use std::sync::Arc;
 use adapters::view_models::PhotoViewModel;
 use domain::entities::Preset;
 use domain::value_objects::CropSettings;
-use gpui::{actions, div, prelude::*, px, Context, Entity, FocusHandle, SharedString, Window};
+use gpui::{actions, div, prelude::*, px, Context, Entity, FocusHandle, Window};
 use gpui_component::button::{Button, ButtonVariants};
-use gpui_component::{ActiveTheme, Disableable, Selectable, Sizable};
+use gpui_component::{ActiveTheme, Sizable};
 use infrastructure::cache::preview_manager::PreviewManager;
 
 use crate::atualizacao::faixa::{self, Pedido as PedidoDeAtualizacao};
@@ -23,7 +40,8 @@ use crate::biblioteca::colecoes::Colecoes;
 use crate::biblioteca::marcacao::Marcador;
 use crate::biblioteca::tela::Biblioteca;
 use crate::biblioteca::tela::Classificou;
-use crate::cliente::{monitor_do_cliente, Cliente};
+use crate::caixa::tela::{Caixa, PedidoDoCaixa};
+use crate::cliente::{monitor_do_cliente, Cliente, ParaRevelar};
 use crate::configuracoes::Configuracoes;
 use crate::entrada::{Entrada, Entrou};
 use crate::exportacao::porta::Exportador;
@@ -41,6 +59,7 @@ use crate::revelacao::sincronizacao;
 use crate::revelacao::tela::{PedidoDaRevelacao, Revelacao};
 use crate::sessoes::arquivos::SeletorDeFotos;
 use crate::sessoes::detalhe::{Detalhe, FotoARevelar, Pedido as DetalhePedido};
+use crate::sessoes::retencao::{PedidoDaRetencao, Retencao};
 use crate::sessoes::tela::{Escolhida, Sessoes};
 use crate::tema;
 
@@ -128,7 +147,9 @@ actions!(
         Desmarcar,
         AlternarComprada,
         SelecionarTudo,
-        LimparSelecao
+        LimparSelecao,
+        // `Cmd/Ctrl+B`, o atalho do menu lateral do site.
+        AlternarMenuLateral
     ]
 );
 
@@ -194,8 +215,7 @@ pub fn init(cx: &mut gpui::App) {
         gpui::KeyBinding::new("backspace", ApagarFotos, Some(SEM_CAMPO_DE_TEXTO)),
         // `R` de "recortar", a mesma tecla do legado (`keyboard.rs`).
         gpui::KeyBinding::new("r", AlternarCorte, Some(SEM_CAMPO_DE_TEXTO)),
-        // `\` mostra o antes/depois, como no legado.
-        gpui::KeyBinding::new("\\", AlternarOriginal, Some(SEM_CAMPO_DE_TEXTO)),
+        // O `\` (segurar para ver o antes) mora em `atalhos_da_revelacao`.
         // As teclas de triagem da Biblioteca, na tabela do `keyboard.rs` do
         // legado: setas para andar, `0`–`5` nota, `6`–`9` cor, `P`/`X`/`U`
         // sinalizador. **Todas** com `!Input`, porque todas são tecla solta —
@@ -237,7 +257,11 @@ pub fn init(cx: &mut gpui::App) {
         // que a sincronização não existia (7/set/2026).
         gpui::KeyBinding::new("ctrl-a", SelecionarTudo, Some(CONTEXTO)),
         gpui::KeyBinding::new("ctrl-d", LimparSelecao, Some(CONTEXTO)),
+        // O menu lateral recolhe com `Cmd/Ctrl+B`, como o `SidebarProvider`.
+        gpui::KeyBinding::new("cmd-b", AlternarMenuLateral, Some(CONTEXTO)),
+        gpui::KeyBinding::new("ctrl-b", AlternarMenuLateral, Some(CONTEXTO)),
     ]);
+    atalhos_da_revelacao::ligar(cx);
 }
 
 /// Os nomes das quatro cores, como o banco os guarda.
@@ -270,6 +294,10 @@ pub enum Tela {
     /// catálogo global com as sessões de lado. Quem vinha de lá achava a coisa
     /// "muito aberta e estranha" — e estava certo.
     Sessao,
+    /// O caixa do balcão — a rota `/dashboard/caixa`.
+    Caixa,
+    /// A política de retenção — `/dashboard/sessoes-fotograficas/configuracoes`.
+    Retencao,
 }
 
 pub struct Aplicativo {
@@ -294,6 +322,39 @@ pub struct Aplicativo {
     pub(crate) sessoes: Entity<Sessoes>,
     /// Dentro de uma sessão: cabeçalho, envio e a grade do site.
     pub(crate) detalhe: Entity<Detalhe>,
+    /// O caixa do balcão.
+    pub(crate) caixa: Entity<Caixa>,
+    /// 🧾 O caixa flutuante da galeria — por cima da grade e da revelação.
+    pub(crate) caixa_flutuante: Entity<Caixa>,
+    _pedido_do_caixa: gpui::Subscription,
+    /// A galeria foi aberta pelo caixa: a volta dela é para o caixa.
+    veio_do_caixa: bool,
+    /// A retenção do pós-venda.
+    pub(crate) retencao: Entity<Retencao>,
+    _pedido_da_retencao: gpui::Subscription,
+    // ── A moldura (`painel.rs`) ───────────────────────────────────────────
+    /// O menu lateral aberto (256 px) ou recolhido em ícones. Nasce recolhido,
+    /// como no app Tauri (`defaultOpen={false}`).
+    menu_aberto: bool,
+    /// O menu da conta (tema e Sair) está aberto.
+    menu_da_conta: bool,
+    /// Quem está logado, de `/auth/me`.
+    conta: Option<Conta>,
+    recados_da_conta: (Sender<PosVendaRecado>, Receiver<PosVendaRecado>),
+    _conta: Option<gpui::Task<()>>,
+    /// Claro, Escuro ou Sistema, e onde a escolha fica lembrada.
+    escolha_de_tema: tema::Escolha,
+    arquivo_do_tema: std::path::PathBuf,
+    _aparencia: gpui::Subscription,
+    /// O que o site recusou nesta abertura, com a frase dele — o canto de
+    /// "N envios recusados".
+    recusas: Vec<String>,
+    vendo_recusas: bool,
+    /// Quando (segundos unix) o site respondeu bem pela última vez — a linha
+    /// "Último envio" da bandeja.
+    ultimo_envio: Option<i64>,
+    /// O roteiro de depuração (`VLB_ROTEIRO`).
+    _roteiro: Option<gpui::Task<()>>,
     /// 🚨 A inscrição no que a tela da sessão pede. Descartada, o botão de
     /// voltar e o clique para revelar param de responder — sem erro nenhum.
     _pedido_da_sessao: gpui::Subscription,
@@ -394,6 +455,24 @@ pub struct Aplicativo {
     /// acompanhar a seleção **sem erro nenhum** — a foto congela no que estava, e
     /// quem está do outro lado do monitor não tem como saber que congelou.
     _observador: gpui::Subscription,
+    /// As outras duas telas que a segunda tela acompanha.
+    _cliente_na_galeria: gpui::Subscription,
+    _cliente_na_revelacao: gpui::Subscription,
+    /// O que a segunda tela mostra agora: o id e se já foi com imagem. Evita
+    /// refazer a imagem a cada notificação da mesma foto (a revelação notifica
+    /// a cada milímetro de slider).
+    no_cliente: Option<(String, Ajustes, CropSettings)>,
+    /// Os pixels sem marca da foto que a segunda tela mostra, guardados para a
+    /// edição ao vivo não decodificar a foto a cada gesto.
+    bruto_do_cliente: Option<(String, Arc<Vec<u8>>, u32, u32)>,
+    /// A foto cuja cópia de trabalho foi pedida para a segunda tela.
+    cliente_pedindo: Option<String>,
+    /// "Salvar na galeria e sair" em curso: `(total, respondidas, alguma falhou)`.
+    /// A tela só fecha quando todas responderem, e fica se alguma falhar —
+    /// como o `salvarESair` do site.
+    saindo_depois_de_salvar: Option<(usize, usize, bool)>,
+    /// Os downloads da Revelação (bruto e "Baixar JPEG"), fora da fila de envios.
+    baixas: resolucao_cheia::Baixas,
     pub(crate) tela: Tela,
     /// A raiz precisa de foco próprio para as ações de teclado chegarem nela.
     /// Sem isto, `Esc` só funcionaria enquanto algum filho focável estivesse
@@ -503,6 +582,10 @@ impl Aplicativo {
         // 🔑 A Revelação **pede** e não faz: exportar abre um modal com pasta
         // de destino e publicar fala com o pós-venda — as duas coisas valem
         // para a seleção inteira e moram aqui.
+        // 🖥️ E a foto aberta na revelação.
+        let cliente_na_revelacao = cx.observe(&revelacao, |raiz, _tela, cx| {
+            raiz.atualizar_o_cliente(false, cx);
+        });
         let pedido_da_revelacao = cx.subscribe_in(
             &revelacao,
             window,
@@ -527,17 +610,8 @@ impl Aplicativo {
 
         // A segunda tela acompanha a seleção da Biblioteca. `observe` dispara a
         // cada `notify` dela — que é exatamente quando a seleção pode ter mudado.
-        let observador = cx.observe(&biblioteca, |raiz, biblioteca, cx| {
-            if raiz.cliente.is_none() {
-                return;
-            }
-            let (foto, posicao) = {
-                let b = biblioteca.read(cx);
-                (b.foto_selecionada(), b.posicao_da_selecao())
-            };
-            if let Some(foto) = foto {
-                raiz.mostrar_ao_cliente(&foto, posicao, cx);
-            }
+        let observador = cx.observe(&biblioteca, |raiz, _biblioteca, cx| {
+            raiz.atualizar_o_cliente(false, cx);
         });
 
         // A porta do app. O mesmo `Publicador` do pós-venda: entrar é a mesma
@@ -547,6 +621,8 @@ impl Aplicativo {
         let publicador_da_raiz = portas.publicador.clone();
         let publicador_do_balcao = portas.publicador.clone();
         let publicador_do_detalhe = portas.publicador.clone();
+        let publicador_do_caixa = portas.publicador.clone();
+        let publicador_da_retencao = portas.publicador.clone();
         let entrada = cx.new(|cx| {
             Entrada::nova(
                 portas.publicador,
@@ -585,6 +661,10 @@ impl Aplicativo {
         // 42 sliders são espalhados com ela. Sem isso o pedido teria de ficar
         // guardado até o próximo quadro, e "clique que só responde no quadro
         // seguinte" é indistinguível de clique perdido.
+        // 🖥️ A tela do cliente acompanha a foto em foco da galeria.
+        let cliente_na_galeria = cx.observe(&detalhe, |raiz, _detalhe, cx| {
+            raiz.atualizar_o_cliente(false, cx);
+        });
         let pedido_da_sessao = cx.subscribe_in(
             &detalhe,
             window,
@@ -592,6 +672,41 @@ impl Aplicativo {
                 raiz.atender_a_sessao(pedido, window, cx);
             },
         );
+
+        let caixa = cx.new(|cx| Caixa::nova(publicador_do_caixa.clone(), window, cx));
+        let caixa_flutuante = cx.new({
+            let detalhe = detalhe.clone();
+            |cx| Caixa::painel(publicador_do_caixa, detalhe, window, cx)
+        });
+        let pedido_do_caixa = cx.subscribe_in(
+            &caixa,
+            window,
+            |raiz, _tela, pedido: &PedidoDoCaixa, window, cx| match pedido {
+                PedidoDoCaixa::AbrirSessao(id) => {
+                    raiz.entrar_na_sessao(id.clone(), cx);
+                    raiz.veio_do_caixa = true;
+                    window.focus(&raiz.foco);
+                }
+            },
+        );
+        let retencao = cx.new(|cx| Retencao::nova(publicador_da_retencao, window, cx));
+        let pedido_da_retencao = cx.subscribe_in(
+            &retencao,
+            window,
+            |raiz, _tela, pedido: &PedidoDaRetencao, window, cx| match pedido {
+                PedidoDaRetencao::Voltar => raiz.ir_para(Tela::Sessoes, window, cx),
+            },
+        );
+
+        // 🎨 O tema segue o sistema quando a escolha é "Sistema".
+        let arquivo_do_tema = tema::arquivo_da_escolha();
+        let escolha_de_tema = tema::escolha_guardada(&arquivo_do_tema);
+        let aparencia = cx.observe_window_appearance(window, |raiz, window, cx| {
+            raiz.seguir_o_sistema(window, cx);
+        });
+
+        // O roteiro de depuração começa depois de a raiz existir.
+        cx.defer_in(window, |raiz, window, cx| raiz.ligar_o_roteiro(window, cx));
 
         let importacao = cx.new(|cx| {
             Importacao::nova(
@@ -636,6 +751,24 @@ impl Aplicativo {
             no_balcao: false,
             sessoes,
             detalhe,
+            caixa,
+            caixa_flutuante,
+            _pedido_do_caixa: pedido_do_caixa,
+            veio_do_caixa: false,
+            retencao,
+            _pedido_da_retencao: pedido_da_retencao,
+            menu_aberto: false,
+            menu_da_conta: false,
+            conta: None,
+            recados_da_conta: channel(),
+            _conta: None,
+            escolha_de_tema,
+            arquivo_do_tema,
+            _aparencia: aparencia,
+            recusas: Vec::new(),
+            vendo_recusas: false,
+            ultimo_envio: None,
+            _roteiro: None,
             _pedido_da_sessao: pedido_da_sessao,
             _pedido_da_revelacao: pedido_da_revelacao,
             sessao_aberta: None,
@@ -657,6 +790,13 @@ impl Aplicativo {
             cliente: None,
             previews: previews_do_cliente,
             _observador: observador,
+            _cliente_na_galeria: cliente_na_galeria,
+            _cliente_na_revelacao: cliente_na_revelacao,
+            no_cliente: None,
+            bruto_do_cliente: None,
+            cliente_pedindo: None,
+            saindo_depois_de_salvar: None,
+            baixas: resolucao_cheia::Baixas::nova(),
             tela: Tela::Biblioteca,
             foco,
             acervo: portas.acervo,
@@ -897,6 +1037,7 @@ impl Aplicativo {
     /// Sai do ensaio: a grade volta a ser o catálogo, e nada mais trabalha.
     pub fn sair_da_sessao(&mut self, cx: &mut Context<Self>) {
         self.sessao_aberta = None;
+        self.veio_do_caixa = false;
         self.fotos_do_site.clear();
         // A fila é do ensaio que estava aberto: levá-la para o próximo mandaria
         // ao site fotos de outro cliente no primeiro "Salvar na galeria" de lá.
@@ -915,9 +1056,33 @@ impl Aplicativo {
         cx: &mut Context<Self>,
     ) {
         match pedido {
+            // 🔑 **A volta é para de onde se veio**, como o "Voltar para o
+            // caixa" da galeria do site (`?daRota=caixa`): o caixa continua com
+            // a mesma sessão escolhida.
             DetalhePedido::Voltar => {
-                self.tela = Tela::Sessoes;
-                cx.notify();
+                if self.veio_do_caixa {
+                    let aberta = self.sessao_aberta.clone();
+                    self.caixa
+                        .update(cx, |tela, cx| tela.escolher_sessao(aberta, cx));
+                    self.ir_para(Tela::Caixa, window, cx);
+                } else {
+                    self.ir_para(Tela::Sessoes, window, cx);
+                }
+            }
+            DetalhePedido::AlternarMenu => self.alternar_menu_lateral(cx),
+            // 🔑 **A seleção da grade da sessão vira a da Biblioteca**, que é
+            // quem o balcão e a impressão leem.
+            DetalhePedido::Negociar(ids) => {
+                let ids = ids.clone();
+                self.biblioteca
+                    .update(cx, |tela, cx| tela.selecionar_ids(&ids, cx));
+                self.abrir_balcao(cx);
+            }
+            DetalhePedido::Imprimir(ids) => {
+                let ids = ids.clone();
+                self.biblioteca
+                    .update(cx, |tela, cx| tela.selecionar_ids(&ids, cx));
+                self.imprimir(window, cx);
             }
             DetalhePedido::Revelar { fotos, inicial } => {
                 self.revelar_da_sessao(fotos, *inicial, window, cx);
@@ -1020,8 +1185,15 @@ impl Aplicativo {
         }
         // Os pixels do storage são pedidos por `AbriuOutraFoto`, que o
         // `abrir_no_acervo` emite — o mesmo caminho da seta e da tira.
+        // 🔑 O recorte e as marcadas da grade entram na tira — o estado é um
+        // só, como no site (`selecaoAoAbrir`).
+        let (recorte, marcadas) = {
+            let detalhe = self.detalhe.read(cx);
+            (detalhe.filtro(), detalhe.marcadas())
+        };
         self.revelacao.update(cx, |tela, cx| {
-            tela.abrir_no_acervo(acervo, inicial, window, cx)
+            tela.abrir_no_acervo(acervo, inicial, window, cx);
+            tela.herdar_da_sessao(recorte, &marcadas, cx);
         });
         self.tela = Tela::Revelacao;
         self.recontar_o_que_falta_subir(cx);
@@ -1373,7 +1545,10 @@ impl Aplicativo {
             // que ninguém pediu) de a fazer dar a volta.
             self.sincronias_pendentes = self.sincronias_pendentes.saturating_sub(1);
             match recado {
-                PosVendaRecado::Sincronizou => mudou = true,
+                PosVendaRecado::Sincronizou => {
+                    self.ultimo_envio = Some(chrono::Utc::now().timestamp());
+                    mudou = true
+                }
                 PosVendaRecado::Pixels { foto_id, bytes } => {
                     // 🚨 Decodificar pode falhar — resposta truncada, formato
                     // que o `image` não lê. Falhar aqui deixa a foto como
@@ -1394,12 +1569,19 @@ impl Aplicativo {
                             let _ = self
                                 .previews
                                 .save_preview(&persistencia::chave_do_trabalho(&foto_id), &imagem);
+                            // 🖥️ A segunda tela pode estar esperando esta cópia.
+                            let para_o_cliente =
+                                self.cliente_pedindo.as_deref() == Some(foto_id.as_str());
                             let aproveitou = self
                                 .revelacao
                                 .update(cx, |tela, cx| tela.receber_pixels(&foto_id, imagem, cx));
                             if !aproveitou {
                                 // A seta andou enquanto o download vinha. Não é
                                 // erro: é o motivo de o id vir junto.
+                            }
+                            if para_o_cliente {
+                                self.cliente_pedindo = None;
+                                self.atualizar_o_cliente(false, cx);
                             }
                         }
                         Err(erro) => {
@@ -1421,14 +1603,25 @@ impl Aplicativo {
                     // dia em que a galeria mudasse por outra tela.
                     self.a_subir.retain(|(ja, _, _)| ja != &foto_no_site);
                     self.gravador.esquecer_do_site(foto_no_site);
+                    self.ultimo_envio = Some(chrono::Utc::now().timestamp());
                     self.recontar_o_que_falta_subir(cx);
                     self.avisar_onde_esta_olhando("revelação salva na galeria".into(), cx);
+                    self.contar_o_salvar(false, cx);
                     if let Some(galeria) = self.sessao_aberta.clone() {
                         self.detalhe.update(cx, |tela, cx| tela.entrar(galeria, cx));
                     }
                     mudou = true;
                 }
+                PosVendaRecado::JpegRevelado { foto_no_site, bytes } => {
+                    self.guardar_o_jpeg(&foto_no_site, &bytes, cx);
+                }
                 PosVendaRecado::Falhou(erro) => {
+                    self.revelacao
+                        .update(cx, |tela, cx| tela.definir_gerando_jpeg(false, cx));
+                    self.contar_o_salvar(true, cx);
+                    // 🔑 **Nada some em silêncio** (G7 do app Tauri): a recusa
+                    // fica no canto até alguém olhar, além do aviso na tela.
+                    self.recusas.push(erro.clone());
                     self.avisar_onde_esta_olhando(erro, cx);
                 }
                 // Os outros recados são de quem os pediu: esta raiz só sincroniza.
@@ -1544,16 +1737,58 @@ impl Aplicativo {
     /// **dentro** da sessão — o catálogo desta máquina, recortado pelo ensaio
     /// que está aberto.
     pub fn voltar_para_biblioteca(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.revelacao
-            .update(cx, |tela, _cx| tela.gravar_o_que_estiver_pendente());
+        self.sair_da_revelacao(cx);
+        window.focus(&self.foco);
+    }
+
+    /// A volta, sem a janela na mão — é o que o fim do salvar usa.
+    fn sair_da_revelacao(&mut self, cx: &mut Context<Self>) {
+        self.saindo_depois_de_salvar = None;
+        self.revelacao.update(cx, |tela, cx| {
+            tela.gravar_o_que_estiver_pendente();
+            tela.definir_salvando(None, cx);
+        });
         self.guardar_as_receitas_do_site(cx);
+        // E de volta: o recorte e as marcadas da tira ficam na grade da sessão.
+        if self.sessao_aberta.is_some() {
+            let (recorte, marcadas) = {
+                let revelacao = self.revelacao.read(cx);
+                (revelacao.recorte(), revelacao.marcadas_na_grade())
+            };
+            self.detalhe.update(cx, |tela, cx| {
+                tela.filtrar(recorte, cx);
+                tela.marcar_ids(&marcadas, cx);
+            });
+        }
         self.tela = if self.sessao_aberta.is_some() {
             Tela::Sessao
         } else {
             Tela::Biblioteca
         };
-        window.focus(&self.foco);
+        self.atualizar_o_cliente(true, cx);
         cx.notify();
+    }
+
+    /// Uma resposta do lote do "Salvar e sair" chegou.
+    fn contar_o_salvar(&mut self, falhou: bool, cx: &mut Context<Self>) {
+        let Some((total, feitas, falha)) = self.saindo_depois_de_salvar.as_mut() else {
+            return;
+        };
+        *feitas += 1;
+        *falha |= falhou;
+        let (total, feitas, falha) = (*total, *feitas, *falha);
+        if feitas < total {
+            self.revelacao
+                .update(cx, |tela, cx| tela.definir_salvando(Some((feitas, total)), cx));
+            return;
+        }
+        self.saindo_depois_de_salvar = None;
+        self.revelacao
+            .update(cx, |tela, cx| tela.definir_salvando(None, cx));
+        // 🔑 Com falha, a tela fica: o operador vê o aviso e tenta de novo.
+        if !falha && self.tela == Tela::Revelacao {
+            self.sair_da_revelacao(cx);
+        }
     }
 
     /// Traz de volta, para as fotos do site que a raiz guarda, o que a
@@ -1610,15 +1845,30 @@ impl Aplicativo {
     ) {
         match pedido {
             PedidoDaRevelacao::Sair => self.voltar_para_biblioteca(window, cx),
-            PedidoDaRevelacao::Exportar => self.exportar(cx),
+            PedidoDaRevelacao::Exportar => self.baixar_jpeg(cx),
+            PedidoDaRevelacao::TelaDoCliente => self.alternar_cliente(cx),
             PedidoDaRevelacao::SalvarNaGaleria => self.salvar_na_galeria(window, cx),
             PedidoDaRevelacao::Sincronizar => self.sincronizar_revelacao(window, cx),
             PedidoDaRevelacao::ZerarAsMarcadas => self.zerar_as_marcadas(cx),
+            // "Baixar como… (N)" do menu da tira: a exportação com os alvos dele.
+            PedidoDaRevelacao::BaixarComo => {
+                let fotos = self.revelacao.update(cx, |tela, _cx| tela.levar_a_baixar());
+                if self.pode_trabalhar() && !fotos.is_empty() {
+                    self.exportacao
+                        .update(cx, |tela, cx| tela.abrir_para(fotos, cx));
+                    self.exportando = true;
+                    cx.notify();
+                }
+            }
             // 📸 Passo 11 a cada troca de foto, e não só na abertura: se o
             // cache local não tem o bruto e a foto está no site, os pixels vêm
             // de lá. A pergunta é feita **depois** de a Revelação abrir a
             // foto, porque é ela quem sabe se sobrou vazio.
-            PedidoDaRevelacao::AbriuOutraFoto => self.repor_os_pixels(cx),
+            PedidoDaRevelacao::AbriuOutraFoto => {
+                self.repor_os_pixels(cx);
+                self.medir_o_original(cx);
+            }
+            PedidoDaRevelacao::QueroOBruto => self.pedir_o_bruto(cx),
         }
     }
 
@@ -1744,7 +1994,18 @@ impl Aplicativo {
 
         let mut gravadas: Vec<(String, Ajustes, persistencia::Corte)> = Vec::new();
         for alvo in &alvos {
-            let corte = persistencia::corte_da_foto(alvo);
+            // 🔑 O enquadramento também volta ao inteiro, como no site ("Zerar
+            // N fotos" zera tudo, inclusive o corte de cada uma).
+            let corte = persistencia::Corte {
+                x: Some(0.),
+                y: Some(0.),
+                largura: Some(1.),
+                altura: Some(1.),
+                rotacao: Some(0),
+                angulo: Some(0.),
+                espelho_h: Some(false),
+                espelho_v: Some(false),
+            };
             self.gravador
                 .gravar(alvo.id.clone(), Ajustes::default(), corte);
             gravadas.push((alvo.id.clone(), Ajustes::default(), corte));
@@ -1794,9 +2055,13 @@ impl Aplicativo {
             return;
         }
 
-        let Some(foto) = self.biblioteca.read(cx).foto_selecionada() else {
+        // 🔑 **A foto é a de onde o operador está**: a em foco da galeria (ou a
+        // primeira dela), a aberta na revelação, a selecionada no catálogo.
+        // Até 2026-09-17 só a do catálogo contava, e na galeria o botão "Tela
+        // do cliente" não fazia nada.
+        if self.foto_para_o_cliente(cx).is_none() {
             return;
-        };
+        }
 
         let telas: Vec<gpui::DisplayId> = cx.displays().iter().map(|tela| tela.id()).collect();
         let principal = cx.primary_display().map(|tela| tela.id());
@@ -1830,8 +2095,8 @@ impl Aplicativo {
                 self.cliente = Some(janela);
                 self.detalhe
                     .update(cx, |tela, cx| tela.definir_cliente_aberta(true, cx));
-                let posicao = self.biblioteca.read(cx).posicao_da_selecao();
-                self.mostrar_ao_cliente(&foto, posicao, cx);
+                self.no_cliente = None;
+                self.atualizar_o_cliente(true, cx);
             }
             // Abrir janela é pedido ao sistema, e ele pode recusar. Sem monitor
             // não há segunda tela — e derrubar o app por causa disso seria trocar
@@ -1845,42 +2110,148 @@ impl Aplicativo {
         self.cliente.is_some()
     }
 
-    /// Manda para a segunda tela a foto que está selecionada aqui.
+    /// A foto que a segunda tela deve mostrar, conforme a tela da frente.
+    fn foto_para_o_cliente(
+        &self,
+        cx: &Context<Self>,
+    ) -> Option<(PhotoViewModel, Option<(usize, usize)>)> {
+        match self.tela {
+            Tela::Revelacao => {
+                let revelacao = self.revelacao.read(cx);
+                let foto = revelacao.foto_aberta()?.clone();
+                let total = revelacao.acervo().len();
+                Some((foto, Some((revelacao.posicao() + 1, total))))
+            }
+            Tela::Sessao => {
+                let detalhe = self.detalhe.read(cx);
+                let total = detalhe.total_visivel();
+                let posicao = detalhe.posicao_em_foco().unwrap_or(0);
+                let id = detalhe
+                    .em_foco()
+                    .or_else(|| detalhe.primeira_visivel())?
+                    .id
+                    .clone();
+                // A grade da sessão fala o id do site; a foto do site mora na
+                // Biblioteca com o prefixo, que é também a chave do cache.
+                let com_prefixo = format!("{}{id}", persistencia::PREFIXO_DO_SITE);
+                let foto = self
+                    .biblioteca
+                    .read(cx)
+                    .todas_as_fotos()
+                    .into_iter()
+                    .find(|f| f.id == id || f.id == com_prefixo)?;
+                Some((foto, Some((posicao + 1, total))))
+            }
+            _ => {
+                let biblioteca = self.biblioteca.read(cx);
+                Some((
+                    biblioteca.foto_selecionada()?,
+                    biblioteca.posicao_da_selecao(),
+                ))
+            }
+        }
+    }
+
+    /// Leva à segunda tela a foto de agora, com a receita de agora — se uma
+    /// das duas mudou (ou se `forcar`).
     ///
-    /// ⚠️ **A imagem é lida e decodificada na thread da interface**, como na
-    /// abertura da Revelação: é um JPEG de preview, de poucos milissegundos. É a
-    /// mesma pendência que a fase 1 deixou, e ela vale para os dois lugares.
-    fn mostrar_ao_cliente(
-        &mut self,
-        foto: &PhotoViewModel,
-        posicao: Option<(usize, usize)>,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(janela) = self.cliente.as_ref() else {
+    /// 🔑 **O cliente vê a edição acontecendo** (dono, 2026-09-11, no site):
+    /// na revelação, cada gesto manda os ajustes da tela, e a janela do
+    /// cliente revela com o motor dela. O motor descarta o pedido que ficou
+    /// para trás, então arrastar um slider não empilha trabalho.
+    fn atualizar_o_cliente(&mut self, forcar: bool, cx: &mut Context<Self>) {
+        let Some(janela) = self.cliente else {
             return;
         };
-
-        let imagem = self
-            .previews
-            .get_preview(&foto.id)
-            .or_else(|| self.previews.get_thumbnail(&foto.id))
-            .map(crate::imagem::para_gpui);
-
-        let foto = foto.clone();
+        let Some((foto, posicao)) = self.foto_para_o_cliente(cx) else {
+            return;
+        };
+        let na_revelacao = self.tela == Tela::Revelacao
+            && self.revelacao.read(cx).foto_aberta().map(|f| &f.id) == Some(&foto.id);
+        let (ajustes, corte) = if na_revelacao {
+            self.revelacao.read(cx).receita_para_o_cliente()
+        } else {
+            (
+                persistencia::da_foto(&foto),
+                persistencia::para_crop_settings(&persistencia::corte_da_foto(&foto)),
+            )
+        };
+        let chave = (foto.id.clone(), ajustes, corte.clone());
+        if !forcar && self.no_cliente.as_ref() == Some(&chave) {
+            return;
+        }
+        let Some((pixels, largura, altura)) = self.bruto_para_o_cliente(&foto, cx) else {
+            return;
+        };
+        self.no_cliente = Some(chave);
+        let pedido = ParaRevelar {
+            foto,
+            posicao,
+            pixels,
+            largura,
+            altura,
+            ajustes,
+            corte,
+        };
         // 🚨 O `update` falha quando a janela **já foi fechada** — pelo `Esc` de
-        // dentro dela, que a raiz não tem como saber que aconteceu. Aqui é onde
-        // isso é descoberto, e o handle morto é jogado fora; sem isto o botão da
-        // barra continuaria dizendo "fechar" para uma janela que não existe.
+        // dentro dela, que a raiz não tem como saber que aconteceu.
         let viva = janela
-            .update(cx, |cliente, _window, cx| {
-                cliente.mostrar(Some(foto), imagem, posicao, cx);
-            })
+            .update(cx, |cliente, _window, cx| cliente.revelar(pedido, cx))
             .is_ok();
-
         if !viva {
             self.cliente = None;
+            self.detalhe
+                .update(cx, |tela, cx| tela.definir_cliente_aberta(false, cx));
             cx.notify();
         }
+    }
+
+    /// Os pixels **sem marca** desta foto, para a segunda tela.
+    ///
+    /// 🚨 **A foto do site não usa a prévia do cache**: aquela é a da galeria,
+    /// com a marca d'água. Usa a cópia de trabalho (`trabalho:`), a mesma que a
+    /// revelação abre; se ela ainda não veio, é pedida, e a tela do cliente
+    /// continua na foto anterior até ela chegar. A foto do disco usa o preview
+    /// do arquivo, que nunca teve marca.
+    fn bruto_para_o_cliente(
+        &mut self,
+        foto: &PhotoViewModel,
+        cx: &mut Context<Self>,
+    ) -> Option<(Arc<Vec<u8>>, u32, u32)> {
+        if let Some((id, pixels, largura, altura)) = &self.bruto_do_cliente {
+            if *id == foto.id {
+                return Some((pixels.clone(), *largura, *altura));
+            }
+        }
+        let do_site = persistencia::id_no_site(&foto.id).is_some();
+        let imagem = if do_site {
+            self.previews
+                .get_preview(&persistencia::chave_do_trabalho(&foto.id))
+        } else {
+            self.previews.get_preview(&foto.id)
+        };
+        let Some(imagem) = imagem else {
+            if do_site && self.cliente_pedindo.as_deref() != Some(foto.id.as_str()) {
+                if let (Some(sessao), Some(no_site)) =
+                    (self.sessao().cloned(), foto.pos_venda_foto_id.clone())
+                {
+                    self.cliente_pedindo = Some(foto.id.clone());
+                    self.publicador.copia_de_trabalho(
+                        sessao,
+                        foto.id.clone(),
+                        no_site,
+                        self.sincronias.0.clone(),
+                    );
+                    self.esperar_a_sincronia(1, cx);
+                }
+            }
+            return None;
+        };
+        let rgba = imagem.to_rgba8();
+        let (largura, altura) = (rgba.width(), rgba.height());
+        let pixels = Arc::new(rgba.into_raw());
+        self.bruto_do_cliente = Some((foto.id.clone(), pixels.clone(), largura, altura));
+        Some((pixels, largura, altura))
     }
 
     /// Abre as Configurações, relendo o cache na hora.
@@ -2012,6 +2383,78 @@ impl Aplicativo {
         cx.notify();
     }
 
+    /// **Baixar JPEG** da Revelação: a foto aberta, em resolução cheia, com o
+    /// que está na tela — inclusive o que ainda não foi salvo. É o `baixar` do
+    /// editor do site, e **não** a exportação da Biblioteca.
+    pub fn baixar_jpeg(&mut self, cx: &mut Context<Self>) {
+        if !self.pode_trabalhar() {
+            return;
+        }
+        let (aberta, ajustes, corte, gerando) = {
+            let revelacao = self.revelacao.read(cx);
+            (
+                revelacao.foto_aberta().cloned(),
+                revelacao.ajustes(),
+                revelacao.enquadramento(),
+                revelacao.gerando_jpeg(),
+            )
+        };
+        let Some(foto) = aberta else {
+            return;
+        };
+        if gerando {
+            return;
+        }
+        match (foto.pos_venda_foto_id.clone(), self.sessao().cloned()) {
+            (Some(no_site), Some(sessao)) => {
+                self.revelacao
+                    .update(cx, |tela, cx| tela.definir_gerando_jpeg(true, cx));
+                self.publicador.revelar_integral(
+                    sessao,
+                    no_site,
+                    ajustes,
+                    corte,
+                    self.baixas.canal(),
+                );
+                self.esperar_as_baixas(1, cx);
+            }
+            // A foto que ainda só está no disco sai pela exportação local, que
+            // lê a receita gravada — por isso o gesto em curso fecha antes.
+            _ => {
+                self.revelacao
+                    .update(cx, |tela, _| tela.gravar_o_que_estiver_pendente());
+                self.exportacao
+                    .update(cx, |tela, cx| tela.abrir_para(vec![foto], cx));
+                self.exportando = true;
+                cx.notify();
+            }
+        }
+    }
+
+    /// O JPEG chegou: vai para a pasta Downloads, como o download do site.
+    fn guardar_o_jpeg(&mut self, foto_no_site: &str, bytes: &[u8], cx: &mut Context<Self>) {
+        self.revelacao
+            .update(cx, |tela, cx| tela.definir_gerando_jpeg(false, cx));
+        let nome = self
+            .fotos_do_site
+            .iter()
+            .find(|f| f.pos_venda_foto_id.as_deref() == Some(foto_no_site))
+            .map(|f| f.name.clone())
+            .unwrap_or_else(|| "foto".into());
+        let pasta = directories::UserDirs::new()
+            .and_then(|d| d.download_dir().map(std::path::Path::to_path_buf))
+            .unwrap_or_else(std::env::temp_dir);
+        let destino = arquivo_livre(&pasta, &nome_do_jpeg(&nome));
+        let aviso = match std::fs::write(&destino, bytes) {
+            Ok(()) => format!(
+                "JPEG salvo em {}",
+                destino.file_name().and_then(|n| n.to_str()).unwrap_or_default()
+            ),
+            Err(erro) => format!("Não foi possível gravar o JPEG: {erro}"),
+        };
+        self.avisar_onde_esta_olhando(aviso, cx);
+    }
+
     /// Fecha o modal. ⚠️ **Não cancela o lote em curso** — a `Task` de colheita
     /// vive na entidade da exportação, que continua existindo. Fechar por engano
     /// no meio de 400 fotos não pode interromper as 400.
@@ -2072,16 +2515,25 @@ impl Aplicativo {
         else {
             return;
         };
-        let (ajustes, corte) = {
+        let (ajustes, corte, pode_revelar) = {
             let revelacao = self.revelacao.read(cx);
-            (revelacao.ajustes(), revelacao.enquadramento())
+            (
+                revelacao.ajustes(),
+                revelacao.enquadramento(),
+                revelacao.pode_revelar(),
+            )
         };
         let (_local, no_site) = foto;
 
-        // O que está pendente vai para o banco antes de sair — é o que
-        // `voltar_para_biblioteca` já faria, e aqui ele precisa vir **antes** do
-        // envio: os mesmos ajustes que sobem ficam gravados aqui.
-        self.voltar_para_biblioteca(window, cx);
+        if self.saindo_depois_de_salvar.is_some() {
+            return;
+        }
+        // O que está pendente vai para o banco **antes** do envio: os mesmos
+        // ajustes que sobem ficam gravados aqui. A tela só fecha quando o lote
+        // responder (`contar_o_salvar`).
+        self.revelacao
+            .update(cx, |tela, _cx| tela.gravar_o_que_estiver_pendente());
+        self.guardar_as_receitas_do_site(cx);
 
         let Some(sessao) = self.sessao().cloned() else {
             return;
@@ -2090,7 +2542,9 @@ impl Aplicativo {
         // A aberta primeiro, quando ela é do site; e em seguida as que o
         // "Sincronizar" deixou só com a receita, das duas procedências.
         let mut lote: Vec<(String, Ajustes, CropSettings)> = Vec::new();
-        if let Some(no_site) = no_site.clone() {
+        // 🚨 **Nunca a comprada** — o `if (podeRevelar) salvar()` do site. Ela
+        // não se revela, mas as pendentes atrás dela sobem assim mesmo.
+        if let Some(no_site) = no_site.clone().filter(|_| pode_revelar) {
             lote.push((no_site, ajustes, corte));
         }
         // 🚨 **A fila não é esvaziada aqui, e sim quando a foto chega.** Quem a
@@ -2119,6 +2573,7 @@ impl Aplicativo {
         }
 
         if lote.is_empty() {
+            self.voltar_para_biblioteca(window, cx);
             self.avisar_onde_esta_olhando(
                 "revelação guardada — ela sobe revelada quando a foto for classificada".into(),
                 cx,
@@ -2127,6 +2582,9 @@ impl Aplicativo {
         }
 
         let quantas = lote.len();
+        self.saindo_depois_de_salvar = Some((quantas, 0, false));
+        self.revelacao
+            .update(cx, |tela, cx| tela.definir_salvando(Some((0, quantas)), cx));
         for (no_site, ajustes, corte) in lote {
             self.publicador.salvar_revelacao(
                 sessao.clone(),
@@ -2158,24 +2616,6 @@ impl Aplicativo {
         self.a_subir.push((no_site, ajustes, corte));
     }
 
-    /// Quantas fotos deste ensaio esperam ir ao site — o número no botão de
-    /// salvar da Revelação.
-    ///
-    /// 🚨 **É a conta do lote, e não a das listas.** O número aparece no botão
-    /// "Salvar na galeria", e ele tem de dizer quantas fotos aquele clique
-    /// manda — por isso a aberta entra (ela sempre vai) e por isso as duas
-    /// procedências contam uma vez só: a foto que só existe no site está na
-    /// fila **e** no depósito depois de um sincronizar.
-    fn quantas_a_subir(&self, aberta: Option<&str>) -> usize {
-        let mut ids: Vec<&str> = self.a_subir.iter().map(|(id, _, _)| id.as_str()).collect();
-        let do_deposito = self.pendentes_do_site();
-        ids.extend(do_deposito.iter().map(|(id, _)| id.as_str()));
-        ids.extend(aberta);
-        ids.sort_unstable();
-        ids.dedup();
-        ids.len()
-    }
-
     /// Reescreve o número no botão "Salvar na galeria" da Revelação.
     fn recontar_o_que_falta_subir(&mut self, cx: &mut Context<Self>) {
         let aberta = self
@@ -2183,9 +2623,20 @@ impl Aplicativo {
             .read(cx)
             .foto_aberta()
             .and_then(|f| f.pos_venda_foto_id.clone());
-        let quantas = self.quantas_a_subir(aberta.as_deref());
-        self.revelacao
-            .update(cx, |tela, cx| tela.definir_nao_salvas(quantas, cx));
+        let mut ids: Vec<String> = self.a_subir.iter().map(|(id, _, _)| id.clone()).collect();
+        ids.extend(self.pendentes_do_site().into_iter().map(|(id, _)| id));
+        ids.sort_unstable();
+        ids.dedup();
+        let no_deposito = aberta
+            .as_deref()
+            .is_some_and(|aberta| ids.iter().any(|id| id == aberta));
+        let outras = ids.len() - usize::from(no_deposito);
+        let pendentes = ids.into_iter().collect();
+        self.revelacao.update(cx, |tela, cx| {
+            tela.definir_nao_salvas(outras, no_deposito, cx);
+            // O ponto oco de cada miniatura da tira.
+            tela.definir_pendentes(pendentes, cx);
+        });
     }
 
     /// As revelações **desta sessão** que ainda não subiram, por id do site.
@@ -2238,11 +2689,16 @@ impl Aplicativo {
             .update(cx, |tela, cx| tela.definir_sessao(sessao.clone(), cx));
         self.detalhe
             .update(cx, |tela, _cx| tela.definir_sessao(sessao.clone()));
+        self.caixa
+            .update(cx, |tela, _cx| tela.definir_sessao(sessao.clone()));
+        self.retencao
+            .update(cx, |tela, _cx| tela.definir_sessao(sessao.clone()));
         // 🔑 **Entrou: a primeira tela é a lista de sessões.** Na web é de
         // onde tudo parte, e abrir no catálogo global foi o que fez o app
         // parecer "aberto e estranho" para quem vinha de lá.
         self.tela = Tela::Sessoes;
         self.sessao = Some(sessao);
+        self.carregar_conta(cx);
         cx.notify();
     }
 
@@ -2304,6 +2760,11 @@ impl Aplicativo {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // 🔑 Na Revelação não há `⌘⇧C` (o site não tem): lá ele copiaria a
+        // seleção da Biblioteca, que não é a foto na tela.
+        if self.tela == Tela::Revelacao {
+            return;
+        }
         self.copiar_revelacao(cx);
     }
 
@@ -2313,6 +2774,9 @@ impl Aplicativo {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.tela == Tela::Revelacao {
+            return;
+        }
         self.colar_revelacao(cx);
     }
 
@@ -2395,7 +2859,7 @@ impl Aplicativo {
             // Na sessão as setas andam na grade dela — é o que a legenda da
             // tira promete.
             Tela::Sessao => self.detalhe.update(cx, |tela, cx| tela.andar(passo, cx)),
-            Tela::Impressao | Tela::Sessoes => {}
+            Tela::Impressao | Tela::Sessoes | Tela::Caixa | Tela::Retencao => {}
         }
     }
 
@@ -2421,7 +2885,7 @@ impl Aplicativo {
                 self.detalhe
                     .update(cx, |tela, cx| tela.andar_linha(passo, colunas, cx))
             }
-            Tela::Revelacao | Tela::Impressao | Tela::Sessoes => {}
+            Tela::Revelacao | Tela::Impressao | Tela::Sessoes | Tela::Caixa | Tela::Retencao => {}
         }
     }
 
@@ -2440,6 +2904,11 @@ impl Aplicativo {
         // impressão só se sai clicando em "Library". A alternativa a esta linha
         // é uma tecla que responde numa tela e emudece na outra, que é mais
         // caro de aprender do que qualquer uma das duas regras inteiras.
+        // No Enquadrar, o `Esc` só sai da ferramenta — como no site.
+        if self.tela == Tela::Revelacao && self.revelacao.read(cx).cortando() {
+            self.revelacao.update(cx, |tela, cx| tela.cancelar_corte(cx));
+            return;
+        }
         if self.tela != Tela::Biblioteca {
             self.voltar_para_biblioteca(window, cx);
         }
@@ -2470,193 +2939,6 @@ impl Aplicativo {
     /// que esta guarda passa a garantir, antes de haver o que contar.
     pub fn pode_trabalhar(&self) -> bool {
         self.sessao_aberta.is_some()
-    }
-
-    /// O título da sessão aberta, para a barra dizer onde se está.
-    fn nome_da_sessao(&self, cx: &Context<Self>) -> Option<SharedString> {
-        self.detalhe
-            .read(cx)
-            .aberta()
-            .map(|a| SharedString::from(a.galeria.titulo.clone()))
-    }
-
-    fn barra(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        // Paridade com o app de egui: o botão de Revelação só liga quando há
-        // seleção na Biblioteca ("Develop button enabled if Library has a
-        // selection", `app.rs`).
-        let tem_selecao = self.biblioteca.read(cx).foto_selecionada().is_some();
-        let na_revelacao = self.tela == Tela::Revelacao;
-        let na_impressao = self.tela == Tela::Impressao;
-        // 🚨 Logado e sem sessão aberta, **nada** trabalha: os botões existem
-        // desligados em vez de sumirem, porque sumir esconderia o app inteiro e
-        // deixaria a impressão de que ele quebrou.
-        let trabalhando = self.pode_trabalhar();
-        let tem_selecao = tem_selecao && trabalhando;
-
-        div()
-            .flex()
-            .items_center()
-            .gap(px(8.))
-            .px(px(10.))
-            .py(px(6.))
-            .bg(cx.theme().title_bar)
-            .border_b_1()
-            .border_color(cx.theme().border)
-            // ── Onde estou ────────────────────────────────────────────────
-            //
-            // 🔑 **A barra é feita de grupos separados por divisor**, e não de
-            // botões iguais em fila. Eles não fazem coisas da mesma natureza:
-            // navegar entre telas e mexer no dinheiro do cliente — e quando tudo
-            // tem o mesmo peso, achar o que se quer custa uma varredura da barra
-            // inteira, toda vez. O grupo do meio, "o que faço com a foto", era o
-            // terceiro; ele saiu em 8/set/2026 e o vão abaixo diz para onde.
-            .child(
-                grupo()
-                    // 🚨 A saída da sessão vem primeiro — e ela é a única coisa
-                    // que a barra oferece antes de haver uma sessão aberta.
-                    //
-                    // 🚨 **Dentro de um ensaio não há aba de biblioteca**, e é o
-                    // ponto que custou mais para eu entender: a grade do ensaio
-                    // já está na tela, logo abaixo do cabeçalho. Uma aba
-                    // "Escolher com o cliente" ao lado dizia que a escolha
-                    // acontece em outro lugar — que é exatamente o equívoco.
-                    .child(
-                        Button::new("nav-sessoes")
-                            .label(if self.sessao_aberta.is_some() {
-                                "← Sessões"
-                            } else {
-                                "Sessões"
-                            })
-                            .xsmall()
-                            .when(self.tela == Tela::Sessoes, |b| b.primary())
-                            .selected(self.tela == Tela::Sessoes)
-                            .on_click(cx.listener(|este, _ev, _window, cx| {
-                                este.sair_da_sessao(cx);
-                            })),
-                    )
-                    .when_some(self.nome_da_sessao(cx), |grupo, nome| {
-                        grupo.child(
-                            // O ensaio aberto é da família âmbar: é o contexto
-                            // do cliente, e não uma tela a mais.
-                            Button::new("nav-sessao-aberta")
-                                .label(nome)
-                                .xsmall()
-                                .when(self.tela == Tela::Sessao, |b| {
-                                    b.custom(tema::botao_quente(cx))
-                                })
-                                .selected(self.tela == Tela::Sessao)
-                                .on_click(cx.listener(|este, _ev, _window, cx| {
-                                    este.tela = Tela::Sessao;
-                                    cx.notify();
-                                })),
-                        )
-                    })
-                    .child(
-                        Button::new("nav-revelacao")
-                            .label("Revelação")
-                            .xsmall()
-                            .when(na_revelacao, |b| b.primary())
-                            .selected(na_revelacao)
-                            .disabled(!tem_selecao)
-                            .on_click(cx.listener(|este, _ev, window, cx| {
-                                este.revelar(window, cx);
-                            })),
-                    )
-                    .child(
-                        // Paridade: no legado o botão de impressão também só
-                        // liga com seleção (`selected_photo_ids` ou a foto da
-                        // Biblioteca).
-                        Button::new("nav-impressao")
-                            .label("Impressão")
-                            .xsmall()
-                            .when(na_impressao, |b| b.primary())
-                            .selected(na_impressao)
-                            .disabled(!tem_selecao || !trabalhando)
-                            .on_click(cx.listener(|este, _ev, window, cx| {
-                                este.imprimir(window, cx);
-                            })),
-                    ),
-            )
-            // ── O vão até o cliente ───────────────────────────────────────
-            //
-            // 🚨 **O grupo "o que faço com a foto" saiu daqui em 8/set/2026**, a
-            // pedido do dono, e com ele o rótulo "VintageLightbox" que ocupava
-            // este vão. Os quatro botões diziam coisas que a sessão já diz
-            // melhor, ou não dizia nenhuma:
-            //
-            // - **Copiar e Colar revelação** são gestos *da* Revelação, e a
-            //   barra não existe lá (`self.tela != Tela::Revelacao`). Ficavam
-            //   apagados o tempo todo, prometendo um trabalho que dali não
-            //   começava. As teclas continuam — `⌘C`/`⌘V`, em `ao_copiar_revelacao`.
-            // - **Importar** abria o explorador *do framework*, ao lado de um
-            //   "Escolher fotos…" que usa o do sistema. Dois botões para o mesmo
-            //   gesto, e o certo era o de baixo: *"é o Escolher fotos… que faz a
-            //   ação correta"*. O de baixo herdou o nome, e hoje é o "Importar"
-            //   da tela da sessão.
-            // - **Exportar** desceu para junto dele, na tela da sessão: entrar e
-            //   sair de um ensaio são o mesmo par de gestos, e estavam a uma
-            //   barra de distância um do outro.
-            // - O **título** era papel de parede: fora da Revelação ele só sabia
-            //   escrever o nome do app, e a barra nunca aparece dentro dela.
-            .child(div().flex_1())
-            // ── O cliente e o dinheiro ────────────────────────────────────
-            //
-            // 🔑 **Tudo o que atravessa para o site é âmbar**, e fica junto no
-            // fim da barra: balcão, publicação e a tela que o cliente vê. É a
-            // separação que o azul sozinho não fazia — "aplicar na foto" e
-            // "cobrar do cliente" tinham a mesma cor e a mesma vizinhança.
-            .child(
-                grupo()
-                    .child(
-                        // 🔑 Só com seleção: negociação é acerto sobre fotos
-                        // específicas, e a grade inteira não é uma escolha.
-                        Button::new("nav-balcao")
-                            .label("Balcão")
-                            .xsmall()
-                            .custom(tema::botao_quente(cx))
-                            .disabled(!tem_selecao)
-                            .on_click(cx.listener(|este, _ev, _window, cx| {
-                                este.abrir_balcao(cx);
-                            })),
-                    )
-                    // 📸 **Publicar cria uma galeria nova, e não tem botão** —
-                    // dentro de um ensaio o gesto é subir para *esta* sessão, e
-                    // dois caminhos para o mesmo lugar com desfechos diferentes
-                    // é a forma mais cara de confundir. O modal continua, e
-                    // quem o abre é o fluxo do balcão; a galeria nova nasce na
-                    // lista de sessões.
-                    .child(
-                        // A segunda tela. Só liga com seleção, como a Revelação
-                        // e a Impressão: mostrar preto ao cliente não diz "não
-                        // escolhi nada", diz "quebrou".
-                        Button::new("nav-cliente")
-                            .label("Segunda tela")
-                            .xsmall()
-                            .ghost()
-                            .when(self.cliente.is_some(), |b| b.custom(tema::botao_quente(cx)))
-                            .selected(self.cliente.is_some())
-                            .disabled(!tem_selecao)
-                            .on_click(cx.listener(|este, _ev, _window, cx| {
-                                este.alternar_cliente(cx);
-                            })),
-                    ),
-            )
-            .child(divisor(cx))
-            .child(
-                Button::new("nav-configuracoes")
-                    .label("Configurações")
-                    .xsmall()
-                    .ghost()
-                    .when(self.configurando, |b| b.primary())
-                    .selected(self.configurando)
-                    .on_click(cx.listener(|este, _ev, window, cx| {
-                        if este.configurando {
-                            este.fechar_configuracoes(window, cx);
-                        } else {
-                            este.abrir_configuracoes(window, cx);
-                        }
-                    })),
-            )
     }
 
     /// As Configurações, no mesmo véu do modal de importação.
@@ -2914,7 +3196,7 @@ impl Aplicativo {
 }
 
 impl Render for Aplicativo {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // 🚨 A porta vem antes de tudo, inclusive das teclas: com o app inteiro
         // desenhado por baixo, as quinze teclas de triagem continuariam
         // chegando à Biblioteca por trás da tela de login.
@@ -2925,10 +3207,20 @@ impl Render for Aplicativo {
                 .into_any_element();
         }
 
+        // 🧾 O caixa flutuante só existe na galeria e na revelação, e só ali
+        // ele escuta as teclas F.
+        let com_caixa = matches!(self.tela, Tela::Sessao | Tela::Revelacao);
+        self.caixa_flutuante
+            .update(cx, |caixa, _| caixa.definir_visivel(com_caixa));
+        let cliente_aberto = self.cliente_aberto();
+        self.revelacao
+            .update(cx, |tela, cx| tela.definir_cliente_aberto(cliente_aberto, cx));
+
         div()
             .key_context(CONTEXTO)
             .relative()
             .track_focus(&self.foco)
+            .map(|raiz| self.ouvir_atalhos_da_revelacao(raiz, window, cx))
             .on_action(cx.listener(Self::ao_voltar))
             .on_action(cx.listener(Self::ao_desfazer))
             .on_action(cx.listener(Self::ao_refazer))
@@ -3053,31 +3345,53 @@ impl Render for Aplicativo {
                     |grade, cx| grade.limpar_selecao(cx),
                 )
             }))
+            .on_action(cx.listener(|este, _: &AlternarMenuLateral, _w, cx| {
+                este.alternar_menu_lateral(cx);
+            }))
             .flex()
-            .flex_col()
             .size_full()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
-            // 🚨 **A barra do app some na Revelação**, e é o que faz a tela ser
-            // a do site: lá o editor é `fixed inset-0` e cobre a janela — não há
-            // navegação por cima dele. O caminho de volta é o `✕` da barra dela,
-            // que faz o mesmo que o `Esc`.
-            .children((self.tela != Tela::Revelacao).then(|| self.barra(cx)))
+            // 🎨 **A moldura do dashboard do site**: o menu lateral à esquerda,
+            // e à direita o cabeçalho de 56 px sobre a tela. A revelação cobre a
+            // janela inteira, como o editor do site (`fixed inset-0`); a galeria
+            // não tem o cabeçalho, porque a barra dela já tem o botão do menu.
+            .when(self.tela.tem_menu(), |raiz| {
+                raiz.child(self.menu_lateral(cx))
+            })
             .child(
-                // `min_h(0)` no contêiner da tela: sem ele, o conteúdo rolável
-                // de dentro empurra o pai e a rolagem nunca acontece. Foi a
-                // mesma correção que a linha de pastas + grade precisou.
-                div().flex().flex_1().min_h(px(0.)).child(match self.tela {
-                    Tela::Biblioteca => self.biblioteca.clone().into_any_element(),
-                    Tela::Revelacao => self.revelacao.clone().into_any_element(),
-                    Tela::Impressao => self.impressao.clone().into_any_element(),
-                    Tela::Sessoes => self.sessoes.clone().into_any_element(),
-                    // 🚨 **A sessão é uma tela só**, com tudo dentro: cabeçalho,
-                    // envio, barra, grade, painel da foto e a tira. É a rota
-                    // `[id]` do site, e foi o que o dono pediu ao mandar a
-                    // imagem dela: *"não invente nada"*.
-                    Tela::Sessao => self.detalhe.clone().into_any_element(),
-                }),
+                div()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_w(px(0.))
+                    .h_full()
+                    .when(self.tela.tem_cabecalho(), |coluna| {
+                        coluna.child(self.cabecalho(window, cx))
+                    })
+                    .child(
+                        // `min_h(0)` no contêiner da tela: sem ele, o conteúdo
+                        // rolável de dentro empurra o pai e a rolagem nunca
+                        // acontece.
+                        div().flex().flex_1().min_h(px(0.)).child(match self.tela {
+                            Tela::Biblioteca => self.biblioteca.clone().into_any_element(),
+                            Tela::Revelacao => self.revelacao.clone().into_any_element(),
+                            Tela::Impressao => self.impressao.clone().into_any_element(),
+                            Tela::Sessoes => self.sessoes.clone().into_any_element(),
+                            // 🚨 **A sessão é uma tela só**, com tudo dentro:
+                            // cabeçalho, envio, barra, grade, painel e a tira. É
+                            // a rota `[id]` do site.
+                            Tela::Sessao => self.detalhe.clone().into_any_element(),
+                            Tela::Caixa => self.caixa.clone().into_any_element(),
+                            Tela::Retencao => self.retencao.clone().into_any_element(),
+                        }),
+                    ),
+            )
+            .when(com_caixa, |raiz| raiz.child(self.caixa_flutuante.clone()))
+            .children(
+                (self.tela.tem_menu())
+                    .then(|| self.canto_dos_envios(cx))
+                    .flatten(),
             )
             .when(self.importando, |raiz| {
                 raiz.child(self.modal_de_importacao(cx))
@@ -3094,6 +3408,9 @@ impl Render for Aplicativo {
             .when(self.configurando, |raiz| {
                 raiz.child(self.modal_de_configuracoes(cx))
             })
+            .when(self.menu_da_conta && self.tela.tem_menu(), |raiz| {
+                raiz.child(self.menu_da_conta(cx))
+            })
             // 🔑 **Depois dos modais, e por cima deles.** A faixa é a última
             // coisa desenhada de propósito: ela ocupa uma linha do rodapé e
             // precisa continuar legível com o modal de importação aberto — que
@@ -3101,6 +3418,11 @@ impl Render for Aplicativo {
             .when_some(self.faixa_de_atualizacao(cx), |raiz, faixa| {
                 raiz.child(faixa)
             })
+            // 🚨 **As camadas do `gpui-component`.** Sem elas, `open_dialog` e
+            // `push_notification` não aparecem em lugar nenhum — a caixa do
+            // "Sincronizar N" abria no vazio e o botão parecia morto.
+            .children(gpui_component::Root::render_dialog_layer(window, cx))
+            .children(gpui_component::Root::render_notification_layer(window, cx))
             .into_any_element()
     }
 }
@@ -3158,6 +3480,7 @@ fn do_site_para_a_grade(
         ),
         pos_venda_foto_id: Some(foto.id.clone()),
         sessao_id,
+        revelacao_travada: foto.estado == EstadoDaFotoNoSite::Comprada || foto.apagada,
         ..Default::default()
     };
     // 🔑 **A receita vem junto.** É o `completar(foto.ajustes)` do editor do
@@ -3235,22 +3558,43 @@ impl Aplicativo {
     }
 }
 
-/// Um grupo de botões da barra: eles se tocam, e o divisor separa do próximo.
-fn grupo() -> gpui::Div {
-    div().flex().items_center().gap(px(2.))
+/// O nome do download, como o site: `<nome sem extensão>-revelada.jpg`.
+fn nome_do_jpeg(arquivo: &str) -> String {
+    let base = match arquivo.rfind('.') {
+        Some(ponto) if ponto > 0 => &arquivo[..ponto],
+        _ => arquivo,
+    };
+    format!("{base}-revelada.jpg")
 }
 
-/// A linha entre dois grupos da barra.
-///
-/// 🔑 **Um pixel, e não um espaço maior.** Espaço separa quando há pouca coisa;
-/// com a barra cheia, o que separa é a linha — e ela custa 1px de largura em vez
-/// dos 12 que o respiro pediria.
-fn divisor(cx: &gpui::App) -> gpui::Div {
-    div().w(px(1.)).h(px(16.)).flex_none().bg(cx.theme().border)
+/// Um caminho que não pisa em arquivo existente: `x.jpg`, `x (2).jpg`…
+fn arquivo_livre(pasta: &std::path::Path, nome: &str) -> std::path::PathBuf {
+    let caminho = pasta.join(nome);
+    if !caminho.exists() {
+        return caminho;
+    }
+    let (base, extensao) = nome.rsplit_once('.').unwrap_or((nome, ""));
+    (2..)
+        .map(|n| pasta.join(format!("{base} ({n}).{extensao}")))
+        .find(|c| !c.exists())
+        .expect("sempre há um número livre")
 }
 
 #[cfg(test)]
 mod testes {
+    #[test]
+    fn o_jpeg_baixado_tem_o_nome_do_site() {
+        assert_eq!(super::nome_do_jpeg("GRA_2729.webp"), "GRA_2729-revelada.jpg");
+        assert_eq!(super::nome_do_jpeg("sem-extensao"), "sem-extensao-revelada.jpg");
+        let pasta = tempfile::tempdir().expect("pasta");
+        let primeiro = super::arquivo_livre(pasta.path(), "a-revelada.jpg");
+        std::fs::write(&primeiro, b"x").expect("gravar");
+        assert_eq!(
+            super::arquivo_livre(pasta.path(), "a-revelada.jpg").file_name().unwrap(),
+            "a-revelada (2).jpg"
+        );
+    }
+
     use super::*;
 
     use gpui::TestAppContext;
@@ -3275,7 +3619,7 @@ mod testes {
     use crate::revelacao::reposicao::mentira::RepositorDeMentira;
 
     /// As portas de mentira, que é o que quase todo teste daqui quer.
-    fn portas() -> Portas {
+    pub(super) fn portas() -> Portas {
         Portas {
             gravador: Arc::new(GravadorDeMentira::default()),
             acervo: Arc::new(AcervoDeMentira::default()),
@@ -3315,7 +3659,7 @@ mod testes {
         )
     }
 
-    fn previews_descartaveis() -> (Arc<PreviewManager>, TempDir) {
+    pub(super) fn previews_descartaveis() -> (Arc<PreviewManager>, TempDir) {
         let dir = TempDir::new().expect("criar diretório temporário");
         (
             Arc::new(PreviewManager::new_with_path(dir.path().to_path_buf())),
@@ -3710,7 +4054,7 @@ mod testes {
         }
     }
 
-    fn acervo() -> Vec<PhotoViewModel> {
+    pub(super) fn acervo() -> Vec<PhotoViewModel> {
         vec![foto("DSC_001.NEF"), foto("retrato.jpg")]
     }
 

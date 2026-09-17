@@ -266,6 +266,40 @@ async fn ler<T: for<'de> Deserialize<'de>>(resposta: reqwest::Response) -> Domai
 
 #[async_trait]
 impl PosVendaApi for PosVendaApiHttp {
+    async fn pedir_json(
+        &self,
+        sessao: &Sessao,
+        metodo: &str,
+        caminho: &str,
+        corpo: Option<serde_json::Value>,
+    ) -> DomainResult<serde_json::Value> {
+        let corpo = corpo.map(|valor| CorpoCru {
+            tipo: "application/json".into(),
+            bytes: valor.to_string().into_bytes(),
+        });
+        let resposta = self.chamar(Some(sessao), metodo, caminho, corpo).await?;
+        let texto = String::from_utf8_lossy(&resposta.bytes);
+        if !(200..300).contains(&resposta.status) {
+            if resposta.status == 401 {
+                return Err(DomainError::AcessoRecusado);
+            }
+            let mensagem = serde_json::from_str::<EnvelopeDeErro>(&texto)
+                .ok()
+                .and_then(|e| e.error)
+                .and_then(|e| e.message)
+                .unwrap_or_else(|| texto.chars().take(200).collect());
+            return Err(DomainError::InfrastructureError(format!(
+                "o site respondeu {}: {mensagem}",
+                resposta.status
+            )));
+        }
+        if resposta.bytes.is_empty() {
+            return Ok(serde_json::Value::Null);
+        }
+        serde_json::from_slice(&resposta.bytes)
+            .map_err(|e| DomainError::InfrastructureError(format!("resposta ilegível: {e}")))
+    }
+
     async fn autorizar_pelo_navegador(&self) -> DomainResult<Sessao> {
         // O servidor local sobe **antes** do navegador: se ele abrisse depois, a
         // volta poderia chegar numa porta que ainda não escuta, e o operador

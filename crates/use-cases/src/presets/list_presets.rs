@@ -9,7 +9,7 @@ use std::sync::Arc;
 /// Eles não moram na tabela `presets`: são construídos aqui a cada listagem, e a
 /// tela os separa dos do usuário por `is_system`.
 ///
-/// # 🔑 São os sete do site, e são os mesmos números
+/// # 🔑 São os oito do site, e são os mesmos números
 ///
 /// Até 7/set/2026 eram quatro — "B&W", "Warm", "Cool" e "High Contrast" —, e o
 /// site tinha outros sete, em português, guardados em
@@ -46,7 +46,7 @@ use std::sync::Arc;
 pub fn presets_de_sistema() -> Vec<Preset> {
     // 🚨 **As que definem o *look* substituem; as que acrescentam, somam.**
     // Somar é o certo para "Nitidez para impressão" — ela se aplica depois de
-    // qualquer tratamento. Não é o certo para as outras seis: a sépia escreve a
+    // qualquer tratamento. Não é o certo para as outras sete: a sépia escreve a
     // tonalização, o preto e branco escreve a dessaturação e não desfaz a
     // tonalização, e o que saía era uma foto âmbar com nome de preto e branco
     // (dono, 2026-09-11, na web). Ver `Preset::replaces`.
@@ -145,6 +145,47 @@ pub fn presets_de_sistema() -> Vec<Preset> {
                 ("blacks", 15.0),
                 ("clarity", -0.1),
                 ("saturation", -0.1),
+            ],
+        ),
+        // 🎞️ **O estilo do estúdio no darktable, e não uma imitação dele** — a
+        // oitava do site (`presets-do-sistema.ts`, `recordarfotos-pb`), com os
+        // mesmos números. São os do `docs/RecordarFotos P&B.dtstyle`,
+        // decodificados do binário de cada módulo e escritos na menor forma
+        // decimal que volta ao mesmo `f32`; os campos no neutro do darktable
+        // ficam de fora, como em qualquer predefinição.
+        //
+        // ⚠️ A exposição (+0,163 EV) é ponto de partida: nas fotos que o estúdio
+        // exportou ela foi corrigida por foto. É o que o operador ajusta depois.
+        //
+        // Importar o mesmo `.dtstyle` pela coluna tem de dar exatamente estes
+        // campos — `ui-gpui/src/revelacao/lightroom/darktable.rs` confere.
+        monte(
+            "RecordarFotos P&B",
+            &[
+                ("dt_exposure_ativo", 1.0),
+                ("dt_exposure_black", -0.0019000024),
+                ("dt_exposure_exposure", 0.16299987),
+                ("dt_shadhi_ativo", 1.0),
+                ("dt_shadhi_shadows", 65.380005),
+                ("dt_shadhi_highlights", -20.509995),
+                ("dt_monochrome_ativo", 1.0),
+                ("dt_vignette_ativo", 1.0),
+                ("dt_vignette_scale", 87.81999),
+                ("dt_vignette_falloff_scale", 45.51),
+                ("dt_vignette_brightness", 0.9999999),
+                ("dt_vignette_saturation", 0.14699996),
+                ("dt_vignette_autoratio", 1.0),
+                ("dt_vignette_shape", 0.47999996),
+                ("dt_cb_ativo", 1.0),
+                ("dt_cb_shadows_c", 0.17469998),
+                ("dt_cb_shadows_h", 71.53999),
+                ("dt_cb_midtones_h", 73.84999),
+                ("dt_cb_highlights_y", 0.0449),
+                ("dt_cb_highlights_c", 0.083299994),
+                ("dt_cb_highlights_h", 71.53999),
+                ("dt_cb_saturation_highlights", 0.16030002),
+                ("dt_cb_saturation_midtones", 0.13459992),
+                ("dt_cb_brilliance_midtones", 0.14740002),
             ],
         ),
         // ⚠️ O raio começa em 0,5 porque raio zero não tem pixel de vizinhança —

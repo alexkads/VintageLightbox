@@ -36,6 +36,7 @@ domain = { path = "../domain" }
 # compilariam, mas `DynamicImage` de uma **não é** o tipo da outra, e a ponte de
 # imagem (§3.1) atravessa exatamente essa fronteira.
 image = "0.25"
+directories = "6.0.0"
 # `RenderImage::new` recebe `SmallVec<[Frame; 1]>`, e o `gpui` não reexporta o
 # `smallvec` — quem constrói o argumento precisa da mesma versão que ele usa.
 smallvec = "1"
@@ -50,6 +51,11 @@ anyhow = "1.0"
 # trocou o `egui_file` por ele. Janela do sistema, e não do framework: é o que
 # evita disputa de camada com o modal (a razão está registrada no STATUS).
 rfd = "0.17.2"
+# Os estilos do darktable guardam os parâmetros de cada módulo em zlib
+# (`gz` + base64), e importar um `.dtstyle` é abri-los
+# (`revelacao/lightroom/darktable.rs`). É o mesmo `miniz_oxide` que o `png` já
+# traz para a árvore — nenhuma dependência nova no lockfile, só uma aresta.
+miniz_oxide = "0.8"
 
 # A folha de impressão vira PDF. 🔑 O leiaute já é calculado em milímetros
 # (`impressao/pagina.rs`), que é a unidade nativa do PDF — gerar é colocar cada
@@ -88,6 +94,30 @@ uuid.workspace = true
 # Duas pilhas TLS na mesma árvore é compilar o mesmo trabalho duas vezes — a
 # mesma razão registrada no `infrastructure/Cargo.toml`.
 cargo-packager-updater = { version = "0.2", default-features = false, features = ["native-tls"] }
+
+# A bandeja do sistema (`src/bandeja.rs`): o mesmo `tray-icon` que o app Tauri
+# usa por dentro, na versão que o lockfile já tem — nenhum crate novo na árvore.
+# ⚠️ Sem `libxdo`: ele só serve aos itens Copiar/Colar do menu, que a bandeja
+# não tem, e seria mais uma biblioteca do sistema para instalar no Linux.
+tray-icon = { version = "0.24", default-features = false, features = ["gtk"] }
+
+# A foto da própria janela, nas ferramentas de depuração (`src/depuracao.rs`):
+# a `NSView` do GPUI chega por `raw-window-handle`, e o número da janela sai
+# dela por uma mensagem do Objective-C. As mesmas versões que o `gpui` e o
+# `app-tauri` já trazem.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+raw-window-handle = "0.6"
+
+# A janela minimizada e a volta da bandeja no Windows (`segundo_plano/janela.rs`).
+[target.'cfg(target_os = "windows")'.dependencies]
+raw-window-handle = "0.6"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
+
+# No Linux o ícone da bandeja mora numa thread com o laço do GTK, que o GPUI não
+# roda (`src/bandeja.rs`). A mesma versão que o `tray-icon` traz.
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = "0.18"
 
 [dev-dependencies]
 tempfile = "3.8"

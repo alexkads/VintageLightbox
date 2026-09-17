@@ -61,6 +61,20 @@ impl PosVendaController {
         self.api.sair().await;
     }
 
+    /// Um pedido JSON em nome da conta — ver [`PosVendaApi::pedir_json`].
+    pub async fn pedir_json(
+        &self,
+        sessao: &Sessao,
+        metodo: &str,
+        caminho: &str,
+        corpo: Option<serde_json::Value>,
+    ) -> Result<serde_json::Value, String> {
+        self.api
+            .pedir_json(sessao, metodo, caminho, corpo)
+            .await
+            .map_err(frase)
+    }
+
     pub async fn produtos(&self, sessao: &Sessao) -> Result<Vec<Produto>, String> {
         self.api.produtos(sessao).await.map_err(frase)
     }

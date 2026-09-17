@@ -750,6 +750,27 @@ impl Biblioteca {
         }
     }
 
+    /// Marca estas fotos (e foca a primeira), vindas da grade da sessão.
+    ///
+    /// 🔑 A grade da sessão fala o id do site; aqui a foto do site leva o
+    /// prefixo `site:` (`persistencia::PREFIXO_DO_SITE`), e a do disco não.
+    pub fn selecionar_ids(&mut self, ids: &[String], cx: &mut Context<Self>) {
+        let prefixo = crate::revelacao::persistencia::PREFIXO_DO_SITE;
+        let mut marcadas = std::collections::HashSet::new();
+        for id in ids {
+            marcadas.insert(id.clone());
+            marcadas.insert(format!("{prefixo}{id}"));
+        }
+        let principal = ids.first().and_then(|primeiro| {
+            self.fotos
+                .iter()
+                .find(|f| f.id == *primeiro || f.id == format!("{prefixo}{primeiro}"))
+                .map(|f| f.id.clone())
+        });
+        self.remarcar_por_id(&marcadas, principal.as_deref());
+        cx.notify();
+    }
+
     /// A foto selecionada, para quem está de fora.
     ///
     /// Devolve uma cópia, e não uma referência: quem pergunta é a raiz, para
@@ -798,6 +819,12 @@ impl Biblioteca {
     /// aqui, mais as que o site respondeu.
     pub fn todas_as_fotos(&self) -> Vec<PhotoViewModel> {
         self.fotos.as_ref().clone()
+    }
+
+    /// Quantas fotos do acervo passam no critério, sem copiar a lista — a
+    /// bandeja pergunta a cada volta (`crate::segundo_plano`).
+    pub fn contar_fotos(&self, criterio: impl Fn(&PhotoViewModel) -> bool) -> usize {
+        self.fotos.iter().filter(|f| criterio(f)).count()
     }
 
     /// As fotos que a grade está mostrando — já filtradas.

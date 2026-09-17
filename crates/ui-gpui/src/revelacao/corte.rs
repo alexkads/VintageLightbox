@@ -211,24 +211,29 @@ pub fn arrastar(corte: &CropSettings, dx: f32, dy: f32) -> CropSettings {
     caixa.para(corte)
 }
 
-/// Gira 90° no sentido horário, como o botão do legado.
+/// Gira um quarto de volta no sentido horário, e **leva o retângulo junto**
+/// (`girar` do site).
 ///
-/// ⚠️ **O retângulo de corte não é girado junto.** Ele é guardado no espaço da
-/// imagem original, e é o `CropSettings::to_visual_space` (no `domain`) que o
-/// traduz para o que aparece na tela. Girar as coordenadas aqui aplicaria a
-/// rotação duas vezes.
+/// 🔑 O retângulo mora no espaço já girado (ver `revelacao_core::transformacao`):
+/// girar o espaço sem girar o retângulo o deixaria descrevendo outra região da
+/// foto. A conta é a rotação do retângulo unitário, `(x, y) → (1 − y − altura, x)`,
+/// com os lados trocados.
 pub fn girar(corte: &CropSettings) -> CropSettings {
-    let voltas = (corte.rotation_90() + 1).rem_euclid(4);
     CropSettings::new(
+        1.0 - corte.crop_y() - corte.crop_height(),
         corte.crop_x(),
-        corte.crop_y(),
-        corte.crop_width(),
         corte.crop_height(),
-        voltas,
+        corte.crop_width(),
+        (corte.rotation_90() + 1).rem_euclid(4),
         corte.angle(),
         corte.flip_horizontal(),
         corte.flip_vertical(),
     )
+}
+
+/// Três quartos de volta: o "girar à esquerda" do painel.
+pub fn girar_a_esquerda(corte: &CropSettings) -> CropSettings {
+    girar(&girar(&girar(corte)))
 }
 
 pub fn espelhar_horizontal(corte: &CropSettings) -> CropSettings {
@@ -269,6 +274,308 @@ pub fn inclinar(corte: &CropSettings, graus: f32) -> CropSettings {
         corte.flip_horizontal(),
         corte.flip_vertical(),
     )
+}
+
+/// O maior ângulo do endireitamento, como no site (`ANGULO_MAXIMO`).
+pub const ANGULO_MAXIMO: f32 = 45.;
+
+/// Um retângulo em pixels do espaço girado (depois de espelhos e giro de 90°).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Retangulo {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+}
+
+/// O retângulo do corte em pixels do espaço (`retanguloDe` do site).
+pub fn retangulo_de(corte: &CropSettings, espaco: (f32, f32)) -> Retangulo {
+    Retangulo {
+        x: corte.crop_x() * espaco.0,
+        y: corte.crop_y() * espaco.1,
+        w: corte.crop_width() * espaco.0,
+        h: corte.crop_height() * espaco.1,
+    }
+}
+
+/// O caminho inverso (`comRetangulo`).
+pub fn com_retangulo(corte: &CropSettings, r: Retangulo, espaco: (f32, f32)) -> CropSettings {
+    CropSettings::new(
+        r.x / espaco.0,
+        r.y / espaco.1,
+        r.w / espaco.0,
+        r.h / espaco.1,
+        corte.rotation_90(),
+        corte.angle(),
+        corte.flip_horizontal(),
+        corte.flip_vertical(),
+    )
+}
+
+/// O ponto está dentro da foto depois de o ângulo girá-la? A foto gira em
+/// torno do centro do espaço, e basta desfazer o giro no ponto.
+fn dentro_da_foto_girada(px: f32, py: f32, espaco: (f32, f32), angulo: f32) -> bool {
+    let (cx, cy) = (espaco.0 / 2., espaco.1 / 2.);
+    let (sin, cos) = (-angulo.to_radians()).sin_cos();
+    let (dx, dy) = (px - cx, py - cy);
+    let x = cx + dx * cos - dy * sin;
+    let y = cy + dx * sin + dy * cos;
+    let folga = 0.5;
+    x >= -folga && y >= -folga && x <= espaco.0 + folga && y <= espaco.1 + folga
+}
+
+/// O retângulo cabe inteiro na foto girada — sem canto vazio?
+pub fn cabe_na_foto_girada(r: Retangulo, espaco: (f32, f32), angulo: f32) -> bool {
+    if r.x < -0.5 || r.y < -0.5 {
+        return false;
+    }
+    if r.x + r.w > espaco.0 + 0.5 || r.y + r.h > espaco.1 + 0.5 {
+        return false;
+    }
+    if angulo == 0. {
+        return true;
+    }
+    [
+        (r.x, r.y),
+        (r.x + r.w, r.y),
+        (r.x, r.y + r.h),
+        (r.x + r.w, r.y + r.h),
+    ]
+    .iter()
+    .all(|(x, y)| dentro_da_foto_girada(*x, *y, espaco, angulo))
+}
+
+fn escalar_no_centro(r: Retangulo, s: f32, cx: f32, cy: f32) -> Retangulo {
+    let (w, h) = (r.w * s, r.h * s);
+    Retangulo {
+        x: cx - w / 2.,
+        y: cy - h / 2.,
+        w,
+        h,
+    }
+}
+
+/// O maior retângulo com a mesma proporção e o mesmo centro que cabe na foto
+/// girada — o "zoom do endireitar" (dono, 2026-09-05: *"o endireitar precisa
+/// dar zoom para preencher os espaços não preenchidos"*).
+pub fn encolher_para_caber(r: Retangulo, espaco: (f32, f32), angulo: f32) -> Retangulo {
+    // Arredondar para dentro, nunca para fora: um pixel a mais é o canto vazio
+    // de volta.
+    let arredondar = |v: Retangulo| {
+        let x = (v.x - 1e-3).ceil().max(0.);
+        let y = (v.y - 1e-3).ceil().max(0.);
+        Retangulo {
+            x,
+            y,
+            w: ((v.x + v.w + 1e-3).floor() - x).max(1.),
+            h: ((v.y + v.h + 1e-3).floor() - y).max(1.),
+        }
+    };
+    if cabe_na_foto_girada(r, espaco, angulo) {
+        return arredondar(r);
+    }
+    let (mut cx, mut cy) = (r.x + r.w / 2., r.y + r.h / 2.);
+    if !dentro_da_foto_girada(cx, cy, espaco, angulo) {
+        cx = espaco.0 / 2.;
+        cy = espaco.1 / 2.;
+    }
+    let (mut cabe, mut nao_cabe) = (0f32, 1f32);
+    for _ in 0..40 {
+        let meio = (cabe + nao_cabe) / 2.;
+        if cabe_na_foto_girada(escalar_no_centro(r, meio, cx, cy), espaco, angulo) {
+            cabe = meio;
+        } else {
+            nao_cabe = meio;
+        }
+    }
+    arredondar(escalar_no_centro(r, cabe, cx, cy))
+}
+
+/// Endireita, e traz o retângulo para dentro da foto (`endireitar` do site).
+///
+/// `desejado` é o retângulo que o operador pediu antes de qualquer
+/// encolhimento: é o que faz o retângulo **crescer de volta** quando o ângulo
+/// volta a zero.
+pub fn endireitar(
+    corte: &CropSettings,
+    angulo: f32,
+    espaco: (f32, f32),
+    desejado: Option<Retangulo>,
+) -> CropSettings {
+    let limitado = angulo.clamp(-ANGULO_MAXIMO, ANGULO_MAXIMO);
+    let alvo = desejado.unwrap_or_else(|| retangulo_de(corte, espaco));
+    let cabendo = encolher_para_caber(alvo, espaco, limitado);
+    let com_angulo = CropSettings::new(
+        corte.crop_x(),
+        corte.crop_y(),
+        corte.crop_width(),
+        corte.crop_height(),
+        corte.rotation_90(),
+        limitado,
+        corte.flip_horizontal(),
+        corte.flip_vertical(),
+    );
+    com_retangulo(&com_angulo, cabendo, espaco)
+}
+
+/// O retângulo remodelado para uma proporção, **na hora**
+/// (`comProporcaoNoCentro` do site).
+///
+/// A **área é preservada**, e não um dos lados: trocar 3:2 por 2:3 mantendo a
+/// largura daria um retângulo altíssimo que a foto corta em seguida. Depois
+/// disso, cabe no espaço e cabe na foto girada.
+pub fn com_proporcao_no_centro(
+    r: Retangulo,
+    proporcao: f32,
+    espaco: (f32, f32),
+    angulo: f32,
+) -> Retangulo {
+    let area = (r.w * r.h).max(1.);
+    let mut w = (area * proporcao).sqrt();
+    let mut h = w / proporcao;
+    let couber = 1f32.min(espaco.0 / w).min(espaco.1 / h);
+    w *= couber;
+    h *= couber;
+    let (cx, cy) = (r.x + r.w / 2., r.y + r.h / 2.);
+    let x = (cx - w / 2.).min(espaco.0 - w).max(0.);
+    let y = (cy - h / 2.).min(espaco.1 - h).max(0.);
+    encolher_para_caber(Retangulo { x, y, w, h }, espaco, angulo)
+}
+
+/// As proporções que o painel oferece, na ordem do site. `None` é livre.
+pub const PROPORCOES: [(&str, Option<f32>); 7] = [
+    ("Livre", None),
+    ("1:1", Some(1.)),
+    ("3:2", Some(3. / 2.)),
+    ("2:3", Some(2. / 3.)),
+    ("4:3", Some(4. / 3.)),
+    ("3:4", Some(3. / 4.)),
+    ("16:9", Some(16. / 9.)),
+];
+
+/// O retângulo depois de um arrasto, **em pixels do espaço girado**
+/// (`arrastar` do site).
+///
+/// `alca` `None` é o meio: só move. Com proporção, a borda que o dedo move
+/// manda e a outra acompanha, a borda oposta fica parada, e o resultado é
+/// limitado à imagem — encolhendo, nunca estourando.
+pub fn arrastar_em_pixels(
+    inicial: Retangulo,
+    alca: Option<Alca>,
+    dx: f32,
+    dy: f32,
+    limite: (f32, f32),
+    proporcao: Option<f32>,
+) -> Retangulo {
+    let minimo = (LADO_MINIMO * limite.0.min(limite.1)).round().max(1.);
+
+    let Some(alca) = alca else {
+        return Retangulo {
+            x: (inicial.x + dx).min(limite.0 - inicial.w).max(0.),
+            y: (inicial.y + dy).min(limite.1 - inicial.h).max(0.),
+            ..inicial
+        };
+    };
+
+    let mut esquerda = inicial.x;
+    let mut topo = inicial.y;
+    let mut direita = inicial.x + inicial.w;
+    let mut base = inicial.y + inicial.h;
+
+    if alca.move_a_esquerda() {
+        esquerda = (esquerda + dx).max(0.).min(direita - minimo);
+    }
+    if alca.move_a_direita() {
+        direita = (direita + dx).min(limite.0).max(esquerda + minimo);
+    }
+    if alca.move_o_topo() {
+        topo = (topo + dy).max(0.).min(base - minimo);
+    }
+    if alca.move_a_base() {
+        base = (base + dy).min(limite.1).max(topo + minimo);
+    }
+
+    if let Some(proporcao) = proporcao {
+        let mut w = direita - esquerda;
+        let mut h = base - topo;
+        // Quem manda é o eixo que a alça move: numa borda horizontal, a
+        // altura; num canto ou borda vertical, a largura.
+        if matches!(alca, Alca::Superior | Alca::Inferior) {
+            w = h * proporcao;
+        } else {
+            h = w / proporcao;
+        }
+        w = w.min(limite.0);
+        h = h.min(limite.1);
+        if w / h > proporcao {
+            w = h * proporcao;
+        } else {
+            h = w / proporcao;
+        }
+
+        // A borda oposta à que se moveu é a âncora.
+        if alca.move_a_esquerda() {
+            esquerda = direita - w;
+        } else {
+            direita = esquerda + w;
+        }
+        if alca.move_o_topo() {
+            topo = base - h;
+        } else {
+            base = topo + h;
+        }
+
+        // Se a âncora empurrou para fora, traz de volta sem mudar o tamanho.
+        if esquerda < 0. {
+            direita -= esquerda;
+            esquerda = 0.;
+        }
+        if topo < 0. {
+            base -= topo;
+            topo = 0.;
+        }
+        if direita > limite.0 {
+            esquerda -= direita - limite.0;
+            direita = limite.0;
+        }
+        if base > limite.1 {
+            topo -= base - limite.1;
+            base = limite.1;
+        }
+        esquerda = esquerda.max(0.);
+        topo = topo.max(0.);
+    }
+
+    // `round` do JavaScript: meio sobe.
+    let arredondar = |v: f32| (v + 0.5).floor();
+    Retangulo {
+        x: arredondar(esquerda),
+        y: arredondar(topo),
+        w: arredondar((direita - esquerda).max(minimo)),
+        h: arredondar((base - topo).max(minimo)),
+    }
+}
+
+/// O espaço girado de uma foto: os lados trocam com giro ímpar.
+pub fn espaco_de(corte: &CropSettings, foto: (f32, f32)) -> (f32, f32) {
+    if corte.rotation_90().rem_euclid(4) % 2 == 1 {
+        (foto.1, foto.0)
+    } else {
+        foto
+    }
+}
+
+/// O enquadramento não muda nada? A folga é a do `ehCorteInteiro` do site.
+pub fn e_inteiro(corte: &CropSettings) -> bool {
+    const FOLGA: f32 = 1e-4;
+    corte.rotation_90().rem_euclid(4) == 0
+        && corte.angle() == 0.
+        && !corte.flip_horizontal()
+        && !corte.flip_vertical()
+        && corte.crop_x().abs() < FOLGA
+        && corte.crop_y().abs() < FOLGA
+        && (corte.crop_width() - 1.).abs() < FOLGA
+        && (corte.crop_height() - 1.).abs() < FOLGA
 }
 
 /// O `largura / altura` que a proporção escolhida exige, em pixels.
@@ -638,12 +945,10 @@ mod testes {
         for volta in 1..=4 {
             girado = girar(&girado);
             assert_eq!(girado.rotation_90(), volta % 4);
-            assert_eq!(
-                quatro(&girado),
-                quatro(&antes),
-                "o retângulo não gira junto"
-            );
         }
+        // O retângulo gira junto, e quatro quartos o devolvem ao lugar.
+        let (a, b) = (quatro(&girado), quatro(&antes));
+        assert!(perto(a.0, b.0) && perto(a.1, b.1) && perto(a.2, b.2) && perto(a.3, b.3));
     }
 
     #[test]
@@ -722,5 +1027,137 @@ mod testes {
         let inteira = foto_inteira();
         assert_eq!(quatro(&inteira), (0.0, 0.0, 1.0, 1.0));
         assert!(!inteira.is_cropped(), "foto inteira não é corte");
+    }
+
+    fn r(x: f32, y: f32, w: f32, h: f32) -> Retangulo {
+        Retangulo { x, y, w, h }
+    }
+
+    const ESPACO: (f32, f32) = (1000., 800.);
+
+    /// O retângulo mora no espaço girado: girar sem levá-lo junto faria o
+    /// enquadramento saltar para outra região da foto.
+    #[test]
+    fn girar_leva_o_retangulo_junto() {
+        let c = CropSettings::new(0., 0., 0.5, 0.25, 0, 0., false, false);
+        let girado = girar(&c);
+        assert_eq!(girado.rotation_90(), 1);
+        assert!(perto(girado.crop_x(), 0.75));
+        assert!(perto(girado.crop_y(), 0.));
+        assert!(perto(girado.crop_width(), 0.25));
+        assert!(perto(girado.crop_height(), 0.5));
+        let volta = girar_a_esquerda(&girado);
+        assert_eq!(volta.rotation_90(), 0);
+        assert!(perto(volta.crop_x(), 0.) && perto(volta.crop_width(), 0.5));
+        assert!(e_inteiro(&girar(&girar(&girar(&girar(&foto_inteira()))))));
+        assert!(!e_inteiro(&girar(&foto_inteira())));
+    }
+
+    #[test]
+    fn arrastar_em_pixels_como_no_site() {
+        let meio = r(200., 160., 400., 320.);
+        assert_eq!(
+            arrastar_em_pixels(meio, None, 50., -30., ESPACO, None),
+            r(250., 130., 400., 320.)
+        );
+        assert_eq!(
+            arrastar_em_pixels(meio, None, -9999., -9999., ESPACO, None),
+            r(0., 0., 400., 320.)
+        );
+        assert_eq!(
+            arrastar_em_pixels(meio, None, 9999., 9999., ESPACO, None),
+            r(600., 480., 400., 320.)
+        );
+        assert_eq!(
+            arrastar_em_pixels(meio, Some(Alca::Esquerda), 100., 0., ESPACO, None),
+            r(300., 160., 300., 320.)
+        );
+        assert_eq!(
+            arrastar_em_pixels(meio, Some(Alca::Inferior), 0., 100., ESPACO, None),
+            r(200., 160., 400., 420.)
+        );
+        assert_eq!(
+            arrastar_em_pixels(meio, Some(Alca::SuperiorDireita), 50., 50., ESPACO, None),
+            r(200., 210., 450., 270.)
+        );
+        for alca in Alca::TODAS {
+            for (dx, dy) in [(9999., 9999.), (-9999., -9999.)] {
+                let v = arrastar_em_pixels(meio, Some(alca), dx, dy, ESPACO, None);
+                assert!(v.x >= 0. && v.y >= 0., "{alca:?}");
+                assert!(v.x + v.w <= ESPACO.0 && v.y + v.h <= ESPACO.1, "{alca:?}");
+                assert!(v.w >= 8. && v.h >= 8., "{alca:?}");
+            }
+            for (rotulo, valor) in PROPORCOES {
+                let Some(valor) = valor else { continue };
+                let v = arrastar_em_pixels(meio, Some(alca), 70., 70., ESPACO, Some(valor));
+                assert!((v.w / v.h - valor).abs() < 0.05, "{rotulo} em {alca:?}");
+                assert!(v.x + v.w <= ESPACO.0 + 1., "{rotulo} em {alca:?}");
+                assert!(v.y + v.h <= ESPACO.1 + 1., "{rotulo} em {alca:?}");
+            }
+        }
+        let v = arrastar_em_pixels(
+            r(0., 0., 100., 100.),
+            Some(Alca::InferiorDireita),
+            9999.,
+            9999.,
+            ESPACO,
+            Some(1.),
+        );
+        assert_eq!(v.w, v.h);
+        assert!(v.w <= ESPACO.1);
+    }
+
+    #[test]
+    fn a_proporcao_remodela_na_hora_mantendo_a_area() {
+        let espaco = (1000., 600.);
+        let base = r(200., 100., 600., 400.);
+        let q = com_proporcao_no_centro(base, 1., espaco, 0.);
+        assert_eq!(q.w, q.h);
+        assert!((q.x + q.w / 2. - 500.).abs() <= 1.);
+        assert!((q.y + q.h / 2. - 300.).abs() <= 1.);
+
+        let deitado = r(100., 100., 300., 200.);
+        let empe = com_proporcao_no_centro(deitado, 2. / 3., espaco, 0.);
+        assert!((empe.w / empe.h - 2. / 3.).abs() < 0.01);
+        assert!((empe.w * empe.h - 60_000.).abs() < 1000.);
+
+        let inteiro = r(0., 0., 1000., 600.);
+        let largo = com_proporcao_no_centro(inteiro, 16. / 9., espaco, 0.);
+        assert!(largo.x >= 0. && largo.y >= 0.);
+        assert!(largo.x + largo.w <= 1001. && largo.y + largo.h <= 601.);
+
+        let girado = com_proporcao_no_centro(inteiro, 1., espaco, -18.);
+        assert!(cabe_na_foto_girada(girado, espaco, -18.));
+        assert!((girado.w / girado.h - 1.).abs() < 0.05);
+    }
+
+    #[test]
+    fn o_espaco_troca_os_lados_com_giro_impar() {
+        let c = girar(&foto_inteira());
+        assert_eq!(espaco_de(&c, (300., 200.)), (200., 300.));
+        assert_eq!(espaco_de(&foto_inteira(), (300., 200.)), (300., 200.));
+    }
+
+    #[test]
+    fn endireitar_encolhe_para_caber_e_cresce_de_volta() {
+        let espaco = (3000., 2000.);
+        let inteiro = foto_inteira();
+        let desejado = retangulo_de(&inteiro, espaco);
+        let girado = endireitar(&inteiro, 10., espaco, Some(desejado));
+        assert_eq!(girado.angle(), 10.);
+        assert!(
+            girado.crop_width() < 1.,
+            "encolheu para não deixar canto vazio"
+        );
+        let r = retangulo_de(&girado, espaco);
+        assert!(cabe_na_foto_girada(r, espaco, 10.));
+        // A proporção se mantém.
+        assert!((r.w / r.h - 1.5).abs() < 0.01, "{r:?}");
+        let de_volta = endireitar(&girado, 0., espaco, Some(desejado));
+        assert!(
+            (de_volta.crop_width() - 1.).abs() < 1e-3,
+            "voltou à foto inteira"
+        );
+        assert_eq!(endireitar(&inteiro, 80., espaco, None).angle(), 45.);
     }
 }

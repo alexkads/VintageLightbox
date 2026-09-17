@@ -24,6 +24,22 @@ pub struct PhotoViewModel {
     /// De qual ensaio esta foto é. `None` = foto solta, do catálogo.
     #[serde(default)]
     pub sessao_id: Option<String>,
+    /// **Todos** os ajustes da revelação, na ordem de `Ajustes::NOMES` do
+    /// motor, quando a foto veio do site.
+    ///
+    /// 🚨 As colunas `edit_*` abaixo são só os 53 ajustes antigos. A receita do
+    /// site tem os módulos novos (`dt_*`), e sem este campo eles se perdiam no
+    /// caminho: a foto revelada em sépia no site abria neutra no desktop, e
+    /// assim ia para a tela do cliente (2026-09-17). `None` = valem as colunas.
+    #[serde(default)]
+    pub ajustes_completos: Option<Vec<f32>>,
+    /// Comprada no site (ou sem arquivo): **não se revela**, como no editor
+    /// do site (`editavel`). O cliente pode já ter baixado o original.
+    ///
+    /// ⚠️ Não é o `comprada` de cima, que junta a levada no balcão — essa
+    /// continua revelável no site.
+    #[serde(default)]
+    pub revelacao_travada: bool,
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub edit_exposure: Option<f32>,

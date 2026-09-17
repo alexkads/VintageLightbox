@@ -64,6 +64,11 @@ pub fn so(aberta: usize) -> BTreeSet<usize> {
 
 /// Um grupo da caixa de sincronizar — os do site, na ordem do site.
 ///
+/// ⚠️ **Desde 2026-09-17 a coluna tem painel próprio para a curva por ponto,
+/// o P&B, a calibração e os cinco módulos RGB**, mas a caixa continua com os
+/// doze grupos do site: `Grupo::Painel` de um desses é sinônimo do grupo
+/// dedicado, e `TODOS` só usa o dedicado.
+///
 /// 🚨 **Não são só os sete painéis da coluna.** O site sincroniza doze grupos
 /// (`GRUPOS_DA_SINCRONIZACAO`, em `revelacao/sincronizacao.ts`): os sete painéis,
 /// os Controles RGB, a curva por ponto, o preto e branco, a calibração e o
@@ -97,9 +102,27 @@ impl Grupo {
         Grupo::Enquadramento,
     ];
 
+    /// O grupo da caixa que leva os ajustes deste painel da coluna.
+    pub fn do_painel(painel: Painel) -> Grupo {
+        match painel {
+            Painel::CurvaPorPonto => Grupo::CurvaPorPonto,
+            Painel::PretoEBranco => Grupo::PretoEBranco,
+            Painel::Calibracao => Grupo::Calibracao,
+            p if p.no_rgb() => Grupo::ControlesRgb,
+            p => Grupo::Painel(p),
+        }
+    }
+
     pub fn rotulo(self) -> &'static str {
         match self {
-            Grupo::ControlesRgb => "Controles RGB",
+            Grupo::ControlesRgb
+            | Grupo::Painel(
+                Painel::RgbExposicao
+                | Painel::RgbSombrasERealces
+                | Painel::RgbMonocromatico
+                | Painel::RgbVinhetagem
+                | Painel::RgbColorBalance,
+            ) => "Controles RGB",
             Grupo::Painel(painel) => painel.rotulo(),
             Grupo::CurvaPorPonto => "Curva por ponto",
             Grupo::PretoEBranco => "Preto e branco",
@@ -111,15 +134,22 @@ impl Grupo {
     /// O que ele descreve, em uma linha — some quando for óbvio.
     pub fn detalhe(self) -> Option<&'static str> {
         match self {
-            Grupo::ControlesRgb => {
-                Some("exposição, sombras e realces, monocromático, vinhetagem e color balance")
-            }
-            Grupo::CurvaPorPonto => Some("os quatro canais"),
+            Grupo::ControlesRgb
+            | Grupo::Painel(
+                Painel::RgbExposicao
+                | Painel::RgbSombrasERealces
+                | Painel::RgbMonocromatico
+                | Painel::RgbVinhetagem
+                | Painel::RgbColorBalance,
+            ) => Some("exposição, sombras e realces, monocromático, vinhetagem e color balance"),
+            Grupo::CurvaPorPonto | Grupo::Painel(Painel::CurvaPorPonto) => Some("os quatro canais"),
             Grupo::Painel(Painel::Hsl) => Some("cor, luminância e matiz das oito faixas"),
-            Grupo::PretoEBranco => Some("conversão e mixer por cor"),
+            Grupo::PretoEBranco | Grupo::Painel(Painel::PretoEBranco) => {
+                Some("conversão e mixer por cor")
+            }
             Grupo::Painel(Painel::Detalhe) => Some("ruído e nitidez"),
             Grupo::Painel(Painel::Lente) => Some("distorção e vinheta"),
-            Grupo::Calibracao => Some("os primários da câmera"),
+            Grupo::Calibracao | Grupo::Painel(Painel::Calibracao) => Some("os primários da câmera"),
             Grupo::Painel(Painel::Tonalizacao) => Some("a cor das sombras e a das altas luzes"),
             Grupo::Painel(Painel::Efeitos) => Some("grão"),
             Grupo::Enquadramento => Some("giro, espelho, endireitar e recorte"),
@@ -130,15 +160,22 @@ impl Grupo {
     /// Um id estável para o elemento da caixa.
     pub fn chave(self) -> &'static str {
         match self {
-            Grupo::ControlesRgb => "controles-rgb",
+            Grupo::ControlesRgb
+            | Grupo::Painel(
+                Painel::RgbExposicao
+                | Painel::RgbSombrasERealces
+                | Painel::RgbMonocromatico
+                | Painel::RgbVinhetagem
+                | Painel::RgbColorBalance,
+            ) => "controles-rgb",
             Grupo::Painel(Painel::Basico) => "basico",
             Grupo::Painel(Painel::CurvaDeTons) => "curva",
-            Grupo::CurvaPorPonto => "curva-por-ponto",
+            Grupo::CurvaPorPonto | Grupo::Painel(Painel::CurvaPorPonto) => "curva-por-ponto",
             Grupo::Painel(Painel::Hsl) => "hsl",
-            Grupo::PretoEBranco => "preto-e-branco",
+            Grupo::PretoEBranco | Grupo::Painel(Painel::PretoEBranco) => "preto-e-branco",
             Grupo::Painel(Painel::Detalhe) => "detalhe",
             Grupo::Painel(Painel::Lente) => "lente",
-            Grupo::Calibracao => "calibracao",
+            Grupo::Calibracao | Grupo::Painel(Painel::Calibracao) => "calibracao",
             Grupo::Painel(Painel::Tonalizacao) => "tonalizacao",
             Grupo::Painel(Painel::Efeitos) => "efeitos",
             Grupo::Enquadramento => "enquadramento",
@@ -194,15 +231,24 @@ impl Default for Escolha {
 impl Escolha {
     fn campo(&mut self, grupo: Grupo) -> &mut bool {
         match grupo {
-            Grupo::ControlesRgb => &mut self.controles_rgb,
+            Grupo::ControlesRgb
+            | Grupo::Painel(
+                Painel::RgbExposicao
+                | Painel::RgbSombrasERealces
+                | Painel::RgbMonocromatico
+                | Painel::RgbVinhetagem
+                | Painel::RgbColorBalance,
+            ) => &mut self.controles_rgb,
             Grupo::Painel(Painel::Basico) => &mut self.basico,
             Grupo::Painel(Painel::CurvaDeTons) => &mut self.curva,
-            Grupo::CurvaPorPonto => &mut self.curva_por_ponto,
+            Grupo::CurvaPorPonto | Grupo::Painel(Painel::CurvaPorPonto) => {
+                &mut self.curva_por_ponto
+            }
             Grupo::Painel(Painel::Hsl) => &mut self.hsl,
-            Grupo::PretoEBranco => &mut self.preto_e_branco,
+            Grupo::PretoEBranco | Grupo::Painel(Painel::PretoEBranco) => &mut self.preto_e_branco,
             Grupo::Painel(Painel::Detalhe) => &mut self.detalhe,
             Grupo::Painel(Painel::Lente) => &mut self.lente,
-            Grupo::Calibracao => &mut self.calibracao,
+            Grupo::Calibracao | Grupo::Painel(Painel::Calibracao) => &mut self.calibracao,
             Grupo::Painel(Painel::Tonalizacao) => &mut self.tonalizacao,
             Grupo::Painel(Painel::Efeitos) => &mut self.efeitos,
             Grupo::Enquadramento => &mut self.enquadramento,
@@ -438,7 +484,7 @@ mod testes {
             let nome = campo_do_controle(def);
             assert_eq!(
                 grupo_do_ajuste(nome),
-                Some(Grupo::Painel(def.secao.painel())),
+                Some(Grupo::do_painel(def.secao.painel())),
                 "`{}` ({nome}) mora em `{}`",
                 def.rotulo,
                 def.secao.painel().rotulo()

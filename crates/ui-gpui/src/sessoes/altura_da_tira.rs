@@ -62,11 +62,19 @@ pub fn lado_da_miniatura(altura: f32) -> f32 {
 
 /// A altura guardada, ou o padrão.
 pub fn guardada(qual: &str) -> f32 {
+    guardada_ou(qual, ALTURA_PADRAO)
+}
+
+/// A altura guardada, ou o padrão **desta** tira.
+///
+/// 🔑 Cada tira do site tem o seu: a da Revelação nasce com 110
+/// (`alturaGuardada("revelacao", 110)`, em `revelacao/tira.tsx`).
+pub fn guardada_ou(qual: &str, padrao: f32) -> f32 {
     std::fs::read_to_string(caminho(qual))
         .ok()
         .and_then(|t| t.trim().parse::<f32>().ok())
         .map(limitar)
-        .unwrap_or(ALTURA_PADRAO)
+        .unwrap_or(padrao)
 }
 
 /// Grava. Não poder lembrar não pode impedir de arrastar.
