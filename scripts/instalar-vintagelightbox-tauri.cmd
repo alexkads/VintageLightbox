@@ -663,7 +663,45 @@ fi
 diga "compilando (10 a 30 minutos na primeira vez)"
 CARGO_TARGET_DIR="$CASA/target-tauri"
 export CARGO_TARGET_DIR
-correr cargo build --release --manifest-path "$FONTE/Cargo.toml" -p app-tauri --bin app-tauri
+
+# 🚨 **Uma compilação por 3 GiB de memória.** O cargo abre uma por núcleo, e
+#    com `lto = true` e `codegen-units = 1` cada `rustc` grande passa de 2 GiB.
+#    Num Fedora com 8 GiB e 4 núcleos o `rustc` do gpui morreu por falta de
+#    memória (`signal: 9, SIGKILL`) no meio da compilação. Um CARGO_BUILD_JOBS
+#    já definido vale mais do que esta conta.
+if [ -z "${CARGO_BUILD_JOBS:-}" ]; then
+  MEMORIA_GIB=""
+  if [ -r /proc/meminfo ]; then
+    MEMORIA_GIB="$(awk '/^MemTotal:/ {print int($2 / 1048576)}' /proc/meminfo)"
+  elif command -v sysctl >/dev/null 2>&1; then
+    MEMORIA_GIB="$(( $(sysctl -n hw.memsize 2>/dev/null || echo 0) / 1073741824 ))"
+  fi
+  NUCLEOS="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)"
+  case "$MEMORIA_GIB:$NUCLEOS" in
+    *[!0-9:]*|:*|*:) : ;;
+    *)
+      TRABALHOS=$(( MEMORIA_GIB / 3 ))
+      [ "$TRABALHOS" -ge 1 ] || TRABALHOS=1
+      if [ "$TRABALHOS" -lt "$NUCLEOS" ]; then
+        CARGO_BUILD_JOBS="$TRABALHOS"
+        export CARGO_BUILD_JOBS
+        ok "compilando $TRABALHOS de cada vez (${MEMORIA_GIB} GiB de memória, $NUCLEOS núcleos)"
+      fi ;;
+  esac
+fi
+
+# O código de saída do cargo chega a quem chamou (o despachante e os testes o
+# conferem).
+if correr cargo build --release --manifest-path "$FONTE/Cargo.toml" -p app-tauri --bin app-tauri; then
+  :
+else
+  CODIGO=$?
+  erro "a compilação falhou."
+  echo "   Se a mensagem acima fala em 'signal: 9' ou 'SIGKILL', faltou memória. Feche"
+  echo "   outros programas e rode de novo com uma compilação de cada vez:"
+  echo "   curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox-tauri.cmd | CARGO_BUILD_JOBS=1 sh"
+  exit "$CODIGO"
+fi
 
 BINARIO="$CARGO_TARGET_DIR/release/app-tauri"
 if [ "$SECO" -eq 0 ] && [ ! -x "$BINARIO" ]; then

@@ -254,6 +254,28 @@ class CasosDoInstalador:
         result = self.run_installer()
         self.assertEqual(result.returncode, 42, result.stdout)
         self.assertEqual((app / "anterior").read_text(), "preservar")
+        self.assertIn("CARGO_BUILD_JOBS=1 sh", result.stdout)
+
+    def test_compila_uma_por_3_gib_de_memoria(self):
+        self.mock("uname", "echo Linux")
+        self.mock("sysctl", "echo 8589934592")
+        self.mock("getconf", "echo 8")
+        self.mock("cargo", 'printf "jobs=%s\\n" "${CARGO_BUILD_JOBS:-}" >> "$TEST_LOG"; exit 42')
+        result = self.run_installer()
+        if Path("/proc/meminfo").exists():
+            self.skipTest("a conta usa o /proc/meminfo desta máquina")
+        self.assertIn("compilando 2 de cada vez", result.stdout)
+        self.assertIn("jobs=2", self.log.read_text())
+
+    def test_cargo_build_jobs_definido_vale_mais(self):
+        self.mock("uname", "echo Linux")
+        self.mock("sysctl", "echo 8589934592")
+        self.mock("getconf", "echo 8")
+        self.mock("cargo", 'printf "jobs=%s\\n" "${CARGO_BUILD_JOBS:-}" >> "$TEST_LOG"; exit 42')
+        self.env["CARGO_BUILD_JOBS"] = "5"
+        result = self.run_installer()
+        self.assertNotIn("GiB de memória", result.stdout)
+        self.assertIn("jobs=5", self.log.read_text())
 
     def test_seco_nao_grava(self):
         result = self.run_installer("--seco")

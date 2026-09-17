@@ -188,7 +188,8 @@
       <li><strong>Silverblue, Kinoite ou Bazzite:</strong> o sistema não aceita <code>dnf install</code>.
           O instalador para e mostra um comando <code>sudo rpm-ostree install …</code>: rode-o,
           <strong>reinicie o computador</strong> e cole a linha acima de novo.</li>
-      <li>A primeira instalação baixa cerca de 2 GiB de pacotes, e a compilação usa mais uns 10 GiB.</li>
+      <li>A primeira instalação baixa cerca de 2 GiB de pacotes, e a compilação usa mais uns 10 GiB
+          de disco. Com 8 GiB de memória ela funciona, só que mais devagar.</li>
     </ul>
   </div>
 
@@ -286,6 +287,7 @@ sh instalar.cmd</code></pre>
       <tr><td><code>a libclang continua faltando</code> (Windows)</td><td>No terminal do MSYS2, rode <code>pacman -S mingw-w64-x86_64-clang</code>. Depois repita.</td></tr>
       <tr><td><code>Unable to find libclang</code> no meio da compilação (Linux)</td><td>Instale <code>clang</code> e <code>libclang-dev</code> (no Fedora, <code>clang</code> e <code>clang-devel</code>) e repita.</td></tr>
       <tr><td>A compilação para por falta de espaço</td><td>Libere alguns GiB e repita.</td></tr>
+      <tr><td><code>signal: 9</code> ou <code>SIGKILL</code> no meio da compilação</td><td>Faltou memória. O instalador já compila menos coisas ao mesmo tempo em máquinas com pouca memória; se ainda assim falhar, feche outros programas e repita com uma compilação de cada vez: ponha <code>CARGO_BUILD_JOBS=1</code> antes do <code>sh</code> (<code>… | CARGO_BUILD_JOBS=1 sh</code>).</td></tr>
       <tr><td>A janela do Windows fechou sozinha</td><td>Rode o arquivo de dentro do <strong>Prompt de Comando</strong> (veja <a href="#opcoes">Opções</a>) para ler a mensagem.</td></tr>
       <tr><td>Abre um app diferente, ou o app não muda depois de atualizar</td><td>O app antigo continuava aberto: saia pela bandeja (<strong>Sair</strong>) e abra de novo. Só roda uma cópia por vez.</td></tr>
       <tr><td>A tela do cliente abre preta</td><td>Atualize o app (repita a instalação).</td></tr>
