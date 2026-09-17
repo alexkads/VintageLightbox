@@ -433,7 +433,10 @@ esac
 #    morre no fim por falta de biblioteca é o pior desfecho possível.
 diga "conferindo o que esta máquina tem"
 
-for f in curl tar diff; do
+# O `diff` não entra aqui: ele só decide se o código baixado é igual ao da vez
+# anterior, para não recompilar à toa, e o Fedora mínimo não o traz. Sem ele o
+# código é trocado sempre, e a instalação segue.
+for f in curl tar; do
   command -v "$f" >/dev/null 2>&1 || { erro "falta '$f'."; exit 1; }
 done
 
@@ -533,7 +536,7 @@ else
   # O `mesa-vulkan-drivers` é o que faz o Vulkan achar a placa de vídeo; sem um
   # driver Vulkan a janela do GPUI não abre, mesmo com tudo compilado.
   PACOTES_APT="build-essential pkg-config curl clang libclang-dev libx11-dev libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev wayland-protocols libxcursor-dev libxrandr-dev libxi-dev libfontconfig1-dev libfreetype6-dev libasound2-dev libssl-dev libvulkan-dev mesa-vulkan-drivers libdbus-1-dev libsecret-1-dev"
-  PACOTES_DNF="gcc-c++ pkgconf-pkg-config curl clang clang-devel libX11-devel libxcb-devel libxkbcommon-devel libxkbcommon-x11-devel wayland-devel wayland-protocols-devel libXcursor-devel libXrandr-devel libXi-devel fontconfig-devel freetype-devel alsa-lib-devel openssl-devel vulkan-loader-devel mesa-vulkan-drivers dbus-devel libsecret-devel"
+  PACOTES_DNF="gcc-c++ pkgconf-pkg-config curl diffutils clang clang-devel libX11-devel libxcb-devel libxkbcommon-devel libxkbcommon-x11-devel wayland-devel wayland-protocols-devel libXcursor-devel libXrandr-devel libXi-devel fontconfig-devel freetype-devel alsa-lib-devel openssl-devel vulkan-loader-devel mesa-vulkan-drivers dbus-devel libsecret-devel"
   PACOTES_PACMAN="base-devel curl clang libx11 libxcb libxkbcommon libxkbcommon-x11 wayland wayland-protocols libxcursor libxrandr libxi fontconfig freetype2 alsa-lib openssl vulkan-icd-loader dbus libsecret"
   PACOTES_A_MAO="libx11, libxcb, libxkbcommon e libxkbcommon-x11, wayland, libxcursor, libxrandr, libxi, fontconfig, freetype, alsa, openssl, vulkan (loader e driver), dbus e libsecret, todos na versão dev, mais clang e libclang (dev)"
   conferir_depois() {
@@ -553,6 +556,16 @@ else
       erro "não há 'sudo' nesta máquina para instalar os pacotes."
       echo "   Peça a quem administra a máquina para instalar os pacotes da lista acima,"
       echo "   ou rode este script como root."
+      exit 1
+    fi
+    # 🚨 **Fedora imutável** (Silverblue, Kinoite, Bazzite): o sistema é uma
+    #    imagem, e o `dnf install` recusa. Os pacotes entram pelo `rpm-ostree`
+    #    e só valem depois de reiniciar, então o script para e diz o comando.
+    # VLB_OSTREE existe para o teste.
+    if [ -e "${VLB_OSTREE:-/run/ostree-booted}" ]; then
+      erro "este Linux é imutável (Fedora Silverblue, Kinoite, Bazzite…): os pacotes não entram pelo dnf."
+      echo "   Rode este comando, reinicie o computador e rode este script de novo:"
+      echo "   sudo rpm-ostree install --idempotent $PACOTES_DNF"
       exit 1
     fi
     if command -v apt-get >/dev/null 2>&1; then
@@ -588,6 +601,47 @@ else
   fi
   resumo_linux
   ok "libclang: $(tem_libclang && echo presente || echo 'a instalar')"
+
+  # 🔑 **O GNOME não mostra ícone de bandeja sem uma extensão**, e o app vai
+  #    para a bandeja ao minimizar e ao fechar com envio pendente. O Ubuntu traz
+  #    a extensão ligada (`ubuntu-appindicators`); o Fedora, não. Sem ela o app
+  #    continua rodando, mas o ícone não aparece. Só se instala pelo `dnf`: nas
+  #    outras distribuições o script avisa e segue.
+  EXTENSAO=appindicatorsupport@rgcjonas.gmail.com
+  # VLB_EXTENSOES_GNOME existe para o teste.
+  EXTENSOES="${VLB_EXTENSOES_GNOME:-/usr/share/gnome-shell/extensions}"
+  case "${XDG_CURRENT_DESKTOP:-}" in
+    *GNOME*)
+      if [ -d "$EXTENSOES/$EXTENSAO" ] \
+         || [ -d "$HOME/.local/share/gnome-shell/extensions/$EXTENSAO" ] \
+         || [ -d "$EXTENSOES/ubuntu-appindicators@ubuntu.com" ]; then
+        :
+      elif command -v dnf >/dev/null 2>&1 && [ ! -e "${VLB_OSTREE:-/run/ostree-booted}" ]; then
+        aviso "o GNOME não mostra o ícone da bandeja sem a extensão AppIndicator — instalando"
+        if [ "$(id -u)" -eq 0 ]; then SUDO=""; else SUDO="sudo"; fi
+        correr ${SUDO:+$SUDO} dnf install -y gnome-shell-extension-appindicator </dev/null \
+          || aviso "não consegui instalar a extensão; o app funciona, mas sem o ícone da bandeja."
+      else
+        aviso "o GNOME não mostra o ícone da bandeja sem a extensão AppIndicator."
+        echo "   Instale a 'AppIndicator and KStatusNotifierItem Support' pelo gerenciador de"
+        echo "   extensões. Sem ela o app funciona, mas o ícone da bandeja não aparece."
+      fi
+      if [ -d "$EXTENSOES/$EXTENSAO" ] && command -v gnome-extensions >/dev/null 2>&1; then
+        if gnome-extensions info "$EXTENSAO" 2>/dev/null | grep -q -i -E "(enabled|state).*(yes|active|enabled)"; then
+          ok "extensão da bandeja do GNOME: ligada"
+        else
+          # Ligada agora, ela só aparece depois de sair e entrar de novo na
+          # sessão: o GNOME no Wayland não recarrega extensões com a sessão aberta.
+          if correr gnome-extensions enable "$EXTENSAO" 2>/dev/null; then
+            aviso "extensão da bandeja ligada: saia e entre de novo na sessão para o ícone aparecer."
+          else
+            aviso "não consegui ligar a extensão da bandeja por aqui."
+            echo "   Abra o app Extensões e ligue 'AppIndicator and KStatusNotifierItem Support'."
+          fi
+        fi
+      fi
+      ;;
+  esac
 fi
 
 # O Rust, pelo rustup, sem privilégio nenhum (tudo em ~/.cargo e ~/.rustup).
@@ -665,7 +719,7 @@ else
       cp -pR "$FONTE/$GERADO/." "$TEMPORARIO/fonte/$GERADO/"
     fi
   done
-  if [ -d "$FONTE" ] && diff -qr "$FONTE" "$TEMPORARIO/fonte" >/dev/null 2>&1; then
+  if [ -d "$FONTE" ] && command -v diff >/dev/null 2>&1 && diff -qr "$FONTE" "$TEMPORARIO/fonte" >/dev/null 2>&1; then
     ok "código sem alterações; preservando o cache"
   else
     # Permissoes geradas da versao anterior nao devem sobreviver a comandos removidos.

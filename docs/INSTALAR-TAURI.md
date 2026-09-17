@@ -69,6 +69,15 @@ O instalador cuida sozinho de:
 - **macOS**: o Rust. Se faltarem as Command Line Tools do Xcode, ele diz o comando para
   instalá-las.
 
+### No Fedora
+
+- **Workstation (GNOME):** o GNOME não mostra ícone de bandeja sem a extensão *AppIndicator*. O
+  instalador a instala pelo `dnf` e a liga; **saia e entre de novo na sessão** para o ícone
+  aparecer. Sem ela o app funciona, mas minimizado só volta pelo Alt+Tab.
+- **Silverblue, Kinoite ou Bazzite:** o sistema é imutável e recusa `dnf install`. O instalador
+  para e mostra um `sudo rpm-ostree install …`: rode-o, reinicie e rode o instalador de novo.
+- A primeira instalação baixa cerca de 2 GiB de pacotes; a compilação usa mais uns 10 GiB.
+
 ---
 
 ## Atualizar

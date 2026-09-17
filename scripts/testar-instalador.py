@@ -71,6 +71,12 @@ class Ambiente(unittest.TestCase):
                         TEST_LOG=str(self.log), LIBCLANG_PATH=str(self.bin),
                         VLB_PASTA_XCODE=str(self.sem_xcode))
         self.env.pop("VLB_APP", None)
+        self.env.pop("XDG_CURRENT_DESKTOP", None)
+        # Nem o Fedora imutável nem as extensões do GNOME desta máquina entram.
+        self.env["VLB_OSTREE"] = str(self.base / "sem-ostree")
+        self.extensoes = self.base / "extensoes-gnome"
+        self.extensoes.mkdir()
+        self.env["VLB_EXTENSOES_GNOME"] = str(self.extensoes)
         self.env.pop("VLB_SECO", None)
         (self.bin / "libclang.so").touch()
         self.mock("uname", "echo Darwin")
@@ -276,6 +282,50 @@ class CasosDoInstalador:
         self.assertIn("apt-get install -y", result.stdout)
         self.assertIn("[seco] não instalei nada", result.stdout)
         self.assertNotIn("nao deveria rodar", result.stdout)
+
+    def test_fedora_imutavel_mostra_o_rpm_ostree(self):
+        self.mock("uname", "echo Linux")
+        self.mock("pkg-config", "exit 1")
+        self.mock("dnf", "echo 'dnf nao deveria rodar' >&2; exit 99")
+        ostree = self.base / "ostree-booted"
+        ostree.touch()
+        self.env["VLB_OSTREE"] = str(ostree)
+        result = self.run_installer()
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("sudo rpm-ostree install --idempotent", result.stdout)
+        self.assertNotIn("nao deveria rodar", result.stdout)
+        self.assertFalse(self.log.exists())
+
+    def test_gnome_no_fedora_instala_a_extensao_da_bandeja(self):
+        self.mock("uname", "echo Linux")
+        self.mock("sudo", '"$@"')
+        self.mock("dnf", 'printf "dnf %s\\n" "$*" >> "$TEST_LOG"')
+        self.env["XDG_CURRENT_DESKTOP"] = "GNOME"
+        result = self.run_installer()
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("dnf install -y gnome-shell-extension-appindicator",
+                      self.log.read_text())
+
+    def test_gnome_com_a_extensao_ligada_nao_mexe(self):
+        self.mock("uname", "echo Linux")
+        self.mock("dnf", "echo 'dnf nao deveria rodar' >&2; exit 99")
+        self.mock("gnome-extensions", "echo '  Enabled: Yes'")
+        (self.extensoes / "appindicatorsupport@rgcjonas.gmail.com").mkdir()
+        self.env["XDG_CURRENT_DESKTOP"] = "ubuntu:GNOME"
+        result = self.run_installer()
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("extensão da bandeja do GNOME: ligada", result.stdout)
+        self.assertNotIn("nao deveria rodar", result.stdout)
+
+    def test_gnome_sem_sessao_manda_ligar_a_extensao_a_mao(self):
+        self.mock("uname", "echo Linux")
+        self.mock("gnome-extensions", "exit 1")
+        (self.extensoes / "appindicatorsupport@rgcjonas.gmail.com").mkdir()
+        self.env["XDG_CURRENT_DESKTOP"] = "GNOME"
+        result = self.run_installer()
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("Abra o app Extensões", result.stdout)
+        self.assertNotIn("extensão da bandeja ligada", result.stdout)
 
     def test_ajuda_aponta_o_outro_app(self):
         result = self.run_installer("--ajuda", piped=True)

@@ -177,7 +177,19 @@
     <p>Funciona com <strong>apt</strong> (Ubuntu, Debian, Mint), <strong>dnf</strong> (Fedora) e
        <strong>pacman</strong> (Arch, Manjaro): o instalador põe o compilador, a libclang, o WebKitGTK e
        o Rust. Um Rust antigo da distribuição fica de lado. Em outra distribuição, ele lista o que
-       instalar à mão. Sem <code>curl</code>, instale-o antes (<code>sudo apt install curl</code>).</p>
+       instalar à mão. Sem <code>curl</code>, instale-o antes (<code>sudo apt install curl</code>
+       ou <code>sudo dnf install curl</code>).</p>
+    <p id="fedora"><strong>No Fedora:</strong></p>
+    <ul class="texto">
+      <li><strong>Workstation (GNOME):</strong> o GNOME não mostra o ícone da bandeja sozinho. O
+          instalador põe e liga a extensão <em>AppIndicator</em>. <strong>Saia e entre de novo na
+          sessão</strong> para o ícone aparecer. Sem ela o app funciona, mas minimizado só volta
+          pelo <kbd>Alt</kbd>+<kbd>Tab</kbd>.</li>
+      <li><strong>Silverblue, Kinoite ou Bazzite:</strong> o sistema não aceita <code>dnf install</code>.
+          O instalador para e mostra um comando <code>sudo rpm-ostree install …</code>: rode-o,
+          <strong>reinicie o computador</strong> e cole a linha acima de novo.</li>
+      <li>A primeira instalação baixa cerca de 2 GiB de pacotes, e a compilação usa mais uns 10 GiB.</li>
+    </ul>
   </div>
 
   <h3 id="primeiro-uso">Primeiro uso</h3>
@@ -262,7 +274,9 @@ sh instalar.cmd</code></pre>
     <tbody>
       <tr><td><code>falta o compilador Metal</code> (macOS)</td><td>Esse é o instalador do <strong>GPUI</strong>. Para o app do balcão, use a linha do <a href="#macos">macOS</a> acima.</td></tr>
       <tr><td><code>faltam as Command Line Tools do Xcode</code> (macOS)</td><td>Rode <code>xcode-select --install</code>, espere terminar e repita a instalação.</td></tr>
-      <tr><td><code>command not found: curl</code> (Linux)</td><td>Instale o curl (<code>sudo apt install curl</code>, ou o equivalente) e repita.</td></tr>
+      <tr><td><code>command not found: curl</code> (Linux)</td><td>Instale o curl (<code>sudo apt install curl</code> ou <code>sudo dnf install curl</code>) e repita.</td></tr>
+      <tr><td><code>este Linux é imutável</code> (Fedora Silverblue, Kinoite, Bazzite)</td><td>Rode o comando <code>sudo rpm-ostree install …</code> que a mensagem mostra, reinicie o computador e repita.</td></tr>
+      <tr><td>O ícone da bandeja não aparece (Fedora e outros com GNOME)</td><td>Saia e entre de novo na sessão. Se continuar sumido, abra o app <strong>Extensões</strong> e ligue <strong>AppIndicator and KStatusNotifierItem Support</strong>.</td></tr>
       <tr><td><code>não reconheci o gerenciador de pacotes</code> (Linux)</td><td>Instale à mão os pacotes que a mensagem lista e repita.</td></tr>
       <tr><td><code>a instalação dos pacotes falhou</code> ou <code>não há 'sudo'</code> (Linux)</td><td>Esta conta não pode instalar programas: peça a quem administra a máquina para rodar o comando mostrado logo acima, e repita.</td></tr>
       <tr><td><code>o Rust continua ausente ou anterior ao 1.89</code></td><td>Rode <code>rustup update stable</code> e repita.</td></tr>
@@ -270,7 +284,7 @@ sh instalar.cmd</code></pre>
       <tr><td><code>o winget … não existe nesta máquina</code> (Windows)</td><td>Instale o <a href="https://apps.microsoft.com/detail/9NBLGGH4NNS1">Instalador de Aplicativo</a> pela Microsoft Store e repita.</td></tr>
       <tr><td><code>o g++ do MinGW continua faltando</code> (Windows)</td><td>Instale o <a href="https://www.msys2.org">MSYS2</a> e, no terminal dele, rode <code>pacman -S mingw-w64-x86_64-gcc</code>. Depois repita.</td></tr>
       <tr><td><code>a libclang continua faltando</code> (Windows)</td><td>No terminal do MSYS2, rode <code>pacman -S mingw-w64-x86_64-clang</code>. Depois repita.</td></tr>
-      <tr><td><code>Unable to find libclang</code> no meio da compilação (Linux)</td><td>Instale <code>clang</code> e <code>libclang-dev</code> (ou os equivalentes) e repita.</td></tr>
+      <tr><td><code>Unable to find libclang</code> no meio da compilação (Linux)</td><td>Instale <code>clang</code> e <code>libclang-dev</code> (no Fedora, <code>clang</code> e <code>clang-devel</code>) e repita.</td></tr>
       <tr><td>A compilação para por falta de espaço</td><td>Libere alguns GiB e repita.</td></tr>
       <tr><td>A janela do Windows fechou sozinha</td><td>Rode o arquivo de dentro do <strong>Prompt de Comando</strong> (veja <a href="#opcoes">Opções</a>) para ler a mensagem.</td></tr>
       <tr><td>Abre um app diferente, ou o app não muda depois de atualizar</td><td>O app antigo continuava aberto: saia pela bandeja (<strong>Sair</strong>) e abra de novo. Só roda uma cópia por vez.</td></tr>
@@ -372,7 +386,8 @@ sh instalar.cmd</code></pre>
     <p>Com <strong>apt</strong>, <strong>dnf</strong> ou <strong>pacman</strong>, o instalador põe o
        compilador, a libclang e as bibliotecas que o GPUI abre: X11, Wayland, xkbcommon, fontconfig,
        ALSA, OpenSSL, D-Bus, libsecret e o <strong>Vulkan</strong> (com o driver Mesa). Sem um driver
-       Vulkan a janela não abre, mesmo com tudo compilado.</p>
+       Vulkan a janela não abre, mesmo com tudo compilado. <strong>No Fedora</strong> valem os
+       mesmos cuidados do <a href="#fedora">app do balcão</a> (bandeja do GNOME e Silverblue).</p>
   </div>
 
   <h3 id="gpui-telas">As telas</h3>
@@ -463,7 +478,7 @@ sh instalar.cmd</code></pre>
       <tr><td><code>o compilador Metal continua faltando</code> (macOS)</td><td>Rode, um de cada vez: <code>sudo xcode-select -s /Applications/Xcode.app/Contents/Developer</code>, <code>sudo xcodebuild -license accept</code> e <code>xcodebuild -downloadComponent MetalToolchain</code>. Depois repita.</td></tr>
       <tr><td><code>o fxc.exe continua faltando</code> (Windows)</td><td>Instale o <a href="https://developer.microsoft.com/windows/downloads/windows-sdk/">Windows SDK</a>, ou defina <code>GPUI_FXC_PATH</code> com o caminho do <code>fxc.exe</code>, e repita.</td></tr>
       <tr><td><code>o windres do MinGW continua faltando</code> (Windows)</td><td>No terminal do MSYS2, rode <code>pacman -S mingw-w64-x86_64-binutils</code>. Depois repita.</td></tr>
-      <tr><td>A janela não abre (Linux)</td><td>Falta um driver Vulkan: instale <code>mesa-vulkan-drivers</code> (ou o da sua placa).</td></tr>
+      <tr><td>A janela não abre (Linux)</td><td>Falta um driver Vulkan: instale <code>mesa-vulkan-drivers</code>. Com placa NVIDIA no Fedora, instale o driver da NVIDIA pelo RPM Fusion (<code>akmod-nvidia</code>) e reinicie.</td></tr>
       <tr><td>Rust, winget, MSYS2, libclang ou pacotes do Linux</td><td>As mesmas saídas do <a href="#problemas">app do balcão</a>.</td></tr>
     </tbody>
   </table>

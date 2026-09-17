@@ -96,7 +96,17 @@ O instalador cuida sozinho de (pelo `apt`, `dnf` ou `pacman`, pedindo a senha de
 - o Rust. Um Rust antigo instalado pela distribuição é deixado de lado, e o instalador põe o `rustup`
   à frente.
 
-Sem `curl`, instale-o antes (`sudo apt install curl`, ou o equivalente).
+Sem `curl`, instale-o antes (`sudo apt install curl` ou `sudo dnf install curl`).
+
+### No Fedora
+
+- **Workstation (GNOME):** o GNOME não mostra ícone de bandeja sem a extensão *AppIndicator*. O
+  instalador a instala pelo `dnf` e a liga; **saia e entre de novo na sessão** para o ícone
+  aparecer. Sem ela o app funciona, mas minimizado só volta pelo Alt+Tab.
+- **Silverblue, Kinoite ou Bazzite:** o sistema é imutável e recusa `dnf install`. O instalador
+  para e mostra um `sudo rpm-ostree install …`: rode-o, reinicie e rode o instalador de novo.
+- Com placa NVIDIA, o Vulkan vem do driver da NVIDIA (`akmod-nvidia`, do RPM Fusion).
+- A primeira instalação baixa cerca de 2 GiB de pacotes; a compilação usa mais uns 10 GiB.
 
 ---
 

@@ -407,7 +407,10 @@ esac
 #    morre no fim por falta de biblioteca é o pior desfecho possível.
 diga "conferindo o que esta máquina tem"
 
-for f in curl tar diff; do
+# O `diff` não entra aqui: ele só decide se o código baixado é igual ao da vez
+# anterior, para não recompilar à toa, e o Fedora mínimo não o traz. Sem ele o
+# código é trocado sempre, e a instalação segue.
+for f in curl tar; do
   command -v "$f" >/dev/null 2>&1 || { erro "falta '$f'."; exit 1; }
 done
 
@@ -459,7 +462,7 @@ else
   tem_libclang || FALTA="$FALTA libclang"
 
   PACOTES_APT="build-essential pkg-config curl libssl-dev libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev clang libclang-dev"
-  PACOTES_DNF="gcc-c++ pkgconf-pkg-config curl openssl-devel webkit2gtk4.1-devel gtk3-devel libappindicator-gtk3-devel librsvg2-devel libxdo-devel clang clang-devel"
+  PACOTES_DNF="gcc-c++ pkgconf-pkg-config curl diffutils openssl-devel webkit2gtk4.1-devel gtk3-devel libappindicator-gtk3-devel librsvg2-devel libxdo-devel clang clang-devel"
   PACOTES_PACMAN="base-devel curl openssl webkit2gtk-4.1 gtk3 libappindicator-gtk3 librsvg xdotool clang"
   PACOTES_A_MAO="webkit2gtk-4.1 (dev), gtk3 (dev), librsvg (dev), libayatana-appindicator (dev), libxdo (dev), openssl (dev), clang e libclang (dev)"
   conferir_depois() {
@@ -477,6 +480,16 @@ else
       erro "não há 'sudo' nesta máquina para instalar os pacotes."
       echo "   Peça a quem administra a máquina para instalar os pacotes da lista acima,"
       echo "   ou rode este script como root."
+      exit 1
+    fi
+    # 🚨 **Fedora imutável** (Silverblue, Kinoite, Bazzite): o sistema é uma
+    #    imagem, e o `dnf install` recusa. Os pacotes entram pelo `rpm-ostree`
+    #    e só valem depois de reiniciar, então o script para e diz o comando.
+    # VLB_OSTREE existe para o teste.
+    if [ -e "${VLB_OSTREE:-/run/ostree-booted}" ]; then
+      erro "este Linux é imutável (Fedora Silverblue, Kinoite, Bazzite…): os pacotes não entram pelo dnf."
+      echo "   Rode este comando, reinicie o computador e rode este script de novo:"
+      echo "   sudo rpm-ostree install --idempotent $PACOTES_DNF"
       exit 1
     fi
     if command -v apt-get >/dev/null 2>&1; then
@@ -512,6 +525,47 @@ else
   fi
   resumo_linux
   ok "libclang: $(tem_libclang && echo presente || echo 'a instalar')"
+
+  # 🔑 **O GNOME não mostra ícone de bandeja sem uma extensão**, e o app vai
+  #    para a bandeja ao minimizar e ao fechar com envio pendente. O Ubuntu traz
+  #    a extensão ligada (`ubuntu-appindicators`); o Fedora, não. Sem ela o app
+  #    continua rodando, mas o ícone não aparece. Só se instala pelo `dnf`: nas
+  #    outras distribuições o script avisa e segue.
+  EXTENSAO=appindicatorsupport@rgcjonas.gmail.com
+  # VLB_EXTENSOES_GNOME existe para o teste.
+  EXTENSOES="${VLB_EXTENSOES_GNOME:-/usr/share/gnome-shell/extensions}"
+  case "${XDG_CURRENT_DESKTOP:-}" in
+    *GNOME*)
+      if [ -d "$EXTENSOES/$EXTENSAO" ] \
+         || [ -d "$HOME/.local/share/gnome-shell/extensions/$EXTENSAO" ] \
+         || [ -d "$EXTENSOES/ubuntu-appindicators@ubuntu.com" ]; then
+        :
+      elif command -v dnf >/dev/null 2>&1 && [ ! -e "${VLB_OSTREE:-/run/ostree-booted}" ]; then
+        aviso "o GNOME não mostra o ícone da bandeja sem a extensão AppIndicator — instalando"
+        if [ "$(id -u)" -eq 0 ]; then SUDO=""; else SUDO="sudo"; fi
+        correr ${SUDO:+$SUDO} dnf install -y gnome-shell-extension-appindicator </dev/null \
+          || aviso "não consegui instalar a extensão; o app funciona, mas sem o ícone da bandeja."
+      else
+        aviso "o GNOME não mostra o ícone da bandeja sem a extensão AppIndicator."
+        echo "   Instale a 'AppIndicator and KStatusNotifierItem Support' pelo gerenciador de"
+        echo "   extensões. Sem ela o app funciona, mas o ícone da bandeja não aparece."
+      fi
+      if [ -d "$EXTENSOES/$EXTENSAO" ] && command -v gnome-extensions >/dev/null 2>&1; then
+        if gnome-extensions info "$EXTENSAO" 2>/dev/null | grep -q -i -E "(enabled|state).*(yes|active|enabled)"; then
+          ok "extensão da bandeja do GNOME: ligada"
+        else
+          # Ligada agora, ela só aparece depois de sair e entrar de novo na
+          # sessão: o GNOME no Wayland não recarrega extensões com a sessão aberta.
+          if correr gnome-extensions enable "$EXTENSAO" 2>/dev/null; then
+            aviso "extensão da bandeja ligada: saia e entre de novo na sessão para o ícone aparecer."
+          else
+            aviso "não consegui ligar a extensão da bandeja por aqui."
+            echo "   Abra o app Extensões e ligue 'AppIndicator and KStatusNotifierItem Support'."
+          fi
+        fi
+      fi
+      ;;
+  esac
 fi
 
 # O Rust, pelo rustup, sem privilégio nenhum (tudo em ~/.cargo e ~/.rustup).
@@ -589,7 +643,7 @@ else
       cp -pR "$FONTE/$GERADO/." "$TEMPORARIO/fonte/$GERADO/"
     fi
   done
-  if [ -d "$FONTE" ] && diff -qr "$FONTE" "$TEMPORARIO/fonte" >/dev/null 2>&1; then
+  if [ -d "$FONTE" ] && command -v diff >/dev/null 2>&1 && diff -qr "$FONTE" "$TEMPORARIO/fonte" >/dev/null 2>&1; then
     ok "código sem alterações; preservando o cache"
   else
     # Permissoes geradas da versao anterior nao devem sobreviver a comandos removidos.
