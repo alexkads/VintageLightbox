@@ -466,20 +466,9 @@ fn estresse_a_revelacao_atrasada_nao_pinta_a_foto_nova(cx: &mut TestAppContext) 
         .expect("a janela aberta");
 
     // A GPU abre numa thread própria: sem ela, não há o que atrasar.
-    let prazo = Instant::now() + Duration::from_secs(20);
-    loop {
-        let disponivel = janela
-            .update(cx, |tela, _w, _cx| tela.processador.disponivel())
-            .expect("a janela aberta");
-        match disponivel {
-            Some(true) => break,
-            Some(false) => {
-                println!("⚠️ sem GPU: não há revelação atrasada para conferir");
-                return;
-            }
-            None if Instant::now() < prazo => std::thread::sleep(Duration::from_millis(20)),
-            None => panic!("a GPU não respondeu em 20 s"),
-        }
+    if !esperar_a_gpu(cx, janela) {
+        println!("⚠️ sem GPU: não há revelação atrasada para conferir");
+        return;
     }
 
     let mut trocas = 0;
@@ -519,6 +508,170 @@ fn estresse_a_revelacao_atrasada_nao_pinta_a_foto_nova(cx: &mut TestAppContext) 
         trocas += 1;
     }
     println!("✅ {trocas} trocas com a GPU atrasada, e o palco sempre com a foto certa");
+}
+
+/// Espera a GPU abrir. `false` quando esta máquina não tem adaptador — e aí o
+/// caso não tem o que conferir.
+///
+/// A thread do [`Processador`] abre o dispositivo em paralelo, e `disponivel()`
+/// responde `None` enquanto isso: tratar `None` como "não tem" faria todo caso
+/// que depende da GPU passar em branco, em toda máquina.
+fn esperar_a_gpu(cx: &mut TestAppContext, janela: gpui::WindowHandle<Revelacao>) -> bool {
+    let prazo = Instant::now() + Duration::from_secs(20);
+    loop {
+        let disponivel = janela
+            .update(cx, |tela, _w, _cx| tela.processador.disponivel())
+            .expect("a janela aberta");
+        match disponivel {
+            Some(true) => return true,
+            Some(false) => return false,
+            None if Instant::now() < prazo => std::thread::sleep(Duration::from_millis(20)),
+            None => panic!("a GPU não respondeu em 20 s"),
+        }
+    }
+}
+
+/// Deixa a GPU responder de verdade e colhe. Devolve se a foto já está no palco.
+fn deixar_a_gpu_responder(cx: &mut TestAppContext, janela: gpui::WindowHandle<Revelacao>) -> bool {
+    std::thread::sleep(Duration::from_millis(2));
+    cx.executor().advance_clock(INTERVALO_DE_COLHEITA * 2);
+    cx.run_until_parked();
+    janela
+        .update(
+            cx,
+            |tela, _w, _cx| matches!(&tela.aberta, Some(aberta) if aberta.desenhada.is_some()),
+        )
+        .expect("a janela aberta")
+}
+
+/// 🚨 **Percorrer uma tira de fotos reveladas não pode mostrar nenhuma delas
+/// crua — nem deixar o palco vazio tempo demais.**
+///
+/// Desde 17/set/2026 a foto com receita gravada **não** vai ao palco antes de o
+/// motor responder (dono: *"primeiro mostra sem efeito e depois é aplicado a
+/// receita"*). Isso troca um defeito visível por um custo: entre uma seta e a
+/// resposta da GPU o palco fica vazio. Os testes de unidade provam a regra numa
+/// foto; o que só se vê aqui é o **preço dela repetido** — quarenta setas
+/// seguidas, com a GPU de verdade no meio.
+///
+/// Duas afirmações, e as duas importam:
+///
+/// 1. em nenhuma das quarenta a foto crua aparece (é a regra);
+/// 2. o palco vazio dura pouco (é o preço) — a meta do dono é uma sessão de 30
+///    fotos em ~5 min, e triagem que pisca preto a cada seta não chega lá.
+#[gpui::test]
+fn estresse_percorrer_a_tira_de_fotos_reveladas(cx: &mut TestAppContext) {
+    const FOTOS: usize = 40;
+
+    let (previews, _dir) = previews_descartaveis();
+    // Cada foto com um tamanho próprio: é por ele que se sabe que o que está no
+    // palco é a revelação **desta** foto, e não a que ficou da anterior.
+    let acervo: Vec<PhotoViewModel> = (0..FOTOS)
+        .map(|i| {
+            previews
+                .save_preview(&format!("id-{i:05}"), &imagem(320 + i as u32 * 4, 240))
+                .expect("gravar preview");
+            PhotoViewModel {
+                // Com receita gravada, senão não há revelação a esperar e o caso
+                // não exercita nada.
+                edit_exposure: Some(0.5 + i as f32 * 0.01),
+                ..foto(i)
+            }
+        })
+        .collect();
+
+    let gravador = Arc::new(GravadorDeMentira::default());
+    let janela = janela(cx, previews, gravador);
+    janela
+        .update(cx, |tela, window, cx| {
+            tela.abrir_no_acervo(acervo, 0, window, cx)
+        })
+        .expect("a janela aberta");
+
+    if !esperar_a_gpu(cx, janela) {
+        println!("⚠️ sem GPU: não há revelação para esperar");
+        return;
+    }
+
+    let mut vazio_total = Duration::ZERO;
+    let mut vazio_pior = Duration::ZERO;
+
+    for passo in 0..FOTOS {
+        if passo > 0 {
+            janela
+                .update(cx, |tela, window, cx| tela.andar(1, window, cx))
+                .expect("a janela aberta");
+        }
+
+        let (nome, esperada) = janela
+            .update(cx, |tela, _w, _cx| {
+                let aberta = tela.aberta.as_ref().expect("uma foto aberta");
+                assert!(
+                    aberta.desenhada.is_none(),
+                    "passo {passo}: a foto crua foi ao palco antes da revelação"
+                );
+                assert!(
+                    aberta.bruta.is_some(),
+                    "passo {passo}: a crua sai da tela, não da memória — é o `\\`"
+                );
+                assert!(
+                    tela.aguardando.is_some(),
+                    "passo {passo}: sem pedido à GPU o palco nunca sairia do vazio"
+                );
+                (
+                    aberta.foto.name.clone(),
+                    aberta.origem.as_ref().map(|o| (o.largura, o.altura)),
+                )
+            })
+            .expect("a janela aberta");
+
+        let comeco = Instant::now();
+        let prazo = comeco + Duration::from_secs(10);
+        while !deixar_a_gpu_responder(cx, janela) {
+            assert!(
+                Instant::now() < prazo,
+                "passo {passo} ({nome}): o palco ficou vazio por 10 s"
+            );
+        }
+        let vazio = comeco.elapsed();
+        vazio_total += vazio;
+        vazio_pior = vazio_pior.max(vazio);
+
+        janela
+            .update(cx, |tela, _w, _cx| {
+                let aberta = tela.aberta.as_ref().expect("uma foto aberta");
+                let revelada = aberta.revelada.as_ref().expect("a revelação chegou");
+                assert_eq!(
+                    Some((revelada.width(), revelada.height())),
+                    esperada,
+                    "passo {passo} ({nome}): o palco mostra a revelação de outra foto"
+                );
+                assert!(tela.aguardando.is_none(), "passo {passo}: a espera acabou");
+            })
+            .expect("a janela aberta");
+    }
+
+    // Folgados de propósito, como o resto do arquivo: o que se procura aqui é
+    // regressão de ordem de grandeza — uma seta que passa a custar segundos —,
+    // e não o milissegundo do perfil `test`.
+    relatar(
+        &format!("palco vazio por seta, em {FOTOS} fotos reveladas (média)"),
+        vazio_total / FOTOS as u32,
+        Duration::from_millis(150),
+    );
+    relatar(
+        "palco vazio por seta (pior)",
+        vazio_pior,
+        Duration::from_millis(600),
+    );
+    assert!(
+        vazio_total / FOTOS as u32 <= Duration::from_millis(150),
+        "a espera média pela revelação passou de 150 ms: a triagem pisca preto a cada seta"
+    );
+    assert!(
+        vazio_pior <= Duration::from_millis(600),
+        "uma das setas deixou o palco vazio por mais de 600 ms"
+    );
 }
 
 /// 🚨 **O Enquadrar arrastado sem parar: um passo e uma gravação por gesto, e o

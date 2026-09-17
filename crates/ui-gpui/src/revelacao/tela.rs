@@ -987,11 +987,30 @@ impl Revelacao {
         // apagaria o sinalizador é o da outra.
         self.repondo = false;
 
+        // 🚨 **A foto crua não vai para a tela quando há receita a aplicar**
+        // (dono, 17/set/2026: *"primeiro mostra sem efeito e depois é aplicado
+        // a receita"*). Ela ia — `revelada` nascia com a bruta e era desenhada
+        // aqui —, e o resultado do motor a substituía alguns milissegundos
+        // depois: duas exibições da mesma foto, a primeira mentindo sobre como
+        // ela está revelada.
+        //
+        // 🔑 **É o que a web faz**, e por isso lá não existe o piscar: o
+        // `editor.tsx` carrega os pixels, define o corte, chama `aplicar` e só
+        // então marca `fase: "pronto"` — e a janela do palco fica `invisible`
+        // até lá. O mesmo desenho já está aqui dentro, em dois lugares: a troca
+        // de resolução (`resolucao.rs`) e a tela do cliente (`cliente.rs`), que
+        // só desenham o que saiu do motor.
+        //
+        // ⚠️ **Só quando vai mesmo revelar.** Sem origem não há pedido, e a
+        // bruta é a espera legítima da foto do site enquanto a cópia de trabalho
+        // não chega; no neutro o resultado é a própria origem, e segurá-la seria
+        // tela preta por nada.
+        let vai_revelar = origem.is_some() && self.ajustes != Ajustes::default();
         self.aberta = Some(Aberta {
             foto,
             origem,
             bruta: bruta.clone(),
-            revelada: bruta,
+            revelada: if vai_revelar { None } else { bruta },
             desenhada: None,
         });
         self.atualizar_exibicao();
@@ -1012,7 +1031,7 @@ impl Revelacao {
         // que ninguém tocou. Fica assim mesmo — o legado pede sempre, então o
         // pior caso aqui é o comportamento dele —, mas a guarda não é a defesa
         // contra abertura lenta que ela parece ser.
-        if self.ajustes != Ajustes::default() {
+        if vai_revelar {
             self.pedir_revelacao(cx);
         }
 
@@ -1064,7 +1083,11 @@ impl Revelacao {
             pixels: Arc::new(rgba.into_raw()),
         });
         aberta.bruta = Some(imagem.clone());
-        aberta.revelada = Some(imagem);
+        // 🚨 **Mesma regra da abertura**: com receita a aplicar, a cópia de
+        // trabalho não aparece crua antes de o motor responder — senão a foto do
+        // site pisca duas vezes, uma ao chegar e outra ao ser revelada. No
+        // neutro o resultado é igual à origem, e segurá-la só atrasaria.
+        aberta.revelada = (self.ajustes == Ajustes::default()).then_some(imagem);
         aberta.desenhada = None;
         self.repondo = false;
 
@@ -1642,6 +1665,30 @@ impl Revelacao {
     /// Pega o resultado mais recente, se houver. Devolve se vale continuar
     /// perguntando.
     fn colher(&mut self, cx: &mut Context<Self>) -> bool {
+        // 🚨 **Sem GPU não vem resultado nenhum.** Como o palco passou a esperar
+        // a revelação para desenhar, uma máquina sem adaptador ficaria com a
+        // tela vazia para sempre — e este laço perguntando a cada 8 ms, também
+        // para sempre. Aqui a espera acaba e a foto crua volta, que é o que o
+        // `processador.rs` promete: "a Revelação mostra a foto sem ajuste —
+        // honesto e visível".
+        //
+        // ⚠️ `Some(false)`, e não `!= Some(true)`: `None` é "a thread ainda está
+        // abrindo o dispositivo", e desistir ali desistiria em toda abertura.
+        if self.processador.disponivel() == Some(false) {
+            let sem_nada_na_tela =
+                matches!(&self.aberta, Some(aberta) if aberta.revelada.is_none());
+            if sem_nada_na_tela {
+                if let Some(aberta) = self.aberta.as_mut() {
+                    aberta.revelada = aberta.bruta.clone();
+                }
+                self.atualizar_exibicao();
+                cx.notify();
+            }
+            self.aguardando = None;
+            self.colhendo = false;
+            return false;
+        }
+
         let descartar_ate = self.descartar_ate;
         if let Some(resultado) = self
             .processador
@@ -1770,6 +1817,12 @@ impl Revelacao {
                     .children(self.folha_de_atalhos(cx)),
                 )
                 .into_any_element(),
+            // 🔑 **Revelando é tela vazia — nunca a foto crua.** É o
+            // `invisible` da web (`editor.tsx`: a janela do palco só aparece em
+            // `fase: "pronto"`), e é o que faz a foto ter **uma** exibição em
+            // vez de duas. As frases abaixo são para quem não tem o que
+            // desenhar; aqui há, e falta só o motor devolver.
+            Some(_) if self.aguardando.is_some() => moldura.into_any_element(),
             // 🔑 **Duas frases, e a diferença é se há o que esperar.** Enquanto
             // a raiz repõe (do disco, ou da cópia de trabalho do site), o que a
             // tela deve dizer é que a foto está vindo; a frase seca de antes só
@@ -3056,6 +3109,79 @@ mod testes {
             .expect("a janela deve estar aberta");
     }
 
+    /// 🚨 **Uma exibição só, e já revelada** (dono, 17/set/2026: *"primeiro
+    /// mostra sem efeito e depois é aplicado a receita"*).
+    ///
+    /// A tela desenhava a foto crua na abertura e a trocava pelo resultado do
+    /// motor alguns milissegundos depois. Duas exibições da mesma foto, e a
+    /// primeira mentindo sobre como ela está revelada — na web isso não
+    /// acontece, porque lá o palco só aparece depois de `aplicar` (`editor.tsx`,
+    /// `fase: "pronto"`).
+    ///
+    /// ⚠️ **A crua continua guardada**: ela é o "antes" do `\`, e some da tela
+    /// sem sair da memória.
+    #[gpui::test]
+    fn abrir_uma_foto_revelada_nao_mostra_a_crua_antes(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_cinza())
+            .expect("gravar preview");
+
+        let janela = janela(cx, previews);
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(
+                    PhotoViewModel {
+                        edit_exposure: Some(1.5),
+                        ..foto("retrato.jpg")
+                    },
+                    window,
+                    cx,
+                );
+
+                let aberta = tela.aberta.as_ref().expect("a foto abriu");
+                assert!(
+                    aberta.bruta.is_some(),
+                    "a crua fica guardada — é o `\\` do antes/depois"
+                );
+                assert!(
+                    aberta.revelada.is_none(),
+                    "a crua não pode ocupar o lugar da revelada"
+                );
+                assert!(
+                    aberta.desenhada.is_none(),
+                    "e nada vai ao palco antes de o motor responder"
+                );
+                assert!(tela.aguardando.is_some(), "a revelação está a caminho");
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// ⚠️ **No neutro a foto aparece na hora.** Sem receita a aplicar, o
+    /// resultado do motor é a própria origem: segurar a tela ali seria um palco
+    /// preto em troca de nada — e é o que separa esta regra de "nunca desenhar
+    /// a crua".
+    #[gpui::test]
+    fn no_neutro_a_foto_aparece_sem_esperar_a_gpu(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_cinza())
+            .expect("gravar preview");
+
+        let janela = janela(cx, previews);
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("retrato.jpg"), window, cx);
+
+                assert!(tela.aguardando.is_none(), "não há o que pedir no neutro");
+                assert!(
+                    tela.aberta.as_ref().unwrap().desenhada.is_some(),
+                    "e por isso a foto já está na tela"
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
     /// 🚨 Abrir uma foto já revelada traz a revelação dela.
     ///
     /// Sem isto, toda foto abre no neutro — inclusive as que o fotógrafo já
@@ -3091,7 +3217,7 @@ mod testes {
                 );
                 assert!(
                     tela.aguardando.is_some(),
-                    "a foto na tela ainda é a original; sem este pedido ela nunca vira a revelada"
+                    "sem este pedido a foto nunca vira a revelada"
                 );
             })
             .expect("a janela deve estar aberta");
