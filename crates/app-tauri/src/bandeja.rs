@@ -7,8 +7,8 @@
 //! - **O ícone diz como estão os envios**: quantos faltam subir, quantos o
 //!   servidor recusou, ou que está tudo sincronizado. O laço dos envios
 //!   (`sincronizacao.rs`) atualiza a cada volta.
-//! - **Clicar no ícone, ou em "Abrir", traz a janela de volta**, e a bandeja
-//!   some.
+//! - **Clicar no ícone abre o menu**, com o estado; "Abrir o VintageLightbox"
+//!   traz a janela de volta, e a bandeja some.
 //!
 //! Fechar a janela com envio pendente (G9) também passa por aqui: a janela
 //! some, e a bandeja fica mostrando o que ainda sobe.
@@ -17,7 +17,7 @@ use std::sync::Mutex;
 
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
-use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
+use tauri::tray::{TrayIcon, TrayIconBuilder};
 use tauri::{AppHandle, Manager, Runtime};
 
 use crate::catalogo::fila::Contagem;
@@ -94,9 +94,9 @@ pub fn criar<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         .icon(Image::from_bytes(ICONE)?)
         .tooltip("VintageLightbox — Tudo sincronizado")
         .menu(&menu)
-        // O clique esquerdo abre a janela; o menu fica no direito (e no
-        // clique com Control, no macOS).
-        .show_menu_on_left_click(false)
+        // O clique abre o menu, com o estado dos envios (dono, 2026-09-16); a
+        // janela volta pelo "Abrir".
+        .show_menu_on_left_click(true)
         .on_menu_event(|app, evento| match evento.id().as_ref() {
             ABRIR => mostrar_janela(app),
             ENVIAR_AGORA => {
@@ -109,16 +109,6 @@ pub fn criar<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
             // "Sair" do menu do app. O que não subiu continua no catálogo.
             SAIR => app.exit(0),
             _ => {}
-        })
-        .on_tray_icon_event(|icone, evento| {
-            if let TrayIconEvent::Click {
-                button: MouseButton::Left,
-                button_state: MouseButtonState::Up,
-                ..
-            } = evento
-            {
-                mostrar_janela(icone.app_handle());
-            }
         })
         .build(app)?;
     icone.set_visible(false)?;
