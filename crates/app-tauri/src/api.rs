@@ -38,6 +38,9 @@ pub struct ContaDoApp {
     /// Esta é só a semente: quem sabe o token de agora é o `PosVendaApiHttp`,
     /// que renova por baixo.
     sessao: tokio::sync::Mutex<Option<Sessao>>,
+    /// O e-mail da conta, lido da resposta de `/auth/me` que a tela já pede.
+    /// É o que a bandeja mostra.
+    pub(crate) email: std::sync::Mutex<Option<String>>,
 }
 
 /// O item do app Tauri no chaveiro, separado do app GPUI.
@@ -78,6 +81,7 @@ impl ContaDoApp {
                 .com_cofre(cofre.clone()),
             cofre,
             sessao: tokio::sync::Mutex::new(None),
+            email: std::sync::Mutex::new(None),
         }
     }
 
@@ -189,6 +193,7 @@ pub async fn entrar(conta: State<'_, ContaDoApp>) -> Result<(), ErroDaPonte> {
 #[tauri::command]
 pub async fn sair(conta: State<'_, ContaDoApp>) -> Result<(), ErroDaPonte> {
     *conta.sessao.lock().await = None;
+    *conta.email.lock().expect("e-mail") = None;
     let cofre = conta.cofre.clone();
     let _ = tauri::async_runtime::spawn_blocking(move || cofre.esquecer()).await;
     Ok(())
@@ -206,6 +211,7 @@ pub struct RespostaDaApi {
 #[tauri::command]
 pub async fn chamar_api(
     conta: State<'_, ContaDoApp>,
+    sincronizador: State<'_, crate::sincronizacao::Sincronizador>,
     metodo: String,
     caminho: String,
     corpo: Option<String>,
@@ -232,6 +238,13 @@ pub async fn chamar_api(
             resposta.status
         );
     }
+    if caminho == "/auth/me" && (200..300).contains(&resposta.status) {
+        if let Some(email) = email_da_resposta(&resposta.bytes) {
+            *conta.email.lock().expect("e-mail") = Some(email);
+            // A bandeja mostra a conta já, e não na próxima volta dos envios.
+            sincronizador.acordar();
+        }
+    }
     Ok(RespostaDaApi {
         status: resposta.status,
         tipo: resposta.tipo,
@@ -239,9 +252,35 @@ pub async fn chamar_api(
     })
 }
 
+/// O e-mail na resposta de `/auth/me`, esteja ele no topo ou dentro de `user`.
+fn email_da_resposta(bytes: &[u8]) -> Option<String> {
+    let valor: serde_json::Value = serde_json::from_slice(bytes).ok()?;
+    ["/email", "/user/email", "/data/email", "/data/user/email"]
+        .iter()
+        .find_map(|p| {
+            valor
+                .pointer(p)
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+        })
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;
+
+    #[test]
+    fn o_email_sai_da_resposta_do_auth_me() {
+        assert_eq!(
+            email_da_resposta(br#"{"email":"a@b.c","role":"ADMIN"}"#).as_deref(),
+            Some("a@b.c")
+        );
+        assert_eq!(
+            email_da_resposta(br#"{"user":{"email":"x@y.z"}}"#).as_deref(),
+            Some("x@y.z")
+        );
+        assert_eq!(email_da_resposta(b"nada"), None);
+    }
 
     #[test]
     fn o_cofre_de_arquivo_guarda_le_e_esquece() {

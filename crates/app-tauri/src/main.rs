@@ -146,7 +146,10 @@ fn main() {
             }
 
             abrir_principal(app)?;
-            bandeja::criar(app.handle())?;
+            let pasta_do_catalogo = app
+                .try_state::<std::sync::Mutex<catalogo::Catalogo>>()
+                .map(|c| c.lock().expect("catálogo").raiz().to_path_buf());
+            bandeja::criar(app.handle(), pasta_do_catalogo)?;
             bandeja::vigiar_minimizar(app.handle());
             // A bandeja nasce depois da primeira volta dos envios: já com o
             // estado de agora, e não "tudo sincronizado" até a próxima.

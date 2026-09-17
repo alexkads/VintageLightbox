@@ -115,6 +115,11 @@ impl Catalogo {
         })
     }
 
+    /// A pasta do catálogo.
+    pub fn raiz(&self) -> &Path {
+        &self.raiz
+    }
+
     pub fn situacao(&self) -> Result<Situacao, ErroDoCatalogo> {
         Ok(Situacao {
             caminho: self.raiz.to_string_lossy().into_owned(),

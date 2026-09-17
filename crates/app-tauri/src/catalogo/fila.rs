@@ -302,6 +302,45 @@ impl Catalogo {
         )?)
     }
 
+    /// Quando algo chegou ao servidor pela última vez: pela fila, ou pela área
+    /// temporária (a importação sobe pelo worker da página).
+    pub fn ultimo_envio_concluido(&self) -> Result<Option<String>, ErroDoCatalogo> {
+        let datas: Vec<String> = {
+            let mut c = self.banco.prepare(
+                "SELECT max(atualizada_em) FROM fila WHERE estado = 'feito'
+                 UNION ALL
+                 SELECT max(atualizada_em) FROM importacao
+                 WHERE json_extract(item, '$.estado') = 'pronta'",
+            )?;
+            let datas = c
+                .query_map([], |l| l.get::<_, Option<String>>(0))?
+                .filter_map(|d| d.ok().flatten())
+                .collect();
+            datas
+        };
+        // Os dois carimbos têm formatos RFC 3339 um pouco diferentes: compara-se
+        // o instante, e não o texto.
+        Ok(datas
+            .into_iter()
+            .filter_map(|d| chrono::DateTime::parse_from_rfc3339(&d).ok())
+            .max()
+            .map(|d| d.to_rfc3339()))
+    }
+
+    /// O envio que falhou e espera a próxima tentativa: quando, e por quê.
+    pub fn proxima_tentativa(&self) -> Result<Option<(i64, Option<String>)>, ErroDoCatalogo> {
+        Ok(self
+            .banco
+            .query_row(
+                "SELECT tentar_depois_de, motivo FROM fila
+                 WHERE estado = 'pendente' AND tentativas > 0 AND operacao = ?1
+                 ORDER BY tentar_depois_de LIMIT 1",
+                [OPERACAO_ENVIO],
+                |l| Ok((l.get(0)?, l.get(1)?)),
+            )
+            .optional()?)
+    }
+
     pub fn contagem_da_fila(&self) -> Result<Contagem, ErroDoCatalogo> {
         Ok(self.banco.query_row(
             "SELECT
@@ -526,6 +565,31 @@ mod testes {
             .unwrap();
         assert!(catalogo.proximo_envio(1014).unwrap().is_none());
         assert!(catalogo.proximo_envio(1015).unwrap().is_some());
+    }
+
+    #[test]
+    fn o_ultimo_envio_e_a_proxima_tentativa() {
+        let (_raiz, catalogo) = catalogo();
+        assert_eq!(catalogo.ultimo_envio_concluido().unwrap(), None);
+        assert_eq!(catalogo.proxima_tentativa().unwrap(), None);
+        guardar(&catalogo, "k1");
+        guardar(&catalogo, "k2");
+        let um = catalogo.proximo_envio(1000).unwrap().unwrap();
+        catalogo
+            .concluir_envio(&um, &Desfecho::Feito, 2000)
+            .unwrap();
+        let dois = catalogo.proximo_envio(2000).unwrap().unwrap();
+        catalogo
+            .concluir_envio(&dois, &Desfecho::TentarDepois("sem rede".into()), 2000)
+            .unwrap();
+        assert_eq!(
+            catalogo.ultimo_envio_concluido().unwrap(),
+            Some(carimbo(2000))
+        );
+        assert_eq!(
+            catalogo.proxima_tentativa().unwrap(),
+            Some((2005, Some("sem rede".into())))
+        );
     }
 
     #[test]

@@ -53,6 +53,9 @@ pub struct Sincronizador {
     /// Os envios que a página ainda guarda no IndexedDB (os que um worker está
     /// subindo por conta própria).
     na_pagina: AtomicU32,
+    /// O tamanho do catálogo, e quando foi medido: somar a pasta inteira a
+    /// cada volta seria ler o disco à toa.
+    tamanho_do_catalogo: Mutex<(Option<std::time::Instant>, Option<u64>)>,
 }
 
 impl Sincronizador {
@@ -387,11 +390,7 @@ pub fn ha_envio_pendente(app: &AppHandle) -> bool {
 pub fn avisar_contagem(app: &AppHandle) {
     let atual = contagem(app);
     let _ = app.emit("fila-de-envios", &atual);
-    let na_pagina = app
-        .state::<Sincronizador>()
-        .na_pagina
-        .load(Ordering::SeqCst);
-    crate::bandeja::atualizar(app, &atual, na_pagina, &area_temporaria(app));
+    crate::bandeja::atualizar(app, &estado_da_bandeja(app, atual));
     let fechar = app
         .state::<Sincronizador>()
         .fechar_ao_esvaziar
@@ -399,6 +398,52 @@ pub fn avisar_contagem(app: &AppHandle) {
     if fechar && !ha_envio_pendente(app) {
         app.exit(0);
     }
+}
+
+/// Tudo o que a janelinha da bandeja mostra.
+fn estado_da_bandeja(app: &AppHandle, fila: Contagem) -> crate::bandeja::Estado {
+    let sincronizador = app.state::<Sincronizador>();
+    let (ultimo_envio, proxima_tentativa, raiz) = app
+        .try_state::<Mutex<Catalogo>>()
+        .map(|c| {
+            let c = c.lock().expect("catálogo");
+            (
+                c.ultimo_envio_concluido().ok().flatten(),
+                c.proxima_tentativa().ok().flatten(),
+                Some(c.raiz().to_path_buf()),
+            )
+        })
+        .unwrap_or((None, None, None));
+    crate::bandeja::Estado {
+        fila,
+        na_pagina: sincronizador.na_pagina.load(Ordering::SeqCst),
+        area: area_temporaria(app),
+        conta: app
+            .try_state::<ContaDoApp>()
+            .and_then(|c| c.email.lock().expect("e-mail").clone()),
+        pilha_local: crate::ambiente::na_pilha_local(),
+        ultimo_envio,
+        proxima_tentativa,
+        bytes_do_catalogo: tamanho_do_catalogo(&sincronizador, raiz),
+        agora: agora(),
+    }
+}
+
+/// O último tamanho medido; mede de novo no máximo uma vez por minuto.
+fn tamanho_do_catalogo(
+    sincronizador: &Sincronizador,
+    raiz: Option<std::path::PathBuf>,
+) -> Option<u64> {
+    const VALIDADE: Duration = Duration::from_secs(60);
+    let mut guardado = sincronizador.tamanho_do_catalogo.lock().expect("tamanho");
+    let velho = guardado.0.is_none_or(|quando| quando.elapsed() > VALIDADE);
+    if let (true, Some(raiz)) = (velho, raiz) {
+        // Marca antes de medir: a próxima volta não dispara outra medição.
+        guardado.0 = Some(std::time::Instant::now());
+        let bytes = crate::bandeja::tamanho_da_pasta(&raiz);
+        guardado.1 = Some(bytes);
+    }
+    guardado.1
 }
 
 // ── Os comandos ──────────────────────────────────────────────────────────────
