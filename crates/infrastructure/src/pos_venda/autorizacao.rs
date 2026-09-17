@@ -233,22 +233,49 @@ async fn responder(conexao: &mut TcpStream, corpo: &str) {
 
 /// Abre a URL no navegador padrão.
 ///
+/// 🚨 **No Windows isto não chama `explorer.exe`, e o motivo é um defeito real**
+/// (balcão, set/2026): o que abria era o **Explorador de Arquivos**, não o
+/// navegador. `explorer` é o shell do sistema, e quando ele não reconhece o
+/// argumento como endereço não recusa — cai no que sabe fazer, que é abrir uma
+/// pasta. Pior: `spawn()` dava certo nos dois desfechos, então nem a frase de
+/// socorro aparecia. Quem abre endereço no Windows é a `ShellExecuteExW` com o
+/// verbo padrão — a mesma do duplo clique —, e é o que `open::that_detached`
+/// faz com a feature `shellexecute-on-windows` ligada no `Cargo.toml`.
+///
+/// `that_detached`, e não `that`: o navegador vive muito mais que esta chamada,
+/// e esperar por ele seguraria a thread até o operador fechar a janela.
+///
 /// Falhar aqui **não é fim de fluxo**: quem chama mostra o endereço na tela para
 /// o operador abrir à mão. Numa máquina de estúdio isso é raro, mas o servidor
 /// já está de pé esperando de qualquer jeito.
 pub fn abrir_no_navegador(url: &str) -> bool {
-    let programa = if cfg!(target_os = "macos") {
-        "open"
-    } else if cfg!(target_os = "windows") {
-        "explorer"
-    } else {
-        "xdg-open"
-    };
+    // Sem `http://` ou `https://` na frente, o shell de qualquer sistema lê o
+    // argumento como caminho — e no Windows é justamente esse o caminho que
+    // termina numa janela de pasta. Recusar aqui deixa o endereço na tela, que é
+    // um desfecho honesto; abrir o Explorador não é.
+    if !e_endereco_web(url) {
+        eprintln!("⚠️  Endereço sem http:// ou https://, não é para o navegador: {url}");
+        return false;
+    }
 
-    std::process::Command::new(programa)
-        .arg(url)
-        .spawn()
-        .is_ok()
+    match open::that_detached(url) {
+        Ok(()) => true,
+        Err(erro) => {
+            eprintln!("⚠️  O navegador padrão não abriu: {erro}");
+            false
+        }
+    }
+}
+
+/// `true` só para `http://` e `https://`. O esquema é insensível a caixa pela
+/// RFC 3986, e um `file://` ou um `C:\...` aqui é engano de configuração.
+fn e_endereco_web(url: &str) -> bool {
+    matches!(
+        url.split_once("://")
+            .map(|(esquema, _)| esquema.to_ascii_lowercase())
+            .as_deref(),
+        Some("http") | Some("https")
+    )
 }
 
 /// 32 bytes de aleatório em base64url — 43 caracteres, o piso da RFC 7636.
@@ -289,6 +316,27 @@ mod testes {
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'));
         assert_ne!(v, sortear(), "dois sorteios iguais seriam gerador quebrado");
+    }
+
+    #[test]
+    fn so_endereco_web_vai_para_o_navegador() {
+        assert!(e_endereco_web(
+            "https://recordarfotos.com.br/autorizar-app?desafio=x&porta=1&estado=y"
+        ));
+        assert!(e_endereco_web(
+            "http://localhost:8001/autorizar-app?porta=1"
+        ));
+        assert!(e_endereco_web("HTTPS://recordarfotos.com.br"));
+
+        // 🚨 Os três que no Windows viravam janela do Explorador de Arquivos, e
+        // não recusa: sem esquema, o shell lê caminho.
+        assert!(!e_endereco_web("localhost:8001/autorizar-app"));
+        assert!(!e_endereco_web("recordarfotos.com.br/autorizar-app"));
+        assert!(!e_endereco_web(r"C:\Users\balcao"));
+
+        // `file://` tem esquema e mesmo assim não é navegador — é abrir pasta
+        // com outro nome.
+        assert!(!e_endereco_web("file:///C:/Users/balcao"));
     }
 
     #[test]

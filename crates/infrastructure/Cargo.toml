@@ -33,6 +33,14 @@ keyring = { version = "3", features = ["apple-native", "windows-native", "sync-s
 rand = "0.8"
 base64 = "0.22"
 
+# Quem leva o operador ao navegador na autorização (`abrir_no_navegador`).
+# 🚨 A feature `shellexecute-on-windows` não é enfeite: sem ela o `open` cai no
+# `explorer.exe`, e o que o balcão via era o **Explorador de Arquivos** no lugar
+# do navegador. Com ela, o caminho no Windows é a `ShellExecuteExW` — a mesma do
+# duplo clique. A feature também vale para o `tauri-plugin-opener`, que usa este
+# mesmo crate: as features se unificam no workspace.
+open = { version = "5", features = ["shellexecute-on-windows"] }
+
 # O motor de revelação: `Ajustes`, o WGSL, `Motor`, o enquadramento e o JPEG.
 # Saiu daqui para um crate próprio em 2026-09-04, para compilar também no
 # navegador; o que fica aqui é a leitura da entidade (`ajustes_da_entidade`,
