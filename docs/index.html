@@ -28,7 +28,7 @@
   th{text-align:left;color:var(--suave);font-weight:500;padding:.5rem .25rem;
      border-bottom:1px solid var(--borda)}
   td{padding:.65rem .25rem;border-bottom:1px solid var(--borda)}
-  td a{color:var(--destaque)}
+  a{color:var(--destaque)}
   .nota{background:color-mix(in srgb,var(--borda) 45%,transparent);border-radius:.5rem;
         padding:1rem 1.1rem;font-size:.875rem;color:var(--suave);margin-top:2rem}
   footer{margin-top:4rem;padding-top:1.5rem;border-top:1px solid var(--borda);
@@ -111,13 +111,13 @@
           pasta pessoal e sem <code>sudo</code>.</li>
       <li><strong>15 a 40 minutos</strong> na primeira vez, e ~10 GiB em
           <code>~/.vintagelightbox</code> — que dá para apagar depois.</li>
-      <li>Só macOS. No Linux e no Windows os instaladores acima já abrem sem esse passo, e
-          compilar não teria troco.</li>
+      <li>Só macOS. Para Windows e Linux, veja
+          <a href="#tauri">o app do balcão</a> logo abaixo.</li>
     </ul>
     <p style="margin:.7rem 0 0;font-size:.875rem;color:var(--suave)">
       Ler um script antes de executá-lo é sensato, e este não se ofende:
       <code>curl -fsSL …/instalar.sh -o instalar.sh</code>, leia, depois <code>sh instalar.sh</code>.
-      Opções: <code>sh -s -- --versao main</code> compila o topo do desenvolvimento,
+      Opções: <code>sh -s -- --versao dev</code> compila o topo do desenvolvimento,
       <code>--seco</code> mostra o que faria sem fazer.
     </p>
     <p style="margin:.7rem 0 0;font-size:.875rem;color:var(--suave)">
@@ -125,6 +125,50 @@
       sozinho, conferindo a assinatura de cada atualização.
     </p>
   </div>
+
+  <h2 id="tauri">O app do balcão: VintageLightbox (Tauri)</h2>
+
+  <p style="color:var(--suave);font-size:.9375rem;margin:0">
+    É o app do pós-venda da RecordarFotos: as telas do painel empacotadas dentro dele, com
+    <strong>RAW</strong>, <strong>cartão da câmera</strong>, <strong>pasta fixa de exportação</strong>,
+    <strong>tela do cliente</strong> no segundo monitor e envio que continua <strong>na bandeja</strong>.
+    Não há instalador pronto: cada máquina compila o próprio app, com um arquivo só, que instala
+    sozinho o que faltar. Ele convive com o VintageLightbox acima, sem substituí-lo.
+  </p>
+
+  <div class="fonte">
+    <strong>Windows</strong>
+    <ol style="margin:.6rem 0 0;padding-left:1.2rem;font-size:.875rem;color:var(--suave)">
+      <li>Baixe
+          <a href="https://github.com/alexkads/VintageLightbox/releases/download/instalador-tauri/instalar-vintagelightbox.cmd"
+             style="color:var(--destaque)">instalar-vintagelightbox.cmd</a>
+          e dê dois cliques nele.</li>
+      <li>Se aparecer <em>“O Windows protegeu o computador”</em>: <strong>Mais informações →
+          Executar assim mesmo</strong>.</li>
+      <li>No fim, o app está no <strong>Menu Iniciar</strong>. Ele instala sozinho o WebView2, o Rust
+          e o compilador do MSYS2.</li>
+    </ol>
+  </div>
+
+  <div class="fonte">
+    <strong>Linux e macOS</strong>
+    <pre><code>curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox.cmd | sh</code></pre>
+    <ul style="margin:0">
+      <li><strong>Linux</strong>: instala as bibliotecas do WebKitGTK (por <code>apt</code>,
+          <code>dnf</code> ou <code>pacman</code>, pedindo a senha) e o Rust. O app aparece no menu de
+          aplicativos.</li>
+      <li><strong>macOS</strong>: precisa só das Command Line Tools
+          (<code>xcode-select --install</code>); o app vai para <code>/Applications</code>.</li>
+    </ul>
+  </div>
+
+  <p style="color:var(--suave);font-size:.875rem;margin:.9rem 0 0">
+    <strong>10 a 30 minutos</strong> na primeira vez. Para <strong>atualizar</strong>, repita o mesmo
+    passo, e a partir da segunda vez leva poucos minutos. Opções (<code>--seco</code>,
+    <code>--versao</code>, <code>--destino</code>) e o passo a passo completo em
+    <a href="https://github.com/alexkads/VintageLightbox/blob/dev/docs/INSTALAR-TAURI.md"
+       style="color:var(--destaque)">INSTALAR-TAURI.md</a>.
+  </p>
 
   <footer>
     <p>
