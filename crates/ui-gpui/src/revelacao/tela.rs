@@ -65,6 +65,8 @@ mod painel;
 mod para_e2e;
 /// A tira do rodapé: recortes, puxador, menu e miniaturas (ver `tira.rs`).
 mod tira;
+/// A conta do pedaço à vista — a tira da sessão usa a mesma.
+pub(crate) use tira::faixa_desenhada;
 /// O estresse de dentro da tela: tira grande, sliders, Enquadrar e zoom.
 #[cfg(test)]
 mod estresse;

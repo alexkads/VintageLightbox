@@ -26,6 +26,7 @@
 //! coisas que o catálogo local não tem como saber.
 
 use std::num::NonZeroUsize;
+use std::ops::Range;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::Duration;
@@ -33,7 +34,7 @@ use std::time::Duration;
 use biblioteca_core::acervo::{self, Acervo, Filtro};
 use biblioteca_core::dados_do_cliente::{self, DadosDoCliente};
 use biblioteca_core::dinheiro;
-use biblioteca_core::grade::colunas_que_cabem;
+use biblioteca_core::grade::{colunas_que_cabem, linhas_necessarias};
 use biblioteca_core::selecao::{Modificadores, Selecao};
 use domain::services::pos_venda::{
     EstadoDaFotoNoSite, EstadoNoBalcao, FotoDaGaleria, GaleriaAberta, LinkDeAcesso,
@@ -55,6 +56,7 @@ use super::arquivos::SeletorDeFotos;
 use crate::biblioteca::miniaturas::{CacheDeMiniaturas, Miniatura};
 use crate::importacao::explorador::{Andamento, Freios, Importador};
 use crate::pos_venda::porta::{GestoDoFim, Publicador, Recado};
+use crate::revelacao::tela::faixa_desenhada;
 use crate::selos;
 use crate::tema::cores;
 use domain::value_objects::{ImportMode, ImportOptions, OrganizationStrategy, RenamePattern};
@@ -75,15 +77,45 @@ const PASSO_DO_ZOOM: f32 = 35.0;
 /// seria pagar pixel que nenhum zoom mostra.
 const LADO_DA_MINIATURA: u32 = ZOOM_MAXIMO as u32;
 
-/// Quantas miniaturas da sessão ficam na memória.
+/// O piso do cache de miniaturas da sessão.
 ///
-/// A grade da sessão **não é virtualizada**: ela desenha todas as visíveis do
-/// recorte. Então o cache precisa caber o recorte inteiro, ou cada quadro
-/// descarta o que o próximo pede de volta — o mesmo defeito que o
-/// `PreviewManager` (15 imagens) já cometia com as 25 desta sessão.
-/// `preparar_miniaturas` cresce isto para o que estiver à vista; este é só o
-/// piso de partida.
+/// 🚨 **Até 17/set/2026 o cache crescia até o recorte inteiro** — a grade não
+/// era virtualizada, desenhava todas, e o cache tinha de caber todas: 2.000
+/// fotos, 2.000 texturas de 320 px na memória, e um quadro de 537 ms (medido
+/// pelo estresse). Agora a grade desenha só as linhas à vista e a tira só o
+/// pedaço à vista; `preparar_miniaturas` dimensiona o cache pelo que **cabe na
+/// janela** (três telas de cada), e este número é só o piso.
 const MINIATURAS_GUARDADAS: usize = 64;
+
+/// O respiro entre as células da grade, nas duas direções.
+const VAO_DA_GRADE: f32 = 8.0;
+/// O respiro entre as miniaturas da tira.
+const VAO_DA_TIRA: f32 = 6.0;
+/// O recuo da tira à esquerda — o `px(10.)` dela.
+const RECUO_DA_TIRA: f32 = 10.0;
+/// O `p(px(12.))` da tela, dos dois lados.
+const MARGEM_DA_GRADE: f32 = 24.0;
+/// A largura do painel da foto mais o `gap` do `corpo`.
+const LARGURA_DO_PAINEL: f32 = 300.0 + 8.0;
+/// Quanto tempo de um quadro pode ir para carregar miniatura **fora** da vista.
+///
+/// 🔑 A que está à vista carrega sempre, no mesmo quadro — célula vazia
+/// piscando é pior que um quadro mais lento. A margem (a tela de cima e a de
+/// baixo) é adiantamento: ela para no orçamento e continua no quadro seguinte.
+const ORCAMENTO_DA_MARGEM: Duration = Duration::from_millis(4);
+
+/// A largura da grade no último quadro desenhado, e em que condição.
+///
+/// 🔑 **A largura vem do quadro, e não da janela**: o menu lateral e o painel
+/// da foto dividem a linha com a grade, e contar as colunas pela janela dava
+/// mais colunas do que cabem. A janela e o painel ficam guardados para a conta
+/// valer também entre um redimensionamento e o quadro seguinte.
+#[derive(Debug, Clone, Copy)]
+struct MedidaDaGrade {
+    largura: f32,
+    janela: f32,
+    painel: bool,
+}
 
 /// Os recortes da barra, na ordem da web.
 ///
@@ -315,8 +347,39 @@ pub struct Detalhe {
     /// pela lista inteira, e a partir da terceira fileira (ou da décima
     /// miniatura) a foto em foco está fora de vista: o operador aperta ↓ e não
     /// vê nada acontecer. É o que a tira do editor da web faz.
+    ///
+    /// 🚨 **As duas desenham só o pedaço à vista.** Antes montavam o recorte
+    /// inteiro a cada quadro: 76 ms com 300 fotos e 537 ms com 2.000 (estresse,
+    /// 17/set/2026). As linhas de fora viram espaçadores do mesmo tamanho —
+    /// ver [`Detalhe::grade`].
     rolagem_da_grade: gpui::ScrollHandle,
     rolagem_da_tira: gpui::ScrollHandle,
+    /// A largura da grade no último quadro — ver [`MedidaDaGrade`].
+    medida_da_grade: Option<MedidaDaGrade>,
+    /// A altura de uma linha de texto `text_xs` — a célula tem duas.
+    linha_de_texto: f32,
+    /// A linha de texto como o quadro a desenhou, quando difere da conta.
+    linha_medida: Option<f32>,
+    /// As colunas que o quadro de fato desenhou, para a janela, o painel e o
+    /// zoom daquele quadro — vence a conta quando as duas discordam.
+    colunas_vistas: Option<((f32, bool, f32), usize)>,
+    /// As colunas e as linhas com que este quadro montou a grade.
+    colunas_da_grade: usize,
+    linhas_da_grade: usize,
+    /// As linhas da grade que viram elemento neste quadro: `[de, ate)`.
+    grade_desenhada: (usize, usize),
+    /// A foto que a grade ainda tem de trazer à vista.
+    grade_a_seguir: Option<usize>,
+    /// Se o quadro anterior desenhou a grade — só então a medida dela vale.
+    grade_no_quadro: bool,
+    /// A janela e o painel no quadro em curso — o que a medida guarda.
+    janela_no_quadro: (f32, f32),
+    painel_no_quadro: bool,
+    /// O pedaço da tira que vira elemento neste quadro: `[de, ate)`.
+    tira_desenhada: (usize, usize),
+    /// A foto que a tira ainda tem de trazer à vista — espera a tira ter
+    /// medida (o primeiro quadro não tem).
+    tira_a_seguir: Option<usize>,
     /// A altura da tira, que **é** o zoom das miniaturas dela.
     altura_da_tira: f32,
     /// O arrasto do puxador: onde o ponteiro desceu e qual era a altura ali.
@@ -494,6 +557,19 @@ impl Detalhe {
             selecao: Selecao::nova(),
             rolagem_da_grade: gpui::ScrollHandle::new(),
             rolagem_da_tira: gpui::ScrollHandle::new(),
+            medida_da_grade: None,
+            linha_de_texto: 16.0,
+            linha_medida: None,
+            colunas_vistas: None,
+            colunas_da_grade: 1,
+            linhas_da_grade: 0,
+            grade_desenhada: (0, 0),
+            grade_a_seguir: None,
+            grade_no_quadro: false,
+            janela_no_quadro: (0.0, 1000.0),
+            painel_no_quadro: false,
+            tira_desenhada: (0, 0),
+            tira_a_seguir: None,
             altura_da_tira: altura_da_tira::guardada("sessao"),
             arrasto_da_tira: None,
             ultimo_foco: None,
@@ -763,34 +839,131 @@ impl Detalhe {
     /// 🔑 **Só quando muda.** O `ScrollHandle` guarda o pedido e o atende na
     /// próxima pintura; repeti-lo a cada quadro deixaria a tira presa no foco e
     /// impossível de arrastar com a mão.
+    ///
+    /// 🔑 **A rolagem é por conta.** A grade e a tira só têm como elemento o
+    /// pedaço à vista, então "rolar até o filho N" não serve: a posição dele é
+    /// `N × passo`, e é essa conta que decide — o mínimo, como o
+    /// `scroll_to_item` do `div` fazia.
     fn seguir_o_foco(&mut self) {
         let foco = self.selecao.foco();
-        if foco == self.ultimo_foco {
-            return;
+        if foco != self.ultimo_foco {
+            self.ultimo_foco = foco;
+            if let Some(posicao) = foco {
+                self.grade_a_seguir = Some(posicao);
+                self.tira_a_seguir = Some(posicao);
+            }
         }
-        self.ultimo_foco = foco;
-        if let Some(posicao) = foco {
-            self.rolagem_da_grade.scroll_to_item(posicao);
-            self.rolagem_da_tira.scroll_to_item(posicao);
-        }
+        self.seguir_na_grade();
+        self.seguir_na_tira();
     }
 
-    /// Quantas colunas a grade da sessão desenha agora.
+    /// Traz à vista da grade a foto pendente, se a grade já tem medida.
+    fn seguir_na_grade(&mut self) {
+        let Some(posicao) = self.grade_a_seguir else {
+            return;
+        };
+        let vista = f32::from(self.rolagem_da_grade.bounds().size.height);
+        if vista <= 0. {
+            return;
+        }
+        self.grade_a_seguir = None;
+        let passo = self.passo_da_grade();
+        let topo = (posicao / self.colunas_da_grade.max(1)) as f32 * passo;
+        let base = topo + passo - VAO_DA_GRADE;
+        let atual = self.rolagem_da_grade.offset();
+        let y = f32::from(atual.y);
+        let novo = if topo + y < 0. {
+            -topo
+        } else if base + y > vista {
+            vista - base
+        } else {
+            return;
+        };
+        self.rolagem_da_grade
+            .set_offset(gpui::point(atual.x, px(novo)));
+    }
+
+    /// A distância de uma linha da grade à seguinte.
+    ///
+    /// 🔑 **Por conta, e exata**: a célula é `lado × 0,72` de foto, dois
+    /// respiros de 2 px e duas linhas de texto. Com a medida arredondada do
+    /// quadro, a décima linha já caía meio pixel fora de onde o `flex_wrap`
+    /// a punha.
+    fn passo_da_grade(&self) -> f32 {
+        let linha = self.linha_medida.unwrap_or(self.linha_de_texto);
+        self.zoom * 0.72 + 4.0 + 2.0 * linha + VAO_DA_GRADE
+    }
+
+    /// Traz à vista da tira a foto pendente, se a tira já tem medida.
+    fn seguir_na_tira(&mut self) {
+        let Some(posicao) = self.tira_a_seguir else {
+            return;
+        };
+        let vista = f32::from(self.rolagem_da_tira.bounds().size.width);
+        if vista <= 0. {
+            return;
+        }
+        self.tira_a_seguir = None;
+        let largura = self.largura_na_tira();
+        let esquerda = RECUO_DA_TIRA + posicao as f32 * (largura + VAO_DA_TIRA);
+        let direita = esquerda + largura;
+        let atual = self.rolagem_da_tira.offset();
+        let x = f32::from(atual.x);
+        let novo = if esquerda + x < 0. {
+            -esquerda
+        } else if direita + x > vista {
+            vista - direita
+        } else {
+            return;
+        };
+        self.rolagem_da_tira
+            .set_offset(gpui::point(px(novo), atual.y));
+    }
+
+    /// A largura de uma miniatura da tira — a altura dela é o zoom.
+    fn largura_na_tira(&self) -> f32 {
+        altura_da_tira::lado_da_miniatura(self.altura_da_tira) * altura_da_tira::PROPORCAO
+    }
+
+    /// A largura que a grade tem, com a janela desta largura.
     ///
     /// 🚨 **O painel da foto entra na conta.** Ele tem 300px fixos e divide a
     /// linha com a grade; ignorá-lo daria mais colunas do que cabem, e a seta ↓
     /// pularia por cima de uma foto. É o mesmo cuidado que `largura_util` da
     /// Biblioteca tem com a árvore de pastas.
     ///
-    /// ⚠️ Quando não há foco não há painel, e a grade é mais larga — mas ↑↓ só
-    /// valem com foco, então a conta com painel é a que importa.
+    /// 🔑 **Com medida, o menu lateral também entra** — a medida é a largura que
+    /// o quadro deu à grade. Sem ela (antes do primeiro quadro), a conta é pela
+    /// janela, como era.
+    fn largura_da_grade(&self, janela: f32) -> f32 {
+        let painel = self.em_foco().is_some();
+        match self.medida_da_grade {
+            Some(m) => {
+                let mut largura = m.largura + (janela - m.janela);
+                if m.painel && !painel {
+                    largura += LARGURA_DO_PAINEL;
+                } else if !m.painel && painel {
+                    largura -= LARGURA_DO_PAINEL;
+                }
+                largura
+            }
+            None => janela - MARGEM_DA_GRADE - if painel { LARGURA_DO_PAINEL } else { 0. },
+        }
+    }
+
+    /// Quantas colunas a grade da sessão desenha agora.
+    ///
+    /// 🔑 **É a mesma conta que monta as linhas**, então ↑↓ andam exatamente
+    /// uma linha da tela.
     pub fn colunas_visiveis(&self, window: &Window) -> usize {
-        /// O `p(px(12.))` da tela, dos dois lados.
-        const MARGEM: f32 = 24.0;
-        /// A largura do painel da foto mais o `gap` do `corpo`.
-        const PAINEL: f32 = 300.0 + 8.0;
-        let largura = f32::from(window.viewport_size().width) - MARGEM - PAINEL;
-        colunas_que_cabem(largura, self.zoom, 8.0)
+        let janela = f32::from(window.viewport_size().width);
+        let chave = (janela, self.em_foco().is_some(), self.zoom);
+        if let Some((vista, colunas)) = self.colunas_vistas {
+            if vista == chave {
+                return colunas;
+            }
+        }
+        colunas_que_cabem(self.largura_da_grade(janela), self.zoom, VAO_DA_GRADE)
     }
 
     /// Uma **linha** para cima ou para baixo — as setas ↑ e ↓.
@@ -1804,37 +1977,143 @@ impl Detalhe {
     /// Aqui a miniatura é gerada na primeira vez que a foto aparece e **fica
     /// gravada**: conserta também as que já estão no cache, sem precisar
     /// ressincronizar a sessão.
-    fn preparar_miniaturas(&mut self) {
-        let visiveis = self.acervo.total_visivel();
-        if visiveis == 0 {
-            return;
+    ///
+    /// # Só o que está à vista, e uma tela de cada lado
+    ///
+    /// 🚨 Até 17/set/2026 isto carregava o recorte **inteiro** e o cache crescia
+    /// até ele. Agora: as linhas à vista da grade e o pedaço à vista da tira
+    /// carregam sempre; a tela de cima, a de baixo e as pontas da tira carregam
+    /// dentro de [`ORCAMENTO_DA_MARGEM`]. O cache tem o tamanho dessas faixas —
+    /// não cresce com a sessão.
+    ///
+    /// Devolve `true` quando a margem ficou para o próximo quadro.
+    fn preparar_miniaturas(&mut self) -> bool {
+        let total = self.acervo.total_visivel();
+        if total == 0 {
+            return false;
         }
-        // A grade da sessão não é virtualizada — desenha o recorte inteiro —,
-        // então o cache precisa caber o recorte inteiro.
-        self.miniaturas.ajustar_capacidade(
-            NonZeroUsize::new(visiveis.max(MINIATURAS_GUARDADAS)).expect("visiveis > 0"),
-        );
+        let (grade_vista, grade_margem) = self.faixas_da_grade(total);
+        let (tira_vista, tira_margem) = self.faixas_da_tira(total);
+        let capacidade = (grade_margem.len() + tira_margem.len()).max(MINIATURAS_GUARDADAS);
+        self.miniaturas
+            .ajustar_capacidade(NonZeroUsize::new(capacidade).expect("o piso não é zero"));
 
-        let chaves: Vec<String> = self
-            .acervo
-            .visiveis()
-            .map(|foto| self.chave_da_foto(&foto.id))
-            .collect();
-
-        for chave in chaves {
+        let inicio = std::time::Instant::now();
+        let mut faltou = false;
+        // A ordem é a da urgência: o que está à vista primeiro.
+        let urgentes = grade_vista.clone().chain(tira_vista.clone());
+        let margem = grade_margem
+            .filter(|p| !grade_vista.contains(p))
+            .chain(tira_margem.filter(|p| !tira_vista.contains(p)));
+        for (posicao, urgente) in urgentes
+            .map(|p| (p, true))
+            .chain(margem.map(|p| (p, false)))
+        {
+            let Some(foto) = self.acervo.visivel(posicao) else {
+                continue;
+            };
+            let chave = self.chave_da_foto(&foto.id);
             if self.miniaturas.espiar(&chave).is_some() {
+                // `tocar`: o que está perto da vista não é o que o LRU descarta.
+                self.miniaturas.tocar(&chave);
                 continue;
             }
-            // Sem miniatura gravada: reduz o preview grande uma vez e a grava.
-            // Da segunda abertura em diante o caminho é só o `get_thumbnail`.
-            if self.previews.get_thumbnail(&chave).is_none() {
-                if let Some(grande) = self.previews.get_preview(&chave) {
-                    let pequena = reduzir(&grande, LADO_DA_MINIATURA);
-                    let _ = self.previews.save_thumbnail(&chave, &pequena);
-                }
+            if !urgente && inicio.elapsed() > ORCAMENTO_DA_MARGEM {
+                faltou = true;
+                continue;
             }
-            self.miniaturas.obter(&self.previews, &chave);
+            self.carregar_miniatura(&chave);
         }
+        faltou
+    }
+
+    /// Lê a miniatura do disco para a memória — gerando-a, se faltar.
+    fn carregar_miniatura(&mut self, chave: &str) {
+        // Sem miniatura gravada: reduz o preview grande uma vez e a grava.
+        // Da segunda abertura em diante o caminho é só o `get_thumbnail`.
+        if self.previews.get_thumbnail(chave).is_none() {
+            if let Some(grande) = self.previews.get_preview(chave) {
+                let pequena = reduzir(&grande, LADO_DA_MINIATURA);
+                let _ = self.previews.save_thumbnail(chave, &pequena);
+            }
+        }
+        self.miniaturas.obter(&self.previews, chave);
+    }
+
+    /// As linhas da grade à vista, e as com uma tela de margem de cada lado.
+    ///
+    /// Pela rolagem e pela altura da grade no último quadro; antes dele, pela
+    /// altura da janela.
+    fn linhas_da_vista(&self) -> (Range<usize>, Range<usize>) {
+        let linhas = self.linhas_da_grade;
+        let passo = self.passo_da_grade();
+        let topo = -f32::from(self.rolagem_da_grade.offset().y);
+        let vista = match f32::from(self.rolagem_da_grade.bounds().size.height) {
+            v if v > 0. => v,
+            _ => self.janela_no_quadro.1,
+        };
+        let primeira = ((topo / passo).floor().max(0.) as usize).min(linhas);
+        let ultima = (((topo + vista) / passo).ceil().max(0.) as usize).clamp(primeira, linhas);
+        let tela = (vista / passo).ceil().max(1.) as usize;
+        (
+            primeira..ultima,
+            primeira.saturating_sub(tela)..(ultima + tela).min(linhas),
+        )
+    }
+
+    /// As posições da grade à vista e as com uma tela de margem de cada lado.
+    fn faixas_da_grade(&self, total: usize) -> (Range<usize>, Range<usize>) {
+        let colunas = self.colunas_da_grade.max(1);
+        let posicoes = |linhas: Range<usize>| {
+            (linhas.start * colunas).min(total)..(linhas.end * colunas).min(total)
+        };
+        let (vista, margem) = self.linhas_da_vista();
+        (posicoes(vista), posicoes(margem))
+    }
+
+    /// As posições da tira à vista e as que viram elemento (`faixa_desenhada`).
+    fn faixas_da_tira(&self, total: usize) -> (Range<usize>, Range<usize>) {
+        let passo = self.largura_na_tira() + VAO_DA_TIRA;
+        let deslocamento = -f32::from(self.rolagem_da_tira.offset().x);
+        let vista = match f32::from(self.rolagem_da_tira.bounds().size.width) {
+            v if v > 0. => v,
+            _ => self.janela_no_quadro.0,
+        };
+        let de = (((deslocamento - RECUO_DA_TIRA) / passo).floor().max(0.) as usize).min(total);
+        let ate = ((((deslocamento + vista) / passo).ceil().max(0.) as usize) + 1).clamp(de, total);
+        let (m_de, m_ate) = faixa_desenhada(total, passo, deslocamento, vista);
+        (de..ate, m_de..m_ate)
+    }
+
+    /// Quantas miniaturas estão na memória agora — o teto é o do estresse.
+    #[cfg(test)]
+    pub(crate) fn miniaturas_na_memoria(&self) -> usize {
+        self.miniaturas.quantas_na_memoria()
+    }
+
+    /// Anota a janela deste quadro e decide colunas, linhas e o pedaço à vista.
+    fn medir_o_quadro(&mut self, window: &Window) {
+        // A largura que o quadro anterior deu à grade, com a janela e o painel
+        // **daquele** quadro — só se ele desenhou a grade.
+        let largura = f32::from(self.rolagem_da_grade.bounds().size.width);
+        if self.grade_no_quadro && largura > 0. {
+            self.medida_da_grade = Some(MedidaDaGrade {
+                largura,
+                janela: self.janela_no_quadro.0,
+                painel: self.painel_no_quadro,
+            });
+        }
+        let mut texto = window.text_style();
+        texto.font_size = gpui::rems(0.75).into();
+        self.linha_de_texto = f32::from(texto.line_height_in_pixels(window.rem_size()));
+
+        let janela = window.viewport_size();
+        self.janela_no_quadro = (f32::from(janela.width), f32::from(janela.height));
+        self.painel_no_quadro = self.em_foco().is_some();
+        self.colunas_da_grade = self.colunas_visiveis(window);
+        let total = self.acervo.total_visivel();
+        self.grade_no_quadro = total > 0;
+        self.linhas_da_grade = linhas_necessarias(total, self.colunas_da_grade);
     }
 }
 
@@ -1856,8 +2135,19 @@ impl Render for Detalhe {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // 🚨 **Antes de montar qualquer célula.** É o que tira o decode de dentro
         // do quadro; `celula` e `tira` daqui para baixo só leem da memória.
-        self.preparar_miniaturas();
+        self.medir_o_quadro(window);
         self.seguir_o_foco();
+        let total = self.acervo.total_visivel();
+        let tira = self.faixas_da_tira(total).1;
+        self.tira_desenhada = (tira.start, tira.end);
+        let grade = self.linhas_da_vista().0;
+        self.grade_desenhada = (grade.start, grade.end);
+        let a_seguir = self.grade_a_seguir.is_some() || self.tira_a_seguir.is_some();
+        let faltou = self.preparar_miniaturas();
+        if faltou || a_seguir {
+            // A margem ficou pela metade, ou a rolagem ainda não tinha medida.
+            cx.on_next_frame(window, |_tela, _window, cx| cx.notify());
+        }
         self.preparar_formulario_do_cliente(window, cx);
 
         // 🎨 **As faixas do site**: o cabeçalho de 48 px, a barra da importação
@@ -2570,7 +2860,87 @@ impl Detalhe {
         // 🔑 O `.id()` não é enfeite: rolar é estado (a posição), e no GPUI só
         // elemento com id tem estado. Sem ele o `overflow_y_scroll` compila e
         // não rola.
+        //
+        // 🚨 **Só as linhas à vista viram elemento.** As de cima e as de baixo
+        // são dois espaçadores de largura cheia — cada um ocupa uma fileira do
+        // `flex_wrap` —, com `k × passo − respiro` de altura: somado ao respiro
+        // da fileira, a linha `k` cai **exatamente** onde caía com todas as
+        // células montadas, e a rolagem tem a mesma altura.
+        let colunas = self.colunas_da_grade.max(1);
+        let total = self.acervo.total_visivel();
+        let linhas = self.linhas_da_grade;
+        let passo = self.passo_da_grade();
+        let (de, ate) = self.grade_desenhada;
+        let ate = ate.min(linhas);
+        let de = de.min(ate);
+        let espacador = |itens: usize| {
+            div()
+                .w_full()
+                .h(px(itens as f32 * passo - VAO_DA_GRADE))
+                .into_any_element()
+        };
+        let posicoes = (de * colunas).min(total)..(ate * colunas).min(total);
+        let quantas = posicoes.len();
+        let mut filhos: Vec<gpui::AnyElement> = Vec::with_capacity(quantas + 2);
+        if de > 0 {
+            filhos.push(espacador(de));
+        }
+        filhos.extend(posicoes.filter_map(|posicao| {
+            self.acervo
+                .visivel(posicao)
+                .map(|foto| self.celula(posicao, foto, cx).into_any_element())
+        }));
+        if ate < linhas {
+            filhos.push(espacador(linhas - ate));
+        }
+
+        // 🔑 **O quadro confere a conta.** As colunas e a linha de texto são
+        // previstas antes do leiaute; se o `flex_wrap` discordar, o que ele
+        // desenhou vence e o quadro seguinte sai com o número dele.
+        let esta = cx.entity().downgrade();
+        let chave = (self.janela_no_quadro.0, self.painel_no_quadro, self.zoom);
+        let linha_usada = self.linha_medida.unwrap_or(self.linha_de_texto);
+        let lado = self.zoom;
+        let pular = usize::from(de > 0);
+        // ⚠️ Com `track_scroll`, o GPUI guarda as caixas dos filhos na alça da
+        // rolagem, e não na lista que o ouvinte recebe (que chega vazia).
+        let rolagem = self.rolagem_da_grade.clone();
+        let conferir =
+            move |_: Vec<gpui::Bounds<gpui::Pixels>>, window: &mut Window, _cx: &mut App| {
+                let celulas: Vec<_> = (pular..pular + quantas)
+                    .map_while(|i| rolagem.bounds_for_item(i))
+                    .collect();
+                let Some(primeira) = celulas.first() else {
+                    return;
+                };
+                let na_fileira = celulas
+                    .iter()
+                    .take_while(|c| c.origin.y == primeira.origin.y)
+                    .count();
+                let colunas_vistas = (na_fileira < celulas.len() || na_fileira > colunas)
+                    .then_some(na_fileira)
+                    .filter(|n| *n != colunas);
+                let linha = ((f32::from(primeira.size.height) - lado * 0.72 - 4.0) / 2.0).round();
+                let linha_vista = (linha > 0. && linha != linha_usada).then_some(linha);
+                if colunas_vistas.is_none() && linha_vista.is_none() {
+                    return;
+                }
+                let esta = esta.clone();
+                window.on_next_frame(move |_window, cx| {
+                    let _ = esta.update(cx, |tela, cx| {
+                        if let Some(n) = colunas_vistas {
+                            tela.colunas_vistas = Some((chave, n));
+                        }
+                        if linha_vista.is_some() {
+                            tela.linha_medida = linha_vista;
+                        }
+                        cx.notify();
+                    });
+                });
+            };
+
         div()
+            .on_children_prepainted(conferir)
             .id("grade-da-sessao")
             .track_scroll(&self.rolagem_da_grade)
             // 🔑 **Ctrl + roda dá zoom**, e é o que o site promete no `title` do
@@ -2598,15 +2968,9 @@ impl Detalhe {
             .flex()
             .flex_wrap()
             .content_start()
-            .gap(px(8.))
+            .gap(px(VAO_DA_GRADE))
             .overflow_y_scroll()
-            .children(
-                self.acervo
-                    .visiveis()
-                    .enumerate()
-                    .map(|(posicao, foto)| self.celula(posicao, foto, cx))
-                    .collect::<Vec<_>>(),
-            )
+            .children(filhos)
             .into_any_element()
     }
 
@@ -2897,6 +3261,32 @@ impl Detalhe {
         let lado = altura_da_tira::lado_da_miniatura(self.altura_da_tira);
         let largura = lado * altura_da_tira::PROPORCAO;
 
+        // Só o pedaço à vista vira elemento; o resto são dois espaçadores do
+        // mesmo tamanho, e a rolagem não percebe a diferença.
+        let passo = largura + VAO_DA_TIRA;
+        let (de, ate) = self.tira_desenhada;
+        let ate = ate.min(total);
+        let de = de.min(ate);
+        let espacador = |itens: usize| {
+            div()
+                .flex_none()
+                .w(px(itens as f32 * passo - VAO_DA_TIRA))
+                .h(px(1.))
+                .into_any_element()
+        };
+        let mut itens: Vec<gpui::AnyElement> = Vec::with_capacity(ate - de + 2);
+        if de > 0 {
+            itens.push(espacador(de));
+        }
+        itens.extend((de..ate).filter_map(|posicao| {
+            self.acervo
+                .visivel(posicao)
+                .map(|foto| self.miniatura_da_tira(posicao, foto, lado, largura, cx))
+        }));
+        if ate < total {
+            itens.push(espacador(total - ate));
+        }
+
         // As pontas: só há sombra onde ainda há foto fora da vista.
         let deslocamento = -self.rolagem_da_tira.offset().x;
         let maximo = self.rolagem_da_tira.max_offset().width;
@@ -2976,8 +3366,8 @@ impl Detalhe {
                             .track_scroll(&self.rolagem_da_tira)
                             .flex()
                             .items_center()
-                            .gap(px(6.))
-                            .px(px(10.))
+                            .gap(px(VAO_DA_TIRA))
+                            .px(px(RECUO_DA_TIRA))
                             .pb(px(6.))
                             .h(px(lado + 8.0))
                             .overflow_x_scroll()
@@ -2996,15 +3386,7 @@ impl Detalhe {
                                     cx.notify();
                                 },
                             ))
-                            .children(
-                                self.acervo
-                                    .visiveis()
-                                    .enumerate()
-                                    .map(|(posicao, foto)| {
-                                        self.miniatura_da_tira(posicao, foto, lado, largura, cx)
-                                    })
-                                    .collect::<Vec<_>>(),
-                            ),
+                            .children(itens),
                     )
                     .when(tem_antes, |moldura| moldura.child(sombra(true, cx)))
                     .when(tem_depois, |moldura| moldura.child(sombra(false, cx))),
@@ -4676,6 +5058,99 @@ mod testes {
                     tela.miniaturas.espiar("site:id-do-catalogo").is_none(),
                     "a local não mora sob o prefixo do site"
                 );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 **A grade e a tira desenham só o pedaço à vista, e seguem o foco.**
+    ///
+    /// Com o recorte inteiro montado, "rolar até a foto N" era o GPUI achar o
+    /// filho N. Agora as fotos de fora são espaçadores, e a rolagem é conta: a
+    /// seta até a última tem de levar as duas até ela, e a volta até a
+    /// primeira tem de trazê-las ao começo — com o quadro montando poucas
+    /// células, e não 400.
+    #[gpui::test]
+    fn a_grade_e_a_tira_seguem_o_foco_sem_montar_tudo(cx: &mut TestAppContext) {
+        const N: usize = 400;
+        let fotos = (0..N)
+            .map(|i| foto(&format!("f{i:03}"), EstadoDaFotoNoSite::Disponivel, Some(3)))
+            .collect();
+        let (janela, _publicador) = janela(cx, fotos);
+        entrar(cx, &janela);
+        let mut visual = gpui::VisualTestContext::from_window(janela.into(), cx);
+        let desenhar = |visual: &mut gpui::VisualTestContext| {
+            for _ in 0..3 {
+                janela
+                    .update(visual, |_tela, _w, cx| cx.notify())
+                    .expect("a janela deve estar aberta");
+                visual.run_until_parked();
+            }
+        };
+        desenhar(&mut visual);
+
+        let conferir = |tela: &Detalhe, posicao: usize| {
+            let (de, ate) = tela.grade_desenhada;
+            let colunas = tela.colunas_da_grade;
+            assert!(
+                (de * colunas..ate * colunas).contains(&posicao),
+                "a linha da foto {posicao} está entre as desenhadas ({de}..{ate} × {colunas})"
+            );
+            assert!(
+                (ate - de) * colunas < N / 4,
+                "a grade montou {} linhas de {}",
+                ate - de,
+                tela.linhas_da_grade
+            );
+            let passo = tela.passo_da_grade();
+            let topo = (posicao / colunas) as f32 * passo;
+            let y = -f32::from(tela.rolagem_da_grade.offset().y);
+            let vista = f32::from(tela.rolagem_da_grade.bounds().size.height);
+            assert!(
+                topo >= y && topo + passo - VAO_DA_GRADE <= y + vista + 0.5,
+                "a linha {topo} está à vista em {y}..{}",
+                y + vista
+            );
+            let (de, ate) = tela.tira_desenhada;
+            assert!(
+                (de..ate).contains(&posicao),
+                "a tira desenha a foto {posicao}"
+            );
+            assert!(ate - de < N / 4, "a tira montou {} de {N}", ate - de);
+        };
+
+        janela
+            .update(&mut visual, |tela, _w, cx| {
+                for _ in 0..N {
+                    tela.andar(1, cx);
+                }
+            })
+            .expect("a janela deve estar aberta");
+        desenhar(&mut visual);
+        janela
+            .update(&mut visual, |tela, _w, _cx| {
+                assert_eq!(tela.posicao_em_foco(), Some(N - 1));
+                assert!(f32::from(tela.rolagem_da_grade.offset().y) < 0.);
+                assert!(f32::from(tela.rolagem_da_tira.offset().x) < 0.);
+                conferir(tela, N - 1);
+            })
+            .expect("a janela deve estar aberta");
+
+        janela
+            .update(&mut visual, |tela, _w, cx| {
+                for _ in 0..N {
+                    tela.andar(-1, cx);
+                }
+            })
+            .expect("a janela deve estar aberta");
+        desenhar(&mut visual);
+        janela
+            .update(&mut visual, |tela, _w, _cx| {
+                assert_eq!(tela.posicao_em_foco(), Some(0));
+                assert_eq!(f32::from(tela.rolagem_da_grade.offset().y), 0.);
+                // O `scroll_to_item` do `div` encostava a miniatura na borda,
+                // deixando o recuo de fora — a conta faz o mesmo.
+                assert_eq!(f32::from(tela.rolagem_da_tira.offset().x), -RECUO_DA_TIRA);
+                conferir(tela, 0);
             })
             .expect("a janela deve estar aberta");
     }

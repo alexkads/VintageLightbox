@@ -1092,16 +1092,56 @@ fn sessao_com(
     (janela, publicador, dir, abrir)
 }
 
-/// 🚨 **A grade da sessão — a tela em que o app abre — com 300 e 2.000 fotos.**
+/// Um quadro da sessão, medido: a **mediana** de `quadros` desenhos, depois de
+/// um de aquecimento.
 ///
-/// ⚠️ **Gargalo conhecido, e medido aqui**: a grade e a tira da sessão
-/// desenham o recorte **inteiro** a cada quadro, e o cache de miniaturas cresce
-/// até o tamanho do recorte (`preparar_miniaturas`). O teste afirma o que tem
-/// de valer sempre (contas, pedidos, contador que volta) e imprime o custo do
-/// quadro, com um teto só contra o desastre.
+/// ⚠️ Mediana, e não média: a suíte roda com a máquina ocupada (compilação ao
+/// lado), e um quadro atropelado pelo sistema não diz nada sobre a grade.
+fn quadro_da_sessao(
+    cx: &mut TestAppContext,
+    janela: gpui::WindowHandle<Aplicativo>,
+    quadros: usize,
+) -> Duration {
+    let mut visual = gpui::VisualTestContext::from_window(janela.into(), cx);
+    let tamanho = gpui::size(gpui::px(1600.), gpui::px(1000.));
+    visual.draw(gpui::Point::default(), tamanho, |_w, _cx| gpui::Empty);
+    let mut tempos: Vec<Duration> = (0..quadros)
+        .map(|_| {
+            let inicio = Instant::now();
+            janela
+                .update(&mut visual, |app, _w, cx| {
+                    app.detalhe.update(cx, |_d, cx| cx.notify())
+                })
+                .expect("a janela aberta");
+            visual.draw(gpui::Point::default(), tamanho, |_w, _cx| gpui::Empty);
+            inicio.elapsed()
+        })
+        .collect();
+    tempos.sort();
+    tempos[tempos.len() / 2]
+}
+
+/// O teto de miniaturas na memória na janela de teste (1920 × 1080, zoom
+/// padrão) — **o mesmo para 300 e para 10.000 fotos**. É a grade à vista mais
+/// uma tela de cada lado, e a tira com o pedaço que ela desenha; medido em
+/// 17/set/2026: 110. Antes o cache guardava uma por foto, sem teto.
+const TETO_DE_MINIATURAS: usize = 160;
+
+/// 🚨 **A grade da sessão — a tela em que o app abre — com 300, 2.000 e
+/// 10.000 fotos.**
+///
+/// Até 17/set/2026 a grade e a tira montavam o recorte **inteiro** a cada
+/// quadro, e o cache de miniaturas crescia até ele: 76 ms por quadro com 300
+/// fotos e 537 ms com 2.000. Agora a grade é um `uniform_list` de linhas, a
+/// tira desenha só o pedaço à vista, e o cache tem teto. O teste afirma o
+/// orçamento de 60 fps e o teto — no começo e depois de andar até o fim.
+///
+/// ⚠️ **Pesado, e só vale sozinho**: o tempo de quadro afirmado aqui passa do
+/// orçamento quando a suíte inteira roda em paralelo ao lado (medido: 30 ms).
 #[gpui::test]
+#[ignore = "pesado: 10.000 fotos e tempo de quadro afirmado — rode com --ignored --nocapture"]
 fn estresse_a_grade_da_sessao(cx: &mut TestAppContext) {
-    for n in [300usize, 2_000] {
+    for n in [300usize, 2_000, 10_000] {
         let (janela, publicador, _dir, abrir) = sessao_com(cx, n);
         relatar(
             &format!("abrir a sessão de {n} (galeria + miniaturas)"),
@@ -1119,27 +1159,24 @@ fn estresse_a_grade_da_sessao(cx: &mut TestAppContext) {
         assert_eq!(visiveis, n);
 
         // Um quadro com tudo carregado.
-        let quadro = {
-            let mut visual = gpui::VisualTestContext::from_window(janela.into(), cx);
-            let tamanho = gpui::size(gpui::px(1600.), gpui::px(1000.));
-            visual.draw(gpui::Point::default(), tamanho, |_w, _cx| gpui::Empty);
-            let inicio = Instant::now();
-            for _ in 0..5 {
-                janela
-                    .update(&mut visual, |app, _w, cx| {
-                        app.detalhe.update(cx, |_d, cx| cx.notify())
-                    })
-                    .expect("a janela aberta");
-                visual.draw(gpui::Point::default(), tamanho, |_w, _cx| gpui::Empty);
-            }
-            inicio.elapsed() / 10
-        };
+        let orcamento = Duration::from_micros(16_700);
+        let quadro = quadro_da_sessao(cx, janela, 21);
         relatar(
             &format!("um quadro da sessão de {n} (orçamento de 60 fps: 16,7 ms)"),
             quadro,
-            Duration::from_micros(16_700),
+            orcamento,
         );
-        assert!(quadro <= Duration::from_secs(2), "um quadro de {quadro:?}");
+        assert!(quadro <= orcamento, "um quadro de {quadro:?} com {n} fotos");
+        let guardadas = janela
+            .update(cx, |app, _w, cx| {
+                app.detalhe.read(cx).miniaturas_na_memoria()
+            })
+            .expect("a janela aberta");
+        println!("ℹ️ sessão de {n}: {guardadas} miniatura(s) na memória");
+        assert!(
+            guardadas <= TETO_DE_MINIATURAS,
+            "{guardadas} miniaturas na memória com {n} fotos"
+        );
 
         janela
             .update(cx, |app, _window, cx| {
@@ -1154,6 +1191,27 @@ fn estresse_a_grade_da_sessao(cx: &mut TestAppContext) {
                         },
                     );
                     assert_eq!(d.posicao_em_foco(), Some(visiveis - 1), "para no fim");
+                });
+            })
+            .expect("a janela aberta");
+
+        // No fim da sessão: a grade e a tira seguiram o foco, e o quadro e a
+        // memória continuam os mesmos do começo.
+        let quadro = quadro_da_sessao(cx, janela, 21);
+        relatar(
+            &format!("um quadro no fim da sessão de {n}, com o painel"),
+            quadro,
+            orcamento,
+        );
+        assert!(quadro <= orcamento, "um quadro de {quadro:?} no fim de {n}");
+        janela
+            .update(cx, |app, _window, cx| {
+                let guardadas = app.detalhe.read(cx).miniaturas_na_memoria();
+                assert!(
+                    guardadas <= TETO_DE_MINIATURAS,
+                    "{guardadas} miniaturas na memória no fim de {n}"
+                );
+                app.detalhe.update(cx, |d, cx| {
                     cronometrar(&format!("⌘A em {n}"), Duration::from_millis(200), || {
                         d.selecionar_tudo(cx)
                     });
