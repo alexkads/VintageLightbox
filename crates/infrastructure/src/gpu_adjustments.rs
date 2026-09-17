@@ -27,7 +27,30 @@ pub use revelacao_core::{Ajustes, Entrada, Motor};
 /// ⚠️ **`Some(0.0)` no contraste é o fotógrafo tendo arrastado até o fim**, e
 /// não pode ser confundido com ausência — que é por que isto é `if let
 /// Some`, e não `unwrap_or_default`.
+///
+/// 🚨 **A receita inteira vem antes das colunas** (migration 023): elas são só
+/// os 53 ajustes antigos, e sem a receita a foto exportada saía sem os módulos
+/// novos (divergência D7 do contrato da foto). Campo ausente ou que não é
+/// número finito fica no neutro, como no `de_json` da tela.
 pub fn ajustes_da_entidade(foto: &domain::entities::Photo) -> Ajustes {
+    if let Some(receita) = foto
+        .receita()
+        .and_then(|r| serde_json::from_str::<serde_json::Value>(r).ok())
+    {
+        let mut vetor = Ajustes::default().como_vetor();
+        for (posicao, nome) in Ajustes::NOMES.iter().enumerate() {
+            if let Some(valor) = receita
+                .get(nome)
+                .and_then(serde_json::Value::as_f64)
+                .filter(|v| v.is_finite())
+            {
+                vetor[posicao] = valor as f32;
+            }
+        }
+        if let Some(ajustes) = Ajustes::de_vetor(&vetor) {
+            return ajustes;
+        }
+    }
     let mut ajustes = Ajustes::default();
 
     macro_rules! ler {
@@ -215,5 +238,31 @@ mod testes {
                 .any(|pixel| pixel[0] != pixel[1] || pixel[1] != pixel[2]),
             "-100 é o fator -99, e fator -99 não é cinza: se virou, a conta do shader mudou"
         );
+    }
+
+    /// 🚨 Divergência D7: a foto do catálogo exporta com a receita inteira, e
+    /// não só com os 53 ajustes que têm coluna.
+    #[test]
+    fn a_receita_inteira_vale_mais_que_as_colunas() {
+        use domain::value_objects::CropSettings;
+
+        let esperado = Ajustes {
+            exposure: 0.75,
+            bw_ativo: 1.0,
+            dt_cb_shadows_h: 71.5,
+            ..Default::default()
+        };
+        let mut foto = domain::entities::Photo::new(
+            domain::value_objects::FilePath::new("/fotos/DSC_0001.jpg").expect("caminho"),
+        );
+        foto.definir_receita(Some(
+            crate::pos_venda::receita::ajustes_em_json(&esperado, &CropSettings::default())
+                .to_string(),
+        ));
+        assert_eq!(ajustes_da_entidade(&foto), esperado);
+
+        // Receita ilegível cai nas colunas, e não no vazio.
+        foto.definir_receita(Some("não é json".into()));
+        assert_eq!(ajustes_da_entidade(&foto), Ajustes::default());
     }
 }
