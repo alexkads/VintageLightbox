@@ -613,6 +613,39 @@ if (-not (Tem-WebView2)) { throw 'nao detectou WebView2 por usuario' }
         result = self.pwsh(codigo, APPS["tauri"]["script"])
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_g_mais_mais_e_testado_antes_de_compilar(self):
+        codigo = r'''
+$ErrorActionPreference = 'Stop'
+$texto = [IO.File]::ReadAllText($args[0])
+$inicio = $texto.IndexOf("`n#==POWERSHELL==")
+$fim = $texto.IndexOf("`n#==FIM-POWERSHELL==", $inicio)
+$tokens = $null; $erros = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput(
+    $texto.Substring($inicio, $fim - $inicio), [ref]$tokens, [ref]$erros)
+if ($erros.Count) { throw ($erros | Out-String) }
+$funcao = $ast.Find({ param($n)
+    $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Testar-Gpp'
+}, $true)
+Invoke-Expression $funcao.Extent.Text
+$bin = Join-Path $PSScriptRoot 'bin'
+New-Item -ItemType Directory -Path $bin -Force | Out-Null
+Set-Content "$bin/g++" "#!/bin/sh`necho 'cc1plus: fatal error: libisl-23.dll nao encontrada' >&2`nexit 1"
+& chmod +x "$bin/g++"
+$caminho = $env:PATH
+$env:PATH = "$bin" + [IO.Path]::PathSeparator + $caminho
+$r = Testar-Gpp
+if ($r.Ok) { throw 'aceitou g++ quebrado' }
+if ($r.Saida -notmatch 'libisl') { throw "sem a mensagem do compilador: $($r.Saida)" }
+if ($ErrorActionPreference -ne 'Stop') { throw 'mudou a preferencia de erro de quem chamou' }
+Set-Content "$bin/g++" "#!/bin/sh`nexit 0"
+if (-not (Testar-Gpp).Ok) { throw 'recusou g++ que funciona' }
+$env:PATH = $caminho
+'''
+        for app in APPS:
+            with self.subTest(app=app):
+                result = self.pwsh(codigo, APPS[app]["script"])
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_fxc_do_gpui(self):
         codigo = r'''
 $ErrorActionPreference = 'Stop'

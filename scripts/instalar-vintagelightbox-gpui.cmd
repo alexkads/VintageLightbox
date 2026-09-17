@@ -201,6 +201,51 @@ if (-not $Seco -and -not (Get-Command g++ -ErrorAction SilentlyContinue)) {
 }
 Ok "g++: $((Get-Command g++ -ErrorAction SilentlyContinue).Source)"
 
+# 🚨 Um g++ presente nao e um g++ que compila. Um MSYS2 atualizado pela metade
+#    deixa o g++.exe no lugar e o cc1plus sem as DLLs de que depende, e o erro so
+#    aparecia no meio do LibRaw, meia hora depois ("error occurred in cc-rs" no
+#    fuji_compressed.cpp, Windows do dono, 2026-09-17). Aqui ele compila um
+#    arquivo de teste com as mesmas opcoes do LibRaw antes de tudo.
+function Testar-Gpp {
+    $ErrorActionPreference = "Continue"
+    $pasta = Join-Path ([IO.Path]::GetTempPath()) ("vlb-gpp-" + [guid]::NewGuid())
+    New-Item -ItemType Directory -Path $pasta | Out-Null
+    try {
+        $arquivo = Join-Path $pasta "teste.cpp"
+        $codigo = "#include <cstdint>`n#include <thread>`n#include <vector>`nint main() { std::vector<int64_t> v(4); std::thread t([] {}); t.join(); return (int)v.size() - 4; }`n"
+        [IO.File]::WriteAllText($arquivo, $codigo)
+        $global:LASTEXITCODE = 0
+        $saida = & g++ -O3 -m64 -pthread -c $arquivo -o (Join-Path $pasta "teste.o") 2>&1 | Out-String
+        return [pscustomobject]@{ Ok = ($LASTEXITCODE -eq 0); Saida = $saida.Trim() }
+    } catch {
+        return [pscustomobject]@{ Ok = $false; Saida = "$_" }
+    } finally {
+        Remove-Item -LiteralPath $pasta -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+if (-not $Seco) {
+    $teste = Testar-Gpp
+    if (-not $teste.Ok) {
+        Aviso "o g++ do MinGW nao compilou um arquivo de teste:"
+        Write-Host $teste.Saida
+        Aviso "atualizando o MSYS2 e reinstalando o compilador"
+        # Sem --needed: o pacote instalado pode ser justamente o quebrado.
+        Correr { & $msysBash -lc "pacman -Syu --noconfirm" }
+        Correr { & $msysBash -lc "pacman -Syu --noconfirm" }
+        Correr { & $msysBash -lc "pacman -S --noconfirm mingw-w64-x86_64-gcc mingw-w64-x86_64-gcc-libs mingw-w64-x86_64-binutils mingw-w64-x86_64-clang" }
+        $teste = Testar-Gpp
+        if (-not $teste.Ok) {
+            Erro "o g++ do MinGW continua sem compilar:"
+            Write-Host $teste.Saida
+            Write-Host "   Se a mensagem fala em acesso negado, o antivirus pode estar bloqueando:"
+            Write-Host "   em Seguranca do Windows > Protecao contra virus e ameacas > Exclusoes,"
+            Write-Host "   adicione $Casa e $msys, e rode este arquivo de novo."
+            throw "o g++ do MinGW nao compila"
+        }
+    }
+    Ok "g++ compila"
+}
+
 # 🚨 O `windres`. O gpui embute o manifesto do Windows no executavel
 #    (`embed-resource`), e com a toolchain `-gnu` quem compila o recurso e o
 #    `windres` do MinGW. Ele vem nos binutils, que o gcc do MSYS2 ja traz.
@@ -287,7 +332,58 @@ if ($Seco) {
 # ── Compilar ─────────────────────────────────────────────────────────────────
 Diga "compilando (15 a 40 minutos na primeira vez)"
 $env:CARGO_TARGET_DIR = Join-Path $Casa "target-gpui"
-Correr { cargo "+$Toolchain" build --release --manifest-path (Join-Path $Fonte "Cargo.toml") -p ui-gpui --bin ui-gpui --target $Alvo }
+
+# O rustfmt so embeleza as ligacoes que o bindgen gera; sem ele sai um aviso
+# assustador no meio da compilacao. Falhar aqui nao impede nada.
+if (-not $Seco) {
+    try {
+        $ErrorActionPreference = "Continue"
+        & rustup component add rustfmt --toolchain $Toolchain 2>&1 | Out-Null
+    } catch { } finally { $ErrorActionPreference = "Stop" }
+}
+
+# 🚨 Uma compilacao por 4 GiB de memoria, como no Linux e no macOS: com LTO,
+#    cada rustc grande passa de 2 GiB, e o cc-rs do LibRaw soma dezenas de g++.
+#    Um CARGO_BUILD_JOBS ja definido vale mais do que esta conta.
+function Trabalhos-Pela-Memoria {
+    try {
+        $gib = [math]::Floor((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB)
+    } catch { return $null }
+    $trabalhos = [math]::Max(1, [math]::Floor($gib / 4))
+    if ($trabalhos -ge [Environment]::ProcessorCount) { return $null }
+    return [pscustomobject]@{ Trabalhos = $trabalhos; Memoria = $gib }
+}
+if (-not $env:CARGO_BUILD_JOBS) {
+    $conta = Trabalhos-Pela-Memoria
+    if ($conta) {
+        $env:CARGO_BUILD_JOBS = "$($conta.Trabalhos)"
+        Ok "compilando $($conta.Trabalhos) de cada vez ($($conta.Memoria) GiB de memoria)"
+    }
+}
+
+# 🚨 Se falhar, tenta de novo uma vez: sem os restos do LibRaw (um .o pela metade,
+#    travado pelo antivirus, derruba a segunda tentativa tambem) e com uma
+#    compilacao de cada vez, que e o que sobra quando falta memoria.
+$compilar = { cargo "+$Toolchain" build --release --manifest-path (Join-Path $Fonte "Cargo.toml") -p ui-gpui --bin ui-gpui --target $Alvo }
+try {
+    Correr $compilar
+} catch {
+    if ($Seco) { throw }
+    Aviso "a compilacao falhou. Tentando de novo, uma compilacao de cada vez."
+    Get-ChildItem (Join-Path $env:CARGO_TARGET_DIR "$Alvo\release\build") -Directory -Filter "rsraw-sys-*" -ErrorAction SilentlyContinue |
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+    $env:CARGO_BUILD_JOBS = "1"
+    try {
+        Correr $compilar
+    } catch {
+        Erro "a compilacao falhou de novo."
+        Write-Host "   A mensagem do compilador esta acima, nas linhas 'cargo:warning='."
+        Write-Host "   Se ela fala em acesso negado, o antivirus pode estar bloqueando:"
+        Write-Host "   em Seguranca do Windows > Protecao contra virus e ameacas > Exclusoes,"
+        Write-Host "   adicione $Casa e $msys, e rode este arquivo de novo."
+        throw
+    }
+}
 $binario = Join-Path $env:CARGO_TARGET_DIR "$Alvo\release\ui-gpui.exe"
 if ($Seco) { Write-Host "`n   [seco] nada foi feito."; return }
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path $binario)) {
