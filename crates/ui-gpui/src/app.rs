@@ -13,8 +13,8 @@
 //! no cabeçalho da lista.
 
 mod atalhos_da_revelacao;
-mod resolucao_cheia;
 mod painel;
+mod resolucao_cheia;
 mod roteiro;
 /// O que a raiz conta à bandeja (`crate::segundo_plano`).
 mod segundo_plano;
@@ -49,8 +49,8 @@ use crate::exportacao::tela::Exportacao;
 use crate::importacao::explorador::{Explorador, GeradorDeMiniaturas, Importador, SeletorDePasta};
 use crate::importacao::tela::{Importacao, Importou};
 use crate::impressao::tela::Impressao;
-use crate::pos_venda::porta::Publicador;
 use crate::pos_venda::porta::Recado as PosVendaRecado;
+use crate::pos_venda::porta::{Natureza, PedidoDeFoto, Publicador};
 use crate::revelacao::persistencia::{self, Gravador};
 use crate::revelacao::presets::GuardaDePresets;
 use crate::revelacao::processador::Ajustes;
@@ -387,6 +387,10 @@ pub struct Aplicativo {
     /// só a primeira revelada, e os erros das outras não apareciam em lugar
     /// nenhum. Era o "não está sincronizando" de 7/set/2026, e valia também
     /// para classificar trinta fotos de uma vez.
+    ///
+    /// 🚨 **Só envios.** É esta conta que a bandeja chama de "Subindo", que o
+    /// canto mostra e que o G9 consulta; os downloads (cópia de trabalho,
+    /// bruto, "Baixar JPEG") contam em `baixas` — ver `esperar_o_site`.
     sincronias_pendentes: usize,
     /// As fotos que receberam receita nova aqui e cujo JPEG no site ainda é o
     /// de antes — a fila que o "Salvar na galeria" esvazia.
@@ -1269,24 +1273,29 @@ impl Aplicativo {
     /// espalhadas no tempo por construção, uma por decodificação, e desligar na
     /// primeira deixaria a tira acender uma célula e parar.
     ///
-    /// ⏱️ O teto é de 60 s por foto esperada — um RAW é o pior caso conhecido e
-    /// cabe folgado.
+    /// 🚨 **Sem teto: o laço só para quando a conta zera** — o mesmo conserto
+    /// de `esperar_a_sincronia`. Havia um (60 s por foto esperada, contado a
+    /// partir do último pedido), e o repositor trabalha em série: uma tira longa
+    /// num disco lento passava dele, e as respostas de depois ficavam no canal
+    /// sem ninguém para lê-las até a próxima reposição religar o laço. Nesse
+    /// meio-tempo a bandeja dizia "refazendo N", a célula ficava sem miniatura
+    /// e a foto, presa em `reposicoes_pedidas`, não era pedida de novo (apontado
+    /// pelo estresse, 17/set/2026). O repositor responde cada foto, com a imagem
+    /// ou com `Falhou`, e só para quando a janela morre — que é quando este
+    /// laço para também.
     fn esperar_a_reposicao(&mut self, cx: &mut Context<Self>) {
-        let voltas = 600 * self.reposicoes_pendentes.max(1);
-        self._reposicao = Some(cx.spawn(async move |raiz, cx| {
-            for _ in 0..voltas {
-                cx.background_executor()
-                    .timer(std::time::Duration::from_millis(100))
-                    .await;
-                let Ok(acabou) = raiz.update(cx, |raiz, cx| {
-                    raiz.colher_reposicao(cx);
-                    raiz.reposicoes_pendentes == 0
-                }) else {
-                    return;
-                };
-                if acabou {
-                    return;
-                }
+        self._reposicao = Some(cx.spawn(async move |raiz, cx| loop {
+            cx.background_executor()
+                .timer(std::time::Duration::from_millis(100))
+                .await;
+            let Ok(acabou) = raiz.update(cx, |raiz, cx| {
+                raiz.colher_reposicao(cx);
+                raiz.reposicoes_pendentes == 0
+            }) else {
+                return;
+            };
+            if acabou {
+                return;
             }
         }));
     }
@@ -1384,9 +1393,7 @@ impl Aplicativo {
             return false;
         };
 
-        self.publicador
-            .copia_de_trabalho(sessao, local, no_site, self.sincronias.0.clone());
-        self.esperar_a_sincronia(1, cx);
+        self.pedir_a_copia_de_trabalho(sessao, local, no_site, cx);
         true
     }
 
@@ -1475,7 +1482,7 @@ impl Aplicativo {
                         cx,
                     )
                 });
-                self.esperar_a_sincronia(esperadas, cx);
+                self.esperar_o_site(PedidoDeFoto::TirarDoSite, esperadas, cx);
                 return;
             };
 
@@ -1501,7 +1508,21 @@ impl Aplicativo {
             esperadas += evento.subiram.len();
         }
 
-        self.esperar_a_sincronia(esperadas, cx);
+        // Tirar e subir são os dois envio: uma conta só.
+        self.esperar_o_site(PedidoDeFoto::SubirClassificada, esperadas, cx);
+    }
+
+    /// Espera a resposta de `quantas` pedidos do mesmo tipo, na conta certa.
+    ///
+    /// 🚨 **Só envio conta como envio** ([`PedidoDeFoto::natureza`]): é a conta
+    /// das sincronias que a bandeja chama de "Subindo", que o canto mostra como
+    /// "N envios na fila" e que o G9 consulta para não deixar o app sair. Um
+    /// download ali fazia as três mentirem (achado pelo estresse, 17/set/2026).
+    fn esperar_o_site(&mut self, pedido: PedidoDeFoto, quantas: usize, cx: &mut Context<Self>) {
+        match pedido.natureza() {
+            Natureza::Envio => self.esperar_a_sincronia(quantas, cx),
+            Natureza::Leitura => self.esperar_as_baixas(quantas, cx),
+        }
     }
 
     /// Espera o site responder e relê o catálogo quando alguma foto muda de
@@ -1552,48 +1573,6 @@ impl Aplicativo {
                     self.ultimo_envio = Some(chrono::Utc::now().timestamp());
                     mudou = true
                 }
-                PosVendaRecado::Pixels { foto_id, bytes } => {
-                    // 🚨 Decodificar pode falhar — resposta truncada, formato
-                    // que o `image` não lê. Falhar aqui deixa a foto como
-                    // estava (vazia), que é o mesmo desfecho de não ter pedido:
-                    // ruim, e honesto.
-                    match image::load_from_memory(&bytes) {
-                        Ok(imagem) => {
-                            // 🔑 **Vai para o cache antes de ir para a tela.** É
-                            // o que faz a seta de volta não pagar outro
-                            // download: o L1 responde na hora e o L2 (SQLite)
-                            // atravessa o fechar do app. A chave é a do bruto,
-                            // separada da miniatura da galeria — ver
-                            // `persistencia::chave_do_trabalho`.
-                            //
-                            // ⚠️ Falha de gravação não impede de mostrar: o
-                            // cache é acelerador, e a foto na mão é o que o
-                            // operador pediu.
-                            let _ = self
-                                .previews
-                                .save_preview(&persistencia::chave_do_trabalho(&foto_id), &imagem);
-                            // 🖥️ A segunda tela pode estar esperando esta cópia.
-                            let para_o_cliente =
-                                self.cliente_pedindo.as_deref() == Some(foto_id.as_str());
-                            let aproveitou = self
-                                .revelacao
-                                .update(cx, |tela, cx| tela.receber_pixels(&foto_id, imagem, cx));
-                            if !aproveitou {
-                                // A seta andou enquanto o download vinha. Não é
-                                // erro: é o motivo de o id vir junto.
-                            }
-                            if para_o_cliente {
-                                self.cliente_pedindo = None;
-                                self.atualizar_o_cliente(false, cx);
-                            }
-                        }
-                        Err(erro) => {
-                            self.biblioteca.update(cx, |tela, cx| {
-                                tela.avisar(format!("a foto do site não abriu: {erro}"), cx)
-                            });
-                        }
-                    }
-                }
                 // 🔑 O revelado entrou no lugar do original: a sessão relê,
                 // e é a releitura que troca a miniatura da grade pela foto
                 // revelada. Sem ela o operador salvaria e continuaria vendo o
@@ -1620,7 +1599,10 @@ impl Aplicativo {
                     self.avisar_onde_esta_olhando("revelação salva na galeria".into(), cx);
                     mudou = true;
                 }
-                PosVendaRecado::JpegRevelado { foto_no_site, bytes } => {
+                PosVendaRecado::JpegRevelado {
+                    foto_no_site,
+                    bytes,
+                } => {
                     self.guardar_o_jpeg(&foto_no_site, &bytes, cx);
                 }
                 PosVendaRecado::Falhou(erro) => {
@@ -1645,6 +1627,58 @@ impl Aplicativo {
         // Uma só rodada de colheita por resposta: quem manda mais fotos religa
         // o laço.
         mudou
+    }
+
+    /// A cópia de trabalho do passo 11 chegou — para a Revelação, para a tela
+    /// do cliente, ou para as duas.
+    ///
+    /// Chega pelo canal dos downloads (`resolucao_cheia`), e não pelo das
+    /// sincronias: baixar não é enviar.
+    pub(super) fn receber_a_copia_de_trabalho(
+        &mut self,
+        foto_id: String,
+        bytes: &[u8],
+        cx: &mut Context<Self>,
+    ) {
+        // 🚨 Decodificar pode falhar — resposta truncada, formato
+        // que o `image` não lê. Falhar aqui deixa a foto como
+        // estava (vazia), que é o mesmo desfecho de não ter pedido:
+        // ruim, e honesto.
+        match image::load_from_memory(bytes) {
+            Ok(imagem) => {
+                // 🔑 **Vai para o cache antes de ir para a tela.** É
+                // o que faz a seta de volta não pagar outro
+                // download: o L1 responde na hora e o L2 (SQLite)
+                // atravessa o fechar do app. A chave é a do bruto,
+                // separada da miniatura da galeria — ver
+                // `persistencia::chave_do_trabalho`.
+                //
+                // ⚠️ Falha de gravação não impede de mostrar: o
+                // cache é acelerador, e a foto na mão é o que o
+                // operador pediu.
+                let _ = self
+                    .previews
+                    .save_preview(&persistencia::chave_do_trabalho(&foto_id), &imagem);
+                // 🖥️ A segunda tela pode estar esperando esta cópia.
+                let para_o_cliente = self.cliente_pedindo.as_deref() == Some(foto_id.as_str());
+                let aproveitou = self
+                    .revelacao
+                    .update(cx, |tela, cx| tela.receber_pixels(&foto_id, imagem, cx));
+                if !aproveitou {
+                    // A seta andou enquanto o download vinha. Não é
+                    // erro: é o motivo de o id vir junto.
+                }
+                if para_o_cliente {
+                    self.cliente_pedindo = None;
+                    self.atualizar_o_cliente(false, cx);
+                }
+            }
+            Err(erro) => {
+                self.biblioteca.update(cx, |tela, cx| {
+                    tela.avisar(format!("a foto do site não abriu: {erro}"), cx)
+                });
+            }
+        }
     }
 
     pub fn tela(&self) -> Tela {
@@ -1797,8 +1831,9 @@ impl Aplicativo {
         *falha |= falhou;
         let (total, feitas, falha) = (*total, *feitas, *falha);
         if feitas < total {
-            self.revelacao
-                .update(cx, |tela, cx| tela.definir_salvando(Some((feitas, total)), cx));
+            self.revelacao.update(cx, |tela, cx| {
+                tela.definir_salvando(Some((feitas, total)), cx)
+            });
             return;
         }
         self.saindo_depois_de_salvar = None;
@@ -2305,13 +2340,7 @@ impl Aplicativo {
                     (self.sessao().cloned(), foto.pos_venda_foto_id.clone())
                 {
                     self.cliente_pedindo = Some(foto.id.clone());
-                    self.publicador.copia_de_trabalho(
-                        sessao,
-                        foto.id.clone(),
-                        no_site,
-                        self.sincronias.0.clone(),
-                    );
-                    self.esperar_a_sincronia(1, cx);
+                    self.pedir_a_copia_de_trabalho(sessao, foto.id.clone(), no_site, cx);
                 }
             }
             return None;
@@ -2515,7 +2544,10 @@ impl Aplicativo {
         let aviso = match std::fs::write(&destino, bytes) {
             Ok(()) => format!(
                 "JPEG salvo em {}",
-                destino.file_name().and_then(|n| n.to_str()).unwrap_or_default()
+                destino
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or_default()
             ),
             Err(erro) => format!("Não foi possível gravar o JPEG: {erro}"),
         };
@@ -2669,7 +2701,7 @@ impl Aplicativo {
             },
             cx,
         );
-        self.esperar_a_sincronia(quantas, cx);
+        self.esperar_o_site(PedidoDeFoto::SalvarRevelacao, quantas, cx);
     }
 
     /// Põe uma foto da galeria na fila de envio — a última receita ganha.
@@ -2973,7 +3005,8 @@ impl Aplicativo {
         // caro de aprender do que qualquer uma das duas regras inteiras.
         // No Enquadrar, o `Esc` só sai da ferramenta — como no site.
         if self.tela == Tela::Revelacao && self.revelacao.read(cx).cortando() {
-            self.revelacao.update(cx, |tela, cx| tela.cancelar_corte(cx));
+            self.revelacao
+                .update(cx, |tela, cx| tela.cancelar_corte(cx));
             return;
         }
         // 🚨 **Só a Revelação e a impressão têm de onde voltar.** Até
@@ -3288,8 +3321,9 @@ impl Render for Aplicativo {
         self.caixa_flutuante
             .update(cx, |caixa, _| caixa.definir_visivel(com_caixa));
         let cliente_aberto = self.cliente_aberto();
-        self.revelacao
-            .update(cx, |tela, cx| tela.definir_cliente_aberto(cliente_aberto, cx));
+        self.revelacao.update(cx, |tela, cx| {
+            tela.definir_cliente_aberto(cliente_aberto, cx)
+        });
 
         div()
             .key_context(CONTEXTO)
@@ -3696,13 +3730,21 @@ fn arquivo_livre(pasta: &std::path::Path, nome: &str) -> std::path::PathBuf {
 mod testes {
     #[test]
     fn o_jpeg_baixado_tem_o_nome_do_site() {
-        assert_eq!(super::nome_do_jpeg("GRA_2729.webp"), "GRA_2729-revelada.jpg");
-        assert_eq!(super::nome_do_jpeg("sem-extensao"), "sem-extensao-revelada.jpg");
+        assert_eq!(
+            super::nome_do_jpeg("GRA_2729.webp"),
+            "GRA_2729-revelada.jpg"
+        );
+        assert_eq!(
+            super::nome_do_jpeg("sem-extensao"),
+            "sem-extensao-revelada.jpg"
+        );
         let pasta = tempfile::tempdir().expect("pasta");
         let primeiro = super::arquivo_livre(pasta.path(), "a-revelada.jpg");
         std::fs::write(&primeiro, b"x").expect("gravar");
         assert_eq!(
-            super::arquivo_livre(pasta.path(), "a-revelada.jpg").file_name().unwrap(),
+            super::arquivo_livre(pasta.path(), "a-revelada.jpg")
+                .file_name()
+                .unwrap(),
             "a-revelada (2).jpg"
         );
     }
@@ -3899,7 +3941,7 @@ mod testes {
 
         janela
             .update(cx, |app, _window, cx| {
-                app.colher_sincronia(cx);
+                app.colher_as_baixas(cx);
                 assert!(
                     app.revelacao.read(cx).tem_pixels(),
                     "a cópia de trabalho chegou do storage"
@@ -3918,7 +3960,7 @@ mod testes {
             .expect("a janela deve estar aberta");
         janela
             .update(cx, |app, _window, cx| {
-                app.colher_sincronia(cx);
+                app.colher_as_baixas(cx);
             })
             .expect("a janela deve estar aberta");
         assert_eq!(
@@ -6623,6 +6665,175 @@ mod testes {
             2,
             "as duas foram mandadas ao site"
         );
+    }
+
+    /// A tira do site aberta na Revelação, com a rede segurando as respostas:
+    /// a cópia de trabalho da primeira foto fica no ar.
+    fn revelando_do_site_com_rede_lenta(
+        cx: &mut TestAppContext,
+        publicador: Arc<PublicadorDeMentira>,
+    ) -> (gpui::WindowHandle<Aplicativo>, TempDir) {
+        use crate::sessoes::detalhe::FotoARevelar;
+
+        let (previews, dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+        let janela = cx.add_window(move |window, cx| {
+            Aplicativo::ja_dentro(
+                Vec::new(),
+                previews,
+                Vec::new(),
+                Portas {
+                    publicador,
+                    ..portas()
+                },
+                window,
+                cx,
+            )
+        });
+        janela
+            .update(cx, |app, window, cx| {
+                app.atender_a_sessao(
+                    &DetalhePedido::FotosDoSite(vec![
+                        foto_do_site("remota-1", None),
+                        foto_do_site("remota-2", None),
+                    ]),
+                    window,
+                    cx,
+                );
+                app.atender_a_sessao(
+                    &DetalhePedido::Revelar {
+                        fotos: ["remota-1", "remota-2"]
+                            .map(|id| FotoARevelar {
+                                id: id.into(),
+                                arquivo: format!("{id}.jpg"),
+                                no_disco: false,
+                            })
+                            .to_vec(),
+                        inicial: 0,
+                    },
+                    window,
+                    cx,
+                );
+                assert_eq!(app.tela(), Tela::Revelacao);
+            })
+            .expect("a janela deve estar aberta");
+        (janela, dir)
+    }
+
+    /// 🚨 **Baixar não é enviar** (achado pelo estresse, 17/set/2026).
+    ///
+    /// A cópia de trabalho do passo 11 entrava na conta dos envios: a bandeja
+    /// dizia "Subindo: 1 foto", o canto "1 envio na fila", e fechar a janela a
+    /// escondia (G9) só por causa de um download. Aqui o download fica no ar,
+    /// um envio de verdade entra junto, e as respostas voltam fora de ordem.
+    #[gpui::test]
+    fn download_no_ar_nao_conta_como_envio_nem_segura_o_g9(cx: &mut TestAppContext) {
+        let publicador = Arc::new(PublicadorDeMentira {
+            demorada: true,
+            copia_demorada: true,
+            ..Default::default()
+        });
+        let (janela, _dir) = revelando_do_site_com_rede_lenta(cx, publicador.clone());
+
+        janela
+            .update(cx, |app, _window, cx| {
+                assert_eq!(publicador.baixadas(), vec!["remota-1".to_string()]);
+                // Dois downloads: a cópia de trabalho e o bruto, que a
+                // Revelação pede para medir o lado da foto.
+                assert_eq!(app.baixas_pendentes(), 2, "os downloads estão no ar");
+                assert_eq!(app.sincronias_pendentes(), 0, "e não é envio");
+                let retrato = app.retrato_do_segundo_plano(cx);
+                assert_eq!(retrato.subindo, 0, "a bandeja não diz \"Subindo\"");
+                assert!(!retrato.ha_envio_pendente(), "fechar agora fecha");
+                assert!(app.canto_dos_envios(cx).is_none(), "o canto fica vazio");
+
+                // Um envio de verdade entra junto: tirar uma foto do site.
+                app.sincronizar_classificacao(
+                    Classificou {
+                        subiram: Vec::new(),
+                        sairam: vec!["remota-2".into()],
+                        nota: None,
+                    },
+                    cx,
+                );
+                assert_eq!(app.sincronias_pendentes(), 1, "o envio conta");
+                assert_eq!(app.baixas_pendentes(), 2, "os downloads seguem à parte");
+                let retrato = app.retrato_do_segundo_plano(cx);
+                assert_eq!(retrato.subindo, 1);
+                assert!(retrato.ha_envio_pendente());
+                assert!(app.canto_dos_envios(cx).is_some());
+            })
+            .expect("a janela deve estar aberta");
+
+        // 🔀 **Fora de ordem**: o envio, pedido depois, responde primeiro — a
+        // mentira responde o "tirar do site" na hora, e a cópia segue presa.
+        janela
+            .update(cx, |app, _window, cx| {
+                // Colher os downloads não come a resposta do envio…
+                app.colher_as_baixas(cx);
+                assert_eq!(app.sincronias_pendentes(), 1);
+                assert_eq!(app.baixas_pendentes(), 2);
+                app.colher_sincronia(cx);
+                assert_eq!(app.sincronias_pendentes(), 0, "o envio respondeu");
+                assert_eq!(app.baixas_pendentes(), 2, "os downloads ainda não");
+                assert!(!app.retrato_do_segundo_plano(cx).ha_envio_pendente());
+            })
+            .expect("a janela deve estar aberta");
+
+        // Agora o download: colher a sincronia não o consome.
+        publicador.responder();
+        janela
+            .update(cx, |app, _window, cx| {
+                app.colher_sincronia(cx);
+                assert_eq!(app.baixas_pendentes(), 2, "não é da conta dos envios");
+                assert!(!app.revelacao.read(cx).tem_pixels());
+                app.colher_as_baixas(cx);
+                assert_eq!(app.baixas_pendentes(), 0);
+                assert_eq!(app.sincronias_pendentes(), 0, "e não dá a volta");
+                assert!(
+                    app.revelacao.read(cx).tem_pixels(),
+                    "a cópia chegou ao palco"
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// Um download que falha **não é recusa do site**: não vai para o canto das
+    /// recusas (que é dos envios, como no Tauri) e não conta como resposta do
+    /// "Salvar na galeria" — antes, uma cópia que falhasse no meio do lote
+    /// andava o "Salvando k/N" como se fosse uma revelação recusada.
+    #[gpui::test]
+    fn download_que_falha_nao_vira_recusa_nem_resposta_do_salvar(cx: &mut TestAppContext) {
+        let publicador = Arc::new(PublicadorDeMentira {
+            copia_demorada: true,
+            copia_falha: Some("sem rede para a cópia".into()),
+            ..Default::default()
+        });
+        let (janela, _dir) = revelando_do_site_com_rede_lenta(cx, publicador.clone());
+
+        janela
+            .update(cx, |app, _window, _cx| {
+                // Um lote de uma foto esperando o site.
+                app.saindo_depois_de_salvar = Some((1, 0, false));
+                app.sincronias_pendentes = 1;
+            })
+            .expect("a janela deve estar aberta");
+        publicador.responder();
+        janela
+            .update(cx, |app, _window, cx| {
+                app.colher_sincronia(cx);
+                app.colher_as_baixas(cx);
+                assert_eq!(app.baixas_pendentes(), 0, "a falha fecha o download");
+                assert_eq!(app.sincronias_pendentes(), 1, "o salvar segue esperando");
+                assert_eq!(
+                    app.saindo_depois_de_salvar,
+                    Some((1, 0, false)),
+                    "a falha do download não anda o \"Salvando 0/1\""
+                );
+                assert!(app.recusas.is_empty(), "e não é recusa do site");
+                assert_eq!(app.tela(), Tela::Revelacao);
+            })
+            .expect("a janela deve estar aberta");
     }
 
     /// ⚠️ **Colar sem ter copiado não grava nada.**

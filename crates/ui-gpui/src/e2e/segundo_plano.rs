@@ -151,3 +151,47 @@ fn reabrir_antes_de_esvaziar_mantem_o_app(cx: &mut TestAppContext) {
         "com a janela à vista, o app não sai"
     );
 }
+
+/// 🎬 **Download no ar não é envio**: a foto `d` não tem cópia no cache e a
+/// rede a segura, mas a bandeja não diz "Subindo" e fechar fecha — o G9 só
+/// vale para envio (achado pelo estresse, 17/set/2026).
+#[gpui::test]
+fn download_no_ar_nao_segura_a_janela(cx: &mut TestAppContext) {
+    let e = abrir_o_ensaio(
+        cx,
+        Cenario {
+            segundo_plano: true,
+            site: Box::new(|site| site.copia_demorada = true),
+            ..Cenario::default()
+        },
+    );
+    e.revelar_pela_barra(cx);
+    e.revelacao(cx, |tela, window, cx| {
+        let d = tela
+            .acervo()
+            .iter()
+            .position(|f| f.id == "site:d")
+            .expect("a d está na tira");
+        tela.ir_para(d, window, cx);
+    });
+    e.esperar(cx);
+    assert!(
+        e.site.baixadas().contains(&"d".to_string()),
+        "a cópia da d foi pedida"
+    );
+    e.app(cx, |app, _w, cx| {
+        assert!(app.baixas_pendentes() > 0, "e está no ar");
+        assert_eq!(app.sincronias_pendentes(), 0, "sem envio nenhum");
+        let retrato = app.retrato_do_segundo_plano(cx);
+        assert_eq!(retrato.subindo, 0);
+        assert!(!retrato.ha_envio_pendente());
+    });
+    voltas(cx);
+    assert_eq!(bandeja(cx), (false, false));
+
+    let mut visual = VisualTestContext::from_window(e.raiz.into(), cx);
+    assert!(
+        visual.simulate_close(),
+        "só download na fila: a janela fecha"
+    );
+}

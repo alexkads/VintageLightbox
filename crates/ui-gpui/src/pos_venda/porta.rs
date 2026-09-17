@@ -160,6 +160,54 @@ pub struct FotoClassificada {
     pub nota: Option<u8>,
 }
 
+/// Os pedidos de foto que a tela faz ao site, pelo que eles fazem lá.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PedidoDeFoto {
+    SubirClassificada,
+    TirarDoSite,
+    SalvarRevelacao,
+    Negociar,
+    EnviarArquivo,
+    CopiaDeTrabalho,
+    Miniatura,
+    Original,
+    RevelarIntegral,
+}
+
+/// Grava no site, ou só lê dele.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Natureza {
+    /// Muda o que o cliente vê: conta em "Subindo", no canto dos envios e no
+    /// G9 (fechar com envio pendente só esconde a janela).
+    Envio,
+    /// Só traz bytes para esta máquina. Fechar o app perde o download, e nada
+    /// mais: a próxima abertura pede de novo.
+    Leitura,
+}
+
+impl PedidoDeFoto {
+    /// 🚨 **Baixar não é enviar.** Até 17/set/2026 a cópia de trabalho da
+    /// Revelação entrava na mesma conta que salvar a revelação: a bandeja dizia
+    /// "Subindo: 3 fotos" enquanto a tira baixava, e fechar a janela nesse
+    /// instante a escondia em vez de sair (achado pelo estresse). No app Tauri
+    /// e no site, "Subindo" conta só a fila de envios.
+    ///
+    /// `SalvarRevelacao` baixa o original antes de subir o JPEG, e é envio
+    /// assim mesmo: o que importa é o que ele deixa no site.
+    pub const fn natureza(self) -> Natureza {
+        match self {
+            Self::SubirClassificada
+            | Self::TirarDoSite
+            | Self::SalvarRevelacao
+            | Self::Negociar
+            | Self::EnviarArquivo => Natureza::Envio,
+            Self::CopiaDeTrabalho | Self::Miniatura | Self::Original | Self::RevelarIntegral => {
+                Natureza::Leitura
+            }
+        }
+    }
+}
+
 pub trait Publicador: Send + Sync + 'static {
     /// Abre o navegador para o operador autorizar este computador.
     ///
@@ -778,6 +826,11 @@ pub mod mentira {
         pub integrais: Mutex<Vec<(String, Ajustes, CropSettings)>>,
         /// Liga a recusa do site ao "Salvar na galeria", com esta frase.
         pub salvar_falha: Option<String>,
+        /// Segura também a cópia de trabalho (o passo 11) até `responder()` —
+        /// para provar que um download no ar não conta como envio.
+        pub copia_demorada: bool,
+        /// Com isto, a cópia de trabalho falha em vez de chegar.
+        pub copia_falha: Option<String>,
     }
 
     /// Um JPEG 1×1 cinza, codificado de verdade.
@@ -1194,10 +1247,21 @@ pub mod mentira {
                 .push(foto_no_site);
             // Um JPEG 1×1 de verdade: a tela decodifica o que chega, e um vetor
             // de lixo faria o teste passar por um caminho que a produção não tem.
-            let _ = canal.send(Recado::Pixels {
-                foto_id: foto_local,
-                bytes: jpeg_de_um_pixel(),
-            });
+            let recado = match &self.copia_falha {
+                Some(erro) => Recado::Falhou(erro.clone()),
+                None => Recado::Pixels {
+                    foto_id: foto_local,
+                    bytes: jpeg_de_um_pixel(),
+                },
+            };
+            if self.copia_demorada {
+                self.guardados
+                    .lock()
+                    .expect("os guardados")
+                    .push((canal, recado));
+            } else {
+                let _ = canal.send(recado);
+            }
         }
 
         fn negociar(
@@ -1243,6 +1307,31 @@ pub mod mentira {
                 id,
                 titulo: nova.titulo,
             }));
+        }
+    }
+}
+
+#[cfg(test)]
+mod testes {
+    use super::{Natureza, PedidoDeFoto};
+
+    /// A tabela inteira: o que grava no site é envio, o que só traz bytes é
+    /// leitura. Um pedido novo sem lugar aqui não compila (o `match` é
+    /// exaustivo), e um mal classificado quebra este teste.
+    #[test]
+    fn baixar_nao_e_enviar() {
+        use PedidoDeFoto::*;
+        for envio in [
+            SubirClassificada,
+            TirarDoSite,
+            SalvarRevelacao,
+            Negociar,
+            EnviarArquivo,
+        ] {
+            assert_eq!(envio.natureza(), Natureza::Envio, "{envio:?}");
+        }
+        for leitura in [CopiaDeTrabalho, Miniatura, Original, RevelarIntegral] {
+            assert_eq!(leitura.natureza(), Natureza::Leitura, "{leitura:?}");
         }
     }
 }

@@ -439,6 +439,7 @@ fn a_revelacao_abre_a_foto_que_so_existe_na_nuvem(cx: &mut TestAppContext) {
     for _ in 0..10 {
         let _ = estudio.janela.update(cx, |app, _window, cx| {
             app.colher_reposicao(cx);
+            app.colher_as_baixas(cx);
             app.colher_sincronia(cx)
         });
         cx.run_until_parked();
@@ -611,7 +612,7 @@ fn da_lista_ao_revelar_dentro_da_sessao(cx: &mut TestAppContext) {
     for _ in 0..10 {
         let _ = estudio
             .janela
-            .update(cx, |app, _window, cx| app.colher_sincronia(cx));
+            .update(cx, |app, _window, cx| app.colher_as_baixas(cx));
         cx.run_until_parked();
     }
 

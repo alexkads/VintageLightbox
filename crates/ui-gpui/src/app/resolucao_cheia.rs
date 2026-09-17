@@ -1,8 +1,11 @@
 //! Os downloads da Revelação que não são envio: o bruto da foto aberta (para
-//! medir o lado dele e para o zoom em resolução cheia) e o "Baixar JPEG".
+//! medir o lado dele e para o zoom em resolução cheia), o "Baixar JPEG" e a
+//! cópia de trabalho do passo 11 (a foto que só existe no site).
 //!
-//! 🔑 **Canal próprio**, e não o das sincronias: aquele conta "N envios na
-//! fila" no canto, e baixar não é enviar.
+//! 🔑 **Canal próprio**, e não o das sincronias: aquele conta "Subindo" na
+//! bandeja, "N envios na fila" no canto e segura o G9, e baixar não é enviar
+//! ([`PedidoDeFoto::natureza`]). A cópia de trabalho passava por lá até
+//! 17/set/2026, e a bandeja dizia "Subindo" enquanto a tira baixava.
 //!
 //! O lado do bruto é **lembrado entre aberturas** (`lados-dos-originais.json`,
 //! ao lado do catálogo), como o `ladoOriginalDaFoto` do site: a rota do
@@ -18,10 +21,16 @@ use std::time::Duration;
 use gpui::{Context, Task};
 
 use super::Aplicativo;
-use crate::pos_venda::porta::Recado;
+use crate::pos_venda::porta::{PedidoDeFoto, Recado};
+use domain::services::pos_venda::Sessao;
 
 pub(super) struct Baixas {
     canal: (Sender<Recado>, Receiver<Recado>),
+    /// Só as cópias de trabalho. Separadas do resto porque o `Falhou` não diz
+    /// de quem é: no canal de cima ele desliga o "Gerando JPEG", e uma cópia
+    /// que falhasse não pode fazer isso com um JPEG ainda a caminho.
+    copias: (Sender<Recado>, Receiver<Recado>),
+    /// Respostas esperadas, dos dois canais.
     pendentes: usize,
     _laco: Option<Task<()>>,
     /// O maior lado do bruto, por id do site.
@@ -54,6 +63,7 @@ impl Baixas {
             .unwrap_or_default();
         Self {
             canal: channel(),
+            copias: channel(),
             pendentes: 0,
             _laco: None,
             lados,
@@ -167,7 +177,11 @@ impl Aplicativo {
         };
         if !caminho.is_empty() {
             let arquivo = PathBuf::from(caminho);
-            self.decodificar_o_bruto(id, move || image::open(&arquivo).map_err(|e| e.to_string()), cx);
+            self.decodificar_o_bruto(
+                id,
+                move || image::open(&arquivo).map_err(|e| e.to_string()),
+                cx,
+            );
             return;
         }
         let Some(no_site) = no_site else {
@@ -216,6 +230,28 @@ impl Aplicativo {
         }));
     }
 
+    /// O passo 11: pede ao site a cópia de trabalho de uma foto.
+    ///
+    /// `local` é o id do catálogo, e volta no recado: é por ele que a tela
+    /// confere se a foto na frente ainda é a mesma.
+    pub(super) fn pedir_a_copia_de_trabalho(
+        &mut self,
+        sessao: Sessao,
+        local: String,
+        no_site: String,
+        cx: &mut Context<Self>,
+    ) {
+        self.publicador
+            .copia_de_trabalho(sessao, local, no_site, self.baixas.copias.0.clone());
+        self.esperar_o_site(PedidoDeFoto::CopiaDeTrabalho, 1, cx);
+    }
+
+    /// Quantos downloads ainda não responderam.
+    #[cfg(test)]
+    pub(crate) fn baixas_pendentes(&self) -> usize {
+        self.baixas.pendentes
+    }
+
     /// Espera as respostas dos downloads — uma por pedido, até a última.
     pub(super) fn esperar_as_baixas(&mut self, quantas: usize, cx: &mut Context<Self>) {
         self.baixas.pendentes += quantas;
@@ -242,7 +278,20 @@ impl Aplicativo {
         }));
     }
 
-    pub(super) fn colher_as_baixas(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn colher_as_baixas(&mut self, cx: &mut Context<Self>) {
+        while let Ok(recado) = self.baixas.copias.1.try_recv() {
+            self.baixas.pendentes = self.baixas.pendentes.saturating_sub(1);
+            match recado {
+                Recado::Pixels { foto_id, bytes } => {
+                    self.receber_a_copia_de_trabalho(foto_id, &bytes, cx)
+                }
+                // 🔑 **Download que falhou não é recusa do site**: não entra no
+                // canto das recusas (que é dos envios, como no Tauri) nem conta
+                // como resposta do "Salvar na galeria". Só avisa.
+                Recado::Falhou(erro) => self.avisar_onde_esta_olhando(erro, cx),
+                _ => {}
+            }
+        }
         while let Ok(recado) = self.baixas.canal.1.try_recv() {
             self.baixas.pendentes = self.baixas.pendentes.saturating_sub(1);
             match recado {
@@ -257,8 +306,9 @@ impl Aplicativo {
                         if let Some((id, Some(no_site), _)) = &aberta {
                             if *no_site == foto_no_site {
                                 let id = id.clone();
-                                self.revelacao
-                                    .update(cx, |tela, cx| tela.definir_lado_do_bruto(&id, lado, cx));
+                                self.revelacao.update(cx, |tela, cx| {
+                                    tela.definir_lado_do_bruto(&id, lado, cx)
+                                });
                             }
                         }
                     }
@@ -269,7 +319,9 @@ impl Aplicativo {
                             if no_site == foto_no_site {
                                 self.decodificar_o_bruto(
                                     id,
-                                    move || image::load_from_memory(&bytes).map_err(|e| e.to_string()),
+                                    move || {
+                                        image::load_from_memory(&bytes).map_err(|e| e.to_string())
+                                    },
                                     cx,
                                 );
                             }
@@ -310,7 +362,10 @@ mod testes {
         let imagem = image::DynamicImage::new_rgb8(30, 12);
         let mut bytes = Vec::new();
         imagem
-            .write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png)
+            .write_to(
+                &mut std::io::Cursor::new(&mut bytes),
+                image::ImageFormat::Png,
+            )
             .expect("codificar");
         assert_eq!(lado_de(&bytes), Some(30.));
         assert_eq!(lado_de(b"nada"), None);
