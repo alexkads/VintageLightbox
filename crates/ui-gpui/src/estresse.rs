@@ -1132,16 +1132,27 @@ const TETO_DE_MINIATURAS: usize = 160;
 ///
 /// Até 17/set/2026 a grade e a tira montavam o recorte **inteiro** a cada
 /// quadro, e o cache de miniaturas crescia até ele: 76 ms por quadro com 300
-/// fotos e 537 ms com 2.000. Agora a grade é um `uniform_list` de linhas, a
+/// fotos e 537 ms com 2.000. Agora a grade monta só as linhas à vista, a
 /// tira desenha só o pedaço à vista, e o cache tem teto. O teste afirma o
 /// orçamento de 60 fps e o teto — no começo e depois de andar até o fim.
 ///
-/// ⚠️ **Pesado, e só vale sozinho**: o tempo de quadro afirmado aqui passa do
-/// orçamento quando a suíte inteira roda em paralelo ao lado (medido: 30 ms).
+/// ⚠️ **O tempo só vale sozinho**: com a suíte inteira em paralelo o quadro
+/// passa do orçamento (medido: 30 ms). Por isso há duas entradas: a da suíte,
+/// com 300 fotos, confere pedidos, contadores e o teto de memória sem afirmar
+/// tempo; a pesada (`--ignored`) acrescenta 2.000 e 10.000 e o tempo.
+#[gpui::test]
+fn a_grade_da_sessao_tem_teto_e_contas_certas(cx: &mut TestAppContext) {
+    percorrer_a_sessao(cx, &[300], false);
+}
+
 #[gpui::test]
 #[ignore = "pesado: 10.000 fotos e tempo de quadro afirmado — rode com --ignored --nocapture"]
 fn estresse_a_grade_da_sessao(cx: &mut TestAppContext) {
-    for n in [300usize, 2_000, 10_000] {
+    percorrer_a_sessao(cx, &[300, 2_000, 10_000], true);
+}
+
+fn percorrer_a_sessao(cx: &mut TestAppContext, tamanhos: &[usize], afirmar_tempo: bool) {
+    for &n in tamanhos {
         let (janela, publicador, _dir, abrir) = sessao_com(cx, n);
         relatar(
             &format!("abrir a sessão de {n} (galeria + miniaturas)"),
@@ -1166,7 +1177,10 @@ fn estresse_a_grade_da_sessao(cx: &mut TestAppContext) {
             quadro,
             orcamento,
         );
-        assert!(quadro <= orcamento, "um quadro de {quadro:?} com {n} fotos");
+        assert!(
+            !afirmar_tempo || quadro <= orcamento,
+            "um quadro de {quadro:?} com {n} fotos"
+        );
         let guardadas = janela
             .update(cx, |app, _w, cx| {
                 app.detalhe.read(cx).miniaturas_na_memoria()
@@ -1203,7 +1217,10 @@ fn estresse_a_grade_da_sessao(cx: &mut TestAppContext) {
             quadro,
             orcamento,
         );
-        assert!(quadro <= orcamento, "um quadro de {quadro:?} no fim de {n}");
+        assert!(
+            !afirmar_tempo || quadro <= orcamento,
+            "um quadro de {quadro:?} no fim de {n}"
+        );
         janela
             .update(cx, |app, _window, cx| {
                 let guardadas = app.detalhe.read(cx).miniaturas_na_memoria();
