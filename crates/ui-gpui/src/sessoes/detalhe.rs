@@ -2162,7 +2162,7 @@ impl Render for Detalhe {
             .size_full()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
-            .child(self.cabecalho(cx))
+            .child(self.cabecalho(window, cx))
             .children(
                 self.formulario_do_cliente(cx)
                     .map(|f| div().p(px(12.)).child(f)),
@@ -2198,7 +2198,7 @@ impl Detalhe {
     /// 0 compradas`. As fichas da barra contam outra coisa: recorte por situação
     /// **exige classificação**. Os dois números estão certos, e respondem
     /// perguntas diferentes.
-    fn cabecalho(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn cabecalho(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         use crate::estilo;
         use crate::recursos::Icone;
         use gpui_component::Icon;
@@ -2252,7 +2252,12 @@ impl Detalhe {
                 .child(rotulo)
         };
 
-        div()
+        // 🚨 **No Linux esta barra é a barra de título da galeria.** A tela da
+        // sessão não tem o cabeçalho de 56 px do app (`Tela::tem_cabecalho`), e
+        // sem isto a janela não se move nem maximiza enquanto ela estiver
+        // aberta — que é onde o operador passa a maior parte do tempo. Ver
+        // `crate::janela`.
+        crate::janela::como_barra_de_titulo(div(), "barra-da-galeria", window, cx)
             .flex()
             .flex_none()
             .items_center()

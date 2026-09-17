@@ -36,6 +36,8 @@ mod fluxo;
 pub mod imagem;
 pub mod importacao;
 pub mod impressao;
+/// Os gestos da janela que o Linux deixa a cargo do app (mover, maximizar).
+pub mod janela;
 /// O menu do app no macOS (Sobre, Ocultar, Sair).
 pub mod menu;
 pub mod pos_venda;

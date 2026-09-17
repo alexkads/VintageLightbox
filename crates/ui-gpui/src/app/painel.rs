@@ -465,7 +465,11 @@ impl Aplicativo {
     ) -> impl IntoElement {
         let tema = cx.theme();
         let (borda, fundo) = (tema.border, tema.background);
-        h_flex()
+        // 🚨 **No Linux esta faixa é a barra de título.** O GNOME não decora
+        // janela nenhuma (ver `crate::janela`), e sem isto ela não se move nem
+        // maximiza com dois cliques — foi a queixa do dono no Fedora,
+        // 17/set/2026. No macOS a chamada não muda nada.
+        crate::janela::como_barra_de_titulo(h_flex(), "cabecalho-do-app", window, cx)
             .flex_none()
             .h(px(ALTURA_DO_CABECALHO))
             .px(px(16.))
