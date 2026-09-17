@@ -5,6 +5,8 @@
 //! da fase é **igualdade de pixel** com o app de egui.
 
 pub mod automatico;
+/// O cache de fotos reveladas (e a chave que diz quando ele serve).
+pub mod cache;
 pub mod controles;
 pub mod corte;
 pub mod curva;

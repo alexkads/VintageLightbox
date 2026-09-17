@@ -10,7 +10,7 @@
 //! ⚠️ Nenhuma etapa disso acontece no `render`. O `render` só desenha o que já
 //! chegou — é o que permite arrastar liso enquanto a GPU trabalha atrás.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
@@ -36,6 +36,7 @@ use crate::imagem::para_gpui;
 use crate::tema;
 
 use super::automatico;
+use super::cache::{self, CacheDeReveladas};
 use super::controles::{Definicao, CONTROLES};
 use super::corte;
 use super::histograma::Histograma;
@@ -284,6 +285,27 @@ pub struct Revelacao {
     preset_inteiro: bool,
     /// O id do pedido que ainda não voltou. `None` é "a tela está em dia".
     aguardando: Option<u64>,
+    /// As revelações já feitas, para a volta não custar outra ida à GPU.
+    ///
+    /// 🔑 **É metade do pedido do dono** (17/set/2026: *"precisa guardar um
+    /// cache e fazer uma aplicação antecipada na próxima foto"*). A outra metade
+    /// é [`Self::antecipar_a_proxima`]. Ver `revelacao/cache.rs` para a chave.
+    reveladas: CacheDeReveladas,
+    /// O que cada pedido à GPU está revelando — e se o resultado vai ao palco.
+    ///
+    /// 🚨 **Sem isto, a revelação antecipada pintaria a foto errada.** Ela é da
+    /// foto **seguinte**, e `colher` desenhava qualquer resultado que passasse
+    /// do `descartar_ate`. Aqui cada id diz de quem é e para quê.
+    pedidos: HashMap<u64, Pendente>,
+    /// O pedido especulativo da próxima foto, enquanto ele está no ar.
+    ///
+    /// Um por vez: dois adiantariam a segunda foto à frente, que o operador
+    /// talvez nem alcance, e cada um atrasa o pedido de quem está olhando.
+    antecipando: Option<u64>,
+    /// Para que lado o operador está andando na tira — é a foto que a
+    /// antecipação escolhe. Nasce para a frente, que é como se percorre uma
+    /// sessão.
+    rumo: i32,
     /// Resultado com id até este é **de outra foto**, e não entra no palco.
     ///
     /// 🚨 Mexer num slider e apertar a seta antes de a GPU responder deixava a
@@ -355,6 +377,14 @@ pub struct Revelacao {
 struct Controle {
     definicao: &'static Definicao,
     estado: Entity<SliderState>,
+}
+
+/// Um pedido no motor, e o que fazer com o que voltar dele.
+struct Pendente {
+    chave: cache::Chave,
+    /// `false` é a revelação antecipada da próxima foto: ela só alimenta o
+    /// cache, e **nunca** entra no palco — quem está na tela é outra foto.
+    para_a_tela: bool,
 }
 
 struct Aberta {
@@ -521,6 +551,10 @@ impl Revelacao {
             previa: None,
             preset_inteiro: false,
             aguardando: None,
+            reveladas: CacheDeReveladas::default(),
+            pedidos: HashMap::new(),
+            antecipando: None,
+            rumo: 1,
             descartar_ate: 0,
             exibicao_atrasada: false,
             colhendo: false,
@@ -584,6 +618,11 @@ impl Revelacao {
         // 🔑 **A seta anda sobre a tira**, e não sobre o acervo: com um recorte
         // aceso, "a próxima" é a próxima que se vê (`naTira` do site).
         if let Some(nova) = tira::vizinha(&self.na_tira(), self.posicao, passo) {
+            // Para onde ele foi é para onde ele provavelmente vai de novo — e é
+            // isso que a revelação antecipada adivinha (`antecipar_a_proxima`).
+            if passo != 0 {
+                self.rumo = passo.signum();
+            }
             self.posicao = nova;
             self.mostrar_a_posicao(window, cx);
         }
@@ -594,6 +633,7 @@ impl Revelacao {
         if posicao >= self.acervo.len() || posicao == self.posicao {
             return;
         }
+        self.rumo = if posicao > self.posicao { 1 } else { -1 };
         self.posicao = posicao;
         self.mostrar_a_posicao(window, cx);
     }
@@ -981,6 +1021,14 @@ impl Revelacao {
         // 🔑 O que a GPU ainda devolver é da foto que saiu. Tomar um id novo
         // também faz a thread largar o pedido velho, se ele não começou.
         self.descartar_ate = self.processador.proximo_id();
+        // 🚨 O `proximo_id` acima já moveu o `id_atual` do motor: a revelação
+        // antecipada que estivesse no ar foi largada por ele. Continuar
+        // esperando por ela deixaria o laço de colheita de pé para sempre.
+        //
+        // ⚠️ O registro dela **fica** em `pedidos`: se ela tiver começado, o
+        // resultado ainda chega, e é por esse registro que `colher` sabe que ele
+        // vai para o cache e não para o palco.
+        self.antecipando = None;
         // 🚨 **A reposição da foto anterior não vale para esta.** Herdar o
         // sinalizador faria a foto nova abrir dizendo "preparando" sem ninguém
         // ter pedido nada — e ficar assim para sempre, porque o `Reposto` que
@@ -1040,6 +1088,12 @@ impl Revelacao {
         // operador não está mais olhando, e o que já carregou continua no cache.
         self.carregar_a_tira(cx);
 
+        // 🔑 **E a próxima já vai sendo revelada.** Com receita a aplicar, quem
+        // dispara é `colher`, ao fim desta; no neutro não há `colher` nenhum, e
+        // sem esta chamada a antecipação nunca começaria numa sessão de fotos
+        // ainda não trabalhadas — que é justamente a que se percorre inteira.
+        self.antecipar_a_proxima(cx);
+
         // Quem quiser buscar os pixels desta foto em outro lugar fica sabendo
         // agora — e não só na abertura da tela.
         cx.emit(PedidoDaRevelacao::AbriuOutraFoto);
@@ -1076,6 +1130,11 @@ impl Revelacao {
         }
 
         let rgba = imagem.to_rgba8();
+        // 🚨 **Os pixels de origem mudaram sob o mesmo id.** Até agora a origem
+        // era a imagem da galeria (ou nada); agora é a cópia de trabalho. O que
+        // estivesse guardado desta foto passaria a responder por uma origem que
+        // não existe mais — e responderia com a cara de certo.
+        self.reveladas.esquecer(foto_id);
         self.resolucao.recomecar_na_copia();
         aberta.origem = Some(Origem {
             largura: rgba.width(),
@@ -1596,25 +1655,185 @@ impl Revelacao {
 
     fn pedir_revelacao(&mut self, cx: &mut Context<Self>) {
         let Some(Aberta {
+            foto,
             origem: Some(origem),
             ..
         }) = &self.aberta
         else {
             return;
         };
+        let foto_id = foto.id.clone();
+        let pixels = origem.pixels.clone();
+        let (largura, altura) = (origem.largura, origem.altura);
+
+        let ajustes = self.ajustes_na_tela();
+        let corte = transformacao::corte(&self.corte_na_tela());
+        let chave = cache::Chave::nova(&foto_id, (largura, altura), &ajustes, &corte);
+
+        // 🔑 **O que já foi revelado não é revelado de novo.** Voltar uma seta,
+        // desfazer, tirar o ponteiro de cima de uma predefinição: nos três a
+        // receita é uma que já passou pelo motor, e a ida à GPU produziria
+        // exatamente o mesmo pixel. Com o palco esperando a resposta para
+        // desenhar (ver `mostrar`), essa ida é o tempo de tela preta.
+        if let Some(pronta) = self.reveladas.buscar(&chave) {
+            if let Some(aberta) = self.aberta.as_mut() {
+                aberta.revelada = Some(pronta);
+            }
+            // Nada mais a esperar: um `aguardando` pendurado aqui deixaria o
+            // laço de colheita perguntando por um pedido que não existe.
+            self.aguardando = None;
+            self.atualizar_exibicao();
+            self.atualizar_a_tira_com_o_revelado();
+            self.antecipar_a_proxima(cx);
+            cx.notify();
+            return;
+        }
 
         let id = self.processador.proximo_id();
         self.processador.pedir(Pedido {
             id,
-            pixels: origem.pixels.clone(),
-            largura: origem.largura,
-            altura: origem.altura,
-            ajustes: self.ajustes_na_tela(),
-            corte: transformacao::corte(&self.corte_na_tela()),
+            pixels,
+            largura,
+            altura,
+            ajustes,
+            corte,
         });
+        self.pedidos.insert(
+            id,
+            Pendente {
+                chave,
+                para_a_tela: true,
+            },
+        );
+        // 🚨 **O especulativo ficou para trás deste.** `proximo_id` acima já moveu
+        // o `id_atual` do motor, então a thread larga o pedido antecipado se ele
+        // não tiver começado — esquecê-lo aqui é o que impede o laço de colheita
+        // de esperar para sempre por um resultado que não vem.
+        self.antecipando = None;
         self.aguardando = Some(id);
         self.acompanhar(cx);
         cx.notify();
+    }
+
+    /// Revela a **próxima** foto antes de a seta chegar nela.
+    ///
+    /// 🔑 **É a outra metade do pedido do dono** (17/set/2026). O cache tira a
+    /// ida à GPU da segunda visita; isto tira a da primeira, que é a que o
+    /// operador sente ao percorrer uma sessão inteira com a seta. O prefetch das
+    /// vizinhas (`adiantar_as_vizinhas`) já deixava os pixels decodificados; o
+    /// que faltava era o passo seguinte, que é o caro.
+    ///
+    /// Quatro recusas, e cada uma tem motivo:
+    ///
+    /// - **há pedido no ar** (`aguardando`) — a GPU tem o que fazer com a foto
+    ///   que o operador está olhando, e furar essa fila é trocar a resposta de
+    ///   agora por uma de daqui a pouco;
+    /// - **já há um especulativo** — um por vez; ver [`Self::antecipando`];
+    /// - **o Enquadrar está aberto**, ou os pixels estão sendo repostos — nos
+    ///   dois, cada movimento do operador vira pedido;
+    /// - **a próxima está no neutro** — sem receita ela aparece direto da prévia,
+    ///   e não há ida à GPU para poupar.
+    fn antecipar_a_proxima(&mut self, cx: &mut Context<Self>) {
+        if self.aguardando.is_some() || self.antecipando.is_some() {
+            return;
+        }
+        if self.edicao.is_some() || self.repondo {
+            return;
+        }
+        let Some(proxima) = tira::vizinha(&self.na_tira(), self.posicao, self.rumo) else {
+            return;
+        };
+        let Some(foto) = self.acervo.get(proxima).cloned() else {
+            return;
+        };
+
+        let ajustes = persistencia::da_foto(&foto);
+        if ajustes == Ajustes::default() {
+            return;
+        }
+        let corte = transformacao::corte(&persistencia::para_crop_settings(
+            &persistencia::corte_da_foto(&foto),
+        ));
+        // A mesma chave que `adiantar_as_vizinhas` usa: o bruto da foto do site
+        // mora na cópia de trabalho, não na imagem da galeria.
+        let no_cache = if persistencia::so_existe_no_site(&foto) {
+            persistencia::chave_do_trabalho(&foto.id)
+        } else {
+            foto.id.clone()
+        };
+
+        let previews = self.previews.clone();
+        cx.spawn(async move |esta, cx| {
+            // ⚠️ **A decodificação vai para o executor de fundo.** Ela custa os
+            // ~16 ms que o prefetch das vizinhas mede, e gastá-los no quadro
+            // seria trocar lentidão futura por lentidão agora — bem no instante
+            // em que a foto acabou de aparecer.
+            let origem = cx
+                .background_executor()
+                .spawn(async move {
+                    let imagem = previews.get_preview(&no_cache)?;
+                    let rgba = imagem.to_rgba8();
+                    let (largura, altura) = (rgba.width(), rgba.height());
+                    Some((largura, altura, Arc::new(rgba.into_raw())))
+                })
+                .await;
+            let Some((largura, altura, pixels)) = origem else {
+                return;
+            };
+            let _ = esta.update(cx, |tela, cx| {
+                tela.enfileirar_a_antecipacao(
+                    &foto.id, largura, altura, pixels, ajustes, corte, cx,
+                );
+            });
+        })
+        .detach();
+    }
+
+    /// Põe na fila a revelação antecipada, se ela ainda fizer sentido.
+    ///
+    /// 🚨 **As guardas são refeitas aqui.** Entre a decisão de antecipar e a
+    /// chegada dos pixels houve uma ida ao disco: o operador pode ter andado,
+    /// mexido num slider ou aberto o Enquadrar. Furar a fila com trabalho
+    /// especulativo nesse momento atrasaria a foto que ele está vendo.
+    #[allow(clippy::too_many_arguments)]
+    fn enfileirar_a_antecipacao(
+        &mut self,
+        foto_id: &str,
+        largura: u32,
+        altura: u32,
+        pixels: Arc<Vec<u8>>,
+        ajustes: Ajustes,
+        corte: transformacao::Corte,
+        cx: &mut Context<Self>,
+    ) {
+        if self.aguardando.is_some() || self.antecipando.is_some() || self.edicao.is_some() {
+            return;
+        }
+        let chave = cache::Chave::nova(foto_id, (largura, altura), &ajustes, &corte);
+        if self.reveladas.buscar(&chave).is_some() {
+            return;
+        }
+
+        let id = self.processador.proximo_id();
+        self.processador.pedir(Pedido {
+            id,
+            pixels,
+            largura,
+            altura,
+            ajustes,
+            corte,
+        });
+        self.pedidos.insert(
+            id,
+            Pendente {
+                chave,
+                para_a_tela: false,
+            },
+        );
+        self.antecipando = Some(id);
+        // O laço precisa continuar de pé: sem ele o resultado especulativo fica
+        // no canal e o cache nunca o vê.
+        self.acompanhar(cx);
     }
 
     /// O enquadramento que a tela mostra: o do modo de corte, se ele estiver
@@ -1690,32 +1909,59 @@ impl Revelacao {
         }
 
         let descartar_ate = self.descartar_ate;
-        if let Some(resultado) = self
-            .processador
-            .colher()
-            .filter(|resultado| resultado.id > descartar_ate)
-        {
-            if let Some(aberta) = self.aberta.as_mut() {
-                aberta.revelada = Some(resultado.imagem);
+        if let Some(resultado) = self.processador.colher() {
+            // De quem é este resultado, e para quê. Os pedidos de id menor foram
+            // largados pela thread — ela só atende o mais recente —, e saem do
+            // mapa junto: senão ele cresceria um registro por evento de slider.
+            let pendente = self.pedidos.remove(&resultado.id);
+            self.pedidos.retain(|id, _| *id > resultado.id);
+            if self.antecipando.is_some_and(|id| id <= resultado.id) {
+                self.antecipando = None;
             }
-            self.atualizar_exibicao();
-            // Só larga a espera se o que voltou é o último pedido. No meio de um
-            // arrasto chegam resultados de valores já ultrapassados, e parar de
-            // colher ali deixaria a foto congelada num ajuste que o dedo já
-            // passou.
-            if self.aguardando == Some(resultado.id) {
-                self.aguardando = None;
-                // 🔑 **Chegou o último: a tira mostra o que o palco mostra.**
-                // Este é o único instante em que a foto revelada está pronta e
-                // parada — no meio de um arrasto os resultados são de valores
-                // que o dedo já passou, e reduzir cada um seria refazer a
-                // miniatura sessenta vezes por segundo para mostrar a penúltima.
-                self.atualizar_a_tira_com_o_revelado();
+
+            // 🔑 **Só o estado parado entra no cache.** No meio de um arrasto
+            // chegam dezenas de resultados de valores que o dedo já passou;
+            // guardar cada um encheria o cache com receitas que ninguém vai
+            // pedir de volta e despejaria as fotos que valem.
+            let ultimo_do_gesto = self.aguardando == Some(resultado.id);
+            let antecipado = pendente.as_ref().is_some_and(|p| !p.para_a_tela);
+            if let Some(pendente) = &pendente {
+                if antecipado || ultimo_do_gesto {
+                    self.reveladas
+                        .guardar(pendente.chave.clone(), &resultado.imagem);
+                }
+            }
+
+            // 🚨 **A revelação antecipada nunca vai ao palco.** Ela é da foto
+            // **seguinte**: pintá-la seria mostrar uma foto sob o nome de outra
+            // — o mesmo defeito que o `descartar_ate` pegou em 17/set/2026, por
+            // outro caminho. Sem registro, vale a regra antiga (o id).
+            if !antecipado && resultado.id > descartar_ate {
+                if let Some(aberta) = self.aberta.as_mut() {
+                    aberta.revelada = Some(resultado.imagem);
+                }
+                self.atualizar_exibicao();
+                // Só larga a espera se o que voltou é o último pedido. No meio de
+                // um arrasto chegam resultados de valores já ultrapassados, e
+                // parar de colher ali deixaria a foto congelada num ajuste que o
+                // dedo já passou.
+                if ultimo_do_gesto {
+                    self.aguardando = None;
+                    // 🔑 **Chegou o último: a tira mostra o que o palco mostra.**
+                    // Este é o único instante em que a foto revelada está pronta e
+                    // parada — no meio de um arrasto os resultados são de valores
+                    // que o dedo já passou, e reduzir cada um seria refazer a
+                    // miniatura sessenta vezes por segundo para mostrar a
+                    // penúltima.
+                    self.atualizar_a_tira_com_o_revelado();
+                    // E, com a GPU livre, a próxima foto já pode ir sendo feita.
+                    self.antecipar_a_proxima(cx);
+                }
             }
             cx.notify();
         }
 
-        let continua = self.aguardando.is_some();
+        let continua = self.aguardando.is_some() || self.antecipando.is_some();
         if !continua {
             self.colhendo = false;
         }
@@ -3178,6 +3424,179 @@ mod testes {
                     tela.aberta.as_ref().unwrap().desenhada.is_some(),
                     "e por isso a foto já está na tela"
                 );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 **A revelação já feita não é feita de novo.**
+    ///
+    /// Voltar uma seta, desfazer, tirar o ponteiro de cima de uma predefinição:
+    /// nos três a receita é uma que já passou pelo motor. Com o palco esperando
+    /// a resposta para desenhar, cada ida repetida é tempo de tela preta — e o
+    /// pixel que volta é igual ao que já se tinha.
+    ///
+    /// Aqui a revelação é posta no cache à mão: o que se prova é o caminho, e
+    /// não a GPU (que nem sempre existe em quem roda `cargo test`).
+    #[gpui::test]
+    fn a_revelacao_guardada_dispensa_a_gpu(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_cinza())
+            .expect("gravar preview");
+
+        let janela = janela(cx, previews);
+        let com_receita = PhotoViewModel {
+            edit_exposure: Some(1.5),
+            ..foto("retrato.jpg")
+        };
+
+        janela
+            .update(cx, |tela, _window, _cx| {
+                // A revelação desta foto com esta receita, como se o motor já a
+                // tivesse devolvido. `foto_cinza` tem 8x8, que é o tamanho da
+                // origem que `abrir` vai montar.
+                let chave = cache::Chave::nova(
+                    &com_receita.id,
+                    (8, 8),
+                    &persistencia::da_foto(&com_receita),
+                    &transformacao::corte(&persistencia::para_crop_settings(
+                        &persistencia::corte_da_foto(&com_receita),
+                    )),
+                );
+                assert!(tela.reveladas.guardar(chave, &foto_uniforme(200)));
+            })
+            .expect("a janela deve estar aberta");
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(com_receita.clone(), window, cx);
+
+                assert!(
+                    tela.aguardando.is_none(),
+                    "com a revelação guardada não há o que pedir à GPU"
+                );
+                assert!(
+                    tela.aberta.as_ref().unwrap().desenhada.is_some(),
+                    "e a foto aparece no mesmo instante, sem palco vazio"
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// ⚠️ **A receita faz parte da chave.** Guardado com uma, pedido com outra:
+    /// é miss, e a GPU é chamada. Sem isto, mexer num slider e voltar à foto
+    /// traria a revelação de antes do gesto — certa na aparência, errada no
+    /// conteúdo.
+    #[gpui::test]
+    fn a_revelacao_guardada_com_outra_receita_nao_serve(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_cinza())
+            .expect("gravar preview");
+
+        let janela = janela(cx, previews);
+        let com_receita = PhotoViewModel {
+            edit_exposure: Some(1.5),
+            ..foto("retrato.jpg")
+        };
+
+        janela
+            .update(cx, |tela, window, cx| {
+                let mut outra = persistencia::da_foto(&com_receita);
+                outra.exposure = -1.0;
+                let chave = cache::Chave::nova(
+                    &com_receita.id,
+                    (8, 8),
+                    &outra,
+                    &transformacao::corte(&persistencia::para_crop_settings(
+                        &persistencia::corte_da_foto(&com_receita),
+                    )),
+                );
+                tela.reveladas.guardar(chave, &foto_uniforme(200));
+
+                tela.abrir(com_receita.clone(), window, cx);
+
+                assert!(
+                    tela.aguardando.is_some(),
+                    "a receita é outra: o cache não pode responder por ela"
+                );
+                assert!(tela.aberta.as_ref().unwrap().desenhada.is_none());
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 **A próxima foto é revelada antes de a seta chegar nela.**
+    ///
+    /// É a outra metade do pedido do dono (17/set/2026). Sem isto, o cache só
+    /// paga a **segunda** visita — e quem percorre uma sessão inteira pela seta
+    /// nunca chega à segunda.
+    ///
+    /// ⚠️ Prova o **pedido**, e não o resultado: o resultado depende de haver
+    /// GPU, e o que esta tela controla é enfileirar o trabalho certo na hora
+    /// certa.
+    #[gpui::test]
+    fn a_proxima_foto_e_revelada_antes_da_seta(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        for nome in ["id-a.jpg", "id-b.jpg"] {
+            previews.save_preview(nome, &foto_cinza()).expect("gravar");
+        }
+
+        let janela = janela(cx, previews);
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir_no_acervo(
+                    vec![
+                        // A aberta no neutro: ela não pede nada à GPU, e é o que
+                        // deixa a fila livre para a seguinte.
+                        foto("a.jpg"),
+                        PhotoViewModel {
+                            edit_exposure: Some(1.5),
+                            ..foto("b.jpg")
+                        },
+                    ],
+                    0,
+                    window,
+                    cx,
+                );
+                assert!(tela.aguardando.is_none(), "a aberta está no neutro");
+            })
+            .expect("a janela deve estar aberta");
+
+        // A decodificação da próxima vai para o executor de fundo.
+        cx.run_until_parked();
+
+        janela
+            .update(cx, |tela, _window, _cx| {
+                assert!(
+                    tela.antecipando.is_some(),
+                    "a próxima tinha receita e devia estar sendo revelada"
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// ⚠️ **No neutro não há o que antecipar.** Sem receita a foto aparece
+    /// direto da prévia: adiantar a ida à GPU seria gastar a placa para poupar
+    /// uma ida que não existe.
+    #[gpui::test]
+    fn a_proxima_no_neutro_nao_vira_pedido(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        for nome in ["id-a.jpg", "id-b.jpg"] {
+            previews.save_preview(nome, &foto_cinza()).expect("gravar");
+        }
+
+        let janela = janela(cx, previews);
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir_no_acervo(vec![foto("a.jpg"), foto("b.jpg")], 0, window, cx);
+            })
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+
+        janela
+            .update(cx, |tela, _window, _cx| {
+                assert!(tela.antecipando.is_none());
+                assert!(tela.aguardando.is_none());
             })
             .expect("a janela deve estar aberta");
     }

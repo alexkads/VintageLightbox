@@ -544,21 +544,100 @@ fn deixar_a_gpu_responder(cx: &mut TestAppContext, janela: gpui::WindowHandle<Re
         .expect("a janela aberta")
 }
 
+/// Anda uma foto e espera ela aparecer.
+///
+/// Devolve `None` quando ela **já estava na tela** (cache ou antecipação), e
+/// `Some(espera)` com o tempo que o palco ficou vazio quando foi preciso
+/// esperar a GPU.
+///
+/// 🚨 **Afirma a regra no caminho**: em nenhum instante a foto crua vai ao
+/// palco. Ou ela já está desenhada, ou não há nada.
+///
+/// ⚠️ **Quem responde "foi instantâneo?" é a prontidão, e não o relógio.**
+/// `Instant::elapsed` nunca devolve zero — uma primeira versão deste caso
+/// contava "esperas" por `!vazio.is_zero()` e acusava o cache de não servir
+/// enquanto ele servia em 100% das setas.
+fn esperar_a_foto(
+    cx: &mut TestAppContext,
+    janela: gpui::WindowHandle<Revelacao>,
+    passo: i32,
+    onde: &str,
+) -> Option<Duration> {
+    if passo != 0 {
+        janela
+            .update(cx, |tela, window, cx| tela.andar(passo, window, cx))
+            .expect("a janela aberta");
+    }
+
+    let (pronta, esperada, nome) = janela
+        .update(cx, |tela, _w, _cx| {
+            let aberta = tela.aberta.as_ref().expect("uma foto aberta");
+            assert!(
+                aberta.bruta.is_some(),
+                "{onde}: a crua sai da tela, não da memória — é o `\\`"
+            );
+            assert!(
+                aberta.desenhada.is_some() || aberta.revelada.is_none(),
+                "{onde}: a foto crua foi ao palco antes da revelação"
+            );
+            (
+                aberta.desenhada.is_some(),
+                aberta.origem.as_ref().map(|o| (o.largura, o.altura)),
+                aberta.foto.name.clone(),
+            )
+        })
+        .expect("a janela aberta");
+
+    let comeco = Instant::now();
+    if !pronta {
+        let prazo = comeco + Duration::from_secs(10);
+        while !deixar_a_gpu_responder(cx, janela) {
+            assert!(
+                Instant::now() < prazo,
+                "{onde} ({nome}): o palco ficou vazio por 10 s"
+            );
+        }
+    }
+    let vazio = (!pronta).then(|| comeco.elapsed());
+
+    janela
+        .update(cx, |tela, _w, _cx| {
+            let aberta = tela.aberta.as_ref().expect("uma foto aberta");
+            let revelada = aberta.revelada.as_ref().expect("a revelação chegou");
+            assert_eq!(
+                Some((revelada.width(), revelada.height())),
+                esperada,
+                "{onde} ({nome}): o palco mostra a revelação de outra foto"
+            );
+        })
+        .expect("a janela aberta");
+
+    vazio
+}
+
 /// 🚨 **Percorrer uma tira de fotos reveladas não pode mostrar nenhuma delas
-/// crua — nem deixar o palco vazio tempo demais.**
+/// crua — e a volta tem de ser instantânea.**
 ///
 /// Desde 17/set/2026 a foto com receita gravada **não** vai ao palco antes de o
 /// motor responder (dono: *"primeiro mostra sem efeito e depois é aplicado a
-/// receita"*). Isso troca um defeito visível por um custo: entre uma seta e a
-/// resposta da GPU o palco fica vazio. Os testes de unidade provam a regra numa
-/// foto; o que só se vê aqui é o **preço dela repetido** — quarenta setas
-/// seguidas, com a GPU de verdade no meio.
+/// receita"*). Isso troca um defeito visível por um custo: entre a seta e a
+/// resposta da GPU o palco fica vazio. O cache de reveladas e a revelação
+/// antecipada (`revelacao/cache.rs` e `antecipar_a_proxima`) existem para pagar
+/// esse custo — *"precisa guardar um cache e fazer uma aplicação antecipada na
+/// próxima foto pra garantir mais velocidade"* (dono, no mesmo dia).
 ///
-/// Duas afirmações, e as duas importam:
+/// Os testes de unidade provam as regras numa foto. O que só se vê aqui é o
+/// **preço repetido**, em três travessias de quarenta fotos com a GPU de verdade
+/// no meio:
 ///
-/// 1. em nenhuma das quarenta a foto crua aparece (é a regra);
-/// 2. o palco vazio dura pouco (é o preço) — a meta do dono é uma sessão de 30
-///    fotos em ~5 min, e triagem que pisca preto a cada seta não chega lá.
+/// 1. **ida a seco** — a seta apertada no instante em que a foto aparece. É o
+///    pior caso: a antecipação não teve tempo de terminar, e o que se mede é a
+///    ida à GPU inteira;
+/// 2. **volta** — sobre fotos já reveladas. Aqui o cache tem de responder, e o
+///    palco **não pode** ficar vazio nenhuma vez;
+/// 3. **ida com pausa** — a seta apertada depois de um instante de folga, como
+///    quem olha a foto antes de andar. É o caso real, e o que a antecipação
+///    existe para resolver.
 #[gpui::test]
 fn estresse_percorrer_a_tira_de_fotos_reveladas(cx: &mut TestAppContext) {
     const FOTOS: usize = 40;
@@ -593,74 +672,27 @@ fn estresse_percorrer_a_tira_de_fotos_reveladas(cx: &mut TestAppContext) {
         return;
     }
 
+    // ------------------------------------------------------------ 1. ida a seco
     let mut vazio_total = Duration::ZERO;
     let mut vazio_pior = Duration::ZERO;
-
     for passo in 0..FOTOS {
-        if passo > 0 {
-            janela
-                .update(cx, |tela, window, cx| tela.andar(1, window, cx))
-                .expect("a janela aberta");
-        }
-
-        let (nome, esperada) = janela
-            .update(cx, |tela, _w, _cx| {
-                let aberta = tela.aberta.as_ref().expect("uma foto aberta");
-                assert!(
-                    aberta.desenhada.is_none(),
-                    "passo {passo}: a foto crua foi ao palco antes da revelação"
-                );
-                assert!(
-                    aberta.bruta.is_some(),
-                    "passo {passo}: a crua sai da tela, não da memória — é o `\\`"
-                );
-                assert!(
-                    tela.aguardando.is_some(),
-                    "passo {passo}: sem pedido à GPU o palco nunca sairia do vazio"
-                );
-                (
-                    aberta.foto.name.clone(),
-                    aberta.origem.as_ref().map(|o| (o.largura, o.altura)),
-                )
-            })
-            .expect("a janela aberta");
-
-        let comeco = Instant::now();
-        let prazo = comeco + Duration::from_secs(10);
-        while !deixar_a_gpu_responder(cx, janela) {
-            assert!(
-                Instant::now() < prazo,
-                "passo {passo} ({nome}): o palco ficou vazio por 10 s"
-            );
-        }
-        let vazio = comeco.elapsed();
+        let vazio = esperar_a_foto(
+            cx,
+            janela,
+            if passo == 0 { 0 } else { 1 },
+            &format!("ida a seco, passo {passo}"),
+        )
+        .unwrap_or_default();
         vazio_total += vazio;
         vazio_pior = vazio_pior.max(vazio);
-
-        janela
-            .update(cx, |tela, _w, _cx| {
-                let aberta = tela.aberta.as_ref().expect("uma foto aberta");
-                let revelada = aberta.revelada.as_ref().expect("a revelação chegou");
-                assert_eq!(
-                    Some((revelada.width(), revelada.height())),
-                    esperada,
-                    "passo {passo} ({nome}): o palco mostra a revelação de outra foto"
-                );
-                assert!(tela.aguardando.is_none(), "passo {passo}: a espera acabou");
-            })
-            .expect("a janela aberta");
     }
-
-    // Folgados de propósito, como o resto do arquivo: o que se procura aqui é
-    // regressão de ordem de grandeza — uma seta que passa a custar segundos —,
-    // e não o milissegundo do perfil `test`.
     relatar(
-        &format!("palco vazio por seta, em {FOTOS} fotos reveladas (média)"),
+        &format!("ida a seco: palco vazio por seta, em {FOTOS} fotos (média)"),
         vazio_total / FOTOS as u32,
         Duration::from_millis(150),
     );
     relatar(
-        "palco vazio por seta (pior)",
+        "ida a seco: palco vazio por seta (pior)",
         vazio_pior,
         Duration::from_millis(600),
     );
@@ -671,6 +703,56 @@ fn estresse_percorrer_a_tira_de_fotos_reveladas(cx: &mut TestAppContext) {
     assert!(
         vazio_pior <= Duration::from_millis(600),
         "uma das setas deixou o palco vazio por mais de 600 ms"
+    );
+
+    // ------------------------------------------------------------ 2. a volta
+    let mut esperas_na_volta = 0;
+    let volta = Instant::now();
+    for passo in 1..FOTOS {
+        if esperar_a_foto(cx, janela, -1, &format!("volta, passo {passo}")).is_some() {
+            esperas_na_volta += 1;
+        }
+    }
+    relatar(
+        &format!(
+            "volta por {} fotos já reveladas (o cache inteiro)",
+            FOTOS - 1
+        ),
+        volta.elapsed(),
+        Duration::from_millis(1500),
+    );
+    assert_eq!(
+        esperas_na_volta, 0,
+        "a volta pediu revelação de novo {esperas_na_volta} vezes — o cache não está servindo"
+    );
+
+    // ------------------------------------------------- 3. ida com pausa (o real)
+    //
+    // 🔑 **A pausa é o que a antecipação precisa.** Sem ela o caso mede só o
+    // pior caso, e a seta apertada no milissegundo em que a foto aparece não é
+    // como ninguém tria. Aqui a foto seguinte é revelada **antes** de a seta
+    // chegar nela — e o palco não deve ficar vazio nenhuma vez.
+    //
+    // Estas fotos já estão no cache da ida, então o que se afirma é a soma do
+    // cache com a antecipação: por qualquer um dos dois caminhos, instantâneo.
+    let mut esperas_com_pausa = 0;
+    for passo in 1..FOTOS {
+        // A folga de quem olha a foto antes de andar.
+        for _ in 0..5 {
+            deixar_a_gpu_responder(cx, janela);
+        }
+        if esperar_a_foto(cx, janela, 1, &format!("ida com pausa, passo {passo}")).is_some() {
+            esperas_com_pausa += 1;
+        }
+    }
+    println!(
+        "✅ ida com pausa: {} de {} setas instantâneas",
+        FOTOS - 1 - esperas_com_pausa,
+        FOTOS - 1
+    );
+    assert_eq!(
+        esperas_com_pausa, 0,
+        "{esperas_com_pausa} setas ainda esperaram a GPU com a folga de uma pausa"
     );
 }
 
