@@ -17,6 +17,9 @@
 pub mod dados;
 mod dialogos;
 mod flutuante;
+/// Os gestos do caixa para os cenários de ponta a ponta. Só testes.
+#[cfg(test)]
+mod para_e2e;
 pub mod tela;
 
 pub use dialogos::TipoDeDialogo;

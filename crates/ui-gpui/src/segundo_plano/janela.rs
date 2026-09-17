@@ -60,11 +60,12 @@ pub fn no_dock(visivel: bool) {
     plataforma::no_dock(visivel);
 }
 
+#[cfg_attr(test, allow(dead_code))]
 fn nada() -> Adiado {
     Box::new(|| {})
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", not(test)))]
 mod plataforma {
     use gpui::Window;
     use objc2::msg_send;
@@ -150,7 +151,7 @@ mod plataforma {
     }
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", not(test)))]
 mod plataforma {
     use gpui::Window;
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -213,7 +214,7 @@ mod plataforma {
     pub fn no_dock(_visivel: bool) {}
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+#[cfg(all(not(any(target_os = "macos", target_os = "windows")), not(test)))]
 mod plataforma {
     use gpui::Window;
 
@@ -239,4 +240,60 @@ mod plataforma {
     }
 
     pub fn no_dock(_visivel: bool) {}
+}
+
+/// 🧪 **Nos testes não há janela do sistema**: a `TestWindow` do GPUI responde
+/// `unimplemented!` à alça nativa, e o `setActivationPolicy:` mexeria no
+/// processo que roda a suíte. O dublê guarda o que foi pedido e deixa o
+/// cenário dizer se a janela está minimizada.
+#[cfg(test)]
+pub(crate) mod plataforma {
+    use std::cell::{Cell, RefCell};
+
+    use gpui::Window;
+
+    use super::Adiado;
+
+    thread_local! {
+        static MINIMIZADA: Cell<bool> = const { Cell::new(false) };
+        static GESTOS: RefCell<Vec<&'static str>> = const { RefCell::new(Vec::new()) };
+    }
+
+    fn anotar(gesto: &'static str) -> Adiado {
+        Box::new(move || GESTOS.with(|g| g.borrow_mut().push(gesto)))
+    }
+
+    /// O sistema passa a dizer que a janela está (ou não) minimizada.
+    pub fn fingir_minimizada(sim: bool) {
+        MINIMIZADA.with(|m| m.set(sim));
+    }
+
+    /// O que foi feito com a janela e com o Dock, na ordem.
+    pub fn gestos() -> Vec<&'static str> {
+        GESTOS.with(|g| g.borrow().clone())
+    }
+
+    pub fn minimizada(_window: &Window) -> bool {
+        MINIMIZADA.with(Cell::get)
+    }
+
+    pub fn esconder(_window: &Window) -> Adiado {
+        anotar("esconder")
+    }
+
+    pub fn mostrar(_window: &Window) -> Adiado {
+        MINIMIZADA.with(|m| m.set(false));
+        anotar("mostrar")
+    }
+
+    pub fn pedir_para_fechar(_window: &Window) -> Adiado {
+        anotar("pedir para fechar")
+    }
+
+    pub fn no_dock(visivel: bool) {
+        GESTOS.with(|g| {
+            g.borrow_mut()
+                .push(if visivel { "no dock" } else { "fora do dock" })
+        });
+    }
 }

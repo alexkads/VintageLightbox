@@ -237,6 +237,17 @@ impl Revelacao {
         cx.notify();
     }
 
+    /// O botão "Zerar tudo" (ou "Zerar N fotos"): esta foto pelo histórico, e
+    /// as outras marcadas pela raiz.
+    fn zerar_tudo(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.controles_ligados() && (self.quantos_alterados() > 0 || self.enquadrada()) {
+            self.redefinir_ajustes(window, cx);
+        }
+        if !self.outras_a_zerar().is_empty() {
+            cx.emit(PedidoDaRevelacao::ZerarAsMarcadas);
+        }
+    }
+
     /// Um gesto discreto sobre os ajustes — o duplo clique num nó, o "Zerar"
     /// de um canal. O mesmo caminho de `devolver_ao_neutro`: fecha o pendente,
     /// muda, vira um passo e grava na hora. Sem mudança, não escreve nada.
@@ -261,6 +272,32 @@ impl Revelacao {
         self.historico.registrar(self.estado());
         self.gravar();
         cx.notify();
+    }
+
+    /// O nó `i` do canal à mostra foi arrastado até `altura` (0–255): como
+    /// os sliders, pede a GPU e deixa a espera fechar o gesto.
+    fn mover_no_da_curva(&mut self, i: usize, altura: f32, cx: &mut Context<Self>) {
+        let canal = self.estado_do_painel.canal;
+        if canal.alturas(&self.ajustes)[i] == altura {
+            return;
+        }
+        canal.definir(&mut self.ajustes, i, altura);
+        self.pedir_revelacao(cx);
+        self.adiar_gravacao(cx);
+        cx.notify();
+    }
+
+    /// O duplo clique num nó: ele volta à reta, num passo de histórico.
+    fn devolver_no_a_reta(
+        &mut self,
+        canal: Canal,
+        i: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let reta = curva::curva_neutra()[i];
+        self.gesto_discreto(|a| canal.definir(a, i, reta), window, cx);
+        self.estado_do_painel.no_arrastado = None;
     }
 
     /// Um passo do roteiro de depuração (`painel …`, em `depuracao.rs`).
@@ -469,16 +506,7 @@ impl Revelacao {
                     .xsmall()
                     .disabled(quantas_fotos == 0)
                     .tooltip(dica)
-                    .on_click(cx.listener(|tela, _ev, window, cx| {
-                        if tela.controles_ligados()
-                            && (tela.quantos_alterados() > 0 || tela.enquadrada())
-                        {
-                            tela.redefinir_ajustes(window, cx);
-                        }
-                        if !tela.outras_a_zerar().is_empty() {
-                            cx.emit(PedidoDaRevelacao::ZerarAsMarcadas);
-                        }
-                    })),
+                    .on_click(cx.listener(|tela, _ev, window, cx| tela.zerar_tudo(window, cx))),
             )
             .into_any_element()
     }
@@ -950,10 +978,7 @@ impl Revelacao {
                             let no = no_sob_o_ponteiro(limites, evento.position, &alturas);
                             tela.estado_do_painel.no_arrastado = no;
                             if let (Some(i), true) = (no, evento.click_count >= 2) {
-                                // Duplo clique devolve o nó à reta.
-                                let reta = curva::curva_neutra()[i];
-                                tela.gesto_discreto(|a| canal.definir(a, i, reta), window, cx);
-                                tela.estado_do_painel.no_arrastado = None;
+                                tela.devolver_no_a_reta(canal, i, window, cx);
                             }
                         }),
                     )
@@ -968,14 +993,7 @@ impl Revelacao {
                             }
                             let limites = evento.bounds;
                             let altura = altura_do_ponteiro(limites, evento.event.position);
-                            let canal = tela.estado_do_painel.canal;
-                            if canal.alturas(&tela.ajustes)[i] == altura {
-                                return;
-                            }
-                            canal.definir(&mut tela.ajustes, i, altura);
-                            tela.pedir_revelacao(cx);
-                            tela.adiar_gravacao(cx);
-                            cx.notify();
+                            tela.mover_no_da_curva(i, altura, cx);
                         },
                     ))
             });
@@ -1166,6 +1184,65 @@ impl Revelacao {
             )
             .size_full(),
         )
+    }
+}
+
+/// 🧪 Os gestos da coluna para os cenários de ponta a ponta (`crate::e2e`) —
+/// os mesmos caminhos dos cliques, sem precisar achar o nó na tela.
+#[cfg(test)]
+impl Revelacao {
+    /// O clique numa aba de espaço: sRGB (`false`) ou RGB (`true`).
+    pub(crate) fn escolher_aba_rgb(&mut self, rgb: bool, cx: &mut Context<Self>) {
+        self.estado_do_painel.definir(CHAVE_DA_ABA_RGB, rgb);
+        cx.notify();
+    }
+
+    pub(crate) fn na_aba_rgb(&self) -> bool {
+        self.estado_do_painel.no_rgb()
+    }
+
+    /// O ponto âmbar de cada aba: `(sRGB, RGB)`.
+    pub(crate) fn abas_alteradas(&self) -> (bool, bool) {
+        (
+            controles::aba_alterada(&self.ajustes, false),
+            controles::aba_alterada(&self.ajustes, true),
+        )
+    }
+
+    /// O clique no botão de um canal da curva.
+    pub(crate) fn escolher_canal_da_curva(&mut self, canal: Canal, cx: &mut Context<Self>) {
+        self.estado_do_painel.canal = canal;
+        cx.notify();
+    }
+
+    /// Pega o nó `i` e o arrasta até `altura`.
+    pub(crate) fn arrastar_no_da_curva(&mut self, i: usize, altura: f32, cx: &mut Context<Self>) {
+        if !self.controles_ligados() {
+            return;
+        }
+        self.estado_do_painel.no_arrastado = Some(i);
+        self.mover_no_da_curva(i, altura, cx);
+    }
+
+    /// O duplo clique no nó `i` do canal à mostra.
+    pub(crate) fn duplo_clique_no_da_curva(
+        &mut self,
+        i: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let canal = self.estado_do_painel.canal;
+        self.devolver_no_a_reta(canal, i, window, cx);
+    }
+
+    /// O clique no "Zerar tudo" do cabeçalho.
+    pub(crate) fn clicar_em_zerar_tudo(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.zerar_tudo(window, cx);
+    }
+
+    /// As alturas dos nove nós do canal.
+    pub(crate) fn alturas_da_curva(&self, canal: Canal) -> [f32; PONTOS_DA_CURVA] {
+        canal.alturas(&self.ajustes)
     }
 }
 

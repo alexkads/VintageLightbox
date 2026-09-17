@@ -408,6 +408,31 @@ impl Sessoes {
             .update(cx, |estado, cx| estado.set_value(email, window, cx));
     }
 
+    /// 🧪 Digita na busca, como quem escreve no campo.
+    #[cfg(test)]
+    pub(crate) fn buscar(&mut self, texto: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let texto = texto.to_string();
+        self.busca
+            .update(cx, |estado, cx| estado.set_value(texto, window, cx));
+        cx.notify();
+    }
+
+    /// 🧪 Os títulos que a lista mostra agora, com a busca e o recorte — a
+    /// mesma conta do `render`.
+    #[cfg(test)]
+    pub(crate) fn titulos_visiveis(&self, cx: &Context<Self>) -> Vec<String> {
+        sessoes::filtrar(&self.para_o_core(), &self.criterio(cx), agora_em_segundos())
+            .iter()
+            .map(|s| s.titulo.clone())
+            .collect()
+    }
+
+    /// 🧪 A frase de erro da tela.
+    #[cfg(test)]
+    pub(crate) fn erro_para_teste(&self) -> Option<String> {
+        self.erro.as_ref().map(|e| e.to_string())
+    }
+
     fn acompanhar(&mut self, cx: &mut Context<Self>) {
         if self.colhendo {
             return;

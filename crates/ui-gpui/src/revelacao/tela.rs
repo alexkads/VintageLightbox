@@ -60,6 +60,9 @@ mod predefinicoes;
 
 /// A coluna da direita: cabeçalho, abas sRGB/RGB, painéis e gráficos.
 mod painel;
+/// Os gestos de ponteiro para os cenários de ponta a ponta. Só testes.
+#[cfg(test)]
+mod para_e2e;
 /// A tira do rodapé: recortes, puxador, menu e miniaturas (ver `tira.rs`).
 mod tira;
 

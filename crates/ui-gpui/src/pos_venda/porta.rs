@@ -769,6 +769,15 @@ pub mod mentira {
         /// A resposta de cada rótulo; sem resposta, o pedido falha com "sem rede".
         pub respostas_json:
             Mutex<std::collections::HashMap<&'static str, Result<serde_json::Value, String>>>,
+        /// O bruto que `original` devolve — `None` é "indisponível", como o
+        /// padrão da porta.
+        pub bruto: Mutex<Option<Vec<u8>>>,
+        /// Os ids no site cujo bruto foi pedido.
+        pub originais: Mutex<Vec<String>>,
+        /// `(foto no site, ajustes, corte)` de cada "Baixar JPEG".
+        pub integrais: Mutex<Vec<(String, Ajustes, CropSettings)>>,
+        /// Liga a recusa do site ao "Salvar na galeria", com esta frase.
+        pub salvar_falha: Option<String>,
     }
 
     /// Um JPEG 1×1 cinza, codificado de verdade.
@@ -842,6 +851,35 @@ pub mod mentira {
 
         pub fn reveladas(&self) -> Vec<(String, Ajustes, CropSettings)> {
             self.reveladas.lock().expect("as reveladas").clone()
+        }
+
+        pub fn originais(&self) -> Vec<String> {
+            self.originais.lock().expect("os originais").clone()
+        }
+
+        pub fn integrais(&self) -> Vec<(String, Ajustes, CropSettings)> {
+            self.integrais.lock().expect("os integrais").clone()
+        }
+
+        pub fn avisadas(&self) -> Vec<String> {
+            self.avisadas.lock().expect("as avisadas").clone()
+        }
+
+        pub fn atualizacoes(&self) -> Vec<(String, MudancaDaGaleria)> {
+            self.atualizacoes.lock().expect("as atualizacoes").clone()
+        }
+
+        /// Um JPEG de verdade, `lado`×`lado`, para o bruto de `original`.
+        pub fn jpeg(lado: u32) -> Vec<u8> {
+            let mut bytes = Vec::new();
+            let imagem = image::RgbImage::from_pixel(lado, lado, image::Rgb([90, 90, 90]));
+            image::DynamicImage::ImageRgb8(imagem)
+                .write_to(
+                    &mut std::io::Cursor::new(&mut bytes),
+                    image::ImageFormat::Jpeg,
+                )
+                .expect("codificar o bruto");
+            bytes
         }
 
         /// Manda **uma** das guardadas, a mais antiga.
@@ -959,7 +997,50 @@ pub mod mentira {
                 ajustes,
                 corte,
             ));
-            self.responder_ou_guardar(canal, Recado::RevelacaoSalva { foto_no_site });
+            let recado = match &self.salvar_falha {
+                Some(frase) => Recado::Falhou(frase.clone()),
+                None => Recado::RevelacaoSalva { foto_no_site },
+            };
+            self.responder_ou_guardar(canal, recado);
+        }
+
+        fn original(&self, _sessao: Sessao, foto_no_site: String, canal: Sender<Recado>) {
+            self.originais
+                .lock()
+                .expect("os originais")
+                .push(foto_no_site.clone());
+            let recado = match self.bruto.lock().expect("o bruto").as_ref() {
+                Some(bytes) => Recado::Original {
+                    foto_no_site,
+                    bytes: Arc::new(bytes.clone()),
+                },
+                None => Recado::OriginalIndisponivel { foto_no_site },
+            };
+            self.responder_ou_guardar(canal, recado);
+        }
+
+        /// Um JPEG de um pixel no lugar da revelação em resolução cheia — o
+        /// que importa aqui é **o que foi pedido**, e que a resposta chega.
+        fn revelar_integral(
+            &self,
+            _sessao: Sessao,
+            foto_no_site: String,
+            ajustes: Ajustes,
+            corte: CropSettings,
+            canal: Sender<Recado>,
+        ) {
+            self.integrais.lock().expect("os integrais").push((
+                foto_no_site.clone(),
+                ajustes,
+                corte,
+            ));
+            self.responder_ou_guardar(
+                canal,
+                Recado::JpegRevelado {
+                    foto_no_site,
+                    bytes: jpeg_de_um_pixel(),
+                },
+            );
         }
 
         fn link(&self, _sessao: Sessao, galeria_id: String, canal: Sender<Recado>) {

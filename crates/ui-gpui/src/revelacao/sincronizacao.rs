@@ -365,7 +365,14 @@ pub fn caminho() -> PathBuf {
 }
 
 /// Ler nunca derruba: qualquer problema devolve o padrão.
+///
+/// ⚠️ **Nos testes não toca o disco** (a mesma regra de `presets::ordem`): a
+/// caixa do "Sincronizar N" lia e regravava o `sincronizacao.json` de quem
+/// roda a suíte.
 pub fn ler() -> Escolha {
+    if cfg!(test) {
+        return Escolha::default();
+    }
     ler_de(&caminho()).unwrap_or_default()
 }
 
@@ -376,6 +383,9 @@ pub fn ler_de(caminho: &Path) -> Option<Escolha> {
 
 /// Gravar falha só imprime: não poder lembrar não pode impedir de sincronizar.
 pub fn gravar(escolha: &Escolha) {
+    if cfg!(test) {
+        return;
+    }
     gravar_em(&caminho(), escolha);
 }
 

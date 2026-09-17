@@ -1605,11 +1605,16 @@ impl Aplicativo {
                     self.gravador.esquecer_do_site(foto_no_site);
                     self.ultimo_envio = Some(chrono::Utc::now().timestamp());
                     self.recontar_o_que_falta_subir(cx);
-                    self.avisar_onde_esta_olhando("revelação salva na galeria".into(), cx);
                     self.contar_o_salvar(false, cx);
                     if let Some(galeria) = self.sessao_aberta.clone() {
                         self.detalhe.update(cx, |tela, cx| tela.entrar(galeria, cx));
                     }
+                    // 🚨 **O aviso vem depois de sair e de reler**, e não antes:
+                    // escrito antes, ele caía na tela que estava fechando, e o
+                    // `entrar` da sessão apagava a linha de recado — quem salvou
+                    // voltava à sessão sem confirmação nenhuma (achado pelo
+                    // cenário de ponta a ponta, 2026-09-17).
+                    self.avisar_onde_esta_olhando("revelação salva na galeria".into(), cx);
                     mudou = true;
                 }
                 PosVendaRecado::JpegRevelado { foto_no_site, bytes } => {
@@ -1750,7 +1755,11 @@ impl Aplicativo {
         });
         self.guardar_as_receitas_do_site(cx);
         // E de volta: o recorte e as marcadas da tira ficam na grade da sessão.
-        if self.sessao_aberta.is_some() {
+        //
+        // 🚨 **Só vindo da Revelação.** Da impressão (o "Voltar" do cabeçalho)
+        // a tira não tem nada a dizer, e copiá-la trocava o recorte e a
+        // seleção da grade pelos de uma revelação que já tinha acabado.
+        if self.sessao_aberta.is_some() && self.tela == Tela::Revelacao {
             let (recorte, marcadas) = {
                 let revelacao = self.revelacao.read(cx);
                 (revelacao.recorte(), revelacao.marcadas_na_grade())
@@ -1807,6 +1816,7 @@ impl Aplicativo {
     /// catálogo. Isto aqui é o espelho da tela; aquilo é o que atravessa o
     /// fechar do app.
     fn guardar_as_receitas_do_site(&mut self, cx: &mut Context<Self>) {
+        self.levar_as_receitas_para_a_grade(cx);
         if self.fotos_do_site.is_empty() {
             return;
         }
@@ -1828,6 +1838,55 @@ impl Aplicativo {
             if let Some(foto) = self.fotos_do_site.iter_mut().find(|f| f.id == id) {
                 persistencia::na_foto(foto, ajustes, corte);
             }
+        }
+    }
+
+    /// Escreve na grade a receita que a Revelação deixou em cada foto.
+    ///
+    /// 🚨 **A tela do cliente lê a foto em foco da grade** (`foto_para_o_cliente`),
+    /// e a grade guardava a cópia de antes da revelação: sair do editor fazia o
+    /// cliente, que acabou de ver a foto revelada, ver de novo a foto crua — até
+    /// a próxima releitura do catálogo, que a foto do site nem tem. Achado pelo
+    /// cenário de ponta a ponta da tela do cliente (2026-09-17).
+    fn levar_as_receitas_para_a_grade(&mut self, cx: &mut Context<Self>) {
+        let receitas: std::collections::HashMap<String, (Ajustes, persistencia::Corte)> = self
+            .revelacao
+            .read(cx)
+            .acervo()
+            .iter()
+            .map(|f| {
+                (
+                    f.id.clone(),
+                    (persistencia::da_foto(f), persistencia::corte_da_foto(f)),
+                )
+            })
+            .collect();
+        if receitas.is_empty() {
+            return;
+        }
+        let mut mudou = false;
+        let todas: Vec<PhotoViewModel> = self
+            .biblioteca
+            .read(cx)
+            .todas_as_fotos()
+            .into_iter()
+            .map(|mut foto| {
+                if let Some((ajustes, corte)) = receitas.get(&foto.id) {
+                    let antes = (
+                        persistencia::da_foto(&foto),
+                        persistencia::corte_da_foto(&foto),
+                    );
+                    if antes != (*ajustes, *corte) {
+                        persistencia::na_foto(&mut foto, *ajustes, *corte);
+                        mudou = true;
+                    }
+                }
+                foto
+            })
+            .collect();
+        if mudou {
+            self.biblioteca
+                .update(cx, |tela, cx| tela.trocar_acervo(todas, cx));
         }
     }
 
@@ -2441,9 +2500,7 @@ impl Aplicativo {
             .find(|f| f.pos_venda_foto_id.as_deref() == Some(foto_no_site))
             .map(|f| f.name.clone())
             .unwrap_or_else(|| "foto".into());
-        let pasta = directories::UserDirs::new()
-            .and_then(|d| d.download_dir().map(std::path::Path::to_path_buf))
-            .unwrap_or_else(std::env::temp_dir);
+        let pasta = self.baixas.pasta_dos_downloads();
         let destino = arquivo_livre(&pasta, &nome_do_jpeg(&nome));
         let aviso = match std::fs::write(&destino, bytes) {
             Ok(()) => format!(
@@ -2909,8 +2966,16 @@ impl Aplicativo {
             self.revelacao.update(cx, |tela, cx| tela.cancelar_corte(cx));
             return;
         }
-        if self.tela != Tela::Biblioteca {
-            self.voltar_para_biblioteca(window, cx);
+        // 🚨 **Só a Revelação e a impressão têm de onde voltar.** Até
+        // 2026-09-17 era "toda tela que não é a Biblioteca": `Esc` na galeria
+        // passava pela saída da Revelação e trocava o recorte e a seleção da
+        // grade pelos da tira, e na lista de sessões, no caixa e na retenção
+        // levava à Biblioteca — uma tela que o app nem mostra mais. Nessas a
+        // tecla segue adiante, como no site.
+        match self.tela {
+            Tela::Revelacao | Tela::Impressao => self.voltar_para_biblioteca(window, cx),
+            Tela::Biblioteca => {}
+            Tela::Sessao | Tela::Sessoes | Tela::Caixa | Tela::Retencao => cx.propagate(),
         }
     }
 
@@ -3555,6 +3620,43 @@ impl Aplicativo {
         // acervo que eles montaram, e não o que o site devolveria para "g1".
         app.sessao_aberta = Some("g1".into());
         app
+    }
+
+    /// A foto e a receita que a segunda tela recebeu por último — é o que os
+    /// cenários de ponta a ponta (`crate::e2e`) conferem na tela do cliente.
+    pub(crate) fn receita_no_cliente(&self) -> Option<(String, Ajustes)> {
+        self.no_cliente
+            .as_ref()
+            .map(|(id, ajustes, _)| (id.clone(), *ajustes))
+    }
+
+    /// O que o site recusou nesta abertura — o canto "N envios recusados".
+    pub(crate) fn recusas_para_teste(&self) -> &[String] {
+        &self.recusas
+    }
+
+    /// As fotos do site na fila do "Salvar na galeria".
+    pub(crate) fn a_subir_para_teste(&self) -> Vec<String> {
+        self.a_subir.iter().map(|(id, _, _)| id.clone()).collect()
+    }
+
+    /// A sessão aberta, pelo id da galeria.
+    pub(crate) fn sessao_aberta_para_teste(&self) -> Option<&str> {
+        self.sessao_aberta.as_deref()
+    }
+
+    /// A folha de impressão e o modal de exportação, para os cenários.
+    pub(crate) fn impressao_para_teste(&self) -> Entity<Impressao> {
+        self.impressao.clone()
+    }
+
+    pub(crate) fn exportacao_para_teste(&self) -> Entity<Exportacao> {
+        self.exportacao.clone()
+    }
+
+    /// Onde o "Baixar JPEG" grava nos testes — nunca a pasta do usuário.
+    pub(crate) fn pasta_dos_downloads_para_teste(&self) -> std::path::PathBuf {
+        self.baixas.pasta_dos_downloads()
     }
 }
 

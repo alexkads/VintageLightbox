@@ -21,6 +21,9 @@ pub mod depuracao;
 /// Quando o app acaba — fechar a janela principal encerra o processo.
 pub mod encerramento;
 pub mod entrada;
+/// O app inteiro de ponta a ponta, com as portas de mentira. Só testes.
+#[cfg(test)]
+mod e2e;
 /// As peças do shadcn do site (botões, selos, cabeçalho de página).
 pub mod estilo;
 pub mod exportacao;

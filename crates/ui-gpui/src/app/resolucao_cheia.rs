@@ -33,6 +33,12 @@ pub(super) struct Baixas {
     /// A foto (id do site) cujo bruto a tela pediu.
     quer_bruto: Option<String>,
     _decodificando: Option<Task<()>>,
+    /// Onde o "Baixar JPEG" grava. `None` é a pasta Downloads de quem usa.
+    ///
+    /// 🚨 **Nos testes é uma pasta temporária por tela**: até 2026-09-17 o
+    /// caminho era sempre o `download_dir()`, e um teste que recebesse o JPEG
+    /// escreveria na pasta Downloads de quem roda a suíte.
+    downloads: Option<PathBuf>,
 }
 
 impl Baixas {
@@ -56,7 +62,20 @@ impl Baixas {
             medindo: HashSet::new(),
             quer_bruto: None,
             _decodificando: None,
+            downloads: downloads_de_teste(),
         }
+    }
+
+    /// A pasta do "Baixar JPEG": a Downloads do sistema (ou a temporária, se
+    /// ele não disser qual é); nos testes, a de [`downloads_de_teste`].
+    pub(super) fn pasta_dos_downloads(&self) -> PathBuf {
+        if let Some(pasta) = &self.downloads {
+            let _ = std::fs::create_dir_all(pasta);
+            return pasta.clone();
+        }
+        directories::UserDirs::new()
+            .and_then(|d| d.download_dir().map(std::path::Path::to_path_buf))
+            .unwrap_or_else(std::env::temp_dir)
     }
 
     pub(super) fn canal(&self) -> Sender<Recado> {
@@ -71,6 +90,24 @@ impl Baixas {
             }
         }
     }
+}
+
+#[cfg(not(test))]
+fn downloads_de_teste() -> Option<PathBuf> {
+    None
+}
+
+/// Uma pasta temporária por tela: testes em paralelo não disputam o nome do
+/// arquivo, e nenhum deles toca a pasta Downloads de quem roda a suíte.
+#[cfg(test)]
+fn downloads_de_teste() -> Option<PathBuf> {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static PROXIMA: AtomicUsize = AtomicUsize::new(0);
+    Some(std::env::temp_dir().join(format!(
+        "vlb-downloads-teste-{}-{}",
+        std::process::id(),
+        PROXIMA.fetch_add(1, Ordering::SeqCst)
+    )))
 }
 
 /// O maior lado de uma imagem, lendo só o cabeçalho.

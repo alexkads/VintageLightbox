@@ -1267,6 +1267,38 @@ impl Detalhe {
         })
     }
 
+    /// 🧪 Preenche o formulário aberto (título, e-mail, WhatsApp) como quem
+    /// digita — `None` deixa o campo como está.
+    #[cfg(test)]
+    pub(crate) fn digitar_dados_do_cliente(
+        &mut self,
+        titulo: Option<&str>,
+        email: Option<&str>,
+        whatsapp: Option<&str>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.preparar_formulario_do_cliente(window, cx);
+        let Some(campos) = self
+            .dados_do_cliente
+            .as_ref()
+            .and_then(|f| f.campos.as_ref())
+        else {
+            return;
+        };
+        let pares = [
+            (&campos.titulo, titulo),
+            (&campos.email, email),
+            (&campos.whatsapp, whatsapp),
+        ];
+        for (campo, valor) in pares {
+            if let Some(valor) = valor {
+                let valor = valor.to_string();
+                campo.update(cx, |c, cx| c.set_value(valor, window, cx));
+            }
+        }
+    }
+
     /// Cria os campos na primeira pintura com janela.
     ///
     /// ⚠️ **Não na abertura**: o `422` chega pela colheita, que não tem

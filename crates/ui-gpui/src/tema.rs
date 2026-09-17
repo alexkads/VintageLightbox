@@ -231,8 +231,23 @@ impl Escolha {
 }
 
 /// Onde a escolha fica lembrada nesta máquina.
+#[cfg(not(test))]
 pub fn arquivo_da_escolha() -> PathBuf {
     infrastructure::paths::AppPaths::catalog_root().join("tema.json")
+}
+
+/// 🚨 **Nos testes, um arquivo temporário por janela.** Até 2026-09-17 o
+/// "Claro/Escuro/Sistema" de um teste gravava no `tema.json` do catálogo de
+/// quem roda a suíte — e o app dele abria no tema que o teste escolheu.
+#[cfg(test)]
+pub fn arquivo_da_escolha() -> PathBuf {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static PROXIMO: AtomicUsize = AtomicUsize::new(0);
+    std::env::temp_dir().join(format!(
+        "vlb-tema-teste-{}-{}.json",
+        std::process::id(),
+        PROXIMO.fetch_add(1, Ordering::SeqCst)
+    ))
 }
 
 /// Lê a escolha guardada. Arquivo ausente ou estragado é "Sistema".

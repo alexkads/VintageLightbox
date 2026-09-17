@@ -46,6 +46,11 @@ impl Global for SegundoPlano {}
 
 impl SegundoPlano {
     fn icone(&mut self) -> Option<&Icone> {
+        // 🧪 Nos testes a bandeja não nasce: o ícone é do sistema, e a suíte
+        // não roda na thread principal que o AppKit exige.
+        if cfg!(test) {
+            return None;
+        }
         let icone = self.icone.get_or_insert_with(|| {
             Icone::criar().inspect_err(|erro| {
                 eprintln!("⚠️ [Bandeja] o sistema não deu o ícone: {erro}");
@@ -85,7 +90,12 @@ pub fn ligar(raiz: WeakEntity<Aplicativo>, window: &mut Window, cx: &mut App) {
         icone: None,
         vigia: Vigia::default(),
         ultimas: None,
-        pasta: infrastructure::paths::AppPaths::catalog_root(),
+        // Nos testes a medição do espaço não varre o catálogo de ninguém.
+        pasta: if cfg!(test) {
+            std::env::temp_dir().join("vlb-catalogo-inexistente-dos-testes")
+        } else {
+            infrastructure::paths::AppPaths::catalog_root()
+        },
         pilha_local,
         medida: Arc::default(),
         voltas: 0,
@@ -241,8 +251,24 @@ fn volta(cx: &mut App) {
     });
     if sair {
         rastro("saindo");
+        #[cfg(test)]
+        SAIU.with(|s| s.set(true));
         cx.quit();
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// O `cx.quit()` da plataforma de teste não faz nada: é aqui que o
+    /// cenário vê que o app decidiu terminar.
+    static SAIU: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// 🧪 O que o segundo plano decidiu até agora: `(na bandeja, pediu para sair)`.
+#[cfg(test)]
+pub(crate) fn estado_para_teste(cx: &App) -> Option<(bool, bool)> {
+    let sp = cx.try_global::<SegundoPlano>()?;
+    Some((sp.vigia.na_bandeja(), SAIU.with(std::cell::Cell::get)))
 }
 
 /// O que a bandeja fez, no terminal — só em depuração: a barra de menus não
