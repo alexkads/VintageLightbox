@@ -362,6 +362,11 @@ Write-Host "   reaproveita o cache em $env:CARGO_TARGET_DIR."
 
 set -eu
 
+# 🚨 **O script inteiro é um bloco `{ … }`**, e o `}` está na última linha. O
+#    `sh` lê um bloco inteiro antes de executá-lo; sem isso, com `curl | sh`, um
+#    erro no meio fazia o `sh` sair enquanto o `curl` ainda escrevia, e a
+#    última linha na tela era "curl: Failed writing body".
+{
 REPO="https://github.com/alexkads/VintageLightbox"
 CASA="${VLB_CASA:-$HOME/.vintagelightbox}"
 FONTE="$CASA/fonte-gpui"
@@ -462,61 +467,22 @@ tem_libclang() {
   return 1
 }
 
+# `--features` a mais no build; só o GPUI no macOS usa.
+RECURSOS=""
 if [ "$SISTEMA" = "Darwin" ]; then
-  # 🚨 **O GPUI compila os shaders Metal em tempo de build**, e o compilador
-  #    `metal` não vem nas Command Line Tools: vem no Xcode, e a partir do
-  #    Xcode 26 é um componente que se baixa à parte. Sem ele o build morre
-  #    depois de centenas de crates, com "missing Metal Toolchain".
-  #
-  #    `xcrun -f metal` responde pelas duas coisas de uma vez: se o
-  #    `xcode-select` aponta para as Command Line Tools, ou se o componente não
-  #    foi baixado, ele falha.
-  if ! xcrun -f metal >/dev/null 2>&1; then
-    XCODE=""
-    # VLB_PASTA_XCODE existe para o teste; o Xcode da App Store fica em /Applications.
-    for f in "${VLB_PASTA_XCODE:-/Applications}"/Xcode.app "${VLB_PASTA_XCODE:-/Applications}"/Xcode*.app; do
-      [ -d "$f" ] && { XCODE="$f"; break; }
-    done
-    if [ -z "$XCODE" ]; then
-      erro "falta o Xcode — o app GPUI não compila sem o compilador Metal, que vem nele."
-      echo
-      printf '   %bO Xcode é grátis.%b A App Store é o único caminho, e não dá para\n' "$N" "$Z"
-      echo "   instalá-lo daqui:"
-      echo "      https://apps.apple.com/app/xcode/id497799835"
-      echo "   Depois de instalado, abra-o uma vez e rode este script de novo: o resto"
-      echo "   (apontar as ferramentas e baixar o componente Metal) ele faz sozinho."
-      echo
-      # 🔑 Quem chega aqui quase sempre queria o app do balcão, que tem outro
-      #    comando e não precisa do Xcode (dono, 2026-09-16).
-      printf '   %bProcurava o app do balcão, o VintageLightbox (Tauri)?%b Ele é outro, e só\n' "$N" "$Z"
-      echo "   precisa das Command Line Tools:"
-      echo "      curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox-tauri.cmd | sh"
-      exit 1
-    fi
-    aviso "o compilador Metal não está pronto — preparando o $XCODE"
-    # `sudo` lê a senha do terminal, e não da entrada: com `curl | sh`, a
-    # entrada é o resto deste script.
-    case "$(xcode-select -p 2>/dev/null)" in
-      "$XCODE"/*) : ;;
-      *) echo "   Apontando as ferramentas para o Xcode (pede a senha de administrador):"
-         correr sudo xcode-select -s "$XCODE/Contents/Developer" </dev/null || true ;;
-    esac
-    if ! xcodebuild -license check >/dev/null 2>&1; then
-      echo "   Aceitando a licença do Xcode (pede a senha de administrador):"
-      correr sudo xcodebuild -license accept </dev/null || true
-    fi
-    echo "   Baixando o componente Metal (alguns minutos):"
-    correr xcodebuild -downloadComponent MetalToolchain </dev/null || true
-    if [ "$SECO" -eq 0 ] && ! xcrun -f metal >/dev/null 2>&1; then
-      erro "o compilador Metal continua faltando."
-      echo "   Rode, um de cada vez, e depois este script de novo:"
-      echo "      sudo xcode-select -s $XCODE/Contents/Developer"
-      echo "      sudo xcodebuild -license accept"
-      echo "      xcodebuild -downloadComponent MetalToolchain"
-      exit 1
-    fi
+  # 🔑 **Sem Xcode** (dono, 2026-09-17: *"não posso depender do xcode"*). O
+  #    GPUI compilava os shaders Metal no build, com o `metal` do Xcode, que não
+  #    vem nas Command Line Tools. Com a feature `shaders-em-tempo-de-execucao`
+  #    quem os compila é o Metal do próprio macOS, quando o app abre. O build
+  #    precisa só do compilador de C++ e da libclang, como o do Tauri.
+  if ! xcrun -f clang++ >/dev/null 2>&1; then
+    erro "faltam as Command Line Tools do Xcode (o compilador de C++)."
+    echo "   Instale com:  xcode-select --install"
+    echo "   Depois rode este script de novo. O Xcode inteiro não é preciso."
+    exit 1
   fi
-  ok "Xcode e Metal: $(xcode-select -p 2>/dev/null || echo 'a preparar')"
+  ok "Command Line Tools: $(xcode-select -p)"
+  RECURSOS="--features shaders-em-tempo-de-execucao"
 else
   # 🔑 O que o GPUI abre no Linux (X11, Wayland, teclado, fontes, Vulkan), o
   #    chaveiro do `keyring` (D-Bus e Secret Service), o TLS do atualizador e o
@@ -568,13 +534,34 @@ else
       echo "   sudo rpm-ostree install --idempotent $PACOTES_DNF"
       exit 1
     fi
-    if command -v apt-get >/dev/null 2>&1; then
+    # 🚨 **A distribuição decide, e não o comando que existe.** O Fedora tem um
+    #    pacote `apt` que instala o `apt-get` sem repositório nenhum: procurado
+    #    primeiro, ele respondia "Unable to locate package" a toda a lista
+    #    (máquina do Igor, Fedora, 2026-09-17). VLB_OS_RELEASE existe para o teste.
+    GERENCIADOR=""
+    # shellcheck disable=SC1090
+    DISTRO="$(. "${VLB_OS_RELEASE:-/etc/os-release}" 2>/dev/null && echo " ${ID:-} ${ID_LIKE:-} ")" || DISTRO=""
+    case "$DISTRO" in
+      *" fedora "*|*" rhel "*|*" centos "*|*" rocky "*|*" almalinux "*|*" nobara "*|*" ultramarine "*)
+        command -v dnf >/dev/null 2>&1 && GERENCIADOR=dnf ;;
+      *" debian "*|*" ubuntu "*)
+        command -v apt-get >/dev/null 2>&1 && GERENCIADOR=apt ;;
+      *" arch "*)
+        command -v pacman >/dev/null 2>&1 && GERENCIADOR=pacman ;;
+    esac
+    if [ -z "$GERENCIADOR" ]; then
+      if command -v dnf >/dev/null 2>&1; then GERENCIADOR=dnf
+      elif command -v pacman >/dev/null 2>&1; then GERENCIADOR=pacman
+      elif command -v apt-get >/dev/null 2>&1; then GERENCIADOR=apt
+      fi
+    fi
+    if [ "$GERENCIADOR" = apt ]; then
       # 🚨 `update` antes: numa máquina recém-instalada a lista de pacotes é a
       #    do dia da imagem, e o `install` responde "Unable to locate package".
       INSTALAR="${SUDO:+$SUDO }apt-get update && ${SUDO:+$SUDO }env DEBIAN_FRONTEND=noninteractive apt-get install -y $PACOTES_APT"
-    elif command -v dnf >/dev/null 2>&1; then
+    elif [ "$GERENCIADOR" = dnf ]; then
       INSTALAR="${SUDO:+$SUDO }dnf install -y $PACOTES_DNF"
-    elif command -v pacman >/dev/null 2>&1; then
+    elif [ "$GERENCIADOR" = pacman ]; then
       INSTALAR="${SUDO:+$SUDO }pacman -Syu --needed --noconfirm $PACOTES_PACMAN"
     else
       erro "não reconheci o gerenciador de pacotes desta distribuição."
@@ -768,7 +755,8 @@ fi
 
 # O código de saída do cargo chega a quem chamou (o despachante e os testes o
 # conferem).
-if correr cargo build --release --manifest-path "$FONTE/Cargo.toml" -p ui-gpui --bin ui-gpui; then
+# shellcheck disable=SC2086
+if correr cargo build --release --manifest-path "$FONTE/Cargo.toml" -p ui-gpui --bin ui-gpui $RECURSOS; then
   :
 else
   CODIGO=$?
@@ -879,3 +867,4 @@ echo
 echo "   Para atualizar, rode este mesmo comando de novo: a segunda compilação"
 echo "   reaproveita o cache em $CARGO_TARGET_DIR."
 echo "   Apagar o cache é seguro:  rm -rf \"$CARGO_TARGET_DIR\""
+}

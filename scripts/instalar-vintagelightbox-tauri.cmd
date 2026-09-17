@@ -336,6 +336,11 @@ Write-Host "   reaproveita o cache em $env:CARGO_TARGET_DIR."
 
 set -eu
 
+# 🚨 **O script inteiro é um bloco `{ … }`**, e o `}` está na última linha. O
+#    `sh` lê um bloco inteiro antes de executá-lo; sem isso, com `curl | sh`, um
+#    erro no meio fazia o `sh` sair enquanto o `curl` ainda escrevia, e a
+#    última linha na tela era "curl: Failed writing body".
+{
 REPO="https://github.com/alexkads/VintageLightbox"
 CASA="${VLB_CASA:-$HOME/.vintagelightbox}"
 FONTE="$CASA/fonte-tauri"
@@ -436,6 +441,8 @@ tem_libclang() {
   return 1
 }
 
+# `--features` a mais no build; só o GPUI no macOS usa.
+RECURSOS=""
 if [ "$SISTEMA" = "Darwin" ]; then
   # O LibRaw é C++, e o compilador e a libclang vêm nas Command Line Tools. A
   # janela Tauri não usa o compilador Metal (o GPUI usa), então o Xcode inteiro
@@ -492,13 +499,34 @@ else
       echo "   sudo rpm-ostree install --idempotent $PACOTES_DNF"
       exit 1
     fi
-    if command -v apt-get >/dev/null 2>&1; then
+    # 🚨 **A distribuição decide, e não o comando que existe.** O Fedora tem um
+    #    pacote `apt` que instala o `apt-get` sem repositório nenhum: procurado
+    #    primeiro, ele respondia "Unable to locate package" a toda a lista
+    #    (máquina do Igor, Fedora, 2026-09-17). VLB_OS_RELEASE existe para o teste.
+    GERENCIADOR=""
+    # shellcheck disable=SC1090
+    DISTRO="$(. "${VLB_OS_RELEASE:-/etc/os-release}" 2>/dev/null && echo " ${ID:-} ${ID_LIKE:-} ")" || DISTRO=""
+    case "$DISTRO" in
+      *" fedora "*|*" rhel "*|*" centos "*|*" rocky "*|*" almalinux "*|*" nobara "*|*" ultramarine "*)
+        command -v dnf >/dev/null 2>&1 && GERENCIADOR=dnf ;;
+      *" debian "*|*" ubuntu "*)
+        command -v apt-get >/dev/null 2>&1 && GERENCIADOR=apt ;;
+      *" arch "*)
+        command -v pacman >/dev/null 2>&1 && GERENCIADOR=pacman ;;
+    esac
+    if [ -z "$GERENCIADOR" ]; then
+      if command -v dnf >/dev/null 2>&1; then GERENCIADOR=dnf
+      elif command -v pacman >/dev/null 2>&1; then GERENCIADOR=pacman
+      elif command -v apt-get >/dev/null 2>&1; then GERENCIADOR=apt
+      fi
+    fi
+    if [ "$GERENCIADOR" = apt ]; then
       # 🚨 `update` antes: numa máquina recém-instalada a lista de pacotes é a
       #    do dia da imagem, e o `install` responde "Unable to locate package".
       INSTALAR="${SUDO:+$SUDO }apt-get update && ${SUDO:+$SUDO }env DEBIAN_FRONTEND=noninteractive apt-get install -y $PACOTES_APT"
-    elif command -v dnf >/dev/null 2>&1; then
+    elif [ "$GERENCIADOR" = dnf ]; then
       INSTALAR="${SUDO:+$SUDO }dnf install -y $PACOTES_DNF"
-    elif command -v pacman >/dev/null 2>&1; then
+    elif [ "$GERENCIADOR" = pacman ]; then
       INSTALAR="${SUDO:+$SUDO }pacman -Syu --needed --noconfirm $PACOTES_PACMAN"
     else
       erro "não reconheci o gerenciador de pacotes desta distribuição."
@@ -692,7 +720,8 @@ fi
 
 # O código de saída do cargo chega a quem chamou (o despachante e os testes o
 # conferem).
-if correr cargo build --release --manifest-path "$FONTE/Cargo.toml" -p app-tauri --bin app-tauri; then
+# shellcheck disable=SC2086
+if correr cargo build --release --manifest-path "$FONTE/Cargo.toml" -p app-tauri --bin app-tauri $RECURSOS; then
   :
 else
   CODIGO=$?
@@ -798,3 +827,4 @@ echo
 echo "   Para atualizar, rode este mesmo comando de novo: a segunda compilação"
 echo "   reaproveita o cache em $CARGO_TARGET_DIR."
 echo "   Apagar o cache é seguro:  rm -rf \"$CARGO_TARGET_DIR\""
+}

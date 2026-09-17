@@ -74,6 +74,7 @@ class Ambiente(unittest.TestCase):
         self.env.pop("XDG_CURRENT_DESKTOP", None)
         # Nem o Fedora imutável nem as extensões do GNOME desta máquina entram.
         self.env["VLB_OSTREE"] = str(self.base / "sem-ostree")
+        self.env["VLB_OS_RELEASE"] = str(self.base / "sem-os-release")
         self.extensoes = self.base / "extensoes-gnome"
         self.extensoes.mkdir()
         self.env["VLB_EXTENSOES_GNOME"] = str(self.extensoes)
@@ -305,6 +306,28 @@ class CasosDoInstalador:
         self.assertIn("[seco] não instalei nada", result.stdout)
         self.assertNotIn("nao deveria rodar", result.stdout)
 
+    def linux_sem_pacotes(self, distro):
+        self.mock("uname", "echo Linux")
+        self.mock("pkg-config", "exit 1")
+        self.mock("apt-get", "exit 0")
+        self.mock("dnf", "exit 0")
+        os_release = self.base / "os-release"
+        os_release.write_text(distro)
+        self.env["VLB_OS_RELEASE"] = str(os_release)
+        return self.run_installer("--seco")
+
+    def test_fedora_com_apt_get_usa_o_dnf(self):
+        result = self.linux_sem_pacotes('NAME="Fedora Linux"\nID=fedora\n')
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("dnf install -y", result.stdout)
+        self.assertNotIn("apt-get", result.stdout)
+
+    def test_ubuntu_com_dnf_usa_o_apt(self):
+        result = self.linux_sem_pacotes('ID=ubuntu\nID_LIKE=debian\n')
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("apt-get install -y", result.stdout)
+        self.assertNotIn("dnf install", result.stdout)
+
     def test_fedora_imutavel_mostra_o_rpm_ostree(self):
         self.mock("uname", "echo Linux")
         self.mock("pkg-config", "exit 1")
@@ -371,32 +394,27 @@ class InstaladorTauri(CasosDoInstalador, Ambiente):
 class InstaladorGpui(CasosDoInstalador, Ambiente):
     app = "gpui"
 
-    def test_macos_sem_xcode_recusa_antes_de_compilar(self):
+    def test_macos_sem_xcode_compila_com_shaders_em_tempo_de_execucao(self):
         self.mock("xcrun", '[ "$2" = metal ] && exit 1; echo /usr/bin/clang++')
         result = self.run_installer()
-        self.assertEqual(result.returncode, 1, result.stdout)
-        self.assertIn("falta o Xcode", result.stdout)
-        self.assertIn("instalar-vintagelightbox-tauri.cmd", result.stdout)
-        self.assertFalse(self.log.exists())
-
-    def test_macos_com_xcode_sem_metal_prepara_no_seco(self):
-        self.mock("xcrun", '[ "$2" = metal ] && exit 1; echo /usr/bin/clang++')
-        (self.sem_xcode / "Xcode.app").mkdir()
-        result = self.run_installer("--seco")
         self.assertEqual(result.returncode, 0, result.stdout)
-        self.assertIn("[seco] sudo xcode-select -s", result.stdout)
-        self.assertIn("[seco] xcodebuild -downloadComponent MetalToolchain", result.stdout)
+        self.assertNotIn("Xcode e Metal", result.stdout)
         self.assertNotIn("sudo chamado", result.stdout)
+        self.assertIn("--features shaders-em-tempo-de-execucao", self.log.read_text())
+        self.assertTrue(self.app_mac().exists())
 
-    def test_macos_metal_continua_faltando(self):
-        self.mock("xcrun", '[ "$2" = metal ] && exit 1; echo /usr/bin/clang++')
-        self.mock("xcode-select", 'echo "$VLB_PASTA_XCODE/Xcode.app/Contents/Developer"')
-        (self.sem_xcode / "Xcode.app").mkdir()
+    def test_macos_sem_command_line_tools(self):
+        self.mock("xcrun", "exit 1")
         result = self.run_installer()
         self.assertEqual(result.returncode, 1, result.stdout)
-        self.assertIn("o compilador Metal continua faltando", result.stdout)
-        self.assertNotIn("sudo chamado", result.stdout)
+        self.assertIn("xcode-select --install", result.stdout)
         self.assertFalse(self.log.exists())
+
+    def test_linux_nao_liga_a_feature_do_macos(self):
+        self.mock("uname", "echo Linux")
+        result = self.run_installer()
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertNotIn("--features", self.log.read_text())
 
     def test_convive_com_o_tauri(self):
         tauri = self.destino / "VintageLightbox (Tauri).app"
