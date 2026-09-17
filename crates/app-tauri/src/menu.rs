@@ -12,7 +12,12 @@
 //! janela, e lá a tela do site já tem tudo o que o operador usa.
 
 use objc2_foundation::{NSString, NSUserDefaults};
+use tauri::image::Image;
 use tauri::menu::{AboutMetadata, Menu, PredefinedMenuItem, Submenu};
+
+/// O ícone do app na caixa "Sobre". Sem ele, o build de depuração (que não é
+/// um pacote `.app`) mostra a pasta genérica do macOS.
+const ICONE: &[u8] = include_bytes!("../../../empacotamento/icones/512x512.png");
 
 /// Os itens que o macOS põe sozinho no menu que tem "Copiar" e "Colar", e o
 /// valor que os tira. Achados no AppKit do macOS 26 e conferidos pelo System
@@ -41,6 +46,7 @@ pub fn do_app<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         name: Some(nome.into()),
         version: Some(app.package_info().version.to_string()),
         copyright: Some("RecordarFotos".into()),
+        icon: Image::from_bytes(ICONE).ok(),
         ..Default::default()
     };
     let separador = || PredefinedMenuItem::separator(app);
