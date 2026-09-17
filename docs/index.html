@@ -95,7 +95,9 @@
   <p class="texto">
     Os dois convivem na mesma máquina: nomes, pastas, caches e catálogos são separados. Os dois
     instaladores funcionam do mesmo jeito — <strong>um arquivo só</strong> para Windows, macOS e
-    Linux, que compila o app no próprio computador e instala sozinho o que faltar.
+    Linux, que compila o app no próprio computador e instala sozinho o que faltar. A compilação usa um
+    perfil próprio, mais rápido e com menos memória que o dos pacotes prontos, e abre menos
+    compilações ao mesmo tempo em máquinas com pouca memória.
   </p>
 
   <h2 id="tauri">Instalar o app do balcão: VintageLightbox (Tauri)</h2>
@@ -285,6 +287,8 @@ sh instalar.cmd</code></pre>
       <tr><td>O navegador bloqueou o download (Windows)</td><td>Na lista de downloads, escolha <strong>Manter</strong> (no Edge: <strong>…</strong> › Manter).</td></tr>
       <tr><td><code>o winget … não existe nesta máquina</code> (Windows)</td><td>Instale o <a href="https://apps.microsoft.com/detail/9NBLGGH4NNS1">Instalador de Aplicativo</a> pela Microsoft Store e repita.</td></tr>
       <tr><td><code>o g++ do MinGW continua faltando</code> (Windows)</td><td>Instale o <a href="https://www.msys2.org">MSYS2</a> e, no terminal dele, rode <code>pacman -S mingw-w64-x86_64-gcc</code>. Depois repita.</td></tr>
+      <tr><td><code>o g++ do MinGW nao compilou um arquivo de teste</code> (Windows)</td><td>O instalador mostra a mensagem do compilador, atualiza o MSYS2 e reinstala o compilador sozinho. Se continuar (<code>o g++ do MinGW continua sem compilar</code>), abra o <strong>MSYS2 MINGW64</strong>, rode <code>pacman -Syu</code> duas vezes e repita.</td></tr>
+      <tr><td><code>a compilacao falhou de novo</code> (Windows)</td><td>O instalador já tentou duas vezes, a segunda com uma compilação de cada vez. A mensagem do compilador está acima, nas linhas <code>cargo:warning=</code>. Se ela fala em acesso negado, o antivírus está bloqueando: em <strong>Segurança do Windows › Proteção contra vírus e ameaças › Exclusões</strong>, adicione <code>%USERPROFILE%\.vintagelightbox</code> e <code>C:\msys64</code>, e repita.</td></tr>
       <tr><td><code>a libclang continua faltando</code> (Windows)</td><td>No terminal do MSYS2, rode <code>pacman -S mingw-w64-x86_64-clang</code>. Depois repita.</td></tr>
       <tr><td><code>Unable to find libclang</code> no meio da compilação (Linux)</td><td>Instale <code>clang</code> e <code>libclang-dev</code> (no Fedora, <code>clang</code> e <code>clang-devel</code>) e repita.</td></tr>
       <tr><td>A compilação para por falta de espaço</td><td>Libere alguns GiB e repita.</td></tr>
@@ -405,6 +409,10 @@ sh instalar.cmd</code></pre>
     <li><strong>Sessões fotográficas:</strong> os cartões de totais, os recortes e a lista em tabela. No
         cabeçalho, <strong>Espaço</strong> (o cache) e <strong>Retenção</strong> (a tela de configurações
         do site).</li>
+    <li><strong>Nova sessão:</strong> o assistente de sete etapas do painel — aplicativo, fotos e
+        receita (preset padrão com amostra e proporção do corte), cliente e preço, agendamento, voucher,
+        como conheceu e compra antecipada. As fotos ficam no computador até a sessão ser criada, e o
+        rascunho é guardado a cada mudança: ao voltar, o app pergunta se retoma.</li>
     <li><strong>Galeria:</strong> importar fotos, recortes, zoom, <strong>Revelar</strong> e
         <strong>Tela do cliente</strong>. Com fotos marcadas, aparecem <strong>Negociação…</strong> e
         <strong>Imprimir…</strong>. No canto, a fila de envios e os recusados.</li>
