@@ -4,6 +4,11 @@
 #
 #     curl -fsSL https://alexkads.github.io/VintageLightbox/instalar.sh | sh
 #
+# ⚠️ **Este é o VintageLightbox antigo (GPUI).** O app do balcão é o
+#    VintageLightbox (Tauri), que tem o próprio instalador
+#    (`scripts/instalar-vintagelightbox.cmd`, docs/INSTALAR-TAURI.md) e não
+#    precisa do Xcode.
+#
 # 🔑 **Por que este caminho existe.** O `.dmg` pronto abre com um susto: o macOS
 #    diz que "não pôde verificar se o item está livre de malware" e oferece só
 #    *Mover para o Lixo*. Não é o app ter problema — é ele não estar assinado
@@ -88,6 +93,10 @@ Opções (com curl | sh, passe-as depois de \`sh -s --\`):
 
 Custa 15 a 40 minutos na primeira vez e ~10 GiB em ~/.vintagelightbox/target.
 Exige o Xcode (grátis) com o componente Metal; o Rust ele instala se faltar.
+
+⚠️ Este é o VintageLightbox antigo (GPUI). O app do balcão, VintageLightbox
+(Tauri), é outro, não precisa do Xcode e se instala com:
+  curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox.cmd | sh
 AJUDA
 }
 
@@ -152,6 +161,12 @@ if ! xcrun -f metal >/dev/null 2>&1; then
   echo "      xcodebuild -downloadComponent MetalToolchain"
   echo
   echo "   Depois rode este script de novo."
+  echo
+  # 🔑 Quem chega aqui quase sempre queria o app do balcão, que tem outro
+  #    comando e não precisa do Xcode (dono, 2026-09-16).
+  printf "   ${N}Procurava o app do balcão, o VintageLightbox (Tauri)?${Z} Ele é outro, e não\n"
+  echo "   precisa do Xcode nem do Metal:"
+  echo "      curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox.cmd | sh"
   exit 1
 fi
 ok "Xcode e Metal: $(xcode-select -p)"

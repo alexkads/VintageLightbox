@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>VintageLightbox — editor de fotos em Rust</title>
+<title>VintageLightbox — instalar</title>
 <meta name="description" content="Importe, organize, trie, revele e entregue. Editor de fotos livre, em Rust, feito pelo Recordar Fotos Estúdio em Gramado e Canela.">
 <link rel="icon" href="icone.png">
 <style>
@@ -39,6 +39,7 @@
   pre{background:color-mix(in srgb,var(--borda) 55%,transparent);padding:.9rem 1rem;
       border-radius:.5rem;overflow-x:auto;font-size:.85rem;margin:.75rem 0}
   pre code{background:none;padding:0;font-size:1em}
+  pre.quebra{white-space:pre-wrap;word-break:break-all}
   .fonte{border:1px solid var(--borda);border-radius:.5rem;padding:1.1rem 1.2rem;margin-top:1rem}
   .fonte ul{margin:.6rem 0 0;padding-left:1.2rem;font-size:.875rem;color:var(--suave)}
 </style>
@@ -56,13 +57,66 @@
 
   <p class="chamada">
     Importe do cartão, tria, revele e entregue — com o ensaio do cliente aberto ao lado.
-    Motor de revelação na GPU, catálogo local, sem nuvem obrigatória.
+    Há dois apps com este nome: <a href="#tauri">o app do balcão</a>, que é o de uso diário, e
+    <a href="#gpui">o editor antigo</a>.
+  </p>
+
+  <h2 id="tauri">Instalar o app do balcão: VintageLightbox (Tauri)</h2>
+
+  <p style="color:var(--suave);font-size:.9375rem;margin:0">
+    É o app do pós-venda da RecordarFotos: as telas do painel empacotadas dentro dele, com
+    <strong>RAW</strong>, <strong>cartão da câmera</strong>, <strong>pasta fixa de exportação</strong>,
+    <strong>tela do cliente</strong> no segundo monitor e envio que continua <strong>na bandeja</strong>.
+    Não há instalador pronto: cada máquina compila o próprio app, com um arquivo só, que instala
+    sozinho o que faltar. <strong>Não precisa do Xcode.</strong> Ele convive com o editor antigo, mais
+    abaixo, sem substituí-lo.
+  </p>
+
+  <div class="fonte">
+    <strong>Windows</strong>
+    <ol style="margin:.6rem 0 0;padding-left:1.2rem;font-size:.875rem;color:var(--suave)">
+      <li>Baixe
+          <a href="https://github.com/alexkads/VintageLightbox/releases/download/instalador-tauri/instalar-vintagelightbox.cmd"
+             style="color:var(--destaque)">instalar-vintagelightbox.cmd</a>
+          e dê dois cliques nele.</li>
+      <li>Se aparecer <em>“O Windows protegeu o computador”</em>: <strong>Mais informações →
+          Executar assim mesmo</strong>.</li>
+      <li>No fim, o app está no <strong>Menu Iniciar</strong>. Ele instala sozinho o WebView2, o Rust
+          e o compilador e a libclang do MSYS2.</li>
+    </ol>
+  </div>
+
+  <div class="fonte">
+    <strong>Linux e macOS</strong>
+    <pre class="quebra"><code>curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox.cmd | sh</code></pre>
+    <ul style="margin:0">
+      <li><strong>Linux</strong>: instala o compilador, a libclang e as bibliotecas do WebKitGTK (por <code>apt</code>,
+          <code>dnf</code> ou <code>pacman</code>, pedindo a senha) e o Rust. O app aparece no menu de
+          aplicativos.</li>
+      <li><strong>macOS</strong>: precisa só das Command Line Tools
+          (<code>xcode-select --install</code>); o app vai para <code>/Applications</code>.</li>
+    </ul>
+  </div>
+
+  <p style="color:var(--suave);font-size:.875rem;margin:.9rem 0 0">
+    <strong>10 a 30 minutos</strong> na primeira vez. Para <strong>atualizar</strong>, repita o mesmo
+    passo, e a partir da segunda vez leva poucos minutos. Opções (<code>--seco</code>,
+    <code>--versao</code>, <code>--destino</code>) e o passo a passo completo em
+    <a href="https://github.com/alexkads/VintageLightbox/blob/dev/docs/INSTALAR-TAURI.md"
+       style="color:var(--destaque)">INSTALAR-TAURI.md</a>.
+  </p>
+
+  <h2 id="gpui">O editor antigo: VintageLightbox (GPUI)</h2>
+
+  <p class="nota" style="margin-top:0">
+    ⚠️ <strong>Este não é o app do balcão.</strong> É o editor nativo, com motor de revelação na GPU
+    e catálogo local. Para o pós-venda, instale o <a href="#tauri">VintageLightbox (Tauri)</a>, acima.
   </p>
 
   <div id="baixar"></div>
   <div class="versao" id="versao">carregando…</div>
 
-  <h2>Todos os arquivos</h2>
+  <h2>Todos os arquivos do editor antigo</h2>
   <table><thead><tr><th>Sistema</th><th>Arquitetura</th><th>Tamanho</th><th></th></tr></thead>
     <tbody id="lista"><tr><td colspan="4" style="color:var(--suave)">carregando…</td></tr></tbody>
   </table>
@@ -90,7 +144,7 @@
     </p>
   </div>
 
-  <h2 id="compilar">Sem aviso nenhum: compile na sua máquina</h2>
+  <h2 id="compilar">Editor antigo sem aviso nenhum: compile na sua máquina</h2>
 
   <p style="color:var(--suave);font-size:.9375rem;margin:0">
     O macOS só interroga o que <strong>chegou pela rede</strong> — é a marca de quarentena que o
@@ -111,8 +165,8 @@
           pasta pessoal e sem <code>sudo</code>.</li>
       <li><strong>15 a 40 minutos</strong> na primeira vez, e ~10 GiB em
           <code>~/.vintagelightbox</code> — que dá para apagar depois.</li>
-      <li>Só macOS. Para Windows e Linux, veja
-          <a href="#tauri">o app do balcão</a> logo abaixo.</li>
+      <li>Só macOS, e só para o editor antigo. O app do balcão tem
+          <a href="#tauri">o próprio comando</a>, acima, que não pede o Xcode.</li>
     </ul>
     <p style="margin:.7rem 0 0;font-size:.875rem;color:var(--suave)">
       Ler um script antes de executá-lo é sensato, e este não se ofende:
@@ -125,50 +179,6 @@
       sozinho, conferindo a assinatura de cada atualização.
     </p>
   </div>
-
-  <h2 id="tauri">O app do balcão: VintageLightbox (Tauri)</h2>
-
-  <p style="color:var(--suave);font-size:.9375rem;margin:0">
-    É o app do pós-venda da RecordarFotos: as telas do painel empacotadas dentro dele, com
-    <strong>RAW</strong>, <strong>cartão da câmera</strong>, <strong>pasta fixa de exportação</strong>,
-    <strong>tela do cliente</strong> no segundo monitor e envio que continua <strong>na bandeja</strong>.
-    Não há instalador pronto: cada máquina compila o próprio app, com um arquivo só, que instala
-    sozinho o que faltar. Ele convive com o VintageLightbox acima, sem substituí-lo.
-  </p>
-
-  <div class="fonte">
-    <strong>Windows</strong>
-    <ol style="margin:.6rem 0 0;padding-left:1.2rem;font-size:.875rem;color:var(--suave)">
-      <li>Baixe
-          <a href="https://github.com/alexkads/VintageLightbox/releases/download/instalador-tauri/instalar-vintagelightbox.cmd"
-             style="color:var(--destaque)">instalar-vintagelightbox.cmd</a>
-          e dê dois cliques nele.</li>
-      <li>Se aparecer <em>“O Windows protegeu o computador”</em>: <strong>Mais informações →
-          Executar assim mesmo</strong>.</li>
-      <li>No fim, o app está no <strong>Menu Iniciar</strong>. Ele instala sozinho o WebView2, o Rust
-          e o compilador e a libclang do MSYS2.</li>
-    </ol>
-  </div>
-
-  <div class="fonte">
-    <strong>Linux e macOS</strong>
-    <pre><code>curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox.cmd | sh</code></pre>
-    <ul style="margin:0">
-      <li><strong>Linux</strong>: instala o compilador, a libclang e as bibliotecas do WebKitGTK (por <code>apt</code>,
-          <code>dnf</code> ou <code>pacman</code>, pedindo a senha) e o Rust. O app aparece no menu de
-          aplicativos.</li>
-      <li><strong>macOS</strong>: precisa só das Command Line Tools
-          (<code>xcode-select --install</code>); o app vai para <code>/Applications</code>.</li>
-    </ul>
-  </div>
-
-  <p style="color:var(--suave);font-size:.875rem;margin:.9rem 0 0">
-    <strong>10 a 30 minutos</strong> na primeira vez. Para <strong>atualizar</strong>, repita o mesmo
-    passo, e a partir da segunda vez leva poucos minutos. Opções (<code>--seco</code>,
-    <code>--versao</code>, <code>--destino</code>) e o passo a passo completo em
-    <a href="https://github.com/alexkads/VintageLightbox/blob/dev/docs/INSTALAR-TAURI.md"
-       style="color:var(--destaque)">INSTALAR-TAURI.md</a>.
-  </p>
 
   <footer>
     <p>
@@ -202,7 +212,7 @@ fetch("downloads.json", {cache: "no-cache"}).then(r => r.json()).then(d => {
   const escolhido = escolher(d.downloads, navigator.userAgent);
   if (escolhido) {
     document.getElementById("baixar").innerHTML =
-      `<a class="principal" href="${escolhido.url}" download>Baixar para ${escolhido.sistema}
+      `<a class="principal" href="${escolhido.url}" download>Baixar o editor antigo para ${escolhido.sistema}
          <small>${escolhido.arquitetura} · ${mb(escolhido.bytes)}</small></a>`;
   }
   const data = d.publicado_em ? new Date(d.publicado_em).toLocaleDateString("pt-BR") : "";

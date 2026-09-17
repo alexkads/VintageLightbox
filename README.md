@@ -2,6 +2,11 @@
 
 Clone profissional do Adobe Lightroom desenvolvido em Rust com interface GPUI.
 
+> 🖥️ **Procura o app do balcão?** É o **VintageLightbox (Tauri)**, que se instala com outro comando e
+> não precisa do Xcode: veja a seção **🖥️ VintageLightbox (Tauri)**, mais abaixo, ou
+> **[docs/INSTALAR-TAURI.md](docs/INSTALAR-TAURI.md)**. O `instalar.sh` e os instaladores de
+> "Baixar" são do editor antigo (GPUI).
+
 ## 🎯 Por que ele existe
 
 O fluxo do estúdio passa pelo Lightroom, e o Lightroom **não conversa com o
@@ -197,9 +202,12 @@ A primeira vez leva de 10 a 30 minutos. Para atualizar, repita o mesmo passo. O 
 as telas do Windows, as opções e o que fazer quando algo dá errado estão em
 **[docs/INSTALAR-TAURI.md](docs/INSTALAR-TAURI.md)**.
 
-## ⬇️ Baixar
+## ⬇️ Baixar o editor antigo (GPUI)
 
-**https://alexkads.github.io/VintageLightbox/** — macOS (Intel e Apple Silicon), Windows e Linux.
+> ⚠️ **Não é o app do balcão.** Para o pós-venda, use o VintageLightbox (Tauri), na seção acima.
+
+**https://alexkads.github.io/VintageLightbox/** — a versão publicada hoje só tem o `.dmg` do macOS
+(Intel e Apple Silicon).
 
 O app **não passa por loja nenhuma** e, a partir da primeira instalação, **se atualiza sozinho** —
 cada atualização é conferida por assinatura antes de ser instalada.
@@ -210,7 +218,7 @@ cada atualização é conferida por assinatura antes de ser instalada.
 >
 > O truque antigo de *botão direito → Abrir* **não funciona a partir do macOS 15**.
 
-### Ou compile na sua máquina — e o aviso do macOS não aparece
+### Ou compile o editor antigo na sua máquina — e o aviso do macOS não aparece
 
 ```bash
 curl -fsSL https://alexkads.github.io/VintageLightbox/instalar.sh | sh
