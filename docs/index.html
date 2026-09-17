@@ -40,6 +40,21 @@
       border-radius:.5rem;overflow-x:auto;font-size:.85rem;margin:.75rem 0}
   pre code{background:none;padding:0;font-size:1em}
   pre.quebra{white-space:pre-wrap;word-break:break-all}
+  h3{font-size:.975rem;margin:2rem 0 .5rem;font-weight:600}
+  .fonte h3{margin:0 0 .4rem}
+  .fonte ol,.fonte p{font-size:.875rem;color:var(--suave)}
+  .fonte ol{margin:.4rem 0 0;padding-left:1.2rem}
+  .fonte ol li{margin:.3rem 0}
+  .fonte p{margin:.7rem 0 0}
+  .texto{color:var(--suave);font-size:.9375rem;margin:.5rem 0 0}
+  ul.texto{padding-left:1.2rem}
+  ul.texto li{margin:.4rem 0}
+  .indice{border-left:3px solid var(--destaque);padding:.5rem .9rem;margin:1rem 0;font-size:.875rem;
+          line-height:1.9;color:var(--suave)}
+  .rolar{overflow-x:auto}
+  td code{word-break:break-all}
+  kbd{border:1px solid var(--borda);border-bottom-width:2px;border-radius:.3em;padding:0 .35em;
+      font:inherit;font-size:.85em}
   .fonte{border:1px solid var(--borda);border-radius:.5rem;padding:1.1rem 1.2rem;margin-top:1rem}
   .fonte ul{margin:.6rem 0 0;padding-left:1.2rem;font-size:.875rem;color:var(--suave)}
 </style>
@@ -63,47 +78,206 @@
 
   <h2 id="tauri">Instalar o app do balcão: VintageLightbox (Tauri)</h2>
 
-  <p style="color:var(--suave);font-size:.9375rem;margin:0">
+  <p class="texto">
     É o app do pós-venda da RecordarFotos: as telas do painel empacotadas dentro dele, com
     <strong>RAW</strong>, <strong>cartão da câmera</strong>, <strong>pasta fixa de exportação</strong>,
     <strong>tela do cliente</strong> no segundo monitor e envio que continua <strong>na bandeja</strong>.
-    Não há instalador pronto: cada máquina compila o próprio app, com um arquivo só, que instala
+    Não há instalador pronto: cada computador compila o próprio app, com um arquivo só, que instala
     sozinho o que faltar. <strong>Não precisa do Xcode.</strong> Ele convive com o editor antigo, mais
     abaixo, sem substituí-lo.
   </p>
 
-  <div class="fonte">
-    <strong>Windows</strong>
-    <ol style="margin:.6rem 0 0;padding-left:1.2rem;font-size:.875rem;color:var(--suave)">
-      <li>Baixe
-          <a href="https://github.com/alexkads/VintageLightbox/releases/download/instalador-tauri/instalar-vintagelightbox.cmd"
-             style="color:var(--destaque)">instalar-vintagelightbox.cmd</a>
-          e dê dois cliques nele.</li>
-      <li>Se aparecer <em>“O Windows protegeu o computador”</em>: <strong>Mais informações →
-          Executar assim mesmo</strong>.</li>
-      <li>No fim, o app está no <strong>Menu Iniciar</strong>. Ele instala sozinho o WebView2, o Rust
-          e o compilador e a libclang do MSYS2.</li>
+  <nav class="indice" aria-label="Nesta seção">
+    <strong>Qual é o seu computador?</strong>
+    <a href="#windows">Windows</a> · <a href="#macos">macOS</a> · <a href="#linux">Linux</a>
+    <br>
+    <strong>Depois:</strong>
+    <a href="#primeiro-uso">Primeiro uso</a> · <a href="#atualizar">Atualizar</a> ·
+    <a href="#opcoes">Opções</a> · <a href="#onde">Onde as coisas ficam</a> ·
+    <a href="#desinstalar">Desinstalar</a> · <a href="#problemas">Quando algo dá errado</a> ·
+    <a href="#diagnostico">Diagnóstico</a>
+  </nav>
+
+  <p class="texto">
+    <strong>Antes de começar:</strong> internet ligada, alguns GiB livres no disco e
+    <strong>10 a 30 minutos</strong> na primeira vez. O computador pode ser usado enquanto isso.
+  </p>
+
+  <div class="fonte" id="windows">
+    <h3>Windows 10 e 11</h3>
+    <ol>
+      <li>Baixe <a href="https://github.com/alexkads/VintageLightbox/releases/download/instalador-tauri/instalar-vintagelightbox.cmd">instalar-vintagelightbox.cmd</a>.
+          Se o navegador disser que o arquivo pode ser perigoso, escolha <strong>Manter</strong>.</li>
+      <li>Na pasta <strong>Downloads</strong>, dê <strong>dois cliques</strong> no arquivo.</li>
+      <li>Se aparecer <em>“O Windows protegeu o computador”</em>, clique em <strong>Mais informações</strong>
+          e depois em <strong>Executar assim mesmo</strong>. Só acontece na primeira vez.</li>
+      <li>Se o Windows perguntar se permite que um programa faça alterações, clique em <strong>Sim</strong>:
+          são as ferramentas que o instalador põe na máquina.</li>
+      <li>Espere a janela preta terminar. No fim, aperte qualquer tecla.</li>
+      <li>Abra pelo <strong>Menu Iniciar</strong>: <strong>VintageLightbox (Tauri)</strong>.</li>
     </ol>
+    <p>O instalador põe sozinho, pelo <strong>winget</strong>: o <strong>WebView2</strong> (já vem no
+       Windows 11), o <strong>Rust</strong> e o <strong>MSYS2</strong> com o compilador e a libclang. O
+       Visual Studio não é preciso. O arquivo baixado não envelhece: ao rodar, ele busca a versão mais
+       nova do instalador.</p>
   </div>
 
-  <div class="fonte">
-    <strong>Linux e macOS</strong>
-    <pre class="quebra"><code>curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox.cmd | sh</code></pre>
-    <ul style="margin:0">
-      <li><strong>Linux</strong>: instala o compilador, a libclang e as bibliotecas do WebKitGTK (por <code>apt</code>,
-          <code>dnf</code> ou <code>pacman</code>, pedindo a senha) e o Rust. O app aparece no menu de
-          aplicativos.</li>
-      <li><strong>macOS</strong>: precisa só das Command Line Tools
-          (<code>xcode-select --install</code>); o app vai para <code>/Applications</code>.</li>
-    </ul>
+  <div class="fonte" id="macos">
+    <h3>macOS</h3>
+    <ol>
+      <li>Abra o <strong>Terminal</strong>: aperte <kbd>⌘</kbd> <kbd>Espaço</kbd>, digite
+          <code>Terminal</code> e aperte <kbd>Enter</kbd>.</li>
+      <li>Cole esta linha e aperte <kbd>Enter</kbd>:
+        <pre class="quebra"><code>curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox.cmd | sh</code></pre></li>
+      <li>Se ele disser que <strong>faltam as Command Line Tools</strong>, rode
+          <code>xcode-select --install</code>, clique em <strong>Instalar</strong> na janela que abrir,
+          espere terminar e cole a linha do passo 2 de novo.</li>
+      <li>Espere aparecer <strong>“instalado em /Applications”</strong>.</li>
+      <li>Abra pelo Launchpad ou pela pasta <strong>Aplicativos</strong>:
+          <strong>VintageLightbox (Tauri)</strong>. Ele abre no primeiro clique, sem aviso de
+          segurança.</li>
+    </ol>
+    <p>Precisa só das <strong>Command Line Tools</strong>; o Rust o instalador põe sozinho, na sua pasta
+       pessoal e sem senha. ⚠️ Não use o <code>instalar.sh</code> do editor antigo: aquele pede o Xcode
+       inteiro e é outro app.</p>
   </div>
 
-  <p style="color:var(--suave);font-size:.875rem;margin:.9rem 0 0">
-    <strong>10 a 30 minutos</strong> na primeira vez. Para <strong>atualizar</strong>, repita o mesmo
-    passo, e a partir da segunda vez leva poucos minutos. Opções (<code>--seco</code>,
-    <code>--versao</code>, <code>--destino</code>) e o passo a passo completo em
-    <a href="https://github.com/alexkads/VintageLightbox/blob/dev/docs/INSTALAR-TAURI.md"
-       style="color:var(--destaque)">INSTALAR-TAURI.md</a>.
+  <div class="fonte" id="linux">
+    <h3>Linux</h3>
+    <ol>
+      <li>Abra o <strong>Terminal</strong>.</li>
+      <li>Cole esta linha e aperte <kbd>Enter</kbd>:
+        <pre class="quebra"><code>curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox.cmd | sh</code></pre></li>
+      <li>Quando pedir, digite <strong>a sua senha</strong> (ela não aparece enquanto você digita). Ela
+          serve para instalar as bibliotecas do sistema.</li>
+      <li>Espere aparecer <strong>“instalado”</strong>.</li>
+      <li>Abra pelo menu de aplicativos: <strong>VintageLightbox (Tauri)</strong>.</li>
+    </ol>
+    <p>Funciona com <strong>apt</strong> (Ubuntu, Debian, Mint), <strong>dnf</strong> (Fedora) e
+       <strong>pacman</strong> (Arch, Manjaro): o instalador põe o compilador, a libclang, o WebKitGTK e
+       o Rust. Um Rust antigo da distribuição fica de lado. Em outra distribuição, ele lista o que
+       instalar à mão. Sem <code>curl</code>, instale-o antes (<code>sudo apt install curl</code>).</p>
+  </div>
+
+  <h3 id="primeiro-uso">Primeiro uso</h3>
+  <ul class="texto">
+    <li><strong>Entrar:</strong> clique em <strong>Entrar com a conta RecordarFotos</strong>. O navegador
+        abre para você confirmar a conta; depois volte para o app. No macOS, se ele pedir a senha para
+        usar o <strong>Chaveiro</strong>, digite a senha do Mac e clique em
+        <strong>Permitir Sempre</strong> (volta a perguntar depois de cada atualização).</li>
+    <li><strong>Tela do cliente:</strong> na galeria, o botão <strong>Tela do cliente</strong> abre a
+        foto em foco em tela cheia <strong>no outro monitor</strong>, e ela acompanha cada foto que você
+        abre. <kbd>Esc</kbd> fecha, <kbd>I</kbd> mostra ou esconde as informações da foto. Com um monitor
+        só, ela abre como janela comum, para arrastar.</li>
+    <li><strong>Bandeja:</strong> minimizar leva o app para a bandeja (a barra de menus, no macOS).
+        Fechar com fotos ainda subindo também: o envio continua, e o app termina quando acabar. Na
+        bandeja: <strong>Abrir o VintageLightbox</strong>, <strong>Enviar agora</strong>,
+        <strong>Abrir a pasta do catálogo</strong> e <strong>Sair</strong> (o que não subiu continua
+        guardado e sobe na próxima abertura).</li>
+  </ul>
+
+  <h3 id="atualizar">Atualizar</h3>
+  <p class="texto">
+    <strong>Repita o passo da instalação</strong>: dois cliques no arquivo no Windows, ou a mesma linha no
+    Terminal. Feche o app antes (pela bandeja, <strong>Sair</strong>). A partir da segunda vez leva poucos
+    minutos. O que estava no catálogo continua lá.
+  </p>
+
+  <h3 id="opcoes">Opções</h3>
+  <div class="rolar">
+  <table>
+    <thead><tr><th>O que</th><th>macOS e Linux</th><th>Windows</th></tr></thead>
+    <tbody>
+      <tr><td>Só mostrar o que faria</td><td><code>… | sh -s -- --seco</code></td><td><code>set VLB_SECO=1</code></td></tr>
+      <tr><td>Outra versão (branch ou tag)</td><td><code>… | sh -s -- --versao v0.2.0</code></td><td><code>set VLB_VERSAO=v0.2.0</code></td></tr>
+      <tr><td>Outra pasta de instalação</td><td><code>… | sh -s -- --destino ~/Apps</code></td><td><code>set VLB_DESTINO=D:\Apps\VintageLightbox</code></td></tr>
+      <tr><td>Ver as opções</td><td><code>… | sh -s -- --ajuda</code></td><td>—</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p class="texto">
+    <code>…</code> é o <code>curl -fsSL … | sh</code> da instalação, com a opção no lugar do
+    <code>| sh</code> final. <strong>No Windows</strong>, as opções só valem se o arquivo for rodado
+    <strong>da mesma janela</strong> em que foram definidas (dois cliques não as enxergam): abra o
+    <strong>Prompt de Comando</strong>, digite o <code>set</code> e depois
+    <code>"%USERPROFILE%\Downloads\instalar-vintagelightbox.cmd"</code>.
+  </p>
+  <p class="texto">Para ler o instalador antes de rodar:</p>
+  <pre class="quebra"><code>curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox.cmd -o instalar.cmd
+less instalar.cmd
+sh instalar.cmd</code></pre>
+
+  <h3 id="onde">Onde as coisas ficam</h3>
+  <div class="rolar">
+  <table>
+    <thead><tr><th></th><th>macOS</th><th>Linux</th><th>Windows</th></tr></thead>
+    <tbody>
+      <tr><td>O app</td><td><code>/Applications</code></td><td><code>~/.local/bin/vintagelightbox-tauri</code></td><td><code>%LOCALAPPDATA%\Programs\VintageLightbox-Tauri</code></td></tr>
+      <tr><td>O catálogo (fotos importadas)</td><td colspan="3"><strong>Imagens › VintageLightbox › Catalogo Tauri</strong>, na sua pasta pessoal</td></tr>
+      <tr><td>Cache do compilador (alguns GiB)</td><td colspan="2"><code>~/.vintagelightbox/target-tauri</code></td><td><code>%USERPROFILE%\.vintagelightbox\target-tauri</code></td></tr>
+      <tr><td>Código baixado</td><td colspan="2"><code>~/.vintagelightbox/fonte-tauri</code></td><td><code>%USERPROFILE%\.vintagelightbox\fonte-tauri</code></td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p class="texto">Apagar a pasta <code>.vintagelightbox</code> é seguro: a próxima atualização só demora mais.</p>
+
+  <h3 id="desinstalar">Desinstalar</h3>
+  <ul class="texto">
+    <li><strong>macOS:</strong> arraste <strong>VintageLightbox (Tauri)</strong> de Aplicativos para o Lixo.</li>
+    <li><strong>Windows:</strong> apague a pasta <code>%LOCALAPPDATA%\Programs\VintageLightbox-Tauri</code>
+        e o atalho <strong>VintageLightbox (Tauri)</strong> do Menu Iniciar (botão direito › Abrir local do
+        arquivo › apagar).</li>
+    <li><strong>Linux:</strong>
+        <pre class="quebra"><code>rm ~/.local/bin/vintagelightbox-tauri ~/.local/share/applications/vintagelightbox-tauri.desktop ~/.local/share/icons/hicolor/256x256/apps/vintagelightbox-tauri.png</code></pre></li>
+    <li>Nos três, a pasta <code>.vintagelightbox</code> pode ir junto. ⚠️ <strong>O catálogo só depois de
+        conferir</strong> que a bandeja diz que tudo subiu: fotos que ainda não subiram só existem nele.
+        O Rust e o MSYS2 ficam instalados e podem ser removidos à parte.</li>
+  </ul>
+
+  <h3 id="problemas">Quando algo dá errado</h3>
+  <div class="rolar">
+  <table>
+    <thead><tr><th>O que aparece</th><th>O que fazer</th></tr></thead>
+    <tbody>
+      <tr><td><code>falta o compilador Metal</code> (macOS)</td><td>Esse é o instalador do <strong>editor antigo</strong>. Use a linha do <a href="#macos">macOS</a> acima.</td></tr>
+      <tr><td><code>faltam as Command Line Tools do Xcode</code> (macOS)</td><td>Rode <code>xcode-select --install</code>, espere terminar e repita a instalação.</td></tr>
+      <tr><td><code>command not found: curl</code> (Linux)</td><td>Instale o curl (<code>sudo apt install curl</code>, ou o equivalente) e repita.</td></tr>
+      <tr><td><code>não reconheci o gerenciador de pacotes</code> (Linux)</td><td>Instale à mão os pacotes que a mensagem lista e repita.</td></tr>
+      <tr><td><code>a instalação dos pacotes falhou</code> ou <code>não há 'sudo'</code> (Linux)</td><td>Esta conta não pode instalar programas: peça a quem administra a máquina para rodar o comando mostrado logo acima, e repita.</td></tr>
+      <tr><td><code>o Rust continua ausente ou anterior ao 1.89</code></td><td>Rode <code>rustup update stable</code> e repita.</td></tr>
+      <tr><td>O navegador bloqueou o download (Windows)</td><td>Na lista de downloads, escolha <strong>Manter</strong> (no Edge: <strong>…</strong> › Manter).</td></tr>
+      <tr><td><code>o winget … não existe nesta máquina</code> (Windows)</td><td>Instale o <a href="https://apps.microsoft.com/detail/9NBLGGH4NNS1">Instalador de Aplicativo</a> pela Microsoft Store e repita.</td></tr>
+      <tr><td><code>o g++ do MinGW continua faltando</code> (Windows)</td><td>Instale o <a href="https://www.msys2.org">MSYS2</a> e, no terminal dele, rode <code>pacman -S mingw-w64-x86_64-gcc</code>. Depois repita.</td></tr>
+      <tr><td><code>a libclang continua faltando</code> (Windows)</td><td>No terminal do MSYS2, rode <code>pacman -S mingw-w64-x86_64-clang</code>. Depois repita.</td></tr>
+      <tr><td><code>Unable to find libclang</code> no meio da compilação (Linux)</td><td>Instale <code>clang</code> e <code>libclang-dev</code> (ou os equivalentes) e repita.</td></tr>
+      <tr><td>A compilação para por falta de espaço</td><td>Libere alguns GiB e repita.</td></tr>
+      <tr><td>A janela do Windows fechou sozinha</td><td>Rode o arquivo de dentro do <strong>Prompt de Comando</strong> (veja <a href="#opcoes">Opções</a>) para ler a mensagem.</td></tr>
+      <tr><td>Abre um app diferente, ou o app não muda depois de atualizar</td><td>O app antigo continuava aberto: saia pela bandeja (<strong>Sair</strong>) e abra de novo. Só roda uma cópia por vez.</td></tr>
+      <tr><td>A tela do cliente abre preta</td><td>Atualize o app (repita a instalação).</td></tr>
+      <tr><td>A tela do cliente não vai para o outro monitor</td><td>Confira se o segundo monitor está <strong>estendido</strong>, e não espelhado. No Linux com Wayland o sistema não deixa o app escolher o monitor: arraste a janela uma vez.</td></tr>
+      <tr><td>A lista aparece vazia ou dá erro ao entrar</td><td>Confira a internet: as telas vêm do app, mas os dados vêm da RecordarFotos. As fotos já importadas continuam no catálogo.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3 id="diagnostico">Diagnóstico</h3>
+  <p class="texto">
+    Para ver o que o computador oferece ao app (GPU, armazenamento, monitores), abra-o com
+    <code>--diagnostico</code>: aparece uma segunda janela com um relatório para copiar e mandar.
+    Feche o app antes.
+  </p>
+  <div class="rolar">
+  <table>
+    <tbody>
+      <tr><td>macOS</td><td><code>open -a "VintageLightbox (Tauri)" --args --diagnostico</code></td></tr>
+      <tr><td>Linux</td><td><code>~/.local/bin/vintagelightbox-tauri --diagnostico</code></td></tr>
+      <tr><td>Windows</td><td><code>"%LOCALAPPDATA%\Programs\VintageLightbox-Tauri\VintageLightbox-Tauri.exe" --diagnostico</code></td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p class="texto">
+    O mesmo guia, em texto, está em
+    <a href="https://github.com/alexkads/VintageLightbox/blob/dev/docs/INSTALAR-TAURI.md">INSTALAR-TAURI.md</a>.
   </p>
 
   <h2 id="gpui">O editor antigo: VintageLightbox (GPUI)</h2>

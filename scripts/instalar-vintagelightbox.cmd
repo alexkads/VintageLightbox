@@ -11,10 +11,13 @@ rem  tecla no fim, para a janela nao sumir com a mensagem. O PowerShell vem da
 rem  versao mais nova do arquivo no GitHub; sem internet, desta copia. Assim a
 rem  copia baixada do Release nunca fica velha.
 title Instalando o VintageLightbox (Tauri)
-powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; $t=$null; try { $t=(Invoke-WebRequest -UseBasicParsing 'https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox.cmd').Content } catch { }; if (-not $t) { $t=[IO.File]::ReadAllText('%~f0') }; $n=[char]10; $i=$t.IndexOf($n+'#==POWERSHELL=='); $f=$t.IndexOf($n+'#==FIM-POWERSHELL==',$i); try { Invoke-Expression $t.Substring($i, $f-$i) } catch { Write-Host ''; Write-Host ('X ' + $_) -ForegroundColor Red; exit 1 }"
+setlocal
+set "VLB_SCRIPT=%~f0"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; try { $t=$null; if ($env:VLB_SECO -ne '1') { try { $t=(Invoke-WebRequest -UseBasicParsing -TimeoutSec 30 'https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox.cmd').Content } catch { } }; if (-not $t) { $t=[IO.File]::ReadAllText($env:VLB_SCRIPT) }; $n=[char]10; $i=$t.IndexOf($n+'#==POWERSHELL=='); if ($i -lt 0) { throw 'instalador invalido: falta o bloco PowerShell' }; $f=$t.IndexOf($n+'#==FIM-POWERSHELL==',$i); if ($f -le $i) { throw 'instalador incompleto' }; Invoke-Expression $t.Substring($i, $f-$i) } catch { Write-Host ''; Write-Host ('X ' + $_) -ForegroundColor Red; exit 1 }"
+set "VLB_RESULTADO=%ERRORLEVEL%"
 echo.
 pause
-goto :eof
+exit /b %VLB_RESULTADO%
 ::FIM-DO-CMD
 #
 # VintageLightbox (Tauri) — instalar compilando nesta máquina. Um arquivo só.
@@ -24,14 +27,14 @@ goto :eof
 #    interpretador lê só a parte dele:
 #
 #    - o `cmd` (dois cliques no Windows) lê a primeira linha como rótulo, roda o
-#      bloco acima e para no `goto :eof`;
+#      bloco acima e para no `exit /b`;
 #    - o `sh` (Linux e macOS) passa pelo bloco acima e pelo do PowerShell como
 #      dois *heredocs* entregues ao `:`, que não faz nada, e roda o resto;
 #    - o PowerShell recebe do `cmd` só o trecho entre as marcas `#==`.
 #
-# 🚨 **Fins de linha LF, e o arquivo não usa rótulo além do `:eof`.** O `sh`
+# 🚨 **Fins de linha LF, e o arquivo não usa saltos para rótulos.** O `sh`
 #    quebra com CRLF. O `cmd` aceita LF, desde que não precise procurar rótulo
-#    (`goto :eof` não procura). O `.gitattributes` fixa o LF.
+#    (`exit /b` não procura). O `.gitattributes` fixa o LF.
 #
 # 🚨 **Nenhuma linha do PowerShell pode ser exatamente a marca de fim** do
 #    heredoc abaixo, senão o `sh` sai dele antes da hora.
@@ -70,7 +73,11 @@ function Erro($t)  { Write-Host "X $t" -ForegroundColor Red }
 function Aviso($t) { Write-Host "! $t" -ForegroundColor Yellow }
 function Ok($t)    { Write-Host "OK $t" -ForegroundColor Green }
 function Correr([scriptblock]$bloco) {
-    if ($Seco) { Write-Host "   [seco] $bloco" } else { & $bloco | Out-Host }
+    if ($Seco) { Write-Host "   [seco] $bloco"; return }
+    # ErrorActionPreference nao intercepta codigos de erro de executaveis no PS 5.1.
+    $global:LASTEXITCODE = 0
+    & $bloco | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw "comando falhou (codigo $LASTEXITCODE): $bloco" }
 }
 
 # O winget vem no Windows 11 e no 10 atualizado, mas falta no LTSC e em
@@ -95,10 +102,19 @@ $chaves = @(
     "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}",
     "HKCU:\Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
 )
-if (-not ($chaves | Where-Object { Test-Path $_ })) {
+function Tem-WebView2 {
+    foreach ($chave in $chaves) {
+        $pv = (Get-ItemProperty -LiteralPath $chave -Name pv -ErrorAction SilentlyContinue).pv
+        $v = $null
+        if ([version]::TryParse($pv, [ref]$v) -and $v -gt [version]'0.0.0.0') { return $true }
+    }
+    return $false
+}
+if (-not (Tem-WebView2)) {
     Aviso "nao achei o WebView2. Instalando pelo winget."
     Precisa-Winget "o WebView2"
     Correr { winget install --silent --accept-package-agreements --accept-source-agreements Microsoft.EdgeWebView2Runtime }
+    if (-not $Seco -and -not (Tem-WebView2)) { throw "o WebView2 continua faltando depois da instalacao" }
 } else {
     Ok "WebView2 instalado"
 }
@@ -111,8 +127,8 @@ if (-not (Get-Command rustup -ErrorAction SilentlyContinue)) {
     Aviso "nao ha rustup nesta maquina. Instalando o Rust."
     if (-not $Seco) {
         $init = Join-Path $env:TEMP "rustup-init.exe"
-        Invoke-WebRequest "https://win.rustup.rs/x86_64" -OutFile $init
-        & $init -y --no-modify-path --profile minimal --default-host $Alvo --default-toolchain $Toolchain | Out-Host
+        Invoke-WebRequest -UseBasicParsing "https://win.rustup.rs/x86_64" -OutFile $init
+        Correr { & $init -y --no-modify-path --profile minimal --default-host $Alvo --default-toolchain $Toolchain }
         $env:PATH = "$cargoDoUsuario;$env:PATH"
     } else {
         Write-Host "   [seco] baixaria e rodaria rustup-init.exe --default-host $Alvo"
@@ -153,18 +169,17 @@ function Pacote-Msys($pacote, $oque) {
         Correr { winget install --silent --accept-package-agreements --accept-source-agreements MSYS2.MSYS2 }
     }
     Aviso "instalando $oque pelo MSYS2"
-    # `-Sy`: a lista de pacotes que vem com o MSYS2 envelhece, e pedir um
-    # pacote que o espelho ja trocou termina em 404.
-    Correr { & $msysBash -lc "pacman -Sy --needed --noconfirm $pacote" }
+    # MSYS2 so suporta atualizacao completa. A primeira passagem pode atualizar
+    # o runtime; a segunda abre outro bash e termina os pacotes restantes.
+    Correr { & $msysBash -lc "pacman -Syu --noconfirm" }
+    Correr { & $msysBash -lc "pacman -Syu --needed --noconfirm $pacote" }
 }
 
-# O g++ do MinGW, que compila o C++ do LibRaw.
-if (-not (Get-Command g++ -ErrorAction SilentlyContinue)) {
-    if (-not (Test-Path (Join-Path $mingw "g++.exe"))) {
-        Pacote-Msys "mingw-w64-x86_64-gcc" "o g++ do MinGW"
-    }
-    $env:PATH = "$mingw;$env:PATH"
+# Use o mesmo MinGW de onde serao copiadas as DLLs, mesmo se houver outro no PATH.
+if (-not (Test-Path (Join-Path $mingw "g++.exe"))) {
+    Pacote-Msys "mingw-w64-x86_64-gcc mingw-w64-x86_64-clang" "o g++ do MinGW e a libclang"
 }
+$env:PATH = "$mingw;$env:PATH"
 if (-not $Seco -and -not (Get-Command g++ -ErrorAction SilentlyContinue)) {
     Erro "o g++ do MinGW continua faltando. Sem ele o LibRaw nao compila."
     Write-Host "   Instale o MSYS2 (https://www.msys2.org) e, no terminal dele:"
@@ -201,16 +216,43 @@ if ($Seco) {
     Write-Host "   [seco] baixaria $url para $Fonte"
 } else {
     New-Item -ItemType Directory -Force -Path $Casa | Out-Null
-    if (Test-Path $Fonte) { Remove-Item -Recurse -Force $Fonte }
-    $zip = Join-Path $env:TEMP "vintagelightbox-tauri.zip"
-    $aberto = Join-Path $env:TEMP "vintagelightbox-tauri"
-    Invoke-WebRequest $url -OutFile $zip
-    if (Test-Path $aberto) { Remove-Item -Recurse -Force $aberto }
-    Expand-Archive $zip -DestinationPath $aberto
-    # O zip do GitHub traz uma pasta so, com o nome do repositorio e da versao.
-    Move-Item (Get-ChildItem $aberto | Select-Object -First 1).FullName $Fonte
-    if (-not (Test-Path (Join-Path $Fonte "crates\app-tauri\Cargo.toml"))) {
-        throw "a versao $Versao nao tem o crates\app-tauri"
+    $temporario = Join-Path $Casa ("download-" + [guid]::NewGuid())
+    New-Item -ItemType Directory -Path $temporario | Out-Null
+    try {
+        $zip = Join-Path $temporario "fonte.zip"
+        $aberto = Join-Path $temporario "aberto"
+        Invoke-WebRequest -UseBasicParsing $url -OutFile $zip
+        Expand-Archive $zip -DestinationPath $aberto
+        $nova = (Get-ChildItem $aberto -Directory | Select-Object -First 1).FullName
+        if (-not $nova -or -not (Test-Path (Join-Path $nova "crates\app-tauri\Cargo.toml"))) {
+            throw "a versao $Versao nao tem o crates\app-tauri"
+        }
+        # O repositorio ainda nao versiona Cargo.lock. Reutilize a resolucao
+        # local; o Cargo a ajusta quando os manifestos mudam.
+        if (-not (Test-Path (Join-Path $nova "Cargo.lock")) -and (Test-Path (Join-Path $Fonte "Cargo.lock"))) {
+            Copy-Item (Join-Path $Fonte "Cargo.lock") (Join-Path $nova "Cargo.lock")
+        }
+        # O ZIP recria datas. Preserve a arvore anterior se o conteudo nao mudou,
+        # para o Cargo nao refazer a compilacao e o LTO sem necessidade.
+        function Assinatura-Fonte($pasta) {
+            if (-not (Test-Path $pasta)) { return }
+            Get-ChildItem $pasta -Recurse -File -Force | ForEach-Object {
+                $relativo = $_.FullName.Substring($pasta.Length).Replace('\', '/')
+                if ($relativo -notmatch '^/crates/app-tauri/(gen/|permissions/autogenerated/)') {
+                    $relativo + ':' + (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
+                }
+            } | Sort-Object
+        }
+        $antes = @(Assinatura-Fonte $Fonte)
+        $depois = @(Assinatura-Fonte $nova)
+        if ($antes.Count -gt 0 -and -not (Compare-Object $antes $depois)) {
+            Ok "codigo sem alteracoes; preservando o cache"
+        } else {
+            if (Test-Path $Fonte) { Remove-Item -Recurse -Force $Fonte }
+            Move-Item $nova $Fonte
+        }
+    } finally {
+        Remove-Item -LiteralPath $temporario -Recurse -Force
     }
     Ok "codigo em $Fonte"
 }
@@ -338,6 +380,8 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+[ -n "$REF" ] || { erro "a versão não pode ser vazia."; exit 1; }
+
 SISTEMA="$(uname -s)"
 case "$SISTEMA" in
   Darwin|Linux) : ;;
@@ -350,7 +394,7 @@ esac
 #    morre no fim por falta de biblioteca é o pior desfecho possível.
 diga "conferindo o que esta máquina tem"
 
-for f in curl tar; do
+for f in curl tar diff; do
   command -v "$f" >/dev/null 2>&1 || { erro "falta '$f'."; exit 1; }
 done
 
@@ -490,24 +534,51 @@ fi
 
 # ── Baixar o código ───────────────────────────────────────────────────────────
 #
-# O tarball, e não `git clone`: não é preciso ter git. `fonte-tauri/` é
-# descartável e some a cada execução.
+# Valide o download numa pasta temporária antes de substituir o código anterior.
 diga "baixando o código de $REF"
 case "$REF" in
   v[0-9]*) URL="$REPO/archive/refs/tags/$REF.tar.gz" ;;
   *)       URL="$REPO/archive/refs/heads/$REF.tar.gz" ;;
 esac
 correr mkdir -p "$CASA"
-correr rm -rf "$FONTE"
-correr mkdir -p "$FONTE"
 if [ "$SECO" -eq 1 ]; then
-  echo "   [seco] curl -fsSL $URL | tar -xz -C $FONTE --strip-components=1"
+  echo "   [seco] baixaria e validaria $URL antes de atualizar $FONTE"
 else
-  if ! curl -fsSL "$URL" | tar -xz -C "$FONTE" --strip-components=1; then
+  TEMPORARIO="$(mktemp -d "$CASA/download.XXXXXX")"
+  trap 'rm -rf "$TEMPORARIO"' 0
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  mkdir "$TEMPORARIO/fonte"
+  # Separe curl e tar: o sh nao oferece pipefail, e tar pode aceitar um arquivo
+  # completo mesmo quando o transporte termina com erro.
+  if ! curl --connect-timeout 30 --retry 3 -fsSL "$URL" -o "$TEMPORARIO/fonte.tar.gz"; then
     erro "não consegui baixar $URL"
     exit 1
   fi
-  [ -f "$FONTE/crates/app-tauri/Cargo.toml" ] || { erro "a versão $REF não tem o crates/app-tauri."; exit 1; }
+  tar -xz -f "$TEMPORARIO/fonte.tar.gz" -C "$TEMPORARIO/fonte" --strip-components=1
+  [ -f "$TEMPORARIO/fonte/crates/app-tauri/Cargo.toml" ] || { erro "a versão $REF não tem o crates/app-tauri."; exit 1; }
+  # Cargo.lock nao e versionado neste repositorio; preserve a resolucao local.
+  if [ ! -f "$TEMPORARIO/fonte/Cargo.lock" ] && [ -f "$FONTE/Cargo.lock" ]; then
+    cp "$FONTE/Cargo.lock" "$TEMPORARIO/fonte/Cargo.lock"
+  fi
+  # Compare sem os dois diretorios gerados pelo tauri-build. Copias temporarias
+  # permitem ignorar apenas estes caminhos, sem excluir fontes de mesmo nome.
+  for GERADO in crates/app-tauri/gen crates/app-tauri/permissions/autogenerated; do
+    if [ -d "$FONTE/$GERADO" ] && [ ! -e "$TEMPORARIO/fonte/$GERADO" ]; then
+      mkdir -p "$TEMPORARIO/fonte/$GERADO"
+      cp -pR "$FONTE/$GERADO/." "$TEMPORARIO/fonte/$GERADO/"
+    fi
+  done
+  if [ -d "$FONTE" ] && diff -qr "$FONTE" "$TEMPORARIO/fonte" >/dev/null 2>&1; then
+    ok "código sem alterações; preservando o cache"
+  else
+    # Permissoes geradas da versao anterior nao devem sobreviver a comandos removidos.
+    rm -rf "$TEMPORARIO/fonte/crates/app-tauri/gen" "$TEMPORARIO/fonte/crates/app-tauri/permissions/autogenerated"
+    rm -rf "$FONTE"
+    mv "$TEMPORARIO/fonte" "$FONTE"
+  fi
+  rm -rf "$TEMPORARIO"
+  trap - 0 INT TERM
   ok "código em $FONTE"
 fi
 

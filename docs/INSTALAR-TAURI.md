@@ -35,7 +35,8 @@ O instalador cuida sozinho de:
 - **Rust**, na versão `-gnu` (o Visual Studio não é preciso);
 - **MSYS2** com o compilador `g++` e a `libclang`.
 
-Tudo isso é instalado pelo **winget**. Se o Windows não tiver o winget (Windows 10 antigo ou LTSC),
+O **winget** instala WebView2 e MSYS2; o **rustup** instala Rust; o **pacman** do MSYS2 instala
+o compilador e a libclang. Se o Windows não tiver o winget (Windows 10 antigo ou LTSC),
 o instalador avisa e indica onde baixá-lo.
 
 ## Linux e macOS
@@ -66,7 +67,15 @@ O instalador cuida sozinho de:
 ## Atualizar
 
 **Faça de novo o mesmo passo da instalação:** dois cliques no Windows, ou o mesmo comando no Linux e
-no macOS. A partir da segunda vez leva poucos minutos.
+no macOS. O cache reduz o trabalho nas próximas execuções; o tempo depende da máquina, da rede
+e do que mudou. Os 10 a 30 minutos da primeira instalação são uma estimativa, não um tempo medido
+em todos os sistemas.
+
+O download é validado antes de substituir o código anterior. Se o conteúdo não mudou, o instalador
+preserva os arquivos e suas datas para evitar recompilações desnecessárias. Os arquivos gerados
+pelo Tauri não contam como alteração. Como o repositório ainda não versiona `Cargo.lock`, a resolução
+local das dependências é preservada quando disponível; instalações novas ainda podem resolver
+versões diferentes das dependências.
 
 ## Opções (para quem sabe o que está fazendo)
 
@@ -125,3 +134,16 @@ Apagar a pasta `.vintagelightbox` é seguro: a próxima atualização só demora
 
 Para conferir o que o sistema oferece (GPU, armazenamento, monitores), abra o app com
 `--diagnostico`. Aparece uma segunda janela com um relatório para copiar.
+
+## Validação do instalador
+
+Execute `python3 scripts/testar-instalador.py` na raiz do repositório. Os testes usam pastas
+temporárias e simulam rede, compilador e ferramentas do sistema: verificam download incompleto,
+arquivo corrompido, versão sem app, falha de compilação, reinstalação, cache, modo seco e atalhos.
+Com `pwsh` disponível, também verificam a sintaxe do PowerShell e a interrupção por erro de um
+executável. `sh -n` e `shellcheck -s sh` podem conferir o arquivo `.cmd` diretamente.
+
+Esses testes não substituem instalar e abrir o app em máquinas reais. O duplo clique do Windows,
+o PowerShell 5.1, o winget e a instalação das bibliotecas do Linux precisam dessa conferência.
+A detecção do WebView2 segue a [documentação da Microsoft](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/distribution),
+e a atualização completa do MSYS2 segue as [instruções do projeto](https://www.msys2.org/docs/updating/).
