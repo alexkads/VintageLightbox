@@ -53,6 +53,7 @@ mod conta;
 mod enquadrar;
 mod galeria;
 mod lote;
+mod nova_sessao;
 mod revelacao;
 mod segundo_plano;
 mod sessoes;

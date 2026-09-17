@@ -10,6 +10,8 @@
 pub mod altura_da_tira;
 pub mod arquivos;
 pub mod detalhe;
+/// O assistente de sete etapas da nova sessão (a rota `nova` do site).
+pub mod nova;
 /// A política de retenção do pós-venda (a rota `configuracoes` do site).
 pub mod retencao;
 pub mod tela;

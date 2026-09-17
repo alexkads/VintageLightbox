@@ -60,7 +60,8 @@ use crate::revelacao::tela::{PedidoDaRevelacao, Revelacao};
 use crate::sessoes::arquivos::SeletorDeFotos;
 use crate::sessoes::detalhe::{Detalhe, FotoARevelar, Pedido as DetalhePedido};
 use crate::sessoes::retencao::{PedidoDaRetencao, Retencao};
-use crate::sessoes::tela::{Escolhida, Sessoes};
+use crate::sessoes::nova::tela::{NovaSessao, PedidoDaNova, PortasDaNova};
+use crate::sessoes::tela::{Escolhida, NovaPedida, Sessoes};
 use crate::tema;
 
 /// As portas para o mundo de fora, num pacote só.
@@ -298,6 +299,8 @@ pub enum Tela {
     Caixa,
     /// A política de retenção — `/dashboard/sessoes-fotograficas/configuracoes`.
     Retencao,
+    /// O assistente de sete etapas — `/dashboard/sessoes-fotograficas/nova`.
+    NovaSessao,
 }
 
 pub struct Aplicativo {
@@ -332,6 +335,9 @@ pub struct Aplicativo {
     /// A retenção do pós-venda.
     pub(crate) retencao: Entity<Retencao>,
     _pedido_da_retencao: gpui::Subscription,
+    /// O assistente da nova sessão.
+    pub(crate) nova_sessao: Entity<NovaSessao>,
+    _pedidos_da_nova: Vec<gpui::Subscription>,
     // ── A moldura (`painel.rs`) ───────────────────────────────────────────
     /// O menu lateral aberto (256 px) ou recolhido em ícones. Nasce recolhido,
     /// como no app Tauri (`defaultOpen={false}`).
@@ -544,6 +550,19 @@ impl Aplicativo {
         // catálogo, com o mesmo caminho: o que muda é a porta de entrada, e não
         // o destino.
         let importador_do_detalhe = portas.importador.clone();
+        // 🧭 O assistente da nova sessão importa para o mesmo catálogo, aplica
+        // a receita pelo mesmo gravador e lê as mesmas prévias.
+        let portas_da_nova = PortasDaNova {
+            publicador: portas.publicador.clone(),
+            seletor_de_fotos: portas.seletor_de_fotos.clone(),
+            importador: portas.importador.clone(),
+            acervo: portas.acervo.clone(),
+            gravador: portas.gravador.clone(),
+            previews: previews.clone(),
+            explorador: portas.explorador.clone(),
+            seletor_de_pasta: portas.seletor.clone(),
+            presets_do_sistema: presets.iter().filter(|p| p.is_system).cloned().collect(),
+        };
         let previews_das_configuracoes = previews.clone();
         // O mesmo seletor nativo da importação: escolher pasta é interação com
         // o sistema, e dois seletores seriam duas janelas do SO para a mesma
@@ -693,6 +712,23 @@ impl Aplicativo {
                 }
             },
         );
+        let nova_sessao = cx.new(|cx| NovaSessao::nova(portas_da_nova, window, cx));
+        let pedidos_da_nova = vec![
+            cx.subscribe_in(
+                &nova_sessao,
+                window,
+                |raiz, _tela, pedido: &PedidoDaNova, window, cx| {
+                    raiz.atender_a_nova_sessao(pedido.clone(), window, cx);
+                },
+            ),
+            cx.subscribe_in(
+                &sessoes,
+                window,
+                |raiz, _tela, _pedido: &NovaPedida, window, cx| {
+                    raiz.ir_para(Tela::NovaSessao, window, cx);
+                },
+            ),
+        ];
         let retencao = cx.new(|cx| Retencao::nova(publicador_da_retencao, window, cx));
         let pedido_da_retencao = cx.subscribe_in(
             &retencao,
@@ -761,6 +797,8 @@ impl Aplicativo {
             veio_do_caixa: false,
             retencao,
             _pedido_da_retencao: pedido_da_retencao,
+            nova_sessao,
+            _pedidos_da_nova: pedidos_da_nova,
             menu_aberto: false,
             menu_da_conta: false,
             conta: None,
@@ -928,6 +966,26 @@ impl Aplicativo {
                 }
             }
         }));
+    }
+
+    /// O que o assistente da nova sessão pede.
+    fn atender_a_nova_sessao(
+        &mut self,
+        pedido: PedidoDaNova,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match pedido {
+            PedidoDaNova::Voltar => self.ir_para(Tela::Sessoes, window, cx),
+            PedidoDaNova::Criada(id) => {
+                // A lista também precisa da sessão nova quando o operador voltar.
+                self.sessoes.update(cx, |tela, cx| tela.recarregar(cx));
+                self.entrar_na_sessao(id, cx);
+                window.focus(&self.foco);
+            }
+            PedidoDaNova::CatalogoMudou => self.reler_o_acervo(cx),
+            PedidoDaNova::AlternarMenu => self.alternar_menu_lateral(cx),
+        }
     }
 
     /// Entrega à tela da sessão as fotos **deste ensaio que só existem aqui**.
@@ -2792,6 +2850,8 @@ impl Aplicativo {
             .update(cx, |tela, _cx| tela.definir_sessao(sessao.clone()));
         self.retencao
             .update(cx, |tela, _cx| tela.definir_sessao(sessao.clone()));
+        self.nova_sessao
+            .update(cx, |tela, _cx| tela.definir_sessao(sessao.clone()));
         // 🔑 **Entrou: a primeira tela é a lista de sessões.** Na web é de
         // onde tudo parte, e abrir no catálogo global foi o que fez o app
         // parecer "aberto e estranho" para quem vinha de lá.
@@ -2958,7 +3018,7 @@ impl Aplicativo {
             // Na sessão as setas andam na grade dela — é o que a legenda da
             // tira promete.
             Tela::Sessao => self.detalhe.update(cx, |tela, cx| tela.andar(passo, cx)),
-            Tela::Impressao | Tela::Sessoes | Tela::Caixa | Tela::Retencao => {}
+            Tela::Impressao | Tela::Sessoes | Tela::Caixa | Tela::Retencao | Tela::NovaSessao => {}
         }
     }
 
@@ -2984,7 +3044,12 @@ impl Aplicativo {
                 self.detalhe
                     .update(cx, |tela, cx| tela.andar_linha(passo, colunas, cx))
             }
-            Tela::Revelacao | Tela::Impressao | Tela::Sessoes | Tela::Caixa | Tela::Retencao => {}
+            Tela::Revelacao
+            | Tela::Impressao
+            | Tela::Sessoes
+            | Tela::Caixa
+            | Tela::Retencao
+            | Tela::NovaSessao => {}
         }
     }
 
@@ -3018,7 +3083,9 @@ impl Aplicativo {
         match self.tela {
             Tela::Revelacao | Tela::Impressao => self.voltar_para_biblioteca(window, cx),
             Tela::Biblioteca => {}
-            Tela::Sessao | Tela::Sessoes | Tela::Caixa | Tela::Retencao => cx.propagate(),
+            Tela::Sessao | Tela::Sessoes | Tela::Caixa | Tela::Retencao | Tela::NovaSessao => {
+                cx.propagate()
+            }
         }
     }
 
@@ -3493,6 +3560,7 @@ impl Render for Aplicativo {
                             Tela::Sessao => self.detalhe.clone().into_any_element(),
                             Tela::Caixa => self.caixa.clone().into_any_element(),
                             Tela::Retencao => self.retencao.clone().into_any_element(),
+                            Tela::NovaSessao => self.nova_sessao.clone().into_any_element(),
                         }),
                     ),
             )

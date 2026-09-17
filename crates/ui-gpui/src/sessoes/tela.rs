@@ -46,6 +46,12 @@ pub struct Escolhida(pub String);
 
 impl EventEmitter<Escolhida> for Sessoes {}
 
+/// "Nova sessão": a raiz abre o assistente de sete etapas, como a rota
+/// `/nova` do site.
+pub struct NovaPedida;
+
+impl EventEmitter<NovaPedida> for Sessoes {}
+
 pub struct Sessoes {
     publicador: Arc<dyn Publicador>,
     /// `None` antes de a porta responder: a tela existe, e diz que precisa de
@@ -617,9 +623,7 @@ impl Sessoes {
                     .child(Icon::new(Icone::Plus).size(px(16.)))
                     .child("Nova sessão")
                     .when(!sem_conta, |b| {
-                        b.on_click(
-                            cx.listener(|tela, _ev, window, cx| tela.comecar_nova(window, cx)),
-                        )
+                        b.on_click(cx.listener(|_tela, _ev, _window, cx| cx.emit(NovaPedida)))
                     }),
                 sem_conta,
             ))

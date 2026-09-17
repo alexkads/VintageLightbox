@@ -109,6 +109,13 @@ pub enum Icone {
     X,
     ZoomIn,
     ZoomOut,
+    CalendarCheck,
+    CircleCheck,
+    Handshake,
+    ImagePlus,
+    ShoppingBag,
+    Ticket,
+    MonitorSmartphone,
 }
 
 impl Icone {
@@ -173,6 +180,13 @@ impl Icone {
         Icone::X,
         Icone::ZoomIn,
         Icone::ZoomOut,
+        Icone::CalendarCheck,
+        Icone::CircleCheck,
+        Icone::Handshake,
+        Icone::ImagePlus,
+        Icone::ShoppingBag,
+        Icone::Ticket,
+        Icone::MonitorSmartphone,
     ];
 
     fn arquivo(self) -> &'static str {
@@ -237,6 +251,13 @@ impl Icone {
             Icone::X => "x",
             Icone::ZoomIn => "zoom-in",
             Icone::ZoomOut => "zoom-out",
+            Icone::CalendarCheck => "calendar-check",
+            Icone::CircleCheck => "circle-check",
+            Icone::Handshake => "handshake",
+            Icone::ImagePlus => "image-plus",
+            Icone::ShoppingBag => "shopping-bag",
+            Icone::Ticket => "ticket",
+            Icone::MonitorSmartphone => "monitor-smartphone",
         }
     }
 }

@@ -114,7 +114,7 @@ impl Tela {
 
     /// Se a tela tem a faixa do cabeçalho. A galeria tem a barra dela.
     pub(super) fn tem_cabecalho(self) -> bool {
-        !matches!(self, Tela::Revelacao | Tela::Sessao)
+        !matches!(self, Tela::Revelacao | Tela::Sessao | Tela::NovaSessao)
     }
 }
 
@@ -134,6 +134,7 @@ impl Aplicativo {
             Tela::Sessoes => self.sessoes.update(cx, |t, cx| t.recarregar(cx)),
             Tela::Caixa => self.caixa.update(cx, |t, cx| t.abrir(cx)),
             Tela::Retencao => self.retencao.update(cx, |t, cx| t.abrir(window, cx)),
+            Tela::NovaSessao => self.nova_sessao.update(cx, |t, cx| t.abrir(window, cx)),
             _ => {}
         }
         self.tela = tela;

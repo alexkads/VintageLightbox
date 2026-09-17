@@ -85,6 +85,7 @@ impl Aplicativo {
                 "galeria" if self.sessao_aberta.is_some() => self.ir_para(Tela::Sessao, window, cx),
                 "caixa" => self.ir_para(Tela::Caixa, window, cx),
                 "retencao" => self.ir_para(Tela::Retencao, window, cx),
+                "nova" => self.ir_para(Tela::NovaSessao, window, cx),
                 outro => eprintln!("[roteiro] não sei ir para '{outro}'"),
             },
             Passo::AbrirSessao(posicao) => match self.sessoes.read(cx).id_na_posicao(*posicao) {
@@ -148,6 +149,41 @@ impl Aplicativo {
                 let gesto = gesto.clone();
                 self.revelacao.update(cx, |tela, cx| {
                     tela.seguir_o_roteiro_das_predefinicoes(&gesto, window, cx)
+                });
+            }
+            Passo::Nova(gesto) => {
+                use crate::sessoes::nova::tela::{Confirmacao, TipoDeBusca};
+                let partes: Vec<&str> = gesto.split_whitespace().collect();
+                self.nova_sessao.update(cx, |tela, cx| match partes[..] {
+                    ["etapa", n] => tela.ir(n.parse().unwrap_or(1), window, cx),
+                    ["buscar", qual] => {
+                        let tipo = match qual {
+                            "voucher" => TipoDeBusca::Voucher,
+                            "compra" => TipoDeBusca::Compra,
+                            "parceiro" => TipoDeBusca::Parceiro,
+                            _ => TipoDeBusca::Agendamento,
+                        };
+                        tela.abrir_busca(tipo, window, cx);
+                    }
+                    ["descartar"] => tela.pedir_confirmacao(Confirmacao::Descartar, cx),
+                    ["importar", pasta] => {
+                        let fotos = crate::sessoes::arquivos::so_as_fotos(&[pasta.into()]);
+                        tela.importar_arquivos(fotos, window, cx);
+                    }
+                    ["conheceu", valor] => tela.escolher_como_conheceu(valor, window, cx),
+                    ["preset", n] => {
+                        let n: isize = n.parse().unwrap_or(0);
+                        tela.mover_foco_do_preset(-10_000, cx);
+                        tela.mover_foco_do_preset(n, cx);
+                        tela.marcar_preset_em_foco(cx);
+                    }
+                    ["proporcao", valor] => {
+                        let valor = (valor != "sem").then(|| valor.to_string());
+                        tela.escolher_proporcao(valor, cx);
+                    }
+                    ["criar"] => tela.criar(window, cx),
+                    ["retomar"] => tela.retomar(window, cx),
+                    _ => eprintln!("[roteiro] gesto desconhecido da nova sessão: '{gesto}'"),
                 });
             }
             Passo::Janela(gesto) => match gesto.split_whitespace().collect::<Vec<_>>()[..] {

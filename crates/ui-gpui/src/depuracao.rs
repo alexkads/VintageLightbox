@@ -23,7 +23,7 @@ pub enum Passo {
     Esperar(Duration),
     /// `foto 01-lista` — letras, números, `-` e `_`.
     Foto(String),
-    /// `ir sessoes` · `ir caixa` · `ir retencao` · `ir galeria`
+    /// `ir sessoes` · `ir caixa` · `ir retencao` · `ir galeria` · `ir nova`
     Ir(String),
     /// `abrir_sessao 1` — a N-ésima da lista, contando de 1.
     AbrirSessao(usize),
@@ -71,6 +71,11 @@ pub enum Passo {
     /// vermelho de verdade; `abrir` é o "Abrir o VintageLightbox"; `fingir_envio`
     /// só mexe na conta de pedidos pendentes, sem mandar nada ao site.
     Janela(String),
+    /// `nova etapa 3` · `nova buscar agendamento|voucher|compra|parceiro` ·
+    /// `nova descartar` · `nova importar <pasta>` · `nova conheceu parceiro` ·
+    /// `nova preset <n>` · `nova proporcao 3:2` · `nova criar` — o assistente
+    /// da nova sessão, para fotografar.
+    Nova(String),
     /// `fim` — fecha o app.
     Fim,
 }
@@ -125,6 +130,7 @@ pub fn ler_roteiro(texto: &str) -> Result<Vec<Passo>, String> {
             "predefinicoes" => Passo::Predefinicoes(argumentos.join(" ")),
             "tira" => Passo::Tira(argumentos.join(" ")),
             "janela" => Passo::Janela(argumentos.join(" ")),
+            "nova" => Passo::Nova(argumentos.join(" ")),
             "fim" => Passo::Fim,
             outro => return Err(format!("linha {}: passo desconhecido: '{outro}'", i + 1)),
         };

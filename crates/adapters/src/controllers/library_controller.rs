@@ -137,4 +137,46 @@ impl LibraryController {
 
         Ok(view_models)
     }
+
+    /// Passa as fotos de uma sessão para outra — o rascunho da nova sessão
+    /// (`rascunho:<uuid>`) virando a sessão que o site acabou de criar.
+    ///
+    /// Devolve quantas mudaram. Refazer depois de uma falha no meio só mexe
+    /// nas que ficaram para trás: as que já mudaram não são mais "de".
+    pub async fn trocar_sessao(&self, de: &str, para: &str) -> Result<usize, String> {
+        let fotos = self
+            .photo_repository
+            .find_all()
+            .await
+            .map_err(|e| e.to_string())?;
+        let mut trocadas = 0;
+        for mut foto in fotos.into_iter().filter(|f| f.sessao() == Some(de)) {
+            foto.definir_sessao(Some(para.to_string()));
+            self.photo_repository
+                .update(&foto)
+                .await
+                .map_err(|e| e.to_string())?;
+            trocadas += 1;
+        }
+        Ok(trocadas)
+    }
+
+    /// Tira do catálogo as fotos de uma sessão e devolve os caminhos que elas
+    /// ocupavam no disco — quem chama decide o que fazer com os arquivos.
+    pub async fn apagar_da_sessao(&self, sessao: &str) -> Result<Vec<String>, String> {
+        let fotos = self
+            .photo_repository
+            .find_all()
+            .await
+            .map_err(|e| e.to_string())?;
+        let mut caminhos = Vec::new();
+        for foto in fotos.into_iter().filter(|f| f.sessao() == Some(sessao)) {
+            self.photo_repository
+                .delete(&foto.id())
+                .await
+                .map_err(|e| e.to_string())?;
+            caminhos.push(foto.file_path().to_string());
+        }
+        Ok(caminhos)
+    }
 }

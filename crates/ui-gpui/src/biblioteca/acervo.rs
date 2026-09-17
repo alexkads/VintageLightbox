@@ -34,6 +34,20 @@ pub trait Acervo: Send + Sync + 'static {
     /// pediu. É a mesma decisão da porta de publicação de eventos: anunciar é
     /// acessório, e um `?` faria a falha do acessório derrubar o principal.
     fn recarregar(&self, canal: Sender<Vec<PhotoViewModel>>);
+
+    /// Passa as fotos da sessão `de` para a sessão `para` — o rascunho da nova
+    /// sessão virando a sessão criada no site. Responde quantas mudaram.
+    fn trocar_sessao(&self, de: String, para: String, canal: Sender<Result<usize, String>>) {
+        let _ = (de, para);
+        let _ = canal.send(Err("este acervo não troca sessão".into()));
+    }
+
+    /// Tira do catálogo **e do disco** as fotos de uma sessão — o "Descartar"
+    /// do rascunho. Os arquivos são as cópias da importação, nunca o cartão.
+    fn apagar_da_sessao(&self, sessao: String, canal: Sender<Result<usize, String>>) {
+        let _ = sessao;
+        let _ = canal.send(Err("este acervo não apaga".into()));
+    }
 }
 
 /// O acervo de verdade: o `LibraryController` numa `Handle` do tokio.
@@ -64,6 +78,29 @@ impl Acervo for AcervoDoBanco {
             }
         });
     }
+
+    fn trocar_sessao(&self, de: String, para: String, canal: Sender<Result<usize, String>>) {
+        let biblioteca = self.biblioteca.clone();
+        self.tokio.spawn(async move {
+            let _ = canal.send(biblioteca.trocar_sessao(&de, &para).await);
+        });
+    }
+
+    fn apagar_da_sessao(&self, sessao: String, canal: Sender<Result<usize, String>>) {
+        let biblioteca = self.biblioteca.clone();
+        self.tokio.spawn(async move {
+            let resultado = biblioteca.apagar_da_sessao(&sessao).await.map(|caminhos| {
+                // 🔑 Só as cópias que a importação fez para a pasta do ensaio: o
+                // arquivo de origem (cartão, pasta do Lightroom) nunca é deste
+                // catálogo, porque a sessão importa sempre copiando.
+                for caminho in &caminhos {
+                    let _ = std::fs::remove_file(caminho);
+                }
+                caminhos.len()
+            });
+            let _ = canal.send(resultado);
+        });
+    }
 }
 
 /// O acervo dos testes: responde o que lhe mandarem, e conta quantas vezes.
@@ -78,11 +115,43 @@ pub mod mentira {
         pub pedidos: Mutex<usize>,
     }
 
+    impl AcervoDeMentira {
+        fn mudar_sessao(&self, de: &str, para: Option<&str>) -> usize {
+            let mut fotos = self.fotos.lock().expect("as fotos");
+            let antes = fotos.len();
+            let mut trocadas = 0;
+            match para {
+                Some(para) => {
+                    for foto in fotos
+                        .iter_mut()
+                        .filter(|f| f.sessao_id.as_deref() == Some(de))
+                    {
+                        foto.sessao_id = Some(para.to_string());
+                        trocadas += 1;
+                    }
+                }
+                None => {
+                    fotos.retain(|f| f.sessao_id.as_deref() != Some(de));
+                    trocadas = antes - fotos.len();
+                }
+            }
+            trocadas
+        }
+    }
+
     impl Acervo for AcervoDeMentira {
         fn recarregar(&self, canal: Sender<Vec<PhotoViewModel>>) {
             *self.pedidos.lock().expect("os pedidos") += 1;
             let fotos = self.fotos.lock().expect("as fotos").clone();
             let _ = canal.send(fotos);
+        }
+
+        fn trocar_sessao(&self, de: String, para: String, canal: Sender<Result<usize, String>>) {
+            let _ = canal.send(Ok(self.mudar_sessao(&de, Some(&para))));
+        }
+
+        fn apagar_da_sessao(&self, sessao: String, canal: Sender<Result<usize, String>>) {
+            let _ = canal.send(Ok(self.mudar_sessao(&sessao, None)));
         }
     }
 }
