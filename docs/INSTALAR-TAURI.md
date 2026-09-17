@@ -1,12 +1,17 @@
 # Instalar o VintageLightbox (Tauri)
 
-O **VintageLightbox (Tauri)** é a janela do balcão que abre o pós-venda da RecordarFotos. Ela também
-faz o que o navegador não consegue:
+O **VintageLightbox (Tauri)** é o app do balcão para o pós-venda da RecordarFotos. As telas são as
+do painel, **empacotadas dentro do app** (ele não abre o site), e as fotos importadas ficam num
+catálogo no próprio computador até subirem. Ele também faz o que o navegador não consegue:
 
 - abrir **RAW** (CR2, NEF, ARW, DNG…);
 - importar um **cartão da câmera** inteiro;
 - gravar a exportação numa **pasta fixa**;
-- mostrar a **tela do cliente** no segundo monitor.
+- mostrar a **tela do cliente** no segundo monitor;
+- continuar enviando as fotos **na bandeja**, com a janela minimizada ou fechada.
+
+Instalado, ele aparece como **VintageLightbox (Tauri)** (o nome do arquivo, para não se confundir
+com o VintageLightbox antigo), e a barra de menus e o Dock mostram **VintageLightbox**.
 
 Não há instalador pronto. **Cada máquina compila o próprio app**, com **um arquivo só**, que funciona
 em Windows, Linux e macOS e instala sozinho tudo o que falta:
@@ -106,7 +111,7 @@ Apagar a pasta `.vintagelightbox` é seguro: a próxima atualização só demora
 | `não reconheci o gerenciador de pacotes` (Linux) | Instalar à mão os pacotes listados na mensagem e repetir |
 | `o g++ do MinGW continua faltando` (Windows) | Instalar o [MSYS2](https://www.msys2.org) e, no terminal dele, rodar `pacman -S mingw-w64-x86_64-gcc`. Depois repetir |
 | A compilação para por falta de espaço | Liberar alguns GiB e repetir |
-| A janela do app abre em branco | Conferir a internet: o app abre o site da RecordarFotos |
+| A lista aparece vazia ou dá erro ao entrar | Conferir a internet: as telas vêm do app, mas os dados vêm da API da RecordarFotos. As fotos já importadas continuam no catálogo, em **Imagens › VintageLightbox › Catalogo Tauri** |
 
 Para conferir o que o sistema oferece (GPU, armazenamento, monitores), abra o app com
 `--diagnostico`. Aparece uma segunda janela com um relatório para copiar.

@@ -180,7 +180,8 @@ VintageLightbox-Rust/
 
 ## 🖥️ VintageLightbox (Tauri) — um arquivo instala tudo
 
-A janela do balcão que abre o pós-venda da RecordarFotos, com RAW, cartão da câmera, pasta de saída
+O app do balcão para o pós-venda da RecordarFotos: as telas do painel empacotadas (sem abrir o
+site), catálogo local, envio em segundo plano pela bandeja, RAW, cartão da câmera, pasta de saída
 fixa e tela do cliente no segundo monitor. **Cada máquina compila o próprio app**, com um arquivo só,
 que instala sozinho tudo o que falta:
 
