@@ -18,6 +18,15 @@ default-run = "ui-gpui"
 # `git revert` ser um comando. Enquanto isso ele é o rollback e a referência de
 # paridade — abandonar a migração precisa custar zero.
 
+[features]
+# 🔑 **Os shaders Metal compilados quando o app abre, e não no build.** Sem
+# isto o build do macOS chama o `metal` do Xcode, que não vem nas Command Line
+# Tools. O instalador (`scripts/instalar-vintagelightbox-gpui.cmd`) liga esta
+# feature para não depender do Xcode (dono, 2026-09-17). Quem compila é o
+# Metal do próprio macOS, na abertura. O pacote do `make empacotar` continua
+# com os shaders prontos.
+shaders-em-tempo-de-execucao = ["gpui/runtime_shaders"]
+
 [dependencies]
 gpui = "0.2.2"
 gpui-component = "0.5.1"

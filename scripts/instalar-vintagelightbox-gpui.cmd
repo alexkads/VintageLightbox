@@ -342,9 +342,9 @@ Write-Host "   reaproveita o cache em $env:CARGO_TARGET_DIR."
 #    dois está aberto), com o identificador do `.dmg`. Um `VintageLightbox.app`
 #    antigo, do `.dmg`, não é apagado: some quando o dono o tirar à mão.
 #
-# 🚨 **No macOS ele exige o Xcode inteiro**, e não só as Command Line Tools: o
-#    GPUI compila os shaders Metal na build, e o compilador `metal` só vem no
-#    Xcode (a partir do 26, como componente à parte, que este script baixa).
+# 🔑 **No macOS bastam as Command Line Tools**, como no Tauri: os shaders Metal
+#    são compilados pelo próprio macOS quando o app abre (feature
+#    `shaders-em-tempo-de-execucao`), e o Xcode não é preciso.
 #
 # ⚠️ **Custa tempo e disco.** A primeira compilação leva de 15 a 40 minutos e usa
 #    alguns GiB em `~/.vintagelightbox/target-gpui`. As seguintes reaproveitam.

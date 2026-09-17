@@ -192,7 +192,7 @@ e instala sozinho o que falta. Os dois apps convivem na mesma máquina.
 | | **VintageLightbox (Tauri)** — o do balcão | **VintageLightbox (Zed GPUI)** — o editor nativo |
 |---|---|---|
 | **Windows** (baixe e dê dois cliques) | **[instalar-vintagelightbox-tauri.cmd](https://github.com/alexkads/VintageLightbox/releases/download/instalador-tauri/instalar-vintagelightbox-tauri.cmd)** | **[instalar-vintagelightbox-gpui.cmd](https://github.com/alexkads/VintageLightbox/releases/download/instalador-tauri/instalar-vintagelightbox-gpui.cmd)** |
-| **No macOS precisa de** | Command Line Tools | Xcode inteiro (o compilador Metal) |
+| **No macOS precisa de** | Command Line Tools | Command Line Tools (os shaders Metal são compilados na abertura) |
 | **Primeira vez** | 10 a 30 minutos | 15 a 40 minutos |
 | **Guia** | [docs/INSTALAR-TAURI.md](docs/INSTALAR-TAURI.md) | [docs/INSTALAR-GPUI.md](docs/INSTALAR-GPUI.md) |
 

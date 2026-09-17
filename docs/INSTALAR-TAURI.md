@@ -15,7 +15,7 @@ com o VintageLightbox (Zed GPUI), o editor nativo), e a barra de menus e o Dock 
 
 > **Há dois apps, e dois instaladores.** Este guia é do app do balcão
 > (`scripts/instalar-vintagelightbox-tauri.cmd`). O editor nativo, que segue o mesmo desenho, tem o
-> próprio arquivo (`scripts/instalar-vintagelightbox-gpui.cmd`) e, no macOS, pede o Xcode inteiro. O
+> próprio arquivo (`scripts/instalar-vintagelightbox-gpui.cmd`), que também não pede o Xcode. O
 > guia dele é o [INSTALAR-GPUI.md](INSTALAR-GPUI.md), e está também na
 > [página do projeto](https://alexkads.github.io/VintageLightbox/#gpui). Os dois convivem na mesma
 > máquina.

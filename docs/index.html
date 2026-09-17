@@ -86,7 +86,7 @@
       <tr><td>As telas</td><td>As do painel da RecordarFotos, empacotadas dentro do app</td><td>Desenhadas em Rust (GPUI), com a mesma cara do app Tauri</td></tr>
       <tr><td>Só dele</td><td>Bandeja com envio em segundo plano, catálogo próprio, assistente de nova sessão</td><td>Catálogo local do editor antigo e o motor de revelação nativo</td></tr>
       <tr><td>Instalador</td><td><code>instalar-vintagelightbox-tauri.cmd</code></td><td><code>instalar-vintagelightbox-gpui.cmd</code></td></tr>
-      <tr><td>No macOS precisa de</td><td>Só as Command Line Tools</td><td>O <strong>Xcode inteiro</strong> (o compilador Metal)</td></tr>
+      <tr><td>No macOS precisa de</td><td>Só as Command Line Tools</td><td>Só as Command Line Tools</td></tr>
       <tr><td>Primeira compilação</td><td>10 a 30 minutos</td><td>15 a 40 minutos</td></tr>
       <tr><td>Nome instalado</td><td>VintageLightbox (Tauri)</td><td>VintageLightbox (Zed GPUI)</td></tr>
     </tbody>
@@ -159,8 +159,8 @@
           segurança.</li>
     </ol>
     <p>Precisa só das <strong>Command Line Tools</strong>; o Rust o instalador põe sozinho, na sua pasta
-       pessoal e sem senha. ⚠️ Não use o instalador do <a href="#gpui">GPUI</a> por engano: aquele pede o Xcode
-       inteiro e é outro app.</p>
+       pessoal e sem senha. ⚠️ Não use o instalador do <a href="#gpui">GPUI</a> por engano: aquele é
+       outro app.</p>
   </div>
 
   <div class="fonte" id="linux">
@@ -274,7 +274,7 @@ sh instalar.cmd</code></pre>
   <table>
     <thead><tr><th>O que aparece</th><th>O que fazer</th></tr></thead>
     <tbody>
-      <tr><td><code>falta o compilador Metal</code> (macOS)</td><td>Esse é o instalador do <strong>GPUI</strong>. Para o app do balcão, use a linha do <a href="#macos">macOS</a> acima.</td></tr>
+      <tr><td><code>falta o compilador Metal</code> (macOS, versão antiga do instalador)</td><td>É uma cópia antiga do instalador do <strong>GPUI</strong>, de quando ele pedia o Xcode. Cole de novo a linha do <a href="#gpui-macos">GPUI</a>, que não precisa dele; para o app do balcão, use a linha do <a href="#macos">macOS</a> acima.</td></tr>
       <tr><td><code>faltam as Command Line Tools do Xcode</code> (macOS)</td><td>Rode <code>xcode-select --install</code>, espere terminar e repita a instalação.</td></tr>
       <tr><td><code>command not found: curl</code> (Linux)</td><td>Instale o curl (<code>sudo apt install curl</code> ou <code>sudo dnf install curl</code>) e repita.</td></tr>
       <tr><td><code>este Linux é imutável</code> (Fedora Silverblue, Kinoite, Bazzite)</td><td>Rode o comando <code>sudo rpm-ostree install …</code> que a mensagem mostra, reinicie o computador e repita.</td></tr>
@@ -363,16 +363,17 @@ sh instalar.cmd</code></pre>
   <div class="fonte" id="gpui-macos">
     <h3>macOS</h3>
     <ol>
-      <li>Instale o <a href="https://apps.apple.com/app/xcode/id497799835">Xcode</a> pela App Store
-          (grátis) e abra-o uma vez.</li>
       <li>No <strong>Terminal</strong>, cole esta linha e aperte <kbd>Enter</kbd>:
         <pre class="quebra"><code>curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox-gpui.cmd | sh</code></pre></li>
-      <li>Quando pedir, digite a senha do Mac: ela aponta as ferramentas para o Xcode, aceita a
-          licença e baixa o componente <strong>Metal</strong>, sozinho.</li>
+      <li>Se ele disser que <strong>faltam as Command Line Tools</strong>, rode
+          <code>xcode-select --install</code>, clique em <strong>Instalar</strong>, espere terminar e
+          cole a linha de novo.</li>
       <li>Espere aparecer <strong>“instalado em /Applications”</strong> e abra
           <strong>VintageLightbox</strong> pelo Launchpad. Ele abre no primeiro clique, sem aviso de
           segurança.</li>
     </ol>
+    <p><strong>Não precisa do Xcode.</strong> Os shaders do GPUI são compilados pelo próprio macOS
+       quando o app abre.</p>
     <p>Ele instala o <code>VintageLightbox (Zed GPUI).app</code>, com o identificador dos pacotes
        prontos: as permissões já concedidas continuam valendo. Um <code>VintageLightbox.app</code>
        antigo não é apagado.</p>
@@ -477,8 +478,7 @@ sh instalar.cmd</code></pre>
   <table>
     <thead><tr><th>O que aparece</th><th>O que fazer</th></tr></thead>
     <tbody>
-      <tr><td><code>falta o Xcode</code> (macOS)</td><td>Instale o Xcode pela App Store, abra-o uma vez e repita. Se queria o app do balcão, use o <a href="#macos">instalador do Tauri</a>, que não precisa dele.</td></tr>
-      <tr><td><code>o compilador Metal continua faltando</code> (macOS)</td><td>Rode, um de cada vez: <code>sudo xcode-select -s /Applications/Xcode.app/Contents/Developer</code>, <code>sudo xcodebuild -license accept</code> e <code>xcodebuild -downloadComponent MetalToolchain</code>. Depois repita.</td></tr>
+      <tr><td><code>faltam as Command Line Tools do Xcode</code> (macOS)</td><td>Rode <code>xcode-select --install</code>, espere terminar e repita. O Xcode inteiro não é preciso.</td></tr>
       <tr><td><code>o fxc.exe continua faltando</code> (Windows)</td><td>Instale o <a href="https://developer.microsoft.com/windows/downloads/windows-sdk/">Windows SDK</a>, ou defina <code>GPUI_FXC_PATH</code> com o caminho do <code>fxc.exe</code>, e repita.</td></tr>
       <tr><td><code>o windres do MinGW continua faltando</code> (Windows)</td><td>No terminal do MSYS2, rode <code>pacman -S mingw-w64-x86_64-binutils</code>. Depois repita.</td></tr>
       <tr><td>A janela não abre (Linux)</td><td>Falta um driver Vulkan: instale <code>mesa-vulkan-drivers</code>. Com placa NVIDIA no Fedora, instale o driver da NVIDIA pelo RPM Fusion (<code>akmod-nvidia</code>) e reinicie.</td></tr>
@@ -538,8 +538,8 @@ sh instalar.cmd</code></pre>
   <p class="texto" id="compilar">
     O script antigo só para macOS, <code>curl -fsSL https://alexkads.github.io/VintageLightbox/instalar.sh | sh</code>,
     continua no ar e instala o mesmo <code>VintageLightbox.app</code>, mas pede que o Xcode e o
-    componente Metal já estejam prontos. O <a href="#gpui-macos">instalador do GPUI</a> faz essa parte
-    sozinho.
+    componente Metal já estejam prontos. O <a href="#gpui-macos">instalador do GPUI</a> não precisa
+    de nenhum dos dois.
   </p>
 
   <footer>

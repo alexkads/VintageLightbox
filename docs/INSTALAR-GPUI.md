@@ -19,8 +19,8 @@ O título da janela e a barra de menus também dizem **VintageLightbox (Zed GPUI
 app diz **VintageLightbox (Tauri)**.
 
 Não há instalador pronto. **Cada máquina compila o próprio app**, com **um arquivo só**, que funciona
-em Windows, Linux e macOS e instala sozinho quase tudo o que falta (no macOS, o Xcode é o único que
-você instala à mão):
+em Windows, Linux e macOS e instala sozinho quase tudo o que falta (no macOS, só as Command Line Tools,
+que ele manda instalar se faltarem; o Xcode não é preciso):
 
 **[instalar-vintagelightbox-gpui.cmd](https://github.com/alexkads/VintageLightbox/releases/download/instalador-tauri/instalar-vintagelightbox-gpui.cmd)**
 
@@ -50,30 +50,25 @@ LTSC), o instalador avisa e indica onde baixá-lo.
 
 ## macOS
 
-1. Instale o **[Xcode](https://apps.apple.com/app/xcode/id497799835)** pela App Store. É grátis.
-   **Abra-o uma vez** depois de instalado.
-2. Abra o **Terminal**: aperte **⌘ Espaço**, digite `Terminal` e aperte **Enter**.
-3. Cole esta linha e aperte **Enter**:
+1. Abra o **Terminal**: aperte **⌘ Espaço**, digite `Terminal` e aperte **Enter**.
+2. Cole esta linha e aperte **Enter**:
 
    ```bash
    curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox-gpui.cmd | sh
    ```
 
-4. Quando pedir, digite **a senha do Mac** (ela não aparece enquanto você digita). Ela serve para
-   apontar as ferramentas para o Xcode e aceitar a licença dele.
-5. Espere. **A primeira vez leva de 15 a 40 minutos**, mais alguns minutos para baixar o componente
-   Metal.
-6. Pronto: o app fica em **Aplicativos**, como **VintageLightbox**. Ele abre no primeiro clique, sem
+3. Se ele disser que **faltam as Command Line Tools**, rode `xcode-select --install`, clique em
+   **Instalar**, espere terminar e cole a linha de novo.
+4. Espere. **A primeira vez leva de 15 a 40 minutos.**
+5. Pronto: o app fica em **Aplicativos**, como **VintageLightbox**. Ele abre no primeiro clique, sem
    aviso de segurança.
 
-🚨 **Por que o Xcode inteiro.** O GPUI compila os shaders Metal durante a compilação, e o compilador
-`metal` não vem nas Command Line Tools: vem no Xcode, e a partir do Xcode 26 é um componente que se
-baixa à parte. O instalador faz o resto sozinho (aponta o `xcode-select`, aceita a licença e baixa o
-componente), mas **o Xcode só se instala pela App Store**. O app do balcão (Tauri) não precisa dele.
+🔑 **Sem Xcode** (dono, 2026-09-17). O GPUI compilava os shaders Metal durante a compilação, com o
+compilador `metal`, que só vem no Xcode. O instalador liga a feature `shaders-em-tempo-de-execucao`
+do `ui-gpui`: quem compila os shaders passa a ser o Metal do próprio macOS, quando o app abre. O
+pacote pronto (`make empacotar`) continua com os shaders compilados no build.
 
-O instalador cuida sozinho de:
-- apontar as ferramentas para o Xcode, aceitar a licença e baixar o **componente Metal**;
-- o **Rust**, na sua pasta pessoal e sem senha.
+O instalador cuida sozinho do **Rust**, na sua pasta pessoal e sem senha.
 
 ## Linux
 
@@ -148,7 +143,7 @@ sh instalar.cmd
   `VLB_APP=gpui` (`curl … | VLB_APP=gpui sh`, ou `set VLB_APP=gpui` no `cmd`). Para instalação nova,
   use o `-gpui.cmd` direto.
 - `https://alexkads.github.io/VintageLightbox/instalar.sh` continua existindo: só macOS, compila a
-  **versão publicada** (e não a `dev`) e não prepara o Xcode sozinho. O `-gpui.cmd` o substitui nos
+  **versão publicada** (e não a `dev`) e ainda pede o Xcode com o componente Metal. O `-gpui.cmd` o substitui nos
   três sistemas.
 
 ### Como um arquivo só roda nos três sistemas
@@ -178,8 +173,8 @@ Apagar `target-gpui` e `fonte-gpui` é seguro: a próxima atualização só demo
 
 | Mensagem | O que fazer |
 |---|---|
-| `falta o Xcode` (macOS) | Instalar o Xcode pela App Store, abrir uma vez e repetir. Se queria o app do balcão, use o [instalador do Tauri](INSTALAR-TAURI.md), que não precisa dele |
-| `o compilador Metal continua faltando` (macOS) | Rodar, um de cada vez: `sudo xcode-select -s /Applications/Xcode.app/Contents/Developer`, `sudo xcodebuild -license accept` e `xcodebuild -downloadComponent MetalToolchain`. Depois repetir |
+| `faltam as Command Line Tools do Xcode` (macOS) | Rodar `xcode-select --install` e repetir. O Xcode inteiro não é preciso |
+| `falta o Xcode` ou `o compilador Metal continua faltando` (macOS) | É uma cópia antiga do instalador. Rodar de novo a linha do `curl` acima, que já não pede o Xcode |
 | `o fxc.exe continua faltando` (Windows) | Instalar o [Windows SDK](https://developer.microsoft.com/windows/downloads/windows-sdk/), ou definir `GPUI_FXC_PATH` com o caminho do `fxc.exe`, e repetir |
 | `o windres do MinGW continua faltando` (Windows) | No terminal do MSYS2, rodar `pacman -S mingw-w64-x86_64-binutils`. Depois repetir |
 | `o winget ... não existe nesta máquina` (Windows) | Instalar o [Instalador de Aplicativo](https://apps.microsoft.com/detail/9NBLGGH4NNS1) pela Microsoft Store e repetir |
@@ -197,5 +192,5 @@ Apagar `target-gpui` e `fonte-gpui` é seguro: a próxima atualização só demo
 `python3 scripts/testar-instalador.py` cobre os dois instaladores e o endereço antigo sem rede, sem
 compilar e sem instalar nada (os detalhes estão em [INSTALAR-TAURI.md](INSTALAR-TAURI.md#validação-do-instalador)).
 Os testes não substituem instalar e abrir o app em máquinas reais: o duplo clique do Windows, o
-PowerShell 5.1, o winget com o Windows SDK, o `windres` na compilação do manifesto, a preparação do
-Xcode e as bibliotecas do Linux só se conferem lá.
+PowerShell 5.1, o winget com o Windows SDK, o `windres` na compilação do manifesto, os shaders
+compilados na abertura do macOS e as bibliotecas do Linux só se conferem lá.
