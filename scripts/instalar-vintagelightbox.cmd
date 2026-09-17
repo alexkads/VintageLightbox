@@ -57,6 +57,13 @@ $Nome  = "VintageLightbox (Tauri)"
 # 🚨 `-gnu`, e não `-msvc`: o `rsraw-sys` compila o LibRaw e recusa o MSVC com
 #    `panic!("MSVC is not supported")`. O g++ do MSYS2 é pré-requisito por isso.
 $Alvo = "x86_64-pc-windows-gnu"
+# 🚨 **O Rust inteiro é `-gnu`, e não só o alvo.** Com o `-msvc` de host (o
+#    padrão do rustup), os `build.rs` e as macros são ligados pelo `link.exe` do
+#    Visual Studio, que a máquina do balcão não tem. A toolchain `-gnu` traz o
+#    próprio ligador, e o Visual Studio deixa de ser preciso.
+$Toolchain = "stable-$Alvo"
+# A menor versão que as dependências aceitam (`rust-version` do `notify-rust`).
+$RustMinimo = [version]"1.89"
 
 function Diga($t)  { Write-Host "`n> $t" -ForegroundColor Cyan }
 function Erro($t)  { Write-Host "X $t" -ForegroundColor Red }
@@ -64,6 +71,17 @@ function Aviso($t) { Write-Host "! $t" -ForegroundColor Yellow }
 function Ok($t)    { Write-Host "OK $t" -ForegroundColor Green }
 function Correr([scriptblock]$bloco) {
     if ($Seco) { Write-Host "   [seco] $bloco" } else { & $bloco | Out-Host }
+}
+
+# O winget vem no Windows 11 e no 10 atualizado, mas falta no LTSC e em
+# instalacoes antigas. Sem ele, o erro do PowerShell nao diria o que fazer.
+function Precisa-Winget($oque) {
+    if (Get-Command winget -ErrorAction SilentlyContinue) { return }
+    Erro "para instalar $oque, este instalador usa o winget, e ele nao existe nesta maquina."
+    Write-Host "   Instale o 'Instalador de Aplicativo' pela Microsoft Store:"
+    Write-Host "   https://apps.microsoft.com/detail/9NBLGGH4NNS1"
+    Write-Host "   Ou instale $oque a mao, e depois rode este arquivo de novo."
+    if (-not $Seco) { throw "falta o winget" }
 }
 
 # ── O que precisa existir antes de compilar ──────────────────────────────────
@@ -79,48 +97,71 @@ $chaves = @(
 )
 if (-not ($chaves | Where-Object { Test-Path $_ })) {
     Aviso "nao achei o WebView2. Instalando pelo winget."
+    Precisa-Winget "o WebView2"
     Correr { winget install --silent --accept-package-agreements --accept-source-agreements Microsoft.EdgeWebView2Runtime }
 } else {
     Ok "WebView2 instalado"
 }
 
-# O Rust, pelo rustup.
-if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
-    $cargoDoUsuario = "$env:USERPROFILE\.cargo\bin"
-    if (Test-Path (Join-Path $cargoDoUsuario "cargo.exe")) { $env:PATH = "$cargoDoUsuario;$env:PATH" }
-}
-if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
-    Aviso "nao ha Rust nesta maquina. Instalando o rustup."
+# O Rust, pelo rustup. Um `cargo` instalado sem rustup nao serve: a toolchain
+# `-gnu` so se escolhe por ele.
+$cargoDoUsuario = "$env:USERPROFILE\.cargo\bin"
+if (Test-Path (Join-Path $cargoDoUsuario "rustup.exe")) { $env:PATH = "$cargoDoUsuario;$env:PATH" }
+if (-not (Get-Command rustup -ErrorAction SilentlyContinue)) {
+    Aviso "nao ha rustup nesta maquina. Instalando o Rust."
     if (-not $Seco) {
         $init = Join-Path $env:TEMP "rustup-init.exe"
         Invoke-WebRequest "https://win.rustup.rs/x86_64" -OutFile $init
-        & $init -y --no-modify-path | Out-Host
-        $env:PATH = "$env:USERPROFILE\.cargo\bin;$env:PATH"
+        & $init -y --no-modify-path --profile minimal --default-host $Alvo --default-toolchain $Toolchain | Out-Host
+        $env:PATH = "$cargoDoUsuario;$env:PATH"
     } else {
-        Write-Host "   [seco] baixaria e rodaria rustup-init.exe"
+        Write-Host "   [seco] baixaria e rodaria rustup-init.exe --default-host $Alvo"
     }
+}
+function Versao-Do-Rust {
+    $v = & rustup run $Toolchain rustc --version 2>$null
+    if ($v -match '^rustc (\d+)\.(\d+)') { return [version]"$($Matches[1]).$($Matches[2])" }
+    return $null
 }
 if (Get-Command rustup -ErrorAction SilentlyContinue) {
-    $alvos = & rustup target list --installed 2>$null
-    if ($alvos -notcontains $Alvo) {
-        Aviso "acrescentando o alvo $Alvo ao Rust"
-        Correr { rustup target add $Alvo }
+    $instaladas = @(& rustup toolchain list 2>$null) -join "`n"
+    if ($instaladas -notmatch [regex]::Escape($Toolchain)) {
+        Aviso "instalando o Rust $Toolchain"
+        Correr { rustup toolchain install $Toolchain --profile minimal }
+    } elseif ((Versao-Do-Rust) -lt $RustMinimo) {
+        Aviso "o Rust desta maquina e anterior ao $RustMinimo. Atualizando."
+        Correr { rustup update $Toolchain }
     }
-    Ok "Rust: $(& cargo --version)"
+    $versaoRust = Versao-Do-Rust
+    if (-not $Seco -and ($null -eq $versaoRust -or $versaoRust -lt $RustMinimo)) {
+        Erro "o Rust $Toolchain continua ausente ou anterior ao $RustMinimo."
+        Write-Host "   Num terminal: rustup toolchain install $Toolchain"
+        throw "Rust ausente ou antigo"
+    }
+    Ok "Rust: $(& rustup run $Toolchain rustc --version 2>$null)"
 }
 
-# O g++ do MinGW, que compila o C++ do LibRaw. O MSYS2 nao poe o `mingw64\bin`
-# no PATH do Windows sozinho, entao ele e procurado no lugar de sempre.
+# O MSYS2 traz as duas ferramentas de C++ que o LibRaw pede. Ele nao poe o
+# `mingw64\bin` no PATH do Windows sozinho, entao e procurado no lugar de sempre.
 $msys = "C:\msys64"
 $mingw = Join-Path $msys "mingw64\bin"
-if (-not (Get-Command g++ -ErrorAction SilentlyContinue)) {
-    if (-not (Test-Path (Join-Path $msys "usr\bin\bash.exe"))) {
+$msysBash = Join-Path $msys "usr\bin\bash.exe"
+function Pacote-Msys($pacote, $oque) {
+    if (-not (Test-Path $msysBash)) {
         Aviso "nao ha MSYS2 nesta maquina. Instalando pelo winget."
+        Precisa-Winget "o MSYS2"
         Correr { winget install --silent --accept-package-agreements --accept-source-agreements MSYS2.MSYS2 }
     }
+    Aviso "instalando $oque pelo MSYS2"
+    # `-Sy`: a lista de pacotes que vem com o MSYS2 envelhece, e pedir um
+    # pacote que o espelho ja trocou termina em 404.
+    Correr { & $msysBash -lc "pacman -Sy --needed --noconfirm $pacote" }
+}
+
+# O g++ do MinGW, que compila o C++ do LibRaw.
+if (-not (Get-Command g++ -ErrorAction SilentlyContinue)) {
     if (-not (Test-Path (Join-Path $mingw "g++.exe"))) {
-        Aviso "instalando o g++ do MinGW pelo MSYS2"
-        Correr { & (Join-Path $msys "usr\bin\bash.exe") -lc "pacman -S --needed --noconfirm mingw-w64-x86_64-gcc" }
+        Pacote-Msys "mingw-w64-x86_64-gcc" "o g++ do MinGW"
     }
     $env:PATH = "$mingw;$env:PATH"
 }
@@ -131,6 +172,27 @@ if (-not $Seco -and -not (Get-Command g++ -ErrorAction SilentlyContinue)) {
     throw "falta o g++ do MinGW"
 }
 Ok "g++: $((Get-Command g++ -ErrorAction SilentlyContinue).Source)"
+
+# 🚨 A libclang. O `rsraw-sys` gera as ligacoes do LibRaw com o bindgen, que
+#    carrega a `libclang.dll`. Sem ela a compilacao morre no meio com "Unable to
+#    find libclang". A maquina do GitHub ja traz o LLVM; a do balcao, nao.
+$llvm = Join-Path $env:ProgramFiles "LLVM\bin"
+$libclang = @($env:LIBCLANG_PATH, $mingw, $llvm) |
+    Where-Object { $_ -and (Test-Path (Join-Path $_ "libclang.dll")) } |
+    Select-Object -First 1
+if (-not $libclang) {
+    Pacote-Msys "mingw-w64-x86_64-clang" "a libclang"
+    $libclang = $mingw
+}
+if (-not $Seco -and -not (Test-Path (Join-Path $libclang "libclang.dll"))) {
+    Erro "a libclang continua faltando. Sem ela o LibRaw nao compila."
+    Write-Host "   No terminal do MSYS2: pacman -S mingw-w64-x86_64-clang"
+    throw "falta a libclang"
+}
+$env:LIBCLANG_PATH = $libclang
+# A libclang do MSYS2 depende de outras DLLs da mesma pasta.
+if ($libclang -eq $mingw -and ($env:PATH -split ';') -notcontains $mingw) { $env:PATH = "$env:PATH;$mingw" }
+Ok "libclang: $libclang"
 
 # ── Baixar o codigo ──────────────────────────────────────────────────────────
 Diga "baixando o codigo de $Versao"
@@ -156,7 +218,7 @@ if ($Seco) {
 # ── Compilar ─────────────────────────────────────────────────────────────────
 Diga "compilando (10 a 30 minutos na primeira vez)"
 $env:CARGO_TARGET_DIR = Join-Path $Casa "target-tauri"
-Correr { cargo build --release --manifest-path (Join-Path $Fonte "Cargo.toml") -p app-tauri --bin app-tauri --target $Alvo }
+Correr { cargo "+$Toolchain" build --release --manifest-path (Join-Path $Fonte "Cargo.toml") -p app-tauri --bin app-tauri --target $Alvo }
 $binario = Join-Path $env:CARGO_TARGET_DIR "$Alvo\release\app-tauri.exe"
 if ($Seco) { Write-Host "`n   [seco] nada foi feito."; return }
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path $binario)) {
@@ -292,9 +354,32 @@ for f in curl tar; do
   command -v "$f" >/dev/null 2>&1 || { erro "falta '$f'."; exit 1; }
 done
 
+# A menor versão que as dependências aceitam (`rust-version` do `notify-rust`).
+RUST_MINIMO_MAIOR=1; RUST_MINIMO_MENOR=89
+
+rust_serve() {
+  command -v rustc >/dev/null 2>&1 || return 1
+  # shellcheck disable=SC2046
+  set -- $(rustc --version 2>/dev/null | sed -n 's/^rustc \([0-9]*\)\.\([0-9]*\).*/\1 \2/p')
+  [ $# -eq 2 ] || return 1
+  [ "$1" -gt "$RUST_MINIMO_MAIOR" ] || { [ "$1" -eq "$RUST_MINIMO_MAIOR" ] && [ "$2" -ge "$RUST_MINIMO_MENOR" ]; }
+}
+
+# 🚨 A libclang. O `rsraw-sys` gera as ligações do LibRaw com o bindgen, que
+#    carrega a `libclang.so`. Sem ela a compilação morre no meio com "Unable to
+#    find libclang".
+tem_libclang() {
+  for f in "${LIBCLANG_PATH:-/nenhum}"/libclang*.so* /usr/lib/llvm-*/lib/libclang*.so* \
+           /usr/lib/*-linux-gnu/libclang*.so* /usr/lib64/libclang*.so* /usr/lib/libclang*.so*; do
+    [ -e "$f" ] && return 0
+  done
+  return 1
+}
+
 if [ "$SISTEMA" = "Darwin" ]; then
-  # O LibRaw é C++, e o compilador vem nas Command Line Tools. A janela Tauri
-  # não usa o compilador Metal (o GPUI usa), então o Xcode inteiro não é preciso.
+  # O LibRaw é C++, e o compilador e a libclang vêm nas Command Line Tools. A
+  # janela Tauri não usa o compilador Metal (o GPUI usa), então o Xcode inteiro
+  # não é preciso.
   if ! xcrun -f clang++ >/dev/null 2>&1; then
     erro "faltam as Command Line Tools do Xcode (o compilador de C++)."
     echo "   Instale com:  xcode-select --install"
@@ -303,56 +388,105 @@ if [ "$SISTEMA" = "Darwin" ]; then
   fi
   ok "Command Line Tools: $(xcode-select -p)"
 else
-  # 🔑 O webview do Linux é o WebKitGTK 4.1. Sem os cabeçalhos dele o build
-  #    morre no fim; a lista é a da documentação do Tauri 2.
-  if ! pkg-config --exists webkit2gtk-4.1 2>/dev/null; then
-    aviso "faltam as bibliotecas de desenvolvimento do WebKitGTK 4.1."
+  # 🔑 Cada peça é conferida por si: ter o WebKitGTK não diz nada do compilador
+  #    nem da libclang. Faltando qualquer uma, a lista inteira é pedida ao
+  #    gerenciador, que pula o que já existe. A lista é a da documentação do
+  #    Tauri 2, mais o clang.
+  FALTA=""
+  command -v pkg-config >/dev/null 2>&1 || FALTA="$FALTA pkg-config"
+  command -v c++ >/dev/null 2>&1 || FALTA="$FALTA compilador-de-C++"
+  pkg-config --exists webkit2gtk-4.1 2>/dev/null || FALTA="$FALTA WebKitGTK-4.1"
+  { pkg-config --exists ayatana-appindicator3-0.1 || pkg-config --exists appindicator3-0.1; } 2>/dev/null \
+    || FALTA="$FALTA appindicator"
+  pkg-config --exists xdo 2>/dev/null || [ -e /usr/include/xdo.h ] || FALTA="$FALTA libxdo"
+  tem_libclang || FALTA="$FALTA libclang"
+
+  if [ -n "$FALTA" ]; then
+    aviso "faltam bibliotecas de desenvolvimento:$FALTA"
+    # Como root (um contêiner, por exemplo) não há `sudo`, nem precisa.
+    if [ "$(id -u)" -eq 0 ]; then SUDO=""; else SUDO="sudo"; fi
+    if [ -n "$SUDO" ] && ! command -v sudo >/dev/null 2>&1; then
+      erro "não há 'sudo' nesta máquina para instalar os pacotes."
+      echo "   Peça a quem administra a máquina para instalar os pacotes da lista acima,"
+      echo "   ou rode este script como root."
+      exit 1
+    fi
     if command -v apt-get >/dev/null 2>&1; then
-      PACOTES="build-essential pkg-config curl libssl-dev libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev"
-      echo "   Instalando com apt (pede a senha de administrador):"
-      echo "   sudo apt-get install -y $PACOTES"
-      # shellcheck disable=SC2086
-      correr sudo apt-get install -y $PACOTES
+      PACOTES="build-essential pkg-config curl libssl-dev libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev clang libclang-dev"
+      # 🚨 `update` antes: numa máquina recém-instalada a lista de pacotes é a
+      #    do dia da imagem, e o `install` responde "Unable to locate package".
+      INSTALAR="${SUDO:+$SUDO }apt-get update && ${SUDO:+$SUDO }env DEBIAN_FRONTEND=noninteractive apt-get install -y $PACOTES"
     elif command -v dnf >/dev/null 2>&1; then
-      PACOTES="gcc-c++ pkgconf-pkg-config curl openssl-devel webkit2gtk4.1-devel gtk3-devel libappindicator-gtk3-devel librsvg2-devel libxdo-devel"
-      echo "   Instalando com dnf (pede a senha de administrador):"
-      # shellcheck disable=SC2086
-      correr sudo dnf install -y $PACOTES
+      PACOTES="gcc-c++ pkgconf-pkg-config curl openssl-devel webkit2gtk4.1-devel gtk3-devel libappindicator-gtk3-devel librsvg2-devel libxdo-devel clang clang-devel"
+      INSTALAR="${SUDO:+$SUDO }dnf install -y $PACOTES"
     elif command -v pacman >/dev/null 2>&1; then
-      PACOTES="base-devel curl openssl webkit2gtk-4.1 gtk3 libappindicator-gtk3 librsvg xdotool"
-      echo "   Instalando com pacman (pede a senha de administrador):"
-      # shellcheck disable=SC2086
-      correr sudo pacman -S --needed --noconfirm $PACOTES
+      PACOTES="base-devel curl openssl webkit2gtk-4.1 gtk3 libappindicator-gtk3 librsvg xdotool clang"
+      INSTALAR="${SUDO:+$SUDO }pacman -Syu --needed --noconfirm $PACOTES"
     else
       erro "não reconheci o gerenciador de pacotes desta distribuição."
       echo "   Instale o equivalente a: webkit2gtk-4.1 (dev), gtk3 (dev), librsvg (dev),"
-      echo "   libayatana-appindicator (dev), libxdo (dev), openssl (dev) e um compilador de C++."
+      echo "   libayatana-appindicator (dev), libxdo (dev), openssl (dev), clang e"
+      echo "   libclang (dev) e um compilador de C++. Depois rode este script de novo."
       exit 1
     fi
-    if [ "$SECO" -eq 0 ] && ! pkg-config --exists webkit2gtk-4.1 2>/dev/null; then
-      erro "o WebKitGTK 4.1 continua faltando depois da instalação."
+    [ -n "$SUDO" ] && echo "   Instalando os pacotes (pede a senha de administrador):"
+    echo "   $INSTALAR"
+    if [ "$SECO" -eq 1 ]; then
+      echo "   [seco] não instalei nada"
+    # 🚨 `</dev/null`: com `curl | sh`, a entrada é o resto deste script, e o
+    #    `apt` que lesse dela o engoliria. O `sudo` pede a senha pelo terminal.
+    elif ! sh -c "$INSTALAR" </dev/null; then
+      erro "a instalação dos pacotes falhou."
+      echo "   Se a senha foi recusada, esta conta não pode instalar programas: peça a"
+      echo "   quem administra a máquina para rodar o comando acima, e rode este script de novo."
       exit 1
+    fi
+    if [ "$SECO" -eq 0 ]; then
+      pkg-config --exists webkit2gtk-4.1 2>/dev/null || { erro "o WebKitGTK 4.1 continua faltando depois da instalação."; exit 1; }
+      tem_libclang || { erro "a libclang continua faltando depois da instalação."; exit 1; }
     fi
   fi
   ok "WebKitGTK 4.1: $(pkg-config --modversion webkit2gtk-4.1 2>/dev/null || echo 'a instalar')"
+  ok "libclang: $(tem_libclang && echo presente || echo 'a instalar')"
 fi
 
 # O Rust, pelo rustup, sem privilégio nenhum (tudo em ~/.cargo e ~/.rustup).
-if ! command -v cargo >/dev/null 2>&1; then
-  # shellcheck disable=SC1091
-  [ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env" || true
-fi
-if ! command -v cargo >/dev/null 2>&1; then
-  aviso "não há Rust nesta máquina — instalando o rustup (em ~/.cargo, sem sudo)"
-  if [ "$SECO" -eq 0 ]; then
-    curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path >/dev/null
-    # shellcheck disable=SC1091
-    . "$HOME/.cargo/env"
+#
+# 🚨 O `~/.cargo/env` é lido **sempre**, e não só quando falta `cargo`: ele põe o
+#    rustup à frente no PATH. Sem isso, um `cargo` antigo da distribuição (o do
+#    `apt` fica anos atrás) ganharia, e a compilação morreria no meio.
+# shellcheck disable=SC1091
+if [ -f "$HOME/.cargo/env" ]; then . "$HOME/.cargo/env"; fi
+if ! rust_serve; then
+  if command -v rustup >/dev/null 2>&1; then
+    aviso "o Rust desta máquina é anterior ao $RUST_MINIMO_MAIOR.$RUST_MINIMO_MENOR — atualizando pelo rustup"
+    correr rustup toolchain install stable --profile minimal
+    correr rustup default stable
   else
-    echo "   [seco] curl https://sh.rustup.rs | sh -s -- -y"
+    if command -v rustc >/dev/null 2>&1; then
+      aviso "o Rust desta máquina ($(rustc --version)) é antigo e não veio do rustup — instalando o rustup ao lado (em ~/.cargo, sem sudo)"
+    else
+      aviso "não há Rust nesta máquina — instalando o rustup (em ~/.cargo, sem sudo)"
+    fi
+    if [ "$SECO" -eq 0 ]; then
+      # `-y` também responde "sim" quando já há um Rust fora do rustup.
+      curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal >/dev/null
+      # shellcheck disable=SC1091
+      . "$HOME/.cargo/env"
+    else
+      echo "   [seco] curl https://sh.rustup.rs | sh -s -- -y"
+    fi
   fi
 fi
-if command -v cargo >/dev/null 2>&1; then ok "Rust: $(cargo --version)"; else aviso "sem cargo (modo seco)"; fi
+if rust_serve; then
+  ok "Rust: $(rustc --version)"
+elif [ "$SECO" -eq 1 ]; then
+  aviso "Rust ausente ou antigo (modo seco)"
+else
+  erro "o Rust continua ausente ou anterior ao $RUST_MINIMO_MAIOR.$RUST_MINIMO_MENOR."
+  echo "   Rode:  rustup update stable   e depois este script de novo."
+  exit 1
+fi
 
 # ── Baixar o código ───────────────────────────────────────────────────────────
 #

@@ -146,7 +146,7 @@
       <li>Se aparecer <em>“O Windows protegeu o computador”</em>: <strong>Mais informações →
           Executar assim mesmo</strong>.</li>
       <li>No fim, o app está no <strong>Menu Iniciar</strong>. Ele instala sozinho o WebView2, o Rust
-          e o compilador do MSYS2.</li>
+          e o compilador e a libclang do MSYS2.</li>
     </ol>
   </div>
 
@@ -154,7 +154,7 @@
     <strong>Linux e macOS</strong>
     <pre><code>curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox.cmd | sh</code></pre>
     <ul style="margin:0">
-      <li><strong>Linux</strong>: instala as bibliotecas do WebKitGTK (por <code>apt</code>,
+      <li><strong>Linux</strong>: instala o compilador, a libclang e as bibliotecas do WebKitGTK (por <code>apt</code>,
           <code>dnf</code> ou <code>pacman</code>, pedindo a senha) e o Rust. O app aparece no menu de
           aplicativos.</li>
       <li><strong>macOS</strong>: precisa só das Command Line Tools

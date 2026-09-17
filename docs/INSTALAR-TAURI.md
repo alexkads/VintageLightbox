@@ -32,8 +32,11 @@ em Windows, Linux e macOS e instala sozinho tudo o que falta:
 
 O instalador cuida sozinho de:
 - **WebView2**, que já vem no Windows 11;
-- **Rust**;
-- **MSYS2** com o compilador `g++`.
+- **Rust**, na versão `-gnu` (o Visual Studio não é preciso);
+- **MSYS2** com o compilador `g++` e a `libclang`.
+
+Tudo isso é instalado pelo **winget**. Se o Windows não tiver o winget (Windows 10 antigo ou LTSC),
+o instalador avisa e indica onde baixá-lo.
 
 ## Linux e macOS
 
@@ -52,7 +55,9 @@ O instalador cuida sozinho de:
    - **macOS**: o app fica em **Aplicativos**.
 
 O instalador cuida sozinho de:
-- **Linux**: as bibliotecas do WebKitGTK (pelo `apt`, `dnf` ou `pacman`) e o Rust;
+- **Linux**: o compilador, a `libclang` e as bibliotecas do WebKitGTK (pelo `apt`, `dnf` ou
+  `pacman`, pedindo a senha de administrador), e o Rust. Um Rust antigo instalado pela
+  distribuição é deixado de lado, e o instalador põe o `rustup` à frente;
 - **macOS**: o Rust. Se faltarem as Command Line Tools do Xcode, ele diz o comando para
   instalá-las.
 
@@ -109,7 +114,12 @@ Apagar a pasta `.vintagelightbox` é seguro: a próxima atualização só demora
 |---|---|
 | `faltam as Command Line Tools do Xcode` (macOS) | Rodar `xcode-select --install` e repetir a instalação |
 | `não reconheci o gerenciador de pacotes` (Linux) | Instalar à mão os pacotes listados na mensagem e repetir |
+| `a instalação dos pacotes falhou` (Linux) | Esta conta não pode instalar programas: pedir a quem administra a máquina para rodar o comando mostrado logo acima, e repetir |
+| `o Rust continua ausente ou anterior ao 1.89` | Rodar `rustup update stable` e repetir |
+| `o winget ... não existe nesta máquina` (Windows) | Instalar o [Instalador de Aplicativo](https://apps.microsoft.com/detail/9NBLGGH4NNS1) pela Microsoft Store e repetir |
 | `o g++ do MinGW continua faltando` (Windows) | Instalar o [MSYS2](https://www.msys2.org) e, no terminal dele, rodar `pacman -S mingw-w64-x86_64-gcc`. Depois repetir |
+| `a libclang continua faltando` (Windows) | No terminal do MSYS2, rodar `pacman -S mingw-w64-x86_64-clang`. Depois repetir |
+| `Unable to find libclang` no meio da compilação (Linux) | Instalar `clang` e `libclang-dev` (ou os equivalentes da distribuição) e repetir |
 | A compilação para por falta de espaço | Liberar alguns GiB e repetir |
 | A lista aparece vazia ou dá erro ao entrar | Conferir a internet: as telas vêm do app, mas os dados vêm da API da RecordarFotos. As fotos já importadas continuam no catálogo, em **Imagens › VintageLightbox › Catalogo Tauri** |
 
