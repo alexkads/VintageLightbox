@@ -9,7 +9,7 @@
 //! código da mesma rota do site, e conversa com a galeria pelo mesmo
 //! `BroadcastChannel`.
 
-use tauri::{AppHandle, Manager, PhysicalPosition, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager, WebviewWindowBuilder};
 
 use crate::erro::ErroDaPonte;
 use crate::navegacao::{decidir, tela, DESENVOLVIMENTO};
@@ -53,7 +53,11 @@ pub async fn abrir(app: &AppHandle) -> Result<(), ErroDaPonte> {
         .visible(false)
         .on_navigation(decidir);
     if DESENVOLVIMENTO {
-        construtor = construtor.initialization_script(crate::depuracao::CONSOLE_NO_TERMINAL);
+        construtor = construtor
+            .initialization_script(crate::depuracao::CONSOLE_NO_TERMINAL)
+            .on_page_load(|janela, carga| {
+                crate::depuracao::rodar_roteiro(&janela, carga.event(), carga.url().as_str())
+            });
     }
     let janela = construtor
         .build()
@@ -79,13 +83,57 @@ pub async fn abrir(app: &AppHandle) -> Result<(), ErroDaPonte> {
         let alvo = &monitores[indice];
         // ⚠️ No Wayland o app não escolhe posição de janela, e esta chamada não
         // tem efeito (DESKTOP_TAURI P9). A tela cheia continua valendo.
-        let _ = janela.set_position(PhysicalPosition::new(alvo.position().x, alvo.position().y));
+        //
+        // 🚨 **No macOS a posição vai em pontos, com a escala do monitor de
+        //    destino.** Em pixels físicos, o Tauri a converte pela escala da
+        //    *janela*, que nasce no monitor do operador: com o Retina (2x) ao lado
+        //    de um Full HD (1x), a origem do Full HD caía pela metade, dentro do
+        //    Retina, e a tela cheia cobria o operador (2026-09-16). No Windows e
+        //    no Linux a área de trabalho é em pixels físicos, e a física é a certa.
+        #[cfg(target_os = "macos")]
+        let destino: tauri::Position = alvo
+            .position()
+            .to_logical::<f64>(alvo.scale_factor())
+            .into();
+        #[cfg(not(target_os = "macos"))]
+        let destino: tauri::Position =
+            tauri::PhysicalPosition::new(alvo.position().x, alvo.position().y).into();
+        let _ = janela.set_position(destino);
         let _ = janela.set_fullscreen(true);
     }
     janela
         .show()
         .map_err(|e| ErroDaPonte::Janela(e.to_string()))?;
+    if DESENVOLVIMENTO {
+        contar_onde_ficou(janela, origens, do_operador);
+    }
     Ok(())
+}
+
+/// Em depuração, diz no terminal onde a janela foi parar. É como se confere o
+/// segundo monitor sem olhar para ele.
+fn contar_onde_ficou(
+    janela: tauri::WebviewWindow,
+    origens: Vec<Origem>,
+    do_operador: Option<Origem>,
+) {
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        let onde = janela.current_monitor().ok().flatten().map(|m| {
+            format!(
+                "{:?} em {:?} (escala {})",
+                m.name(),
+                m.position(),
+                m.scale_factor()
+            )
+        });
+        eprintln!(
+            "[tela do cliente] monitores {origens:?}, operador {do_operador:?}; \
+             a janela está em {:?}, tela cheia {:?}, no monitor {onde:?}",
+            janela.outer_position().ok(),
+            janela.is_fullscreen().ok(),
+        );
+    });
 }
 
 pub fn fechar(app: &AppHandle) {

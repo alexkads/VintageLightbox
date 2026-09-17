@@ -5,7 +5,8 @@
 //!
 //! - **o console da página vai para o terminal**: `console.*`, erros e promessas
 //!   rejeitadas, com o nome da janela;
-//! - **`VLB_ROTEIRO=arquivo.js`** roda um roteiro dentro da janela principal a
+//! - **`VLB_ROTEIRO=arquivo.js`** roda um roteiro dentro das janelas do app (a
+//!   principal e a tela do cliente; ele se orienta por `location.pathname`) a
 //!   cada página carregada. É como se testa um fluxo no WebKit de verdade sem
 //!   olhar a tela;
 //! - **`VLB_FOTOS=pasta`** deixa o roteiro fotografar a janela
