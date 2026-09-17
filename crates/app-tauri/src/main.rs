@@ -16,6 +16,8 @@ mod catalogo;
 mod comandos;
 mod depuracao;
 mod erro;
+#[cfg(target_os = "macos")]
+mod menu;
 mod navegacao;
 mod origem;
 mod pasta_de_saida;
@@ -37,7 +39,10 @@ use raizes::RaizesPermitidas;
 fn main() {
     let diagnostico = std::env::args().any(|argumento| argumento == "--diagnostico");
 
-    tauri::Builder::default()
+    let construtor = tauri::Builder::default();
+    #[cfg(target_os = "macos")]
+    let construtor = construtor.menu(menu::do_app);
+    construtor
         // G1: uma instância só. Ele vem primeiro, como o plugin pede: a segunda
         // abertura só traz a janela da primeira para frente, e termina.
         .plugin(tauri_plugin_single_instance::init(
