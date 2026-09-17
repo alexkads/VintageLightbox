@@ -11,19 +11,26 @@ catálogo no próprio computador até subirem. Ele também faz o que o navegador
 - continuar enviando as fotos **na bandeja**, com a janela minimizada ou fechada.
 
 Instalado, ele aparece como **VintageLightbox (Tauri)** (o nome do arquivo, para não se confundir
-com o VintageLightbox antigo), e a barra de menus e o Dock mostram **VintageLightbox**.
+com o VintageLightbox (Zed GPUI), o editor nativo), e a barra de menus e o Dock mostram **VintageLightbox**.
+
+> **Há dois apps, e dois instaladores.** Este guia é do app do balcão
+> (`scripts/instalar-vintagelightbox-tauri.cmd`). O editor nativo, que segue o mesmo desenho, tem o
+> próprio arquivo (`scripts/instalar-vintagelightbox-gpui.cmd`) e, no macOS, pede o Xcode inteiro. O
+> guia dele é o [INSTALAR-GPUI.md](INSTALAR-GPUI.md), e está também na
+> [página do projeto](https://alexkads.github.io/VintageLightbox/#gpui). Os dois convivem na mesma
+> máquina.
 
 Não há instalador pronto. **Cada máquina compila o próprio app**, com **um arquivo só**, que funciona
 em Windows, Linux e macOS e instala sozinho tudo o que falta:
 
-**[instalar-vintagelightbox.cmd](https://github.com/alexkads/VintageLightbox/releases/download/instalador-tauri/instalar-vintagelightbox.cmd)**
+**[instalar-vintagelightbox-tauri.cmd](https://github.com/alexkads/VintageLightbox/releases/download/instalador-tauri/instalar-vintagelightbox-tauri.cmd)**
 
 ---
 
 ## Windows
 
-1. **[Clique aqui para baixar o instalador](https://github.com/alexkads/VintageLightbox/releases/download/instalador-tauri/instalar-vintagelightbox.cmd)**.
-2. Na pasta **Downloads**, dê **dois cliques** em `instalar-vintagelightbox.cmd`.
+1. **[Clique aqui para baixar o instalador](https://github.com/alexkads/VintageLightbox/releases/download/instalador-tauri/instalar-vintagelightbox-tauri.cmd)**.
+2. Na pasta **Downloads**, dê **dois cliques** em `instalar-vintagelightbox-tauri.cmd`.
 3. Se o Windows mostrar *"O Windows protegeu o computador"*, clique em **Mais informações** e depois
    em **Executar assim mesmo**. Isso só acontece na primeira vez.
 4. Espere. A janela mostra o andamento, e **a primeira vez leva de 10 a 30 minutos**.
@@ -45,7 +52,7 @@ o instalador avisa e indica onde baixá-lo.
 2. Cole esta linha e aperte **Enter**:
 
    ```bash
-   curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox.cmd | sh
+   curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox-tauri.cmd | sh
    ```
 
 3. **No Linux**, digite a sua senha quando ela for pedida. Ela serve para instalar as bibliotecas do
@@ -88,19 +95,27 @@ versões diferentes das dependências.
 Ler antes de rodar é legítimo:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox.cmd -o instalar.cmd
+curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox-tauri.cmd -o instalar.cmd
 less instalar.cmd
 sh instalar.cmd
 ```
 
 ### Como um arquivo só roda nos três sistemas
 
-`scripts/instalar-vintagelightbox.cmd` tem três partes, e cada sistema lê só a sua:
+`scripts/instalar-vintagelightbox-tauri.cmd` tem três partes, e cada sistema lê só a sua:
 
 - o `cmd` do Windows roda o bloco do topo, que chama o PowerShell guardado no meio do arquivo;
 - o `sh` do Linux e do macOS pula esses dois blocos e roda o resto.
 
 O arquivo precisa ter fins de linha LF, e o `.gitattributes` garante isso.
+
+Os dois instaladores (`-tauri` e `-gpui`) são **gerados** a partir de um modelo só,
+`scripts/instalador-modelo.cmd.in`, por `python3 scripts/gerar-instaladores.py`. Edite o modelo e
+gere de novo; `--conferir` diz se os arquivos estão em dia.
+
+**O nome antigo continua funcionando.** `scripts/instalar-vintagelightbox.cmd`, que está em cópias já
+baixadas e no comando que as pessoas copiaram, agora só baixa o instalador do app e o roda: o Tauri,
+a menos que `VLB_APP=gpui` (`curl … | VLB_APP=gpui sh`, ou `set VLB_APP=gpui` no `cmd`).
 
 A cópia do link do Windows fica no Release
 [`instalador-tauri`](https://github.com/alexkads/VintageLightbox/releases/tag/instalador-tauri), que
@@ -137,11 +152,13 @@ Para conferir o que o sistema oferece (GPU, armazenamento, monitores), abra o ap
 
 ## Validação do instalador
 
-Execute `python3 scripts/testar-instalador.py` na raiz do repositório. Os testes usam pastas
-temporárias e simulam rede, compilador e ferramentas do sistema: verificam download incompleto,
-arquivo corrompido, versão sem app, falha de compilação, reinstalação, cache, modo seco e atalhos.
-Com `pwsh` disponível, também verificam a sintaxe do PowerShell e a interrupção por erro de um
-executável. `sh -n` e `shellcheck -s sh` podem conferir o arquivo `.cmd` diretamente.
+Execute `python3 scripts/testar-instalador.py` na raiz do repositório. Os testes cobrem os três
+arquivos (o `-tauri.cmd`, o `-gpui.cmd` e o nome antigo), usam pastas temporárias e simulam rede,
+compilador e ferramentas do sistema: verificam download incompleto, arquivo corrompido, versão sem
+app, falha de compilação, reinstalação, cache, modo seco, atalhos, o despacho por `VLB_APP`, as marcas
+que fazem um arquivo só rodar nos três sistemas e se os `.cmd` batem com o modelo. Com `pwsh`
+disponível, também verificam a sintaxe do PowerShell, a interrupção por erro de um executável e o
+caminho inteiro do Windows em modo seco; com `shellcheck`, conferem os três arquivos.
 
 Esses testes não substituem instalar e abrir o app em máquinas reais. O duplo clique do Windows,
 o PowerShell 5.1, o winget e a instalação das bibliotecas do Linux precisam dessa conferência.

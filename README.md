@@ -2,10 +2,11 @@
 
 Clone profissional do Adobe Lightroom desenvolvido em Rust com interface GPUI.
 
-> 🖥️ **Procura o app do balcão?** É o **VintageLightbox (Tauri)**, que se instala com outro comando e
-> não precisa do Xcode: veja a seção **🖥️ VintageLightbox (Tauri)**, mais abaixo, ou
-> **[docs/INSTALAR-TAURI.md](docs/INSTALAR-TAURI.md)**. O `instalar.sh` e os instaladores de
-> "Baixar" são do editor antigo (GPUI).
+> 🖥️ **Há dois apps, e cada um tem o seu instalador.** O do balcão é o **VintageLightbox (Tauri)**
+> (`instalar-vintagelightbox-tauri.cmd`, sem Xcode: **[docs/INSTALAR-TAURI.md](docs/INSTALAR-TAURI.md)**);
+> o editor nativo é o **VintageLightbox (Zed GPUI)** (`instalar-vintagelightbox-gpui.cmd`:
+> **[docs/INSTALAR-GPUI.md](docs/INSTALAR-GPUI.md)**). Na dúvida, é o Tauri. Veja a seção
+> **🖥️ Instalar**, mais abaixo.
 
 ## 🎯 Por que ele existe
 
@@ -183,28 +184,46 @@ VintageLightbox-Rust/
 - **Cross-Platform**: Funciona nativamente em macOS, Windows e Linux
 - **Atualiza sozinho**: fora das lojas, com pacote assinado e conferido antes de instalar
 
-## 🖥️ VintageLightbox (Tauri) — um arquivo instala tudo
+## 🖥️ Instalar — um arquivo por app, e cada um instala tudo
 
-O app do balcão para o pós-venda da RecordarFotos: as telas do painel empacotadas (sem abrir o
-site), catálogo local, envio em segundo plano pela bandeja, RAW, cartão da câmera, pasta de saída
-fixa e tela do cliente no segundo monitor. **Cada máquina compila o próprio app**, com um arquivo só,
-que instala sozinho tudo o que falta:
+**Cada máquina compila o próprio app**, com um arquivo só por app, que roda em Windows, macOS e Linux
+e instala sozinho o que falta. Os dois apps convivem na mesma máquina.
 
-- **Windows**: baixe **[instalar-vintagelightbox.cmd](https://github.com/alexkads/VintageLightbox/releases/download/instalador-tauri/instalar-vintagelightbox.cmd)**
-  e dê **dois cliques** nele.
-- **Linux e macOS**: no Terminal, cole
+| | **VintageLightbox (Tauri)** — o do balcão | **VintageLightbox (Zed GPUI)** — o editor nativo |
+|---|---|---|
+| **Windows** (baixe e dê dois cliques) | **[instalar-vintagelightbox-tauri.cmd](https://github.com/alexkads/VintageLightbox/releases/download/instalador-tauri/instalar-vintagelightbox-tauri.cmd)** | **[instalar-vintagelightbox-gpui.cmd](https://github.com/alexkads/VintageLightbox/releases/download/instalador-tauri/instalar-vintagelightbox-gpui.cmd)** |
+| **No macOS precisa de** | Command Line Tools | Xcode inteiro (o compilador Metal) |
+| **Primeira vez** | 10 a 30 minutos | 15 a 40 minutos |
+| **Guia** | [docs/INSTALAR-TAURI.md](docs/INSTALAR-TAURI.md) | [docs/INSTALAR-GPUI.md](docs/INSTALAR-GPUI.md) |
 
-  ```bash
-  curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox.cmd | sh
-  ```
+**Linux e macOS**, no Terminal — o app do balcão (Tauri):
 
-A primeira vez leva de 10 a 30 minutos. Para atualizar, repita o mesmo passo. O passo a passo com
-as telas do Windows, as opções e o que fazer quando algo dá errado estão em
-**[docs/INSTALAR-TAURI.md](docs/INSTALAR-TAURI.md)**.
+```bash
+curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox-tauri.cmd | sh
+```
+
+o editor nativo (GPUI):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox-gpui.cmd | sh
+```
+
+O app Tauri tem as telas do painel empacotadas (sem abrir o site), catálogo local, envio em segundo
+plano pela bandeja, RAW, cartão da câmera, pasta de saída fixa e tela do cliente no segundo monitor.
+Para atualizar qualquer um dos dois, repita o mesmo passo.
+
+⚠️ **O nome antigo, `instalar-vintagelightbox.cmd`, continua funcionando e instala o Tauri**, como
+sempre instalou: ele só baixa o `-tauri.cmd` e o roda. Com `VLB_APP=gpui` instala o GPUI
+(`curl … | VLB_APP=gpui sh`).
+
+🔧 Os dois `.cmd` são **gerados** de `scripts/instalador-modelo.cmd.in` por
+`python3 scripts/gerar-instaladores.py`; os testes são `python3 scripts/testar-instalador.py`.
 
 ## ⬇️ Baixar o editor antigo (GPUI)
 
-> ⚠️ **Não é o app do balcão.** Para o pós-venda, use o VintageLightbox (Tauri), na seção acima.
+> ⚠️ **Não é o app do balcão.** Para o pós-venda, use o VintageLightbox (Tauri), na seção acima. E
+> para compilar o GPUI em qualquer sistema, o caminho novo é o `instalar-vintagelightbox-gpui.cmd`,
+> também acima; o que segue são os pacotes publicados e o `instalar.sh`, que é só do macOS.
 
 **https://alexkads.github.io/VintageLightbox/** — a versão publicada hoje só tem o `.dmg` do macOS
 (Intel e Apple Silicon).
