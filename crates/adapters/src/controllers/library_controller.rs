@@ -59,6 +59,7 @@ impl LibraryController {
                     pos_venda_foto_id: photo.id_no_site().map(str::to_string),
                     sessao_id: photo.sessao().map(str::to_string),
                     ajustes_completos: None,
+                    receita: photo.receita().map(str::to_string),
                     revelacao_travada: false,
                     width: metadata.and_then(|m| m.width),
                     height: metadata.and_then(|m| m.height),

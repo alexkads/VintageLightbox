@@ -160,6 +160,11 @@ impl Gravador for GravadorDoBanco {
             return;
         }
 
+        // A receita inteira vai junto das colunas: elas são só os 53 antigos, e
+        // os módulos novos voltavam zerados ao reabrir (divergência D7).
+        let receita =
+            crate::pos_venda::porta::ajustes_em_json(&ajustes, &para_crop_settings(&corte))
+                .to_string();
         self.tokio.spawn(async move {
             let resultado = editor
                 .save_edits(
@@ -225,6 +230,7 @@ impl Gravador for GravadorDoBanco {
                     corte.angulo,
                     corte.espelho_h,
                     corte.espelho_v,
+                    Some(receita),
                 )
                 .await;
 
@@ -341,6 +347,15 @@ pub fn da_foto(foto: &PhotoViewModel) -> Ajustes {
             return ajustes;
         }
     }
+    // A foto do catálogo guarda a receita inteira desde a migration 023; as
+    // colunas abaixo são só os 53 antigos, e valem para quem veio antes dela.
+    if let Some(receita) = foto
+        .receita
+        .as_deref()
+        .and_then(|r| serde_json::from_str::<serde_json::Value>(r).ok())
+    {
+        return de_json(&receita).0;
+    }
     let mut ajustes = Ajustes::default();
 
     macro_rules! ler {
@@ -369,10 +384,9 @@ pub fn na_foto(foto: &mut PhotoViewModel, ajustes: Ajustes, corte: Corte) {
         };
     }
     com_os_campos!(escrever);
-    // A foto do site guarda também a receita inteira (ver `da_foto`).
-    if foto.ajustes_completos.is_some() || id_no_site(&foto.id).is_some() {
-        foto.ajustes_completos = Some(ajustes.como_vetor().to_vec());
-    }
+    // A receita inteira vale para toda foto (ver `da_foto`): as colunas são só
+    // os 53 antigos, e a cópia em memória não pode perder os módulos novos.
+    foto.ajustes_completos = Some(ajustes.como_vetor().to_vec());
 
     foto.edit_crop_x = corte.x;
     foto.edit_crop_y = corte.y;
@@ -966,28 +980,39 @@ mod testes {
         }
     }
 
-    /// 🚧 **Divergência D7 do contrato da foto** (`../recordarfotos-e-commerce/docs/CONTRATO_DA_FOTO.md`,
-    /// C8): nenhum cliente descarta parâmetro. Enquanto houver prefixo sem coluna
-    /// no catálogo local, uma foto do SQLite perde parâmetros ao reabrir. Quando a
-    /// lista abaixo esvaziar, tire o `#[ignore]`.
+    /// ✅ **Divergência D7 do contrato da foto** (`../recordarfotos-e-commerce/docs/CONTRATO_DA_FOTO.md`,
+    /// C8): nenhum cliente descarta parâmetro. A foto do catálogo guarda a
+    /// receita inteira em `photos.edit_receita` (migration 023), e é ela que
+    /// vale quando existe — os ajustes sem coluna voltam por ali.
     #[test]
-    #[ignore = "Divergência D7 do contrato da foto: o SQLite guarda só 53 dos 171 parâmetros"]
-    fn contrato_d7_nenhum_parametro_fica_sem_coluna_no_sqlite() {
-        assert!(
-            SEM_COLUNA_NO_BANCO_LOCAL.is_empty(),
-            "ainda sem coluna: {SEM_COLUNA_NO_BANCO_LOCAL:?}"
-        );
+    fn contrato_d7_a_receita_do_catalogo_traz_o_que_nao_tem_coluna() {
+        let ajustes = Ajustes {
+            calib_red_hue: 12.0,
+            bw_ativo: 1.0,
+            curva_m4: 140.0,
+            dt_cb_shadows_h: 71.5,
+            ..Ajustes::default()
+        };
+        let receita = crate::pos_venda::porta::ajustes_em_json(
+            &ajustes,
+            &para_crop_settings(&Corte::default()),
+        )
+        .to_string();
+        let foto = PhotoViewModel {
+            edit_exposure: Some(0.0),
+            receita: Some(receita),
+            ..Default::default()
+        };
+        assert_eq!(da_foto(&foto), ajustes);
     }
 
-    /// Os ajustes que **ainda não têm coluna** em `photos`, por prefixo.
+    /// Os ajustes que **não têm coluna** em `photos`, por prefixo.
     ///
-    /// ⚠️ **É defeito, e não decisão.** São os 118 que o motor ganhou depois dos
-    /// 53 — calibração, preto e branco, curva por ponto, a tonalização completa
-    /// e os Controles RGB. Numa foto do catálogo local eles não são gravados por
-    /// `SavePhotoEditsUseCase` (que recebe os 53 um a um), e somem ao reabrir. Na
-    /// foto do site eles viajam inteiros pelo JSON da receita
-    /// (`todos_os_ajustes_sobem_e_voltam_pelo_json_do_site`). Dar coluna a eles é
-    /// migração, entidade e caso de uso — cada prefixo que ganhar sai daqui.
+    /// São os 118 que o motor ganhou depois dos 53 — calibração, preto e
+    /// branco, curva por ponto, a tonalização completa e os Controles RGB. Eles
+    /// não ganharam coluna: vão na receita inteira (`edit_receita`, migration
+    /// 023), como na foto do site. Esta lista só descreve o caminho das colunas,
+    /// que é o de quem foi revelado antes da migration 023.
     const SEM_COLUNA_NO_BANCO_LOCAL: [&str; 7] = [
         "calib_",
         "split_midtone_",
@@ -1020,9 +1045,9 @@ mod testes {
         assert_eq!(lidos.exposure, 0.25);
         assert_eq!(corte_da_foto(&foto).largura, Some(0.89));
 
-        // A foto do disco continua pelas colunas.
+        // A foto do disco também leva os módulos novos (divergência D7).
         let mut local = PhotoViewModel::default();
         na_foto(&mut local, ajustes, corte);
-        assert!(local.ajustes_completos.is_none());
+        assert_eq!(da_foto(&local).dt_cb_shadows_h, 71.5);
     }
 }

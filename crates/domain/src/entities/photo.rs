@@ -30,6 +30,12 @@ pub struct Photo {
     /// soube ler — e aí [`Self::file_name`] volta a olhar o caminho, que é
     /// exatamente o que ela fazia antes.
     nome_original: Option<String>,
+    /// A receita inteira da revelação, em JSON (migration 023).
+    ///
+    /// 🚨 As colunas `edit_*` são só os 53 ajustes antigos; o motor tem 171.
+    /// Sem isto, os módulos novos voltavam zerados ao reabrir a foto
+    /// (divergência D7 do contrato da foto). `None` = valem as colunas.
+    receita: Option<String>,
     /// Classificação por estrelas (0-5)
     rating: Option<Rating>,
     /// Etiqueta de cor
@@ -296,6 +302,7 @@ impl Photo {
             id,
             file_path,
             nome_original: None,
+            receita: None,
             imported_at,
             modified_at,
             metadata,
@@ -594,6 +601,20 @@ impl Photo {
     /// mentira pura.
     pub fn definir_nome_original(&mut self, nome: Option<String>) {
         self.nome_original = nome.filter(|n| !n.trim().is_empty());
+    }
+
+    /// A receita inteira da revelação, em JSON — ver o campo.
+    pub fn receita(&self) -> Option<&str> {
+        self.receita.as_deref()
+    }
+
+    /// Guarda a receita inteira. Quem revela a chama junto de
+    /// [`Self::set_edits`]; o repositório, ao reconstruir do banco.
+    ///
+    /// ⚠️ Não mexe em `modified_at`: `set_edits` já marca, e na reconstrução
+    /// marcar modificação seria mentira.
+    pub fn definir_receita(&mut self, receita: Option<String>) {
+        self.receita = receita.filter(|r| !r.trim().is_empty());
     }
 
     /// Retorna a extensão do arquivo

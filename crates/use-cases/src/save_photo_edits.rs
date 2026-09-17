@@ -86,6 +86,7 @@ impl SavePhotoEditsUseCase {
         crop_angle: Option<f32>,
         crop_flip_h: Option<bool>,
         crop_flip_v: Option<bool>,
+        receita: Option<String>,
     ) -> DomainResult<()> {
         let mut photo = self
             .photo_repository
@@ -156,6 +157,8 @@ impl SavePhotoEditsUseCase {
             crop_flip_h,
             crop_flip_v,
         )?;
+        // Os 53 acima são as colunas antigas; a receita leva os 171 (D7).
+        photo.definir_receita(receita);
         self.photo_repository.update(&photo).await?;
 
         Ok(())
@@ -228,6 +231,7 @@ mod tests {
                 None, None, None, None, // Crop Rect
                 None, None, // Rotation
                 None, None, // Flip
+                None, // Receita
             )
             .await;
 
@@ -259,6 +263,7 @@ mod tests {
                 0.0, // Tonalização (matiz/sat das duas pontas, balanço)
                 0.0, 0.0, // Grão (quantidade, tamanho)
                 None, None, None, None, None, None, None, None, // Crop
+                None, // Receita
             )
             .await;
 

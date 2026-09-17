@@ -1,0 +1,19 @@
+-- A receita inteira da revelação de uma foto do catálogo, em JSON.
+--
+-- 🚨 **Divergência D7 do contrato da foto** (`recordarfotos-e-commerce/
+-- docs/CONTRATO_DA_FOTO.md`, C8: nenhum cliente descarta parâmetro). As colunas
+-- `edit_*` são os 53 ajustes antigos; o motor passou a ter 171 em 12/set/2026
+-- (calibração, preto e branco, curva por ponto, tonalização completa e os
+-- módulos do darktable). Numa foto importada nesta máquina os 118 novos não
+-- eram gravados, e voltavam zerados ao reabrir a foto. A foto do site não
+-- sofria disso: a receita dela já viajava inteira, em JSON
+-- (`revelacoes_do_site`, migration 021).
+--
+-- 🔑 **Mesmo formato da foto do site**: os ajustes por nome mais o enquadramento
+-- com prefixo `corte_` (`ajustes_em_json`), que é o objeto que sobe para a API.
+-- Um formato só: a foto do catálogo que subir leva a mesma receita, e um ajuste
+-- novo do motor passa a ser guardado sem migration nova.
+--
+-- As colunas `edit_*` continuam sendo escritas. `NULL` aqui é foto revelada
+-- antes desta coluna, e para ela as colunas continuam valendo.
+ALTER TABLE photos ADD COLUMN edit_receita TEXT;

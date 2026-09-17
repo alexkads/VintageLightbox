@@ -33,6 +33,12 @@ pub struct PhotoViewModel {
     /// assim ia para a tela do cliente (2026-09-17). `None` = valem as colunas.
     #[serde(default)]
     pub ajustes_completos: Option<Vec<f32>>,
+    /// A receita inteira de uma foto **do catálogo**, em JSON, como o banco a
+    /// guarda (`photos.edit_receita`, migration 023). A tela a converte; este
+    /// crate não conhece o motor. `None` = foto revelada antes da coluna, e
+    /// valem as colunas `edit_*`.
+    #[serde(default)]
+    pub receita: Option<String>,
     /// Comprada no site (ou sem arquivo): **não se revela**, como no editor
     /// do site (`editavel`). O cliente pode já ter baixado o original.
     ///
