@@ -241,6 +241,13 @@ endif
 # ⚠️ **Suba a versao antes**, em `[workspace.package]` do Cargo.toml **e** no
 #    `empacotamento/packager.toml`. O app compara a propria `CARGO_PKG_VERSION`
 #    com a do manifesto: lancar sem subir a versao nao atualiza ninguem.
+#
+# 🚨 **Desde 17/set/2026 nao ha GitHub Actions: a conta esta travada por
+#    cobranca** e todo workflow falha em ~2 segundos ("your account is locked due
+#    to a billing issue"). `lancar` empurraria a tag e nada seria compilado — sem
+#    Release, sem `latest.json`, sem balcao atualizado. Enquanto durar, o alvo e
+#    `publicar`, com cada plataforma gerada na maquina dela e junta em `dist/`.
+#    Conferir se voltou: `gh run list --limit 1`. Ver docs/STATUS.md.
 
 publicar: ## Publica o que esta em dist/ no Releases e no Pages (sem CI)
 	@./scripts/lancar-local.sh

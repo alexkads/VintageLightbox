@@ -9,6 +9,24 @@
 > `app::testes::buscar_antes_de_revelar_nao_desliga_as_teclas` esperavam `Tela::Biblioteca` e
 > recebiam `Tela::Sessao`; conferido passando em 7/set/2026, com a suíte inteira verde.
 
+> 🚨 **Não há GitHub Actions desde 17/set/2026 — a conta está travada por cobrança.**
+> Todo workflow falha em ~2 segundos, sem rodar passo nenhum, com a anotação *"The job was not
+> started because your account is locked due to a billing issue."* (sete runs seguidas; o
+> repositório é público e não está desabilitado — é cobrança da conta).
+>
+> **O que isso quebra:** `make lancar` só empurra a tag. Quem compila as três plataformas, cria
+> o Release e publica o `latest.json` é o `instaladores.yml`. Sem Actions a tag sai e **não
+> produz instalador nenhum** — nenhum balcão atualiza, e como o app compara a própria versão com
+> a do manifesto, uma tag vazia é pior que nenhuma tag.
+>
+> **O caminho enquanto durar:** `make publicar` (`scripts/lancar-local.sh`), que faz o mesmo da
+> máquina de quem lança. ⚠️ Gere cada plataforma **na máquina dela** e junte tudo em `dist/`
+> antes: o manifesto é remontado a partir do `dist/` inteiro, e publicar só uma plataforma
+> **apaga as outras** da página — quem tem as outras passa a receber "nada novo", em silêncio.
+>
+> Não é a primeira vez: o `scripts/lancar-local.sh` foi escrito em **7/set/2026** pelo mesmo
+> motivo. Antes de lançar, conferir se voltou: `gh run list --limit 1`.
+
 > 🎯 **O objetivo do projeto mudou em 17/ago/2026** e está em
 > [`00-OBJETIVO.md`](00-OBJETIVO.md): substituir o Lightroom no fluxo do estúdio, para que a edição
 > converse com o `recordarfotos.com.br`. A migração de egui para GPUI — que era o objetivo anterior —
