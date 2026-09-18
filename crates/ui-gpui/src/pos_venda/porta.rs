@@ -49,6 +49,12 @@ pub enum Recado {
     Criada(Galeria),
     /// A sessão em que se entrou: a galeria e as fotos que estão nela.
     Aberta(Box<GaleriaAberta>),
+    /// A capa de um estúdio, baixada do cadastro. Ela é **pública** — o R2
+    /// serve `studios/` sem autenticação —, então o que viaja é a URL.
+    CapaDoEstudio {
+        estudio_id: String,
+        bytes: std::sync::Arc<Vec<u8>>,
+    },
     /// A miniatura de uma foto da sessão.
     Miniatura {
         foto_id: String,
@@ -311,6 +317,15 @@ pub trait Publicador: Send + Sync + 'static {
     );
     /// Manda ao cliente o e-mail "suas fotos estão prontas".
     fn avisar(&self, sessao: Sessao, galeria_id: String, canal: Sender<Recado>);
+    /// Baixa a capa de um estúdio pela URL do cadastro. Volta como
+    /// [`Recado::CapaDoEstudio`].
+    ///
+    /// 🔑 **Sem sessão**: a foto do estúdio é pública (é a mesma que o site
+    /// mostra no agendamento). O padrão não faz nada — quem não sabe baixar
+    /// deixa a tela com a inicial do nome, que é o desenho de "cadastro sem
+    /// foto".
+    fn capa_do_estudio(&self, _estudio_id: String, _url: String, _canal: Sender<Recado>) {}
+
     /// Baixa o bruto de uma foto do site. Volta como [`Recado::Original`].
     fn original(&self, _sessao: Sessao, foto_no_site: String, canal: Sender<Recado>) {
         let _ = canal.send(Recado::OriginalIndisponivel { foto_no_site });
@@ -728,6 +743,21 @@ impl Publicador for PublicadorDaApi {
         });
     }
 
+    fn capa_do_estudio(&self, estudio_id: String, url: String, canal: Sender<Recado>) {
+        let controlador = self.controlador.clone();
+        self.tokio.spawn(async move {
+            // ⚠️ **Capa que não vem é capa que não aparece**, e a tela já sabe
+            // desenhar o estúdio sem ela — nada de recado de falha para um
+            // enfeite.
+            if let Ok(bytes) = controlador.arquivo_publico(&url).await {
+                let _ = canal.send(Recado::CapaDoEstudio {
+                    estudio_id,
+                    bytes: std::sync::Arc::new(bytes),
+                });
+            }
+        });
+    }
+
     fn avisar(&self, sessao: Sessao, galeria_id: String, canal: Sender<Recado>) {
         let controlador = self.controlador.clone();
         self.tokio.spawn(async move {
@@ -836,6 +866,8 @@ pub mod mentira {
         pub bruto: Mutex<Option<Vec<u8>>>,
         /// Os ids no site cujo bruto foi pedido.
         pub originais: Mutex<Vec<String>>,
+        /// Os estúdios cuja capa foi pedida.
+        pub capas_pedidas: Mutex<Vec<String>>,
         /// `(foto no site, ajustes, corte)` de cada "Baixar JPEG".
         pub integrais: Mutex<Vec<(String, Ajustes, CropSettings)>>,
         /// Liga a recusa do site ao "Salvar na galeria", com esta frase.
@@ -1275,6 +1307,17 @@ pub mod mentira {
                 .expect("as atualizacoes")
                 .push((galeria_id, mudanca));
             self.responder_ou_guardar(canal, Recado::GaleriaAtualizada);
+        }
+
+        fn capa_do_estudio(&self, estudio_id: String, _url: String, canal: Sender<Recado>) {
+            self.capas_pedidas
+                .lock()
+                .expect("as capas")
+                .push(estudio_id.clone());
+            let _ = canal.send(Recado::CapaDoEstudio {
+                estudio_id,
+                bytes: Arc::new(Self::jpeg(64)),
+            });
         }
 
         fn miniatura(&self, _sessao: Sessao, foto_id: String, canal: Sender<Recado>) {

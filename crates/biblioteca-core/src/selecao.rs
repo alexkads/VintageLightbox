@@ -371,7 +371,11 @@ mod testes {
         s.clicar(2, false, CTRL);
         assert_eq!(marcadas(&s), vec![7, 5], "desmarcar não reordena o resto");
         s.marcar_todas(8);
-        assert_eq!(marcadas(&s)[..2], [7, 5], "marcar todas deixa as escolhidas na frente");
+        assert_eq!(
+            marcadas(&s)[..2],
+            [7, 5],
+            "marcar todas deixa as escolhidas na frente"
+        );
         assert_eq!(s.quantas(), 8);
     }
 
@@ -442,7 +446,11 @@ mod testes {
         s.clicar(9, false, SOZINHO);
         let base = s.instantaneo();
         s.arrastar(&base, &[1, 2]);
-        assert_eq!(marcadas(&s), vec![9, 1, 2], "a que já estava fica na frente");
+        assert_eq!(
+            marcadas(&s),
+            vec![9, 1, 2],
+            "a que já estava fica na frente"
+        );
     }
 
     #[test]

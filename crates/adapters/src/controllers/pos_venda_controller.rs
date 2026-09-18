@@ -198,6 +198,11 @@ impl PosVendaController {
         self.api.miniatura(sessao, foto_id).await.map_err(frase)
     }
 
+    /// A capa de um estúdio, pela URL pública do cadastro.
+    pub async fn arquivo_publico(&self, url: &str) -> Result<Vec<u8>, String> {
+        self.api.arquivo_publico(url).await.map_err(frase)
+    }
+
     /// Os bytes da cópia de trabalho de uma foto do site — o passo 11.
     pub async fn copia_de_trabalho(
         &self,

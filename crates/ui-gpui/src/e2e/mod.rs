@@ -246,6 +246,7 @@ fn site_de_mentira(ajustar: impl FnOnce(&mut PublicadorDeMentira)) -> Arc<Public
             id: "e1".into(),
             nome: "Centro".into(),
             cidade: "Gramado".into(),
+            foto: Some("https://r2/studios/centro.jpg".into()),
         }],
         galerias: std::sync::Mutex::new(vec![
             galeria_do_painel(GALERIA, "Ensaio da Ana", Some("ana@exemplo.com")),

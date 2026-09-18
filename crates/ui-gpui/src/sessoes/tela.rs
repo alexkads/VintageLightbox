@@ -38,6 +38,9 @@ use crate::pos_venda::porta::{Publicador, Recado};
 /// De quanto em quanto a tela pergunta se o site respondeu.
 const INTERVALO_DE_COLHEITA: Duration = Duration::from_millis(100);
 
+/// O lado da capa do estúdio no diálogo, em pontos — o avatar do shadcn.
+const LADO_DA_CAPA: u32 = 48;
+
 /// A sessão fotográfica escolhida para receber as fotos.
 ///
 /// Quem escuta é a raiz: é ela que leva o id para o pós-venda e — quando o
@@ -63,6 +66,14 @@ pub struct Sessoes {
     estudios: Vec<Estudio>,
     /// Onde o último estúdio escolhido fica lembrado nesta máquina.
     lembranca: PathBuf,
+    /// As capas dos estúdios, já decodificadas — por id.
+    ///
+    /// 🔑 **A tela guarda a imagem pronta**, e não os bytes: decodificar a cada
+    /// quadro é o defeito que a grade da sessão já pagou duas vezes
+    /// (`docs/08-CACHE-ARCHITECTURE.md`).
+    capas: std::collections::HashMap<String, Arc<gpui::RenderImage>>,
+    /// Os estúdios cuja capa já foi pedida — uma vez cada.
+    capas_pedidas: std::collections::HashSet<String>,
     /// A pergunta da entrada está na tela? (`Some` enquanto ela espera resposta.)
     ///
     /// 🚨 **A rota das sessões exige um estúdio antes de qualquer coisa** (dono,
@@ -164,6 +175,8 @@ impl Sessoes {
             estudios: Vec::new(),
             lembranca: caminho_da_lembranca(),
             escolhendo_estudio: false,
+            capas: std::collections::HashMap::new(),
+            capas_pedidas: std::collections::HashSet::new(),
             aberta: None,
             busca,
             situacao: None,
@@ -198,9 +211,25 @@ impl Sessoes {
     }
 
     /// As sessões como o core as entende — a tradução acontece num lugar só.
+    /// As galerias que a lista mostra — **as do estúdio desta máquina**.
+    ///
+    /// 🚨 **O filtro é o estúdio escolhido na entrada** (dono, 18/set/2026: *"as
+    /// sessões do grid precisam ser filtradas de acordo com o estúdio
+    /// selecionado"*). Cada balcão vê o que é dele: a lista de Canela com as
+    /// sessões de Gramado no meio é onde o operador clica na galeria errada.
+    ///
+    /// ⚠️ **A sessão sem estúdio aparece em todas.** São as de antes de o campo
+    /// existir e as que nasceram por outro caminho; escondê-las de todo mundo
+    /// seria perdê-las de vista — e é justamente nelas que o seletor do
+    /// cabeçalho da galeria serve para dizer de quem são.
     fn para_o_core(&self) -> Vec<SessaoFotografica> {
+        let meu = self.estudio_de_trabalho().map(|e| e.id.clone());
         self.galerias
             .iter()
+            .filter(|g| match (&meu, &g.estudio_id) {
+                (Some(meu), Some(dela)) => meu == dela,
+                _ => true,
+            })
             .map(|g| SessaoFotografica {
                 id: g.id.clone(),
                 titulo: g.titulo.clone(),
@@ -475,12 +504,25 @@ impl Sessoes {
                 Recado::Produtos(lista) => self.produtos = lista,
                 Recado::Estudios(lista) => {
                     self.estudios = lista;
+                    // 🖼️ **A capa do cadastro** (dono, 18/set/2026): a mesma
+                    // foto que o site mostra no agendamento, para o operador
+                    // reconhecer o estúdio pela imagem e não pelo nome.
+                    self.pedir_as_capas();
                     // 🏢 **A lista chegou: ou a lembrança vale, ou a pergunta
                     // aparece.** É o `precisaEscolher` do site, e o mesmo
                     // cuidado: sem estúdio cadastrado não se pergunta nada — um
                     // diálogo sem opção e sem saída é pior que a ausência dele.
                     if self.estudio_de_trabalho().is_none() && !self.estudios.is_empty() {
                         self.escolhendo_estudio = true;
+                    }
+                }
+                Recado::CapaDoEstudio { estudio_id, bytes } => {
+                    // ⚠️ Imagem que não decodifica é capa que não aparece: o
+                    // estúdio fica com a inicial, como o cadastro sem foto.
+                    if let Ok(imagem) = image::load_from_memory(&bytes) {
+                        let miniatura = imagem.thumbnail(LADO_DA_CAPA * 2, LADO_DA_CAPA * 2);
+                        self.capas
+                            .insert(estudio_id, crate::imagem::para_gpui(miniatura));
                     }
                 }
                 Recado::Criada(galeria) => {
@@ -590,6 +632,64 @@ fn data_br(iso: &str) -> String {
 }
 
 impl Sessoes {
+    /// Pede a capa de cada estúdio que ainda não tem uma — uma vez por id.
+    fn pedir_as_capas(&mut self) {
+        let Some(sessao) = self.sessao.clone() else {
+            return;
+        };
+        let _ = sessao;
+        for estudio in &self.estudios {
+            let Some(url) = estudio.foto.clone() else {
+                continue;
+            };
+            if !self.capas_pedidas.insert(estudio.id.clone()) {
+                continue;
+            }
+            self.publicador
+                .capa_do_estudio(estudio.id.clone(), url, self.recados.0.clone());
+        }
+    }
+
+    /// A miniatura do estúdio — a capa do cadastro, ou a inicial do nome.
+    ///
+    /// 🎨 **É o avatar do shadcn**: quadrado de canto arredondado, a imagem
+    /// cobrindo (`object-cover`), e a inicial no fundo `muted` quando não há
+    /// foto. O site faz o mesmo no agendamento, com um gradiente no lugar da
+    /// inicial.
+    fn capa_do_estudio(&self, estudio: &Estudio, lado: f32, cx: &App) -> gpui::AnyElement {
+        let tema = cx.theme();
+        let moldura = div()
+            .flex_none()
+            .size(px(lado))
+            .rounded(px(8.))
+            .overflow_hidden()
+            .bg(tema.muted);
+        match self.capas.get(&estudio.id) {
+            Some(imagem) => moldura
+                .child(
+                    gpui::img(imagem.clone())
+                        .size_full()
+                        .object_fit(gpui::ObjectFit::Cover),
+                )
+                .into_any_element(),
+            None => moldura
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_color(tema.muted_foreground)
+                .font_weight(gpui::FontWeight::SEMIBOLD)
+                .child(SharedString::from(
+                    estudio
+                        .nome
+                        .chars()
+                        .next()
+                        .map(|c| c.to_uppercase().to_string())
+                        .unwrap_or_default(),
+                ))
+                .into_any_element(),
+        }
+    }
+
     /// O estúdio em que **esta máquina** está trabalhando — conferido contra a
     /// lista de agora.
     ///
@@ -661,16 +761,27 @@ impl Sessoes {
                                 cx,
                             )
                             .when(escolhido, |o| o.border_color(primaria))
+                            // 🖼️ Capa à esquerda, nome e cidade à direita — o
+                            // item de lista com avatar do shadcn.
+                            .flex_row()
+                            .items_center()
+                            .gap(px(12.))
+                            .child(self.capa_do_estudio(estudio, LADO_DA_CAPA as f32, cx))
                             .child(
-                                div()
-                                    .font_weight(gpui::FontWeight::MEDIUM)
-                                    .child(SharedString::from(estudio.nome.clone())),
-                            )
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(apagado)
-                                    .child(SharedString::from(estudio.cidade.clone())),
+                                gpui_component::v_flex()
+                                    .gap(px(2.))
+                                    .items_start()
+                                    .child(
+                                        div()
+                                            .font_weight(gpui::FontWeight::MEDIUM)
+                                            .child(SharedString::from(estudio.nome.clone())),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(apagado)
+                                            .child(SharedString::from(estudio.cidade.clone())),
+                                    ),
                             )
                             .on_click(cx.listener(
                                 move |tela, _ev, _window, cx| {
@@ -1237,6 +1348,7 @@ mod testes {
             id: "s1".into(),
             nome: "Gramado".into(),
             cidade: "Gramado".into(),
+            foto: None,
         }
     }
 
@@ -1495,6 +1607,60 @@ mod testes {
                 // O chip abre a mesma pergunta de novo — é a saída da decisão.
                 tela.trocar_de_estudio(cx);
                 assert!(tela.perguntando_o_estudio());
+                let _ = std::fs::remove_file(&tela.lembranca);
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 **A lista mostra as sessões do estúdio escolhido** (dono,
+    /// 18/set/2026: *"as sessões do grid precisam ser filtradas de acordo com o
+    /// estúdio selecionado"*).
+    ///
+    /// A sessão **sem** estúdio aparece em todas: são as de antes de o campo
+    /// existir, e escondê-las de todo mundo seria perdê-las de vista.
+    #[gpui::test]
+    fn a_lista_mostra_so_as_sessoes_do_estudio_escolhido(cx: &mut TestAppContext) {
+        let de_gramado = |id: &str, estudio: Option<&str>| {
+            let mut g = galeria(id, "Ensaio", None);
+            g.estudio_id = estudio.map(|e| e.to_string());
+            g
+        };
+        let publicador = Arc::new(PublicadorDeMentira {
+            galerias: Mutex::new(vec![
+                de_gramado("g1", Some("s1")),
+                de_gramado("g2", Some("s2")),
+                de_gramado("g3", None),
+            ]),
+            estudios: vec![
+                estudio(),
+                Estudio {
+                    id: "s2".into(),
+                    nome: "Canela".into(),
+                    cidade: "Canela".into(),
+                    foto: None,
+                },
+            ],
+            ..Default::default()
+        });
+        let janela = janela(cx, publicador);
+        com_sessao(cx, &janela);
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                // Sem escolha ainda: a lista é inteira — e a pergunta está na tela.
+                assert_eq!(tela.para_o_core().len(), 3);
+
+                tela.escolher_estudio_de_trabalho("s1", cx);
+                let ids: Vec<String> = tela.para_o_core().into_iter().map(|s| s.id).collect();
+                assert_eq!(
+                    ids,
+                    vec!["g1".to_string(), "g3".to_string()],
+                    "as de Gramado e a sem estúdio"
+                );
+
+                tela.escolher_estudio_de_trabalho("s2", cx);
+                let ids: Vec<String> = tela.para_o_core().into_iter().map(|s| s.id).collect();
+                assert_eq!(ids, vec!["g2".to_string(), "g3".to_string()]);
                 let _ = std::fs::remove_file(&tela.lembranca);
             })
             .expect("a janela deve estar aberta");

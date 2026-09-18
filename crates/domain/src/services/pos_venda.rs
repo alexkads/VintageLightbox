@@ -132,6 +132,14 @@ pub struct Estudio {
     pub nome: String,
     /// Pode vir vazia: o cadastro do site não a exige.
     pub cidade: String,
+    /// A **primeira** foto do cadastro (`studios."fotosUrls"`), que é a mesma
+    /// que o site usa como capa do estúdio no agendamento.
+    ///
+    /// 🔑 **Pública, e por isso basta a URL**: o R2 serve `studios/` sem
+    /// autenticação (`/api/v2/public/media/arquivos/`), ao contrário das fotos
+    /// de cliente. `None` é cadastro sem foto — e aí quem desenha mostra a
+    /// inicial, como a web faz com o gradiente.
+    pub foto: Option<String>,
 }
 
 /// A galeria do cliente, como o balcão a descreve.
@@ -682,6 +690,18 @@ pub trait PosVendaApi: Send + Sync {
 
     /// A miniatura de uma foto do site, para desenhar a grade da sessão.
     async fn miniatura(&self, sessao: &Sessao, foto_id: &str) -> DomainResult<Vec<u8>>;
+
+    /// Os bytes de um arquivo **público** do site — a capa de um estúdio.
+    ///
+    /// 🔑 **Sem sessão, e por isso fora do resto**: o R2 serve `studios/` e
+    /// `blog/` sem autenticação, e é a mesma URL que o site usa no
+    /// agendamento. O padrão recusa: quem não sabe baixar deixa a tela com a
+    /// inicial do nome, que é o desenho de "cadastro sem foto".
+    async fn arquivo_publico(&self, _url: &str) -> DomainResult<Vec<u8>> {
+        Err(crate::DomainError::InvalidOperation(
+            "esta API não baixa arquivo público".into(),
+        ))
+    }
 
     /// Os bytes da **cópia de trabalho** de uma foto que está no site.
     ///

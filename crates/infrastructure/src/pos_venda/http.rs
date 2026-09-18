@@ -181,6 +181,10 @@ struct EstudioDaApi {
     /// `true` para uma resposta sem o campo não esvaziar a lista.
     #[serde(default = "verdadeiro")]
     is_active: bool,
+    /// As fotos de cenário do cadastro. A primeira é a capa — a mesma que o
+    /// site mostra no agendamento.
+    #[serde(default)]
+    fotos_urls: Vec<String>,
 }
 
 fn verdadeiro() -> bool {
@@ -405,8 +409,25 @@ impl PosVendaApi for PosVendaApiHttp {
                 id: e.id,
                 nome: e.name,
                 cidade: e.city,
+                foto: e.fotos_urls.into_iter().next(),
             })
             .collect())
+    }
+
+    /// A capa do estúdio — um arquivo **público** do R2.
+    ///
+    /// 🔑 **Sem token e sem a base da API**: a URL vem inteira do cadastro, e
+    /// `studios/` é servido sem autenticação (o mesmo arquivo que o site mostra
+    /// no agendamento).
+    async fn arquivo_publico(&self, url: &str) -> DomainResult<Vec<u8>> {
+        let resposta = self.client.get(url).send().await.map_err(rede)?;
+        if !resposta.status().is_success() {
+            return Err(DomainError::InfrastructureError(format!(
+                "o arquivo público respondeu {}",
+                resposta.status()
+            )));
+        }
+        Ok(resposta.bytes().await.map_err(rede)?.to_vec())
     }
 
     async fn criar_galeria(&self, sessao: &Sessao, nova: &NovaGaleria) -> DomainResult<Galeria> {
@@ -1720,7 +1741,11 @@ mod tests {
             .and(path("/api/v2/bookings/studios"))
             .and(header("authorization", "Bearer tok"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!([
-                { "id": "s1", "name": "Gramado", "city": "Gramado", "is_active": true },
+                {
+                    "id": "s1", "name": "Gramado", "city": "Gramado", "is_active": true,
+                    // A capa do cadastro: a **primeira** da lista.
+                    "fotos_urls": ["https://r2/studios/gramado-1.jpg", "https://r2/studios/gramado-2.jpg"]
+                },
                 { "id": "s2", "name": "Fechado", "city": "Canela", "is_active": false }
             ])))
             .mount(&servidor)
@@ -1744,6 +1769,7 @@ mod tests {
                 id: "s1".into(),
                 nome: "Gramado".into(),
                 cidade: "Gramado".into(),
+                foto: Some("https://r2/studios/gramado-1.jpg".into()),
             }]
         );
         api.criar_galeria(

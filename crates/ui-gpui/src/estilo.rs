@@ -235,6 +235,13 @@ pub fn veu_do_dialogo() -> Div {
         .items_center()
         .justify_center()
         .bg(gpui::black().opacity(0.5))
+        // 🚨 **O véu para o mouse aqui, e é o que faz dele um véu** (dono,
+        // 18/set/2026: *"tem que selecionar o estúdio e ficar na listagem de
+        // sessões, e não abrir uma sessão"*). No GPUI, desenhar por cima não
+        // bloqueia o clique: sem `occlude`, o clique atravessava a caixa e
+        // chegava à linha da tabela por baixo — escolher o estúdio abria a
+        // sessão que estivesse atrás do botão.
+        .occlude()
 }
 
 /// A caixa do `DialogContent`: canto de 12 px, fundo do `popover`, 16 px de
