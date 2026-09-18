@@ -63,6 +63,12 @@ pub struct Sessoes {
     estudios: Vec<Estudio>,
     /// Onde o último estúdio escolhido fica lembrado nesta máquina.
     lembranca: PathBuf,
+    /// A pergunta da entrada está na tela? (`Some` enquanto ela espera resposta.)
+    ///
+    /// 🚨 **A rota das sessões exige um estúdio antes de qualquer coisa** (dono,
+    /// 2026-09-18), como no site: sem a resposta, cada tela adiante adivinha —
+    /// e adivinhava pela última sessão criada, que é a de qualquer balcão.
+    escolhendo_estudio: bool,
     /// Qual sessão está aberta para receber fotos.
     aberta: Option<String>,
     busca: gpui::Entity<InputState>,
@@ -157,6 +163,7 @@ impl Sessoes {
             produtos: Vec::new(),
             estudios: Vec::new(),
             lembranca: caminho_da_lembranca(),
+            escolhendo_estudio: false,
             aberta: None,
             busca,
             situacao: None,
@@ -466,7 +473,16 @@ impl Sessoes {
                     self.galerias = lista;
                 }
                 Recado::Produtos(lista) => self.produtos = lista,
-                Recado::Estudios(lista) => self.estudios = lista,
+                Recado::Estudios(lista) => {
+                    self.estudios = lista;
+                    // 🏢 **A lista chegou: ou a lembrança vale, ou a pergunta
+                    // aparece.** É o `precisaEscolher` do site, e o mesmo
+                    // cuidado: sem estúdio cadastrado não se pergunta nada — um
+                    // diálogo sem opção e sem saída é pior que a ausência dele.
+                    if self.estudio_de_trabalho().is_none() && !self.estudios.is_empty() {
+                        self.escolhendo_estudio = true;
+                    }
+                }
                 Recado::Criada(galeria) => {
                     // 🎯 O estúdio fica lembrado **depois** de a sessão existir:
                     // lembrar uma escolha que o site recusou sugeriria o erro.
@@ -521,6 +537,7 @@ impl Render for Sessoes {
         // 📐 O esqueleto da página do site (`Pagina alturaCheia`): 24 px de
         // respiro, e só a tabela rola.
         div()
+            .relative()
             .flex()
             .flex_col()
             .gap(px(16.))
@@ -543,6 +560,7 @@ impl Render for Sessoes {
             .children(self.formulario(cx))
             .child(self.tabela(&visiveis, agora, cx))
             .child(div().text_xs().text_color(apagado).child(rodape))
+            .children(self.dialogo_do_estudio(cx))
     }
 }
 
@@ -572,6 +590,122 @@ fn data_br(iso: &str) -> String {
 }
 
 impl Sessoes {
+    /// O estúdio em que **esta máquina** está trabalhando — conferido contra a
+    /// lista de agora.
+    ///
+    /// 🔑 **A lista manda.** O nome lembrado pode estar velho (o estúdio foi
+    /// renomeado), e um desativado não continua valendo como padrão só porque
+    /// alguém o escolheu na semana passada. É o mesmo de
+    /// `estudio-de-trabalho.ts`, no site.
+    pub fn estudio_de_trabalho(&self) -> Option<&Estudio> {
+        let lembrado = estudio_lembrado(&self.lembranca)?;
+        self.estudios.iter().find(|e| e.id == lembrado)
+    }
+
+    /// Abre a pergunta — é o clique no chip do estúdio.
+    pub fn trocar_de_estudio(&mut self, cx: &mut Context<Self>) {
+        if self.estudios.is_empty() {
+            return;
+        }
+        self.escolhendo_estudio = true;
+        cx.notify();
+    }
+
+    /// A resposta: fica lembrada nesta máquina e vale para todas as telas.
+    pub fn escolher_estudio_de_trabalho(&mut self, id: &str, cx: &mut Context<Self>) {
+        lembrar_estudio(&self.lembranca, id);
+        self.escolhendo_estudio = false;
+        // 🔑 **A sessão nova em curso acompanha.** Trocar de estúdio com o
+        // formulário aberto e deixá-lo no anterior seria a tela contradizendo a
+        // resposta que acabou de receber.
+        if let Some(nova) = self.nova.as_mut() {
+            nova.estudio_id = Some(id.to_string());
+        }
+        cx.notify();
+    }
+
+    /// 🧪 A pergunta está na tela?
+    #[cfg(test)]
+    pub(crate) fn perguntando_o_estudio(&self) -> bool {
+        self.escolhendo_estudio
+    }
+
+    /// O diálogo **sem saída** da entrada: "Em qual estúdio você está?".
+    ///
+    /// 🚨 **Sem "cancelar", como no site.** A única saída é escolher — e é isso
+    /// que impede a tela seguinte de adivinhar.
+    fn dialogo_do_estudio(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+        if !self.escolhendo_estudio {
+            return None;
+        }
+        let tema = cx.theme().clone();
+        let atual = self.estudio_de_trabalho().map(|e| e.id.clone());
+        Some(
+            div()
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .bg(gpui::black().opacity(0.5))
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .w(px(460.))
+                        .p(px(24.))
+                        .gap(px(12.))
+                        .rounded(px(12.))
+                        .border_1()
+                        .border_color(tema.border)
+                        .bg(tema.background)
+                        .shadow_lg()
+                        .child(
+                            div()
+                                .text_lg()
+                                .font_weight(gpui::FontWeight::SEMIBOLD)
+                                .child("Em qual estúdio você está?"),
+                        )
+                        .child(div().text_sm().text_color(tema.muted_foreground).child(
+                            "A escolha fica guardada nesta máquina e vale para todas as telas: as \
+                             sessões que você criar e o caixa saem daqui. Dá para trocar a \
+                             qualquer momento na barra.",
+                        ))
+                        .children(self.estudios.iter().map(|estudio| {
+                            let id = estudio.id.clone();
+                            let escolhido = atual.as_deref() == Some(estudio.id.as_str());
+                            crate::estilo::botao_contorno(
+                                SharedString::from(format!("estudio-de-trabalho-{}", estudio.id)),
+                                cx,
+                            )
+                            .w_full()
+                            .justify_start()
+                            .when(escolhido, |b| b.border_color(tema.primary))
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .items_start()
+                                    .child(SharedString::from(estudio.nome.clone()))
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(tema.muted_foreground)
+                                            .child(SharedString::from(estudio.cidade.clone())),
+                                    ),
+                            )
+                            .on_click(cx.listener(
+                                move |tela, _ev, _window, cx| {
+                                    tela.escolher_estudio_de_trabalho(&id, cx)
+                                },
+                            ))
+                        })),
+                ),
+        )
+    }
+
     fn barra(&self, contagens: &sessoes::Contagens, cx: &mut Context<Self>) -> impl IntoElement {
         use crate::estilo;
         use crate::recursos::Icone;
@@ -673,6 +807,22 @@ impl Sessoes {
                 )
             })
             .child(div().flex_1())
+            // 🏢 **O estúdio desta máquina, e o clique que o troca.** Sem um
+            // lugar visível para trocar, a escolha do primeiro dia viraria
+            // definitiva — e o jeito de desfazê-la seria apagar o arquivo.
+            .when_some(
+                self.estudio_de_trabalho().map(|e| e.nome.clone()),
+                |barra, nome| {
+                    barra.child(
+                        estilo::botao_contorno("sessoes-estudio-de-trabalho", cx)
+                            .child(Icon::new(Icone::Building2).size(px(14.)))
+                            .child(SharedString::from(nome))
+                            .on_click(
+                                cx.listener(|tela, _ev, _window, cx| tela.trocar_de_estudio(cx)),
+                            ),
+                    )
+                },
+            )
             .child(estilo::desligado(
                 estilo::botao_contorno("sessoes-recarregar", cx)
                     .child(if self.carregando {
@@ -1322,6 +1472,75 @@ mod testes {
                     "estúdio que saiu da lista não é sugerido"
                 );
                 let _ = std::fs::remove_file(&tela.lembranca);
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 **A rota das sessões pergunta o estúdio antes de qualquer coisa** —
+    /// e a resposta fica nesta máquina (dono, 2026-09-18).
+    ///
+    /// É a mesma pergunta do site (`estudio-de-trabalho.ts`): sem ela, a tela
+    /// seguinte adivinha o estúdio pela última sessão criada, que é a de
+    /// qualquer balcão — e o operador de Canela cria sessão em Gramado sem
+    /// perceber.
+    #[gpui::test]
+    fn a_entrada_exige_o_estudio_e_a_escolha_fica(cx: &mut TestAppContext) {
+        let publicador = Arc::new(PublicadorDeMentira {
+            estudios: vec![estudio()],
+            ..Default::default()
+        });
+        let janela = janela(cx, publicador);
+        com_sessao(cx, &janela);
+
+        janela
+            .update(cx, |tela, window, cx| {
+                assert!(
+                    tela.perguntando_o_estudio(),
+                    "a lista de estúdios chegou e não há escolha guardada"
+                );
+                assert!(tela.estudio_de_trabalho().is_none());
+
+                tela.escolher_estudio_de_trabalho("s1", cx);
+                assert!(!tela.perguntando_o_estudio(), "respondida, ela sai da tela");
+                assert_eq!(
+                    tela.estudio_de_trabalho().map(|e| e.id.as_str()),
+                    Some("s1")
+                );
+
+                // 🏢 E a sessão nova nasce nele — sem passar pela sugestão do
+                // servidor nem pela lembrança antiga.
+                tela.comecar_nova(window, cx);
+                assert_eq!(
+                    tela.nova.as_ref().and_then(|n| n.estudio_id.as_deref()),
+                    Some("s1")
+                );
+
+                // O chip abre a mesma pergunta de novo — é a saída da decisão.
+                tela.trocar_de_estudio(cx);
+                assert!(tela.perguntando_o_estudio());
+                let _ = std::fs::remove_file(&tela.lembranca);
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// ⚠️ **Sem estúdio cadastrado não se pergunta nada**: um diálogo sem opção
+    /// e sem saída é pior do que a ausência dele — e quem está começando ainda
+    /// não cadastrou estúdio nenhum.
+    #[gpui::test]
+    fn sem_estudio_cadastrado_a_entrada_nao_pergunta(cx: &mut TestAppContext) {
+        let publicador = Arc::new(PublicadorDeMentira::default());
+        let janela = janela(cx, publicador);
+        com_sessao(cx, &janela);
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                assert!(tela.estudios.is_empty());
+                assert!(!tela.perguntando_o_estudio());
+                tela.trocar_de_estudio(cx);
+                assert!(
+                    !tela.perguntando_o_estudio(),
+                    "nem pelo chip: não há o que escolher"
+                );
             })
             .expect("a janela deve estar aberta");
     }
