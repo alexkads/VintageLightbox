@@ -67,7 +67,21 @@ type EmRevelacao = (u64, PhotoViewModel, Option<(usize, usize)>, CropSettings);
 /// toda velocidade e a foto aparece de estalo.
 const CRUZAMENTO: Duration = Duration::from_millis(1000);
 
-actions!(vintagelightbox, [FecharCliente, AlternarInfoDoCliente]);
+actions!(
+    vintagelightbox,
+    [
+        FecharCliente,
+        AlternarInfoDoCliente,
+        AlternarJanelaDoCliente
+    ]
+);
+
+/// O que esta janela pede à raiz — ela não sabe abrir a si mesma de novo.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PedidoDoCliente {
+    /// Reabrir no outro modo: tela cheia no monitor ↔ janela arrastável.
+    AlternarJanela,
+}
 
 /// O contexto de teclado da segunda tela.
 ///
@@ -83,6 +97,13 @@ pub fn init(cx: &mut gpui::App) {
         gpui::KeyBinding::new("escape", FecharCliente, Some(CONTEXTO)),
         // `I` liga e desliga o rodapé com nome e nota, como no legado.
         gpui::KeyBinding::new("i", AlternarInfoDoCliente, Some(CONTEXTO)),
+        // 🚨 **`J` tira a tela do monitor e a põe em janela** (dono,
+        // 18/set/2026): *"no Mac às vezes a função do segundo monitor pode
+        // falhar, e o usuário tem que conseguir contornar arrastando para o
+        // segundo monitor"*. Sem barra de título e sem poder mover, uma
+        // detecção errada de monitor deixava a tela do cliente presa onde
+        // ninguém queria — e sem saída a não ser `Esc`.
+        gpui::KeyBinding::new("j", AlternarJanelaDoCliente, Some(CONTEXTO)),
     ]);
 }
 
@@ -180,10 +201,13 @@ pub struct Cliente {
     /// lição que custou dois commits na Revelação: `track_focus` rastreia o
     /// foco, não o concede.
     foco: FocusHandle,
+    /// Em que modo esta janela nasceu: arrastável (`true`) ou tomando o monitor.
+    /// Só muda o que o rodapé diz — quem decide o modo é a raiz, ao abrir.
+    em_janela: bool,
 }
 
 impl Cliente {
-    pub fn novo(window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn novo(em_janela: bool, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let foco = cx.focus_handle();
         window.focus(&foco);
 
@@ -200,6 +224,7 @@ impl Cliente {
             revelando: None,
             _colheita: None,
             foco,
+            em_janela,
         }
     }
 
@@ -345,6 +370,21 @@ impl Cliente {
         self.alternar_info(cx);
     }
 
+    /// `J`: pede à raiz para reabrir esta tela no outro modo.
+    ///
+    /// 🔑 **Quem reabre é a raiz**, e não esta janela: o modo de uma janela do
+    /// GPUI (barra de título, se é movível, se é redimensionável) é decidido em
+    /// `open_window` e não muda depois. Trocar de modo é fechar e abrir de novo
+    /// — e quem sabe qual foto mostrar, e em que monitor, é quem abriu.
+    fn ao_alternar_janela(
+        &mut self,
+        _acao: &AlternarJanelaDoCliente,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        cx.emit(PedidoDoCliente::AlternarJanela);
+    }
+
     /// O que o rodapé conta: onde estamos, o nome, a nota e se o cliente já
     /// levou esta foto.
     ///
@@ -464,6 +504,8 @@ impl Cliente {
     }
 }
 
+impl gpui::EventEmitter<PedidoDoCliente> for Cliente {}
+
 impl Render for Cliente {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let info = self.mostrar_info.then(|| self.info()).flatten();
@@ -473,6 +515,7 @@ impl Render for Cliente {
             .key_context(CONTEXTO)
             .track_focus(&self.foco)
             .on_action(cx.listener(Self::ao_alternar_info))
+            .on_action(cx.listener(Self::ao_alternar_janela))
             .on_action(cx.listener(Self::ao_fechar))
             .relative()
             .size_full()
@@ -571,7 +614,15 @@ impl Render for Cliente {
                     .bg(gpui::rgba(0x00000078))
                     .text_xs()
                     .text_color(gpui::rgb(0xb4b4b4))
-                    .child("Esc fecha • I mostra o nome"),
+                    // 🔑 **`J` aparece aqui porque é a saída de um problema
+                    // que não se vê**: quando o Mac põe a tela no monitor
+                    // errado, ela não tem barra nem pode ser movida, e a única
+                    // pista de que dá para virá-la em janela é esta linha.
+                    .child(SharedString::from(if self.em_janela {
+                        "Esc fecha • I mostra o nome • J volta ao monitor"
+                    } else {
+                        "Esc fecha • I mostra o nome • J vira janela"
+                    })),
             )
     }
 }
@@ -732,7 +783,7 @@ mod testes {
     /// de longe sem contar o que não está lá.
     #[gpui::test]
     fn o_rodape_mostra_a_posicao_o_nome_e_as_cinco_estrelas(cx: &mut TestAppContext) {
-        let janela = cx.add_window(Cliente::novo);
+        let janela = cx.add_window(|window, cx| Cliente::novo(false, window, cx));
 
         janela
             .update(cx, |cliente, _window, cx| {
@@ -758,7 +809,7 @@ mod testes {
     /// A foto que o cliente já disse que leva aparece marcada.
     #[gpui::test]
     fn a_levada_no_balcao_aparece_como_escolhida(cx: &mut TestAppContext) {
-        let janela = cx.add_window(Cliente::novo);
+        let janela = cx.add_window(|window, cx| Cliente::novo(false, window, cx));
 
         janela
             .update(cx, |cliente, _window, cx| {
@@ -791,7 +842,7 @@ mod testes {
     /// ✨ Trocar de foto **guarda a anterior**: é ela que sai enquanto a nova entra.
     #[gpui::test]
     fn a_foto_que_sai_fica_para_o_cruzamento(cx: &mut TestAppContext) {
-        let janela = cx.add_window(Cliente::novo);
+        let janela = cx.add_window(|window, cx| Cliente::novo(false, window, cx));
 
         janela
             .update(cx, |cliente, _window, cx| {
@@ -828,7 +879,7 @@ mod testes {
     /// diferentes.
     #[gpui::test]
     fn continuar_na_mesma_foto_nao_cruza_nada(cx: &mut TestAppContext) {
-        let janela = cx.add_window(Cliente::novo);
+        let janela = cx.add_window(|window, cx| Cliente::novo(false, window, cx));
 
         janela
             .update(cx, |cliente, _window, cx| {
@@ -864,7 +915,7 @@ mod testes {
     #[gpui::test]
     fn a_tecla_i_liga_e_desliga_o_rodape(cx: &mut TestAppContext) {
         cx.update(init);
-        let janela = cx.add_window(Cliente::novo);
+        let janela = cx.add_window(|window, cx| Cliente::novo(false, window, cx));
 
         janela
             .update(cx, |cliente, _window, _cx| {
