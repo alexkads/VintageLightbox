@@ -667,8 +667,8 @@ impl Caixa {
         self.decidir_estudio(flutuante);
     }
 
-    /// O pedido manda; senão o da sessão aberta; senão o primeiro ativo. Com o
-    /// estúdio decidido, o caixa dele.
+    /// O pedido manda; senão o da sessão aberta; senão **o estúdio desta
+    /// máquina**; senão o primeiro ativo. Com o estúdio decidido, o caixa dele.
     ///
     /// No painel da galeria o caixa é **o do estúdio da sessão**, ativo ou não
     /// (`carregarGaleria`); sessão sem estúdio não tem caixa.
@@ -691,10 +691,15 @@ impl Caixa {
         let estudio = if flutuante {
             da_sessao
         } else {
+            // 🏢 **O estúdio da entrada das sessões entra aqui** (dono,
+            // 2026-09-18): sem ele, o caixa abria no primeiro ativo — o de
+            // outra cidade metade das vezes.
+            let da_maquina = crate::sessoes::tela::estudio_de_trabalho_guardado();
             regras::escolher_estudio(
                 &ativos,
                 carga.estudio_pedido.as_deref(),
                 da_sessao.as_deref(),
+                da_maquina.as_deref(),
             )
         };
         if let (Some(id), Some(conta)) = (&estudio, self.sessao.clone()) {

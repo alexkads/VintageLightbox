@@ -1126,16 +1126,27 @@ pub fn filtrar_sessoes<'a>(sessoes: &'a [SessaoACobrar], busca: &str) -> Vec<&'a
         .collect()
 }
 
-/// O estúdio do caixa: o pedido manda; senão o da sessão aberta; senão o
-/// primeiro ativo.
+/// O estúdio do caixa: o pedido manda; senão o da sessão aberta; senão **o
+/// estúdio desta máquina**; e só então o primeiro ativo.
+///
+/// 🚨 **`da_maquina` entrou em 18/set/2026** (dono: *"essa seleção de estúdio
+/// [precisa] influenciar o caixa também"*). O último recurso — o primeiro
+/// ativo — é um chute, e metade das vezes ele é o estúdio de outra cidade: o
+/// caixa abria em Gramado para quem está em Canela. Com a escolha da entrada
+/// das sessões, o chute só acontece para quem ainda não escolheu nada.
+///
+/// A ordem é a mesma do site (`caixa/carregar.ts`), e é o que faz as três
+/// interfaces abrirem o mesmo caixa.
 pub fn escolher_estudio(
     ativos: &[String],
     pedido: Option<&str>,
     da_sessao: Option<&str>,
+    da_maquina: Option<&str>,
 ) -> Option<String> {
     let achar = |id: Option<&str>| id.and_then(|id| ativos.iter().find(|a| a.as_str() == id));
     achar(pedido)
         .or_else(|| achar(da_sessao))
+        .or_else(|| achar(da_maquina))
         .or_else(|| ativos.first())
         .cloned()
 }
@@ -1776,22 +1787,41 @@ mod testes {
         assert!(filtrar_sessoes(&lista, "pedro").is_empty());
     }
 
+    /// 🚨 A ordem inteira, com o estúdio da máquina entre a sessão e o chute.
     #[test]
-    fn o_estudio_do_pedido_manda_depois_o_da_sessao_depois_o_primeiro() {
-        let ativos = vec!["a".to_string(), "b".to_string()];
+    fn o_estudio_do_pedido_manda_depois_o_da_sessao_depois_o_da_maquina() {
+        let ativos = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+        // O pedido no endereço vence tudo.
         assert_eq!(
-            escolher_estudio(&ativos, Some("b"), Some("a")).as_deref(),
+            escolher_estudio(&ativos, Some("b"), Some("a"), Some("c")).as_deref(),
             Some("b")
         );
+        // Pedido que não existe mais cai para o da sessão.
         assert_eq!(
-            escolher_estudio(&ativos, Some("x"), Some("b")).as_deref(),
+            escolher_estudio(&ativos, Some("x"), Some("b"), Some("c")).as_deref(),
             Some("b")
         );
+        // Sem sessão com estúdio, vale o **desta máquina** — e não o primeiro.
         assert_eq!(
-            escolher_estudio(&ativos, None, Some("x")).as_deref(),
+            escolher_estudio(&ativos, None, None, Some("c")).as_deref(),
+            Some("c"),
+            "o caixa abre no estúdio em que o operador disse estar"
+        );
+        assert_eq!(
+            escolher_estudio(&ativos, None, Some("x"), Some("c")).as_deref(),
+            Some("c")
+        );
+        // Sem nada escolhido, o chute: o primeiro ativo.
+        assert_eq!(
+            escolher_estudio(&ativos, None, None, None).as_deref(),
             Some("a")
         );
-        assert_eq!(escolher_estudio(&[], Some("a"), None), None);
+        // Estúdio de máquina que saiu do cadastro não vale.
+        assert_eq!(
+            escolher_estudio(&ativos, None, None, Some("sumiu")).as_deref(),
+            Some("a")
+        );
+        assert_eq!(escolher_estudio(&[], Some("a"), None, Some("c")), None);
     }
 
     #[test]

@@ -146,6 +146,17 @@ fn estudio_lembrado(caminho: &Path) -> Option<String> {
         .filter(|id| !id.trim().is_empty())
 }
 
+/// O estúdio que **esta máquina** escolheu na entrada das sessões, como está
+/// guardado — sem conferir contra a lista de agora.
+///
+/// 🔑 **Quem confere é quem tem a lista** (a tela das sessões, o caixa): aqui
+/// só se lê o arquivo. É por esta função que o caixa sabe em que estúdio abrir
+/// quando a sessão não diz (dono, 2026-09-18) — o equivalente ao cookie que a
+/// web grava para o servidor ler.
+pub fn estudio_de_trabalho_guardado() -> Option<String> {
+    estudio_lembrado(&caminho_da_lembranca())
+}
+
 fn lembrar_estudio(caminho: &Path, estudio_id: &str) {
     let lembranca = Lembranca {
         estudio_id: Some(estudio_id.to_string()),
