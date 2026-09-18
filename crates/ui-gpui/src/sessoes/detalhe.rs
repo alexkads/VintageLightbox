@@ -37,9 +37,10 @@ use biblioteca_core::dinheiro;
 use biblioteca_core::grade::{colunas_que_cabem, linhas_necessarias};
 use biblioteca_core::selecao::{Modificadores, Selecao};
 use domain::services::pos_venda::{
-    EstadoDaFotoNoSite, EstadoNoBalcao, FotoDaGaleria, GaleriaAberta, LinkDeAcesso,
+    EstadoDaFotoNoSite, EstadoNoBalcao, Estudio, FotoDaGaleria, GaleriaAberta, LinkDeAcesso,
     MudancaDaGaleria, Produto, Sessao,
 };
+use domain::services::PreviewType;
 use gpui::{
     canvas, div, img, prelude::*, px, App, Context, Entity, EventEmitter, Focusable, SharedString,
     Task, Window,
@@ -47,6 +48,7 @@ use gpui::{
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::progress::Progress;
+use gpui_component::select::{SearchableVec, Select, SelectEvent, SelectItem, SelectState};
 use gpui_component::slider::{Slider, SliderEvent, SliderState};
 use gpui_component::{ActiveTheme, Disableable, Sizable};
 use infrastructure::cache::preview_manager::PreviewManager;
@@ -122,6 +124,21 @@ struct MedidaDaGrade {
 /// 🚨 **"Sem nota" é o último de propósito**: é um recorte de exceção — o que
 /// está sem classificação não pode ir à venda, não recebe marca d'água e não
 /// devia estar no storage. Ele existe para esvaziar, não para consultar.
+/// O modificador do sistema, como o `useTeclaDeAtalho` do site: `⌘` no Mac,
+/// `Ctrl` no resto. A dica que mostra a tecla errada ensina o gesto errado.
+#[cfg(target_os = "macos")]
+const MODIFICADOR: &str = "⌘";
+#[cfg(not(target_os = "macos"))]
+const MODIFICADOR: &str = "Ctrl";
+#[cfg(target_os = "macos")]
+const MODIFICADOR_A: &str = "⌘+A";
+#[cfg(not(target_os = "macos"))]
+const MODIFICADOR_A: &str = "Ctrl+A";
+#[cfg(target_os = "macos")]
+const MODIFICADOR_D: &str = "⌘+D";
+#[cfg(not(target_os = "macos"))]
+const MODIFICADOR_D: &str = "Ctrl+D";
+
 const FILTROS: [(&str, Filtro); 7] = [
     ("Todas", Filtro::Todas),
     // 🔑 **Os dois passos do balcão, na ordem em que acontecem**: classificar
@@ -155,6 +172,8 @@ pub enum Pedido {
     AlternarMenu,
     /// "Negociação…": o balcão com as fotos marcadas.
     Negociar(Vec<String>),
+    /// "Apagar": a foto sai do site, com os dois arquivos.
+    ApagarDoSite(String),
     /// "Imprimir…": a folha de impressão com as fotos marcadas (só no desktop).
     Imprimir(Vec<String>),
     /// A miniatura de uma foto do site chegou ao cache, sob esta chave.
@@ -297,7 +316,16 @@ pub struct Detalhe {
     /// Quantas miniaturas ainda estão a caminho.
     baixando: usize,
     /// As faixas de preço do catálogo — o `select` da barra de envio.
+    ///
+    /// 🚨 **Ninguém as carregava.** O campo, o `escolher_faixa` e o `faixa()`
+    /// existiam desde o porte, e a lista chegava **vazia**: a barra não tinha o
+    /// seletor, e a leva inteira subia na faixa da galeria. No site a faixa é
+    /// uma das **duas escolhas antes dos arquivos** (`envio.tsx`), porque a
+    /// sessão mista sobe em levas — a mãe sozinha numa faixa, a família em
+    /// outra.
     produtos: Vec<Produto>,
+    /// Os estúdios do cadastro — o seletor do cabeçalho, como no site.
+    estudios: Vec<Estudio>,
     /// A faixa escolhida para a próxima leva. `None` = a padrão da galeria.
     faixa: Option<String>,
     /// O lado do tile, em pixels.
@@ -433,6 +461,43 @@ pub struct Detalhe {
     /// sob `site:<id>` não acha nada, e o sintoma é a **célula preta** — a foto
     /// aparece na grade, com nome, estado e faixa, e sem imagem.
     ids_locais: std::collections::HashSet<String>,
+    /// Quais fotos locais já têm a **revelada da receita padrão** no cache.
+    ///
+    /// 🔑 **Consultado uma vez por foto, e não por quadro.** Saber se a chave
+    /// existe custa disco; `chave_da_foto` roda por foto visível a cada quadro,
+    /// e era assim que a grade já travou uma vez (ver `preparar_miniaturas`).
+    /// `revelada_chegou` tira a foto daqui, e a próxima consulta a refaz.
+    com_revelada: std::collections::HashMap<String, bool>,
+    /// Os controles do painel da foto em foco — ver [`CamposDoPainel`].
+    campos_do_painel: Option<CamposDoPainel>,
+    /// A gaveta do atendimento está aberta?
+    atendimento_aberto: bool,
+    /// A sanfona "Faixa, negociação e preço" do painel — **fechada por
+    /// padrão**, como no site (`PainelColapsavel`, `padrao={false}`): o que se
+    /// faz a cada foto fica em cima; o que se faz uma vez por atendimento, atrás
+    /// de um clique.
+    faixa_e_precos_aberto: bool,
+    /// O "detalhes" do cabeçalho — os números e os prazos, como o popover do
+    /// site. Ele se consulta uma vez por atendimento, e por isso não fica na
+    /// faixa de cima: cada pixel ali é uma foto a menos na primeira olhada.
+    detalhes_abertos: bool,
+    /// A foto cujo "Apagar" está sendo perguntado — `(id, nome do arquivo)`.
+    ///
+    /// 🚨 **Um diálogo, como no site** (`useConfirmacao`): apagar tira a foto
+    /// **e os arquivos dela** do site, e não há como desfazer pela tela. O
+    /// balcão é tela de dedo rápido; a pergunta é o freio.
+    apagar_confirmando: Option<(String, String)>,
+    /// As predefinições que este app conhece — para a gaveta dizer o **nome** do
+    /// preset padrão, e não o id.
+    presets_da_receita: Vec<domain::entities::Preset>,
+    /// O seletor da **faixa da próxima leva**, na barra de envio (site:
+    /// `envio.tsx`). Criado no primeiro render, porque `nova` não tem `window`.
+    escolha_da_leva: Option<Entity<SelectState<SearchableVec<OpcaoDaFaixa>>>>,
+    /// O seletor do **estúdio da sessão**, no cabeçalho (site:
+    /// `estudio-da-galeria.tsx`).
+    escolha_do_estudio: Option<Entity<SelectState<SearchableVec<OpcaoDaFaixa>>>>,
+    /// As assinaturas dos dois — sem elas o `Confirm` não chega a lugar nenhum.
+    _escolhas_da_barra: Vec<gpui::Subscription>,
     /// Quem grava a foto **no catálogo local** — o SQLite desta máquina.
     ///
     /// 🚨 **A importação não sobe nada**, e essa é a regra do dono (8/set/2026):
@@ -506,6 +571,44 @@ struct CamposDoCliente {
 }
 
 /// Um campo já com o valor que a sessão tem.
+/// Uma faixa (tipo de ensaio) no menu do painel. `id` vazio = o padrão da
+/// galeria, que é como o site também oferece a primeira opção.
+#[derive(Debug, Clone)]
+pub(crate) struct OpcaoDaFaixa {
+    id: String,
+    titulo: SharedString,
+}
+
+impl SelectItem for OpcaoDaFaixa {
+    type Value = String;
+
+    fn title(&self) -> SharedString {
+        self.titulo.clone()
+    }
+
+    fn value(&self) -> &Self::Value {
+        &self.id
+    }
+
+    fn display_title(&self) -> Option<gpui::AnyElement> {
+        None
+    }
+}
+
+/// Os controles do painel da foto em foco — a faixa e o preço de venda.
+///
+/// 🔑 **Criados sob demanda, e um jogo por foto.** `Detalhe::nova` não tem
+/// `window` (ver o comentário do `zoom_slider`), e `SelectState`/`InputState`
+/// pedem uma; então eles nascem no primeiro render em que há foco, como os
+/// campos do cliente. Trocar de foto refaz o jogo: um `InputState` guarda texto,
+/// e reaproveitá-lo mostraria o preço da foto anterior na foto de agora.
+struct CamposDoPainel {
+    foto_id: String,
+    faixa: Entity<SelectState<SearchableVec<OpcaoDaFaixa>>>,
+    preco: Entity<InputState>,
+    _assinaturas: Vec<gpui::Subscription>,
+}
+
 fn campo_preenchido(
     valor: &str,
     dica: &'static str,
@@ -583,6 +686,7 @@ impl Detalhe {
             pedidas: std::collections::HashSet::new(),
             baixando: 0,
             produtos: Vec::new(),
+            estudios: Vec::new(),
             faixa: None,
             zoom: ZOOM_PADRAO,
             avisando: false,
@@ -591,6 +695,16 @@ impl Detalhe {
             do_site: Vec::new(),
             locais: Vec::new(),
             ids_locais: std::collections::HashSet::new(),
+            com_revelada: std::collections::HashMap::new(),
+            campos_do_painel: None,
+            atendimento_aberto: false,
+            faixa_e_precos_aberto: false,
+            detalhes_abertos: false,
+            apagar_confirmando: None,
+            presets_da_receita: Vec::new(),
+            escolha_da_leva: None,
+            escolha_do_estudio: None,
+            _escolhas_da_barra: Vec::new(),
             importador,
             andamentos: channel(),
             freios: Freios::default(),
@@ -638,6 +752,12 @@ impl Detalhe {
         self.erro = None;
         self.carregando = true;
 
+        // O catálogo e os estúdios vêm junto: são eles que enchem o seletor de
+        // faixa da barra de envio e o do estúdio no cabeçalho.
+        self.publicador
+            .produtos(sessao.clone(), self.recados.0.clone());
+        self.publicador
+            .estudios(sessao.clone(), self.recados.0.clone());
         self.publicador
             .abrir_galeria(sessao, galeria_id, self.recados.0.clone());
         self.acompanhar(cx);
@@ -812,6 +932,46 @@ impl Detalhe {
 
     pub fn posicao_em_foco(&self) -> Option<usize> {
         self.selecao.foco()
+    }
+
+    /// 🧪 O "Apagar" do painel, sem o clique — o cenário e2e o usa para afirmar
+    /// **o que a pergunta diz** antes de confirmar.
+    #[cfg(test)]
+    pub(crate) fn apagar_do_site_para_teste(&mut self, cx: &mut Context<Self>) {
+        self.apagar_do_site(cx);
+    }
+
+    /// 🧪 O arquivo citado na pergunta de apagar, se ela está aberta.
+    #[cfg(test)]
+    pub(crate) fn arquivo_na_pergunta_de_apagar(&self) -> Option<String> {
+        self.apagar_confirmando
+            .as_ref()
+            .map(|(_, arquivo)| arquivo.clone())
+    }
+
+    /// 🧪 A faixa da foto em foco, sem abrir o seletor.
+    #[cfg(test)]
+    pub(crate) fn mudar_faixa_para_teste(&mut self, produto_id: &str, cx: &mut Context<Self>) {
+        self.mudar_faixa(produto_id.to_string(), cx);
+    }
+
+    /// Os ids das fotos do recorte em vigor, na ordem da grade — que é a mesma
+    /// da tira.
+    ///
+    /// 🔑 **É o que os cenários e2e afirmam.** Contar fotos não diz **quais**
+    /// ficaram: um recorte que troque duas fotos de lugar, ou que deixe entrar a
+    /// comprada em "à venda", passa por qualquer teste que só some.
+    pub fn ids_visiveis(&self) -> Vec<String> {
+        (0..self.acervo.total_visivel())
+            .filter_map(|p| self.acervo.visivel(p).map(|f| f.id.clone()))
+            .collect()
+    }
+
+    /// `(estado, nota, revelada)` de uma foto visível — o que a célula mostra.
+    pub fn como_esta(&self, id: &str) -> Option<(acervo::Estado, Option<u8>, bool)> {
+        let p = self.acervo.posicao_de(id)?;
+        let f = self.acervo.visivel(p)?;
+        Some((f.estado, f.nota, f.revelada))
     }
 
     pub fn total_visivel(&self) -> usize {
@@ -1598,6 +1758,7 @@ impl Detalhe {
                 titulo: mudancas.titulo,
                 email: mudancas.email,
                 whatsapp: mudancas.whatsapp,
+                ..Default::default()
             },
             self.recados.0.clone(),
         );
@@ -1613,6 +1774,20 @@ impl Detalhe {
             // O formulário exige o e-mail neste motivo: o aviso tem para onde ir.
             MotivoDoFormulario::ContatoParaAvisar => self.avisar(cx),
         }
+    }
+
+    /// A receita padrão revelou esta foto: a miniatura velha sai do cache, e a
+    /// próxima passada de `preparar_miniaturas` lê a nova.
+    ///
+    /// 🔑 **É a metade visível do C17** ("mudou a origem, os caches derivados
+    /// saem e são refeitos"): quem gravou foi o serviço, em disco; aqui só se
+    /// descarta o que está na memória desta tela.
+    pub fn revelada_chegou(&mut self, foto_id: &str) {
+        self.miniaturas.esquecer(foto_id);
+        self.miniaturas
+            .esquecer(&crate::revelacao::persistencia::chave_da_revelada(foto_id));
+        // A próxima `chave_da_foto` pergunta ao disco de novo — e agora acha.
+        self.com_revelada.remove(foto_id);
     }
 
     /// Pede as miniaturas que ainda faltam — uma vez cada.
@@ -1865,6 +2040,8 @@ impl Detalhe {
                     };
                     self.abrir_formulario_do_cliente(motivo, Some(frase.into()), cx);
                 }
+                Recado::Produtos(lista) => self.produtos = lista,
+                Recado::Estudios(lista) => self.estudios = lista,
                 Recado::GaleriaAtualizada => {
                     if let Some((motivo, novo)) = self.gravando_dados.take() {
                         if let Some(aberta) = self.aberta.as_mut() {
@@ -1950,9 +2127,32 @@ impl Detalhe {
     /// estado e faixa, e nenhuma imagem.
     fn chave_da_foto(&self, foto_id: &str) -> String {
         if self.ids_locais.contains(foto_id) {
+            // 🚨 **A revelada da receita padrão vem antes do bruto.** A etapa 2
+            // do assistente promete a predefinição e o corte; sem esta linha a
+            // sessão abria mostrando os brutos, e o que o operador tinha visto
+            // no assistente sumia ao entrar (achado do dono, 17/set/2026).
+            //
+            // Quem pergunta ao disco é `resolver_revelada`, uma vez por foto,
+            // em `preparar_miniaturas`. Aqui só se lê o que ela respondeu:
+            // desenhar não é hora de tocar em disco.
+            if self.com_revelada.get(foto_id) == Some(&true) {
+                return crate::revelacao::persistencia::chave_da_revelada(foto_id);
+            }
             return foto_id.to_string();
         }
         chave_do_site(foto_id)
+    }
+
+    /// Esta foto local já tem a revelada da receita padrão? — pergunta ao disco
+    /// **uma vez** e guarda a resposta (ver `com_revelada`).
+    fn resolver_revelada(&mut self, foto_id: &str) {
+        if !self.ids_locais.contains(foto_id) || self.com_revelada.contains_key(foto_id) {
+            return;
+        }
+        let revelada = crate::revelacao::persistencia::chave_da_revelada(foto_id);
+        let tem = self.previews.tem(&revelada, PreviewType::Thumbnail)
+            || self.previews.tem(&revelada, PreviewType::Large);
+        self.com_revelada.insert(foto_id.to_string(), tem);
     }
 
     /// Põe na memória a miniatura de cada foto visível — **uma vez por quadro**,
@@ -2012,7 +2212,9 @@ impl Detalhe {
             let Some(foto) = self.acervo.visivel(posicao) else {
                 continue;
             };
-            let chave = self.chave_da_foto(&foto.id);
+            let foto_id = foto.id.clone();
+            self.resolver_revelada(&foto_id);
+            let chave = self.chave_da_foto(&foto_id);
             if self.miniaturas.espiar(&chave).is_some() {
                 // `tocar`: o que está perto da vista não é o que o LRU descarta.
                 self.miniaturas.tocar(&chave);
@@ -2149,6 +2351,8 @@ impl Render for Detalhe {
             cx.on_next_frame(window, |_tela, _window, cx| cx.notify());
         }
         self.preparar_formulario_do_cliente(window, cx);
+        self.preparar_painel(window, cx);
+        self.preparar_seletores(window, cx);
 
         // 🎨 **As faixas do site**: o cabeçalho de 48 px, a barra da importação
         // e a dos recortes, cada uma com o traço de baixo, e a grade encostada
@@ -2167,6 +2371,9 @@ impl Render for Detalhe {
                 self.formulario_do_cliente(cx)
                     .map(|f| div().p(px(12.)).child(f)),
             )
+            .children(self.detalhes(cx))
+            .children(self.atendimento(cx))
+            .children(self.dialogo_de_apagar(cx))
             .child(self.envio(cx))
             .child(self.barra_da_grade(cx))
             .when_some(self.erro.clone(), |tela, erro| {
@@ -2187,6 +2394,14 @@ impl Render for Detalhe {
                     .child(self.corpo(cx)),
             )
             .child(self.tira(cx))
+            // 🪟 **As duas camadas do site, por cima da tela**: os "detalhes"
+            // ancorados no botão que os abriu (o `Popover` de lá) e o
+            // atendimento como gaveta que entra pela direita (o `Drawer`).
+            // Elas ficam **por último** para nascerem acima da grade, e são
+            // desenhadas na própria tela — o `deferred` do GPUI não aceita
+            // outro `deferred` dentro (ver `caixa/dialogos.rs`).
+            .children(self.detalhes(cx))
+            .children(self.atendimento(cx))
     }
 }
 
@@ -2324,12 +2539,40 @@ impl Detalhe {
                 estilo::botao_contorno("sessao-contagem", cx)
                     .text_xs()
                     .text_color(apagado)
-                    .cursor_default()
                     .child(Icon::new(Icone::Info).size(px(14.)))
                     .child(format!(
                         "{levadas} levadas · {a_venda} à venda · {compradas} compradas"
-                    )),
+                    ))
+                    .on_click(cx.listener(|tela, _ev, _window, cx| {
+                        tela.detalhes_abertos = !tela.detalhes_abertos;
+                        cx.notify();
+                    })),
             )
+            // 📋 **Atendimento** — o que o assistente coletou nas sete etapas.
+            // No site é uma gaveta ao lado do "Dados do cliente", e é onde se
+            // corrige um voucher errado sem recriar a sessão.
+            .child(estilo::desligado(
+                estilo::botao_fantasma("sessao-atendimento", cx)
+                    .border_1()
+                    .border_color(campo)
+                    .child(Icon::new(Icone::ClipboardList).size(px(16.)))
+                    .child(SharedString::from(match self.quantas_associacoes() {
+                        0 => "Atendimento".to_string(),
+                        n => format!("Atendimento · {n}"),
+                    }))
+                    .when(!sem_galeria, |b| {
+                        b.on_click(
+                            cx.listener(|tela, _ev, _window, cx| tela.alternar_atendimento(cx)),
+                        )
+                    }),
+                sem_galeria,
+            ))
+            // 🏠 **O estúdio da sessão**, como no cabeçalho do site.
+            .children(self.escolha_do_estudio.as_ref().map(|escolha| {
+                div()
+                    .w(px(200.))
+                    .child(Select::new(escolha).xsmall().placeholder("Estúdio…"))
+            }))
             .child(estilo::desligado(
                 estilo::botao_fantasma("sessao-editar-cliente", cx)
                     .border_1()
@@ -2604,6 +2847,14 @@ impl Detalhe {
             .child(ficha("sem marcação", None, cx))
             .child(ficha("à venda", Some(EstadoNoBalcao::Disponivel), cx))
             .child(ficha("levadas", Some(EstadoNoBalcao::LevadaNoBalcao), cx))
+            // 🧾 **A faixa da próxima leva** — a segunda escolha antes dos
+            // arquivos, como no site: a sessão mista sobe em levas, e sem ela
+            // toda foto nascia na faixa da galeria.
+            .children(self.escolha_da_leva.as_ref().map(|escolha| {
+                div()
+                    .w(px(232.))
+                    .child(Select::new(escolha).xsmall().placeholder("Faixa…"))
+            }))
             .child(
                 div()
                     .flex()
@@ -3128,7 +3379,871 @@ impl Detalhe {
     }
 
     /// O painel da direita: o que se sabe e o que se muda **nesta** foto.
+    /// Monta os seletores da barra e do cabeçalho quando o catálogo chega.
+    ///
+    /// Como o painel da foto: eles pedem `window`, e `Detalhe::nova` não tem uma.
+    /// Refazer quando a lista muda é de propósito — a primeira carga chega com o
+    /// catálogo vazio.
+    fn preparar_seletores(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.produtos.is_empty() && self.estudios.is_empty() {
+            return;
+        }
+        if self.escolha_da_leva.is_none() && !self.produtos.is_empty() {
+            let mut opcoes = vec![OpcaoDaFaixa {
+                id: String::new(),
+                titulo: SharedString::from(format!(
+                    "Padrão da galeria ({})",
+                    self.nome_da_faixa(&self.produto_padrao_da_galeria())
+                )),
+            }];
+            opcoes.extend(self.produtos.iter().map(|p| OpcaoDaFaixa {
+                id: p.id.clone(),
+                titulo: SharedString::from(self.nome_da_faixa(&p.id)),
+            }));
+            let escolha =
+                cx.new(|cx| SelectState::new(SearchableVec::new(opcoes), None, window, cx));
+            let atual = self.faixa.clone().unwrap_or_default();
+            escolha.update(cx, |estado, cx| {
+                estado.set_selected_value(&atual, window, cx);
+            });
+            self._escolhas_da_barra.push(cx.subscribe_in(
+                &escolha,
+                window,
+                |tela, _, evento: &SelectEvent<SearchableVec<OpcaoDaFaixa>>, _window, cx| {
+                    let SelectEvent::Confirm(valor) = evento;
+                    let id = valor.clone().unwrap_or_default();
+                    tela.escolher_faixa((!id.trim().is_empty()).then_some(id), cx);
+                },
+            ));
+            self.escolha_da_leva = Some(escolha);
+        }
+        if self.escolha_do_estudio.is_none() && !self.estudios.is_empty() {
+            let opcoes: Vec<OpcaoDaFaixa> = self
+                .estudios
+                .iter()
+                .map(|e| OpcaoDaFaixa {
+                    id: e.id.clone(),
+                    titulo: SharedString::from(if e.cidade.trim().is_empty() {
+                        e.nome.clone()
+                    } else {
+                        format!("{} — {}", e.nome, e.cidade)
+                    }),
+                })
+                .collect();
+            let escolha =
+                cx.new(|cx| SelectState::new(SearchableVec::new(opcoes), None, window, cx));
+            let atual = self.estudio_da_galeria();
+            escolha.update(cx, |estado, cx| {
+                estado.set_selected_value(&atual, window, cx);
+            });
+            self._escolhas_da_barra.push(cx.subscribe_in(
+                &escolha,
+                window,
+                |tela, _, evento: &SelectEvent<SearchableVec<OpcaoDaFaixa>>, _window, cx| {
+                    let SelectEvent::Confirm(valor) = evento;
+                    tela.mudar_estudio(valor.clone().unwrap_or_default(), cx);
+                },
+            ));
+            self.escolha_do_estudio = Some(escolha);
+        }
+    }
+
+    /// A raiz entrega as predefinições carregadas na abertura.
+    pub fn definir_presets(&mut self, presets: Vec<domain::entities::Preset>) {
+        self.presets_da_receita = presets;
+    }
+
+    /// Abre ou fecha os detalhes da sessão (números e prazos).
+    pub fn alternar_detalhes(&mut self, cx: &mut Context<Self>) {
+        self.detalhes_abertos = !self.detalhes_abertos;
+        cx.notify();
+    }
+
+    /// Abre ou fecha a gaveta do atendimento.
+    pub fn alternar_atendimento(&mut self, cx: &mut Context<Self>) {
+        self.atendimento_aberto = !self.atendimento_aberto;
+        cx.notify();
+    }
+
+    /// Quantas associações a sessão tem — o número do botão do cabeçalho.
+    /// A mesma conta do site (`quantasAssociacoes`).
+    fn quantas_associacoes(&self) -> usize {
+        let Some(aberta) = self.aberta.as_ref() else {
+            return 0;
+        };
+        let g = &aberta.galeria;
+        [
+            g.ensaio_id.is_some(),
+            g.voucher_id.is_some(),
+            g.pedido_id.is_some(),
+            g.como_conheceu.is_some(),
+            g.preset_padrao_id.is_some() || g.proporcao_padrao.is_some(),
+        ]
+        .into_iter()
+        .filter(|tem| *tem)
+        .count()
+    }
+
+    /// Troca a resposta de "como conheceu" da sessão aberta.
+    ///
+    /// 🚨 **Os três campos vão juntos.** Trocar a resposta sem limpar o parceiro
+    /// manda `parceiro_id` com outra origem, e o site recusa (`400`); clicar na
+    /// que já está marcada desmarca — "não perguntei" é diferente de qualquer
+    /// resposta, como no `ToggleGroup` do site.
+    fn escolher_como_conheceu(&mut self, valor: &str, cx: &mut Context<Self>) {
+        let atual = self
+            .aberta
+            .as_ref()
+            .and_then(|a| a.galeria.como_conheceu.clone());
+        let novo = (atual.as_deref() != Some(valor)).then(|| valor.to_string());
+        let vira_parceiro = novo.as_deref() == Some("parceiro");
+        let vira_outro = novo.as_deref() == Some("outro");
+        self.gravar_a_galeria(
+            MudancaDaGaleria {
+                como_conheceu: Some(novo),
+                // O parceiro só sobrevive à resposta "parceiro"; o texto, à
+                // "outro". A gaveta ainda não escolhe parceiro — quem o associa
+                // é o assistente —, então trocar para "parceiro" mantém o que
+                // houver.
+                parceiro_id: (!vira_parceiro).then_some(None),
+                como_conheceu_detalhe: (!vira_outro).then_some(None),
+                ..Default::default()
+            },
+            cx,
+        );
+    }
+
+    /// Troca o corte padrão da sessão. `""` é "sem corte".
+    fn escolher_corte_padrao(&mut self, valor: &str, cx: &mut Context<Self>) {
+        let novo = (!valor.trim().is_empty()).then(|| valor.to_string());
+        let atual = self
+            .aberta
+            .as_ref()
+            .and_then(|a| a.galeria.proporcao_padrao.clone());
+        if atual == novo {
+            return;
+        }
+        self.gravar_a_galeria(
+            MudancaDaGaleria {
+                proporcao_padrao: Some(novo),
+                ..Default::default()
+            },
+            cx,
+        );
+    }
+
+    /// Os números e os prazos da galeria — o "detalhes" do cabeçalho do site.
+    ///
+    /// 🔑 **Nada aqui muda foto nenhuma**: é conferência, e por isso fica atrás
+    /// de um clique. Prazo ausente some da lista em vez de virar "—": a galeria
+    /// sem vencimento de venda não tem essa data, e inventar um traço sugeriria
+    /// que alguém esqueceu de preencher.
+    fn detalhes(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+        if !self.detalhes_abertos {
+            return None;
+        }
+        let aberta = self.aberta.as_ref()?;
+        let g = &aberta.galeria;
+        let tema = cx.theme();
+        let apagado = tema.muted_foreground;
+        let (levadas, a_venda, compradas) = self.contagem();
+        let apagadas = self.acervo.contagens().de(Filtro::Apagadas);
+
+        let linha = |rotulo: &'static str, valor: String| {
+            div()
+                .flex()
+                .gap(px(8.))
+                .text_sm()
+                .child(div().w(px(150.)).text_color(apagado).child(rotulo))
+                .child(div().flex_1().truncate().child(SharedString::from(valor)))
+        };
+        let dia = |quando: Option<i64>| {
+            quando
+                .and_then(|s| chrono::DateTime::from_timestamp(s, 0))
+                .map(|d| {
+                    d.with_timezone(&chrono::FixedOffset::west_opt(3 * 3600).expect("fuso"))
+                        .format("%d/%m/%Y")
+                        .to_string()
+                })
+        };
+        let padrao = self.produto_padrao_da_galeria();
+
+        Some(
+            // O véu ocupa a tela e fecha ao clique, como o `Popover` do site
+            // fecha ao clicar fora; o painel nasce abaixo do botão que o abriu,
+            // alinhado à direita dele.
+            div()
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full()
+                .id("detalhes-veu")
+                .on_click(cx.listener(|tela, _ev, _w, cx| {
+                    tela.detalhes_abertos = false;
+                    cx.notify();
+                }))
+                .child(
+            div()
+                .absolute()
+                .top(px(52.))
+                .right(px(12.))
+                .w(px(384.))
+                .flex()
+                .flex_col()
+                .gap(px(8.))
+                .p(px(12.))
+                .rounded(tema.radius)
+                .border_1()
+                .border_color(tema.border)
+                .bg(tema.background)
+                .shadow_lg()
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .child(
+                            div()
+                                .flex_1()
+                                .font_weight(gpui::FontWeight::SEMIBOLD)
+                                .child("Detalhes da sessão"),
+                        )
+                        .child(
+                            Button::new("detalhes-fechar")
+                                .label("Fechar")
+                                .xsmall()
+                                .ghost()
+                                .on_click(cx.listener(|tela, _ev, _w, cx| {
+                                    tela.detalhes_abertos = false;
+                                    cx.notify();
+                                })),
+                        ),
+                )
+                .child(linha(
+                    "Fotos",
+                    match apagadas {
+                        0 => format!("{levadas} levadas · {a_venda} à venda · {compradas} compradas"),
+                        n => format!(
+                            "{levadas} levadas · {a_venda} à venda · {compradas} compradas · {n} apagadas"
+                        ),
+                    },
+                ))
+                .child(linha("Preço padrão", self.nome_da_faixa(&padrao)))
+                .children(
+                    dia(aberta.vence_venda).map(|quando| linha("À venda até", quando)),
+                )
+                .children(
+                    dia(aberta.vence_download).map(|quando| linha("Download até", quando)),
+                )
+                .children(dia(g.expira_em).map(|quando| linha("Galeria até", quando)))
+                .child(linha(
+                    "Criada",
+                    {
+                        // `2026-09-18` → `18/09/2026`: a data se lê como no
+                        // resto da tela, e não como o banco a guarda.
+                        let criada = g
+                            .criada_em_iso
+                            .split('-')
+                            .collect::<Vec<_>>()
+                            .as_slice()
+                            .try_into()
+                            .map(|[a, m, d]: [&str; 3]| format!("{d}/{m}/{a}"))
+                            .unwrap_or_else(|_| g.criada_em_iso.clone());
+                        match g.criada_por.as_deref().filter(|q| !q.trim().is_empty()) {
+                            Some(quem) => format!("{criada} por {quem}"),
+                            None => criada,
+                        }
+                    },
+                )),
+                ),
+        )
+    }
+
+    /// A gaveta do atendimento: o que veio junto com o cliente.
+    ///
+    /// 🔑 **Ids valem como "associado".** A API devolve o id sempre e o resumo
+    /// quando o tem; um `voucher_id` sem resumo aparece como "associado", porque
+    /// esconder diria que **não há** voucher — e o gesto seguinte do operador
+    /// seria associar outro por cima (a mesma regra do `atendimento.ts`).
+    fn atendimento(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+        if !self.atendimento_aberto {
+            return None;
+        }
+        let aberta = self.aberta.as_ref()?;
+        let g = aberta.galeria.clone();
+        let tema = cx.theme();
+        let apagado = tema.muted_foreground;
+
+        let linha = |rotulo: &'static str, valor: String| {
+            div()
+                .flex()
+                .items_center()
+                .gap(px(8.))
+                .text_sm()
+                .child(div().w(px(150.)).text_color(apagado).child(rotulo))
+                .child(div().flex_1().truncate().child(SharedString::from(valor)))
+        };
+        // 🔑 O resumo quando ele veio; "associado" quando só há o id; "—" quando
+        // não há associação nenhuma. Nunca o contrário: esconder um id sem
+        // resumo diria que não há associação, e o gesto seguinte seria associar
+        // outra por cima (a mesma regra do `atendimento.ts`).
+        let resumos = aberta.resumos.clone();
+        let com_resumo = |id: Option<String>,
+                          resumo: Option<domain::services::pos_venda::ResumoSimples>,
+                          associado: &str| match (id, resumo) {
+            (None, _) => "—".to_string(),
+            (Some(_), Some(r)) if !r.detalhe.trim().is_empty() => {
+                format!("{} — {}", r.titulo, r.detalhe)
+            }
+            (Some(_), Some(r)) => r.titulo,
+            (Some(_), None) => associado.to_string(),
+        };
+        let preset = g
+            .preset_padrao_id
+            .as_deref()
+            .map(|id| {
+                crate::sessoes::nova::receita::presets_da_sessao(
+                    &self.presets_da_receita,
+                    Vec::new(),
+                )
+                .into_iter()
+                .find(|p| p.id == id)
+                .map(|p| p.nome)
+                .unwrap_or_else(|| id.to_string())
+            })
+            .unwrap_or_else(|| "—".to_string());
+        let proporcao = g
+            .proporcao_padrao
+            .as_deref()
+            .map(|p| crate::sessoes::nova::estado::rotulo_da_proporcao(p).to_string())
+            .unwrap_or_else(|| "Sem corte".to_string());
+
+        Some(
+            // 🪟 **Gaveta pela direita, como o `Drawer` do site** — e não um
+            // bloco que empurra a tela: a galeria continua atrás, e é dela que
+            // o operador voltou a olhar assim que fecha. O véu fecha ao clique,
+            // como o `onOpenChange` de lá.
+            div()
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full()
+                .bg(gpui::black().opacity(0.4))
+                .id("atendimento-veu")
+                .on_click(cx.listener(|tela, _ev, _w, cx| {
+                    tela.atendimento_aberto = false;
+                    cx.notify();
+                }))
+                .child(
+            div()
+                .absolute()
+                .top_0()
+                .right_0()
+                .h_full()
+                .w(px(576.))
+                .flex()
+                .flex_col()
+                .gap(px(8.))
+                .p(px(16.))
+                .id("atendimento-gaveta")
+                .border_l_1()
+                .border_color(tema.border)
+                .bg(tema.background)
+                .shadow_lg()
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .child(
+                            div()
+                                .flex_1()
+                                .font_weight(gpui::FontWeight::SEMIBOLD)
+                                .child("Atendimento"),
+                        )
+                        .child(
+                            Button::new("atendimento-fechar")
+                                .label("Fechar")
+                                .xsmall()
+                                .ghost()
+                                .on_click(cx.listener(|tela, _ev, _w, cx| {
+                                    tela.atendimento_aberto = false;
+                                    cx.notify();
+                                })),
+                        ),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(apagado)
+                        .child("O que veio junto com o cliente, gravado no assistente."),
+                )
+                .child(linha(
+                    "Agendamento",
+                    com_resumo(
+                        g.ensaio_id.clone(),
+                        resumos.agendamento.clone(),
+                        "Agendamento associado",
+                    ),
+                ))
+                .child(linha(
+                    "Voucher",
+                    com_resumo(
+                        g.voucher_id.clone(),
+                        resumos.voucher.clone(),
+                        "Voucher associado",
+                    ),
+                ))
+                .child(linha(
+                    "Compra antecipada",
+                    com_resumo(
+                        g.pedido_id.clone(),
+                        resumos.pedido.clone(),
+                        "Compra antecipada associada",
+                    ),
+                ))
+                // ✏️ **Editável aqui**, como no site: entrar na sessão com tudo e
+                // não poder corrigir a resposta sem recriar a sessão seria meio
+                // pedido (`atendimento-da-sessao.tsx`). Trocar limpa o parceiro
+                // e o texto de "Outro" — é o que o site recusaria com `400`.
+                .child(
+                    div()
+                        .flex()
+                        .gap(px(8.))
+                        .items_start()
+                        .text_sm()
+                        .child(div().w(px(150.)).text_color(apagado).child("Como conheceu"))
+                        .child(
+                            div().flex().flex_wrap().gap(px(6.)).children(
+                                crate::sessoes::nova::associacoes::COMO_CONHECEU.iter().map(
+                                    |(valor, rotulo)| {
+                                        let escolhido = g.como_conheceu.as_deref() == Some(*valor);
+                                        let valor = *valor;
+                                        pilula(
+                                            SharedString::from(format!("atend-origem-{valor}")),
+                                            rotulo,
+                                            None,
+                                            escolhido,
+                                            cx,
+                                        )
+                                        .on_click(cx.listener(move |tela, _ev, _w, cx| {
+                                            tela.escolher_como_conheceu(valor, cx)
+                                        }))
+                                    },
+                                ),
+                            ),
+                        ),
+                )
+                .children(
+                    g.como_conheceu_detalhe
+                        .as_deref()
+                        .filter(|d| !d.trim().is_empty())
+                        .map(|detalhe| linha("Detalhe", detalhe.to_string())),
+                )
+                .child(linha(
+                    "Parceiro",
+                    com_resumo(
+                        g.parceiro_id.clone(),
+                        resumos.parceiro.clone(),
+                        "Parceiro associado",
+                    ),
+                ))
+                .child(linha("Preset padrão", preset))
+                // ✂️ **O corte padrão se troca aqui**, e vale para as próximas
+                // fotos da sessão: o serviço da receita repassa a proporção
+                // nova a quem ainda não subiu (ver `aplicar_a_receita_da_sessao`
+                // na raiz). O preset continua sendo escolhido no assistente,
+                // onde as amostras existem.
+                .child(
+                    div()
+                        .flex()
+                        .gap(px(8.))
+                        .items_start()
+                        .text_sm()
+                        .child(div().w(px(150.)).text_color(apagado).child("Corte padrão"))
+                        .child(
+                            div().flex().flex_wrap().gap(px(6.)).children(
+                                std::iter::once(("", "Sem corte"))
+                                    .chain(
+                                        crate::sessoes::nova::estado::PROPORCOES_PADRAO
+                                            .iter()
+                                            .map(|p| {
+                                                (
+                                                    *p,
+                                                    crate::sessoes::nova::estado::rotulo_da_proporcao(p),
+                                                )
+                                            }),
+                                    )
+                                    .map(|(valor, rotulo)| {
+                                        let escolhido = match valor {
+                                            "" => g.proporcao_padrao.is_none(),
+                                            v => g.proporcao_padrao.as_deref() == Some(v),
+                                        };
+                                        let valor = valor.to_string();
+                                        pilula(
+                                            SharedString::from(format!("atend-corte-{valor}")),
+                                            rotulo,
+                                            None,
+                                            escolhido,
+                                            cx,
+                                        )
+                                        .on_click(cx.listener(move |tela, _ev, _w, cx| {
+                                            tela.escolher_corte_padrao(&valor, cx)
+                                        }))
+                                    }),
+                            ),
+                        ),
+                )
+                .child(div().text_xs().text_color(apagado).child(
+                    SharedString::from(format!("Agora: {proporcao}. Vale para as próximas fotos desta sessão.")),
+                )),
+                ),
+        )
+    }
+
+    /// "Apagar" no painel: pergunta primeiro, no diálogo.
+    ///
+    /// 🚨 **A foto sai do site com os arquivos dela.** É o mesmo `DELETE` que
+    /// zerar a classificação usa (`tirar_do_site`), e o site recusa com `409` a
+    /// comprada — que aqui nem chega a oferecer o botão.
+    fn apagar_do_site(&mut self, cx: &mut Context<Self>) {
+        let Some(foto) = self.em_foco().cloned() else {
+            return;
+        };
+        if !foto.editavel() {
+            self.recado("Foto comprada não se apaga.".into(), cx);
+            return;
+        }
+        self.apagar_confirmando = Some((foto.id, foto.arquivo));
+        cx.notify();
+    }
+
+    /// O "Apagar a foto" do diálogo.
+    pub fn confirmar_apagar(&mut self, cx: &mut Context<Self>) {
+        let Some((id, _)) = self.apagar_confirmando.take() else {
+            return;
+        };
+        cx.emit(Pedido::ApagarDoSite(id));
+        cx.notify();
+    }
+
+    /// O "Cancelar" do diálogo.
+    pub fn cancelar_apagar(&mut self, cx: &mut Context<Self>) {
+        self.apagar_confirmando = None;
+        cx.notify();
+    }
+
+    /// O diálogo de "Apagar esta foto?" — os mesmos textos do site.
+    fn dialogo_de_apagar(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+        let (_, arquivo) = self.apagar_confirmando.clone()?;
+        let tema = cx.theme().clone();
+        Some(
+            div()
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .bg(gpui::black().opacity(0.5))
+                .id("apagar-veu")
+                .on_click(cx.listener(|tela, _ev, _w, cx| tela.cancelar_apagar(cx)))
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .w(px(460.))
+                        .p(px(24.))
+                        .gap(px(12.))
+                        .rounded(px(12.))
+                        .border_1()
+                        .border_color(tema.border)
+                        .bg(tema.background)
+                        .shadow_lg()
+                        .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .child(
+                            div()
+                                .text_lg()
+                                .font_weight(gpui::FontWeight::SEMIBOLD)
+                                .child("Apagar esta foto?"),
+                        )
+                        .child(div().text_sm().text_color(tema.muted_foreground).child(
+                            SharedString::from(format!(
+                                "{arquivo} sai da galeria com os arquivos dela — original, prévia                                  e miniatura. Não há como desfazer pela tela."
+                            )),
+                        ))
+                        .child(
+                            div()
+                                .flex()
+                                .mt(px(8.))
+                                .justify_end()
+                                .gap(px(8.))
+                                .child(
+                                    crate::estilo::botao_contorno("apagar-cancelar", cx)
+                                        .child("Cancelar")
+                                        .on_click(cx.listener(|tela, _ev, _w, cx| {
+                                            tela.cancelar_apagar(cx)
+                                        })),
+                                )
+                                .child(
+                                    crate::estilo::botao_perigo("apagar-confirmar", cx)
+                                        .child("Apagar a foto")
+                                        .on_click(cx.listener(|tela, _ev, _w, cx| {
+                                            tela.confirmar_apagar(cx)
+                                        })),
+                                ),
+                        ),
+                ),
+        )
+    }
+
+    /// Manda um `PATCH` na sessão aberta — o caminho comum do estúdio e das
+    /// associações do atendimento.
+    ///
+    /// A resposta vem como `GaleriaAtualizada`, que relê a galeria: é assim que
+    /// a tela passa a mostrar o que gravou, sem inventar o estado novo aqui.
+    fn gravar_a_galeria(&mut self, mudanca: MudancaDaGaleria, cx: &mut Context<Self>) {
+        let (Some(sessao), Some(galeria_id)) = (self.sessao.clone(), self.galeria_id.clone())
+        else {
+            return;
+        };
+        if mudanca.vazia() {
+            return;
+        }
+        self.erro = None;
+        self.publicador
+            .atualizar_galeria(sessao, galeria_id, mudanca, self.recados.0.clone());
+        self.acompanhar(cx);
+        cx.notify();
+    }
+
+    /// O estúdio da sessão aberta, ou vazio.
+    fn estudio_da_galeria(&self) -> String {
+        self.aberta
+            .as_ref()
+            .and_then(|a| a.galeria.estudio_id.clone())
+            .unwrap_or_default()
+    }
+
+    /// Troca o estúdio da sessão — o `EstudioDaGaleria` do site.
+    fn mudar_estudio(&mut self, estudio_id: String, cx: &mut Context<Self>) {
+        if estudio_id.trim().is_empty() || estudio_id == self.estudio_da_galeria() {
+            return;
+        }
+        let mudanca = MudancaDaGaleria {
+            estudio_id: Some(Some(estudio_id)),
+            ..Default::default()
+        };
+        self.gravar_a_galeria(mudanca, cx);
+    }
+
+    /// A foto **como o site a devolveu** — o que a grade não carrega.
+    ///
+    /// 🔑 A grade fala em [`acervo::Foto`], que é do core e serve aos dois
+    /// apps; tamanho, faixa própria e prazos são do painel, e ficam aqui.
+    fn do_site(&self, foto_id: &str) -> Option<&FotoDaGaleria> {
+        self.aberta.as_ref()?.fotos.iter().find(|f| f.id == foto_id)
+    }
+
+    /// A faixa padrão desta galeria — a que vale para a foto sem faixa própria.
+    fn produto_padrao_da_galeria(&self) -> String {
+        self.aberta
+            .as_ref()
+            .map(|a| a.galeria.produto_id.clone())
+            .unwrap_or_default()
+    }
+
+    /// Manda uma mudança para **uma** foto do site — o gesto do painel, que age
+    /// na foto em foco, e não na seleção.
+    fn pedir_mudanca(
+        &mut self,
+        foto_id: String,
+        mudanca: domain::services::pos_venda::MudancaDaFoto,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(sessao) = self.sessao.clone() else {
+            return;
+        };
+        // A foto que só existe no disco não tem linha no site: o que a leva para
+        // lá é a nota (ver `mudar_as_marcadas`).
+        if self.locais.iter().any(|f| f.id == foto_id) {
+            self.recado(
+                "esta foto ainda não subiu — classifique-a (1 a 5) antes".into(),
+                cx,
+            );
+            return;
+        }
+        if mudanca.vazia() || self.mudando > 0 {
+            return;
+        }
+        self.erro = None;
+        self.mudando = 1;
+        self.publicador
+            .negociar(sessao, foto_id, mudanca, self.recados.0.clone());
+        self.acompanhar(cx);
+        cx.notify();
+    }
+
+    /// Monta (ou refaz) os controles do painel para a foto em foco.
+    ///
+    /// Chamado do `render`, que é quem tem `window`. Sem foco, os campos somem —
+    /// e com eles o texto digitado e não aplicado, que era de outra foto.
+    fn preparar_painel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(foto) = self.em_foco().cloned() else {
+            self.campos_do_painel = None;
+            return;
+        };
+        if self
+            .campos_do_painel
+            .as_ref()
+            .is_some_and(|c| c.foto_id == foto.id)
+        {
+            return;
+        }
+        // Mudou a foto em foco: o "Apagar mesmo?" da anterior não vale mais.
+        self.apagar_confirmando = None;
+
+        let mut opcoes = vec![OpcaoDaFaixa {
+            id: String::new(),
+            titulo: SharedString::from(format!(
+                "Padrão da galeria ({})",
+                self.nome_da_faixa(&self.produto_padrao_da_galeria())
+            )),
+        }];
+        opcoes.extend(self.produtos.iter().map(|p| OpcaoDaFaixa {
+            id: p.id.clone(),
+            titulo: SharedString::from(format!(
+                "{} — {}",
+                p.nome,
+                dinheiro::ler_campo(&p.preco.replace('.', ","))
+                    .map(dinheiro::formatar)
+                    .unwrap_or_else(|| format!("R$ {}", p.preco))
+            )),
+        }));
+        // 🚨 **A faixa **própria** da foto, e não a efetiva.** Marcar a efetiva
+        // diria que a foto tem faixa fixada quando ela só está seguindo a
+        // galeria — e o primeiro clique no seletor "fixaria" sem querer o que
+        // era herdado.
+        let efetiva = self
+            .do_site(&foto.id)
+            .and_then(|f| f.produto_id.clone())
+            .unwrap_or_default();
+        let faixa = cx.new(|cx| SelectState::new(SearchableVec::new(opcoes), None, window, cx));
+        faixa.update(cx, |estado, cx| {
+            // A opção "Padrão da galeria" tem id vazio: escolher por valor
+            // acerta as duas pontas sem saber a posição de nenhuma.
+            estado.set_selected_value(&efetiva, window, cx);
+        });
+
+        // O preço fixado vem como decimal em texto ("19.90"); a tela fala em
+        // vírgula, como o resto do dinheiro no app.
+        let preco = cx.new(|cx| InputState::new(window, cx).placeholder("19,90"));
+        // O campo fala em vírgula, como o resto do dinheiro no app; a API leva
+        // decimal com ponto (ver `aplicar_preco_de_venda`).
+        let valor = foto
+            .preco_de_venda
+            .map(|centavos| format!("{},{:02}", centavos / 100, centavos % 100))
+            .unwrap_or_default();
+        preco.update(cx, |campo, cx| campo.set_value(valor, window, cx));
+
+        let mut assinaturas = Vec::new();
+        assinaturas.push(cx.subscribe_in(
+            &faixa,
+            window,
+            |tela, _, evento: &SelectEvent<SearchableVec<OpcaoDaFaixa>>, _window, cx| {
+                let SelectEvent::Confirm(valor) = evento;
+                tela.mudar_faixa(valor.clone().unwrap_or_default(), cx);
+            },
+        ));
+        // Enter aplica, como no campo do site.
+        assinaturas.push(cx.subscribe(
+            &preco,
+            |tela: &mut Detalhe, _estado, evento: &InputEvent, cx| {
+                if matches!(evento, InputEvent::PressEnter { .. }) {
+                    tela.aplicar_preco_de_venda(cx);
+                }
+            },
+        ));
+
+        self.campos_do_painel = Some(CamposDoPainel {
+            foto_id: foto.id,
+            faixa,
+            preco,
+            _assinaturas: assinaturas,
+        });
+    }
+
+    /// A faixa da foto em foco. Id vazio = devolver ao padrão da galeria.
+    ///
+    /// 🔑 **É o "Faixa" do painel do site** (`FaixaDaFoto`): a sessão mista tem
+    /// fotos de faixas diferentes, e é aqui que a leva que subiu na faixa errada
+    /// se conserta — sem isso, só reimportando.
+    fn mudar_faixa(&mut self, produto_id: String, cx: &mut Context<Self>) {
+        let Some(foto) = self.em_foco().cloned() else {
+            return;
+        };
+        if !foto.editavel() {
+            self.recado("Foto comprada não muda de faixa.".into(), cx);
+            return;
+        }
+        let no_site = foto.id.clone();
+        let mudanca = domain::services::pos_venda::MudancaDaFoto {
+            produto_id: Some(if produto_id.trim().is_empty() {
+                None
+            } else {
+                Some(produto_id)
+            }),
+            ..Default::default()
+        };
+        self.pedir_mudanca(no_site, mudanca, cx);
+    }
+
+    /// "Preço de venda online" — o que o cliente paga por **esta** foto.
+    ///
+    /// Campo vazio devolve ao preço da faixa (`Some(None)`). Zero é recusado
+    /// aqui, como o site recusa com `400`: zero é cortesia, e cortesia é
+    /// negociação — que é outro campo, e não muda o que a compra cobra.
+    fn aplicar_preco_de_venda(&mut self, cx: &mut Context<Self>) {
+        let Some(foto) = self.em_foco().cloned() else {
+            return;
+        };
+        let Some(campos) = self.campos_do_painel.as_ref() else {
+            return;
+        };
+        if !foto.editavel() {
+            self.recado("Foto comprada não muda de preço.".into(), cx);
+            return;
+        }
+        let texto = campos.preco.read(cx).value().trim().to_string();
+        let novo = if texto.is_empty() {
+            None
+        } else {
+            match dinheiro::ler_campo(&texto) {
+                Some(centavos) if centavos > 0 => {
+                    Some(format!("{}.{:02}", centavos / 100, centavos % 100))
+                }
+                Some(_) => {
+                    self.recado(
+                        "Preço zero é cortesia: registre pela negociação, no caixa.".into(),
+                        cx,
+                    );
+                    return;
+                }
+                None => {
+                    self.recado("Preço inválido. Use 19,90.".into(), cx);
+                    return;
+                }
+            }
+        };
+        let mudanca = domain::services::pos_venda::MudancaDaFoto {
+            preco_de_venda: Some(novo),
+            ..Default::default()
+        };
+        self.pedir_mudanca(foto.id.clone(), mudanca, cx);
+    }
+
     fn painel(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+        use crate::recursos::Icone;
+        use gpui_component::Icon;
         let foto = self.em_foco()?;
         let posicao = self.selecao.foco()? + 1;
         let negociada = foto.tem_negociacao();
@@ -3197,46 +4312,158 @@ impl Detalhe {
                                 ),
                         ),
                 )
+                // 📂 **A sanfona do site**: tamanho, faixa, negociação, preço e
+                // apagar ficam atrás de "Faixa, negociação e preço", fechada por
+                // padrão. Antes eram onze controles empilhados com o mesmo peso,
+                // e o operador procurava o botão a cada foto.
                 .child(
                     div()
+                        .id("painel-sanfona")
+                        .flex()
+                        .items_center()
+                        .gap(px(6.))
+                        .py(px(4.))
+                        .cursor_pointer()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child(SharedString::from(format!(
-                            "Faixa: {}",
-                            self.nome_da_faixa(&foto.produto_efetivo)
-                        ))),
+                        .child(
+                            Icon::new(if self.faixa_e_precos_aberto {
+                                Icone::ChevronDown
+                            } else {
+                                Icone::ChevronRight
+                            })
+                            .size(px(14.)),
+                        )
+                        .child("Faixa, negociação e preço")
+                        .on_click(cx.listener(|tela, _ev, _w, cx| {
+                            tela.faixa_e_precos_aberto = !tela.faixa_e_precos_aberto;
+                            cx.notify();
+                        })),
                 )
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(SharedString::from(format!(
-                            "Downloads {} · {}",
-                            foto.downloads,
-                            match foto.preco_de_venda {
-                                Some(centavos) =>
-                                    format!("preço fixado {}", dinheiro::formatar(centavos)),
-                                None => "sem valor fixado: vale o preço da faixa".to_string(),
-                            }
-                        ))),
-                )
-                .when(negociada, |painel| {
-                    painel.child(div().text_xs().text_color(cx.theme().warning).child(
-                        match foto.preco_negociado {
-                            Some(centavos) => format!("Balcão: {}", dinheiro::formatar(centavos)),
-                            None => "Balcão: registrado".to_string(),
-                        },
-                    ))
-                })
-                // 📌 A negociação, o preço de venda e o apagar ficam para o
-                // próximo passo — eles pedem campos e confirmação, e entram
-                // inteiros ou não entram.
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child("Negociação e preço: pelo Balcão, na barra de cima."),
-                ),
+                .when(self.faixa_e_precos_aberto, |painel| {
+                    painel
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(SharedString::from({
+                                    // "12,7 MB · Downloads 0 · na nuvem" — as três
+                                    // linhas do painel do site numa só, porque aqui a
+                                    // coluna é estreita.
+                                    let tamanho = self
+                                        .do_site(&foto.id)
+                                        .and_then(|f| f.tamanho_bytes)
+                                        .map(|bytes| {
+                                            format!("{:.1} MB · ", bytes as f64 / 1_048_576.0)
+                                                .replace('.', ",")
+                                        })
+                                        .unwrap_or_default();
+                                    let onde = if self.ids_locais.contains(&foto.id) {
+                                        "neste computador"
+                                    } else {
+                                        "na nuvem"
+                                    };
+                                    format!("{tamanho}Downloads {} · {onde}", foto.downloads)
+                                })),
+                        )
+                        // 🧾 **Faixa e preço, como no painel do site** (`FaixaDaFoto` e
+                        // `PrecoDeVendaDaFoto`). Eles não existiam aqui, e a frase que
+                        // mandava ao Balcão não resolvia: lá se registra o que **entrou
+                        // no balcão**; a faixa e o preço de venda são o que o cliente vê
+                        // e paga na galeria dele.
+                        .children(self.campos_do_painel.as_ref().map(|campos| {
+                            let apagado = cx.theme().muted_foreground;
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap(px(6.))
+                                .child(div().text_xs().text_color(apagado).child("Faixa"))
+                                .child(
+                                    Select::new(&campos.faixa)
+                                        .xsmall()
+                                        .placeholder("Escolha…")
+                                        .w_full(),
+                                )
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(apagado)
+                                        .child("Preço de venda online"),
+                                )
+                                .child(
+                                    div()
+                                        .flex()
+                                        .gap(px(6.))
+                                        .items_center()
+                                        .child(div().text_xs().text_color(apagado).child("R$"))
+                                        .child(
+                                            div()
+                                                .flex_1()
+                                                .child(Input::new(&campos.preco).xsmall()),
+                                        )
+                                        .child(
+                                            Button::new("painel-preco-aplicar")
+                                                .label("Aplicar")
+                                                .xsmall()
+                                                .disabled(!foto.editavel())
+                                                .on_click(cx.listener(|tela, _ev, _window, cx| {
+                                                    tela.aplicar_preco_de_venda(cx)
+                                                })),
+                                        ),
+                                )
+                                .child(div().text_xs().text_color(apagado).child(
+                                    match foto.preco_de_venda {
+                                        Some(centavos) => format!(
+                                            "O cliente paga {} por esta foto.",
+                                            dinheiro::formatar(centavos)
+                                        ),
+                                        None => {
+                                            "Sem valor fixado: vale o preço da faixa.".to_string()
+                                        }
+                                    },
+                                ))
+                        }))
+                        .when(negociada, |painel| {
+                            painel.child(div().text_xs().text_color(cx.theme().warning).child(
+                                match foto.preco_negociado {
+                                    Some(centavos) => {
+                                        format!("Balcão: {}", dinheiro::formatar(centavos))
+                                    }
+                                    None => "Balcão: registrado".to_string(),
+                                },
+                            ))
+                        })
+                        // 🤝 **Negociação e apagar**, os dois últimos controles que o
+                        // painel do site tem e este não tinha.
+                        .when(foto.editavel(), |painel| {
+                            painel.child(
+                                div()
+                                    .flex()
+                                    .gap(px(6.))
+                                    .child(
+                                        Button::new("painel-negociar")
+                                            .label("Negociação…")
+                                            .xsmall()
+                                            .on_click(cx.listener(|tela, _ev, _window, cx| {
+                                                let Some(foto) = tela.em_foco().cloned() else {
+                                                    return;
+                                                };
+                                                cx.emit(Pedido::Negociar(vec![foto.id]));
+                                            })),
+                                    )
+                                    .child(
+                                        Button::new("painel-apagar")
+                                            .label("Apagar")
+                                            .xsmall()
+                                            .danger()
+                                            .ghost()
+                                            .on_click(cx.listener(|tela, _ev, _window, cx| {
+                                                tela.apagar_do_site(cx)
+                                            })),
+                                    ),
+                            )
+                        })
+                }),
         )
     }
 
@@ -3327,15 +4554,21 @@ impl Detalhe {
                     .child("–")
                     .child(tecla("5", cx))
                     .child("nota ·")
+                    // 🔑 **O `0` estava faltando**, e ele é metade do gesto: a
+                    // nota sobe a foto, e tirá-la a traz de volta (C20–C22). A
+                    // linha do site o traz desde sempre.
+                    .child(tecla("0", cx))
+                    .child("tira a nota ·")
                     .child(tecla("P", cx))
                     .child("levada no balcão ·")
-                    .child(tecla("Ctrl", cx))
+                    // ⌘ no Mac, Ctrl no resto — o `useTeclaDeAtalho` do site.
+                    .child(tecla(MODIFICADOR, cx))
                     .child("ou")
                     .child(tecla("Shift", cx))
                     .child("no clique marcam várias ·")
-                    .child(tecla("Ctrl+A", cx))
+                    .child(tecla(MODIFICADOR_A, cx))
                     .child("marca tudo,")
-                    .child(tecla("Ctrl+D", cx))
+                    .child(tecla(MODIFICADOR_D, cx))
                     .child("desmarca")
                     // As setas ficam na ponta direita, como no site.
                     .child(
@@ -3778,6 +5011,7 @@ mod testes {
             downloads: 0,
             revelada: false,
             ajustes: None,
+            ..Default::default()
         }
     }
 
@@ -3812,6 +5046,7 @@ mod testes {
                 expira_em: None,
                 fotos: Default::default(),
                 totais: None,
+                ..Default::default()
             }]),
             fotos_da_sessao: std::sync::Mutex::new(fotos),
             ..Default::default()
@@ -4818,6 +6053,261 @@ mod testes {
             nota: None,
             ordem: 0,
         }
+    }
+
+    /// ✏️ **A gaveta do atendimento corrige sem recriar a sessão.**
+    ///
+    /// "Como conheceu" e o corte padrão vão num `PATCH` com **só** o que mudou —
+    /// e trocar a resposta limpa o parceiro, que é o que o site recusaria.
+    #[gpui::test]
+    fn o_atendimento_corrige_a_origem_e_o_corte(cx: &mut TestAppContext) {
+        let publicador = publicador_com(Vec::new(), false);
+        {
+            let mut galerias = publicador.galerias.lock().unwrap();
+            for galeria in galerias.iter_mut() {
+                if galeria.id == "g1" {
+                    galeria.como_conheceu = Some("parceiro".into());
+                    galeria.parceiro_id = Some("pa1".into());
+                }
+            }
+        }
+        let janela = janela_com(
+            cx,
+            publicador.clone(),
+            Arc::new(SeletorDeMentira::default()),
+        );
+        entrar(cx, &janela);
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.escolher_como_conheceu("instagram", cx);
+            })
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+
+        let mudancas = publicador.atualizacoes();
+        assert_eq!(mudancas.len(), 1);
+        let m = &mudancas[0].1;
+        assert_eq!(m.como_conheceu.as_ref(), Some(&Some("instagram".into())));
+        assert_eq!(
+            m.parceiro_id.as_ref(),
+            Some(&None),
+            "trocar a origem solta o parceiro — senão o site recusa com 400"
+        );
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.escolher_corte_padrao("1:1", cx);
+            })
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+
+        let mudancas = publicador.atualizacoes();
+        assert_eq!(
+            mudancas.last().map(|(_, m)| m.proporcao_padrao.clone()),
+            Some(Some(Some("1:1".into())))
+        );
+    }
+
+    /// 🗑️ **"Apagar" pergunta antes, e some com a foto do site.**
+    ///
+    /// O diálogo é o `useConfirmacao` do site: o balcão é tela de dedo rápido, e
+    /// o `DELETE` leva os arquivos junto.
+    #[gpui::test]
+    fn apagar_no_painel_pede_confirmacao_no_dialogo(cx: &mut TestAppContext) {
+        let (janela, _) = janela(
+            cx,
+            vec![foto("f1", EstadoDaFotoNoSite::Disponivel, Some(4))],
+        );
+        entrar(cx, &janela);
+
+        let apagados = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let recebidos = apagados.clone();
+        let raiz = cx.update(|cx| janela.root(cx).expect("a tela"));
+        let _assinatura = cx.update(|cx| {
+            cx.subscribe(&raiz, move |_, evento: &Pedido, _| {
+                if let Pedido::ApagarDoSite(id) = evento {
+                    recebidos.borrow_mut().push(id.clone());
+                }
+            })
+        });
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.clicar(0, Modificadores::default(), cx);
+                tela.apagar_do_site(cx);
+                assert_eq!(
+                    tela.apagar_confirmando.as_ref().map(|(id, _)| id.as_str()),
+                    Some("f1"),
+                    "o clique abre o diálogo, e nada é apagado ainda"
+                );
+                tela.confirmar_apagar(cx);
+                assert!(
+                    tela.apagar_confirmando.is_none(),
+                    "confirmar fecha o diálogo"
+                );
+            })
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+
+        assert_eq!(apagados.borrow().as_slice(), ["f1"]);
+    }
+
+    /// 📋 **O atendimento entra na sessão, e o estúdio se troca no cabeçalho.**
+    ///
+    /// O que o assistente coletou nas sete etapas ficava só no banco: a sessão
+    /// abria sem dizer se havia agendamento, voucher, compra, como conheceu ou
+    /// receita padrão — e o estúdio não tinha onde ser corrigido.
+    #[gpui::test]
+    fn o_cabecalho_mostra_o_atendimento_e_troca_o_estudio(cx: &mut TestAppContext) {
+        let publicador = publicador_com(
+            vec![foto("f1", EstadoDaFotoNoSite::Disponivel, Some(4))],
+            false,
+        );
+        {
+            let mut galerias = publicador.galerias.lock().unwrap();
+            for galeria in galerias.iter_mut() {
+                if galeria.id == "g1" {
+                    galeria.como_conheceu = Some("instagram".into());
+                    galeria.voucher_id = Some("v1".into());
+                    galeria.preset_padrao_id = Some("sistema:sepia".into());
+                    galeria.proporcao_padrao = Some("3:2".into());
+                    galeria.estudio_id = Some("e1".into());
+                }
+            }
+        }
+        let janela = janela_com(
+            cx,
+            publicador.clone(),
+            Arc::new(SeletorDeMentira::default()),
+        );
+        entrar(cx, &janela);
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                assert_eq!(
+                    tela.quantas_associacoes(),
+                    3,
+                    "voucher, como conheceu e receita padrão"
+                );
+                assert_eq!(tela.estudio_da_galeria(), "e1");
+
+                // Trocar o estúdio vai num `PATCH` só com esse campo.
+                tela.mudar_estudio("e2".into(), cx);
+            })
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+
+        let mudancas = publicador.atualizacoes();
+        assert_eq!(mudancas.len(), 1);
+        assert_eq!(
+            mudancas[0].1.estudio_id.as_ref(),
+            Some(&Some("e2".to_string()))
+        );
+        assert!(
+            mudancas[0].1.titulo.is_none() && mudancas[0].1.email.is_none(),
+            "ausente não é nulo: o PATCH leva só o que mudou"
+        );
+    }
+
+    /// 🧾 **A faixa e o preço de venda se mudam no painel, como no site.**
+    ///
+    /// Eles não existiam no app: a tela mandava ao Balcão, que é onde se
+    /// registra o que **entrou no balcão** — outra conta. A faixa decide o preço
+    /// da foto na galeria do cliente, e o preço de venda o substitui; sem os
+    /// dois, uma leva que subiu na faixa errada só se conserta pelo site.
+    #[gpui::test]
+    fn o_painel_muda_a_faixa_e_o_preco_de_venda(cx: &mut TestAppContext) {
+        let (janela, publicador) = janela(
+            cx,
+            vec![foto("f1", EstadoDaFotoNoSite::Disponivel, Some(4))],
+        );
+        entrar(cx, &janela);
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.clicar(0, Modificadores::default(), cx);
+                tela.mudar_faixa("p2".into(), cx);
+            })
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+
+        let negociadas = publicador.negociadas();
+        assert_eq!(negociadas.len(), 1);
+        assert_eq!(negociadas[0].0, "f1");
+        assert_eq!(
+            negociadas[0].1.produto_id.as_ref(),
+            Some(&Some("p2".to_string())),
+            "a faixa escolhida tinha de ir no PATCH"
+        );
+
+        // E o preço de venda sai como decimal com ponto, que é o que a API lê.
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.mudando = 0;
+                tela.preparar_painel(window, cx);
+                if let Some(campos) = tela.campos_do_painel.as_ref() {
+                    campos
+                        .preco
+                        .update(cx, |campo, cx| campo.set_value("19,90", window, cx));
+                }
+                tela.aplicar_preco_de_venda(cx);
+            })
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+
+        let negociadas = publicador.negociadas();
+        assert_eq!(
+            negociadas.last().map(|(_, m)| m.preco_de_venda.clone()),
+            Some(Some(Some("19.90".to_string()))),
+            "o preço fixado tinha de ir como 19.90"
+        );
+    }
+
+    /// 🚨 **A grade mostra a foto revelada pela receita padrão, e não o bruto.**
+    ///
+    /// O operador escolhe a predefinição e a proporção na etapa 2, vê as
+    /// miniaturas mudarem — e ao entrar na sessão via os brutos de volta. Eram
+    /// **dois caches diferentes**: o serviço gravava a revelada com
+    /// `save_preview` (`Large`) e a grade procurava por `get_thumbnail`
+    /// (`Thumbnail`), na chave do bruto. Achado do dono, 17/set/2026.
+    #[gpui::test]
+    fn a_grade_mostra_a_revelada_da_receita_padrao(cx: &mut TestAppContext) {
+        let dir = tempfile::TempDir::new().expect("diretório temporário");
+        let previews = Arc::new(PreviewManager::new_with_path(dir.path().to_path_buf()));
+        let janela = janela_com_previews(
+            cx,
+            publicador_com(Vec::new(), false),
+            Arc::new(SeletorDeMentira::default()),
+            Arc::new(ImportadorDeMentira::default()),
+            previews.clone(),
+        );
+        entrar(cx, &janela);
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.definir_locais(vec![local("nova-1")], cx);
+
+                // Sem revelada, a chave é a do bruto.
+                tela.resolver_revelada("nova-1");
+                assert_eq!(tela.chave_da_foto("nova-1"), "nova-1");
+
+                // O serviço grava a revelada e avisa.
+                let imagem = image::DynamicImage::ImageRgba8(image::RgbaImage::new(8, 8));
+                let revelada = crate::revelacao::persistencia::chave_da_revelada("nova-1");
+                previews
+                    .save_thumbnail(&revelada, &imagem)
+                    .expect("gravar a revelada");
+                tela.revelada_chegou("nova-1");
+
+                tela.resolver_revelada("nova-1");
+                assert_eq!(
+                    tela.chave_da_foto("nova-1"),
+                    revelada,
+                    "a grade tinha de passar a ler a revelada"
+                );
+            })
+            .expect("a janela deve estar aberta");
     }
 
     /// 🚨 **A foto importada aparece na grade, no recorte "Sem nota".**

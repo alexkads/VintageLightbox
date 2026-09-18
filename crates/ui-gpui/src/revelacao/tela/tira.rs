@@ -342,6 +342,18 @@ impl Revelacao {
         na_tira(&self.acervo, self.tira.recorte, self.posicao)
     }
 
+    /// 🧪 Os ids das fotos da tira, na ordem — o que o cenário e2e afirma.
+    ///
+    /// 🔑 **Id da grade**, e não o do catálogo: é ele que liga a tira à foto da
+    /// sessão (`site:<id>` quando ela já subiu).
+    #[cfg(test)]
+    pub(crate) fn ids_na_tira(&self) -> Vec<String> {
+        self.na_tira()
+            .into_iter()
+            .filter_map(|p| self.acervo.get(p).map(id_na_grade))
+            .collect()
+    }
+
     /// Onde a aberta está **na tira**, e quantas a tira tem — o "3/29" do site
     /// conta sobre o recorte.
     pub fn posicao_na_tira(&self) -> (usize, usize) {

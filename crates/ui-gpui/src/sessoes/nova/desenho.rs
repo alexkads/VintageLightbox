@@ -131,7 +131,15 @@ impl Render for NovaSessao {
         self.preparar_miniaturas();
         // As amostras pedidas neste quadro chegam por canal: alguém tem de
         // acordar para recolhê-las.
-        if self.amostras.esperando() {
+        //
+        // 🚨 **A receita padrão entra na mesma condição.** Ela revela numa
+        // thread e avisa por canal; sem alguém acordando, o trabalho acontecia
+        // no disco e a tela não mudava — as miniaturas ficavam nas de antes e a
+        // barra "Preset padrão" parava em 0/N.
+        if self.amostras.esperando()
+            || self.pedir_colheita_das_reveladas
+            || self.portas.receita_padrao.progresso().andando()
+        {
             self.acompanhar(window, cx);
         }
         let tema = cx.theme();
@@ -390,12 +398,16 @@ impl NovaSessao {
     /// `(total, copiadas, prévias)` — as contas do resumo e da barra.
     fn numeros_da_copia(&self) -> (usize, usize, usize) {
         let gravadas = self.fotos.len();
+        // As levas que esperam a vez já contam no total: o site publica
+        // `total + arquivos.length` no instante em que a leva é solta, e sem
+        // isto a barra fecharia em 12/12 com mais 20 fotos por copiar.
+        let na_fila: usize = self.fila_de_levas.iter().map(Vec::len).sum();
         let (total, copiadas) = match self.importacao {
             Some(lote) => (
-                gravadas + lote.total.saturating_sub(lote.falhas),
+                gravadas + lote.total.saturating_sub(lote.falhas) + na_fila,
                 gravadas + lote.feitas,
             ),
-            None => (gravadas, gravadas),
+            None => (gravadas + na_fila, gravadas),
         };
         (total, copiadas, self.quantas_previas().min(copiadas))
     }

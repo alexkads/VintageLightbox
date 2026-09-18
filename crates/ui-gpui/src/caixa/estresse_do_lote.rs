@@ -57,6 +57,7 @@ fn publicador() -> Arc<PublicadorDeMentira> {
             expira_em: None,
             fotos: Default::default(),
             totais: None,
+            ..Default::default()
         }]),
         fotos_da_sessao: std::sync::Mutex::new(
             (0..N)
@@ -75,6 +76,7 @@ fn publicador() -> Arc<PublicadorDeMentira> {
                     downloads: 0,
                     revelada: false,
                     ajustes: None,
+                    ..Default::default()
                 })
                 .collect(),
         ),

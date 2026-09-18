@@ -431,6 +431,17 @@ pub struct Aplicativo {
     /// 🚨 A `Task` que espera o disco responder. **Descartá-la a cancela**, e a
     /// foto ficaria em "Preparando…" com o preview já gravado no cache.
     _reposicao: Option<gpui::Task<()>>,
+    _reveladas: Option<gpui::Task<()>>,
+    /// O serviço da receita padrão — a raiz o consulta para saber quando parar
+    /// de colher.
+    receita_padrao: Arc<crate::sessoes::receita_padrao::ReceitaPadrao>,
+    /// As predefinições que este app conhece — sistema e as do banco local.
+    /// É delas que sai a receita padrão da sessão aberta.
+    presets_conhecidos: Vec<Preset>,
+    /// A receita já aplicada a cada foto local, por id: `"<preset>|<proporção>"`.
+    /// O mesmo registro do assistente, e pelo mesmo motivo — sem ele a receita
+    /// seria pedida de novo a cada releitura do catálogo.
+    receita_das_locais: std::collections::HashMap<String, String>,
     /// 🚨 A inscrição na travessia do zero da classificação. Sem ela nada acusa:
     /// as estrelas entram no banco, e nada sobe nem sai do site.
     _classificacao: gpui::Subscription,
@@ -502,6 +513,13 @@ pub struct Aplicativo {
     /// O canal por onde o acervo relido volta. A releitura é assíncrona: o
     /// `LibraryController` é `async` do tokio, e o GPUI não roda futuros dele.
     releituras: (Sender<Vec<PhotoViewModel>>, Receiver<Vec<PhotoViewModel>>),
+    /// Os ids que a receita padrão acabou de revelar, para as grades relerem.
+    ///
+    /// ⚠️ **Um canal, dois destinos.** `mpsc` tem um `Receiver` só, então quem
+    /// colhe é a raiz e ela repassa ao assistente e à sessão — as duas mostram
+    /// as mesmas fotos, e a que estiver fora de cena simplesmente não tem o que
+    /// esquecer.
+    reveladas: (Sender<String>, Receiver<String>),
     /// 🚨 A `Task` que espera a releitura chegar. **Descartá-la a cancela** — e
     /// o sintoma seria a grade nunca receber as fotos importadas, que é
     /// exatamente o defeito que esta ligação existe para consertar.
@@ -552,6 +570,18 @@ impl Aplicativo {
         let importador_do_detalhe = portas.importador.clone();
         // 🧭 O assistente da nova sessão importa para o mesmo catálogo, aplica
         // a receita pelo mesmo gravador e lê as mesmas prévias.
+        let reveladas: (Sender<String>, Receiver<String>) = channel();
+        // 📸 A receita padrão revelada em segundo plano (o `receita-padrao/` do
+        // site). Nasce aqui, na raiz, porque atravessa telas: o assistente pede,
+        // a sessão mostra, e a raiz repassa os avisos às duas.
+        let receita_padrao = Arc::new(crate::sessoes::receita_padrao::ReceitaPadrao::nova(
+            previews.clone(),
+            portas.gravador.clone(),
+            reveladas.0.clone(),
+        ));
+        // A lista inteira fica com a raiz: é ela que resolve o `preset_padrao_id`
+        // da galeria aberta quando uma foto nova entra na sessão.
+        let presets_para_a_receita = presets.clone();
         let portas_da_nova = PortasDaNova {
             publicador: portas.publicador.clone(),
             seletor_de_fotos: portas.seletor_de_fotos.clone(),
@@ -559,6 +589,7 @@ impl Aplicativo {
             acervo: portas.acervo.clone(),
             gravador: portas.gravador.clone(),
             previews: previews.clone(),
+            receita_padrao: receita_padrao.clone(),
             explorador: portas.explorador.clone(),
             seletor_de_pasta: portas.seletor.clone(),
             presets_do_sistema: presets.iter().filter(|p| p.is_system).cloned().collect(),
@@ -672,13 +703,17 @@ impl Aplicativo {
         });
 
         let detalhe = cx.new(|cx| {
-            Detalhe::nova(
+            let mut tela = Detalhe::nova(
                 publicador_do_detalhe,
                 portas.seletor_de_fotos,
                 importador_do_detalhe,
                 previews_do_detalhe,
                 cx,
-            )
+            );
+            // A gaveta do atendimento diz o **nome** do preset padrão, e não o
+            // id: a lista é a mesma que a Revelação usa.
+            tela.definir_presets(presets_para_a_receita.clone());
+            tela
         });
         // 🔑 `subscribe_in`, e não `subscribe`: revelar precisa da janela — os
         // 42 sliders são espalhados com ela. Sem isso o pedido teria de ficar
@@ -825,6 +860,10 @@ impl Aplicativo {
             reposicoes_pendentes: 0,
             reposicoes_pedidas: std::collections::HashSet::new(),
             _reposicao: None,
+            _reveladas: None,
+            receita_padrao,
+            presets_conhecidos: presets_para_a_receita,
+            receita_das_locais: std::collections::HashMap::new(),
             _classificacao: classificacao,
             _sessao_escolhida: sessao_escolhida,
             configuracoes: cx.new(|_| Configuracoes::nova(previews_das_configuracoes)),
@@ -845,6 +884,7 @@ impl Aplicativo {
             gravador: gravador_para_colar,
             area_de_transferencia: None,
             releituras: channel(),
+            reveladas,
             _releitura: None,
             _fim_da_importacao: fim_da_importacao,
             atualizador: portas.atualizador,
@@ -985,6 +1025,7 @@ impl Aplicativo {
             }
             PedidoDaNova::CatalogoMudou => self.reler_o_acervo(cx),
             PedidoDaNova::AlternarMenu => self.alternar_menu_lateral(cx),
+            PedidoDaNova::RevelandoReceita => self.esperar_as_reveladas(cx),
         }
     }
 
@@ -1011,6 +1052,7 @@ impl Aplicativo {
             .collect();
         self.detalhe
             .update(cx, |tela, cx| tela.definir_locais(locais, cx));
+        self.aplicar_a_receita_da_sessao(fotos, &galeria, cx);
     }
 
     /// Entra numa sessão — o mesmo gesto que abre a rota `[id]` na web.
@@ -1139,6 +1181,16 @@ impl Aplicativo {
                 self.biblioteca
                     .update(cx, |tela, cx| tela.selecionar_ids(&ids, cx));
                 self.abrir_balcao(cx);
+            }
+            // 🗑️ "Apagar" no painel da foto: o mesmo `DELETE` de zerar a
+            // classificação, e a grade relê depois que o site confirma.
+            DetalhePedido::ApagarDoSite(id) => {
+                let Some(sessao) = self.sessao.clone() else {
+                    return;
+                };
+                self.publicador
+                    .tirar_do_site(sessao, id.clone(), self.sincronias.0.clone());
+                self.esperar_o_site(PedidoDeFoto::TirarDoSite, 1, cx);
             }
             DetalhePedido::Imprimir(ids) => {
                 let ids = ids.clone();
@@ -1341,6 +1393,116 @@ impl Aplicativo {
     /// pelo estresse, 17/set/2026). O repositor responde cada foto, com a imagem
     /// ou com `Falhou`, e só para quando a janela morre — que é quando este
     /// laço para também.
+    /// 🚨 **A receita padrão da sessão vale para quem chega depois.**
+    ///
+    /// A etapa 2 do assistente escolhe a predefinição e a proporção, e elas
+    /// ficam **na galeria** (`preset_padrao_id`, `proporcao_padrao`). Quem
+    /// importa mais fotos **dentro** da sessão — o botão "Importar fotos" da
+    /// tela do ensaio — espera o mesmo visual, e era o que não acontecia: a
+    /// receita só era aplicada às fotos do rascunho, e a leva seguinte entrava
+    /// crua. Na web as duas portas caem no mesmo agendador, que lê a receita da
+    /// **galeria** (`receita-padrao/agendador.ts`).
+    ///
+    /// 🔑 **Só as que ainda não subiram.** A foto do site já tem a receita dela
+    /// gravada lá; reaplicar aqui seria escrever por cima do que o operador fez
+    /// no editor.
+    fn aplicar_a_receita_da_sessao(
+        &mut self,
+        fotos: &[PhotoViewModel],
+        galeria: &str,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(aberta) = self.detalhe.read(cx).aberta() else {
+            return;
+        };
+        let (preset_id, proporcao) = (
+            aberta.galeria.preset_padrao_id.clone(),
+            aberta.galeria.proporcao_padrao.clone(),
+        );
+        if preset_id.is_none() && proporcao.is_none() {
+            return;
+        }
+        // `sistema:<chave>` é o que o assistente grava, e o app o resolve
+        // sozinho. Um id do servidor não está na lista local: a foto fica com o
+        // corte, que é o que dá para honrar sem inventar ajustes.
+        let preset = preset_id.as_deref().and_then(|id| {
+            crate::sessoes::nova::receita::presets_da_sessao(&self.presets_conhecidos, Vec::new())
+                .into_iter()
+                .find(|p| p.id == id)
+                .map(|p| p.preset)
+        });
+        let ajustes = crate::sessoes::nova::receita::ajustes_da_receita(preset.as_ref());
+        let chave = format!("{preset_id:?}|{proporcao:?}");
+        let mut pediu = false;
+        for foto in fotos {
+            if foto.sessao_id.as_deref() != Some(galeria) || foto.pos_venda_foto_id.is_some() {
+                continue;
+            }
+            if self.receita_das_locais.get(&foto.id) == Some(&chave) {
+                continue;
+            }
+            self.receita_das_locais
+                .insert(foto.id.clone(), chave.clone());
+            self.receita_padrao
+                .pedir(foto.id.clone(), ajustes, proporcao.clone());
+            pediu = true;
+        }
+        if pediu {
+            self.esperar_as_reveladas(cx);
+        }
+    }
+
+    /// 🧪 Quantas fotos a receita padrão já pegou — o que o e2e afirma.
+    #[cfg(test)]
+    pub(crate) fn receita_padrao_pedida(&self) -> usize {
+        self.receita_padrao.progresso().total
+    }
+
+    /// Acompanha a receita padrão enquanto ela anda.
+    ///
+    /// 🔑 **Nasce do evento e morre com o trabalho**, como `esperar_a_reposicao`:
+    /// um laço eterno para colher um canal que fica vazio a maior parte do dia
+    /// seria custo por nada. O `RevelandoReceita` o liga a cada lote pedido; se
+    /// já estiver ligado, o `is_some` o deixa em paz.
+    fn esperar_as_reveladas(&mut self, cx: &mut Context<Self>) {
+        if self._reveladas.is_some() {
+            return;
+        }
+        self._reveladas = Some(cx.spawn(async move |raiz, cx| loop {
+            cx.background_executor()
+                .timer(std::time::Duration::from_millis(150))
+                .await;
+            let Ok(acabou) = raiz.update(cx, |raiz, cx| raiz.colher_reveladas(cx)) else {
+                return;
+            };
+            if acabou {
+                let _ = raiz.update(cx, |raiz, _| raiz._reveladas = None);
+                return;
+            }
+        }));
+    }
+
+    /// Repassa às grades as fotos que a receita revelou. Devolve se acabou.
+    pub(crate) fn colher_reveladas(&mut self, cx: &mut Context<Self>) -> bool {
+        let mut chegou = false;
+        while let Ok(foto_id) = self.reveladas.1.try_recv() {
+            chegou = true;
+            // As duas telas mostram as mesmas fotos; a que não tiver esta na mão
+            // não tem o que esquecer, e o `remove` não custa nada.
+            self.nova_sessao
+                .update(cx, |tela, _| tela.revelada_chegou(&foto_id));
+            self.detalhe
+                .update(cx, |tela, _| tela.revelada_chegou(&foto_id));
+        }
+        if chegou {
+            cx.notify();
+        }
+        // 🔑 **Só para quando a fila secou E o canal está vazio.** Parar pelo
+        // progresso sozinho descartaria o último aviso, e a última foto do lote
+        // ficaria com a miniatura velha até alguém rolar a grade.
+        !chegou && !self.receita_padrao.progresso().andando()
+    }
+
     fn esperar_a_reposicao(&mut self, cx: &mut Context<Self>) {
         self._reposicao = Some(cx.spawn(async move |raiz, cx| loop {
             cx.background_executor()
@@ -1559,6 +1721,12 @@ impl Aplicativo {
                         // `Classificou::nota`: a gravação dela ainda pode estar
                         // correndo quando o envio lê a linha da foto.
                         nota: evento.nota,
+                        // 🧾 **A faixa escolhida na barra de envio da sessão.**
+                        // É a primeira das duas escolhas antes dos arquivos, no
+                        // site; sem ela, a leva inteira subia no padrão da
+                        // galeria e a sessão mista tinha de ser corrigida foto a
+                        // foto depois.
+                        produto_id: self.detalhe.read(cx).faixa().map(str::to_string),
                     },
                     self.sincronias.0.clone(),
                 );
@@ -3496,8 +3664,22 @@ impl Render for Aplicativo {
             .on_action(cx.listener(|este, _: &CorAzul, _w, cx| {
                 este.na_biblioteca(cx, |tela, cx| tela.dar_cor(AZUL, cx))
             }))
+            // 🚨 **`P` na sessão é "levada no balcão", como na web** — e o
+            // rodapé da tira sempre prometeu isso ("P levada no balcão"). Ele
+            // só marcava a bandeira do Lightroom, que **não existe** na galeria
+            // do site: quem apertava P no balcão achava que tinha sinalizado a
+            // foto do cliente e não tinha marcado nada lá.
+            //
+            // 🔑 Na **Biblioteca** ele continua sendo a bandeira do Lightroom:
+            // ali a tela é a do catálogo local, e é a gramática que o fotógrafo
+            // traz de lá. `B` segue valendo na sessão, como atalho de quem já
+            // aprendeu.
             .on_action(cx.listener(|este, _: &Escolher, _w, cx| {
-                este.na_biblioteca(cx, |tela, cx| tela.sinalizar(1, cx))
+                este.na_grade(
+                    cx,
+                    |sessao, cx| sessao.alternar_levada(cx),
+                    |grade, cx| grade.sinalizar(1, cx),
+                )
             }))
             .on_action(cx.listener(|este, _: &Rejeitar, _w, cx| {
                 este.na_biblioteca(cx, |tela, cx| tela.sinalizar(-1, cx))
@@ -3704,6 +3886,7 @@ fn galeria_do_painel(id: &str) -> domain::services::pos_venda::GaleriaDoPainel {
         expira_em: None,
         fotos: Default::default(),
         totais: None,
+        ..Default::default()
     }
 }
 
@@ -3933,6 +4116,7 @@ mod testes {
             downloads: 0,
             revelada: ajustes.is_some(),
             ajustes,
+            ..Default::default()
         }
     }
 

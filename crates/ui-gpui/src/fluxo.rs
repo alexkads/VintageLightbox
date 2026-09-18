@@ -798,6 +798,7 @@ fn a_grade_e_a_do_ensaio_e_e_uma_so(cx: &mut TestAppContext) {
                         downloads: 0,
                         revelada: false,
                         ajustes: None,
+                        ..Default::default()
                     },
                 ]),
                 _window,
@@ -907,5 +908,6 @@ fn do_site(
         downloads: 0,
         revelada: false,
         ajustes: None,
+        ..Default::default()
     }
 }

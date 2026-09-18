@@ -1021,8 +1021,12 @@ impl Revelacao {
     /// 260px de conteúdo; o excesso era desenhado por cima da barra do topo.
     fn painel_dos_graficos(&self, cx: &mut Context<Self>) -> AnyElement {
         let estado = &self.estado_do_painel;
-        let com_histograma = estado.aberto(CHAVE_DO_HISTOGRAMA, true);
-        let com_curva = estado.aberto(CHAVE_DA_CURVA_RESULTANTE, true);
+        // 🚨 **Nascem recolhidos.** Eles não existem no site, e abertos ocupavam
+        // mais de meia coluna: a Revelação abria sem **um** slider à vista, e o
+        // que o operador vê na web ao abrir é o painel Básico. Quem os quer
+        // abre uma vez — a escolha fica lembrada entre sessões.
+        let com_histograma = estado.aberto(CHAVE_DO_HISTOGRAMA, false);
+        let com_curva = estado.aberto(CHAVE_DA_CURVA_RESULTANTE, false);
 
         let cabecalho_hist = self.cabecalho_da_sanfona(
             "Histograma",

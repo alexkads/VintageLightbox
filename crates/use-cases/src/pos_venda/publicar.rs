@@ -90,6 +90,9 @@ impl PublicarNoPosVendaUseCase {
                     bruto: None,
                     ajustes: None,
                     estado,
+                    // Este caminho não passa pela barra de envio: a faixa é a
+                    // da galeria.
+                    produto_id: None,
                     ordem,
                     // ⚠️ **Sem nota e sem chave, e é o que este caminho é.** Ele
                     // sobe um arquivo do disco que não passou pelo catálogo:
@@ -124,6 +127,7 @@ impl PublicarNoPosVendaUseCase {
     ///
     /// `None` mantém o comportamento de ler do banco, que é o certo para quem
     /// publica em lote uma foto já classificada há tempos.
+    #[allow(clippy::too_many_arguments)]
     pub async fn enviar_uma(
         &self,
         sessao: &Sessao,
@@ -132,8 +136,9 @@ impl PublicarNoPosVendaUseCase {
         ordem: u32,
         estado: Option<EstadoNoBalcao>,
         nota: Option<u8>,
+        produto_id: Option<String>,
     ) -> Result<String, String> {
-        self.subir(sessao, galeria_id, id, ordem, estado, nota)
+        self.subir(sessao, galeria_id, id, ordem, estado, nota, produto_id)
             .await
             .map(|(nome, _)| nome)
             .map_err(|(nome, erro)| format!("{nome}: {erro}"))
@@ -219,6 +224,7 @@ impl PublicarNoPosVendaUseCase {
     /// site: "sobe estas como levadas" é uma decisão sobre o lote, e não sobre
     /// cada foto. `None` cai na marcação da tecla `B` de cada uma — que é o que
     /// a publicação em lote e a classificação usam.
+    #[allow(clippy::too_many_arguments)]
     async fn subir(
         &self,
         sessao: &Sessao,
@@ -227,6 +233,8 @@ impl PublicarNoPosVendaUseCase {
         ordem: u32,
         estado: Option<EstadoNoBalcao>,
         nota: Option<u8>,
+        // A faixa escolhida na barra de envio; `None` segue a galeria.
+        produto_id: Option<String>,
     ) -> Result<(String, EstadoNoBalcao), (String, String)> {
         let mut photo = match self.fotos.find_by_id(id).await {
             Ok(Some(p)) => p,
@@ -284,6 +292,7 @@ impl PublicarNoPosVendaUseCase {
                         .and_then(|_| self.exportador.receita_para_o_site(&photo)),
                     bruto,
                     estado,
+                    produto_id,
                     ordem,
                     // 🚨 **A nota vai junto do arquivo.** É ela que autoriza a
                     // foto a subir (passo 3), e o site recusa o envio sem ela —
@@ -577,7 +586,7 @@ mod tests {
             api.clone(),
         );
         for (ordem, foto) in [&levada, &ficou].iter().enumerate() {
-            caso.enviar_uma(&sessao(), "g1", &foto.id(), ordem as u32, None, None)
+            caso.enviar_uma(&sessao(), "g1", &foto.id(), ordem as u32, None, None, None)
                 .await
                 .unwrap();
         }
@@ -622,7 +631,7 @@ mod tests {
             Arc::new(MockThumbnailGen::new()),
             api.clone(),
         );
-        caso.enviar_uma(&sessao(), "g1", &foto.id(), 0, None, Some(4))
+        caso.enviar_uma(&sessao(), "g1", &foto.id(), 0, None, Some(4), None)
             .await
             .unwrap();
 
@@ -808,7 +817,7 @@ mod tests {
             api.clone(),
         );
 
-        caso.enviar_uma(&sessao(), "g1", &foto.id(), 0, None, Some(4))
+        caso.enviar_uma(&sessao(), "g1", &foto.id(), 0, None, Some(4), None)
             .await
             .expect("a foto sobe");
 
@@ -912,7 +921,7 @@ mod tests {
         );
 
         let nome = caso
-            .enviar_uma(&sessao(), "g1", &id, 0, None, None)
+            .enviar_uma(&sessao(), "g1", &id, 0, None, None, None)
             .await
             .expect("subiu");
         assert_eq!(
@@ -950,7 +959,7 @@ mod tests {
         );
 
         let nome = caso
-            .enviar_uma(&sessao(), "g1", &id, 0, None, None)
+            .enviar_uma(&sessao(), "g1", &id, 0, None, None, None)
             .await
             .expect("subiu");
         assert_eq!(nome, "DSC_0001.jpg");
@@ -998,7 +1007,7 @@ mod tests {
             api.clone(),
         );
 
-        caso.enviar_uma(&sessao(), "g1", &id, 0, None, None)
+        caso.enviar_uma(&sessao(), "g1", &id, 0, None, None, None)
             .await
             .expect("subiu");
 
@@ -1053,7 +1062,7 @@ mod tests {
             api.clone(),
         );
 
-        caso.enviar_uma(&sessao(), "g1", &id, 0, None, Some(5))
+        caso.enviar_uma(&sessao(), "g1", &id, 0, None, Some(5), None)
             .await
             .expect("subiu");
 
@@ -1096,7 +1105,7 @@ mod tests {
         );
 
         let nome = caso
-            .enviar_uma(&sessao(), "g1", &id, 0, None, None)
+            .enviar_uma(&sessao(), "g1", &id, 0, None, None, None)
             .await
             .expect("subiu");
         assert_eq!(nome, "DSC_009.jpg");

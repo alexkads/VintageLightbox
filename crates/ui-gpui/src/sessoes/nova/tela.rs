@@ -45,7 +45,7 @@ use crate::biblioteca::acervo::Acervo;
 use crate::importacao::estado::Recado as RecadoDaImportacao;
 use crate::importacao::explorador::{Andamento, Explorador, Freios, Importador, SeletorDePasta};
 use crate::pos_venda::porta::{PedidoJson, Publicador, Recado};
-use crate::revelacao::persistencia::Gravador;
+use crate::revelacao::persistencia::{self, Gravador};
 use crate::sessoes::arquivos::SeletorDeFotos;
 use crate::sessoes::detalhe::{pasta_do_ensaio, Importacao};
 
@@ -68,6 +68,9 @@ pub enum PedidoDaNova {
     CatalogoMudou,
     /// O botão do menu lateral.
     AlternarMenu,
+    /// Fotos entraram na fila da receita padrão: a raiz liga a colheita dos
+    /// avisos, que ela repassa a esta tela e à da sessão.
+    RevelandoReceita,
 }
 
 impl EventEmitter<PedidoDaNova> for NovaSessao {}
@@ -203,6 +206,13 @@ pub struct PortasDaNova {
     pub acervo: Arc<dyn Acervo>,
     pub gravador: Arc<dyn Gravador>,
     pub previews: Arc<PreviewManager>,
+    /// Quem revela a receita padrão em segundo plano.
+    ///
+    /// 🔑 **Porta, e não campo da tela.** O assistente sai de cena quando a
+    /// sessão nasce, e a revelação não pode sair com ele — é o pedido do dono
+    /// ("em segundo plano, e ao abrir a sessão ir acontecendo"). O mesmo serviço
+    /// serve a sessão, e por isso as duas telas mostram a mesma imagem.
+    pub receita_padrao: Arc<crate::sessoes::receita_padrao::ReceitaPadrao>,
     pub explorador: Arc<dyn Explorador>,
     pub seletor_de_pasta: Arc<dyn SeletorDePasta>,
     pub presets_do_sistema: Vec<Preset>,
@@ -242,6 +252,19 @@ pub struct NovaSessao {
     /// As de outros rascunhos, que ninguém mais vai criar.
     pub(super) orfas: Vec<String>,
     pub(super) importacao: Option<Importacao>,
+    /// As levas soltas enquanto uma cópia andava, na ordem em que chegaram.
+    ///
+    /// 🚨 **Antes, soltar fotos durante a cópia era recusado** — "Espere a cópia
+    /// em curso terminar para adicionar mais fotos." (achado do dono,
+    /// 17/set/2026: a importação tem de andar em segundo plano). O site nunca
+    /// recusou: `copiarParaORascunho` põe a leva numa cadeia de promessas e o
+    /// operador segue soltando cartões (`nova/copia-local.ts`).
+    ///
+    /// 🔑 **Fila, e não paralelo**: `ImportadorDoDisco::importar` dá um
+    /// `tokio.spawn` por chamada, e duas levas ao mesmo tempo intercalariam a
+    /// ordem das fotos no catálogo — que é a ordem em que o balcão as mostra.
+    /// A cadeia do site serializa pelo mesmo motivo.
+    pub(super) fila_de_levas: std::collections::VecDeque<Vec<String>>,
     pub(super) falhas_da_copia: Option<(usize, String)>,
     freios: Freios,
     escolhendo: bool,
@@ -256,6 +279,12 @@ pub struct NovaSessao {
     pub(super) teclado_no_preset: bool,
     /// As miniaturas das fotos do rascunho, por id.
     pub(super) miniaturas: HashMap<String, Arc<RenderImage>>,
+    /// Fotos foram para a fila da receita: o próximo quadro avisa a raiz.
+    ///
+    /// 🔑 **Bandeira, e não `cx.emit` direto**: `aplicar_receita` é chamado de
+    /// lugares sem `Context` (a releitura do catálogo, a chegada dos presets), e
+    /// dar um `cx` a ela só para isto espalharia o contexto por meio módulo.
+    pub(super) pedir_colheita_das_reveladas: bool,
     pub(super) amostras: Amostras,
     /// O campo que o próximo quadro deve focar.
     focar: Option<Campo>,
@@ -436,6 +465,7 @@ impl NovaSessao {
             fotos: Vec::new(),
             orfas: Vec::new(),
             importacao: None,
+            fila_de_levas: std::collections::VecDeque::new(),
             falhas_da_copia: None,
             freios: Freios::default(),
             escolhendo: false,
@@ -448,6 +478,7 @@ impl NovaSessao {
             foco_do_preset: 0,
             teclado_no_preset: false,
             miniaturas: HashMap::new(),
+            pedir_colheita_das_reveladas: false,
             amostras: Amostras::default(),
             focar: None,
             recados: channel(),
@@ -836,7 +867,7 @@ impl NovaSessao {
     }
 
     pub fn importando(&self) -> bool {
-        self.importacao.is_some_and(|i| !i.terminou())
+        self.importacao.is_some_and(|i| !i.terminou()) || !self.fila_de_levas.is_empty()
     }
 
     /// Copia as fotos para o catálogo, sob o id do rascunho. **Nada sobe.**
@@ -851,13 +882,29 @@ impl NovaSessao {
             return;
         }
         if self.importando() {
+            let quantas = caminhos.len();
+            self.fila_de_levas.push_back(caminhos);
             self.avisar(
-                "Espere a cópia em curso terminar para adicionar mais fotos.",
-                true,
+                format!(
+                    "{} na fila: entram assim que a cópia atual terminar.",
+                    estado::plural(quantas, "foto", "fotos")
+                ),
+                false,
             );
             cx.notify();
             return;
         }
+        self.despachar_leva(caminhos, window, cx);
+    }
+
+    /// Manda uma leva ao importador. Quem decide se é agora ou depois da fila é
+    /// `importar_arquivos`.
+    fn despachar_leva(
+        &mut self,
+        caminhos: Vec<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.falhas_da_copia = None;
         self.importacao = Some(Importacao {
             total: caminhos.len(),
@@ -897,6 +944,7 @@ impl NovaSessao {
         }
         self.rascunho.formulario.preset_id = id;
         self.guardar();
+        self.esquecer_a_fila_da_receita();
         self.aplicar_receita();
         cx.notify();
     }
@@ -908,6 +956,7 @@ impl NovaSessao {
         }
         self.rascunho.formulario.proporcao = proporcao;
         self.guardar();
+        self.esquecer_a_fila_da_receita();
         self.aplicar_receita();
         cx.notify();
     }
@@ -954,26 +1003,60 @@ impl NovaSessao {
         let chave = format!("{:?}|{:?}", f.preset_id, proporcao);
         let ajustes = receita::ajustes_da_receita(preset.as_ref());
         let sem_efeito = f.preset_id.is_none() && proporcao.is_none();
-        self.receita.total = if sem_efeito { 0 } else { self.fotos.len() };
-        self.receita.prontas = 0;
+        let mut pediu = false;
         for foto in &self.fotos {
             let ja = self.receita_aplicada.get(&foto.id) == Some(&chave);
             if !ja {
                 // Sem efeito também grava: é o que desfaz a receita anterior.
                 if !(sem_efeito && !self.receita_aplicada.contains_key(&foto.id)) {
+                    // Os PARÂMETROS na hora, com o que se sabe agora — e o
+                    // serviço os regrava com o corte medido na imagem.
+                    //
+                    // 🚨 **O corte daqui costuma sair vazio, e é de propósito
+                    // que ele não é o último a falar**: `width`/`height` vêm do
+                    // EXIF (`PixelXDimension`), que JPEG, NEF e CR2 de verdade
+                    // não trazem — medido em quatro arquivos, nenhum tinha.
+                    // Gravar aqui garante que a foto nunca fica **sem** receita
+                    // (C8); quem põe o corte certo é quem abre a imagem.
                     let corte = receita::corte_centralizado(
                         proporcao.as_deref(),
                         foto.width.unwrap_or(0),
                         foto.height.unwrap_or(0),
                     );
                     self.portas.gravador.gravar(foto.id.clone(), ajustes, corte);
+                    // 🚨 **Gravar os PARÂMETROS não revela nada** — e era só
+                    // isto que acontecia aqui. A foto ia para a sessão com o
+                    // preset escolhido e a imagem do bruto, e a barra "Preset
+                    // padrão" enchia na hora porque contava este laço em vez do
+                    // trabalho (achado do dono, 17/set/2026). Agora o serviço
+                    // revela em segundo plano e a barra segue **ele**.
+                    //
+                    // 🔑 **E é ele quem grava o corte de verdade**, medido na
+                    // imagem que abriu — o site faz igual: quem grava a receita
+                    // é o trabalhador que revela (`exportacao/worker.ts`).
+                    self.portas
+                        .receita_padrao
+                        .pedir(foto.id.clone(), ajustes, proporcao.clone());
+                    pediu = true;
                 }
                 self.receita_aplicada.insert(foto.id.clone(), chave.clone());
             }
-            if !sem_efeito {
-                self.receita.prontas += 1;
-            }
         }
+        // O progresso é do serviço: quem conta é quem termina.
+        let andamento = self.portas.receita_padrao.progresso();
+        self.receita.total = andamento.total;
+        self.receita.prontas = andamento.prontas;
+        if pediu {
+            self.pedir_colheita_das_reveladas = true;
+        }
+    }
+
+    /// A receita mudou de cara: o que está na fila não vale mais.
+    ///
+    /// Chamado de `escolher_preset` e `escolher_proporcao`, antes de aplicar —
+    /// é o `recomecar` do serviço visto daqui.
+    fn esquecer_a_fila_da_receita(&mut self) {
+        self.portas.receita_padrao.recomecar();
     }
 
     pub fn apagar_orfas(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1644,6 +1727,26 @@ impl NovaSessao {
     pub fn colher(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let mut mudou = false;
 
+        // 🚨 **O aviso de "estou revelando" sai daqui, e não de `aplicar_receita`.**
+        // Ela é chamada de lugares sem `Context` (a releitura do catálogo, a
+        // chegada dos presets), então deixa a bandeira e quem tem `cx` a leva à
+        // raiz. Sem este trecho o serviço revelava no disco, ninguém colhia os
+        // avisos, as miniaturas ficavam nas de antes e a barra "Preset padrão"
+        // parava em 0/N — a receita acontecia e a tela não mostrava (achado do
+        // dono, 17/set/2026: *"aplicou o filtro padrão e corte e não faz o que
+        // promete"*).
+        if std::mem::take(&mut self.pedir_colheita_das_reveladas) {
+            cx.emit(PedidoDaNova::RevelandoReceita);
+        }
+        // E o progresso é lido do serviço a cada volta: quem conta é quem
+        // termina o trabalho.
+        let andamento = self.portas.receita_padrao.progresso();
+        if (andamento.total, andamento.prontas) != (self.receita.total, self.receita.prontas) {
+            self.receita.total = andamento.total;
+            self.receita.prontas = andamento.prontas;
+            mudou = true;
+        }
+
         while let Ok(recado) = self.recados.1.try_recv() {
             mudou = true;
             match recado {
@@ -1824,6 +1927,15 @@ impl NovaSessao {
             if self.importacao.is_some_and(|i| i.terminou()) {
                 self.importacao = None;
             }
+            // 🔑 **Depois da releitura, e não quando a leva termina.** As fotos
+            // da leva anterior só entram em `self.fotos` aqui; despachar antes
+            // faria o total da barra cair (ele soma as gravadas ao lote em
+            // curso) e a contagem andaria para trás na frente do operador.
+            if self.importacao.is_none() {
+                if let Some(proxima) = self.fila_de_levas.pop_front() {
+                    self.despachar_leva(proxima, window, cx);
+                }
+            }
             self.aplicar_receita();
         }
 
@@ -1878,6 +1990,9 @@ impl NovaSessao {
             || self.esperando_releitura
             || self.aviso.is_some()
             || self.amostras.esperando()
+            // A receita anda numa thread: enquanto ela não termina, a tela
+            // continua acordando para colher os avisos e mover a barra.
+            || self.portas.receita_padrao.progresso().andando()
             || self.menu_da_origem.as_ref().is_some_and(|m| m.procurando)
             || self
                 .cadastro
@@ -1905,20 +2020,33 @@ impl NovaSessao {
     }
 
     /// Lê as miniaturas que faltam (até 60) e a foto das amostras.
+    ///
+    /// 🚨 **A grade mostra a foto com a receita, e não como ela veio.** Era o
+    /// contrário: a miniatura entrava no mapa uma vez e nunca mais era refeita,
+    /// então escolher o preset padrão mudava os cartões do seletor e deixava os
+    /// quadros na imagem de antes (achado do dono, 17/set/2026).
+    ///
+    /// 🔑 **Quem revela é o serviço, não esta tela.** `sessoes::receita_padrao`
+    /// grava a miniatura revelada em `revelada:<id>` e avisa; aqui só se lê,
+    /// preferindo essa chave e caindo no bruto quando ela ainda não existe — é
+    /// o mesmo arranjo do site, onde o trabalhador revela e a grade lê a prévia.
+    /// Ler é também o que faz a **sessão** mostrar a mesma imagem que o
+    /// assistente mostrou, sem revelar de novo.
     pub(super) fn preparar_miniaturas(&mut self) {
         let previews = self.portas.previews.clone();
-        for foto in self.fotos.iter().take(60) {
-            if self.miniaturas.contains_key(&foto.id) {
+        let ids: Vec<String> = self.fotos.iter().take(60).map(|f| f.id.clone()).collect();
+        for id in ids {
+            if self.miniaturas.contains_key(&id) {
                 continue;
             }
-            let imagem = previews.get_thumbnail(&foto.id).or_else(|| {
-                previews
-                    .get_preview(&foto.id)
-                    .map(|g| g.thumbnail(320, 320))
-            });
+            let revelada = persistencia::chave_da_revelada(&id);
+            let imagem = previews
+                .get_thumbnail(&revelada)
+                .or_else(|| previews.get_thumbnail(&id))
+                .or_else(|| previews.get_preview(&id).map(|g| g.thumbnail(320, 320)));
             if let Some(imagem) = imagem {
                 self.miniaturas
-                    .insert(foto.id.clone(), crate::imagem::para_gpui(imagem));
+                    .insert(id.clone(), crate::imagem::para_gpui(imagem));
             }
         }
         let primeira = self
@@ -1932,6 +2060,16 @@ impl NovaSessao {
                 .get_preview(&id)
                 .or_else(|| previews.get_thumbnail(&id))
         });
+    }
+
+    /// Uma foto acabou de ser revelada pela receita: a miniatura velha sai, e a
+    /// próxima passada de `preparar_miniaturas` lê a nova.
+    ///
+    /// 🔑 **Esquecer, e não gravar aqui.** Quem gravou foi o serviço, em disco;
+    /// esta tela só descarta o que tem na mão — C17 do Contrato da Foto ("os
+    /// caches derivados saem e são refeitos") visto do lado de quem desenha.
+    pub fn revelada_chegou(&mut self, foto_id: &str) {
+        self.miniaturas.remove(foto_id);
     }
 
     /// A amostra do cartão deste preset (`None` = "Nenhum").

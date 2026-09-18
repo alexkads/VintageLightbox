@@ -1101,6 +1101,7 @@ mod testes {
                 ..ContagemDaApi::default()
             },
             totais: None,
+            ..Default::default()
         }
     }
 

@@ -29,6 +29,7 @@ fn foto_do_site(id: &str, ordem: i32, estado: EstadoDaFotoNoSite) -> FotoDaGaler
         downloads: 0,
         revelada: false,
         ajustes: None,
+        ..Default::default()
     }
 }
 
@@ -67,6 +68,7 @@ fn publicador() -> Arc<PublicadorDeMentira> {
             expira_em: None,
             fotos: Default::default(),
             totais: None,
+            ..Default::default()
         }]),
         fotos_da_sessao: std::sync::Mutex::new(vec![
             foto_do_site("a", 0, EstadoDaFotoNoSite::LevadaNoBalcao),

@@ -19,6 +19,65 @@ fn clicar(e: &Estudio, cx: &mut TestAppContext, alvo: &'static str) {
     visual.run_until_parked();
 }
 
+/// 🚨 **A receita padrão da sessão vale para quem chega depois.**
+///
+/// A predefinição e a proporção escolhidas na etapa 2 do assistente ficam **na
+/// galeria**. Quem importa mais fotos dentro da sessão espera o mesmo visual — e
+/// era o que não acontecia: o serviço da receita só atendia o assistente, e a
+/// leva seguinte entrava crua (achado do dono, 17/set/2026).
+#[gpui::test]
+fn a_foto_importada_na_sessao_recebe_a_receita_padrao(cx: &mut TestAppContext) {
+    let e = abrir_o_ensaio(
+        cx,
+        Cenario {
+            site: Box::new(|site| {
+                for galeria in site.galerias.lock().unwrap().iter_mut() {
+                    if galeria.id == GALERIA {
+                        galeria.preset_padrao_id = Some("sistema:sepia".into());
+                        galeria.proporcao_padrao = Some("1:1".into());
+                    }
+                }
+            }),
+            ..Default::default()
+        },
+    );
+
+    // As locais do ensaio já entram na conta da receita: elas são as que ainda
+    // não subiram, e é nelas que a receita da galeria manda.
+    e.app(cx, |app, _w, _cx| {
+        assert!(
+            app.receita_padrao_pedida() > 0,
+            "a receita da galeria tinha de ser pedida para as fotos locais"
+        );
+    });
+}
+
+/// 🧾 **A faixa escolhida na barra sobe com a foto.**
+///
+/// É a primeira das duas escolhas antes dos arquivos, no site: a sessão mista
+/// sobe a mãe sozinha numa faixa e a família em outra. O campo existia na tela
+/// (`escolher_faixa`) e **não chegava ao site** — nem o catálogo de faixas era
+/// carregado, então o seletor nem aparecia.
+#[gpui::test]
+fn a_faixa_da_barra_sobe_com_a_foto_classificada(cx: &mut TestAppContext) {
+    let e = abrir_o_ensaio(cx, Cenario::default());
+
+    e.detalhe(cx, |tela, _w, cx| {
+        assert!(!tela.produtos().is_empty(), "o catálogo chega com a sessão");
+        tela.escolher_faixa(Some("p1".into()), cx);
+    });
+
+    e.detalhe(cx, |tela, _w, cx| tela.focar_foto("id-DSC_101.jpg", cx));
+    e.teclar(cx, "4");
+    e.esperar(cx);
+
+    assert_eq!(
+        e.site.faixas_pedidas(),
+        vec![Some("p1".to_string())],
+        "a foto tinha de subir na faixa escolhida"
+    );
+}
+
 /// 🎬 **Importar, classificar e levar**: o botão "Importar" abre o seletor do
 /// sistema, o lote vai para o catálogo **local** com o carimbo do ensaio, a
 /// nota dada pela tecla sobe a foto (passo 3), e o `B` leva a do site.

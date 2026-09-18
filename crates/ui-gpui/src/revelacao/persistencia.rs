@@ -501,6 +501,24 @@ pub fn chave_do_trabalho(foto_id: &str) -> String {
     format!("trabalho:{foto_id}")
 }
 
+/// A chave da **miniatura revelada** pela receita padrão — `revelada:<id>`.
+///
+/// 🚨 **Terceira chave, e pelo motivo da segunda.** Quem lê aqui é a grade (a da
+/// sessão e a do assistente), que quer ver o preset aplicado. Quem **não** pode
+/// ler é a Revelação: ela lê `get_preview(&foto.id)`, o bruto, e receber daqui
+/// aplicaria receita sobre receita — o defeito de 7/set que o bloco acima
+/// registra.
+///
+/// 🔑 **Ausente é resposta válida.** Sem GPU, com receita neutra ou antes de a
+/// fila chegar nesta foto, não existe nada nesta chave, e quem desenha cai no
+/// bruto. É o que faz a grade nunca ficar vazia esperando a revelação.
+///
+/// O que mora aqui é **cache** no sentido do Contrato da Foto: derivado da
+/// VERSÃO REVELADA, descartável, refeito quando os PARÂMETROS mudam (C15, C17).
+pub fn chave_da_revelada(foto_id: &str) -> String {
+    format!("revelada:{foto_id}")
+}
+
 /// Se esta foto já foi revelada — algum ajuste fora do neutro, ou algum
 /// enquadramento.
 ///

@@ -124,6 +124,7 @@ impl PosVendaController {
     }
 
     /// Sobe **uma** foto para uma galeria que já existe — o passo 3 do fluxo.
+    #[allow(clippy::too_many_arguments)]
     pub async fn enviar_uma(
         &self,
         sessao: &Sessao,
@@ -132,10 +133,11 @@ impl PosVendaController {
         ordem: u32,
         estado: Option<EstadoNoBalcao>,
         nota: Option<u8>,
+        produto_id: Option<String>,
     ) -> Result<String, String> {
         let id = PhotoId::from_string(foto_id).map_err(|e| e.to_string())?;
         self.publicar
-            .enviar_uma(sessao, galeria_id, &id, ordem, estado, nota)
+            .enviar_uma(sessao, galeria_id, &id, ordem, estado, nota, produto_id)
             .await
     }
 

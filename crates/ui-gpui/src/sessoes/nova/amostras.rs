@@ -100,6 +100,16 @@ impl Amostras {
             return Some(pronta.clone());
         }
         let base = self.base.clone()?;
+        self.pedir(chave, base, ajustes)
+    }
+
+    /// O despacho ao motor, comum aos cartões e à grade.
+    fn pedir(
+        &mut self,
+        chave: &str,
+        base: Arc<Base>,
+        ajustes: Ajustes,
+    ) -> Option<Arc<RenderImage>> {
         if self.pedidas.insert(chave.to_string()) {
             if ajustes == Ajustes::default() {
                 // "Nenhum" é a foto como veio: não precisa do motor.

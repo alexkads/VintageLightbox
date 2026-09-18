@@ -33,9 +33,19 @@ use ui_gpui::tema;
 /// 🔧 Em depuração, `VLB_SESSAO_EM_ARQUIVO=1` troca o chaveiro por um arquivo
 /// (`ui_gpui::depuracao::CofreEmArquivo`), para um roteiro não parar no diálogo
 /// do macOS a cada recompilação. O binário do balcão nem olha a variável.
-fn cofre_da_sessao() -> Arc<dyn domain::services::pos_venda::CofreDeSessao> {
+fn cofre_da_sessao(pilha_local: bool) -> Arc<dyn domain::services::pos_venda::CofreDeSessao> {
     if cfg!(debug_assertions) && std::env::var_os("VLB_SESSAO_EM_ARQUIVO").is_some() {
         return Arc::new(ui_gpui::depuracao::CofreEmArquivo::padrao());
+    }
+    // 🚨 **A pilha local nunca usa o item de produção do chaveiro.** Eram o
+    // mesmo item, e autorizar contra `localhost` gravava o token local em cima
+    // da sessão do estúdio — o operador voltava a produção deslogado, sem
+    // relação visível com o que tinha feito. O app Tauri já separava os dois
+    // (`app-tauri/src/api.rs`, "a pilha local tem a própria sessão").
+    if pilha_local {
+        return Arc::new(infrastructure::CofreDoSistema::com_servico(
+            "br.com.recordarfotos.vintagelightbox.local",
+        ));
     }
     Arc::new(infrastructure::CofreDoSistema::novo())
 }
@@ -207,9 +217,20 @@ async fn main() {
             // 🔑 O chaveiro do sistema é o que faz a sessão sobreviver ao
             // fechamento do app: sem ele, o refresh de quinze dias morreria com
             // o processo e o operador reautorizaria toda manhã.
+            // 🚨 **Sem `com_site` a autorização ia sempre para produção.**
+            // `PosVendaApiHttp::nova` cai em `SITE_PADRAO` quando ninguém lhe
+            // diz o site, então com a API em `localhost` o navegador abria
+            // `recordarfotos.com.br/autorizar-app` — que é exatamente a
+            // armadilha descrita em `pos_venda/config.rs`: o código é assinado
+            // pelo segredo de um servidor e apresentado a outro. `config.site()`
+            // já resolve a precedência (`VLB_SITE_URL`, o JSON, a dedução).
+            let config = ui_gpui::pos_venda::config::ler();
+            let local = config.base_url.contains("://localhost")
+                || config.base_url.contains("://127.0.0.1");
             let api = Arc::new(
-                infrastructure::PosVendaApiHttp::nova(ui_gpui::pos_venda::config::ler().base_url)
-                    .com_cofre(cofre_da_sessao()),
+                infrastructure::PosVendaApiHttp::nova(config.base_url.clone())
+                    .com_site(config.site())
+                    .com_cofre(cofre_da_sessao(local)),
             );
             adapters::controllers::PosVendaController::new(
                 api.clone(),

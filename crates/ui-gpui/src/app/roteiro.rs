@@ -92,6 +92,18 @@ impl Aplicativo {
                 Some(id) => self.entrar_na_sessao(id, cx),
                 None => eprintln!("[roteiro] a lista não tem a sessão {posicao}"),
             },
+            Passo::Detalhes => self
+                .detalhe
+                .update(cx, |tela, cx| tela.alternar_detalhes(cx)),
+            Passo::Foco(posicao) => {
+                let posicao = posicao.saturating_sub(1);
+                self.detalhe.update(cx, |tela, cx| {
+                    tela.clicar(posicao, Default::default(), cx);
+                });
+            }
+            Passo::Atendimento => self
+                .detalhe
+                .update(cx, |tela, cx| tela.alternar_atendimento(cx)),
             Passo::Menu => self.alternar_menu_lateral(cx),
             Passo::MenuDoUsuario => self.alternar_menu_da_conta(cx),
             Passo::Tema(nome) => match crate::tema::Escolha::do_nome(nome) {

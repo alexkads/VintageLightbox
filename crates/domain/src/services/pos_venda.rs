@@ -164,7 +164,10 @@ pub struct Galeria {
 /// contagem por estado, prazo, se o cliente já entrou. Quem calcula a situação
 /// é `biblioteca_core::sessoes`, a mesma conta da lista do site; o que chega
 /// aqui é o dado cru para ela.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// `Default` existe para os cenários de teste: a galeria tem quinze campos, e
+/// exigir os quinze em cada literal faz cada campo novo virar uma varredura por
+/// arquivos de teste — que foi como este ficou sem `preset_padrao_id`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GaleriaDoPainel {
     pub id: String,
     pub titulo: String,
@@ -176,12 +179,40 @@ pub struct GaleriaDoPainel {
     pub user_id: Option<String>,
     /// `"2026-09-03"`, já reduzida ao dia: é o carimbo do eixo do gráfico.
     pub criada_em_iso: String,
+    /// Quem criou a sessão — o e-mail do operador, como no "detalhes" do site.
+    pub criada_por: Option<String>,
     /// Segundos desde a época. `None` = não expira.
     pub expira_em: Option<i64>,
     pub fotos: ContagemDeFotos,
     /// `None` na galeria de uma API anterior ao campo — e isso é dito na soma,
     /// em vez de virar zero calado.
     pub totais: Option<TotaisDaGaleria>,
+    /// A **receita padrão** da sessão: a predefinição escolhida na etapa 2 do
+    /// assistente (`sistema:<chave>` ou o id do banco).
+    ///
+    /// 🚨 **Ela não é enfeite da lista**: é o que faz a foto importada **dentro**
+    /// da sessão nascer com o mesmo visual das que entraram pelo assistente. Sem
+    /// ela aqui, a sessão aplicava a receita só às fotos do rascunho, e as
+    /// importadas depois ficavam cruas — na web o agendador as pega pelas duas
+    /// portas (`receita-padrao/agendador.ts` lê a receita **da galeria**).
+    pub preset_padrao_id: Option<String>,
+    /// A proporção do corte padrão (`"3:2"`, `"livre"`…), pelo mesmo motivo.
+    pub proporcao_padrao: Option<String>,
+    /// O estúdio da sessão — o seletor do cabeçalho.
+    pub estudio_id: Option<String>,
+    /// O que o assistente associou: agendamento, voucher e compra antecipada.
+    ///
+    /// 🔑 **Ids, e não resumos.** É o que a API devolve sempre; o resumo (nome,
+    /// data, total) vem quando ela o tem, e a gaveta do atendimento mostra
+    /// "associado" quando só há o id — esconder diria ao operador que **não há**
+    /// associação, e o próximo gesto dele seria associar outra por cima.
+    pub ensaio_id: Option<String>,
+    pub voucher_id: Option<String>,
+    pub pedido_id: Option<String>,
+    /// Como o cliente conheceu o estúdio (`instagram`, `parceiro`…).
+    pub como_conheceu: Option<String>,
+    pub como_conheceu_detalhe: Option<String>,
+    pub parceiro_id: Option<String>,
 }
 
 /// Quantas fotos a galeria tem, por estado.
@@ -225,9 +256,12 @@ pub struct LinkDeAcesso {
 /// mas volta de lá, e a grade da sessão precisa saber desenhá-la. Um enum só
 /// para os dois sentidos deixaria "comprada" representável na escrita, que é
 /// exatamente o que não pode acontecer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum EstadoDaFotoNoSite {
     LevadaNoBalcao,
+    /// O padrão: é o que o site grava quando o envio não diz o estado, e o que
+    /// o `Default` de [`FotoDaGaleria`] usa nos cenários de teste.
+    #[default]
     Disponivel,
     /// Pagou depois, pela galeria — há um pedido por trás.
     Comprada,
@@ -254,7 +288,7 @@ impl EstadoDaFotoNoSite {
 }
 
 /// Uma foto como ela está no site.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct FotoDaGaleria {
     pub id: String,
     /// O nome que o cliente vê.
@@ -276,6 +310,15 @@ pub struct FotoDaGaleria {
     pub nota: Option<u8>,
     /// A faixa que **vale** para esta foto: a dela, ou a da galeria.
     pub produto_efetivo: String,
+    /// A faixa **fixada nesta foto**, quando há uma. `None` = ela segue a
+    /// galeria.
+    ///
+    /// 🔑 **Não é o mesmo que `produto_efetivo`**, e o painel precisa dos dois:
+    /// o seletor marca "Padrão da galeria" quando este é `None`, e mostrar o
+    /// efetivo ali diria que a foto tem faixa própria quando ela não tem.
+    pub produto_id: Option<String>,
+    /// O tamanho do arquivo no acervo, em bytes — o "Tamanho" do painel.
+    pub tamanho_bytes: Option<u64>,
     /// O preço fixado para a compra online, decimal em texto. `None` = a faixa.
     pub preco_de_venda: Option<String>,
     /// O pedido que a comprou, quando houve um.
@@ -304,6 +347,37 @@ pub struct GaleriaAberta {
     pub vence_venda: Option<i64>,
     /// Até quando as adquiridas ficam para download.
     pub vence_download: Option<i64>,
+    /// Os resumos do que o assistente associou — o que a gaveta do atendimento
+    /// mostra além do id.
+    ///
+    /// ⚠️ **`None` não é "não há associação"**: o id na galeria é que responde
+    /// isso. O resumo pode faltar (a API no meio de um deploy, o voucher
+    /// apagado), e aí a gaveta diz "associado" — a mesma regra do site.
+    pub resumos: ResumosDoAtendimento,
+}
+
+/// O que a API devolve sobre cada associação, para a gaveta não mostrar só ids.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ResumosDoAtendimento {
+    /// `(nome, quando, estúdio)` do agendamento.
+    pub agendamento: Option<ResumoSimples>,
+    /// `(número, nome do cliente, parceiro)` do voucher.
+    pub voucher: Option<ResumoSimples>,
+    /// `(total, comprador, pago em)` da compra antecipada.
+    pub pedido: Option<ResumoSimples>,
+    /// `(nome, tipo)` do parceiro.
+    pub parceiro: Option<ResumoSimples>,
+}
+
+/// Um resumo como a tela o mostra: o título e uma linha de detalhe.
+///
+/// 🔑 **Texto pronto, e não campos.** Cada resumo da API tem uma forma
+/// diferente (data, total, slug), e montá-los aqui deixa a tela com uma regra
+/// só: mostrar o que veio.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ResumoSimples {
+    pub titulo: String,
+    pub detalhe: String,
 }
 
 /// O que muda numa foto que **já está** no site.
@@ -327,6 +401,20 @@ pub struct MudancaDaFoto {
     /// A nota de 1 a 5. 🚨 **`Some(None)` é recusado pelo site** — ver o topo
     /// do módulo; tirar a nota de uma foto do acervo é removê-la.
     pub nota: Option<Option<i16>>,
+    /// A **faixa** desta foto — o "tipo de ensaio", que dá o preço. `Some(None)`
+    /// devolve a foto ao produto padrão da galeria.
+    ///
+    /// 🔑 É o `produto_id` do `PATCH /pos-venda/fotos/{id}`, o mesmo campo que o
+    /// painel do site muda em "Faixa": a sessão mista tem fotos de faixas
+    /// diferentes, e corrigir uma leva inteira foto a foto é o que o balcão faz.
+    pub produto_id: Option<Option<String>>,
+    /// **O preço** desta foto na galeria do cliente e no pedido, quando difere
+    /// da faixa. Decimal em texto (`"19.90"`); `Some(None)` volta ao da faixa.
+    ///
+    /// ⚠️ **Não confundir com `preco_negociado`**: aquele é registro do balcão e
+    /// não entra na compra online; este é o que o cliente paga. Zero é recusado
+    /// pelo site (`400`) — zero é cortesia, e cortesia é negociação.
+    pub preco_de_venda: Option<Option<String>>,
 }
 
 impl MudancaDaFoto {
@@ -337,6 +425,8 @@ impl MudancaDaFoto {
             && self.preco_negociado.is_none()
             && self.observacao_da_negociacao.is_none()
             && self.nota.is_none()
+            && self.produto_id.is_none()
+            && self.preco_de_venda.is_none()
     }
 }
 
@@ -355,12 +445,39 @@ pub struct MudancaDaGaleria {
     pub titulo: Option<String>,
     pub email: Option<Option<String>>,
     pub whatsapp: Option<Option<String>>,
+    /// O estúdio da sessão. `Some(None)` a deixa sem estúdio.
+    pub estudio_id: Option<Option<String>>,
+    /// As associações do atendimento — o que a gaveta corrige sem recriar a
+    /// sessão (site: `atendimento-da-sessao.tsx`).
+    pub ensaio_id: Option<Option<String>>,
+    pub voucher_id: Option<Option<String>>,
+    pub pedido_id: Option<Option<String>>,
+    /// 🚨 **Os três do "como conheceu" andam juntos.** O site recusa parceiro
+    /// sem `como_conheceu = parceiro` (`400`), e a resposta trocada sem limpar o
+    /// parceiro é exatamente esse caso.
+    pub como_conheceu: Option<Option<String>>,
+    pub como_conheceu_detalhe: Option<Option<String>>,
+    pub parceiro_id: Option<Option<String>>,
+    /// A receita padrão da sessão — muda o que as próximas fotos recebem.
+    pub preset_padrao_id: Option<Option<String>>,
+    pub proporcao_padrao: Option<Option<String>>,
 }
 
 impl MudancaDaGaleria {
     /// Nada a mudar — não se gasta uma ida à rede.
     pub fn vazia(&self) -> bool {
-        self.titulo.is_none() && self.email.is_none() && self.whatsapp.is_none()
+        self.titulo.is_none()
+            && self.email.is_none()
+            && self.whatsapp.is_none()
+            && self.estudio_id.is_none()
+            && self.ensaio_id.is_none()
+            && self.voucher_id.is_none()
+            && self.pedido_id.is_none()
+            && self.como_conheceu.is_none()
+            && self.como_conheceu_detalhe.is_none()
+            && self.parceiro_id.is_none()
+            && self.preset_padrao_id.is_none()
+            && self.proporcao_padrao.is_none()
     }
 }
 
@@ -415,6 +532,13 @@ pub struct FotoParaEnviar {
     /// como entrou. Ver `ImageExporter::receita_para_o_site`.
     pub ajustes: Option<serde_json::Value>,
     pub estado: EstadoNoBalcao,
+    /// A **faixa** desta foto, quando a leva escolheu uma. `None` = a da
+    /// galeria.
+    ///
+    /// 🔑 É a primeira das duas escolhas antes dos arquivos, no site
+    /// (`envio.tsx`): a sessão mista sobe a mãe sozinha numa faixa e a família
+    /// em outra, e sem este campo a leva inteira nascia no padrão da galeria.
+    pub produto_id: Option<String>,
     pub ordem: u32,
     /// A nota de 1 a 5. **O site recusa envio sem ela.**
     ///

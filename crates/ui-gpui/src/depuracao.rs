@@ -27,6 +27,13 @@ pub enum Passo {
     Ir(String),
     /// `abrir_sessao 1` — a N-ésima da lista, contando de 1.
     AbrirSessao(usize),
+    /// `atendimento` — abre ou fecha a gaveta do atendimento da sessão aberta.
+    Atendimento,
+    /// `detalhes` — abre ou fecha os números e prazos da sessão aberta.
+    Detalhes,
+    /// `foco 1` — põe o foco na N-ésima foto da grade da sessão, contando de 1.
+    /// É o clique da grade, e é ele que faz o painel da direita aparecer.
+    Foco(usize),
     /// `menu` — abre ou recolhe o menu lateral.
     Menu,
     /// `menu_usuario` — abre ou fecha o menu da conta.
@@ -109,6 +116,9 @@ pub fn ler_roteiro(texto: &str) -> Result<Vec<Passo>, String> {
             }
             "ir" => Passo::Ir(argumentos.first().copied().unwrap_or_default().to_string()),
             "abrir_sessao" => Passo::AbrirSessao(numero(0)?.max(1.0) as usize),
+            "atendimento" => Passo::Atendimento,
+            "detalhes" => Passo::Detalhes,
+            "foco" => Passo::Foco(numero(0)?.max(1.0) as usize),
             "menu" => Passo::Menu,
             "menu_usuario" => Passo::MenuDoUsuario,
             "tema" => Passo::Tema(argumentos.first().copied().unwrap_or_default().to_string()),
@@ -299,7 +309,17 @@ pub struct CofreEmArquivo {
 
 impl CofreEmArquivo {
     /// O arquivo ao lado dos dados do app, herdando do Tauri de depuração.
+    ///
+    /// 🔧 **`VLB_SESSAO_ARQUIVO=<caminho>` troca o arquivo**, e nada é herdado:
+    /// é como se abre uma sessão de teste (a da pilha local, por exemplo) sem
+    /// passar por cima da que já está guardada.
     pub fn padrao() -> Self {
+        if let Some(caminho) = std::env::var_os("VLB_SESSAO_ARQUIVO") {
+            return Self {
+                arquivo: std::path::PathBuf::from(caminho),
+                herdar_de: None,
+            };
+        }
         let dados = infrastructure::paths::AppPaths::home_dir()
             .join("Library")
             .join("Application Support");

@@ -1021,6 +1021,7 @@ fn foto_do_site(i: usize) -> domain::services::pos_venda::FotoDaGaleria {
         downloads: 0,
         revelada: false,
         ajustes: None,
+        ..Default::default()
     }
 }
 
@@ -1050,6 +1051,7 @@ fn sessao_com(
             expira_em: None,
             fotos: Default::default(),
             totais: None,
+            ..Default::default()
         }]),
         fotos_da_sessao: std::sync::Mutex::new((0..n).map(foto_do_site).collect()),
         ..Default::default()

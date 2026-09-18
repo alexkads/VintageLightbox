@@ -158,6 +158,9 @@ pub struct FotoClassificada {
     /// dela é outra tarefa do tokio, e ninguém a espera — quem lê o banco aqui
     /// corre com ela e pode subir o valor anterior.
     pub nota: Option<u8>,
+    /// A **faixa** escolhida na barra de envio, quando há uma. `None` segue a
+    /// faixa da galeria — o que o site chama de "Padrão da galeria".
+    pub produto_id: Option<String>,
 }
 
 /// Os pedidos de foto que a tela faz ao site, pelo que eles fazem lá.
@@ -632,9 +635,18 @@ impl Publicador for PublicadorDaApi {
                 ordem,
                 estado,
                 nota,
+                produto_id,
             } = foto;
             let recado = match controlador
-                .enviar_uma(&sessao, &galeria_id, &foto_id, ordem, estado, nota)
+                .enviar_uma(
+                    &sessao,
+                    &galeria_id,
+                    &foto_id,
+                    ordem,
+                    estado,
+                    nota,
+                    produto_id,
+                )
                 .await
             {
                 Ok(_) => Recado::Sincronizou,
@@ -792,6 +804,8 @@ pub mod mentira {
         pub avisadas: Mutex<Vec<String>>,
         /// O estado pedido em cada subida — `None` é "o da tecla B".
         pub estados_pedidos: Mutex<Vec<Option<EstadoNoBalcao>>>,
+        /// A faixa pedida em cada subida — `None` é "a da galeria".
+        pub faixas_pedidas: Mutex<Vec<Option<String>>>,
         /// A nota que acompanhou cada subida — é o que prende a corrida entre a
         /// gravação da nota e o envio.
         pub notas_pedidas: Mutex<Vec<Option<u8>>>,
@@ -872,6 +886,10 @@ pub mod mentira {
 
         pub fn subidas(&self) -> Vec<(String, String, u32)> {
             self.subidas.lock().expect("as subidas").clone()
+        }
+
+        pub fn faixas_pedidas(&self) -> Vec<Option<String>> {
+            self.faixas_pedidas.lock().expect("as faixas").clone()
         }
 
         pub fn tiradas(&self) -> Vec<String> {
@@ -1131,6 +1149,10 @@ pub mod mentira {
                 .expect("os estados")
                 .push(foto.estado);
             self.notas_pedidas.lock().expect("as notas").push(foto.nota);
+            self.faixas_pedidas
+                .lock()
+                .expect("as faixas")
+                .push(foto.produto_id);
             let _ = canal.send(Recado::Sincronizou);
         }
 
@@ -1181,6 +1203,7 @@ pub mod mentira {
                 fotos: self.fotos_da_sessao.lock().expect("as fotos").clone(),
                 vence_venda: None,
                 vence_download: None,
+                resumos: Default::default(),
             })));
         }
 
@@ -1302,6 +1325,7 @@ pub mod mentira {
                     expira_em: None,
                     fotos: domain::services::pos_venda::ContagemDeFotos::default(),
                     totais: None,
+                    ..Default::default()
                 });
             let _ = canal.send(Recado::Criada(Galeria {
                 id,

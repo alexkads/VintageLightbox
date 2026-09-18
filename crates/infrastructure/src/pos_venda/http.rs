@@ -29,7 +29,8 @@ use async_trait::async_trait;
 use domain::services::pos_venda::{
     CofreDeSessao, ContagemDeFotos, EstadoDaFotoNoSite, Estudio, FotoDaGaleria, FotoEnviada,
     FotoParaEnviar, Galeria, GaleriaAberta, GaleriaDoPainel, LinkDeAcesso, MudancaDaFoto,
-    MudancaDaGaleria, NovaGaleria, PosVendaApi, Produto, Sessao, TotaisDaGaleria,
+    MudancaDaGaleria, NovaGaleria, PosVendaApi, Produto, ResumoSimples, ResumosDoAtendimento,
+    Sessao, TotaisDaGaleria,
 };
 use domain::{DomainError, DomainResult};
 use serde::Deserialize;
@@ -450,6 +451,11 @@ impl PosVendaApi for PosVendaApiHttp {
         if let Some(nota) = foto.nota {
             form = form.text("nota", nota.to_string());
         }
+        // A faixa da leva, quando o operador escolheu uma na barra de envio.
+        // Vazio é ausência, e o site trata assim: a foto segue a galeria.
+        if let Some(produto) = foto.produto_id.as_ref().filter(|p| !p.trim().is_empty()) {
+            form = form.text("produto_id", produto.clone());
+        }
         // 🔑 A chave de idempotência: reenviar a mesma foto devolve a que já
         // está lá, em vez de uma segunda cópia na galeria do cliente.
         if let Some(chave) = foto.chave_do_cliente.clone() {
@@ -541,6 +547,12 @@ impl PosVendaApi for PosVendaApiHttp {
         if let Some(nota) = &mudanca.nota {
             corpo.insert("nota".into(), json!(nota));
         }
+        if let Some(produto) = &mudanca.produto_id {
+            corpo.insert("produto_id".into(), json!(produto));
+        }
+        if let Some(preco) = &mudanca.preco_de_venda {
+            corpo.insert("preco_de_venda".into(), json!(preco));
+        }
 
         let resposta = self
             .client
@@ -616,6 +628,23 @@ impl PosVendaApi for PosVendaApiHttp {
         if let Some(whatsapp) = &mudanca.whatsapp {
             corpo.insert("whatsapp".into(), json!(whatsapp));
         }
+        // 🔑 Os três estados de cada campo, como no `PATCH` da foto: ausente do
+        // mapa é "não mexer", `null` é "desassociar".
+        for (campo, valor) in [
+            ("estudio_id", &mudanca.estudio_id),
+            ("ensaio_id", &mudanca.ensaio_id),
+            ("voucher_id", &mudanca.voucher_id),
+            ("pedido_id", &mudanca.pedido_id),
+            ("como_conheceu", &mudanca.como_conheceu),
+            ("como_conheceu_detalhe", &mudanca.como_conheceu_detalhe),
+            ("parceiro_id", &mudanca.parceiro_id),
+            ("preset_padrao_id", &mudanca.preset_padrao_id),
+            ("proporcao_padrao", &mudanca.proporcao_padrao),
+        ] {
+            if let Some(valor) = valor {
+                corpo.insert(campo.into(), json!(valor));
+            }
+        }
 
         let resposta = self
             .client
@@ -657,6 +686,8 @@ impl PosVendaApi for PosVendaApiHttp {
                     apagada: f.apagada_em.is_some(),
                     nota: f.nota,
                     produto_efetivo: f.produto_efetivo,
+                    produto_id: f.produto_id,
+                    tamanho_bytes: f.tamanho_bytes,
                     preco_de_venda: f.preco_de_venda,
                     pedido_id: f.pedido_id,
                     downloads: f.downloads,
@@ -667,6 +698,49 @@ impl PosVendaApi for PosVendaApiHttp {
                 .collect(),
             vence_venda: aberta.vence_venda.map(|q| q.timestamp()),
             vence_download: aberta.vence_download.map(|q| q.timestamp()),
+            resumos: ResumosDoAtendimento {
+                agendamento: aberta.agendamento.map(|a| ResumoSimples {
+                    titulo: a.nome.unwrap_or_else(|| "Agendamento".into()),
+                    detalhe: [
+                        a.inicio.map(data_e_hora_br),
+                        a.estudio_nome,
+                        (!a.status.trim().is_empty()).then_some(a.status),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .collect::<Vec<_>>()
+                    .join(" · "),
+                }),
+                voucher: aberta.voucher.map(|v| ResumoSimples {
+                    titulo: format!("Voucher {}", v.numero),
+                    detalhe: [
+                        v.nome,
+                        (!v.parceiro.trim().is_empty()).then_some(v.parceiro),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .collect::<Vec<_>>()
+                    .join(" · "),
+                }),
+                pedido: aberta.pedido.map(|p| ResumoSimples {
+                    titulo: match p.total {
+                        Some(total) => format!("Compra de R$ {total}"),
+                        None => "Compra antecipada".into(),
+                    },
+                    detalhe: [
+                        p.comprador_nome,
+                        p.pago_em.map(|q| format!("paga em {}", data_e_hora_br(q))),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .collect::<Vec<_>>()
+                    .join(" · "),
+                }),
+                parceiro: aberta.parceiro.map(|p| ResumoSimples {
+                    titulo: p.nome,
+                    detalhe: p.tipo.unwrap_or_default(),
+                }),
+            },
         })
     }
 
@@ -921,6 +995,8 @@ struct GaleriaDoPainelDaApi {
     user_id: Option<String>,
     criada_em: chrono::DateTime<chrono::Utc>,
     #[serde(default)]
+    criada_por: Option<String>,
+    #[serde(default)]
     expira_em: Option<chrono::DateTime<chrono::Utc>>,
     #[serde(default)]
     fotos: ContagemDaApi,
@@ -929,6 +1005,24 @@ struct GaleriaDoPainelDaApi {
     /// total está menor que o real. Zero calado é a única resposta errada aqui.
     #[serde(default)]
     totais: Option<TotaisDaApi>,
+    #[serde(default)]
+    preset_padrao_id: Option<String>,
+    #[serde(default)]
+    proporcao_padrao: Option<String>,
+    #[serde(default)]
+    estudio_id: Option<String>,
+    #[serde(default)]
+    ensaio_id: Option<String>,
+    #[serde(default)]
+    voucher_id: Option<String>,
+    #[serde(default)]
+    pedido_id: Option<String>,
+    #[serde(default)]
+    como_conheceu: Option<String>,
+    #[serde(default)]
+    como_conheceu_detalhe: Option<String>,
+    #[serde(default)]
+    parceiro_id: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -962,6 +1056,7 @@ impl From<GaleriaDoPainelDaApi> for GaleriaDoPainel {
             // por dia, e guardar a hora daria duas galerias do mesmo dia em
             // degraus diferentes assim que alguém esquecesse de cortar.
             criada_em_iso: g.criada_em.format("%Y-%m-%d").to_string(),
+            criada_por: g.criada_por,
             expira_em: g.expira_em.map(|quando| quando.timestamp()),
             fotos: ContagemDeFotos {
                 levadas_no_balcao: g.fotos.levadas_no_balcao,
@@ -973,6 +1068,15 @@ impl From<GaleriaDoPainelDaApi> for GaleriaDoPainel {
                 balcao: t.balcao,
                 pos_venda: t.pos_venda,
             }),
+            preset_padrao_id: g.preset_padrao_id,
+            proporcao_padrao: g.proporcao_padrao,
+            estudio_id: g.estudio_id,
+            ensaio_id: g.ensaio_id,
+            voucher_id: g.voucher_id,
+            pedido_id: g.pedido_id,
+            como_conheceu: g.como_conheceu,
+            como_conheceu_detalhe: g.como_conheceu_detalhe,
+            parceiro_id: g.parceiro_id,
         }
     }
 }
@@ -985,6 +1089,63 @@ struct GaleriaAbertaDaApi {
     vence_venda: Option<chrono::DateTime<chrono::Utc>>,
     #[serde(default)]
     vence_download: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default)]
+    agendamento: Option<AgendamentoDaApi>,
+    #[serde(default)]
+    voucher: Option<VoucherDaApi>,
+    #[serde(default)]
+    pedido: Option<PedidoDaApi>,
+    #[serde(default)]
+    parceiro: Option<ParceiroDaApi>,
+}
+
+/// Os quatro resumos do atendimento, como a API os devolve. Cada um vira um
+/// [`ResumoSimples`] — texto pronto para a gaveta.
+#[derive(Deserialize)]
+struct AgendamentoDaApi {
+    #[serde(default)]
+    nome: Option<String>,
+    #[serde(default)]
+    inicio: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default)]
+    estudio_nome: Option<String>,
+    #[serde(default)]
+    status: String,
+}
+
+#[derive(Deserialize)]
+struct VoucherDaApi {
+    numero: String,
+    #[serde(default)]
+    nome: Option<String>,
+    #[serde(default)]
+    parceiro: String,
+}
+
+#[derive(Deserialize)]
+struct PedidoDaApi {
+    #[serde(default)]
+    total: Option<String>,
+    #[serde(default)]
+    comprador_nome: Option<String>,
+    #[serde(default)]
+    pago_em: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[derive(Deserialize)]
+struct ParceiroDaApi {
+    nome: String,
+    #[serde(default)]
+    tipo: Option<String>,
+}
+
+/// `2026-09-13T14:00:00Z` → `13/09/2026, 11:00`, no fuso do estúdio.
+fn data_e_hora_br(quando: chrono::DateTime<chrono::Utc>) -> String {
+    let brasilia = chrono::FixedOffset::west_opt(3 * 3600).expect("fuso do estúdio");
+    quando
+        .with_timezone(&brasilia)
+        .format("%d/%m/%Y, %H:%M")
+        .to_string()
 }
 
 /// A foto como o painel a devolve. O que a grade do desktop não usa (downloads,
@@ -1009,6 +1170,11 @@ struct FotoDaGaleriaDaApi {
     nota: Option<u8>,
     #[serde(default)]
     produto_efetivo: String,
+    /// A faixa fixada **nesta** foto — `null` quando ela segue a galeria.
+    #[serde(default)]
+    produto_id: Option<String>,
+    #[serde(default)]
+    tamanho_bytes: Option<u64>,
     #[serde(default)]
     preco_de_venda: Option<String>,
     #[serde(default)]
@@ -1234,6 +1400,7 @@ mod tests {
                     bruto: None,
                     ajustes: None,
                     estado: EstadoNoBalcao::LevadaNoBalcao,
+                    produto_id: Some("p2".into()),
                     ordem: 3,
                     nota: Some(4),
                     chave_do_cliente: Some("3f1c9a6e-0000-4000-8000-000000000001".into()),
@@ -1619,6 +1786,7 @@ mod tests {
                 titulo: Some("Ensaio da Ana".into()),
                 email: Some(None),
                 whatsapp: None,
+                ..Default::default()
             },
         )
         .await

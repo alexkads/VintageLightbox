@@ -39,6 +39,7 @@
 //! | [`conta`] | a porta, `/auth/me`, o tema, o menu lateral, o menu da conta e o Sair |
 //! | [`sessoes`] | a lista, a busca, os recortes, a sessão nova, a retenção e o caixa |
 //! | [`galeria`] | dentro da sessão: importar, classificar, levar, negociar, imprimir, exportar, o cliente e o link |
+//! | [`atendimento`] | **as fotos**: quais entram em cada recorte, o que cada gesto faz **nelas**, a tira da revelação e o que o cliente vê |
 //! | [`caixa`] | o caixa flutuante na galeria e na revelação |
 //! | [`cliente`] | a segunda tela acompanhando a galeria e a revelação |
 //! | [`revelacao`] | a tira, os sliders, o histórico, as abas, a curva e as predefinições |
@@ -47,6 +48,7 @@
 //! | [`lote`] | sincronizar, zerar, a comprada, "Baixar JPEG" e "Salvar na galeria" |
 //! | [`segundo_plano`] | minimizar, fechar com envio pendente e sair quando a fila esvazia |
 
+mod atendimento;
 mod caixa;
 mod cliente;
 mod conta;
@@ -154,6 +156,7 @@ pub(super) fn do_site(
         downloads: 0,
         revelada: false,
         ajustes: None,
+        ..Default::default()
     }
 }
 
@@ -180,6 +183,7 @@ pub(super) fn galeria_do_painel(id: &str, titulo: &str, email: Option<&str>) -> 
         expira_em: None,
         fotos: Default::default(),
         totais: None,
+        ..Default::default()
     }
 }
 
