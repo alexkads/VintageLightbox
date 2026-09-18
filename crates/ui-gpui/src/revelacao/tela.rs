@@ -3255,6 +3255,74 @@ mod testes {
             .expect("a janela deve estar aberta");
     }
 
+    /// 🚨 **Esquecer uma miniatura sem mandar reler deixa "sem prévia" na
+    /// tela** (dono, 18/set/2026, logo depois de clicar em "Sincronizar 22":
+    /// *"ficou sem prévia nas miniaturas do filmstrip, e só atualiza quando eu
+    /// clico em qualquer outra foto"*).
+    ///
+    /// O quadro só **lê** o cache da tira — quem o enche é `carregar_a_tira`.
+    /// Quando a prévia local de um lote inteiro é trocada, cada célula esquecida
+    /// desenha o vazio até algo disparar o carregamento; o que disparava era
+    /// trocar de foto, que é o gesto que o operador não tinha por que fazer.
+    #[gpui::test]
+    fn esquecer_a_miniatura_manda_reler_na_mesma_passada(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        for nome in ["retrato.jpg", "paisagem.jpg"] {
+            previews
+                .save_preview(&format!("id-{nome}"), &foto_cinza())
+                .expect("gravar preview");
+            previews
+                .save_thumbnail(&format!("id-{nome}"), &foto_cinza())
+                .expect("gravar miniatura");
+        }
+        let janela = janela(cx, previews.clone());
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir_no_acervo(
+                    vec![foto("retrato.jpg"), foto("paisagem.jpg")],
+                    0,
+                    window,
+                    cx,
+                );
+                tela.carregar_a_tira(cx);
+            })
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+
+        janela
+            .update(cx, |tela, _window, _cx| {
+                assert!(
+                    matches!(
+                        tela.miniaturas_da_tira.espiar("id-paisagem.jpg"),
+                        Some(Miniatura::Pronta(_))
+                    ),
+                    "a tira carregou as duas"
+                );
+            })
+            .expect("a janela deve estar aberta");
+
+        // O que o "Sincronizar" e o "Zerar N" fazem em cada foto do lote.
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.miniatura_reposta("id-paisagem.jpg", cx);
+            })
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+
+        janela
+            .update(cx, |tela, _window, _cx| {
+                assert!(
+                    matches!(
+                        tela.miniaturas_da_tira.espiar("id-paisagem.jpg"),
+                        Some(Miniatura::Pronta(_))
+                    ),
+                    "a célula releu sozinha — sem isto ela fica 'sem prévia'"
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
     /// Passa da espera do salvamento, sem esperar de verdade.
     fn passar_a_espera(cx: &mut TestAppContext) {
         cx.executor().advance_clock(ESPERA_DA_GRAVACAO * 2);

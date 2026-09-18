@@ -576,8 +576,15 @@ impl Revelacao {
     }
 
     /// A miniatura desta foto voltou ao cache: a célula da tira pode reler.
+    ///
+    /// 🚨 **Esquecer sem mandar reler deixa "sem prévia" na tela** (dono,
+    /// 18/set/2026, no "Sincronizar"): o quadro só **lê** o cache da tira
+    /// (`carregar_a_tira` é quem o enche), então a célula esquecida desenha o
+    /// vazio até algo disparar o carregamento — e o que disparava era trocar de
+    /// foto. Quem esquece manda reler na mesma passada.
     pub fn miniatura_reposta(&mut self, foto_id: &str, cx: &mut Context<Self>) {
         self.miniaturas_da_tira.esquecer(foto_id);
+        self.carregar_a_tira(cx);
         cx.notify();
     }
 
