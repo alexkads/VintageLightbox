@@ -2155,14 +2155,26 @@ impl Aplicativo {
     /// A volta, sem a janela na mão — é o que o fim do salvar usa.
     fn sair_da_revelacao(&mut self, cx: &mut Context<Self>) {
         self.saindo_depois_de_salvar = None;
-        self.revelacao.update(cx, |tela, cx| {
+        let aberta = self.revelacao.update(cx, |tela, cx| {
             tela.gravar_o_que_estiver_pendente();
             // A prévia local da foto que estava aberta — é ela que a grade da
             // sessão mostra até a revelação subir. Ver
             // `Revelacao::guardar_a_revelada_no_cache`.
             tela.guardar_a_revelada_no_cache();
             tela.definir_salvando(None, cx);
+            tela.foto_aberta().map(|f| f.id.clone())
         });
+        // 🚨 **E a grade precisa saber que ela mudou** (dono, 18/set/2026:
+        // *"quando eu mando sincronizar os efeitos na revelação e volto para a
+        // galeria, a primeira foto não é atualizada"*). A foto do palco não
+        // entra no lote do "Sincronizar" — ela já está com a receita, e o laço
+        // a pula —, então ninguém avisava a grade a respeito dela. A prévia
+        // acabou de ser gravada acima; o que faltava era o recado.
+        if let Some(id) = aberta {
+            let na_grade = persistencia::id_no_site(&id).unwrap_or(&id).to_string();
+            self.detalhe
+                .update(cx, |tela, _| tela.revelada_chegou(&na_grade));
+        }
         self.guardar_as_receitas_do_site(cx);
         // E de volta: o recorte e as marcadas da tira ficam na grade da sessão.
         //

@@ -490,6 +490,9 @@ pub struct Detalhe {
     /// **e os arquivos dela** do site, e não há como desfazer pela tela. O
     /// balcão é tela de dedo rápido; a pergunta é o freio.
     apagar_confirmando: Option<(String, String)>,
+    /// 🧪 O registro dos avisos de "esta foto mudou, releia".
+    #[cfg(test)]
+    reveladas_avisadas: Vec<String>,
     /// As fotos que a tecla `0` vai tirar do acervo, à espera do "sim".
     tirar_do_acervo_confirmando: Option<Vec<acervo::Foto>>,
     /// As predefinições que este app conhece — para a gaveta dizer o **nome** do
@@ -706,6 +709,8 @@ impl Detalhe {
             faixa_e_precos_aberto: false,
             detalhes_abertos: false,
             apagar_confirmando: None,
+            #[cfg(test)]
+            reveladas_avisadas: Vec::new(),
             tirar_do_acervo_confirmando: None,
             presets_da_receita: Vec::new(),
             escolha_da_leva: None,
@@ -746,8 +751,23 @@ impl Detalhe {
         };
         // 🔑 Tudo o que era da sessão anterior sai: miniatura e link de outra
         // galeria na tela desta seria o pior tipo de erro — o que parece certo.
+        //
+        // 🚨 **Inclusive a grade** (dono, 18/set/2026: *"parece que a sessão
+        // anterior ainda estava na memória, uma por cima da outra"*). As fotos
+        // do site só eram trocadas quando a galeria nova respondia, e as
+        // **locais** só quando a raiz mandasse outras — se a sessão nova não
+        // tivesse nenhuma foto no disco, as da anterior ficavam na tela para
+        // sempre. Zerar aqui deixa a grade vazia pelo tempo da leitura, que é o
+        // estado honesto: ainda não se sabe o que esta sessão tem.
         self.galeria_id = Some(galeria_id.clone());
         self.aberta = None;
+        self.do_site.clear();
+        self.locais.clear();
+        self.ids_locais.clear();
+        self.com_revelada.clear();
+        self.miniaturas.esvaziar();
+        self.recompor_acervo();
+        self.selecao.limpar_tudo();
         self.pedidas.clear();
         self.baixando = 0;
         self.link = None;
@@ -971,6 +991,12 @@ impl Detalhe {
         (0..self.acervo.total_visivel())
             .filter_map(|p| self.acervo.visivel(p).map(|f| f.id.clone()))
             .collect()
+    }
+
+    /// 🧪 As fotos sobre as quais a grade foi avisada — "esta mudou, releia".
+    #[cfg(test)]
+    pub(crate) fn reveladas_avisadas(&self) -> Vec<String> {
+        self.reveladas_avisadas.clone()
     }
 
     /// `(estado, nota, revelada)` de uma foto visível — o que a célula mostra.
@@ -1787,6 +1813,8 @@ impl Detalhe {
     /// saem e são refeitos"): quem gravou foi o serviço, em disco; aqui só se
     /// descarta o que está na memória desta tela.
     pub fn revelada_chegou(&mut self, foto_id: &str) {
+        #[cfg(test)]
+        self.reveladas_avisadas.push(foto_id.to_string());
         self.miniaturas.esquecer(foto_id);
         self.miniaturas.esquecer(&chave_do_site(foto_id));
         self.miniaturas
@@ -5354,6 +5382,64 @@ mod testes {
     }
 
     /// Deixa a colheita rodar — ela responde a cada `INTERVALO_DE_COLHEITA`.
+    /// 🚨 **Entrar noutra sessão esvazia a grade** (dono, 18/set/2026: *"parece
+    /// que a sessão anterior ainda estava na memória, uma por cima da outra"*).
+    ///
+    /// As fotos do site só eram trocadas quando a galeria nova respondia, e as
+    /// **locais** só quando a raiz mandasse outras — se a sessão nova não
+    /// tivesse nenhuma foto no disco, as da anterior ficavam na tela para
+    /// sempre. O estado honesto enquanto se lê a nova é o vazio.
+    #[gpui::test]
+    fn entrar_noutra_sessao_nao_deixa_a_anterior_na_tela(cx: &mut TestAppContext) {
+        let (janela, _publicador) =
+            janela(cx, vec![foto("a", EstadoDaFotoNoSite::Disponivel, Some(5))]);
+        janela
+            .update(cx, |tela, _window, cx| tela.entrar("g1".into(), cx))
+            .expect("a janela deve estar aberta");
+        colher_ate_parar(cx, &janela);
+
+        // Uma foto local desta sessão, como a raiz manda depois de importar.
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.definir_locais(
+                    vec![biblioteca_core::acervo::Foto {
+                        id: "id-local.jpg".into(),
+                        arquivo: "local.jpg".into(),
+                        estado: biblioteca_core::acervo::Estado::Disponivel,
+                        apagada: false,
+                        produto_efetivo: String::new(),
+                        preco_negociado: None,
+                        tem_observacao: false,
+                        preco_de_venda: None,
+                        pedido_id: None,
+                        downloads: 0,
+                        revelada: false,
+                        nota: None,
+                        ordem: 1,
+                    }],
+                    cx,
+                );
+                assert_eq!(
+                    tela.ids_visiveis(),
+                    vec!["a".to_string(), "id-local.jpg".to_string()],
+                    "a grade tem a do site e a do disco"
+                );
+            })
+            .expect("a janela deve estar aberta");
+
+        // Outra sessão: a grade começa vazia, e não com as fotos da anterior.
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.entrar("g2".into(), cx);
+                assert!(
+                    tela.ids_visiveis().is_empty(),
+                    "a sessão anterior ficou na tela: {:?}",
+                    tela.ids_visiveis()
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
     fn colher_ate_parar(cx: &mut TestAppContext, janela: &gpui::WindowHandle<Detalhe>) {
         for _ in 0..20 {
             let _ = janela.update(cx, |tela, _window, cx| tela.colher(cx));

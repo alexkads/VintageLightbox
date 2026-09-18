@@ -167,6 +167,16 @@ impl CacheDeMiniaturas {
         self.carregadas.pop(chave);
     }
 
+    /// Esvazia o cache inteiro.
+    ///
+    /// 🚨 **É o que uma tela faz ao trocar do que ela mostra** — entrar noutra
+    /// sessão, por exemplo. Sem isto, as miniaturas da galeria anterior ficam
+    /// na memória e a grade nova desenha as duas, uma por cima da outra (dono,
+    /// 18/set/2026).
+    pub fn esvaziar(&mut self) {
+        self.carregadas.clear();
+    }
+
     /// Quantas miniaturas estão na memória agora.
     pub fn quantas_na_memoria(&self) -> usize {
         self.carregadas.len()

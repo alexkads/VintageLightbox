@@ -746,3 +746,30 @@ fn zerar_as_marcadas_limpa_receita_enquadramento_e_previas(cx: &mut TestAppConte
         "e a aberta, pelo depósito: o Salvar leva as duas listas"
     );
 }
+
+/// 🎬 **A foto do palco também chega atualizada à grade** depois do
+/// "Sincronizar".
+///
+/// 🚨 **Dono, 18/set/2026**: *"quando eu mando sincronizar os efeitos na
+/// revelação e volto para a galeria, a primeira foto não é atualizada"*. Ela é
+/// a única do lote que o "Sincronizar" **pula** — já está com a receita, foi
+/// dela que ela saiu —, então ninguém avisava a grade a respeito dela. A prévia
+/// local é gravada ao sair do editor; o que faltava era o recado.
+#[gpui::test]
+fn ao_sair_da_revelacao_a_grade_relê_a_foto_que_estava_no_palco(cx: &mut TestAppContext) {
+    let e = abrir_o_ensaio(cx, Cenario::default());
+    e.revelar_a_do_site(cx, "a");
+    e.revelacao(cx, |tela, _w, cx| tela.arrastar_slider(0, 0.7, cx));
+    e.esperar(cx);
+
+    botao(&e, cx, PedidoDaRevelacao::Sair);
+    e.esperar(cx);
+
+    e.detalhe(cx, |tela, _w, _cx| {
+        assert!(
+            tela.reveladas_avisadas().iter().any(|id| id == "a"),
+            "a grade não soube que a foto do palco mudou: {:?}",
+            tela.reveladas_avisadas()
+        );
+    });
+}
