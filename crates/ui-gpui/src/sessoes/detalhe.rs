@@ -174,6 +174,9 @@ pub enum Pedido {
     Negociar(Vec<String>),
     /// "Apagar": a foto sai do site, com os dois arquivos.
     ApagarDoSite(String),
+    /// A tecla `0`: estas fotos voltam para esta máquina e **depois** saem do
+    /// acervo — a cláusula C21 do contrato da foto, em `app::resgate`.
+    TirarDoAcervo(Vec<crate::app::resgate::AFotoQueVolta>),
     /// "Imprimir…": a folha de impressão com as fotos marcadas (só no desktop).
     Imprimir(Vec<String>),
     /// A miniatura de uma foto do site chegou ao cache, sob esta chave.
@@ -487,6 +490,8 @@ pub struct Detalhe {
     /// **e os arquivos dela** do site, e não há como desfazer pela tela. O
     /// balcão é tela de dedo rápido; a pergunta é o freio.
     apagar_confirmando: Option<(String, String)>,
+    /// As fotos que a tecla `0` vai tirar do acervo, à espera do "sim".
+    tirar_do_acervo_confirmando: Option<Vec<acervo::Foto>>,
     /// As predefinições que este app conhece — para a gaveta dizer o **nome** do
     /// preset padrão, e não o id.
     presets_da_receita: Vec<domain::entities::Preset>,
@@ -701,6 +706,7 @@ impl Detalhe {
             faixa_e_precos_aberto: false,
             detalhes_abertos: false,
             apagar_confirmando: None,
+            tirar_do_acervo_confirmando: None,
             presets_da_receita: Vec::new(),
             escolha_da_leva: None,
             escolha_do_estudio: None,
@@ -1173,9 +1179,7 @@ impl Detalhe {
     /// recusado.
     pub fn dar_nota(&mut self, nota: u8, cx: &mut Context<Self>) {
         if nota == 0 {
-            self.erro =
-                Some("tirar a nota de uma foto do acervo é removê-la do site — use Apagar".into());
-            cx.notify();
+            self.pedir_para_tirar_do_acervo(cx);
             return;
         }
         self.mudar_as_marcadas(
@@ -2395,6 +2399,7 @@ impl Render for Detalhe {
             .children(self.detalhes(cx))
             .children(self.atendimento(cx))
             .children(self.dialogo_de_apagar(cx))
+            .children(self.dialogo_de_tirar_do_acervo(cx))
             .child(self.envio(cx))
             .child(self.barra_da_grade(cx))
             .when_some(self.erro.clone(), |tela, erro| {
@@ -3945,6 +3950,103 @@ impl Detalhe {
         cx.notify();
     }
 
+    /// A tecla `0` nas marcadas: **tirar do acervo**, com a cópia vindo antes.
+    ///
+    /// 🚨 **Era um bloqueio, e o bloqueio é que estava errado** (dono,
+    /// 18/set/2026: *"fui tirar a classificação de uma foto e fui bloqueado —
+    /// eu preciso desclassificar, retirar a foto da nuvem e trazer a foto para
+    /// a minha máquina, exatamente como a versão WEB faz"*). É a cláusula C21
+    /// do contrato da foto, e era a divergência D14: o desktop recusava com
+    /// *"use Apagar"*, e "Apagar" removia da nuvem sem trazer nada para cá.
+    ///
+    /// 🔑 **As recusas continuam existindo — só que por foto, e não pelo lote**
+    /// (`resgate::pode_voltar`): a comprada tem cobrança atrás, a levada no
+    /// balcão não perde a nota, a apagada já não está lá. As outras seguem, e a
+    /// tela conta as que ficaram de fora — recusar o lote inteiro faria o
+    /// operador procurar qual foi.
+    ///
+    /// ⚠️ **A foto que só existe no disco não passa por aqui**: ela não está na
+    /// nuvem, e tirar a nota dela é só tirar a nota.
+    fn pedir_para_tirar_do_acervo(&mut self, cx: &mut Context<Self>) {
+        let marcadas: Vec<acervo::Foto> = self
+            .selecao
+            .marcadas()
+            .filter_map(|p| self.acervo.visivel(p))
+            .cloned()
+            .collect();
+        if marcadas.is_empty() {
+            return;
+        }
+        let (podem, ficam): (Vec<acervo::Foto>, Vec<acervo::Foto>) = marcadas
+            .into_iter()
+            // A local não está na nuvem: não há o que resgatar nem o que remover.
+            .filter(|f| !self.locais.iter().any(|l| l.id == f.id))
+            .partition(|f| crate::app::resgate::pode_voltar(f.estado, f.apagada));
+
+        if !ficam.is_empty() {
+            let nomes: Vec<&str> = ficam.iter().map(|f| f.arquivo.as_str()).collect();
+            self.erro = Some(
+                format!(
+                    "{} foto(s) ficam como estão — comprada ou levada no balcão não perde a \
+                     nota ({})",
+                    ficam.len(),
+                    nomes.join(" / ")
+                )
+                .into(),
+            );
+        }
+        if podem.is_empty() {
+            cx.notify();
+            return;
+        }
+        self.tirar_do_acervo_confirmando = Some(podem);
+        cx.notify();
+    }
+
+    /// O "Tirar do acervo" do diálogo: agora sim, o gesto vai para a raiz.
+    pub fn confirmar_tirar_do_acervo(&mut self, cx: &mut Context<Self>) {
+        let Some(fotos) = self.tirar_do_acervo_confirmando.take() else {
+            return;
+        };
+        let fotos = fotos
+            .into_iter()
+            .map(|f| {
+                // Os PARÂMETROS que estão na nuvem voltam com ela — é o que
+                // impede a foto de voltar crua (C21).
+                let do_site = self
+                    .aberta
+                    .as_ref()
+                    .and_then(|a| a.fotos.iter().find(|g| g.id == f.id));
+                let (ajustes, corte) = do_site
+                    .and_then(|g| g.ajustes.as_ref())
+                    .map(crate::revelacao::persistencia::de_json)
+                    .unwrap_or_default();
+                crate::app::resgate::AFotoQueVolta {
+                    no_site: f.id,
+                    arquivo: f.arquivo,
+                    ajustes,
+                    corte,
+                }
+            })
+            .collect();
+        cx.emit(Pedido::TirarDoAcervo(fotos));
+        cx.notify();
+    }
+
+    pub fn cancelar_tirar_do_acervo(&mut self, cx: &mut Context<Self>) {
+        self.tirar_do_acervo_confirmando = None;
+        cx.notify();
+    }
+
+    /// 🧪 Quais fotos a pergunta "tirar do acervo?" está segurando.
+    #[cfg(test)]
+    pub(crate) fn fotos_na_pergunta_de_tirar_do_acervo(&self) -> Vec<String> {
+        self.tirar_do_acervo_confirmando
+            .as_ref()
+            .map(|fotos| fotos.iter().map(|f| f.arquivo.clone()).collect())
+            .unwrap_or_default()
+    }
+
     /// O "Apagar a foto" do diálogo.
     pub fn confirmar_apagar(&mut self, cx: &mut Context<Self>) {
         let Some((id, _)) = self.apagar_confirmando.take() else {
@@ -3958,6 +4060,92 @@ impl Detalhe {
     pub fn cancelar_apagar(&mut self, cx: &mut Context<Self>) {
         self.apagar_confirmando = None;
         cx.notify();
+    }
+
+    /// O diálogo de "Tirar do acervo?" — os mesmos textos do site.
+    ///
+    /// 🔑 **A descrição conta o caminho inteiro**, porque é ele que tira o medo
+    /// do gesto: a foto sai do acervo, o cliente deixa de vê-la, e **volta para
+    /// esta máquina** — de onde sobe de novo assim que for classificada. E a
+    /// última frase é a garantia: o arquivo vem para cá **antes** de sair de lá;
+    /// a que não conseguir vir continua no acervo.
+    fn dialogo_de_tirar_do_acervo(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+        let fotos = self.tirar_do_acervo_confirmando.as_ref()?;
+        let quantas = fotos.len();
+        let titulo = if quantas == 1 {
+            "Tirar esta foto do acervo?".to_string()
+        } else {
+            format!("Tirar {quantas} fotos do acervo?")
+        };
+        let confirmar = if quantas == 1 {
+            "Tirar do acervo".to_string()
+        } else {
+            format!("Tirar as {quantas}")
+        };
+        let tema = cx.theme().clone();
+        Some(
+            div()
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .bg(gpui::black().opacity(0.5))
+                .id("tirar-do-acervo-veu")
+                .on_click(cx.listener(|tela, _ev, _w, cx| tela.cancelar_tirar_do_acervo(cx)))
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .w(px(520.))
+                        .p(px(24.))
+                        .gap(px(12.))
+                        .rounded(px(12.))
+                        .border_1()
+                        .border_color(tema.border)
+                        .bg(tema.background)
+                        .shadow_lg()
+                        .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .child(
+                            div()
+                                .text_lg()
+                                .font_weight(gpui::FontWeight::SEMIBOLD)
+                                .child(SharedString::from(titulo)),
+                        )
+                        .child(div().text_sm().text_color(tema.muted_foreground).child(
+                            SharedString::from(
+                                "Sem classificação a foto não fica no servidor: ela sai do \
+                                     acervo, o cliente deixa de vê-la, e volta para esta máquina \
+                                     — de onde sobe de novo assim que você a classificar. O \
+                                     arquivo vem para cá antes de sair de lá; a que não \
+                                     conseguir vir continua no acervo.",
+                            ),
+                        ))
+                        .child(
+                            div()
+                                .flex()
+                                .mt(px(8.))
+                                .justify_end()
+                                .gap(px(8.))
+                                .child(
+                                    crate::estilo::botao_contorno("tirar-do-acervo-cancelar", cx)
+                                        .child("Cancelar")
+                                        .on_click(cx.listener(|tela, _ev, _w, cx| {
+                                            tela.cancelar_tirar_do_acervo(cx)
+                                        })),
+                                )
+                                .child(
+                                    crate::estilo::botao_perigo("tirar-do-acervo-confirmar", cx)
+                                        .child(SharedString::from(confirmar))
+                                        .on_click(cx.listener(|tela, _ev, _w, cx| {
+                                            tela.confirmar_tirar_do_acervo(cx)
+                                        })),
+                                ),
+                        ),
+                ),
+        )
     }
 
     /// O diálogo de "Apagar esta foto?" — os mesmos textos do site.

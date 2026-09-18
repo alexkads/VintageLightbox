@@ -116,6 +116,21 @@ pub mod mentira {
     }
 
     impl AcervoDeMentira {
+        /// Põe no catálogo uma foto que "acabou de ser importada" deste
+        /// caminho — é o que o resgate procura depois que o importador termina.
+        pub fn acrescentar_do_caminho(&self, id: &str, caminho: &str) {
+            let foto = PhotoViewModel {
+                id: id.to_string(),
+                path: caminho.to_string(),
+                name: std::path::Path::new(caminho)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default(),
+                ..Default::default()
+            };
+            self.fotos.lock().expect("as fotos").push(foto);
+        }
+
         fn mudar_sessao(&self, de: &str, para: Option<&str>) -> usize {
             let mut fotos = self.fotos.lock().expect("as fotos");
             let antes = fotos.len();

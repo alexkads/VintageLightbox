@@ -152,13 +152,22 @@ fn importar_classificar_e_levar_pelas_teclas(cx: &mut TestAppContext) {
     assert_eq!(negociadas.len(), 2);
     assert_eq!(negociadas[1].1.nota, Some(Some(5)));
 
-    // O `0` numa foto do acervo avisa em vez de tirá-la do site.
+    // 🚨 **O `0` numa foto do acervo pergunta antes** — e nada sai da nuvem
+    // enquanto a resposta não vem. O caminho de volta inteiro (o bruto para cá,
+    // o catálogo, os parâmetros, e só então a remoção) está em
+    // `e2e::resgate`; aqui o que se prende é que a tecla **abre a pergunta** em
+    // vez de recusar, como fazia até 18/set/2026.
     e.teclar(cx, "0");
     e.detalhe(cx, |tela, _w, _cx| {
-        assert!(tela.erro().is_some_and(|f| f.contains("use Apagar")));
+        assert_eq!(
+            tela.fotos_na_pergunta_de_tirar_do_acervo(),
+            vec!["d.jpg".to_string()],
+            "a pergunta segura a foto até o operador responder"
+        );
     });
     assert_eq!(e.site.negociadas().len(), 2, "o 0 não foi ao site");
     assert!(e.site.tiradas().is_empty());
+    e.detalhe(cx, |tela, _w, cx| tela.cancelar_tirar_do_acervo(cx));
 
     // A comprada não muda por lote.
     e.detalhe(cx, |tela, _w, cx| tela.focar_foto("c", cx));

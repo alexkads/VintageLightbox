@@ -924,6 +924,13 @@ pub mod mentira {
             self.reveladas.lock().expect("as reveladas").clone()
         }
 
+        /// O bruto que o site devolve quando alguém pede o original — sem
+        /// ele, a resposta é `OriginalIndisponivel`, que é o caso da foto cujo
+        /// arquivo já não está no storage.
+        pub fn definir_bruto(&mut self, bytes: Vec<u8>) {
+            *self.bruto.lock().expect("o bruto") = Some(bytes);
+        }
+
         pub fn originais(&self) -> Vec<String> {
             self.originais.lock().expect("os originais").clone()
         }

@@ -14,6 +14,7 @@
 
 mod atalhos_da_revelacao;
 mod painel;
+pub mod resgate;
 mod resolucao_cheia;
 mod roteiro;
 /// O que a raiz conta à bandeja (`crate::segundo_plano`).
@@ -548,6 +549,16 @@ pub struct Aplicativo {
     /// A segunda tela, quando aberta. É uma **janela**, e não uma tela desta —
     /// as duas existem ao mesmo tempo, em monitores diferentes.
     cliente: Option<gpui::WindowHandle<Cliente>>,
+    /// Quem cataloga arquivo no SQLite. A raiz o guarda por causa do resgate
+    /// (`app::resgate`): a foto que volta do acervo entra no catálogo como
+    /// qualquer foto do cartão.
+    importador: Arc<dyn Importador>,
+    /// A tarefa do resgate — trazer as fotos do acervo de volta antes de a
+    /// nuvem perdê-las. Descartada, o lote para no meio: por isso ela é guardada
+    /// (e por isso é **uma só**, com as fotos em fila dentro dela).
+    _resgate: Option<Task<()>>,
+    /// 🧪 O desfecho do último resgate, para os cenários.
+    ultimo_resgate: Option<resgate::Desfecho>,
     /// A tela do cliente abre como **janela arrastável**, e não tomando o
     /// monitor? Guardada em disco: quem contornou um monitor mal detectado uma
     /// vez não quer refazer o contorno a cada abertura.
@@ -653,6 +664,7 @@ impl Aplicativo {
         // catálogo, com o mesmo caminho: o que muda é a porta de entrada, e não
         // o destino.
         let importador_do_detalhe = portas.importador.clone();
+        let importador_da_raiz = portas.importador.clone();
         // 🧭 O assistente da nova sessão importa para o mesmo catálogo, aplica
         // a receita pelo mesmo gravador e lê as mesmas prévias.
         let reveladas: (Sender<String>, Receiver<String>) = channel();
@@ -957,6 +969,9 @@ impl Aplicativo {
             configuracoes: cx.new(|_| Configuracoes::nova(previews_das_configuracoes)),
             configurando: false,
             cliente: None,
+            importador: importador_da_raiz,
+            _resgate: None,
+            ultimo_resgate: None,
             cliente_em_janela: modo_do_cliente_guardado(),
             _pedido_do_cliente: None,
             previews: previews_do_cliente,
@@ -1281,6 +1296,13 @@ impl Aplicativo {
                 self.publicador
                     .tirar_do_site(sessao, id.clone(), self.sincronias.0.clone());
                 self.esperar_o_site(PedidoDeFoto::TirarDoSite, 1, cx);
+            }
+            // 🚨 **Tirar do acervo é o caminho de volta inteiro** (C21): o
+            // bruto vem para cá, é catalogado com os parâmetros, e só então a
+            // nuvem perde a foto. Ver `app::resgate`.
+            DetalhePedido::TirarDoAcervo(fotos) => {
+                let fotos = fotos.clone();
+                self.desclassificar_do_acervo(fotos, cx);
             }
             DetalhePedido::Imprimir(ids) => {
                 let ids = ids.clone();
@@ -2506,7 +2528,7 @@ impl Aplicativo {
     /// subiu (o servidor passou a ser mais novo), a receita voltou ao neutro, ou
     /// o lote foi zerado. Nas três, quem desenha precisa ser avisado — senão a
     /// tela continua mostrando o que já não existe.
-    fn esquecer_a_previa_local(&mut self, foto_id: &str, cx: &mut Context<Self>) {
+    pub(crate) fn esquecer_a_previa_local(&mut self, foto_id: &str, cx: &mut Context<Self>) {
         self.previews
             .apagar(&persistencia::chave_da_revelada(foto_id));
         self.revelacao
