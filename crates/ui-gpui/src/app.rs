@@ -1415,6 +1415,14 @@ impl Aplicativo {
                 let chave = chave.clone();
                 self.biblioteca
                     .update(cx, |tela, cx| tela.esquecer_miniatura(&chave, cx));
+                // 🚨 **A tira da Revelação desenha as mesmas fotos, com memória
+                // própria** (dono, 18/set/2026: *"a galeria em filmstrip não foi
+                // atualizada, mas a tela do cliente sim"*). A tela do cliente
+                // lê o preview grande no momento de mostrar; a tira guarda a
+                // miniatura convertida, e sem este recado ela continuaria com a
+                // de antes do envio até o operador trocar de foto.
+                self.revelacao
+                    .update(cx, |tela, cx| tela.miniatura_reposta(&chave, cx));
             }
             DetalhePedido::FotosDoSite(fotos) => {
                 let sessao = self.sessao_aberta.clone();
@@ -2052,10 +2060,19 @@ impl Aplicativo {
                     // faria a grade mostrar para sempre a receita deste
                     // momento. É o `apagarPreviaLocal` da web.
                     let no_acervo = format!("{}{foto_no_site}", persistencia::PREFIXO_DO_SITE);
-                    self.previews
-                        .apagar(&persistencia::chave_da_revelada(&no_acervo));
+                    // 🔑 **Pela função de sempre, e não por um `apagar` à
+                    // parte**: apagar o arquivo sem avisar quem o desenha é
+                    // deixar a tira da Revelação e a grade da nova sessão
+                    // mostrando o que já não existe. Ver
+                    // `esquecer_a_previa_local`.
+                    self.esquecer_a_previa_local(&no_acervo, cx);
+                    // 🚨 **A miniatura da grade é a de antes do envio** (dono,
+                    // 18/set/2026: *"não travou, mas não fez a atualização das
+                    // miniaturas"*). A foto no site é a revelada agora;
+                    // `revelada_subiu` esquece a guardada **e** pede a nova —
+                    // só a desta foto.
                     self.detalhe
-                        .update(cx, |tela, _| tela.revelada_chegou(&foto_no_site));
+                        .update(cx, |tela, cx| tela.revelada_subiu(&foto_no_site, cx));
                     self.gravador.esquecer_do_site(foto_no_site);
                     self.ultimo_envio = Some(chrono::Utc::now().timestamp());
                     self.recontar_o_que_falta_subir(cx);

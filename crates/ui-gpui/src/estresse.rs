@@ -1370,7 +1370,15 @@ fn estresse_a_galeria_de_pe_durante_duzentas_revelacoes(cx: &mut TestAppContext)
 
     let (janela, publicador, _dir, _abrir) = sessao_com(cx, N);
     let aberturas_antes = publicador.abertas().len();
-    let miniaturas_antes = publicador.baixadas().len();
+    // A abertura pede uma miniatura por foto **que tem miniatura**: a grade
+    // mostra as apagadas desbotadas, sem pedir arquivo nenhum.
+    let na_abertura = publicador.miniaturas_pedidas();
+    let miniaturas_antes = na_abertura.len();
+    let com_miniatura: std::collections::HashSet<String> = na_abertura.into_iter().collect();
+    assert!(
+        miniaturas_antes > N * 9 / 10,
+        "{miniaturas_antes} miniaturas"
+    );
 
     // O operador está com o cliente: vinte fotos marcadas e uma em foco.
     let (todas, marcadas) = janela
@@ -1442,11 +1450,23 @@ fn estresse_a_galeria_de_pe_durante_duzentas_revelacoes(cx: &mut TestAppContext)
         menor_cache > 0,
         "as miniaturas sumiram da memória no meio do lote"
     );
-    let rebaixadas = publicador.baixadas().len() - miniaturas_antes;
-    assert!(
-        rebaixadas <= TETO_DE_MINIATURAS,
-        "{rebaixadas} miniaturas baixadas de novo durante o lote — o cache está \
-         sendo esvaziado a cada releitura"
+    // 🚨 **Uma re-descida por foto que subiu, e nenhuma a mais** (dono,
+    // 18/set/2026: *"não travou, mas não fez a atualização das miniaturas"*).
+    // A miniatura guardada é a de antes do envio: se ninguém a pedir de novo, a
+    // célula continua mostrando o "antes" — e se a galeria inteira for pedida a
+    // cada releitura, volta o custo do qual se saiu.
+    let ultimas: Vec<String> = publicador.miniaturas_pedidas().split_off(miniaturas_antes);
+    let rebaixadas = ultimas.len();
+    let esperadas: Vec<String> = todas
+        .iter()
+        .take(LOTE)
+        .filter(|id| com_miniatura.contains(*id))
+        .cloned()
+        .collect();
+    assert_eq!(
+        ultimas, esperadas,
+        "as miniaturas pedidas de novo têm de ser exatamente as {LOTE} que \
+         subiram, na ordem em que o site respondeu"
     );
 
     // 3 e 4 — o que o operador tinha na mão, e o preço da atualização.

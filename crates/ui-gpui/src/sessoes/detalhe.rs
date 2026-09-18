@@ -1827,6 +1827,46 @@ impl Detalhe {
         self.com_revelada.remove(foto_id);
     }
 
+    /// **O site passou a ter a revelada desta foto** — e a miniatura que a
+    /// grade desenha veio de antes dela.
+    ///
+    /// 🚨 **Esquecer não basta: tem de pedir de novo** (dono, 18/set/2026:
+    /// *"não travou, mas não fez a atualização das miniaturas"*). Enquanto a
+    /// releitura era `entrar`, o cache inteiro era esvaziado e `pedidas`
+    /// zerava, então todas as miniaturas voltavam a ser baixadas — a
+    /// atualização aparecia, ao preço da tela piscando em branco. Agora que a
+    /// releitura mantém a grade de pé, `pedir_miniaturas` não pediria esta:
+    /// ela já está em `pedidas`, e a célula continuaria mostrando o "antes".
+    ///
+    /// 🔑 **Só esta foto.** O envio muda uma por vez, e re-baixar a galeria
+    /// inteira a cada resposta é exatamente o custo do qual se saiu.
+    pub fn revelada_subiu(&mut self, foto_id: &str, cx: &mut Context<Self>) {
+        self.revelada_chegou(foto_id);
+        let (Some(sessao), true) = (self.sessao.clone(), self.tem_para_baixar(foto_id)) else {
+            return;
+        };
+        // ⚠️ **O pedido é direto, e não por `pedir_miniaturas`**: aquela varre a
+        // galeria inteira atrás do que falta, e durante um lote de duzentas
+        // seriam duzentas varreduras de trezentas fotos — o mesmo tipo de custo
+        // que tirou a grade do ar. Aqui se sabe qual foto mudou.
+        self.pedidas.insert(foto_id.to_string());
+        self.baixando += 1;
+        self.publicador
+            .miniatura(sessao, foto_id.to_string(), self.recados.0.clone());
+        self.acompanhar(cx);
+        cx.notify();
+    }
+
+    /// Esta foto está na galeria aberta e tem miniatura para baixar? A apagada
+    /// aparece desbotada na grade, sem arquivo nenhum — pedi-la seria um 404
+    /// por foto.
+    fn tem_para_baixar(&self, foto_id: &str) -> bool {
+        self.aberta
+            .as_ref()
+            .and_then(|a| a.fotos.iter().find(|f| f.id == foto_id))
+            .is_some_and(|f| !f.apagada)
+    }
+
     /// Pede as miniaturas que ainda faltam — uma vez cada.
     fn pedir_miniaturas(&mut self, cx: &mut Context<Self>) {
         let Some(sessao) = self.sessao.clone() else {
@@ -6555,6 +6595,45 @@ mod testes {
                 );
             })
             .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 **A foto que subiu revelada troca de miniatura na grade** (dono,
+    /// 18/set/2026: *"não travou, mas não fez a atualização das miniaturas"*).
+    ///
+    /// A miniatura guardada veio de antes do envio. Enquanto a releitura era
+    /// `entrar`, ela sumia junto com todas as outras e voltava do site — a
+    /// atualização aparecia, ao preço de a galeria piscar em branco. Agora que
+    /// a grade fica de pé, quem pede a nova é `revelada_subiu`, **só para esta
+    /// foto**.
+    #[gpui::test]
+    fn a_foto_que_subiu_pede_a_miniatura_de_novo(cx: &mut TestAppContext) {
+        let (janela, publicador) = janela(
+            cx,
+            vec![
+                foto("f1", EstadoDaFotoNoSite::Disponivel, None),
+                foto("f2", EstadoDaFotoNoSite::Disponivel, None),
+            ],
+        );
+        entrar(cx, &janela);
+
+        // A abertura pediu uma miniatura por foto, e só uma.
+        assert_eq!(
+            publicador.miniaturas_pedidas(),
+            vec!["f1".to_string(), "f2".into()]
+        );
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.revelada_subiu("f1", cx);
+            })
+            .expect("a janela deve estar aberta");
+        colher_ate_parar(cx, &janela);
+
+        assert_eq!(
+            publicador.miniaturas_pedidas(),
+            vec!["f1".to_string(), "f2".into(), "f1".into()],
+            "a foto revelada tinha de ser pedida de novo — e só ela"
+        );
     }
 
     /// 🚨 **A foto importada aparece na grade, no recorte "Sem nota".**

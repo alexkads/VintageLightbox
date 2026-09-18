@@ -829,6 +829,10 @@ pub mod mentira {
         pub negociadas: Mutex<Vec<(String, MudancaDaFoto)>>,
         /// Os ids no site cujos pixels foram pedidos.
         pub baixadas: Mutex<Vec<String>>,
+        /// As **miniaturas** pedidas, na ordem — uma por foto, por chamada. É
+        /// por elas que o estresse sabe se a grade está sendo re-baixada
+        /// inteira a cada releitura, ou só a foto que mudou.
+        pub miniaturas_pedidas: Mutex<Vec<String>>,
         /// As sessões em que se entrou.
         pub abertas: Mutex<Vec<String>>,
         /// As galerias cujo cliente foi avisado.
@@ -935,6 +939,13 @@ pub mod mentira {
 
         pub fn baixadas(&self) -> Vec<String> {
             self.baixadas.lock().expect("as baixadas").clone()
+        }
+
+        pub fn miniaturas_pedidas(&self) -> Vec<String> {
+            self.miniaturas_pedidas
+                .lock()
+                .expect("as miniaturas pedidas")
+                .clone()
         }
 
         pub fn abertas(&self) -> Vec<String> {
@@ -1322,6 +1333,10 @@ pub mod mentira {
         }
 
         fn miniatura(&self, _sessao: Sessao, foto_id: String, canal: Sender<Recado>) {
+            self.miniaturas_pedidas
+                .lock()
+                .expect("as miniaturas pedidas")
+                .push(foto_id.clone());
             let _ = canal.send(Recado::Miniatura {
                 foto_id,
                 bytes: jpeg_de_um_pixel(),
