@@ -57,7 +57,7 @@ else
 endif
 
 .DEFAULT_GOAL := ajuda
-.PHONY: ajuda sistema testar lint fmt rodar medir tauri tauri-diagnostico tauri-local icones mac mac-arm mac-intel \
+.PHONY: ajuda sistema testar lint fmt rodar rodar-local medir tauri tauri-diagnostico tauri-local icones mac mac-arm mac-intel \
         linux linux-arm windows conferir-windows tudo publicar publicar-seco \
         web biblioteca faxina
 
@@ -128,9 +128,20 @@ fmt: ## Formata tudo
 #    mede este codigo, mede o que o compilador deixou de fazer. Ele entra no
 #    STATUS como se fosse desempenho do app, e a comparacao seguinte — feita em
 #    release, como manda — parece uma melhora de 57x que ninguem escreveu.
-rodar: ## Abre o app em release
+rodar: ## Abre o app em release, contra PRODUCAO
 	@./scripts/faxina-se-preciso.sh
 	cargo run --release -p ui-gpui
+
+# O par de `tauri` / `tauri-local`, e pelo mesmo motivo: e preciso poder abrir o
+# app contra a pilha local sem editar JSON nem lembrar de duas variaveis.
+#
+# 🔑 **Quem decide as portas e o script do crate**, e nao esta linha: ele confere
+# se a API local responde antes de compilar, e explica no cabecalho por que as
+# duas variaveis andam juntas. Repetir os enderecos aqui daria duas verdades
+# para o mesmo endereco — e foi assim que o `tauri-local` ficou apontando para a
+# porta 3001 depois que a pilha local passou para a 8001.
+rodar-local: ## Abre o app em debug, na pilha local do e-commerce (make up)
+	./crates/ui-gpui/rodar-local.sh
 
 medir: ## As reguas de desempenho (miniaturas e abertura) — tambem em release
 	cargo run --release -p ui-gpui --bin medir-miniaturas
@@ -149,8 +160,8 @@ tauri: ## A janela Tauri no site de producao
 tauri-diagnostico: ## A janela Tauri e a pagina que responde P1-P9 da Fase 0
 	cargo run -p app-tauri -- --diagnostico
 
-tauri-local: ## A janela Tauri na pilha local do e-commerce (make up, Next em :3001)
-	VLB_SITE_URL=http://localhost:3001 cargo run -p app-tauri
+tauri-local: ## A janela Tauri na pilha local do e-commerce (make up, Next em :8001)
+	./crates/app-tauri/rodar-local.sh
 
 # ───────────────────────── O motor no navegador ──────────────────────────────
 

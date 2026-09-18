@@ -32,14 +32,29 @@ era migrar a interface de egui para GPUI **com paridade**; ele foi **alcançado*
 valendo — em especial **"nenhuma feature nova"**, que é o motivo de o painel de Revelação ter 19
 sliders que não fazem nada: o app antigo também não os aplicava, e o porte foi fiel ao defeito.
 
-> 🔁 **`crates/ui-gpui` e `crates/app-tauri` vão existir sempre, e um valida o outro** (dono,
-> 2026-09-16). O fluxo de `/dashboard/sessoes-fotograficas` sempre vai precisar de validação: a
-> mesma sessão levada pelos dois apps tem de dar o mesmo resultado, e quando não dá, um deles tem
-> defeito. O Tauri (uma janela que abre a tela do site) vem primeiro porque entrega mais rápido.
-> Enquanto isso, o `ui-gpui` fica em pausa, recebendo só correção de defeito, e continua
-> compilando. **Um dia ele vai ser concluído.** Regra de negócio vai para `use-cases`, onde os dois
-> a encontram. O plano está em `recordarfotos-e-commerce/docs/DESKTOP_TAURI.md`.
-> O objetivo acima, "em Rust com GPUI", continua sendo o destino.
+> 🩸 **Contrato de sangue (dono, 2026-09-17) — três peças, três papéis:**
+>
+> | Peça | Papel |
+> |---|---|
+> | `frontend/.../dashboard/sessoes-fotograficas` (no e-commerce) | **Em produção** — os funcionários já estão usando |
+> | `crates/app-tauri` | **Temporário, e a base** — nasceu para trazer a tela da web com pouco esforço (MVP), e serve para o GPUI ser construído a partir do que ele mostra |
+> | **`crates/ui-gpui`** | **A interface final e definitiva do desktop**, por ser mais performática |
+>
+> 🚨 **O `ui-gpui` não está mais em pausa.** Isto revoga o rumo de 2026-09-16 (o `ui-gpui` recebendo
+> só correção de defeito, e o balcão passando para o Tauri): **todo trabalho novo de fluxo é feito
+> aqui**, no GPUI.
+>
+> 🔑 **"Base" não é fonte de código.** O `app-tauri` roda a tela React do site — não há código a
+> mover de lá para cá, há **comportamento a reproduzir**. Portar continua sendo reescrever com a
+> regra entendida. O jeito de usar a base é abrir as duas janelas lado a lado
+> (`crates/app-tauri/rodar-local.sh` e `crates/ui-gpui/rodar-local.sh`, contra `make up` do
+> e-commerce), repetir o mesmo gesto e anotar onde diferem — cada diferença é uma linha da lista de
+> trabalho. Quando os três divergirem, a ordem de autoridade é **web → Tauri → GPUI**: a web é a que
+> tem gente dentro.
+>
+> Regra de negócio vai para `use-cases`, onde as duas telas a encontram. O plano e a decisão (D15)
+> estão em `recordarfotos-e-commerce/docs/DESKTOP_TAURI.md`, seção "O contrato".
+> O objetivo acima, "em Rust com GPUI", continua sendo o destino — e agora é o único.
 
 **Fidelidade ao app antigo deixou de ser virtude.** Detalhes em
 [`docs/00-OBJETIVO.md`](docs/00-OBJETIVO.md).
@@ -106,12 +121,19 @@ cargo test test_name --workspace
 #    framework é lento" duas vezes (docs/STATUS.md).
 cargo run --release -p ui-gpui
 
-# A segunda interface, em Tauri (Fase 0 — recordarfotos-e-commerce/docs/DESKTOP_TAURI.md).
+# A base temporária, em Tauri (recordarfotos-e-commerce/docs/DESKTOP_TAURI.md, D15).
 # Abre /dashboard/sessoes-fotograficas do site; `--diagnostico` abre também a página
 # que mede o webview do sistema. **Testes sempre no Mac, e sem GitHub** (dono,
 # 2026-09-16): não há workflow para o app Tauri.
 cargo run -p app-tauri -- --diagnostico
-VLB_SITE_URL=http://localhost:3001 cargo run -p app-tauri   # pilha local, só em debug
+
+# 🔑 Contra a pilha local, os dois pelos scripts do crate — eles apontam a API (8080) e
+#    o site (8001) juntos e conferem se a API responde antes de compilar. As duas
+#    variáveis nunca andam sozinhas: só a API em localhost abria a autorização em
+#    produção, e o operador entrava na conta real achando que estava local
+#    (17/set/2026). Antes: `make up` no recordarfotos-e-commerce.
+crates/ui-gpui/rodar-local.sh     # o produto final
+crates/app-tauri/rodar-local.sh   # a base, para comparar lado a lado
 
 # O motor de revelação para o navegador (entrega ao recordarfotos-e-commerce)
 scripts/construir-web.sh [caminho/do/frontend]
