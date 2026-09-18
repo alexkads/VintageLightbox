@@ -1,3 +1,15 @@
+// 🚨 **No Windows, um app de janela não abre console** (dono, 18/set/2026:
+// *"quando abro a aplicação no Windows, também abre um terminal, e quando fecho
+// o terminal a aplicação fecha"*). O padrão do `rustc` é o subsistema
+// `console`: o Windows cria uma janela de terminal para o processo, ela fica
+// atrás do app, e fechá-la mata o processo inteiro — o operador do balcão
+// perde a sessão por ter fechado o que parecia uma janela solta.
+//
+// ⚠️ **Só fora do `debug_assertions`.** Em desenvolvimento o console é onde
+// saem os `eprintln!` do roteiro, da sonda e do barramento; sem ele, conferir
+// qualquer coisa na máquina de trabalho passaria a exigir arquivo de log.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 //! O app em GPUI, ao lado do de egui.
 //!
 //! `cargo run -p ui-gpui` — e `cargo run -p ui` continua abrindo o de sempre.
