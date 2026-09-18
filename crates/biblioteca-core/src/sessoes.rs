@@ -133,6 +133,65 @@ pub struct Criterio {
     pub busca: String,
     /// `None` é "todas".
     pub situacao: Option<Situacao>,
+    /// O período de criação, em datas `YYYY-MM-DD` do fuso do estúdio.
+    /// `None` é "todo o período" — o arquivo inteiro.
+    ///
+    /// 🔑 **A lista abre em hoje** (dono, 2026-09-18: *"na listagem de sessões
+    /// por padrão deve estar filtrado como hoje, mas com opção de selecionar o
+    /// dia ou mesmo range de um período"*). O balcão trabalha o dia; a lista
+    /// inteira é o arquivo.
+    ///
+    /// ⚠️ **Texto, e não data**: `YYYY-MM-DD` comparado como texto é comparação
+    /// de data sem fuso, sem horário e sem biblioteca — e é o mesmo que o site
+    /// faz (`periodo-da-lista.ts`). Quem converte para esse texto já lidou com
+    /// o fuso.
+    pub periodo: Option<FaixaDeDatas>,
+}
+
+/// Uma faixa de datas fechada, em `YYYY-MM-DD`.
+///
+/// ⚠️ **Não confundir com [`Periodo`]**, que é um degrau do gráfico: aquele é
+/// "o que entrou no dia 3", este é "de 1 a 7".
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct FaixaDeDatas {
+    pub de: String,
+    pub ate: String,
+}
+
+impl FaixaDeDatas {
+    /// Um dia só.
+    pub fn no_dia(dia: impl Into<String>) -> Self {
+        let dia = dia.into();
+        Self {
+            de: dia.clone(),
+            ate: dia,
+        }
+    }
+
+    /// Em ordem — quem escolheu o fim antes do começo quis o mesmo intervalo.
+    pub fn em_ordem(&self) -> (&str, &str) {
+        if self.de <= self.ate {
+            (&self.de, &self.ate)
+        } else {
+            (&self.ate, &self.de)
+        }
+    }
+
+    pub fn contem(&self, dia: &str) -> bool {
+        let (de, ate) = self.em_ordem();
+        dia >= de && dia <= ate
+    }
+}
+
+/// O dia de uma data ISO — `2026-09-18T12:00:00Z` vira `2026-09-18`.
+///
+/// ⚠️ **Corta, não converte.** A API devolve a criação em UTC; o balcão é
+/// GMT-3, e uma sessão criada às 21h de lá é do dia seguinte aqui. Isso é a
+/// divergência que o site também tem (`criadaEmISO` sai de `paraDataISO`, que
+/// usa o fuso) — e é por isso que este corte existe num lugar só, com nome: o
+/// dia que sobe do corte é o que a coluna "Criada" já mostra.
+fn dia_da_criacao(iso: &str) -> &str {
+    iso.split('T').next().unwrap_or(iso)
 }
 
 /// Minúsculas e sem acento: "Joao" acha "João" e vice-versa.
@@ -185,6 +244,14 @@ pub fn filtrar<'a>(
     sessoes
         .iter()
         .filter(|sessao| {
+            // 📅 O período é o recorte mais grosso, e vem primeiro.
+            if criterio
+                .periodo
+                .as_ref()
+                .is_some_and(|p| !p.contem(dia_da_criacao(&sessao.criada_em_iso)))
+            {
+                return false;
+            }
             if criterio
                 .situacao
                 .is_some_and(|querida| sessao.situacao(agora) != querida)
@@ -491,6 +558,7 @@ mod testes {
             &Criterio {
                 busca: "joao".into(),
                 situacao: None,
+                ..Default::default()
             },
             AGORA,
         );
@@ -502,6 +570,7 @@ mod testes {
             &Criterio {
                 busca: "outro.com".into(),
                 situacao: None,
+                ..Default::default()
             },
             AGORA,
         );
@@ -512,6 +581,7 @@ mod testes {
             &Criterio {
                 busca: "99999".into(),
                 situacao: None,
+                ..Default::default()
             },
             AGORA,
         );
@@ -534,6 +604,7 @@ mod testes {
             &Criterio {
                 busca: "47".into(),
                 situacao: None,
+                ..Default::default()
             },
             AGORA,
         );
@@ -554,6 +625,7 @@ mod testes {
             &Criterio {
                 busca: "ensaio".into(),
                 situacao: Some(Situacao::SemFotos),
+                ..Default::default()
             },
             AGORA,
         );
@@ -681,5 +753,81 @@ mod testes {
         assert_eq!(primeiro_de_marco - fim_de_fevereiro, 2, "2024 tem 29/02");
 
         assert_eq!(dia_civil("nada disso"), None);
+    }
+}
+
+#[cfg(test)]
+mod testes_do_periodo {
+    use super::*;
+
+    fn sessao(id: &str, criada_em_iso: &str) -> SessaoFotografica {
+        SessaoFotografica {
+            id: id.into(),
+            titulo: format!("Ensaio {id}"),
+            email: None,
+            whatsapp: None,
+            criada_em_iso: criada_em_iso.into(),
+            expira_em: None,
+            user_id: None,
+            fotos: ContagemDeFotos::default(),
+            totais: None,
+        }
+    }
+
+    /// 📅 **A lista abre em hoje** e a faixa recorta pelas pontas, inclusive.
+    #[test]
+    fn o_periodo_recorta_pela_data_de_criacao() {
+        let sessoes = vec![
+            sessao("a", "2026-09-17T14:00:00Z"),
+            sessao("b", "2026-09-18T09:30:00Z"),
+            sessao("c", "2026-09-19T23:59:00Z"),
+        ];
+        let com = |de: &str, ate: &str| Criterio {
+            periodo: Some(FaixaDeDatas {
+                de: de.into(),
+                ate: ate.into(),
+            }),
+            ..Default::default()
+        };
+
+        let hoje: Vec<&str> = filtrar(&sessoes, &com("2026-09-18", "2026-09-18"), 0)
+            .iter()
+            .map(|s| s.id.as_str())
+            .collect();
+        assert_eq!(hoje, vec!["b"], "um dia só");
+
+        let faixa: Vec<&str> = filtrar(&sessoes, &com("2026-09-17", "2026-09-19"), 0)
+            .iter()
+            .map(|s| s.id.as_str())
+            .collect();
+        assert_eq!(faixa, vec!["a", "b", "c"], "as pontas entram");
+
+        // Sem período, o arquivo inteiro.
+        assert_eq!(filtrar(&sessoes, &Criterio::default(), 0).len(), 3);
+    }
+
+    /// A faixa invertida é a mesma faixa — quem clicou no fim antes quis isso.
+    #[test]
+    fn a_faixa_invertida_vale_igual() {
+        let faixa = FaixaDeDatas {
+            de: "2026-09-20".into(),
+            ate: "2026-09-17".into(),
+        };
+
+        assert!(faixa.contem("2026-09-18"));
+        assert_eq!(faixa.em_ordem(), ("2026-09-17", "2026-09-20"));
+        assert!(!faixa.contem("2026-09-21"));
+    }
+
+    /// 🚨 A hora não entra na conta: o que se compara é o dia.
+    #[test]
+    fn a_hora_da_criacao_nao_entra_na_conta() {
+        let sessoes = vec![sessao("a", "2026-09-18T23:59:59Z")];
+        let criterio = Criterio {
+            periodo: Some(FaixaDeDatas::no_dia("2026-09-18")),
+            ..Default::default()
+        };
+
+        assert_eq!(filtrar(&sessoes, &criterio, 0).len(), 1);
     }
 }

@@ -18,6 +18,11 @@ fn a_lista_busca_recorta_e_recarrega(cx: &mut TestAppContext) {
         app.sessoes.update(cx, |tela, cx| {
             assert_eq!(tela.quantas(), 2, "as duas sessões do site");
             assert_eq!(tela.id_na_posicao(1).as_deref(), Some(GALERIA));
+            // 📅 **A lista abre em hoje** (dono, 18/set/2026). As deste cenário
+            // são de outro dia, então o primeiro gesto é o que o operador faria
+            // para ver o arquivo: "Tudo" no seletor de período.
+            assert!(tela.filtrando(cx), "hoje é um recorte");
+            tela.escolher_periodo_para_teste(None, cx);
             assert!(!tela.filtrando(cx));
 
             // "joao" acha "João".
@@ -32,7 +37,10 @@ fn a_lista_busca_recorta_e_recarrega(cx: &mut TestAppContext) {
             assert!(tela.filtrando(cx));
             assert!(tela.titulos_visiveis(cx).is_empty());
 
+            // ⚠️ **"Limpar" devolve o padrão, e o padrão é hoje** — ver
+            // `limpar_filtros`. Para o arquivo inteiro é o "Tudo" do seletor.
             tela.limpar_filtros(window, cx);
+            tela.escolher_periodo_para_teste(None, cx);
             assert!(!tela.filtrando(cx));
             assert_eq!(tela.titulos_visiveis(cx).len(), 2);
         });

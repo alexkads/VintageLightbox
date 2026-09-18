@@ -22,11 +22,13 @@ use std::time::Duration;
 use biblioteca_core::dados_do_cliente;
 use biblioteca_core::dinheiro;
 use biblioteca_core::sessoes::{
-    self, ContagemDeFotos, Criterio, SessaoFotografica, Situacao, Totais,
+    self, ContagemDeFotos, Criterio, FaixaDeDatas, SessaoFotografica, Situacao, Totais,
 };
 use domain::services::pos_venda::{Estudio, GaleriaDoPainel, NovaGaleria, Produto, Sessao};
 use gpui::{div, prelude::*, px, App, Context, EventEmitter, SharedString, Task, Window};
 use gpui_component::button::{Button, ButtonVariants};
+use gpui_component::calendar::Date;
+use gpui_component::date_picker::{DatePicker, DatePickerEvent, DatePickerState, DateRangePreset};
 use gpui_component::input::{Input, InputState};
 use gpui_component::{ActiveTheme, Disableable, Selectable, Sizable};
 use infrastructure::paths::AppPaths;
@@ -37,6 +39,30 @@ use crate::pos_venda::porta::{Publicador, Recado};
 
 /// De quanto em quanto a tela pergunta se o site respondeu.
 const INTERVALO_DE_COLHEITA: Duration = Duration::from_millis(100);
+
+/// Os atalhos do seletor: hoje, os últimos 7 e os últimos 30 dias.
+///
+/// 🔑 **Sem eles, olhar a semana exigiria dois cliques no calendário e saber em
+/// que dia ela começou.** São os mesmos do site (`filtro-de-periodo.tsx`).
+fn atalhos_do_periodo() -> Vec<DateRangePreset> {
+    let hoje = hoje_no_estudio();
+    let ha = |dias: i64| hoje - chrono::Duration::days(dias);
+    vec![
+        DateRangePreset::single("Hoje", hoje),
+        DateRangePreset::range("7 dias", ha(6), hoje),
+        DateRangePreset::range("30 dias", ha(29), hoje),
+    ]
+}
+
+/// Hoje, **no fuso do estúdio** — a data que o balcão chama de hoje.
+///
+/// 🔑 O mesmo fuso do resto do app (`caixa::dados::no_estudio`): uma sessão
+/// criada às 21h de Brasília é de hoje aqui, e do dia seguinte em UTC.
+fn hoje_no_estudio() -> chrono::NaiveDate {
+    chrono::Utc::now()
+        .with_timezone(&chrono::FixedOffset::west_opt(3 * 3600).expect("o fuso do estúdio"))
+        .date_naive()
+}
 
 /// O lado da capa do estúdio no diálogo, em pontos — o avatar do shadcn.
 const LADO_DA_CAPA: u32 = 48;
@@ -66,6 +92,13 @@ pub struct Sessoes {
     estudios: Vec<Estudio>,
     /// Onde o último estúdio escolhido fica lembrado nesta máquina.
     lembranca: PathBuf,
+    /// 📅 O seletor de período da barra — o `DatePicker` do `gpui-component`,
+    /// que é o `DatePicker` do shadcn do site.
+    periodo: gpui::Entity<DatePickerState>,
+    /// A inscrição no seletor. Descartada, escolher data não filtra nada.
+    _periodo: gpui::Subscription,
+    /// O período escolhido. `None` é "todo o período" — o arquivo inteiro.
+    faixa: Option<FaixaDeDatas>,
     /// As capas dos estúdios, já decodificadas — por id.
     ///
     /// 🔑 **A tela guarda a imagem pronta**, e não os bytes: decodificar a cada
@@ -178,8 +211,23 @@ impl Sessoes {
     ) -> Self {
         let busca =
             cx.new(|cx| InputState::new(window, cx).placeholder("Nome, e-mail ou WhatsApp…"));
+        // 📅 **A lista abre em hoje** (dono, 2026-09-18), como no site: o balcão
+        // trabalha o dia, e a lista inteira é o arquivo.
+        let hoje = hoje_no_estudio();
+        let periodo = cx.new(|cx| {
+            let mut estado = DatePickerState::range(window, cx);
+            estado.set_date(Date::Range(Some(hoje), Some(hoje)), window, cx);
+            estado
+        });
+        let _periodo = cx.subscribe(&periodo, |tela, _estado, evento, cx| {
+            let DatePickerEvent::Change(data) = evento;
+            tela.escolher_periodo(*data, cx);
+        });
         Self {
             publicador,
+            periodo,
+            _periodo,
+            faixa: Some(FaixaDeDatas::no_dia(hoje.format("%Y-%m-%d").to_string())),
             sessao: None,
             galerias: Vec::new(),
             produtos: Vec::new(),
@@ -270,18 +318,69 @@ impl Sessoes {
         Criterio {
             busca: self.busca.read(cx).value().to_string(),
             situacao: self.situacao,
+            periodo: self.faixa.clone(),
         }
     }
 
     /// Se há busca ou filtro — é o que faz os totais falarem em "recorte".
     pub fn filtrando(&self, cx: &Context<Self>) -> bool {
-        !self.busca.read(cx).value().trim().is_empty() || self.situacao.is_some()
+        // 📅 **O período conta como recorte**: a lista abre em hoje, e somar o
+        // arquivo inteiro debaixo de uma lista de um dia diria um número que a
+        // tela não reproduz.
+        !self.busca.read(cx).value().trim().is_empty()
+            || self.situacao.is_some()
+            || self.faixa.is_some()
+    }
+
+    /// O que o seletor devolveu vira a faixa da busca.
+    ///
+    /// ⚠️ **Meio do gesto conta como um dia**: o primeiro clique no calendário
+    /// traz `Range(Some, None)`, e esperar o segundo deixaria a lista parada
+    /// entre os dois cliques. É o mesmo do site.
+    fn escolher_periodo(&mut self, data: Date, cx: &mut Context<Self>) {
+        let iso = |d: chrono::NaiveDate| d.format("%Y-%m-%d").to_string();
+        self.faixa = match data {
+            Date::Single(Some(dia)) => Some(FaixaDeDatas::no_dia(iso(dia))),
+            Date::Range(Some(de), Some(ate)) => Some(FaixaDeDatas {
+                de: iso(de),
+                ate: iso(ate),
+            }),
+            Date::Range(Some(dia), None) => Some(FaixaDeDatas::no_dia(iso(dia))),
+            _ => None,
+        };
+        cx.notify();
+    }
+
+    /// 🧪 A faixa de datas que a lista está mostrando.
+    #[cfg(test)]
+    pub(crate) fn faixa_para_teste(&self) -> Option<FaixaDeDatas> {
+        self.faixa.clone()
+    }
+
+    /// 🧪 Troca o período sem passar pelo calendário — `None` é "todo o
+    /// período", o "Tudo" do seletor.
+    #[cfg(test)]
+    pub(crate) fn escolher_periodo_para_teste(
+        &mut self,
+        faixa: Option<FaixaDeDatas>,
+        cx: &mut Context<Self>,
+    ) {
+        self.faixa = faixa;
+        cx.notify();
     }
 
     pub fn limpar_filtros(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.busca
             .update(cx, |estado, cx| estado.set_value("", window, cx));
         self.situacao = None;
+        // 📅 **O "limpar" volta ao padrão, e não ao arquivo inteiro**: a lista
+        // abre em hoje, e é para hoje que ela volta. Ver o arquivo é uma
+        // escolha, e ela tem o "Tudo" do seletor.
+        let hoje = hoje_no_estudio();
+        self.periodo.update(cx, |estado, cx| {
+            estado.set_date(Date::Range(Some(hoje), Some(hoje)), window, cx)
+        });
+        self.faixa = Some(FaixaDeDatas::no_dia(hoje.format("%Y-%m-%d").to_string()));
         cx.notify();
     }
 
@@ -867,6 +966,21 @@ impl Sessoes {
                         .cleanable(true),
                 ),
             )
+            // 📅 **O período, e ele abre em hoje** (dono, 2026-09-18). É o
+            // `DatePicker` do `gpui-component` — o mesmo desenho do `DatePicker`
+            // do shadcn no site —, com os mesmos quatro atalhos: hoje é o
+            // padrão e serve para voltar; 7 e 30 dias são as duas perguntas que
+            // o balcão faz depois; "Tudo" é o arquivo.
+            .child(
+                div().w(px(230.)).child(
+                    DatePicker::new(&self.periodo)
+                        .small()
+                        .placeholder("Todo o período")
+                        .cleanable(true)
+                        .number_of_months(1)
+                        .presets(atalhos_do_periodo()),
+                ),
+            )
             .child(
                 pilula(
                     "sessoes-todas".into(),
@@ -1417,6 +1531,10 @@ mod testes {
         janela
             .update(cx, |tela, window, cx| {
                 assert_eq!(tela.quantas(), 2);
+                // 📅 A lista abre em hoje; estas são de outro dia, e o que este
+                // teste mede é a busca — "Tudo" no seletor tira o período do
+                // caminho.
+                tela.escolher_periodo_para_teste(None, cx);
                 let todas = tela.para_o_core();
                 assert_eq!(todas[0].fotos.disponiveis, 3, "a contagem atravessou");
                 assert_eq!(todas[0].situacao(0), Situacao::AguardandoCliente);
@@ -1430,6 +1548,7 @@ mod testes {
                 assert!(tela.filtrando(cx), "com busca, os totais falam em recorte");
 
                 tela.limpar_filtros(window, cx);
+                tela.escolher_periodo_para_teste(None, cx);
                 assert!(!tela.filtrando(cx));
             })
             .expect("a janela deve estar aberta");
@@ -1619,6 +1738,67 @@ mod testes {
                 tela.trocar_de_estudio(cx);
                 assert!(tela.perguntando_o_estudio());
                 let _ = std::fs::remove_file(&tela.lembranca);
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 📅 **A lista abre em hoje, e o seletor muda o período** (dono,
+    /// 18/set/2026: *"na listagem de sessões por padrão deve estar filtrado
+    /// como hoje, mas com opção de selecionar o dia ou mesmo range de um
+    /// período"*).
+    #[gpui::test]
+    fn a_lista_abre_em_hoje_e_o_periodo_recorta(cx: &mut TestAppContext) {
+        let hoje = super::hoje_no_estudio();
+        let ontem = hoje - chrono::Duration::days(1);
+        let iso = |d: chrono::NaiveDate| d.format("%Y-%m-%d").to_string();
+        let de_hoje = |id: &str, dia: chrono::NaiveDate| {
+            let mut g = galeria(id, "Ensaio", None);
+            g.criada_em_iso = format!("{}T12:00:00Z", iso(dia));
+            g
+        };
+        let publicador = Arc::new(PublicadorDeMentira {
+            galerias: Mutex::new(vec![de_hoje("g1", hoje), de_hoje("g2", ontem)]),
+            ..Default::default()
+        });
+        let janela = janela(cx, publicador);
+        com_sessao(cx, &janela);
+
+        janela
+            .update(cx, |tela, window, cx| {
+                // 1 · Abre em hoje: a de ontem fica no arquivo.
+                assert_eq!(
+                    tela.faixa_para_teste(),
+                    Some(FaixaDeDatas::no_dia(iso(hoje)))
+                );
+                let visiveis: Vec<String> =
+                    sessoes::filtrar(&tela.para_o_core(), &tela.criterio(cx), 0)
+                        .iter()
+                        .map(|s| s.id.clone())
+                        .collect();
+                assert_eq!(visiveis, vec!["g1".to_string()]);
+                assert!(tela.filtrando(cx), "hoje é um recorte, e os totais dizem");
+
+                // 2 · Um intervalo de dois dias traz as duas.
+                tela.escolher_periodo(Date::Range(Some(ontem), Some(hoje)), cx);
+                assert_eq!(
+                    sessoes::filtrar(&tela.para_o_core(), &tela.criterio(cx), 0).len(),
+                    2
+                );
+
+                // 3 · "Tudo" (o seletor limpo) é o arquivo inteiro.
+                tela.escolher_periodo(Date::Range(None, None), cx);
+                assert_eq!(tela.faixa_para_teste(), None);
+                assert_eq!(
+                    sessoes::filtrar(&tela.para_o_core(), &tela.criterio(cx), 0).len(),
+                    2
+                );
+
+                // 4 · E o "limpar" volta ao padrão — hoje, e não o arquivo.
+                tela.limpar_filtros(window, cx);
+                assert_eq!(
+                    tela.faixa_para_teste(),
+                    Some(FaixaDeDatas::no_dia(iso(hoje)))
+                );
             })
             .expect("a janela deve estar aberta");
     }
