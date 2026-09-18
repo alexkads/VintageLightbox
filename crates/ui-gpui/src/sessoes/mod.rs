@@ -13,6 +13,7 @@ pub mod detalhe;
 /// O assistente de sete etapas da nova sessão (a rota `nova` do site).
 pub mod nova;
 /// A receita padrão revelada em segundo plano (o `receita-padrao/` do site).
+pub mod periodo;
 pub mod receita_padrao;
 /// A política de retenção do pós-venda (a rota `configuracoes` do site).
 pub mod retencao;

@@ -266,6 +266,24 @@ impl PublicarNoPosVendaUseCase {
             .await
             .map_err(|e| (nome.clone(), e.to_string()))?;
 
+        // 🚨 **Nada vazio sobe** (dono, 18/set/2026: uma sessão de 200 fotos
+        // parou com *"o site respondeu 400: formato de imagem não suportado:
+        // the image format could not be determined"*). Essa frase é o que o
+        // servidor diz quando os bytes que chegam não são imagem — e zero bytes
+        // não são. A recusa acontecia depois de uma ida à rede por foto, com
+        // uma mensagem que fala do **servidor** e não do arquivo.
+        //
+        // 🔑 A conferência é aqui porque aqui se sabe **qual foto é**: a frase
+        // sai com o nome do arquivo, que é o que o operador procura no cartão.
+        if jpeg.is_empty() {
+            return Err((
+                nome.clone(),
+                "a foto revelada saiu vazia — o arquivo de origem pode estar corrompido ou \
+                 truncado; abra-a na Revelação para conferir"
+                    .into(),
+            ));
+        }
+
         // 🚨 **E o arquivo de antes, quando esta foto já foi revelada.** O que
         // subiu acima já vem tratado; sem esta segunda cópia o site passa a
         // tratar o revelado como original, e "Zerar tudo" lá não tem para onde
@@ -275,7 +293,10 @@ impl PublicarNoPosVendaUseCase {
             .exportador
             .renderizar_bruto_jpeg(&photo, &ExportOptions::default())
             .await
-            .map_err(|e| (nome.clone(), e.to_string()))?;
+            .map_err(|e| (nome.clone(), e.to_string()))?
+            // Bruto vazio é o mesmo caso do JPEG vazio, e o desfecho é ausência:
+            // o site trata o campo ausente como "o que subiu **é** o bruto".
+            .filter(|bytes| !bytes.is_empty());
 
         let enviada = self
             .api

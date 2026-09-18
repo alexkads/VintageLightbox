@@ -25,10 +25,10 @@ use biblioteca_core::sessoes::{
     self, ContagemDeFotos, Criterio, FaixaDeDatas, SessaoFotografica, Situacao, Totais,
 };
 use domain::services::pos_venda::{Estudio, GaleriaDoPainel, NovaGaleria, Produto, Sessao};
+
+use super::periodo;
 use gpui::{div, prelude::*, px, App, Context, EventEmitter, SharedString, Task, Window};
 use gpui_component::button::{Button, ButtonVariants};
-use gpui_component::calendar::Date;
-use gpui_component::date_picker::{DatePicker, DatePickerEvent, DatePickerState, DateRangePreset};
 use gpui_component::input::{Input, InputState};
 use gpui_component::{ActiveTheme, Disableable, Selectable, Sizable};
 use infrastructure::paths::AppPaths;
@@ -39,29 +39,6 @@ use crate::pos_venda::porta::{Publicador, Recado};
 
 /// De quanto em quanto a tela pergunta se o site respondeu.
 const INTERVALO_DE_COLHEITA: Duration = Duration::from_millis(100);
-
-/// Os atalhos do seletor: hoje, os últimos 7 e os últimos 30 dias.
-///
-/// 🔑 **Sem eles, olhar a semana exigiria dois cliques no calendário e saber em
-/// que dia ela começou.** São os mesmos do site (`filtro-de-periodo.tsx`).
-fn atalhos_do_periodo() -> Vec<DateRangePreset> {
-    let hoje = hoje_no_estudio();
-    let ha = |dias: i64| hoje - chrono::Duration::days(dias);
-    // 🔑 **Os sete do site** (`filtro-de-periodo.tsx`), na ordem em que o balcão
-    // pergunta: o dia, o dia anterior, a semana, o mês, e as três janelas de
-    // fechamento — trimestre, semestre e ano. Os três últimos são **corridos**
-    // (os últimos 90/180/365 dias), que é a pergunta de quem fecha caixa: "o
-    // quanto entrou até aqui", e não "o que aconteceu no trimestre civil".
-    vec![
-        DateRangePreset::single("Hoje", hoje),
-        DateRangePreset::single("Ontem", ha(1)),
-        DateRangePreset::range("7 dias", ha(6), hoje),
-        DateRangePreset::range("30 dias", ha(29), hoje),
-        DateRangePreset::range("Trimestre", ha(89), hoje),
-        DateRangePreset::range("Semestre", ha(179), hoje),
-        DateRangePreset::range("Ano", ha(364), hoje),
-    ]
-}
 
 /// Hoje, **no fuso do estúdio** — a data que o balcão chama de hoje.
 ///
@@ -101,11 +78,12 @@ pub struct Sessoes {
     estudios: Vec<Estudio>,
     /// Onde o último estúdio escolhido fica lembrado nesta máquina.
     lembranca: PathBuf,
-    /// 📅 O seletor de período da barra — o `DatePicker` do `gpui-component`,
-    /// que é o `DatePicker` do shadcn do site.
-    periodo: gpui::Entity<DatePickerState>,
-    /// A inscrição no seletor. Descartada, escolher data não filtra nada.
-    _periodo: gpui::Subscription,
+    /// 📅 O calendário do período está aberto? (`Some` = o popover na tela.)
+    ///
+    /// 🚨 **É o nosso, e não o do `gpui-component`** — o de lá não fala
+    /// português e o dicionário dele é compilado dentro do crate. Ver
+    /// `sessoes::periodo`.
+    calendario: Option<periodo::EstadoDoPeriodo>,
     /// O período escolhido. `None` é "todo o período" — o arquivo inteiro.
     faixa: Option<FaixaDeDatas>,
     /// As capas dos estúdios, já decodificadas — por id.
@@ -223,21 +201,9 @@ impl Sessoes {
         // 📅 **A lista abre em hoje** (dono, 2026-09-18), como no site: o balcão
         // trabalha o dia, e a lista inteira é o arquivo.
         let hoje = hoje_no_estudio();
-        let periodo = cx.new(|cx| {
-            // 🇧🇷 **Data em português do Brasil** (dono, 18/set/2026): o padrão
-            // do componente é `%Y/%m/%d`, que no balcão se lê como erro.
-            let mut estado = DatePickerState::range(window, cx).date_format("%d/%m/%Y");
-            estado.set_date(Date::Range(Some(hoje), Some(hoje)), window, cx);
-            estado
-        });
-        let _periodo = cx.subscribe(&periodo, |tela, _estado, evento, cx| {
-            let DatePickerEvent::Change(data) = evento;
-            tela.escolher_periodo(*data, cx);
-        });
         Self {
             publicador,
-            periodo,
-            _periodo,
+            calendario: None,
             faixa: Some(FaixaDeDatas::no_dia(hoje.format("%Y-%m-%d").to_string())),
             sessao: None,
             galerias: Vec::new(),
@@ -343,23 +309,51 @@ impl Sessoes {
             || self.faixa.is_some()
     }
 
-    /// O que o seletor devolveu vira a faixa da busca.
-    ///
-    /// ⚠️ **Meio do gesto conta como um dia**: o primeiro clique no calendário
-    /// traz `Range(Some, None)`, e esperar o segundo deixaria a lista parada
-    /// entre os dois cliques. É o mesmo do site.
-    fn escolher_periodo(&mut self, data: Date, cx: &mut Context<Self>) {
-        let iso = |d: chrono::NaiveDate| d.format("%Y-%m-%d").to_string();
-        self.faixa = match data {
-            Date::Single(Some(dia)) => Some(FaixaDeDatas::no_dia(iso(dia))),
-            Date::Range(Some(de), Some(ate)) => Some(FaixaDeDatas {
-                de: iso(de),
-                ate: iso(ate),
-            }),
-            Date::Range(Some(dia), None) => Some(FaixaDeDatas::no_dia(iso(dia))),
-            _ => None,
+    /// Abre ou fecha o calendário do período.
+    pub fn alternar_calendario(&mut self, cx: &mut Context<Self>) {
+        self.calendario = match self.calendario {
+            Some(_) => None,
+            None => Some(periodo::EstadoDoPeriodo::no_mes_de(
+                self.faixa
+                    .as_ref()
+                    .and_then(|f| chrono::NaiveDate::parse_from_str(f.de.as_str(), "%Y-%m-%d").ok())
+                    .unwrap_or_else(hoje_no_estudio),
+            )),
         };
         cx.notify();
+    }
+
+    /// Um atalho do calendário — `None` é "Tudo".
+    pub fn escolher_periodo(&mut self, faixa: Option<FaixaDeDatas>, cx: &mut Context<Self>) {
+        self.faixa = faixa;
+        self.calendario = None;
+        cx.notify();
+    }
+
+    /// O clique num dia do calendário.
+    ///
+    /// ⚠️ **O primeiro clique já filtra** (um dia só): esperar o segundo
+    /// deixaria a lista parada no meio do gesto. O segundo fecha o intervalo e
+    /// o calendário.
+    pub fn clicar_no_dia(&mut self, dia: chrono::NaiveDate, cx: &mut Context<Self>) {
+        let Some(estado) = self.calendario.as_mut() else {
+            return;
+        };
+        let faixa = periodo::clicar_no_dia(estado, dia);
+        let fechou = estado.comecando.is_none();
+        self.faixa = Some(faixa);
+        if fechou {
+            self.calendario = None;
+        }
+        cx.notify();
+    }
+
+    /// As setas do calendário.
+    pub fn andar_no_mes(&mut self, passo: i32, cx: &mut Context<Self>) {
+        if let Some(estado) = self.calendario.as_mut() {
+            estado.andar_mes(passo);
+            cx.notify();
+        }
     }
 
     /// 🧪 A faixa de datas que a lista está mostrando.
@@ -388,10 +382,8 @@ impl Sessoes {
         // abre em hoje, e é para hoje que ela volta. Ver o arquivo é uma
         // escolha, e ela tem o "Tudo" do seletor.
         let hoje = hoje_no_estudio();
-        self.periodo.update(cx, |estado, cx| {
-            estado.set_date(Date::Range(Some(hoje), Some(hoje)), window, cx)
-        });
         self.faixa = Some(FaixaDeDatas::no_dia(hoje.format("%Y-%m-%d").to_string()));
+        self.calendario = None;
         cx.notify();
     }
 
@@ -724,6 +716,7 @@ impl Render for Sessoes {
             .child(self.tabela(&visiveis, agora, cx))
             .child(div().text_xs().text_color(apagado).child(rodape))
             .children(self.dialogo_do_estudio(cx))
+            .children(self.popover_do_periodo(cx))
     }
 }
 
@@ -849,6 +842,112 @@ impl Sessoes {
     #[cfg(test)]
     pub(crate) fn perguntando_o_estudio(&self) -> bool {
         self.escolhendo_estudio
+    }
+
+    /// 📅 O calendário do período — os atalhos à esquerda, o mês à direita.
+    ///
+    /// 🎨 **É o `DatePicker` do shadcn, desenhado aqui**: o mesmo arranjo do
+    /// site (`filtro-de-periodo.tsx`), com as peças de `estilo.rs`. O véu
+    /// fecha ao clique fora, como um popover.
+    fn popover_do_periodo(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+        use crate::recursos::Icone;
+        use gpui_component::Icon;
+
+        let estado = self.calendario.as_ref()?;
+        let hoje = hoje_no_estudio();
+        let tema = cx.theme().clone();
+        let faixa = self.faixa.clone();
+        Some(
+            div()
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full()
+                .id("periodo-veu")
+                .occlude()
+                .on_click(cx.listener(|tela, _ev, _w, cx| tela.alternar_calendario(cx)))
+                .child(
+                    div()
+                        // Ancorado sob a barra, à esquerda — onde o botão está.
+                        .absolute()
+                        .top(px(112.))
+                        .left(px(360.))
+                        .flex()
+                        .gap(px(12.))
+                        .p(px(12.))
+                        .rounded(px(12.))
+                        .border_1()
+                        .border_color(tema.border)
+                        .bg(tema.popover)
+                        .text_color(tema.popover_foreground)
+                        .shadow_lg()
+                        .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .child(gpui_component::v_flex().gap(px(2.)).w(px(120.)).children(
+                            periodo::atalhos(hoje).into_iter().map(|(rotulo, faixa)| {
+                                crate::estilo::botao_fantasma(
+                                    SharedString::from(format!("periodo-{rotulo}")),
+                                    cx,
+                                )
+                                .w_full()
+                                .justify_start()
+                                .child(rotulo)
+                                .on_click(cx.listener(
+                                    move |tela, _ev, _w, cx| {
+                                        tela.escolher_periodo(faixa.clone(), cx)
+                                    },
+                                ))
+                            }),
+                        ))
+                        .child(
+                            gpui_component::v_flex()
+                                .gap(px(8.))
+                                .child(
+                                    gpui_component::h_flex()
+                                        .items_center()
+                                        .justify_between()
+                                        .child(
+                                            crate::estilo::botao_fantasma(
+                                                "periodo-mes-anterior",
+                                                cx,
+                                            )
+                                            .child(Icon::new(Icone::ChevronLeft).size(px(14.)))
+                                            .on_click(
+                                                cx.listener(|tela, _ev, _w, cx| {
+                                                    tela.andar_no_mes(-1, cx)
+                                                }),
+                                            ),
+                                        )
+                                        .child(
+                                            div()
+                                                .text_sm()
+                                                .font_weight(gpui::FontWeight::MEDIUM)
+                                                .child(SharedString::from(periodo::titulo_do_mes(
+                                                    estado.mes,
+                                                ))),
+                                        )
+                                        .child(
+                                            crate::estilo::botao_fantasma(
+                                                "periodo-mes-proximo",
+                                                cx,
+                                            )
+                                            .child(Icon::new(Icone::ChevronRight).size(px(14.)))
+                                            .on_click(
+                                                cx.listener(|tela, _ev, _w, cx| {
+                                                    tela.andar_no_mes(1, cx)
+                                                }),
+                                            ),
+                                        ),
+                                )
+                                .child(periodo::calendario(
+                                    estado,
+                                    faixa.as_ref(),
+                                    hoje,
+                                    cx,
+                                    |tela, dia, _window, cx| tela.clicar_no_dia(dia, cx),
+                                )),
+                        ),
+                ),
+        )
     }
 
     /// O diálogo **sem saída** da entrada: "Em qual estúdio você está?".
@@ -977,20 +1076,17 @@ impl Sessoes {
                         .cleanable(true),
                 ),
             )
-            // 📅 **O período, e ele abre em hoje** (dono, 2026-09-18). É o
-            // `DatePicker` do `gpui-component` — o mesmo desenho do `DatePicker`
-            // do shadcn no site —, com os mesmos quatro atalhos: hoje é o
-            // padrão e serve para voltar; 7 e 30 dias são as duas perguntas que
-            // o balcão faz depois; "Tudo" é o arquivo.
+            // 📅 **O período, e ele abre em hoje** (dono, 2026-09-18). O
+            // calendário é o nosso (`sessoes::periodo`), em português — o do
+            // `gpui-component` só fala inglês, chinês e italiano.
             .child(
-                div().w(px(230.)).child(
-                    DatePicker::new(&self.periodo)
-                        .small()
-                        .placeholder("Todo o período")
-                        .cleanable(true)
-                        .number_of_months(1)
-                        .presets(atalhos_do_periodo()),
-                ),
+                estilo::botao_contorno("sessoes-periodo", cx)
+                    .child(Icon::new(Icone::CalendarCheck).size(px(14.)))
+                    .child(SharedString::from(periodo::rotulo(
+                        self.faixa.as_ref(),
+                        hoje_no_estudio(),
+                    )))
+                    .on_click(cx.listener(|tela, _ev, _window, cx| tela.alternar_calendario(cx))),
             )
             .child(
                 pilula(
@@ -1790,14 +1886,20 @@ mod testes {
                 assert!(tela.filtrando(cx), "hoje é um recorte, e os totais dizem");
 
                 // 2 · Um intervalo de dois dias traz as duas.
-                tela.escolher_periodo(Date::Range(Some(ontem), Some(hoje)), cx);
+                tela.escolher_periodo(
+                    Some(FaixaDeDatas {
+                        de: iso(ontem),
+                        ate: iso(hoje),
+                    }),
+                    cx,
+                );
                 assert_eq!(
                     sessoes::filtrar(&tela.para_o_core(), &tela.criterio(cx), 0).len(),
                     2
                 );
 
                 // 3 · "Tudo" (o seletor limpo) é o arquivo inteiro.
-                tela.escolher_periodo(Date::Range(None, None), cx);
+                tela.escolher_periodo(None, cx);
                 assert_eq!(tela.faixa_para_teste(), None);
                 assert_eq!(
                     sessoes::filtrar(&tela.para_o_core(), &tela.criterio(cx), 0).len(),
