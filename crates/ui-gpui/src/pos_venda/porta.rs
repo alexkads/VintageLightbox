@@ -968,6 +968,26 @@ pub mod mentira {
             let _ = canal.send(recado);
         }
 
+        /// Manda a resposta guardada de **uma revelação**, a mais antiga.
+        ///
+        /// 🔑 **`responder_uma` não serve para contar o lote.** Com `demorada`,
+        /// tudo o que passa por `responder_ou_guardar` entra na mesma fila —
+        /// inclusive os `pedir_json` da galeria viva, que chegam sozinhos. Tirar
+        /// o primeiro da fila solta qualquer um deles, e o teste que quer ver o
+        /// botão andar de "Salvando 1/2…" para "Salvando 2/2…" mediria outra
+        /// coisa.
+        pub fn responder_uma_revelacao(&self) {
+            let mut guardados = self.guardados.lock().expect("os guardados");
+            let Some(posicao) = guardados
+                .iter()
+                .position(|(_, recado)| matches!(recado, Recado::RevelacaoSalva { .. }))
+            else {
+                return;
+            };
+            let (canal, recado) = guardados.remove(posicao);
+            let _ = canal.send(recado);
+        }
+
         /// Manda o que `demorada` segurou — a rede respondendo, enfim.
         pub fn responder(&self) {
             for (canal, recado) in self.guardados.lock().expect("os guardados").drain(..) {

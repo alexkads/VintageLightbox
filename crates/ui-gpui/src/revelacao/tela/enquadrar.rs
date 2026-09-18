@@ -835,6 +835,12 @@ impl Revelacao {
             "zoom" => self.z_apertado(cx),
             "ajuda" => self.alternar_ajuda(cx),
             "antes" => self.ver_o_antes(numero.unwrap_or(1.) > 0., cx),
+            // 🧪 O lote da tira e o "Sincronizar N", para o roteiro chegar ao
+            // diálogo sem mouse.
+            "marcar_tudo" => self.marcar_todas(cx),
+            "sincronizar" => self.abrir_sincronizacao(window, cx),
+            "sincronizar_ok" => cx.emit(super::PedidoDaRevelacao::Sincronizar),
+            "baixar_jpeg" => cx.emit(super::PedidoDaRevelacao::Exportar),
             outro => eprintln!("[roteiro] gesto da revelação desconhecido: {outro}"),
         }
     }

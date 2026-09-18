@@ -279,11 +279,22 @@ fn salvar_na_galeria_sobe_o_lote_e_sai(cx: &mut TestAppContext) {
         e.gravador.deposito().is_empty(),
         "o depósito esvaziou: a verdade é o site"
     );
-    e.detalhe(cx, |tela, _w, _cx| {
+    // 🔑 **O sucesso é toast, não a faixa vermelha** (dono, 18/set/2026): a
+    // faixa é onde mora erro, e um sucesso pintado de falha ensina o operador a
+    // desconfiar do que deu certo.
+    e.app(cx, |app, _w, _cx| {
+        let avisos = app.avisos_para_teste();
         assert_eq!(
-            tela.erro().map(|f| f.to_string()).as_deref(),
+            avisos.last().map(|(t, _)| t.as_str()),
             Some("revelação salva na galeria")
         );
+        assert!(
+            avisos.iter().all(|(_, erro)| !erro),
+            "nenhum deles é falha: {avisos:?}"
+        );
+    });
+    e.detalhe(cx, |tela, _w, _cx| {
+        assert!(tela.erro().is_none(), "e a faixa de erro fica limpa");
     });
 }
 
@@ -321,4 +332,218 @@ fn salvar_na_galeria_com_falha_fica_na_tela(cx: &mut TestAppContext) {
         e.gravador.deposito().iter().any(|(id, _)| id == "a"),
         "a receita continua guardada"
     );
+}
+
+/// 🎬 **O botão "Salvar na galeria e sair", estado por estado** — o que o
+/// operador lê nele em cada momento, comparado com o editor da web.
+///
+/// 🚨 **Nasceu de "tem momentos que ele falta"** (dono, 18/set/2026). Eram duas
+/// coisas: o toast do `gpui-component` nasce no canto superior **direito** e
+/// cobria os três últimos botões da barra por quatro segundos (agora os avisos
+/// vão no topo **ao centro**, como o `sonner` do site), e o "Baixar JPEG" em
+/// curso não desligava o "Salvar" — na web o `ocupado` desliga os dois.
+///
+/// Os quatro estados aqui são os quatro `title` do `<Button>` da web:
+/// nada a salvar · esta foto · esta e mais N · a comprada e as N atrás dela.
+#[gpui::test]
+fn o_botao_de_salvar_conta_o_que_ha_para_salvar(cx: &mut TestAppContext) {
+    let e = abrir_o_ensaio(
+        cx,
+        Cenario {
+            site: Box::new(|site| site.demorada = true),
+            ..Cenario::default()
+        },
+    );
+    e.revelar_a_do_site(cx, "a");
+
+    // 1 · Recém-aberta, sem tocar em nada: apagado, e a dica diz por quê.
+    e.revelacao(cx, |tela, _w, _cx| {
+        let botao = tela.botao_de_salvar();
+        assert!(!botao.habilitado, "nada mudou: nada a salvar");
+        assert_eq!(botao.rotulo, "Salvar na galeria e sair");
+        assert_eq!(
+            botao.dica,
+            "Nada a salvar: o que está no canvas já está na galeria"
+        );
+    });
+
+    // 2 · Um slider acende o botão, como o `sujo` do site.
+    e.revelacao(cx, |tela, _w, cx| tela.arrastar_slider(0, 0.4, cx));
+    e.esperar(cx);
+    e.revelacao(cx, |tela, _w, _cx| {
+        let botao = tela.botao_de_salvar();
+        assert!(botao.habilitado, "a foto aberta tem receita nova");
+        assert_eq!(botao.dica, "Salva esta foto na galeria e fecha o editor");
+    });
+
+    // 3 · Enquanto o "Baixar JPEG" trabalha, ele fica quieto — o `ocupado`.
+    e.revelacao(cx, |tela, _w, cx| tela.definir_gerando_jpeg(true, cx));
+    e.revelacao(cx, |tela, _w, _cx| {
+        assert!(
+            !tela.botao_de_salvar().habilitado,
+            "um JPEG por vez: os dois pedem o bruto em resolução cheia"
+        );
+    });
+    e.revelacao(cx, |tela, _w, cx| tela.definir_gerando_jpeg(false, cx));
+
+    // 4 · O "Sincronizar" deixa outra pendente: a dica passa a contá-la.
+    e.revelacao(cx, |tela, window, cx| {
+        let b = tela
+            .acervo()
+            .iter()
+            .position(|f| f.id == "site:b")
+            .expect("b na tira");
+        tela.clicar_na_tira(
+            b,
+            biblioteca_core::selecao::Modificadores {
+                aditivo: true,
+                faixa: false,
+            },
+            window,
+            cx,
+        );
+    });
+    botao(&e, cx, PedidoDaRevelacao::Sincronizar);
+    e.esperar(cx);
+    e.revelacao(cx, |tela, _w, _cx| {
+        let botao = tela.botao_de_salvar();
+        assert!(botao.habilitado);
+        assert_eq!(
+            botao.dica, "Salva esta e mais 1 com edição pendente, e fecha o editor",
+            "a dica conta as que o Sincronizar deixou"
+        );
+    });
+
+    // 5 · Na comprada, que não se revela, o botão continua aceso pelas outras —
+    // e a dica troca de frase (o `podeRevelar` do site).
+    e.revelacao(cx, |tela, window, cx| {
+        let c = tela
+            .acervo()
+            .iter()
+            .position(|f| f.id == "site:c")
+            .expect("a comprada na tira");
+        tela.ir_para(c, window, cx);
+    });
+    e.esperar(cx);
+    e.revelacao(cx, |tela, _w, _cx| {
+        assert!(!tela.pode_revelar(), "site:c é a comprada");
+        let botao = tela.botao_de_salvar();
+        assert!(botao.habilitado, "as pendentes atrás dela ainda sobem");
+        assert!(
+            botao.dica.starts_with("Esta foi comprada e não se revela"),
+            "a dica diz por que a do canvas fica de fora: {}",
+            botao.dica
+        );
+    });
+
+    // 6 · O lote subindo: o rótulo conta, e o botão não aceita um segundo clique.
+    botao(&e, cx, PedidoDaRevelacao::SalvarNaGaleria);
+    e.esperar(cx);
+    e.revelacao(cx, |tela, _w, _cx| {
+        let botao = tela.botao_de_salvar();
+        assert!(!botao.habilitado, "o lote já está no ar");
+        assert_eq!(
+            botao.rotulo, "Salvando 1/2…",
+            "a comprada fica de fora, mas as duas pendentes sobem"
+        );
+    });
+    e.site.responder();
+    e.esperar(cx);
+    e.app(cx, |app, _w, _cx| {
+        assert_eq!(app.tela(), Tela::Sessao, "o lote terminou: volta à sessão");
+    });
+}
+
+/// 🎬 **O lote de duas ou mais conta no rótulo**, uma resposta de cada vez —
+/// é o `Salvando 1/2…` do site, e o que diz ao operador que a espera anda.
+#[gpui::test]
+fn o_rotulo_do_salvar_conta_o_lote(cx: &mut TestAppContext) {
+    let e = abrir_o_ensaio(
+        cx,
+        Cenario {
+            site: Box::new(|site| site.demorada = true),
+            ..Cenario::default()
+        },
+    );
+    e.revelar_a_do_site(cx, "a");
+    e.revelacao(cx, |tela, _w, cx| tela.arrastar_slider(0, 0.4, cx));
+    e.esperar(cx);
+    e.revelacao(cx, |tela, window, cx| {
+        let b = tela
+            .acervo()
+            .iter()
+            .position(|f| f.id == "site:b")
+            .expect("b na tira");
+        tela.clicar_na_tira(
+            b,
+            biblioteca_core::selecao::Modificadores {
+                aditivo: true,
+                faixa: false,
+            },
+            window,
+            cx,
+        );
+    });
+    botao(&e, cx, PedidoDaRevelacao::Sincronizar);
+    e.esperar(cx);
+
+    botao(&e, cx, PedidoDaRevelacao::SalvarNaGaleria);
+    e.esperar(cx);
+    e.revelacao(cx, |tela, _w, _cx| {
+        assert_eq!(tela.botao_de_salvar().rotulo, "Salvando 1/2…");
+    });
+    e.site.responder_uma_revelacao();
+    e.esperar(cx);
+    e.revelacao(cx, |tela, _w, _cx| {
+        assert_eq!(
+            tela.botao_de_salvar().rotulo,
+            "Salvando 2/2…",
+            "a primeira respondeu; falta uma"
+        );
+    });
+    e.site.responder();
+    e.esperar(cx);
+    e.app(cx, |app, _w, _cx| assert_eq!(app.tela(), Tela::Sessao));
+}
+
+/// 🎬 **O aviso não pode cobrir o botão** — a razão de os toasts terem saído do
+/// canto direito.
+///
+/// O que o teste alcança é o **lugar** deles: a lista de avisos da raiz, que o
+/// `render` desenha no topo ao centro. Antes disso era o `push_notification` do
+/// `gpui-component`, cuja lista mora fixa em `top_4().right_4()` — por cima de
+/// "Tela do cliente", "Baixar JPEG" e "Salvar na galeria e sair".
+#[gpui::test]
+fn o_aviso_de_sucesso_fica_no_topo_e_some_sozinho(cx: &mut TestAppContext) {
+    let e = abrir_o_ensaio(cx, Cenario::default());
+    e.revelar_a_do_site(cx, "a");
+    e.revelacao(cx, |tela, _w, cx| tela.arrastar_slider(0, 0.4, cx));
+    e.esperar(cx);
+
+    botao(&e, cx, PedidoDaRevelacao::SalvarNaGaleria);
+    e.esperar(cx);
+    e.app(cx, |app, _w, _cx| {
+        let avisos = app.avisos_para_teste();
+        assert!(
+            avisos.iter().any(|(t, erro)| t.contains("salva") && !erro),
+            "o sucesso aparece como toast verde: {avisos:?}"
+        );
+        assert!(
+            avisos.len() <= 3,
+            "e nunca mais do que cabe na tela: {avisos:?}"
+        );
+    });
+
+    // ⏱️ Passados os quatro segundos do `sonner`, a tela volta limpa — e os
+    // botões que ficam por baixo do aviso voltam a aparecer.
+    cx.executor()
+        .advance_clock(std::time::Duration::from_secs(5));
+    e.esperar(cx);
+    e.app(cx, |app, _w, _cx| {
+        assert!(
+            app.avisos_para_teste().is_empty(),
+            "o aviso some sozinho: {:?}",
+            app.avisos_para_teste()
+        );
+    });
 }

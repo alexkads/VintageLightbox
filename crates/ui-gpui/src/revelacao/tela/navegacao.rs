@@ -871,71 +871,89 @@ impl Revelacao {
                         }),
                     ),
             )
+            // 🚨 **A área do navegador tem altura fixa.** A miniatura acompanha a
+            // proporção da foto (como no site), mas o **bloco** não: sem isto,
+            // trocar uma paisagem por um retrato mudava a altura daqui e a lista
+            // de predefinições subia e descia a cada foto — *"o tamanho dessa
+            // janela fica mudando de forma bizarra"* (dono, 18/set/2026).
+            //
+            // 🔑 `ALTURA_DO_NAVEGADOR` é o teto que a escala já usa: fixando o
+            // bloco nele, a foto mais alta encosta nas bordas e a mais larga
+            // ganha respiro em cima e embaixo — e nada se mexe em volta.
             .child(
-                h_flex().justify_center().child(match miniatura {
-                    Some((imagem, w, h)) => div()
-                        .id("navegador-miniatura")
-                        .relative()
-                        .w(px(w))
-                        .h(px(h))
-                        .overflow_hidden()
-                        .rounded(px(2.))
-                        .bg(fundo)
-                        .when(retangulo.is_some() && !desligado, |d| {
-                            d.cursor_move()
-                                .on_mouse_down(
-                                    MouseButton::Left,
-                                    cx.listener(|tela, e: &MouseDownEvent, _, cx| {
-                                        tela.navegacao.arrastando_miniatura = true;
-                                        tela.centralizar_pela_miniatura(e.position, cx);
-                                    }),
+                h_flex()
+                    .h(px(ALTURA_DO_NAVEGADOR))
+                    .flex_none()
+                    .items_center()
+                    .justify_center()
+                    .child(match miniatura {
+                        Some((imagem, w, h)) => div()
+                            .id("navegador-miniatura")
+                            .relative()
+                            .w(px(w))
+                            .h(px(h))
+                            .overflow_hidden()
+                            .rounded(px(2.))
+                            .bg(fundo)
+                            .when(retangulo.is_some() && !desligado, |d| {
+                                d.cursor_move()
+                                    .on_mouse_down(
+                                        MouseButton::Left,
+                                        cx.listener(|tela, e: &MouseDownEvent, _, cx| {
+                                            tela.navegacao.arrastando_miniatura = true;
+                                            tela.centralizar_pela_miniatura(e.position, cx);
+                                        }),
+                                    )
+                                    .on_mouse_move(cx.listener(
+                                        |tela, e: &MouseMoveEvent, _, cx| {
+                                            if tela.navegacao.arrastando_miniatura && e.dragging() {
+                                                tela.centralizar_pela_miniatura(e.position, cx);
+                                            }
+                                        },
+                                    ))
+                                    .on_mouse_up(
+                                        MouseButton::Left,
+                                        cx.listener(|tela, _: &MouseUpEvent, _, _| {
+                                            tela.navegacao.arrastando_miniatura = false;
+                                        }),
+                                    )
+                            })
+                            .child(img(imagem).size_full().object_fit(ObjectFit::Fill))
+                            .children(retangulo.map(|r| {
+                                // O que está fora da tela escurece, como no site.
+                                div()
+                                    .absolute()
+                                    .left(px(r.x * w))
+                                    .top(px(r.y * h))
+                                    .w(px(r.w * w))
+                                    .h(px(r.h * h))
+                                    .border_1()
+                                    .border_color(gpui::white())
+                            }))
+                            .child(
+                                canvas(
+                                    move |bounds, _, cx| {
+                                        medidor.update(cx, |tela, _| {
+                                            if tela.navegacao.miniatura != bounds {
+                                                tela.navegacao.miniatura = bounds;
+                                            }
+                                        });
+                                    },
+                                    |_, _, _, _| {},
                                 )
-                                .on_mouse_move(cx.listener(|tela, e: &MouseMoveEvent, _, cx| {
-                                    if tela.navegacao.arrastando_miniatura && e.dragging() {
-                                        tela.centralizar_pela_miniatura(e.position, cx);
-                                    }
-                                }))
-                                .on_mouse_up(
-                                    MouseButton::Left,
-                                    cx.listener(|tela, _: &MouseUpEvent, _, _| {
-                                        tela.navegacao.arrastando_miniatura = false;
-                                    }),
-                                )
-                        })
-                        .child(img(imagem).size_full().object_fit(ObjectFit::Fill))
-                        .children(retangulo.map(|r| {
-                            // O que está fora da tela escurece, como no site.
-                            div()
                                 .absolute()
-                                .left(px(r.x * w))
-                                .top(px(r.y * h))
-                                .w(px(r.w * w))
-                                .h(px(r.h * h))
-                                .border_1()
-                                .border_color(gpui::white())
-                        }))
-                        .child(
-                            canvas(
-                                move |bounds, _, cx| {
-                                    medidor.update(cx, |tela, _| {
-                                        if tela.navegacao.miniatura != bounds {
-                                            tela.navegacao.miniatura = bounds;
-                                        }
-                                    });
-                                },
-                                |_, _, _, _| {},
+                                .inset_0(),
                             )
-                            .absolute()
-                            .inset_0(),
-                        )
-                        .into_any_element(),
-                    None => div()
-                        .w(px(LARGURA_DO_NAVEGADOR))
-                        .h(px(120.))
-                        .rounded(px(2.))
-                        .bg(fundo)
-                        .into_any_element(),
-                }),
+                            .into_any_element(),
+                        // Sem foto aberta ainda: o mesmo retângulo, para a coluna
+                        // já nascer com a altura que vai ter.
+                        None => div()
+                            .w(px(LARGURA_DO_NAVEGADOR))
+                            .h(px(ALTURA_DO_NAVEGADOR))
+                            .rounded(px(2.))
+                            .bg(fundo)
+                            .into_any_element(),
+                    }),
             )
             .into_any_element()
     }

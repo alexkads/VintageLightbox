@@ -3294,7 +3294,15 @@ impl Detalhe {
                         gpui::transparent_black()
                     })
                     .when_some(miniatura, |quadro, imagem| {
-                        quadro.child(img(imagem).size_full().object_fit(gpui::ObjectFit::Contain))
+                        // 🚨 **`max_*`, e nunca `size_full` com `Contain`.** O
+                        // `Img` do GPUI grava `style.aspect_ratio` com a
+                        // proporção da foto em todo layout: com largura e
+                        // altura em 100%, o taffy tira a altura da largura, o
+                        // elemento fica maior que o quadro e o `overflow_hidden`
+                        // daqui transforma o `Contain` em corte — a mesma
+                        // armadilha que cortava a tela do cliente
+                        // (`cliente::camada`, 17/set/2026).
+                        quadro.child(img(imagem).max_w_full().max_h_full())
                     })
                     // O selo do estado, no canto — como na tela do site, e
                     // agora com a cor do que ele diz (`crate::selos`).

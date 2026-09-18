@@ -27,7 +27,9 @@ use std::sync::Arc;
 use adapters::view_models::PhotoViewModel;
 use domain::entities::Preset;
 use domain::value_objects::CropSettings;
-use gpui::{actions, div, prelude::*, px, Context, Entity, FocusHandle, Window};
+use gpui::{
+    actions, div, prelude::*, px, Context, Entity, FocusHandle, SharedString, Task, Window,
+};
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::{ActiveTheme, Sizable};
 use infrastructure::cache::preview_manager::PreviewManager;
@@ -159,6 +161,12 @@ actions!(
 /// Nomeado porque o `Esc` **não pode** ser global: o campo de busca da
 /// Biblioteca usa `Esc` para se limpar, e uma ligação sem contexto roubaria a
 /// tecla dele.
+/// Quanto tempo um toast fica na tela — os 4s do `sonner` do site.
+const DURACAO_DO_TOAST: std::time::Duration = std::time::Duration::from_secs(4);
+
+/// Quantos toasts cabem empilhados antes de os antigos caírem.
+const MAXIMO_DE_TOASTS: usize = 3;
+
 const CONTEXTO: &str = "Aplicativo";
 
 /// O contexto da raiz **com nenhum campo de texto no caminho do foco**.
@@ -435,6 +443,34 @@ pub struct Aplicativo {
     /// O serviço da receita padrão — a raiz o consulta para saber quando parar
     /// de colher.
     receita_padrao: Arc<crate::sessoes::receita_padrao::ReceitaPadrao>,
+    /// Os avisos que ainda não viraram toast — `(texto, é erro)`.
+    ///
+    /// 🚨 **Aviso de ação é toast, como no site** (`sonner`): "revelação salva
+    /// na galeria" ia para a **faixa vermelha** da sessão, que é onde mora erro
+    /// — o operador via um sucesso pintado de falha (achado do dono,
+    /// 18/set/2026). A faixa fica para o que **persiste** (a tela sem conta, o
+    /// site fora do ar); o que aconteceu agora passa e some.
+    ///
+    /// 🚨 **No alto e no meio, e não no canto** (dono, 18/set/2026: *"tem
+    /// momentos que ele falta"*). A lista de notificações do `gpui-component`
+    /// mora fixa no canto superior **direito** (`NotificationList::render`), que
+    /// é exatamente onde ficam "Tela do cliente", "Baixar JPEG" e "Salvar na
+    /// galeria e sair": cada aviso apagava os três botões por alguns segundos, e
+    /// o que se via era o botão sumir sozinho. O `sonner` do site é
+    /// `position="top-center"` (`app/layout.tsx`) — sobre o nome do arquivo, que
+    /// não é clicável. Esta lista é a de cá, desenhada no mesmo lugar.
+    ///
+    /// Cada um é `(id, texto, é erro)`; o id é o que o relógio usa para tirá-lo.
+    toasts: Vec<(usize, SharedString, bool)>,
+    /// O próximo id de toast. Nunca reaproveitado: dois avisos iguais em
+    /// sequência são dois avisos.
+    proximo_toast: usize,
+    /// Os relógios que tiram os toasts vencidos — **um por toast**.
+    ///
+    /// 🚨 **Um campo só, sobrescrito, cancelaria o anterior**: `Task` aborta ao
+    /// ser largado, e o segundo aviso deixava o primeiro na tela para sempre.
+    /// A lista é limpa quando o último toast sai, e aí todos já terminaram.
+    _relogios_dos_toasts: Vec<Task<()>>,
     /// As predefinições que este app conhece — sistema e as do banco local.
     /// É delas que sai a receita padrão da sessão aberta.
     presets_conhecidos: Vec<Preset>,
@@ -862,6 +898,9 @@ impl Aplicativo {
             _reposicao: None,
             _reveladas: None,
             receita_padrao,
+            toasts: Vec::new(),
+            proximo_toast: 0,
+            _relogios_dos_toasts: Vec::new(),
             presets_conhecidos: presets_para_a_receita,
             receita_das_locais: std::collections::HashMap::new(),
             _classificacao: classificacao,
@@ -1452,6 +1491,15 @@ impl Aplicativo {
         }
     }
 
+    /// 🧪 Os avisos que estão em toast, na ordem.
+    #[cfg(test)]
+    pub(crate) fn avisos_para_teste(&self) -> Vec<(String, bool)> {
+        self.toasts
+            .iter()
+            .map(|(_, texto, erro)| (texto.to_string(), *erro))
+            .collect()
+    }
+
     /// 🧪 Quantas fotos a receita padrão já pegou — o que o e2e afirma.
     #[cfg(test)]
     pub(crate) fn receita_padrao_pedida(&self) -> usize {
@@ -1579,7 +1627,7 @@ impl Aplicativo {
                         self.revelacao
                             .update(cx, |tela, cx| tela.desistir_dos_pixels(cx));
                     }
-                    self.avisar_onde_esta_olhando(erro, cx);
+                    self.avisar_falha(erro, cx);
                 }
             }
         }
@@ -1838,7 +1886,7 @@ impl Aplicativo {
                     // 🔑 **Nada some em silêncio** (G7 do app Tauri): a recusa
                     // fica no canto até alguém olhar, além do aviso na tela.
                     self.recusas.push(erro.clone());
-                    self.avisar_onde_esta_olhando(erro, cx);
+                    self.avisar_falha(erro, cx);
                 }
                 // Os outros recados são de quem os pediu: esta raiz só sincroniza.
                 _ => {}
@@ -2793,7 +2841,8 @@ impl Aplicativo {
             ),
             Err(erro) => format!("Não foi possível gravar o JPEG: {erro}"),
         };
-        self.avisar_onde_esta_olhando(aviso, cx);
+        let falhou = aviso.starts_with("Não foi possível");
+        self.avisar_em_toast(aviso, falhou, cx);
     }
 
     /// Fecha o modal. ⚠️ **Não cancela o lote em curso** — a `Task` de colheita
@@ -3004,12 +3053,94 @@ impl Aplicativo {
     /// depois de salvar na galeria quem está olhando é a **sessão**, e o aviso
     /// caía numa tela que ninguém estava vendo.
     fn avisar_onde_esta_olhando(&mut self, texto: String, cx: &mut Context<Self>) {
-        match self.tela {
-            Tela::Sessao => self.detalhe.update(cx, |tela, cx| tela.recado(texto, cx)),
-            _ => self
-                .biblioteca
-                .update(cx, |tela, cx| tela.avisar(texto, cx)),
+        self.avisar_em_toast(texto, false, cx);
+    }
+
+    /// O mesmo, dito como falha — o toast vermelho do site.
+    fn avisar_falha(&mut self, texto: String, cx: &mut Context<Self>) {
+        self.avisar_em_toast(texto, true, cx);
+    }
+
+    /// Põe o aviso na lista dos toasts e liga o relógio que o tira.
+    ///
+    /// 🔑 **Autohide**, como o `sonner` do site: o aviso conta o que acabou de
+    /// acontecer, e ficar na tela depois disso é ruído que o operador aprende a
+    /// ignorar.
+    fn avisar_em_toast(&mut self, texto: String, erro: bool, cx: &mut Context<Self>) {
+        // Ninguém na tela: os relógios anteriores já terminaram o trabalho
+        // deles, e a lista pode começar limpa.
+        if self.toasts.is_empty() {
+            self._relogios_dos_toasts.clear();
         }
+        self.proximo_toast = self.proximo_toast.wrapping_add(1);
+        let id = self.proximo_toast;
+        self.toasts.push((id, SharedString::from(texto), erro));
+        // ⚠️ **Nunca mais do que cabe na tela.** Uma esteira que falha em série
+        // empilharia um aviso por foto; o site descarta os antigos do mesmo
+        // jeito.
+        while self.toasts.len() > MAXIMO_DE_TOASTS {
+            self.toasts.remove(0);
+        }
+        self.ligar_o_relogio_do_toast(id, cx);
+        cx.notify();
+    }
+
+    /// Tira este toast quando o tempo dele passar.
+    ///
+    /// 🔑 **Um relógio por toast, e não um laço que varre a lista**: assim o
+    /// segundo aviso não herda o tempo que o primeiro já gastou, que é o que faz
+    /// dois avisos seguidos sumirem juntos.
+    fn ligar_o_relogio_do_toast(&mut self, id: usize, cx: &mut Context<Self>) {
+        self._relogios_dos_toasts
+            .push(cx.spawn(async move |raiz, cx| {
+                cx.background_executor().timer(DURACAO_DO_TOAST).await;
+                let _ = raiz.update(cx, |raiz, cx| {
+                    raiz.toasts.retain(|(este, _, _)| *este != id);
+                    cx.notify();
+                });
+            }));
+    }
+
+    /// A camada dos toasts: no alto, no meio, por cima de tudo.
+    ///
+    /// 🎨 **As cores do `richColors` do site**: verde para o que deu certo,
+    /// vermelho para o que falhou — e não o cinza do tema, que faz um erro
+    /// parecer um recado.
+    fn camada_dos_toasts(&self, cx: &Context<Self>) -> Option<gpui::AnyElement> {
+        if self.toasts.is_empty() {
+            return None;
+        }
+        let tema = cx.theme();
+        Some(
+            div()
+                .absolute()
+                .top(px(12.))
+                .left_0()
+                .right_0()
+                .flex()
+                .flex_col()
+                .items_center()
+                .gap(px(6.))
+                .children(self.toasts.iter().map(|(_, texto, erro)| {
+                    let (fundo, borda, letra) = if *erro {
+                        (tema.danger, tema.danger, tema.danger_foreground)
+                    } else {
+                        (tema.success, tema.success, tema.success_foreground)
+                    };
+                    div()
+                        .px(px(14.))
+                        .py(px(8.))
+                        .rounded(px(8.))
+                        .bg(fundo)
+                        .border_1()
+                        .border_color(borda)
+                        .text_sm()
+                        .text_color(letra)
+                        .shadow_lg()
+                        .child(texto.clone())
+                }))
+                .into_any_element(),
+        )
     }
 
     /// A porta foi respondida: o app passa a existir.
@@ -3796,6 +3927,9 @@ impl Render for Aplicativo {
             // 🚨 **As camadas do `gpui-component`.** Sem elas, `open_dialog` e
             // `push_notification` não aparecem em lugar nenhum — a caixa do
             // "Sincronizar N" abria no vazio e o botão parecia morto.
+            // 🚨 **Os toasts vêm antes das camadas do `gpui-component`** e
+            // depois de todo o resto: eles ficam sobre a tela, e sob o diálogo.
+            .children(self.camada_dos_toasts(cx))
             .children(gpui_component::Root::render_dialog_layer(window, cx))
             .children(gpui_component::Root::render_notification_layer(window, cx))
             .into_any_element()

@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use gpui::RenderImage;
+use gpui::{px, size, DevicePixels, Pixels, RenderImage, Size};
 // `Frame` vem do **crate `image`**, e não do `gpui`: lá ele é reexportado de
 // forma privada. É a mesma peça que a `infrastructure` já usa, e é por isso que
 // as duas versões do `image` precisam ser a mesma na árvore (§3.2).
@@ -70,6 +70,59 @@ pub fn para_gpui(imagem: DynamicImage) -> Arc<RenderImage> {
     };
 
     Arc::new(RenderImage::new(SmallVec::from_elem(Frame::new(bytes), 1)))
+}
+
+/// O tamanho com que a foto **cabe inteira** numa moldura — o `object-fit:
+/// contain` da web, feito na mão.
+///
+/// # 🚨 Por que não `ObjectFit::Contain`
+///
+/// O `Img` do GPUI escreve `style.aspect_ratio` com a proporção da imagem em
+/// **todo** `request_layout` (`elements/img.rs`). Com `size_full()` os dois
+/// lados pedem 100%, o taffy tira a altura da largura e o elemento fica maior
+/// que a moldura; o `Contain` então cabe direitinho **nesse** retângulo, que
+/// já está fora da tela. Foi o que cortou a tela do cliente (dono,
+/// 17/set/2026): uma foto em pé de 747×1370 numa janela de 1920×1080 recebia
+/// 1920×3522 e aparecia ampliada 2,6×.
+///
+/// Onde a moldura tem tamanho conhecido, `max_w_*`/`max_h_*` já resolvem — o
+/// máximo limita os dois lados e a proporção do `Img` faz o resto. Esta conta
+/// é para quem precisa do número: uma animação de escala, uma moldura própria.
+pub fn cabe_em(moldura: Size<Pixels>, imagem: Size<DevicePixels>) -> Size<Pixels> {
+    escalar(moldura, imagem, |largura, altura| largura.min(altura))
+}
+
+/// O tamanho com que a foto **cobre** uma moldura — o `object-fit: cover`.
+///
+/// Sobra foto para fora dos dois lados, e quem corta é o `overflow_hidden` da
+/// moldura. Mesma razão de [`cabe_em`] para existir.
+pub fn cobre(moldura: Size<Pixels>, imagem: Size<DevicePixels>) -> Size<Pixels> {
+    escalar(moldura, imagem, |largura, altura| largura.max(altura))
+}
+
+/// O que as duas têm em comum: a escala que cada lado pediria, e a escolha
+/// entre elas.
+///
+/// ⚠️ **Moldura ainda sem medida** (o primeiro quadro de uma janela) devolve a
+/// foto no tamanho dela: some é pior que grande demais, e o quadro seguinte já
+/// traz a medida.
+fn escalar(
+    moldura: Size<Pixels>,
+    imagem: Size<DevicePixels>,
+    escolher: fn(f32, f32) -> f32,
+) -> Size<Pixels> {
+    let largura = u32::from(imagem.width).max(1) as f32;
+    let altura = u32::from(imagem.height).max(1) as f32;
+    let escala = escolher(
+        f32::from(moldura.width) / largura,
+        f32::from(moldura.height) / altura,
+    );
+    let escala = if escala.is_finite() && escala > 0.0 {
+        escala
+    } else {
+        1.0
+    };
+    size(px(largura * escala), px(altura * escala))
 }
 
 /// RGB de três bytes vira BGRA de quatro, numa passada só.
@@ -176,6 +229,60 @@ mod tests {
 
         assert_eq!(u32::from(tamanho.width), 320);
         assert_eq!(u32::from(tamanho.height), 240);
+    }
+
+    /// 🔑 A foto em pé cabe pela **altura**, e sobra tarja dos lados — que é o
+    /// que a tela do cliente mostra desde que a conta passou a ser esta.
+    #[test]
+    fn a_foto_em_pe_cabe_pela_altura() {
+        let cabe = cabe_em(size(px(1920.), px(1080.)), moldura_de(747, 1370));
+
+        assert_eq!(f32::from(cabe.height).round(), 1080.0);
+        assert_eq!(f32::from(cabe.width).round(), 589.0);
+    }
+
+    /// A deitada de 3:2 numa janela 16:9 cabe pela **altura** também — e é o
+    /// que deixa tarja dos lados em vez de cortar as bonecas do rodapé da foto,
+    /// que era o desfecho antigo.
+    #[test]
+    fn a_foto_deitada_de_3_por_2_cabe_pela_altura_numa_janela_16_por_9() {
+        let cabe = cabe_em(size(px(1920.), px(1080.)), moldura_de(2048, 1365));
+
+        assert_eq!(f32::from(cabe.height).round(), 1080.0);
+        assert_eq!(f32::from(cabe.width).round(), 1620.0);
+    }
+
+    /// Mais larga que a moldura: aí sim cabe pela largura.
+    #[test]
+    fn a_foto_panoramica_cabe_pela_largura() {
+        let cabe = cabe_em(size(px(1000.), px(1000.)), moldura_de(2000, 500));
+
+        assert_eq!(f32::from(cabe.width).round(), 1000.0);
+        assert_eq!(f32::from(cabe.height).round(), 250.0);
+    }
+
+    /// `cobre` é o contrário: o lado que sobra passa da moldura, e quem corta é
+    /// o `overflow_hidden`.
+    #[test]
+    fn cobrir_estoura_o_lado_que_sobra() {
+        let cobre = cobre(size(px(72.), px(72.)), moldura_de(3000, 2000));
+
+        assert_eq!(f32::from(cobre.height).round(), 72.0);
+        assert_eq!(f32::from(cobre.width).round(), 108.0);
+    }
+
+    /// ⚠️ Moldura de tamanho zero (primeiro quadro) não some com a foto.
+    #[test]
+    fn sem_moldura_medida_a_foto_fica_no_tamanho_dela() {
+        let cabe = cabe_em(size(px(0.), px(0.)), moldura_de(100, 50));
+
+        assert_eq!(f32::from(cabe.width), 100.0);
+        assert_eq!(f32::from(cabe.height), 50.0);
+    }
+
+    /// O tamanho de uma imagem, como o `RenderImage` o devolve.
+    fn moldura_de(largura: u32, altura: u32) -> Size<DevicePixels> {
+        para_gpui(DynamicImage::ImageRgba8(RgbaImage::new(largura, altura))).size(0)
     }
 
     #[test]

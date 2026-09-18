@@ -923,6 +923,10 @@ impl Importacao {
                                     .w(px(Self::LADO_DA_MINIATURA))
                                     .h(px(Self::LADO_DA_MINIATURA))
                                     .flex_shrink_0()
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .overflow_hidden()
                                     .bg(cor_foco)
                                     .when_some(
                                         match miniatura {
@@ -932,7 +936,14 @@ impl Importacao {
                                             // é o que diz isso sem alarmar.
                                             Miniatura::Ausente => None,
                                         },
-                                        |celula, imagem| celula.child(img(imagem).size_full()),
+                                        // 🚨 `max_*`, e não `size_full`: o `Img`
+                                        // do GPUI impõe a proporção da foto no
+                                        // layout, e com os dois lados em 100% a
+                                        // miniatura saía da célula (a mesma
+                                        // armadilha da tela do cliente).
+                                        |celula, imagem| {
+                                            celula.child(img(imagem).max_w_full().max_h_full())
+                                        },
                                     ),
                             )
                             .child(
@@ -1004,7 +1015,10 @@ impl Importacao {
                     Miniatura::Pronta(imagem) => div()
                         .w(px(420.))
                         .h(px(420.))
-                        .child(img(imagem).size_full())
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(img(imagem).max_w_full().max_h_full())
                         .into_any_element(),
                     Miniatura::Ausente => div()
                         .text_xs()

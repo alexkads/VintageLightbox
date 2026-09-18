@@ -154,6 +154,17 @@ const CRUZAMENTO_DA_FOTO: Duration = Duration::from_millis(140);
 /// não acorda nenhuma vez.
 const INTERVALO_DE_COLHEITA: Duration = Duration::from_millis(8);
 
+/// O que a barra mostra no botão "Salvar na galeria e sair".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BotaoDeSalvar {
+    /// O texto do botão — ou o andamento do lote, enquanto ele sobe.
+    pub rotulo: String,
+    /// A dica, que diz **por que** ele está apagado quando está.
+    pub dica: String,
+    /// Aceso?
+    pub habilitado: bool,
+}
+
 pub struct Revelacao {
     previews: Arc<PreviewManager>,
     gravador: Arc<dyn Gravador>,
@@ -757,6 +768,49 @@ impl Revelacao {
     /// Há o que salvar na galeria? Sem isso o botão se apaga.
     pub fn ha_o_que_salvar(&self) -> bool {
         self.aberta_a_salvar() || self.nao_salvas > 0
+    }
+
+    /// O botão "Salvar na galeria e sair", como a barra o desenha — e como o
+    /// e2e o afirma.
+    ///
+    /// 🔑 **Uma função só para o que a barra mostra.** O rótulo, a dica e o
+    /// aceso/apagado são exatamente os três do editor da web
+    /// (`editor.tsx`, o último `<Button>` do cabeçalho): `disabled={!pronto ||
+    /// ocupado || !haOQueSalvar}`, a dica dizendo **por que** ele está apagado,
+    /// e o rótulo contando o lote enquanto ele sobe. Com os três aqui, o teste
+    /// afirma sobre o mesmo que o operador lê.
+    pub fn botao_de_salvar(&self) -> BotaoDeSalvar {
+        let ha = self.ha_o_que_salvar();
+        let outras = self.nao_salvas;
+        let ocupado = self.gerando_jpeg || self.salvando.is_some();
+        let dica = if !ha {
+            "Nada a salvar: o que está no canvas já está na galeria".to_string()
+        } else if outras > 0 {
+            if self.pode_revelar() {
+                format!("Salva esta e mais {outras} com edição pendente, e fecha o editor")
+            } else {
+                format!(
+                    "Esta foi comprada e não se revela; salva as {outras} pendentes e fecha o editor"
+                )
+            }
+        } else {
+            "Salva esta foto na galeria e fecha o editor".to_string()
+        };
+        // ⚠️ **"Gravando…" é o lote de uma foto só**, e não o fim do lote
+        // grande: com uma, não há o que contar, e "Salvando 1/1…" é ruído.
+        let rotulo = match self.salvando {
+            None => "Salvar na galeria e sair".to_string(),
+            Some((_, 1)) => "Gravando…".to_string(),
+            Some((feitas, total)) => format!("Salvando {}/{total}…", (feitas + 1).min(total)),
+        };
+        BotaoDeSalvar {
+            rotulo,
+            dica,
+            // Os três do site, na mesma ordem. `ocupado` inclui o "Baixar JPEG"
+            // em curso: os dois pedem o bruto em resolução cheia, e clicar num
+            // enquanto o outro trabalha era pedir a mesma foto duas vezes.
+            habilitado: self.tem_pixels() && !ocupado && ha,
+        }
     }
 
     pub fn definir_gerando_jpeg(&mut self, gerando: bool, cx: &mut Context<Self>) {
@@ -2295,6 +2349,9 @@ impl Revelacao {
             .unwrap_or_default();
         let pronto = self.tem_pixels();
         let pode_revelar = self.pode_revelar();
+        // O `ocupado` do editor da web: enquanto um JPEG está sendo gerado ou o
+        // lote do "Salvar" está subindo, os dois botões do fim ficam quietos.
+        let ocupado = self.gerando_jpeg || self.salvando.is_some();
 
         div()
             .flex()
@@ -2509,32 +2566,19 @@ impl Revelacao {
                     })
                     .small()
                     .outline()
-                    .disabled(!pronto || self.gerando_jpeg)
+                    // O `ocupado` do site: um JPEG por vez, e nenhum enquanto o
+                    // lote do "Salvar" está subindo.
+                    .disabled(!pronto || ocupado)
                     .on_click(cx.listener(|_tela, _ev, _window, cx| {
                         cx.emit(PedidoDaRevelacao::Exportar);
                     })),
             )
             .child({
-                let ha = self.ha_o_que_salvar();
-                let outras = self.nao_salvas;
-                let dica = if !ha {
-                    "Nada a salvar: o que está no canvas já está na galeria".to_string()
-                } else if outras > 0 {
-                    if pode_revelar {
-                        format!("Salva esta e mais {outras} com edição pendente, e fecha o editor")
-                    } else {
-                        format!(
-                            "Esta foi comprada e não se revela; salva as {outras} pendentes e fecha o editor"
-                        )
-                    }
-                } else {
-                    "Salva esta foto na galeria e fecha o editor".to_string()
-                };
-                let rotulo = match self.salvando {
-                    None => "Salvar na galeria e sair".to_string(),
-                    Some((_, 1)) => "Gravando…".to_string(),
-                    Some((feitas, total)) => format!("Salvando {}/{total}…", (feitas + 1).min(total)),
-                };
+                let BotaoDeSalvar {
+                    rotulo,
+                    dica,
+                    habilitado,
+                } = self.botao_de_salvar();
                 Button::new("revelacao-salvar-na-galeria")
                     .when(self.salvando.is_none(), |b| b.icon(Icon::new(Icone::Save)))
                     .loading(self.salvando.is_some())
@@ -2542,7 +2586,7 @@ impl Revelacao {
                     .tooltip(dica)
                     .small()
                     .primary()
-                    .disabled(!pronto || !ha || self.salvando.is_some())
+                    .disabled(!habilitado)
                     .on_click(cx.listener(|_tela, _ev, _window, cx| {
                         cx.emit(PedidoDaRevelacao::SalvarNaGaleria);
                     }))

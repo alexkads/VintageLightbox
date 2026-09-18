@@ -25,8 +25,8 @@ use std::time::Duration;
 use adapters::view_models::PhotoViewModel;
 use domain::value_objects::CropSettings;
 use gpui::{
-    actions, div, ease_in_out, img, point, prelude::*, px, relative, size, Animation, AnimationExt,
-    Bounds, Context, FocusHandle, Pixels, RenderImage, SharedString, Task, Window,
+    actions, div, ease_in_out, img, point, prelude::*, px, size, Animation, AnimationExt, Bounds,
+    Context, FocusHandle, Pixels, RenderImage, SharedString, Size, Task, Window,
 };
 use infrastructure::transformacao;
 
@@ -402,10 +402,19 @@ impl Cliente {
     /// inteira, sem corte e sem esticar. Numa apresentação, cobrir a tela
     /// cortaria justamente o enquadramento que se está mostrando.
     ///
-    /// 🚨 **`Contain` só garante isso se a moldura couber na tela.** A camada é
-    /// dimensionada pela animação abaixo, e enquanto ela começava em 1,03 a foto
-    /// cabia numa moldura maior que a janela — o `Contain` fazia o trabalho dele
-    /// e o resultado saía pelas bordas assim mesmo.
+    /// 🚨 **`ObjectFit::Contain` sozinho não contém nada aqui** (dono,
+    /// 17/set/2026: *"a tela do cliente tá cortando a foto"*). O `Img` do GPUI
+    /// escreve `style.aspect_ratio` com a proporção da imagem em **todo**
+    /// `request_layout` (`elements/img.rs`); com `size_full()`, o taffy tira a
+    /// altura da largura e o elemento fica **maior que a janela** — uma foto em
+    /// pé de 747×1370 numa janela de 1920×1080 recebia 1920×3522, e o `Contain`
+    /// preenchia esse retângulo direitinho, para fora da tela. O que se via era
+    /// a foto ampliada 2,6× e cortada, que é o oposto do que `Contain`
+    /// promete.
+    ///
+    /// A conta agora é [`crate::imagem::cabe_em`]: a mesma da tela do cliente da
+    /// web (`tela-do-cliente-web`, `escala = min(jw/sw, jh/sh) * zoom`). O
+    /// elemento nasce **do tamanho da foto**, e nada precisa ser contido.
     ///
     /// ⚠️ **A que sai continua desenhada com opacidade zero** depois do
     /// cruzamento, e é de propósito: tirá-la no mesmo quadro em que a de cima
@@ -416,38 +425,49 @@ impl Cliente {
         troca: usize,
         imagem: Arc<RenderImage>,
         saindo: bool,
+        janela: Size<Pixels>,
     ) -> impl IntoElement {
+        let base = crate::imagem::cabe_em(janela, imagem.size(0));
         div()
             .absolute()
             .size_full()
-            // A foto ocupa a tela inteira, sem distorcer.
-            .child(img(imagem).size_full().object_fit(gpui::ObjectFit::Contain))
-            .with_animation(
-                (id, troca),
-                Animation::new(CRUZAMENTO).with_easing(ease_in_out),
-                move |camada, delta| {
-                    // ✨ O passo à frente do site: a que entra cresce até o
-                    // tamanho da moldura; a que sai fica onde está e some.
-                    let escala = if saindo {
-                        1.0
-                    } else {
-                        escala_de_entrada(delta)
-                    };
-                    let sobra = (1.0 - escala) / 2.0;
-                    camada
-                        .top(relative(sobra))
-                        .left(relative(sobra))
-                        .w(relative(escala))
-                        .h(relative(escala))
-                        .opacity(if saindo { 1.0 - delta } else { delta })
-                },
+            // A foto fica no meio da tela; quem a dimensiona é `contain`.
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+                div()
+                    .w(base.width)
+                    .h(base.height)
+                    // `size_full` **dentro de uma moldura da proporção da
+                    // foto**: aqui a altura que o `aspect_ratio` do `Img`
+                    // calcula é a que a moldura já tem, e não sobra nada para
+                    // fora.
+                    .child(img(imagem).size_full())
+                    .with_animation(
+                        (id, troca),
+                        Animation::new(CRUZAMENTO).with_easing(ease_in_out),
+                        move |foto, delta| {
+                            // ✨ O passo à frente do site: a que entra cresce até o
+                            // tamanho da moldura; a que sai fica onde está e some.
+                            let escala = if saindo {
+                                1.0
+                            } else {
+                                escala_de_entrada(delta)
+                            };
+                            foto.w(base.width * escala)
+                                .h(base.height * escala)
+                                .opacity(if saindo { 1.0 - delta } else { delta })
+                        },
+                    ),
             )
     }
 }
 
 impl Render for Cliente {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let info = self.mostrar_info.then(|| self.info()).flatten();
+        let janela = window.viewport_size();
 
         div()
             .key_context(CONTEXTO)
@@ -474,12 +494,12 @@ impl Render for Cliente {
             .children(
                 self.saindo
                     .clone()
-                    .map(|saindo| Self::camada("cliente-saindo", self.troca, saindo, true)),
+                    .map(|saindo| Self::camada("cliente-saindo", self.troca, saindo, true, janela)),
             )
             .children(
-                self.imagem
-                    .clone()
-                    .map(|imagem| Self::camada("cliente-entrando", self.troca, imagem, false)),
+                self.imagem.clone().map(|imagem| {
+                    Self::camada("cliente-entrando", self.troca, imagem, false, janela)
+                }),
             )
             .children(info.map(|info| {
                 div()
