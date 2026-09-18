@@ -353,6 +353,27 @@ try {
     Aviso "a compilacao falhou. Tentando de novo, uma compilacao de cada vez."
     Get-ChildItem (Join-Path $env:CARGO_TARGET_DIR "$Alvo\instalador\build") -Directory -Filter "rsraw-sys-*" -ErrorAction SilentlyContinue |
         Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+    # 🚨 **E os crates DESTE repositorio saem do cache** (balcao do dono,
+    #    18/set/2026): o codigo chegou novo e o cargo compilou a interface contra
+    #    um `biblioteca-core` **velho**, guardado no alvo — "no field
+    #    `sem_estudio` on type `SessaoFotografica`", com o campo no arquivo ao
+    #    lado. O ZIP recria datas, este instalador preserva a arvore quando o
+    #    conteudo nao muda, e nesse vaivem o carimbo que o cargo usa para decidir
+    #    "isto nao mudou" desencontra do que esta em disco.
+    #
+    # 🔑 **So os locais**: apagar o carimbo deles recompila os crates da pasta
+    #    `crates/` e preserva o caro (wgpu, gpui, LibRaw) — segundos, e nao os
+    #    quarenta minutos de uma compilacao do zero.
+    $carimbos = Join-Path $env:CARGO_TARGET_DIR "$Alvo\instalador\.fingerprint"
+    if (Test-Path $carimbos) {
+        foreach ($local in (Get-ChildItem (Join-Path $Fonte "crates") -Directory -ErrorAction SilentlyContinue)) {
+            foreach ($padrao in @("$($local.Name)-*", "$($local.Name -replace '-','_')-*")) {
+                Get-ChildItem $carimbos -Directory -Filter $padrao -ErrorAction SilentlyContinue |
+                    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        }
+        Ok "cache dos crates locais limpo"
+    }
     $env:CARGO_BUILD_JOBS = "1"
     try {
         Correr $compilar
