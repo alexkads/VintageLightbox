@@ -93,6 +93,28 @@ pub enum Recado {
     RevelacaoSalva {
         foto_no_site: String,
     },
+    /// **Uma foto classificada subiu** — o passo 3, com o nome de quem subiu.
+    ///
+    /// 🔑 **Por que não basta o [`Recado::Sincronizou`]**: ele é o recado de
+    /// "algo mudou no catálogo", e sai também de gestos que nunca passaram pela
+    /// esteira (negociar, tirar do site). A esteira precisa saber **qual**
+    /// trabalho dela terminou — senão não sabe qual vaga abrir nem o que
+    /// repetir (dono, 18/set/2026: *"essa rotina precisa ser um tanque de
+    /// guerra!"*).
+    ClassificadaSubiu {
+        foto_id: String,
+    },
+    /// **Um envio de foto falhou, e com o nome de quem falhou.**
+    ///
+    /// 🚨 **A frase sozinha não dá para repetir.** Até 18/set/2026 toda recusa
+    /// virava [`Recado::Falhou`], que leva só o texto: o lote seguia sem a foto,
+    /// e o operador só descobria no canto dos envios — se olhasse. Com o alvo, a
+    /// esteira tenta de novo e, se desistir, diz **qual arquivo** ficou para
+    /// trás.
+    EnvioFalhou {
+        alvo: String,
+        frase: String,
+    },
     /// O passo 3 terminou para uma foto: ela subiu, ou saiu do storage.
     ///
     /// 🔑 **Notifica, não descreve.** Quem escuta só precisa saber que o
@@ -529,7 +551,10 @@ impl Publicador for PublicadorDaApi {
                 Ok(()) => Recado::RevelacaoSalva {
                     foto_no_site: foto_no_site.clone(),
                 },
-                Err(erro) => Recado::Falhou(erro),
+                Err(frase) => Recado::EnvioFalhou {
+                    alvo: foto_no_site.clone(),
+                    frase,
+                },
             };
             let _ = canal.send(recado);
         });
@@ -665,8 +690,13 @@ impl Publicador for PublicadorDaApi {
                 )
                 .await
             {
-                Ok(_) => Recado::Sincronizou,
-                Err(erro) => Recado::Falhou(erro),
+                Ok(_) => Recado::ClassificadaSubiu {
+                    foto_id: foto_id.clone(),
+                },
+                Err(frase) => Recado::EnvioFalhou {
+                    alvo: foto_id.clone(),
+                    frase,
+                },
             };
             let _ = canal.send(recado);
         });
@@ -877,6 +907,10 @@ pub mod mentira {
         pub integrais: Mutex<Vec<(String, Ajustes, CropSettings)>>,
         /// Liga a recusa do site ao "Salvar na galeria", com esta frase.
         pub salvar_falha: Option<String>,
+        /// **Quantas vezes cada foto ainda vai falhar** antes de passar — a
+        /// rede ruim do balcão, reproduzida. O envio decrementa a conta: `2`
+        /// falha duas vezes e sobe na terceira; `u8::MAX` nunca sobe.
+        pub falhas_por_foto: Mutex<std::collections::HashMap<String, u8>>,
         /// Segura também a cópia de trabalho (o passo 11) até `responder()` —
         /// para provar que um download no ar não conta como envio.
         pub copia_demorada: bool,
@@ -939,6 +973,23 @@ pub mod mentira {
 
         pub fn baixadas(&self) -> Vec<String> {
             self.baixadas.lock().expect("as baixadas").clone()
+        }
+
+        /// Esta foto falha **desta vez**? Gasta uma das falhas programadas em
+        /// `falhas_por_foto` e devolve a frase que o site devolveria.
+        fn vai_falhar(&self, alvo: &str) -> Option<String> {
+            let mut falhas = self.falhas_por_foto.lock().expect("as falhas");
+            let restam = falhas.get_mut(alvo)?;
+            if *restam == 0 {
+                return None;
+            }
+            // `u8::MAX` é "falha sempre": não decrementa, e a esteira desiste.
+            if *restam != u8::MAX {
+                *restam -= 1;
+            }
+            Some(format!(
+                "erro de infraestrutura: o site não respondeu ({alvo})"
+            ))
         }
 
         pub fn miniaturas_pedidas(&self) -> Vec<String> {
@@ -1139,8 +1190,15 @@ pub mod mentira {
                 ajustes,
                 corte,
             ));
-            let recado = match &self.salvar_falha {
-                Some(frase) => Recado::Falhou(frase.clone()),
+            let recado = match self
+                .salvar_falha
+                .clone()
+                .or_else(|| self.vai_falhar(&foto_no_site))
+            {
+                Some(frase) => Recado::EnvioFalhou {
+                    alvo: foto_no_site,
+                    frase,
+                },
                 None => Recado::RevelacaoSalva { foto_no_site },
             };
             self.responder_ou_guardar(canal, recado);
@@ -1211,6 +1269,7 @@ pub mod mentira {
             foto: FotoClassificada,
             canal: Sender<Recado>,
         ) {
+            let foto_id = foto.foto_id.clone();
             self.subidas
                 .lock()
                 .expect("as subidas")
@@ -1224,7 +1283,14 @@ pub mod mentira {
                 .lock()
                 .expect("as faixas")
                 .push(foto.produto_id);
-            let _ = canal.send(Recado::Sincronizou);
+            let recado = match self.vai_falhar(&foto_id) {
+                Some(frase) => Recado::EnvioFalhou {
+                    alvo: foto_id,
+                    frase,
+                },
+                None => Recado::ClassificadaSubiu { foto_id },
+            };
+            self.responder_ou_guardar(canal, recado);
         }
 
         fn tirar_do_site(&self, _sessao: Sessao, foto_id: String, canal: Sender<Recado>) {

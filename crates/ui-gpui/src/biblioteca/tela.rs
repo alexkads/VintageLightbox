@@ -821,6 +821,18 @@ impl Biblioteca {
         self.fotos.as_ref().clone()
     }
 
+    /// O nome do arquivo de uma foto **pelo id dela no site** — o que o aviso
+    /// de recusa mostra ao operador.
+    ///
+    /// 🔑 **Sem copiar a lista**: com dez mil fotos, clonar o acervo para achar
+    /// um nome seria pagar a grade inteira por uma frase.
+    pub fn nome_no_site(&self, foto_no_site: &str) -> Option<String> {
+        self.fotos
+            .iter()
+            .find(|f| f.pos_venda_foto_id.as_deref() == Some(foto_no_site))
+            .map(|f| f.name.clone())
+    }
+
     /// Quantas fotos do acervo passam no critério, sem copiar a lista — a
     /// bandeja pergunta a cada volta (`crate::segundo_plano`).
     pub fn contar_fotos(&self, criterio: impl Fn(&PhotoViewModel) -> bool) -> usize {

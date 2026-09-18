@@ -812,6 +812,20 @@ fn revelacao_com_lote(
     n: usize,
     publicador: Arc<PublicadorDeMentira>,
 ) -> (gpui::WindowHandle<Aplicativo>, TempDir) {
+    revelacao_com_lote_e_acervo(cx, n, publicador, Arc::new(AcervoDeMentira::default()))
+}
+
+/// O mesmo, com o catálogo por parâmetro.
+///
+/// 🔑 **O catálogo importa quando a frase precisa do nome do arquivo**: a raiz
+/// relê o acervo ao longo do lote, e um catálogo vazio deixa a Biblioteca sem
+/// nenhuma foto — é de lá que sai o nome que a recusa mostra ao operador.
+fn revelacao_com_lote_e_acervo(
+    cx: &mut TestAppContext,
+    n: usize,
+    publicador: Arc<PublicadorDeMentira>,
+    acervo: Arc<AcervoDeMentira>,
+) -> (gpui::WindowHandle<Aplicativo>, TempDir) {
     use crate::revelacao::sincronizacao::Escolha;
 
     let (previews, dir) = previews_descartaveis();
@@ -826,7 +840,7 @@ fn revelacao_com_lote(
             fotos,
             previews,
             Vec::new(),
-            portas(publicador, Arc::new(GravadorDeMentira::default())),
+            portas_com(publicador, Arc::new(GravadorDeMentira::default()), acervo),
             window,
             cx,
         )
@@ -931,6 +945,7 @@ fn estresse_salvar_trezentas_na_galeria_com_desordem_e_falhas(cx: &mut TestAppCo
     cx.run_until_parked();
 
     let mut g = Lcg::novo(41);
+    let mut ja_falharam: std::collections::HashSet<String> = std::collections::HashSet::new();
     let inicio = Instant::now();
     let mut voltas = 0u32;
     let mut respondidas = 0;
@@ -950,9 +965,24 @@ fn estresse_salvar_trezentas_na_galeria_com_desordem_e_falhas(cx: &mut TestAppCo
         );
         g.embaralhar(&mut recados);
         for (_, recado) in recados.iter_mut() {
+            // 🚨 **Uma em cada dez leva um 502 na primeira tentativa** — e só
+            // na primeira: é a rede do balcão oscilando, não o site recusando.
+            // A esteira tem de trazer essa foto de volta sozinha (dono,
+            // 18/set/2026: *"essa rotina precisa ser um tanque de guerra!"*).
             if i % 10 == 3 {
-                *recado = Recado::Falhou(format!("502 na foto {i}"));
-                falhas += 1;
+                if let Recado::RevelacaoSalva { foto_no_site } = recado {
+                    let alvo = foto_no_site.clone();
+                    if ja_falharam.insert(alvo.clone()) {
+                        *recado = Recado::EnvioFalhou {
+                            alvo,
+                            frase: format!("502 na foto {i}"),
+                        };
+                        falhas += 1;
+                        // A tentativa que falhou não fecha a foto: ela volta
+                        // para a fila, e a resposta boa vem numa volta adiante.
+                        respondidas -= 1;
+                    }
+                }
             }
             i += 1;
         }
@@ -975,7 +1005,10 @@ fn estresse_salvar_trezentas_na_galeria_com_desordem_e_falhas(cx: &mut TestAppCo
         }
         janela
             .update(cx, |app, _window, cx| {
-                conferir_os_contadores(app, cx, N - respondidas, N, respondidas);
+                // ⚠️ **Com repetição, a conta do lote não é a das respostas**:
+                // a tentativa que falhou respondeu e voltou para a fila, e a
+                // foto ainda deve uma resposta. O que continua valendo é o
+                // sentido: ainda há envio pendente até a última subir.
                 assert!(
                     !vigia.deve_sair(app.retrato_do_segundo_plano(cx).ha_envio_pendente())
                         || respondidas == N
@@ -1006,7 +1039,21 @@ fn estresse_salvar_trezentas_na_galeria_com_desordem_e_falhas(cx: &mut TestAppCo
         .update(cx, |app, _window, cx| {
             conferir_os_contadores(app, cx, 0, N, N);
             let retrato = app.retrato_do_segundo_plano(cx);
-            assert_eq!(retrato.recusadas, falhas, "cada falha fica no canto");
+            // 🚨 **Nenhuma recusa**: as trinta que levaram 502 voltaram
+            // sozinhas e subiram na segunda tentativa. Antes de a esteira
+            // repetir, cada uma dessas era uma foto perdida com um aviso no
+            // canto.
+            assert_eq!(
+                retrato.recusadas, 0,
+                "a repetição tinha de ter salvado as {falhas} que falharam uma vez"
+            );
+            assert!(falhas > 20, "o cenário precisa ter falhado: {falhas}");
+            assert_eq!(
+                publicador.reveladas().len(),
+                N + falhas,
+                "cada falha custa uma tentativa a mais, e nenhuma foto sobe \
+                 duas vezes de graça"
+            );
             assert!(
                 vigia.deve_sair(retrato.ha_envio_pendente()),
                 "G9: a fila esvaziou, o app sai"
@@ -1023,6 +1070,162 @@ fn estresse_salvar_trezentas_na_galeria_com_desordem_e_falhas(cx: &mut TestAppCo
         publicador.abertas().len(),
         N - falhas
     );
+}
+
+/// 🚨 **O tanque de guerra: 400 fotos, rede oscilando e um site que às vezes
+/// nunca aceita.**
+///
+/// Dono, 18/set/2026: *"essa rotina precisa ser um tanque de guerra!"*. O
+/// cenário junta os três desfechos que o balcão vê num sábado:
+///
+/// - **a maioria sobe de primeira**;
+/// - **uma em oito leva um erro de momento** (o 502, o Wi-Fi que oscilou) e tem
+///   de subir sozinha na tentativa seguinte, sem ninguém apertar nada;
+/// - **uma em cinquenta é recusa de verdade** (a foto foi apagada no site) e
+///   nunca vai passar: depois de [`TENTATIVAS`] a esteira desiste — e o
+///   operador tem de **saber qual arquivo** ficou para trás.
+///
+/// O que ele prende, além dos números: nenhuma foto sobe duas vezes de graça,
+/// o teto de [`EM_VOO`] vale o tempo todo (é ele que segura a memória), e os
+/// contadores voltam a zero mesmo com recuo e repetição no meio.
+#[gpui::test]
+fn estresse_o_lote_sobrevive_a_rede_ruim(cx: &mut TestAppContext) {
+    const N: usize = 400;
+    let publicador = Arc::new(PublicadorDeMentira {
+        demorada: true,
+        ..Default::default()
+    });
+    // A rede do balcão, programada: quantas vezes cada foto ainda vai falhar.
+    let mut intermitentes: Vec<String> = Vec::new();
+    let mut perdidas: Vec<String> = Vec::new();
+    {
+        let mut falhas = publicador.falhas_por_foto.lock().expect("as falhas");
+        for i in 0..N {
+            let alvo = format!("remota-{i:05}");
+            if i.is_multiple_of(50) {
+                falhas.insert(alvo.clone(), u8::MAX);
+                perdidas.push(alvo);
+            } else if i.is_multiple_of(8) {
+                falhas.insert(alvo.clone(), 1);
+                intermitentes.push(alvo);
+            }
+        }
+    }
+    let acervo = Arc::new(AcervoDeMentira {
+        fotos: std::sync::Mutex::new((0..N).map(|i| foto(i, true)).collect()),
+        ..Default::default()
+    });
+    let (janela, _dir) = revelacao_com_lote_e_acervo(cx, N, publicador.clone(), acervo);
+
+    janela
+        .update(cx, |app, window, cx| app.salvar_na_galeria(window, cx))
+        .expect("a janela aberta");
+
+    // A rede responde, embaralhada, até a esteira parar.
+    let mut g = Lcg::novo(77);
+    let inicio = Instant::now();
+    let mut voltas = 0;
+    loop {
+        voltas += 1;
+        assert!(voltas < 1_000, "o lote não terminou em 1.000 voltas");
+        let mut recados: Vec<_> =
+            std::mem::take(&mut *publicador.guardados.lock().expect("guardados"));
+        assert!(
+            recados.len() <= crate::envios::EM_VOO,
+            "🚨 {} fotos no ar: o teto é {} — é ele que segura a memória",
+            recados.len(),
+            crate::envios::EM_VOO
+        );
+        g.embaralhar(&mut recados);
+        for (canal, recado) in recados.drain(..) {
+            canal.send(recado).expect("o canal da raiz");
+        }
+        // O relógio anda o bastante para os recuos das repetições vencerem.
+        cx.executor().advance_clock(Duration::from_millis(500));
+        cx.run_until_parked();
+
+        let acabou = janela
+            .update(cx, |app, _window, cx| {
+                app.colher_sincronia(cx);
+                app.sincronias_pendentes() == 0
+                    && publicador.guardados.lock().expect("guardados").is_empty()
+            })
+            .expect("a janela aberta");
+        if acabou {
+            break;
+        }
+    }
+    relatar(
+        &format!("{N} fotos com rede ruim ({voltas} voltas)"),
+        inicio.elapsed(),
+        Duration::from_secs(20),
+    );
+
+    // 🔑 **A conta das tentativas, foto a foto.** É ela que mostra que a
+    // repetição existe e que não há tentativa a mais escondida.
+    let mut tentativas: std::collections::HashMap<String, usize> = Default::default();
+    for (alvo, _, _) in publicador.reveladas() {
+        *tentativas.entry(alvo).or_default() += 1;
+    }
+    for alvo in &perdidas {
+        assert_eq!(
+            tentativas.get(alvo).copied(),
+            Some(crate::envios::TENTATIVAS as usize),
+            "a foto que nunca passa é tentada {} vezes, e só",
+            crate::envios::TENTATIVAS
+        );
+    }
+    for alvo in &intermitentes {
+        assert_eq!(
+            tentativas.get(alvo).copied(),
+            Some(2),
+            "a foto do 502 sobe na segunda — sem ninguém apertar nada"
+        );
+    }
+    let normais = N - perdidas.len() - intermitentes.len();
+    assert_eq!(
+        tentativas.len(),
+        N,
+        "toda foto do lote foi ao site pelo menos uma vez"
+    );
+    assert_eq!(
+        publicador.reveladas().len(),
+        normais + intermitentes.len() * 2 + perdidas.len() * crate::envios::TENTATIVAS as usize,
+        "nenhuma tentativa a mais, nenhuma a menos"
+    );
+
+    janela
+        .update(cx, |app, _window, cx| {
+            // 🚨 **O que ficou para trás tem nome.** Um id não diz ao operador
+            // qual foto repetir, e é ele quem vai repetir.
+            let recusas = app.recusas_para_teste();
+            assert_eq!(
+                recusas.len(),
+                perdidas.len(),
+                "uma recusa por foto que nunca passou: {recusas:?}"
+            );
+            for i in (0..N).step_by(50) {
+                let nome = format!("DSC_{i:05}.jpg");
+                assert!(
+                    recusas.iter().any(|r| r.starts_with(&nome)),
+                    "a recusa de {nome} tinha de estar no canto: {recusas:?}"
+                );
+            }
+            // E as contas voltam a zero, com repetição e recuo no meio.
+            assert_eq!(app.sincronias_pendentes(), 0, "o contador zerou");
+            let retrato = app.retrato_do_segundo_plano(cx);
+            assert_eq!(retrato.subindo, 0, "a bandeja esvaziou");
+            assert_eq!(
+                retrato.recusadas,
+                perdidas.len(),
+                "o canto guarda as {perdidas:?}"
+            );
+            assert!(
+                !retrato.ha_envio_pendente(),
+                "G9: o app pode sair — não há envio no ar"
+            );
+        })
+        .expect("a janela aberta");
 }
 
 /// 🚨 **A resposta que demora mais que a espera não pode prender o contador.**

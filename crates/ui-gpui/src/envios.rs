@@ -34,8 +34,9 @@
 //! divisão da web: o Worker não é a memória, o IndexedDB é.
 
 use domain::services::pos_venda::Sessao;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::sync::mpsc::Sender;
+use std::time::Duration;
 
 use crate::pos_venda::porta::{FotoClassificada, Publicador, Recado};
 use crate::revelacao::processador::Ajustes;
@@ -116,10 +117,67 @@ impl Progresso {
     }
 }
 
+/// Quantas vezes a esteira tenta a **mesma** foto antes de desistir dela.
+///
+/// 🚨 **Uma rede ruim não pode custar o trabalho do operador** (dono,
+/// 18/set/2026: *"essa rotina precisa ser um tanque de guerra!"*). Até aqui,
+/// uma falha de rede gastava a foto: a resposta abria vaga, o lote seguia sem
+/// ela, e quem estava com o cliente só descobria no canto dos envios — se
+/// olhasse. Três é o número do balcão: erro de momento (um 502, o Wi-Fi que
+/// oscilou) passa na segunda; o que falha três vezes tem causa, e insistir só
+/// atrasa as outras.
+pub const TENTATIVAS: u8 = 3;
+
+/// A espera antes de repetir, multiplicada pela tentativa.
+///
+/// 🔑 **Repetir na hora é repetir o erro.** Quando a rede cai, as três em voo
+/// falham juntas; sem recuo, as três voltam na mesma passada, falham de novo e
+/// gastam as tentativas em menos de um segundo — a rede nem teve tempo de
+/// voltar. Com o recuo, as três tentativas de uma foto cobrem uns dois
+/// segundos.
+pub const RECUO: Duration = Duration::from_millis(400);
+
+/// Um trabalho e quantas vezes ele já foi tentado.
+#[derive(Debug, Clone)]
+struct NaEsteira {
+    trabalho: Trabalho,
+    tentativas: u8,
+}
+
+/// O que aconteceu com a resposta que chegou.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Desfecho {
+    /// A resposta não é de nenhum trabalho desta esteira — outro gesto (uma
+    /// negociação, um "tirar do site") ou o eco de um lote que já acabou.
+    ///
+    /// 🔑 **Existe para a esteira não contar o que não é dela.** Antes, toda
+    /// resposta que passava pelo canal abria uma vaga aqui, inclusive as de
+    /// gestos que nunca entraram na fila.
+    NaoEraMeu,
+    /// Subiu.
+    Feito,
+    /// Falhou, e volta para o fim da fila.
+    VaiRepetir {
+        alvo: String,
+        daqui_a: Duration,
+        tentativa: u8,
+    },
+    /// Falhou [`TENTATIVAS`] vezes: a esteira larga esta foto.
+    ///
+    /// 🚨 **E quem pediu tem de dizer isso na tela**, com o nome do arquivo:
+    /// nada pode sumir em silêncio. A receita continua no depósito e a foto
+    /// continua na conta do "falta subir", então repetir o gesto a manda de
+    /// novo — o que não pode é o operador não saber.
+    Desistiu { tentativas: u8 },
+}
+
 /// A fila com teto.
 #[derive(Debug, Default)]
 pub struct Esteira {
-    fila: VecDeque<Trabalho>,
+    fila: VecDeque<NaEsteira>,
+    /// O que está no site agora, **por alvo** — é o que permite saber qual
+    /// foto falhou, e portanto qual repetir.
+    no_ar: HashMap<String, NaEsteira>,
     progresso: Progresso,
 }
 
@@ -131,14 +189,19 @@ impl Esteira {
     /// ao site duas vezes — e a segunda desfaria a primeira depois de dois
     /// downloads e dois JPEGs. É a mesma regra de `enfileirar_para_subir`.
     ///
-    /// ⚠️ **O que já está no ar não é comparado**: ele já saiu, e a resposta
-    /// dele vem de qualquer jeito. Quem repete um gesto sobre uma foto que
-    /// acabou de sair está pedindo a segunda versão dela, e é o que acontece.
+    /// ⚠️ **O que já está no ar também não entra.** Ele já saiu e a resposta
+    /// dele vem de qualquer jeito; aceitar um segundo pedido da mesma foto
+    /// faria duas versões dela disputarem qual chega por último — e, agora que
+    /// a esteira repete, a repetição da primeira brigaria com a segunda.
     pub fn empurrar(&mut self, trabalho: Trabalho) {
-        if self.fila.iter().any(|t| t.alvo() == trabalho.alvo()) {
+        let alvo = trabalho.alvo();
+        if self.no_ar.contains_key(alvo) || self.fila.iter().any(|t| t.trabalho.alvo() == alvo) {
             return;
         }
-        self.fila.push_back(trabalho);
+        self.fila.push_back(NaEsteira {
+            trabalho,
+            tentativas: 0,
+        });
         self.progresso.total += 1;
     }
 
@@ -151,13 +214,18 @@ impl Esteira {
         canal: &Sender<Recado>,
     ) -> usize {
         let mut saíram = 0;
-        while self.progresso.no_ar < EM_VOO {
-            let Some(trabalho) = self.fila.pop_front() else {
+        while self.no_ar.len() < EM_VOO {
+            let Some(item) = self.fila.pop_front() else {
                 break;
             };
-            match trabalho {
+            match &item.trabalho {
                 Trabalho::Classificada { galeria, foto } => {
-                    publicador.subir_classificada(sessao.clone(), galeria, *foto, canal.clone());
+                    publicador.subir_classificada(
+                        sessao.clone(),
+                        galeria.clone(),
+                        (**foto).clone(),
+                        canal.clone(),
+                    );
                 }
                 Trabalho::Revelacao {
                     foto_no_site,
@@ -166,36 +234,64 @@ impl Esteira {
                 } => {
                     publicador.salvar_revelacao(
                         sessao.clone(),
-                        foto_no_site,
-                        *ajustes,
-                        corte,
+                        foto_no_site.clone(),
+                        **ajustes,
+                        corte.clone(),
                         canal.clone(),
                     );
                 }
             }
-            self.progresso.no_ar += 1;
+            self.no_ar.insert(item.trabalho.alvo().to_string(), item);
+            self.progresso.no_ar = self.no_ar.len();
             saíram += 1;
         }
         saíram
     }
 
-    /// Uma resposta voltou: abre uma vaga.
+    /// **A resposta de uma foto chegou** — e é por ela que a esteira anda.
     ///
     /// 🔑 **Quem reabastece é a resposta**, e não o relógio: a esteira não sabe
     /// quanto uma foto demora, e um temporizador acabaria mandando mais fotos
     /// enquanto as primeiras ainda decodificam — que é exatamente o que ela
     /// existe para impedir.
-    pub fn uma_respondeu(&mut self, falhou: bool) {
-        if self.progresso.no_ar == 0 && self.progresso.respondidos >= self.progresso.total {
-            // Um eco atrasado (recado que ninguém pediu) não faz a conta dar a
-            // volta — o mesmo cuidado do contador de sincronias.
-            return;
+    ///
+    /// ⚠️ **A resposta tem nome.** Sem ele não há como repetir a que falhou nem
+    /// como saber se a resposta é sequer desta esteira, e era assim até
+    /// 18/set/2026 (`Recado::Falhou` levava só a frase).
+    pub fn respondeu(&mut self, alvo: &str, falhou: bool) -> Desfecho {
+        let Some(mut item) = self.no_ar.remove(alvo) else {
+            return Desfecho::NaoEraMeu;
+        };
+        self.progresso.no_ar = self.no_ar.len();
+        if !falhou {
+            self.progresso.respondidos += 1;
+            self.talvez_zerar();
+            return Desfecho::Feito;
         }
-        self.progresso.no_ar = self.progresso.no_ar.saturating_sub(1);
+        item.tentativas += 1;
+        if item.tentativas < TENTATIVAS {
+            let desfecho = Desfecho::VaiRepetir {
+                alvo: alvo.to_string(),
+                daqui_a: RECUO * u32::from(item.tentativas),
+                tentativa: item.tentativas,
+            };
+            // 🔑 **No fim da fila, e não na frente**: a foto que falhou espera a
+            // vez das que ainda não tentaram. Furar a fila com ela seria deixar
+            // uma foto problemática segurando as outras cento e noventa.
+            self.fila.push_back(item);
+            return desfecho;
+        }
         self.progresso.respondidos += 1;
-        self.progresso.houve_falha |= falhou;
-        if !self.progresso.andando() && self.fila.is_empty() {
-            // Esteira vazia: a contagem recomeça no próximo lote.
+        self.progresso.houve_falha = true;
+        self.talvez_zerar();
+        Desfecho::Desistiu {
+            tentativas: item.tentativas,
+        }
+    }
+
+    /// Esteira vazia: a contagem recomeça no próximo lote.
+    fn talvez_zerar(&mut self) {
+        if !self.andando() && self.progresso.respondidos >= self.progresso.total {
             self.progresso = Progresso::default();
         }
     }
@@ -206,7 +302,7 @@ impl Esteira {
 
     /// Há o que fazer? (Na fila ou no ar.)
     pub fn andando(&self) -> bool {
-        !self.fila.is_empty() || self.progresso.no_ar > 0
+        !self.fila.is_empty() || !self.no_ar.is_empty()
     }
 
     /// Esvazia o que ainda não saiu — o que está no ar continua, porque já saiu.
@@ -279,8 +375,12 @@ mod testes {
         }
         esteira.despachar(publicador.as_ref(), &sessao(), &canal);
 
-        for _ in 0..10 {
-            esteira.uma_respondeu(false);
+        for i in 0..10 {
+            assert_eq!(
+                esteira.respondeu(&format!("f{i}"), false),
+                Desfecho::Feito,
+                "a resposta da f{i} é dela"
+            );
             esteira.despachar(publicador.as_ref(), &sessao(), &canal);
         }
 
@@ -304,9 +404,57 @@ mod testes {
         assert_eq!(esteira.progresso().total, 2);
     }
 
-    /// A falha conta como resposta — e fica registrada para o aviso do fim.
+    /// 🚨 **A foto que falha volta para a fila** — e só depois de
+    /// [`TENTATIVAS`] a esteira desiste dela.
+    ///
+    /// Dono, 18/set/2026: *"essa rotina precisa ser um tanque de guerra!"*. Uma
+    /// falha de rede não pode custar a foto: até aqui a resposta abria vaga, o
+    /// lote seguia sem ela, e quem estava com o cliente só descobria depois.
     #[test]
-    fn a_falha_conta_e_fica_registrada() {
+    fn a_foto_que_falha_vai_de_novo_ate_a_terceira() {
+        let publicador = Arc::new(PublicadorDeMentira::default());
+        let (canal, _recebe) = channel();
+        let mut esteira = Esteira::default();
+        esteira.empurrar(classificada("a"));
+        esteira.despachar(publicador.as_ref(), &sessao(), &canal);
+
+        // Primeira falha: volta para a fila, com recuo, e o total não muda —
+        // ela continua sendo **uma** foto por subir.
+        let desfecho = esteira.respondeu("a", true);
+        assert!(
+            matches!(desfecho, Desfecho::VaiRepetir { tentativa: 1, daqui_a, .. } if daqui_a == RECUO)
+        );
+        assert_eq!(esteira.progresso().total, 1);
+        assert_eq!(esteira.progresso().respondidos, 0, "ainda não respondeu");
+        assert!(esteira.andando());
+
+        // Segunda: de novo, com o recuo dobrado.
+        esteira.despachar(publicador.as_ref(), &sessao(), &canal);
+        assert_eq!(publicador.subidas().len(), 2, "a segunda tentativa saiu");
+        assert!(matches!(
+            esteira.respondeu("a", true),
+            Desfecho::VaiRepetir {
+                tentativa: 2,
+                daqui_a,
+                ..
+            } if daqui_a == RECUO * 2
+        ));
+
+        // Terceira e última: a esteira desiste, e diz isso a quem pediu.
+        esteira.despachar(publicador.as_ref(), &sessao(), &canal);
+        assert_eq!(publicador.subidas().len(), 3);
+        assert_eq!(
+            esteira.respondeu("a", true),
+            Desfecho::Desistiu {
+                tentativas: TENTATIVAS
+            }
+        );
+        assert!(!esteira.andando(), "a esteira largou a foto");
+    }
+
+    /// A foto que falha e depois passa não conta falha nenhuma no fim.
+    #[test]
+    fn a_falha_que_passa_na_segunda_nao_vira_aviso() {
         let publicador = Arc::new(PublicadorDeMentira::default());
         let (canal, _recebe) = channel();
         let mut esteira = Esteira::default();
@@ -314,24 +462,59 @@ mod testes {
         esteira.empurrar(classificada("b"));
         esteira.despachar(publicador.as_ref(), &sessao(), &canal);
 
-        esteira.uma_respondeu(true);
-        assert!(esteira.progresso().houve_falha);
-        assert_eq!(esteira.progresso().no_ar, 1);
+        esteira.respondeu("a", true);
+        esteira.despachar(publicador.as_ref(), &sessao(), &canal);
+        assert_eq!(esteira.respondeu("a", false), Desfecho::Feito);
+        assert_eq!(esteira.respondeu("b", false), Desfecho::Feito);
 
-        esteira.uma_respondeu(false);
         assert!(!esteira.andando());
+        assert_eq!(
+            esteira.progresso(),
+            Progresso::default(),
+            "sem falha pendente: a contagem recomeça limpa"
+        );
     }
 
-    /// ⚠️ Um eco atrasado não faz a conta dar a volta.
+    /// ⚠️ **A resposta que não é desta esteira não mexe na conta dela.**
+    ///
+    /// Pelo mesmo canal chegam as respostas de gestos que nunca entraram na
+    /// fila — uma negociação, um "tirar do site" — e o eco de um lote que já
+    /// acabou. Antes de a resposta ter nome, toda uma delas abria uma vaga
+    /// aqui.
     #[test]
     fn resposta_que_ninguem_pediu_nao_estraga_a_conta() {
+        let publicador = Arc::new(PublicadorDeMentira::default());
+        let (canal, _recebe) = channel();
         let mut esteira = Esteira::default();
 
-        esteira.uma_respondeu(false);
-        esteira.uma_respondeu(true);
-
+        assert_eq!(esteira.respondeu("fantasma", false), Desfecho::NaoEraMeu);
+        assert_eq!(esteira.respondeu("fantasma", true), Desfecho::NaoEraMeu);
         assert_eq!(esteira.progresso(), Progresso::default());
+
+        esteira.empurrar(classificada("a"));
+        esteira.despachar(publicador.as_ref(), &sessao(), &canal);
+        assert_eq!(esteira.respondeu("outra", true), Desfecho::NaoEraMeu);
+        assert_eq!(esteira.progresso().no_ar, 1, "a de verdade continua no ar");
         assert!(!esteira.progresso().houve_falha);
+    }
+
+    /// 🚨 **A foto que está no ar não entra de novo na fila.**
+    ///
+    /// Com a repetição, aceitar um segundo pedido da mesma foto faria a
+    /// repetição da primeira brigar com a segunda — duas versões da mesma foto
+    /// subindo, e o site ficando com a que chegasse por último.
+    #[test]
+    fn o_que_esta_no_ar_nao_entra_de_novo() {
+        let publicador = Arc::new(PublicadorDeMentira::default());
+        let (canal, _recebe) = channel();
+        let mut esteira = Esteira::default();
+        esteira.empurrar(classificada("a"));
+        esteira.despachar(publicador.as_ref(), &sessao(), &canal);
+
+        esteira.empurrar(classificada("a"));
+
+        assert_eq!(esteira.progresso().total, 1);
+        assert_eq!(esteira.progresso().na_fila(), 0);
     }
 
     /// O que ainda não saiu pode ser esquecido; o que está no ar, não.

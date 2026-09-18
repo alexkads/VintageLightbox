@@ -597,6 +597,18 @@ pub struct Aplicativo {
     _releitura_agendada: Option<Task<()>>,
     /// O mesmo, para a galeria aberta.
     _releitura_da_galeria: Option<Task<()>>,
+
+    /// Os relógios das repetições da esteira — um por foto que falhou e vai de
+    /// novo.
+    ///
+    /// ⚠️ **Um `Vec`, e não um campo só**: guardar uma `Task` por vez cancelaria
+    /// a espera anterior, e com três fotos falhando juntas (a rede caiu) duas
+    /// repetições nunca aconteceriam. É a mesma razão dos relógios dos toasts.
+    _repeticoes: Vec<Task<()>>,
+
+    /// O aviso de que a tela do cliente foi fechada **por fora** — o `X` da
+    /// barra, o `Esc` de dentro, o sistema.
+    _cliente_fechou: Option<gpui::Subscription>,
     /// 📤 **A esteira de envios** — a fila com teto que sobe as fotos em
     /// segundo plano, e o que na web é o Worker. Ver `crate::envios`.
     esteira: crate::envios::Esteira,
@@ -1007,6 +1019,8 @@ impl Aplicativo {
             cliente_pedindo: None,
             lote_no_ar: None,
             esteira: crate::envios::Esteira::default(),
+            _repeticoes: Vec::new(),
+            _cliente_fechou: None,
             _releitura_agendada: None,
             _releitura_da_galeria: None,
             baixas: resolucao_cheia::Baixas::nova(),
@@ -2032,14 +2046,32 @@ impl Aplicativo {
             // `saturating_sub` é o que impede uma resposta a mais (um recado
             // que ninguém pediu) de a fazer dar a volta.
             self.sincronias_pendentes = self.sincronias_pendentes.saturating_sub(1);
-            // 📤 Uma resposta chegou: a esteira abre uma vaga e manda a
-            // próxima. Quem reabastece é a resposta, nunca o relógio.
-            self.esteira.uma_respondeu(false);
+            // 📤 **Uma resposta chegou, e ela tem nome**: a esteira abre a vaga
+            // daquele trabalho e manda o próximo. Quem reabastece é a resposta,
+            // nunca o relógio — e o que não é dela (uma negociação, um "tirar
+            // do site") não mexe na conta.
+            let desfecho = match &recado {
+                PosVendaRecado::ClassificadaSubiu { foto_id } => {
+                    self.esteira.respondeu(foto_id, false)
+                }
+                PosVendaRecado::RevelacaoSalva { foto_no_site } => {
+                    self.esteira.respondeu(foto_no_site, false)
+                }
+                PosVendaRecado::EnvioFalhou { alvo, .. } => self.esteira.respondeu(alvo, true),
+                _ => crate::envios::Desfecho::NaoEraMeu,
+            };
+            let vai_repetir = self.cuidar_da_repeticao(&desfecho, cx);
             if self.esteira.andando() {
                 self.despachar_os_envios(cx);
             }
             match recado {
                 PosVendaRecado::Sincronizou => {
+                    self.ultimo_envio = Some(chrono::Utc::now().timestamp());
+                    mudou = true
+                }
+                // 🔑 O mesmo desfecho do `Sincronizou`, com nome: o catálogo
+                // mudou e a grade relê. O nome serviu à esteira, acima.
+                PosVendaRecado::ClassificadaSubiu { .. } => {
                     self.ultimo_envio = Some(chrono::Utc::now().timestamp());
                     mudou = true
                 }
@@ -2092,6 +2124,31 @@ impl Aplicativo {
                     bytes,
                 } => {
                     self.guardar_o_jpeg(&foto_no_site, &bytes, cx);
+                }
+                // 🚨 **A falha de um envio, com o nome de quem falhou.**
+                //
+                // ⚠️ **Enquanto a esteira vai repetir, a tela não diz nada**: um
+                // 502 que passa na segunda tentativa não é notícia para quem
+                // está com o cliente na frente, e um toast por tentativa seria
+                // três interrupções por foto de rede ruim. O que o operador
+                // precisa saber é o que **ficou para trás**, e isso vem abaixo.
+                PosVendaRecado::EnvioFalhou { alvo, frase } => {
+                    if vai_repetir {
+                        continue;
+                    }
+                    self.revelacao
+                        .update(cx, |tela, cx| tela.definir_gerando_jpeg(false, cx));
+                    self.contar_o_salvar(true, cx);
+                    // 🔑 **Nada some em silêncio** (G7 do app Tauri): a recusa
+                    // fica no canto até alguém olhar, além do aviso na tela — e
+                    // agora com o **nome do arquivo**, que é o que permite ao
+                    // operador achar a foto e repetir o gesto nela.
+                    let recusa = format!(
+                        "{}: {frase}",
+                        self.nome_no_site(&alvo, cx).unwrap_or_else(|| alvo.clone())
+                    );
+                    self.recusas.push(recusa.clone());
+                    self.avisar_falha(recusa, cx);
                 }
                 PosVendaRecado::Falhou(erro) => {
                     self.revelacao
@@ -2772,7 +2829,21 @@ impl Aplicativo {
         // **operador**, e precisa dos dois — sem barra não há por onde pegar, e
         // uma prévia que não sai da frente é estorvo.
         let opcoes = gpui::WindowOptions {
-            window_bounds: Some(gpui::WindowBounds::Windowed(area)),
+            // 🚨 **`Maximized` no monitor próprio, e não `Windowed`** (dono,
+            // 18/set/2026: *"em tela cheia está cortando o componente com as
+            // estrelinhas da classificação e a sinalização, mas em janela fica
+            // OK"*). No macOS, `Display::bounds()` devolve a tela **inteira**,
+            // barra de menu incluída — e o sistema não deixa uma janela comum
+            // cobri-la: ele a empurra para baixo, e os últimos ~35 px ficam
+            // fora do monitor. A legenda mora a 20 px do fundo, e era ela que
+            // sumia. `Maximized` vira `zoom()` no macOS, que usa a **área
+            // visível** da tela; o `Bounds` continua servindo de tamanho de
+            // restauração.
+            window_bounds: Some(if monitor_proprio {
+                gpui::WindowBounds::Maximized(area)
+            } else {
+                gpui::WindowBounds::Windowed(area)
+            }),
             display_id: Some(escolhida),
             titlebar: (!monitor_proprio).then(|| gpui::TitlebarOptions {
                 title: Some("Tela do cliente".into()),
@@ -2803,6 +2874,18 @@ impl Aplicativo {
                             }
                         },
                     ));
+                    // 🚨 **A janela pode ser fechada por fora** (dono,
+                    // 18/set/2026: *"quando fecho a janela do cliente o botão
+                    // não detecta essa ação"*). O `X` da barra e o `Esc` de
+                    // dentro tiram a janela sem passar por `alternar_cliente`,
+                    // e o botão continuava dizendo "Fechar a tela do cliente" —
+                    // e o clique nele, achando que fechava, abria de novo.
+                    // Quando a janela some, a entidade dela é liberada: é esse
+                    // o aviso.
+                    self._cliente_fechou =
+                        Some(cx.observe_release(&entidade, |raiz, _cliente, cx| {
+                            raiz.a_tela_do_cliente_fechou(cx)
+                        }));
                 }
                 self.cliente = Some(janela);
                 self.detalhe
@@ -2815,6 +2898,22 @@ impl Aplicativo {
             // "o botão não fez nada" por "perdi a triagem inteira".
             Err(erro) => eprintln!("⚠️  Não foi possível abrir a segunda tela: {erro}"),
         }
+        cx.notify();
+    }
+
+    /// A segunda tela sumiu sem passar por aqui — o botão tem de saber.
+    ///
+    /// 🔑 **Um só lugar guarda "a tela está aberta"**, e são dois: o handle da
+    /// janela e o que a barra da sessão desenha. Quando eles discordam, o botão
+    /// mente — e o clique seguinte faz o contrário do que ele promete.
+    pub(crate) fn a_tela_do_cliente_fechou(&mut self, cx: &mut Context<Self>) {
+        if self.cliente.is_none() {
+            return;
+        }
+        self.cliente = None;
+        self.no_cliente = None;
+        self.detalhe
+            .update(cx, |tela, cx| tela.definir_cliente_aberta(false, cx));
         cx.notify();
     }
 
@@ -3421,6 +3520,61 @@ impl Aplicativo {
     }
 
     /// O mesmo, dito como falha — o toast vermelho do site.
+    /// **A esteira vai repetir esta foto?** — e, se vai, agenda o recuo.
+    ///
+    /// 🚨 **Uma rede ruim não pode custar o trabalho do operador** (dono,
+    /// 18/set/2026: *"essa rotina precisa ser um tanque de guerra!"*). Devolve
+    /// `true` quando a foto vai de novo — e aí a tela não diz nada, porque não
+    /// há o que dizer ainda.
+    ///
+    /// Duas contas andam junto com a repetição:
+    ///
+    /// - **mais uma resposta a esperar** (`esperar_a_sincronia(1)`): a tentativa
+    ///   nova vai responder também, e sem somar aqui o contador do canto e o G9
+    ///   zerariam com fotos ainda no ar;
+    /// - **o despacho volta depois do recuo**: quem reabastece a esteira é a
+    ///   resposta, e a tentativa que falhou já respondeu — sem este relógio a
+    ///   foto ficaria na fila até outra resposta chegar, e a última do lote não
+    ///   teria nenhuma.
+    fn cuidar_da_repeticao(
+        &mut self,
+        desfecho: &crate::envios::Desfecho,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let crate::envios::Desfecho::VaiRepetir { daqui_a, .. } = desfecho else {
+            // A esteira parou: os relógios que sobraram não têm mais o que
+            // despachar, e segurá-los seria vazar uma `Task` por foto do lote.
+            if !self.esteira.andando() {
+                self._repeticoes.clear();
+            }
+            return false;
+        };
+        let daqui_a = *daqui_a;
+        self.esperar_a_sincronia(1, cx);
+        self._repeticoes.push(cx.spawn(async move |raiz, cx| {
+            cx.background_executor().timer(daqui_a).await;
+            let _ = raiz.update(cx, |raiz, cx| raiz.despachar_os_envios(cx));
+        }));
+        true
+    }
+
+    /// O nome do arquivo de uma foto do site — o que o operador reconhece.
+    ///
+    /// 🔑 **Um id não serve de aviso**: `a3f1…-…` não diz qual foto ficou para
+    /// trás, e o recado da recusa existe justamente para ele achar a foto e
+    /// repetir o gesto nela.
+    /// ⚠️ **Os dois lugares**: a foto pode estar na lista que veio da galeria
+    /// aberta **ou** no acervo local (a que subiu daqui e ainda é uma linha do
+    /// catálogo). Olhar só um deles devolvia o id cru justamente no caso mais
+    /// comum do balcão — o lote que sai da Revelação.
+    fn nome_no_site(&self, foto_no_site: &str, cx: &gpui::App) -> Option<String> {
+        self.fotos_do_site
+            .iter()
+            .find(|f| f.pos_venda_foto_id.as_deref() == Some(foto_no_site))
+            .map(|f| f.name.clone())
+            .or_else(|| self.biblioteca.read(cx).nome_no_site(foto_no_site))
+    }
+
     fn avisar_falha(&mut self, texto: String, cx: &mut Context<Self>) {
         self.avisar_em_toast(texto, true, cx);
     }
@@ -6088,6 +6242,57 @@ mod testes {
             .update(cx, |app, _window, cx| {
                 app.alternar_cliente(cx);
                 assert!(!app.cliente_aberto(), "e o mesmo botão fecha");
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 **A janela do cliente fechada por fora tem de apagar o botão** (dono,
+    /// 18/set/2026: *"quando fecho a janela do cliente o botão não detecta essa
+    /// ação"*).
+    ///
+    /// O `X` da barra e o `Esc` de dentro tiram a janela sem passar por
+    /// `alternar_cliente`: o handle ficava na raiz, o botão continuava dizendo
+    /// "Fechar a tela do cliente", e o clique seguinte — que o operador dava
+    /// para fechar — abria de novo.
+    #[gpui::test]
+    fn fechar_a_janela_do_cliente_por_fora_apaga_o_botao(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-DSC_001.NEF", &foto_vermelha())
+            .expect("gravar preview");
+        cx.update(gpui_component::init);
+
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            |window, cx| Aplicativo::ja_dentro(acervo(), previews, Vec::new(), portas(), window, cx)
+        });
+
+        let do_cliente = janela
+            .update(cx, |app, _window, cx| {
+                app.biblioteca
+                    .update(cx, |tela, cx| tela.selecionar(Some(0), cx));
+                app.alternar_cliente(cx);
+                assert!(app.cliente_aberto());
+                app.cliente.expect("a janela do cliente")
+            })
+            .expect("a janela deve estar aberta");
+
+        // O `X` da barra: a janela some sem avisar ninguém.
+        do_cliente
+            .update(cx, |_cliente, window, _cx| window.remove_window())
+            .expect("a janela do cliente estava aberta");
+        cx.run_until_parked();
+
+        janela
+            .update(cx, |app, _window, cx| {
+                assert!(
+                    !app.cliente_aberto(),
+                    "a raiz tinha de saber que a janela sumiu"
+                );
+                assert!(
+                    !app.detalhe.read(cx).cliente_aberta(),
+                    "e a barra da sessão também — é ela que desenha o botão"
+                );
             })
             .expect("a janela deve estar aberta");
     }

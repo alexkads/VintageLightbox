@@ -1233,6 +1233,11 @@ impl Detalhe {
     }
 
     /// A raiz avisa quando a segunda tela abre ou fecha.
+    /// A segunda tela está no ar? É o que o botão da barra desenha.
+    pub fn cliente_aberta(&self) -> bool {
+        self.cliente_aberta
+    }
+
     pub fn definir_cliente_aberta(&mut self, aberta: bool, cx: &mut Context<Self>) {
         if self.cliente_aberta != aberta {
             self.cliente_aberta = aberta;

@@ -326,8 +326,9 @@ fn salvar_na_galeria_com_falha_deixa_a_receita_no_deposito(cx: &mut TestAppConte
         assert_eq!(app.tela(), Tela::Sessao, "o lote sobe em segundo plano");
         assert_eq!(
             app.recusas_para_teste(),
-            ["o site respondeu 410: foto apagada"],
-            "a recusa vai para o canto dos envios, onde ficam as outras"
+            ["a.jpg: o site respondeu 410: foto apagada"],
+            "a recusa vai para o canto dos envios, com o NOME do arquivo — um \
+             id não diz ao operador qual foto ficou para trás"
         );
         assert!(
             app.revelacao.read(cx).ha_o_que_salvar(),
@@ -337,6 +338,15 @@ fn salvar_na_galeria_com_falha_deixa_a_receita_no_deposito(cx: &mut TestAppConte
     assert!(
         e.gravador.deposito().iter().any(|(id, _)| id == "a"),
         "a receita continua guardada"
+    );
+    // 🚨 **Três tentativas antes de desistir** (dono, 18/set/2026: *"essa
+    // rotina precisa ser um tanque de guerra!"*). Uma recusa de verdade — um
+    // 410 — não muda com a repetição, e é por isso que ela acaba no canto; o
+    // que a repetição salva é o 502 de momento, que passa na segunda.
+    assert_eq!(
+        e.site.reveladas().len(),
+        crate::envios::TENTATIVAS as usize,
+        "o site tinha de ter sido tentado três vezes antes da recusa"
     );
 }
 
