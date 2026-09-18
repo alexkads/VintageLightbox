@@ -638,71 +638,48 @@ impl Sessoes {
         if !self.escolhendo_estudio {
             return None;
         }
-        let tema = cx.theme().clone();
+        let apagado = cx.theme().muted_foreground;
+        let primaria = cx.theme().primary;
         let atual = self.estudio_de_trabalho().map(|e| e.id.clone());
         Some(
-            div()
-                .absolute()
-                .top_0()
-                .left_0()
-                .size_full()
-                .flex()
-                .items_center()
-                .justify_center()
-                .bg(gpui::black().opacity(0.5))
-                .child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .w(px(460.))
-                        .p(px(24.))
-                        .gap(px(12.))
-                        .rounded(px(12.))
-                        .border_1()
-                        .border_color(tema.border)
-                        .bg(tema.background)
-                        .shadow_lg()
-                        .child(
-                            div()
-                                .text_lg()
-                                .font_weight(gpui::FontWeight::SEMIBOLD)
-                                .child("Em qual estúdio você está?"),
-                        )
-                        .child(div().text_sm().text_color(tema.muted_foreground).child(
-                            "A escolha fica guardada nesta máquina e vale para todas as telas: as \
-                             sessões que você criar e o caixa saem daqui. Dá para trocar a \
-                             qualquer momento na barra.",
-                        ))
-                        .children(self.estudios.iter().map(|estudio| {
+            crate::estilo::veu_do_dialogo().child(
+                crate::estilo::caixa_do_dialogo(cx)
+                    .child(crate::estilo::cabecalho_do_dialogo(
+                        "Em qual estúdio você está?",
+                        "A escolha fica guardada nesta máquina e vale para todas as telas: as \
+                         sessões que você criar e o caixa saem daqui. Dá para trocar a qualquer \
+                         momento na barra.",
+                        Some(crate::recursos::Icone::Building2),
+                        cx,
+                    ))
+                    .child(gpui_component::v_flex().gap(px(8.)).children(
+                        self.estudios.iter().map(|estudio| {
                             let id = estudio.id.clone();
                             let escolhido = atual.as_deref() == Some(estudio.id.as_str());
-                            crate::estilo::botao_contorno(
+                            crate::estilo::opcao_do_dialogo(
                                 SharedString::from(format!("estudio-de-trabalho-{}", estudio.id)),
                                 cx,
                             )
-                            .w_full()
-                            .justify_start()
-                            .when(escolhido, |b| b.border_color(tema.primary))
+                            .when(escolhido, |o| o.border_color(primaria))
                             .child(
                                 div()
-                                    .flex()
-                                    .flex_col()
-                                    .items_start()
-                                    .child(SharedString::from(estudio.nome.clone()))
-                                    .child(
-                                        div()
-                                            .text_xs()
-                                            .text_color(tema.muted_foreground)
-                                            .child(SharedString::from(estudio.cidade.clone())),
-                                    ),
+                                    .font_weight(gpui::FontWeight::MEDIUM)
+                                    .child(SharedString::from(estudio.nome.clone())),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(apagado)
+                                    .child(SharedString::from(estudio.cidade.clone())),
                             )
                             .on_click(cx.listener(
                                 move |tela, _ev, _window, cx| {
                                     tela.escolher_estudio_de_trabalho(&id, cx)
                                 },
                             ))
-                        })),
-                ),
+                        }),
+                    )),
+            ),
         )
     }
 

@@ -4110,53 +4110,25 @@ impl Detalhe {
         } else {
             format!("Tirar as {quantas}")
         };
-        let tema = cx.theme().clone();
         Some(
-            div()
-                .absolute()
-                .top_0()
-                .left_0()
-                .size_full()
-                .flex()
-                .items_center()
-                .justify_center()
-                .bg(gpui::black().opacity(0.5))
+            crate::estilo::veu_do_dialogo()
                 .id("tirar-do-acervo-veu")
                 .on_click(cx.listener(|tela, _ev, _w, cx| tela.cancelar_tirar_do_acervo(cx)))
                 .child(
-                    div()
-                        .flex()
-                        .flex_col()
+                    crate::estilo::caixa_do_dialogo(cx)
                         .w(px(520.))
-                        .p(px(24.))
-                        .gap(px(12.))
-                        .rounded(px(12.))
-                        .border_1()
-                        .border_color(tema.border)
-                        .bg(tema.background)
-                        .shadow_lg()
                         .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                        .child(
-                            div()
-                                .text_lg()
-                                .font_weight(gpui::FontWeight::SEMIBOLD)
-                                .child(SharedString::from(titulo)),
-                        )
-                        .child(div().text_sm().text_color(tema.muted_foreground).child(
-                            SharedString::from(
-                                "Sem classificação a foto não fica no servidor: ela sai do \
-                                     acervo, o cliente deixa de vê-la, e volta para esta máquina \
-                                     — de onde sobe de novo assim que você a classificar. O \
-                                     arquivo vem para cá antes de sair de lá; a que não \
-                                     conseguir vir continua no acervo.",
-                            ),
+                        .child(crate::estilo::cabecalho_do_dialogo(
+                            titulo,
+                            "Sem classificação a foto não fica no servidor: ela sai do acervo, o \
+                             cliente deixa de vê-la, e volta para esta máquina — de onde sobe de \
+                             novo assim que você a classificar. O arquivo vem para cá antes de \
+                             sair de lá; a que não conseguir vir continua no acervo.",
+                            Some(crate::recursos::Icone::Undo2),
+                            cx,
                         ))
                         .child(
-                            div()
-                                .flex()
-                                .mt(px(8.))
-                                .justify_end()
-                                .gap(px(8.))
+                            crate::estilo::rodape_do_dialogo()
                                 .child(
                                     crate::estilo::botao_contorno("tirar-do-acervo-cancelar", cx)
                                         .child("Cancelar")
@@ -4179,49 +4151,25 @@ impl Detalhe {
     /// O diálogo de "Apagar esta foto?" — os mesmos textos do site.
     fn dialogo_de_apagar(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
         let (_, arquivo) = self.apagar_confirmando.clone()?;
-        let tema = cx.theme().clone();
         Some(
-            div()
-                .absolute()
-                .top_0()
-                .left_0()
-                .size_full()
-                .flex()
-                .items_center()
-                .justify_center()
-                .bg(gpui::black().opacity(0.5))
+            crate::estilo::veu_do_dialogo()
                 .id("apagar-veu")
                 .on_click(cx.listener(|tela, _ev, _w, cx| tela.cancelar_apagar(cx)))
                 .child(
-                    div()
-                        .flex()
-                        .flex_col()
+                    crate::estilo::caixa_do_dialogo(cx)
                         .w(px(460.))
-                        .p(px(24.))
-                        .gap(px(12.))
-                        .rounded(px(12.))
-                        .border_1()
-                        .border_color(tema.border)
-                        .bg(tema.background)
-                        .shadow_lg()
                         .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                        .child(
-                            div()
-                                .text_lg()
-                                .font_weight(gpui::FontWeight::SEMIBOLD)
-                                .child("Apagar esta foto?"),
-                        )
-                        .child(div().text_sm().text_color(tema.muted_foreground).child(
+                        .child(crate::estilo::cabecalho_do_dialogo(
+                            "Apagar esta foto?",
                             SharedString::from(format!(
-                                "{arquivo} sai da galeria com os arquivos dela — original, prévia                                  e miniatura. Não há como desfazer pela tela."
+                                "{arquivo} sai da galeria com os arquivos dela — original, prévia \
+                                 e miniatura. Não há como desfazer pela tela."
                             )),
+                            Some(crate::recursos::Icone::Trash2),
+                            cx,
                         ))
                         .child(
-                            div()
-                                .flex()
-                                .mt(px(8.))
-                                .justify_end()
-                                .gap(px(8.))
+                            crate::estilo::rodape_do_dialogo()
                                 .child(
                                     crate::estilo::botao_contorno("apagar-cancelar", cx)
                                         .child("Cancelar")
@@ -4241,10 +4189,6 @@ impl Detalhe {
         )
     }
 
-    /// Manda um `PATCH` na sessão aberta — o caminho comum do estúdio e das
-    /// associações do atendimento.
-    ///
-    /// A resposta vem como `GaleriaAtualizada`, que relê a galeria: é assim que
     /// a tela passa a mostrar o que gravou, sem inventar o estado novo aqui.
     fn gravar_a_galeria(&mut self, mudanca: MudancaDaGaleria, cx: &mut Context<Self>) {
         let (Some(sessao), Some(galeria_id)) = (self.sessao.clone(), self.galeria_id.clone())
