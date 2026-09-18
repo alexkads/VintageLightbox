@@ -69,7 +69,9 @@ use std::time::Duration;
 use infrastructure::cache::preview_manager::PreviewManager;
 use infrastructure::gpu_adjustments::Ajustes;
 
-use crate::revelacao::persistencia::{chave_da_revelada, para_crop_settings, Corte, Gravador};
+use crate::revelacao::persistencia::{
+    chave_da_revelada, chave_do_trabalho, para_crop_settings, Corte, Gravador,
+};
 use crate::sessoes::nova::receita;
 
 /// O lado maior da miniatura revelada que fica no cache.
@@ -93,12 +95,29 @@ const ESPERAS_ATE_DESISTIR: u32 = 150;
 /// prévia. Sem isto, a foto adiada só andaria no próximo pedido.
 const RESPIRO: Duration = Duration::from_millis(200);
 
+/// De onde sai o enquadramento desta foto — e quem grava os PARÂMETROS.
+enum Receita {
+    /// A receita padrão da sessão: a proporção vira corte centralizado **medido
+    /// na imagem**, e o serviço grava ajustes e corte no catálogo.
+    Padrao {
+        /// O rótulo da proporção (`"3:2"`, `"livre"`…), ou nenhuma.
+        proporcao: Option<String>,
+    },
+    /// A receita **já gravada** por quem pediu — o "Sincronizar N" da Revelação.
+    ///
+    /// 🔑 **Aqui o serviço não grava nada**: os PARÂMETROS já estão no catálogo
+    /// (ou no depósito, para a foto do site), postos pelo próprio gesto. O que
+    /// falta é só o cache, que é o que faz a tira e a grade mostrarem o efeito
+    /// antes de a foto subir — sem ele, sincronizar 22 fotos não muda um pixel
+    /// na tela e o gesto parece não ter acontecido (dono, 18/set/2026).
+    Pronta { corte: Corte },
+}
+
 /// Uma foto esperando a receita.
 struct Pedido {
     foto_id: String,
     ajustes: Ajustes,
-    /// O rótulo da proporção do corte padrão (`"3:2"`, `"livre"`…), ou nenhuma.
-    proporcao: Option<String>,
+    receita: Receita,
     /// Voltas dadas sem a prévia existir — ver [`ESPERAS_ATE_DESISTIR`].
     esperas: u32,
 }
@@ -161,6 +180,18 @@ impl ReceitaPadrao {
     /// Esta foto precisa da receita. Chamar de novo com a mesma foto na fila não
     /// a duplica.
     pub fn pedir(&self, foto_id: String, ajustes: Ajustes, proporcao: Option<String>) {
+        self.enfileirar(foto_id, ajustes, Receita::Padrao { proporcao });
+    }
+
+    /// A receita **desta** foto já está gravada: só falta a miniatura revelada.
+    ///
+    /// É o que o "Sincronizar N" pede para cada foto que recebeu os ajustes, e
+    /// o que a Revelação pede para a foto que ela acabou de editar.
+    pub fn pedir_a_miniatura(&self, foto_id: String, ajustes: Ajustes, corte: Corte) {
+        self.enfileirar(foto_id, ajustes, Receita::Pronta { corte });
+    }
+
+    fn enfileirar(&self, foto_id: String, ajustes: Ajustes, receita: Receita) {
         {
             let mut fila = self.fila.lock().expect("a fila da receita");
             if fila.iter().any(|p| p.foto_id == foto_id) {
@@ -169,7 +200,7 @@ impl ReceitaPadrao {
             fila.push_back(Pedido {
                 foto_id,
                 ajustes,
-                proporcao,
+                receita,
                 esperas: 0,
             });
         }
@@ -270,17 +301,30 @@ fn trabalhar(
     gravador: &dyn Gravador,
     pedido: &Pedido,
 ) -> Desfecho {
+    // 🔑 **A cópia de trabalho vem antes da foto da galeria.** Para a foto do
+    // site, `site:<id>` é a prévia **com marca d'água**; `trabalho:<id>` é a
+    // mesma foto sem ela, que é o que a Revelação mostra. Revelar a marcada
+    // deixaria a tira com um efeito diferente do palco.
     let Some(base) = previews
-        .get_preview(&pedido.foto_id)
+        .get_preview(&chave_do_trabalho(&pedido.foto_id))
+        .or_else(|| previews.get_preview(&pedido.foto_id))
         .or_else(|| previews.get_thumbnail(&pedido.foto_id))
     else {
         return Desfecho::SemImagem;
     };
 
-    // O corte sai das dimensões **da imagem**, e não do EXIF. Ver o cabeçalho.
-    let corte =
-        receita::corte_centralizado(pedido.proporcao.as_deref(), base.width(), base.height());
-    gravador.gravar(pedido.foto_id.clone(), pedido.ajustes, corte);
+    let corte = match &pedido.receita {
+        Receita::Padrao { proporcao } => {
+            // O corte sai das dimensões **da imagem**, e não do EXIF. Ver o
+            // cabeçalho.
+            let corte =
+                receita::corte_centralizado(proporcao.as_deref(), base.width(), base.height());
+            gravador.gravar(pedido.foto_id.clone(), pedido.ajustes, corte);
+            corte
+        }
+        // Já gravada por quem pediu — ver `Receita::Pronta`.
+        Receita::Pronta { corte } => *corte,
+    };
 
     let tem_ajustes = pedido.ajustes != Ajustes::default();
     let tem_corte = corte != Corte::default();
@@ -401,7 +445,9 @@ mod testes {
         let pedido = Pedido {
             foto_id: "foto-1".into(),
             ajustes: Ajustes::default(),
-            proporcao: Some("1:1".into()),
+            receita: Receita::Padrao {
+                proporcao: Some("1:1".into()),
+            },
             esperas: 0,
         };
 
@@ -443,13 +489,55 @@ mod testes {
         let pedido = Pedido {
             foto_id: "foto-1".into(),
             ajustes: Ajustes::default(),
-            proporcao: None,
+            receita: Receita::Padrao { proporcao: None },
             esperas: 0,
         };
         let desfecho = trabalhar(None, &previews, &gravador, &pedido);
         assert!(matches!(desfecho, Desfecho::Feito { avisar: false }));
         assert!(previews.get_preview(&chave_da_revelada("foto-1")).is_none());
         assert_eq!(gravador.gravado().len(), 1);
+    }
+
+    /// 🚨 **A receita já gravada não é gravada de novo** — e o corte é o que
+    /// veio, não um calculado por proporção.
+    ///
+    /// É o pedido do "Sincronizar N": os PARÂMETROS já foram para o catálogo (ou
+    /// para o depósito, na foto do site) pelo próprio gesto, e regravá-los aqui
+    /// poria a foto na fila de envio uma segunda vez. O que falta é só o cache.
+    #[test]
+    fn a_receita_pronta_so_faz_o_cache() {
+        let (previews, _pasta) = previews_com("foto-1", 600, 400);
+        let gravador = GravadorDeMentira::default();
+        let corte = Corte {
+            x: Some(0.25),
+            y: Some(0.0),
+            largura: Some(0.5),
+            altura: Some(1.0),
+            ..Default::default()
+        };
+        let pedido = Pedido {
+            foto_id: "foto-1".into(),
+            ajustes: Ajustes::default(),
+            receita: Receita::Pronta { corte },
+            esperas: 0,
+        };
+
+        let desfecho = trabalhar(None, &previews, &gravador, &pedido);
+
+        assert!(matches!(desfecho, Desfecho::Feito { avisar: true }));
+        assert!(
+            gravador.gravado().is_empty(),
+            "quem pediu já gravou: o serviço não repete"
+        );
+        let cortada = previews
+            .get_preview(&chave_da_revelada("foto-1"))
+            .expect("a revelada gravada");
+        assert!(
+            cortada.width() < cortada.height() * 2,
+            "o corte que veio no pedido foi aplicado: {}×{}",
+            cortada.width(),
+            cortada.height()
+        );
     }
 
     /// 🔑 **Sem prévia, o pedido espera** — e não some nem grava corte errado.
@@ -462,7 +550,9 @@ mod testes {
         let pedido = Pedido {
             foto_id: "foto-sem-previa".into(),
             ajustes: Ajustes::default(),
-            proporcao: Some("1:1".into()),
+            receita: Receita::Padrao {
+                proporcao: Some("1:1".into()),
+            },
             esperas: 0,
         };
         assert!(matches!(

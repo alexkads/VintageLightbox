@@ -1784,8 +1784,13 @@ impl Detalhe {
     /// descarta o que está na memória desta tela.
     pub fn revelada_chegou(&mut self, foto_id: &str) {
         self.miniaturas.esquecer(foto_id);
+        self.miniaturas.esquecer(&chave_do_site(foto_id));
         self.miniaturas
             .esquecer(&crate::revelacao::persistencia::chave_da_revelada(foto_id));
+        self.miniaturas
+            .esquecer(&crate::revelacao::persistencia::chave_da_revelada(
+                &chave_do_site(foto_id),
+            ));
         // A próxima `chave_da_foto` pergunta ao disco de novo — e agora acha.
         self.com_revelada.remove(foto_id);
     }
@@ -2126,30 +2131,46 @@ impl Detalhe {
     /// importação passou a entrar na grade (8/set/2026): 21 fotos com nome,
     /// estado e faixa, e nenhuma imagem.
     fn chave_da_foto(&self, foto_id: &str) -> String {
-        if self.ids_locais.contains(foto_id) {
-            // 🚨 **A revelada da receita padrão vem antes do bruto.** A etapa 2
-            // do assistente promete a predefinição e o corte; sem esta linha a
-            // sessão abria mostrando os brutos, e o que o operador tinha visto
-            // no assistente sumia ao entrar (achado do dono, 17/set/2026).
-            //
-            // Quem pergunta ao disco é `resolver_revelada`, uma vez por foto,
-            // em `preparar_miniaturas`. Aqui só se lê o que ela respondeu:
-            // desenhar não é hora de tocar em disco.
-            if self.com_revelada.get(foto_id) == Some(&true) {
-                return crate::revelacao::persistencia::chave_da_revelada(foto_id);
-            }
-            return foto_id.to_string();
+        let base = if self.ids_locais.contains(foto_id) {
+            foto_id.to_string()
+        } else {
+            chave_do_site(foto_id)
+        };
+        // 🚨 **A revelada local vem antes do bruto e antes do site.**
+        //
+        // Na local é a promessa da etapa 2 do assistente: a predefinição e o
+        // corte que o operador viu lá (dono, 17/set/2026 — a sessão abria
+        // mostrando os brutos).
+        //
+        // 🚨 **Na foto do site é a mesma prévia local da web**
+        // (`usar-previas-reveladas.ts`): a grade desenha o que o servidor tem,
+        // e o servidor só muda quando alguém salva na galeria — enquanto isso a
+        // Revelação já abre com a receita do banco local. O dono viu as duas
+        // caras da mesma foto em 18/set/2026: *"na galeria estava com um efeito,
+        // dei dois cliques e a revelação estava com outro"*. A prévia local é o
+        // que faz as duas dizerem a mesma coisa antes de subir.
+        //
+        // Quem pergunta ao disco é `resolver_revelada`, uma vez por foto, em
+        // `preparar_miniaturas`. Aqui só se lê o que ela respondeu: desenhar não
+        // é hora de tocar em disco.
+        if self.com_revelada.get(foto_id) == Some(&true) {
+            return crate::revelacao::persistencia::chave_da_revelada(&base);
         }
-        chave_do_site(foto_id)
+        base
     }
 
     /// Esta foto local já tem a revelada da receita padrão? — pergunta ao disco
     /// **uma vez** e guarda a resposta (ver `com_revelada`).
     fn resolver_revelada(&mut self, foto_id: &str) {
-        if !self.ids_locais.contains(foto_id) || self.com_revelada.contains_key(foto_id) {
+        if self.com_revelada.contains_key(foto_id) {
             return;
         }
-        let revelada = crate::revelacao::persistencia::chave_da_revelada(foto_id);
+        let base = if self.ids_locais.contains(foto_id) {
+            foto_id.to_string()
+        } else {
+            chave_do_site(foto_id)
+        };
+        let revelada = crate::revelacao::persistencia::chave_da_revelada(&base);
         let tem = self.previews.tem(&revelada, PreviewType::Thumbnail)
             || self.previews.tem(&revelada, PreviewType::Large);
         self.com_revelada.insert(foto_id.to_string(), tem);

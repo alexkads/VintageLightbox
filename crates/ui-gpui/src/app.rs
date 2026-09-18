@@ -1541,6 +1541,11 @@ impl Aplicativo {
                 .update(cx, |tela, _| tela.revelada_chegou(&foto_id));
             self.detalhe
                 .update(cx, |tela, _| tela.revelada_chegou(&foto_id));
+            // 🔑 **A tira da Revelação também mostra estas fotos.** Ela é a
+            // tela onde o "Sincronizar N" acontece, e era justamente onde o
+            // efeito não aparecia.
+            self.revelacao
+                .update(cx, |tela, cx| tela.miniatura_reposta(&foto_id, cx));
         }
         if chegou {
             cx.notify();
@@ -1858,6 +1863,16 @@ impl Aplicativo {
                     // atualiza — a foto voltaria ao que era antes do envio no
                     // dia em que a galeria mudasse por outra tela.
                     self.a_subir.retain(|(ja, _, _)| ja != &foto_no_site);
+                    // 🔑 **A prévia local sai junto.** Ela existia porque o
+                    // servidor ainda não tinha a revelação; agora tem, e é ele
+                    // quem manda — uma cópia local que ninguém mais atualiza
+                    // faria a grade mostrar para sempre a receita deste
+                    // momento. É o `apagarPreviaLocal` da web.
+                    let no_acervo = format!("{}{foto_no_site}", persistencia::PREFIXO_DO_SITE);
+                    self.previews
+                        .apagar(&persistencia::chave_da_revelada(&no_acervo));
+                    self.detalhe
+                        .update(cx, |tela, _| tela.revelada_chegou(&foto_no_site));
                     self.gravador.esquecer_do_site(foto_no_site);
                     self.ultimo_envio = Some(chrono::Utc::now().timestamp());
                     self.recontar_o_que_falta_subir(cx);
@@ -2069,6 +2084,10 @@ impl Aplicativo {
         self.saindo_depois_de_salvar = None;
         self.revelacao.update(cx, |tela, cx| {
             tela.gravar_o_que_estiver_pendente();
+            // A prévia local da foto que estava aberta — é ela que a grade da
+            // sessão mostra até a revelação subir. Ver
+            // `Revelacao::guardar_a_revelada_no_cache`.
+            tela.guardar_a_revelada_no_cache();
             tela.definir_salvando(None, cx);
         });
         self.guardar_as_receitas_do_site(cx);
@@ -2338,6 +2357,17 @@ impl Aplicativo {
         // seguinte abriria a foto sincronizada com os sliders de antes.
         self.revelacao
             .update(cx, |tela, cx| tela.aplicar_sincronizadas(&gravadas, cx));
+        // 🚨 **E as miniaturas, senão nada muda na tela** (dono, 18/set/2026:
+        // *"não atualiza o filmstrip da revelação, dá a sensação de que não
+        // aconteceu nada"*). O "Sincronizar" copia só a receita — o JPEG do
+        // servidor continua o de antes —, então a única coisa que pode mostrar
+        // o efeito antes de salvar é a prévia local. É o que a web faz desde
+        // 11/set/2026 (`usar-previas-reveladas.ts`), pelo mesmo relato.
+        for (id, ajustes_dela, corte_dela) in &gravadas {
+            self.receita_padrao
+                .pedir_a_miniatura(id.clone(), *ajustes_dela, *corte_dela);
+        }
+        self.esperar_as_reveladas(cx);
         self.reler_o_acervo(cx);
         self.recontar_o_que_falta_subir(cx);
         self.avisar_onde_esta_olhando(

@@ -19,6 +19,7 @@ use std::num::NonZeroUsize;
 use adapters::view_models::PhotoViewModel;
 use biblioteca_core::acervo::{self, Contagens, Estado, Filtro};
 use biblioteca_core::selecao::Modificadores;
+use domain::services::PreviewType;
 use gpui::{
     canvas, div, img, prelude::*, px, AnyElement, Context, MouseButton, Pixels, SharedString,
     Window,
@@ -497,7 +498,20 @@ impl Revelacao {
                     let previews = previews.clone();
                     let id = id.clone();
                     cx.background_executor()
-                        .spawn(async move { previews.get_thumbnail(&id).map(para_gpui) })
+                        .spawn(async move {
+                            // 🚨 **A prévia revelada local vem antes da do
+                            // servidor.** Enquanto a foto não sobe, o JPEG de lá
+                            // é o de antes do "Sincronizar"; quem tem o efeito é
+                            // esta chave. É o mesmo que a grade da sessão faz, e
+                            // o que a web faz em `usar-previas-reveladas.ts`.
+                            let revelada = persistencia::chave_da_revelada(&id);
+                            let chave = if previews.tem(&revelada, PreviewType::Thumbnail) {
+                                revelada
+                            } else {
+                                id
+                            };
+                            previews.get_thumbnail(&chave).map(para_gpui)
+                        })
                         .await
                 };
                 // `update` falha quando a tela morreu.

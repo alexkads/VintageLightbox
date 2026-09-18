@@ -82,6 +82,11 @@ const LADO_DOS_PRESETS: f32 = 224.0;
 /// A altura da barra do topo — os `h-12` do site.
 const ALTURA_DO_CABECALHO: f32 = 48.0;
 
+/// O lado da miniatura revelada que a Revelação deixa para a grade — o mesmo
+/// do serviço da receita padrão (`sessoes::receita_padrao`), porque é a mesma
+/// chave de cache e a mesma célula desenhando.
+const LADO_DA_REVELADA: u32 = 320;
+
 /// Quantas miniaturas da tira ficam em memória.
 ///
 /// A tira mostra o acervo **inteiro**, mas quem paga por quadro é só o que está
@@ -770,6 +775,52 @@ impl Revelacao {
         self.aberta_a_salvar() || self.nao_salvas > 0
     }
 
+    /// Guarda no cache a miniatura **revelada** da foto aberta — a prévia local
+    /// que a grade e a tira mostram antes de a foto subir.
+    ///
+    /// # 🚨 Por que a grade não pode se contentar com o servidor
+    ///
+    /// É o mesmo defeito que a web já pagou (`usar-previas-reveladas.ts`,
+    /// 11/set/2026, dono: *"tá deixando as miniaturas e a foto central sem
+    /// efeito"*) e que apareceu aqui em 18/set/2026: a grade desenha a foto do
+    /// **site**, que só muda quando alguém salva na galeria; a Revelação abre
+    /// com a receita do **banco local**, que muda a cada gesto. Entre um e
+    /// outro, a mesma foto tem duas caras — e quem vê as duas conclui,
+    /// corretamente, que o sistema está mentindo em alguma delas.
+    ///
+    /// Aqui a prévia local nasce de `aberta.revelada` (o que o motor devolveu,
+    /// com o enquadramento aplicado por cima, como na exportação), nas **duas**
+    /// chaves de cache, porque a grade lê a miniatura e o painel lê o preview.
+    ///
+    /// 🔑 **Receita neutra apaga a prévia** em vez de gravá-la: depois de um
+    /// "Zerar tudo", o certo é voltar a mostrar a do servidor. É o mesmo que a
+    /// web faz ao apagar a prévia local quando a foto sobe — a partir daí quem
+    /// é mais novo é o site.
+    ///
+    /// ⚠️ **Sem `revelada` não grava nada.** Antes do primeiro resultado do
+    /// motor não há o que guardar, e gravar a bruta aqui seria dizer à grade
+    /// que a foto foi revelada assim.
+    pub fn guardar_a_revelada_no_cache(&self) {
+        let Some(aberta) = self.aberta.as_ref() else {
+            return;
+        };
+        let chave = persistencia::chave_da_revelada(&aberta.foto.id);
+        let neutro = self.ajustes == Ajustes::default() && corte::e_inteiro(&self.enquadramento());
+        if neutro {
+            self.previews.apagar(&chave);
+            return;
+        }
+        let Some(revelada) = aberta.revelada.as_ref() else {
+            return;
+        };
+        let final_ = infrastructure::transformacao::aplicar(revelada, &self.enquadramento(), true);
+        let _ = self.previews.save_preview(&chave, &final_);
+        let _ = self.previews.save_thumbnail(
+            &chave,
+            &final_.thumbnail(LADO_DA_REVELADA, LADO_DA_REVELADA),
+        );
+    }
+
     /// O botão "Salvar na galeria e sair", como a barra o desenha — e como o
     /// e2e o afirma.
     ///
@@ -1012,6 +1063,8 @@ impl Revelacao {
         // revelação de uma foto gravada na outra. É a mesma ordem do legado
         // ("Check if we need to save the CURRENT photo before switching").
         self.gravar_o_que_estiver_pendente();
+        // E a miniatura da que sai, para a grade não mostrar a foto sem efeito.
+        self.guardar_a_revelada_no_cache();
 
         // 🚨 **A foto do site tem bruto em outra chave.** Em `site:<id>` a
         // grade da sessão guarda a imagem da **galeria** — depois de "Salvar na

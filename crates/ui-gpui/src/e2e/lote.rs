@@ -1,6 +1,7 @@
 //! 📦 O que a Revelação faz com mais de uma foto, e os dois botões do fim:
 //! "Baixar JPEG" e "Salvar na galeria e sair".
 
+use domain::services::PreviewType;
 use gpui::TestAppContext;
 
 use super::{abrir_o_ensaio, Cenario};
@@ -544,6 +545,94 @@ fn o_aviso_de_sucesso_fica_no_topo_e_some_sozinho(cx: &mut TestAppContext) {
             app.avisos_para_teste().is_empty(),
             "o aviso some sozinho: {:?}",
             app.avisos_para_teste()
+        );
+    });
+}
+
+/// 🎬 **A foto tem uma cara só** — a da grade e a da Revelação.
+///
+/// 🚨 **Nasceu de "na galeria estava com um efeito, dei dois cliques e a
+/// revelação estava com outro"** (dono, 18/set/2026). A grade desenha o que o
+/// **servidor** tem, e o servidor só muda quando alguém salva na galeria; a
+/// Revelação abre com a receita do **banco local**, que muda a cada gesto. Entre
+/// um e outro, a mesma foto tinha duas caras — e quem vê as duas conclui,
+/// corretamente, que uma delas está mentindo.
+///
+/// A web já pagou esse defeito (`usar-previas-reveladas.ts`, 11/set/2026) e
+/// resolveu do mesmo jeito: uma prévia revelada **local**, que a grade consulta
+/// antes da URL do servidor e que é apagada quando a foto sobe — porque daí em
+/// diante quem é mais novo é o site.
+#[gpui::test]
+fn a_previa_local_revelada_nasce_ao_sair_e_morre_quando_a_foto_sobe(cx: &mut TestAppContext) {
+    let e = abrir_o_ensaio(
+        cx,
+        Cenario {
+            site: Box::new(|site| site.demorada = true),
+            ..Cenario::default()
+        },
+    );
+    let chave = crate::revelacao::persistencia::chave_da_revelada("site:a");
+    assert!(
+        !e.previews.tem(&chave, PreviewType::Thumbnail),
+        "sem revelação, a grade mostra a foto do site"
+    );
+
+    e.revelar_a_do_site(cx, "a");
+    e.revelacao(cx, |tela, _w, cx| tela.arrastar_slider(0, 0.6, cx));
+    e.esperar(cx);
+    // Sair guarda a prévia da foto aberta — é o que a grade vai mostrar.
+    botao(&e, cx, PedidoDaRevelacao::Sair);
+    e.esperar(cx);
+    e.app(cx, |app, _w, _cx| assert_eq!(app.tela(), Tela::Sessao));
+    assert!(
+        e.previews.tem(&chave, PreviewType::Thumbnail)
+            && e.previews.tem(&chave, PreviewType::Large),
+        "as duas chaves: a grade lê a miniatura, o painel lê o preview"
+    );
+
+    // E ela morre quando o site recebe a revelação.
+    e.revelar_a_do_site(cx, "a");
+    botao(&e, cx, PedidoDaRevelacao::SalvarNaGaleria);
+    e.esperar(cx);
+    e.site.responder();
+    e.esperar(cx);
+    assert!(
+        !e.previews.tem(&chave, PreviewType::Thumbnail),
+        "subiu: quem manda passa a ser o servidor"
+    );
+}
+
+/// 🎬 **"Sincronizar N" muda a tira na hora** — e não só o banco.
+///
+/// 🚨 **Dono, 18/set/2026**: *"o botão de sincronizar não está com o mesmo
+/// comportamento da WEB e não atualiza o filmstrip da revelação, dá a sensação
+/// de que não aconteceu nada"*. Desde 11/set o "Sincronizar" copia **só a
+/// receita**: o JPEG do servidor continua o de antes, então a única coisa capaz
+/// de mostrar o efeito antes de salvar é a prévia local — que é o que o serviço
+/// da receita padrão passou a gerar para cada foto sincronizada.
+///
+/// ⚠️ **O que este cenário alcança é o pedido**, e não o pixel: a thread do
+/// serviço roda com `motor = None` em teste (nenhum cenário abre GPU), e quem
+/// prova o cache é `a_receita_pronta_so_faz_o_cache`, em `receita_padrao.rs`.
+#[gpui::test]
+fn sincronizar_pede_a_previa_local_das_marcadas(cx: &mut TestAppContext) {
+    let e = abrir_o_ensaio(cx, Cenario::default());
+    e.revelar_a_do_site(cx, "a");
+    e.revelacao(cx, |tela, _w, cx| tela.arrastar_slider(0, 0.8, cx));
+    e.esperar(cx);
+    e.app(cx, |app, _w, _cx| {
+        assert_eq!(app.receita_padrao_pedida(), 0, "nada pedido ainda");
+    });
+
+    e.teclar(cx, "cmd-a");
+    botao(&e, cx, PedidoDaRevelacao::Sincronizar);
+    e.esperar(cx);
+
+    e.app(cx, |app, _w, _cx| {
+        assert_eq!(
+            app.receita_padrao_pedida(),
+            4,
+            "as quatro que receberam a receita (a comprada e a aberta ficam de fora)"
         );
     });
 }

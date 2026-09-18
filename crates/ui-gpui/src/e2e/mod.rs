@@ -361,6 +361,9 @@ pub(super) struct Estudio {
     pub exportador: Arc<ExportadorDeMentira>,
     pub folha: Arc<FolhaDeMentira>,
     pub guarda: Arc<GuardaDeMentira>,
+    /// O cache de prévias do app — é nele que a prévia **revelada local** mora,
+    /// e é por ele que os cenários afirmam que a grade vai mostrar o efeito.
+    pub previews: Arc<PreviewManager>,
     _dir: TempDir,
 }
 
@@ -460,6 +463,7 @@ pub(super) fn abrir_o_app(cx: &mut TestAppContext, cenario: Cenario) -> Estudio 
         exportador,
         folha,
         guarda,
+        previews,
         _dir: dir,
     };
     estudio.esperar(cx);

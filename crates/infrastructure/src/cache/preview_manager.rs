@@ -182,6 +182,28 @@ impl PreviewManager {
         }
     }
 
+    /// Apaga do cache **tudo** o que está gravado sob esta chave — as duas
+    /// variantes, no banco e na memória.
+    ///
+    /// 🔑 **Quem apaga é quem sabe que a origem mudou de dono.** O caso que a
+    /// fez nascer é a prévia revelada local (`revelada:<id>`): enquanto a foto
+    /// não subiu, ela é a verdade que a grade mostra; quando a receita volta ao
+    /// neutro, ou quando o site recebe a revelação, quem passa a ser mais novo é
+    /// o servidor — e uma cópia local que ninguém mais atualiza faria a grade
+    /// mostrar para sempre o que já mudou.
+    ///
+    /// ⚠️ **Falha de banco não é fim de fluxo**: o pior desfecho é o cache
+    /// continuar com a entrada velha, que é onde já se estava.
+    pub fn apagar(&self, photo_id_str: &str) {
+        self.esquecer_da_memoria(photo_id_str);
+        if let Ok(conn) = self.conn.lock() {
+            let _ = conn.execute(
+                "DELETE FROM previews WHERE photo_id = ?1",
+                params![photo_id_str],
+            );
+        }
+    }
+
     /// Se o cache **tem** esta entrada, sem trazer a imagem.
     ///
     /// 🔑 **Existe para quem precisa perguntar por muitas fotos.** `get_*`
