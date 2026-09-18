@@ -47,10 +47,19 @@ const INTERVALO_DE_COLHEITA: Duration = Duration::from_millis(100);
 fn atalhos_do_periodo() -> Vec<DateRangePreset> {
     let hoje = hoje_no_estudio();
     let ha = |dias: i64| hoje - chrono::Duration::days(dias);
+    // 🔑 **Os sete do site** (`filtro-de-periodo.tsx`), na ordem em que o balcão
+    // pergunta: o dia, o dia anterior, a semana, o mês, e as três janelas de
+    // fechamento — trimestre, semestre e ano. Os três últimos são **corridos**
+    // (os últimos 90/180/365 dias), que é a pergunta de quem fecha caixa: "o
+    // quanto entrou até aqui", e não "o que aconteceu no trimestre civil".
     vec![
         DateRangePreset::single("Hoje", hoje),
+        DateRangePreset::single("Ontem", ha(1)),
         DateRangePreset::range("7 dias", ha(6), hoje),
         DateRangePreset::range("30 dias", ha(29), hoje),
+        DateRangePreset::range("Trimestre", ha(89), hoje),
+        DateRangePreset::range("Semestre", ha(179), hoje),
+        DateRangePreset::range("Ano", ha(364), hoje),
     ]
 }
 
@@ -215,7 +224,9 @@ impl Sessoes {
         // trabalha o dia, e a lista inteira é o arquivo.
         let hoje = hoje_no_estudio();
         let periodo = cx.new(|cx| {
-            let mut estado = DatePickerState::range(window, cx);
+            // 🇧🇷 **Data em português do Brasil** (dono, 18/set/2026): o padrão
+            // do componente é `%Y/%m/%d`, que no balcão se lê como erro.
+            let mut estado = DatePickerState::range(window, cx).date_format("%d/%m/%Y");
             estado.set_date(Date::Range(Some(hoje), Some(hoje)), window, cx);
             estado
         });
