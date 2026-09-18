@@ -136,6 +136,16 @@ struct Nova {
 struct Lembranca {
     #[serde(default)]
     estudio_id: Option<String>,
+    /// 🏢 **"Todos os estúdios"** — a lista deixa de ser recortada (dono,
+    /// 18/set/2026: *"tem que ter opção de trazer todos os estúdios, pois tem
+    /// sessões que foram criadas sem definição de estúdio"*).
+    ///
+    /// 🔑 **Ao lado do estúdio, e não no lugar dele**: quem escolhe "todos"
+    /// continua com um estúdio para criar sessão e para abrir o caixa — o
+    /// último que escolheu. "Todos" é uma lente sobre a lista, não um lugar
+    /// onde se trabalha.
+    #[serde(default)]
+    ver_todos: bool,
 }
 
 #[cfg(not(test))]
@@ -158,12 +168,23 @@ fn caminho_da_lembranca() -> PathBuf {
     ))
 }
 
+fn lembranca(caminho: &Path) -> Lembranca {
+    std::fs::read_to_string(caminho)
+        .ok()
+        .and_then(|texto| serde_json::from_str::<Lembranca>(&texto).ok())
+        .unwrap_or_default()
+}
+
 fn estudio_lembrado(caminho: &Path) -> Option<String> {
-    let texto = std::fs::read_to_string(caminho).ok()?;
-    serde_json::from_str::<Lembranca>(&texto)
-        .ok()?
+    lembranca(caminho)
         .estudio_id
         .filter(|id| !id.trim().is_empty())
+}
+
+/// Esta máquina já respondeu à pergunta do estúdio? ("Todos" é resposta.)
+fn ja_respondeu(caminho: &Path) -> bool {
+    let guardada = lembranca(caminho);
+    guardada.ver_todos || guardada.estudio_id.is_some_and(|id| !id.trim().is_empty())
 }
 
 /// O estúdio que **esta máquina** escolheu na entrada das sessões, como está
@@ -178,9 +199,28 @@ pub fn estudio_de_trabalho_guardado() -> Option<String> {
 }
 
 fn lembrar_estudio(caminho: &Path, estudio_id: &str) {
-    let lembranca = Lembranca {
-        estudio_id: Some(estudio_id.to_string()),
-    };
+    gravar_lembranca(
+        caminho,
+        Lembranca {
+            estudio_id: Some(estudio_id.to_string()),
+            ver_todos: false,
+        },
+    );
+}
+
+/// "Todos os estúdios": o recorte sai, e o estúdio de trabalho fica.
+fn lembrar_todos(caminho: &Path) {
+    let guardada = lembranca(caminho);
+    gravar_lembranca(
+        caminho,
+        Lembranca {
+            estudio_id: guardada.estudio_id,
+            ver_todos: true,
+        },
+    );
+}
+
+fn gravar_lembranca(caminho: &Path, lembranca: Lembranca) {
     let Ok(texto) = serde_json::to_string_pretty(&lembranca) else {
         return;
     };
@@ -259,7 +299,7 @@ impl Sessoes {
     /// seria perdê-las de vista — e é justamente nelas que o seletor do
     /// cabeçalho da galeria serve para dizer de quem são.
     fn para_o_core(&self) -> Vec<SessaoFotografica> {
-        let meu = self.estudio_de_trabalho().map(|e| e.id.clone());
+        let meu = self.estudio_do_recorte().map(|e| e.id.clone());
         self.galerias
             .iter()
             .filter(|g| match (&meu, &g.estudio_id) {
@@ -267,6 +307,9 @@ impl Sessoes {
                 _ => true,
             })
             .map(|g| SessaoFotografica {
+                // 🏢 A sessão sem estúdio é marcada na grade: ela não entra em
+                // caixa nenhum enquanto ninguém a corrigir.
+                sem_estudio: g.estudio_id.is_none(),
                 id: g.id.clone(),
                 titulo: g.titulo.clone(),
                 email: g.email.clone(),
@@ -625,7 +668,12 @@ impl Sessoes {
                     // aparece.** É o `precisaEscolher` do site, e o mesmo
                     // cuidado: sem estúdio cadastrado não se pergunta nada — um
                     // diálogo sem opção e sem saída é pior que a ausência dele.
-                    if self.estudio_de_trabalho().is_none() && !self.estudios.is_empty() {
+                    // 🔑 **"Todos" também é resposta**: quem escolheu ver tudo
+                    // não pode levar a pergunta de novo a cada abertura.
+                    if !ja_respondeu(&self.lembranca)
+                        && self.estudio_de_trabalho().is_none()
+                        && !self.estudios.is_empty()
+                    {
                         self.escolhendo_estudio = true;
                     }
                 }
@@ -816,6 +864,32 @@ impl Sessoes {
         self.estudios.iter().find(|e| e.id == lembrado)
     }
 
+    /// O estúdio que **recorta a lista** — `None` quando a máquina está em
+    /// "Todos os estúdios".
+    ///
+    /// 🔑 **Separado do estúdio de trabalho de propósito**: com "todos"
+    /// escolhido, criar sessão e abrir o caixa continuam no último estúdio
+    /// escolhido — não existe "criar sessão em todos".
+    fn estudio_do_recorte(&self) -> Option<&Estudio> {
+        if self.vendo_todos_os_estudios() {
+            return None;
+        }
+        self.estudio_de_trabalho()
+    }
+
+    /// A máquina está vendo as sessões de todos os estúdios?
+    pub fn vendo_todos_os_estudios(&self) -> bool {
+        lembranca(&self.lembranca).ver_todos
+    }
+
+    /// "Todos os estúdios": a lista deixa de ser recortada, e a pergunta da
+    /// entrada fica respondida.
+    pub fn escolher_todos_os_estudios(&mut self, cx: &mut Context<Self>) {
+        lembrar_todos(&self.lembranca);
+        self.escolhendo_estudio = false;
+        cx.notify();
+    }
+
     /// Abre a pergunta — é o clique no chip do estúdio.
     pub fn trocar_de_estudio(&mut self, cx: &mut Context<Self>) {
         if self.estudios.is_empty() {
@@ -972,44 +1046,104 @@ impl Sessoes {
                         Some(crate::recursos::Icone::Building2),
                         cx,
                     ))
-                    .child(gpui_component::v_flex().gap(px(8.)).children(
-                        self.estudios.iter().map(|estudio| {
-                            let id = estudio.id.clone();
-                            let escolhido = atual.as_deref() == Some(estudio.id.as_str());
-                            crate::estilo::opcao_do_dialogo(
-                                SharedString::from(format!("estudio-de-trabalho-{}", estudio.id)),
-                                cx,
-                            )
-                            .when(escolhido, |o| o.border_color(primaria))
-                            // 🖼️ Capa à esquerda, nome e cidade à direita — o
-                            // item de lista com avatar do shadcn.
-                            .flex_row()
-                            .items_center()
-                            .gap(px(12.))
-                            .child(self.capa_do_estudio(estudio, LADO_DA_CAPA as f32, cx))
+                    .child(
+                        gpui_component::v_flex()
+                            .gap(px(8.))
+                            // 🏢 **"Todos os estúdios", no topo** (dono,
+                            // 18/set/2026: *"tem que ter opção de trazer todos
+                            // os estúdios, pois tem sessões que foram criadas
+                            // sem definição de estúdio"*). No topo porque é a
+                            // saída de quem não sabe em qual procurar — e
+                            // porque é ela que mostra as sessões órfãs, que
+                            // atrapalham o fechamento do caixa.
                             .child(
-                                gpui_component::v_flex()
-                                    .gap(px(2.))
-                                    .items_start()
-                                    .child(
-                                        div()
-                                            .font_weight(gpui::FontWeight::MEDIUM)
-                                            .child(SharedString::from(estudio.nome.clone())),
-                                    )
-                                    .child(
-                                        div()
-                                            .text_xs()
-                                            .text_color(apagado)
-                                            .child(SharedString::from(estudio.cidade.clone())),
-                                    ),
+                                crate::estilo::opcao_do_dialogo(
+                                    SharedString::from("estudio-de-trabalho-todos"),
+                                    cx,
+                                )
+                                .when(self.vendo_todos_os_estudios(), |o| o.border_color(primaria))
+                                .flex_row()
+                                .items_center()
+                                .gap(px(12.))
+                                .child(
+                                    div()
+                                        .flex_none()
+                                        .size(px(LADO_DA_CAPA as f32))
+                                        .rounded(px(8.))
+                                        .bg(cx.theme().muted)
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .child(
+                                            gpui_component::Icon::new(
+                                                crate::recursos::Icone::Building2,
+                                            )
+                                            .size(px(18.))
+                                            .text_color(apagado),
+                                        ),
+                                )
+                                .child(
+                                    gpui_component::v_flex()
+                                        .gap(px(2.))
+                                        .items_start()
+                                        .child(
+                                            div()
+                                                .font_weight(gpui::FontWeight::MEDIUM)
+                                                .child("Todos os estúdios"),
+                                        )
+                                        .child(
+                                            div()
+                                                .text_xs()
+                                                .text_color(apagado)
+                                                .child("Inclusive as sessões sem estúdio definido"),
+                                        ),
+                                )
+                                .on_click(cx.listener(
+                                    move |tela, _ev, _window, cx| {
+                                        tela.escolher_todos_os_estudios(cx)
+                                    },
+                                )),
                             )
-                            .on_click(cx.listener(
-                                move |tela, _ev, _window, cx| {
-                                    tela.escolher_estudio_de_trabalho(&id, cx)
-                                },
-                            ))
-                        }),
-                    )),
+                            .children(self.estudios.iter().map(|estudio| {
+                                let id = estudio.id.clone();
+                                let escolhido = atual.as_deref() == Some(estudio.id.as_str());
+                                crate::estilo::opcao_do_dialogo(
+                                    SharedString::from(format!(
+                                        "estudio-de-trabalho-{}",
+                                        estudio.id
+                                    )),
+                                    cx,
+                                )
+                                .when(escolhido, |o| o.border_color(primaria))
+                                // 🖼️ Capa à esquerda, nome e cidade à direita — o
+                                // item de lista com avatar do shadcn.
+                                .flex_row()
+                                .items_center()
+                                .gap(px(12.))
+                                .child(self.capa_do_estudio(estudio, LADO_DA_CAPA as f32, cx))
+                                .child(
+                                    gpui_component::v_flex()
+                                        .gap(px(2.))
+                                        .items_start()
+                                        .child(
+                                            div()
+                                                .font_weight(gpui::FontWeight::MEDIUM)
+                                                .child(SharedString::from(estudio.nome.clone())),
+                                        )
+                                        .child(
+                                            div()
+                                                .text_xs()
+                                                .text_color(apagado)
+                                                .child(SharedString::from(estudio.cidade.clone())),
+                                        ),
+                                )
+                                .on_click(cx.listener(
+                                    move |tela, _ev, _window, cx| {
+                                        tela.escolher_estudio_de_trabalho(&id, cx)
+                                    },
+                                ))
+                            })),
+                    ),
             ),
         )
     }
@@ -1130,8 +1264,15 @@ impl Sessoes {
             // 🏢 **O estúdio desta máquina, e o clique que o troca.** Sem um
             // lugar visível para trocar, a escolha do primeiro dia viraria
             // definitiva — e o jeito de desfazê-la seria apagar o arquivo.
+            // 🔑 **Com "todos", o chip diz "todos"** — e continua ali. Sumir
+            // com ele deixaria a máquina sem o caminho de volta para um
+            // estúdio, que é o mesmo defeito de não ter chip nenhum.
             .when_some(
-                self.estudio_de_trabalho().map(|e| e.nome.clone()),
+                if self.vendo_todos_os_estudios() {
+                    Some("Todos os estúdios".to_string())
+                } else {
+                    self.estudio_de_trabalho().map(|e| e.nome.clone())
+                },
                 |barra, nome| {
                     barra.child(
                         estilo::botao_contorno("sessoes-estudio-de-trabalho", cx)
@@ -1504,7 +1645,21 @@ impl Sessoes {
                         .w(px(160.))
                         .flex_none()
                         .flex()
-                        .child(selo_da_situacao(sessao.situacao(agora), cx)),
+                        .gap(px(6.))
+                        .items_center()
+                        .child(selo_da_situacao(sessao.situacao(agora), cx))
+                        // 🏢 **A sessão sem estúdio é marcada aqui** (dono,
+                        // 18/set/2026: *"talvez alguma indicação no grid quando
+                        // a sessão estiver com esse problema, pois atrapalha
+                        // até o fechamento de caixa"*). Ela não entra em caixa
+                        // nenhum enquanto ninguém a corrigir, e é o cabeçalho
+                        // da galeria que corrige.
+                        .when(sessao.sem_estudio, |c| {
+                            c.child(
+                                crate::estilo::selo_colorido(crate::tema::cores::selo_ambar())
+                                    .child("Sem estúdio"),
+                            )
+                        }),
                 )
                 .child(numero(LARGURAS[0]).child(sessao.fotos.levadas_no_balcao.to_string()))
                 .child(numero(LARGURAS[1]).child(sessao.fotos.disponiveis.to_string()))
@@ -1965,6 +2120,89 @@ mod testes {
                 tela.escolher_estudio_de_trabalho("s2", cx);
                 let ids: Vec<String> = tela.para_o_core().into_iter().map(|s| s.id).collect();
                 assert_eq!(ids, vec!["g2".to_string(), "g3".to_string()]);
+                let _ = std::fs::remove_file(&tela.lembranca);
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🏢 **"Todos os estúdios": a lista inteira, e a sessão órfã marcada**
+    /// (dono, 18/set/2026: *"tem que ter opção de trazer todos os estúdios,
+    /// pois tem sessões que foram criadas sem definição de estúdio. Talvez
+    /// alguma indicação no grid quando a sessão estiver com esse problema, pois
+    /// atrapalha até o fechamento de caixa"*).
+    ///
+    /// 🔑 **O estúdio de trabalho sobrevive à escolha**: criar sessão e abrir o
+    /// caixa continuam no último escolhido — não existe "criar sessão em
+    /// todos".
+    #[gpui::test]
+    fn todos_os_estudios_mostra_a_lista_inteira_e_marca_a_sem_estudio(cx: &mut TestAppContext) {
+        let com_estudio = |id: &str, estudio: Option<&str>| {
+            let mut g = galeria(id, "Ensaio", None);
+            g.estudio_id = estudio.map(|e| e.to_string());
+            g
+        };
+        let publicador = Arc::new(PublicadorDeMentira {
+            galerias: Mutex::new(vec![
+                com_estudio("g1", Some("s1")),
+                com_estudio("g2", Some("s2")),
+                com_estudio("g3", None),
+            ]),
+            estudios: vec![
+                estudio(),
+                Estudio {
+                    id: "s2".into(),
+                    nome: "Canela".into(),
+                    cidade: "Canela".into(),
+                    foto: None,
+                },
+            ],
+            ..Default::default()
+        });
+        let janela = janela(cx, publicador);
+        com_sessao(cx, &janela);
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.escolher_estudio_de_trabalho("s1", cx);
+                assert_eq!(tela.para_o_core().len(), 2, "só Gramado e a órfã");
+
+                tela.escolher_todos_os_estudios(cx);
+                assert!(tela.vendo_todos_os_estudios());
+                assert!(
+                    !tela.perguntando_o_estudio(),
+                    "'todos' é resposta: a pergunta sai da tela"
+                );
+                let sessoes = tela.para_o_core();
+                assert_eq!(sessoes.len(), 3, "a lista inteira, de todos os estúdios");
+                let orfas: Vec<&str> = sessoes
+                    .iter()
+                    .filter(|s| s.sem_estudio)
+                    .map(|s| s.id.as_str())
+                    .collect();
+                assert_eq!(
+                    orfas,
+                    vec!["g3"],
+                    "e a sem estúdio vai marcada para a grade"
+                );
+
+                // 🔑 O estúdio de trabalho continua: é dele que sai a sessão
+                // nova e o caixa.
+                assert_eq!(
+                    tela.estudio_de_trabalho().map(|e| e.id.as_str()),
+                    Some("s1"),
+                    "'todos' recorta a lista, não muda onde se trabalha"
+                );
+                assert_eq!(
+                    super::estudio_lembrado(&tela.lembranca).as_deref(),
+                    Some("s1"),
+                    "e o caixa, que lê o arquivo (`estudio_de_trabalho_guardado`), \
+                     continua achando o estúdio"
+                );
+
+                // E voltar a um estúdio desliga o "todos".
+                tela.escolher_estudio_de_trabalho("s2", cx);
+                assert!(!tela.vendo_todos_os_estudios());
+                assert_eq!(tela.para_o_core().len(), 2);
                 let _ = std::fs::remove_file(&tela.lembranca);
             })
             .expect("a janela deve estar aberta");

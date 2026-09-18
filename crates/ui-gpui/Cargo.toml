@@ -128,6 +128,15 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_Wind
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18"
 
+# 🪟 **O ícone do `.exe`** — sem ele o Windows desenha a janela e a barra de
+# tarefas sem logo nenhuma (dono, 18/set/2026: *"no Windows não aparece a
+# logo"*). O GPUI carrega o **recurso de ícone de id 1** do próprio executável
+# (`platform/windows/platform.rs`, `load_icon`); quem o põe lá é este passo do
+# build. Fora do Windows a dependência é baixada e não faz nada — o `build.rs`
+# olha o alvo antes de agir.
+[build-dependencies]
+embed-resource = "3"
+
 [dev-dependencies]
 tempfile = "3.8"
 # `TestAppContext` — o substituto que o plano escolheu para os 146 testes de UI

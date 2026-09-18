@@ -109,6 +109,13 @@ pub struct SessaoFotografica {
     /// `None` na sessão vinda de uma API anterior ao campo — e isso é dito na
     /// soma, em vez de virar zero calado.
     pub totais: Option<Totais>,
+    /// 🏢 **A sessão não tem estúdio definido.**
+    ///
+    /// 🚨 **A grade precisa mostrar isso** (dono, 18/set/2026: *"tem sessões
+    /// que foram criadas sem definição de estúdio… atrapalha até o fechamento
+    /// de caixa"*): sem estúdio, a venda não entra no caixa de lugar nenhum, e
+    /// a sessão só aparece em "Todos os estúdios" — onde ninguém a procura.
+    pub sem_estudio: bool,
 }
 
 impl SessaoFotografica {
@@ -461,6 +468,7 @@ mod testes {
 
     fn sessao(titulo: &str) -> SessaoFotografica {
         SessaoFotografica {
+            sem_estudio: false,
             id: titulo.to_string(),
             titulo: titulo.to_string(),
             email: None,
@@ -762,6 +770,7 @@ mod testes_do_periodo {
 
     fn sessao(id: &str, criada_em_iso: &str) -> SessaoFotografica {
         SessaoFotografica {
+            sem_estudio: false,
             id: id.into(),
             titulo: format!("Ensaio {id}"),
             email: None,
