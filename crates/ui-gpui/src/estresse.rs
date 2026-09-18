@@ -567,9 +567,19 @@ fn estresse_as_paginas_percorrem_a_foto_inteira() {
 // ─────────────────────────────────────────────────── o app, com portas de mentira
 
 fn portas(publicador: Arc<PublicadorDeMentira>, gravador: Arc<GravadorDeMentira>) -> Portas {
+    portas_com(publicador, gravador, Arc::new(AcervoDeMentira::default()))
+}
+
+/// O mesmo, com o acervo de fora — é por ele que o estresse conta **quantas
+/// releituras** um lote provoca.
+fn portas_com(
+    publicador: Arc<PublicadorDeMentira>,
+    gravador: Arc<GravadorDeMentira>,
+    acervo: Arc<AcervoDeMentira>,
+) -> Portas {
     Portas {
         gravador,
-        acervo: Arc::new(AcervoDeMentira::default()),
+        acervo,
         exportador: Arc::new(ExportadorDeMentira::default()),
         publicador,
         colecoes: Arc::new(ColecoesDeMentira::default()),
@@ -632,18 +642,22 @@ fn estresse_a_biblioteca_com_dez_mil_fotos(cx: &mut TestAppContext) {
     let fotos: Vec<PhotoViewModel> = (0..N).map(|i| foto(i, false)).collect();
     let memoria_antes = memoria_em_mb();
 
+    // O acervo de mentira conta as releituras: é por ele que este cenário
+    // afirma que o lote não trava a Biblioteca.
+    let acervo = Arc::new(AcervoDeMentira::default());
     let janela = cronometrar(
         "abrir o app com 10.000 fotos",
         Duration::from_secs(5),
         || {
             cx.add_window({
                 let publicador = publicador.clone();
+                let acervo = acervo.clone();
                 move |window, cx| {
                     Aplicativo::ja_dentro(
                         fotos,
                         previews,
                         Vec::new(),
-                        portas(publicador, Arc::new(GravadorDeMentira::default())),
+                        portas_com(publicador, Arc::new(GravadorDeMentira::default()), acervo),
                         window,
                         cx,
                     )
@@ -731,7 +745,7 @@ fn estresse_a_biblioteca_com_dez_mil_fotos(cx: &mut TestAppContext) {
     // conta da espera continua sendo o lote todo: todas as respostas virão.
     assert_eq!(
         publicador.subidas().len(),
-        crate::app::EM_VOO,
+        crate::envios::EM_VOO,
         "só as primeiras saem; as outras esperam vaga"
     );
 
@@ -747,6 +761,17 @@ fn estresse_a_biblioteca_com_dez_mil_fotos(cx: &mut TestAppContext) {
         publicador.subidas().len(),
         sem_nota,
         "ao fim, subiram todas as que ganharam nota"
+    );
+
+    // 🚨 **A Biblioteca continua operável durante o lote** (dono, 18/set/2026:
+    // *"funcionou, mas o usuário não consegue operar a biblioteca durante a
+    // atualização das fotos"*). Reler o acervo é varrer o catálogo e refazer a
+    // grade **na thread que desenha**; uma releitura por resposta são 1.667
+    // varreduras de 10.000 fotos. Agrupadas, são poucas.
+    let releituras = *acervo.pedidos.lock().expect("os pedidos");
+    assert!(
+        releituras < sem_nota / 10,
+        "{releituras} releituras para {sem_nota} respostas — a grade está sendo refeita foto a foto"
     );
     janela
         .update(cx, |app, _window, cx| {
@@ -892,7 +917,7 @@ fn estresse_salvar_trezentas_na_galeria_com_desordem_e_falhas(cx: &mut TestAppCo
     // o lote inteiro: todas as respostas virão, uma vaga de cada vez.
     assert_eq!(
         publicador.reveladas().len(),
-        crate::app::EM_VOO,
+        crate::envios::EM_VOO,
         "só as primeiras saem; as outras esperam vaga"
     );
 
@@ -918,9 +943,9 @@ fn estresse_salvar_trezentas_na_galeria_com_desordem_e_falhas(cx: &mut TestAppCo
         let mut recados: Vec<_> =
             std::mem::take(&mut *publicador.guardados.lock().expect("guardados"));
         assert!(
-            recados.len() <= crate::app::EM_VOO,
+            recados.len() <= crate::envios::EM_VOO,
             "mais de {} fotos no ar: {}",
-            crate::app::EM_VOO,
+            crate::envios::EM_VOO,
             recados.len()
         );
         g.embaralhar(&mut recados);

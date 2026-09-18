@@ -25,6 +25,7 @@ mod e2e;
 pub mod encerramento;
 pub mod entrada;
 /// As peças do shadcn do site (botões, selos, cabeçalho de página).
+pub mod envios;
 pub mod estilo;
 /// O estresse: volume, repetição e desordem, com números medidos. Só testes.
 #[cfg(test)]

@@ -154,6 +154,7 @@ impl PedidoJson {
 /// levou. Soltos, viravam quatro posições seguidas em que trocar duas de lugar
 /// compila — `ordem` e `nota` são ambos numéricos e opcionais o bastante para
 /// isso passar batido numa revisão.
+#[derive(Debug, Clone)]
 pub struct FotoClassificada {
     pub foto_id: String,
     pub ordem: u32,

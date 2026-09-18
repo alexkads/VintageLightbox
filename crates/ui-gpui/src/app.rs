@@ -204,19 +204,10 @@ fn guardar_o_modo_do_cliente(em_janela: bool) {
     );
 }
 
-/// Quantas fotos o "Salvar na galeria" leva **em voo** ao mesmo tempo.
-///
-/// 🔑 **Três, e o número é o do site** (`editor.tsx`, `EM_VOO`). Cada foto é
-/// baixar (rede), decodificar e revelar (96 MB e a GPU, serializados pela fila
-/// do motor) e subir (rede). Com uma só, a GPU fica parada durante os segundos
-/// de rede de cada foto; com várias, o download de uma corre enquanto outra
-/// revela e uma terceira sobe.
-///
-/// ⚠️ **O teto é memória, não banda.** As que esperam a vez seguram o original
-/// comprimido — uns 30 MB cada. Três em voo é ~90 MB parados mais os 96 MB da
-/// que está sendo decodificada; subir isso para dez leva a máquina do balcão
-/// junto, que é onde este botão roda.
-pub(crate) const EM_VOO: usize = 3;
+/// De quanto em quanto tempo, no máximo, o acervo é relido enquanto um lote
+/// sobe. Duas vezes por segundo é o bastante para a grade acompanhar, e pouco o
+/// bastante para o teclado continuar respondendo.
+const RESPIRO_DA_RELEITURA: std::time::Duration = std::time::Duration::from_millis(450);
 
 /// Quanto tempo um toast fica na tela — os 4s do `sonner` do site.
 const DURACAO_DO_TOAST: std::time::Duration = std::time::Duration::from_secs(4);
@@ -602,25 +593,13 @@ pub struct Aplicativo {
     bruto_do_cliente: Option<(String, Arc<Vec<u8>>, u32, u32)>,
     /// A foto cuja cópia de trabalho foi pedida para a segunda tela.
     cliente_pedindo: Option<String>,
-    /// 📤 **A fila do passo 3**: as fotos classificadas que esperam vaga para
-    /// subir.
-    ///
-    /// 🚨 **Elas subiam todas de uma vez** — e uma sessão de 200 fotos
-    /// classificada em lote virava 200 tarefas simultâneas, cada uma
-    /// decodificando 24 MP (96 MB em RAM), revelando na GPU e subindo (dono,
-    /// 18/set/2026: *"essa sessão tinha 200 fotos e deu erro"*, com o site
-    /// respondendo *"formato de imagem não suportado"* — o que chega ao
-    /// servidor quando os bytes não são imagem). Mesmo teto do "Salvar na
-    /// galeria": [`EM_VOO`].
-    classificadas_a_subir:
-        std::collections::VecDeque<(String, crate::pos_venda::porta::FotoClassificada)>,
-    /// O que falta despachar do lote — as fotos que esperam a vez.
-    ///
-    /// 🚨 **O lote inteiro de uma vez estourava a memória** (dono, 18/set/2026,
-    /// ao salvar em segundo plano). Cada foto é baixar o original, **decodificar
-    /// 24 MP** (96 MB em RAM), revelar e subir; com vinte `spawn` de uma vez são
-    /// vinte originais na memória ao mesmo tempo. Ver [`EM_VOO`].
-    lote_a_despachar: std::collections::VecDeque<(String, Ajustes, CropSettings)>,
+    /// O adiamento da releitura do acervo — ver `pedir_releitura_do_acervo`.
+    _releitura_agendada: Option<Task<()>>,
+    /// O mesmo, para a galeria aberta.
+    _releitura_da_galeria: Option<Task<()>>,
+    /// 📤 **A esteira de envios** — a fila com teto que sobe as fotos em
+    /// segundo plano, e o que na web é o Worker. Ver `crate::envios`.
+    esteira: crate::envios::Esteira,
     /// O lote do "Salvar na galeria e sair" que está **no ar**:
     /// `(total, respondidas, alguma falhou)`.
     ///
@@ -1027,8 +1006,9 @@ impl Aplicativo {
             bruto_do_cliente: None,
             cliente_pedindo: None,
             lote_no_ar: None,
-            lote_a_despachar: std::collections::VecDeque::new(),
-            classificadas_a_subir: std::collections::VecDeque::new(),
+            esteira: crate::envios::Esteira::default(),
+            _releitura_agendada: None,
+            _releitura_da_galeria: None,
             baixas: resolucao_cheia::Baixas::nova(),
             tela: Tela::Biblioteca,
             foco,
@@ -1125,6 +1105,48 @@ impl Aplicativo {
     /// cada 100ms pelo resto da sessão; este morre na primeira resposta, e
     /// desiste depois de 30s — uma releitura que não volta deixa a grade como
     /// estava, que é o pior desfecho aceitável (ver [`Acervo::recarregar`]).
+    /// Pede uma releitura do acervo **agrupada** — no máximo uma por
+    /// [`RESPIRO_DA_RELEITURA`].
+    ///
+    /// 🚨 **Uma releitura por resposta travava a Biblioteca** (dono,
+    /// 18/set/2026: *"funcionou, mas o usuário não consegue operar a biblioteca
+    /// durante a atualização das fotos"*). Cada resposta do site marcava o
+    /// acervo como mudado, e reler é varrer o catálogo inteiro e refazer a
+    /// grade — com 200 fotos subindo são 200 varreduras na thread que desenha.
+    ///
+    /// 🔑 **O gesto do operador não espera o envio.** Agrupando, a grade se
+    /// atualiza umas duas vezes por segundo enquanto o lote sobe, e o teclado e
+    /// o mouse continuam respondendo: é o mesmo princípio do `mudando` da tela
+    /// da sessão, que já separava "trabalhar" de "esperar a rede".
+    fn pedir_releitura_do_acervo(&mut self, cx: &mut Context<Self>) {
+        if self._releitura_agendada.is_some() {
+            return;
+        }
+        self._releitura_agendada = Some(cx.spawn(async move |raiz, cx| {
+            cx.background_executor().timer(RESPIRO_DA_RELEITURA).await;
+            let _ = raiz.update(cx, |raiz, cx| {
+                raiz._releitura_agendada = None;
+                raiz.reler_o_acervo(cx);
+            });
+        }));
+    }
+
+    /// Pede uma releitura da **galeria aberta**, agrupada como a do acervo.
+    fn pedir_releitura_da_galeria(&mut self, cx: &mut Context<Self>) {
+        if self._releitura_da_galeria.is_some() {
+            return;
+        }
+        self._releitura_da_galeria = Some(cx.spawn(async move |raiz, cx| {
+            cx.background_executor().timer(RESPIRO_DA_RELEITURA).await;
+            let _ = raiz.update(cx, |raiz, cx| {
+                raiz._releitura_da_galeria = None;
+                if let Some(galeria) = raiz.sessao_aberta.clone() {
+                    raiz.detalhe.update(cx, |tela, cx| tela.entrar(galeria, cx));
+                }
+            });
+        }));
+    }
+
     fn reler_o_acervo(&mut self, cx: &mut Context<Self>) {
         self.acervo.recarregar(self.releituras.0.clone());
 
@@ -1896,27 +1918,28 @@ impl Aplicativo {
             };
 
             for (ordem, id) in evento.subiram.iter().enumerate() {
-                self.classificadas_a_subir.push_back((
-                    galeria.clone(),
-                    crate::pos_venda::porta::FotoClassificada {
-                        foto_id: id.clone(),
-                        ordem: ordem as u32,
-                        // 🔑 `None`: quem classifica não escolheu leva nenhuma,
-                        // e o estado sai da tecla `B` de cada foto. A escolha
-                        // por lote existe na tela da sessão, onde ela é o gesto.
-                        estado: None,
-                        // 🚨 **A nota vem do evento, e não do banco.** Ver
-                        // `Classificou::nota`: a gravação dela ainda pode estar
-                        // correndo quando o envio lê a linha da foto.
-                        nota: evento.nota,
-                        // 🧾 **A faixa escolhida na barra de envio da sessão.**
-                        // É a primeira das duas escolhas antes dos arquivos, no
-                        // site; sem ela, a leva inteira subia no padrão da
-                        // galeria e a sessão mista tinha de ser corrigida foto a
-                        // foto depois.
-                        produto_id: self.detalhe.read(cx).faixa().map(str::to_string),
-                    },
-                ));
+                self.esteira
+                    .empurrar(crate::envios::Trabalho::Classificada {
+                        galeria: galeria.clone(),
+                        foto: Box::new(crate::pos_venda::porta::FotoClassificada {
+                            foto_id: id.clone(),
+                            ordem: ordem as u32,
+                            // 🔑 `None`: quem classifica não escolheu leva nenhuma,
+                            // e o estado sai da tecla `B` de cada foto. A escolha
+                            // por lote existe na tela da sessão, onde ela é o gesto.
+                            estado: None,
+                            // 🚨 **A nota vem do evento, e não do banco.** Ver
+                            // `Classificou::nota`: a gravação dela ainda pode estar
+                            // correndo quando o envio lê a linha da foto.
+                            nota: evento.nota,
+                            // 🧾 **A faixa escolhida na barra de envio da sessão.**
+                            // É a primeira das duas escolhas antes dos arquivos, no
+                            // site; sem ela, a leva inteira subia no padrão da
+                            // galeria e a sessão mista tinha de ser corrigida foto a
+                            // foto depois.
+                            produto_id: self.detalhe.read(cx).faixa().map(str::to_string),
+                        }),
+                    });
             }
             esperadas += evento.subiram.len();
         }
@@ -1925,7 +1948,8 @@ impl Aplicativo {
         self.esperar_o_site(PedidoDeFoto::SubirClassificada, esperadas, cx);
         // ⚠️ **A conta da espera é o lote inteiro; o despacho é de três em
         // três.** Todas as respostas virão — só não ao mesmo tempo.
-        self.despachar_classificadas(&sessao);
+        let _ = &sessao;
+        self.despachar_os_envios(cx);
     }
 
     /// Espera a resposta de `quantas` pedidos do mesmo tipo, na conta certa.
@@ -1984,11 +2008,11 @@ impl Aplicativo {
             // `saturating_sub` é o que impede uma resposta a mais (um recado
             // que ninguém pediu) de a fazer dar a volta.
             self.sincronias_pendentes = self.sincronias_pendentes.saturating_sub(1);
-            // 📤 Uma resposta chegou: abriu vaga para a próxima classificada.
-            if !self.classificadas_a_subir.is_empty() {
-                if let Some(sessao) = self.sessao().cloned() {
-                    self.despachar_classificadas(&sessao);
-                }
+            // 📤 Uma resposta chegou: a esteira abre uma vaga e manda a
+            // próxima. Quem reabastece é a resposta, nunca o relógio.
+            self.esteira.uma_respondeu(false);
+            if self.esteira.andando() {
+                self.despachar_os_envios(cx);
             }
             match recado {
                 PosVendaRecado::Sincronizou => {
@@ -2019,9 +2043,11 @@ impl Aplicativo {
                     self.gravador.esquecer_do_site(foto_no_site);
                     self.ultimo_envio = Some(chrono::Utc::now().timestamp());
                     self.recontar_o_que_falta_subir(cx);
-                    if let Some(galeria) = self.sessao_aberta.clone() {
-                        self.detalhe.update(cx, |tela, cx| tela.entrar(galeria, cx));
-                    }
+                    // ⚠️ **Uma releitura da galeria por foto é uma ida à rede
+                    // por foto** — com um lote de vinte, vinte aberturas
+                    // completas enquanto o operador tenta trabalhar. A releitura
+                    // é agrupada pelo mesmo motivo da do acervo.
+                    self.pedir_releitura_da_galeria(cx);
                     // 🚨 **Quem avisa é o fim do lote, e não cada foto**: com
                     // vinte no ar seriam vinte toasts, e o operador já está com
                     // o próximo cliente. `contar_o_salvar` vem **depois** da
@@ -2053,7 +2079,10 @@ impl Aplicativo {
             // 🔑 A releitura é o que traz o id remoto para a tela. Sem ela a foto
             // está no site e a grade não sabe — e o próximo gesto que dependa
             // disso (tirar do storage, negociar) não teria em quem cair.
-            self.reler_o_acervo(cx);
+            //
+            // ⚠️ **Agrupada**: uma por resposta travava a Biblioteca no meio de
+            // um lote grande. Ver `pedir_releitura_do_acervo`.
+            self.pedir_releitura_do_acervo(cx);
         }
         // Uma só rodada de colheita por resposta: quem manda mais fotos religa
         // o laço.
@@ -2267,50 +2296,19 @@ impl Aplicativo {
         cx.notify();
     }
 
-    /// Manda para o site as próximas **classificadas**, até [`EM_VOO`] no ar.
+    /// Manda para o site os próximos trabalhos da esteira — até `EM_VOO` no ar.
     ///
-    /// 🔑 **Quem reabastece é a resposta** (`colher_sincronia`): cada foto que
-    /// volta abre uma vaga. O contador de sincronias já é do lote inteiro, e é
-    /// por ele que a bandeja e o G9 sabem que ainda há envio.
-    fn despachar_classificadas(&mut self, sessao: &domain::services::pos_venda::Sessao) {
-        let em_voo = self
-            .sincronias_pendentes
-            .saturating_sub(self.classificadas_a_subir.len());
-        for _ in em_voo..EM_VOO {
-            let Some((galeria, foto)) = self.classificadas_a_subir.pop_front() else {
-                return;
-            };
-            self.publicador.subir_classificada(
-                sessao.clone(),
-                galeria,
-                foto,
-                self.sincronias.0.clone(),
-            );
-        }
-    }
-
-    /// Manda para o site as próximas do lote, até [`EM_VOO`] no ar.
-    ///
-    /// 🔑 **Quem reabastece é a resposta**: cada foto que volta abre uma vaga.
-    /// Sem isto o lote de trezentas viraria trezentos downloads simultâneos —
-    /// que foi o que estourou a memória.
-    fn despachar_do_lote(&mut self, sessao: &domain::services::pos_venda::Sessao) {
-        let em_voo = self
-            .lote_no_ar
-            .map(|(total, feitas, _)| total.saturating_sub(feitas + self.lote_a_despachar.len()))
-            .unwrap_or(0);
-        for _ in em_voo..EM_VOO {
-            let Some((no_site, ajustes, corte)) = self.lote_a_despachar.pop_front() else {
-                return;
-            };
-            self.publicador.salvar_revelacao(
-                sessao.clone(),
-                no_site,
-                ajustes,
-                corte,
-                self.sincronias.0.clone(),
-            );
-        }
+    /// 🔑 **É a única porta de saída dos envios com imagem**: o passo 3 e o
+    /// "Salvar na galeria" empurram trabalhos, e quem decide *quando* eles saem
+    /// é a esteira. Ver `crate::envios`.
+    fn despachar_os_envios(&mut self, cx: &mut Context<Self>) {
+        let Some(sessao) = self.sessao().cloned() else {
+            return;
+        };
+        let canal = self.sincronias.0.clone();
+        self.esteira
+            .despachar(self.publicador.as_ref(), &sessao, &canal);
+        cx.notify();
     }
 
     /// Uma resposta do lote do "Salvar e sair" chegou.
@@ -2328,14 +2326,9 @@ impl Aplicativo {
         *falha |= falhou;
         let (total, feitas, falha) = (*total, *feitas, *falha);
         if feitas < total {
-            // Uma resposta chegou: abriu vaga para a próxima do lote.
-            if let Some(sessao) = self.sessao().cloned() {
-                self.despachar_do_lote(&sessao);
-            }
             return;
         }
         self.lote_no_ar = None;
-        self.lote_a_despachar.clear();
         // ⚠️ **Falha não vira toast aqui**: cada recusa já foi para o canto dos
         // envios com a frase do site, que é onde o operador a encontra depois.
         // Um toast a mais diria a mesma coisa num lugar que some.
@@ -3250,9 +3243,9 @@ impl Aplicativo {
             .update(cx, |tela, _cx| tela.gravar_o_que_estiver_pendente());
         self.guardar_as_receitas_do_site(cx);
 
-        let Some(sessao) = self.sessao().cloned() else {
+        if self.sessao().is_none() {
             return;
-        };
+        }
 
         // A aberta primeiro, quando ela é do site; e em seguida as que o
         // "Sincronizar" deixou só com a receita, das duas procedências.
@@ -3298,11 +3291,17 @@ impl Aplicativo {
 
         let quantas = lote.len();
         self.lote_no_ar = Some((quantas, 0, false));
-        self.lote_a_despachar = lote.into_iter().collect();
+        for (no_site, ajustes, corte) in lote {
+            self.esteira.empurrar(crate::envios::Trabalho::Revelacao {
+                foto_no_site: no_site,
+                ajustes: Box::new(ajustes),
+                corte,
+            });
+        }
         // ⚠️ **A conta da espera é o lote inteiro**, e não o que está em voo: o
         // contador do canto e o G9 falam de respostas, e todas virão.
         self.esperar_o_site(PedidoDeFoto::SalvarRevelacao, quantas, cx);
-        self.despachar_do_lote(&sessao);
+        self.despachar_os_envios(cx);
         // 🚨 **O editor fecha agora, e o lote sobe atrás** (dono, 18/set/2026:
         // *"precisa acontecer em segundo plano e não pode travar o fluxo,
         // devendo continuar na tela de sessão de fotos; esse comportamento é
