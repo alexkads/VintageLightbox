@@ -725,17 +725,29 @@ fn estresse_a_biblioteca_com_dez_mil_fotos(cx: &mut TestAppContext) {
         .expect("a janela aberta");
 
     let sem_nota = (0..N).filter(|i| i.is_multiple_of(6)).count();
+    // 🚨 **Três no ar, e não 1.667** (dono, 18/set/2026: *"essa sessão tinha 200
+    // fotos e deu erro"*). Cada foto no ar é um original decodificado — 96 MB em
+    // RAM —, e o lote inteiro de uma vez levava a máquina do balcão junto. A
+    // conta da espera continua sendo o lote todo: todas as respostas virão.
+    assert_eq!(
+        publicador.subidas().len(),
+        crate::app::EM_VOO,
+        "só as primeiras saem; as outras esperam vaga"
+    );
+
+    // O site respondeu na hora (a mentira não demora): a próxima colheita zera —
+    // e é ela que vai abrindo as vagas até a última.
+    cronometrar("colher as respostas", Duration::from_secs(5), || {
+        for _ in 0..40 {
+            cx.executor().advance_clock(Duration::from_millis(300));
+            cx.run_until_parked();
+        }
+    });
     assert_eq!(
         publicador.subidas().len(),
         sem_nota,
-        "subiram as que ganharam nota"
+        "ao fim, subiram todas as que ganharam nota"
     );
-
-    // O site respondeu na hora (a mentira não demora): a próxima colheita zera.
-    cronometrar("colher as respostas", Duration::from_secs(2), || {
-        cx.executor().advance_clock(Duration::from_millis(300));
-        cx.run_until_parked();
-    });
     janela
         .update(cx, |app, _window, cx| {
             assert_eq!(app.sincronias_pendentes(), 0, "o contador voltou a zero");

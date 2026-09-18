@@ -602,6 +602,18 @@ pub struct Aplicativo {
     bruto_do_cliente: Option<(String, Arc<Vec<u8>>, u32, u32)>,
     /// A foto cuja cópia de trabalho foi pedida para a segunda tela.
     cliente_pedindo: Option<String>,
+    /// 📤 **A fila do passo 3**: as fotos classificadas que esperam vaga para
+    /// subir.
+    ///
+    /// 🚨 **Elas subiam todas de uma vez** — e uma sessão de 200 fotos
+    /// classificada em lote virava 200 tarefas simultâneas, cada uma
+    /// decodificando 24 MP (96 MB em RAM), revelando na GPU e subindo (dono,
+    /// 18/set/2026: *"essa sessão tinha 200 fotos e deu erro"*, com o site
+    /// respondendo *"formato de imagem não suportado"* — o que chega ao
+    /// servidor quando os bytes não são imagem). Mesmo teto do "Salvar na
+    /// galeria": [`EM_VOO`].
+    classificadas_a_subir:
+        std::collections::VecDeque<(String, crate::pos_venda::porta::FotoClassificada)>,
     /// O que falta despachar do lote — as fotos que esperam a vez.
     ///
     /// 🚨 **O lote inteiro de uma vez estourava a memória** (dono, 18/set/2026,
@@ -1016,6 +1028,7 @@ impl Aplicativo {
             cliente_pedindo: None,
             lote_no_ar: None,
             lote_a_despachar: std::collections::VecDeque::new(),
+            classificadas_a_subir: std::collections::VecDeque::new(),
             baixas: resolucao_cheia::Baixas::nova(),
             tela: Tela::Biblioteca,
             foco,
@@ -1883,8 +1896,7 @@ impl Aplicativo {
             };
 
             for (ordem, id) in evento.subiram.iter().enumerate() {
-                self.publicador.subir_classificada(
-                    sessao.clone(),
+                self.classificadas_a_subir.push_back((
                     galeria.clone(),
                     crate::pos_venda::porta::FotoClassificada {
                         foto_id: id.clone(),
@@ -1904,14 +1916,16 @@ impl Aplicativo {
                         // foto depois.
                         produto_id: self.detalhe.read(cx).faixa().map(str::to_string),
                     },
-                    self.sincronias.0.clone(),
-                );
+                ));
             }
             esperadas += evento.subiram.len();
         }
 
         // Tirar e subir são os dois envio: uma conta só.
         self.esperar_o_site(PedidoDeFoto::SubirClassificada, esperadas, cx);
+        // ⚠️ **A conta da espera é o lote inteiro; o despacho é de três em
+        // três.** Todas as respostas virão — só não ao mesmo tempo.
+        self.despachar_classificadas(&sessao);
     }
 
     /// Espera a resposta de `quantas` pedidos do mesmo tipo, na conta certa.
@@ -1970,6 +1984,12 @@ impl Aplicativo {
             // `saturating_sub` é o que impede uma resposta a mais (um recado
             // que ninguém pediu) de a fazer dar a volta.
             self.sincronias_pendentes = self.sincronias_pendentes.saturating_sub(1);
+            // 📤 Uma resposta chegou: abriu vaga para a próxima classificada.
+            if !self.classificadas_a_subir.is_empty() {
+                if let Some(sessao) = self.sessao().cloned() {
+                    self.despachar_classificadas(&sessao);
+                }
+            }
             match recado {
                 PosVendaRecado::Sincronizou => {
                     self.ultimo_envio = Some(chrono::Utc::now().timestamp());
@@ -2245,6 +2265,28 @@ impl Aplicativo {
         };
         self.atualizar_o_cliente(true, cx);
         cx.notify();
+    }
+
+    /// Manda para o site as próximas **classificadas**, até [`EM_VOO`] no ar.
+    ///
+    /// 🔑 **Quem reabastece é a resposta** (`colher_sincronia`): cada foto que
+    /// volta abre uma vaga. O contador de sincronias já é do lote inteiro, e é
+    /// por ele que a bandeja e o G9 sabem que ainda há envio.
+    fn despachar_classificadas(&mut self, sessao: &domain::services::pos_venda::Sessao) {
+        let em_voo = self
+            .sincronias_pendentes
+            .saturating_sub(self.classificadas_a_subir.len());
+        for _ in em_voo..EM_VOO {
+            let Some((galeria, foto)) = self.classificadas_a_subir.pop_front() else {
+                return;
+            };
+            self.publicador.subir_classificada(
+                sessao.clone(),
+                galeria,
+                foto,
+                self.sincronias.0.clone(),
+            );
+        }
     }
 
     /// Manda para o site as próximas do lote, até [`EM_VOO`] no ar.
