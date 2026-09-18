@@ -2479,6 +2479,13 @@ impl Aplicativo {
 
         self.revelacao
             .update(cx, |tela, cx| tela.aplicar_sincronizadas(&gravadas, cx));
+        // 🚨 **As prévias locais das zeradas somem** — senão o gesto muda o
+        // banco e não muda a tela, que é a mesma queixa do "Sincronizar" pelo
+        // avesso: a miniatura continuaria mostrando a receita que acabou de ser
+        // desfeita (dono, 18/set/2026).
+        for (id, _, _) in &gravadas {
+            self.esquecer_a_previa_local(id, cx);
+        }
         self.reler_o_acervo(cx);
         self.recontar_o_que_falta_subir(cx);
         self.avisar_onde_esta_olhando(
@@ -2489,6 +2496,29 @@ impl Aplicativo {
             cx,
         );
         cx.notify();
+    }
+
+    /// A prévia revelada local desta foto não vale mais: sai do cache e as três
+    /// telas que a mostram relêem.
+    ///
+    /// 🔑 **Uma função só para os dois sentidos.** Ela nasce quando a Revelação
+    /// grava (`guardar_a_revelada_no_cache`) e morre em três situações: a foto
+    /// subiu (o servidor passou a ser mais novo), a receita voltou ao neutro, ou
+    /// o lote foi zerado. Nas três, quem desenha precisa ser avisado — senão a
+    /// tela continua mostrando o que já não existe.
+    fn esquecer_a_previa_local(&mut self, foto_id: &str, cx: &mut Context<Self>) {
+        self.previews
+            .apagar(&persistencia::chave_da_revelada(foto_id));
+        self.revelacao
+            .update(cx, |tela, cx| tela.miniatura_reposta(foto_id, cx));
+        // A grade fala o id **do site**, sem o prefixo do acervo.
+        let na_grade = persistencia::id_no_site(foto_id)
+            .unwrap_or(foto_id)
+            .to_string();
+        self.detalhe
+            .update(cx, |tela, _| tela.revelada_chegou(&na_grade));
+        self.nova_sessao
+            .update(cx, |tela, _| tela.revelada_chegou(&na_grade));
     }
 
     /// Abre ou fecha a segunda tela — a janela que se vira para o cliente.

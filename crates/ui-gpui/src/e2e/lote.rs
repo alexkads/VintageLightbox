@@ -636,3 +636,113 @@ fn sincronizar_pede_a_previa_local_das_marcadas(cx: &mut TestAppContext) {
         );
     });
 }
+
+/// 🎬 **"Zerar N fotos" com a tira marcada** — o que o botão promete, e o que
+/// a tela mostra depois.
+///
+/// 🚨 **Dono, 18/set/2026**: *"o 'Zerar tudo' precisa fazer exatamente como
+/// acontece na WEB: quando selecionadas as fotos no filmstrip, precisa zerar as
+/// selecionadas e atualizar as miniaturas"*. A primeira metade já valia — a
+/// segunda não: o banco voltava ao neutro e a miniatura continuava mostrando a
+/// receita que acabara de ser desfeita, porque a prévia local (a mesma que faz
+/// o "Sincronizar" aparecer) ficava para trás.
+///
+/// O cenário estressa as seis coisas que o gesto toca de uma vez:
+/// o rótulo do botão, quem entra no lote, o enquadramento, o histórico da
+/// aberta, a prévia local de cada uma e a fila de envio.
+#[gpui::test]
+fn zerar_as_marcadas_limpa_receita_enquadramento_e_previas(cx: &mut TestAppContext) {
+    let e = abrir_o_ensaio(cx, Cenario::default());
+    e.revelar_a_do_site(cx, "a");
+    e.revelacao(cx, |tela, _w, cx| tela.arrastar_slider(0, 0.9, cx));
+    e.esperar(cx);
+    // Um enquadramento na aberta: o "Zerar" promete levá-lo junto.
+    e.teclar(cx, "r ] enter");
+    e.revelacao(cx, |tela, _w, _cx| {
+        assert_eq!(tela.enquadramento().rotation_90(), 1)
+    });
+
+    // A tira inteira marcada, e a receita copiada para ela.
+    e.teclar(cx, "cmd-a");
+    botao(&e, cx, PedidoDaRevelacao::Sincronizar);
+    e.esperar(cx);
+
+    // As prévias locais existem — é o estado de quem acabou de sincronizar.
+    for id in ["site:a", "site:b", "site:d"] {
+        e.previews
+            .save_thumbnail(
+                &crate::revelacao::persistencia::chave_da_revelada(id),
+                &image::DynamicImage::ImageRgb8(image::RgbImage::new(8, 8)),
+            )
+            .expect("gravar a prévia local");
+    }
+
+    // O botão conta esta **e** as marcadas — o `quantasFotos` do site.
+    e.revelacao(cx, |tela, _w, _cx| {
+        assert!(
+            tela.outras_a_zerar().len() >= 3,
+            "as marcadas com receita entram no lote"
+        );
+        assert!(
+            !tela.outras_a_zerar().iter().any(|f| f.id == "site:c"),
+            "a comprada não se zera"
+        );
+    });
+
+    e.revelacao(cx, |tela, window, cx| tela.clicar_em_zerar_tudo(window, cx));
+    e.esperar(cx);
+
+    // 1 · A aberta voltou ao neutro, com enquadramento e tudo — e dá `⌘Z`.
+    e.revelacao(cx, |tela, _w, _cx| {
+        assert_eq!(tela.ajustes().exposure, 0.0);
+        assert_eq!(tela.enquadramento().rotation_90(), 0);
+        assert!(tela.pode_desfazer(), "esta volta pelo ⌘Z");
+        assert!(
+            tela.outras_a_zerar().is_empty(),
+            "e as outras também zeraram"
+        );
+    });
+
+    // 2 · O banco recebeu o neutro de cada uma.
+    let zeradas: Vec<String> = e
+        .gravador
+        .gravado()
+        .into_iter()
+        .filter(|(_, ajustes, corte)| {
+            *ajustes == crate::revelacao::processador::Ajustes::default()
+                && corte.largura == Some(1.0)
+        })
+        .map(|(id, _, _)| id)
+        .collect();
+    for id in ["site:a", "site:b", "site:d"] {
+        assert!(zeradas.contains(&id.to_string()), "{id} voltou ao neutro");
+    }
+    assert!(
+        !zeradas.contains(&"site:c".to_string()),
+        "a comprada ficou de fora do banco também"
+    );
+
+    // 3 · 🚨 E as miniaturas: sem isto o gesto muda o banco e não muda a tela.
+    for id in ["site:a", "site:b", "site:d"] {
+        assert!(
+            !e.previews.tem(
+                &crate::revelacao::persistencia::chave_da_revelada(id),
+                PreviewType::Thumbnail
+            ),
+            "{id} ainda mostra a receita desfeita"
+        );
+    }
+
+    // 4 · O neutro também precisa subir — e sobe pelos dois caminhos: as
+    // marcadas pela fila da raiz, a aberta pelo depósito do gravador (foi a
+    // própria tela que a zerou, pelo histórico).
+    e.app(cx, |app, _w, _cx| {
+        let mut fila = app.a_subir_para_teste();
+        fila.sort();
+        assert_eq!(fila, vec!["b", "d"], "as marcadas");
+    });
+    assert!(
+        e.gravador.deposito().iter().any(|(id, _)| id == "a"),
+        "e a aberta, pelo depósito: o Salvar leva as duas listas"
+    );
+}

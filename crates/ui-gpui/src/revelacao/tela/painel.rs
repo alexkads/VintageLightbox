@@ -234,6 +234,15 @@ impl Revelacao {
         self.atualizar_exibicao();
         self.historico.registrar(self.estado());
         self.gravar();
+        // 🚨 **A prévia local vai junto.** Ela é o que a grade e a tira mostram
+        // enquanto a foto não sobe; deixá-la aqui faria o "Zerar tudo" mudar o
+        // palco e não mudar a miniatura ao lado dele — a mesma foto com duas
+        // caras, agora ao contrário (dono, 18/set/2026). Neutro apaga: ver
+        // `guardar_a_revelada_no_cache`.
+        self.guardar_a_revelada_no_cache();
+        if let Some(id) = self.foto_aberta().map(|f| f.id.clone()) {
+            self.esquecer_a_miniatura_da_tira(&id);
+        }
         cx.notify();
     }
 

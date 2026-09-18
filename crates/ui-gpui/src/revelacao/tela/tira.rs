@@ -569,6 +569,12 @@ impl Revelacao {
             .collect()
     }
 
+    /// Esquece a miniatura desta foto na memória da tira — a próxima passada
+    /// relê do cache. É o que faz o "Zerar tudo" aparecer na tira.
+    pub(crate) fn esquecer_a_miniatura_da_tira(&mut self, foto_id: &str) {
+        self.miniaturas_da_tira.esquecer(foto_id);
+    }
+
     /// A miniatura desta foto voltou ao cache: a célula da tira pode reler.
     pub fn miniatura_reposta(&mut self, foto_id: &str, cx: &mut Context<Self>) {
         self.miniaturas_da_tira.esquecer(foto_id);
