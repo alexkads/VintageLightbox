@@ -340,6 +340,44 @@ A assinatura minisign da atualização é **independente disso** e continua vale
 assinaturas com propósitos diferentes — a da Apple diz ao Gatekeeper quem publicou; a nossa diz ao
 app instalado que o pacote é o mesmo que saiu daqui.
 
+### 🔑 O Keychain pedindo a senha a cada versão nova
+
+> *"Tem como evitar esse negócio de pedir credencial toda vez que instalar uma nova versão no Mac?"*
+> — dono, 18/set/2026
+
+**Tem, e a causa é a assinatura.** O app guarda o par de tokens no chaveiro do sistema
+(`infrastructure::pos_venda::cofre`), e o macOS prende cada item do chaveiro ao **programa** que o
+criou — identificado pela assinatura de código. Sem certificado, o `cargo-packager` assina *ad-hoc*,
+e aí o requisito do binário é o **hash dele**:
+
+```text
+# ad-hoc, duas builds do mesmo código
+designated => cdhash H"a71e355d8a2af19f15d6b7e33ca1a0516c8676ac"
+designated => cdhash H"f38f5514b591dfb3477116e33fc36a71d4f09e97"
+
+# assinado com um certificado
+designated => identifier "br.com.recordarfotos.vintagelightbox" and anchor apple generic
+              and certificate leaf[subject.CN] = "Apple Development: …"
+```
+
+O hash muda a cada build; o certificado, não. Por isso o "Sempre Permitir" nunca vale para a próxima
+versão — aos olhos do sistema ela é **outro programa**.
+
+Dois caminhos, e eles não competem:
+
+| | O que resolve | O que não resolve |
+|---|---|---|
+| `--assinar-aqui` (Apple Development) | o Keychain para de perguntar **nas máquinas do time** | o Gatekeeper de qualquer outro Mac recusa o `.dmg` |
+| `--assinar` (Developer ID + notarização) | o Keychain **e** o Gatekeeper, em qualquer Mac | exige o Apple Developer Program |
+
+⚠️ **O `.app` e o `.dmg` gerados com `--assinar-aqui` não se distribuem.** Eles são para a máquina
+que gera e confere — que é exatamente onde o incômodo aparece, porque é lá que se instala versão
+nova dez vezes por dia.
+
+⚠️ **O app Tauri tem o mesmo item de chaveiro e o mesmo problema**, com serviço próprio
+(`…vintagelightbox.tauri`, ver `CofreDoSistema::com_servico`): o bundler dele também lê
+`APPLE_SIGNING_IDENTITY`.
+
 ## Trocar o ícone
 
 Troque `icones/icone-mestre.png` (quadrado, mínimo 1024×1024) e rode `./scripts/gerar-icones.sh`. O

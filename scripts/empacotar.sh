@@ -23,6 +23,9 @@
 #
 # Opções:
 #   --assinar     assina e notariza o macOS (exige Developer ID + credenciais)
+#   --assinar-aqui  assina com a identidade "Apple Development" desta máquina —
+#                 é o que faz o Keychain parar de pedir a senha a cada versão
+#                 nova (ver "Assinatura do macOS", abaixo). **Não distribui.**
 #   --limpo       apaga dist/ antes
 #   --seco        mostra o que faria, sem compilar nada
 #
@@ -49,11 +52,12 @@ BIN="ui-gpui"
 #    guarde uma cópia em lugar seguro.
 CHAVE="${VLB_CHAVE_ATUALIZACAO:-$HOME/.vintagelightbox/atualizacao.key}"
 
-ASSINAR=0; LIMPO=0; SECO=0; ALVOS=()
+ASSINAR=0; ASSINAR_AQUI=0; LIMPO=0; SECO=0; ALVOS=()
 
 for arg in "$@"; do
   case "$arg" in
     --assinar) ASSINAR=1 ;;
+    --assinar-aqui) ASSINAR_AQUI=1 ;;
     --limpo)   LIMPO=1 ;;
     --seco)    SECO=1 ;;
     -h|--help) sed -n '2,32p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -97,6 +101,44 @@ conferir_versao() {
 #    máquina do próprio time, e o Gatekeeper recusa em qualquer outra. Para um
 #    .dmg que o fotógrafo abre é preciso "Developer ID Application", que é outro
 #    certificado, emitido no Apple Developer Program.
+# ── A senha do Keychain a cada versão nova ───────────────────────────────────
+#
+# 🚨 **A causa é a assinatura ad-hoc** (dono, 18/set/2026: *"tem como evitar
+#    esse negócio de pedir credencial toda vez que instalar uma nova versão no
+#    Mac?"*).
+#
+#    O app guarda o par de tokens no Keychain (`infrastructure::pos_venda::
+#    cofre`), e o macOS prende cada item do chaveiro ao **programa** que o
+#    criou — identificado pela assinatura de código. Sem certificado, o
+#    `cargo-packager` assina ad-hoc: o `cdhash` muda a cada build, e o sistema
+#    vê um programa **diferente** a cada versão. Daí o "permitir uma vez /
+#    sempre permitir" voltar a aparecer em toda instalação, e o "sempre" nunca
+#    valer para a próxima.
+#
+#    Assinado com um certificado, o requisito passa a ser o certificado — que
+#    não muda entre versões —, e o chaveiro reconhece o app novo como o mesmo.
+#
+# 🔑 **"Apple Development" resolve nas máquinas do time, e só nelas.** É o que
+#    existe aqui hoje; para o .dmg que o fotógrafo baixa continua sendo preciso
+#    "Developer ID Application" + notarização (`--assinar`).
+identidade_desta_maquina() {
+  security find-identity -v -p codesigning 2>/dev/null \
+    | sed -n 's/.*"\(Apple Development:.*\)"/\1/p' | head -1
+}
+
+conferir_assinatura_local() {
+  local ident="${APPLE_SIGNING_IDENTITY:-$(identidade_desta_maquina)}"
+  if [[ -z "$ident" ]]; then
+    erro "--assinar-aqui pedido, mas não há certificado de assinatura no chaveiro."
+    echo "   Xcode → Settings → Accounts → Manage Certificates → + Apple Development."
+    exit 1
+  fi
+  export APPLE_SIGNING_IDENTITY="$ident"
+  echo "   assinando para esta máquina: $ident"
+  aviso "isto NÃO distribui: o Gatekeeper de outro Mac recusa 'Apple Development'."
+  echo  "     Serve para o Keychain parar de pedir a senha a cada versão nova."
+}
+
 conferir_assinatura() {
   local ident="${APPLE_SIGNING_IDENTITY:-}"
   if [[ -z "$ident" ]]; then
@@ -372,6 +414,7 @@ MOTIVO
 diga "VintageLightbox — gerador de instaladores"
 conferir_versao
 [[ $ASSINAR -eq 1 ]] && conferir_assinatura
+[[ $ASSINAR_AQUI -eq 1 ]] && conferir_assinatura_local
 [[ $LIMPO -eq 1 ]] && { diga "limpando dist/"; correr rm -rf "$DIST"; }
 command -v cargo-packager >/dev/null || {
   erro "falta o cargo-packager — 'cargo install cargo-packager --locked'"; exit 1; }
