@@ -119,6 +119,60 @@ sempre a mesma — **o caminho entra por parâmetro**, e o teste passa um `TempD
 
 ---
 
+## 4.1 Os cenários de ponta a ponta — `src/e2e/`
+
+> **Escrito em 18/set/2026**, quando a suíte passou a **olhar para as fotos**.
+
+`crates/ui-gpui/src/e2e/` monta o app inteiro — o `Root` do `main.rs`, as mesmas teclas, o mesmo
+tema — e percorre o fluxo do balcão como o operador o percorre. São **13 módulos, 39 cenários**.
+
+| Módulo | O pedaço do fluxo |
+|---|---|
+| `conta` | a porta, `/auth/me`, o tema, o menu lateral e o Sair |
+| `sessoes` | a lista, a busca, os recortes, a sessão nova, a retenção e o caixa |
+| `nova_sessao` | as sete etapas: rascunho, fotos sob `rascunho:<uuid>`, receita padrão, criar |
+| `galeria` | dentro da sessão: importar, classificar, levar, negociar, imprimir, exportar, o link |
+| **`atendimento`** | **as fotos**: quais entram em cada recorte, o que cada gesto faz *nelas*, a tira da revelação e o que o cliente vê |
+| `caixa` | o caixa flutuante na galeria e na revelação |
+| `cliente` | a segunda tela acompanhando a galeria e a revelação |
+| `revelacao` | a tira, os sliders, o histórico, as abas, a curva e as predefinições |
+| `enquadrar` | girar, espelhar, endireitar, proporção e alças |
+| `zoom` | as teclas do zoom, a folha de atalhos e o bruto em resolução cheia |
+| `lote` | sincronizar, zerar, a comprada, "Baixar JPEG" e "Salvar na galeria" |
+| `segundo_plano` | minimizar, fechar com envio pendente e sair quando a fila esvazia |
+
+### 🚨 A regra do módulo `atendimento`: contar não é conferir
+
+**Um número não diz qual foto.** Um recorte que deixasse a comprada entrar em "à venda", uma tira que
+perdesse a ordem da grade, uma revelação que abrisse a vizinha, uma tela do cliente que ficasse na
+foto de antes — **todos passam** num teste que só soma. Por isso os cenários afirmam a **lista de
+ids**, e não o tamanho dela:
+
+```rust
+recortar(&e, cx, Filtro::Situacao(Estado::Disponivel));
+assert_eq!(na_grade(&e, cx), ["d"]); // a comprada não entra em "à venda"
+```
+
+Os quatro cenários, e o que cada um prende:
+
+| Cenário | O que ele prende |
+|---|---|
+| `a_grade_mostra_as_fotos_certas_em_cada_recorte` | a lista por recorte (todas, classificadas, sinalizadas, à venda, compradas, sem nota), a local entrando **sem nota**, e a seleção que **não** atravessa a troca de recorte |
+| `classificar_sinalizar_e_o_painel_acompanham_a_foto` | a nota que **sobe** a foto local (passo 3), o `P` que muda o estado **da foto certa**, a comprada que nem tenta, a faixa no `PATCH`, e o apagar que pergunta com o **nome do arquivo** antes de sumir com ela |
+| `a_tira_da_revelacao_segue_o_recorte_da_grade` | a revelação abrindo **na foto em foco**, a tira com as do recorte **na ordem da grade**, a seta que troca a aberta, e o gesto gravado **só** nela |
+| `a_tela_do_cliente_mostra_a_foto_da_vez_em_cada_tela` | o cliente acompanhando grade → revelação → gesto ao vivo → volta, sempre com a foto certa e **nunca com a de antes** |
+
+🔑 **Os observadores são `#[cfg(test)]` e leem o que a tela desenha**: `Detalhe::ids_visiveis`,
+`Detalhe::como_esta` (estado, nota, revelada), `Revelacao::ids_na_tira`,
+`Aplicativo::receita_no_cliente` (a foto **e os ajustes** que a segunda tela recebeu). Nenhum deles
+inventa estado: todos saem de onde o render lê.
+
+⚠️ **A foto do site chega pela rede, e o cenário espera por ela.** A segunda tela mostra a *cópia de
+trabalho*; quando ela não está no cache, o app a pede ao site. Um cenário que afirmasse na linha
+seguinte veria `None` — e o defeito que ele acusaria seria o do próprio teste.
+
+---
+
 ## 5. Testes que precisam de GPU
 
 Os do motor de revelação (`infrastructure::gpu_adjustments`) abrem um dispositivo wgpu de verdade e
@@ -134,12 +188,12 @@ medem **pixel**. É onde ficam as perguntas que só a imagem responde: "este aju
 
 | Camada | Testes |
 |---|---:|
-| `domain` | 205 |
-| `use-cases` | 71 |
+| `domain` | 217 |
+| `use-cases` | 96 |
 | `adapters` | **0** ⚠️ |
-| `infrastructure` | 64 + integração |
-| `ui-gpui` | 295 + 6 de integração |
-| **Total** | **676**, 0 falhando |
+| `infrastructure` | 92 + integração |
+| `ui-gpui` | 779 + 8 de integração — **39 deles são cenários de ponta a ponta** (§4.1) |
+| **Total** | **1.184**, 0 falhando (medido em 18/set/2026) |
 
 ⚠️ **A camada `adapters` não tem nenhum teste**, e é ela que traduz entre use case e tela. É a única
 camada onde um defeito atravessa sem ninguém acusar.
