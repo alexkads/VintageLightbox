@@ -1343,6 +1343,144 @@ fn percorrer_a_sessao(cx: &mut TestAppContext, tamanhos: &[usize], afirmar_tempo
     }
 }
 
+/// 🚨 **A galeria continua sendo a tela do cliente enquanto o lote sobe.**
+///
+/// Dono, 18/set/2026: *"da forma que ficou eu não tenho a galeria liberada para
+/// ir mostrando as fotos para o cliente e isso deixa a UX muito ruim. Mas na
+/// WEB e no Tauri eu consigo!"*
+///
+/// O cenário é o balcão de verdade: 300 fotos na galeria, o operador com vinte
+/// marcadas e o cliente ao lado olhando, e **duzentas** revelações voltando do
+/// site enquanto isso. Cada resposta manda a raiz reler a galeria — e é aí que
+/// a tela do operador se perde, ou não.
+///
+/// O que este cenário afirma, e que a releitura por `entrar` quebrava:
+///
+/// 1. **a grade nunca fica vazia** — `entrar` zera `do_site` e só repõe quando
+///    a resposta chega, e nesse vão o cliente vê a tela em branco;
+/// 2. **as miniaturas não são baixadas de novo** — `entrar` esvazia o cache, e
+///    a foto some da célula até o download voltar;
+/// 3. **a seleção do operador sobrevive às duzentas** — era `limpar_tudo` a
+///    cada resposta;
+/// 4. **as releituras são poucas** — agrupadas pelo respiro, e não uma por foto.
+#[gpui::test]
+fn estresse_a_galeria_de_pe_durante_duzentas_revelacoes(cx: &mut TestAppContext) {
+    const N: usize = 300;
+    const LOTE: usize = 200;
+
+    let (janela, publicador, _dir, _abrir) = sessao_com(cx, N);
+    let aberturas_antes = publicador.abertas().len();
+    let miniaturas_antes = publicador.baixadas().len();
+
+    // O operador está com o cliente: vinte fotos marcadas e uma em foco.
+    let (todas, marcadas) = janela
+        .update(cx, |app, _window, cx| {
+            let todas = app.detalhe.read(cx).ids_visiveis();
+            let marcadas: Vec<String> = todas.iter().take(20).cloned().collect();
+            app.detalhe.update(cx, |d, cx| {
+                d.marcar_ids(&marcadas, cx);
+            });
+            (todas, marcadas)
+        })
+        .expect("a janela aberta");
+    assert_eq!(todas.len(), N, "a galeria abriu inteira");
+
+    // E o lote sobe: duzentas revelações confirmadas pelo site, uma a uma,
+    // como a rede as traz.
+    let canal = janela
+        .update(cx, |app, _window, _cx| app.canal_da_sincronia_para_teste())
+        .expect("a janela aberta");
+    let mut menor_grade = usize::MAX;
+    let mut menor_cache = usize::MAX;
+    let inicio = Instant::now();
+    for (i, id) in todas.iter().take(LOTE).enumerate() {
+        canal
+            .send(Recado::RevelacaoSalva {
+                foto_no_site: id.clone(),
+            })
+            .expect("o canal aberto");
+        janela
+            .update(cx, |app, _window, cx| {
+                app.colher_sincronia(cx);
+                let d = app.detalhe.read(cx);
+                menor_grade = menor_grade.min(d.total_visivel());
+                menor_cache = menor_cache.min(d.miniaturas_na_memoria());
+            })
+            .expect("a janela aberta");
+        // A cada vinte, o relógio anda: é quando a releitura agrupada dispara e
+        // a galeria volta do site — o momento exato em que a tela piscava.
+        if i.is_multiple_of(20) {
+            cx.executor().advance_clock(Duration::from_millis(500));
+            cx.run_until_parked();
+            janela
+                .update(cx, |app, _window, cx| {
+                    let d = app.detalhe.read(cx);
+                    menor_grade = menor_grade.min(d.total_visivel());
+                    menor_cache = menor_cache.min(d.miniaturas_na_memoria());
+                })
+                .expect("a janela aberta");
+        }
+    }
+    relatar(
+        &format!("{LOTE} revelações confirmadas com a galeria de {N} aberta"),
+        inicio.elapsed(),
+        Duration::from_secs(20),
+    );
+
+    // A poeira baixa: a última releitura agrupada chega.
+    for _ in 0..8 {
+        cx.executor().advance_clock(Duration::from_millis(250));
+        cx.run_until_parked();
+    }
+
+    // 1 e 2 — o que o cliente via.
+    assert_eq!(
+        menor_grade, N,
+        "a grade esvaziou no meio do lote: o cliente viu a tela em branco"
+    );
+    assert!(
+        menor_cache > 0,
+        "as miniaturas sumiram da memória no meio do lote"
+    );
+    let rebaixadas = publicador.baixadas().len() - miniaturas_antes;
+    assert!(
+        rebaixadas <= TETO_DE_MINIATURAS,
+        "{rebaixadas} miniaturas baixadas de novo durante o lote — o cache está \
+         sendo esvaziado a cada releitura"
+    );
+
+    // 3 e 4 — o que o operador tinha na mão, e o preço da atualização.
+    let releituras = publicador.abertas().len() - aberturas_antes;
+    println!(
+        "ℹ️ {LOTE} respostas → {releituras} releitura(s) da galeria, \
+         {rebaixadas} miniatura(s) baixada(s) de novo"
+    );
+    assert!(
+        releituras <= LOTE / 10,
+        "{releituras} releituras para {LOTE} respostas — a galeria está sendo \
+         reaberta foto a foto"
+    );
+    janela
+        .update(cx, |app, _window, cx| {
+            let d = app.detalhe.read(cx);
+            assert_eq!(d.total_visivel(), N, "a galeria continua inteira no fim");
+            assert_eq!(
+                d.marcadas(),
+                marcadas,
+                "a seleção do operador sobreviveu às {LOTE} respostas"
+            );
+        })
+        .expect("a janela aberta");
+
+    // E o quadro, no fim do lote: a tela que o cliente está olhando.
+    let quadro = quadro_da_sessao(cx, janela, 21);
+    relatar(
+        "um quadro da galeria logo depois do lote",
+        quadro,
+        Duration::from_millis(100),
+    );
+}
+
 // ─────────────────────────────────────────────────────────────── o caixa
 
 /// 🚨 **Um cupom de 800 fotos, com toda negociação que existe.**

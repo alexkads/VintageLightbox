@@ -1132,6 +1132,16 @@ impl Aplicativo {
     }
 
     /// Pede uma releitura da **galeria aberta**, agrupada como a do acervo.
+    ///
+    /// 🚨 **Relê, não entra de novo** (dono, 18/set/2026: *"da forma que ficou
+    /// eu não tenho a galeria liberada para ir mostrando as fotos para o
+    /// cliente e isso deixa a UX muito ruim"*). `entrar` é o gesto de **abrir
+    /// outra sessão**: ele esvazia grade, miniaturas e seleção de propósito,
+    /// para que a sessão anterior não fique por baixo da nova. Usá-lo aqui
+    /// fazia a galeria piscar em branco a cada foto que subia — e o operador,
+    /// que está mostrando as fotos ao cliente ao lado, perdia a seleção e o
+    /// lugar onde estava. `reler` pede a mesma galeria e troca só o que o site
+    /// respondeu, traduzindo a seleção por id.
     fn pedir_releitura_da_galeria(&mut self, cx: &mut Context<Self>) {
         if self._releitura_da_galeria.is_some() {
             return;
@@ -1140,8 +1150,8 @@ impl Aplicativo {
             cx.background_executor().timer(RESPIRO_DA_RELEITURA).await;
             let _ = raiz.update(cx, |raiz, cx| {
                 raiz._releitura_da_galeria = None;
-                if let Some(galeria) = raiz.sessao_aberta.clone() {
-                    raiz.detalhe.update(cx, |tela, cx| tela.entrar(galeria, cx));
+                if raiz.sessao_aberta.is_some() {
+                    raiz.detalhe.update(cx, |tela, cx| tela.reler(cx));
                 }
             });
         }));
@@ -1274,7 +1284,13 @@ impl Aplicativo {
 
         // E o catálogo é relido assim mesmo: o que mudou no banco desde a última
         // leitura entra junto quando chegar.
-        self.reler_o_acervo(cx);
+        //
+        // ⚠️ **Agrupada**, como todas as outras: durante um lote esta função é
+        // chamada a cada resposta da galeria, e reler é varrer o catálogo
+        // inteiro na thread que desenha. As fotos do site já entraram na grade
+        // logo acima — a releitura só traz o que mudou por fora, e pode esperar
+        // o respiro.
+        self.pedir_releitura_do_acervo(cx);
     }
 
     /// Escreve, sobre o que a API respondeu, a revelação que **ainda não
@@ -2050,9 +2066,7 @@ impl Aplicativo {
                     self.pedir_releitura_da_galeria(cx);
                     // 🚨 **Quem avisa é o fim do lote, e não cada foto**: com
                     // vinte no ar seriam vinte toasts, e o operador já está com
-                    // o próximo cliente. `contar_o_salvar` vem **depois** da
-                    // releitura acima pelo mesmo motivo de sempre — o `entrar`
-                    // da sessão apaga a linha de recado (2026-09-17).
+                    // o próximo cliente.
                     self.contar_o_salvar(false, cx);
                     mudou = true;
                 }
@@ -7892,5 +7906,116 @@ mod testes {
                 );
             })
             .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 **Dono, 18/set/2026: *"da forma que ficou eu não tenho a galeria
+    /// liberada para ir mostrando as fotos para o cliente e isso deixa a UX
+    /// muito ruim"*.**
+    ///
+    /// Enquanto o lote sobe, cada foto que o site confirma manda a raiz reler a
+    /// galeria. A releitura chamava `entrar` — o gesto de **abrir outra
+    /// sessão**, que esvazia grade, miniaturas e seleção de propósito para que a
+    /// anterior não fique por baixo da nova. O efeito colateral era a galeria
+    /// piscando em branco a cada resposta, com a seleção indo embora junto: o
+    /// operador não conseguia mostrar as fotos ao cliente durante o envio.
+    ///
+    /// 🔑 A releitura da **mesma** galeria é `reler`: pede de novo e troca só o
+    /// que o site respondeu, traduzindo a seleção por id.
+    #[gpui::test]
+    fn a_galeria_fica_de_pe_enquanto_o_lote_sobe(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+        let publicador = Arc::new(PublicadorDeMentira {
+            galerias: std::sync::Mutex::new(vec![galeria_do_painel("g1")]),
+            fotos_da_sessao: std::sync::Mutex::new(vec![
+                foto_do_site("remota-1", None),
+                foto_do_site("remota-2", None),
+            ]),
+            ..Default::default()
+        });
+
+        let janela = cx.add_window({
+            let publicador = publicador.clone();
+            move |window, cx| {
+                Aplicativo::ja_dentro(
+                    Vec::new(),
+                    previews,
+                    Vec::new(),
+                    Portas {
+                        publicador,
+                        ..portas()
+                    },
+                    window,
+                    cx,
+                )
+            }
+        });
+
+        // A sessão aberta de verdade, como o clique na lista a abre.
+        janela
+            .update(cx, |app, _window, cx| {
+                let sessao = app.sessao.clone().expect("a conta do site");
+                app.detalhe
+                    .update(cx, |tela, _cx| tela.definir_sessao(sessao));
+                app.entrar_na_sessao("g1".into(), cx);
+            })
+            .expect("a janela deve estar aberta");
+        deixar_a_sessao_colher(cx);
+
+        // O operador está com o cliente: uma foto marcada, a grade cheia.
+        janela
+            .update(cx, |app, _window, cx| {
+                app.detalhe
+                    .update(cx, |tela, cx| tela.marcar_ids(&["remota-2".into()], cx));
+                assert_eq!(
+                    app.detalhe.read(cx).ids_visiveis().len(),
+                    2,
+                    "a grade abriu com as duas fotos do site"
+                );
+            })
+            .expect("a janela deve estar aberta");
+
+        // E o lote sobe: uma revelação confirmada pelo site.
+        janela
+            .update(cx, |app, _window, cx| {
+                let _ = app.sincronias.0.send(PosVendaRecado::RevelacaoSalva {
+                    foto_no_site: "remota-1".into(),
+                });
+                app.colher_sincronia(cx);
+            })
+            .expect("a janela deve estar aberta");
+        deixar_a_sessao_colher(cx);
+
+        assert!(
+            publicador.abertas().len() >= 2,
+            "a releitura tem de ter acontecido, senão o teste não afirma nada: {:?}",
+            publicador.abertas()
+        );
+        janela
+            .update(cx, |app, _window, cx| {
+                let tela = app.detalhe.read(cx);
+                assert_eq!(
+                    tela.ids_visiveis().len(),
+                    2,
+                    "a grade continua de pé durante o envio: {:?}",
+                    tela.ids_visiveis()
+                );
+                assert_eq!(
+                    tela.marcadas(),
+                    vec!["remota-2".to_string()],
+                    "e a seleção do operador sobrevive à releitura"
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// Deixa a colheita da tela da sessão rodar — ela acorda a cada 100ms, e a
+    /// releitura da raiz espera o respiro de 450ms.
+    fn deixar_a_sessao_colher(cx: &mut TestAppContext) {
+        for _ in 0..12 {
+            cx.executor()
+                .advance_clock(std::time::Duration::from_millis(120));
+            cx.run_until_parked();
+        }
     }
 }
