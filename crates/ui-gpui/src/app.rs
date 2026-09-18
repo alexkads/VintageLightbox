@@ -204,6 +204,20 @@ fn guardar_o_modo_do_cliente(em_janela: bool) {
     );
 }
 
+/// Quantas fotos o "Salvar na galeria" leva **em voo** ao mesmo tempo.
+///
+/// 🔑 **Três, e o número é o do site** (`editor.tsx`, `EM_VOO`). Cada foto é
+/// baixar (rede), decodificar e revelar (96 MB e a GPU, serializados pela fila
+/// do motor) e subir (rede). Com uma só, a GPU fica parada durante os segundos
+/// de rede de cada foto; com várias, o download de uma corre enquanto outra
+/// revela e uma terceira sobe.
+///
+/// ⚠️ **O teto é memória, não banda.** As que esperam a vez seguram o original
+/// comprimido — uns 30 MB cada. Três em voo é ~90 MB parados mais os 96 MB da
+/// que está sendo decodificada; subir isso para dez leva a máquina do balcão
+/// junto, que é onde este botão roda.
+pub(crate) const EM_VOO: usize = 3;
+
 /// Quanto tempo um toast fica na tela — os 4s do `sonner` do site.
 const DURACAO_DO_TOAST: std::time::Duration = std::time::Duration::from_secs(4);
 
@@ -508,6 +522,10 @@ pub struct Aplicativo {
     /// O próximo id de toast. Nunca reaproveitado: dois avisos iguais em
     /// sequência são dois avisos.
     proximo_toast: usize,
+    /// 🧪 Tudo o que já foi avisado, para os cenários — ver
+    /// `avisos_dados_para_teste`.
+    #[cfg(test)]
+    avisos_dados: Vec<(String, bool)>,
     /// Os relógios que tiram os toasts vencidos — **um por toast**.
     ///
     /// 🚨 **Um campo só, sobrescrito, cancelaria o anterior**: `Task` aborta ao
@@ -584,10 +602,23 @@ pub struct Aplicativo {
     bruto_do_cliente: Option<(String, Arc<Vec<u8>>, u32, u32)>,
     /// A foto cuja cópia de trabalho foi pedida para a segunda tela.
     cliente_pedindo: Option<String>,
-    /// "Salvar na galeria e sair" em curso: `(total, respondidas, alguma falhou)`.
+    /// O que falta despachar do lote — as fotos que esperam a vez.
+    ///
+    /// 🚨 **O lote inteiro de uma vez estourava a memória** (dono, 18/set/2026,
+    /// ao salvar em segundo plano). Cada foto é baixar o original, **decodificar
+    /// 24 MP** (96 MB em RAM), revelar e subir; com vinte `spawn` de uma vez são
+    /// vinte originais na memória ao mesmo tempo. Ver [`EM_VOO`].
+    lote_a_despachar: std::collections::VecDeque<(String, Ajustes, CropSettings)>,
+    /// O lote do "Salvar na galeria e sair" que está **no ar**:
+    /// `(total, respondidas, alguma falhou)`.
+    ///
+    /// 🔑 **Ele não prende mais a tela** (dono, 18/set/2026): o editor fecha no
+    /// clique e o lote sobe em segundo plano. O que este contador faz é uma
+    /// coisa só — saber quando o lote acabou, para avisar **uma vez** em vez de
+    /// uma por foto.
     /// A tela só fecha quando todas responderem, e fica se alguma falhar —
     /// como o `salvarESair` do site.
-    saindo_depois_de_salvar: Option<(usize, usize, bool)>,
+    lote_no_ar: Option<(usize, usize, bool)>,
     /// Os downloads da Revelação (bruto e "Baixar JPEG"), fora da fila de envios.
     baixas: resolucao_cheia::Baixas,
     pub(crate) tela: Tela,
@@ -960,6 +991,8 @@ impl Aplicativo {
             _reveladas: None,
             receita_padrao,
             toasts: Vec::new(),
+            #[cfg(test)]
+            avisos_dados: Vec::new(),
             proximo_toast: 0,
             _relogios_dos_toasts: Vec::new(),
             presets_conhecidos: presets_para_a_receita,
@@ -981,7 +1014,8 @@ impl Aplicativo {
             no_cliente: None,
             bruto_do_cliente: None,
             cliente_pedindo: None,
-            saindo_depois_de_salvar: None,
+            lote_no_ar: None,
+            lote_a_despachar: std::collections::VecDeque::new(),
             baixas: resolucao_cheia::Baixas::nova(),
             tela: Tela::Biblioteca,
             foco,
@@ -1564,13 +1598,29 @@ impl Aplicativo {
         }
     }
 
-    /// 🧪 Os avisos que estão em toast, na ordem.
+    /// 🧪 Os avisos que estão em toast **agora**, na ordem.
     #[cfg(test)]
     pub(crate) fn avisos_para_teste(&self) -> Vec<(String, bool)> {
         self.toasts
             .iter()
             .map(|(_, texto, erro)| (texto.to_string(), *erro))
             .collect()
+    }
+
+    /// 🧪 O lote do "Salvar na galeria" que está no ar.
+    #[cfg(test)]
+    pub(crate) fn lote_no_ar_para_teste(&self) -> Option<(usize, usize, bool)> {
+        self.lote_no_ar
+    }
+
+    /// 🧪 Todos os avisos desde a abertura — inclusive os que já sumiram.
+    ///
+    /// 🔑 **Existe porque o toast some sozinho** (4 s), e a espera de um cenário
+    /// passa desse tempo: afirmar sobre `avisos_para_teste` depois de duas
+    /// esperas mediria o autohide, e não o aviso.
+    #[cfg(test)]
+    pub(crate) fn avisos_dados_para_teste(&self) -> Vec<(String, bool)> {
+        self.avisos_dados.clone()
     }
 
     /// 🧪 Quantas fotos a receita padrão já pegou — o que o e2e afirma.
@@ -1949,16 +1999,15 @@ impl Aplicativo {
                     self.gravador.esquecer_do_site(foto_no_site);
                     self.ultimo_envio = Some(chrono::Utc::now().timestamp());
                     self.recontar_o_que_falta_subir(cx);
-                    self.contar_o_salvar(false, cx);
                     if let Some(galeria) = self.sessao_aberta.clone() {
                         self.detalhe.update(cx, |tela, cx| tela.entrar(galeria, cx));
                     }
-                    // 🚨 **O aviso vem depois de sair e de reler**, e não antes:
-                    // escrito antes, ele caía na tela que estava fechando, e o
-                    // `entrar` da sessão apagava a linha de recado — quem salvou
-                    // voltava à sessão sem confirmação nenhuma (achado pelo
-                    // cenário de ponta a ponta, 2026-09-17).
-                    self.avisar_onde_esta_olhando("revelação salva na galeria".into(), cx);
+                    // 🚨 **Quem avisa é o fim do lote, e não cada foto**: com
+                    // vinte no ar seriam vinte toasts, e o operador já está com
+                    // o próximo cliente. `contar_o_salvar` vem **depois** da
+                    // releitura acima pelo mesmo motivo de sempre — o `entrar`
+                    // da sessão apaga a linha de recado (2026-09-17).
+                    self.contar_o_salvar(false, cx);
                     mudou = true;
                 }
                 PosVendaRecado::JpegRevelado {
@@ -2154,14 +2203,12 @@ impl Aplicativo {
 
     /// A volta, sem a janela na mão — é o que o fim do salvar usa.
     fn sair_da_revelacao(&mut self, cx: &mut Context<Self>) {
-        self.saindo_depois_de_salvar = None;
-        let aberta = self.revelacao.update(cx, |tela, cx| {
+        let aberta = self.revelacao.update(cx, |tela, _cx| {
             tela.gravar_o_que_estiver_pendente();
             // A prévia local da foto que estava aberta — é ela que a grade da
             // sessão mostra até a revelação subir. Ver
             // `Revelacao::guardar_a_revelada_no_cache`.
             tela.guardar_a_revelada_no_cache();
-            tela.definir_salvando(None, cx);
             tela.foto_aberta().map(|f| f.id.clone())
         });
         // 🚨 **E a grade precisa saber que ela mudou** (dono, 18/set/2026:
@@ -2200,26 +2247,65 @@ impl Aplicativo {
         cx.notify();
     }
 
+    /// Manda para o site as próximas do lote, até [`EM_VOO`] no ar.
+    ///
+    /// 🔑 **Quem reabastece é a resposta**: cada foto que volta abre uma vaga.
+    /// Sem isto o lote de trezentas viraria trezentos downloads simultâneos —
+    /// que foi o que estourou a memória.
+    fn despachar_do_lote(&mut self, sessao: &domain::services::pos_venda::Sessao) {
+        let em_voo = self
+            .lote_no_ar
+            .map(|(total, feitas, _)| total.saturating_sub(feitas + self.lote_a_despachar.len()))
+            .unwrap_or(0);
+        for _ in em_voo..EM_VOO {
+            let Some((no_site, ajustes, corte)) = self.lote_a_despachar.pop_front() else {
+                return;
+            };
+            self.publicador.salvar_revelacao(
+                sessao.clone(),
+                no_site,
+                ajustes,
+                corte,
+                self.sincronias.0.clone(),
+            );
+        }
+    }
+
     /// Uma resposta do lote do "Salvar e sair" chegou.
+    ///
+    /// 🔑 **A tela já saiu** — o lote sobe em segundo plano (ver
+    /// [`Self::salvar_na_galeria`]). O que sobra para cá é contar, e dizer no
+    /// fim o que aconteceu: uma frase por **lote**, e não uma por foto. Com
+    /// vinte fotos, vinte toasts seriam vinte interrupções para o operador que
+    /// já está com o próximo cliente.
     fn contar_o_salvar(&mut self, falhou: bool, cx: &mut Context<Self>) {
-        let Some((total, feitas, falha)) = self.saindo_depois_de_salvar.as_mut() else {
+        let Some((total, feitas, falha)) = self.lote_no_ar.as_mut() else {
             return;
         };
         *feitas += 1;
         *falha |= falhou;
         let (total, feitas, falha) = (*total, *feitas, *falha);
         if feitas < total {
-            self.revelacao.update(cx, |tela, cx| {
-                tela.definir_salvando(Some((feitas, total)), cx)
-            });
+            // Uma resposta chegou: abriu vaga para a próxima do lote.
+            if let Some(sessao) = self.sessao().cloned() {
+                self.despachar_do_lote(&sessao);
+            }
             return;
         }
-        self.saindo_depois_de_salvar = None;
-        self.revelacao
-            .update(cx, |tela, cx| tela.definir_salvando(None, cx));
-        // 🔑 Com falha, a tela fica: o operador vê o aviso e tenta de novo.
-        if !falha && self.tela == Tela::Revelacao {
-            self.sair_da_revelacao(cx);
+        self.lote_no_ar = None;
+        self.lote_a_despachar.clear();
+        // ⚠️ **Falha não vira toast aqui**: cada recusa já foi para o canto dos
+        // envios com a frase do site, que é onde o operador a encontra depois.
+        // Um toast a mais diria a mesma coisa num lugar que some.
+        if !falha {
+            self.avisar_onde_esta_olhando(
+                if total == 1 {
+                    "revelação salva na galeria".into()
+                } else {
+                    format!("{total} revelações salvas na galeria")
+                },
+                cx,
+            );
         }
     }
 
@@ -3112,7 +3198,7 @@ impl Aplicativo {
         };
         let (_local, no_site) = foto;
 
-        if self.saindo_depois_de_salvar.is_some() {
+        if self.lote_no_ar.is_some() {
             return;
         }
         // O que está pendente vai para o banco **antes** do envio: os mesmos
@@ -3169,27 +3255,36 @@ impl Aplicativo {
         }
 
         let quantas = lote.len();
-        self.saindo_depois_de_salvar = Some((quantas, 0, false));
-        self.revelacao
-            .update(cx, |tela, cx| tela.definir_salvando(Some((0, quantas)), cx));
-        for (no_site, ajustes, corte) in lote {
-            self.publicador.salvar_revelacao(
-                sessao.clone(),
-                no_site,
-                ajustes,
-                corte,
-                self.sincronias.0.clone(),
-            );
-        }
+        self.lote_no_ar = Some((quantas, 0, false));
+        self.lote_a_despachar = lote.into_iter().collect();
+        // ⚠️ **A conta da espera é o lote inteiro**, e não o que está em voo: o
+        // contador do canto e o G9 falam de respostas, e todas virão.
+        self.esperar_o_site(PedidoDeFoto::SalvarRevelacao, quantas, cx);
+        self.despachar_do_lote(&sessao);
+        // 🚨 **O editor fecha agora, e o lote sobe atrás** (dono, 18/set/2026:
+        // *"precisa acontecer em segundo plano e não pode travar o fluxo,
+        // devendo continuar na tela de sessão de fotos; esse comportamento é
+        // assim na WEB"*).
+        //
+        // 🔑 **É o `salvarESairNaVez` do site**: ele grava a intenção, manda o
+        // lote para o Worker e chama `aoFechar()` na mesma linha, com o aviso
+        // *"Revelando em segundo plano. Pode continuar com o cliente"*. Segurar
+        // o editor por uma ida à rede de segundos, no meio de uma revelação em
+        // série com o cliente na frente, custa mais do que protege — e o que se
+        // perderia numa falha é nada: a receita já está no banco local, a foto
+        // continua no depósito e a recusa aparece no canto dos envios.
+        //
+        // ⚠️ **O envio continua contado** (`Natureza::Envio`): ele aparece em
+        // "Subindo N", e fechar a janela com envio pendente só a esconde (G9).
+        self.sair_da_revelacao(cx);
         self.avisar_onde_esta_olhando(
             if quantas == 1 {
-                "salvando a revelação na galeria…".into()
+                "revelando em segundo plano — pode continuar com o cliente".into()
             } else {
-                format!("salvando {quantas} revelações na galeria…")
+                format!("{quantas} fotos na fila — pode continuar com o cliente")
             },
             cx,
         );
-        self.esperar_o_site(PedidoDeFoto::SalvarRevelacao, quantas, cx);
     }
 
     /// Põe uma foto da galeria na fila de envio — a última receita ganha.
@@ -3269,6 +3364,8 @@ impl Aplicativo {
         if self.toasts.is_empty() {
             self._relogios_dos_toasts.clear();
         }
+        #[cfg(test)]
+        self.avisos_dados.push((texto.clone(), erro));
         self.proximo_toast = self.proximo_toast.wrapping_add(1);
         let id = self.proximo_toast;
         self.toasts.push((id, SharedString::from(texto), erro));
@@ -7472,7 +7569,7 @@ mod testes {
         janela
             .update(cx, |app, _window, _cx| {
                 // Um lote de uma foto esperando o site.
-                app.saindo_depois_de_salvar = Some((1, 0, false));
+                app.lote_no_ar = Some((1, 0, false));
                 app.sincronias_pendentes = 1;
             })
             .expect("a janela deve estar aberta");
@@ -7484,7 +7581,7 @@ mod testes {
                 assert_eq!(app.baixas_pendentes(), 0, "a falha fecha o download");
                 assert_eq!(app.sincronias_pendentes(), 1, "o salvar segue esperando");
                 assert_eq!(
-                    app.saindo_depois_de_salvar,
+                    app.lote_no_ar,
                     Some((1, 0, false)),
                     "a falha do download não anda o \"Salvando 0/1\""
                 );

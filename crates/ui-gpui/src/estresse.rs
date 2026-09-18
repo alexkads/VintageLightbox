@@ -829,11 +829,18 @@ fn conferir_os_contadores(
     let retrato = app.retrato_do_segundo_plano(cx);
     assert_eq!(retrato.subindo, esperadas, "a bandeja");
     assert_eq!(retrato.ha_envio_pendente(), esperadas > 0, "o G9");
-    let salvando = app.revelacao.read(cx).salvando_para_teste();
+    // 🔑 **O terceiro número saiu do botão e foi para o lote** (dono,
+    // 18/set/2026): o editor fecha no clique, e quem conta as respostas é
+    // `lote_no_ar` — é ele que decide quando avisar, uma vez só.
+    let lote = app.lote_no_ar_para_teste();
     if respondidas < total {
-        assert_eq!(salvando, Some((respondidas, total)), "o \"Salvando k/N\"");
+        assert_eq!(
+            lote.map(|(t, feitas, _)| (feitas, t)),
+            Some((respondidas, total)),
+            "o lote ainda no ar"
+        );
     } else {
-        assert_eq!(salvando, None, "o botão volta ao fim do lote");
+        assert_eq!(lote, None, "o lote acabou");
     }
 }
 
@@ -866,37 +873,54 @@ fn estresse_salvar_trezentas_na_galeria_com_desordem_e_falhas(cx: &mut TestAppCo
             conferir_os_contadores(app, cx, N, N, 0);
         })
         .expect("a janela aberta");
-    assert_eq!(publicador.reveladas().len(), N, "uma subida por foto");
+    // 🚨 **Três em voo, e não trezentas** (dono, 18/set/2026: a aplicação
+    // estourava a memória ao salvar em segundo plano). Cada foto no ar é um
+    // original baixado e decodificado — 96 MB em RAM —, e o lote inteiro de uma
+    // vez levava a máquina do balcão junto. O contador de espera continua sendo
+    // o lote inteiro: todas as respostas virão, uma vaga de cada vez.
+    assert_eq!(
+        publicador.reveladas().len(),
+        crate::app::EM_VOO,
+        "só as primeiras saem; as outras esperam vaga"
+    );
 
     // O operador fecha a janela com o lote no ar: G9.
     let mut vigia = Vigia::default();
     assert_eq!(vigia.ao_fechar(true), AoFechar::Esconder);
-
-    // As respostas, embaralhadas, com uma falha a cada dez.
-    let mut recados: Vec<_> = std::mem::take(&mut *publicador.guardados.lock().expect("guardados"));
-    assert_eq!(recados.len(), N);
-    let mut g = Lcg::novo(41);
-    g.embaralhar(&mut recados);
-    let mut falhas = 0;
-    for (i, (_, recado)) in recados.iter_mut().enumerate() {
-        if i % 10 == 3 {
-            *recado = Recado::Falhou(format!("502 na foto {i}"));
-            falhas += 1;
-        }
-    }
 
     // O primeiro quadro da Revelação custa segundos no perfil de teste (fontes,
     // tema, a GPU abrindo): aquecido antes, para a régua medir a colheita.
     cx.executor().advance_clock(Duration::from_millis(150));
     cx.run_until_parked();
 
+    let mut g = Lcg::novo(41);
     let inicio = Instant::now();
     let mut voltas = 0u32;
     let mut respondidas = 0;
-    while !recados.is_empty() {
+    let mut falhas = 0;
+    let mut i = 0usize;
+    while respondidas < N {
         voltas += 1;
-        let lote = (1 + g.ate(12)).min(recados.len());
-        for (canal, recado) in recados.drain(..lote) {
+        // 🔑 **As respostas aparecem aos poucos**, porque o despacho é aos
+        // poucos: o que está guardado agora é o que está no ar.
+        let mut recados: Vec<_> =
+            std::mem::take(&mut *publicador.guardados.lock().expect("guardados"));
+        assert!(
+            recados.len() <= crate::app::EM_VOO,
+            "mais de {} fotos no ar: {}",
+            crate::app::EM_VOO,
+            recados.len()
+        );
+        g.embaralhar(&mut recados);
+        for (_, recado) in recados.iter_mut() {
+            if i % 10 == 3 {
+                *recado = Recado::Falhou(format!("502 na foto {i}"));
+                falhas += 1;
+            }
+            i += 1;
+        }
+        let lote = recados.len();
+        for (canal, recado) in recados.drain(..) {
             canal.send(recado).expect("o canal da raiz");
         }
         respondidas += lote;
@@ -950,8 +974,10 @@ fn estresse_salvar_trezentas_na_galeria_com_desordem_e_falhas(cx: &mut TestAppCo
                 vigia.deve_sair(retrato.ha_envio_pendente()),
                 "G9: a fila esvaziou, o app sai"
             );
-            // Com falha, a tela fica — e o que não subiu continua na fila.
-            assert_eq!(app.tela(), Tela::Revelacao);
+            // 🔑 **A tela saiu no clique** (o lote sobe em segundo plano), e o
+            // que não subiu continua na fila: é a receita no depósito que
+            // protege o trabalho, não a tela parada.
+            assert_eq!(app.tela(), Tela::Sessao);
             assert!(app.revelacao.read(cx).ha_o_que_salvar());
         })
         .expect("a janela aberta");

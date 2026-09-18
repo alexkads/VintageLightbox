@@ -251,28 +251,26 @@ fn salvar_na_galeria_sobe_o_lote_e_sai(cx: &mut TestAppContext) {
     let mut reveladas: Vec<String> = e.site.reveladas().into_iter().map(|r| r.0).collect();
     reveladas.sort();
     assert_eq!(reveladas, vec!["a", "b"], "a aberta e a da fila");
+    // 🚨 **A tela sai na hora, e o lote sobe atrás** (dono, 18/set/2026: *"não
+    // pode travar o fluxo, devendo continuar na tela de sessão de fotos"*).
     e.app(cx, |app, _w, _cx| {
-        assert_eq!(
-            app.tela(),
-            Tela::Revelacao,
-            "fica enquanto o site não responde"
+        assert_eq!(app.tela(), Tela::Sessao, "o editor não segura o operador");
+        let avisos = app.avisos_dados_para_teste();
+        assert!(
+            avisos
+                .iter()
+                .any(|(t, _)| t.contains("pode continuar com o cliente")),
+            "e o aviso diz o que está acontecendo: {avisos:?}"
         );
     });
 
-    // O site responde uma de cada vez: a tela só sai na última.
+    // O site responde uma de cada vez; o lote continua no ar até a última.
     e.site.responder_uma();
     e.esperar(cx);
-    e.app(cx, |app, _w, _cx| {
-        assert_eq!(app.tela(), Tela::Revelacao, "falta uma")
-    });
     e.site.responder();
     e.esperar(cx);
     e.app(cx, |app, _w, _cx| {
-        assert_eq!(
-            app.tela(),
-            Tela::Sessao,
-            "o lote terminou: volta para a sessão"
-        );
+        assert_eq!(app.tela(), Tela::Sessao);
         assert!(app.a_subir_para_teste().is_empty(), "a fila esvaziou");
         assert!(app.recusas_para_teste().is_empty());
     });
@@ -284,10 +282,11 @@ fn salvar_na_galeria_sobe_o_lote_e_sai(cx: &mut TestAppContext) {
     // faixa é onde mora erro, e um sucesso pintado de falha ensina o operador a
     // desconfiar do que deu certo.
     e.app(cx, |app, _w, _cx| {
-        let avisos = app.avisos_para_teste();
+        let avisos = app.avisos_dados_para_teste();
         assert_eq!(
             avisos.last().map(|(t, _)| t.as_str()),
-            Some("revelação salva na galeria")
+            Some("2 revelações salvas na galeria"),
+            "uma frase por lote, e não uma por foto: {avisos:?}"
         );
         assert!(
             avisos.iter().all(|(_, erro)| !erro),
@@ -299,10 +298,15 @@ fn salvar_na_galeria_sobe_o_lote_e_sai(cx: &mut TestAppContext) {
     });
 }
 
-/// 🎬 **O site recusa o Salvar**: a tela fica, a recusa vai para o canto, e
-/// a receita continua no depósito para tentar de novo.
+/// 🎬 **O site recusa o Salvar**: a recusa vai para o canto dos envios, e a
+/// receita continua no depósito para tentar de novo.
+///
+/// 🔑 **A tela sai assim mesmo**, porque o lote sobe em segundo plano: segurar
+/// o editor esperando uma resposta que pode demorar segundos é o que o dono
+/// pediu para acabar (18/set/2026). O que protege o trabalho não é a tela
+/// parada — é a receita continuar aqui.
 #[gpui::test]
-fn salvar_na_galeria_com_falha_fica_na_tela(cx: &mut TestAppContext) {
+fn salvar_na_galeria_com_falha_deixa_a_receita_no_deposito(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(
         cx,
         Cenario {
@@ -319,10 +323,11 @@ fn salvar_na_galeria_com_falha_fica_na_tela(cx: &mut TestAppContext) {
     botao(&e, cx, PedidoDaRevelacao::SalvarNaGaleria);
     e.esperar(cx);
     e.app(cx, |app, _w, cx| {
-        assert_eq!(app.tela(), Tela::Revelacao, "com falha, a tela fica");
+        assert_eq!(app.tela(), Tela::Sessao, "o lote sobe em segundo plano");
         assert_eq!(
             app.recusas_para_teste(),
-            ["o site respondeu 410: foto apagada"]
+            ["o site respondeu 410: foto apagada"],
+            "a recusa vai para o canto dos envios, onde ficam as outras"
         );
         assert!(
             app.revelacao.read(cx).ha_o_que_salvar(),
@@ -437,28 +442,24 @@ fn o_botao_de_salvar_conta_o_que_ha_para_salvar(cx: &mut TestAppContext) {
         );
     });
 
-    // 6 · O lote subindo: o rótulo conta, e o botão não aceita um segundo clique.
+    // 6 · O clique sai da revelação na hora — o lote sobe atrás.
     botao(&e, cx, PedidoDaRevelacao::SalvarNaGaleria);
     e.esperar(cx);
-    e.revelacao(cx, |tela, _w, _cx| {
-        let botao = tela.botao_de_salvar();
-        assert!(!botao.habilitado, "o lote já está no ar");
-        assert_eq!(
-            botao.rotulo, "Salvando 1/2…",
-            "a comprada fica de fora, mas as duas pendentes sobem"
-        );
+    e.app(cx, |app, _w, _cx| {
+        assert_eq!(app.tela(), Tela::Sessao, "o editor não segura o operador");
     });
     e.site.responder();
     e.esperar(cx);
-    e.app(cx, |app, _w, _cx| {
-        assert_eq!(app.tela(), Tela::Sessao, "o lote terminou: volta à sessão");
-    });
 }
 
-/// 🎬 **O lote de duas ou mais conta no rótulo**, uma resposta de cada vez —
-/// é o `Salvando 1/2…` do site, e o que diz ao operador que a espera anda.
+/// 🎬 **O lote de duas ou mais avisa uma vez só, no fim.**
+///
+/// 🚨 **Era um rótulo no botão** (`Salvando 1/2…`), e ele morreu com o pedido
+/// de 18/set/2026: o editor fecha na hora, então não há botão onde contar. O
+/// que resta é o aviso — e ele é **por lote**: com vinte fotos, vinte toasts
+/// seriam vinte interrupções para quem já está com o próximo cliente.
 #[gpui::test]
-fn o_rotulo_do_salvar_conta_o_lote(cx: &mut TestAppContext) {
+fn o_lote_avisa_uma_vez_so_quando_termina(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(
         cx,
         Cenario {
@@ -490,21 +491,27 @@ fn o_rotulo_do_salvar_conta_o_lote(cx: &mut TestAppContext) {
 
     botao(&e, cx, PedidoDaRevelacao::SalvarNaGaleria);
     e.esperar(cx);
-    e.revelacao(cx, |tela, _w, _cx| {
-        assert_eq!(tela.botao_de_salvar().rotulo, "Salvando 1/2…");
-    });
+
+    // A primeira resposta **não** avisa: o lote ainda está no ar.
     e.site.responder_uma_revelacao();
     e.esperar(cx);
-    e.revelacao(cx, |tela, _w, _cx| {
-        assert_eq!(
-            tela.botao_de_salvar().rotulo,
-            "Salvando 2/2…",
-            "a primeira respondeu; falta uma"
+    e.app(cx, |app, _w, _cx| {
+        let avisos = app.avisos_dados_para_teste();
+        assert!(
+            !avisos.iter().any(|(t, _)| t.contains("salvas na galeria")),
+            "meio do lote não anuncia fim: {avisos:?}"
         );
     });
+
     e.site.responder();
     e.esperar(cx);
-    e.app(cx, |app, _w, _cx| assert_eq!(app.tela(), Tela::Sessao));
+    e.app(cx, |app, _w, _cx| {
+        let avisos = app.avisos_dados_para_teste();
+        assert_eq!(
+            avisos.last().map(|(t, _)| t.as_str()),
+            Some("2 revelações salvas na galeria")
+        );
+    });
 }
 
 /// 🎬 **O aviso não pode cobrir o botão** — a razão de os toasts terem saído do
@@ -526,7 +533,9 @@ fn o_aviso_de_sucesso_fica_no_topo_e_some_sozinho(cx: &mut TestAppContext) {
     e.app(cx, |app, _w, _cx| {
         let avisos = app.avisos_para_teste();
         assert!(
-            avisos.iter().any(|(t, erro)| t.contains("salva") && !erro),
+            avisos
+                .iter()
+                .any(|(t, erro)| t.contains("segundo plano") && !erro),
             "o sucesso aparece como toast verde: {avisos:?}"
         );
         assert!(

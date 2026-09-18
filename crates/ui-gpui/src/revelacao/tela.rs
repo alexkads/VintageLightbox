@@ -251,8 +251,6 @@ pub struct Revelacao {
     cliente_aberto: bool,
     /// "Gerando o JPEG…" no botão de baixar.
     gerando_jpeg: bool,
-    /// O "Salvar na galeria e sair" em curso: `(respondidas, total)`.
-    salvando: Option<(usize, usize)>,
     /// O histograma da foto **como ela está na tela**. Recalculado junto com a
     /// exibição, e `None` enquanto não há foto.
     histograma: Option<Histograma>,
@@ -551,7 +549,6 @@ impl Revelacao {
             receita_ao_abrir: None,
             cliente_aberto: false,
             gerando_jpeg: false,
-            salvando: None,
             histograma: None,
             angulo,
             palco: Bounds::default(),
@@ -833,7 +830,11 @@ impl Revelacao {
     pub fn botao_de_salvar(&self) -> BotaoDeSalvar {
         let ha = self.ha_o_que_salvar();
         let outras = self.nao_salvas;
-        let ocupado = self.gerando_jpeg || self.salvando.is_some();
+        // 🚨 **Não há mais "salvando" aqui** (dono, 18/set/2026): o lote sobe em
+        // segundo plano e o editor fecha na hora, como no site. O que ainda
+        // ocupa o botão é o "Baixar JPEG", que disputa o mesmo bruto em
+        // resolução cheia.
+        let ocupado = self.gerando_jpeg;
         let dica = if !ha {
             "Nada a salvar: o que está no canvas já está na galeria".to_string()
         } else if outras > 0 {
@@ -847,15 +848,8 @@ impl Revelacao {
         } else {
             "Salva esta foto na galeria e fecha o editor".to_string()
         };
-        // ⚠️ **"Gravando…" é o lote de uma foto só**, e não o fim do lote
-        // grande: com uma, não há o que contar, e "Salvando 1/1…" é ruído.
-        let rotulo = match self.salvando {
-            None => "Salvar na galeria e sair".to_string(),
-            Some((_, 1)) => "Gravando…".to_string(),
-            Some((feitas, total)) => format!("Salvando {}/{total}…", (feitas + 1).min(total)),
-        };
         BotaoDeSalvar {
-            rotulo,
+            rotulo: "Salvar na galeria e sair".to_string(),
             dica,
             // Os três do site, na mesma ordem. `ocupado` inclui o "Baixar JPEG"
             // em curso: os dois pedem o bruto em resolução cheia, e clicar num
@@ -867,13 +861,6 @@ impl Revelacao {
     pub fn definir_gerando_jpeg(&mut self, gerando: bool, cx: &mut Context<Self>) {
         if self.gerando_jpeg != gerando {
             self.gerando_jpeg = gerando;
-            cx.notify();
-        }
-    }
-
-    pub fn definir_salvando(&mut self, salvando: Option<(usize, usize)>, cx: &mut Context<Self>) {
-        if self.salvando != salvando {
-            self.salvando = salvando;
             cx.notify();
         }
     }
@@ -1730,12 +1717,6 @@ impl Revelacao {
         self.historico.pode_refazer()
     }
 
-    /// O "Salvando k/N" do botão, para quem confere o lote de fora.
-    #[cfg(test)]
-    pub fn salvando_para_teste(&self) -> Option<(usize, usize)> {
-        self.salvando
-    }
-
     /// Move um controle sem passar pelo slider, para os testes da raiz.
     ///
     /// ⚠️ Ele **não** substitui o `arrastar` dos testes desta tela, que emite o
@@ -2404,7 +2385,7 @@ impl Revelacao {
         let pode_revelar = self.pode_revelar();
         // O `ocupado` do editor da web: enquanto um JPEG está sendo gerado ou o
         // lote do "Salvar" está subindo, os dois botões do fim ficam quietos.
-        let ocupado = self.gerando_jpeg || self.salvando.is_some();
+        let ocupado = self.gerando_jpeg;
 
         div()
             .flex()
@@ -2633,8 +2614,7 @@ impl Revelacao {
                     habilitado,
                 } = self.botao_de_salvar();
                 Button::new("revelacao-salvar-na-galeria")
-                    .when(self.salvando.is_none(), |b| b.icon(Icon::new(Icone::Save)))
-                    .loading(self.salvando.is_some())
+                    .icon(Icon::new(Icone::Save))
                     .label(rotulo)
                     .tooltip(dica)
                     .small()

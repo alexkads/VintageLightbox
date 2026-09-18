@@ -642,10 +642,13 @@ fn da_lista_ao_revelar_dentro_da_sessao(cx: &mut TestAppContext) {
                 window,
                 cx,
             );
+            // 🚨 **Sai na hora, e o lote sobe atrás** — o `salvarESair` do
+            // site fecha o editor na mesma linha em que manda o lote ao Worker
+            // (dono, 18/set/2026: *"não pode travar o fluxo"*).
             assert_eq!(
                 app.tela(),
-                Tela::Revelacao,
-                "fica enquanto o envio não responde, como o `salvarESair` do site"
+                Tela::Sessao,
+                "o editor não segura o operador enquanto o envio anda"
             );
         })
         .expect("a janela deve estar aberta");
