@@ -62,7 +62,7 @@ impl Render for Biblioteca {
 anterior eram 290 linhas de `pos2`, `Rect` e aritmética de retângulo; aqui é um componente do
 `gpui-component` com `SliderState`.
 
-### As três armadilhas que mais custaram
+### As armadilhas que mais custaram
 
 1. 🚨 **`track_focus` rastreia o foco; ele não concede.** Sem alguém focar a raiz, o caminho de foco
    fica vazio e **nenhuma ação de teclado dela é alcançada**. Tecla que não casa não falha — ela não
@@ -75,10 +75,31 @@ anterior eram 290 linhas de `pos2`, `Rect` e aritmética de retângulo; aqui é 
 3. 🚨 **`cx.subscribe` devolve uma `Subscription` que cancela ao ser descartada.** Um
    `let _ = cx.subscribe(...)` compila, roda, e a ligação **não existe** — sem erro, sem aviso. O
    mesmo vale para `cx.observe` e para `Task`: **descartar uma `Task` a cancela**.
+4. 🚨 **`img(...).size_full()` não contém nada — ele estoura a moldura.** O `Img` do GPUI escreve
+   `style.aspect_ratio` com a proporção da foto em **todo** `request_layout`. Com os dois lados em
+   100%, o taffy tira a altura da largura, o elemento fica maior que a moldura, e um
+   `ObjectFit::Contain` cabe direitinho **nesse** retângulo — que já está fora. Onde há
+   `overflow_hidden`, isso vira **corte**. Use `max_w_full()`/`max_h_full()`, ou
+   `imagem::cabe_em` quando precisar do número.
 
-⚠️ **As três têm a mesma forma**: o código compila, o app roda, e a funcionalidade simplesmente não
-acontece. É por isso que toda ligação deste tipo tem teste, e o teste é conferido **quebrando de
-propósito**.
+⚠️ **As três primeiras têm a mesma forma**: o código compila, o app roda, e a funcionalidade
+simplesmente não acontece. É por isso que toda ligação deste tipo tem teste, e o teste é conferido
+**quebrando de propósito**.
+
+⚠️ **A quarta é a mais teimosa, e por um motivo só: ela quase não aparece.** O defeito é
+proporcional à diferença entre a proporção da foto e a da moldura — numa miniatura paisagem, a foto
+deitada sobra **2%** e a em pé sobra **81%** (medido em `imagem.rs`, `a_moldura_medida`). Como o
+catálogo de medição só tinha fotos 320×240, nem a suíte nem o olho passando pela régua tinham como
+vê-la: ela voltou **três vezes** — tela do cliente e grade da sessão (17 e 18/set/2026) e as duas
+tiras (18/set/2026) — sempre relatada como *"a foto está cortada"*, sempre numa foto em pé.
+
+Por isso ela é vigiada em três frentes, e não por um teste:
+
+| Onde | O que faz |
+|---|---|
+| `imagem.rs`, `a_moldura_manda` | lê o **código-fonte** de `ui-gpui` e recusa `img(...).size_full()` sem `Cover`/`Fill`, com uma lista curta de exceções — cada uma com o motivo |
+| `imagem.rs`, `a_moldura_medida` | **mede** o layout numa janela de teste: prova que `size_full` estoura, que `max_*` não, e que a paisagem quase não sofre. Se o GPUI mudar, é aqui que se descobre |
+| `bin/semear-catalogo.rs` | uma foto em cada três nasce **em pé**, para a conferência visual poder enxergar o defeito |
 
 ---
 

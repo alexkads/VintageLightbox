@@ -4890,6 +4890,9 @@ impl Detalhe {
             .w(px(largura))
             .h(px(lado))
             .flex_none()
+            .flex()
+            .items_center()
+            .justify_center()
             .overflow_hidden()
             .rounded(cx.theme().radius)
             .bg(cx.theme().muted)
@@ -4908,7 +4911,16 @@ impl Detalhe {
             .when_some(miniatura, |celula, imagem| {
                 celula.child(
                     img(imagem)
-                        .size_full()
+                        // 🚨 **`max_*`, e nunca `size_full`.** O `Img` do GPUI
+                        // grava `style.aspect_ratio` com a proporção da foto em
+                        // todo layout: com os dois lados em 100% o taffy tira a
+                        // altura da largura, o elemento fica mais alto que a
+                        // miniatura e o `overflow_hidden` daqui vira **corte** —
+                        // visível só no retrato, porque a miniatura é paisagem.
+                        // Mesma armadilha da tela do cliente e da grade ao lado
+                        // (17 e 18/set/2026).
+                        .max_w_full()
+                        .max_h_full()
                         // 🚨 `Contain`, e não `Cover`. Preencher o retângulo
                         // custa **cortar**, e numa foto que já foi
                         // **enquadrada** isso corta o que o operador escolheu

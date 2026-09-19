@@ -27,14 +27,36 @@ use image::{DynamicImage, Rgba, RgbaImage};
 use infrastructure::cache::preview_manager::PreviewManager;
 use infrastructure::paths::AppPaths;
 
-/// Uma foto sintética: quadrado de cor sólida com uma faixa clara no topo.
+/// As medidas desta foto — e **uma em cada três nasce em pé**.
+///
+/// 🚨 **Até 18/set/2026 todas eram 320×240**, e é por isso que o corte da foto
+/// em retrato voltava sempre (*"as fotos no modo retrato está ficando cortada
+/// no filmstrip"*, dono, 18/set/2026). A moldura da miniatura é paisagem: a
+/// foto deitada cabe nela **por acaso**, mesmo quando o layout está errado, e
+/// só a em pé estoura para fora e aparece cortada. Num catálogo de medição sem
+/// nenhuma foto em pé, a régua não tinha como mostrar o defeito — nem a régua,
+/// nem o olho do dono passando por ela.
+///
+/// A armadilha em si está descrita em [`ui_gpui::imagem`], com o teste que
+/// vigia o código-fonte; isto aqui é o outro lado: dar à conferência visual uma
+/// foto que **denuncia** quando ela volta.
+fn medidas(indice: usize) -> (u32, u32) {
+    if indice % 3 == 2 {
+        (240, 320)
+    } else {
+        (320, 240)
+    }
+}
+
+/// Uma foto sintética: retângulo de cor sólida com uma faixa clara no topo.
 ///
 /// A faixa existe para a conferência visual ser possível: numa grade de cores
 /// chapadas não dá para ver se as miniaturas estão sendo trocadas de lugar
 /// durante a rolagem, e é exatamente esse o defeito que a virtualização
-/// introduz.
+/// introduz. Ela fica **no topo**, e é também o que denuncia o corte: numa
+/// foto em pé mal enquadrada, a faixa é a primeira coisa a sumir.
 fn foto_sintetica(indice: usize) -> DynamicImage {
-    let (largura, altura) = (320u32, 240u32);
+    let (largura, altura) = medidas(indice);
     let mut img = RgbaImage::new(largura, altura);
 
     let matiz = (indice * 37 % 360) as f32;
@@ -155,7 +177,13 @@ async fn main() {
         // filtrar quando chegarem.
         .bind((i % 6) as i64)
         .bind(&agora)
-        .bind(r#"{"camera_model":"Medição","width":320,"height":240}"#)
+        // As medidas de verdade desta foto, e não um par fixo: é por elas que
+        // a tela decide o enquadramento, e um metadado que mentisse sobre a
+        // orientação devolveria o catálogo ao estado em que nada aparece em pé.
+        .bind({
+            let (largura, altura) = medidas(i);
+            format!(r#"{{"camera_model":"Medição","width":{largura},"height":{altura}}}"#)
+        })
         // Uma em cada seis fica sem cor, e o resto gira pelas cinco do dominio.
         .bind(match i % 6 {
             0 => None,

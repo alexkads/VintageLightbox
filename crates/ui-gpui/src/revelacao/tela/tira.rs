@@ -943,6 +943,9 @@ impl Revelacao {
             .w(px(largura))
             .h(px(lado))
             .flex_none()
+            .flex()
+            .items_center()
+            .justify_center()
             .overflow_hidden()
             .rounded(px(4.))
             .bg(fundo)
@@ -960,7 +963,18 @@ impl Revelacao {
             .map(|t| match miniatura {
                 Some(imagem) => t.child(
                     img(imagem)
-                        .size_full()
+                        // 🚨 **`max_*`, e nunca `size_full`.** O `Img` do GPUI
+                        // grava `style.aspect_ratio` com a proporção da foto em
+                        // todo layout: com os dois lados em 100% o taffy tira a
+                        // altura da largura, o elemento fica mais alto que a
+                        // miniatura e o `overflow_hidden` daqui vira **corte** —
+                        // que só aparece no retrato, porque a miniatura é
+                        // paisagem (`PROPORCAO`). É a armadilha que já cortou a
+                        // tela do cliente e a grade da sessão (17 e 18/set/2026,
+                        // `crate::imagem::cabe_em`), e a tira tinha ficado de
+                        // fora das duas vezes.
+                        .max_w_full()
+                        .max_h_full()
                         // `object-contain`: o recorte da foto enquadrada fica inteiro.
                         .object_fit(gpui::ObjectFit::Contain)
                         // A apagada desbota, como na tira da galeria.
