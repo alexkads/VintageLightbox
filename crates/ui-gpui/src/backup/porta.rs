@@ -10,6 +10,7 @@
 //! arquivos, e atravessá-los pela máquina do Fly é o gargalo que a URL assinada
 //! existe para não ter.
 
+use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
 
@@ -115,13 +116,19 @@ pub trait Acervo: Send + Sync + 'static {
         arquivo: ParaBaixar,
         canal: Sender<Result<(String, Vec<u8>), String>>,
     );
-    /// Sobe **um** arquivo, relatando o quanto já foi pelo canal.
+    /// Sobe **um** arquivo, lendo-o do disco e relatando o quanto já foi.
+    ///
+    /// 🚨 **O caminho, e nunca os bytes.** Receber `Vec<u8>` obrigava quem
+    /// chama a ter o arquivo inteiro na memória antes de mandar — e, numa
+    /// pasta, a pasta inteira. Foi o que fez o app comer 15,77 GB subindo
+    /// ~1.300 RAW (dono, 2026-09-19). Com o caminho, quem lê é a tarefa que
+    /// envia, em pedaços, e o que fica na memória é um pedaço.
     fn enviar(
         &self,
         sessao: Sessao,
         id: usize,
         destino: DestinoDeEnvio,
-        corpo: Vec<u8>,
+        origem: PathBuf,
         tipo: String,
         canal: Sender<Andamento>,
     );
@@ -295,7 +302,7 @@ impl Acervo for AcervoHttp {
         sessao: Sessao,
         id: usize,
         destino: DestinoDeEnvio,
-        corpo: Vec<u8>,
+        origem: PathBuf,
         tipo: String,
         canal: Sender<Andamento>,
     ) {
@@ -308,6 +315,19 @@ impl Acervo for AcervoHttp {
                 // tacada, e a barra desta peça salta de 0 a 100. É o ambiente
                 // de desenvolvimento, e inventar um progresso interpolado
                 // mostraria movimento onde não há informação.
+                // 🖥️ Só a pilha local, onde os arquivos são de teste: aqui o
+                // corpo vai inteiro, porque o `chamar` é a porta de JSON e não
+                // tem caminho de fluxo. Em produção nunca se passa por aqui.
+                let corpo = match std::fs::read(&origem) {
+                    Ok(bytes) => bytes,
+                    Err(erro) => {
+                        let _ = canal.send(Andamento::Falhou {
+                            id,
+                            erro: format!("{}: {erro}", origem.display()),
+                        });
+                        return;
+                    }
+                };
                 let bytes = corpo.len() as u64;
                 let rota = format!("/arquivos/conteudo/{}", em_query(&destino.caminho));
                 let crua = api
@@ -335,10 +355,10 @@ impl Acervo for AcervoHttp {
                 }
             } else {
                 let aviso = canal.clone();
-                api.enviar_para_url_assinada(
+                api.enviar_arquivo_assinado(
                     &destino.url,
                     &tipo,
-                    corpo,
+                    &origem,
                     Arc::new(move |enviados| {
                         let _ = aviso.send(Andamento::Subiu { id, enviados });
                     }),
@@ -519,11 +539,15 @@ pub mod mentira {
             _sessao: Sessao,
             id: usize,
             destino: DestinoDeEnvio,
-            corpo: Vec<u8>,
+            origem: PathBuf,
             _tipo: String,
             canal: Sender<Andamento>,
         ) {
-            let tamanho = corpo.len();
+            // Lê só para saber o tamanho: é o que a barra usa, e o que permite
+            // afirmar no teste que o arquivo certo foi parar no lugar certo.
+            let tamanho = std::fs::metadata(&origem)
+                .map(|m| m.len() as usize)
+                .unwrap_or(0);
             self.enviados
                 .lock()
                 .unwrap()

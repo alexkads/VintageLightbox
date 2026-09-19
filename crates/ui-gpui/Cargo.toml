@@ -116,6 +116,7 @@ tray-icon = { version = "0.24", default-features = false, features = ["gtk"] }
 # zip aqui serve para **juntar**, e não para encolher, e é o mesmo método
 # (*store*) que o `client-zip` usa no site.
 zip = { version = "8.6.0", default-features = false }
+tempfile = "3.8"
 
 # A foto da própria janela, nas ferramentas de depuração (`src/depuracao.rs`):
 # a `NSView` do GPUI chega por `raw-window-handle`, e o número da janela sai

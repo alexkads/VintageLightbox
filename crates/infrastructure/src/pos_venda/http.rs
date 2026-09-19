@@ -963,52 +963,66 @@ impl PosVendaApiHttp {
         })
     }
 
-    /// `PUT` numa URL **assinada**, relatando quantos bytes já saíram.
+    /// `PUT` numa URL **assinada**, lendo o arquivo **do disco** e relatando
+    /// quantos bytes já saíram.
     ///
-    /// # Por que existe, e por que não passa pelo `chamar`
+    /// # Por que o caminho, e não os bytes
     ///
-    /// O destino não é esta API: é a URL do R2 que
-    /// `POST /arquivos/envios` devolveu. O `chamar` recusa endereço absoluto de
-    /// propósito (é a porta da tela empacotada, e um caminho absoluto ali seria
-    /// um pedido nosso indo para outro lugar) — aqui o endereço **é** o assunto.
+    /// 🚨 **A primeira versão recebia `Vec<u8>` e o app comeu 15,77 GB** (foto
+    /// do dono, 2026-09-19, subindo uma pasta de ~1.300 RAW de 12 MB). Eram
+    /// dois erros somados: a tela lia a pasta inteira para a memória antes de
+    /// subir, e **aqui** os mesmos bytes viravam uma segunda cópia, fatiada em
+    /// pedaços, para poder relatar progresso.
+    ///
+    /// Agora o arquivo é lido em pedaços conforme sai, e o que fica na memória
+    /// é um pedaço — não o arquivo, muito menos a pasta.
     ///
     /// 🚨 **Sem `bearer_auth`, nunca.** A assinatura do R2 vai na query; um
     /// `Authorization` nosso junto faz o próprio R2 recusar com
     /// `InvalidArgument`, e a mensagem não menciona o cabeçalho.
     ///
-    /// # Como o progresso sai daqui
-    ///
-    /// O corpo é entregue como **fluxo de pedaços**, e cada pedaço enviado
-    /// chama `avisou`. Mandar o `Vec` inteiro faria o `reqwest` subir tudo numa
-    /// tacada, e a barra só teria dois estados — 0 e 100 — numa tela cuja razão
-    /// de existir é mostrar uma pasta grande subindo.
-    ///
     /// ⚠️ **O aviso é do que foi entregue ao sistema operacional**, e não do que
     /// o R2 confirmou: o último pedaço chega a 100% um instante antes de a
     /// resposta voltar. É a mesma verdade que o `upload.onprogress` do
     /// navegador conta, e a tela só dá a peça por pronta quando a resposta vem.
-    pub async fn enviar_para_url_assinada(
+    pub async fn enviar_arquivo_assinado(
         &self,
         url: &str,
         tipo: &str,
-        corpo: Vec<u8>,
+        origem: &std::path::Path,
         avisou: Arc<dyn Fn(u64) + Send + Sync>,
     ) -> DomainResult<()> {
-        /// O tamanho de cada pedaço entregue ao `reqwest`.
+        use futures::StreamExt;
+
+        /// O tamanho de cada pedaço lido do disco e entregue ao `reqwest`.
         ///
         /// 256 KiB: pequeno o bastante para a barra andar em arquivo de poucos
         /// MB, grande o bastante para um RAW de 80 MB não virar 20 mil avisos —
         /// cada um deles um `cx.notify()` do outro lado.
         const PEDACO: usize = 256 * 1024;
 
-        let total = corpo.len();
-        let mut enviados: u64 = 0;
-        let pedacos: Vec<Vec<u8>> = corpo.chunks(PEDACO).map(<[u8]>::to_vec).collect();
-        let fluxo = futures::stream::iter(pedacos.into_iter().map(move |pedaco| {
-            enviados += pedaco.len() as u64;
-            avisou(enviados);
-            Ok::<_, std::io::Error>(pedaco)
-        }));
+        let total = tokio::fs::metadata(origem)
+            .await
+            .map_err(|e| DomainError::InfrastructureError(format!("{}: {e}", origem.display())))?
+            .len();
+        let arquivo = tokio::fs::File::open(origem)
+            .await
+            .map_err(|e| DomainError::InfrastructureError(format!("{}: {e}", origem.display())))?;
+
+        // 🔑 **`ReaderStream` do `tokio-util`, e não um `unfold` à mão.** É a
+        // peça que existe para exatamente isto — transformar um `AsyncRead` em
+        // fluxo de pedaços —, e escrevê-la de novo só acrescentaria um lugar
+        // onde o caso de erro pode ficar errado (a primeira versão precisava de
+        // uma bandeira para não repetir a falha para sempre).
+        let mut enviados = 0u64;
+        let fluxo =
+            tokio_util::io::ReaderStream::with_capacity(arquivo, PEDACO).map(move |pedaco| {
+                if let Ok(dados) = &pedaco {
+                    enviados += dados.len() as u64;
+                    avisou(enviados);
+                }
+                pedaco
+            });
 
         let resposta = self
             .client

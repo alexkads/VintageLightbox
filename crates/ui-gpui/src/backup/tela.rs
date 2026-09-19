@@ -71,8 +71,20 @@ pub struct Backup {
     conversao: Conversao,
     /// A fila do envio em andamento.
     pecas: Vec<Peca>,
-    /// O corpo de cada peça, guardado até ela subir.
-    corpos: HashMap<usize, Vec<u8>>,
+    /// Onde os WebP convertidos ficam até subirem.
+    ///
+    /// 🚨 **Em disco, e não na memória.** A primeira versão guardava o
+    /// convertido (e o original!) num `HashMap<usize, Vec<u8>>` até a vez de
+    /// cada um: subindo três por vez, a pasta inteira ficava na RAM. Comeu
+    /// 15,77 GB numa pasta de ~1.300 RAW (dono, 2026-09-19).
+    ///
+    /// 🔑 **`TempDir`, e não uma pasta com o pid no nome.** A segunda versão
+    /// usava `temp_dir()/vlb-backup-{pid}` com arquivos `0.webp`, `1.webp` — e
+    /// dois envios no mesmo processo escreviam por cima um do outro, com o
+    /// primeiro apagando os arquivos do segundo ao terminar. O `TempDir` dá
+    /// diretório **único** e o apaga no `drop`: a limpeza deixa de ser um passo
+    /// que alguém pode esquecer.
+    temporarios: Option<tempfile::TempDir>,
     /// As que ainda não foram despachadas, em ordem.
     pendentes: Vec<usize>,
     /// Onde gravar cada peça já assinada, por caminho.
@@ -113,7 +125,7 @@ impl Backup {
             converter: true,
             conversao: Conversao::default(),
             pecas: Vec::new(),
-            corpos: HashMap::new(),
+            temporarios: None,
             pendentes: Vec::new(),
             assinados: HashMap::new(),
             assinando: false,
@@ -221,7 +233,7 @@ impl Backup {
         }
 
         self.pecas.clear();
-        self.corpos.clear();
+        self.limpar_os_temporarios();
         self.pendentes.clear();
         self.assinados.clear();
         self.erro = None;
@@ -240,26 +252,52 @@ impl Backup {
         // erro nenhum, e valia igual para qualquer teste futuro desta fila.
         let pasta = self.pasta.clone();
         let conversao = self.converter.then_some(self.conversao);
+        let temporarios = self.abrir_os_temporarios();
         let (daqui, dali) = channel::<DaPreparacao>();
         let tarefa = cx.background_executor().spawn(async move {
             for (feitos, arrastado) in arrastados.iter().enumerate() {
-                let Ok(bruto) = std::fs::read(&arrastado.origem) else {
-                    // Arquivo que sumiu entre a varredura e a leitura: some da
+                let Ok(dados) = std::fs::metadata(&arrastado.origem) else {
+                    // Arquivo que sumiu entre a varredura e o envio: some da
                     // fila em vez de derrubá-la.
                     continue;
                 };
                 let destino = caminho_no_acervo(&pasta, &arrastado.relativo);
                 let nome = nome_do(&destino);
-                let convertido = conversao.and_then(|c| converter_para_webp(&nome, &bruto, c));
+
+                // 🚨 **Só o que vira WebP é lido aqui.** O RAW e o PDF nunca
+                // passam pela memória: a fila leva o caminho, e quem lê é a
+                // tarefa que envia, em pedaços. Foi a leitura de todos eles,
+                // guardada até a vez de cada um, que comeu 15,77 GB.
+                let convertido = match (conversao, temporarios.as_ref()) {
+                    (Some(c), Some(pasta_temporaria))
+                        if super::conversao::eh_conversivel(std::path::Path::new(&nome)) =>
+                    {
+                        std::fs::read(&arrastado.origem)
+                            .ok()
+                            .and_then(|bruto| converter_para_webp(&nome, &bruto, c))
+                            .and_then(|feito| {
+                                // Vai para disco na hora: guardá-lo até a vez
+                                // dele é o mesmo erro, com outro nome.
+                                let arquivo = pasta_temporaria.join(format!("{feitos}.webp"));
+                                let bytes = feito.bytes.len() as u64;
+                                std::fs::write(&arquivo, &feito.bytes)
+                                    .ok()
+                                    .map(|()| (feito.nome, arquivo, bytes))
+                            })
+                    }
+                    _ => None,
+                };
+
+                let pasta_do = destino[..destino.rfind('/').map_or(0, |i| i + 1)].to_string();
                 let _ = daqui.send(DaPreparacao::Arquivo(Preparada {
                     feitos: feitos + 1,
-                    caminho: destino.clone(),
                     nome,
-                    bruto,
-                    convertido: convertido.map(|c| {
-                        let pasta_do = &destino[..destino.rfind('/').map_or(0, |i| i + 1)];
-                        (format!("{pasta_do}{}", c.nome), c.nome, c.bytes)
+                    origem: arrastado.origem.clone(),
+                    bytes: dados.len(),
+                    convertido: convertido.map(|(nome, arquivo, bytes)| {
+                        (format!("{pasta_do}{nome}"), nome, arquivo, bytes)
                     }),
+                    caminho: destino,
                 }));
             }
             // 🔑 **O fim é uma mensagem, e não o canal fechando.** A desconexão
@@ -283,36 +321,33 @@ impl Backup {
             let total = tela.convertendo.map_or(0, |(_, t)| t);
             tela.convertendo = Some((preparada.feitos, total));
 
-            let bytes = preparada.bruto.len() as u64;
             let id = tela.novo_id();
             tela.pecas.push(Peca {
                 id,
                 caminho: preparada.caminho,
                 nome: preparada.nome,
-                bytes,
-                origem: None,
+                bytes: preparada.bytes,
+                origem: Some(preparada.origem),
                 convertida: false,
                 situacao: Situacao::Esperando,
                 enviados: 0,
                 erro: None,
             });
-            tela.corpos.insert(id, preparada.bruto);
             tela.pendentes.push(id);
 
-            if let Some((caminho, nome, bytes)) = preparada.convertido {
+            if let Some((caminho, nome, arquivo, bytes)) = preparada.convertido {
                 let id = tela.novo_id();
                 tela.pecas.push(Peca {
                     id,
                     caminho,
                     nome,
-                    bytes: bytes.len() as u64,
-                    origem: None,
+                    bytes,
+                    origem: Some(arquivo),
                     convertida: true,
                     situacao: Situacao::Esperando,
                     enviados: 0,
                     erro: None,
                 });
-                tela.corpos.insert(id, bytes);
                 tela.pendentes.push(id);
             }
             cx.notify();
@@ -595,6 +630,28 @@ impl Backup {
         );
     }
 
+    /// Abre a pasta onde os WebP convertidos esperam a vez.
+    ///
+    /// 🔑 **Uma por envio, apagada no fim.** Fica em `std::env::temp_dir` com o
+    /// pid no nome: duas janelas do app não disputam a mesma, e o que sobrar de
+    /// um encerramento abrupto o sistema recolhe.
+    fn abrir_os_temporarios(&mut self) -> Option<std::path::PathBuf> {
+        // Sem lugar para escrever, o envio segue **sem** converter: subir o
+        // original é melhor que não subir nada.
+        let pasta = tempfile::Builder::new()
+            .prefix("vlb-backup-")
+            .tempdir()
+            .ok()?;
+        let caminho = pasta.path().to_path_buf();
+        self.temporarios = Some(pasta);
+        Some(caminho)
+    }
+
+    /// Larga a pasta temporária — o `drop` do `TempDir` a apaga.
+    fn limpar_os_temporarios(&mut self) {
+        self.temporarios = None;
+    }
+
     fn novo_id(&mut self) -> usize {
         self.proximo_id += 1;
         self.proximo_id
@@ -700,7 +757,7 @@ impl Backup {
         let Some(destino) = self.assinados.remove(&peca.caminho) else {
             return;
         };
-        let Some(corpo) = self.corpos.remove(&id) else {
+        let Some(origem) = peca.origem.clone() else {
             return;
         };
         peca.situacao = Situacao::Enviando;
@@ -708,7 +765,7 @@ impl Backup {
         self.no_ar += 1;
 
         let (daqui, dali) = channel();
-        self.acervo.enviar(sessao, id, destino, corpo, tipo, daqui);
+        self.acervo.enviar(sessao, id, destino, origem, tipo, daqui);
         self.drenar_muitos(
             dali,
             window,
@@ -733,6 +790,7 @@ impl Backup {
                 }
                 self.no_ar = self.no_ar.saturating_sub(1);
                 self.bombear(window, cx);
+                self.varrer_se_acabou();
             }
             Andamento::Falhou { id, erro } => {
                 if let Some(peca) = self.pecas.iter_mut().find(|p| p.id == id) {
@@ -744,9 +802,20 @@ impl Backup {
                 // da exportação em lote. Parar tudo numa pasta de 300 fotos
                 // obrigaria a recomeçar por causa de uma.
                 self.bombear(window, cx);
+                self.varrer_se_acabou();
             }
         }
         cx.notify();
+    }
+
+    /// Apaga os convertidos assim que a fila acaba.
+    ///
+    /// ⚠️ **Só quando acaba de verdade**: apagar a pasta com peça pendente
+    /// deixaria o envio seguinte procurando um arquivo que não existe mais.
+    fn varrer_se_acabou(&mut self) {
+        if self.no_ar == 0 && self.pendentes.is_empty() && self.convertendo.is_none() {
+            self.limpar_os_temporarios();
+        }
     }
 
     /// Uma resposta só.
@@ -829,14 +898,17 @@ enum DaPreparacao {
     Fim,
 }
 
-/// Um arquivo lido e convertido, vindo da thread de fundo.
+/// Um arquivo pronto para entrar na fila — **sem o conteúdo dele**.
 struct Preparada {
     feitos: usize,
+    /// No acervo.
     caminho: String,
     nome: String,
-    bruto: Vec<u8>,
-    /// `(caminho, nome, bytes)` do irmão WebP.
-    convertido: Option<(String, String, Vec<u8>)>,
+    /// No disco desta máquina. É de onde os bytes saem, na hora de subir.
+    origem: std::path::PathBuf,
+    bytes: u64,
+    /// O irmão WebP: `(caminho no acervo, nome, arquivo temporário, bytes)`.
+    convertido: Option<(String, String, std::path::PathBuf, u64)>,
 }
 
 fn nome_do(caminho: &str) -> String {
@@ -1978,6 +2050,95 @@ mod testes {
         janela
             .update(cx, |tela, _window, _cx| {
                 assert!(tela.erro.as_deref().is_some_and(|e| e.contains("vazia")));
+            })
+            .expect("a janela abriu");
+    }
+    /// 🚨 **O teste da memória** (dono, 2026-09-19: *"gasta muita memória"* —
+    /// 15,77 GB subindo uma pasta de RAW).
+    ///
+    /// A causa era estrutural: a preparação lia **todo** arquivo para a memória
+    /// e mandava os bytes por um canal sem limite, e a tela os guardava num
+    /// mapa até a vez de cada um — subindo três por vez, a pasta inteira ficava
+    /// na RAM.
+    ///
+    /// O que este teste afirma é o contorno: **nenhuma peça carrega conteúdo**.
+    /// Cada uma leva o caminho de onde os bytes saem, e quem lê é a tarefa que
+    /// envia. Uma peça que voltasse a carregar `Vec<u8>` não caberia no tipo, e
+    /// é isso que se confere aqui — junto com o tamanho, que continua sendo
+    /// lido do disco para a barra andar por bytes.
+    #[gpui::test]
+    async fn a_fila_guarda_caminhos_e_nao_o_conteudo(cx: &mut TestAppContext) {
+        let acervo = Arc::new(AcervoDeArquivosDeMentira::default());
+        let (janela, mut visual) = tela(cx, acervo.clone());
+        let pasta = pasta_com(30);
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.receber(vec![pasta.path().join("ensaio-silva")], window, cx);
+            })
+            .expect("a janela abriu");
+        assentar(&mut visual);
+
+        janela
+            .update(cx, |tela, _window, _cx| {
+                assert_eq!(tela.pecas().len(), 30);
+                for peca in tela.pecas() {
+                    assert!(
+                        peca.origem.is_some(),
+                        "{} tem de saber de onde ler, e não carregar o conteúdo",
+                        peca.caminho
+                    );
+                    assert!(peca.bytes > 0, "o tamanho vem do disco, para a barra");
+                }
+            })
+            .expect("a janela abriu");
+
+        assert_eq!(acervo.enviados.lock().unwrap().len(), 30);
+    }
+
+    /// 🔑 **A pasta temporária é única por envio, e some no fim.**
+    ///
+    /// A versão anterior usava `temp_dir()/vlb-backup-{pid}` com arquivos
+    /// `0.webp`, `1.webp`: dois envios no mesmo processo escreviam por cima um
+    /// do outro, e o primeiro a terminar apagava os arquivos do segundo. Foi o
+    /// que fez este arquivo de testes falhar de um jeito que parecia conversão
+    /// quebrada — e não era.
+    #[gpui::test]
+    async fn dois_envios_seguidos_nao_disputam_a_pasta_temporaria(cx: &mut TestAppContext) {
+        let acervo = Arc::new(AcervoDeArquivosDeMentira::default());
+        let (janela, mut visual) = tela(cx, acervo.clone());
+
+        let raiz = tempfile::tempdir().expect("pasta");
+        let foto = image::DynamicImage::ImageRgb8(image::RgbImage::from_fn(900, 600, |x, y| {
+            image::Rgb([(x % 251) as u8, (y % 253) as u8, ((x + y) % 241) as u8])
+        }));
+        let caminho = raiz.path().join("capa.png");
+        foto.save(&caminho).expect("png de teste");
+
+        for volta in 1..=2 {
+            janela
+                .update(cx, |tela, window, cx| {
+                    tela.conversao.maior_lado = 300;
+                    tela.receber(vec![caminho.clone()], window, cx);
+                })
+                .expect("a janela abriu");
+            assentar(&mut visual);
+
+            let enviados = acervo.enviados.lock().unwrap().len();
+            assert_eq!(
+                enviados,
+                volta * 2,
+                "a volta {volta} tinha de subir o original e o WebP"
+            );
+        }
+
+        // 🔑 Terminado o envio, a pasta temporária vai embora sozinha.
+        janela
+            .update(cx, |tela, _window, _cx| {
+                assert!(
+                    tela.temporarios.is_none(),
+                    "o TempDir some quando a fila acaba"
+                );
             })
             .expect("a janela abriu");
     }

@@ -58,6 +58,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "mul
 # relatar quantos bytes já saíram, e isso só existe com o corpo entregue como
 # fluxo. Sem eles a barra saltaria de 0 a 100 por arquivo.
 futures.workspace = true
+tokio-util = { version = "0.7.19", features = ["io"] }
 
 [dev-dependencies]
 tempfile.workspace = true
