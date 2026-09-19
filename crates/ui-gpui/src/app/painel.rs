@@ -482,7 +482,7 @@ impl Aplicativo {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let tema = cx.theme();
-        let (borda, fundo) = (tema.border, tema.background);
+        let (borda, fundo, frente) = (tema.border, tema.background, tema.foreground);
         // 🚨 **No Linux esta faixa é a barra de título.** O GNOME não decora
         // janela nenhuma (ver `crate::janela`), e sem isto ela não se move nem
         // maximiza com dois cliques — foi a queixa do dono no Fedora,
@@ -505,6 +505,10 @@ impl Aplicativo {
                     .overflow_hidden()
                     .children(self.assunto_do_cabecalho(window, cx)),
             )
+            // 🪟 **No Linux os botões de janela são estes.** Sem barra do
+            // sistema, fechar e minimizar só existem se o app os desenhar; fora
+            // do Linux a chamada não devolve nada.
+            .child(crate::janela::controles("janela-app", frente, window, cx))
     }
 
     /// O botão que abre e recolhe o menu (`SidebarTrigger`). A galeria usa o

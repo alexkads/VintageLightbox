@@ -117,6 +117,36 @@ impl Entrada {
         cx.notify();
     }
 
+    /// Desiste da espera e volta ao convite.
+    ///
+    /// # 🚨 Por que a tela precisa de saída
+    ///
+    /// *"Tinha que ter um timeout pois a tela tá travada"* (dono, 19/set/2026).
+    /// O prazo existe — [`PRAZO_PARA_AUTORIZAR`] são cinco minutos, em
+    /// `infrastructure::pos_venda::autorizacao` —, mas cinco minutos de roda
+    /// girando são indistinguíveis de um app pendurado, e no GNOME, onde não há
+    /// barra de janela, o operador nem fechar podia: só restava matar o
+    /// processo. O caso que trouxe a queixa nem chegava ao prazo — a conta não
+    /// tinha `ManageMedia`, o site recusava com 403 e **nada voltava para cá**.
+    ///
+    /// # 🔑 O canal é trocado, e é isso que desliga a tentativa abandonada
+    ///
+    /// A autorização vive numa tarefa do tokio que não dá para cancelar daqui:
+    /// ela segue esperando o navegador até o prazo dela. Trocar o canal deixa o
+    /// `Sender` dela falando para um `Receiver` que já morreu — o `send` falha
+    /// em silêncio, como já falha hoje quando a tela fecha. Sem isso, uma
+    /// autorização abandonada entraria no app cinco minutos depois, sozinha.
+    pub fn desistir(&mut self, cx: &mut Context<Self>) {
+        if !self.no_navegador {
+            return;
+        }
+        self.recados = channel();
+        self.entrando = false;
+        self.no_navegador = false;
+        self.erro = None;
+        cx.notify();
+    }
+
     fn acompanhar(&mut self, cx: &mut Context<Self>) {
         if self.colhendo {
             return;
@@ -229,7 +259,7 @@ impl Entrada {
 }
 
 impl Render for Entrada {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         use capa::cor;
         use gpui::{
             img, linear_color_stop, linear_gradient, relative, Animation, AnimationExt, FontWeight,
@@ -247,7 +277,9 @@ impl Render for Entrada {
             "Entrar com a conta RecordarFotos"
         };
         let dica = if self.no_navegador {
-            "Confirme a entrada na janela que abriu no navegador e volte para cá.".to_string()
+            "Confirme a entrada na janela que abriu no navegador e volte para cá. \
+             O pedido vale por cinco minutos."
+                .to_string()
         } else {
             format!(
                 "O navegador abre para você confirmar a conta em {}. Depois é só voltar para cá.",
@@ -366,6 +398,21 @@ impl Render for Entrada {
                             .text_color(cor(capa::PARAGRAFO).opacity(0.6))
                             .child(dica),
                     )
+                    // 🚪 A saída da espera. Só aparece enquanto ela dura, e é
+                    // a única coisa clicável da tela nesse estado.
+                    .when(self.no_navegador, |d| {
+                        d.child(
+                            div()
+                                .id("entrada-desistir")
+                                .mt(px(12.))
+                                .text_sm()
+                                .cursor_pointer()
+                                .text_color(cor(capa::OURO).opacity(0.85))
+                                .hover(|s| s.text_color(cor(capa::OURO)))
+                                .child("Cancelar e voltar")
+                                .on_click(cx.listener(|tela, _ev, _window, cx| tela.desistir(cx))),
+                        )
+                    })
                     .when_some(self.erro.clone(), |d, erro| {
                         d.child(
                             div()
@@ -457,6 +504,28 @@ impl Render for Entrada {
                     .py(px(48.))
                     .child(conteudo),
             )
+            // 🪟 **A barra de janela desta tela.** Ela não tem o cabeçalho de
+            // 56 px do app, e no GNOME não há barra do sistema: sem esta faixa a
+            // janela não se move nem fecha — e é a primeira tela que o app
+            // mostra. Fora do Linux ela fica vazia e só serve de espaço.
+            .child(
+                crate::janela::como_barra_de_titulo(div(), "barra-da-entrada", window, cx)
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .right_0()
+                    .h(px(36.))
+                    .flex()
+                    .items_center()
+                    .justify_end()
+                    .px(px(8.))
+                    .child(crate::janela::controles(
+                        "janela-entrada",
+                        cor(capa::PARAGRAFO),
+                        window,
+                        cx,
+                    )),
+            )
             .child(
                 h_flex()
                     .absolute()
@@ -474,5 +543,105 @@ impl Render for Entrada {
                             .child("Ensaio no estúdio de Canela"),
                     ),
             )
+    }
+}
+
+#[cfg(test)]
+mod testes {
+    use super::*;
+
+    use crate::pos_venda::porta::mentira::PublicadorDeMentira;
+    use gpui::TestAppContext;
+
+    /// A tela já com a retomada resolvida — que é como o operador a encontra.
+    ///
+    /// ⚠️ **Sem colher o `SemSessao` da abertura, `entrar` não faz nada**: ela
+    /// recusa enquanto `entrando` estiver de pé, e a retomada o deixa de pé até
+    /// a primeira colheita. No app isso acontece num piscar, antes de existir
+    /// clique; no teste, se não for feito à mão, o clique cai no vazio e o teste
+    /// passa medindo outra coisa.
+    fn tela(
+        publicador: Arc<PublicadorDeMentira>,
+        cx: &mut TestAppContext,
+    ) -> gpui::WindowHandle<Entrada> {
+        cx.update(gpui_component::init);
+        let janela = cx.add_window(|window, cx| {
+            Entrada::nova(publicador, Configuracao::default(), window, cx)
+        });
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.colher(cx);
+                assert!(!tela.entrando(), "a retomada não achou sessão e terminou");
+            })
+            .expect("a janela de teste");
+        janela
+    }
+
+    /// 🚪 **A espera tem saída, e a saída volta ao convite.**
+    ///
+    /// Antes de 19/set/2026 não havia: quem apertava "Entrar" ficava com a roda
+    /// girando até o prazo de cinco minutos do `infrastructure`, e no GNOME —
+    /// onde o app desenha a própria janela — nem fechar dava, porque a tela de
+    /// entrada não tinha barra. O caminho que trouxe a queixa nem chegava ao
+    /// prazo: o site recusava com 403 e nada voltava.
+    #[gpui::test]
+    fn desistir_da_espera_devolve_o_convite(cx: &mut TestAppContext) {
+        let publicador = Arc::new(PublicadorDeMentira {
+            // A rede que não responde: é o que põe a tela no estado de espera.
+            demorada: true,
+            ..Default::default()
+        });
+        let janela = tela(publicador.clone(), cx);
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.entrar(cx);
+                assert!(tela.entrando(), "apertou entrar: a tela está esperando");
+                assert!(tela.no_navegador, "e a espera é a do navegador");
+
+                tela.desistir(cx);
+                assert!(!tela.entrando(), "desistiu: a tela não espera mais");
+                assert!(!tela.no_navegador, "e não fala mais em navegador");
+                assert!(
+                    tela.erro().is_none(),
+                    "desistir é escolha do operador, não falha — nada de vermelho"
+                );
+            })
+            .expect("a janela de teste");
+    }
+
+    /// 🚨 **A autorização abandonada não entra pela porta dos fundos.**
+    ///
+    /// A tarefa que espera o navegador não se cancela daqui: ela segue de pé até
+    /// o prazo dela. Sem trocar o canal, o operador que desistiu veria o app
+    /// entrar sozinho minutos depois — com a conta que ele decidiu não usar.
+    #[gpui::test]
+    fn o_que_volta_depois_de_desistir_nao_entra(cx: &mut TestAppContext) {
+        let publicador = Arc::new(PublicadorDeMentira {
+            demorada: true,
+            ..Default::default()
+        });
+        let janela = tela(publicador.clone(), cx);
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.entrar(cx);
+                tela.desistir(cx);
+            })
+            .expect("a janela de teste");
+
+        // A rede responde agora, tarde: o `Sender` que ela tem é o do canal
+        // trocado, e não há mais quem o escute.
+        publicador.responder();
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.colher(cx);
+                assert!(
+                    !tela.entrando(),
+                    "a resposta atrasada não pode reabrir a espera"
+                );
+            })
+            .expect("a janela de teste");
     }
 }

@@ -1143,7 +1143,11 @@ pub mod mentira {
 
         fn autorizar(&self, canal: Sender<Recado>) {
             self.autorizacoes.lock().expect("as autorizacoes").push(());
-            let _ = canal.send(if !self.recusa_autorizacao {
+            // 🔑 **Respeita o `demorada`.** A autorização é a única espera que o
+            // operador *vê* — são os minutos dele no navegador —, e sem isto
+            // nenhum teste conseguia parar a tela nesse estado para afirmar o
+            // que ela oferece ali.
+            let recado = if !self.recusa_autorizacao {
                 Recado::Entrou(Sessao {
                     access_token: "tok-de-mentira".into(),
                     refresh_token: "ref-de-mentira".into(),
@@ -1152,7 +1156,8 @@ pub mod mentira {
                 })
             } else {
                 Recado::Falhou("o site recusou a autorização".into())
-            });
+            };
+            self.responder_ou_guardar(canal, recado);
         }
 
         fn retomar(&self, canal: Sender<Recado>) {
