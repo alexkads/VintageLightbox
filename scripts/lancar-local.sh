@@ -38,7 +38,7 @@ TAG="v$VERSAO"
 # ⚠️ O `dist/` pode ter sobra de uma versão anterior — o empacotador não limpa.
 #    Um `.dmg` da 0.1.0 ao lado do da 0.1.1 entraria no manifesto como se fosse
 #    da versão nova, e o app baixaria o arquivo errado.
-VELHOS=$(find dist -type f -name "*_*" ! -name "*_${VERSAO}_*" ! -name "*.app.tar.gz*" 2>/dev/null | head -5)
+VELHOS=$(find dist -type f -name "*_*" ! -name "*_${VERSAO}_*" ! -name "*.app.tar.gz*" 2>/dev/null | head -5 || true)
 if [[ -n "$VELHOS" ]]; then
   erro "há arquivos de outra versão em dist/ — eles entrariam no manifesto da $VERSAO:"
   echo "$VELHOS" | sed 's/^/     /'
