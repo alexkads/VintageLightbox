@@ -116,6 +116,11 @@ pub enum Icone {
     ShoppingBag,
     Ticket,
     MonitorSmartphone,
+    // 📦 A tela do backup (`/dashboard/backup`): a pasta, o arquivo e o
+    // recarregar. Os três SVG já estavam em `icones/`.
+    FolderOpen,
+    File,
+    RefreshCw,
 }
 
 impl Icone {
@@ -187,6 +192,9 @@ impl Icone {
         Icone::ShoppingBag,
         Icone::Ticket,
         Icone::MonitorSmartphone,
+        Icone::FolderOpen,
+        Icone::File,
+        Icone::RefreshCw,
     ];
 
     fn arquivo(self) -> &'static str {
@@ -245,6 +253,9 @@ impl Icone {
             Icone::Store => "store",
             Icone::Sun => "sun",
             Icone::Trash2 => "trash-2",
+            Icone::FolderOpen => "folder-open",
+            Icone::File => "file",
+            Icone::RefreshCw => "refresh-cw",
             Icone::TriangleAlert => "triangle-alert",
             Icone::Upload => "upload",
             Icone::UserPlus => "user-plus",

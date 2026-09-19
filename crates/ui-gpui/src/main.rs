@@ -224,26 +224,34 @@ async fn main() {
     // 📸 O pós-venda do site — o vão que o projeto existe para fechar. O mesmo
     // exportador da exportação, em memória: o que sobe é o que a tela mostra,
     // e o site gera a prévia marcada a partir dele.
+    // 🔑 O chaveiro do sistema é o que faz a sessão sobreviver ao
+    // fechamento do app: sem ele, o refresh de quinze dias morreria com
+    // o processo e o operador reautorizaria toda manhã.
+    // 🚨 **Sem `com_site` a autorização ia sempre para produção.**
+    // `PosVendaApiHttp::nova` cai em `SITE_PADRAO` quando ninguém lhe
+    // diz o site, então com a API em `localhost` o navegador abria
+    // `recordarfotos.com.br/autorizar-app` — que é exatamente a
+    // armadilha descrita em `pos_venda/config.rs`: o código é assinado
+    // pelo segredo de um servidor e apresentado a outro. `config.site()`
+    // já resolve a precedência (`VLB_SITE_URL`, o JSON, a dedução).
+    //
+    // 🔑 **Um cliente só, e por isso ele nasce aqui fora.** O acervo do backup
+    // fala com a mesma API e precisa do mesmo token; dois clientes seriam dois
+    // lugares onde a base e a renovação podem divergir — e o sintoma seria uma
+    // das telas deslogando sozinha.
+    let api_do_site = {
+        let config = ui_gpui::pos_venda::config::ler();
+        let local =
+            config.base_url.contains("://localhost") || config.base_url.contains("://127.0.0.1");
+        Arc::new(
+            infrastructure::PosVendaApiHttp::nova(config.base_url.clone())
+                .com_site(config.site())
+                .com_cofre(cofre_da_sessao(local)),
+        )
+    };
     let publicador: Arc<dyn Publicador> = Arc::new(PublicadorDaApi::novo(
         Arc::new({
-            // 🔑 O chaveiro do sistema é o que faz a sessão sobreviver ao
-            // fechamento do app: sem ele, o refresh de quinze dias morreria com
-            // o processo e o operador reautorizaria toda manhã.
-            // 🚨 **Sem `com_site` a autorização ia sempre para produção.**
-            // `PosVendaApiHttp::nova` cai em `SITE_PADRAO` quando ninguém lhe
-            // diz o site, então com a API em `localhost` o navegador abria
-            // `recordarfotos.com.br/autorizar-app` — que é exatamente a
-            // armadilha descrita em `pos_venda/config.rs`: o código é assinado
-            // pelo segredo de um servidor e apresentado a outro. `config.site()`
-            // já resolve a precedência (`VLB_SITE_URL`, o JSON, a dedução).
-            let config = ui_gpui::pos_venda::config::ler();
-            let local = config.base_url.contains("://localhost")
-                || config.base_url.contains("://127.0.0.1");
-            let api = Arc::new(
-                infrastructure::PosVendaApiHttp::nova(config.base_url.clone())
-                    .com_site(config.site())
-                    .com_cofre(cofre_da_sessao(local)),
-            );
+            let api = api_do_site.clone();
             adapters::controllers::PosVendaController::new(
                 api.clone(),
                 Arc::new(use_cases::pos_venda::PublicarNoPosVendaUseCase::new(
@@ -262,6 +270,18 @@ async fn main() {
         Arc::new(infrastructure::ImageExporterImpl::new()),
         tokio::runtime::Handle::current(),
     ));
+
+    // 📦 O acervo de arquivos de `/dashboard/backup`: lista pastas, pede a URL
+    // assinada e sobe o arquivo direto no R2. Mesmo cliente, mesmo token.
+    let acervo_de_arquivos: Arc<dyn ui_gpui::backup::Acervo> = Arc::new(
+        ui_gpui::backup::AcervoHttp::novo(api_do_site.clone(), tokio::runtime::Handle::current()),
+    );
+
+    // 🔑 *"Tinha que ter opção sem arrastar e soltar"* (dono, 2026-09-19): a
+    // janela do sistema para escolher pasta ou arquivos do backup.
+    let escolha_do_backup: Arc<dyn ui_gpui::backup::EscolhaDoBackup> = Arc::new(
+        ui_gpui::backup::EscolhaNativa::nova(tokio::runtime::Handle::current()),
+    );
 
     // A folha de impressão em PDF. 🔑 Ela reusa o **mesmo** exportador da
     // exportação: a folha tem de sair com a foto revelada e enquadrada, e
@@ -432,6 +452,8 @@ async fn main() {
                                     // sessão: filtro de imagem e seleção múltipla.
                                     seletor_de_fotos: seletor_de_fotos.clone(),
                                     atualizador: atualizador.clone(),
+                                    acervo_de_arquivos: acervo_de_arquivos.clone(),
+                                    escolha_do_backup: escolha_do_backup.clone(),
                                 },
                                 window,
                                 cx,

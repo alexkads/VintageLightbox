@@ -330,6 +330,11 @@ mod a_moldura_manda {
             "impressao/tela.rs",
             "a moldura é o retângulo que `encaixar` calculou para o papel",
         ),
+        (
+            "backup/tela.rs",
+            "a prévia mede a moldura com `cabe_em(janela, foto) * zoom` — ela já \
+             tem a proporção da foto, como em `cliente.rs`",
+        ),
     ];
 
     /// Tira os comentários, para que o texto que **explica** a armadilha não

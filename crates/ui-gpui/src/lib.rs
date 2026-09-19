@@ -8,6 +8,7 @@
 pub mod app;
 /// A atualização automática — o app não passa por loja e se atualiza sozinho.
 pub mod atualizacao;
+pub mod backup;
 pub mod balcao;
 /// O ícone na bandeja do sistema, com os envios à vista.
 pub mod bandeja;

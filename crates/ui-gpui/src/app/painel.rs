@@ -83,7 +83,7 @@ struct ItemDoMenu {
 }
 
 /// As seções que o app tem, em "Operação" — as mesmas do app Tauri.
-const MENU: [ItemDoMenu; 2] = [
+const MENU: [ItemDoMenu; 3] = [
     ItemDoMenu {
         tela: Tela::Sessoes,
         titulo: "Sessões fotográficas",
@@ -94,6 +94,13 @@ const MENU: [ItemDoMenu; 2] = [
         titulo: "Caixa",
         icone: Icone::Calculator,
     },
+    // 📦 O acervo de arquivos no R2 — `/dashboard/backup` no site, portado do
+    // `file-manager` do legado em 2026-09-18.
+    ItemDoMenu {
+        tela: Tela::Backup,
+        titulo: "Backup de arquivos",
+        icone: Icone::FolderOpen,
+    },
 ];
 
 impl Tela {
@@ -102,6 +109,7 @@ impl Tela {
     fn secao(self) -> Tela {
         match self {
             Tela::Caixa => Tela::Caixa,
+            Tela::Backup => Tela::Backup,
             _ => Tela::Sessoes,
         }
     }
@@ -135,6 +143,16 @@ impl Aplicativo {
             Tela::Caixa => self.caixa.update(cx, |t, cx| t.abrir(cx)),
             Tela::Retencao => self.retencao.update(cx, |t, cx| t.abrir(window, cx)),
             Tela::NovaSessao => self.nova_sessao.update(cx, |t, cx| t.abrir(window, cx)),
+            // 🔑 **A sessão chega aqui, e não na entrada.** Listar o acervo na
+            // hora do login gastaria um pedido por abertura do app para uma
+            // tela que quase nunca se abre; e a conta pode trocar sem o app
+            // fechar. Aqui a tela recebe a conta de agora e lê a raiz.
+            Tela::Backup => {
+                if let Some(sessao) = self.sessao.clone() {
+                    self.backup
+                        .update(cx, |t, cx| t.com_sessao(sessao, window, cx));
+                }
+            }
             _ => {}
         }
         self.tela = tela;

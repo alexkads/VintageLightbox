@@ -115,6 +115,14 @@ pub struct Portas {
     /// reinstale à mão, e o que acontece de verdade é a versão velha rodar por
     /// meses.
     pub atualizador: Arc<dyn Atualizador>,
+    /// 📦 O acervo de arquivos no R2 — a tela `/dashboard/backup`.
+    pub acervo_de_arquivos: Arc<dyn crate::backup::Acervo>,
+    /// Quem abre a janela do sistema para escolher pasta ou arquivos do backup.
+    ///
+    /// ⚠️ **Separada do [`Self::seletor`] e do [`Self::seletor_de_fotos`]**: o
+    /// primeiro só escolhe pasta de importação, e o segundo filtra por extensão
+    /// de foto — e um backup guarda PDF, planilha e recibo junto com o RAW.
+    pub escolha_do_backup: Arc<dyn crate::backup::EscolhaDoBackup>,
 }
 
 actions!(
@@ -357,6 +365,11 @@ pub enum Tela {
     Retencao,
     /// O assistente de sete etapas — `/dashboard/sessoes-fotograficas/nova`.
     NovaSessao,
+    /// O acervo de arquivos no R2 — `/dashboard/backup`.
+    ///
+    /// O porte do `dashboard.file-manager` do legado (paridade, `falta-storage`),
+    /// com o nome que o dono pediu em 2026-09-18.
+    Backup,
 }
 
 pub struct Aplicativo {
@@ -390,6 +403,7 @@ pub struct Aplicativo {
     veio_do_caixa: bool,
     /// A retenção do pós-venda.
     pub(crate) retencao: Entity<Retencao>,
+    pub(crate) backup: Entity<crate::backup::Backup>,
     _pedido_da_retencao: gpui::Subscription,
     /// O assistente da nova sessão.
     pub(crate) nova_sessao: Entity<NovaSessao>,
@@ -895,6 +909,13 @@ impl Aplicativo {
                 },
             ),
         ];
+        let backup = cx.new(|cx| {
+            crate::backup::Backup::novo(
+                portas.acervo_de_arquivos.clone(),
+                portas.escolha_do_backup.clone(),
+                cx,
+            )
+        });
         let retencao = cx.new(|cx| Retencao::nova(publicador_da_retencao, window, cx));
         let pedido_da_retencao = cx.subscribe_in(
             &retencao,
@@ -962,6 +983,7 @@ impl Aplicativo {
             _pedido_do_caixa: pedido_do_caixa,
             veio_do_caixa: false,
             retencao,
+            backup,
             _pedido_da_retencao: pedido_da_retencao,
             nova_sessao,
             _pedidos_da_nova: pedidos_da_nova,
@@ -3853,7 +3875,14 @@ impl Aplicativo {
             // Na sessão as setas andam na grade dela — é o que a legenda da
             // tira promete.
             Tela::Sessao => self.detalhe.update(cx, |tela, cx| tela.andar(passo, cx)),
-            Tela::Impressao | Tela::Sessoes | Tela::Caixa | Tela::Retencao | Tela::NovaSessao => {}
+            // No Backup as setas não andam: a lista é de arquivos, e quem
+            // navega é o clique — como no site.
+            Tela::Impressao
+            | Tela::Sessoes
+            | Tela::Caixa
+            | Tela::Retencao
+            | Tela::NovaSessao
+            | Tela::Backup => {}
         }
     }
 
@@ -3881,6 +3910,7 @@ impl Aplicativo {
             }
             Tela::Revelacao
             | Tela::Impressao
+            | Tela::Backup
             | Tela::Sessoes
             | Tela::Caixa
             | Tela::Retencao
@@ -3918,9 +3948,12 @@ impl Aplicativo {
         match self.tela {
             Tela::Revelacao | Tela::Impressao => self.voltar_para_biblioteca(window, cx),
             Tela::Biblioteca => {}
-            Tela::Sessao | Tela::Sessoes | Tela::Caixa | Tela::Retencao | Tela::NovaSessao => {
-                cx.propagate()
-            }
+            Tela::Sessao
+            | Tela::Sessoes
+            | Tela::Caixa
+            | Tela::Retencao
+            | Tela::NovaSessao
+            | Tela::Backup => cx.propagate(),
         }
     }
 
@@ -4409,6 +4442,7 @@ impl Render for Aplicativo {
                             Tela::Sessao => self.detalhe.clone().into_any_element(),
                             Tela::Caixa => self.caixa.clone().into_any_element(),
                             Tela::Retencao => self.retencao.clone().into_any_element(),
+                            Tela::Backup => self.backup.clone().into_any_element(),
                             Tela::NovaSessao => self.nova_sessao.clone().into_any_element(),
                         }),
                     ),
@@ -4704,6 +4738,12 @@ mod testes {
             folha: Arc::new(FolhaDeMentira::default()),
             marcador: Arc::new(MarcadorDeMentira::default()),
             gerador: Arc::new(GeradorDeMentira::default()),
+            acervo_de_arquivos: Arc::new(
+                crate::backup::porta::mentira::AcervoDeArquivosDeMentira::default(),
+            ),
+            escolha_do_backup: Arc::new(
+                crate::backup::escolha::mentira::EscolhaDeMentira::default(),
+            ),
             // O padrão de mentira não devolve imagem nenhuma: quem quiser
             // afirmar sobre a reposição troca esta porta por
             // `RepositorDeMentira::que_devolve`.

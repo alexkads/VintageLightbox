@@ -963,6 +963,99 @@ impl PosVendaApiHttp {
         })
     }
 
+    /// `PUT` numa URL **assinada**, relatando quantos bytes já saíram.
+    ///
+    /// # Por que existe, e por que não passa pelo `chamar`
+    ///
+    /// O destino não é esta API: é a URL do R2 que
+    /// `POST /arquivos/envios` devolveu. O `chamar` recusa endereço absoluto de
+    /// propósito (é a porta da tela empacotada, e um caminho absoluto ali seria
+    /// um pedido nosso indo para outro lugar) — aqui o endereço **é** o assunto.
+    ///
+    /// 🚨 **Sem `bearer_auth`, nunca.** A assinatura do R2 vai na query; um
+    /// `Authorization` nosso junto faz o próprio R2 recusar com
+    /// `InvalidArgument`, e a mensagem não menciona o cabeçalho.
+    ///
+    /// # Como o progresso sai daqui
+    ///
+    /// O corpo é entregue como **fluxo de pedaços**, e cada pedaço enviado
+    /// chama `avisou`. Mandar o `Vec` inteiro faria o `reqwest` subir tudo numa
+    /// tacada, e a barra só teria dois estados — 0 e 100 — numa tela cuja razão
+    /// de existir é mostrar uma pasta grande subindo.
+    ///
+    /// ⚠️ **O aviso é do que foi entregue ao sistema operacional**, e não do que
+    /// o R2 confirmou: o último pedaço chega a 100% um instante antes de a
+    /// resposta voltar. É a mesma verdade que o `upload.onprogress` do
+    /// navegador conta, e a tela só dá a peça por pronta quando a resposta vem.
+    pub async fn enviar_para_url_assinada(
+        &self,
+        url: &str,
+        tipo: &str,
+        corpo: Vec<u8>,
+        avisou: Arc<dyn Fn(u64) + Send + Sync>,
+    ) -> DomainResult<()> {
+        /// O tamanho de cada pedaço entregue ao `reqwest`.
+        ///
+        /// 256 KiB: pequeno o bastante para a barra andar em arquivo de poucos
+        /// MB, grande o bastante para um RAW de 80 MB não virar 20 mil avisos —
+        /// cada um deles um `cx.notify()` do outro lado.
+        const PEDACO: usize = 256 * 1024;
+
+        let total = corpo.len();
+        let mut enviados: u64 = 0;
+        let pedacos: Vec<Vec<u8>> = corpo.chunks(PEDACO).map(<[u8]>::to_vec).collect();
+        let fluxo = futures::stream::iter(pedacos.into_iter().map(move |pedaco| {
+            enviados += pedaco.len() as u64;
+            avisou(enviados);
+            Ok::<_, std::io::Error>(pedaco)
+        }));
+
+        let resposta = self
+            .client
+            .put(url)
+            .header(reqwest::header::CONTENT_TYPE, tipo)
+            // O R2 precisa do tamanho: sem ele o `reqwest` manda
+            // `Transfer-Encoding: chunked`, que a API do S3 recusa.
+            .header(reqwest::header::CONTENT_LENGTH, total)
+            .body(reqwest::Body::wrap_stream(fluxo))
+            .send()
+            .await
+            .map_err(rede)?;
+
+        if resposta.status().is_success() {
+            return Ok(());
+        }
+        let status = resposta.status();
+        let corpo = resposta.text().await.unwrap_or_default();
+        Err(DomainError::InfrastructureError(format!(
+            "o armazenamento respondeu {status}: {corpo}"
+        )))
+    }
+
+    /// `GET` numa URL **assinada** — a foto da prévia e o arquivo do zip.
+    ///
+    /// O par de [`Self::enviar_para_url_assinada`], e existe pelo mesmo motivo:
+    /// o destino não é esta API, e o `chamar` recusa endereço absoluto de
+    /// propósito.
+    ///
+    /// 🚨 **Sem `bearer_auth`**: a assinatura do R2 vai na query, e um
+    /// `Authorization` nosso junto faz o próprio R2 recusar.
+    pub async fn buscar_url_assinada(&self, url: &str) -> DomainResult<Vec<u8>> {
+        let resposta = self.client.get(url).send().await.map_err(rede)?;
+        if !resposta.status().is_success() {
+            let status = resposta.status();
+            let corpo = resposta.text().await.unwrap_or_default();
+            return Err(DomainError::InfrastructureError(format!(
+                "o armazenamento respondeu {status}: {corpo}"
+            )));
+        }
+        Ok(resposta
+            .bytes()
+            .await
+            .map_err(|e| DomainError::InfrastructureError(format!("leitura incompleta: {e}")))?
+            .to_vec())
+    }
+
     /// As rotas de imagem devolvem **bytes**, e não JSON.
     ///
     /// 🔑 Passar por `ler` desserializaria e falharia com "resposta ilegível"

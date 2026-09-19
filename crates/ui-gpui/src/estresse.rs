@@ -594,6 +594,10 @@ fn portas_com(
         seletor: Arc::new(SeletorDeMentira::default()),
         seletor_de_fotos: Arc::new(crate::sessoes::arquivos::mentira::SeletorDeMentira::default()),
         atualizador: Arc::new(AtualizadorDeMentira::default()),
+        acervo_de_arquivos: Arc::new(
+            crate::backup::porta::mentira::AcervoDeArquivosDeMentira::default(),
+        ),
+        escolha_do_backup: Arc::new(crate::backup::escolha::mentira::EscolhaDeMentira::default()),
     }
 }
 

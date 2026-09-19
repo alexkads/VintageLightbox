@@ -109,6 +109,13 @@ cargo-packager-updater = { version = "0.2", default-features = false, features =
 # ⚠️ Sem `libxdo`: ele só serve aos itens Copiar/Colar do menu, que a bandeja
 # não tem, e seria mais uma biblioteca do sistema para instalar no Linux.
 tray-icon = { version = "0.24", default-features = false, features = ["gtk"] }
+# 📦 O zip de "baixar a pasta compactada" (`/dashboard/backup`).
+#
+# `default-features = false`: sem deflate, sem bzip2, sem zstd. JPEG, WebP e RAW
+# já são dados comprimidos — passar deflate neles gasta CPU para ganhar 1–2%. O
+# zip aqui serve para **juntar**, e não para encolher, e é o mesmo método
+# (*store*) que o `client-zip` usa no site.
+zip = { version = "8.6.0", default-features = false }
 
 # A foto da própria janela, nas ferramentas de depuração (`src/depuracao.rs`):
 # a `NSView` do GPUI chega por `raw-window-handle`, e o número da janela sai

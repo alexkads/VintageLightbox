@@ -149,6 +149,12 @@ fn abrir_o_estudio(cx: &mut TestAppContext, fotos: Vec<PhotoViewModel>) -> Estud
                     seletor: Arc::new(SeletorDeMentira::default()),
                     seletor_de_fotos,
                     atualizador: Arc::new(AtualizadorDeMentira::default()),
+                    acervo_de_arquivos: Arc::new(
+                        crate::backup::porta::mentira::AcervoDeArquivosDeMentira::default(),
+                    ),
+                    escolha_do_backup: Arc::new(
+                        crate::backup::escolha::mentira::EscolhaDeMentira::default(),
+                    ),
                 },
                 window,
                 cx,
@@ -715,6 +721,12 @@ fn nada_acontece_fora_de_uma_sessao(cx: &mut TestAppContext) {
                     seletor: Arc::new(SeletorDeMentira::default()),
                     seletor_de_fotos: Arc::new(SeletorDeFotosDeMentira::default()),
                     atualizador: Arc::new(AtualizadorDeMentira::default()),
+                    acervo_de_arquivos: Arc::new(
+                        crate::backup::porta::mentira::AcervoDeArquivosDeMentira::default(),
+                    ),
+                    escolha_do_backup: Arc::new(
+                        crate::backup::escolha::mentira::EscolhaDeMentira::default(),
+                    ),
                 },
                 window,
                 cx,

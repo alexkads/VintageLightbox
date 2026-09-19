@@ -431,6 +431,10 @@ pub(super) fn abrir_o_app(cx: &mut TestAppContext, cenario: Cenario) -> Estudio 
         seletor: Arc::new(SeletorDeMentira::default()),
         seletor_de_fotos: seletor_de_fotos.clone(),
         atualizador: Arc::new(AtualizadorDeMentira::default()),
+        acervo_de_arquivos: Arc::new(
+            crate::backup::porta::mentira::AcervoDeArquivosDeMentira::default(),
+        ),
+        escolha_do_backup: Arc::new(crate::backup::escolha::mentira::EscolhaDeMentira::default()),
     };
 
     let mut guardado = None;

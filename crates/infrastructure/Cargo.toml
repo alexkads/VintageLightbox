@@ -53,7 +53,11 @@ lru = "0.16.2"
 # fala com a rede. `native-tls`, e não `rustls`: o `sqlx` acima já traz a pilha
 # TLS do sistema, e uma segunda ao lado dela seria compilar o mesmo trabalho
 # duas vezes.
-reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "native-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "native-tls", "stream"] }
+# 🔑 `stream` + `futures`: o envio do acervo (`/dashboard/backup`) precisa
+# relatar quantos bytes já saíram, e isso só existe com o corpo entregue como
+# fluxo. Sem eles a barra saltaria de 0 a 100 por arquivo.
+futures.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
