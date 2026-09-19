@@ -215,7 +215,7 @@ impl Exportacao {
     pub fn escolher_pasta(&mut self, cx: &mut Context<Self>) {
         self.esperando_pasta = true;
         self.escolhendo_marca = false;
-        self.seletor.escolher_destino(self.recados.0.clone());
+        self.seletor.escolher_destino(self.recados.0.clone(), cx);
         self.acompanhar(cx);
         cx.notify();
     }
@@ -223,7 +223,7 @@ impl Exportacao {
     /// Abre o seletor nativo para o arquivo da marca d'água.
     ///
     /// ⚠️ **Reusa o seletor de pasta e trata a resposta como caminho de
-    /// arquivo.** O `rfd` do projeto está montado para pasta; abrir um segundo
+    /// arquivo.** A porta do projeto está montada para pasta; abrir um segundo
     /// diálogo, de arquivo, é uma porta nova — e enquanto ela não existe, apontar
     /// a pasta que **contém** o logotipo seria pedir à pessoa que confie que o
     /// app adivinha qual arquivo. Por isso o campo aceita o caminho e a tela diz
@@ -231,7 +231,7 @@ impl Exportacao {
     pub fn escolher_marca(&mut self, cx: &mut Context<Self>) {
         self.esperando_pasta = true;
         self.escolhendo_marca = true;
-        self.seletor.escolher(self.recados.0.clone());
+        self.seletor.escolher(self.recados.0.clone(), cx);
         self.acompanhar(cx);
         cx.notify();
     }

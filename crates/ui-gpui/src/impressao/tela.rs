@@ -501,7 +501,7 @@ impl Impressao {
     pub fn exportar_pdf(&mut self, cx: &mut Context<Self>) {
         self.esperando_pasta = true;
         self.seletor
-            .escolher_destino(self.recados_do_seletor.0.clone());
+            .escolher_destino(self.recados_do_seletor.0.clone(), cx);
         self.acompanhar(cx);
         cx.notify();
     }
