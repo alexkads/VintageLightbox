@@ -391,7 +391,10 @@ mod testes {
             access_vence_em: 3,
             refresh_vence_em: 4,
         });
-        assert!(cofre.arquivo.exists(), "o arquivo nasce na primeira gravação");
+        assert!(
+            cofre.arquivo.exists(),
+            "o arquivo nasce na primeira gravação"
+        );
         assert_eq!(cofre.ler().unwrap().access_token, "b");
         assert_eq!(cofre.ler().unwrap().refresh_token, "s");
         cofre.esquecer();

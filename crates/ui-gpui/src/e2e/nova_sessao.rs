@@ -327,9 +327,219 @@ fn o_titulo_aceita_o_teclado(cx: &mut TestAppContext) {
 
     e.app(cx, |app, _w, cx| {
         assert_eq!(
-            app.nova_sessao.read(cx).rascunho_para_teste().formulario.titulo,
+            app.nova_sessao
+                .read(cx)
+                .rascunho_para_teste()
+                .formulario
+                .titulo,
             "bodas",
             "o que se digita tem de chegar ao formulário"
         );
     });
+}
+
+/// 🚨 **A lista que chega do servidor não pode tirar o foco de quem digita.**
+///
+/// O operador abre a etapa 3 e começa pelo título, que é o primeiro campo.
+/// Produtos e estúdios chegam da rede logo depois — e `atualizar_escolhas`
+/// refaz os dois `Select` passando a janela. Se isso mover o foco, o resto do
+/// que ele digitou cai fora do campo.
+#[gpui::test]
+fn a_lista_que_chega_nao_rouba_o_foco_do_titulo(cx: &mut TestAppContext) {
+    let e = abrir_o_app(
+        cx,
+        Cenario {
+            site: Box::new(|site| site.demorada = true),
+            ..Default::default()
+        },
+    );
+    e.entrar_na_conta(cx);
+    e.app(cx, |app, _w, cx| {
+        app.sessoes.update(cx, |_tela, cx| cx.emit(NovaPedida));
+    });
+    e.esperar(cx);
+
+    // Etapa 3, foco no título — o caminho do "Criar" com pendência.
+    e.app(cx, |app, window, cx| {
+        app.nova_sessao.update(cx, |tela, cx| {
+            tela.ir(3, window, cx);
+            tela.criar(window, cx);
+        });
+    });
+    e.esperar(cx);
+    e.teclar(cx, "b o");
+
+    // A rede responde AGORA: galerias, produtos e estúdios de uma vez.
+    e.site.responder();
+    e.esperar(cx);
+
+    e.teclar(cx, "d a s");
+    e.esperar(cx);
+
+    e.app(cx, |app, _w, cx| {
+        assert_eq!(
+            app.nova_sessao
+                .read(cx)
+                .rascunho_para_teste()
+                .formulario
+                .titulo,
+            "bodas",
+            "as listas chegaram no meio da digitação e levaram o foco embora"
+        );
+    });
+}
+
+/// 🚨 **Clicar no título e digitar** — o caminho do dedo, do começo ao fim.
+///
+/// Os testes daqui punham o foco por `criar()` (a pendência leva ao campo) ou
+/// escreviam no rascunho por `digitar(...)`. Nenhum clicava no campo, que é
+/// como o operador chega nele.
+#[gpui::test]
+fn clicar_no_titulo_e_digitar(cx: &mut TestAppContext) {
+    let e = abrir_o_app(cx, Cenario::default());
+    e.entrar_na_conta(cx);
+    abrir_o_assistente(&e, cx);
+    e.app(cx, |app, window, cx| {
+        app.nova_sessao
+            .update(cx, |tela, cx| tela.ir(3, window, cx));
+    });
+    e.esperar(cx);
+
+    let mut visual = gpui::VisualTestContext::from_window(e.raiz.into(), cx);
+    visual.run_until_parked();
+    let onde = visual
+        .debug_bounds("nova-titulo")
+        .expect("o campo do título está desenhado");
+    visual.simulate_click(onde.center(), gpui::Modifiers::none());
+    visual.run_until_parked();
+
+    e.teclar(cx, "b o d a s");
+    e.esperar(cx);
+
+    e.app(cx, |app, _w, cx| {
+        assert_eq!(
+            app.nova_sessao
+                .read(cx)
+                .rascunho_para_teste()
+                .formulario
+                .titulo,
+            "bodas",
+            "clicar no campo tem de dar o foco a ele"
+        );
+    });
+}
+
+/// 🚨 **Digitar o título com a importação correndo por baixo** — o caso real.
+///
+/// Dono, 20/set/2026: *"não consigo digitar o título como se tivesse um bug no
+/// input"*, com a bandeja marcando 54 → 55 → 60 fotos esperando nota: as fotos
+/// entravam enquanto ele escrevia. A cada leva a tela relê o catálogo, refaz
+/// `self.fotos` e aplica a receita — e a colheita acorda a ~10 Hz.
+#[gpui::test]
+fn digitar_o_titulo_com_a_importacao_correndo(cx: &mut TestAppContext) {
+    let e = abrir_o_app(cx, Cenario::default());
+    e.entrar_na_conta(cx);
+    abrir_o_assistente(&e, cx);
+    let rascunho = id_do_rascunho(&e, cx);
+
+    // Uma leva entra, como o cartão despejando.
+    e.app(cx, |app, window, cx| {
+        app.nova_sessao.update(cx, |tela, cx| {
+            tela.importar_arquivos(
+                (1..=8).map(|n| format!("/cartao/DSC_{n}.jpg")).collect(),
+                window,
+                cx,
+            )
+        });
+    });
+    for n in 1..=8 {
+        foto_no_rascunho(&e, &format!("leva-{n}"), &rascunho);
+    }
+
+    e.app(cx, |app, window, cx| {
+        app.nova_sessao
+            .update(cx, |tela, cx| tela.ir(3, window, cx));
+    });
+
+    // Clica no campo e digita enquanto o catálogo ainda está se mexendo.
+    let mut visual = gpui::VisualTestContext::from_window(e.raiz.into(), cx);
+    visual.run_until_parked();
+    let onde = visual
+        .debug_bounds("nova-titulo")
+        .expect("o campo do título está desenhado");
+    visual.simulate_click(onde.center(), gpui::Modifiers::none());
+    visual.run_until_parked();
+
+    for tecla in ["b", "o", "d", "a", "s"] {
+        e.teclar(cx, tecla);
+        // Entre uma tecla e outra, a colheita acorda e o catálogo é relido.
+        e.esperar(cx);
+    }
+
+    e.app(cx, |app, _w, cx| {
+        assert_eq!(
+            app.nova_sessao
+                .read(cx)
+                .rascunho_para_teste()
+                .formulario
+                .titulo,
+            "bodas",
+            "a importação por baixo comeu o que foi digitado"
+        );
+    });
+}
+
+/// 🚨 **A grade do assistente continua mostrando as fotos** — com a leitura do
+/// cache fora da linha da interface.
+///
+/// A miniatura deixou de ser lida dentro do desenho e passa por uma thread
+/// (`sessoes::nova::miniaturas`), que a devolve por canal. O ganho é a linha da
+/// interface livre; o risco é a grade ficar cinza para sempre se ninguém
+/// colher. Este teste é o que separa os dois.
+#[gpui::test]
+fn a_grade_do_assistente_recebe_as_miniaturas_lidas_na_thread(cx: &mut TestAppContext) {
+    let e = abrir_o_app(cx, Cenario::default());
+    e.entrar_na_conta(cx);
+    abrir_o_assistente(&e, cx);
+    let rascunho = id_do_rascunho(&e, cx);
+
+    // Duas fotos no rascunho, com prévia já no cache (o `abrir_o_app` grava a
+    // de cada nome de `LOCAIS`).
+    for nome in ["DSC_101.jpg", "DSC_102.jpg"] {
+        let mut foto = super::local(nome);
+        foto.sessao_id = Some(rascunho.clone());
+        e.acervo.fotos.lock().unwrap().push(foto);
+    }
+    e.app(cx, |app, window, cx| {
+        app.nova_sessao
+            .update(cx, |tela, cx| tela.reler_fotos_para_teste(window, cx));
+    });
+
+    // 🔑 **Desenhar e deixar o relógio andar, alternadamente.** Quem pede as
+    // miniaturas é `preparar_miniaturas`, dentro do `render` — sem um quadro,
+    // nada é pedido; e quem recolhe a releitura do catálogo é a colheita, que
+    // só acorda com o relógio andando.
+    //
+    // E a thread das miniaturas é de verdade: o relógio do teste não a faz
+    // andar. Dá-se a volta até ela responder, com teto — grade cinza para
+    // sempre é o defeito que este teste existe para pegar.
+    let mut quantas = 0;
+    for _ in 0..80 {
+        e.esperar(cx);
+        {
+            let visual = gpui::VisualTestContext::from_window(e.raiz.into(), cx);
+            visual.run_until_parked();
+        }
+        quantas = e.app(cx, |app, _w, cx| {
+            app.nova_sessao.read(cx).quantas_miniaturas()
+        });
+        if quantas == 2 {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(
+        quantas, 2,
+        "as duas fotos do rascunho têm prévia no cache: a grade tinha de mostrá-las"
+    );
 }

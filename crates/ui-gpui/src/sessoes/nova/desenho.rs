@@ -136,7 +136,12 @@ impl Render for NovaSessao {
         // thread e avisa por canal; sem alguém acordando, o trabalho acontecia
         // no disco e a tela não mudava — as miniaturas ficavam nas de antes e a
         // barra "Preset padrão" parava em 0/N.
+        // 🚨 **E as miniaturas.** Quem as pede é `preparar_miniaturas`, logo
+        // acima, no meio deste desenho — se a colheita já tinha parado, o
+        // pedido sairia para a thread e a resposta ficaria no canal para
+        // sempre: grade cinza, sem ninguém para recolher.
         if self.amostras.esperando()
+            || self.miniaturas.esperando()
             || self.pedir_colheita_das_reveladas
             || self.portas.receita_padrao.progresso().andando()
         {
@@ -967,7 +972,7 @@ impl NovaSessao {
             .iter()
             .filter_map(|f| {
                 self.miniaturas
-                    .get(&f.id)
+                    .obter(&f.id)
                     .map(|m| (f.name.clone(), m.clone()))
             })
             .take(60)
@@ -975,7 +980,7 @@ impl NovaSessao {
         let sem_previa = self.fotos.len().saturating_sub(
             self.fotos
                 .iter()
-                .filter(|f| self.miniaturas.contains_key(&f.id))
+                .filter(|f| self.miniaturas.tem(&f.id))
                 .count(),
         );
         let alem = self.fotos.len().saturating_sub(60);
@@ -1222,7 +1227,11 @@ impl NovaSessao {
             .child(campo(
                 "Título",
                 true,
-                Input::new(&self.titulo),
+                // `debug_selector` para o teste poder clicar onde o dedo clica:
+                // o caminho clique → foco → tecla é o que nenhum teste pegava.
+                div()
+                    .debug_selector(|| "nova-titulo".into())
+                    .child(Input::new(&self.titulo)),
                 self.erro_de(estado::FALTA_TITULO),
                 None,
                 cx,

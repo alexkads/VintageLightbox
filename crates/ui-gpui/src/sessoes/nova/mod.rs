@@ -5,5 +5,6 @@ pub mod amostras;
 pub mod associacoes;
 mod desenho;
 pub mod estado;
+pub mod miniaturas;
 pub mod receita;
 pub mod tela;

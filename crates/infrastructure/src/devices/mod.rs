@@ -56,7 +56,10 @@ impl DeviceService {
 /// Se este disco é algo que alguém plugou — e não o sistema.
 fn e_de_fora(ponto: &Path, removivel: bool) -> bool {
     let texto = ponto.to_string_lossy();
-    removivel || RAIZES_DE_MONTAGEM.iter().any(|raiz| texto.starts_with(raiz))
+    removivel
+        || RAIZES_DE_MONTAGEM
+            .iter()
+            .any(|raiz| texto.starts_with(raiz))
 }
 
 /// O nome que vai no botão de "Cartões".
