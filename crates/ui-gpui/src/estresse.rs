@@ -956,8 +956,12 @@ fn estresse_salvar_trezentas_na_galeria_com_desordem_e_falhas(cx: &mut TestAppCo
         "só as primeiras saem; as outras esperam vaga"
     );
 
-    // O operador fecha a janela com o lote no ar: G9.
+    // O operador fecha a janela com o lote no ar: G9 — com o aviso antes
+    // (dono, 2026-09-20: *"ao fechar a aplicação avise que tem processo
+    // pendente em segundo plano"*). O primeiro pedido pergunta, o segundo é a
+    // resposta e esconde.
     let mut vigia = Vigia::default();
+    assert_eq!(vigia.ao_fechar(true), AoFechar::Avisar);
     assert_eq!(vigia.ao_fechar(true), AoFechar::Esconder);
 
     // O primeiro quadro da Revelação custa segundos no perfil de teste (fontes,
