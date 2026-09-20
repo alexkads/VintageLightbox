@@ -280,7 +280,7 @@ async fn main() {
     // 🔑 *"Tinha que ter opção sem arrastar e soltar"* (dono, 2026-09-19): a
     // janela do sistema para escolher pasta ou arquivos do backup.
     let escolha_do_backup: Arc<dyn ui_gpui::backup::EscolhaDoBackup> = Arc::new(
-        ui_gpui::backup::EscolhaNativa::nova(),
+        ui_gpui::backup::EscolhaNativa::nova(tokio::runtime::Handle::current()),
     );
 
     // A folha de impressão em PDF. 🔑 Ela reusa o **mesmo** exportador da
