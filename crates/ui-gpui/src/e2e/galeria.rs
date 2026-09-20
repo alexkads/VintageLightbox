@@ -410,6 +410,17 @@ fn dados_do_cliente_link_e_aviso(cx: &mut TestAppContext) {
         Some(url),
         "o link foi para a área de transferência"
     );
+    // 🚨 **E ele não expira** (dono, 2026-09-20): o site responde
+    // `validade_em_segundos: null`, e eram 7 dias até então. O que este degrau
+    // fixa é a tela **atravessar** o `null` — a forma de falhar era a resposta
+    // inteira ser recusada, com o link já assinado do outro lado.
+    e.detalhe(cx, |tela, _w, _cx| {
+        assert_eq!(
+            tela.link().and_then(|l| l.validade_em_segundos),
+            None,
+            "o link da galeria não expira"
+        );
+    });
 
     // 📧 Avisar o cliente.
     e.detalhe(cx, |tela, _w, cx| tela.avisar(cx));

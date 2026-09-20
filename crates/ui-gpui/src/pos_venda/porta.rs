@@ -1262,7 +1262,8 @@ pub mod mentira {
                 canal,
                 Recado::Link(LinkDeAcesso {
                     url: format!("https://recordarfotos.com.br/entrar?t={galeria_id}"),
-                    validade_em_segundos: 604_800,
+                    // Como o site responde desde 2026-09-20: sem prazo.
+                    validade_em_segundos: None,
                 }),
             );
         }

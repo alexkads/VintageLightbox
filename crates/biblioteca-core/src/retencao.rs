@@ -45,7 +45,7 @@ impl Prazo {
         match self {
             Prazo::DiasAVenda => "Contados da criação da galeria. Depois disso a retenção apaga o original e a prévia — a linha fica, para a conta de vendas.",
             Prazo::DiasLiberadas => "Contados da liberação: no balcão, da entrada; compradas, do pagamento. A foto adquirida que o cliente nunca baixou não é apagada (veja abaixo).",
-            Prazo::DiasDeAviso => "Um e-mail por fase: um para as fotos à venda, outro para as adquiridas. O link do e-mail entra sem senha e vale 7 dias.",
+            Prazo::DiasDeAviso => "Um e-mail por fase: um para as fotos à venda, outro para as adquiridas. O link do e-mail entra sem senha e não perde a validade.",
             Prazo::ProrrogacaoSemLeitura => "A leitura vem do MailerSend (abertura ou clique). Adia uma vez só, a galeria inteira; depois disso apaga mesmo sem leitura. Zero desliga.",
         }
     }
