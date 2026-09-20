@@ -7,13 +7,10 @@
 > ago/2026. Um documento que descreve uma tecnologia ausente é pior que nenhum: ele responde à
 > pergunta errada com confiança.
 
-> 🔁 **`crates/ui-gpui` e `crates/app-tauri` vão existir sempre, e um valida o outro** (dono,
-> 2026-09-16). O fluxo de `/dashboard/sessoes-fotograficas` sempre vai precisar de validação: a
-> mesma sessão levada pelos dois apps tem de dar o mesmo resultado, e quando não dá, um deles tem
-> defeito. O Tauri (uma janela que abre a tela do site) vem primeiro porque entrega mais rápido.
-> Enquanto isso, o `ui-gpui` fica em pausa, recebendo só correção de defeito, e continua
-> compilando. **Um dia ele vai ser concluído.** Regra de negócio vai para `use-cases`, onde os dois
-> a encontram. O plano está em `recordarfotos-e-commerce/docs/DESKTOP_TAURI.md`.
+> 🔁 **`crates/ui-gpui` é a interface do balcão** (2026-09-20). O fluxo de
+> `/dashboard/sessoes-fotograficas` é executado por ele e pela Web, e a mesma sessão levada pelos
+> dois tem de dar o mesmo resultado; quando não dá, um deles tem defeito — e quem está certo é a
+> Web. Regra de negócio vai para `use-cases`, onde os dois a encontram.
 
 **Stack**: `gpui 0.2.2` + `gpui-component 0.5.1`, do crates.io. Rust puro, no mesmo processo, na GPU.
 

@@ -4,25 +4,25 @@ O **VintageLightbox (Zed GPUI)** é o editor nativo do projeto: as telas são de
 com o motor de revelação na GPU, o catálogo local, a importação do cartão da câmera, a tela do
 cliente no segundo monitor e o caixa do balcão.
 
-> **Há dois apps, e dois instaladores.** Este guia é do **GPUI**, e o arquivo dele termina em
-> **`-gpui.cmd`**. O app do balcão, o **VintageLightbox (Tauri)**, se instala com
-> `instalar-vintagelightbox-tauri.cmd`: veja [INSTALAR-TAURI.md](INSTALAR-TAURI.md). **Na dúvida, o
-> do balcão é o Tauri.** Os dois convivem na mesma máquina.
+> **Um app, um instalador.** O arquivo termina em **`-gpui.cmd`**, e é o único que instala o
+> VintageLightbox.
 
 Instalado, ele aparece como:
 
 - **macOS**: **VintageLightbox (Zed GPUI)** (`VintageLightbox (Zed GPUI).app`), com o mesmo
   identificador dos pacotes prontos (`.dmg`). Um `VintageLightbox.app` antigo não é apagado;
-- **Windows e Linux**: **VintageLightbox (Zed GPUI)**, para não se confundir com o Tauri.
+- **Windows e Linux**: **VintageLightbox (Zed GPUI)**.
 
-O título da janela e a barra de menus também dizem **VintageLightbox (Zed GPUI)**, como o outro
-app diz **VintageLightbox (Tauri)**.
+O título da janela e a barra de menus também dizem **VintageLightbox (Zed GPUI)**.
 
 Não há instalador pronto. **Cada máquina compila o próprio app**, com **um arquivo só**, que funciona
 em Windows, Linux e macOS e instala sozinho quase tudo o que falta (no macOS, só as Command Line Tools,
 que ele manda instalar se faltarem; o Xcode não é preciso):
 
 **[instalar-vintagelightbox-gpui.cmd](https://github.com/alexkads/VintageLightbox/releases/download/instalador-tauri/instalar-vintagelightbox-gpui.cmd)**
+
+> ℹ️ O `instalador-tauri` no endereço é só o **nome da tag** do Release, de quando havia outra
+> interface. O arquivo é o do GPUI, e mudar a tag quebraria os links já copiados.
 
 ---
 
@@ -139,20 +139,28 @@ sh instalar.cmd
 
 ### O endereço antigo e o `instalar.sh`
 
-- `instalar-vintagelightbox.cmd`, o nome antigo, **instala o Tauri**. Para ele instalar o GPUI, use
-  `VLB_APP=gpui` (`curl … | VLB_APP=gpui sh`, ou `set VLB_APP=gpui` no `cmd`). Para instalação nova,
-  use o `-gpui.cmd` direto.
+- `instalar-vintagelightbox.cmd`, o nome antigo, continua funcionando: ele só baixa o `-gpui.cmd` e
+  o roda. Para instalação nova, use o `-gpui.cmd` direto.
 - `https://alexkads.github.io/VintageLightbox/instalar.sh` continua existindo: só macOS, compila a
   **versão publicada** (e não a `dev`) e ainda pede o Xcode com o componente Metal. O `-gpui.cmd` o substitui nos
   três sistemas.
 
 ### Como um arquivo só roda nos três sistemas
 
-É o mesmo desenho do instalador do Tauri, descrito em
-[INSTALAR-TAURI.md](INSTALAR-TAURI.md#como-um-arquivo-só-roda-nos-três-sistemas): o `cmd` roda o
-bloco do topo, que chama o PowerShell do meio do arquivo; o `sh` pula esses dois blocos e roda o
-resto. Os dois instaladores são **gerados** de `scripts/instalador-modelo.cmd.in` por
-`python3 scripts/gerar-instaladores.py`: edite o modelo, nunca o `.cmd`.
+`scripts/instalar-vintagelightbox-gpui.cmd` tem três partes, e cada sistema lê só a sua:
+
+- o `cmd` do Windows roda o bloco do topo, que chama o PowerShell guardado no meio do arquivo;
+- o `sh` do Linux e do macOS pula esses dois blocos e roda o resto.
+
+O arquivo precisa ter fins de linha LF, e o `.gitattributes` garante isso.
+
+O instalador é **gerado** de `scripts/instalador-modelo.cmd.in` por
+`python3 scripts/gerar-instaladores.py`: edite o modelo, nunca o `.cmd`. O `--conferir` diz se o
+arquivo está em dia.
+
+A cópia do link do Windows fica num Release que entrega o arquivo como download. Ela não envelhece:
+ao rodar, o trecho do Windows baixa a versão mais nova do script, e só usa a própria cópia se
+estiver sem internet.
 
 ## Onde as coisas ficam
 
@@ -162,8 +170,7 @@ resto. Os dois instaladores são **gerados** de `scripts/instalador-modelo.cmd.i
 | Cache do compilador (alguns GiB) | `~/.vintagelightbox/target-gpui` | `~/.vintagelightbox/target-gpui` | `%USERPROFILE%\.vintagelightbox\target-gpui` |
 | Código baixado (descartável) | `~/.vintagelightbox/fonte-gpui` | `~/.vintagelightbox/fonte-gpui` | `%USERPROFILE%\.vintagelightbox\fonte-gpui` |
 
-Apagar `target-gpui` e `fonte-gpui` é seguro: a próxima atualização só demora mais. As pastas
-`-tauri` ao lado são do outro app.
+Apagar `target-gpui` e `fonte-gpui` é seguro: a próxima atualização só demora mais.
 
 **Desinstalar**: no macOS, `VintageLightbox` para o Lixo; no Windows, a pasta acima e o atalho
 **VintageLightbox (Zed GPUI)** do Menu Iniciar; no Linux, `~/.local/bin/vintagelightbox-gpui`,
@@ -189,8 +196,15 @@ Apagar `target-gpui` e `fonte-gpui` é seguro: a próxima atualização só demo
 
 ## Validação do instalador
 
-`python3 scripts/testar-instalador.py` cobre os dois instaladores e o endereço antigo sem rede, sem
-compilar e sem instalar nada (os detalhes estão em [INSTALAR-TAURI.md](INSTALAR-TAURI.md#validação-do-instalador)).
+`python3 scripts/testar-instalador.py` cobre o instalador e o endereço antigo sem rede, sem compilar
+e sem instalar nada. Os testes usam pastas temporárias e simulam rede, compilador e ferramentas do
+sistema: verificam download incompleto, arquivo corrompido, versão sem app, falha de compilação,
+reinstalação, cache, modo seco, atalhos, as marcas que fazem um arquivo só rodar nos três sistemas e
+se o `.cmd` bate com o modelo. Com `pwsh` disponível, também verificam a sintaxe do PowerShell, a
+interrupção por erro de um executável e o caminho inteiro do Windows em modo seco; com `shellcheck`,
+conferem os arquivos.
+
 Os testes não substituem instalar e abrir o app em máquinas reais: o duplo clique do Windows, o
 PowerShell 5.1, o winget com o Windows SDK, o `windres` na compilação do manifesto, os shaders
-compilados na abertura do macOS e as bibliotecas do Linux só se conferem lá.
+compilados na abertura do macOS e as bibliotecas do Linux só se conferem lá. A atualização completa
+do MSYS2 segue as [instruções do projeto](https://www.msys2.org/docs/updating/).

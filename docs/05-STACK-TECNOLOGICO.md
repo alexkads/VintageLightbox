@@ -2,14 +2,8 @@
 
 > ⚠️ **A escolha de interface deste documento está errada há muito tempo.** Ele defende **Slint**,
 > que foi avaliado e **nunca usado**. A UI foi escrita em **egui 0.31 + eframe/wgpu** e migrada para
-> **GPUI 0.2.2 + gpui-component 0.5.1** em ago/2026 — a avaliação de Tauri e a decisão por GPUI estão
-> em [`historico/09-MIGRACAO-TAURI.md`](historico/09-MIGRACAO-TAURI.md) e
+> **GPUI 0.2.2 + gpui-component 0.5.1** em ago/2026 — a decisão por GPUI está em
 > [`historico/10-MIGRACAO-GPUI.md`](historico/10-MIGRACAO-GPUI.md).
->
-> 🔁 **Em 2026-09-16 a recusa do Tauri foi revertida para ganhar velocidade de entrega.** O Tauri
-> não substitui o GPUI: as duas interfaces vão existir sempre, uma validando a outra. O
-> `crates/ui-gpui/` fica em pausa e um dia vai ser concluído. O plano está em
-> `recordarfotos-e-commerce/docs/DESKTOP_TAURI.md`.
 >
 > **O stack de verdade, medido do `Cargo.toml` em 17/ago/2026:**
 >
@@ -1118,7 +1112,6 @@ VintageLightbox/
 ### UI Frameworks
 - **egui**: Immediate mode, mais simples mas menos nativo
 - **Iced**: Declarativo, inspirado em Elm
-- **Tauri**: Web-based (HTML/CSS/JS), mais pesado
 - **GTK-rs**: Bindings para GTK, complexo
 - **Qt for Rust**: Experimental, bindings incompletos
 

@@ -1,15 +1,11 @@
 :<<"::FIM-DO-CMD"
 @echo off
-rem  VintageLightbox - o endereco antigo do instalador. Instala o app Tauri.
+rem  VintageLightbox - o endereco antigo do instalador.
 rem
-rem  Os instaladores de verdade sao dois, um por app:
-rem    instalar-vintagelightbox-tauri.cmd .. VintageLightbox (Tauri), o do balcao
-rem    instalar-vintagelightbox-gpui.cmd ... VintageLightbox (Zed GPUI), o editor
-rem
-rem  Este arquivo continua existindo porque o Release "instalador-tauri" e quem
-rem  copiou o comando antigo apontam para ele. Ele baixa o instalador do app e
-rem  roda: o Tauri, a menos que VLB_APP=gpui (antes dos dois cliques, num cmd:
-rem  set VLB_APP=gpui).
+rem  O instalador de verdade e scripts/instalar-vintagelightbox-gpui.cmd, o app
+rem  do balcao. Este arquivo continua existindo porque o Release antigo e quem
+rem  copiou o comando antigo apontam para ele: ele baixa aquele instalador e o
+rem  roda.
 title Instalando o VintageLightbox
 setlocal
 set "VLB_SCRIPT=%~f0"
@@ -22,24 +18,13 @@ exit /b %VLB_RESULTADO%
 #
 # VintageLightbox — o endereço antigo do instalador, que hoje só despacha.
 #
-# 🔑 **Por que ele ainda existe** (dono, 2026-09-17: "o script de instalação
-#    precisa ter duas versões, uma para crates/ui-gpui e outra para
-#    crates/app-tauri"). Os instaladores são dois, um arquivo único por app:
+# 🔑 **Por que ele ainda existe.** O instalador de verdade é um arquivo único:
 #
-#      scripts/instalar-vintagelightbox-tauri.cmd   VintageLightbox (Tauri)
 #      scripts/instalar-vintagelightbox-gpui.cmd    VintageLightbox (Zed GPUI)
 #
-#    Mas este nome está no Release `instalador-tauri`, em cópias já baixadas
-#    nos balcões e no comando que as pessoas copiaram. Até 2026-09-17 ele
-#    instalava o Tauri, e **continua instalando o Tauri**: quem roda o comando
-#    antigo recebe o mesmo app de antes.
-#
-# 🔑 **O app se escolhe por `VLB_APP=gpui|tauri`, com o Tauri por padrão.**
-#    Uma pergunta na tela não serviria: com `curl | sh` a entrada é o próprio
-#    script, e um instalador que para esperando resposta quebraria quem já o
-#    usa sem teclado.
-#
-#      curl -fsSL …/instalar-vintagelightbox.cmd | VLB_APP=gpui sh
+#    Mas este nome está no Release antigo, em cópias já baixadas nos balcões e
+#    no comando que as pessoas copiaram. Quem roda o comando antigo recebe o
+#    app do balcão.
 #
 # 🔑 **Nenhuma lógica de instalação mora aqui.** O despachante baixa o arquivo
 #    do app da branch `dev` e o roda; sem internet, usa a cópia ao lado deste
@@ -52,9 +37,7 @@ exit /b %VLB_RESULTADO%
 : <<'#==FIM-POWERSHELL=='
 #==POWERSHELL==
 # Sem `exit`: este trecho roda por `iex` (veja os instaladores de cada app).
-$App = if ($env:VLB_APP) { $env:VLB_APP.ToLowerInvariant() } else { "tauri" }
-if ($App -notin @("tauri", "gpui")) { throw "VLB_APP deve ser 'tauri' ou 'gpui', e nao '$App'" }
-$Arquivo = "instalar-vintagelightbox-$App.cmd"
+$Arquivo = "instalar-vintagelightbox-gpui.cmd"
 Write-Host "> Este e o endereco antigo. O instalador do app e $Arquivo." -ForegroundColor Cyan
 $texto = $null
 if ($env:VLB_SECO -ne "1") {
@@ -82,12 +65,7 @@ Invoke-Expression $texto.Substring($inicio, $fim - $inicio)
 
 set -eu
 
-APP="${VLB_APP:-tauri}"
-case "$APP" in
-  tauri|gpui) : ;;
-  *) printf '❌ VLB_APP deve ser "tauri" ou "gpui", e não "%s".\n' "$APP" >&2; exit 1 ;;
-esac
-ARQUIVO="instalar-vintagelightbox-$APP.cmd"
+ARQUIVO="instalar-vintagelightbox-gpui.cmd"
 URL="https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/$ARQUIVO"
 
 printf '▸ Este é o endereço antigo. O instalador do app é %s:\n' "$ARQUIVO"

@@ -14,7 +14,7 @@
 //! # O que é do desktop
 //!
 //! A etapa 1 é sempre "feita" (o app já é o aplicativo), e o assistente abre
-//! na etapa 2 — o mesmo que o app Tauri faz.
+//! na etapa 2.
 
 use std::collections::HashMap;
 use std::path::PathBuf;

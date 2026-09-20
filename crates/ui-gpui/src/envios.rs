@@ -3,9 +3,9 @@
 //! # Por que existe (dono, 18/set/2026)
 //!
 //! > *"Essas atividades de 'Sincronizar' e 'Salvar na galeria e sair' precisam
-//! > ser realmente em segundo plano, da mesma forma que ocorre no `app-tauri` e
-//! > no site, pois eu sei que eles usam Service Worker. Precisa criar algum
-//! > módulo no Rust que faça esse mesmo trabalho paralelo em fila!"*
+//! > ser realmente em segundo plano, da mesma forma que ocorre no site, pois eu
+//! > sei que ele usa Service Worker. Precisa criar algum módulo no Rust que
+//! > faça esse mesmo trabalho paralelo em fila!"*
 //!
 //! No site, quem sobe as fotos é um Worker: a tela entrega a lista e continua
 //! respondendo ao operador, e o Worker leva **três por vez**

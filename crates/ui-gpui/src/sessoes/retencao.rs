@@ -1,6 +1,6 @@
 //! A política de retenção do pós-venda — a rota
-//! `/dashboard/sessoes-fotograficas/configuracoes` do site, que o app Tauri
-//! também tem (`TelaDeRetencao` e `FormularioDeRetencao`).
+//! `/dashboard/sessoes-fotograficas/configuracoes` do site (`TelaDeRetencao` e
+//! `FormularioDeRetencao`).
 //!
 //! Quanto tempo cada foto fica guardada, quando o cliente é avisado e o que
 //! acontece com quem não leu o aviso. Quem aplica é o cron do servidor; a tela

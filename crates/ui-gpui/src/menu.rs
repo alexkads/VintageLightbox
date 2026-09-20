@@ -1,13 +1,13 @@
-//! O menu do app no macOS: um só, com o nome do app, como o do app Tauri
-//! (`app-tauri/src/menu.rs`, dono, 2026-09-16: sem "Editar" e sem "Janela").
+//! O menu do app no macOS: um só, com o nome do app (dono, 2026-09-16: sem
+//! "Editar" e sem "Janela").
 //!
 //! Até 2026-09-17 este app não tinha menu nenhum (ver `encerramento`): no
 //! macOS sobrava o nome do binário na barra, sem "Sobre" e sem "Sair".
 //!
-//! ⚠️ **Sem Copiar, Colar e Desfazer**, ao contrário do Tauri. Lá eles moram
-//! no menu porque o webview só recebe `Cmd+C` por um item de menu; aqui o
-//! campo de texto do `gpui-component` tem as próprias teclas, e um item de
-//! menu com `Cmd+Z` disputaria a tecla com o desfazer da revelação.
+//! ⚠️ **Sem Copiar, Colar e Desfazer.** Num webview eles precisariam estar no
+//! menu, porque só de lá chega o `Cmd+C`; aqui o campo de texto do
+//! `gpui-component` tem as próprias teclas, e um item de menu com `Cmd+Z`
+//! disputaria a tecla com o desfazer da revelação.
 //!
 //! No Windows e no Linux o GPUI não desenha menu de app, e nada aqui aparece.
 
@@ -20,9 +20,8 @@ actions!(
 
 /// O nome que o menu, a caixa "Sobre" e o título da janela mostram.
 ///
-/// 🔑 **Com o "(Zed GPUI)"**, como o outro app se chama "VintageLightbox
-/// (Tauri)": os dois convivem na mesma máquina, e o nome no topo é o que diz
-/// qual está aberto (dono, 2026-09-17).
+/// 🔑 **Com o "(Zed GPUI)"**: o sufixo diz qual app está aberto quando mais de
+/// uma build convive na mesma máquina (dono, 2026-09-17).
 pub const NOME: &str = "VintageLightbox (Zed GPUI)";
 
 /// O ícone da caixa "Sobre". Sem ele, o build de depuração (que não é um

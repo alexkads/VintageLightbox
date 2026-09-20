@@ -910,9 +910,9 @@ impl PosVendaApiHttp {
 
     /// Um pedido qualquer à API, com o token de agora, e a resposta crua.
     ///
-    /// É a porta da tela empacotada do app Tauri (DESKTOP_TAURI §0): as funções
-    /// de `lib/api/*` do site montam o pedido, e este cliente põe o token,
-    /// renova quando vence e devolve o status e os bytes, sem interpretar nada.
+    /// É a porta crua da API: quem chama monta o pedido, e este cliente põe o
+    /// token, renova quando vence e devolve o status e os bytes, sem
+    /// interpretar nada.
     /// Uma resposta `4xx` ou `5xx` volta como resposta, e não como erro: quem lê
     /// o envelope de erro é o cliente do site.
     ///

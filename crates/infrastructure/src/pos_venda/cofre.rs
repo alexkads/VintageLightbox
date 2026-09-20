@@ -54,12 +54,13 @@ impl CofreDoSistema {
         }
     }
 
-    /// Um item próprio no chaveiro, para outro app da família.
+    /// Um item próprio no chaveiro, para separar sessões (a da pilha local da
+    /// de produção, por exemplo).
     ///
-    /// 🔑 **O app Tauri não lê o item do app GPUI.** No macOS, o item pertence
-    /// ao programa que o criou, e ler o de outro abre um diálogo pedindo
-    /// permissão (26 s parado na primeira carga, 2026-09-16). Com o próprio item,
-    /// o app entra uma vez e não pergunta mais.
+    /// 🔑 **Um app não lê o item de outro sem incômodo.** No macOS, o item
+    /// pertence ao programa que o criou, e ler o de outro abre um diálogo
+    /// pedindo permissão (26 s parado na primeira carga, 2026-09-16). Com o
+    /// próprio item, o app entra uma vez e não pergunta mais.
     pub fn com_servico(servico: impl Into<String>) -> Self {
         Self {
             servico: servico.into(),

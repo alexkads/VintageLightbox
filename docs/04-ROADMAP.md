@@ -12,9 +12,7 @@
 > ⚠️ **E os caminhos `crates/ui/...` que ele cita não existem mais.** Aquele crate saiu do workspace
 > em 17/ago/2026 (−25.783 linhas); o código está no histórico do git, e o que ele fazia está em
 > [`historico/PARIDADE-UI.md`](historico/PARIDADE-UI.md). A interface hoje é `crates/ui-gpui/`,
-> em pausa desde 2026-09-16 enquanto o Tauri avança, e que um dia vai ser concluído. Os dois vão
-> existir sempre, um validando o outro
-> (`recordarfotos-e-commerce/docs/DESKTOP_TAURI.md`).
+> e é ela que recebe todo trabalho novo de fluxo.
 >
 > ⚠️ **A diferença de critério importa.** Este documento ordena por fase de construção; a fila nova
 > ordena por *o que destrava mais coisa* — e por isso a exportação, que não aparece com destaque

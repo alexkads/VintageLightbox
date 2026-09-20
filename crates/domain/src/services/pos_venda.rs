@@ -616,8 +616,7 @@ pub trait PosVendaApi: Send + Sync {
     ///
     /// 🔑 É a porta das telas do painel que só leem e gravam JSON e não têm
     /// regra própria no app: a conta (`/auth/me`), o caixa e a retenção. Elas
-    /// são as mesmas do site, que também só repassa o JSON (2026-09-17, a
-    /// moldura do app Tauri levada ao GPUI).
+    /// são as mesmas do site, que também só repassa o JSON (2026-09-17).
     ///
     /// Uma resposta fora de `2xx` vira erro, com a frase do envelope do site.
     async fn pedir_json(

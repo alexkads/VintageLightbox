@@ -29,8 +29,7 @@
 #   --limpo       apaga dist/ antes
 #   --seco        mostra o que faria, sem compilar nada
 #
-# O empacotador é o `cargo-packager` (crabnebula), que é o `tauri-bundler`
-# extraído para servir app que não é Tauri. A configuração inteira está em
+# O empacotador é o `cargo-packager` (crabnebula). A configuração inteira está em
 # `empacotamento/packager.toml`; este script só compila o binário certo, aponta
 # a pasta dele e escolhe os formatos.
 set -euo pipefail

@@ -1,23 +1,22 @@
 #!/usr/bin/env python3
-"""Gera os dois instaladores de arquivo único a partir de um modelo só.
+"""Gera o instalador de arquivo único a partir do modelo.
 
-    python3 scripts/gerar-instaladores.py             # regrava os dois
-    python3 scripts/gerar-instaladores.py --conferir  # só diz se estão em dia
+    python3 scripts/gerar-instaladores.py             # regrava o instalador
+    python3 scripts/gerar-instaladores.py --conferir  # só diz se está em dia
 
-🔑 **Por que um gerador.** Cada app precisa de um arquivo que funcione sozinho
+🔑 **Por que um gerador.** O app precisa de um arquivo que funcione sozinho
    (`curl … | sh`, dois cliques no Windows), então nada pode ser buscado de um
-   terceiro arquivo na hora de rodar. O que é comum — o bloco do `cmd`, o Rust
+   segundo arquivo na hora de rodar. O conteúdo — o bloco do `cmd`, o Rust
    `-gnu`, o MSYS2, a libclang, o download com cache, o rustup, o `apt`/`dnf`/
-   `pacman` — mora uma vez só em `scripts/instalador-modelo.cmd.in`, e este
-   script escreve as duas cópias.
+   `pacman` — mora em `scripts/instalador-modelo.cmd.in`, e este script escreve
+   a cópia com os valores do app.
 
 No modelo:
   @@CHAVE@@          troca pelo valor do app (tabela APPS abaixo)
-  #@tauri … #@fim    linhas só do instalador do Tauri
   #@gpui  … #@fim    linhas só do instalador do GPUI
 
 As linhas de marca somem da saída. O teste `scripts/testar-instalador.py`
-confere que os arquivos gerados batem com o modelo.
+confere que o arquivo gerado bate com o modelo.
 """
 
 from pathlib import Path
@@ -28,33 +27,16 @@ PASTA = Path(__file__).resolve().parent
 MODELO = PASTA / "instalador-modelo.cmd.in"
 
 APPS = {
-    "tauri": {
-        "APP": "tauri",
-        "NOME": "VintageLightbox (Tauri)",
-        "ARQUIVO": "instalar-vintagelightbox-tauri.cmd",
-        "OUTRO_NOME": "VintageLightbox (Zed GPUI)",
-        "OUTRO_ARQUIVO": "instalar-vintagelightbox-gpui.cmd",
-        "CRATE": "app-tauri",
-        "BIN": "app-tauri",
-        "PASTA_WIN": "VintageLightbox-Tauri",
-        # O arquivo do macOS, e o nome que a barra de menus mostra.
-        "NOME_MAC": "VintageLightbox (Tauri)",
-        "NOME_EXIBIDO": "VintageLightbox",
-        "IDENTIFICADOR": "br.com.recordarfotos.vintagelightbox.tauri",
-        "DESCRICAO": "Pós-venda da RecordarFotos",
-        "MINUTOS": "10 a 30",
-    },
     "gpui": {
         "APP": "gpui",
         "NOME": "VintageLightbox (Zed GPUI)",
         "ARQUIVO": "instalar-vintagelightbox-gpui.cmd",
-        "OUTRO_NOME": "VintageLightbox (Tauri)",
-        "OUTRO_ARQUIVO": "instalar-vintagelightbox-tauri.cmd",
         "CRATE": "ui-gpui",
         "BIN": "ui-gpui",
         "PASTA_WIN": "VintageLightbox-GPUI",
-        # Como o do Tauri: o nome diz qual dos dois está aberto (dono,
-        # 2026-09-17). O identificador continua o do .dmg.
+        # O arquivo do macOS, e o nome que a barra de menus mostra. O sufixo diz
+        # qual build está aberta (dono, 2026-09-17); o identificador continua o
+        # do .dmg.
         "NOME_MAC": "VintageLightbox (Zed GPUI)",
         "NOME_EXIBIDO": "VintageLightbox (Zed GPUI)",
         "IDENTIFICADOR": "br.com.recordarfotos.vintagelightbox",
@@ -63,7 +45,7 @@ APPS = {
     },
 }
 
-MARCA = re.compile(r"^#@(tauri|gpui|fim)\s*$")
+MARCA = re.compile(r"^#@(gpui|fim)\s*$")
 
 
 def gerar(app: str) -> str:

@@ -1,17 +1,16 @@
 //! O trabalho que continua quando ninguém está olhando, e a bandeja que o
-//! mostra — o equivalente do service worker da web e do laço de envios do app
-//! Tauri (`app-tauri/src/sincronizacao.rs` e `bandeja.rs`, dono, 2026-09-17).
+//! mostra — o equivalente do service worker da web (dono, 2026-09-17).
 //!
 //! # O que roda em segundo plano aqui
 //!
-//! | Atividade | Web | Tauri | Aqui |
-//! |---|---|---|---|
-//! | Subir e tirar fotos do site, salvar revelação | `sw.js` + `envios-pendentes.js` | fila do catálogo | `Aplicativo::sincronias_pendentes` |
-//! | O que o site recusou, com o motivo | descartado | G7, "Recusadas pelo servidor" | `Aplicativo::recusas` |
-//! | Refazer miniaturas | "Em segundo plano N" (fila de fundo) | a mesma tela | reposições do disco |
-//! | Fotos importadas esperando nota | — | área temporária, "Esperando nota" | locais da sessão sem nota |
+//! | Atividade | Web | Aqui |
+//! |---|---|---|
+//! | Subir e tirar fotos do site, salvar revelação | `sw.js` + `envios-pendentes.js` | `Aplicativo::sincronias_pendentes` |
+//! | O que o site recusou, com o motivo | descartado | `Aplicativo::recusas` |
+//! | Refazer miniaturas | "Em segundo plano N" (fila de fundo) | reposições do disco |
+//! | Fotos importadas esperando nota | — | locais da sessão sem nota |
 //!
-//! # Minimizar e fechar (igual ao Tauri)
+//! # Minimizar e fechar
 //!
 //! - **Minimizar leva o app para a bandeja**: o ícone aparece na barra de menus
 //!   (macOS) ou na área de notificação (Windows e Linux), e no macOS o app sai

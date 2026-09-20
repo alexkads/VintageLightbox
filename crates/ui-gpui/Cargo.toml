@@ -32,7 +32,7 @@ gpui = "0.2.2"
 gpui-component = "0.5.1"
 
 # As quatro camadas internas, intactas. Nenhuma delas sabe que a interface
-# mudou — é o que tornou o GPUI mais barato que o Tauri (§2.1).
+# mudou — é o que torna trocar de interface barato (§2.1).
 infrastructure = { path = "../infrastructure" }
 # A grade da Biblioteca: a mesma aritmética que o site usa (2026-09-05). Sem
 # GPU e sem janela dentro — ver `biblioteca/grade.rs`.
@@ -93,10 +93,9 @@ sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "sqlite", "mig
 chrono.workspace = true
 uuid.workspace = true
 
-# A atualização automática (`atualizacao/porta.rs`). É o updater do Tauri
-# extraído para servir app que não é Tauri, do mesmo autor do `cargo-packager`
-# que monta os instaladores — então o `.sig` que o empacotamento produz é
-# exatamente o que este crate confere.
+# A atualização automática (`atualizacao/porta.rs`). É o updater do mesmo autor
+# do `cargo-packager` que monta os instaladores — então o `.sig` que o
+# empacotamento produz é exatamente o que este crate confere.
 #
 # ⚠️ `default-features = false` + `native-tls`: o padrão dele é `rustls`, e o
 # `sqlx` e o `reqwest` do `infrastructure` já trazem a pilha TLS do sistema.
@@ -104,8 +103,8 @@ uuid.workspace = true
 # mesma razão registrada no `infrastructure/Cargo.toml`.
 cargo-packager-updater = { version = "0.2", default-features = false, features = ["native-tls"] }
 
-# A bandeja do sistema (`src/bandeja.rs`): o mesmo `tray-icon` que o app Tauri
-# usa por dentro, na versão que o lockfile já tem — nenhum crate novo na árvore.
+# A bandeja do sistema (`src/bandeja.rs`): o `tray-icon`, na versão que o
+# lockfile já tem — nenhum crate novo na árvore.
 # ⚠️ Sem `libxdo`: ele só serve aos itens Copiar/Colar do menu, que a bandeja
 # não tem, e seria mais uma biblioteca do sistema para instalar no Linux.
 tray-icon = { version = "0.24", default-features = false, features = ["gtk"] }
@@ -120,8 +119,8 @@ tempfile = "3.8"
 
 # A foto da própria janela, nas ferramentas de depuração (`src/depuracao.rs`):
 # a `NSView` do GPUI chega por `raw-window-handle`, e o número da janela sai
-# dela por uma mensagem do Objective-C. As mesmas versões que o `gpui` e o
-# `app-tauri` já trazem.
+# dela por uma mensagem do Objective-C. As mesmas versões que o `gpui` já
+# traz.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 raw-window-handle = "0.6"

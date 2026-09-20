@@ -4,10 +4,6 @@
 #
 #     crates/ui-gpui/rodar-local.sh
 #
-# O par de `crates/app-tauri/rodar-local.sh`, e pelo mesmo motivo: as duas
-# interfaces se validam uma à outra (DESKTOP_TAURI, D7), e uma delas não pode
-# ser mais difícil de abrir local que a outra.
-#
 # ## 🚨 Por que ele subiu de "confere" para "prepara"
 #
 # Até 19/set/2026 este script só media a temperatura: se a API não respondesse,
@@ -40,8 +36,8 @@
 # o endereço ser explícito em vez de deduzido. As portas são as do
 # docker-compose.dev.yml; troque com VLB_POS_VENDA_URL e VLB_SITE_URL.
 #
-# 🔑 **A sessão da pilha local tem item próprio no chaveiro** e não encosta na de
-# produção (`main.rs`, `cofre_da_sessao`) — o mesmo que o Tauri já fazia.
+# 🔑 **A sessão da pilha local tem item próprio no chaveiro** e não encosta na
+# de produção (`main.rs`, `cofre_da_sessao`).
 #
 # ⚠️ **O catálogo é o desta máquina, e continua sendo.** Ele é local desde
 # sempre — o que muda aqui é para qual servidor o app fala. Para abrir um

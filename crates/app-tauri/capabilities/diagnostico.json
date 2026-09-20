@@ -1,7 +1,0 @@
-{
-  "$schema": "../gen/schemas/desktop-schema.json",
-  "identifier": "diagnostico",
-  "description": "A página local da Fase 0, que vem dentro do app e não da internet.",
-  "windows": ["diagnostico"],
-  "permissions": ["core:default", "allow-escolher-raw", "allow-ler-raw"]
-}

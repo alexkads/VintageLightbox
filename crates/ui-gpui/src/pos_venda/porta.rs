@@ -221,8 +221,8 @@ impl PedidoDeFoto {
     /// 🚨 **Baixar não é enviar.** Até 17/set/2026 a cópia de trabalho da
     /// Revelação entrava na mesma conta que salvar a revelação: a bandeja dizia
     /// "Subindo: 3 fotos" enquanto a tira baixava, e fechar a janela nesse
-    /// instante a escondia em vez de sair (achado pelo estresse). No app Tauri
-    /// e no site, "Subindo" conta só a fila de envios.
+    /// instante a escondia em vez de sair (achado pelo estresse). No site,
+    /// "Subindo" conta só a fila de envios.
     ///
     /// `SalvarRevelacao` baixa o original antes de subir o JPEG, e é envio
     /// assim mesmo: o que importa é o que ele deixa no site.

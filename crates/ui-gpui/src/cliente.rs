@@ -128,10 +128,9 @@ pub fn monitor_do_cliente<T: Copy + PartialEq>(todos: &[T], principal: Option<T>
 
 /// O tamanho da janela quando **não** há segundo monitor.
 ///
-/// 🔑 **É o do app Tauri** (`app-tauri/src/tela_do_cliente.rs`, `inner_size`):
-/// as duas interfaces mostram a mesma tela, e a de cá segue o desenho da de lá
-/// (dono, 2026-09-17). Um número igual dos dois lados também é o que permite
-/// conferir por foto das duas janelas lado a lado.
+/// 🔑 **É o mesmo tamanho que o pop-up da tela do cliente tem no site** (dono,
+/// 2026-09-17). Um número igual dos dois lados é o que permite conferir por
+/// foto das duas janelas lado a lado.
 const PREVIA: (f32, f32) = (1280., 800.);
 
 /// Onde a segunda tela nasce — e **nunca em tela cheia**.
@@ -147,10 +146,9 @@ const PREVIA: (f32, f32) = (1280., 800.);
 /// - **Com monitor próprio**, ela recebe os limites dele inteiros, origem
 ///   incluída. A origem é o que a coloca no monitor certo: os `Bounds` do GPUI
 ///   são globais, e um `display_id` sem origem deixa o sistema escolher.
-/// - **Sem monitor próprio**, ela é uma janela comum de [`PREVIA`], centrada —
-///   como no app Tauri, onde `monitor_do_cliente` devolve `None` com um monitor
-///   só e a janela nasce arrastável. Quem está olhando é o operador, e o que ele
-///   precisa é comparar com o app, não perdê-lo de vista.
+/// - **Sem monitor próprio**, ela é uma janela comum de [`PREVIA`], centrada e
+///   arrastável. Quem está olhando é o operador, e o que ele precisa é
+///   comparar com o app, não perdê-lo de vista.
 ///
 /// Numa tela menor que [`PREVIA`] a janela não estoura o monitor: o tamanho é
 /// limitado ao que existe. Sem isso a origem centrada ficaria **negativa** e a
@@ -710,7 +708,7 @@ mod testes {
         assert_eq!(
             (f32::from(area.size.width), f32::from(area.size.height)),
             PREVIA,
-            "o tamanho é o do app Tauri, para as duas janelas serem comparáveis"
+            "o tamanho é o do pop-up do site, para as janelas serem comparáveis"
         );
         assert!(
             area.size.width < tela.size.width && area.size.height < tela.size.height,

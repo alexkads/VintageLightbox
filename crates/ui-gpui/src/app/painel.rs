@@ -1,6 +1,6 @@
 //! A moldura do painel: o menu lateral, o cabeçalho, o menu da conta e o canto
-//! dos envios. É o layout do dashboard do site, que o app Tauri mostra
-//! (`frontend/desktop/src/app.tsx`), desenhado aqui com as mesmas medidas.
+//! dos envios. É o layout do dashboard do site, desenhado aqui com as mesmas
+//! medidas.
 //!
 //! # O que vem de onde no site
 //!
@@ -13,8 +13,8 @@
 //! | Conta, tema (Claro, Escuro, Sistema) e Sair | `MenuDoUsuario` | [`Aplicativo::menu_da_conta`] |
 //! | "N envios na fila" e "N envios recusados", no canto | `FilaDeEnviosDoApp` | [`Aplicativo::canto_dos_envios`] |
 //!
-//! 🔑 **O que não está pronto no app não aparece nele** (DESKTOP_TAURI §0): o
-//! menu tem as duas seções que as duas interfaces têm, e nenhuma a mais.
+//! 🔑 **O que não está pronto no app não aparece nele**: o menu tem só as
+//! seções que o app já atende, e nenhuma a mais.
 
 use gpui::{
     div, prelude::*, px, AnyElement, Context, FontWeight, MouseButton, SharedString, Window,
@@ -44,7 +44,7 @@ pub struct Conta {
 
 impl Conta {
     /// A conta na resposta de `/auth/me`, esteja ela no topo ou dentro de
-    /// `user`/`data` (o mesmo leitor do app Tauri, `email_da_resposta`).
+    /// `user`/`data` — o servidor já respondeu nos quatro formatos.
     pub fn da_resposta(valor: &serde_json::Value) -> Option<Conta> {
         let usuario = ["", "/user", "/data", "/data/user"]
             .iter()
@@ -82,7 +82,7 @@ struct ItemDoMenu {
     icone: Icone,
 }
 
-/// As seções que o app tem, em "Operação" — as mesmas do app Tauri.
+/// As seções que o app tem, em "Operação".
 const MENU: [ItemDoMenu; 3] = [
     ItemDoMenu {
         tela: Tela::Sessoes,
@@ -748,8 +748,7 @@ impl Aplicativo {
             )
     }
 
-    /// O canto de baixo: fotos subindo e o que o site recusou, como a
-    /// `FilaDeEnviosDoApp` do Tauri.
+    /// O canto de baixo: fotos subindo e o que o site recusou.
     pub(super) fn canto_dos_envios(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
         let subindo = self.sincronias_pendentes;
         let recusados = self.recusas.len();

@@ -94,8 +94,8 @@ pub use real::AtualizadorDaWeb;
 mod real {
     use super::*;
 
-    /// O atualizador de verdade — `cargo-packager-updater`, que é o updater do
-    /// Tauri extraído para servir app que não é Tauri.
+    /// O atualizador de verdade — `cargo-packager-updater`, o updater do
+    /// `cargo-packager` que monta os instaladores.
     ///
     /// 🔑 **Ele não guarda o `Update` que a procura achou.** O `Update` carrega
     /// uma `Config` e um `HeaderMap`, e a porta atravessa threads; guardá-lo
