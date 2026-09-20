@@ -85,6 +85,16 @@ impl Selecao {
         self.marcadas.clear();
     }
 
+    /// Tira **uma** da seleção, sem mexer no foco nem na âncora.
+    ///
+    /// 🔑 Existe para o gesto que age sobre o lote **menos** as que a regra
+    /// recusa — o `P` do balcão, que deixa de fora a foto sem nota (dono,
+    /// 2026-09-05 e 2026-09-20) e segue com as outras. Recusar o lote inteiro
+    /// faria o operador procurar qual foi, numa grade de duzentas.
+    pub fn desmarcar_uma(&mut self, indice: usize) {
+        self.marcadas.remove(indice);
+    }
+
     /// O clique terminou sobre a foto `indice`.
     ///
     /// `na_caixa` é o clique na caixinha de marcar do canto do tile: ela alterna

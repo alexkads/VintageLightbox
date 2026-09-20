@@ -266,14 +266,21 @@ pub struct Cupom {
 
 /// Entra no cupom? A mesma regra da contagem "Sinalizadas" da barra.
 ///
-/// 🔄 **Aqui se exigia nota, e isso custava venda** (C21, 2026-09-20). A regra
-/// era de 2026-09-05, quando sem nota a foto não subia nem se vendia; o dono a
-/// revogou com o caso: *"se o cliente compra a foto sem nota na galeria, o
-/// operador tem de poder marcá-la como levada na frente dele — é a mesma
-/// venda"*. Com a exigência de pé, essa venda ficava fora do cupom **e do
-/// total**, calada. O que o balcão recusa agora é a **rejeitada**.
+/// 🚨 **A nota é a porta da venda** — dono, 2026-09-05 e reafirmado em
+/// 2026-09-20: *"pra vender é necessário classificar com teclas [0-5], pois é
+/// um bloqueio de regra na hora de sinalizar com a tela [P]"*.
+///
+/// ⚠️ **Durante algumas horas de 2026-09-20 esta exigência saiu daqui**, junto
+/// com a C20 — foi leitura errada da regra nova: a nota deixou de ser a porta
+/// **da nuvem** (o ensaio inteiro sobe sem ela, e isso não muda) e continua
+/// sendo a porta **da venda**. Quem também não entra é a **rejeitada** (C21),
+/// que não está à venda em lugar nenhum.
 pub fn entra_no_caixa(f: &FotoDoCupom) -> bool {
-    !f.apagada && !f.rejeitada && !f.sem_marcacao && f.estado == Estado::LevadaNoBalcao
+    !f.apagada
+        && f.nota.is_some()
+        && !f.rejeitada
+        && !f.sem_marcacao
+        && f.estado == Estado::LevadaNoBalcao
 }
 
 fn tem_negociacao(f: &FotoDoCupom) -> bool {
@@ -1207,7 +1214,7 @@ mod testes {
     }
 
     #[test]
-    fn so_a_sinalizada_viva_e_com_marcacao_entra() {
+    fn so_a_sinalizada_viva_com_nota_e_com_marcacao_entra() {
         assert!(entra_no_caixa(&foto("a")));
         assert!(!entra_no_caixa(
             &com(foto("b"), |f| f.estado = Estado::Disponivel)
@@ -1219,16 +1226,16 @@ mod testes {
         assert!(!entra_no_caixa(&com(foto("f"), |f| f.sem_marcacao = true)));
     }
 
-    /// 🚨 **A venda sem nota entra no caixa** — contrato C21, e é dinheiro.
+    /// 🚨 **Sem classificar não se vende** — dono, 2026-09-05 e reafirmado em
+    /// 2026-09-20: *"pra vender é necessário classificar com teclas [0-5], pois
+    /// é um bloqueio de regra na hora de sinalizar com a tela [P]"*.
     ///
-    /// 🔄 Aqui se cobrava o contrário (`f.nota = None` → não entra): era a
-    /// regra de 2026-09-05, em que sem nota a foto não subia nem se vendia. O
-    /// dono a revogou com o caso: o cliente compra na galeria uma foto que
-    /// ninguém classificou, e o operador a marca como levada na frente dele.
-    /// Com a exigência de pé, essa venda ficava fora do cupom **e do total**.
+    /// ⚠️ Durante algumas horas de 2026-09-20 este caso foi invertido aqui,
+    /// junto com a C20 — leitura errada: a nota deixou de ser a porta **da
+    /// nuvem**, e continua sendo a porta **da venda**.
     #[test]
-    fn a_sinalizada_sem_nota_entra_e_a_rejeitada_nao() {
-        assert!(entra_no_caixa(&com(foto("d"), |f| f.nota = None)));
+    fn a_sem_nota_e_a_rejeitada_ficam_fora_do_cupom() {
+        assert!(!entra_no_caixa(&com(foto("d"), |f| f.nota = None)));
         assert!(!entra_no_caixa(&com(foto("g"), |f| f.rejeitada = true)));
     }
 

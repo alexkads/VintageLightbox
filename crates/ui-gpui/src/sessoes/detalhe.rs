@@ -907,7 +907,32 @@ impl Detalhe {
     /// ⚠️ **A comprada e a apagada ficam de fora**, e quem decide isso é o core
     /// (`Foto::editavel`): a comprada tem cobrança atrás dela, e a apagada não
     /// tem arquivo. Mandar assim mesmo traria um erro por foto.
+    ///
+    /// 🚨 **E a sem nota fica de fora aqui, antes da ida** — dono, 2026-09-05 e
+    /// reafirmado em 2026-09-20: *"pra vender é necessário classificar com
+    /// teclas [0-5], pois é um bloqueio de regra na hora de sinalizar com a
+    /// tela [P]"*. O servidor recusa do mesmo jeito (`SemClassificacao`); esta
+    /// conferência existe para o ritmo do balcão — o operador está com o
+    /// cliente na frente, e esperar a resposta para descobrir que o `P` não
+    /// valia é uma espera que a tela pode poupar. É a mesma divisão da web
+    /// (`somenteClassificadas`).
+    ///
+    /// 🔑 **As sem nota são separadas, não bloqueiam o resto**: marcar dez e
+    /// ter uma sem classificar marca as nove e conta a décima — recusar o lote
+    /// faria o operador procurar qual foi, numa grade de duzentas.
     pub fn marcar_como(&mut self, estado: EstadoNoBalcao, cx: &mut Context<Self>) {
+        let sem_nota: Vec<String> = self
+            .selecao
+            .marcadas()
+            .filter_map(|p| self.acervo.visivel(p))
+            .filter(|f| {
+                f.editavel() && f.nota.is_none() && !self.locais.iter().any(|l| l.id == f.id)
+            })
+            .map(|f| f.arquivo.clone())
+            .collect();
+        if !sem_nota.is_empty() {
+            self.desmarcar_sem_nota(cx);
+        }
         self.mudar_as_marcadas(
             domain::services::pos_venda::MudancaDaFoto {
                 estado: Some(estado),
@@ -915,6 +940,40 @@ impl Detalhe {
             },
             cx,
         );
+        if !sem_nota.is_empty() {
+            self.erro = Some(
+                if sem_nota.len() == 1 {
+                    format!(
+                        "{} ficou de fora: classifique de 1 a 5 antes de marcar.",
+                        sem_nota[0]
+                    )
+                } else {
+                    format!(
+                        "{} sem classificação ficaram de fora: dê a nota de 1 a 5 antes de marcar.",
+                        sem_nota.len()
+                    )
+                }
+                .into(),
+            );
+            cx.notify();
+        }
+    }
+
+    /// Tira da seleção as fotos do acervo sem nota — elas não vão ao balcão.
+    fn desmarcar_sem_nota(&mut self, cx: &mut Context<Self>) {
+        let fora: Vec<usize> = self
+            .selecao
+            .marcadas()
+            .filter(|p| {
+                self.acervo
+                    .visivel(*p)
+                    .is_some_and(|f| f.nota.is_none() && !self.locais.iter().any(|l| l.id == f.id))
+            })
+            .collect();
+        for posicao in fora {
+            self.selecao.desmarcar_uma(posicao);
+        }
+        cx.notify();
     }
 
     pub fn zoom(&self) -> f32 {
