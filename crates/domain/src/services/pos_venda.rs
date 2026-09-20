@@ -16,15 +16,26 @@
 //! | Passo do fluxo | O que faltava aqui |
 //! |---|---|
 //! | classificar sobe a foto | [`PosVendaApi::galerias`] — para subir **numa galeria que já existe**, em vez de criar uma por leva |
-//! | zerar a nota tira do storage | [`PosVendaApi::remover_foto`] |
+//! | zerar a nota tira do storage | 🔄 **caiu em 2026-09-20** — ver abaixo |
 //! | o cliente paga no balcão | [`PosVendaApi::mudar_foto`] — a negociação e o estado |
 //! | gerar o link do cliente | [`PosVendaApi::link_da_galeria`] |
 //!
-//! 🚨 **`nota: null` é recusado pelo site, e isso não é limitação: é a regra.**
-//! Foi a classificação que autorizou a foto a subir, então uma foto do acervo
-//! sem nota não existe. Zerar a nota é [`PosVendaApi::remover_foto`] — a foto sai
-//! do storage e volta a ser só local, que é o mesmo ciclo da área temporária do
-//! navegador.
+//! 🔄 **A regra mudou em 2026-09-20 — e este parágrafo dizia o contrário.**
+//!
+//! Aqui se lia: *"`nota: null` é recusado pelo site, e isso não é limitação: é a
+//! regra. Foi a classificação que autorizou a foto a subir, então uma foto do
+//! acervo sem nota não existe. Zerar a nota é [`PosVendaApi::remover_foto`]"*.
+//!
+//! O dono trocou a regra (contrato da foto, C20–C22): o ensaio inteiro sobe em
+//! segundo plano **durante** a classificação, classificado ou não. `nota: null`
+//! passou a ser aceito e significa só "sem curadoria" — não move arquivo nenhum.
+//! Quem impede uma foto de subir é a **rejeição** (a tecla `X`), e ela **marca
+//! sem apagar**: a foto que já subiu fica onde está.
+//!
+//! 🚨 **Nenhum gesto de classificação apaga arquivo da nuvem.** Some com isso a
+//! janela entre "baixei o bruto de volta" e "o servidor apagou a foto", que
+//! custou duas perdas registradas no site. [`PosVendaApi::remover_foto`]
+//! continua existindo para o gesto explícito de apagar, que é outra coisa.
 //!
 //! 🔑 **O original sobe sem marca, sempre.** É o site que gera a prévia marcada
 //! a partir dele (uma vez, no upload) e que decide, pelo `estado`, se o cliente
@@ -340,6 +351,14 @@ pub struct FotoDaGaleria {
     /// A retenção apagou os arquivos: a linha ficou para a conta de vendas, e
     /// não há imagem para mostrar.
     pub apagada: bool,
+    /// A foto foi **rejeitada** — a tecla `X` (contrato C21).
+    ///
+    /// 🚨 **Rejeitar marca, e nunca apaga.** A rejeitada continua inteira no
+    /// acervo: o que ela perde é a vista do cliente, o balcão e a venda.
+    ///
+    /// ⚠️ **Não é `nota == None`**, que é "ainda não passou pela curadoria" e
+    /// sobe e vende normalmente (C20, C22).
+    pub rejeitada: bool,
     /// A nota de 1 a 5 do fotógrafo. `None` = **não classificada**.
     ///
     /// 🚨 **Sem ela a barra da grade mente.** Os recortes por situação exigem
@@ -437,9 +456,23 @@ pub struct MudancaDaFoto {
     /// O porquê do `preco_negociado`, no formato que o painel lê de volta:
     /// `"Cortesia — aniversário"`, `"TchêOfertas — cupom 123"`.
     pub observacao_da_negociacao: Option<Option<String>>,
-    /// A nota de 1 a 5. 🚨 **`Some(None)` é recusado pelo site** — ver o topo
-    /// do módulo; tirar a nota de uma foto do acervo é removê-la.
+    /// A nota de 1 a 5, ou `Some(None)` para tirá-la.
+    ///
+    /// 🔄 **`Some(None)` passou a ser aceito em 2026-09-20** (contrato C22).
+    /// Aqui se lia que ele era recusado, porque tirar a nota significava remover
+    /// a foto do acervo. Não significa mais: a nota virou curadoria, e tirá-la
+    /// não move arquivo nenhum.
     pub nota: Option<Option<i16>>,
+    /// A **rejeição** — a tecla `X` (contrato C21). `Some(true)` rejeita,
+    /// `Some(false)` desfaz, `None` não mexe.
+    ///
+    /// 🚨 **Rejeitar marca, e nunca apaga.** A rejeitada não sobe, não aparece
+    /// ao cliente e não é comprável; a que já tiver subido fica exatamente onde
+    /// está. É o gesto que substituiu a desclassificação destrutiva.
+    ///
+    /// ⚠️ **Não é "sem nota".** Sem nota é foto que ainda não passou pela
+    /// curadoria, e que sobe e vende normalmente.
+    pub rejeitada: Option<bool>,
     /// A **faixa** desta foto — o "tipo de ensaio", que dá o preço. `Some(None)`
     /// devolve a foto ao produto padrão da galeria.
     ///
@@ -466,6 +499,9 @@ impl MudancaDaFoto {
             && self.nota.is_none()
             && self.produto_id.is_none()
             && self.preco_de_venda.is_none()
+            // 🚨 Sem esta linha, um `X` sozinho seria "mudança vazia" e nunca
+            // chegaria à rede — o gesto morreria calado no cliente HTTP.
+            && self.rejeitada.is_none()
     }
 }
 

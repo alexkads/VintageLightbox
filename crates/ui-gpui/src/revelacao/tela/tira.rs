@@ -143,6 +143,7 @@ pub fn classificacao(foto: &PhotoViewModel) -> acervo::Foto {
         (false, false) => (Estado::Disponivel, false),
     };
     acervo::Foto {
+        rejeitada: false,
         id: String::new(),
         arquivo: String::new(),
         estado,

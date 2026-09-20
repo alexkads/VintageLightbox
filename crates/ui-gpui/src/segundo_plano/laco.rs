@@ -156,21 +156,90 @@ fn ao_fechar(window: &mut Window, cx: &mut App) -> bool {
         return true;
     }
     cx.update_global::<SegundoPlano, _>(|sp, cx| {
-        let pendente = retrato(sp, cx).is_some_and(|r| r.ha_envio_pendente());
+        let retrato = retrato(sp, cx);
+        let pendente = retrato.as_ref().is_some_and(|r| r.ha_envio_pendente());
         rastro(&format!("pedido de fechar, envio pendente: {pendente}"));
         match sp.vigia.ao_fechar(pendente) {
             AoFechar::Fechar => true,
+            // 🚪 **O aviso, e a janela fica** (dono, 2026-09-20). A frase é a
+            // mesma linha que a bandeja mostra — o operador vê o que está
+            // pendente, e não só que "há algo".
+            AoFechar::Avisar => {
+                let frase = retrato
+                    .map(|r| frases::linhas(&r).subindo)
+                    .unwrap_or_else(|| "Subindo: fotos na fila".into());
+                if let Some(raiz) = sp.raiz.upgrade() {
+                    raiz.update(cx, |raiz, cx| {
+                        raiz.avisar_fechamento_pendente(frase.into(), cx)
+                    });
+                }
+                false
+            }
             AoFechar::Esconder => {
                 depois(cx, janela::esconder(window));
-                sp.para_a_bandeja(cx);
-                // A segunda tela não fica sozinha no monitor do cliente.
-                if let Some(raiz) = sp.raiz.upgrade() {
-                    raiz.update(cx, |raiz, cx| raiz.fechar_tela_do_cliente(cx));
-                }
+                para_a_bandeja(sp, cx);
                 false
             }
         }
     })
+}
+
+/// A janela some e a bandeja assume — o G9, de onde quer que o pedido venha.
+fn para_a_bandeja(sp: &mut SegundoPlano, cx: &mut App) {
+    sp.para_a_bandeja(cx);
+    // A segunda tela não fica sozinha no monitor do cliente.
+    if let Some(raiz) = sp.raiz.upgrade() {
+        raiz.update(cx, |raiz, cx| raiz.fechar_tela_do_cliente(cx));
+    }
+}
+
+/// O "Continuar em segundo plano" do aviso: a resposta que o aviso esperava.
+///
+/// 🚨 **Esconde aqui, e não repete o pedido de fechar.** No Linux
+/// `janela::pedir_para_fechar` não faz nada — é o próprio GPUI que manda na
+/// janela —, e o botão ficaria mudo justamente na máquina do balcão.
+///
+/// ⚠️ **Não mexe na raiz**: quem chama é um clique dentro dela, e um
+/// `raiz.update` aqui seria "cannot update while it is already being updated".
+/// A segunda tela é fechada por quem clicou, antes de chamar.
+pub fn fechar_mesmo(cx: &mut App) {
+    if !cx.has_global::<SegundoPlano>() {
+        return;
+    }
+    cx.update_global::<SegundoPlano, _>(|sp, cx| {
+        // A vigia já avisou: este `ao_fechar` é a resposta, e devolve `Esconder`.
+        if sp.vigia.ao_fechar(true) != AoFechar::Esconder {
+            return;
+        }
+        // ⚠️ **A janela também está em uso** — o clique que chegou aqui saiu
+        // dela. Pedir o `esconder` numa tarefa é o que tira as duas coisas do
+        // `update` de agora, como todo gesto de janela deste módulo.
+        let principal = sp.principal;
+        cx.spawn(async move |cx| {
+            let esconder = cx
+                .update(|cx| {
+                    principal
+                        .update(cx, |_, window, _cx| janela::esconder(window))
+                        .ok()
+                })
+                .ok()
+                .flatten();
+            if let Some(esconder) = esconder {
+                esconder();
+            }
+        })
+        .detach();
+        sp.para_a_bandeja(cx);
+    });
+}
+
+/// O "Ficar no app": a vigia esquece que avisou, e o próximo fechamento
+/// pergunta de novo.
+pub fn desistiu_de_fechar(cx: &mut App) {
+    if !cx.has_global::<SegundoPlano>() {
+        return;
+    }
+    cx.update_global::<SegundoPlano, _>(|sp, _cx| sp.vigia.desistiu_de_fechar());
 }
 
 fn mostrar_janela(sp: &mut SegundoPlano, cx: &mut App) {

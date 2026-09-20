@@ -174,9 +174,12 @@ pub enum Pedido {
     Negociar(Vec<String>),
     /// "Apagar": a foto sai do site, com os dois arquivos.
     ApagarDoSite(String),
-    /// A tecla `0`: estas fotos voltam para esta máquina e **depois** saem do
-    /// acervo — a cláusula C21 do contrato da foto, em `app::resgate`.
-    TirarDoAcervo(Vec<crate::app::resgate::AFotoQueVolta>),
+    /// A tecla `X` em fotos que **só existem no disco**: a rejeição é gravada
+    /// no catálogo local (C21), e é ela que as segura fora da fila de subida.
+    ///
+    /// 🔑 **Quem grava é a Biblioteca**, dona do catálogo — como na nota
+    /// ([`Pedido::Classificar`]). Esta tela só diz quais e para que lado.
+    Rejeitar { ids: Vec<String>, rejeitada: bool },
     /// "Imprimir…": a folha de impressão com as fotos marcadas (só no desktop).
     Imprimir(Vec<String>),
     /// A miniatura de uma foto do site chegou ao cache, sob esta chave.
@@ -207,9 +210,11 @@ pub enum Pedido {
     /// Classificar fotos que **só existem no disco** — o passo 3, pedido da
     /// grade da sessão.
     ///
-    /// 🔑 **Quem grava a nota e decide quem sobe é a Biblioteca**, que é a dona
-    /// do catálogo (`Classificou` → `subir_classificada`). Esta tela só diz
-    /// quais e quanto.
+    /// 🔑 **Quem grava a nota é a Biblioteca**, que é a dona do catálogo. Esta
+    /// tela só diz quais e quanto.
+    ///
+    /// 🔄 **E classificar não sobe mais nada** (C22, 2026-09-20): a foto vai ao
+    /// site pela fila de segundo plano do ensaio, classificada ou não.
     Classificar { ids: Vec<String>, nota: i32 },
     /// A importação gravou no catálogo local: a raiz precisa reler o acervo e
     /// devolver as fotos deste ensaio.
@@ -493,8 +498,6 @@ pub struct Detalhe {
     /// 🧪 O registro dos avisos de "esta foto mudou, releia".
     #[cfg(test)]
     reveladas_avisadas: Vec<String>,
-    /// As fotos que a tecla `0` vai tirar do acervo, à espera do "sim".
-    tirar_do_acervo_confirmando: Option<Vec<acervo::Foto>>,
     /// As predefinições que este app conhece — para a gaveta dizer o **nome** do
     /// preset padrão, e não o id.
     presets_da_receita: Vec<domain::entities::Preset>,
@@ -711,7 +714,6 @@ impl Detalhe {
             apagar_confirmando: None,
             #[cfg(test)]
             reveladas_avisadas: Vec::new(),
-            tirar_do_acervo_confirmando: None,
             presets_da_receita: Vec::new(),
             escolha_da_leva: None,
             escolha_do_estudio: None,
@@ -905,7 +907,32 @@ impl Detalhe {
     /// ⚠️ **A comprada e a apagada ficam de fora**, e quem decide isso é o core
     /// (`Foto::editavel`): a comprada tem cobrança atrás dela, e a apagada não
     /// tem arquivo. Mandar assim mesmo traria um erro por foto.
+    ///
+    /// 🚨 **E a sem nota fica de fora aqui, antes da ida** — dono, 2026-09-05 e
+    /// reafirmado em 2026-09-20: *"pra vender é necessário classificar com
+    /// teclas [0-5], pois é um bloqueio de regra na hora de sinalizar com a
+    /// tela [P]"*. O servidor recusa do mesmo jeito (`SemClassificacao`); esta
+    /// conferência existe para o ritmo do balcão — o operador está com o
+    /// cliente na frente, e esperar a resposta para descobrir que o `P` não
+    /// valia é uma espera que a tela pode poupar. É a mesma divisão da web
+    /// (`somenteClassificadas`).
+    ///
+    /// 🔑 **As sem nota são separadas, não bloqueiam o resto**: marcar dez e
+    /// ter uma sem classificar marca as nove e conta a décima — recusar o lote
+    /// faria o operador procurar qual foi, numa grade de duzentas.
     pub fn marcar_como(&mut self, estado: EstadoNoBalcao, cx: &mut Context<Self>) {
+        let sem_nota: Vec<String> = self
+            .selecao
+            .marcadas()
+            .filter_map(|p| self.acervo.visivel(p))
+            .filter(|f| {
+                f.editavel() && f.nota.is_none() && !self.locais.iter().any(|l| l.id == f.id)
+            })
+            .map(|f| f.arquivo.clone())
+            .collect();
+        if !sem_nota.is_empty() {
+            self.desmarcar_sem_nota(cx);
+        }
         self.mudar_as_marcadas(
             domain::services::pos_venda::MudancaDaFoto {
                 estado: Some(estado),
@@ -913,6 +940,40 @@ impl Detalhe {
             },
             cx,
         );
+        if !sem_nota.is_empty() {
+            self.erro = Some(
+                if sem_nota.len() == 1 {
+                    format!(
+                        "{} ficou de fora: classifique de 1 a 5 antes de marcar.",
+                        sem_nota[0]
+                    )
+                } else {
+                    format!(
+                        "{} sem classificação ficaram de fora: dê a nota de 1 a 5 antes de marcar.",
+                        sem_nota.len()
+                    )
+                }
+                .into(),
+            );
+            cx.notify();
+        }
+    }
+
+    /// Tira da seleção as fotos do acervo sem nota — elas não vão ao balcão.
+    fn desmarcar_sem_nota(&mut self, cx: &mut Context<Self>) {
+        let fora: Vec<usize> = self
+            .selecao
+            .marcadas()
+            .filter(|p| {
+                self.acervo
+                    .visivel(*p)
+                    .is_some_and(|f| f.nota.is_none() && !self.locais.iter().any(|l| l.id == f.id))
+            })
+            .collect();
+        for posicao in fora {
+            self.selecao.desmarcar_uma(posicao);
+        }
+        cx.notify();
     }
 
     pub fn zoom(&self) -> f32 {
@@ -1197,24 +1258,79 @@ impl Detalhe {
         cx.notify();
     }
 
-    /// `1`–`5` dão a nota; `0` a tira.
+    /// As teclas `1`–`5` dão a nota; o `0` **tira** — e só isso.
     ///
-    /// 🚨 **Tirar a nota de uma foto do acervo é removê-la**, e o site recusa
-    /// `nota: null` justamente por isso — foi a classificação que a autorizou a
-    /// subir. Aqui a tecla `0` avisa, em vez de mandar um pedido que voltaria
-    /// recusado.
+    /// # 🔄 O `0` deixou de apagar foto (contrato C22, 2026-09-20)
+    ///
+    /// Aqui o `0` chamava `pedir_para_tirar_do_acervo`: um diálogo, o resgate do
+    /// bruto de volta ao SQLite e a remoção da foto do servidor. Era a regra de
+    /// 2026-09-05, em que a classificação autorizava a foto a subir — tirar a
+    /// nota era, literalmente, desfazer a autorização.
+    ///
+    /// 🚨 **Não é mais.** O ensaio inteiro sobe em segundo plano durante a
+    /// classificação (C20), tirar a nota não move arquivo nenhum, e o gesto que
+    /// esconde a foto do cliente é a tecla `X` ([`Self::alternar_rejeicao`]) —
+    /// que **marca sem apagar**.
     pub fn dar_nota(&mut self, nota: u8, cx: &mut Context<Self>) {
-        if nota == 0 {
-            self.pedir_para_tirar_do_acervo(cx);
-            return;
-        }
         self.mudar_as_marcadas(
             domain::services::pos_venda::MudancaDaFoto {
-                nota: Some(Some(nota as i16)),
+                nota: Some((nota != 0).then_some(nota as i16)),
                 ..Default::default()
             },
             cx,
         );
+    }
+
+    /// A tecla `X`: alterna a **rejeição** — contrato C21.
+    ///
+    /// 🔑 **A decisão é do grupo**, como no `P`: se todas as marcadas já estão
+    /// rejeitadas, o gesto desfaz; senão, rejeita todas. Na tela da sessão o
+    /// operador seleciona em bloco, e um por um seria outro gesto.
+    ///
+    /// 🚨 **Marca, e nunca apaga.** A rejeitada some da galeria do cliente,
+    /// deixa de ser comprável e não vai ao balcão — e continua inteira no
+    /// acervo, com o bruto intacto. É o gesto que substituiu a desclassificação
+    /// destrutiva, e com ele some a janela em que a foto se perdia calada.
+    ///
+    /// ⚠️ **A comprada fica de fora**: há cobrança e entrega atrás dela.
+    pub fn alternar_rejeicao(&mut self, cx: &mut Context<Self>) {
+        let marcadas: Vec<acervo::Foto> = self
+            .selecao
+            .marcadas()
+            .filter_map(|p| self.acervo.visivel(p))
+            .cloned()
+            .collect();
+        let (podem, compradas): (Vec<&acervo::Foto>, Vec<&acervo::Foto>) = marcadas
+            .iter()
+            .partition(|f| f.estado != acervo::Estado::Comprada);
+        // 🚨 **A comprada fica de fora com aviso, e não em silêncio** — a mesma
+        // regra da web: recusar o lote inteiro faria o operador procurar qual
+        // foi, e recusar calado faria a tecla parecer quebrada.
+        let aviso: Option<SharedString> = (!compradas.is_empty()).then(|| {
+            let nomes: Vec<&str> = compradas.iter().map(|f| f.arquivo.as_str()).collect();
+            format!(
+                "{} foto(s) compradas ficam como estão — há cobrança e entrega atrás delas ({})",
+                compradas.len(),
+                nomes.join(" / ")
+            )
+            .into()
+        });
+        let todas_rejeitadas = !podem.is_empty() && podem.iter().all(|f| f.rejeitada);
+        if !podem.is_empty() {
+            self.mudar_as_marcadas(
+                domain::services::pos_venda::MudancaDaFoto {
+                    rejeitada: Some(!todas_rejeitadas),
+                    ..Default::default()
+                },
+                cx,
+            );
+        }
+        // ⚠️ **Depois da mudança, e não antes**: `mudar_as_marcadas` limpa o
+        // erro ao despachar, e o aviso posto antes morreria no mesmo gesto.
+        if aviso.is_some() {
+            self.erro = aviso;
+            cx.notify();
+        }
     }
 
     /// `P`: levada no balcão, e o mesmo gesto devolve à venda.
@@ -1276,25 +1392,41 @@ impl Detalhe {
             .map(|f| f.id.clone())
             .collect();
 
-        // 🚨 **A foto que só existe no disco faz outro caminho, e é o passo 3.**
-        // Ela não tem linha no site: mandar `negociar` com o id local devolveria
-        // erro para todas. O que a leva ao site é a **nota** — e é por isso que
-        // só a classificação atravessa daqui. Sinalizar "levada" numa foto que
-        // ainda não subiu não tem onde ser gravado, e o silêncio seria a pior
-        // resposta: a linha de erro abaixo diz o que fazer antes.
+        // 🚨 **A foto que só existe no disco faz outro caminho.** Ela não tem
+        // linha no site: mandar `negociar` com o id local devolveria erro para
+        // todas. O que ela tem é a linha do catálogo, e é lá que a curadoria
+        // desta máquina é gravada — a nota e a rejeição.
+        //
+        // 🔄 **Até 2026-09-20 só a nota atravessava daqui**, porque era ela que
+        // levava a foto ao site (o "passo 3"): sem nota, nada subia. Com C20 o
+        // ensaio inteiro sobe em segundo plano, e a nota deixou de ser a porta —
+        // o que ela faz aqui é marcar a foto, do lado de cá, até a subida dela
+        // acontecer. A **rejeição** (C21) segue o mesmo caminho, e é o gesto que
+        // impede a subida.
+        //
+        // ⚠️ **Só o balcão continua precisando da foto no site**: "levada" e
+        // "comprada" são venda, e não há onde gravá-las numa foto que ainda
+        // está subindo. O silêncio seria a pior resposta — a linha de erro
+        // abaixo diz o que esperar.
         let (locais, alvos): (Vec<String>, Vec<String>) = alvos
             .into_iter()
             .partition(|id| self.locais.iter().any(|f| &f.id == id));
         if !locais.is_empty() {
-            match mudanca.nota {
-                Some(Some(nota)) => cx.emit(Pedido::Classificar {
+            match (mudanca.nota, mudanca.rejeitada, mudanca.estado) {
+                // O `0` também atravessa: tirar a nota é curadoria (C22), e
+                // recusá-lo aqui faria a tecla valer só metade da grade.
+                (Some(nota), _, None) => cx.emit(Pedido::Classificar {
                     ids: locais,
-                    nota: nota as i32,
+                    nota: nota.unwrap_or(0) as i32,
+                }),
+                (None, Some(rejeitada), None) => cx.emit(Pedido::Rejeitar {
+                    ids: locais,
+                    rejeitada,
                 }),
                 _ => {
                     self.erro = Some(
-                        "estas fotos ainda não subiram — classifique-as (1 a 5) antes \
-                         de marcar no balcão"
+                        "estas fotos ainda estão subindo — espere o envio terminar para \
+                         marcá-las no balcão"
                             .into(),
                     );
                     cx.notify();
@@ -1397,15 +1529,19 @@ impl Detalhe {
     ///
     /// 🔑 **A régua é uma só**: a foto do site traz a `ordem` com que subiu (a
     /// posição no acervo), e a local recebe a posição dela no mesmo acervo — ver
-    /// `mostrar_as_locais_na_sessao`. O desempate é o id, para a grade não
-    /// remexer sozinha quando duas empatarem.
+    /// `subir_o_que_falta_do_ensaio`.
+    ///
+    /// ⚠️ **A ordenação é estável, e sem desempate próprio.** Um desempate por
+    /// id pareceria mais determinístico e seria pior: quando duas empatam na
+    /// `ordem`, quem já as tinha separado foi o servidor (que ordena por
+    /// `ordem, criada_em`), e reordenar por id jogaria fora esse critério.
     fn recompor_acervo(&mut self) {
         let marcadas = self.ids_marcados();
         let focada = self.em_foco().map(|f| f.id.clone());
 
         let mut todas = self.do_site.clone();
         todas.extend(self.locais.iter().cloned());
-        todas.sort_by(|a, b| a.ordem.cmp(&b.ordem).then_with(|| a.id.cmp(&b.id)));
+        todas.sort_by_key(|f| f.ordem);
         self.acervo.definir(todas);
 
         // A seleção fala em **posição**, e a lista mudou de tamanho: quem
@@ -2483,7 +2619,6 @@ impl Render for Detalhe {
             .children(self.detalhes(cx))
             .children(self.atendimento(cx))
             .children(self.dialogo_de_apagar(cx))
-            .children(self.dialogo_de_tirar_do_acervo(cx))
             .child(self.envio(cx))
             .child(self.barra_da_grade(cx))
             .when_some(self.erro.clone(), |tela, erro| {
@@ -4043,103 +4178,6 @@ impl Detalhe {
         cx.notify();
     }
 
-    /// A tecla `0` nas marcadas: **tirar do acervo**, com a cópia vindo antes.
-    ///
-    /// 🚨 **Era um bloqueio, e o bloqueio é que estava errado** (dono,
-    /// 18/set/2026: *"fui tirar a classificação de uma foto e fui bloqueado —
-    /// eu preciso desclassificar, retirar a foto da nuvem e trazer a foto para
-    /// a minha máquina, exatamente como a versão WEB faz"*). É a cláusula C21
-    /// do contrato da foto, e era a divergência D14: o desktop recusava com
-    /// *"use Apagar"*, e "Apagar" removia da nuvem sem trazer nada para cá.
-    ///
-    /// 🔑 **As recusas continuam existindo — só que por foto, e não pelo lote**
-    /// (`resgate::pode_voltar`): a comprada tem cobrança atrás, a levada no
-    /// balcão não perde a nota, a apagada já não está lá. As outras seguem, e a
-    /// tela conta as que ficaram de fora — recusar o lote inteiro faria o
-    /// operador procurar qual foi.
-    ///
-    /// ⚠️ **A foto que só existe no disco não passa por aqui**: ela não está na
-    /// nuvem, e tirar a nota dela é só tirar a nota.
-    fn pedir_para_tirar_do_acervo(&mut self, cx: &mut Context<Self>) {
-        let marcadas: Vec<acervo::Foto> = self
-            .selecao
-            .marcadas()
-            .filter_map(|p| self.acervo.visivel(p))
-            .cloned()
-            .collect();
-        if marcadas.is_empty() {
-            return;
-        }
-        let (podem, ficam): (Vec<acervo::Foto>, Vec<acervo::Foto>) = marcadas
-            .into_iter()
-            // A local não está na nuvem: não há o que resgatar nem o que remover.
-            .filter(|f| !self.locais.iter().any(|l| l.id == f.id))
-            .partition(|f| crate::app::resgate::pode_voltar(f.estado, f.apagada));
-
-        if !ficam.is_empty() {
-            let nomes: Vec<&str> = ficam.iter().map(|f| f.arquivo.as_str()).collect();
-            self.erro = Some(
-                format!(
-                    "{} foto(s) ficam como estão — comprada ou levada no balcão não perde a \
-                     nota ({})",
-                    ficam.len(),
-                    nomes.join(" / ")
-                )
-                .into(),
-            );
-        }
-        if podem.is_empty() {
-            cx.notify();
-            return;
-        }
-        self.tirar_do_acervo_confirmando = Some(podem);
-        cx.notify();
-    }
-
-    /// O "Tirar do acervo" do diálogo: agora sim, o gesto vai para a raiz.
-    pub fn confirmar_tirar_do_acervo(&mut self, cx: &mut Context<Self>) {
-        let Some(fotos) = self.tirar_do_acervo_confirmando.take() else {
-            return;
-        };
-        let fotos = fotos
-            .into_iter()
-            .map(|f| {
-                // Os PARÂMETROS que estão na nuvem voltam com ela — é o que
-                // impede a foto de voltar crua (C21).
-                let do_site = self
-                    .aberta
-                    .as_ref()
-                    .and_then(|a| a.fotos.iter().find(|g| g.id == f.id));
-                let (ajustes, corte) = do_site
-                    .and_then(|g| g.ajustes.as_ref())
-                    .map(crate::revelacao::persistencia::de_json)
-                    .unwrap_or_default();
-                crate::app::resgate::AFotoQueVolta {
-                    no_site: f.id,
-                    arquivo: f.arquivo,
-                    ajustes,
-                    corte,
-                }
-            })
-            .collect();
-        cx.emit(Pedido::TirarDoAcervo(fotos));
-        cx.notify();
-    }
-
-    pub fn cancelar_tirar_do_acervo(&mut self, cx: &mut Context<Self>) {
-        self.tirar_do_acervo_confirmando = None;
-        cx.notify();
-    }
-
-    /// 🧪 Quais fotos a pergunta "tirar do acervo?" está segurando.
-    #[cfg(test)]
-    pub(crate) fn fotos_na_pergunta_de_tirar_do_acervo(&self) -> Vec<String> {
-        self.tirar_do_acervo_confirmando
-            .as_ref()
-            .map(|fotos| fotos.iter().map(|f| f.arquivo.clone()).collect())
-            .unwrap_or_default()
-    }
-
     /// O "Apagar a foto" do diálogo.
     pub fn confirmar_apagar(&mut self, cx: &mut Context<Self>) {
         let Some((id, _)) = self.apagar_confirmando.take() else {
@@ -4153,64 +4191,6 @@ impl Detalhe {
     pub fn cancelar_apagar(&mut self, cx: &mut Context<Self>) {
         self.apagar_confirmando = None;
         cx.notify();
-    }
-
-    /// O diálogo de "Tirar do acervo?" — os mesmos textos do site.
-    ///
-    /// 🔑 **A descrição conta o caminho inteiro**, porque é ele que tira o medo
-    /// do gesto: a foto sai do acervo, o cliente deixa de vê-la, e **volta para
-    /// esta máquina** — de onde sobe de novo assim que for classificada. E a
-    /// última frase é a garantia: o arquivo vem para cá **antes** de sair de lá;
-    /// a que não conseguir vir continua no acervo.
-    fn dialogo_de_tirar_do_acervo(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
-        let fotos = self.tirar_do_acervo_confirmando.as_ref()?;
-        let quantas = fotos.len();
-        let titulo = if quantas == 1 {
-            "Tirar esta foto do acervo?".to_string()
-        } else {
-            format!("Tirar {quantas} fotos do acervo?")
-        };
-        let confirmar = if quantas == 1 {
-            "Tirar do acervo".to_string()
-        } else {
-            format!("Tirar as {quantas}")
-        };
-        Some(
-            crate::estilo::veu_do_dialogo()
-                .id("tirar-do-acervo-veu")
-                .on_click(cx.listener(|tela, _ev, _w, cx| tela.cancelar_tirar_do_acervo(cx)))
-                .child(
-                    crate::estilo::caixa_do_dialogo(cx)
-                        .w(px(520.))
-                        .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                        .child(crate::estilo::cabecalho_do_dialogo(
-                            titulo,
-                            "Sem classificação a foto não fica no servidor: ela sai do acervo, o \
-                             cliente deixa de vê-la, e volta para esta máquina — de onde sobe de \
-                             novo assim que você a classificar. O arquivo vem para cá antes de \
-                             sair de lá; a que não conseguir vir continua no acervo.",
-                            Some(crate::recursos::Icone::Undo2),
-                            cx,
-                        ))
-                        .child(
-                            crate::estilo::rodape_do_dialogo()
-                                .child(
-                                    crate::estilo::botao_contorno("tirar-do-acervo-cancelar", cx)
-                                        .child("Cancelar")
-                                        .on_click(cx.listener(|tela, _ev, _w, cx| {
-                                            tela.cancelar_tirar_do_acervo(cx)
-                                        })),
-                                )
-                                .child(
-                                    crate::estilo::botao_perigo("tirar-do-acervo-confirmar", cx)
-                                        .child(SharedString::from(confirmar))
-                                        .on_click(cx.listener(|tela, _ev, _w, cx| {
-                                            tela.confirmar_tirar_do_acervo(cx)
-                                        })),
-                                ),
-                        ),
-                ),
-        )
     }
 
     /// O diálogo de "Apagar esta foto?" — os mesmos textos do site.
@@ -5227,6 +5207,7 @@ fn sanear(texto: &str) -> String {
 
 fn para_o_core(foto: &FotoDaGaleria) -> acervo::Foto {
     acervo::Foto {
+        rejeitada: foto.rejeitada,
         id: foto.id.clone(),
         arquivo: foto.arquivo.clone(),
         estado: match foto.estado {
@@ -5424,6 +5405,7 @@ mod testes {
             .update(cx, |tela, _window, cx| {
                 tela.definir_locais(
                     vec![biblioteca_core::acervo::Foto {
+                        rejeitada: false,
                         id: "id-local.jpg".into(),
                         arquivo: "local.jpg".into(),
                         estado: biblioteca_core::acervo::Estado::Disponivel,
@@ -5971,11 +5953,15 @@ mod testes {
     /// `on_click` que aponta para o lugar errado **não falha** — ele só não faz
     /// nada. O clique aqui é nas coordenadas do botão desenhado.
     ///
-    /// A segunda é o **destino**, regra do dono do mesmo dia: *"a importação não
-    /// vai imediatamente para o storage cloud, pois o cliente precisa
-    /// classificar a foto; ela fica local usando sqlite"*. Até então o botão
-    /// chamava `enviar_arquivo`, e o site devolvia **400 Bad Request: a foto
-    /// sobe classificada** — 21 de 21 arquivos, e a sessão vazia na tela.
+    /// A segunda é o **destino**: a importação grava no catálogo local, e não
+    /// no storage. Até 8/set/2026 o botão chamava `enviar_arquivo`, e o site
+    /// devolvia **400 Bad Request: a foto sobe classificada** — 21 de 21
+    /// arquivos, e a sessão vazia na tela.
+    ///
+    /// 🔄 **O motivo mudou em 2026-09-20, o destino não.** A regra de então era
+    /// *"a importação não vai imediatamente para o storage, pois o cliente
+    /// precisa classificar"*; hoje o ensaio **vai** para a nuvem sozinho (C20),
+    /// só que pela fila da raiz, e não por esta tela.
     #[gpui::test]
     fn o_clique_no_importar_grava_no_catalogo_e_nao_sobe_nada(cx: &mut TestAppContext) {
         let seletor = Arc::new(SeletorDeMentira::escolhe(&["/fotos/a.jpg", "/fotos/b.NEF"]));
@@ -6012,9 +5998,17 @@ mod testes {
         // 🚨 O carimbo do ensaio entra na criação: sem ele a foto chega ao
         // catálogo sem dono e não aparece na grade da sessão que a importou.
         assert_eq!(opcoes.sessao_id.as_deref(), Some("g1"));
+        // 🔑 **A importação não fala com o site — quem fala é a fila.** O botão
+        // grava no catálogo local, e daí em diante o ensaio sobe em segundo
+        // plano pela esteira da raiz (`subir_o_que_falta_do_ensaio`, C20).
+        //
+        // 🔄 A frase daqui dizia *"quem autoriza a foto a subir é a nota"*, e
+        // era a regra de 8/set/2026, quando `enviar_arquivo` daqui fazia o site
+        // devolver **400: a foto sobe classificada** nos 21 arquivos do dono.
+        // O destino continua o mesmo; o que mudou é quem o autoriza.
         assert!(
             publicador.arquivos_enviados().is_empty(),
-            "a importação subiu para o site — quem autoriza a foto a subir é a nota"
+            "o botão de importar falou com o site — ele grava no catálogo, e a fila leva depois"
         );
     }
 
@@ -6363,6 +6357,7 @@ mod testes {
     /// A foto que a raiz achou no catálogo, na linguagem da grade.
     fn local(id: &str) -> acervo::Foto {
         acervo::Foto {
+            rejeitada: false,
             id: id.into(),
             arquivo: format!("{id}.jpg"),
             estado: acervo::Estado::Disponivel,
@@ -6430,6 +6425,149 @@ mod testes {
         assert_eq!(
             mudancas.last().map(|(_, m)| m.proporcao_padrao.clone()),
             Some(Some(Some("1:1".into())))
+        );
+    }
+
+    /// ❌ **A tecla `X` rejeita: marca, e nunca apaga** — contrato C21.
+    ///
+    /// 🚨 **É o gesto que substituiu a desclassificação destrutiva.** Até
+    /// 2026-09-20 o `0` numa foto do acervo baixava o BRUTO de volta e apagava a
+    /// foto do servidor; a janela entre uma coisa e outra custou duas fotos na
+    /// web. Aqui o que se prende é o desenho novo: a do site vai num `PATCH`, a
+    /// que ainda sobe vai para o catálogo local, e **nada é apagado em lugar
+    /// nenhum**.
+    #[gpui::test]
+    fn o_x_rejeita_a_do_site_no_patch_e_a_local_no_catalogo(cx: &mut TestAppContext) {
+        let (janela, publicador) = janela(
+            cx,
+            vec![
+                foto("f1", EstadoDaFotoNoSite::Disponivel, Some(4)),
+                foto("c1", EstadoDaFotoNoSite::Comprada, Some(5)),
+            ],
+        );
+        entrar(cx, &janela);
+
+        let raiz = cx.update(|cx| janela.root(cx).expect("a tela"));
+        let rejeicoes = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let recebidas = rejeicoes.clone();
+        let _assinatura = cx.update(|cx| {
+            cx.subscribe(&raiz, move |_, evento: &Pedido, _| {
+                if let Pedido::Rejeitar { ids, rejeitada } = evento {
+                    recebidas.borrow_mut().push((ids.clone(), *rejeitada));
+                }
+            })
+        });
+
+        // A foto do site: um `PATCH` com a rejeição, e nada mais.
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.clicar(0, Modificadores::default(), cx);
+                tela.alternar_rejeicao(cx);
+            })
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+
+        let negociadas = publicador.negociadas();
+        assert_eq!(negociadas.len(), 1, "{negociadas:?}");
+        assert_eq!(negociadas[0].0, "f1");
+        assert_eq!(negociadas[0].1.rejeitada, Some(true));
+        assert!(
+            publicador.tiradas().is_empty(),
+            "🚨 rejeitar não apaga arquivo nenhum (C21)"
+        );
+
+        // 🛒 A comprada fica de fora, e a tela diz quem ficou.
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.clicar(1, Modificadores::default(), cx);
+                tela.alternar_rejeicao(cx);
+                assert!(
+                    tela.erro
+                        .as_deref()
+                        .is_some_and(|e| e.contains("compradas")),
+                    "a comprada fica de fora com aviso: {:?}",
+                    tela.erro
+                );
+            })
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+        assert_eq!(publicador.negociadas().len(), 1, "e nada vai ao site");
+
+        // A foto que ainda não subiu: o pedido vai para o catálogo local.
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.definir_locais(vec![local("nova-1")], cx);
+                tela.selecionar_tudo(cx);
+                tela.filtrar(acervo::Filtro::Todas, cx);
+                tela.clicar(2, Modificadores::default(), cx);
+                tela.alternar_rejeicao(cx);
+            })
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+
+        assert_eq!(
+            rejeicoes.borrow().as_slice(),
+            [(vec!["nova-1".to_string()], true)],
+            "a local é rejeitada no catálogo, que é onde ela existe"
+        );
+        assert_eq!(
+            publicador.negociadas().len(),
+            1,
+            "e não vai ao site: ela não tem linha lá"
+        );
+    }
+
+    /// 🔁 **`X` de novo desfaz a rejeição, e a decisão é do grupo.**
+    ///
+    /// A mesma regra do `P`: só desfaz quando **todas** as marcadas já estão
+    /// rejeitadas. Com uma rejeitada e uma não, o `X` rejeita as duas — uma
+    /// tecla, um desfecho, e não metade da seleção para cada lado.
+    #[gpui::test]
+    fn o_x_desfaz_so_quando_todas_ja_estao_rejeitadas(cx: &mut TestAppContext) {
+        let rejeitada = |id: &str| {
+            let mut f = foto(id, EstadoDaFotoNoSite::Disponivel, Some(4));
+            f.rejeitada = true;
+            f
+        };
+
+        // Uma rejeitada e uma não: o gesto rejeita as duas.
+        let (mista, publicador) = janela(
+            cx,
+            vec![
+                rejeitada("f1"),
+                foto("f2", EstadoDaFotoNoSite::Disponivel, None),
+            ],
+        );
+        entrar(cx, &mista);
+        mista
+            .update(cx, |tela, _window, cx| {
+                tela.selecionar_tudo(cx);
+                tela.alternar_rejeicao(cx);
+            })
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+        let negociadas = publicador.negociadas();
+        assert_eq!(negociadas.len(), 2, "{negociadas:?}");
+        assert!(
+            negociadas.iter().all(|(_, m)| m.rejeitada == Some(true)),
+            "com uma fora, o grupo inteiro é rejeitado: {negociadas:?}"
+        );
+
+        // As duas rejeitadas: agora o gesto desfaz.
+        let (outra, publicador) = janela(cx, vec![rejeitada("f1"), rejeitada("f2")]);
+        entrar(cx, &outra);
+        outra
+            .update(cx, |tela, _window, cx| {
+                tela.selecionar_tudo(cx);
+                tela.alternar_rejeicao(cx);
+            })
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+        let negociadas = publicador.negociadas();
+        assert_eq!(negociadas.len(), 2, "{negociadas:?}");
+        assert!(
+            negociadas.iter().all(|(_, m)| m.rejeitada == Some(false)),
+            "todas rejeitadas: o mesmo X desfaz: {negociadas:?}"
         );
     }
 
@@ -6720,16 +6858,21 @@ mod testes {
             .expect("a janela deve estar aberta");
     }
 
-    /// 🚨 **Classificar a foto importada é o que a manda para o site — passo 3.**
+    /// 🚨 **A nota da foto importada é gravada no catálogo — e não no site.**
+    ///
+    /// 🔄 **Ela era o passo 3**, o gesto que mandava a foto para o site; com
+    /// C20 (2026-09-20) quem a manda é a fila de segundo plano do ensaio, e a
+    /// nota virou curadoria (C22). O pedido à raiz continua o mesmo, e o que
+    /// mudou é o que ele significa.
     ///
     /// ⚠️ **E sinalizar "levada" nela, não.** A negociação do balcão se grava na
-    /// foto **do site**, e uma que nunca subiu não tem em qual linha ser
+    /// foto **do site**, e uma que ainda está subindo não tem em qual linha ser
     /// gravada: mandar `negociar` com o id local devolveria erro para todas. O
     /// que este teste segura é que a tela **diz isso**, em vez de não fazer nada
     /// — o silêncio é a pior resposta possível a um gesto que o operador acabou
     /// de fazer com o cliente ao lado.
     #[gpui::test]
-    fn classificar_a_importada_pede_o_passo_3_e_sinalizar_avisa(cx: &mut TestAppContext) {
+    fn a_nota_da_importada_vai_ao_catalogo_e_sinalizar_avisa(cx: &mut TestAppContext) {
         let (janela, publicador) = janela(cx, Vec::new());
         entrar(cx, &janela);
 
@@ -6776,7 +6919,7 @@ mod testes {
                 assert!(
                     tela.erro
                         .as_deref()
-                        .is_some_and(|e| e.contains("ainda não subiram")),
+                        .is_some_and(|e| e.contains("ainda estão subindo")),
                     "sinalizar uma foto que não subiu não pode falhar em silêncio: {:?}",
                     tela.erro
                 );

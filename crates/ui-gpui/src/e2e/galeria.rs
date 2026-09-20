@@ -52,35 +52,49 @@ fn a_foto_importada_na_sessao_recebe_a_receita_padrao(cx: &mut TestAppContext) {
     });
 }
 
-/// 🧾 **A faixa escolhida na barra sobe com a foto.**
+/// 🧾 **A faixa escolhida na barra sobe com a foto que entra depois dela.**
 ///
 /// É a primeira das duas escolhas antes dos arquivos, no site: a sessão mista
 /// sobe a mãe sozinha numa faixa e a família em outra. O campo existia na tela
 /// (`escolher_faixa`) e **não chegava ao site** — nem o catálogo de faixas era
 /// carregado, então o seletor nem aparecia.
+///
+/// 🔄 **A ordem passou a importar em 2026-09-20** (C20). Antes a foto subia no
+/// gesto da nota, sempre depois da escolha da faixa; agora ela sobe sozinha,
+/// assim que entra no ensaio. A faixa da barra vale para o que **entrar depois**
+/// dela — como no site, onde ela é escolhida antes de arrastar os arquivos. Para
+/// a que já subiu, a faixa é uma mudança da foto, no painel.
 #[gpui::test]
-fn a_faixa_da_barra_sobe_com_a_foto_classificada(cx: &mut TestAppContext) {
+fn a_faixa_da_barra_sobe_com_a_foto_que_entra_depois(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(cx, Cenario::default());
+    e.esperar(cx);
+    assert_eq!(
+        e.site.faixas_pedidas(),
+        vec![None, None],
+        "as que já estavam no ensaio sobem no padrão da galeria"
+    );
 
     e.detalhe(cx, |tela, _w, cx| {
         assert!(!tela.produtos().is_empty(), "o catálogo chega com a sessão");
         tela.escolher_faixa(Some("p1".into()), cx);
     });
 
-    e.detalhe(cx, |tela, _w, cx| tela.focar_foto("id-DSC_101.jpg", cx));
-    e.teclar(cx, "4");
+    // Agora a importação: é ela que entra depois da escolha.
+    e.acervo.fotos.lock().unwrap().push(local("DSC_201.jpg"));
+    clicar(&e, cx, "detalhe-importar");
     e.esperar(cx);
 
     assert_eq!(
         e.site.faixas_pedidas(),
-        vec![Some("p1".to_string())],
-        "a foto tinha de subir na faixa escolhida"
+        vec![None, None, Some("p1".to_string())],
+        "a importada tinha de subir na faixa escolhida"
     );
 }
 
 /// 🎬 **Importar, classificar e levar**: o botão "Importar" abre o seletor do
-/// sistema, o lote vai para o catálogo **local** com o carimbo do ensaio, a
-/// nota dada pela tecla sobe a foto (passo 3), e o `B` leva a do site.
+/// sistema, o lote vai para o catálogo **local** com o carimbo do ensaio e
+/// **sobe sozinho** (C20), a nota marca a foto (C22), o `X` a rejeita sem
+/// apagar nada (C21) e o `B` leva a do site.
 #[gpui::test]
 fn importar_classificar_e_levar_pelas_teclas(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(cx, Cenario::default());
@@ -103,34 +117,39 @@ fn importar_classificar_e_levar_pelas_teclas(cx: &mut TestAppContext) {
         vec!["/cartao/DSC_201.jpg", "/cartao/DSC_202.jpg"]
     );
     assert_eq!(lotes[0].1.sessao_id.as_deref(), Some(GALERIA));
-    assert!(
-        e.site.arquivos_enviados().is_empty(),
-        "importar não sobe nada — quem autoriza é a nota"
-    );
     e.detalhe(cx, |tela, _w, _cx| {
         assert_eq!(tela.total_visivel(), 7, "a importada entrou na grade");
     });
 
-    // ⭐ A nota pela tecla, numa foto local: ela sobe.
+    // 📤 **O ensaio inteiro sobe sozinho** (C20): as duas que já estavam no
+    // disco ao abrir a sessão, e a que acabou de ser importada — nenhuma
+    // classificada. 🔄 Até 2026-09-20 nada disto subia: *"importar não sobe
+    // nada — quem autoriza é a nota"*.
+    let subidas = e.site.subidas();
+    assert_eq!(subidas.len(), 3, "o ensaio inteiro sobe: {subidas:?}");
+    assert_eq!(subidas[0].0, GALERIA);
+    assert_eq!(subidas[2].1, "id-DSC_201.jpg", "a recém-importada também");
+    assert!(
+        e.site.notas_pedidas().iter().all(Option::is_none),
+        "e sobem sem nota: {:?}",
+        e.site.notas_pedidas()
+    );
+
+    // ⭐ A nota pela tecla, numa foto que já subiu: é uma mudança da foto.
     e.detalhe(cx, |tela, _w, cx| tela.focar_foto("id-DSC_101.jpg", cx));
     e.teclar(cx, "4");
     e.esperar(cx);
-    let subidas = e.site.subidas();
-    assert_eq!(subidas.len(), 1, "classificar sobe: {subidas:?}");
-    assert_eq!(subidas[0].0, GALERIA);
-    assert_eq!(subidas[0].1, "id-DSC_101.jpg");
-    assert_eq!(
-        e.site.notas_pedidas(),
-        vec![Some(4)],
-        "com a nota que acabou de ser dada"
-    );
+    assert_eq!(e.site.subidas().len(), 3, "classificar não sobe de novo");
 
-    // O `B` numa foto local não tem onde gravar: a tela diz o que fazer.
+    // O `B` numa foto que ainda está subindo não tem onde gravar: a tela diz o
+    // que esperar. 🔄 Antes ela dizia "classifique-as antes" — era a regra em
+    // que a nota abria a porta da nuvem (C20 revogou-a).
     e.detalhe(cx, |tela, _w, cx| tela.focar_foto("id-DSC_102.jpg", cx));
     e.teclar(cx, "b");
     e.detalhe(cx, |tela, _w, _cx| {
         assert!(
-            tela.erro().is_some_and(|f| f.contains("classifique-as")),
+            tela.erro()
+                .is_some_and(|f| f.contains("ainda estão subindo")),
             "sinalizar a que não subiu avisa: {:?}",
             tela.erro()
         );
@@ -152,28 +171,42 @@ fn importar_classificar_e_levar_pelas_teclas(cx: &mut TestAppContext) {
     assert_eq!(negociadas.len(), 2);
     assert_eq!(negociadas[1].1.nota, Some(Some(5)));
 
-    // 🚨 **O `0` numa foto do acervo pergunta antes** — e nada sai da nuvem
-    // enquanto a resposta não vem. O caminho de volta inteiro (o bruto para cá,
-    // o catálogo, os parâmetros, e só então a remoção) está em
-    // `e2e::resgate`; aqui o que se prende é que a tecla **abre a pergunta** em
-    // vez de recusar, como fazia até 18/set/2026.
+    // 🚨 **O `0` numa foto do acervo tira a nota, e só isso** (contrato C22,
+    // 2026-09-20). Até 18/set/2026 ele recusava ("use Apagar"); de lá até
+    // 20/set ele abria a pergunta do resgate — o bruto de volta para cá e a
+    // foto apagada da nuvem. Nenhum gesto de classificação apaga arquivo.
     e.teclar(cx, "0");
-    e.detalhe(cx, |tela, _w, _cx| {
-        assert_eq!(
-            tela.fotos_na_pergunta_de_tirar_do_acervo(),
-            vec!["d.jpg".to_string()],
-            "a pergunta segura a foto até o operador responder"
-        );
-    });
-    assert_eq!(e.site.negociadas().len(), 2, "o 0 não foi ao site");
-    assert!(e.site.tiradas().is_empty());
-    e.detalhe(cx, |tela, _w, cx| tela.cancelar_tirar_do_acervo(cx));
+    e.esperar(cx);
+    let negociadas = e.site.negociadas();
+    assert_eq!(
+        negociadas.len(),
+        3,
+        "o 0 é uma mudança da foto: {negociadas:?}"
+    );
+    assert_eq!(negociadas[2].0, "d");
+    assert_eq!(
+        negociadas[2].1.nota,
+        Some(None),
+        "tirar a nota é `nota: null`"
+    );
+    assert!(
+        e.site.tiradas().is_empty(),
+        "e nada sai da nuvem — o resgate destrutivo deixou de existir"
+    );
+
+    // ❌ **O `X` rejeita: marca, e nunca apaga** (C21).
+    e.teclar(cx, "x");
+    e.esperar(cx);
+    let negociadas = e.site.negociadas();
+    assert_eq!(negociadas.len(), 4, "{negociadas:?}");
+    assert_eq!(negociadas[3].1.rejeitada, Some(true));
+    assert!(e.site.tiradas().is_empty(), "rejeitar não apaga nada");
 
     // A comprada não muda por lote.
     e.detalhe(cx, |tela, _w, cx| tela.focar_foto("c", cx));
     e.teclar(cx, "b");
     e.esperar(cx);
-    assert_eq!(e.site.negociadas().len(), 2, "a comprada fica de fora");
+    assert_eq!(e.site.negociadas().len(), 4, "a comprada fica de fora");
 }
 
 /// 🎬 **Recortes, zoom e marcação**: os chips recortam, a seleção limpa ao

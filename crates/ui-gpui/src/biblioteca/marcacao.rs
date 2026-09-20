@@ -16,6 +16,14 @@ use std::sync::Arc;
 
 use adapters::controllers::PhotoController;
 
+/// O código da **rejeitada** no catálogo — a bandeira vazia do Lightroom.
+///
+/// 🚨 **É a mesma marca que o contrato da foto chama de rejeição** (C21): na
+/// foto que ainda não subiu é ela que segura o envio, e quando a foto sobe o
+/// site passa a responder pelo mesmo estado (`rejeitada_em`). Um número solto
+/// nas telas faria as duas pontas se afastarem sem ninguém perceber.
+pub const REJEITADA_NO_CATALOGO: i32 = -1;
+
 /// O que uma tecla de marcação faz com a foto.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Marca {

@@ -11,8 +11,14 @@ use crate::menu::NOME;
 pub struct Retrato {
     /// Pedidos ao site ainda sem resposta (subir, tirar, salvar revelação).
     pub subindo: usize,
-    /// Fotos importadas numa sessão, que só sobem quando ganharem nota.
-    pub sem_nota: usize,
+    /// Fotos do ensaio **rejeitadas** (a tecla `X`): elas ficam no disco e
+    /// **não sobem** — contrato C21.
+    ///
+    /// 🔄 **Era `sem_nota`, "esperando nota"**, e a linha dizia a verdade até
+    /// 2026-09-20: sem nota a foto não subia. Com C20 o ensaio inteiro sobe em
+    /// segundo plano, e quem fica esperando alguma coisa é só a rejeitada —
+    /// esperando o operador mudar de ideia.
+    pub rejeitadas: usize,
     /// O que o site recusou nesta abertura.
     pub recusadas: usize,
     /// Miniaturas sendo refeitas do disco.
@@ -42,7 +48,7 @@ pub struct Linhas {
     pub cabecalho: String,
     pub conta: String,
     pub subindo: String,
-    pub sem_nota: String,
+    pub rejeitadas: String,
     pub recusadas: String,
     pub segundo_plano: String,
     pub ultimo: String,
@@ -104,9 +110,9 @@ pub fn linhas(r: &Retrato) -> Linhas {
         0 => "Subindo: nada na fila".into(),
         n => format!("Subindo: {}", plural(n, "foto", "fotos")),
     };
-    let sem_nota = match r.sem_nota {
-        0 => "Esperando nota: nenhuma".into(),
-        n => format!("Esperando nota: {}", plural(n, "foto", "fotos")),
+    let rejeitadas = match r.rejeitadas {
+        0 => "Rejeitadas (não sobem): nenhuma".into(),
+        n => format!("Rejeitadas (não sobem): {}", plural(n, "foto", "fotos")),
     };
     let recusadas = match r.recusadas {
         0 => "Recusadas pelo servidor: nenhuma".into(),
@@ -136,8 +142,8 @@ pub fn linhas(r: &Retrato) -> Linhas {
             plural(r.recusadas, "recusada", "recusadas")
         ));
     }
-    if r.sem_nota > 0 {
-        resumo.push(format!("{} esperando nota", r.sem_nota));
+    if r.rejeitadas > 0 {
+        resumo.push(format!("{} rejeitadas", r.rejeitadas));
     }
     let dica = if resumo.is_empty() {
         format!("{NOME} — Tudo sincronizado")
@@ -149,7 +155,7 @@ pub fn linhas(r: &Retrato) -> Linhas {
         cabecalho,
         conta,
         subindo,
-        sem_nota,
+        rejeitadas,
         recusadas,
         segundo_plano,
         ultimo,
@@ -192,7 +198,7 @@ mod testes {
         });
         assert_eq!(l.conta, "Conta: sem sessão");
         assert_eq!(l.subindo, "Subindo: nada na fila");
-        assert_eq!(l.sem_nota, "Esperando nota: nenhuma");
+        assert_eq!(l.rejeitadas, "Rejeitadas (não sobem): nenhuma");
         assert_eq!(l.recusadas, "Recusadas pelo servidor: nenhuma");
         assert_eq!(l.segundo_plano, "Em segundo plano: nada");
         assert_eq!(l.ultimo, "Último envio: nenhum ainda");
@@ -206,7 +212,7 @@ mod testes {
     fn cada_linha_conta_a_sua_parte() {
         let r = Retrato {
             subindo: 5,
-            sem_nota: 3,
+            rejeitadas: 3,
             recusadas: 1,
             refazendo: 1,
             conta: Some("dono@estudio".into()),
@@ -219,14 +225,14 @@ mod testes {
         assert!(l.cabecalho.ends_with("· PILHA LOCAL"), "{}", l.cabecalho);
         assert_eq!(l.conta, "Conta: dono@estudio");
         assert_eq!(l.subindo, "Subindo: 5 fotos");
-        assert_eq!(l.sem_nota, "Esperando nota: 3 fotos");
+        assert_eq!(l.rejeitadas, "Rejeitadas (não sobem): 3 fotos");
         assert_eq!(l.recusadas, "Recusadas pelo servidor: 1 (veja no app)");
         assert_eq!(l.segundo_plano, "Em segundo plano: 1 miniatura");
         assert_eq!(l.ultimo, "Último envio: há 5 min");
         assert_eq!(l.catalogo, "Catálogo neste computador: 3,5 MB");
         assert_eq!(
             l.dica,
-            format!("{NOME} — 5 fotos subindo · 1 recusada pelo servidor · 3 esperando nota")
+            format!("{NOME} — 5 fotos subindo · 1 recusada pelo servidor · 3 rejeitadas")
         );
     }
 
@@ -234,16 +240,16 @@ mod testes {
     fn uma_foto_so_fala_no_singular() {
         let l = linhas(&Retrato {
             subindo: 1,
-            sem_nota: 1,
+            rejeitadas: 1,
             refazendo: 7,
             ..Default::default()
         });
         assert_eq!(l.subindo, "Subindo: 1 foto");
-        assert_eq!(l.sem_nota, "Esperando nota: 1 foto");
+        assert_eq!(l.rejeitadas, "Rejeitadas (não sobem): 1 foto");
         assert_eq!(l.segundo_plano, "Em segundo plano: 7 miniaturas");
         assert_eq!(
             l.dica,
-            format!("{NOME} — 1 foto subindo · 1 esperando nota"),
+            format!("{NOME} — 1 foto subindo · 1 rejeitadas"),
             "miniatura refeita não entra no resumo: é cache, não envio"
         );
     }
@@ -252,7 +258,7 @@ mod testes {
     fn so_o_envio_segura_o_app_aberto() {
         let refazendo = Retrato {
             refazendo: 30,
-            sem_nota: 4,
+            rejeitadas: 4,
             recusadas: 2,
             ..Default::default()
         };

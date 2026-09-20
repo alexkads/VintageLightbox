@@ -244,9 +244,14 @@ fn revelar_vem_antes_de_classificar(cx: &mut TestAppContext) {
 
 /// 📸 **Passo 3 → 5: classifico, filtro, sinalizo.**
 ///
-/// O que a junta acrescenta aos testes de unidade: a foto classificada **sobe**,
-/// o filtro recorta sem perder quem já estava marcado, e a tecla `B` decide o
-/// estado com que ela vai ao site.
+/// O que a junta acrescenta aos testes de unidade: **o ensaio inteiro sobe** ao
+/// entrar na sessão (C20), o filtro recorta sem perder quem já estava marcado, e
+/// a tecla `B` decide o estado com que a foto vai ao site.
+///
+/// 🔄 **Aqui se lia "classificar é o que autoriza a foto a subir"**, e era
+/// verdade até 2026-09-20: só a classificada ia para a nuvem. O dono trocou a
+/// regra — a não classificada sobe junto, em segundo plano, e a nota passou a
+/// ser curadoria.
 #[gpui::test]
 fn classificar_filtrar_e_sinalizar(cx: &mut TestAppContext) {
     let estudio = abrir_o_estudio(cx, vec![foto("DSC_001.NEF"), foto("DSC_002.NEF")]);
@@ -282,8 +287,8 @@ fn classificar_filtrar_e_sinalizar(cx: &mut TestAppContext) {
 
     assert_eq!(
         estudio.publicador.subidas().len(),
-        1,
-        "classificar é o que autoriza a foto a subir"
+        2,
+        "o ensaio inteiro sobe — a classificada e a que ninguém classificou"
     );
 
     estudio
