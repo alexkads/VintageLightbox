@@ -1386,15 +1386,26 @@ impl Detalhe {
 
     /// Monta o acervo da grade: **o que está no site, e o que só está no disco**.
     ///
-    /// 🔑 **As locais vêm depois**, e é de propósito: a ordem da grade é a ordem
-    /// da sessão, e o que acabou de ser importado é o mais novo. Quem importa
-    /// 500 quer vê-las onde as deixou — no fim.
+    /// 🚨 **As duas listas se intercalam pela `ordem`, que é a da fotografia**
+    /// (20/set/2026, pedido do dono: *"a grade precisa usar a ordem da captura,
+    /// pois a sessão é temática e a ordem em que as fotografias são feitas
+    /// conta"*). Até aqui as locais eram empilhadas no fim — *"quem importa 500
+    /// quer vê-las onde as deixou"* —, e enquanto metade do ensaio estava no
+    /// site e metade no disco a grade mostrava duas sequências coladas, nenhuma
+    /// delas a do ensaio. É também o que a grade do site faz (`grade.tsx`), e
+    /// as duas telas têm de responder igual ao mesmo gesto.
+    ///
+    /// 🔑 **A régua é uma só**: a foto do site traz a `ordem` com que subiu (a
+    /// posição no acervo), e a local recebe a posição dela no mesmo acervo — ver
+    /// `mostrar_as_locais_na_sessao`. O desempate é o id, para a grade não
+    /// remexer sozinha quando duas empatarem.
     fn recompor_acervo(&mut self) {
         let marcadas = self.ids_marcados();
         let focada = self.em_foco().map(|f| f.id.clone());
 
         let mut todas = self.do_site.clone();
         todas.extend(self.locais.iter().cloned());
+        todas.sort_by(|a, b| a.ordem.cmp(&b.ordem).then_with(|| a.id.cmp(&b.id)));
         self.acervo.definir(todas);
 
         // A seleção fala em **posição**, e a lista mudou de tamanho: quem

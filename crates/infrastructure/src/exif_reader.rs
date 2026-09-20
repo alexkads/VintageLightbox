@@ -47,9 +47,46 @@ impl ExifReader {
             metadata.camera_make = Some(field.display_value().to_string());
         }
 
-        // Extrair data/hora
-        if let Some(field) = exif_data.get_field(exif::Tag::DateTime, exif::In::PRIMARY) {
-            metadata.date_time = Some(field.display_value().to_string());
+        // Extrair a data/hora **do disparo**, e não a do arquivo.
+        //
+        // 🚨 **A ordem das três tags é a correção de 20/set/2026.** Até então
+        // lia-se só `DateTime` — a tag do IFD0, que é *quando o arquivo foi
+        // escrito pela última vez*. Num ensaio exportado do Lightroom ela é a
+        // hora da exportação, igual em todas as fotos: a grade ordenada por
+        // "Hora de captura" empatava tudo e caía no desempate, e o ensaio
+        // chegava ao site fora da ordem em que foi fotografado.
+        //
+        // - `DateTimeOriginal` é o disparo — a única que responde a pergunta;
+        // - `DateTimeDigitized` é quando virou arquivo (iguais numa digital,
+        //   diferentes num negativo escaneado);
+        // - `DateTime` fica como último recurso, porque um arquivo tocado por
+        //   qualquer programa a perde.
+        for tag in [
+            exif::Tag::DateTimeOriginal,
+            exif::Tag::DateTimeDigitized,
+            exif::Tag::DateTime,
+        ] {
+            if let Some(field) = exif_data.get_field(tag, exif::In::PRIMARY) {
+                metadata.date_time = Some(field.display_value().to_string());
+                break;
+            }
+        }
+
+        // O subsegundo do disparo, que é o que desempata uma rajada — ver
+        // `PhotoMetadata::chave_de_captura`. Segue a data escolhida acima.
+        for tag in [
+            exif::Tag::SubSecTimeOriginal,
+            exif::Tag::SubSecTimeDigitized,
+            exif::Tag::SubSecTime,
+        ] {
+            if let Some(field) = exif_data.get_field(tag, exif::In::PRIMARY) {
+                let bruto = field.display_value().to_string();
+                let digitos: String = bruto.chars().filter(char::is_ascii_digit).collect();
+                if !digitos.is_empty() {
+                    metadata.sub_sec = Some(digitos);
+                    break;
+                }
+            }
         }
 
         // Extrair ISO

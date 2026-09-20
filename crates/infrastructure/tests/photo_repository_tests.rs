@@ -109,6 +109,74 @@ async fn test_find_all_photos() {
     assert_eq!(all_photos.len(), 3);
 }
 
+/// 🚨 **A lista do catálogo sai na ordem em que as fotos foram fotografadas.**
+///
+/// Até 20/set/2026 era `ORDER BY imported_at DESC` — a ordem da importação, de
+/// trás para a frente. Como esta lista é a grade da Biblioteca e a da sessão, e
+/// como a `ordem` que sobe para o site sai dela, o ensaio chegava invertido até
+/// a galeria do cliente. *"A sessão é temática, e a ordem em que as fotografias
+/// são feitas conta"* (dono).
+#[tokio::test]
+async fn find_all_devolve_na_ordem_da_captura() {
+    let repo = create_test_repository().await;
+
+    // Salvas ao contrário da ordem do disparo, de propósito: é o embaralho que
+    // a importação em paralelo produzia.
+    for (arquivo, data, sub) in [
+        ("/photos/c.jpg", "2026:09:20 14:00:05", Some("500")),
+        ("/photos/a.jpg", "2026:09:20 09:00:00", None),
+        ("/photos/b.jpg", "2026:09:20 14:00:05", Some("070")),
+    ] {
+        let mut foto = Photo::new(FilePath::new(arquivo).unwrap());
+        foto.definir_nome_original(Some(arquivo.rsplit('/').next().unwrap().to_string()));
+        foto.set_metadata(PhotoMetadata {
+            date_time: Some(data.to_string()),
+            sub_sec: sub.map(str::to_string),
+            ..Default::default()
+        });
+        repo.save(&foto).await.unwrap();
+    }
+
+    let nomes: Vec<String> = repo
+        .find_all()
+        .await
+        .unwrap()
+        .iter()
+        .map(|f| f.file_name().unwrap_or_default().to_string())
+        .collect();
+
+    // `b` antes de `c` é o subsegundo trabalhando: as duas são do mesmo segundo.
+    assert_eq!(nomes, ["a.jpg", "b.jpg", "c.jpg"]);
+}
+
+/// A foto sem EXIF fica no fim, por nome — e não abre o ensaio.
+#[tokio::test]
+async fn find_all_poe_quem_nao_tem_captura_no_fim() {
+    let repo = create_test_repository().await;
+
+    let mut escaneada = Photo::new(FilePath::new("/photos/scan.png").unwrap());
+    escaneada.definir_nome_original(Some("scan.png".to_string()));
+    repo.save(&escaneada).await.unwrap();
+
+    let mut fotografada = Photo::new(FilePath::new("/photos/IMG_1.jpg").unwrap());
+    fotografada.definir_nome_original(Some("IMG_1.jpg".to_string()));
+    fotografada.set_metadata(PhotoMetadata {
+        date_time: Some("2026:09:20 09:00:00".to_string()),
+        ..Default::default()
+    });
+    repo.save(&fotografada).await.unwrap();
+
+    let nomes: Vec<String> = repo
+        .find_all()
+        .await
+        .unwrap()
+        .iter()
+        .map(|f| f.file_name().unwrap_or_default().to_string())
+        .collect();
+
+    assert_eq!(nomes, ["IMG_1.jpg", "scan.png"]);
+}
+
 #[tokio::test]
 async fn test_photo_not_found() {
     // Arrange
@@ -203,6 +271,7 @@ async fn test_save_and_find_photo_with_metadata() {
         camera_make: Some("Canon".to_string()),
         camera_model: Some("EOS R5".to_string()),
         date_time: Some("2023-12-17 12:00:00".to_string()),
+        sub_sec: Some("250".to_string()),
         iso: Some(100),
         aperture: Some(2.8),
         shutter_speed: Some("1/1000".to_string()),

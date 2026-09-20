@@ -80,7 +80,8 @@ impl ImportController {
                     file_size: item.file_size,
                     is_raw: item.is_raw,
                     camera: format_camera(&item.metadata.camera_make, &item.metadata.camera_model),
-                    date_time: item.metadata.date_time.unwrap_or_default(),
+                    captura: item.metadata.chave_de_captura().unwrap_or_default(),
+                    date_time: item.metadata.date_time.clone().unwrap_or_default(),
                     dimensions: match (item.metadata.width, item.metadata.height) {
                         (Some(w), Some(h)) => Some(format!("{}x{}", w, h)),
                         _ => None,

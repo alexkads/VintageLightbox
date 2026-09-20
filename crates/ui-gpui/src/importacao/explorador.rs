@@ -107,6 +107,7 @@ impl Explorador for ExploradorDoDisco {
                             e_raw: item.is_raw,
                             camera: item.camera,
                             data: item.date_time,
+                            captura: item.captura,
                             dimensoes: item.dimensions,
                         })
                         .collect(),
@@ -543,6 +544,7 @@ pub mod mentira {
                         e_raw: caminho.ends_with(".NEF"),
                         camera: "Nikon Z6".into(),
                         data: "2026:08:16 10:00:00".into(),
+                        captura: "2026:08:16 10:00:00".into(),
                         dimensoes: Some("6000x4000".into()),
                     })
                     .collect(),

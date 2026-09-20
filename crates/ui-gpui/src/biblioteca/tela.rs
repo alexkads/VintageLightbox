@@ -821,6 +821,28 @@ impl Biblioteca {
         self.fotos.as_ref().clone()
     }
 
+    /// Onde cada uma destas fotos está no acervo — **a ordem em que o ensaio
+    /// foi fotografado**.
+    ///
+    /// 🚨 **É o que sobe para o site como `ordem`** (20/set/2026). Antes, quem
+    /// classificava mandava o índice *dentro do gesto*: classificar foto a foto
+    /// dava `0` para todas, e a galeria do cliente caía no desempate por hora de
+    /// chegada — que com três envios no ar ao mesmo tempo é o acaso. Contando a
+    /// posição no acervo, a ordem é a mesma entre levas e é a do disparo,
+    /// porque é assim que o catálogo entrega a lista (`find_all`).
+    ///
+    /// Quem não estiver no acervo fica de fora do mapa: quem chama decide o que
+    /// fazer com isso.
+    pub fn ordem_no_acervo(&self, ids: &[String]) -> std::collections::HashMap<String, u32> {
+        let procurados: std::collections::HashSet<&str> = ids.iter().map(String::as_str).collect();
+        self.fotos
+            .iter()
+            .enumerate()
+            .filter(|(_, f)| procurados.contains(f.id.as_str()))
+            .map(|(i, f)| (f.id.clone(), i as u32))
+            .collect()
+    }
+
     /// O nome do arquivo de uma foto **pelo id dela no site** — o que o aviso
     /// de recusa mostra ao operador.
     ///
@@ -2792,6 +2814,49 @@ mod testes {
             })
             .expect("a janela deve estar aberta");
         (janela, marcador, dir)
+    }
+
+    /// 🚨 **A ordem que sobe para o site é a posição no acervo** — e o acervo
+    /// vem na ordem em que o ensaio foi fotografado (`find_all`).
+    ///
+    /// Antes de 20/set/2026 subia o índice *dentro do gesto*: classificar foto a
+    /// foto mandava `0` em todas, e a galeria do cliente ordenava pela hora de
+    /// chegada do upload — o acaso, com três envios no ar ao mesmo tempo.
+    #[gpui::test]
+    fn a_ordem_que_sobe_e_a_posicao_no_acervo(cx: &mut TestAppContext) {
+        let (janela, _marcador, _dir) = tela_com(cx, acervo());
+
+        let ordens = janela
+            .update(cx, |tela, _w, _cx| {
+                // Na ordem trocada de propósito: quem responde é o acervo, e não
+                // a ordem em que os ids foram pedidos.
+                tela.ordem_no_acervo(&["id-retrato.jpg".to_string(), "id-DSC_001.NEF".to_string()])
+            })
+            .expect("a janela deve estar aberta");
+
+        assert_eq!(ordens.get("id-DSC_001.NEF"), Some(&0));
+        assert_eq!(ordens.get("id-retrato.jpg"), Some(&2));
+        assert_eq!(ordens.len(), 2, "quem não foi pedido não entra no mapa");
+        assert_eq!(
+            ordens.get("id-DSC_002.NEF"),
+            None,
+            "a do meio não foi pedida, e a posição dela continua sendo 1 para quem pedir"
+        );
+    }
+
+    /// Um id que não está no acervo simplesmente não aparece — quem chama
+    /// decide o que fazer, e no `app.rs` isso é ir para depois do fim.
+    #[gpui::test]
+    fn ordem_no_acervo_ignora_quem_nao_esta_la(cx: &mut TestAppContext) {
+        let (janela, _marcador, _dir) = tela_com(cx, acervo());
+
+        let ordens = janela
+            .update(cx, |tela, _w, _cx| {
+                tela.ordem_no_acervo(&["id-de-outro-ensaio.jpg".to_string()])
+            })
+            .expect("a janela deve estar aberta");
+
+        assert!(ordens.is_empty());
     }
 
     /// 🚨 A grade desconta **as duas** colunas laterais.

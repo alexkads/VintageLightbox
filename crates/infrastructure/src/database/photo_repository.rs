@@ -11,6 +11,21 @@ use domain::{
 };
 use sqlx::{Row, SqlitePool};
 
+/// O que põe uma foto do catálogo na ordem do ensaio: a chave do disparo e o
+/// nome que a câmera deu.
+///
+/// 🔑 **O nome é o `file_name`, e não o do disco.** O organizador renomeia tudo
+/// para `photo-AAAA-MM-DD-NNN` na importação, em ordem de chegada; desempatar
+/// por ele devolveria justamente a ordem de importação que esta função existe
+/// para deixar de usar.
+fn chave_da_foto(foto: &Photo) -> (String, String) {
+    let captura = foto
+        .metadata()
+        .and_then(|m| m.chave_de_captura())
+        .unwrap_or_default();
+    (captura, foto.file_name().unwrap_or_default().to_string())
+}
+
 /// Implementação SQLite do PhotoRepository
 pub struct PhotoRepositoryImpl {
     pool: SqlitePool,
@@ -559,13 +574,34 @@ impl PhotoRepository for PhotoRepositoryImpl {
         }
     }
 
+    /// Todas as fotos do catálogo, **na ordem em que foram fotografadas**.
+    ///
+    /// 🚨 **Era `ORDER BY imported_at DESC`** — a ordem da importação, de trás
+    /// para a frente (20/set/2026, pedido do dono: *"a sessão é temática, e a
+    /// ordem em que as fotografias são feitas conta"*). Isto alimenta a grade da
+    /// Biblioteca e a da sessão, então o ensaio chegava invertido à tela em que
+    /// se revela e se classifica — e, como a `ordem` que sobe para o site sai
+    /// daí, chegava invertido também à galeria do cliente. Duas importações
+    /// concorrentes ainda se intercalavam entre si, porque `imported_at` é
+    /// quando a linha foi gravada, não quando o disparo aconteceu.
+    ///
+    /// ⚠️ **A ordenação é em Rust, e não em SQL.** A data do disparo mora no
+    /// JSON de `metadata`, e o desempate por nome tem de ler os números como
+    /// números (`IMG_9` antes de `IMG_10`) — coisas que o `ORDER BY` do SQLite
+    /// não faz sem `json_extract` e nem com ele. O catálogo já é carregado
+    /// inteiro aqui; ordenar depois de ler não custa outra ida ao disco.
     async fn find_all(&self) -> DomainResult<Vec<Photo>> {
-        let rows = sqlx::query("SELECT * FROM photos ORDER BY imported_at DESC")
+        let rows = sqlx::query("SELECT * FROM photos")
             .fetch_all(&self.pool)
             .await
             .map_err(|e| DomainError::InvalidOperation(format!("Failed to fetch photos: {}", e)))?;
 
-        rows.iter().map(Self::row_to_photo).collect()
+        let mut fotos: Vec<Photo> = rows
+            .iter()
+            .map(Self::row_to_photo)
+            .collect::<DomainResult<Vec<_>>>()?;
+        domain::ordem_da_captura::ordenar_pela_captura(&mut fotos, chave_da_foto);
+        Ok(fotos)
     }
 
     async fn update(&self, photo: &Photo) -> DomainResult<()> {

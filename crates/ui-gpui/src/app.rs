@@ -1276,11 +1276,18 @@ impl Aplicativo {
         let Some(galeria) = self.sessao_aberta.clone() else {
             return;
         };
+        // 🚨 **A posição é contada no ensaio inteiro, e não só entre as que
+        // ainda não subiram** (20/set/2026). O `enumerate` vinha depois dos dois
+        // filtros: a terceira foto ainda local ganhava `ordem = 2` mesmo sendo a
+        // décima do ensaio, e como a do site traz a ordem do disparo, as duas
+        // escalas discordavam — a grade intercalava errado. Contar antes do
+        // filtro de "já subiu" põe as duas na mesma régua: a do acervo, que é a
+        // da fotografia (`find_all`).
         let locais: Vec<biblioteca_core::acervo::Foto> = fotos
             .iter()
             .filter(|f| f.sessao_id.as_deref() == Some(galeria.as_str()))
-            .filter(|f| f.pos_venda_foto_id.is_none())
             .enumerate()
+            .filter(|(_, f)| f.pos_venda_foto_id.is_none())
             .map(|(i, f)| local_para_a_grade(f, i as i64))
             .collect();
         self.detalhe
@@ -1990,13 +1997,32 @@ impl Aplicativo {
                 return;
             };
 
-            for (ordem, id) in evento.subiram.iter().enumerate() {
+            // 🚨 **A ordem é a posição no acervo, e não o índice deste gesto**
+            // (20/set/2026, pedido do dono: *"tem que ser tudo na ordem da
+            // fotografia"*). O `enumerate` daqui contava dentro da leva que
+            // acabou de ser classificada: quem classifica foto a foto mandava
+            // `0` em todas, e o site — que ordena por `ordem, criada_em` —
+            // caía no desempate por hora de chegada, com três envios no ar ao
+            // mesmo tempo. O acervo já vem na ordem do disparo (`find_all`), e
+            // contar nele dá uma ordem que atravessa as levas.
+            let no_acervo = self.biblioteca.read(cx).ordem_no_acervo(&evento.subiram);
+            let depois_do_fim = self.biblioteca.read(cx).quantas_fotos() as u32;
+            for (i, id) in evento.subiram.iter().enumerate() {
+                // ⚠️ **Fora do acervo vai para depois do fim da lista**, como a
+                // foto sem EXIF — e não para a frente do ensaio, que é o que
+                // `0` faria. Não é `u32::MAX`: do outro lado a coluna é `i32`, e
+                // o handler recusa o envio inteiro com "ordem invalida" antes de
+                // olhar o arquivo.
+                let ordem = no_acervo
+                    .get(id)
+                    .copied()
+                    .unwrap_or_else(|| depois_do_fim.saturating_add(i as u32));
                 self.esteira
                     .empurrar(crate::envios::Trabalho::Classificada {
                         galeria: galeria.clone(),
                         foto: Box::new(crate::pos_venda::porta::FotoClassificada {
                             foto_id: id.clone(),
-                            ordem: ordem as u32,
+                            ordem,
                             // 🔑 `None`: quem classifica não escolheu leva nenhuma,
                             // e o estado sai da tecla `B` de cada foto. A escolha
                             // por lote existe na tela da sessão, onde ela é o gesto.

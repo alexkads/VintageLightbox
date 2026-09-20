@@ -55,12 +55,23 @@ fn recortar(e: &super::Estudio, cx: &mut TestAppContext, filtro: Filtro) {
 fn a_grade_mostra_as_fotos_certas_em_cada_recorte(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(cx, Cenario::default());
 
-    // A grade é uma só: as do site e as do disco, na ordem em que a sessão as
-    // devolve — as locais por último, porque entram depois.
+    // 🚨 **A grade é uma só, e as duas listas se intercalam pela `ordem`** —
+    // que é a da fotografia (20/set/2026: *"a sessão é temática, e a ordem em
+    // que as fotografias são feitas conta"*). Antes as locais eram empilhadas
+    // no fim, e um ensaio meio no site e meio no disco virava duas sequências
+    // coladas.
+    //
+    // ⚠️ **O cruzamento aqui é o do cenário, não o do balcão.** Neste cenário as
+    // quatro do site (`ordem` 0–3) **não** estão no catálogo desta máquina, e as
+    // duas locais são as posições 0 e 1 do catálogo — duas réguas de origens
+    // diferentes, que é o caso de um ensaio enviado de outro lugar. No balcão,
+    // onde tudo foi importado aqui, a régua é uma só: a foto que subiu continua
+    // no catálogo e ocupa a posição dela, então as locais caem nas posições
+    // seguintes.
     assert_eq!(
         na_grade(&e, cx),
-        ["a", "b", "d", "c", "id-DSC_101.jpg", "id-DSC_102.jpg"],
-        "a grade da sessão mistura o site e o disco, sem reordenar"
+        ["a", "id-DSC_101.jpg", "b", "id-DSC_102.jpg", "d", "c"],
+        "a grade da sessão intercala o site e o disco pela ordem da captura"
     );
 
     // 🚨 A foto local entra **sem nota**: o que a leva ao site é a
