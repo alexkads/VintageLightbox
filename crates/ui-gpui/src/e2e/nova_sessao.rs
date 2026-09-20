@@ -297,3 +297,39 @@ fn descartar_apaga_e_voltar_guarda(cx: &mut TestAppContext) {
         assert_eq!(tela.rascunho_para_teste().formulario.titulo, "Batizado");
     });
 }
+
+/// 🚨 **Digitar o título na etapa 3, com o teclado de verdade.**
+///
+/// Todo teste daqui preenchia o formulário por `digitar(...)`, que escreve no
+/// rascunho sem passar pelo campo. O caminho do operador — foco no `Input`,
+/// tecla, `InputEvent::Change` — nunca foi exercido (dono, 20/set/2026: *"não
+/// consigo digitar o título como se tivesse um bug no input"*).
+#[gpui::test]
+fn o_titulo_aceita_o_teclado(cx: &mut TestAppContext) {
+    let e = abrir_o_app(cx, Cenario::default());
+    e.entrar_na_conta(cx);
+    abrir_o_assistente(&e, cx);
+
+    // "Criar" sem título leva à etapa 3 e põe o foco no campo, que é como o
+    // operador chega nele.
+    e.app(cx, |app, window, cx| {
+        app.nova_sessao.update(cx, |tela, cx| {
+            tela.ir(3, window, cx);
+            tela.escolher_produto("p1", window, cx);
+            tela.escolher_estudio("e1", window, cx);
+            tela.criar(window, cx);
+        });
+    });
+    e.esperar(cx);
+
+    e.teclar(cx, "b o d a s");
+    e.esperar(cx);
+
+    e.app(cx, |app, _w, cx| {
+        assert_eq!(
+            app.nova_sessao.read(cx).rascunho_para_teste().formulario.titulo,
+            "bodas",
+            "o que se digita tem de chegar ao formulário"
+        );
+    });
+}
