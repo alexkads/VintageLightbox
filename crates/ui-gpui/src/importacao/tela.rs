@@ -282,7 +282,7 @@ impl Importacao {
     /// que seja "desisti".
     pub fn escolher_origem(&mut self, cx: &mut Context<Self>) {
         self.esperando_escolha = true;
-        self.seletor.escolher(self.recados.0.clone());
+        self.seletor.escolher(self.recados.0.clone(), cx);
         // 🚨 O laço tem de estar de pé **antes** da resposta: o seletor é uma
         // janela do sistema e pode voltar a qualquer momento. Sem isto, a pasta
         // escolhida ficaria parada no canal até alguma outra coisa acordar a
@@ -294,7 +294,7 @@ impl Importacao {
     /// Abre o seletor para a pasta de destino.
     pub fn escolher_destino(&mut self, cx: &mut Context<Self>) {
         self.esperando_escolha = true;
-        self.seletor.escolher_destino(self.recados.0.clone());
+        self.seletor.escolher_destino(self.recados.0.clone(), cx);
         self.acompanhar(cx);
         cx.notify();
     }

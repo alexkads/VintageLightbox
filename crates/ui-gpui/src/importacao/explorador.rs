@@ -18,6 +18,8 @@
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
 
+use gpui::AppContext as _;
+
 use adapters::controllers::ImportController;
 use domain::value_objects::ImportOptions;
 
@@ -139,54 +141,97 @@ impl Explorador for ExploradorDoDisco {
 pub trait SeletorDePasta: Send + Sync + 'static {
     /// Responde **sempre**: `OrigemEscolhida` ou `SemEscolha`. Silêncio deixaria
     /// a tela esperando uma pasta que nunca vem.
-    fn escolher(&self, canal: Sender<Recado>);
+    fn escolher(&self, canal: Sender<Recado>, cx: &mut gpui::App);
 
     /// O mesmo, para a pasta de destino. Responde `DestinoEscolhido` ou
     /// `SemEscolha`.
-    fn escolher_destino(&self, canal: Sender<Recado>);
+    fn escolher_destino(&self, canal: Sender<Recado>, cx: &mut gpui::App);
 }
 
-/// O seletor do sistema, via `rfd`.
+/// O seletor do sistema, pelo diálogo do próprio GPUI.
 ///
 /// ⚠️ **Janela do sistema, e não do framework.** É a mesma escolha que o legado
-/// fez ao trocar o `egui_file` por `rfd`: um seletor desenhado pelo framework
-/// disputa camada com o modal e aparece escurecido e sem responder ao clique.
-pub struct SeletorNativo {
-    tokio: tokio::runtime::Handle,
-}
+/// fez ao trocar o `egui_file` por um seletor nativo: um seletor desenhado pelo
+/// framework disputa camada com o modal e aparece escurecido e sem responder ao
+/// clique.
+///
+/// # 🚨 Por que não é mais o `rfd`
+///
+/// Até 19/set/2026 isto abria `rfd::AsyncFileDialog` numa tarefa do tokio. No
+/// macOS funciona; no **Ubuntu** (GNOME sobre Wayland) o resultado é a janela
+/// solta que o dono descreveu como *"a interface de importação ou pasta fica
+/// tudo quebrado"*.
+///
+/// O motivo é o `parent_window` do portal. `xdg-desktop-portal` recebe, no
+/// primeiro argumento de `OpenFile`, o identificador da janela que está pedindo
+/// — e o `rfd` só o preenche com `set_parent`, que o código não chamava (e não
+/// podia: o `RawWindowHandle` do Wayland não é `Send`, e a chamada estava do
+/// outro lado de um `tokio::spawn`). Sem ele o portal abre um diálogo
+/// **sem pai e sem `modal: true`**: o compositor é livre para empilhá-lo atrás
+/// da janela do app, o app continua aceitando clique e desenhando o modal por
+/// cima, e quem escolhe pasta fica com duas janelas disputando a tela.
+///
+/// 🔑 **O GPUI já resolve isso, e o app estava passando por fora.**
+/// `App::prompt_for_paths` chama o mesmo portal pelo `ashpd`, mas com
+/// `.identifier(window_identifier().await)` — o `xdg_foreign` da superfície
+/// Wayland — e `.modal(true)`, na thread de interface
+/// (`gpui/src/platform/linux/platform.rs`). No macOS ele é o `NSOpenPanel` de
+/// sempre. Uma dependência a menos no caminho e três sistemas com o
+/// comportamento do sistema.
+#[derive(Default)]
+pub struct SeletorNativo;
 
 impl SeletorNativo {
-    pub fn novo(tokio: tokio::runtime::Handle) -> Self {
-        Self { tokio }
+    pub fn novo() -> Self {
+        Self
     }
 
     /// Abre o seletor e responde com o recado que a chamada pedir.
     ///
-    /// 🔑 Um caminho só para as duas pastas: origem e destino diferem no título e
-    /// no recado, e nada mais. Duas cópias divergiriam no primeiro ajuste — e o
-    /// jeito de descobrir seria um dos dois parar de responder ao desistir.
-    fn pedir(&self, titulo: &'static str, canal: Sender<Recado>, como: fn(String) -> Recado) {
-        self.tokio.spawn(async move {
-            let recado = match rfd::AsyncFileDialog::new()
-                .set_title(titulo)
-                .pick_folder()
-                .await
-            {
-                Some(pasta) => como(pasta.path().to_string_lossy().to_string()),
-                None => Recado::SemEscolha,
+    /// 🔑 Um caminho só para as duas pastas: origem e destino diferem no rótulo
+    /// e no recado, e nada mais. Duas cópias divergiriam no primeiro ajuste — e
+    /// o jeito de descobrir seria um dos dois parar de responder ao desistir.
+    fn pedir(
+        rotulo: &'static str,
+        canal: Sender<Recado>,
+        como: fn(String) -> Recado,
+        cx: &mut gpui::App,
+    ) {
+        let escolha = cx.prompt_for_paths(gpui::PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some(rotulo.into()),
+        });
+
+        cx.background_spawn(async move {
+            // Três desfechos, e dois deles são "desisti": o portal pode
+            // devolver `Ok(None)` (cancelou), um erro (não abriu), ou o canal
+            // pode ter fechado. Nenhum deles pode virar silêncio — ver o
+            // contrato do trait.
+            let recado = match escolha.await {
+                Ok(Ok(Some(pastas))) => match pastas.into_iter().next() {
+                    Some(pasta) => como(pasta.to_string_lossy().to_string()),
+                    None => Recado::SemEscolha,
+                },
+                Ok(Ok(None)) => Recado::SemEscolha,
+                Ok(Err(erro)) => Recado::Falhou(format!("O seletor de pasta não abriu: {erro}")),
+                // O oneshot morreu sem resposta — a janela fechou no meio.
+                Err(_) => Recado::SemEscolha,
             };
             let _ = canal.send(recado);
-        });
+        })
+        .detach();
     }
 }
 
 impl SeletorDePasta for SeletorNativo {
-    fn escolher(&self, canal: Sender<Recado>) {
-        self.pedir("Escolher a origem", canal, Recado::OrigemEscolhida);
+    fn escolher(&self, canal: Sender<Recado>, cx: &mut gpui::App) {
+        Self::pedir("Escolher a origem", canal, Recado::OrigemEscolhida, cx);
     }
 
-    fn escolher_destino(&self, canal: Sender<Recado>) {
-        self.pedir("Escolher o destino", canal, Recado::DestinoEscolhido);
+    fn escolher_destino(&self, canal: Sender<Recado>, cx: &mut gpui::App) {
+        Self::pedir("Escolher o destino", canal, Recado::DestinoEscolhido, cx);
     }
 }
 
@@ -521,7 +566,7 @@ pub mod mentira {
     }
 
     impl SeletorDePasta for SeletorDeMentira {
-        fn escolher(&self, canal: Sender<Recado>) {
+        fn escolher(&self, canal: Sender<Recado>, _cx: &mut gpui::App) {
             let recado = match self.escolha.lock().expect("a escolha").clone() {
                 Some(caminho) => Recado::OrigemEscolhida(caminho),
                 None => Recado::SemEscolha,
@@ -529,7 +574,7 @@ pub mod mentira {
             let _ = canal.send(recado);
         }
 
-        fn escolher_destino(&self, canal: Sender<Recado>) {
+        fn escolher_destino(&self, canal: Sender<Recado>, _cx: &mut gpui::App) {
             let recado = match self.escolha.lock().expect("a escolha").clone() {
                 Some(caminho) => Recado::DestinoEscolhido(caminho),
                 None => Recado::SemEscolha,

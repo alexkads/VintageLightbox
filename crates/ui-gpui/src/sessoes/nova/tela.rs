@@ -853,7 +853,7 @@ impl NovaSessao {
         self.menu_da_origem = None;
         self.portas
             .seletor_de_pasta
-            .escolher(self.origens.0.clone());
+            .escolher(self.origens.0.clone(), cx);
         self.escolhendo = true;
         self.acompanhar(window, cx);
         cx.notify();

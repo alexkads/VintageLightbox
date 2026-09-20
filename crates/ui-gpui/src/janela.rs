@@ -51,8 +51,13 @@
 //!   (`segundo_plano/janela.rs` registra a lição, conferida em 17/set/2026).
 //!   Fica para quando houver uma máquina de cada para conferir.
 
-use gpui::{div, prelude::*, App, Div, InteractiveElement, MouseButton, Stateful, Window};
-use gpui_component::InteractiveElementExt as _;
+use gpui::{
+    div, prelude::*, px, App, Div, Hsla, InteractiveElement, MouseButton, SharedString, Stateful,
+    Window,
+};
+use gpui_component::{ActiveTheme as _, Icon, InteractiveElementExt as _};
+
+use crate::recursos::Icone;
 
 /// Um elemento que passa a se comportar como barra de título.
 ///
@@ -76,7 +81,7 @@ pub fn como_barra_de_titulo(
 
     elemento
         .id(id)
-        .on_double_click(|_, window, _| maximizar_ou_restaurar(window))
+        .on_double_click(|_, window, cx| maximizar_ou_restaurar(window, cx))
         .on_mouse_down(
             MouseButton::Left,
             window.listener_for(&arrastando, |estado, _, _, _| estado.0 = true),
@@ -102,7 +107,7 @@ pub fn como_barra_de_titulo(
 /// configurável no sistema (`AppleActionOnDoubleClick`: aumentar/reduzir,
 /// minimizar ou nada), e `titlebar_double_click` é o que consulta essa
 /// preferência. Maximizar à força seria o app decidindo por quem já decidiu.
-pub fn maximizar_ou_restaurar(window: &Window) {
+pub fn maximizar_ou_restaurar(window: &mut Window, _cx: &mut App) {
     #[cfg(target_os = "macos")]
     window.titlebar_double_click();
     #[cfg(not(target_os = "macos"))]
@@ -119,4 +124,110 @@ impl Render for Arrastando {
     fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
         div()
     }
+}
+
+/// Os botões de janela — minimizar, maximizar/restaurar e fechar.
+///
+/// # 🚨 Por que isto existe
+///
+/// *"O comportamento no Ubuntu 26 GNOME tá muito ruim, sem botão de fechar"*
+/// (dono, 19/set/2026). O GNOME não decora janela nenhuma (o porquê está no
+/// alto deste módulo), então **os botões que o operador procura no canto não
+/// existem** — quem os desenha tem de ser o app. Até aqui o `ui-gpui` desenhava
+/// nenhum: no Fedora e no Ubuntu a única saída era matar o processo.
+///
+/// Pior na **tela de entrada**, que não tem cabeçalho: ali não havia barra, nem
+/// botão, nem gesto — a janela não fechava nem se movia, e é a primeira coisa
+/// que o app mostra.
+///
+/// # No macOS e no Windows isto não desenha nada, de propósito
+///
+/// Lá o sistema já põe os seus logo acima do cabeçalho. Desenhar os nossos
+/// deixaria **dois** jogos de botão na mesma janela, e o de baixo faria o que o
+/// de cima já faz. Por isso a função devolve um `div()` vazio fora do Linux, em
+/// vez de o chamador lembrar de um `cfg!` em cada lugar.
+///
+/// `prefixo` entra no id de cada botão: duas barras na mesma janela com o mesmo
+/// id dividiriam estado sem querer.
+pub fn controles(prefixo: &'static str, cor: Hsla, window: &Window, cx: &App) -> Div {
+    if !cfg!(target_os = "linux") {
+        return div();
+    }
+
+    // O fundo do hover: cinza do tema nos dois primeiros, vermelho no fechar —
+    // o mesmo contrato visual de qualquer barra de título, e o que distingue o
+    // botão que **encerra** dos que só mudam o tamanho.
+    let realce = cx.theme().secondary_hover;
+    let perigo = cx.theme().danger;
+
+    let (icone_do_meio, dica_do_meio) = if window.is_maximized() {
+        (Icone::Minimize2, "Restaurar")
+    } else {
+        (Icone::Maximize2, "Maximizar")
+    };
+
+    div()
+        .flex()
+        .flex_none()
+        .items_center()
+        .child(botao(
+            SharedString::from(format!("{prefixo}-minimizar")),
+            Icone::Minus,
+            "Minimizar",
+            cor,
+            realce,
+            |window, _| window.minimize_window(),
+        ))
+        .child(botao(
+            SharedString::from(format!("{prefixo}-maximizar")),
+            icone_do_meio,
+            dica_do_meio,
+            cor,
+            realce,
+            maximizar_ou_restaurar,
+        ))
+        .child(botao(
+            SharedString::from(format!("{prefixo}-fechar")),
+            Icone::X,
+            "Fechar",
+            cor,
+            perigo,
+            // 🚨 `remove_window`, e não `quit`: fechar a janela principal é o
+            // gesto de sair do app, mas quem decide o que fazer com as outras
+            // (a segunda tela, um modal do sistema) é o GPUI.
+            |window, _| window.remove_window(),
+        ))
+}
+
+/// Um botão da barra: o quadrado com o ícone, o realce e o clique.
+fn botao(
+    id: impl Into<gpui::ElementId>,
+    icone: Icone,
+    dica: &'static str,
+    cor: Hsla,
+    realce: Hsla,
+    acao: impl Fn(&mut Window, &mut App) + 'static,
+) -> Stateful<Div> {
+    div()
+        .id(id)
+        .flex()
+        .flex_none()
+        .items_center()
+        .justify_center()
+        .w(px(34.))
+        .h(px(28.))
+        .rounded(px(4.))
+        .cursor_pointer()
+        .text_color(cor)
+        .hover(move |s| s.bg(realce))
+        .tooltip(move |window, cx| gpui_component::tooltip::Tooltip::new(dica).build(window, cx))
+        // 🔑 O clique **para aqui**. Estes botões moram dentro da barra que
+        // arrasta a janela: sem isto, apertar "fechar" começaria um arrasto e o
+        // compositor levaria o ponteiro embora antes do clique acontecer.
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        .on_click(move |_, window, cx| {
+            cx.stop_propagation();
+            acao(window, cx);
+        })
+        .child(Icon::new(icone).size(px(15.)))
 }

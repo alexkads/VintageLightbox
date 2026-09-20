@@ -357,8 +357,7 @@ async fn main() {
         importacao,
         tokio::runtime::Handle::current(),
     ));
-    let seletor: Arc<dyn SeletorDePasta> =
-        Arc::new(SeletorNativo::novo(tokio::runtime::Handle::current()));
+    let seletor: Arc<dyn SeletorDePasta> = Arc::new(SeletorNativo::novo());
     let seletor_de_fotos: Arc<dyn ui_gpui::sessoes::arquivos::SeletorDeFotos> = Arc::new(
         ui_gpui::sessoes::arquivos::SeletorDeFotosNativo::novo(tokio::runtime::Handle::current()),
     );

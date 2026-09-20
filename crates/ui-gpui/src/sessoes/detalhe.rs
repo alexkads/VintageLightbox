@@ -2715,6 +2715,15 @@ impl Detalhe {
                     self.avisando,
                 ))
             })
+            // 🪟 A tela da sessão não tem o cabeçalho do app: no Linux os botões
+            // de janela têm de morar aqui, ou não existem enquanto ela estiver
+            // aberta — que é onde o operador passa o dia.
+            .child(crate::janela::controles(
+                "janela-galeria",
+                texto,
+                window,
+                cx,
+            ))
     }
 
     /// ✏️ O formulário dos dados do cliente — embutido sob o cabeçalho, como o
