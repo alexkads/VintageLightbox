@@ -1,0 +1,16 @@
+[package]
+name = "biblioteca-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "A biblioteca de fotos do VintageLightbox: a geometria da grade e a política das miniaturas — sem janela, sem GPU, sem rede"
+
+[lib]
+name = "biblioteca_core"
+path = "src/lib.rs"
+
+[dependencies]
+# Nada. É de propósito: este crate é aritmética e decisão, e é o que permite
+# que o desktop (GPUI), o navegador (wgpu) e os testes o usem sem carregar
+# renderizador nenhum junto.

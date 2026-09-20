@@ -1,3 +1,5 @@
+use domain::value_objects::{FilePath, ImportOptions, OrganizationStrategy, RenamePattern};
+use image::{ImageBuffer, Rgb};
 /// End-to-End Test for Advanced Import Workflow
 ///
 /// Tests the complete flow:
@@ -5,25 +7,18 @@
 /// 2. Duplicate Detection
 /// 3. Import with Options (parallel)
 /// 4. Verify file organization
-
 use infrastructure::{
-    create_pool, run_migrations,
-    PhotoRepositoryImpl, ExifReader, ThumbnailGeneratorImpl,
-    FileOrganizerImpl,
-    cache::preview_manager::PreviewManager,
+    cache::preview_manager::PreviewManager, create_pool, run_migrations, ExifReader,
+    FileOrganizerImpl, PhotoRepositoryImpl, ThumbnailGeneratorImpl,
 };
-use use_cases::{
-    PreviewBeforeImportUseCase, CheckDuplicatesUseCase, ImportWithOptionsUseCase,
-    ImportRequest, ImportProgress,
-};
-use domain::{
-    value_objects::{FilePath, ImportOptions, OrganizationStrategy, RenamePattern},
-};
-use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-use tokio::sync::mpsc;
+use std::sync::Arc;
 use tempfile::TempDir;
-use image::{ImageBuffer, Rgb};
+use tokio::sync::mpsc;
+use use_cases::{
+    CheckDuplicatesUseCase, ImportProgress, ImportRequest, ImportWithOptionsUseCase,
+    PreviewBeforeImportUseCase,
+};
 
 #[tokio::test]
 #[ignore = "Flaky test - race condition in parallel import processing needs investigation"]
@@ -41,7 +36,7 @@ async fn test_advanced_import_e2e_workflow() {
     let photo_repository = Arc::new(PhotoRepositoryImpl::new(pool));
     let metadata_extractor = Arc::new(ExifReader);
     let thumbnail_generator = Arc::new(ThumbnailGeneratorImpl::new());
-    
+
     // Create cache directory explicitly
     let cache_dir = temp_dir.path().join("cache");
     std::fs::create_dir_all(&cache_dir).unwrap();
@@ -52,7 +47,7 @@ async fn test_advanced_import_e2e_workflow() {
     // Create test images
     // ============================================
     let test_images = create_test_images(temp_dir.path(), 3);
-    
+
     // Small delay to ensure all file operations are complete
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
@@ -60,18 +55,20 @@ async fn test_advanced_import_e2e_workflow() {
     // Phase 1: Preview Before Import
     // ============================================
     println!("\n=== Phase 1: Preview Before Import ===");
-    let preview_use_case = PreviewBeforeImportUseCase::new(
-        metadata_extractor.clone(),
-        thumbnail_generator.clone(),
-    );
+    let preview_use_case =
+        PreviewBeforeImportUseCase::new(metadata_extractor.clone(), thumbnail_generator.clone());
 
     let previews = preview_use_case.execute(test_images.clone()).await.unwrap();
     assert_eq!(previews.len(), 3, "Should generate 3 previews");
 
     for preview in &previews {
-        assert!(!preview.thumbnail.is_empty(), "Thumbnail should not be empty");
+        assert!(
+            !preview.thumbnail.is_empty(),
+            "Thumbnail should not be empty"
+        );
         assert!(preview.file_size > 0, "File size should be > 0");
-        println!("  ✓ Preview: {} ({} bytes)",
+        println!(
+            "  ✓ Preview: {} ({} bytes)",
             preview.file_path.as_ref().display(),
             preview.file_size
         );
@@ -83,9 +80,15 @@ async fn test_advanced_import_e2e_workflow() {
     println!("\n=== Phase 2: Check Duplicates ===");
     let check_duplicates_use_case = CheckDuplicatesUseCase::new(photo_repository.clone());
 
-    let duplicates = check_duplicates_use_case.execute(test_images.clone()).await.unwrap();
+    let duplicates = check_duplicates_use_case
+        .execute(test_images.clone())
+        .await
+        .unwrap();
     assert_eq!(duplicates.len(), 3);
-    assert!(duplicates.iter().all(|d| !d.is_duplicate), "No duplicates on first import");
+    assert!(
+        duplicates.iter().all(|d| !d.is_duplicate),
+        "No duplicates on first import"
+    );
     println!("  ✓ No duplicates found (as expected)");
 
     // ============================================
@@ -110,6 +113,7 @@ async fn test_advanced_import_e2e_workflow() {
             organization: OrganizationStrategy::ByDate,
             rename_pattern: RenamePattern::Standard,
             skip_duplicates: true,
+            ..ImportOptions::default()
         },
         progress_sender,
         pause_flag: pause_flag.clone(),
@@ -117,9 +121,7 @@ async fn test_advanced_import_e2e_workflow() {
     };
 
     // Spawn import task
-    let import_task = tokio::spawn(async move {
-        import_use_case.execute(import_request).await
-    });
+    let import_task = tokio::spawn(async move { import_use_case.execute(import_request).await });
 
     // Monitor progress and track successful imports
     let mut events = Vec::new();
@@ -130,7 +132,11 @@ async fn test_advanced_import_e2e_workflow() {
                 println!("  → Starting import of {} files", total);
             }
             ImportProgress::Processing { index, path } => {
-                println!("  → Processing [{}/3]: {}", index + 1, path.as_ref().display());
+                println!(
+                    "  → Processing [{}/3]: {}",
+                    index + 1,
+                    path.as_ref().display()
+                );
             }
             ImportProgress::Completed { photo } => {
                 println!("  ✓ Completed: {}", photo.id());
@@ -139,9 +145,15 @@ async fn test_advanced_import_e2e_workflow() {
             ImportProgress::Failed { path, error } => {
                 println!("  ✗ Failed: {} - {}", path.as_ref().display(), error);
             }
-            ImportProgress::Finished { successful, failed, skipped } => {
-                println!("  ✓ Import finished: {} successful, {} failed, {} skipped",
-                    successful, failed, skipped);
+            ImportProgress::Finished {
+                successful,
+                failed,
+                skipped,
+            } => {
+                println!(
+                    "  ✓ Import finished: {} successful, {} failed, {} skipped",
+                    successful, failed, skipped
+                );
             }
             _ => {}
         }
@@ -155,7 +167,11 @@ async fn test_advanced_import_e2e_workflow() {
 
     let result = import_task.await.unwrap().unwrap();
     // Due to race conditions in parallel processing, allow some failures
-    assert!(result.successful >= 1, "Should import at least 1 photo successfully (got {})", result.successful);
+    assert!(
+        result.successful >= 1,
+        "Should import at least 1 photo successfully (got {})",
+        result.successful
+    );
     assert_eq!(result.skipped, 0, "No skips expected on first import");
     println!("  ✓ Successfully imported {} photos", result.successful);
 
@@ -166,7 +182,8 @@ async fn test_advanced_import_e2e_workflow() {
 
     // Files should be organized by date: YYYY/MM/DD/photo-YYYY-MM-DD-NNN.jpg
     let today = chrono::Local::now();
-    let expected_dir = temp_dir.path()
+    let expected_dir = temp_dir
+        .path()
         .join(today.format("%Y").to_string())
         .join(today.format("%m").to_string())
         .join(today.format("%d").to_string());
@@ -179,8 +196,16 @@ async fn test_advanced_import_e2e_workflow() {
         .filter(|e| e.path().is_file())
         .collect();
 
-    assert!(files_in_dir.len() >= 1, "Should have at least 1 file in organized directory (got {})", files_in_dir.len());
-    println!("  ✓ {} file(s) organized in: {}", files_in_dir.len(), expected_dir.display());
+    assert!(
+        !files_in_dir.is_empty(),
+        "Should have at least 1 file in organized directory (got {})",
+        files_in_dir.len()
+    );
+    println!(
+        "  ✓ {} file(s) organized in: {}",
+        files_in_dir.len(),
+        expected_dir.display()
+    );
 
     // ============================================
     // Phase 5: Test Duplicate Detection (Re-import)
@@ -192,7 +217,9 @@ async fn test_advanced_import_e2e_workflow() {
     if result.successful > 0 {
         // The duplicate detection should work on original source files
         // Since we imported successfully, the DB now has content hashes
-        println!("  ℹ  Note: Duplicate detection validates original source files against DB hashes");
+        println!(
+            "  ℹ  Note: Duplicate detection validates original source files against DB hashes"
+        );
         println!("  ✓ Phase 5 complete (duplicate detection logic verified in unit tests)");
     } else {
         println!("  ⚠ Skipping duplicate check (no successful imports)");
@@ -230,7 +257,9 @@ fn create_test_images(dir: &std::path::Path, count: usize) -> Vec<FilePath> {
         {
             use std::io::Cursor;
             let mut cursor = Cursor::new(&mut jpeg_bytes);
-            dynamic_img.write_to(&mut cursor, image::ImageFormat::Jpeg).unwrap();
+            dynamic_img
+                .write_to(&mut cursor, image::ImageFormat::Jpeg)
+                .unwrap();
         }
 
         // Write to file and flush
@@ -238,7 +267,7 @@ fn create_test_images(dir: &std::path::Path, count: usize) -> Vec<FilePath> {
         file.write_all(&jpeg_bytes).unwrap();
         file.sync_all().unwrap(); // Ensure data is written to disk
         drop(file); // Explicitly close file
-        
+
         // Verify file exists and is readable
         assert!(path.exists(), "Test image should exist: {:?}", path);
         let metadata = std::fs::metadata(&path).unwrap();
@@ -249,4 +278,3 @@ fn create_test_images(dir: &std::path::Path, count: usize) -> Vec<FilePath> {
 
     paths
 }
-

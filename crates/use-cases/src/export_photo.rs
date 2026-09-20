@@ -1,8 +1,8 @@
-use std::sync::Arc;
 use domain::repositories::PhotoRepository;
 use domain::services::ImageExporter;
-use domain::value_objects::{PhotoId, FilePath};
+use domain::value_objects::{ExportOptions, FilePath, PhotoId};
 use domain::DomainResult;
+use std::sync::Arc;
 
 pub struct ExportPhotoUseCase {
     photo_repository: Arc<dyn PhotoRepository>,
@@ -20,15 +20,25 @@ impl ExportPhotoUseCase {
         }
     }
 
-    pub async fn execute(&self, id: PhotoId, output_path: String) -> DomainResult<()> {
+    pub async fn execute(
+        &self,
+        id: PhotoId,
+        output_path: String,
+        options: &ExportOptions,
+    ) -> DomainResult<()> {
         // 1. Fetch photo
-        let photo = self.photo_repository.find_by_id(&id).await?
-            .ok_or_else(|| domain::DomainError::PhotoNotFound)?;
-        
+        let photo = self
+            .photo_repository
+            .find_by_id(&id)
+            .await?
+            .ok_or(domain::DomainError::PhotoNotFound)?;
+
         // 2. Validate output path (basic)
         let output_path_vo = FilePath::new(output_path)?;
 
         // 3. Export
-        self.image_exporter.export(&photo, &output_path_vo).await
+        self.image_exporter
+            .export(&photo, &output_path_vo, options)
+            .await
     }
 }

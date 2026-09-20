@@ -1,5 +1,17 @@
 # Requisitos do Sistema - VintageLightbox
 
+
+> ⚠️ **Isto é a especificação escrita antes do código, e descreve o alvo — não o estado.** Ela
+> continua valendo como alvo: o objetivo é [substituir o Lightroom no fluxo do
+> estúdio](00-OBJETIVO.md), e estes requisitos são o que isso quer dizer em detalhe.
+>
+> 🚨 **Para saber o que existe, leia [`PARIDADE-LIGHTROOM.md`](PARIDADE-LIGHTROOM.md)** — a lista
+> medida do código, com três estados: funciona, promete e não faz, e não existe. Este documento não
+> distingue os três, e ler "62 requisitos funcionais" como "62 coisas prontas" já é um erro fácil de
+> cometer.
+>
+> ⚠️ Onde ele diz **Slint** ou **egui**, a interface hoje é **GPUI**.
+
 ## Visão Geral
 VintageLightbox é uma aplicação multiplataforma de gerenciamento e edição de fotos profissionais, similar ao Adobe Lightroom, desenvolvida em Rust com interface gráfica Slint.
 

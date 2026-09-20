@@ -2,14 +2,14 @@
 //!
 //! Extrai metadados EXIF de arquivos de imagem.
 
-use std::path::Path;
-use std::fs::File;
+use async_trait::async_trait;
 use domain::{
-    value_objects::{FilePath, PhotoMetadata},
     services::MetadataExtractor,
+    value_objects::{FilePath, PhotoMetadata},
     DomainResult,
 };
-use async_trait::async_trait;
+use std::fs::File;
+use std::path::Path;
 
 /// Leitor de metadados EXIF
 pub struct ExifReader;
@@ -28,7 +28,7 @@ impl ExifReader {
 
         let mut bufreader = std::io::BufReader::new(&file);
         let exifreader = exif::Reader::new();
-        
+
         // Se falhar ao ler EXIF, retorna metadados vazios em vez de erro
         // Isso permite importar imagens sem EXIF
         let Ok(exif_data) = exifreader.read_from_container(&mut bufreader) else {
@@ -47,13 +47,52 @@ impl ExifReader {
             metadata.camera_make = Some(field.display_value().to_string());
         }
 
-        // Extrair data/hora
-        if let Some(field) = exif_data.get_field(exif::Tag::DateTime, exif::In::PRIMARY) {
-            metadata.date_time = Some(field.display_value().to_string());
+        // Extrair a data/hora **do disparo**, e não a do arquivo.
+        //
+        // 🚨 **A ordem das três tags é a correção de 20/set/2026.** Até então
+        // lia-se só `DateTime` — a tag do IFD0, que é *quando o arquivo foi
+        // escrito pela última vez*. Num ensaio exportado do Lightroom ela é a
+        // hora da exportação, igual em todas as fotos: a grade ordenada por
+        // "Hora de captura" empatava tudo e caía no desempate, e o ensaio
+        // chegava ao site fora da ordem em que foi fotografado.
+        //
+        // - `DateTimeOriginal` é o disparo — a única que responde a pergunta;
+        // - `DateTimeDigitized` é quando virou arquivo (iguais numa digital,
+        //   diferentes num negativo escaneado);
+        // - `DateTime` fica como último recurso, porque um arquivo tocado por
+        //   qualquer programa a perde.
+        for tag in [
+            exif::Tag::DateTimeOriginal,
+            exif::Tag::DateTimeDigitized,
+            exif::Tag::DateTime,
+        ] {
+            if let Some(field) = exif_data.get_field(tag, exif::In::PRIMARY) {
+                metadata.date_time = Some(field.display_value().to_string());
+                break;
+            }
+        }
+
+        // O subsegundo do disparo, que é o que desempata uma rajada — ver
+        // `PhotoMetadata::chave_de_captura`. Segue a data escolhida acima.
+        for tag in [
+            exif::Tag::SubSecTimeOriginal,
+            exif::Tag::SubSecTimeDigitized,
+            exif::Tag::SubSecTime,
+        ] {
+            if let Some(field) = exif_data.get_field(tag, exif::In::PRIMARY) {
+                let bruto = field.display_value().to_string();
+                let digitos: String = bruto.chars().filter(char::is_ascii_digit).collect();
+                if !digitos.is_empty() {
+                    metadata.sub_sec = Some(digitos);
+                    break;
+                }
+            }
         }
 
         // Extrair ISO
-        if let Some(field) = exif_data.get_field(exif::Tag::PhotographicSensitivity, exif::In::PRIMARY) {
+        if let Some(field) =
+            exif_data.get_field(exif::Tag::PhotographicSensitivity, exif::In::PRIMARY)
+        {
             if let exif::Value::Short(ref v) = field.value {
                 if !v.is_empty() {
                     metadata.iso = Some(v[0] as u32);
@@ -108,7 +147,7 @@ impl ExifReader {
     pub fn has_exif(&self, path: &Path) -> bool {
         // Tenta ler e vê se algum campo foi preenchido
         if let Ok(metadata) = self.read_metadata(path) {
-             metadata.camera_model.is_some() || metadata.iso.is_some()
+            metadata.camera_model.is_some() || metadata.iso.is_some()
         } else {
             false
         }
@@ -138,7 +177,7 @@ mod tests {
     // Helper para criar um arquivo JPEG mínimo com EXIF
     fn create_test_jpeg_with_exif() -> NamedTempFile {
         let mut file = NamedTempFile::new().unwrap();
-        
+
         // JPEG mínimo com marcador EXIF
         let jpeg_data = vec![
             0xFF, 0xD8, // SOI (Start of Image)
@@ -146,10 +185,9 @@ mod tests {
             0x00, 0x10, // APP1 length (16 bytes)
             0x45, 0x78, 0x69, 0x66, 0x00, 0x00, // "Exif\0\0"
             // Minimal TIFF header
-            0x49, 0x49, 0x2A, 0x00, 0x08, 0x00, 0x00, 0x00,
-            0xFF, 0xD9, // EOI (End of Image)
+            0x49, 0x49, 0x2A, 0x00, 0x08, 0x00, 0x00, 0x00, 0xFF, 0xD9, // EOI (End of Image)
         ];
-        
+
         file.write_all(&jpeg_data).unwrap();
         file.flush().unwrap();
         file
@@ -157,8 +195,10 @@ mod tests {
 
     #[test]
     fn test_exif_reader_creation() {
+        // O que este teste realmente prova é que `new()` não entra em pânico —
+        // o `assert!(true)` que estava aqui não afirmava nada e escondia isso.
+        // Construir e descartar já é a afirmação inteira.
         let _reader = ExifReader::new();
-        assert!(true); // Just test instantiation
     }
 
     #[test]
@@ -172,9 +212,9 @@ mod tests {
     fn test_read_metadata_from_valid_jpeg() {
         let reader = ExifReader::new();
         let file = create_test_jpeg_with_exif();
-        
+
         let result = reader.read_metadata(file.path());
-        
+
         match result {
             Ok(metadata) => {
                 assert!(metadata.camera_model.is_none() || metadata.camera_model.is_some());

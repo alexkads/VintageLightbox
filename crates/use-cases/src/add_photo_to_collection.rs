@@ -7,7 +7,7 @@ use domain::{
     entities::Collection,
     repositories::{CollectionRepository, PhotoRepository},
     value_objects::{CollectionId, PhotoId},
-    DomainResult, DomainError,
+    DomainError, DomainResult,
 };
 use std::sync::Arc;
 
@@ -30,7 +30,11 @@ impl AddPhotoToCollectionUseCase {
     }
 
     /// Adiciona uma foto a uma coleção
-    pub async fn execute(&self, collection_id: CollectionId, photo_id: PhotoId) -> DomainResult<Collection> {
+    pub async fn execute(
+        &self,
+        collection_id: CollectionId,
+        photo_id: PhotoId,
+    ) -> DomainResult<Collection> {
         // Verificar se a foto existe
         let photo_exists = self.photo_repository.exists(&photo_id).await?;
         if !photo_exists {
@@ -38,9 +42,11 @@ impl AddPhotoToCollectionUseCase {
         }
 
         // Buscar coleção
-        let collection_option = self.collection_repository.find_by_id(&collection_id).await?;
-        let mut collection = collection_option
-            .ok_or(DomainError::CollectionNotFound)?;
+        let collection_option = self
+            .collection_repository
+            .find_by_id(&collection_id)
+            .await?;
+        let mut collection = collection_option.ok_or(DomainError::CollectionNotFound)?;
 
         // Adicionar foto à coleção
         collection.add_photo(photo_id);
@@ -94,10 +100,10 @@ mod tests {
     async fn test_add_photo_to_collection_success() {
         // Arrange
         let collection = Collection::new("My Collection");
-        let collection_id = collection.id().clone();
+        let collection_id = *collection.id();
 
         let photo = Photo::new(FilePath::new("/photos/test.jpg").unwrap());
-        let photo_id = photo.id().clone();
+        let photo_id = photo.id();
 
         let mut mock_photo_repo = MockPhotoRepo::new();
         let mut mock_collection_repo = MockCollectionRepo::new();
@@ -105,7 +111,7 @@ mod tests {
         // Mock photo exists
         mock_photo_repo
             .expect_exists()
-            .with(eq(photo_id.clone()))
+            .with(eq(photo_id))
             .times(1)
             .returning(|_| Ok(true));
 
@@ -113,7 +119,7 @@ mod tests {
         let collection_clone = collection.clone();
         mock_collection_repo
             .expect_find_by_id()
-            .with(eq(collection_id.clone()))
+            .with(eq(collection_id))
             .times(1)
             .returning(move |_| Ok(Some(collection_clone.clone())));
 
@@ -129,7 +135,7 @@ mod tests {
         );
 
         // Act
-        let result = use_case.execute(collection_id, photo_id.clone()).await;
+        let result = use_case.execute(collection_id, photo_id).await;
 
         // Assert
         assert!(result.is_ok());
@@ -150,7 +156,7 @@ mod tests {
         // Mock photo does not exist
         mock_photo_repo
             .expect_exists()
-            .with(eq(photo_id.clone()))
+            .with(eq(photo_id))
             .times(1)
             .returning(|_| Ok(false));
 
@@ -165,7 +171,7 @@ mod tests {
         // Assert
         assert!(result.is_err());
         match result {
-            Err(DomainError::PhotoNotFound) => {},
+            Err(DomainError::PhotoNotFound) => {}
             _ => panic!("Expected PhotoNotFound error"),
         }
     }
@@ -202,7 +208,7 @@ mod tests {
         // Assert
         assert!(result.is_err());
         match result {
-            Err(DomainError::CollectionNotFound) => {},
+            Err(DomainError::CollectionNotFound) => {}
             _ => panic!("Expected CollectionNotFound error"),
         }
     }
@@ -211,7 +217,7 @@ mod tests {
     async fn test_add_multiple_photos_to_collection() {
         // Arrange
         let collection = Collection::new("My Collection");
-        let collection_id = collection.id().clone();
+        let collection_id = *collection.id();
 
         let photo1_id = PhotoId::new();
         let photo2_id = PhotoId::new();
@@ -257,7 +263,7 @@ mod tests {
         );
 
         // Act
-        let result1 = use_case.execute(collection_id.clone(), photo1_id).await;
+        let result1 = use_case.execute(collection_id, photo1_id).await;
         let result2 = use_case.execute(collection_id, photo2_id).await;
 
         // Assert
@@ -271,8 +277,8 @@ mod tests {
         // Arrange
         let mut collection = Collection::new("My Collection");
         let photo_id = PhotoId::new();
-        collection.add_photo(photo_id.clone());
-        let collection_id = collection.id().clone();
+        collection.add_photo(photo_id);
+        let collection_id = *collection.id();
 
         let mut mock_photo_repo = MockPhotoRepo::new();
         let mut mock_collection_repo = MockCollectionRepo::new();
@@ -302,7 +308,7 @@ mod tests {
         );
 
         // Act
-        let result = use_case.execute(collection_id, photo_id.clone()).await;
+        let result = use_case.execute(collection_id, photo_id).await;
 
         // Assert - deve ter sucesso, mas não duplicar
         assert!(result.is_ok());

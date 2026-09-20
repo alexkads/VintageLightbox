@@ -11,6 +11,21 @@ use domain::{
 };
 use sqlx::{Row, SqlitePool};
 
+/// O que põe uma foto do catálogo na ordem do ensaio: a chave do disparo e o
+/// nome que a câmera deu.
+///
+/// 🔑 **O nome é o `file_name`, e não o do disco.** O organizador renomeia tudo
+/// para `photo-AAAA-MM-DD-NNN` na importação, em ordem de chegada; desempatar
+/// por ele devolveria justamente a ordem de importação que esta função existe
+/// para deixar de usar.
+fn chave_da_foto(foto: &Photo) -> (String, String) {
+    let captura = foto
+        .metadata()
+        .and_then(|m| m.chave_de_captura())
+        .unwrap_or_default();
+    (captura, foto.file_name().unwrap_or_default().to_string())
+}
+
 /// Implementação SQLite do PhotoRepository
 pub struct PhotoRepositoryImpl {
     pool: SqlitePool,
@@ -27,14 +42,14 @@ impl PhotoRepositoryImpl {
         use chrono::{DateTime, Utc};
         use domain::value_objects::PhotoMetadata;
 
-        let id_str: String = row.try_get("id").map_err(|e| {
-            DomainError::InvalidOperation(format!("Failed to get id: {}", e))
-        })?;
-        
+        let id_str: String = row
+            .try_get("id")
+            .map_err(|e| DomainError::InvalidOperation(format!("Failed to get id: {}", e)))?;
+
         let file_path_str: String = row.try_get("file_path").map_err(|e| {
             DomainError::InvalidOperation(format!("Failed to get file_path: {}", e))
         })?;
-        
+
         let imported_at_str: String = row.try_get("imported_at").map_err(|e| {
             DomainError::InvalidOperation(format!("Failed to get imported_at: {}", e))
         })?;
@@ -46,28 +61,206 @@ impl PhotoRepositoryImpl {
         let rating_val: Option<i64> = row.try_get("rating").ok();
         let color_label_str: Option<String> = row.try_get("color_label").ok();
         let flag_val: Option<i32> = row.try_get("flag").ok();
+        let comprada_em_str: Option<String> = row.try_get("comprada_em").ok();
+        let pos_venda_foto_id: Option<String> = row.try_get("pos_venda_foto_id").ok().flatten();
+        let sessao_id: Option<String> = row.try_get("sessao_id").ok().flatten();
+        // ⚠️ `try_get(...).ok().flatten()`, como as outras colunas novas: uma
+        // coluna que ainda não existe no banco de alguém não pode derrubar a
+        // leitura do catálogo inteiro.
+        let nome_original: Option<String> = row.try_get("nome_original").ok().flatten();
+        let receita: Option<String> = row.try_get("edit_receita").ok().flatten();
         let is_edited: bool = row.try_get("is_edited").unwrap_or(false);
         let thumbnail_path_str: Option<String> = row.try_get("thumbnail_path").ok();
         let preview_path_str: Option<String> = row.try_get("preview_path").ok();
-        let edit_exposure: Option<f32> = row.try_get::<Option<f32>, _>("edit_exposure").unwrap_or(None);
-        let edit_contrast: Option<f32> = row.try_get::<Option<f32>, _>("edit_contrast").unwrap_or(None);
-        
-        let edit_temperature: Option<f32> = row.try_get::<Option<f32>, _>("edit_temperature").unwrap_or(None);
+        let edit_exposure: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_exposure")
+            .unwrap_or(None);
+        let edit_contrast: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_contrast")
+            .unwrap_or(None);
+
+        let edit_temperature: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_temperature")
+            .unwrap_or(None);
         let edit_tint: Option<f32> = row.try_get::<Option<f32>, _>("edit_tint").unwrap_or(None);
-        let edit_highlights: Option<f32> = row.try_get::<Option<f32>, _>("edit_highlights").unwrap_or(None);
-        let edit_shadows: Option<f32> = row.try_get::<Option<f32>, _>("edit_shadows").unwrap_or(None);
+        let edit_highlights: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_highlights")
+            .unwrap_or(None);
+        let edit_shadows: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_shadows")
+            .unwrap_or(None);
         let edit_whites: Option<f32> = row.try_get::<Option<f32>, _>("edit_whites").unwrap_or(None);
         let edit_blacks: Option<f32> = row.try_get::<Option<f32>, _>("edit_blacks").unwrap_or(None);
-        let edit_clarity: Option<f32> = row.try_get::<Option<f32>, _>("edit_clarity").unwrap_or(None);
-        let edit_vibrance: Option<f32> = row.try_get::<Option<f32>, _>("edit_vibrance").unwrap_or(None);
-        let edit_saturation: Option<f32> = row.try_get::<Option<f32>, _>("edit_saturation").unwrap_or(None);
-        let edit_tone_curve_shadows: Option<f32> = row.try_get::<Option<f32>, _>("edit_tone_curve_shadows").unwrap_or(None);
-        let edit_tone_curve_darks: Option<f32> = row.try_get::<Option<f32>, _>("edit_tone_curve_darks").unwrap_or(None);
-        let edit_tone_curve_lights: Option<f32> = row.try_get::<Option<f32>, _>("edit_tone_curve_lights").unwrap_or(None);
-        let edit_tone_curve_highlights: Option<f32> = row.try_get::<Option<f32>, _>("edit_tone_curve_highlights").unwrap_or(None);
+        let edit_clarity: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_clarity")
+            .unwrap_or(None);
+        let edit_vibrance: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_vibrance")
+            .unwrap_or(None);
+        let edit_saturation: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_saturation")
+            .unwrap_or(None);
+        let edit_tone_curve_shadows: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_tone_curve_shadows")
+            .unwrap_or(None);
+        let edit_tone_curve_darks: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_tone_curve_darks")
+            .unwrap_or(None);
+        let edit_tone_curve_lights: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_tone_curve_lights")
+            .unwrap_or(None);
+        let edit_tone_curve_highlights: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_tone_curve_highlights")
+            .unwrap_or(None);
         let content_hash: Option<String> = row.try_get("content_hash").ok();
 
+        // HSL saturation fields
+        let edit_hsl_red_sat: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_hsl_red_sat")
+            .unwrap_or(None);
+        let edit_hsl_orange_sat: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_hsl_orange_sat")
+            .unwrap_or(None);
+        let edit_hsl_yellow_sat: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_hsl_yellow_sat")
+            .unwrap_or(None);
+        let edit_hsl_green_sat: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_hsl_green_sat")
+            .unwrap_or(None);
+        let edit_hsl_aqua_sat: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_hsl_aqua_sat")
+            .unwrap_or(None);
+        let edit_hsl_blue_sat: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_hsl_blue_sat")
+            .unwrap_or(None);
+        let edit_hsl_purple_sat: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_hsl_purple_sat")
+            .unwrap_or(None);
+        let edit_hsl_magenta_sat: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_hsl_magenta_sat")
+            .unwrap_or(None);
 
+        // HSL Hue fields
+        let edit_hsl_red_hue: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_hsl_red_hue")
+            .unwrap_or(None);
+        let edit_hsl_orange_hue: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_hsl_orange_hue")
+            .unwrap_or(None);
+        let edit_hsl_yellow_hue: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_hsl_yellow_hue")
+            .unwrap_or(None);
+        let edit_hsl_green_hue: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_hsl_green_hue")
+            .unwrap_or(None);
+        let edit_hsl_aqua_hue: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_hsl_aqua_hue")
+            .unwrap_or(None);
+        let edit_hsl_blue_hue: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_hsl_blue_hue")
+            .unwrap_or(None);
+        let edit_hsl_purple_hue: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_hsl_purple_hue")
+            .unwrap_or(None);
+        let edit_hsl_magenta_hue: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_hsl_magenta_hue")
+            .unwrap_or(None);
+
+        // HSL Luminance fields
+        let edit_hsl_red_lum: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_hsl_red_lum")
+            .unwrap_or(None);
+        let edit_hsl_orange_lum: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_hsl_orange_lum")
+            .unwrap_or(None);
+        let edit_hsl_yellow_lum: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_hsl_yellow_lum")
+            .unwrap_or(None);
+        let edit_hsl_green_lum: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_hsl_green_lum")
+            .unwrap_or(None);
+        let edit_hsl_aqua_lum: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_hsl_aqua_lum")
+            .unwrap_or(None);
+        let edit_hsl_blue_lum: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_hsl_blue_lum")
+            .unwrap_or(None);
+        let edit_hsl_purple_lum: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_hsl_purple_lum")
+            .unwrap_or(None);
+        let edit_hsl_magenta_lum: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_hsl_magenta_lum")
+            .unwrap_or(None);
+
+        // Lens Correction fields
+        let edit_lens_distortion: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_lens_distortion")
+            .unwrap_or(None);
+        let edit_lens_vignette_amount: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_lens_vignette_amount")
+            .unwrap_or(None);
+        let edit_lens_vignette_midpoint: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_lens_vignette_midpoint")
+            .unwrap_or(None);
+        // Noise Reduction fields
+        let edit_nr_luminance: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_nr_luminance")
+            .unwrap_or(None);
+        let edit_nr_color: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_nr_color")
+            .unwrap_or(None);
+        // Sharpening fields
+        let edit_sharpen_amount: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_sharpen_amount")
+            .unwrap_or(None);
+        let edit_sharpen_radius: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_sharpen_radius")
+            .unwrap_or(None);
+
+        // Tonalização e grão
+        let edit_split_shadow_hue: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_split_shadow_hue")
+            .unwrap_or(None);
+        let edit_split_shadow_sat: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_split_shadow_sat")
+            .unwrap_or(None);
+        let edit_split_highlight_hue: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_split_highlight_hue")
+            .unwrap_or(None);
+        let edit_split_highlight_sat: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_split_highlight_sat")
+            .unwrap_or(None);
+        let edit_split_balance: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_split_balance")
+            .unwrap_or(None);
+        let edit_grain_amount: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_grain_amount")
+            .unwrap_or(None);
+        let edit_grain_size: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_grain_size")
+            .unwrap_or(None);
+
+        // Crop fields
+        let edit_crop_x: Option<f32> = row.try_get::<Option<f32>, _>("edit_crop_x").unwrap_or(None);
+        let edit_crop_y: Option<f32> = row.try_get::<Option<f32>, _>("edit_crop_y").unwrap_or(None);
+        let edit_crop_width: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_crop_width")
+            .unwrap_or(None);
+        let edit_crop_height: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_crop_height")
+            .unwrap_or(None);
+        let edit_crop_rotation: Option<i32> = row
+            .try_get::<Option<i32>, _>("edit_crop_rotation")
+            .unwrap_or(None);
+        let edit_crop_angle: Option<f32> = row
+            .try_get::<Option<f32>, _>("edit_crop_angle")
+            .unwrap_or(None);
+        let edit_crop_flip_h: Option<bool> = row
+            .try_get::<Option<bool>, _>("edit_crop_flip_h")
+            .unwrap_or(None);
+        let edit_crop_flip_v: Option<bool> = row
+            .try_get::<Option<bool>, _>("edit_crop_flip_v")
+            .unwrap_or(None);
 
         // Metadata persistido como JSON string
         let metadata_str: Option<String> = row.try_get("metadata").ok();
@@ -82,6 +275,11 @@ impl PhotoRepositoryImpl {
         let rating = rating_val.and_then(|v| Rating::new(v as u8).ok());
         let color_label = color_label_str.and_then(|s| ColorLabel::from_name(&s).ok());
         let flag = flag_val.and_then(Flag::from_code);
+        // Data ilegível vira "não comprada", e não erro: a linha inteira não pode
+        // sumir da grade por causa de uma coluna acessória.
+        let comprada_em = comprada_em_str
+            .and_then(|s| DateTime::parse_from_rfc3339(&s).ok())
+            .map(|d| d.with_timezone(&Utc));
         let thumbnail_path = thumbnail_path_str.and_then(|s| FilePath::new(&s).ok());
         let preview_path = preview_path_str.and_then(|s| FilePath::new(&s).ok());
 
@@ -94,7 +292,7 @@ impl PhotoRepositoryImpl {
             .with_timezone(&Utc);
 
         // Reconstruct photo with all fields
-        Ok(Photo::reconstruct(
+        let mut photo = Photo::reconstruct(
             photo_id,
             file_path,
             imported_at,
@@ -103,6 +301,7 @@ impl PhotoRepositoryImpl {
             rating,
             color_label,
             flag,
+            comprada_em,
             is_edited,
             thumbnail_path,
             preview_path,
@@ -122,7 +321,61 @@ impl PhotoRepositoryImpl {
             edit_tone_curve_lights,
             edit_tone_curve_highlights,
             content_hash,
-        ))
+            edit_hsl_red_sat,
+            edit_hsl_orange_sat,
+            edit_hsl_yellow_sat,
+            edit_hsl_green_sat,
+            edit_hsl_aqua_sat,
+            edit_hsl_blue_sat,
+            edit_hsl_purple_sat,
+            edit_hsl_magenta_sat,
+            edit_hsl_red_hue,
+            edit_hsl_orange_hue,
+            edit_hsl_yellow_hue,
+            edit_hsl_green_hue,
+            edit_hsl_aqua_hue,
+            edit_hsl_blue_hue,
+            edit_hsl_purple_hue,
+            edit_hsl_magenta_hue,
+            edit_hsl_red_lum,
+            edit_hsl_orange_lum,
+            edit_hsl_yellow_lum,
+            edit_hsl_green_lum,
+            edit_hsl_aqua_lum,
+            edit_hsl_blue_lum,
+            edit_hsl_purple_lum,
+            edit_hsl_magenta_lum,
+            edit_lens_distortion,
+            edit_lens_vignette_amount,
+            edit_lens_vignette_midpoint,
+            edit_nr_luminance,
+            edit_nr_color,
+            edit_sharpen_amount,
+            edit_sharpen_radius,
+            edit_split_shadow_hue,
+            edit_split_shadow_sat,
+            edit_split_highlight_hue,
+            edit_split_highlight_sat,
+            edit_split_balance,
+            edit_grain_amount,
+            edit_grain_size,
+            edit_crop_x,
+            edit_crop_y,
+            edit_crop_width,
+            edit_crop_height,
+            edit_crop_rotation,
+            edit_crop_angle,
+            edit_crop_flip_h,
+            edit_crop_flip_v,
+        );
+
+        // O id remoto entra fora da lista posicional — ver o comentário em
+        // `Photo::reconstruct`.
+        photo.definir_id_no_site(pos_venda_foto_id);
+        photo.definir_sessao(sessao_id);
+        photo.definir_nome_original(nome_original);
+        photo.definir_receita(receita);
+        Ok(photo)
     }
 }
 
@@ -134,11 +387,20 @@ impl PhotoRepository for PhotoRepositoryImpl {
         let rating = photo.rating().map(|r| r.value() as i64);
         let color_label = photo.color_label().map(|c| c.name().to_string());
         let flag = photo.flag().map(|f| f.as_code());
+        let comprada_em = photo.comprada_em().map(|d| d.to_rfc3339());
+        let pos_venda_foto_id = photo.id_no_site().map(str::to_string);
+        let sessao_id = photo.sessao().map(str::to_string);
+        let nome_original = photo.nome_original().map(str::to_string);
+        let receita = photo.receita().map(str::to_string);
         let is_edited = photo.is_edited();
         let imported_at = photo.imported_at().to_rfc3339();
         let modified_at = photo.modified_at().to_rfc3339();
-        let thumbnail_path = photo.thumbnail_path().map(|p| p.to_string_lossy().to_string());
-        let preview_path = photo.preview_path().map(|p| p.to_string_lossy().to_string());
+        let thumbnail_path = photo
+            .thumbnail_path()
+            .map(|p| p.to_string_lossy().to_string());
+        let preview_path = photo
+            .preview_path()
+            .map(|p| p.to_string_lossy().to_string());
         let edit_exposure = photo.edit_exposure();
         let edit_contrast = photo.edit_contrast();
         let edit_temperature = photo.edit_temperature();
@@ -155,20 +417,68 @@ impl PhotoRepository for PhotoRepositoryImpl {
         let edit_tone_curve_lights = photo.edit_tone_curve_lights();
         let edit_tone_curve_highlights = photo.edit_tone_curve_highlights();
         let content_hash = photo.content_hash().map(|s| s.to_string());
+        // HSL saturation fields
+        let edit_hsl_red_sat = photo.edit_hsl_red_sat();
+        let edit_hsl_orange_sat = photo.edit_hsl_orange_sat();
+        let edit_hsl_yellow_sat = photo.edit_hsl_yellow_sat();
+        let edit_hsl_green_sat = photo.edit_hsl_green_sat();
+        let edit_hsl_aqua_sat = photo.edit_hsl_aqua_sat();
+        let edit_hsl_blue_sat = photo.edit_hsl_blue_sat();
+        let edit_hsl_purple_sat = photo.edit_hsl_purple_sat();
+        let edit_hsl_magenta_sat = photo.edit_hsl_magenta_sat();
+        // HSL Hue
+        let edit_hsl_red_hue = photo.edit_hsl_red_hue();
+        let edit_hsl_orange_hue = photo.edit_hsl_orange_hue();
+        let edit_hsl_yellow_hue = photo.edit_hsl_yellow_hue();
+        let edit_hsl_green_hue = photo.edit_hsl_green_hue();
+        let edit_hsl_aqua_hue = photo.edit_hsl_aqua_hue();
+        let edit_hsl_blue_hue = photo.edit_hsl_blue_hue();
+        let edit_hsl_purple_hue = photo.edit_hsl_purple_hue();
+        let edit_hsl_magenta_hue = photo.edit_hsl_magenta_hue();
+        // HSL Lum
+        let edit_hsl_red_lum = photo.edit_hsl_red_lum();
+        let edit_hsl_orange_lum = photo.edit_hsl_orange_lum();
+        let edit_hsl_yellow_lum = photo.edit_hsl_yellow_lum();
+        let edit_hsl_green_lum = photo.edit_hsl_green_lum();
+        let edit_hsl_aqua_lum = photo.edit_hsl_aqua_lum();
+        let edit_hsl_blue_lum = photo.edit_hsl_blue_lum();
+        let edit_hsl_purple_lum = photo.edit_hsl_purple_lum();
+        let edit_hsl_magenta_lum = photo.edit_hsl_magenta_lum();
+        // Lens
+        let edit_lens_distortion = photo.edit_lens_distortion();
+        let edit_lens_vignette_amount = photo.edit_lens_vignette_amount();
+        let edit_lens_vignette_midpoint = photo.edit_lens_vignette_midpoint();
+        // Noise Reduction fields
+        let edit_nr_luminance = photo.edit_nr_luminance();
+        let edit_nr_color = photo.edit_nr_color();
+        let edit_sharpen_amount = photo.edit_sharpen_amount();
+        let edit_sharpen_radius = photo.edit_sharpen_radius();
+        // Tonalização e grão
+        let edit_split_shadow_hue = photo.edit_split_shadow_hue();
+        let edit_split_shadow_sat = photo.edit_split_shadow_sat();
+        let edit_split_highlight_hue = photo.edit_split_highlight_hue();
+        let edit_split_highlight_sat = photo.edit_split_highlight_sat();
+        let edit_split_balance = photo.edit_split_balance();
+        let edit_grain_amount = photo.edit_grain_amount();
+        let edit_grain_size = photo.edit_grain_size();
 
         // Serializar metadata para JSON
-        let metadata = photo.metadata()
-            .and_then(|m| serde_json::to_string(m).ok());
+        let metadata = photo.metadata().and_then(|m| serde_json::to_string(m).ok());
 
         sqlx::query(
-            "INSERT INTO photos (id, file_path, rating, color_label, flag, is_edited, imported_at, modified_at, metadata, thumbnail_path, preview_path, edit_exposure, edit_contrast, edit_temperature, edit_tint, edit_highlights, edit_shadows, edit_whites, edit_blacks, edit_clarity, edit_vibrance, edit_saturation, edit_tone_curve_shadows, edit_tone_curve_darks, edit_tone_curve_lights, edit_tone_curve_highlights, content_hash)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO photos (id, file_path, rating, color_label, flag, comprada_em, pos_venda_foto_id, sessao_id, nome_original, edit_receita, is_edited, imported_at, modified_at, metadata, thumbnail_path, preview_path, edit_exposure, edit_contrast, edit_temperature, edit_tint, edit_highlights, edit_shadows, edit_whites, edit_blacks, edit_clarity, edit_vibrance, edit_saturation, edit_tone_curve_shadows, edit_tone_curve_darks, edit_tone_curve_lights, edit_tone_curve_highlights, content_hash, edit_hsl_red_sat, edit_hsl_orange_sat, edit_hsl_yellow_sat, edit_hsl_green_sat, edit_hsl_aqua_sat, edit_hsl_blue_sat, edit_hsl_purple_sat, edit_hsl_magenta_sat, edit_hsl_red_hue, edit_hsl_orange_hue, edit_hsl_yellow_hue, edit_hsl_green_hue, edit_hsl_aqua_hue, edit_hsl_blue_hue, edit_hsl_purple_hue, edit_hsl_magenta_hue, edit_hsl_red_lum, edit_hsl_orange_lum, edit_hsl_yellow_lum, edit_hsl_green_lum, edit_hsl_aqua_lum, edit_hsl_blue_lum, edit_hsl_purple_lum, edit_hsl_magenta_lum, edit_lens_distortion, edit_lens_vignette_amount, edit_lens_vignette_midpoint, edit_nr_luminance, edit_nr_color, edit_sharpen_amount, edit_sharpen_radius, edit_split_shadow_hue, edit_split_shadow_sat, edit_split_highlight_hue, edit_split_highlight_sat, edit_split_balance, edit_grain_amount, edit_grain_size, edit_crop_x, edit_crop_y, edit_crop_width, edit_crop_height, edit_crop_rotation, edit_crop_angle, edit_crop_flip_h, edit_crop_flip_v)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         .bind(&id)
         .bind(&file_path)
         .bind(rating)
         .bind(color_label)
         .bind(flag)
+        .bind(&comprada_em)
+        .bind(&pos_venda_foto_id)
+        .bind(&sessao_id)
+        .bind(&nome_original)
+        .bind(&receita)
         .bind(is_edited)
         .bind(&imported_at)
         .bind(&modified_at)
@@ -191,6 +501,57 @@ impl PhotoRepository for PhotoRepositoryImpl {
         .bind(edit_tone_curve_lights)
         .bind(edit_tone_curve_highlights)
         .bind(content_hash)
+        .bind(edit_hsl_red_sat)
+        .bind(edit_hsl_orange_sat)
+        .bind(edit_hsl_yellow_sat)
+        .bind(edit_hsl_green_sat)
+        .bind(edit_hsl_aqua_sat)
+        .bind(edit_hsl_blue_sat)
+        .bind(edit_hsl_purple_sat)
+        .bind(edit_hsl_magenta_sat)
+        .bind(edit_hsl_red_hue)
+        .bind(edit_hsl_orange_hue)
+        .bind(edit_hsl_yellow_hue)
+        .bind(edit_hsl_green_hue)
+        .bind(edit_hsl_aqua_hue)
+        .bind(edit_hsl_blue_hue)
+        .bind(edit_hsl_purple_hue)
+        .bind(edit_hsl_magenta_hue)
+        .bind(edit_hsl_red_lum)
+        .bind(edit_hsl_orange_lum)
+        .bind(edit_hsl_yellow_lum)
+        .bind(edit_hsl_green_lum)
+        .bind(edit_hsl_aqua_lum)
+        .bind(edit_hsl_blue_lum)
+        .bind(edit_hsl_purple_lum)
+        .bind(edit_hsl_magenta_lum)
+        .bind(edit_lens_distortion)
+        .bind(edit_lens_vignette_amount)
+        .bind(edit_lens_vignette_midpoint)
+        .bind(edit_nr_luminance)
+        .bind(edit_nr_color)
+        .bind(edit_sharpen_amount)
+        .bind(edit_sharpen_radius)
+        .bind(edit_split_shadow_hue)
+        .bind(edit_split_shadow_sat)
+        .bind(edit_split_highlight_hue)
+        .bind(edit_split_highlight_sat)
+        .bind(edit_split_balance)
+        .bind(edit_grain_amount)
+        .bind(edit_grain_size)
+        // 🚨 **Os oito do enquadramento faltavam aqui até 2026-09-06.** O
+        // `INSERT` lista 68 colunas e vinculava 60: os `edit_crop_*` ficavam com
+        // o `?` sem valor, que no SQLite entra como NULL. Passava despercebido
+        // porque foto recém-importada não tem enquadramento mesmo — mas `save`
+        // de uma foto que já tinha um o apagava, calado.
+        .bind(photo.edit_crop_x())
+        .bind(photo.edit_crop_y())
+        .bind(photo.edit_crop_width())
+        .bind(photo.edit_crop_height())
+        .bind(photo.edit_crop_rotation())
+        .bind(photo.edit_crop_angle())
+        .bind(photo.edit_crop_flip_h())
+        .bind(photo.edit_crop_flip_v())
         .execute(&self.pool)
         .await
         .map_err(|e| DomainError::InvalidOperation(format!("Failed to save photo: {}", e)))?;
@@ -213,15 +574,34 @@ impl PhotoRepository for PhotoRepositoryImpl {
         }
     }
 
+    /// Todas as fotos do catálogo, **na ordem em que foram fotografadas**.
+    ///
+    /// 🚨 **Era `ORDER BY imported_at DESC`** — a ordem da importação, de trás
+    /// para a frente (20/set/2026, pedido do dono: *"a sessão é temática, e a
+    /// ordem em que as fotografias são feitas conta"*). Isto alimenta a grade da
+    /// Biblioteca e a da sessão, então o ensaio chegava invertido à tela em que
+    /// se revela e se classifica — e, como a `ordem` que sobe para o site sai
+    /// daí, chegava invertido também à galeria do cliente. Duas importações
+    /// concorrentes ainda se intercalavam entre si, porque `imported_at` é
+    /// quando a linha foi gravada, não quando o disparo aconteceu.
+    ///
+    /// ⚠️ **A ordenação é em Rust, e não em SQL.** A data do disparo mora no
+    /// JSON de `metadata`, e o desempate por nome tem de ler os números como
+    /// números (`IMG_9` antes de `IMG_10`) — coisas que o `ORDER BY` do SQLite
+    /// não faz sem `json_extract` e nem com ele. O catálogo já é carregado
+    /// inteiro aqui; ordenar depois de ler não custa outra ida ao disco.
     async fn find_all(&self) -> DomainResult<Vec<Photo>> {
-        let rows = sqlx::query("SELECT * FROM photos ORDER BY imported_at DESC")
+        let rows = sqlx::query("SELECT * FROM photos")
             .fetch_all(&self.pool)
             .await
             .map_err(|e| DomainError::InvalidOperation(format!("Failed to fetch photos: {}", e)))?;
 
-        rows.iter()
-            .map(|row| Self::row_to_photo(row))
-            .collect()
+        let mut fotos: Vec<Photo> = rows
+            .iter()
+            .map(Self::row_to_photo)
+            .collect::<DomainResult<Vec<_>>>()?;
+        domain::ordem_da_captura::ordenar_pela_captura(&mut fotos, chave_da_foto);
+        Ok(fotos)
     }
 
     async fn update(&self, photo: &Photo) -> DomainResult<()> {
@@ -230,10 +610,19 @@ impl PhotoRepository for PhotoRepositoryImpl {
         let rating = photo.rating().map(|r| r.value() as i64);
         let color_label = photo.color_label().map(|c| c.name().to_string());
         let flag = photo.flag().map(|f| f.as_code());
+        let comprada_em = photo.comprada_em().map(|d| d.to_rfc3339());
+        let pos_venda_foto_id = photo.id_no_site().map(str::to_string);
+        let sessao_id = photo.sessao().map(str::to_string);
+        let nome_original = photo.nome_original().map(str::to_string);
+        let receita = photo.receita().map(str::to_string);
         let is_edited = photo.is_edited();
         let modified_at = photo.modified_at().to_rfc3339();
-        let thumbnail_path = photo.thumbnail_path().map(|p| p.to_string_lossy().to_string());
-        let preview_path = photo.preview_path().map(|p| p.to_string_lossy().to_string());
+        let thumbnail_path = photo
+            .thumbnail_path()
+            .map(|p| p.to_string_lossy().to_string());
+        let preview_path = photo
+            .preview_path()
+            .map(|p| p.to_string_lossy().to_string());
         let edit_exposure = photo.edit_exposure();
         let edit_contrast = photo.edit_contrast();
         let edit_temperature = photo.edit_temperature();
@@ -250,20 +639,78 @@ impl PhotoRepository for PhotoRepositoryImpl {
         let edit_tone_curve_lights = photo.edit_tone_curve_lights();
         let edit_tone_curve_highlights = photo.edit_tone_curve_highlights();
         let content_hash = photo.content_hash().map(|s| s.to_string());
+        // HSL saturation fields
+        let edit_hsl_red_sat = photo.edit_hsl_red_sat();
+        let edit_hsl_orange_sat = photo.edit_hsl_orange_sat();
+        let edit_hsl_yellow_sat = photo.edit_hsl_yellow_sat();
+        let edit_hsl_green_sat = photo.edit_hsl_green_sat();
+        let edit_hsl_aqua_sat = photo.edit_hsl_aqua_sat();
+        let edit_hsl_blue_sat = photo.edit_hsl_blue_sat();
+        let edit_hsl_purple_sat = photo.edit_hsl_purple_sat();
+        let edit_hsl_magenta_sat = photo.edit_hsl_magenta_sat();
+        // HSL Hue
+        let edit_hsl_red_hue = photo.edit_hsl_red_hue();
+        let edit_hsl_orange_hue = photo.edit_hsl_orange_hue();
+        let edit_hsl_yellow_hue = photo.edit_hsl_yellow_hue();
+        let edit_hsl_green_hue = photo.edit_hsl_green_hue();
+        let edit_hsl_aqua_hue = photo.edit_hsl_aqua_hue();
+        let edit_hsl_blue_hue = photo.edit_hsl_blue_hue();
+        let edit_hsl_purple_hue = photo.edit_hsl_purple_hue();
+        let edit_hsl_magenta_hue = photo.edit_hsl_magenta_hue();
+        // HSL Lum
+        let edit_hsl_red_lum = photo.edit_hsl_red_lum();
+        let edit_hsl_orange_lum = photo.edit_hsl_orange_lum();
+        let edit_hsl_yellow_lum = photo.edit_hsl_yellow_lum();
+        let edit_hsl_green_lum = photo.edit_hsl_green_lum();
+        let edit_hsl_aqua_lum = photo.edit_hsl_aqua_lum();
+        let edit_hsl_blue_lum = photo.edit_hsl_blue_lum();
+        let edit_hsl_purple_lum = photo.edit_hsl_purple_lum();
+        let edit_hsl_magenta_lum = photo.edit_hsl_magenta_lum();
+        // Lens
+        let edit_lens_distortion = photo.edit_lens_distortion();
+        let edit_lens_vignette_amount = photo.edit_lens_vignette_amount();
+        let edit_lens_vignette_midpoint = photo.edit_lens_vignette_midpoint();
+        // Noise Reduction fields
+        let edit_nr_luminance = photo.edit_nr_luminance();
+        let edit_nr_color = photo.edit_nr_color();
+        // Sharpening fields
+        let edit_sharpen_amount = photo.edit_sharpen_amount();
+        let edit_sharpen_radius = photo.edit_sharpen_radius();
+        // Tonalização e grão
+        let edit_split_shadow_hue = photo.edit_split_shadow_hue();
+        let edit_split_shadow_sat = photo.edit_split_shadow_sat();
+        let edit_split_highlight_hue = photo.edit_split_highlight_hue();
+        let edit_split_highlight_sat = photo.edit_split_highlight_sat();
+        let edit_split_balance = photo.edit_split_balance();
+        let edit_grain_amount = photo.edit_grain_amount();
+        let edit_grain_size = photo.edit_grain_size();
+        // Crop fields
+        let edit_crop_x = photo.edit_crop_x();
+        let edit_crop_y = photo.edit_crop_y();
+        let edit_crop_width = photo.edit_crop_width();
+        let edit_crop_height = photo.edit_crop_height();
+        let edit_crop_rotation = photo.edit_crop_rotation();
+        let edit_crop_angle = photo.edit_crop_angle();
+        let edit_crop_flip_h = photo.edit_crop_flip_h();
+        let edit_crop_flip_v = photo.edit_crop_flip_v();
 
         // Serializar metadata para JSON
-        let metadata = photo.metadata()
-            .and_then(|m| serde_json::to_string(m).ok());
+        let metadata = photo.metadata().and_then(|m| serde_json::to_string(m).ok());
 
         let result = sqlx::query(
             "UPDATE photos
-             SET file_path = ?, rating = ?, color_label = ?, flag = ?, is_edited = ?, modified_at = ?, metadata = ?, thumbnail_path = ?, preview_path = ?, edit_exposure = ?, edit_contrast = ?, edit_temperature = ?, edit_tint = ?, edit_highlights = ?, edit_shadows = ?, edit_whites = ?, edit_blacks = ?, edit_clarity = ?, edit_vibrance = ?, edit_saturation = ?, edit_tone_curve_shadows = ?, edit_tone_curve_darks = ?, edit_tone_curve_lights = ?, edit_tone_curve_highlights = ?, content_hash = ?
+             SET file_path = ?, rating = ?, color_label = ?, flag = ?, comprada_em = ?, pos_venda_foto_id = ?, sessao_id = ?, nome_original = ?, edit_receita = ?, is_edited = ?, modified_at = ?, metadata = ?, thumbnail_path = ?, preview_path = ?, edit_exposure = ?, edit_contrast = ?, edit_temperature = ?, edit_tint = ?, edit_highlights = ?, edit_shadows = ?, edit_whites = ?, edit_blacks = ?, edit_clarity = ?, edit_vibrance = ?, edit_saturation = ?, edit_tone_curve_shadows = ?, edit_tone_curve_darks = ?, edit_tone_curve_lights = ?, edit_tone_curve_highlights = ?, content_hash = ?, edit_hsl_red_sat = ?, edit_hsl_orange_sat = ?, edit_hsl_yellow_sat = ?, edit_hsl_green_sat = ?, edit_hsl_aqua_sat = ?, edit_hsl_blue_sat = ?, edit_hsl_purple_sat = ?, edit_hsl_magenta_sat = ?, edit_hsl_red_hue = ?, edit_hsl_orange_hue = ?, edit_hsl_yellow_hue = ?, edit_hsl_green_hue = ?, edit_hsl_aqua_hue = ?, edit_hsl_blue_hue = ?, edit_hsl_purple_hue = ?, edit_hsl_magenta_hue = ?, edit_hsl_red_lum = ?, edit_hsl_orange_lum = ?, edit_hsl_yellow_lum = ?, edit_hsl_green_lum = ?, edit_hsl_aqua_lum = ?, edit_hsl_blue_lum = ?, edit_hsl_purple_lum = ?, edit_hsl_magenta_lum = ?, edit_lens_distortion = ?, edit_lens_vignette_amount = ?, edit_lens_vignette_midpoint = ?, edit_nr_luminance = ?, edit_nr_color = ?, edit_sharpen_amount = ?, edit_sharpen_radius = ?, edit_split_shadow_hue = ?, edit_split_shadow_sat = ?, edit_split_highlight_hue = ?, edit_split_highlight_sat = ?, edit_split_balance = ?, edit_grain_amount = ?, edit_grain_size = ?, edit_crop_x = ?, edit_crop_y = ?, edit_crop_width = ?, edit_crop_height = ?, edit_crop_rotation = ?, edit_crop_angle = ?, edit_crop_flip_h = ?, edit_crop_flip_v = ?
              WHERE id = ?"
         )
         .bind(&file_path)
         .bind(rating)
         .bind(color_label)
         .bind(flag)
+        .bind(&comprada_em)
+        .bind(&pos_venda_foto_id)
+        .bind(&sessao_id)
+        .bind(&nome_original)
+        .bind(&receita)
         .bind(is_edited)
         .bind(&modified_at)
         .bind(metadata)
@@ -285,6 +732,52 @@ impl PhotoRepository for PhotoRepositoryImpl {
         .bind(edit_tone_curve_lights)
         .bind(edit_tone_curve_highlights)
         .bind(content_hash)
+        .bind(edit_hsl_red_sat)
+        .bind(edit_hsl_orange_sat)
+        .bind(edit_hsl_yellow_sat)
+        .bind(edit_hsl_green_sat)
+        .bind(edit_hsl_aqua_sat)
+        .bind(edit_hsl_blue_sat)
+        .bind(edit_hsl_purple_sat)
+        .bind(edit_hsl_magenta_sat)
+        .bind(edit_hsl_red_hue)
+        .bind(edit_hsl_orange_hue)
+        .bind(edit_hsl_yellow_hue)
+        .bind(edit_hsl_green_hue)
+        .bind(edit_hsl_aqua_hue)
+        .bind(edit_hsl_blue_hue)
+        .bind(edit_hsl_purple_hue)
+        .bind(edit_hsl_magenta_hue)
+        .bind(edit_hsl_red_lum)
+        .bind(edit_hsl_orange_lum)
+        .bind(edit_hsl_yellow_lum)
+        .bind(edit_hsl_green_lum)
+        .bind(edit_hsl_aqua_lum)
+        .bind(edit_hsl_blue_lum)
+        .bind(edit_hsl_purple_lum)
+        .bind(edit_hsl_magenta_lum)
+        .bind(edit_lens_distortion)
+        .bind(edit_lens_vignette_amount)
+        .bind(edit_lens_vignette_midpoint)
+        .bind(edit_nr_luminance)
+        .bind(edit_nr_color)
+        .bind(edit_sharpen_amount)
+        .bind(edit_sharpen_radius)
+        .bind(edit_split_shadow_hue)
+        .bind(edit_split_shadow_sat)
+        .bind(edit_split_highlight_hue)
+        .bind(edit_split_highlight_sat)
+        .bind(edit_split_balance)
+        .bind(edit_grain_amount)
+        .bind(edit_grain_size)
+        .bind(edit_crop_x)
+        .bind(edit_crop_y)
+        .bind(edit_crop_width)
+        .bind(edit_crop_height)
+        .bind(edit_crop_rotation)
+        .bind(edit_crop_angle)
+        .bind(edit_crop_flip_h)
+        .bind(edit_crop_flip_v)
         .bind(&id)
         .execute(&self.pool)
         .await
@@ -320,7 +813,9 @@ impl PhotoRepository for PhotoRepositoryImpl {
             .bind(&id_str)
             .fetch_one(&self.pool)
             .await
-            .map_err(|e| DomainError::InvalidOperation(format!("Failed to check existence: {}", e)))?;
+            .map_err(|e| {
+                DomainError::InvalidOperation(format!("Failed to check existence: {}", e))
+            })?;
 
         Ok(count > 0)
     }
@@ -330,7 +825,9 @@ impl PhotoRepository for PhotoRepositoryImpl {
             .bind(hash)
             .fetch_optional(&self.pool)
             .await
-            .map_err(|e| DomainError::InvalidOperation(format!("Failed to find photo by hash: {}", e)))?;
+            .map_err(|e| {
+                DomainError::InvalidOperation(format!("Failed to find photo by hash: {}", e))
+            })?;
 
         match row {
             Some(r) => Ok(Some(Self::row_to_photo(&r)?)),

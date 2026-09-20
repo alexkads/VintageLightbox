@@ -1,18 +1,30 @@
+pub mod aspect_ratio;
 pub mod collection_id;
-pub mod rating;
-pub mod photo_id;
 pub mod color_label;
+pub mod crop_settings;
+pub mod export_options;
 pub mod file_path;
-pub mod photo_metadata;
-pub mod import_options;
 pub mod flag;
+pub mod import_options;
+pub mod photo_id;
+pub mod photo_metadata;
+pub mod print_job_id;
+pub mod print_layout;
+pub mod print_settings;
+pub mod rating;
 
 // Re-exports
+pub use aspect_ratio::AspectRatio;
 pub use collection_id::CollectionId;
-pub use rating::Rating;
-pub use photo_id::PhotoId;
 pub use color_label::ColorLabel;
+pub use crop_settings::CropSettings;
+pub use export_options::{ExportOptions, Watermark, WatermarkPosition};
 pub use file_path::FilePath;
-pub use photo_metadata::PhotoMetadata;
-pub use import_options::{ImportOptions, OrganizationStrategy, RenamePattern};
 pub use flag::Flag;
+pub use import_options::{ImportMode, ImportOptions, OrganizationStrategy, RenamePattern};
+pub use photo_id::PhotoId;
+pub use photo_metadata::PhotoMetadata;
+pub use print_job_id::PrintJobId;
+pub use print_layout::PrintLayout;
+pub use print_settings::{ColorMode, Margins, Orientation, PaperSize, PrintSettings};
+pub use rating::Rating;

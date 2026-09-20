@@ -1,5 +1,10 @@
 # Rust
 /target/
+# Os instaladores gerados por scripts/empacotar.sh
+/dist/
+# Gerados por scripts/montar-manifesto.py no CI — a pagina (index.html, icone.png)
+# e versionada; o manifesto e a lista de downloads sao do lancamento.
+/docs/notas-do-lancamento.md
 **/*.rs.bk
 *.pdb
 

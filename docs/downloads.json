@@ -1,0 +1,14 @@
+{
+  "versao": "0.1.9",
+  "publicado_em": "2026-09-17T13:57:13+00:00",
+  "notas": "O visual e os gestos do app passam a ser os do site: o mesmo menu lateral, as mesmas cores e as mesmas telas. E a revelação de uma foto importada no computador agora guarda tudo: curvas, preto e branco, calibração e os módulos novos voltavam zerados ao reabrir a foto, e saíam de fora da exportação.",
+  "downloads": [
+    {
+      "sistema": "macOS",
+      "arquitetura": "Intel e Apple Silicon",
+      "arquivo": "VintageLightbox_0.1.9_universal.dmg",
+      "url": "https://github.com/alexkads/VintageLightbox/releases/download/v0.1.9/VintageLightbox_0.1.9_universal.dmg",
+      "bytes": 33459872
+    }
+  ]
+}

@@ -11,7 +11,9 @@ serde.workspace = true
 uuid.workspace = true
 chrono.workspace = true
 async-trait.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
 fake.workspace = true
+serde_json.workspace = true

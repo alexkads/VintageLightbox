@@ -67,9 +67,7 @@ impl PreviewBeforeImportUseCase {
                     };
 
                     // Extrair metadados (pode falhar gracefully)
-                    let metadata = metadata_extractor
-                        .extract(&path)
-                        .unwrap_or_default();
+                    let metadata = metadata_extractor.extract(&path).unwrap_or_default();
 
                     // Obter tamanho do arquivo
                     let file_size = std::fs::metadata(path.as_ref())
@@ -116,10 +114,10 @@ impl PreviewBeforeImportUseCase {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use domain::{DomainError, value_objects::PhotoMetadata};
+    use domain::{value_objects::PhotoMetadata, DomainError};
     use mockall::{mock, predicate::*};
-    use tempfile::NamedTempFile;
     use std::io::Write;
+    use tempfile::NamedTempFile;
 
     // Mock do MetadataExtractor
     mock! {
@@ -165,10 +163,8 @@ mod tests {
             .times(2)
             .returning(|_, _| Ok(vec![1, 2, 3, 4])); // JPEG bytes fictícios
 
-        let use_case = PreviewBeforeImportUseCase::new(
-            Arc::new(mock_extractor),
-            Arc::new(mock_generator),
-        );
+        let use_case =
+            PreviewBeforeImportUseCase::new(Arc::new(mock_extractor), Arc::new(mock_generator));
 
         let temp1 = create_temp_file(".jpg");
         let temp2 = create_temp_file(".png");
@@ -211,10 +207,8 @@ mod tests {
                 }
             });
 
-        let use_case = PreviewBeforeImportUseCase::new(
-            Arc::new(mock_extractor),
-            Arc::new(mock_generator),
-        );
+        let use_case =
+            PreviewBeforeImportUseCase::new(Arc::new(mock_extractor), Arc::new(mock_generator));
 
         let temp1 = create_temp_file(".jpg");
         let temp2 = create_temp_file(".png");
@@ -241,10 +235,8 @@ mod tests {
         let mock_extractor = MockMetadataExtractor::new();
         let mock_generator = MockThumbnailGenerator::new();
 
-        let use_case = PreviewBeforeImportUseCase::new(
-            Arc::new(mock_extractor),
-            Arc::new(mock_generator),
-        );
+        let use_case =
+            PreviewBeforeImportUseCase::new(Arc::new(mock_extractor), Arc::new(mock_generator));
 
         // Act
         let result = use_case.execute(vec![]).await;
@@ -270,10 +262,8 @@ mod tests {
             .times(2)
             .returning(|_, _| Ok(vec![1, 2, 3]));
 
-        let use_case = PreviewBeforeImportUseCase::new(
-            Arc::new(mock_extractor),
-            Arc::new(mock_generator),
-        );
+        let use_case =
+            PreviewBeforeImportUseCase::new(Arc::new(mock_extractor), Arc::new(mock_generator));
 
         let temp_raw = create_temp_file(".cr2");
         let temp_jpeg = create_temp_file(".jpg");
@@ -319,10 +309,8 @@ mod tests {
             .times(10)
             .returning(|_, _| Ok(vec![1, 2, 3]));
 
-        let use_case = PreviewBeforeImportUseCase::new(
-            Arc::new(mock_extractor),
-            Arc::new(mock_generator),
-        );
+        let use_case =
+            PreviewBeforeImportUseCase::new(Arc::new(mock_extractor), Arc::new(mock_generator));
 
         // Criar 10 arquivos temporários
         let temp_files: Vec<_> = (0..10).map(|_| create_temp_file(".jpg")).collect();

@@ -1,0 +1,158 @@
+[package]
+name = "ui-gpui"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+# `cargo run -p ui-gpui` — o comando que a fase 1 documenta — não escolhia nada:
+# o crate tem três binários (o app, `medir-miniaturas` e `semear-catalogo`) e o
+# cargo desiste quando há mais de um. Sem esta linha, a instrução escrita em
+# docs/10-MIGRACAO-GPUI.md §5 e no `semear-catalogo` respondia com uma lista.
+default-run = "ui-gpui"
+
+# A interface em GPUI, construída **ao lado** de `crates/ui` e não no lugar
+# dele. Os dois compilam e rodam durante a migração inteira (docs/10-MIGRACAO-GPUI.md
+# §5 e §7.2): `cargo run -p ui` e `cargo run -p ui-gpui`.
+#
+# O `crates/ui` só sai do workspace na fase 5, em commit isolado, para o
+# `git revert` ser um comando. Enquanto isso ele é o rollback e a referência de
+# paridade — abandonar a migração precisa custar zero.
+
+[features]
+# 🔑 **Os shaders Metal compilados quando o app abre, e não no build.** Sem
+# isto o build do macOS chama o `metal` do Xcode, que não vem nas Command Line
+# Tools. O instalador (`scripts/instalar-vintagelightbox-gpui.cmd`) liga esta
+# feature para não depender do Xcode (dono, 2026-09-17). Quem compila é o
+# Metal do próprio macOS, na abertura. O pacote do `make empacotar` continua
+# com os shaders prontos.
+shaders-em-tempo-de-execucao = ["gpui/runtime_shaders"]
+
+[dependencies]
+gpui = "0.2.2"
+gpui-component = "0.5.1"
+
+# As quatro camadas internas, intactas. Nenhuma delas sabe que a interface
+# mudou — é o que torna trocar de interface barato (§2.1).
+infrastructure = { path = "../infrastructure" }
+# A grade da Biblioteca: a mesma aritmética que o site usa (2026-09-05). Sem
+# GPU e sem janela dentro — ver `biblioteca/grade.rs`.
+biblioteca-core = { path = "../biblioteca-core" }
+adapters = { path = "../adapters" }
+use-cases = { path = "../use-cases" }
+domain = { path = "../domain" }
+
+# `image` na mesma versão que o `gpui` resolve. Duas versões na árvore
+# compilariam, mas `DynamicImage` de uma **não é** o tipo da outra, e a ponte de
+# imagem (§3.1) atravessa exatamente essa fronteira.
+image = "0.25"
+directories = "6.0.0"
+# `RenderImage::new` recebe `SmallVec<[Frame; 1]>`, e o `gpui` não reexporta o
+# `smallvec` — quem constrói o argumento precisa da mesma versão que ele usa.
+smallvec = "1"
+# O mesmo `lru` que o `crates/ui` usa — um cache de imagem por crate ja e
+# suficiente; duas politicas de descarte diferentes para a mesma coisa nao.
+lru = "0.16.2"
+tokio.workspace = true
+# A configuração do pós-venda (`pos_venda/config.rs`) é um JSON ao lado do catálogo.
+serde.workspace = true
+anyhow = "1.0"
+# O seletor nativo de pasta da importação — a mesma versão do `crates/ui`, que já
+# trocou o `egui_file` por ele. Janela do sistema, e não do framework: é o que
+# evita disputa de camada com o modal (a razão está registrada no STATUS).
+rfd = "0.17.2"
+# Os estilos do darktable guardam os parâmetros de cada módulo em zlib
+# (`gz` + base64), e importar um `.dtstyle` é abri-los
+# (`revelacao/lightroom/darktable.rs`). É o mesmo `miniz_oxide` que o `png` já
+# traz para a árvore — nenhuma dependência nova no lockfile, só uma aresta.
+miniz_oxide = "0.8"
+
+# A folha de impressão vira PDF. 🔑 O leiaute já é calculado em milímetros
+# (`impressao/pagina.rs`), que é a unidade nativa do PDF — gerar é colocar cada
+# célula na página, sem uma segunda conta de posição.
+#
+# ⚠️ `default-features = false` de propósito: o padrão traz layout de texto e
+# HTML, e aqui não há texto nenhum — só imagens em retângulos.
+printpdf = { version = "0.12", default-features = false }
+
+# O motor de revelação (`revelacao/processador.rs`). Nas mesmas versões do
+# `crates/ui`: o critério de saída da fase 2 é igualdade de pixel, e wgpu é
+# quem compila o WGSL — versão diferente é compilador diferente para o mesmo
+# shader. No macOS isto não conflita com o GPUI, que fala Metal direto.
+wgpu = "23.0"
+bytemuck = { version = "1.14", features = ["derive"] }
+pollster = "0.4"
+parking_lot = "0.12"
+# O tema. `ThemeConfigColors` tem campos privados, então literal de struct não
+# compila de fora do crate — e o JSON é o formato nativo do `gpui-component`
+# para tema, não um contorno (`crates/ui-gpui/src/tema.rs`).
+serde_json.workspace = true
+# Só para ler a versão de migration aplicada na tela de primeira luz — a mesma
+# versão e as mesmas features do `infrastructure`, senão são dois drivers de
+# SQLite na árvore falando com o mesmo arquivo.
+sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "sqlite", "migrate"] }
+chrono.workspace = true
+uuid.workspace = true
+
+# A atualização automática (`atualizacao/porta.rs`). É o updater do mesmo autor
+# do `cargo-packager` que monta os instaladores — então o `.sig` que o
+# empacotamento produz é exatamente o que este crate confere.
+#
+# ⚠️ `default-features = false` + `native-tls`: o padrão dele é `rustls`, e o
+# `sqlx` e o `reqwest` do `infrastructure` já trazem a pilha TLS do sistema.
+# Duas pilhas TLS na mesma árvore é compilar o mesmo trabalho duas vezes — a
+# mesma razão registrada no `infrastructure/Cargo.toml`.
+cargo-packager-updater = { version = "0.2", default-features = false, features = ["native-tls"] }
+
+# A bandeja do sistema (`src/bandeja.rs`): o `tray-icon`, na versão que o
+# lockfile já tem — nenhum crate novo na árvore.
+# ⚠️ Sem `libxdo`: ele só serve aos itens Copiar/Colar do menu, que a bandeja
+# não tem, e seria mais uma biblioteca do sistema para instalar no Linux.
+tray-icon = { version = "0.24", default-features = false, features = ["gtk"] }
+# 📦 O zip de "baixar a pasta compactada" (`/dashboard/backup`).
+#
+# `default-features = false`: sem deflate, sem bzip2, sem zstd. JPEG, WebP e RAW
+# já são dados comprimidos — passar deflate neles gasta CPU para ganhar 1–2%. O
+# zip aqui serve para **juntar**, e não para encolher, e é o mesmo método
+# (*store*) que o `client-zip` usa no site.
+zip = { version = "8.6.0", default-features = false }
+tempfile = "3.8"
+
+# A foto da própria janela, nas ferramentas de depuração (`src/depuracao.rs`):
+# a `NSView` do GPUI chega por `raw-window-handle`, e o número da janela sai
+# dela por uma mensagem do Objective-C. As mesmas versões que o `gpui` já
+# traz.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+raw-window-handle = "0.6"
+
+# A janela minimizada e a volta da bandeja no Windows (`segundo_plano/janela.rs`).
+[target.'cfg(target_os = "windows")'.dependencies]
+raw-window-handle = "0.6"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
+
+# No Linux o ícone da bandeja mora numa thread com o laço do GTK, que o GPUI não
+# roda (`src/bandeja.rs`). A mesma versão que o `tray-icon` traz.
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = "0.18"
+
+# 🪟 **O ícone do `.exe`** — sem ele o Windows desenha a janela e a barra de
+# tarefas sem logo nenhuma (dono, 18/set/2026: *"no Windows não aparece a
+# logo"*). O GPUI carrega o **recurso de ícone de id 1** do próprio executável
+# (`platform/windows/platform.rs`, `load_icon`); quem o põe lá é este passo do
+# build. Fora do Windows a dependência é baixada e não faz nada — o `build.rs`
+# olha o alvo antes de agir.
+[build-dependencies]
+embed-resource = "3"
+
+[dev-dependencies]
+tempfile = "3.8"
+# `TestAppContext` — o substituto que o plano escolheu para os 146 testes de UI
+# que morrem na fase 5 (§6). É como o Zed testa a própria interface: dirige
+# janela e afirma sobre estado, sem snapshot visual.
+#
+# ⚠️ Em `[dev-dependencies]`, e **não** em `[dependencies]`, mesmo custando uma
+# segunda compilação do gpui: `test-support` liga junto o `leak-detection`, que
+# grava backtrace a cada handle de entidade. Num app onde a fase 1 quase
+# condenou o framework por medir fluidez no perfil errado, carregar detector de
+# vazamento no binário do produto é repetir o mesmo erro de outro jeito.
+gpui = { version = "0.2.2", features = ["test-support"] }

@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Os entitlements do Hardened Runtime — o mínimo, e cada linha com motivo.
+
+  🔑 O Hardened Runtime é **obrigatório para notarizar**, e ele fecha por padrão
+     coisas que o app faz. O que está aberto aqui está aberto porque o app quebra
+     sem; o que não está, fica fechado.
+
+  ⚠️ Não há `com.apple.security.app-sandbox`. O app lê pastas de cartão de
+     memória escolhidas pelo fotógrafo e escreve o catálogo em ~/Pictures —
+     sandbox exigiria security-scoped bookmarks em todo o caminho de importação,
+     que é trabalho de outra ordem. Distribuição por Developer ID não pede
+     sandbox; a App Store pediria.
+-->
+<plist version="1.0">
+<dict>
+  <!-- O login pelo navegador (`pos_venda/autorizacao.rs`) sobe um servidor em
+       127.0.0.1 e recebe o `?code=` de volta. Sem isto o `TcpListener::bind`
+       falha e não há como entrar no app. -->
+  <key>com.apple.security.network.server</key>
+  <true/>
+
+  <!-- O cliente HTTP do pós-venda (`pos_venda/http.rs`), o único lugar que fala
+       com a rede de saída. -->
+  <key>com.apple.security.network.client</key>
+  <true/>
+
+  <!-- A importação lê o cartão montado em /Volumes. -->
+  <key>com.apple.security.device.removable-volumes</key>
+  <true/>
+
+  <!-- O catálogo mora em ~/Pictures/VintageLightbox (`infrastructure/paths.rs`),
+       e a exportação escreve onde o fotógrafo mandar. -->
+  <key>com.apple.security.files.user-selected.read-write</key>
+  <true/>
+</dict>
+</plist>

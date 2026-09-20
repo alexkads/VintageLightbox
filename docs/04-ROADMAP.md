@@ -1,5 +1,23 @@
 # Roadmap de Desenvolvimento - VintageLightbox
 
+
+> 🚨 **Este roadmap descreve um plano que terminou.** Ele foi escrito para as fases de construção e
+> depois para a migração de egui para GPUI — que **fechou** em 17/ago/2026
+> ([história](historico/10-MIGRACAO-GPUI.md)).
+>
+> **A fila de trabalho de agora é [`PARIDADE-LIGHTROOM.md`](PARIDADE-LIGHTROOM.md)**, e ela é ordenada
+> pelo [objetivo novo](00-OBJETIVO.md): substituir o Lightroom no fluxo do estúdio, para que a edição
+> converse com o `recordarfotos.com.br`.
+>
+> ⚠️ **E os caminhos `crates/ui/...` que ele cita não existem mais.** Aquele crate saiu do workspace
+> em 17/ago/2026 (−25.783 linhas); o código está no histórico do git, e o que ele fazia está em
+> [`historico/PARIDADE-UI.md`](historico/PARIDADE-UI.md). A interface hoje é `crates/ui-gpui/`,
+> e é ela que recebe todo trabalho novo de fluxo.
+>
+> ⚠️ **A diferença de critério importa.** Este documento ordena por fase de construção; a fila nova
+> ordena por *o que destrava mais coisa* — e por isso a exportação, que não aparece com destaque
+> aqui, foi o item 1 de lá: sem ela o app não entrega nada ao site.
+
 ## Visão Geral
 
 Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Architecture** e **Test-Driven Development (TDD)**. Cada funcionalidade é implementada com testes primeiro, garantindo qualidade desde o início.
@@ -10,19 +28,59 @@ Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Ar
 
 ---
 
-## 📊 Progresso Atual (Atualizado: 22/dez/2025)
+## 📊 Progresso Atual (Atualizado: 15/ago/2026)
+
+> ✅ **Compila e roda.** O HEAD de `dev` estava quebrado por dois erros (`raw_processing.rs`, do
+> preview embutido de RAW de 25/jan/2026, e `save_photo_edits.rs`, teste não atualizado quando o
+> Crop acrescentou 8 parâmetros em 27/dez/2025). Os dois foram consertados em 15/ago/2026 e ainda
+> **não estão commitados**. Detalhes e o bloqueio que restou (4 migrations aplicadas fora do
+> repositório) em **[STATUS.md](STATUS.md)**, que é a fonte de status do projeto.
 
 ### Status Geral
-- **Fase Atual**: Fase 2.1 (Importação Avançada) - **100% COMPLETO** ✅
-- **Total de Testes**: **225 testes passando** 🎉
-  - Domain Layer: 115 testes (100% cobertura, +5 tone curve, +5 import options)
-  - Use Cases Layer: 50 testes (+15: Preview, Duplicates, ImportWithOptions)
-  - Infrastructure Layer: 58 testes (+7: FileOrganizer, async hash)
-  - Adapters Layer: 0 testes
-  - UI Layer: 0 testes (testes removidos temporariamente)
+- **Fase Atual**: Fase 2 (Funcionalidades Essenciais) — 2.1 a 2.4, 2.8 e 2.9 completas
+- **Total de Testes**: **478 passando, 0 falhas, 3 ignorados**
+  - Domain Layer: 202 ✅
+  - Use Cases Layer: 65 ✅
+  - Infrastructure Layer: 65 ✅
+  - Adapters Layer: 0 ⚠️ sem testes
+  - UI Layer: 146 ✅ (E2E `egui_kittest`)
 
 ### Conquistas Recentes
 
+- ✅ **CACHE OPTIMIZATION - LIGHTROOM-STYLE NAVIGATION (26/dez/2025)** ⚡
+  - **Problema Resolvido**: Troca de fotos no Develop era lenta (~800ms) mesmo com cache L1
+  - **Solução Implementada**:
+    1. **Cache L1 Expandido**: 5 → 15 imagens (~600MB RAM)
+    2. **Prefetch Paralelo**: Fotos adjacentes (N-1, N+1) pré-carregadas em threads separadas
+    3. **ProcessedCache**: Cache do resultado final (ColorImage + edits hash) evita re-processamento
+  - **Resultado**: Navegação entre fotos visitadas de **800ms → 0.01ms** (instantâneo!)
+  - **Arquivos Modificados**:
+    - `crates/ui/src/async_loader.rs`: ProcessedCache, prefetch paralelo, edits_hash
+    - `crates/ui/src/app.rs`: Integração prefetch na navegação
+  - **Documentação**: `docs/08-CACHE-ARCHITECTURE.md` atualizado
+  - **Status**: ✅ **100% COMPLETO**
+
+- ✅ **NOISE REDUCTION COMPLETE (25/dez/2025)** 📉
+  - **Luminance NR**: Bilateral Filter (GPU) + Smart Blur (CPU)
+  - **Color NR**: Gaussian Blur on UV channels (GPU) + Blur & Restore Luminance (CPU)
+  - **UI Integrada**: Sliders independentes para Luminance e Color no painel Detail
+  - **Single-Pass Shader**: Otimização crítica combinando filtros Luma/Chroma em um único loop 5x5
+  - **Status**: ✅ **100% COMPLETO**
+
+- ✅ **SHARPENING COMPLETE (25/dez/2025)** 🔪
+  - **Unsharp Mask (USM)**: Implementado no shader GPU e CPU fallback
+  - **Parâmetros**: Amount (0-100) e Radius (0.5-3.0)
+  - **Integração**: Single-pass combinado com Noise Reduction no shader 5x5
+  - **Testes**: Todos passando (domain, use-cases, infrastructure)
+  - **Status**: ✅ **100% COMPLETO**
+
+
+- ✅ **THEME & SELECTION UX FIXES (24/dez/2025)** 🎨
+  - **Latte Light Theme**: Correção completa de cores hardcoded em PhotoGrid, Filmstrip e Widgets. Tema claro agora 100% funcional.
+  - **Seleção Profissional**: Implementação de "Double Border" (Azul Externo + Branco Interno) para seleção primária.
+  - **Fundo Limpo**: Remoção de preenchimento de fundo na seleção, focando na borda para clareza (evita conflito com color labels).
+  - **Contraste Vintage Dark**: Correção de texto invisível em botões primários no tema padrão.
+  - **Status**: ✅ **100% COMPLETO**
 - ✅ **INTEGRAÇÃO PHOSPHOR ICONS (22/dez/2025)** 🎨
   - **Visual Profissional**: Substituição de ícones unicode/texto por Phosphor Icons
   - **Pacote Otimizado**: Crate `egui_phosphor` integrado
@@ -341,8 +399,8 @@ Este roadmap divide o desenvolvimento em fases incrementais, seguindo **Clean Ar
 2. ✅ ~~**Reset de Ajustes**~~ - Volta todos os sliders ao padrão
 3. ✅ ~~**Before/After Toggle**~~ - Comparação antes/depois (tecla \)
 4. ✅ ~~**GPU Acceleration**~~ - WGPU Compute Shaders implementados
-5. 🎯 **Tone Curve UI** - Sliders paramétricos e integração com shader
-6. **Cache System Optimization** - Cache robusto (L1/L2) para performance em catálogos grandes
+5. ✅ ~~**Tone Curve UI**~~ - Sliders paramétricos e integração com shader
+6. ✅ ~~**Cache System Optimization**~~ - Cache L1 expandido (15 imgs), prefetch paralelo, ProcessedCache (0.01ms navigation)
 7. **Presets System** - Salvar e aplicar presets de edição (Default, Auto, B&W, Custom)
 8. **HSL/Color** - Ajustes por canal de cor (8 canais)
 9. **RAW Processing Avançado** - Integração completa com LibRaw/rawler para mais formatos
@@ -721,12 +779,20 @@ Criar versão mínima funcional com importação, visualização, edição bási
 - ✅ UI Components 70% (Dialogs estruturados: import_dialogs.rs criado)
 
 **Pendente para v1 UI completo**:
-- [ ] UI Integration: Conectar dialogs ao app state (app.rs)
-- [ ] UI Integration: Adicionar botão "Advanced Import" no LibraryView
-- [ ] UI Integration: Instanciar use cases no app initialization
+- [x] UI Integration: Conectar dialogs ao app state (app.rs) ✅
+- [x] UI Integration: Adicionar botão "Advanced Import" no LibraryView ✅
+- [x] UI Integration: Instanciar use cases no app initialization ✅
 - [ ] UI Polish: Thumbnails reais nos previews (atualmente texto placeholder)
 - [ ] UI Polish: Resolver borrow checker issues nos dialogs
 - [ ] Testes E2E: Fluxo completo end-to-end com UI
+
+**Status de Progresso Adicional (25/dez/2025)**:
+- ✅ **Import View UI Shell**:
+  - `ImportView` struct criada e integrada no `CurrentView`.
+  - Layout básico definido (Sources, Grid, Options).
+  - Integração com `ImportController` via `tokio::mpsc` channels para carregamento assíncrono de dispositivos.
+  - Navegação entre Library e Import View funcional.
+  - Correção de erros de compilação no setup de dependências em `main.rs`.
 
 **Arquivos Criados**:
 - `crates/domain/src/value_objects/import_options.rs` (5 testes)
@@ -761,11 +827,24 @@ import_controller.import_with_options(files, options, tx, pause, cancel).await?;
 - [x] ✅ **Highlights e Shadows** - Ajuste seletivo por luminância
 - [x] ✅ **Temperature e Tint** - White balance completo
 - [x] ✅ **Smart Folder Hierarchy** - Detecção inteligente de datas (Ano/Mês) na árvore da biblioteca
-- [ ] 🎯 **Tone Curve** - Curva de tons paramétrica (PRÓXIMO)
-- [ ] **Point Curve** - Curva com múltiplos pontos de controle
-- [ ] **HSL/Color** - Ajustes por canal de cor (8 canais: Red, Orange, Yellow, Green, Aqua, Blue, Purple, Magenta)
-- [ ] **Redução de Ruído** - Luminance e Color noise reduction
-- [ ] **Nitidez** - Sharpening com Amount, Radius, Detail, Masking
+- [x] ✅ **Tone Curve Backend** (25/dez/2025) - 4 zonas paramétricas implementadas:
+  - CPU: `ImageProcessor::process_image()` com shadows/darks/lights/highlights
+  - GPU: Shader WGSL com mesma lógica sincronizada
+  - Undo/Redo: `EditSnapshot` com 4 campos de tone curve
+  - Persistência: Campos já existem na entidade `Photo` e banco de dados
+- [x] ✅ **Tone Curve UI** (25/dez/2025) - Sliders para controle das 4 zonas no Develop View
+- [ ] **Point Curve** - Curva com múltiplos pontos de controle (complexo)
+- [x] ✅ **HSL/Color** - Ajustes por canal de cor (8 canais: Red, Orange, Yellow, Green, Aqua, Blue, Purple, Magenta) — Hue + Saturation + Luminance por canal (24 parâmetros), migrations `011` e `014`, sliders no Develop View
+- [x] ✅ **Correção de Lente** - Distortion + Vignette (amount/midpoint), migration `014`
+- [x] ✅ **Redução de Ruído** (25/dez/2025) - 100% Funcional (Luma + Chroma):
+  - **Luminance**: Bilateral Filter (preserva bordas)
+  - **Color**: Gaussian Blur em canais UV (remove manchas coloridas)
+  - **GPU**: Implementação otimizada em WGSL (single pass)
+  - **CPU**: Fallback implementado para exportação
+- [x] ✅ **Nitidez** (25/dez/2025) - 100% Funcional:
+  - **Unsharp Mask (USM)**: Implementado no shader (GPU) e CPU (export).
+  - **Controles**: Amount (0-100) e Radius (0.5-3.0) na UI.
+  - **Otimização**: Integrado ao loop 5x5 de redução de ruído no shader.
 
 ### 2.3 Presets ✅ BACKEND COMPLETO (23/dez/2025)
 - [x] ✅ **Domain Layer**: `Preset`, `PresetAdjustments`, `PresetId` entities
@@ -810,6 +889,57 @@ import_controller.import_with_options(files, options, tx, pause, cancel).await?;
 - [x] Melhorar cache de previews (Smart Preview System - BLOB SQLite) ✅ + RAM LRU ✅
 - [x] Profiling e otimizações críticas (Performance Stats Overlay)
 - [x] Reduzir uso de memória (Texture management otimizado)
+- [x] ✅ **Cache L1 Expandido (26/dez/2025)**: 5 → 15 imagens para navegação fluida
+- [x] ✅ **Prefetch Paralelo (26/dez/2025)**: Fotos adjacentes pré-carregadas em threads separadas
+- [x] ✅ **ProcessedCache (26/dez/2025)**: Cache do resultado final evita re-processamento (~800ms → 0.01ms)
+
+### 2.9 Corte e Rotação (Crop & Rotate) ✅ IMPLEMENTADO (27/dez/2025) — com 3 lacunas
+
+**Descrição**: Ferramenta de corte com proporções fixas e personalizadas, posicionamento da imagem dentro da área de corte, rotação e endireitamento de horizonte. Todas as operações são não-destrutivas e integradas ao Develop View.
+
+**Como ficou, diferente do planejado**: não há `ApplyCropUseCase` — o crop é persistido por `SavePhotoEditsUseCase` junto dos demais ajustes (foi o que acrescentou os 8 parâmetros e quebrou o teste, veja STATUS.md). A tentativa de fazer o crop no shader GPU foi **revertida** (`10dda3f`); o que valeu foi renderização por mesh com mapeamento UV no `image_viewer` + `ImageProcessing::apply_crop` (CPU) para thumbnails.
+
+#### 2.9.1 Domain Layer (TDD)
+- [x] ✅ **CropSettings Value Object**
+  - `crop_x`, `crop_y`, `crop_width`, `crop_height` (normalized 0.0-1.0)
+  - `rotation_90` (múltiplos de 90°: -1, 0, 1, 2)
+  - `angle` (rotação fina: -45.0 a +45.0)
+  - `flip_horizontal`, `flip_vertical`
+  - Validações + invariante testada: o viewer nunca rotaciona (`c907148`)
+- [x] ✅ **AspectRatio Enum** — enum fechado de presets (`Original`, `Free`, `Square`, `TwoThree`, `ThreeTwo`, `FourThree`, …) com swap de orientação
+- [ ] 🔴🟢🔵 **CustomAspectRatio Entity** — **não implementado** (proporções são só as predefinidas)
+  - `id`, `name`, `width`, `height`, `created_at`
+  - Persistência no perfil do usuário
+
+#### 2.9.2 Use Cases Layer (TDD)
+- [x] ✅ **Persistência do crop** — via `SavePhotoEditsUseCase` (não virou use case próprio)
+- [ ] 🔴🟢🔵 **SaveCustomAspectRatioUseCase** — não implementado
+- [ ] 🔴🟢🔵 **DeleteCustomAspectRatioUseCase** — não implementado
+
+#### 2.9.3 Infrastructure Layer (TDD)
+- [x] ✅ **Migração SQLite** — `015_add_crop_fields.sql` com os 8 campos
+  - [ ] Tabela `custom_aspect_ratios` — não criada
+- [ ] ~~**GPU Shader (WGSL)**~~ — implementado e **revertido** (`305466e` → `10dda3f`)
+- [x] ✅ **CPU** — `ImageProcessing::apply_crop` (crop + flips + rotação 90°)
+
+#### 2.9.4 UI Layer - Develop View
+- [x] ✅ **Crop Overlay Component** — handles, área externa escurecida, grid de composição
+- [x] ✅ **Drag Interactions** — resize com aspect ratio travado, mínimo e clamp de bordas; pan desabilitado em modo crop; cursor contextual
+- [x] ✅ **Crop Toolbar / Crop Panel** — dropdown de proporções, rotação 90°, flips, slider de ângulo fino, Reset
+  - [ ] Auto-straighten (botão existe, `crop_panel.rs:105` diz "not implemented")
+- [ ] **Custom Aspect Ratio Dialog** — não implementado
+- [x] ✅ **Keyboard Shortcut** — `R` alterna o modo crop
+  - [ ] `X` swap, `O` overlays, `H`/`V` flip, `Cmd+[`/`Cmd+]` rotação — não implementados
+
+#### 2.9.5 Integração
+- [x] ✅ **Preview em Tempo Real** — mesh + UV no `image_viewer`
+- [ ] 🚨 **Exportação** — **o crop NÃO chega ao arquivo exportado**. `ImageExporterImpl::export` abre o original e aplica os ajustes tonais, sem nenhuma referência a crop/rotação/flip
+- [ ] 🚨 **Undo/Redo** — `EditSnapshot` não tem campos de crop; o histórico ignora corte
+- [x] ✅ **Filmstrip/Thumbnail** — `thumbnail_renderer` aplica crop e rotação, com invalidação ao editar
+
+**Estimativa original**: 2 semanas (1 semana backend + 1 semana UI)
+**Prioridade**: Alta (feature essencial para workflow de edição)
+**Pendente**: exportação, undo/redo, proporções customizadas, auto-straighten, atalhos extras
 
 ### Entregáveis Fase 2
 - ✅ Edição profissional de RAW
@@ -2110,7 +2240,7 @@ crates/ui-gtk4/src/
 - 🎯 **GPU Acceleration**: Avaliar wgpu para processamento de imagem em tempo real
 - 🎯 **Caching Strategy**: Implementar cache inteligente de previews e thumbnails
 - 🎯 **Batch Processing**: Otimizar operações em lote com paralelização
-- 🎯 **RAW Decoder**: Integrar LibRaw/rawler para suporte a mais formatos
+- ✅ **RAW Decoder**: Integrado LibRaw/rawler e implementada extração de previews embutidos para performance superior.
 
 ---
 

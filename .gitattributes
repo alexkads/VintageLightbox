@@ -1,0 +1,4 @@
+# Os instaladores de arquivo único rodam no sh, que quebra com CRLF.
+scripts/instalar-vintagelightbox.cmd text eol=lf
+scripts/instalar-vintagelightbox-gpui.cmd text eol=lf
+scripts/instalador-modelo.cmd.in text eol=lf

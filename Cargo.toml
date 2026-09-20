@@ -5,12 +5,46 @@ members = [
     "crates/use-cases",
     "crates/adapters",
     "crates/infrastructure",
-    "crates/ui",
-    "crates/ui-gtk4",
+    # 📸 O codificador de foto, sozinho (2026-09-12). Ele era um módulo do
+    # `revelacao-core` e saiu de lá para poder virar wasm **sem GPU**: o
+    # download do cliente converte WebP em JPEG no navegador dele, e o
+    # `revelacao-core` traz o `wgpu` a reboque.
+    "crates/foto-codec",
+    # O mesmo codificador compilado para o navegador do **cliente** — sem GPU,
+    # só para converter o WebP guardado no JPEG que ele leva ao laboratório.
+    "crates/conversao-web",
+    # O motor de revelação sem nada em volta (2026-09-04): o que o navegador
+    # precisa e o `infrastructure` não consegue dar, porque puxa sqlx, reqwest e
+    # LibRaw — nada disso compila para wasm32.
+    "crates/revelacao-core",
+    # O mesmo motor compilado para o navegador (wasm-bindgen + wgpu). É o que o
+    # `scripts/construir-web.sh` entrega ao `recordarfotos-e-commerce`.
+    "crates/revelacao-web",
+    # A biblioteca de fotos sem tela (2026-09-05): a geometria da grade, a
+    # seleção, o recorte da barra e a política das miniaturas. Existiam três
+    # cópias das mesmas contas — as duas grades do site e a Biblioteca daqui —,
+    # e elas já tinham divergido.
+    "crates/biblioteca-core",
+    # A mesma biblioteca desenhada no navegador (wgpu + wasm-bindgen), entregue
+    # em `frontend/public/biblioteca/` pelo `scripts/construir-biblioteca.sh`.
+    "crates/biblioteca-web",
+    # A tela do cliente do balcão (2026-09-11, decisão do dono registrada em
+    # STATUS §2.88): a foto revelada sobre preto no segundo monitor, e o
+    # cruzamento entre uma foto e a seguinte. O único caso em que a tela **é** o
+    # canvas — ela não tem interface nenhuma para divergir do site.
+    "crates/tela-do-cliente-web",
+    # A interface, em GPUI. O `crates/ui` (egui) saiu daqui em 17/ago/2026, com a
+    # lista de paridade zerada (docs/PARIDADE-UI.md) — é a fase 5 do plano.
+    #
+    # 🔑 **O que ele era e deixou de ser**: o rollback e a referência de
+    # paridade. O rollback agora é `git revert` do commit que o removeu, que é
+    # um comando e traz os 21.352 LOC de volta inteiros; a referência de
+    # paridade virou documento, e o código continua no histórico.
+    "crates/ui-gpui",
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.10"
 edition = "2021"
 authors = ["VintageLightbox Team"]
 license = "MIT"
@@ -22,16 +56,12 @@ serde_json = "1.0"
 
 # Error handling
 thiserror = "1.0"
-anyhow = "1.0"
 
 # Testing tools
 mockall = "0.12"
 proptest = "1.4"
 fake = { version = "2.9", features = ["derive"] }
 tempfile = "3.8"
-
-# Benchmarking
-criterion = { version = "0.5", features = ["html_reports"] }
 
 # Snapshot testing
 insta = { version = "1.34", features = ["yaml"] }
@@ -50,12 +80,106 @@ chrono = { version = "0.4", features = ["serde"] }
 
 [profile.dev]
 opt-level = 0
-debug = true
+# 🚨 **`debug = true` era o que enchia o disco.** Ele grava a tabela de símbolos
+# inteira de cada crate, e neste repositório isso se multiplica por oito árvores
+# (`debug/`, `release/`, as duas arquiteturas do Mac, a universal, o Linux, o
+# wasm e o empacotamento). Em 2026-09-08 o disco encheu **duas vezes no mesmo
+# dia**, a segunda a ponto de nenhum comando conseguir gravar a própria saída.
+#
+# 🔑 **`line-tables-only` mantém o que se usa de verdade**: arquivo e linha em
+# `panic!`, em backtrace e no `assert` de um teste que falhou. O que sai é o que
+# só um depurador de passo a passo lê — inspecionar variável, avaliar expressão —
+# e para isso basta voltar esta linha para `true` no dia em que for preciso.
+debug = "line-tables-only"
+
+# 🚨 **As dependências saem otimizadas mesmo em `dev`, e isto não é detalhe.**
+#
+# `opt-level = 0` vale para o código deste repositório — que é o que se depura —,
+# mas em `dev` ele também valia para o `image`, o `jpeg-decoder` e o `rusqlite`,
+# que são quem faz o trabalho pesado. Medido em 8/set/2026 (`medir-revelacao`,
+# catálogo real): decodificar um preview de 2560px custava **414 ms** e o
+# `to_rgba8` dele **768 ms** — contra 24 ms e 4 ms em `release`. Uma seta na
+# tira custava quase um segundo, e o CLAUDE.md registra que isso já foi
+# confundido com "o framework é lento" duas vezes.
+#
+# 🔑 **Elas compilam uma vez.** Otimizar dependência não custa tempo de
+# recompilação no dia a dia: o que se mexe é o código daqui, que continua em
+# `opt-level = 0`, com nome de função e linha no backtrace.
+[profile.dev.package."*"]
+opt-level = 3
+# E sem símbolo nenhum: ninguém depura passo a passo dentro do `image` ou do
+# `sqlx`, e são eles que respondem pela maior parte dos bytes.
+debug = false
+
+# 🚨 **E os laços de pixel deste repositório também.** `opt-level = 0` num laço
+# que percorre 4,4 milhões de pixels não é "sem otimização", é 30× mais lento:
+# o histograma da Revelação custava 211 ms em `dev` contra 0,3 ms em `release`,
+# e o `para_gpui` 100 ms contra 4 ms — por quadro, enquanto um slider anda.
+#
+# 🔑 **`opt-level = 1` mantém o que se depura**: nome de função, número de linha
+# e backtrace continuam lá; o que sai é a ausência de vetorização e o excesso de
+# cópias que o nível zero deixa. É o meio-termo que faz `cargo run` sem
+# `--release` ser utilizável num app que trabalha com imagem — e o CLAUDE.md
+# registra que a lentidão do perfil já foi confundida com "o framework é lento"
+# duas vezes.
+[profile.dev.package.ui-gpui]
+opt-level = 2
+
+[profile.dev.package.revelacao-core]
+opt-level = 2
+
+[profile.dev.package.infrastructure]
+opt-level = 2
+
+# O codificador de JPEG: um laço de pixel como os de cima. Sem isto, o RAW
+# revelado em `cargo run` levava segundos só no JPEG, e o número parecia custo
+# da LibRaw.
+[profile.dev.package.foto-codec]
+opt-level = 3
 
 [profile.release]
 opt-level = 3
 lto = true
 codegen-units = 1
 
+# O perfil de quem compila o app na própria máquina (`scripts/instalar-*.cmd`).
+#
+# 🚨 **O `release` é lento de propósito, e para o balcão lento demais.** Com
+# `lto = true` e `codegen-units = 1`, cada crate grande (gpui, wgpu, naga) é
+# gerado numa linha só e a ligação final junta o programa inteiro: num Fedora
+# com 8 GiB a primeira compilação passava de uma hora, e o `rustc` do ui-gpui
+# morria sem memória (dono, 2026-09-17).
+#
+# 🔑 **Thin LTO e 16 unidades** dividem o trabalho entre os núcleos e gastam
+# bem menos memória na ligação. O `opt-level` continua 3: os laços de pixel
+# rodam praticamente iguais. Os pacotes distribuídos (`empacotar.sh`) seguem no
+# `release` completo.
+[profile.instalador]
+inherits = "release"
+lto = "thin"
+codegen-units = 16
+
 [profile.test]
 opt-level = 1
+
+# O perfil do `.wasm`.
+#
+# 🚨 **Era `opt-level = "z"`, com a justificativa de que velocidade "custaria o
+# dobro de bytes por pouco ganho".** Medido em 2026-09-12, no navegador, com os
+# dois módulos na mesma página e alternados: codificar uma foto de 24 MP em
+# JPEG q92 custava **1068 ms** com `z` e passou a **624 ms** com `3` mais
+# `+simd128` — **1,71×**, e o arquivo que sai é byte a byte o mesmo. O preço
+# real foi **+21%** de wasm (2,70 → 3,27 MB), e não o dobro.
+#
+# 🔑 **E os bytes se pagam uma vez.** O site serve os motores com
+# `Cache-Control: immutable` (a URL leva `?v=<commit>`) e começa a baixar o da
+# revelação no passar do mouse sobre "Revelar". O que não se paga uma vez é o
+# codificador: ele roda a cada foto salva, e o lote do balcão tem trinta.
+#
+# ⚠️ O `+simd128` é passado por `RUSTFLAGS` em `construir-web.sh`, e não aqui:
+# ele vale para o motor de revelação, que só roda em tela de operador. SIMD em
+# wasm pede Chrome 91+ ou Safari 16.4+.
+[profile.release-web]
+inherits = "release"
+opt-level = 3
+panic = "abort"

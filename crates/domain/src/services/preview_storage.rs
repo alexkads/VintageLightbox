@@ -15,13 +15,13 @@ pub enum PreviewType {
 pub trait PreviewStorage: Send + Sync {
     /// Save a preview to the storage
     fn save(&self, id: &PhotoId, preview_type: PreviewType, data: &[u8]) -> DomainResult<()>;
-    
+
     /// Retrieve a preview from the storage
     fn get(&self, id: &PhotoId, preview_type: PreviewType) -> DomainResult<Option<Vec<u8>>>;
-    
+
     /// Check if a preview exists
     fn has(&self, id: &PhotoId, preview_type: PreviewType) -> DomainResult<bool>;
-    
+
     /// Delete all previews for a photo
     fn delete(&self, id: &PhotoId) -> DomainResult<()>;
 }

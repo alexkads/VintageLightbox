@@ -1,0 +1,2917 @@
+//! O motor de revelação: wgpu, o WGSL, e a passada que aplica os 46 ajustes.
+//!
+//! 🔑 **Ele mora aqui, e não no crate de interface, porque wgpu é detalhe
+//! técnico.** Estava em `ui-gpui/revelacao/processador.rs` por herança: veio do
+//! `gpu_processor.rs` do `crates/ui`, onde nasceu colado na tela. O que o
+//! descolou foi a exportação: `ImageExporterImpl` tinha a **própria**
+//! implementação dos ajustes, na CPU, com 15 dos 46 e uma matemática que já
+//! divergia. Com o motor num lugar só, a tela e o arquivo atravessam o
+//! **mesmo** `.wgsl` — e desde 2026-09-04 o navegador também.
+//!
+//! ## As duas entradas
+//!
+//! O corpo (`shaders/corpo.wgsl`) é um; o ponto de entrada são dois:
+//!
+//! | [`Entrada`] | quem usa | por quê |
+//! |---|---|---|
+//! | `Compute` | desktop (Metal, Vulkan, DX12) | um invocation por pixel, storage texture |
+//! | `Fragmento` | navegador (WebGPU **e** WebGL2) | o WebGL2 não tem compute nem storage texture |
+//!
+//! A concatenação é feita em tempo de compilação do Rust (`concat!` +
+//! `include_str!`), então não há como as duas entradas verem corpos diferentes.
+//! Quem prende que revelam o mesmo pixel é
+//! `o_fragmento_revela_o_mesmo_pixel_que_o_compute`.
+//!
+//! ## Síncrono no desktop, assíncrono no navegador
+//!
+//! `request_device` e a leitura de volta (`map_async`) são assíncronos no wgpu.
+//! O desktop bloqueia a thread de fundo com `pollster` ([`Motor::abrir`],
+//! [`Motor::revelar`]); o navegador não tem thread para bloquear, e usa
+//! [`Motor::abrir_com`] e [`Motor::revelar_async`]. É a mesma função por baixo.
+//!
+//! ## O que ficou do outro lado
+//!
+//! A fila de pedidos — thread, canal, descarte do pedido velho durante um
+//! arrasto — continua em `ui-gpui`: é resposta a um dedo arrastando um slider,
+//! e não tem o que fazer numa exportação, que roda uma vez e espera.
+
+use std::collections::HashMap;
+use std::num::NonZeroUsize;
+use std::sync::Arc;
+
+use image::DynamicImage;
+use lru::LruCache;
+
+use crate::ajustes::{Ajustes, TAMANHO_DO_UNIFORM};
+use crate::transformacao::{Corte, Quadro};
+
+/// O shader do desktop: o corpo mais a entrada por compute.
+const SHADER_COMPUTE: &str = concat!(
+    include_str!("shaders/corpo.wgsl"),
+    include_str!("shaders/darktable_constantes.wgsl"),
+    include_str!("shaders/darktable.wgsl"),
+    include_str!("shaders/entrada_compute.wgsl")
+);
+
+/// O shader do navegador: o corpo mais a entrada por vértice e fragmento.
+const SHADER_FRAGMENTO: &str = concat!(
+    include_str!("shaders/corpo.wgsl"),
+    include_str!("shaders/darktable_constantes.wgsl"),
+    include_str!("shaders/darktable.wgsl"),
+    include_str!("shaders/entrada_fragmento.wgsl")
+);
+
+/// O formato em que a revelação é lida de volta — o mesmo da textura de entrada.
+const FORMATO_DE_LEITURA: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+
+/// Por onde o shader entra: ver o módulo.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Entrada {
+    /// `@compute` escrevendo numa storage texture. O desktop.
+    Compute,
+    /// `@vertex` + `@fragment` escrevendo no alvo do render pass. O navegador.
+    Fragmento,
+}
+
+/// O pipeline de cada entrada.
+///
+/// O de fragmento é **um por formato de alvo**: a textura de leitura é
+/// `Rgba8Unorm`, e a superfície de um canvas é o que o navegador preferir
+/// (`Bgra8Unorm` no WebGPU). O render pipeline grava o formato do alvo, então
+/// há um para cada, criados quando pedidos e guardados.
+enum Pipeline {
+    Compute(wgpu::ComputePipeline),
+    Fragmento {
+        modulo: wgpu::ShaderModule,
+        layout_do_grupo: wgpu::BindGroupLayout,
+        layout: wgpu::PipelineLayout,
+        por_formato: HashMap<wgpu::TextureFormat, wgpu::RenderPipeline>,
+    },
+}
+
+/// Recursos por tamanho de imagem.
+///
+/// Trocar de foto no mesmo tamanho reaproveita textura e buffer; trocar de
+/// tamanho cria de novo. O cache guarda cinco tamanhos porque uma sessão de
+/// revelação alterna entre poucas resoluções (o preview, o full, o recorte), e
+/// recriar textura a cada troca aparece como engasgo.
+struct Recursos {
+    textura_entrada: wgpu::Texture,
+    textura_saida: wgpu::Texture,
+    buffer_ajustes: wgpu::Buffer,
+    buffer_saida: wgpu::Buffer,
+    grupo: wgpu::BindGroup,
+    bytes_por_linha_alinhado: u32,
+    bytes_por_linha: u32,
+    /// Os pixels que já estão na textura de entrada — por identidade de `Arc`,
+    /// não por conteúdo. Comparar 24 MB byte a byte para decidir se vale subir
+    /// 24 MB custaria quase o mesmo que subir.
+    ultimos_pixels: Option<Arc<Vec<u8>>>,
+    /// As grades bilaterais do estágio darktable — `shadows and highlights` e
+    /// `monochrome` —, de 1×1 enquanto nenhum dos dois está ligado.
+    textura_grade_sh: wgpu::Texture,
+    textura_grade_mo: wgpu::Texture,
+    /// Tamanho e sigmas das duas grades (`DadosDasGrades` no WGSL).
+    buffer_grades: wgpu::Buffer,
+    /// O quadro do arquivo que sai (`QuadroDeSaida` no WGSL) — ver
+    /// [`Motor::definir_corte`].
+    buffer_quadro: wgpu::Buffer,
+    /// O que produziu as grades em uso — ver [`ChaveDasGrades`].
+    chave_das_grades: Option<ChaveDasGrades>,
+    /// A última combinação pedida e quando ela chegou — ver [`adiar_as_grades`].
+    grades_pedidas: Option<ChaveDasGrades>,
+    ultimo_pedido_ms: f64,
+    /// O último desenho saiu com grades de antes.
+    grades_pendentes: bool,
+}
+
+fn criar_recursos(
+    dispositivo: &wgpu::Device,
+    pipeline: &Pipeline,
+    largura: u32,
+    altura: u32,
+) -> Recursos {
+    /// Exigência do wgpu ao copiar textura para buffer.
+    const ALINHAMENTO: u32 = 256;
+    let bytes_por_linha = 4 * largura;
+    let bytes_por_linha_alinhado = bytes_por_linha.div_ceil(ALINHAMENTO) * ALINHAMENTO;
+
+    let descritor = |rotulo, uso| wgpu::TextureDescriptor {
+        label: Some(rotulo),
+        size: wgpu::Extent3d {
+            width: largura,
+            height: altura,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: FORMATO_DE_LEITURA,
+        usage: uso,
+        view_formats: &[],
+    };
+
+    let textura_entrada = dispositivo.create_texture(&descritor(
+        "Input Texture",
+        wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+    ));
+    // A saída é escrita pelo shader como storage (compute) ou como alvo de
+    // render pass (fragmento) — e lida de volta por cópia nos dois casos.
+    let uso_da_saida = match pipeline {
+        Pipeline::Compute(_) => wgpu::TextureUsages::STORAGE_BINDING,
+        Pipeline::Fragmento { .. } => wgpu::TextureUsages::RENDER_ATTACHMENT,
+    };
+    let textura_saida = dispositivo.create_texture(&descritor(
+        "Output Texture",
+        uso_da_saida | wgpu::TextureUsages::COPY_SRC,
+    ));
+
+    let buffer_ajustes = dispositivo.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("Params Buffer"),
+        size: TAMANHO_DO_UNIFORM,
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+
+    let vazia = crate::darktable::GradeParaGpu::vazia();
+    let textura_grade_sh = textura_de_grade(dispositivo, None, &vazia);
+    let textura_grade_mo = textura_de_grade(dispositivo, None, &vazia);
+    let buffer_grades = dispositivo.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("Dados das grades"),
+        size: 64,
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    // Duas linhas `vec4`: 32 bytes, múltiplo de 16 como o WebGL2 exige.
+    let buffer_quadro = dispositivo.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("Quadro de saída"),
+        size: 32,
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    let grupo = montar_grupo(
+        dispositivo,
+        pipeline,
+        &textura_entrada,
+        &textura_saida,
+        &buffer_ajustes,
+        &textura_grade_sh,
+        &textura_grade_mo,
+        &buffer_grades,
+        &buffer_quadro,
+    );
+
+    let buffer_saida = dispositivo.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("Output Buffer"),
+        size: (bytes_por_linha_alinhado * altura) as wgpu::BufferAddress,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+
+    Recursos {
+        textura_entrada,
+        textura_saida,
+        buffer_ajustes,
+        buffer_saida,
+        grupo,
+        bytes_por_linha_alinhado,
+        bytes_por_linha,
+        ultimos_pixels: None,
+        textura_grade_sh,
+        textura_grade_mo,
+        buffer_grades,
+        buffer_quadro,
+        chave_das_grades: None,
+        grades_pedidas: None,
+        ultimo_pedido_ms: 0.0,
+        grades_pendentes: false,
+    }
+}
+
+/// O layout do grupo 0: entrada, saída (só no compute), ajustes, as duas grades
+/// bilaterais e os dados delas.
+///
+/// Todas as texturas lidas são `Float { filterable: false }`: o shader só usa
+/// `textureLoad`, e o `R32Float` das grades não é filtrável sem feature extra.
+fn criar_layout_do_grupo(
+    dispositivo: &wgpu::Device,
+    estagio: wgpu::ShaderStages,
+) -> wgpu::BindGroupLayout {
+    let textura = |binding| wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: estagio,
+        ty: wgpu::BindingType::Texture {
+            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+            view_dimension: wgpu::TextureViewDimension::D2,
+            multisampled: false,
+        },
+        count: None,
+    };
+    let uniforme = |binding| wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: estagio,
+        ty: wgpu::BindingType::Buffer {
+            ty: wgpu::BufferBindingType::Uniform,
+            has_dynamic_offset: false,
+            min_binding_size: None,
+        },
+        count: None,
+    };
+    let mut entradas = vec![
+        textura(0),
+        uniforme(2),
+        textura(3),
+        textura(4),
+        uniforme(5),
+        uniforme(6),
+    ];
+    if estagio == wgpu::ShaderStages::COMPUTE {
+        entradas.push(wgpu::BindGroupLayoutEntry {
+            binding: 1,
+            visibility: estagio,
+            ty: wgpu::BindingType::StorageTexture {
+                access: wgpu::StorageTextureAccess::WriteOnly,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                view_dimension: wgpu::TextureViewDimension::D2,
+            },
+            count: None,
+        });
+    }
+    dispositivo.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("Layout do grupo 0"),
+        entries: &entradas,
+    })
+}
+
+/// O bind group do passe: entrada, saída (só no compute), ajustes e as grades.
+///
+/// 🔑 **É refeito quando as grades mudam de tamanho**, e não a cada quadro: a
+/// textura de uma grade é recriada quando outra foto ou outro raio muda o
+/// número de células, e o grupo antigo apontaria para a textura destruída.
+#[allow(clippy::too_many_arguments)]
+fn montar_grupo(
+    dispositivo: &wgpu::Device,
+    pipeline: &Pipeline,
+    entrada: &wgpu::Texture,
+    saida: &wgpu::Texture,
+    ajustes: &wgpu::Buffer,
+    grade_sh: &wgpu::Texture,
+    grade_mo: &wgpu::Texture,
+    grades: &wgpu::Buffer,
+    quadro: &wgpu::Buffer,
+) -> wgpu::BindGroup {
+    let vista = |t: &wgpu::Texture| t.create_view(&wgpu::TextureViewDescriptor::default());
+    let (v_entrada, v_saida, v_sh, v_mo) = (
+        vista(entrada),
+        vista(saida),
+        vista(grade_sh),
+        vista(grade_mo),
+    );
+    let mut entradas = vec![
+        wgpu::BindGroupEntry {
+            binding: 0,
+            resource: wgpu::BindingResource::TextureView(&v_entrada),
+        },
+        wgpu::BindGroupEntry {
+            binding: 2,
+            resource: ajustes.as_entire_binding(),
+        },
+        wgpu::BindGroupEntry {
+            binding: 3,
+            resource: wgpu::BindingResource::TextureView(&v_sh),
+        },
+        wgpu::BindGroupEntry {
+            binding: 4,
+            resource: wgpu::BindingResource::TextureView(&v_mo),
+        },
+        wgpu::BindGroupEntry {
+            binding: 5,
+            resource: grades.as_entire_binding(),
+        },
+        wgpu::BindGroupEntry {
+            binding: 6,
+            resource: quadro.as_entire_binding(),
+        },
+    ];
+    match pipeline {
+        Pipeline::Compute(pipeline) => {
+            entradas.push(wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::TextureView(&v_saida),
+            });
+            dispositivo.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Compute Bind Group"),
+                layout: &pipeline.get_bind_group_layout(0),
+                entries: &entradas,
+            })
+        }
+        // O fragmento não tem o binding 1: a saída é o alvo do passe.
+        Pipeline::Fragmento {
+            layout_do_grupo, ..
+        } => dispositivo.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Fragment Bind Group"),
+            layout: layout_do_grupo,
+            entries: &entradas,
+        }),
+    }
+}
+
+/// Uma grade bilateral como textura `R32Float`, com as fatias de L lado a lado.
+fn textura_de_grade(
+    dispositivo: &wgpu::Device,
+    fila: Option<&wgpu::Queue>,
+    grade: &crate::darktable::GradeParaGpu,
+) -> wgpu::Texture {
+    let tamanho = wgpu::Extent3d {
+        width: grade.largura_do_atlas(),
+        height: grade.size_y,
+        depth_or_array_layers: 1,
+    };
+    let textura = dispositivo.create_texture(&wgpu::TextureDescriptor {
+        label: Some("Grade bilateral"),
+        size: tamanho,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::R32Float,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    if let Some(fila) = fila {
+        fila.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &textura,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            bytemuck::cast_slice(&grade.dados),
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(4 * grade.largura_do_atlas()),
+                rows_per_image: Some(grade.size_y),
+            },
+            tamanho,
+        );
+    }
+    textura
+}
+
+/// Quanto tempo sem mudança nos ajustes que alimentam as grades antes de refazê-las.
+const OCIOSO_ANTES_DAS_GRADES_MS: f64 = 150.0;
+
+/// Desenhar com as grades de antes, em vez de refazê-las agora?
+///
+/// 🚨 **Refazer as grades custa centenas de milissegundos numa cópia de 2048
+/// px** (medido no nativo; o wasm é mais lento), e o editor desenha a cada
+/// quadro de um arrasto: com o estilo P&B ligado, arrastar a exposição virava
+/// um slide travado (dono, 2026-09-12: *"achei os novos controles RGB meio
+/// travado para deslizar"*).
+///
+/// 🔑 **Enquanto os ajustes continuam mudando, a GPU desenha com a grade de
+/// antes** — a exposição, as cores e a vinheta respondem na hora, e só a
+/// vizinhança do `shadhi` e o filtro do `monochrome` ficam um instante para
+/// trás. Parado o arrasto por [`OCIOSO_ANTES_DAS_GRADES_MS`], a grade exata é
+/// refeita. Nunca adia sem relógio (exportação, desktop), numa foto nova, na
+/// primeira grade, ou quando um módulo acabou de ligar.
+fn adiar_as_grades(
+    feitas: Option<&ChaveDasGrades>,
+    pedida: &ChaveDasGrades,
+    relogio: Option<f64>,
+    ultimo_pedido_ms: f64,
+) -> bool {
+    let (Some(agora), Some(feitas)) = (relogio, feitas) else {
+        return false;
+    };
+    feitas.pixels == pedida.pixels
+        && feitas.escala == pedida.escala
+        && feitas.modulos == pedida.modulos
+        && agora - ultimo_pedido_ms < OCIOSO_ANTES_DAS_GRADES_MS
+}
+
+/// O que decide se as grades em uso ainda valem.
+///
+/// 🔑 **Mexer num controle nosso não refaz a grade**: ela depende só dos
+/// pixels (pela identidade do `Arc`, como a textura de entrada), da escala e
+/// dos parâmetros de `exposure`, `shadhi` e `monochrome`. Refazê-la a cada
+/// arrasto de slider custaria o módulo inteiro em CPU por quadro.
+#[derive(Clone, PartialEq)]
+struct ChaveDasGrades {
+    pixels: usize,
+    escala: u32,
+    parametros: Vec<u32>,
+    /// `shadhi` e `monochrome` ligados. Uma grade de antes só serve com os
+    /// mesmos módulos: sem ela, o módulo recém-ligado leria uma grade vazia.
+    modulos: (bool, bool),
+}
+
+impl ChaveDasGrades {
+    fn nova(pixels: &Arc<Vec<u8>>, ajustes: &Ajustes, escala: f32) -> Self {
+        let vetor = ajustes.como_vetor();
+        let posicao = |nome: &str| {
+            Ajustes::NOMES
+                .iter()
+                .position(|n| *n == nome)
+                .expect("campo do estágio darktable")
+        };
+        let exposure = posicao("dt_exposure_ativo")..=posicao("dt_exposure_exposure");
+        let locais = posicao("dt_shadhi_ativo")..=posicao("dt_monochrome_highlights");
+        Self {
+            pixels: Arc::as_ptr(pixels) as usize,
+            modulos: (
+                ajustes.dt_shadhi_ativo != 0.0,
+                ajustes.dt_monochrome_ativo != 0.0,
+            ),
+            escala: escala.to_bits(),
+            parametros: exposure.chain(locais).map(|i| vetor[i].to_bits()).collect(),
+        }
+    }
+}
+
+/// O dispositivo, o pipeline e o cache de recursos — abertos uma vez.
+///
+/// ⚠️ **Abrir custa**: `request_adapter` e `request_device` são assíncronos e
+/// levam dezenas de milissegundos. Quem revela abre um na thread de fundo e o
+/// mantém pela sessão inteira; quem exporta abre um por lote, não por foto.
+pub struct Motor {
+    dispositivo: wgpu::Device,
+    fila: wgpu::Queue,
+    pipeline: Pipeline,
+    /// Recursos por tamanho de imagem — ver [`Recursos`].
+    cache: LruCache<(u32, u32), Recursos>,
+    /// Qual API gráfica respondeu — Metal, Vulkan, WebGPU, WebGL2.
+    ///
+    /// 🔑 **É o selo que o editor do site mostra ao lado do nome do arquivo.**
+    /// Lá ele separa WebGPU de WebGL2, que rendem diferente; aqui ele responde
+    /// "a GPU está mesmo sendo usada, e por qual caminho" — a pergunta que
+    /// aparece toda vez que alguém acha o arrasto lento.
+    backend: &'static str,
+    /// A razão entre a imagem revelada e a foto original — ver
+    /// [`Motor::definir_escala_do_original`].
+    escala_do_original: f32,
+    /// Ver [`Motor::definir_relogio`].
+    relogio_ms: Option<f64>,
+    /// Ver [`Motor::grades_pendentes`].
+    grades_pendentes: bool,
+    /// O enquadramento da foto que vai ser revelada — ver [`Motor::definir_corte`].
+    corte: Corte,
+}
+
+impl Motor {
+    /// `None` quando não há adaptador de GPU.
+    ///
+    /// 🚨 **E aí não há caminho de CPU para cair.** O `crates/ui` tinha um —
+    /// uma segunda implementação da mesma matemática, com resultado diferente
+    /// do shader — e ele não veio junto de propósito: um motor que responde
+    /// "certo por outro caminho" é pior que um que responde "não sei".
+    ///
+    /// Quem chama decide o que fazer com o `None`: a Revelação mostra a foto sem
+    /// ajuste, e a exportação **falha**, porque gravar arquivo com os ajustes
+    /// descartados em silêncio é o defeito que ela acabou de deixar de ter.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn abrir() -> Option<Self> {
+        Self::abrir_por(Entrada::Compute)
+    }
+
+    /// [`Motor::abrir`] com a entrada escolhida — o desktop usa `Compute`; o
+    /// `Fragmento` em nativo existe para o teste que compara os dois.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn abrir_por(entrada: Entrada) -> Option<Self> {
+        let instancia = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::all(),
+            ..Default::default()
+        });
+
+        let adaptador =
+            pollster::block_on(instancia.request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                compatible_surface: None,
+                force_fallback_adapter: false,
+            }))?;
+
+        pollster::block_on(Self::abrir_com(
+            &adaptador,
+            entrada,
+            wgpu::Limits::default(),
+        ))
+        .ok()
+    }
+
+    /// Abre o dispositivo num adaptador que quem chama já escolheu.
+    ///
+    /// É a porta do navegador: lá o adaptador tem de ser compatível com a
+    /// superfície do canvas, e os limites dependem do backend que respondeu
+    /// (`Limits::downlevel_webgl2_defaults()` no WebGL2, com a resolução do
+    /// adaptador por cima — o padrão sozinho declara 2048 px de textura).
+    ///
+    /// Devolve o erro do wgpu, e não `None`: no navegador a mensagem é a
+    /// única pista de por que um adaptador que respondeu não abriu.
+    pub async fn abrir_com(
+        adaptador: &wgpu::Adapter,
+        entrada: Entrada,
+        limites: wgpu::Limits,
+    ) -> Result<Self, wgpu::RequestDeviceError> {
+        let (dispositivo, fila) = adaptador
+            .request_device(
+                &wgpu::DeviceDescriptor {
+                    label: Some("VintageLightbox GPU"),
+                    required_features: wgpu::Features::empty(),
+                    required_limits: limites,
+                    memory_hints: wgpu::MemoryHints::Performance,
+                },
+                None,
+            )
+            .await?;
+
+        // 🚨 O `struct Params` do WGSL tem de casar com o `Ajustes`, campo a
+        // campo: o `uniform` viaja como bytes crus e liga por **posição**, não
+        // por nome. Quem prende isso é
+        // `o_wgsl_declara_os_mesmos_46_campos_na_mesma_ordem`.
+        let pipeline = match entrada {
+            Entrada::Compute => {
+                let modulo = dispositivo.create_shader_module(wgpu::ShaderModuleDescriptor {
+                    label: Some("Image Adjustments Shader (compute)"),
+                    source: wgpu::ShaderSource::Wgsl(SHADER_COMPUTE.into()),
+                });
+                // 🚨 Explícito também aqui: o layout automático declara toda
+                // `texture_2d<f32>` como filtrável, e a grade bilateral é
+                // `R32Float`, que não é.
+                let layout_do_grupo =
+                    criar_layout_do_grupo(&dispositivo, wgpu::ShaderStages::COMPUTE);
+                let layout = dispositivo.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("Compute Pipeline Layout"),
+                    bind_group_layouts: &[&layout_do_grupo],
+                    push_constant_ranges: &[],
+                });
+                Pipeline::Compute(dispositivo.create_compute_pipeline(
+                    &wgpu::ComputePipelineDescriptor {
+                        label: Some("Image Processing Pipeline"),
+                        layout: Some(&layout),
+                        module: &modulo,
+                        entry_point: Some("main"),
+                        compilation_options: wgpu::PipelineCompilationOptions::default(),
+                        cache: None,
+                    },
+                ))
+            }
+            Entrada::Fragmento => {
+                let modulo = dispositivo.create_shader_module(wgpu::ShaderModuleDescriptor {
+                    label: Some("Image Adjustments Shader (fragment)"),
+                    source: wgpu::ShaderSource::Wgsl(SHADER_FRAGMENTO.into()),
+                });
+                // Explícito, e não `layout: None`: o mesmo bind group serve a
+                // todos os pipelines por formato, e layouts implícitos são um
+                // por pipeline.
+                let layout_do_grupo =
+                    criar_layout_do_grupo(&dispositivo, wgpu::ShaderStages::FRAGMENT);
+                let layout = dispositivo.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("Fragment Pipeline Layout"),
+                    bind_group_layouts: &[&layout_do_grupo],
+                    push_constant_ranges: &[],
+                });
+                Pipeline::Fragmento {
+                    modulo,
+                    layout_do_grupo,
+                    layout,
+                    por_formato: HashMap::new(),
+                }
+            }
+        };
+
+        Ok(Self {
+            dispositivo,
+            fila,
+            pipeline,
+            cache: LruCache::new(NonZeroUsize::new(5).expect("5 não é zero")),
+            escala_do_original: 1.0,
+            relogio_ms: None,
+            grades_pendentes: false,
+            corte: Corte::inteiro(),
+            backend: match adaptador.get_info().backend {
+                wgpu::Backend::Metal => "Metal",
+                wgpu::Backend::Vulkan => "Vulkan",
+                wgpu::Backend::Dx12 => "DirectX 12",
+                wgpu::Backend::Gl => "OpenGL",
+                wgpu::Backend::BrowserWebGpu => "WebGPU",
+                wgpu::Backend::Empty => "sem GPU",
+            },
+        })
+    }
+
+    /// Qual API gráfica respondeu.
+    pub fn backend(&self) -> &'static str {
+        self.backend
+    }
+
+    /// Por onde este motor entra no shader.
+    pub fn entrada(&self) -> Entrada {
+        match self.pipeline {
+            Pipeline::Compute(_) => Entrada::Compute,
+            Pipeline::Fragmento { .. } => Entrada::Fragmento,
+        }
+    }
+
+    /// Os limites do dispositivo aberto — o maior lado de textura, em especial.
+    pub fn limites(&self) -> wgpu::Limits {
+        self.dispositivo.limits()
+    }
+
+    /// O dispositivo, para quem precisa configurar uma superfície com ele.
+    pub fn dispositivo(&self) -> &wgpu::Device {
+        &self.dispositivo
+    }
+
+    /// A fila, para quem submete os **próprios** comandos com este dispositivo.
+    ///
+    /// 🔑 É o que permite compor o que este motor revelou sem abrir um segundo
+    /// dispositivo: a tela do cliente (`tela-do-cliente-web`) revela cada foto numa
+    /// textura com [`Self::desenhar`] e compõe as duas na superfície com um
+    /// pipeline dela. Dois dispositivos não compartilham textura nenhuma.
+    pub fn fila(&self) -> &wgpu::Queue {
+        &self.fila
+    }
+
+    /// A razão entre a imagem que vai ser revelada e a foto original.
+    ///
+    /// 🚨 **Os módulos locais do estágio darktable medem em pixels da foto
+    /// original**: o raio de 100 px do `shadows and highlights` é um pedaço da
+    /// foto, e numa cópia de trabalho de 2048 px de uma foto de 6016 ele é um
+    /// raio de 34. Sem isto, a cópia mostraria um estilo e o arquivo sairia com
+    /// outro. Padrão 1 — a exportação em tamanho cheio.
+    pub fn definir_escala_do_original(&mut self, escala: f32) {
+        self.escala_do_original = if escala.is_finite() && escala > 0.0 {
+            escala
+        } else {
+            1.0
+        };
+    }
+
+    /// O relógio de quem desenha em tempo real, em milissegundos — o
+    /// `performance.now()` do navegador, o `agora` do `requestAnimationFrame`.
+    ///
+    /// Com relógio, [`Motor::desenhar`] adia as grades bilaterais enquanto os
+    /// ajustes que as alimentam continuam mudando (ver `adiar_as_grades`).
+    /// `None`, o padrão, é sem pressa: toda revelação sai com as grades exatas.
+    /// [`Motor::revelar`] ignora o relógio — o arquivo exportado é sempre exato.
+    pub fn definir_relogio(&mut self, agora_ms: Option<f64>) {
+        self.relogio_ms = agora_ms.filter(|v| v.is_finite());
+    }
+
+    /// O último [`Motor::desenhar`] saiu com grades de antes: desenhe de novo,
+    /// com os mesmos ajustes, no próximo quadro — é o que as refaz quando o
+    /// arrasto parar.
+    pub fn grades_pendentes(&self) -> bool {
+        self.grades_pendentes
+    }
+
+    /// O enquadramento da foto que vai ser revelada — é onde as vinhetas moram.
+    ///
+    /// 🚨 **O shader revela a foto inteira, e as vinhetas são do recorte.** Quem
+    /// recorta continua sendo [`crate::transformacao::aplicar`], depois — as
+    /// grades bilaterais, o ruído e a nitidez leem a foto inteira, e a prévia do
+    /// editor do site recorta por CSS. O corte entra aqui só para as duas
+    /// vinhetas (a de lente e a do darktable) medirem centro, proporção e escala
+    /// no quadro do arquivo ([`Corte::quadro`]). Sem isto, uma foto 3:2 recortada
+    /// em 3:4 saía com a vinheta centrada e na proporção da foto inteira —
+    /// laterais do recorte limpas (dono, 2026-09-13).
+    ///
+    /// ⚠️ **Vale até ser trocado**, como [`Motor::definir_escala_do_original`]:
+    /// quem revela fotos diferentes no mesmo motor define antes de cada uma.
+    /// Padrão: [`Corte::inteiro`], em que as vinhetas saem bit a bit as de antes.
+    pub fn definir_corte(&mut self, corte: &Corte) {
+        self.corte = corte.clone();
+    }
+
+    /// Uma passada: sobe o que mudou, despacha, lê de volta.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn revelar(
+        &mut self,
+        pixels: &Arc<Vec<u8>>,
+        largura: u32,
+        altura: u32,
+        ajustes: &Ajustes,
+    ) -> Option<DynamicImage> {
+        pollster::block_on(self.revelar_async(pixels, largura, altura, ajustes))
+    }
+
+    /// [`Motor::revelar`] sem bloquear: é o que o navegador consegue esperar.
+    pub async fn revelar_async(
+        &mut self,
+        pixels: &Arc<Vec<u8>>,
+        largura: u32,
+        altura: u32,
+        ajustes: &Ajustes,
+    ) -> Option<DynamicImage> {
+        let escala = self.escala_do_original;
+        let quadro = self.corte.quadro(largura, altura);
+        let Motor {
+            dispositivo,
+            fila,
+            pipeline,
+            cache,
+            ..
+        } = self;
+        let recursos = preparar(
+            dispositivo,
+            fila,
+            pipeline,
+            cache,
+            pixels,
+            largura,
+            altura,
+            ajustes,
+            escala,
+            None,
+            &quadro,
+        );
+
+        let mut encoder = dispositivo.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Revelação Encoder"),
+        });
+
+        let vista_de_saida = recursos
+            .textura_saida
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        despachar(
+            dispositivo,
+            pipeline,
+            &mut encoder,
+            recursos,
+            largura,
+            altura,
+            &vista_de_saida,
+            FORMATO_DE_LEITURA,
+        );
+
+        encoder.copy_texture_to_buffer(
+            wgpu::ImageCopyTexture {
+                texture: &recursos.textura_saida,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::ImageCopyBuffer {
+                buffer: &recursos.buffer_saida,
+                layout: wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(recursos.bytes_por_linha_alinhado),
+                    rows_per_image: Some(altura),
+                },
+            },
+            wgpu::Extent3d {
+                width: largura,
+                height: altura,
+                depth_or_array_layers: 1,
+            },
+        );
+
+        fila.submit(std::iter::once(encoder.finish()));
+
+        let fatia = recursos.buffer_saida.slice(..);
+        let (avisa, espera) = futures_channel::oneshot::channel();
+        fatia.map_async(wgpu::MapMode::Read, move |r| {
+            let _ = avisa.send(r);
+        });
+        // 🚨 **Mapeamento que falhou desmapeia antes de sair.** O `map_async`
+        // marca o buffer como mapeado na hora do pedido, e só o `unmap` desfaz
+        // a marca. Com o `?` direto, a GPU perdida (driver que reinicia, device
+        // lost) deixava o buffer marcado, e a foto SEGUINTE batia no
+        // `assert_eq!(initial_range, 0..0, "Buffer is already mapped")` do wgpu:
+        // pânico, `RuntimeError: unreachable`, e o wasm inteiro morto até
+        // recarregar a página. Achado pelo estresse `gpu-perdida` do e-commerce
+        // (2026-09-13). Assim a falha volta como `None` — erro de uma foto,
+        // que quem chama pode tratar reabrindo o motor.
+        if esperar_o_mapeamento(dispositivo, fila, espera)
+            .await
+            .is_none()
+        {
+            recursos.buffer_saida.unmap();
+            return None;
+        }
+
+        let dados = fatia.get_mapped_range();
+        // A GPU devolve cada linha alinhada em 256 bytes; a imagem não tem esse
+        // enchimento. Copiar o buffer inteiro daria uma foto com listras
+        // deslocadas — e quanto mais estreita, mais torta.
+        let mut saida = Vec::with_capacity((recursos.bytes_por_linha * altura) as usize);
+        for y in 0..altura {
+            let inicio = (y * recursos.bytes_por_linha_alinhado) as usize;
+            saida.extend_from_slice(&dados[inicio..inicio + recursos.bytes_por_linha as usize]);
+        }
+        drop(dados);
+        recursos.buffer_saida.unmap();
+
+        Some(DynamicImage::ImageRgba8(image::RgbaImage::from_raw(
+            largura, altura, saida,
+        )?))
+    }
+
+    /// Revela **para um alvo de quem chama**, sem ler de volta — a superfície
+    /// de um canvas, no navegador.
+    ///
+    /// O alvo tem de ter o tamanho da imagem: o triângulo cobre o alvo inteiro
+    /// e cada fragmento lê o pixel de mesma coordenada. `None` se o motor for de
+    /// compute (não há render pass para escrever no alvo) ou se o formato não
+    /// puder ser alvo de cor.
+    pub fn desenhar(
+        &mut self,
+        pixels: &Arc<Vec<u8>>,
+        largura: u32,
+        altura: u32,
+        ajustes: &Ajustes,
+        alvo: &wgpu::TextureView,
+        formato: wgpu::TextureFormat,
+    ) -> Option<()> {
+        if !matches!(self.pipeline, Pipeline::Fragmento { .. }) {
+            return None;
+        }
+        let escala = self.escala_do_original;
+        let relogio = self.relogio_ms;
+        let quadro = self.corte.quadro(largura, altura);
+        let Motor {
+            dispositivo,
+            fila,
+            pipeline,
+            cache,
+            ..
+        } = self;
+        let recursos = preparar(
+            dispositivo,
+            fila,
+            pipeline,
+            cache,
+            pixels,
+            largura,
+            altura,
+            ajustes,
+            escala,
+            relogio,
+            &quadro,
+        );
+        let pendentes = recursos.grades_pendentes;
+
+        let mut encoder = dispositivo.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Revelação Encoder (superfície)"),
+        });
+        despachar(
+            dispositivo,
+            pipeline,
+            &mut encoder,
+            recursos,
+            largura,
+            altura,
+            alvo,
+            formato,
+        );
+        fila.submit(std::iter::once(encoder.finish()));
+        self.grades_pendentes = pendentes;
+        Some(())
+    }
+}
+
+/// Garante os recursos do tamanho, sobe os pixels se mudaram e grava os ajustes.
+#[allow(clippy::too_many_arguments)]
+fn preparar<'a>(
+    dispositivo: &wgpu::Device,
+    fila: &wgpu::Queue,
+    pipeline: &Pipeline,
+    cache: &'a mut LruCache<(u32, u32), Recursos>,
+    pixels: &Arc<Vec<u8>>,
+    largura: u32,
+    altura: u32,
+    ajustes: &Ajustes,
+    escala: f32,
+    relogio: Option<f64>,
+    quadro: &Quadro,
+) -> &'a mut Recursos {
+    if !cache.contains(&(largura, altura)) {
+        cache.put(
+            (largura, altura),
+            criar_recursos(dispositivo, pipeline, largura, altura),
+        );
+    }
+    let recursos = cache
+        .get_mut(&(largura, altura))
+        .expect("acabou de entrar no cache");
+
+    let precisa_subir = match &recursos.ultimos_pixels {
+        Some(ultimos) => !Arc::ptr_eq(ultimos, pixels),
+        None => true,
+    };
+
+    if precisa_subir {
+        fila.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &recursos.textura_entrada,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            pixels,
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(recursos.bytes_por_linha),
+                rows_per_image: Some(altura),
+            },
+            wgpu::Extent3d {
+                width: largura,
+                height: altura,
+                depth_or_array_layers: 1,
+            },
+        );
+        recursos.ultimos_pixels = Some(pixels.clone());
+    }
+
+    // Estágio darktable: as grades bilaterais só se refazem quando a chave muda.
+    recursos.grades_pendentes = false;
+    if ajustes.dt_shadhi_ativo != 0.0 || ajustes.dt_monochrome_ativo != 0.0 {
+        let chave = ChaveDasGrades::nova(pixels, ajustes, escala);
+        if let Some(agora) = relogio {
+            if recursos.grades_pedidas.as_ref() != Some(&chave) {
+                recursos.ultimo_pedido_ms = agora;
+                recursos.grades_pedidas = Some(chave.clone());
+            }
+        }
+        if recursos.chave_das_grades.as_ref() != Some(&chave)
+            && adiar_as_grades(
+                recursos.chave_das_grades.as_ref(),
+                &chave,
+                relogio,
+                recursos.ultimo_pedido_ms,
+            )
+        {
+            recursos.grades_pendentes = true;
+        } else if recursos.chave_das_grades.as_ref() != Some(&chave) {
+            let grades = crate::darktable::grades_do_estagio(
+                pixels,
+                largura as usize,
+                altura as usize,
+                ajustes,
+                escala,
+            );
+            let mut dados = [0.0f32; 16];
+            if let Some(g) = &grades.shadhi {
+                recursos.textura_grade_sh = textura_de_grade(dispositivo, Some(fila), g);
+                dados[..6].copy_from_slice(&[
+                    g.size_x as f32,
+                    g.size_y as f32,
+                    g.size_z as f32,
+                    0.0,
+                    g.sigma_s,
+                    g.sigma_r,
+                ]);
+            }
+            if let Some(g) = &grades.monochrome {
+                recursos.textura_grade_mo = textura_de_grade(dispositivo, Some(fila), g);
+                dados[8..14].copy_from_slice(&[
+                    g.size_x as f32,
+                    g.size_y as f32,
+                    g.size_z as f32,
+                    0.0,
+                    g.sigma_s,
+                    g.sigma_r,
+                ]);
+            }
+            fila.write_buffer(&recursos.buffer_grades, 0, bytemuck::cast_slice(&dados));
+            recursos.grupo = montar_grupo(
+                dispositivo,
+                pipeline,
+                &recursos.textura_entrada,
+                &recursos.textura_saida,
+                &recursos.buffer_ajustes,
+                &recursos.textura_grade_sh,
+                &recursos.textura_grade_mo,
+                &recursos.buffer_grades,
+                &recursos.buffer_quadro,
+            );
+            recursos.chave_das_grades = Some(chave);
+        }
+    }
+    fila.write_buffer(&recursos.buffer_ajustes, 0, bytemuck::bytes_of(ajustes));
+    fila.write_buffer(
+        &recursos.buffer_quadro,
+        0,
+        bytemuck::cast_slice(&quadro.para_gpu()),
+    );
+    recursos
+}
+
+/// Grava no encoder a passada do shader — compute ou render — sobre `alvo`.
+///
+/// No compute o `alvo` é ignorado: a saída é a storage texture do bind group.
+#[allow(clippy::too_many_arguments)]
+fn despachar(
+    dispositivo: &wgpu::Device,
+    pipeline: &mut Pipeline,
+    encoder: &mut wgpu::CommandEncoder,
+    recursos: &Recursos,
+    largura: u32,
+    altura: u32,
+    alvo: &wgpu::TextureView,
+    formato: wgpu::TextureFormat,
+) {
+    match pipeline {
+        Pipeline::Compute(pipeline) => {
+            let mut passe = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("Image Processing Pass"),
+                timestamp_writes: None,
+            });
+            passe.set_pipeline(pipeline);
+            passe.set_bind_group(0, &recursos.grupo, &[]);
+            // Grupos de 16×16, como o `@workgroup_size` do WGSL declara. A divisão
+            // arredonda para cima: com 17 pixels de largura o último grupo trabalha
+            // pela metade, e é o shader que descarta quem cair fora.
+            passe.dispatch_workgroups(largura.div_ceil(16), altura.div_ceil(16), 1);
+        }
+        Pipeline::Fragmento {
+            modulo,
+            layout,
+            por_formato,
+            ..
+        } => {
+            let pipeline = por_formato
+                .entry(formato)
+                .or_insert_with(|| pipeline_de_fragmento(dispositivo, modulo, layout, formato));
+            let mut passe = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Image Processing Pass (fragment)"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: alvo,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            passe.set_pipeline(pipeline);
+            passe.set_bind_group(0, &recursos.grupo, &[]);
+            // Um triângulo que cobre o alvo inteiro: três vértices, sem buffer.
+            passe.draw(0..3, 0..1);
+        }
+    }
+}
+
+fn pipeline_de_fragmento(
+    dispositivo: &wgpu::Device,
+    modulo: &wgpu::ShaderModule,
+    layout: &wgpu::PipelineLayout,
+    formato: wgpu::TextureFormat,
+) -> wgpu::RenderPipeline {
+    dispositivo.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("Image Processing Pipeline (fragment)"),
+        layout: Some(layout),
+        vertex: wgpu::VertexState {
+            module: modulo,
+            entry_point: Some("vs"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            buffers: &[],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: modulo,
+            entry_point: Some("fs"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: formato,
+                blend: None,
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            strip_index_format: None,
+            front_face: wgpu::FrontFace::Ccw,
+            cull_mode: None,
+            unclipped_depth: false,
+            polygon_mode: wgpu::PolygonMode::Fill,
+            conservative: false,
+        },
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        multiview: None,
+        cache: None,
+    })
+}
+
+/// O resultado do `map_async`, do jeito que cada lado consegue esperar.
+type Mapeamento = Result<(), wgpu::BufferAsyncError>;
+
+/// 🚨 **O flush do contexto WebGL2, emprestado por quem tem o canvas.**
+///
+/// Sem ele a revelação **dentro de um Worker** no WebGL2 não termina nunca
+/// (balcão do dono, Firefox, 18/set/2026). O navegador diz o motivo:
+///
+/// ```text
+/// WebGL warning: getSyncParameter: ClientWaitSync with timeout=0 … called 100
+///   times without SYNC_FLUSH_COMMANDS_BIT. If you do not flush, this sync
+///   object is not guaranteed to ever complete.
+/// ```
+///
+/// O `poll` do wgpu pergunta ao fence **sem** mandar os comandos para a GPU. Na
+/// thread da tela o compositor do navegador faz esse envio a cada quadro — é
+/// por isso que o editor revela normalmente na mesma máquina. Num Worker não há
+/// compositor, e o fence espera um trabalho que nunca saiu da fila.
+///
+/// ⚠️ **O wgpu não expõe o flush** (um `submit` vazio não basta: medido), então
+/// quem tem o `OffscreenCanvas` — `revelacao-web` — registra aqui a chamada
+/// `gl.flush()` do contexto de verdade. Sem registro, nada muda: é o caso do
+/// WebGPU, onde o `Promise` do `mapAsync` resolve sozinho.
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static FLUSH_DA_GPU: std::cell::RefCell<Option<Box<dyn Fn()>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Registra o flush do contexto WebGL2 desta thread (ver [`FLUSH_DA_GPU`]).
+#[cfg(target_arch = "wasm32")]
+pub fn registrar_flush_da_gpu(flush: Box<dyn Fn()>) {
+    FLUSH_DA_GPU.with(|guardado| *guardado.borrow_mut() = Some(flush));
+}
+
+#[cfg(target_arch = "wasm32")]
+fn flush_da_gpu() {
+    FLUSH_DA_GPU.with(|guardado| {
+        if let Some(flush) = guardado.borrow().as_ref() {
+            flush();
+        }
+    });
+}
+
+/// No desktop, bloqueia até a GPU terminar: o callback dispara dentro do `poll`.
+#[cfg(not(target_arch = "wasm32"))]
+async fn esperar_o_mapeamento(
+    dispositivo: &wgpu::Device,
+    _fila: &wgpu::Queue,
+    espera: futures_channel::oneshot::Receiver<Mapeamento>,
+) -> Option<()> {
+    dispositivo.poll(wgpu::Maintain::Wait);
+    espera.await.ok()?.ok()
+}
+
+/// No navegador, não há como bloquear — e o WebGL2 só atualiza o estado dos
+/// fences **entre tarefas** do laço de eventos. Então: um `poll` sem esperar,
+/// e se o callback ainda não veio, ceder a vez ao navegador e tentar de novo.
+/// No WebGPU o callback vem pelo `Promise` do `mapAsync`, e o mesmo laço serve.
+///
+/// # 🚨 O `submit` vazio a cada volta, e por que ele existe
+///
+/// Sem ele, **a revelação dentro de um Worker no WebGL2 nunca termina**
+/// (balcão do dono, Firefox, 18/set/2026). O próprio navegador diz o motivo:
+///
+/// ```text
+/// WebGL warning: getSyncParameter: ClientWaitSync with timeout=0 … called 100
+///   times without SYNC_FLUSH_COMMANDS_BIT. If you do not flush, this sync
+///   object is not guaranteed to ever complete.
+/// ```
+///
+/// O `poll` do wgpu pergunta ao fence sem mandar os comandos para a GPU. Na
+/// thread da tela isso passa despercebido porque o compositor faz o flush a
+/// cada quadro — é por isso que o editor revela normalmente na mesma máquina.
+/// Dentro de um Worker não há compositor, ninguém dá flush, e o fence fica
+/// esperando um trabalho que nunca saiu da fila: a foto não volta, e o prazo de
+/// dois minutos da tela só troca o sintoma de lugar.
+///
+/// 🔑 **Um `submit` vazio é o flush que o wgpu não expõe.** Ele não desenha
+/// nada; o que importa é o que o backend GL faz por baixo dele — empurrar os
+/// comandos pendentes. Custa uma chamada por volta do laço, e só é feito
+/// enquanto o resultado não chegou.
+#[cfg(target_arch = "wasm32")]
+async fn esperar_o_mapeamento(
+    dispositivo: &wgpu::Device,
+    fila: &wgpu::Queue,
+    mut espera: futures_channel::oneshot::Receiver<Mapeamento>,
+) -> Option<()> {
+    loop {
+        // O `submit` vazio sozinho **não** resolve (medido no Firefox sem
+        // WebGPU): quem manda os comandos para a GPU é o `flush` do contexto.
+        fila.submit(std::iter::empty());
+        flush_da_gpu();
+        dispositivo.poll(wgpu::Maintain::Poll);
+        match espera.try_recv() {
+            Ok(Some(resultado)) => return resultado.ok(),
+            Ok(None) => gloo_timers::future::TimeoutFuture::new(0).await,
+            Err(_) => return None,
+        }
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod testes {
+    #[test]
+    fn as_grades_esperam_o_arrasto_parar_e_so_ele() {
+        let chave = |pixels, parametro: u32, modulos| super::ChaveDasGrades {
+            pixels,
+            escala: 1,
+            parametros: vec![parametro],
+            modulos,
+        };
+        let adiar = super::adiar_as_grades;
+        let feitas = chave(1, 10, (true, true));
+        let arrastando = chave(1, 11, (true, true));
+        // Sem relógio — a exportação e o desktop: sempre a grade exata.
+        assert!(!adiar(Some(&feitas), &arrastando, None, 0.0));
+        // Mudou há 20 ms: desenha com a de antes.
+        assert!(adiar(Some(&feitas), &arrastando, Some(1020.0), 1000.0));
+        // Parado há 150 ms: refaz.
+        assert!(!adiar(Some(&feitas), &arrastando, Some(1150.0), 1000.0));
+        // Outra foto, a primeira grade, ou um módulo que acabou de ligar: não há
+        // grade de antes que sirva.
+        assert!(!adiar(
+            Some(&feitas),
+            &chave(2, 11, (true, true)),
+            Some(1020.0),
+            1000.0
+        ));
+        assert!(!adiar(None, &arrastando, Some(1020.0), 1000.0));
+        assert!(!adiar(
+            Some(&feitas),
+            &chave(1, 11, (true, false)),
+            Some(1020.0),
+            1000.0
+        ));
+    }
+
+    use super::*;
+
+    /// Espera a thread abrir o dispositivo, e falha se não houver GPU.
+    ///
+    /// ⚠️ **Falha, e não pula.** O produto declara macOS e Windows, onde sempre
+    /// há adaptador; uma máquina rodando esta suíte sem GPU precisa saber que
+    /// não está conferindo o motor de revelação. Teste que se cala quando não
+    /// pode rodar é teste que some do placar sem ninguém notar.
+    fn motor_pronto() -> Motor {
+        Motor::abrir().expect("nenhum adaptador de GPU — o motor de revelação não roda aqui")
+    }
+
+    fn cinza(lado: u32, valor: u8) -> Arc<Vec<u8>> {
+        Arc::new(
+            std::iter::repeat_n([valor, valor, valor, 255], (lado * lado) as usize)
+                .flatten()
+                .collect(),
+        )
+    }
+
+    /// Os 256 níveis de cinza, um por pixel, em ordem: o pixel `i` vale `i`.
+    ///
+    /// 🔑 É a amostra que enxerga o que a `amostra()` não enxerga: com um nível
+    /// por pixel e nada de vizinhança ligada, a saída de cada pixel é a curva de
+    /// tom inteira, ponto a ponto. Degrau e inversão aparecem como diferença
+    /// entre pixels consecutivos.
+    fn rampa() -> Arc<Vec<u8>> {
+        Arc::new(
+            (0u32..256)
+                .flat_map(|i| [i as u8, i as u8, i as u8, 255])
+                .collect(),
+        )
+    }
+
+    fn revelar_e_colher(motor: &mut Motor, entrada: Arc<Vec<u8>>, ajustes: Ajustes) -> Vec<u8> {
+        motor
+            .revelar(&entrada, 16, 16, &ajustes)
+            .expect("o motor não devolveu imagem")
+            .into_rgba8()
+            .into_raw()
+    }
+
+    /// 🚨 O neutro tem de sair **igual** ao que entrou.
+    ///
+    /// É o teste que vale mais nesta fase, e não é sobre a GPU: é sobre os 46
+    /// valores de `Ajustes::default`. Um só deles fora do neutro faz toda foto
+    /// abrir alterada — sem erro, sem aviso, e parecendo decisão de cor de quem
+    /// escreveu o shader.
+    #[test]
+    fn o_neutro_devolve_o_pixel_intacto() {
+        let mut motor = motor_pronto();
+        let entrada = cinza(16, 100);
+        let saida = revelar_e_colher(&mut motor, entrada.clone(), Ajustes::default());
+
+        assert_eq!(
+            saida.as_slice(),
+            entrada.as_slice(),
+            "algum campo de `Ajustes::default` não é neutro"
+        );
+    }
+
+    /// A exposição atravessou: `+1` dobra o valor, como `pow(2, exposure)` manda.
+    ///
+    /// Prova que o caminho inteiro está de pé — textura sobe, `uniform` chega no
+    /// campo certo, compute despacha, buffer volta sem o enchimento de 256 bytes
+    /// por linha. Se o `Ajustes` estivesse deslocado de um campo, aqui apareceria
+    /// como exposição que não faz nada.
+    #[test]
+    fn exposicao_de_um_ponto_dobra_o_valor() {
+        let mut motor = motor_pronto();
+        let saida = revelar_e_colher(
+            &mut motor,
+            cinza(16, 100),
+            Ajustes {
+                exposure: 1.0,
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(&saida[0..4], &[200, 200, 200, 255]);
+        // O último pixel também: linha final é onde o desalinhamento de 256
+        // bytes apareceria primeiro.
+        assert_eq!(&saida[saida.len() - 4..], &[200, 200, 200, 255]);
+    }
+
+    /// Uma amostra 16×16 desenhada para que **todo** ajuste do shader tenha onde
+    /// agir: rampa de cinza de 0 a 255 (altas luzes, sombras, brancos, pretos e
+    /// as quatro zonas da curva), as 8 cores do HSL saturadas, e as mesmas 8
+    /// esmaecidas (`vibrance` só age onde `max_diff < 64`). Tudo em xadrez de
+    /// 1px, para haver borda dura em toda parte — sem borda, nitidez e redução de
+    /// ruído não teriam o que fazer.
+    fn amostra() -> Arc<Vec<u8>> {
+        const CORES: [[u8; 3]; 8] = [
+            [220, 40, 40],
+            [230, 140, 30],
+            [230, 220, 40],
+            [40, 200, 60],
+            [40, 210, 200],
+            [50, 80, 220],
+            [140, 50, 210],
+            [220, 50, 180],
+        ];
+        let mut pixels = Vec::with_capacity(16 * 16 * 4);
+        for y in 0u32..16 {
+            for x in 0u32..16 {
+                let cor = match y {
+                    // Rampa de cinza, com um degrau por coluna.
+                    0..=3 => [(x * 17) as u8; 3],
+                    // As 8 cores, uma por linha, em xadrez com cinza médio.
+                    4..=11 if (x + y) % 2 == 0 => CORES[(y - 4) as usize],
+                    4..=11 => [128, 128, 128],
+                    // As mesmas, puxadas para perto do cinza.
+                    _ if (x + y) % 2 == 0 => {
+                        let base = CORES[(y - 12) as usize];
+                        [
+                            (128 + (base[0] as i32 - 128) / 4) as u8,
+                            (128 + (base[1] as i32 - 128) / 4) as u8,
+                            (128 + (base[2] as i32 - 128) / 4) as u8,
+                        ]
+                    }
+                    _ => [128, 128, 128],
+                };
+                pixels.extend_from_slice(&[cor[0], cor[1], cor[2], 255]);
+            }
+        }
+        Arc::new(pixels)
+    }
+
+    /// Escreve **por posição**, e não por nome: é assim que o `uniform` chega à
+    /// GPU, e é a única forma de perguntar "o que o shader faz com o campo *n*"
+    /// sem depender de qual nome o Rust deu a ele.
+    fn com_campos(alterados: &[(usize, f32)]) -> Ajustes {
+        let mut campos = Ajustes::default().como_vetor();
+        for (indice, valor) in alterados {
+            campos[*indice] = *valor;
+        }
+        Ajustes::de_vetor(&campos).expect("a quantidade certa de campos")
+    }
+
+    fn com_campo(indice: usize, valor: f32) -> Ajustes {
+        com_campos(&[(indice, valor)])
+    }
+
+    /// Soma das diferenças entre vizinhos horizontais.
+    ///
+    /// Cai quando a imagem borra, sobe quando ela é afiada — é o que separa
+    /// "mudou alguma coisa" de "virou exatamente o ajuste do vizinho".
+    fn contraste_local(pixels: &[u8]) -> u64 {
+        let mut soma = 0u64;
+        for y in 0..16usize {
+            for x in 1..16usize {
+                for canal in 0..3usize {
+                    let atual = pixels[(y * 16 + x) * 4 + canal] as i32;
+                    let anterior = pixels[(y * 16 + x - 1) * 4 + canal] as i32;
+                    soma += atual.abs_diff(anterior) as u64;
+                }
+            }
+        }
+        soma
+    }
+
+    /// Os 23 primeiros ajustes e os 4 de Detalhe mudam a foto.
+    ///
+    /// ✅ **O Detalhe é o que o alinhamento de 17/ago devolveu**: `nr_luminance`,
+    /// `nr_color` e `sharpen_amount` sempre tiveram código no corpo do shader —
+    /// o que faltava era chegarem lá. Eram quatro sliders que arrastavam,
+    /// mostravam número e não moviam um pixel.
+    ///
+    /// ⚠️ **`sharpen_radius` só conta com `sharpen_amount` junto**: raio sozinho
+    /// nunca mudaria nada (`do_sharpen` é `amount > 0.0`), e o teste passaria por
+    /// engano ao afirmar o contrário.
+    #[test]
+    fn o_basico_e_o_detalhe_chegam_ao_shader() {
+        let mut motor = motor_pronto();
+        let entrada = amostra();
+        let neutro = revelar_e_colher(&mut motor, entrada.clone(), Ajustes::default());
+
+        for (i, nome) in Ajustes::NOMES.iter().enumerate().take(23) {
+            let saida = revelar_e_colher(&mut motor, entrada.clone(), com_campo(i, 60.0));
+            assert_ne!(
+                saida, neutro,
+                "`{nome}` (campo {i}) devia chegar ao shader e não mudou nada"
+            );
+        }
+
+        let detalhe: [(&str, &[(usize, f32)]); 3] = [
+            ("Ruído (luminância)", &[(42, 60.0)]),
+            ("Ruído (cor)", &[(43, 60.0)]),
+            ("Nitidez (com raio)", &[(44, 80.0), (45, 2.0)]),
+        ];
+        for (rotulo, campos) in detalhe {
+            let saida = revelar_e_colher(&mut motor, entrada.clone(), com_campos(campos));
+            assert_ne!(saida, neutro, "Detalhe — `{rotulo}` não fez efeito nenhum");
+        }
+    }
+
+    /// O estilo `RecordarFotos P&B`, com os cinco módulos.
+    fn estilo_recordarfotos_pb() -> Ajustes {
+        Ajustes {
+            dt_exposure_ativo: 1.0,
+            dt_exposure_black: -0.0019,
+            dt_exposure_exposure: 0.163,
+            dt_shadhi_ativo: 1.0,
+            dt_shadhi_shadows: 65.38,
+            dt_shadhi_highlights: -20.51,
+            dt_monochrome_ativo: 1.0,
+            dt_vignette_ativo: 1.0,
+            dt_vignette_scale: 87.82,
+            dt_vignette_falloff_scale: 45.51,
+            dt_vignette_brightness: 0.99999,
+            dt_vignette_saturation: 0.147,
+            dt_vignette_autoratio: 1.0,
+            dt_vignette_shape: 0.48,
+            dt_cb_ativo: 1.0,
+            dt_cb_shadows_c: 0.1747,
+            dt_cb_shadows_h: 71.54,
+            dt_cb_midtones_h: 73.85,
+            dt_cb_highlights_y: 0.0449,
+            dt_cb_highlights_c: 0.0833,
+            dt_cb_highlights_h: 71.54,
+            dt_cb_saturation_highlights: 0.1603,
+            dt_cb_saturation_midtones: 0.1346,
+            dt_cb_brilliance_midtones: 0.1474,
+            ..Default::default()
+        }
+    }
+
+    /// O gabarito de CPU (`darktable.rs`) sobre pixels RGBA.
+    fn oraculo_darktable(
+        entrada: &[u8],
+        largura: usize,
+        altura: usize,
+        ajustes: &Ajustes,
+    ) -> Vec<u8> {
+        use crate::darktable as dt;
+        let tub = dt::Tubulacao::nova();
+        let mut px: Vec<dt::Rgb> = entrada
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|c| tub.entrar([c[0], c[1], c[2]]))
+            .collect();
+        if ajustes.dt_exposure_ativo != 0.0 {
+            dt::exposure(&mut px, dt::Exposure::de(ajustes));
+        }
+        if ajustes.dt_shadhi_ativo != 0.0 {
+            dt::shadhi(
+                &mut px,
+                largura,
+                altura,
+                &tub,
+                dt::ShadowsHighlights::de(ajustes),
+                1.0,
+            );
+        }
+        if ajustes.dt_monochrome_ativo != 0.0 {
+            dt::monochrome(
+                &mut px,
+                largura,
+                altura,
+                &tub,
+                dt::Monochrome::de(ajustes),
+                1.0,
+            );
+        }
+        if ajustes.dt_vignette_ativo != 0.0 {
+            dt::vignette(&mut px, largura, altura, dt::Vignette::de(ajustes));
+        }
+        if ajustes.dt_cb_ativo != 0.0 {
+            dt::color_balance_rgb(&mut px, &tub, &dt::ColorBalanceRgb::de(ajustes));
+        }
+        px.iter()
+            .flat_map(|c| {
+                let s = tub.sair(*c);
+                [s[0], s[1], s[2], 255]
+            })
+            .collect()
+    }
+
+    /// Cores saturadas em todos os matizes e uma rampa de cinza, 64×40.
+    fn carta_colorida() -> Arc<Vec<u8>> {
+        let (w, h) = (64u32, 40u32);
+        let mut px = Vec::with_capacity((w * h * 4) as usize);
+        for y in 0..h {
+            for x in 0..w {
+                let cor = if y < 30 {
+                    // Matiz pela coluna, valor e saturação pela linha.
+                    let hh = x as f32 / w as f32 * 6.0;
+                    let (v, s) = (1.0 - (y / 10) as f32 * 0.3, 1.0 - (y % 10) as f32 * 0.09);
+                    let c = v * s;
+                    let xx = c * (1.0 - (hh % 2.0 - 1.0).abs());
+                    let m = v - c;
+                    let (r, g, b) = match hh as u32 {
+                        0 => (c, xx, 0.0),
+                        1 => (xx, c, 0.0),
+                        2 => (0.0, c, xx),
+                        3 => (0.0, xx, c),
+                        4 => (xx, 0.0, c),
+                        _ => (c, 0.0, xx),
+                    };
+                    [
+                        ((r + m) * 255.0) as u8,
+                        ((g + m) * 255.0) as u8,
+                        ((b + m) * 255.0) as u8,
+                    ]
+                } else {
+                    [(x * 4) as u8; 3]
+                };
+                px.extend_from_slice(&[cor[0], cor[1], cor[2], 255]);
+            }
+        }
+        Arc::new(px)
+    }
+
+    /// O estágio darktable da GPU é o do gabarito de CPU, pixel a pixel —
+    /// inclusive o fatiamento das grades bilaterais calculadas em CPU.
+    ///
+    /// # Por que este é o teste que vale
+    ///
+    /// 🚨 **O gabarito já foi medido contra o darktable-cli 5.6.1** (máximo de 1
+    /// nível numa carta de teste). O que falta provar é que o WGSL é a mesma
+    /// conta — e é aqui que um `pow(0, 0)` indefinido, uma matriz com linha e
+    /// coluna trocadas ou uma constante com um dígito errado apareceriam.
+    ///
+    /// ⚠️ **Tolerância de 1 nível**, e só por arredondamento: a GPU pode fundir
+    /// multiplicação e soma (FMA) e errar na sétima casa. Uma conta errada move
+    /// o pixel dezenas de níveis.
+    #[test]
+    fn o_estagio_darktable_por_pixel_bate_com_o_oraculo() {
+        let mut motor = motor_pronto();
+        let entrada = carta_colorida();
+        let (w, h) = (64usize, 40usize);
+        let estilo = estilo_recordarfotos_pb();
+        // Um módulo ligado de cada vez, e os cinco juntos.
+        let so = |modulo: &str| Ajustes {
+            dt_exposure_ativo: (modulo == "exposure") as u8 as f32,
+            dt_shadhi_ativo: (modulo == "shadhi") as u8 as f32,
+            dt_monochrome_ativo: (modulo == "monochrome") as u8 as f32,
+            dt_vignette_ativo: (modulo == "vignette") as u8 as f32,
+            dt_cb_ativo: (modulo == "cb") as u8 as f32,
+            ..estilo
+        };
+        let casos = [
+            ("exposure", so("exposure")),
+            ("shadows and highlights", so("shadhi")),
+            ("monochrome", so("monochrome")),
+            ("vignetting", so("vignette")),
+            ("color balance rgb", so("cb")),
+            ("os cinco, na ordem do darktable", estilo),
+        ];
+        for (rotulo, ajustes) in casos {
+            let gpu = motor
+                .revelar(&entrada, w as u32, h as u32, &ajustes)
+                .expect("o motor devolveu imagem")
+                .into_rgba8()
+                .into_raw();
+            let cpu = oraculo_darktable(&entrada, w, h, &ajustes);
+            let mut pior = (0u8, 0usize);
+            for (i, (a, b)) in gpu.iter().zip(cpu.iter()).enumerate() {
+                if i % 4 == 3 {
+                    continue;
+                }
+                let d = a.abs_diff(*b);
+                if d > pior.0 {
+                    pior = (d, i);
+                }
+            }
+            let k = pior.1 / 4 * 4;
+            assert!(
+                pior.0 <= 1,
+                "{rotulo}: pixel ({}, {}) saiu {:?} na GPU e {:?} no gabarito",
+                (k / 4) % w,
+                (k / 4) / w,
+                &gpu[k..k + 3],
+                &cpu[k..k + 3]
+            );
+        }
+        // E desligado ele não existe: o neutro continua devolvendo a foto.
+        let neutro = motor
+            .revelar(&entrada, w as u32, h as u32, &Ajustes::default())
+            .unwrap()
+            .into_rgba8()
+            .into_raw();
+        assert_eq!(
+            neutro, *entrada,
+            "o estágio darktable desligado mexeu na foto"
+        );
+    }
+
+    /// A curva por ponto age, é monótona, e no neutro devolve a foto intacta.
+    ///
+    /// # As três coisas que ela precisa provar
+    ///
+    /// 🚨 **1. Que age.** Era o maior buraco da importação de presets — 321 de
+    /// 400 comerciais usam curva por ponto —, e um campo que chega ao `uniform`
+    /// sem código que o leia já aconteceu aqui (17/ago/2026, os 46 campos).
+    ///
+    /// 🚨 **2. Que não inverte nem oscila.** É o defeito clássico de curva de
+    /// tom: spline cúbica comum passa por fora dos pontos, e dois nós quase no
+    /// mesmo nível fazem a interpolação subir acima dos dois e voltar — uma
+    /// faixa clara atravessando um degradê liso. Por isso a interpolação é
+    /// Hermite monótono (Fritsch–Carlson), e por isso este teste varre os 256
+    /// níveis com uma curva feita de propósito para oscilar.
+    ///
+    /// 🚨 **3. Que o neutro é a identidade.** A curva neutra não é zero: é a
+    /// reta `y = x`. Se ela fosse zero, toda revelação gravada antes de
+    /// 2026-09-12 abriria preta — o `serde(default)` completa o campo ausente, e
+    /// o que ele completa tem de ser "sem curva".
+    #[test]
+    fn a_curva_por_ponto_age_e_nunca_inverte() {
+        let mut motor = motor_pronto();
+        let posicao = |nome: &str| {
+            Ajustes::NOMES
+                .iter()
+                .position(|n| *n == nome)
+                .unwrap_or_else(|| panic!("`{nome}` não está em NOMES"))
+        };
+
+        // 3. O neutro devolve a rampa intacta.
+        let rampa = rampa();
+        let neutro = revelar_e_colher(&mut motor, rampa.clone(), Ajustes::default());
+        for (i, pixel) in neutro.as_chunks::<4>().0.iter().take(256).enumerate() {
+            assert!(
+                (pixel[0] as i32 - i as i32).abs() <= 1,
+                "a curva neutra mexeu no nível {i}: saiu {}",
+                pixel[0]
+            );
+        }
+
+        // 1. Um S no mestre muda a foto — e escurece embaixo, clareia em cima.
+        let s_forte = com_campos(&[
+            (posicao("curva_m1"), 12.0),
+            (posicao("curva_m2"), 40.0),
+            (posicao("curva_m3"), 80.0),
+            (posicao("curva_m5"), 180.0),
+            (posicao("curva_m6"), 215.0),
+            (posicao("curva_m7"), 240.0),
+        ]);
+        let curvada = revelar_e_colher(&mut motor, rampa.clone(), s_forte);
+        assert_ne!(curvada, neutro, "a curva por ponto não fez efeito nenhum");
+        assert!(
+            curvada[64 * 4] < neutro[64 * 4],
+            "o S devia escurecer o quarto de tom: {} contra {}",
+            curvada[64 * 4],
+            neutro[64 * 4]
+        );
+        assert!(
+            curvada[192 * 4] > neutro[192 * 4],
+            "o S devia clarear os três quartos: {} contra {}",
+            curvada[192 * 4],
+            neutro[192 * 4]
+        );
+
+        // 2. Monotonicidade, na curva mais hostil que cabe nos nove pontos:
+        // três nós no mesmo nível seguidos de um salto — é onde a spline comum
+        // sobe acima dos dois vizinhos e volta.
+        let degrau = com_campos(&[
+            (posicao("curva_m1"), 30.0),
+            (posicao("curva_m2"), 30.0),
+            (posicao("curva_m3"), 30.0),
+            (posicao("curva_m4"), 220.0),
+            (posicao("curva_m5"), 225.0),
+            (posicao("curva_m6"), 226.0),
+            (posicao("curva_m7"), 226.0),
+        ]);
+        let dura = revelar_e_colher(&mut motor, rampa.clone(), degrau);
+        let mut anterior = -1i32;
+        for (i, pixel) in dura.as_chunks::<4>().0.iter().take(256).enumerate() {
+            let v = pixel[0] as i32;
+            assert!(
+                v >= anterior - 1,
+                "a curva inverteu no nível {i}: {v} depois de {anterior}"
+            );
+            anterior = v;
+        }
+
+        // E o canal sozinho: um preset de filme levanta o preto **só no azul**.
+        let so_o_azul = com_campo(posicao("curva_b0"), 40.0);
+        let azulada = revelar_e_colher(&mut motor, rampa.clone(), so_o_azul);
+        assert!(
+            azulada[2] > neutro[2] && azulada[0] == neutro[0],
+            "o levantamento do azul devia tocar só o azul: {:?} contra {:?}",
+            &azulada[0..3],
+            &neutro[0..3]
+        );
+    }
+
+    /// Os 21 controles de 2026-09-12 chegam ao shader **e fazem efeito**.
+    ///
+    /// # Por que este teste, e por que assim
+    ///
+    /// 🚨 **"Chegar" e "ser aplicado" já foram duas coisas diferentes aqui.** Em
+    /// 17/ago/2026 os 46 campos chegavam ao `uniform` e o corpo do shader não
+    /// mencionava matiz, luminância nem lente em lugar nenhum — os controles
+    /// existiam na tela, o operador os movia, e a foto não mudava. O teste de
+    /// paridade de nomes (`o_wgsl_declara_os_mesmos_campos_na_mesma_ordem`)
+    /// passa nessa situação: ele confere o contrato, não o efeito.
+    ///
+    /// Estes 21 entraram porque o operador do estúdio disse que não conseguia
+    /// reproduzir os estilos que tem no Lightroom e no darktable. Cada um só
+    /// vale se mudar o pixel — e é isso que se cobra aqui, um por um.
+    ///
+    /// ⚠️ **A amostra é colorida de propósito.** Calibração, mixer P&B e
+    /// tonalização por faixa são todos função do **matiz**: num cinza chapado
+    /// os três não teriam o que fazer, e o teste passaria verde sobre um shader
+    /// vazio.
+    #[test]
+    fn a_calibracao_o_mixer_pb_e_o_color_grading_chegam_ao_shader() {
+        let mut motor = motor_pronto();
+        let entrada = amostra();
+        let neutro = revelar_e_colher(&mut motor, entrada.clone(), Ajustes::default());
+
+        let posicao = |nome: &str| {
+            Ajustes::NOMES
+                .iter()
+                .position(|n| *n == nome)
+                .unwrap_or_else(|| panic!("`{nome}` não está em NOMES"))
+        };
+
+        // 🔑 Cada caso leva o **par** que o controle precisa para agir. Matiz
+        // sem saturação não pinta nada (a tonalização multiplica um pelo
+        // outro), e o mixer não existe com a foto colorida — exatamente como no
+        // Lightroom, onde o mixer só aparece depois do B&W.
+        let casos: &[(&str, &[(&str, f32)])] = &[
+            ("Calibração — matiz do vermelho", &[("calib_red_hue", 60.0)]),
+            (
+                "Calibração — saturação do vermelho",
+                &[("calib_red_sat", 80.0)],
+            ),
+            ("Calibração — matiz do verde", &[("calib_green_hue", 60.0)]),
+            (
+                "Calibração — saturação do verde",
+                &[("calib_green_sat", 80.0)],
+            ),
+            ("Calibração — matiz do azul", &[("calib_blue_hue", 60.0)]),
+            (
+                "Calibração — saturação do azul",
+                &[("calib_blue_sat", 80.0)],
+            ),
+            (
+                "Calibração — matiz das sombras",
+                &[("calib_shadow_tint", 80.0)],
+            ),
+            (
+                "Color Grading — tons médios",
+                &[("split_midtone_hue", 40.0), ("split_midtone_sat", 80.0)],
+            ),
+            (
+                "Color Grading — global",
+                &[("split_global_hue", 200.0), ("split_global_sat", 80.0)],
+            ),
+            (
+                "Color Grading — a mistura muda a largura das faixas",
+                &[
+                    ("split_shadow_hue", 30.0),
+                    ("split_shadow_sat", 80.0),
+                    ("split_highlight_hue", 210.0),
+                    ("split_highlight_sat", 80.0),
+                    ("split_blending", 0.0),
+                ],
+            ),
+            (
+                "Mixer P&B — vermelho",
+                &[("bw_ativo", 1.0), ("bw_red", 80.0)],
+            ),
+            (
+                "Mixer P&B — laranja",
+                &[("bw_ativo", 1.0), ("bw_orange", 80.0)],
+            ),
+            (
+                "Mixer P&B — amarelo",
+                &[("bw_ativo", 1.0), ("bw_yellow", 80.0)],
+            ),
+            (
+                "Mixer P&B — verde",
+                &[("bw_ativo", 1.0), ("bw_green", 80.0)],
+            ),
+            ("Mixer P&B — água", &[("bw_ativo", 1.0), ("bw_aqua", 80.0)]),
+            ("Mixer P&B — azul", &[("bw_ativo", 1.0), ("bw_blue", 80.0)]),
+            (
+                "Mixer P&B — roxo",
+                &[("bw_ativo", 1.0), ("bw_purple", 80.0)],
+            ),
+            (
+                "Mixer P&B — magenta",
+                &[("bw_ativo", 1.0), ("bw_magenta", 80.0)],
+            ),
+        ];
+
+        for (rotulo, campos) in casos {
+            let indices: Vec<(usize, f32)> = campos.iter().map(|(n, v)| (posicao(n), *v)).collect();
+            let saida = revelar_e_colher(&mut motor, entrada.clone(), com_campos(&indices));
+            assert_ne!(
+                saida, neutro,
+                "`{rotulo}` devia chegar ao shader e não mudou nada"
+            );
+        }
+
+        // 🚨 **O mixer desligado não pode fazer nada**, como no Lightroom: os
+        // oito sliders existem, o preset os traz, e sem o B&W ligado eles
+        // dormem. Sem esta linha, um preset de cor com `GrayMixer` dentro
+        // dessaturaria a foto sem ninguém ter pedido.
+        let so_os_sliders = com_campos(&[(posicao("bw_red"), 100.0), (posicao("bw_blue"), -100.0)]);
+        assert_eq!(
+            revelar_e_colher(&mut motor, entrada.clone(), so_os_sliders),
+            neutro,
+            "o mixer P&B agiu com `bw_ativo` em zero"
+        );
+
+        // 🚨 **E a mistura no neutro (50) tem de devolver a foto de antes.** O
+        // valor fixo que estava no shader era 0,35 de meia-largura, e é nele
+        // que `0,10 + 0,50 · 0,5` cai: se esta conta mudar, toda revelação já
+        // gravada com tonalização sai diferente da que o operador salvou.
+        let tonalizada = [
+            (posicao("split_shadow_hue"), 30.0),
+            (posicao("split_shadow_sat"), 80.0),
+        ];
+        let com_neutro_explicito = com_campos(&[
+            tonalizada[0],
+            tonalizada[1],
+            (posicao("split_blending"), 50.0),
+        ]);
+        assert_eq!(
+            revelar_e_colher(&mut motor, entrada.clone(), com_campos(&tonalizada)),
+            revelar_e_colher(&mut motor, entrada.clone(), com_neutro_explicito),
+            "a mistura neutra devia ser a largura de antes"
+        );
+    }
+
+    /// 🚨 **O neutro devolve a foto intacta — numa imagem com detalhe.**
+    ///
+    /// Existe porque `o_neutro_devolve_o_pixel_intacto` **não consegue** ver o
+    /// defeito que este vê: ele usa cinza chapado, e interpolar dois pixels
+    /// iguais devolve o mesmo valor. Um erro de meio pixel na reamostragem passa
+    /// por ele sem tocar em nada.
+    ///
+    /// Descoberto quebrando de propósito, ao ligar a distorção de lente: um
+    /// deslocamento na `amostrar` deixou os 13 testes passando. A `amostra` tem
+    /// xadrez de 1px, onde meio pixel de erro vira borrão imediato.
+    #[test]
+    fn o_neutro_nao_reamostra_uma_imagem_com_detalhe() {
+        let mut motor = motor_pronto();
+        let entrada = amostra();
+        let saida = revelar_e_colher(&mut motor, entrada.clone(), Ajustes::default());
+
+        assert_eq!(
+            saida.as_slice(),
+            entrada.as_slice(),
+            "o neutro moveu pixel — a leitura bilinear deixou de ser exata no inteiro"
+        );
+    }
+
+    /// 🚨 **Altas luzes, sombras, brancos e pretos não invertem nem dão degrau.**
+    ///
+    /// É o teste do defeito de 06/09: os quatro eram `if` sobre a luminância com
+    /// um fator só por região, e o dono viu o estrago numa foto de estúdio — o
+    /// branco das janelas manchado, contorno duro em volta delas. Duas medidas,
+    /// sobre a rampa de 256 níveis:
+    ///
+    ///   - **Inversão**: um nível de entrada maior nunca pode sair menor. Era o
+    ///     que fazia \"brancos\" em -100 zerar o pixel de 255 e deixar o de 190
+    ///     intacto.
+    ///   - **Degrau**: entre dois níveis vizinhos de entrada a saída não pode
+    ///     pular. Era o que punha contorno onde a luminância cruzava 128 ou 192.
+    ///
+    /// A folga de 4 níveis vem da matemática: a derivada de cada curva fica em
+    /// 0..2, então um passo de 1 nível na entrada anda no máximo 2 na saída, e
+    /// sobra 1 para o arredondamento de cada lado.
+    #[test]
+    fn o_tom_por_regiao_nunca_inverte_nem_da_degrau() {
+        let mut motor = motor_pronto();
+
+        // 4 a 7 é `highlights`, `shadows`, `whites`, `blacks`.
+        let mut casos: Vec<(String, Ajustes)> = Vec::new();
+        for (i, nome) in Ajustes::NOMES.iter().enumerate().take(8).skip(4) {
+            for valor in [-100.0, -60.0, 60.0, 100.0] {
+                casos.push((format!("{nome} em {valor}"), com_campo(i, valor)));
+            }
+        }
+        // 🔑 Os quatro juntos, e nos sinais que se opõem: é a combinação em que
+        // somar os deltas em vez de compor as curvas volta a inverter.
+        casos.push((
+            "os quatro opostos".into(),
+            com_campos(&[(4, -100.0), (5, -100.0), (6, 100.0), (7, 100.0)]),
+        ));
+        casos.push((
+            "os quatro opostos, ao contrário".into(),
+            com_campos(&[(4, 100.0), (5, 100.0), (6, -100.0), (7, -100.0)]),
+        ));
+
+        for (rotulo, ajustes) in casos {
+            let saida = revelar_e_colher(&mut motor, rampa(), ajustes);
+            let nivel = |entrada: usize| saida[entrada * 4] as i32;
+
+            for entrada in 1..256usize {
+                let (antes, agora) = (nivel(entrada - 1), nivel(entrada));
+                assert!(
+                    agora >= antes,
+                    "{rotulo}: a entrada {entrada} saiu em {agora}, ABAIXO do nível \
+                     {antes} que a entrada {} devolveu — isso é a inversão que mancha",
+                    entrada - 1
+                );
+                assert!(
+                    agora - antes <= 4,
+                    "{rotulo}: de {} para {entrada} a saída pulou de {antes} para {agora} — \
+                     esse degrau vira contorno duro na foto",
+                    entrada - 1
+                );
+            }
+        }
+    }
+
+    /// ✅ **Cada um dos quatro age na sua ponta da escala.**
+    ///
+    /// Sem isto, a correção do degrau passaria com os quatro virando controle
+    /// global de brilho — contínuo, monotônico e errado. A medida é a ponta
+    /// oposta: \"sombras\" tem de levantar o cinza 32 e quase não tocar o 240.
+    #[test]
+    fn cada_ajuste_de_tom_age_na_sua_ponta() {
+        let mut motor = motor_pronto();
+        let nivel = |saida: &[u8], entrada: usize| saida[entrada * 4] as i32;
+
+        let sombras = revelar_e_colher(&mut motor, rampa(), com_campo(5, 100.0));
+        assert!(
+            nivel(&sombras, 32) > 32 + 15,
+            "sombras +100 mal levantou o nível 32: saiu {}",
+            nivel(&sombras, 32)
+        );
+        assert!(
+            (nivel(&sombras, 240) - 240).abs() <= 5,
+            "sombras +100 mexeu no nível 240 ({}) — isso é brilho, não sombra",
+            nivel(&sombras, 240)
+        );
+
+        let brancos = revelar_e_colher(&mut motor, rampa(), com_campo(6, -100.0));
+        assert!(
+            nivel(&brancos, 240) < 240 - 15,
+            "brancos -100 mal baixou o nível 240: saiu {}",
+            nivel(&brancos, 240)
+        );
+        assert!(
+            (nivel(&brancos, 32) - 32).abs() <= 5,
+            "brancos -100 mexeu no nível 32 ({}) — a faixa dele é o topo",
+            nivel(&brancos, 32)
+        );
+    }
+
+    /// ✅ **As quatro zonas da curva de tons movem a foto, cada uma na sua.**
+    ///
+    /// A prova de que cada uma respeita a própria faixa é feita sobre cinzas de
+    /// níveis diferentes: a zona das sombras (centro 0,125) tem de mexer num
+    /// cinza escuro e deixar um claro em paz.
+    #[test]
+    fn cada_zona_da_curva_de_tons_mexe_na_sua_faixa() {
+        let mut motor = motor_pronto();
+
+        let escuro = cinza(16, 32); // ~0,125
+        let claro = cinza(16, 223); // ~0,875
+
+        let com_sombras = Ajustes {
+            tone_curve_shadows: 60.0,
+            ..Default::default()
+        };
+        let com_altas = Ajustes {
+            tone_curve_highlights: 60.0,
+            ..Default::default()
+        };
+
+        let escuro_neutro = revelar_e_colher(&mut motor, escuro.clone(), Ajustes::default());
+        let claro_neutro = revelar_e_colher(&mut motor, claro.clone(), Ajustes::default());
+
+        let escuro_com_sombras = revelar_e_colher(&mut motor, escuro.clone(), com_sombras);
+        assert_ne!(
+            escuro_com_sombras, escuro_neutro,
+            "a zona das sombras não alcançou um cinza de nível 32"
+        );
+
+        let claro_com_sombras = revelar_e_colher(&mut motor, claro.clone(), com_sombras);
+        assert_eq!(
+            claro_com_sombras, claro_neutro,
+            "a zona das sombras alcançou um cinza de nível 223 — a faixa dela vazou"
+        );
+
+        let claro_com_altas = revelar_e_colher(&mut motor, claro, com_altas);
+        assert_ne!(
+            claro_com_altas, claro_neutro,
+            "a zona das altas luzes não alcançou um cinza de nível 223"
+        );
+
+        let escuro_com_altas = revelar_e_colher(&mut motor, escuro, com_altas);
+        assert_eq!(
+            escuro_com_altas, escuro_neutro,
+            "a zona das altas luzes alcançou um cinza de nível 32"
+        );
+    }
+
+    /// ✅ **Os 3 controles de Lente movem a foto.**
+    ///
+    /// ⚠️ **A vinheta é testada com o meio junto**, e a distorção sozinha: o meio
+    /// da vinheta não faz nada sem a intensidade, e um teste que o afirmasse
+    /// passaria por engano.
+    #[test]
+    fn a_lente_move_a_foto() {
+        let mut motor = motor_pronto();
+        let entrada = amostra();
+        let neutro = revelar_e_colher(&mut motor, entrada.clone(), Ajustes::default());
+
+        let distorcida = revelar_e_colher(&mut motor, entrada.clone(), com_campo(39, 60.0));
+        assert_ne!(distorcida, neutro, "Lente — a distorção não moveu nada");
+
+        let vinheta = revelar_e_colher(&mut motor, entrada, com_campos(&[(40, -80.0), (41, 30.0)]));
+        assert_ne!(vinheta, neutro, "Lente — a vinheta não moveu nada");
+    }
+
+    /// 🚨 **Nenhum efeito pode manchar um preto chapado** (dono, 18/set/2026:
+    /// *"alguns efeitos estão com o preto manchado de roxo na revelação, de
+    /// forma aleatória"* — numa máquina que não é a de desenvolvimento).
+    ///
+    /// # O que o teste mede, e por que é a medida certa
+    ///
+    /// Uma foto de um valor só sai de um valor só: seja qual for o ajuste, e
+    /// por mais que ele clareie, escureça ou **colora** o preto (a tonalização
+    /// faz isso de propósito), todos os pixels têm de sair **iguais entre si**.
+    /// Mancha é heterogeneidade — e é o que `NaN` e `Inf` produzem: eles não
+    /// sobrevivem ao `clamp` de forma definida, e cada GPU resolve o
+    /// indefinido do jeito dela. É por isso que o defeito aparece numa máquina
+    /// e não na outra.
+    ///
+    /// ⚠️ **Quatro ajustes variam com a posição por construção** e ficam de
+    /// fora: a distorção e a vinheta da lente, a vinheta do darktable e o grão.
+    /// Eles são espaciais — manchar o quadro é o trabalho deles.
+    #[test]
+    fn nenhum_efeito_mancha_um_preto_chapado() {
+        let mut motor = motor_pronto();
+        let preto = cinza(16, 0);
+
+        // Os índices dos quatro que desenham no quadro, e não na cor.
+        let nomes = Ajustes::NOMES;
+        let espacial = |i: usize| {
+            let nome = nomes[i];
+            nome.starts_with("lens_")
+                || nome.starts_with("grain_")
+                || nome.starts_with("dt_vignette_")
+        };
+
+        let neutro = Ajustes::default().como_vetor();
+        for indice in 0..crate::ajustes::QUANTIDADE {
+            if espacial(indice) {
+                continue;
+            }
+            // Os dois extremos de cada slider, mais um valor fora da faixa: é
+            // fora dela que a conta estoura, e a tela deixa chegar (a receita
+            // vem do banco, e o banco tem o que outra versão gravou).
+            for valor in [-100.0, -1.0, 1.0, 100.0, 255.0] {
+                if neutro[indice] == valor {
+                    continue;
+                }
+                let saida = revelar_e_colher(&mut motor, preto.clone(), com_campo(indice, valor));
+                let primeiro = &saida[..4];
+                let manchado = saida
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .enumerate()
+                    .find(|(_, pixel)| pixel.as_slice() != primeiro);
+                assert!(
+                    manchado.is_none(),
+                    "'{}' em {valor} manchou o preto: o pixel {} saiu {:?}, e o primeiro {:?}",
+                    nomes[indice],
+                    manchado.expect("achado acima").0,
+                    manchado.expect("achado acima").1,
+                    primeiro,
+                );
+            }
+        }
+    }
+
+    /// 🚨 **A vinheta escurece o canto e deixa o centro em paz.**
+    ///
+    /// É o que separa "vinheta" de "exposição": um fator aplicado à foto inteira
+    /// também mudaria a saída, e `assert_ne!` sozinho não veria a diferença. Aqui
+    /// a medida é a razão entre o canto e o centro.
+    #[test]
+    fn a_vinheta_escurece_o_canto_e_nao_o_centro() {
+        let mut motor = motor_pronto();
+        let cinza_puro = cinza(16, 200);
+
+        let saida = revelar_e_colher(
+            &mut motor,
+            cinza_puro,
+            Ajustes {
+                lens_vignette_amount: -80.0,
+                lens_vignette_midpoint: 0.0,
+                ..Default::default()
+            },
+        );
+
+        let em = |x: usize, y: usize| saida[(y * 16 + x) * 4] as i32;
+        let centro = em(8, 8);
+        let canto = em(0, 0);
+
+        assert!(
+            canto < centro - 20,
+            "o canto ({canto}) tinha de estar bem mais escuro que o centro ({centro})"
+        );
+        assert!(
+            centro >= 190,
+            "o centro ({centro}) mal pode ser tocado — senão isto é exposição, não vinheta"
+        );
+    }
+
+    /// ⚠️ **A vinheta positiva clareia**, e a negativa escurece — é a convenção
+    /// do Lightroom, onde "Vignetting: Amount" negativo é o efeito clássico.
+    #[test]
+    fn o_sinal_da_vinheta_decide_a_direcao() {
+        let mut motor = motor_pronto();
+        let cinza_puro = cinza(16, 128);
+        let canto = |saida: &[u8]| saida[0] as i32;
+
+        let escura = revelar_e_colher(
+            &mut motor,
+            cinza_puro.clone(),
+            Ajustes {
+                lens_vignette_amount: -80.0,
+                ..Default::default()
+            },
+        );
+        let clara = revelar_e_colher(
+            &mut motor,
+            cinza_puro,
+            Ajustes {
+                lens_vignette_amount: 80.0,
+                ..Default::default()
+            },
+        );
+
+        assert!(canto(&escura) < 128, "vinheta negativa tem de escurecer");
+        assert!(canto(&clara) > 128, "vinheta positiva tem de clarear");
+    }
+
+    /// Uma foto cinza de `largura × altura`: sem cor e sem vizinhança, o que
+    /// muda nela é só a vinheta.
+    fn cinza_retangular(largura: u32, altura: u32, valor: u8) -> Arc<Vec<u8>> {
+        Arc::new(
+            std::iter::repeat_n([valor, valor, valor, 255], (largura * altura) as usize)
+                .flatten()
+                .collect(),
+        )
+    }
+
+    /// As duas vinhetas, cada uma sozinha: a de lente (a pós-corte que os
+    /// presets do Lightroom trazem) e a do darktable (a do `RecordarFotos P&B`),
+    /// com uma queda que não satura no meio da borda. O terceiro campo diz se a
+    /// borda esquerda e a de cima caem juntas — a proporção automática do
+    /// darktable; a de lente mede distância em pixels e não tem isso.
+    fn as_duas_vinhetas() -> [(&'static str, Ajustes, bool); 2] {
+        [
+            (
+                "vinheta de lente",
+                Ajustes {
+                    lens_vignette_amount: -80.0,
+                    lens_vignette_midpoint: 0.0,
+                    ..Default::default()
+                },
+                false,
+            ),
+            (
+                "vinheta do darktable",
+                Ajustes {
+                    dt_vignette_ativo: 1.0,
+                    dt_vignette_scale: 60.0,
+                    dt_vignette_falloff_scale: 80.0,
+                    dt_vignette_brightness: -0.8,
+                    dt_vignette_saturation: 0.0,
+                    dt_vignette_center_x: 0.0,
+                    dt_vignette_center_y: 0.0,
+                    dt_vignette_autoratio: 1.0,
+                    dt_vignette_whratio: 1.0,
+                    dt_vignette_shape: 1.0,
+                    dt_vignette_unbound: 0.0,
+                    ..Default::default()
+                },
+                true,
+            ),
+        ]
+    }
+
+    /// O caminho da tela e do arquivo: revela a foto inteira com o corte no
+    /// motor, e recorta depois.
+    fn revelar_e_recortar(
+        motor: &mut Motor,
+        pixels: &Arc<Vec<u8>>,
+        (largura, altura): (u32, u32),
+        ajustes: &Ajustes,
+        corte: &Corte,
+    ) -> image::RgbaImage {
+        motor.definir_corte(corte);
+        let revelada = motor
+            .revelar(pixels, largura, altura, ajustes)
+            .expect("o motor não devolveu imagem");
+        crate::transformacao::aplicar(&revelada, corte, true).into_rgba8()
+    }
+
+    /// O gabarito: recorta **antes** e revela a foto já recortada, sem corte
+    /// nenhum no motor. É a ordem do darktable, onde o `vignette` vem depois do
+    /// `crop`.
+    fn recortar_e_revelar(
+        motor: &mut Motor,
+        pixels: &Arc<Vec<u8>>,
+        (largura, altura): (u32, u32),
+        ajustes: &Ajustes,
+        corte: &Corte,
+    ) -> image::RgbaImage {
+        let foto = DynamicImage::ImageRgba8(
+            image::RgbaImage::from_raw(largura, altura, pixels.to_vec()).expect("os pixels"),
+        );
+        let recortada = crate::transformacao::aplicar(&foto, corte, true).into_rgba8();
+        let (l, a) = recortada.dimensions();
+        motor.definir_corte(&Corte::inteiro());
+        motor
+            .revelar(&Arc::new(recortada.into_raw()), l, a, ajustes)
+            .expect("o motor não devolveu imagem")
+            .into_rgba8()
+    }
+
+    /// A maior diferença entre duas imagens do mesmo tamanho, em níveis, e onde.
+    fn pior_diferenca(a: &image::RgbaImage, b: &image::RgbaImage) -> (u8, (u32, u32)) {
+        assert_eq!(a.dimensions(), b.dimensions(), "tamanhos diferentes");
+        let mut pior = (0u8, (0, 0));
+        for (x, y, p) in a.enumerate_pixels() {
+            let q = b.get_pixel(x, y);
+            for c in 0..3 {
+                let d = p.0[c].abs_diff(q.0[c]);
+                if d > pior.0 {
+                    pior = (d, (x, y));
+                }
+            }
+        }
+        pior
+    }
+
+    /// Confere a vinheta de um recorte `largura × altura` já recortado: centro
+    /// intacto, cantos simétricos e escuros, e — para a do darktable — a borda
+    /// esquerda caindo junto com a de cima.
+    ///
+    /// ⚠️ **Os cantos são 1 e `largura − 1`**, e não 0 e `largura − 1`: o centro
+    /// das duas vinhetas é `largura / 2` (é a conta do darktable), e os pares
+    /// simétricos em torno dele são `i` e `largura − i`.
+    fn confere_a_vinheta_do_recorte(saida: &image::RgbaImage, rotulo: &str, bordas_juntas: bool) {
+        let (w, h) = saida.dimensions();
+        let em = |x: u32, y: u32| saida.get_pixel(x, y).0[0] as i32;
+        let centro = em(w / 2, h / 2);
+        let cantos = [em(1, 1), em(w - 1, 1), em(1, h - 1), em(w - 1, h - 1)];
+        let (menor, maior) = (
+            *cantos.iter().min().expect("quatro"),
+            *cantos.iter().max().expect("quatro"),
+        );
+        assert!(
+            maior - menor <= 1,
+            "{rotulo}: os quatro cantos do recorte saíram {cantos:?} — a vinheta não é simétrica nele"
+        );
+        assert!(
+            centro >= 157,
+            "{rotulo}: o centro do recorte escureceu para {centro} — era 160"
+        );
+        assert!(
+            maior < centro - 20,
+            "{rotulo}: os cantos {cantos:?} mal escureceram perto do centro {centro}"
+        );
+        if bordas_juntas {
+            let (esquerda, cima) = (em(0, h / 2), em(w / 2, 0));
+            assert!(
+                esquerda.abs_diff(cima) <= 1,
+                "{rotulo}: a borda esquerda saiu {esquerda} e a de cima {cima} — \
+                 a proporção automática não é a do recorte"
+            );
+        }
+    }
+
+    /// 🚨 **A vinheta é do recorte** — o defeito que o dono viu em 2026-09-13,
+    /// no passo-a-passo da nova sessão, com o `RecordarFotos P&B` e o 3:4 da
+    /// receita padrão: *"as vinhetas não estão respeitando o formato do corte"*.
+    ///
+    /// Numa foto 3:2 com recorte 3:4 no centro, a vinheta medida na foto inteira
+    /// deixava as laterais do recorte limpas e escurecia só o topo e a base. A
+    /// prova de que agora ela é do recorte é o gabarito: dá o mesmo que recortar
+    /// antes e revelar o recorte.
+    #[test]
+    fn com_corte_3_por_4_na_foto_3_por_2_a_vinheta_e_do_recorte() {
+        let mut motor = motor_pronto();
+        let tamanho = (120u32, 80u32);
+        let foto = cinza_retangular(tamanho.0, tamanho.1, 160);
+        // 3:4 no centro: 60 × 80, de x = 30 a 89.
+        let corte = Corte::novo(0.25, 0.0, 0.5, 1.0, 0, 0.0, false, false);
+
+        for (rotulo, ajustes, bordas_juntas) in as_duas_vinhetas() {
+            let saida = revelar_e_recortar(&mut motor, &foto, tamanho, &ajustes, &corte);
+            assert_eq!(saida.dimensions(), (60, 80));
+            confere_a_vinheta_do_recorte(&saida, rotulo, bordas_juntas);
+
+            let gabarito = recortar_e_revelar(&mut motor, &foto, tamanho, &ajustes, &corte);
+            let (pior, onde) = pior_diferenca(&saida, &gabarito);
+            assert!(
+                pior <= 1,
+                "{rotulo}: em {onde:?} a vinheta difere em {pior} níveis da foto recortada antes"
+            );
+        }
+    }
+
+    /// 🔑 **Com o corte fora do centro, o centro da vinheta vai junto.**
+    ///
+    /// Medida na foto inteira, a vinheta de um recorte no quadrante de baixo à
+    /// direita escurecia o centro do recorte e deixava a borda de dentro clara.
+    #[test]
+    fn com_corte_deslocado_o_centro_da_vinheta_segue_o_do_recorte() {
+        let mut motor = motor_pronto();
+        let tamanho = (120u32, 80u32);
+        let foto = cinza_retangular(tamanho.0, tamanho.1, 160);
+        // 60 × 40, de (60, 20) a (119, 59).
+        let corte = Corte::novo(0.5, 0.25, 0.5, 0.5, 0, 0.0, false, false);
+
+        for (rotulo, ajustes, bordas_juntas) in as_duas_vinhetas() {
+            let saida = revelar_e_recortar(&mut motor, &foto, tamanho, &ajustes, &corte);
+            assert_eq!(saida.dimensions(), (60, 40));
+            confere_a_vinheta_do_recorte(&saida, rotulo, bordas_juntas);
+
+            let gabarito = recortar_e_revelar(&mut motor, &foto, tamanho, &ajustes, &corte);
+            let (pior, onde) = pior_diferenca(&saida, &gabarito);
+            assert!(
+                pior <= 1,
+                "{rotulo}: em {onde:?} a vinheta difere em {pior} níveis da foto recortada antes"
+            );
+        }
+    }
+
+    /// Com giro de 90°, espelho e endireitamento, a vinheta continua sendo a da
+    /// foto recortada antes.
+    ///
+    /// ⚠️ **Folga de 3 níveis com ângulo**, e só por interpolação: o arquivo
+    /// endireitado amostra a revelação entre pixels, e o gabarito revela no
+    /// pixel exato. Uma vinheta no lugar errado erra dezenas de níveis.
+    #[test]
+    fn com_giro_e_endireitamento_a_vinheta_ainda_e_do_recorte() {
+        let mut motor = motor_pronto();
+        let tamanho = (120u32, 80u32);
+        let foto = cinza_retangular(tamanho.0, tamanho.1, 160);
+        let casos = [
+            (
+                "giro 270 com espelho v",
+                Corte::novo(0.2, 0.3, 0.4, 0.4, 3, 0.0, false, true),
+                1u8,
+            ),
+            (
+                "giro 90, espelho h e 8°",
+                Corte::novo(0.25, 0.25, 0.5, 0.5, 1, 8.0, true, false),
+                3u8,
+            ),
+        ];
+        for (caso, corte, folga) in casos {
+            for (rotulo, ajustes, _) in as_duas_vinhetas() {
+                let saida = revelar_e_recortar(&mut motor, &foto, tamanho, &ajustes, &corte);
+                let gabarito = recortar_e_revelar(&mut motor, &foto, tamanho, &ajustes, &corte);
+                let (pior, onde) = pior_diferenca(&saida, &gabarito);
+                assert!(
+                    pior <= folga,
+                    "{rotulo}, {caso}: em {onde:?} a vinheta difere em {pior} níveis da foto recortada antes"
+                );
+            }
+        }
+    }
+
+    /// 🚨 **Sem corte, as vinhetas são as de antes** — e trocar de corte e
+    /// voltar não deixa resto no motor.
+    ///
+    /// A de lente é conferida pela conta de antes: no canto (0, 0) de uma foto
+    /// 120×80 a distância normalizada é 1, o fator é `1 − 0,8` e o cinza 160 vira
+    /// 32. A do darktable tem o gabarito de CPU bit a bit
+    /// (`sem_enquadramento_a_vinheta_e_a_de_antes`, em `darktable.rs`) e o
+    /// estágio inteiro contra ele (`o_estagio_darktable_por_pixel_bate_com_o_oraculo`).
+    #[test]
+    fn sem_corte_as_vinhetas_sao_as_de_antes() {
+        let mut motor = motor_pronto();
+        let mut virgem = motor_pronto();
+        let (l, a) = (120u32, 80u32);
+        let foto = cinza_retangular(l, a, 160);
+
+        for (rotulo, ajustes, _) in as_duas_vinhetas() {
+            // Um motor que nunca ouviu falar de corte.
+            let nunca = virgem
+                .revelar(&foto, l, a, &ajustes)
+                .expect("o motor não devolveu imagem")
+                .into_rgba8();
+            // E um que revelou com corte e voltou para a foto inteira.
+            motor.definir_corte(&Corte::novo(0.5, 0.25, 0.5, 0.5, 1, 10.0, true, false));
+            let _ = motor.revelar(&foto, l, a, &ajustes);
+            motor.definir_corte(&Corte::inteiro());
+            let depois = motor
+                .revelar(&foto, l, a, &ajustes)
+                .expect("o motor não devolveu imagem")
+                .into_rgba8();
+            assert!(
+                nunca.as_raw() == depois.as_raw(),
+                "{rotulo}: voltar para a foto inteira não devolveu a revelação sem corte"
+            );
+            assert!(
+                nunca.get_pixel(l / 2, a / 2).0[0] >= 157,
+                "{rotulo}: o centro da foto escureceu"
+            );
+        }
+
+        let lente = virgem
+            .revelar(&foto, l, a, &as_duas_vinhetas()[0].1)
+            .expect("o motor não devolveu imagem")
+            .into_rgba8();
+        let canto = lente.get_pixel(0, 0).0[0];
+        assert!(
+            canto.abs_diff(32) <= 1,
+            "vinheta de lente sem corte: o canto saiu {canto}, e a conta de antes dá 32"
+        );
+    }
+
+    /// ✅ **Os 16 sliders de matiz e luminância do HSL movem a foto.**
+    ///
+    /// A amostra tem as oito cores do HSL, então cada canal tem onde agir.
+    #[test]
+    fn o_matiz_e_a_luminancia_do_hsl_movem_a_foto() {
+        let mut motor = motor_pronto();
+        let entrada = amostra();
+        let neutro = revelar_e_colher(&mut motor, entrada.clone(), Ajustes::default());
+
+        // 23–30 é matiz, 31–38 é luminância — um canal por posição.
+        for (i, nome) in Ajustes::NOMES.iter().enumerate().take(39).skip(23) {
+            let saida = revelar_e_colher(&mut motor, entrada.clone(), com_campo(i, 60.0));
+            assert_ne!(
+                saida, neutro,
+                "`{nome}` (campo {i}) chega ao shader e não moveu um pixel"
+            );
+        }
+    }
+
+    /// 🚨 **A luminância do HSL não pode clarear cinza.**
+    ///
+    /// Um pixel cinza não tem matiz: `delta == 0` dá `hue == 0`, que cai na
+    /// faixa do **vermelho** com peso 1.0. Sem o portão da saturação, arrastar
+    /// "HSL / luminância — Vermelho" clarearia **toda** área neutra da foto — e
+    /// o slider viraria, calado, um controle global de brilho.
+    #[test]
+    fn a_luminancia_do_vermelho_nao_mexe_no_cinza() {
+        let mut motor = motor_pronto();
+        let cinza_puro = cinza(16, 128);
+
+        let neutro = revelar_e_colher(&mut motor, cinza_puro.clone(), Ajustes::default());
+        let com_lum = revelar_e_colher(
+            &mut motor,
+            cinza_puro,
+            Ajustes {
+                hsl_red_lum: 100.0,
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(
+            com_lum, neutro,
+            "o cinza não tem matiz — a luminância do vermelho não pode tocá-lo"
+        );
+    }
+
+    /// 🔑 **O matiz gira a cor; ele não mexe no contraste entre vizinhos.**
+    ///
+    /// É a mesma medida que acusou o defeito antigo, agora do lado certo: quando
+    /// o campo 23 era lido como `nr_luminance`, o contraste local **caía** —
+    /// assinatura de borrão. Girando de verdade, ele fica onde estava.
+    #[test]
+    fn o_matiz_gira_a_cor_sem_borrar() {
+        let mut motor = motor_pronto();
+        let entrada = amostra();
+
+        let neutro = revelar_e_colher(&mut motor, entrada.clone(), Ajustes::default());
+        let girado = revelar_e_colher(
+            &mut motor,
+            entrada,
+            Ajustes {
+                hsl_red_hue: 120.0,
+                ..Default::default()
+            },
+        );
+
+        assert_ne!(girado, neutro, "o matiz do vermelho não moveu nada");
+        let (antes, depois) = (contraste_local(&neutro), contraste_local(&girado));
+        assert!(
+            depois > antes / 2,
+            "o contraste local caiu de {antes} para {depois} — isso é borrão, não giro de matiz"
+        );
+    }
+
+    /// 🚨 **A entrada por fragmento revela o mesmo pixel que a por compute.**
+    ///
+    /// É o teste que autoriza o navegador: o desktop revela por `@compute`, o
+    /// site por `@fragment`, e o corpo é um só por construção (`concat!`). O que
+    /// este teste prende é o que a construção não prende — que a coordenada do
+    /// fragmento (`floor(uv * dims)`) é o mesmo pixel que o `global_id` do
+    /// compute, inclusive nas bordas e no último pixel, e que o render pass não
+    /// inverte, desloca nem mistura nada.
+    ///
+    /// Com **todos** os grupos fora do neutro, porque distorção e vinheta são os
+    /// únicos que dependem de **onde** o pixel está — e um erro de coordenada só
+    /// aparece neles.
+    ///
+    /// A folga de 1 nível é para a rasterização: a interpolação do `uv` e o
+    /// arredondamento do alvo podem diferir do compute no último bit.
+    #[test]
+    fn o_fragmento_revela_o_mesmo_pixel_que_o_compute() {
+        let mut compute = motor_pronto();
+        let mut fragmento = Motor::abrir_por(Entrada::Fragmento)
+            .expect("nenhum adaptador de GPU para a entrada por fragmento");
+        assert_eq!(fragmento.entrada(), Entrada::Fragmento);
+
+        let entrada = amostra();
+        let ajustes = Ajustes {
+            exposure: 0.4,
+            contrast: 1.2,
+            temperature: 15.0,
+            highlights: -30.0,
+            shadows: 25.0,
+            clarity: 20.0,
+            vibrance: 30.0,
+            tone_curve_darks: 15.0,
+            hsl_red_hue: 40.0,
+            hsl_blue_sat: -30.0,
+            hsl_green_lum: 20.0,
+            lens_distortion: 35.0,
+            lens_vignette_amount: -60.0,
+            lens_vignette_midpoint: 20.0,
+            nr_luminance: 30.0,
+            nr_color: 30.0,
+            sharpen_amount: 50.0,
+            sharpen_radius: 1.5,
+            split_shadow_hue: 35.0,
+            split_shadow_sat: 60.0,
+            split_highlight_hue: 210.0,
+            split_highlight_sat: 40.0,
+            split_balance: -20.0,
+            grain_amount: 70.0,
+            grain_size: 40.0,
+            ..Default::default()
+        };
+
+        let pelo_compute = revelar_e_colher(&mut compute, entrada.clone(), ajustes);
+        let pelo_fragmento = revelar_e_colher(&mut fragmento, entrada.clone(), ajustes);
+        let neutro = revelar_e_colher(&mut compute, entrada, Ajustes::default());
+        assert_ne!(
+            pelo_compute, neutro,
+            "os ajustes escolhidos têm de mover a foto"
+        );
+
+        let maior_diferenca = pelo_compute
+            .iter()
+            .zip(&pelo_fragmento)
+            .map(|(a, b)| a.abs_diff(*b))
+            .max()
+            .unwrap_or(0);
+        assert!(
+            maior_diferenca <= 1,
+            "compute e fragmento divergem em até {maior_diferenca} níveis — \
+             a coordenada do fragmento não é o pixel do compute"
+        );
+    }
+
+    /// 🔑 **Sépia é tonalização sobre foto sem cor — e até 2026-09-06 não dava.**
+    ///
+    /// Temperatura e matiz agem no passo 3 do shader, antes da saturação: numa
+    /// foto com `saturation = -1.0` eles pintam uma cor que o passo 9 apaga em
+    /// seguida. Este teste é a prova de que o caminho novo existe: o cinza sai
+    /// âmbar (`r > g > b`) **e com o mesmo brilho**, que é o que separa uma sépia
+    /// de uma foto amarelada.
+    #[test]
+    fn a_tonalizacao_pinta_de_sepia_uma_foto_sem_cor() {
+        let mut motor = motor_pronto();
+        let saida = revelar_e_colher(
+            &mut motor,
+            cinza(16, 128),
+            Ajustes {
+                saturation: -1.0,
+                split_shadow_hue: 35.0,
+                split_shadow_sat: 100.0,
+                split_highlight_hue: 35.0,
+                split_highlight_sat: 100.0,
+                ..Default::default()
+            },
+        );
+
+        let (r, g, b) = (saida[0] as i32, saida[1] as i32, saida[2] as i32);
+        assert!(
+            r > g && g > b,
+            "35° é âmbar: esperava vermelho > verde > azul, saiu ({r}, {g}, {b})"
+        );
+
+        let brilho = (0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32).round() as i32;
+        assert!(
+            (brilho - 128).abs() <= 2,
+            "tonalizar não pode mudar o brilho: 128 virou {brilho}"
+        );
+    }
+
+    /// As duas pontas da escala recebem cores diferentes — e cada pixel a sua.
+    ///
+    /// A rampa dá um nível de cinza por pixel, então "sombra" e "altas luzes"
+    /// aqui são dois pixels concretos: o 20 e o 240.
+    #[test]
+    fn a_tonalizacao_separa_as_sombras_das_altas_luzes() {
+        let mut motor = motor_pronto();
+        let saida = revelar_e_colher(
+            &mut motor,
+            rampa(),
+            Ajustes {
+                split_shadow_hue: 30.0,
+                split_shadow_sat: 100.0,
+                split_highlight_hue: 210.0,
+                split_highlight_sat: 100.0,
+                ..Default::default()
+            },
+        );
+
+        let quente = |i: usize| saida[i * 4] as i32 - saida[i * 4 + 2] as i32;
+        assert!(
+            quente(20) > 5,
+            "a sombra tinha de puxar para o âmbar, e saiu {}",
+            quente(20)
+        );
+        assert!(
+            quente(240) < -5,
+            "a alta luz tinha de puxar para o azul, e saiu {}",
+            quente(240)
+        );
+    }
+
+    /// ⚠️ **O balanço move a fronteira, e move para os dois lados.**
+    ///
+    /// Sem ele a tonalização é uma escolha só; com ele o meio-tom cai para uma
+    /// ponta ou para a outra — que é o que decide se a foto lê como "sombra
+    /// quente" ou "foto inteira quente".
+    #[test]
+    fn o_balanco_desloca_a_fronteira_da_tonalizacao() {
+        let mut motor = motor_pronto();
+        let tonalizada = |motor: &mut Motor, balanco: f32| {
+            let saida = revelar_e_colher(
+                motor,
+                rampa(),
+                Ajustes {
+                    split_shadow_hue: 30.0,
+                    split_shadow_sat: 100.0,
+                    split_highlight_hue: 210.0,
+                    split_highlight_sat: 100.0,
+                    split_balance: balanco,
+                    ..Default::default()
+                },
+            );
+            // O meio-tom exato: o pixel 128 da rampa.
+            saida[128 * 4] as i32 - saida[128 * 4 + 2] as i32
+        };
+
+        let para_a_sombra = tonalizada(&mut motor, -100.0);
+        let neutro = tonalizada(&mut motor, 0.0);
+        let para_a_luz = tonalizada(&mut motor, 100.0);
+
+        assert!(
+            para_a_luz < neutro && neutro < para_a_sombra,
+            "o meio-tom tinha de esfriar com o balanço nas altas luzes e esquentar              com ele nas sombras — saiu {para_a_luz}, {neutro}, {para_a_sombra}"
+        );
+    }
+
+    /// 🚨 **A tonalização não pode manchar o que veio fora da faixa.**
+    ///
+    /// Contraste, nitidez e as curvas de tom entregam valores abaixo de 0 e
+    /// acima de 255 — sempre entregaram, e até 2026-09-06 isso não importava,
+    /// porque o `clamp` do fim do shader recolhia tudo. `tonalizar` divide pela
+    /// luminância da mistura, e essa divisão inverte de sinal quando a
+    /// luminância de entrada é negativa: o pixel explode para dezenas de
+    /// milhares e o `clamp` final o deposita num canto puro da roda de cor.
+    ///
+    /// A rampa é o caso mínimo: os 256 níveis entram lisos, e basta um ajuste
+    /// que empurre o escuro abaixo de zero. Os dois aqui vêm de uma varredura
+    /// dos 53 controles sobre uma sépia ligada, e são os **extremos do
+    /// painel**, não valores de laboratório: contraste 2,0 leva o nível `i` a
+    /// `2i - 128`, negativo abaixo do 64; matiz -10 tira 50 do verde. Nos dois
+    /// o denominador cruzava o zero em algum nível, e ali dois vizinhos saíam
+    /// em cores opostas — salto de 255 num degradê liso.
+    #[test]
+    fn a_tonalizacao_nao_mancha_o_que_veio_fora_da_faixa() {
+        let mut motor = motor_pronto();
+        // Uma sépia como a do preset, e o controle que empurra para fora.
+        let sepia = Ajustes {
+            saturation: -1.0,
+            split_shadow_hue: 35.0,
+            split_shadow_sat: 60.0,
+            split_highlight_hue: 45.0,
+            split_highlight_sat: 40.0,
+            ..Default::default()
+        };
+        let casos = [
+            (
+                "contraste no máximo",
+                Ajustes {
+                    contrast: 2.0,
+                    ..sepia
+                },
+            ),
+            (
+                "matiz no mínimo",
+                Ajustes {
+                    tint: -10.0,
+                    ..sepia
+                },
+            ),
+        ];
+
+        for (nome, ajustes) in casos {
+            let saida = revelar_e_colher(&mut motor, rampa(), ajustes);
+
+            // A entrada anda de um nível por pixel e todo ajuste aqui é função
+            // contínua do nível: nenhum canal tem por que saltar dezenas entre
+            // vizinhos.
+            for i in 1..256usize {
+                for canal in 0..3 {
+                    let antes = saida[(i - 1) * 4 + canal] as i32;
+                    let agora = saida[i * 4 + canal] as i32;
+                    assert!(
+                        (agora - antes).abs() <= 24,
+                        "{nome}: mancha no pixel {i}, canal {canal} — \
+                         {antes} saltou para {agora}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// O grão muda a foto, é **o mesmo** a cada revelação, e some nas pontas.
+    ///
+    /// 🚨 **Repetir é requisito, e não detalhe.** O site revela a mesma foto a
+    /// cada arrasto de slider e exporta no fim; grão sorteado por revelação daria
+    /// uma prévia que nunca é o arquivo, e um "antes/depois" que pisca. Quem
+    /// garante é o hash inteiro do shader, que não depende de relógio nem de
+    /// quadro.
+    #[test]
+    fn o_grao_e_sempre_o_mesmo_e_respeita_as_pontas() {
+        let mut motor = motor_pronto();
+        let com_grao = Ajustes {
+            grain_amount: 100.0,
+            grain_size: 0.0,
+            ..Default::default()
+        };
+
+        let meio_tom = cinza(16, 128);
+        let primeira = revelar_e_colher(&mut motor, meio_tom.clone(), com_grao);
+        let segunda = revelar_e_colher(&mut motor, meio_tom.clone(), com_grao);
+        assert_eq!(
+            primeira, segunda,
+            "o grão tem de ser o mesmo a cada revelação"
+        );
+        assert_ne!(
+            primeira,
+            meio_tom.as_slice().to_vec(),
+            "o grão tinha de mover o meio-tom"
+        );
+
+        // Monocromático: o mesmo delta nos três canais, como prata de filme.
+        for pixel in primeira.as_chunks::<4>().0 {
+            assert_eq!(
+                (pixel[0], pixel[1]),
+                (pixel[2], pixel[2]),
+                "o grão saiu colorido — é chuvisco de sensor, não prata"
+            );
+        }
+
+        let preto = cinza(16, 0);
+        assert_eq!(
+            revelar_e_colher(&mut motor, preto.clone(), com_grao),
+            preto.as_slice().to_vec(),
+            "no preto fechado não há grão a mostrar — e o clamp o viraria mancha"
+        );
+    }
+
+    /// O tamanho do grão engrossa o grumo: células maiores, vizinhos iguais.
+    ///
+    /// A medida é o contraste local — quantos níveis separam pixels vizinhos.
+    /// Grão fino muda a cada pixel; grão grosso repete o mesmo valor por vários,
+    /// e a soma das diferenças cai.
+    #[test]
+    fn o_tamanho_do_grao_engrossa_o_grumo() {
+        let mut motor = motor_pronto();
+        let grao = |motor: &mut Motor, tamanho: f32| {
+            contraste_local(&revelar_e_colher(
+                motor,
+                cinza(16, 128),
+                Ajustes {
+                    grain_amount: 100.0,
+                    grain_size: tamanho,
+                    ..Default::default()
+                },
+            ))
+        };
+
+        let fino = grao(&mut motor, 0.0);
+        let grosso = grao(&mut motor, 100.0);
+        assert!(
+            grosso < fino,
+            "grão de cinco pixels tinha de ter menos contraste entre vizinhos              que o de um pixel — saiu {grosso} contra {fino}"
+        );
+    }
+
+    /// O motor de compute não desenha em alvo alheio, e diz isso com `None`.
+    #[test]
+    fn o_compute_nao_desenha_em_alvo_de_quem_chama() {
+        let mut motor = motor_pronto();
+        let textura = motor.dispositivo.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d {
+                width: 16,
+                height: 16,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: FORMATO_DE_LEITURA,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let vista = textura.create_view(&Default::default());
+        assert_eq!(
+            motor.desenhar(
+                &cinza(16, 1),
+                16,
+                16,
+                &Ajustes::default(),
+                &vista,
+                FORMATO_DE_LEITURA
+            ),
+            None
+        );
+    }
+}

@@ -1,0 +1,17 @@
+{
+  "version": "0.1.9",
+  "notes": "O visual e os gestos do app passam a ser os do site: o mesmo menu lateral, as mesmas cores e as mesmas telas. E a revela\u00e7\u00e3o de uma foto importada no computador agora guarda tudo: curvas, preto e branco, calibra\u00e7\u00e3o e os m\u00f3dulos novos voltavam zerados ao reabrir a foto, e sa\u00edam de fora da exporta\u00e7\u00e3o.",
+  "pub_date": "2026-09-17T13:57:13+00:00",
+  "platforms": {
+    "macos-aarch64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIGNhcmdvLXBhY2thZ2VyIHNlY3JldCBrZXkKUlVSSk9VNzBRQkxYTTJWOFZQUHV5SDNDN0NsaWMyTnovTW54YjN5cU1WajBNeTU4N1I5TzNCaWptdklXejFKS2ExWm5OQTBXM09URGdDVUhocXdoOGYyemtmWVZMODJ0WEE4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg5NjUzMzkxCWZpbGU6VmludGFnZUxpZ2h0Ym94LmFwcC50YXIuZ3oKdk9ydWUrVFZRa3BXMDhoRTZ5aUxvcWhndnpXdkJURkhMMlYxbmp3OVEwRzVyRFh5UTlqZ3JHYjN2aTAyeUNGa2FLdkpLMnV4aUhwci9zb0M5cHBEQUE9PQo=",
+      "url": "https://github.com/alexkads/VintageLightbox/releases/download/v0.1.9/VintageLightbox.app.tar.gz",
+      "format": "app"
+    },
+    "macos-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIGNhcmdvLXBhY2thZ2VyIHNlY3JldCBrZXkKUlVSSk9VNzBRQkxYTTJWOFZQUHV5SDNDN0NsaWMyTnovTW54YjN5cU1WajBNeTU4N1I5TzNCaWptdklXejFKS2ExWm5OQTBXM09URGdDVUhocXdoOGYyemtmWVZMODJ0WEE4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg5NjUzMzkxCWZpbGU6VmludGFnZUxpZ2h0Ym94LmFwcC50YXIuZ3oKdk9ydWUrVFZRa3BXMDhoRTZ5aUxvcWhndnpXdkJURkhMMlYxbmp3OVEwRzVyRFh5UTlqZ3JHYjN2aTAyeUNGa2FLdkpLMnV4aUhwci9zb0M5cHBEQUE9PQo=",
+      "url": "https://github.com/alexkads/VintageLightbox/releases/download/v0.1.9/VintageLightbox.app.tar.gz",
+      "format": "app"
+    }
+  }
+}

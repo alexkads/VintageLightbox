@@ -3,28 +3,48 @@
 //! Orquestra a importação paralela de fotos com opções configuráveis.
 //! Integra detecção de duplicatas, organização de arquivos, e progress reporting.
 
+use crate::check_duplicates::CheckDuplicatesUseCase;
 use domain::{
     entities::Photo,
     repositories::PhotoRepository,
-    services::{MetadataExtractor, ThumbnailGenerator, PreviewStorage, FileOrganizer, PreviewType},
-    value_objects::{FilePath, ImportOptions},
-    DomainResult, DomainError,
+    services::{FileOrganizer, MetadataExtractor, PreviewStorage, PreviewType, ThumbnailGenerator},
+    value_objects::{FilePath, ImportMode, ImportOptions},
+    DomainError, DomainResult,
 };
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use tokio::sync::{mpsc, Semaphore};
-use crate::check_duplicates::CheckDuplicatesUseCase;
 
 /// Progresso da importação
 #[derive(Debug, Clone)]
 pub enum ImportProgress {
-    Starting { total: usize },
-    Processing { index: usize, path: FilePath },
-    Completed { photo: Photo },
-    Failed { path: FilePath, error: String },
-    DuplicateSkipped { path: FilePath, existing: Photo },
-    Paused { completed: usize, remaining: usize },
-    Finished { successful: usize, failed: usize, skipped: usize },
+    Starting {
+        total: usize,
+    },
+    Processing {
+        index: usize,
+        path: FilePath,
+    },
+    Completed {
+        photo: Photo,
+    },
+    Failed {
+        path: FilePath,
+        error: String,
+    },
+    DuplicateSkipped {
+        path: FilePath,
+        existing: Photo,
+    },
+    Paused {
+        completed: usize,
+        remaining: usize,
+    },
+    Finished {
+        successful: usize,
+        failed: usize,
+        skipped: usize,
+    },
 }
 
 /// Request de importação com opções
@@ -118,8 +138,17 @@ impl ImportWithOptionsUseCase {
         let mut tasks = Vec::new();
 
         for (index, file_path) in files.iter().enumerate() {
-            let permit = semaphore.clone().acquire_owned().await
-                .map_err(|e| DomainError::InfrastructureError(format!("Semaphore error: {}", e)))?;
+            // 🔑 Cancelar para de **abrir** trabalho, e não só de fazê-lo. Sem
+            // esta saída, cancelar um lote de 2.000 arquivos ainda criaria as
+            // 2.000 tarefas — cada uma para desistir na primeira linha.
+            if cancel_flag.load(Ordering::Relaxed) {
+                break;
+            }
+
+            let permit =
+                semaphore.clone().acquire_owned().await.map_err(|e| {
+                    DomainError::InfrastructureError(format!("Semaphore error: {}", e))
+                })?;
 
             let file_path = file_path.clone();
             let options = options.clone();
@@ -139,12 +168,14 @@ impl ImportWithOptionsUseCase {
             let imported_photos = imported_photos.clone();
 
             // Verificar se é duplicata
-            let is_duplicate = duplicates.iter()
+            let is_duplicate = duplicates
+                .iter()
                 .find(|d| d.file_path == file_path)
                 .map(|d| d.is_duplicate)
                 .unwrap_or(false);
 
-            let existing_photo = duplicates.iter()
+            let existing_photo = duplicates
+                .iter()
                 .find(|d| d.file_path == file_path)
                 .and_then(|d| d.existing_photo.clone());
 
@@ -152,12 +183,17 @@ impl ImportWithOptionsUseCase {
                 // Liberar permit ao final
                 let _permit = permit;
 
-                // Check pause flag
-                while pause_flag.load(Ordering::Relaxed) {
+                // 🚨 A espera da pausa também olha o cancelamento.
+                //
+                // Sem a segunda condição, pausar e **depois** cancelar trava o
+                // lote para sempre: as 8 tarefas que seguram as permissões do
+                // semáforo dormem em `pause_flag`, o laço de cima nunca ganha
+                // permissão, `Finished` nunca é mandado — e a tela fica em
+                // "cancelando…" pelo resto da sessão.
+                while pause_flag.load(Ordering::Relaxed) && !cancel_flag.load(Ordering::Relaxed) {
                     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
                 }
 
-                // Check cancel flag
                 if cancel_flag.load(Ordering::Relaxed) {
                     return;
                 }
@@ -189,7 +225,9 @@ impl ImportWithOptionsUseCase {
                     &*preview_storage,
                     &*file_organizer,
                     &*photo_repository,
-                ).await {
+                )
+                .await
+                {
                     Ok(photo) => {
                         successful.fetch_add(1, Ordering::Relaxed);
                         let _ = progress_sender.send(ImportProgress::Completed {
@@ -248,17 +286,40 @@ impl ImportWithOptionsUseCase {
         // 1. Extrair metadados
         let metadata = metadata_extractor.extract(source)?;
 
-        // 2. Organizar arquivo (copiar para destino)
-        let dest_path = file_organizer.organize_file(
-            source,
-            Some(&metadata),
-            options.organization,
-            options.rename_pattern.clone(),
-        ).await?;
+        // 2. Colocar o arquivo onde ele vai ficar, conforme o modo escolhido
+        //
+        // `Add` cataloga onde está: nada é copiado, e o caminho gravado é o original.
+        // `Copy` e `Move` passam pelo organizador; `Move` apaga a origem **depois** de
+        // tudo ter dado certo, nunca antes — um erro no meio não pode deixar o usuário
+        // sem o arquivo e sem o registro.
+        let dest_path = match options.mode {
+            ImportMode::Add => source.clone(),
+            ImportMode::Copy | ImportMode::Move => {
+                file_organizer
+                    .organize_file_with(source, Some(&metadata), options)
+                    .await?
+            }
+        };
 
         // 3. Criar entidade Photo
         let mut photo = Photo::new(dest_path.clone());
         photo.set_metadata(metadata);
+        // 🚨 **O nome de origem é gravado aqui, e é a única chance.** Com
+        // `RenamePattern::Uuid` o `dest_path` já é `<uuid>.jpg`, e daqui para a
+        // frente não há de onde tirar `DSC_2571.JPG`: `source` é a última coisa
+        // que ainda sabe. Sem esta linha o operador perderia o nome na grade, na
+        // tira, no painel, na Revelação e na exportação — e o cliente veria um
+        // UUID na galeria dele (migration 022).
+        photo.definir_nome_original(
+            std::path::Path::new(&source.to_string_lossy().to_string())
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(str::to_string),
+        );
+        // 🚨 O ensaio entra **na criação**, e não depois: uma foto que chega ao
+        // catálogo sem ensaio não aparece na grade da sessão que a importou, e o
+        // sintoma é a importação "não ter funcionado".
+        photo.definir_sessao(options.sessao_id.clone());
 
         // 4. Gerar thumbnails
         let thumbnail_300 = thumbnail_generator.generate(&dest_path, 300).await?;
@@ -271,6 +332,18 @@ impl ImportWithOptionsUseCase {
         // 6. Salvar no banco de dados
         photo_repository.save(&photo).await?;
 
+        // 7. Só agora, com a foto registrada e as previews no lugar, o original pode sair
+        if options.mode == ImportMode::Move {
+            if let Err(e) = tokio::fs::remove_file(source.as_ref() as &std::path::Path).await {
+                // Falhar aqui não invalida a importação: a foto está no catálogo e o arquivo
+                // está no destino. O que sobrou foi uma cópia órfã na origem.
+                eprintln!(
+                    "Importação moveu {} mas não conseguiu apagar o original: {}",
+                    source, e
+                );
+            }
+        }
+
         Ok(photo)
     }
 }
@@ -280,12 +353,12 @@ mod tests {
     use super::*;
     use domain::{
         repositories::PhotoRepository,
-        services::{MetadataExtractor, ThumbnailGenerator, PreviewStorage, FileOrganizer},
-        value_objects::{PhotoId, PhotoMetadata, OrganizationStrategy, RenamePattern},
+        services::{FileOrganizer, MetadataExtractor, PreviewStorage, ThumbnailGenerator},
+        value_objects::{OrganizationStrategy, PhotoId, PhotoMetadata, RenamePattern},
     };
     use mockall::{mock, predicate::*};
-    use tempfile::NamedTempFile;
     use std::io::Write;
+    use tempfile::NamedTempFile;
 
     // Mocks
     mock! {
@@ -366,10 +439,7 @@ mod tests {
         let mock_organizer = MockFileOrg;
 
         // Setup mocks - sem duplicatas (skip_duplicates = false, então não chama find_by_content_hash)
-        mock_repo
-            .expect_save()
-            .times(2)
-            .returning(|_| Ok(()));
+        mock_repo.expect_save().times(2).returning(|_| Ok(()));
 
         mock_metadata
             .expect_extract()
@@ -406,6 +476,7 @@ mod tests {
             organization: OrganizationStrategy::ByDate,
             rename_pattern: RenamePattern::Standard,
             skip_duplicates: false,
+            ..ImportOptions::default()
         };
 
         let (tx, mut rx) = mpsc::unbounded_channel();
@@ -437,8 +508,12 @@ mod tests {
             messages.push(msg);
         }
 
-        assert!(messages.iter().any(|m| matches!(m, ImportProgress::Starting { .. })));
-        assert!(messages.iter().any(|m| matches!(m, ImportProgress::Finished { .. })));
+        assert!(messages
+            .iter()
+            .any(|m| matches!(m, ImportProgress::Starting { .. })));
+        assert!(messages
+            .iter()
+            .any(|m| matches!(m, ImportProgress::Finished { .. })));
     }
 
     #[tokio::test]
@@ -468,10 +543,7 @@ mod tests {
             });
 
         // Apenas 1 save (a não-duplicata)
-        mock_repo
-            .expect_save()
-            .times(1)
-            .returning(|_| Ok(()));
+        mock_repo.expect_save().times(1).returning(|_| Ok(()));
 
         mock_metadata
             .expect_extract()
@@ -508,6 +580,7 @@ mod tests {
             organization: OrganizationStrategy::ByDate,
             rename_pattern: RenamePattern::Standard,
             skip_duplicates: true, // Habilitar skip
+            ..ImportOptions::default()
         };
 
         let (tx, _rx) = mpsc::unbounded_channel();
@@ -554,6 +627,7 @@ mod tests {
             organization: OrganizationStrategy::ByDate,
             rename_pattern: RenamePattern::Standard,
             skip_duplicates: false,
+            ..ImportOptions::default()
         };
 
         let (tx, _rx) = mpsc::unbounded_channel();
@@ -590,22 +664,18 @@ mod tests {
 
         // Primeira falha, segunda sucede
         let mut call_count = 0;
-        mock_metadata
-            .expect_extract()
-            .times(2)
-            .returning(move |_| {
-                call_count += 1;
-                if call_count == 1 {
-                    Err(DomainError::InfrastructureError("Failed to extract metadata".to_string()))
-                } else {
-                    Ok(PhotoMetadata::default())
-                }
-            });
+        mock_metadata.expect_extract().times(2).returning(move |_| {
+            call_count += 1;
+            if call_count == 1 {
+                Err(DomainError::InfrastructureError(
+                    "Failed to extract metadata".to_string(),
+                ))
+            } else {
+                Ok(PhotoMetadata::default())
+            }
+        });
 
-        mock_repo
-            .expect_save()
-            .times(1)
-            .returning(|_| Ok(()));
+        mock_repo.expect_save().times(1).returning(|_| Ok(()));
 
         mock_thumbnail
             .expect_generate()
@@ -637,6 +707,7 @@ mod tests {
             organization: OrganizationStrategy::ByDate,
             rename_pattern: RenamePattern::Standard,
             skip_duplicates: false,
+            ..ImportOptions::default()
         };
 
         let (tx, _rx) = mpsc::unbounded_channel();
@@ -675,9 +746,7 @@ mod tests {
             .expect_find_by_content_hash()
             .returning(|_| Ok(None));
 
-        mock_repo
-            .expect_save()
-            .returning(|_| Ok(()));
+        mock_repo.expect_save().returning(|_| Ok(()));
 
         mock_metadata
             .expect_extract()
@@ -687,9 +756,7 @@ mod tests {
             .expect_generate()
             .returning(|_, _| Ok(vec![0u8; 100]));
 
-        mock_preview
-            .expect_save()
-            .returning(|_, _, _| Ok(()));
+        mock_preview.expect_save().returning(|_, _, _| Ok(()));
 
         let use_case = ImportWithOptionsUseCase::new(
             Arc::new(mock_repo),
@@ -706,6 +773,7 @@ mod tests {
             organization: OrganizationStrategy::ByDate,
             rename_pattern: RenamePattern::Standard,
             skip_duplicates: false,
+            ..ImportOptions::default()
         };
 
         let (tx, mut rx) = mpsc::unbounded_channel();
@@ -730,9 +798,81 @@ mod tests {
         }
 
         // Deve ter: Starting, Processing, Completed, Finished
-        assert!(messages.iter().any(|m| matches!(m, ImportProgress::Starting { total: 1 })));
-        assert!(messages.iter().any(|m| matches!(m, ImportProgress::Processing { .. })));
-        assert!(messages.iter().any(|m| matches!(m, ImportProgress::Completed { .. })));
-        assert!(messages.iter().any(|m| matches!(m, ImportProgress::Finished { successful: 1, failed: 0, skipped: 0 })));
+        assert!(messages
+            .iter()
+            .any(|m| matches!(m, ImportProgress::Starting { total: 1 })));
+        assert!(messages
+            .iter()
+            .any(|m| matches!(m, ImportProgress::Processing { .. })));
+        assert!(messages
+            .iter()
+            .any(|m| matches!(m, ImportProgress::Completed { .. })));
+        assert!(messages.iter().any(|m| matches!(
+            m,
+            ImportProgress::Finished {
+                successful: 1,
+                failed: 0,
+                skipped: 0
+            }
+        )));
+    }
+
+    /// 🚨 Cancelar **enquanto pausado** tem de terminar o lote.
+    ///
+    /// Este era o motivo de a pausa e o cancelamento continuarem sem botão: as
+    /// tarefas que seguram as 8 permissões do semáforo dormiam em `pause_flag`
+    /// sem olhar `cancel_flag`, o laço que abre trabalho novo nunca ganhava
+    /// permissão de volta, e `Finished` nunca saía. Sem o `timeout` abaixo,
+    /// este teste **não falha: ele pendura**.
+    #[tokio::test]
+    async fn cancelar_enquanto_pausado_termina_o_lote() {
+        // Nenhuma expectativa nos mocks: se qualquer arquivo for processado, o
+        // mockall entra em pânico — que é a segunda coisa afirmada aqui.
+        let use_case = ImportWithOptionsUseCase::new(
+            Arc::new(MockPhotoRepo::new()),
+            Arc::new(MockMetadataExt::new()),
+            Arc::new(MockThumbnailGen::new()),
+            Arc::new(MockPreviewStore::new()),
+            Arc::new(MockFileOrg),
+        );
+
+        let arquivos: Vec<_> = (0..12).map(|_| create_temp_file(b"raw")).collect();
+        let files = arquivos
+            .iter()
+            .map(|a| FilePath::new(a.path().to_str().unwrap()).unwrap())
+            .collect();
+
+        let (tx, _rx) = mpsc::unbounded_channel();
+        // Já nasce pausado: as primeiras 8 tarefas vão direto para o laço da espera.
+        let pause_flag = Arc::new(AtomicBool::new(true));
+        let cancel_flag = Arc::new(AtomicBool::new(false));
+
+        let cancelar = cancel_flag.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+            cancelar.store(true, Ordering::Relaxed);
+        });
+
+        let resultado = tokio::time::timeout(
+            tokio::time::Duration::from_secs(5),
+            use_case.execute(ImportRequest {
+                files,
+                options: ImportOptions {
+                    skip_duplicates: false,
+                    ..ImportOptions::default()
+                },
+                progress_sender: tx,
+                pause_flag,
+                cancel_flag,
+            }),
+        )
+        .await
+        .expect("o lote pausado e depois cancelado tem de terminar, e não pendurar");
+
+        let importacao = resultado.expect("cancelar não é erro");
+        assert_eq!(
+            importacao.successful, 0,
+            "nada entra depois do cancelamento"
+        );
     }
 }

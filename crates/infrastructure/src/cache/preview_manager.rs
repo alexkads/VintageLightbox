@@ -1,11 +1,11 @@
-use std::path::PathBuf;
-use std::sync::Mutex;
 use std::fs;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 // use directories::ProjectDirs;
-use image::DynamicImage;
 use domain::services::{PreviewStorage, PreviewType};
 use domain::value_objects::PhotoId;
 use domain::DomainResult;
+use image::DynamicImage;
 use rusqlite::{params, Connection, OptionalExtension};
 
 /// Statistics about the preview cache for UI display
@@ -21,12 +21,89 @@ pub struct CacheStats {
     pub db_path: PathBuf,
 }
 
+/// Quantos **previews grandes** ficam decodificados em memória.
+///
+/// 🔑 **Quinze, como no app de egui** (`docs/08-CACHE-ARCHITECTURE.md`): é o
+/// suficiente para ir e voltar pela seta numa sequência de revelação sem
+/// redecodificar nada, e o teto que mantém o consumo previsível — um preview de
+/// 2560px descomprimido são ~26 MB, então quinze são ~400 MB no pior caso.
+const PREVIEWS_NA_MEMORIA: usize = 15;
+
+/// E quantas **miniaturas**.
+///
+/// 🚨 **Elas não podem dividir o teto com os previews, e a conta diz por quê.**
+/// Eram um LRU só, de quinze: a tira da Revelação monta lendo **uma miniatura
+/// por foto do ensaio** — 21, 125, 200 —, e com quinze vagas essa varredura
+/// despeja tudo, inclusive o preview de 2560px que o palco acabou de pôr lá.
+/// A seta seguinte não achava mais nada em memória e redecodificava o JPEG
+/// inteiro.
+///
+/// Medido em 8/set/2026 no catálogo real (`medir-revelacao`): reler o preview
+/// custava **1,42 ms** com ele na memória e **13,41 ms** depois de a tira
+/// passar — 9,4× por tecla, para sempre, e ninguém teria achado o motivo
+/// olhando a Revelação.
+///
+/// 256 miniaturas de 300px descomprimidas são ~77 MB: uma ordem de grandeza
+/// abaixo dos previews, e mais do que cabe numa tira.
+const MINIATURAS_NA_MEMORIA: usize = 256;
+
 pub struct PreviewManager {
     conn: Mutex<Connection>,
     #[allow(dead_code)]
     cache_dir: PathBuf,
+    /// O cache L1 dos previews grandes: imagens **já decodificadas**, por id.
+    ///
+    /// 🚨 **É `Arc` por dentro para o descarte do LRU não copiar 26 MB.** Guardar
+    /// `DynamicImage` direto faria cada `put` mover a imagem inteira, e cada
+    /// despejo liberar de uma vez — com o `Arc`, quem já pegou a imagem continua
+    /// com ela enquanto usa.
+    previews: Mutex<lru::LruCache<String, Arc<DynamicImage>>>,
+    /// O mesmo para as miniaturas, **em outro LRU**. Ver
+    /// [`MINIATURAS_NA_MEMORIA`]: juntas, as pequenas expulsavam as grandes.
+    miniaturas: Mutex<lru::LruCache<String, Arc<DynamicImage>>>,
 }
 
+/// Grava a imagem como JPEG, convertendo para RGB8 antes.
+///
+/// # Por que a conversão não é opcional
+///
+/// **JPEG não tem canal alfa.** Até o `image` 0.24 os dois métodos aqui
+/// passavam `image.color()` direto para o encoder, e uma foto RGBA era aceita
+/// sem reclamação — gravando bytes de 4 canais num formato de 3. O 0.25 recusa
+/// explicitamente:
+///
+/// ```text
+/// The encoder or decoder for Jpeg does not support the color type `Rgba8`
+/// ```
+///
+/// O `image_exporter.rs`, no mesmo crate, sempre fez `to_rgb8()` antes de
+/// encodar — eram dois caminhos para a mesma decisão, e só um estava certo.
+/// Isto aqui é o caminho certo, agora num lugar só.
+///
+/// ⚠️ **Descartar o alfa é a única saída, e é o que já acontecia.** Miniatura e
+/// preview são para exibição, não para reedição — o pixel editável vem do RAW.
+/// Preservar transparência exigiria trocar o formato do cache, que é outra
+/// decisão e outro custo.
+fn encode_jpeg<W: std::io::Write>(
+    encoder: &mut image::codecs::jpeg::JpegEncoder<W>,
+    image: &DynamicImage,
+) -> Result<(), String> {
+    let rgb = image.to_rgb8();
+    encoder
+        .encode(
+            &rgb,
+            rgb.width(),
+            rgb.height(),
+            image::ExtendedColorType::Rgb8,
+        )
+        .map_err(|e| e.to_string())
+}
+
+impl Default for PreviewManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl PreviewManager {
     pub fn new() -> Self {
@@ -58,30 +135,142 @@ impl PreviewManager {
                 PRIMARY KEY (photo_id, type)
             )",
             [],
-        ).expect("Failed to initialize preview database");
+        )
+        .expect("Failed to initialize preview database");
 
         Self {
             conn: Mutex::new(conn),
             cache_dir,
+            previews: Mutex::new(lru::LruCache::new(
+                std::num::NonZeroUsize::new(PREVIEWS_NA_MEMORIA).expect("não é zero"),
+            )),
+            miniaturas: Mutex::new(lru::LruCache::new(
+                std::num::NonZeroUsize::new(MINIATURAS_NA_MEMORIA).expect("não é zero"),
+            )),
         }
     }
 
+    /// Qual dos dois LRUs guarda este tipo.
+    fn memoria_de(&self, tipo: PreviewType) -> &Mutex<lru::LruCache<String, Arc<DynamicImage>>> {
+        match tipo {
+            PreviewType::Large => &self.previews,
+            PreviewType::Thumbnail => &self.miniaturas,
+        }
+    }
+
+    /// A imagem já decodificada, se ela estiver na memória.
+    fn da_memoria(&self, tipo: PreviewType, id: &str) -> Option<DynamicImage> {
+        self.memoria_de(tipo)
+            .lock()
+            .ok()?
+            .get(id)
+            .map(|imagem: &Arc<DynamicImage>| (**imagem).clone())
+    }
+
+    fn guardar_na_memoria(&self, tipo: PreviewType, id: &str, imagem: &DynamicImage) {
+        if let Ok(mut memoria) = self.memoria_de(tipo).lock() {
+            memoria.put(id.to_string(), Arc::new(imagem.clone()));
+        }
+    }
+
+    /// Esquece uma foto da memória — usado quando o preview dela é regravado.
+    pub fn esquecer_da_memoria(&self, photo_id_str: &str) {
+        for tipo in [PreviewType::Large, PreviewType::Thumbnail] {
+            if let Ok(mut memoria) = self.memoria_de(tipo).lock() {
+                memoria.pop(photo_id_str);
+            }
+        }
+    }
+
+    /// Apaga do cache **tudo** o que está gravado sob esta chave — as duas
+    /// variantes, no banco e na memória.
+    ///
+    /// 🔑 **Quem apaga é quem sabe que a origem mudou de dono.** O caso que a
+    /// fez nascer é a prévia revelada local (`revelada:<id>`): enquanto a foto
+    /// não subiu, ela é a verdade que a grade mostra; quando a receita volta ao
+    /// neutro, ou quando o site recebe a revelação, quem passa a ser mais novo é
+    /// o servidor — e uma cópia local que ninguém mais atualiza faria a grade
+    /// mostrar para sempre o que já mudou.
+    ///
+    /// ⚠️ **Falha de banco não é fim de fluxo**: o pior desfecho é o cache
+    /// continuar com a entrada velha, que é onde já se estava.
+    pub fn apagar(&self, photo_id_str: &str) {
+        self.esquecer_da_memoria(photo_id_str);
+        if let Ok(conn) = self.conn.lock() {
+            let _ = conn.execute(
+                "DELETE FROM previews WHERE photo_id = ?1",
+                params![photo_id_str],
+            );
+        }
+    }
+
+    /// Se o cache **tem** esta entrada, sem trazer a imagem.
+    ///
+    /// 🔑 **Existe para quem precisa perguntar por muitas fotos.** `get_*`
+    /// decodifica o JPEG e ainda o guarda na memória: varrer uma tira de 200
+    /// fotos com eles seria 200 decodes e o LRU inteiro trocado só para
+    /// descobrir o que falta. Aqui é um `SELECT 1` num índice — e o `PRIMARY
+    /// KEY (photo_id, type)` é justamente esse índice.
+    ///
+    /// ⚠️ **Não mexe no `last_accessed_at`.** Perguntar não é usar, e contar
+    /// como uso faria a varredura proteger do `cleanup_lru` exatamente as fotos
+    /// que ninguém abriu.
+    pub fn tem(&self, photo_id_str: &str, tipo: PreviewType) -> bool {
+        let Ok(conn) = self.conn.lock() else {
+            return false;
+        };
+        // O número da coluna sai de um `match`, como nos outros três pontos do
+        // arquivo — e não de um `as i32`: a ordem de declaração do enum viraria
+        // silenciosamente o valor gravado no banco.
+        let tipo = match tipo {
+            PreviewType::Thumbnail => 0,
+            PreviewType::Large => 1,
+        };
+        conn.query_row(
+            "SELECT 1 FROM previews WHERE photo_id = ?1 AND type = ?2",
+            params![photo_id_str, tipo],
+            |_| Ok(()),
+        )
+        .optional()
+        .ok()
+        .flatten()
+        .is_some()
+    }
+
     /// Helper to get a thumbnail as DynamicImage
+    ///
+    /// ⚠️ **Também passa pela memória.** A grade já tem cache próprio de
+    /// `RenderImage`, mas a Revelação cai na miniatura quando não há preview, e o
+    /// filmstrip pede as vizinhas a cada troca de foto.
     pub fn get_thumbnail(&self, photo_id_str: &str) -> Option<DynamicImage> {
+        if let Some(imagem) = self.da_memoria(PreviewType::Thumbnail, photo_id_str) {
+            return Some(imagem);
+        }
+        let imagem = self.ler_miniatura_do_disco(photo_id_str)?;
+        self.guardar_na_memoria(PreviewType::Thumbnail, photo_id_str, &imagem);
+        Some(imagem)
+    }
+
+    fn ler_miniatura_do_disco(&self, photo_id_str: &str) -> Option<DynamicImage> {
         let conn = self.conn.lock().unwrap();
         // Type 0 = Thumbnail
-        let mut stmt = conn.prepare("SELECT data FROM previews WHERE photo_id = ?1 AND type = 0").ok()?;
-        let data: Option<Vec<u8>> = stmt.query_row(params![photo_id_str], |row| row.get(0)).optional().ok()?;
-        
+        let mut stmt = conn
+            .prepare("SELECT data FROM previews WHERE photo_id = ?1 AND type = 0")
+            .ok()?;
+        let data: Option<Vec<u8>> = stmt
+            .query_row(params![photo_id_str], |row| row.get(0))
+            .optional()
+            .ok()?;
+
         if let Some(bytes) = data {
-             // Update access time
-             let now = chrono::Utc::now().timestamp();
-             let _ = conn.execute(
-                 "UPDATE previews SET last_accessed_at = ?1 WHERE photo_id = ?2 AND type = 0", 
-                 params![now, photo_id_str]
-             );
-             
-             image::load_from_memory(&bytes).ok()
+            // Update access time
+            let now = chrono::Utc::now().timestamp();
+            let _ = conn.execute(
+                "UPDATE previews SET last_accessed_at = ?1 WHERE photo_id = ?2 AND type = 0",
+                params![now, photo_id_str],
+            );
+
+            image::load_from_memory(&bytes).ok()
         } else {
             None
         }
@@ -89,11 +278,15 @@ impl PreviewManager {
 
     /// Helper to save thumbnail
     pub fn save_thumbnail(&self, photo_id_str: &str, image: &DynamicImage) -> Result<(), String> {
+        // 🚨 Regravar invalida a memória. Sem isto, gerar um preview novo
+        // deixaria o antigo valendo até o LRU o descartar — e a foto continuaria
+        // aparecendo como estava, sem erro nenhum.
+        self.esquecer_da_memoria(photo_id_str);
+
         let mut bytes: Vec<u8> = Vec::new();
         // Medium quality JPEG for thumbnails
         let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes, 80);
-        encoder.encode(image.as_bytes(), image.width(), image.height(), image.color())
-            .map_err(|e| e.to_string())?;
+        encode_jpeg(&mut encoder, image)?;
 
         let conn = self.conn.lock().unwrap();
         let now = chrono::Utc::now().timestamp();
@@ -102,28 +295,50 @@ impl PreviewManager {
             "INSERT OR REPLACE INTO previews (photo_id, type, data, created_at, last_accessed_at)
              VALUES (?1, ?2, ?3, ?4, ?5)",
             params![photo_id_str, 0, bytes, now, now],
-        ).map_err(|e| e.to_string())?;
-        
+        )
+        .map_err(|e| e.to_string())?;
+
         Ok(())
     }
 
     /// Helper to get a preview as DynamicImage (Legacy API support)
     /// Loads the 'Large' preview type (Smart Preview)
+    ///
+    /// 🚨 **A memória vem primeiro, e é o que faz trocar de foto ser instantâneo.**
+    /// Sem ela, cada troca custava ler o BLOB do SQLite e **decodificar o JPEG de
+    /// novo** — medido no catálogo real em 18/ago/2026: **16 ms por foto, e a
+    /// segunda passada pelas mesmas fotos custava o mesmo**. É a técnica que o app
+    /// de egui tinha (`async_loader.rs`, cache L1 de 15 imagens) e que não veio no
+    /// porte; `docs/08-CACHE-ARCHITECTURE.md` a descreve desde dez/2025.
     pub fn get_preview(&self, photo_id_str: &str) -> Option<DynamicImage> {
+        if let Some(imagem) = self.da_memoria(PreviewType::Large, photo_id_str) {
+            return Some(imagem);
+        }
+        let imagem = self.ler_preview_do_disco(photo_id_str)?;
+        self.guardar_na_memoria(PreviewType::Large, photo_id_str, &imagem);
+        Some(imagem)
+    }
+
+    fn ler_preview_do_disco(&self, photo_id_str: &str) -> Option<DynamicImage> {
         let conn = self.conn.lock().unwrap();
         // Type 1 = Large
-        let mut stmt = conn.prepare("SELECT data FROM previews WHERE photo_id = ?1 AND type = 1").ok()?;
-        let data: Option<Vec<u8>> = stmt.query_row(params![photo_id_str], |row| row.get(0)).optional().ok()?;
-        
+        let mut stmt = conn
+            .prepare("SELECT data FROM previews WHERE photo_id = ?1 AND type = 1")
+            .ok()?;
+        let data: Option<Vec<u8>> = stmt
+            .query_row(params![photo_id_str], |row| row.get(0))
+            .optional()
+            .ok()?;
+
         if let Some(bytes) = data {
-             // Update access time
-             let now = chrono::Utc::now().timestamp();
-             let _ = conn.execute(
-                 "UPDATE previews SET last_accessed_at = ?1 WHERE photo_id = ?2 AND type = 1", 
-                 params![now, photo_id_str]
-             );
-             
-             image::load_from_memory(&bytes).ok()
+            // Update access time
+            let now = chrono::Utc::now().timestamp();
+            let _ = conn.execute(
+                "UPDATE previews SET last_accessed_at = ?1 WHERE photo_id = ?2 AND type = 1",
+                params![now, photo_id_str],
+            );
+
+            image::load_from_memory(&bytes).ok()
         } else {
             None
         }
@@ -132,11 +347,15 @@ impl PreviewManager {
     /// Helper to save preview (Legacy API support)
     /// Saves as 'Large' preview type
     pub fn save_preview(&self, photo_id_str: &str, image: &DynamicImage) -> Result<(), String> {
+        // 🚨 Regravar invalida a memória. Sem isto, gerar um preview novo
+        // deixaria o antigo valendo até o LRU o descartar — e a foto continuaria
+        // aparecendo como estava, sem erro nenhum.
+        self.esquecer_da_memoria(photo_id_str);
+
         let mut bytes: Vec<u8> = Vec::new();
         // High quality JPEG for previews
         let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes, 90);
-        encoder.encode(image.as_bytes(), image.width(), image.height(), image.color())
-            .map_err(|e| e.to_string())?;
+        encode_jpeg(&mut encoder, image)?;
 
         let conn = self.conn.lock().unwrap();
         let now = chrono::Utc::now().timestamp();
@@ -145,22 +364,25 @@ impl PreviewManager {
             "INSERT OR REPLACE INTO previews (photo_id, type, data, created_at, last_accessed_at)
              VALUES (?1, ?2, ?3, ?4, ?5)",
             params![photo_id_str, 1, bytes, now, now],
-        ).map_err(|e| e.to_string())?;
-        
+        )
+        .map_err(|e| e.to_string())?;
+
         Ok(())
     }
-    
+
     /// Cleanup old previews if cache exceeds size limit
     pub fn cleanup_lru(&self, max_size_bytes: u64) -> Result<u64, String> {
         let conn = self.conn.lock().unwrap();
-        
+
         // Check current size
         // This is a rough estimate summing Blob sizes
-        let size: i64 = conn.query_row(
-            "SELECT COALESCE(SUM(LENGTH(data)), 0) FROM previews",
-            [],
-            |row| row.get(0)
-        ).unwrap_or(0);
+        let size: i64 = conn
+            .query_row(
+                "SELECT COALESCE(SUM(LENGTH(data)), 0) FROM previews",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
 
         if size as u64 <= max_size_bytes {
             return Ok(0);
@@ -168,58 +390,64 @@ impl PreviewManager {
 
         // Delete oldest accessed
         // We delete in chunks until size is under limit, or just simplistic approach:
-        // Delete oldest 10%? 
+        // Delete oldest 10%?
         // Or delete strictly strictly oldest until satisfied.
-        
+
         let target_size = max_size_bytes as i64;
         let diff = size - target_size;
-        
-        if diff <= 0 { return Ok(0); }
+
+        if diff <= 0 {
+            return Ok(0);
+        }
 
         // Find items to delete
         // We want to delete rows with oldest last_accessed_at until we free 'diff' bytes.
         // This logic is complex in SQL alone without iteration.
         // Simplification: Delete oldest N items.
-        
+
         // Let's just delete the oldest 50 items and repeat or just one pass.
-        // Better: Delete where last_accessed_at < some_threshold? 
-        
+        // Better: Delete where last_accessed_at < some_threshold?
+
         // For now, let's just delete the 20 oldest items if we are over limit, as a maintenance step.
-        let deleted = conn.execute(
-            "DELETE FROM previews WHERE photo_id IN (
+        let deleted = conn
+            .execute(
+                "DELETE FROM previews WHERE photo_id IN (
                 SELECT photo_id FROM previews ORDER BY last_accessed_at ASC LIMIT 50
             )",
-            []
-        ).map_err(|e| e.to_string())?;
-        
+                [],
+            )
+            .map_err(|e| e.to_string())?;
+
         Ok(deleted as u64)
     }
 
     /// Get cache statistics for UI display
     pub fn get_stats(&self) -> CacheStats {
         let conn = self.conn.lock().unwrap();
-        
+
         // Count thumbnails (type 0)
-        let thumbnail_count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM previews WHERE type = 0",
-            [],
-            |row| row.get(0)
-        ).unwrap_or(0);
-        
+        let thumbnail_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM previews WHERE type = 0", [], |row| {
+                row.get(0)
+            })
+            .unwrap_or(0);
+
         // Count large previews (type 1)
-        let large_preview_count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM previews WHERE type = 1",
-            [],
-            |row| row.get(0)
-        ).unwrap_or(0);
-        
+        let large_preview_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM previews WHERE type = 1", [], |row| {
+                row.get(0)
+            })
+            .unwrap_or(0);
+
         // Total size of all data
-        let total_size_bytes: i64 = conn.query_row(
-            "SELECT COALESCE(SUM(LENGTH(data)), 0) FROM previews",
-            [],
-            |row| row.get(0)
-        ).unwrap_or(0);
-        
+        let total_size_bytes: i64 = conn
+            .query_row(
+                "SELECT COALESCE(SUM(LENGTH(data)), 0) FROM previews",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
         CacheStats {
             thumbnail_count: thumbnail_count as u64,
             large_preview_count: large_preview_count as u64,
@@ -232,12 +460,13 @@ impl PreviewManager {
     /// Returns the number of deleted entries
     pub fn clear_all(&self) -> Result<u64, String> {
         let conn = self.conn.lock().unwrap();
-        let deleted = conn.execute("DELETE FROM previews", [])
+        let deleted = conn
+            .execute("DELETE FROM previews", [])
             .map_err(|e| e.to_string())?;
-        
+
         // VACUUM to reclaim disk space
         conn.execute("VACUUM", []).ok();
-        
+
         Ok(deleted as u64)
     }
 
@@ -245,7 +474,8 @@ impl PreviewManager {
     /// Returns the number of deleted entries
     pub fn clear_thumbnails(&self) -> Result<u64, String> {
         let conn = self.conn.lock().unwrap();
-        let deleted = conn.execute("DELETE FROM previews WHERE type = 0", [])
+        let deleted = conn
+            .execute("DELETE FROM previews WHERE type = 0", [])
             .map_err(|e| e.to_string())?;
         Ok(deleted as u64)
     }
@@ -254,12 +484,12 @@ impl PreviewManager {
     /// Returns the number of deleted entries
     pub fn clear_previews(&self) -> Result<u64, String> {
         let conn = self.conn.lock().unwrap();
-        let deleted = conn.execute("DELETE FROM previews WHERE type = 1", [])
+        let deleted = conn
+            .execute("DELETE FROM previews WHERE type = 1", [])
             .map_err(|e| e.to_string())?;
         Ok(deleted as u64)
     }
 }
-
 
 impl PreviewStorage for PreviewManager {
     fn save(&self, id: &PhotoId, preview_type: PreviewType, data: &[u8]) -> DomainResult<()> {
@@ -274,7 +504,8 @@ impl PreviewStorage for PreviewManager {
             "INSERT OR REPLACE INTO previews (photo_id, type, data, created_at, last_accessed_at)
              VALUES (?1, ?2, ?3, ?4, ?5)",
             params![id.to_string(), type_id, data, now, now],
-        ).map_err(|e| domain::DomainError::InfrastructureError(format!("DB error: {}", e)))?;
+        )
+        .map_err(|e| domain::DomainError::InfrastructureError(format!("DB error: {}", e)))?;
 
         Ok(())
     }
@@ -285,19 +516,22 @@ impl PreviewStorage for PreviewManager {
             PreviewType::Thumbnail => 0,
             PreviewType::Large => 1,
         };
-        
-        let mut stmt = conn.prepare("SELECT data FROM previews WHERE photo_id = ?1 AND type = ?2")
-             .map_err(|e| domain::DomainError::InfrastructureError(format!("DB error: {}", e)))?;
-             
-        let data: Option<Vec<u8>> = stmt.query_row(params![id.to_string(), type_id], |row| row.get(0)).optional()
-             .map_err(|e| domain::DomainError::InfrastructureError(format!("DB error: {}", e)))?;
+
+        let mut stmt = conn
+            .prepare("SELECT data FROM previews WHERE photo_id = ?1 AND type = ?2")
+            .map_err(|e| domain::DomainError::InfrastructureError(format!("DB error: {}", e)))?;
+
+        let data: Option<Vec<u8>> = stmt
+            .query_row(params![id.to_string(), type_id], |row| row.get(0))
+            .optional()
+            .map_err(|e| domain::DomainError::InfrastructureError(format!("DB error: {}", e)))?;
 
         if data.is_some() {
-             let now = chrono::Utc::now().timestamp();
-             let _ = conn.execute(
-                 "UPDATE previews SET last_accessed_at = ?1 WHERE photo_id = ?2 AND type = ?3", 
-                 params![now, id.to_string(), type_id]
-             );
+            let now = chrono::Utc::now().timestamp();
+            let _ = conn.execute(
+                "UPDATE previews SET last_accessed_at = ?1 WHERE photo_id = ?2 AND type = ?3",
+                params![now, id.to_string(), type_id],
+            );
         }
 
         Ok(data)
@@ -309,12 +543,14 @@ impl PreviewStorage for PreviewManager {
             PreviewType::Thumbnail => 0,
             PreviewType::Large => 1,
         };
-        
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(1) FROM previews WHERE photo_id = ?1 AND type = ?2",
-            params![id.to_string(), type_id],
-            |row| row.get(0),
-        ).map_err(|e| domain::DomainError::InfrastructureError(format!("DB error: {}", e)))?;
+
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(1) FROM previews WHERE photo_id = ?1 AND type = ?2",
+                params![id.to_string(), type_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| domain::DomainError::InfrastructureError(format!("DB error: {}", e)))?;
 
         Ok(count > 0)
     }
@@ -324,16 +560,143 @@ impl PreviewStorage for PreviewManager {
         conn.execute(
             "DELETE FROM previews WHERE photo_id = ?1",
             params![id.to_string()],
-        ).map_err(|e| domain::DomainError::InfrastructureError(format!("DB error: {}", e)))?;
+        )
+        .map_err(|e| domain::DomainError::InfrastructureError(format!("DB error: {}", e)))?;
         Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
+    /// 🚨 **A segunda leitura da mesma foto não decodifica de novo.**
+    ///
+    /// Sem o cache em memória, trocar de foto na Revelação custava ler o BLOB do
+    /// SQLite e **decodificar o JPEG inteiro**, toda vez. Medido no catálogo real
+    /// em 18/ago/2026: **16 ms por foto, e a segunda passada pelas mesmas doze
+    /// custava os mesmos 154 ms.** Com a memória, 8,9 ms.
+    ///
+    /// 🔑 É a técnica que o app de egui tinha (`async_loader.rs`, cache L1 de 15
+    /// imagens) e que não veio no porte — `docs/08-CACHE-ARCHITECTURE.md` a
+    /// descreve desde dez/2025.
+    ///
+    /// O teste mede o **efeito observável**: apagar a linha do disco e a foto
+    /// continuar vindo prova que ela não foi lida de lá.
+    #[test]
+    fn a_segunda_leitura_vem_da_memoria() {
+        let dir = tempfile::tempdir().expect("diretório");
+        let previews = PreviewManager::new_with_path(dir.path().to_path_buf());
+
+        let imagem = DynamicImage::ImageRgb8(image::RgbImage::new(64, 48));
+        previews.save_preview("foto-1", &imagem).expect("gravar");
+
+        let primeira = previews.get_preview("foto-1").expect("primeira leitura");
+        assert_eq!((primeira.width(), primeira.height()), (64, 48));
+
+        // Some com a linha do disco, sem avisar a memória.
+        {
+            let conn = previews.conn.lock().expect("a conexão");
+            conn.execute("DELETE FROM previews WHERE photo_id = 'foto-1'", [])
+                .expect("apagar");
+        }
+
+        let segunda = previews.get_preview("foto-1");
+        assert!(
+            segunda.is_some(),
+            "a segunda leitura foi ao disco — não há cache em memória"
+        );
+    }
+
+    /// 🚨 **Regravar invalida a memória.**
+    ///
+    /// Sem isto, gerar um preview novo deixaria o antigo valendo até o LRU o
+    /// descartar — e a foto continuaria aparecendo como estava, sem erro nenhum.
+    #[test]
+    fn regravar_troca_o_que_esta_na_memoria() {
+        let dir = tempfile::tempdir().expect("diretório");
+        let previews = PreviewManager::new_with_path(dir.path().to_path_buf());
+
+        previews
+            .save_preview(
+                "foto-1",
+                &DynamicImage::ImageRgb8(image::RgbImage::new(64, 48)),
+            )
+            .expect("gravar");
+        assert_eq!(previews.get_preview("foto-1").expect("lida").width(), 64);
+
+        previews
+            .save_preview(
+                "foto-1",
+                &DynamicImage::ImageRgb8(image::RgbImage::new(32, 24)),
+            )
+            .expect("regravar");
+
+        assert_eq!(
+            previews.get_preview("foto-1").expect("relida").width(),
+            32,
+            "veio a versão antiga da memória"
+        );
+    }
+
+    /// ⚠️ A memória tem teto: a 16ª foto empurra a primeira para fora.
+    #[test]
+    fn a_memoria_tem_teto() {
+        let dir = tempfile::tempdir().expect("diretório");
+        let previews = PreviewManager::new_with_path(dir.path().to_path_buf());
+
+        let imagem = DynamicImage::ImageRgb8(image::RgbImage::new(8, 8));
+        for i in 0..=PREVIEWS_NA_MEMORIA {
+            previews
+                .save_preview(&format!("foto-{i}"), &imagem)
+                .expect("gravar");
+            previews.get_preview(&format!("foto-{i}"));
+        }
+
+        let memoria = previews.previews.lock().expect("a memória");
+        assert_eq!(memoria.len(), PREVIEWS_NA_MEMORIA);
+    }
+
+    /// 🚨 **A tira não pode despejar o preview do palco.**
+    ///
+    /// Eram um LRU só, de quinze: a tira da Revelação lê uma miniatura por foto
+    /// do ensaio ao montar, e essa varredura empurrava para fora o preview de
+    /// 2560px que o palco tinha acabado de pôr lá. A seta seguinte
+    /// redecodificava o JPEG inteiro — 13,41 ms contra 1,42 ms, medido no
+    /// catálogo real em 8/set/2026 (`medir-revelacao`).
+    ///
+    /// O defeito só apareceu quando a Revelação passou a abrir de verdade as
+    /// fotos que só estão no disco: antes a tira não achava miniatura nenhuma,
+    /// e uma varredura que não lê nada não despeja nada.
+    #[test]
+    fn as_miniaturas_nao_despejam_os_previews() {
+        let dir = tempfile::tempdir().expect("diretório");
+        let previews = PreviewManager::new_with_path(dir.path().to_path_buf());
+        let imagem = DynamicImage::ImageRgb8(image::RgbImage::new(8, 8));
+
+        previews.save_preview("no-palco", &imagem).expect("gravar");
+        previews.get_preview("no-palco");
+
+        // A tira monta: uma miniatura por foto do ensaio, muito além do teto
+        // dos previews.
+        for i in 0..(PREVIEWS_NA_MEMORIA * 3) {
+            previews
+                .save_thumbnail(&format!("da-tira-{i}"), &imagem)
+                .expect("gravar");
+            previews.get_thumbnail(&format!("da-tira-{i}"));
+        }
+
+        assert!(
+            previews
+                .previews
+                .lock()
+                .expect("a memória")
+                .contains("no-palco"),
+            "a tira despejou o preview do palco — cada seta volta a decodificar"
+        );
+    }
+
     use super::*;
-    use tempfile::tempdir;
     use image::{DynamicImage, RgbaImage};
+    use tempfile::tempdir;
 
     // Helper para criar imagem dummy
     fn create_dummy_image(width: u32, height: u32) -> DynamicImage {
@@ -354,10 +717,10 @@ mod tests {
 
         // Inserir dados
         let img = create_dummy_image(100, 100);
-        
+
         // Salvar Thumbnail
         manager.save_thumbnail(photo_id, &img).unwrap();
-        
+
         // Salvar Preview
         manager.save_preview(photo_id, &img).unwrap();
 
@@ -370,14 +733,14 @@ mod tests {
         // Testar Clear Thumbnails
         let count = manager.clear_thumbnails().unwrap();
         assert_eq!(count, 1);
-        
+
         let stats = manager.get_stats();
         assert_eq!(stats.thumbnail_count, 0, "Thumbnails should be gone");
         assert_eq!(stats.large_preview_count, 1, "Previews should remain");
 
         // Recolocar thumbnail para testar Clear All
         manager.save_thumbnail(photo_id, &img).unwrap();
-        
+
         // Testar Clear Previews
         let count = manager.clear_previews().unwrap();
         assert_eq!(count, 1);

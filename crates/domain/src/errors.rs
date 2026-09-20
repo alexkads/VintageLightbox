@@ -21,8 +21,37 @@ pub enum DomainError {
     #[error("Adjustment value fora dos limites permitidos")]
     InvalidAdjustmentValue,
 
+    #[error("Print settings inválido: {0}")]
+    InvalidPrintSettings(String),
+
     #[error("Foto não encontrada")]
     PhotoNotFound,
+
+    /// O site recusou a credencial — e-mail, senha ou sessão vencida.
+    ///
+    /// Variante própria, e não `InfrastructureError`, porque o remédio é outro:
+    /// "sem rede" é esperar; isto é entrar de novo. A tela precisa distinguir.
+    #[error("o site recusou o acesso: confira e-mail e senha")]
+    AcessoRecusado,
+
+    /// O site respondeu `404` — o recurso não está mais lá.
+    ///
+    /// Variante própria pelo mesmo motivo de [`Self::AcessoRecusado`]: o remédio
+    /// é outro. Ao **remover** uma foto do storage, "já não está lá" é o desfecho
+    /// desejado, e não uma falha — tratá-lo como erro faria o app insistir em
+    /// remover, a cada estrela apagada, algo que outra tela já removeu.
+    #[error("o site não encontrou: {0}")]
+    NaoEncontradoNoSite(String),
+
+    /// 🔚 O site recusou o fim da sessão — gerar o link ou avisar — porque a
+    /// galeria não tem e-mail (`422`, desde 2026-09-13): sem contato nenhum, ou
+    /// só com WhatsApp. O link entra na conta do e-mail, e o aviso vai por ele.
+    ///
+    /// Variante própria pelo mesmo motivo das outras: o remédio é outro. Não é
+    /// "tente de novo" nem "entre de novo" — é pedir o e-mail ao operador e
+    /// seguir com o gesto. A frase é a do site.
+    #[error("{0}")]
+    FaltaEmail(String),
 
     #[error("Collection não encontrada")]
     CollectionNotFound,
