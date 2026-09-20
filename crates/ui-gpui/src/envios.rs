@@ -305,6 +305,27 @@ impl Esteira {
         !self.fila.is_empty() || !self.no_ar.is_empty()
     }
 
+    /// Tira **este** trabalho da fila, se ele ainda não saiu. Devolve se saiu
+    /// da fila.
+    ///
+    /// 🚨 **É o `X` chegando antes da vez da foto** (contrato C21): o ensaio
+    /// inteiro entra na esteira assim que é importado, e rejeitar uma foto que
+    /// ainda espera vaga tem de impedir a subida — não adiantaria marcar a foto
+    /// e vê-la subir três segundos depois.
+    ///
+    /// ⚠️ **O que já está no ar não volta.** Ele saiu, e a resposta dele vem de
+    /// qualquer jeito; quem cuida dessa foto é a conciliação de quem a mandou,
+    /// que marca a rejeição no site depois que ela chega lá.
+    pub fn tirar_da_fila(&mut self, alvo: &str) -> bool {
+        let antes = self.fila.len();
+        self.fila.retain(|t| t.trabalho.alvo() != alvo);
+        let tirou = self.fila.len() < antes;
+        if tirou {
+            self.progresso.total -= antes - self.fila.len();
+        }
+        tirou
+    }
+
     /// Esvazia o que ainda não saiu — o que está no ar continua, porque já saiu.
     pub fn esquecer_o_que_espera(&mut self) {
         self.progresso.total -= self.fila.len();
@@ -515,6 +536,38 @@ mod testes {
 
         assert_eq!(esteira.progresso().total, 1);
         assert_eq!(esteira.progresso().na_fila(), 0);
+    }
+
+    /// ❌ **A rejeitada sai da fila antes de subir** — contrato C21.
+    ///
+    /// O ensaio inteiro entra na esteira assim que é importado (C20), e o `X`
+    /// chega depois: a foto que ainda espera vaga tem de ser tirada dali. A que
+    /// já está no ar não volta — ela saiu, e quem cuida dela é a conciliação
+    /// de quem a mandou.
+    #[test]
+    fn rejeitar_tira_da_fila_o_que_ainda_nao_saiu() {
+        let publicador = Arc::new(PublicadorDeMentira::default());
+        let (canal, _recebe) = channel();
+        let mut esteira = Esteira::default();
+        for i in 0..5 {
+            esteira.empurrar(classificada(&format!("f{i}")));
+        }
+        esteira.despachar(publicador.as_ref(), &sessao(), &canal);
+
+        assert!(esteira.tirar_da_fila("f4"), "f4 ainda esperava vaga");
+        assert_eq!(esteira.progresso().total, 4);
+        assert_eq!(esteira.progresso().na_fila(), 1, "sobrou a f3");
+
+        assert!(
+            !esteira.tirar_da_fila("f0"),
+            "a que já está no ar não sai da fila — ela não está nela"
+        );
+        assert_eq!(esteira.progresso().no_ar, EM_VOO);
+        assert!(
+            !esteira.tirar_da_fila("fantasma"),
+            "e o que nunca entrou não mexe na conta"
+        );
+        assert_eq!(esteira.progresso().total, 4);
     }
 
     /// O que ainda não saiu pode ser esquecido; o que está no ar, não.

@@ -11,6 +11,7 @@
 //! é a tela, que tem o controller em mãos. É o que permite testar a máquina
 //! inteira sem runtime, sem banco e sem cartão de memória plugado.
 
+use domain::ordem_da_captura::{comparar_captura, comparar_nome};
 use domain::value_objects::ImportOptions;
 
 /// Um arquivo listado na grade.
@@ -31,8 +32,12 @@ pub struct Candidato {
     pub e_raw: bool,
     pub camera: String,
     /// Data de captura no formato EXIF (`"YYYY:MM:DD HH:MM:SS"`), vazia quando
-    /// não há.
+    /// não há. É o que a célula mostra.
     pub data: String,
+    /// A chave por onde a grade ordena: a data do disparo com o subsegundo
+    /// normalizado, vazia quando não há data. Ver `chave_de_captura`, no
+    /// domínio — e [`Estado::ordenar`], que decide o que fazer com a vazia.
+    pub captura: String,
     pub dimensoes: Option<String>,
     /// Se os metadados já chegaram.
     pub descrito: bool,
@@ -66,6 +71,7 @@ impl Candidato {
             e_raw: false,
             camera: String::new(),
             data: String::new(),
+            captura: String::new(),
             dimensoes: None,
             descrito: false,
         }
@@ -147,6 +153,8 @@ pub struct Descricao {
     pub e_raw: bool,
     pub camera: String,
     pub data: String,
+    /// A chave de ordenação — ver [`Candidato::captura`].
+    pub captura: String,
     pub dimensoes: Option<String>,
 }
 
@@ -236,18 +244,30 @@ impl Estado {
     /// 🚨 **Empata sempre pelo nome do arquivo.** Sem isso, fotos disparadas no
     /// mesmo segundo — uma rajada — trocariam de lugar a cada reordenação, e a
     /// grade pareceria embaralhar sozinha.
+    ///
+    /// 🚨 **Quem não tem captura vai para o fim, e não para o começo**
+    /// (20/set/2026). A comparação era sobre a data crua, e texto vazio é menor
+    /// que qualquer data: um arquivo sem EXIF — um escaneado, um exportado por
+    /// um programa que apagou a tag — se punha **na frente do ensaio**, e as
+    /// células ainda não descritas iam junto enquanto as datas não chegavam. É
+    /// a mesma regra do site (`ordem-da-captura.ts`): com data primeiro, sem
+    /// data no fim, e as duas metades não se misturam.
     pub fn ordenar(&mut self) {
         match self.ordem {
             Ordem::Captura => self
                 .candidatos
-                .sort_by(|a, b| a.data.cmp(&b.data).then(a.nome.cmp(&b.nome))),
-            Ordem::Nome => self.candidatos.sort_by(|a, b| a.nome.cmp(&b.nome)),
-            Ordem::Tamanho => self
+                .sort_by(|a, b| comparar_captura((&a.captura, &a.nome), (&b.captura, &b.nome))),
+            Ordem::Nome => self
                 .candidatos
-                .sort_by(|a, b| b.tamanho.cmp(&a.tamanho).then(a.nome.cmp(&b.nome))),
+                .sort_by(|a, b| comparar_nome(&a.nome, &b.nome)),
+            Ordem::Tamanho => self.candidatos.sort_by(|a, b| {
+                b.tamanho
+                    .cmp(&a.tamanho)
+                    .then(comparar_nome(&a.nome, &b.nome))
+            }),
             Ordem::Tipo => self
                 .candidatos
-                .sort_by(|a, b| b.e_raw.cmp(&a.e_raw).then(a.nome.cmp(&b.nome))),
+                .sort_by(|a, b| b.e_raw.cmp(&a.e_raw).then(comparar_nome(&a.nome, &b.nome))),
         }
     }
 
@@ -380,6 +400,7 @@ pub fn aplicar(estado: &mut Estado, recado: Recado) -> Option<Seguimento> {
                     candidato.e_raw = descricao.e_raw;
                     candidato.camera = descricao.camera;
                     candidato.data = descricao.data;
+                    candidato.captura = descricao.captura;
                     candidato.dimensoes = descricao.dimensoes;
                     candidato.descrito = true;
                 }
@@ -544,6 +565,7 @@ mod testes {
                 e_raw: true,
                 camera: "Nikon Z6".into(),
                 data: "2026:08:16 10:00:00".into(),
+                captura: "2026:08:16 10:00:00".into(),
                 dimensoes: Some("6000x4000".into()),
             }]),
         );
@@ -583,6 +605,7 @@ mod testes {
                     e_raw: true,
                     camera: String::new(),
                     data: "2026:08:16 12:00:00".into(),
+                    captura: "2026:08:16 12:00:00".into(),
                     dimensoes: None,
                 },
                 Descricao {
@@ -591,12 +614,102 @@ mod testes {
                     e_raw: true,
                     camera: String::new(),
                     data: "2026:08:16 09:00:00".into(),
+                    captura: "2026:08:16 09:00:00".into(),
                     dimensoes: None,
                 },
             ]),
         );
 
         assert_eq!(nomes(&estado), ["b.NEF", "a.NEF"], "a mais antiga primeiro");
+    }
+
+    /// 🚨 **O arquivo sem EXIF vai para o fim, e não para a frente do ensaio.**
+    ///
+    /// Era o defeito de antes de 20/set/2026: a comparação era sobre a data
+    /// crua, e texto vazio é menor que qualquer data — um escaneado, ou uma
+    /// foto que perdeu a tag, abria o ensaio.
+    #[test]
+    fn quem_nao_tem_captura_fica_no_fim() {
+        let mut estado = com_arquivos("/cartao", &["sem-exif.jpg", "b.NEF", "a.NEF"]);
+
+        aplicar(
+            &mut estado,
+            Recado::Descritos(vec![
+                Descricao {
+                    caminho: "/cartao/a.NEF".into(),
+                    tamanho: 1,
+                    e_raw: true,
+                    camera: String::new(),
+                    data: "2026:08:16 09:00:00".into(),
+                    captura: "2026:08:16 09:00:00.000".into(),
+                    dimensoes: None,
+                },
+                Descricao {
+                    caminho: "/cartao/b.NEF".into(),
+                    tamanho: 1,
+                    e_raw: true,
+                    camera: String::new(),
+                    data: "2026:08:16 12:00:00".into(),
+                    captura: "2026:08:16 12:00:00.000".into(),
+                    dimensoes: None,
+                },
+                Descricao {
+                    caminho: "/cartao/sem-exif.jpg".into(),
+                    tamanho: 1,
+                    e_raw: false,
+                    camera: String::new(),
+                    data: String::new(),
+                    captura: String::new(),
+                    dimensoes: None,
+                },
+            ]),
+        );
+
+        assert_eq!(nomes(&estado), ["a.NEF", "b.NEF", "sem-exif.jpg"]);
+    }
+
+    /// 🚨 **O subsegundo é o que ordena a rajada**, e é por isso que a chave
+    /// existe separada da data que a célula mostra: as três têm o mesmo segundo.
+    #[test]
+    fn o_subsegundo_ordena_a_rajada() {
+        let mut estado = com_arquivos("/cartao", &["c.NEF", "a.NEF", "b.NEF"]);
+        let segundo = "2026:08:16 10:00:00";
+
+        aplicar(
+            &mut estado,
+            Recado::Descritos(
+                [("a.NEF", "450"), ("b.NEF", "070"), ("c.NEF", "500")]
+                    .iter()
+                    .map(|(nome, sub)| Descricao {
+                        caminho: format!("/cartao/{nome}"),
+                        tamanho: 1,
+                        e_raw: true,
+                        camera: String::new(),
+                        data: segundo.into(),
+                        captura: format!("{segundo}.{sub}"),
+                        dimensoes: None,
+                    })
+                    .collect(),
+            ),
+        );
+
+        assert_eq!(nomes(&estado), ["b.NEF", "a.NEF", "c.NEF"]);
+    }
+
+    /// 🚨 **`IMG_9` antes de `IMG_10`** — o desempate de todas as ordens, e a
+    /// ordem inteira de quem não tem EXIF.
+    #[test]
+    fn o_nome_compara_os_numeros_como_numeros() {
+        use std::cmp::Ordering;
+        assert_eq!(comparar_nome("IMG_9.NEF", "IMG_10.NEF"), Ordering::Less);
+        assert_eq!(comparar_nome("IMG_0009.NEF", "IMG_9.NEF"), Ordering::Equal);
+        assert_eq!(comparar_nome("DSC_2.jpg", "dsc_10.jpg"), Ordering::Less);
+        assert_eq!(comparar_nome("a.jpg", "a.jpg"), Ordering::Equal);
+
+        let mut estado = com_arquivos("/cartao", &["IMG_10.NEF", "IMG_9.NEF", "IMG_100.NEF"]);
+        estado.ordem = Ordem::Nome;
+        estado.ordenar();
+        assert_eq!(nomes(&estado), ["IMG_9.NEF", "IMG_10.NEF", "IMG_100.NEF"]);
     }
 
     /// 🚨 Rajada: fotos do mesmo segundo não trocam de lugar entre ordenações.
@@ -616,6 +729,7 @@ mod testes {
                         e_raw: true,
                         camera: String::new(),
                         data: mesma_hora.into(),
+                        captura: mesma_hora.into(),
                         dimensoes: None,
                     })
                     .collect(),
@@ -964,6 +1078,7 @@ mod testes {
                     e_raw: true,
                     camera: String::new(),
                     data: String::new(),
+                    captura: String::new(),
                     dimensoes: None,
                 },
                 Descricao {
@@ -972,6 +1087,7 @@ mod testes {
                     e_raw: true,
                     camera: String::new(),
                     data: String::new(),
+                    captura: String::new(),
                     dimensoes: None,
                 },
             ]),

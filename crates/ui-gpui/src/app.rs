@@ -14,7 +14,6 @@
 
 mod atalhos_da_revelacao;
 mod painel;
-pub mod resgate;
 mod resolucao_cheia;
 mod roteiro;
 /// O que a raiz conta à bandeja (`crate::segundo_plano`).
@@ -41,8 +40,8 @@ use crate::balcao::tela::Balcao;
 use crate::biblioteca::acervo::Acervo;
 use crate::biblioteca::colecoes::Colecoes;
 use crate::biblioteca::marcacao::Marcador;
+use crate::biblioteca::marcacao::REJEITADA_NO_CATALOGO;
 use crate::biblioteca::tela::Biblioteca;
-use crate::biblioteca::tela::Classificou;
 use crate::caixa::tela::{Caixa, PedidoDoCaixa};
 use crate::cliente::{area_do_cliente, monitor_do_cliente, Cliente, ParaRevelar};
 use crate::configuracoes::Configuracoes;
@@ -371,7 +370,6 @@ pub enum Tela {
     /// com o nome que o dono pediu em 2026-09-18.
     Backup,
 }
-
 pub struct Aplicativo {
     pub(crate) biblioteca: Entity<Biblioteca>,
     pub(crate) revelacao: Entity<Revelacao>,
@@ -540,13 +538,29 @@ pub struct Aplicativo {
     /// As predefinições que este app conhece — sistema e as do banco local.
     /// É delas que sai a receita padrão da sessão aberta.
     presets_conhecidos: Vec<Preset>,
+    /// O aviso de "há trabalho em segundo plano" está na tela? Guarda a frase
+    /// do que está pendente — ver [`Aplicativo::avisar_fechamento_pendente`].
+    fechar_avisando: Option<SharedString>,
+    /// O que este app **mandou subir sozinho** (C20), por id do catálogo: a
+    /// curadoria que a foto tinha quando entrou na esteira, `(nota, rejeitada)`.
+    ///
+    /// 🚨 **É o que impede a foto de subir duas vezes** — a releitura do
+    /// catálogo acontece a cada importação, e sem este registro toda releitura
+    /// reenfileiraria o ensaio inteiro.
+    ///
+    /// 🔑 **E é o que fecha a corrida da curadoria.** Entre a foto entrar na
+    /// esteira e a linha dela existir no site há segundos, e o operador
+    /// classifica dentro deles: a nota vai para o catálogo e a foto sobe sem
+    /// ela. Quando a linha do site aparece, [`Aplicativo::conciliar_o_que_subiu`]
+    /// compara as duas pontas e manda a diferença — só nas fotos deste
+    /// registro, que são as que este app acabou de criar. Nenhuma outra é
+    /// tocada: sobrescrever o que o site sabe seria desfazer o trabalho de quem
+    /// classificou por lá.
+    subindo_sozinhas: std::collections::HashMap<String, (Option<u8>, bool)>,
     /// A receita já aplicada a cada foto local, por id: `"<preset>|<proporção>"`.
     /// O mesmo registro do assistente, e pelo mesmo motivo — sem ele a receita
     /// seria pedida de novo a cada releitura do catálogo.
     receita_das_locais: std::collections::HashMap<String, String>,
-    /// 🚨 A inscrição na travessia do zero da classificação. Sem ela nada acusa:
-    /// as estrelas entram no banco, e nada sobe nem sai do site.
-    _classificacao: gpui::Subscription,
     /// 🚨 A inscrição na escolha da sessão. Descartada, a tela marca a linha e
     /// o resto do app continua sem saber em qual galeria as fotos entram.
     _sessao_escolhida: gpui::Subscription,
@@ -572,16 +586,6 @@ pub struct Aplicativo {
     /// A segunda tela, quando aberta. É uma **janela**, e não uma tela desta —
     /// as duas existem ao mesmo tempo, em monitores diferentes.
     cliente: Option<gpui::WindowHandle<Cliente>>,
-    /// Quem cataloga arquivo no SQLite. A raiz o guarda por causa do resgate
-    /// (`app::resgate`): a foto que volta do acervo entra no catálogo como
-    /// qualquer foto do cartão.
-    importador: Arc<dyn Importador>,
-    /// A tarefa do resgate — trazer as fotos do acervo de volta antes de a
-    /// nuvem perdê-las. Descartada, o lote para no meio: por isso ela é guardada
-    /// (e por isso é **uma só**, com as fotos em fila dentro dela).
-    _resgate: Option<Task<()>>,
-    /// 🧪 O desfecho do último resgate, para os cenários.
-    ultimo_resgate: Option<resgate::Desfecho>,
     /// A tela do cliente abre como **janela arrastável**, e não tomando o
     /// monitor? Guardada em disco: quem contornou um monitor mal detectado uma
     /// vez não quer refazer o contorno a cada abertura.
@@ -712,7 +716,6 @@ impl Aplicativo {
         // catálogo, com o mesmo caminho: o que muda é a porta de entrada, e não
         // o destino.
         let importador_do_detalhe = portas.importador.clone();
-        let importador_da_raiz = portas.importador.clone();
         // 🧭 O assistente da nova sessão importa para o mesmo catálogo, aplica
         // a receita pelo mesmo gravador e lê as mesmas prévias.
         let reveladas: (Sender<String>, Receiver<String>) = channel();
@@ -832,13 +835,6 @@ impl Aplicativo {
         });
         let escolha = cx.subscribe(&entrada, |raiz, _entrada, evento: &Entrou, cx| {
             raiz.entrar_na_conta(evento.0.clone(), cx);
-        });
-
-        // 🔑 A Biblioteca **notifica** que a classificação atravessou o zero, e
-        // não sobe nada: quem tem a sessão e a galeria aberta é esta raiz. É o
-        // que deixa a grade não precisar saber que existe um site.
-        let classificacao = cx.subscribe(&biblioteca, |raiz, _tela, evento: &Classificou, cx| {
-            raiz.sincronizar_classificacao(evento.clone(), cx);
         });
 
         let balcao = cx.new(|cx| Balcao::nova(publicador_do_balcao, window, cx));
@@ -1034,15 +1030,13 @@ impl Aplicativo {
             proximo_toast: 0,
             _relogios_dos_toasts: Vec::new(),
             presets_conhecidos: presets_para_a_receita,
+            fechar_avisando: None,
+            subindo_sozinhas: std::collections::HashMap::new(),
             receita_das_locais: std::collections::HashMap::new(),
-            _classificacao: classificacao,
             _sessao_escolhida: sessao_escolhida,
             configuracoes: cx.new(|_| Configuracoes::nova(previews_das_configuracoes)),
             configurando: false,
             cliente: None,
-            importador: importador_da_raiz,
-            _resgate: None,
-            ultimo_resgate: None,
             cliente_em_janela: modo_do_cliente_guardado(),
             _pedido_do_cliente: None,
             previews: previews_do_cliente,
@@ -1276,16 +1270,154 @@ impl Aplicativo {
         let Some(galeria) = self.sessao_aberta.clone() else {
             return;
         };
+        // 🚨 **A posição é contada no ensaio inteiro, e não só entre as que
+        // ainda não subiram** (20/set/2026). O `enumerate` vinha depois dos dois
+        // filtros: a terceira foto ainda local ganhava `ordem = 2` mesmo sendo a
+        // décima do ensaio, e como a do site traz a ordem do disparo, as duas
+        // escalas discordavam — a grade intercalava errado. Contar antes do
+        // filtro de "já subiu" põe as duas na mesma régua: a do acervo, que é a
+        // da fotografia (`find_all`).
         let locais: Vec<biblioteca_core::acervo::Foto> = fotos
             .iter()
             .filter(|f| f.sessao_id.as_deref() == Some(galeria.as_str()))
-            .filter(|f| f.pos_venda_foto_id.is_none())
             .enumerate()
+            .filter(|(_, f)| f.pos_venda_foto_id.is_none())
             .map(|(i, f)| local_para_a_grade(f, i as i64))
             .collect();
         self.detalhe
             .update(cx, |tela, cx| tela.definir_locais(locais, cx));
         self.aplicar_a_receita_da_sessao(fotos, &galeria, cx);
+        self.conciliar_o_que_subiu(fotos, cx);
+        self.subir_o_que_falta_do_ensaio(fotos, &galeria, cx);
+    }
+
+    /// **O ensaio inteiro sobe, em segundo plano** — contrato C20.
+    ///
+    /// # 🔄 A regra virou em 2026-09-20, e este método é a virada
+    ///
+    /// Até aqui quem mandava a foto ao site era a **nota**: classificar era a
+    /// porta da nuvem (a travessia do zero → `subir_classificada`), e a sem nota
+    /// ficava só no disco. O dono trocou: *"as fotos não classificadas também
+    /// vão subir para o CloudFlare, mas durante o processo de classificação, ou
+    /// seja continua em segundo plano"*. O operador classifica com o cliente na
+    /// frente e, quando termina, o trabalho já está lá.
+    ///
+    /// 🚨 **Quem segura uma foto aqui é a rejeição** (C21), e nada mais. A
+    /// rejeitada não entra na esteira; a que já entrou sai dela pelo
+    /// [`crate::envios::Esteira::tirar_da_fila`].
+    ///
+    /// ⚠️ **A receita padrão da sessão vem primeiro.** Subir antes dela faria o
+    /// BRUTO chegar ao acervo com os PARÂMETROS neutros e o cliente veria a
+    /// foto crua — o contrário do que o preset do ensaio existe para fazer
+    /// (C1, C5). Enquanto a fila da receita anda, esta passada não enfileira
+    /// nada: [`Self::colher_reveladas`] chama de novo quando ela seca.
+    fn subir_o_que_falta_do_ensaio(
+        &mut self,
+        fotos: &[PhotoViewModel],
+        galeria: &str,
+        cx: &mut Context<Self>,
+    ) {
+        if self.sessao().is_none() || self.receita_padrao.progresso().andando() {
+            return;
+        }
+        let faixa = self.detalhe.read(cx).faixa().map(str::to_string);
+        let mut entraram = 0;
+        // 🚨 **A posição é contada no ensaio inteiro, e não só entre as que
+        // ainda não subiram** (20/set/2026, pedido do dono: *"tem que ser tudo
+        // na ordem da fotografia"*). Esta passada roda de novo a cada
+        // importação, e com o `enumerate` depois do filtro de "já subiu" a leva
+        // seguinte recomeçava do `0` — colidindo com as ordens que a primeira já
+        // tinha mandado ao site, que ordena por `ordem, criada_em`. Contando
+        // antes do filtro, a régua é a do acervo, que vem na ordem do disparo
+        // (`find_all`), e ela atravessa as passadas.
+        for (ordem, foto) in fotos
+            .iter()
+            .filter(|f| f.sessao_id.as_deref() == Some(galeria))
+            .enumerate()
+            .filter(|(_, f)| f.pos_venda_foto_id.is_none())
+        {
+            if self.subindo_sozinhas.contains_key(&foto.id)
+                || foto.flag == Some(REJEITADA_NO_CATALOGO)
+            {
+                continue;
+            }
+            let nota = u8::try_from(foto.rating)
+                .ok()
+                .filter(|n| (1..=5).contains(n));
+            self.esteira
+                .empurrar(crate::envios::Trabalho::Classificada {
+                    galeria: galeria.to_string(),
+                    foto: Box::new(crate::pos_venda::porta::FotoClassificada {
+                        foto_id: foto.id.clone(),
+                        ordem: ordem as u32,
+                        // 🔑 `None`: quem sobe não escolheu leva nenhuma, e o
+                        // estado sai da tecla `B` de cada foto, depois.
+                        estado: None,
+                        nota,
+                        // 🧾 A faixa escolhida na barra de envio da sessão.
+                        produto_id: faixa.clone(),
+                    }),
+                });
+            self.subindo_sozinhas.insert(foto.id.clone(), (nota, false));
+            entraram += 1;
+        }
+        if entraram == 0 {
+            return;
+        }
+        self.esperar_o_site(PedidoDeFoto::SubirClassificada, entraram, cx);
+        self.despachar_os_envios(cx);
+    }
+
+    /// A curadoria que mudou **enquanto a foto subia** alcança o site.
+    ///
+    /// 🚨 **Sem isto a nota se perde calada.** A foto entra na esteira no
+    /// instante em que é importada, e o operador classifica segundos depois:
+    /// quando o gesto chega, a foto ainda é local — a nota vai para o catálogo —
+    /// e a subida já levou o que tinha, que era nada. A grade releria e a foto
+    /// apareceria sem estrelas, com o operador jurando tê-las dado.
+    ///
+    /// 🔑 **Só as fotos que este app acabou de subir** ([`Self::subindo_sozinhas`]).
+    /// Conciliar o acervo inteiro faria o catálogo desta máquina vencer o que o
+    /// site sabe — e apagaria a classificação feita no painel da web.
+    fn conciliar_o_que_subiu(&mut self, fotos: &[PhotoViewModel], cx: &mut Context<Self>) {
+        if self.subindo_sozinhas.is_empty() {
+            return;
+        }
+        let Some(sessao) = self.sessao().cloned() else {
+            return;
+        };
+        let mut pedidos = 0;
+        for foto in fotos {
+            let Some(no_site) = foto.pos_venda_foto_id.as_deref() else {
+                continue;
+            };
+            let Some((nota_enviada, rejeicao_enviada)) = self.subindo_sozinhas.remove(&foto.id)
+            else {
+                continue;
+            };
+            let nota = u8::try_from(foto.rating)
+                .ok()
+                .filter(|n| (1..=5).contains(n));
+            let rejeitada = foto.flag == Some(REJEITADA_NO_CATALOGO);
+            let mudanca = domain::services::pos_venda::MudancaDaFoto {
+                nota: (nota != nota_enviada).then_some(nota.map(i16::from)),
+                rejeitada: (rejeitada != rejeicao_enviada).then_some(rejeitada),
+                ..Default::default()
+            };
+            if mudanca.vazia() {
+                continue;
+            }
+            self.publicador.negociar(
+                sessao.clone(),
+                no_site.to_string(),
+                mudanca,
+                self.sincronias.0.clone(),
+            );
+            pedidos += 1;
+        }
+        if pedidos > 0 {
+            self.esperar_o_site(PedidoDeFoto::Negociar, pedidos, cx);
+        }
     }
 
     /// Entra numa sessão — o mesmo gesto que abre a rota `[id]` na web.
@@ -1301,6 +1433,10 @@ impl Aplicativo {
         self.detalhe
             .update(cx, |tela, cx| tela.entrar(galeria_id, cx));
         self.tela = Tela::Sessao;
+        // 🚨 **O ensaio de ontem também sobe** (C20): quem importou sem rede,
+        // ou fechou o app no meio, tem fotos do ensaio paradas no disco — e
+        // nenhuma importação nova viria buscá-las.
+        self.tentar_subir_o_ensaio(cx);
         cx.notify();
     }
 
@@ -1431,12 +1567,21 @@ impl Aplicativo {
                     .tirar_do_site(sessao, id.clone(), self.sincronias.0.clone());
                 self.esperar_o_site(PedidoDeFoto::TirarDoSite, 1, cx);
             }
-            // 🚨 **Tirar do acervo é o caminho de volta inteiro** (C21): o
-            // bruto vem para cá, é catalogado com os parâmetros, e só então a
-            // nuvem perde a foto. Ver `app::resgate`.
-            DetalhePedido::TirarDoAcervo(fotos) => {
-                let fotos = fotos.clone();
-                self.desclassificar_do_acervo(fotos, cx);
+            // 🚨 **A rejeição da foto que ainda não subiu mora no catálogo**
+            // (C21): quem grava é a Biblioteca, e a marca é a mesma bandeira do
+            // Lightroom. Rejeitar também **tira da fila** o que ainda não saiu —
+            // senão a foto subiria segundos depois de o operador a recusar.
+            DetalhePedido::Rejeitar { ids, rejeitada } => {
+                let (ids, rejeitada) = (ids.clone(), *rejeitada);
+                let codigo = if rejeitada { REJEITADA_NO_CATALOGO } else { 0 };
+                self.biblioteca
+                    .update(cx, |tela, cx| tela.sinalizar_ids(&ids, codigo, cx));
+                if rejeitada {
+                    for id in &ids {
+                        self.esteira.tirar_da_fila(id);
+                        self.subindo_sozinhas.remove(id);
+                    }
+                }
             }
             DetalhePedido::Imprimir(ids) => {
                 let ids = ids.clone();
@@ -1453,8 +1598,10 @@ impl Aplicativo {
             // só aparecem depois desta releitura — a porta do acervo é daqui.
             DetalhePedido::CatalogoMudou => self.reler_o_acervo(cx),
             // 🔑 **A Biblioteca é quem classifica**, mesmo quando o gesto veio
-            // da grade da sessão: é ela que grava a nota, lê a travessia do zero
-            // e emite `Classificou` — que é o que faz a foto subir (passo 3).
+            // da grade da sessão: ela é a dona do catálogo.
+            //
+            // 🔄 **E classificar não sobe mais nada** (C22): a nota é curadoria,
+            // e quem leva a foto ao site é `subir_o_que_falta_do_ensaio`.
             DetalhePedido::Classificar { ids, nota } => {
                 let (ids, nota) = (ids.clone(), *nota);
                 self.biblioteca
@@ -1784,7 +1931,29 @@ impl Aplicativo {
         // 🔑 **Só para quando a fila secou E o canal está vazio.** Parar pelo
         // progresso sozinho descartaria o último aviso, e a última foto do lote
         // ficaria com a miniatura velha até alguém rolar a grade.
-        !chegou && !self.receita_padrao.progresso().andando()
+        let acabou = !chegou && !self.receita_padrao.progresso().andando();
+        // 🚨 **A subida do ensaio esperava por isto** (C20): enquanto a receita
+        // padrão andava, `subir_o_que_falta_do_ensaio` não enfileirava nada,
+        // para o BRUTO não chegar ao acervo sem os PARÂMETROS do ensaio. Secou
+        // a fila, o ensaio vai.
+        if acabou {
+            self.tentar_subir_o_ensaio(cx);
+        }
+        acabou
+    }
+
+    /// Relê as locais do catálogo e manda ao site o que falta do ensaio (C20).
+    ///
+    /// 🔑 **O mesmo gesto por dois caminhos**: a releitura do catálogo (depois
+    /// de importar) já traz a lista na mão; aqui ela é buscada, para os pontos
+    /// em que a lista não passa por perto — entrar na sessão e o fim da receita
+    /// padrão.
+    fn tentar_subir_o_ensaio(&mut self, cx: &mut Context<Self>) {
+        let Some(galeria) = self.sessao_aberta.clone() else {
+            return;
+        };
+        let fotos = self.biblioteca.read(cx).todas_as_fotos();
+        self.subir_o_que_falta_do_ensaio(&fotos, &galeria, cx);
     }
 
     fn esperar_a_reposicao(&mut self, cx: &mut Context<Self>) {
@@ -1953,76 +2122,6 @@ impl Aplicativo {
 
     pub fn no_balcao(&self) -> bool {
         self.no_balcao
-    }
-
-    /// O passo 3 do fluxo: o que ganhou nota sobe, o que a perdeu sai.
-    ///
-    /// ⚠️ **Sem galeria aberta não sobe nada, e a tela diz isso.** Classificar
-    /// 200 fotos e descobrir no balcão que nenhuma foi para o site é o desfecho
-    /// que este aviso existe para impedir — silêncio aqui seria pior que erro.
-    fn sincronizar_classificacao(&mut self, evento: Classificou, cx: &mut Context<Self>) {
-        let Some(sessao) = self.sessao().cloned() else {
-            // Sem conta não se chega aqui: a porta vem antes de tudo, e a
-            // Biblioteca não é desenhada enquanto ela não for respondida.
-            return;
-        };
-
-        // Tirar do site não precisa de galeria aberta: a foto já sabe onde está.
-        for id in &evento.sairam {
-            self.publicador
-                .tirar_do_site(sessao.clone(), id.clone(), self.sincronias.0.clone());
-        }
-        // Uma resposta por pedido: é o que o laço de espera conta.
-        let mut esperadas = evento.sairam.len();
-
-        if !evento.subiram.is_empty() {
-            let Some(galeria) = self.sessao_aberta.clone() else {
-                let quantas = evento.subiram.len();
-                self.biblioteca.update(cx, |tela, cx| {
-                    tela.avisar(
-                        format!(
-                            "{quantas} foto(s) classificada(s) e nenhuma sessão aberta —                              escolha uma em Sessões para elas subirem"
-                        ),
-                        cx,
-                    )
-                });
-                self.esperar_o_site(PedidoDeFoto::TirarDoSite, esperadas, cx);
-                return;
-            };
-
-            for (ordem, id) in evento.subiram.iter().enumerate() {
-                self.esteira
-                    .empurrar(crate::envios::Trabalho::Classificada {
-                        galeria: galeria.clone(),
-                        foto: Box::new(crate::pos_venda::porta::FotoClassificada {
-                            foto_id: id.clone(),
-                            ordem: ordem as u32,
-                            // 🔑 `None`: quem classifica não escolheu leva nenhuma,
-                            // e o estado sai da tecla `B` de cada foto. A escolha
-                            // por lote existe na tela da sessão, onde ela é o gesto.
-                            estado: None,
-                            // 🚨 **A nota vem do evento, e não do banco.** Ver
-                            // `Classificou::nota`: a gravação dela ainda pode estar
-                            // correndo quando o envio lê a linha da foto.
-                            nota: evento.nota,
-                            // 🧾 **A faixa escolhida na barra de envio da sessão.**
-                            // É a primeira das duas escolhas antes dos arquivos, no
-                            // site; sem ela, a leva inteira subia no padrão da
-                            // galeria e a sessão mista tinha de ser corrigida foto a
-                            // foto depois.
-                            produto_id: self.detalhe.read(cx).faixa().map(str::to_string),
-                        }),
-                    });
-            }
-            esperadas += evento.subiram.len();
-        }
-
-        // Tirar e subir são os dois envio: uma conta só.
-        self.esperar_o_site(PedidoDeFoto::SubirClassificada, esperadas, cx);
-        // ⚠️ **A conta da espera é o lote inteiro; o despacho é de três em
-        // três.** Todas as respostas virão — só não ao mesmo tempo.
-        let _ = &sessao;
-        self.despachar_os_envios(cx);
     }
 
     /// Espera a resposta de `quantas` pedidos do mesmo tipo, na conta certa.
@@ -4054,6 +4153,115 @@ impl Aplicativo {
     /// frase, quem lê "apagar" imagina perda de arquivo e não clica; sem a
     /// terceira, clica achando que reimportar desfaz — e reimportar devolve o
     /// arquivo, não os 46 ajustes.
+    /// 🚪 **Fechar com trabalho em segundo plano avisa antes** — pedido do dono
+    /// (2026-09-20): *"ao fechar a aplicação ui-gpui avise que tem processo
+    /// pendente em segundo plano"*.
+    ///
+    /// 🚨 **O G9 nunca perdeu envio — mas fechava calado.** A janela sumia, a
+    /// bandeja assumia a fila e o app terminava sozinho ao esvaziar; quem não
+    /// conhecia o ícone concluía que tinha fechado o app no meio do envio, que é
+    /// o medo que o G9 existe para tirar. O aviso conta o que está pendente e
+    /// deixa a decisão com quem fechou.
+    pub(crate) fn avisar_fechamento_pendente(
+        &mut self,
+        pendente: SharedString,
+        cx: &mut Context<Self>,
+    ) {
+        self.fechar_avisando = Some(pendente);
+        cx.notify();
+    }
+
+    /// "Ficar no app": o aviso sai e nada fecha.
+    pub(crate) fn desistir_de_fechar(&mut self, cx: &mut Context<Self>) {
+        self.fechar_avisando = None;
+        crate::segundo_plano::desistiu_de_fechar(cx);
+        cx.notify();
+    }
+
+    /// "Continuar em segundo plano": a janela vai para a bandeja, e o app
+    /// termina sozinho quando a fila esvaziar (G9).
+    pub(crate) fn fechar_em_segundo_plano(&mut self, cx: &mut Context<Self>) {
+        self.fechar_avisando = None;
+        // A segunda tela não fica sozinha no monitor do cliente — e é aqui que
+        // ela se fecha, porque lá fora a raiz já está em uso (ver
+        // `segundo_plano::fechar_mesmo`).
+        self.fechar_tela_do_cliente(cx);
+        cx.notify();
+        crate::segundo_plano::fechar_mesmo(cx);
+    }
+
+    /// 🧪 A frase do aviso de fechamento que está na tela.
+    #[cfg(test)]
+    pub(crate) fn aviso_de_fechamento_para_teste(&self) -> Option<String> {
+        self.fechar_avisando.as_ref().map(ToString::to_string)
+    }
+
+    fn aviso_de_fechar_com_pendencia(
+        &self,
+        pendente: SharedString,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        div()
+            .absolute()
+            .inset_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(tema::cores::veu())
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(10.))
+                    .p(px(16.))
+                    .max_w(px(460.))
+                    .bg(cx.theme().background)
+                    .border_1()
+                    .border_color(cx.theme().border)
+                    .rounded(px(6.))
+                    .child(div().text_sm().child("Há trabalho em segundo plano"))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(pendente),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(
+                                "Fechar agora não cancela nada: a janela vai para a área de \
+                                 notificação e o envio continua. O app se fecha sozinho quando \
+                                 a fila esvaziar.",
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .justify_end()
+                            .gap(px(8.))
+                            .child(
+                                Button::new("fechar-ficar")
+                                    .label("Ficar no app")
+                                    .xsmall()
+                                    .on_click(cx.listener(|este, _ev, _window, cx| {
+                                        este.desistir_de_fechar(cx)
+                                    })),
+                            )
+                            .child(
+                                Button::new("fechar-em-segundo-plano")
+                                    .label("Continuar em segundo plano")
+                                    .xsmall()
+                                    .primary()
+                                    .on_click(cx.listener(|este, _ev, _window, cx| {
+                                        este.fechar_em_segundo_plano(cx)
+                                    })),
+                            ),
+                    ),
+            )
+    }
+
     fn aviso_de_apagar(&self, quantas: usize, cx: &mut Context<Self>) -> impl IntoElement {
         let titulo = if quantas == 1 {
             "Tirar 1 foto do catálogo?".to_string()
@@ -4378,8 +4586,20 @@ impl Render for Aplicativo {
                     |grade, cx| grade.sinalizar(1, cx),
                 )
             }))
+            // 🚨 **`X` na sessão é a rejeição do contrato** (C21), e não a
+            // bandeira do Lightroom: ela marca a foto, tira-a da vista do
+            // cliente e a segura fora da fila de subida — sem apagar nada.
+            //
+            // 🔑 Na **Biblioteca** ele continua sendo a bandeira, como o `P`:
+            // ali a tela é a do catálogo local, e é a gramática que o fotógrafo
+            // traz de lá. As duas escrevem o mesmo `flag = -1` na foto que
+            // ainda não subiu — é a mesma marca, lida por dois nomes.
             .on_action(cx.listener(|este, _: &Rejeitar, _w, cx| {
-                este.na_biblioteca(cx, |tela, cx| tela.sinalizar(-1, cx))
+                este.na_grade(
+                    cx,
+                    |sessao, cx| sessao.alternar_rejeicao(cx),
+                    |grade, cx| grade.sinalizar(REJEITADA_NO_CATALOGO, cx),
+                )
             }))
             .on_action(cx.listener(|este, _: &Desmarcar, _w, cx| {
                 este.na_biblioteca(cx, |tela, cx| tela.sinalizar(0, cx))
@@ -4477,6 +4697,11 @@ impl Render for Aplicativo {
                 self.biblioteca.read(cx).confirmando_apagar(),
                 |raiz, quantas| raiz.child(self.aviso_de_apagar(quantas, cx)),
             )
+            // 🚪 O aviso de fechar com trabalho em segundo plano — por cima de
+            // tudo, porque é uma pergunta sobre a janela inteira.
+            .when_some(self.fechar_avisando.clone(), |raiz, pendente| {
+                raiz.child(self.aviso_de_fechar_com_pendencia(pendente, cx))
+            })
             .when(false, |raiz| raiz)
             .when(self.configurando, |raiz| {
                 raiz.child(self.modal_de_configuracoes(cx))
@@ -4517,10 +4742,15 @@ impl Render for Aplicativo {
 /// 🔑 **Ela nasce "à venda" e sem nota**, e os dois são deliberados: `Estado` só
 /// sabe falar do que existe no site (levada · à venda · comprada), e destes o
 /// único honesto para quem ainda não subiu é o neutro. A nota vazia é o que a
-/// põe no recorte "Sem nota" — o lugar de onde o operador a classifica, que é o
-/// gesto que a faz subir.
+/// põe no recorte "Sem nota" — o lugar de onde o operador a classifica.
+///
+/// 🔑 **A rejeição dela é a bandeira do Lightroom** (`flag = -1`), e não uma
+/// coluna nova: é o mesmo `X` que o fotógrafo aperta na Biblioteca, e é ele que
+/// segura a foto fora da fila de subida (C21) até a curadoria mudar de ideia.
+/// Quando a foto sobe, quem responde pela rejeição passa a ser o site.
 fn local_para_a_grade(foto: &PhotoViewModel, ordem: i64) -> biblioteca_core::acervo::Foto {
     biblioteca_core::acervo::Foto {
+        rejeitada: foto.flag == Some(REJEITADA_NO_CATALOGO),
         id: foto.id.clone(),
         arquivo: foto.name.clone(),
         estado: biblioteca_core::acervo::Estado::Disponivel,
@@ -7143,13 +7373,22 @@ mod testes {
             .expect("a janela deve estar aberta");
     }
 
-    /// 📸 O passo 3 do fluxo do dono: **classifico as fotos** — e elas sobem.
+    /// 📸 **O ensaio inteiro sobe, e a nota não move arquivo nenhum** — C20 e
+    /// C22 do contrato da foto.
     ///
-    /// 🚨 O que este teste prende é a **travessia**, e não o estado. Ir de 3
-    /// para 4 estrelas não sobe nada: a foto já estava lá. O que conta é sair do
-    /// zero (sobe) e voltar a ele (sai do storage).
+    /// # 🔄 Este teste afirmava o contrário, e foi reescrito
+    ///
+    /// Ele se chamava `classificar_sobe_e_zerar_tira_do_site` e prendia a
+    /// **travessia do zero**: sair do zero subia a foto, voltar a ele a tirava
+    /// do storage. Era a regra de 2026-09-05, revogada pelo dono em 2026-09-20 —
+    /// e a parte destrutiva dela (zerar apaga da nuvem) é a janela em que duas
+    /// fotos se perderam caladas na web.
+    ///
+    /// O que sobrou para prender: **entrar na sessão sobe as fotos dela**, sem
+    /// nota nenhuma; classificar depois **não sobe de novo**; e zerar a nota
+    /// **não tira nada** do site.
     #[gpui::test]
-    fn classificar_sobe_e_zerar_tira_do_site(cx: &mut TestAppContext) {
+    fn o_ensaio_sobe_sozinho_e_a_nota_nao_move_arquivo(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         cx.update(gpui_component::init);
 
@@ -7199,43 +7438,151 @@ mod testes {
             .expect("a janela deve estar aberta");
         cx.run_until_parked();
 
+        // 🚨 **As duas subiram ao entrar na sessão**, antes de qualquer nota:
+        // é o "em segundo plano, durante a classificação" do dono (C20).
         let subidas = publicador.subidas();
-        assert_eq!(subidas.len(), 1, "uma foto atravessou o zero");
+        assert_eq!(subidas.len(), 2, "o ensaio inteiro sobe: {subidas:?}");
         assert_eq!(subidas[0].0, "g7", "para a sessão aberta");
 
         janela
             .update(cx, |app, _window, cx| {
-                // De 4 para 5: continua no site, e nada é pedido de novo.
+                // De 4 para 5, e de 5 para 0: curadoria, e nada mais.
                 app.na_biblioteca(cx, |tela, cx| tela.dar_nota(5, cx));
-            })
-            .expect("a janela deve estar aberta");
-        cx.run_until_parked();
-        assert_eq!(
-            publicador.subidas().len(),
-            1,
-            "mudar de 4 para 5 estrelas não é travessia"
-        );
-
-        janela
-            .update(cx, |app, _window, cx| {
                 app.na_biblioteca(cx, |tela, cx| tela.dar_nota(0, cx));
             })
             .expect("a janela deve estar aberta");
         cx.run_until_parked();
         assert_eq!(
-            publicador.tiradas().len(),
-            1,
-            "zerar a nota tira a foto do storage"
+            publicador.subidas().len(),
+            2,
+            "classificar não sobe de novo — a foto já está lá"
+        );
+        assert!(
+            publicador.tiradas().is_empty(),
+            "🚨 zerar a nota não tira nada do site (C22)"
         );
     }
 
-    /// 🚨 Classificar sem sessão aberta **avisa**, e não sobe calado.
+    /// Relê o catálogo e espera a resposta chegar — a releitura é uma tarefa
+    /// com relógio, e `run_until_parked` sozinho não a faz andar.
+    fn releitura(cx: &mut TestAppContext, janela: &gpui::WindowHandle<Aplicativo>) {
+        janela
+            .update(cx, |app, _window, cx| app.reler_o_acervo(cx))
+            .expect("a janela deve estar aberta");
+        for _ in 0..10 {
+            cx.executor()
+                .advance_clock(std::time::Duration::from_millis(150));
+            cx.run_until_parked();
+        }
+    }
+
+    /// ❌ **A rejeitada não sobe; e a nota dada enquanto a foto subia alcança
+    /// o site.**
     ///
-    /// Classificar 200 fotos e descobrir no balcão que nenhuma foi para o site é
-    /// o desfecho que este aviso existe para impedir. Silêncio aqui seria pior
-    /// que erro: o operador não teria como saber que faltou um passo.
+    /// Duas cláusulas num cenário só, porque é uma sequência de balcão:
+    ///
+    /// - **C21** — a foto com a bandeira de rejeitada fica fora da fila. Não
+    ///   basta marcá-la: o ensaio sobe sozinho, e o que não for segurado aqui
+    ///   chega ao cliente.
+    /// - **C22 + a corrida** — entre a foto entrar na esteira e a linha dela
+    ///   existir no site passam segundos, e o operador classifica dentro deles.
+    ///   A nota vai para o catálogo, a subida já levou o que tinha (nada), e sem
+    ///   a conciliação ela se perderia calada.
     #[gpui::test]
-    fn classificar_sem_sessao_aberta_avisa_em_vez_de_sumir(cx: &mut TestAppContext) {
+    fn a_rejeitada_fica_e_a_nota_da_corrida_alcanca_o_site(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+
+        let publicador = Arc::new(PublicadorDeMentira::default());
+        let acervo = Arc::new(AcervoDeMentira::default());
+        // Duas do ensaio: a segunda já vem rejeitada pela triagem.
+        {
+            let mut fotos = acervo.fotos.lock().expect("as fotos");
+            *fotos = acervo_da_sessao("g7");
+            fotos[1].flag = Some(crate::biblioteca::marcacao::REJEITADA_NO_CATALOGO);
+        }
+        let iniciais = acervo.fotos.lock().expect("as fotos").clone();
+
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            let publicador = publicador.clone();
+            let acervo = acervo.clone();
+            |window, cx| {
+                Aplicativo::novo(
+                    iniciais,
+                    previews,
+                    Vec::new(),
+                    Portas {
+                        publicador,
+                        acervo,
+                        ..portas()
+                    },
+                    window,
+                    cx,
+                )
+            }
+        });
+
+        janela
+            .update(cx, |app, _window, cx| {
+                app.entrar_na_conta(sessao_de_teste(), cx);
+                app.entrar_na_sessao("g7".into(), cx);
+            })
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+
+        let subidas = publicador.subidas();
+        assert_eq!(subidas.len(), 1, "a rejeitada fica: {subidas:?}");
+        assert_eq!(
+            subidas[0].1, "id-DSC_001.NEF",
+            "subiu só a que não foi rejeitada"
+        );
+        assert!(
+            publicador.tiradas().is_empty(),
+            "🚨 rejeitar não apaga nada de lugar nenhum"
+        );
+
+        // ⏱️ A corrida: o operador dá ★★★★ enquanto a foto sobe, e a linha do
+        // site nasce depois — com a nota que a subida não levou.
+        {
+            let mut fotos = acervo.fotos.lock().expect("as fotos");
+            fotos[0].rating = 4;
+            fotos[0].pos_venda_foto_id = Some("remota-1".into());
+        }
+        releitura(cx, &janela);
+
+        let negociadas = publicador.negociadas();
+        assert_eq!(
+            negociadas.len(),
+            1,
+            "a nota alcançou o site: {negociadas:?}"
+        );
+        assert_eq!(negociadas[0].0, "remota-1");
+        assert_eq!(negociadas[0].1.nota, Some(Some(4)));
+        assert_eq!(
+            negociadas[0].1.rejeitada, None,
+            "e só a nota: a rejeição não mudou"
+        );
+
+        // 🔁 E a conciliação é **uma vez**: releituras seguintes não repetem o
+        // pedido, nem sobrescrevem o que o site souber depois.
+        releitura(cx, &janela);
+        assert_eq!(publicador.negociadas().len(), 1, "conciliou uma vez só");
+        assert_eq!(publicador.subidas().len(), 1, "e nada subiu duas vezes");
+    }
+
+    /// 🚨 **Sem sessão aberta nada sobe — e a foto não se perde por isso.**
+    ///
+    /// # 🔄 O aviso saiu junto com a regra que o exigia
+    ///
+    /// Este teste se chamava `classificar_sem_sessao_aberta_avisa_em_vez_de_sumir`
+    /// e cobrava a frase *"N foto(s) classificada(s) e nenhuma sessão aberta"*:
+    /// a nota era a porta da nuvem, e classificar fora de uma sessão era um
+    /// gesto que não tinha onde acontecer. Com C20 a subida é do **ensaio**, e
+    /// não da nota: classificar fora de uma sessão é só marcar a foto, e entrar
+    /// na sessão sobe o que estava esperando.
+    #[gpui::test]
+    fn sem_sessao_aberta_a_nota_so_marca_e_entrar_na_sessao_sobe(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         cx.update(gpui_component::init);
 
@@ -7271,21 +7618,28 @@ mod testes {
         // por isso que a leitura do aviso vem depois, e não no mesmo `update`.
         cx.run_until_parked();
 
-        janela
-            .update(cx, |app, _window, cx| {
-                let aviso = app
-                    .biblioteca
-                    .read(cx)
-                    .aviso()
-                    .cloned()
-                    .expect("a tela tinha de avisar");
-                assert!(aviso.contains("nenhuma sessão aberta"), "{aviso}");
-            })
-            .expect("a janela deve estar aberta");
-
         assert!(
             publicador.subidas().is_empty(),
             "sem sessão aberta não há para onde subir"
+        );
+
+        // 🔑 **E o trabalho não se perdeu**: entrar na sessão manda as duas,
+        // com a nota que a triagem deixou gravada.
+        janela
+            .update(cx, |app, _window, cx| {
+                app.entrar_na_sessao("g7".into(), cx);
+            })
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+        assert_eq!(
+            publicador.subidas().len(),
+            2,
+            "entrar na sessão sobe o ensaio que estava esperando"
+        );
+        assert_eq!(
+            publicador.notas_pedidas(),
+            vec![Some(3), None],
+            "a classificada sobe com a nota; a outra, sem nota nenhuma"
         );
     }
 
@@ -7832,15 +8186,13 @@ mod testes {
                 assert!(!retrato.ha_envio_pendente(), "fechar agora fecha");
                 assert!(app.canto_dos_envios(cx).is_none(), "o canto fica vazio");
 
-                // Um envio de verdade entra junto: tirar uma foto do site.
-                app.sincronizar_classificacao(
-                    Classificou {
-                        subiram: Vec::new(),
-                        sairam: vec!["remota-2".into()],
-                        nota: None,
-                    },
-                    cx,
-                );
+                // Um envio de verdade entra junto: tirar uma foto do site —
+                // o "Apagar" do painel, que é o gesto que sobrou depois de a
+                // classificação deixar de tirar foto da nuvem (C22).
+                let sessao = app.sessao().cloned().expect("logado");
+                app.publicador
+                    .tirar_do_site(sessao, "remota-2".into(), app.sincronias.0.clone());
+                app.esperar_o_site(PedidoDeFoto::TirarDoSite, 1, cx);
                 assert_eq!(app.sincronias_pendentes(), 1, "o envio conta");
                 assert_eq!(app.baixas_pendentes(), 2, "os downloads seguem à parte");
                 let retrato = app.retrato_do_segundo_plano(cx);

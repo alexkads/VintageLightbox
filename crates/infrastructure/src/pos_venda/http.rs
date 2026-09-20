@@ -574,6 +574,13 @@ impl PosVendaApi for PosVendaApiHttp {
         if let Some(preco) = &mudanca.preco_de_venda {
             corpo.insert("preco_de_venda".into(), json!(preco));
         }
+        // 🔄 A rejeição — a tecla `X` (contrato C21). Booleano simples, e não
+        // `Option<Option<_>>`: não há "apagar a rejeição", há desfazê-la, que é
+        // `false`. O site aplica este campo por último quando ele vem junto com
+        // a nota, porque a rejeição é a palavra final sobre a foto aparecer.
+        if let Some(rejeitada) = mudanca.rejeitada {
+            corpo.insert("rejeitada".into(), json!(rejeitada));
+        }
 
         let resposta = self
             .client
@@ -705,6 +712,7 @@ impl PosVendaApi for PosVendaApiHttp {
                     preco_negociado: f.preco_negociado,
                     observacao_da_negociacao: f.observacao_da_negociacao,
                     apagada: f.apagada_em.is_some(),
+                    rejeitada: f.rejeitada_em.is_some(),
                     nota: f.nota,
                     produto_efetivo: f.produto_efetivo,
                     produto_id: f.produto_id,
@@ -1318,6 +1326,16 @@ struct FotoDaGaleriaDaApi {
     observacao_da_negociacao: Option<String>,
     #[serde(default)]
     apagada_em: Option<chrono::DateTime<chrono::Utc>>,
+    /// Quando a foto foi **rejeitada** — a tecla `X` (contrato C21). `null` =
+    /// não rejeitada.
+    ///
+    /// 🔑 **Chega como data e vira `bool`**: o site guarda o instante porque a
+    /// linha do tempo dele precisa dele; aqui a grade só pergunta "está
+    /// rejeitada?". `#[serde(default)]` porque um backend anterior a
+    /// 2026-09-20 não manda o campo — e sem ele a galeria inteira falharia ao
+    /// desserializar.
+    #[serde(default)]
+    rejeitada_em: Option<chrono::DateTime<chrono::Utc>>,
     #[serde(default)]
     nota: Option<u8>,
     #[serde(default)]
@@ -2004,6 +2022,80 @@ mod tests {
         .await
         .unwrap();
         api.atualizar_galeria(&sessao, "g1", &MudancaDaGaleria::default())
+            .await
+            .unwrap();
+    }
+
+    /// ❌ **`rejeitada_em` do site vira `rejeitada` na grade** — contrato C21.
+    ///
+    /// 🚨 **E o campo ausente não derruba a galeria inteira.** Um backend
+    /// anterior a 2026-09-20 não manda a coluna; sem o `serde(default)` a
+    /// resposta inteira ficaria ilegível e o operador veria "não foi possível
+    /// abrir a sessão" numa sessão perfeitamente normal — o mesmo desfecho que
+    /// o `null` da validade do link causou em 2026-09-20.
+    #[tokio::test]
+    async fn a_rejeitada_do_site_chega_a_grade_e_a_ausencia_dela_nao_quebra() {
+        let servidor = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/pos-venda/galerias/g1"))
+            .and(header("authorization", "Bearer tok"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "galeria": {
+                    "id": "g1",
+                    "titulo": "Ensaio",
+                    "email": null,
+                    "whatsapp": null,
+                    "produto_id": "p1",
+                    "criada_em": "2026-09-20T10:00:00Z"
+                },
+                "fotos": [
+                    {
+                        "id": "f1",
+                        "arquivo": "f1.jpg",
+                        "estado": "disponivel",
+                        "rejeitada_em": "2026-09-20T12:00:00Z"
+                    },
+                    { "id": "f2", "arquivo": "f2.jpg", "estado": "disponivel" }
+                ]
+            })))
+            .mount(&servidor)
+            .await;
+
+        let api = PosVendaApiHttp::nova(servidor.uri());
+        let aberta = api.abrir_galeria(&sessao_valida(), "g1").await.unwrap();
+
+        assert!(aberta.fotos[0].rejeitada, "a marcada volta rejeitada");
+        assert!(
+            !aberta.fotos[1].rejeitada,
+            "e a sem o campo é só uma foto sem curadoria — não uma rejeitada"
+        );
+    }
+
+    /// ❌ **O `X` vai no `PATCH` como booleano, e sozinho basta.**
+    ///
+    /// 🚨 **`MudancaDaFoto::vazia` precisava conhecer o campo novo**: sem isso
+    /// um `X` sozinho seria "mudança vazia", e o gesto morreria no cliente HTTP
+    /// sem nunca chegar à rede — calado, que é o pior desfecho.
+    #[tokio::test]
+    async fn a_rejeicao_vai_sozinha_no_patch_da_foto() {
+        let servidor = MockServer::start().await;
+        Mock::given(method("PATCH"))
+            .and(path("/api/v2/pos-venda/fotos/f1"))
+            .and(header("authorization", "Bearer tok"))
+            .and(wiremock::matchers::body_json(json!({ "rejeitada": true })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "id": "f1" })))
+            .expect(1)
+            .mount(&servidor)
+            .await;
+
+        let mudanca = MudancaDaFoto {
+            rejeitada: Some(true),
+            ..Default::default()
+        };
+        assert!(!mudanca.vazia(), "um X sozinho é mudança");
+
+        PosVendaApiHttp::nova(servidor.uri())
+            .mudar_foto(&sessao_valida(), "f1", &mudanca)
             .await
             .unwrap();
     }

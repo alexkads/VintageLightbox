@@ -131,8 +131,17 @@ pub struct ImportCandidateViewModel {
     pub file_size: u64,
     pub is_raw: bool,
     pub camera: String,
-    /// Data de captura no formato EXIF, ou vazio quando não há
+    /// Data de captura no formato EXIF, ou vazio quando não há — é o que a
+    /// célula mostra
     pub date_time: String,
+    /// A chave que põe o ensaio na ordem em que foi fotografado: a data do
+    /// disparo com o subsegundo normalizado, ou vazio quando não há data.
+    ///
+    /// 🔑 **Separada da de cima de propósito.** A grade mostra a data; quem
+    /// ordena precisa do subsegundo, que numa rajada é a única coisa que
+    /// distingue seis fotos do mesmo segundo. Ver
+    /// `PhotoMetadata::chave_de_captura`.
+    pub captura: String,
     pub dimensions: Option<String>,
 }
 

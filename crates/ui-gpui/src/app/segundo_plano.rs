@@ -12,18 +12,25 @@ impl Aplicativo {
     /// ⚠️ Sem o que mora fora da raiz (tamanho do catálogo, pilha local, a
     /// hora): isso é o laço quem sabe.
     pub(crate) fn retrato_do_segundo_plano(&self, cx: &App) -> Retrato {
-        // 🔑 **"Esperando nota" é a área temporária**: foto importada numa
-        // sessão, que ainda não está no site e só sobe quando ganhar nota.
-        let sem_nota = if self.conta.is_some() {
+        // ❌ **As rejeitadas são as que não vão subir** (contrato C21): foto de
+        // um ensaio, ainda fora do site, com a bandeira do `X`.
+        //
+        // 🔄 **Era "esperando nota"**, e contava a foto sem nota da sessão —
+        // certo até 2026-09-20, quando a nota era a porta da nuvem. Hoje a sem
+        // nota sobe como qualquer outra, e contá-la aqui diria ao operador que
+        // há trabalho parado quando não há.
+        let rejeitadas = if self.conta.is_some() {
             self.biblioteca.read(cx).contar_fotos(|f| {
-                f.sessao_id.is_some() && f.pos_venda_foto_id.is_none() && f.rating == 0
+                f.sessao_id.is_some()
+                    && f.pos_venda_foto_id.is_none()
+                    && f.flag == Some(crate::biblioteca::marcacao::REJEITADA_NO_CATALOGO)
             })
         } else {
             0
         };
         Retrato {
             subindo: self.sincronias_pendentes,
-            sem_nota,
+            rejeitadas,
             recusadas: self.recusas.len(),
             refazendo: self.reposicoes_pendentes,
             conta: self.conta.as_ref().map(|c| c.email.clone()),

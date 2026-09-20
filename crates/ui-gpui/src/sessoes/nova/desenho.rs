@@ -5,10 +5,10 @@
 use std::sync::Arc;
 
 use gpui::{
-    div, img, prelude::*, px, relative, AnyElement, App, Context, Div, FontWeight, Hsla,
+    div, img, prelude::*, px, relative, AnyElement, App, Context, Div, Entity, FontWeight, Hsla,
     KeyDownEvent, RenderImage, SharedString, Stateful, Window,
 };
-use gpui_component::input::Input;
+use gpui_component::input::{Input, InputState};
 use gpui_component::progress::Progress;
 use gpui_component::select::Select;
 use gpui_component::{h_flex, v_flex, ActiveTheme, Icon};
@@ -42,6 +42,21 @@ fn rotulo(texto: &str, obrigatorio: bool) -> Div {
 }
 
 /// `Campo` do site: rótulo em cima; embaixo, o erro ou a ajuda.
+/// Um campo de texto que **ocupa a largura do campo** — a do `campo` acima.
+///
+/// 🚨 **Sem isto o `Input` fica do tamanho intrínseco dele** (uns 50 px), e o
+/// operador vê uma caixinha quadrada onde devia haver uma linha inteira —
+/// achado pelo dono em 2026-09-20, na etapa "Cliente e preço". Todo `Select`
+/// deste assistente já levava `.w_full()`; os `Input` não levavam nenhum, e a
+/// diferença não aparece em teste de método: é geometria, e só se vê na tela.
+///
+/// 🔑 **Existe para não haver o que esquecer**: o campo de texto do assistente
+/// passa a nascer com a largura certa, em vez de depender de quem o escreve
+/// lembrar do `.w_full()`.
+fn entrada(estado: &Entity<InputState>) -> Input {
+    Input::new(estado).w_full()
+}
+
 fn campo(
     texto: &str,
     obrigatorio: bool,
@@ -136,7 +151,12 @@ impl Render for NovaSessao {
         // thread e avisa por canal; sem alguém acordando, o trabalho acontecia
         // no disco e a tela não mudava — as miniaturas ficavam nas de antes e a
         // barra "Preset padrão" parava em 0/N.
+        // 🚨 **E as miniaturas.** Quem as pede é `preparar_miniaturas`, logo
+        // acima, no meio deste desenho — se a colheita já tinha parado, o
+        // pedido sairia para a thread e a resposta ficaria no canal para
+        // sempre: grade cinza, sem ninguém para recolher.
         if self.amostras.esperando()
+            || self.miniaturas.esperando()
             || self.pedir_colheita_das_reveladas
             || self.portas.receita_padrao.progresso().andando()
         {
@@ -967,7 +987,7 @@ impl NovaSessao {
             .iter()
             .filter_map(|f| {
                 self.miniaturas
-                    .get(&f.id)
+                    .obter(&f.id)
                     .map(|m| (f.name.clone(), m.clone()))
             })
             .take(60)
@@ -975,7 +995,7 @@ impl NovaSessao {
         let sem_previa = self.fotos.len().saturating_sub(
             self.fotos
                 .iter()
-                .filter(|f| self.miniaturas.contains_key(&f.id))
+                .filter(|f| self.miniaturas.tem(&f.id))
                 .count(),
         );
         let alem = self.fotos.len().saturating_sub(60);
@@ -1222,7 +1242,14 @@ impl NovaSessao {
             .child(campo(
                 "Título",
                 true,
-                Input::new(&self.titulo),
+                // `debug_selector` para o teste poder clicar onde o dedo clica:
+                // o caminho clique → foco → tecla é o que nenhum teste pegava.
+                // O `w_full` é de `entrada` — sem ele o campo nascia com 50 px —,
+                // e o `div` em volta precisa dele também, senão encolhe junto.
+                div()
+                    .w_full()
+                    .debug_selector(|| "nova-titulo".into())
+                    .child(entrada(&self.titulo)),
                 self.erro_de(estado::FALTA_TITULO),
                 None,
                 cx,
@@ -1263,7 +1290,7 @@ impl NovaSessao {
                     .child(v_flex().flex_1().min_w(px(0.)).child(campo(
                         "E-mail do cliente",
                         false,
-                        Input::new(&self.email),
+                        entrada(&self.email),
                         self.erro_de(estado::EMAIL_INCOMPLETO),
                         Some("Prefira o e-mail: é por ele que o link vai."),
                         cx,
@@ -1271,7 +1298,7 @@ impl NovaSessao {
                     .child(v_flex().w(px(260.)).flex_none().child(campo(
                         "WhatsApp",
                         false,
-                        Input::new(&self.whatsapp),
+                        entrada(&self.whatsapp),
                         None,
                         Some("Opcional agora."),
                         cx,
@@ -1568,7 +1595,7 @@ impl NovaSessao {
                 c.child(campo(
                     "Como foi?",
                     false,
-                    Input::new(&self.detalhe),
+                    entrada(&self.detalhe),
                     None,
                     None,
                     cx,
@@ -1635,7 +1662,7 @@ impl NovaSessao {
                     .child(v_flex().flex_1().min_w(px(0.)).child(campo(
                         "Nome",
                         false,
-                        Input::new(&cadastro.nome),
+                        entrada(&cadastro.nome),
                         None,
                         None,
                         cx,
@@ -1656,7 +1683,7 @@ impl NovaSessao {
                     .child(v_flex().flex_1().min_w(px(0.)).child(campo(
                         "WhatsApp (opcional)",
                         false,
-                        Input::new(&cadastro.whatsapp),
+                        entrada(&cadastro.whatsapp),
                         None,
                         None,
                         cx,
@@ -1664,7 +1691,7 @@ impl NovaSessao {
                     .child(v_flex().flex_1().min_w(px(0.)).child(campo(
                         "E-mail (opcional)",
                         false,
-                        Input::new(&cadastro.email),
+                        entrada(&cadastro.email),
                         None,
                         None,
                         cx,
@@ -2206,7 +2233,7 @@ impl NovaSessao {
                         .text_color(tema.muted_foreground)
                         .child(descricao),
                 )
-                .child(Input::new(&busca.campo).prefix(Icon::new(Icone::Search).size(px(16.))))
+                .child(entrada(&busca.campo).prefix(Icon::new(Icone::Search).size(px(16.))))
                 .child(
                     v_flex()
                         .id("nova-resultados")
@@ -2322,4 +2349,41 @@ fn colunas_do_item(item: &ItemDaBusca) -> [String; 4] {
 /// 3:2 quando não há corte.
 fn receita_da_tela(proporcao: Option<&str>) -> f32 {
     super::receita::valor_da_proporcao(proporcao).unwrap_or(3. / 2.)
+}
+
+#[cfg(test)]
+mod testes {
+    /// 🚨 **Todo campo de texto do assistente passa por `entrada`** — e é ela
+    /// que põe o `.w_full()`.
+    ///
+    /// O `Input` do `gpui-component` **não ocupa a largura sozinho**: sem a
+    /// chamada, ele fica do tamanho intrínseco (uns 50 px) dentro de um campo
+    /// de coluna inteira. Foi o que o dono viu em 2026-09-20 na etapa "Cliente
+    /// e preço" — uma caixinha quadrada onde devia haver uma linha. Os `Select`
+    /// deste arquivo já levavam `.w_full()` um a um; os `Input`, nenhum.
+    ///
+    /// 🔑 **O teste é de fonte porque o defeito é de geometria**: a largura só
+    /// existe depois de a tela ser desenhada, e o `Input` do `gpui-component`
+    /// não aceita `debug_selector` para o cenário medir. O que dá para cobrar
+    /// sem abrir o app é que ninguém escreva `Input::new` solto aqui — que é
+    /// exatamente o descuido que produz a caixinha.
+    #[test]
+    fn nenhum_campo_de_texto_nasce_sem_largura() {
+        let fonte = include_str!("desenho.rs");
+        // Só o desenho: o próprio teste fala de `Input::new` e se acusaria.
+        let desenho = fonte
+            .split("#[cfg(test)]")
+            .next()
+            .expect("o corpo do arquivo");
+        let soltos: Vec<&str> = desenho
+            .lines()
+            .map(str::trim)
+            .filter(|l| l.contains("Input::new("))
+            .collect();
+        assert_eq!(
+            soltos,
+            vec!["Input::new(estado).w_full()"],
+            "há `Input::new` fora de `entrada()` — ele nasceria sem largura"
+        );
+    }
 }

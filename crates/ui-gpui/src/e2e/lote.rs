@@ -222,6 +222,14 @@ fn salvar_na_galeria_sobe_o_lote_e_sai(cx: &mut TestAppContext) {
             ..Cenario::default()
         },
     );
+    // 🚨 **A subida do ensaio (C20) divide a esteira com o "Salvar".** Com
+    // `demorada`, as duas locais que sobem ao abrir a sessão ocupam vagas das
+    // três em voo, e as revelações esperariam atrás delas — que é o
+    // comportamento certo, e não o que este cenário mede. A rede responde
+    // primeiro, e a esteira fica livre para o lote.
+    e.site.responder();
+    e.esperar(cx);
+
     e.revelar_a_do_site(cx, "a");
     e.revelacao(cx, |tela, _w, cx| tela.arrastar_slider(0, 0.4, cx));
     e.esperar(cx);

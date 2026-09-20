@@ -312,6 +312,11 @@ struct FotoDaGaleria {
     nota: Option<u8>,
     #[serde(default)]
     apagada_em: Option<String>,
+    /// ❌ Quando a foto foi rejeitada (C21). `#[serde(default)]` porque um
+    /// backend anterior a 2026-09-20 não manda o campo — e sem ele a galeria
+    /// inteira ficaria ilegível para o caixa.
+    #[serde(default)]
+    rejeitada_em: Option<String>,
     produto_efetivo: String,
     #[serde(default)]
     produto_id: Option<String>,
@@ -377,6 +382,9 @@ pub fn ler_galeria(valor: Value) -> Result<GaleriaDoCaixa, String> {
                 estado: estado(&f.estado),
                 apagada: f.apagada_em.is_some(),
                 nota: f.nota,
+                // ❌ A rejeitada não entra no cupom (C21) — e é ela, e não a
+                // falta de nota, que o balcão recusa desde 2026-09-20.
+                rejeitada: f.rejeitada_em.is_some(),
                 sem_marcacao: false,
                 produto_efetivo: f.produto_efetivo,
                 produto_id: f.produto_id,

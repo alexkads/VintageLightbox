@@ -108,6 +108,33 @@ fn fechar_com_envio_esconde_e_sai_quando_a_fila_esvazia(cx: &mut TestAppContext)
         "com envio na fila a janela não fecha"
     );
     voltas(cx);
+
+    // 🚪 **O primeiro fechamento avisa** (dono, 2026-09-20): a janela fica, e
+    // o aviso diz o que está pendente.
+    assert_eq!(
+        bandeja(cx),
+        (false, false),
+        "a janela não some enquanto o aviso está na tela"
+    );
+    e.app(cx, |app, _w, _cx| {
+        let aviso = app
+            .aviso_de_fechamento_para_teste()
+            .expect("o aviso tinha de estar na tela");
+        assert!(
+            aviso.contains("Subindo"),
+            "e diz o que está pendente: {aviso}"
+        );
+    });
+
+    // "Continuar em segundo plano": agora sim, a bandeja.
+    e.app(cx, |app, _w, cx| app.fechar_em_segundo_plano(cx));
+    voltas(cx);
+    e.app(cx, |app, _w, _cx| {
+        assert!(
+            app.aviso_de_fechamento_para_teste().is_none(),
+            "o aviso sai com a decisão"
+        );
+    });
     assert_eq!(bandeja(cx), (true, false), "foi para a bandeja, e não saiu");
     assert!(plataforma::gestos().contains(&"esconder"));
     e.app(cx, |app, _w, _cx| {
@@ -133,6 +160,9 @@ fn reabrir_antes_de_esvaziar_mantem_o_app(cx: &mut TestAppContext) {
     let e = com_envio_na_fila(cx);
     let mut visual = VisualTestContext::from_window(e.raiz.into(), cx);
     assert!(!visual.simulate_close());
+    voltas(cx);
+    // O aviso vem primeiro; o operador responde "continuar em segundo plano".
+    e.app(cx, |app, _w, cx| app.fechar_em_segundo_plano(cx));
     voltas(cx);
     assert_eq!(bandeja(cx), (true, false));
 

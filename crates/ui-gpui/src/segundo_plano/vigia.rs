@@ -13,6 +13,15 @@ pub const ESPERA_AO_VOLTAR: Duration = Duration::from_secs(2);
 pub enum AoFechar {
     /// Nada pendente: fecha, e o app termina (`encerramento`).
     Fechar,
+    /// **Há trabalho em segundo plano e o operador ainda não foi avisado**: a
+    /// janela fica onde está e o aviso aparece, com o que está subindo.
+    ///
+    /// 🚨 **Pedido do dono (2026-09-20)**: *"ao fechar a aplicação ui-gpui
+    /// avise que tem processo pendente em segundo plano"*. Até aqui a janela
+    /// sumia calada e o app continuava enviando pela bandeja — o operador que
+    /// não conhecesse o ícone concluía que tinha fechado o app no meio do
+    /// envio, que é exatamente o medo que o G9 existe para tirar.
+    Avisar,
     /// Envio na fila (G9): a janela some, a bandeja fica, e o app termina
     /// quando a fila esvaziar.
     Esconder,
@@ -34,6 +43,9 @@ pub struct Vigia {
     na_bandeja: bool,
     /// Fechada com envio (G9), e não só minimizada: ela não "volta sozinha".
     escondida: bool,
+    /// O aviso de trabalho pendente já está na tela — o segundo pedido de
+    /// fechar é a resposta a ele, e não uma pergunta nova.
+    avisado: bool,
     fechar_ao_esvaziar: bool,
     restaurada_em: Option<Instant>,
 }
@@ -44,14 +56,34 @@ impl Vigia {
     }
 
     /// O operador pediu para fechar a janela principal.
+    ///
+    /// 🔑 **Com trabalho pendente, o primeiro pedido avisa e o segundo
+    /// esconde.** O aviso é a pergunta; fechar de novo (o botão "Continuar em
+    /// segundo plano") é a resposta. Quem desistir chama [`Self::desistiu_de_fechar`],
+    /// e o próximo fechamento avisa de novo — um aviso por decisão.
     pub fn ao_fechar(&mut self, ha_envio_pendente: bool) -> AoFechar {
         if !ha_envio_pendente {
             return AoFechar::Fechar;
         }
+        if !self.avisado {
+            self.avisado = true;
+            return AoFechar::Avisar;
+        }
+        self.avisado = false;
         self.na_bandeja = true;
         self.escondida = true;
         self.fechar_ao_esvaziar = true;
         AoFechar::Esconder
+    }
+
+    /// O operador leu o aviso e escolheu ficar no app.
+    pub fn desistiu_de_fechar(&mut self) {
+        self.avisado = false;
+    }
+
+    /// 🧪 O aviso de trabalho pendente está na tela?
+    pub fn avisado(&self) -> bool {
+        self.avisado
     }
 
     /// Uma volta do laço, com o que a janela diz agora.
@@ -138,10 +170,36 @@ mod testes {
         assert!(!v.deve_sair(false));
     }
 
+    /// 🚨 **Com trabalho pendente, fechar avisa antes de esconder** (dono,
+    /// 2026-09-20). A janela não some no primeiro pedido: some no segundo, que
+    /// é a resposta ao aviso.
+    #[test]
+    fn fechar_com_envio_avisa_antes_de_esconder() {
+        let mut v = Vigia::default();
+        assert_eq!(v.ao_fechar(true), AoFechar::Avisar);
+        assert!(v.avisado());
+        assert!(
+            !v.na_bandeja(),
+            "a janela fica enquanto o aviso está na tela"
+        );
+
+        // Quem desiste continua no app, e o próximo fechamento avisa de novo.
+        v.desistiu_de_fechar();
+        assert!(!v.avisado());
+        assert_eq!(v.ao_fechar(true), AoFechar::Avisar, "um aviso por decisão");
+        assert_eq!(
+            v.ao_fechar(true),
+            AoFechar::Esconder,
+            "e a resposta esconde"
+        );
+        assert!(v.na_bandeja());
+    }
+
     #[test]
     fn fechar_com_envio_esconde_e_sai_quando_a_fila_esvazia() {
         let mut v = Vigia::default();
         let t = Instant::now();
+        assert_eq!(v.ao_fechar(true), AoFechar::Avisar, "o aviso vem antes");
         assert_eq!(v.ao_fechar(true), AoFechar::Esconder);
         assert!(v.na_bandeja());
         // Escondida não é "desminimizada": a vigia não a dá por voltada.
@@ -153,6 +211,7 @@ mod testes {
     #[test]
     fn abrir_de_novo_antes_de_esvaziar_mantem_o_app_aberto() {
         let mut v = Vigia::default();
+        v.ao_fechar(true);
         v.ao_fechar(true);
         v.restaurar(Instant::now());
         assert!(!v.deve_sair(false), "quem fechou está de volta");

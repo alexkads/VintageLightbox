@@ -56,7 +56,6 @@ mod enquadrar;
 mod galeria;
 mod lote;
 mod nova_sessao;
-mod resgate;
 mod revelacao;
 mod segundo_plano;
 mod sessoes;

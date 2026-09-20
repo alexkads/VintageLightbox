@@ -55,12 +55,23 @@ fn recortar(e: &super::Estudio, cx: &mut TestAppContext, filtro: Filtro) {
 fn a_grade_mostra_as_fotos_certas_em_cada_recorte(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(cx, Cenario::default());
 
-    // A grade é uma só: as do site e as do disco, na ordem em que a sessão as
-    // devolve — as locais por último, porque entram depois.
+    // 🚨 **A grade é uma só, e as duas listas se intercalam pela `ordem`** —
+    // que é a da fotografia (20/set/2026: *"a sessão é temática, e a ordem em
+    // que as fotografias são feitas conta"*). Antes as locais eram empilhadas
+    // no fim, e um ensaio meio no site e meio no disco virava duas sequências
+    // coladas.
+    //
+    // ⚠️ **O cruzamento aqui é o do cenário, não o do balcão.** Neste cenário as
+    // quatro do site (`ordem` 0–3) **não** estão no catálogo desta máquina, e as
+    // duas locais são as posições 0 e 1 do catálogo — duas réguas de origens
+    // diferentes, que é o caso de um ensaio enviado de outro lugar. No balcão,
+    // onde tudo foi importado aqui, a régua é uma só: a foto que subiu continua
+    // no catálogo e ocupa a posição dela, então as locais caem nas posições
+    // seguintes.
     assert_eq!(
         na_grade(&e, cx),
-        ["a", "b", "d", "c", "id-DSC_101.jpg", "id-DSC_102.jpg"],
-        "a grade da sessão mistura o site e o disco, sem reordenar"
+        ["a", "id-DSC_101.jpg", "b", "id-DSC_102.jpg", "d", "c"],
+        "a grade da sessão intercala o site e o disco pela ordem da captura"
     );
 
     // 🚨 A foto local entra **sem nota**: o que a leva ao site é a
@@ -116,21 +127,27 @@ fn a_grade_mostra_as_fotos_certas_em_cada_recorte(cx: &mut TestAppContext) {
 
 /// ⭐ **Classificar, sinalizar e mexer no painel — conferido na foto.**
 ///
-/// A nota de uma local a leva ao site (passo 3); o `P` alterna o estado da do
-/// site; a faixa e o preço de venda vão num `PATCH` com só o que mudou; apagar
-/// pergunta antes e some com ela.
+/// O ensaio sobe sozinho (C20) e a nota de uma local **alcança a linha que
+/// acabou de nascer no site**; o `P` alterna o estado da do site; a faixa e o
+/// preço de venda vão num `PATCH` com só o que mudou; apagar pergunta antes e
+/// some com ela.
 #[gpui::test]
 fn classificar_sinalizar_e_o_painel_acompanham_a_foto(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(cx, Cenario::default());
+    e.esperar(cx);
 
-    // ⭐ A nota numa foto **local**: ela sobe, com a nota que acabou de ser dada.
+    // 📤 As duas locais subiram sozinhas, sem nota — a classificação deixou de
+    // ser a porta da nuvem em 2026-09-20.
+    let subidas = e.site.subidas();
+    assert_eq!(subidas.len(), 2, "o ensaio inteiro sobe: {subidas:?}");
+    assert!(e.site.notas_pedidas().iter().all(Option::is_none));
+
+    // ⭐ A nota numa foto que acabou de subir: é uma mudança da foto, e vai
+    // para a linha do site pelo id novo.
     e.detalhe(cx, |tela, _w, cx| tela.focar_foto("id-DSC_101.jpg", cx));
     e.teclar(cx, "4");
     e.esperar(cx);
-    let subidas = e.site.subidas();
-    assert_eq!(subidas.len(), 1, "classificar sobe: {subidas:?}");
-    assert_eq!(subidas[0].1, "id-DSC_101.jpg");
-    assert_eq!(e.site.notas_pedidas(), vec![Some(4)]);
+    assert_eq!(e.site.subidas().len(), 2, "e não sobe de novo");
 
     // 🚩 O `P` numa foto do site alterna levada ↔ à venda, e a grade mostra.
     e.detalhe(cx, |tela, _w, cx| tela.focar_foto("d", cx));

@@ -45,7 +45,7 @@ use crate::biblioteca::acervo::Acervo;
 use crate::importacao::estado::Recado as RecadoDaImportacao;
 use crate::importacao::explorador::{Andamento, Explorador, Freios, Importador, SeletorDePasta};
 use crate::pos_venda::porta::{PedidoJson, Publicador, Recado};
-use crate::revelacao::persistencia::{self, Gravador};
+use crate::revelacao::persistencia::Gravador;
 use crate::sessoes::arquivos::SeletorDeFotos;
 use crate::sessoes::detalhe::{pasta_do_ensaio, Importacao};
 
@@ -277,8 +277,9 @@ pub struct NovaSessao {
     pub(super) foco_do_preset: usize,
     /// As setas andaram pelos cartões: o anel de foco aparece.
     pub(super) teclado_no_preset: bool,
-    /// As miniaturas das fotos do rascunho, por id.
-    pub(super) miniaturas: HashMap<String, Arc<RenderImage>>,
+    /// As miniaturas das fotos do rascunho. **Lidas fora da linha da
+    /// interface** — ver [`super::miniaturas`].
+    pub(super) miniaturas: super::miniaturas::Miniaturas,
     /// Fotos foram para a fila da receita: o próximo quadro avisa a raiz.
     ///
     /// 🔑 **Bandeira, e não `cx.emit` direto**: `aplicar_receita` é chamado de
@@ -477,7 +478,7 @@ impl NovaSessao {
             foco: cx.focus_handle(),
             foco_do_preset: 0,
             teclado_no_preset: false,
-            miniaturas: HashMap::new(),
+            miniaturas: Default::default(),
             pedir_colheita_das_reveladas: false,
             amostras: Amostras::default(),
             focar: None,
@@ -1936,6 +1937,10 @@ impl NovaSessao {
                     self.despachar_leva(proxima, window, cx);
                 }
             }
+            // 🔑 A foto pedida antes de o trabalhador gravar a prévia voltou
+            // sem imagem. A releitura é o aviso de que vale pedir de novo —
+            // sem isto ela ficaria cinza até a tela ser reaberta.
+            self.miniaturas.esquecer_as_vazias();
             self.aplicar_receita();
         }
 
@@ -1972,6 +1977,11 @@ impl NovaSessao {
             mudou = true;
         }
 
+        // As miniaturas lidas na thread: chegaram, a grade muda.
+        if self.miniaturas.colher() {
+            mudou = true;
+        }
+
         if self.aviso.as_ref().is_some_and(|a| Instant::now() >= a.ate) {
             self.aviso = None;
             mudou = true;
@@ -1990,6 +2000,7 @@ impl NovaSessao {
             || self.esperando_releitura
             || self.aviso.is_some()
             || self.amostras.esperando()
+            || self.miniaturas.esperando()
             // A receita anda numa thread: enquanto ela não termina, a tela
             // continua acordando para colher os avisos e mover a barra.
             || self.portas.receita_padrao.progresso().andando()
@@ -2034,25 +2045,12 @@ impl NovaSessao {
     /// assistente mostrou, sem revelar de novo.
     pub(super) fn preparar_miniaturas(&mut self) {
         let previews = self.portas.previews.clone();
-        let ids: Vec<String> = self.fotos.iter().take(60).map(|f| f.id.clone()).collect();
-        for id in ids {
-            if self.miniaturas.contains_key(&id) {
-                continue;
-            }
-            let revelada = persistencia::chave_da_revelada(&id);
-            let imagem = previews
-                .get_thumbnail(&revelada)
-                .or_else(|| previews.get_thumbnail(&id))
-                .or_else(|| previews.get_preview(&id).map(|g| g.thumbnail(320, 320)));
-            if let Some(imagem) = imagem {
-                self.miniaturas
-                    .insert(id.clone(), crate::imagem::para_gpui(imagem));
-            }
-        }
+        let ids = self.fotos.iter().take(60).map(|f| f.id.clone());
+        self.miniaturas.pedir(ids, &previews);
         let primeira = self
             .fotos
             .iter()
-            .find(|f| self.miniaturas.contains_key(&f.id))
+            .find(|f| self.miniaturas.tem(&f.id))
             .map(|f| f.id.clone());
         self.amostras.definir_base(primeira.clone(), || {
             let id = primeira?;
@@ -2069,7 +2067,7 @@ impl NovaSessao {
     /// esta tela só descarta o que tem na mão — C17 do Contrato da Foto ("os
     /// caches derivados saem e são refeitos") visto do lado de quem desenha.
     pub fn revelada_chegou(&mut self, foto_id: &str) {
-        self.miniaturas.remove(foto_id);
+        self.miniaturas.esquecer(foto_id);
     }
 
     /// A amostra do cartão deste preset (`None` = "Nenhum").
@@ -2127,6 +2125,25 @@ impl NovaSessao {
     #[cfg(test)]
     pub(crate) fn perguntando_se_retoma(&self) -> bool {
         self.guardado.is_some()
+    }
+
+    /// 🧪 Relê o catálogo, como a importação faz ao terminar uma leva.
+    ///
+    /// 🔑 Com o `acompanhar` junto, que é o que `abrir` faz: `reler_fotos`
+    /// sozinho pede ao acervo e não acorda ninguém para recolher a resposta.
+    #[cfg(test)]
+    pub(crate) fn reler_fotos_para_teste(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.reler_fotos();
+        self.acompanhar(window, cx);
+    }
+
+    /// 🧪 Quantas fotos do rascunho já têm miniatura na grade.
+    #[cfg(test)]
+    pub(crate) fn quantas_miniaturas(&self) -> usize {
+        self.fotos
+            .iter()
+            .filter(|f| self.miniaturas.tem(&f.id))
+            .count()
     }
 }
 
