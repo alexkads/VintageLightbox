@@ -1,6 +1,5 @@
-//! Quando o app vai para a bandeja, quando volta e quando termina — a regra do
-//! app Tauri (`bandeja::vigiar_minimizar`, `para_a_bandeja`, `mostrar_janela` e
-//! o G9 de `main.rs`), sem janela nem ícone, para ser conferida em teste.
+//! Quando o app vai para a bandeja, quando volta e quando termina — a regra
+//! sozinha, sem janela nem ícone, para ser conferida em teste.
 
 use std::time::{Duration, Instant};
 

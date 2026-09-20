@@ -32,28 +32,22 @@ era migrar a interface de egui para GPUI **com paridade**; ele foi **alcançado*
 valendo — em especial **"nenhuma feature nova"**, que é o motivo de o painel de Revelação ter 19
 sliders que não fazem nada: o app antigo também não os aplicava, e o porte foi fiel ao defeito.
 
-> 🩸 **Contrato de sangue (dono, 2026-09-17) — três peças, três papéis:**
+> 🩸 **Contrato de sangue (dono, 2026-09-17; revisto em 2026-09-20) — duas peças, dois papéis:**
 >
 > | Peça | Papel |
 > |---|---|
-> | `frontend/.../dashboard/sessoes-fotograficas` (no e-commerce) | **Em produção** — os funcionários já estão usando |
-> | `crates/app-tauri` | **Temporário, e a base** — nasceu para trazer a tela da web com pouco esforço (MVP), e serve para o GPUI ser construído a partir do que ele mostra |
+> | `frontend/.../dashboard/sessoes-fotograficas` (no e-commerce) | **Em produção** — os funcionários já estão usando, e é a referência de comportamento |
 > | **`crates/ui-gpui`** | **A interface final e definitiva do desktop**, por ser mais performática |
 >
-> 🚨 **O `ui-gpui` não está mais em pausa.** Isto revoga o rumo de 2026-09-16 (o `ui-gpui` recebendo
-> só correção de defeito, e o balcão passando para o Tauri): **todo trabalho novo de fluxo é feito
-> aqui**, no GPUI.
+> 🚨 **O `ui-gpui` não está mais em pausa**: **todo trabalho novo de fluxo é feito aqui**, no GPUI.
 >
-> 🔑 **"Base" não é fonte de código.** O `app-tauri` roda a tela React do site — não há código a
-> mover de lá para cá, há **comportamento a reproduzir**. Portar continua sendo reescrever com a
-> regra entendida. O jeito de usar a base é abrir as duas janelas lado a lado
-> (`crates/app-tauri/rodar-local.sh` e `crates/ui-gpui/rodar-local.sh`, contra `make up` do
-> e-commerce), repetir o mesmo gesto e anotar onde diferem — cada diferença é uma linha da lista de
-> trabalho. Quando os três divergirem, a ordem de autoridade é **web → Tauri → GPUI**: a web é a que
-> tem gente dentro.
+> 🔑 **A web é a referência, e não uma fonte de código.** Não há código a mover de lá para cá, há
+> **comportamento a reproduzir**. Portar é reescrever com a regra entendida. O jeito de conferir é
+> abrir a janela do app e a do site lado a lado (`crates/ui-gpui/rodar-local.sh` contra o `make up`
+> do e-commerce), repetir o mesmo gesto e anotar onde diferem — cada diferença é uma linha da lista
+> de trabalho. Quando os dois divergirem, **quem está certo é a web**: é a que tem gente dentro.
 >
-> Regra de negócio vai para `use-cases`, onde as duas telas a encontram. O plano e a decisão (D15)
-> estão em `recordarfotos-e-commerce/docs/DESKTOP_TAURI.md`, seção "O contrato".
+> Regra de negócio vai para `use-cases`, onde as duas telas a encontram.
 > O objetivo acima, "em Rust com GPUI", continua sendo o destino — e agora é o único.
 
 **Fidelidade ao app antigo deixou de ser virtude.** Detalhes em
@@ -87,7 +81,6 @@ make            # a lista dos alvos
 make testar     # cargo test --workspace
 make lint       # fmt + clippy -D warnings, como no CI
 make rodar      # abre o app (sempre em release)
-make tauri-diagnostico  # a janela Tauri (Fase 0) e a página que responde P1–P9
 make mac        # .app + .dmg universal
 make linux      # .deb + .AppImage, por Docker
 make windows    # explica por que o Windows sai do .ps1, e nao daqui
@@ -121,19 +114,12 @@ cargo test test_name --workspace
 #    framework é lento" duas vezes (docs/STATUS.md).
 cargo run --release -p ui-gpui
 
-# A base temporária, em Tauri (recordarfotos-e-commerce/docs/DESKTOP_TAURI.md, D15).
-# Abre /dashboard/sessoes-fotograficas do site; `--diagnostico` abre também a página
-# que mede o webview do sistema. **Testes sempre no Mac, e sem GitHub** (dono,
-# 2026-09-16): não há workflow para o app Tauri.
-cargo run -p app-tauri -- --diagnostico
-
-# 🔑 Contra a pilha local, os dois pelos scripts do crate — eles apontam a API (8080) e
+# 🔑 Contra a pilha local, pelo script do crate — ele aponta a API (8080) e
 #    o site (8001) juntos e conferem se a API responde antes de compilar. As duas
 #    variáveis nunca andam sozinhas: só a API em localhost abria a autorização em
 #    produção, e o operador entrava na conta real achando que estava local
 #    (17/set/2026). Antes: `make up` no recordarfotos-e-commerce.
-crates/ui-gpui/rodar-local.sh     # o produto final
-crates/app-tauri/rodar-local.sh   # a base, para comparar lado a lado
+crates/ui-gpui/rodar-local.sh     # o app, contra a pilha local
 
 # O motor de revelação para o navegador (entrega ao recordarfotos-e-commerce)
 scripts/construir-web.sh [caminho/do/frontend]
@@ -238,13 +224,10 @@ tecnologias de revelacao-web"). O registro, com a lista do que não refazer, est
 
 ## UI Framework
 
-🔁 **`crates/ui-gpui` e `crates/app-tauri` vão existir sempre, e um valida o outro** (dono,
-2026-09-16). O fluxo de `/dashboard/sessoes-fotograficas` sempre vai precisar de validação: a
-mesma sessão levada pelos dois apps tem de dar o mesmo resultado, e quando não dá, um deles tem
-defeito. O Tauri (uma janela que abre a tela do site) vem primeiro porque entrega mais rápido.
-Enquanto isso, o `ui-gpui` fica em pausa, recebendo só correção de defeito, e continua
-compilando. **Um dia ele vai ser concluído.** Regra de negócio vai para `use-cases`, onde os dois
-a encontram. O plano está em `recordarfotos-e-commerce/docs/DESKTOP_TAURI.md`.
+🔁 **`crates/ui-gpui` é a interface do desktop** (2026-09-20). O fluxo de
+`/dashboard/sessoes-fotograficas` sempre vai precisar de validação: a mesma sessão levada pelo app e
+pelo site tem de dar o mesmo resultado, e quando não dá, um deles tem defeito — e quem está certo é
+o site. Regra de negócio vai para `use-cases`, onde os dois a encontram.
 
 **GPUI 0.2 + gpui-component 0.5** — o egui saiu em 17/ago/2026, com a migração
 concluída (`docs/historico/10-MIGRACAO-GPUI.md`). Quem procura o app antigo o encontra no
@@ -273,8 +256,7 @@ e `--bin medir-abertura`.
 3. Implementação em `infrastructure` (repositório, disco, GPU)
 4. Controller em `adapters`, ligando use case e interface
 5. **Montagem no `crates/ui-gpui/src/main.rs`** e tela em
-   `crates/ui-gpui/src/{biblioteca,revelacao,importacao,impressao}/`. Enquanto o `ui-gpui`
-   estiver em pausa, tela **nova** nasce no site e chega ao desktop pelo Tauri.
+   `crates/ui-gpui/src/{biblioteca,revelacao,importacao,impressao}/`.
 
 🚨 **O passo 5 é o que mais some, e some em silêncio.** `ExportPhotoUseCase`, `ExportController` e
 `ImageExporterImpl` existem, estão testados — e **nunca são construídos no `main.rs`**. O app não

@@ -910,9 +910,9 @@ impl PosVendaApiHttp {
 
     /// Um pedido qualquer à API, com o token de agora, e a resposta crua.
     ///
-    /// É a porta da tela empacotada do app Tauri (DESKTOP_TAURI §0): as funções
-    /// de `lib/api/*` do site montam o pedido, e este cliente põe o token,
-    /// renova quando vence e devolve o status e os bytes, sem interpretar nada.
+    /// É a porta crua da API: quem chama monta o pedido, e este cliente põe o
+    /// token, renova quando vence e devolve o status e os bytes, sem
+    /// interpretar nada.
     /// Uma resposta `4xx` ou `5xx` volta como resposta, e não como erro: quem lê
     /// o envelope de erro é o cliente do site.
     ///
@@ -1320,7 +1320,15 @@ struct FotoDaGaleriaDaApi {
 #[derive(Deserialize)]
 struct LinkDaApi {
     link: String,
-    validade_em_segundos: i64,
+    /// 🚨 **`null` desde 2026-09-20 — o link da galeria não expira.**
+    ///
+    /// `Option` **e** `#[serde(default)]`: sem o primeiro, a resposta de hoje
+    /// (`null`) derruba a desserialização e o operador vê "não foi possível
+    /// gerar o link" com o link já assinado do outro lado; sem o segundo, um
+    /// backend que um dia pare de mandar o campo faria o mesmo. Ver
+    /// `LinkDeAcesso`.
+    #[serde(default)]
+    validade_em_segundos: Option<i64>,
 }
 
 #[cfg(test)]
@@ -1792,7 +1800,7 @@ mod tests {
             .and(header("authorization", "Bearer tok"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "link": "https://recordarfotos.com.br/entrar?t=abc123",
-                "validade_em_segundos": 604800
+                "validade_em_segundos": null
             })))
             .mount(&servidor)
             .await;
@@ -1801,7 +1809,38 @@ mod tests {
         let link = api.link_da_galeria(&sessao_valida(), "g1").await.unwrap();
 
         assert_eq!(link.url, "https://recordarfotos.com.br/entrar?t=abc123");
-        assert_eq!(link.validade_em_segundos, 604_800);
+        assert_eq!(
+            link.validade_em_segundos, None,
+            "o link da galeria não expira desde 2026-09-20"
+        );
+    }
+
+    /// 🚨 **O link de 7 dias continua sendo lido** — e o campo ausente também.
+    ///
+    /// O site de hoje manda `null`, mas o app conversa com o que estiver no ar:
+    /// uma máquina antiga no meio de um deploy ainda responde `604800`. As duas
+    /// formas precisam abrir a mesma tela; a que **não** pode acontecer é a
+    /// resposta inteira ser recusada por causa deste campo.
+    #[tokio::test]
+    async fn o_link_aceita_o_prazo_antigo_e_a_ausencia_do_campo() {
+        for (corpo, esperado) in [
+            (
+                json!({ "link": "https://site/x", "validade_em_segundos": 604800 }),
+                Some(604_800),
+            ),
+            (json!({ "link": "https://site/x" }), None),
+        ] {
+            let servidor = MockServer::start().await;
+            Mock::given(method("POST"))
+                .and(path("/api/v2/pos-venda/galerias/g1/link"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(corpo))
+                .mount(&servidor)
+                .await;
+
+            let api = PosVendaApiHttp::nova(servidor.uri());
+            let link = api.link_da_galeria(&sessao_valida(), "g1").await.unwrap();
+            assert_eq!(link.validade_em_segundos, esperado);
+        }
     }
 
     /// 🔚 Sessão sem contato: o `422` do link e do aviso chega como

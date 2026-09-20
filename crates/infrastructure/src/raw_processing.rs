@@ -91,8 +91,8 @@ pub fn load_raw_as_dynamic_image(path: &str) -> Result<image::DynamicImage, Stri
 
 /// O mesmo que [`load_raw_as_dynamic_image`], a partir dos bytes do arquivo.
 ///
-/// É o caminho do app Tauri: a página entrega os bytes do `File` que o operador
-/// escolheu ou soltou, e não um caminho no disco.
+/// É o caminho de quem tem os bytes em mãos — o arquivo que o operador soltou
+/// na janela — e não um caminho no disco.
 ///
 /// ⚠️ Sem caminho não há a reserva do DNG com perdas, que precisa da LibRaw do
 /// sistema abrindo o arquivo pelo nome.

@@ -286,8 +286,8 @@ impl Aplicativo {
                     self.receber_a_copia_de_trabalho(foto_id, &bytes, cx)
                 }
                 // 🔑 **Download que falhou não é recusa do site**: não entra no
-                // canto das recusas (que é dos envios, como no Tauri) nem conta
-                // como resposta do "Salvar na galeria". Só avisa.
+                // canto das recusas (que é dos envios) nem conta como resposta
+                // do "Salvar na galeria". Só avisa.
                 Recado::Falhou(erro) => self.avisar_onde_esta_olhando(erro, cx),
                 _ => {}
             }

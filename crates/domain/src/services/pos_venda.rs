@@ -251,10 +251,21 @@ pub struct TotaisDaGaleria {
 /// cliente não tem conta — ele saiu do estúdio, não do site. Este link é
 /// assinado pelo backend, cria a conta no primeiro clique e é o mesmo que vai
 /// no e-mail de "fotos prontas".
+///
+/// 🚨 **Ele não expira** desde 2026-09-20 (decisão do dono: *"jamais poderá
+/// expirar se o usuário nunca logar-se com o e-mail dele"*). A regra e o preço
+/// dela estão no backend, em `application::ports::token::destino_perpetuo`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LinkDeAcesso {
     pub url: String,
-    pub validade_em_segundos: i64,
+    /// **`None` = não expira**, e é o que o site sempre devolve desde
+    /// 2026-09-20.
+    ///
+    /// `Option`, e não um número grande: um prazo absurdo continuaria sendo um
+    /// prazo, e voltaria a trancar o cliente do lado de fora no dia em que
+    /// chegasse. Quem lê isto para mostrar ao operador diz "não expira" no
+    /// `None` — nunca um traço mudo.
+    pub validade_em_segundos: Option<i64>,
 }
 
 /// Como o **site** vê o estado de uma foto.
@@ -605,8 +616,7 @@ pub trait PosVendaApi: Send + Sync {
     ///
     /// 🔑 É a porta das telas do painel que só leem e gravam JSON e não têm
     /// regra própria no app: a conta (`/auth/me`), o caixa e a retenção. Elas
-    /// são as mesmas do site, que também só repassa o JSON (2026-09-17, a
-    /// moldura do app Tauri levada ao GPUI).
+    /// são as mesmas do site, que também só repassa o JSON (2026-09-17).
     ///
     /// Uma resposta fora de `2xx` vira erro, com a frase do envelope do site.
     async fn pedir_json(

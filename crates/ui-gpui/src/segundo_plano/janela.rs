@@ -1,10 +1,8 @@
 //! O que o GPUI não sabe fazer com a janela: perguntar se está minimizada,
 //! escondê-la sem fechar e tirar o app do Dock.
 //!
-//! 🚨 **O GPUI 0.2 não tem evento nem pergunta de "minimizou"** — como o Tauri,
-//! que também não tinha (`app-tauri/src/bandeja.rs`, `vigiar_minimizar`). A
-//! saída é a mesma de lá: perguntar ao sistema a cada volta do laço, pela alça
-//! nativa da janela.
+//! 🚨 **O GPUI 0.2 não tem evento nem pergunta de "minimizou".** A saída é
+//! perguntar ao sistema a cada volta do laço, pela alça nativa da janela.
 //!
 //! 🚨 **Mudar a janela é sempre depois (`Adiado`), nunca dentro de um `update`.**
 //! `orderOut:`, `deminiaturize:` e `ShowWindow` chamam os callbacks da janela
@@ -54,8 +52,8 @@ pub fn pedir_para_fechar(window: &Window) -> Adiado {
 /// No macOS, o app sai do Dock enquanto mora na bandeja, e volta com a janela.
 /// Chamar só fora de `update`, como os `Adiado`.
 ///
-/// 🚨 **O app volta antes da janela** (a mesma lição do Tauri): sem o Dock ele
-/// é um acessório, e uma janela de acessório não vem para a frente.
+/// 🚨 **O app volta antes da janela**: sem o Dock ele é um acessório, e uma
+/// janela de acessório não vem para a frente.
 pub fn no_dock(visivel: bool) {
     plataforma::no_dock(visivel);
 }
@@ -125,7 +123,7 @@ mod plataforma {
                     let _: () = msg_send![app, activateIgnoringOtherApps: true];
                 }
                 // Desminimizar antes de mostrar: escondida e minimizada ao
-                // mesmo tempo, o macOS não a devolvia (Tauri, 2026-09-16).
+                // mesmo tempo, o macOS não a devolvia (2026-09-16).
                 let minimizada: bool = msg_send![j, isMiniaturized];
                 if minimizada {
                     let _: () = msg_send![j, deminiaturize: nulo];
@@ -209,8 +207,8 @@ mod plataforma {
         })
     }
 
-    /// No Windows a janela minimizada continua na barra de tarefas, como no
-    /// Tauri (lá `set_dock_visibility` só existe no macOS).
+    /// No Windows a janela minimizada continua na barra de tarefas: sair do
+    /// Dock só faz sentido no macOS.
     pub fn no_dock(_visivel: bool) {}
 }
 

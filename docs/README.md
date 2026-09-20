@@ -117,7 +117,6 @@ como explicação de por que o código é como é.**
 | | |
 |---|---|
 | [10-MIGRACAO-GPUI.md](historico/10-MIGRACAO-GPUI.md) | A migração de egui para GPUI, fase a fase. **O melhor registro das armadilhas do framework** — BGRA, o `uniform` que casa por posição, o foco que não se concede, a fluidez que só se mede em `--release`. ⚠️ As regras da §7 estão **revogadas** |
-| [09-MIGRACAO-TAURI.md](historico/09-MIGRACAO-TAURI.md) | A alternativa avaliada e **descartada** em ago/2026 |
 | [PARIDADE-UI.md](historico/PARIDADE-UI.md) | Os 146 testes do app de egui virados em lista de comportamentos, antes de ele ser apagado |
 
 ## 🗺️ Guia de Leitura

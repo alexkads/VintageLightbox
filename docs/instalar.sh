@@ -4,13 +4,10 @@
 #
 #     curl -fsSL https://alexkads.github.io/VintageLightbox/instalar.sh | sh
 #
-# ⚠️ **Este é o VintageLightbox antigo (GPUI), só macOS, na versão publicada.**
-#    Desde 2026-09-17 cada app tem um instalador de arquivo único para os três
-#    sistemas, que compila a branch `dev`:
-#      - o app do balcão, VintageLightbox (Tauri), que não precisa do Xcode:
-#        `scripts/instalar-vintagelightbox-tauri.cmd` (docs/INSTALAR-TAURI.md);
-#      - este mesmo app GPUI, que também prepara o Xcode sozinho:
-#        `scripts/instalar-vintagelightbox-gpui.cmd` (docs/INSTALAR-GPUI.md).
+# ⚠️ **Este caminho é só macOS, e compila a versão publicada.** Desde
+#    2026-09-17 há um instalador de arquivo único para os três sistemas, que
+#    compila a branch `dev` e dispensa o Xcode:
+#      `scripts/instalar-vintagelightbox-gpui.cmd` (docs/INSTALAR-GPUI.md).
 #    Este script continua publicado porque o endereço curto está em uso.
 #
 # 🔑 **Por que este caminho existe.** O `.dmg` pronto abre com um susto: o macOS
@@ -98,11 +95,8 @@ Opções (com curl | sh, passe-as depois de \`sh -s --\`):
 Custa 15 a 40 minutos na primeira vez e ~10 GiB em ~/.vintagelightbox/target.
 Exige o Xcode (grátis) com o componente Metal; o Rust ele instala se faltar.
 
-⚠️ Este é o VintageLightbox antigo (GPUI). O app do balcão, VintageLightbox
-(Tauri), é outro, não precisa do Xcode e se instala com:
-  curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox-tauri.cmd | sh
-
-Este mesmo app GPUI, compilado da branch dev e em qualquer sistema:
+⚠️ Este caminho compila a versão publicada e exige o Xcode. O mesmo app,
+compilado da branch dev, em qualquer sistema e sem o Xcode:
   curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox-gpui.cmd | sh
 AJUDA
 }
@@ -169,11 +163,11 @@ if ! xcrun -f metal >/dev/null 2>&1; then
   echo
   echo "   Depois rode este script de novo."
   echo
-  # 🔑 Quem chega aqui quase sempre queria o app do balcão, que tem outro
-  #    comando e não precisa do Xcode (dono, 2026-09-16).
-  printf "   ${N}Procurava o app do balcão, o VintageLightbox (Tauri)?${Z} Ele é outro, e não\n"
-  echo "   precisa do Xcode nem do Metal:"
-  echo "      curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox-tauri.cmd | sh"
+  # 🔑 Quem chega aqui quase sempre pode usar o instalador da branch `dev`,
+  #    que não precisa do Xcode (dono, 2026-09-16).
+  printf "   ${N}Não quer instalar o Xcode?${Z} O instalador da branch dev não\n"
+  echo "   precisa dele nem do Metal:"
+  echo "      curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox-gpui.cmd | sh"
   exit 1
 fi
 ok "Xcode e Metal: $(xcode-select -p)"

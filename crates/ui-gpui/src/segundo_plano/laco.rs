@@ -1,9 +1,8 @@
 //! O laço que olha a janela e a raiz, e mantém a bandeja em dia.
 //!
-//! 🔑 **Uma volta a cada 150 ms para os cliques, e a cada ~0,7 s para o resto**
-//! — o mesmo passo da vigia do Tauri. Perguntar ao sistema se a janela está
-//! minimizada custa nada e não falha, que é mais do que se pode dizer de um
-//! evento que o GPUI não tem.
+//! 🔑 **Uma volta a cada 150 ms para os cliques, e a cada ~0,7 s para o resto.**
+//! Perguntar ao sistema se a janela está minimizada custa nada e não falha, que
+//! é mais do que se pode dizer de um evento que o GPUI não tem.
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -208,8 +207,8 @@ fn volta(cx: &mut App) {
             match clique {
                 Clique::Abrir => mostrar_janela(sp, cx),
                 Clique::AbrirPasta => bandeja::abrir_pasta(&sp.pasta),
-                // Pela bandeja, sair é escolha explícita: não espera a fila, como
-                // no Tauri. O que não subiu segue guardado no depósito.
+                // Pela bandeja, sair é escolha explícita: não espera a fila.
+                // O que não subiu segue guardado no depósito.
                 Clique::Sair => sair = true,
             }
         }

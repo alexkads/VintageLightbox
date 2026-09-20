@@ -52,8 +52,8 @@ fn cofre_da_sessao(pilha_local: bool) -> Arc<dyn domain::services::pos_venda::Co
     // 🚨 **A pilha local nunca usa o item de produção do chaveiro.** Eram o
     // mesmo item, e autorizar contra `localhost` gravava o token local em cima
     // da sessão do estúdio — o operador voltava a produção deslogado, sem
-    // relação visível com o que tinha feito. O app Tauri já separava os dois
-    // (`app-tauri/src/api.rs`, "a pilha local tem a própria sessão").
+    // relação visível com o que tinha feito. A pilha local tem a própria
+    // sessão, e é por isso que o serviço do chaveiro é outro.
     if pilha_local {
         return Arc::new(infrastructure::CofreDoSistema::com_servico(
             "br.com.recordarfotos.vintagelightbox.local",
@@ -83,8 +83,8 @@ async fn main() {
         .expect("Failed to run database migrations");
 
     // As quatro camadas internas, intactas — este app fala com elas do mesmo
-    // jeito que o de egui fala. É o que tornou o GPUI mais barato que o Tauri:
-    // nada precisou virar comando serializável.
+    // jeito que o de egui falava. É o que torna trocar de interface barato:
+    // nada precisa virar comando serializável.
     let repositorio_de_fotos = Arc::new(infrastructure::PhotoRepositoryImpl::new(pool.clone()));
     let biblioteca = Arc::new(adapters::controllers::LibraryController::new(
         repositorio_de_fotos.clone(),
@@ -412,7 +412,7 @@ async fn main() {
             // E as duas da segunda tela — em contexto próprio, senão o `Esc` dela
             // e o da janela principal seriam a mesma ligação em janelas diferentes.
             ui_gpui::cliente::init(cx);
-            // O menu do app no macOS, como o do app Tauri.
+            // O menu do app no macOS.
             ui_gpui::menu::instalar(cx);
 
             let bounds = Bounds::centered(None, size(px(1100.), px(720.)), cx);

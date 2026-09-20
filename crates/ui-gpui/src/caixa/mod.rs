@@ -1,6 +1,5 @@
 //! O caixa do balcão numa tela inteira — a rota `/dashboard/caixa` do site
-//! (`frontend/src/app/(dashboard)/dashboard/caixa/pdv-do-caixa.tsx`), que o app
-//! Tauri também tem.
+//! (`frontend/src/app/(dashboard)/dashboard/caixa/pdv-do-caixa.tsx`).
 //!
 //! | Aqui | O que faz | No site |
 //! |---|---|---|

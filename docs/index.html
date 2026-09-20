@@ -72,263 +72,26 @@
 
   <p class="chamada">
     Importe do cartão, tria, revele e entregue — com o ensaio do cliente aberto ao lado.
-    Há <strong>dois apps</strong> com este nome, os dois mantidos e com o mesmo desenho:
-    <a href="#tauri">VintageLightbox (Tauri)</a>, o app do balcão, e
-    <a href="#gpui">VintageLightbox (Zed GPUI)</a>, o editor nativo. Cada um tem o próprio instalador.
+    O <a href="#gpui">VintageLightbox (Zed GPUI)</a> é o app do balcão: as telas desenhadas em Rust,
+    o motor de revelação na GPU e o catálogo na sua máquina.
   </p>
 
-  <h2 id="escolher">Qual instalar?</h2>
-  <div class="rolar">
-  <table>
-    <thead><tr><th></th><th><a href="#tauri">VintageLightbox (Tauri)</a></th><th><a href="#gpui">VintageLightbox (Zed GPUI)</a></th></tr></thead>
-    <tbody>
-      <tr><td>Para quem</td><td><strong>O balcão, no dia a dia.</strong> Na dúvida, é este.</td><td>Quem quer o editor nativo, com o motor de revelação na GPU</td></tr>
-      <tr><td>As telas</td><td>As do painel da RecordarFotos, empacotadas dentro do app</td><td>Desenhadas em Rust (GPUI), com a mesma cara do app Tauri</td></tr>
-      <tr><td>Só dele</td><td>Bandeja com envio em segundo plano, catálogo próprio, assistente de nova sessão</td><td>Catálogo local do editor antigo e o motor de revelação nativo</td></tr>
-      <tr><td>Instalador</td><td><code>instalar-vintagelightbox-tauri.cmd</code></td><td><code>instalar-vintagelightbox-gpui.cmd</code></td></tr>
-      <tr><td>No macOS precisa de</td><td>Só as Command Line Tools</td><td>Só as Command Line Tools</td></tr>
-      <tr><td>Primeira compilação</td><td>10 a 30 minutos</td><td>15 a 40 minutos</td></tr>
-      <tr><td>Nome instalado</td><td>VintageLightbox (Tauri)</td><td>VintageLightbox (Zed GPUI)</td></tr>
-    </tbody>
-  </table>
-  </div>
   <p class="texto">
-    Os dois convivem na mesma máquina: nomes, pastas, caches e catálogos são separados. Os dois
-    instaladores funcionam do mesmo jeito — <strong>um arquivo só</strong> para Windows, macOS e
-    Linux, que compila o app no próprio computador e instala sozinho o que faltar. A compilação usa um
-    perfil próprio, mais rápido e com menos memória que o dos pacotes prontos, e abre menos
-    compilações ao mesmo tempo em máquinas com pouca memória.
+    Não há instalador pronto: <strong>um arquivo só</strong> para Windows, macOS e Linux compila o app
+    no próprio computador e instala sozinho o que faltar. A compilação usa um perfil próprio, mais
+    rápido e com menos memória que o dos pacotes prontos, e abre menos compilações ao mesmo tempo em
+    máquinas com pouca memória.
   </p>
 
-  <h2 id="tauri">Instalar o app do balcão: VintageLightbox (Tauri)</h2>
+  <h2 id="gpui">Instalar o VintageLightbox (Zed GPUI)</h2>
 
   <p class="texto">
-    É o app do pós-venda da RecordarFotos: as telas do painel empacotadas dentro dele, com
-    <strong>RAW</strong>, <strong>cartão da câmera</strong>, <strong>pasta fixa de exportação</strong>,
+    É o app escrito inteiro em Rust, com a interface desenhada pelo <strong>GPUI</strong> e o motor de
+    revelação na GPU. Desde 17/09/2026 ele <strong>segue o desenho do painel da RecordarFotos</strong>:
+    as mesmas cores, a mesma moldura e as mesmas telas. Traz <strong>RAW</strong>,
+    <strong>cartão da câmera</strong>, <strong>pasta fixa de exportação</strong>,
     <strong>tela do cliente</strong> no segundo monitor e envio que continua <strong>na bandeja</strong>.
-    Não há instalador pronto: cada computador compila o próprio app, com um arquivo só, que instala
-    sozinho o que faltar. <strong>Não precisa do Xcode.</strong>
-  </p>
-
-  <nav class="indice" aria-label="Nesta seção">
-    <strong>Qual é o seu computador?</strong>
-    <a href="#windows">Windows</a> · <a href="#macos">macOS</a> · <a href="#linux">Linux</a>
-    <br>
-    <strong>Depois:</strong>
-    <a href="#primeiro-uso">Primeiro uso</a> · <a href="#atualizar">Atualizar</a> ·
-    <a href="#opcoes">Opções</a> · <a href="#onde">Onde as coisas ficam</a> ·
-    <a href="#desinstalar">Desinstalar</a> · <a href="#problemas">Quando algo dá errado</a> ·
-    <a href="#diagnostico">Diagnóstico</a>
-  </nav>
-
-  <p class="texto">
-    <strong>Antes de começar:</strong> internet ligada, alguns GiB livres no disco e
-    <strong>10 a 30 minutos</strong> na primeira vez. O computador pode ser usado enquanto isso.
-  </p>
-
-  <div class="fonte" id="windows">
-    <h3>Windows 10 e 11</h3>
-    <ol>
-      <li>Baixe <a href="https://github.com/alexkads/VintageLightbox/releases/download/instalador-tauri/instalar-vintagelightbox-tauri.cmd">instalar-vintagelightbox-tauri.cmd</a>.
-          Se o navegador disser que o arquivo pode ser perigoso, escolha <strong>Manter</strong>.</li>
-      <li>Na pasta <strong>Downloads</strong>, dê <strong>dois cliques</strong> no arquivo.</li>
-      <li>Se aparecer <em>“O Windows protegeu o computador”</em>, clique em <strong>Mais informações</strong>
-          e depois em <strong>Executar assim mesmo</strong>. Só acontece na primeira vez.</li>
-      <li>Se o Windows perguntar se permite que um programa faça alterações, clique em <strong>Sim</strong>:
-          são as ferramentas que o instalador põe na máquina.</li>
-      <li>Espere a janela preta terminar. No fim, aperte qualquer tecla.</li>
-      <li>Abra pelo <strong>Menu Iniciar</strong>: <strong>VintageLightbox (Tauri)</strong>.</li>
-    </ol>
-    <p>O instalador põe sozinho, pelo <strong>winget</strong>: o <strong>WebView2</strong> (já vem no
-       Windows 11), o <strong>Rust</strong> e o <strong>MSYS2</strong> com o compilador e a libclang. O
-       Visual Studio não é preciso. O arquivo baixado não envelhece: ao rodar, ele busca a versão mais
-       nova do instalador.</p>
-  </div>
-
-  <div class="fonte" id="macos">
-    <h3>macOS</h3>
-    <ol>
-      <li>Abra o <strong>Terminal</strong>: aperte <kbd>⌘</kbd> <kbd>Espaço</kbd>, digite
-          <code>Terminal</code> e aperte <kbd>Enter</kbd>.</li>
-      <li>Cole esta linha e aperte <kbd>Enter</kbd>:
-        <pre class="quebra"><code>curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox-tauri.cmd | sh</code></pre></li>
-      <li>Se ele disser que <strong>faltam as Command Line Tools</strong>, rode
-          <code>xcode-select --install</code>, clique em <strong>Instalar</strong> na janela que abrir,
-          espere terminar e cole a linha do passo 2 de novo.</li>
-      <li>Espere aparecer <strong>“instalado em /Applications”</strong>.</li>
-      <li>Abra pelo Launchpad ou pela pasta <strong>Aplicativos</strong>:
-          <strong>VintageLightbox (Tauri)</strong>. Ele abre no primeiro clique, sem aviso de
-          segurança.</li>
-    </ol>
-    <p>Precisa só das <strong>Command Line Tools</strong>; o Rust o instalador põe sozinho, na sua pasta
-       pessoal e sem senha. ⚠️ Não use o instalador do <a href="#gpui">GPUI</a> por engano: aquele é
-       outro app.</p>
-  </div>
-
-  <div class="fonte" id="linux">
-    <h3>Linux</h3>
-    <ol>
-      <li>Abra o <strong>Terminal</strong>.</li>
-      <li>Cole esta linha e aperte <kbd>Enter</kbd>:
-        <pre class="quebra"><code>curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox-tauri.cmd | sh</code></pre></li>
-      <li>Quando pedir, digite <strong>a sua senha</strong> (ela não aparece enquanto você digita). Ela
-          serve para instalar as bibliotecas do sistema.</li>
-      <li>Espere aparecer <strong>“instalado”</strong>.</li>
-      <li>Abra pelo menu de aplicativos: <strong>VintageLightbox (Tauri)</strong>.</li>
-    </ol>
-    <p>Funciona com <strong>apt</strong> (Ubuntu, Debian, Mint), <strong>dnf</strong> (Fedora) e
-       <strong>pacman</strong> (Arch, Manjaro): o instalador põe o compilador, a libclang, o WebKitGTK e
-       o Rust. Um Rust antigo da distribuição fica de lado. Em outra distribuição, ele lista o que
-       instalar à mão. Sem <code>curl</code>, instale-o antes (<code>sudo apt install curl</code>
-       ou <code>sudo dnf install curl</code>).</p>
-    <p id="fedora"><strong>No Fedora:</strong></p>
-    <ul class="texto">
-      <li><strong>Workstation (GNOME):</strong> o GNOME não mostra o ícone da bandeja sozinho. O
-          instalador põe e liga a extensão <em>AppIndicator</em>. <strong>Saia e entre de novo na
-          sessão</strong> para o ícone aparecer. Sem ela o app funciona, mas minimizado só volta
-          pelo <kbd>Alt</kbd>+<kbd>Tab</kbd>.</li>
-      <li><strong>Silverblue, Kinoite ou Bazzite:</strong> o sistema não aceita <code>dnf install</code>.
-          O instalador para e mostra um comando <code>sudo rpm-ostree install …</code>: rode-o,
-          <strong>reinicie o computador</strong> e cole a linha acima de novo.</li>
-      <li>A primeira instalação baixa cerca de 2 GiB de pacotes, e a compilação usa mais uns 10 GiB
-          de disco. A compilação do Zed GPUI pede bastante memória: com 8 GiB ou menos, feche os
-          outros programas antes.</li>
-    </ul>
-  </div>
-
-  <h3 id="primeiro-uso">Primeiro uso</h3>
-  <ul class="texto">
-    <li><strong>Entrar:</strong> clique em <strong>Entrar com a conta RecordarFotos</strong>. O navegador
-        abre para você confirmar a conta; depois volte para o app. No macOS, se ele pedir a senha para
-        usar o <strong>Chaveiro</strong>, digite a senha do Mac e clique em
-        <strong>Permitir Sempre</strong> (volta a perguntar depois de cada atualização).</li>
-    <li><strong>Tela do cliente:</strong> na galeria, o botão <strong>Tela do cliente</strong> abre a
-        foto em foco em tela cheia <strong>no outro monitor</strong>, e ela acompanha cada foto que você
-        abre. <kbd>Esc</kbd> fecha, <kbd>I</kbd> mostra ou esconde as informações da foto. Com um monitor
-        só, ela abre como janela comum, para arrastar.</li>
-    <li><strong>Bandeja:</strong> minimizar leva o app para a bandeja (a barra de menus, no macOS).
-        Fechar com fotos ainda subindo também: o envio continua, e o app termina quando acabar. Na
-        bandeja: <strong>Abrir o VintageLightbox</strong>, <strong>Enviar agora</strong>,
-        <strong>Abrir a pasta do catálogo</strong> e <strong>Sair</strong> (o que não subiu continua
-        guardado e sobe na próxima abertura).</li>
-  </ul>
-
-  <h3 id="atualizar">Atualizar</h3>
-  <p class="texto">
-    <strong>Repita o passo da instalação</strong>: dois cliques no arquivo no Windows, ou a mesma linha no
-    Terminal. Feche o app antes (pela bandeja, <strong>Sair</strong>). A partir da segunda vez leva poucos
-    minutos. O que estava no catálogo continua lá.
-  </p>
-
-  <h3 id="opcoes">Opções</h3>
-  <div class="rolar">
-  <table>
-    <thead><tr><th>O que</th><th>macOS e Linux</th><th>Windows</th></tr></thead>
-    <tbody>
-      <tr><td>Só mostrar o que faria</td><td><code>… | sh -s -- --seco</code></td><td><code>set VLB_SECO=1</code></td></tr>
-      <tr><td>Outra versão (branch ou tag)</td><td><code>… | sh -s -- --versao v0.2.0</code></td><td><code>set VLB_VERSAO=v0.2.0</code></td></tr>
-      <tr><td>Outra pasta de instalação</td><td><code>… | sh -s -- --destino ~/Apps</code></td><td><code>set VLB_DESTINO=D:\Apps\VintageLightbox</code></td></tr>
-      <tr><td>Ver as opções</td><td><code>… | sh -s -- --ajuda</code></td><td>—</td></tr>
-    </tbody>
-  </table>
-  </div>
-  <p class="texto">
-    <code>…</code> é o <code>curl -fsSL … | sh</code> da instalação, com a opção no lugar do
-    <code>| sh</code> final. <strong>No Windows</strong>, as opções só valem se o arquivo for rodado
-    <strong>da mesma janela</strong> em que foram definidas (dois cliques não as enxergam): abra o
-    <strong>Prompt de Comando</strong>, digite o <code>set</code> e depois
-    <code>"%USERPROFILE%\Downloads\instalar-vintagelightbox-tauri.cmd"</code>.
-  </p>
-  <p class="texto">Para ler o instalador antes de rodar:</p>
-  <pre class="quebra"><code>curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox-tauri.cmd -o instalar.cmd
-less instalar.cmd
-sh instalar.cmd</code></pre>
-
-  <h3 id="onde">Onde as coisas ficam</h3>
-  <div class="rolar">
-  <table>
-    <thead><tr><th></th><th>macOS</th><th>Linux</th><th>Windows</th></tr></thead>
-    <tbody>
-      <tr><td>O app</td><td><code>/Applications</code></td><td><code>~/.local/bin/vintagelightbox-tauri</code></td><td><code>%LOCALAPPDATA%\Programs\VintageLightbox-Tauri</code></td></tr>
-      <tr><td>O catálogo (fotos importadas)</td><td colspan="3"><strong>Imagens › VintageLightbox › Catalogo Tauri</strong>, na sua pasta pessoal</td></tr>
-      <tr><td>Cache do compilador (alguns GiB)</td><td colspan="2"><code>~/.vintagelightbox/target-tauri</code></td><td><code>%USERPROFILE%\.vintagelightbox\target-tauri</code></td></tr>
-      <tr><td>Código baixado</td><td colspan="2"><code>~/.vintagelightbox/fonte-tauri</code></td><td><code>%USERPROFILE%\.vintagelightbox\fonte-tauri</code></td></tr>
-    </tbody>
-  </table>
-  </div>
-  <p class="texto">Apagar a pasta <code>.vintagelightbox</code> é seguro: a próxima atualização só demora mais.</p>
-
-  <h3 id="desinstalar">Desinstalar</h3>
-  <ul class="texto">
-    <li><strong>macOS:</strong> arraste <strong>VintageLightbox (Tauri)</strong> de Aplicativos para o Lixo.</li>
-    <li><strong>Windows:</strong> apague a pasta <code>%LOCALAPPDATA%\Programs\VintageLightbox-Tauri</code>
-        e o atalho <strong>VintageLightbox (Tauri)</strong> do Menu Iniciar (botão direito › Abrir local do
-        arquivo › apagar).</li>
-    <li><strong>Linux:</strong>
-        <pre class="quebra"><code>rm ~/.local/bin/vintagelightbox-tauri ~/.local/share/applications/vintagelightbox-tauri.desktop ~/.local/share/icons/hicolor/256x256/apps/vintagelightbox-tauri.png</code></pre></li>
-    <li>Nos três, a pasta <code>.vintagelightbox</code> pode ir junto. ⚠️ <strong>O catálogo só depois de
-        conferir</strong> que a bandeja diz que tudo subiu: fotos que ainda não subiram só existem nele.
-        O Rust e o MSYS2 ficam instalados e podem ser removidos à parte.</li>
-  </ul>
-
-  <h3 id="problemas">Quando algo dá errado</h3>
-  <div class="rolar">
-  <table>
-    <thead><tr><th>O que aparece</th><th>O que fazer</th></tr></thead>
-    <tbody>
-      <tr><td><code>falta o compilador Metal</code> (macOS, versão antiga do instalador)</td><td>É uma cópia antiga do instalador do <strong>GPUI</strong>, de quando ele pedia o Xcode. Cole de novo a linha do <a href="#gpui-macos">GPUI</a>, que não precisa dele; para o app do balcão, use a linha do <a href="#macos">macOS</a> acima.</td></tr>
-      <tr><td><code>faltam as Command Line Tools do Xcode</code> (macOS)</td><td>Rode <code>xcode-select --install</code>, espere terminar e repita a instalação.</td></tr>
-      <tr><td><code>command not found: curl</code> (Linux)</td><td>Instale o curl (<code>sudo apt install curl</code> ou <code>sudo dnf install curl</code>) e repita.</td></tr>
-      <tr><td><code>este Linux é imutável</code> (Fedora Silverblue, Kinoite, Bazzite)</td><td>Rode o comando <code>sudo rpm-ostree install …</code> que a mensagem mostra, reinicie o computador e repita.</td></tr>
-      <tr><td>O ícone da bandeja não aparece (Fedora e outros com GNOME)</td><td>Saia e entre de novo na sessão. Se continuar sumido, abra o app <strong>Extensões</strong> e ligue <strong>AppIndicator and KStatusNotifierItem Support</strong>.</td></tr>
-      <tr><td><code>não reconheci o gerenciador de pacotes</code> (Linux)</td><td>Instale à mão os pacotes que a mensagem lista e repita.</td></tr>
-      <tr><td><code>a instalação dos pacotes falhou</code> ou <code>não há 'sudo'</code> (Linux)</td><td>Esta conta não pode instalar programas: peça a quem administra a máquina para rodar o comando mostrado logo acima, e repita.</td></tr>
-      <tr><td><code>o Rust continua ausente ou anterior ao 1.89</code></td><td>Rode <code>rustup update stable</code> e repita.</td></tr>
-      <tr><td>O navegador bloqueou o download (Windows)</td><td>Na lista de downloads, escolha <strong>Manter</strong> (no Edge: <strong>…</strong> › Manter).</td></tr>
-      <tr><td><code>o winget … não existe nesta máquina</code> (Windows)</td><td>Instale o <a href="https://apps.microsoft.com/detail/9NBLGGH4NNS1">Instalador de Aplicativo</a> pela Microsoft Store e repita.</td></tr>
-      <tr><td><code>o g++ do MinGW continua faltando</code> (Windows)</td><td>Instale o <a href="https://www.msys2.org">MSYS2</a> e, no terminal dele, rode <code>pacman -S mingw-w64-x86_64-gcc</code>. Depois repita.</td></tr>
-      <tr><td><code>o g++ do MinGW nao compilou um arquivo de teste</code> (Windows)</td><td>O instalador mostra a mensagem do compilador, atualiza o MSYS2 e reinstala o compilador sozinho. Se continuar (<code>o g++ do MinGW continua sem compilar</code>), abra o <strong>MSYS2 MINGW64</strong>, rode <code>pacman -Syu</code> duas vezes e repita.</td></tr>
-      <tr><td><code>a compilacao falhou de novo</code> (Windows)</td><td>O instalador já tentou duas vezes, a segunda com uma compilação de cada vez. A mensagem do compilador está acima, nas linhas <code>cargo:warning=</code>. Se ela fala em acesso negado, o antivírus está bloqueando: em <strong>Segurança do Windows › Proteção contra vírus e ameaças › Exclusões</strong>, adicione <code>%USERPROFILE%\.vintagelightbox</code> e <code>C:\msys64</code>, e repita.</td></tr>
-      <tr><td><code>a libclang continua faltando</code> (Windows)</td><td>No terminal do MSYS2, rode <code>pacman -S mingw-w64-x86_64-clang</code>. Depois repita.</td></tr>
-      <tr><td><code>Unable to find libclang</code> no meio da compilação (Linux)</td><td>Instale <code>clang</code> e <code>libclang-dev</code> (no Fedora, <code>clang</code> e <code>clang-devel</code>) e repita.</td></tr>
-      <tr><td>A compilação para por falta de espaço</td><td>Libere alguns GiB e repita.</td></tr>
-      <tr><td><code>signal: 9</code> ou <code>SIGKILL</code> no meio da compilação</td><td>Faltou memória. O instalador já compila menos coisas ao mesmo tempo em máquinas com pouca memória; se ainda assim falhar, feche outros programas e repita com uma compilação de cada vez: ponha <code>CARGO_BUILD_JOBS=1</code> antes do <code>sh</code> (<code>… | CARGO_BUILD_JOBS=1 sh</code>).</td></tr>
-      <tr><td>A janela do Windows fechou sozinha</td><td>Rode o arquivo de dentro do <strong>Prompt de Comando</strong> (veja <a href="#opcoes">Opções</a>) para ler a mensagem.</td></tr>
-      <tr><td>Abre um app diferente, ou o app não muda depois de atualizar</td><td>O app antigo continuava aberto: saia pela bandeja (<strong>Sair</strong>) e abra de novo. Só roda uma cópia por vez.</td></tr>
-      <tr><td>A tela do cliente abre preta</td><td>Atualize o app (repita a instalação).</td></tr>
-      <tr><td>A tela do cliente não vai para o outro monitor</td><td>Confira se o segundo monitor está <strong>estendido</strong>, e não espelhado. No Linux com Wayland o sistema não deixa o app escolher o monitor: arraste a janela uma vez.</td></tr>
-      <tr><td>A lista aparece vazia ou dá erro ao entrar</td><td>Confira a internet: as telas vêm do app, mas os dados vêm da RecordarFotos. As fotos já importadas continuam no catálogo.</td></tr>
-    </tbody>
-  </table>
-  </div>
-
-  <h3 id="diagnostico">Diagnóstico</h3>
-  <p class="texto">
-    Para ver o que o computador oferece ao app (GPU, armazenamento, monitores), abra-o com
-    <code>--diagnostico</code>: aparece uma segunda janela com um relatório para copiar e mandar.
-    Feche o app antes.
-  </p>
-  <div class="rolar">
-  <table>
-    <tbody>
-      <tr><td>macOS</td><td><code>open -a "VintageLightbox (Tauri)" --args --diagnostico</code></td></tr>
-      <tr><td>Linux</td><td><code>~/.local/bin/vintagelightbox-tauri --diagnostico</code></td></tr>
-      <tr><td>Windows</td><td><code>"%LOCALAPPDATA%\Programs\VintageLightbox-Tauri\VintageLightbox-Tauri.exe" --diagnostico</code></td></tr>
-    </tbody>
-  </table>
-  </div>
-  <p class="texto">
-    O mesmo guia, em texto, está em
-    <a href="https://github.com/alexkads/VintageLightbox/blob/dev/docs/INSTALAR-TAURI.md">INSTALAR-TAURI.md</a>.
-  </p>
-
-  <h2 id="gpui">Instalar o editor nativo: VintageLightbox (Zed GPUI)</h2>
-
-  <p class="texto">
-    É o editor escrito inteiro em Rust, com a interface desenhada pelo <strong>GPUI</strong> e o motor de
-    revelação na GPU. Desde 17/09/2026 ele <strong>segue o desenho do app Tauri</strong>: as mesmas
-    cores, a mesma moldura e as mesmas telas. Os dois apps continuam independentes, e um serve para
-    conferir o outro.
+    <strong>Não precisa do Xcode.</strong>
   </p>
 
   <nav class="indice" aria-label="Nesta seção">
@@ -336,8 +99,10 @@ sh instalar.cmd</code></pre>
     <a href="#gpui-windows">Windows</a> · <a href="#gpui-macos">macOS</a> · <a href="#gpui-linux">Linux</a>
     <br>
     <strong>Depois:</strong>
-    <a href="#gpui-telas">As telas</a> · <a href="#gpui-atalhos">Atalhos</a> ·
-    <a href="#gpui-onde">Onde as coisas ficam</a> · <a href="#gpui-problemas">Quando algo dá errado</a> ·
+    <a href="#primeiro-uso">Primeiro uso</a> · <a href="#gpui-telas">As telas</a> ·
+    <a href="#gpui-atalhos">Atalhos</a> · <a href="#atualizar">Atualizar</a> ·
+    <a href="#opcoes">Opções</a> · <a href="#gpui-onde">Onde as coisas ficam</a> ·
+    <a href="#gpui-problemas">Quando algo dá errado</a> ·
     <a href="#pacotes">Pacotes prontos (versão antiga)</a>
   </nav>
 
@@ -345,8 +110,8 @@ sh instalar.cmd</code></pre>
     <strong>Antes de começar:</strong> internet ligada, alguns GiB livres no disco e
     <strong>15 a 40 minutos</strong> na primeira vez. Atualizar é repetir o mesmo passo, e as opções
     (<code>--seco</code>, <code>--versao</code>, <code>--destino</code>, e no Windows
-    <code>VLB_SECO</code>, <code>VLB_VERSAO</code>, <code>VLB_DESTINO</code>) são as mesmas do
-    <a href="#opcoes">app do balcão</a>.
+    <code>VLB_SECO</code>, <code>VLB_VERSAO</code>, <code>VLB_DESTINO</code>) estão em
+    <a href="#opcoes">Opções</a>.
   </p>
 
   <div class="fonte" id="gpui-windows">
@@ -354,8 +119,10 @@ sh instalar.cmd</code></pre>
     <ol>
       <li>Baixe <a href="https://github.com/alexkads/VintageLightbox/releases/download/instalador-tauri/instalar-vintagelightbox-gpui.cmd">instalar-vintagelightbox-gpui.cmd</a>.
           Se o navegador disser que o arquivo pode ser perigoso, escolha <strong>Manter</strong>.</li>
-      <li>Na pasta <strong>Downloads</strong>, dê <strong>dois cliques</strong> no arquivo. Os avisos do
-          Windows são os mesmos do <a href="#windows">app do balcão</a>.</li>
+      <li>Na pasta <strong>Downloads</strong>, dê <strong>dois cliques</strong> no arquivo. Se aparecer
+          <em>“O Windows protegeu o computador”</em>, clique em <strong>Mais informações</strong> e
+          depois em <strong>Executar assim mesmo</strong>; e se ele perguntar se permite que um programa
+          faça alterações, clique em <strong>Sim</strong>. Só acontece na primeira vez.</li>
       <li>Espere a janela preta terminar. No fim, aperte qualquer tecla.</li>
       <li>Abra pelo <strong>Menu Iniciar</strong>: <strong>VintageLightbox (Zed GPUI)</strong>.</li>
     </ol>
@@ -394,9 +161,38 @@ sh instalar.cmd</code></pre>
     <p>Com <strong>apt</strong>, <strong>dnf</strong> ou <strong>pacman</strong>, o instalador põe o
        compilador, a libclang e as bibliotecas que o GPUI abre: X11, Wayland, xkbcommon, fontconfig,
        ALSA, OpenSSL, D-Bus, libsecret e o <strong>Vulkan</strong> (com o driver Mesa). Sem um driver
-       Vulkan a janela não abre, mesmo com tudo compilado. <strong>No Fedora</strong> valem os
-       mesmos cuidados do <a href="#fedora">app do balcão</a> (bandeja do GNOME e Silverblue).</p>
+       Vulkan a janela não abre, mesmo com tudo compilado.</p>
+    <p id="fedora"><strong>No Fedora:</strong></p>
+    <ul class="texto">
+      <li><strong>Workstation (GNOME):</strong> o GNOME não mostra o ícone da bandeja sozinho. O
+          instalador põe e liga a extensão <em>AppIndicator</em>. <strong>Saia e entre de novo na
+          sessão</strong> para o ícone aparecer. Sem ela o app funciona, mas minimizado só volta
+          pelo <kbd>Alt</kbd>+<kbd>Tab</kbd>.</li>
+      <li><strong>Silverblue, Kinoite ou Bazzite:</strong> o sistema não aceita <code>dnf install</code>.
+          O instalador para e mostra um comando <code>sudo rpm-ostree install …</code>: rode-o,
+          <strong>reinicie o computador</strong> e cole a linha acima de novo.</li>
+      <li>A primeira instalação baixa cerca de 2 GiB de pacotes, e a compilação usa mais uns 10 GiB
+          de disco. A compilação pede bastante memória: com 8 GiB ou menos, feche os
+          outros programas antes.</li>
+    </ul>
   </div>
+
+  <h3 id="primeiro-uso">Primeiro uso</h3>
+  <ul class="texto">
+    <li><strong>Entrar:</strong> clique em <strong>Entrar com a conta RecordarFotos</strong>. O navegador
+        abre para você confirmar a conta; depois volte para o app. No macOS, se ele pedir a senha para
+        usar o <strong>Chaveiro</strong>, digite a senha do Mac e clique em
+        <strong>Permitir Sempre</strong> (volta a perguntar depois de cada atualização).</li>
+    <li><strong>Tela do cliente:</strong> na galeria, o botão <strong>Tela do cliente</strong> abre a
+        foto em foco em tela cheia <strong>no outro monitor</strong>, e ela acompanha cada foto que você
+        abre. <kbd>Esc</kbd> fecha, <kbd>I</kbd> mostra ou esconde as informações da foto. Com um monitor
+        só, ela abre como janela comum, para arrastar.</li>
+    <li><strong>Bandeja:</strong> minimizar leva o app para a bandeja (a barra de menus, no macOS).
+        Fechar com fotos ainda subindo também: o envio continua, e o app termina quando acabar. Na
+        bandeja: <strong>Abrir o VintageLightbox</strong>,
+        <strong>Abrir a pasta do catálogo</strong> e <strong>Sair</strong> (o que não subiu continua
+        guardado e sobe na próxima abertura).</li>
+  </ul>
 
   <h3 id="gpui-telas">As telas</h3>
   <ul class="texto">
@@ -424,11 +220,6 @@ sh instalar.cmd</code></pre>
         endireitar, desfazer e refazer, copiar e colar ajustes. A barra de cima e as cores seguem o site;
         os painéis de ajuste ainda são os do GPUI.</li>
   </ul>
-  <p class="texto">
-    Ainda <strong>só no app do balcão</strong>: o assistente de nova sessão em sete passos (no GPUI é o
-    formulário na lista), a bandeja do sistema e o catálogo próprio.
-  </p>
-
   <h3 id="gpui-atalhos">Atalhos</h3>
   <p class="texto">No Windows e no Linux, onde está <kbd>⌘</kbd> use <kbd>Ctrl</kbd>. As teclas soltas
      não valem enquanto se digita num campo.</p>
@@ -462,6 +253,37 @@ sh instalar.cmd</code></pre>
   </table>
   </div>
 
+  <h3 id="atualizar">Atualizar</h3>
+  <p class="texto">
+    <strong>Repita o passo da instalação</strong>: dois cliques no arquivo no Windows, ou a mesma linha no
+    Terminal. Feche o app antes (pela bandeja, <strong>Sair</strong>). A partir da segunda vez leva poucos
+    minutos. O que estava no catálogo continua lá.
+  </p>
+
+  <h3 id="opcoes">Opções</h3>
+  <div class="rolar">
+  <table>
+    <thead><tr><th>O que</th><th>macOS e Linux</th><th>Windows</th></tr></thead>
+    <tbody>
+      <tr><td>Só mostrar o que faria</td><td><code>… | sh -s -- --seco</code></td><td><code>set VLB_SECO=1</code></td></tr>
+      <tr><td>Outra versão (branch ou tag)</td><td><code>… | sh -s -- --versao v0.2.0</code></td><td><code>set VLB_VERSAO=v0.2.0</code></td></tr>
+      <tr><td>Outra pasta de instalação</td><td><code>… | sh -s -- --destino ~/Apps</code></td><td><code>set VLB_DESTINO=D:\Apps\VintageLightbox</code></td></tr>
+      <tr><td>Ver as opções</td><td><code>… | sh -s -- --ajuda</code></td><td>—</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p class="texto">
+    <code>…</code> é o <code>curl -fsSL … | sh</code> da instalação, com a opção no lugar do
+    <code>| sh</code> final. <strong>No Windows</strong>, as opções só valem se o arquivo for rodado
+    <strong>da mesma janela</strong> em que foram definidas (dois cliques não as enxergam): abra o
+    <strong>Prompt de Comando</strong>, digite o <code>set</code> e depois
+    <code>"%USERPROFILE%\Downloads\instalar-vintagelightbox-gpui.cmd"</code>.
+  </p>
+  <p class="texto">Para ler o instalador antes de rodar:</p>
+  <pre class="quebra"><code>curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox-gpui.cmd -o instalar.cmd
+less instalar.cmd
+sh instalar.cmd</code></pre>
+
   <h3 id="gpui-onde">Onde as coisas ficam</h3>
   <div class="rolar">
   <table>
@@ -486,22 +308,46 @@ sh instalar.cmd</code></pre>
   <table>
     <thead><tr><th>O que aparece</th><th>O que fazer</th></tr></thead>
     <tbody>
-      <tr><td><code>faltam as Command Line Tools do Xcode</code> (macOS)</td><td>Rode <code>xcode-select --install</code>, espere terminar e repita. O Xcode inteiro não é preciso.</td></tr>
+      <tr><td><code>falta o compilador Metal</code> (macOS, versão antiga do instalador)</td><td>É uma cópia antiga do instalador, de quando ele pedia o Xcode. Cole de novo a linha do <a href="#gpui-macos">macOS</a>, que não precisa dele.</td></tr>
+      <tr><td><code>faltam as Command Line Tools do Xcode</code> (macOS)</td><td>Rode <code>xcode-select --install</code>, espere terminar e repita a instalação.</td></tr>
+      <tr><td><code>command not found: curl</code> (Linux)</td><td>Instale o curl (<code>sudo apt install curl</code> ou <code>sudo dnf install curl</code>) e repita.</td></tr>
+      <tr><td><code>este Linux é imutável</code> (Fedora Silverblue, Kinoite, Bazzite)</td><td>Rode o comando <code>sudo rpm-ostree install …</code> que a mensagem mostra, reinicie o computador e repita.</td></tr>
+      <tr><td>O ícone da bandeja não aparece (Fedora e outros com GNOME)</td><td>Saia e entre de novo na sessão. Se continuar sumido, abra o app <strong>Extensões</strong> e ligue <strong>AppIndicator and KStatusNotifierItem Support</strong>.</td></tr>
+      <tr><td><code>não reconheci o gerenciador de pacotes</code> (Linux)</td><td>Instale à mão os pacotes que a mensagem lista e repita.</td></tr>
+      <tr><td><code>a instalação dos pacotes falhou</code> ou <code>não há 'sudo'</code> (Linux)</td><td>Esta conta não pode instalar programas: peça a quem administra a máquina para rodar o comando mostrado logo acima, e repita.</td></tr>
+      <tr><td><code>o Rust continua ausente ou anterior ao 1.89</code></td><td>Rode <code>rustup update stable</code> e repita.</td></tr>
+      <tr><td>O navegador bloqueou o download (Windows)</td><td>Na lista de downloads, escolha <strong>Manter</strong> (no Edge: <strong>…</strong> › Manter).</td></tr>
+      <tr><td><code>o winget … não existe nesta máquina</code> (Windows)</td><td>Instale o <a href="https://apps.microsoft.com/detail/9NBLGGH4NNS1">Instalador de Aplicativo</a> pela Microsoft Store e repita.</td></tr>
+      <tr><td><code>o g++ do MinGW continua faltando</code> (Windows)</td><td>Instale o <a href="https://www.msys2.org">MSYS2</a> e, no terminal dele, rode <code>pacman -S mingw-w64-x86_64-gcc</code>. Depois repita.</td></tr>
       <tr><td><code>o fxc.exe continua faltando</code> (Windows)</td><td>Instale o <a href="https://developer.microsoft.com/windows/downloads/windows-sdk/">Windows SDK</a>, ou defina <code>GPUI_FXC_PATH</code> com o caminho do <code>fxc.exe</code>, e repita.</td></tr>
       <tr><td><code>o windres do MinGW continua faltando</code> (Windows)</td><td>No terminal do MSYS2, rode <code>pacman -S mingw-w64-x86_64-binutils</code>. Depois repita.</td></tr>
+      <tr><td><code>o g++ do MinGW nao compilou um arquivo de teste</code> (Windows)</td><td>O instalador mostra a mensagem do compilador, atualiza o MSYS2 e reinstala o compilador sozinho. Se continuar (<code>o g++ do MinGW continua sem compilar</code>), abra o <strong>MSYS2 MINGW64</strong>, rode <code>pacman -Syu</code> duas vezes e repita.</td></tr>
+      <tr><td><code>a compilacao falhou de novo</code> (Windows)</td><td>O instalador já tentou duas vezes, a segunda com uma compilação de cada vez. A mensagem do compilador está acima, nas linhas <code>cargo:warning=</code>. Se ela fala em acesso negado, o antivírus está bloqueando: em <strong>Segurança do Windows › Proteção contra vírus e ameaças › Exclusões</strong>, adicione <code>%USERPROFILE%\.vintagelightbox</code> e <code>C:\msys64</code>, e repita.</td></tr>
+      <tr><td><code>a libclang continua faltando</code> (Windows)</td><td>No terminal do MSYS2, rode <code>pacman -S mingw-w64-x86_64-clang</code>. Depois repita.</td></tr>
+      <tr><td><code>Unable to find libclang</code> no meio da compilação (Linux)</td><td>Instale <code>clang</code> e <code>libclang-dev</code> (no Fedora, <code>clang</code> e <code>clang-devel</code>) e repita.</td></tr>
       <tr><td>A janela não abre (Linux)</td><td>Falta um driver Vulkan: instale <code>mesa-vulkan-drivers</code>. Com placa NVIDIA no Fedora, instale o driver da NVIDIA pelo RPM Fusion (<code>akmod-nvidia</code>) e reinicie.</td></tr>
-      <tr><td>Rust, winget, MSYS2, libclang ou pacotes do Linux</td><td>As mesmas saídas do <a href="#problemas">app do balcão</a>.</td></tr>
+      <tr><td>A compilação para por falta de espaço</td><td>Libere alguns GiB e repita.</td></tr>
+      <tr><td><code>signal: 9</code> ou <code>SIGKILL</code> no meio da compilação</td><td>Faltou memória. O instalador já compila menos coisas ao mesmo tempo em máquinas com pouca memória; se ainda assim falhar, feche outros programas e repita com uma compilação de cada vez: ponha <code>CARGO_BUILD_JOBS=1</code> antes do <code>sh</code> (<code>… | CARGO_BUILD_JOBS=1 sh</code>).</td></tr>
+      <tr><td>A janela do Windows fechou sozinha</td><td>Rode o arquivo de dentro do <strong>Prompt de Comando</strong> (veja <a href="#opcoes">Opções</a>) para ler a mensagem.</td></tr>
+      <tr><td>Abre um app diferente, ou o app não muda depois de atualizar</td><td>O app antigo continuava aberto: saia pela bandeja (<strong>Sair</strong>) e abra de novo. Só roda uma cópia por vez.</td></tr>
+      <tr><td>A tela do cliente abre preta</td><td>Atualize o app (repita a instalação).</td></tr>
+      <tr><td>A tela do cliente não vai para o outro monitor</td><td>Confira se o segundo monitor está <strong>estendido</strong>, e não espelhado. No Linux com Wayland o sistema não deixa o app escolher o monitor: arraste a janela uma vez.</td></tr>
+      <tr><td>A lista aparece vazia ou dá erro ao entrar</td><td>Confira a internet: as telas vêm do app, mas os dados vêm da RecordarFotos. As fotos já importadas continuam no catálogo.</td></tr>
     </tbody>
   </table>
   </div>
 
+
+  <p class="texto">
+    O mesmo guia, em texto, está em
+    <a href="https://github.com/alexkads/VintageLightbox/blob/dev/docs/INSTALAR-GPUI.md">INSTALAR-GPUI.md</a>.
+  </p>
+
   <h3 id="endereco-antigo">O endereço antigo do instalador</h3>
   <p class="texto">
     Quem já tem <code>instalar-vintagelightbox.cmd</code>, ou copiou o comando com esse nome, continua
-    recebendo o <strong>app do balcão (Tauri)</strong>: o arquivo antigo agora só baixa o instalador certo
-    e o roda. Para ele instalar o GPUI, use <code>VLB_APP=gpui</code>
-    (<code>curl … | VLB_APP=gpui sh</code>, ou <code>set VLB_APP=gpui</code> no Prompt de Comando antes
-    de rodar o arquivo). Para instalação nova, use os dois arquivos acima.
+    sendo atendido: o arquivo antigo só baixa o instalador acima e o roda. Para instalação nova, use o
+    arquivo acima.
   </p>
 
   <h2 id="pacotes">Pacotes prontos do GPUI (versão antiga)</h2>

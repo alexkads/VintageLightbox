@@ -2,7 +2,7 @@
 
 **Escrito em**: 15 de agosto de 2026
 **Estado**: ✅ **concluída em 17/ago/2026** — as cinco fases fecharam, e o `crates/ui` saiu do
-workspace (fase 5). O plano de Tauri ([09](09-MIGRACAO-TAURI.md)) foi avaliado e descartado.
+workspace (fase 5). O plano de Tauri foi avaliado e descartado.
 **Base**: código em `dev` na data acima, mais um **spike compilado e rodando** (§1)
 
 > 🚨 **Este documento deixou de ser plano e virou história em 17/ago/2026.** O objetivo do projeto
@@ -1669,5 +1669,4 @@ O terceiro **tem de falhar** conforme cada família ganhar código, e some quand
 | Estado de edição que sobrevive | [state.rs:20-78](../../crates/ui/src/state.rs#L20-L78) |
 | Caminho fixo do catálogo (fase 0) | [paths.rs](../../crates/infrastructure/src/paths.rs) |
 | Os 99 E2E que viram lista de paridade | [crates/ui/tests/](../../crates/ui/tests/) |
-| Avaliação do Tauri, descartada | [09-MIGRACAO-TAURI.md](09-MIGRACAO-TAURI.md) |
 | `gpui-component` | https://github.com/longbridge/gpui-component |

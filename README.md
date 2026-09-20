@@ -2,11 +2,9 @@
 
 Clone profissional do Adobe Lightroom desenvolvido em Rust com interface GPUI.
 
-> 🖥️ **Há dois apps, e cada um tem o seu instalador.** O do balcão é o **VintageLightbox (Tauri)**
-> (`instalar-vintagelightbox-tauri.cmd`, sem Xcode: **[docs/INSTALAR-TAURI.md](docs/INSTALAR-TAURI.md)**);
-> o editor nativo é o **VintageLightbox (Zed GPUI)** (`instalar-vintagelightbox-gpui.cmd`:
-> **[docs/INSTALAR-GPUI.md](docs/INSTALAR-GPUI.md)**). Na dúvida, é o Tauri. Veja a seção
-> **🖥️ Instalar**, mais abaixo.
+> 🖥️ **Um app, um instalador.** O **VintageLightbox (Zed GPUI)** se instala com
+> `instalar-vintagelightbox-gpui.cmd` (**[docs/INSTALAR-GPUI.md](docs/INSTALAR-GPUI.md)**). Veja a
+> seção **🖥️ Instalar**, mais abaixo.
 
 ## 🎯 Por que ele existe
 
@@ -184,19 +182,18 @@ VintageLightbox-Rust/
 - **Cross-Platform**: Funciona nativamente em macOS, Windows e Linux
 - **Atualiza sozinho**: fora das lojas, com pacote assinado e conferido antes de instalar
 
-## 🖥️ Instalar — um arquivo por app, e cada um instala tudo
+## 🖥️ Instalar — um arquivo, que instala tudo
 
-**Cada máquina compila o próprio app**, com um arquivo só por app, que roda em Windows, macOS e Linux
-e instala sozinho o que falta. Os dois apps convivem na mesma máquina. **Na dúvida, é o Tauri** — o
-app do balcão.
+**Cada máquina compila o próprio app**, com um arquivo só, que roda em Windows, macOS e Linux e
+instala sozinho o que falta.
 
-| | **VintageLightbox (Tauri)** — o do balcão | **VintageLightbox (Zed GPUI)** — o editor nativo |
-|---|---|---|
-| **Windows** (baixe e dê dois cliques) | **[instalar-vintagelightbox-tauri.cmd](https://github.com/alexkads/VintageLightbox/releases/download/instalador-tauri/instalar-vintagelightbox-tauri.cmd)** | **[instalar-vintagelightbox-gpui.cmd](https://github.com/alexkads/VintageLightbox/releases/download/instalador-tauri/instalar-vintagelightbox-gpui.cmd)** |
-| **macOS e Linux** (cole no Terminal) | `curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox-tauri.cmd \| sh` | `curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox-gpui.cmd \| sh` |
-| **No macOS precisa de** | Command Line Tools | Command Line Tools (os shaders Metal são compilados na abertura; o Xcode não é preciso) |
-| **Primeira vez** | 10 a 30 minutos | 15 a 40 minutos |
-| **Guia completo** | [docs/INSTALAR-TAURI.md](docs/INSTALAR-TAURI.md) | [docs/INSTALAR-GPUI.md](docs/INSTALAR-GPUI.md) |
+| | **VintageLightbox (Zed GPUI)** |
+|---|---|
+| **Windows** (baixe e dê dois cliques) | **[instalar-vintagelightbox-gpui.cmd](https://github.com/alexkads/VintageLightbox/releases/download/instalador-tauri/instalar-vintagelightbox-gpui.cmd)** |
+| **macOS e Linux** (cole no Terminal) | `curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox-gpui.cmd \| sh` |
+| **No macOS precisa de** | Command Line Tools (os shaders Metal são compilados na abertura; o Xcode não é preciso) |
+| **Primeira vez** | 15 a 40 minutos |
+| **Guia completo** | [docs/INSTALAR-GPUI.md](docs/INSTALAR-GPUI.md) |
 
 O mesmo passo a passo, com as telas e os atalhos, está em **https://alexkads.github.io/VintageLightbox/**.
 
@@ -205,7 +202,7 @@ da tabela acima. O computador pode ser usado enquanto isso.
 
 ### Windows 10 e 11
 
-1. Baixe o `.cmd` do app, na tabela acima. Se o navegador disser que o arquivo pode ser perigoso,
+1. Baixe o `.cmd`, na tabela acima. Se o navegador disser que o arquivo pode ser perigoso,
    escolha **Manter** (no Edge: **…** › Manter).
 2. Na pasta **Downloads**, dê dois cliques no arquivo.
 3. Se aparecer *"O Windows protegeu o computador"*, clique em **Mais informações** e depois em
@@ -213,11 +210,11 @@ da tabela acima. O computador pode ser usado enquanto isso.
 4. Se o Windows perguntar se permite que um programa faça alterações, clique em **Sim**: são as
    ferramentas que o instalador põe na máquina.
 5. Espere a janela preta terminar e aperte qualquer tecla.
-6. Abra pelo **Menu Iniciar**: *VintageLightbox (Tauri)* ou *VintageLightbox (Zed GPUI)*.
+6. Abra pelo **Menu Iniciar**: *VintageLightbox (Zed GPUI)*.
 
-O instalador põe sozinho, pelo `winget`: o **WebView2** (já vem no Windows 11), o **Rust** `-gnu` e o
-**MSYS2** com o compilador, a libclang e o `windres`. O do GPUI põe também o **Windows SDK**, de onde
-vem o `fxc.exe` que compila os shaders. O Visual Studio **não** é preciso. O arquivo baixado não
+O instalador põe sozinho, pelo `winget`: o **Rust** `-gnu`, o **MSYS2** com o compilador, a libclang
+e o `windres`, e o **Windows SDK**, de onde vem o `fxc.exe` que compila os shaders. O Visual Studio
+**não** é preciso. O arquivo baixado não
 envelhece: ao rodar, ele busca a versão mais nova de si mesmo antes de começar.
 
 ### macOS
@@ -241,11 +238,11 @@ concedidas continuam valendo; um `VintageLightbox.app` antigo não é apagado.
 3. Espere aparecer *"instalado"* e abra pelo menu de aplicativos.
 
 Funciona com **`apt`** (Ubuntu, Debian, Mint), **`dnf`** (Fedora) e **`pacman`** (Arch, Manjaro): o
-instalador põe o compilador, a libclang, o WebKitGTK (Tauri) ou X11/Wayland/Vulkan e companhia (GPUI),
-e o Rust — um Rust antigo da distribuição fica de lado. Em outra distribuição, ele lista o que instalar
+instalador põe o compilador, a libclang, o X11/Wayland/Vulkan e companhia, e o Rust — um Rust antigo
+da distribuição fica de lado. Em outra distribuição, ele lista o que instalar
 à mão. Sem `curl`, instale-o antes (`sudo apt install curl` ou `sudo dnf install curl`).
 
-- **GPUI:** sem um driver **Vulkan** (Mesa) a janela não abre, mesmo com tudo compilado.
+- Sem um driver **Vulkan** (Mesa) a janela não abre, mesmo com tudo compilado.
 - **Fedora Workstation (GNOME):** o instalador põe e liga a extensão AppIndicator para o ícone da
   bandeja; saia e entre de novo na sessão para ele aparecer.
 - **Fedora Silverblue, Kinoite, Bazzite:** o sistema não aceita `dnf install`. O instalador para e
@@ -270,39 +267,37 @@ continua onde estava.
 
 `…` é o `curl -fsSL …` da instalação. **No Windows**, as variáveis só valem se o arquivo for rodado da
 mesma janela em que foram definidas (dois cliques não as enxergam): abra o **Prompt de Comando**, digite
-o `set` e depois `"%USERPROFILE%\Downloads\instalar-vintagelightbox-tauri.cmd"`.
+o `set` e depois `"%USERPROFILE%\Downloads\instalar-vintagelightbox-gpui.cmd"`.
 
 Para ler o instalador antes de rodar:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox-tauri.cmd -o instalar.cmd
+curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox-gpui.cmd -o instalar.cmd
 less instalar.cmd
 sh instalar.cmd
 ```
 
 ### Onde as coisas ficam
 
-Troque `tauri` por `gpui` (e `Tauri` por `GPUI`) para o editor nativo.
-
 | | macOS | Linux | Windows |
 |---|---|---|---|
-| O app | `/Applications` | `~/.local/bin/vintagelightbox-tauri` | `%LOCALAPPDATA%\Programs\VintageLightbox-Tauri` |
-| O catálogo | Imagens › VintageLightbox, na pasta pessoal (`Catalogo Tauri` ou `VintageLightbox Catalog`) | idem | idem |
-| Cache do compilador (alguns GiB) | `~/.vintagelightbox/target-tauri` | idem | `%USERPROFILE%\.vintagelightbox\target-tauri` |
-| Código baixado | `~/.vintagelightbox/fonte-tauri` | idem | `%USERPROFILE%\.vintagelightbox\fonte-tauri` |
+| O app | `/Applications` | `~/.local/bin/vintagelightbox-gpui` | `%LOCALAPPDATA%\Programs\VintageLightbox-GPUI` |
+| O catálogo | Imagens › VintageLightbox, na pasta pessoal (`VintageLightbox Catalog`) | idem | idem |
+| Cache do compilador (alguns GiB) | `~/.vintagelightbox/target-gpui` | idem | `%USERPROFILE%\.vintagelightbox\target-gpui` |
+| Código baixado | `~/.vintagelightbox/fonte-gpui` | idem | `%USERPROFILE%\.vintagelightbox\fonte-gpui` |
 
 Apagar a pasta `.vintagelightbox` é seguro: a próxima atualização só demora mais.
 
 ### Desinstalar
 
 - **macOS:** arraste o app de Aplicativos para o Lixo.
-- **Windows:** apague a pasta `%LOCALAPPDATA%\Programs\VintageLightbox-Tauri` (ou `-GPUI`) e o atalho
+- **Windows:** apague a pasta `%LOCALAPPDATA%\Programs\VintageLightbox-GPUI` e o atalho
   do Menu Iniciar (botão direito › Abrir local do arquivo › apagar).
-- **Linux (Tauri):**
+- **Linux:**
   ```bash
-  rm ~/.local/bin/vintagelightbox-tauri \
-     ~/.local/share/applications/vintagelightbox-tauri.desktop \
-     ~/.local/share/icons/hicolor/256x256/apps/vintagelightbox-tauri.png
+  rm ~/.local/bin/vintagelightbox-gpui \
+     ~/.local/share/applications/vintagelightbox-gpui.desktop \
+     ~/.local/share/icons/hicolor/256x256/apps/vintagelightbox-gpui.png
   ```
 
 A pasta `.vintagelightbox` pode ir junto. ⚠️ **O catálogo, só depois de conferir que a bandeja diz que
@@ -333,27 +328,16 @@ removidos à parte.
 | A tela do cliente não vai para o outro monitor | Confira se o monitor está **estendido**, e não espelhado. No Wayland, arraste a janela uma vez. |
 | A lista aparece vazia ou dá erro ao entrar | Confira a internet: os dados vêm da RecordarFotos. As fotos importadas continuam no catálogo. |
 
-### Diagnóstico
-
-Para ver o que o computador oferece ao app (GPU, armazenamento, monitores), feche-o e abra com
-`--diagnostico` — aparece uma janela com um relatório para copiar e mandar:
-
-| | |
-|---|---|
-| macOS | `open -a "VintageLightbox (Tauri)" --args --diagnostico` |
-| Linux | `~/.local/bin/vintagelightbox-tauri --diagnostico` |
-| Windows | `"%LOCALAPPDATA%\Programs\VintageLightbox-Tauri\VintageLightbox-Tauri.exe" --diagnostico` |
-
 ### O nome antigo e o gerador
 
-⚠️ **O nome antigo, `instalar-vintagelightbox.cmd`, continua funcionando e instala o Tauri**, como
-sempre instalou: ele só baixa o `-tauri.cmd` e o roda. Com `VLB_APP=gpui` instala o GPUI
-(`curl … | VLB_APP=gpui sh`).
+⚠️ **O nome antigo, `instalar-vintagelightbox.cmd`, continua funcionando**: ele só baixa o
+`-gpui.cmd` e o roda.
 
-🔧 Os dois `.cmd` são **gerados** de `scripts/instalador-modelo.cmd.in` por
-`python3 scripts/gerar-instaladores.py` (`--conferir` só diz se estão em dia); os testes são
-`python3 scripts/testar-instalador.py`. O link do Windows aponta para o Release `instalador-tauri`, que
-é atualizado à mão depois de mudar o modelo:
+🔧 O `.cmd` é **gerado** de `scripts/instalador-modelo.cmd.in` por
+`python3 scripts/gerar-instaladores.py` (`--conferir` só diz se está em dia); os testes são
+`python3 scripts/testar-instalador.py`. O link do Windows aponta para um Release — cuja tag ainda se
+chama `instalador-tauri`, de quando havia outra interface, e renomeá-la quebraria os links já
+copiados — que é atualizado à mão depois de mudar o modelo:
 
 ```bash
 gh release upload instalador-tauri scripts/instalar-vintagelightbox*.cmd --clobber -R alexkads/VintageLightbox
@@ -362,11 +346,10 @@ gh release upload instalador-tauri scripts/instalar-vintagelightbox*.cmd --clobb
 Mesmo um `.cmd` antigo do Release roda a versão nova: ao abrir, ele baixa a do branch `dev` e só usa a
 própria cópia se estiver sem internet (ou com `VLB_SECO=1`).
 
-## ⬇️ Baixar o editor antigo (GPUI)
+## ⬇️ Baixar os pacotes publicados
 
-> ⚠️ **Não é o app do balcão.** Para o pós-venda, use o VintageLightbox (Tauri), na seção acima. E
-> para compilar o GPUI em qualquer sistema, o caminho novo é o `instalar-vintagelightbox-gpui.cmd`,
-> também acima; o que segue são os pacotes publicados e o `instalar.sh`, que é só do macOS.
+> ⚠️ **O caminho recomendado é o `instalar-vintagelightbox-gpui.cmd`, na seção acima**, que roda nos
+> três sistemas. O que segue são os pacotes publicados e o `instalar.sh`, que é só do macOS.
 
 **https://alexkads.github.io/VintageLightbox/** — a versão publicada hoje só tem o `.dmg` do macOS
 (Intel e Apple Silicon).
@@ -380,7 +363,7 @@ cada atualização é conferida por assinatura antes de ser instalada.
 >
 > O truque antigo de *botão direito → Abrir* **não funciona a partir do macOS 15**.
 
-### Ou compile o editor antigo na sua máquina — e o aviso do macOS não aparece
+### Ou compile na sua máquina — e o aviso do macOS não aparece
 
 ```bash
 curl -fsSL https://alexkads.github.io/VintageLightbox/instalar.sh | sh

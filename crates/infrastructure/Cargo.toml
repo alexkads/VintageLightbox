@@ -37,8 +37,7 @@ base64 = "0.22"
 # 🚨 A feature `shellexecute-on-windows` não é enfeite: sem ela o `open` cai no
 # `explorer.exe`, e o que o balcão via era o **Explorador de Arquivos** no lugar
 # do navegador. Com ela, o caminho no Windows é a `ShellExecuteExW` — a mesma do
-# duplo clique. A feature também vale para o `tauri-plugin-opener`, que usa este
-# mesmo crate: as features se unificam no workspace.
+# duplo clique.
 open = { version = "5", features = ["shellexecute-on-windows"] }
 
 # O motor de revelação: `Ajustes`, o WGSL, `Motor`, o enquadramento e o JPEG.

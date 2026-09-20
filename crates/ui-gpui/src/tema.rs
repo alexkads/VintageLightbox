@@ -3,13 +3,12 @@
 //! # As cores são as do `recordarfotos.com.br`, nos dois modos
 //!
 //! Até 2026-09-17 este app tinha um tema próprio, o "Vintage Dark", travado no
-//! escuro, com um azul de ação (`#4a9eff`) que o site não usa. O app Tauri
-//! mostra a tela do site, com o `globals.css` dele, e o dono pediu que o GPUI
-//! ficasse igual (*"deixar o crates/ui-gpui lindo! Assim como fizemos em
-//! crates/app-tauri!"*). Por isso as duas paletas abaixo são os tokens do
-//! shadcn do site (`frontend/src/app/globals.css`), convertidos de oklch para
-//! hexadecimal, e o operador escolhe **Claro, Escuro ou Sistema** no menu da
-//! conta, como no site.
+//! escuro, com um azul de ação (`#4a9eff`) que o site não usa. O dono pediu que
+//! o GPUI ficasse igual ao site (*"deixar o crates/ui-gpui lindo!"*). Por isso
+//! as duas paletas abaixo são os tokens do shadcn do site
+//! (`frontend/src/app/globals.css`), convertidos de oklch para hexadecimal, e o
+//! operador escolhe **Claro, Escuro ou Sistema** no menu da conta, como no
+//! site.
 //!
 //! | Token do site | Claro | Escuro |
 //! |---|---|---|

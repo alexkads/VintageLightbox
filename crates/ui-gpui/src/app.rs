@@ -5,8 +5,8 @@
 //! podia abrir a Biblioteca direto. A partir de duas, alguém precisa saber qual
 //! está no ar — e esse alguém não pode ser nenhuma das duas.
 //!
-//! 🎨 **A moldura é a do dashboard do site** desde 2026-09-17 (`painel.rs`), a
-//! mesma que o app Tauri mostra: até ali havia uma barra de botões no topo
+//! 🎨 **A moldura é a do dashboard do site** desde 2026-09-17 (`painel.rs`):
+//! até ali havia uma barra de botões no topo
 //! (Sessões, Revelação, Impressão, Balcão, Segunda tela, Configurações), que o
 //! site nunca teve. Os gestos dela continuam, cada um no lugar em que o site o
 //! tem: a revelação e a tela do cliente na barra da galeria, o espaço do cache
@@ -410,7 +410,7 @@ pub struct Aplicativo {
     _pedidos_da_nova: Vec<gpui::Subscription>,
     // ── A moldura (`painel.rs`) ───────────────────────────────────────────
     /// O menu lateral aberto (256 px) ou recolhido em ícones. Nasce recolhido,
-    /// como no app Tauri (`defaultOpen={false}`).
+    /// como no site (`defaultOpen={false}`).
     menu_aberto: bool,
     /// O menu da conta (tema e Sair) está aberto.
     menu_da_conta: bool,
@@ -2161,8 +2161,8 @@ impl Aplicativo {
                     self.revelacao
                         .update(cx, |tela, cx| tela.definir_gerando_jpeg(false, cx));
                     self.contar_o_salvar(true, cx);
-                    // 🔑 **Nada some em silêncio** (G7 do app Tauri): a recusa
-                    // fica no canto até alguém olhar, além do aviso na tela — e
+                    // 🔑 **Nada some em silêncio** (G7): a recusa fica no
+                    // canto até alguém olhar, além do aviso na tela — e
                     // agora com o **nome do arquivo**, que é o que permite ao
                     // operador achar a foto e repetir o gesto nela.
                     let recusa = format!(
@@ -2176,8 +2176,8 @@ impl Aplicativo {
                     self.revelacao
                         .update(cx, |tela, cx| tela.definir_gerando_jpeg(false, cx));
                     self.contar_o_salvar(true, cx);
-                    // 🔑 **Nada some em silêncio** (G7 do app Tauri): a recusa
-                    // fica no canto até alguém olhar, além do aviso na tela.
+                    // 🔑 **Nada some em silêncio** (G7): a recusa fica no
+                    // canto até alguém olhar, além do aviso na tela.
                     self.recusas.push(erro.clone());
                     self.avisar_falha(erro, cx);
                 }
@@ -7871,7 +7871,7 @@ mod testes {
     }
 
     /// Um download que falha **não é recusa do site**: não vai para o canto das
-    /// recusas (que é dos envios, como no Tauri) e não conta como resposta do
+    /// recusas (que é dos envios) e não conta como resposta do
     /// "Salvar na galeria" — antes, uma cópia que falhasse no meio do lote
     /// andava o "Salvando k/N" como se fosse uma revelação recusada.
     #[gpui::test]

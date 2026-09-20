@@ -211,7 +211,7 @@ impl Entrada {
 /// A capa do estúdio, com as cores e as medidas de
 /// `frontend/src/components/marca/capa-do-estudio.tsx` (dono, 2026-09-16: a
 /// entrada *"tem que ser muito linda com uma imagem vintage de fundo"*). É a
-/// mesma capa da entrada do app Tauri e de `/autorizar-app`.
+/// mesma capa de `/autorizar-app`.
 ///
 /// 🔑 **Nada vem da rede.** A foto (já com o filtro sépia do site aplicado,
 /// porque o GPUI não tem filtro de imagem) e o selo estão embutidos

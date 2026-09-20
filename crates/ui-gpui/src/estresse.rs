@@ -1554,7 +1554,7 @@ fn percorrer_a_sessao(cx: &mut TestAppContext, tamanhos: &[usize], afirmar_tempo
 ///
 /// Dono, 18/set/2026: *"da forma que ficou eu não tenho a galeria liberada para
 /// ir mostrando as fotos para o cliente e isso deixa a UX muito ruim. Mas na
-/// WEB e no Tauri eu consigo!"*
+/// WEB eu consigo!"*
 ///
 /// O cenário é o balcão de verdade: 300 fotos na galeria, o operador com vinte
 /// marcadas e o cliente ao lado olhando, e **duzentas** revelações voltando do

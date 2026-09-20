@@ -1,5 +1,5 @@
 //! O assistente da nova sessão, em sete etapas — a rota
-//! `/dashboard/sessoes-fotograficas/nova` do site, que o app Tauri mostra.
+//! `/dashboard/sessoes-fotograficas/nova` do site.
 
 pub mod amostras;
 pub mod associacoes;

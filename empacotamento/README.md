@@ -60,9 +60,8 @@ scripts/empacotar.sh                 scripts/publicar.py            o app instal
 | `macos/entitlements.plist` | Os entitlements do Hardened Runtime, um por um com o motivo |
 | `linux/Dockerfile` | A toolchain Linux inteira, para o `.deb` e o `.AppImage` saírem daqui |
 
-O empacotador é o [`cargo-packager`](https://github.com/crabnebula-dev/cargo-packager) — o
-`tauri-bundler` extraído para servir app que não é Tauri —, e o updater do app é o
-`cargo-packager-updater`, do mesmo autor. É por isso que o `.sig` que sai daqui é exatamente o que o
+O empacotador é o [`cargo-packager`](https://github.com/crabnebula-dev/cargo-packager), e o
+updater do app é o `cargo-packager-updater`, do mesmo autor. É por isso que o `.sig` que sai daqui é exatamente o que o
 app sabe conferir.
 
 ```bash
@@ -373,10 +372,6 @@ Dois caminhos, e eles não competem:
 ⚠️ **O `.app` e o `.dmg` gerados com `--assinar-aqui` não se distribuem.** Eles são para a máquina
 que gera e confere — que é exatamente onde o incômodo aparece, porque é lá que se instala versão
 nova dez vezes por dia.
-
-⚠️ **O app Tauri tem o mesmo item de chaveiro e o mesmo problema**, com serviço próprio
-(`…vintagelightbox.tauri`, ver `CofreDoSistema::com_servico`): o bundler dele também lê
-`APPLE_SIGNING_IDENTITY`.
 
 ## Trocar o ícone
 

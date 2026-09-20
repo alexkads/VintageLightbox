@@ -1,7 +1,7 @@
 //! Ferramentas de depuração: fotografar a janela e seguir um roteiro.
 //!
-//! São as mesmas duas do app Tauri (`app-tauri/src/depuracao.rs`), para o
-//! desenho das duas interfaces poder ser comparado lado a lado:
+//! Duas, para o desenho da janela poder ser conferido sem ninguém na frente
+//! da tela:
 //!
 //! - **`VLB_FOTOS=pasta`** grava `<pasta>/<nome>.png` com o que a janela mostra,
 //!   a cada passo `foto <nome>` do roteiro. O `screencapture` não tem permissão
@@ -298,26 +298,21 @@ mod mac {
 /// 🔧 Cada recompilação é outro binário para o macOS, que pergunta de novo se
 /// libera o item do chaveiro — e um roteiro não tem quem clique. Com
 /// `VLB_SESSAO_EM_ARQUIVO=1` (só em depuração), a sessão fica em
-/// `sessao-dev.json`, com permissão só do usuário. Sem o arquivo, ele traz a
-/// cópia do app Tauri de depuração, que o backend aceita igual: o token de
-/// renovação não é invalidado ao ser usado.
+/// `sessao-dev.json`, com permissão só do usuário.
 pub struct CofreEmArquivo {
     pub arquivo: std::path::PathBuf,
-    /// De onde trazer a sessão quando ainda não há arquivo.
-    pub herdar_de: Option<std::path::PathBuf>,
 }
 
 impl CofreEmArquivo {
-    /// O arquivo ao lado dos dados do app, herdando do Tauri de depuração.
+    /// O arquivo ao lado dos dados do app.
     ///
-    /// 🔧 **`VLB_SESSAO_ARQUIVO=<caminho>` troca o arquivo**, e nada é herdado:
-    /// é como se abre uma sessão de teste (a da pilha local, por exemplo) sem
-    /// passar por cima da que já está guardada.
+    /// 🔧 **`VLB_SESSAO_ARQUIVO=<caminho>` troca o arquivo**: é como se abre uma
+    /// sessão de teste (a da pilha local, por exemplo) sem passar por cima da
+    /// que já está guardada.
     pub fn padrao() -> Self {
         if let Some(caminho) = std::env::var_os("VLB_SESSAO_ARQUIVO") {
             return Self {
                 arquivo: std::path::PathBuf::from(caminho),
-                herdar_de: None,
             };
         }
         let dados = infrastructure::paths::AppPaths::home_dir()
@@ -325,11 +320,6 @@ impl CofreEmArquivo {
             .join("Application Support");
         Self {
             arquivo: dados.join("VintageLightbox").join("sessao-dev.json"),
-            herdar_de: Some(
-                dados
-                    .join("br.com.recordarfotos.vintagelightbox.tauri")
-                    .join("sessao-dev.json"),
-            ),
         }
     }
 
@@ -368,14 +358,7 @@ impl domain::services::pos_venda::CofreDeSessao for CofreEmArquivo {
     }
 
     fn ler(&self) -> Option<domain::services::pos_venda::Sessao> {
-        let bytes = match std::fs::read(&self.arquivo) {
-            Ok(bytes) => bytes,
-            Err(_) => {
-                let bytes = std::fs::read(self.herdar_de.as_ref()?).ok()?;
-                self.gravar(&bytes);
-                bytes
-            }
-        };
+        let bytes = std::fs::read(&self.arquivo).ok()?;
         let g: SessaoEmArquivo = serde_json::from_slice(&bytes).ok()?;
         Some(domain::services::pos_venda::Sessao {
             access_token: g.access_token,
@@ -396,32 +379,21 @@ mod testes {
     use domain::services::pos_venda::{CofreDeSessao, Sessao};
 
     #[test]
-    fn o_cofre_de_arquivo_herda_uma_vez_e_esquece() {
+    fn o_cofre_de_arquivo_guarda_le_e_esquece() {
         let pasta = tempfile::tempdir().unwrap();
-        let origem = pasta.path().join("tauri.json");
-        std::fs::write(
-            &origem,
-            br#"{"access_token":"a","refresh_token":"r","access_vence_em":1,"refresh_vence_em":2}"#,
-        )
-        .unwrap();
         let cofre = CofreEmArquivo {
             arquivo: pasta.path().join("gpui").join("sessao-dev.json"),
-            herdar_de: Some(origem.clone()),
         };
-        assert_eq!(cofre.ler().unwrap().refresh_token, "r");
-        assert!(cofre.arquivo.exists(), "a cópia fica no arquivo do GPUI");
+        assert!(cofre.ler().is_none(), "sem arquivo não há sessão");
         cofre.guardar(&Sessao {
             access_token: "b".into(),
             refresh_token: "s".into(),
             access_vence_em: 3,
             refresh_vence_em: 4,
         });
+        assert!(cofre.arquivo.exists(), "o arquivo nasce na primeira gravação");
         assert_eq!(cofre.ler().unwrap().access_token, "b");
-        let origem_intacta = std::fs::read_to_string(&origem).unwrap();
-        assert!(
-            origem_intacta.contains("\"a\""),
-            "a sessão do Tauri não muda"
-        );
+        assert_eq!(cofre.ler().unwrap().refresh_token, "s");
         cofre.esquecer();
         assert!(!cofre.arquivo.exists());
     }

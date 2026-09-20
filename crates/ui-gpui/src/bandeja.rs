@@ -1,10 +1,10 @@
 //! O ícone na bandeja — a barra de menus no macOS, a área de notificação no
-//! Windows e no Linux —, com a mesma janelinha do app Tauri
-//! (`app-tauri/src/bandeja.rs`): a conta, os envios, o espaço do catálogo e os
-//! botões "Abrir a pasta do catálogo", "Abrir o VintageLightbox" e "Sair".
+//! Windows e no Linux —, com a janelinha que mostra a conta, os envios, o
+//! espaço do catálogo e os botões "Abrir a pasta do catálogo", "Abrir o
+//! VintageLightbox" e "Sair".
 //!
-//! 🔑 **O mesmo `tray-icon` que o Tauri usa por dentro**, na mesma versão do
-//! lockfile: não entra dependência nova na árvore, só uma aresta.
+//! 🔑 **O `tray-icon` na mesma versão do lockfile**: não entra dependência
+//! nova na árvore, só uma aresta.
 //!
 //! 🚨 **Cada sistema quer o ícone numa thread diferente.**
 //! - macOS: na thread principal, com o laço do AppKit já rodando — é a do GPUI.
@@ -69,7 +69,7 @@ enum Ordem {
 /// Os itens da janelinha, para trocar o texto sem remontar o menu.
 ///
 /// ⚠️ Um item de menu não se esconde: as linhas são fixas e dizem "nenhuma"
-/// quando não há o que contar (a mesma regra do Tauri).
+/// quando não há o que contar.
 struct Itens {
     cabecalho: MenuItem,
     conta: MenuItem,

@@ -41,11 +41,6 @@ members = [
     # um comando e traz os 21.352 LOC de volta inteiros; a referência de
     # paridade virou documento, e o código continua no histórico.
     "crates/ui-gpui",
-    # A segunda interface, em Tauri (2026-09-16): uma janela que abre
-    # `/dashboard/sessoes-fotograficas` do site, com uma ponte curta para o que só
-    # o desktop faz. **Não substitui o `ui-gpui`**: os dois existem sempre, e um
-    # valida o outro (recordarfotos-e-commerce/docs/DESKTOP_TAURI.md, D7).
-    "crates/app-tauri",
 ]
 
 [workspace.package]
@@ -137,8 +132,8 @@ opt-level = 2
 opt-level = 2
 
 # O codificador de JPEG: um laço de pixel como os de cima. Sem isto, o RAW
-# revelado pelo app Tauri em `cargo run` levava segundos só no JPEG, e o número
-# parecia custo da LibRaw.
+# revelado em `cargo run` levava segundos só no JPEG, e o número parecia custo
+# da LibRaw.
 [profile.dev.package.foto-codec]
 opt-level = 3
 

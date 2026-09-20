@@ -1,10 +1,8 @@
-//! O que a bandeja diz, linha por linha — as frases do app Tauri
-//! (`app-tauri/src/bandeja.rs`, `linhas`), para os dois apps falarem igual.
+//! O que a bandeja diz, linha por linha.
 //!
-//! ⚠️ **Duas linhas do Tauri não existem aqui, e é de propósito**: "Conexão:
-//! nova tentativa em N s" e o "Enviar agora". Lá a fila mora no catálogo e tenta
-//! de novo sozinha; aqui cada pedido sai uma vez e a falha vira recusa com
-//! motivo. Mostrar um relógio de nova tentativa que não existe seria mentir.
+//! ⚠️ **Não há "Conexão: nova tentativa em N s" nem "Enviar agora", e é de
+//! propósito**: aqui cada pedido sai uma vez e a falha vira recusa com motivo.
+//! Mostrar um relógio de nova tentativa que não existe seria mentir.
 
 use crate::menu::NOME;
 
@@ -29,7 +27,7 @@ pub struct Retrato {
 }
 
 impl Retrato {
-    /// Há trabalho que fechar a janela interromperia (o G9 do Tauri).
+    /// Há trabalho que fechar a janela interromperia (G9).
     ///
     /// 🔑 **Só o envio conta.** Miniatura refeita é cache: some com o app e
     /// volta na próxima abertura, sem perda nenhuma.
@@ -205,7 +203,7 @@ mod testes {
     }
 
     #[test]
-    fn cada_linha_conta_a_sua_parte_com_as_frases_do_tauri() {
+    fn cada_linha_conta_a_sua_parte() {
         let r = Retrato {
             subindo: 5,
             sem_nota: 3,
