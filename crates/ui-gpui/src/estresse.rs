@@ -784,6 +784,27 @@ fn estresse_a_biblioteca_com_dez_mil_fotos(cx: &mut TestAppContext) {
         "ao fim, subiu o ensaio inteiro — classificado ou não"
     );
 
+    // 🚨 **Entrar de novo não manda nada de novo** — a versão daqui da
+    // invariante que a web escreveu como *"a fila nunca escolhe o que o envio
+    // recusa"* (armadilha 72 do `task.md`). Lá, um item que a fila escolhe e o
+    // envio devolve vira laço; aqui, um ensaio que a releitura reenfileira vira
+    // 10.000 envios repetidos. Nos dois casos o sintoma é o mesmo: a fila
+    // trabalhando para sempre sem erro nenhum.
+    cronometrar("entrar na sessão de novo", Duration::from_secs(5), || {
+        janela
+            .update(cx, |app, _window, cx| app.entrar_na_sessao("g1".into(), cx))
+            .expect("a janela aberta");
+    });
+    for _ in 0..10 {
+        cx.executor().advance_clock(Duration::from_millis(300));
+        cx.run_until_parked();
+    }
+    assert_eq!(
+        publicador.subidas().len(),
+        N,
+        "entrar na sessão de novo reenfileirou o ensaio — cada foto sobe uma vez só"
+    );
+
     // 🚨 **A Biblioteca continua operável durante o lote** (dono, 18/set/2026:
     // *"funcionou, mas o usuário não consegue operar a biblioteca durante a
     // atualização das fotos"*). Reler o acervo é varrer o catálogo e refazer a
