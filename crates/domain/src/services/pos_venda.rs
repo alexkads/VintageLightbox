@@ -195,6 +195,9 @@ pub struct GaleriaDoPainel {
     /// `None` na galeria de uma API anterior ao campo — e isso é dito na soma,
     /// em vez de virar zero calado.
     pub totais: Option<TotaisDaGaleria>,
+    /// O que o caixa cobrou desta sessão (2026-09-20). `None` = a API não
+    /// soube dizer; `Some` com `vendas: 0` = não passou pelo caixa.
+    pub caixa: Option<PagoNoCaixa>,
     /// A **receita padrão** da sessão: a predefinição escolhida na etapa 2 do
     /// assistente (`sistema:<chave>` ou o id do banco).
     ///
@@ -243,6 +246,23 @@ pub struct ContagemDeFotos {
 pub struct TotaisDaGaleria {
     pub balcao: String,
     pub pos_venda: String,
+}
+
+/// Quanto o **caixa do balcão** cobrou desta sessão — o `PagoNoCaixa` do site.
+///
+/// ⚠️ **Centavos inteiros aqui, e decimal em texto no vizinho**
+/// ([`TotaisDaGaleria`]): é assim que a API devolve os dois, porque o caixa
+/// fala centavos em toda parte e os totais vêm de `Decimal`. Converter um dos
+/// dois no caminho esconderia a diferença até alguém somá-los.
+///
+/// 🔑 **`vendas: 0` é um fato**: a sessão não passou pelo caixa, e é dele que
+/// sai o "Fechar venda" da lista. Quem não sabe é o `Option` de fora.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PagoNoCaixa {
+    pub vendas: u32,
+    pub bruto_centavos: i64,
+    pub estornado_centavos: i64,
+    pub liquido_centavos: i64,
 }
 
 /// O link que abre a galeria **sem senha**.

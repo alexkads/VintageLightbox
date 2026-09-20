@@ -186,6 +186,34 @@ fn a_retencao_le_recusa_e_grava(cx: &mut TestAppContext) {
     e.app(cx, |app, _w, _cx| assert_eq!(app.tela(), Tela::Sessoes));
 }
 
+/// 🎬 💵 **"Fechar venda" na coluna do caixa** leva ao Caixa com a sessão já
+/// escolhida — o `/dashboard/caixa?sessao={id}` do site.
+///
+/// 🔑 É a junta que nenhum teste de unidade pega: a decisão da célula está no
+/// `biblioteca-core` e a navegação, na raiz. Entre as duas há um evento, e
+/// evento sem assinante falha calado.
+#[gpui::test]
+fn fechar_venda_na_lista_abre_o_caixa_na_sessao(cx: &mut TestAppContext) {
+    let e = abrir_o_app(cx, Cenario::default());
+    e.entrar_na_conta(cx);
+
+    e.app(cx, |app, _w, cx| {
+        assert_eq!(app.tela(), Tela::Sessoes);
+        app.sessoes.update(cx, |_tela, cx| {
+            cx.emit(crate::sessoes::tela::FecharVendaPedida(GALERIA.into()))
+        });
+    });
+    e.esperar(cx);
+    e.app(cx, |app, _w, cx| {
+        assert_eq!(app.tela(), Tela::Caixa, "o convite leva ao caixa");
+        assert_eq!(
+            app.caixa.read(cx).sessao_escolhida(),
+            Some(GALERIA),
+            "e com a sessão já escolhida: quem clicou não a procura de novo"
+        );
+    });
+}
+
 /// 🎬 **O caixa da rota**: o menu leva a ele, ele carrega o estúdio, os
 /// funcionários e o catálogo, e escolher uma sessão lá abre a galeria dela —
 /// cuja volta é para o caixa.
