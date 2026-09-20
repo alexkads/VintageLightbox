@@ -83,6 +83,15 @@ pub struct Foto {
     /// galeria quando a coluna nasceu, e o recorte que as encontra — que é
     /// justamente para o operador as classificar ou tirar.
     pub nota: Option<u8>,
+    /// A foto foi **rejeitada** — a tecla `X` (contrato C21).
+    ///
+    /// 🚨 Rejeitar **marca**: a foto some da galeria do cliente, deixa de ser
+    /// comprável e não vai ao balcão — e continua inteira no acervo. Nada é
+    /// apagado por este campo.
+    ///
+    /// ⚠️ Distinto de `nota == None`, que é "ainda não passou pela curadoria" e
+    /// sobe e vende normalmente (C20, C22).
+    pub rejeitada: bool,
     pub ordem: i64,
 }
 
@@ -328,6 +337,7 @@ mod testes {
 
     fn foto(id: &str, estado: Estado, apagada: bool) -> Foto {
         Foto {
+            rejeitada: false,
             id: id.to_string(),
             arquivo: format!("{id}.jpg"),
             estado,

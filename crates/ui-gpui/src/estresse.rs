@@ -631,12 +631,15 @@ fn previews_descartaveis() -> (Arc<PreviewManager>, TempDir) {
     )
 }
 
-/// 🚨 **A Biblioteca com 10.000 fotos: abrir, recortar, marcar, andar e
-/// classificar tudo de uma vez.**
+/// 🚨 **A Biblioteca com 10.000 fotos: abrir, recortar, marcar, andar,
+/// classificar tudo de uma vez — e o ensaio inteiro subindo.**
 ///
-/// A classificação em massa é o gesto mais caro que a grade tem: cada foto
-/// vira um pedido ao site, e as dez mil respostas passam pelo mesmo contador
-/// que prende o G9 — ele tem de voltar a zero.
+/// 🔄 **O gesto mais caro mudou de dono em 2026-09-20.** Era a classificação em
+/// massa: cada foto que ganhava nota virava um pedido ao site. Com C20 quem
+/// manda as dez mil é **entrar na sessão**, e a nota não fala com a rede —
+/// então o cenário prende as duas coisas: classificar 10.000 não faz pedido
+/// nenhum, e o ensaio de 10.000 sobe de três em três, com o contador que prende
+/// o G9 voltando a zero.
 #[gpui::test]
 fn estresse_a_biblioteca_com_dez_mil_fotos(cx: &mut TestAppContext) {
     const N: usize = 10_000;
@@ -731,7 +734,7 @@ fn estresse_a_biblioteca_com_dez_mil_fotos(cx: &mut TestAppContext) {
                 },
             );
 
-            // A nota em todas: as que estavam sem nota sobem, uma por pedido.
+            // A nota em todas: curadoria, e nada mais (C22).
             cronometrar(
                 "dar ★★★★ a 10.000 de uma vez",
                 Duration::from_secs(5),
@@ -741,9 +744,23 @@ fn estresse_a_biblioteca_com_dez_mil_fotos(cx: &mut TestAppContext) {
             );
         })
         .expect("a janela aberta");
+    assert!(
+        publicador.subidas().is_empty(),
+        "🔄 classificar não fala com a rede desde 2026-09-20 (C22)"
+    );
 
-    let sem_nota = (0..N).filter(|i| i.is_multiple_of(6)).count();
-    // 🚨 **Três no ar, e não 1.667** (dono, 18/set/2026: *"essa sessão tinha 200
+    // 📤 **Agora o gesto caro: entrar na sessão com 10.000 fotos no disco.**
+    cronometrar(
+        "entrar na sessão de 10.000",
+        Duration::from_secs(5),
+        || {
+            janela
+                .update(cx, |app, _window, cx| app.entrar_na_sessao("g1".into(), cx))
+                .expect("a janela aberta");
+        },
+    );
+
+    // 🚨 **Três no ar, e não 10.000** (dono, 18/set/2026: *"essa sessão tinha 200
     // fotos e deu erro"*). Cada foto no ar é um original decodificado — 96 MB em
     // RAM —, e o lote inteiro de uma vez levava a máquina do balcão junto. A
     // conta da espera continua sendo o lote todo: todas as respostas virão.
@@ -763,8 +780,8 @@ fn estresse_a_biblioteca_com_dez_mil_fotos(cx: &mut TestAppContext) {
     });
     assert_eq!(
         publicador.subidas().len(),
-        sem_nota,
-        "ao fim, subiram todas as que ganharam nota"
+        N,
+        "ao fim, subiu o ensaio inteiro — classificado ou não"
     );
 
     // 🚨 **A Biblioteca continua operável durante o lote** (dono, 18/set/2026:
@@ -774,8 +791,8 @@ fn estresse_a_biblioteca_com_dez_mil_fotos(cx: &mut TestAppContext) {
     // varreduras de 10.000 fotos. Agrupadas, são poucas.
     let releituras = *acervo.pedidos.lock().expect("os pedidos");
     assert!(
-        releituras < sem_nota / 10,
-        "{releituras} releituras para {sem_nota} respostas — a grade está sendo refeita foto a foto"
+        releituras < N / 10,
+        "{releituras} releituras para {N} respostas — a grade está sendo refeita foto a foto"
     );
     janela
         .update(cx, |app, _window, cx| {

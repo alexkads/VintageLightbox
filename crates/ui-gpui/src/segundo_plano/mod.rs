@@ -31,7 +31,7 @@ pub mod vigia;
 
 #[cfg(test)]
 pub(crate) use laco::estado_para_teste;
-pub use laco::{ao_reabrir, gesto_de_roteiro, ligar};
+pub use laco::{ao_reabrir, desistiu_de_fechar, fechar_mesmo, gesto_de_roteiro, ligar};
 
 /// Liga o [`ao_reabrir`] na aplicação, sem quebrar a corrente de `main.rs`.
 pub trait ReabrirDaBandeja {

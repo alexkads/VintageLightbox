@@ -116,21 +116,27 @@ fn a_grade_mostra_as_fotos_certas_em_cada_recorte(cx: &mut TestAppContext) {
 
 /// ⭐ **Classificar, sinalizar e mexer no painel — conferido na foto.**
 ///
-/// A nota de uma local a leva ao site (passo 3); o `P` alterna o estado da do
-/// site; a faixa e o preço de venda vão num `PATCH` com só o que mudou; apagar
-/// pergunta antes e some com ela.
+/// O ensaio sobe sozinho (C20) e a nota de uma local **alcança a linha que
+/// acabou de nascer no site**; o `P` alterna o estado da do site; a faixa e o
+/// preço de venda vão num `PATCH` com só o que mudou; apagar pergunta antes e
+/// some com ela.
 #[gpui::test]
 fn classificar_sinalizar_e_o_painel_acompanham_a_foto(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(cx, Cenario::default());
+    e.esperar(cx);
 
-    // ⭐ A nota numa foto **local**: ela sobe, com a nota que acabou de ser dada.
+    // 📤 As duas locais subiram sozinhas, sem nota — a classificação deixou de
+    // ser a porta da nuvem em 2026-09-20.
+    let subidas = e.site.subidas();
+    assert_eq!(subidas.len(), 2, "o ensaio inteiro sobe: {subidas:?}");
+    assert!(e.site.notas_pedidas().iter().all(Option::is_none));
+
+    // ⭐ A nota numa foto que acabou de subir: é uma mudança da foto, e vai
+    // para a linha do site pelo id novo.
     e.detalhe(cx, |tela, _w, cx| tela.focar_foto("id-DSC_101.jpg", cx));
     e.teclar(cx, "4");
     e.esperar(cx);
-    let subidas = e.site.subidas();
-    assert_eq!(subidas.len(), 1, "classificar sobe: {subidas:?}");
-    assert_eq!(subidas[0].1, "id-DSC_101.jpg");
-    assert_eq!(e.site.notas_pedidas(), vec![Some(4)]);
+    assert_eq!(e.site.subidas().len(), 2, "e não sobe de novo");
 
     // 🚩 O `P` numa foto do site alterna levada ↔ à venda, e a grade mostra.
     e.detalhe(cx, |tela, _w, cx| tela.focar_foto("d", cx));

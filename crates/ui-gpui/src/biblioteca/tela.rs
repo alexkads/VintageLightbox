@@ -1259,11 +1259,10 @@ impl Biblioteca {
     /// Classifica **estas** fotos, por id — o pedido que vem da tela da sessão.
     ///
     /// 🚨 **A grade da sessão é outra, mas o catálogo é o mesmo.** Quem grava a
-    /// nota e decide quem sobe é esta tela (`travessia_do_zero` → `Classificou`
-    /// → `subir_classificada` na raiz), e reescrever isso do outro lado faria
-    /// duas verdades sobre a mesma coluna. Daqui a foto importada faz o passo 3
-    /// sem passar pela seleção desta grade — que é de quem está olhando **esta**
-    /// tela, e não pode mudar sozinha.
+    /// nota é esta tela, e reescrever isso do outro lado faria duas verdades
+    /// sobre a mesma coluna. Daqui a foto importada é classificada sem passar
+    /// pela seleção desta grade — que é de quem está olhando **esta** tela, e
+    /// não pode mudar sozinha.
     pub fn classificar_ids(&mut self, ids: &[String], nota: i32, cx: &mut Context<Self>) {
         let alvos: Vec<usize> = ids
             .iter()
@@ -1272,21 +1271,31 @@ impl Biblioteca {
         self.aplicar_em(alvos, Marca::Nota(nota), cx);
     }
 
+    /// Sinaliza **estas** fotos, por id — o `X` da tela da sessão na foto que
+    /// ainda não subiu (contrato C21).
+    ///
+    /// 🔑 **Sem alternância de grupo, ao contrário de [`Self::sinalizar`]**: a
+    /// tela da sessão já decidiu para que lado o gesto vai, olhando as fotos do
+    /// site e as locais juntas. Decidir de novo aqui, sobre metade da grade,
+    /// daria lados opostos ao mesmo `X`.
+    pub fn sinalizar_ids(&mut self, ids: &[String], codigo: i32, cx: &mut Context<Self>) {
+        let alvos: Vec<usize> = ids
+            .iter()
+            .filter_map(|id| self.fotos.iter().position(|f| &f.id == id))
+            .collect();
+        self.aplicar_em(alvos, Marca::Sinalizador(codigo), cx);
+    }
+
     fn aplicar_em(&mut self, alvos: Vec<usize>, marca: Marca, cx: &mut Context<Self>) {
         if alvos.is_empty() {
             return;
         }
 
-        // 🚨 A travessia do zero é lida **antes** da escrita, e só para a nota.
-        //
-        // No fluxo do dono é a classificação que autoriza a foto a subir para o
-        // site, e zerá-la é tirá-la de lá. Depois de escrever, o "antes" já não
-        // existe — e sem ele não dá para saber quem atravessou, só quem está de
-        // que lado agora.
-        let travessia = match &marca {
-            Marca::Nota(nova) => Some(travessia_do_zero(&self.fotos, &alvos, *nova)),
-            _ => None,
-        };
+        // 🔄 **A travessia do zero saiu daqui em 2026-09-20** (contrato C20/C22).
+        // Ela era lida antes da escrita, e dizia quem tinha acabado de ganhar
+        // nota (subia para o site) e quem a tinha perdido (saía de lá). Com a
+        // regra nova, o ensaio inteiro sobe em segundo plano e a nota não move
+        // arquivo nenhum: marcar é marcar, e a tela não tem mais o que avisar.
 
         let fotos = Arc::make_mut(&mut self.fotos);
         for no_acervo in alvos {
@@ -1303,11 +1312,6 @@ impl Biblioteca {
         }
 
         self.refiltrar();
-        if let Some(classificou) = travessia {
-            if !classificou.vazio() {
-                cx.emit(classificou);
-            }
-        }
         cx.notify();
     }
 
@@ -2108,65 +2112,6 @@ fn celula(
         .child(div().px(px(2.)).child(selos::faixa(&selos, cx)))
         .on_click(ao_clicar)
         .into_any_element()
-}
-
-/// Quais fotos atravessaram o zero da classificação — e para que lado.
-///
-/// 🔑 **É o gatilho do passo 3 do fluxo do dono**, e o motivo de a Biblioteca
-/// não falar com o site: ela **notifica** que a classificação mudou de lado, e
-/// quem sabe o que fazer com isso é a raiz, que tem a sessão e a galeria aberta.
-/// Assim a grade continua sem precisar saber que existe um site.
-///
-/// ⚠️ **A travessia, e não o estado.** Passar de 3 para 4 estrelas não é evento:
-/// a foto já estava no site e continua. O que importa é 0 → nota (sobe) e
-/// nota → 0 (sai).
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct Classificou {
-    /// Ganharam nota: sobem para a galeria aberta.
-    pub subiram: Vec<String>,
-    /// Ficaram sem nota: saem do storage.
-    pub sairam: Vec<String>,
-    /// A nota que acabou de ser dada — a que faz as de cima subirem.
-    ///
-    /// 🚨 **Ela viaja no evento porque o banco ainda pode não tê-la.** Gravar a
-    /// nota é uma tarefa do tokio que ninguém espera, e quem sobe a foto lê a
-    /// nota do banco: quando a leitura ganha a corrida, sobe o valor
-    /// **anterior** e o site devolve `400` — *"nota invalida: 0 (use de 1 a
-    /// 5)"*. Foi o que o dono viu ao classificar em 8/set/2026.
-    ///
-    /// `None` quando ninguém subiu (só saídas), que é quando ela não é usada.
-    pub nota: Option<u8>,
-}
-
-impl Classificou {
-    pub fn vazio(&self) -> bool {
-        self.subiram.is_empty() && self.sairam.is_empty()
-    }
-}
-
-impl gpui::EventEmitter<Classificou> for Biblioteca {}
-
-/// Quem atravessou o zero, comparando o que está no acervo com a nota nova.
-fn travessia_do_zero(fotos: &[PhotoViewModel], alvos: &[usize], nova: i32) -> Classificou {
-    let mut classificou = Classificou {
-        // Só as de 1 a 5 sobem; a nota que zera não acompanha subida nenhuma.
-        nota: u8::try_from(nova).ok().filter(|n| (1..=5).contains(n)),
-        ..Default::default()
-    };
-    for &no_acervo in alvos {
-        let foto = &fotos[no_acervo];
-        let tinha = foto.rating >= 1;
-        let tera = nova >= 1;
-        if tinha == tera {
-            continue;
-        }
-        if tera {
-            classificou.subiram.push(foto.id.clone());
-        } else {
-            classificou.sairam.push(foto.id.clone());
-        }
-    }
-    classificou
 }
 
 impl Render for Biblioteca {
