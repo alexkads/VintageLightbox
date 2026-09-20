@@ -1784,6 +1784,8 @@ fn estresse_o_cupom_com_oitocentas_fotos() {
                 },
                 apagada: i.is_multiple_of(50),
                 nota: Some(3),
+                // Uma em vinte rejeitada: ela não entra no cupom (C21).
+                rejeitada: i.is_multiple_of(20),
                 sem_marcacao: false,
                 produto_efetivo: if i.is_multiple_of(2) { "p1" } else { "p2" }.into(),
                 produto_id: None,

@@ -183,6 +183,9 @@ pub struct FotoDoCupom {
     /// Só nas locais do site: a leva entrou sem marcação. O desktop não tem
     /// foto local na sessão; fica `false`.
     pub sem_marcacao: bool,
+    /// A foto foi **rejeitada** — a tecla `X` (contrato C21). A rejeitada não
+    /// está à venda em lugar nenhum, e por isso não entra no cupom.
+    pub rejeitada: bool,
     /// A faixa que vale para ela, resolvida pelo backend.
     pub produto_efetivo: String,
     /// A faixa **gravada** na foto (`None` = o padrão da galeria) — o que a
@@ -262,8 +265,15 @@ pub struct Cupom {
 }
 
 /// Entra no cupom? A mesma regra da contagem "Sinalizadas" da barra.
+///
+/// 🔄 **Aqui se exigia nota, e isso custava venda** (C21, 2026-09-20). A regra
+/// era de 2026-09-05, quando sem nota a foto não subia nem se vendia; o dono a
+/// revogou com o caso: *"se o cliente compra a foto sem nota na galeria, o
+/// operador tem de poder marcá-la como levada na frente dele — é a mesma
+/// venda"*. Com a exigência de pé, essa venda ficava fora do cupom **e do
+/// total**, calada. O que o balcão recusa agora é a **rejeitada**.
 pub fn entra_no_caixa(f: &FotoDoCupom) -> bool {
-    !f.apagada && f.nota.is_some() && !f.sem_marcacao && f.estado == Estado::LevadaNoBalcao
+    !f.apagada && !f.rejeitada && !f.sem_marcacao && f.estado == Estado::LevadaNoBalcao
 }
 
 fn tem_negociacao(f: &FotoDoCupom) -> bool {
@@ -1164,6 +1174,7 @@ mod testes {
             apagada: false,
             nota: Some(3),
             sem_marcacao: false,
+            rejeitada: false,
             produto_efetivo: "p".into(),
             produto_id: None,
             preco_negociado: None,
@@ -1196,7 +1207,7 @@ mod testes {
     }
 
     #[test]
-    fn so_a_sinalizada_viva_com_nota_e_com_marcacao_entra() {
+    fn so_a_sinalizada_viva_e_com_marcacao_entra() {
         assert!(entra_no_caixa(&foto("a")));
         assert!(!entra_no_caixa(
             &com(foto("b"), |f| f.estado = Estado::Disponivel)
@@ -1204,9 +1215,21 @@ mod testes {
         assert!(!entra_no_caixa(
             &com(foto("c"), |f| f.estado = Estado::Comprada)
         ));
-        assert!(!entra_no_caixa(&com(foto("d"), |f| f.nota = None)));
         assert!(!entra_no_caixa(&com(foto("e"), |f| f.apagada = true)));
         assert!(!entra_no_caixa(&com(foto("f"), |f| f.sem_marcacao = true)));
+    }
+
+    /// 🚨 **A venda sem nota entra no caixa** — contrato C21, e é dinheiro.
+    ///
+    /// 🔄 Aqui se cobrava o contrário (`f.nota = None` → não entra): era a
+    /// regra de 2026-09-05, em que sem nota a foto não subia nem se vendia. O
+    /// dono a revogou com o caso: o cliente compra na galeria uma foto que
+    /// ninguém classificou, e o operador a marca como levada na frente dele.
+    /// Com a exigência de pé, essa venda ficava fora do cupom **e do total**.
+    #[test]
+    fn a_sinalizada_sem_nota_entra_e_a_rejeitada_nao() {
+        assert!(entra_no_caixa(&com(foto("d"), |f| f.nota = None)));
+        assert!(!entra_no_caixa(&com(foto("g"), |f| f.rejeitada = true)));
     }
 
     #[test]
