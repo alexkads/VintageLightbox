@@ -5879,11 +5879,15 @@ mod testes {
     /// `on_click` que aponta para o lugar errado **não falha** — ele só não faz
     /// nada. O clique aqui é nas coordenadas do botão desenhado.
     ///
-    /// A segunda é o **destino**, regra do dono do mesmo dia: *"a importação não
-    /// vai imediatamente para o storage cloud, pois o cliente precisa
-    /// classificar a foto; ela fica local usando sqlite"*. Até então o botão
-    /// chamava `enviar_arquivo`, e o site devolvia **400 Bad Request: a foto
-    /// sobe classificada** — 21 de 21 arquivos, e a sessão vazia na tela.
+    /// A segunda é o **destino**: a importação grava no catálogo local, e não
+    /// no storage. Até 8/set/2026 o botão chamava `enviar_arquivo`, e o site
+    /// devolvia **400 Bad Request: a foto sobe classificada** — 21 de 21
+    /// arquivos, e a sessão vazia na tela.
+    ///
+    /// 🔄 **O motivo mudou em 2026-09-20, o destino não.** A regra de então era
+    /// *"a importação não vai imediatamente para o storage, pois o cliente
+    /// precisa classificar"*; hoje o ensaio **vai** para a nuvem sozinho (C20),
+    /// só que pela fila da raiz, e não por esta tela.
     #[gpui::test]
     fn o_clique_no_importar_grava_no_catalogo_e_nao_sobe_nada(cx: &mut TestAppContext) {
         let seletor = Arc::new(SeletorDeMentira::escolhe(&["/fotos/a.jpg", "/fotos/b.NEF"]));
@@ -5920,9 +5924,17 @@ mod testes {
         // 🚨 O carimbo do ensaio entra na criação: sem ele a foto chega ao
         // catálogo sem dono e não aparece na grade da sessão que a importou.
         assert_eq!(opcoes.sessao_id.as_deref(), Some("g1"));
+        // 🔑 **A importação não fala com o site — quem fala é a fila.** O botão
+        // grava no catálogo local, e daí em diante o ensaio sobe em segundo
+        // plano pela esteira da raiz (`subir_o_que_falta_do_ensaio`, C20).
+        //
+        // 🔄 A frase daqui dizia *"quem autoriza a foto a subir é a nota"*, e
+        // era a regra de 8/set/2026, quando `enviar_arquivo` daqui fazia o site
+        // devolver **400: a foto sobe classificada** nos 21 arquivos do dono.
+        // O destino continua o mesmo; o que mudou é quem o autoriza.
         assert!(
             publicador.arquivos_enviados().is_empty(),
-            "a importação subiu para o site — quem autoriza a foto a subir é a nota"
+            "o botão de importar falou com o site — ele grava no catálogo, e a fila leva depois"
         );
     }
 
