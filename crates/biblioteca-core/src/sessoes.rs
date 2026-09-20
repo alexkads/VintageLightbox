@@ -88,6 +88,71 @@ pub struct Totais {
     pub pos_venda: i64,
 }
 
+/// O que o **caixa do balcão** cobrou de uma sessão.
+///
+/// 🔑 **`vendas: 0` é um fato, e não um vazio**: a sessão não passou pelo
+/// caixa, e é isso que faz a lista oferecer o caminho para fechar a venda.
+/// Quem não sabe é o `Option` de fora — a API que não respondeu, ou que é
+/// anterior ao campo.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PagoNoCaixa {
+    pub vendas: u32,
+    /// Em centavos, como o resto do caixa — e ao contrário de [`Totais`], que
+    /// chega da API em reais e é convertido na borda.
+    pub bruto_centavos: i64,
+    pub estornado_centavos: i64,
+    /// `bruto − estornado`, calculado no servidor: a tela mostra, não recompõe.
+    pub liquido_centavos: i64,
+}
+
+/// O que a coluna "Caixa (PDV)" da lista tem a dizer sobre uma sessão.
+///
+/// 🚨 **Três dos quatro casos mostrariam `R$ 0,00`** se a coluna fosse só um
+/// número, e eles pedem coisas opostas de quem opera: um manda perguntar de
+/// novo, outro não tem nada a cobrar, o terceiro é uma venda esquecida e o
+/// quarto já está fechado. É por isso que a decisão é um tipo, e não um `if`
+/// dentro do desenho.
+///
+/// ⚠️ **A web tem esta mesma regra em TypeScript**
+/// (`sessoes-fotograficas/caixa-na-lista.ts`), porque a lista de lá é React e
+/// não chama este wasm. São duas escritas da mesma decisão, cada uma com o
+/// teste que a prende — ao mudar uma, mudar a outra.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EstadoNoCaixa {
+    /// A API não soube dizer (ou é anterior ao campo). Mostra `?`.
+    NaoSei,
+    /// Passou ou não pelo caixa, mas não há foto levada a cobrar. Mostra `—`.
+    NadaACobrar,
+    /// 💵 **Foto levada no balcão e nenhuma venda no PDV**: é a venda que
+    /// ficou aberta, e a razão de a coluna existir.
+    FecharVenda,
+    /// Passou pelo caixa: o líquido, e quanto voltou em estorno.
+    Cobrado {
+        liquido_centavos: i64,
+        estornado_centavos: i64,
+    },
+}
+
+/// A decisão da coluna do caixa. Ver [`EstadoNoCaixa`].
+pub fn estado_no_caixa(caixa: Option<PagoNoCaixa>, levadas_no_balcao: u32) -> EstadoNoCaixa {
+    let Some(pago) = caixa else {
+        return EstadoNoCaixa::NaoSei;
+    };
+    if pago.vendas == 0 {
+        // 🔑 Sem foto levada não há venda a fechar: oferecer o caixa em toda
+        // sessão vazia encheria a coluna de convites que não levam a nada.
+        return if levadas_no_balcao == 0 {
+            EstadoNoCaixa::NadaACobrar
+        } else {
+            EstadoNoCaixa::FecharVenda
+        };
+    }
+    EstadoNoCaixa::Cobrado {
+        liquido_centavos: pago.liquido_centavos,
+        estornado_centavos: pago.estornado_centavos,
+    }
+}
+
 /// Uma sessão fotográfica como a lista precisa vê-la.
 ///
 /// 🔑 O nome é `SessaoFotografica` e não `Sessao` de propósito: no desktop já
@@ -109,6 +174,10 @@ pub struct SessaoFotografica {
     /// `None` na sessão vinda de uma API anterior ao campo — e isso é dito na
     /// soma, em vez de virar zero calado.
     pub totais: Option<Totais>,
+    /// 💵 **O que o caixa cobrou desta sessão** (dono, 20/set/2026). `None` =
+    /// não se sabe; `Some` com `vendas: 0` = não passou pelo caixa, e a lista
+    /// mostra o caminho para fechar a venda.
+    pub caixa: Option<PagoNoCaixa>,
     /// 🏢 **A sessão não tem estúdio definido.**
     ///
     /// 🚨 **A grade precisa mostrar isso** (dono, 18/set/2026: *"tem sessões
@@ -481,7 +550,43 @@ mod testes {
                 ..ContagemDeFotos::default()
             },
             totais: None,
+            caixa: None,
         }
+    }
+
+    /// 💵 A coluna do caixa: os quatro estados, e os três que mostrariam zero.
+    #[test]
+    fn a_coluna_do_caixa_separa_o_que_falta_cobrar_do_que_ja_foi() {
+        // Sem resposta da API não é "não foi cobrada".
+        assert_eq!(estado_no_caixa(None, 3), EstadoNoCaixa::NaoSei);
+
+        // Não passou pelo caixa, com foto levada: é a venda esquecida.
+        let sem_venda = PagoNoCaixa::default();
+        assert_eq!(
+            estado_no_caixa(Some(sem_venda), 3),
+            EstadoNoCaixa::FecharVenda
+        );
+        // Sem foto levada não há o que cobrar — e o convite não aparece.
+        assert_eq!(
+            estado_no_caixa(Some(sem_venda), 0),
+            EstadoNoCaixa::NadaACobrar
+        );
+
+        // 🚨 Vendida e estornada por inteiro sobra zero, e **não** volta a ser
+        // "fechar venda": ela já passou pelo caixa.
+        let estornada = PagoNoCaixa {
+            vendas: 1,
+            bruto_centavos: 9_000,
+            estornado_centavos: 9_000,
+            liquido_centavos: 0,
+        };
+        assert_eq!(
+            estado_no_caixa(Some(estornada), 2),
+            EstadoNoCaixa::Cobrado {
+                liquido_centavos: 0,
+                estornado_centavos: 9_000
+            }
+        );
     }
 
     /// 🚨 A ordem da situação é a ordem em que ela importa para quem opera.
@@ -780,6 +885,7 @@ mod testes_do_periodo {
             user_id: None,
             fotos: ContagemDeFotos::default(),
             totais: None,
+            caixa: None,
         }
     }
 

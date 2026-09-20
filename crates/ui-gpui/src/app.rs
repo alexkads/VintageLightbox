@@ -64,7 +64,7 @@ use crate::sessoes::arquivos::SeletorDeFotos;
 use crate::sessoes::detalhe::{Detalhe, FotoARevelar, Pedido as DetalhePedido};
 use crate::sessoes::nova::tela::{NovaSessao, PedidoDaNova, PortasDaNova};
 use crate::sessoes::retencao::{PedidoDaRetencao, Retencao};
-use crate::sessoes::tela::{Escolhida, NovaPedida, Sessoes};
+use crate::sessoes::tela::{Escolhida, FecharVendaPedida, NovaPedida, Sessoes};
 use crate::tema;
 
 /// As portas para o mundo de fora, num pacote só.
@@ -906,6 +906,19 @@ impl Aplicativo {
                 window,
                 |raiz, _tela, _pedido: &NovaPedida, window, cx| {
                     raiz.ir_para(Tela::NovaSessao, window, cx);
+                },
+            ),
+            // 💵 "Fechar venda" na coluna do caixa: vai para o Caixa **com a
+            // sessão escolhida**, que é o `?sessao=` do site. O caminho de
+            // volta já existe (`DetalhePedido::Voltar` com `veio_do_caixa`).
+            cx.subscribe_in(
+                &sessoes,
+                window,
+                |raiz, _tela, pedido: &FecharVendaPedida, window, cx| {
+                    let id = pedido.0.clone();
+                    raiz.caixa
+                        .update(cx, |tela, cx| tela.escolher_sessao(Some(id), cx));
+                    raiz.ir_para(Tela::Caixa, window, cx);
                 },
             ),
         ];

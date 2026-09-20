@@ -29,8 +29,8 @@ use async_trait::async_trait;
 use domain::services::pos_venda::{
     CofreDeSessao, ContagemDeFotos, EstadoDaFotoNoSite, Estudio, FotoDaGaleria, FotoEnviada,
     FotoParaEnviar, Galeria, GaleriaAberta, GaleriaDoPainel, LinkDeAcesso, MudancaDaFoto,
-    MudancaDaGaleria, NovaGaleria, PosVendaApi, Produto, ResumoSimples, ResumosDoAtendimento,
-    Sessao, TotaisDaGaleria,
+    MudancaDaGaleria, NovaGaleria, PagoNoCaixa, PosVendaApi, Produto, ResumoSimples,
+    ResumosDoAtendimento, Sessao, TotaisDaGaleria,
 };
 use domain::{DomainError, DomainResult};
 use serde::Deserialize;
@@ -1133,6 +1133,10 @@ struct GaleriaDoPainelDaApi {
     /// total está menor que o real. Zero calado é a única resposta errada aqui.
     #[serde(default)]
     totais: Option<TotaisDaApi>,
+    /// 💵 Pelo mesmo motivo do vizinho: `null` e campo ausente são "não sei",
+    /// e o objeto com `vendas: 0` é "não passou pelo caixa".
+    #[serde(default)]
+    caixa: Option<PagoNoCaixaDaApi>,
     #[serde(default)]
     preset_padrao_id: Option<String>,
     #[serde(default)]
@@ -1171,6 +1175,20 @@ struct TotaisDaApi {
     pos_venda: String,
 }
 
+/// 💵 `PagoNoCaixa` do site. Tudo com `default`: a API anterior ao campo não o
+/// manda, e um `null` explícito quer dizer "não deu para perguntar ao caixa".
+#[derive(Deserialize, Default)]
+struct PagoNoCaixaDaApi {
+    #[serde(default)]
+    vendas: u32,
+    #[serde(default)]
+    bruto_centavos: i64,
+    #[serde(default)]
+    estornado_centavos: i64,
+    #[serde(default)]
+    liquido_centavos: i64,
+}
+
 impl From<GaleriaDoPainelDaApi> for GaleriaDoPainel {
     fn from(g: GaleriaDoPainelDaApi) -> Self {
         Self {
@@ -1195,6 +1213,12 @@ impl From<GaleriaDoPainelDaApi> for GaleriaDoPainel {
             totais: g.totais.map(|t| TotaisDaGaleria {
                 balcao: t.balcao,
                 pos_venda: t.pos_venda,
+            }),
+            caixa: g.caixa.map(|c| PagoNoCaixa {
+                vendas: c.vendas,
+                bruto_centavos: c.bruto_centavos,
+                estornado_centavos: c.estornado_centavos,
+                liquido_centavos: c.liquido_centavos,
             }),
             preset_padrao_id: g.preset_padrao_id,
             proporcao_padrao: g.proporcao_padrao,
@@ -1641,6 +1665,12 @@ mod tests {
                         "apagadas": 0
                     },
                     "totais": { "balcao": "150.00", "pos_venda": "45.00" },
+                    "caixa": {
+                        "vendas": 2,
+                        "bruto_centavos": 15000,
+                        "estornado_centavos": 2500,
+                        "liquido_centavos": 12500
+                    },
                     // O painel manda mais que isto; o serde ignora o que sobra.
                     "criada_por": "operador",
                     "ensaio_id": null,
@@ -1681,6 +1711,16 @@ mod tests {
         // zero: é o que permite ao rodapé dizer que o total está menor que o
         // real, em vez de anunciar um número curto como se fosse completo.
         assert_eq!(galerias[1].totais, None);
+
+        // 💵 O caixa vem em centavos inteiros, ao contrário dos totais ao lado
+        // — e o líquido é o que a coluna mostra.
+        let pago = galerias[0].caixa.expect("g1 passou pelo caixa");
+        assert_eq!(pago.vendas, 2);
+        assert_eq!(pago.bruto_centavos, 15_000);
+        assert_eq!(pago.liquido_centavos, 12_500);
+        // 🚨 E a galeria sem o campo não vira "cobrada, e deu zero": ela chega
+        // como "não sei", que é o `?` da coluna.
+        assert_eq!(galerias[1].caixa, None);
         assert_eq!(galerias[1].expira_em, None, "sem prazo é sem prazo");
         assert_eq!(
             galerias[0].expira_em,

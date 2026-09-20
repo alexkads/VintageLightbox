@@ -22,12 +22,16 @@ use std::time::Duration;
 use biblioteca_core::dados_do_cliente;
 use biblioteca_core::dinheiro;
 use biblioteca_core::sessoes::{
-    self, ContagemDeFotos, Criterio, FaixaDeDatas, SessaoFotografica, Situacao, Totais,
+    self, estado_no_caixa, ContagemDeFotos, Criterio, EstadoNoCaixa, FaixaDeDatas, PagoNoCaixa,
+    SessaoFotografica, Situacao, Totais,
 };
 use domain::services::pos_venda::{Estudio, GaleriaDoPainel, NovaGaleria, Produto, Sessao};
 
 use super::periodo;
-use gpui::{div, prelude::*, px, App, Context, EventEmitter, SharedString, Task, Window};
+use gpui::{
+    div, prelude::*, px, AnyElement, App, Context, EventEmitter, Hsla, MouseButton, SharedString,
+    Task, Window,
+};
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::input::{Input, InputState};
 use gpui_component::{ActiveTheme, Disableable, Selectable, Sizable};
@@ -66,6 +70,16 @@ impl EventEmitter<Escolhida> for Sessoes {}
 pub struct NovaPedida;
 
 impl EventEmitter<NovaPedida> for Sessoes {}
+
+/// 💵 "Fechar venda" na coluna do caixa: a sessão tem foto levada no balcão e
+/// nenhuma venda no PDV.
+///
+/// 🔑 **Leva ao caixa com a sessão já escolhida**, que é o
+/// `/dashboard/caixa?sessao={id}` do site — e não à sessão, que é onde o
+/// clique na linha cai.
+pub struct FecharVendaPedida(pub String);
+
+impl EventEmitter<FecharVendaPedida> for Sessoes {}
 
 pub struct Sessoes {
     publicador: Arc<dyn Publicador>,
@@ -329,6 +343,14 @@ impl Sessoes {
                 totais: g.totais.as_ref().map(|t| Totais {
                     balcao: dinheiro::ler_campo(&t.balcao).unwrap_or(0),
                     pos_venda: dinheiro::ler_campo(&t.pos_venda).unwrap_or(0),
+                }),
+                // 💵 O caixa já vem em centavos — não passa pelo leitor de
+                // decimal acima, e é essa a diferença entre as duas colunas.
+                caixa: g.caixa.map(|c| PagoNoCaixa {
+                    vendas: c.vendas,
+                    bruto_centavos: c.bruto_centavos,
+                    estornado_centavos: c.estornado_centavos,
+                    liquido_centavos: c.liquido_centavos,
                 }),
             })
             .collect()
@@ -1565,7 +1587,9 @@ impl Sessoes {
         // As colunas do site que o app tem (as de "máquinas" são do relato do
         // navegador, e não existem aqui). Largura fixa nos números, alinhados
         // à direita como no site.
-        const LARGURAS: [f32; 6] = [84., 84., 104., 112., 112., 104.];
+        // 💵 A do caixa é mais larga: ela pode trazer o "Fechar venda" em vez
+        // de um número (dono, 20/set/2026).
+        const LARGURAS: [f32; 7] = [84., 84., 104., 112., 124., 112., 104.];
         let numero = |largura: f32| div().w(px(largura)).flex_none().flex().justify_end();
         let titulo_da_coluna = |texto: &'static str, largura: Option<f32>| match largura {
             Some(l) => numero(l).child(texto).into_any_element(),
@@ -1593,8 +1617,9 @@ impl Sessoes {
             .child(titulo_da_coluna("À venda", Some(LARGURAS[1])))
             .child(titulo_da_coluna("Compradas", Some(LARGURAS[2])))
             .child(titulo_da_coluna("Balcão", Some(LARGURAS[3])))
-            .child(titulo_da_coluna("Pós-venda", Some(LARGURAS[4])))
-            .child(titulo_da_coluna("Criada", Some(LARGURAS[5])));
+            .child(titulo_da_coluna("Caixa (PDV)", Some(LARGURAS[4])))
+            .child(titulo_da_coluna("Pós-venda", Some(LARGURAS[5])))
+            .child(titulo_da_coluna("Criada", Some(LARGURAS[6])));
 
         let linhas = visiveis.iter().map(|sessao| {
             let id = sessao.id.clone();
@@ -1665,9 +1690,16 @@ impl Sessoes {
                 .child(numero(LARGURAS[1]).child(sessao.fotos.disponiveis.to_string()))
                 .child(numero(LARGURAS[2]).child(sessao.fotos.compradas.to_string()))
                 .child(numero(LARGURAS[3]).child(valor_ou_traco(balcao)))
-                .child(numero(LARGURAS[4]).child(valor_ou_traco(pos_venda)))
+                .child(numero(LARGURAS[4]).child(celula_do_caixa(
+                    sessao.caixa,
+                    sessao.fotos.levadas_no_balcao,
+                    sessao.id.clone(),
+                    apagado,
+                    cx,
+                )))
+                .child(numero(LARGURAS[5]).child(valor_ou_traco(pos_venda)))
                 .child(
-                    numero(LARGURAS[5])
+                    numero(LARGURAS[6])
                         .text_xs()
                         .text_color(apagado)
                         .child(data_br(&sessao.criada_em_iso)),
@@ -1692,6 +1724,77 @@ impl Sessoes {
                     .children(linhas),
             )
             .into_any_element()
+    }
+}
+
+/// 💵 A célula da coluna "Caixa (PDV)" — o que o PDV cobrou, ou o caminho
+/// para cobrar.
+///
+/// 🚨 **Quatro estados, e três deles mostrariam `0` se a coluna fosse só um
+/// número** — a mesma tabela do `NoCaixa` da web
+/// (`sessoes-fotograficas/lista.tsx`):
+///
+/// | O que se sabe | O que a célula mostra |
+/// |---|---|
+/// | A API não soube dizer (ou é anterior ao campo) | `?` |
+/// | Não passou pelo caixa, e não há o que cobrar | `—` |
+/// | Não passou pelo caixa, **com foto levada no balcão** | "Fechar venda" |
+/// | Passou | o líquido, e o estornado embaixo quando houve |
+///
+/// ⚠️ **`stop_propagation` não é detalhe**: a linha inteira abre a sessão, e
+/// sem ele o clique em "Fechar venda" abriria a sessão em vez do caixa.
+fn celula_do_caixa(
+    caixa: Option<PagoNoCaixa>,
+    levadas: u32,
+    sessao_id: String,
+    apagado: Hsla,
+    cx: &Context<Sessoes>,
+) -> AnyElement {
+    match estado_no_caixa(caixa, levadas) {
+        EstadoNoCaixa::NaoSei => div().text_color(apagado).child("?").into_any_element(),
+        EstadoNoCaixa::NadaACobrar => div().text_color(apagado).child("—").into_any_element(),
+        EstadoNoCaixa::FecharVenda => {
+            let (fundo, borda, texto) = crate::tema::cores::selo_ambar();
+            div()
+                .id(SharedString::from(format!("fechar-venda-{sessao_id}")))
+                .flex_none()
+                .h(px(22.))
+                .px(px(8.))
+                .rounded(px(6.))
+                .border_1()
+                .border_color(borda)
+                .bg(fundo)
+                .text_color(texto)
+                .text_xs()
+                .font_weight(gpui::FontWeight::MEDIUM)
+                .cursor_pointer()
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .on_click(cx.listener(move |_tela, _ev, _window, cx| {
+                    cx.stop_propagation();
+                    cx.emit(FecharVendaPedida(sessao_id.clone()));
+                }))
+                .child("Fechar venda")
+                .into_any_element()
+        }
+        EstadoNoCaixa::Cobrado {
+            liquido_centavos,
+            estornado_centavos,
+        } => {
+            let liquido = dinheiro::formatar(liquido_centavos);
+            if estornado_centavos <= 0 {
+                return div().child(liquido).into_any_element();
+            }
+            div()
+                .flex()
+                .flex_col()
+                .items_end()
+                .child(div().child(liquido))
+                .child(div().text_xs().text_color(apagado).child(format!(
+                    "−{} estornado",
+                    dinheiro::formatar(estornado_centavos)
+                )))
+                .into_any_element()
+        }
     }
 }
 
