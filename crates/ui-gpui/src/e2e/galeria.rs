@@ -4,7 +4,7 @@ use biblioteca_core::acervo::{Estado, Filtro};
 use domain::services::pos_venda::{EstadoNoBalcao, MudancaDaGaleria};
 use gpui::{TestAppContext, VisualTestContext};
 
-use super::{abrir_o_ensaio, local, Cenario, Estudio, GALERIA};
+use super::{abrir_o_app, abrir_o_ensaio, local, Cenario, Estudio, GALERIA};
 use crate::app::Tela;
 use crate::impressao::porta::Destino;
 
@@ -207,6 +207,157 @@ fn importar_classificar_e_levar_pelas_teclas(cx: &mut TestAppContext) {
     e.teclar(cx, "b");
     e.esperar(cx);
     assert_eq!(e.site.negociadas().len(), 4, "a comprada fica de fora");
+}
+
+/// O que o catálogo desta máquina sabe da foto: (nota, sinalizador).
+fn no_catalogo(e: &Estudio, cx: &mut TestAppContext, id: &str) -> (i32, Option<i32>) {
+    e.app(cx, |app, _w, cx| {
+        let foto = app
+            .biblioteca
+            .read(cx)
+            .todas_as_fotos()
+            .into_iter()
+            .find(|f| f.id == id)
+            .unwrap_or_else(|| panic!("{id} não está no catálogo"));
+        (foto.rating, foto.flag)
+    })
+}
+
+/// 🚨 **Classificar e sinalizar a foto que ainda não subiu** — o gesto que o
+/// operador faz com o cliente na frente, enquanto o ensaio sobe em segundo
+/// plano (C20–C22).
+///
+/// Regressão de 21/set/2026: a passada de subida passou a pular a foto sem
+/// nota, e o gesto mais comum da sessão — dar nota e rejeitar durante a
+/// importação — deixava de ter efeito. Aqui as teclas de verdade passam pela
+/// grade da sessão até o catálogo, e o cenário afirma o que **ficou gravado**.
+#[gpui::test]
+fn classificar_e_rejeitar_a_foto_que_ainda_nao_subiu(cx: &mut TestAppContext) {
+    let e = abrir_o_ensaio(cx, Cenario::default());
+    let id = "id-DSC_101.jpg";
+
+    // Todo o ensaio subiu sem nota, e a foto continua sendo do disco.
+    assert_eq!(e.site.subidas().len(), 2, "as duas locais subiram");
+    assert_eq!(no_catalogo(&e, cx, id), (0, None), "sem nota e sem marca");
+
+    // ⭐ `1`–`5` dão a nota no catálogo, sem tocar no site.
+    e.detalhe(cx, |tela, _w, cx| tela.focar_foto(id, cx));
+    for nota in 1..=5 {
+        e.teclar(cx, &nota.to_string());
+        e.esperar(cx);
+        assert_eq!(no_catalogo(&e, cx, id).0, nota, "a tecla {nota} dá a nota");
+        // 🚨 E a **célula da grade mostra a estrela**: gravar sem desenhar fazia
+        // o gesto parecer não ter efeito nenhum.
+        let na_grade = e.detalhe(cx, |tela, _w, _cx| tela.como_esta(id));
+        assert_eq!(
+            na_grade.map(|(_, n, _)| n),
+            Some(Some(nota as u8)),
+            "a grade da sessão mostra a nota {nota}"
+        );
+    }
+    assert!(e.site.negociadas().is_empty(), "foto local não negocia");
+    assert_eq!(e.site.subidas().len(), 2, "classificar não sobe de novo");
+
+    // `0` tira a nota — e só isso.
+    e.teclar(cx, "0");
+    e.esperar(cx);
+    assert_eq!(no_catalogo(&e, cx, id), (0, None));
+    assert_eq!(
+        e.detalhe(cx, |tela, _w, _cx| tela.como_esta(id).map(|(_, n, _)| n)),
+        Some(None),
+        "e a grade some com a estrela"
+    );
+    assert!(e.site.tiradas().is_empty(), "nada sai da nuvem");
+
+    // ❌ `X` rejeita (C21) e o segundo `X` desfaz, sem apagar arquivo nenhum.
+    e.teclar(cx, "x");
+    e.esperar(cx);
+    assert_eq!(no_catalogo(&e, cx, id).1, Some(-1), "o X rejeita");
+    e.teclar(cx, "x");
+    e.esperar(cx);
+    assert_eq!(no_catalogo(&e, cx, id).1, Some(0), "o segundo X desfaz");
+    assert!(e.site.tiradas().is_empty(), "rejeitar não apaga nada");
+
+    // A outra foto não foi tocada por nenhum destes gestos.
+    assert_eq!(no_catalogo(&e, cx, "id-DSC_102.jpg"), (0, None));
+}
+
+/// 🔑 **A seleção em lote classifica e rejeita todas de uma vez**, na foto
+/// local — uma tecla, um desfecho (`⌘A` e depois a tecla).
+#[gpui::test]
+fn classificar_e_rejeitar_o_lote_de_fotos_locais(cx: &mut TestAppContext) {
+    let e = abrir_o_ensaio(cx, Cenario::default());
+    e.detalhe(cx, |tela, _w, cx| {
+        tela.marcar_ids(
+            &["id-DSC_101.jpg".to_string(), "id-DSC_102.jpg".to_string()],
+            cx,
+        )
+    });
+
+    e.teclar(cx, "3");
+    e.esperar(cx);
+    assert_eq!(no_catalogo(&e, cx, "id-DSC_101.jpg").0, 3);
+    assert_eq!(no_catalogo(&e, cx, "id-DSC_102.jpg").0, 3);
+
+    e.teclar(cx, "x");
+    e.esperar(cx);
+    assert_eq!(no_catalogo(&e, cx, "id-DSC_101.jpg").1, Some(-1));
+    assert_eq!(no_catalogo(&e, cx, "id-DSC_102.jpg").1, Some(-1));
+
+    e.teclar(cx, "x");
+    e.esperar(cx);
+    assert_eq!(no_catalogo(&e, cx, "id-DSC_101.jpg").1, Some(0));
+    assert_eq!(no_catalogo(&e, cx, "id-DSC_102.jpg").1, Some(0));
+}
+
+/// 📤 **A subida leva a nota que já existe e segura a rejeitada** (C20/C21).
+///
+/// A classificada sobe com a nota dela; a sem nota sobe sem nota — o `0` do
+/// catálogo nunca atravessa como classificação —, e a rejeitada não sobe.
+#[gpui::test]
+fn a_subida_leva_a_nota_e_segura_a_rejeitada(cx: &mut TestAppContext) {
+    let e = abrir_o_app(cx, Cenario::default());
+    e.entrar_na_conta(cx);
+    {
+        let mut fotos = e.acervo.fotos.lock().unwrap();
+        fotos[0].rating = 4;
+        fotos[1].flag = Some(-1);
+        fotos.push(local("DSC_103.jpg"));
+    }
+    // O mesmo recado que a importação dá quando o catálogo muda.
+    e.detalhe(cx, |_tela, _w, cx| {
+        cx.emit(crate::sessoes::detalhe::Pedido::CatalogoMudou)
+    });
+    e.esperar(cx);
+    e.app(cx, |app, _w, cx| {
+        app.sessoes
+            .update(cx, |tela, cx| tela.abrir(GALERIA.into(), cx));
+    });
+    e.esperar(cx);
+
+    let subidas = e.site.subidas();
+    let ids: Vec<&str> = subidas.iter().map(|s| s.1.as_str()).collect();
+    assert!(
+        ids.contains(&"id-DSC_101.jpg"),
+        "a classificada sobe: {ids:?}"
+    );
+    assert!(
+        ids.contains(&"id-DSC_103.jpg"),
+        "a sem nota também: {ids:?}"
+    );
+    assert!(
+        !ids.contains(&"id-DSC_102.jpg"),
+        "a rejeitada não sobe: {ids:?}"
+    );
+    let notas = e.site.notas_pedidas();
+    assert!(notas.contains(&Some(4)), "a nota 4 foi junto: {notas:?}");
+    assert!(
+        notas.iter().all(|n| n.is_none_or(|n| (1..=5).contains(&n))),
+        "o 0 nunca atravessa como nota: {notas:?}"
+    );
+
+    // Tirar a rejeição não some com a foto: ela só volta a ser candidata.
+    assert_eq!(no_catalogo(&e, cx, "id-DSC_102.jpg").1, Some(-1));
 }
 
 /// 🎬 **Recortes, zoom e marcação**: os chips recortam, a seleção limpa ao

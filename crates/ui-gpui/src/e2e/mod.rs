@@ -420,7 +420,7 @@ pub(super) fn abrir_o_app(cx: &mut TestAppContext, cenario: Cenario) -> Estudio 
         publicador: site.clone(),
         colecoes: Arc::new(ColecoesDeMentira::default()),
         folha: folha.clone(),
-        marcador: Arc::new(MarcadorDeMentira::default()),
+        marcador: Arc::new(MarcadorDeMentira::gravando_em(acervo.clone())),
         gerador: Arc::new(GeradorDeMentira::default()),
         repositor: Arc::new(RepositorDeMentira::default()),
         guarda_de_presets: guarda.clone(),

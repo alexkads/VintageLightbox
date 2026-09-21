@@ -1345,14 +1345,9 @@ impl Aplicativo {
             let nota = u8::try_from(foto.rating)
                 .ok()
                 .filter(|n| (1..=5).contains(n));
-            // A API de pós-venda só aceita fotos classificadas. A importação
-            // continua assíncrona, mas uma foto sem nota fica aguardando a
-            // curadoria local em vez de entrar na fila e voltar como `400
-            // nota inválida: 0`. Assim, pressionar 1–5 grava a nota e a
-            // próxima releitura a envia normalmente.
-            let Some(nota) = nota else {
-                continue;
-            };
+            // 🚨 **A sem nota também sobe** (C20): o ensaio inteiro vai em segundo
+            // plano durante a classificação. O `0` do catálogo nunca atravessa
+            // como nota — `PublicarNoPosVendaUseCase` só deixa passar 1–5.
             self.esteira
                 .empurrar(crate::envios::Trabalho::Classificada {
                     galeria: galeria.to_string(),
@@ -1362,13 +1357,12 @@ impl Aplicativo {
                         // 🔑 `None`: quem sobe não escolheu leva nenhuma, e o
                         // estado sai da tecla `B` de cada foto, depois.
                         estado: None,
-                        nota: Some(nota),
+                        nota,
                         // 🧾 A faixa escolhida na barra de envio da sessão.
                         produto_id: faixa.clone(),
                     }),
                 });
-            self.subindo_sozinhas
-                .insert(foto.id.clone(), (Some(nota), false));
+            self.subindo_sozinhas.insert(foto.id.clone(), (nota, false));
             entraram += 1;
         }
         if entraram == 0 {
@@ -1586,6 +1580,10 @@ impl Aplicativo {
                 let codigo = if rejeitada { REJEITADA_NO_CATALOGO } else { 0 };
                 self.biblioteca
                     .update(cx, |tela, cx| tela.sinalizar_ids(&ids, codigo, cx));
+                // 🔑 A grade da sessão desenha as locais **da última releitura**:
+                // sem pedir outra, a marca ficava gravada e invisível — e o
+                // segundo `X` decidia sobre o estado velho.
+                self.pedir_releitura_do_acervo(cx);
                 if rejeitada {
                     for id in &ids {
                         self.esteira.tirar_da_fila(id);
@@ -1616,6 +1614,9 @@ impl Aplicativo {
                 let (ids, nota) = (ids.clone(), *nota);
                 self.biblioteca
                     .update(cx, |tela, cx| tela.classificar_ids(&ids, nota, cx));
+                // 🔑 Idem: a estrela só aparece na grade da sessão depois de
+                // uma releitura, e a nota não move arquivo para provocá-la.
+                self.pedir_releitura_do_acervo(cx);
             }
             DetalhePedido::MiniaturaPronta(chave) => {
                 let chave = chave.clone();
@@ -4778,7 +4779,12 @@ fn local_para_a_grade(foto: &PhotoViewModel, ordem: i64) -> biblioteca_core::ace
         pedido_id: None,
         downloads: 0,
         revelada: persistencia::ja_revelada(foto),
-        nota: None,
+        // 🚨 **A nota que o operador deu aparece na hora**, e não só depois de a foto
+        // subir: com `None` a tecla `1`–`5` gravava no catálogo e a grade não
+        // mostrava estrela nenhuma — o gesto parecia não ter feito nada.
+        nota: u8::try_from(foto.rating)
+            .ok()
+            .filter(|n| (1..=5).contains(n)),
         ordem,
     }
 }
