@@ -2173,11 +2173,11 @@ impl NovaSessao {
 
         self.veu(cx).child(
             v_flex()
-                .w(px(560.))
-                .max_h(px(560.))
-                .p(px(20.))
-                .gap(px(12.))
-                .rounded(px(12.))
+                .w(px(760.))
+                .max_h(px(680.))
+                .p(px(24.))
+                .gap(px(14.))
+                .rounded(px(16.))
                 .border_1()
                 .border_color(tema.border)
                 .bg(tema.background)
@@ -2194,7 +2194,7 @@ impl NovaSessao {
                         .text_sm()
                         .text_color(tema.muted_foreground)
                         .child(format!(
-                            "{nome_da_pasta} — clique no início e use Shift+clique no fim para marcar um intervalo."
+                            "{nome_da_pasta} — escolha as fotos que deseja trazer para a sessão."
                         )),
                 )
                 .child(
@@ -2227,8 +2227,8 @@ impl NovaSessao {
                 .child(
                     v_flex()
                         .id("nova-fotos-da-pasta-lista")
-                        .max_h(px(320.))
-                        .gap(px(2.))
+                        .max_h(px(430.))
+                        .gap(px(4.))
                         .overflow_y_scroll()
                         .children(selecao.fotos.iter().enumerate().map(
                             |(indice, (caminho, marcado))| {
@@ -2236,14 +2236,19 @@ impl NovaSessao {
                                     .file_name()
                                     .map(|n| n.to_string_lossy().to_string())
                                     .unwrap_or_else(|| caminho.clone());
+                                let miniatura = self.miniaturas_da_pasta.get(caminho).cloned();
+                                let tem_miniatura = miniatura.is_some();
                                 h_flex()
                                     .id(SharedString::from(format!(
                                         "nova-foto-da-pasta-linha-{indice}"
                                     )))
-                                    .gap(px(8.))
-                                    .px(px(8.))
-                                    .py(px(4.))
-                                    .rounded(px(6.))
+                                    .gap(px(12.))
+                                    .px(px(10.))
+                                    .py(px(7.))
+                                    .rounded(px(10.))
+                                    .border_1()
+                                    .border_color(if *marcado { tema.primary } else { tema.border })
+                                    .when(*marcado, |linha| linha.bg(tema.accent))
                                     .hover(|h| h.bg(tema.muted))
                                     .on_click(cx.listener(
                                         move |tela, evento: &ClickEvent, _, cx| {
@@ -2255,12 +2260,49 @@ impl NovaSessao {
                                         },
                                     ))
                                     .child(
+                                        div()
+                                            .size(px(58.))
+                                            .flex_none()
+                                            .rounded(px(7.))
+                                            .overflow_hidden()
+                                            .bg(tema.muted)
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                            .when_some(miniatura, |quadro, imagem| {
+                                                quadro.child(
+                                                    img(imagem)
+                                                        .size_full()
+                                                        .object_fit(gpui::ObjectFit::Cover),
+                                                )
+                                            })
+                                            .when(!tem_miniatura, |quadro| {
+                                                quadro.child(
+                                                    Icon::new(Icone::ImagePlus)
+                                                        .size(px(22.))
+                                                        .text_color(tema.muted_foreground),
+                                                )
+                                            }),
+                                    )
+                                    .child(
                                         Checkbox::new(SharedString::from(format!(
                                             "nova-foto-da-pasta-{indice}"
                                         )))
                                         .checked(*marcado),
                                     )
-                                    .child(div().flex_1().truncate().text_sm().child(nome))
+                                    .child(
+                                        v_flex()
+                                            .flex_1()
+                                            .min_w(px(0.))
+                                            .gap(px(2.))
+                                            .child(div().truncate().text_sm().child(nome))
+                                            .child(
+                                                div()
+                                                    .text_xs()
+                                                    .text_color(tema.muted_foreground)
+                                                    .child(format!("Foto {}", indice + 1)),
+                                            ),
+                                    )
                                     .into_any_element()
                             },
                         )),

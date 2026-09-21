@@ -733,6 +733,7 @@ impl Aplicativo {
         let portas_da_nova = PortasDaNova {
             publicador: portas.publicador.clone(),
             seletor_de_fotos: portas.seletor_de_fotos.clone(),
+            gerador: portas.gerador.clone(),
             importador: portas.importador.clone(),
             acervo: portas.acervo.clone(),
             gravador: portas.gravador.clone(),

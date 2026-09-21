@@ -213,6 +213,8 @@ pub(super) struct SelecaoDaPasta {
 pub struct PortasDaNova {
     pub publicador: Arc<dyn Publicador>,
     pub seletor_de_fotos: Arc<dyn SeletorDeFotos>,
+    /// Gera miniaturas dos arquivos que ainda estão na câmera ou na pasta.
+    pub gerador: Arc<dyn crate::importacao::explorador::GeradorDeMiniaturas>,
     pub importador: Arc<dyn Importador>,
     pub acervo: Arc<dyn Acervo>,
     pub gravador: Arc<dyn Gravador>,
@@ -292,6 +294,9 @@ pub struct NovaSessao {
     /// As miniaturas das fotos do rascunho. **Lidas fora da linha da
     /// interface** — ver [`super::miniaturas`].
     pub(super) miniaturas: super::miniaturas::Miniaturas,
+    /// Miniaturas dos arquivos que ainda estão na origem da importação.
+    pub(super) miniaturas_da_pasta: HashMap<String, Arc<RenderImage>>,
+    gerando_miniaturas_da_pasta: bool,
     /// Fotos foram para a fila da receita: o próximo quadro avisa a raiz.
     ///
     /// 🔑 **Bandeira, e não `cx.emit` direto**: `aplicar_receita` é chamado de
@@ -492,6 +497,8 @@ impl NovaSessao {
             foco_do_preset: 0,
             teclado_no_preset: false,
             miniaturas: Default::default(),
+            miniaturas_da_pasta: HashMap::new(),
+            gerando_miniaturas_da_pasta: false,
             pedir_colheita_das_reveladas: false,
             amostras: Amostras::default(),
             focar: None,
@@ -1910,6 +1917,17 @@ impl NovaSessao {
                         .varrer(pasta, true, self.origens.0.clone());
                 }
                 RecadoDaImportacao::SemEscolha => self.escolhendo = false,
+                RecadoDaImportacao::MiniaturasProntas(caminhos) => {
+                    self.gerando_miniaturas_da_pasta = false;
+                    for caminho in caminhos {
+                        if let Some(imagem) = self.portas.previews.get_thumbnail(
+                            &crate::importacao::explorador::chave_de_miniatura(&caminho),
+                        ) {
+                            self.miniaturas_da_pasta
+                                .insert(caminho, crate::imagem::para_gpui(imagem));
+                        }
+                    }
+                }
                 RecadoDaImportacao::Varrido { raiz, arquivos } => {
                     let nome = std::path::Path::new(&raiz)
                         .file_name()
@@ -1924,6 +1942,11 @@ impl NovaSessao {
                     if fotos.is_empty() {
                         self.avisar(format!("Nenhuma foto em {nome}."), false);
                     } else {
+                        self.miniaturas_da_pasta.clear();
+                        self.gerando_miniaturas_da_pasta = true;
+                        self.portas
+                            .gerador
+                            .gerar(fotos.clone(), self.origens.0.clone());
                         self.selecao_da_pasta = Some(SelecaoDaPasta {
                             raiz,
                             fotos: fotos.into_iter().map(|caminho| (caminho, true)).collect(),
@@ -2076,6 +2099,7 @@ impl NovaSessao {
             || self.aviso.is_some()
             || self.amostras.esperando()
             || self.miniaturas.esperando()
+            || self.gerando_miniaturas_da_pasta
             // A receita anda numa thread: enquanto ela não termina, a tela
             // continua acordando para colher os avisos e mover a barra.
             || self.portas.receita_padrao.progresso().andando()
