@@ -814,6 +814,7 @@ impl NovaSessao {
                                 .child(Icon::new(Icone::HardDrive).size(px(16.)))
                                 .child(nome.clone())
                                 .on_click(cx.listener(move |tela, _, window, cx| {
+                                    cx.stop_propagation();
                                     tela.ler_cartao(caminho.clone(), window, cx)
                                 }))
                         }))
@@ -831,6 +832,7 @@ impl NovaSessao {
                                 .child(Icon::new(Icone::FolderInput).size(px(16.)))
                                 .child("Escolher pasta…")
                                 .on_click(cx.listener(|tela, _, window, cx| {
+                                    cx.stop_propagation();
                                     tela.escolher_pasta(window, cx)
                                 })),
                         )
@@ -847,6 +849,7 @@ impl NovaSessao {
                                 .child(Icon::new(Icone::ImagePlus).size(px(16.)))
                                 .child("Escolher fotos…")
                                 .on_click(cx.listener(|tela, _, window, cx| {
+                                    cx.stop_propagation();
                                     tela.escolher_fotos(window, cx)
                                 })),
                         ),
