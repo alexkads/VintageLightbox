@@ -194,6 +194,8 @@ impl Publicador for PublicadorDoCaixa {
     fn criar_galeria(&self, _: Sessao, _: NovaGaleria, _: Sender<Recado>) {}
     fn subir_classificada(&self, _: Sessao, _: String, _: FotoClassificada, _: Sender<Recado>) {}
     fn tirar_do_site(&self, _: Sessao, _: String, _: Sender<Recado>) {}
+    fn rejeitar_tirando_da_nuvem(&self, _: Sessao, _: String, _: Sender<Recado>) {}
+    fn remover_remoto(&self, _: Sessao, _: String, _: Sender<Recado>) {}
     fn negociar(&self, _: Sessao, _: String, _: MudancaDaFoto, _: Sender<Recado>) {}
     fn enviar_arquivo(
         &self,

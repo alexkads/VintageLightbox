@@ -121,9 +121,10 @@ struct MedidaDaGrade {
 
 /// Os recortes da barra, na ordem da web.
 ///
-/// 🚨 **"Sem nota" é o último de propósito**: é um recorte de exceção — o que
-/// está sem classificação não pode ir à venda, não recebe marca d'água e não
-/// devia estar no storage. Ele existe para esvaziar, não para consultar.
+/// 🚨 **"Sem nota" é o último de propósito**: é o recorte de onde se
+/// classifica. A sem nota está à venda e sobe com marca d'água (dono,
+/// 2026-09-21), mas vender **no balcão** pede nota e `P` — é aqui que se acha o
+/// que ainda falta classificar.
 /// O modificador do sistema, como o `useTeclaDeAtalho` do site: `⌘` no Mac,
 /// `Ctrl` no resto. A dica que mostra a tecla errada ensina o gesto errado.
 #[cfg(target_os = "macos")]
@@ -139,7 +140,7 @@ const MODIFICADOR_D: &str = "⌘+D";
 #[cfg(not(target_os = "macos"))]
 const MODIFICADOR_D: &str = "Ctrl+D";
 
-const FILTROS: [(&str, Filtro); 7] = [
+const FILTROS: [(&str, Filtro); 8] = [
     ("Todas", Filtro::Todas),
     // 🔑 **Os dois passos do balcão, na ordem em que acontecem**: classificar
     // (a nota, que é o que sobe a foto) e sinalizar (a tecla P). "Sinalizada"
@@ -154,6 +155,8 @@ const FILTROS: [(&str, Filtro); 7] = [
     ("À venda", Filtro::Situacao(acervo::Estado::Disponivel)),
     ("Compradas", Filtro::Situacao(acervo::Estado::Comprada)),
     ("Apagadas", Filtro::Apagadas),
+    // ❌ As do `X` (C21): é aqui que se acham para desfazer.
+    ("Rejeitadas", Filtro::Rejeitadas),
     ("Sem nota", Filtro::SemNota),
 ];
 
@@ -180,6 +183,9 @@ pub enum Pedido {
     /// 🔑 **Quem grava é a Biblioteca**, dona do catálogo — como na nota
     /// ([`Pedido::Classificar`]). Esta tela só diz quais e para que lado.
     Rejeitar { ids: Vec<String>, rejeitada: bool },
+    /// ❌ A tecla `X` em fotos **que estão na nuvem**: elas voltam para cá e
+    /// saem de lá (dono, 2026-09-21). Quem faz é a raiz — `app::resgate`.
+    RejeitarDaNuvem(Vec<crate::app::resgate::AFotoQueVolta>),
     /// "Imprimir…": a folha de impressão com as fotos marcadas (só no desktop).
     Imprimir(Vec<String>),
     /// A miniatura de uma foto do site chegou ao cache, sob esta chave.
@@ -251,6 +257,15 @@ pub struct FotoARevelar {
     /// Se esta foto **ainda não subiu**: o id é o do catálogo local, e o arquivo
     /// está neste disco.
     pub no_disco: bool,
+}
+
+/// Onde uma foto está: na nuvem, neste computador, ou indo — ver
+/// [`Detalhe::lugar_de`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Lugar {
+    pub nuvem: bool,
+    pub disco: bool,
+    pub transito: bool,
 }
 
 /// O andamento de uma importação: quantas foram pedidas e quantas responderam.
@@ -469,6 +484,21 @@ pub struct Detalhe {
     /// sob `site:<id>` não acha nada, e o sintoma é a **célula preta** — a foto
     /// aparece na grade, com nome, estado e faixa, e sem imagem.
     ids_locais: std::collections::HashSet<String>,
+    /// A foto que acabou de subir: o id dela no catálogo → o id no site.
+    ///
+    /// 🚨 **A foto troca de id no meio da classificação** (achado rodando o app
+    /// contra a pilha local, 21/set/2026). O ensaio sobe enquanto o operador
+    /// classifica (C20): ele clica na foto, ela termina de subir, e a grade a
+    /// trocava pela do site — com outro id. A seleção, guardada por id, sumia,
+    /// e o `5` seguinte caía em nada, sem aviso. Com este mapa a seleção e o
+    /// gesto atravessam a troca, e a local só sai da grade quando a do site já
+    /// está nela.
+    subiu_como: std::collections::HashMap<String, String>,
+    /// As do site que **também** têm cópia neste computador (o catálogo tem a
+    /// linha delas com o id remoto).
+    copia_aqui: std::collections::HashSet<String>,
+    /// As locais que estão subindo agora.
+    subindo_agora: std::collections::HashSet<String>,
     /// Quais fotos locais já têm a **revelada da receita padrão** no cache.
     ///
     /// 🔑 **Consultado uma vez por foto, e não por quadro.** Saber se a chave
@@ -706,6 +736,9 @@ impl Detalhe {
             do_site: Vec::new(),
             locais: Vec::new(),
             ids_locais: std::collections::HashSet::new(),
+            subiu_como: std::collections::HashMap::new(),
+            copia_aqui: std::collections::HashSet::new(),
+            subindo_agora: std::collections::HashSet::new(),
             com_revelada: std::collections::HashMap::new(),
             campos_do_painel: None,
             atendimento_aberto: false,
@@ -921,6 +954,25 @@ impl Detalhe {
     /// ter uma sem classificar marca as nove e conta a décima — recusar o lote
     /// faria o operador procurar qual foi, numa grade de duzentas.
     pub fn marcar_como(&mut self, estado: EstadoNoBalcao, cx: &mut Context<Self>) {
+        // ❌ **A rejeitada também não vai ao balcão** (C21) — a mesma recusa do
+        // servidor (*"foto rejeitada não vai ao balcão: tire a rejeição
+        // antes"*), feita aqui antes da ida e separando em vez de bloquear,
+        // como a da sem nota. Ela vem primeiro porque é o recado certo: na
+        // rejeitada sem nota, pedir a nota mandaria o operador para o lado
+        // errado.
+        let rejeitadas: Vec<String> = if estado == EstadoNoBalcao::LevadaNoBalcao {
+            self.selecao
+                .marcadas()
+                .filter_map(|p| self.acervo.visivel(p))
+                .filter(|f| f.editavel() && f.rejeitada)
+                .map(|f| f.arquivo.clone())
+                .collect()
+        } else {
+            Vec::new()
+        };
+        if !rejeitadas.is_empty() {
+            self.desmarcar_onde(|f| f.rejeitada, cx);
+        }
         let sem_nota: Vec<String> = self
             .selecao
             .marcadas()
@@ -940,23 +992,50 @@ impl Detalhe {
             },
             cx,
         );
+        let mut recados: Vec<String> = Vec::new();
+        if !rejeitadas.is_empty() {
+            recados.push(if rejeitadas.len() == 1 {
+                format!(
+                    "{} está rejeitada e não vai ao balcão: tire a rejeição (X) antes.",
+                    rejeitadas[0]
+                )
+            } else {
+                format!(
+                    "{} rejeitadas ficaram de fora: tire a rejeição (X) antes de marcar.",
+                    rejeitadas.len()
+                )
+            });
+        }
         if !sem_nota.is_empty() {
-            self.erro = Some(
-                if sem_nota.len() == 1 {
-                    format!(
-                        "{} ficou de fora: classifique de 1 a 5 antes de marcar.",
-                        sem_nota[0]
-                    )
-                } else {
-                    format!(
-                        "{} sem classificação ficaram de fora: dê a nota de 1 a 5 antes de marcar.",
-                        sem_nota.len()
-                    )
-                }
-                .into(),
-            );
+            recados.push(if sem_nota.len() == 1 {
+                format!(
+                    "{} ficou de fora: classifique de 1 a 5 antes de marcar.",
+                    sem_nota[0]
+                )
+            } else {
+                format!(
+                    "{} sem classificação ficaram de fora: dê a nota de 1 a 5 antes de marcar.",
+                    sem_nota.len()
+                )
+            });
+        }
+        if !recados.is_empty() {
+            self.erro = Some(recados.join(" ").into());
             cx.notify();
         }
+    }
+
+    /// Tira da seleção as marcadas que batem com `regra`.
+    fn desmarcar_onde(&mut self, regra: impl Fn(&acervo::Foto) -> bool, cx: &mut Context<Self>) {
+        let fora: Vec<usize> = self
+            .selecao
+            .marcadas()
+            .filter(|p| self.acervo.visivel(*p).is_some_and(&regra))
+            .collect();
+        for posicao in fora {
+            self.selecao.desmarcar_uma(posicao);
+        }
+        cx.notify();
     }
 
     /// Tira da seleção as fotos do acervo sem nota — elas não vão ao balcão.
@@ -1300,30 +1379,123 @@ impl Detalhe {
             .filter_map(|p| self.acervo.visivel(p))
             .cloned()
             .collect();
-        let (podem, compradas): (Vec<&acervo::Foto>, Vec<&acervo::Foto>) = marcadas
-            .iter()
-            .partition(|f| f.estado != acervo::Estado::Comprada);
-        // 🚨 **A comprada fica de fora com aviso, e não em silêncio** — a mesma
-        // regra da web: recusar o lote inteiro faria o operador procurar qual
-        // foi, e recusar calado faria a tecla parecer quebrada.
-        let aviso: Option<SharedString> = (!compradas.is_empty()).then(|| {
-            let nomes: Vec<&str> = compradas.iter().map(|f| f.arquivo.as_str()).collect();
-            format!(
-                "{} foto(s) compradas ficam como estão — há cobrança e entrega atrás delas ({})",
-                compradas.len(),
-                nomes.join(" / ")
-            )
-            .into()
+        // 🚨 **A comprada e a levada ficam de fora com aviso, e não em
+        // silêncio** — recusar o lote inteiro faria o operador procurar qual
+        // foi, e recusar calado faria a tecla parecer quebrada. A comprada tem
+        // cobrança e entrega atrás; a **levada** tem a venda do balcão em
+        // andamento, e rejeitá-la a tiraria da nuvem no meio dela (2026-09-21).
+        let (podem, ficam): (Vec<&acervo::Foto>, Vec<&acervo::Foto>) =
+            marcadas.iter().partition(|f| {
+                !matches!(
+                    f.estado,
+                    acervo::Estado::Comprada | acervo::Estado::LevadaNoBalcao
+                )
+            });
+        let aviso: Option<SharedString> = (!ficam.is_empty()).then(|| {
+            let compradas: Vec<&str> = ficam
+                .iter()
+                .filter(|f| f.estado == acervo::Estado::Comprada)
+                .map(|f| f.arquivo.as_str())
+                .collect();
+            let levadas: Vec<&str> = ficam
+                .iter()
+                .filter(|f| f.estado == acervo::Estado::LevadaNoBalcao)
+                .map(|f| f.arquivo.as_str())
+                .collect();
+            let mut frases = Vec::new();
+            if !compradas.is_empty() {
+                frases.push(format!(
+                    "{} foto(s) compradas ficam como estão — há cobrança e entrega atrás delas ({})",
+                    compradas.len(),
+                    compradas.join(" / ")
+                ));
+            }
+            if !levadas.is_empty() {
+                frases.push(format!(
+                    "{} foto(s) levadas no balcão ficam como estão — tire a marcação (P) antes de \
+                     rejeitar ({})",
+                    levadas.len(),
+                    levadas.join(" / ")
+                ));
+            }
+            frases.join(". ").into()
         });
+        if !ficam.is_empty() {
+            self.desmarcar_onde(|f| f.estado == acervo::Estado::LevadaNoBalcao, cx);
+        }
         let todas_rejeitadas = !podem.is_empty() && podem.iter().all(|f| f.rejeitada);
-        if !podem.is_empty() {
+        // 🔄 **Rejeitar o que está na nuvem é trazê-lo para cá e tirá-lo de
+        // lá** (dono, 2026-09-21: *"quando o usuário rejeitar, a mesma voltará
+        // para o arquivo local e sairá da núvem"*). A que só existe aqui segue
+        // o caminho de sempre — a marca no catálogo segura a subida. Desfazer
+        // também: a local sem a marca volta a subir sozinha, e a do site que
+        // alguém rejeitou pelo caminho antigo perde a marca num `PATCH`.
+        let rejeitar = !todas_rejeitadas;
+        let da_nuvem: Vec<crate::app::resgate::AFotoQueVolta> = if rejeitar {
+            podem
+                .iter()
+                .filter_map(|f| {
+                    let no_site = match self.subiu_como.get(&f.id) {
+                        Some(no_site) => no_site.clone(),
+                        None if !self.ids_locais.contains(&f.id) => f.id.clone(),
+                        None => return None,
+                    };
+                    // Os PARÂMETROS que estão na nuvem voltam com ela.
+                    let (ajustes, corte) = self
+                        .do_site(&no_site)
+                        .and_then(|g| g.ajustes.as_ref())
+                        .map(crate::revelacao::persistencia::de_json)
+                        .unwrap_or_default();
+                    Some(crate::app::resgate::AFotoQueVolta {
+                        no_site,
+                        arquivo: f.arquivo.clone(),
+                        ajustes,
+                        corte,
+                    })
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        // As que vão para o resgate saem **deste gesto** — o resto (as só
+        // locais) segue pelo catálogo, abaixo — e voltam à seleção no fim: se
+        // o resgate falhar, o próximo `X` tem de cair nelas sem outro clique.
+        let fora_do_gesto: Vec<usize> = if da_nuvem.is_empty() {
+            Vec::new()
+        } else {
+            let vao: std::collections::HashSet<&str> =
+                da_nuvem.iter().map(|f| f.no_site.as_str()).collect();
+            self.selecao
+                .marcadas()
+                .filter(|p| {
+                    self.acervo.visivel(*p).is_some_and(|f| {
+                        vao.contains(f.id.as_str())
+                            || self
+                                .subiu_como
+                                .get(&f.id)
+                                .is_some_and(|s| vao.contains(s.as_str()))
+                    })
+                })
+                .collect()
+        };
+        for posicao in &fora_do_gesto {
+            self.selecao.desmarcar_uma(*posicao);
+        }
+        if !da_nuvem.is_empty() {
+            cx.emit(Pedido::RejeitarDaNuvem(da_nuvem));
+        }
+        let restam = self.selecao.marcadas().next().is_some();
+        if !podem.is_empty() && restam {
             self.mudar_as_marcadas(
                 domain::services::pos_venda::MudancaDaFoto {
-                    rejeitada: Some(!todas_rejeitadas),
+                    rejeitada: Some(rejeitar),
                     ..Default::default()
                 },
                 cx,
             );
+        }
+        for posicao in fora_do_gesto {
+            self.selecao.marcar(posicao);
         }
         // ⚠️ **Depois da mudança, e não antes**: `mudar_as_marcadas` limpa o
         // erro ao despachar, e o aviso posto antes morreria no mesmo gesto.
@@ -1389,7 +1561,14 @@ impl Detalhe {
             .marcadas()
             .filter_map(|p| self.acervo.visivel(p))
             .filter(|f| f.editavel())
-            .map(|f| f.id.clone())
+            // 🔑 A que já subiu e ainda aparece como local recebe o gesto no
+            // site, onde ela está agora — ver `subiu_como`.
+            .map(|f| {
+                self.subiu_como
+                    .get(&f.id)
+                    .cloned()
+                    .unwrap_or_else(|| f.id.clone())
+            })
             .collect();
 
         // 🚨 **A foto que só existe no disco faz outro caminho.** Ela não tem
@@ -1500,6 +1679,65 @@ impl Detalhe {
         self.acompanhar(cx);
     }
 
+    /// As que acabaram de subir: id do catálogo → id no site. Ver
+    /// [`Self::subiu_como`].
+    pub fn definir_subidas(&mut self, subidas: std::collections::HashMap<String, String>) {
+        self.subiu_como = subidas;
+    }
+
+    /// Onde as fotos estão — o que a raiz sabe e esta tela não: quais do site
+    /// têm cópia aqui, e quais locais estão subindo.
+    pub fn definir_lugares(
+        &mut self,
+        copia_aqui: std::collections::HashSet<String>,
+        subindo_agora: std::collections::HashSet<String>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.copia_aqui != copia_aqui || self.subindo_agora != subindo_agora {
+            self.copia_aqui = copia_aqui;
+            self.subindo_agora = subindo_agora;
+            cx.notify();
+        }
+    }
+
+    /// 📍 **Onde esta foto está** — a mesma pergunta e as mesmas três respostas
+    /// do canto de baixo da grade do site (`onde-esta.ts`, `SeloDoLugar`).
+    ///
+    /// 🚨 **Nuvem e disco não são excludentes**: a foto que subiu continua com
+    /// os bytes aqui, e mostrar só a nuvem escondia o espaço que ela ocupa.
+    pub fn lugar_de(&self, id: &str) -> Lugar {
+        if self.subiu_como.contains_key(id) {
+            return Lugar {
+                nuvem: true,
+                disco: true,
+                transito: false,
+            };
+        }
+        if self.ids_locais.contains(id) {
+            let transito = self.subindo_agora.contains(id);
+            return Lugar {
+                nuvem: false,
+                disco: !transito,
+                transito,
+            };
+        }
+        let apagada = self.do_site.iter().any(|f| f.id == id && f.apagada);
+        Lugar {
+            nuvem: !apagada,
+            disco: self.copia_aqui.contains(id),
+            transito: false,
+        }
+    }
+
+    /// O id que vale para esta foto agora: o do site, se ela subiu e a do site
+    /// já está na grade; o dela, senão.
+    fn id_de_agora(&self, id: &str) -> String {
+        match self.subiu_como.get(id) {
+            Some(no_site) if self.do_site.iter().any(|f| &f.id == no_site) => no_site.clone(),
+            _ => id.to_string(),
+        }
+    }
+
     /// As fotos deste ensaio que a raiz achou no catálogo local.
     ///
     /// 🚨 **Só as que ainda não subiram.** Uma foto classificada existe dos dois
@@ -1536,11 +1774,22 @@ impl Detalhe {
     /// `ordem`, quem já as tinha separado foi o servidor (que ordena por
     /// `ordem, criada_em`), e reordenar por id jogaria fora esse critério.
     fn recompor_acervo(&mut self) {
-        let marcadas = self.ids_marcados();
-        let focada = self.em_foco().map(|f| f.id.clone());
+        let marcadas: Vec<String> = self
+            .ids_marcados()
+            .iter()
+            .map(|id| self.id_de_agora(id))
+            .collect();
+        let focada = self.em_foco().map(|f| self.id_de_agora(&f.id));
 
         let mut todas = self.do_site.clone();
-        todas.extend(self.locais.iter().cloned());
+        // 🔑 A que subiu só sai quando a do site já está aqui: entre uma e
+        // outra, é ela que recebe o clique e a tecla.
+        todas.extend(
+            self.locais
+                .iter()
+                .filter(|f| self.id_de_agora(&f.id) == f.id)
+                .cloned(),
+        );
         todas.sort_by_key(|f| f.ordem);
         self.acervo.definir(todas);
 
@@ -1569,6 +1818,14 @@ impl Detalhe {
     /// Se há uma importação em curso — a que segura o botão e desenha a barra.
     pub fn importando(&self) -> bool {
         self.importacao.is_some_and(|i| !i.terminou())
+    }
+
+    /// O andamento da cópia que o assistente continua depois de criar a
+    /// sessão. É a mesma barra da importação feita aqui — e, enquanto ela anda,
+    /// o botão "Importar" espera, pela mesma razão de uma importação de cada vez.
+    pub fn mostrar_a_copia(&mut self, andamento: Importacao, cx: &mut Context<Self>) {
+        self.importacao = Some(andamento);
+        cx.notify();
     }
 
     /// O andamento da última importação, terminada ou não.
@@ -2195,11 +2452,14 @@ impl Detalhe {
                     // promete. O `posicao_de` responde `None` e ela fica de fora
                     // — as outras marcadas continuam.
                     for id in &marcadas {
-                        if let Some(p) = self.acervo.posicao_de(id) {
+                        if let Some(p) = self.acervo.posicao_de(&self.id_de_agora(id)) {
                             self.selecao.marcar(p);
                         }
                     }
-                    if let Some(p) = focada.as_deref().and_then(|id| self.acervo.posicao_de(id)) {
+                    if let Some(p) = focada
+                        .as_deref()
+                        .and_then(|id| self.acervo.posicao_de(&self.id_de_agora(id)))
+                    {
                         self.selecao.focar(Some(p));
                         // A releitura reposiciona; o foco tem de reaparecer na
                         // tela, e não só no estado.
@@ -3556,7 +3816,15 @@ impl Detalhe {
                         // daqui transforma o `Contain` em corte — a mesma
                         // armadilha que cortava a tela do cliente
                         // (`cliente::camada`, 17/set/2026).
-                        quadro.child(img(imagem).max_w_full().max_h_full())
+                        // A rejeitada fica esmaecida: continua ali para ser
+                        // desfeita, e não compete com as que estão em jogo.
+                        let rejeitada = foto.rejeitada;
+                        quadro.child(
+                            img(imagem)
+                                .max_w_full()
+                                .max_h_full()
+                                .when(rejeitada, |i| i.opacity(0.4)),
+                        )
                     })
                     // O selo do estado, no canto — como na tela do site, e
                     // agora com a cor do que ele diz (`crate::selos`).
@@ -3567,12 +3835,24 @@ impl Detalhe {
                             .left(px(4.))
                             // 🚨 A importada não é "à venda": ela nem chegou ao
                             // site. Ver `selos::selo_de_so_no_disco`.
-                            .child(if self.ids_locais.contains(&foto.id) {
+                            // ❌ A rejeitada diz isso antes de tudo (C21): é a
+                            // decisão que muda o que acontece com ela.
+                            .child(if foto.rejeitada && !foto.apagada {
+                                selos::selo_de_rejeitada(cx).into_any_element()
+                            } else if self.ids_locais.contains(&foto.id) {
                                 selos::selo_de_so_no_disco(cx).into_any_element()
                             } else {
                                 selos::selo_do_estado(foto.estado, foto.apagada, cx)
                                     .into_any_element()
                             }),
+                    )
+                    // 📍 **Onde ela está**, no canto de baixo — como no site.
+                    .child(
+                        div()
+                            .absolute()
+                            .bottom(px(4.))
+                            .left(px(4.))
+                            .child(selo_do_lugar(self.lugar_de(&foto.id))),
                     )
                     .when(marcada, |quadro| {
                         quadro.child(
@@ -4503,7 +4783,12 @@ impl Detalhe {
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child(foto.estado.rotulo()),
+                        .child(if foto.rejeitada && !foto.apagada {
+                            // C21: o que ela é agora, e o que isso quer dizer.
+                            "Rejeitada — fora da galeria do cliente; X desfaz".to_string()
+                        } else {
+                            foto.estado.rotulo().to_string()
+                        }),
                 )
                 .child(
                     div()
@@ -5075,6 +5360,43 @@ impl Detalhe {
                 },
             ))
     }
+}
+
+/// ☁️ 💾 ⏳ O selo do lugar, sobre a foto: o `SeloDoLugar` do site.
+///
+/// ⚠️ **A nuvem é discreta e o disco sozinho não**: o normal é a foto estar no
+/// acervo, e o que chama a atenção é o que ainda depende deste computador. Com
+/// ela nos dois lugares, o disco é informação de espaço, e fica cinza.
+fn selo_do_lugar(lugar: Lugar) -> impl IntoElement {
+    use crate::recursos::Icone;
+    use gpui_component::Icon;
+    let redondo = |icone: Icone, cor: gpui::Hsla, fundo: u32| {
+        div()
+            .size(px(22.))
+            .rounded_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(gpui::rgba(fundo))
+            .child(Icon::new(icone).size(px(13.)).text_color(cor))
+    };
+    let cinza: gpui::Hsla = gpui::rgb(0xa3a3a3).into();
+    div()
+        .flex()
+        .gap(px(4.))
+        .when(lugar.transito, |d| {
+            d.child(redondo(Icone::LoaderCircle, cores::selecao(), 0x000000b3))
+        })
+        .when(lugar.nuvem, |d| {
+            d.child(redondo(Icone::Cloud, cores::nuvem(), 0x00000080))
+        })
+        .when(lugar.disco, |d| {
+            d.child(if lugar.nuvem {
+                redondo(Icone::HardDrive, cinza, 0x00000080)
+            } else {
+                redondo(Icone::HardDrive, cores::quente(), 0x000000b3)
+            })
+        })
 }
 
 /// Uma tecla escrita, como os `<kbd>` do site.
@@ -5720,14 +6042,15 @@ mod testes {
             .expect("a janela deve estar aberta");
     }
 
-    /// 🚨 **Sem classificação não é "à venda" nem "levada".**
+    /// 🚨 **A sem nota está à venda.**
     ///
-    /// É a regra do dono de 2026-09-05, e ela mora no core: contar a sem nota no
-    /// recorte de venda dizia o contrário na primeira linha da tela — *"à venda
-    /// 8"* numa galeria em que nenhuma das oito tinha nota. Elas moram no
-    /// recorte "Sem nota", que existe para esvaziar.
+    /// 🔄 **Revogado pelo dono em 2026-09-21**: *"A foto com classificação 0
+    /// (zero) fica disponível para venda e irá para nuvem com marca d'água"*.
+    /// Até ali a sem nota ficava fora de "À venda" (regra de 2026-09-05). Agora
+    /// ela conta nos dois recortes — "À venda" e "Sem nota" —, e quem fica fora
+    /// da venda é só a rejeitada.
     #[gpui::test]
-    fn o_recorte_por_situacao_exige_classificacao(cx: &mut TestAppContext) {
+    fn a_sem_nota_esta_a_venda(cx: &mut TestAppContext) {
         let (janela, _) = janela(
             cx,
             vec![
@@ -5744,8 +6067,8 @@ mod testes {
                 assert_eq!(contagens.todas, 3);
                 assert_eq!(
                     contagens.de(Filtro::Situacao(acervo::Estado::Disponivel)),
-                    1,
-                    "a sem nota não entra em 'à venda'"
+                    2,
+                    "a sem nota está à venda"
                 );
                 assert_eq!(contagens.de(Filtro::SemNota), 1);
 
@@ -6458,7 +6781,21 @@ mod testes {
             })
         });
 
-        // A foto do site: um `PATCH` com a rejeição, e nada mais.
+        let da_nuvem = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let recebidas_da_nuvem = da_nuvem.clone();
+        let _outra_assinatura = cx.update(|cx| {
+            cx.subscribe(&raiz, move |_, evento: &Pedido, _| {
+                if let Pedido::RejeitarDaNuvem(fotos) = evento {
+                    recebidas_da_nuvem
+                        .borrow_mut()
+                        .extend(fotos.iter().map(|f| f.no_site.clone()));
+                }
+            })
+        });
+
+        // 🔄 A foto do site vai para o resgate (dono, 2026-09-21): ela volta
+        // para cá e sai da nuvem. Quem faz é a raiz; a tela só pede — e não
+        // manda `PATCH` nenhum.
         janela
             .update(cx, |tela, _window, cx| {
                 tela.clicar(0, Modificadores::default(), cx);
@@ -6467,13 +6804,11 @@ mod testes {
             .expect("a janela deve estar aberta");
         cx.run_until_parked();
 
-        let negociadas = publicador.negociadas();
-        assert_eq!(negociadas.len(), 1, "{negociadas:?}");
-        assert_eq!(negociadas[0].0, "f1");
-        assert_eq!(negociadas[0].1.rejeitada, Some(true));
+        assert_eq!(da_nuvem.borrow().as_slice(), ["f1"]);
+        assert!(publicador.negociadas().is_empty(), "nenhum PATCH");
         assert!(
             publicador.tiradas().is_empty(),
-            "🚨 rejeitar não apaga arquivo nenhum (C21)"
+            "🚨 a tela não apaga: quem tira da nuvem é o resgate, depois da cópia"
         );
 
         // 🛒 A comprada fica de fora, e a tela diz quem ficou.
@@ -6491,7 +6826,7 @@ mod testes {
             })
             .expect("a janela deve estar aberta");
         cx.run_until_parked();
-        assert_eq!(publicador.negociadas().len(), 1, "e nada vai ao site");
+        assert!(publicador.negociadas().is_empty(), "e nada vai ao site");
 
         // A foto que ainda não subiu: o pedido vai para o catálogo local.
         janela
@@ -6510,11 +6845,207 @@ mod testes {
             [(vec!["nova-1".to_string()], true)],
             "a local é rejeitada no catálogo, que é onde ela existe"
         );
-        assert_eq!(
-            publicador.negociadas().len(),
-            1,
+        assert!(
+            publicador.negociadas().is_empty(),
             "e não vai ao site: ela não tem linha lá"
         );
+        assert_eq!(da_nuvem.borrow().len(), 1, "nem ao resgate");
+    }
+
+    /// 🚨 **A foto que termina de subir no meio da classificação não perde o
+    /// gesto.**
+    ///
+    /// Achado rodando o app contra a pilha local (21/set/2026): o operador
+    /// clicava numa foto, ela terminava de subir, a grade a trocava pela do
+    /// site — com outro id — e o `5` seguinte caía em nada, sem aviso. Aqui:
+    /// no intervalo em que a do site ainda não voltou, a local continua na
+    /// grade e a tecla vai ao site com o id novo; quando a do site chega, a
+    /// seleção passa para ela.
+    #[gpui::test]
+    fn a_foto_que_sobe_no_meio_da_classificacao_nao_perde_o_gesto(cx: &mut TestAppContext) {
+        let (janela, publicador) = janela(
+            cx,
+            vec![foto("f1", EstadoDaFotoNoSite::Disponivel, Some(4))],
+        );
+        entrar(cx, &janela);
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.definir_locais(vec![local("nova-1")], cx);
+                let p = tela.acervo.posicao_de("nova-1").expect("a local na grade");
+                tela.clicar(p, Modificadores::default(), cx);
+                // Ela terminou de subir; a do site ainda não voltou.
+                tela.definir_subidas([("nova-1".to_string(), "s1".to_string())].into());
+                tela.definir_locais(vec![local("nova-1")], cx);
+                assert!(
+                    tela.como_esta("nova-1").is_some(),
+                    "no intervalo, a local continua na grade"
+                );
+                tela.dar_nota(5, cx);
+            })
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+        let negociadas = publicador.negociadas();
+        assert_eq!(negociadas.len(), 1, "{negociadas:?}");
+        assert_eq!(
+            negociadas[0].0, "s1",
+            "o gesto vai para onde ela está agora"
+        );
+        assert_eq!(negociadas[0].1.nota, Some(Some(5)));
+
+        // A do site chega: a local sai, e a seleção passa para ela.
+        publicador.fotos_da_sessao.lock().unwrap().push(foto(
+            "s1",
+            EstadoDaFotoNoSite::Disponivel,
+            Some(5),
+        ));
+        janela
+            .update(cx, |tela, _window, cx| tela.reler(cx))
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.colher(cx);
+                assert!(tela.como_esta("nova-1").is_none(), "uma foto só na grade");
+                assert_eq!(
+                    tela.em_foco().map(|f| f.id.clone()).as_deref(),
+                    Some("s1"),
+                    "o foco atravessou a troca de id"
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 📍 **O selo do lugar responde o que o do site responde** (`ondeEla`):
+    /// a do site sem cópia aqui é só nuvem; com cópia, nuvem e disco; a local
+    /// na fila está indo; a local fora da fila (a rejeitada) está só no disco;
+    /// e a que acabou de subir já é nuvem, ainda com os bytes aqui.
+    #[gpui::test]
+    fn o_selo_do_lugar_diz_onde_a_foto_esta(cx: &mut TestAppContext) {
+        let (janela, _publicador) = janela(
+            cx,
+            vec![
+                foto("s1", EstadoDaFotoNoSite::Disponivel, Some(4)),
+                foto("s2", EstadoDaFotoNoSite::Disponivel, None),
+            ],
+        );
+        entrar(cx, &janela);
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.definir_locais(vec![local("l1"), local("l2"), local("l3")], cx);
+                tela.definir_subidas([("l3".to_string(), "s9".to_string())].into());
+                tela.definir_lugares(["s2".to_string()].into(), ["l1".to_string()].into(), cx);
+                let lugar = |nuvem, disco, transito| Lugar {
+                    nuvem,
+                    disco,
+                    transito,
+                };
+                assert_eq!(
+                    tela.lugar_de("s1"),
+                    lugar(true, false, false),
+                    "só na nuvem"
+                );
+                assert_eq!(tela.lugar_de("s2"), lugar(true, true, false), "nos dois");
+                assert_eq!(tela.lugar_de("l1"), lugar(false, false, true), "subindo");
+                assert_eq!(tela.lugar_de("l2"), lugar(false, true, false), "só aqui");
+                assert_eq!(
+                    tela.lugar_de("l3"),
+                    lugar(true, true, false),
+                    "acabou de subir"
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// ❌ **A rejeitada tem recorte próprio, sai de "À venda" e não vai ao
+    /// balcão** (C21).
+    ///
+    /// O `P` com uma rejeitada na seleção marca as outras e diz qual ficou de
+    /// fora — a mesma recusa do servidor, feita antes da ida e separando em vez
+    /// de bloquear, como a da sem nota.
+    #[gpui::test]
+    fn a_rejeitada_tem_recorte_e_nao_vai_ao_balcao(cx: &mut TestAppContext) {
+        let mut rejeitada = foto("r1", EstadoDaFotoNoSite::Disponivel, Some(4));
+        rejeitada.rejeitada = true;
+        let (janela, publicador) = janela(
+            cx,
+            vec![
+                rejeitada,
+                foto("f1", EstadoDaFotoNoSite::Disponivel, Some(4)),
+            ],
+        );
+        entrar(cx, &janela);
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                let c = tela.contagens();
+                assert_eq!(c.de(Filtro::Rejeitadas), 1);
+                assert_eq!(
+                    c.de(Filtro::Situacao(acervo::Estado::Disponivel)),
+                    1,
+                    "a rejeitada não está à venda"
+                );
+                tela.selecionar_tudo(cx);
+                tela.marcar_como(EstadoNoBalcao::LevadaNoBalcao, cx);
+                assert!(
+                    tela.erro
+                        .as_deref()
+                        .is_some_and(|e| e.contains("rejeitada") && e.contains("r1.jpg")),
+                    "diz quem ficou de fora: {:?}",
+                    tela.erro
+                );
+            })
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+        let negociadas = publicador.negociadas();
+        assert_eq!(negociadas.len(), 1, "{negociadas:?}");
+        assert_eq!(negociadas[0].0, "f1", "só a que pode ir ao balcão");
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.filtrar(Filtro::Rejeitadas, cx);
+                assert_eq!(tela.total_visivel(), 1);
+                assert!(tela.como_esta("r1").is_some(), "é aqui que ela se acha");
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// ❌ **A levada no balcão não é rejeitada** (2026-09-21): rejeitar tira da
+    /// nuvem, e ela tem a venda do balcão em andamento. Fica de fora com aviso,
+    /// e as outras da seleção seguem.
+    #[gpui::test]
+    fn o_x_nao_rejeita_a_levada_no_balcao(cx: &mut TestAppContext) {
+        let (janela, publicador) = janela(
+            cx,
+            vec![foto("l1", EstadoDaFotoNoSite::LevadaNoBalcao, Some(5))],
+        );
+        entrar(cx, &janela);
+        let raiz = cx.update(|cx| janela.root(cx).expect("a tela"));
+        let pedidos = std::rc::Rc::new(std::cell::RefCell::new(0));
+        let contagem = pedidos.clone();
+        let _assinatura = cx.update(|cx| {
+            cx.subscribe(&raiz, move |_, evento: &Pedido, _| {
+                if matches!(evento, Pedido::RejeitarDaNuvem(_)) {
+                    *contagem.borrow_mut() += 1;
+                }
+            })
+        });
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.clicar(0, Modificadores::default(), cx);
+                tela.alternar_rejeicao(cx);
+                assert!(
+                    tela.erro
+                        .as_deref()
+                        .is_some_and(|e| e.contains("levadas no balcão") && e.contains("l1.jpg")),
+                    "{:?}",
+                    tela.erro
+                );
+            })
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+        assert_eq!(*pedidos.borrow(), 0, "não vai ao resgate");
+        assert!(publicador.negociadas().is_empty(), "nem ao site");
     }
 
     /// 🔁 **`X` de novo desfaz a rejeição, e a decisão é do grupo.**
@@ -6530,7 +7061,8 @@ mod testes {
             f
         };
 
-        // Uma rejeitada e uma não: o gesto rejeita as duas.
+        // Uma rejeitada e uma não: o gesto rejeita as duas — e as duas estão na
+        // nuvem, então as duas vão ao resgate (2026-09-21), e nenhuma num PATCH.
         let (mista, publicador) = janela(
             cx,
             vec![
@@ -6546,11 +7078,9 @@ mod testes {
             })
             .expect("a janela deve estar aberta");
         cx.run_until_parked();
-        let negociadas = publicador.negociadas();
-        assert_eq!(negociadas.len(), 2, "{negociadas:?}");
         assert!(
-            negociadas.iter().all(|(_, m)| m.rejeitada == Some(true)),
-            "com uma fora, o grupo inteiro é rejeitado: {negociadas:?}"
+            publicador.negociadas().is_empty(),
+            "com uma fora, o grupo inteiro vai ao resgate, e não ao PATCH"
         );
 
         // As duas rejeitadas: agora o gesto desfaz.
@@ -6845,8 +7375,9 @@ mod testes {
                 );
                 assert_eq!(
                     contagens.de(Filtro::Situacao(acervo::Estado::Disponivel)),
-                    1,
-                    "e não entra em 'à venda': quem está à venda é quem subiu"
+                    3,
+                    "e entra em 'à venda': ela sobe sozinha e vende com marca d'água \
+                     (dono, 2026-09-21)"
                 );
 
                 // 🔑 **No fim da lista**: quem importou 500 quer vê-las onde as

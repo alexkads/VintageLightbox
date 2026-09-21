@@ -1547,14 +1547,15 @@ mod testes {
         assert!(classificacao(&apagada).apagada);
     }
 
-    /// Os números dos chips são os do core — "À venda" não conta a sem nota.
+    /// Os números dos chips são os do core — "À venda" conta a sem nota (dono,
+    /// 2026-09-21); só a rejeitada fica de fora.
     #[test]
     fn os_chips_contam_como_a_galeria() {
         let c = contar(&acervo());
         assert_eq!(c.de(Filtro::Todas), 4);
         assert_eq!(c.de(Filtro::Classificadas), 3);
         assert_eq!(c.de(Filtro::Situacao(Estado::LevadaNoBalcao)), 1);
-        assert_eq!(c.de(Filtro::Situacao(Estado::Disponivel)), 1);
+        assert_eq!(c.de(Filtro::Situacao(Estado::Disponivel)), 2);
         assert_eq!(c.de(Filtro::SemNota), 1);
     }
 

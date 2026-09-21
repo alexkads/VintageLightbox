@@ -419,11 +419,13 @@ async fn main() {
             let principal = cx
                 .open_window(
                     WindowOptions {
+                        app_id: Some(ui_gpui::menu::APP_ID.into()),
                         window_bounds: Some(WindowBounds::Windowed(bounds)),
                         titlebar: Some(gpui::TitlebarOptions {
                             title: Some(ui_gpui::menu::NOME.into()),
                             ..Default::default()
                         }),
+                        is_resizable: true,
                         ..Default::default()
                     },
                     |window, cx| {

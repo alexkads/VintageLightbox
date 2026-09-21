@@ -201,6 +201,125 @@ fn a_sessao_nasce_com_o_atendimento_e_as_fotos(cx: &mut TestAppContext) {
     });
 }
 
+/// 🚀 **Criar não espera a cópia** (dono, 21/set/2026: *"a importação das
+/// fotos e a aplicação dos efeitos do passo 2 precisa acontecer em segundo
+/// plano quando estiver na tela da sessão para classificação e sinalização"*).
+///
+/// Com o cartão ainda copiando, "Criar" cria a galeria e entra na sessão na
+/// hora; a barra da sessão mostra a cópia, e as fotos que terminam depois
+/// passam para ela e sobem (C20) — sem o operador sair de onde classifica.
+#[gpui::test]
+fn criar_com_a_copia_correndo_entra_na_sessao_e_o_resto_chega(cx: &mut TestAppContext) {
+    let e = abrir_o_app(
+        cx,
+        Cenario {
+            importador_demorado: true,
+            ..Cenario::default()
+        },
+    );
+    e.entrar_na_conta(cx);
+    abrir_o_assistente(&e, cx);
+    let rascunho = id_do_rascunho(&e, cx);
+
+    // 📷 Três fotos no cartão; só a primeira terminou de copiar.
+    e.app(cx, |app, window, cx| {
+        app.nova_sessao.update(cx, |tela, cx| {
+            tela.importar_arquivos(
+                vec![
+                    "/cartao/DSC_1.jpg".into(),
+                    "/cartao/DSC_2.jpg".into(),
+                    "/cartao/DSC_3.jpg".into(),
+                ],
+                window,
+                cx,
+            )
+        });
+    });
+    e.importador.responder_uma(); // Começou
+    foto_no_rascunho(&e, "nova-1", &rascunho);
+    e.importador.responder_uma(); // a primeira ficou pronta
+    e.esperar(cx);
+
+    // 🚀 Criar no meio da cópia: o POST sai na hora.
+    e.site.responder_json(
+        "nova-criada",
+        Ok(json!({"id": "g9", "titulo": "Ensaio da Ana"})),
+    );
+    e.app(cx, |app, window, cx| {
+        app.nova_sessao.update(cx, |tela, cx| {
+            tela.escolher_produto("p1", window, cx);
+            tela.escolher_estudio("e1", window, cx);
+            tela.digitar("Ensaio da Ana", "", "", window, cx);
+            tela.criar(window, cx);
+        });
+    });
+    e.esperar(cx);
+    assert!(
+        e.site
+            .pedidos_json()
+            .iter()
+            .any(|p| p.rotulo == "nova-criada"),
+        "o POST não espera a cópia"
+    );
+    let dono = |id: &str| {
+        e.acervo
+            .fotos
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|f| f.id == id)
+            .and_then(|f| f.sessao_id.clone())
+    };
+    assert_eq!(
+        dono("id-nova-1").as_deref(),
+        Some("g9"),
+        "a pronta já passou"
+    );
+    e.app(cx, |app, _w, cx| {
+        assert_eq!(app.tela(), Tela::Sessao, "o operador já está na sessão");
+        let detalhe = app.detalhe.read(cx);
+        assert!(detalhe.importando(), "a barra da sessão mostra a cópia");
+        let andamento = detalhe.importacao().expect("com andamento");
+        assert_eq!((andamento.prontas(), andamento.total), (1, 3));
+    });
+
+    // 📥 O resto termina de copiar com o operador na sessão.
+    foto_no_rascunho(&e, "nova-2", &rascunho);
+    foto_no_rascunho(&e, "nova-3", &rascunho);
+    e.importador.responder();
+    e.esperar(cx);
+    e.esperar(cx);
+
+    assert_eq!(
+        dono("id-nova-2").as_deref(),
+        Some("g9"),
+        "a que terminou depois também"
+    );
+    assert_eq!(dono("id-nova-3").as_deref(), Some("g9"));
+    e.app(cx, |app, _w, cx| {
+        assert_eq!(app.tela(), Tela::Sessao, "e ninguém tirou o operador de lá");
+        let detalhe = app.detalhe.read(cx);
+        assert!(!detalhe.importando(), "a cópia terminou");
+        assert!(
+            ["id-nova-1", "id-nova-2", "id-nova-3"]
+                .iter()
+                .all(|id| detalhe.como_esta(id).is_some()),
+            "as três na grade da sessão"
+        );
+        assert!(
+            app.nova_sessao.read(cx).levando_para_teste().is_none(),
+            "nada ficou esperando para ser levado"
+        );
+    });
+    let subidas: Vec<String> = e.site.subidas().into_iter().map(|s| s.1).collect();
+    for id in ["id-nova-1", "id-nova-2", "id-nova-3"] {
+        assert!(
+            subidas.contains(&id.to_string()),
+            "{id} sobe (C20): {subidas:?}"
+        );
+    }
+}
+
 /// 🧯 O site recusa: a frase dele aparece, com o caminho para a etapa, e
 /// nenhuma galeria fica registrada no rascunho.
 #[gpui::test]

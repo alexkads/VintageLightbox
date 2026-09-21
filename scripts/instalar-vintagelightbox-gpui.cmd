@@ -466,6 +466,13 @@ Write-Host "   reaproveita o cache em $env:CARGO_TARGET_DIR."
 #     --destino <pasta>  onde instalar. Padrão: /Applications (macOS) ou
 #                        ~/.local (Linux)
 #     --seco             diz o que faria, sem fazer
+#     --diagnostico      só o retrato da máquina, para mandar a quem ajuda
+#
+# 🧾 **Toda instalação deixa um registro** em `~/.vintagelightbox/registros/`,
+#    com o retrato da máquina no topo e tudo o que passou pela tela — a saída
+#    do cargo inclusive. Quando algo dá errado, a última linha diz qual arquivo
+#    mandar (dono, 2026-09-21: *"é melhor atualizar o script de instalação do
+#    Linux pra eu trazer informação"*).
 #
 # Ler antes de rodar:
 #
@@ -488,7 +495,10 @@ IDENTIFICADOR="br.com.recordarfotos.vintagelightbox"
 # No Linux: o nome do binário, do atalho e do ícone.
 NOME_LINUX="vintagelightbox-gpui"
 
-REF="dev"; DESTINO=""; SECO=0
+REF="dev"; DESTINO=""; SECO=0; DIAGNOSTICO=0
+# O passo em que se está — é o que a última linha diz quando algo falha.
+PASSO="começando"
+REGISTRO=""; TEMPORARIO=""; TEE_PID=""
 
 if [ -t 1 ]; then
   C='\033[1;36m'; V='\033[1;32m'; A='\033[1;33m'; E='\033[1;31m'; N='\033[1m'; Z='\033[0m'
@@ -496,11 +506,44 @@ else
   C=''; V=''; A=''; E=''; N=''; Z=''
 fi
 
-diga()  { printf "\n${C}▸ %s${Z}\n" "$*"; }
+diga()  { PASSO="$*"; printf "\n${C}▸ %s${Z}\n" "$*"; }
 ok()    { printf "${V}✅ %s${Z}\n" "$*"; }
 aviso() { printf "${A}⚠️  %s${Z}\n" "$*"; }
 erro()  { printf "${E}❌ %s${Z}\n" "$*" >&2; }
 correr() { if [ "$SECO" -eq 1 ]; then echo "   [seco] $*"; else "$@"; fi; }
+
+# Acrescenta uma extensão à lista das ligadas do GNOME, sem o Shell saber —
+# vale no próximo login. Não duplica, e não mexe se o `gsettings` não existir.
+ligar_pelo_gsettings() {
+  command -v gsettings >/dev/null 2>&1 || return 1
+  atual=$(gsettings get org.gnome.shell enabled-extensions 2>/dev/null) || return 1
+  case "$atual" in
+    *"'$1'"*) return 0 ;;
+    "@as []"|"[]"|"") novo="['$1']" ;;
+    *) novo="${atual%]}, '$1']" ;;
+  esac
+  correr gsettings set org.gnome.shell enabled-extensions "$novo" 2>/dev/null
+}
+
+extensao_ativa() {
+  gnome-extensions info "$1" 2>/dev/null | grep -q -i -E "(state|estado).*active"
+}
+
+# Pede ao Shell que está rodando para instalar a extensão pelo
+# extensions.gnome.org. É o único caminho que a carrega sem sair da sessão no
+# Wayland: o Shell carrega na hora o que ele mesmo instala. Ele abre um diálogo
+# pedindo confirmação, e a cópia vai para ~/.local/share, à frente da do `dnf`.
+#
+# 🚨 **O `gdbus` responde erro mesmo quando deu certo** (GNOME 50, 2026-09-21):
+# "Remote peer disconnected", com a extensão já ACTIVE. Quem decide é o
+# `extensao_ativa` depois, e não o código de saída.
+carregar_na_sessao() {
+  command -v gdbus >/dev/null 2>&1 || return 1
+  correr gdbus call --session --timeout 180 --dest org.gnome.Shell.Extensions \
+    --object-path /org/gnome/Shell/Extensions \
+    --method org.gnome.Shell.Extensions.InstallRemoteExtension "$1" >/dev/null 2>&1 || true
+  extensao_ativa "$1"
+}
 
 # A ajuda mora aqui, e não é lida do arquivo: com `curl | sh` o script não
 # existe em disco.
@@ -514,6 +557,7 @@ Opções (com curl | sh, depois de \`sh -s --\`):
   --versao <ref>     branch ou tag. Padrão: dev
   --destino <pasta>  onde instalar. Padrão: /Applications ou ~/.local
   --seco             diz o que faria, sem compilar nem instalar
+  --diagnostico      só o retrato desta máquina, para mandar a quem ajuda
   --ajuda            isto aqui
 
 AJUDA
@@ -528,8 +572,9 @@ while [ $# -gt 0 ]; do
     --destino)   [ $# -ge 2 ] || faltou --destino ~/Apps; DESTINO="$2"; shift 2 ;;
     --destino=*) DESTINO="${1#*=}"; shift ;;
     --seco)      SECO=1; shift ;;
+    --diagnostico) DIAGNOSTICO=1; shift ;;
     -h|--ajuda|--help) ajuda; exit 0 ;;
-    *) erro "opção desconhecida: $1"; echo "   as que existem: --versao, --destino, --seco, --ajuda"; exit 1 ;;
+    *) erro "opção desconhecida: $1"; echo "   as que existem: --versao, --destino, --seco, --diagnostico, --ajuda"; exit 1 ;;
   esac
 done
 
@@ -540,6 +585,127 @@ case "$SISTEMA" in
   Darwin|Linux) : ;;
   *) erro "sistema desconhecido. No Windows, dê dois cliques neste arquivo."; exit 1 ;;
 esac
+
+# ── O retrato da máquina, e o registro ────────────────────────────────────────
+#
+# 🔑 **Tudo o que ajuda a entender uma instalação que deu errado, num lugar
+#    só.** Cada linha é tolerante: um comando que não existe nesta máquina vira
+#    "—", e nada aqui pode derrubar a instalação.
+uma_linha() { r=$("$@" 2>/dev/null | head -1) || true; echo "${r:-—}"; }
+# O Shell só procura extensões ao entrar na sessão: a que o `dnf` pôs depois
+# está no disco e ele responde que "não existe". É o caso que mais se confunde.
+estado_da_bandeja() {
+  u=appindicatorsupport@rgcjonas.gmail.com
+  r=$(gnome-extensions info "$u" 2>/dev/null | grep -i -E '(enabled|habilitada|state|estado):' | tr -s ' \n' ' ' | sed 's/^ //') || true
+  if [ -n "$r" ]; then echo "$r"
+  elif [ -d "${VLB_EXTENSOES_GNOME:-/usr/share/gnome-shell/extensions}/$u" ] \
+       || [ -d "$HOME/.local/share/gnome-shell/extensions/$u" ]; then
+    echo "no disco, mas o Shell desta sessão não a conhece — sair e entrar na sessão"
+  else
+    echo "não instalada"
+  fi
+}
+retrato() {
+  echo "── retrato da máquina ─────────────────────────────────────────────"
+  echo "data:            $(date '+%Y-%m-%d %H:%M:%S %z')"
+  echo "instalador:      instalar-vintagelightbox-gpui.cmd · versão pedida: $REF"
+  echo "sistema:         $(uname -srm)"
+  if [ "$SISTEMA" = "Darwin" ]; then
+    echo "macOS:           $(uma_linha sw_vers -productVersion)"
+  elif [ -r "${VLB_OS_RELEASE:-/etc/os-release}" ]; then
+    # shellcheck disable=SC1090
+    echo "distribuição:    $(. "${VLB_OS_RELEASE:-/etc/os-release}" 2>/dev/null; echo "${PRETTY_NAME:-?}")"
+  fi
+  echo "área de trabalho: ${XDG_CURRENT_DESKTOP:-—} · sessão: ${XDG_SESSION_TYPE:-—} · WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-—} · DISPLAY=${DISPLAY:-—}"
+  if command -v gnome-shell >/dev/null 2>&1; then
+    echo "gnome-shell:     $(uma_linha gnome-shell --version)"
+    echo "extensão AppIndicator: $(estado_da_bandeja)"
+    echo "extensões ligadas: $(uma_linha gsettings get org.gnome.shell enabled-extensions)"
+  fi
+  echo "núcleos:         $(getconf _NPROCESSORS_ONLN 2>/dev/null || echo —)"
+  if [ -r /proc/meminfo ]; then
+    echo "memória:         $(awk '/^MemTotal:/ {printf "%.1f GiB", $2/1048576}' /proc/meminfo)"
+  elif command -v sysctl >/dev/null 2>&1; then
+    echo "memória:         $(( $(sysctl -n hw.memsize 2>/dev/null || echo 0) / 1073741824 )) GiB"
+  fi
+  # O `df` na casa, ou no HOME enquanto ela não existe — o retrato não cria nada.
+  if [ -d "$CASA" ]; then ONDE="$CASA"; else ONDE="$HOME"; fi
+  echo "disco livre em $ONDE: $(df -h "$ONDE" 2>/dev/null | awk 'NR==2 {print $4}')"
+  echo "rustc:           $(uma_linha rustc --version)"
+  echo "rustup:          $(uma_linha rustup show active-toolchain)"
+  echo "CARGO_BUILD_JOBS: ${CARGO_BUILD_JOBS:-—} · LIBCLANG_PATH: ${LIBCLANG_PATH:-—}"
+  if [ "$SISTEMA" = "Linux" ]; then
+    echo "libclang:        $(ldconfig -p 2>/dev/null | grep -o 'libclang[^ ]*\.so[^ ]*' | head -1 || true)"
+    if command -v pkg-config >/dev/null 2>&1; then
+      for LIB in x11 xcb xkbcommon xkbcommon-x11 wayland-client xcursor xrandr xi \
+                 fontconfig freetype2 alsa openssl vulkan dbus-1 libsecret-1; do
+        printf "  %-15s %s\n" "$LIB" "$(pkg-config --modversion "$LIB" 2>/dev/null || echo FALTA)"
+      done
+    else
+      echo "pkg-config:      FALTA"
+    fi
+    echo "GPU:             $(lspci 2>/dev/null | grep -i -E 'vga|3d|display' | tr '\n' ';' || true)"
+    echo "Vulkan:          $(vulkaninfo --summary 2>/dev/null | grep -i 'deviceName' | tr -s ' ' | tr '\n' ';' || true)"
+    echo "OpenGL:          $(glxinfo -B 2>/dev/null | grep -i 'renderer string' || true)"
+  fi
+  echo "cache do cargo:  $(du -sh "$CASA/target-gpui" 2>/dev/null | cut -f1 || true)"
+  echo "────────────────────────────────────────────────────────────────────"
+}
+
+if [ "$DIAGNOSTICO" -eq 1 ]; then
+  retrato
+  exit 0
+fi
+
+# 🧾 **Tudo o que passa pela tela vai também para o registro**, pelo `tee`
+#    atrás de um FIFO — o jeito POSIX de duplicar a saída do próprio script
+#    (sem `bash`, sem `script`). O código de saída não muda: quem sai é o
+#    script, e o `tee` só é esperado para não perder as últimas linhas.
+#
+# ⚠️ **Com `--seco`, não**: ele promete não gravar nada no disco.
+REGISTROS="$CASA/registros"
+if [ "$SECO" -eq 0 ] && mkdir -p "$REGISTROS" 2>/dev/null && command -v mkfifo >/dev/null 2>&1; then
+  REGISTRO="$REGISTROS/instalacao-$(date +%Y%m%d-%H%M%S).log"
+  retrato > "$REGISTRO" 2>&1 || true
+  CANO="$REGISTROS/.cano.$$"
+  rm -f "$CANO"
+  if mkfifo "$CANO" 2>/dev/null; then
+    tee -a "$REGISTRO" < "$CANO" &
+    TEE_PID=$!
+    exec > "$CANO" 2>&1
+    rm -f "$CANO"
+  fi
+  # Os dez mais novos ficam; o resto é só espaço em disco.
+  # shellcheck disable=SC2012
+  ls -t "$REGISTROS"/instalacao-*.log 2>/dev/null | tail -n +11 | while read -r VELHO; do
+    rm -f "$VELHO"
+  done
+fi
+
+# 🚨 **Uma saída só, para tudo o que precisa acontecer no fim**: apagar o
+#    download pela metade e dizer onde está o registro. Se alguém trocar este
+#    `trap 0` por outro, o registro para de ser anunciado — e é justamente na
+#    falha que ele importa.
+ao_sair() {
+  CODIGO_DA_SAIDA=$?
+  [ -n "$TEMPORARIO" ] && rm -rf "$TEMPORARIO"
+  if [ -n "$REGISTRO" ]; then
+    if [ "$CODIGO_DA_SAIDA" -ne 0 ]; then
+      printf "\n${E}❌ parou em: %s (código %s)${Z}\n" "$PASSO" "$CODIGO_DA_SAIDA"
+      printf "   ${N}Mande este arquivo para quem está ajudando:${Z}\n   %s\n" "$REGISTRO"
+    else
+      printf "\n   registro desta instalação: %s\n" "$REGISTRO"
+    fi
+  fi
+  if [ -n "$TEE_PID" ]; then
+    exec >&- 2>&-
+    wait "$TEE_PID" 2>/dev/null || true
+  fi
+  exit "$CODIGO_DA_SAIDA"
+}
+trap ao_sair 0
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # ── O que precisa existir antes de compilar ───────────────────────────────────
 #
@@ -758,8 +924,25 @@ else
         else
           # Ligada agora, ela só aparece depois de sair e entrar de novo na
           # sessão: o GNOME no Wayland não recarrega extensões com a sessão aberta.
-          if correr gnome-extensions enable "$EXTENSAO" 2>/dev/null; then
-            aviso "extensão da bandeja ligada: saia e entre de novo na sessão para o ícone aparecer."
+          #
+          # 🚨 **Recém-instalada pelo `dnf`, o `enable` falha** (Fedora 44,
+          # 2026-09-21): o GNOME Shell no Wayland só descobre extensões novas
+          # ao entrar na sessão, e responde que ela não existe. A lista das
+          # ligadas mora no dconf (`org.gnome.shell enabled-extensions`), e
+          # gravá-la ali não depende do Shell: ela liga no próximo login.
+          #
+          # Por isso, se o Shell não a conhece, pedimos a ele mesmo que a
+          # instale (`carregar_na_sessao`) — e o login fica só de reserva.
+          if correr gnome-extensions enable "$EXTENSAO" 2>/dev/null \
+             && { [ "$SECO" -eq 1 ] || extensao_ativa "$EXTENSAO"; }; then
+            ok "extensão da bandeja do GNOME: ligada"
+          elif ligar_pelo_gsettings "$EXTENSAO"; then
+            echo "   O GNOME vai pedir para instalar a extensão da bandeja: clique em Instalar."
+            if [ "$SECO" -eq 0 ] && carregar_na_sessao "$EXTENSAO"; then
+              ok "extensão da bandeja do GNOME: ligada, sem sair da sessão"
+            else
+              aviso "extensão da bandeja ligada: saia e entre de novo na sessão para o ícone aparecer."
+            fi
           else
             aviso "não consegui ligar a extensão da bandeja por aqui."
             echo "   Abra o app Extensões e ligue 'AppIndicator and KStatusNotifierItem Support'."
@@ -820,10 +1003,8 @@ correr mkdir -p "$CASA"
 if [ "$SECO" -eq 1 ]; then
   echo "   [seco] baixaria e validaria $URL antes de atualizar $FONTE"
 else
+  # O download pela metade é apagado pelo `ao_sair`, se algo falhar.
   TEMPORARIO="$(mktemp -d "$CASA/download.XXXXXX")"
-  trap 'rm -rf "$TEMPORARIO"' 0
-  trap 'exit 130' INT
-  trap 'exit 143' TERM
   mkdir "$TEMPORARIO/fonte"
   # Separe curl e tar: o sh nao oferece pipefail, e tar pode aceitar um arquivo
   # completo mesmo quando o transporte termina com erro.
@@ -844,7 +1025,7 @@ else
     mv "$TEMPORARIO/fonte" "$FONTE"
   fi
   rm -rf "$TEMPORARIO"
-  trap - 0 INT TERM
+  TEMPORARIO=""
   ok "código em $FONTE"
 fi
 
@@ -985,6 +1166,7 @@ Name=VintageLightbox (Zed GPUI)
 Comment=Editor de fotos da RecordarFotos
 Exec=$DESTINO/bin/$NOME_LINUX
 Icon=$NOME_LINUX
+StartupWMClass=$NOME_LINUX
 Categories=Graphics;Photography;
 Terminal=false
 DESKTOP

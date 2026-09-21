@@ -161,6 +161,21 @@ impl PosVendaController {
         self.publicar.remover_do_site(sessao, &id).await
     }
 
+    /// Rejeita a foto que tem cópia aqui: ela sai da nuvem e fica marcada.
+    pub async fn rejeitar_tirando_da_nuvem(
+        &self,
+        sessao: &Sessao,
+        foto_id: &str,
+    ) -> Result<(), String> {
+        let id = PhotoId::from_string(foto_id).map_err(|e| e.to_string())?;
+        self.publicar.rejeitar_tirando_da_nuvem(sessao, &id).await
+    }
+
+    /// Tira do site pelo id **de lá** — o fim do resgate.
+    pub async fn remover_remoto(&self, sessao: &Sessao, no_site: &str) -> Result<(), String> {
+        self.publicar.remover_remoto(sessao, no_site).await
+    }
+
     /// Entra numa sessão: a galeria e as fotos que estão nela.
     pub async fn abrir_galeria(&self, sessao: &Sessao, id: &str) -> Result<GaleriaAberta, String> {
         self.api.abrir_galeria(sessao, id).await.map_err(frase)

@@ -98,9 +98,11 @@ fn a_grade_mostra_as_fotos_certas_em_cada_recorte(cx: &mut TestAppContext) {
     assert_eq!(na_grade(&e, cx), ["a", "b"]);
 
     // À venda: a comprada **não** entra — ela já foi paga, e oferecer de novo é
-    // o erro que a coluna de estado existe para impedir.
+    // o erro que a coluna de estado existe para impedir. As duas locais sem nota
+    // **entram** (dono, 2026-09-21): a sem nota está à venda e sobe com marca
+    // d'água; só a rejeitada fica de fora.
     recortar(&e, cx, Filtro::Situacao(Estado::Disponivel));
-    assert_eq!(na_grade(&e, cx), ["d"]);
+    assert_eq!(na_grade(&e, cx), ["id-DSC_101.jpg", "id-DSC_102.jpg", "d"]);
 
     // Compradas: só a `c`.
     recortar(&e, cx, Filtro::Situacao(Estado::Comprada));

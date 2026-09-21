@@ -297,6 +297,13 @@ pub trait Publicador: Send + Sync + 'static {
     );
     /// O passo 3 ao contrário: a classificação foi zerada, a foto sai do storage.
     fn tirar_do_site(&self, sessao: Sessao, foto_id: String, canal: Sender<Recado>);
+    /// ❌ Rejeita a foto que tem cópia neste catálogo (`foto_id` é o id
+    /// **local**): ela sai da nuvem e fica aqui, marcada. Volta como
+    /// `Sincronizou` ou `Falhou`.
+    fn rejeitar_tirando_da_nuvem(&self, sessao: Sessao, foto_id: String, canal: Sender<Recado>);
+    /// Tira do site pelo id **de lá** — o último passo do resgate da foto que
+    /// não tinha cópia aqui.
+    fn remover_remoto(&self, sessao: Sessao, no_site: String, canal: Sender<Recado>);
     /// O passo 6: o que o cliente acertou no balcão, gravado na foto do site.
     fn negociar(
         &self,
@@ -713,6 +720,31 @@ impl Publicador for PublicadorDaApi {
         });
     }
 
+    fn rejeitar_tirando_da_nuvem(&self, sessao: Sessao, foto_id: String, canal: Sender<Recado>) {
+        let controlador = self.controlador.clone();
+        self.tokio.spawn(async move {
+            let recado = match controlador
+                .rejeitar_tirando_da_nuvem(&sessao, &foto_id)
+                .await
+            {
+                Ok(()) => Recado::Sincronizou,
+                Err(erro) => Recado::Falhou(erro),
+            };
+            let _ = canal.send(recado);
+        });
+    }
+
+    fn remover_remoto(&self, sessao: Sessao, no_site: String, canal: Sender<Recado>) {
+        let controlador = self.controlador.clone();
+        self.tokio.spawn(async move {
+            let recado = match controlador.remover_remoto(&sessao, &no_site).await {
+                Ok(()) => Recado::Sincronizou,
+                Err(erro) => Recado::Falhou(erro),
+            };
+            let _ = canal.send(recado);
+        });
+    }
+
     fn negociar(
         &self,
         sessao: Sessao,
@@ -853,6 +885,20 @@ pub mod mentira {
         pub criadas: Mutex<Vec<NovaGaleria>>,
         /// `(galeria, foto, ordem)` de cada classificada que subiu.
         pub subidas: Mutex<Vec<(String, String, u32)>>,
+        /// O que o servidor de verdade faz ao receber a foto, antes de
+        /// responder: ela entra na galeria e ganha id remoto no catálogo.
+        ///
+        /// 🚨 **Sem isto a subida não tinha consequência**, e a grade da sessão
+        /// que esvaziava a cada foto enviada passou por todos os cenários: a
+        /// local saía das locais e a do site nunca entrava (21/set/2026).
+        /// O que o catálogo sofre quando a rejeição tira a foto da nuvem — a
+        /// marca e o id remoto, como o use case de verdade.
+        #[allow(clippy::type_complexity)]
+        pub ao_rejeitar: Mutex<Option<Box<dyn Fn(&PublicadorDeMentira, &str) + Send>>>,
+        /// Os ids **locais** das rejeitadas que saíram da nuvem.
+        pub rejeitadas_na_nuvem: Mutex<Vec<String>>,
+        #[allow(clippy::type_complexity)]
+        pub ao_subir: Mutex<Option<Box<dyn Fn(&PublicadorDeMentira, &str, u32) + Send>>>,
         /// As fotos tiradas do storage.
         pub tiradas: Mutex<Vec<String>>,
         /// O que foi negociado, por foto.
@@ -1276,6 +1322,7 @@ pub mod mentira {
             canal: Sender<Recado>,
         ) {
             let foto_id = foto.foto_id.clone();
+            let ordem = foto.ordem;
             self.subidas
                 .lock()
                 .expect("as subidas")
@@ -1294,13 +1341,39 @@ pub mod mentira {
                     alvo: foto_id,
                     frase,
                 },
-                None => Recado::ClassificadaSubiu { foto_id },
+                None => {
+                    if let Some(consequencia) = self.ao_subir.lock().expect("o gancho").as_ref() {
+                        consequencia(self, &foto_id, ordem);
+                    }
+                    Recado::ClassificadaSubiu { foto_id }
+                }
             };
             self.responder_ou_guardar(canal, recado);
         }
 
         fn tirar_do_site(&self, _sessao: Sessao, foto_id: String, canal: Sender<Recado>) {
             self.tiradas.lock().expect("as tiradas").push(foto_id);
+            let _ = canal.send(Recado::Sincronizou);
+        }
+
+        fn rejeitar_tirando_da_nuvem(
+            &self,
+            _sessao: Sessao,
+            foto_id: String,
+            canal: Sender<Recado>,
+        ) {
+            if let Some(consequencia) = self.ao_rejeitar.lock().expect("o gancho").as_ref() {
+                consequencia(self, &foto_id);
+            }
+            self.rejeitadas_na_nuvem
+                .lock()
+                .expect("as rejeitadas")
+                .push(foto_id);
+            let _ = canal.send(Recado::Sincronizou);
+        }
+
+        fn remover_remoto(&self, _sessao: Sessao, no_site: String, canal: Sender<Recado>) {
+            self.tiradas.lock().expect("as tiradas").push(no_site);
             let _ = canal.send(Recado::Sincronizou);
         }
 

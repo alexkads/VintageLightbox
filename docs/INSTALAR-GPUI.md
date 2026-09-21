@@ -100,8 +100,11 @@ Sem `curl`, instale-o antes (`sudo apt install curl` ou `sudo dnf install curl`)
 ### No Fedora
 
 - **Workstation (GNOME):** o GNOME não mostra ícone de bandeja sem a extensão *AppIndicator*. O
-  instalador a instala pelo `dnf` e a liga — recém-instalada, ela só pode ser ligada para o
-  próximo login; **saia e entre de novo na sessão** para o ícone aparecer. Sem ela o app funciona, mas minimizado só volta pelo Alt+Tab.
+  instalador a instala pelo `dnf` e a liga. Recém-instalada, o GNOME da sessão aberta ainda não a
+  conhece, então o instalador pede a ele que a carregue: **abre um diálogo do GNOME — clique em
+  Instalar** e o ícone aparece na hora (a cópia vai para `~/.local/share/gnome-shell/extensions`).
+  Recusou o diálogo, ou não havia sessão? **Saia e entre de novo na sessão**. Sem ela o app funciona,
+  mas minimizado só volta pelo Alt+Tab.
 - **Silverblue, Kinoite ou Bazzite:** o sistema é imutável e recusa `dnf install`. O instalador
   para e mostra um `sudo rpm-ostree install …`: rode-o, reinicie e rode o instalador de novo.
 - Com placa NVIDIA, o Vulkan vem do driver da NVIDIA (`akmod-nvidia`, do RPM Fusion).

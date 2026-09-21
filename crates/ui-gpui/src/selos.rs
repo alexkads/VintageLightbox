@@ -279,6 +279,12 @@ pub fn selo_do_estado(estado: Estado, apagada: bool, cx: &App) -> impl IntoEleme
     selo(tom_do_estado(estado, apagada), texto, cx)
 }
 
+/// ❌ O selo da **rejeitada** — a tecla `X` (contrato C21). Em vermelho: é a
+/// decisão de deixá-la fora, e ela manda mais do que a situação de antes.
+pub fn selo_de_rejeitada(cx: &App) -> impl IntoElement {
+    selo(Tom::Ruim, "Rejeitada", cx)
+}
+
 /// O selo da foto **que só existe no disco** — a importada, antes do passo 3.
 ///
 /// 🚨 **Ela não é "à venda", e dizer que é seria mentir na cor certa.** O

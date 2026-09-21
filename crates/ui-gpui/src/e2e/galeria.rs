@@ -4,7 +4,7 @@ use biblioteca_core::acervo::{Estado, Filtro};
 use domain::services::pos_venda::{EstadoNoBalcao, MudancaDaGaleria};
 use gpui::{TestAppContext, VisualTestContext};
 
-use super::{abrir_o_ensaio, local, Cenario, Estudio, GALERIA};
+use super::{abrir_o_app, abrir_o_ensaio, local, Cenario, Estudio, GALERIA};
 use crate::app::Tela;
 use crate::impressao::porta::Destino;
 
@@ -194,19 +194,385 @@ fn importar_classificar_e_levar_pelas_teclas(cx: &mut TestAppContext) {
         "e nada sai da nuvem — o resgate destrutivo deixou de existir"
     );
 
-    // ❌ **O `X` rejeita: marca, e nunca apaga** (C21).
+    // ❌ **O `X` na foto da nuvem vai ao resgate, e não a um `PATCH`**
+    // (2026-09-21): a `d` não tem cópia catalogada aqui, então o bruto é pedido
+    // antes — e, sem ele chegar ao catálogo, nada sai da nuvem.
     e.teclar(cx, "x");
     e.esperar(cx);
-    let negociadas = e.site.negociadas();
-    assert_eq!(negociadas.len(), 4, "{negociadas:?}");
-    assert_eq!(negociadas[3].1.rejeitada, Some(true));
-    assert!(e.site.tiradas().is_empty(), "rejeitar não apaga nada");
+    assert_eq!(e.site.negociadas().len(), 3, "nenhum PATCH de rejeição");
+    assert_eq!(e.site.originais(), ["d"], "o bruto foi pedido primeiro");
+    assert!(
+        e.site.tiradas().is_empty(),
+        "e nada saiu da nuvem sem a cópia"
+    );
 
     // A comprada não muda por lote.
     e.detalhe(cx, |tela, _w, cx| tela.focar_foto("c", cx));
     e.teclar(cx, "b");
     e.esperar(cx);
-    assert_eq!(e.site.negociadas().len(), 4, "a comprada fica de fora");
+    assert_eq!(e.site.negociadas().len(), 3, "a comprada fica de fora");
+}
+
+/// O que o catálogo desta máquina sabe da foto: (nota, sinalizador).
+fn no_catalogo(e: &Estudio, cx: &mut TestAppContext, id: &str) -> (i32, Option<i32>) {
+    e.app(cx, |app, _w, cx| {
+        let foto = app
+            .biblioteca
+            .read(cx)
+            .todas_as_fotos()
+            .into_iter()
+            .find(|f| f.id == id)
+            .unwrap_or_else(|| panic!("{id} não está no catálogo"));
+        (foto.rating, foto.flag)
+    })
+}
+
+/// 🚨 **Classificar e sinalizar a foto que ainda não subiu** — o gesto que o
+/// operador faz com o cliente na frente, enquanto o ensaio sobe em segundo
+/// plano (C20–C22).
+///
+/// Regressão de 21/set/2026: a passada de subida passou a pular a foto sem
+/// nota, e o gesto mais comum da sessão — dar nota e rejeitar durante a
+/// importação — deixava de ter efeito. Aqui as teclas de verdade passam pela
+/// grade da sessão até o catálogo, e o cenário afirma o que **ficou gravado**.
+#[gpui::test]
+fn classificar_e_rejeitar_a_foto_que_ainda_nao_subiu(cx: &mut TestAppContext) {
+    let e = abrir_o_ensaio(cx, Cenario::default());
+    let id = "id-DSC_101.jpg";
+
+    // Todo o ensaio subiu sem nota, e a foto continua sendo do disco.
+    assert_eq!(e.site.subidas().len(), 2, "as duas locais subiram");
+    assert_eq!(no_catalogo(&e, cx, id), (0, None), "sem nota e sem marca");
+
+    // ⭐ `1`–`5` dão a nota no catálogo, sem tocar no site.
+    e.detalhe(cx, |tela, _w, cx| tela.focar_foto(id, cx));
+    for nota in 1..=5 {
+        e.teclar(cx, &nota.to_string());
+        e.esperar(cx);
+        assert_eq!(no_catalogo(&e, cx, id).0, nota, "a tecla {nota} dá a nota");
+        // 🚨 E a **célula da grade mostra a estrela**: gravar sem desenhar fazia
+        // o gesto parecer não ter efeito nenhum.
+        let na_grade = e.detalhe(cx, |tela, _w, _cx| tela.como_esta(id));
+        assert_eq!(
+            na_grade.map(|(_, n, _)| n),
+            Some(Some(nota as u8)),
+            "a grade da sessão mostra a nota {nota}"
+        );
+    }
+    assert!(e.site.negociadas().is_empty(), "foto local não negocia");
+    assert_eq!(e.site.subidas().len(), 2, "classificar não sobe de novo");
+
+    // `0` tira a nota — e só isso.
+    e.teclar(cx, "0");
+    e.esperar(cx);
+    assert_eq!(no_catalogo(&e, cx, id), (0, None));
+    assert_eq!(
+        e.detalhe(cx, |tela, _w, _cx| tela.como_esta(id).map(|(_, n, _)| n)),
+        Some(None),
+        "e a grade some com a estrela"
+    );
+    assert!(e.site.tiradas().is_empty(), "nada sai da nuvem");
+
+    // ❌ `X` rejeita (C21) e o segundo `X` desfaz, sem apagar arquivo nenhum.
+    e.teclar(cx, "x");
+    e.esperar(cx);
+    assert_eq!(no_catalogo(&e, cx, id).1, Some(-1), "o X rejeita");
+    let rejeitadas = |e: &Estudio, cx: &mut TestAppContext| {
+        e.detalhe(cx, |tela, _w, _cx| {
+            tela.contagens()
+                .de(biblioteca_core::acervo::Filtro::Rejeitadas)
+        })
+    };
+    assert_eq!(
+        rejeitadas(&e, cx),
+        1,
+        "e a grade a põe no recorte dela (C21)"
+    );
+    e.teclar(cx, "x");
+    e.esperar(cx);
+    assert_eq!(no_catalogo(&e, cx, id).1, Some(0), "o segundo X desfaz");
+    assert_eq!(rejeitadas(&e, cx), 0, "e ela volta");
+    assert!(e.site.tiradas().is_empty(), "rejeitar não apaga nada");
+
+    // A outra foto não foi tocada por nenhum destes gestos.
+    assert_eq!(no_catalogo(&e, cx, "id-DSC_102.jpg"), (0, None));
+}
+
+/// 🔑 **A seleção em lote classifica e rejeita todas de uma vez**, na foto
+/// local — uma tecla, um desfecho (`⌘A` e depois a tecla).
+#[gpui::test]
+fn classificar_e_rejeitar_o_lote_de_fotos_locais(cx: &mut TestAppContext) {
+    let e = abrir_o_ensaio(cx, Cenario::default());
+    e.detalhe(cx, |tela, _w, cx| {
+        tela.marcar_ids(
+            &["id-DSC_101.jpg".to_string(), "id-DSC_102.jpg".to_string()],
+            cx,
+        )
+    });
+
+    e.teclar(cx, "3");
+    e.esperar(cx);
+    assert_eq!(no_catalogo(&e, cx, "id-DSC_101.jpg").0, 3);
+    assert_eq!(no_catalogo(&e, cx, "id-DSC_102.jpg").0, 3);
+
+    e.teclar(cx, "x");
+    e.esperar(cx);
+    assert_eq!(no_catalogo(&e, cx, "id-DSC_101.jpg").1, Some(-1));
+    assert_eq!(no_catalogo(&e, cx, "id-DSC_102.jpg").1, Some(-1));
+
+    e.teclar(cx, "x");
+    e.esperar(cx);
+    assert_eq!(no_catalogo(&e, cx, "id-DSC_101.jpg").1, Some(0));
+    assert_eq!(no_catalogo(&e, cx, "id-DSC_102.jpg").1, Some(0));
+}
+
+/// 📤 **A subida leva a nota que já existe e segura a rejeitada** (C20/C21).
+///
+/// A classificada sobe com a nota dela; a sem nota sobe sem nota — o `0` do
+/// catálogo nunca atravessa como classificação —, e a rejeitada não sobe.
+#[gpui::test]
+fn a_subida_leva_a_nota_e_segura_a_rejeitada(cx: &mut TestAppContext) {
+    let e = abrir_o_app(cx, Cenario::default());
+    e.entrar_na_conta(cx);
+    {
+        let mut fotos = e.acervo.fotos.lock().unwrap();
+        fotos[0].rating = 4;
+        fotos[1].flag = Some(-1);
+        fotos.push(local("DSC_103.jpg"));
+    }
+    // O mesmo recado que a importação dá quando o catálogo muda.
+    e.detalhe(cx, |_tela, _w, cx| {
+        cx.emit(crate::sessoes::detalhe::Pedido::CatalogoMudou)
+    });
+    e.esperar(cx);
+    e.app(cx, |app, _w, cx| {
+        app.sessoes
+            .update(cx, |tela, cx| tela.abrir(GALERIA.into(), cx));
+    });
+    e.esperar(cx);
+
+    let subidas = e.site.subidas();
+    let ids: Vec<&str> = subidas.iter().map(|s| s.1.as_str()).collect();
+    assert!(
+        ids.contains(&"id-DSC_101.jpg"),
+        "a classificada sobe: {ids:?}"
+    );
+    assert!(
+        ids.contains(&"id-DSC_103.jpg"),
+        "a sem nota também: {ids:?}"
+    );
+    assert!(
+        !ids.contains(&"id-DSC_102.jpg"),
+        "a rejeitada não sobe: {ids:?}"
+    );
+    let notas = e.site.notas_pedidas();
+    assert!(notas.contains(&Some(4)), "a nota 4 foi junto: {notas:?}");
+    assert!(
+        notas.iter().all(|n| n.is_none_or(|n| (1..=5).contains(&n))),
+        "o 0 nunca atravessa como nota: {notas:?}"
+    );
+
+    // Tirar a rejeição não some com a foto: ela só volta a ser candidata.
+    assert_eq!(no_catalogo(&e, cx, "id-DSC_102.jpg").1, Some(-1));
+}
+
+/// 🚨 **A foto que termina de subir continua na grade** — e a tecla continua
+/// tendo onde cair.
+///
+/// Regressão achada rodando o app contra a pilha local (21/set/2026): ao
+/// terminar a subida, a releitura do catálogo tirava a foto das locais (ela
+/// ganhou id remoto), mas ninguém relia a galeria do site. A grade ia a
+/// "Todas 0", e o operador apertava `3` e `X` sobre nada.
+#[gpui::test]
+fn a_foto_que_subiu_continua_na_grade_e_aceita_a_nota(cx: &mut TestAppContext) {
+    let e = abrir_o_app(cx, Cenario::default());
+    let acervo = e.acervo.clone();
+    *e.site.ao_subir.lock().unwrap() = Some(Box::new(move |site, foto_id, ordem| {
+        let no_site = format!("site-{foto_id}");
+        if let Some(foto) = acervo
+            .fotos
+            .lock()
+            .unwrap()
+            .iter_mut()
+            .find(|f| f.id == foto_id)
+        {
+            foto.pos_venda_foto_id = Some(no_site.clone());
+        }
+        site.fotos_da_sessao.lock().unwrap().push(super::do_site(
+            &no_site,
+            ordem as i32 + 10,
+            domain::services::pos_venda::EstadoDaFotoNoSite::Disponivel,
+            None,
+        ));
+    }));
+    e.entrar_na_conta(cx);
+    e.app(cx, |app, _w, cx| {
+        app.sessoes
+            .update(cx, |tela, cx| tela.abrir(GALERIA.into(), cx));
+    });
+    e.esperar(cx);
+
+    assert_eq!(e.site.subidas().len(), 2, "as duas locais subiram");
+    e.detalhe(cx, |tela, _w, _cx| {
+        assert_eq!(
+            tela.total_visivel(),
+            6,
+            "as 4 do site e as 2 que acabaram de subir — nenhuma some"
+        );
+        assert!(tela.como_esta("site-id-DSC_101.jpg").is_some());
+    });
+
+    // A tecla cai na foto que acabou de subir, agora do site.
+    e.detalhe(cx, |tela, _w, cx| {
+        tela.focar_foto("site-id-DSC_101.jpg", cx)
+    });
+    e.teclar(cx, "3");
+    e.esperar(cx);
+    let negociadas = e.site.negociadas();
+    assert_eq!(negociadas.len(), 1, "{negociadas:?}");
+    assert_eq!(negociadas[0].0, "site-id-DSC_101.jpg");
+    assert_eq!(negociadas[0].1.nota, Some(Some(3)));
+}
+
+/// ❌ **Rejeitar a foto da nuvem que tem cópia aqui: ela sai de lá e fica
+/// aqui, marcada** (dono, 2026-09-21) — o caminho de quase sempre, porque o
+/// ensaio sobe desta máquina e a cópia local continua (C20.1).
+///
+/// E tirar a rejeição a sobe de novo, sozinha.
+#[gpui::test]
+fn rejeitar_a_da_nuvem_com_copia_aqui_e_desfazer(cx: &mut TestAppContext) {
+    let e = abrir_o_app(cx, Cenario::default());
+    // A cópia daqui da foto `d` do site.
+    {
+        let mut copia = local("copia-d.jpg");
+        copia.pos_venda_foto_id = Some("d".into());
+        e.acervo.fotos.lock().unwrap().push(copia);
+    }
+    let acervo = e.acervo.clone();
+    *e.site.ao_rejeitar.lock().unwrap() = Some(Box::new(move |site, id_local| {
+        // O que o use case de verdade faz: a marca e o id remoto mudam juntos.
+        if let Some(f) = acervo
+            .fotos
+            .lock()
+            .unwrap()
+            .iter_mut()
+            .find(|f| f.id == id_local)
+        {
+            f.flag = Some(-1);
+            f.pos_venda_foto_id = None;
+        }
+        site.fotos_da_sessao.lock().unwrap().retain(|f| f.id != "d");
+    }));
+    e.entrar_na_conta(cx);
+    e.app(cx, |app, _w, cx| {
+        app.sessoes
+            .update(cx, |tela, cx| tela.abrir(GALERIA.into(), cx));
+    });
+    e.esperar(cx);
+    let subidas_antes = e.site.subidas().len();
+
+    e.detalhe(cx, |tela, _w, cx| tela.focar_foto("d", cx));
+    e.teclar(cx, "x");
+    e.esperar(cx);
+    e.esperar(cx);
+
+    assert_eq!(
+        *e.site.rejeitadas_na_nuvem.lock().unwrap(),
+        ["id-copia-d.jpg"],
+        "um pedido só, pelo id daqui"
+    );
+    assert!(
+        e.site.originais().is_empty(),
+        "com cópia aqui, nada é baixado"
+    );
+    assert_eq!(no_catalogo(&e, cx, "id-copia-d.jpg").1, Some(-1));
+    e.app(cx, |app, _w, _cx| {
+        let desfecho = app.ultimo_resgate().expect("o resgate terminou");
+        assert_eq!(desfecho.voltaram, ["d.jpg"]);
+        assert!(desfecho.ficaram.is_empty());
+    });
+    e.detalhe(cx, |tela, _w, _cx| {
+        assert!(tela.como_esta("d").is_none(), "saiu da nuvem");
+        assert!(
+            tela.como_esta("id-copia-d.jpg").is_some(),
+            "e está na grade, como local"
+        );
+        assert_eq!(
+            tela.contagens()
+                .de(biblioteca_core::acervo::Filtro::Rejeitadas),
+            1
+        );
+    });
+    assert_eq!(
+        e.site.subidas().len(),
+        subidas_antes,
+        "a rejeitada não sobe de novo"
+    );
+
+    // 🔁 Tirar a rejeição: ela volta a subir sozinha.
+    e.detalhe(cx, |tela, _w, cx| tela.focar_foto("id-copia-d.jpg", cx));
+    e.teclar(cx, "x");
+    e.esperar(cx);
+    e.esperar(cx);
+    assert_eq!(no_catalogo(&e, cx, "id-copia-d.jpg").1, Some(0));
+    assert!(
+        e.site.subidas().iter().any(|s| s.1 == "id-copia-d.jpg"),
+        "sem a rejeição, ela sobe de novo: {:?}",
+        e.site.subidas()
+    );
+}
+
+/// ❌ **Rejeitar a foto da nuvem sem cópia aqui: o bruto vem antes**
+/// (2026-09-21, o resgate de 18/09 readaptado). A nuvem só perde a foto depois
+/// de o arquivo estar gravado e catalogado aqui; sem o bruto, nada sai.
+#[gpui::test]
+fn rejeitar_a_da_nuvem_sem_copia_traz_o_bruto_antes(cx: &mut TestAppContext) {
+    let e = abrir_o_ensaio(
+        cx,
+        Cenario {
+            site: Box::new(|site| {
+                *site.bruto.lock().unwrap() = None;
+            }),
+            ..Cenario::default()
+        },
+    );
+
+    // Sem o bruto no site: nada sai da nuvem.
+    e.detalhe(cx, |tela, _w, cx| tela.focar_foto("d", cx));
+    e.teclar(cx, "x");
+    e.esperar(cx);
+    e.esperar(cx);
+    assert_eq!(e.site.originais(), ["d"], "pediu o bruto");
+    assert!(
+        e.site.tiradas().is_empty(),
+        "🚨 sem cópia, a nuvem não perde nada"
+    );
+    e.app(cx, |app, _w, _cx| {
+        let desfecho = app.ultimo_resgate().expect("o resgate terminou");
+        assert_eq!(desfecho.ficaram, ["d.jpg"]);
+    });
+
+    // Com o bruto: ele é gravado, catalogado, marcado — e só então sai de lá.
+    let mut png = Vec::new();
+    super::imagem(8, 8, 90)
+        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+        .unwrap();
+    *e.site.bruto.lock().unwrap() = Some(png);
+    // O importador de mentira não grava no catálogo: o teste grava por ele, no
+    // caminho em que o resgate grava o arquivo.
+    let caminho = crate::app::resgate::pasta_das_resgatadas().join("d.jpg");
+    {
+        let mut volta = local("volta-d.jpg");
+        volta.path = caminho.to_string_lossy().to_string();
+        e.acervo.fotos.lock().unwrap().push(volta);
+    }
+    e.teclar(cx, "x");
+    e.esperar(cx);
+    e.esperar(cx);
+    assert!(caminho.exists(), "o bruto foi gravado aqui");
+    assert_eq!(e.site.tiradas(), ["d"], "e só então a nuvem perdeu a foto");
+    assert_eq!(no_catalogo(&e, cx, "id-volta-d.jpg").1, Some(-1), "marcada");
+    let _ = std::fs::remove_dir_all(crate::app::resgate::pasta_das_resgatadas());
 }
 
 /// 🎬 **Recortes, zoom e marcação**: os chips recortam, a seleção limpa ao

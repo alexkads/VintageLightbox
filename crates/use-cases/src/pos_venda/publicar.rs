@@ -218,6 +218,55 @@ impl PublicarNoPosVendaUseCase {
         }
     }
 
+    /// ❌ **Rejeitar a foto que já subiu: ela sai da nuvem e fica aqui,
+    /// marcada** (dono, 2026-09-21: *"quando o usuário rejeitar, a mesma
+    /// voltará para o arquivo local e sairá da nuvem"*).
+    ///
+    /// 🔑 **Só serve à foto que tem cópia neste catálogo** — o arquivo já está
+    /// no disco, então apagar a nuvem não perde nada. A que não tem cópia aqui
+    /// passa antes pelo resgate da tela (`app::resgate`), que a traz e a
+    /// cataloga.
+    ///
+    /// 🚨 **A marca e o id remoto mudam juntos, e só depois de a nuvem
+    /// responder.** Se o site recusar, nada muda aqui: a foto continua na nuvem
+    /// e não rejeitada, e a tela diz que não deu. A foto é relida **depois** da
+    /// ida à rede, pela mesma razão de `subir` — a linha é regravada inteira.
+    pub async fn rejeitar_tirando_da_nuvem(
+        &self,
+        sessao: &Sessao,
+        id: &PhotoId,
+    ) -> Result<(), String> {
+        let Some(photo) = self.fotos.find_by_id(id).await.map_err(|e| e.to_string())? else {
+            return Err("foto não está mais no catálogo".into());
+        };
+        if let Some(remoto) = photo.id_no_site().map(str::to_string) {
+            match self.api.remover_foto(sessao, &remoto).await {
+                // 404 é "já não está lá": o desfecho desejado.
+                Ok(()) | Err(DomainError::NaoEncontradoNoSite(_)) => {}
+                Err(erro) => return Err(erro.to_string()),
+            }
+        }
+        let mut atual = self
+            .fotos
+            .find_by_id(id)
+            .await
+            .map_err(|e| e.to_string())?
+            .unwrap_or(photo);
+        atual.set_flag(domain::value_objects::Flag::Reject);
+        atual.definir_id_no_site(None);
+        self.fotos.update(&atual).await.map_err(|e| e.to_string())
+    }
+
+    /// Tira do site a foto pelo id **dela lá** — o último passo do resgate da
+    /// foto que não tinha cópia aqui, quando o bruto já foi trazido e
+    /// catalogado. 404 é sucesso: ela já não está lá.
+    pub async fn remover_remoto(&self, sessao: &Sessao, remoto: &str) -> Result<(), String> {
+        match self.api.remover_foto(sessao, remoto).await {
+            Ok(()) | Err(DomainError::NaoEncontradoNoSite(_)) => Ok(()),
+            Err(erro) => Err(erro.to_string()),
+        }
+    }
+
     /// `estado` manda quando vem preenchido.
     ///
     /// 🔑 **É a leva escolhida antes dos arquivos**, como na tela da sessão do
@@ -236,7 +285,7 @@ impl PublicarNoPosVendaUseCase {
         // A faixa escolhida na barra de envio; `None` segue a galeria.
         produto_id: Option<String>,
     ) -> Result<(String, EstadoNoBalcao), (String, String)> {
-        let mut photo = match self.fotos.find_by_id(id).await {
+        let photo = match self.fotos.find_by_id(id).await {
             Ok(Some(p)) => p,
             Ok(None) => return Err((id.to_string(), "foto não está mais no catálogo".into())),
             Err(e) => return Err((id.to_string(), e.to_string())),
@@ -248,17 +297,29 @@ impl PublicarNoPosVendaUseCase {
         // quando ele existe, e cai no caminho quando não — que é o que mantém
         // de pé toda foto importada antes desta coluna.
         let nome = nome_para_o_site(photo.file_name().unwrap_or_default());
+
+        // 🚨 **A rejeitada não sobe** (C21) — conferido aqui, na leitura mais
+        // fresca que existe, e não só na fila da tela. A tela decide a partir
+        // de uma releitura do catálogo, e a releitura pode chegar antes de a
+        // marca do `X` ser gravada: a foto voltava à fila e subia rejeitada
+        // (achado contra a pilha local, 21/set/2026).
+        if photo.flag() == Some(domain::value_objects::Flag::Reject) {
+            return Err((nome, "rejeitada — fica fora do site (C21)".into()));
+        }
         let estado = estado.unwrap_or_else(|| EstadoNoBalcao::da_foto(&photo));
 
         // 🔑 **A de quem classificou vence a do banco.** O `photo` acima foi
         // lido enquanto a gravação da nota ainda corria noutra tarefa; sem este
         // `or_else` o que sobe é o valor anterior. Ver `enviar_uma`.
         //
-        // ⚠️ **E não se recusa aqui o que o site recusa.** Uma guarda local
-        // "só sobe de 1 a 5" pareceria melhora e derrubaria a publicação em
-        // lote, que sobe foto do ensaio inteiro sem passar pela travessia do
-        // zero. Quem decide o que o acervo aceita é o site.
-        let nota = nota.or_else(|| photo.rating().map(|r| r.value()));
+        // O contrato do site aceita somente notas de 1 a 5. `0` significa
+        // "sem nota" no catálogo local e jamais pode atravessar a fronteira
+        // HTTP como uma classificação — o backend responde 400 nesse caso.
+        // A fila da UI não envia fotos sem nota; esta guarda também protege
+        // chamadas diretas e fotos antigas cujo valor local esteja zerado.
+        let nota = nota
+            .or_else(|| photo.rating().map(|r| r.value()))
+            .filter(|nota| (1..=5).contains(nota));
 
         let jpeg = self
             .exportador
@@ -340,8 +401,20 @@ impl PublicarNoPosVendaUseCase {
         // ⚠️ **Falhar aqui não desfaz o envio**: a foto está no site, e dizer
         // que ela falhou faria o operador subir de novo, criando duplicata. O
         // preço de não gravar é perder o id — que se recupera relendo a galeria.
-        photo.definir_id_no_site(Some(enviada.id));
-        if let Err(erro) = self.fotos.update(&photo).await {
+        //
+        // 🚨 **Relida agora, e não a de antes do envio** (21/set/2026, achado
+        // rodando o app contra a pilha local). O `photo` lá de cima foi lido
+        // antes de renderizar e subir — segundos atrás —, e o `update` regrava
+        // a linha inteira: a nota que o operador deu **durante** a subida
+        // voltava a zero, e a foto chegava ao site sem ela. O ensaio sobe
+        // enquanto se classifica (C20), então essa janela é a regra, não o
+        // acaso.
+        let mut atual = match self.fotos.find_by_id(id).await {
+            Ok(Some(atual)) => atual,
+            _ => photo,
+        };
+        atual.definir_id_no_site(Some(enviada.id));
+        if let Err(erro) = self.fotos.update(&atual).await {
             eprintln!("⚠️ [Pós-venda] {nome} subiu, mas o id do site não foi gravado: {erro}");
         }
 
@@ -420,6 +493,8 @@ mod tests {
         falham: Vec<String>,
         avisadas: Mutex<Vec<String>>,
         removidas: Mutex<Vec<String>>,
+        /// O site recusa toda remoção (`500`).
+        recusa_remover: bool,
         /// Ids que o site responde `404` ao remover — alguém já os tirou de lá.
         some_do_site: Vec<String>,
         /// `(bilhete, tamanho do JPEG, ajustes)` de cada revelação salva.
@@ -497,6 +572,11 @@ mod tests {
         }
         async fn remover_foto(&self, _: &Sessao, id: &str) -> DomainResult<()> {
             self.removidas.lock().unwrap().push(id.to_string());
+            if self.recusa_remover {
+                return Err(DomainError::InfrastructureError(
+                    "o site respondeu 500".into(),
+                ));
+            }
             if self.some_do_site.contains(&id.to_string()) {
                 return Err(DomainError::NaoEncontradoNoSite("foto".into()));
             }
@@ -620,6 +700,60 @@ mod tests {
                 ("DSC_002.jpg".to_string(), EstadoNoBalcao::Disponivel, 1),
             ]
         );
+    }
+
+    /// 🚨 **A nota dada durante a subida não volta a zero.**
+    ///
+    /// O ensaio sobe enquanto o operador classifica (C20): a foto é lida,
+    /// renderizada e enviada — segundos —, e nesse meio a tecla `5` grava a
+    /// nota. Gravar o id remoto a partir da leitura de antes regravava a linha
+    /// inteira com a nota velha (achado contra a pilha local, 21/set/2026).
+    #[tokio::test]
+    async fn a_nota_dada_durante_a_subida_sobrevive_ao_id_remoto() {
+        let antes = foto("/ensaio/DSC_003.NEF", false);
+        let mut depois = antes.clone();
+        depois
+            .rate(domain::value_objects::Rating::new(5).unwrap())
+            .unwrap();
+
+        let id = antes.id();
+        let leituras = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut repo = MockPhotoRepo::new();
+        repo.expect_find_by_id().returning({
+            let leituras = leituras.clone();
+            move |_| {
+                // A primeira leitura é a de antes da tecla; a segunda, depois.
+                let n = leituras.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(Some(if n == 0 {
+                    antes.clone()
+                } else {
+                    depois.clone()
+                }))
+            }
+        });
+        repo.expect_update()
+            .times(1)
+            .withf(|foto| {
+                foto.id_no_site() == Some("f") && foto.rating().map(|r| r.value()) == Some(5)
+            })
+            .returning(|_| Ok(()));
+        let mut exportador = MockExportador::new();
+        exportador
+            .expect_renderizar_jpeg()
+            .returning(|_, _| Ok(vec![1]));
+        exportador
+            .expect_renderizar_bruto_jpeg()
+            .returning(|_, _| Ok(None));
+        let caso = PublicarNoPosVendaUseCase::new(
+            Arc::new(repo),
+            Arc::new(exportador),
+            Arc::new(MockThumbnailGen::new()),
+            Arc::new(ApiDeMentira::default()),
+        );
+
+        caso.enviar_uma(&sessao(), "g1", &id, 0, None, None, None)
+            .await
+            .unwrap();
     }
 
     /// 🛡️ **Contrato da foto, C7** (`../recordarfotos-e-commerce/docs/CONTRATO_DA_FOTO.md`):
@@ -764,6 +898,66 @@ mod tests {
         caso.remover_do_site(&sessao(), &id)
             .await
             .expect("já não estar lá é o que se queria");
+    }
+
+    /// ❌ **Rejeitar a que subiu tira da nuvem e marca aqui, numa gravação
+    /// só** (dono, 2026-09-21). A marca e o id remoto mudam juntos, depois de
+    /// o site responder.
+    #[tokio::test]
+    async fn rejeitar_tira_da_nuvem_e_marca_a_copia_daqui() {
+        let mut photo = foto("/ensaio/r.NEF", false);
+        photo.definir_id_no_site(Some("remota-r".into()));
+        let id = photo.id();
+        let mut repo = MockPhotoRepo::new();
+        repo.expect_find_by_id()
+            .returning(move |_| Ok(Some(photo.clone())));
+        repo.expect_update()
+            .times(1)
+            .withf(|f| {
+                f.id_no_site().is_none() && f.flag() == Some(domain::value_objects::Flag::Reject)
+            })
+            .returning(|_| Ok(()));
+        let api = Arc::new(ApiDeMentira::default());
+        let caso = PublicarNoPosVendaUseCase::new(
+            Arc::new(repo),
+            Arc::new(MockExportador::new()),
+            Arc::new(MockThumbnailGen::new()),
+            api.clone(),
+        );
+
+        caso.rejeitar_tirando_da_nuvem(&sessao(), &id)
+            .await
+            .unwrap();
+        assert_eq!(*api.removidas.lock().unwrap(), ["remota-r"]);
+    }
+
+    /// 🚨 **O site recusou: nada muda aqui.** A foto continua na nuvem e sem a
+    /// marca — rejeitar pela metade deixaria a cópia daqui dizendo uma coisa e
+    /// a nuvem outra.
+    #[tokio::test]
+    async fn rejeitar_com_o_site_recusando_nao_muda_nada_aqui() {
+        let mut photo = foto("/ensaio/f.NEF", false);
+        photo.definir_id_no_site(Some("remota-f".into()));
+        let id = photo.id();
+        let mut repo = MockPhotoRepo::new();
+        repo.expect_find_by_id()
+            .returning(move |_| Ok(Some(photo.clone())));
+        repo.expect_update().times(0);
+        let api = Arc::new(ApiDeMentira {
+            recusa_remover: true,
+            ..Default::default()
+        });
+        let caso = PublicarNoPosVendaUseCase::new(
+            Arc::new(repo),
+            Arc::new(MockExportador::new()),
+            Arc::new(MockThumbnailGen::new()),
+            api,
+        );
+
+        assert!(caso
+            .rejeitar_tirando_da_nuvem(&sessao(), &id)
+            .await
+            .is_err());
     }
 
     /// ⚠️ Tirar a nota de uma foto que nunca subiu não fala com o site.

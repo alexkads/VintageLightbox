@@ -154,9 +154,21 @@ pub mod mentira {
     pub struct MarcadorDeMentira {
         marcado: Mutex<Vec<(String, Marca)>>,
         apagados: Mutex<Vec<String>>,
+        /// O catálogo que a gravação alcança, como o banco de verdade: sem
+        /// ele, a releitura do acervo devolveria a foto como estava antes.
+        acervo: Option<std::sync::Arc<crate::biblioteca::acervo::mentira::AcervoDeMentira>>,
     }
 
     impl MarcadorDeMentira {
+        pub fn gravando_em(
+            acervo: std::sync::Arc<crate::biblioteca::acervo::mentira::AcervoDeMentira>,
+        ) -> Self {
+            Self {
+                acervo: Some(acervo),
+                ..Default::default()
+            }
+        }
+
         pub fn apagados(&self) -> Vec<String> {
             self.apagados
                 .lock()
@@ -174,6 +186,17 @@ pub mod mentira {
 
     impl Marcador for MarcadorDeMentira {
         fn marcar(&self, id: String, marca: Marca) {
+            if let Some(acervo) = &self.acervo {
+                let mut fotos = acervo.fotos.lock().expect("as fotos");
+                if let Some(foto) = fotos.iter_mut().find(|f| f.id == id) {
+                    match &marca {
+                        Marca::Nota(n) => foto.rating = *n,
+                        Marca::Cor(c) => foto.color_label = c.clone(),
+                        Marca::Sinalizador(c) => foto.flag = Some(*c),
+                        Marca::Comprada(b) => foto.comprada = *b,
+                    }
+                }
+            }
             self.marcado
                 .lock()
                 .expect("o marcador de mentira não deve estar envenenado")
