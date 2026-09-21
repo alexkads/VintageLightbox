@@ -91,8 +91,14 @@ impl Selecao {
     /// recusa — o `P` do balcão, que deixa de fora a foto sem nota (dono,
     /// 2026-09-05 e 2026-09-20) e segue com as outras. Recusar o lote inteiro
     /// faria o operador procurar qual foi, numa grade de duzentas.
+    ///
+    /// 🚨 **`indice` é a posição da foto, e não o lugar dela na lista das
+    /// marcadas.** Era `Vec::remove(indice)` — que remove pelo lugar na lista:
+    /// com a foto 4 marcada sozinha, pedir para tirá-la derrubava o app
+    /// (*removal index (is 4) should be < len (is 1)*), e com mais marcadas
+    /// tirava a errada (achado em 2026-09-21, no `X` que separa as da nuvem).
     pub fn desmarcar_uma(&mut self, indice: usize) {
-        self.marcadas.remove(indice);
+        self.marcadas.retain(|&p| p != indice);
     }
 
     /// O clique terminou sobre a foto `indice`.
@@ -297,6 +303,19 @@ fn faixa_a_partir(ancora: usize, destino: usize) -> Vec<usize> {
 
 #[cfg(test)]
 mod testes {
+
+    /// 🚨 Tirar uma da seleção é pela **posição da foto**.
+    #[test]
+    fn desmarcar_uma_tira_a_foto_pela_posicao() {
+        let mut s = Selecao::default();
+        s.marcar(4);
+        s.marcar(7);
+        s.desmarcar_uma(4);
+        assert_eq!(s.marcadas().collect::<Vec<_>>(), [7]);
+        s.desmarcar_uma(7);
+        assert_eq!(s.quantas(), 0);
+    }
+
     use super::*;
     use crate::grade::Opcoes;
 

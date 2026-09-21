@@ -14,6 +14,7 @@
 
 mod atalhos_da_revelacao;
 mod painel;
+pub mod resgate;
 mod resolucao_cheia;
 mod roteiro;
 /// O que a raiz conta à bandeja (`crate::segundo_plano`).
@@ -564,6 +565,14 @@ pub struct Aplicativo {
     /// marca. A releitura pode chegar antes da gravação, e sem isto a passada
     /// de subida via a foto sem a marca e a punha de volta na fila (C21).
     rejeitadas_agora: std::collections::HashSet<String>,
+    /// Quem cataloga o bruto que volta da nuvem e quem marca a cópia como
+    /// rejeitada — ver `app::resgate`.
+    importador: Arc<dyn crate::importacao::explorador::Importador>,
+    marcador: Arc<dyn Marcador>,
+    /// A tarefa do resgate da rejeição: uma foto de cada vez.
+    _resgate: Option<gpui::Task<()>>,
+    /// 🧪 O desfecho do último resgate, para os cenários.
+    ultimo_resgate: Option<resgate::Desfecho>,
     /// A receita já aplicada a cada foto local, por id: `"<preset>|<proporção>"`.
     /// O mesmo registro do assistente, e pelo mesmo motivo — sem ele a receita
     /// seria pedida de novo a cada releitura do catálogo.
@@ -764,7 +773,7 @@ impl Aplicativo {
             Biblioteca::nova(
                 fotos,
                 previews.clone(),
-                portas.marcador,
+                portas.marcador.clone(),
                 portas.colecoes,
                 window,
                 cx,
@@ -955,7 +964,7 @@ impl Aplicativo {
         let importacao = cx.new(|cx| {
             Importacao::nova(
                 portas.explorador,
-                portas.importador,
+                portas.importador.clone(),
                 portas.seletor,
                 portas.gerador,
                 previews_para_importar,
@@ -1042,6 +1051,10 @@ impl Aplicativo {
             subindo_sozinhas: std::collections::HashMap::new(),
             recem_subidas: std::collections::HashSet::new(),
             rejeitadas_agora: std::collections::HashSet::new(),
+            importador: portas.importador.clone(),
+            marcador: portas.marcador.clone(),
+            _resgate: None,
+            ultimo_resgate: None,
             receita_das_locais: std::collections::HashMap::new(),
             _sessao_escolhida: sessao_escolhida,
             configuracoes: cx.new(|_| Configuracoes::nova(previews_das_configuracoes)),
@@ -1657,6 +1670,11 @@ impl Aplicativo {
                         self.rejeitadas_agora.remove(id);
                     }
                 }
+            }
+            // ❌ O `X` em fotos da nuvem: cada uma volta para cá antes de a
+            // nuvem a perder — ver `app::resgate`.
+            DetalhePedido::RejeitarDaNuvem(fotos) => {
+                self.rejeitar_da_nuvem(fotos.clone(), cx);
             }
             DetalhePedido::Imprimir(ids) => {
                 let ids = ids.clone();

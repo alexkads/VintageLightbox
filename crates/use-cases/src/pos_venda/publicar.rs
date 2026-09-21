@@ -218,6 +218,55 @@ impl PublicarNoPosVendaUseCase {
         }
     }
 
+    /// ❌ **Rejeitar a foto que já subiu: ela sai da nuvem e fica aqui,
+    /// marcada** (dono, 2026-09-21: *"quando o usuário rejeitar, a mesma
+    /// voltará para o arquivo local e sairá da nuvem"*).
+    ///
+    /// 🔑 **Só serve à foto que tem cópia neste catálogo** — o arquivo já está
+    /// no disco, então apagar a nuvem não perde nada. A que não tem cópia aqui
+    /// passa antes pelo resgate da tela (`app::resgate`), que a traz e a
+    /// cataloga.
+    ///
+    /// 🚨 **A marca e o id remoto mudam juntos, e só depois de a nuvem
+    /// responder.** Se o site recusar, nada muda aqui: a foto continua na nuvem
+    /// e não rejeitada, e a tela diz que não deu. A foto é relida **depois** da
+    /// ida à rede, pela mesma razão de `subir` — a linha é regravada inteira.
+    pub async fn rejeitar_tirando_da_nuvem(
+        &self,
+        sessao: &Sessao,
+        id: &PhotoId,
+    ) -> Result<(), String> {
+        let Some(photo) = self.fotos.find_by_id(id).await.map_err(|e| e.to_string())? else {
+            return Err("foto não está mais no catálogo".into());
+        };
+        if let Some(remoto) = photo.id_no_site().map(str::to_string) {
+            match self.api.remover_foto(sessao, &remoto).await {
+                // 404 é "já não está lá": o desfecho desejado.
+                Ok(()) | Err(DomainError::NaoEncontradoNoSite(_)) => {}
+                Err(erro) => return Err(erro.to_string()),
+            }
+        }
+        let mut atual = self
+            .fotos
+            .find_by_id(id)
+            .await
+            .map_err(|e| e.to_string())?
+            .unwrap_or(photo);
+        atual.set_flag(domain::value_objects::Flag::Reject);
+        atual.definir_id_no_site(None);
+        self.fotos.update(&atual).await.map_err(|e| e.to_string())
+    }
+
+    /// Tira do site a foto pelo id **dela lá** — o último passo do resgate da
+    /// foto que não tinha cópia aqui, quando o bruto já foi trazido e
+    /// catalogado. 404 é sucesso: ela já não está lá.
+    pub async fn remover_remoto(&self, sessao: &Sessao, remoto: &str) -> Result<(), String> {
+        match self.api.remover_foto(sessao, remoto).await {
+            Ok(()) | Err(DomainError::NaoEncontradoNoSite(_)) => Ok(()),
+            Err(erro) => Err(erro.to_string()),
+        }
+    }
+
     /// `estado` manda quando vem preenchido.
     ///
     /// 🔑 **É a leva escolhida antes dos arquivos**, como na tela da sessão do
@@ -444,6 +493,8 @@ mod tests {
         falham: Vec<String>,
         avisadas: Mutex<Vec<String>>,
         removidas: Mutex<Vec<String>>,
+        /// O site recusa toda remoção (`500`).
+        recusa_remover: bool,
         /// Ids que o site responde `404` ao remover — alguém já os tirou de lá.
         some_do_site: Vec<String>,
         /// `(bilhete, tamanho do JPEG, ajustes)` de cada revelação salva.
@@ -521,6 +572,11 @@ mod tests {
         }
         async fn remover_foto(&self, _: &Sessao, id: &str) -> DomainResult<()> {
             self.removidas.lock().unwrap().push(id.to_string());
+            if self.recusa_remover {
+                return Err(DomainError::InfrastructureError(
+                    "o site respondeu 500".into(),
+                ));
+            }
             if self.some_do_site.contains(&id.to_string()) {
                 return Err(DomainError::NaoEncontradoNoSite("foto".into()));
             }
@@ -842,6 +898,66 @@ mod tests {
         caso.remover_do_site(&sessao(), &id)
             .await
             .expect("já não estar lá é o que se queria");
+    }
+
+    /// ❌ **Rejeitar a que subiu tira da nuvem e marca aqui, numa gravação
+    /// só** (dono, 2026-09-21). A marca e o id remoto mudam juntos, depois de
+    /// o site responder.
+    #[tokio::test]
+    async fn rejeitar_tira_da_nuvem_e_marca_a_copia_daqui() {
+        let mut photo = foto("/ensaio/r.NEF", false);
+        photo.definir_id_no_site(Some("remota-r".into()));
+        let id = photo.id();
+        let mut repo = MockPhotoRepo::new();
+        repo.expect_find_by_id()
+            .returning(move |_| Ok(Some(photo.clone())));
+        repo.expect_update()
+            .times(1)
+            .withf(|f| {
+                f.id_no_site().is_none() && f.flag() == Some(domain::value_objects::Flag::Reject)
+            })
+            .returning(|_| Ok(()));
+        let api = Arc::new(ApiDeMentira::default());
+        let caso = PublicarNoPosVendaUseCase::new(
+            Arc::new(repo),
+            Arc::new(MockExportador::new()),
+            Arc::new(MockThumbnailGen::new()),
+            api.clone(),
+        );
+
+        caso.rejeitar_tirando_da_nuvem(&sessao(), &id)
+            .await
+            .unwrap();
+        assert_eq!(*api.removidas.lock().unwrap(), ["remota-r"]);
+    }
+
+    /// 🚨 **O site recusou: nada muda aqui.** A foto continua na nuvem e sem a
+    /// marca — rejeitar pela metade deixaria a cópia daqui dizendo uma coisa e
+    /// a nuvem outra.
+    #[tokio::test]
+    async fn rejeitar_com_o_site_recusando_nao_muda_nada_aqui() {
+        let mut photo = foto("/ensaio/f.NEF", false);
+        photo.definir_id_no_site(Some("remota-f".into()));
+        let id = photo.id();
+        let mut repo = MockPhotoRepo::new();
+        repo.expect_find_by_id()
+            .returning(move |_| Ok(Some(photo.clone())));
+        repo.expect_update().times(0);
+        let api = Arc::new(ApiDeMentira {
+            recusa_remover: true,
+            ..Default::default()
+        });
+        let caso = PublicarNoPosVendaUseCase::new(
+            Arc::new(repo),
+            Arc::new(MockExportador::new()),
+            Arc::new(MockThumbnailGen::new()),
+            api,
+        );
+
+        assert!(caso
+            .rejeitar_tirando_da_nuvem(&sessao(), &id)
+            .await
+            .is_err());
     }
 
     /// ⚠️ Tirar a nota de uma foto que nunca subiu não fala com o site.

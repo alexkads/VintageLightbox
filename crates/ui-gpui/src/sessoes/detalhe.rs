@@ -183,6 +183,9 @@ pub enum Pedido {
     /// 🔑 **Quem grava é a Biblioteca**, dona do catálogo — como na nota
     /// ([`Pedido::Classificar`]). Esta tela só diz quais e para que lado.
     Rejeitar { ids: Vec<String>, rejeitada: bool },
+    /// ❌ A tecla `X` em fotos **que estão na nuvem**: elas voltam para cá e
+    /// saem de lá (dono, 2026-09-21). Quem faz é a raiz — `app::resgate`.
+    RejeitarDaNuvem(Vec<crate::app::resgate::AFotoQueVolta>),
     /// "Imprimir…": a folha de impressão com as fotos marcadas (só no desktop).
     Imprimir(Vec<String>),
     /// A miniatura de uma foto do site chegou ao cache, sob esta chave.
@@ -1376,30 +1379,123 @@ impl Detalhe {
             .filter_map(|p| self.acervo.visivel(p))
             .cloned()
             .collect();
-        let (podem, compradas): (Vec<&acervo::Foto>, Vec<&acervo::Foto>) = marcadas
-            .iter()
-            .partition(|f| f.estado != acervo::Estado::Comprada);
-        // 🚨 **A comprada fica de fora com aviso, e não em silêncio** — a mesma
-        // regra da web: recusar o lote inteiro faria o operador procurar qual
-        // foi, e recusar calado faria a tecla parecer quebrada.
-        let aviso: Option<SharedString> = (!compradas.is_empty()).then(|| {
-            let nomes: Vec<&str> = compradas.iter().map(|f| f.arquivo.as_str()).collect();
-            format!(
-                "{} foto(s) compradas ficam como estão — há cobrança e entrega atrás delas ({})",
-                compradas.len(),
-                nomes.join(" / ")
-            )
-            .into()
+        // 🚨 **A comprada e a levada ficam de fora com aviso, e não em
+        // silêncio** — recusar o lote inteiro faria o operador procurar qual
+        // foi, e recusar calado faria a tecla parecer quebrada. A comprada tem
+        // cobrança e entrega atrás; a **levada** tem a venda do balcão em
+        // andamento, e rejeitá-la a tiraria da nuvem no meio dela (2026-09-21).
+        let (podem, ficam): (Vec<&acervo::Foto>, Vec<&acervo::Foto>) =
+            marcadas.iter().partition(|f| {
+                !matches!(
+                    f.estado,
+                    acervo::Estado::Comprada | acervo::Estado::LevadaNoBalcao
+                )
+            });
+        let aviso: Option<SharedString> = (!ficam.is_empty()).then(|| {
+            let compradas: Vec<&str> = ficam
+                .iter()
+                .filter(|f| f.estado == acervo::Estado::Comprada)
+                .map(|f| f.arquivo.as_str())
+                .collect();
+            let levadas: Vec<&str> = ficam
+                .iter()
+                .filter(|f| f.estado == acervo::Estado::LevadaNoBalcao)
+                .map(|f| f.arquivo.as_str())
+                .collect();
+            let mut frases = Vec::new();
+            if !compradas.is_empty() {
+                frases.push(format!(
+                    "{} foto(s) compradas ficam como estão — há cobrança e entrega atrás delas ({})",
+                    compradas.len(),
+                    compradas.join(" / ")
+                ));
+            }
+            if !levadas.is_empty() {
+                frases.push(format!(
+                    "{} foto(s) levadas no balcão ficam como estão — tire a marcação (P) antes de \
+                     rejeitar ({})",
+                    levadas.len(),
+                    levadas.join(" / ")
+                ));
+            }
+            frases.join(". ").into()
         });
+        if !ficam.is_empty() {
+            self.desmarcar_onde(|f| f.estado == acervo::Estado::LevadaNoBalcao, cx);
+        }
         let todas_rejeitadas = !podem.is_empty() && podem.iter().all(|f| f.rejeitada);
-        if !podem.is_empty() {
+        // 🔄 **Rejeitar o que está na nuvem é trazê-lo para cá e tirá-lo de
+        // lá** (dono, 2026-09-21: *"quando o usuário rejeitar, a mesma voltará
+        // para o arquivo local e sairá da núvem"*). A que só existe aqui segue
+        // o caminho de sempre — a marca no catálogo segura a subida. Desfazer
+        // também: a local sem a marca volta a subir sozinha, e a do site que
+        // alguém rejeitou pelo caminho antigo perde a marca num `PATCH`.
+        let rejeitar = !todas_rejeitadas;
+        let da_nuvem: Vec<crate::app::resgate::AFotoQueVolta> = if rejeitar {
+            podem
+                .iter()
+                .filter_map(|f| {
+                    let no_site = match self.subiu_como.get(&f.id) {
+                        Some(no_site) => no_site.clone(),
+                        None if !self.ids_locais.contains(&f.id) => f.id.clone(),
+                        None => return None,
+                    };
+                    // Os PARÂMETROS que estão na nuvem voltam com ela.
+                    let (ajustes, corte) = self
+                        .do_site(&no_site)
+                        .and_then(|g| g.ajustes.as_ref())
+                        .map(crate::revelacao::persistencia::de_json)
+                        .unwrap_or_default();
+                    Some(crate::app::resgate::AFotoQueVolta {
+                        no_site,
+                        arquivo: f.arquivo.clone(),
+                        ajustes,
+                        corte,
+                    })
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        // As que vão para o resgate saem **deste gesto** — o resto (as só
+        // locais) segue pelo catálogo, abaixo — e voltam à seleção no fim: se
+        // o resgate falhar, o próximo `X` tem de cair nelas sem outro clique.
+        let fora_do_gesto: Vec<usize> = if da_nuvem.is_empty() {
+            Vec::new()
+        } else {
+            let vao: std::collections::HashSet<&str> =
+                da_nuvem.iter().map(|f| f.no_site.as_str()).collect();
+            self.selecao
+                .marcadas()
+                .filter(|p| {
+                    self.acervo.visivel(*p).is_some_and(|f| {
+                        vao.contains(f.id.as_str())
+                            || self
+                                .subiu_como
+                                .get(&f.id)
+                                .is_some_and(|s| vao.contains(s.as_str()))
+                    })
+                })
+                .collect()
+        };
+        for posicao in &fora_do_gesto {
+            self.selecao.desmarcar_uma(*posicao);
+        }
+        if !da_nuvem.is_empty() {
+            cx.emit(Pedido::RejeitarDaNuvem(da_nuvem));
+        }
+        let restam = self.selecao.marcadas().next().is_some();
+        if !podem.is_empty() && restam {
             self.mudar_as_marcadas(
                 domain::services::pos_venda::MudancaDaFoto {
-                    rejeitada: Some(!todas_rejeitadas),
+                    rejeitada: Some(rejeitar),
                     ..Default::default()
                 },
                 cx,
             );
+        }
+        for posicao in fora_do_gesto {
+            self.selecao.marcar(posicao);
         }
         // ⚠️ **Depois da mudança, e não antes**: `mudar_as_marcadas` limpa o
         // erro ao despachar, e o aviso posto antes morreria no mesmo gesto.
@@ -6685,7 +6781,21 @@ mod testes {
             })
         });
 
-        // A foto do site: um `PATCH` com a rejeição, e nada mais.
+        let da_nuvem = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let recebidas_da_nuvem = da_nuvem.clone();
+        let _outra_assinatura = cx.update(|cx| {
+            cx.subscribe(&raiz, move |_, evento: &Pedido, _| {
+                if let Pedido::RejeitarDaNuvem(fotos) = evento {
+                    recebidas_da_nuvem
+                        .borrow_mut()
+                        .extend(fotos.iter().map(|f| f.no_site.clone()));
+                }
+            })
+        });
+
+        // 🔄 A foto do site vai para o resgate (dono, 2026-09-21): ela volta
+        // para cá e sai da nuvem. Quem faz é a raiz; a tela só pede — e não
+        // manda `PATCH` nenhum.
         janela
             .update(cx, |tela, _window, cx| {
                 tela.clicar(0, Modificadores::default(), cx);
@@ -6694,13 +6804,11 @@ mod testes {
             .expect("a janela deve estar aberta");
         cx.run_until_parked();
 
-        let negociadas = publicador.negociadas();
-        assert_eq!(negociadas.len(), 1, "{negociadas:?}");
-        assert_eq!(negociadas[0].0, "f1");
-        assert_eq!(negociadas[0].1.rejeitada, Some(true));
+        assert_eq!(da_nuvem.borrow().as_slice(), ["f1"]);
+        assert!(publicador.negociadas().is_empty(), "nenhum PATCH");
         assert!(
             publicador.tiradas().is_empty(),
-            "🚨 rejeitar não apaga arquivo nenhum (C21)"
+            "🚨 a tela não apaga: quem tira da nuvem é o resgate, depois da cópia"
         );
 
         // 🛒 A comprada fica de fora, e a tela diz quem ficou.
@@ -6718,7 +6826,7 @@ mod testes {
             })
             .expect("a janela deve estar aberta");
         cx.run_until_parked();
-        assert_eq!(publicador.negociadas().len(), 1, "e nada vai ao site");
+        assert!(publicador.negociadas().is_empty(), "e nada vai ao site");
 
         // A foto que ainda não subiu: o pedido vai para o catálogo local.
         janela
@@ -6737,11 +6845,11 @@ mod testes {
             [(vec!["nova-1".to_string()], true)],
             "a local é rejeitada no catálogo, que é onde ela existe"
         );
-        assert_eq!(
-            publicador.negociadas().len(),
-            1,
+        assert!(
+            publicador.negociadas().is_empty(),
             "e não vai ao site: ela não tem linha lá"
         );
+        assert_eq!(da_nuvem.borrow().len(), 1, "nem ao resgate");
     }
 
     /// 🚨 **A foto que termina de subir no meio da classificação não perde o
@@ -6902,6 +7010,44 @@ mod testes {
             .expect("a janela deve estar aberta");
     }
 
+    /// ❌ **A levada no balcão não é rejeitada** (2026-09-21): rejeitar tira da
+    /// nuvem, e ela tem a venda do balcão em andamento. Fica de fora com aviso,
+    /// e as outras da seleção seguem.
+    #[gpui::test]
+    fn o_x_nao_rejeita_a_levada_no_balcao(cx: &mut TestAppContext) {
+        let (janela, publicador) = janela(
+            cx,
+            vec![foto("l1", EstadoDaFotoNoSite::LevadaNoBalcao, Some(5))],
+        );
+        entrar(cx, &janela);
+        let raiz = cx.update(|cx| janela.root(cx).expect("a tela"));
+        let pedidos = std::rc::Rc::new(std::cell::RefCell::new(0));
+        let contagem = pedidos.clone();
+        let _assinatura = cx.update(|cx| {
+            cx.subscribe(&raiz, move |_, evento: &Pedido, _| {
+                if matches!(evento, Pedido::RejeitarDaNuvem(_)) {
+                    *contagem.borrow_mut() += 1;
+                }
+            })
+        });
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.clicar(0, Modificadores::default(), cx);
+                tela.alternar_rejeicao(cx);
+                assert!(
+                    tela.erro
+                        .as_deref()
+                        .is_some_and(|e| e.contains("levadas no balcão") && e.contains("l1.jpg")),
+                    "{:?}",
+                    tela.erro
+                );
+            })
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+        assert_eq!(*pedidos.borrow(), 0, "não vai ao resgate");
+        assert!(publicador.negociadas().is_empty(), "nem ao site");
+    }
+
     /// 🔁 **`X` de novo desfaz a rejeição, e a decisão é do grupo.**
     ///
     /// A mesma regra do `P`: só desfaz quando **todas** as marcadas já estão
@@ -6915,7 +7061,8 @@ mod testes {
             f
         };
 
-        // Uma rejeitada e uma não: o gesto rejeita as duas.
+        // Uma rejeitada e uma não: o gesto rejeita as duas — e as duas estão na
+        // nuvem, então as duas vão ao resgate (2026-09-21), e nenhuma num PATCH.
         let (mista, publicador) = janela(
             cx,
             vec![
@@ -6931,11 +7078,9 @@ mod testes {
             })
             .expect("a janela deve estar aberta");
         cx.run_until_parked();
-        let negociadas = publicador.negociadas();
-        assert_eq!(negociadas.len(), 2, "{negociadas:?}");
         assert!(
-            negociadas.iter().all(|(_, m)| m.rejeitada == Some(true)),
-            "com uma fora, o grupo inteiro é rejeitado: {negociadas:?}"
+            publicador.negociadas().is_empty(),
+            "com uma fora, o grupo inteiro vai ao resgate, e não ao PATCH"
         );
 
         // As duas rejeitadas: agora o gesto desfaz.
