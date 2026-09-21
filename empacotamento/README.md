@@ -20,6 +20,16 @@ Por baixo do `make` estão os scripts, que aceitam mais opções:
 ./scripts/publicar.py --seco --notas "corrige o magenta da tonalização"
 ```
 
+No Fedora, o `.rpm` tem script próprio — o `cargo-packager` não gera esse formato:
+
+```bash
+./scripts/empacotar-rpm.sh                    # compila e gera dist/fedora/*.rpm
+./scripts/empacotar-rpm.sh --binario CAMINHO  # empacota um binário já compilado
+./scripts/empacotar-rpm.sh --instalar         # gera e instala com o dnf
+```
+
+⚠️ O `.rpm` gerado no Fedora 44 pede a glibc 2.43 e **só instala no 44 em diante**.
+
 ## 🔑 São dois scripts, e isso é desenho
 
 | Script | Alvos | Onde roda |

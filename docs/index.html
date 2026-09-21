@@ -96,7 +96,7 @@
 
   <nav class="indice" aria-label="Nesta seção">
     <strong>Qual é o seu computador?</strong>
-    <a href="#gpui-windows">Windows</a> · <a href="#gpui-macos">macOS</a> · <a href="#gpui-linux">Linux</a>
+    <a href="#gpui-windows">Windows</a> · <a href="#gpui-macos">macOS</a> · <a href="#gpui-linux">Linux</a> · <a href="#gpui-rpm">Fedora (.rpm)</a>
     <br>
     <strong>Depois:</strong>
     <a href="#primeiro-uso">Primeiro uso</a> · <a href="#gpui-telas">As telas</a> ·
@@ -202,13 +202,23 @@ cargo run --release -p ui-gpui</code></pre>
 docker compose -f docker-compose.dev.yml up -d
 cd /Users/alexkads/Projects/RecordarFotos/VintageLightbox-Rust
 VLB_POS_VENDA_URL=http://localhost:8080 VLB_SITE_URL=http://localhost:8001 cargo run --release -p ui-gpui</code></pre>
+    <h3 id="gpui-rpm">Gerar o pacote .rpm (Fedora)</h3>
+    <p>Para instalar em outros computadores com Fedora sem compilar em cada um, gere um
+       <code>.rpm</code> numa máquina com o projeto:</p>
+    <pre><code>./scripts/empacotar-rpm.sh              # compila e gera dist/fedora/*.rpm
+./scripts/empacotar-rpm.sh --instalar   # gera e já instala nesta máquina</code></pre>
+    <p>Nos outros computadores, basta dar dois cliques no arquivo, ou:</p>
+    <pre class="quebra"><code>sudo dnf install ./vintagelightbox-0.1.10-1.fc44.x86_64.rpm</code></pre>
+    <p>O <code>dnf</code> traz sozinho as bibliotecas que faltarem e sugere a extensão da bandeja, o
+       driver Vulkan e o suporte à câmera. Para remover: <code>sudo dnf remove vintagelightbox</code>.
+       ⚠️ Gerado no Fedora 44, o pacote <strong>só instala no Fedora 44 em diante</strong>.</p>
     <p id="fedora"><strong>No Fedora:</strong></p>
     <ul class="texto">
       <li><strong>Workstation (GNOME):</strong> o GNOME não mostra o ícone da bandeja sozinho. O
-          instalador põe e liga a extensão <em>AppIndicator</em> — recém-instalada, ela só pode ser
-          ligada para o próximo login. <strong>Saia e entre de novo na sessão</strong> para o ícone
-          aparecer. Sem ela o app funciona, mas minimizado só volta
-          pelo <kbd>Alt</kbd>+<kbd>Tab</kbd>.</li>
+          instalador põe e liga a extensão <em>AppIndicator</em>, e o GNOME abre um aviso pedindo
+          para instalá-la: <strong>clique em Instalar</strong> e o ícone aparece na hora. Recusou o
+          aviso, ou ele não apareceu? <strong>Saia e entre de novo na sessão</strong>. Sem a extensão
+          o app funciona, mas minimizado só volta pelo <kbd>Alt</kbd>+<kbd>Tab</kbd>.</li>
       <li><strong>Silverblue, Kinoite ou Bazzite:</strong> o sistema não aceita <code>dnf install</code>.
           O instalador para e mostra um comando <code>sudo rpm-ostree install …</code>: rode-o,
           <strong>reinicie o computador</strong> e cole a linha acima de novo.</li>
@@ -366,7 +376,7 @@ sh instalar.cmd</code></pre>
       <tr><td><code>faltam as Command Line Tools do Xcode</code> (macOS)</td><td>Rode <code>xcode-select --install</code>, espere terminar e repita a instalação.</td></tr>
       <tr><td><code>command not found: curl</code> (Linux)</td><td>Instale o curl (<code>sudo apt install curl</code> ou <code>sudo dnf install curl</code>) e repita.</td></tr>
       <tr><td><code>este Linux é imutável</code> (Fedora Silverblue, Kinoite, Bazzite)</td><td>Rode o comando <code>sudo rpm-ostree install …</code> que a mensagem mostra, reinicie o computador e repita.</td></tr>
-      <tr><td>O ícone da bandeja não aparece (Fedora e outros com GNOME)</td><td>Saia e entre de novo na sessão. Se continuar sumido, abra o app <strong>Extensões</strong> e ligue <strong>AppIndicator and KStatusNotifierItem Support</strong>.</td></tr>
+      <tr><td>O ícone da bandeja não aparece (Fedora e outros com GNOME)</td><td>Se o GNOME mostrou um aviso para instalar a extensão, aceite. Senão, saia e entre de novo na sessão. Se continuar sumido, abra o app <strong>Extensões</strong> e ligue <strong>AppIndicator and KStatusNotifierItem Support</strong>.</td></tr>
       <tr><td><code>não reconheci o gerenciador de pacotes</code> (Linux)</td><td>Instale à mão os pacotes que a mensagem lista e repita.</td></tr>
       <tr><td><code>a instalação dos pacotes falhou</code> ou <code>não há 'sudo'</code> (Linux)</td><td>Esta conta não pode instalar programas: peça a quem administra a máquina para rodar o comando mostrado logo acima, e repita.</td></tr>
       <tr><td><code>o Rust continua ausente ou anterior ao 1.89</code></td><td>Rode <code>rustup update stable</code> e repita.</td></tr>
