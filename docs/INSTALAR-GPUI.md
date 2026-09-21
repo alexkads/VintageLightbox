@@ -83,6 +83,10 @@ O instalador cuida sozinho do **Rust**, na sua pasta pessoal e sem senha.
 4. Espere. **A primeira vez leva de 15 a 40 minutos.**
 5. Pronto: o app aparece no menu de aplicativos como **VintageLightbox (Zed GPUI)**.
 
+**Deu errado?** A última linha diz em que passo parou e **qual arquivo mandar** — o registro da
+instalação, com o retrato da máquina e tudo o que passou pela tela. Ver
+[Quando algo dá errado](#quando-algo-dá-errado).
+
 O instalador cuida sozinho de (pelo `apt`, `dnf` ou `pacman`, pedindo a senha de administrador):
 - o compilador e a `libclang`;
 - as bibliotecas que o GPUI abre: X11, Wayland, xkbcommon, fontconfig, freetype, ALSA, OpenSSL, D-Bus,
@@ -96,8 +100,8 @@ Sem `curl`, instale-o antes (`sudo apt install curl` ou `sudo dnf install curl`)
 ### No Fedora
 
 - **Workstation (GNOME):** o GNOME não mostra ícone de bandeja sem a extensão *AppIndicator*. O
-  instalador a instala pelo `dnf` e a liga; **saia e entre de novo na sessão** para o ícone
-  aparecer. Sem ela o app funciona, mas minimizado só volta pelo Alt+Tab.
+  instalador a instala pelo `dnf` e a liga — recém-instalada, ela só pode ser ligada para o
+  próximo login; **saia e entre de novo na sessão** para o ícone aparecer. Sem ela o app funciona, mas minimizado só volta pelo Alt+Tab.
 - **Silverblue, Kinoite ou Bazzite:** o sistema é imutável e recusa `dnf install`. O instalador
   para e mostra um `sudo rpm-ostree install …`: rode-o, reinicie e rode o instalador de novo.
 - Com placa NVIDIA, o Vulkan vem do driver da NVIDIA (`akmod-nvidia`, do RPM Fusion).
@@ -128,6 +132,7 @@ atualização; para acompanhar a `dev`, repita a instalação.
 | Outra versão (branch ou tag) | `… \| sh -s -- --versao v0.1.2` | `set VLB_VERSAO=v0.1.2` |
 | Outra pasta de instalação | `… \| sh -s -- --destino ~/Apps` | `set VLB_DESTINO=D:\Apps\VintageLightbox` |
 | Caminho do `fxc.exe` já instalado | — | `set GPUI_FXC_PATH=C:\...\fxc.exe` |
+| Só o retrato da máquina, para mandar a quem ajuda | `… \| sh -s -- --diagnostico` | — |
 
 Ler antes de rodar é legítimo:
 
@@ -169,6 +174,7 @@ estiver sem internet.
 | O app | `/Applications/VintageLightbox (Zed GPUI).app` | `~/.local/bin/vintagelightbox-gpui` | `%LOCALAPPDATA%\Programs\VintageLightbox-GPUI` |
 | Cache do compilador (alguns GiB) | `~/.vintagelightbox/target-gpui` | `~/.vintagelightbox/target-gpui` | `%USERPROFILE%\.vintagelightbox\target-gpui` |
 | Código baixado (descartável) | `~/.vintagelightbox/fonte-gpui` | `~/.vintagelightbox/fonte-gpui` | `%USERPROFILE%\.vintagelightbox\fonte-gpui` |
+| Registros da instalação (os dez últimos) | `~/.vintagelightbox/registros/` | `~/.vintagelightbox/registros/` | — |
 
 Apagar `target-gpui` e `fonte-gpui` é seguro: a próxima atualização só demora mais.
 
@@ -177,6 +183,23 @@ Apagar `target-gpui` e `fonte-gpui` é seguro: a próxima atualização só demo
 `~/.local/share/applications/vintagelightbox-gpui.desktop` e o ícone de mesmo nome.
 
 ## Quando algo dá errado
+
+**No macOS e no Linux, o instalador diz o que mandar.** Toda instalação grava um registro em
+`~/.vintagelightbox/registros/instalacao-<data>.log`, com o **retrato da máquina** no topo (sistema,
+sessão Wayland ou X11, GNOME e a extensão da bandeja, Rust, memória, disco, bibliotecas, placa de
+vídeo) e tudo o que passou pela tela, inclusive a compilação. Quando algo falha, a última linha é:
+
+```
+❌ parou em: compilando (código 101)
+   Mande este arquivo para quem está ajudando:
+   /home/voce/.vintagelightbox/registros/instalacao-20260921-161500.log
+```
+
+Mande esse arquivo. Só o retrato da máquina, sem compilar nada:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox-gpui.cmd | sh -s -- --diagnostico
+```
 
 | Mensagem | O que fazer |
 |---|---|

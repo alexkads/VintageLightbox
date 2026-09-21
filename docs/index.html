@@ -158,6 +158,9 @@
       <li>Quando pedir, digite <strong>a sua senha</strong>.</li>
       <li>Abra pelo menu de aplicativos: <strong>VintageLightbox (Zed GPUI)</strong>.</li>
     </ol>
+    <p><strong>Deu errado?</strong> A última linha diz em que passo parou e <strong>qual arquivo
+       mandar</strong> a quem está ajudando — o registro da instalação, com o retrato da máquina e
+       tudo o que passou pela tela. Ver <a href="#gpui-problemas">Quando algo dá errado</a>.</p>
     <p>Com <strong>apt</strong>, <strong>dnf</strong> ou <strong>pacman</strong>, o instalador põe o
        compilador, a libclang e as bibliotecas que o GPUI abre: X11, Wayland, xkbcommon, fontconfig,
        ALSA, OpenSSL, D-Bus, libsecret e o <strong>Vulkan</strong> (com o driver Mesa). Sem um driver
@@ -202,8 +205,9 @@ VLB_POS_VENDA_URL=http://localhost:8080 VLB_SITE_URL=http://localhost:8001 cargo
     <p id="fedora"><strong>No Fedora:</strong></p>
     <ul class="texto">
       <li><strong>Workstation (GNOME):</strong> o GNOME não mostra o ícone da bandeja sozinho. O
-          instalador põe e liga a extensão <em>AppIndicator</em>. <strong>Saia e entre de novo na
-          sessão</strong> para o ícone aparecer. Sem ela o app funciona, mas minimizado só volta
+          instalador põe e liga a extensão <em>AppIndicator</em> — recém-instalada, ela só pode ser
+          ligada para o próximo login. <strong>Saia e entre de novo na sessão</strong> para o ícone
+          aparecer. Sem ela o app funciona, mas minimizado só volta
           pelo <kbd>Alt</kbd>+<kbd>Tab</kbd>.</li>
       <li><strong>Silverblue, Kinoite ou Bazzite:</strong> o sistema não aceita <code>dnf install</code>.
           O instalador para e mostra um comando <code>sudo rpm-ostree install …</code>: rode-o,
@@ -305,6 +309,7 @@ VLB_POS_VENDA_URL=http://localhost:8080 VLB_SITE_URL=http://localhost:8001 cargo
       <tr><td>Só mostrar o que faria</td><td><code>… | sh -s -- --seco</code></td><td><code>set VLB_SECO=1</code></td></tr>
       <tr><td>Outra versão (branch ou tag)</td><td><code>… | sh -s -- --versao v0.2.0</code></td><td><code>set VLB_VERSAO=v0.2.0</code></td></tr>
       <tr><td>Outra pasta de instalação</td><td><code>… | sh -s -- --destino ~/Apps</code></td><td><code>set VLB_DESTINO=D:\Apps\VintageLightbox</code></td></tr>
+      <tr><td>Só o retrato da máquina, para mandar a quem ajuda</td><td><code>… | sh -s -- --diagnostico</code></td><td>—</td></tr>
       <tr><td>Ver as opções</td><td><code>… | sh -s -- --ajuda</code></td><td>—</td></tr>
     </tbody>
   </table>
@@ -330,6 +335,7 @@ sh instalar.cmd</code></pre>
       <tr><td>O catálogo</td><td colspan="3"><strong>Imagens › VintageLightbox › VintageLightbox Catalog</strong>, na sua pasta pessoal</td></tr>
       <tr><td>Cache do compilador</td><td colspan="2"><code>~/.vintagelightbox/target-gpui</code></td><td><code>%USERPROFILE%\.vintagelightbox\target-gpui</code></td></tr>
       <tr><td>Código baixado</td><td colspan="2"><code>~/.vintagelightbox/fonte-gpui</code></td><td><code>%USERPROFILE%\.vintagelightbox\fonte-gpui</code></td></tr>
+      <tr><td>Registros da instalação (os dez últimos)</td><td colspan="2"><code>~/.vintagelightbox/registros/instalacao-&lt;data&gt;.log</code></td><td>—</td></tr>
     </tbody>
   </table>
   </div>
@@ -341,6 +347,17 @@ sh instalar.cmd</code></pre>
   </p>
 
   <h3 id="gpui-problemas">Quando algo dá errado</h3>
+  <p class="texto">
+    <strong>No macOS e no Linux, o instalador diz o que mandar.</strong> Toda instalação grava um
+    registro com o <strong>retrato da máquina</strong> (sistema, sessão Wayland ou X11, GNOME e a
+    extensão da bandeja, Rust, memória, disco, bibliotecas, placa de vídeo) e tudo o que passou pela
+    tela, inclusive a compilação. Quando algo falha, a última linha é assim:
+  </p>
+  <pre class="quebra"><code>❌ parou em: compilando (código 101)
+   Mande este arquivo para quem está ajudando:
+   /home/voce/.vintagelightbox/registros/instalacao-20260921-161500.log</code></pre>
+  <p class="texto">Mande esse arquivo. Para mandar só o retrato da máquina, sem compilar nada:</p>
+  <pre class="quebra"><code>curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox-gpui.cmd | sh -s -- --diagnostico</code></pre>
   <div class="rolar">
   <table>
     <thead><tr><th>O que aparece</th><th>O que fazer</th></tr></thead>
