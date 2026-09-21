@@ -85,6 +85,8 @@ class Ambiente(unittest.TestCase):
         self.mock("gphoto2", "echo gphoto2")
         self.mock("gio", "echo gio")
         self.env["VLB_PTP_BACKEND_OK"] = "1"
+        # O `gdbus` de verdade falaria com o GNOME Shell de quem roda o teste.
+        self.mock("gdbus", "exit 1")
         self.mock("codesign", "exit 0")
         self.mock("ditto", 'cp -R "$1" "$2"')
         # O raw.githubusercontent.com (os instaladores) sai de TEST_RAW_DIR, e
@@ -424,6 +426,41 @@ class CasosDoInstalador:
             "'appindicatorsupport@rgcjonas.gmail.com']",
             self.log.read_text(),
         )
+
+    def test_gnome_recem_instalada_carrega_sem_sair_da_sessao(self):
+        # O Shell carrega na hora o que ele mesmo instala: depois do `gdbus`
+        # (que responde erro mesmo dando certo), a extensão está ACTIVE.
+        self.mock("uname", "echo Linux")
+        carregada = self.base / "carregada"
+        self.env["TEST_CARREGADA"] = str(carregada)
+        self.mock(
+            "gnome-extensions",
+            '[ "$1" = info ] && [ -e "$TEST_CARREGADA" ] || exit 1\n'
+            "echo '  State: ACTIVE'",
+        )
+        self.mock("gsettings", 'if [ "$1" = get ]; then echo "@as []"; fi')
+        self.mock(
+            "gdbus",
+            'printf "gdbus %s\\n" "$*" >> "$TEST_LOG"; touch "$TEST_CARREGADA"; exit 1',
+        )
+        (self.extensoes / "appindicatorsupport@rgcjonas.gmail.com").mkdir()
+        self.env["XDG_CURRENT_DESKTOP"] = "GNOME"
+        result = self.run_installer()
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("ligada, sem sair da sessão", result.stdout)
+        self.assertNotIn("saia e entre de novo", result.stdout)
+        self.assertIn("InstallRemoteExtension appindicatorsupport@rgcjonas.gmail.com",
+                      self.log.read_text())
+
+    def test_diagnostico_diz_que_o_shell_nao_conhece_a_extensao(self):
+        self.mock("uname", "echo Linux")
+        self.mock("gnome-shell", "echo 'GNOME Shell 50.5'")
+        self.mock("gnome-extensions", "echo 'A extensão não existe' >&2; exit 2")
+        (self.extensoes / "appindicatorsupport@rgcjonas.gmail.com").mkdir()
+        result = self.run_installer("--diagnostico")
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("no disco, mas o Shell desta sessão não a conhece", result.stdout)
+        self.assertRegex(result.stdout, r"rustup: +—")
 
     def test_ajuda_aponta_o_instalador_do_app(self):
         result = self.run_installer("--ajuda", piped=True)

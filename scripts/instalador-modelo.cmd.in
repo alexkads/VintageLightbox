@@ -531,6 +531,26 @@ ligar_pelo_gsettings() {
   correr gsettings set org.gnome.shell enabled-extensions "$novo" 2>/dev/null
 }
 
+extensao_ativa() {
+  gnome-extensions info "$1" 2>/dev/null | grep -q -i -E "(state|estado).*active"
+}
+
+# Pede ao Shell que está rodando para instalar a extensão pelo
+# extensions.gnome.org. É o único caminho que a carrega sem sair da sessão no
+# Wayland: o Shell carrega na hora o que ele mesmo instala. Ele abre um diálogo
+# pedindo confirmação, e a cópia vai para ~/.local/share, à frente da do `dnf`.
+#
+# 🚨 **O `gdbus` responde erro mesmo quando deu certo** (GNOME 50, 2026-09-21):
+# "Remote peer disconnected", com a extensão já ACTIVE. Quem decide é o
+# `extensao_ativa` depois, e não o código de saída.
+carregar_na_sessao() {
+  command -v gdbus >/dev/null 2>&1 || return 1
+  correr gdbus call --session --timeout 180 --dest org.gnome.Shell.Extensions \
+    --object-path /org/gnome/Shell/Extensions \
+    --method org.gnome.Shell.Extensions.InstallRemoteExtension "$1" >/dev/null 2>&1 || true
+  extensao_ativa "$1"
+}
+
 # A ajuda mora aqui, e não é lida do arquivo: com `curl | sh` o script não
 # existe em disco.
 ajuda() {
@@ -577,7 +597,20 @@ esac
 # 🔑 **Tudo o que ajuda a entender uma instalação que deu errado, num lugar
 #    só.** Cada linha é tolerante: um comando que não existe nesta máquina vira
 #    "—", e nada aqui pode derrubar a instalação.
-uma_linha() { "$@" 2>/dev/null | head -1 || true; }
+uma_linha() { r=$("$@" 2>/dev/null | head -1) || true; echo "${r:-—}"; }
+# O Shell só procura extensões ao entrar na sessão: a que o `dnf` pôs depois
+# está no disco e ele responde que "não existe". É o caso que mais se confunde.
+estado_da_bandeja() {
+  u=appindicatorsupport@rgcjonas.gmail.com
+  r=$(gnome-extensions info "$u" 2>/dev/null | grep -i -E '(enabled|habilitada|state|estado):' | tr -s ' \n' ' ' | sed 's/^ //') || true
+  if [ -n "$r" ]; then echo "$r"
+  elif [ -d "${VLB_EXTENSOES_GNOME:-/usr/share/gnome-shell/extensions}/$u" ] \
+       || [ -d "$HOME/.local/share/gnome-shell/extensions/$u" ]; then
+    echo "no disco, mas o Shell desta sessão não a conhece — sair e entrar na sessão"
+  else
+    echo "não instalada"
+  fi
+}
 retrato() {
   echo "── retrato da máquina ─────────────────────────────────────────────"
   echo "data:            $(date '+%Y-%m-%d %H:%M:%S %z')"
@@ -592,7 +625,7 @@ retrato() {
   echo "área de trabalho: ${XDG_CURRENT_DESKTOP:-—} · sessão: ${XDG_SESSION_TYPE:-—} · WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-—} · DISPLAY=${DISPLAY:-—}"
   if command -v gnome-shell >/dev/null 2>&1; then
     echo "gnome-shell:     $(uma_linha gnome-shell --version)"
-    echo "extensão AppIndicator: $(gnome-extensions info appindicatorsupport@rgcjonas.gmail.com 2>/dev/null | grep -i -E 'enabled|state' | tr '\n' ' ' || true)"
+    echo "extensão AppIndicator: $(estado_da_bandeja)"
     echo "extensões ligadas: $(uma_linha gsettings get org.gnome.shell enabled-extensions)"
   fi
   echo "núcleos:         $(getconf _NPROCESSORS_ONLN 2>/dev/null || echo —)"
@@ -907,9 +940,19 @@ else
           # ao entrar na sessão, e responde que ela não existe. A lista das
           # ligadas mora no dconf (`org.gnome.shell enabled-extensions`), e
           # gravá-la ali não depende do Shell: ela liga no próximo login.
+          #
+          # Por isso, se o Shell não a conhece, pedimos a ele mesmo que a
+          # instale (`carregar_na_sessao`) — e o login fica só de reserva.
           if correr gnome-extensions enable "$EXTENSAO" 2>/dev/null \
-             || ligar_pelo_gsettings "$EXTENSAO"; then
-            aviso "extensão da bandeja ligada: saia e entre de novo na sessão para o ícone aparecer."
+             && { [ "$SECO" -eq 1 ] || extensao_ativa "$EXTENSAO"; }; then
+            ok "extensão da bandeja do GNOME: ligada"
+          elif ligar_pelo_gsettings "$EXTENSAO"; then
+            echo "   O GNOME vai pedir para instalar a extensão da bandeja: clique em Instalar."
+            if [ "$SECO" -eq 0 ] && carregar_na_sessao "$EXTENSAO"; then
+              ok "extensão da bandeja do GNOME: ligada, sem sair da sessão"
+            else
+              aviso "extensão da bandeja ligada: saia e entre de novo na sessão para o ícone aparecer."
+            fi
           else
             aviso "não consegui ligar a extensão da bandeja por aqui."
             echo "   Abra o app Extensões e ligue 'AppIndicator and KStatusNotifierItem Support'."

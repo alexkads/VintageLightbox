@@ -268,7 +268,8 @@ origem pode precisar ser preparada localmente antes da seleção.
 
 - Sem um driver **Vulkan** (Mesa) a janela não abre, mesmo com tudo compilado.
 - **Fedora Workstation (GNOME):** o instalador põe e liga a extensão AppIndicator para o ícone da
-  bandeja; saia e entre de novo na sessão para ele aparecer.
+  bandeja. O GNOME abre um diálogo pedindo para instalá-la: clique em **Instalar** e o ícone aparece
+  na hora — sem o diálogo, saia e entre de novo na sessão.
 - **Fedora Silverblue, Kinoite, Bazzite:** o sistema não aceita `dnf install`. O instalador para e
   mostra um `sudo rpm-ostree install …`: rode-o, reinicie e cole a linha de novo.
 - **Pouca memória (8 GiB ou menos):** feche os outros programas antes, principalmente para o GPUI.
