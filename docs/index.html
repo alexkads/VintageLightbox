@@ -177,6 +177,16 @@ sudo pacman -S gphoto2 gvfs libgphoto2</code></pre>
        copia somente as fotos escolhidas. O <code>gphoto2</code> direto é usado como fallback
        quando o GVfs não estiver disponível. Se a câmera não aparecer, confira também as regras
        <code>udev</code> e se a sessão gráfica está rodando com GVfs.</p>
+    <p><strong>Para importar somente algumas fotos:</strong> no menu <strong>Do cartão ou pasta…</strong>,
+       clique em <strong>Escolher pasta…</strong> e selecione a pasta da câmera ou do cartão. Na tela de
+       seleção, clique na primeira foto e depois faça <kbd>Shift</kbd>+clique na última para marcar um
+       intervalo. Use <kbd>⌘</kbd>+<kbd>A</kbd> no macOS ou <kbd>Ctrl</kbd>+<kbd>A</kbd> no Linux e Windows
+       para marcar todas as fotos; cliques com <kbd>Ctrl</kbd> ou <kbd>⌘</kbd> alternam fotos individuais.
+       Confirme somente depois de marcar os arquivos desejados: apenas essa seleção será copiada para a
+       sessão.</p>
+    <p>O botão <strong>Escolher fotos…</strong> também permite selecionar arquivos diretamente pelo
+       seletor nativo do sistema. Para uma seleção por intervalo consistente, use a tela de seleção do
+       VintageLightbox após escolher a pasta.</p>
     <h3>Levantar manualmente para desenvolvimento</h3>
     <p>Na raiz do projeto, o caminho recomendado é:</p>
     <pre><code>./crates/ui-gpui/rodar-local.sh</code></pre>
