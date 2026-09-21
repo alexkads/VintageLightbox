@@ -328,6 +328,8 @@ pub(super) struct Cenario {
     pub site: Box<dyn FnOnce(&mut PublicadorDeMentira)>,
     /// Liga o segundo plano (a bandeja) na janela, como o `main.rs`.
     pub segundo_plano: bool,
+    /// A cópia do disco anda só quando o cenário manda — o cartão lento.
+    pub importador_demorado: bool,
 }
 
 impl Default for Cenario {
@@ -337,6 +339,7 @@ impl Default for Cenario {
             arquivos_de_predefinicao: Vec::new(),
             site: Box::new(|_| {}),
             segundo_plano: false,
+            importador_demorado: false,
         }
     }
 }
@@ -403,7 +406,11 @@ pub(super) fn abrir_o_app(cx: &mut TestAppContext, cenario: Cenario) -> Estudio 
         ..Default::default()
     });
     let gravador = Arc::new(GravadorDeMentira::default());
-    let importador = Arc::new(ImportadorDeMentira::default());
+    let importador = Arc::new(if cenario.importador_demorado {
+        ImportadorDeMentira::demorado()
+    } else {
+        ImportadorDeMentira::default()
+    });
     let seletor_de_fotos = Arc::new(SeletorDeFotosDeMentira::escolhe(&[
         "/cartao/DSC_201.jpg",
         "/cartao/DSC_202.jpg",

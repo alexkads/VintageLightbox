@@ -193,6 +193,12 @@ impl Aplicativo {
                         let valor = (valor != "sem").then(|| valor.to_string());
                         tela.escolher_proporcao(valor, cx);
                     }
+                    ["titulo", ..] => {
+                        let titulo = gesto.trim_start_matches("titulo").trim().to_string();
+                        tela.digitar(&titulo, "", "", window, cx);
+                    }
+                    ["produto", id] => tela.escolher_produto(id, window, cx),
+                    ["estudio", id] => tela.escolher_estudio(id, window, cx),
                     ["criar"] => tela.criar(window, cx),
                     ["retomar"] => tela.retomar(window, cx),
                     _ => eprintln!("[roteiro] gesto desconhecido da nova sessão: '{gesto}'"),
@@ -214,6 +220,20 @@ impl Aplicativo {
                     .detach();
                 }
                 _ => eprintln!("[roteiro] gesto de janela desconhecido: '{gesto}'"),
+            },
+            Passo::Importar(pasta) => {
+                let fotos = crate::sessoes::arquivos::so_as_fotos(&[pasta.into()]);
+                self.detalhe
+                    .update(cx, |tela, cx| tela.enviar_arquivos(fotos, cx));
+            }
+            Passo::Tecla(tecla) => match gpui::Keystroke::parse(tecla) {
+                // 🚨 **Adiada**: o despacho chega a esta mesma raiz, que está
+                // emprestada ao passo agora.
+                Ok(tecla) => window.defer(cx, move |window, cx| {
+                    let tratou = window.dispatch_keystroke(tecla.clone(), cx);
+                    eprintln!("[roteiro] tecla {tecla:?} tratada: {tratou}");
+                }),
+                Err(erro) => eprintln!("[roteiro] tecla inválida '{tecla}': {erro}"),
             },
             Passo::Fim => {
                 cx.quit();

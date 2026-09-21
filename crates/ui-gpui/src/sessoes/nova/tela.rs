@@ -8,8 +8,11 @@
 //! - O rascunho é gravado a cada mudança, e as fotos entram no catálogo com o
 //!   `sessao_id` provisório (`rascunho:<uuid>`). **Nada sobe enquanto é
 //!   rascunho**: sem sessão no site, não há para onde subir.
-//! - Criar espera a cópia local, grava o id devolvido **antes** de mover as
-//!   fotos, e só então as passa para a sessão.
+//! - Criar **não espera a cópia** (dono, 21/set/2026: *"a importação das
+//!   fotos e a aplicação dos efeitos do passo 2 precisa acontecer em segundo
+//!   plano quando estiver na tela da sessão"*). Grava o id devolvido **antes**
+//!   de mover as fotos, passa à sessão as que já copiaram e entra nela; as que
+//!   terminam depois vão chegando ([`Levando`]).
 //!
 //! # O que é do desktop
 //!
@@ -72,6 +75,26 @@ pub enum PedidoDaNova {
     /// Fotos entraram na fila da receita padrão: a raiz liga a colheita dos
     /// avisos, que ela repassa a esta tela e à da sessão.
     RevelandoReceita,
+    /// A cópia que continua depois de criar a sessão andou: a sessão mostra a
+    /// barra dela, como mostraria a de uma importação feita lá.
+    CopiaDaSessao {
+        galeria: String,
+        andamento: Importacao,
+    },
+}
+
+/// A cópia de uma sessão **já criada**, que continua em segundo plano.
+///
+/// 🔑 O lote do importador nasceu com o `sessao_id` do rascunho, e não dá para
+/// trocá-lo no meio: o que chega com o id antigo é passado ao novo em lotes,
+/// pelo mesmo `trocar_sessao` do "Criar". Um lote de cada vez — o que termina
+/// durante a troca pede outra (`de_novo`), e nada fica para trás.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Levando {
+    pub de: String,
+    pub para: String,
+    pub trocando: bool,
+    pub de_novo: bool,
 }
 
 impl EventEmitter<PedidoDaNova> for NovaSessao {}
@@ -324,6 +347,8 @@ pub struct NovaSessao {
     catalogo: Canal<Result<usize, String>>,
     origens: (Sender<RecadoDaImportacao>, Receiver<RecadoDaImportacao>),
     esperando_catalogo: Option<Fase>,
+    /// A cópia da sessão criada que ainda não terminou — ver [`Levando`].
+    pub(super) levando: Option<Levando>,
     esperando_descarte: bool,
     esperando_releitura: bool,
     carregando: bool,
@@ -542,6 +567,7 @@ impl NovaSessao {
             catalogo: channel(),
             origens: channel(),
             esperando_catalogo: None,
+            levando: None,
             esperando_descarte: false,
             esperando_releitura: false,
             carregando: false,
@@ -1034,6 +1060,17 @@ impl NovaSessao {
         if caminhos.is_empty() {
             return;
         }
+        // ⚠️ **A cópia de uma sessão já criada é dela.** Pôr este lote na fila
+        // levaria as fotos do próximo cliente para a sessão anterior.
+        if self.levando.is_some() {
+            self.avisar(
+                "A sessão anterior ainda está copiando fotos. Espere terminar para importar \
+                 nesta.",
+                true,
+            );
+            cx.notify();
+            return;
+        }
         if self.importando() {
             let quantas = caminhos.len();
             self.fila_de_levas.push_back(caminhos);
@@ -1065,7 +1102,12 @@ impl NovaSessao {
             falhas: 0,
         });
         self.freios = Freios::default();
-        let id = self.rascunho.id_provisorio.clone();
+        // 🔑 A leva que estava na fila quando a sessão foi criada entra
+        // direto nela.
+        let id = match &self.levando {
+            Some(levando) => levando.para.clone(),
+            None => self.rascunho.id_provisorio.clone(),
+        };
         let pasta = pasta_do_ensaio("", &id.replace(':', "-"));
         self.portas.importador.importar(
             caminhos,
@@ -1241,8 +1283,9 @@ impl NovaSessao {
         cx.notify();
     }
 
-    /// 🧪 Digita nos campos, como o operador.
-    #[cfg(test)]
+    /// 🧪 Digita nos campos, como o operador — nos testes e no roteiro de
+    /// depuração.
+    #[cfg(any(test, debug_assertions))]
     pub(crate) fn digitar(
         &mut self,
         titulo: &str,
@@ -1640,6 +1683,11 @@ impl NovaSessao {
 
     // ── Criar ────────────────────────────────────────────────────────────
 
+    #[cfg(test)]
+    pub(crate) fn levando_para_teste(&self) -> Option<Levando> {
+        self.levando.clone()
+    }
+
     pub(super) fn rotulo_de_criar(&self) -> &'static str {
         if self.rascunho.criada_id.is_some() {
             "Terminar e abrir a sessão"
@@ -1672,28 +1720,27 @@ impl NovaSessao {
 
     /// Anda a criação um passo, quando o anterior terminou.
     fn seguir_criacao(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        match self.fase {
-            Some(Fase::Copiando) if !self.importando() => {
-                if self.rascunho.criada_id.is_some() {
-                    self.mover_fotos();
-                } else if let Some(sessao) = self.sessao.clone() {
-                    self.fase = Some(Fase::Criando);
-                    self.portas.publicador.pedir_json(
-                        sessao,
-                        PedidoJson::gravar(
-                            "nova-criada",
-                            "POST",
-                            "/pos-venda/galerias",
-                            estado::para_envio(self.formulario()),
-                        ),
-                        self.recados.0.clone(),
-                    );
-                } else {
-                    self.fase = None;
-                    self.erro = Some(("Entre na conta para criar a sessão.".into(), None));
-                }
+        // 🔄 **Não espera mais a cópia** (21/set/2026): o que ainda está
+        // copiando segue para a sessão depois dela criada ([`Levando`]).
+        if self.fase == Some(Fase::Copiando) {
+            if self.rascunho.criada_id.is_some() {
+                self.mover_fotos();
+            } else if let Some(sessao) = self.sessao.clone() {
+                self.fase = Some(Fase::Criando);
+                self.portas.publicador.pedir_json(
+                    sessao,
+                    PedidoJson::gravar(
+                        "nova-criada",
+                        "POST",
+                        "/pos-venda/galerias",
+                        estado::para_envio(self.formulario()),
+                    ),
+                    self.recados.0.clone(),
+                );
+            } else {
+                self.fase = None;
+                self.erro = Some(("Entre na conta para criar a sessão.".into(), None));
             }
-            _ => {}
         }
         let _ = (window, cx);
     }
@@ -1758,6 +1805,14 @@ impl NovaSessao {
         match resultado {
             Ok(_) => {
                 let id = self.rascunho.criada_id.clone().unwrap_or_default();
+                if self.importando() {
+                    self.levando = Some(Levando {
+                        de: self.rascunho.id_provisorio.clone(),
+                        para: id.clone(),
+                        trocando: false,
+                        de_novo: false,
+                    });
+                }
                 let fotos = self.fotos.len();
                 estado::apagar_rascunho(&self.caminho);
                 lembranca::gravar(&lembranca::Lembranca {
@@ -1789,7 +1844,15 @@ impl NovaSessao {
                 );
                 self.rascunho.etapa = 2;
                 cx.emit(PedidoDaNova::CatalogoMudou);
-                cx.emit(PedidoDaNova::Criada(id));
+                cx.emit(PedidoDaNova::Criada(id.clone()));
+                // 🔑 **Depois de entrar**: a barra é da sessão aberta, e antes
+                // do `Criada` a raiz ainda não sabe qual é.
+                if let (Some(_), Some(andamento)) = (&self.levando, self.importacao) {
+                    cx.emit(PedidoDaNova::CopiaDaSessao {
+                        galeria: id,
+                        andamento,
+                    });
+                }
             }
             Err(msg) => {
                 self.fase = None;
@@ -1802,6 +1865,48 @@ impl NovaSessao {
                 ));
             }
         }
+    }
+
+    /// Passa à sessão criada o que terminou de copiar desde a última troca.
+    fn levar_o_que_copiou(&mut self) {
+        let Some(levando) = self.levando.as_mut() else {
+            return;
+        };
+        if levando.trocando || !levando.de_novo {
+            return;
+        }
+        levando.trocando = true;
+        levando.de_novo = false;
+        self.portas.acervo.trocar_sessao(
+            levando.de.clone(),
+            levando.para.clone(),
+            self.catalogo.0.clone(),
+        );
+    }
+
+    /// Uma troca da cópia em segundo plano voltou.
+    fn receber_o_que_levou(&mut self, resultado: Result<usize, String>, cx: &mut Context<Self>) {
+        let Some(levando) = self.levando.as_mut() else {
+            return;
+        };
+        levando.trocando = false;
+        match resultado {
+            Ok(_) => cx.emit(PedidoDaNova::CatalogoMudou),
+            Err(erro) => {
+                // Nada se perde: as fotos continuam no catálogo com o id do
+                // rascunho, e a próxima troca as leva junto.
+                levando.de_novo = true;
+                eprintln!("⚠️ [Nova sessão] a cópia não passou para a sessão: {erro}");
+            }
+        }
+        let falta = levando.de_novo;
+        if !self.importando() && !falta {
+            // A cópia terminou e tudo passou: a próxima importação é livre.
+            self.levando = None;
+            self.importacao = None;
+            return;
+        }
+        self.levar_o_que_copiou();
     }
 
     // ── Descartar ────────────────────────────────────────────────────────
@@ -2083,7 +2188,19 @@ impl NovaSessao {
             if lote.terminou() {
                 terminou_copia = true;
             }
+            if let Some(levando) = self.levando.as_mut() {
+                levando.de_novo = true;
+            }
         }
+        if let (Some(levando), Some(andamento)) = (self.levando.as_ref(), self.importacao) {
+            if mudou {
+                cx.emit(PedidoDaNova::CopiaDaSessao {
+                    galeria: levando.para.clone(),
+                    andamento,
+                });
+            }
+        }
+        self.levar_o_que_copiou();
         if terminou_copia {
             self.reler_fotos();
             cx.emit(PedidoDaNova::CatalogoMudou);
@@ -2140,6 +2257,8 @@ impl NovaSessao {
             mudou = true;
             if self.esperando_catalogo == Some(Fase::Movendo) {
                 self.receber_troca(resultado, cx);
+            } else if self.levando.as_ref().is_some_and(|l| l.trocando) {
+                self.receber_o_que_levou(resultado, cx);
             } else {
                 self.esperando_descarte = false;
                 if resultado.is_err() {
@@ -2184,6 +2303,7 @@ impl NovaSessao {
         }
 
         let continua = self.carregando
+            || self.levando.is_some()
             || self.escolhendo
             || self.varrendo
             || self.importando()

@@ -853,6 +853,14 @@ pub mod mentira {
         pub criadas: Mutex<Vec<NovaGaleria>>,
         /// `(galeria, foto, ordem)` de cada classificada que subiu.
         pub subidas: Mutex<Vec<(String, String, u32)>>,
+        /// O que o servidor de verdade faz ao receber a foto, antes de
+        /// responder: ela entra na galeria e ganha id remoto no catálogo.
+        ///
+        /// 🚨 **Sem isto a subida não tinha consequência**, e a grade da sessão
+        /// que esvaziava a cada foto enviada passou por todos os cenários: a
+        /// local saía das locais e a do site nunca entrava (21/set/2026).
+        #[allow(clippy::type_complexity)]
+        pub ao_subir: Mutex<Option<Box<dyn Fn(&PublicadorDeMentira, &str, u32) + Send>>>,
         /// As fotos tiradas do storage.
         pub tiradas: Mutex<Vec<String>>,
         /// O que foi negociado, por foto.
@@ -1276,6 +1284,7 @@ pub mod mentira {
             canal: Sender<Recado>,
         ) {
             let foto_id = foto.foto_id.clone();
+            let ordem = foto.ordem;
             self.subidas
                 .lock()
                 .expect("as subidas")
@@ -1294,7 +1303,12 @@ pub mod mentira {
                     alvo: foto_id,
                     frase,
                 },
-                None => Recado::ClassificadaSubiu { foto_id },
+                None => {
+                    if let Some(consequencia) = self.ao_subir.lock().expect("o gancho").as_ref() {
+                        consequencia(self, &foto_id, ordem);
+                    }
+                    Recado::ClassificadaSubiu { foto_id }
+                }
             };
             self.responder_ou_guardar(canal, recado);
         }

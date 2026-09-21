@@ -80,9 +80,17 @@ pub enum Passo {
     Janela(String),
     /// `nova etapa 3` · `nova buscar agendamento|voucher|compra|parceiro` ·
     /// `nova descartar` · `nova importar <pasta>` · `nova conheceu parceiro` ·
-    /// `nova preset <n>` · `nova proporcao 3:2` · `nova criar` — o assistente
+    /// `nova preset <n>` · `nova proporcao 3:2` · `nova titulo <texto>` ·
+    /// `nova produto <id>` · `nova estudio <id>` · `nova criar` — o assistente
     /// da nova sessão, para fotografar.
     Nova(String),
+    /// `importar <pasta>` — as fotos da pasta entram na sessão aberta, como se
+    /// soltas na grade.
+    Importar(String),
+    /// `tecla 3` · `tecla x` · `tecla cmd-a` — uma tecla de verdade na janela,
+    /// pelo mesmo despacho do teclado: passa pelo foco e pelos contextos, que é
+    /// onde um atalho morto se esconde.
+    Tecla(String),
     /// `fim` — fecha o app.
     Fim,
 }
@@ -141,6 +149,8 @@ pub fn ler_roteiro(texto: &str) -> Result<Vec<Passo>, String> {
             "tira" => Passo::Tira(argumentos.join(" ")),
             "janela" => Passo::Janela(argumentos.join(" ")),
             "nova" => Passo::Nova(argumentos.join(" ")),
+            "importar" => Passo::Importar(argumentos.join(" ")),
+            "tecla" => Passo::Tecla(argumentos.first().copied().unwrap_or_default().to_string()),
             "fim" => Passo::Fim,
             outro => return Err(format!("linha {}: passo desconhecido: '{outro}'", i + 1)),
         };

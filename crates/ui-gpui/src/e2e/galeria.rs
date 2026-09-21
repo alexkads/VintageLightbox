@@ -360,6 +360,64 @@ fn a_subida_leva_a_nota_e_segura_a_rejeitada(cx: &mut TestAppContext) {
     assert_eq!(no_catalogo(&e, cx, "id-DSC_102.jpg").1, Some(-1));
 }
 
+/// 🚨 **A foto que termina de subir continua na grade** — e a tecla continua
+/// tendo onde cair.
+///
+/// Regressão achada rodando o app contra a pilha local (21/set/2026): ao
+/// terminar a subida, a releitura do catálogo tirava a foto das locais (ela
+/// ganhou id remoto), mas ninguém relia a galeria do site. A grade ia a
+/// "Todas 0", e o operador apertava `3` e `X` sobre nada.
+#[gpui::test]
+fn a_foto_que_subiu_continua_na_grade_e_aceita_a_nota(cx: &mut TestAppContext) {
+    let e = abrir_o_app(cx, Cenario::default());
+    let acervo = e.acervo.clone();
+    *e.site.ao_subir.lock().unwrap() = Some(Box::new(move |site, foto_id, ordem| {
+        let no_site = format!("site-{foto_id}");
+        if let Some(foto) = acervo
+            .fotos
+            .lock()
+            .unwrap()
+            .iter_mut()
+            .find(|f| f.id == foto_id)
+        {
+            foto.pos_venda_foto_id = Some(no_site.clone());
+        }
+        site.fotos_da_sessao.lock().unwrap().push(super::do_site(
+            &no_site,
+            ordem as i32 + 10,
+            domain::services::pos_venda::EstadoDaFotoNoSite::Disponivel,
+            None,
+        ));
+    }));
+    e.entrar_na_conta(cx);
+    e.app(cx, |app, _w, cx| {
+        app.sessoes
+            .update(cx, |tela, cx| tela.abrir(GALERIA.into(), cx));
+    });
+    e.esperar(cx);
+
+    assert_eq!(e.site.subidas().len(), 2, "as duas locais subiram");
+    e.detalhe(cx, |tela, _w, _cx| {
+        assert_eq!(
+            tela.total_visivel(),
+            6,
+            "as 4 do site e as 2 que acabaram de subir — nenhuma some"
+        );
+        assert!(tela.como_esta("site-id-DSC_101.jpg").is_some());
+    });
+
+    // A tecla cai na foto que acabou de subir, agora do site.
+    e.detalhe(cx, |tela, _w, cx| {
+        tela.focar_foto("site-id-DSC_101.jpg", cx)
+    });
+    e.teclar(cx, "3");
+    e.esperar(cx);
+    let negociadas = e.site.negociadas();
+    assert_eq!(negociadas.len(), 1, "{negociadas:?}");
+    assert_eq!(negociadas[0].0, "site-id-DSC_101.jpg");
+    assert_eq!(negociadas[0].1.nota, Some(Some(3)));
+}
+
 /// 🎬 **Recortes, zoom e marcação**: os chips recortam, a seleção limpa ao
 /// trocar de recorte, `⌘A`/`⌘D` marcam e desmarcam, as setas andam, e o zoom
 /// da grade anda dentro dos limites.

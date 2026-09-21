@@ -236,7 +236,7 @@ impl PublicarNoPosVendaUseCase {
         // A faixa escolhida na barra de envio; `None` segue a galeria.
         produto_id: Option<String>,
     ) -> Result<(String, EstadoNoBalcao), (String, String)> {
-        let mut photo = match self.fotos.find_by_id(id).await {
+        let photo = match self.fotos.find_by_id(id).await {
             Ok(Some(p)) => p,
             Ok(None) => return Err((id.to_string(), "foto não está mais no catálogo".into())),
             Err(e) => return Err((id.to_string(), e.to_string())),
@@ -248,6 +248,15 @@ impl PublicarNoPosVendaUseCase {
         // quando ele existe, e cai no caminho quando não — que é o que mantém
         // de pé toda foto importada antes desta coluna.
         let nome = nome_para_o_site(photo.file_name().unwrap_or_default());
+
+        // 🚨 **A rejeitada não sobe** (C21) — conferido aqui, na leitura mais
+        // fresca que existe, e não só na fila da tela. A tela decide a partir
+        // de uma releitura do catálogo, e a releitura pode chegar antes de a
+        // marca do `X` ser gravada: a foto voltava à fila e subia rejeitada
+        // (achado contra a pilha local, 21/set/2026).
+        if photo.flag() == Some(domain::value_objects::Flag::Reject) {
+            return Err((nome, "rejeitada — fica fora do site (C21)".into()));
+        }
         let estado = estado.unwrap_or_else(|| EstadoNoBalcao::da_foto(&photo));
 
         // 🔑 **A de quem classificou vence a do banco.** O `photo` acima foi
@@ -343,8 +352,20 @@ impl PublicarNoPosVendaUseCase {
         // ⚠️ **Falhar aqui não desfaz o envio**: a foto está no site, e dizer
         // que ela falhou faria o operador subir de novo, criando duplicata. O
         // preço de não gravar é perder o id — que se recupera relendo a galeria.
-        photo.definir_id_no_site(Some(enviada.id));
-        if let Err(erro) = self.fotos.update(&photo).await {
+        //
+        // 🚨 **Relida agora, e não a de antes do envio** (21/set/2026, achado
+        // rodando o app contra a pilha local). O `photo` lá de cima foi lido
+        // antes de renderizar e subir — segundos atrás —, e o `update` regrava
+        // a linha inteira: a nota que o operador deu **durante** a subida
+        // voltava a zero, e a foto chegava ao site sem ela. O ensaio sobe
+        // enquanto se classifica (C20), então essa janela é a regra, não o
+        // acaso.
+        let mut atual = match self.fotos.find_by_id(id).await {
+            Ok(Some(atual)) => atual,
+            _ => photo,
+        };
+        atual.definir_id_no_site(Some(enviada.id));
+        if let Err(erro) = self.fotos.update(&atual).await {
             eprintln!("⚠️ [Pós-venda] {nome} subiu, mas o id do site não foi gravado: {erro}");
         }
 
@@ -623,6 +644,60 @@ mod tests {
                 ("DSC_002.jpg".to_string(), EstadoNoBalcao::Disponivel, 1),
             ]
         );
+    }
+
+    /// 🚨 **A nota dada durante a subida não volta a zero.**
+    ///
+    /// O ensaio sobe enquanto o operador classifica (C20): a foto é lida,
+    /// renderizada e enviada — segundos —, e nesse meio a tecla `5` grava a
+    /// nota. Gravar o id remoto a partir da leitura de antes regravava a linha
+    /// inteira com a nota velha (achado contra a pilha local, 21/set/2026).
+    #[tokio::test]
+    async fn a_nota_dada_durante_a_subida_sobrevive_ao_id_remoto() {
+        let antes = foto("/ensaio/DSC_003.NEF", false);
+        let mut depois = antes.clone();
+        depois
+            .rate(domain::value_objects::Rating::new(5).unwrap())
+            .unwrap();
+
+        let id = antes.id();
+        let leituras = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut repo = MockPhotoRepo::new();
+        repo.expect_find_by_id().returning({
+            let leituras = leituras.clone();
+            move |_| {
+                // A primeira leitura é a de antes da tecla; a segunda, depois.
+                let n = leituras.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(Some(if n == 0 {
+                    antes.clone()
+                } else {
+                    depois.clone()
+                }))
+            }
+        });
+        repo.expect_update()
+            .times(1)
+            .withf(|foto| {
+                foto.id_no_site() == Some("f") && foto.rating().map(|r| r.value()) == Some(5)
+            })
+            .returning(|_| Ok(()));
+        let mut exportador = MockExportador::new();
+        exportador
+            .expect_renderizar_jpeg()
+            .returning(|_, _| Ok(vec![1]));
+        exportador
+            .expect_renderizar_bruto_jpeg()
+            .returning(|_, _| Ok(None));
+        let caso = PublicarNoPosVendaUseCase::new(
+            Arc::new(repo),
+            Arc::new(exportador),
+            Arc::new(MockThumbnailGen::new()),
+            Arc::new(ApiDeMentira::default()),
+        );
+
+        caso.enviar_uma(&sessao(), "g1", &id, 0, None, None, None)
+            .await
+            .unwrap();
     }
 
     /// 🛡️ **Contrato da foto, C7** (`../recordarfotos-e-commerce/docs/CONTRATO_DA_FOTO.md`):

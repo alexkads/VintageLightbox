@@ -557,6 +557,13 @@ pub struct Aplicativo {
     /// tocada: sobrescrever o que o site sabe seria desfazer o trabalho de quem
     /// classificou por lá.
     subindo_sozinhas: std::collections::HashMap<String, (Option<u8>, bool)>,
+    /// As que terminaram de subir e cuja versão do site ainda não chegou à
+    /// grade — ver `mostrar_as_locais_na_sessao`.
+    recem_subidas: std::collections::HashSet<String>,
+    /// As rejeitadas por um `X` desta máquina, até o catálogo confirmar a
+    /// marca. A releitura pode chegar antes da gravação, e sem isto a passada
+    /// de subida via a foto sem a marca e a punha de volta na fila (C21).
+    rejeitadas_agora: std::collections::HashSet<String>,
     /// A receita já aplicada a cada foto local, por id: `"<preset>|<proporção>"`.
     /// O mesmo registro do assistente, e pelo mesmo motivo — sem ele a receita
     /// seria pedida de novo a cada releitura do catálogo.
@@ -1033,6 +1040,8 @@ impl Aplicativo {
             presets_conhecidos: presets_para_a_receita,
             fechar_avisando: None,
             subindo_sozinhas: std::collections::HashMap::new(),
+            recem_subidas: std::collections::HashSet::new(),
+            rejeitadas_agora: std::collections::HashSet::new(),
             receita_das_locais: std::collections::HashMap::new(),
             _sessao_escolhida: sessao_escolhida,
             configuracoes: cx.new(|_| Configuracoes::nova(previews_das_configuracoes)),
@@ -1254,6 +1263,14 @@ impl Aplicativo {
             PedidoDaNova::CatalogoMudou => self.reler_o_acervo(cx),
             PedidoDaNova::AlternarMenu => self.alternar_menu_lateral(cx),
             PedidoDaNova::RevelandoReceita => self.esperar_as_reveladas(cx),
+            // 🔑 A cópia que continua depois de criar aparece na barra da
+            // sessão — o operador classifica vendo quantas ainda faltam.
+            PedidoDaNova::CopiaDaSessao { galeria, andamento } => {
+                if self.sessao_aberta.as_deref() == Some(galeria.as_str()) {
+                    self.detalhe
+                        .update(cx, |tela, cx| tela.mostrar_a_copia(andamento, cx));
+                }
+            }
         }
     }
 
@@ -1278,18 +1295,62 @@ impl Aplicativo {
         // escalas discordavam — a grade intercalava errado. Contar antes do
         // filtro de "já subiu" põe as duas na mesma régua: a do acervo, que é a
         // da fotografia (`find_all`).
+        // 🚨 **A que acabou de subir continua como local até a do site chegar**
+        // (21/set/2026): sumir de um lado antes de aparecer do outro deixava a
+        // tecla do operador sem foto onde cair. `subiu_como` diz à tela para
+        // quem o gesto vai.
+        let no_site: std::collections::HashSet<&str> = self
+            .fotos_do_site
+            .iter()
+            .filter_map(|f| f.pos_venda_foto_id.as_deref())
+            .collect();
+        self.recem_subidas.retain(|id| {
+            fotos.iter().any(|f| {
+                &f.id == id
+                    && f.pos_venda_foto_id
+                        .as_deref()
+                        .is_none_or(|remoto| !no_site.contains(remoto))
+            })
+        });
+        let subidas: std::collections::HashMap<String, String> = fotos
+            .iter()
+            .filter(|f| self.recem_subidas.contains(&f.id))
+            .filter_map(|f| Some((f.id.clone(), f.pos_venda_foto_id.clone()?)))
+            .collect();
+        // A marca chegou ao catálogo: a lembrança já não é necessária.
+        self.rejeitadas_agora.retain(|id| {
+            fotos
+                .iter()
+                .any(|f| &f.id == id && f.flag != Some(REJEITADA_NO_CATALOGO))
+        });
         let locais: Vec<biblioteca_core::acervo::Foto> = fotos
             .iter()
             .filter(|f| f.sessao_id.as_deref() == Some(galeria.as_str()))
             .enumerate()
-            .filter(|(_, f)| f.pos_venda_foto_id.is_none())
-            .map(|(i, f)| local_para_a_grade(f, i as i64))
+            .filter(|(_, f)| f.pos_venda_foto_id.is_none() || subidas.contains_key(&f.id))
+            .map(|(i, f)| {
+                let mut foto = local_para_a_grade(f, i as i64);
+                foto.rejeitada |= self.rejeitadas_agora.contains(&f.id);
+                foto
+            })
             .collect();
-        self.detalhe
-            .update(cx, |tela, cx| tela.definir_locais(locais, cx));
+        self.detalhe.update(cx, |tela, cx| {
+            tela.definir_subidas(subidas);
+            tela.definir_locais(locais, cx)
+        });
         self.aplicar_a_receita_da_sessao(fotos, &galeria, cx);
         self.conciliar_o_que_subiu(fotos, cx);
         self.subir_o_que_falta_do_ensaio(fotos, &galeria, cx);
+        // 📍 Onde cada foto está, para o selo do canto — depois da subida, que
+        // é quem acabou de pôr fotos na fila.
+        let copia_aqui = fotos
+            .iter()
+            .filter(|f| f.sessao_id.as_deref() == Some(galeria.as_str()))
+            .filter_map(|f| f.pos_venda_foto_id.clone())
+            .collect();
+        let subindo = self.subindo_sozinhas.keys().cloned().collect();
+        self.detalhe
+            .update(cx, |tela, cx| tela.definir_lugares(copia_aqui, subindo, cx));
     }
 
     /// **O ensaio inteiro sobe, em segundo plano** — contrato C20.
@@ -1339,6 +1400,7 @@ impl Aplicativo {
         {
             if self.subindo_sozinhas.contains_key(&foto.id)
                 || foto.flag == Some(REJEITADA_NO_CATALOGO)
+                || self.rejeitadas_agora.contains(&foto.id)
             {
                 continue;
             }
@@ -1588,6 +1650,11 @@ impl Aplicativo {
                     for id in &ids {
                         self.esteira.tirar_da_fila(id);
                         self.subindo_sozinhas.remove(id);
+                        self.rejeitadas_agora.insert(id.clone());
+                    }
+                } else {
+                    for id in &ids {
+                        self.rejeitadas_agora.remove(id);
                     }
                 }
             }
@@ -2216,8 +2283,16 @@ impl Aplicativo {
                 }
                 // 🔑 O mesmo desfecho do `Sincronizou`, com nome: o catálogo
                 // mudou e a grade relê. O nome serviu à esteira, acima.
-                PosVendaRecado::ClassificadaSubiu { .. } => {
+                PosVendaRecado::ClassificadaSubiu { foto_id } => {
+                    self.recem_subidas.insert(foto_id);
                     self.ultimo_envio = Some(chrono::Utc::now().timestamp());
+                    // 🚨 **A galeria também relê.** A releitura do acervo tira
+                    // a foto das locais (ela ganhou id remoto); sem reler o
+                    // site, ela não entra do outro lado — e a grade da sessão
+                    // esvaziava a cada foto que subia, com as teclas sem ter
+                    // onde cair (dono, 21/set/2026: *"não estou conseguindo
+                    // classificar e nem sinalizar"*).
+                    self.pedir_releitura_da_galeria(cx);
                     mudou = true
                 }
                 // 🔑 O revelado entrou no lugar do original: a sessão relê,

@@ -402,6 +402,12 @@ pub mod cores {
         })
     }
 
+    /// ☁️ O selo "na nuvem" sobre a foto: `text-emerald-400/80` do site —
+    /// discreto de propósito, porque é o normal.
+    pub fn nuvem() -> Hsla {
+        cor(paleta::ESMERALDA_400).opacity(0.8)
+    }
+
     /// O azul da seleção na grade.
     pub fn selecao() -> Hsla {
         cor(paleta::AZUL_500)

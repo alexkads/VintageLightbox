@@ -253,6 +253,15 @@ pub struct FotoARevelar {
     pub no_disco: bool,
 }
 
+/// Onde uma foto está: na nuvem, neste computador, ou indo — ver
+/// [`Detalhe::lugar_de`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Lugar {
+    pub nuvem: bool,
+    pub disco: bool,
+    pub transito: bool,
+}
+
 /// O andamento de uma importação: quantas foram pedidas e quantas responderam.
 ///
 /// 🔑 **A falha conta como pronta.** A barra mede o que falta *esperar*, não o
@@ -469,6 +478,21 @@ pub struct Detalhe {
     /// sob `site:<id>` não acha nada, e o sintoma é a **célula preta** — a foto
     /// aparece na grade, com nome, estado e faixa, e sem imagem.
     ids_locais: std::collections::HashSet<String>,
+    /// A foto que acabou de subir: o id dela no catálogo → o id no site.
+    ///
+    /// 🚨 **A foto troca de id no meio da classificação** (achado rodando o app
+    /// contra a pilha local, 21/set/2026). O ensaio sobe enquanto o operador
+    /// classifica (C20): ele clica na foto, ela termina de subir, e a grade a
+    /// trocava pela do site — com outro id. A seleção, guardada por id, sumia,
+    /// e o `5` seguinte caía em nada, sem aviso. Com este mapa a seleção e o
+    /// gesto atravessam a troca, e a local só sai da grade quando a do site já
+    /// está nela.
+    subiu_como: std::collections::HashMap<String, String>,
+    /// As do site que **também** têm cópia neste computador (o catálogo tem a
+    /// linha delas com o id remoto).
+    copia_aqui: std::collections::HashSet<String>,
+    /// As locais que estão subindo agora.
+    subindo_agora: std::collections::HashSet<String>,
     /// Quais fotos locais já têm a **revelada da receita padrão** no cache.
     ///
     /// 🔑 **Consultado uma vez por foto, e não por quadro.** Saber se a chave
@@ -706,6 +730,9 @@ impl Detalhe {
             do_site: Vec::new(),
             locais: Vec::new(),
             ids_locais: std::collections::HashSet::new(),
+            subiu_como: std::collections::HashMap::new(),
+            copia_aqui: std::collections::HashSet::new(),
+            subindo_agora: std::collections::HashSet::new(),
             com_revelada: std::collections::HashMap::new(),
             campos_do_painel: None,
             atendimento_aberto: false,
@@ -1389,7 +1416,14 @@ impl Detalhe {
             .marcadas()
             .filter_map(|p| self.acervo.visivel(p))
             .filter(|f| f.editavel())
-            .map(|f| f.id.clone())
+            // 🔑 A que já subiu e ainda aparece como local recebe o gesto no
+            // site, onde ela está agora — ver `subiu_como`.
+            .map(|f| {
+                self.subiu_como
+                    .get(&f.id)
+                    .cloned()
+                    .unwrap_or_else(|| f.id.clone())
+            })
             .collect();
 
         // 🚨 **A foto que só existe no disco faz outro caminho.** Ela não tem
@@ -1500,6 +1534,65 @@ impl Detalhe {
         self.acompanhar(cx);
     }
 
+    /// As que acabaram de subir: id do catálogo → id no site. Ver
+    /// [`Self::subiu_como`].
+    pub fn definir_subidas(&mut self, subidas: std::collections::HashMap<String, String>) {
+        self.subiu_como = subidas;
+    }
+
+    /// Onde as fotos estão — o que a raiz sabe e esta tela não: quais do site
+    /// têm cópia aqui, e quais locais estão subindo.
+    pub fn definir_lugares(
+        &mut self,
+        copia_aqui: std::collections::HashSet<String>,
+        subindo_agora: std::collections::HashSet<String>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.copia_aqui != copia_aqui || self.subindo_agora != subindo_agora {
+            self.copia_aqui = copia_aqui;
+            self.subindo_agora = subindo_agora;
+            cx.notify();
+        }
+    }
+
+    /// 📍 **Onde esta foto está** — a mesma pergunta e as mesmas três respostas
+    /// do canto de baixo da grade do site (`onde-esta.ts`, `SeloDoLugar`).
+    ///
+    /// 🚨 **Nuvem e disco não são excludentes**: a foto que subiu continua com
+    /// os bytes aqui, e mostrar só a nuvem escondia o espaço que ela ocupa.
+    pub fn lugar_de(&self, id: &str) -> Lugar {
+        if self.subiu_como.contains_key(id) {
+            return Lugar {
+                nuvem: true,
+                disco: true,
+                transito: false,
+            };
+        }
+        if self.ids_locais.contains(id) {
+            let transito = self.subindo_agora.contains(id);
+            return Lugar {
+                nuvem: false,
+                disco: !transito,
+                transito,
+            };
+        }
+        let apagada = self.do_site.iter().any(|f| f.id == id && f.apagada);
+        Lugar {
+            nuvem: !apagada,
+            disco: self.copia_aqui.contains(id),
+            transito: false,
+        }
+    }
+
+    /// O id que vale para esta foto agora: o do site, se ela subiu e a do site
+    /// já está na grade; o dela, senão.
+    fn id_de_agora(&self, id: &str) -> String {
+        match self.subiu_como.get(id) {
+            Some(no_site) if self.do_site.iter().any(|f| &f.id == no_site) => no_site.clone(),
+            _ => id.to_string(),
+        }
+    }
+
     /// As fotos deste ensaio que a raiz achou no catálogo local.
     ///
     /// 🚨 **Só as que ainda não subiram.** Uma foto classificada existe dos dois
@@ -1536,11 +1629,22 @@ impl Detalhe {
     /// `ordem`, quem já as tinha separado foi o servidor (que ordena por
     /// `ordem, criada_em`), e reordenar por id jogaria fora esse critério.
     fn recompor_acervo(&mut self) {
-        let marcadas = self.ids_marcados();
-        let focada = self.em_foco().map(|f| f.id.clone());
+        let marcadas: Vec<String> = self
+            .ids_marcados()
+            .iter()
+            .map(|id| self.id_de_agora(id))
+            .collect();
+        let focada = self.em_foco().map(|f| self.id_de_agora(&f.id));
 
         let mut todas = self.do_site.clone();
-        todas.extend(self.locais.iter().cloned());
+        // 🔑 A que subiu só sai quando a do site já está aqui: entre uma e
+        // outra, é ela que recebe o clique e a tecla.
+        todas.extend(
+            self.locais
+                .iter()
+                .filter(|f| self.id_de_agora(&f.id) == f.id)
+                .cloned(),
+        );
         todas.sort_by_key(|f| f.ordem);
         self.acervo.definir(todas);
 
@@ -1569,6 +1673,14 @@ impl Detalhe {
     /// Se há uma importação em curso — a que segura o botão e desenha a barra.
     pub fn importando(&self) -> bool {
         self.importacao.is_some_and(|i| !i.terminou())
+    }
+
+    /// O andamento da cópia que o assistente continua depois de criar a
+    /// sessão. É a mesma barra da importação feita aqui — e, enquanto ela anda,
+    /// o botão "Importar" espera, pela mesma razão de uma importação de cada vez.
+    pub fn mostrar_a_copia(&mut self, andamento: Importacao, cx: &mut Context<Self>) {
+        self.importacao = Some(andamento);
+        cx.notify();
     }
 
     /// O andamento da última importação, terminada ou não.
@@ -2195,11 +2307,14 @@ impl Detalhe {
                     // promete. O `posicao_de` responde `None` e ela fica de fora
                     // — as outras marcadas continuam.
                     for id in &marcadas {
-                        if let Some(p) = self.acervo.posicao_de(id) {
+                        if let Some(p) = self.acervo.posicao_de(&self.id_de_agora(id)) {
                             self.selecao.marcar(p);
                         }
                     }
-                    if let Some(p) = focada.as_deref().and_then(|id| self.acervo.posicao_de(id)) {
+                    if let Some(p) = focada
+                        .as_deref()
+                        .and_then(|id| self.acervo.posicao_de(&self.id_de_agora(id)))
+                    {
                         self.selecao.focar(Some(p));
                         // A releitura reposiciona; o foco tem de reaparecer na
                         // tela, e não só no estado.
@@ -3573,6 +3688,14 @@ impl Detalhe {
                                 selos::selo_do_estado(foto.estado, foto.apagada, cx)
                                     .into_any_element()
                             }),
+                    )
+                    // 📍 **Onde ela está**, no canto de baixo — como no site.
+                    .child(
+                        div()
+                            .absolute()
+                            .bottom(px(4.))
+                            .left(px(4.))
+                            .child(selo_do_lugar(self.lugar_de(&foto.id))),
                     )
                     .when(marcada, |quadro| {
                         quadro.child(
@@ -5077,6 +5200,43 @@ impl Detalhe {
     }
 }
 
+/// ☁️ 💾 ⏳ O selo do lugar, sobre a foto: o `SeloDoLugar` do site.
+///
+/// ⚠️ **A nuvem é discreta e o disco sozinho não**: o normal é a foto estar no
+/// acervo, e o que chama a atenção é o que ainda depende deste computador. Com
+/// ela nos dois lugares, o disco é informação de espaço, e fica cinza.
+fn selo_do_lugar(lugar: Lugar) -> impl IntoElement {
+    use crate::recursos::Icone;
+    use gpui_component::Icon;
+    let redondo = |icone: Icone, cor: gpui::Hsla, fundo: u32| {
+        div()
+            .size(px(22.))
+            .rounded_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(gpui::rgba(fundo))
+            .child(Icon::new(icone).size(px(13.)).text_color(cor))
+    };
+    let cinza: gpui::Hsla = gpui::rgb(0xa3a3a3).into();
+    div()
+        .flex()
+        .gap(px(4.))
+        .when(lugar.transito, |d| {
+            d.child(redondo(Icone::LoaderCircle, cores::selecao(), 0x000000b3))
+        })
+        .when(lugar.nuvem, |d| {
+            d.child(redondo(Icone::Cloud, cores::nuvem(), 0x00000080))
+        })
+        .when(lugar.disco, |d| {
+            d.child(if lugar.nuvem {
+                redondo(Icone::HardDrive, cinza, 0x00000080)
+            } else {
+                redondo(Icone::HardDrive, cores::quente(), 0x000000b3)
+            })
+        })
+}
+
 /// Uma tecla escrita, como os `<kbd>` do site.
 /// Uma ficha da galeria do site: pílula com borda, a acesa em âmbar.
 fn pilula(
@@ -6515,6 +6675,111 @@ mod testes {
             1,
             "e não vai ao site: ela não tem linha lá"
         );
+    }
+
+    /// 🚨 **A foto que termina de subir no meio da classificação não perde o
+    /// gesto.**
+    ///
+    /// Achado rodando o app contra a pilha local (21/set/2026): o operador
+    /// clicava numa foto, ela terminava de subir, a grade a trocava pela do
+    /// site — com outro id — e o `5` seguinte caía em nada, sem aviso. Aqui:
+    /// no intervalo em que a do site ainda não voltou, a local continua na
+    /// grade e a tecla vai ao site com o id novo; quando a do site chega, a
+    /// seleção passa para ela.
+    #[gpui::test]
+    fn a_foto_que_sobe_no_meio_da_classificacao_nao_perde_o_gesto(cx: &mut TestAppContext) {
+        let (janela, publicador) = janela(
+            cx,
+            vec![foto("f1", EstadoDaFotoNoSite::Disponivel, Some(4))],
+        );
+        entrar(cx, &janela);
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.definir_locais(vec![local("nova-1")], cx);
+                let p = tela.acervo.posicao_de("nova-1").expect("a local na grade");
+                tela.clicar(p, Modificadores::default(), cx);
+                // Ela terminou de subir; a do site ainda não voltou.
+                tela.definir_subidas([("nova-1".to_string(), "s1".to_string())].into());
+                tela.definir_locais(vec![local("nova-1")], cx);
+                assert!(
+                    tela.como_esta("nova-1").is_some(),
+                    "no intervalo, a local continua na grade"
+                );
+                tela.dar_nota(5, cx);
+            })
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+        let negociadas = publicador.negociadas();
+        assert_eq!(negociadas.len(), 1, "{negociadas:?}");
+        assert_eq!(
+            negociadas[0].0, "s1",
+            "o gesto vai para onde ela está agora"
+        );
+        assert_eq!(negociadas[0].1.nota, Some(Some(5)));
+
+        // A do site chega: a local sai, e a seleção passa para ela.
+        publicador.fotos_da_sessao.lock().unwrap().push(foto(
+            "s1",
+            EstadoDaFotoNoSite::Disponivel,
+            Some(5),
+        ));
+        janela
+            .update(cx, |tela, _window, cx| tela.reler(cx))
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.colher(cx);
+                assert!(tela.como_esta("nova-1").is_none(), "uma foto só na grade");
+                assert_eq!(
+                    tela.em_foco().map(|f| f.id.clone()).as_deref(),
+                    Some("s1"),
+                    "o foco atravessou a troca de id"
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 📍 **O selo do lugar responde o que o do site responde** (`ondeEla`):
+    /// a do site sem cópia aqui é só nuvem; com cópia, nuvem e disco; a local
+    /// na fila está indo; a local fora da fila (a rejeitada) está só no disco;
+    /// e a que acabou de subir já é nuvem, ainda com os bytes aqui.
+    #[gpui::test]
+    fn o_selo_do_lugar_diz_onde_a_foto_esta(cx: &mut TestAppContext) {
+        let (janela, _publicador) = janela(
+            cx,
+            vec![
+                foto("s1", EstadoDaFotoNoSite::Disponivel, Some(4)),
+                foto("s2", EstadoDaFotoNoSite::Disponivel, None),
+            ],
+        );
+        entrar(cx, &janela);
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.definir_locais(vec![local("l1"), local("l2"), local("l3")], cx);
+                tela.definir_subidas([("l3".to_string(), "s9".to_string())].into());
+                tela.definir_lugares(["s2".to_string()].into(), ["l1".to_string()].into(), cx);
+                let lugar = |nuvem, disco, transito| Lugar {
+                    nuvem,
+                    disco,
+                    transito,
+                };
+                assert_eq!(
+                    tela.lugar_de("s1"),
+                    lugar(true, false, false),
+                    "só na nuvem"
+                );
+                assert_eq!(tela.lugar_de("s2"), lugar(true, true, false), "nos dois");
+                assert_eq!(tela.lugar_de("l1"), lugar(false, false, true), "subindo");
+                assert_eq!(tela.lugar_de("l2"), lugar(false, true, false), "só aqui");
+                assert_eq!(
+                    tela.lugar_de("l3"),
+                    lugar(true, true, false),
+                    "acabou de subir"
+                );
+            })
+            .expect("a janela deve estar aberta");
     }
 
     /// 🔁 **`X` de novo desfaz a rejeição, e a decisão é do grupo.**
