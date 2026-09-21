@@ -18,6 +18,22 @@
 
 use std::collections::{HashMap, HashSet};
 
+/// A base do nome do arquivo, sem extensão e sem caixa: `DSC_2700.JPG`,
+/// `DSC_2700.NEF` e `DSC_2700.jpg` dão o mesmo `dsc_2700`.
+///
+/// 🚨 **Comparar o nome inteiro não pega a foto que sobe** (dono, 21/set/2026:
+/// o pisca voltou com as fotos da câmera dele). A subida troca a extensão por
+/// `.jpg` (`nome_para_o_site`): a local `DSC_2700.JPG` vira `DSC_2700.jpg` no
+/// site. O roteiro de teste usava `IMG_0001.jpg`, já minúsculo, e passava.
+pub fn base_do_nome(arquivo: &str) -> String {
+    let arquivo = arquivo.rsplit(['/', '\\']).next().unwrap_or(arquivo);
+    arquivo
+        .rsplit_once('.')
+        .map(|(base, _)| base)
+        .unwrap_or(arquivo)
+        .to_lowercase()
+}
+
 /// Um tile da lista nova.
 pub struct Tile<'a> {
     pub id: &'a str,
@@ -37,11 +53,11 @@ pub fn quem_empresta(
 ) -> Vec<(String, String)> {
     let ids_de_agora: HashSet<&str> = agora.iter().map(|t| t.id).collect();
     // Os que saíram, pelo nome — o mesmo nome duas vezes não empresta.
-    let mut saiu_por_arquivo: HashMap<&str, Option<&str>> = HashMap::new();
+    let mut saiu_por_arquivo: HashMap<String, Option<&str>> = HashMap::new();
     for (id, arquivo) in arquivos_antes {
         if !ids_de_agora.contains(id.as_str()) {
             saiu_por_arquivo
-                .entry(arquivo.as_str())
+                .entry(base_do_nome(arquivo))
                 .and_modify(|v| *v = None)
                 .or_insert(Some(id.as_str()));
         }
@@ -54,7 +70,7 @@ pub fn quem_empresta(
                 t.id.to_string()
             } else {
                 saiu_por_arquivo
-                    .get(t.arquivo?)
+                    .get(&base_do_nome(t.arquivo?))
                     .copied()
                     .flatten()?
                     .to_string()
@@ -123,6 +139,20 @@ mod testes {
             tile("nova", "/m/nova", "A.jpg"),
         ];
         assert!(quem_empresta(&antes, &arquivos, &agora, |u| u != "/m/nova").is_empty());
+    }
+
+    /// 🚨 A local da câmera é `.JPG` (ou `.NEF`) e a do servidor é `.jpg`: a
+    /// extensão e a caixa não separam as duas.
+    #[test]
+    fn a_extensao_trocada_na_subida_nao_separa_as_duas() {
+        let antes = mapa(&[("local:1", "blob:1")]);
+        let arquivos = mapa(&[("local:1", "DSC_2700.JPG")]);
+        let agora = [tile("s1", "/m/s1", "DSC_2700.jpg")];
+        assert_eq!(
+            quem_empresta(&antes, &arquivos, &agora, |_| false),
+            vec![("s1".to_string(), "local:1".to_string())]
+        );
+        assert_eq!(base_do_nome("fotos/DSC_2700.NEF"), "dsc_2700");
     }
 
     /// Duas que saíram com o mesmo nome: nenhuma empresta, para não mostrar a

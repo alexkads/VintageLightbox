@@ -89,6 +89,22 @@ const LADO_DA_MINIATURA: u32 = ZOOM_MAXIMO as u32;
 /// janela** (três telas de cada), e este número é só o piso.
 const MINIATURAS_GUARDADAS: usize = 64;
 
+/// A base do nome do arquivo, sem extensão e sem caixa: `DSC_2700.JPG`,
+/// `DSC_2700.NEF` e `DSC_2700.jpg` dão o mesmo `dsc_2700`.
+///
+/// 🚨 **Comparar o nome inteiro não pega a foto que sobe** (dono, 21/set/2026:
+/// o pisca voltou com as fotos da câmera dele). A subida troca a extensão por
+/// `.jpg` (`nome_para_o_site`): a local `DSC_2700.JPG` vira `DSC_2700.jpg` no
+/// site. O roteiro de teste usava `IMG_0001.jpg`, já minúsculo, e passava.
+fn base_do_nome(arquivo: &str) -> String {
+    let arquivo = arquivo.rsplit(['/', '\\']).next().unwrap_or(arquivo);
+    arquivo
+        .rsplit_once('.')
+        .map(|(base, _)| base)
+        .unwrap_or(arquivo)
+        .to_lowercase()
+}
+
 /// Quanto dura a troca suave de uma miniatura pela seguinte (a foto que subiu,
 /// a revelada por cima do bruto). Curta o bastante para não atrasar o olho de
 /// quem classifica, longa o bastante para não parecer um pisca.
@@ -1838,6 +1854,7 @@ impl Detalhe {
     /// `ordem`, quem já as tinha separado foi o servidor (que ordena por
     /// `ordem, criada_em`), e reordenar por id jogaria fora esse critério.
     fn recompor_acervo(&mut self) {
+        self.reconhecer_as_que_subiram();
         let marcadas: Vec<String> = self
             .ids_marcados()
             .iter()
@@ -1869,6 +1886,41 @@ impl Detalhe {
             self.selecao.focar(Some(p));
             self.ultimo_foco = None;
         }
+    }
+
+    /// Liga a local à do site que é ela, quando a do site chega **antes** de
+    /// a raiz dizer ([`Self::definir_subidas`]).
+    ///
+    /// 🚨 **Sem isto a mesma foto aparecia duas vezes, e a grade inteira
+    /// andava uma casa** (dono, 21/set/2026: *"estou vendo o problema de
+    /// pisca-pisca"*). A releitura da galeria às vezes volta antes da do
+    /// catálogo: a do site entrava, a local continuava, e cada foto depois
+    /// delas pulava para o lado e voltava — o pisca que a medida de célula
+    /// preta não via.
+    ///
+    /// 🔑 **Mesma `ordem` e mesmo nome base** (sem extensão nem caixa: a
+    /// subida troca `.JPG` por `.jpg`). A `ordem` que sobe é a da posição da
+    /// local no ensaio, então as duas coincidem; o nome evita ligar duas fotos
+    /// diferentes que por acaso dividam a posição.
+    fn reconhecer_as_que_subiram(&mut self) {
+        let ja_ligadas: std::collections::HashSet<&String> = self.subiu_como.values().collect();
+        let pares: Vec<(String, String)> = self
+            .locais
+            .iter()
+            .filter(|l| !self.subiu_como.contains_key(&l.id))
+            .filter_map(|l| {
+                let nome = base_do_nome(&l.arquivo);
+                self.do_site
+                    .iter()
+                    .find(|s| {
+                        s.ordem == l.ordem
+                            && !ja_ligadas.contains(&s.id)
+                            && base_do_nome(&s.arquivo) == nome
+                    })
+                    .map(|s| (l.id.clone(), s.id.clone()))
+            })
+            .collect();
+        self.subiu_como.extend(pares);
     }
 
     fn ids_marcados(&self) -> Vec<String> {
@@ -2762,6 +2814,7 @@ impl Detalhe {
             return false;
         }
         let (grade_vista, grade_margem) = self.faixas_da_grade(total);
+        let grade_vista_medida = grade_vista.clone();
         let (tira_vista, tira_margem) = self.faixas_da_tira(total);
         let capacidade = (grade_margem.len() + tira_margem.len()).max(MINIATURAS_GUARDADAS);
         self.miniaturas
@@ -2773,7 +2826,7 @@ impl Detalhe {
             .filter_map(|p| {
                 self.acervo
                     .visivel(p)
-                    .map(|f| (f.id.clone(), f.arquivo.clone()))
+                    .map(|f| (f.id.clone(), base_do_nome(&f.arquivo)))
             })
             .collect();
         let inicio = std::time::Instant::now();
@@ -2805,6 +2858,38 @@ impl Detalhe {
             self.carregar_miniatura(&chave);
         }
         self.lembrar_as_imagens(&perto);
+        // 📏 `VLB_MEDIR_GRADE=1`: a cada quadro, quantas células à vista estão
+        // sem imagem e quais fotos aparecem em dobro — a régua do pisca da
+        // subida (21/set/2026). Fotografar a janela não servia: a captura leva
+        // ~200 ms, a troca 280, e um painel por cima das células enganava a
+        // medida pela posição.
+        if std::env::var_os("VLB_MEDIR_GRADE").is_some() {
+            let vista: Vec<&acervo::Foto> = grade_vista_medida
+                .clone()
+                .filter_map(|p| self.acervo.visivel(p))
+                .collect();
+            let sem_imagem: Vec<&str> = vista
+                .iter()
+                .filter(|f| !self.imagens_vistas.contains_key(&f.id))
+                .map(|f| f.arquivo.as_str())
+                .collect();
+            let mut nomes = std::collections::HashMap::new();
+            for f in &vista {
+                *nomes.entry(base_do_nome(&f.arquivo)).or_insert(0) += 1;
+            }
+            let dobradas: Vec<&String> = nomes
+                .iter()
+                .filter(|(_, n)| **n > 1)
+                .map(|(k, _)| k)
+                .collect();
+            eprintln!(
+                "[medida] vista={} sem_imagem={:?} dobradas={:?} trocas={}",
+                vista.len(),
+                sem_imagem,
+                dobradas,
+                self.trocas.len()
+            );
+        }
         faltou
     }
 
@@ -2864,6 +2949,14 @@ impl Detalhe {
                 (Some(nova), Some(velha)) => {
                     if !Arc::ptr_eq(&nova, velha) && !self.trocas.contains_key(id) {
                         self.proxima_troca += 1;
+                        if std::env::var_os("VLB_MEDIR_GRADE").is_some() {
+                            eprintln!(
+                                "[troca] {id} {} {:?}->{:?}",
+                                self.chave_da_foto(id),
+                                velha.size(0),
+                                nova.size(0)
+                            );
+                        }
                         self.trocas
                             .insert(id.clone(), (velha.clone(), agora, self.proxima_troca));
                     }
@@ -6944,6 +7037,45 @@ mod testes {
         );
     }
 
+    /// 🚨 **A do site que chega antes do aviso da raiz não duplica a foto.**
+    ///
+    /// A releitura da galeria às vezes volta antes da do catálogo: sem ligar as
+    /// duas, a grade mostrava a local **e** a do site, e cada foto depois delas
+    /// andava uma casa (dono, 21/set/2026: *"estou vendo o problema de
+    /// pisca-pisca"*). Mesma `ordem` e mesmo nome base — a câmera grava `.JPG`,
+    /// a subida manda `.jpg`.
+    #[gpui::test]
+    fn a_do_site_que_chega_antes_do_aviso_nao_duplica_a_foto(cx: &mut TestAppContext) {
+        let mut do_site = foto("s1", EstadoDaFotoNoSite::Disponivel, None);
+        do_site.arquivo = "DSC_2700.jpg".into();
+        do_site.ordem = 0;
+        let (janela, _publicador) = janela(cx, vec![do_site]);
+        entrar(cx, &janela);
+        janela
+            .update(cx, |tela, _window, cx| {
+                let mut a_local = local("nova-1");
+                a_local.arquivo = "DSC_2700.JPG".into();
+                a_local.ordem = 0;
+                let mut outra = local("nova-2");
+                outra.arquivo = "DSC_2701.JPG".into();
+                outra.ordem = 1;
+                // Sem `definir_subidas`: o aviso da raiz ainda não chegou.
+                tela.definir_locais(vec![a_local, outra], cx);
+                assert!(
+                    tela.como_esta("nova-1").is_none(),
+                    "a foto aparece uma vez só"
+                );
+                assert!(tela.como_esta("s1").is_some());
+                assert!(tela.como_esta("nova-2").is_some(), "a outra local continua");
+                assert_eq!(
+                    tela.acervo.posicao_de("nova-2"),
+                    Some(1),
+                    "e ninguém anda uma casa"
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
     /// 🛒 **O `B` vale na foto que ainda está subindo** (dono, 21/set/2026:
     /// *"eu não posso impedir o atendente de fazer as marcações"*). Antes dava
     /// "espere o envio terminar"; agora a marca vai para o catálogo, sem erro,
@@ -7898,7 +8030,8 @@ mod testes {
             let mut do_site = publicador.fotos_da_sessao.lock().unwrap();
             do_site.push(foto("s0", EstadoDaFotoNoSite::Disponivel, None));
             let mut subiu = foto("s1", EstadoDaFotoNoSite::Disponivel, None);
-            subiu.arquivo = "nova-1.jpg".into();
+            // 🚨 A câmera grava `.JPG` e a subida troca por `.jpg`.
+            subiu.arquivo = "NOVA-1.jpg".into();
             do_site.push(subiu);
         }
         janela
