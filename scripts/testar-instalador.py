@@ -272,6 +272,41 @@ class CasosDoInstalador:
         self.assertNotIn("GiB de memória", result.stdout)
         self.assertIn("jobs=5", self.log.read_text())
 
+    def test_a_falha_deixa_o_registro_e_diz_qual_mandar(self):
+        # 🧾 O dono no Fedora 44: "é melhor atualizar o script de instalação
+        # do Linux pra eu trazer informação". O código do cargo continua sendo
+        # o da saída, e o registro tem o retrato e a saída da compilação.
+        self.mock("uname", "echo Linux")
+        self.env["TEST_BUILD_EXIT"] = "42"
+        result = self.run_installer()
+        self.assertEqual(result.returncode, 42, result.stdout)
+        self.assertIn("parou em: compilando", result.stdout)
+        self.assertIn("Mande este arquivo", result.stdout)
+        registros = list((self.casa / "registros").glob("instalacao-*.log"))
+        self.assertEqual(len(registros), 1, result.stdout)
+        self.assertIn(str(registros[0]), result.stdout)
+        texto = registros[0].read_text()
+        self.assertIn("retrato da máquina", texto)
+        self.assertIn("rustc 1.98.0 (teste)", texto)
+        self.assertIn("a compilação falhou", texto, "a saída de erro também vai")
+
+    def test_o_sucesso_tambem_diz_onde_esta_o_registro(self):
+        self.mock("uname", "echo Linux")
+        result = self.run_installer()
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("registro desta instalação:", result.stdout)
+        self.assertNotIn("Mande este arquivo", result.stdout)
+
+    def test_diagnostico_so_tira_o_retrato(self):
+        self.mock("uname", "echo Linux")
+        self.mock("cargo", "echo 'cargo nao deveria rodar' >&2; exit 99")
+        result = self.run_installer("--diagnostico")
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("retrato da máquina", result.stdout)
+        self.assertIn("rustc 1.98.0 (teste)", result.stdout)
+        self.assertNotIn("nao deveria rodar", result.stdout)
+        self.assertFalse(self.casa.exists(), "o retrato não grava nada")
+
     def test_seco_nao_grava(self):
         result = self.run_installer("--seco")
         self.assertEqual(result.returncode, 0, result.stdout)
