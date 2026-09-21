@@ -105,6 +105,10 @@ Sem `curl`, instale-o antes (`sudo apt install curl` ou `sudo dnf install curl`)
   Instalar** e o ícone aparece na hora (a cópia vai para `~/.local/share/gnome-shell/extensions`).
   Recusou o diálogo, ou não havia sessão? **Saia e entre de novo na sessão**. Sem ela o app funciona,
   mas minimizado só volta pelo Alt+Tab.
+- **Pacote `.rpm`:** para instalar em outros Fedora sem compilar em cada um, gere o pacote com
+  `./scripts/empacotar-rpm.sh` (sai em `dist/fedora/`) e instale com
+  `sudo dnf install ./vintagelightbox-<versão>-1.fc44.x86_64.rpm`. Gerado no Fedora 44, só instala do
+  44 em diante.
 - **Silverblue, Kinoite ou Bazzite:** o sistema é imutável e recusa `dnf install`. O instalador
   para e mostra um `sudo rpm-ostree install …`: rode-o, reinicie e rode o instalador de novo.
 - Com placa NVIDIA, o Vulkan vem do driver da NVIDIA (`akmod-nvidia`, do RPM Fusion).
