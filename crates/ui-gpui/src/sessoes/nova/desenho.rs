@@ -2336,9 +2336,21 @@ impl NovaSessao {
                             v_flex()
                                 .id("nova-fotos-da-pasta-lista")
                                 .flex_1()
+                                .when(selecao.lendo, |lista| {
+                                    lista
+                                        .min_h(px(220.))
+                                        .items_center()
+                                        .justify_center()
+                                        .gap(px(10.))
+                                        .text_sm()
+                                        .text_color(tema.muted_foreground)
+                                        .child(Icon::new(Icone::ImagePlus).size(px(26.)))
+                                        .child("Lendo as fotos…")
+                                })
                                 .min_h(px(0.))
                                 .overflow_y_scroll()
-                                .child(
+                                .when(!selecao.lendo, |lista| {
+                                    lista.child(
                                     div()
                                         .id("nova-fotos-da-pasta-grade")
                                         .grid()
@@ -2476,7 +2488,8 @@ impl NovaSessao {
                                                     .into_any_element()
                                             },
                                         )),
-                                ),
+                                    )
+                                }),
                         )
                 })
                 .child(
@@ -2488,11 +2501,15 @@ impl NovaSessao {
                             div()
                                 .text_sm()
                                 .text_color(tema.muted_foreground)
-                                .child(format!(
-                                    "{} de {} selecionadas",
-                                    selecionadas,
-                                    selecao.fotos.len()
-                                )),
+                                .child(if selecao.lendo {
+                                    "Lendo as fotos…".to_string()
+                                } else {
+                                    format!(
+                                        "{} de {} selecionadas",
+                                        selecionadas,
+                                        selecao.fotos.len()
+                                    )
+                                }),
                         )
                         .child(div().flex_1())
                         .child(

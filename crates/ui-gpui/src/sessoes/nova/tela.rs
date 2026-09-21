@@ -208,6 +208,8 @@ pub(super) struct SelecaoDaPasta {
     pub fotos: Vec<(String, bool)>,
     /// Primeiro item de um intervalo feito com Shift+clique.
     pub ancora: Option<usize>,
+    /// A varredura ainda não voltou: o modal já está aberto, sem fotos.
+    pub lendo: bool,
 }
 
 /// As portas que a tela usa.
@@ -284,6 +286,9 @@ pub struct NovaSessao {
     pub(super) falhas_da_copia: Option<(usize, String)>,
     freios: Freios,
     escolhendo: bool,
+    /// Uma varredura de cartão/pasta está no ar: o resultado chega pelo canal
+    /// e só a colheita o mostra, então ela não pode dormir antes.
+    varrendo: bool,
     pub(super) receita: Receita,
     receita_aplicada: HashMap<String, String>,
     pub(super) arrastando: bool,
@@ -511,6 +516,7 @@ impl NovaSessao {
             falhas_da_copia: None,
             freios: Freios::default(),
             escolhendo: false,
+            varrendo: false,
             receita: Receita::default(),
             receita_aplicada: HashMap::new(),
             arrastando: false,
@@ -884,15 +890,28 @@ impl NovaSessao {
         cx.notify();
     }
 
+    /// Abre o modal da pasta na hora, vazio e "lendo": a varredura de um
+    /// cartão lento não deixa a tela muda até terminar.
+    fn abrir_selecao_lendo(&mut self, raiz: String, window: &mut Window) {
+        window.focus(&self.foco);
+        self.aviso = None;
+        self.miniaturas_da_pasta.clear();
+        self.metadados_da_pasta.clear();
+        self.gerando_miniaturas_da_pasta = false;
+        self.selecao_da_pasta_maximizada = false;
+        self.selecao_da_pasta_minimizada = false;
+        self.varrendo = true;
+        self.selecao_da_pasta = Some(SelecaoDaPasta {
+            raiz,
+            fotos: Vec::new(),
+            ancora: None,
+            lendo: true,
+        });
+    }
+
     pub fn ler_cartao(&mut self, caminho: String, window: &mut Window, cx: &mut Context<Self>) {
         self.menu_da_origem = None;
-        self.selecao_da_pasta = None;
-        self.gerando_miniaturas_da_pasta = false;
-        let nome = std::path::Path::new(&caminho)
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| caminho.clone());
-        self.avisar(format!("Lendo de {nome}…"), false);
+        self.abrir_selecao_lendo(caminho.clone(), window);
         self.portas
             .explorador
             .varrer(caminho, true, self.origens.0.clone());
@@ -961,6 +980,7 @@ impl NovaSessao {
 
     pub fn cancelar_selecao_da_pasta(&mut self, cx: &mut Context<Self>) {
         self.selecao_da_pasta = None;
+        self.varrendo = false;
         self.gerando_miniaturas_da_pasta = false;
         self.selecao_da_pasta_minimizada = false;
         cx.notify();
@@ -978,6 +998,9 @@ impl NovaSessao {
     }
 
     pub fn importar_selecao_da_pasta(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.selecao_da_pasta.as_ref().is_some_and(|s| s.lendo) {
+            return;
+        }
         let Some(selecao) = self.selecao_da_pasta.take() else {
             return;
         };
@@ -1957,9 +1980,8 @@ impl NovaSessao {
                 RecadoDaImportacao::OrigemEscolhida(pasta) => {
                     self.menu_da_origem = None;
                     self.selecao_da_pasta = None;
-                    self.gerando_miniaturas_da_pasta = false;
                     self.escolhendo = false;
-                    self.avisar("Lendo fotos da pasta…", false);
+                    self.abrir_selecao_lendo(pasta.clone(), window);
                     self.portas
                         .explorador
                         .varrer(pasta, true, self.origens.0.clone());
@@ -1983,6 +2005,16 @@ impl NovaSessao {
                     }
                 }
                 RecadoDaImportacao::Varrido { raiz, arquivos } => {
+                    self.varrendo = false;
+                    // Cancelado (ou trocado por outra pasta) enquanto lia: o
+                    // resultado velho não reabre nada.
+                    if !self
+                        .selecao_da_pasta
+                        .as_ref()
+                        .is_some_and(|s| s.lendo && s.raiz == raiz)
+                    {
+                        continue;
+                    }
                     let nome = std::path::Path::new(&raiz)
                         .file_name()
                         .map(|n| n.to_string_lossy().to_string())
@@ -1994,15 +2026,10 @@ impl NovaSessao {
                         })
                         .collect();
                     if fotos.is_empty() {
+                        self.selecao_da_pasta = None;
                         self.avisar(format!("Nenhuma foto em {nome}."), false);
                     } else {
-                        window.focus(&self.foco);
-                        self.aviso = None;
-                        self.miniaturas_da_pasta.clear();
-                        self.metadados_da_pasta.clear();
                         self.gerando_miniaturas_da_pasta = true;
-                        self.selecao_da_pasta_maximizada = false;
-                        self.selecao_da_pasta_minimizada = false;
                         self.portas
                             .gerador
                             .gerar(fotos.clone(), self.origens.0.clone());
@@ -2013,11 +2040,16 @@ impl NovaSessao {
                             raiz,
                             fotos: fotos.into_iter().map(|caminho| (caminho, true)).collect(),
                             ancora: None,
+                            lendo: false,
                         });
                     }
                 }
                 RecadoDaImportacao::Falhou(erro) => {
                     self.escolhendo = false;
+                    self.varrendo = false;
+                    if self.selecao_da_pasta.as_ref().is_some_and(|s| s.lendo) {
+                        self.selecao_da_pasta = None;
+                    }
                     self.avisar(erro, true);
                 }
                 _ => {}
@@ -2153,6 +2185,7 @@ impl NovaSessao {
 
         let continua = self.carregando
             || self.escolhendo
+            || self.varrendo
             || self.importando()
             || self.fase.is_some()
             || self.esperando_catalogo.is_some()
