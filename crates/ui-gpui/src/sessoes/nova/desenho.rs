@@ -866,23 +866,6 @@ impl NovaSessao {
                                     cx.stop_propagation();
                                     tela.escolher_pasta(window, cx)
                                 })),
-                        )
-                        .child(
-                            h_flex()
-                                .id("nova-escolher-fotos-do-menu")
-                                .gap(px(8.))
-                                .px(px(8.))
-                                .py(px(6.))
-                                .rounded(px(4.))
-                                .text_sm()
-                                .cursor_pointer()
-                                .hover(|h| h.bg(tema.accent))
-                                .child(Icon::new(Icone::ImagePlus).size(px(16.)))
-                                .child("Escolher fotos…")
-                                .on_click(cx.listener(|tela, _, window, cx| {
-                                    cx.stop_propagation();
-                                    tela.escolher_fotos(window, cx)
-                                })),
                         ),
                 )
             })

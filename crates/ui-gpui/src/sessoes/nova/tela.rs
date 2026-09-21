@@ -886,6 +886,8 @@ impl NovaSessao {
 
     pub fn ler_cartao(&mut self, caminho: String, window: &mut Window, cx: &mut Context<Self>) {
         self.menu_da_origem = None;
+        self.selecao_da_pasta = None;
+        self.gerando_miniaturas_da_pasta = false;
         let nome = std::path::Path::new(&caminho)
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
@@ -900,10 +902,12 @@ impl NovaSessao {
 
     pub fn escolher_pasta(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.menu_da_origem = None;
+        self.selecao_da_pasta = None;
+        self.gerando_miniaturas_da_pasta = false;
+        self.escolhendo = true;
         self.portas
             .seletor_de_pasta
             .escolher(self.origens.0.clone(), cx);
-        self.escolhendo = true;
         self.acompanhar(window, cx);
         cx.notify();
     }
@@ -957,6 +961,7 @@ impl NovaSessao {
 
     pub fn cancelar_selecao_da_pasta(&mut self, cx: &mut Context<Self>) {
         self.selecao_da_pasta = None;
+        self.gerando_miniaturas_da_pasta = false;
         self.selecao_da_pasta_minimizada = false;
         cx.notify();
     }
