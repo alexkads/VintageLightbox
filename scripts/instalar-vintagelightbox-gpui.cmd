@@ -502,6 +502,19 @@ aviso() { printf "${A}⚠️  %s${Z}\n" "$*"; }
 erro()  { printf "${E}❌ %s${Z}\n" "$*" >&2; }
 correr() { if [ "$SECO" -eq 1 ]; then echo "   [seco] $*"; else "$@"; fi; }
 
+# Acrescenta uma extensão à lista das ligadas do GNOME, sem o Shell saber —
+# vale no próximo login. Não duplica, e não mexe se o `gsettings` não existir.
+ligar_pelo_gsettings() {
+  command -v gsettings >/dev/null 2>&1 || return 1
+  atual=$(gsettings get org.gnome.shell enabled-extensions 2>/dev/null) || return 1
+  case "$atual" in
+    *"'$1'"*) return 0 ;;
+    "@as []"|"[]"|"") novo="['$1']" ;;
+    *) novo="${atual%]}, '$1']" ;;
+  esac
+  correr gsettings set org.gnome.shell enabled-extensions "$novo" 2>/dev/null
+}
+
 # A ajuda mora aqui, e não é lida do arquivo: com `curl | sh` o script não
 # existe em disco.
 ajuda() {
@@ -758,7 +771,14 @@ else
         else
           # Ligada agora, ela só aparece depois de sair e entrar de novo na
           # sessão: o GNOME no Wayland não recarrega extensões com a sessão aberta.
-          if correr gnome-extensions enable "$EXTENSAO" 2>/dev/null; then
+          #
+          # 🚨 **Recém-instalada pelo `dnf`, o `enable` falha** (Fedora 44,
+          # 2026-09-21): o GNOME Shell no Wayland só descobre extensões novas
+          # ao entrar na sessão, e responde que ela não existe. A lista das
+          # ligadas mora no dconf (`org.gnome.shell enabled-extensions`), e
+          # gravá-la ali não depende do Shell: ela liga no próximo login.
+          if correr gnome-extensions enable "$EXTENSAO" 2>/dev/null \
+             || ligar_pelo_gsettings "$EXTENSAO"; then
             aviso "extensão da bandeja ligada: saia e entre de novo na sessão para o ícone aparecer."
           else
             aviso "não consegui ligar a extensão da bandeja por aqui."
@@ -985,6 +1005,7 @@ Name=VintageLightbox (Zed GPUI)
 Comment=Editor de fotos da RecordarFotos
 Exec=$DESTINO/bin/$NOME_LINUX
 Icon=$NOME_LINUX
+StartupWMClass=$NOME_LINUX
 Categories=Graphics;Photography;
 Terminal=false
 DESKTOP

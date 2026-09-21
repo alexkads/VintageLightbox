@@ -359,12 +359,36 @@ class CasosDoInstalador:
     def test_gnome_sem_sessao_manda_ligar_a_extensao_a_mao(self):
         self.mock("uname", "echo Linux")
         self.mock("gnome-extensions", "exit 1")
+        # Sem sessão gráfica o dconf também não responde.
+        self.mock("gsettings", "exit 1")
         (self.extensoes / "appindicatorsupport@rgcjonas.gmail.com").mkdir()
         self.env["XDG_CURRENT_DESKTOP"] = "GNOME"
         result = self.run_installer()
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("Abra o app Extensões", result.stdout)
         self.assertNotIn("extensão da bandeja ligada", result.stdout)
+
+    def test_gnome_recem_instalada_liga_pelo_gsettings(self):
+        # Fedora 44: o `enable` falha porque o Shell ainda não conhece a
+        # extensão que o `dnf` acabou de instalar; a lista do dconf, não.
+        self.mock("uname", "echo Linux")
+        self.mock("gnome-extensions", "exit 1")
+        self.mock(
+            "gsettings",
+            'if [ "$1" = get ]; then echo "[\'outra@exemplo.com\']"; '
+            'else printf "gsettings %s\\n" "$*" >> "$TEST_LOG"; fi',
+        )
+        (self.extensoes / "appindicatorsupport@rgcjonas.gmail.com").mkdir()
+        self.env["XDG_CURRENT_DESKTOP"] = "GNOME"
+        result = self.run_installer()
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("saia e entre de novo", result.stdout)
+        self.assertNotIn("não consegui ligar", result.stdout)
+        self.assertIn(
+            "enabled-extensions ['outra@exemplo.com', "
+            "'appindicatorsupport@rgcjonas.gmail.com']",
+            self.log.read_text(),
+        )
 
     def test_ajuda_aponta_o_instalador_do_app(self):
         result = self.run_installer("--ajuda", piped=True)
