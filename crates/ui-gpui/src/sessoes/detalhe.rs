@@ -188,6 +188,9 @@ pub enum Pedido {
     /// 🔑 **Quem grava é a Biblioteca**, dona do catálogo — como na nota
     /// ([`Pedido::Classificar`]). Esta tela só diz quais e para que lado.
     Rejeitar { ids: Vec<String>, rejeitada: bool },
+    /// 🛒 A tecla `B` em fotos que **ainda estão subindo**: a marca vai para o
+    /// catálogo e sobe com elas. Quem grava é a Biblioteca, como na nota.
+    Levar { ids: Vec<String>, levada: bool },
     /// ❌ A tecla `X` em fotos **que estão na nuvem**: elas voltam para cá e
     /// saem de lá (dono, 2026-09-21). Quem faz é a raiz — `app::resgate`.
     RejeitarDaNuvem(Vec<crate::app::resgate::AFotoQueVolta>),
@@ -1005,9 +1008,12 @@ impl Detalhe {
             .selecao
             .marcadas()
             .filter_map(|p| self.acervo.visivel(p))
-            .filter(|f| {
-                f.editavel() && f.nota.is_none() && !self.locais.iter().any(|l| l.id == f.id)
-            })
+            // 🔄 **A local também** (21/set/2026): até aqui ela ficava de fora
+            // porque o `B` nela dava "espere o envio". Agora ele vale, e a
+            // regra do servidor vale junto — sem isto, a marca ia para o
+            // catálogo e a **subida inteira** era recusada ("classifique a foto
+            // de 1 a 5 antes de marcá-la como levada"), visto rodando o app.
+            .filter(|f| f.editavel() && f.nota.is_none())
             .map(|f| f.arquivo.clone())
             .collect();
         if !sem_nota.is_empty() {
@@ -1071,11 +1077,7 @@ impl Detalhe {
         let fora: Vec<usize> = self
             .selecao
             .marcadas()
-            .filter(|p| {
-                self.acervo
-                    .visivel(*p)
-                    .is_some_and(|f| f.nota.is_none() && !self.locais.iter().any(|l| l.id == f.id))
-            })
+            .filter(|p| self.acervo.visivel(*p).is_some_and(|f| f.nota.is_none()))
             .collect();
         for posicao in fora {
             self.selecao.desmarcar_uma(posicao);
@@ -1611,10 +1613,12 @@ impl Detalhe {
         // acontecer. A **rejeição** (C21) segue o mesmo caminho, e é o gesto que
         // impede a subida.
         //
-        // ⚠️ **Só o balcão continua precisando da foto no site**: "levada" e
-        // "comprada" são venda, e não há onde gravá-las numa foto que ainda
-        // está subindo. O silêncio seria a pior resposta — a linha de erro
-        // abaixo diz o que esperar.
+        // 🔄 **O balcão também**, desde 21/set/2026 (dono: *"eu não posso
+        // impedir o atendente de fazer as marcações pois tudo precisa usar o
+        // poder do paralelismo"*). Até aqui o `B` numa foto subindo dava
+        // "espere o envio terminar". A levada mora no catálogo (a coluna do `B`
+        // da Biblioteca) e sobe com a foto; a "comprada" continua sendo só do
+        // site, que a cria de pedido pago.
         let (locais, alvos): (Vec<String>, Vec<String>) = alvos
             .into_iter()
             .partition(|id| self.locais.iter().any(|f| &f.id == id));
@@ -1622,18 +1626,50 @@ impl Detalhe {
             match (mudanca.nota, mudanca.rejeitada, mudanca.estado) {
                 // O `0` também atravessa: tirar a nota é curadoria (C22), e
                 // recusá-lo aqui faria a tecla valer só metade da grade.
-                (Some(nota), _, None) => cx.emit(Pedido::Classificar {
-                    ids: locais,
-                    nota: nota.unwrap_or(0) as i32,
-                }),
+                (Some(nota), _, None) => {
+                    // 🔑 **A estrela aparece antes de o catálogo responder**
+                    // — senão o `B` apertado logo depois da nota a achava sem
+                    // nota e a deixava de fora (visto rodando o app,
+                    // 21/set/2026: `4` e `B` em sequência, nenhuma levada).
+                    let nova = nota.and_then(|n| u8::try_from(n).ok());
+                    for foto in self.locais.iter_mut().filter(|f| locais.contains(&f.id)) {
+                        foto.nota = nova;
+                    }
+                    self.recompor_acervo();
+                    cx.emit(Pedido::Classificar {
+                        ids: locais,
+                        nota: nota.unwrap_or(0) as i32,
+                    });
+                }
                 (None, Some(rejeitada), None) => cx.emit(Pedido::Rejeitar {
                     ids: locais,
                     rejeitada,
                 }),
+                (None, None, Some(estado)) => {
+                    // 🔑 **A grade mostra a marca antes de o catálogo
+                    // responder**, como a Biblioteca: sem isto o segundo `B`,
+                    // apertado antes da releitura, decidia sobre o estado velho
+                    // e marcava de novo em vez de desfazer (visto rodando o app,
+                    // 21/set/2026).
+                    let novo = match estado {
+                        EstadoNoBalcao::LevadaNoBalcao => acervo::Estado::LevadaNoBalcao,
+                        EstadoNoBalcao::Disponivel => acervo::Estado::Disponivel,
+                    };
+                    for foto in self.locais.iter_mut().filter(|f| locais.contains(&f.id)) {
+                        foto.estado = novo;
+                    }
+                    self.recompor_acervo();
+                    cx.emit(Pedido::Levar {
+                        ids: locais,
+                        levada: estado == EstadoNoBalcao::LevadaNoBalcao,
+                    });
+                }
+                // Preço negociado e observação são do site: esperam a foto
+                // chegar lá, sem sumir em silêncio.
                 _ => {
                     self.erro = Some(
-                        "estas fotos ainda estão subindo — espere o envio terminar para \
-                         marcá-las no balcão"
+                        "estas fotos ainda estão subindo — a negociação fica para quando \
+                         chegarem ao site"
                             .into(),
                     );
                     cx.notify();
@@ -6908,6 +6944,70 @@ mod testes {
         );
     }
 
+    /// 🛒 **O `B` vale na foto que ainda está subindo** (dono, 21/set/2026:
+    /// *"eu não posso impedir o atendente de fazer as marcações"*). Antes dava
+    /// "espere o envio terminar"; agora a marca vai para o catálogo, sem erro,
+    /// e o segundo `B` desfaz — a local mostra a levada na hora.
+    #[gpui::test]
+    fn o_b_marca_a_foto_que_ainda_sobe(cx: &mut TestAppContext) {
+        let (janela, publicador) = janela(cx, Vec::new());
+        entrar(cx, &janela);
+
+        let raiz = cx.update(|cx| janela.root(cx).expect("a tela"));
+        let levadas = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let recebidas = levadas.clone();
+        let _assinatura = cx.update(|cx| {
+            cx.subscribe(&raiz, move |_, evento: &Pedido, _| {
+                if let Pedido::Levar { ids, levada } = evento {
+                    recebidas.borrow_mut().push((ids.clone(), *levada));
+                }
+            })
+        });
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                // Sem nota, a regra do servidor vale: fica de fora, com o
+                // recado — e nada vai ao catálogo.
+                tela.definir_locais(vec![local("nova-1")], cx);
+                let p = tela.acervo.posicao_de("nova-1").expect("a local na grade");
+                tela.clicar(p, Modificadores::default(), cx);
+                tela.alternar_levada(cx);
+                assert!(
+                    tela.erro
+                        .as_deref()
+                        .is_some_and(|e| e.contains("classifique")),
+                    "a sem nota pede a nota: {:?}",
+                    tela.erro
+                );
+                tela.erro = None;
+
+                let mut com_nota = local("nova-1");
+                com_nota.nota = Some(4);
+                tela.definir_locais(vec![com_nota], cx);
+                let p = tela.acervo.posicao_de("nova-1").expect("a local na grade");
+                tela.clicar(p, Modificadores::default(), cx);
+                tela.alternar_levada(cx);
+                assert_eq!(tela.erro, None, "o B não pede para esperar o envio");
+                // 🚨 Sem releitura no meio: o segundo `B` chega antes dela.
+                tela.alternar_levada(cx);
+            })
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+
+        assert_eq!(
+            levadas.borrow().as_slice(),
+            [
+                (vec!["nova-1".to_string()], true),
+                (vec!["nova-1".to_string()], false)
+            ],
+            "o primeiro B marca e o segundo desfaz, no catálogo"
+        );
+        assert!(
+            publicador.negociadas().is_empty(),
+            "e nada vai ao site: ela ainda não tem linha lá"
+        );
+    }
+
     /// ❌ **A tecla `X` rejeita: marca, e nunca apaga** — contrato C21.
     ///
     /// 🚨 **É o gesto que substituiu a desclassificação destrutiva.** Até
@@ -7599,18 +7699,14 @@ mod testes {
             "a foto local não tem linha no site: negociar com o id local daria erro"
         );
 
-        // O mesmo gesto, mas de balcão: a tela recusa e diz por quê.
+        // 🔄 O mesmo gesto, mas de balcão: desde 21/set/2026 ele vale na foto
+        // que ainda sobe (antes: "espere o envio terminar"). A nota acabou de
+        // ser dada, e a grade já a mostra — o `B` não a acha sem nota.
         janela
             .update(cx, |tela, _window, cx| {
                 tela.selecionar_tudo(cx);
                 tela.alternar_levada(cx);
-                assert!(
-                    tela.erro
-                        .as_deref()
-                        .is_some_and(|e| e.contains("ainda estão subindo")),
-                    "sinalizar uma foto que não subiu não pode falhar em silêncio: {:?}",
-                    tela.erro
-                );
+                assert_eq!(tela.erro, None, "o B vale na foto que ainda sobe");
             })
             .expect("a janela deve estar aberta");
         assert!(publicador.negociadas().is_empty());

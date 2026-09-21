@@ -141,15 +141,15 @@ fn importar_classificar_e_levar_pelas_teclas(cx: &mut TestAppContext) {
     e.esperar(cx);
     assert_eq!(e.site.subidas().len(), 3, "classificar não sobe de novo");
 
-    // O `B` numa foto que ainda está subindo não tem onde gravar: a tela diz o
-    // que esperar. 🔄 Antes ela dizia "classifique-as antes" — era a regra em
-    // que a nota abria a porta da nuvem (C20 revogou-a).
+    // O `B` numa foto sem nota fica de fora, com a regra do servidor. 🔄 Até
+    // 21/set/2026 a foto que ainda subia dava "espere o envio terminar"; agora
+    // o `B` vale nela (dono: *"eu não posso impedir o atendente de fazer as
+    // marcações"*), e o que a segura é só a nota, como a do site.
     e.detalhe(cx, |tela, _w, cx| tela.focar_foto("id-DSC_102.jpg", cx));
     e.teclar(cx, "b");
     e.detalhe(cx, |tela, _w, _cx| {
         assert!(
-            tela.erro()
-                .is_some_and(|f| f.contains("ainda estão subindo")),
+            tela.erro().is_some_and(|f| f.contains("classifique")),
             "sinalizar a que não subiu avisa: {:?}",
             tela.erro()
         );

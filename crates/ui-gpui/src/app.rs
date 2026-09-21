@@ -557,7 +557,11 @@ pub struct Aplicativo {
     /// registro, que são as que este app acabou de criar. Nenhuma outra é
     /// tocada: sobrescrever o que o site sabe seria desfazer o trabalho de quem
     /// classificou por lá.
-    subindo_sozinhas: std::collections::HashMap<String, (Option<u8>, bool)>,
+    /// O valor é o que foi mandado: a nota, a rejeição e a **levada no
+    /// balcão** (a tecla `B`, que desde 21/set/2026 vale na foto que ainda
+    /// sobe — dono: *"eu não posso impedir o atendente de fazer as
+    /// marcações"*).
+    subindo_sozinhas: std::collections::HashMap<String, (Option<u8>, bool, bool)>,
     /// As que terminaram de subir e cuja versão do site ainda não chegou à
     /// grade — ver `mostrar_as_locais_na_sessao`.
     recem_subidas: std::collections::HashSet<String>,
@@ -1431,13 +1435,19 @@ impl Aplicativo {
                         ordem: ordem as u32,
                         // 🔑 `None`: quem sobe não escolheu leva nenhuma, e o
                         // estado sai da tecla `B` de cada foto, depois.
-                        estado: None,
+                        estado: (foto.comprada && nota.is_none())
+                            .then_some(domain::services::pos_venda::EstadoNoBalcao::Disponivel),
                         nota,
                         // 🧾 A faixa escolhida na barra de envio da sessão.
                         produto_id: faixa.clone(),
                     }),
                 });
-            self.subindo_sozinhas.insert(foto.id.clone(), (nota, false));
+            // 🛒 A levada sem nota seria recusada pelo servidor — e com ela a
+            // foto inteira. A tela já não deixa marcar assim; se a nota saiu
+            // depois do `B`, a foto sobe à venda e a levada espera a nota.
+            let levada = foto.comprada && nota.is_some();
+            self.subindo_sozinhas
+                .insert(foto.id.clone(), (nota, false, levada));
             entraram += 1;
         }
         if entraram == 0 {
@@ -1470,7 +1480,8 @@ impl Aplicativo {
             let Some(no_site) = foto.pos_venda_foto_id.as_deref() else {
                 continue;
             };
-            let Some((nota_enviada, rejeicao_enviada)) = self.subindo_sozinhas.remove(&foto.id)
+            let Some((nota_enviada, rejeicao_enviada, levada_enviada)) =
+                self.subindo_sozinhas.remove(&foto.id)
             else {
                 continue;
             };
@@ -1478,9 +1489,17 @@ impl Aplicativo {
                 .ok()
                 .filter(|n| (1..=5).contains(n));
             let rejeitada = foto.flag == Some(REJEITADA_NO_CATALOGO);
+            // 🔑 A subida lê o `B` do catálogo na hora de sair, e o operador
+            // pode tê-lo apertado depois: a diferença vai aqui.
+            let levada = foto.comprada && nota.is_some();
             let mudanca = domain::services::pos_venda::MudancaDaFoto {
                 nota: (nota != nota_enviada).then_some(nota.map(i16::from)),
                 rejeitada: (rejeitada != rejeicao_enviada).then_some(rejeitada),
+                estado: (levada != levada_enviada).then_some(if levada {
+                    domain::services::pos_venda::EstadoNoBalcao::LevadaNoBalcao
+                } else {
+                    domain::services::pos_venda::EstadoNoBalcao::Disponivel
+                }),
                 ..Default::default()
             };
             if mudanca.vazia() {
@@ -1695,6 +1714,16 @@ impl Aplicativo {
             //
             // 🔄 **E classificar não sobe mais nada** (C22): a nota é curadoria,
             // e quem leva a foto ao site é `subir_o_que_falta_do_ensaio`.
+            // 🛒 A tecla `B` na foto que ainda sobe: a marca vai para o
+            // catálogo — a mesma coluna do `B` da Biblioteca — e sobe com ela
+            // (`EstadoNoBalcao::da_foto`); o que mudar no meio da subida,
+            // `conciliar_o_que_subiu` leva depois.
+            DetalhePedido::Levar { ids, levada } => {
+                let (ids, levada) = (ids.clone(), *levada);
+                self.biblioteca
+                    .update(cx, |tela, cx| tela.marcar_comprada_ids(&ids, levada, cx));
+                self.pedir_releitura_do_acervo(cx);
+            }
             DetalhePedido::Classificar { ids, nota } => {
                 let (ids, nota) = (ids.clone(), *nota);
                 self.biblioteca
@@ -2390,6 +2419,7 @@ impl Aplicativo {
                         "{}: {frase}",
                         self.nome_no_site(&alvo, cx).unwrap_or_else(|| alvo.clone())
                     );
+                    eprintln!("⚠️ [Envio] recusado — {recusa}");
                     self.recusas.push(recusa.clone());
                     self.avisar_falha(recusa, cx);
                 }
@@ -4863,7 +4893,12 @@ fn local_para_a_grade(foto: &PhotoViewModel, ordem: i64) -> biblioteca_core::ace
         rejeitada: foto.flag == Some(REJEITADA_NO_CATALOGO),
         id: foto.id.clone(),
         arquivo: foto.name.clone(),
-        estado: biblioteca_core::acervo::Estado::Disponivel,
+        // 🛒 O `B` dado enquanto ela sobe aparece na hora, como a nota.
+        estado: if foto.comprada {
+            biblioteca_core::acervo::Estado::LevadaNoBalcao
+        } else {
+            biblioteca_core::acervo::Estado::Disponivel
+        },
         apagada: false,
         produto_efetivo: String::new(),
         preco_negociado: None,
