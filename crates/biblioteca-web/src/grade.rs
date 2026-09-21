@@ -112,6 +112,8 @@ pub struct Grade {
     pub caixa: Caixa,
     /// A URL da miniatura por id — a chave da textura.
     pub miniaturas: HashMap<String, String>,
+    /// O nome do arquivo por id — a ponte entre a local e a do servidor.
+    pub arquivos: HashMap<String, String>,
     /// A imagem de antes, emprestada ao tile enquanto a dele não chega.
     ///
     /// 🚨 **É o que impede o tile vazio quando a foto sobe** (dono,
@@ -151,6 +153,7 @@ impl Grade {
             texturas: HashMap::new(),
             caixa: Caixa::default(),
             miniaturas: HashMap::new(),
+            arquivos: HashMap::new(),
             emprestadas: HashMap::new(),
             trocas: HashMap::new(),
             cores: Cores::do_tema(escuro),
@@ -182,20 +185,21 @@ impl Grade {
             serde_json::from_str(json).map_err(|e| format!("fotos ilegíveis: {e}"))?;
         let marcados = self.ids_selecionados();
         let foco = self.id_em_foco();
-        // Quem estava em cada posição, para a foto que troca de id no lugar.
-        let antes_por_posicao: Vec<String> = (0..self.acervo.total_visivel())
-            .filter_map(|n| self.acervo.visivel(n).map(|f| f.id.clone()))
-            .collect();
 
         let mut fotos = Vec::with_capacity(lista.len());
         let mut miniaturas = HashMap::with_capacity(lista.len());
+        let mut arquivos = HashMap::with_capacity(lista.len());
         for f in &lista {
             fotos.push(f.para_core()?);
             miniaturas.insert(f.id.clone(), f.miniatura.clone());
+            if !f.arquivo.is_empty() {
+                arquivos.insert(f.id.clone(), f.arquivo.clone());
+            }
         }
         self.acervo.definir(fotos);
         let antes = std::mem::replace(&mut self.miniaturas, miniaturas);
-        self.emprestar_as_de_antes(&antes, &antes_por_posicao);
+        let arquivos_antes = std::mem::replace(&mut self.arquivos, arquivos);
+        self.emprestar_as_de_antes(&antes, &arquivos_antes);
 
         self.selecao.limpar_tudo();
         for id in &marcados {
@@ -221,25 +225,28 @@ impl Grade {
         Ok(mudou::SELECAO | mudou::CONTAGENS | mudou::VISIVEIS | self.recalcular())
     }
 
-    /// Empresta a cada tile sem textura a imagem que ocupava o lugar dele.
-    ///
-    /// 🔑 **Duas perguntas, nesta ordem**: a mesma foto tinha outra URL (a
-    /// revelação salva trocou o `?v=`)? E, se a foto é nova, quem estava na
-    /// mesma posição e sumiu da lista — a local que subiu e virou esta. A
-    /// ordem da grade é a da fotografia, e a do servidor chega no lugar da
-    /// local.
+    /// Empresta a cada tile sem textura a imagem de antes: a da mesma foto
+    /// com outra URL (a revelação salva trocou o `?v=`), ou a da local **de
+    /// mesmo arquivo** que saiu da lista — a que subiu e é esta. Ver
+    /// [`crate::emprestimo`].
     fn emprestar_as_de_antes(
         &mut self,
         antes: &HashMap<String, String>,
-        antes_por_posicao: &[String],
+        arquivos_antes: &HashMap<String, String>,
     ) {
-        let agora: Vec<(&str, &str)> = (0..self.acervo.total_visivel())
+        let agora: Vec<crate::emprestimo::Tile> = (0..self.acervo.total_visivel())
             .filter_map(|n| self.acervo.visivel(n))
-            .filter_map(|f| Some((f.id.as_str(), self.miniaturas.get(&f.id)?.as_str())))
+            .filter_map(|f| {
+                Some(crate::emprestimo::Tile {
+                    id: &f.id,
+                    url: self.miniaturas.get(&f.id)?,
+                    arquivo: self.arquivos.get(&f.id).map(String::as_str),
+                })
+            })
             .collect();
         let mut emprestadas = HashMap::new();
         for (id, de_quem) in
-            crate::emprestimo::quem_empresta(antes, antes_por_posicao, &agora, |url| {
+            crate::emprestimo::quem_empresta(antes, arquivos_antes, &agora, |url| {
                 self.texturas.contains_key(url)
             })
         {
