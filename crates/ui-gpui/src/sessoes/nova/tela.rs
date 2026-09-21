@@ -297,6 +297,8 @@ pub struct NovaSessao {
     /// Miniaturas dos arquivos que ainda estão na origem da importação.
     pub(super) miniaturas_da_pasta: HashMap<String, Arc<RenderImage>>,
     gerando_miniaturas_da_pasta: bool,
+    pub(super) selecao_da_pasta_maximizada: bool,
+    pub(super) selecao_da_pasta_minimizada: bool,
     /// Fotos foram para a fila da receita: o próximo quadro avisa a raiz.
     ///
     /// 🔑 **Bandeira, e não `cx.emit` direto**: `aplicar_receita` é chamado de
@@ -499,6 +501,8 @@ impl NovaSessao {
             miniaturas: Default::default(),
             miniaturas_da_pasta: HashMap::new(),
             gerando_miniaturas_da_pasta: false,
+            selecao_da_pasta_maximizada: false,
+            selecao_da_pasta_minimizada: false,
             pedir_colheita_das_reveladas: false,
             amostras: Amostras::default(),
             focar: None,
@@ -930,6 +934,18 @@ impl NovaSessao {
 
     pub fn cancelar_selecao_da_pasta(&mut self, cx: &mut Context<Self>) {
         self.selecao_da_pasta = None;
+        self.selecao_da_pasta_minimizada = false;
+        cx.notify();
+    }
+
+    pub fn alternar_maximizacao_da_pasta(&mut self, cx: &mut Context<Self>) {
+        self.selecao_da_pasta_maximizada = !self.selecao_da_pasta_maximizada;
+        self.selecao_da_pasta_minimizada = false;
+        cx.notify();
+    }
+
+    pub fn alternar_minimizacao_da_pasta(&mut self, cx: &mut Context<Self>) {
+        self.selecao_da_pasta_minimizada = !self.selecao_da_pasta_minimizada;
         cx.notify();
     }
 
@@ -1944,6 +1960,8 @@ impl NovaSessao {
                     } else {
                         self.miniaturas_da_pasta.clear();
                         self.gerando_miniaturas_da_pasta = true;
+                        self.selecao_da_pasta_maximizada = false;
+                        self.selecao_da_pasta_minimizada = false;
                         self.portas
                             .gerador
                             .gerar(fotos.clone(), self.origens.0.clone());

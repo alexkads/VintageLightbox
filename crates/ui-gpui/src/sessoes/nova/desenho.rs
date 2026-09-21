@@ -217,7 +217,7 @@ impl Render for NovaSessao {
             )
             .when(self.arrastando, |t| t.child(self.sobreposicao(cx)))
             .when_some(self.selecao_da_pasta.as_ref(), |t, selecao| {
-                t.child(self.dialogo_da_pasta(selecao, cx))
+                t.child(self.dialogo_da_pasta(selecao, window, cx))
             })
             .when_some(self.confirmacao, |t, qual| t.child(self.dialogo(qual, cx)))
             .when(self.busca.is_some(), |t| t.child(self.modal_de_busca(cx)))
@@ -2161,11 +2161,21 @@ impl NovaSessao {
     fn dialogo_da_pasta(
         &self,
         selecao: &SelecaoDaPasta,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let tema = cx.theme().clone();
         let selecionadas = selecao.fotos.iter().filter(|(_, marcado)| *marcado).count();
         let todas = selecionadas == selecao.fotos.len();
+        let minimizada = self.selecao_da_pasta_minimizada;
+        let maximizada = self.selecao_da_pasta_maximizada;
+        let largura_janela = f32::from(window.viewport_size().width);
+        let largura_modal = if maximizada {
+            (largura_janela * 0.94).min(1440.)
+        } else {
+            (largura_janela * 0.88).min(820.)
+        };
+        let colunas = ((largura_modal - 64.) / 178.).floor().clamp(2., 8.) as u16;
         let nome_da_pasta = std::path::Path::new(&selecao.raiz)
             .file_name()
             .map(|nome| nome.to_string_lossy().to_string())
@@ -2173,8 +2183,9 @@ impl NovaSessao {
 
         self.veu(cx).child(
             v_flex()
-                .w(px(760.))
-                .max_h(px(680.))
+                .w(relative(if maximizada { 0.94 } else { 0.88 }))
+                .max_w(px(if maximizada { 1440. } else { 820. }))
+                .max_h(if maximizada { relative(0.94) } else { relative(0.82) })
                 .p(px(24.))
                 .gap(px(14.))
                 .rounded(px(16.))
@@ -2184,129 +2195,227 @@ impl NovaSessao {
                 .shadow_lg()
                 .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .child(
-                    div()
-                        .text_lg()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .child("Escolha as fotos da pasta"),
-                )
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(tema.muted_foreground)
-                        .child(format!(
-                            "{nome_da_pasta} — escolha as fotos que deseja trazer para a sessão."
-                        )),
-                )
-                .child(
                     h_flex()
-                        .justify_between()
                         .items_center()
+                        .gap(px(16.))
                         .child(
-                            div()
-                                .text_sm()
-                                .text_color(tema.muted_foreground)
-                                .child(format!(
-                                    "{} de {} selecionadas",
-                                    selecionadas,
-                                    selecao.fotos.len()
-                                )),
+                            v_flex()
+                                .flex_1()
+                                .min_w(px(0.))
+                                .gap(px(3.))
+                                .child(
+                                    div()
+                                        .text_lg()
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .child("Escolha as fotos da pasta"),
+                                )
+                                .child(
+                                    div()
+                                        .text_sm()
+                                        .text_color(tema.muted_foreground)
+                                        .truncate()
+                                        .child(format!(
+                                            "{nome_da_pasta} — clique para selecionar; Shift seleciona um intervalo."
+                                        )),
+                                ),
                         )
                         .child(
-                            Checkbox::new("nova-marcar-todas-da-pasta")
-                                .label(if todas {
-                                    "Desmarcar todas"
-                                } else {
-                                    "Marcar todas"
-                                })
-                                .checked(todas)
-                                .on_click(cx.listener(move |tela, marcado: &bool, _, cx| {
-                                    tela.marcar_todas_da_pasta(*marcado, cx)
-                                })),
+                            h_flex()
+                                .gap(px(4.))
+                                .child(
+                                    div()
+                                        .id("nova-minimizar-selecao-pasta")
+                                        .p(px(8.))
+                                        .rounded(px(7.))
+                                        .cursor_pointer()
+                                        .hover(|d| d.bg(tema.accent))
+                                        .tooltip(|window, cx| {
+                                            gpui_component::tooltip::Tooltip::new("Minimizar")
+                                                .build(window, cx)
+                                        })
+                                        .child(Icon::new(Icone::Minus).size(px(17.)))
+                                        .on_click(cx.listener(|tela, _, _, cx| {
+                                            tela.alternar_minimizacao_da_pasta(cx)
+                                        })),
+                                )
+                                .child(
+                                    div()
+                                        .id("nova-maximizar-selecao-pasta")
+                                        .p(px(8.))
+                                        .rounded(px(7.))
+                                        .cursor_pointer()
+                                        .hover(|d| d.bg(tema.accent))
+                                        .tooltip(move |window, cx| {
+                                            gpui_component::tooltip::Tooltip::new(if maximizada {
+                                                "Restaurar tamanho"
+                                            } else {
+                                                "Maximizar"
+                                            })
+                                            .build(window, cx)
+                                        })
+                                        .child(
+                                            Icon::new(if maximizada {
+                                                Icone::Minimize2
+                                            } else {
+                                                Icone::Maximize2
+                                            })
+                                            .size(px(17.)),
+                                        )
+                                        .on_click(cx.listener(|tela, _, _, cx| {
+                                            tela.alternar_maximizacao_da_pasta(cx)
+                                        })),
+                                ),
                         ),
                 )
-                .child(
-                    v_flex()
-                        .id("nova-fotos-da-pasta-lista")
-                        .max_h(px(430.))
-                        .gap(px(4.))
-                        .overflow_y_scroll()
-                        .children(selecao.fotos.iter().enumerate().map(
-                            |(indice, (caminho, marcado))| {
-                                let nome = std::path::Path::new(caminho)
-                                    .file_name()
-                                    .map(|n| n.to_string_lossy().to_string())
-                                    .unwrap_or_else(|| caminho.clone());
-                                let miniatura = self.miniaturas_da_pasta.get(caminho).cloned();
-                                let tem_miniatura = miniatura.is_some();
-                                h_flex()
-                                    .id(SharedString::from(format!(
-                                        "nova-foto-da-pasta-linha-{indice}"
-                                    )))
-                                    .gap(px(12.))
-                                    .px(px(10.))
-                                    .py(px(7.))
-                                    .rounded(px(10.))
-                                    .border_1()
-                                    .border_color(if *marcado { tema.primary } else { tema.border })
-                                    .when(*marcado, |linha| linha.bg(tema.accent))
-                                    .hover(|h| h.bg(tema.muted))
-                                    .on_click(cx.listener(
-                                        move |tela, evento: &ClickEvent, _, cx| {
-                                            tela.marcar_foto_da_pasta(
-                                                indice,
-                                                evento.modifiers().shift,
-                                                cx,
-                                            )
-                                        },
-                                    ))
-                                    .child(
-                                        div()
-                                            .size(px(58.))
-                                            .flex_none()
-                                            .rounded(px(7.))
-                                            .overflow_hidden()
-                                            .bg(tema.muted)
-                                            .flex()
-                                            .items_center()
-                                            .justify_center()
-                                            .when_some(miniatura, |quadro, imagem| {
-                                                quadro.child(
-                                                    img(imagem)
-                                                        .size_full()
-                                                        .object_fit(gpui::ObjectFit::Cover),
-                                                )
-                                            })
-                                            .when(!tem_miniatura, |quadro| {
-                                                quadro.child(
-                                                    Icon::new(Icone::ImagePlus)
-                                                        .size(px(22.))
-                                                        .text_color(tema.muted_foreground),
-                                                )
-                                            }),
-                                    )
-                                    .child(
-                                        Checkbox::new(SharedString::from(format!(
-                                            "nova-foto-da-pasta-{indice}"
-                                        )))
-                                        .checked(*marcado),
-                                    )
-                                    .child(
-                                        v_flex()
-                                            .flex_1()
-                                            .min_w(px(0.))
-                                            .gap(px(2.))
-                                            .child(div().truncate().text_sm().child(nome))
-                                            .child(
-                                                div()
-                                                    .text_xs()
-                                                    .text_color(tema.muted_foreground)
-                                                    .child(format!("Foto {}", indice + 1)),
-                                            ),
-                                    )
-                                    .into_any_element()
-                            },
-                        )),
-                )
+                .when(!minimizada, |modal| {
+                    modal
+                        .child(
+                            h_flex()
+                                .items_center()
+                                .justify_between()
+                                .gap(px(12.))
+                                .child(
+                                    div()
+                                        .text_sm()
+                                        .text_color(tema.muted_foreground)
+                                        .child(format!(
+                                            "{} de {} selecionadas",
+                                            selecionadas,
+                                            selecao.fotos.len()
+                                        )),
+                                )
+                                .child(
+                                    Checkbox::new("nova-marcar-todas-da-pasta")
+                                        .label(if todas {
+                                            "Desmarcar todas"
+                                        } else {
+                                            "Marcar todas"
+                                        })
+                                        .checked(todas)
+                                        .on_click(cx.listener(move |tela, marcado: &bool, _, cx| {
+                                            tela.marcar_todas_da_pasta(*marcado, cx)
+                                        })),
+                                ),
+                        )
+                        .child(
+                            v_flex()
+                                .id("nova-fotos-da-pasta-lista")
+                                .flex_1()
+                                .min_h(px(0.))
+                                .overflow_y_scroll()
+                                .child(
+                                    div()
+                                        .id("nova-fotos-da-pasta-grade")
+                                        .grid()
+                                        .grid_cols(colunas)
+                                        .gap(px(10.))
+                                        .children(selecao.fotos.iter().enumerate().map(
+                                            |(indice, (caminho, marcado))| {
+                                                let nome = std::path::Path::new(caminho)
+                                                    .file_name()
+                                                    .map(|n| n.to_string_lossy().to_string())
+                                                    .unwrap_or_else(|| caminho.clone());
+                                                let miniatura =
+                                                    self.miniaturas_da_pasta.get(caminho).cloned();
+                                                let tem_miniatura = miniatura.is_some();
+                                                v_flex()
+                                                    .id(SharedString::from(format!(
+                                                        "nova-foto-da-pasta-{indice}"
+                                                    )))
+                                                    .relative()
+                                                    .min_w(px(0.))
+                                                    .p(px(7.))
+                                                    .gap(px(6.))
+                                                    .rounded(px(10.))
+                                                    .border_1()
+                                                    .border_color(if *marcado {
+                                                        tema.primary
+                                                    } else {
+                                                        tema.border
+                                                    })
+                                                    .when(*marcado, |card| card.bg(tema.accent))
+                                                    .hover(|card| card.bg(tema.muted))
+                                                    .on_click(cx.listener(
+                                                        move |tela, evento: &ClickEvent, _, cx| {
+                                                            tela.marcar_foto_da_pasta(
+                                                                indice,
+                                                                evento.modifiers().shift,
+                                                                cx,
+                                                            )
+                                                        },
+                                                    ))
+                                                    .child(
+                                                        div()
+                                                            .relative()
+                                                            .w_full()
+                                                            .h(px(132.))
+                                                            .rounded(px(7.))
+                                                            .overflow_hidden()
+                                                            .bg(tema.muted)
+                                                            .flex()
+                                                            .items_center()
+                                                            .justify_center()
+                                                            .when_some(miniatura, |quadro, imagem| {
+                                                                quadro.child(
+                                                                    img(imagem).size_full().object_fit(
+                                                                        gpui::ObjectFit::Cover,
+                                                                    ),
+                                                                )
+                                                            })
+                                                            .when(!tem_miniatura, |quadro| {
+                                                                quadro.child(
+                                                                    Icon::new(Icone::ImagePlus)
+                                                                        .size(px(26.))
+                                                                        .text_color(
+                                                                            tema.muted_foreground,
+                                                                        ),
+                                                                )
+                                                            })
+                                                            .child(
+                                                                div()
+                                                                    .absolute()
+                                                                    .top(px(7.))
+                                                                    .right(px(7.))
+                                                                    .size(px(25.))
+                                                                    .rounded_full()
+                                                                    .flex()
+                                                                    .items_center()
+                                                                    .justify_center()
+                                                                    .border_1()
+                                                                    .border_color(if *marcado {
+                                                                        tema.primary
+                                                                    } else {
+                                                                        tema.border
+                                                                    })
+                                                                    .when(*marcado, |selo| {
+                                                                        selo.bg(tema.primary)
+                                                                            .text_color(tema.primary_foreground)
+                                                                            .child(
+                                                                                Icon::new(Icone::Check)
+                                                                                    .size(px(14.)),
+                                                                            )
+                                                                    }),
+                                                            ),
+                                                    )
+                                                    .child(
+                                                        div()
+                                                            .truncate()
+                                                            .text_xs()
+                                                            .font_weight(FontWeight::MEDIUM)
+                                                            .child(nome),
+                                                    )
+                                                    .child(
+                                                        div()
+                                                            .text_xs()
+                                                            .text_color(tema.muted_foreground)
+                                                            .child(format!("Foto {}", indice + 1)),
+                                                    )
+                                                    .into_any_element()
+                                            },
+                                        )),
+                                ),
+                        )
+                })
                 .child(
                     h_flex()
                         .mt(px(4.))
