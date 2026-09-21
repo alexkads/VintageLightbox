@@ -526,6 +526,10 @@ pub struct Detalhe {
     trocas: std::collections::HashMap<String, (Arc<gpui::RenderImage>, std::time::Instant, u64)>,
     /// O contador das trocas — o id de cada animação.
     proxima_troca: u64,
+    /// A imagem das locais perto da vista, pelo **nome do arquivo** — o que a
+    /// local e a do site têm em comum quando ela sobe. Ver
+    /// `lembrar_as_imagens`.
+    imagens_por_arquivo: std::collections::HashMap<String, Arc<gpui::RenderImage>>,
     /// Os controles do painel da foto em foco — ver [`CamposDoPainel`].
     campos_do_painel: Option<CamposDoPainel>,
     /// A gaveta do atendimento está aberta?
@@ -763,6 +767,7 @@ impl Detalhe {
             imagens_vistas: std::collections::HashMap::new(),
             trocas: std::collections::HashMap::new(),
             proxima_troca: 0,
+            imagens_por_arquivo: std::collections::HashMap::new(),
             campos_do_painel: None,
             atendimento_aberto: false,
             faixa_e_precos_aberto: false,
@@ -2726,10 +2731,14 @@ impl Detalhe {
         self.miniaturas
             .ajustar_capacidade(NonZeroUsize::new(capacidade).expect("o piso não é zero"));
 
-        let perto: Vec<String> = grade_margem
+        let perto: Vec<(String, String)> = grade_margem
             .clone()
             .chain(tira_margem.clone())
-            .filter_map(|p| self.acervo.visivel(p).map(|f| f.id.clone()))
+            .filter_map(|p| {
+                self.acervo
+                    .visivel(p)
+                    .map(|f| (f.id.clone(), f.arquivo.clone()))
+            })
             .collect();
         let inicio = std::time::Instant::now();
         let mut faltou = false;
@@ -2769,18 +2778,53 @@ impl Detalhe {
     ///
     /// 🔑 **Só as de perto da vista**: o mapa é refeito a cada passada, e o
     /// que rolou para longe sai dele junto com a miniatura do LRU.
-    fn lembrar_as_imagens(&mut self, perto: &[String]) {
+    ///
+    /// 🚨 **A herança é pelo nome do arquivo, e não por [`Self::subiu_como`]
+    /// nem pela posição** — as duas falharam rodando o app contra a pilha
+    /// local (21/set/2026), medindo 120 quadros de uma subida de 40 fotos:
+    ///
+    /// - o mapa: a releitura da galeria volta antes de a grade desenhar um
+    ///   quadro com a local e o mapa juntos; a local sai e a do site entra de
+    ///   uma vez, sem ninguém para emprestar — 1 a 2 s de célula preta por foto;
+    /// - a posição: a do site entra pela `ordem` do servidor e as locais andam
+    ///   uma casa, então quem saiu do lugar não é quem entrou nele.
+    ///
+    /// O nome é o que a local e a do site têm em comum, e só a local que
+    /// **saiu da grade** empresta: duas fotos de mesmo nome à vista ao mesmo
+    /// tempo não trocam de imagem.
+    fn lembrar_as_imagens(&mut self, perto: &[(String, String)]) {
         let agora = std::time::Instant::now();
         self.trocas
             .retain(|_, (_, desde, _)| agora.duration_since(*desde) < DURACAO_DA_TROCA);
         let antes = std::mem::take(&mut self.imagens_vistas);
+        let por_arquivo_antes = std::mem::take(&mut self.imagens_por_arquivo);
+        let locais_a_vista: std::collections::HashMap<&str, &str> = perto
+            .iter()
+            .filter(|(id, _)| self.ids_locais.contains(id))
+            .map(|(id, arquivo)| (arquivo.as_str(), id.as_str()))
+            .collect();
         let mut vistas = std::collections::HashMap::with_capacity(perto.len());
-        for id in perto {
+        for (id, arquivo) in perto {
             let atual = match self.miniaturas.espiar(&self.chave_da_foto(id)) {
                 Some(Miniatura::Pronta(imagem)) => Some(imagem.clone()),
                 _ => None,
             };
-            let guardada = match (atual, antes.get(id)) {
+            // A local de mesmo nome que saiu da grade (a que subiu e é esta).
+            // Se a local ainda está à vista (a grade a segura até a do site
+            // chegar), empresta só quando o mapa diz que é ela mesma.
+            let de_antes = antes.get(id).or_else(|| {
+                if self.ids_locais.contains(id) {
+                    return None;
+                }
+                match locais_a_vista.get(arquivo.as_str()) {
+                    None => por_arquivo_antes.get(arquivo),
+                    Some(local) if self.subiu_como.get(*local) == Some(id) => {
+                        antes.get(*local).or_else(|| por_arquivo_antes.get(arquivo))
+                    }
+                    Some(_) => None,
+                }
+            });
+            let guardada = match (atual, de_antes) {
                 (Some(nova), Some(velha)) => {
                     if !Arc::ptr_eq(&nova, velha) && !self.trocas.contains_key(id) {
                         self.proxima_troca += 1;
@@ -2802,6 +2846,10 @@ impl Detalhe {
                 vistas
                     .entry(no_site.clone())
                     .or_insert_with(|| imagem.clone());
+            }
+            if self.ids_locais.contains(id) {
+                self.imagens_por_arquivo
+                    .insert(arquivo.clone(), imagem.clone());
             }
             vistas.insert(id.clone(), imagem);
         }
@@ -7736,9 +7784,9 @@ mod testes {
         let da_local = janela
             .update(cx, |tela, _window, cx| {
                 tela.definir_locais(vec![local("nova-1")], cx);
-                tela.preparar_miniaturas();
-                // Terminou de subir; a do site ainda não voltou.
-                tela.definir_subidas([("nova-1".to_string(), "s1".to_string())].into());
+                // 🚨 Sem `definir_subidas`: no app, a releitura da galeria volta
+                // antes de a grade desenhar um quadro com o mapa — a local sai
+                // e a do site entra de uma vez. É a posição que as liga.
                 tela.preparar_miniaturas();
                 tela.imagens_vistas
                     .get("nova-1")
@@ -7748,11 +7796,15 @@ mod testes {
             .expect("a janela deve estar aberta");
 
         // A do site chega, sem miniatura baixada: a local sai da grade.
-        publicador.fotos_da_sessao.lock().unwrap().push(foto(
-            "s1",
-            EstadoDaFotoNoSite::Disponivel,
-            None,
-        ));
+        // Com o mesmo arquivo da local — é o que as liga —, e com uma outra
+        // do site entrando antes dela: as posições andam, como no app.
+        {
+            let mut do_site = publicador.fotos_da_sessao.lock().unwrap();
+            do_site.push(foto("s0", EstadoDaFotoNoSite::Disponivel, None));
+            let mut subiu = foto("s1", EstadoDaFotoNoSite::Disponivel, None);
+            subiu.arquivo = "nova-1.jpg".into();
+            do_site.push(subiu);
+        }
         janela
             .update(cx, |tela, _window, cx| tela.reler(cx))
             .expect("a janela deve estar aberta");
