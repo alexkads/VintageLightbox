@@ -1285,7 +1285,10 @@ impl NovaSessao {
 
     /// 🧪 Digita nos campos, como o operador — nos testes e no roteiro de
     /// depuração.
-    #[cfg(any(test, debug_assertions))]
+    ///
+    /// ⚠️ **Sem `cfg`**: o roteiro (`app::roteiro`) é compilado em toda build
+    /// e só se recusa a rodar fora da depuração, em tempo de execução. Com
+    /// `#[cfg(debug_assertions)]` aqui, a build release do balcão não compilava.
     pub(crate) fn digitar(
         &mut self,
         titulo: &str,
