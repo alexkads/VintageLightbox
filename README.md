@@ -242,6 +242,30 @@ instalador põe o compilador, a libclang, o X11/Wayland/Vulkan e companhia, e o 
 da distribuição fica de lado. Em outra distribuição, ele lista o que instalar
 à mão. Sem `curl`, instale-o antes (`sudo apt install curl` ou `sudo dnf install curl`).
 
+Para importar diretamente de câmeras conectadas por **PTP** (`camera:/` ou
+`gphoto2://`), instale também o `gphoto2`, o backend GVfs e as regras USB da
+distribuição:
+
+```bash
+# Ubuntu/Debian/Mint
+sudo apt install gphoto2 gvfs-backends libgphoto2-6
+
+# Fedora
+sudo dnf install gphoto2 gvfs-gphoto2 libgphoto2
+
+# Arch/Garuda/Manjaro
+sudo pacman -S gphoto2 gvfs libgphoto2
+```
+
+Depois de conectar a câmera, ela aparece no menu **Do cartão ou pasta…** como
+PTP. O app monta a câmera pelo GVfs, lista as fotos sem baixar o cartão inteiro,
+permite escolher somente parte delas e copia apenas as selecionadas para a
+sessão. Se a distribuição não usar esses nomes de pacotes, instale os
+equivalentes `gphoto2`/`libgphoto2`, `gio`/GVfs e as regras `udev` da câmera.
+
+O `gphoto2` direto é mantido como fallback para sessões sem GVfs; nesse caso a
+origem pode precisar ser preparada localmente antes da seleção.
+
 - Sem um driver **Vulkan** (Mesa) a janela não abre, mesmo com tudo compilado.
 - **Fedora Workstation (GNOME):** o instalador põe e liga a extensão AppIndicator para o ícone da
   bandeja; saia e entre de novo na sessão para ele aparecer.
@@ -441,13 +465,43 @@ Comece por:
 - [A fila de trabalho](docs/PARIDADE-LIGHTROOM.md) — medida do código
 - [A interface em GPUI](docs/06-UI-ARCHITECTURE.md) — e as armadilhas que já custaram commit
 
-### 4. Setup do Desenvolvimento (Em breve)
+### 4. Setup do Desenvolvimento
+
+Para executar o app contra a pilha local do e-commerce, é possível usar o
+atalho `make rodar-local`. Ele prepara os contêineres, confere a API e o site e
+inicia o app em debug.
+
+Para levantar tudo manualmente — inclusive em modo release — suba primeiro a
+pilha local e depois execute o app a partir da raiz deste repositório:
+
 ```bash
-# Será disponibilizado na Fase 0
-cargo build
-cargo test
-cargo run --release -p ui-gpui   # 🚨 --release não é opcional: debug é 57× mais lento por miniatura
+cd /Users/alexkads/Projects/RecordarFotos/recordarfotos-e-commerce
+docker compose -f docker-compose.dev.yml up -d
+
+cd /Users/alexkads/Projects/RecordarFotos/VintageLightbox-Rust
+VLB_POS_VENDA_URL=http://localhost:8080 VLB_SITE_URL=http://localhost:8001 cargo run --release -p ui-gpui
 ```
+
+Se a pilha já estiver ativa, basta executar o app diretamente:
+
+```bash
+VLB_POS_VENDA_URL=http://localhost:8080 \
+VLB_SITE_URL=http://localhost:8001 \
+cargo run --release -p ui-gpui
+```
+
+A API local responde em `http://localhost:8080` e o site em
+`http://localhost:8001`. O usuário de desenvolvimento é
+`admin@recordarfotos.com`, com a senha `admin123`.
+
+Para desenvolvimento iterativo, o script equivalente em debug é:
+
+```bash
+./crates/ui-gpui/rodar-local.sh
+```
+
+🚨 `--release` não é opcional para medir desempenho: debug é 57× mais lento por
+miniatura.
 
 ## 🤝 Contribuindo
 

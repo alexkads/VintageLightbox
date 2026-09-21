@@ -79,6 +79,12 @@ class Ambiente(unittest.TestCase):
         self.mock("sudo", 'echo "sudo chamado: $*" >&2; exit 99')
         self.mock("rustc", "echo 'rustc 1.98.0 (teste)'")
         self.mock("pkg-config", "echo 4.1")
+        # O instalador Linux também confere o suporte PTP/GVfs antes de
+        # compilar; no ambiente falso, esses dois comandos representam as
+        # ferramentas já instaladas.
+        self.mock("gphoto2", "echo gphoto2")
+        self.mock("gio", "echo gio")
+        self.env["VLB_PTP_BACKEND_OK"] = "1"
         self.mock("codesign", "exit 0")
         self.mock("ditto", 'cp -R "$1" "$2"')
         # O raw.githubusercontent.com (os instaladores) sai de TEST_RAW_DIR, e

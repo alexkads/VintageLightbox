@@ -602,6 +602,32 @@ else
   FALTA=""
   command -v pkg-config >/dev/null 2>&1 || FALTA="$FALTA pkg-config"
   command -v c++ >/dev/null 2>&1 || FALTA="$FALTA compilador-de-C++"
+  # PTP não é um disco montado: o app usa o gphoto2 para detectar a câmera e
+  # o gio/GVfs para as URIs camera:/ e gphoto2:// escolhidas pelo usuário.
+  command -v gphoto2 >/dev/null 2>&1 || FALTA="$FALTA gphoto2"
+  command -v gio >/dev/null 2>&1 || FALTA="$FALTA gio"
+  # `gio` sozinho não basta: é o backend `gvfsd-gphoto2` que transforma a
+  # câmera PTP em uma pasta navegável. O nome do pacote muda entre as famílias
+  # de distribuição, por isso conferimos tanto o binário quanto o gerenciador
+  # de pacotes. VLB_PTP_BACKEND_OK só existe nos testes automatizados.
+  tem_backend_ptp() {
+    [ "${VLB_PTP_BACKEND_OK:-}" = 1 ] && return 0
+    for BIN in /usr/lib/gvfs/gvfsd-gphoto2 /usr/libexec/gvfsd-gphoto2 \
+               /lib/gvfs/gvfsd-gphoto2 /libexec/gvfsd-gphoto2; do
+      [ -x "$BIN" ] && return 0
+    done
+    if command -v dpkg-query >/dev/null 2>&1; then
+      dpkg-query -W -f='${db:Status-Status}' gvfs-backends 2>/dev/null | grep -qx installed && return 0
+    fi
+    if command -v rpm >/dev/null 2>&1; then
+      rpm -q gvfs-gphoto2 2>/dev/null >/dev/null && return 0
+    fi
+    if command -v pacman >/dev/null 2>&1; then
+      pacman -Q gvfs 2>/dev/null >/dev/null && return 0
+    fi
+    return 1
+  }
+  tem_backend_ptp || FALTA="$FALTA backend-ptp-gvfs"
   for LIB in x11 xcb xkbcommon xkbcommon-x11 wayland-client xcursor xrandr xi \
              fontconfig freetype2 alsa openssl vulkan dbus-1 libsecret-1; do
     pkg-config --exists "$LIB" 2>/dev/null || FALTA="$FALTA $LIB"
@@ -610,14 +636,18 @@ else
 
   # O `mesa-vulkan-drivers` é o que faz o Vulkan achar a placa de vídeo; sem um
   # driver Vulkan a janela do GPUI não abre, mesmo com tudo compilado.
-  PACOTES_APT="build-essential pkg-config curl clang libclang-dev libx11-dev libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev wayland-protocols libxcursor-dev libxrandr-dev libxi-dev libfontconfig1-dev libfreetype6-dev libasound2-dev libssl-dev libvulkan-dev mesa-vulkan-drivers libdbus-1-dev libsecret-1-dev"
-  PACOTES_DNF="gcc-c++ pkgconf-pkg-config curl diffutils clang clang-devel libX11-devel libxcb-devel libxkbcommon-devel libxkbcommon-x11-devel wayland-devel wayland-protocols-devel libXcursor-devel libXrandr-devel libXi-devel fontconfig-devel freetype-devel alsa-lib-devel openssl-devel vulkan-loader-devel mesa-vulkan-drivers dbus-devel libsecret-devel"
-  PACOTES_PACMAN="base-devel curl clang libx11 libxcb libxkbcommon libxkbcommon-x11 wayland wayland-protocols libxcursor libxrandr libxi fontconfig freetype2 alsa-lib openssl vulkan-icd-loader dbus libsecret"
-  PACOTES_A_MAO="libx11, libxcb, libxkbcommon e libxkbcommon-x11, wayland, libxcursor, libxrandr, libxi, fontconfig, freetype, alsa, openssl, vulkan (loader e driver), dbus e libsecret, todos na versão dev, mais clang e libclang (dev)"
+  PACOTES_APT="build-essential pkg-config curl clang libclang-dev libx11-dev libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev wayland-protocols libxcursor-dev libxrandr-dev libxi-dev libfontconfig1-dev libfreetype6-dev libasound2-dev libssl-dev libvulkan-dev mesa-vulkan-drivers libdbus-1-dev libsecret-1-dev gphoto2 gvfs-backends libgphoto2-6"
+  PACOTES_DNF="gcc-c++ pkgconf-pkg-config curl diffutils clang clang-devel libX11-devel libxcb-devel libxkbcommon-devel libxkbcommon-x11-devel wayland-devel wayland-protocols-devel libXcursor-devel libXrandr-devel libXi-devel fontconfig-devel freetype-devel alsa-lib-devel openssl-devel vulkan-loader-devel mesa-vulkan-drivers dbus-devel libsecret-devel gphoto2 gvfs-gphoto2 libgphoto2"
+  PACOTES_PACMAN="base-devel curl clang libx11 libxcb libxkbcommon libxkbcommon-x11 wayland wayland-protocols libxcursor libxrandr libxi fontconfig freetype2 alsa-lib openssl vulkan-icd-loader dbus libsecret gphoto2 gvfs libgphoto2"
+  PACOTES_A_MAO="libx11, libxcb, libxkbcommon e libxkbcommon-x11, wayland, libxcursor, libxrandr, libxi, fontconfig, freetype, alsa, openssl, vulkan (loader e driver), dbus e libsecret, gphoto2, gio/GVfs e libgphoto2, todos na versão dev, mais clang e libclang (dev)"
   conferir_depois() {
     for LIB in xkbcommon vulkan dbus-1; do
       pkg-config --exists "$LIB" 2>/dev/null || { erro "a biblioteca $LIB continua faltando depois da instalação."; exit 1; }
     done
+    for BIN in gphoto2 gio; do
+      command -v "$BIN" >/dev/null 2>&1 || { erro "o comando $BIN continua faltando depois da instalação."; exit 1; }
+    done
+    tem_backend_ptp || { erro "o backend PTP do GVfs continua faltando depois da instalação."; exit 1; }
   }
   resumo_linux() {
     ok "xkbcommon $(pkg-config --modversion xkbcommon 2>/dev/null || echo 'a instalar'), Vulkan $(pkg-config --modversion vulkan 2>/dev/null || echo 'a instalar')"

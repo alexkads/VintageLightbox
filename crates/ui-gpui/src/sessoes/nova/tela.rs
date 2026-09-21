@@ -198,6 +198,17 @@ pub(super) struct MenuDaOrigem {
     pub cartoes: Vec<(String, String)>,
 }
 
+/// Fotos encontradas numa pasta, antes da cópia para o rascunho.
+///
+/// A pasta é uma origem, não uma ordem para importar tudo: o fotógrafo pode
+/// fazer uma triagem e trazer só parte do ensaio.
+pub(super) struct SelecaoDaPasta {
+    pub raiz: String,
+    pub fotos: Vec<(String, bool)>,
+    /// Primeiro item de um intervalo feito com Shift+clique.
+    pub ancora: Option<usize>,
+}
+
 /// As portas que a tela usa.
 pub struct PortasDaNova {
     pub publicador: Arc<dyn Publicador>,
@@ -247,6 +258,7 @@ pub struct NovaSessao {
     pub(super) busca: Option<Busca>,
     pub(super) cadastro: Option<Cadastro>,
     pub(super) menu_da_origem: Option<MenuDaOrigem>,
+    pub(super) selecao_da_pasta: Option<SelecaoDaPasta>,
     /// As fotos do catálogo com o `sessao_id` do rascunho.
     pub(super) fotos: Vec<PhotoViewModel>,
     /// As de outros rascunhos, que ninguém mais vai criar.
@@ -463,6 +475,7 @@ impl NovaSessao {
             busca: None,
             cadastro: None,
             menu_da_origem: None,
+            selecao_da_pasta: None,
             fotos: Vec::new(),
             orfas: Vec::new(),
             importacao: None,
@@ -814,6 +827,7 @@ impl NovaSessao {
 
     /// "Escolher fotos" / "Adicionar mais fotos".
     pub fn escolher_fotos(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.menu_da_origem = None;
         self.escolhendo = true;
         self.portas
             .seletor_de_fotos
@@ -858,6 +872,70 @@ impl NovaSessao {
         self.escolhendo = true;
         self.acompanhar(window, cx);
         cx.notify();
+    }
+
+    pub fn marcar_foto_da_pasta(&mut self, indice: usize, shift: bool, cx: &mut Context<Self>) {
+        if let Some(selecao) = self.selecao_da_pasta.as_mut() {
+            let Some((_, atual)) = selecao.fotos.get(indice) else {
+                return;
+            };
+            let marcado = !*atual;
+            if shift {
+                if let Some(ancora) = selecao.ancora {
+                    let (inicio, fim) = if ancora <= indice {
+                        (ancora, indice)
+                    } else {
+                        (indice, ancora)
+                    };
+                    for (_, item) in &mut selecao.fotos[inicio..=fim] {
+                        *item = marcado;
+                    }
+                } else if let Some((_, atual)) = selecao.fotos.get_mut(indice) {
+                    *atual = marcado;
+                }
+            } else if let Some((_, atual)) = selecao.fotos.get_mut(indice) {
+                *atual = marcado;
+                selecao.ancora = Some(indice);
+            }
+        }
+        cx.notify();
+    }
+
+    pub fn marcar_todas_da_pasta(&mut self, marcado: bool, cx: &mut Context<Self>) {
+        if let Some(selecao) = self.selecao_da_pasta.as_mut() {
+            for (_, atual) in &mut selecao.fotos {
+                *atual = marcado;
+            }
+            selecao.ancora = None;
+        }
+        cx.notify();
+    }
+
+    /// Alterna a seleção total do modal de pasta (`⌘A` no macOS, `Ctrl+A` nos
+    /// demais sistemas), como a tela de importação principal já faz.
+    pub fn alternar_todas_da_pasta(&mut self, cx: &mut Context<Self>) {
+        let todas = self
+            .selecao_da_pasta
+            .as_ref()
+            .is_some_and(|selecao| selecao.fotos.iter().all(|(_, marcado)| *marcado));
+        self.marcar_todas_da_pasta(!todas, cx);
+    }
+
+    pub fn cancelar_selecao_da_pasta(&mut self, cx: &mut Context<Self>) {
+        self.selecao_da_pasta = None;
+        cx.notify();
+    }
+
+    pub fn importar_selecao_da_pasta(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(selecao) = self.selecao_da_pasta.take() else {
+            return;
+        };
+        let fotos: Vec<String> = selecao
+            .fotos
+            .into_iter()
+            .filter_map(|(caminho, marcado)| marcado.then_some(caminho))
+            .collect();
+        self.importar_arquivos(fotos, window, cx);
     }
 
     pub fn destacar(&mut self, arrastando: bool, cx: &mut Context<Self>) {
@@ -1836,7 +1914,7 @@ impl NovaSessao {
                     let nome = std::path::Path::new(&raiz)
                         .file_name()
                         .map(|n| n.to_string_lossy().to_string())
-                        .unwrap_or(raiz);
+                        .unwrap_or_else(|| raiz.clone());
                     let fotos: Vec<String> = arquivos
                         .into_iter()
                         .filter(|a| {
@@ -1846,14 +1924,11 @@ impl NovaSessao {
                     if fotos.is_empty() {
                         self.avisar(format!("Nenhuma foto em {nome}."), false);
                     } else {
-                        self.avisar(
-                            format!(
-                                "{} de {nome} na fila.",
-                                estado::plural(fotos.len(), "foto", "fotos")
-                            ),
-                            false,
-                        );
-                        self.importar_arquivos(fotos, window, cx);
+                        self.selecao_da_pasta = Some(SelecaoDaPasta {
+                            raiz,
+                            fotos: fotos.into_iter().map(|caminho| (caminho, true)).collect(),
+                            ancora: None,
+                        });
                     }
                 }
                 RecadoDaImportacao::Falhou(erro) => {

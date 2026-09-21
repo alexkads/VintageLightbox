@@ -1,4 +1,5 @@
 pub mod history_repo;
+pub mod ptp;
 pub mod repository;
 use domain::import_source::ImportSource;
 use std::path::Path;
@@ -38,7 +39,7 @@ impl DeviceService {
     pub fn get_mounted_devices(&self) -> Vec<ImportSource> {
         let disks = Disks::new_with_refreshed_list();
 
-        disks
+        let mut fontes: Vec<_> = disks
             .iter()
             .filter_map(|disco| {
                 let ponto = disco.mount_point();
@@ -49,7 +50,13 @@ impl DeviceService {
                     )
                 })
             })
-            .collect()
+            .collect();
+
+        // PTP não é um disco: ele não aparece em `sysinfo::Disks`. O adaptador
+        // usa GVfs para expor a câmera como uma pasta; `gphoto2` fica como
+        // fallback em instalações sem GVfs.
+        fontes.extend(ptp::fontes_ptp());
+        fontes
     }
 }
 

@@ -162,6 +162,33 @@
        compilador, a libclang e as bibliotecas que o GPUI abre: X11, Wayland, xkbcommon, fontconfig,
        ALSA, OpenSSL, D-Bus, libsecret e o <strong>Vulkan</strong> (com o driver Mesa). Sem um driver
        Vulkan a janela não abre, mesmo com tudo compilado.</p>
+    <p><strong>Câmeras e cartões via PTP:</strong> para câmeras que aparecem como
+       <code>camera:/</code> ou <code>gphoto2://</code>, instale o suporte da sua distribuição:</p>
+    <pre><code># Ubuntu/Debian/Mint
+sudo apt install gphoto2 gvfs-backends libgphoto2-6
+
+# Fedora
+sudo dnf install gphoto2 gvfs-gphoto2 libgphoto2
+
+# Arch/Garuda/Manjaro
+sudo pacman -S gphoto2 gvfs libgphoto2</code></pre>
+    <p>Depois de conectar a câmera, abra <strong>Do cartão ou pasta…</strong>. O VintageLightbox
+       monta a câmera pelo <strong>GVfs</strong>, mostra as fotos sem baixar o cartão inteiro e
+       copia somente as fotos escolhidas. O <code>gphoto2</code> direto é usado como fallback
+       quando o GVfs não estiver disponível. Se a câmera não aparecer, confira também as regras
+       <code>udev</code> e se a sessão gráfica está rodando com GVfs.</p>
+    <h3>Levantar manualmente para desenvolvimento</h3>
+    <p>Na raiz do projeto, o caminho recomendado é:</p>
+    <pre><code>./crates/ui-gpui/rodar-local.sh</code></pre>
+    <p>Para iniciar somente o app, sem a infraestrutura local de vendas:</p>
+    <pre><code>VLB_POS_VENDA_URL=http://localhost:8080 \
+VLB_SITE_URL=http://localhost:8001 \
+cargo run --release -p ui-gpui</code></pre>
+    <p>Quando for necessário levantar também o e-commerce local:</p>
+    <pre><code>cd /Users/alexkads/Projects/RecordarFotos/recordarfotos-e-commerce
+docker compose -f docker-compose.dev.yml up -d
+cd /Users/alexkads/Projects/RecordarFotos/VintageLightbox-Rust
+VLB_POS_VENDA_URL=http://localhost:8080 VLB_SITE_URL=http://localhost:8001 cargo run --release -p ui-gpui</code></pre>
     <p id="fedora"><strong>No Fedora:</strong></p>
     <ul class="texto">
       <li><strong>Workstation (GNOME):</strong> o GNOME não mostra o ícone da bandeja sozinho. O

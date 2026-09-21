@@ -5,9 +5,10 @@
 use std::sync::Arc;
 
 use gpui::{
-    div, img, prelude::*, px, relative, AnyElement, App, Context, Div, Entity, FontWeight, Hsla,
-    KeyDownEvent, RenderImage, SharedString, Stateful, Window,
+    div, img, prelude::*, px, relative, AnyElement, App, ClickEvent, Context, Div, Entity,
+    FontWeight, Hsla, KeyDownEvent, RenderImage, SharedString, Stateful, Window,
 };
+use gpui_component::checkbox::Checkbox;
 use gpui_component::input::{Input, InputState};
 use gpui_component::progress::Progress;
 use gpui_component::select::Select;
@@ -16,7 +17,9 @@ use gpui_component::{h_flex, v_flex, ActiveTheme, Icon};
 use super::associacoes::{self as assoc};
 use super::estado::{self, EstadoDaEtapa};
 use super::receita::Grupo;
-use super::tela::{Confirmacao, Fase, ItemDaBusca, NovaSessao, PedidoDaNova, TipoDeBusca};
+use super::tela::{
+    Confirmacao, Fase, ItemDaBusca, NovaSessao, PedidoDaNova, SelecaoDaPasta, TipoDeBusca,
+};
 use crate::estilo;
 use crate::recursos::Icone;
 use crate::tema;
@@ -213,6 +216,9 @@ impl Render for NovaSessao {
                     ),
             )
             .when(self.arrastando, |t| t.child(self.sobreposicao(cx)))
+            .when_some(self.selecao_da_pasta.as_ref(), |t, selecao| {
+                t.child(self.dialogo_da_pasta(selecao, cx))
+            })
             .when_some(self.confirmacao, |t, qual| t.child(self.dialogo(qual, cx)))
             .when(self.busca.is_some(), |t| t.child(self.modal_de_busca(cx)))
             .when_some(self.aviso.as_ref(), |t, aviso| {
@@ -249,6 +255,13 @@ impl NovaSessao {
     fn tecla(&mut self, evento: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let tecla = evento.keystroke.key.as_str();
         let m = &evento.keystroke.modifiers;
+        if tecla.eq_ignore_ascii_case("a")
+            && (m.platform || m.control)
+            && self.selecao_da_pasta.is_some()
+        {
+            self.alternar_todas_da_pasta(cx);
+            return;
+        }
         if m.shift || m.alt || m.control || m.platform {
             return;
         }
@@ -753,7 +766,10 @@ impl NovaSessao {
                 c.child(
                     v_flex()
                         .absolute()
-                        .top(px(36.))
+                        // A área das fotos fica dentro de uma coluna com
+                        // `overflow_hidden`. Abrir para baixo fazia o menu
+                        // ser cortado pela borda inferior dessa etapa.
+                        .bottom(px(36.))
                         .left_0()
                         .min_w(px(240.))
                         .p(px(4.))
@@ -816,6 +832,22 @@ impl NovaSessao {
                                 .child("Escolher pasta…")
                                 .on_click(cx.listener(|tela, _, window, cx| {
                                     tela.escolher_pasta(window, cx)
+                                })),
+                        )
+                        .child(
+                            h_flex()
+                                .id("nova-escolher-fotos-do-menu")
+                                .gap(px(8.))
+                                .px(px(8.))
+                                .py(px(6.))
+                                .rounded(px(4.))
+                                .text_sm()
+                                .cursor_pointer()
+                                .hover(|h| h.bg(tema.accent))
+                                .child(Icon::new(Icone::ImagePlus).size(px(16.)))
+                                .child("Escolher fotos…")
+                                .on_click(cx.listener(|tela, _, window, cx| {
+                                    tela.escolher_fotos(window, cx)
                                 })),
                         ),
                 )
@@ -2121,6 +2153,141 @@ impl NovaSessao {
                                 .on_click(
                                     cx.listener(|tela, _, window, cx| tela.confirmar(window, cx)),
                                 ),
+                        ),
+                ),
+        )
+    }
+
+    fn dialogo_da_pasta(
+        &self,
+        selecao: &SelecaoDaPasta,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let tema = cx.theme().clone();
+        let selecionadas = selecao.fotos.iter().filter(|(_, marcado)| *marcado).count();
+        let todas = selecionadas == selecao.fotos.len();
+        let nome_da_pasta = std::path::Path::new(&selecao.raiz)
+            .file_name()
+            .map(|nome| nome.to_string_lossy().to_string())
+            .unwrap_or_else(|| selecao.raiz.clone());
+
+        self.veu(cx).child(
+            v_flex()
+                .w(px(560.))
+                .max_h(px(560.))
+                .p(px(20.))
+                .gap(px(12.))
+                .rounded(px(12.))
+                .border_1()
+                .border_color(tema.border)
+                .bg(tema.background)
+                .shadow_lg()
+                .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .child(
+                    div()
+                        .text_lg()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child("Escolha as fotos da pasta"),
+                )
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(tema.muted_foreground)
+                        .child(format!(
+                            "{nome_da_pasta} — clique no início e use Shift+clique no fim para marcar um intervalo."
+                        )),
+                )
+                .child(
+                    h_flex()
+                        .justify_between()
+                        .items_center()
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(tema.muted_foreground)
+                                .child(format!(
+                                    "{} de {} selecionadas",
+                                    selecionadas,
+                                    selecao.fotos.len()
+                                )),
+                        )
+                        .child(
+                            Checkbox::new("nova-marcar-todas-da-pasta")
+                                .label(if todas {
+                                    "Desmarcar todas"
+                                } else {
+                                    "Marcar todas"
+                                })
+                                .checked(todas)
+                                .on_click(cx.listener(move |tela, marcado: &bool, _, cx| {
+                                    tela.marcar_todas_da_pasta(*marcado, cx)
+                                })),
+                        ),
+                )
+                .child(
+                    v_flex()
+                        .id("nova-fotos-da-pasta-lista")
+                        .max_h(px(320.))
+                        .gap(px(2.))
+                        .overflow_y_scroll()
+                        .children(selecao.fotos.iter().enumerate().map(
+                            |(indice, (caminho, marcado))| {
+                                let nome = std::path::Path::new(caminho)
+                                    .file_name()
+                                    .map(|n| n.to_string_lossy().to_string())
+                                    .unwrap_or_else(|| caminho.clone());
+                                h_flex()
+                                    .id(SharedString::from(format!(
+                                        "nova-foto-da-pasta-linha-{indice}"
+                                    )))
+                                    .gap(px(8.))
+                                    .px(px(8.))
+                                    .py(px(4.))
+                                    .rounded(px(6.))
+                                    .hover(|h| h.bg(tema.muted))
+                                    .on_click(cx.listener(
+                                        move |tela, evento: &ClickEvent, _, cx| {
+                                            tela.marcar_foto_da_pasta(
+                                                indice,
+                                                evento.modifiers().shift,
+                                                cx,
+                                            )
+                                        },
+                                    ))
+                                    .child(
+                                        Checkbox::new(SharedString::from(format!(
+                                            "nova-foto-da-pasta-{indice}"
+                                        )))
+                                        .checked(*marcado),
+                                    )
+                                    .child(div().flex_1().truncate().text_sm().child(nome))
+                                    .into_any_element()
+                            },
+                        )),
+                )
+                .child(
+                    h_flex()
+                        .mt(px(4.))
+                        .justify_end()
+                        .gap(px(8.))
+                        .child(
+                            estilo::botao_contorno("nova-cancelar-selecao-pasta", cx)
+                                .child("Cancelar")
+                                .on_click(
+                                    cx.listener(|tela, _, _, cx| {
+                                        tela.cancelar_selecao_da_pasta(cx)
+                                    }),
+                                ),
+                        )
+                        .child(
+                            estilo::botao_primario("nova-importar-selecao-pasta", cx)
+                                .child(format!(
+                                    "Importar {}",
+                                    estado::plural(selecionadas, "foto", "fotos")
+                                ))
+                                .on_click(cx.listener(|tela, _, window, cx| {
+                                    tela.importar_selecao_da_pasta(window, cx)
+                                })),
                         ),
                 ),
         )

@@ -30,7 +30,11 @@ impl Default for SourceScannerImpl {
 #[async_trait]
 impl SourceScanner for SourceScannerImpl {
     async fn scan(&self, root: &str, include_subfolders: bool) -> DomainResult<Vec<FilePath>> {
-        let root = PathBuf::from(root);
+        let root = if crate::devices::ptp::e_uri_de_camera(root) {
+            crate::devices::ptp::materializar_uri(root).map_err(DomainError::InfrastructureError)?
+        } else {
+            PathBuf::from(root)
+        };
 
         let paths = tokio::task::spawn_blocking(move || {
             FileScanner::new().scan_directory_with_depth(&root, include_subfolders)
