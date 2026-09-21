@@ -17,6 +17,7 @@
 //! nativo este crate é vazio de propósito — o que se prova dele fora do
 //! navegador é o `biblioteca-core`, que é onde as decisões moram.
 
+pub mod emprestimo;
 #[cfg(target_arch = "wasm32")]
 mod grade;
 // 🔑 **Sem `cfg`, e de propósito**: o esquema do depósito é constante e

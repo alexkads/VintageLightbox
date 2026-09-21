@@ -99,6 +99,10 @@ impl Arrasto {
     }
 }
 
+/// Quanto dura a troca suave de uma miniatura pela seguinte, em segundos —
+/// o mesmo tempo do desktop (`sessoes::detalhe`).
+pub const DURACAO_DA_TROCA: f64 = 0.28;
+
 pub struct Grade {
     pub ctx: egui::Context,
     pub acervo: Acervo,
@@ -108,6 +112,18 @@ pub struct Grade {
     pub caixa: Caixa,
     /// A URL da miniatura por id — a chave da textura.
     pub miniaturas: HashMap<String, String>,
+    /// A imagem de antes, emprestada ao tile enquanto a dele não chega.
+    ///
+    /// 🚨 **É o que impede o tile vazio quando a foto sobe** (dono,
+    /// 21/set/2026: *"a foto fica preta e depois aparece novamente"*). Ao
+    /// subir, a foto troca `local:…` pelo id do servidor e a miniatura troca de
+    /// URL; sem isto, o tile mostrava só o fundo até o `fetch` e a
+    /// decodificação da nova terminarem. Vale também para a mesma foto com URL
+    /// nova (o `?v=` de uma revelação salva). Ver [`Grade::definir_fotos`].
+    pub emprestadas: HashMap<String, TextureHandle>,
+    /// As trocas suaves em andamento: id → a textura de antes e o instante
+    /// (tempo do egui, em segundos) em que a nova chegou.
+    pub trocas: HashMap<String, (TextureHandle, f64)>,
     pub cores: Cores,
     pub layout: Layout,
     pub hover: Option<usize>,
@@ -135,6 +151,8 @@ impl Grade {
             texturas: HashMap::new(),
             caixa: Caixa::default(),
             miniaturas: HashMap::new(),
+            emprestadas: HashMap::new(),
+            trocas: HashMap::new(),
             cores: Cores::do_tema(escuro),
             layout: Layout::calcular(0.0, ZOOM_PADRAO, 0, Opcoes::default()),
             hover: None,
@@ -164,6 +182,10 @@ impl Grade {
             serde_json::from_str(json).map_err(|e| format!("fotos ilegíveis: {e}"))?;
         let marcados = self.ids_selecionados();
         let foco = self.id_em_foco();
+        // Quem estava em cada posição, para a foto que troca de id no lugar.
+        let antes_por_posicao: Vec<String> = (0..self.acervo.total_visivel())
+            .filter_map(|n| self.acervo.visivel(n).map(|f| f.id.clone()))
+            .collect();
 
         let mut fotos = Vec::with_capacity(lista.len());
         let mut miniaturas = HashMap::with_capacity(lista.len());
@@ -172,7 +194,8 @@ impl Grade {
             miniaturas.insert(f.id.clone(), f.miniatura.clone());
         }
         self.acervo.definir(fotos);
-        self.miniaturas = miniaturas;
+        let antes = std::mem::replace(&mut self.miniaturas, miniaturas);
+        self.emprestar_as_de_antes(&antes, &antes_por_posicao);
 
         self.selecao.limpar_tudo();
         for id in &marcados {
@@ -196,6 +219,41 @@ impl Grade {
         // alguém mexia no zoom — que muda o layout. É o irmão do caso que o
         // comentário do `recalcular` conta.
         Ok(mudou::SELECAO | mudou::CONTAGENS | mudou::VISIVEIS | self.recalcular())
+    }
+
+    /// Empresta a cada tile sem textura a imagem que ocupava o lugar dele.
+    ///
+    /// 🔑 **Duas perguntas, nesta ordem**: a mesma foto tinha outra URL (a
+    /// revelação salva trocou o `?v=`)? E, se a foto é nova, quem estava na
+    /// mesma posição e sumiu da lista — a local que subiu e virou esta. A
+    /// ordem da grade é a da fotografia, e a do servidor chega no lugar da
+    /// local.
+    fn emprestar_as_de_antes(
+        &mut self,
+        antes: &HashMap<String, String>,
+        antes_por_posicao: &[String],
+    ) {
+        let agora: Vec<(&str, &str)> = (0..self.acervo.total_visivel())
+            .filter_map(|n| self.acervo.visivel(n))
+            .filter_map(|f| Some((f.id.as_str(), self.miniaturas.get(&f.id)?.as_str())))
+            .collect();
+        let mut emprestadas = HashMap::new();
+        for (id, de_quem) in
+            crate::emprestimo::quem_empresta(antes, antes_por_posicao, &agora, |url| {
+                self.texturas.contains_key(url)
+            })
+        {
+            let textura = antes
+                .get(&de_quem)
+                .and_then(|u| self.texturas.get(u))
+                .or_else(|| self.emprestadas.get(&de_quem))
+                .cloned();
+            if let Some(textura) = textura {
+                emprestadas.insert(id, textura);
+            }
+        }
+        self.emprestadas = emprestadas;
+        self.trocas.retain(|id, _| self.miniaturas.contains_key(id));
     }
 
     /// O recorte da barra. **Trocar limpa a seleção**: as posições passam a
@@ -719,6 +777,9 @@ impl Grade {
 
     /// Esvazia a caixa de correio. Chamado no começo de cada quadro.
     pub fn receber(&mut self) {
+        let agora = self.ctx.input(|i| i.time);
+        self.trocas
+            .retain(|_, (_, desde)| agora - *desde < DURACAO_DA_TROCA);
         for m in self.caixa.esvaziar() {
             self.receber_miniatura(m.url, m.bytes);
             self.ctx.request_repaint();
@@ -734,6 +795,19 @@ impl Grade {
                     self.ctx
                         .load_texture(url.clone(), imagem, egui::TextureOptions::LINEAR);
                 self.texturas.insert(url.clone(), handle);
+                // A imagem do tile chegou: a emprestada sai, por baixo da nova.
+                let agora = self.ctx.input(|i| i.time);
+                let chegaram: Vec<String> = self
+                    .emprestadas
+                    .keys()
+                    .filter(|id| self.miniaturas.get(*id) == Some(&url))
+                    .cloned()
+                    .collect();
+                for id in chegaram {
+                    if let Some(velha) = self.emprestadas.remove(&id) {
+                        self.trocas.insert(id, (velha, agora));
+                    }
+                }
                 Desfecho::Chegou
             }
             None => Desfecho::Falhou,
