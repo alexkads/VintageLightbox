@@ -2483,7 +2483,6 @@ impl NovaSessao {
                     h_flex()
                         .mt(px(4.))
                         .items_center()
-                        .justify_between()
                         .gap(px(8.))
                         .child(
                             div()
@@ -2495,6 +2494,7 @@ impl NovaSessao {
                                     selecao.fotos.len()
                                 )),
                         )
+                        .child(div().flex_1())
                         .child(
                             estilo::botao_contorno("nova-cancelar-selecao-pasta", cx)
                                 .child("Cancelar")
