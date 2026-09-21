@@ -393,7 +393,13 @@ impl NovaSessao {
             cx.new(|cx| SelectState::new(SearchableVec::new(Vec::new()), None, window, cx));
         let escolha_do_estudio =
             cx.new(|cx| SelectState::new(SearchableVec::new(Vec::new()), None, window, cx));
-        let zoom_da_pasta = cx.new(|_| SliderState::new().min(0.7).max(1.5).default_value(1.0));
+        let zoom_da_pasta = cx.new(|_| {
+            SliderState::new()
+                .min(0.7)
+                .max(1.5)
+                .step(0.05)
+                .default_value(1.0)
+        });
 
         let mut assinaturas = Vec::new();
         #[derive(Clone, Copy)]
@@ -1973,6 +1979,7 @@ impl NovaSessao {
                     if fotos.is_empty() {
                         self.avisar(format!("Nenhuma foto em {nome}."), false);
                     } else {
+                        window.focus(&self.foco);
                         self.miniaturas_da_pasta.clear();
                         self.gerando_miniaturas_da_pasta = true;
                         self.selecao_da_pasta_maximizada = false;

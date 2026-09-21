@@ -2208,6 +2208,9 @@ impl NovaSessao {
                 .bg(tema.background)
                 .shadow_lg()
                 .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .on_key_down(cx.listener(|tela, evento: &KeyDownEvent, window, cx| {
+                    tela.tecla(evento, window, cx);
+                }))
                 .child(
                     h_flex()
                         .items_center()
@@ -2287,9 +2290,10 @@ impl NovaSessao {
                             h_flex()
                                 .items_center()
                                 .justify_between()
-                                .gap(px(12.))
+                                .gap(px(16.))
                                 .child(
                                     div()
+                                        .flex_1()
                                         .text_sm()
                                         .text_color(tema.muted_foreground)
                                         .child(format!(
@@ -2297,6 +2301,34 @@ impl NovaSessao {
                                             selecionadas,
                                             selecao.fotos.len()
                                         )),
+                                )
+                        )
+                        .child(
+                            h_flex()
+                                .justify_between()
+                                .items_center()
+                                .gap(px(8.))
+                                .p(px(8.))
+                                .rounded(px(9.))
+                                .bg(tema.muted)
+                                .child(
+                                    h_flex()
+                                        .items_center()
+                                        .gap(px(8.))
+                                        .child(Icon::new(Icone::ZoomOut).size(px(15.)))
+                                        .child(
+                                            div()
+                                                .w(px(240.))
+                                                .child(Slider::new(&self.zoom_da_pasta).horizontal()),
+                                        )
+                                        .child(Icon::new(Icone::ZoomIn).size(px(15.)))
+                                        .child(
+                                            div()
+                                                .w(px(42.))
+                                                .text_xs()
+                                                .text_color(tema.muted_foreground)
+                                                .child(format!("{:.0}%", zoom * 100.)),
+                                        ),
                                 )
                                 .child(
                                     Checkbox::new("nova-marcar-todas-da-pasta")
@@ -2309,25 +2341,6 @@ impl NovaSessao {
                                         .on_click(cx.listener(move |tela, marcado: &bool, _, cx| {
                                             tela.marcar_todas_da_pasta(*marcado, cx)
                                         })),
-                                ),
-                        )
-                        .child(
-                            h_flex()
-                                .items_center()
-                                .gap(px(8.))
-                                .child(Icon::new(Icone::ZoomOut).size(px(15.)))
-                                .child(
-                                    div()
-                                        .w(px(180.))
-                                        .child(Slider::new(&self.zoom_da_pasta).horizontal()),
-                                )
-                                .child(Icon::new(Icone::ZoomIn).size(px(15.)))
-                                .child(
-                                    div()
-                                        .w(px(42.))
-                                        .text_xs()
-                                        .text_color(tema.muted_foreground)
-                                        .child(format!("{:.0}%", zoom * 100.)),
                                 ),
                         )
                         .child(
@@ -2366,7 +2379,9 @@ impl NovaSessao {
                                                     } else {
                                                         tema.border
                                                     })
-                                                    .when(*marcado, |card| card.bg(tema.accent))
+                                                    .when(*marcado, |card| {
+                                                        card.bg(tema.primary.opacity(0.12))
+                                                    })
                                                     .hover(|card| card.bg(tema.muted))
                                                     .on_click(cx.listener(
                                                         move |tela, evento: &ClickEvent, _, cx| {

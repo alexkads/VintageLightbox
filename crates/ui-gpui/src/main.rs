@@ -424,6 +424,7 @@ async fn main() {
                             title: Some(ui_gpui::menu::NOME.into()),
                             ..Default::default()
                         }),
+                        is_resizable: true,
                         ..Default::default()
                     },
                     |window, cx| {
