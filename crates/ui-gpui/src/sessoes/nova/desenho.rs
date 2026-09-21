@@ -33,6 +33,29 @@ fn cor(hex: u32) -> Hsla {
     gpui::rgb(hex).into()
 }
 
+fn data_hora_da_foto(valor: &str) -> String {
+    let mut partes = valor.split_whitespace();
+    let Some(data) = partes.next() else {
+        return "Lendo data…".into();
+    };
+    let hora = partes.next().unwrap_or("");
+    if data.len() >= 10 && data.as_bytes().get(4) == Some(&b':') {
+        let minutos = hora.get(..5).unwrap_or(hora);
+        return format!(
+            "{}/{}/{} {}",
+            &data[8..10],
+            &data[5..7],
+            &data[..4],
+            minutos
+        );
+    }
+    if valor.trim().is_empty() {
+        "Data não disponível".into()
+    } else {
+        valor.to_string()
+    }
+}
+
 /// O rótulo de um campo, com `*` vermelho quando obrigatório.
 fn rotulo(texto: &str, obrigatorio: bool) -> Div {
     h_flex()
@@ -2347,6 +2370,13 @@ impl NovaSessao {
                                                 let miniatura =
                                                     self.miniaturas_da_pasta.get(caminho).cloned();
                                                 let tem_miniatura = miniatura.is_some();
+                                                let data_hora = self
+                                                    .metadados_da_pasta
+                                                    .get(caminho)
+                                                    .map(|descricao| {
+                                                        data_hora_da_foto(&descricao.data)
+                                                    })
+                                                    .unwrap_or_else(|| "Lendo data…".into());
                                                 v_flex()
                                                     .id(SharedString::from(format!(
                                                         "nova-foto-da-pasta-{indice}"
@@ -2436,10 +2466,29 @@ impl NovaSessao {
                                                             .child(nome),
                                                     )
                                                     .child(
-                                                        div()
-                                                            .text_xs()
-                                                            .text_color(tema.muted_foreground)
-                                                            .child(format!("Foto {}", indice + 1)),
+                                                        h_flex()
+                                                            .justify_between()
+                                                            .gap(px(6.))
+                                                            .child(
+                                                                div()
+                                                                    .text_xs()
+                                                                    .text_color(
+                                                                        tema.muted_foreground,
+                                                                    )
+                                                                    .child(format!(
+                                                                        "Foto {}",
+                                                                        indice + 1
+                                                                    )),
+                                                            )
+                                                            .child(
+                                                                div()
+                                                                    .text_xs()
+                                                                    .text_color(
+                                                                        tema.muted_foreground,
+                                                                    )
+                                                                    .truncate()
+                                                                    .child(data_hora),
+                                                            ),
                                                     )
                                                     .into_any_element()
                                             },

@@ -43,7 +43,7 @@ use super::associacoes::{
 use super::estado::{self, Campo, EstadoDaEtapa, Formulario, Rascunho};
 use super::receita::{self, PresetDaSessao};
 use crate::biblioteca::acervo::Acervo;
-use crate::importacao::estado::Recado as RecadoDaImportacao;
+use crate::importacao::estado::{Descricao as DescricaoDaImportacao, Recado as RecadoDaImportacao};
 use crate::importacao::explorador::{Andamento, Explorador, Freios, Importador, SeletorDePasta};
 use crate::pos_venda::porta::{PedidoJson, Publicador, Recado};
 use crate::revelacao::persistencia::Gravador;
@@ -262,6 +262,7 @@ pub struct NovaSessao {
     pub(super) cadastro: Option<Cadastro>,
     pub(super) menu_da_origem: Option<MenuDaOrigem>,
     pub(super) selecao_da_pasta: Option<SelecaoDaPasta>,
+    pub(super) metadados_da_pasta: HashMap<String, DescricaoDaImportacao>,
     /// As fotos do catálogo com o `sessao_id` do rascunho.
     pub(super) fotos: Vec<PhotoViewModel>,
     /// As de outros rascunhos, que ninguém mais vai criar.
@@ -502,6 +503,7 @@ impl NovaSessao {
             cadastro: None,
             menu_da_origem: None,
             selecao_da_pasta: None,
+            metadados_da_pasta: HashMap::new(),
             fotos: Vec::new(),
             orfas: Vec::new(),
             importacao: None,
@@ -1954,6 +1956,12 @@ impl NovaSessao {
                         .varrer(pasta, true, self.origens.0.clone());
                 }
                 RecadoDaImportacao::SemEscolha => self.escolhendo = false,
+                RecadoDaImportacao::Descritos(descricoes) => {
+                    for descricao in descricoes {
+                        self.metadados_da_pasta
+                            .insert(descricao.caminho.clone(), descricao);
+                    }
+                }
                 RecadoDaImportacao::MiniaturasProntas(caminhos) => {
                     self.gerando_miniaturas_da_pasta = false;
                     for caminho in caminhos {
@@ -1981,12 +1989,16 @@ impl NovaSessao {
                     } else {
                         window.focus(&self.foco);
                         self.miniaturas_da_pasta.clear();
+                        self.metadados_da_pasta.clear();
                         self.gerando_miniaturas_da_pasta = true;
                         self.selecao_da_pasta_maximizada = false;
                         self.selecao_da_pasta_minimizada = false;
                         self.portas
                             .gerador
                             .gerar(fotos.clone(), self.origens.0.clone());
+                        self.portas
+                            .explorador
+                            .detalhar(fotos.clone(), self.origens.0.clone());
                         self.selecao_da_pasta = Some(SelecaoDaPasta {
                             raiz,
                             fotos: fotos.into_iter().map(|caminho| (caminho, true)).collect(),
