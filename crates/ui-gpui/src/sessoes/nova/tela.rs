@@ -2464,6 +2464,24 @@ impl NovaSessao {
     }
 }
 
+#[cfg(test)]
+impl NovaSessao {
+    /// Abre o modal da pasta já varrido, com as fotos dadas desmarcadas.
+    pub(crate) fn abrir_selecao_para_teste(&mut self, fotos: &[&str], window: &mut Window) {
+        self.abrir_selecao_lendo("/cartao".into(), window);
+        if let Some(selecao) = self.selecao_da_pasta.as_mut() {
+            selecao.lendo = false;
+            selecao.fotos = fotos.iter().map(|f| (f.to_string(), false)).collect();
+        }
+    }
+
+    pub(crate) fn marcadas_da_pasta(&self) -> usize {
+        self.selecao_da_pasta
+            .as_ref()
+            .map_or(0, |s| s.fotos.iter().filter(|(_, m)| *m).count())
+    }
+}
+
 impl Focusable for NovaSessao {
     fn focus_handle(&self, _cx: &App) -> FocusHandle {
         self.foco.clone()

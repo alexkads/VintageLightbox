@@ -202,6 +202,26 @@ impl Render for NovaSessao {
             .on_key_down(cx.listener(|tela, evento: &KeyDownEvent, window, cx| {
                 tela.tecla(evento, window, cx);
             }))
+            // 🚨 **`Cmd/Ctrl+A` e `Cmd/Ctrl+D` chegam como ação, não como
+            // tecla.** A raiz liga as quatro combinações a `SelecionarTudo` e
+            // `LimparSelecao` no contexto `Aplicativo`, e o GPUI despacha a
+            // ação antes do `on_key_down`: conferidas ali, elas nunca chegavam
+            // ao modal da pasta (dono, 2026-09-21). Sem o modal aberto, a ação
+            // segue para a raiz.
+            .on_action(cx.listener(|tela, _: &crate::app::SelecionarTudo, _, cx| {
+                if tela.selecao_da_pasta.is_some() {
+                    tela.marcar_todas_da_pasta(true, cx);
+                } else {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|tela, _: &crate::app::LimparSelecao, _, cx| {
+                if tela.selecao_da_pasta.is_some() {
+                    tela.marcar_todas_da_pasta(false, cx);
+                } else {
+                    cx.propagate();
+                }
+            }))
             .on_drag_move(cx.listener(
                 |tela, _: &gpui::DragMoveEvent<gpui::ExternalPaths>, _, cx| {
                     tela.destacar(true, cx);
@@ -279,20 +299,6 @@ impl NovaSessao {
     fn tecla(&mut self, evento: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let tecla = evento.keystroke.key.as_str();
         let m = &evento.keystroke.modifiers;
-        if tecla.eq_ignore_ascii_case("a")
-            && (m.platform || m.control)
-            && self.selecao_da_pasta.is_some()
-        {
-            self.marcar_todas_da_pasta(true, cx);
-            return;
-        }
-        if tecla.eq_ignore_ascii_case("d")
-            && (m.platform || m.control)
-            && self.selecao_da_pasta.is_some()
-        {
-            self.marcar_todas_da_pasta(false, cx);
-            return;
-        }
         if m.shift || m.alt || m.control || m.platform {
             return;
         }

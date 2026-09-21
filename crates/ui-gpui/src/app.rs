@@ -8081,6 +8081,45 @@ mod testes {
         assert_eq!(corte.x, Some(0.4), "o corte é o dela, não o da aberta");
     }
 
+    /// 🚨 `Cmd/Ctrl+A` e `Cmd/Ctrl+D` chegam ao **modal da pasta** da nova
+    /// sessão. A raiz as liga como ação no contexto `Aplicativo`, e o modal as
+    /// conferia no `on_key_down` — que a ação despachada antes nunca deixava
+    /// rodar (dono, 2026-09-21).
+    #[gpui::test]
+    fn no_modal_da_pasta_cmd_a_e_ctrl_a_marcam_as_fotos(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+        cx.update(init);
+
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            |window, cx| Aplicativo::ja_dentro(acervo(), previews, Vec::new(), portas(), window, cx)
+        });
+        janela
+            .update(cx, |app, window, cx| {
+                app.ir_para(Tela::NovaSessao, window, cx);
+                app.nova_sessao.update(cx, |nova, _| {
+                    nova.abrir_selecao_para_teste(&["/cartao/a.jpg", "/cartao/b.jpg"], window)
+                });
+            })
+            .expect("a janela deve estar aberta");
+
+        let mut visual = gpui::VisualTestContext::from_window(janela.into(), cx);
+        visual.run_until_parked();
+        for (tecla, esperado) in [("cmd-a", 2), ("cmd-d", 0), ("ctrl-a", 2), ("ctrl-d", 0)] {
+            visual.simulate_keystrokes(tecla);
+            janela
+                .update(cx, |app, _window, cx| {
+                    assert_eq!(
+                        app.nova_sessao.read(cx).marcadas_da_pasta(),
+                        esperado,
+                        "{tecla} no modal da pasta"
+                    );
+                })
+                .expect("a janela deve estar aberta");
+        }
+    }
+
     /// 🚨 `Cmd+A`, `Ctrl+A` e `Cmd+D` chegam à **tira da Revelação** — e não à
     /// grade da Biblioteca por trás dela. Sem isto o lote nunca se forma, o
     /// botão "Sincronizar N" não aparece, e a caixa de flags nunca abre.
