@@ -1003,6 +1003,7 @@ Name=@@NOME@@
 Comment=@@DESCRICAO@@
 Exec=$DESTINO/bin/$NOME_LINUX
 Icon=$NOME_LINUX
+StartupWMClass=$NOME_LINUX
 Categories=Graphics;Photography;
 Terminal=false
 DESKTOP

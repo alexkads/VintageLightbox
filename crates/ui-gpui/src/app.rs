@@ -2978,6 +2978,7 @@ impl Aplicativo {
         // **operador**, e precisa dos dois — sem barra não há por onde pegar, e
         // uma prévia que não sai da frente é estorvo.
         let opcoes = gpui::WindowOptions {
+            app_id: Some(crate::menu::APP_ID.into()),
             // 🚨 **`Maximized` no monitor próprio, e não `Windowed`** (dono,
             // 18/set/2026: *"em tela cheia está cortando o componente com as
             // estrelinhas da classificação e a sinalização, mas em janela fica

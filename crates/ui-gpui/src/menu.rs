@@ -24,6 +24,12 @@ actions!(
 /// uma build convive na mesma máquina (dono, 2026-09-17).
 pub const NOME: &str = "VintageLightbox (Zed GPUI)";
 
+/// O `app_id` (Wayland) / `WM_CLASS` (X11) das janelas. No GNOME o ícone do
+/// Dock, da visão geral e do gesto de três dedos vem de casar este valor com o
+/// nome do `.desktop` instalado (`vintagelightbox-gpui.desktop`); sem ele a
+/// janela aparece como "desconhecido", com o ícone genérico.
+pub const APP_ID: &str = "vintagelightbox-gpui";
+
 /// O ícone da caixa "Sobre". Sem ele, o build de depuração (que não é um
 /// pacote `.app`) mostra o ícone genérico do macOS.
 #[cfg(target_os = "macos")]
