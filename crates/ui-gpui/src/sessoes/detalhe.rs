@@ -89,6 +89,11 @@ const LADO_DA_MINIATURA: u32 = ZOOM_MAXIMO as u32;
 /// janela** (três telas de cada), e este número é só o piso.
 const MINIATURAS_GUARDADAS: usize = 64;
 
+/// Quanto dura a troca suave de uma miniatura pela seguinte (a foto que subiu,
+/// a revelada por cima do bruto). Curta o bastante para não atrasar o olho de
+/// quem classifica, longa o bastante para não parecer um pisca.
+const DURACAO_DA_TROCA: Duration = Duration::from_millis(280);
+
 /// O respiro entre as células da grade, nas duas direções.
 const VAO_DA_GRADE: f32 = 8.0;
 /// O respiro entre as miniaturas da tira.
@@ -506,6 +511,21 @@ pub struct Detalhe {
     /// e era assim que a grade já travou uma vez (ver `preparar_miniaturas`).
     /// `revelada_chegou` tira a foto daqui, e a próxima consulta a refaz.
     com_revelada: std::collections::HashMap<String, bool>,
+    /// A última imagem desenhada de cada foto perto da vista.
+    ///
+    /// 🚨 **É o que impede a célula preta quando a foto sobe** (dono,
+    /// 21/set/2026: *"a foto fica preta e depois aparece novamente"*). Ao subir,
+    /// a foto troca de id — o do catálogo pelo do site — e a miniatura passa a
+    /// ser procurada noutra chave, que ainda não carregou. Enquanto a nova não
+    /// chega, a célula continua com a imagem de antes: a do id local é
+    /// herdada pelo id do site já enquanto a local está na grade
+    /// ([`Self::subiu_como`]). Ver `lembrar_as_imagens`.
+    imagens_vistas: std::collections::HashMap<String, Arc<gpui::RenderImage>>,
+    /// As trocas de imagem em andamento: foto → a imagem de antes, quando
+    /// começou e um número para a animação recomeçar só nesta troca.
+    trocas: std::collections::HashMap<String, (Arc<gpui::RenderImage>, std::time::Instant, u64)>,
+    /// O contador das trocas — o id de cada animação.
+    proxima_troca: u64,
     /// Os controles do painel da foto em foco — ver [`CamposDoPainel`].
     campos_do_painel: Option<CamposDoPainel>,
     /// A gaveta do atendimento está aberta?
@@ -740,6 +760,9 @@ impl Detalhe {
             copia_aqui: std::collections::HashSet::new(),
             subindo_agora: std::collections::HashSet::new(),
             com_revelada: std::collections::HashMap::new(),
+            imagens_vistas: std::collections::HashMap::new(),
+            trocas: std::collections::HashMap::new(),
+            proxima_troca: 0,
             campos_do_painel: None,
             atendimento_aberto: false,
             faixa_e_precos_aberto: false,
@@ -2703,6 +2726,11 @@ impl Detalhe {
         self.miniaturas
             .ajustar_capacidade(NonZeroUsize::new(capacidade).expect("o piso não é zero"));
 
+        let perto: Vec<String> = grade_margem
+            .clone()
+            .chain(tira_margem.clone())
+            .filter_map(|p| self.acervo.visivel(p).map(|f| f.id.clone()))
+            .collect();
         let inicio = std::time::Instant::now();
         let mut faltou = false;
         // A ordem é a da urgência: o que está à vista primeiro.
@@ -2731,7 +2759,106 @@ impl Detalhe {
             }
             self.carregar_miniatura(&chave);
         }
+        self.lembrar_as_imagens(&perto);
         faltou
+    }
+
+    /// Guarda a imagem de cada foto perto da vista, e começa a troca suave
+    /// quando ela muda — a subida (bruto local → foto do site) e a revelada
+    /// que chega por cima do bruto.
+    ///
+    /// 🔑 **Só as de perto da vista**: o mapa é refeito a cada passada, e o
+    /// que rolou para longe sai dele junto com a miniatura do LRU.
+    fn lembrar_as_imagens(&mut self, perto: &[String]) {
+        let agora = std::time::Instant::now();
+        self.trocas
+            .retain(|_, (_, desde, _)| agora.duration_since(*desde) < DURACAO_DA_TROCA);
+        let antes = std::mem::take(&mut self.imagens_vistas);
+        let mut vistas = std::collections::HashMap::with_capacity(perto.len());
+        for id in perto {
+            let atual = match self.miniaturas.espiar(&self.chave_da_foto(id)) {
+                Some(Miniatura::Pronta(imagem)) => Some(imagem.clone()),
+                _ => None,
+            };
+            let guardada = match (atual, antes.get(id)) {
+                (Some(nova), Some(velha)) => {
+                    if !Arc::ptr_eq(&nova, velha) && !self.trocas.contains_key(id) {
+                        self.proxima_troca += 1;
+                        self.trocas
+                            .insert(id.clone(), (velha.clone(), agora, self.proxima_troca));
+                    }
+                    Some(nova)
+                }
+                (Some(nova), None) => Some(nova),
+                // A nova ainda não carregou: segura a de antes.
+                (None, velha) => velha.cloned(),
+            };
+            let Some(imagem) = guardada else {
+                continue;
+            };
+            // 📤 A que acabou de subir empresta a imagem ao id do site, que é
+            // o que a célula vai ter quando a local sair da grade.
+            if let Some(no_site) = self.subiu_como.get(id) {
+                vistas
+                    .entry(no_site.clone())
+                    .or_insert_with(|| imagem.clone());
+            }
+            vistas.insert(id.clone(), imagem);
+        }
+        self.imagens_vistas = vistas;
+    }
+
+    /// A imagem da célula: a miniatura pronta, ou a última desenhada enquanto
+    /// ela não chega — e, numa troca, a de antes por baixo da nova, que surge
+    /// por cima dela.
+    fn imagem_da_celula(&self, foto_id: &str, opacidade: f32) -> Option<gpui::AnyElement> {
+        let pronta = match self.miniaturas.espiar(&self.chave_da_foto(foto_id)) {
+            Some(Miniatura::Pronta(imagem)) => Some(imagem.clone()),
+            _ => None,
+        };
+        let imagem = pronta
+            .clone()
+            .or_else(|| self.imagens_vistas.get(foto_id).cloned())?;
+        // 🚨 **`max_*`, e nunca `size_full` com `Contain`.** O `Img` do GPUI
+        // grava `style.aspect_ratio` com a proporção da foto em todo layout:
+        // com largura e altura em 100%, o taffy tira a altura da largura, o
+        // elemento fica maior que o quadro e o `overflow_hidden` transforma o
+        // `Contain` em corte — a mesma armadilha que cortava a tela do cliente
+        // (`cliente::camada`, 17/set/2026).
+        use gpui::AnimationExt as _;
+        let nova = img(imagem).max_w_full().max_h_full();
+        let troca = pronta.and(self.trocas.get(foto_id));
+        let Some((velha, _, numero)) = troca else {
+            return Some(nova.opacity(opacidade).into_any_element());
+        };
+        Some(
+            div()
+                .relative()
+                .size_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(
+                            img(velha.clone())
+                                .max_w_full()
+                                .max_h_full()
+                                .opacity(opacidade),
+                        ),
+                )
+                .child(nova.with_animation(
+                    SharedString::from(format!("troca-{foto_id}-{numero}")),
+                    gpui::Animation::new(DURACAO_DA_TROCA).with_easing(gpui::ease_in_out),
+                    move |imagem, delta| imagem.opacity(delta * opacidade),
+                ))
+                .into_any_element(),
+        )
     }
 
     /// Lê a miniatura do disco para a memória — gerando-a, se faltar.
@@ -3755,10 +3882,9 @@ impl Detalhe {
         let lado = self.zoom;
         // 🔑 **Só lê.** Quem carrega é `preparar_miniaturas`, uma vez por quadro,
         // antes de o render começar — ver o campo `miniaturas`.
-        let miniatura = match self.miniaturas.espiar(&self.chave_da_foto(&foto.id)) {
-            Some(Miniatura::Pronta(imagem)) => Some(imagem),
-            _ => None,
-        };
+        // A rejeitada fica esmaecida: continua ali para ser desfeita, e não
+        // compete com as que estão em jogo.
+        let miniatura = self.imagem_da_celula(&foto.id, if foto.rejeitada { 0.4 } else { 1. });
 
         div()
             .id(SharedString::from(format!("sessao-tile-{}", foto.id)))
@@ -3807,25 +3933,7 @@ impl Detalhe {
                     } else {
                         gpui::transparent_black()
                     })
-                    .when_some(miniatura, |quadro, imagem| {
-                        // 🚨 **`max_*`, e nunca `size_full` com `Contain`.** O
-                        // `Img` do GPUI grava `style.aspect_ratio` com a
-                        // proporção da foto em todo layout: com largura e
-                        // altura em 100%, o taffy tira a altura da largura, o
-                        // elemento fica maior que o quadro e o `overflow_hidden`
-                        // daqui transforma o `Contain` em corte — a mesma
-                        // armadilha que cortava a tela do cliente
-                        // (`cliente::camada`, 17/set/2026).
-                        // A rejeitada fica esmaecida: continua ali para ser
-                        // desfeita, e não compete com as que estão em jogo.
-                        let rejeitada = foto.rejeitada;
-                        quadro.child(
-                            img(imagem)
-                                .max_w_full()
-                                .max_h_full()
-                                .when(rejeitada, |i| i.opacity(0.4)),
-                        )
-                    })
+                    .children(miniatura)
                     // O selo do estado, no canto — como na tela do site, e
                     // agora com a cor do que ele diz (`crate::selos`).
                     .child(
@@ -5162,8 +5270,9 @@ impl Detalhe {
         let em_foco = self.selecao.foco() == Some(posicao);
         let marcada = self.selecao.tem(posicao);
         let miniatura = match self.miniaturas.espiar(&self.chave_da_foto(&foto.id)) {
-            Some(Miniatura::Pronta(imagem)) => Some(imagem),
-            _ => None,
+            Some(Miniatura::Pronta(imagem)) => Some(imagem.clone()),
+            // A mesma lembrança da grade: a tira não fica preta na subida.
+            _ => self.imagens_vistas.get(&foto.id).cloned(),
         };
         let nota = foto.nota.unwrap_or(0).min(5) as usize;
         let levada = foto.estado == acervo::Estado::LevadaNoBalcao && !foto.apagada;
@@ -7590,6 +7699,92 @@ mod testes {
                     tela.miniaturas.espiar("site:id-do-catalogo").is_none(),
                     "a local não mora sob o prefixo do site"
                 );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 **A foto que sobe não fica preta no caminho** (dono, 21/set/2026:
+    /// *"a foto fica preta e depois aparece novamente"*).
+    ///
+    /// Ao subir, a foto troca o id do catálogo pelo do site, e a miniatura do
+    /// site ainda não baixou. A célula nova herda a imagem da local; quando a
+    /// do site chega, as duas se cruzam numa troca suave.
+    #[gpui::test]
+    fn a_foto_que_sobe_nao_fica_preta_na_troca(cx: &mut TestAppContext) {
+        let dir = tempfile::TempDir::new().expect("diretório temporário");
+        let previews = Arc::new(PreviewManager::new_with_path(dir.path().to_path_buf()));
+        let cor = |c: u8| {
+            image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+                8,
+                8,
+                image::Rgb([c, 30, 30]),
+            ))
+        };
+        previews
+            .save_thumbnail("nova-1", &cor(200))
+            .expect("gravar a miniatura da local");
+        let publicador = publicador_com(Vec::new(), false);
+        let janela = janela_com_previews(
+            cx,
+            publicador.clone(),
+            Arc::new(SeletorDeMentira::default()),
+            Arc::new(ImportadorDeMentira::default()),
+            previews.clone(),
+        );
+        entrar(cx, &janela);
+
+        let da_local = janela
+            .update(cx, |tela, _window, cx| {
+                tela.definir_locais(vec![local("nova-1")], cx);
+                tela.preparar_miniaturas();
+                // Terminou de subir; a do site ainda não voltou.
+                tela.definir_subidas([("nova-1".to_string(), "s1".to_string())].into());
+                tela.preparar_miniaturas();
+                tela.imagens_vistas
+                    .get("nova-1")
+                    .cloned()
+                    .expect("a local desenhada")
+            })
+            .expect("a janela deve estar aberta");
+
+        // A do site chega, sem miniatura baixada: a local sai da grade.
+        publicador.fotos_da_sessao.lock().unwrap().push(foto(
+            "s1",
+            EstadoDaFotoNoSite::Disponivel,
+            None,
+        ));
+        janela
+            .update(cx, |tela, _window, cx| tela.reler(cx))
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.colher(cx);
+                tela.definir_subidas(Default::default());
+                tela.definir_locais(Vec::new(), cx);
+                assert!(tela.como_esta("nova-1").is_none(), "uma foto só na grade");
+                tela.preparar_miniaturas();
+                let herdada = tela
+                    .imagens_vistas
+                    .get("s1")
+                    .expect("a célula do site ficou preta: não herdou a imagem da local");
+                assert!(Arc::ptr_eq(herdada, &da_local), "é a mesma imagem de antes");
+                assert!(tela.imagem_da_celula("s1", 1.).is_some());
+                assert!(tela.trocas.is_empty(), "sem a nova, não há o que trocar");
+            })
+            .expect("a janela deve estar aberta");
+
+        // A miniatura do site chega: a troca começa, com a de antes por baixo.
+        janela
+            .update(cx, |tela, _window, _cx| {
+                let chave = tela.chave_da_foto("s1");
+                previews
+                    .save_thumbnail(&chave, &cor(40))
+                    .expect("gravar a miniatura do site");
+                tela.miniaturas.esquecer(&chave);
+                tela.preparar_miniaturas();
+                let (velha, _, _) = tela.trocas.get("s1").expect("a troca suave começou");
+                assert!(Arc::ptr_eq(velha, &da_local));
             })
             .expect("a janela deve estar aberta");
     }
