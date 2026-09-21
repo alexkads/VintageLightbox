@@ -1955,7 +1955,11 @@ impl NovaSessao {
                     }
                 }
                 RecadoDaImportacao::OrigemEscolhida(pasta) => {
+                    self.menu_da_origem = None;
+                    self.selecao_da_pasta = None;
+                    self.gerando_miniaturas_da_pasta = false;
                     self.escolhendo = false;
+                    self.avisar("Lendo fotos da pasta…", false);
                     self.portas
                         .explorador
                         .varrer(pasta, true, self.origens.0.clone());
@@ -1993,6 +1997,7 @@ impl NovaSessao {
                         self.avisar(format!("Nenhuma foto em {nome}."), false);
                     } else {
                         window.focus(&self.foco);
+                        self.aviso = None;
                         self.miniaturas_da_pasta.clear();
                         self.metadados_da_pasta.clear();
                         self.gerando_miniaturas_da_pasta = true;
