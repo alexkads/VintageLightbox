@@ -33,6 +33,7 @@ use gpui::{
 };
 use gpui_component::input::{InputEvent, InputState};
 use gpui_component::select::{SearchableVec, SelectEvent, SelectItem, SelectState};
+use gpui_component::slider::{SliderEvent, SliderState};
 use infrastructure::cache::preview_manager::PreviewManager;
 
 use super::amostras::Amostras;
@@ -299,6 +300,8 @@ pub struct NovaSessao {
     gerando_miniaturas_da_pasta: bool,
     pub(super) selecao_da_pasta_maximizada: bool,
     pub(super) selecao_da_pasta_minimizada: bool,
+    pub(super) zoom_da_pasta: Entity<SliderState>,
+    pub(super) zoom_da_pasta_valor: f32,
     /// Fotos foram para a fila da receita: o próximo quadro avisa a raiz.
     ///
     /// 🔑 **Bandeira, e não `cx.emit` direto**: `aplicar_receita` é chamado de
@@ -390,6 +393,7 @@ impl NovaSessao {
             cx.new(|cx| SelectState::new(SearchableVec::new(Vec::new()), None, window, cx));
         let escolha_do_estudio =
             cx.new(|cx| SelectState::new(SearchableVec::new(Vec::new()), None, window, cx));
+        let zoom_da_pasta = cx.new(|_| SliderState::new().min(0.7).max(1.5).default_value(1.0));
 
         let mut assinaturas = Vec::new();
         #[derive(Clone, Copy)]
@@ -450,6 +454,15 @@ impl NovaSessao {
                 cx.notify();
             },
         ));
+        assinaturas.push(cx.subscribe_in(
+            &zoom_da_pasta,
+            window,
+            |tela, _, evento: &SliderEvent, _, cx| {
+                let SliderEvent::Change(valor) = evento;
+                tela.zoom_da_pasta_valor = valor.start();
+                cx.notify();
+            },
+        ));
 
         let caminho = estado::caminho_do_rascunho();
         Self {
@@ -503,6 +516,8 @@ impl NovaSessao {
             gerando_miniaturas_da_pasta: false,
             selecao_da_pasta_maximizada: false,
             selecao_da_pasta_minimizada: false,
+            zoom_da_pasta,
+            zoom_da_pasta_valor: 1.0,
             pedir_colheita_das_reveladas: false,
             amostras: Amostras::default(),
             focar: None,

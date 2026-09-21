@@ -12,6 +12,7 @@ use gpui_component::checkbox::Checkbox;
 use gpui_component::input::{Input, InputState};
 use gpui_component::progress::Progress;
 use gpui_component::select::Select;
+use gpui_component::slider::Slider;
 use gpui_component::{h_flex, v_flex, ActiveTheme, Icon};
 
 use super::associacoes::{self as assoc};
@@ -259,7 +260,14 @@ impl NovaSessao {
             && (m.platform || m.control)
             && self.selecao_da_pasta.is_some()
         {
-            self.alternar_todas_da_pasta(cx);
+            self.marcar_todas_da_pasta(true, cx);
+            return;
+        }
+        if tecla.eq_ignore_ascii_case("d")
+            && (m.platform || m.control)
+            && self.selecao_da_pasta.is_some()
+        {
+            self.marcar_todas_da_pasta(false, cx);
             return;
         }
         if m.shift || m.alt || m.control || m.platform {
@@ -2172,13 +2180,16 @@ impl NovaSessao {
         let todas = selecionadas == selecao.fotos.len();
         let minimizada = self.selecao_da_pasta_minimizada;
         let maximizada = self.selecao_da_pasta_maximizada;
+        let zoom = self.zoom_da_pasta_valor;
         let largura_janela = f32::from(window.viewport_size().width);
         let largura_modal = if maximizada {
             (largura_janela * 0.94).min(1440.)
         } else {
             (largura_janela * 0.88).min(820.)
         };
-        let colunas = ((largura_modal - 64.) / 178.).floor().clamp(2., 8.) as u16;
+        let colunas = ((largura_modal - 64.) / (178. * zoom))
+            .floor()
+            .clamp(2., 8.) as u16;
         let nome_da_pasta = std::path::Path::new(&selecao.raiz)
             .file_name()
             .map(|nome| nome.to_string_lossy().to_string())
@@ -2301,6 +2312,25 @@ impl NovaSessao {
                                 ),
                         )
                         .child(
+                            h_flex()
+                                .items_center()
+                                .gap(px(8.))
+                                .child(Icon::new(Icone::ZoomOut).size(px(15.)))
+                                .child(
+                                    div()
+                                        .w(px(180.))
+                                        .child(Slider::new(&self.zoom_da_pasta).horizontal()),
+                                )
+                                .child(Icon::new(Icone::ZoomIn).size(px(15.)))
+                                .child(
+                                    div()
+                                        .w(px(42.))
+                                        .text_xs()
+                                        .text_color(tema.muted_foreground)
+                                        .child(format!("{:.0}%", zoom * 100.)),
+                                ),
+                        )
+                        .child(
                             v_flex()
                                 .id("nova-fotos-da-pasta-lista")
                                 .flex_1()
@@ -2351,7 +2381,7 @@ impl NovaSessao {
                                                         div()
                                                             .relative()
                                                             .w_full()
-                                                            .h(px(132.))
+                                                            .h(px(132. * zoom))
                                                             .rounded(px(7.))
                                                             .overflow_hidden()
                                                             .bg(tema.muted)
