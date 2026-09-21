@@ -1590,11 +1590,23 @@ impl Sessoes {
         // 💵 A do caixa é mais larga: ela pode trazer o "Fechar venda" em vez
         // de um número (dono, 20/set/2026).
         const LARGURAS: [f32; 7] = [84., 84., 104., 112., 124., 112., 104.];
-        let numero = |largura: f32| div().w(px(largura)).flex_none().flex().justify_end();
-        let titulo_da_coluna = |texto: &'static str, largura: Option<f32>| match largura {
-            Some(l) => numero(l).child(texto).into_any_element(),
-            None => div().flex_1().min_w(px(0.)).child(texto).into_any_element(),
+        // ↔️ **Galeria e Contato crescem, mas não encolhem abaixo disto.** Com
+        // `min_w(0)` a janela estreita as espremia até o nome da galeria virar
+        // uma letra por linha; agora quem sobra rola na horizontal (dono,
+        // 21/set/2026: *"o grid precisa de scroll pra não deformar os campos"*).
+        const GALERIA: f32 = 180.;
+        const CONTATO: f32 = 200.;
+        const SITUACAO: f32 = 160.;
+        const VAO: f32 = 16.;
+        const RECUO: f32 = 8.;
+        let largura_minima = {
+            let fixas: f32 = LARGURAS.iter().sum();
+            let colunas = 3 + LARGURAS.len();
+            GALERIA + CONTATO + SITUACAO + fixas + VAO * (colunas - 1) as f32 + RECUO * 2.
         };
+        let numero = |largura: f32| div().w(px(largura)).flex_none().flex().justify_end();
+        let titulo_da_coluna = |texto: &'static str, largura: f32| numero(largura).child(texto);
+        let flexivel = |minima: f32| div().flex_1().min_w(px(minima));
         let valor_ou_traco = |centavos: Option<i64>| match centavos {
             Some(c) if c > 0 => dinheiro::formatar(c),
             _ => "—".to_string(),
@@ -1603,23 +1615,24 @@ impl Sessoes {
         let cabecalho = div()
             .flex()
             .items_center()
-            .gap(px(16.))
+            .flex_none()
+            .gap(px(VAO))
             .h(px(40.))
-            .px(px(8.))
+            .px(px(RECUO))
             .border_b_1()
             .border_color(borda)
             .text_sm()
             .font_weight(gpui::FontWeight::MEDIUM)
-            .child(titulo_da_coluna("Galeria", None))
-            .child(titulo_da_coluna("Contato", None))
-            .child(div().w(px(160.)).flex_none().child("Situação"))
-            .child(titulo_da_coluna("Levadas", Some(LARGURAS[0])))
-            .child(titulo_da_coluna("À venda", Some(LARGURAS[1])))
-            .child(titulo_da_coluna("Compradas", Some(LARGURAS[2])))
-            .child(titulo_da_coluna("Balcão", Some(LARGURAS[3])))
-            .child(titulo_da_coluna("Caixa (PDV)", Some(LARGURAS[4])))
-            .child(titulo_da_coluna("Pós-venda", Some(LARGURAS[5])))
-            .child(titulo_da_coluna("Criada", Some(LARGURAS[6])));
+            .child(flexivel(GALERIA).child("Galeria"))
+            .child(flexivel(CONTATO).child("Contato"))
+            .child(div().w(px(SITUACAO)).flex_none().child("Situação"))
+            .child(titulo_da_coluna("Levadas", LARGURAS[0]))
+            .child(titulo_da_coluna("À venda", LARGURAS[1]))
+            .child(titulo_da_coluna("Compradas", LARGURAS[2]))
+            .child(titulo_da_coluna("Balcão", LARGURAS[3]))
+            .child(titulo_da_coluna("Caixa (PDV)", LARGURAS[4]))
+            .child(titulo_da_coluna("Pós-venda", LARGURAS[5]))
+            .child(titulo_da_coluna("Criada", LARGURAS[6]));
 
         let linhas = visiveis.iter().map(|sessao| {
             let id = sessao.id.clone();
@@ -1632,9 +1645,10 @@ impl Sessoes {
                 .id(SharedString::from(format!("sessao-{}", sessao.id)))
                 .flex()
                 .items_center()
-                .gap(px(16.))
+                .flex_none()
+                .gap(px(VAO))
                 .min_h(px(52.))
-                .px(px(8.))
+                .px(px(RECUO))
                 .py(px(6.))
                 .border_b_1()
                 .border_color(borda)
@@ -1644,17 +1658,13 @@ impl Sessoes {
                 .when(e_a_aberta, |linha| linha.bg(realce.opacity(0.5)))
                 .on_click(cx.listener(move |tela, _ev, _window, cx| tela.abrir(id.clone(), cx)))
                 .child(
-                    div()
-                        .flex_1()
-                        .min_w(px(0.))
+                    flexivel(GALERIA)
                         .font_weight(gpui::FontWeight::MEDIUM)
                         .truncate()
                         .child(sessao.titulo.clone()),
                 )
                 .child(
-                    div()
-                        .flex_1()
-                        .min_w(px(0.))
+                    flexivel(CONTATO)
                         .flex()
                         .flex_col()
                         .text_xs()
@@ -1667,7 +1677,7 @@ impl Sessoes {
                 )
                 .child(
                     div()
-                        .w(px(160.))
+                        .w(px(SITUACAO))
                         .flex_none()
                         .flex()
                         .gap(px(6.))
@@ -1706,22 +1716,47 @@ impl Sessoes {
                 )
         });
 
+        // ↔️ Duas rolagens encaixadas: a de fora é só horizontal e leva o
+        // cabeçalho junto com as linhas; a de dentro é só vertical, e o
+        // cabeçalho fica parado em cima dela.
+        // 🚨 `restrict_scroll_to_axis` na de fora é o que impede a roda
+        // vertical de rolar as duas ao mesmo tempo — sem ele o GPUI converte o
+        // `delta.y` em horizontal em quem só rola em x.
+        let mut rolagem_horizontal = div()
+            .id("sessoes-tabela")
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_h(px(0.))
+            .overflow_x_scroll();
+        rolagem_horizontal.style().restrict_scroll_to_axis = Some(true);
+
         crate::estilo::cartao(cx)
             .flex()
             .flex_col()
             .flex_1()
             .min_h(px(0.))
             .bg(fundo)
-            .child(cabecalho)
             .child(
-                div()
-                    .id("sessoes-linhas")
-                    .flex()
-                    .flex_col()
-                    .flex_1()
-                    .min_h(px(0.))
-                    .overflow_y_scroll()
-                    .children(linhas),
+                rolagem_horizontal.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .flex_1()
+                        .min_h(px(0.))
+                        .min_w(px(largura_minima))
+                        .child(cabecalho)
+                        .child(
+                            div()
+                                .id("sessoes-linhas")
+                                .flex()
+                                .flex_col()
+                                .flex_1()
+                                .min_h(px(0.))
+                                .overflow_y_scroll()
+                                .children(linhas),
+                        ),
+                ),
             )
             .into_any_element()
     }
