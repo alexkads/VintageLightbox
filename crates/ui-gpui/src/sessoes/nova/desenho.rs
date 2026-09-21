@@ -2288,23 +2288,6 @@ impl NovaSessao {
                     modal
                         .child(
                             h_flex()
-                                .items_center()
-                                .justify_between()
-                                .gap(px(16.))
-                                .child(
-                                    div()
-                                        .flex_1()
-                                        .text_sm()
-                                        .text_color(tema.muted_foreground)
-                                        .child(format!(
-                                            "{} de {} selecionadas",
-                                            selecionadas,
-                                            selecao.fotos.len()
-                                        )),
-                                )
-                        )
-                        .child(
-                            h_flex()
                                 .justify_between()
                                 .items_center()
                                 .gap(px(8.))
@@ -2467,8 +2450,19 @@ impl NovaSessao {
                 .child(
                     h_flex()
                         .mt(px(4.))
-                        .justify_end()
+                        .items_center()
+                        .justify_between()
                         .gap(px(8.))
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(tema.muted_foreground)
+                                .child(format!(
+                                    "{} de {} selecionadas",
+                                    selecionadas,
+                                    selecao.fotos.len()
+                                )),
+                        )
                         .child(
                             estilo::botao_contorno("nova-cancelar-selecao-pasta", cx)
                                 .child("Cancelar")
