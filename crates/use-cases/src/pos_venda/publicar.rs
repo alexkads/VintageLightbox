@@ -254,11 +254,14 @@ impl PublicarNoPosVendaUseCase {
         // lido enquanto a gravação da nota ainda corria noutra tarefa; sem este
         // `or_else` o que sobe é o valor anterior. Ver `enviar_uma`.
         //
-        // ⚠️ **E não se recusa aqui o que o site recusa.** Uma guarda local
-        // "só sobe de 1 a 5" pareceria melhora e derrubaria a publicação em
-        // lote, que sobe foto do ensaio inteiro sem passar pela travessia do
-        // zero. Quem decide o que o acervo aceita é o site.
-        let nota = nota.or_else(|| photo.rating().map(|r| r.value()));
+        // O contrato do site aceita somente notas de 1 a 5. `0` significa
+        // "sem nota" no catálogo local e jamais pode atravessar a fronteira
+        // HTTP como uma classificação — o backend responde 400 nesse caso.
+        // A fila da UI não envia fotos sem nota; esta guarda também protege
+        // chamadas diretas e fotos antigas cujo valor local esteja zerado.
+        let nota = nota
+            .or_else(|| photo.rating().map(|r| r.value()))
+            .filter(|nota| (1..=5).contains(nota));
 
         let jpeg = self
             .exportador

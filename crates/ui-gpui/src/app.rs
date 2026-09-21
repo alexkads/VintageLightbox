@@ -1345,6 +1345,14 @@ impl Aplicativo {
             let nota = u8::try_from(foto.rating)
                 .ok()
                 .filter(|n| (1..=5).contains(n));
+            // A API de pós-venda só aceita fotos classificadas. A importação
+            // continua assíncrona, mas uma foto sem nota fica aguardando a
+            // curadoria local em vez de entrar na fila e voltar como `400
+            // nota inválida: 0`. Assim, pressionar 1–5 grava a nota e a
+            // próxima releitura a envia normalmente.
+            let Some(nota) = nota else {
+                continue;
+            };
             self.esteira
                 .empurrar(crate::envios::Trabalho::Classificada {
                     galeria: galeria.to_string(),
@@ -1354,12 +1362,13 @@ impl Aplicativo {
                         // 🔑 `None`: quem sobe não escolheu leva nenhuma, e o
                         // estado sai da tecla `B` de cada foto, depois.
                         estado: None,
-                        nota,
+                        nota: Some(nota),
                         // 🧾 A faixa escolhida na barra de envio da sessão.
                         produto_id: faixa.clone(),
                     }),
                 });
-            self.subindo_sozinhas.insert(foto.id.clone(), (nota, false));
+            self.subindo_sozinhas
+                .insert(foto.id.clone(), (Some(nota), false));
             entraram += 1;
         }
         if entraram == 0 {
@@ -2271,6 +2280,11 @@ impl Aplicativo {
                     if vai_repetir {
                         continue;
                     }
+                    // Uma falha definitiva não pode bloquear uma nova
+                    // tentativa depois que o operador corrigir a causa —
+                    // especialmente ao classificar uma foto que falhou sem
+                    // nota durante a importação assíncrona.
+                    self.subindo_sozinhas.remove(&alvo);
                     self.revelacao
                         .update(cx, |tela, cx| tela.definir_gerando_jpeg(false, cx));
                     self.contar_o_salvar(true, cx);
