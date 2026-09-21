@@ -121,9 +121,10 @@ struct MedidaDaGrade {
 
 /// Os recortes da barra, na ordem da web.
 ///
-/// 🚨 **"Sem nota" é o último de propósito**: é um recorte de exceção — o que
-/// está sem classificação não pode ir à venda, não recebe marca d'água e não
-/// devia estar no storage. Ele existe para esvaziar, não para consultar.
+/// 🚨 **"Sem nota" é o último de propósito**: é o recorte de onde se
+/// classifica. A sem nota está à venda e sobe com marca d'água (dono,
+/// 2026-09-21), mas vender **no balcão** pede nota e `P` — é aqui que se acha o
+/// que ainda falta classificar.
 /// O modificador do sistema, como o `useTeclaDeAtalho` do site: `⌘` no Mac,
 /// `Ctrl` no resto. A dica que mostra a tecla errada ensina o gesto errado.
 #[cfg(target_os = "macos")]
@@ -139,7 +140,7 @@ const MODIFICADOR_D: &str = "⌘+D";
 #[cfg(not(target_os = "macos"))]
 const MODIFICADOR_D: &str = "Ctrl+D";
 
-const FILTROS: [(&str, Filtro); 7] = [
+const FILTROS: [(&str, Filtro); 8] = [
     ("Todas", Filtro::Todas),
     // 🔑 **Os dois passos do balcão, na ordem em que acontecem**: classificar
     // (a nota, que é o que sobe a foto) e sinalizar (a tecla P). "Sinalizada"
@@ -154,6 +155,8 @@ const FILTROS: [(&str, Filtro); 7] = [
     ("À venda", Filtro::Situacao(acervo::Estado::Disponivel)),
     ("Compradas", Filtro::Situacao(acervo::Estado::Comprada)),
     ("Apagadas", Filtro::Apagadas),
+    // ❌ As do `X` (C21): é aqui que se acham para desfazer.
+    ("Rejeitadas", Filtro::Rejeitadas),
     ("Sem nota", Filtro::SemNota),
 ];
 
@@ -948,6 +951,25 @@ impl Detalhe {
     /// ter uma sem classificar marca as nove e conta a décima — recusar o lote
     /// faria o operador procurar qual foi, numa grade de duzentas.
     pub fn marcar_como(&mut self, estado: EstadoNoBalcao, cx: &mut Context<Self>) {
+        // ❌ **A rejeitada também não vai ao balcão** (C21) — a mesma recusa do
+        // servidor (*"foto rejeitada não vai ao balcão: tire a rejeição
+        // antes"*), feita aqui antes da ida e separando em vez de bloquear,
+        // como a da sem nota. Ela vem primeiro porque é o recado certo: na
+        // rejeitada sem nota, pedir a nota mandaria o operador para o lado
+        // errado.
+        let rejeitadas: Vec<String> = if estado == EstadoNoBalcao::LevadaNoBalcao {
+            self.selecao
+                .marcadas()
+                .filter_map(|p| self.acervo.visivel(p))
+                .filter(|f| f.editavel() && f.rejeitada)
+                .map(|f| f.arquivo.clone())
+                .collect()
+        } else {
+            Vec::new()
+        };
+        if !rejeitadas.is_empty() {
+            self.desmarcar_onde(|f| f.rejeitada, cx);
+        }
         let sem_nota: Vec<String> = self
             .selecao
             .marcadas()
@@ -967,23 +989,50 @@ impl Detalhe {
             },
             cx,
         );
+        let mut recados: Vec<String> = Vec::new();
+        if !rejeitadas.is_empty() {
+            recados.push(if rejeitadas.len() == 1 {
+                format!(
+                    "{} está rejeitada e não vai ao balcão: tire a rejeição (X) antes.",
+                    rejeitadas[0]
+                )
+            } else {
+                format!(
+                    "{} rejeitadas ficaram de fora: tire a rejeição (X) antes de marcar.",
+                    rejeitadas.len()
+                )
+            });
+        }
         if !sem_nota.is_empty() {
-            self.erro = Some(
-                if sem_nota.len() == 1 {
-                    format!(
-                        "{} ficou de fora: classifique de 1 a 5 antes de marcar.",
-                        sem_nota[0]
-                    )
-                } else {
-                    format!(
-                        "{} sem classificação ficaram de fora: dê a nota de 1 a 5 antes de marcar.",
-                        sem_nota.len()
-                    )
-                }
-                .into(),
-            );
+            recados.push(if sem_nota.len() == 1 {
+                format!(
+                    "{} ficou de fora: classifique de 1 a 5 antes de marcar.",
+                    sem_nota[0]
+                )
+            } else {
+                format!(
+                    "{} sem classificação ficaram de fora: dê a nota de 1 a 5 antes de marcar.",
+                    sem_nota.len()
+                )
+            });
+        }
+        if !recados.is_empty() {
+            self.erro = Some(recados.join(" ").into());
             cx.notify();
         }
+    }
+
+    /// Tira da seleção as marcadas que batem com `regra`.
+    fn desmarcar_onde(&mut self, regra: impl Fn(&acervo::Foto) -> bool, cx: &mut Context<Self>) {
+        let fora: Vec<usize> = self
+            .selecao
+            .marcadas()
+            .filter(|p| self.acervo.visivel(*p).is_some_and(&regra))
+            .collect();
+        for posicao in fora {
+            self.selecao.desmarcar_uma(posicao);
+        }
+        cx.notify();
     }
 
     /// Tira da seleção as fotos do acervo sem nota — elas não vão ao balcão.
@@ -3671,7 +3720,15 @@ impl Detalhe {
                         // daqui transforma o `Contain` em corte — a mesma
                         // armadilha que cortava a tela do cliente
                         // (`cliente::camada`, 17/set/2026).
-                        quadro.child(img(imagem).max_w_full().max_h_full())
+                        // A rejeitada fica esmaecida: continua ali para ser
+                        // desfeita, e não compete com as que estão em jogo.
+                        let rejeitada = foto.rejeitada;
+                        quadro.child(
+                            img(imagem)
+                                .max_w_full()
+                                .max_h_full()
+                                .when(rejeitada, |i| i.opacity(0.4)),
+                        )
                     })
                     // O selo do estado, no canto — como na tela do site, e
                     // agora com a cor do que ele diz (`crate::selos`).
@@ -3682,7 +3739,11 @@ impl Detalhe {
                             .left(px(4.))
                             // 🚨 A importada não é "à venda": ela nem chegou ao
                             // site. Ver `selos::selo_de_so_no_disco`.
-                            .child(if self.ids_locais.contains(&foto.id) {
+                            // ❌ A rejeitada diz isso antes de tudo (C21): é a
+                            // decisão que muda o que acontece com ela.
+                            .child(if foto.rejeitada && !foto.apagada {
+                                selos::selo_de_rejeitada(cx).into_any_element()
+                            } else if self.ids_locais.contains(&foto.id) {
                                 selos::selo_de_so_no_disco(cx).into_any_element()
                             } else {
                                 selos::selo_do_estado(foto.estado, foto.apagada, cx)
@@ -4626,7 +4687,12 @@ impl Detalhe {
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child(foto.estado.rotulo()),
+                        .child(if foto.rejeitada && !foto.apagada {
+                            // C21: o que ela é agora, e o que isso quer dizer.
+                            "Rejeitada — fora da galeria do cliente; X desfaz".to_string()
+                        } else {
+                            foto.estado.rotulo().to_string()
+                        }),
                 )
                 .child(
                     div()
@@ -5880,14 +5946,15 @@ mod testes {
             .expect("a janela deve estar aberta");
     }
 
-    /// 🚨 **Sem classificação não é "à venda" nem "levada".**
+    /// 🚨 **A sem nota está à venda.**
     ///
-    /// É a regra do dono de 2026-09-05, e ela mora no core: contar a sem nota no
-    /// recorte de venda dizia o contrário na primeira linha da tela — *"à venda
-    /// 8"* numa galeria em que nenhuma das oito tinha nota. Elas moram no
-    /// recorte "Sem nota", que existe para esvaziar.
+    /// 🔄 **Revogado pelo dono em 2026-09-21**: *"A foto com classificação 0
+    /// (zero) fica disponível para venda e irá para nuvem com marca d'água"*.
+    /// Até ali a sem nota ficava fora de "À venda" (regra de 2026-09-05). Agora
+    /// ela conta nos dois recortes — "À venda" e "Sem nota" —, e quem fica fora
+    /// da venda é só a rejeitada.
     #[gpui::test]
-    fn o_recorte_por_situacao_exige_classificacao(cx: &mut TestAppContext) {
+    fn a_sem_nota_esta_a_venda(cx: &mut TestAppContext) {
         let (janela, _) = janela(
             cx,
             vec![
@@ -5904,8 +5971,8 @@ mod testes {
                 assert_eq!(contagens.todas, 3);
                 assert_eq!(
                     contagens.de(Filtro::Situacao(acervo::Estado::Disponivel)),
-                    1,
-                    "a sem nota não entra em 'à venda'"
+                    2,
+                    "a sem nota está à venda"
                 );
                 assert_eq!(contagens.de(Filtro::SemNota), 1);
 
@@ -6782,6 +6849,59 @@ mod testes {
             .expect("a janela deve estar aberta");
     }
 
+    /// ❌ **A rejeitada tem recorte próprio, sai de "À venda" e não vai ao
+    /// balcão** (C21).
+    ///
+    /// O `P` com uma rejeitada na seleção marca as outras e diz qual ficou de
+    /// fora — a mesma recusa do servidor, feita antes da ida e separando em vez
+    /// de bloquear, como a da sem nota.
+    #[gpui::test]
+    fn a_rejeitada_tem_recorte_e_nao_vai_ao_balcao(cx: &mut TestAppContext) {
+        let mut rejeitada = foto("r1", EstadoDaFotoNoSite::Disponivel, Some(4));
+        rejeitada.rejeitada = true;
+        let (janela, publicador) = janela(
+            cx,
+            vec![
+                rejeitada,
+                foto("f1", EstadoDaFotoNoSite::Disponivel, Some(4)),
+            ],
+        );
+        entrar(cx, &janela);
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                let c = tela.contagens();
+                assert_eq!(c.de(Filtro::Rejeitadas), 1);
+                assert_eq!(
+                    c.de(Filtro::Situacao(acervo::Estado::Disponivel)),
+                    1,
+                    "a rejeitada não está à venda"
+                );
+                tela.selecionar_tudo(cx);
+                tela.marcar_como(EstadoNoBalcao::LevadaNoBalcao, cx);
+                assert!(
+                    tela.erro
+                        .as_deref()
+                        .is_some_and(|e| e.contains("rejeitada") && e.contains("r1.jpg")),
+                    "diz quem ficou de fora: {:?}",
+                    tela.erro
+                );
+            })
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+        let negociadas = publicador.negociadas();
+        assert_eq!(negociadas.len(), 1, "{negociadas:?}");
+        assert_eq!(negociadas[0].0, "f1", "só a que pode ir ao balcão");
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.filtrar(Filtro::Rejeitadas, cx);
+                assert_eq!(tela.total_visivel(), 1);
+                assert!(tela.como_esta("r1").is_some(), "é aqui que ela se acha");
+            })
+            .expect("a janela deve estar aberta");
+    }
+
     /// 🔁 **`X` de novo desfaz a rejeição, e a decisão é do grupo.**
     ///
     /// A mesma regra do `P`: só desfaz quando **todas** as marcadas já estão
@@ -7110,8 +7230,9 @@ mod testes {
                 );
                 assert_eq!(
                     contagens.de(Filtro::Situacao(acervo::Estado::Disponivel)),
-                    1,
-                    "e não entra em 'à venda': quem está à venda é quem subiu"
+                    3,
+                    "e entra em 'à venda': ela sobe sozinha e vende com marca d'água \
+                     (dono, 2026-09-21)"
                 );
 
                 // 🔑 **No fim da lista**: quem importou 500 quer vê-las onde as

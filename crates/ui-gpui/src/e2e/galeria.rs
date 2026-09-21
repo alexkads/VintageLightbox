@@ -273,9 +273,21 @@ fn classificar_e_rejeitar_a_foto_que_ainda_nao_subiu(cx: &mut TestAppContext) {
     e.teclar(cx, "x");
     e.esperar(cx);
     assert_eq!(no_catalogo(&e, cx, id).1, Some(-1), "o X rejeita");
+    let rejeitadas = |e: &Estudio, cx: &mut TestAppContext| {
+        e.detalhe(cx, |tela, _w, _cx| {
+            tela.contagens()
+                .de(biblioteca_core::acervo::Filtro::Rejeitadas)
+        })
+    };
+    assert_eq!(
+        rejeitadas(&e, cx),
+        1,
+        "e a grade a põe no recorte dela (C21)"
+    );
     e.teclar(cx, "x");
     e.esperar(cx);
     assert_eq!(no_catalogo(&e, cx, id).1, Some(0), "o segundo X desfaz");
+    assert_eq!(rejeitadas(&e, cx), 0, "e ela volta");
     assert!(e.site.tiradas().is_empty(), "rejeitar não apaga nada");
 
     // A outra foto não foi tocada por nenhum destes gestos.

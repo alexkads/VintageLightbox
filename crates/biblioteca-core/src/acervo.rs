@@ -119,16 +119,22 @@ pub enum Filtro {
     Apagadas,
     /// As que ninguém classificou — o recorte que o dono pediu em 2026-09-05.
     ///
-    /// Existe porque elas são um problema a resolver, não um estado normal:
-    /// não podem ir à venda, não recebem marca d'água e não deviam estar no
-    /// storage. Sem um recorte que as junte, achá-las numa galeria de duzentas
-    /// é olhar foto por foto.
+    /// 🔄 Até 2026-09-21 ela era um problema a resolver (não ia à venda nem ao
+    /// storage). Hoje está à venda e sobe com marca d'água; o recorte continua
+    /// porque vender **no balcão** pede nota, e achá-las numa galeria de
+    /// duzentas sem ele é olhar foto por foto.
     SemNota,
     /// As que **têm nota** — o oposto de [`Filtro::SemNota`].
     ///
     /// Serve à pergunta que o operador faz no fim do atendimento: *"o que já
     /// está classificado?"*. Sem ele, a resposta é somar três chips de cabeça.
     Classificadas,
+    /// As que o operador **rejeitou** com a tecla `X` (contrato C21).
+    ///
+    /// 🔑 Elas saem de todos os outros recortes menos "Todas": não estão à
+    /// venda, não vão ao balcão e não esperam curadoria — a decisão já foi
+    /// tomada. É aqui que se acham para desfazer, com o mesmo `X`.
+    Rejeitadas,
 }
 
 impl Filtro {
@@ -145,11 +151,22 @@ impl Filtro {
             // contrário na primeira linha da tela — *"à venda 8"* numa galeria
             // em que nenhuma das oito tinha nota, e nenhuma sequer havia
             // subido. Elas moram no recorte `SemNota`, que existe para isso.
-            Filtro::Situacao(estado) => {
-                !foto.apagada && foto.nota.is_some() && foto.estado == estado
-            }
-            Filtro::SemNota => !foto.apagada && foto.nota.is_none(),
-            Filtro::Classificadas => !foto.apagada && foto.nota.is_some(),
+            //
+            // 🔄 **Revogado pelo dono em 2026-09-21**: *"A foto com
+            // classificação 0 (zero) fica disponível para venda e irá para
+            // nuvem com marca d'água; para a nova regra, somente as fotos
+            // rejeitadas não serão enviadas para nuvem"*. A sem nota está à
+            // venda como qualquer outra; a venda **no balcão** continua pedindo
+            // nota e `P`, e quem cobra isso é o balcão, não o recorte.
+            //
+            // 🚨 **A rejeitada sai** (C21): ela não está à venda em lugar
+            // nenhum.
+            Filtro::Situacao(estado) => !foto.apagada && !foto.rejeitada && foto.estado == estado,
+            // Rejeitada não é "sem nota" (C21): a sem nota espera curadoria, a
+            // rejeitada já foi decidida.
+            Filtro::SemNota => !foto.apagada && !foto.rejeitada && foto.nota.is_none(),
+            Filtro::Classificadas => !foto.apagada && !foto.rejeitada && foto.nota.is_some(),
+            Filtro::Rejeitadas => !foto.apagada && foto.rejeitada,
         }
     }
 }
@@ -166,6 +183,8 @@ pub struct Contagens {
     pub sem_nota: usize,
     /// Quantas têm nota.
     pub classificadas: usize,
+    /// Quantas foram rejeitadas (`X`).
+    pub rejeitadas: usize,
 }
 
 impl Contagens {
@@ -178,6 +197,7 @@ impl Contagens {
             Filtro::Apagadas => self.apagadas,
             Filtro::SemNota => self.sem_nota,
             Filtro::Classificadas => self.classificadas,
+            Filtro::Rejeitadas => self.rejeitadas,
         }
     }
 }
@@ -264,22 +284,23 @@ impl Acervo {
             todas: self.fotos.len(),
             ..Default::default()
         };
+        // 🔑 **Contado pelo próprio `Filtro::bate`**, recorte a recorte: o
+        // número que a barra mostra é o que o recorte devolve, sempre. Contar
+        // com uma segunda regra aqui foi o que deixou a D21 passar — as duas
+        // listas da mesma verdade.
         for f in &self.fotos {
-            if f.apagada {
-                c.apagadas += 1;
-            } else if f.nota.is_none() {
-                // 🚨 Ela não entra em nenhum recorte de situação — ver
-                // `Filtro::bate`. O número que a barra mostra é o mesmo que o
-                // recorte devolve, sempre.
-                c.sem_nota += 1;
-            } else {
-                c.classificadas += 1;
-                match f.estado {
-                    Estado::LevadaNoBalcao => c.levadas += 1,
-                    Estado::Disponivel => c.a_venda += 1,
-                    Estado::Comprada => c.compradas += 1,
+            let conta = |filtro: Filtro, n: &mut usize| {
+                if filtro.bate(f) {
+                    *n += 1;
                 }
-            }
+            };
+            conta(Filtro::Apagadas, &mut c.apagadas);
+            conta(Filtro::SemNota, &mut c.sem_nota);
+            conta(Filtro::Classificadas, &mut c.classificadas);
+            conta(Filtro::Rejeitadas, &mut c.rejeitadas);
+            conta(Filtro::Situacao(Estado::LevadaNoBalcao), &mut c.levadas);
+            conta(Filtro::Situacao(Estado::Disponivel), &mut c.a_venda);
+            conta(Filtro::Situacao(Estado::Comprada), &mut c.compradas);
         }
         c
     }
@@ -438,26 +459,65 @@ mod testes {
         assert_eq!(a.total_visivel(), 1, "mas o recorte mostra uma só");
     }
 
-    /// 🚨 **A sem nota não conta como "à venda"** — achado do dono na tela, no
-    /// mesmo dia: *"a contagem do filtro à venda 8 está errada, pois não pode
-    /// ser vendido se não estiver classificado"*. Eram oito fotos da área
-    /// temporária, nenhuma classificada, nenhuma sequer no servidor — e a barra
-    /// anunciava oito à venda.
+    /// ❌ **Só a rejeitada fica fora da venda** (dono, 2026-09-21).
+    ///
+    /// A sem nota está à venda e vai à nuvem com marca d'água; a rejeitada sai
+    /// de todo recorte menos "Todas" e o dela — "À venda", "Sem nota" e
+    /// "Classificadas". O número de cada chip é o que o recorte devolve, em
+    /// todos.
     #[test]
-    fn a_sem_nota_nao_entra_nos_recortes_de_situacao() {
+    fn a_rejeitada_sai_dos_recortes_e_tem_o_dela() {
         let mut sem = foto("sem", Estado::Disponivel, false);
         sem.nota = None;
+        let mut rejeitada = foto("rej", Estado::Disponivel, false);
+        rejeitada.rejeitada = true;
+        let mut rejeitada_sem_nota = foto("rej-sem", Estado::Disponivel, false);
+        rejeitada_sem_nota.rejeitada = true;
+        rejeitada_sem_nota.nota = None;
         let mut a = Acervo::novo();
-        a.definir(vec![foto("com", Estado::Disponivel, false), sem]);
+        a.definir(vec![
+            foto("com", Estado::Disponivel, false),
+            sem,
+            rejeitada,
+            rejeitada_sem_nota,
+        ]);
 
         let c = a.contagens();
-        assert_eq!(c.a_venda, 1, "so a classificada esta a venda");
-        assert_eq!(c.sem_nota, 1);
-        assert_eq!(c.todas, 2, "as duas continuam existindo");
+        assert_eq!(
+            c.a_venda, 2,
+            "a classificada e a sem nota; a rejeitada, não"
+        );
+        assert_eq!(c.sem_nota, 1, "rejeitada não é sem nota");
+        assert_eq!(c.classificadas, 1, "nem classificada");
+        assert_eq!(c.rejeitadas, 2);
+        assert_eq!(c.todas, 4, "todas continuam existindo");
 
         a.filtrar(Filtro::Situacao(Estado::Disponivel));
-        assert_eq!(a.total_visivel(), 1);
-        assert_eq!(a.visivel(0).unwrap().id, "com");
+        let ids: Vec<&str> = (0..a.total_visivel())
+            .map(|i| a.visivel(i).unwrap().id.as_str())
+            .collect();
+        assert_eq!(ids, ["com", "sem"]);
+
+        a.filtrar(Filtro::Rejeitadas);
+        let ids: Vec<&str> = (0..a.total_visivel())
+            .map(|i| a.visivel(i).unwrap().id.as_str())
+            .collect();
+        assert_eq!(ids, ["rej", "rej-sem"]);
+
+        // O número do chip é o que o recorte devolve, em todo recorte.
+        for filtro in [
+            Filtro::Todas,
+            Filtro::Apagadas,
+            Filtro::SemNota,
+            Filtro::Classificadas,
+            Filtro::Rejeitadas,
+            Filtro::Situacao(Estado::Disponivel),
+            Filtro::Situacao(Estado::LevadaNoBalcao),
+            Filtro::Situacao(Estado::Comprada),
+        ] {
+            a.filtrar(filtro);
+            assert_eq!(a.total_visivel(), c.de(filtro), "{filtro:?}");
+        }
     }
 
     /// 🚨 **O recorte das não classificadas** — o pedido do dono de 2026-09-05.

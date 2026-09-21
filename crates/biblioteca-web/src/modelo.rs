@@ -24,6 +24,10 @@ pub struct FotoJson {
     /// A nota de 1 a 5; ausente ou nula = não classificada.
     #[serde(default)]
     pub nota: Option<u8>,
+    /// Rejeitada com a tecla `X` (C21). Ausente = não rejeitada, que é o que
+    /// um site sem o campo quer dizer.
+    #[serde(default)]
+    pub rejeitada: bool,
     #[serde(default)]
     pub ordem: i64,
 }
@@ -47,6 +51,10 @@ impl FotoJson {
             downloads: 0,
             revelada: false,
             nota: self.nota,
+            // 🚨 **Faltava**: o core ganhou o campo em 2026-09-20 e esta ponte
+            // não o passava — a grade do site nunca soube que uma foto estava
+            // rejeitada, e a contava "à venda" (D21).
+            rejeitada: self.rejeitada,
             ordem: self.ordem,
         })
     }
