@@ -25,6 +25,22 @@
 /// O tamanho-alvo do tile, em pixels — o controle de zoom escolhe entre os dois.
 pub const ZOOM_MIN: f32 = 110.0;
 pub const ZOOM_MAX: f32 = 440.0;
+
+/// O maior zoom **desta** grade: a largura dela — uma foto por linha.
+///
+/// 🔄 **O topo do zoom é "uma por linha"** (dono, 2026-09-21: *"o mínimo
+/// deveria ser 1 na galeria de fotos dentro da sessão, pois existem momentos
+/// que o operador precisa ver a foto maior"*). Com o teto fixo em
+/// [`ZOOM_MAX`], uma janela larga parava em três por linha. [`ZOOM_MAX`]
+/// continua sendo o piso do teto: numa grade estreita (ou ainda sem medida), o
+/// controle não encolhe abaixo dele.
+pub fn zoom_maximo(largura: f32) -> f32 {
+    if largura.is_finite() {
+        largura.max(ZOOM_MAX)
+    } else {
+        ZOOM_MAX
+    }
+}
 pub const ZOOM_PADRAO: f32 = 220.0;
 
 /// O respiro entre tiles.
@@ -144,7 +160,7 @@ impl Layout {
         } else {
             ESPACO
         };
-        let alvo = zoom.clamp(ZOOM_MIN, ZOOM_MAX);
+        let alvo = zoom.clamp(ZOOM_MIN, zoom_maximo(l));
 
         let colunas = colunas_que_cabem(l, alvo, espaco);
         let lado = if colunas == 1 {
@@ -506,6 +522,19 @@ pub fn suavizar(t: f32) -> f32 {
 
 #[cfg(test)]
 mod testes_do_ajuste {
+
+    /// 🔄 No topo do zoom, uma foto por linha — em qualquer largura.
+    #[test]
+    fn o_topo_do_zoom_e_uma_por_linha() {
+        for largura in [800.0_f32, 1500.0, 2400.0] {
+            let l = Layout::calcular(largura, zoom_maximo(largura), 48, Opcoes::default());
+            assert_eq!(l.colunas, 1, "em {largura} px");
+            assert_eq!(l.lado, largura, "e ela ocupa a linha inteira");
+        }
+        assert_eq!(zoom_maximo(300.0), ZOOM_MAX, "o teto não encolhe abaixo do fixo");
+        assert_eq!(zoom_maximo(f32::NAN), ZOOM_MAX);
+    }
+
     use super::*;
 
     /// Oito fotos numa janela larga: o ajuste escolhe um tile grande, e todas

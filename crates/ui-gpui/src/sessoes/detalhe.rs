@@ -89,6 +89,14 @@ const LADO_DA_MINIATURA: u32 = ZOOM_MAXIMO as u32;
 /// janela** (três telas de cada), e este número é só o piso.
 const MINIATURAS_GUARDADAS: usize = 64;
 
+/// Quantas prévias grandes a grade guarda — as da vista na "uma por linha" e
+/// na "duas por linha", com folga.
+const GRANDES_GUARDADAS: usize = 12;
+
+/// Quantas prévias grandes a grade lê do disco por quadro: decodificar uma
+/// custa dezenas de milissegundos, e o quadro seguinte busca as que faltam.
+const GRANDES_POR_QUADRO: usize = 2;
+
 /// A base do nome do arquivo, sem extensão e sem caixa: `DSC_2700.JPG`,
 /// `DSC_2700.NEF` e `DSC_2700.jpg` dão o mesmo `dsc_2700`.
 ///
@@ -358,6 +366,9 @@ pub struct Detalhe {
     /// É o mesmo cache da grade da Biblioteca, que nasceu deste problema
     /// (`biblioteca::miniaturas`) e não tinha sido ligado aqui.
     miniaturas: CacheDeMiniaturas,
+    /// As prévias grandes das fotos à vista, para o zoom acima da miniatura —
+    /// a "uma por linha" (ver `preparar_as_grandes`). Poucas: só as da vista.
+    grandes: CacheDeMiniaturas,
     /// De quem já foi pedida miniatura, para não pedir duas vezes.
     pedidas: std::collections::HashSet<String>,
     /// Quantas miniaturas ainda estão a caminho.
@@ -384,6 +395,10 @@ pub struct Detalhe {
     /// fixo, ir de 90 a 320px são sete cliques, e o operador não vê onde está
     /// na faixa. O slider mostra e chega em um gesto.
     zoom_slider: Entity<SliderState>,
+    /// O topo do slider agora — a largura da grade (uma foto por linha). O
+    /// slider é refeito quando ela muda (`acompanhar_o_topo_do_zoom`): o
+    /// `SliderState` só aceita o máximo na construção.
+    zoom_maximo: f32,
     /// Se o aviso ao cliente está a caminho.
     avisando: bool,
     /// Se o pedido do link está no ar — é o que mantém a colheita acordada até
@@ -713,28 +728,11 @@ impl Detalhe {
         previews: Arc<PreviewManager>,
         cx: &mut Context<Self>,
     ) -> Self {
-        let zoom_slider = cx.new(|_| {
-            SliderState::new()
-                .min(ZOOM_MINIMO)
-                .max(ZOOM_MAXIMO)
-                .step(PASSO_DO_ZOOM)
-                .default_value(ZOOM_PADRAO)
-        });
-        // ⚠️ `subscribe`, e não `subscribe_in`: mudar o tamanho do tile não
-        // precisa da janela, e exigi-la obrigaria a raiz a construir o Detalhe
-        // dentro de um `cx.new` com `window` — que ela não tem ali.
-        cx.subscribe(&zoom_slider, |tela, _estado, evento: &SliderEvent, cx| {
-            let SliderEvent::Change(valor) = evento;
-            let novo = valor.start().clamp(ZOOM_MINIMO, ZOOM_MAXIMO);
-            if novo != tela.zoom {
-                tela.zoom = novo;
-                cx.notify();
-            }
-        })
-        .detach();
+        let zoom_slider = Self::novo_slider_do_zoom(ZOOM_MAXIMO, ZOOM_PADRAO, cx);
 
         Self {
             zoom_slider,
+            zoom_maximo: ZOOM_MAXIMO,
             publicador,
             seletor,
             escolhas: channel(),
@@ -766,6 +764,9 @@ impl Detalhe {
             previews,
             miniaturas: CacheDeMiniaturas::nova(
                 NonZeroUsize::new(MINIATURAS_GUARDADAS).expect("não é zero"),
+            ),
+            grandes: CacheDeMiniaturas::nova(
+                NonZeroUsize::new(GRANDES_GUARDADAS).expect("não é zero"),
             ),
             pedidas: std::collections::HashSet::new(),
             baixando: 0,
@@ -848,6 +849,7 @@ impl Detalhe {
         self.ids_locais.clear();
         self.com_revelada.clear();
         self.miniaturas.esvaziar();
+        self.grandes.esvaziar();
         self.recompor_acervo();
         self.selecao.limpar_tudo();
         self.pedidas.clear();
@@ -1105,8 +1107,67 @@ impl Detalhe {
         self.zoom
     }
 
+    /// O slider do zoom, de [`ZOOM_MINIMO`] até `maximo`.
+    fn novo_slider_do_zoom(maximo: f32, valor: f32, cx: &mut Context<Self>) -> Entity<SliderState> {
+        let slider = cx.new(|_| {
+            SliderState::new()
+                .min(ZOOM_MINIMO)
+                .max(maximo)
+                .step(PASSO_DO_ZOOM)
+                .default_value(valor.clamp(ZOOM_MINIMO, maximo))
+        });
+        // ⚠️ `subscribe`, e não `subscribe_in`: mudar o tamanho do tile não
+        // precisa da janela, e exigi-la obrigaria a raiz a construir o Detalhe
+        // dentro de um `cx.new` com `window` — que ela não tem ali.
+        cx.subscribe(&slider, |tela, _estado, evento: &SliderEvent, cx| {
+            let SliderEvent::Change(valor) = evento;
+            let novo = valor.start().clamp(ZOOM_MINIMO, tela.zoom_maximo);
+            if novo != tela.zoom {
+                tela.zoom = novo;
+                cx.notify();
+            }
+        })
+        .detach();
+        slider
+    }
+
+    /// 🔄 **O topo do zoom é "uma foto por linha"** (dono, 2026-09-21: *"o
+    /// mínimo deveria ser 1 na galeria de fotos dentro da sessão, pois existem
+    /// momentos que o operador precisa ver a foto maior"*). Com o teto fixo em
+    /// 320 px, uma janela larga parava em três por linha. O topo acompanha a
+    /// largura da grade — a mesma regra do site (`zoom_maximo` do core).
+    fn acompanhar_o_topo_do_zoom(&mut self, cx: &mut Context<Self>) {
+        let largura = self.largura_da_grade(self.janela_no_quadro.0);
+        let topo = if largura.is_finite() {
+            largura.round().max(ZOOM_MAXIMO)
+        } else {
+            ZOOM_MAXIMO
+        };
+        if (topo - self.zoom_maximo).abs() < 1.0 {
+            return;
+        }
+        let estava_no_topo = self.zoom >= self.zoom_maximo - 0.5;
+        self.zoom_maximo = topo;
+        // Quem estava em "uma por linha" continua nela ao alargar a janela.
+        if estava_no_topo || self.zoom > topo {
+            self.zoom = topo;
+        }
+        self.zoom_slider = Self::novo_slider_do_zoom(topo, self.zoom, cx);
+    }
+
+    /// O lado da célula: o zoom, sem passar da largura da grade — no topo, uma
+    /// foto por linha, ocupando a linha inteira.
+    fn lado_da_celula(&self) -> f32 {
+        let largura = self.largura_da_grade(self.janela_no_quadro.0);
+        if largura.is_finite() && largura >= ZOOM_MINIMO {
+            self.zoom.min(largura)
+        } else {
+            self.zoom
+        }
+    }
+
     pub fn ajustar_zoom(&mut self, passo: f32, window: &mut Window, cx: &mut Context<Self>) {
-        let novo = (self.zoom + passo).clamp(ZOOM_MINIMO, ZOOM_MAXIMO);
+        let novo = (self.zoom + passo).clamp(ZOOM_MINIMO, self.zoom_maximo);
         if novo == self.zoom {
             return;
         }
@@ -1269,7 +1330,7 @@ impl Detalhe {
     /// a punha.
     fn passo_da_grade(&self) -> f32 {
         let linha = self.linha_medida.unwrap_or(self.linha_de_texto);
-        self.zoom * 0.72 + 4.0 + 2.0 * linha + VAO_DA_GRADE
+        self.lado_da_celula() * 0.72 + 4.0 + 2.0 * linha + VAO_DA_GRADE
     }
 
     /// Traz à vista da tira a foto pendente, se a tira já tem medida.
@@ -1341,7 +1402,12 @@ impl Detalhe {
                 return colunas;
             }
         }
-        colunas_que_cabem(self.largura_da_grade(janela), self.zoom, VAO_DA_GRADE)
+        let largura = self.largura_da_grade(janela);
+        colunas_que_cabem(
+            largura,
+            self.zoom.min(largura.max(ZOOM_MINIMO)),
+            VAO_DA_GRADE,
+        )
     }
 
     /// Uma **linha** para cima ou para baixo — as setas ↑ e ↓.
@@ -2342,6 +2408,9 @@ impl Detalhe {
         self.reveladas_avisadas.push(foto_id.to_string());
         self.miniaturas.esquecer(foto_id);
         self.miniaturas.esquecer(&chave_do_site(foto_id));
+        // As grandes são poucas: esquecê-las todas é mais simples que achar a
+        // chave certa, e a próxima passada relê as da vista.
+        self.grandes.esvaziar();
         self.miniaturas
             .esquecer(&crate::revelacao::persistencia::chave_da_revelada(foto_id));
         self.miniaturas
@@ -2603,6 +2672,7 @@ impl Detalhe {
                             // O cache guarda a ausência: sem esquecê-la, a foto
                             // recém-chegada ficaria vazia até sair e voltar.
                             self.miniaturas.esquecer(&chave);
+                            self.grandes.esquecer(&chave);
                             // A grade guarda "ausente" para quem ainda não tinha
                             // miniatura; sem avisar, a foto recém-baixada só
                             // apareceria quando a célula saísse e voltasse.
@@ -2858,6 +2928,9 @@ impl Detalhe {
             self.carregar_miniatura(&chave);
         }
         self.lembrar_as_imagens(&perto);
+        if self.preparar_as_grandes(grade_vista_medida.clone()) {
+            faltou = true;
+        }
         // 📏 `VLB_MEDIR_GRADE=1`: a cada quadro, quantas células à vista estão
         // sem imagem e quais fotos aparecem em dobro — a régua do pisca da
         // subida (21/set/2026). Fotografar a janela não servia: a captura leva
@@ -2913,6 +2986,43 @@ impl Detalhe {
     /// O nome é o que a local e a do site têm em comum, e só a local que
     /// **saiu da grade** empresta: duas fotos de mesmo nome à vista ao mesmo
     /// tempo não trocam de imagem.
+    /// A célula passou do tamanho da miniatura? Então a grade quer a prévia
+    /// grande — sem isso, a "uma por linha" do zoom mostraria a miniatura de
+    /// 320 px esticada até a largura da janela (dono, 2026-09-21: *"existem
+    /// momentos que o operador precisa ver a foto maior"*).
+    fn quer_as_grandes(&self) -> bool {
+        self.lado_da_celula() > LADO_DA_MINIATURA as f32
+    }
+
+    /// Lê do disco as prévias grandes das fotos à vista, poucas por quadro.
+    /// Devolve se ficou alguma para o próximo.
+    fn preparar_as_grandes(&mut self, vista: Range<usize>) -> bool {
+        if !self.quer_as_grandes() {
+            return false;
+        }
+        let mut lidas = 0;
+        for posicao in vista {
+            let Some(foto) = self.acervo.visivel(posicao) else {
+                continue;
+            };
+            let chave = self.chave_da_foto(&foto.id);
+            if self.grandes.espiar(&chave).is_some() {
+                self.grandes.tocar(&chave);
+                continue;
+            }
+            if lidas == GRANDES_POR_QUADRO {
+                return true;
+            }
+            let grande = match self.previews.get_preview(&chave) {
+                Some(imagem) => Miniatura::Pronta(crate::imagem::para_gpui(imagem)),
+                None => Miniatura::Ausente,
+            };
+            self.grandes.guardar(&chave, grande);
+            lidas += 1;
+        }
+        false
+    }
+
     fn lembrar_as_imagens(&mut self, perto: &[(String, String)]) {
         let agora = std::time::Instant::now();
         self.trocas
@@ -2989,10 +3099,19 @@ impl Detalhe {
     /// ela não chega — e, numa troca, a de antes por baixo da nova, que surge
     /// por cima dela.
     fn imagem_da_celula(&self, foto_id: &str, opacidade: f32) -> Option<gpui::AnyElement> {
-        let pronta = match self.miniaturas.espiar(&self.chave_da_foto(foto_id)) {
+        let chave = self.chave_da_foto(foto_id);
+        // No zoom grande, a prévia grande — quando já está na memória.
+        let grande = self
+            .quer_as_grandes()
+            .then(|| match self.grandes.espiar(&chave) {
+                Some(Miniatura::Pronta(imagem)) => Some(imagem),
+                _ => None,
+            })
+            .flatten();
+        let pronta = grande.or_else(|| match self.miniaturas.espiar(&chave) {
             Some(Miniatura::Pronta(imagem)) => Some(imagem.clone()),
             _ => None,
-        };
+        });
         let imagem = pronta
             .clone()
             .or_else(|| self.imagens_vistas.get(foto_id).cloned())?;
@@ -3147,6 +3266,7 @@ impl Render for Detalhe {
         // 🚨 **Antes de montar qualquer célula.** É o que tira o decode de dentro
         // do quadro; `celula` e `tira` daqui para baixo só leem da memória.
         self.medir_o_quadro(window);
+        self.acompanhar_o_topo_do_zoom(cx);
         self.seguir_o_foco();
         let total = self.acervo.total_visivel();
         let tira = self.faixas_da_tira(total).1;
@@ -3974,7 +4094,7 @@ impl Detalhe {
         let esta = cx.entity().downgrade();
         let chave = (self.janela_no_quadro.0, self.painel_no_quadro, self.zoom);
         let linha_usada = self.linha_medida.unwrap_or(self.linha_de_texto);
-        let lado = self.zoom;
+        let lado = self.lado_da_celula();
         let pular = usize::from(de > 0);
         // ⚠️ Com `track_scroll`, o GPUI guarda as caixas dos filhos na alça da
         // rolagem, e não na lista que o ouvinte recebe (que chega vazia).
@@ -4056,7 +4176,7 @@ impl Detalhe {
     ) -> impl IntoElement {
         let marcada = self.selecao.tem(posicao);
         let em_foco = self.selecao.foco() == Some(posicao);
-        let lado = self.zoom;
+        let lado = self.lado_da_celula();
         // 🔑 **Só lê.** Quem carrega é `preparar_miniaturas`, uma vez por quadro,
         // antes de o render começar — ver o campo `miniaturas`.
         // A rejeitada fica esmaecida: continua ali para ser desfeita, e não
@@ -8066,6 +8186,46 @@ mod testes {
                 tela.preparar_miniaturas();
                 let (velha, _, _) = tela.trocas.get("s1").expect("a troca suave começou");
                 assert!(Arc::ptr_eq(velha, &da_local));
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🔄 **No topo do zoom, uma foto por linha** (dono, 2026-09-21: *"o
+    /// mínimo deveria ser 1 na galeria de fotos dentro da sessão"*). O topo do
+    /// slider acompanha a largura da grade; com o teto fixo em 320 px, uma
+    /// janela larga parava em três por linha.
+    #[gpui::test]
+    fn o_topo_do_zoom_e_uma_foto_por_linha(cx: &mut TestAppContext) {
+        let fotos = (0..12)
+            .map(|i| foto(&format!("f{i:02}"), EstadoDaFotoNoSite::Disponivel, None))
+            .collect();
+        let (janela, _publicador) = janela(cx, fotos);
+        entrar(cx, &janela);
+        let mut visual = gpui::VisualTestContext::from_window(janela.into(), cx);
+        let desenhar = |visual: &mut gpui::VisualTestContext| {
+            for _ in 0..3 {
+                janela
+                    .update(visual, |_tela, _w, cx| cx.notify())
+                    .expect("a janela deve estar aberta");
+                visual.run_until_parked();
+            }
+        };
+        desenhar(&mut visual);
+        janela
+            .update(&mut visual, |tela, window, cx| {
+                assert!(
+                    tela.colunas_da_grade > 1,
+                    "no zoom padrão, várias por linha"
+                );
+                assert!(tela.zoom_maximo > ZOOM_MAXIMO, "o topo passou dos 320 px");
+                tela.ajustar_zoom(100_000.0, window, cx);
+            })
+            .expect("a janela deve estar aberta");
+        desenhar(&mut visual);
+        janela
+            .update(&mut visual, |tela, _window, _cx| {
+                assert_eq!(tela.colunas_da_grade, 1, "no topo, uma por linha");
+                assert!(tela.quer_as_grandes(), "e a célula pede a prévia grande");
             })
             .expect("a janela deve estar aberta");
     }

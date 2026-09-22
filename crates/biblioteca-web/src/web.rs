@@ -114,6 +114,11 @@ impl Grade {
         self.estado.definir_zoom(zoom)
     }
 
+    /// O topo do controle de zoom na largura de agora: uma foto por linha.
+    pub fn zoom_maximo(&self) -> f32 {
+        self.estado.zoom_maximo()
+    }
+
     /// O maior zoom em que todas as fotos do recorte cabem em
     /// `altura_disponivel` (a da **área**, não a do canvas), ou `-1` quando não
     /// cabem nem no menor tile.
