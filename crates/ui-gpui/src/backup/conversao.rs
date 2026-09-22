@@ -94,7 +94,9 @@ pub fn converter_para_webp(nome: &str, bruto: &[u8], conversao: Conversao) -> Op
     if !eh_conversivel(Path::new(nome)) {
         return None;
     }
-    let imagem = image::load_from_memory(bruto).ok()?;
+    // De pé: o WebP não leva a etiqueta de girar do EXIF — sem aplicá-la, a
+    // foto em retrato ficaria deitada no backup (`infrastructure::orientacao`).
+    let imagem = infrastructure::orientacao::decodificar_de_pe(bruto).ok()?;
     let (largura, altura) =
         medidas_que_cabem(imagem.width(), imagem.height(), conversao.maior_lado);
 

@@ -30,6 +30,10 @@ pub struct FotoJson {
     pub rejeitada: bool,
     #[serde(default)]
     pub ordem: i64,
+    /// O nome do arquivo — o que a local e a do servidor têm em comum quando
+    /// ela sobe (ver `emprestimo`). Ausente = nenhuma herança por nome.
+    #[serde(default)]
+    pub arquivo: String,
 }
 
 impl FotoJson {

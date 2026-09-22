@@ -480,6 +480,19 @@ pub struct Aplicativo {
     /// gravada, e a foto reabre com ela); perde o **aviso** de que o cliente
     /// ainda vê o JPEG antigo.
     a_subir: Vec<(String, Ajustes, CropSettings)>,
+    /// A receita que saiu em cada envio do "Salvar na galeria", por id no site
+    /// — no formato do depósito (`ajustes_em_json`).
+    ///
+    /// 🚨 **É o que impede o envio de apagar uma receita mais nova.** A
+    /// confirmação do servidor tirava a foto da fila e do depósito sem olhar:
+    /// um "Zerar" ou "Sincronizar" feito enquanto ela subia sumia, e o site
+    /// ficava com a revelação de antes sem nada pendente. O site só dá baixa
+    /// se a receita no depósito ainda for a que subiu (`registrar-salva.ts`).
+    receitas_no_ar: std::collections::HashMap<String, String>,
+    /// A receita de um "Salvar" que pegou a foto **no ar** — ela sobe de novo,
+    /// com esta, assim que a de antes responder. É o que o Worker do site faz:
+    /// a mesma foto vai para o fim da fila com a receita nova.
+    reenviar_depois: std::collections::HashMap<String, (Ajustes, CropSettings)>,
     /// Quem refaz o preview que o cache perdeu, e por onde a resposta volta.
     repositor: Arc<dyn Repositor>,
     reposicoes: (Sender<ReposicaoRecado>, Receiver<ReposicaoRecado>),
@@ -539,9 +552,6 @@ pub struct Aplicativo {
     /// As predefinições que este app conhece — sistema e as do banco local.
     /// É delas que sai a receita padrão da sessão aberta.
     presets_conhecidos: Vec<Preset>,
-    /// O aviso de "há trabalho em segundo plano" está na tela? Guarda a frase
-    /// do que está pendente — ver [`Aplicativo::avisar_fechamento_pendente`].
-    fechar_avisando: Option<SharedString>,
     /// O que este app **mandou subir sozinho** (C20), por id do catálogo: a
     /// curadoria que a foto tinha quando entrou na esteira, `(nota, rejeitada)`.
     ///
@@ -557,7 +567,11 @@ pub struct Aplicativo {
     /// registro, que são as que este app acabou de criar. Nenhuma outra é
     /// tocada: sobrescrever o que o site sabe seria desfazer o trabalho de quem
     /// classificou por lá.
-    subindo_sozinhas: std::collections::HashMap<String, (Option<u8>, bool)>,
+    /// O valor é o que foi mandado: a nota, a rejeição e a **levada no
+    /// balcão** (a tecla `B`, que desde 21/set/2026 vale na foto que ainda
+    /// sobe — dono: *"eu não posso impedir o atendente de fazer as
+    /// marcações"*).
+    subindo_sozinhas: std::collections::HashMap<String, (Option<u8>, bool, bool)>,
     /// As que terminaram de subir e cuja versão do site ainda não chegou à
     /// grade — ver `mostrar_as_locais_na_sessao`.
     recem_subidas: std::collections::HashSet<String>,
@@ -1034,6 +1048,8 @@ impl Aplicativo {
             _sincronia: None,
             sincronias_pendentes: 0,
             a_subir: Vec::new(),
+            receitas_no_ar: std::collections::HashMap::new(),
+            reenviar_depois: std::collections::HashMap::new(),
             repositor: portas.repositor,
             reposicoes: channel(),
             reposicoes_pendentes: 0,
@@ -1047,7 +1063,6 @@ impl Aplicativo {
             proximo_toast: 0,
             _relogios_dos_toasts: Vec::new(),
             presets_conhecidos: presets_para_a_receita,
-            fechar_avisando: None,
             subindo_sozinhas: std::collections::HashMap::new(),
             recem_subidas: std::collections::HashSet::new(),
             rejeitadas_agora: std::collections::HashSet::new(),
@@ -1431,13 +1446,19 @@ impl Aplicativo {
                         ordem: ordem as u32,
                         // 🔑 `None`: quem sobe não escolheu leva nenhuma, e o
                         // estado sai da tecla `B` de cada foto, depois.
-                        estado: None,
+                        estado: (foto.comprada && nota.is_none())
+                            .then_some(domain::services::pos_venda::EstadoNoBalcao::Disponivel),
                         nota,
                         // 🧾 A faixa escolhida na barra de envio da sessão.
                         produto_id: faixa.clone(),
                     }),
                 });
-            self.subindo_sozinhas.insert(foto.id.clone(), (nota, false));
+            // 🛒 A levada sem nota seria recusada pelo servidor — e com ela a
+            // foto inteira. A tela já não deixa marcar assim; se a nota saiu
+            // depois do `B`, a foto sobe à venda e a levada espera a nota.
+            let levada = foto.comprada && nota.is_some();
+            self.subindo_sozinhas
+                .insert(foto.id.clone(), (nota, false, levada));
             entraram += 1;
         }
         if entraram == 0 {
@@ -1470,7 +1491,8 @@ impl Aplicativo {
             let Some(no_site) = foto.pos_venda_foto_id.as_deref() else {
                 continue;
             };
-            let Some((nota_enviada, rejeicao_enviada)) = self.subindo_sozinhas.remove(&foto.id)
+            let Some((nota_enviada, rejeicao_enviada, levada_enviada)) =
+                self.subindo_sozinhas.remove(&foto.id)
             else {
                 continue;
             };
@@ -1478,9 +1500,17 @@ impl Aplicativo {
                 .ok()
                 .filter(|n| (1..=5).contains(n));
             let rejeitada = foto.flag == Some(REJEITADA_NO_CATALOGO);
+            // 🔑 A subida lê o `B` do catálogo na hora de sair, e o operador
+            // pode tê-lo apertado depois: a diferença vai aqui.
+            let levada = foto.comprada && nota.is_some();
             let mudanca = domain::services::pos_venda::MudancaDaFoto {
                 nota: (nota != nota_enviada).then_some(nota.map(i16::from)),
                 rejeitada: (rejeitada != rejeicao_enviada).then_some(rejeitada),
+                estado: (levada != levada_enviada).then_some(if levada {
+                    domain::services::pos_venda::EstadoNoBalcao::LevadaNoBalcao
+                } else {
+                    domain::services::pos_venda::EstadoNoBalcao::Disponivel
+                }),
                 ..Default::default()
             };
             if mudanca.vazia() {
@@ -1695,6 +1725,16 @@ impl Aplicativo {
             //
             // 🔄 **E classificar não sobe mais nada** (C22): a nota é curadoria,
             // e quem leva a foto ao site é `subir_o_que_falta_do_ensaio`.
+            // 🛒 A tecla `B` na foto que ainda sobe: a marca vai para o
+            // catálogo — a mesma coluna do `B` da Biblioteca — e sobe com ela
+            // (`EstadoNoBalcao::da_foto`); o que mudar no meio da subida,
+            // `conciliar_o_que_subiu` leva depois.
+            DetalhePedido::Levar { ids, levada } => {
+                let (ids, levada) = (ids.clone(), *levada);
+                self.biblioteca
+                    .update(cx, |tela, cx| tela.marcar_comprada_ids(&ids, levada, cx));
+                self.pedir_releitura_do_acervo(cx);
+            }
             DetalhePedido::Classificar { ids, nota } => {
                 let (ids, nota) = (ids.clone(), *nota);
                 self.biblioteca
@@ -2317,6 +2357,23 @@ impl Aplicativo {
                 // e é a releitura que troca a miniatura da grade pela foto
                 // revelada. Sem ela o operador salvaria e continuaria vendo o
                 // "antes" — o pior desfecho, porque parece que não salvou.
+                PosVendaRecado::RevelacaoSalva { foto_no_site }
+                    if self.receita_mudou_no_envio(&foto_no_site) =>
+                {
+                    // 🚨 **A receita mudou enquanto a foto subia** — um "Zerar"
+                    // ou "Sincronizar" no meio do envio. O servidor tem a de
+                    // antes; a nova fica pendente (fila, depósito e prévia
+                    // local), e o próximo "Salvar" a leva. Dar baixa aqui era
+                    // perdê-la em silêncio.
+                    self.reenviar_se_pedido(&foto_no_site, cx);
+                    self.detalhe
+                        .update(cx, |tela, cx| tela.revelada_subiu(&foto_no_site, cx));
+                    self.ultimo_envio = Some(chrono::Utc::now().timestamp());
+                    self.recontar_o_que_falta_subir(cx);
+                    self.pedir_releitura_da_galeria(cx);
+                    self.contar_o_salvar(false, cx);
+                    mudou = true;
+                }
                 PosVendaRecado::RevelacaoSalva { foto_no_site } => {
                     // 🔑 **Subiu: sai do depósito.** A partir daqui a receita
                     // desta foto é a do servidor, e deixá-la também aqui faria
@@ -2374,6 +2431,10 @@ impl Aplicativo {
                     if vai_repetir {
                         continue;
                     }
+                    // A receita que falhou não está mais no ar; a de um
+                    // "Salvar" feito enquanto ela subia ainda tem a vez dela.
+                    self.receitas_no_ar.remove(&alvo);
+                    self.reenviar_se_pedido(&alvo, cx);
                     // Uma falha definitiva não pode bloquear uma nova
                     // tentativa depois que o operador corrigir a causa —
                     // especialmente ao classificar uma foto que falhou sem
@@ -2390,6 +2451,7 @@ impl Aplicativo {
                         "{}: {frase}",
                         self.nome_no_site(&alvo, cx).unwrap_or_else(|| alvo.clone())
                     );
+                    eprintln!("⚠️ [Envio] recusado — {recusa}");
                     self.recusas.push(recusa.clone());
                     self.avisar_falha(recusa, cx);
                 }
@@ -2901,8 +2963,7 @@ impl Aplicativo {
         // o efeito antes de salvar é a prévia local. É o que a web faz desde
         // 11/set/2026 (`usar-previas-reveladas.ts`), pelo mesmo relato.
         for (id, ajustes_dela, corte_dela) in &gravadas {
-            self.receita_padrao
-                .pedir_a_miniatura(id.clone(), *ajustes_dela, *corte_dela);
+            self.pedir_a_previa_da_receita(id, *ajustes_dela, *corte_dela, cx);
         }
         self.esperar_as_reveladas(cx);
         self.reler_o_acervo(cx);
@@ -2965,13 +3026,15 @@ impl Aplicativo {
 
         self.revelacao
             .update(cx, |tela, cx| tela.aplicar_sincronizadas(&gravadas, cx));
-        // 🚨 **As prévias locais das zeradas somem** — senão o gesto muda o
-        // banco e não muda a tela, que é a mesma queixa do "Sincronizar" pelo
-        // avesso: a miniatura continuaria mostrando a receita que acabou de ser
-        // desfeita (dono, 18/set/2026).
-        for (id, _, _) in &gravadas {
-            self.esquecer_a_previa_local(id, cx);
+        // 🚨 **As prévias das zeradas viram o neutro** — senão o gesto muda o
+        // banco e não muda a tela (dono, 18/set/2026). Apagá-las não bastava:
+        // na foto do site, sem prévia a tira volta à imagem da galeria, que
+        // ainda tem a receita até o "Salvar" (dono, 21/set/2026). É o que a web
+        // faz — a miniatura neutra refeita pelo Worker.
+        for (id, ajustes_dela, corte_dela) in &gravadas {
+            self.pedir_a_previa_da_receita(id, *ajustes_dela, *corte_dela, cx);
         }
+        self.esperar_as_reveladas(cx);
         self.reler_o_acervo(cx);
         self.recontar_o_que_falta_subir(cx);
         self.avisar_onde_esta_olhando(
@@ -2982,6 +3045,33 @@ impl Aplicativo {
             cx,
         );
         cx.notify();
+    }
+
+    /// Pede a prévia local desta receita — a do "Sincronizar" e a do "Zerar".
+    ///
+    /// 🔑 **A foto do site precisa da cópia de trabalho** (o bruto reduzido): é
+    /// dela que a prévia nasce, e não da imagem da galeria, que já traz a
+    /// receita antiga. Ela só está no cache das fotos já abertas na Revelação;
+    /// para as outras, o download sai aqui, e o serviço espera por ele.
+    fn pedir_a_previa_da_receita(
+        &mut self,
+        foto_id: &str,
+        ajustes: Ajustes,
+        corte: persistencia::Corte,
+        cx: &mut Context<Self>,
+    ) {
+        if let (Some(no_site), Some(sessao)) = (persistencia::id_no_site(foto_id), self.sessao()) {
+            let chave = persistencia::chave_do_trabalho(foto_id);
+            if !self
+                .previews
+                .tem(&chave, domain::services::PreviewType::Large)
+            {
+                let (sessao, no_site) = (sessao.clone(), no_site.to_string());
+                self.pedir_a_copia_de_trabalho(sessao, foto_id.to_string(), no_site, cx);
+            }
+        }
+        self.receita_padrao
+            .pedir_a_miniatura(foto_id.to_string(), ajustes, corte);
     }
 
     /// A prévia revelada local desta foto não vale mais: sai do cache e as três
@@ -3607,9 +3697,10 @@ impl Aplicativo {
         };
         let (_local, no_site) = foto;
 
-        if self.lote_no_ar.is_some() {
-            return;
-        }
+        // 🔄 **Com um lote no ar, o novo "Salvar" soma a ele** (2026-09-21).
+        // Antes ele voltava calado: a receita nova de uma foto que ainda
+        // esperava na esteira não subia, e o operador achava que tinha salvo.
+        // O site enfileira do mesmo jeito (`naFilaDeAcoes`).
         // O que está pendente vai para o banco **antes** do envio: os mesmos
         // ajustes que sobem ficam gravados aqui. A tela só fecha quando o lote
         // responder (`contar_o_salvar`).
@@ -3663,14 +3754,46 @@ impl Aplicativo {
             return;
         }
 
-        let quantas = lote.len();
-        self.lote_no_ar = Some((quantas, 0, false));
+        let mut quantas = 0;
         for (no_site, ajustes, corte) in lote {
-            self.esteira.empurrar(crate::envios::Trabalho::Revelacao {
-                foto_no_site: no_site,
+            let json = crate::pos_venda::porta::ajustes_em_json(&ajustes, &corte).to_string();
+            let entrada = self.esteira.empurrar(crate::envios::Trabalho::Revelacao {
+                foto_no_site: no_site.clone(),
                 ajustes: Box::new(ajustes),
-                corte,
+                corte: corte.clone(),
             });
+            // 🚨 **A que está no ar sobe de novo, com esta receita, quando a de
+            // antes responder** — senão o segundo "Salvar" deixava no site a
+            // receita do primeiro (visto rodando o app: zerar e salvar com o
+            // lote de P&B subindo terminava com duas fotos em P&B).
+            if entrada == crate::envios::Entrada::JaNoAr
+                && self.receitas_no_ar.get(&no_site) != Some(&json)
+            {
+                if self
+                    .reenviar_depois
+                    .insert(no_site.clone(), (ajustes, corte))
+                    .is_none()
+                {
+                    // Uma resposta a mais virá: a do reenvio.
+                    quantas += 1;
+                }
+                continue;
+            }
+            // 🔑 Só o que vai sair com **esta** receita a registra: a que já
+            // está no ar sobe a de antes, e é contra ela que a resposta confere.
+            use crate::envios::Entrada;
+            if matches!(entrada, Entrada::Nova | Entrada::Substituida) {
+                self.receitas_no_ar.insert(no_site, json);
+            }
+            if entrada == Entrada::Nova {
+                quantas += 1;
+            }
+        }
+        match self.lote_no_ar.as_mut() {
+            Some((total, _, _)) => *total += quantas,
+            // Sem foto nova, nada a esperar: um lote de zero nunca terminaria.
+            None if quantas > 0 => self.lote_no_ar = Some((quantas, 0, false)),
+            None => {}
         }
         // ⚠️ **A conta da espera é o lote inteiro**, e não o que está em voo: o
         // contador do canto e o G9 falam de respostas, e todas virão.
@@ -3708,6 +3831,53 @@ impl Aplicativo {
     /// diferentes mandaria a foto duas vezes ao site, a segunda desfazendo a
     /// primeira depois de dois downloads e dois JPEGs — e a ordem de chegada
     /// decidiria o que o cliente vê.
+    /// A receita desta foto hoje é outra que a que subiu? Tira o registro do
+    /// envio de qualquer jeito — a resposta chegou.
+    ///
+    /// 🔑 A receita de hoje é a da fila do "Salvar" (`a_subir`), senão a do
+    /// depósito — a mesma ordem em que `salvar_na_galeria` monta o lote.
+    /// Manda de novo a foto que um "Salvar" pegou no ar — ver
+    /// [`Self::reenviar_depois`].
+    fn reenviar_se_pedido(&mut self, foto_no_site: &str, cx: &mut Context<Self>) {
+        let Some((ajustes, corte)) = self.reenviar_depois.remove(foto_no_site) else {
+            return;
+        };
+        self.receitas_no_ar.insert(
+            foto_no_site.to_string(),
+            crate::pos_venda::porta::ajustes_em_json(&ajustes, &corte).to_string(),
+        );
+        self.esteira.empurrar(crate::envios::Trabalho::Revelacao {
+            foto_no_site: foto_no_site.to_string(),
+            ajustes: Box::new(ajustes),
+            corte,
+        });
+        // ⚠️ A espera desta resposta já foi contada no "Salvar" que pediu o
+        // reenvio — contar de novo deixava a bandeja em "2 fotos subindo" com
+        // tudo já no site (visto rodando o app).
+        self.despachar_os_envios(cx);
+    }
+
+    fn receita_mudou_no_envio(&mut self, foto_no_site: &str) -> bool {
+        let Some(enviada) = self.receitas_no_ar.remove(foto_no_site) else {
+            return false;
+        };
+        let atual = self
+            .a_subir
+            .iter()
+            .find(|(id, _, _)| id == foto_no_site)
+            .map(|(_, ajustes, corte)| {
+                crate::pos_venda::porta::ajustes_em_json(ajustes, corte).to_string()
+            })
+            .or_else(|| {
+                self.gravador
+                    .guardadas_do_site()
+                    .into_iter()
+                    .find(|(id, _)| id == foto_no_site)
+                    .map(|(_, json)| json)
+            });
+        atual.is_some_and(|atual| atual != enviada)
+    }
+
     fn enfileirar_para_subir(&mut self, no_site: String, ajustes: Ajustes, corte: CropSettings) {
         self.a_subir.retain(|(ja, _, _)| ja != &no_site);
         self.a_subir.push((no_site, ajustes, corte));
@@ -4263,115 +4433,6 @@ impl Aplicativo {
     /// frase, quem lê "apagar" imagina perda de arquivo e não clica; sem a
     /// terceira, clica achando que reimportar desfaz — e reimportar devolve o
     /// arquivo, não os 46 ajustes.
-    /// 🚪 **Fechar com trabalho em segundo plano avisa antes** — pedido do dono
-    /// (2026-09-20): *"ao fechar a aplicação ui-gpui avise que tem processo
-    /// pendente em segundo plano"*.
-    ///
-    /// 🚨 **O G9 nunca perdeu envio — mas fechava calado.** A janela sumia, a
-    /// bandeja assumia a fila e o app terminava sozinho ao esvaziar; quem não
-    /// conhecia o ícone concluía que tinha fechado o app no meio do envio, que é
-    /// o medo que o G9 existe para tirar. O aviso conta o que está pendente e
-    /// deixa a decisão com quem fechou.
-    pub(crate) fn avisar_fechamento_pendente(
-        &mut self,
-        pendente: SharedString,
-        cx: &mut Context<Self>,
-    ) {
-        self.fechar_avisando = Some(pendente);
-        cx.notify();
-    }
-
-    /// "Ficar no app": o aviso sai e nada fecha.
-    pub(crate) fn desistir_de_fechar(&mut self, cx: &mut Context<Self>) {
-        self.fechar_avisando = None;
-        crate::segundo_plano::desistiu_de_fechar(cx);
-        cx.notify();
-    }
-
-    /// "Continuar em segundo plano": a janela vai para a bandeja, e o app
-    /// termina sozinho quando a fila esvaziar (G9).
-    pub(crate) fn fechar_em_segundo_plano(&mut self, cx: &mut Context<Self>) {
-        self.fechar_avisando = None;
-        // A segunda tela não fica sozinha no monitor do cliente — e é aqui que
-        // ela se fecha, porque lá fora a raiz já está em uso (ver
-        // `segundo_plano::fechar_mesmo`).
-        self.fechar_tela_do_cliente(cx);
-        cx.notify();
-        crate::segundo_plano::fechar_mesmo(cx);
-    }
-
-    /// 🧪 A frase do aviso de fechamento que está na tela.
-    #[cfg(test)]
-    pub(crate) fn aviso_de_fechamento_para_teste(&self) -> Option<String> {
-        self.fechar_avisando.as_ref().map(ToString::to_string)
-    }
-
-    fn aviso_de_fechar_com_pendencia(
-        &self,
-        pendente: SharedString,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        div()
-            .absolute()
-            .inset_0()
-            .flex()
-            .items_center()
-            .justify_center()
-            .bg(tema::cores::veu())
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(10.))
-                    .p(px(16.))
-                    .max_w(px(460.))
-                    .bg(cx.theme().background)
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    .rounded(px(6.))
-                    .child(div().text_sm().child("Há trabalho em segundo plano"))
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(pendente),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(
-                                "Fechar agora não cancela nada: a janela vai para a área de \
-                                 notificação e o envio continua. O app se fecha sozinho quando \
-                                 a fila esvaziar.",
-                            ),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .justify_end()
-                            .gap(px(8.))
-                            .child(
-                                Button::new("fechar-ficar")
-                                    .label("Ficar no app")
-                                    .xsmall()
-                                    .on_click(cx.listener(|este, _ev, _window, cx| {
-                                        este.desistir_de_fechar(cx)
-                                    })),
-                            )
-                            .child(
-                                Button::new("fechar-em-segundo-plano")
-                                    .label("Continuar em segundo plano")
-                                    .xsmall()
-                                    .primary()
-                                    .on_click(cx.listener(|este, _ev, _window, cx| {
-                                        este.fechar_em_segundo_plano(cx)
-                                    })),
-                            ),
-                    ),
-            )
-    }
-
     fn aviso_de_apagar(&self, quantas: usize, cx: &mut Context<Self>) -> impl IntoElement {
         let titulo = if quantas == 1 {
             "Tirar 1 foto do catálogo?".to_string()
@@ -4807,11 +4868,6 @@ impl Render for Aplicativo {
                 self.biblioteca.read(cx).confirmando_apagar(),
                 |raiz, quantas| raiz.child(self.aviso_de_apagar(quantas, cx)),
             )
-            // 🚪 O aviso de fechar com trabalho em segundo plano — por cima de
-            // tudo, porque é uma pergunta sobre a janela inteira.
-            .when_some(self.fechar_avisando.clone(), |raiz, pendente| {
-                raiz.child(self.aviso_de_fechar_com_pendencia(pendente, cx))
-            })
             .when(false, |raiz| raiz)
             .when(self.configurando, |raiz| {
                 raiz.child(self.modal_de_configuracoes(cx))
@@ -4863,7 +4919,12 @@ fn local_para_a_grade(foto: &PhotoViewModel, ordem: i64) -> biblioteca_core::ace
         rejeitada: foto.flag == Some(REJEITADA_NO_CATALOGO),
         id: foto.id.clone(),
         arquivo: foto.name.clone(),
-        estado: biblioteca_core::acervo::Estado::Disponivel,
+        // 🛒 O `B` dado enquanto ela sobe aparece na hora, como a nota.
+        estado: if foto.comprada {
+            biblioteca_core::acervo::Estado::LevadaNoBalcao
+        } else {
+            biblioteca_core::acervo::Estado::Disponivel
+        },
         apagada: false,
         produto_efetivo: String::new(),
         preco_negociado: None,
@@ -4985,6 +5046,12 @@ impl Aplicativo {
         self.no_cliente
             .as_ref()
             .map(|(id, ajustes, _)| (id.clone(), *ajustes))
+    }
+
+    /// O serviço das prévias ainda tem pedido na fila? Para o teste esperar a
+    /// thread dele, que anda com relógio de verdade.
+    pub(crate) fn previas_andando(&self) -> bool {
+        self.receita_padrao.progresso().andando()
     }
 
     /// O que o site recusou nesta abertura — o canto "N envios recusados".
@@ -5485,6 +5552,149 @@ mod testes {
             gravador.deposito().is_empty(),
             "a que subiu tem de sair do deposito: {:?}",
             gravador.deposito()
+        );
+    }
+
+    /// 🚨 **A receita que muda enquanto a foto sobe não se perde.**
+    ///
+    /// O "Salvar" mandou a receita A; antes de o servidor responder, o operador
+    /// zerou a foto (receita B). A confirmação chegava e tirava a foto da fila e
+    /// do depósito sem olhar — o B sumia, e o site ficava com o A sem nada
+    /// pendente. O site só dá baixa se a receita ainda for a que subiu
+    /// (`registrar-salva.ts`).
+    #[gpui::test]
+    fn a_receita_que_muda_durante_o_envio_continua_pendente(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+        let publicador = Arc::new(PublicadorDeMentira::default());
+        let gravador = Arc::new(GravadorDeMentira::com_o_deposito(vec![(
+            "remota-1".to_string(),
+            r#"{"exposure":1.25}"#.to_string(),
+        )]));
+        let janela = cx.add_window({
+            let publicador = publicador.clone();
+            let gravador = gravador.clone();
+            move |window, cx| {
+                Aplicativo::ja_dentro(
+                    Vec::new(),
+                    previews,
+                    Vec::new(),
+                    Portas {
+                        publicador,
+                        gravador,
+                        ..portas()
+                    },
+                    window,
+                    cx,
+                )
+            }
+        });
+
+        janela
+            .update(cx, |app, _window, cx| {
+                // O envio saiu com a receita A.
+                let a = Ajustes {
+                    exposure: 1.25,
+                    ..Ajustes::default()
+                };
+                app.receitas_no_ar.insert(
+                    "remota-1".into(),
+                    crate::pos_venda::porta::ajustes_em_json(&a, &CropSettings::default())
+                        .to_string(),
+                );
+                // No meio do envio, o "Zerar" (receita B).
+                app.enfileirar_para_subir(
+                    "remota-1".into(),
+                    Ajustes::default(),
+                    CropSettings::default(),
+                );
+                // O servidor confirma a A.
+                let _ = app.sincronias.0.send(PosVendaRecado::RevelacaoSalva {
+                    foto_no_site: "remota-1".into(),
+                });
+                app.colher_sincronia(cx);
+
+                assert_eq!(
+                    app.a_subir_para_teste(),
+                    vec!["remota-1".to_string()],
+                    "o zerar feito durante o envio continua na fila do Salvar"
+                );
+                assert!(
+                    app.receitas_no_ar.is_empty(),
+                    "a resposta chegou: o registro do envio sai"
+                );
+            })
+            .expect("a janela deve estar aberta");
+        assert!(
+            !gravador.deposito().is_empty(),
+            "e o depósito não perde a receita nova"
+        );
+    }
+
+    /// 🔄 **O "Salvar" que pega a foto no ar a manda de novo quando ela
+    /// responde**, com a receita nova — como o Worker do site. Visto rodando o
+    /// app: zerar e salvar com o lote de P&B subindo terminava com duas fotos
+    /// em P&B no site.
+    #[gpui::test]
+    fn a_foto_pega_no_ar_sobe_de_novo_com_a_receita_nova(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+        let publicador = Arc::new(PublicadorDeMentira::default());
+        let janela = cx.add_window({
+            let publicador = publicador.clone();
+            move |window, cx| {
+                Aplicativo::ja_dentro(
+                    Vec::new(),
+                    previews,
+                    Vec::new(),
+                    Portas {
+                        publicador,
+                        ..portas()
+                    },
+                    window,
+                    cx,
+                )
+            }
+        });
+        janela
+            .update(cx, |app, _window, cx| {
+                let pb = Ajustes {
+                    saturation: -1.0,
+                    ..Ajustes::default()
+                };
+                // A de P&B está no ar; o segundo "Salvar" pediu o neutro.
+                app.receitas_no_ar.insert(
+                    "remota-1".into(),
+                    crate::pos_venda::porta::ajustes_em_json(&pb, &CropSettings::default())
+                        .to_string(),
+                );
+                app.enfileirar_para_subir(
+                    "remota-1".into(),
+                    Ajustes::default(),
+                    CropSettings::default(),
+                );
+                app.reenviar_depois.insert(
+                    "remota-1".into(),
+                    (Ajustes::default(), CropSettings::default()),
+                );
+                let _ = app.sincronias.0.send(PosVendaRecado::RevelacaoSalva {
+                    foto_no_site: "remota-1".into(),
+                });
+                app.colher_sincronia(cx);
+                assert!(app.reenviar_depois.is_empty(), "o reenvio saiu");
+            })
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+        let reveladas = publicador.reveladas.lock().expect("as reveladas").clone();
+        assert!(
+            reveladas
+                .iter()
+                .any(|(id, ajustes, _)| id == "remota-1" && *ajustes == Ajustes::default()),
+            "a foto subiu de novo com a receita nova: {:?}",
+            reveladas
+                .iter()
+                .map(|(id, a, _)| (id, a.saturation))
+                .collect::<Vec<_>>()
         );
     }
 
@@ -8079,6 +8289,45 @@ mod testes {
             "Detalhe desmarcado fica o dela"
         );
         assert_eq!(corte.x, Some(0.4), "o corte é o dela, não o da aberta");
+    }
+
+    /// 🚨 `Cmd/Ctrl+A` e `Cmd/Ctrl+D` chegam ao **modal da pasta** da nova
+    /// sessão. A raiz as liga como ação no contexto `Aplicativo`, e o modal as
+    /// conferia no `on_key_down` — que a ação despachada antes nunca deixava
+    /// rodar (dono, 2026-09-21).
+    #[gpui::test]
+    fn no_modal_da_pasta_cmd_a_e_ctrl_a_marcam_as_fotos(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+        cx.update(init);
+
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            |window, cx| Aplicativo::ja_dentro(acervo(), previews, Vec::new(), portas(), window, cx)
+        });
+        janela
+            .update(cx, |app, window, cx| {
+                app.ir_para(Tela::NovaSessao, window, cx);
+                app.nova_sessao.update(cx, |nova, _| {
+                    nova.abrir_selecao_para_teste(&["/cartao/a.jpg", "/cartao/b.jpg"], window)
+                });
+            })
+            .expect("a janela deve estar aberta");
+
+        let mut visual = gpui::VisualTestContext::from_window(janela.into(), cx);
+        visual.run_until_parked();
+        for (tecla, esperado) in [("cmd-a", 2), ("cmd-d", 0), ("ctrl-a", 2), ("ctrl-d", 0)] {
+            visual.simulate_keystrokes(tecla);
+            janela
+                .update(cx, |app, _window, cx| {
+                    assert_eq!(
+                        app.nova_sessao.read(cx).marcadas_da_pasta(),
+                        esperado,
+                        "{tecla} no modal da pasta"
+                    );
+                })
+                .expect("a janela deve estar aberta");
+        }
     }
 
     /// 🚨 `Cmd+A`, `Ctrl+A` e `Cmd+D` chegam à **tira da Revelação** — e não à

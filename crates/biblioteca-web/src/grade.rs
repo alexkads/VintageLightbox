@@ -99,6 +99,10 @@ impl Arrasto {
     }
 }
 
+/// Quanto dura a troca suave de uma miniatura pela seguinte, em segundos —
+/// o mesmo tempo do desktop (`sessoes::detalhe`).
+pub const DURACAO_DA_TROCA: f64 = 0.28;
+
 pub struct Grade {
     pub ctx: egui::Context,
     pub acervo: Acervo,
@@ -108,6 +112,20 @@ pub struct Grade {
     pub caixa: Caixa,
     /// A URL da miniatura por id — a chave da textura.
     pub miniaturas: HashMap<String, String>,
+    /// O nome do arquivo por id — a ponte entre a local e a do servidor.
+    pub arquivos: HashMap<String, String>,
+    /// A imagem de antes, emprestada ao tile enquanto a dele não chega.
+    ///
+    /// 🚨 **É o que impede o tile vazio quando a foto sobe** (dono,
+    /// 21/set/2026: *"a foto fica preta e depois aparece novamente"*). Ao
+    /// subir, a foto troca `local:…` pelo id do servidor e a miniatura troca de
+    /// URL; sem isto, o tile mostrava só o fundo até o `fetch` e a
+    /// decodificação da nova terminarem. Vale também para a mesma foto com URL
+    /// nova (o `?v=` de uma revelação salva). Ver [`Grade::definir_fotos`].
+    pub emprestadas: HashMap<String, TextureHandle>,
+    /// As trocas suaves em andamento: id → a textura de antes e o instante
+    /// (tempo do egui, em segundos) em que a nova chegou.
+    pub trocas: HashMap<String, (TextureHandle, f64)>,
     pub cores: Cores,
     pub layout: Layout,
     pub hover: Option<usize>,
@@ -135,6 +153,9 @@ impl Grade {
             texturas: HashMap::new(),
             caixa: Caixa::default(),
             miniaturas: HashMap::new(),
+            arquivos: HashMap::new(),
+            emprestadas: HashMap::new(),
+            trocas: HashMap::new(),
             cores: Cores::do_tema(escuro),
             layout: Layout::calcular(0.0, ZOOM_PADRAO, 0, Opcoes::default()),
             hover: None,
@@ -167,12 +188,18 @@ impl Grade {
 
         let mut fotos = Vec::with_capacity(lista.len());
         let mut miniaturas = HashMap::with_capacity(lista.len());
+        let mut arquivos = HashMap::with_capacity(lista.len());
         for f in &lista {
             fotos.push(f.para_core()?);
             miniaturas.insert(f.id.clone(), f.miniatura.clone());
+            if !f.arquivo.is_empty() {
+                arquivos.insert(f.id.clone(), f.arquivo.clone());
+            }
         }
         self.acervo.definir(fotos);
-        self.miniaturas = miniaturas;
+        let antes = std::mem::replace(&mut self.miniaturas, miniaturas);
+        let arquivos_antes = std::mem::replace(&mut self.arquivos, arquivos);
+        self.emprestar_as_de_antes(&antes, &arquivos_antes);
 
         self.selecao.limpar_tudo();
         for id in &marcados {
@@ -196,6 +223,44 @@ impl Grade {
         // alguém mexia no zoom — que muda o layout. É o irmão do caso que o
         // comentário do `recalcular` conta.
         Ok(mudou::SELECAO | mudou::CONTAGENS | mudou::VISIVEIS | self.recalcular())
+    }
+
+    /// Empresta a cada tile sem textura a imagem de antes: a da mesma foto
+    /// com outra URL (a revelação salva trocou o `?v=`), ou a da local **de
+    /// mesmo arquivo** que saiu da lista — a que subiu e é esta. Ver
+    /// [`crate::emprestimo`].
+    fn emprestar_as_de_antes(
+        &mut self,
+        antes: &HashMap<String, String>,
+        arquivos_antes: &HashMap<String, String>,
+    ) {
+        let agora: Vec<crate::emprestimo::Tile> = (0..self.acervo.total_visivel())
+            .filter_map(|n| self.acervo.visivel(n))
+            .filter_map(|f| {
+                Some(crate::emprestimo::Tile {
+                    id: &f.id,
+                    url: self.miniaturas.get(&f.id)?,
+                    arquivo: self.arquivos.get(&f.id).map(String::as_str),
+                })
+            })
+            .collect();
+        let mut emprestadas = HashMap::new();
+        for (id, de_quem) in
+            crate::emprestimo::quem_empresta(antes, arquivos_antes, &agora, |url| {
+                self.texturas.contains_key(url)
+            })
+        {
+            let textura = antes
+                .get(&de_quem)
+                .and_then(|u| self.texturas.get(u))
+                .or_else(|| self.emprestadas.get(&de_quem))
+                .cloned();
+            if let Some(textura) = textura {
+                emprestadas.insert(id, textura);
+            }
+        }
+        self.emprestadas = emprestadas;
+        self.trocas.retain(|id, _| self.miniaturas.contains_key(id));
     }
 
     /// O recorte da barra. **Trocar limpa a seleção**: as posições passam a
@@ -719,6 +784,9 @@ impl Grade {
 
     /// Esvazia a caixa de correio. Chamado no começo de cada quadro.
     pub fn receber(&mut self) {
+        let agora = self.ctx.input(|i| i.time);
+        self.trocas
+            .retain(|_, (_, desde)| agora - *desde < DURACAO_DA_TROCA);
         for m in self.caixa.esvaziar() {
             self.receber_miniatura(m.url, m.bytes);
             self.ctx.request_repaint();
@@ -734,6 +802,19 @@ impl Grade {
                     self.ctx
                         .load_texture(url.clone(), imagem, egui::TextureOptions::LINEAR);
                 self.texturas.insert(url.clone(), handle);
+                // A imagem do tile chegou: a emprestada sai, por baixo da nova.
+                let agora = self.ctx.input(|i| i.time);
+                let chegaram: Vec<String> = self
+                    .emprestadas
+                    .keys()
+                    .filter(|id| self.miniaturas.get(*id) == Some(&url))
+                    .cloned()
+                    .collect();
+                for id in chegaram {
+                    if let Some(velha) = self.emprestadas.remove(&id) {
+                        self.trocas.insert(id, (velha, agora));
+                    }
+                }
                 Desfecho::Chegou
             }
             None => Desfecho::Falhou,
@@ -776,7 +857,9 @@ fn dentro(x: f32, y: f32, r: Retangulo) -> bool {
 /// JPEG/PNG → RGBA, reduzido ao lado da textura. Milissegundos por miniatura.
 fn decodificar(bytes: &[u8]) -> Option<(usize, usize, Vec<u8>)> {
     const LADO: u32 = 512;
-    let imagem = image::load_from_memory(bytes).ok()?;
+    // De pé: a miniatura local (`blob:`) pode ser o arquivo da câmera, com a
+    // etiqueta de girar — a mesma regra do desktop (`foto_codec::orientacao`).
+    let imagem = foto_codec::orientacao::decodificar_de_pe(bytes).ok()?;
     let imagem = if imagem.width() > LADO || imagem.height() > LADO {
         imagem.thumbnail(LADO, LADO)
     } else {

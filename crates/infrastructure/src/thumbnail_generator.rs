@@ -1,11 +1,7 @@
 use async_trait::async_trait;
 use domain::{services::ThumbnailGenerator, value_objects::FilePath, DomainError, DomainResult};
-use std::io::Cursor;
-// `image::io::Reader` virou `image::ImageReader` no 0.25 — o alias antigo ainda
-// existe, mas depreciado. O nome local não muda, então nada mais aqui precisa
-// saber disso.
 use image::ImageFormat;
-use image::ImageReader;
+use std::io::Cursor;
 
 /// Implementação do ThumbnailGenerator usando a crate `image`
 /// Reduz para caber num quadrado de `lado` — **sem nunca ampliar**.
@@ -79,7 +75,7 @@ impl ThumbnailGenerator for ThumbnailGeneratorImpl {
                         // Tenta extrair embedded preview
                         if let Some(embedded) = extract_embedded_preview(&path_str, size) {
                             // Carrega o embedded preview como imagem para redimensionar se necessário
-                            if let Ok(img) = image::load_from_memory(&embedded) {
+                            if let Ok(img) = crate::orientacao::decodificar_de_pe(&embedded) {
                                 let thumbnail = reduzir(&img, size);
                                 let mut bytes: Vec<u8> = Vec::new();
                                 let mut cursor = Cursor::new(&mut bytes);
@@ -115,18 +111,11 @@ impl ThumbnailGenerator for ThumbnailGeneratorImpl {
                 }
             } else {
                 // Estratégia Imagem Comum (JPG/PNG): Carregar uma vez, redimensionar N vezes
-                let img = ImageReader::open(&path_buf)
-                    .map_err(|e| {
-                        DomainError::InvalidOperation(format!("Failed to open image: {}", e))
-                    })?
-                    .with_guessed_format()
-                    .map_err(|e| {
-                        DomainError::InvalidOperation(format!("Failed to guess format: {}", e))
-                    })?
-                    .decode()
-                    .map_err(|e| {
-                        DomainError::InvalidOperation(format!("Failed to decode image: {}", e))
-                    })?;
+                // 🚨 **De pé**: a foto em retrato vem deitada com a etiqueta
+                // de girar no EXIF — ver `crate::orientacao`.
+                let img = crate::orientacao::abrir_de_pe(&path_buf).map_err(|e| {
+                    DomainError::InvalidOperation(format!("Failed to decode image: {}", e))
+                })?;
 
                 for &size in &sizes {
                     let thumbnail = reduzir(&img, size);

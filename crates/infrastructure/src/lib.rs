@@ -16,6 +16,8 @@ pub mod file_system;
 /// que compila para wasm32.
 pub mod gpu_adjustments;
 pub mod image_exporter;
+/// Abrir de pé — a regra mora no `foto-codec`, compartilhada com o site.
+pub use foto_codec::orientacao;
 pub mod paths;
 pub mod pos_venda;
 pub mod raw_processing;

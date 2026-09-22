@@ -306,6 +306,7 @@ impl PublicarNoPosVendaUseCase {
         if photo.flag() == Some(domain::value_objects::Flag::Reject) {
             return Err((nome, "rejeitada — fica fora do site (C21)".into()));
         }
+        let do_b = estado.is_none();
         let estado = estado.unwrap_or_else(|| EstadoNoBalcao::da_foto(&photo));
 
         // 🔑 **A de quem classificou vence a do banco.** O `photo` acima foi
@@ -320,6 +321,18 @@ impl PublicarNoPosVendaUseCase {
         let nota = nota
             .or_else(|| photo.rating().map(|r| r.value()))
             .filter(|nota| (1..=5).contains(nota));
+
+        // 🛒 **O `B` sem nota sobe à venda**, e não é recusado. O servidor não
+        // aceita levada sem nota — e recusaria a foto **inteira**, não só a
+        // marca (visto rodando o app, 21/set/2026, quando o `B` passou a valer
+        // na foto que ainda sobe). A tela já não deixa marcar assim; isto cobre
+        // a nota tirada depois do `B`. A leva escolhida na barra (`estado`
+        // preenchido) é decisão do lote, e segue como veio.
+        let estado = if do_b && estado == EstadoNoBalcao::LevadaNoBalcao && nota.is_none() {
+            EstadoNoBalcao::Disponivel
+        } else {
+            estado
+        };
 
         let jpeg = self
             .exportador
@@ -653,9 +666,12 @@ mod tests {
     async fn a_levada_sobe_como_levada_e_a_outra_como_disponivel_na_ordem() {
         let levada = foto("/ensaio/DSC_001.NEF", true);
         let ficou = foto("/ensaio/DSC_002.NEF", false);
+        // 🛒 O `B` sem nota: o servidor recusaria a foto inteira ("classifique
+        // de 1 a 5 antes de marcá-la como levada") — ela sobe à venda.
+        let sem_nota = foto("/ensaio/DSC_003.NEF", true);
 
         let mut repo = MockPhotoRepo::new();
-        for f in [&levada, &ficou] {
+        for f in [&levada, &ficou, &sem_nota] {
             let devolvida = f.clone();
             repo.expect_find_by_id()
                 .withf(move |id| *id == devolvida.id())
@@ -667,7 +683,7 @@ mod tests {
         // 🔑 O id que o site devolveu volta para o catálogo — é o que permite
         // desfazer depois (tirar do storage, registrar a negociação).
         repo.expect_update()
-            .times(2)
+            .times(3)
             .withf(|foto| foto.id_no_site() == Some("f"))
             .returning(|_| Ok(()));
         let mut exportador = MockExportador::new();
@@ -686,8 +702,11 @@ mod tests {
             Arc::new(MockThumbnailGen::new()),
             api.clone(),
         );
-        for (ordem, foto) in [&levada, &ficou].iter().enumerate() {
-            caso.enviar_uma(&sessao(), "g1", &foto.id(), ordem as u32, None, None, None)
+        for (ordem, (foto, nota)) in [(&levada, Some(4)), (&ficou, Some(4)), (&sem_nota, None)]
+            .iter()
+            .enumerate()
+        {
+            caso.enviar_uma(&sessao(), "g1", &foto.id(), ordem as u32, None, *nota, None)
                 .await
                 .unwrap();
         }
@@ -698,6 +717,7 @@ mod tests {
             vec![
                 ("DSC_001.jpg".to_string(), EstadoNoBalcao::LevadaNoBalcao, 0),
                 ("DSC_002.jpg".to_string(), EstadoNoBalcao::Disponivel, 1),
+                ("DSC_003.jpg".to_string(), EstadoNoBalcao::Disponivel, 2),
             ]
         );
     }

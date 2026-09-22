@@ -91,6 +91,20 @@ impl Trabalho {
     }
 }
 
+/// O que aconteceu com um trabalho empurrado — quem conta respostas só soma
+/// o que é [`Entrada::Nova`]: é ela que terá uma resposta a mais.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Entrada {
+    /// Entrou na fila.
+    Nova,
+    /// A mesma foto esperava na fila, e recebeu a receita nova.
+    Substituida,
+    /// A mesma foto já esperava, e o pedido repetido não muda nada.
+    JaNaFila,
+    /// A mesma foto já saiu; a resposta dela vem de qualquer jeito.
+    JaNoAr,
+}
+
 /// Quanto da esteira já andou — o que a bandeja e o canto dos envios mostram.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Progresso {
@@ -193,16 +207,30 @@ impl Esteira {
     /// dele vem de qualquer jeito; aceitar um segundo pedido da mesma foto
     /// faria duas versões dela disputarem qual chega por último — e, agora que
     /// a esteira repete, a repetição da primeira brigaria com a segunda.
-    pub fn empurrar(&mut self, trabalho: Trabalho) {
-        let alvo = trabalho.alvo();
-        if self.no_ar.contains_key(alvo) || self.fila.iter().any(|t| t.trabalho.alvo() == alvo) {
-            return;
+    ///
+    /// 🔄 **A revelação que espera recebe a receita nova** (2026-09-21). Um
+    /// segundo "Salvar na galeria" com a mesma foto ainda na fila trocava nada:
+    /// a receita velha subia. É o que o Worker do site faz — a mesma foto é
+    /// substituída. A que já está no ar segue como está: a raiz confere, na
+    /// resposta, se a receita mudou no caminho (`receita_mudou_no_envio`).
+    pub fn empurrar(&mut self, trabalho: Trabalho) -> Entrada {
+        let alvo = trabalho.alvo().to_string();
+        if self.no_ar.contains_key(&alvo) {
+            return Entrada::JaNoAr;
+        }
+        if let Some(na_fila) = self.fila.iter_mut().find(|t| t.trabalho.alvo() == alvo) {
+            if matches!(trabalho, Trabalho::Revelacao { .. }) {
+                na_fila.trabalho = trabalho;
+                return Entrada::Substituida;
+            }
+            return Entrada::JaNaFila;
         }
         self.fila.push_back(NaEsteira {
             trabalho,
             tentativas: 0,
         });
         self.progresso.total += 1;
+        Entrada::Nova
     }
 
     /// Manda para a porta os próximos, até [`EM_VOO`] no ar. Devolve quantos
@@ -423,6 +451,34 @@ mod testes {
         esteira.empurrar(classificada("b"));
 
         assert_eq!(esteira.progresso().total, 2);
+    }
+
+    /// 🔄 A revelação que espera na fila recebe a receita do segundo "Salvar",
+    /// sem contar outra resposta; a que já está no ar não é tocada.
+    #[test]
+    fn a_revelacao_que_espera_recebe_a_receita_nova() {
+        let revelacao = |exposicao: f32| Trabalho::Revelacao {
+            foto_no_site: "a".into(),
+            ajustes: Box::new(Ajustes {
+                exposure: exposicao,
+                ..Ajustes::default()
+            }),
+            corte: CropSettings::default(),
+        };
+        let mut esteira = Esteira::default();
+        assert_eq!(esteira.empurrar(revelacao(1.0)), Entrada::Nova);
+        assert_eq!(esteira.empurrar(revelacao(2.0)), Entrada::Substituida);
+        assert_eq!(esteira.progresso().total, 1, "uma foto, uma resposta");
+        let Some(Trabalho::Revelacao { ajustes, .. }) = esteira.fila.front().map(|t| &t.trabalho)
+        else {
+            panic!("a revelação está na fila");
+        };
+        assert_eq!(ajustes.exposure, 2.0, "vale a receita do último clique");
+
+        let publicador = Arc::new(PublicadorDeMentira::default());
+        let (canal, _recebe) = channel();
+        esteira.despachar(publicador.as_ref(), &sessao(), &canal);
+        assert_eq!(esteira.empurrar(revelacao(3.0)), Entrada::JaNoAr);
     }
 
     /// 🚨 **A foto que falha volta para a fila** — e só depois de

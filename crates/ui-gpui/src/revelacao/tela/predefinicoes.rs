@@ -706,6 +706,14 @@ impl Revelacao {
             }
             "soltar" => self.soltar_preset(cx),
             "fechar" => self.fechar_relatorio(cx),
+            // 🧪 Aplica a N-ésima predefinição do sistema à foto aberta (0 é a
+            // primeira) — o clique na linha da coluna.
+            "aplicar" => {
+                let n: usize = argumento.parse().unwrap_or(0);
+                if let Some(preset) = self.grupos_da_coluna(cx).0.get(n).map(|p| (*p).clone()) {
+                    self.aplicar_preset(&preset, window, cx);
+                }
+            }
             "responder" => self.responder_pergunta(argumento == "sim", cx),
             "ordem" => self.definir_ordem_dos_presets(Grupo::Sistema, None, cx),
             "importar" => {

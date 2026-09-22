@@ -27,6 +27,7 @@ pub fn pintar(ctx: &egui::Context, g: &Grade) {
     let d = g.deslocamento;
     let cores = g.cores;
     let (inicio, fim) = g.intervalo;
+    let agora = ctx.input(|i| i.time);
 
     for n in inicio..fim {
         let Some(foto) = g.acervo.visivel(n) else {
@@ -44,28 +45,26 @@ pub fn pintar(ctx: &egui::Context, g: &Grade) {
 
         p.rect_filled(imagem, Rounding::same(RAIO), cores.fundo_do_tile);
 
-        if let Some(tex) = g.miniaturas.get(&foto.id).and_then(|u| g.texturas.get(u)) {
-            // 🚨 **A foto inteira, encaixada** — e não em *cover*, que cortava
-            // as bordas para preencher o tile. Numa foto **enquadrada**, que já
-            // foi recortada de propósito, isso corta de novo: a mesma foto
-            // aparecia com um pedaço a menos aqui e inteira no editor, na tira
-            // da revelação e na tela do cliente. Quem enquadrou já escolheu o
-            // que fica na foto. Ver `area_contida`.
-            let tam = tex.size_vec2();
-            let a = area_contida(tam.x, tam.y, imagem.width(), imagem.height());
-            let dentro = Rect::from_min_size(imagem.min + Vec2::new(a.x, a.y), Vec2::new(a.w, a.h));
-            // O canto arredondado acompanha a foto, e não o tile: numa faixa
-            // estreita ele comeria a imagem em vez da moldura.
-            let raio = RAIO.min(a.w / 2.0).min(a.h / 2.0);
-            let mut forma = RectShape::filled(dentro, Rounding::same(raio), Color32::WHITE);
-            forma.fill_texture_id = tex.id();
-            // 🚨 **A `uv` é obrigatória, mesmo sendo a textura inteira.**
-            // `RectShape::filled` nasce com `uv: Rect::ZERO`, e um retângulo com
-            // textura e `uv` degenerada é pintado como cor sólida: a galeria
-            // ficou **branca** no primeiro build do contain, porque a cor de
-            // preenchimento é branca (ela existe para multiplicar a textura).
-            forma.uv = Rect::from_min_size(Pos2::ZERO, Vec2::new(1.0, 1.0));
-            p.add(Shape::Rect(forma));
+        let propria = g.miniaturas.get(&foto.id).and_then(|u| g.texturas.get(u));
+        match (propria, g.trocas.get(&foto.id)) {
+            // 🔄 A troca suave: a de antes por baixo, a nova surgindo por cima.
+            (Some(nova), Some((velha, desde))) => {
+                let t = ((agora - desde) / crate::grade::DURACAO_DA_TROCA).clamp(0.0, 1.0) as f32;
+                // `ease-in-out`, como o do desktop.
+                let t = t * t * (3.0 - 2.0 * t);
+                pintar_foto(&p, velha, imagem, Color32::WHITE);
+                pintar_foto(&p, nova, imagem, Color32::WHITE.gamma_multiply(t));
+                if t < 1.0 {
+                    ctx.request_repaint();
+                }
+            }
+            (Some(tex), None) => pintar_foto(&p, tex, imagem, Color32::WHITE),
+            // A dela ainda não chegou: a de antes segura o lugar.
+            (None, _) => {
+                if let Some(velha) = g.emprestadas.get(&foto.id) {
+                    pintar_foto(&p, velha, imagem, Color32::WHITE);
+                }
+            }
         }
         if foto.apagada {
             p.rect_filled(imagem, Rounding::same(RAIO), cores.veu);
@@ -128,4 +127,30 @@ pub fn pintar(ctx: &egui::Context, g: &Grade) {
             Stroke::new(1.0_f32, tema::AMBAR),
         );
     }
+}
+
+/// A miniatura inteira, encaixada no tile; `cor` multiplica a textura — branca
+/// é a foto como é, e o alfa dela é o que faz a troca suave.
+fn pintar_foto(p: &egui::Painter, tex: &egui::TextureHandle, imagem: Rect, cor: Color32) {
+    // 🚨 **A foto inteira, encaixada** — e não em *cover*, que cortava
+    // as bordas para preencher o tile. Numa foto **enquadrada**, que já
+    // foi recortada de propósito, isso corta de novo: a mesma foto
+    // aparecia com um pedaço a menos aqui e inteira no editor, na tira
+    // da revelação e na tela do cliente. Quem enquadrou já escolheu o
+    // que fica na foto. Ver `area_contida`.
+    let tam = tex.size_vec2();
+    let a = area_contida(tam.x, tam.y, imagem.width(), imagem.height());
+    let dentro = Rect::from_min_size(imagem.min + Vec2::new(a.x, a.y), Vec2::new(a.w, a.h));
+    // O canto arredondado acompanha a foto, e não o tile: numa faixa
+    // estreita ele comeria a imagem em vez da moldura.
+    let raio = RAIO.min(a.w / 2.0).min(a.h / 2.0);
+    let mut forma = RectShape::filled(dentro, Rounding::same(raio), cor);
+    forma.fill_texture_id = tex.id();
+    // 🚨 **A `uv` é obrigatória, mesmo sendo a textura inteira.**
+    // `RectShape::filled` nasce com `uv: Rect::ZERO`, e um retângulo com
+    // textura e `uv` degenerada é pintado como cor sólida: a galeria
+    // ficou **branca** no primeiro build do contain, porque a cor de
+    // preenchimento é branca (ela existe para multiplicar a textura).
+    forma.uv = Rect::from_min_size(Pos2::ZERO, Vec2::new(1.0, 1.0));
+    p.add(Shape::Rect(forma));
 }

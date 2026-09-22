@@ -61,7 +61,7 @@ use crate::revelacao::persistencia::mentira::GravadorDeMentira;
 use crate::revelacao::presets::mentira::GuardaDeMentira;
 use crate::revelacao::reposicao::mentira::RepositorDeMentira;
 use crate::revelacao::zoom::{self, Cena, EstadoDoZoom, Medidas, Nivel, Ponto};
-use crate::segundo_plano::vigia::{AoFechar, Vigia};
+use crate::segundo_plano::vigia::Vigia;
 
 // ───────────────────────────────────────────────────────── as ferramentas
 
@@ -977,13 +977,11 @@ fn estresse_salvar_trezentas_na_galeria_com_desordem_e_falhas(cx: &mut TestAppCo
         "só as primeiras saem; as outras esperam vaga"
     );
 
-    // O operador fecha a janela com o lote no ar: G9 — com o aviso antes
-    // (dono, 2026-09-20: *"ao fechar a aplicação avise que tem processo
-    // pendente em segundo plano"*). O primeiro pedido pergunta, o segundo é a
-    // resposta e esconde.
+    // O operador fecha a janela com o lote no ar: ela vai para a bandeja, e o
+    // lote segue lá (dono, 2026-09-21).
     let mut vigia = Vigia::default();
-    assert_eq!(vigia.ao_fechar(true), AoFechar::Avisar);
-    assert_eq!(vigia.ao_fechar(true), AoFechar::Esconder);
+    vigia.ao_fechar();
+    assert!(vigia.na_bandeja());
 
     // O primeiro quadro da Revelação custa segundos no perfil de teste (fontes,
     // tema, a GPU abrindo): aquecido antes, para a régua medir a colheita.
@@ -1055,10 +1053,7 @@ fn estresse_salvar_trezentas_na_galeria_com_desordem_e_falhas(cx: &mut TestAppCo
                 // a tentativa que falhou respondeu e voltou para a fila, e a
                 // foto ainda deve uma resposta. O que continua valendo é o
                 // sentido: ainda há envio pendente até a última subir.
-                assert!(
-                    !vigia.deve_sair(app.retrato_do_segundo_plano(cx).ha_envio_pendente())
-                        || respondidas == N
-                );
+                assert!(app.retrato_do_segundo_plano(cx).ha_envio_pendente() || respondidas == N);
             })
             .expect("a janela aberta");
     }
@@ -1100,10 +1095,8 @@ fn estresse_salvar_trezentas_na_galeria_com_desordem_e_falhas(cx: &mut TestAppCo
                 "cada falha custa uma tentativa a mais, e nenhuma foto sobe \
                  duas vezes de graça"
             );
-            assert!(
-                vigia.deve_sair(retrato.ha_envio_pendente()),
-                "G9: a fila esvaziou, o app sai"
-            );
+            assert!(!retrato.ha_envio_pendente(), "a fila esvaziou");
+            assert!(vigia.na_bandeja(), "e o app segue na bandeja");
             // 🔑 **A tela saiu no clique** (o lote sobe em segundo plano), e o
             // que não subiu continua na fila: é a receita no depósito que
             // protege o trabalho, não a tela parada.

@@ -1293,6 +1293,17 @@ impl Biblioteca {
         self.aplicar_em(alvos, Marca::Nota(nota), cx);
     }
 
+    /// Marca **estas** fotos como levadas no balcão (ou desmarca), por id — o
+    /// `B` da tela da sessão na foto que ainda está subindo. Sem alternância:
+    /// a tela da sessão já decidiu o lado, como em [`Self::sinalizar_ids`].
+    pub fn marcar_comprada_ids(&mut self, ids: &[String], levada: bool, cx: &mut Context<Self>) {
+        let alvos: Vec<usize> = ids
+            .iter()
+            .filter_map(|id| self.fotos.iter().position(|f| &f.id == id))
+            .collect();
+        self.aplicar_em(alvos, Marca::Comprada(levada), cx);
+    }
+
     /// Sinaliza **estas** fotos, por id — o `X` da tela da sessão na foto que
     /// ainda não subiu (contrato C21).
     ///

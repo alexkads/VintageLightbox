@@ -95,7 +95,8 @@ impl ImageExporterImpl {
         corte: &CropSettings,
         qualidade: u8,
     ) -> DomainResult<Vec<u8>> {
-        let imagem = image::load_from_memory(bytes)
+        // De pé: o bruto do site pode ser o arquivo da câmera, com a etiqueta.
+        let imagem = crate::orientacao::decodificar_de_pe(bytes)
             .map_err(|e| DomainError::InfrastructureError(format!("o original não abriu: {e}")))?;
         let revelada = self.revelar(&imagem, ajustes, corte)?;
         let saida = transformacao::aplicar(&revelada, corte, true);
@@ -225,7 +226,10 @@ impl ImageExporterImpl {
     pub fn renderizar(&self, photo: &Photo, options: &ExportOptions) -> DomainResult<DynamicImage> {
         let input_path = photo.file_path().as_str()?;
 
-        let img = image::open(Path::new(&input_path)).map_err(|e| {
+        // 🚨 **De pé** — é daqui que sai o JPEG que sobe ao site, e ele não
+        // leva EXIF: a foto em retrato subia deitada, sem etiqueta para o
+        // servidor corrigir. Ver `crate::orientacao`.
+        let img = crate::orientacao::abrir_de_pe(Path::new(&input_path)).map_err(|e| {
             DomainError::InfrastructureError(format!("Failed to open source image: {}", e))
         })?;
 
@@ -292,7 +296,7 @@ impl ImageExporter for ImageExporterImpl {
         }
 
         let input_path = photo.file_path().as_str()?;
-        let img = image::open(Path::new(&input_path)).map_err(|e| {
+        let img = crate::orientacao::abrir_de_pe(Path::new(&input_path)).map_err(|e| {
             DomainError::InfrastructureError(format!("Failed to open source image: {}", e))
         })?;
 

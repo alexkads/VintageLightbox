@@ -15,10 +15,11 @@
 //! - **Minimizar leva o app para a bandeja**: o ícone aparece na barra de menus
 //!   (macOS) ou na área de notificação (Windows e Linux), e no macOS o app sai
 //!   do Dock. O trabalho continua: ele nunca dependeu da janela à vista.
-//! - **Fechar com envio na fila só esconde a janela** (G9). O app termina
-//!   sozinho quando a fila esvazia, e a bandeja mostra o que ainda sobe.
-//! - **"Abrir o VintageLightbox"** (ou o ícone do Dock) traz a janela de volta, e
-//!   o app deixa de terminar sozinho.
+//! - **Fechar também leva para a bandeja, sempre** (dono, 2026-09-21: *"quero
+//!   que o sistema fique na bandeja ao fechar, assim podemos continuar com os
+//!   processos em segundo plano"*). Nada se interrompe e o app não termina
+//!   sozinho; sair de verdade é o "Sair" da bandeja (ou `⌘Q`).
+//! - **"Abrir o VintageLightbox"** (ou o ícone do Dock) traz a janela de volta.
 //!
 //! 🔑 **A regra mora aqui, sem GPUI**: `frases` diz o que cada linha da bandeja
 //! mostra, e `vigia` decide quando ir para a bandeja, voltar e sair. O laço
@@ -31,7 +32,7 @@ pub mod vigia;
 
 #[cfg(test)]
 pub(crate) use laco::estado_para_teste;
-pub use laco::{ao_reabrir, desistiu_de_fechar, fechar_mesmo, gesto_de_roteiro, ligar};
+pub use laco::{ao_reabrir, gesto_de_roteiro, ligar};
 
 /// Liga o [`ao_reabrir`] na aplicação, sem quebrar a corrente de `main.rs`.
 pub trait ReabrirDaBandeja {

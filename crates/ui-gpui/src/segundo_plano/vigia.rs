@@ -1,4 +1,4 @@
-//! Quando o app vai para a bandeja, quando volta e quando termina — a regra
+//! Quando o app vai para a bandeja e quando volta — a regra
 //! sozinha, sem janela nem ícone, para ser conferida em teste.
 
 use std::time::{Duration, Instant};
@@ -7,25 +7,6 @@ use std::time::{Duration, Instant};
 /// antes de perguntar de novo — senão a animação de desminimizar ainda diz
 /// "minimizada" e o app voltaria direto para a bandeja.
 pub const ESPERA_AO_VOLTAR: Duration = Duration::from_secs(2);
-
-/// O que fazer com o pedido de fechar a janela principal.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AoFechar {
-    /// Nada pendente: fecha, e o app termina (`encerramento`).
-    Fechar,
-    /// **Há trabalho em segundo plano e o operador ainda não foi avisado**: a
-    /// janela fica onde está e o aviso aparece, com o que está subindo.
-    ///
-    /// 🚨 **Pedido do dono (2026-09-20)**: *"ao fechar a aplicação ui-gpui
-    /// avise que tem processo pendente em segundo plano"*. Até aqui a janela
-    /// sumia calada e o app continuava enviando pela bandeja — o operador que
-    /// não conhecesse o ícone concluía que tinha fechado o app no meio do
-    /// envio, que é exatamente o medo que o G9 existe para tirar.
-    Avisar,
-    /// Envio na fila (G9): a janela some, a bandeja fica, e o app termina
-    /// quando a fila esvaziar.
-    Esconder,
-}
 
 /// O que uma volta do laço pede.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,12 +22,8 @@ pub enum Passo {
 #[derive(Debug, Default)]
 pub struct Vigia {
     na_bandeja: bool,
-    /// Fechada com envio (G9), e não só minimizada: ela não "volta sozinha".
+    /// Fechada (e não só minimizada): ela não "volta sozinha".
     escondida: bool,
-    /// O aviso de trabalho pendente já está na tela — o segundo pedido de
-    /// fechar é a resposta a ele, e não uma pergunta nova.
-    avisado: bool,
-    fechar_ao_esvaziar: bool,
     restaurada_em: Option<Instant>,
 }
 
@@ -55,35 +32,18 @@ impl Vigia {
         self.na_bandeja
     }
 
-    /// O operador pediu para fechar a janela principal.
+    /// O operador fechou a janela principal: **ela vai para a bandeja, sempre.**
     ///
-    /// 🔑 **Com trabalho pendente, o primeiro pedido avisa e o segundo
-    /// esconde.** O aviso é a pergunta; fechar de novo (o botão "Continuar em
-    /// segundo plano") é a resposta. Quem desistir chama [`Self::desistiu_de_fechar`],
-    /// e o próximo fechamento avisa de novo — um aviso por decisão.
-    pub fn ao_fechar(&mut self, ha_envio_pendente: bool) -> AoFechar {
-        if !ha_envio_pendente {
-            return AoFechar::Fechar;
-        }
-        if !self.avisado {
-            self.avisado = true;
-            return AoFechar::Avisar;
-        }
-        self.avisado = false;
+    /// 🔄 **Decisão do dono (2026-09-21)**: *"quero que o sistema fique na
+    /// bandeja ao fechar, assim podemos continuar com os processos em segundo
+    /// plano"*. Até aqui, fechar sem nada na fila encerrava o app, e fechar com
+    /// envio avisava e depois encerrava quando a fila esvaziasse (G9 e o aviso
+    /// de 2026-09-20). Agora nada se interrompe ao fechar — e, como nada se
+    /// interrompe, não há o que perguntar. Sair de verdade é o "Sair" da
+    /// bandeja (ou `⌘Q`).
+    pub fn ao_fechar(&mut self) {
         self.na_bandeja = true;
         self.escondida = true;
-        self.fechar_ao_esvaziar = true;
-        AoFechar::Esconder
-    }
-
-    /// O operador leu o aviso e escolheu ficar no app.
-    pub fn desistiu_de_fechar(&mut self) {
-        self.avisado = false;
-    }
-
-    /// 🧪 O aviso de trabalho pendente está na tela?
-    pub fn avisado(&self) -> bool {
-        self.avisado
     }
 
     /// Uma volta do laço, com o que a janela diz agora.
@@ -107,18 +67,11 @@ impl Vigia {
         }
     }
 
-    /// A janela volta ("Abrir", ou o ícone do Dock). Quem a trouxe está de
-    /// volta: o app deixa de terminar sozinho quando a fila esvaziar.
+    /// A janela volta ("Abrir", ou o ícone do Dock).
     pub fn restaurar(&mut self, agora: Instant) {
         self.na_bandeja = false;
         self.escondida = false;
-        self.fechar_ao_esvaziar = false;
         self.restaurada_em = Some(agora);
-    }
-
-    /// A janela foi fechada com envio, e a fila acabou de esvaziar.
-    pub fn deve_sair(&self, ha_envio_pendente: bool) -> bool {
-        self.fechar_ao_esvaziar && !ha_envio_pendente
     }
 }
 
@@ -134,7 +87,6 @@ mod testes {
         assert_eq!(v.volta(true, t), Passo::ParaABandeja);
         assert!(v.na_bandeja());
         assert_eq!(v.volta(true, t), Passo::Nada, "já está na bandeja");
-        assert!(!v.deve_sair(false), "minimizar não encerra o app");
     }
 
     #[test]
@@ -162,58 +114,18 @@ mod testes {
         assert!(!v.na_bandeja());
     }
 
+    /// 🔄 **Fechar leva para a bandeja, com ou sem trabalho** (dono,
+    /// 2026-09-21): o app não termina ao fechar a janela.
     #[test]
-    fn fechar_sem_envio_fecha() {
-        let mut v = Vigia::default();
-        assert_eq!(v.ao_fechar(false), AoFechar::Fechar);
-        assert!(!v.na_bandeja());
-        assert!(!v.deve_sair(false));
-    }
-
-    /// 🚨 **Com trabalho pendente, fechar avisa antes de esconder** (dono,
-    /// 2026-09-20). A janela não some no primeiro pedido: some no segundo, que
-    /// é a resposta ao aviso.
-    #[test]
-    fn fechar_com_envio_avisa_antes_de_esconder() {
-        let mut v = Vigia::default();
-        assert_eq!(v.ao_fechar(true), AoFechar::Avisar);
-        assert!(v.avisado());
-        assert!(
-            !v.na_bandeja(),
-            "a janela fica enquanto o aviso está na tela"
-        );
-
-        // Quem desiste continua no app, e o próximo fechamento avisa de novo.
-        v.desistiu_de_fechar();
-        assert!(!v.avisado());
-        assert_eq!(v.ao_fechar(true), AoFechar::Avisar, "um aviso por decisão");
-        assert_eq!(
-            v.ao_fechar(true),
-            AoFechar::Esconder,
-            "e a resposta esconde"
-        );
-        assert!(v.na_bandeja());
-    }
-
-    #[test]
-    fn fechar_com_envio_esconde_e_sai_quando_a_fila_esvazia() {
+    fn fechar_sempre_leva_para_a_bandeja() {
         let mut v = Vigia::default();
         let t = Instant::now();
-        assert_eq!(v.ao_fechar(true), AoFechar::Avisar, "o aviso vem antes");
-        assert_eq!(v.ao_fechar(true), AoFechar::Esconder);
+        v.ao_fechar();
         assert!(v.na_bandeja());
         // Escondida não é "desminimizada": a vigia não a dá por voltada.
         assert_eq!(v.volta(false, t), Passo::Nada);
-        assert!(!v.deve_sair(true), "ainda subindo");
-        assert!(v.deve_sair(false), "a fila esvaziou");
-    }
-
-    #[test]
-    fn abrir_de_novo_antes_de_esvaziar_mantem_o_app_aberto() {
-        let mut v = Vigia::default();
-        v.ao_fechar(true);
-        v.ao_fechar(true);
-        v.restaurar(Instant::now());
-        assert!(!v.deve_sair(false), "quem fechou está de volta");
+        // E abrir de novo a traz de volta.
+        v.restaurar(t);
+        assert!(!v.na_bandeja());
     }
 }

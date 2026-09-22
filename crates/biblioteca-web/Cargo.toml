@@ -10,6 +10,8 @@ description = "A grade de miniaturas do pós-venda para o navegador: só o motor
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+# A regra de abrir a foto de pé, a mesma do desktop.
+foto-codec = { path = "../foto-codec" }
 biblioteca-core = { path = "../biblioteca-core" }
 # 🚨 A mesma versão do resto do workspace — inclusive a do `revelacao-web`, que
 # roda na **mesma página**. Duas versões do wgpu no mesmo bundle são dois
