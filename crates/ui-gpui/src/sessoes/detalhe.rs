@@ -1124,6 +1124,9 @@ impl Detalhe {
             let novo = valor.start().clamp(ZOOM_MINIMO, tela.zoom_maximo);
             if novo != tela.zoom {
                 tela.zoom = novo;
+                // O tamanho mudou: a foto em foco volta ao lugar dela na vista
+                // (no meio, quando é uma por linha).
+                tela.grade_a_seguir = tela.selecao.foco();
                 cx.notify();
             }
         })
@@ -1172,6 +1175,7 @@ impl Detalhe {
             return;
         }
         self.zoom = novo;
+        self.grade_a_seguir = self.selecao.foco();
         // 🚨 O slider tem de acompanhar quem mexeu no zoom por outro caminho,
         // ou ele passa a mostrar um número que não é o da grade. `set_value`
         // não emite `Change`, então isto não volta como um segundo ajuste.
@@ -1311,6 +1315,21 @@ impl Detalhe {
         let base = topo + passo - VAO_DA_GRADE;
         let atual = self.rolagem_da_grade.offset();
         let y = f32::from(atual.y);
+        // 🔑 **Uma por linha: a foto em foco fica no meio da vista**, e não
+        // encostada na borda (dono, 2026-09-22: *"a foto precisa se auto
+        // centralizar no scroll vertical"*). Com várias por linha, o de sempre:
+        // rolar só o que falta para ela aparecer.
+        if self.colunas_da_grade <= 1 {
+            let linhas = self.linhas_da_grade.max(1) as f32;
+            let conteudo = linhas * passo;
+            let meio = topo + (passo - VAO_DA_GRADE) / 2.;
+            let alvo = (vista / 2. - meio).clamp((vista - conteudo).min(0.), 0.);
+            if (alvo - y).abs() >= 1. {
+                self.rolagem_da_grade
+                    .set_offset(gpui::point(atual.x, px(alvo)));
+            }
+            return;
+        }
         let novo = if topo + y < 0. {
             -topo
         } else if base + y > vista {
@@ -1330,7 +1349,26 @@ impl Detalhe {
     /// a punha.
     fn passo_da_grade(&self) -> f32 {
         let linha = self.linha_medida.unwrap_or(self.linha_de_texto);
-        self.lado_da_celula() * 0.72 + 4.0 + 2.0 * linha + VAO_DA_GRADE
+        self.altura_da_imagem() + 4.0 + 2.0 * linha + VAO_DA_GRADE
+    }
+
+    /// A altura da foto na célula: `lado × 0,72`, **sem passar da altura
+    /// visível da grade** (com o rodapé da célula).
+    ///
+    /// 🚨 Na "uma por linha" do zoom a célula passava da tela (dono,
+    /// 2026-09-22: *"a foto precisa se auto centralizar no scroll vertical"*):
+    /// com 1400 px de largura eram 1000 px de foto numa grade de 800, a foto
+    /// ficava cortada ou fora do centro, e não havia rolagem que a mostrasse
+    /// inteira. Presa à vista, cada célula cabe numa tela.
+    fn altura_da_imagem(&self) -> f32 {
+        let alta = self.lado_da_celula() * 0.72;
+        let vista = f32::from(self.rolagem_da_grade.bounds().size.height);
+        if vista <= 0. {
+            return alta;
+        }
+        let linha = self.linha_medida.unwrap_or(self.linha_de_texto);
+        let cabe = vista - (4.0 + 2.0 * linha + VAO_DA_GRADE);
+        alta.min(cabe.max(ZOOM_MINIMO * 0.72))
     }
 
     /// Traz à vista da tira a foto pendente, se a tira já tem medida.
@@ -4094,44 +4132,45 @@ impl Detalhe {
         let esta = cx.entity().downgrade();
         let chave = (self.janela_no_quadro.0, self.painel_no_quadro, self.zoom);
         let linha_usada = self.linha_medida.unwrap_or(self.linha_de_texto);
-        let lado = self.lado_da_celula();
+        let altura_da_foto = self.altura_da_imagem();
         let pular = usize::from(de > 0);
         // ⚠️ Com `track_scroll`, o GPUI guarda as caixas dos filhos na alça da
         // rolagem, e não na lista que o ouvinte recebe (que chega vazia).
         let rolagem = self.rolagem_da_grade.clone();
-        let conferir =
-            move |_: Vec<gpui::Bounds<gpui::Pixels>>, window: &mut Window, _cx: &mut App| {
-                let celulas: Vec<_> = (pular..pular + quantas)
-                    .map_while(|i| rolagem.bounds_for_item(i))
-                    .collect();
-                let Some(primeira) = celulas.first() else {
-                    return;
-                };
-                let na_fileira = celulas
-                    .iter()
-                    .take_while(|c| c.origin.y == primeira.origin.y)
-                    .count();
-                let colunas_vistas = (na_fileira < celulas.len() || na_fileira > colunas)
-                    .then_some(na_fileira)
-                    .filter(|n| *n != colunas);
-                let linha = ((f32::from(primeira.size.height) - lado * 0.72 - 4.0) / 2.0).round();
-                let linha_vista = (linha > 0. && linha != linha_usada).then_some(linha);
-                if colunas_vistas.is_none() && linha_vista.is_none() {
-                    return;
-                }
-                let esta = esta.clone();
-                window.on_next_frame(move |_window, cx| {
-                    let _ = esta.update(cx, |tela, cx| {
-                        if let Some(n) = colunas_vistas {
-                            tela.colunas_vistas = Some((chave, n));
-                        }
-                        if linha_vista.is_some() {
-                            tela.linha_medida = linha_vista;
-                        }
-                        cx.notify();
-                    });
-                });
+        let conferir = move |_: Vec<gpui::Bounds<gpui::Pixels>>,
+                             window: &mut Window,
+                             _cx: &mut App| {
+            let celulas: Vec<_> = (pular..pular + quantas)
+                .map_while(|i| rolagem.bounds_for_item(i))
+                .collect();
+            let Some(primeira) = celulas.first() else {
+                return;
             };
+            let na_fileira = celulas
+                .iter()
+                .take_while(|c| c.origin.y == primeira.origin.y)
+                .count();
+            let colunas_vistas = (na_fileira < celulas.len() || na_fileira > colunas)
+                .then_some(na_fileira)
+                .filter(|n| *n != colunas);
+            let linha = ((f32::from(primeira.size.height) - altura_da_foto - 4.0) / 2.0).round();
+            let linha_vista = (linha > 0. && linha != linha_usada).then_some(linha);
+            if colunas_vistas.is_none() && linha_vista.is_none() {
+                return;
+            }
+            let esta = esta.clone();
+            window.on_next_frame(move |_window, cx| {
+                let _ = esta.update(cx, |tela, cx| {
+                    if let Some(n) = colunas_vistas {
+                        tela.colunas_vistas = Some((chave, n));
+                    }
+                    if linha_vista.is_some() {
+                        tela.linha_medida = linha_vista;
+                    }
+                    cx.notify();
+                });
+            });
+        };
 
         div()
             .on_children_prepainted(conferir)
@@ -4212,7 +4251,7 @@ impl Detalhe {
             .child(
                 div()
                     .relative()
-                    .h(px(lado * 0.72))
+                    .h(px(self.altura_da_imagem()))
                     .flex()
                     .items_center()
                     .justify_center()
@@ -8226,6 +8265,53 @@ mod testes {
             .update(&mut visual, |tela, _window, _cx| {
                 assert_eq!(tela.colunas_da_grade, 1, "no topo, uma por linha");
                 assert!(tela.quer_as_grandes(), "e a célula pede a prévia grande");
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🔄 **Uma por linha: a foto em foco fica no meio da vista, e inteira**
+    /// (dono, 2026-09-22: *"a foto precisa se auto centralizar no scroll
+    /// vertical"*). A célula não passa da altura visível, e andar até uma foto
+    /// a põe no centro.
+    #[gpui::test]
+    fn uma_por_linha_centraliza_a_foto_em_foco(cx: &mut TestAppContext) {
+        let fotos = (0..8)
+            .map(|i| foto(&format!("f{i:02}"), EstadoDaFotoNoSite::Disponivel, None))
+            .collect();
+        let (janela, _publicador) = janela(cx, fotos);
+        entrar(cx, &janela);
+        let mut visual = gpui::VisualTestContext::from_window(janela.into(), cx);
+        let desenhar = |visual: &mut gpui::VisualTestContext| {
+            for _ in 0..4 {
+                janela
+                    .update(visual, |_tela, _w, cx| cx.notify())
+                    .expect("a janela deve estar aberta");
+                visual.run_until_parked();
+            }
+        };
+        desenhar(&mut visual);
+        janela
+            .update(&mut visual, |tela, window, cx| {
+                tela.ajustar_zoom(100_000.0, window, cx);
+                tela.clicar(3, Modificadores::default(), cx);
+            })
+            .expect("a janela deve estar aberta");
+        desenhar(&mut visual);
+        janela
+            .update(&mut visual, |tela, _window, _cx| {
+                assert_eq!(tela.colunas_da_grade, 1);
+                let vista = f32::from(tela.rolagem_da_grade.bounds().size.height);
+                let passo = tela.passo_da_grade();
+                assert!(
+                    passo <= vista + 1.,
+                    "a célula cabe na vista: {passo} > {vista}"
+                );
+                let y = f32::from(tela.rolagem_da_grade.offset().y);
+                let meio_da_foto = 3. * passo + (passo - VAO_DA_GRADE) / 2. + y;
+                assert!(
+                    (meio_da_foto - vista / 2.).abs() <= 1.,
+                    "a foto 4 no meio da vista: {meio_da_foto} de {vista}"
+                );
             })
             .expect("a janela deve estar aberta");
     }

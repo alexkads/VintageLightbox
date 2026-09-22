@@ -146,6 +146,9 @@ pub struct Grade {
     /// O deslocamento da página: o topo da janela visível, em px de conteúdo.
     pub deslocamento: f32,
     pub altura_visivel: f32,
+    /// A altura da **área** de rolagem (não a do canvas) — ver
+    /// [`Grade::definir_area`]. `0` enquanto o React não disse.
+    pub altura_da_area: f32,
     pub largura: f32,
     pub dpr: f32,
     pub backend: String,
@@ -175,6 +178,7 @@ impl Grade {
             intervalo: (0, 0),
             deslocamento: 0.0,
             altura_visivel: 0.0,
+            altura_da_area: 0.0,
             largura: 0.0,
             dpr: 1.0,
             backend: backend.to_string(),
@@ -316,7 +320,15 @@ impl Grade {
             return 0;
         }
         self.zoom = z;
-        self.recalcular()
+        let bits = self.recalcular();
+        // Chegou à "uma por linha": a foto em foco vai para o meio da área.
+        if self.layout.colunas == 1 {
+            if let Some(foco) = self.selecao.foco() {
+                self.rolar_para = Some(foco);
+                return bits | mudou::ROLAR;
+            }
+        }
+        bits
     }
 
     /// O maior zoom em que **todas** as fotos do recorte cabem em
@@ -380,12 +392,26 @@ impl Grade {
     }
 
     fn recalcular(&mut self) -> u32 {
-        let novo = Layout::calcular(
-            self.largura,
-            self.zoom,
-            self.acervo.total_visivel(),
-            Opcoes::default(),
-        );
+        let total = self.acervo.total_visivel();
+        let mut novo = Layout::calcular(self.largura, self.zoom, total, Opcoes::default());
+        // 🔄 **O tile não passa da altura da área** (dono, 2026-09-22: *"a foto
+        // precisa se auto centralizar no scroll vertical"*). Na "uma por linha"
+        // do zoom, 3/4 da largura passava da tela: a foto ficava cortada e não
+        // havia rolagem que a mostrasse inteira. A razão encolhe só o que falta.
+        let area = self.altura_da_area;
+        let ocupa = novo.altura_imagem + novo.altura_rodape + novo.espaco;
+        if area > 0.0 && ocupa > area && novo.lado > 0.0 {
+            let razao = ((area - novo.altura_rodape - novo.espaco) / novo.lado).max(0.2);
+            novo = Layout::calcular(
+                self.largura,
+                self.zoom,
+                total,
+                Opcoes {
+                    razao,
+                    ..Opcoes::default()
+                },
+            );
+        }
         // 🚨 **Layout que muda implica visíveis que mudam.** O
         // `atualizar_visiveis` compara só o *intervalo* `(início, fim)`; com o
         // zoom mudando e as mesmas fotos à vista, ele continua igual — e o
@@ -817,12 +843,39 @@ impl Grade {
         serde_json::to_string(&lista).unwrap_or_else(|_| "[]".into())
     }
 
+    /// A altura da área de rolagem, que o React mede.
+    ///
+    /// 🚨 **A da área, e não a do canvas** — pelo mesmo motivo do
+    /// [`Self::zoom_para_caber`]: o canvas tem a altura do conteúdo, e o
+    /// conteúdo é o que este número limita. Perguntar à altura do canvas faria
+    /// a grade encolher um pouco a cada quadro.
+    pub fn definir_area(&mut self, altura: f32) -> u32 {
+        let altura = if altura.is_finite() {
+            altura.max(0.0)
+        } else {
+            0.0
+        };
+        if (altura - self.altura_da_area).abs() < 0.5 {
+            return 0;
+        }
+        self.altura_da_area = altura;
+        self.recalcular()
+    }
+
     /// `[y, h]` (em conteúdo) do tile que o teclado alcançou, uma vez.
+    ///
+    /// 🔄 **Uma por linha: o alvo é a área inteira, centrada no tile** — quem o
+    /// traz à vista o põe no meio, e não encostado na borda (dono, 2026-09-22).
     pub fn alvo_de_rolagem(&mut self) -> Vec<f32> {
         match self.rolar_para.take() {
             Some(n) if n < self.layout.total => {
                 let t = self.layout.posicao_do(n);
-                vec![t.y, t.h]
+                let area = self.altura_da_area;
+                if self.layout.colunas == 1 && area > t.h {
+                    vec![(t.y + t.h / 2.0 - area / 2.0).max(0.0), area]
+                } else {
+                    vec![t.y, t.h]
+                }
             }
             _ => Vec::new(),
         }
