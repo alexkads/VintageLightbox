@@ -5110,6 +5110,15 @@ fn arquivo_livre(pasta: &std::path::Path, nome: &str) -> std::path::PathBuf {
         .expect("sempre há um número livre")
 }
 
+/// Cronometra um trecho até o fim do escopo — ver `depuracao::vigia`.
+struct CronometroAoSair(&'static str, std::time::Instant);
+
+impl Drop for CronometroAoSair {
+    fn drop(&mut self) {
+        crate::depuracao::vigia::cronometrar(self.0, self.1);
+    }
+}
+
 #[cfg(test)]
 mod testes {
     #[test]
@@ -9012,14 +9021,5 @@ mod testes {
                 .advance_clock(std::time::Duration::from_millis(120));
             cx.run_until_parked();
         }
-    }
-}
-
-/// Cronometra um trecho até o fim do escopo — ver `depuracao::vigia`.
-struct CronometroAoSair(&'static str, std::time::Instant);
-
-impl Drop for CronometroAoSair {
-    fn drop(&mut self) {
-        crate::depuracao::vigia::cronometrar(self.0, self.1);
     }
 }
