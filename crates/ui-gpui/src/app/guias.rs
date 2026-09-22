@@ -18,19 +18,31 @@
 //! As guias ficam **lembradas entre aberturas** (`guias-das-sessoes.json`, ao
 //! lado do catálogo), presas à conta que as abriu: outra conta nesta máquina
 //! não herda as sessões de quem saiu.
+//!
+//! 🖱️ **A guia se arruma como aba de navegador**: arrasta-se para mudar de
+//! lugar, e o botão direito abre o menu dela — renomear, dar cor, mover e
+//! fechar (esta, as outras, as da direita). O nome dado ali é **só da guia**:
+//! a sessão no site continua com o dela, que se troca pelo lápis do cabeçalho.
+//! A cor é uma das cinco etiquetas, as mesmas das fotos.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use domain::value_objects::CropSettings;
-use gpui::{div, prelude::*, px, Context, FontWeight, MouseButton, SharedString};
+use domain::value_objects::{ColorLabel, CropSettings};
+use gpui::{
+    div, prelude::*, px, Context, DragMoveEvent, Entity, FontWeight, MouseButton, SharedString,
+    Subscription, WeakEntity, Window,
+};
+use gpui_component::input::{Escape, Input, InputEvent, InputState};
+use gpui_component::menu::{ContextMenuExt, PopupMenu, PopupMenuItem};
 use gpui_component::tooltip::Tooltip;
-use gpui_component::{h_flex, ActiveTheme, Icon};
+use gpui_component::{h_flex, ActiveTheme, Icon, Sizable};
 use serde::{Deserialize, Serialize};
 
 use super::{Aplicativo, Tela};
 use crate::recursos::Icone;
 use crate::revelacao::processador::Ajustes;
+use crate::tema::cores;
 
 /// Altura da faixa — a das abas do Chrome, menos o arredondado.
 const ALTURA_DA_FAIXA: f32 = 36.;
@@ -49,6 +61,20 @@ pub struct Guia {
     /// respondeu — a guia diz "Carregando…".
     #[serde(default)]
     pub titulo: Option<String>,
+    /// O nome que o operador deu à guia pelo botão direito. Manda sobre o da
+    /// sessão enquanto existir; a sessão no site não muda.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub apelido: Option<String>,
+    /// A cor da guia: o nome de uma das cinco etiquetas (`ColorLabel`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cor: Option<String>,
+}
+
+impl Guia {
+    /// O que a faixa escreve: o nome dado pelo operador, senão o da sessão.
+    pub fn nome(&self) -> Option<&str> {
+        self.apelido.as_deref().or(self.titulo.as_deref())
+    }
 }
 
 /// A lista de guias, sem tela — é aqui que moram as regras de abrir, fechar e
@@ -85,6 +111,8 @@ impl Guias {
         let guia = Guia {
             id: id.to_string(),
             titulo: None,
+            apelido: None,
+            cor: None,
         };
         match depois_de.and_then(|ativa| self.posicao(ativa)) {
             Some(i) => self.lista.insert(i + 1, guia),
@@ -144,6 +172,79 @@ impl Guias {
         }
     }
 
+    /// O nome dado pelo botão direito. Vazio, ou igual ao da sessão, volta a
+    /// guia ao nome da sessão — não há "apelido" que só repete o nome.
+    pub fn apelidar(&mut self, id: &str, apelido: &str) -> bool {
+        let apelido = apelido.trim();
+        let Some(guia) = self.lista.iter_mut().find(|g| g.id == id) else {
+            return false;
+        };
+        let novo = (!apelido.is_empty() && guia.titulo.as_deref() != Some(apelido))
+            .then(|| apelido.to_string());
+        if guia.apelido == novo {
+            return false;
+        }
+        guia.apelido = novo;
+        true
+    }
+
+    /// Dá (ou tira, com `None`) a cor da guia.
+    pub fn colorir(&mut self, id: &str, cor: Option<ColorLabel>) -> bool {
+        let cor = cor.map(|c| c.name().to_string());
+        match self.lista.iter_mut().find(|g| g.id == id) {
+            Some(guia) if guia.cor != cor => {
+                guia.cor = cor;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Leva a guia para a posição `destino` (limitada às pontas).
+    pub fn mover(&mut self, id: &str, destino: usize) -> bool {
+        let Some(i) = self.posicao(id) else {
+            return false;
+        };
+        let destino = destino.min(self.lista.len() - 1);
+        if i == destino {
+            return false;
+        }
+        let guia = self.lista.remove(i);
+        self.lista.insert(destino, guia);
+        true
+    }
+
+    /// O arrasto passou sobre `alvo`: a arrastada toma o lugar dela, e a
+    /// `alvo` recua uma casa na direção de onde a arrastada veio — como a aba
+    /// do navegador, que abre espaço enquanto a outra passa.
+    pub fn passar_sobre(&mut self, arrastada: &str, alvo: &str) -> bool {
+        match self.posicao(alvo) {
+            Some(destino) if arrastada != alvo => self.mover(arrastada, destino),
+            _ => false,
+        }
+    }
+
+    /// As guias que "Fechar as outras" fecha: todas menos esta.
+    pub fn outras(&self, id: &str) -> Vec<String> {
+        self.lista
+            .iter()
+            .filter(|g| g.id != id)
+            .map(|g| g.id.clone())
+            .collect()
+    }
+
+    /// As guias que "Fechar as da direita" fecha.
+    pub fn a_direita(&self, id: &str) -> Vec<String> {
+        match self.posicao(id) {
+            Some(i) => self.lista[i + 1..].iter().map(|g| g.id.clone()).collect(),
+            None => Vec::new(),
+        }
+    }
+
+    pub fn guia(&self, id: &str) -> Option<&Guia> {
+        self.lista.iter().find(|g| g.id == id)
+    }
+
     /// Guarda a fila do "Salvar" da guia que sai da frente.
     pub fn estacionar(&mut self, id: &str, fila: Vec<Pendente>) {
         if fila.is_empty() || self.posicao(id).is_none() {
@@ -179,7 +280,7 @@ impl Guias {
         self.estacionadas.clear();
     }
 
-    fn posicao(&self, id: &str) -> Option<usize> {
+    pub fn posicao(&self, id: &str) -> Option<usize> {
         self.lista.iter().position(|g| g.id == id)
     }
 
@@ -223,6 +324,75 @@ struct Arquivo {
 pub(super) fn arquivo() -> Option<PathBuf> {
     (!cfg!(test))
         .then(|| infrastructure::paths::AppPaths::catalog_root().join("guias-das-sessoes.json"))
+}
+
+/// O que a faixa está fazendo agora — nada disso vai para o disco.
+#[derive(Default)]
+pub(super) struct Edicao {
+    /// A guia do último botão direito. O menu é montado depois do evento, e lê.
+    alvo_do_menu: Option<String>,
+    /// A guia com o nome em edição.
+    renome: Option<Renome>,
+    /// Onde cada guia foi desenhada no último quadro — o roteiro de depuração
+    /// abre o menu sobre ela.
+    desenhadas: std::rc::Rc<std::cell::RefCell<Vec<gpui::Bounds<gpui::Pixels>>>>,
+    /// O menu aberto pelo roteiro de depuração, e onde.
+    menu_do_roteiro: Option<(Entity<PopupMenu>, gpui::Point<gpui::Pixels>)>,
+}
+
+struct Renome {
+    id: String,
+    campo: Entity<InputState>,
+    _assinatura: Subscription,
+}
+
+/// O que viaja no arrasto de uma guia.
+#[derive(Clone)]
+struct ArrastoDeGuia {
+    id: String,
+    nome: SharedString,
+}
+
+/// A guia que acompanha o ponteiro durante o arrasto.
+struct FantasmaDaGuia {
+    nome: SharedString,
+}
+
+impl Render for FantasmaDaGuia {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        h_flex()
+            .gap(px(6.))
+            .px(px(12.))
+            .h(px(ALTURA_DA_FAIXA - 6.))
+            .rounded(px(6.))
+            .bg(cx.theme().background)
+            .border_1()
+            .border_color(cx.theme().border)
+            .opacity(0.9)
+            .text_sm()
+            .text_color(cx.theme().foreground)
+            .child(Icon::new(Icone::Camera).size(px(14.)))
+            .child(self.nome.clone())
+    }
+}
+
+/// As cores do menu, na ordem das etiquetas, com o nome que o operador lê.
+const CORES: [(ColorLabel, &str); 5] = [
+    (ColorLabel::Red, "Vermelho"),
+    (ColorLabel::Yellow, "Amarelo"),
+    (ColorLabel::Green, "Verde"),
+    (ColorLabel::Blue, "Azul"),
+    (ColorLabel::Purple, "Roxo"),
+];
+
+/// O que o menu precisa saber da guia do botão direito.
+struct MenuDaGuia {
+    id: String,
+    nome: String,
+    apelidada: bool,
+    cor: Option<String>,
+    posicao: usize,
+    total: usize,
 }
 
 impl Aplicativo {
@@ -373,6 +543,195 @@ impl Aplicativo {
         self.guias.lista().iter().map(|g| g.id.clone()).collect()
     }
 
+    // ── O menu do botão direito ─────────────────────────────────────────
+
+    /// A guia vira campo, começando com o nome que ela mostra.
+    ///
+    /// 🔑 **O foco vai ao campo depois de o menu fechar**: o menu devolve o
+    /// foco a quem o tinha, e o campo perderia o foco — e se confirmaria — no
+    /// mesmo quadro em que nasceu.
+    pub fn comecar_a_renomear_guia(
+        &mut self,
+        id: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(guia) = self.guias.guia(&id) else {
+            return;
+        };
+        let nome = guia.nome().unwrap_or_default().to_string();
+        let campo = cx.new(|cx| InputState::new(window, cx).placeholder("Nome da guia"));
+        campo.update(cx, |campo, cx| campo.set_value(nome, window, cx));
+        let assinatura = cx.subscribe_in(
+            &campo,
+            window,
+            |raiz: &mut Self, _campo, evento: &InputEvent, _window, cx| match evento {
+                InputEvent::PressEnter { .. } | InputEvent::Blur => {
+                    raiz.confirmar_renome_da_guia(cx)
+                }
+                _ => {}
+            },
+        );
+        let focar = campo.clone();
+        window.defer(cx, move |window, cx| {
+            focar.update(cx, |campo, cx| campo.focus(window, cx));
+        });
+        // O nome inteiro selecionado: digitar já troca, como no Finder. Só
+        // depois de o campo ser desenhado — antes, a ação não acha a quem chegar.
+        let foco = gpui::Focusable::focus_handle(campo.read(cx), cx);
+        cx.spawn_in(window, async move |_raiz, cx| {
+            cx.background_executor()
+                .timer(std::time::Duration::from_millis(50))
+                .await;
+            let _ = cx.update(|window, cx| {
+                foco.dispatch_action(&gpui_component::input::SelectAll, window, cx);
+            });
+        })
+        .detach();
+        self.edicao_das_guias.renome = Some(Renome {
+            id,
+            campo,
+            _assinatura: assinatura,
+        });
+        cx.notify();
+    }
+
+    /// Enter, ou clicar fora: o nome digitado vale. Vazio volta ao da sessão.
+    pub fn confirmar_renome_da_guia(&mut self, cx: &mut Context<Self>) {
+        let Some(renome) = self.edicao_das_guias.renome.take() else {
+            return;
+        };
+        let nome = renome.campo.read(cx).value().to_string();
+        self.renomear_guia(&renome.id, &nome, cx);
+    }
+
+    /// Esc: a guia fica com o nome que tinha.
+    pub fn cancelar_renome_da_guia(&mut self, cx: &mut Context<Self>) {
+        if self.edicao_das_guias.renome.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    pub fn renomear_guia(&mut self, id: &str, nome: &str, cx: &mut Context<Self>) {
+        if self.guias.apelidar(id, nome) {
+            self.guardar_guias();
+        }
+        cx.notify();
+    }
+
+    pub fn colorir_guia(&mut self, id: &str, cor: Option<ColorLabel>, cx: &mut Context<Self>) {
+        if self.guias.colorir(id, cor) {
+            self.guardar_guias();
+            cx.notify();
+        }
+    }
+
+    pub fn mover_guia(&mut self, id: &str, destino: usize, cx: &mut Context<Self>) {
+        if self.guias.mover(id, destino) {
+            self.guardar_guias();
+            cx.notify();
+        }
+    }
+
+    /// "Fechar as outras" e "Fechar as da direita".
+    ///
+    /// 🔑 **Se a da frente está entre as que fecham, a do menu vem à frente
+    /// antes** — é para ela que o operador apontou, e fechar uma a uma levaria
+    /// a vizinhas que também vão fechar, abrindo sessões à toa.
+    pub fn fechar_guias(
+        &mut self,
+        fica: String,
+        fecham: Vec<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let da_frente = (self.tela == Tela::Sessao)
+            .then(|| self.sessao_aberta.clone())
+            .flatten();
+        if da_frente.is_some_and(|f| fecham.contains(&f)) {
+            self.ir_para_a_guia(fica, window, cx);
+        }
+        for id in &fecham {
+            self.guias.fechar(id);
+        }
+        self.guardar_guias();
+        cx.notify();
+    }
+
+    fn menu_da_guia(&self, id: &str) -> Option<MenuDaGuia> {
+        let guia = self.guias.guia(id)?;
+        Some(MenuDaGuia {
+            id: guia.id.clone(),
+            nome: guia.nome().unwrap_or("Carregando…").to_string(),
+            apelidada: guia.apelido.is_some(),
+            cor: guia.cor.clone(),
+            posicao: self.guias.posicao(id)?,
+            total: self.guias.lista().len(),
+        })
+    }
+
+    /// Um gesto do roteiro de depuração (`guias …`).
+    ///
+    /// ⚠️ O `ContextMenu` não abre por fora: o `menu` monta **o mesmo** menu e
+    /// o desenha sobre a guia, como o `tira menu` da Revelação.
+    pub(super) fn seguir_o_roteiro_das_guias(
+        &mut self,
+        gesto: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let partes: Vec<&str> = gesto.split_whitespace().collect();
+        let n = |i: usize| partes.get(i).and_then(|p| p.parse::<usize>().ok());
+        let id = n(1).and_then(|i| self.guias.lista().get(i).map(|g| g.id.clone()));
+        match (partes.first().copied().unwrap_or_default(), id) {
+            ("menu", Some(id)) => {
+                let Some(dados) = self.menu_da_guia(&id) else {
+                    return;
+                };
+                let onde = self
+                    .edicao_das_guias
+                    .desenhadas
+                    .borrow()
+                    .get(n(1).unwrap_or(0))
+                    .copied();
+                let Some(onde) = onde else {
+                    return;
+                };
+                let esta = cx.entity().downgrade();
+                let menu = PopupMenu::build(window, cx, move |menu, window, cx| {
+                    montar_o_menu(menu, dados, esta, window, cx)
+                });
+                self.edicao_das_guias.menu_do_roteiro = Some((menu, onde.center()));
+            }
+            ("fechar_menu", _) => self.edicao_das_guias.menu_do_roteiro = None,
+            ("renomear", Some(id)) => self.comecar_a_renomear_guia(id, window, cx),
+            ("nome", Some(id)) => self.renomear_guia(&id, &partes[2..].join(" "), cx),
+            ("cor", Some(id)) => {
+                let cor = partes.get(2).and_then(|c| ColorLabel::from_name(c).ok());
+                self.colorir_guia(&id, cor, cx);
+            }
+            ("mover", Some(id)) => self.mover_guia(&id, n(2).unwrap_or(0), cx),
+            (outro, _) => eprintln!("[roteiro] gesto das guias desconhecido: {gesto} ({outro})"),
+        }
+        cx.notify();
+    }
+
+    pub fn apelidos_das_guias_para_teste(&self) -> Vec<Option<String>> {
+        self.guias
+            .lista()
+            .iter()
+            .map(|g| g.apelido.clone())
+            .collect()
+    }
+
+    pub fn cores_das_guias_para_teste(&self) -> Vec<Option<String>> {
+        self.guias.lista().iter().map(|g| g.cor.clone()).collect()
+    }
+
+    pub fn renomeando_guia_para_teste(&self) -> Option<&str> {
+        self.edicao_das_guias.renome.as_ref().map(|r| r.id.as_str())
+    }
+
     // ── O desenho ────────────────────────────────────────────────────────
 
     /// A faixa das guias, sobre a galeria e sobre a lista de sessões.
@@ -390,6 +749,12 @@ impl Aplicativo {
             .then(|| self.sessao_aberta.clone())
             .flatten();
 
+        let renome = self
+            .edicao_das_guias
+            .renome
+            .as_ref()
+            .map(|r| (r.id.clone(), r.campo.clone()));
+
         let guias = self.guias.lista().iter().enumerate().map(|(i, guia)| {
             let ativa = da_frente.as_deref() == Some(guia.id.as_str());
             let por_salvar = if ativa {
@@ -397,21 +762,34 @@ impl Aplicativo {
             } else {
                 self.guias.por_salvar(&guia.id)
             };
-            let titulo: SharedString = guia
-                .titulo
-                .clone()
-                .unwrap_or_else(|| "Carregando…".into())
-                .into();
+            let titulo: SharedString = guia.nome().unwrap_or("Carregando…").to_string().into();
             let dica = match (i, por_salvar) {
                 (0..=7, 0) => format!("{titulo}  ·  ⌘{}", i + 1),
                 (_, 0) => titulo.to_string(),
                 (_, n) => format!("{titulo}  ·  {n} revelação(ões) por salvar"),
             };
+            let cor = guia.cor.as_deref().and_then(cores::etiqueta);
+            let editando = renome
+                .as_ref()
+                .filter(|(id, _)| id == &guia.id)
+                .map(|(_, campo)| campo.clone());
             let id_clique = guia.id.clone();
             let id_meio = guia.id.clone();
             let id_fechar = guia.id.clone();
+            let id_direito = guia.id.clone();
+            let id_sob_o_arrasto = guia.id.clone();
+            let arrasto = ArrastoDeGuia {
+                id: guia.id.clone(),
+                nome: titulo.clone(),
+            };
             h_flex()
                 .id(SharedString::from(format!("guia-{}", guia.id)))
+                // Para o teste arrastar onde o dedo arrasta.
+                .debug_selector({
+                    let id = guia.id.clone();
+                    move || format!("guia-{id}")
+                })
+                .relative()
                 .flex_1()
                 .min_w(px(LARGURA_MINIMA))
                 .max_w(px(LARGURA_MAXIMA))
@@ -432,12 +810,38 @@ impl Aplicativo {
                 })
                 .when(!ativa, |g| {
                     g.text_color(apagado)
+                        .when_some(cor, |g, cor| g.bg(cor.opacity(0.10)))
                         .hover(move |g| g.bg(fundo_ativo.opacity(0.5)).text_color(frente))
                 })
-                .tooltip(move |window, cx| Tooltip::new(dica.clone()).build(window, cx))
-                .on_click(cx.listener(move |raiz, _, window, cx| {
-                    raiz.ir_para_a_guia(id_clique.clone(), window, cx);
-                }))
+                // 🎨 A cor é uma faixa no alto da guia, como o grupo de abas do
+                // Chrome — por cima da borda da ativa, que continua dizendo
+                // "esta é a da frente" pelo fundo e pelo peso da letra.
+                .when_some(cor, |g, cor| {
+                    g.child(
+                        div()
+                            .absolute()
+                            .top_0()
+                            .left_0()
+                            .right_0()
+                            .h(px(3.))
+                            .bg(cor),
+                    )
+                })
+                .when(editando.is_none(), |g| {
+                    g.tooltip(move |window, cx| Tooltip::new(dica.clone()).build(window, cx))
+                })
+                .on_click(
+                    cx.listener(move |raiz, evento: &gpui::ClickEvent, window, cx| {
+                        if raiz.renomeando_guia_para_teste() == Some(id_clique.as_str()) {
+                            return;
+                        }
+                        raiz.ir_para_a_guia(id_clique.clone(), window, cx);
+                        // O duplo clique no nome renomeia, como no Finder.
+                        if evento.click_count() == 2 {
+                            raiz.comecar_a_renomear_guia(id_clique.clone(), window, cx);
+                        }
+                    }),
+                )
                 // O botão do meio fecha, como em todo navegador.
                 .on_mouse_down(
                     MouseButton::Middle,
@@ -445,8 +849,53 @@ impl Aplicativo {
                         raiz.fechar_guia(id_meio.clone(), window, cx);
                     }),
                 )
-                .child(Icon::new(Icone::Camera).size(px(14.)).flex_none())
-                .child(div().flex_1().min_w(px(0.)).truncate().child(titulo))
+                // O botão direito anota qual guia foi; o menu da faixa lê.
+                .on_mouse_down(
+                    MouseButton::Right,
+                    cx.listener(move |raiz, _, _window, _cx| {
+                        raiz.edicao_das_guias.alvo_do_menu = Some(id_direito.clone());
+                    }),
+                )
+                // 🔑 **Arrastar muda a guia de lugar ao vivo**: passar sobre a
+                // vizinha já troca as duas, como no navegador, e a ordem nova é
+                // gravada na hora — soltar fora da faixa não a desfaz.
+                .when(editando.is_none(), |g| {
+                    g.on_drag(arrasto, |valor, _posicao, _window, cx| {
+                        let nome = valor.nome.clone();
+                        cx.new(|_| FantasmaDaGuia { nome })
+                    })
+                })
+                .on_drag_move(cx.listener(
+                    move |raiz, evento: &DragMoveEvent<ArrastoDeGuia>, _window, cx| {
+                        if !evento.bounds.contains(&evento.event.position) {
+                            return;
+                        }
+                        let arrastada = evento.drag(cx).id.clone();
+                        if raiz.guias.passar_sobre(&arrastada, &id_sob_o_arrasto) {
+                            raiz.guardar_guias();
+                            cx.notify();
+                        }
+                    },
+                ))
+                .child(
+                    Icon::new(Icone::Camera)
+                        .size(px(14.))
+                        .flex_none()
+                        .when_some(cor, |i, cor| i.text_color(cor)),
+                )
+                .map(|g| match editando {
+                    // Enter confirma, Esc desiste, clicar fora confirma.
+                    Some(campo) => g.child(
+                        div()
+                            .flex_1()
+                            .min_w(px(0.))
+                            .on_action(cx.listener(|raiz, _: &Escape, _window, cx| {
+                                raiz.cancelar_renome_da_guia(cx)
+                            }))
+                            .child(Input::new(&campo).xsmall()),
+                    ),
+                    None => g.child(div().flex_1().min_w(px(0.)).truncate().child(titulo)),
+                })
                 // 🔑 O ponto diz "tem revelação por salvar", como o ponto oco da
                 // tira — trocar de guia não pode esconder isso.
                 .when(por_salvar > 0, |g| {
@@ -470,8 +919,14 @@ impl Aplicativo {
                 )
         });
 
+        let esta = cx.entity().downgrade();
+        let desenhadas = self.edicao_das_guias.desenhadas.clone();
+        let menu_do_roteiro = self.edicao_das_guias.menu_do_roteiro.clone();
         Some(
             h_flex()
+                .on_children_prepainted(move |limites, _window, _cx| {
+                    *desenhadas.borrow_mut() = limites;
+                })
                 .id("faixa-das-guias")
                 .flex_none()
                 .w_full()
@@ -499,9 +954,134 @@ impl Aplicativo {
                         .on_click(cx.listener(|raiz, _, window, cx| {
                             raiz.ir_para(Tela::Sessoes, window, cx);
                         })),
-                ),
+                )
+                .children(menu_do_roteiro.map(|(menu, ponto)| {
+                    gpui::deferred(gpui::anchored().position(ponto).child(menu)).with_priority(1)
+                }))
+                // 🔑 **Um menu para a faixa inteira**, como o da tira da
+                // Revelação: o `ContextMenu` guarda estado por id, e um por guia
+                // seriam vários com o mesmo. Fora de uma guia (no `+`, no vão),
+                // não há alvo e o menu não abre.
+                .context_menu(move |menu, window, cx| {
+                    let Some(dados) = esta
+                        .update(cx, |raiz, _cx| {
+                            raiz.edicao_das_guias
+                                .alvo_do_menu
+                                .take()
+                                .and_then(|id| raiz.menu_da_guia(&id))
+                        })
+                        .ok()
+                        .flatten()
+                    else {
+                        return menu;
+                    };
+                    montar_o_menu(menu, dados, esta.clone(), window, cx)
+                }),
         )
     }
+}
+
+/// O menu do botão direito numa guia.
+fn montar_o_menu(
+    menu: PopupMenu,
+    dados: MenuDaGuia,
+    esta: WeakEntity<Aplicativo>,
+    window: &mut Window,
+    cx: &mut Context<PopupMenu>,
+) -> PopupMenu {
+    type Gesto = fn(&mut Aplicativo, String, &mut Window, &mut Context<Aplicativo>);
+    let com = |gesto: Gesto| {
+        let (esta, id) = (esta.clone(), dados.id.clone());
+        move |_ev: &gpui::ClickEvent, window: &mut Window, cx: &mut gpui::App| {
+            let _ = esta.update(cx, |raiz, cx| gesto(raiz, id.clone(), window, cx));
+        }
+    };
+    let ultima = dados.posicao + 1 == dados.total;
+    let (posicao, cor_atual) = (dados.posicao, dados.cor.clone());
+    let (esta_cor, id_cor) = (esta.clone(), dados.id.clone());
+
+    menu.label(dados.nome)
+        .separator()
+        .item(
+            PopupMenuItem::new("Renomear guia…").on_click(com(|_raiz, id, window, cx| {
+                // Depois de o menu fechar: é ele quem devolve o foco ao fechar.
+                let esta = cx.entity();
+                window.defer(cx, move |window, cx| {
+                    esta.update(cx, |raiz, cx| raiz.comecar_a_renomear_guia(id, window, cx));
+                });
+            })),
+        )
+        .item(
+            PopupMenuItem::new("Voltar ao nome da sessão")
+                .disabled(!dados.apelidada)
+                .on_click(com(|raiz, id, _window, cx| raiz.renomear_guia(&id, "", cx))),
+        )
+        .submenu("Cor da guia", window, cx, move |sub, _window, _cx| {
+            let esta = esta_cor.clone();
+            let id = id_cor.clone();
+            let pintar = move |cor: Option<ColorLabel>| {
+                let (esta, id) = (esta.clone(), id.clone());
+                move |_ev: &gpui::ClickEvent, _window: &mut Window, cx: &mut gpui::App| {
+                    let _ = esta.update(cx, |raiz, cx| raiz.colorir_guia(&id, cor, cx));
+                }
+            };
+            let sub = sub.item(
+                PopupMenuItem::new("Sem cor")
+                    .checked(cor_atual.is_none())
+                    .on_click(pintar(None)),
+            );
+            CORES.iter().fold(sub, |sub, (cor, nome)| {
+                sub.item(
+                    PopupMenuItem::new(*nome)
+                        .checked(cor_atual.as_deref() == Some(cor.name()))
+                        .on_click(pintar(Some(*cor))),
+                )
+            })
+        })
+        .separator()
+        .item(
+            PopupMenuItem::new("Mover para a esquerda")
+                .disabled(posicao == 0)
+                .on_click({
+                    let (esta, id) = (esta.clone(), dados.id.clone());
+                    move |_ev, _window, cx| {
+                        let _ = esta.update(cx, |raiz, cx| {
+                            raiz.mover_guia(&id, posicao.saturating_sub(1), cx)
+                        });
+                    }
+                }),
+        )
+        .item(
+            PopupMenuItem::new("Mover para a direita")
+                .disabled(ultima)
+                .on_click({
+                    let (esta, id) = (esta.clone(), dados.id.clone());
+                    move |_ev, _window, cx| {
+                        let _ = esta.update(cx, |raiz, cx| raiz.mover_guia(&id, posicao + 1, cx));
+                    }
+                }),
+        )
+        .separator()
+        .item(
+            PopupMenuItem::new("Fechar guia")
+                .on_click(com(|raiz, id, window, cx| raiz.fechar_guia(id, window, cx))),
+        )
+        .item(
+            PopupMenuItem::new("Fechar as outras guias")
+                .disabled(dados.total < 2)
+                .on_click(com(|raiz, id, window, cx| {
+                    let fecham = raiz.guias.outras(&id);
+                    raiz.fechar_guias(id, fecham, window, cx);
+                })),
+        )
+        .item(
+            PopupMenuItem::new("Fechar as guias à direita")
+                .disabled(ultima)
+                .on_click(com(|raiz, id, window, cx| {
+                    let fecham = raiz.guias.a_direita(&id);
+                    raiz.fechar_guias(id, fecham, window, cx);
+                })),
+        )
 }
 
 #[cfg(test)]
@@ -628,5 +1208,100 @@ mod testes {
         assert!(!guias.dar_nome("g1", "   "));
         assert!(!guias.dar_nome("g1", "Ensaio"));
         assert_eq!(guias.lista()[0].titulo.as_deref(), Some("Ensaio"));
+    }
+
+    fn tres() -> Guias {
+        let mut guias = Guias::default();
+        for id in ["g1", "g2", "g3"] {
+            guias.abrir(id, None);
+        }
+        guias
+    }
+
+    #[test]
+    fn o_apelido_manda_no_nome_e_vazio_volta_ao_da_sessao() {
+        let mut guias = tres();
+        guias.dar_nome("g1", "Ensaio da Ana");
+        assert!(guias.apelidar("g1", "  Ana — prova  "));
+        assert_eq!(guias.guia("g1").unwrap().nome(), Some("Ana — prova"));
+        // A sessão continua com o nome dela: o site renomeia, a guia não perde o apelido.
+        guias.dar_nome("g1", "Ensaio da Ana Paula");
+        assert_eq!(guias.guia("g1").unwrap().nome(), Some("Ana — prova"));
+        assert!(guias.apelidar("g1", ""));
+        assert_eq!(
+            guias.guia("g1").unwrap().nome(),
+            Some("Ensaio da Ana Paula")
+        );
+        // Repetir o nome da sessão não vira apelido.
+        assert!(!guias.apelidar("g1", "Ensaio da Ana Paula"));
+        assert_eq!(guias.guia("g1").unwrap().apelido, None);
+        assert!(!guias.apelidar("nenhuma", "x"));
+    }
+
+    #[test]
+    fn a_cor_e_uma_das_etiquetas_e_sai_com_sem_cor() {
+        let mut guias = tres();
+        assert!(guias.colorir("g2", Some(ColorLabel::Green)));
+        assert!(!guias.colorir("g2", Some(ColorLabel::Green)));
+        assert_eq!(guias.guia("g2").unwrap().cor.as_deref(), Some("green"));
+        assert!(cores::etiqueta("green").is_some(), "a faixa sabe pintar");
+        assert!(guias.colorir("g2", None));
+        assert_eq!(guias.guia("g2").unwrap().cor, None);
+    }
+
+    #[test]
+    fn mover_leva_a_guia_e_para_nas_pontas() {
+        let mut guias = tres();
+        assert!(guias.mover("g3", 0));
+        assert_eq!(ids(&guias), ["g3", "g1", "g2"]);
+        assert!(guias.mover("g3", 99));
+        assert_eq!(ids(&guias), ["g1", "g2", "g3"]);
+        assert!(!guias.mover("g3", 2));
+        assert!(!guias.mover("nenhuma", 0));
+    }
+
+    #[test]
+    fn arrastar_sobre_a_vizinha_troca_de_lugar_nos_dois_sentidos() {
+        let mut guias = tres();
+        // Da primeira para a direita, passando por cima de cada uma.
+        assert!(guias.passar_sobre("g1", "g2"));
+        assert_eq!(ids(&guias), ["g2", "g1", "g3"]);
+        assert!(guias.passar_sobre("g1", "g3"));
+        assert_eq!(ids(&guias), ["g2", "g3", "g1"]);
+        // Sobre si mesma não faz nada — o ponteiro fica sobre ela depois da troca.
+        assert!(!guias.passar_sobre("g1", "g1"));
+        // E de volta, pulando direto para a primeira.
+        assert!(guias.passar_sobre("g1", "g2"));
+        assert_eq!(ids(&guias), ["g1", "g2", "g3"]);
+    }
+
+    #[test]
+    fn fechar_as_outras_e_as_da_direita_escolhem_as_certas() {
+        let guias = tres();
+        assert_eq!(guias.outras("g2"), ["g1", "g3"]);
+        assert_eq!(guias.a_direita("g1"), ["g2", "g3"]);
+        assert!(guias.a_direita("g3").is_empty());
+        assert!(guias.a_direita("nenhuma").is_empty());
+    }
+
+    #[test]
+    fn apelido_cor_e_ordem_voltam_na_proxima_abertura() {
+        let mut guias = tres();
+        guias.apelidar("g2", "Prova");
+        guias.colorir("g2", Some(ColorLabel::Blue));
+        guias.mover("g2", 0);
+        let de_volta = Guias::de_json(&guias.em_json(Some("a@x.com")), "a@x.com");
+        assert_eq!(de_volta[0].id, "g2");
+        assert_eq!(de_volta[0].apelido.as_deref(), Some("Prova"));
+        assert_eq!(de_volta[0].cor.as_deref(), Some("blue"));
+    }
+
+    #[test]
+    fn o_arquivo_de_antes_das_cores_ainda_abre() {
+        let antigo = r#"{"conta":"a@x.com","guias":[{"id":"g1","titulo":"Ensaio"}]}"#;
+        let guias = Guias::de_json(antigo, "a@x.com");
+        assert_eq!(guias.len(), 1);
+        assert_eq!(guias[0].apelido, None);
+        assert_eq!(guias[0].cor, None);
     }
 }

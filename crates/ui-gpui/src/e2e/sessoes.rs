@@ -315,3 +315,116 @@ fn cada_sessao_abre_numa_guia_e_as_teclas_do_navegador_andam_entre_elas(cx: &mut
         assert_eq!(app.tela(), Tela::Sessoes, "sem guia, volta à lista");
     });
 }
+
+/// 🎬 **A guia se arruma como aba de navegador.** Arrastada com o mouse de
+/// verdade, passa por cima da vizinha e troca de lugar; pelo menu, ganha um
+/// nome só dela (o nome inteiro já vem selecionado, e digitar troca), uma cor,
+/// e "Fechar as outras" traz à frente a do menu antes de fechar as demais.
+#[gpui::test]
+fn a_guia_se_arrasta_se_renomeia_ganha_cor_e_fecha_as_outras(cx: &mut TestAppContext) {
+    let e = abrir_o_ensaio(cx, Cenario::default());
+    e.app(cx, |app, _w, cx| app.entrar_na_sessao("g2".into(), cx));
+    e.esperar(cx);
+    e.app(cx, |app, _w, _cx| {
+        assert_eq!(app.guias_para_teste(), [GALERIA, "g2"])
+    });
+
+    // O arrasto: aperta na primeira, passa pela segunda, solta.
+    let mut visual = gpui::VisualTestContext::from_window(e.raiz.into(), cx);
+    let de = visual
+        .debug_bounds("guia-g1")
+        .expect("a primeira guia está na faixa");
+    let para = visual
+        .debug_bounds("guia-g2")
+        .expect("a segunda guia está na faixa");
+    visual.simulate_mouse_down(
+        de.center(),
+        gpui::MouseButton::Left,
+        gpui::Modifiers::none(),
+    );
+    for passo in 1..=8 {
+        let t = passo as f32 / 8.;
+        let x = de.center().x + (para.center().x - de.center().x) * t;
+        visual.simulate_mouse_move(
+            gpui::point(x, de.center().y),
+            Some(gpui::MouseButton::Left),
+            gpui::Modifiers::none(),
+        );
+    }
+    visual.simulate_mouse_up(
+        para.center(),
+        gpui::MouseButton::Left,
+        gpui::Modifiers::none(),
+    );
+    cx.run_until_parked();
+    e.app(cx, |app, _w, _cx| {
+        assert_eq!(
+            app.guias_para_teste(),
+            ["g2", GALERIA],
+            "a arrastada tomou o lugar da vizinha"
+        );
+        assert_eq!(
+            app.sessao_aberta_para_teste(),
+            Some("g2"),
+            "arrastar não é clicar: a da frente não mudou"
+        );
+    });
+
+    // Renomear: o campo nasce com o nome todo selecionado.
+    e.app(cx, |app, w, cx| {
+        app.comecar_a_renomear_guia(GALERIA.into(), w, cx)
+    });
+    e.esperar(cx);
+    e.app(cx, |app, _w, _cx| {
+        assert_eq!(app.renomeando_guia_para_teste(), Some(GALERIA))
+    });
+    e.teclar(cx, "P r o v a enter");
+    e.app(cx, |app, _w, _cx| {
+        assert_eq!(app.renomeando_guia_para_teste(), None, "Enter confirma");
+        assert_eq!(
+            app.apelidos_das_guias_para_teste(),
+            [None, Some("Prova".to_string())]
+        );
+        assert_eq!(
+            app.titulos_das_guias_para_teste()[1].as_deref(),
+            Some("Ensaio da Ana"),
+            "a sessão continua com o nome dela"
+        );
+    });
+
+    // Esc desiste sem mexer no nome.
+    e.app(cx, |app, w, cx| {
+        app.comecar_a_renomear_guia(GALERIA.into(), w, cx)
+    });
+    e.esperar(cx);
+    e.teclar(cx, "X escape");
+    e.app(cx, |app, _w, _cx| {
+        assert_eq!(app.renomeando_guia_para_teste(), None);
+        assert_eq!(
+            app.apelidos_das_guias_para_teste()[1].as_deref(),
+            Some("Prova")
+        );
+    });
+
+    e.app(cx, |app, _w, cx| {
+        app.colorir_guia("g2", Some(domain::value_objects::ColorLabel::Purple), cx)
+    });
+    e.app(cx, |app, _w, _cx| {
+        assert_eq!(
+            app.cores_das_guias_para_teste(),
+            [Some("purple".to_string()), None]
+        );
+    });
+
+    // "Fechar as outras" na de trás: ela vem à frente, e só ela fica.
+    e.app(cx, |app, w, cx| {
+        let fecham = vec!["g2".to_string()];
+        app.fechar_guias(GALERIA.into(), fecham, w, cx);
+    });
+    e.esperar(cx);
+    e.app(cx, |app, _w, cx| {
+        assert_eq!(app.guias_para_teste(), [GALERIA]);
+        assert_eq!(app.sessao_aberta_para_teste(), Some(GALERIA));
+        assert_eq!(app.detalhe.read(cx).galeria_id(), Some(GALERIA));
+    });
+}

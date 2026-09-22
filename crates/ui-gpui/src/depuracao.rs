@@ -73,6 +73,11 @@ pub enum Passo {
     /// tira da Revelação aberta (a posição é a da tira, contando de 0). O
     /// `menu` dá um botão direito de verdade sobre a miniatura.
     Tira(String),
+    /// `guias menu 1` · `guias fechar_menu` · `guias renomear 1` · `guias nome 1
+    /// Prova` · `guias cor 1 purple` · `guias mover 1 0` — a faixa das guias
+    /// (posição contando de 0). O `menu` desenha o mesmo menu do botão direito
+    /// sobre a guia.
+    Guias(String),
     /// `janela minimizar` · `janela fechar` · `janela abrir` · `janela
     /// fingir_envio 2` — a bandeja (`crate::segundo_plano`). `fechar` é o botão
     /// vermelho de verdade; `abrir` é o "Abrir o VintageLightbox"; `fingir_envio`
@@ -156,6 +161,7 @@ pub fn ler_roteiro(texto: &str) -> Result<Vec<Passo>, String> {
             "revelacao" => Passo::Revelacao(argumentos.join(" ")),
             "predefinicoes" => Passo::Predefinicoes(argumentos.join(" ")),
             "tira" => Passo::Tira(argumentos.join(" ")),
+            "guias" => Passo::Guias(argumentos.join(" ")),
             "janela" => Passo::Janela(argumentos.join(" ")),
             "nova" => Passo::Nova(argumentos.join(" ")),
             "importar" => Passo::Importar(argumentos.join(" ")),

@@ -531,7 +531,11 @@ mod testes_do_ajuste {
             assert_eq!(l.colunas, 1, "em {largura} px");
             assert_eq!(l.lado, largura, "e ela ocupa a linha inteira");
         }
-        assert_eq!(zoom_maximo(300.0), ZOOM_MAX, "o teto não encolhe abaixo do fixo");
+        assert_eq!(
+            zoom_maximo(300.0),
+            ZOOM_MAX,
+            "o teto não encolhe abaixo do fixo"
+        );
         assert_eq!(zoom_maximo(f32::NAN), ZOOM_MAX);
     }
 

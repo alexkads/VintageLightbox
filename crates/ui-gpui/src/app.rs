@@ -476,6 +476,9 @@ pub struct Aplicativo {
     /// `sessao_aberta`; as outras guardam o nome e a fila do "Salvar".
     guias: guias::Guias,
     arquivo_das_guias: Option<std::path::PathBuf>,
+    /// O que a faixa das guias está fazendo agora: o alvo do botão direito,
+    /// o nome sendo editado e a guia sendo arrastada.
+    edicao_das_guias: guias::Edicao,
     /// As fotos que já estão **no site**, do ensaio aberto, na linguagem da
     /// grade.
     ///
@@ -1082,6 +1085,7 @@ impl Aplicativo {
             sessao_aberta: None,
             guias: guias::Guias::default(),
             arquivo_das_guias: guias::arquivo(),
+            edicao_das_guias: guias::Edicao::default(),
             fotos_do_site: Vec::new(),
             publicador: publicador_da_raiz,
             sincronias: channel(),
