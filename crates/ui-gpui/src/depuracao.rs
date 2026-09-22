@@ -78,6 +78,9 @@ pub enum Passo {
     /// (posição contando de 0). O `menu` desenha o mesmo menu do botão direito
     /// sobre a guia.
     Guias(String),
+    /// `importar_modal` — o botão "Importar fotos" da sessão aberta: abre o
+    /// modal do quadro, sem abrir a janela do sistema.
+    ImportarModal,
     /// `janela minimizar` · `janela fechar` · `janela abrir` · `janela
     /// fingir_envio 2` — a bandeja (`crate::segundo_plano`). `fechar` é o botão
     /// vermelho de verdade; `abrir` é o "Abrir o VintageLightbox"; `fingir_envio`
@@ -162,6 +165,7 @@ pub fn ler_roteiro(texto: &str) -> Result<Vec<Passo>, String> {
             "predefinicoes" => Passo::Predefinicoes(argumentos.join(" ")),
             "tira" => Passo::Tira(argumentos.join(" ")),
             "guias" => Passo::Guias(argumentos.join(" ")),
+            "importar_modal" => Passo::ImportarModal,
             "janela" => Passo::Janela(argumentos.join(" ")),
             "nova" => Passo::Nova(argumentos.join(" ")),
             "importar" => Passo::Importar(argumentos.join(" ")),

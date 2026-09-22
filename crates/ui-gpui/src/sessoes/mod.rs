@@ -14,6 +14,8 @@ pub mod detalhe;
 pub mod nova;
 /// A receita padrão revelada em segundo plano (o `receita-padrao/` do site).
 pub mod periodo;
+/// O quadro "arraste ou escolha" das duas portas de importar.
+pub mod quadro_de_importacao;
 pub mod receita_padrao;
 /// A política de retenção do pós-venda (a rota `configuracoes` do site).
 pub mod retencao;

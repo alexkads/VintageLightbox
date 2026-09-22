@@ -881,48 +881,22 @@ impl NovaSessao {
         let tema = cx.theme().clone();
         let (total, copiadas, previas) = self.numeros_da_copia();
         if total == 0 {
-            return v_flex()
-                .items_center()
-                .justify_center()
-                .gap(px(12.))
-                .p(px(32.))
-                .min_h(px(320.))
-                .rounded(px(10.))
-                .border_1()
-                .border_dashed()
-                .border_color(tema.border)
-                .child(
-                    div()
-                        .p(px(8.))
-                        .rounded(px(8.))
-                        .bg(tema.muted)
-                        .child(Icon::new(Icone::ImagePlus).size(px(24.))),
-                )
-                .child(div().text_lg().font_weight(FontWeight::MEDIUM).child("Nenhuma foto ainda"))
-                .child(
-                    div()
-                        .max_w(px(360.))
-                        .text_sm()
-                        .text_center()
-                        .text_color(tema.muted_foreground)
-                        .child(
-                            "Arraste a pasta do Lightroom para qualquer lugar desta tela, ou escolha \
-                             os arquivos. As fotos ficam neste computador e sobem quando forem \
-                             classificadas, dentro da sessão.",
-                        ),
-                )
-                .child(
-                    h_flex()
-                        .gap(px(8.))
-                        .child(
-                            estilo::botao_primario("nova-escolher-fotos", cx)
-                                .child("Escolher fotos")
-                                .on_click(cx.listener(|tela, _, window, cx| {
-                                    tela.escolher_fotos(window, cx)
-                                })),
-                        )
-                        .child(self.botao_da_origem(cx)),
-                )
+            return crate::sessoes::quadro_de_importacao::quadro_de_importacao(
+                "Nenhuma foto ainda",
+                crate::sessoes::quadro_de_importacao::ARRASTE_OU_ESCOLHA,
+                h_flex()
+                    .gap(px(8.))
+                    .child(
+                        estilo::botao_primario("nova-escolher-fotos", cx)
+                            .child("Escolher fotos")
+                            .on_click(
+                                cx.listener(|tela, _, window, cx| tela.escolher_fotos(window, cx)),
+                            ),
+                    )
+                    .child(self.botao_da_origem(cx)),
+                cx,
+            )
+            .min_h(px(320.))
                 .into_any_element();
         }
 

@@ -583,6 +583,9 @@ pub struct Detalhe {
     /// **e os arquivos dela** do site, e não há como desfazer pela tela. O
     /// balcão é tela de dedo rápido; a pergunta é o freio.
     apagar_confirmando: Option<(String, String)>,
+    /// O modal "Importar fotos" está aberto — o quadro de arrastar ou escolher,
+    /// o mesmo da etapa 2 da nova sessão (`quadro_de_importacao`).
+    importacao_aberta: bool,
     /// 🧪 O registro dos avisos de "esta foto mudou, releia".
     #[cfg(test)]
     reveladas_avisadas: Vec<String>,
@@ -793,6 +796,7 @@ impl Detalhe {
             faixa_e_precos_aberto: false,
             detalhes_abertos: false,
             apagar_confirmando: None,
+            importacao_aberta: false,
             #[cfg(test)]
             reveladas_avisadas: Vec::new(),
             presets_da_receita: Vec::new(),
@@ -3369,6 +3373,14 @@ impl Render for Detalhe {
             // outro `deferred` dentro (ver `caixa/dialogos.rs`).
             .children(self.detalhes(cx))
             .children(self.atendimento(cx))
+            // 🔑 **`deferred`, e não só por último**: o caixa flutuante é filho
+            // da raiz, desenhado depois desta tela, e ficava por cima do modal.
+            // Diferido, o modal é pintado depois de tudo. Não há `deferred`
+            // dentro dele (ver o comentário acima).
+            .children(
+                self.modal_de_importacao(cx)
+                    .map(|modal| gpui::deferred(modal).with_priority(2)),
+            )
     }
 }
 
@@ -3803,7 +3815,9 @@ impl Detalhe {
                     .child(Icon::new(Icone::Upload).size(px(16.)))
                     .child("Importar fotos")
                     .when(!(ocupado || sem_sessao), |b| {
-                        b.on_click(cx.listener(|tela, _ev, _window, cx| tela.importar(cx)))
+                        b.on_click(
+                            cx.listener(|tela, _ev, _window, cx| tela.abrir_a_importacao(cx)),
+                        )
                     }),
                 ocupado || sem_sessao,
             ))
@@ -4939,6 +4953,94 @@ impl Detalhe {
     }
 
     /// O diálogo de "Apagar esta foto?" — os mesmos textos do site.
+    /// "Importar fotos": abre o modal do quadro, e não mais a janela do sistema
+    /// direto (dono, 22/set/2026: *"precisa abrir um modal parecido com o de
+    /// criação de sessão"*). O "Escolher fotos" do modal é que abre a janela.
+    pub fn abrir_a_importacao(&mut self, cx: &mut Context<Self>) {
+        if self.importando() {
+            return;
+        }
+        self.importacao_aberta = true;
+        cx.notify();
+    }
+
+    pub fn fechar_a_importacao(&mut self, cx: &mut Context<Self>) {
+        if std::mem::take(&mut self.importacao_aberta) {
+            cx.notify();
+        }
+    }
+
+    pub fn importacao_aberta(&self) -> bool {
+        self.importacao_aberta
+    }
+
+    /// O modal "Importar fotos": o quadro de arrastar ou escolher, sobre o véu.
+    ///
+    /// 🔑 **Soltar arquivos no véu importa**, como soltar na faixa de envio: o
+    /// véu para o mouse, e sem isto o arrasto que o modal convida a fazer
+    /// morreria nele.
+    fn modal_de_importacao(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+        if !self.importacao_aberta {
+            return None;
+        }
+        // Os mesmos rótulos do site (`envio.tsx`, `rotuloDoEstado`).
+        let estado = match self.leva {
+            Some(EstadoNoBalcao::LevadaNoBalcao) => "levadas no balcão",
+            None => "sem marcação",
+            Some(_) => "à venda",
+        };
+        let quadro = super::quadro_de_importacao::quadro_de_importacao(
+            "Mais fotos para esta sessão",
+            super::quadro_de_importacao::descricao_na_sessao(estado),
+            crate::estilo::botao_primario("importar-escolher-fotos", cx)
+                .debug_selector(|| "importar-escolher-fotos".into())
+                .child("Escolher fotos")
+                .on_click(cx.listener(|tela, _ev, _w, cx| {
+                    tela.fechar_a_importacao(cx);
+                    tela.importar(cx);
+                })),
+            cx,
+        )
+        .min_h(px(280.));
+        Some(
+            crate::estilo::veu_do_dialogo()
+                .id("importar-veu")
+                .on_click(cx.listener(|tela, _ev, _w, cx| tela.fechar_a_importacao(cx)))
+                .on_drop(
+                    cx.listener(|tela, arrastados: &gpui::ExternalPaths, _window, cx| {
+                        tela.fechar_a_importacao(cx);
+                        let fotos = super::arquivos::so_as_fotos(arrastados.paths());
+                        tela.enviar_arquivos(fotos, cx);
+                    }),
+                )
+                .child(
+                    crate::estilo::caixa_do_dialogo(cx)
+                        .w(px(560.))
+                        .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .child(
+                            gpui_component::h_flex()
+                                .gap(px(8.))
+                                .items_center()
+                                .text_lg()
+                                .font_weight(gpui::FontWeight::SEMIBOLD)
+                                .child(gpui_component::Icon::new(crate::recursos::Icone::Upload).size(px(18.)))
+                                .child("Importar fotos"),
+                        )
+                        .child(quadro)
+                        .child(
+                            crate::estilo::rodape_do_dialogo().child(
+                                crate::estilo::botao_contorno("importar-cancelar", cx)
+                                    .debug_selector(|| "importar-cancelar".into())
+                                    .child("Cancelar")
+                                    .on_click(cx.listener(|tela, _ev, _w, cx| {
+                                        tela.fechar_a_importacao(cx)
+                                    })),
+                            ),
+                        ),
+                ),
+        )
+    }
+
     fn dialogo_de_apagar(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
         let (_, arquivo) = self.apagar_confirmando.clone()?;
         Some(
@@ -6154,6 +6256,28 @@ mod testes {
     /// (`docs/07-E2E-TESTING.md` §1). O caminho medido é o inteiro: achar o
     /// elemento no quadro desenhado, descer o botão do mouse nas coordenadas
     /// dele, subir, e deixar os efeitos chegarem.
+    /// "Importar fotos" abre o modal; o "Escolher fotos" dele é que abre a
+    /// janela do sistema. Devolve o gasto do segundo clique — o que chega ao
+    /// seletor.
+    fn importar_pelo_modal(
+        cx: &mut TestAppContext,
+        janela: &gpui::WindowHandle<Detalhe>,
+    ) -> std::time::Duration {
+        clicar(cx, janela, "detalhe-importar");
+        janela
+            .update(cx, |tela, _w, _cx| {
+                assert!(tela.importacao_aberta(), "o botão abre o modal")
+            })
+            .unwrap();
+        let gasto = clicar(cx, janela, "importar-escolher-fotos");
+        janela
+            .update(cx, |tela, _w, _cx| {
+                assert!(!tela.importacao_aberta(), "escolher fecha o modal")
+            })
+            .unwrap();
+        gasto
+    }
+
     fn clicar(
         cx: &mut TestAppContext,
         janela: &gpui::WindowHandle<Detalhe>,
@@ -6764,7 +6888,7 @@ mod testes {
 
         assert_eq!(seletor.pedidos(), 0, "nada abre sozinho");
 
-        let gasto = clicar(cx, &janela, "detalhe-importar");
+        let gasto = importar_pelo_modal(cx, &janela);
         assert_eq!(
             seletor.pedidos(),
             1,
@@ -6875,7 +6999,7 @@ mod testes {
         entrar_demorado(cx, &janela, &publicador);
 
         // O lote sai — e fica no meio, que é onde o cenário acontece.
-        let gasto = clicar(cx, &janela, "detalhe-importar");
+        let gasto = importar_pelo_modal(cx, &janela);
         assert!(
             gasto < ORCAMENTO_DE_UM_QUADRO,
             "o clique que dispara 500 fotos custou {gasto:?}, mais que um quadro"
@@ -6970,7 +7094,7 @@ mod testes {
         let janela = janela_completa(cx, publicador.clone(), seletor.clone(), importador.clone());
         entrar_demorado(cx, &janela, &publicador);
 
-        clicar(cx, &janela, "detalhe-importar");
+        importar_pelo_modal(cx, &janela);
         let colher = |cx: &mut TestAppContext| {
             janela
                 .update(cx, |tela, _window, cx| tela.colher(cx))
@@ -7085,7 +7209,7 @@ mod testes {
         let janela = janela_completa(cx, publicador.clone(), seletor.clone(), importador.clone());
         entrar(cx, &janela);
 
-        clicar(cx, &janela, "detalhe-importar");
+        importar_pelo_modal(cx, &janela);
         assert_eq!(seletor.pedidos(), 1, "a janela do sistema abriu");
 
         // O operador procura a pasta. Cinco segundos — nada demais.
@@ -7127,7 +7251,7 @@ mod testes {
         let janela = janela_completa(cx, publicador, seletor.clone(), importador.clone());
         entrar(cx, &janela);
 
-        clicar(cx, &janela, "detalhe-importar");
+        importar_pelo_modal(cx, &janela);
         seletor.responder();
         cx.executor()
             .advance_clock(std::time::Duration::from_secs(1));
@@ -8056,7 +8180,7 @@ mod testes {
         );
         entrar(cx, &janela);
 
-        clicar(cx, &janela, "detalhe-importar");
+        importar_pelo_modal(cx, &janela);
         colher_ate_parar(cx, &janela);
 
         let (_, opcoes) = importador.importados().remove(0);

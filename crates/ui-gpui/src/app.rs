@@ -4429,6 +4429,12 @@ impl Aplicativo {
         // é uma tecla que responde numa tela e emudece na outra, que é mais
         // caro de aprender do que qualquer uma das duas regras inteiras.
         // No Enquadrar, o `Esc` só sai da ferramenta — como no site.
+        // O modal "Importar fotos" da sessão fecha no `Esc`, como todo diálogo.
+        if self.tela == Tela::Sessao && self.detalhe.read(cx).importacao_aberta() {
+            self.detalhe
+                .update(cx, |tela, cx| tela.fechar_a_importacao(cx));
+            return;
+        }
         if self.tela == Tela::Revelacao && self.revelacao.read(cx).cortando() {
             self.revelacao
                 .update(cx, |tela, cx| tela.cancelar_corte(cx));

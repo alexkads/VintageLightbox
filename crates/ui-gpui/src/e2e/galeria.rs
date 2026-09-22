@@ -82,6 +82,7 @@ fn a_faixa_da_barra_sobe_com_a_foto_que_entra_depois(cx: &mut TestAppContext) {
     // Agora a importação: é ela que entra depois da escolha.
     e.acervo.fotos.lock().unwrap().push(local("DSC_201.jpg"));
     clicar(&e, cx, "detalhe-importar");
+    clicar(&e, cx, "importar-escolher-fotos");
     e.esperar(cx);
 
     assert_eq!(
@@ -108,6 +109,7 @@ fn importar_classificar_e_levar_pelas_teclas(cx: &mut TestAppContext) {
     // 📥 Importar, pelo clique no botão.
     e.acervo.fotos.lock().unwrap().push(local("DSC_201.jpg"));
     clicar(&e, cx, "detalhe-importar");
+    clicar(&e, cx, "importar-escolher-fotos");
     e.esperar(cx);
     assert_eq!(e.seletor_de_fotos.pedidos(), 1, "a janela do sistema abriu");
     let lotes = e.importador.importados();
@@ -885,5 +887,41 @@ fn esc_na_galeria_nao_troca_o_recorte_nem_a_selecao(cx: &mut TestAppContext) {
     e.app(cx, |app, _w, _cx| {
         assert_eq!(app.tela(), Tela::Sessao);
         assert!(app.pode_trabalhar());
+    });
+}
+
+/// 🎬 **"Importar fotos" abre o modal do quadro**, o mesmo da etapa 2 da nova
+/// sessão (dono, 22/set/2026). Esc e "Cancelar" fecham sem importar nada, e o
+/// "Escolher fotos" do modal é que traz as fotos.
+#[gpui::test]
+fn importar_fotos_abre_o_modal_e_esc_ou_cancelar_fecham_sem_importar(cx: &mut TestAppContext) {
+    let e = abrir_o_ensaio(cx, Cenario::default());
+    let antes = e.detalhe(cx, |tela, _w, _cx| tela.ids_visiveis().len());
+    e.acervo.fotos.lock().unwrap().push(local("DSC_301.jpg"));
+
+    clicar(&e, cx, "detalhe-importar");
+    e.detalhe(cx, |tela, _w, _cx| assert!(tela.importacao_aberta()));
+    e.teclar(cx, "escape");
+    e.detalhe(cx, |tela, _w, _cx| {
+        assert!(!tela.importacao_aberta(), "Esc fecha o modal")
+    });
+    e.app(cx, |app, _w, _cx| {
+        assert_eq!(app.tela(), Tela::Sessao, "e não sai da sessão")
+    });
+
+    clicar(&e, cx, "detalhe-importar");
+    clicar(&e, cx, "importar-cancelar");
+    e.esperar(cx);
+    e.detalhe(cx, |tela, _w, _cx| {
+        assert!(!tela.importacao_aberta(), "Cancelar fecha o modal");
+        assert_eq!(tela.ids_visiveis().len(), antes, "e nada entrou");
+    });
+
+    clicar(&e, cx, "detalhe-importar");
+    clicar(&e, cx, "importar-escolher-fotos");
+    e.esperar(cx);
+    e.detalhe(cx, |tela, _w, _cx| {
+        assert!(!tela.importacao_aberta());
+        assert_eq!(tela.ids_visiveis().len(), antes + 1, "o Escolher fotos importa");
     });
 }

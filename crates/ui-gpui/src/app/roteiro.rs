@@ -187,6 +187,10 @@ impl Aplicativo {
                 self.revelacao
                     .update(cx, |tela, cx| tela.seguir_o_roteiro(&gesto, window, cx));
             }
+            Passo::ImportarModal => {
+                self.detalhe
+                    .update(cx, |tela, cx| tela.abrir_a_importacao(cx));
+            }
             Passo::Guias(gesto) => {
                 let gesto = gesto.clone();
                 self.seguir_o_roteiro_das_guias(&gesto, window, cx);
