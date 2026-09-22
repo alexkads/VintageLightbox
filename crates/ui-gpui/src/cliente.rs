@@ -28,6 +28,7 @@ use gpui::{
     actions, div, ease_in_out, img, point, prelude::*, px, size, Animation, AnimationExt, Bounds,
     Context, FocusHandle, Pixels, RenderImage, SharedString, Size, Task, Window,
 };
+use gpui_component::InteractiveElementExt as _;
 use infrastructure::transformacao;
 
 use crate::revelacao::processador::{Ajustes, Pedido, Processador};
@@ -72,16 +73,9 @@ actions!(
     [
         FecharCliente,
         AlternarInfoDoCliente,
-        AlternarJanelaDoCliente
+        AlternarTelaCheiaDoCliente
     ]
 );
-
-/// O que esta janela pede à raiz — ela não sabe abrir a si mesma de novo.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PedidoDoCliente {
-    /// Reabrir no outro modo: tela cheia no monitor ↔ janela arrastável.
-    AlternarJanela,
-}
 
 /// O contexto de teclado da segunda tela.
 ///
@@ -97,13 +91,14 @@ pub fn init(cx: &mut gpui::App) {
         gpui::KeyBinding::new("escape", FecharCliente, Some(CONTEXTO)),
         // `I` liga e desliga o rodapé com nome e nota, como no legado.
         gpui::KeyBinding::new("i", AlternarInfoDoCliente, Some(CONTEXTO)),
-        // 🚨 **`J` tira a tela do monitor e a põe em janela** (dono,
-        // 18/set/2026): *"no Mac às vezes a função do segundo monitor pode
-        // falhar, e o usuário tem que conseguir contornar arrastando para o
-        // segundo monitor"*. Sem barra de título e sem poder mover, uma
-        // detecção errada de monitor deixava a tela do cliente presa onde
-        // ninguém queria — e sem saída a não ser `Esc`.
-        gpui::KeyBinding::new("j", AlternarJanelaDoCliente, Some(CONTEXTO)),
+        // 🔑 **`F` (ou `F11`) põe e tira a tela cheia, na própria janela** —
+        // o gesto do darktable (dono, 22/set/2026). Arrastar até o monitor do
+        // cliente e apertar `F` é o caminho que funciona até no GNOME, onde o
+        // app não escolhe monitor nenhum. `J` era a troca de modo antiga e
+        // continua valendo, para não trair a mão de quem já a usava.
+        gpui::KeyBinding::new("f", AlternarTelaCheiaDoCliente, Some(CONTEXTO)),
+        gpui::KeyBinding::new("f11", AlternarTelaCheiaDoCliente, Some(CONTEXTO)),
+        gpui::KeyBinding::new("j", AlternarTelaCheiaDoCliente, Some(CONTEXTO)),
     ]);
 }
 
@@ -187,9 +182,54 @@ const ALTURA_DA_BARRA: f32 = 32.;
 /// não arrastava. `crate::janela` explica o porquê inteiro.
 ///
 /// No macOS e no Windows a barra do sistema existe, e uma segunda seria
-/// duplicata. Tomando o monitor, não há barra nenhuma: é a tela do cliente.
-fn tem_barra_propria(em_janela: bool) -> bool {
-    em_janela && cfg!(target_os = "linux")
+/// duplicata. Em tela cheia não há barra nenhuma: é a tela do cliente.
+fn tem_barra_propria(tela_cheia: bool) -> bool {
+    !tela_cheia && cfg!(target_os = "linux")
+}
+
+/// Como a janela estava quando saiu: é como ela volta.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Estado {
+    Janela,
+    Maximizada,
+    TelaCheia,
+}
+
+/// Se o gesto de tela cheia vira tela cheia **de verdade**, ou maximizar.
+///
+/// 🚨 **No Mac, no monitor principal, maximiza** (dono, 17/set/2026). Tela
+/// cheia no macOS é um *Space* próprio: num Mac de um monitor só ele tomava o
+/// lugar do app, e o operador perdia a triagem de vista. Maximizar ali usa a
+/// área visível da tela e deixa o app a um clique. Num segundo monitor o
+/// *Space* é daquele monitor, e a tela cheia é a de sempre. No Linux e no
+/// Windows, tela cheia é só uma janela sem moldura — vale em qualquer monitor.
+pub fn tela_cheia_de_verdade(e_mac: bool, no_monitor_principal: bool) -> bool {
+    !(e_mac && no_monitor_principal)
+}
+
+/// O estado com que ela abre.
+///
+/// - **Lembrado**, o lembrado — com a mesma troca de tela cheia por
+///   maximizar que [`tela_cheia_de_verdade`] faz no Mac.
+/// - **Sem lembrança**, tela cheia se ela tem um monitor só para ela (o que a
+///   regra do legado sempre fez) e janela quando divide a tela com o app.
+pub fn estado_ao_abrir(
+    lembrado: Option<Estado>,
+    monitor_proprio: bool,
+    e_mac: bool,
+    no_monitor_principal: bool,
+) -> Estado {
+    let pedido = lembrado.unwrap_or(if monitor_proprio {
+        Estado::TelaCheia
+    } else {
+        Estado::Janela
+    });
+    if pedido == Estado::TelaCheia && !tela_cheia_de_verdade(e_mac, no_monitor_principal) {
+        Estado::Maximizada
+    } else {
+        pedido
+    }
 }
 
 /// O que a tela do cliente lembra entre uma abertura e outra.
@@ -201,12 +241,14 @@ fn tem_barra_propria(em_janela: bool) -> bool {
 ///
 /// O monitor é guardado pelo `uuid` do sistema, e não pelo `DisplayId`: este é
 /// só a posição na lista, e muda quando um monitor é plugado ou tirado.
+///
+/// ⚠️ O arquivo de antes guardava só `em_janela`: o campo é ignorado, e a
+/// primeira abertura depois da troca segue a regra sem lembrança.
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Lembranca {
-    /// Arrastável (`true`) ou tomando o monitor. É o campo que o arquivo já
-    /// tinha antes dos outros dois, e ausente continua sendo "toma o monitor".
-    #[serde(default)]
-    pub em_janela: bool,
+    /// Janela, maximizada ou tela cheia.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub estado: Option<Estado>,
     /// O `uuid` do monitor onde ela estava.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub monitor: Option<String>,
@@ -337,9 +379,6 @@ pub struct Cliente {
     /// lição que custou dois commits na Revelação: `track_focus` rastreia o
     /// foco, não o concede.
     foco: FocusHandle,
-    /// Em que modo esta janela nasceu: arrastável (`true`) ou tomando o monitor.
-    /// Só muda o que o rodapé diz — quem decide o modo é a raiz, ao abrir.
-    em_janela: bool,
     /// Onde a lembrança desta tela é gravada. `None` nos testes que não a
     /// conferem.
     arquivo: Option<std::path::PathBuf>,
@@ -348,7 +387,6 @@ pub struct Cliente {
 
 impl Cliente {
     pub fn novo(
-        em_janela: bool,
         arquivo: Option<std::path::PathBuf>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -377,13 +415,13 @@ impl Cliente {
             revelando: None,
             _colheita: None,
             foco,
-            em_janela,
             arquivo,
             _limites: limites,
         }
     }
 
-    /// Grava o monitor onde ela está e, em janela, a posição e o tamanho.
+    /// Grava o monitor onde ela está, o estado e, em janela, a posição e o
+    /// tamanho — o `_darkroom_ui_second_window_write_config` do darktable.
     ///
     /// ⚠️ **Maximizada não grava os limites**: seriam os do monitor inteiro, e
     /// a próxima abertura em janela nasceria do tamanho da tela. O que vale é
@@ -402,11 +440,14 @@ impl Cliente {
         if let Some(uuid) = window.display(cx).and_then(|tela| tela.uuid().ok()) {
             agora.monitor = Some(uuid.to_string());
         }
-        if self.em_janela {
-            if let gpui::WindowBounds::Windowed(limites) = window.window_bounds() {
+        agora.estado = Some(match window.window_bounds() {
+            gpui::WindowBounds::Windowed(limites) => {
                 agora.lembrar_limites(limites);
+                Estado::Janela
             }
-        }
+            gpui::WindowBounds::Maximized(_) => Estado::Maximizada,
+            gpui::WindowBounds::Fullscreen(_) => Estado::TelaCheia,
+        });
         if agora != antes {
             agora.gravar(arquivo);
         }
@@ -565,19 +606,34 @@ impl Cliente {
         self.alternar_info(cx);
     }
 
-    /// `J`: pede à raiz para reabrir esta tela no outro modo.
+    /// `F`: tela cheia neste monitor, ou de volta à janela.
     ///
-    /// 🔑 **Quem reabre é a raiz**, e não esta janela: o modo de uma janela do
-    /// GPUI (barra de título, se é movível, se é redimensionável) é decidido em
-    /// `open_window` e não muda depois. Trocar de modo é fechar e abrir de novo
-    /// — e quem sabe qual foto mostrar, e em que monitor, é quem abriu.
-    fn ao_alternar_janela(
+    /// 🔑 **É a mesma janela**, e não uma nova: o sistema a põe em tela cheia
+    /// no monitor onde ela está. Até 22/set/2026 o `J` fechava e reabria em
+    /// outro modo, com o monitor escolhido pelo app — e no GNOME o app não
+    /// escolhe monitor nenhum, então a tela nascia onde o compositor queria e,
+    /// sem barra, não saía de lá.
+    pub fn alternar_tela_cheia(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if window.is_fullscreen() {
+            window.toggle_fullscreen();
+            return;
+        }
+        let principal = cx.primary_display().map(|tela| tela.id());
+        let aqui = window.display(cx).map(|tela| tela.id());
+        if tela_cheia_de_verdade(cfg!(target_os = "macos"), aqui == principal) {
+            window.toggle_fullscreen();
+        } else {
+            window.zoom_window();
+        }
+    }
+
+    fn ao_alternar_tela_cheia(
         &mut self,
-        _acao: &AlternarJanelaDoCliente,
-        _window: &mut Window,
+        _acao: &AlternarTelaCheiaDoCliente,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        cx.emit(PedidoDoCliente::AlternarJanela);
+        self.alternar_tela_cheia(window, cx);
     }
 
     /// O que o rodapé conta: onde estamos, o nome, a nota e se o cliente já
@@ -699,12 +755,10 @@ impl Cliente {
     }
 }
 
-impl gpui::EventEmitter<PedidoDoCliente> for Cliente {}
-
 impl Render for Cliente {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let info = self.mostrar_info.then(|| self.info()).flatten();
-        let barra = tem_barra_propria(self.em_janela);
+        let barra = tem_barra_propria(window.is_fullscreen());
         let mut janela = window.viewport_size();
         if barra {
             janela.height = (janela.height - px(ALTURA_DA_BARRA)).max(px(0.));
@@ -712,6 +766,11 @@ impl Render for Cliente {
 
         let palco =
             div()
+                .id("palco-do-cliente")
+                // Dois cliques na foto: tela cheia e volta, como o `F`.
+                .on_double_click(
+                    cx.listener(|cliente, _, window, cx| cliente.alternar_tela_cheia(window, cx)),
+                )
                 .relative()
                 .flex_1()
                 .w_full()
@@ -808,14 +867,13 @@ impl Render for Cliente {
                         .bg(gpui::rgba(0x00000078))
                         .text_xs()
                         .text_color(gpui::rgb(0xb4b4b4))
-                        // 🔑 **`J` aparece aqui porque é a saída de um problema
-                        // que não se vê**: quando o Mac põe a tela no monitor
-                        // errado, ela não tem barra nem pode ser movida, e a única
-                        // pista de que dá para virá-la em janela é esta linha.
-                        .child(SharedString::from(if self.em_janela {
-                            "Esc fecha • I mostra o nome • J volta ao monitor"
+                        // 🔑 **O `F` aparece aqui porque é a saída de um problema
+                        // que não se vê**: a tela no monitor errado. Em janela,
+                        // arrasta-se até o certo e aperta-se `F` lá.
+                        .child(SharedString::from(if window.is_fullscreen() {
+                            "Esc fecha • I mostra o nome • F sai da tela cheia"
                         } else {
-                            "Esc fecha • I mostra o nome • J vira janela"
+                            "Esc fecha • I mostra o nome • F tela cheia neste monitor"
                         })),
                 );
 
@@ -823,7 +881,7 @@ impl Render for Cliente {
             .key_context(CONTEXTO)
             .track_focus(&self.foco)
             .on_action(cx.listener(Self::ao_alternar_info))
-            .on_action(cx.listener(Self::ao_alternar_janela))
+            .on_action(cx.listener(Self::ao_alternar_tela_cheia))
             .on_action(cx.listener(Self::ao_fechar))
             .size_full()
             .bg(gpui::black())
@@ -969,8 +1027,10 @@ mod testes {
         std::fs::write(&arquivo, r#"{"em_janela":true}"#).expect("gravar");
 
         let mut lembranca = Lembranca::ler(&arquivo);
-        assert!(lembranca.em_janela);
+        assert_eq!(lembranca.estado, None, "o campo antigo não vira estado");
         assert_eq!(lembranca.limites(), None);
+
+        lembranca.estado = Some(Estado::TelaCheia);
 
         lembranca.monitor = Some("cliente".into());
         lembranca.lembrar_limites(limites(2100., 200., 900., 600.));
@@ -979,6 +1039,46 @@ mod testes {
         let relida = Lembranca::ler(&arquivo);
         assert_eq!(relida, lembranca);
         assert_eq!(relida.limites(), Some(limites(2100., 200., 900., 600.)));
+    }
+
+    /// 🔑 Sem lembrança, tela cheia com monitor próprio e janela dividindo a
+    /// tela; lembrado, o lembrado.
+    #[test]
+    fn o_estado_ao_abrir_segue_a_lembranca_e_depois_o_monitor() {
+        assert_eq!(estado_ao_abrir(None, true, false, false), Estado::TelaCheia);
+        assert_eq!(estado_ao_abrir(None, false, false, true), Estado::Janela);
+        assert_eq!(
+            estado_ao_abrir(Some(Estado::Janela), true, false, false),
+            Estado::Janela,
+            "quem deixou em janela reabre em janela, mesmo com monitor próprio"
+        );
+        assert_eq!(
+            estado_ao_abrir(Some(Estado::Maximizada), false, false, true),
+            Estado::Maximizada
+        );
+    }
+
+    /// 🚨 No Mac, tela cheia no monitor principal vira maximizar: o *Space*
+    /// dela escondia o app num Mac de um monitor só.
+    #[test]
+    fn no_mac_a_tela_cheia_no_monitor_principal_maximiza() {
+        assert!(!tela_cheia_de_verdade(true, true));
+        assert!(
+            tela_cheia_de_verdade(true, false),
+            "no segundo monitor é tela cheia"
+        );
+        assert!(
+            tela_cheia_de_verdade(false, true),
+            "no Linux e no Windows sempre"
+        );
+        assert_eq!(
+            estado_ao_abrir(Some(Estado::TelaCheia), false, true, true),
+            Estado::Maximizada
+        );
+        assert_eq!(
+            estado_ao_abrir(Some(Estado::TelaCheia), true, true, false),
+            Estado::TelaCheia
+        );
     }
 
     /// Resto de arrasto não é tamanho de janela.
@@ -1109,7 +1209,7 @@ mod testes {
     /// de longe sem contar o que não está lá.
     #[gpui::test]
     fn o_rodape_mostra_a_posicao_o_nome_e_as_cinco_estrelas(cx: &mut TestAppContext) {
-        let janela = cx.add_window(|window, cx| Cliente::novo(false, None, window, cx));
+        let janela = cx.add_window(|window, cx| Cliente::novo(None, window, cx));
 
         janela
             .update(cx, |cliente, _window, cx| {
@@ -1135,7 +1235,7 @@ mod testes {
     /// A foto que o cliente já disse que leva aparece marcada.
     #[gpui::test]
     fn a_levada_no_balcao_aparece_como_escolhida(cx: &mut TestAppContext) {
-        let janela = cx.add_window(|window, cx| Cliente::novo(false, None, window, cx));
+        let janela = cx.add_window(|window, cx| Cliente::novo(None, window, cx));
 
         janela
             .update(cx, |cliente, _window, cx| {
@@ -1168,7 +1268,7 @@ mod testes {
     /// ✨ Trocar de foto **guarda a anterior**: é ela que sai enquanto a nova entra.
     #[gpui::test]
     fn a_foto_que_sai_fica_para_o_cruzamento(cx: &mut TestAppContext) {
-        let janela = cx.add_window(|window, cx| Cliente::novo(false, None, window, cx));
+        let janela = cx.add_window(|window, cx| Cliente::novo(None, window, cx));
 
         janela
             .update(cx, |cliente, _window, cx| {
@@ -1205,7 +1305,7 @@ mod testes {
     /// diferentes.
     #[gpui::test]
     fn continuar_na_mesma_foto_nao_cruza_nada(cx: &mut TestAppContext) {
-        let janela = cx.add_window(|window, cx| Cliente::novo(false, None, window, cx));
+        let janela = cx.add_window(|window, cx| Cliente::novo(None, window, cx));
 
         janela
             .update(cx, |cliente, _window, cx| {
@@ -1241,7 +1341,7 @@ mod testes {
     #[gpui::test]
     fn a_tecla_i_liga_e_desliga_o_rodape(cx: &mut TestAppContext) {
         cx.update(init);
-        let janela = cx.add_window(|window, cx| Cliente::novo(false, None, window, cx));
+        let janela = cx.add_window(|window, cx| Cliente::novo(None, window, cx));
 
         janela
             .update(cx, |cliente, _window, _cx| {

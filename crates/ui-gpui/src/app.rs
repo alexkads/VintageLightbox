@@ -45,8 +45,8 @@ use crate::biblioteca::marcacao::REJEITADA_NO_CATALOGO;
 use crate::biblioteca::tela::Biblioteca;
 use crate::caixa::tela::{Caixa, PedidoDoCaixa};
 use crate::cliente::{
-    area_da_janela, area_do_cliente, monitor_do_cliente, monitor_lembrado, Cliente, Lembranca,
-    ParaRevelar,
+    area_da_janela, estado_ao_abrir, monitor_do_cliente, monitor_lembrado, Cliente, Estado,
+    Lembranca, ParaRevelar,
 };
 use crate::configuracoes::Configuracoes;
 use crate::entrada::{Entrada, Entrou};
@@ -191,19 +191,6 @@ fn caminho_do_modo_do_cliente() -> std::path::PathBuf {
         std::process::id(),
         PROXIMO.fetch_add(1, Ordering::SeqCst)
     ))
-}
-
-/// Ausente é "toma o monitor" — o modo de sempre, e o que a maioria quer.
-fn modo_do_cliente_guardado() -> bool {
-    crate::cliente::Lembranca::ler(&caminho_do_modo_do_cliente()).em_janela
-}
-
-/// Troca só o modo: o monitor e a janela lembrados continuam valendo.
-fn guardar_o_modo_do_cliente(em_janela: bool) {
-    let caminho = caminho_do_modo_do_cliente();
-    let mut lembranca = crate::cliente::Lembranca::ler(&caminho);
-    lembranca.em_janela = em_janela;
-    lembranca.gravar(&caminho);
 }
 
 /// De quanto em quanto tempo, no máximo, o acervo é relido enquanto um lote
@@ -613,10 +600,8 @@ pub struct Aplicativo {
     /// A tela do cliente abre como **janela arrastável**, e não tomando o
     /// monitor? Guardada em disco: quem contornou um monitor mal detectado uma
     /// vez não quer refazer o contorno a cada abertura.
-    cliente_em_janela: bool,
     /// A inscrição no `J` da tela do cliente. Descartada, a tecla não faz nada
     /// e a janela fica presa no modo em que nasceu.
-    _pedido_do_cliente: Option<gpui::Subscription>,
     /// O cache de previews, guardado para alimentar a segunda tela.
     previews: Arc<PreviewManager>,
     /// 🚨 A inscrição que mantém a segunda tela em dia. Descartada, ela para de
@@ -1069,8 +1054,6 @@ impl Aplicativo {
             configuracoes: cx.new(|_| Configuracoes::nova(previews_das_configuracoes)),
             configurando: false,
             cliente: None,
-            cliente_em_janela: modo_do_cliente_guardado(),
-            _pedido_do_cliente: None,
             previews: previews_do_cliente,
             _observador: observador,
             _cliente_na_galeria: cliente_na_galeria,
@@ -3168,87 +3151,60 @@ impl Aplicativo {
             return;
         };
 
-        // 🚨 **Nunca em tela cheia** (dono, 17/set/2026). Tela cheia no macOS é
-        // um *Space* próprio, e num Mac de um monitor só — que é como esta tela
-        // se confere (D10) — ela engolia o app inteiro. `area_do_cliente` decide
-        // o tamanho pelo que existe: o monitor todo quando ela tem um só para
-        // ela, uma prévia centrada quando divide a tela com o app.
-        // 🚨 **A janela arrastável é a saída quando o monitor falha** (dono,
-        // 18/set/2026). Com monitor próprio a tela nasce sem barra e presa nele;
-        // se o Mac escolher o monitor errado — e escolhe —, não há como mover.
-        // `J`, dentro dela, alterna os dois modos, e a escolha fica guardada.
-        let monitor_proprio = Some(escolhida) != principal && !self.cliente_em_janela;
+        // 🔑 **Uma janela só, sempre com barra, e a tela cheia é um estado
+        // dela** — o desenho do darktable (dono, 22/set/2026). Até aqui havia
+        // dois modos: "monitor", sem barra e presa, e "janela". No GNOME o app
+        // não escolhe monitor, e a tela sem barra nascia onde o compositor
+        // queria, sem como sair de lá. Agora ela volta como estava (monitor,
+        // lugar, tamanho, tela cheia ou não), e `F` dentro dela alterna a tela
+        // cheia no monitor onde ela estiver.
+        let monitor_proprio = Some(escolhida) != principal;
         let area = cx
             .displays()
             .iter()
             .find(|tela| tela.id() == escolhida)
-            .map(|tela| {
-                if monitor_proprio {
-                    area_do_cliente(tela.bounds(), true)
-                } else {
-                    // Em janela, onde ela estava e do tamanho que tinha.
-                    area_da_janela(tela.bounds(), lembranca.limites())
-                }
-            })
+            .map(|tela| area_da_janela(tela.bounds(), lembranca.limites()))
             // Sem os limites do monitor não há como posicionar nada — e uma
             // janela de tamanho zero é pior que uma no meio da tela.
             .unwrap_or_else(|| {
                 gpui::Bounds::centered(None, gpui::size(gpui::px(1100.), gpui::px(720.)), cx)
             });
+        let estado = estado_ao_abrir(
+            lembranca.estado,
+            monitor_proprio,
+            cfg!(target_os = "macos"),
+            !monitor_proprio,
+        );
 
-        // Com monitor próprio ela é a tela do cliente: sem barra de título e sem
-        // poder ser movida, porque quem está do outro lado não tem por que
-        // arrastá-la e um título escrito "VintageLightbox" sobre a foto é o que
-        // uma apresentação não quer. Dividindo a tela com o app ela é prévia do
-        // **operador**, e precisa dos dois — sem barra não há por onde pegar, e
-        // uma prévia que não sai da frente é estorvo.
         let opcoes = gpui::WindowOptions {
             app_id: Some(crate::menu::APP_ID.into()),
-            // 🚨 **`Maximized` no monitor próprio, e não `Windowed`** (dono,
-            // 18/set/2026: *"em tela cheia está cortando o componente com as
-            // estrelinhas da classificação e a sinalização, mas em janela fica
-            // OK"*). No macOS, `Display::bounds()` devolve a tela **inteira**,
-            // barra de menu incluída — e o sistema não deixa uma janela comum
-            // cobri-la: ele a empurra para baixo, e os últimos ~35 px ficam
-            // fora do monitor. A legenda mora a 20 px do fundo, e era ela que
-            // sumia. `Maximized` vira `zoom()` no macOS, que usa a **área
-            // visível** da tela; o `Bounds` continua servindo de tamanho de
-            // restauração.
-            window_bounds: Some(if monitor_proprio {
-                gpui::WindowBounds::Maximized(area)
-            } else {
-                gpui::WindowBounds::Windowed(area)
+            // 🚨 **No Mac, maximizar, e nunca uma janela do tamanho da tela**
+            // (dono, 18/set/2026): `Display::bounds()` inclui a barra de menu,
+            // o sistema empurra a janela para baixo e a legenda sumia pelo
+            // rodapé. `Maximized` vira `zoom()`, que usa a área visível. O
+            // `Bounds` é o tamanho de volta à janela.
+            window_bounds: Some(match estado {
+                Estado::Janela => gpui::WindowBounds::Windowed(area),
+                Estado::Maximizada => gpui::WindowBounds::Maximized(area),
+                Estado::TelaCheia => gpui::WindowBounds::Fullscreen(area),
             }),
             display_id: Some(escolhida),
-            titlebar: (!monitor_proprio).then(|| gpui::TitlebarOptions {
+            titlebar: Some(gpui::TitlebarOptions {
                 title: Some("Tela do cliente".into()),
                 ..Default::default()
             }),
-            is_movable: !monitor_proprio,
-            is_resizable: !monitor_proprio,
+            is_movable: true,
+            is_resizable: true,
             is_minimizable: false,
             window_background: gpui::WindowBackgroundAppearance::Opaque,
             ..Default::default()
         };
 
-        let em_janela = !monitor_proprio;
         match cx.open_window(opcoes, |window, cx| {
-            cx.new(|cx| Cliente::novo(em_janela, Some(arquivo), window, cx))
+            cx.new(|cx| Cliente::novo(Some(arquivo), window, cx))
         }) {
             Ok(janela) => {
-                // 🔑 **A raiz escuta a janela** — é assim que o `J` de lá chega
-                // aqui, e a única forma de reabrir no outro modo (o modo de uma
-                // janela do GPUI é decidido em `open_window` e não muda depois).
                 if let Ok(entidade) = janela.update(cx, |_cliente, _window, cx| cx.entity()) {
-                    self._pedido_do_cliente = Some(cx.subscribe(
-                        &entidade,
-                        |raiz, _cliente, pedido: &crate::cliente::PedidoDoCliente, cx| match pedido
-                        {
-                            crate::cliente::PedidoDoCliente::AlternarJanela => {
-                                raiz.alternar_janela_do_cliente(cx)
-                            }
-                        },
-                    ));
                     // 🚨 **A janela pode ser fechada por fora** (dono,
                     // 18/set/2026: *"quando fecho a janela do cliente o botão
                     // não detecta essa ação"*). O `X` da barra e o `Esc` de
@@ -3294,37 +3250,6 @@ impl Aplicativo {
 
     pub fn cliente_aberto(&self) -> bool {
         self.cliente.is_some()
-    }
-
-    /// Reabre a tela do cliente no outro modo — monitor inteiro ↔ janela.
-    ///
-    /// 🚨 **Existe porque o monitor pode ser o errado** (dono, 18/set/2026:
-    /// *"no Mac às vezes a função do segundo monitor pode falhar, e o usuário
-    /// tem que conseguir contornar arrastando para o segundo monitor"*). Em
-    /// modo monitor a janela nasce sem barra de título e sem poder ser movida —
-    /// que é o certo quando ela está mesmo virada para o cliente, e é uma
-    /// armadilha quando não está.
-    ///
-    /// 🔑 **É fechar e abrir**, e não um ajuste na janela viva: barra de
-    /// título, `is_movable` e `is_resizable` são opções de `open_window`.
-    /// Fechar e abrir com a mesma foto é indistinguível de uma troca de modo —
-    /// e `atualizar_o_cliente(true, …)` devolve a foto e a receita de agora.
-    pub fn alternar_janela_do_cliente(&mut self, cx: &mut Context<Self>) {
-        self.cliente_em_janela = !self.cliente_em_janela;
-        guardar_o_modo_do_cliente(self.cliente_em_janela);
-        if self.cliente.is_none() {
-            return;
-        }
-        // Fecha e abre: o `alternar_cliente` faz as duas metades, e a segunda
-        // já lê a preferência nova.
-        self.alternar_cliente(cx);
-        self.alternar_cliente(cx);
-    }
-
-    /// 🧪 Em que modo a tela do cliente abre agora.
-    #[cfg(test)]
-    pub(crate) fn cliente_em_janela(&self) -> bool {
-        self.cliente_em_janela
     }
 
     /// A foto que a segunda tela deve mostrar, conforme a tela da frente.
@@ -6984,65 +6909,6 @@ mod testes {
                     !app.detalhe.read(cx).cliente_aberta(),
                     "e a barra da sessão também — é ela que desenha o botão"
                 );
-            })
-            .expect("a janela deve estar aberta");
-    }
-
-    /// 🚨 **`J` tira a tela do cliente do monitor e a põe em janela** — e a
-    /// escolha atravessa a abertura seguinte.
-    ///
-    /// Nasceu do dono, 18/set/2026: *"no Mac às vezes a função do segundo
-    /// monitor pode falhar, e o usuário tem que conseguir contornar arrastando
-    /// para o segundo monitor"*. Em modo monitor a janela não tem barra nem é
-    /// movível — de propósito, para não haver o que arrastar na frente do
-    /// cliente —, e é isso que a torna uma armadilha quando o monitor está
-    /// errado. O gesto é fechar e abrir no outro modo; a foto volta com ela.
-    #[gpui::test]
-    fn a_tela_do_cliente_alterna_entre_o_monitor_e_a_janela(cx: &mut TestAppContext) {
-        let (previews, _dir) = previews_descartaveis();
-        previews
-            .save_preview("id-DSC_001.NEF", &foto_vermelha())
-            .expect("gravar preview");
-        cx.update(gpui_component::init);
-
-        let janela = cx.add_window({
-            let previews = previews.clone();
-            |window, cx| Aplicativo::ja_dentro(acervo(), previews, Vec::new(), portas(), window, cx)
-        });
-
-        janela
-            .update(cx, |app, _window, cx| {
-                assert!(!app.cliente_em_janela(), "o padrão é tomar o monitor");
-                app.biblioteca
-                    .update(cx, |tela, cx| tela.selecionar(Some(0), cx));
-                app.alternar_cliente(cx);
-                assert!(app.cliente_aberto());
-
-                app.alternar_janela_do_cliente(cx);
-                assert!(app.cliente_em_janela(), "o `J` virou o modo");
-                assert!(
-                    app.cliente_aberto(),
-                    "e a tela continua aberta — fechar e abrir é como se troca de modo"
-                );
-            })
-            .expect("a janela deve estar aberta");
-        cx.run_until_parked();
-
-        // A foto volta com ela: quem estava mostrando continua mostrando.
-        let nome = janela
-            .update(cx, |app, _window, cx| {
-                app.cliente
-                    .as_ref()
-                    .and_then(|c| c.read(cx).ok().and_then(|c| c.foto_mostrada()))
-            })
-            .expect("a janela deve estar aberta");
-        assert_eq!(nome.as_deref(), Some("DSC_001.NEF"));
-
-        janela
-            .update(cx, |app, _window, cx| {
-                app.alternar_janela_do_cliente(cx);
-                assert!(!app.cliente_em_janela(), "e volta ao monitor");
-                assert!(app.cliente_aberto());
             })
             .expect("a janela deve estar aberta");
     }
