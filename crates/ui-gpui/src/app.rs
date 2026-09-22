@@ -44,7 +44,10 @@ use crate::biblioteca::marcacao::Marcador;
 use crate::biblioteca::marcacao::REJEITADA_NO_CATALOGO;
 use crate::biblioteca::tela::Biblioteca;
 use crate::caixa::tela::{Caixa, PedidoDoCaixa};
-use crate::cliente::{area_do_cliente, monitor_do_cliente, Cliente, ParaRevelar};
+use crate::cliente::{
+    area_da_janela, area_do_cliente, monitor_do_cliente, monitor_lembrado, Cliente, Lembranca,
+    ParaRevelar,
+};
 use crate::configuracoes::Configuracoes;
 use crate::entrada::{Entrada, Entrou};
 use crate::exportacao::porta::Exportador;
@@ -192,24 +195,15 @@ fn caminho_do_modo_do_cliente() -> std::path::PathBuf {
 
 /// Ausente é "toma o monitor" — o modo de sempre, e o que a maioria quer.
 fn modo_do_cliente_guardado() -> bool {
-    std::fs::read_to_string(caminho_do_modo_do_cliente())
-        .ok()
-        .and_then(|texto| serde_json::from_str::<serde_json::Value>(&texto).ok())
-        .and_then(|valor| valor.get("em_janela").and_then(|v| v.as_bool()))
-        .unwrap_or(false)
+    crate::cliente::Lembranca::ler(&caminho_do_modo_do_cliente()).em_janela
 }
 
-/// ⚠️ Falha de gravação não é fim de fluxo: o modo vale nesta abertura e a
-/// próxima começa no padrão.
+/// Troca só o modo: o monitor e a janela lembrados continuam valendo.
 fn guardar_o_modo_do_cliente(em_janela: bool) {
     let caminho = caminho_do_modo_do_cliente();
-    if let Some(pai) = caminho.parent() {
-        let _ = std::fs::create_dir_all(pai);
-    }
-    let _ = std::fs::write(
-        caminho,
-        serde_json::json!({ "em_janela": em_janela }).to_string(),
-    );
+    let mut lembranca = crate::cliente::Lembranca::ler(&caminho);
+    lembranca.em_janela = em_janela;
+    lembranca.gravar(&caminho);
 }
 
 /// De quanto em quanto tempo, no máximo, o acervo é relido enquanto um lote
@@ -3157,9 +3151,20 @@ impl Aplicativo {
             return;
         }
 
-        let telas: Vec<gpui::DisplayId> = cx.displays().iter().map(|tela| tela.id()).collect();
+        let arquivo = caminho_do_modo_do_cliente();
+        let lembranca = Lembranca::ler(&arquivo);
+        let telas: Vec<(gpui::DisplayId, Option<String>)> = cx
+            .displays()
+            .iter()
+            .map(|tela| (tela.id(), tela.uuid().ok().map(|uuid| uuid.to_string())))
+            .collect();
+        let ids: Vec<gpui::DisplayId> = telas.iter().map(|(id, _)| *id).collect();
         let principal = cx.primary_display().map(|tela| tela.id());
-        let Some(escolhida) = monitor_do_cliente(&telas, principal) else {
+        // 🔑 **O monitor de onde ela saiu da última vez**, se ainda estiver
+        // plugado (dono, 22/set/2026). Sem ele, a regra do legado.
+        let Some(escolhida) = monitor_lembrado(&telas, lembranca.monitor.as_deref())
+            .or_else(|| monitor_do_cliente(&ids, principal))
+        else {
             return;
         };
 
@@ -3177,7 +3182,14 @@ impl Aplicativo {
             .displays()
             .iter()
             .find(|tela| tela.id() == escolhida)
-            .map(|tela| area_do_cliente(tela.bounds(), monitor_proprio))
+            .map(|tela| {
+                if monitor_proprio {
+                    area_do_cliente(tela.bounds(), true)
+                } else {
+                    // Em janela, onde ela estava e do tamanho que tinha.
+                    area_da_janela(tela.bounds(), lembranca.limites())
+                }
+            })
             // Sem os limites do monitor não há como posicionar nada — e uma
             // janela de tamanho zero é pior que uma no meio da tela.
             .unwrap_or_else(|| {
@@ -3221,7 +3233,7 @@ impl Aplicativo {
 
         let em_janela = !monitor_proprio;
         match cx.open_window(opcoes, |window, cx| {
-            cx.new(|cx| Cliente::novo(em_janela, window, cx))
+            cx.new(|cx| Cliente::novo(em_janela, Some(arquivo), window, cx))
         }) {
             Ok(janela) => {
                 // 🔑 **A raiz escuta a janela** — é assim que o `J` de lá chega

@@ -169,6 +169,144 @@ pub fn area_do_cliente(tela: Bounds<Pixels>, monitor_proprio: bool) -> Bounds<Pi
     }
 }
 
+/// O menor tamanho que uma janela lembrada pode ter ao voltar. Abaixo disso a
+/// lembrança é descartada: uma tela do cliente de 40 px não é escolha, é
+/// resto de um arrasto que deu errado.
+const MENOR_JANELA: (f32, f32) = (320., 200.);
+
+/// A altura da barra que a tela do cliente desenha em janela no Linux.
+const ALTURA_DA_BARRA: f32 = 32.;
+
+/// Se esta janela desenha a própria barra de título.
+///
+/// 🚨 **No GNOME não há barra do sistema** (dono, 22/set/2026: *"quando
+/// estiver no modo janela precisa ter a barra de movimentação no GNome"*). O
+/// compositor não implementa `xdg-decoration`, e o `titlebar` do
+/// `WindowOptions` é ignorado — a janela nascia sem por onde pegar, e o modo
+/// janela, que existe justamente para arrastar a tela até o monitor certo,
+/// não arrastava. `crate::janela` explica o porquê inteiro.
+///
+/// No macOS e no Windows a barra do sistema existe, e uma segunda seria
+/// duplicata. Tomando o monitor, não há barra nenhuma: é a tela do cliente.
+fn tem_barra_propria(em_janela: bool) -> bool {
+    em_janela && cfg!(target_os = "linux")
+}
+
+/// O que a tela do cliente lembra entre uma abertura e outra.
+///
+/// 🔑 **O monitor e a janela de onde ela saiu** (dono, 22/set/2026: *"precisa
+/// memorizar a última posição e monitor que estava antes de ser fechado"*).
+/// Quem arrastou a tela até o monitor virado para o cliente não quer
+/// arrastá-la de novo a cada abertura.
+///
+/// O monitor é guardado pelo `uuid` do sistema, e não pelo `DisplayId`: este é
+/// só a posição na lista, e muda quando um monitor é plugado ou tirado.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Lembranca {
+    /// Arrastável (`true`) ou tomando o monitor. É o campo que o arquivo já
+    /// tinha antes dos outros dois, e ausente continua sendo "toma o monitor".
+    #[serde(default)]
+    pub em_janela: bool,
+    /// O `uuid` do monitor onde ela estava.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub monitor: Option<String>,
+    /// Posição e tamanho no modo janela: `[x, y, largura, altura]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub janela: Option<[f32; 4]>,
+}
+
+impl Lembranca {
+    /// ⚠️ Arquivo ausente ou ilegível é a lembrança vazia: o padrão de sempre.
+    pub fn ler(arquivo: &std::path::Path) -> Self {
+        std::fs::read_to_string(arquivo)
+            .ok()
+            .and_then(|texto| serde_json::from_str(&texto).ok())
+            .unwrap_or_default()
+    }
+
+    /// ⚠️ Falha de gravação não é fim de fluxo: vale nesta abertura, e a
+    /// próxima começa no padrão.
+    pub fn gravar(&self, arquivo: &std::path::Path) {
+        if let Some(pai) = arquivo.parent() {
+            let _ = std::fs::create_dir_all(pai);
+        }
+        if let Ok(texto) = serde_json::to_string(self) {
+            let _ = std::fs::write(arquivo, texto);
+        }
+    }
+
+    pub fn limites(&self) -> Option<Bounds<Pixels>> {
+        let [x, y, largura, altura] = self.janela?;
+        (largura >= MENOR_JANELA.0 && altura >= MENOR_JANELA.1).then(|| Bounds {
+            origin: point(px(x), px(y)),
+            size: size(px(largura), px(altura)),
+        })
+    }
+
+    pub fn lembrar_limites(&mut self, limites: Bounds<Pixels>) {
+        self.janela = Some([
+            f32::from(limites.origin.x),
+            f32::from(limites.origin.y),
+            f32::from(limites.size.width),
+            f32::from(limites.size.height),
+        ]);
+    }
+}
+
+/// O monitor lembrado, **se ele ainda estiver plugado**.
+///
+/// Genérica pelo mesmo motivo de [`monitor_do_cliente`]: o `DisplayId` não se
+/// constrói fora do GPUI. Sem o lembrado, quem decide é a regra de sempre.
+pub fn monitor_lembrado<T: Copy>(
+    todos: &[(T, Option<String>)],
+    lembrado: Option<&str>,
+) -> Option<T> {
+    let lembrado = lembrado?;
+    todos
+        .iter()
+        .find(|(_, uuid)| uuid.as_deref() == Some(lembrado))
+        .map(|(id, _)| *id)
+}
+
+/// Onde a janela arrastável nasce: onde estava, se ainda couber.
+///
+/// - **Sem lembrança**, é a prévia centrada de [`area_do_cliente`].
+/// - **Lembrada e ainda tocando o monitor**, volta ali — empurrada para
+///   dentro dele se sobrava para fora, e nunca maior que ele.
+/// - **Lembrada e fora do monitor** (a resolução mudou, o monitor foi trocado
+///   de lado), volta no tamanho que tinha, centrada nele. Nascer fora de
+///   qualquer tela é o que deixaria a janela sem como ser alcançada.
+pub fn area_da_janela(tela: Bounds<Pixels>, lembrada: Option<Bounds<Pixels>>) -> Bounds<Pixels> {
+    let Some(lembrada) = lembrada else {
+        return area_do_cliente(tela, false);
+    };
+    let largura = lembrada.size.width.min(tela.size.width);
+    let altura = lembrada.size.height.min(tela.size.height);
+    let origem = if lembrada.intersects(&tela) {
+        point(
+            lembrada
+                .origin
+                .x
+                .max(tela.origin.x)
+                .min(tela.origin.x + tela.size.width - largura),
+            lembrada
+                .origin
+                .y
+                .max(tela.origin.y)
+                .min(tela.origin.y + tela.size.height - altura),
+        )
+    } else {
+        point(
+            tela.origin.x + (tela.size.width - largura) / 2.,
+            tela.origin.y + (tela.size.height - altura) / 2.,
+        )
+    };
+    Bounds {
+        origin: origem,
+        size: size(largura, altura),
+    }
+}
+
 pub struct Cliente {
     foto: Option<PhotoViewModel>,
     imagem: Option<Arc<RenderImage>>,
@@ -202,12 +340,29 @@ pub struct Cliente {
     /// Em que modo esta janela nasceu: arrastável (`true`) ou tomando o monitor.
     /// Só muda o que o rodapé diz — quem decide o modo é a raiz, ao abrir.
     em_janela: bool,
+    /// Onde a lembrança desta tela é gravada. `None` nos testes que não a
+    /// conferem.
+    arquivo: Option<std::path::PathBuf>,
+    _limites: Option<gpui::Subscription>,
 }
 
 impl Cliente {
-    pub fn novo(em_janela: bool, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn novo(
+        em_janela: bool,
+        arquivo: Option<std::path::PathBuf>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let foco = cx.focus_handle();
         window.focus(&foco);
+        // 🔑 Mover ou redimensionar é o que grava: fechar pelo `X`, pelo `Esc`
+        // ou pelo botão do app não passa todos pelo mesmo lugar, e o último
+        // lugar onde ela esteve é o último movimento.
+        let limites = arquivo.is_some().then(|| {
+            cx.observe_window_bounds(window, |cliente: &mut Self, window, cx| {
+                cliente.lembrar(window, cx)
+            })
+        });
 
         Self {
             foto: None,
@@ -223,6 +378,37 @@ impl Cliente {
             _colheita: None,
             foco,
             em_janela,
+            arquivo,
+            _limites: limites,
+        }
+    }
+
+    /// Grava o monitor onde ela está e, em janela, a posição e o tamanho.
+    ///
+    /// ⚠️ **Maximizada não grava os limites**: seriam os do monitor inteiro, e
+    /// a próxima abertura em janela nasceria do tamanho da tela. O que vale é
+    /// a janela que o operador desenhou.
+    ///
+    /// ⚠️ **No GNOME (Wayland) a posição não existe para o app**: o protocolo
+    /// não conta onde a janela está, e o GPUI devolve a origem em zero. O
+    /// monitor e o tamanho são lembrados; o lugar exato, quem decide é o
+    /// compositor.
+    fn lembrar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(arquivo) = &self.arquivo else {
+            return;
+        };
+        let antes = Lembranca::ler(arquivo);
+        let mut agora = antes.clone();
+        if let Some(uuid) = window.display(cx).and_then(|tela| tela.uuid().ok()) {
+            agora.monitor = Some(uuid.to_string());
+        }
+        if self.em_janela {
+            if let gpui::WindowBounds::Windowed(limites) = window.window_bounds() {
+                agora.lembrar_limites(limites);
+            }
+        }
+        if agora != antes {
+            agora.gravar(arquivo);
         }
     }
 
@@ -518,7 +704,120 @@ impl gpui::EventEmitter<PedidoDoCliente> for Cliente {}
 impl Render for Cliente {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let info = self.mostrar_info.then(|| self.info()).flatten();
-        let janela = window.viewport_size();
+        let barra = tem_barra_propria(self.em_janela);
+        let mut janela = window.viewport_size();
+        if barra {
+            janela.height = (janela.height - px(ALTURA_DA_BARRA)).max(px(0.));
+        }
+
+        let palco =
+            div()
+                .relative()
+                .flex_1()
+                .w_full()
+                // 🔑 **Preto, e não o fundo do tema.** A segunda tela é onde a cor da
+                // foto é julgada por quem paga por ela; qualquer entorno claro muda
+                // como a foto é percebida. É a mesma razão de o tema do app inteiro
+                // não poder acompanhar o claro/escuro do sistema.
+                .bg(gpui::black())
+                .flex()
+                .items_center()
+                .justify_center()
+                // ✨ **Uma foto atravessa a outra, e nunca há um quadro sem foto**
+                // (pedido do dono, 2026-09-09, na tela do cliente da web; aqui pela
+                // regra de paridade entre as duas plataformas). A que sai some
+                // enquanto a que entra aparece, no mesmo meio segundo.
+                //
+                // O passo à frente da web (a escala de 1,03 a 1) sai pelo tamanho
+                // da camada: o GPUI 0.2.2 não tem escala em `div`/`img`.
+                .children(
+                    self.saindo.clone().map(|saindo| {
+                        Self::camada("cliente-saindo", self.troca, saindo, true, janela)
+                    }),
+                )
+                .children(self.imagem.clone().map(|imagem| {
+                    Self::camada("cliente-entrando", self.troca, imagem, false, janela)
+                }))
+                .children(info.map(|info| {
+                    div()
+                        .absolute()
+                        .left(px(20.))
+                        .bottom(px(20.))
+                        .px(px(10.))
+                        .py(px(6.))
+                        .rounded(px(4.))
+                        .bg(gpui::rgba(0x000000b4))
+                        .flex()
+                        .flex_col()
+                        .gap(px(2.))
+                        .child(
+                            div()
+                                .flex()
+                                .items_baseline()
+                                .gap(px(8.))
+                                .children(info.posicao.map(|posicao| {
+                                    div()
+                                        .text_sm()
+                                        .text_color(gpui::rgb(0x9a9a9a))
+                                        .child(posicao)
+                                }))
+                                .child(div().text_sm().text_color(gpui::white()).child(info.nome)),
+                        )
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(8.))
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(gpui::rgb(0xfbbf24))
+                                        .child(info.cheias),
+                                )
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(gpui::rgb(0x4a4a4a))
+                                        .child(info.vazias),
+                                )
+                                .when(info.escolhida, |linha| {
+                                    linha.child(
+                                        div()
+                                            .px(px(6.))
+                                            .rounded(px(999.))
+                                            .bg(gpui::rgb(0xfbbf24))
+                                            .text_xs()
+                                            .text_color(gpui::black())
+                                            .child("Escolhida"),
+                                    )
+                                }),
+                        )
+                }))
+                .child(
+                    // As instruções, como no legado. Elas **não** dependem do `I`:
+                    // desligar o rodapé e perder junto a única pista de como fechar
+                    // a janela deixaria uma tela preta sem saída visível, num monitor
+                    // que muitas vezes está de costas para quem a abriu.
+                    div()
+                        .absolute()
+                        .right(px(20.))
+                        .top(px(20.))
+                        .px(px(8.))
+                        .py(px(4.))
+                        .rounded(px(4.))
+                        .bg(gpui::rgba(0x00000078))
+                        .text_xs()
+                        .text_color(gpui::rgb(0xb4b4b4))
+                        // 🔑 **`J` aparece aqui porque é a saída de um problema
+                        // que não se vê**: quando o Mac põe a tela no monitor
+                        // errado, ela não tem barra nem pode ser movida, e a única
+                        // pista de que dá para virá-la em janela é esta linha.
+                        .child(SharedString::from(if self.em_janela {
+                            "Esc fecha • I mostra o nome • J volta ao monitor"
+                        } else {
+                            "Esc fecha • I mostra o nome • J vira janela"
+                        })),
+                );
 
         div()
             .key_context(CONTEXTO)
@@ -526,113 +825,34 @@ impl Render for Cliente {
             .on_action(cx.listener(Self::ao_alternar_info))
             .on_action(cx.listener(Self::ao_alternar_janela))
             .on_action(cx.listener(Self::ao_fechar))
-            .relative()
             .size_full()
-            // 🔑 **Preto, e não o fundo do tema.** A segunda tela é onde a cor da
-            // foto é julgada por quem paga por ela; qualquer entorno claro muda
-            // como a foto é percebida. É a mesma razão de o tema do app inteiro
-            // não poder acompanhar o claro/escuro do sistema.
             .bg(gpui::black())
             .flex()
-            .items_center()
-            .justify_center()
-            // ✨ **Uma foto atravessa a outra, e nunca há um quadro sem foto**
-            // (pedido do dono, 2026-09-09, na tela do cliente da web; aqui pela
-            // regra de paridade entre as duas plataformas). A que sai some
-            // enquanto a que entra aparece, no mesmo meio segundo.
-            //
-            // O passo à frente da web (a escala de 1,03 a 1) sai pelo tamanho
-            // da camada: o GPUI 0.2.2 não tem escala em `div`/`img`.
-            .children(
-                self.saindo
-                    .clone()
-                    .map(|saindo| Self::camada("cliente-saindo", self.troca, saindo, true, janela)),
-            )
-            .children(
-                self.imagem.clone().map(|imagem| {
-                    Self::camada("cliente-entrando", self.troca, imagem, false, janela)
-                }),
-            )
-            .children(info.map(|info| {
-                div()
-                    .absolute()
-                    .left(px(20.))
-                    .bottom(px(20.))
-                    .px(px(10.))
-                    .py(px(6.))
-                    .rounded(px(4.))
-                    .bg(gpui::rgba(0x000000b4))
-                    .flex()
-                    .flex_col()
-                    .gap(px(2.))
-                    .child(
-                        div()
-                            .flex()
-                            .items_baseline()
-                            .gap(px(8.))
-                            .children(info.posicao.map(|posicao| {
-                                div()
-                                    .text_sm()
-                                    .text_color(gpui::rgb(0x9a9a9a))
-                                    .child(posicao)
-                            }))
-                            .child(div().text_sm().text_color(gpui::white()).child(info.nome)),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(8.))
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(gpui::rgb(0xfbbf24))
-                                    .child(info.cheias),
-                            )
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(gpui::rgb(0x4a4a4a))
-                                    .child(info.vazias),
-                            )
-                            .when(info.escolhida, |linha| {
-                                linha.child(
-                                    div()
-                                        .px(px(6.))
-                                        .rounded(px(999.))
-                                        .bg(gpui::rgb(0xfbbf24))
-                                        .text_xs()
-                                        .text_color(gpui::black())
-                                        .child("Escolhida"),
-                                )
-                            }),
-                    )
-            }))
-            .child(
-                // As instruções, como no legado. Elas **não** dependem do `I`:
-                // desligar o rodapé e perder junto a única pista de como fechar
-                // a janela deixaria uma tela preta sem saída visível, num monitor
-                // que muitas vezes está de costas para quem a abriu.
-                div()
-                    .absolute()
-                    .right(px(20.))
-                    .top(px(20.))
-                    .px(px(8.))
-                    .py(px(4.))
-                    .rounded(px(4.))
-                    .bg(gpui::rgba(0x00000078))
-                    .text_xs()
-                    .text_color(gpui::rgb(0xb4b4b4))
-                    // 🔑 **`J` aparece aqui porque é a saída de um problema
-                    // que não se vê**: quando o Mac põe a tela no monitor
-                    // errado, ela não tem barra nem pode ser movida, e a única
-                    // pista de que dá para virá-la em janela é esta linha.
-                    .child(SharedString::from(if self.em_janela {
-                        "Esc fecha • I mostra o nome • J volta ao monitor"
-                    } else {
-                        "Esc fecha • I mostra o nome • J vira janela"
-                    })),
-            )
+            .flex_col()
+            .when(barra, |coluna| {
+                coluna.child(
+                    crate::janela::como_barra_de_titulo(div(), "barra-do-cliente", window, cx)
+                        .flex_none()
+                        .h(px(ALTURA_DA_BARRA))
+                        .w_full()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .pl(px(12.))
+                        .pr(px(4.))
+                        .bg(gpui::rgb(0x161616))
+                        .text_xs()
+                        .text_color(gpui::rgb(0xb4b4b4))
+                        .child("Tela do cliente")
+                        .child(crate::janela::controles(
+                            "janela-cliente",
+                            gpui::rgb(0xb4b4b4).into(),
+                            window,
+                            cx,
+                        )),
+                )
+            })
+            .child(palco)
     }
 }
 
@@ -673,6 +893,103 @@ mod testes {
     /// segundo monitor plugado. Devolver `None` faria o botão não fazer nada na
     /// máquina de quem está desenvolvendo — e "não faz nada" é indistinguível de
     /// defeito.
+    /// 🔑 O monitor lembrado ganha da regra — desde que ainda esteja plugado.
+    #[test]
+    fn o_monitor_lembrado_volta_se_ainda_existir() {
+        let telas = [
+            (1, Some("principal".to_string())),
+            (2, Some("cliente".to_string())),
+        ];
+
+        assert_eq!(monitor_lembrado(&telas, Some("cliente")), Some(2));
+        assert_eq!(monitor_lembrado(&telas, Some("principal")), Some(1));
+        assert_eq!(
+            monitor_lembrado(&telas, Some("desplugado")),
+            None,
+            "monitor que saiu não é escolha: vale a regra de sempre"
+        );
+        assert_eq!(monitor_lembrado(&telas, None), None);
+    }
+
+    fn limites(x: f32, y: f32, largura: f32, altura: f32) -> Bounds<Pixels> {
+        Bounds {
+            origin: point(px(x), px(y)),
+            size: size(px(largura), px(altura)),
+        }
+    }
+
+    /// A janela volta onde estava e do tamanho que tinha.
+    #[test]
+    fn a_janela_lembrada_volta_onde_estava() {
+        let tela = segundo_monitor();
+        let lembrada = limites(2100., 200., 900., 600.);
+
+        assert_eq!(area_da_janela(tela, Some(lembrada)), lembrada);
+    }
+
+    /// Sobrando para fora, é empurrada para dentro — nunca maior que a tela.
+    #[test]
+    fn a_janela_que_sobrava_para_fora_volta_para_dentro() {
+        let tela = segundo_monitor();
+        let area = area_da_janela(tela, Some(limites(4000., 1200., 900., 600.)));
+
+        assert_eq!(area.size, size(px(900.), px(600.)));
+        assert!(area.origin.x + area.size.width <= tela.origin.x + tela.size.width);
+        assert!(area.origin.y + area.size.height <= tela.origin.y + tela.size.height);
+
+        let enorme = area_da_janela(tela, Some(limites(1920., 0., 9000., 9000.)));
+        assert_eq!(enorme, tela, "maior que a tela, ela cabe na tela");
+    }
+
+    /// Fora do monitor inteiro (o GNOME devolve a origem em zero), volta no
+    /// tamanho lembrado, centrada nele.
+    #[test]
+    fn a_janela_lembrada_fora_do_monitor_volta_centrada() {
+        let tela = segundo_monitor();
+        let area = area_da_janela(tela, Some(limites(0., 0., 800., 500.)));
+
+        assert_eq!(area.size, size(px(800.), px(500.)));
+        assert_eq!(area.origin, point(px(1920. + 880.), px(470.)));
+    }
+
+    /// Sem lembrança, a prévia centrada de sempre.
+    #[test]
+    fn sem_lembranca_a_janela_e_a_previa() {
+        let tela = segundo_monitor();
+
+        assert_eq!(area_da_janela(tela, None), area_do_cliente(tela, false));
+    }
+
+    /// O arquivo antigo, só com o modo, continua sendo lido — e a lembrança
+    /// grava e relê os três campos.
+    #[test]
+    fn a_lembranca_le_o_arquivo_antigo_e_guarda_os_tres_campos() {
+        let pasta = tempfile::tempdir().expect("pasta temporária");
+        let arquivo = pasta.path().join("tela-do-cliente.json");
+        std::fs::write(&arquivo, r#"{"em_janela":true}"#).expect("gravar");
+
+        let mut lembranca = Lembranca::ler(&arquivo);
+        assert!(lembranca.em_janela);
+        assert_eq!(lembranca.limites(), None);
+
+        lembranca.monitor = Some("cliente".into());
+        lembranca.lembrar_limites(limites(2100., 200., 900., 600.));
+        lembranca.gravar(&arquivo);
+
+        let relida = Lembranca::ler(&arquivo);
+        assert_eq!(relida, lembranca);
+        assert_eq!(relida.limites(), Some(limites(2100., 200., 900., 600.)));
+    }
+
+    /// Resto de arrasto não é tamanho de janela.
+    #[test]
+    fn janela_minuscula_nao_e_lembrada() {
+        let mut lembranca = Lembranca::default();
+        lembranca.lembrar_limites(limites(0., 0., 40., 30.));
+
+        assert_eq!(lembranca.limites(), None);
+    }
+
     #[test]
     fn com_um_monitor_so_ela_abre_nele() {
         let unico = 1u32;
@@ -792,7 +1109,7 @@ mod testes {
     /// de longe sem contar o que não está lá.
     #[gpui::test]
     fn o_rodape_mostra_a_posicao_o_nome_e_as_cinco_estrelas(cx: &mut TestAppContext) {
-        let janela = cx.add_window(|window, cx| Cliente::novo(false, window, cx));
+        let janela = cx.add_window(|window, cx| Cliente::novo(false, None, window, cx));
 
         janela
             .update(cx, |cliente, _window, cx| {
@@ -818,7 +1135,7 @@ mod testes {
     /// A foto que o cliente já disse que leva aparece marcada.
     #[gpui::test]
     fn a_levada_no_balcao_aparece_como_escolhida(cx: &mut TestAppContext) {
-        let janela = cx.add_window(|window, cx| Cliente::novo(false, window, cx));
+        let janela = cx.add_window(|window, cx| Cliente::novo(false, None, window, cx));
 
         janela
             .update(cx, |cliente, _window, cx| {
@@ -851,7 +1168,7 @@ mod testes {
     /// ✨ Trocar de foto **guarda a anterior**: é ela que sai enquanto a nova entra.
     #[gpui::test]
     fn a_foto_que_sai_fica_para_o_cruzamento(cx: &mut TestAppContext) {
-        let janela = cx.add_window(|window, cx| Cliente::novo(false, window, cx));
+        let janela = cx.add_window(|window, cx| Cliente::novo(false, None, window, cx));
 
         janela
             .update(cx, |cliente, _window, cx| {
@@ -888,7 +1205,7 @@ mod testes {
     /// diferentes.
     #[gpui::test]
     fn continuar_na_mesma_foto_nao_cruza_nada(cx: &mut TestAppContext) {
-        let janela = cx.add_window(|window, cx| Cliente::novo(false, window, cx));
+        let janela = cx.add_window(|window, cx| Cliente::novo(false, None, window, cx));
 
         janela
             .update(cx, |cliente, _window, cx| {
@@ -924,7 +1241,7 @@ mod testes {
     #[gpui::test]
     fn a_tecla_i_liga_e_desliga_o_rodape(cx: &mut TestAppContext) {
         cx.update(init);
-        let janela = cx.add_window(|window, cx| Cliente::novo(false, window, cx));
+        let janela = cx.add_window(|window, cx| Cliente::novo(false, None, window, cx));
 
         janela
             .update(cx, |cliente, _window, _cx| {
