@@ -3,7 +3,7 @@
 use biblioteca_core::sessoes::Situacao;
 use gpui::TestAppContext;
 
-use super::{abrir_o_app, Cenario, GALERIA};
+use super::{abrir_o_app, abrir_o_ensaio, Cenario, GALERIA};
 use crate::app::Tela;
 
 /// 🎬 **A lista**: chega do site, a busca acha sem acento, o recorte por
@@ -259,5 +259,59 @@ fn o_caixa_da_rota_abre_a_galeria_e_a_volta_e_para_ele(cx: &mut TestAppContext) 
         assert_eq!(app.tela(), Tela::Caixa, "a volta é para de onde se veio");
         assert!(!app.pode_trabalhar(), "sair da galeria fecha a sessão");
         assert_eq!(app.caixa.read(cx).sessao_escolhida(), Some(GALERIA));
+    });
+}
+
+/// 🎬 **Uma guia por sessão, com as teclas do navegador.** Abrir outra sessão
+/// abre outra guia com o nome dela; `Ctrl+Tab` e `⌘1` andam entre elas pela
+/// tecla de verdade, e `⌘W` fecha a da frente e leva à vizinha — até a lista,
+/// quando não sobra nenhuma.
+#[gpui::test]
+fn cada_sessao_abre_numa_guia_e_as_teclas_do_navegador_andam_entre_elas(cx: &mut TestAppContext) {
+    let e = abrir_o_ensaio(cx, Cenario::default());
+    e.app(cx, |app, _w, cx| app.entrar_na_sessao("g2".into(), cx));
+    e.esperar(cx);
+    e.app(cx, |app, _w, _cx| {
+        assert_eq!(app.guias_para_teste(), [GALERIA, "g2"]);
+        assert_eq!(
+            app.titulos_das_guias_para_teste(),
+            [
+                Some("Ensaio da Ana".to_string()),
+                Some("Casamento do João".to_string())
+            ],
+            "cada guia leva o nome da sessão"
+        );
+    });
+
+    e.teclar(cx, "ctrl-tab");
+    e.esperar(cx);
+    e.app(cx, |app, _w, cx| {
+        assert_eq!(app.sessao_aberta_para_teste(), Some(GALERIA), "dá a volta");
+        assert_eq!(app.detalhe.read(cx).galeria_id(), Some(GALERIA));
+    });
+
+    e.teclar(cx, "cmd-2");
+    e.esperar(cx);
+    e.app(cx, |app, _w, _cx| {
+        assert_eq!(app.sessao_aberta_para_teste(), Some("g2"))
+    });
+
+    e.teclar(cx, "cmd-w");
+    e.esperar(cx);
+    e.app(cx, |app, _w, _cx| {
+        assert_eq!(app.guias_para_teste(), [GALERIA]);
+        assert_eq!(
+            app.sessao_aberta_para_teste(),
+            Some(GALERIA),
+            "a vizinha assume"
+        );
+        assert_eq!(app.tela(), Tela::Sessao);
+    });
+
+    e.teclar(cx, "cmd-w");
+    e.esperar(cx);
+    e.app(cx, |app, _w, _cx| {
+        assert!(app.guias_para_teste().is_empty());
+        assert_eq!(app.tela(), Tela::Sessoes, "sem guia, volta à lista");
     });
 }

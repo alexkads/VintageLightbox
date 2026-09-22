@@ -205,6 +205,9 @@ impl Aplicativo {
         if self.sessao_aberta.is_some() {
             self.sair_da_sessao(cx);
         }
+        // As guias são da conta que sai: a próxima não herda os clientes dela.
+        self.guias.esvaziar();
+        self.guardar_guias();
         let (canal, _) = std::sync::mpsc::channel();
         self.publicador.sair(canal);
         self.sessao = None;
@@ -252,7 +255,12 @@ impl Aplicativo {
             {
                 chegou = true;
                 match resultado {
-                    Ok(valor) => self.conta = Conta::da_resposta(&valor),
+                    Ok(valor) => {
+                        self.conta = Conta::da_resposta(&valor);
+                        // 🗂️ As guias da última abertura voltam, se forem
+                        // desta conta — só agora se sabe quem entrou.
+                        self.repor_guias();
+                    }
                     Err(erro) => eprintln!("⚠️ [Conta] /auth/me: {erro}"),
                 }
                 cx.notify();

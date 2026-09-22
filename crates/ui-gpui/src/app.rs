@@ -13,6 +13,7 @@
 //! no cabeçalho da lista.
 
 mod atalhos_da_revelacao;
+mod guias;
 mod painel;
 pub mod resgate;
 mod resolucao_cheia;
@@ -166,7 +167,21 @@ actions!(
         // `Cmd/Ctrl+B`, o atalho do menu lateral do site.
         AlternarMenuLateral,
         // `⌘⇧F` / `Ctrl+Shift+F`: tela cheia na tela do cliente.
-        TelaCheiaDoCliente
+        TelaCheiaDoCliente,
+        // As guias de sessão (`app/guias.rs`): as teclas do navegador.
+        GuiaNova,
+        FecharGuia,
+        ProximaGuia,
+        GuiaAnterior,
+        Guia1,
+        Guia2,
+        Guia3,
+        Guia4,
+        Guia5,
+        Guia6,
+        Guia7,
+        Guia8,
+        UltimaGuia
     ]
 );
 
@@ -316,6 +331,35 @@ pub fn init(cx: &mut gpui::App) {
             TelaCheiaDoCliente,
             Some(CONTEXTO),
         ),
+        // 🗂️ **As guias, com as teclas do navegador** — é de lá que vem quem
+        // trabalha com uma aba por cliente. `Cmd` no Mac, `Ctrl` no resto, e
+        // `Ctrl+Tab` nos dois, como no Chrome.
+        gpui::KeyBinding::new("cmd-t", GuiaNova, Some(CONTEXTO)),
+        gpui::KeyBinding::new("ctrl-t", GuiaNova, Some(CONTEXTO)),
+        gpui::KeyBinding::new("cmd-w", FecharGuia, Some(CONTEXTO)),
+        gpui::KeyBinding::new("ctrl-w", FecharGuia, Some(CONTEXTO)),
+        gpui::KeyBinding::new("ctrl-tab", ProximaGuia, Some(CONTEXTO)),
+        gpui::KeyBinding::new("ctrl-shift-tab", GuiaAnterior, Some(CONTEXTO)),
+        gpui::KeyBinding::new("cmd-shift-]", ProximaGuia, Some(CONTEXTO)),
+        gpui::KeyBinding::new("cmd-shift-[", GuiaAnterior, Some(CONTEXTO)),
+        gpui::KeyBinding::new("cmd-1", Guia1, Some(CONTEXTO)),
+        gpui::KeyBinding::new("cmd-2", Guia2, Some(CONTEXTO)),
+        gpui::KeyBinding::new("cmd-3", Guia3, Some(CONTEXTO)),
+        gpui::KeyBinding::new("cmd-4", Guia4, Some(CONTEXTO)),
+        gpui::KeyBinding::new("cmd-5", Guia5, Some(CONTEXTO)),
+        gpui::KeyBinding::new("cmd-6", Guia6, Some(CONTEXTO)),
+        gpui::KeyBinding::new("cmd-7", Guia7, Some(CONTEXTO)),
+        gpui::KeyBinding::new("cmd-8", Guia8, Some(CONTEXTO)),
+        gpui::KeyBinding::new("cmd-9", UltimaGuia, Some(CONTEXTO)),
+        gpui::KeyBinding::new("ctrl-1", Guia1, Some(CONTEXTO)),
+        gpui::KeyBinding::new("ctrl-2", Guia2, Some(CONTEXTO)),
+        gpui::KeyBinding::new("ctrl-3", Guia3, Some(CONTEXTO)),
+        gpui::KeyBinding::new("ctrl-4", Guia4, Some(CONTEXTO)),
+        gpui::KeyBinding::new("ctrl-5", Guia5, Some(CONTEXTO)),
+        gpui::KeyBinding::new("ctrl-6", Guia6, Some(CONTEXTO)),
+        gpui::KeyBinding::new("ctrl-7", Guia7, Some(CONTEXTO)),
+        gpui::KeyBinding::new("ctrl-8", Guia8, Some(CONTEXTO)),
+        gpui::KeyBinding::new("ctrl-9", UltimaGuia, Some(CONTEXTO)),
     ]);
     atalhos_da_revelacao::ligar(cx);
 }
@@ -428,6 +472,10 @@ pub struct Aplicativo {
     _pedido_da_revelacao: gpui::Subscription,
     /// A sessão escolhida para receber as fotos. `None` é "nenhuma aberta".
     sessao_aberta: Option<String>,
+    /// 🗂️ As sessões abertas em guias (`app/guias.rs`). A da frente é
+    /// `sessao_aberta`; as outras guardam o nome e a fila do "Salvar".
+    guias: guias::Guias,
+    arquivo_das_guias: Option<std::path::PathBuf>,
     /// As fotos que já estão **no site**, do ensaio aberto, na linguagem da
     /// grade.
     ///
@@ -882,6 +930,7 @@ impl Aplicativo {
         // seguinte" é indistinguível de clique perdido.
         // 🖥️ A tela do cliente acompanha a foto em foco da galeria.
         let cliente_na_galeria = cx.observe(&detalhe, |raiz, _detalhe, cx| {
+            raiz.nomear_a_guia_da_frente(cx);
             raiz.atualizar_o_cliente(false, cx);
         });
         let pedido_da_sessao = cx.subscribe_in(
@@ -1031,6 +1080,8 @@ impl Aplicativo {
             _pedido_da_sessao: pedido_da_sessao,
             _pedido_da_revelacao: pedido_da_revelacao,
             sessao_aberta: None,
+            guias: guias::Guias::default(),
+            arquivo_das_guias: guias::arquivo(),
             fotos_do_site: Vec::new(),
             publicador: publicador_da_raiz,
             sincronias: channel(),
@@ -1518,7 +1569,21 @@ impl Aplicativo {
 
     /// Entra numa sessão — o mesmo gesto que abre a rota `[id]` na web.
     ///
+    ///
+    /// 🗂️ **Toda entrada abre (ou encontra) a guia da sessão.** Com outra sessão
+    /// à frente, esta é a troca de guia: a de antes sai com a fila dela
+    /// estacionada, e a que entra retoma a sua.
     pub fn entrar_na_sessao(&mut self, galeria_id: String, cx: &mut Context<Self>) {
+        let anterior = self.sessao_aberta.clone();
+        let trocou = anterior.as_deref() != Some(galeria_id.as_str());
+        if trocou && anterior.is_some() {
+            self.deixar_a_sessao(cx);
+        }
+        self.guias.abrir(&galeria_id, anterior.as_deref());
+        if trocou {
+            self.a_subir = self.guias.retomar(&galeria_id);
+        }
+        self.guardar_guias();
         self.sessao_aberta = Some(galeria_id.clone());
         // 🚨 **A grade passa a ser a do ensaio.** É o modelo da web: dentro da
         // sessão é que se revela e se escolhe com o cliente, e a grade tem de
@@ -1611,16 +1676,27 @@ impl Aplicativo {
 
     /// Sai do ensaio: a grade volta a ser o catálogo, e nada mais trabalha.
     pub fn sair_da_sessao(&mut self, cx: &mut Context<Self>) {
-        self.sessao_aberta = None;
-        self.veio_do_caixa = false;
-        self.fotos_do_site.clear();
-        // A fila é do ensaio que estava aberto: levá-la para o próximo mandaria
-        // ao site fotos de outro cliente no primeiro "Salvar na galeria" de lá.
-        self.a_subir.clear();
+        self.deixar_a_sessao(cx);
         self.biblioteca
             .update(cx, |tela, cx| tela.escopar_na_sessao(None, cx));
         self.tela = Tela::Sessoes;
         cx.notify();
+    }
+
+    /// A sessão da frente sai — para a lista, para outra tela ou para outra
+    /// guia. A grade e a tela ficam com quem chamou.
+    fn deixar_a_sessao(&mut self, cx: &mut Context<Self>) {
+        if let Some(id) = self.sessao_aberta.take() {
+            self.nomear_a_guia(&id, cx);
+            // A fila é do ensaio que estava aberto: levá-la para o próximo
+            // mandaria ao site fotos de outro cliente no primeiro "Salvar na
+            // galeria" de lá. Ela fica **estacionada na guia**, e volta com ela.
+            self.guias
+                .estacionar(&id, std::mem::take(&mut self.a_subir));
+        }
+        self.a_subir.clear();
+        self.veio_do_caixa = false;
+        self.fotos_do_site.clear();
     }
 
     /// O que a tela da sessão pede — ela não troca de tela nem abre a Revelação.
@@ -2368,6 +2444,9 @@ impl Aplicativo {
                     // atualiza — a foto voltaria ao que era antes do envio no
                     // dia em que a galeria mudasse por outra tela.
                     self.a_subir.retain(|(ja, _, _)| ja != &foto_no_site);
+                    // E das guias de trás: a resposta pode chegar depois de o
+                    // operador trocar de guia.
+                    self.guias.deu_baixa(&foto_no_site);
                     // 🔑 **A prévia local sai junto.** Ela existia porque o
                     // servidor ainda não tinha a revelação; agora tem, e é ele
                     // quem manda — uma cópia local que ninguém mais atualiza
@@ -4833,6 +4912,7 @@ impl Render for Aplicativo {
             .on_action(cx.listener(|este, _: &AlternarMenuLateral, _w, cx| {
                 este.alternar_menu_lateral(cx);
             }))
+            .map(|raiz| self.ouvir_atalhos_das_guias(raiz, cx))
             .flex()
             .size_full()
             .bg(cx.theme().background)
@@ -4851,6 +4931,7 @@ impl Render for Aplicativo {
                     .flex_1()
                     .min_w(px(0.))
                     .h_full()
+                    .children(self.faixa_das_guias(cx))
                     .when(self.tela.tem_cabecalho(), |coluna| {
                         coluna.child(self.cabecalho(window, cx))
                     })
@@ -7871,6 +7952,56 @@ mod testes {
         releitura(cx, &janela);
         assert_eq!(publicador.negociadas().len(), 1, "conciliou uma vez só");
         assert_eq!(publicador.subidas().len(), 1, "e nada subiu duas vezes");
+    }
+
+    /// 🗂️ Trocar de guia estaciona a fila do "Salvar" da sessão de trás, e
+    /// voltar a ela a devolve — sem vazar para a sessão do outro cliente.
+    #[gpui::test]
+    fn trocar_de_guia_estaciona_a_fila_do_salvar_e_fechar_leva_a_vizinha(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            |window, cx| Aplicativo::novo(Vec::new(), previews, Vec::new(), portas(), window, cx)
+        });
+
+        janela
+            .update(cx, |app, window, cx| {
+                app.entrar_na_conta(sessao_de_teste(), cx);
+                app.entrar_na_sessao("g1".into(), cx);
+                app.enfileirar_para_subir("f1".into(), Ajustes::default(), CropSettings::default());
+
+                // Abrir outra sessão abre outra guia, e a fila de g1 não vem junto.
+                app.entrar_na_sessao("g2".into(), cx);
+                assert_eq!(app.guias_para_teste(), ["g1", "g2"]);
+                assert!(
+                    app.a_subir_para_teste().is_empty(),
+                    "a fila de g1 vazou para g2"
+                );
+
+                // Voltar a g1 devolve a fila; entrar de novo não duplica a guia.
+                app.entrar_na_sessao("g1".into(), cx);
+                assert_eq!(app.guias_para_teste(), ["g1", "g2"]);
+                assert_eq!(app.a_subir_para_teste(), ["f1"]);
+
+                // A lista de sessões não fecha as guias: g1 volta com a fila.
+                app.ir_para(Tela::Sessoes, window, cx);
+                assert_eq!(app.guias_para_teste(), ["g1", "g2"]);
+                app.ir_para_a_guia("g1".into(), window, cx);
+                assert_eq!(app.a_subir_para_teste(), ["f1"]);
+
+                // Fechar a da frente leva à vizinha da direita; a fila some junto.
+                app.fechar_guia("g1".into(), window, cx);
+                assert_eq!(app.sessao_aberta_para_teste(), Some("g2"));
+                assert_eq!(app.guias_para_teste(), ["g2"]);
+                assert!(app.a_subir_para_teste().is_empty());
+
+                // Fechar a última volta à lista de sessões.
+                app.fechar_guia("g2".into(), window, cx);
+                assert_eq!(app.sessao_aberta_para_teste(), None);
+                assert_eq!(app.tela, Tela::Sessoes);
+            })
+            .expect("a janela deve estar aberta");
     }
 
     /// 🚨 **Sem sessão aberta nada sobe — e a foto não se perde por isso.**
