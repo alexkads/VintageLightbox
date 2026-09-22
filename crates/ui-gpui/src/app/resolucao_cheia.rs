@@ -179,7 +179,10 @@ impl Aplicativo {
             let arquivo = PathBuf::from(caminho);
             self.decodificar_o_bruto(
                 id,
-                move || image::open(&arquivo).map_err(|e| e.to_string()),
+                // De pé: a etiqueta de girar do EXIF — `infrastructure::orientacao`.
+                move || {
+                    infrastructure::orientacao::abrir_de_pe(&arquivo).map_err(|e| e.to_string())
+                },
                 cx,
             );
             return;
@@ -194,7 +197,10 @@ impl Aplicativo {
                 let bytes = bytes.clone();
                 self.decodificar_o_bruto(
                     id,
-                    move || image::load_from_memory(&bytes).map_err(|e| e.to_string()),
+                    move || {
+                        infrastructure::orientacao::decodificar_de_pe(&bytes)
+                            .map_err(|e| e.to_string())
+                    },
                     cx,
                 );
                 return;
@@ -320,7 +326,8 @@ impl Aplicativo {
                                 self.decodificar_o_bruto(
                                     id,
                                     move || {
-                                        image::load_from_memory(&bytes).map_err(|e| e.to_string())
+                                        infrastructure::orientacao::decodificar_de_pe(&bytes)
+                                            .map_err(|e| e.to_string())
                                     },
                                     cx,
                                 );

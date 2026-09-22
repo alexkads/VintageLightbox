@@ -16,6 +16,7 @@ pub mod file_system;
 /// que compila para wasm32.
 pub mod gpu_adjustments;
 pub mod image_exporter;
+pub mod orientacao;
 pub mod paths;
 pub mod pos_venda;
 pub mod raw_processing;
