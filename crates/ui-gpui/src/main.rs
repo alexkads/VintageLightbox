@@ -397,6 +397,9 @@ async fn main() {
             // diálogo e lista. Sem ele, o primeiro componente do `gpui-component`
             // que a tela usar entra num `cx.global::<...>()` que não existe.
             gpui_component::init(cx);
+            // Devolve à GPU as texturas das imagens que saíram de uso — sem
+            // isso a memória de vídeo só cresce (`imagem::coleta`).
+            ui_gpui::imagem::coleta::ligar(cx);
             // E logo em seguida o tema do site, no modo que o operador escolheu
             // (Claro, Escuro ou Sistema, no menu da conta).
             tema::aplicar(

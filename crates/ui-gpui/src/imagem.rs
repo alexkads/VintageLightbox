@@ -69,7 +69,128 @@ pub fn para_gpui(imagem: DynamicImage) -> Arc<RenderImage> {
         }
     };
 
-    Arc::new(RenderImage::new(SmallVec::from_elem(Frame::new(bytes), 1)))
+    let imagem = Arc::new(RenderImage::new(SmallVec::from_elem(Frame::new(bytes), 1)));
+    coleta::registrar(&imagem);
+    imagem
+}
+
+/// 🚨 **A textura na GPU não some quando a imagem some.**
+///
+/// O atlas do GPUI guarda uma textura por `RenderImage` desenhada e só a solta
+/// quando alguém chama `drop_image` — soltar o `Arc` não basta. Nada no app
+/// chamava. Cada prévia nova da revelação (uma por quadro, com um slider
+/// arrastado) ficava presa na memória de vídeo, e numa Intel Haswell ela acabou:
+/// `OutOfDeviceMemory` dentro do `BladeAtlas`, o `unwrap` do blade virou pânico
+/// e o pânico na limpeza derrubou o app (Fedora, 22/set/2026). No Mac, com a
+/// memória unificada grande, o vazamento só não tinha chegado ao teto.
+///
+/// Toda imagem nasce em [`para_gpui`] e é registrada aqui. A cada
+/// [`INTERVALO`], quem só tem a referência do registro não está em tela nem em
+/// cache nenhum — e volta para a GPU.
+pub mod coleta {
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
+    use gpui::{App, RenderImage};
+
+    /// De quanto em quanto tempo o registro é varrido.
+    pub const INTERVALO: Duration = Duration::from_millis(250);
+
+    /// Cada imagem viva e quantas varreduras seguidas ela passou órfã.
+    static VIVAS: Mutex<Vec<(Arc<RenderImage>, u8)>> = Mutex::new(Vec::new());
+
+    pub(super) fn registrar(imagem: &Arc<RenderImage>) {
+        if let Ok(mut vivas) = VIVAS.lock() {
+            vivas.push((imagem.clone(), 0));
+        }
+    }
+
+    /// Solta da GPU as imagens que ninguém mais segura, e devolve quantas.
+    ///
+    /// ⚠️ **Duas varreduras órfã, e não uma.** O quadro já desenhado pode ainda
+    /// apontar para a textura; a segunda varredura dá tempo de ele ser trocado.
+    /// E depois de soltar, **toda janela redesenha**: apresentar de novo a
+    /// cena antiga com uma textura destruída é outro jeito de derrubar o app.
+    pub fn recolher(cx: &mut App) -> usize {
+        let soltas: Vec<Arc<RenderImage>> = {
+            let Ok(mut vivas) = VIVAS.lock() else {
+                return 0;
+            };
+            let mut soltas = Vec::new();
+            vivas.retain_mut(|(imagem, orfa)| {
+                if Arc::strong_count(imagem) > 1 {
+                    *orfa = 0;
+                    return true;
+                }
+                *orfa += 1;
+                if *orfa < 2 {
+                    return true;
+                }
+                soltas.push(imagem.clone());
+                false
+            });
+            soltas
+        };
+        let quantas = soltas.len();
+        if quantas > 0 && std::env::var_os("VLB_VIGIA").is_some() {
+            relatar(&soltas);
+        }
+        for imagem in soltas {
+            cx.drop_image(imagem, None);
+        }
+        if quantas > 0 {
+            cx.refresh_windows();
+        }
+        quantas
+    }
+
+    /// 🔧 Com `VLB_VIGIA=1`, quanto a coleta soltou e quanto ainda está vivo.
+    fn relatar(soltas: &[Arc<RenderImage>]) {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static SOLTOS: AtomicUsize = AtomicUsize::new(0);
+        let bytes = |imagem: &RenderImage| {
+            let lado = imagem.size(0);
+            u32::from(lado.width) as usize * u32::from(lado.height) as usize * 4
+        };
+        let agora: usize = soltas.iter().map(|imagem| bytes(imagem)).sum();
+        let total = SOLTOS.fetch_add(agora, Ordering::Relaxed) + agora;
+        let Ok(vivas) = VIVAS.lock() else {
+            return;
+        };
+        let vivos: usize = vivas.iter().map(|(imagem, _)| bytes(imagem)).sum();
+        eprintln!(
+            "[coleta] soltou {} ({} MB, {} MB desde o início); vivas {} ({} MB)",
+            soltas.len(),
+            agora / 1_000_000,
+            total / 1_000_000,
+            vivas.len(),
+            vivos / 1_000_000
+        );
+    }
+
+    /// Liga a varredura para a vida inteira do app.
+    pub fn ligar(cx: &mut App) {
+        cx.spawn(async move |cx| loop {
+            cx.background_executor().timer(INTERVALO).await;
+            if cx.update(recolher).is_err() {
+                return;
+            }
+        })
+        .detach();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn registrada(imagem: &RenderImage) -> bool {
+        registrada_por_id(imagem.id)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn registrada_por_id(id: gpui::ImageId) -> bool {
+        VIVAS
+            .lock()
+            .map(|vivas| vivas.iter().any(|(viva, _)| viva.id == id))
+            .unwrap_or(false)
+    }
 }
 
 /// O tamanho com que a foto **cabe inteira** numa moldura — o `object-fit:
@@ -283,6 +404,26 @@ mod tests {
     /// O tamanho de uma imagem, como o `RenderImage` o devolve.
     fn moldura_de(largura: u32, altura: u32) -> Size<DevicePixels> {
         para_gpui(DynamicImage::ImageRgba8(RgbaImage::new(largura, altura))).size(0)
+    }
+
+    /// 🚨 A imagem que saiu de uso volta para a GPU — e a que ainda está em uso
+    /// fica. Sem isso o atlas só cresce, e numa Haswell a memória de vídeo
+    /// acaba no meio de um arrasto de exposição.
+    #[gpui::test]
+    fn a_imagem_que_ninguem_segura_sai_da_gpu(cx: &mut gpui::TestAppContext) {
+        let em_uso = para_gpui(um_pixel(1, 2, 3, 255));
+        let solta = para_gpui(um_pixel(4, 5, 6, 255));
+        let id_da_solta = solta.id;
+        drop(solta);
+
+        cx.update(coleta::recolher);
+        // Uma varredura órfã ainda não basta: o quadro na tela pode usá-la.
+        assert!(super::coleta::registrada(&em_uso));
+        cx.update(coleta::recolher);
+
+        assert!(super::coleta::registrada(&em_uso), "a que está em uso fica");
+        let ainda = super::coleta::registrada_por_id(id_da_solta);
+        assert!(!ainda, "a que ninguém segura saiu na segunda varredura");
     }
 
     #[test]
