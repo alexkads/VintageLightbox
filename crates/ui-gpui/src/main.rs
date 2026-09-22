@@ -432,7 +432,12 @@ async fn main() {
                 .open_window(
                     WindowOptions {
                         app_id: Some(ui_gpui::menu::APP_ID.into()),
-                        window_bounds: Some(WindowBounds::Windowed(bounds)),
+                        // 🖥️ **Abre maximizada** (dono, 22/set/2026: *"o gnome
+                        // ainda não tem barra pra fazer isso"*). `bounds` fica
+                        // como o tamanho de restaurar. Só o Windows atende este
+                        // pedido no GPUI 0.2.2; os outros são maximizados logo
+                        // abaixo, depois de a janela existir.
+                        window_bounds: Some(WindowBounds::Maximized(bounds)),
                         titlebar: Some(gpui::TitlebarOptions {
                             title: Some(ui_gpui::menu::NOME.into()),
                             ..Default::default()
@@ -475,6 +480,13 @@ async fn main() {
                         // Minimizar leva à bandeja; fechar com envio na fila só
                         // esconde (G9) — `ui_gpui::segundo_plano`.
                         ui_gpui::segundo_plano::ligar(aplicativo.downgrade(), window, cx);
+                        // No Linux (Wayland e X11) e no macOS o GPUI ignora o
+                        // `Maximized` da abertura e só o informa depois: quem
+                        // maximiza é o app. No Wayland o pedido vai antes do
+                        // primeiro quadro, e a janela já nasce do tamanho da tela.
+                        if !window.is_maximized() {
+                            window.zoom_window();
+                        }
                         // A primeira camada da janela **tem** de ser o `Root`: é ele
                         // que hospeda diálogo, gaveta e aviso, e quem sabe qual campo
                         // de texto está com o foco. O `gpui-component` procura por ele
