@@ -178,7 +178,7 @@ impl ReceitaPadrao {
     }
 
     /// Esta foto precisa da receita. Chamar de novo com a mesma foto na fila não
-    /// a duplica.
+    /// a duplica: a receita nova toma o lugar da que esperava.
     pub fn pedir(&self, foto_id: String, ajustes: Ajustes, proporcao: Option<String>) {
         self.enfileirar(foto_id, ajustes, Receita::Padrao { proporcao });
     }
@@ -194,7 +194,15 @@ impl ReceitaPadrao {
     fn enfileirar(&self, foto_id: String, ajustes: Ajustes, receita: Receita) {
         {
             let mut fila = self.fila.lock().expect("a fila da receita");
-            if fila.iter().any(|p| p.foto_id == foto_id) {
+            // 🚨 **A mesma foto na fila recebe a receita nova**, e não é
+            // ignorada. Descartar o pedido novo deixava valer o velho: um
+            // "Zerar" logo depois de um "Sincronizar" (com a foto ainda
+            // esperando a cópia de trabalho) terminava mostrando a receita
+            // desfeita (dono, 2026-09-21). É o que o Worker do site faz — a
+            // mesma foto é substituída.
+            if let Some(pedido) = fila.iter_mut().find(|p| p.foto_id == foto_id) {
+                pedido.ajustes = ajustes;
+                pedido.receita = receita;
                 return;
             }
             fila.push_back(Pedido {
@@ -305,11 +313,24 @@ fn trabalhar(
     // site, `site:<id>` é a prévia **com marca d'água**; `trabalho:<id>` é a
     // mesma foto sem ela, que é o que a Revelação mostra. Revelar a marcada
     // deixaria a tira com um efeito diferente do palco.
-    let Some(base) = previews
-        .get_preview(&chave_do_trabalho(&pedido.foto_id))
-        .or_else(|| previews.get_preview(&pedido.foto_id))
-        .or_else(|| previews.get_thumbnail(&pedido.foto_id))
-    else {
+    //
+    // 🚨 **Na foto do site, só a cópia de trabalho** (dono, 2026-09-21: zerar e
+    // sincronizar não mudavam a tira). `site:<id>` é a imagem **da galeria**, e
+    // ela já traz a receita que o site tem: revelar por cima empilhava o efeito
+    // (P&B sobre P&B), e o "neutro" feito dela continuava P&B. Sem a cópia no
+    // cache, o pedido espera — quem a baixa é a raiz (`pedir_a_previa_da_receita`).
+    let do_site = pedido
+        .foto_id
+        .starts_with(crate::revelacao::persistencia::PREFIXO_DO_SITE);
+    let base = if do_site {
+        previews.get_preview(&chave_do_trabalho(&pedido.foto_id))
+    } else {
+        previews
+            .get_preview(&chave_do_trabalho(&pedido.foto_id))
+            .or_else(|| previews.get_preview(&pedido.foto_id))
+            .or_else(|| previews.get_thumbnail(&pedido.foto_id))
+    };
+    let Some(base) = base else {
         return Desfecho::SemImagem;
     };
 
@@ -327,10 +348,34 @@ fn trabalhar(
     };
 
     let tem_ajustes = pedido.ajustes != Ajustes::default();
-    let tem_corte = corte != Corte::default();
+    let tem_corte = corte != Corte::default()
+        && !crate::revelacao::corte::e_inteiro(&para_crop_settings(&corte));
     if !tem_ajustes && !tem_corte {
         // A receita é o neutro: o bruto **é** a foto com ela.
-        return Desfecho::Feito { avisar: false };
+        //
+        // 🚨 **Mas a prévia velha não pode ficar** (dono, 2026-09-21: *"quando
+        // eu zerar a receita de uma foto, devo conseguir selecionar as demais e
+        // sincronizá-las, para que a receita delas também seja zerada"*). Zerar
+        // ou sincronizar o neutro deixava a prévia da receita anterior no cache
+        // — e a tira seguia mostrando o P&B. Na importação sem preset
+        // (`Receita::Padrao`) não há prévia para trocar.
+        if !matches!(pedido.receita, Receita::Pronta { .. }) {
+            return Desfecho::Feito { avisar: false };
+        }
+        let chave = chave_da_revelada(&pedido.foto_id);
+        if do_site {
+            // A imagem da galeria ainda tem a receita antiga até o "Salvar":
+            // a prévia neutra é o bruto, e é ela que a tira e a grade mostram.
+            let _ = previews.save_preview(&chave, &base);
+            let _ = previews.save_thumbnail(
+                &chave,
+                &base.thumbnail(LADO_DA_MINIATURA, LADO_DA_MINIATURA),
+            );
+        } else {
+            // A local: sem prévia, o que aparece é o próprio bruto.
+            previews.apagar(&chave);
+        }
+        return Desfecho::Feito { avisar: true };
     }
 
     let pequena = base.thumbnail(LADO, LADO);

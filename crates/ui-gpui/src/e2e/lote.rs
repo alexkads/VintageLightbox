@@ -718,6 +718,17 @@ fn zerar_as_marcadas_limpa_receita_enquadramento_e_previas(cx: &mut TestAppConte
 
     e.revelacao(cx, |tela, window, cx| tela.clicar_em_zerar_tudo(window, cx));
     e.esperar(cx);
+    // O serviço das prévias anda numa thread de verdade, com relógio de
+    // verdade: a `d` espera a cópia de trabalho chegar do storage antes de
+    // virar o neutro.
+    for _ in 0..60 {
+        let andando = e.app(cx, |app, _w, _cx| app.previas_andando());
+        if !andando {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        e.esperar(cx);
+    }
 
     // 1 · A aberta voltou ao neutro, com enquadramento e tudo — e dá `⌘Z`.
     e.revelacao(cx, |tela, _w, _cx| {
@@ -750,14 +761,18 @@ fn zerar_as_marcadas_limpa_receita_enquadramento_e_previas(cx: &mut TestAppConte
     );
 
     // 3 · 🚨 E as miniaturas: sem isto o gesto muda o banco e não muda a tela.
+    //
+    // 🔄 **A da foto do site vira o neutro, e não some** (dono, 2026-09-21).
+    // Apagar a prévia fazia a tira voltar à imagem da galeria — que ainda tem a
+    // receita desfeita até o "Salvar". O que se cobra é que a prévia da receita
+    // (a 8×8 gravada acima) não esteja mais lá.
     for id in ["site:a", "site:b", "site:d"] {
-        assert!(
-            !e.previews.tem(
-                &crate::revelacao::persistencia::chave_da_revelada(id),
-                PreviewType::Thumbnail
-            ),
-            "{id} ainda mostra a receita desfeita"
-        );
+        let chave = crate::revelacao::persistencia::chave_da_revelada(id);
+        let velha = e
+            .previews
+            .get_thumbnail(&chave)
+            .is_some_and(|m| (m.width(), m.height()) == (8, 8));
+        assert!(!velha, "{id} ainda mostra a receita desfeita");
     }
 
     // 4 · O neutro também precisa subir — e sobe pelos dois caminhos: as

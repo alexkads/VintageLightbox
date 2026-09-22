@@ -841,6 +841,24 @@ impl Revelacao {
             "sincronizar" => self.abrir_sincronizacao(window, cx),
             "sincronizar_ok" => cx.emit(super::PedidoDaRevelacao::Sincronizar),
             "baixar_jpeg" => cx.emit(super::PedidoDaRevelacao::Exportar),
+            // 🧪 Os outros dois botões da barra — "Zerar tudo" e "Salvar na
+            // galeria e sair" —, pelo mesmo caminho do clique.
+            "zerar" => self.zerar_tudo(window, cx),
+            "salvar" => {
+                let botao = self.botao_de_salvar();
+                eprintln!(
+                    "[roteiro] salvar: '{}' {}",
+                    botao.rotulo,
+                    if botao.habilitado {
+                        "habilitado"
+                    } else {
+                        "DESABILITADO"
+                    }
+                );
+                if botao.habilitado {
+                    cx.emit(super::PedidoDaRevelacao::SalvarNaGaleria);
+                }
+            }
             outro => eprintln!("[roteiro] gesto da revelação desconhecido: {outro}"),
         }
     }

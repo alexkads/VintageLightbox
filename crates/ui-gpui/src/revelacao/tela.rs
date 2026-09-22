@@ -715,13 +715,7 @@ impl Revelacao {
         self.alvos_da_sincronizacao()
             .into_iter()
             .filter(|f| Some(&f.id) != aberta.as_ref())
-            // Ajuste **ou** enquadramento fora do neutro — o `temOQueZerar`.
-            .filter(|f| {
-                persistencia::da_foto(f) != Ajustes::default()
-                    || !corte::e_inteiro(&persistencia::para_crop_settings(
-                        &persistencia::corte_da_foto(f),
-                    ))
-            })
+            .filter(tem_o_que_zerar)
             .collect()
     }
 
@@ -803,7 +797,11 @@ impl Revelacao {
         };
         let chave = persistencia::chave_da_revelada(&aberta.foto.id);
         let neutro = self.ajustes == Ajustes::default() && corte::e_inteiro(&self.enquadramento());
-        if neutro {
+        // 🚨 **Só a local apaga no neutro.** Na foto do site, sem prévia a tira
+        // e a grade voltam à imagem da galeria — que ainda tem a receita antiga
+        // até o "Salvar" (dono, 2026-09-21: zerar não mudava a tira). Ela grava
+        // o neutro como qualquer outra receita, logo abaixo.
+        if neutro && !persistencia::so_existe_no_site(&aberta.foto) {
             self.previews.apagar(&chave);
             return;
         }
@@ -970,8 +968,10 @@ impl Revelacao {
                         })
                 }))
                 .child(div().pt(px(8.)).text_xs().child(
-                    "A receita vai para cada foto marcada; as que já estão no site são \
-                     reveladas em resolução cheia e salvas na galeria.",
+                    // O texto do site (`sincronizar-dialogo.tsx`): sincronizar
+                    // copia a receita, e quem leva à galeria é o "Salvar".
+                    "A receita vai para cada foto marcada. Elas sobem para a galeria \
+                     quando você salvar.",
                 ))
                 .on_ok(move |_ev, _window, cx| {
                     para_ok.update(cx, |tela, cx| {
@@ -2673,6 +2673,19 @@ fn pilula(
         })
         .when(desligada, |b| b.opacity(0.4))
         .when(!desligada, |b| b.cursor_pointer())
+}
+
+/// Ajuste **ou** enquadramento fora do neutro — o `temOQueZerar` do site.
+///
+/// 🔑 **Uma regra para o botão do painel e para o menu da tira.** O menu usava
+/// `ja_revelada`, que compara o corte com o vazio: a foto já zerada (corte
+/// inteiro gravado) continuava contando como "a zerar", e o menu reenfileirava
+/// um restaurar-original à toa. No site os dois usam a mesma regra.
+pub(crate) fn tem_o_que_zerar(foto: &PhotoViewModel) -> bool {
+    persistencia::da_foto(foto) != Ajustes::default()
+        || !corte::e_inteiro(&persistencia::para_crop_settings(
+            &persistencia::corte_da_foto(foto),
+        ))
 }
 
 #[cfg(test)]

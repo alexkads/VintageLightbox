@@ -646,7 +646,7 @@ impl Revelacao {
             .iter()
             .filter(|f| Some(&f.id) != aberta.as_ref())
             .filter(|f| !f.revelacao_travada)
-            .filter(|f| persistencia::ja_revelada(f))
+            .filter(|f| super::tem_o_que_zerar(f))
             .map(|f| f.id.clone())
             .collect()
     }

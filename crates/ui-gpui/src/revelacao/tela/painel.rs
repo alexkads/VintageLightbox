@@ -248,7 +248,7 @@ impl Revelacao {
 
     /// O botão "Zerar tudo" (ou "Zerar N fotos"): esta foto pelo histórico, e
     /// as outras marcadas pela raiz.
-    fn zerar_tudo(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn zerar_tudo(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.controles_ligados() && (self.quantos_alterados() > 0 || self.enquadrada()) {
             self.redefinir_ajustes(window, cx);
         }
