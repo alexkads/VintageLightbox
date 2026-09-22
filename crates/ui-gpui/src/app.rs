@@ -3339,6 +3339,8 @@ impl Aplicativo {
         let Some(janela) = self.cliente else {
             return;
         };
+        let _inicio = std::time::Instant::now();
+        let _cronometro = CronometroAoSair("atualizar_o_cliente", _inicio);
         let Some((foto, posicao)) = self.foto_para_o_cliente(cx) else {
             return;
         };
@@ -3399,6 +3401,7 @@ impl Aplicativo {
                 return Some((pixels.clone(), *largura, *altura));
             }
         }
+        let inicio = std::time::Instant::now();
         let do_site = persistencia::id_no_site(&foto.id).is_some();
         let imagem = if do_site {
             self.previews
@@ -3420,6 +3423,7 @@ impl Aplicativo {
         let rgba = imagem.to_rgba8();
         let (largura, altura) = (rgba.width(), rgba.height());
         let pixels = Arc::new(rgba.into_raw());
+        crate::depuracao::vigia::cronometrar("bruto_para_o_cliente (ler + decodificar)", inicio);
         self.bruto_do_cliente = Some((foto.id.clone(), pixels.clone(), largura, altura));
         Some((pixels, largura, altura))
     }
@@ -9008,5 +9012,14 @@ mod testes {
                 .advance_clock(std::time::Duration::from_millis(120));
             cx.run_until_parked();
         }
+    }
+}
+
+/// Cronometra um trecho até o fim do escopo — ver `depuracao::vigia`.
+struct CronometroAoSair(&'static str, std::time::Instant);
+
+impl Drop for CronometroAoSair {
+    fn drop(&mut self) {
+        crate::depuracao::vigia::cronometrar(self.0, self.1);
     }
 }

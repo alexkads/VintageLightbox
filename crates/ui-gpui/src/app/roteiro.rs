@@ -31,6 +31,18 @@ impl Aplicativo {
             }
         };
         let pasta = std::env::var_os("VLB_FOTOS").map(PathBuf::from);
+        // 🐕 O vigia de travamento (`VLB_VIGIA=1`): a batida da interface, a
+        // cada 16 ms, numa tarefa que só anda se a thread estiver livre.
+        depuracao::vigia::ligar();
+        if depuracao::vigia::ligado() {
+            cx.spawn(async move |_, cx| loop {
+                depuracao::vigia::bater();
+                cx.background_executor()
+                    .timer(Duration::from_millis(16))
+                    .await;
+            })
+            .detach();
+        }
         self._roteiro = Some(cx.spawn_in(window, async move |raiz, cx| {
             // A capa de entrada também se fotografa: os passos antes de a conta
             // entrar rodam com ela na tela.
@@ -39,6 +51,28 @@ impl Aplicativo {
                     cx.background_executor().timer(tempo).await;
                     continue;
                 }
+                // 🔁 A rajada: o mesmo passo, sem o respiro entre um e outro.
+                if let Passo::Rajada {
+                    vezes,
+                    intervalo,
+                    passo: dentro,
+                } = &passo
+                {
+                    depuracao::vigia::passo(&format!("{passo:?}"));
+                    eprintln!("[roteiro] rajada de {vezes}: {dentro:?}");
+                    for _ in 0..*vezes {
+                        let pasta = pasta.clone();
+                        let seguiu = raiz.update_in(cx, |raiz, window, cx| {
+                            raiz.dar_o_passo(dentro, pasta.as_deref(), window, cx)
+                        });
+                        if !matches!(seguiu, Ok(true)) {
+                            return;
+                        }
+                        cx.background_executor().timer(*intervalo).await;
+                    }
+                    continue;
+                }
+                depuracao::vigia::passo(&format!("{passo:?}"));
                 let pasta = pasta.clone();
                 let seguiu = raiz.update_in(cx, |raiz, window, cx| {
                     raiz.dar_o_passo(&passo, pasta.as_deref(), window, cx)
@@ -52,6 +86,7 @@ impl Aplicativo {
                     .await;
             }
             eprintln!("[roteiro] fim");
+            depuracao::vigia::relatar();
         }));
     }
 
@@ -65,7 +100,8 @@ impl Aplicativo {
     ) -> bool {
         eprintln!("[roteiro] {passo:?}");
         match passo {
-            Passo::Esperar(_) => {}
+            // Quem desenrola a rajada é o laço do roteiro.
+            Passo::Esperar(_) | Passo::Rajada { .. } => {}
             Passo::Foto(nome) => {
                 let Some(pasta) = pasta else {
                     eprintln!("[roteiro] VLB_FOTOS não definida: a foto {nome} não sai");
@@ -236,6 +272,7 @@ impl Aplicativo {
                 Err(erro) => eprintln!("[roteiro] tecla inválida '{tecla}': {erro}"),
             },
             Passo::Fim => {
+                depuracao::vigia::relatar();
                 cx.quit();
                 return false;
             }

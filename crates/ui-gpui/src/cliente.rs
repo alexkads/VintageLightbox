@@ -266,8 +266,13 @@ impl Cliente {
         if let Some(resultado) = processador.colher() {
             if let Some((id, foto, posicao, corte)) = self.revelando.take() {
                 if id == resultado.id {
+                    let inicio = std::time::Instant::now();
                     let exibida = transformacao::aplicar(&resultado.imagem, &corte, true);
                     let imagem = crate::imagem::para_gpui(exibida);
+                    crate::depuracao::vigia::cronometrar(
+                        "tela do cliente: enquadrar + converter",
+                        inicio,
+                    );
                     self.mostrar(Some(foto), Some(imagem), posicao, cx);
                 } else {
                     // Chegou um resultado velho: o pedido novo continua na fila.

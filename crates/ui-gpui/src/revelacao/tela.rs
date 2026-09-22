@@ -229,6 +229,8 @@ pub struct Revelacao {
     /// enfileirar mais uma.
     _gravacao: Option<Task<()>>,
     controles: Vec<Controle>,
+    /// A fase do gesto `revelacao varrer` do roteiro de estresse.
+    varredura: u32,
     /// O corte em edição. `None` é "fora do modo de corte" — e é a diferença
     /// entre a foto com overlay por cima e a foto sozinha.
     edicao: Option<Edicao>,
@@ -542,6 +544,7 @@ impl Revelacao {
             pendente: false,
             _gravacao: None,
             controles,
+            varredura: 0,
             edicao: None,
             mostrando_original: false,
             nao_salvas: 0,

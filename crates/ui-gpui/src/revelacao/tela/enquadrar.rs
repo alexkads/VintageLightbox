@@ -844,6 +844,28 @@ impl Revelacao {
             // 🧪 Os outros dois botões da barra — "Zerar tudo" e "Salvar na
             // galeria e sair" —, pelo mesmo caminho do clique.
             "zerar" => self.zerar_tudo(window, cx),
+            // 🧪 Um arrasto de slider, para o teste de estresse: cada chamada
+            // leva o controle N ao próximo ponto de uma varredura de ida e
+            // volta — é o `Change` que o componente emite durante o arrasto.
+            "varrer" => {
+                let controle = numero.unwrap_or(0.) as usize;
+                if let Some(c) = self.controles.get(controle) {
+                    let estado = c.estado.clone();
+                    let (min, max) = {
+                        let d = c.definicao;
+                        (d.minimo, d.maximo)
+                    };
+                    self.varredura = self.varredura.wrapping_add(1);
+                    let fase = (self.varredura % 40) as f32 / 20.;
+                    let t = if fase <= 1. { fase } else { 2. - fase };
+                    let valor = min + (max - min) * (0.25 + 0.5 * t);
+                    estado.update(cx, |_, cx| {
+                        cx.emit(gpui_component::slider::SliderEvent::Change(
+                            gpui_component::slider::SliderValue::Single(valor),
+                        ))
+                    });
+                }
+            }
             "salvar" => {
                 let botao = self.botao_de_salvar();
                 eprintln!(
