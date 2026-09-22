@@ -91,6 +91,15 @@ pub enum Passo {
     /// pelo mesmo despacho do teclado: passa pelo foco e pelos contextos, que é
     /// onde um atalho morto se esconde.
     Tecla(String),
+    /// `rajada 200 25 tecla right` — o passo do fim da linha, N vezes, com o
+    /// intervalo em milissegundos, **sem** o respiro de 120 ms entre passos: é
+    /// a carga do teste de estresse (dono, 2026-09-22: *"a aplicação parou de
+    /// responder durante o uso"*).
+    Rajada {
+        vezes: usize,
+        intervalo: Duration,
+        passo: Box<Passo>,
+    },
     /// `fim` — fecha o app.
     Fim,
 }
@@ -151,6 +160,21 @@ pub fn ler_roteiro(texto: &str) -> Result<Vec<Passo>, String> {
             "nova" => Passo::Nova(argumentos.join(" ")),
             "importar" => Passo::Importar(argumentos.join(" ")),
             "tecla" => Passo::Tecla(argumentos.first().copied().unwrap_or_default().to_string()),
+            "rajada" => {
+                let vezes = numero(0)? as usize;
+                let intervalo = Duration::from_millis(numero(1)? as u64);
+                let resto = argumentos.get(2..).unwrap_or_default().join(" ");
+                let mut dentro =
+                    ler_roteiro(&resto).map_err(|e| format!("linha {}: rajada: {e}", i + 1))?;
+                let Some(passo) = dentro.pop().filter(|_| dentro.is_empty()) else {
+                    return Err(format!("linha {}: rajada precisa de um passo", i + 1));
+                };
+                Passo::Rajada {
+                    vezes,
+                    intervalo,
+                    passo: Box::new(passo),
+                }
+            }
             "fim" => Passo::Fim,
             outro => return Err(format!("linha {}: passo desconhecido: '{outro}'", i + 1)),
         };
@@ -411,6 +435,29 @@ mod testes {
         assert!(!cofre.arquivo.exists());
     }
 
+    /// A rajada é o passo do fim da linha, N vezes com o intervalo.
+    #[test]
+    fn a_rajada_repete_o_passo_do_fim_da_linha() {
+        let passos =
+            ler_roteiro("rajada 200 25 tecla right\nrajada 3 16 revelacao varrer 0").unwrap();
+        assert_eq!(
+            passos,
+            vec![
+                Passo::Rajada {
+                    vezes: 200,
+                    intervalo: Duration::from_millis(25),
+                    passo: Box::new(Passo::Tecla("right".into())),
+                },
+                Passo::Rajada {
+                    vezes: 3,
+                    intervalo: Duration::from_millis(16),
+                    passo: Box::new(Passo::Revelacao("varrer 0".into())),
+                },
+            ]
+        );
+        assert!(ler_roteiro("rajada 2 10").is_err(), "sem passo é erro");
+    }
+
     #[test]
     fn o_roteiro_le_cada_passo_e_ignora_comentario() {
         let passos = ler_roteiro(
@@ -453,5 +500,112 @@ mod testes {
         assert!(erro.contains("linha 2"), "{erro}");
         assert!(ler_roteiro("foto ../fora").is_err());
         assert!(ler_roteiro("esperar muito").is_err());
+    }
+}
+
+/// 🐕 **O vigia de travamento** (`VLB_VIGIA=1`) — mede quanto tempo a thread
+/// da interface fica sem responder (dono, 2026-09-22: *"a aplicação parou de
+/// responder durante o uso, então precisamos simular uma carga mais intensa"*).
+///
+/// A thread da interface bate a cada 16 ms ([`bater`]); uma thread à parte olha
+/// a cada 10 ms e, quando a batida some por mais de [`LIMIAR`], anota a trava —
+/// a duração e o passo do roteiro em que ela aconteceu. [`relatar`] imprime o
+/// resumo. Não custa nada com a variável desligada.
+pub mod vigia {
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+
+    /// Acima disto, a interface "travou" — o operador já sente.
+    pub const LIMIAR: Duration = Duration::from_millis(150);
+
+    static LIGADO: AtomicBool = AtomicBool::new(false);
+    static BATIDA: AtomicU64 = AtomicU64::new(0);
+    static PASSO: Mutex<String> = Mutex::new(String::new());
+    static TRAVAS: Mutex<Vec<(u64, String)>> = Mutex::new(Vec::new());
+    static COMECO: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+
+    fn agora_ms() -> u64 {
+        COMECO.get_or_init(Instant::now).elapsed().as_millis() as u64
+    }
+
+    pub fn ligado() -> bool {
+        LIGADO.load(Ordering::Relaxed)
+    }
+
+    /// Liga, se `VLB_VIGIA` estiver definida. Chamar uma vez.
+    pub fn ligar() {
+        if std::env::var_os("VLB_VIGIA").is_none() || LIGADO.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        BATIDA.store(agora_ms(), Ordering::SeqCst);
+        std::thread::Builder::new()
+            .name("vigia".into())
+            .spawn(|| {
+                let mut travada_desde: Option<u64> = None;
+                loop {
+                    std::thread::sleep(Duration::from_millis(10));
+                    let agora = agora_ms();
+                    let ultima = BATIDA.load(Ordering::SeqCst);
+                    let parada = agora.saturating_sub(ultima);
+                    match travada_desde {
+                        None if parada > LIMIAR.as_millis() as u64 => travada_desde = Some(ultima),
+                        Some(desde) if parada < 40 => {
+                            let durou = ultima.saturating_sub(desde);
+                            let passo = PASSO.lock().map(|p| p.clone()).unwrap_or_default();
+                            eprintln!("[vigia] TRAVOU {durou} ms (em {desde} ms) — passo: {passo}");
+                            if let Ok(mut t) = TRAVAS.lock() {
+                                t.push((durou, passo));
+                            }
+                            travada_desde = None;
+                        }
+                        _ => {}
+                    }
+                }
+            })
+            .expect("abrir a thread do vigia");
+    }
+
+    /// A batida da thread da interface.
+    pub fn bater() {
+        BATIDA.store(agora_ms(), Ordering::SeqCst);
+    }
+
+    /// O passo do roteiro que está rodando — para dizer onde travou.
+    pub fn passo(nome: &str) {
+        if let Ok(mut p) = PASSO.lock() {
+            *p = nome.to_string();
+        }
+    }
+
+    /// Um trecho que passou do orçamento de um quadro, com nome.
+    pub fn cronometrar(nome: &str, inicio: Instant) {
+        if !ligado() {
+            return;
+        }
+        let gasto = inicio.elapsed();
+        if gasto > Duration::from_millis(16) {
+            eprintln!("[vigia] lento: {nome} levou {} ms", gasto.as_millis());
+        }
+    }
+
+    /// O resumo: quantas travas, a pior, o total e as dez maiores.
+    pub fn relatar() {
+        if !ligado() {
+            return;
+        }
+        let mut t = TRAVAS.lock().map(|t| t.clone()).unwrap_or_default();
+        t.sort_by_key(|(ms, _)| std::cmp::Reverse(*ms));
+        let total: u64 = t.iter().map(|(ms, _)| ms).sum();
+        eprintln!(
+            "[vigia] RESUMO: {} travas acima de {} ms, a pior {} ms, {} ms parado no total",
+            t.len(),
+            LIMIAR.as_millis(),
+            t.first().map_or(0, |(ms, _)| *ms),
+            total
+        );
+        for (ms, passo) in t.iter().take(10) {
+            eprintln!("[vigia]   {ms:>6} ms — {passo}");
+        }
     }
 }

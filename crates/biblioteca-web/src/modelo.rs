@@ -34,6 +34,11 @@ pub struct FotoJson {
     /// ela sobe (ver `emprestimo`). Ausente = nenhuma herança por nome.
     #[serde(default)]
     pub arquivo: String,
+    /// A prévia grande (1400 px) — o que a grade desenha quando o tile passa
+    /// do tamanho da miniatura (a "uma por linha" do zoom). Ausente = a grade
+    /// fica na miniatura.
+    #[serde(default)]
+    pub previa: String,
 }
 
 impl FotoJson {

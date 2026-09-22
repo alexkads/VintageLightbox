@@ -25,7 +25,7 @@ use std::collections::HashMap;
 
 use biblioteca_core::acervo::{Acervo, Estado, Filtro};
 use biblioteca_core::grade::{
-    zoom_que_cabe, Direcao, Layout, Opcoes, Retangulo, ZOOM_MAX, ZOOM_MIN, ZOOM_PADRAO,
+    zoom_que_cabe, Direcao, Layout, Opcoes, Retangulo, ZOOM_MIN, ZOOM_PADRAO,
 };
 use biblioteca_core::miniaturas::{Cache, Desfecho, Politica};
 use biblioteca_core::selecao::{Modificadores, Selecao};
@@ -103,6 +103,14 @@ impl Arrasto {
 /// o mesmo tempo do desktop (`sessoes::detalhe`).
 pub const DURACAO_DA_TROCA: f64 = 0.28;
 
+/// O tamanho em que a miniatura do servidor (640 px) ainda é nítida na tela,
+/// em pixels de dispositivo. Acima disso, a grade pede a prévia.
+const LADO_DA_MINIATURA_NA_TELA: f32 = 600.0;
+
+/// O maior zoom que a grade guarda — mais largo que qualquer monitor. O que
+/// vale na tela é o `zoom_maximo` da largura de agora.
+const TETO_DO_ZOOM: f32 = 8000.0;
+
 pub struct Grade {
     pub ctx: egui::Context,
     pub acervo: Acervo,
@@ -114,6 +122,8 @@ pub struct Grade {
     pub miniaturas: HashMap<String, String>,
     /// O nome do arquivo por id — a ponte entre a local e a do servidor.
     pub arquivos: HashMap<String, String>,
+    /// A URL da prévia grande por id — ver [`Grade::precisa_da_previa`].
+    pub previas: HashMap<String, String>,
     /// A imagem de antes, emprestada ao tile enquanto a dele não chega.
     ///
     /// 🚨 **É o que impede o tile vazio quando a foto sobe** (dono,
@@ -136,6 +146,9 @@ pub struct Grade {
     /// O deslocamento da página: o topo da janela visível, em px de conteúdo.
     pub deslocamento: f32,
     pub altura_visivel: f32,
+    /// A altura da **área** de rolagem (não a do canvas) — ver
+    /// [`Grade::definir_area`]. `0` enquanto o React não disse.
+    pub altura_da_area: f32,
     pub largura: f32,
     pub dpr: f32,
     pub backend: String,
@@ -154,6 +167,7 @@ impl Grade {
             caixa: Caixa::default(),
             miniaturas: HashMap::new(),
             arquivos: HashMap::new(),
+            previas: HashMap::new(),
             emprestadas: HashMap::new(),
             trocas: HashMap::new(),
             cores: Cores::do_tema(escuro),
@@ -164,6 +178,7 @@ impl Grade {
             intervalo: (0, 0),
             deslocamento: 0.0,
             altura_visivel: 0.0,
+            altura_da_area: 0.0,
             largura: 0.0,
             dpr: 1.0,
             backend: backend.to_string(),
@@ -189,9 +204,13 @@ impl Grade {
         let mut fotos = Vec::with_capacity(lista.len());
         let mut miniaturas = HashMap::with_capacity(lista.len());
         let mut arquivos = HashMap::with_capacity(lista.len());
+        let mut previas = HashMap::new();
         for f in &lista {
             fotos.push(f.para_core()?);
             miniaturas.insert(f.id.clone(), f.miniatura.clone());
+            if !f.previa.is_empty() {
+                previas.insert(f.id.clone(), f.previa.clone());
+            }
             if !f.arquivo.is_empty() {
                 arquivos.insert(f.id.clone(), f.arquivo.clone());
             }
@@ -199,6 +218,7 @@ impl Grade {
         self.acervo.definir(fotos);
         let antes = std::mem::replace(&mut self.miniaturas, miniaturas);
         let arquivos_antes = std::mem::replace(&mut self.arquivos, arquivos);
+        self.previas = previas;
         self.emprestar_as_de_antes(&antes, &arquivos_antes);
 
         self.selecao.limpar_tudo();
@@ -282,9 +302,17 @@ impl Grade {
         Ok(mudou::SELECAO | mudou::CONTAGENS | mudou::CURSOR | self.recalcular())
     }
 
+    /// O topo do controle de zoom **nesta** largura — uma foto por linha.
+    pub fn zoom_maximo(&self) -> f32 {
+        biblioteca_core::grade::zoom_maximo(self.largura)
+    }
+
     pub fn definir_zoom(&mut self, zoom: f32) -> u32 {
         let z = if zoom.is_finite() {
-            zoom.clamp(ZOOM_MIN, ZOOM_MAX).round()
+            // 🔄 Até a largura da grade, e não mais até [`ZOOM_MAX`]: o topo do
+            // controle é "uma por linha" (`zoom_maximo`). O teto aqui é só
+            // sanidade; quem prende à largura de agora é o `Layout`.
+            zoom.clamp(ZOOM_MIN, TETO_DO_ZOOM).round()
         } else {
             ZOOM_PADRAO
         };
@@ -292,7 +320,15 @@ impl Grade {
             return 0;
         }
         self.zoom = z;
-        self.recalcular()
+        let bits = self.recalcular();
+        // Chegou à "uma por linha": a foto em foco vai para o meio da área.
+        if self.layout.colunas == 1 {
+            if let Some(foco) = self.selecao.foco() {
+                self.rolar_para = Some(foco);
+                return bits | mudou::ROLAR;
+            }
+        }
+        bits
     }
 
     /// O maior zoom em que **todas** as fotos do recorte cabem em
@@ -356,12 +392,26 @@ impl Grade {
     }
 
     fn recalcular(&mut self) -> u32 {
-        let novo = Layout::calcular(
-            self.largura,
-            self.zoom,
-            self.acervo.total_visivel(),
-            Opcoes::default(),
-        );
+        let total = self.acervo.total_visivel();
+        let mut novo = Layout::calcular(self.largura, self.zoom, total, Opcoes::default());
+        // 🔄 **O tile não passa da altura da área** (dono, 2026-09-22: *"a foto
+        // precisa se auto centralizar no scroll vertical"*). Na "uma por linha"
+        // do zoom, 3/4 da largura passava da tela: a foto ficava cortada e não
+        // havia rolagem que a mostrasse inteira. A razão encolhe só o que falta.
+        let area = self.altura_da_area;
+        let ocupa = novo.altura_imagem + novo.altura_rodape + novo.espaco;
+        if area > 0.0 && ocupa > area && novo.lado > 0.0 {
+            let razao = ((area - novo.altura_rodape - novo.espaco) / novo.lado).max(0.2);
+            novo = Layout::calcular(
+                self.largura,
+                self.zoom,
+                total,
+                Opcoes {
+                    razao,
+                    ..Opcoes::default()
+                },
+            );
+        }
         // 🚨 **Layout que muda implica visíveis que mudam.** O
         // `atualizar_visiveis` compara só o *intervalo* `(início, fim)`; com o
         // zoom mudando e as mesmas fotos à vista, ele continua igual — e o
@@ -650,11 +700,35 @@ impl Grade {
         self.layout.indice_em(cx, cy)
     }
 
+    /// O tile passou do tamanho da miniatura na tela? Aí a grade pede a prévia
+    /// grande — sem isso, a "uma por linha" do zoom mostraria uma miniatura de
+    /// 640 px esticada até a largura da janela (dono, 2026-09-21: *"existem
+    /// momentos que o operador precisa ver a foto maior"*).
+    pub fn precisa_da_previa(&self) -> bool {
+        self.layout.lado * self.dpr > LADO_DA_MINIATURA_NA_TELA
+    }
+
+    /// A URL que este tile quer agora: a prévia no zoom grande (quando há),
+    /// senão a miniatura.
     pub fn url_da(&self, n: usize) -> Option<String> {
-        self.acervo
-            .visivel(n)
-            .and_then(|f| self.miniaturas.get(&f.id))
-            .cloned()
+        let foto = self.acervo.visivel(n)?;
+        if self.precisa_da_previa() {
+            if let Some(previa) = self.previas.get(&foto.id) {
+                return Some(previa.clone());
+            }
+        }
+        self.miniaturas.get(&foto.id).cloned()
+    }
+
+    /// A textura que o tile desenha: a prévia, se o zoom a pede e ela já
+    /// chegou; senão a miniatura — que continua na tela enquanto a prévia vem.
+    pub fn textura_de(&self, id: &str) -> Option<&TextureHandle> {
+        if self.precisa_da_previa() {
+            if let Some(tex) = self.previas.get(id).and_then(|u| self.texturas.get(u)) {
+                return Some(tex);
+            }
+        }
+        self.miniaturas.get(id).and_then(|u| self.texturas.get(u))
     }
 
     pub fn ids_selecionados(&self) -> Vec<String> {
@@ -769,12 +843,39 @@ impl Grade {
         serde_json::to_string(&lista).unwrap_or_else(|_| "[]".into())
     }
 
+    /// A altura da área de rolagem, que o React mede.
+    ///
+    /// 🚨 **A da área, e não a do canvas** — pelo mesmo motivo do
+    /// [`Self::zoom_para_caber`]: o canvas tem a altura do conteúdo, e o
+    /// conteúdo é o que este número limita. Perguntar à altura do canvas faria
+    /// a grade encolher um pouco a cada quadro.
+    pub fn definir_area(&mut self, altura: f32) -> u32 {
+        let altura = if altura.is_finite() {
+            altura.max(0.0)
+        } else {
+            0.0
+        };
+        if (altura - self.altura_da_area).abs() < 0.5 {
+            return 0;
+        }
+        self.altura_da_area = altura;
+        self.recalcular()
+    }
+
     /// `[y, h]` (em conteúdo) do tile que o teclado alcançou, uma vez.
+    ///
+    /// 🔄 **Uma por linha: o alvo é a área inteira, centrada no tile** — quem o
+    /// traz à vista o põe no meio, e não encostado na borda (dono, 2026-09-22).
     pub fn alvo_de_rolagem(&mut self) -> Vec<f32> {
         match self.rolar_para.take() {
             Some(n) if n < self.layout.total => {
                 let t = self.layout.posicao_do(n);
-                vec![t.y, t.h]
+                let area = self.altura_da_area;
+                if self.layout.colunas == 1 && area > t.h {
+                    vec![(t.y + t.h / 2.0 - area / 2.0).max(0.0), area]
+                } else {
+                    vec![t.y, t.h]
+                }
             }
             _ => Vec::new(),
         }
@@ -794,7 +895,13 @@ impl Grade {
     }
 
     fn receber_miniatura(&mut self, url: String, bytes: Result<Vec<u8>, String>) {
-        let textura = bytes.ok().and_then(|b| decodificar(&b));
+        // A prévia fica no tamanho dela; a miniatura, no da textura da grade.
+        let lado = if self.previas.values().any(|p| p == &url) {
+            LADO_DA_PREVIA
+        } else {
+            LADO_DA_MINIATURA
+        };
+        let textura = bytes.ok().and_then(|b| decodificar(&b, lado));
         let desfecho = match textura {
             Some((largura, altura, rgba)) => {
                 let imagem = egui::ColorImage::from_rgba_unmultiplied([largura, altura], &rgba);
@@ -855,13 +962,15 @@ fn dentro(x: f32, y: f32, r: Retangulo) -> bool {
 }
 
 /// JPEG/PNG → RGBA, reduzido ao lado da textura. Milissegundos por miniatura.
-fn decodificar(bytes: &[u8]) -> Option<(usize, usize, Vec<u8>)> {
-    const LADO: u32 = 512;
+const LADO_DA_MINIATURA: u32 = 512;
+const LADO_DA_PREVIA: u32 = 1600;
+
+fn decodificar(bytes: &[u8], lado: u32) -> Option<(usize, usize, Vec<u8>)> {
     // De pé: a miniatura local (`blob:`) pode ser o arquivo da câmera, com a
     // etiqueta de girar — a mesma regra do desktop (`foto_codec::orientacao`).
     let imagem = foto_codec::orientacao::decodificar_de_pe(bytes).ok()?;
-    let imagem = if imagem.width() > LADO || imagem.height() > LADO {
-        imagem.thumbnail(LADO, LADO)
+    let imagem = if imagem.width() > lado || imagem.height() > lado {
+        imagem.thumbnail(lado, lado)
     } else {
         imagem
     };

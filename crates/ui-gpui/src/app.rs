@@ -2487,50 +2487,79 @@ impl Aplicativo {
     ///
     /// Chega pelo canal dos downloads (`resolucao_cheia`), e não pelo das
     /// sincronias: baixar não é enviar.
+    /// A cópia de trabalho de uma foto do site chegou: decodificar e guardar
+    /// **em segundo plano**, e só a entrega fica na thread da interface.
+    ///
+    /// 🚨 **Decodificar e gravar aqui travava a tela** (dono, 2026-09-22: *"com
+    /// a tela do cliente aberta, resolvi mexer a exposição no modo revelação"* —
+    /// e o GNOME disse que o app não respondia). Cada cópia de 2048 px é um JPEG
+    /// para decodificar e um `save_preview` que recodifica e escreve no SQLite:
+    /// ~300 ms por foto, medidos pelo vigia, em série, a cada troca de foto
+    /// durante o arrasto. Numa máquina mais lenta isso passa do limite em que o
+    /// sistema pergunta se o app morreu.
     pub(super) fn receber_a_copia_de_trabalho(
         &mut self,
         foto_id: String,
-        bytes: &[u8],
+        bytes: Vec<u8>,
         cx: &mut Context<Self>,
     ) {
-        // 🚨 Decodificar pode falhar — resposta truncada, formato
-        // que o `image` não lê. Falhar aqui deixa a foto como
-        // estava (vazia), que é o mesmo desfecho de não ter pedido:
-        // ruim, e honesto.
-        match image::load_from_memory(bytes) {
-            Ok(imagem) => {
-                // 🔑 **Vai para o cache antes de ir para a tela.** É
-                // o que faz a seta de volta não pagar outro
-                // download: o L1 responde na hora e o L2 (SQLite)
-                // atravessa o fechar do app. A chave é a do bruto,
-                // separada da miniatura da galeria — ver
-                // `persistencia::chave_do_trabalho`.
-                //
-                // ⚠️ Falha de gravação não impede de mostrar: o
-                // cache é acelerador, e a foto na mão é o que o
-                // operador pediu.
-                let _ = self
-                    .previews
-                    .save_preview(&persistencia::chave_do_trabalho(&foto_id), &imagem);
-                // 🖥️ A segunda tela pode estar esperando esta cópia.
-                let para_o_cliente = self.cliente_pedindo.as_deref() == Some(foto_id.as_str());
-                let aproveitou = self
-                    .revelacao
-                    .update(cx, |tela, cx| tela.receber_pixels(&foto_id, imagem, cx));
-                if !aproveitou {
-                    // A seta andou enquanto o download vinha. Não é
-                    // erro: é o motivo de o id vir junto.
-                }
-                if para_o_cliente {
-                    self.cliente_pedindo = None;
-                    self.atualizar_o_cliente(false, cx);
-                }
+        let previews = self.previews.clone();
+        let chave = persistencia::chave_do_trabalho(&foto_id);
+        let pronta = cx.background_executor().spawn(async move {
+            let imagem = image::load_from_memory(&bytes).map_err(|e| e.to_string());
+            // 🔑 **Vai para o cache antes de ir para a tela.** É o que faz a
+            // seta de volta não pagar outro download: o L1 responde na hora e
+            // o L2 (SQLite) atravessa o fechar do app. A chave é a do bruto,
+            // separada da miniatura da galeria — ver
+            // `persistencia::chave_do_trabalho`. ⚠️ Falha de gravação não
+            // impede de mostrar: o cache é acelerador.
+            if let Ok(imagem) = &imagem {
+                let _ = previews.save_preview(&chave, imagem);
             }
+            imagem
+        });
+        cx.spawn(async move |raiz, cx| {
+            let imagem = pronta.await;
+            let _ = raiz.update(cx, |raiz, cx| raiz.entregar_a_copia(foto_id, imagem, cx));
+        })
+        .detach();
+    }
+
+    /// A cópia decodificada e guardada: à Revelação e à tela do cliente.
+    fn entregar_a_copia(
+        &mut self,
+        foto_id: String,
+        imagem: Result<image::DynamicImage, String>,
+        cx: &mut Context<Self>,
+    ) {
+        // 🚨 Decodificar pode falhar — resposta truncada, formato que o
+        // `image` não lê. Falhar aqui deixa a foto como estava (vazia), que é o
+        // mesmo desfecho de não ter pedido: ruim, e honesto.
+        let imagem = match imagem {
+            Ok(imagem) => imagem,
             Err(erro) => {
                 self.biblioteca.update(cx, |tela, cx| {
                     tela.avisar(format!("a foto do site não abriu: {erro}"), cx)
                 });
+                return;
             }
+        };
+        // 🖥️ A segunda tela pode estar esperando esta cópia.
+        let para_o_cliente = self.cliente_pedindo.as_deref() == Some(foto_id.as_str());
+        if crate::depuracao::vigia::ligado() {
+            eprintln!(
+                "[cliente] chegou a cópia de {foto_id} (a tela do cliente espera {:?})",
+                self.cliente_pedindo
+            );
+        }
+        // A seta pode ter andado enquanto o download vinha: não é erro, é o
+        // motivo de o id vir junto.
+        let _aproveitou = self
+            .revelacao
+            .update(cx, |tela, cx| tela.receber_pixels(&foto_id, imagem, cx));
+        if para_o_cliente {
+            self.cliente_pedindo = None;
+            self.atualizar_o_cliente(false, cx);
         }
     }
 
@@ -3339,7 +3368,12 @@ impl Aplicativo {
         let Some(janela) = self.cliente else {
             return;
         };
+        let _inicio = std::time::Instant::now();
+        let _cronometro = CronometroAoSair("atualizar_o_cliente", _inicio);
         let Some((foto, posicao)) = self.foto_para_o_cliente(cx) else {
+            if crate::depuracao::vigia::ligado() {
+                eprintln!("[cliente] sem foto para mostrar (tela {:?})", self.tela);
+            }
             return;
         };
         let na_revelacao = self.tela == Tela::Revelacao
@@ -3353,6 +3387,15 @@ impl Aplicativo {
             )
         };
         let chave = (foto.id.clone(), ajustes, corte.clone());
+        if crate::depuracao::vigia::ligado() {
+            eprintln!(
+                "[cliente] entrada: {} exp={} igual={} tela={:?} na_revelacao={na_revelacao}",
+                foto.id,
+                ajustes.exposure,
+                self.no_cliente.as_ref() == Some(&chave),
+                self.tela
+            );
+        }
         if !forcar && self.no_cliente.as_ref() == Some(&chave) {
             return;
         }
@@ -3360,6 +3403,9 @@ impl Aplicativo {
             return;
         };
         self.no_cliente = Some(chave);
+        if crate::depuracao::vigia::ligado() {
+            eprintln!("[cliente] revelar {}", foto.id);
+        }
         let pedido = ParaRevelar {
             foto,
             posicao,
@@ -3371,9 +3417,13 @@ impl Aplicativo {
         };
         // 🚨 O `update` falha quando a janela **já foi fechada** — pelo `Esc` de
         // dentro dela, que a raiz não tem como saber que aconteceu.
-        let viva = janela
-            .update(cx, |cliente, _window, cx| cliente.revelar(pedido, cx))
-            .is_ok();
+        let resposta = janela.update(cx, |cliente, _window, cx| cliente.revelar(pedido, cx));
+        if let Err(erro) = &resposta {
+            if crate::depuracao::vigia::ligado() {
+                eprintln!("[cliente] ESQUECIDA: o update da janela falhou — {erro:#}");
+            }
+        }
+        let viva = resposta.is_ok();
         if !viva {
             self.cliente = None;
             self.detalhe
@@ -3399,6 +3449,7 @@ impl Aplicativo {
                 return Some((pixels.clone(), *largura, *altura));
             }
         }
+        let inicio = std::time::Instant::now();
         let do_site = persistencia::id_no_site(&foto.id).is_some();
         let imagem = if do_site {
             self.previews
@@ -3407,6 +3458,12 @@ impl Aplicativo {
             self.previews.get_preview(&foto.id)
         };
         let Some(imagem) = imagem else {
+            if crate::depuracao::vigia::ligado() {
+                eprintln!(
+                    "[cliente] sem a cópia de {} — pedindo {:?}",
+                    foto.id, self.cliente_pedindo
+                );
+            }
             if do_site && self.cliente_pedindo.as_deref() != Some(foto.id.as_str()) {
                 if let (Some(sessao), Some(no_site)) =
                     (self.sessao().cloned(), foto.pos_venda_foto_id.clone())
@@ -3420,6 +3477,7 @@ impl Aplicativo {
         let rgba = imagem.to_rgba8();
         let (largura, altura) = (rgba.width(), rgba.height());
         let pixels = Arc::new(rgba.into_raw());
+        crate::depuracao::vigia::cronometrar("bruto_para_o_cliente (ler + decodificar)", inicio);
         self.bruto_do_cliente = Some((foto.id.clone(), pixels.clone(), largura, altura));
         Some((pixels, largura, altura))
     }
@@ -5106,6 +5164,15 @@ fn arquivo_livre(pasta: &std::path::Path, nome: &str) -> std::path::PathBuf {
         .expect("sempre há um número livre")
 }
 
+/// Cronometra um trecho até o fim do escopo — ver `depuracao::vigia`.
+struct CronometroAoSair(&'static str, std::time::Instant);
+
+impl Drop for CronometroAoSair {
+    fn drop(&mut self) {
+        crate::depuracao::vigia::cronometrar(self.0, self.1);
+    }
+}
+
 #[cfg(test)]
 mod testes {
     #[test]
@@ -5327,8 +5394,12 @@ mod testes {
             .expect("a janela deve estar aberta");
 
         janela
+            .update(cx, |app, _window, cx| app.colher_as_baixas(cx))
+            .expect("a janela deve estar aberta");
+        // Decodificada e guardada em segundo plano, antes de ir ao palco.
+        cx.run_until_parked();
+        janela
             .update(cx, |app, _window, cx| {
-                app.colher_as_baixas(cx);
                 assert!(
                     app.revelacao.read(cx).tem_pixels(),
                     "a cópia de trabalho chegou do storage"
@@ -8591,6 +8662,13 @@ mod testes {
                 app.colher_as_baixas(cx);
                 assert_eq!(app.baixas_pendentes(), 0);
                 assert_eq!(app.sincronias_pendentes(), 0, "e não dá a volta");
+            })
+            .expect("a janela deve estar aberta");
+        // A cópia é decodificada e guardada em segundo plano, e só então vai
+        // ao palco — decodificar na thread da interface travava a tela.
+        cx.run_until_parked();
+        janela
+            .update(cx, |app, _window, cx| {
                 assert!(
                     app.revelacao.read(cx).tem_pixels(),
                     "a cópia chegou ao palco"

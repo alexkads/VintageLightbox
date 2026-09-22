@@ -45,7 +45,7 @@ pub fn pintar(ctx: &egui::Context, g: &Grade) {
 
         p.rect_filled(imagem, Rounding::same(RAIO), cores.fundo_do_tile);
 
-        let propria = g.miniaturas.get(&foto.id).and_then(|u| g.texturas.get(u));
+        let propria = g.textura_de(&foto.id);
         match (propria, g.trocas.get(&foto.id)) {
             // 🔄 A troca suave: a de antes por baixo, a nova surgindo por cima.
             (Some(nova), Some((velha, desde))) => {
