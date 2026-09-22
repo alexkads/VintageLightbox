@@ -552,9 +552,6 @@ pub struct Aplicativo {
     /// As predefinições que este app conhece — sistema e as do banco local.
     /// É delas que sai a receita padrão da sessão aberta.
     presets_conhecidos: Vec<Preset>,
-    /// O aviso de "há trabalho em segundo plano" está na tela? Guarda a frase
-    /// do que está pendente — ver [`Aplicativo::avisar_fechamento_pendente`].
-    fechar_avisando: Option<SharedString>,
     /// O que este app **mandou subir sozinho** (C20), por id do catálogo: a
     /// curadoria que a foto tinha quando entrou na esteira, `(nota, rejeitada)`.
     ///
@@ -1066,7 +1063,6 @@ impl Aplicativo {
             proximo_toast: 0,
             _relogios_dos_toasts: Vec::new(),
             presets_conhecidos: presets_para_a_receita,
-            fechar_avisando: None,
             subindo_sozinhas: std::collections::HashMap::new(),
             recem_subidas: std::collections::HashSet::new(),
             rejeitadas_agora: std::collections::HashSet::new(),
@@ -4437,115 +4433,6 @@ impl Aplicativo {
     /// frase, quem lê "apagar" imagina perda de arquivo e não clica; sem a
     /// terceira, clica achando que reimportar desfaz — e reimportar devolve o
     /// arquivo, não os 46 ajustes.
-    /// 🚪 **Fechar com trabalho em segundo plano avisa antes** — pedido do dono
-    /// (2026-09-20): *"ao fechar a aplicação ui-gpui avise que tem processo
-    /// pendente em segundo plano"*.
-    ///
-    /// 🚨 **O G9 nunca perdeu envio — mas fechava calado.** A janela sumia, a
-    /// bandeja assumia a fila e o app terminava sozinho ao esvaziar; quem não
-    /// conhecia o ícone concluía que tinha fechado o app no meio do envio, que é
-    /// o medo que o G9 existe para tirar. O aviso conta o que está pendente e
-    /// deixa a decisão com quem fechou.
-    pub(crate) fn avisar_fechamento_pendente(
-        &mut self,
-        pendente: SharedString,
-        cx: &mut Context<Self>,
-    ) {
-        self.fechar_avisando = Some(pendente);
-        cx.notify();
-    }
-
-    /// "Ficar no app": o aviso sai e nada fecha.
-    pub(crate) fn desistir_de_fechar(&mut self, cx: &mut Context<Self>) {
-        self.fechar_avisando = None;
-        crate::segundo_plano::desistiu_de_fechar(cx);
-        cx.notify();
-    }
-
-    /// "Continuar em segundo plano": a janela vai para a bandeja, e o app
-    /// termina sozinho quando a fila esvaziar (G9).
-    pub(crate) fn fechar_em_segundo_plano(&mut self, cx: &mut Context<Self>) {
-        self.fechar_avisando = None;
-        // A segunda tela não fica sozinha no monitor do cliente — e é aqui que
-        // ela se fecha, porque lá fora a raiz já está em uso (ver
-        // `segundo_plano::fechar_mesmo`).
-        self.fechar_tela_do_cliente(cx);
-        cx.notify();
-        crate::segundo_plano::fechar_mesmo(cx);
-    }
-
-    /// 🧪 A frase do aviso de fechamento que está na tela.
-    #[cfg(test)]
-    pub(crate) fn aviso_de_fechamento_para_teste(&self) -> Option<String> {
-        self.fechar_avisando.as_ref().map(ToString::to_string)
-    }
-
-    fn aviso_de_fechar_com_pendencia(
-        &self,
-        pendente: SharedString,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        div()
-            .absolute()
-            .inset_0()
-            .flex()
-            .items_center()
-            .justify_center()
-            .bg(tema::cores::veu())
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(10.))
-                    .p(px(16.))
-                    .max_w(px(460.))
-                    .bg(cx.theme().background)
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    .rounded(px(6.))
-                    .child(div().text_sm().child("Há trabalho em segundo plano"))
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(pendente),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(
-                                "Fechar agora não cancela nada: a janela vai para a área de \
-                                 notificação e o envio continua. O app se fecha sozinho quando \
-                                 a fila esvaziar.",
-                            ),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .justify_end()
-                            .gap(px(8.))
-                            .child(
-                                Button::new("fechar-ficar")
-                                    .label("Ficar no app")
-                                    .xsmall()
-                                    .on_click(cx.listener(|este, _ev, _window, cx| {
-                                        este.desistir_de_fechar(cx)
-                                    })),
-                            )
-                            .child(
-                                Button::new("fechar-em-segundo-plano")
-                                    .label("Continuar em segundo plano")
-                                    .xsmall()
-                                    .primary()
-                                    .on_click(cx.listener(|este, _ev, _window, cx| {
-                                        este.fechar_em_segundo_plano(cx)
-                                    })),
-                            ),
-                    ),
-            )
-    }
-
     fn aviso_de_apagar(&self, quantas: usize, cx: &mut Context<Self>) -> impl IntoElement {
         let titulo = if quantas == 1 {
             "Tirar 1 foto do catálogo?".to_string()
@@ -4981,11 +4868,6 @@ impl Render for Aplicativo {
                 self.biblioteca.read(cx).confirmando_apagar(),
                 |raiz, quantas| raiz.child(self.aviso_de_apagar(quantas, cx)),
             )
-            // 🚪 O aviso de fechar com trabalho em segundo plano — por cima de
-            // tudo, porque é uma pergunta sobre a janela inteira.
-            .when_some(self.fechar_avisando.clone(), |raiz, pendente| {
-                raiz.child(self.aviso_de_fechar_com_pendencia(pendente, cx))
-            })
             .when(false, |raiz| raiz)
             .when(self.configurando, |raiz| {
                 raiz.child(self.modal_de_configuracoes(cx))

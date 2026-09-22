@@ -87,15 +87,23 @@ fn minimizar_vai_para_a_bandeja_e_voltar_tira(cx: &mut TestAppContext) {
     );
     assert!(plataforma::gestos().contains(&"no dock"));
 
-    // Sem envio na fila, fechar fecha.
+    // 🔄 Sem envio na fila, fechar **também** vai para a bandeja (dono,
+    // 2026-09-21): o app não termina ao fechar a janela.
     let mut visual = VisualTestContext::from_window(e.raiz.into(), cx);
-    assert!(visual.simulate_close(), "nada pendente: a janela fecha");
+    assert!(
+        !visual.simulate_close(),
+        "a janela não fecha: vai para a bandeja"
+    );
+    voltas(cx);
+    assert_eq!(bandeja(cx), (true, false), "na bandeja, e o app segue");
 }
 
-/// 🎬 **G9: fechar com envio na fila só esconde**, fecha junto a tela do
-/// cliente, e o app termina sozinho quando o site responde.
+/// 🎬 **Fechar com envio na fila leva à bandeja, e o envio termina lá** —
+/// sem aviso, e sem o app sair quando a fila esvazia (dono, 2026-09-21:
+/// *"quero que o sistema fique na bandeja ao fechar, assim podemos continuar
+/// com os processos em segundo plano"*). Fecha junto a tela do cliente.
 #[gpui::test]
-fn fechar_com_envio_esconde_e_sai_quando_a_fila_esvazia(cx: &mut TestAppContext) {
+fn fechar_com_envio_vai_para_a_bandeja_e_o_envio_termina_la(cx: &mut TestAppContext) {
     let e = com_envio_na_fila(cx);
     e.app(cx, |app, _w, cx| {
         app.alternar_cliente(cx);
@@ -103,38 +111,8 @@ fn fechar_com_envio_esconde_e_sai_quando_a_fila_esvazia(cx: &mut TestAppContext)
     });
 
     let mut visual = VisualTestContext::from_window(e.raiz.into(), cx);
-    assert!(
-        !visual.simulate_close(),
-        "com envio na fila a janela não fecha"
-    );
+    assert!(!visual.simulate_close(), "a janela não fecha");
     voltas(cx);
-
-    // 🚪 **O primeiro fechamento avisa** (dono, 2026-09-20): a janela fica, e
-    // o aviso diz o que está pendente.
-    assert_eq!(
-        bandeja(cx),
-        (false, false),
-        "a janela não some enquanto o aviso está na tela"
-    );
-    e.app(cx, |app, _w, _cx| {
-        let aviso = app
-            .aviso_de_fechamento_para_teste()
-            .expect("o aviso tinha de estar na tela");
-        assert!(
-            aviso.contains("Subindo"),
-            "e diz o que está pendente: {aviso}"
-        );
-    });
-
-    // "Continuar em segundo plano": agora sim, a bandeja.
-    e.app(cx, |app, _w, cx| app.fechar_em_segundo_plano(cx));
-    voltas(cx);
-    e.app(cx, |app, _w, _cx| {
-        assert!(
-            app.aviso_de_fechamento_para_teste().is_none(),
-            "o aviso sai com a decisão"
-        );
-    });
     assert_eq!(bandeja(cx), (true, false), "foi para a bandeja, e não saiu");
     assert!(plataforma::gestos().contains(&"esconder"));
     e.app(cx, |app, _w, _cx| {
@@ -144,25 +122,25 @@ fn fechar_com_envio_esconde_e_sai_quando_a_fila_esvazia(cx: &mut TestAppContext)
         );
     });
 
-    // O site responde: a fila esvazia e o app termina.
+    // O site responde: a fila esvazia, e o app continua na bandeja.
     e.site.responder();
     voltas(cx);
     e.app(cx, |app, _w, _cx| assert_eq!(app.sincronias_pendentes(), 0));
     voltas(cx);
-    assert!(bandeja(cx).1, "a fila esvaziou: o app pediu para sair");
-    assert_eq!(e.site.reveladas().len(), 1, "e o envio chegou antes");
+    assert_eq!(
+        bandeja(cx),
+        (true, false),
+        "a fila esvaziou e o app segue na bandeja"
+    );
+    assert_eq!(e.site.reveladas().len(), 1, "e o envio chegou");
 }
 
-/// 🎬 **Abrir de novo antes de a fila esvaziar mantém o app aberto** — quem
-/// fechou está de volta.
+/// 🎬 **Abrir de novo traz a janela da bandeja**, com o envio ainda no ar.
 #[gpui::test]
-fn reabrir_antes_de_esvaziar_mantem_o_app(cx: &mut TestAppContext) {
+fn reabrir_traz_a_janela_da_bandeja(cx: &mut TestAppContext) {
     let e = com_envio_na_fila(cx);
     let mut visual = VisualTestContext::from_window(e.raiz.into(), cx);
     assert!(!visual.simulate_close());
-    voltas(cx);
-    // O aviso vem primeiro; o operador responde "continuar em segundo plano".
-    e.app(cx, |app, _w, cx| app.fechar_em_segundo_plano(cx));
     voltas(cx);
     assert_eq!(bandeja(cx), (true, false));
 
@@ -178,7 +156,7 @@ fn reabrir_antes_de_esvaziar_mantem_o_app(cx: &mut TestAppContext) {
     assert_eq!(
         bandeja(cx),
         (false, false),
-        "com a janela à vista, o app não sai"
+        "com a janela à vista, o app segue"
     );
 }
 
@@ -219,9 +197,10 @@ fn download_no_ar_nao_segura_a_janela(cx: &mut TestAppContext) {
     voltas(cx);
     assert_eq!(bandeja(cx), (false, false));
 
+    // Fechar vai para a bandeja em qualquer caso (dono, 2026-09-21) — o que
+    // este cenário prova é o retrato acima: download não conta como envio.
     let mut visual = VisualTestContext::from_window(e.raiz.into(), cx);
-    assert!(
-        visual.simulate_close(),
-        "só download na fila: a janela fecha"
-    );
+    assert!(!visual.simulate_close(), "a janela vai para a bandeja");
+    voltas(cx);
+    assert_eq!(bandeja(cx), (true, false));
 }
