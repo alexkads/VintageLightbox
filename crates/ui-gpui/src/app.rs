@@ -164,7 +164,9 @@ actions!(
         SelecionarTudo,
         LimparSelecao,
         // `Cmd/Ctrl+B`, o atalho do menu lateral do site.
-        AlternarMenuLateral
+        AlternarMenuLateral,
+        // `⌘⇧F` / `Ctrl+Shift+F`: tela cheia na tela do cliente.
+        TelaCheiaDoCliente
     ]
 );
 
@@ -306,6 +308,14 @@ pub fn init(cx: &mut gpui::App) {
         // O menu lateral recolhe com `Cmd/Ctrl+B`, como o `SidebarProvider`.
         gpui::KeyBinding::new("cmd-b", AlternarMenuLateral, Some(CONTEXTO)),
         gpui::KeyBinding::new("ctrl-b", AlternarMenuLateral, Some(CONTEXTO)),
+        // 🔑 **Daqui, e não só de dentro dela** (dono, 22/set/2026: o Mac dele
+        // não tem F1–F12). Quem aperta está na janela principal — a tela do
+        // cliente fica virada para o outro lado e quase nunca tem o foco.
+        gpui::KeyBinding::new(
+            crate::cliente::ATALHO_DA_TELA_CHEIA,
+            TelaCheiaDoCliente,
+            Some(CONTEXTO),
+        ),
     ]);
     atalhos_da_revelacao::ligar(cx);
 }
@@ -3252,6 +3262,21 @@ impl Aplicativo {
         self.cliente.is_some()
     }
 
+    /// Tela cheia na tela do cliente, a partir da janela principal.
+    ///
+    /// ⚠️ **Adiado**: esta janela está no meio do próprio `update`, e a do
+    /// cliente é outra — mexer nela depois do quadro não disputa nada.
+    pub fn alternar_tela_cheia_do_cliente(&mut self, cx: &mut Context<Self>) {
+        let Some(janela) = self.cliente else {
+            return;
+        };
+        cx.defer(move |cx| {
+            let _ = janela.update(cx, |cliente, window, cx| {
+                cliente.alternar_tela_cheia(window, cx)
+            });
+        });
+    }
+
     /// A foto que a segunda tela deve mostrar, conforme a tela da frente.
     fn foto_para_o_cliente(
         &self,
@@ -4801,6 +4826,9 @@ impl Render for Aplicativo {
                     |sessao, cx| sessao.limpar_selecao(cx),
                     |grade, cx| grade.limpar_selecao(cx),
                 )
+            }))
+            .on_action(cx.listener(|este, _: &TelaCheiaDoCliente, _w, cx| {
+                este.alternar_tela_cheia_do_cliente(cx)
             }))
             .on_action(cx.listener(|este, _: &AlternarMenuLateral, _w, cx| {
                 este.alternar_menu_lateral(cx);

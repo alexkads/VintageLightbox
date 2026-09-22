@@ -86,18 +86,42 @@ actions!(
 /// fecha coisas.
 const CONTEXTO: &str = "Cliente";
 
+/// O atalho da tela cheia: `⌘⇧F` no Mac, `Ctrl+Shift+F` no resto. Vale
+/// dentro da tela do cliente e na janela principal (`app::TelaCheiaDoCliente`).
+pub const ATALHO_DA_TELA_CHEIA: &str = "secondary-shift-f";
+
+/// O atalho como aparece nos botões — `⌘⇧F` no Mac, `Ctrl+Shift+F` no resto.
+pub fn tecla_da_tela_cheia() -> gpui_component::kbd::Kbd {
+    gpui_component::kbd::Kbd::new(
+        gpui::Keystroke::parse(ATALHO_DA_TELA_CHEIA).expect("o atalho é válido"),
+    )
+}
+
+/// O mesmo atalho, em texto.
+pub fn texto_da_tela_cheia() -> String {
+    gpui_component::kbd::Kbd::format(
+        &gpui::Keystroke::parse(ATALHO_DA_TELA_CHEIA).expect("o atalho é válido"),
+    )
+}
+
 pub fn init(cx: &mut gpui::App) {
     cx.bind_keys([
         gpui::KeyBinding::new("escape", FecharCliente, Some(CONTEXTO)),
         // `I` liga e desliga o rodapé com nome e nota, como no legado.
         gpui::KeyBinding::new("i", AlternarInfoDoCliente, Some(CONTEXTO)),
-        // 🔑 **`F` (ou `F11`) põe e tira a tela cheia, na própria janela** —
+        // 🔑 **`F` (ou `⌘⇧F`/`Ctrl+Shift+F`) põe e tira a tela cheia, na
+        // própria janela** —
         // o gesto do darktable (dono, 22/set/2026). Arrastar até o monitor do
         // cliente e apertar `F` é o caminho que funciona até no GNOME, onde o
         // app não escolhe monitor nenhum. `J` era a troca de modo antiga e
         // continua valendo, para não trair a mão de quem já a usava.
         gpui::KeyBinding::new("f", AlternarTelaCheiaDoCliente, Some(CONTEXTO)),
-        gpui::KeyBinding::new("f11", AlternarTelaCheiaDoCliente, Some(CONTEXTO)),
+        // Sem `F11`: o teclado do Mac do dono não tem F1–F12 (22/set/2026).
+        gpui::KeyBinding::new(
+            ATALHO_DA_TELA_CHEIA,
+            AlternarTelaCheiaDoCliente,
+            Some(CONTEXTO),
+        ),
         gpui::KeyBinding::new("j", AlternarTelaCheiaDoCliente, Some(CONTEXTO)),
     ]);
 }
@@ -872,9 +896,15 @@ impl Render for Cliente {
                         // que não se vê**: a tela no monitor errado. Em janela,
                         // arrasta-se até o certo e aperta-se `F` lá.
                         .child(SharedString::from(if window.is_fullscreen() {
-                            "Esc fecha • I mostra o nome • F sai da tela cheia"
+                            format!(
+                                "Esc fecha • I mostra o nome • F ou {} sai da tela cheia",
+                                texto_da_tela_cheia()
+                            )
                         } else {
-                            "Esc fecha • I mostra o nome • F tela cheia neste monitor"
+                            format!(
+                                "Esc fecha • I mostra o nome • F ou {} tela cheia neste monitor",
+                                texto_da_tela_cheia()
+                            )
                         })),
                 );
 
@@ -953,6 +983,18 @@ mod testes {
     /// máquina de quem está desenvolvendo — e "não faz nada" é indistinguível de
     /// defeito.
     /// 🔑 O monitor lembrado ganha da regra — desde que ainda esteja plugado.
+    /// 🔑 O atalho existe e é uma combinação — nunca uma tecla F (o Mac do
+    /// dono não as tem).
+    #[test]
+    fn o_atalho_da_tela_cheia_e_uma_combinacao() {
+        let tecla = gpui::Keystroke::parse(ATALHO_DA_TELA_CHEIA).expect("válido");
+
+        assert_eq!(tecla.key, "f");
+        assert!(tecla.modifiers.shift);
+        assert!(tecla.modifiers.platform || tecla.modifiers.control);
+        assert!(!texto_da_tela_cheia().is_empty());
+    }
+
     #[test]
     fn o_monitor_lembrado_volta_se_ainda_existir() {
         let telas = [

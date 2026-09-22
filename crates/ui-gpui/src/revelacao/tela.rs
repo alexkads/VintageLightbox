@@ -2560,13 +2560,22 @@ impl Revelacao {
                         .size(px(14.)),
                     )
                     .child("Tela do cliente")
+                    .when(self.cliente_aberto, |b| {
+                        b.child(crate::cliente::tecla_da_tela_cheia())
+                    })
                     .tooltip({
                         let texto = if self.cliente_aberto {
-                            "Fechar a tela do cliente"
+                            format!(
+                                "Fechar a tela do cliente · {} põe e tira a tela cheia",
+                                crate::cliente::texto_da_tela_cheia()
+                            )
                         } else {
-                            "Abrir a tela do cliente no outro monitor: ela mostra esta foto, revelada, enquanto você ajusta"
+                            format!(
+                                "Abrir a tela do cliente no outro monitor: ela mostra esta foto, revelada, enquanto você ajusta · depois, {} põe e tira a tela cheia",
+                                crate::cliente::texto_da_tela_cheia()
+                            )
                         };
-                        move |w, cx| Tooltip::new(texto).build(w, cx)
+                        move |w, cx| Tooltip::new(texto.clone()).build(w, cx)
                     })
                     .on_click(cx.listener(|_tela, _ev, _window, cx| {
                         cx.emit(PedidoDaRevelacao::TelaDoCliente);
