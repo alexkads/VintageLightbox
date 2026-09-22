@@ -81,6 +81,9 @@ pub enum Passo {
     /// `importar_modal` — o botão "Importar fotos" da sessão aberta: abre o
     /// modal do quadro, sem abrir a janela do sistema.
     ImportarModal,
+    /// `importar_origem` — o mesmo modal, já com o menu do "Do cartão ou
+    /// pasta…" aberto: os cartões montados e o "Escolher pasta…".
+    ImportarOrigem,
     /// `janela minimizar` · `janela fechar` · `janela abrir` · `janela
     /// fingir_envio 2` — a bandeja (`crate::segundo_plano`). `fechar` é o botão
     /// vermelho de verdade; `abrir` é o "Abrir o VintageLightbox"; `fingir_envio`
@@ -166,6 +169,7 @@ pub fn ler_roteiro(texto: &str) -> Result<Vec<Passo>, String> {
             "tira" => Passo::Tira(argumentos.join(" ")),
             "guias" => Passo::Guias(argumentos.join(" ")),
             "importar_modal" => Passo::ImportarModal,
+            "importar_origem" => Passo::ImportarOrigem,
             "janela" => Passo::Janela(argumentos.join(" ")),
             "nova" => Passo::Nova(argumentos.join(" ")),
             "importar" => Passo::Importar(argumentos.join(" ")),
@@ -483,6 +487,7 @@ mod testes {
              tema claro\n\
              revelar\n\
              sair_da_conta\n\
+             importar_origem\n\
              fim\n",
         )
         .unwrap();
@@ -499,6 +504,7 @@ mod testes {
                 Passo::Tema("claro".into()),
                 Passo::Revelar,
                 Passo::SairDaConta,
+                Passo::ImportarOrigem,
                 Passo::Fim,
             ]
         );

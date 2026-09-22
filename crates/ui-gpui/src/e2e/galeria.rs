@@ -922,6 +922,10 @@ fn importar_fotos_abre_o_modal_e_esc_ou_cancelar_fecham_sem_importar(cx: &mut Te
     e.esperar(cx);
     e.detalhe(cx, |tela, _w, _cx| {
         assert!(!tela.importacao_aberta());
-        assert_eq!(tela.ids_visiveis().len(), antes + 1, "o Escolher fotos importa");
+        assert_eq!(
+            tela.ids_visiveis().len(),
+            antes + 1,
+            "o Escolher fotos importa"
+        );
     });
 }

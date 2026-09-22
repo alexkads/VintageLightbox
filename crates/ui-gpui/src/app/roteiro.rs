@@ -191,6 +191,10 @@ impl Aplicativo {
                 self.detalhe
                     .update(cx, |tela, cx| tela.abrir_a_importacao(cx));
             }
+            Passo::ImportarOrigem => {
+                self.detalhe
+                    .update(cx, |tela, cx| tela.abrir_a_origem(window, cx));
+            }
             Passo::Guias(gesto) => {
                 let gesto = gesto.clone();
                 self.seguir_o_roteiro_das_guias(&gesto, window, cx);

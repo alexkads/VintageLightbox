@@ -7,9 +7,13 @@
 //! um único componente para reaproveitamento"*). A etapa 2 da nova sessão e o
 //! "Importar fotos" de dentro da sessão levam ao mesmo lugar, e o operador tem
 //! de reconhecer o gesto nos dois. Os botões vêm de quem chama: cada porta
-//! sabe o que o "Escolher fotos" dela faz, e só o assistente tem o "Do cartão
-//! ou pasta…" — dentro da sessão não há explorador nosso, de propósito
-//! (`detalhe.rs`, a área de envio).
+//! sabe o que o "Escolher fotos" dela faz.
+//!
+//! 🔄 **O "Do cartão ou pasta…" está nas duas desde 22/set/2026**, a pedido do
+//! dono. Até então só o assistente o tinha, e dentro da sessão não havia
+//! explorador nosso, de propósito (decisão de 8/set, em `detalhe.rs`, a área de
+//! envio). Caiu: ele é o componente `origem_das_fotos::OrigemDasFotos`, um só
+//! para as duas portas, e cada uma põe o botão dele ao lado do "Escolher fotos".
 
 use gpui::{div, prelude::*, px, App, Div, FontWeight, SharedString};
 use gpui_component::{v_flex, ActiveTheme, Icon};

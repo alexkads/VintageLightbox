@@ -60,6 +60,7 @@ use crate::importacao::explorador::{Andamento, Freios, Importador};
 use crate::pos_venda::porta::{GestoDoFim, Publicador, Recado};
 use crate::revelacao::tela::faixa_desenhada;
 use crate::selos;
+use crate::sessoes::origem_das_fotos::{EventoDaOrigem, OrigemDasFotos, PortasDaOrigem};
 use crate::tema::cores;
 use domain::value_objects::{ImportMode, ImportOptions, OrganizationStrategy, RenamePattern};
 
@@ -586,6 +587,12 @@ pub struct Detalhe {
     /// O modal "Importar fotos" está aberto — o quadro de arrastar ou escolher,
     /// o mesmo da etapa 2 da nova sessão (`quadro_de_importacao`).
     importacao_aberta: bool,
+    /// "Do cartão ou pasta…" do modal "Importar fotos" — o mesmo componente da
+    /// etapa 2 da nova sessão. `None` até a raiz entregar as portas
+    /// ([`Detalhe::definir_origem`]); sem elas o modal mostra só o
+    /// "Escolher fotos".
+    origem: Option<Entity<OrigemDasFotos>>,
+    _assinaturas_da_origem: Vec<gpui::Subscription>,
     /// 🧪 O registro dos avisos de "esta foto mudou, releia".
     #[cfg(test)]
     reveladas_avisadas: Vec<String>,
@@ -797,6 +804,8 @@ impl Detalhe {
             detalhes_abertos: false,
             apagar_confirmando: None,
             importacao_aberta: false,
+            origem: None,
+            _assinaturas_da_origem: Vec::new(),
             #[cfg(test)]
             reveladas_avisadas: Vec::new(),
             presets_da_receita: Vec::new(),
@@ -3381,6 +3390,16 @@ impl Render for Detalhe {
                 self.modal_de_importacao(cx)
                     .map(|modal| gpui::deferred(modal).with_priority(2)),
             )
+            // 🔑 **A janela de escolher as fotos do cartão também é
+            // diferida**, pelo mesmo motivo do modal: o caixa flutuante é
+            // desenhado depois desta tela. Ela não abre junto com o modal — o
+            // modal fecha quando ela abre ([`EventoDaOrigem::Lendo`]).
+            .children(
+                self.origem
+                    .clone()
+                    .and_then(|origem| origem.update(cx, |origem, cx| origem.dialogo(window, cx)))
+                    .map(|dialogo| gpui::deferred(dialogo).with_priority(2)),
+            )
     }
 }
 
@@ -3706,12 +3725,16 @@ impl Detalhe {
     /// "Importar" que existia na barra do app saiu junto: era o segundo botão
     /// para o mesmo gesto, e o que abria o explorador errado.
     ///
-    /// 🚨 **Não há explorador de arquivos nosso aqui.** O app tem um, no modal de
-    /// importação, e ele existe para a triagem em RAW — escolher entre duzentas
-    /// do cartão. Para mandar fotos ao cliente ele é atrito: quem exportou do
-    /// Lightroom já está com a pasta aberta ao lado. É o gesto da web, e o
-    /// pedido do dono: *"tem que usar o mesmo explorador de arquivos do sistema
-    /// operacional"*.
+    /// 🔄 **Havia aqui "não há explorador de arquivos nosso", e caiu em
+    /// 22/set/2026, a pedido do dono.** A regra de 8/set era: para mandar
+    /// fotos ao cliente o explorador do app é atrito — quem exportou do
+    /// Lightroom já está com a pasta aberta ao lado —, e o pedido era *"tem que
+    /// usar o mesmo explorador de arquivos do sistema operacional"*. Isso
+    /// continua valendo para o "Escolher fotos", que abre a janela do sistema.
+    /// Mas o modal "Importar fotos" ganhou o **"Do cartão ou pasta…"** da etapa
+    /// 2 da nova sessão (*"seria bom ser um único componente para
+    /// reaproveitamento"*), com a janela de escolher entre as fotos do cartão:
+    /// é o componente [`OrigemDasFotos`], o mesmo nas duas telas.
     ///
     /// 🔑 **A leva é escolhida antes dos arquivos**, e o padrão é **sem
     /// marcação** — ver o campo [`Self::leva`].
@@ -4974,6 +4997,53 @@ impl Detalhe {
         self.importacao_aberta
     }
 
+    /// Liga o "Do cartão ou pasta…" do modal "Importar fotos" (dono,
+    /// 22/set/2026: *"precisa ter a opção 'Do cartão ou pasta…'"*).
+    ///
+    /// 🔑 **As fotos escolhidas entram pelo mesmo caminho do soltar
+    /// arquivos** — `enviar_arquivos`, que copia para a pasta do ensaio e
+    /// carimba o id da galeria. O componente não sabe importar; ele só diz
+    /// quais.
+    pub fn definir_origem(&mut self, portas: PortasDaOrigem, cx: &mut Context<Self>) {
+        let origem = cx.new(|cx| OrigemDasFotos::nova(portas, cx));
+        self._assinaturas_da_origem = vec![
+            // O componente desenha dentro desta tela: o que muda nele muda aqui.
+            cx.observe(&origem, |_, _, cx| cx.notify()),
+            cx.subscribe(
+                &origem,
+                |tela, _, evento: &EventoDaOrigem, cx| match evento {
+                    // A janela de escolher abriu: o modal por baixo sai de cena, e
+                    // um só diálogo fica na tela.
+                    EventoDaOrigem::Lendo => tela.fechar_a_importacao(cx),
+                    EventoDaOrigem::Escolhidas(caminhos) => {
+                        let caminhos: Vec<std::path::PathBuf> =
+                            caminhos.iter().map(std::path::PathBuf::from).collect();
+                        let fotos = super::arquivos::so_as_fotos(&caminhos);
+                        tela.enviar_arquivos(fotos, cx);
+                    }
+                    EventoDaOrigem::Aviso { texto, .. } => tela.recado(texto.clone(), cx),
+                },
+            ),
+        ];
+        self.origem = Some(origem);
+    }
+
+    /// O modal "Importar fotos" com o menu do "Do cartão ou pasta…" já
+    /// aberto — o passo `importar_origem` do roteiro, para fotografar.
+    pub fn abrir_a_origem(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.abrir_a_importacao(cx);
+        if !self.importacao_aberta {
+            return;
+        }
+        if let Some(origem) = self.origem.clone() {
+            origem.update(cx, |origem, cx| {
+                if !origem.menu_aberto() {
+                    origem.abrir_menu(window, cx);
+                }
+            });
+        }
+    }
+
     /// O modal "Importar fotos": o quadro de arrastar ou escolher, sobre o véu.
     ///
     /// 🔑 **Soltar arquivos no véu importa**, como soltar na faixa de envio: o
@@ -4992,13 +5062,22 @@ impl Detalhe {
         let quadro = super::quadro_de_importacao::quadro_de_importacao(
             "Mais fotos para esta sessão",
             super::quadro_de_importacao::descricao_na_sessao(estado),
-            crate::estilo::botao_primario("importar-escolher-fotos", cx)
-                .debug_selector(|| "importar-escolher-fotos".into())
-                .child("Escolher fotos")
-                .on_click(cx.listener(|tela, _ev, _w, cx| {
-                    tela.fechar_a_importacao(cx);
-                    tela.importar(cx);
-                })),
+            gpui_component::h_flex()
+                .gap(px(8.))
+                .child(
+                    crate::estilo::botao_primario("importar-escolher-fotos", cx)
+                        .debug_selector(|| "importar-escolher-fotos".into())
+                        .child("Escolher fotos")
+                        .on_click(cx.listener(|tela, _ev, _w, cx| {
+                            tela.fechar_a_importacao(cx);
+                            tela.importar(cx);
+                        })),
+                )
+                .children(
+                    self.origem
+                        .as_ref()
+                        .map(|origem| origem.update(cx, |origem, cx| origem.botao(cx))),
+                ),
             cx,
         )
         .min_h(px(280.));
@@ -5023,7 +5102,10 @@ impl Detalhe {
                                 .items_center()
                                 .text_lg()
                                 .font_weight(gpui::FontWeight::SEMIBOLD)
-                                .child(gpui_component::Icon::new(crate::recursos::Icone::Upload).size(px(18.)))
+                                .child(
+                                    gpui_component::Icon::new(crate::recursos::Icone::Upload)
+                                        .size(px(18.)),
+                                )
                                 .child("Importar fotos"),
                         )
                         .child(quadro)
@@ -6922,6 +7004,118 @@ mod testes {
         assert!(
             publicador.arquivos_enviados().is_empty(),
             "o botão de importar falou com o site — ele grava no catálogo, e a fila leva depois"
+        );
+    }
+
+    /// 🔑 **O "Do cartão ou pasta…" do modal "Importar fotos" importa na
+    /// sessão** (dono, 22/set/2026: o mesmo componente da etapa 2 da nova
+    /// sessão). O caminho inteiro, pelos cliques: o modal, o botão, o
+    /// "Escolher pasta…", a janela de escolher com uma foto desmarcada, e o
+    /// "Importar" — e as marcadas chegam ao catálogo com o carimbo da galeria,
+    /// pelo mesmo `enviar_arquivos` do soltar arquivos.
+    #[gpui::test]
+    fn do_cartao_ou_pasta_no_modal_importa_as_marcadas_na_sessao(cx: &mut TestAppContext) {
+        use crate::importacao::explorador::mentira::{
+            ExploradorDeMentira, GeradorDeMentira, SeletorDeMentira as SeletorDePastaDeMentira,
+        };
+        use crate::sessoes::origem_das_fotos::PortasDaOrigem;
+
+        let publicador = publicador_com(Vec::new(), false);
+        let importador = Arc::new(ImportadorDeMentira::default());
+        let janela = janela_completa(
+            cx,
+            publicador,
+            Arc::new(SeletorDeMentira::default()),
+            importador.clone(),
+        );
+        let explorador = Arc::new(ExploradorDeMentira::responde(
+            "/cartao/DCIM",
+            &[
+                "/cartao/DCIM/a.jpg",
+                "/cartao/DCIM/b.NEF",
+                "/cartao/DCIM/leia.txt",
+            ],
+        ));
+        let dir = tempfile::TempDir::new().expect("diretório temporário");
+        let previews = Arc::new(PreviewManager::new_with_path(dir.path().to_path_buf()));
+        janela
+            .update(cx, |tela, _w, cx| {
+                tela.definir_origem(
+                    PortasDaOrigem {
+                        explorador: explorador.clone(),
+                        seletor_de_pasta: Arc::new(SeletorDePastaDeMentira::escolhe(
+                            "/cartao/DCIM",
+                        )),
+                        gerador: Arc::new(GeradorDeMentira::default()),
+                        previews,
+                    },
+                    cx,
+                )
+            })
+            .unwrap();
+        entrar(cx, &janela);
+        let origem = janela
+            .update(cx, |tela, _w, _cx| tela.origem.clone())
+            .unwrap()
+            .expect("a raiz entregou as portas");
+        let colher_a_origem = |cx: &mut TestAppContext| {
+            for _ in 0..5 {
+                let _ = janela.update(cx, |_tela, window, cx| {
+                    origem.update(cx, |origem, cx| origem.colher(window, cx))
+                });
+                cx.run_until_parked();
+            }
+        };
+
+        clicar(cx, &janela, "detalhe-importar");
+        clicar(cx, &janela, "origem-botao");
+        colher_a_origem(cx);
+        assert!(
+            origem.read_with(cx, |origem, _| origem.menu_aberto()),
+            "o botão abre o menu dos cartões"
+        );
+        clicar(cx, &janela, "origem-escolher-pasta");
+        colher_a_origem(cx);
+
+        janela
+            .update(cx, |tela, _w, cx| {
+                assert!(
+                    !tela.importacao_aberta(),
+                    "a janela de escolher abriu, e o modal por baixo saiu de cena"
+                );
+                let origem = origem.read(cx);
+                assert!(origem.escolhendo_fotos(), "a janela de escolher abriu");
+                assert_eq!(origem.marcadas(), 2, "as duas fotos, e não o .txt");
+            })
+            .unwrap();
+        assert!(
+            explorador
+                .pedidos()
+                .contains(&"varrer:/cartao/DCIM".to_string()),
+            "a pasta escolhida foi varrida: {:?}",
+            explorador.pedidos()
+        );
+
+        // O fotógrafo tira uma da leva, e importa a outra pelo botão.
+        let _ = janela.update(cx, |_tela, _w, cx| {
+            origem.update(cx, |origem, cx| origem.marcar_foto(0, false, cx))
+        });
+        clicar(cx, &janela, "origem-importar-selecao-pasta");
+        colher_ate_parar(cx, &janela);
+
+        assert!(
+            !origem.read_with(cx, |origem, _| origem.escolhendo_fotos()),
+            "importar fecha a janela"
+        );
+        let lotes = importador.importados();
+        assert_eq!(lotes.len(), 1, "um lote foi para o catálogo local");
+        let (arquivos, opcoes) = &lotes[0];
+        assert_eq!(arquivos, &vec!["/cartao/DCIM/b.NEF".to_string()]);
+        assert_eq!(opcoes.sessao_id.as_deref(), Some("g1"));
+        assert_eq!(
+            opcoes.mode,
+            ImportMode::Copy,
+            "o cartão sai da máquina: copiar, nunca catalogar onde está"
         );
     }
 

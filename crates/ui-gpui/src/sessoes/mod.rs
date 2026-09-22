@@ -12,6 +12,8 @@ pub mod arquivos;
 pub mod detalhe;
 /// O assistente de sete etapas da nova sessão (a rota `nova` do site).
 pub mod nova;
+/// "Do cartão ou pasta…": o menu e a janela de escolher, das duas portas.
+pub mod origem_das_fotos;
 /// A receita padrão revelada em segundo plano (o `receita-padrao/` do site).
 pub mod periodo;
 /// O quadro "arraste ou escolha" das duas portas de importar.

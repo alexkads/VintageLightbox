@@ -5,22 +5,18 @@
 use std::sync::Arc;
 
 use gpui::{
-    div, img, prelude::*, px, relative, AnyElement, App, ClickEvent, Context, Div, Entity,
-    FontWeight, Hsla, KeyDownEvent, RenderImage, SharedString, Stateful, Window,
+    div, img, prelude::*, px, relative, AnyElement, App, Context, Div, Entity, FontWeight, Hsla,
+    KeyDownEvent, RenderImage, SharedString, Stateful, Window,
 };
-use gpui_component::checkbox::Checkbox;
 use gpui_component::input::{Input, InputState};
 use gpui_component::progress::Progress;
 use gpui_component::select::Select;
-use gpui_component::slider::Slider;
 use gpui_component::{h_flex, v_flex, ActiveTheme, Icon};
 
 use super::associacoes::{self as assoc};
 use super::estado::{self, EstadoDaEtapa};
 use super::receita::Grupo;
-use super::tela::{
-    Confirmacao, Fase, ItemDaBusca, NovaSessao, PedidoDaNova, SelecaoDaPasta, TipoDeBusca,
-};
+use super::tela::{Confirmacao, Fase, ItemDaBusca, NovaSessao, PedidoDaNova, TipoDeBusca};
 use crate::estilo;
 use crate::recursos::Icone;
 use crate::tema;
@@ -31,29 +27,6 @@ const AMBAR: u32 = 0xf59e0b;
 
 fn cor(hex: u32) -> Hsla {
     gpui::rgb(hex).into()
-}
-
-fn data_hora_da_foto(valor: &str) -> String {
-    let mut partes = valor.split_whitespace();
-    let Some(data) = partes.next() else {
-        return "Lendo data…".into();
-    };
-    let hora = partes.next().unwrap_or("");
-    if data.len() >= 10 && data.as_bytes().get(4) == Some(&b':') {
-        let minutos = hora.get(..5).unwrap_or(hora);
-        return format!(
-            "{}/{}/{} {}",
-            &data[8..10],
-            &data[5..7],
-            &data[..4],
-            minutos
-        );
-    }
-    if valor.trim().is_empty() {
-        "Data não disponível".into()
-    } else {
-        valor.to_string()
-    }
 }
 
 /// O rótulo de um campo, com `*` vermelho quando obrigatório.
@@ -202,26 +175,9 @@ impl Render for NovaSessao {
             .on_key_down(cx.listener(|tela, evento: &KeyDownEvent, window, cx| {
                 tela.tecla(evento, window, cx);
             }))
-            // 🚨 **`Cmd/Ctrl+A` e `Cmd/Ctrl+D` chegam como ação, não como
-            // tecla.** A raiz liga as quatro combinações a `SelecionarTudo` e
-            // `LimparSelecao` no contexto `Aplicativo`, e o GPUI despacha a
-            // ação antes do `on_key_down`: conferidas ali, elas nunca chegavam
-            // ao modal da pasta (dono, 2026-09-21). Sem o modal aberto, a ação
-            // segue para a raiz.
-            .on_action(cx.listener(|tela, _: &crate::app::SelecionarTudo, _, cx| {
-                if tela.selecao_da_pasta.is_some() {
-                    tela.marcar_todas_da_pasta(true, cx);
-                } else {
-                    cx.propagate();
-                }
-            }))
-            .on_action(cx.listener(|tela, _: &crate::app::LimparSelecao, _, cx| {
-                if tela.selecao_da_pasta.is_some() {
-                    tela.marcar_todas_da_pasta(false, cx);
-                } else {
-                    cx.propagate();
-                }
-            }))
+            // 🚨 **`Cmd/Ctrl+A` e `Cmd/Ctrl+D` do modal da pasta são dele**
+            // (`sessoes::origem_das_fotos`): o modal tem o foco e responde à
+            // ação antes desta tela e da raiz (dono, 2026-09-21).
             .on_drag_move(cx.listener(
                 |tela, _: &gpui::DragMoveEvent<gpui::ExternalPaths>, _, cx| {
                     tela.destacar(true, cx);
@@ -260,9 +216,10 @@ impl Render for NovaSessao {
                     ),
             )
             .when(self.arrastando, |t| t.child(self.sobreposicao(cx)))
-            .when_some(self.selecao_da_pasta.as_ref(), |t, selecao| {
-                t.child(self.dialogo_da_pasta(selecao, window, cx))
-            })
+            .children(
+                self.origem
+                    .update(cx, |origem, cx| origem.dialogo(window, cx)),
+            )
             .when_some(self.confirmacao, |t, qual| t.child(self.dialogo(qual, cx)))
             .when(self.busca.is_some(), |t| t.child(self.modal_de_busca(cx)))
             .when_some(self.aviso.as_ref(), |t, aviso| {
@@ -307,8 +264,8 @@ impl NovaSessao {
                 self.fechar_busca(cx);
             } else if self.confirmacao.is_some() {
                 self.cancelar_confirmacao(cx);
-            } else if self.menu_da_origem.take().is_some() {
-                cx.notify();
+            } else {
+                self.fechar_menu_da_origem(cx);
             }
             return;
         }
@@ -787,94 +744,9 @@ impl NovaSessao {
             )
     }
 
+    /// "Do cartão ou pasta…" — o componente das duas portas de importar.
     fn botao_da_origem(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let tema = cx.theme();
-        div()
-            .relative()
-            .child(
-                estilo::botao_contorno("nova-origem", cx)
-                    .child(Icon::new(Icone::HardDrive).size(px(16.)))
-                    .child("Do cartão ou pasta…")
-                    .on_click(
-                        cx.listener(|tela, _, window, cx| tela.abrir_menu_da_origem(window, cx)),
-                    ),
-            )
-            .when_some(self.menu_da_origem.as_ref(), |c, menu| {
-                c.child(
-                    v_flex()
-                        .absolute()
-                        // A área das fotos fica dentro de uma coluna com
-                        // `overflow_hidden`. Abrir para baixo fazia o menu
-                        // ser cortado pela borda inferior dessa etapa.
-                        .bottom(px(36.))
-                        .left_0()
-                        .min_w(px(240.))
-                        .p(px(4.))
-                        .rounded(px(8.))
-                        .border_1()
-                        .border_color(tema.border)
-                        .bg(tema.popover)
-                        .shadow_lg()
-                        .child(
-                            div()
-                                .px(px(8.))
-                                .py(px(6.))
-                                .text_xs()
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(tema.muted_foreground)
-                                .child("Cartões conectados"),
-                        )
-                        .when(menu.procurando, |m| {
-                            m.child(div().px(px(8.)).py(px(6.)).text_sm().child("Procurando…"))
-                        })
-                        .when(!menu.procurando && menu.cartoes.is_empty(), |m| {
-                            m.child(
-                                div()
-                                    .px(px(8.))
-                                    .py(px(6.))
-                                    .text_sm()
-                                    .text_color(tema.muted_foreground)
-                                    .child("Nenhum cartão encontrado"),
-                            )
-                        })
-                        .children(menu.cartoes.iter().enumerate().map(|(i, (nome, caminho))| {
-                            let caminho = caminho.clone();
-                            h_flex()
-                                .id(SharedString::from(format!("nova-cartao-{i}")))
-                                .gap(px(8.))
-                                .px(px(8.))
-                                .py(px(6.))
-                                .rounded(px(4.))
-                                .text_sm()
-                                .cursor_pointer()
-                                .hover(|h| h.bg(tema.accent))
-                                .child(Icon::new(Icone::HardDrive).size(px(16.)))
-                                .child(nome.clone())
-                                .on_click(cx.listener(move |tela, _, window, cx| {
-                                    cx.stop_propagation();
-                                    tela.ler_cartao(caminho.clone(), window, cx)
-                                }))
-                        }))
-                        .child(div().my(px(4.)).h(px(1.)).bg(tema.border))
-                        .child(
-                            h_flex()
-                                .id("nova-escolher-pasta")
-                                .gap(px(8.))
-                                .px(px(8.))
-                                .py(px(6.))
-                                .rounded(px(4.))
-                                .text_sm()
-                                .cursor_pointer()
-                                .hover(|h| h.bg(tema.accent))
-                                .child(Icon::new(Icone::FolderInput).size(px(16.)))
-                                .child("Escolher pasta…")
-                                .on_click(cx.listener(|tela, _, window, cx| {
-                                    cx.stop_propagation();
-                                    tela.escolher_pasta(window, cx)
-                                })),
-                        ),
-                )
-            })
+        self.origem.update(cx, |origem, cx| origem.botao(cx))
     }
 
     fn area_das_fotos(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -897,7 +769,7 @@ impl NovaSessao {
                 cx,
             )
             .min_h(px(320.))
-                .into_any_element();
+            .into_any_element();
         }
 
         let medidor = |nome: &'static str, feitos: usize, de: usize| {
@@ -2150,366 +2022,6 @@ impl NovaSessao {
                                 .on_click(
                                     cx.listener(|tela, _, window, cx| tela.confirmar(window, cx)),
                                 ),
-                        ),
-                ),
-        )
-    }
-
-    fn dialogo_da_pasta(
-        &self,
-        selecao: &SelecaoDaPasta,
-        window: &Window,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let tema = cx.theme().clone();
-        let selecionadas = selecao.fotos.iter().filter(|(_, marcado)| *marcado).count();
-        let todas = selecionadas == selecao.fotos.len();
-        let minimizada = self.selecao_da_pasta_minimizada;
-        let maximizada = self.selecao_da_pasta_maximizada;
-        let zoom = self.zoom_da_pasta_valor;
-        let largura_janela = f32::from(window.viewport_size().width);
-        let largura_modal = if maximizada {
-            (largura_janela * 0.94).min(1440.)
-        } else {
-            (largura_janela * 0.88).min(820.)
-        };
-        let colunas = ((largura_modal - 64.) / (178. * zoom))
-            .floor()
-            .clamp(2., 8.) as u16;
-        let nome_da_pasta = std::path::Path::new(&selecao.raiz)
-            .file_name()
-            .map(|nome| nome.to_string_lossy().to_string())
-            .unwrap_or_else(|| selecao.raiz.clone());
-
-        self.veu(cx).child(
-            v_flex()
-                .w(relative(if maximizada { 0.94 } else { 0.88 }))
-                .max_w(px(if maximizada { 1440. } else { 820. }))
-                .max_h(if maximizada { relative(0.94) } else { relative(0.82) })
-                .p(px(24.))
-                .gap(px(14.))
-                .rounded(px(16.))
-                .border_1()
-                .border_color(tema.border)
-                .bg(tema.background)
-                .shadow_lg()
-                .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                .on_key_down(cx.listener(|tela, evento: &KeyDownEvent, window, cx| {
-                    tela.tecla(evento, window, cx);
-                }))
-                .child(
-                    h_flex()
-                        .items_center()
-                        .gap(px(16.))
-                        .child(
-                            v_flex()
-                                .flex_1()
-                                .min_w(px(0.))
-                                .gap(px(3.))
-                                .child(
-                                    div()
-                                        .text_lg()
-                                        .font_weight(FontWeight::SEMIBOLD)
-                                        .child("Escolha as fotos da pasta"),
-                                )
-                                .child(
-                                    div()
-                                        .text_sm()
-                                        .text_color(tema.muted_foreground)
-                                        .truncate()
-                                        .child(format!(
-                                            "{nome_da_pasta} — clique para selecionar; Shift seleciona um intervalo."
-                                        )),
-                                ),
-                        )
-                        .child(
-                            h_flex()
-                                .gap(px(4.))
-                                .child(
-                                    div()
-                                        .id("nova-minimizar-selecao-pasta")
-                                        .p(px(8.))
-                                        .rounded(px(7.))
-                                        .cursor_pointer()
-                                        .hover(|d| d.bg(tema.accent))
-                                        .tooltip(|window, cx| {
-                                            gpui_component::tooltip::Tooltip::new("Minimizar")
-                                                .build(window, cx)
-                                        })
-                                        .child(Icon::new(Icone::Minus).size(px(17.)))
-                                        .on_click(cx.listener(|tela, _, _, cx| {
-                                            tela.alternar_minimizacao_da_pasta(cx)
-                                        })),
-                                )
-                                .child(
-                                    div()
-                                        .id("nova-maximizar-selecao-pasta")
-                                        .p(px(8.))
-                                        .rounded(px(7.))
-                                        .cursor_pointer()
-                                        .hover(|d| d.bg(tema.accent))
-                                        .tooltip(move |window, cx| {
-                                            gpui_component::tooltip::Tooltip::new(if maximizada {
-                                                "Restaurar tamanho"
-                                            } else {
-                                                "Maximizar"
-                                            })
-                                            .build(window, cx)
-                                        })
-                                        .child(
-                                            Icon::new(if maximizada {
-                                                Icone::Minimize2
-                                            } else {
-                                                Icone::Maximize2
-                                            })
-                                            .size(px(17.)),
-                                        )
-                                        .on_click(cx.listener(|tela, _, _, cx| {
-                                            tela.alternar_maximizacao_da_pasta(cx)
-                                        })),
-                                ),
-                        ),
-                )
-                .when(!minimizada, |modal| {
-                    modal
-                        .child(
-                            h_flex()
-                                .justify_between()
-                                .items_center()
-                                .gap(px(8.))
-                                .p(px(8.))
-                                .rounded(px(9.))
-                                .bg(tema.muted)
-                                .child(
-                                    h_flex()
-                                        .items_center()
-                                        .gap(px(8.))
-                                        .child(Icon::new(Icone::ZoomOut).size(px(15.)))
-                                        .child(
-                                            div()
-                                                .w(px(240.))
-                                                .child(Slider::new(&self.zoom_da_pasta).horizontal()),
-                                        )
-                                        .child(Icon::new(Icone::ZoomIn).size(px(15.)))
-                                        .child(
-                                            div()
-                                                .w(px(42.))
-                                                .text_xs()
-                                                .text_color(tema.muted_foreground)
-                                                .child(format!("{:.0}%", zoom * 100.)),
-                                        ),
-                                )
-                                .child(
-                                    Checkbox::new("nova-marcar-todas-da-pasta")
-                                        .label(if todas {
-                                            "Desmarcar todas"
-                                        } else {
-                                            "Marcar todas"
-                                        })
-                                        .checked(todas)
-                                        .on_click(cx.listener(move |tela, marcado: &bool, _, cx| {
-                                            tela.marcar_todas_da_pasta(*marcado, cx)
-                                        })),
-                                ),
-                        )
-                        .child(
-                            v_flex()
-                                .id("nova-fotos-da-pasta-lista")
-                                .flex_1()
-                                .when(selecao.lendo, |lista| {
-                                    lista
-                                        .min_h(px(220.))
-                                        .items_center()
-                                        .justify_center()
-                                        .gap(px(10.))
-                                        .text_sm()
-                                        .text_color(tema.muted_foreground)
-                                        .child(Icon::new(Icone::ImagePlus).size(px(26.)))
-                                        .child("Lendo as fotos…")
-                                })
-                                .min_h(px(0.))
-                                .overflow_y_scroll()
-                                .when(!selecao.lendo, |lista| {
-                                    lista.child(
-                                    div()
-                                        .id("nova-fotos-da-pasta-grade")
-                                        .grid()
-                                        .grid_cols(colunas)
-                                        .gap(px(10.))
-                                        .children(selecao.fotos.iter().enumerate().map(
-                                            |(indice, (caminho, marcado))| {
-                                                let nome = std::path::Path::new(caminho)
-                                                    .file_name()
-                                                    .map(|n| n.to_string_lossy().to_string())
-                                                    .unwrap_or_else(|| caminho.clone());
-                                                let miniatura =
-                                                    self.miniaturas_da_pasta.get(caminho).cloned();
-                                                let tem_miniatura = miniatura.is_some();
-                                                let data_hora = self
-                                                    .metadados_da_pasta
-                                                    .get(caminho)
-                                                    .map(|descricao| {
-                                                        data_hora_da_foto(&descricao.data)
-                                                    })
-                                                    .unwrap_or_else(|| "Lendo data…".into());
-                                                v_flex()
-                                                    .id(SharedString::from(format!(
-                                                        "nova-foto-da-pasta-{indice}"
-                                                    )))
-                                                    .relative()
-                                                    .min_w(px(0.))
-                                                    .p(px(7.))
-                                                    .gap(px(6.))
-                                                    .rounded(px(10.))
-                                                    .border_1()
-                                                    .border_color(if *marcado {
-                                                        tema.primary
-                                                    } else {
-                                                        tema.border
-                                                    })
-                                                    .when(*marcado, |card| {
-                                                        card.bg(tema.primary.opacity(0.12))
-                                                    })
-                                                    .hover(|card| card.bg(tema.muted))
-                                                    .on_click(cx.listener(
-                                                        move |tela, evento: &ClickEvent, _, cx| {
-                                                            tela.marcar_foto_da_pasta(
-                                                                indice,
-                                                                evento.modifiers().shift,
-                                                                cx,
-                                                            )
-                                                        },
-                                                    ))
-                                                    .child(
-                                                        div()
-                                                            .relative()
-                                                            .w_full()
-                                                            .h(px(132. * zoom))
-                                                            .rounded(px(7.))
-                                                            .overflow_hidden()
-                                                            .bg(tema.muted)
-                                                            .flex()
-                                                            .items_center()
-                                                            .justify_center()
-                                                            .when_some(miniatura, |quadro, imagem| {
-                                                                quadro.child(
-                                                                    img(imagem).size_full().object_fit(
-                                                                        gpui::ObjectFit::Cover,
-                                                                    ),
-                                                                )
-                                                            })
-                                                            .when(!tem_miniatura, |quadro| {
-                                                                quadro.child(
-                                                                    Icon::new(Icone::ImagePlus)
-                                                                        .size(px(26.))
-                                                                        .text_color(
-                                                                            tema.muted_foreground,
-                                                                        ),
-                                                                )
-                                                            })
-                                                            .child(
-                                                                div()
-                                                                    .absolute()
-                                                                    .top(px(7.))
-                                                                    .right(px(7.))
-                                                                    .size(px(25.))
-                                                                    .rounded_full()
-                                                                    .flex()
-                                                                    .items_center()
-                                                                    .justify_center()
-                                                                    .border_1()
-                                                                    .border_color(if *marcado {
-                                                                        tema.primary
-                                                                    } else {
-                                                                        tema.border
-                                                                    })
-                                                                    .when(*marcado, |selo| {
-                                                                        selo.bg(tema.primary)
-                                                                            .text_color(tema.primary_foreground)
-                                                                            .child(
-                                                                                Icon::new(Icone::Check)
-                                                                                    .size(px(14.)),
-                                                                            )
-                                                                    }),
-                                                            ),
-                                                    )
-                                                    .child(
-                                                        div()
-                                                            .truncate()
-                                                            .text_xs()
-                                                            .font_weight(FontWeight::MEDIUM)
-                                                            .child(nome),
-                                                    )
-                                                    .child(
-                                                        h_flex()
-                                                            .justify_between()
-                                                            .gap(px(6.))
-                                                            .child(
-                                                                div()
-                                                                    .text_xs()
-                                                                    .text_color(
-                                                                        tema.muted_foreground,
-                                                                    )
-                                                                    .child(format!(
-                                                                        "Foto {}",
-                                                                        indice + 1
-                                                                    )),
-                                                            )
-                                                            .child(
-                                                                div()
-                                                                    .text_xs()
-                                                                    .text_color(
-                                                                        tema.muted_foreground,
-                                                                    )
-                                                                    .truncate()
-                                                                    .child(data_hora),
-                                                            ),
-                                                    )
-                                                    .into_any_element()
-                                            },
-                                        )),
-                                    )
-                                }),
-                        )
-                })
-                .child(
-                    h_flex()
-                        .mt(px(4.))
-                        .items_center()
-                        .gap(px(8.))
-                        .child(
-                            div()
-                                .text_sm()
-                                .text_color(tema.muted_foreground)
-                                .child(if selecao.lendo {
-                                    "Lendo as fotos…".to_string()
-                                } else {
-                                    format!(
-                                        "{} de {} selecionadas",
-                                        selecionadas,
-                                        selecao.fotos.len()
-                                    )
-                                }),
-                        )
-                        .child(div().flex_1())
-                        .child(
-                            estilo::botao_contorno("nova-cancelar-selecao-pasta", cx)
-                                .child("Cancelar")
-                                .on_click(
-                                    cx.listener(|tela, _, _, cx| {
-                                        tela.cancelar_selecao_da_pasta(cx)
-                                    }),
-                                ),
-                        )
-                        .child(
-                            estilo::botao_primario("nova-importar-selecao-pasta", cx)
-                                .child(format!(
-                                    "Importar {}",
-                                    estado::plural(selecionadas, "foto", "fotos")
-                                ))
-                                .on_click(cx.listener(|tela, _, window, cx| {
-                                    tela.importar_selecao_da_pasta(window, cx)
-                                })),
                         ),
                 ),
         )

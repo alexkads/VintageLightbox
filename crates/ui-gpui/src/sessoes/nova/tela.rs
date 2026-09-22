@@ -36,7 +36,6 @@ use gpui::{
 };
 use gpui_component::input::{InputEvent, InputState};
 use gpui_component::select::{SearchableVec, SelectEvent, SelectItem, SelectState};
-use gpui_component::slider::{SliderEvent, SliderState};
 use infrastructure::cache::preview_manager::PreviewManager;
 
 use super::amostras::Amostras;
@@ -46,12 +45,12 @@ use super::associacoes::{
 use super::estado::{self, Campo, EstadoDaEtapa, Formulario, Rascunho};
 use super::receita::{self, PresetDaSessao};
 use crate::biblioteca::acervo::Acervo;
-use crate::importacao::estado::{Descricao as DescricaoDaImportacao, Recado as RecadoDaImportacao};
-use crate::importacao::explorador::{Andamento, Explorador, Freios, Importador, SeletorDePasta};
+use crate::importacao::explorador::{Andamento, Freios, Importador};
 use crate::pos_venda::porta::{PedidoJson, Publicador, Recado};
 use crate::revelacao::persistencia::Gravador;
 use crate::sessoes::arquivos::SeletorDeFotos;
 use crate::sessoes::detalhe::{pasta_do_ensaio, Importacao};
+use crate::sessoes::origem_das_fotos::{EventoDaOrigem, OrigemDasFotos, PortasDaOrigem};
 
 /// Um canal com as duas pontas guardadas juntas.
 type Canal<T> = (Sender<T>, Receiver<T>);
@@ -216,31 +215,10 @@ pub(super) struct Receita {
     pub prontas: usize,
 }
 
-/// Os cartões montados, para o menu "Do cartão ou pasta…".
-pub(super) struct MenuDaOrigem {
-    pub procurando: bool,
-    pub cartoes: Vec<(String, String)>,
-}
-
-/// Fotos encontradas numa pasta, antes da cópia para o rascunho.
-///
-/// A pasta é uma origem, não uma ordem para importar tudo: o fotógrafo pode
-/// fazer uma triagem e trazer só parte do ensaio.
-pub(super) struct SelecaoDaPasta {
-    pub raiz: String,
-    pub fotos: Vec<(String, bool)>,
-    /// Primeiro item de um intervalo feito com Shift+clique.
-    pub ancora: Option<usize>,
-    /// A varredura ainda não voltou: o modal já está aberto, sem fotos.
-    pub lendo: bool,
-}
-
 /// As portas que a tela usa.
 pub struct PortasDaNova {
     pub publicador: Arc<dyn Publicador>,
     pub seletor_de_fotos: Arc<dyn SeletorDeFotos>,
-    /// Gera miniaturas dos arquivos que ainda estão na câmera ou na pasta.
-    pub gerador: Arc<dyn crate::importacao::explorador::GeradorDeMiniaturas>,
     pub importador: Arc<dyn Importador>,
     pub acervo: Arc<dyn Acervo>,
     pub gravador: Arc<dyn Gravador>,
@@ -252,8 +230,8 @@ pub struct PortasDaNova {
     /// ("em segundo plano, e ao abrir a sessão ir acontecendo"). O mesmo serviço
     /// serve a sessão, e por isso as duas telas mostram a mesma imagem.
     pub receita_padrao: Arc<crate::sessoes::receita_padrao::ReceitaPadrao>,
-    pub explorador: Arc<dyn Explorador>,
-    pub seletor_de_pasta: Arc<dyn SeletorDePasta>,
+    /// O "Do cartão ou pasta…" — as mesmas portas do da sessão.
+    pub origem: PortasDaOrigem,
     pub presets_do_sistema: Vec<Preset>,
 }
 
@@ -285,9 +263,9 @@ pub struct NovaSessao {
     pub(super) confirmacao: Option<Confirmacao>,
     pub(super) busca: Option<Busca>,
     pub(super) cadastro: Option<Cadastro>,
-    pub(super) menu_da_origem: Option<MenuDaOrigem>,
-    pub(super) selecao_da_pasta: Option<SelecaoDaPasta>,
-    pub(super) metadados_da_pasta: HashMap<String, DescricaoDaImportacao>,
+    /// "Do cartão ou pasta…": o menu e a janela de escolher as fotos — o
+    /// mesmo componente do modal "Importar fotos" da sessão.
+    pub(super) origem: Entity<OrigemDasFotos>,
     /// As fotos do catálogo com o `sessao_id` do rascunho.
     pub(super) fotos: Vec<PhotoViewModel>,
     /// As de outros rascunhos, que ninguém mais vai criar.
@@ -309,9 +287,6 @@ pub struct NovaSessao {
     pub(super) falhas_da_copia: Option<(usize, String)>,
     freios: Freios,
     escolhendo: bool,
-    /// Uma varredura de cartão/pasta está no ar: o resultado chega pelo canal
-    /// e só a colheita o mostra, então ela não pode dormir antes.
-    varrendo: bool,
     pub(super) receita: Receita,
     receita_aplicada: HashMap<String, String>,
     pub(super) arrastando: bool,
@@ -324,13 +299,6 @@ pub struct NovaSessao {
     /// As miniaturas das fotos do rascunho. **Lidas fora da linha da
     /// interface** — ver [`super::miniaturas`].
     pub(super) miniaturas: super::miniaturas::Miniaturas,
-    /// Miniaturas dos arquivos que ainda estão na origem da importação.
-    pub(super) miniaturas_da_pasta: HashMap<String, Arc<RenderImage>>,
-    gerando_miniaturas_da_pasta: bool,
-    pub(super) selecao_da_pasta_maximizada: bool,
-    pub(super) selecao_da_pasta_minimizada: bool,
-    pub(super) zoom_da_pasta: Entity<SliderState>,
-    pub(super) zoom_da_pasta_valor: f32,
     /// Fotos foram para a fila da receita: o próximo quadro avisa a raiz.
     ///
     /// 🔑 **Bandeira, e não `cx.emit` direto**: `aplicar_receita` é chamado de
@@ -345,7 +313,6 @@ pub struct NovaSessao {
     andamentos: (Sender<Andamento>, Receiver<Andamento>),
     releituras: (Sender<Vec<PhotoViewModel>>, Receiver<Vec<PhotoViewModel>>),
     catalogo: Canal<Result<usize, String>>,
-    origens: (Sender<RecadoDaImportacao>, Receiver<RecadoDaImportacao>),
     esperando_catalogo: Option<Fase>,
     /// A cópia da sessão criada que ainda não terminou — ver [`Levando`].
     pub(super) levando: Option<Levando>,
@@ -424,13 +391,7 @@ impl NovaSessao {
             cx.new(|cx| SelectState::new(SearchableVec::new(Vec::new()), None, window, cx));
         let escolha_do_estudio =
             cx.new(|cx| SelectState::new(SearchableVec::new(Vec::new()), None, window, cx));
-        let zoom_da_pasta = cx.new(|_| {
-            SliderState::new()
-                .min(0.7)
-                .max(1.5)
-                .step(0.05)
-                .default_value(1.0)
-        });
+        let origem = cx.new(|cx| OrigemDasFotos::nova(portas.origem.clone(), cx));
 
         let mut assinaturas = Vec::new();
         #[derive(Clone, Copy)]
@@ -491,13 +452,25 @@ impl NovaSessao {
                 cx.notify();
             },
         ));
+        // O componente desenha dentro desta tela: o que muda nele muda aqui.
+        assinaturas.push(cx.observe(&origem, |_, _, cx| cx.notify()));
         assinaturas.push(cx.subscribe_in(
-            &zoom_da_pasta,
+            &origem,
             window,
-            |tela, _, evento: &SliderEvent, _, cx| {
-                let SliderEvent::Change(valor) = evento;
-                tela.zoom_da_pasta_valor = valor.start();
-                cx.notify();
+            |tela, _, evento: &EventoDaOrigem, window, cx| match evento {
+                EventoDaOrigem::Lendo => {
+                    tela.aviso = None;
+                    cx.notify();
+                }
+                EventoDaOrigem::Escolhidas(fotos) => {
+                    tela.importar_arquivos(fotos.clone(), window, cx);
+                }
+                EventoDaOrigem::Aviso { texto, erro } => {
+                    tela.avisar(texto.clone(), *erro);
+                    // O aviso some pela colheita: ela tem de estar acordada.
+                    tela.acompanhar(window, cx);
+                    cx.notify();
+                }
             },
         ));
 
@@ -531,9 +504,7 @@ impl NovaSessao {
             confirmacao: None,
             busca: None,
             cadastro: None,
-            menu_da_origem: None,
-            selecao_da_pasta: None,
-            metadados_da_pasta: HashMap::new(),
+            origem,
             fotos: Vec::new(),
             orfas: Vec::new(),
             importacao: None,
@@ -541,7 +512,6 @@ impl NovaSessao {
             falhas_da_copia: None,
             freios: Freios::default(),
             escolhendo: false,
-            varrendo: false,
             receita: Receita::default(),
             receita_aplicada: HashMap::new(),
             arrastando: false,
@@ -551,12 +521,6 @@ impl NovaSessao {
             foco_do_preset: 0,
             teclado_no_preset: false,
             miniaturas: Default::default(),
-            miniaturas_da_pasta: HashMap::new(),
-            gerando_miniaturas_da_pasta: false,
-            selecao_da_pasta_maximizada: false,
-            selecao_da_pasta_minimizada: false,
-            zoom_da_pasta,
-            zoom_da_pasta_valor: 1.0,
             pedir_colheita_das_reveladas: false,
             amostras: Amostras::default(),
             focar: None,
@@ -565,7 +529,6 @@ impl NovaSessao {
             andamentos: channel(),
             releituras: channel(),
             catalogo: channel(),
-            origens: channel(),
             esperando_catalogo: None,
             levando: None,
             esperando_descarte: false,
@@ -586,7 +549,7 @@ impl NovaSessao {
         self.erro = None;
         self.confirmacao = None;
         self.busca = None;
-        self.menu_da_origem = None;
+        self.fechar_menu_da_origem(cx);
         self.tentou = false;
         if self.fase.is_none() {
             self.carregar_rascunho(window, cx);
@@ -782,7 +745,7 @@ impl NovaSessao {
             return;
         }
         self.rascunho.etapa = etapa;
-        self.menu_da_origem = None;
+        self.fechar_menu_da_origem(cx);
         self.busca = None;
         self.guardar();
         self.rolagem
@@ -893,7 +856,7 @@ impl NovaSessao {
 
     /// "Escolher fotos" / "Adicionar mais fotos".
     pub fn escolher_fotos(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.menu_da_origem = None;
+        self.fechar_menu_da_origem(cx);
         self.escolhendo = true;
         self.portas
             .seletor_de_fotos
@@ -901,141 +864,9 @@ impl NovaSessao {
         self.acompanhar(window, cx);
     }
 
-    /// "Do cartão ou pasta…": abre o menu e procura os cartões.
-    pub fn abrir_menu_da_origem(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.menu_da_origem.take().is_some() {
-            cx.notify();
-            return;
-        }
-        self.menu_da_origem = Some(MenuDaOrigem {
-            procurando: true,
-            cartoes: Vec::new(),
-        });
-        self.portas.explorador.origens(self.origens.0.clone());
-        self.acompanhar(window, cx);
-        cx.notify();
-    }
-
-    /// Abre o modal da pasta na hora, vazio e "lendo": a varredura de um
-    /// cartão lento não deixa a tela muda até terminar.
-    fn abrir_selecao_lendo(&mut self, raiz: String, window: &mut Window) {
-        window.focus(&self.foco);
-        self.aviso = None;
-        self.miniaturas_da_pasta.clear();
-        self.metadados_da_pasta.clear();
-        self.gerando_miniaturas_da_pasta = false;
-        self.selecao_da_pasta_maximizada = false;
-        self.selecao_da_pasta_minimizada = false;
-        self.varrendo = true;
-        self.selecao_da_pasta = Some(SelecaoDaPasta {
-            raiz,
-            fotos: Vec::new(),
-            ancora: None,
-            lendo: true,
-        });
-    }
-
-    pub fn ler_cartao(&mut self, caminho: String, window: &mut Window, cx: &mut Context<Self>) {
-        self.menu_da_origem = None;
-        self.abrir_selecao_lendo(caminho.clone(), window);
-        self.portas
-            .explorador
-            .varrer(caminho, true, self.origens.0.clone());
-        self.acompanhar(window, cx);
-        cx.notify();
-    }
-
-    pub fn escolher_pasta(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.menu_da_origem = None;
-        self.selecao_da_pasta = None;
-        self.gerando_miniaturas_da_pasta = false;
-        self.escolhendo = true;
-        self.portas
-            .seletor_de_pasta
-            .escolher(self.origens.0.clone(), cx);
-        self.acompanhar(window, cx);
-        cx.notify();
-    }
-
-    pub fn marcar_foto_da_pasta(&mut self, indice: usize, shift: bool, cx: &mut Context<Self>) {
-        if let Some(selecao) = self.selecao_da_pasta.as_mut() {
-            let Some((_, atual)) = selecao.fotos.get(indice) else {
-                return;
-            };
-            let marcado = !*atual;
-            if shift {
-                if let Some(ancora) = selecao.ancora {
-                    let (inicio, fim) = if ancora <= indice {
-                        (ancora, indice)
-                    } else {
-                        (indice, ancora)
-                    };
-                    for (_, item) in &mut selecao.fotos[inicio..=fim] {
-                        *item = marcado;
-                    }
-                } else if let Some((_, atual)) = selecao.fotos.get_mut(indice) {
-                    *atual = marcado;
-                }
-            } else if let Some((_, atual)) = selecao.fotos.get_mut(indice) {
-                *atual = marcado;
-                selecao.ancora = Some(indice);
-            }
-        }
-        cx.notify();
-    }
-
-    pub fn marcar_todas_da_pasta(&mut self, marcado: bool, cx: &mut Context<Self>) {
-        if let Some(selecao) = self.selecao_da_pasta.as_mut() {
-            for (_, atual) in &mut selecao.fotos {
-                *atual = marcado;
-            }
-            selecao.ancora = None;
-        }
-        cx.notify();
-    }
-
-    /// Alterna a seleção total do modal de pasta (`⌘A` no macOS, `Ctrl+A` nos
-    /// demais sistemas), como a tela de importação principal já faz.
-    pub fn alternar_todas_da_pasta(&mut self, cx: &mut Context<Self>) {
-        let todas = self
-            .selecao_da_pasta
-            .as_ref()
-            .is_some_and(|selecao| selecao.fotos.iter().all(|(_, marcado)| *marcado));
-        self.marcar_todas_da_pasta(!todas, cx);
-    }
-
-    pub fn cancelar_selecao_da_pasta(&mut self, cx: &mut Context<Self>) {
-        self.selecao_da_pasta = None;
-        self.varrendo = false;
-        self.gerando_miniaturas_da_pasta = false;
-        self.selecao_da_pasta_minimizada = false;
-        cx.notify();
-    }
-
-    pub fn alternar_maximizacao_da_pasta(&mut self, cx: &mut Context<Self>) {
-        self.selecao_da_pasta_maximizada = !self.selecao_da_pasta_maximizada;
-        self.selecao_da_pasta_minimizada = false;
-        cx.notify();
-    }
-
-    pub fn alternar_minimizacao_da_pasta(&mut self, cx: &mut Context<Self>) {
-        self.selecao_da_pasta_minimizada = !self.selecao_da_pasta_minimizada;
-        cx.notify();
-    }
-
-    pub fn importar_selecao_da_pasta(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.selecao_da_pasta.as_ref().is_some_and(|s| s.lendo) {
-            return;
-        }
-        let Some(selecao) = self.selecao_da_pasta.take() else {
-            return;
-        };
-        let fotos: Vec<String> = selecao
-            .fotos
-            .into_iter()
-            .filter_map(|(caminho, marcado)| marcado.then_some(caminho))
-            .collect();
-        self.importar_arquivos(fotos, window, cx);
+    /// Fecha o menu "Do cartão ou pasta…"; devolve se ele estava aberto.
+    pub(super) fn fechar_menu_da_origem(&mut self, cx: &mut Context<Self>) -> bool {
+        self.origem.update(cx, |origem, cx| origem.fechar_menu(cx))
     }
 
     pub fn destacar(&mut self, arrastando: bool, cx: &mut Context<Self>) {
@@ -2076,94 +1907,6 @@ impl NovaSessao {
             self.importar_arquivos(escolhidos, window, cx);
         }
 
-        while let Ok(recado) = self.origens.1.try_recv() {
-            mudou = true;
-            match recado {
-                RecadoDaImportacao::Origens { cartoes, .. } => {
-                    if let Some(menu) = self.menu_da_origem.as_mut() {
-                        menu.procurando = false;
-                        menu.cartoes = cartoes.into_iter().map(|o| (o.nome, o.caminho)).collect();
-                    }
-                }
-                RecadoDaImportacao::OrigemEscolhida(pasta) => {
-                    self.menu_da_origem = None;
-                    self.selecao_da_pasta = None;
-                    self.escolhendo = false;
-                    self.abrir_selecao_lendo(pasta.clone(), window);
-                    self.portas
-                        .explorador
-                        .varrer(pasta, true, self.origens.0.clone());
-                }
-                RecadoDaImportacao::SemEscolha => self.escolhendo = false,
-                RecadoDaImportacao::Descritos(descricoes) => {
-                    for descricao in descricoes {
-                        self.metadados_da_pasta
-                            .insert(descricao.caminho.clone(), descricao);
-                    }
-                }
-                RecadoDaImportacao::MiniaturasProntas(caminhos) => {
-                    self.gerando_miniaturas_da_pasta = false;
-                    for caminho in caminhos {
-                        if let Some(imagem) = self.portas.previews.get_thumbnail(
-                            &crate::importacao::explorador::chave_de_miniatura(&caminho),
-                        ) {
-                            self.miniaturas_da_pasta
-                                .insert(caminho, crate::imagem::para_gpui(imagem));
-                        }
-                    }
-                }
-                RecadoDaImportacao::Varrido { raiz, arquivos } => {
-                    self.varrendo = false;
-                    // Cancelado (ou trocado por outra pasta) enquanto lia: o
-                    // resultado velho não reabre nada.
-                    if !self
-                        .selecao_da_pasta
-                        .as_ref()
-                        .is_some_and(|s| s.lendo && s.raiz == raiz)
-                    {
-                        continue;
-                    }
-                    let nome = std::path::Path::new(&raiz)
-                        .file_name()
-                        .map(|n| n.to_string_lossy().to_string())
-                        .unwrap_or_else(|| raiz.clone());
-                    let fotos: Vec<String> = arquivos
-                        .into_iter()
-                        .filter(|a| {
-                            crate::sessoes::arquivos::so_as_fotos(&[PathBuf::from(a)]).len() == 1
-                        })
-                        .collect();
-                    if fotos.is_empty() {
-                        self.selecao_da_pasta = None;
-                        self.avisar(format!("Nenhuma foto em {nome}."), false);
-                    } else {
-                        self.gerando_miniaturas_da_pasta = true;
-                        self.portas
-                            .gerador
-                            .gerar(fotos.clone(), self.origens.0.clone());
-                        self.portas
-                            .explorador
-                            .detalhar(fotos.clone(), self.origens.0.clone());
-                        self.selecao_da_pasta = Some(SelecaoDaPasta {
-                            raiz,
-                            fotos: fotos.into_iter().map(|caminho| (caminho, true)).collect(),
-                            ancora: None,
-                            lendo: false,
-                        });
-                    }
-                }
-                RecadoDaImportacao::Falhou(erro) => {
-                    self.escolhendo = false;
-                    self.varrendo = false;
-                    if self.selecao_da_pasta.as_ref().is_some_and(|s| s.lendo) {
-                        self.selecao_da_pasta = None;
-                    }
-                    self.avisar(erro, true);
-                }
-                _ => {}
-            }
-        }
-
         let mut terminou_copia = false;
         while let Ok(andamento) = self.andamentos.1.try_recv() {
             mudou = true;
@@ -2308,7 +2051,6 @@ impl NovaSessao {
         let continua = self.carregando
             || self.levando.is_some()
             || self.escolhendo
-            || self.varrendo
             || self.importando()
             || self.fase.is_some()
             || self.esperando_catalogo.is_some()
@@ -2317,11 +2059,9 @@ impl NovaSessao {
             || self.aviso.is_some()
             || self.amostras.esperando()
             || self.miniaturas.esperando()
-            || self.gerando_miniaturas_da_pasta
             // A receita anda numa thread: enquanto ela não termina, a tela
             // continua acordando para colher os avisos e mover a barra.
             || self.portas.receita_padrao.progresso().andando()
-            || self.menu_da_origem.as_ref().is_some_and(|m| m.procurando)
             || self
                 .cadastro
                 .as_ref()
@@ -2467,18 +2207,19 @@ impl NovaSessao {
 #[cfg(test)]
 impl NovaSessao {
     /// Abre o modal da pasta já varrido, com as fotos dadas desmarcadas.
-    pub(crate) fn abrir_selecao_para_teste(&mut self, fotos: &[&str], window: &mut Window) {
-        self.abrir_selecao_lendo("/cartao".into(), window);
-        if let Some(selecao) = self.selecao_da_pasta.as_mut() {
-            selecao.lendo = false;
-            selecao.fotos = fotos.iter().map(|f| (f.to_string(), false)).collect();
-        }
+    pub(crate) fn abrir_selecao_para_teste(
+        &mut self,
+        fotos: &[&str],
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.origem.update(cx, |origem, cx| {
+            origem.abrir_selecao_para_teste(fotos, window, cx)
+        });
     }
 
-    pub(crate) fn marcadas_da_pasta(&self) -> usize {
-        self.selecao_da_pasta
-            .as_ref()
-            .map_or(0, |s| s.fotos.iter().filter(|(_, m)| *m).count())
+    pub(crate) fn marcadas_da_pasta(&self, cx: &App) -> usize {
+        self.origem.read(cx).marcadas()
     }
 }
 

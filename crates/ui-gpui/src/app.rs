@@ -800,17 +800,24 @@ impl Aplicativo {
         // A lista inteira fica com a raiz: é ela que resolve o `preset_padrao_id`
         // da galeria aberta quando uma foto nova entra na sessão.
         let presets_para_a_receita = presets.clone();
+        // 🔑 **O "Do cartão ou pasta…" é um componente só**, com as mesmas
+        // portas nas duas telas que o mostram: a etapa 2 da nova sessão e o
+        // modal "Importar fotos" da sessão (dono, 22/set/2026).
+        let portas_da_origem = crate::sessoes::origem_das_fotos::PortasDaOrigem {
+            explorador: portas.explorador.clone(),
+            seletor_de_pasta: portas.seletor.clone(),
+            gerador: portas.gerador.clone(),
+            previews: previews.clone(),
+        };
         let portas_da_nova = PortasDaNova {
             publicador: portas.publicador.clone(),
             seletor_de_fotos: portas.seletor_de_fotos.clone(),
-            gerador: portas.gerador.clone(),
             importador: portas.importador.clone(),
             acervo: portas.acervo.clone(),
             gravador: portas.gravador.clone(),
             previews: previews.clone(),
             receita_padrao: receita_padrao.clone(),
-            explorador: portas.explorador.clone(),
-            seletor_de_pasta: portas.seletor.clone(),
+            origem: portas_da_origem.clone(),
             presets_do_sistema: presets.iter().filter(|p| p.is_system).cloned().collect(),
         };
         let previews_das_configuracoes = previews.clone();
@@ -925,6 +932,7 @@ impl Aplicativo {
             // A gaveta do atendimento diz o **nome** do preset padrão, e não o
             // id: a lista é a mesma que a Revelação usa.
             tela.definir_presets(presets_para_a_receita.clone());
+            tela.definir_origem(portas_da_origem, cx);
             tela
         });
         // 🔑 `subscribe_in`, e não `subscribe`: revelar precisa da janela — os
@@ -8426,8 +8434,8 @@ mod testes {
         janela
             .update(cx, |app, window, cx| {
                 app.ir_para(Tela::NovaSessao, window, cx);
-                app.nova_sessao.update(cx, |nova, _| {
-                    nova.abrir_selecao_para_teste(&["/cartao/a.jpg", "/cartao/b.jpg"], window)
+                app.nova_sessao.update(cx, |nova, cx| {
+                    nova.abrir_selecao_para_teste(&["/cartao/a.jpg", "/cartao/b.jpg"], window, cx)
                 });
             })
             .expect("a janela deve estar aberta");
@@ -8439,7 +8447,7 @@ mod testes {
             janela
                 .update(cx, |app, _window, cx| {
                     assert_eq!(
-                        app.nova_sessao.read(cx).marcadas_da_pasta(),
+                        app.nova_sessao.read(cx).marcadas_da_pasta(cx),
                         esperado,
                         "{tecla} no modal da pasta"
                     );
