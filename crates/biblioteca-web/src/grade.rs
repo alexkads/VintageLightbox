@@ -857,7 +857,9 @@ fn dentro(x: f32, y: f32, r: Retangulo) -> bool {
 /// JPEG/PNG → RGBA, reduzido ao lado da textura. Milissegundos por miniatura.
 fn decodificar(bytes: &[u8]) -> Option<(usize, usize, Vec<u8>)> {
     const LADO: u32 = 512;
-    let imagem = image::load_from_memory(bytes).ok()?;
+    // De pé: a miniatura local (`blob:`) pode ser o arquivo da câmera, com a
+    // etiqueta de girar — a mesma regra do desktop (`foto_codec::orientacao`).
+    let imagem = foto_codec::orientacao::decodificar_de_pe(bytes).ok()?;
     let imagem = if imagem.width() > LADO || imagem.height() > LADO {
         imagem.thumbnail(LADO, LADO)
     } else {

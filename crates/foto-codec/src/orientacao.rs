@@ -11,6 +11,11 @@
 //! orientação, `marca_dagua::decodificar_de_pe`) não tinha mais o que ler
 //! (dono, 21/set/2026, com as fotos da NIKON D3100 dele).
 //!
+//! Mora no `foto-codec` porque é regra de **todo destino**: o desktop abre o
+//! arquivo da câmera com ela, e os dois wasm do site (a grade e o motor de
+//! revelação) decodificam com ela quando o `createImageBitmap` do navegador não
+//! é quem decodifica.
+//!
 //! 🔑 **O arquivo da câmera não é tocado** (contrato C1): a orientação entra no
 //! que se *deriva* dele, que é o que o navegador faria ao abrir o mesmo arquivo.
 //! Etiqueta ilegível não recusa a foto: sem orientação que se leia, ela segue

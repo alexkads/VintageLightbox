@@ -45,6 +45,7 @@ open = { version = "5", features = ["shellexecute-on-windows"] }
 # navegador; o que fica aqui é a leitura da entidade (`ajustes_da_entidade`,
 # `corte_da_entidade`), que é a única parte que conhece o `domain`.
 revelacao-core = { path = "../revelacao-core" }
+foto-codec = { path = "../foto-codec" }
 # O cache de prévias (`cache/preview_manager.rs`).
 lru = "0.16.2"
 
