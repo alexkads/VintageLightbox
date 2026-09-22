@@ -820,6 +820,7 @@ impl Revelacao {
         let mut partes = gesto.split_whitespace();
         let nome = partes.next().unwrap_or_default();
         let numero = partes.next().and_then(|n| n.parse::<f32>().ok());
+        let partes_extra: Vec<u32> = partes.filter_map(|n| n.parse().ok()).collect();
         match nome {
             "enquadrar" => self.alternar_corte(window, cx),
             "angulo" => {
@@ -844,6 +845,26 @@ impl Revelacao {
             // 🧪 Os outros dois botões da barra — "Zerar tudo" e "Salvar na
             // galeria e sair" —, pelo mesmo caminho do clique.
             "zerar" => self.zerar_tudo(window, cx),
+            // 🧪 O caso do dono (2026-09-22): *"com a tela do cliente aberta,
+            // resolvi mexer a exposição no modo revelação"* — arrastar **e**
+            // passar de foto no meio do arrasto. A cada `N` chamadas (o segundo
+            // número, padrão 5) vai para a foto seguinte; nas outras, varre o
+            // controle, como a mão que não solta o slider ao trocar de foto.
+            "misturar" => {
+                let a_cada = partes_extra.first().copied().unwrap_or(5).max(1);
+                // Um contador só deste gesto: o `varrer` abaixo conta o dele, e
+                // somar os dois pulava de dois em dois — "a cada 2" nunca caía.
+                self.mistura = self.mistura.wrapping_add(1);
+                if self.mistura.is_multiple_of(a_cada) && !self.acervo.is_empty() {
+                    let proxima = (self.posicao + 1) % self.acervo.len();
+                    if crate::depuracao::vigia::ligado() {
+                        eprintln!("[misturar] foto {} → {proxima}", self.posicao);
+                    }
+                    self.ir_para(proxima, window, cx);
+                } else {
+                    self.seguir_o_roteiro(&format!("varrer {}", numero.unwrap_or(0.)), window, cx);
+                }
+            }
             // 🧪 Um arrasto de slider, para o teste de estresse: cada chamada
             // leva o controle N ao próximo ponto de uma varredura de ida e
             // volta — é o `Change` que o componente emite durante o arrasto.

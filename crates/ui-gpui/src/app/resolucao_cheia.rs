@@ -39,6 +39,15 @@ pub(super) struct Baixas {
     /// O último bruto baixado — o zoom quase sempre pede o da foto medida.
     em_maos: Option<(String, Arc<Vec<u8>>)>,
     medindo: HashSet<String>,
+    /// As cópias de trabalho a caminho, por id local.
+    ///
+    /// 🚨 **A mesma cópia não se pede duas vezes** (achado no teste de estresse
+    /// da tela do cliente, 2026-09-22): cada troca de foto pedia a cópia de
+    /// novo — pela Revelação e pela tela do cliente —, e 48 fotos percorridas
+    /// num arrasto viraram 429 pedidos para 31 respostas. A foto que estava na
+    /// tela esperava no fim de uma fila de centenas, e a tela do cliente ficava
+    /// parada na foto de antes.
+    copias_no_ar: HashSet<String>,
     /// A foto (id do site) cujo bruto a tela pediu.
     quer_bruto: Option<String>,
     _decodificando: Option<Task<()>>,
@@ -70,6 +79,7 @@ impl Baixas {
             arquivo,
             em_maos: None,
             medindo: HashSet::new(),
+            copias_no_ar: HashSet::new(),
             quer_bruto: None,
             _decodificando: None,
             downloads: downloads_de_teste(),
@@ -247,6 +257,13 @@ impl Aplicativo {
         no_site: String,
         cx: &mut Context<Self>,
     ) {
+        if !self.baixas.copias_no_ar.insert(local.clone()) {
+            // Já está a caminho: a resposta dela serve a quem pediu de novo.
+            return;
+        }
+        if crate::depuracao::vigia::ligado() {
+            eprintln!("[baixa] pedida a cópia de {local}");
+        }
         self.publicador
             .copia_de_trabalho(sessao, local, no_site, self.baixas.copias.0.clone());
         self.esperar_o_site(PedidoDeFoto::CopiaDeTrabalho, 1, cx);
@@ -289,12 +306,19 @@ impl Aplicativo {
             self.baixas.pendentes = self.baixas.pendentes.saturating_sub(1);
             match recado {
                 Recado::Pixels { foto_id, bytes } => {
-                    self.receber_a_copia_de_trabalho(foto_id, &bytes, cx)
+                    self.baixas.copias_no_ar.remove(&foto_id);
+                    self.receber_a_copia_de_trabalho(foto_id, bytes, cx)
                 }
                 // 🔑 **Download que falhou não é recusa do site**: não entra no
                 // canto das recusas (que é dos envios) nem conta como resposta
                 // do "Salvar na galeria". Só avisa.
-                Recado::Falhou(erro) => self.avisar_onde_esta_olhando(erro, cx),
+                // A falha não diz de quem era: as que estão a caminho podem ser
+                // pedidas de novo — melhor um pedido repetido que uma foto que
+                // nunca mais vem.
+                Recado::Falhou(erro) => {
+                    self.baixas.copias_no_ar.clear();
+                    self.avisar_onde_esta_olhando(erro, cx)
+                }
                 _ => {}
             }
         }

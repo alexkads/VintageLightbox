@@ -273,8 +273,14 @@ impl Cliente {
                         "tela do cliente: enquadrar + converter",
                         inicio,
                     );
+                    if crate::depuracao::vigia::ligado() {
+                        eprintln!("[cliente] mostrou {}", foto.id);
+                    }
                     self.mostrar(Some(foto), Some(imagem), posicao, cx);
                 } else {
+                    if crate::depuracao::vigia::ligado() {
+                        eprintln!("[cliente] resultado velho {} (espera {id})", resultado.id);
+                    }
                     // Chegou um resultado velho: o pedido novo continua na fila.
                     self.revelando = Some((id, foto, posicao, corte));
                 }
