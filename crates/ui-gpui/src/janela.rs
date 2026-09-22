@@ -52,8 +52,8 @@
 //!   Fica para quando houver uma máquina de cada para conferir.
 
 use gpui::{
-    div, prelude::*, px, App, Div, Hsla, InteractiveElement, MouseButton, SharedString, Stateful,
-    Window,
+    div, prelude::*, px, App, Decorations, Div, Hsla, InteractiveElement, MouseButton,
+    SharedString, Stateful, Window,
 };
 use gpui_component::{ActiveTheme as _, Icon, InteractiveElementExt as _};
 
@@ -150,7 +150,7 @@ impl Render for Arrastando {
 /// `prefixo` entra no id de cada botão: duas barras na mesma janela com o mesmo
 /// id dividiriam estado sem querer.
 pub fn controles(prefixo: &'static str, cor: Hsla, window: &Window, cx: &App) -> Div {
-    if !cfg!(target_os = "linux") {
+    if !app_desenha_a_barra(window) {
         return div();
     }
 
@@ -199,6 +199,92 @@ pub fn controles(prefixo: &'static str, cor: Hsla, window: &Window, cx: &App) ->
         ))
 }
 
+/// Se **o app** tem de desenhar a barra desta janela.
+///
+/// # 🚨 A pergunta é à janela, e não ao sistema operacional
+///
+/// Até 22/set/2026 a regra era "no Linux, o app desenha", e isso só é
+/// verdade no GNOME. O KDE Plasma (e o Sway, o Hyprland com o plugin certo, o
+/// X11 com qualquer gerenciador de janelas) **desenha a barra dele**: lá a
+/// janela ficaria com duas, a do sistema e a nossa logo abaixo.
+///
+/// Quem sabe é o GPUI, depois de negociar com o compositor: no Wayland ele
+/// pede a barra ao sistema pelo `xdg-decoration`, e só quando o compositor
+/// não o implementa (o GNOME) a janela fica `Decorations::Client`. É uma
+/// resposta por janela e **pode mudar depois do primeiro quadro** — a
+/// negociação chega junto com a primeira configuração —, por isso se
+/// pergunta a cada desenho, e não uma vez ao abrir.
+///
+/// Fora do Linux o sistema sempre desenha; o `cfg!` só poupa a pergunta.
+pub fn app_desenha_a_barra(window: &Window) -> bool {
+    cfg!(target_os = "linux") && matches!(window.window_decorations(), Decorations::Client { .. })
+}
+
+/// Em que área de trabalho o app está rodando.
+///
+/// 🔑 **Serve para dizer, e não para decidir.** A barra é decidida por
+/// [`app_desenha_a_barra`], que pergunta à janela: um KDE em X11, um GNOME
+/// com extensão de barra, um Sway — todos se resolvem sozinhos por ali, e
+/// uma lista de nomes nunca estaria completa. Este nome vai para o log de
+/// abertura e para o diagnóstico, que é onde "está no KDE?" se pergunta.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AreaDeTrabalho {
+    Gnome,
+    Kde,
+    /// Outra, com o nome que o sistema deu.
+    Outra(String),
+    /// Linux sem `XDG_CURRENT_DESKTOP` (um gerenciador de janelas cru), ou
+    /// outro sistema.
+    Desconhecida,
+}
+
+impl AreaDeTrabalho {
+    /// Lida de `XDG_CURRENT_DESKTOP`, que pode trazer vários nomes separados
+    /// por `:` (o Ubuntu manda `ubuntu:GNOME`, o Plasma manda `KDE`).
+    pub fn de(valor: Option<&str>) -> Self {
+        let Some(valor) = valor.map(str::trim).filter(|v| !v.is_empty()) else {
+            return Self::Desconhecida;
+        };
+        let nomes: Vec<String> = valor
+            .split(':')
+            .map(|nome| nome.to_ascii_uppercase())
+            .collect();
+        if nomes.iter().any(|nome| nome == "KDE" || nome == "PLASMA") {
+            Self::Kde
+        } else if nomes
+            .iter()
+            .any(|nome| nome == "GNOME" || nome.starts_with("GNOME-"))
+        {
+            Self::Gnome
+        } else {
+            Self::Outra(valor.to_string())
+        }
+    }
+
+    pub fn atual() -> Self {
+        if !cfg!(target_os = "linux") {
+            return Self::Desconhecida;
+        }
+        Self::de(std::env::var("XDG_CURRENT_DESKTOP").ok().as_deref())
+    }
+
+    /// Como aparece para quem lê: `KDE Plasma (Wayland)`.
+    pub fn descricao(&self) -> String {
+        let nome = match self {
+            Self::Gnome => "GNOME".to_string(),
+            Self::Kde => "KDE Plasma".to_string(),
+            Self::Outra(nome) => nome.clone(),
+            Self::Desconhecida => "desconhecida".to_string(),
+        };
+        let sessao = std::env::var("XDG_SESSION_TYPE").unwrap_or_default();
+        if sessao.is_empty() {
+            nome
+        } else {
+            format!("{nome} ({sessao})")
+        }
+    }
+}
+
 /// Um botão da barra: o quadrado com o ícone, o realce e o clique.
 fn botao(
     id: impl Into<gpui::ElementId>,
@@ -230,4 +316,30 @@ fn botao(
             acao(window, cx);
         })
         .child(Icon::new(icone).size(px(15.)))
+}
+
+#[cfg(test)]
+mod testes_da_area_de_trabalho {
+    use super::AreaDeTrabalho;
+
+    #[test]
+    fn reconhece_o_kde_e_o_gnome_pelo_xdg_current_desktop() {
+        assert_eq!(AreaDeTrabalho::de(Some("KDE")), AreaDeTrabalho::Kde);
+        assert_eq!(AreaDeTrabalho::de(Some("GNOME")), AreaDeTrabalho::Gnome);
+        // O Ubuntu antepõe o próprio nome, e o Fedora às vezes o modo clássico.
+        assert_eq!(
+            AreaDeTrabalho::de(Some("ubuntu:GNOME")),
+            AreaDeTrabalho::Gnome
+        );
+        assert_eq!(
+            AreaDeTrabalho::de(Some("GNOME-Classic:GNOME")),
+            AreaDeTrabalho::Gnome
+        );
+        assert_eq!(
+            AreaDeTrabalho::de(Some("sway")),
+            AreaDeTrabalho::Outra("sway".into())
+        );
+        assert_eq!(AreaDeTrabalho::de(Some("")), AreaDeTrabalho::Desconhecida);
+        assert_eq!(AreaDeTrabalho::de(None), AreaDeTrabalho::Desconhecida);
+    }
 }

@@ -64,6 +64,15 @@ fn cofre_da_sessao(pilha_local: bool) -> Arc<dyn domain::services::pos_venda::Co
 
 #[tokio::main]
 async fn main() {
+    // Onde está rodando — no Linux, a área de trabalho muda quem desenha a
+    // barra das janelas (`janela::app_desenha_a_barra`).
+    if cfg!(target_os = "linux") {
+        eprintln!(
+            "🖥️  Área de trabalho: {}",
+            ui_gpui::janela::AreaDeTrabalho::atual().descricao()
+        );
+    }
+
     // O mesmo preâmbulo do `crates/ui`, e de propósito: os dois apps abrem o
     // mesmo catálogo e rodam as mesmas migrations. Se este divergisse daquele,
     // a comparação de paridade da fase 5 mediria dois bancos diferentes.

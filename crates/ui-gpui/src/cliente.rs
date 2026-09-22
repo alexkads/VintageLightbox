@@ -169,7 +169,7 @@ pub fn area_do_cliente(tela: Bounds<Pixels>, monitor_proprio: bool) -> Bounds<Pi
 /// resto de um arrasto que deu errado.
 const MENOR_JANELA: (f32, f32) = (320., 200.);
 
-/// A altura da barra que a tela do cliente desenha em janela no Linux.
+/// A altura da barra que a tela do cliente desenha em janela no GNOME.
 const ALTURA_DA_BARRA: f32 = 32.;
 
 /// Se esta janela desenha a própria barra de título.
@@ -181,10 +181,11 @@ const ALTURA_DA_BARRA: f32 = 32.;
 /// janela, que existe justamente para arrastar a tela até o monitor certo,
 /// não arrastava. `crate::janela` explica o porquê inteiro.
 ///
-/// No macOS e no Windows a barra do sistema existe, e uma segunda seria
-/// duplicata. Em tela cheia não há barra nenhuma: é a tela do cliente.
-fn tem_barra_propria(tela_cheia: bool) -> bool {
-    !tela_cheia && cfg!(target_os = "linux")
+/// No macOS, no Windows e no KDE a barra do sistema existe, e uma segunda
+/// seria duplicata — quem decide é [`crate::janela::app_desenha_a_barra`].
+/// Em tela cheia não há barra nenhuma: é a tela do cliente.
+fn tem_barra_propria(window: &Window) -> bool {
+    !window.is_fullscreen() && crate::janela::app_desenha_a_barra(window)
 }
 
 /// Como a janela estava quando saiu: é como ela volta.
@@ -758,7 +759,7 @@ impl Cliente {
 impl Render for Cliente {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let info = self.mostrar_info.then(|| self.info()).flatten();
-        let barra = tem_barra_propria(window.is_fullscreen());
+        let barra = tem_barra_propria(window);
         let mut janela = window.viewport_size();
         if barra {
             janela.height = (janela.height - px(ALTURA_DA_BARRA)).max(px(0.));
