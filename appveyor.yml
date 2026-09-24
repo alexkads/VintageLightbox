@@ -40,7 +40,18 @@ skip_commits:
     - docs/**
 clone_depth: 1
 
+# ⏱️ **O plano gratuito corta o job em 60 minutos**, e a compilação do perfil
+#    `instalador` (herda o `release`: opt-level 3, LTO) não cabia. A 1ª build do
+#    Linux levou 55 min; a do Windows foi cortada aos 60, sem erro, compilando
+#    os crates do app (24/set/2026). A pergunta daqui é "o balcão compila?", e
+#    erro de compilação aparece igual com otimização menor — então o CI, e só
+#    ele, troca a otimização do perfil por variável de ambiente. O código, as
+#    features, o alvo e o instalador são os mesmos do balcão.
 environment:
+  CARGO_PROFILE_INSTALADOR_OPT_LEVEL: 1
+  CARGO_PROFILE_INSTALADOR_LTO: "false"
+  CARGO_PROFILE_INSTALADOR_CODEGEN_UNITS: 256
+  CARGO_PROFILE_INSTALADOR_DEBUG: 0
   matrix:
     - APPVEYOR_BUILD_WORKER_IMAGE: Visual Studio 2022
     - APPVEYOR_BUILD_WORKER_IMAGE: Ubuntu2204
