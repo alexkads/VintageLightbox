@@ -168,6 +168,7 @@ actions!(
         AlternarMenuLateral,
         // `⌘⇧F` / `Ctrl+Shift+F`: tela cheia na tela do cliente.
         TelaCheiaDoCliente,
+        AlternarTelaCheiaDoApp,
         // As guias de sessão (`app/guias.rs`): as teclas do navegador.
         GuiaNova,
         FecharGuia,
@@ -245,6 +246,8 @@ const SEM_CAMPO_DE_TEXTO: &str = "Aplicativo && !Input";
 
 pub fn init(cx: &mut gpui::App) {
     cx.bind_keys([
+        gpui::KeyBinding::new("f11", AlternarTelaCheiaDoApp, Some(CONTEXTO)),
+        gpui::KeyBinding::new("ctrl-cmd-f", AlternarTelaCheiaDoApp, Some(CONTEXTO)),
         gpui::KeyBinding::new("escape", VoltarParaBiblioteca, Some(CONTEXTO)),
         // As mesmas teclas do legado (`keyboard.rs`): `Cmd+Z` e `Cmd+Shift+Z`.
         //
@@ -1750,6 +1753,22 @@ impl Aplicativo {
                 self.publicador
                     .tirar_do_site(sessao, id.clone(), self.sincronias.0.clone());
                 self.esperar_o_site(PedidoDeFoto::TirarDoSite, 1, cx);
+            }
+            DetalhePedido::ApagarDoSiteEmLote(ids) => {
+                let Some(sessao) = self.sessao.clone() else {
+                    return;
+                };
+                if ids.is_empty() {
+                    return;
+                }
+                for id in ids {
+                    self.publicador.tirar_do_site(
+                        sessao.clone(),
+                        id.clone(),
+                        self.sincronias.0.clone(),
+                    );
+                }
+                self.esperar_o_site(PedidoDeFoto::TirarDoSite, ids.len(), cx);
             }
             // 🚨 **A rejeição da foto que ainda não subiu mora no catálogo**
             // (C21): quem grava é a Biblioteca, e a marca é a mesma bandeira do
@@ -4926,6 +4945,9 @@ impl Render for Aplicativo {
             }))
             .on_action(cx.listener(|este, _: &TelaCheiaDoCliente, _w, cx| {
                 este.alternar_tela_cheia_do_cliente(cx)
+            }))
+            .on_action(cx.listener(|_, _: &AlternarTelaCheiaDoApp, window, _| {
+                window.toggle_fullscreen();
             }))
             .on_action(cx.listener(|este, _: &AlternarMenuLateral, _w, cx| {
                 este.alternar_menu_lateral(cx);

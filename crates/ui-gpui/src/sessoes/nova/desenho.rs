@@ -197,7 +197,7 @@ impl Render for NovaSessao {
                     tela.importar_arquivos(fotos, window, cx);
                 }),
             )
-            .child(self.cabecalho(cx))
+            .child(self.cabecalho(window, cx))
             .child(
                 h_flex()
                     .flex_1()
@@ -290,7 +290,7 @@ impl NovaSessao {
 
     // ── Cabeçalho ────────────────────────────────────────────────────────
 
-    fn cabecalho(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn cabecalho(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tema = cx.theme();
         let (borda, apagado, texto) = (tema.border, tema.muted_foreground, tema.foreground);
         let (total, copiadas, previas) = self.numeros_da_copia();
@@ -321,7 +321,7 @@ impl NovaSessao {
             .relative()
             .flex_none()
             .child(
-                h_flex()
+                crate::janela::como_barra_de_titulo(h_flex(), "barra-da-nova-sessao", window, cx)
                     .h(px(56.))
                     .px(px(16.))
                     .gap(px(12.))
@@ -403,7 +403,13 @@ impl NovaSessao {
                                 }))
                             })
                         })
-                    }),
+                    })
+                    .child(crate::janela::controles(
+                        "janela-nova-sessao",
+                        texto,
+                        window,
+                        cx,
+                    )),
             )
             .when(total > 0, |c| {
                 c.child(
