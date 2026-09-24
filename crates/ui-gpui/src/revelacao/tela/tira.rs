@@ -14,7 +14,6 @@
 //! ```
 
 use std::collections::BTreeSet;
-use std::num::NonZeroUsize;
 
 use adapters::view_models::PhotoViewModel;
 use biblioteca_core::acervo::{self, Contagens, Estado, Filtro};
@@ -1194,10 +1193,13 @@ impl Revelacao {
         if self.acervo.is_empty() {
             return None;
         }
-        self.miniaturas_da_tira.ajustar_capacidade(
-            NonZeroUsize::new(self.acervo.len().clamp(1, MINIATURAS_DA_TIRA))
-                .expect("o piso 1 garante que não é zero"),
-        );
+        // 🚨 **O cache não encolhe com a sessão** (dono, 24/set/2026: *"quando
+        // eu troco de guia entre duas sessões que o modo revelação está aberto
+        // dá uma piscada esquisita no filmstrip"*). Ele era ajustado aqui ao
+        // tamanho do acervo, a cada quadro: a sessão de uma foto deixava o LRU
+        // com uma vaga, as miniaturas da outra guia saíam, e na volta a tira
+        // aparecia vazia até o disco relê-las. O teto é o do construtor
+        // (`MINIATURAS_DA_TIRA`), e é ele que limita a memória.
         // 🔑 **O quadro só lê.** Quem carrega é [`Self::carregar_a_tira`].
 
         let tira = self.na_tira();

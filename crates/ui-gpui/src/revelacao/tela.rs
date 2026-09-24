@@ -3748,6 +3748,46 @@ mod testes {
             .expect("a janela deve estar aberta");
     }
 
+    /// 🚨 **Trocar de sessão não esvazia a tira da outra** (dono, 24/set/2026:
+    /// a piscada no filmstrip ao trocar de guia). A sessão de uma foto
+    /// encolhia o cache para uma vaga, e as miniaturas da guia de antes eram
+    /// relidas do disco na volta.
+    #[gpui::test]
+    fn a_sessao_pequena_nao_joga_fora_as_miniaturas_da_outra(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        for nome in ["id-a.jpg", "id-b.jpg", "id-c.jpg"] {
+            previews
+                .save_thumbnail(nome, &foto_cinza())
+                .expect("gravar");
+        }
+        let janela = janela(cx, previews.clone());
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir_no_acervo(vec![foto("a.jpg"), foto("b.jpg")], 0, window, cx);
+                for id in ["id-a.jpg", "id-b.jpg"] {
+                    assert!(matches!(
+                        tela.miniaturas_da_tira.obter(&previews, id),
+                        Miniatura::Pronta(_)
+                    ));
+                }
+                // A outra guia: uma sessão de uma foto, desenhada.
+                tela.abrir_no_acervo(vec![foto("c.jpg")], 0, window, cx);
+                assert!(tela.filmstrip(window, cx).is_some());
+                // E a volta encontra as duas ainda prontas.
+                tela.abrir_no_acervo(vec![foto("a.jpg"), foto("b.jpg")], 0, window, cx);
+                for id in ["id-a.jpg", "id-b.jpg"] {
+                    assert!(
+                        matches!(
+                            tela.miniaturas_da_tira.espiar(id),
+                            Some(Miniatura::Pronta(_))
+                        ),
+                        "{id} saiu do cache"
+                    );
+                }
+            })
+            .expect("a janela deve estar aberta");
+    }
+
     /// 🚨 **A tira fica com uma foto só** (dono, 24/set/2026): com as guias,
     /// a sessão de uma foto ao lado da de oito trocava a moldura da Revelação
     /// a cada troca de guia. O site desenha a tira sempre.
