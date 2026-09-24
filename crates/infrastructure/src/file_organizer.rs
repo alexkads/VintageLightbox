@@ -100,7 +100,7 @@ impl FileOrganizerImpl {
 /// Pega o nome para si, criando o arquivo **vazio e exclusivo**.
 ///
 /// 🚨 **Perguntar "existe?" e depois copiar perde foto.** A importação roda
-/// **oito arquivos em paralelo** (`Semaphore::new(8)` no
+/// **vários arquivos em paralelo** (semáforo no
 /// `ImportWithOptionsUseCase`): dois deles perguntam ao mesmo tempo, os dois
 /// ouvem "não existe", e os dois copiam **para o mesmo caminho**. Uma foto
 /// sobrescreve a outra — e quem lê o destino no meio da segunda cópia recebe um

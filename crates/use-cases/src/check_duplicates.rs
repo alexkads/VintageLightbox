@@ -65,13 +65,19 @@ impl CheckDuplicatesUseCase {
         }
 
         // Calcular hashes em paralelo usando Rayon
-        let hashes: Vec<(FilePath, Option<String>)> = files
-            .par_iter()
-            .map(|path| {
-                let hash = Self::calculate_file_hash(path.as_ref()).ok();
-                (path.clone(), hash)
-            })
-            .collect();
+        // O hash lê cada arquivo inteiro. Rodá-lo no worker assíncrono segura
+        // esse worker até o lote todo terminar e atrasa os recados de progresso.
+        let hashes: Vec<(FilePath, Option<String>)> = tokio::task::spawn_blocking(move || {
+            files
+                .par_iter()
+                .map(|path| {
+                    let hash = Self::calculate_file_hash(path.as_ref()).ok();
+                    (path.clone(), hash)
+                })
+                .collect()
+        })
+        .await
+        .map_err(|e| domain::DomainError::InfrastructureError(format!("Hash das fotos: {e}")))?;
 
         // Verificar duplicatas no banco de dados (sequencial, mas indexado)
         let mut results = Vec::new();

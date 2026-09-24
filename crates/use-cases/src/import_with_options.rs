@@ -125,8 +125,12 @@ impl ImportWithOptionsUseCase {
             Vec::new()
         };
 
-        // Criar semaphore para limitar paralelismo (8 concurrent tasks)
-        let semaphore = Arc::new(Semaphore::new(8));
+        // Decodificar prévias grandes consome CPU e memória. Reservar ao menos
+        // um núcleo para a interface evita que o progresso fique sem repintar.
+        let paralelismo = std::thread::available_parallelism()
+            .map(|n| n.get().saturating_sub(1).clamp(1, 4))
+            .unwrap_or(2);
+        let semaphore = Arc::new(Semaphore::new(paralelismo));
 
         // Contadores compartilhados
         let successful = Arc::new(std::sync::atomic::AtomicUsize::new(0));
