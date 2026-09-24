@@ -480,7 +480,7 @@ impl Revelacao {
     /// aparece enchendo do palco para fora. O cache mora na tela, e só ela o
     /// toca.
     pub(super) fn carregar_a_tira(&mut self, cx: &mut Context<Self>) {
-        if self.acervo.len() < 2 {
+        if self.acervo.is_empty() {
             return;
         }
         self.segurar_as_vizinhas();
@@ -1180,14 +1180,18 @@ impl Revelacao {
 
     /// A faixa do rodapé: recortes, puxador e miniaturas.
     ///
-    /// ⚠️ **Some com um acervo de uma foto**: uma faixa com um item só ocupa
-    /// espaço da foto para não dizer nada.
+    /// 🚨 **Fica mesmo com uma foto só** (dono, 24/set/2026: *"estranhamente
+    /// uma guia na sessão ficou com filmstrip e a outra não"*). Ela sumia com
+    /// um acervo de uma foto, para devolver o espaço à imagem; com as guias, a
+    /// sessão de uma foto ao lado da de oito fazia a Revelação trocar de
+    /// moldura a cada troca de guia. O site (`<Tira>` do `editor.tsx`) desenha
+    /// a tira sempre, e os recortes dela continuam dizendo o que a sessão tem.
     pub(super) fn filmstrip(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        if self.acervo.len() < 2 {
+        if self.acervo.is_empty() {
             return None;
         }
         self.miniaturas_da_tira.ajustar_capacidade(

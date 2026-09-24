@@ -3748,6 +3748,31 @@ mod testes {
             .expect("a janela deve estar aberta");
     }
 
+    /// 🚨 **A tira fica com uma foto só** (dono, 24/set/2026): com as guias,
+    /// a sessão de uma foto ao lado da de oito trocava a moldura da Revelação
+    /// a cada troca de guia. O site desenha a tira sempre.
+    #[gpui::test]
+    fn a_tira_fica_com_uma_foto_so(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-a.jpg", &foto_cinza())
+            .expect("gravar");
+
+        let janela = janela(cx, previews);
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir_no_acervo(vec![foto("a.jpg")], 0, window, cx);
+            })
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+
+        janela
+            .update(cx, |tela, window, cx| {
+                assert!(tela.filmstrip(window, cx).is_some());
+            })
+            .expect("a janela deve estar aberta");
+    }
+
     /// ⚠️ **No neutro não há o que antecipar.** Sem receita a foto aparece
     /// direto da prévia: adiantar a ida à GPU seria gastar a placa para poupar
     /// uma ida que não existe.
