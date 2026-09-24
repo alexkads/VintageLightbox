@@ -164,6 +164,9 @@ vez.
   bloco PowerShell, extraído do checkout como o `.cmd` faz; no Linux é o `sh`, com a mesma linha
   do balcão. Ele não roda `cargo test`. A pergunta que ele responde é "o próximo balcão que repetir
   a instalação compila?".
+- **Ele roda no `dev`, antes do `main`.** O balcão compila o `main`, e o `dev` só chega lá pelo
+  `make mains` do e-commerce, que avisa se o AppVeyor do `dev` não estiver verde. É a última chance
+  de pegar um `dev` que não compila antes de ele virar produção.
 - **Ele compila o branch como está no GitHub**, porque o instalador baixa
   `archive/refs/heads/<branch>`. E o `Cargo.lock` não é versionado: uma build vermelha sem commit
   novo costuma ser dependência nova quebrada, a mesma que o balcão pegaria.
@@ -314,12 +317,19 @@ Actions, travado por cobrança desde 17/set/2026: empurra a tag e nada compila. 
 
 O roteiro passo a passo é a skill `lancar-o-app-desktop`, no repositório do e-commerce.
 
+🚨 **Produção só sai do `main`, e só com o `main` dos três projetos em dia** (dono, 24/set/2026):
+este, o e-commerce e a landing `fotoamodaantiga`. O trabalho fica no `dev`. O balcão é produção:
+o instalador compila o `main`, e o `make publicar` recusa se o checkout não for o `main` ou se algum
+`main` estiver atrás do `dev`. Quem confere e quem leva o `dev` ao `main` nos três é
+`../recordarfotos-e-commerce/scripts/mains.sh` (`make mains` lá). Nunca `git push origin main`
+daqui à mão.
+
 🚨 **Commit em `dev` não chega ao balcão empacotado.** Só uma versão nova publicada chega. E **não
 há volta de versão**: o updater só instala versão maior, então um lançamento ruim se corrige com
 outro, maior.
 
 🚨 **A maior parte dos balcões instalou compilando** (`instalar-vintagelightbox-gpui.cmd`, que
-compila o `dev`), e não pelo pacote. Esses se atualizam repetindo o instalador. Em 24/set/2026 o
+compila o `main`), e não pelo pacote. Esses se atualizam repetindo o instalador. Em 24/set/2026 o
 manifesto só tem macOS; publicar Windows ou Linux pela primeira vez faz o updater desses balcões
 instalar o pacote por cima ou ao lado da instalação compilada. Está no README, em "Plataforma
 nova", e o script recusa sem `--estrear-plataforma`.

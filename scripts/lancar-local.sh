@@ -121,6 +121,16 @@ if [[ $SO_CONFERIR == 1 ]]; then
   exit
 fi
 
+# ─── Produção só sai do main, com os três mains em dia ───────────────────────
+#
+# Regra do dono (24/set/2026): o trabalho é no `dev`; o balcão é produção, e
+# produção só sai do `main`, quando o `main` do e-commerce, deste repositório e
+# da landing tem todo o `dev`. Quem confere é o script do e-commerce, que
+# conhece os três. Os pacotes em `dist/` também devem ter saído do `main`.
+MAINS="$RAIZ/../recordarfotos-e-commerce/scripts/mains.sh"
+[[ -x "$MAINS" ]] || { erro "não achei $MAINS — a regra dos mains precisa dele"; exit 1; }
+"$MAINS" conferir --daqui .
+
 # ─── Conferências de dist/ ───────────────────────────────────────────────────
 
 # ⚠️ O `dist/` pode ter sobra de uma versão anterior — o empacotador não limpa.
@@ -247,7 +257,10 @@ espelho() {
 
 Gerado por scripts/lancar-local.sh a partir do que havia em dist/.
 Plataformas: $(python3 -c "import json;print(', '.join(sorted(json.load(open('docs/latest.json'))['platforms'])) or 'nenhuma')")"
-    git push origin HEAD
+    # O Pages serve o `docs/` do `main`. O checkout era o `main` (conferido
+    # acima), então o commit novo anda nos dois por fast-forward.
+    git push origin HEAD:dev
+    git push origin HEAD:main
   fi
 
   diga "publicando o Release $TAG"

@@ -190,7 +190,7 @@ instala sozinho o que falta.
 | | **VintageLightbox (Zed GPUI)** |
 |---|---|
 | **Windows** (baixe e dê dois cliques) | **[instalar-vintagelightbox-gpui.cmd](https://github.com/alexkads/VintageLightbox/releases/download/instalador-tauri/instalar-vintagelightbox-gpui.cmd)** |
-| **macOS e Linux** (cole no Terminal) | `curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox-gpui.cmd \| sh` |
+| **macOS e Linux** (cole no Terminal) | `curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/main/scripts/instalar-vintagelightbox-gpui.cmd \| sh` |
 | **No macOS precisa de** | Command Line Tools (os shaders Metal são compilados na abertura; o Xcode não é preciso) |
 | **Primeira vez** | 15 a 40 minutos |
 | **Guia completo** | [docs/INSTALAR-GPUI.md](docs/INSTALAR-GPUI.md) |
@@ -297,7 +297,7 @@ o `set` e depois `"%USERPROFILE%\Downloads\instalar-vintagelightbox-gpui.cmd"`.
 Para ler o instalador antes de rodar:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox-gpui.cmd -o instalar.cmd
+curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/main/scripts/instalar-vintagelightbox-gpui.cmd -o instalar.cmd
 less instalar.cmd
 sh instalar.cmd
 ```
@@ -368,7 +368,7 @@ copiados — que é atualizado à mão depois de mudar o modelo:
 gh release upload instalador-tauri scripts/instalar-vintagelightbox*.cmd --clobber -R alexkads/VintageLightbox
 ```
 
-Mesmo um `.cmd` antigo do Release roda a versão nova: ao abrir, ele baixa a do branch `dev` e só usa a
+Mesmo um `.cmd` antigo do Release roda a versão nova: ao abrir, ele baixa a do branch `main` e só usa a
 própria cópia se estiver sem internet (ou com `VLB_SECO=1`).
 
 ## ⬇️ Baixar os pacotes publicados

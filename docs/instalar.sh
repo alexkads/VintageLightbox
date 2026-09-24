@@ -6,7 +6,7 @@
 #
 # ⚠️ **Este caminho é só macOS, e compila a versão publicada.** Desde
 #    2026-09-17 há um instalador de arquivo único para os três sistemas, que
-#    compila a branch `dev` e dispensa o Xcode:
+#    compila a branch `main` e dispensa o Xcode:
 #      `scripts/instalar-vintagelightbox-gpui.cmd` (docs/INSTALAR-GPUI.md).
 #    Este script continua publicado porque o endereço curto está em uso.
 #
@@ -97,7 +97,7 @@ Exige o Xcode (grátis) com o componente Metal; o Rust ele instala se faltar.
 
 ⚠️ Este caminho compila a versão publicada e exige o Xcode. O mesmo app,
 compilado da branch dev, em qualquer sistema e sem o Xcode:
-  curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox-gpui.cmd | sh
+  curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/main/scripts/instalar-vintagelightbox-gpui.cmd | sh
 AJUDA
 }
 
@@ -163,11 +163,11 @@ if ! xcrun -f metal >/dev/null 2>&1; then
   echo
   echo "   Depois rode este script de novo."
   echo
-  # 🔑 Quem chega aqui quase sempre pode usar o instalador da branch `dev`,
+  # 🔑 Quem chega aqui quase sempre pode usar o instalador do GPUI,
   #    que não precisa do Xcode (dono, 2026-09-16).
-  printf "   ${N}Não quer instalar o Xcode?${Z} O instalador da branch dev não\n"
+  printf "   ${N}Não quer instalar o Xcode?${Z} O instalador do GPUI não\n"
   echo "   precisa dele nem do Metal:"
-  echo "      curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox-gpui.cmd | sh"
+  echo "      curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/main/scripts/instalar-vintagelightbox-gpui.cmd | sh"
   exit 1
 fi
 ok "Xcode e Metal: $(xcode-select -p)"

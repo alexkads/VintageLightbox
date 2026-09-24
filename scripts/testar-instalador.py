@@ -569,7 +569,7 @@ class Estrutura(unittest.TestCase):
                 self.assertIn("exit /b %VLB_RESULTADO%", cmd)
                 self.assertIn("pause", cmd)
                 # O cmd baixa a versao mais nova DESTE arquivo, e nao de outro.
-                propria = f"/dev/scripts/{script.name}'"
+                propria = f"/main/scripts/{script.name}'"
                 self.assertTrue(any(propria in l for l in cmd if l.startswith("powershell ")), propria)
                 self.assertNotIn("@@", "\n".join(linhas))
                 self.assertFalse(any(l.startswith("#@") for l in linhas))

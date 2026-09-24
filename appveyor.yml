@@ -23,9 +23,11 @@
 #    mandar "atualização" a todo balcão.
 
 version: '{build}-{branch}'
-# Só `dev`: o `main` recebe o `dev` por fast-forward, e com um job por vez
-# no plano gratuito a build do `main` só atrasaria a fila compilando de novo o
-# mesmo código.
+# Só `dev`: é a conferência ANTES da produção. O balcão compila o `main`, e o
+# `dev` só chega lá pelo `make mains` do e-commerce (regra do dono, 24/set:
+# produção só do `main`), que avisa se a build do `dev` não estiver verde. O
+# `main` recebe o `dev` por fast-forward, então compilá-lo de novo só
+# atrasaria a fila do plano gratuito, que roda um job por vez.
 branches:
   only:
     - dev
@@ -51,7 +53,7 @@ for:
   # ── Windows ────────────────────────────────────────────────────────────────
   #
   # O `.cmd` de dois cliques baixa a versão mais nova do próprio script do
-  # `raw.githubusercontent.com/.../dev`, que tem cache de minutos, e termina
+  # `raw.githubusercontent.com/.../main`, que tem cache de minutos, e termina
   # num `pause`. Aqui o bloco PowerShell é extraído **deste checkout** do mesmo
   # jeito que o `.cmd` o extrai, e roda como lá: num `powershell.exe` à parte.
   #

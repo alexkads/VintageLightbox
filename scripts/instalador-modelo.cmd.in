@@ -4,7 +4,7 @@ rem  @@NOME@@ - instalar compilando nesta maquina.
 rem
 rem  Um arquivo so para os tres sistemas:
 rem    Windows ........ baixe e de dois cliques neste arquivo
-rem    Linux e macOS .. curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/@@ARQUIVO@@ | sh
+rem    Linux e macOS .. curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/main/scripts/@@ARQUIVO@@ | sh
 rem
 rem  No Windows, esta parte roda o PowerShell que esta mais abaixo e espera uma
 rem  tecla no fim, para a janela nao sumir com a mensagem. O PowerShell vem da
@@ -15,7 +15,7 @@ rem  Gerado por scripts/gerar-instaladores.py - edite scripts/instalador-modelo.
 title Instalando o @@NOME@@
 setlocal
 set "VLB_SCRIPT=%~f0"
-powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; try { $t=$null; if ($env:VLB_SECO -ne '1') { try { $t=(Invoke-WebRequest -UseBasicParsing -TimeoutSec 30 'https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/@@ARQUIVO@@').Content } catch { } }; if (-not $t) { $t=[IO.File]::ReadAllText($env:VLB_SCRIPT) }; $n=[char]10; $i=$t.IndexOf($n+'#==POWERSHELL=='); if ($i -lt 0) { throw 'instalador invalido: falta o bloco PowerShell' }; $f=$t.IndexOf($n+'#==FIM-POWERSHELL==',$i); if ($f -le $i) { throw 'instalador incompleto' }; Invoke-Expression $t.Substring($i, $f-$i) } catch { Write-Host ''; Write-Host ('X ' + $_) -ForegroundColor Red; exit 1 }"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; try { $t=$null; if ($env:VLB_SECO -ne '1') { try { $t=(Invoke-WebRequest -UseBasicParsing -TimeoutSec 30 'https://raw.githubusercontent.com/alexkads/VintageLightbox/main/scripts/@@ARQUIVO@@').Content } catch { } }; if (-not $t) { $t=[IO.File]::ReadAllText($env:VLB_SCRIPT) }; $n=[char]10; $i=$t.IndexOf($n+'#==POWERSHELL=='); if ($i -lt 0) { throw 'instalador invalido: falta o bloco PowerShell' }; $f=$t.IndexOf($n+'#==FIM-POWERSHELL==',$i); if ($f -le $i) { throw 'instalador incompleto' }; Invoke-Expression $t.Substring($i, $f-$i) } catch { Write-Host ''; Write-Host ('X ' + $_) -ForegroundColor Red; exit 1 }"
 set "VLB_RESULTADO=%ERRORLEVEL%"
 echo.
 pause
@@ -51,8 +51,11 @@ exit /b %VLB_RESULTADO%
 #    mensagem e espera uma tecla é o trecho do `cmd`, lá em cima.
 #
 # As opções vêm de variáveis de ambiente, porque o `iex` não recebe parâmetros:
-#   VLB_VERSAO (padrão dev), VLB_DESTINO, VLB_SECO=1
-$Versao  = if ($env:VLB_VERSAO) { $env:VLB_VERSAO } else { "dev" }
+#   VLB_VERSAO (padrão main), VLB_DESTINO, VLB_SECO=1
+# 🔑 **`main`, e não `dev`** (dono, 24/set/2026): o balcão é produção, e produção
+#    só sai do `main`. O `dev` é onde o trabalho acontece; ele chega ao `main` por
+#    `scripts/mains.sh atualizar`, no repositório do e-commerce, e só então aqui.
+$Versao  = if ($env:VLB_VERSAO) { $env:VLB_VERSAO } else { "main" }
 $Destino = if ($env:VLB_DESTINO) { $env:VLB_DESTINO } else { "$env:LOCALAPPDATA\Programs\@@PASTA_WIN@@" }
 $Seco    = $env:VLB_SECO -eq "1"
 $ErrorActionPreference = "Stop"
@@ -480,7 +483,7 @@ Write-Host "   reaproveita o cache em $env:CARGO_TARGET_DIR."
 #
 # Opções (com `curl | sh`, passe-as depois de `sh -s --`):
 #
-#     --versao <ref>     branch ou tag a compilar. Padrão: dev
+#     --versao <ref>     branch ou tag a compilar. Padrão: main (produção)
 #     --destino <pasta>  onde instalar. Padrão: /Applications (macOS) ou
 #                        ~/.local (Linux)
 #     --seco             diz o que faria, sem fazer
@@ -513,7 +516,8 @@ IDENTIFICADOR="@@IDENTIFICADOR@@"
 # No Linux: o nome do binário, do atalho e do ícone.
 NOME_LINUX="vintagelightbox-@@APP@@"
 
-REF="dev"; DESTINO=""; SECO=0; DIAGNOSTICO=0
+# 🔑 `main`, e não `dev`: o balcão é produção (dono, 24/set/2026).
+REF="main"; DESTINO=""; SECO=0; DIAGNOSTICO=0
 # O passo em que se está — é o que a última linha diz quando algo falha.
 PASSO="começando"
 REGISTRO=""; TEMPORARIO=""; TEE_PID=""
@@ -569,10 +573,10 @@ ajuda() {
   cat <<AJUDA
 @@NOME@@ — compila e instala nesta máquina (macOS ou Linux).
 
-  curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/@@ARQUIVO@@ | sh
+  curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/main/scripts/@@ARQUIVO@@ | sh
 
 Opções (com curl | sh, depois de \`sh -s --\`):
-  --versao <ref>     branch ou tag. Padrão: dev
+  --versao <ref>     branch ou tag. Padrão: main
   --destino <pasta>  onde instalar. Padrão: /Applications ou ~/.local
   --seco             diz o que faria, sem compilar nem instalar
   --diagnostico      só o retrato desta máquina, para mandar a quem ajuda
@@ -1097,7 +1101,7 @@ else
   erro "a compilação falhou."
   echo "   Se a mensagem acima fala em 'signal: 9' ou 'SIGKILL', faltou memória. Feche"
   echo "   outros programas e rode de novo com uma compilação de cada vez:"
-  echo "   curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/@@ARQUIVO@@ | CARGO_BUILD_JOBS=1 sh"
+  echo "   curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/main/scripts/@@ARQUIVO@@ | CARGO_BUILD_JOBS=1 sh"
   exit "$CODIGO"
 fi
 

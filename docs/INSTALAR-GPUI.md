@@ -54,7 +54,7 @@ LTSC), o instalador avisa e indica onde baixá-lo.
 2. Cole esta linha e aperte **Enter**:
 
    ```bash
-   curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox-gpui.cmd | sh
+   curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/main/scripts/instalar-vintagelightbox-gpui.cmd | sh
    ```
 
 3. Se ele disser que **faltam as Command Line Tools**, rode `xcode-select --install`, clique em
@@ -76,7 +76,7 @@ O instalador cuida sozinho do **Rust**, na sua pasta pessoal e sem senha.
 2. Cole esta linha e aperte **Enter**:
 
    ```bash
-   curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox-gpui.cmd | sh
+   curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/main/scripts/instalar-vintagelightbox-gpui.cmd | sh
    ```
 
 3. Digite a sua senha quando ela for pedida. Ela serve para instalar as bibliotecas do sistema.
@@ -132,8 +132,8 @@ primeiro no R2 da Recordar Fotos e, se ele falhar, no GitHub Pages. Se houver ve
 instalada, mostra a faixa *"Versão X disponível"* com **Atualizar**, que baixa, confere a
 assinatura e instala. Depois vem **Reabrir agora**.
 
-Compilado da branch `dev`, o app costuma estar à frente da versão publicada e não vê atualização;
-para acompanhar a `dev`, repita a instalação.
+Compilado do `main`, o app costuma estar à frente da versão publicada e não vê atualização;
+para acompanhar o `main`, repita a instalação.
 
 ## Opções (para quem sabe o que está fazendo)
 
@@ -148,7 +148,7 @@ para acompanhar a `dev`, repita a instalação.
 Ler antes de rodar é legítimo:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox-gpui.cmd -o instalar.cmd
+curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/main/scripts/instalar-vintagelightbox-gpui.cmd -o instalar.cmd
 less instalar.cmd
 sh instalar.cmd
 ```
@@ -209,7 +209,7 @@ vídeo) e tudo o que passou pela tela, inclusive a compilação. Quando algo fal
 Mande esse arquivo. Só o retrato da máquina, sem compilar nada:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox-gpui.cmd | sh -s -- --diagnostico
+curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/main/scripts/instalar-vintagelightbox-gpui.cmd | sh -s -- --diagnostico
 ```
 
 | Mensagem | O que fazer |

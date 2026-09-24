@@ -9,7 +9,7 @@ rem  roda.
 title Instalando o VintageLightbox
 setlocal
 set "VLB_SCRIPT=%~f0"
-powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; try { $t=$null; if ($env:VLB_SECO -ne '1') { try { $t=(Invoke-WebRequest -UseBasicParsing -TimeoutSec 30 'https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/instalar-vintagelightbox.cmd').Content } catch { } }; if (-not $t) { $t=[IO.File]::ReadAllText($env:VLB_SCRIPT) }; $n=[char]10; $i=$t.IndexOf($n+'#==POWERSHELL=='); if ($i -lt 0) { throw 'instalador invalido: falta o bloco PowerShell' }; $f=$t.IndexOf($n+'#==FIM-POWERSHELL==',$i); if ($f -le $i) { throw 'instalador incompleto' }; Invoke-Expression $t.Substring($i, $f-$i) } catch { Write-Host ''; Write-Host ('X ' + $_) -ForegroundColor Red; exit 1 }"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; try { $t=$null; if ($env:VLB_SECO -ne '1') { try { $t=(Invoke-WebRequest -UseBasicParsing -TimeoutSec 30 'https://raw.githubusercontent.com/alexkads/VintageLightbox/main/scripts/instalar-vintagelightbox.cmd').Content } catch { } }; if (-not $t) { $t=[IO.File]::ReadAllText($env:VLB_SCRIPT) }; $n=[char]10; $i=$t.IndexOf($n+'#==POWERSHELL=='); if ($i -lt 0) { throw 'instalador invalido: falta o bloco PowerShell' }; $f=$t.IndexOf($n+'#==FIM-POWERSHELL==',$i); if ($f -le $i) { throw 'instalador incompleto' }; Invoke-Expression $t.Substring($i, $f-$i) } catch { Write-Host ''; Write-Host ('X ' + $_) -ForegroundColor Red; exit 1 }"
 set "VLB_RESULTADO=%ERRORLEVEL%"
 echo.
 pause
@@ -42,7 +42,7 @@ Write-Host "> Este e o endereco antigo. O instalador do app e $Arquivo." -Foregr
 $texto = $null
 if ($env:VLB_SECO -ne "1") {
     try {
-        $texto = (Invoke-WebRequest -UseBasicParsing -TimeoutSec 30 "https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/$Arquivo").Content
+        $texto = (Invoke-WebRequest -UseBasicParsing -TimeoutSec 30 "https://raw.githubusercontent.com/alexkads/VintageLightbox/main/scripts/$Arquivo").Content
     } catch { }
 }
 if (-not $texto -and $env:VLB_SCRIPT) {
@@ -66,7 +66,7 @@ Invoke-Expression $texto.Substring($inicio, $fim - $inicio)
 set -eu
 
 ARQUIVO="instalar-vintagelightbox-gpui.cmd"
-URL="https://raw.githubusercontent.com/alexkads/VintageLightbox/dev/scripts/$ARQUIVO"
+URL="https://raw.githubusercontent.com/alexkads/VintageLightbox/main/scripts/$ARQUIVO"
 
 printf '▸ Este é o endereço antigo. O instalador do app é %s:\n' "$ARQUIVO"
 printf '    curl -fsSL %s | sh\n' "$URL"

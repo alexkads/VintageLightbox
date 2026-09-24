@@ -103,7 +103,7 @@ corrige com outra, maior, que desfaz o defeito.
 ### Plataforma nova — as instalações compiladas
 
 A maior parte dos balcões **não instalou pacote**: rodou `instalar-vintagelightbox-gpui.cmd`, que
-compila o branch `dev` na máquina e instala fora de onde o pacote instalaria. O binário compilado tem
+compila o branch `main` na máquina e instala fora de onde o pacote instalaria. O binário compilado tem
 o mesmo updater e a versão do `dev` naquele dia. Quando o manifesto passa a ter o sistema dele:
 
 | Sistema | Instalação compilada | O que o pacote faz com ela |
