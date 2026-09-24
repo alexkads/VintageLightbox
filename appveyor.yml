@@ -38,7 +38,11 @@ skip_commits:
   files:
     - '**/*.md'
     - docs/**
-clone_depth: 1
+# 🐛 Não 1: a build clona o branch como está AGORA e faz checkout do commit que a
+#    enfileirou. Se o `dev` andou enquanto ela esperava na fila (um job por vez
+#    no plano gratuito), aquele commit fica fora de um clone raso e ela morre
+#    com "unable to read tree" (build 6, 24/set/2026).
+clone_depth: 50
 
 # ⏱️ **O plano gratuito corta o job em 60 minutos**, e a compilação do perfil
 #    `instalador` (herda o `release`: opt-level 3, LTO) não cabia. A 1ª build do
@@ -97,6 +101,6 @@ for:
     on_failure:
       # O instalador grava o registro completo (retrato da máquina + saída do
       # cargo); é o mesmo arquivo que o balcão mandaria.
-      - sh: for f in $HOME/.vintagelightbox/registros/instalacao-*.log; do [ -f "$f" ] && appveyor PushArtifact "$f"; done
+      - sh: for f in $HOME/.vintagelightbox/registros/instalacao-*.log; do if [ -f "$f" ]; then appveyor PushArtifact "$f"; fi; done; true
 
 test: off
