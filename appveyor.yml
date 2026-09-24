@@ -56,6 +56,12 @@ environment:
   CARGO_PROFILE_INSTALADOR_LTO: "false"
   CARGO_PROFILE_INSTALADOR_CODEGEN_UNITS: 256
   CARGO_PROFILE_INSTALADOR_DEBUG: 0
+  # 🔑 O gargalo de verdade (build 9): o instalador reserva 4 GiB por
+  #    compilação, as máquinas daqui têm 5 GiB e 2 núcleos, e ele escolhia
+  #    "compilando 1 de cada vez" — metade da máquina parada. Com a otimização
+  #    acima cada compilação pesa bem menos que a do balcão, e duas cabem. O
+  #    instalador respeita um CARGO_BUILD_JOBS já definido.
+  CARGO_BUILD_JOBS: 2
   matrix:
     - APPVEYOR_BUILD_WORKER_IMAGE: Visual Studio 2022
     - APPVEYOR_BUILD_WORKER_IMAGE: Ubuntu2204
