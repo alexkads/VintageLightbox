@@ -86,12 +86,19 @@ for:
   - matrix:
       only:
         - APPVEYOR_BUILD_WORKER_IMAGE: Visual Studio 2022
+    # ⏱️ **`cargo check`, e não `cargo build`** (VLB_SO_CONFERIR=1). A máquina
+    #    Windows daqui tem 2 núcleos e compila devagar: a build completa foi
+    #    cortada aos 60 minutos em todas as tentativas (builds 5, 9 e 10), com
+    #    uma compilação por vez, com otimização menor e com duas ao mesmo tempo.
+    #    O check passa por tudo o que o instalador prepara (Rust -gnu, MSYS2,
+    #    fxc, libclang, download do código) e roda os build.rs (shaders HLSL,
+    #    LibRaw em C++) e a checagem de tipos inteira. Só a geração e a ligação
+    #    do binário ficam de fora: um erro de linker no Windows este CI não pega.
     environment:
       VLB_DESTINO: C:\vlb-instalado
+      VLB_SO_CONFERIR: 1
     build_script:
       - cmd: powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; $env:VLB_VERSAO=$env:APPVEYOR_REPO_BRANCH; try { $t=[IO.File]::ReadAllText('scripts\instalar-vintagelightbox-gpui.cmd'); $n=[char]10; $i=$t.IndexOf($n+'#==POWERSHELL=='); $f=$t.IndexOf($n+'#==FIM-POWERSHELL==',$i); if ($i -lt 0 -or $f -le $i) { throw 'instalador sem o bloco PowerShell' }; Invoke-Expression $t.Substring($i, $f-$i) } catch { Write-Host ('X ' + $_) -ForegroundColor Red; exit 1 }"
-      - cmd: if not exist C:\vlb-instalado\VintageLightbox-GPUI.exe (echo o instalador terminou sem deixar o executavel & exit 1)
-      - cmd: dir C:\vlb-instalado
 
   # ── Linux ──────────────────────────────────────────────────────────────────
   #

@@ -51,13 +51,19 @@ exit /b %VLB_RESULTADO%
 #    mensagem e espera uma tecla é o trecho do `cmd`, lá em cima.
 #
 # As opções vêm de variáveis de ambiente, porque o `iex` não recebe parâmetros:
-#   VLB_VERSAO (padrão main), VLB_DESTINO, VLB_SECO=1
+#   VLB_VERSAO (padrão main), VLB_DESTINO, VLB_SECO=1, VLB_SO_CONFERIR=1
 # 🔑 **`main`, e não `dev`** (dono, 24/set/2026): o balcão é produção, e produção
 #    só sai do `main`. O `dev` é onde o trabalho acontece; ele chega ao `main` por
 #    `scripts/mains.sh atualizar`, no repositório do e-commerce, e só então aqui.
 $Versao  = if ($env:VLB_VERSAO) { $env:VLB_VERSAO } else { "main" }
 $Destino = if ($env:VLB_DESTINO) { $env:VLB_DESTINO } else { "$env:LOCALAPPDATA\Programs\@@PASTA_WIN@@" }
 $Seco    = $env:VLB_SECO -eq "1"
+# 🔧 **Só para o CI** (AppVeyor, 24/set/2026): prepara a máquina inteira, baixa o
+#    código e roda `cargo check` em vez de `cargo build`, sem instalar nada. O
+#    check roda os build.rs (shaders pelo fxc, LibRaw em C++) e confere todos os
+#    tipos, mas nao gera nem liga o binario. A compilacao completa nao cabe nos
+#    60 minutos do plano gratuito numa maquina de 2 nucleos; o balcao nunca liga isto.
+$SoConferir = $env:VLB_SO_CONFERIR -eq "1"
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"   # o Invoke-WebRequest fica 10x mais lento com a barra
 
@@ -379,7 +385,8 @@ if (-not $env:CARGO_BUILD_JOBS) {
 # 🚨 Se falhar, tenta de novo uma vez: sem os restos do LibRaw (um .o pela metade,
 #    travado pelo antivirus, derruba a segunda tentativa tambem) e com uma
 #    compilacao de cada vez, que e o que sobra quando falta memoria.
-$compilar = { cargo "+$Toolchain" build --profile instalador --manifest-path (Join-Path $Fonte "Cargo.toml") -p @@CRATE@@ --bin @@BIN@@ --target $Alvo }
+$verbo = if ($SoConferir) { "check" } else { "build" }
+$compilar = { cargo "+$Toolchain" $verbo --profile instalador --manifest-path (Join-Path $Fonte "Cargo.toml") -p @@CRATE@@ --bin @@BIN@@ --target $Alvo }
 try {
     Correr $compilar
 } catch {
@@ -422,6 +429,7 @@ try {
 }
 $binario = Join-Path $env:CARGO_TARGET_DIR "$Alvo\instalador\@@BIN@@.exe"
 if ($Seco) { Write-Host "`n   [seco] nada foi feito."; return }
+if ($SoConferir) { Ok "cargo check passou: o codigo compila nesta maquina (nada foi instalado)"; return }
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path $binario)) {
     throw "a compilacao falhou, ou nao deixou $binario"
 }

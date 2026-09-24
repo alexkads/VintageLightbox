@@ -164,6 +164,13 @@ vez.
   bloco PowerShell, extraído do checkout como o `.cmd` faz; no Linux é o `sh`, com a mesma linha
   do balcão. Ele não roda `cargo test`. A pergunta que ele responde é "o próximo balcão que repetir
   a instalação compila?".
+- ⏱️ **O plano gratuito corta todo job em 60 minutos, e isso decide o que cada sistema faz:**
+  - **Linux:** compilação completa e instalação, com duas compilações ao mesmo tempo.
+  - **Windows:** o mesmo instalador com `VLB_SO_CONFERIR=1`. Ele prepara tudo e roda
+    `cargo check`, com os `build.rs` e a checagem de tipos, mas **não liga o binário**. A
+    compilação completa no Windows foi cortada aos 60 minutos em três tentativas (24/set/2026).
+    Um erro de linker no Windows este CI não pega.
+  - **Nos dois:** otimização menor (`CARGO_PROFILE_INSTALADOR_*`), só no CI.
 - **Ele roda no `dev`, antes do `main`.** O balcão compila o `main`, e o `dev` só chega lá pelo
   `make mains` do e-commerce, que avisa se o AppVeyor do `dev` não estiver verde. É a última chance
   de pegar um `dev` que não compila antes de ele virar produção.
