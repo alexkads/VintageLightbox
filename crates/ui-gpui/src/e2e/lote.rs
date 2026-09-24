@@ -6,6 +6,7 @@ use gpui::TestAppContext;
 
 use super::{abrir_o_ensaio, Cenario};
 use crate::app::Tela;
+use crate::revelacao::persistencia;
 use crate::revelacao::tela::PedidoDaRevelacao;
 
 /// O botão da barra da Revelação que emite `pedido`.
@@ -814,4 +815,355 @@ fn ao_sair_da_revelacao_a_grade_relê_a_foto_que_estava_no_palco(cx: &mut TestAp
             tela.reveladas_avisadas()
         );
     });
+}
+
+/// A rede responde as subidas do ensaio que estavam presas, e o site fica como
+/// o `subir` de verdade o deixa: a linha da foto existe lá, **com a receita que
+/// foi junto**, e o id remoto voltou ao catálogo.
+///
+/// Devolve `(id local, receita que subiu)` de cada uma.
+fn a_rede_responde_a_subida(e: &super::Estudio) -> Vec<(String, Option<String>)> {
+    use crate::pos_venda::porta::Recado;
+    let subiram: Vec<(String, Option<String>)> = e
+        .site
+        .guardados
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|(_, recado)| match recado {
+            Recado::ClassificadaSubiu { foto_id, receita } => {
+                Some((foto_id.clone(), receita.clone()))
+            }
+            _ => None,
+        })
+        .collect();
+    for (i, (foto_id, receita)) in subiram.iter().cloned().enumerate() {
+        let no_site = format!("site-{foto_id}");
+        if let Some(foto) = e
+            .acervo
+            .fotos
+            .lock()
+            .unwrap()
+            .iter_mut()
+            .find(|f| f.id == foto_id)
+        {
+            foto.pos_venda_foto_id = Some(no_site.clone());
+        }
+        let mut linha = super::do_site(
+            &no_site,
+            10 + i as i32,
+            domain::services::pos_venda::EstadoDaFotoNoSite::Disponivel,
+            None,
+        );
+        linha.ajustes = receita.map(|r| serde_json::from_str(&r).expect("a receita é JSON"));
+        linha.revelada = linha.ajustes.is_some();
+        e.site.fotos_da_sessao.lock().unwrap().push(linha);
+    }
+    e.site.responder();
+    subiram
+}
+
+/// A receita da foto aberta na Revelação, depois de levá-la até `id`.
+fn reabrir(e: &super::Estudio, cx: &mut TestAppContext, id: &str) -> (String, f32, f32) {
+    e.revelar_pela_barra(cx);
+    let alvo = id.to_string();
+    e.revelacao(cx, |tela, window, cx| {
+        let posicao = tela
+            .acervo()
+            .iter()
+            .position(|f| f.id == alvo)
+            .unwrap_or_else(|| panic!("{alvo} não está na tira"));
+        tela.ir_para(posicao, window, cx);
+    });
+    e.esperar(cx);
+    e.revelacao(cx, |tela, _w, _cx| {
+        let aberta = tela.foto_aberta().map(|f| f.id.clone()).unwrap_or_default();
+        let ajustes = tela.ajustes();
+        (aberta, ajustes.exposure, ajustes.contrast)
+    })
+}
+
+/// O ensaio com a receita padrão (contraste 1,25) começando a subir, com a
+/// rede lenta: as duas locais saíram e nenhuma resposta voltou.
+fn o_ensaio_subindo(cx: &mut TestAppContext) -> super::Estudio {
+    let e = super::abrir_o_app(
+        cx,
+        Cenario {
+            site: Box::new(|site| site.demorada = true),
+            ..Cenario::default()
+        },
+    );
+    e.entrar_na_conta(cx);
+    let padrao = crate::revelacao::processador::Ajustes {
+        contrast: 1.25,
+        ..Default::default()
+    };
+    for foto in e.acervo.fotos.lock().unwrap().iter_mut() {
+        persistencia::na_foto(foto, padrao, Default::default());
+    }
+    e.detalhe(cx, |_tela, _w, cx| {
+        cx.emit(crate::sessoes::detalhe::Pedido::CatalogoMudou)
+    });
+    e.esperar(cx);
+    e.app(cx, |app, _w, cx| {
+        app.sessoes
+            .update(cx, |tela, cx| tela.abrir(super::GALERIA.into(), cx));
+    });
+    e.esperar(cx);
+    let mut subindo: Vec<String> = e.site.subidas().into_iter().map(|s| s.1).collect();
+    subindo.sort();
+    assert_eq!(
+        subindo,
+        vec!["id-DSC_101.jpg", "id-DSC_102.jpg"],
+        "o ensaio começou a subir, e a rede ainda não respondeu"
+    );
+    e
+}
+
+/// 🚨 **Revelar a foto que ainda está subindo, salvar, e a edição continuar
+/// lá depois da barra verde** (dono, 24/set/2026: *"gravo a edição, aparece
+/// uma barra verde e desfaz a minha edição para a primeira foto importada"*).
+///
+/// Reproduzido contra a pilha local antes de virar teste: 24 fotos importadas,
+/// a exposição da quarta levada a −0,5 enquanto ela ainda estava "No disco",
+/// "Salvar na galeria e sair". O catálogo ficou com −0,5, o servidor com 0 — a
+/// subida tinha lido a foto antes do ajuste —, e quando ela terminou de subir
+/// a foto passou a ser a do site: a Revelação a reabria com a receita da
+/// importação.
+///
+/// O cenário prende a janela inteira, e não só a conta:
+///
+/// 1. o ensaio entra com a receita padrão (contraste 1,25) e começa a subir,
+///    com a rede lenta — a subida lê cada foto **antes** do ajuste;
+/// 2. a Revelação abre a **segunda** foto local, não a primeira, e o ajuste
+///    chega ao catálogo;
+/// 3. "Salvar na galeria e sair" volta para a sessão, com a foto ainda subindo;
+/// 4. a rede responde (a barra verde): a foto vira a do site com a receita da
+///    importação — e **a tela precisa continuar mostrando a do operador**;
+/// 5. a receita que perdeu a partida sobe como revelação, só a desta foto;
+/// 6. com tudo respondido, o depósito se esvazia e a verdade é o site — que
+///    agora tem a edição.
+///
+/// E, em cada passo, o que não pode acontecer: a edição cair noutra foto, a
+/// foto intocada subir de novo, e a tira duplicar a foto que mudou de casa.
+#[gpui::test]
+fn revelar_a_foto_que_ainda_sobe_e_salvar_nao_desfaz_a_edicao(cx: &mut TestAppContext) {
+    let e = o_ensaio_subindo(cx);
+
+    // 2 · A segunda foto local, ainda no disco.
+    let (aberta, _, contraste) = reabrir(&e, cx, "id-DSC_102.jpg");
+    assert_eq!(aberta, "id-DSC_102.jpg");
+    assert_eq!(contraste, 1.25, "abre com a receita padrão");
+    e.revelacao(cx, |tela, _w, cx| tela.arrastar_slider(0, -0.5, cx));
+    e.esperar(cx);
+    let no_catalogo = |e: &super::Estudio, id: &str| {
+        let fotos = e.acervo.fotos.lock().unwrap();
+        let foto = fotos.iter().find(|f| f.id == id).expect("no catálogo");
+        persistencia::da_foto(foto)
+    };
+    assert_eq!(no_catalogo(&e, "id-DSC_102.jpg").exposure, -0.5);
+    assert_eq!(
+        no_catalogo(&e, "id-DSC_101.jpg").exposure,
+        0.0,
+        "a edição não caiu na primeira foto"
+    );
+
+    // 3 · Salvar e sair, com a foto ainda subindo.
+    botao(&e, cx, PedidoDaRevelacao::SalvarNaGaleria);
+    e.esperar(cx);
+    e.app(cx, |app, _w, _cx| assert_eq!(app.tela(), Tela::Sessao));
+    assert!(
+        e.site.reveladas().is_empty(),
+        "a foto ainda não é do site: não há o que revelar lá"
+    );
+
+    // 4 · A rede responde: a subida chegou com a receita da importação.
+    let subiram = a_rede_responde_a_subida(&e);
+    let exposicao_que_subiu = |id: &str| {
+        subiram
+            .iter()
+            .find(|(foto, _)| foto == id)
+            .and_then(|(_, receita)| receita.as_deref())
+            .and_then(|r| serde_json::from_str::<serde_json::Value>(r).ok())
+            .and_then(|r| r["exposure"].as_f64())
+    };
+    assert_eq!(
+        exposicao_que_subiu("id-DSC_102.jpg"),
+        Some(0.0),
+        "o cenário é o do defeito: a subida leu a foto antes do ajuste"
+    );
+    e.esperar(cx);
+    e.esperar(cx);
+    let linha = |e: &super::Estudio, id: &str| {
+        e.site
+            .fotos_da_sessao
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|f| f.id == id)
+            .and_then(|f| f.ajustes.clone())
+    };
+    let (aberta, exposicao, contraste) = reabrir(&e, cx, "site:site-id-DSC_102.jpg");
+    assert_eq!(aberta, "site:site-id-DSC_102.jpg");
+    assert_eq!(
+        (exposicao, contraste),
+        (-0.5, 1.25),
+        "depois da barra verde a foto continua com a edição, e não com a receita da importação"
+    );
+    e.revelacao(cx, |tela, _w, _cx| {
+        let ids: Vec<&str> = tela.acervo().iter().map(|f| f.id.as_str()).collect();
+        let mut unicos = ids.clone();
+        unicos.sort();
+        unicos.dedup();
+        assert_eq!(ids.len(), unicos.len(), "nenhuma foto em dobro: {ids:?}");
+        assert!(
+            !ids.contains(&"id-DSC_102.jpg"),
+            "a local saiu da tira quando a do site entrou: {ids:?}"
+        );
+    });
+    botao(&e, cx, PedidoDaRevelacao::Sair);
+    e.esperar(cx);
+
+    // 5 · Só a receita que perdeu a partida sobe — a da foto intocada, não.
+    let reveladas: Vec<(String, f32, f32)> = e
+        .site
+        .reveladas()
+        .into_iter()
+        .map(|(id, ajustes, _)| (id, ajustes.exposure, ajustes.contrast))
+        .collect();
+    assert_eq!(
+        reveladas,
+        vec![("site-id-DSC_102.jpg".to_string(), -0.5, 1.25)],
+        "a edição vai ao site, e a outra foto não sobe de novo"
+    );
+
+    // 6 · Tudo respondido: o depósito esvazia e o site é a verdade.
+    e.site.responder();
+    e.esperar(cx);
+    e.esperar(cx);
+    assert!(e.gravador.deposito().is_empty(), "o depósito esvaziou");
+    e.app(cx, |app, _w, _cx| {
+        assert!(app.a_subir_para_teste().is_empty(), "nada a salvar");
+        assert!(app.recusas_para_teste().is_empty());
+    });
+    assert_eq!(
+        linha(&e, "site-id-DSC_102.jpg").and_then(|a| a["exposure"].as_f64()),
+        Some(-0.5),
+        "o site tem a edição"
+    );
+    let (_, exposicao, contraste) = reabrir(&e, cx, "site:site-id-DSC_102.jpg");
+    assert_eq!((exposicao, contraste), (-0.5, 1.25), "e reabre com ela");
+    botao(&e, cx, PedidoDaRevelacao::Sair);
+    e.esperar(cx);
+    let (_, exposicao, _) = reabrir(&e, cx, "site:site-id-DSC_101.jpg");
+    assert_eq!(
+        exposicao, 0.0,
+        "a primeira foto continua como foi importada"
+    );
+}
+
+/// 🚨 **A foto termina de subir com a Revelação aberta nela, e o ajuste feito
+/// depois vai ao site** — a segunda janela do mesmo defeito.
+///
+/// Achada rodando o app contra a pilha local depois do conserto da primeira:
+/// a foto subiu às 39,07 s, o ajuste chegou às 40,49 s, com a tira ainda na
+/// cópia local. A conciliação da subida já tinha passado (as duas receitas
+/// eram iguais), e o ajuste caiu na linha local — que a grade não mostra mais
+/// e o "Salvar" não levava. O servidor ficou com a receita da importação.
+#[gpui::test]
+fn a_foto_termina_de_subir_com_a_revelacao_aberta_e_o_ajuste_vai_ao_site(cx: &mut TestAppContext) {
+    let e = o_ensaio_subindo(cx);
+    let (aberta, _, _) = reabrir(&e, cx, "id-DSC_102.jpg");
+    assert_eq!(aberta, "id-DSC_102.jpg");
+    // 🚨 A receita da **outra** foto muda no catálogo depois de a tira abrir —
+    // a receita padrão que chega atrasada. A cópia dela na tira fica velha, e
+    // ninguém a tocou na Revelação: o site tem de terminar com a do catálogo.
+    {
+        let mut fotos = e.acervo.fotos.lock().unwrap();
+        let outra = fotos
+            .iter_mut()
+            .find(|f| f.id == "id-DSC_101.jpg")
+            .expect("no catálogo");
+        let ajustes = crate::revelacao::processador::Ajustes {
+            contrast: 1.4,
+            ..Default::default()
+        };
+        persistencia::na_foto(outra, ajustes, Default::default());
+    }
+
+    // A barra verde com o operador ainda na foto: ela subiu sem ajuste nenhum.
+    a_rede_responde_a_subida(&e);
+    e.esperar(cx);
+    e.esperar(cx);
+    e.app(cx, |app, _w, cx| {
+        assert_eq!(
+            app.tela(),
+            Tela::Revelacao,
+            "a subida não tira ninguém do editor"
+        );
+        assert_eq!(
+            app.revelacao.read(cx).foto_aberta().map(|f| f.id.clone()),
+            Some("id-DSC_102.jpg".to_string()),
+            "e não troca a foto aberta no meio do trabalho"
+        );
+    });
+    let so_a_102 = |e: &super::Estudio| -> Vec<(String, f32, f32)> {
+        e.site
+            .reveladas()
+            .into_iter()
+            .filter(|(id, _, _)| id == "site-id-DSC_102.jpg")
+            .map(|(id, ajustes, _)| (id, ajustes.exposure, ajustes.contrast))
+            .collect()
+    };
+    assert!(so_a_102(&e).is_empty(), "nada mudou nela: nada a revelar");
+
+    // O ajuste chega depois, na cópia local que continua aberta.
+    e.revelacao(cx, |tela, _w, cx| tela.arrastar_slider(0, -0.5, cx));
+    e.esperar(cx);
+    botao(&e, cx, PedidoDaRevelacao::SalvarNaGaleria);
+    e.esperar(cx);
+    e.app(cx, |app, _w, _cx| assert_eq!(app.tela(), Tela::Sessao));
+    assert_eq!(
+        so_a_102(&e),
+        vec![("site-id-DSC_102.jpg".to_string(), -0.5, 1.25)],
+        "o Salvar leva o ajuste à foto do site"
+    );
+    let da_101: Vec<f32> = e
+        .site
+        .reveladas()
+        .into_iter()
+        .filter(|(id, _, _)| id == "site-id-DSC_101.jpg")
+        .map(|(_, ajustes, _)| ajustes.contrast)
+        .collect();
+    assert_eq!(
+        da_101,
+        vec![1.4],
+        "a outra sobe uma vez, com a receita do catálogo, e nunca com a cópia velha da tira"
+    );
+    let (_, exposicao, contraste) = reabrir(&e, cx, "site:site-id-DSC_102.jpg");
+    assert_eq!(
+        (exposicao, contraste),
+        (-0.5, 1.25),
+        "a foto reabre com o ajuste enquanto a revelação sobe"
+    );
+    botao(&e, cx, PedidoDaRevelacao::Sair);
+    e.esperar(cx);
+
+    e.site.responder();
+    e.esperar(cx);
+    e.esperar(cx);
+    assert!(e.gravador.deposito().is_empty(), "o depósito esvaziou");
+    let (_, exposicao, _) = reabrir(&e, cx, "site:site-id-DSC_102.jpg");
+    assert_eq!(
+        exposicao, -0.5,
+        "e continua com ele depois que o site responde"
+    );
+    botao(&e, cx, PedidoDaRevelacao::Sair);
+    e.esperar(cx);
+    let (_, exposicao, contraste) = reabrir(&e, cx, "site:site-id-DSC_101.jpg");
+    assert_eq!(
+        (exposicao, contraste),
+        (0.0, 1.4),
+        "a primeira foto não recebeu a edição, e ficou com a receita do catálogo"
+    );
 }

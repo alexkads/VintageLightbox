@@ -103,6 +103,12 @@ pub enum Recado {
     /// guerra!"*).
     ClassificadaSubiu {
         foto_id: String,
+        /// A receita que subiu junto, em JSON — `None` é a foto no neutro.
+        ///
+        /// 🚨 **É a da leitura do começo da subida.** O ajuste feito enquanto a
+        /// foto subia não está nela, e quem recebe o recado compara com o
+        /// catálogo (`conciliar_o_que_subiu`).
+        receita: Option<String>,
     },
     /// **Um envio de foto falhou, e com o nome de quem falhou.**
     ///
@@ -697,8 +703,9 @@ impl Publicador for PublicadorDaApi {
                 )
                 .await
             {
-                Ok(_) => Recado::ClassificadaSubiu {
+                Ok(subida) => Recado::ClassificadaSubiu {
                     foto_id: foto_id.clone(),
+                    receita: subida.receita.map(|r| r.to_string()),
                 },
                 Err(frase) => Recado::EnvioFalhou {
                     alvo: foto_id.clone(),
@@ -899,6 +906,11 @@ pub mod mentira {
         pub rejeitadas_na_nuvem: Mutex<Vec<String>>,
         #[allow(clippy::type_complexity)]
         pub ao_subir: Mutex<Option<Box<dyn Fn(&PublicadorDeMentira, &str, u32) + Send>>>,
+        /// A receita que o catálogo tem da foto **no instante em que a subida
+        /// a lê** — é ela que vai junto, como no `subir` de verdade. Sem gancho,
+        /// a foto sobe no neutro.
+        #[allow(clippy::type_complexity)]
+        pub receita_do_catalogo: Mutex<Option<Box<dyn Fn(&str) -> Option<String> + Send>>>,
         /// As fotos tiradas do storage.
         pub tiradas: Mutex<Vec<String>>,
         /// O que foi negociado, por foto.
@@ -1239,7 +1251,7 @@ pub mod mentira {
             self.reveladas.lock().expect("as reveladas").push((
                 foto_no_site.clone(),
                 ajustes,
-                corte,
+                corte.clone(),
             ));
             let recado = match self
                 .salvar_falha
@@ -1250,7 +1262,22 @@ pub mod mentira {
                     alvo: foto_no_site,
                     frase,
                 },
-                None => Recado::RevelacaoSalva { foto_no_site },
+                None => {
+                    // 🔑 **A receita nova fica na linha da foto**, como no
+                    // servidor: é dela que a galeria relida reabre a foto
+                    // depois que o depósito daqui se esvazia.
+                    if let Some(foto) = self
+                        .fotos_da_sessao
+                        .lock()
+                        .expect("as fotos")
+                        .iter_mut()
+                        .find(|f| f.id == foto_no_site)
+                    {
+                        foto.ajustes = Some(ajustes_em_json(&ajustes, &corte));
+                        foto.revelada = true;
+                    }
+                    Recado::RevelacaoSalva { foto_no_site }
+                }
             };
             self.responder_ou_guardar(canal, recado);
         }
@@ -1342,10 +1369,16 @@ pub mod mentira {
                     frase,
                 },
                 None => {
+                    let receita = self
+                        .receita_do_catalogo
+                        .lock()
+                        .expect("o gancho")
+                        .as_ref()
+                        .and_then(|ler| ler(&foto_id));
                     if let Some(consequencia) = self.ao_subir.lock().expect("o gancho").as_ref() {
                         consequencia(self, &foto_id, ordem);
                     }
-                    Recado::ClassificadaSubiu { foto_id }
+                    Recado::ClassificadaSubiu { foto_id, receita }
                 }
             };
             self.responder_ou_guardar(canal, recado);

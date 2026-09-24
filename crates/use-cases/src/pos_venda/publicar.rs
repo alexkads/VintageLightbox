@@ -137,10 +137,10 @@ impl PublicarNoPosVendaUseCase {
         estado: Option<EstadoNoBalcao>,
         nota: Option<u8>,
         produto_id: Option<String>,
-    ) -> Result<String, String> {
+    ) -> Result<Subida, String> {
         self.subir(sessao, galeria_id, id, ordem, estado, nota, produto_id)
             .await
-            .map(|(nome, _)| nome)
+            .map(|(subida, _)| subida)
             .map_err(|(nome, erro)| format!("{nome}: {erro}"))
     }
 
@@ -284,7 +284,7 @@ impl PublicarNoPosVendaUseCase {
         nota: Option<u8>,
         // A faixa escolhida na barra de envio; `None` segue a galeria.
         produto_id: Option<String>,
-    ) -> Result<(String, EstadoNoBalcao), (String, String)> {
+    ) -> Result<(Subida, EstadoNoBalcao), (String, String)> {
         let photo = match self.fotos.find_by_id(id).await {
             Ok(Some(p)) => p,
             Ok(None) => return Err((id.to_string(), "foto não está mais no catálogo".into())),
@@ -372,6 +372,11 @@ impl PublicarNoPosVendaUseCase {
             // o site trata o campo ausente como "o que subiu **é** o bruto".
             .filter(|bytes| !bytes.is_empty());
 
+        // 🔑 A receita anda com o bruto: é com ela que a foto reabre revelada
+        // no editor do site, e não no neutro.
+        let receita = bruto
+            .as_ref()
+            .and_then(|_| self.exportador.receita_para_o_site(&photo));
         let enviada = self
             .api
             .enviar_foto(
@@ -380,11 +385,7 @@ impl PublicarNoPosVendaUseCase {
                 FotoParaEnviar {
                     nome: nome.clone(),
                     jpeg,
-                    // 🔑 A receita anda com o bruto: é com ela que a foto reabre
-                    // revelada no editor do site, e não no neutro.
-                    ajustes: bruto
-                        .as_ref()
-                        .and_then(|_| self.exportador.receita_para_o_site(&photo)),
+                    ajustes: receita.clone(),
                     bruto,
                     estado,
                     produto_id,
@@ -431,8 +432,23 @@ impl PublicarNoPosVendaUseCase {
             eprintln!("⚠️ [Pós-venda] {nome} subiu, mas o id do site não foi gravado: {erro}");
         }
 
-        Ok((nome, estado))
+        Ok((Subida { nome, receita }, estado))
     }
+}
+
+/// O que uma subida levou ao site.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Subida {
+    /// O nome que o cliente vê.
+    pub nome: String,
+    /// A receita que foi junto com o arquivo — `None` é a foto no neutro.
+    ///
+    /// 🚨 **É a receita da leitura do começo da subida, e não a de agora.** A
+    /// foto é lida, revelada e mandada em segundos, e o operador revela
+    /// enquanto o ensaio sobe (C20): o ajuste feito nessa janela fica só no
+    /// catálogo. Quem subiu a foto compara esta receita com a do catálogo e
+    /// manda a diferença (`conciliar_o_que_subiu`, no app).
+    pub receita: Option<serde_json::Value>,
 }
 
 /// O nome que o cliente vê no site: o do arquivo de origem, com `.jpg`,
@@ -1160,7 +1176,7 @@ mod tests {
             .await
             .expect("subiu");
         assert_eq!(
-            nome, "DSC_2571.jpg",
+            nome.nome, "DSC_2571.jpg",
             "o cliente recebeu o nome do disco em vez do nome da câmera"
         );
     }
@@ -1197,7 +1213,7 @@ mod tests {
             .enviar_uma(&sessao(), "g1", &id, 0, None, None, None)
             .await
             .expect("subiu");
-        assert_eq!(nome, "DSC_0001.jpg");
+        assert_eq!(nome.nome, "DSC_0001.jpg");
     }
 
     /// 🚨 **A nota e a chave sobem junto do arquivo — as duas faltavam.**
@@ -1343,7 +1359,7 @@ mod tests {
             .enviar_uma(&sessao(), "g1", &id, 0, None, None, None)
             .await
             .expect("subiu");
-        assert_eq!(nome, "DSC_009.jpg");
+        assert_eq!(nome.nome, "DSC_009.jpg");
         // 🔑 Não cria galeria e não avisa o cliente: o aviso sai no fim do lote,
         // e não a cada estrela.
         assert!(api.galerias.lock().unwrap().is_empty());

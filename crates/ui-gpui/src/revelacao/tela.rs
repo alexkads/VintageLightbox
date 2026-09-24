@@ -224,6 +224,16 @@ pub struct Revelacao {
     /// a tarefa continua existindo depois de terminar, e trocar de foto gravaria
     /// de novo o que já estava no banco.
     pendente: bool,
+    /// As fotos que **esta abertura** gravou — um ajuste, uma predefinição, um
+    /// "Sincronizar". Recomeça a cada `abrir_no_acervo`.
+    ///
+    /// 🔑 **É o que separa o que o operador fez do que a tira só guarda.** A
+    /// cópia de cada foto na tira é um retrato de quando a Revelação abriu: a
+    /// receita padrão da sessão, aplicada depois, não chega a ela. Quem lê a
+    /// tira para levar ao site o que mudou (`trazer_da_revelacao_as_que_subiram`)
+    /// levaria o retrato velho por cima da receita nova — e zeraria no site uma
+    /// foto que ninguém tocou (visto rodando o app, 24/set/2026).
+    gravadas: std::collections::HashSet<String>,
     /// A espera do próximo salvamento. Guardada porque **descartá-la cancela** —
     /// é assim que cada movimento novo do slider adia a gravação em vez de
     /// enfileirar mais uma.
@@ -544,6 +554,7 @@ impl Revelacao {
             corte: Corte::default(),
             historico: Historico::novo(Estado::default()),
             pendente: false,
+            gravadas: std::collections::HashSet::new(),
             _gravacao: None,
             controles,
             varredura: 0,
@@ -621,6 +632,7 @@ impl Revelacao {
         }
         self.posicao = posicao.min(acervo.len() - 1);
         self.acervo = Arc::new(acervo);
+        self.gravadas.clear();
         // Acervo novo, posições novas: o lote antigo não aponta para nada.
         self.marcadas = sincronizacao::so(self.posicao);
         self.ultima_na_tira = None;
@@ -659,6 +671,11 @@ impl Revelacao {
 
     pub fn posicao(&self) -> usize {
         self.posicao
+    }
+
+    /// As fotos que esta abertura gravou — ver [`Self::gravadas`].
+    pub fn gravadas(&self) -> &std::collections::HashSet<String> {
+        &self.gravadas
     }
 
     /// A lista que a tira percorre.
@@ -888,6 +905,8 @@ impl Revelacao {
         gravadas: &[(String, Ajustes, Corte)],
         cx: &mut Context<Self>,
     ) {
+        self.gravadas
+            .extend(gravadas.iter().map(|(id, _, _)| id.clone()));
         let acervo = Arc::make_mut(&mut self.acervo);
         for (id, ajustes, corte) in gravadas {
             if let Some(foto) = acervo.iter_mut().find(|f| &f.id == id) {
@@ -1455,6 +1474,7 @@ impl Revelacao {
         }
         let id = aberta.foto.id.clone();
         self.gravador.gravar(id.clone(), self.ajustes, self.corte);
+        self.gravadas.insert(id.clone());
 
         let (ajustes, corte) = (self.ajustes, self.corte);
         if let Some(aberta) = self.aberta.as_mut() {

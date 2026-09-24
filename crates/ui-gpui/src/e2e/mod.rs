@@ -411,6 +411,33 @@ pub(super) fn abrir_o_app(cx: &mut TestAppContext, cenario: Cenario) -> Estudio 
         ..Default::default()
     });
     let gravador = Arc::new(GravadorDeMentira::default());
+    // 🔑 **O catálogo é um só**, como no disco: o que a Revelação grava numa
+    // foto local é o que a grade relê e o que a subida do ensaio leva.
+    *gravador.no_catalogo.lock().expect("o gancho") = Some(Box::new({
+        let acervo = acervo.clone();
+        move |id, ajustes, corte| {
+            if let Some(foto) = acervo
+                .fotos
+                .lock()
+                .expect("o acervo")
+                .iter_mut()
+                .find(|f| f.id == id)
+            {
+                persistencia::na_foto(foto, ajustes, corte);
+            }
+        }
+    }));
+    *site.receita_do_catalogo.lock().expect("o gancho") = Some(Box::new({
+        let acervo = acervo.clone();
+        move |id| {
+            let fotos = acervo.fotos.lock().expect("o acervo");
+            let foto = fotos.iter().find(|f| f.id == id)?;
+            let ajustes = persistencia::da_foto(foto);
+            let corte = persistencia::para_crop_settings(&persistencia::corte_da_foto(foto));
+            (ajustes != Default::default() || corte != Default::default())
+                .then(|| crate::pos_venda::porta::ajustes_em_json(&ajustes, &corte).to_string())
+        }
+    }));
     let importador = Arc::new(if cenario.importador_demorado {
         ImportadorDeMentira::demorado()
     } else {

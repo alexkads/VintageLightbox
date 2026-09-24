@@ -549,6 +549,10 @@ pub mod mentira {
         gravado: Mutex<Vec<(String, Ajustes, Corte)>>,
         /// O depósito das fotos do site, como se já estivesse no disco.
         do_site: Mutex<Vec<(String, String)>>,
+        /// Onde a receita de uma foto **local** cai — o catálogo, que é o que
+        /// o gravador de verdade escreve e o que a subida do ensaio lê.
+        #[allow(clippy::type_complexity)]
+        pub no_catalogo: Mutex<Option<Box<dyn Fn(&str, Ajustes, Corte) + Send>>>,
     }
 
     impl GravadorDeMentira {
@@ -562,8 +566,8 @@ pub mod mentira {
         /// Semeia o depósito — o que "o app achou lá ao abrir".
         pub fn com_o_deposito(guardadas: Vec<(String, String)>) -> Self {
             Self {
-                gravado: Mutex::default(),
                 do_site: Mutex::new(guardadas),
+                ..Self::default()
             }
         }
 
@@ -588,6 +592,8 @@ pub mod mentira {
                 let mut deposito = self.do_site.lock().expect("o depósito");
                 deposito.retain(|(outra, _)| outra != no_site);
                 deposito.push((no_site.to_string(), json));
+            } else if let Some(catalogo) = self.no_catalogo.lock().expect("o gancho").as_ref() {
+                catalogo(&id, ajustes, corte);
             }
             self.gravado
                 .lock()

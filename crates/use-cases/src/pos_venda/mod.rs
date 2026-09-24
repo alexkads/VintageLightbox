@@ -3,5 +3,5 @@
 pub mod publicar;
 pub mod revelacoes_locais;
 
-pub use publicar::PublicarNoPosVendaUseCase;
+pub use publicar::{PublicarNoPosVendaUseCase, Subida};
 pub use revelacoes_locais::RevelacoesLocaisUseCase;

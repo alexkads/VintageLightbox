@@ -134,7 +134,7 @@ impl PosVendaController {
         estado: Option<EstadoNoBalcao>,
         nota: Option<u8>,
         produto_id: Option<String>,
-    ) -> Result<String, String> {
+    ) -> Result<use_cases::pos_venda::Subida, String> {
         let id = PhotoId::from_string(foto_id).map_err(|e| e.to_string())?;
         self.publicar
             .enviar_uma(sessao, galeria_id, &id, ordem, estado, nota, produto_id)
