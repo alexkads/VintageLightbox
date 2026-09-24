@@ -23,11 +23,19 @@
 #    mandar "atualização" a todo balcão.
 
 version: '{build}-{branch}'
+# Só `dev`: o `main` recebe o `dev` por fast-forward, e com um job por vez
+# no plano gratuito a build do `main` só atrasaria a fila compilando de novo o
+# mesmo código.
 branches:
   only:
     - dev
-    - main
 skip_tags: true
+# O instalador compila o topo do branch, então commit que só mexe em texto
+# compilaria exatamente o que a build anterior compilou.
+skip_commits:
+  files:
+    - '**/*.md'
+    - docs/**
 clone_depth: 1
 
 environment:
