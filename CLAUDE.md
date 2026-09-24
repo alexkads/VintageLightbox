@@ -153,6 +153,29 @@ cargo fmt --all
 cargo clippy --workspace
 ```
 
+## CI: o AppVeyor roda o instalador do balcão (desde 24/set/2026)
+
+O GitHub Actions está travado por cobrança desde 17/set, e o `.github/workflows/` não roda. Quem
+confere agora é o **AppVeyor** (<https://ci.appveyor.com/project/alexkads/vintagelightbox>),
+configurado em [`appveyor.yml`](appveyor.yml). É gratuito para projeto público e roda um job por
+vez.
+
+- **O que ele roda é o instalador**, `scripts/instalar-vintagelightbox-gpui.cmd`. No Windows é o
+  bloco PowerShell, extraído do checkout como o `.cmd` faz; no Linux é o `sh`, com a mesma linha
+  do balcão. Ele não roda `cargo test`. A pergunta que ele responde é "o próximo balcão que repetir
+  a instalação compila?".
+- **Ele compila o branch como está no GitHub**, porque o instalador baixa
+  `archive/refs/heads/<branch>`. E o `Cargo.lock` não é versionado: uma build vermelha sem commit
+  novo costuma ser dependência nova quebrada, a mesma que o balcão pegaria.
+- **Quando falha no Linux**, o registro do instalador sobe como artefato da build. É o mesmo
+  arquivo que o balcão mandaria.
+- 🚨 **Nenhum segredo vai para lá.** Ele não assina nem publica. A chave minisign e o wrangler do
+  R2 ficam na máquina de quem lança; um CI de terceiro com a chave privada poderia mandar
+  "atualização" a todo balcão.
+
+Status da última build:
+`curl -s https://ci.appveyor.com/api/projects/alexkads/vintagelightbox | python3 -m json.tool | grep -m3 status`.
+
 ## Architecture
 
 VintageLightbox follows **Clean Architecture** with 4 layers as separate crates:
