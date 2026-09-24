@@ -1,0 +1,84 @@
+# AppVeyor — roda o INSTALADOR do balcão, no Windows e no Linux, a cada push.
+#
+# 🔑 **Por que existe (24/set/2026).** O GitHub Actions está travado por
+#    cobrança desde 17/set, e nem antes ele conferia o que importa: o `ci.yml`
+#    tirou o Linux da matriz e testava `cargo test`, não o que o balcão roda.
+#    Os balcões são Windows e Linux e instalam por
+#    `scripts/instalar-vintagelightbox-gpui.cmd`, que baixa o branch e compila
+#    na máquina. Então é **ele** que roda aqui, do jeito que roda lá: se o
+#    AppVeyor ficou verde, o próximo balcão que repetir a instalação compila.
+#
+# ⚠️ **O que ele compila é o branch no GitHub, e não este checkout.** O
+#    instalador baixa `archive/refs/heads/<branch>`, como no balcão. Dois pushes
+#    seguidos podem fazer a primeira build compilar o código da segunda.
+#
+# ⚠️ **O `Cargo.lock` não é versionado** (`.gitignore`): cada instalação
+#    resolve as dependências do dia. Uma build vermelha sem commit novo
+#    costuma ser uma dependência que publicou versão quebrada. É o que o
+#    balcão pegaria no dia seguinte, então é aviso de verdade.
+#
+# 🚨 **Nada de segredo aqui.** Esta build não assina nem publica: a chave
+#    minisign e o wrangler do R2 ficam na máquina de quem lança
+#    (empacotamento/README.md). Um CI de terceiro com a chave privada poderia
+#    mandar "atualização" a todo balcão.
+
+version: '{build}-{branch}'
+branches:
+  only:
+    - dev
+    - main
+skip_tags: true
+clone_depth: 1
+
+environment:
+  matrix:
+    - APPVEYOR_BUILD_WORKER_IMAGE: Visual Studio 2022
+    - APPVEYOR_BUILD_WORKER_IMAGE: Ubuntu2204
+
+# Uma falha num sistema não esconde o outro.
+matrix:
+  fast_finish: false
+
+for:
+  # ── Windows ────────────────────────────────────────────────────────────────
+  #
+  # O `.cmd` de dois cliques baixa a versão mais nova do próprio script do
+  # `raw.githubusercontent.com/.../dev`, que tem cache de minutos, e termina
+  # num `pause`. Aqui o bloco PowerShell é extraído **deste checkout** do mesmo
+  # jeito que o `.cmd` o extrai, e roda no mesmo Windows PowerShell 5.1.
+  - matrix:
+      only:
+        - APPVEYOR_BUILD_WORKER_IMAGE: Visual Studio 2022
+    build_script:
+      - ps: |
+          $ErrorActionPreference = 'Stop'
+          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+          $env:VLB_VERSAO = $env:APPVEYOR_REPO_BRANCH
+          $env:VLB_DESTINO = 'C:\vlb-instalado'
+          $t = [IO.File]::ReadAllText("$env:APPVEYOR_BUILD_FOLDER\scripts\instalar-vintagelightbox-gpui.cmd")
+          $n = [char]10
+          $i = $t.IndexOf($n + '#==POWERSHELL==')
+          $f = $t.IndexOf($n + '#==FIM-POWERSHELL==', $i)
+          if ($i -lt 0 -or $f -le $i) { throw 'instalador sem o bloco PowerShell' }
+          Invoke-Expression $t.Substring($i, $f - $i)
+          $exe = 'C:\vlb-instalado\VintageLightbox-GPUI.exe'
+          if (-not (Test-Path $exe)) { throw "o instalador terminou sem deixar $exe" }
+          Get-Item $exe | Format-List FullName, Length, LastWriteTime
+
+  # ── Linux ──────────────────────────────────────────────────────────────────
+  #
+  # Exatamente a linha do balcão, com o arquivo deste checkout no lugar do
+  # `curl`. O usuário `appveyor` tem `sudo` sem senha, que é o que o
+  # instalador usa para os pacotes do apt.
+  - matrix:
+      only:
+        - APPVEYOR_BUILD_WORKER_IMAGE: Ubuntu2204
+    build_script:
+      - sh: sh scripts/instalar-vintagelightbox-gpui.cmd --versao "$APPVEYOR_REPO_BRANCH" --destino "$HOME/vlb-instalado"
+      - sh: test -x "$HOME/vlb-instalado/bin/vintagelightbox-gpui" && ls -l "$HOME/vlb-instalado/bin/vintagelightbox-gpui"
+    on_failure:
+      # O instalador grava o registro completo (retrato da máquina + saída do
+      # cargo); é o mesmo arquivo que o balcão mandaria.
+      - sh: for f in $HOME/.vintagelightbox/registros/instalacao-*.log; do [ -f "$f" ] && appveyor PushArtifact "$f"; done
+
+test: off
