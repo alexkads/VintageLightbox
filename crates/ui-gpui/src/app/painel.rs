@@ -114,12 +114,6 @@ impl Tela {
         }
     }
 
-    /// Se a tela tem o menu lateral. A revelação cobre a janela inteira, como
-    /// o editor do site (`fixed inset-0`).
-    pub(super) fn tem_menu(self) -> bool {
-        !matches!(self, Tela::Revelacao)
-    }
-
     /// Se a tela tem a faixa do cabeçalho. A galeria tem a barra dela.
     pub(super) fn tem_cabecalho(self) -> bool {
         !matches!(self, Tela::Revelacao | Tela::Sessao | Tela::NovaSessao)
@@ -135,6 +129,14 @@ impl Aplicativo {
     /// não passam por aqui.
     pub fn ir_para(&mut self, tela: Tela, window: &mut Window, cx: &mut Context<Self>) {
         self.menu_da_conta = false;
+        // 🎞️ O menu lateral também está na Revelação: sair dela por ele grava
+        // o pendente, e a guia da sessão guarda a Revelação para voltar nela.
+        // Para a galeria da mesma sessão é só sair: a guia fica na frente.
+        if tela == Tela::Sessao {
+            self.largar_a_revelacao(cx);
+        } else {
+            self.estacionar_a_revelacao(cx);
+        }
         if tela != Tela::Sessao && self.sessao_aberta.is_some() {
             self.sair_da_sessao(cx);
         }
@@ -202,6 +204,7 @@ impl Aplicativo {
     /// O "Sair" do menu da conta: esquece a sessão e volta para a capa.
     pub fn sair_da_conta(&mut self, cx: &mut Context<Self>) {
         self.menu_da_conta = false;
+        self.largar_a_revelacao(cx);
         if self.sessao_aberta.is_some() {
             self.sair_da_sessao(cx);
         }
@@ -302,6 +305,8 @@ impl Aplicativo {
                 let titulo = item.titulo;
                 let base = h_flex()
                     .id(SharedString::from(format!("menu-{titulo}")))
+                    // Para o teste clicar onde o dedo clica.
+                    .debug_selector(move || format!("menu-{titulo}"))
                     .h(px(32.))
                     .rounded(px(8.))
                     .gap(px(8.))
@@ -872,7 +877,6 @@ mod testes {
         for tela in [Tela::Sessoes, Tela::Sessao, Tela::Retencao, Tela::Revelacao] {
             assert_eq!(tela.secao(), Tela::Sessoes);
         }
-        assert!(!Tela::Revelacao.tem_menu());
         assert!(!Tela::Sessao.tem_cabecalho());
         assert!(Tela::Caixa.tem_cabecalho());
     }

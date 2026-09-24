@@ -29,13 +29,22 @@
 //! de sessão no modo revelação, deixando pouco intuitivo"*). Na web o editor
 //! cobre a página, mas as abas do navegador continuam em cima dele; aqui a
 //! faixa sumia, e o operador perdia de vista de quem era a foto aberta e como
-//! ir ao próximo cliente. Trocar de guia de dentro da Revelação é sair dela
-//! pela porta de sempre (`sair_da_revelacao`, que grava o pendente) e entrar
-//! na outra sessão.
+//! ir ao próximo cliente.
+//!
+//! 🎞️ **E cada guia lembra o modo em que ficou** (dono, no mesmo dia: *"quando
+//! eu mudar de guia não pode fechar o modo revelação se o mesmo estiver
+//! aberto na sessão"*). Como a aba do navegador, que volta na página em que
+//! foi deixada: a guia que sai da frente com a Revelação aberta guarda a tira,
+//! a foto e o recorte ([`RevelacaoEstacionada`]), e volta na Revelação. A tela
+//! da Revelação continua **uma só** — a memória de vídeo não cresce por
+//! cliente —, e a saída grava o pendente pela porta de sempre
+//! (`sair_da_revelacao`).
 
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use adapters::view_models::PhotoViewModel;
+use biblioteca_core::acervo::Filtro;
 use domain::value_objects::{ColorLabel, CropSettings};
 use gpui::{
     div, prelude::*, px, Context, DragMoveEvent, Entity, FontWeight, MouseButton, SharedString,
@@ -60,6 +69,24 @@ const LARGURA_MINIMA: f32 = 96.;
 
 /// Uma revelação à espera do "Salvar na galeria": `(id no site, receita, corte)`.
 pub(super) type Pendente = (String, Ajustes, CropSettings);
+
+/// A Revelação que uma guia deixou aberta ao sair da frente.
+///
+/// 🔑 **Guarda a tira, e não o pedido de abri-la.** Refazer a tira pela grade
+/// esperaria a galeria responder, e a guia voltaria mostrando a grade por um
+/// instante — o "fechou" que o dono não quer ver. A tira guardada abre na hora.
+///
+/// ⚠️ Só vive enquanto o app está aberto: não vai para o
+/// `guias-das-sessoes.json`, porque abrir o app direto num editor de uma foto
+/// de ontem seria surpresa, e não continuidade.
+#[derive(Debug, Clone)]
+pub(super) struct RevelacaoEstacionada {
+    pub acervo: Vec<PhotoViewModel>,
+    pub posicao: usize,
+    pub recorte: Filtro,
+    /// As marcadas da tira, com o id da grade.
+    pub marcadas: Vec<String>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Guia {
@@ -92,6 +119,8 @@ pub struct Guias {
     lista: Vec<Guia>,
     /// As filas do "Salvar" das guias que não estão à frente, por galeria.
     estacionadas: HashMap<String, Vec<Pendente>>,
+    /// As guias de trás que ficaram na Revelação, por galeria.
+    reveladas: HashMap<String, RevelacaoEstacionada>,
 }
 
 impl Guias {
@@ -135,6 +164,7 @@ impl Guias {
         let i = self.posicao(id)?;
         self.lista.remove(i);
         self.estacionadas.remove(id);
+        self.reveladas.remove(id);
         self.lista
             .get(i)
             .or_else(|| i.checked_sub(1).and_then(|j| self.lista.get(j)))
@@ -286,6 +316,23 @@ impl Guias {
     pub fn esvaziar(&mut self) {
         self.lista.clear();
         self.estacionadas.clear();
+        self.reveladas.clear();
+    }
+
+    /// A guia sai da frente com a Revelação aberta: ela fica guardada.
+    pub(super) fn estacionar_revelacao(&mut self, id: &str, revelacao: RevelacaoEstacionada) {
+        if self.posicao(id).is_some() && !revelacao.acervo.is_empty() {
+            self.reveladas.insert(id.to_string(), revelacao);
+        }
+    }
+
+    /// A Revelação que a guia deixou, se deixou — e ela sai daqui.
+    pub(super) fn tirar_revelacao(&mut self, id: &str) -> Option<RevelacaoEstacionada> {
+        self.reveladas.remove(id)
+    }
+
+    pub fn em_revelacao(&self, id: &str) -> bool {
+        self.reveladas.contains_key(id)
     }
 
     pub fn posicao(&self, id: &str) -> Option<usize> {
@@ -439,8 +486,12 @@ impl Aplicativo {
         {
             return;
         }
-        self.largar_a_revelacao(cx);
+        self.estacionar_a_revelacao(cx);
+        let revelada = self.guias.tirar_revelacao(&id);
         self.entrar_na_sessao(id, cx);
+        if let Some(revelada) = revelada {
+            self.voltar_a_revelacao(revelada, window, cx);
+        }
         window.focus(&self.foco);
     }
 
@@ -467,20 +518,75 @@ impl Aplicativo {
         cx.notify();
     }
 
-    /// A Revelação sai pela porta de sempre antes de a guia trocar ou fechar.
+    /// A Revelação sai pela porta de sempre antes de a guia fechar.
     ///
     /// 🚨 `entrar_na_sessao` e `ir_para` não passam por `sair_da_revelacao`:
     /// sem isto, o ajuste dos últimos 500 ms se perderia, e a grade da sessão
     /// seguiria com a miniatura de antes da foto que estava aberta.
-    fn largar_a_revelacao(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn largar_a_revelacao(&mut self, cx: &mut Context<Self>) {
         if self.tela == Tela::Revelacao {
             self.sair_da_revelacao(cx);
         }
     }
 
+    /// A guia da frente sai da frente (outra guia, o `+`, o menu lateral): se
+    /// estava na Revelação, sai dela gravando o pendente, e a guia a guarda
+    /// para voltar nela.
+    pub(super) fn estacionar_a_revelacao(&mut self, cx: &mut Context<Self>) {
+        let Some(id) = self
+            .sessao_aberta
+            .clone()
+            .filter(|_| self.tela == Tela::Revelacao)
+        else {
+            return;
+        };
+        self.sair_da_revelacao(cx);
+        let revelada = {
+            let tela = self.revelacao.read(cx);
+            RevelacaoEstacionada {
+                acervo: tela.acervo().to_vec(),
+                posicao: tela.posicao(),
+                recorte: tela.recorte(),
+                marcadas: tela.marcadas_na_grade(),
+            }
+        };
+        self.guias.estacionar_revelacao(&id, revelada);
+    }
+
+    /// A guia volta à frente na Revelação em que ficou.
+    ///
+    /// 🔑 **Se a tela da Revelação ainda é a desta guia** (ninguém revelou
+    /// outra sessão no meio), ela só volta a aparecer: o zoom e o desfazer
+    /// continuam onde estavam. Senão, a tira guardada é aberta de novo.
+    fn voltar_a_revelacao(
+        &mut self,
+        revelada: RevelacaoEstacionada,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) {
+        let intacta = {
+            let tela = self.revelacao.read(cx);
+            tela.posicao() == revelada.posicao
+                && tela
+                    .acervo()
+                    .iter()
+                    .map(|f| &f.id)
+                    .eq(revelada.acervo.iter().map(|f| &f.id))
+        };
+        if !intacta {
+            self.revelacao.update(cx, |tela, cx| {
+                tela.abrir_no_acervo(revelada.acervo, revelada.posicao, window, cx);
+                tela.herdar_da_sessao(revelada.recorte, &revelada.marcadas, cx);
+            });
+        }
+        self.tela = Tela::Revelacao;
+        self.recontar_o_que_falta_subir(cx);
+        self.atualizar_o_cliente(true, cx);
+        cx.notify();
+    }
+
     /// O `+` da faixa e o `⌘T`: a lista de sessões, que é a "página nova".
     fn abrir_guia_nova(&mut self, window: &mut gpui::Window, cx: &mut Context<Self>) {
-        self.largar_a_revelacao(cx);
         self.ir_para(Tela::Sessoes, window, cx);
     }
 
@@ -574,6 +680,10 @@ impl Aplicativo {
             .iter()
             .map(|g| g.titulo.clone())
             .collect()
+    }
+
+    pub fn guia_em_revelacao_para_teste(&self, id: &str) -> bool {
+        self.guias.em_revelacao(id)
     }
 
     pub fn guias_para_teste(&self) -> Vec<String> {
@@ -800,6 +910,11 @@ impl Aplicativo {
 
         let guias = self.guias.lista().iter().enumerate().map(|(i, guia)| {
             let ativa = da_frente.as_deref() == Some(guia.id.as_str());
+            let revelando = if ativa {
+                self.tela == Tela::Revelacao
+            } else {
+                self.guias.em_revelacao(&guia.id)
+            };
             let por_salvar = if ativa {
                 self.a_subir.len()
             } else {
@@ -921,10 +1036,16 @@ impl Aplicativo {
                     },
                 ))
                 .child(
-                    Icon::new(Icone::Camera)
-                        .size(px(14.))
-                        .flex_none()
-                        .when_some(cor, |i, cor| i.text_color(cor)),
+                    // 🎞️ A guia que está (ou ficou) na Revelação troca a câmera
+                    // pelo ícone do "Revelar": volta-se nela no editor.
+                    Icon::new(if revelando {
+                        Icone::SlidersHorizontal
+                    } else {
+                        Icone::Camera
+                    })
+                    .size(px(14.))
+                    .flex_none()
+                    .when_some(cor, |i, cor| i.text_color(cor)),
                 )
                 .map(|g| match editando {
                     // Enter confirma, Esc desiste, clicar fora confirma.

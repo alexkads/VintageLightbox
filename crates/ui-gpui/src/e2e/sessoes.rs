@@ -316,25 +316,30 @@ fn cada_sessao_abre_numa_guia_e_as_teclas_do_navegador_andam_entre_elas(cx: &mut
     });
 }
 
-/// 🎬 **As guias ficam em cima da Revelação**, como as abas do navegador em
-/// cima do editor do site (dono, 24/set/2026). A da frente é a sessão da foto
-/// aberta, e clicar nela não tira ninguém do editor; `⌘W` não fecha nada ali;
-/// e o clique de verdade na outra guia sai da Revelação levando o ajuste feito
-/// e entra na outra sessão.
+/// 🎬 **As guias ficam em cima da Revelação, e cada uma lembra o modo em que
+/// ficou** (dono, 24/set/2026), como as abas do navegador. A da frente é a
+/// sessão da foto aberta, e clicar nela não tira ninguém do editor; `⌘W` não
+/// fecha nada ali. O clique de verdade na outra guia grava o ajuste feito e
+/// mostra a outra sessão como ela estava; voltar reabre a Revelação na mesma
+/// foto — inclusive depois de a outra sessão ter revelado no meio, e
+/// inclusive quando a saída foi pelo menu lateral, que fica na Revelação.
 #[gpui::test]
-fn a_revelacao_mostra_as_guias_e_troca_de_sessao_por_elas(cx: &mut TestAppContext) {
+fn a_revelacao_mostra_as_guias_e_cada_guia_volta_no_modo_em_que_ficou(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(cx, Cenario::default());
     e.app(cx, |app, _w, cx| app.entrar_na_sessao("g2".into(), cx));
     e.esperar(cx);
     e.teclar(cx, "cmd-1");
     e.esperar(cx);
-    e.revelar_a_do_site(cx, "a");
+    e.revelar_a_do_site(cx, "b");
 
     let mut visual = gpui::VisualTestContext::from_window(e.raiz.into(), cx);
     let da_frente = visual
         .debug_bounds("guia-g1")
         .expect("a guia da sessão aberta está sobre a Revelação");
     let outra = visual.debug_bounds("guia-g2").expect("a outra guia também");
+    let menu = visual
+        .debug_bounds("menu-Sessões fotográficas")
+        .expect("o menu lateral fica na Revelação");
 
     visual.simulate_click(da_frente.center(), gpui::Modifiers::none());
     cx.run_until_parked();
@@ -353,6 +358,7 @@ fn a_revelacao_mostra_as_guias_e_troca_de_sessao_por_elas(cx: &mut TestAppContex
         );
     });
 
+    // Para a outra guia: ela estava na grade, e é na grade que aparece.
     e.revelacao(cx, |tela, _w, cx| tela.arrastar_slider(0, 1.5, cx));
     let mut visual = gpui::VisualTestContext::from_window(e.raiz.into(), cx);
     visual.simulate_click(outra.center(), gpui::Modifiers::none());
@@ -363,20 +369,49 @@ fn a_revelacao_mostra_as_guias_e_troca_de_sessao_por_elas(cx: &mut TestAppContex
         assert_eq!(app.detalhe.read(cx).galeria_id(), Some("g2"));
     });
     assert!(
-        e.gravador.gravado().iter().any(|(id, _, _)| id == "site:a"),
+        e.gravador.gravado().iter().any(|(id, _, _)| id == "site:b"),
         "o ajuste da foto aberta foi junto"
     );
 
-    // E `⌘1` anda de dentro da Revelação também.
+    // E de volta: a Revelação, na mesma foto — pela tecla, de dentro dela.
     e.teclar(cx, "cmd-1");
     e.esperar(cx);
-    e.revelar_a_do_site(cx, "a");
+    let voltou_na_revelacao = |e: &super::Estudio, cx: &mut TestAppContext| {
+        e.app(cx, |app, _w, _cx| {
+            assert_eq!(app.tela(), Tela::Revelacao, "a guia volta no editor");
+            assert_eq!(app.sessao_aberta_para_teste(), Some(GALERIA));
+        });
+        e.revelacao(cx, |tela, _w, _cx| {
+            assert_eq!(tela.foto_aberta().map(|f| f.id.as_str()), Some("site:b"));
+            assert_eq!(tela.ajustes().exposure, 1.5, "com o ajuste feito");
+        });
+    };
+    voltou_na_revelacao(&e, cx);
+
+    // A outra sessão revela no meio: a tela da Revelação passa a ser dela, e
+    // a guia de cá reabre a tira que guardou.
     e.teclar(cx, "cmd-2");
     e.esperar(cx);
+    e.revelar_pela_barra(cx);
+    e.teclar(cx, "cmd-1");
+    e.esperar(cx);
+    voltou_na_revelacao(&e, cx);
+
+    // Pelo menu lateral: a lista abre, e a guia continua na Revelação.
+    let mut visual = gpui::VisualTestContext::from_window(e.raiz.into(), cx);
+    visual.simulate_click(menu.center(), gpui::Modifiers::none());
+    cx.run_until_parked();
     e.app(cx, |app, _w, _cx| {
-        assert_eq!(app.tela(), Tela::Sessao);
-        assert_eq!(app.sessao_aberta_para_teste(), Some("g2"));
+        assert_eq!(app.tela(), Tela::Sessoes);
+        assert!(app.guia_em_revelacao_para_teste(GALERIA));
+        assert!(
+            app.guia_em_revelacao_para_teste("g2"),
+            "a g2 também ficou no editor"
+        );
     });
+    e.teclar(cx, "cmd-1");
+    e.esperar(cx);
+    voltou_na_revelacao(&e, cx);
 }
 
 /// 🎬 **A guia se arruma como aba de navegador.** Arrastada com o mouse de

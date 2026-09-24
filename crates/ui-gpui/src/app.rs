@@ -1670,6 +1670,10 @@ impl Aplicativo {
             self.deixar_a_sessao(cx);
         }
         self.guias.abrir(&galeria_id, anterior.as_deref());
+        // A Revelação guardada só volta pela guia (`ir_para_a_guia`, que a
+        // tira antes de chegar aqui). Entrar pela lista ou pelo caixa abre a
+        // grade, e a guardada, que ficaria velha, sai.
+        self.guias.tirar_revelacao(&galeria_id);
         if trocou {
             self.a_subir = self.guias.retomar(&galeria_id);
         }
@@ -5033,12 +5037,15 @@ impl Render for Aplicativo {
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             // 🎨 **A moldura do dashboard do site**: o menu lateral à esquerda,
-            // e à direita o cabeçalho de 56 px sobre a tela. A revelação cobre a
-            // janela inteira, como o editor do site (`fixed inset-0`); a galeria
-            // não tem o cabeçalho, porque a barra dela já tem o botão do menu.
-            .when(self.tela.tem_menu(), |raiz| {
-                raiz.child(self.menu_lateral(cx))
-            })
+            // e à direita o cabeçalho de 56 px sobre a tela. A galeria e a
+            // revelação não têm o cabeçalho: a barra de cada uma já tem o dela.
+            //
+            // 🚨 **O menu fica também na Revelação** (dono, 24/set/2026: *"a
+            // barra do menu lateral não pode fechar no modo revelação, pois dá
+            // uma sensação de falta de acabamento"*). Até aqui ela cobria a
+            // janela inteira, como o `fixed inset-0` do site, e a moldura do
+            // app sumia e voltava a cada entrada e saída.
+            .child(self.menu_lateral(cx))
             .child(
                 div()
                     .flex()
@@ -5071,11 +5078,7 @@ impl Render for Aplicativo {
                     ),
             )
             .when(com_caixa, |raiz| raiz.child(self.caixa_flutuante.clone()))
-            .children(
-                (self.tela.tem_menu())
-                    .then(|| self.canto_dos_envios(cx))
-                    .flatten(),
-            )
+            .children(self.canto_dos_envios(cx))
             .when(self.importando, |raiz| {
                 raiz.child(self.modal_de_importacao(cx))
             })
@@ -5091,7 +5094,7 @@ impl Render for Aplicativo {
             .when(self.configurando, |raiz| {
                 raiz.child(self.modal_de_configuracoes(cx))
             })
-            .when(self.menu_da_conta && self.tela.tem_menu(), |raiz| {
+            .when(self.menu_da_conta, |raiz| {
                 raiz.child(self.menu_da_conta(cx))
             })
             // 🔑 **Depois dos modais, e por cima deles.** A faixa é a última
