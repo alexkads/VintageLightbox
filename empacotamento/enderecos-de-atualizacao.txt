@@ -1,0 +1,21 @@
+# Onde o app pergunta se há versão nova, na ordem em que tenta.
+#
+# Uma URL de `latest.json` por linha; `#` começa comentário. O app tenta a
+# primeira e só passa para a seguinte se ela falhar (fora do ar, 404, JSON
+# ilegível). Compilado para dentro do binário por `atualizacao::porta`, e lido
+# por `scripts/lancar-local.sh`, que publica os pacotes ao lado do PRIMEIRO
+# endereço que for do R2. Uma lista só, para o app e o lançamento nunca
+# discordarem de onde as coisas estão.
+#
+# 🔑 O R2 vem primeiro: ele não depende do GitHub Actions, que está travado por
+#    cobrança desde 17/set/2026 (e o Pages também roda como Action, por baixo).
+#    O GitHub Pages fica por último, como espelho, e é o único que o app 0.1.9
+#    e anteriores conhecem: eles só aprendem o R2 quando instalarem uma versão
+#    com este arquivo.
+#
+# ⚠️ O bucket é o `vintagelightbox`, só para isto e público pelo endereço
+#    r2.dev (criado em 24/set/2026). Nunca apontar para `recordarfotos-fotos`:
+#    lá mora foto de cliente, e o bucket é privado de propósito.
+
+https://pub-f97274c3a83f47ff903a64fc1578efb0.r2.dev/latest.json
+https://alexkads.github.io/VintageLightbox/latest.json

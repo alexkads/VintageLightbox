@@ -37,22 +37,36 @@ use std::sync::mpsc::Sender;
 /// do repositório**, em `~/.vintagelightbox/atualizacao.key`.
 pub const CHAVE_PUBLICA: &str = include_str!("../../../../empacotamento/chave-publica.txt");
 
-/// Onde o app pergunta se há versão nova.
+/// Onde o app pergunta se há versão nova — a lista, como está no arquivo.
 ///
 /// 🔑 **Um arquivo estático, e não um endpoint.** O `latest.json` traz **todas**
 /// as plataformas de uma vez, e quem compara as versões é o próprio app: o
 /// updater lê o `version` do manifesto, confronta com a instalada e escolhe a
 /// entrada de `platforms` que corresponde a esta máquina.
 ///
-/// Isso é o que permite o projeto não ter servidor nenhum. Antes isto apontava
-/// para uma rota do `recordarfotos.com.br`, que respondia `204` quando não havia
-/// novidade; a rota saiu quando a distribuição foi para o GitHub, e com ela saiu
-/// a última credencial que o lançamento precisava (7/set/2026).
+/// 🔑 **Vários endereços, tentados em ordem** (24/set/2026). O R2 vem primeiro
+/// porque não depende do GitHub Actions, travado por cobrança desde 17/set; o
+/// GitHub Pages fica por último, como espelho. O updater só passa ao seguinte
+/// quando o anterior falha — fora do ar, 404, JSON ilegível. A lista mora em
+/// `empacotamento/enderecos-de-atualizacao.txt` porque o `lancar-local.sh` lê a
+/// mesma, e os dois nunca podem discordar de onde os pacotes estão.
+const LISTA_DE_ENDERECOS: &str =
+    include_str!("../../../../empacotamento/enderecos-de-atualizacao.txt");
+
+/// Os endereços da lista, na ordem em que o app tenta.
+pub fn enderecos() -> Vec<&'static str> {
+    LISTA_DE_ENDERECOS
+        .lines()
+        .map(str::trim)
+        .filter(|linha| !linha.is_empty() && !linha.starts_with('#'))
+        .collect()
+}
+
+/// Quanto a **procura** espera por um endereço antes de tentar o seguinte.
 ///
-/// ⚠️ **O GitHub Pages serve com cache curto, mas serve com cache.** Um
-/// lançamento pode levar alguns minutos para chegar a todo mundo — o que é
-/// irrelevante para algo que o app consulta uma vez por abertura.
-pub const ENDERECO: &str = "https://alexkads.github.io/VintageLightbox/latest.json";
+/// ⚠️ Só a procura. O mesmo limite no download cortaria um pacote de 30 MB numa
+/// conexão lenta de balcão — por isso `instalar` o tira antes de baixar.
+const ESPERA_DA_PROCURA: std::time::Duration = std::time::Duration::from_secs(15);
 
 /// O que a tela precisa saber sobre uma versão nova.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -116,9 +130,13 @@ mod real {
 
         fn config() -> cargo_packager_updater::Config {
             cargo_packager_updater::Config {
-                endpoints: vec![ENDERECO
-                    .parse()
-                    .expect("o endereço de atualização é literal e válido")],
+                endpoints: enderecos()
+                    .into_iter()
+                    .map(|e| {
+                        e.parse()
+                            .expect("os endereços de atualização são literais e válidos")
+                    })
+                    .collect(),
                 pubkey: CHAVE_PUBLICA.trim().to_string(),
                 ..Default::default()
             }
@@ -132,7 +150,10 @@ mod real {
             let atual = versao
                 .parse()
                 .map_err(|e| format!("versão instalada ilegível: {e}"))?;
-            cargo_packager_updater::check_update(atual, Self::config())
+            cargo_packager_updater::UpdaterBuilder::new(atual, Self::config())
+                .timeout(ESPERA_DA_PROCURA)
+                .build()
+                .and_then(|updater| updater.check())
                 .map_err(|e| format!("não consegui perguntar ao servidor: {e}"))
         }
     }
@@ -170,8 +191,11 @@ mod real {
             let atual = self.versao_atual.clone();
             std::thread::spawn(move || {
                 let aviso = match AtualizadorDaWeb::consultar(&atual) {
-                    Ok(Some(nova)) => {
+                    Ok(Some(mut nova)) => {
                         let versao = nova.version.clone();
+                        // O limite era da procura; o download leva o tempo que
+                        // a conexão do balcão precisar.
+                        nova.timeout = None;
                         // Baixa, **confere a assinatura** e instala. A conferência
                         // é do próprio updater, contra `CHAVE_PUBLICA`.
                         match nova.download_and_install() {
@@ -262,5 +286,67 @@ pub mod mentira {
                 let _ = canal.send(aviso);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod testes {
+    use super::*;
+
+    #[test]
+    fn todo_endereco_da_lista_e_uma_url_de_manifesto() {
+        let lista = enderecos();
+        assert!(
+            !lista.is_empty(),
+            "sem endereço, ninguém recebe atualização"
+        );
+        for endereco in &lista {
+            let url: cargo_packager_updater::reqwest::Url =
+                endereco.parse().expect("endereço ilegível");
+            assert_eq!(url.scheme(), "https", "{endereco}");
+            assert!(url.path().ends_with("/latest.json"), "{endereco}");
+        }
+    }
+
+    /// 🚨 O 0.1.9 e anteriores só conhecem o Pages. Tirá-lo da lista antes de
+    /// todo balcão ter passado por uma versão que conhece o R2 é deixar esses
+    /// balcões presos, e em silêncio.
+    #[test]
+    fn o_pages_continua_na_lista_para_quem_ainda_nao_conhece_o_r2() {
+        assert!(enderecos().contains(&"https://alexkads.github.io/VintageLightbox/latest.json"));
+    }
+
+    #[test]
+    fn o_r2_quando_ligado_vem_antes_do_github() {
+        let lista = enderecos();
+        let r2 = lista.iter().position(|e| e.contains(".r2.dev/"));
+        let pages = lista.iter().position(|e| e.contains("github.io"));
+        if let (Some(r2), Some(pages)) = (r2, pages) {
+            assert!(r2 < pages, "o R2 é o principal; o Pages é espelho");
+        }
+    }
+
+    /// Contra a rede de verdade: o **primeiro** endereço da lista (o R2) acha
+    /// uma versão, baixa o pacote desta plataforma e a assinatura confere.
+    /// `download` confere a assinatura antes de devolver; `install` não roda.
+    ///
+    /// `cargo test -p ui-gpui --lib o_primeiro_endereco -- --ignored`
+    #[test]
+    #[ignore = "usa a rede e baixa ~30 MB"]
+    fn o_primeiro_endereco_serve_um_pacote_com_assinatura_valida() {
+        let primeiro = enderecos()[0];
+        let config = cargo_packager_updater::Config {
+            endpoints: vec![primeiro.parse().expect("endereço")],
+            pubkey: CHAVE_PUBLICA.trim().to_string(),
+            ..Default::default()
+        };
+        let nova = cargo_packager_updater::check_update("0.0.1".parse().unwrap(), config)
+            .expect("o manifesto responde")
+            .expect("há versão para esta plataforma");
+        assert!(nova
+            .download_url
+            .as_str()
+            .starts_with(primeiro.trim_end_matches("latest.json")));
+        nova.download().expect("baixou e a assinatura confere");
     }
 }

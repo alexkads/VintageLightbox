@@ -26,6 +26,23 @@
 >
 > Não é a primeira vez: o `scripts/lancar-local.sh` foi escrito em **7/set/2026** pelo mesmo
 > motivo. Antes de lançar, conferir se voltou: `gh run list --limit 1`.
+>
+> ✅ **Desde 24/set/2026 o lançamento não depende mais do GitHub.** Os pacotes e o `latest.json`
+> vão primeiro para o bucket R2 `vintagelightbox` (público em
+> `https://pub-f97274c3a83f47ff903a64fc1578efb0.r2.dev`), enviados pelo `wrangler` de quem lança.
+> O app pergunta ali primeiro e só cai no Pages se o R2 falhar
+> (`empacotamento/enderecos-de-atualizacao.txt`). O GitHub (Pages + Releases) virou espelho: se
+> recusar, o `lancar-local.sh` avisa e segue. O Pages também roda como Action por baixo
+> (`pages-build-deployment`), e se a trava o alcançar o manifesto de lá congela; por isso o
+> `latest.json` que vai ao Pages já aponta para os pacotes do R2.
+>
+> ⚠️ **O app 0.1.9 e anteriores só conhecem o Pages.** Eles aprendem o R2 ao instalar a primeira
+> versão com a lista nova. Até todo balcão ter passado por ela, o Pages não sai da lista (há teste
+> que o prende lá).
+>
+> 🚨 **O manifesto publicado (0.1.9) só tem macOS.** Para os balcões Windows e Linux o updater
+> ouve "nada novo" e **eles não atualizam** até sair uma versão com `dist/windows-x86_64/` e
+> `dist/linux-x86_64/`, gerados na máquina de cada um e juntados aqui antes do `make publicar`.
 
 > 🎯 **O objetivo do projeto mudou em 17/ago/2026** e está em
 > [`00-OBJETIVO.md`](00-OBJETIVO.md): substituir o Lightroom no fluxo do estúdio, para que a edição

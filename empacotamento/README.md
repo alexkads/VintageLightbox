@@ -1,14 +1,14 @@
 # Empacotamento e distribuição — tudo nesta máquina
 
 O VintageLightbox **não passa pela App Store nem pela Microsoft Store**. Ele é gerado aqui,
-publicado em `recordarfotos.com.br/vintageLightbox`, e a partir da primeira instalação **se atualiza
-sozinho**.
+publicado no bucket R2 `vintagelightbox` (com o GitHub de espelho), e a partir da primeira
+instalação **se atualiza sozinho**.
 
 ```bash
 make mac         # .app + .dmg universal (Intel e Apple Silicon)
 make linux       # .deb + .AppImage, num contêiner Docker
 make tudo        # os dois
-make publicar    # sobe dist/ para o site
+make publicar    # sobe dist/ para o R2 e espelha no GitHub
 make             # a lista inteira
 ```
 
@@ -43,22 +43,40 @@ ninguém aqui consegue abrir antes do cliente — e o renderizador inteiro do ap
 parte que a cross-compilação não alcança.
 
 Os dois leem a **mesma** `empacotamento/packager.toml` e assinam com a **mesma** chave. Publicar é
-sempre daqui, porque é aqui que fica a `service_role`.
+sempre daqui, pelo `make publicar`.
 
 ## O caminho inteiro, de uma vez
 
 ```
-scripts/empacotar.sh                 scripts/publicar.py            o app instalado
-  ├─ cargo build (por alvo)            ├─ sobe para o bucket          ├─ pergunta ao site
-  ├─ lipo (o universal do macOS)       │   versoes/<versao>/…         │   /api/vintagelightbox/
-  ├─ cargo packager                    └─ escreve ultima.json         │      atualizacao
-  │   .app .dmg .deb .AppImage                                        ├─ confere a assinatura
-  │   .msi .exe                        Supabase Storage               └─ instala e reabre
-  └─ minisign: .sig de cada um         (bucket público)
-                                              ▲
-                                              │ lê
-                          site: /vintageLightbox  e  /api/…/atualizacao
+scripts/empacotar.sh (e .ps1)        scripts/lancar-local.sh         o app instalado
+  ├─ cargo build (por alvo)            ├─ confere o R2 (sobe e relê)   ├─ lê a lista de
+  ├─ lipo (o universal do macOS)       ├─ monta latest.json            │   enderecos-de-atualizacao.txt
+  ├─ cargo packager                    ├─ R2: v<versão>/<pacotes>      ├─ pergunta ao R2; se falhar,
+  │   .app .dmg .deb .AppImage         │      e latest.json POR ÚLTIMO │   ao Pages
+  │   .msi .exe                        └─ GitHub (espelho, não trava): ├─ confere a assinatura
+  └─ minisign: .sig de cada um             docs/ no Pages + Release    └─ instala e reabre
 ```
+
+## Publicar no R2 — sem GitHub Actions (24/set/2026)
+
+O GitHub Actions está travado por cobrança desde 17/set, e o Pages também é uma Action por baixo.
+Por isso o destino principal é o bucket **`vintagelightbox`** do Cloudflare R2, só para isto e
+público pelo endereço r2.dev. Não tem nada a ver com `recordarfotos-fotos`, que guarda foto de
+cliente e é privado de propósito.
+
+- **Quem envia é o `wrangler`**, com o login de quem lança (`npm i -g wrangler && wrangler login`).
+  Nenhuma chave S3 fica em disco.
+- **Onde o app pergunta** está em `enderecos-de-atualizacao.txt`, uma URL por linha, em ordem.
+  O `lancar-local.sh` lê o mesmo arquivo para saber para onde publicar.
+- **Conferir sem publicar nada:** `./scripts/lancar-local.sh --conferir-r2` sobe um arquivo
+  pequeno e o lê de volta pelo endereço público.
+- **Conferir que o app atualiza pelo R2:**
+  `cargo test -p ui-gpui --lib o_primeiro_endereco -- --ignored` roda o updater de verdade contra
+  o primeiro endereço, baixa o pacote e confere a assinatura. Ele não instala nada.
+
+🚨 **Com o R2 na lista, publicar só no GitHub não adianta.** O app pergunta ao R2 primeiro, e um
+manifesto velho lá responde "nada novo" *com sucesso*, então o updater nem chega ao Pages. Por isso
+o script recusa publicar sem o `wrangler`.
 
 ## O que é o quê
 

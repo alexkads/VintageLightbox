@@ -244,7 +244,7 @@ endif
 #    `publicar`, com cada plataforma gerada na maquina dela e junta em `dist/`.
 #    Conferir se voltou: `gh run list --limit 1`. Ver docs/STATUS.md.
 
-publicar: ## Publica o que esta em dist/ no Releases e no Pages (sem CI)
+publicar: ## Publica dist/ no R2 e espelha no GitHub (sem CI)
 	@./scripts/lancar-local.sh
 
 lancar: ## Empurra a tag da versao atual — o CI faz o resto

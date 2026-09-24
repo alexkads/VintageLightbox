@@ -59,3 +59,6 @@ vintage_lightbox.db
 
 # Snyk Security Extension - AI Rules (auto-generated)
 .github/instructions/snyk_rules.instructions.md
+
+# Estado local do wrangler (o `make publicar` envia ao R2 por ele)
+/.wrangler/

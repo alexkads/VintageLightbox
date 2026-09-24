@@ -74,11 +74,21 @@ def main() -> None:
     ap.add_argument("--notas", default="", help="o texto que o app mostra ao avisar")
     ap.add_argument("--repo", required=True, help="dono/repositorio")
     ap.add_argument("--tag", default="", help="a tag do lançamento, se houver")
+    ap.add_argument("--base", default="",
+                    help="endereço público do R2; sem ele, os pacotes saem do Releases")
     args = ap.parse_args()
 
     versao = versao_do_workspace()
     tag = args.tag if args.tag.startswith("v") else f"v{versao}"
-    base = f"https://github.com/{args.repo}/releases/download/{tag}"
+    # 🔑 **Com o R2, os pacotes vivem numa pasta por versão** (`v0.1.12/…`): o
+    #    `.app.tar.gz` não leva a versão no nome, e sem a pasta o lançamento
+    #    novo sobrescreveria o arquivo que o manifesto anterior ainda assina.
+    #    O mesmo manifesto vai para o R2 e para o Pages, então até o app que só
+    #    conhece o Pages baixa do R2 — o Releases vira espelho.
+    if args.base:
+        base = f"{args.base.rstrip('/')}/{tag}"
+    else:
+        base = f"https://github.com/{args.repo}/releases/download/{tag}"
 
     interessa = (".dmg", ".deb", ".AppImage", ".exe", ".msi", ".tar.gz")
     arquivos = sorted(p for p in DIST.rglob("*") if p.is_file() and p.name.endswith(interessa))
