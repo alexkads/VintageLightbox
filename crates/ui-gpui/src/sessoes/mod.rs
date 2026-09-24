@@ -14,6 +14,8 @@ pub mod detalhe;
 pub mod nova;
 /// "Do cartão ou pasta…": o menu e a janela de escolher, das duas portas.
 pub mod origem_das_fotos;
+/// A coluna da direita da galeria: aberta ou recolhida, lembrado.
+pub mod paineis;
 /// A receita padrão revelada em segundo plano (o `receita-padrao/` do site).
 pub mod periodo;
 /// O quadro "arraste ou escolha" das duas portas de importar.

@@ -127,8 +127,6 @@ const VAO_DA_TIRA: f32 = 6.0;
 const RECUO_DA_TIRA: f32 = 10.0;
 /// O `p(px(12.))` da tela, dos dois lados.
 const MARGEM_DA_GRADE: f32 = 24.0;
-/// A largura do painel da foto mais o `gap` do `corpo`.
-const LARGURA_DO_PAINEL: f32 = 300.0 + 8.0;
 /// Quanto tempo de um quadro pode ir para carregar miniatura **fora** da vista.
 ///
 /// 🔑 A que está à vista carrega sempre, no mesmo quadro — célula vazia
@@ -140,13 +138,14 @@ const ORCAMENTO_DA_MARGEM: Duration = Duration::from_millis(4);
 ///
 /// 🔑 **A largura vem do quadro, e não da janela**: o menu lateral e o painel
 /// da foto dividem a linha com a grade, e contar as colunas pela janela dava
-/// mais colunas do que cabem. A janela e o painel ficam guardados para a conta
+/// mais colunas do que cabem. A janela e a coluna ficam guardadas para a conta
 /// valer também entre um redimensionamento e o quadro seguinte.
 #[derive(Debug, Clone, Copy)]
 struct MedidaDaGrade {
     largura: f32,
     janela: f32,
-    painel: bool,
+    /// A coluna da direita estava recolhida naquele quadro?
+    recolhida: bool,
 }
 
 /// Os recortes da barra, na ordem da web.
@@ -578,6 +577,9 @@ pub struct Detalhe {
     /// faz a cada foto fica em cima; o que se faz uma vez por atendimento, atrás
     /// de um clique.
     faixa_e_precos_aberto: bool,
+    /// A coluna da direita — aberta ou recolhida, e os Atalhos. Ver
+    /// [`super::paineis`].
+    paineis: super::paineis::PaineisDaGaleria,
     /// O "detalhes" do cabeçalho — os números e os prazos, como o popover do
     /// site. Ele se consulta uma vez por atendimento, e por isso não fica na
     /// faixa de cima: cada pixel ali é uma foto a menos na primeira olhada.
@@ -814,6 +816,7 @@ impl Detalhe {
             campos_do_painel: None,
             atendimento_aberto: false,
             faixa_e_precos_aberto: false,
+            paineis: super::paineis::PaineisDaGaleria::default(),
             detalhes_abertos: false,
             apagar_confirmando: None,
             apagar_lote_confirmando: None,
@@ -1431,27 +1434,28 @@ impl Detalhe {
 
     /// A largura que a grade tem, com a janela desta largura.
     ///
-    /// 🚨 **O painel da foto entra na conta.** Ele tem 300px fixos e divide a
-    /// linha com a grade; ignorá-lo daria mais colunas do que cabem, e a seta ↓
-    /// pularia por cima de uma foto. É o mesmo cuidado que `largura_util` da
-    /// Biblioteca tem com a árvore de pastas.
+    /// 🚨 **A coluna da direita entra na conta.** Ela divide a linha com a
+    /// grade; ignorá-la daria mais colunas do que cabem, e a seta ↓ pularia por
+    /// cima de uma foto. É o mesmo cuidado que `largura_util` da Biblioteca tem
+    /// com a árvore de pastas. E ela **não depende do foco** — só de estar
+    /// recolhida —, então focar uma foto não muda as colunas.
     ///
     /// 🔑 **Com medida, o menu lateral também entra** — a medida é a largura que
     /// o quadro deu à grade. Sem ela (antes do primeiro quadro), a conta é pela
     /// janela, como era.
     fn largura_da_grade(&self, janela: f32) -> f32 {
-        let painel = self.em_foco().is_some();
-        match self.medida_da_grade {
-            Some(m) => {
-                let mut largura = m.largura + (janela - m.janela);
-                if m.painel && !painel {
-                    largura += LARGURA_DO_PAINEL;
-                } else if !m.painel && painel {
-                    largura -= LARGURA_DO_PAINEL;
-                }
-                largura
+        use super::paineis::{LARGURA_ABERTA, LARGURA_RECOLHIDA};
+        let coluna = |recolhida: bool| {
+            if recolhida {
+                LARGURA_RECOLHIDA
+            } else {
+                LARGURA_ABERTA
             }
-            None => janela - MARGEM_DA_GRADE - if painel { LARGURA_DO_PAINEL } else { 0. },
+        };
+        let agora = coluna(self.paineis.coluna_recolhida());
+        match self.medida_da_grade {
+            Some(m) => m.largura + (janela - m.janela) + coluna(m.recolhida) - agora,
+            None => janela - MARGEM_DA_GRADE - agora,
         }
     }
 
@@ -1461,7 +1465,7 @@ impl Detalhe {
     /// uma linha da tela.
     pub fn colunas_visiveis(&self, window: &Window) -> usize {
         let janela = f32::from(window.viewport_size().width);
-        let chave = (janela, self.em_foco().is_some(), self.zoom);
+        let chave = (janela, self.paineis.coluna_recolhida(), self.zoom);
         if let Some((vista, colunas)) = self.colunas_vistas {
             if vista == chave {
                 return colunas;
@@ -3317,7 +3321,7 @@ impl Detalhe {
             self.medida_da_grade = Some(MedidaDaGrade {
                 largura,
                 janela: self.janela_no_quadro.0,
-                painel: self.painel_no_quadro,
+                recolhida: self.painel_no_quadro,
             });
         }
         let mut texto = window.text_style();
@@ -3326,7 +3330,7 @@ impl Detalhe {
 
         let janela = window.viewport_size();
         self.janela_no_quadro = (f32::from(janela.width), f32::from(janela.height));
-        self.painel_no_quadro = self.em_foco().is_some();
+        self.painel_no_quadro = self.paineis.coluna_recolhida();
         self.colunas_da_grade = self.colunas_visiveis(window);
         let total = self.acervo.total_visivel();
         self.grade_no_quadro = total > 0;
@@ -4155,7 +4159,7 @@ impl Detalhe {
             .min_h(px(0.))
             .gap(px(8.))
             .child(self.grade(cx))
-            .children(self.painel(cx))
+            .child(self.painel(cx))
     }
 
     fn grade(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -5570,7 +5574,173 @@ impl Detalhe {
         self.pedir_mudanca(foto.id.clone(), mudanca, cx);
     }
 
-    fn painel(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+    /// 🗂️ **A coluna da direita, sempre reservada** — ver [`super::paineis`].
+    /// Com foto em foco, o painel dela; sem, os Atalhos, como no site. O botão
+    /// do canto a recolhe numa faixa estreita, e a faixa a abre de volta.
+    fn painel(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
+        use crate::recursos::Icone;
+        use gpui_component::Icon;
+        let (borda, raio) = (cx.theme().border, cx.theme().radius);
+        if self.paineis.coluna_recolhida() {
+            return div()
+                .id("painel-recolhido")
+                .debug_selector(|| "painel-recolhido".into())
+                .w(px(super::paineis::LARGURA_RECOLHIDA - VAO_DA_GRADE))
+                .flex_shrink_0()
+                .flex()
+                .flex_col()
+                .items_center()
+                .py(px(6.))
+                .rounded(raio)
+                .border_1()
+                .border_color(borda)
+                .child(
+                    Button::new("painel-abrir")
+                        .debug_selector(|| "painel-abrir".into())
+                        .icon(Icon::new(Icone::PanelRightOpen))
+                        .xsmall()
+                        .ghost()
+                        .tooltip("Mostrar o painel da foto")
+                        .on_click(
+                            cx.listener(|tela, _, window, cx| tela.alternar_coluna(window, cx)),
+                        ),
+                )
+                .into_any_element();
+        }
+        let conteudo = match self.painel_da_foto(cx) {
+            Some(painel) => painel.into_any_element(),
+            None => self.atalhos(cx).into_any_element(),
+        };
+        div()
+            .w(px(super::paineis::LARGURA_ABERTA - VAO_DA_GRADE))
+            .flex_shrink_0()
+            .flex()
+            .flex_col()
+            .min_h(px(0.))
+            .rounded(raio)
+            .border_1()
+            .border_color(borda)
+            .child(
+                div().flex().justify_end().px(px(4.)).pt(px(4.)).child(
+                    Button::new("painel-recolher")
+                        .debug_selector(|| "painel-recolher".into())
+                        .icon(Icon::new(Icone::PanelRightClose))
+                        .xsmall()
+                        .ghost()
+                        .tooltip("Recolher o painel")
+                        .on_click(
+                            cx.listener(|tela, _, window, cx| tela.alternar_coluna(window, cx)),
+                        ),
+                ),
+            )
+            .child(
+                div()
+                    .id("painel-da-sessao")
+                    .flex_1()
+                    .min_h(px(0.))
+                    .overflow_y_scroll()
+                    .px(px(10.))
+                    .pb(px(10.))
+                    .child(conteudo),
+            )
+            .into_any_element()
+    }
+
+    /// Recolhe ou abre a coluna. As colunas da grade mudam, e a conta delas é
+    /// refeita já neste quadro.
+    pub fn alternar_coluna(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.paineis.alternar_coluna();
+        self.colunas_vistas = None;
+        self.medida_da_grade = None;
+        self.colunas_da_grade = self.colunas_visiveis(window);
+        cx.notify();
+    }
+
+    pub fn coluna_recolhida(&self) -> bool {
+        self.paineis.coluna_recolhida()
+    }
+
+    /// Sem foto em foco, a coluna ensina os gestos — os **Atalhos** do site
+    /// (`painel.tsx`), fechados por padrão e lembrados. Só entra aqui o que
+    /// esta grade faz: o laço de arrastar e o `Enter` da prévia são do site.
+    fn atalhos(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        use crate::recursos::Icone;
+        use gpui_component::Icon;
+        let apagado = cx.theme().muted_foreground;
+        let aberto = self.paineis.atalhos_abertos();
+        let tecla = |t: &'static str| {
+            div()
+                .px(px(4.))
+                .rounded(px(3.))
+                .border_1()
+                .border_color(cx.theme().border)
+                .child(t)
+        };
+        let linha = || div().flex().flex_wrap().items_center().gap(px(3.));
+        div()
+            .flex()
+            .flex_col()
+            .text_xs()
+            .text_color(apagado)
+            .child(
+                div()
+                    .id("painel-atalhos")
+                    .debug_selector(|| "painel-atalhos".into())
+                    .flex()
+                    .items_center()
+                    .gap(px(6.))
+                    .py(px(4.))
+                    .cursor_pointer()
+                    .text_color(cx.theme().foreground)
+                    .child(
+                        Icon::new(if aberto {
+                            Icone::ChevronDown
+                        } else {
+                            Icone::ChevronRight
+                        })
+                        .size(px(14.))
+                        .text_color(apagado),
+                    )
+                    .child("Atalhos")
+                    .on_click(cx.listener(|tela, _, _, cx| {
+                        tela.paineis.alternar_atalhos();
+                        cx.notify();
+                    })),
+            )
+            .when(aberto, |atalhos| {
+                atalhos
+                    .gap(px(6.))
+                    .child("Clique numa foto para ver e mudar o que está marcado nela.")
+                    .child(
+                        linha()
+                            .child(tecla("Shift"))
+                            .child("+ clique estende a seleção;")
+                            .child(tecla(MODIFICADOR))
+                            .child("+ clique acrescenta."),
+                    )
+                    .child("Duplo clique entra no modo de revelação naquela foto.")
+                    .child(
+                        linha()
+                            .child(tecla(MODIFICADOR))
+                            .child("+ roda do mouse muda o tamanho das miniaturas."),
+                    )
+                    .child(
+                        linha()
+                            .child(tecla("1"))
+                            .child("–")
+                            .child(tecla("5"))
+                            .child("dão a nota,")
+                            .child(tecla("0"))
+                            .child("tira,")
+                            .child(tecla("P"))
+                            .child("marca levada no balcão,")
+                            .child(tecla("X"))
+                            .child("rejeita (não vai para a galeria do cliente)."),
+                    )
+            })
+    }
+
+    fn painel_da_foto(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
         use crate::recursos::Icone;
         use gpui_component::Icon;
         let foto = self.em_foco()?;
@@ -5599,18 +5769,9 @@ impl Detalhe {
 
         Some(
             div()
-                .id("painel-da-sessao")
-                .w(px(300.))
-                .flex_shrink_0()
                 .flex()
                 .flex_col()
-                .min_h(px(0.))
-                .overflow_y_scroll()
                 .gap(px(6.))
-                .p(px(10.))
-                .rounded(cx.theme().radius)
-                .border_1()
-                .border_color(cx.theme().border)
                 .children(self.campos_do_lote.as_ref().map(|campos| {
                     let apagado = cx.theme().muted_foreground;
                     let nota_do_lote = self

@@ -1055,3 +1055,48 @@ fn importar_fotos_abre_o_modal_e_esc_ou_cancelar_fecham_sem_importar(cx: &mut Te
         );
     });
 }
+
+/// 🗂️ **A coluna da foto fica reservada** (dono, 24/set/2026). Sem foto em
+/// foco ela mostra os Atalhos; focar uma foto não muda as colunas da grade; o
+/// botão do canto a recolhe numa faixa e a faixa a abre de volta — tudo pelo
+/// clique de verdade.
+#[gpui::test]
+fn a_coluna_da_foto_fica_reservada_mostra_os_atalhos_e_se_recolhe(cx: &mut TestAppContext) {
+    let e = abrir_o_ensaio(cx, Cenario::default());
+    let sem_foco = e.detalhe(cx, |tela, w, _cx| {
+        assert!(tela.em_foco().is_none(), "a sessão abre sem foto em foco");
+        tela.colunas_visiveis(w)
+    });
+    clicar(&e, cx, "painel-atalhos");
+    clicar(&e, cx, "painel-atalhos");
+    clicar(&e, cx, "painel-atalhos");
+
+    e.teclar(cx, "right");
+    e.esperar(cx);
+    e.detalhe(cx, |tela, w, _cx| {
+        assert!(tela.em_foco().is_some());
+        assert_eq!(
+            tela.colunas_visiveis(w),
+            sem_foco,
+            "focar uma foto não muda as colunas"
+        );
+    });
+
+    clicar(&e, cx, "painel-recolher");
+    let recolhida = e.detalhe(cx, |tela, w, _cx| {
+        assert!(tela.coluna_recolhida());
+        tela.colunas_visiveis(w)
+    });
+    assert!(recolhida >= sem_foco, "a grade ganha a largura da coluna");
+    let mut visual = VisualTestContext::from_window(e.raiz.into(), cx);
+    assert!(
+        visual.debug_bounds("painel-recolhido").is_some(),
+        "a faixa estreita fica no lugar da coluna"
+    );
+
+    clicar(&e, cx, "painel-abrir");
+    e.detalhe(cx, |tela, w, _cx| {
+        assert!(!tela.coluna_recolhida());
+        assert_eq!(tela.colunas_visiveis(w), sem_foco);
+    });
+}
