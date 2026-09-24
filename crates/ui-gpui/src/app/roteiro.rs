@@ -156,6 +156,9 @@ impl Aplicativo {
                 .detalhe
                 .update(cx, |tela, cx| tela.alternar_atendimento(cx)),
             Passo::Menu => self.alternar_menu_lateral(cx),
+            Passo::DadosDoCliente => self
+                .detalhe
+                .update(cx, |tela, cx| tela.editar_dados_do_cliente(cx)),
             Passo::Filtros => self
                 .sessoes
                 .update(cx, |tela, cx| tela.alternar_filtros(cx)),

@@ -676,6 +676,9 @@ struct FormularioDoCliente {
     /// A frase da recusa: a conferência local, o `400` do site, ou o `422`
     /// que abriu o pedido.
     erro: Option<SharedString>,
+    /// O campo que a conferência local recusou — a frase vai embaixo dele,
+    /// como no site. `None` = a frase é do formulário todo (a do site).
+    campo_do_erro: Option<dados_do_cliente::Campo>,
 }
 
 struct CamposDoCliente {
@@ -2281,6 +2284,7 @@ impl Detalhe {
             Some(formulario) if formulario.motivo == motivo => {
                 if aviso.is_some() {
                     formulario.erro = aviso;
+                    formulario.campo_do_erro = None;
                 }
             }
             _ => {
@@ -2288,10 +2292,18 @@ impl Detalhe {
                     motivo,
                     campos: None,
                     erro: aviso,
+                    campo_do_erro: None,
                 })
             }
         }
         cx.notify();
+    }
+
+    /// 🧪 A frase da recusa e o campo a que ela se refere.
+    #[cfg(test)]
+    pub(crate) fn recusa_do_formulario(&self) -> Option<(Option<dados_do_cliente::Campo>, String)> {
+        let f = self.dados_do_cliente.as_ref()?;
+        Some((f.campo_do_erro, f.erro.as_ref()?.to_string()))
     }
 
     pub fn fechar_formulario_do_cliente(&mut self, cx: &mut Context<Self>) {
@@ -2360,7 +2372,7 @@ impl Detalhe {
         let titulo = campo_preenchido(&atual.titulo, "Ensaio da Maria", window, cx);
         let email = campo_preenchido(
             atual.email.as_deref().unwrap_or(""),
-            "cliente@exemplo.com",
+            "maria@exemplo.com",
             window,
             cx,
         );
@@ -2440,6 +2452,7 @@ impl Detalhe {
             Err(recusa) => {
                 if let Some(formulario) = self.dados_do_cliente.as_mut() {
                     formulario.erro = Some(recusa.frase.into());
+                    formulario.campo_do_erro = Some(recusa.campo);
                 }
                 cx.notify();
                 return;
@@ -2457,6 +2470,7 @@ impl Detalhe {
 
         if let Some(formulario) = self.dados_do_cliente.as_mut() {
             formulario.erro = None;
+            formulario.campo_do_erro = None;
         }
         self.gravando_dados = Some((motivo, novo));
         self.publicador.atualizar_galeria(
@@ -2832,7 +2846,10 @@ impl Detalhe {
                 Recado::GaleriaNaoAtualizada(frase) => {
                     self.gravando_dados = None;
                     match self.dados_do_cliente.as_mut() {
-                        Some(formulario) => formulario.erro = Some(frase.into()),
+                        Some(formulario) => {
+                            formulario.erro = Some(frase.into());
+                            formulario.campo_do_erro = None;
+                        }
                         None => self.erro = Some(frase.into()),
                     }
                 }
@@ -3388,13 +3405,8 @@ impl Render for Detalhe {
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .child(self.cabecalho(window, cx))
-            .children(
-                self.formulario_do_cliente(cx)
-                    .map(|f| div().p(px(12.)).child(f)),
-            )
             .children(self.detalhes(cx))
             .children(self.atendimento(cx))
-            .children(self.dialogo_de_apagar(cx))
             .child(self.envio(cx))
             .child(self.barra_da_grade(cx))
             .when_some(self.erro.clone(), |tela, erro| {
@@ -3439,6 +3451,18 @@ impl Render for Detalhe {
                 self.origem
                     .clone()
                     .and_then(|origem| origem.update(cx, |origem, cx| origem.dialogo(window, cx)))
+                    .map(|dialogo| gpui::deferred(dialogo).with_priority(2)),
+            )
+            // 🔑 **Os diálogos também são diferidos** (dono, 24/set/2026, no
+            // modal dos dados do cliente). Eles vinham antes da grade na
+            // árvore: a grade era pintada por cima do véu, que não escurecia
+            // nada, e o caixa flutuante cobria o "Gravar".
+            .children(
+                self.dialogo_de_apagar(cx)
+                    .map(|dialogo| gpui::deferred(dialogo).with_priority(2)),
+            )
+            .children(
+                self.formulario_do_cliente(cx)
                     .map(|dialogo| gpui::deferred(dialogo).with_priority(2)),
             )
     }
@@ -3614,6 +3638,7 @@ impl Detalhe {
             }))
             .child(estilo::desligado(
                 estilo::botao_fantasma("sessao-editar-cliente", cx)
+                    .debug_selector(|| "sessao-editar-cliente".into())
                     .border_1()
                     .border_color(campo)
                     .child(Icon::new(Icone::ClipboardList).size(px(16.)))
@@ -3672,10 +3697,23 @@ impl Detalhe {
     /// ⚠️ **Embutido, e não `open_dialog`**: o diálogo do `gpui-component` exige
     /// o `Root` na janela, e as janelas de teste desta tela não o têm — o
     /// pedido de contato ficaria sem teste justamente no caminho do `422`.
+    /// ✏️ **Os dados do cliente num modal, como no site** (dono, 24/set/2026:
+    /// *"a edição dos dados do cliente na web aparece um modal e no
+    /// vintagelightbox não"*). Era uma faixa embutida sob o cabeçalho, com os
+    /// três campos em linha, que empurrava a grade para baixo. Agora é o
+    /// `DadosDoClienteDialog` do site: título e descrição, os campos um sob o
+    /// outro com o rótulo em cima, a frase da recusa embaixo do campo que ela
+    /// aponta, e Cancelar / Gravar no rodapé. Fora do "editar" o título não
+    /// aparece e o e-mail ganha o `*`, como lá.
     fn formulario_do_cliente(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+        use crate::estilo;
+        use crate::recursos::Icone;
+        use dados_do_cliente::Campo;
+        use gpui_component::Icon;
         let formulario = self.dados_do_cliente.as_ref()?;
         let campos = formulario.campos.as_ref()?;
         let gravando = self.gravando_dados.is_some();
+        let editar = formulario.motivo == MotivoDoFormulario::Editar;
         let (titulo, dica, rotulo_de_gravar) = match formulario.motivo {
             MotivoDoFormulario::Editar => (
                 "Dados do cliente",
@@ -3683,76 +3721,126 @@ impl Detalhe {
                 "Gravar",
             ),
             MotivoDoFormulario::ContatoParaOLink => (
-                "Falta o e-mail do cliente para gerar o link",
+                "Falta o e-mail do cliente",
                 "O link que entra sem senha nasce do e-mail do cliente. O WhatsApp é opcional.",
                 "Gravar e gerar o link",
             ),
             MotivoDoFormulario::ContatoParaAvisar => (
-                "Falta o e-mail do cliente para avisar",
+                "Falta o e-mail do cliente",
                 "O aviso de fotos prontas vai por e-mail. O WhatsApp é opcional.",
                 "Gravar e avisar",
             ),
         };
-        let apagado = cx.theme().muted_foreground;
         let perigo = cx.theme().danger;
-        let campo = |rotulo: &'static str, estado: &Entity<InputState>| {
-            div()
-                .flex()
-                .flex_col()
-                .gap(px(2.))
-                .flex_1()
-                .child(div().text_xs().text_color(apagado).child(rotulo))
-                .child(Input::new(estado).xsmall())
+        let erro_de = |campo: Campo| {
+            (formulario.campo_do_erro == Some(campo))
+                .then(|| formulario.erro.clone())
+                .flatten()
         };
-        let linha = div()
-            .flex()
-            .gap(px(8.))
-            .child(campo("título", &campos.titulo))
-            .child(campo("e-mail do cliente", &campos.email))
-            .child(campo("WhatsApp", &campos.whatsapp));
-
-        Some(
+        let erro_geral = formulario
+            .campo_do_erro
+            .is_none()
+            .then(|| formulario.erro.clone())
+            .flatten();
+        let campo = |rotulo: &'static str,
+                     obrigatorio: bool,
+                     estado: &Entity<InputState>,
+                     erro: Option<SharedString>| {
             div()
                 .flex()
                 .flex_col()
                 .gap(px(6.))
-                .p(px(10.))
-                .rounded(cx.theme().radius)
-                .border_1()
-                .border_color(cx.theme().border)
-                .child(div().text_xs().child(titulo))
-                .child(linha)
-                .child(div().text_xs().text_color(apagado).child(dica))
-                .when_some(formulario.erro.clone(), |bloco, erro| {
-                    bloco.child(div().text_xs().text_color(perigo).child(erro))
-                })
                 .child(
                     div()
                         .flex()
-                        .justify_end()
-                        .gap(px(6.))
+                        .gap(px(4.))
+                        .text_sm()
+                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .child(rotulo)
+                        .when(obrigatorio, |r| {
+                            r.child(div().text_color(perigo).child("*"))
+                        }),
+                )
+                .child(Input::new(estado))
+                .children(erro.map(|e| div().text_xs().text_color(perigo).child(e)))
+        };
+
+        Some(
+            estilo::veu_do_dialogo()
+                .id("cliente-veu")
+                .on_click(cx.listener(|tela, _ev, _w, cx| {
+                    if tela.gravando_dados.is_none() {
+                        tela.fechar_formulario_do_cliente(cx)
+                    }
+                }))
+                .child(
+                    estilo::caixa_do_dialogo(cx)
+                        .relative()
+                        .w(px(480.))
+                        .debug_selector(|| "dados-do-cliente".into())
+                        .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
                         .child(
-                            Button::new("sessao-cliente-cancelar")
-                                .label("Cancelar")
-                                .xsmall()
-                                .disabled(gravando)
-                                .on_click(cx.listener(|tela, _ev, _window, cx| {
-                                    tela.fechar_formulario_do_cliente(cx)
-                                })),
+                            div().absolute().top(px(10.)).right(px(10.)).child(
+                                Button::new("sessao-cliente-fechar")
+                                    .icon(Icon::new(Icone::X))
+                                    .xsmall()
+                                    .ghost()
+                                    .disabled(gravando)
+                                    .on_click(cx.listener(|tela, _ev, _w, cx| {
+                                        tela.fechar_formulario_do_cliente(cx)
+                                    })),
+                            ),
                         )
+                        .child(estilo::cabecalho_do_dialogo(titulo, dica, None, cx))
+                        .when(editar, |caixa| {
+                            caixa.child(campo(
+                                "Título",
+                                true,
+                                &campos.titulo,
+                                erro_de(Campo::Titulo),
+                            ))
+                        })
+                        .child(campo(
+                            "E-mail do cliente",
+                            !editar,
+                            &campos.email,
+                            erro_de(Campo::Email),
+                        ))
+                        .child(campo(
+                            "WhatsApp",
+                            false,
+                            &campos.whatsapp,
+                            erro_de(Campo::Whatsapp),
+                        ))
+                        .children(erro_geral.map(|e| div().text_sm().text_color(perigo).child(e)))
                         .child(
-                            Button::new("sessao-cliente-gravar")
-                                .label(if gravando {
-                                    "Gravando…"
-                                } else {
-                                    rotulo_de_gravar
-                                })
-                                .xsmall()
-                                .primary()
-                                .disabled(gravando)
-                                .on_click(cx.listener(|tela, _ev, _window, cx| {
-                                    tela.gravar_dados_do_cliente(cx)
-                                })),
+                            estilo::rodape_do_dialogo()
+                                .child(estilo::desligado(
+                                    estilo::botao_fantasma("sessao-cliente-cancelar", cx)
+                                        .debug_selector(|| "sessao-cliente-cancelar".into())
+                                        .child(if editar { "Cancelar" } else { "Agora não" })
+                                        .when(!gravando, |b| {
+                                            b.on_click(cx.listener(|tela, _ev, _w, cx| {
+                                                tela.fechar_formulario_do_cliente(cx)
+                                            }))
+                                        }),
+                                    gravando,
+                                ))
+                                .child(estilo::desligado(
+                                    estilo::botao_primario("sessao-cliente-gravar", cx)
+                                        .debug_selector(|| "sessao-cliente-gravar".into())
+                                        .child(if gravando {
+                                            "Gravando…"
+                                        } else {
+                                            rotulo_de_gravar
+                                        })
+                                        .when(!gravando, |b| {
+                                            b.on_click(cx.listener(|tela, _ev, _w, cx| {
+                                                tela.gravar_dados_do_cliente(cx)
+                                            }))
+                                        }),
+                                    gravando,
+                                )),
                         ),
                 ),
         )

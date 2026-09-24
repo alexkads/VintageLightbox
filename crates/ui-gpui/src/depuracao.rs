@@ -42,6 +42,8 @@ pub enum Passo {
     Menu,
     /// Liga ou desliga a linha de filtros por coluna da lista de sessões.
     Filtros,
+    /// Abre o modal "Dados do cliente" da sessão aberta.
+    DadosDoCliente,
     /// `menu_usuario` — abre ou fecha o menu da conta.
     MenuDoUsuario,
     /// `tema claro` · `tema escuro` · `tema sistema`
@@ -157,6 +159,7 @@ pub fn ler_roteiro(texto: &str) -> Result<Vec<Passo>, String> {
             "conferir_selecao" => Passo::ConferirSelecao(numero(0)? as usize),
             "menu" => Passo::Menu,
             "filtros" => Passo::Filtros,
+            "dados_do_cliente" => Passo::DadosDoCliente,
             "menu_usuario" => Passo::MenuDoUsuario,
             "tema" => Passo::Tema(argumentos.first().copied().unwrap_or_default().to_string()),
             "tamanho" => Passo::Tamanho(numero(0)?, numero(1)?),

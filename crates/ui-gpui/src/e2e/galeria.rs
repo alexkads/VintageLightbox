@@ -1100,3 +1100,41 @@ fn a_coluna_da_foto_fica_reservada_mostra_os_atalhos_e_se_recolhe(cx: &mut TestA
         assert_eq!(tela.colunas_visiveis(w), sem_foco);
     });
 }
+
+/// ✏️ **Os dados do cliente num modal, como no site** (dono, 24/set/2026).
+/// O botão do cabeçalho abre o modal por cima da galeria; a recusa do e-mail
+/// aparece embaixo do campo dele; "Cancelar" fecha sem gravar — tudo pelo
+/// clique de verdade.
+#[gpui::test]
+fn os_dados_do_cliente_abrem_num_modal_e_a_recusa_fica_no_campo(cx: &mut TestAppContext) {
+    use biblioteca_core::dados_do_cliente::Campo;
+    let e = abrir_o_ensaio(cx, Cenario::default());
+    clicar(&e, cx, "sessao-editar-cliente");
+    let mut visual = VisualTestContext::from_window(e.raiz.into(), cx);
+    assert!(
+        visual.debug_bounds("dados-do-cliente").is_some(),
+        "o modal está na tela"
+    );
+
+    e.detalhe(cx, |tela, window, cx| {
+        tela.digitar_dados_do_cliente(None, Some("ana@"), None, window, cx);
+    });
+    clicar(&e, cx, "sessao-cliente-gravar");
+    e.detalhe(cx, |tela, _w, _cx| {
+        let (campo, frase) = tela.recusa_do_formulario().expect("a recusa");
+        assert_eq!(
+            campo,
+            Some(Campo::Email),
+            "a frase vai sob o e-mail: {frase}"
+        );
+        assert!(
+            tela.motivo_do_formulario().is_some(),
+            "recusado, continua aberto"
+        );
+    });
+
+    clicar(&e, cx, "sessao-cliente-cancelar");
+    e.detalhe(cx, |tela, _w, _cx| {
+        assert!(tela.motivo_do_formulario().is_none(), "Cancelar fecha");
+    });
+}
