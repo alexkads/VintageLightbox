@@ -266,7 +266,7 @@ impl FaixaDeDatas {
 /// divergência que o site também tem (`criadaEmISO` sai de `paraDataISO`, que
 /// usa o fuso) — e é por isso que este corte existe num lugar só, com nome: o
 /// dia que sobe do corte é o que a coluna "Criada" já mostra.
-fn dia_da_criacao(iso: &str) -> &str {
+pub(crate) fn dia_da_criacao(iso: &str) -> &str {
     iso.split('T').next().unwrap_or(iso)
 }
 

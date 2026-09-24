@@ -10,6 +10,8 @@
 pub mod altura_da_tira;
 pub mod arquivos;
 pub mod detalhe;
+/// O "Filtros" da lista: um campo por coluna, sob o cabeçalho.
+pub mod filtros_da_lista;
 /// O assistente de sete etapas da nova sessão (a rota `nova` do site).
 pub mod nova;
 /// "Do cartão ou pasta…": o menu e a janela de escolher, das duas portas.

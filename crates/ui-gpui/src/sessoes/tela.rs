@@ -21,6 +21,7 @@ use std::time::Duration;
 
 use biblioteca_core::dados_do_cliente;
 use biblioteca_core::dinheiro;
+use biblioteca_core::filtro_de_coluna::{self, Coluna};
 use biblioteca_core::sessoes::{
     self, estado_no_caixa, ContagemDeFotos, Criterio, EstadoNoCaixa, FaixaDeDatas, PagoNoCaixa,
     SessaoFotografica, Situacao, Totais,
@@ -118,6 +119,8 @@ pub struct Sessoes {
     aberta: Option<String>,
     busca: gpui::Entity<InputState>,
     situacao: Option<Situacao>,
+    /// O "Filtros" do site: um campo por coluna, sob o cabeçalho.
+    filtros: super::filtros_da_lista::FiltrosDaLista,
     carregando: bool,
     erro: Option<SharedString>,
     /// O formulário de abrir sessão, quando aparece.
@@ -270,6 +273,7 @@ impl Sessoes {
             aberta: None,
             busca,
             situacao: None,
+            filtros: super::filtros_da_lista::FiltrosDaLista::novos(window, cx),
             carregando: false,
             erro: None,
             nova: None,
@@ -372,6 +376,7 @@ impl Sessoes {
         !self.busca.read(cx).value().trim().is_empty()
             || self.situacao.is_some()
             || self.faixa.is_some()
+            || !self.filtros.ativos(cx).is_empty()
     }
 
     /// Abre ou fecha o calendário do período.
@@ -449,6 +454,25 @@ impl Sessoes {
         let hoje = hoje_no_estudio();
         self.faixa = Some(FaixaDeDatas::no_dia(hoje.format("%Y-%m-%d").to_string()));
         self.calendario = None;
+        self.filtros.limpar(window, cx);
+        cx.notify();
+    }
+
+    /// As sessões que a tabela mostra: a busca, a situação, o período e os
+    /// filtros de coluna — **todos** somam.
+    fn visiveis<'a>(
+        &self,
+        todas: &'a [SessaoFotografica],
+        agora: i64,
+        cx: &Context<Self>,
+    ) -> Vec<&'a SessaoFotografica> {
+        let recorte = sessoes::filtrar(todas, &self.criterio(cx), agora);
+        filtro_de_coluna::filtrar_por_coluna(recorte, &self.filtros.ativos(cx), agora)
+    }
+
+    /// O botão "Filtros": liga ou desliga a linha de campos.
+    pub fn alternar_filtros(&mut self, cx: &mut Context<Self>) {
+        self.filtros.alternar();
         cx.notify();
     }
 
@@ -641,10 +665,17 @@ impl Sessoes {
     /// mesma conta do `render`.
     #[cfg(test)]
     pub(crate) fn titulos_visiveis(&self, cx: &Context<Self>) -> Vec<String> {
-        sessoes::filtrar(&self.para_o_core(), &self.criterio(cx), agora_em_segundos())
+        let todas = self.para_o_core();
+        self.visiveis(&todas, agora_em_segundos(), cx)
             .iter()
             .map(|s| s.titulo.clone())
             .collect()
+    }
+
+    /// 🧪 A linha de filtros por coluna.
+    #[cfg(test)]
+    pub(crate) fn filtros_para_teste(&self) -> &super::filtros_da_lista::FiltrosDaLista {
+        &self.filtros
     }
 
     /// 🧪 A frase de erro da tela.
@@ -753,7 +784,7 @@ impl Render for Sessoes {
         let agora = agora_em_segundos();
         let todas = self.para_o_core();
         let contagens = sessoes::contar_por_situacao(&todas, agora);
-        let visiveis = sessoes::filtrar(&todas, &self.criterio(cx), agora);
+        let visiveis = self.visiveis(&todas, agora, cx);
         let soma = sessoes::somar_totais(&visiveis);
         let filtrando = self.filtrando(cx);
         let apagado = cx.theme().muted_foreground;
@@ -1186,29 +1217,31 @@ impl Sessoes {
             tema.accent,
         );
         // Os recortes do site: pílulas, a escolhida em cores invertidas.
-        let pilula = move |id: SharedString, rotulo: &'static str, quantas: usize, acesa: bool| {
-            div()
-                .id(id)
-                .flex()
-                .items_center()
-                .gap(px(6.))
-                .h(px(28.))
-                .px(px(10.))
-                .rounded_full()
-                .border_1()
-                .border_color(borda)
-                .text_xs()
-                .cursor_pointer()
-                .when(acesa, |p| p.bg(texto).text_color(fundo).border_color(texto))
-                .when(!acesa, |p| p.hover(move |s| s.bg(acento)))
-                .child(rotulo)
-                .child(
-                    div()
-                        .when(!acesa, |d| d.text_color(apagado))
-                        .when(acesa, |d| d.opacity(0.7))
-                        .child(quantas.to_string()),
-                )
-        };
+        // O número some quando é `None` — o "Filtros" só conta quando há filtro.
+        let pilula =
+            move |id: SharedString, rotulo: &'static str, quantas: Option<usize>, acesa: bool| {
+                div()
+                    .id(id)
+                    .flex()
+                    .items_center()
+                    .gap(px(6.))
+                    .h(px(28.))
+                    .px(px(10.))
+                    .rounded_full()
+                    .border_1()
+                    .border_color(borda)
+                    .text_xs()
+                    .cursor_pointer()
+                    .when(acesa, |p| p.bg(texto).text_color(fundo).border_color(texto))
+                    .when(!acesa, |p| p.hover(move |s| s.bg(acento)))
+                    .child(rotulo)
+                    .children(quantas.map(|quantas| {
+                        div()
+                            .when(!acesa, |d| d.text_color(apagado))
+                            .when(acesa, |d| d.opacity(0.7))
+                            .child(quantas.to_string())
+                    }))
+            };
 
         let sem_conta = self.sessao.is_none() || self.abrindo_nova();
         div()
@@ -1248,7 +1281,7 @@ impl Sessoes {
                 pilula(
                     "sessoes-todas".into(),
                     "Todas",
-                    contagens.todas,
+                    Some(contagens.todas),
                     ativa.is_none(),
                 )
                 .on_click(cx.listener(|tela, _ev, _window, cx| tela.filtrar_por(None, cx))),
@@ -1264,7 +1297,7 @@ impl Sessoes {
                     pilula(
                         SharedString::from(format!("sessoes-{}", situacao.como_texto())),
                         situacao.rotulo(),
-                        quantas,
+                        Some(quantas),
                         ativa == Some(situacao),
                     )
                     .on_click(cx.listener(move |tela, _ev, _window, cx| {
@@ -1272,6 +1305,39 @@ impl Sessoes {
                     })),
                 )
             }))
+            // 🔎 **"Filtros"**: liga a linha de campos sob o cabeçalho, e diz
+            // quantos estão valendo; o × ao lado apaga só eles.
+            .child({
+                let quantos = self.filtros.ativos(cx).len();
+                let acesa = self.filtros.ligada() || quantos > 0;
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(2.))
+                    .child(
+                        pilula(
+                            "sessoes-filtros".into(),
+                            "Filtros",
+                            (quantos > 0).then_some(quantos),
+                            acesa,
+                        )
+                        .debug_selector(|| "sessoes-filtros".into())
+                        .on_click(cx.listener(|tela, _ev, _window, cx| {
+                            tela.alternar_filtros(cx);
+                        })),
+                    )
+                    .when(quantos > 0, |d| {
+                        d.child(
+                            estilo::botao_fantasma("sessoes-filtros-limpar", cx)
+                                .text_color(apagado)
+                                .child(Icon::new(Icone::X).size(px(14.)))
+                                .on_click(cx.listener(|tela, _ev, window, cx| {
+                                    tela.filtros.limpar(window, cx);
+                                    cx.notify();
+                                })),
+                        )
+                    })
+            })
             .when(filtrando, |barra| {
                 barra.child(
                     estilo::botao_fantasma("sessoes-limpar", cx)
@@ -1567,7 +1633,10 @@ impl Sessoes {
             tema.muted,
             tema.background,
         );
-        if visiveis.is_empty() {
+        // 🔎 Com a linha de filtros na tela, a tabela fica mesmo vazia: sumir
+        // com ela tiraria os campos de onde se desfaz o filtro.
+        let com_filtros = self.filtros.visivel(cx);
+        if visiveis.is_empty() && !com_filtros {
             let frase = if self.galerias.is_empty() {
                 "Nenhuma galeria ainda. A primeira nasce no botão \"Nova sessão\"."
             } else {
@@ -1633,6 +1702,48 @@ impl Sessoes {
             .child(titulo_da_coluna("Caixa (PDV)", LARGURAS[4]))
             .child(titulo_da_coluna("Pós-venda", LARGURAS[5]))
             .child(titulo_da_coluna("Criada", LARGURAS[6]));
+
+        // 🔎 A linha de filtros, com as larguras do cabeçalho: cada campo fica
+        // sob a sua coluna, como no site.
+        let linha_de_filtros = com_filtros.then(|| {
+            let celula = |largura: f32, coluna: Coluna| {
+                div()
+                    .w(px(largura))
+                    .flex_none()
+                    .child(self.filtros.campo(coluna))
+            };
+            div()
+                .flex()
+                .items_start()
+                .flex_none()
+                .gap(px(VAO))
+                .px(px(RECUO))
+                .py(px(4.))
+                .border_b_1()
+                .border_color(borda)
+                .child(flexivel(GALERIA).child(self.filtros.campo(Coluna::Galeria)))
+                .child(flexivel(CONTATO).child(self.filtros.campo(Coluna::Contato)))
+                .child(celula(SITUACAO, Coluna::Situacao))
+                .child(celula(LARGURAS[0], Coluna::Levadas))
+                .child(celula(LARGURAS[1], Coluna::AVenda))
+                .child(celula(LARGURAS[2], Coluna::Compradas))
+                .child(celula(LARGURAS[3], Coluna::Balcao))
+                .child(celula(LARGURAS[4], Coluna::Caixa))
+                .child(celula(LARGURAS[5], Coluna::PosVenda))
+                .child(celula(LARGURAS[6], Coluna::Criada))
+        });
+        let nenhuma = visiveis.is_empty().then(|| {
+            div()
+                .p(px(24.))
+                .text_sm()
+                .text_color(apagado)
+                .flex()
+                .justify_center()
+                .child(
+                    "Nenhuma galeria passa por estes filtros. Apague o que está nos campos \
+                     acima, ou use o × ao lado de \"Filtros\".",
+                )
+        });
 
         let linhas = visiveis.iter().map(|sessao| {
             let id = sessao.id.clone();
@@ -1746,6 +1857,7 @@ impl Sessoes {
                         .min_h(px(0.))
                         .min_w(px(largura_minima))
                         .child(cabecalho)
+                        .children(linha_de_filtros)
                         .child(
                             div()
                                 .id("sessoes-linhas")
@@ -1754,6 +1866,7 @@ impl Sessoes {
                                 .flex_1()
                                 .min_h(px(0.))
                                 .overflow_y_scroll()
+                                .children(nenhuma)
                                 .children(linhas),
                         ),
                 ),
@@ -1950,6 +2063,68 @@ mod testes {
                 tela.limpar_filtros(window, cx);
                 tela.escolher_periodo_para_teste(None, cx);
                 assert!(!tela.filtrando(cx));
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🔎 **Os filtros de coluna do site** (dono, 24/set/2026). O botão
+    /// "Filtros", clicado de verdade, liga a linha; texto acha sem acento,
+    /// número pergunta "quanto" com o operador escolhido, e o "Limpar" da barra
+    /// apaga os campos junto com o resto.
+    #[gpui::test]
+    fn os_filtros_de_coluna_recortam_a_lista_como_no_site(cx: &mut TestAppContext) {
+        use biblioteca_core::filtro_de_coluna::{Coluna, Operador};
+        let publicador = Arc::new(PublicadorDeMentira {
+            galerias: Mutex::new(vec![
+                galeria("g1", "Ensaio do João", Some("joao@exemplo.com")),
+                galeria("g2", "Casamento da Maria", Some("maria@outro.com")),
+            ]),
+            ..Default::default()
+        });
+        let janela = janela(cx, publicador);
+        com_sessao(cx, &janela);
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.escolher_periodo_para_teste(None, cx);
+                assert!(!tela.filtros_para_teste().visivel(cx), "nasce desligada");
+            })
+            .expect("a janela deve estar aberta");
+
+        let mut visual = gpui::VisualTestContext::from_window(janela.into(), cx);
+        visual.run_until_parked();
+        let botao = visual
+            .debug_bounds("sessoes-filtros")
+            .expect("o botão Filtros está na barra");
+        visual.simulate_click(botao.center(), gpui::Modifiers::none());
+        visual.run_until_parked();
+        assert!(
+            visual.debug_bounds("filtro-Galeria").is_some(),
+            "a linha de campos aparece sob o cabeçalho"
+        );
+
+        janela
+            .update(cx, |tela, window, cx| {
+                assert!(tela.filtros_para_teste().ligada());
+                tela.filtros_para_teste()
+                    .escrever(Coluna::Galeria, "MARIA", window, cx);
+                assert_eq!(tela.titulos_visiveis(cx), ["Casamento da Maria"]);
+                assert!(tela.filtrando(cx), "filtro de coluna é recorte");
+
+                tela.filtros_para_teste()
+                    .escrever(Coluna::Galeria, "", window, cx);
+                tela.filtros_para_teste()
+                    .escrever(Coluna::AVenda, "4", window, cx);
+                assert!(tela.titulos_visiveis(cx).is_empty(), "3 à venda não é ≥ 4");
+                tela.filtros_para_teste().escolher_operador(
+                    Coluna::AVenda,
+                    Operador::MenorIgual,
+                    window,
+                    cx,
+                );
+                assert_eq!(tela.titulos_visiveis(cx).len(), 2);
+
+                tela.limpar_filtros(window, cx);
+                assert!(tela.filtros_para_teste().ativos(cx).is_empty());
             })
             .expect("a janela deve estar aberta");
     }

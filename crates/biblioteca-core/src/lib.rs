@@ -41,6 +41,7 @@ pub mod acervo;
 pub mod caixa;
 pub mod dados_do_cliente;
 pub mod dinheiro;
+pub mod filtro_de_coluna;
 pub mod grade;
 pub mod miniaturas;
 pub mod negociacao;

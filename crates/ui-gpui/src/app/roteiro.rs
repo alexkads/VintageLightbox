@@ -156,6 +156,9 @@ impl Aplicativo {
                 .detalhe
                 .update(cx, |tela, cx| tela.alternar_atendimento(cx)),
             Passo::Menu => self.alternar_menu_lateral(cx),
+            Passo::Filtros => self
+                .sessoes
+                .update(cx, |tela, cx| tela.alternar_filtros(cx)),
             Passo::MenuDoUsuario => self.alternar_menu_da_conta(cx),
             Passo::Tema(nome) => match crate::tema::Escolha::do_nome(nome) {
                 Some(escolha) => self.escolher_tema(escolha, window, cx),
