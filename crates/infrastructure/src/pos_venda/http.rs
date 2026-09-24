@@ -165,6 +165,8 @@ struct ProdutoDaApi {
     name: String,
     price: serde_json::Value,
     #[serde(default)]
+    normal_price: Option<serde_json::Value>,
+    #[serde(default)]
     inactive: bool,
     #[serde(default)]
     deleted_at: Option<String>,
@@ -383,7 +385,9 @@ impl PosVendaApi for PosVendaApiHttp {
             .map(|p| Produto {
                 id: p.id,
                 nome: p.name,
-                preco: match p.price {
+                // O balcão começa pelo preço cheio; `price` é o valor da vitrine
+                // com desconto para a compra antecipada no site.
+                preco: match p.normal_price.unwrap_or(p.price) {
                     serde_json::Value::String(s) => s,
                     outro => outro.to_string(),
                 },
@@ -1525,7 +1529,7 @@ mod tests {
             .and(query_param("limit", "200"))
             .and(header("authorization", "Bearer tok"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!([
-                { "product": { "id": "p1", "name": "Foto avulsa", "price": "29.90", "inactive": true }, "category": {} },
+                { "product": { "id": "p1", "name": "Foto avulsa", "price": "19.91", "normal_price": "29.90", "inactive": true }, "category": {} },
                 { "product": { "id": "p2", "name": "Apagado", "price": "1.00", "deleted_at": "2026-01-01T00:00:00Z" }, "category": {} }
             ])))
             .mount(&servidor)
