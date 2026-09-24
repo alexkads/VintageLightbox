@@ -13,6 +13,7 @@
 //! no cabeçalho da lista.
 
 mod atalhos_da_revelacao;
+mod barra_do_pe;
 mod guias;
 mod painel;
 pub mod resgate;
@@ -703,6 +704,9 @@ pub struct Aplicativo {
     /// 📤 **A esteira de envios** — a fila com teto que sobe as fotos em
     /// segundo plano, e o que na web é o Worker. Ver `crate::envios`.
     esteira: crate::envios::Esteira,
+    /// A barra fina do pé da janela — a leva lembrada entre os quadros. Ver
+    /// [`barra_do_pe`].
+    barra_do_pe: barra_do_pe::BarraDoPe,
     /// O lote do "Salvar na galeria e sair" que está **no ar**:
     /// `(total, respondidas, alguma falhou)`.
     ///
@@ -1139,6 +1143,7 @@ impl Aplicativo {
             cliente_pedindo: None,
             lote_no_ar: None,
             esteira: crate::envios::Esteira::default(),
+            barra_do_pe: Default::default(),
             _repeticoes: Vec::new(),
             _cliente_fechou: None,
             _releitura_agendada: None,
@@ -1216,6 +1221,76 @@ impl Aplicativo {
             }
         }
         cx.notify();
+    }
+
+    /// As cópias em curso, `(total, prontas)`, somadas para a barra do pé.
+    pub(crate) fn copia_da_barra_do_pe(&self, cx: &gpui::App) -> Option<(usize, usize)> {
+        let nova = self.nova_sessao.read(cx).copia_em_curso();
+        let espelhada = nova
+            .as_ref()
+            .and_then(|(_, para)| *para)
+            .is_some_and(|para| self.sessao_aberta.as_deref() == Some(para));
+        // A cópia que o assistente continua depois de criar a sessão aparece
+        // também na barra da sessão aberta (`mostrar_a_copia`): é a mesma, e
+        // contá-la duas vezes dobraria o total.
+        let da_sessao = (!espelhada)
+            .then(|| self.detalhe.read(cx).importacao())
+            .flatten()
+            .filter(|i| !i.terminou())
+            .map(|i| (i.total, i.prontas()));
+        match (nova.map(|(c, _)| c), da_sessao) {
+            (Some(a), Some(b)) => Some((a.0 + b.0, a.1 + b.1)),
+            (a, b) => a.or(b),
+        }
+    }
+
+    /// A barra fina do pé da janela enquanto a importação anda — cópia e
+    /// subida, em qualquer tela. Ver [`barra_do_pe`].
+    ///
+    /// 🔑 **Nenhum observador novo**: nenhuma tela daqui é `cached`, então a
+    /// cópia que avisa a própria tela já redesenha a raiz, e a esteira avisa
+    /// a raiz a cada resposta.
+    fn barra_do_pe(&mut self, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
+        let copia = self.copia_da_barra_do_pe(cx);
+        let (quadro, acabou_agora) =
+            self.barra_do_pe
+                .quadro(copia, self.esteira.progresso(), std::time::Instant::now());
+        if acabou_agora {
+            // O quadro cheio precisa de um redesenho para sumir, e ninguém
+            // mais vai pedir um: a leva acabou justamente por nada mais andar.
+            cx.spawn(async move |raiz, cx| {
+                cx.background_executor()
+                    .timer(barra_do_pe::FIM_A_VISTA)
+                    .await;
+                let _ = raiz.update(cx, |_, cx| cx.notify());
+            })
+            .detach();
+        }
+        let quadro = quadro?;
+        let cor = if !quadro.terminou {
+            cx.theme().warning
+        } else if quadro.houve_falha {
+            cx.theme().danger
+        } else {
+            cx.theme().success
+        };
+        Some(
+            div()
+                .id("barra-do-pe")
+                .absolute()
+                .bottom_0()
+                .left_0()
+                .right_0()
+                .h(px(3.))
+                .bg(cx.theme().foreground.opacity(0.08))
+                .child(
+                    div()
+                        .h_full()
+                        .w(gpui::relative(quadro.fracao.clamp(0., 1.)))
+                        .bg(cor),
+                )
+                .into_any_element(),
+        )
     }
 
     /// A faixa do rodapé, quando há o que dizer.
@@ -5026,6 +5101,9 @@ impl Render for Aplicativo {
             .when_some(self.faixa_de_atualizacao(cx), |raiz, faixa| {
                 raiz.child(faixa)
             })
+            // 📏 A barra do pé: por cima da tela e dos modais, sem pegar clique
+            // (não tem `on_mouse_*`, e três pixels não tapam nada).
+            .children(self.barra_do_pe(cx))
             // 🚨 **As camadas do `gpui-component`.** Sem elas, `open_dialog` e
             // `push_notification` não aparecem em lugar nenhum — a caixa do
             // "Sincronizar N" abria no vazio e o botão parecia morto.

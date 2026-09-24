@@ -281,6 +281,9 @@ fn criar_com_a_copia_correndo_entra_na_sessao_e_o_resto_chega(cx: &mut TestAppCo
         assert!(detalhe.importando(), "a barra da sessão mostra a cópia");
         let andamento = detalhe.importacao().expect("com andamento");
         assert_eq!((andamento.prontas(), andamento.total), (1, 3));
+        // 📏 A barra do pé conta a cópia **uma vez**: a da sessão é o espelho
+        // da que o assistente continua.
+        assert_eq!(app.copia_da_barra_do_pe(cx), Some((3, 1)));
     });
 
     // 📥 O resto termina de copiar com o operador na sessão.
@@ -300,6 +303,11 @@ fn criar_com_a_copia_correndo_entra_na_sessao_e_o_resto_chega(cx: &mut TestAppCo
         assert_eq!(app.tela(), Tela::Sessao, "e ninguém tirou o operador de lá");
         let detalhe = app.detalhe.read(cx);
         assert!(!detalhe.importando(), "a cópia terminou");
+        assert_eq!(
+            app.copia_da_barra_do_pe(cx),
+            None,
+            "e a barra a dá por feita"
+        );
         assert!(
             ["id-nova-1", "id-nova-2", "id-nova-3"]
                 .iter()

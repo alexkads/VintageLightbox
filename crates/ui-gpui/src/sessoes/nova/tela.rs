@@ -880,6 +880,24 @@ impl NovaSessao {
         self.importacao.is_some_and(|i| !i.terminou()) || !self.fila_de_levas.is_empty()
     }
 
+    /// A cópia em curso para a barra do pé da janela, `(total, prontas)`, e a
+    /// galeria para onde ela vai quando a sessão já foi criada.
+    ///
+    /// 🔑 **Só o lote, sem as fotos que o rascunho já tinha** — ao contrário
+    /// do resumo do cabeçalho: a barra do pé mede a leva, e um rascunho com 30
+    /// fotos gravadas começaria a leva seguinte em 30/40.
+    pub fn copia_em_curso(&self) -> Option<((usize, usize), Option<&str>)> {
+        if !self.importando() {
+            return None;
+        }
+        let na_fila: usize = self.fila_de_levas.iter().map(Vec::len).sum();
+        let lote = self.importacao.unwrap_or_default();
+        Some((
+            (lote.total + na_fila, lote.prontas()),
+            self.levando.as_ref().map(|l| l.para.as_str()),
+        ))
+    }
+
     /// Copia as fotos para o catálogo, sob o id do rascunho. **Nada sobe.**
     pub fn importar_arquivos(
         &mut self,
