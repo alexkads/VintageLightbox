@@ -14,6 +14,7 @@
 
 mod atalhos_da_revelacao;
 mod barra_do_pe;
+mod canto_dos_envios;
 mod guias;
 mod painel;
 pub mod resgate;
@@ -464,6 +465,8 @@ pub struct Aplicativo {
     /// "N envios recusados".
     recusas: Vec<String>,
     vendo_recusas: bool,
+    /// Onde o canto dos envios foi largado — ver `app/canto_dos_envios.rs`.
+    canto: canto_dos_envios::CantoDosEnvios,
     /// Quando (segundos unix) o site respondeu bem pela última vez — a linha
     /// "Último envio" da bandeja.
     ultimo_envio: Option<i64>,
@@ -1101,6 +1104,7 @@ impl Aplicativo {
             _aparencia: aparencia,
             recusas: Vec::new(),
             vendo_recusas: false,
+            canto: canto_dos_envios::CantoDosEnvios::lembrado(),
             ultimo_envio: None,
             _roteiro: None,
             _pedido_da_sessao: pedido_da_sessao,
@@ -5239,7 +5243,7 @@ impl Render for Aplicativo {
                     ),
             )
             .when(com_caixa, |raiz| raiz.child(self.caixa_flutuante.clone()))
-            .children(self.canto_dos_envios(cx))
+            .children(self.canto_dos_envios(window, cx))
             .when(self.importando, |raiz| {
                 raiz.child(self.modal_de_importacao(cx))
             })
@@ -5446,6 +5450,10 @@ impl Aplicativo {
     }
 
     /// As fotos do site na fila do "Salvar na galeria".
+    pub(crate) fn canto_dos_envios_para_teste(&self) -> (f32, f32) {
+        self.canto.posicao
+    }
+
     pub(crate) fn a_subir_para_teste(&self) -> Vec<String> {
         self.a_subir.iter().map(|(id, _, _)| id.clone()).collect()
     }
@@ -8929,7 +8937,7 @@ mod testes {
         let (janela, _dir) = revelando_do_site_com_rede_lenta(cx, publicador.clone());
 
         janela
-            .update(cx, |app, _window, cx| {
+            .update(cx, |app, window, cx| {
                 assert_eq!(publicador.baixadas(), vec!["remota-1".to_string()]);
                 // Dois downloads: a cópia de trabalho e o bruto, que a
                 // Revelação pede para medir o lado da foto.
@@ -8938,7 +8946,10 @@ mod testes {
                 let retrato = app.retrato_do_segundo_plano(cx);
                 assert_eq!(retrato.subindo, 0, "a bandeja não diz \"Subindo\"");
                 assert!(!retrato.ha_envio_pendente(), "fechar agora fecha");
-                assert!(app.canto_dos_envios(cx).is_none(), "o canto fica vazio");
+                assert!(
+                    app.canto_dos_envios(window, cx).is_none(),
+                    "o canto fica vazio"
+                );
 
                 // Um envio de verdade entra junto: tirar uma foto do site —
                 // o "Apagar" do painel, que é o gesto que sobrou depois de a
@@ -8952,7 +8963,7 @@ mod testes {
                 let retrato = app.retrato_do_segundo_plano(cx);
                 assert_eq!(retrato.subindo, 1);
                 assert!(retrato.ha_envio_pendente());
-                assert!(app.canto_dos_envios(cx).is_some());
+                assert!(app.canto_dos_envios(window, cx).is_some());
             })
             .expect("a janela deve estar aberta");
 

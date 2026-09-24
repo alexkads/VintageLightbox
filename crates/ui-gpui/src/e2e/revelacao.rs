@@ -328,3 +328,73 @@ fn predefinicoes_prever_aplicar_criar_renomear_reordenar_importar_e_apagar(
     });
     assert_eq!(e.guarda.apagados().len(), 1);
 }
+
+/// 🎬 **O canto dos envios sai de cima da tira pela alça**, como o caixa
+/// (dono, 24/set/2026: *"em alguns momentos esse status pode ficar por cima do
+/// filmstrip"*).
+///
+/// Com o ensaio subindo e a Revelação aberta, o mouse de verdade agarra a alça,
+/// leva o canto 400 px para a direita e 300 px para cima e solta: o canto vai
+/// junto, e fica. Soltar sem a alça apertada não mexe em nada.
+#[gpui::test]
+fn o_canto_dos_envios_se_arrasta_para_fora_da_tira(cx: &mut TestAppContext) {
+    use gpui::{point, px, Modifiers, MouseButton};
+
+    let e = abrir_o_ensaio(
+        cx,
+        Cenario {
+            site: Box::new(|site| site.demorada = true),
+            ..Cenario::default()
+        },
+    );
+    e.revelar_a_do_site(cx, "a");
+    e.app(cx, |app, _w, _cx| {
+        assert!(app.sincronias_pendentes() > 0, "o ensaio está subindo");
+        assert_eq!(app.canto_dos_envios_para_teste(), (0., 0.), "nasce no pé");
+    });
+
+    let mut visual = gpui::VisualTestContext::from_window(e.raiz.into(), cx);
+    let antes = visual
+        .debug_bounds("canto-dos-envios")
+        .expect("o canto aparece na Revelação");
+    let alca = visual
+        .debug_bounds("canto-dos-envios-alca")
+        .expect("com a alça");
+    let de = alca.center();
+    let ate = point(de.x + px(400.), de.y - px(300.));
+    visual.simulate_mouse_down(de, MouseButton::Left, Modifiers::none());
+    visual.simulate_mouse_move(
+        point(de.x + px(200.), de.y - px(150.)),
+        MouseButton::Left,
+        Modifiers::none(),
+    );
+    visual.simulate_mouse_move(ate, MouseButton::Left, Modifiers::none());
+    visual.simulate_mouse_up(ate, MouseButton::Left, Modifiers::none());
+    cx.run_until_parked();
+
+    e.app(cx, |app, _w, _cx| {
+        assert_eq!(app.tela(), Tela::Revelacao, "arrastar não sai do editor");
+        assert_eq!(app.canto_dos_envios_para_teste(), (400., -300.));
+    });
+    let mut visual = gpui::VisualTestContext::from_window(e.raiz.into(), cx);
+    let depois = visual
+        .debug_bounds("canto-dos-envios")
+        .expect("o canto continua à vista");
+    assert_eq!(
+        depois.origin.x - antes.origin.x,
+        px(400.),
+        "foi para a direita"
+    );
+    assert_eq!(antes.origin.y - depois.origin.y, px(300.), "e para cima");
+
+    // O ponteiro que anda sem a alça apertada não leva o canto.
+    visual.simulate_mouse_move(
+        point(px(10.), px(10.)),
+        None::<MouseButton>,
+        Modifiers::none(),
+    );
+    cx.run_until_parked();
+    e.app(cx, |app, _w, _cx| {
+        assert_eq!(app.canto_dos_envios_para_teste(), (400., -300.), "e fica");
+    });
+}

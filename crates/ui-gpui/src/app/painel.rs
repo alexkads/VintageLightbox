@@ -17,7 +17,8 @@
 //! seções que o app já atende, e nenhuma a mais.
 
 use gpui::{
-    div, prelude::*, px, AnyElement, Context, FontWeight, MouseButton, SharedString, Window,
+    canvas, div, prelude::*, px, AnyElement, Context, FontWeight, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, SharedString, Window,
 };
 use gpui_component::tooltip::Tooltip;
 use gpui_component::{h_flex, v_flex, ActiveTheme, Icon};
@@ -762,14 +763,35 @@ impl Aplicativo {
     }
 
     /// O canto de baixo: fotos subindo e o que o site recusou.
-    pub(super) fn canto_dos_envios(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+    ///
+    /// 🔑 **Arrasta-se pela alça**, como o caixa — ver
+    /// `app/canto_dos_envios.rs`. Nasce no pé, ao lado do menu, que é onde a
+    /// tira desenha as primeiras fotos.
+    pub(super) fn canto_dos_envios(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<impl IntoElement> {
+        use super::canto_dos_envios::{dentro_dos_limites, MARGEM};
+
         let subindo = self.sincronias_pendentes;
         let recusados = self.recusas.len();
         if subindo == 0 && recusados == 0 {
             return None;
         }
+        let menu = self.largura_do_menu();
+        let janela = window.viewport_size();
+        let area = (f32::from(janela.width) - menu, f32::from(janela.height));
+        // Com a janela menor, o canto volta para dentro.
+        let (x, y) = dentro_dos_limites(self.canto.posicao, self.canto.tamanho.get(), area);
+        let tamanho = self.canto.tamanho.clone();
         let tema = cx.theme();
-        let (fundo, borda, perigo) = (tema.background.opacity(0.95), tema.border, tema.danger);
+        let (fundo, borda, perigo, apagado) = (
+            tema.background.opacity(0.95),
+            tema.border,
+            tema.danger,
+            tema.muted_foreground,
+        );
         let pilula = || {
             h_flex()
                 .gap(px(8.))
@@ -781,70 +803,121 @@ impl Aplicativo {
                 .shadow_lg()
                 .text_xs()
         };
-        Some(
-            v_flex()
+        let alca = h_flex()
+            .id("canto-dos-envios-alca")
+            .debug_selector(|| "canto-dos-envios-alca".into())
+            .cursor_move()
+            .px(px(4.))
+            .py(px(8.))
+            .rounded(px(10.))
+            .border_1()
+            .border_color(borda)
+            .bg(fundo)
+            .shadow_lg()
+            .child(
+                Icon::new(Icone::GripVertical)
+                    .size(px(14.))
+                    .text_color(apagado),
+            )
+            .tooltip(|window, cx| Tooltip::new("Arraste para mudar de lugar").build(window, cx))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|raiz, e: &MouseDownEvent, _window, cx| {
+                    raiz.canto
+                        .comecar((f32::from(e.position.x), f32::from(e.position.y)));
+                    cx.notify();
+                }),
+            );
+        // 🔑 **O arrasto escuta a janela inteira**, e não a alça: o ponteiro
+        // sai de cima dela no primeiro pixel. É o mesmo desenho do caixa.
+        let arrasto = self.canto.arrastando().then(|| {
+            let fraca = cx.entity().downgrade();
+            canvas(
+                |_, _, _| {},
+                move |_, _, window, _| {
+                    let para_mover = fraca.clone();
+                    window.on_mouse_event(move |e: &MouseMoveEvent, _, _, cx| {
+                        if let Some(raiz) = para_mover.upgrade() {
+                            raiz.update(cx, |raiz, cx| {
+                                let ponto = (f32::from(e.position.x), f32::from(e.position.y));
+                                if raiz.canto.arrastar(ponto, area) {
+                                    cx.notify();
+                                }
+                            });
+                        }
+                    });
+                    let para_soltar = fraca.clone();
+                    window.on_mouse_event(move |_: &MouseUpEvent, _, _, cx| {
+                        if let Some(raiz) = para_soltar.upgrade() {
+                            raiz.update(cx, |raiz, cx| {
+                                if raiz.canto.soltar() {
+                                    cx.notify();
+                                }
+                            });
+                        }
+                    });
+                },
+            )
+            .absolute()
+            .size_full()
+        });
+        let canto = v_flex()
+            .id("canto-dos-envios")
+            .debug_selector(|| "canto-dos-envios".into())
+            .absolute()
+            .left(px(menu + MARGEM + x))
+            .bottom(px(MARGEM - y))
+            .gap(px(8.))
+            .child(
+                h_flex()
+                    .gap(px(8.))
+                    .child(alca)
+                    .when(subindo > 0, |d| {
+                        d.child(
+                            pilula()
+                                .border_color(borda)
+                                .child(Icon::new(Icone::LoaderCircle).size(px(14.)))
+                                .child(if subindo == 1 {
+                                    "1 envio na fila".to_string()
+                                } else {
+                                    format!("{subindo} envios na fila")
+                                }),
+                        )
+                    })
+                    .when(recusados > 0, |d| {
+                        d.child(
+                            pilula()
+                                .id("recusas-botao")
+                                .cursor_pointer()
+                                .border_color(perigo.opacity(0.4))
+                                .text_color(perigo)
+                                .child(Icon::new(Icone::TriangleAlert).size(px(14.)))
+                                .child(if recusados == 1 {
+                                    "1 envio recusado".to_string()
+                                } else {
+                                    format!("{recusados} envios recusados")
+                                })
+                                .on_click(cx.listener(|raiz, _, _window, cx| {
+                                    raiz.vendo_recusas = !raiz.vendo_recusas;
+                                    cx.notify();
+                                })),
+                        )
+                    }),
+            )
+            .child(
+                canvas(
+                    move |limites, _, _| {
+                        tamanho.set((
+                            f32::from(limites.size.width),
+                            f32::from(limites.size.height),
+                        ))
+                    },
+                    |_, _, _, _| {},
+                )
                 .absolute()
-                .left(px(self.largura_do_menu() + 16.))
-                .bottom(px(16.))
-                .gap(px(8.))
-                .when(self.vendo_recusas && recusados > 0, |d| {
-                    d.child(
-                        v_flex()
-                            .id("recusas")
-                            .w(px(384.))
-                            .max_h(px(320.))
-                            .overflow_y_scroll()
-                            .p(px(12.))
-                            .gap(px(8.))
-                            .rounded(px(10.))
-                            .border_1()
-                            .border_color(borda)
-                            .bg(tema.popover)
-                            .shadow_md()
-                            .text_xs()
-                            .children(
-                                self.recusas
-                                    .iter()
-                                    .map(|motivo| div().child(motivo.clone())),
-                            ),
-                    )
-                })
-                .child(
-                    h_flex()
-                        .gap(px(8.))
-                        .when(subindo > 0, |d| {
-                            d.child(
-                                pilula()
-                                    .border_color(borda)
-                                    .child(Icon::new(Icone::LoaderCircle).size(px(14.)))
-                                    .child(if subindo == 1 {
-                                        "1 envio na fila".to_string()
-                                    } else {
-                                        format!("{subindo} envios na fila")
-                                    }),
-                            )
-                        })
-                        .when(recusados > 0, |d| {
-                            d.child(
-                                pilula()
-                                    .id("recusas-botao")
-                                    .cursor_pointer()
-                                    .border_color(perigo.opacity(0.4))
-                                    .text_color(perigo)
-                                    .child(Icon::new(Icone::TriangleAlert).size(px(14.)))
-                                    .child(if recusados == 1 {
-                                        "1 envio recusado".to_string()
-                                    } else {
-                                        format!("{recusados} envios recusados")
-                                    })
-                                    .on_click(cx.listener(|raiz, _, _window, cx| {
-                                        raiz.vendo_recusas = !raiz.vendo_recusas;
-                                        cx.notify();
-                                    })),
-                            )
-                        }),
-                ),
-        )
+                .inset_0(),
+            );
+        Some(div().absolute().inset_0().children(arrasto).child(canto))
     }
 }
 
