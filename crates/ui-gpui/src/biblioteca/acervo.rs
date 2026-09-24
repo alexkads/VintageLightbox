@@ -113,6 +113,9 @@ pub mod mentira {
     pub struct AcervoDeMentira {
         pub fotos: Mutex<Vec<PhotoViewModel>>,
         pub pedidos: Mutex<usize>,
+        /// Uma leitura que começou antes da última gravação e terminou
+        /// depois dela: a próxima releitura devolve este retrato, uma vez.
+        pub leitura_atrasada: Mutex<Option<Vec<PhotoViewModel>>>,
     }
 
     impl AcervoDeMentira {
@@ -157,6 +160,10 @@ pub mod mentira {
     impl Acervo for AcervoDeMentira {
         fn recarregar(&self, canal: Sender<Vec<PhotoViewModel>>) {
             *self.pedidos.lock().expect("os pedidos") += 1;
+            if let Some(velhas) = self.leitura_atrasada.lock().expect("o atraso").take() {
+                let _ = canal.send(velhas);
+                return;
+            }
             let fotos = self.fotos.lock().expect("as fotos").clone();
             let _ = canal.send(fotos);
         }

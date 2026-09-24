@@ -1354,6 +1354,25 @@ impl Aplicativo {
         }));
     }
 
+    /// A releitura do catálogo com a receita que o gravador já sabe por cima.
+    ///
+    /// 🚨 **O disco anda atrás do espelho.** Quem grava (a Revelação, a
+    /// receita padrão) escreve no espelho na hora e no disco por uma tarefa do
+    /// tokio; durante a importação, cada foto copiada pede uma releitura. Uma
+    /// leitura que começava antes de a gravação chegar ao disco terminava
+    /// depois dela e trocava a cópia da grade pela de antes — e a Revelação
+    /// abria a foto sem a receita padrão que o catálogo já tinha (visto contra
+    /// a pilha local, 24/set/2026). É a mesma regra do depósito das do site
+    /// (`aplicar_o_deposito_do_site`): o que ainda não chegou ao disco ganha
+    /// dele.
+    fn com_o_espelho_do_gravador(&self, fotos: &mut [PhotoViewModel]) {
+        for foto in fotos {
+            if let Some((ajustes, corte)) = self.gravador.receita_de(&foto.id) {
+                persistencia::na_foto(foto, ajustes, corte);
+            }
+        }
+    }
+
     /// Pede uma releitura da **galeria aberta**, agrupada como a do acervo.
     ///
     /// 🚨 **Relê, não entra de novo** (dono, 18/set/2026: *"da forma que ficou
@@ -1389,9 +1408,10 @@ impl Aplicativo {
                     .timer(std::time::Duration::from_millis(100))
                     .await;
                 let Ok(chegou) = raiz.update(cx, |raiz, cx| {
-                    let Ok(fotos) = raiz.releituras.1.try_recv() else {
+                    let Ok(mut fotos) = raiz.releituras.1.try_recv() else {
                         return false;
                     };
+                    raiz.com_o_espelho_do_gravador(&mut fotos);
                     // 🔑 **A tela da sessão recebe as locais deste ensaio.**
                     // Sem isto a foto importada ficaria gravada e invisível —
                     // o mesmo desfecho de não ter importado. Antes das do
@@ -2302,8 +2322,14 @@ impl Aplicativo {
             }
             self.receita_das_locais
                 .insert(foto.id.clone(), chave.clone());
+            // A base é o que a foto tem agora — do espelho do gravador, que
+            // anda na hora, e senão do catálogo relido.
+            let base = self.gravador.receita_de(&foto.id).unwrap_or((
+                persistencia::da_foto(foto),
+                persistencia::corte_da_foto(foto),
+            ));
             self.receita_padrao
-                .pedir(foto.id.clone(), ajustes, proporcao.clone());
+                .pedir(foto.id.clone(), ajustes, proporcao.clone(), base);
             pediu = true;
         }
         if pediu {
@@ -2342,6 +2368,12 @@ impl Aplicativo {
         self.receita_padrao.progresso().total
     }
 
+    /// 🧪 A receita padrão ainda anda?
+    #[cfg(test)]
+    pub(crate) fn receita_padrao_andando(&self) -> bool {
+        self.receita_padrao.progresso().andando()
+    }
+
     /// Acompanha a receita padrão enquanto ela anda.
     ///
     /// 🔑 **Nasce do evento e morre com o trabalho**, como `esperar_a_reposicao`:
@@ -2369,8 +2401,18 @@ impl Aplicativo {
     /// Repassa às grades as fotos que a receita revelou. Devolve se acabou.
     pub(crate) fn colher_reveladas(&mut self, cx: &mut Context<Self>) -> bool {
         let mut chegou = false;
+        let mut de_fora = std::collections::HashMap::new();
         while let Ok(foto_id) = self.reveladas.1.try_recv() {
             chegou = true;
+            // 🔑 **A receita que o serviço gravou chega à Revelação**, que pode
+            // estar com esta foto aberta — e com um ajuste feito em cima da
+            // receita de antes (ver `Revelacao::receita_mudou_por_fora`).
+            if let Some(receita) = self.gravador.receita_de(&foto_id) {
+                self.revelacao.update(cx, |tela, cx| {
+                    tela.receita_mudou_por_fora(&foto_id, receita, cx)
+                });
+                de_fora.insert(foto_id.clone(), receita);
+            }
             // As duas telas mostram as mesmas fotos; a que não tiver esta na mão
             // não tem o que esquecer, e o `remove` não custa nada.
             self.nova_sessao
@@ -2383,6 +2425,12 @@ impl Aplicativo {
             self.revelacao
                 .update(cx, |tela, cx| tela.miniatura_reposta(&foto_id, cx));
         }
+        // 🚨 **E à grade, que é de onde a Revelação abre a foto local.** Sem
+        // isto, a foto aberta depois do aviso vinha da cópia de antes da
+        // receita padrão, e o primeiro ajuste gravava o neutro por cima (visto
+        // contra a pilha local, 24/set/2026: o serviço gravou às 29,86 s, a
+        // Revelação abriu a foto às 33,29 s com o contraste 1,0).
+        self.escrever_na_grade(&de_fora, cx);
         if chegou {
             cx.notify();
         }
@@ -3154,6 +3202,16 @@ impl Aplicativo {
                 )
             })
             .collect();
+        self.escrever_na_grade(&receitas, cx);
+    }
+
+    /// Escreve receitas na cópia do catálogo que a grade guarda — e de onde a
+    /// Revelação abre as fotos locais (`revelar_da_sessao`).
+    fn escrever_na_grade(
+        &mut self,
+        receitas: &std::collections::HashMap<String, (Ajustes, persistencia::Corte)>,
+        cx: &mut Context<Self>,
+    ) {
         if receitas.is_empty() {
             return;
         }

@@ -93,6 +93,16 @@ pub trait Gravador: Send + Sync + 'static {
 
     /// Esta subiu para a galeria: o servidor passa a ser a verdade dela.
     fn esquecer_do_site(&self, _foto_no_site: String) {}
+
+    /// A última receita gravada **nesta abertura do app** para uma foto local.
+    ///
+    /// 🔑 **É o espelho que deixa dois escritores se enxergarem.** A Revelação
+    /// e a receita padrão gravam a mesma foto, cada uma de uma thread, e o disco
+    /// é assíncrono: sem uma memória comum, cada uma escrevia a foto inteira sem
+    /// saber da outra (ver [`mesclar`]). `None` é "ninguém gravou ainda".
+    fn receita_de(&self, _id: &str) -> Option<Receita> {
+        None
+    }
 }
 
 /// O gravador de verdade: entrega ao `EditorController`, numa tarefa do tokio.
@@ -111,6 +121,9 @@ pub struct GravadorDoBanco {
     /// presets) e acompanha cada gravação daqui em diante — assim a sessão
     /// reaberta mostra o que o operador acabou de ajustar, sem ida ao banco.
     do_site: Arc<std::sync::Mutex<std::collections::HashMap<String, String>>>,
+    /// A última receita de cada foto local, gravada nesta abertura — ver
+    /// [`Gravador::receita_de`].
+    locais: std::sync::Mutex<std::collections::HashMap<String, Receita>>,
 }
 
 impl GravadorDoBanco {
@@ -125,6 +138,7 @@ impl GravadorDoBanco {
             editor,
             tokio,
             do_site: Arc::new(std::sync::Mutex::new(guardadas.into_iter().collect())),
+            locais: std::sync::Mutex::default(),
         }
     }
 }
@@ -160,6 +174,11 @@ impl Gravador for GravadorDoBanco {
             return;
         }
 
+        // O espelho anda **na hora**, antes do disco: é por ele que o outro
+        // escritor da foto enxerga este (`receita_de`).
+        if let Ok(mut locais) = self.locais.lock() {
+            locais.insert(id.clone(), (ajustes, corte));
+        }
         // A receita inteira vai junto das colunas: elas são só os 53 antigos, e
         // os módulos novos voltavam zerados ao reabrir (divergência D7).
         let receita =
@@ -265,6 +284,10 @@ impl Gravador for GravadorDoBanco {
                 eprintln!("⚠️ [Revelação] {foto_no_site} subiu, mas ficou no depósito: {erro}");
             }
         });
+    }
+
+    fn receita_de(&self, id: &str) -> Option<Receita> {
+        self.locais.lock().ok()?.get(id).copied()
     }
 }
 
@@ -396,6 +419,84 @@ pub fn na_foto(foto: &mut PhotoViewModel, ajustes: Ajustes, corte: Corte) {
     foto.edit_crop_angle = corte.angulo;
     foto.edit_crop_flip_h = corte.espelho_h;
     foto.edit_crop_flip_v = corte.espelho_v;
+}
+
+/// Uma receita inteira: os ajustes e o enquadramento.
+pub type Receita = (Ajustes, Corte);
+
+/// O corte com cada campo escrito — ausente vira o neutro dele.
+///
+/// Comparar `None` com `Some(0.0)` diria que o operador mexeu num corte que
+/// ninguém tocou; escritos por extenso, os dois são o mesmo.
+fn corte_por_extenso(corte: Corte) -> Corte {
+    Corte {
+        x: Some(corte.x.unwrap_or(0.)),
+        y: Some(corte.y.unwrap_or(0.)),
+        largura: Some(corte.largura.unwrap_or(1.)),
+        altura: Some(corte.altura.unwrap_or(1.)),
+        rotacao: Some(corte.rotacao.unwrap_or(0)),
+        angulo: Some(corte.angulo.unwrap_or(0.)),
+        espelho_h: Some(corte.espelho_h.unwrap_or(false)),
+        espelho_v: Some(corte.espelho_v.unwrap_or(false)),
+    }
+}
+
+/// A receita que mudou **por fora** encontra a que o operador fez **por
+/// dentro** — campo a campo, em três pontas.
+///
+/// `base` é o que a foto tinha quando os dois lados partiram; `meu` é o que o
+/// operador fez desde então; `deles` é o que chegou de fora (a receita padrão
+/// da sessão, gravada em segundo plano). Em cada campo, o que o operador mudou
+/// fica, e o resto vem de fora.
+///
+/// 🚨 **Existe porque a receita padrão e a Revelação escreviam a foto inteira,
+/// uma por cima da outra** (visto contra a pilha local, 24/set/2026). A
+/// Revelação abria a foto antes de a receita padrão chegar, e o primeiro ajuste
+/// gravava tudo a partir do neutro: o contraste 1,25 da sessão voltava a 1,0. Na
+/// ordem inversa, a receita padrão gravava por cima do ajuste, e a edição
+/// sumia. Com a mescla, a foto fica com as duas.
+pub fn mesclar(base: Receita, meu: Receita, deles: Receita) -> Receita {
+    let (base_a, meu_a, deles_a) = (
+        base.0.como_vetor(),
+        meu.0.como_vetor(),
+        deles.0.como_vetor(),
+    );
+    let mut vetor = deles_a;
+    for (i, valor) in vetor.iter_mut().enumerate() {
+        if meu_a[i].to_bits() != base_a[i].to_bits() {
+            *valor = meu_a[i];
+        }
+    }
+    let ajustes = Ajustes::de_vetor(&vetor).expect("o mesmo tamanho dos três");
+
+    let (b, m, d) = (
+        corte_por_extenso(base.1),
+        corte_por_extenso(meu.1),
+        corte_por_extenso(deles.1),
+    );
+    fn campo<T: PartialEq>(b: T, m: T, d: T) -> T {
+        if m != b {
+            m
+        } else {
+            d
+        }
+    }
+    let corte = Corte {
+        x: campo(b.x, m.x, d.x),
+        y: campo(b.y, m.y, d.y),
+        largura: campo(b.largura, m.largura, d.largura),
+        altura: campo(b.altura, m.altura, d.altura),
+        rotacao: campo(b.rotacao, m.rotacao, d.rotacao),
+        angulo: campo(b.angulo, m.angulo, d.angulo),
+        espelho_h: campo(b.espelho_h, m.espelho_h, d.espelho_h),
+        espelho_v: campo(b.espelho_v, m.espelho_v, d.espelho_v),
+    };
+    (ajustes, corte)
+}
+
+/// As duas receitas dizem o mesmo — com o corte ausente igual ao neutro.
+pub fn mesma_receita(a: Receita, b: Receita) -> bool {
+    a.0 == b.0 && corte_por_extenso(a.1) == corte_por_extenso(b.1)
 }
 
 /// O corte como o domínio o entende: campo ausente é a foto inteira.
@@ -611,6 +712,87 @@ pub mod mentira {
                 .expect("o depósito")
                 .retain(|(id, _)| id != &foto_no_site);
         }
+
+        fn receita_de(&self, id: &str) -> Option<super::Receita> {
+            if super::id_no_site(id).is_some() {
+                return None;
+            }
+            self.gravado
+                .lock()
+                .expect("o registro de gravações")
+                .iter()
+                .rev()
+                .find(|(outra, _, _)| outra == id)
+                .map(|(_, ajustes, corte)| (*ajustes, *corte))
+        }
+    }
+}
+
+#[cfg(test)]
+mod testes_da_mescla {
+    use super::*;
+
+    fn com(exposicao: f32, contraste: f32, largura: Option<f32>) -> Receita {
+        (
+            Ajustes {
+                exposure: exposicao,
+                contrast: contraste,
+                ..Ajustes::default()
+            },
+            Corte {
+                largura,
+                ..Corte::default()
+            },
+        )
+    }
+
+    /// 🔑 O caso do dono: a Revelação abriu no neutro, o operador baixou a
+    /// exposição, e a receita padrão (contraste 1,25 e corte 3:2) chegou
+    /// depois. A foto fica com as duas.
+    #[test]
+    fn o_que_o_operador_mudou_fica_e_o_resto_vem_de_fora() {
+        let base = com(0., 1., None);
+        let meu = com(-0.5, 1., None);
+        let deles = com(0., 1.25, Some(0.9));
+        let (ajustes, corte) = mesclar(base, meu, deles);
+        assert_eq!(ajustes.exposure, -0.5, "a edição fica");
+        assert_eq!(ajustes.contrast, 1.25, "a receita padrão entra");
+        assert_eq!(corte.largura, Some(0.9), "e o corte dela também");
+    }
+
+    /// O corte ausente e o corte escrito no neutro são o mesmo corte — senão o
+    /// `Some(1.0)` que a Revelação grava tomaria o lugar do 3:2 da sessão.
+    #[test]
+    fn ausente_e_neutro_escrito_nao_contam_como_mudanca() {
+        let base = com(0., 1., None);
+        let meu = com(0., 1., Some(1.));
+        let deles = com(0., 1., Some(0.9));
+        assert_eq!(mesclar(base, meu, deles).1.largura, Some(0.9));
+    }
+
+    /// Tirar da receita de fora o que veio do operador: `mesclar(meu, base,
+    /// deles)` devolve a base nos campos que ele mudou — é o ponto de partida
+    /// do histórico refeito.
+    #[test]
+    fn a_parte_de_fora_sem_o_ajuste_do_operador() {
+        let base = com(0., 1., None);
+        let meu = com(-0.5, 1., None);
+        let deles_ja_mesclada = com(-0.5, 1.25, None);
+        let fora = mesclar(meu, base, deles_ja_mesclada);
+        assert_eq!((fora.0.exposure, fora.0.contrast), (0., 1.25));
+    }
+
+    #[test]
+    fn sem_mudanca_de_nenhum_lado_e_a_de_fora() {
+        let base = com(0.3, 1., None);
+        let deles = com(0.7, 1.1, None);
+        assert_eq!(mesclar(base, base, deles).0, deles.0);
+        let meu = com(0.9, 1.4, None);
+        assert_eq!(
+            mesclar(base, meu, base).0,
+            meu.0,
+            "nada de fora: fica a minha"
+        );
     }
 }
 

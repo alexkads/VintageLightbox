@@ -234,6 +234,14 @@ pub struct Revelacao {
     /// levaria o retrato velho por cima da receita nova — e zeraria no site uma
     /// foto que ninguém tocou (visto rodando o app, 24/set/2026).
     gravadas: std::collections::HashSet<String>,
+    /// A receita de cada foto **antes** do primeiro gesto desta abertura sobre
+    /// ela — a base da mescla quando a mesma foto muda por fora (a receita
+    /// padrão da sessão, gravada em segundo plano). Ver
+    /// [`Self::receita_mudou_por_fora`].
+    bases: std::collections::HashMap<String, persistencia::Receita>,
+    /// A receita da foto aberta mudou por fora e os sliders ainda mostram a de
+    /// antes: quem os acerta é o `render`, que tem a janela.
+    sliders_atrasados: bool,
     /// A espera do próximo salvamento. Guardada porque **descartá-la cancela** —
     /// é assim que cada movimento novo do slider adia a gravação em vez de
     /// enfileirar mais uma.
@@ -555,6 +563,8 @@ impl Revelacao {
             historico: Historico::novo(Estado::default()),
             pendente: false,
             gravadas: std::collections::HashSet::new(),
+            bases: std::collections::HashMap::new(),
+            sliders_atrasados: false,
             _gravacao: None,
             controles,
             varredura: 0,
@@ -633,6 +643,7 @@ impl Revelacao {
         self.posicao = posicao.min(acervo.len() - 1);
         self.acervo = Arc::new(acervo);
         self.gravadas.clear();
+        self.bases.clear();
         // Acervo novo, posições novas: o lote antigo não aponta para nada.
         self.marcadas = sincronizacao::so(self.posicao);
         self.ultima_na_tira = None;
@@ -671,6 +682,103 @@ impl Revelacao {
 
     pub fn posicao(&self) -> usize {
         self.posicao
+    }
+
+    /// A receita de uma foto da tira mudou **por fora** — a receita padrão da
+    /// sessão, gravada em segundo plano depois de a tira abrir.
+    ///
+    /// 🚨 **A cópia da tira é um retrato da abertura.** Sem isto, a foto aberta
+    /// continuava nos sliders de antes, e o primeiro ajuste gravava a foto
+    /// inteira a partir deles: o contraste 1,25 da sessão voltava a 1,0 (visto
+    /// contra a pilha local, 24/set/2026). E se o ajuste veio primeiro, quem
+    /// escreveu por último foi a receita padrão — e a edição sumia.
+    ///
+    /// 🔑 **A mescla é campo a campo** ([`persistencia::mesclar`]): o que o
+    /// operador mudou desde a base fica, e o resto vem de fora. Se o resultado
+    /// não é o que o catálogo tem, ele é gravado; se a foto está aberta, os
+    /// sliders e a imagem mudam, e o histórico é refeito sobre a receita nova —
+    /// senão o `Cmd+Z` a desfaria.
+    pub fn receita_mudou_por_fora(
+        &mut self,
+        id: &str,
+        deles: persistencia::Receita,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(copia) = self.acervo.iter().find(|f| f.id == id) else {
+            return;
+        };
+        let aberta = self.aberta.as_ref().is_some_and(|a| a.foto.id == id);
+        let meu = if aberta {
+            (self.ajustes, self.corte)
+        } else {
+            (
+                persistencia::da_foto(copia),
+                persistencia::corte_da_foto(copia),
+            )
+        };
+        let base = self
+            .bases
+            .get(id)
+            .copied()
+            .or_else(|| {
+                aberta
+                    .then_some(self.receita_ao_abrir)
+                    .flatten()
+                    .map(|e| (e.ajustes, e.corte))
+            })
+            .unwrap_or(meu);
+        let mexeu = !persistencia::mesma_receita(meu, base);
+        let final_ = persistencia::mesclar(base, meu, deles);
+        // 🚨 **O que veio de fora, sem o que veio do operador.** O serviço da
+        // receita padrão já mescla com o que o operador gravou (ver
+        // `receita_padrao::mesclada`), então `deles` pode trazer o ajuste dele.
+        // Rebasear o histórico sobre `deles` punha o ajuste dentro do passo
+        // zero, e o `⌘Z` não tinha mais o que tirar (achado pelo e2e).
+        let fora = persistencia::mesclar(meu, base, deles);
+
+        if mexeu {
+            // Daqui em diante, o que o operador mudar é sobre a receita nova.
+            self.bases.insert(id.to_string(), fora);
+            if aberta {
+                self.historico.rebasear(|passo| {
+                    let (ajustes, corte) =
+                        persistencia::mesclar(base, (passo.ajustes, passo.corte), fora);
+                    Estado { ajustes, corte }
+                });
+            }
+        } else if aberta {
+            // Ninguém tinha mexido: a foto passa a abrir com a receita nova.
+            let estado = Estado {
+                ajustes: deles.0,
+                corte: deles.1,
+            };
+            self.receita_ao_abrir = Some(estado);
+            self.historico = Historico::novo(estado);
+        }
+        if persistencia::mesma_receita(final_, meu) {
+            return;
+        }
+
+        let acervo = Arc::make_mut(&mut self.acervo);
+        if let Some(foto) = acervo.iter_mut().find(|f| f.id == id) {
+            persistencia::na_foto(foto, final_.0, final_.1);
+        }
+        if aberta {
+            self.ajustes = final_.0;
+            self.corte = final_.1;
+            if let Some(aberta) = self.aberta.as_mut() {
+                persistencia::na_foto(&mut aberta.foto, final_.0, final_.1);
+            }
+            self.sliders_atrasados = true;
+            self.pedir_revelacao(cx);
+            self.atualizar_exibicao();
+        }
+        // O catálogo tem a de fora; a mescla ainda não está lá.
+        if !persistencia::mesma_receita(final_, deles) {
+            self.gravador.gravar(id.to_string(), final_.0, final_.1);
+            self.gravadas.insert(id.to_string());
+        }
+        cx.notify();
     }
 
     /// As fotos que esta abertura gravou — ver [`Self::gravadas`].
@@ -907,6 +1015,15 @@ impl Revelacao {
     ) {
         self.gravadas
             .extend(gravadas.iter().map(|(id, _, _)| id.clone()));
+        for (id, _, _) in gravadas {
+            if let Some(foto) = self.acervo.iter().find(|f| &f.id == id) {
+                let antes = (
+                    persistencia::da_foto(foto),
+                    persistencia::corte_da_foto(foto),
+                );
+                self.bases.entry(id.clone()).or_insert(antes);
+            }
+        }
         let acervo = Arc::make_mut(&mut self.acervo);
         for (id, ajustes, corte) in gravadas {
             if let Some(foto) = acervo.iter_mut().find(|f| &f.id == id) {
@@ -1473,6 +1590,15 @@ impl Revelacao {
             return;
         }
         let id = aberta.foto.id.clone();
+        // A base é o que a foto tinha antes do primeiro gesto: a cópia que
+        // abriu, ainda não tocada por esta gravação.
+        if !self.bases.contains_key(&id) {
+            let antes = (
+                persistencia::da_foto(&aberta.foto),
+                persistencia::corte_da_foto(&aberta.foto),
+            );
+            self.bases.insert(id.clone(), antes);
+        }
         self.gravador.gravar(id.clone(), self.ajustes, self.corte);
         self.gravadas.insert(id.clone());
 
@@ -2346,6 +2472,12 @@ impl Render for Revelacao {
         self.navegacao.dpr = window.scale_factor();
         if self.exibicao_atrasada {
             self.atualizar_exibicao();
+        }
+        if std::mem::take(&mut self.sliders_atrasados) {
+            let graus = self.corte_atual().angle();
+            self.angulo
+                .update(cx, |estado, cx| estado.set_value(graus, window, cx));
+            self.espalhar_nos_sliders(window, cx);
         }
         self.acompanhar_a_resolucao(cx);
         let cabecalho = self.cabecalho(cx);

@@ -1167,3 +1167,316 @@ fn a_foto_termina_de_subir_com_a_revelacao_aberta_e_o_ajuste_vai_ao_site(cx: &mu
         "a primeira foto não recebeu a edição, e ficou com a receita do catálogo"
     );
 }
+
+/// O ensaio aberto com a Revelação na **segunda** foto local, e a receita da
+/// sessão ("Sépia à moda antiga", contraste 1,25) ainda por escolher — ela
+/// chega depois, pelo [`chega_a_receita_padrao`].
+fn revelando_antes_da_receita_padrao(cx: &mut TestAppContext) -> super::Estudio {
+    let e = com_a_receita_da_sessao_por_escolher(cx);
+    let (aberta, exposicao, contraste) = reabrir(&e, cx, "id-DSC_102.jpg");
+    assert_eq!(aberta, "id-DSC_102.jpg");
+    assert_eq!((exposicao, contraste), (0.0, 1.0), "abre no neutro");
+    e
+}
+
+/// O ensaio aberto na grade, com "Sépia à moda antiga" (contraste 1,25) entre
+/// as predefinições conhecidas, e nenhuma receita escolhida ainda.
+fn com_a_receita_da_sessao_por_escolher(cx: &mut TestAppContext) -> super::Estudio {
+    use domain::entities::preset::PresetAdjustments;
+    use domain::entities::Preset;
+
+    let mut presets = super::presets_do_sistema();
+    presets.push(Preset::system(
+        "Sépia à moda antiga",
+        PresetAdjustments::vazia().com("contrast", 1.25),
+    ));
+    // 🔑 **Rede lenta, como a de verdade**: com a subida respondendo na hora,
+    // a resposta relê o catálogo e esconde a cópia velha que a grade guarda —
+    // e a corrida não aparece (visto ao escrever este cenário).
+    abrir_o_ensaio(
+        cx,
+        Cenario {
+            presets,
+            site: Box::new(|site| site.demorada = true),
+            ..Cenario::default()
+        },
+    )
+}
+
+/// A sessão ganha a receita padrão, e o serviço (uma thread de verdade) a
+/// grava nas locais em segundo plano — o que a importação faz ao entrar.
+///
+/// `segurando` é a foto que o serviço **não alcança ainda**: sem a prévia dela
+/// no cache, ele a adia, como na importação real, em que a fila anda uma foto
+/// por vez. É a janela em que o operador ajusta a foto que a receita ainda vai
+/// gravar. [`solta_a_receita_padrao`] devolve a prévia.
+fn chega_a_receita_padrao(e: &super::Estudio, cx: &mut TestAppContext, segurando: Option<&str>) {
+    if let Some(id) = segurando {
+        e.previews.apagar(id);
+    }
+    for galeria in e.site.galerias.lock().unwrap().iter_mut() {
+        if galeria.id == super::GALERIA {
+            galeria.preset_padrao_id = Some("sistema:sepia".into());
+        }
+    }
+    e.detalhe(cx, |tela, _w, cx| tela.reler(cx));
+    e.esperar(cx);
+    e.detalhe(cx, |_tela, _w, cx| {
+        cx.emit(crate::sessoes::detalhe::Pedido::CatalogoMudou)
+    });
+    // A thread do serviço anda no relógio de verdade; a tela, no do teste.
+    let segurando = segurando.is_some();
+    esperar_o_servico(e, cx, |e, cx| {
+        let (pedidas, andando) = e.app(cx, |app, _w, _cx| {
+            (app.receita_padrao_pedida(), app.receita_padrao_andando())
+        });
+        let outra_pronta = e
+            .gravador
+            .gravado()
+            .iter()
+            .any(|(id, ajustes, _)| id == "id-DSC_101.jpg" && ajustes.contrast == 1.25);
+        // A segurada fica na fila; sem ela, a fila inteira seca.
+        pedidas >= 2 && outra_pronta && (segurando || !andando)
+    });
+}
+
+/// Devolve a prévia que [`chega_a_receita_padrao`] segurou, e espera a fila secar.
+fn solta_a_receita_padrao(e: &super::Estudio, cx: &mut TestAppContext, id: &str) {
+    e.previews
+        .save_preview(id, &super::imagem(160, 120, 110))
+        .expect("devolver a prévia");
+    esperar_o_servico(e, cx, |e, cx| {
+        !e.app(cx, |app, _w, _cx| app.receita_padrao_andando())
+    });
+}
+
+fn esperar_o_servico(
+    e: &super::Estudio,
+    cx: &mut TestAppContext,
+    pronto: impl Fn(&super::Estudio, &mut TestAppContext) -> bool,
+) {
+    // Prazo de relógio de verdade, e não de voltas: com a suíte inteira em
+    // paralelo, a thread do serviço disputa a máquina com as outras.
+    let prazo = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        e.esperar(cx);
+        if pronto(e, cx) {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < prazo,
+            "o serviço da receita padrão não terminou em 30 s"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    e.esperar(cx);
+    e.esperar(cx);
+}
+
+/// A última receita gravada no catálogo para `id`: `(exposição, contraste)`.
+fn gravada(e: &super::Estudio, id: &str) -> (f32, f32) {
+    e.gravador
+        .gravado()
+        .into_iter()
+        .rev()
+        .find(|(outra, _, _)| outra == id)
+        .map(|(_, ajustes, _)| (ajustes.exposure, ajustes.contrast))
+        .unwrap_or_else(|| panic!("nada gravado em {id}"))
+}
+
+/// 🚨 **A receita padrão que chega com a Revelação aberta não some no primeiro
+/// ajuste** — a ordem em que a foto perdia o contraste da sessão.
+///
+/// Visto contra a pilha local (24/set/2026): a Q_0001 e a R_0001 foram abertas
+/// logo depois de importadas, antes de a receita padrão chegar a elas. A tela
+/// ficou nos sliders do neutro, e o primeiro ajuste gravou a foto inteira a
+/// partir deles: exposição −0,5 e contraste **1,0**, e não 1,25. A foto subiu
+/// assim, com o site e o catálogo de acordo — e errados.
+#[gpui::test]
+fn a_receita_padrao_que_chega_com_a_revelacao_aberta_nao_some_no_primeiro_ajuste(
+    cx: &mut TestAppContext,
+) {
+    let e = revelando_antes_da_receita_padrao(cx);
+    chega_a_receita_padrao(&e, cx, None);
+    assert_eq!(
+        gravada(&e, "id-DSC_102.jpg"),
+        (0.0, 1.25),
+        "a receita chegou ao catálogo"
+    );
+    e.revelacao(cx, |tela, _w, _cx| {
+        assert_eq!(
+            tela.foto_aberta().map(|f| f.id.clone()).as_deref(),
+            Some("id-DSC_102.jpg"),
+            "a foto aberta continua a mesma"
+        );
+        assert_eq!(
+            tela.ajustes().contrast,
+            1.25,
+            "e os sliders mostram a receita que chegou"
+        );
+        assert!(
+            !tela.pode_desfazer(),
+            "sem gesto do operador, nada a desfazer"
+        );
+    });
+
+    e.revelacao(cx, |tela, _w, cx| tela.arrastar_slider(0, -0.5, cx));
+    e.esperar(cx);
+    assert_eq!(
+        gravada(&e, "id-DSC_102.jpg"),
+        (-0.5, 1.25),
+        "o ajuste grava por cima da receita padrão, e não do neutro"
+    );
+    assert_eq!(
+        gravada(&e, "id-DSC_101.jpg"),
+        (0.0, 1.25),
+        "a outra recebeu a receita"
+    );
+
+    e.teclar(cx, "cmd-z");
+    e.esperar(cx);
+    assert_eq!(
+        gravada(&e, "id-DSC_102.jpg"),
+        (0.0, 1.25),
+        "desfazer volta à receita padrão, e não ao neutro de antes dela"
+    );
+}
+
+/// 🚨 **A receita padrão que chegou antes de a Revelação abrir vale no primeiro
+/// ajuste** — a terceira porta da mesma corrida.
+///
+/// Visto contra a pilha local (24/set/2026), já com as duas primeiras
+/// fechadas: o serviço gravou a receita na U_0001 um segundo depois da
+/// importação, e a Revelação só abriu cinco segundos depois — a partir da
+/// cópia do catálogo que a grade guarda, que ninguém tinha relido. A foto
+/// abriu no neutro, com o catálogo já em 1,25, e o ajuste gravou o neutro por
+/// cima.
+#[gpui::test]
+fn a_receita_padrao_que_chegou_antes_de_abrir_a_revelacao_vale_no_primeiro_ajuste(
+    cx: &mut TestAppContext,
+) {
+    let e = com_a_receita_da_sessao_por_escolher(cx);
+    let antes_da_receita = e.acervo.fotos.lock().unwrap().clone();
+    chega_a_receita_padrao(&e, cx, None);
+    assert_eq!(
+        gravada(&e, "id-DSC_102.jpg"),
+        (0.0, 1.25),
+        "a receita chegou ao catálogo"
+    );
+
+    // 1 · Logo depois do aviso, sem releitura do catálogo no meio.
+    let (aberta, exposicao, contraste) = reabrir(&e, cx, "id-DSC_102.jpg");
+    assert_eq!(aberta, "id-DSC_102.jpg");
+    assert_eq!(
+        (exposicao, contraste),
+        (0.0, 1.25),
+        "a Revelação abre com o que o catálogo tem, e não com a cópia de antes"
+    );
+    botao(&e, cx, PedidoDaRevelacao::Sair);
+    e.esperar(cx);
+
+    // 2 · 🚨 Uma releitura que começou antes de a receita chegar ao disco
+    // termina agora — a segunda metade do que se viu na pilha local: a cópia
+    // da grade voltava à de antes mesmo depois do aviso.
+    *e.acervo.leitura_atrasada.lock().unwrap() = Some(antes_da_receita);
+    e.detalhe(cx, |_tela, _w, cx| {
+        cx.emit(crate::sessoes::detalhe::Pedido::CatalogoMudou)
+    });
+    e.esperar(cx);
+    assert!(
+        e.acervo.leitura_atrasada.lock().unwrap().is_none(),
+        "a leitura atrasada foi entregue"
+    );
+    let (_, exposicao, contraste) = reabrir(&e, cx, "id-DSC_102.jpg");
+    assert_eq!(
+        (exposicao, contraste),
+        (0.0, 1.25),
+        "a leitura atrasada não desfaz a receita que o gravador já gravou"
+    );
+
+    e.revelacao(cx, |tela, _w, cx| tela.arrastar_slider(0, -0.5, cx));
+    e.esperar(cx);
+    assert_eq!(
+        gravada(&e, "id-DSC_102.jpg"),
+        (-0.5, 1.25),
+        "o ajuste grava por cima da receita padrão"
+    );
+}
+
+/// 🚨 **O ajuste feito enquanto a receita padrão espera na fila não é apagado
+/// por ela** — a outra ordem da mesma corrida.
+///
+/// A receita é pedida na importação e gravada uma foto por vez, em segundo
+/// plano; o operador abre e ajusta a foto que ainda está na fila. O serviço
+/// gravava a foto **inteira** quando chegava a vez dela, e o ajuste sumia.
+/// Agora ela entra só no que o operador não mexeu, a tela mostra as duas, e o
+/// `⌘Z` tira o ajuste — e não a receita.
+#[gpui::test]
+fn o_ajuste_feito_enquanto_a_receita_padrao_espera_nao_e_apagado_por_ela(cx: &mut TestAppContext) {
+    let e = revelando_antes_da_receita_padrao(cx);
+    chega_a_receita_padrao(&e, cx, Some("id-DSC_102.jpg"));
+    e.revelacao(cx, |tela, _w, cx| tela.arrastar_slider(0, -0.5, cx));
+    e.esperar(cx);
+    assert_eq!(
+        gravada(&e, "id-DSC_102.jpg"),
+        (-0.5, 1.0),
+        "a receita ainda não chegou a ela"
+    );
+
+    solta_a_receita_padrao(&e, cx, "id-DSC_102.jpg");
+    assert_eq!(
+        gravada(&e, "id-DSC_102.jpg"),
+        (-0.5, 1.25),
+        "o catálogo fica com o ajuste e com a receita"
+    );
+    e.revelacao(cx, |tela, _w, _cx| {
+        let ajustes = tela.ajustes();
+        assert_eq!(
+            (ajustes.exposure, ajustes.contrast),
+            (-0.5, 1.25),
+            "e a tela também"
+        );
+    });
+
+    e.teclar(cx, "cmd-z");
+    e.esperar(cx);
+    e.revelacao(cx, |tela, _w, _cx| {
+        let ajustes = tela.ajustes();
+        assert_eq!(
+            (ajustes.exposure, ajustes.contrast),
+            (0.0, 1.25),
+            "desfazer tira o ajuste, e não a receita padrão"
+        );
+    });
+    assert_eq!(gravada(&e, "id-DSC_102.jpg"), (0.0, 1.25));
+}
+
+/// 🚨 **E com a Revelação já em outra foto**: quem protege o ajuste é o
+/// próprio serviço, que mescla com o que o operador gravou desde o pedido.
+///
+/// O operador ajusta a foto que espera a receita, volta para a sessão e abre
+/// outra. A tira nova não guarda o que a de antes sabia; sem a mescla no
+/// serviço, a receita apagaria o ajuste sem ninguém olhando.
+#[gpui::test]
+fn o_ajuste_sobrevive_a_receita_padrao_mesmo_com_a_revelacao_em_outra_foto(
+    cx: &mut TestAppContext,
+) {
+    let e = revelando_antes_da_receita_padrao(cx);
+    chega_a_receita_padrao(&e, cx, Some("id-DSC_102.jpg"));
+    e.revelacao(cx, |tela, _w, cx| tela.arrastar_slider(0, -0.5, cx));
+    e.esperar(cx);
+    botao(&e, cx, PedidoDaRevelacao::Sair);
+    e.esperar(cx);
+    let (aberta, _, _) = reabrir(&e, cx, "id-DSC_101.jpg");
+    assert_eq!(
+        aberta, "id-DSC_101.jpg",
+        "a Revelação abriu de novo, noutra foto"
+    );
+
+    solta_a_receita_padrao(&e, cx, "id-DSC_102.jpg");
+    assert_eq!(
+        gravada(&e, "id-DSC_102.jpg"),
+        (-0.5, 1.25),
+        "o serviço gravou a receita por cima só do que o operador não mexeu"
+    );
+}

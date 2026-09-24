@@ -1078,9 +1078,15 @@ impl NovaSessao {
                     // 🔑 **E é ele quem grava o corte de verdade**, medido na
                     // imagem que abriu — o site faz igual: quem grava a receita
                     // é o trabalhador que revela (`exportacao/worker.ts`).
-                    self.portas
-                        .receita_padrao
-                        .pedir(foto.id.clone(), ajustes, proporcao.clone());
+                    //
+                    // A base da mescla é o que acabou de ser gravado: o serviço
+                    // só troca por cima o que ninguém mexeu desde aqui.
+                    self.portas.receita_padrao.pedir(
+                        foto.id.clone(),
+                        ajustes,
+                        proporcao.clone(),
+                        (ajustes, corte),
+                    );
                     pediu = true;
                 }
                 self.receita_aplicada.insert(foto.id.clone(), chave.clone());

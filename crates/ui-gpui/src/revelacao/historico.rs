@@ -126,6 +126,17 @@ impl Historico {
         self.atual += 1;
         Some(self.passos[self.atual])
     }
+
+    /// Refaz cada passo sobre uma receita que mudou por fora.
+    ///
+    /// 🔑 Os passos foram dados sobre a receita de antes: sem isto, o `Cmd+Z`
+    /// levaria a foto de volta a um estado sem a receita que chegou — e
+    /// gravaria isso (ver `Revelacao::receita_mudou_por_fora`).
+    pub fn rebasear(&mut self, refazer: impl Fn(Estado) -> Estado) {
+        for passo in &mut self.passos {
+            *passo = refazer(*passo);
+        }
+    }
 }
 
 #[cfg(test)]

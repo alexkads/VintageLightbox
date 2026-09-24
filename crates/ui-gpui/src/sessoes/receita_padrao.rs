@@ -70,7 +70,7 @@ use infrastructure::cache::preview_manager::PreviewManager;
 use infrastructure::gpu_adjustments::Ajustes;
 
 use crate::revelacao::persistencia::{
-    chave_da_revelada, chave_do_trabalho, para_crop_settings, Corte, Gravador,
+    self, chave_da_revelada, chave_do_trabalho, para_crop_settings, Corte, Gravador,
 };
 use crate::sessoes::nova::receita;
 
@@ -118,6 +118,10 @@ struct Pedido {
     foto_id: String,
     ajustes: Ajustes,
     receita: Receita,
+    /// A receita que a foto tinha quando a receita padrão foi pedida — a base
+    /// da mescla com o que o operador fizer enquanto ela espera. `None` na
+    /// `Pronta`, que não grava nada.
+    base: Option<persistencia::Receita>,
     /// Voltas dadas sem a prévia existir — ver [`ESPERAS_ATE_DESISTIR`].
     esperas: u32,
 }
@@ -179,8 +183,18 @@ impl ReceitaPadrao {
 
     /// Esta foto precisa da receita. Chamar de novo com a mesma foto na fila não
     /// a duplica: a receita nova toma o lugar da que esperava.
-    pub fn pedir(&self, foto_id: String, ajustes: Ajustes, proporcao: Option<String>) {
-        self.enfileirar(foto_id, ajustes, Receita::Padrao { proporcao });
+    ///
+    /// `base` é a receita que a foto tem **agora**: o que o operador mudar
+    /// depois dela, na Revelação, sobrevive à receita padrão (ver
+    /// [`persistencia::mesclar`]).
+    pub fn pedir(
+        &self,
+        foto_id: String,
+        ajustes: Ajustes,
+        proporcao: Option<String>,
+        base: persistencia::Receita,
+    ) {
+        self.enfileirar(foto_id, ajustes, Receita::Padrao { proporcao }, Some(base));
     }
 
     /// A receita **desta** foto já está gravada: só falta a miniatura revelada.
@@ -188,10 +202,16 @@ impl ReceitaPadrao {
     /// É o que o "Sincronizar N" pede para cada foto que recebeu os ajustes, e
     /// o que a Revelação pede para a foto que ela acabou de editar.
     pub fn pedir_a_miniatura(&self, foto_id: String, ajustes: Ajustes, corte: Corte) {
-        self.enfileirar(foto_id, ajustes, Receita::Pronta { corte });
+        self.enfileirar(foto_id, ajustes, Receita::Pronta { corte }, None);
     }
 
-    fn enfileirar(&self, foto_id: String, ajustes: Ajustes, receita: Receita) {
+    fn enfileirar(
+        &self,
+        foto_id: String,
+        ajustes: Ajustes,
+        receita: Receita,
+        base: Option<persistencia::Receita>,
+    ) {
         {
             let mut fila = self.fila.lock().expect("a fila da receita");
             // 🚨 **A mesma foto na fila recebe a receita nova**, e não é
@@ -203,12 +223,15 @@ impl ReceitaPadrao {
             if let Some(pedido) = fila.iter_mut().find(|p| p.foto_id == foto_id) {
                 pedido.ajustes = ajustes;
                 pedido.receita = receita;
+                // A base é a mais antiga: é dela que o operador partiu.
+                pedido.base = pedido.base.or(base);
                 return;
             }
             fila.push_back(Pedido {
                 foto_id,
                 ajustes,
                 receita,
+                base,
                 esperas: 0,
             });
         }
@@ -261,9 +284,13 @@ fn laco(
             let Some(mut pedido) = fila.lock().expect("a fila da receita").pop_front() else {
                 break;
             };
+            // 🔑 **A receita padrão avisa sempre que grava**, e não só quando há
+            // cache novo: a Revelação que está com a foto aberta precisa saber
+            // que os PARÂMETROS mudaram por fora (ver `mesclar`).
+            let gravou = matches!(pedido.receita, Receita::Padrao { .. });
             match trabalhar(motor.as_mut(), &previews, gravador.as_ref(), &pedido) {
                 Desfecho::Feito { avisar } => {
-                    if avisar {
+                    if avisar || gravou {
                         let _ = avisos.send(pedido.foto_id.clone());
                     }
                     progresso.lock().expect("o progresso").prontas += 1;
@@ -273,7 +300,13 @@ fn laco(
                     if pedido.esperas >= ESPERAS_ATE_DESISTIR {
                         // Os PARÂMETROS não se perdem por falta de imagem: vão
                         // sem corte, que é o que não dá para saber sem ela.
-                        gravador.gravar(pedido.foto_id.clone(), pedido.ajustes, Corte::default());
+                        let (ajustes, corte) = mesclada(
+                            gravador.as_ref(),
+                            &pedido,
+                            (pedido.ajustes, Corte::default()),
+                        );
+                        gravador.gravar(pedido.foto_id.clone(), ajustes, corte);
+                        let _ = avisos.send(pedido.foto_id.clone());
                         progresso.lock().expect("o progresso").prontas += 1;
                     } else {
                         adiados.push(pedido);
@@ -287,6 +320,24 @@ fn laco(
                 fila.push_back(pedido);
             }
         }
+    }
+}
+
+/// A receita padrão sobre o que o operador fez desde que ela foi pedida.
+///
+/// 🚨 **Ela escrevia a foto inteira**, e a Revelação também: o que chegasse por
+/// último apagava o outro. O operador que baixava a exposição de uma foto
+/// recém-importada perdia o ajuste quando a receita padrão chegava — ou a
+/// receita padrão, quando o ajuste chegava depois (visto contra a pilha local,
+/// 24/set/2026). Aqui os campos que o operador mudou ficam.
+fn mesclada(
+    gravador: &dyn Gravador,
+    pedido: &Pedido,
+    deles: persistencia::Receita,
+) -> persistencia::Receita {
+    match (pedido.base, gravador.receita_de(&pedido.foto_id)) {
+        (Some(base), Some(meu)) => persistencia::mesclar(base, meu, deles),
+        _ => deles,
     }
 }
 
@@ -334,20 +385,21 @@ fn trabalhar(
         return Desfecho::SemImagem;
     };
 
-    let corte = match &pedido.receita {
+    let (ajustes, corte) = match &pedido.receita {
         Receita::Padrao { proporcao } => {
             // O corte sai das dimensões **da imagem**, e não do EXIF. Ver o
             // cabeçalho.
             let corte =
                 receita::corte_centralizado(proporcao.as_deref(), base.width(), base.height());
-            gravador.gravar(pedido.foto_id.clone(), pedido.ajustes, corte);
-            corte
+            let (ajustes, corte) = mesclada(gravador, pedido, (pedido.ajustes, corte));
+            gravador.gravar(pedido.foto_id.clone(), ajustes, corte);
+            (ajustes, corte)
         }
         // Já gravada por quem pediu — ver `Receita::Pronta`.
-        Receita::Pronta { corte } => *corte,
+        Receita::Pronta { corte } => (pedido.ajustes, *corte),
     };
 
-    let tem_ajustes = pedido.ajustes != Ajustes::default();
+    let tem_ajustes = ajustes != Ajustes::default();
     let tem_corte = corte != Corte::default()
         && !crate::revelacao::corte::e_inteiro(&para_crop_settings(&corte));
     if !tem_ajustes && !tem_corte {
@@ -388,7 +440,7 @@ fn trabalhar(
         };
         let rgba = pequena.to_rgba8();
         let (largura, altura) = rgba.dimensions();
-        match motor.revelar(&Arc::new(rgba.into_raw()), largura, altura, &pedido.ajustes) {
+        match motor.revelar(&Arc::new(rgba.into_raw()), largura, altura, &ajustes) {
             Some(imagem) => imagem,
             None => return Desfecho::Feito { avisar: false },
         }
@@ -462,8 +514,8 @@ mod testes {
             exposure: 0.5,
             ..Ajustes::default()
         };
-        servico.pedir("foto-1".into(), ajustes, None);
-        servico.pedir("foto-1".into(), ajustes, None);
+        servico.pedir("foto-1".into(), ajustes, None, Default::default());
+        servico.pedir("foto-1".into(), ajustes, None, Default::default());
         // Uma na fila (ou já colhida pela thread), nunca duas.
         assert!(
             servico.progresso().total <= 1,
@@ -493,6 +545,7 @@ mod testes {
             receita: Receita::Padrao {
                 proporcao: Some("1:1".into()),
             },
+            base: None,
             esperas: 0,
         };
 
@@ -535,6 +588,7 @@ mod testes {
             foto_id: "foto-1".into(),
             ajustes: Ajustes::default(),
             receita: Receita::Padrao { proporcao: None },
+            base: None,
             esperas: 0,
         };
         let desfecho = trabalhar(None, &previews, &gravador, &pedido);
@@ -564,6 +618,7 @@ mod testes {
             foto_id: "foto-1".into(),
             ajustes: Ajustes::default(),
             receita: Receita::Pronta { corte },
+            base: None,
             esperas: 0,
         };
 
@@ -598,6 +653,7 @@ mod testes {
             receita: Receita::Padrao {
                 proporcao: Some("1:1".into()),
             },
+            base: None,
             esperas: 0,
         };
         assert!(matches!(
