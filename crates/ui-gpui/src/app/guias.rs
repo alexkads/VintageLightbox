@@ -24,6 +24,14 @@
 //! fechar (esta, as outras, as da direita). O nome dado ali é **só da guia**:
 //! a sessão no site continua com o dela, que se troca pelo lápis do cabeçalho.
 //! A cor é uma das cinco etiquetas, as mesmas das fotos.
+//!
+//! 🎞️ **A faixa fica também na Revelação** (dono, 24/set/2026: *"não tem guias
+//! de sessão no modo revelação, deixando pouco intuitivo"*). Na web o editor
+//! cobre a página, mas as abas do navegador continuam em cima dele; aqui a
+//! faixa sumia, e o operador perdia de vista de quem era a foto aberta e como
+//! ir ao próximo cliente. Trocar de guia de dentro da Revelação é sair dela
+//! pela porta de sempre (`sair_da_revelacao`, que grava o pendente) e entrar
+//! na outra sessão.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -424,9 +432,14 @@ impl Aplicativo {
         window: &mut gpui::Window,
         cx: &mut Context<Self>,
     ) {
-        if self.sessao_aberta.as_deref() == Some(id.as_str()) && self.tela == Tela::Sessao {
+        // A guia da frente não faz nada, nem na Revelação: é a aba ativa do
+        // navegador, e clicar nela não tira ninguém do editor.
+        if self.sessao_aberta.as_deref() == Some(id.as_str())
+            && matches!(self.tela, Tela::Sessao | Tela::Revelacao)
+        {
             return;
         }
+        self.largar_a_revelacao(cx);
         self.entrar_na_sessao(id, cx);
         window.focus(&self.foco);
     }
@@ -438,6 +451,7 @@ impl Aplicativo {
     pub fn fechar_guia(&mut self, id: String, window: &mut gpui::Window, cx: &mut Context<Self>) {
         let da_frente = self.sessao_aberta.as_deref() == Some(id.as_str());
         if da_frente {
+            self.largar_a_revelacao(cx);
             // A fila sai da frente antes de a guia sumir: senão `sair_da_sessao`
             // a estacionaria numa guia que já não existe.
             self.a_subir.clear();
@@ -451,6 +465,23 @@ impl Aplicativo {
         }
         self.guardar_guias();
         cx.notify();
+    }
+
+    /// A Revelação sai pela porta de sempre antes de a guia trocar ou fechar.
+    ///
+    /// 🚨 `entrar_na_sessao` e `ir_para` não passam por `sair_da_revelacao`:
+    /// sem isto, o ajuste dos últimos 500 ms se perderia, e a grade da sessão
+    /// seguiria com a miniatura de antes da foto que estava aberta.
+    fn largar_a_revelacao(&mut self, cx: &mut Context<Self>) {
+        if self.tela == Tela::Revelacao {
+            self.sair_da_revelacao(cx);
+        }
+    }
+
+    /// O `+` da faixa e o `⌘T`: a lista de sessões, que é a "página nova".
+    fn abrir_guia_nova(&mut self, window: &mut gpui::Window, cx: &mut Context<Self>) {
+        self.largar_a_revelacao(cx);
+        self.ir_para(Tela::Sessoes, window, cx);
     }
 
     /// Anda `passo` guias a partir da da frente.
@@ -494,27 +525,33 @@ impl Aplicativo {
         }
     }
 
-    /// As teclas do navegador. 🚨 **Só na galeria e na lista**: na Revelação
-    /// `Cmd+W` fecharia a sessão com a foto aberta no meio de um ajuste.
+    /// As teclas do navegador.
+    ///
+    /// 🚨 **Na Revelação, só as que andam** (`Ctrl+Tab`, `⌘1`…`⌘9`): `⌘W`
+    /// fecharia a sessão com a foto aberta no meio de um ajuste, e `⌘T` a
+    /// levaria para a lista — as duas por um dedo que escorregou. Fechar ou
+    /// abrir guia, ali, é pelo mouse.
     pub(super) fn ouvir_atalhos_das_guias(
         &self,
         raiz: gpui::Div,
         cx: &mut Context<Self>,
     ) -> gpui::Div {
-        if !matches!(self.tela, Tela::Sessao | Tela::Sessoes) {
-            return raiz;
-        }
-        raiz.on_action(cx.listener(|raiz, _: &super::GuiaNova, window, cx| {
-            raiz.ir_para(Tela::Sessoes, window, cx);
-        }))
-        .on_action(cx.listener(|raiz, _: &super::FecharGuia, window, cx| {
-            if raiz.tela == Tela::Sessao {
-                if let Some(id) = raiz.sessao_aberta.clone() {
-                    raiz.fechar_guia(id, window, cx);
-                }
-            }
-        }))
-        .on_action(cx.listener(|raiz, _: &super::ProximaGuia, window, cx| {
+        let raiz = match self.tela {
+            Tela::Sessao | Tela::Sessoes => raiz
+                .on_action(cx.listener(|raiz, _: &super::GuiaNova, window, cx| {
+                    raiz.abrir_guia_nova(window, cx);
+                }))
+                .on_action(cx.listener(|raiz, _: &super::FecharGuia, window, cx| {
+                    if raiz.tela == Tela::Sessao {
+                        if let Some(id) = raiz.sessao_aberta.clone() {
+                            raiz.fechar_guia(id, window, cx);
+                        }
+                    }
+                })),
+            Tela::Revelacao if self.sessao_aberta.is_some() => raiz,
+            _ => return raiz,
+        };
+        raiz.on_action(cx.listener(|raiz, _: &super::ProximaGuia, window, cx| {
             raiz.andar_nas_guias(1, window, cx);
         }))
         .on_action(cx.listener(|raiz, _: &super::GuiaAnterior, window, cx| {
@@ -645,7 +682,7 @@ impl Aplicativo {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let da_frente = (self.tela == Tela::Sessao)
+        let da_frente = matches!(self.tela, Tela::Sessao | Tela::Revelacao)
             .then(|| self.sessao_aberta.clone())
             .flatten();
         if da_frente.is_some_and(|f| fecham.contains(&f)) {
@@ -734,18 +771,24 @@ impl Aplicativo {
 
     // ── O desenho ────────────────────────────────────────────────────────
 
-    /// A faixa das guias, sobre a galeria e sobre a lista de sessões.
+    /// A faixa das guias, sobre a galeria, a lista de sessões e a Revelação
+    /// de uma sessão.
     ///
     /// 🔑 **Só aparece com guia aberta**: quem trabalha com uma sessão por vez
     /// não ganha uma faixa a mais na tela.
     pub(super) fn faixa_das_guias(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
-        if self.guias.vazia() || !matches!(self.tela, Tela::Sessao | Tela::Sessoes) {
+        let na_tela = match self.tela {
+            Tela::Sessao | Tela::Sessoes => true,
+            Tela::Revelacao => self.sessao_aberta.is_some(),
+            _ => false,
+        };
+        if self.guias.vazia() || !na_tela {
             return None;
         }
         let tema = cx.theme();
         let (borda, fundo_da_faixa, fundo_ativo) = (tema.border, tema.muted, tema.background);
         let (frente, apagado, destaque) = (tema.foreground, tema.muted_foreground, tema.primary);
-        let da_frente = (self.tela == Tela::Sessao)
+        let da_frente = matches!(self.tela, Tela::Sessao | Tela::Revelacao)
             .then(|| self.sessao_aberta.clone())
             .flatten();
 
@@ -952,7 +995,7 @@ impl Aplicativo {
                         })
                         .child(Icon::new(Icone::Plus).size(px(16.)))
                         .on_click(cx.listener(|raiz, _, window, cx| {
-                            raiz.ir_para(Tela::Sessoes, window, cx);
+                            raiz.abrir_guia_nova(window, cx);
                         })),
                 )
                 .children(menu_do_roteiro.map(|(menu, ponto)| {

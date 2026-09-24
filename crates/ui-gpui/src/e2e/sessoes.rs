@@ -316,6 +316,69 @@ fn cada_sessao_abre_numa_guia_e_as_teclas_do_navegador_andam_entre_elas(cx: &mut
     });
 }
 
+/// 🎬 **As guias ficam em cima da Revelação**, como as abas do navegador em
+/// cima do editor do site (dono, 24/set/2026). A da frente é a sessão da foto
+/// aberta, e clicar nela não tira ninguém do editor; `⌘W` não fecha nada ali;
+/// e o clique de verdade na outra guia sai da Revelação levando o ajuste feito
+/// e entra na outra sessão.
+#[gpui::test]
+fn a_revelacao_mostra_as_guias_e_troca_de_sessao_por_elas(cx: &mut TestAppContext) {
+    let e = abrir_o_ensaio(cx, Cenario::default());
+    e.app(cx, |app, _w, cx| app.entrar_na_sessao("g2".into(), cx));
+    e.esperar(cx);
+    e.teclar(cx, "cmd-1");
+    e.esperar(cx);
+    e.revelar_a_do_site(cx, "a");
+
+    let mut visual = gpui::VisualTestContext::from_window(e.raiz.into(), cx);
+    let da_frente = visual
+        .debug_bounds("guia-g1")
+        .expect("a guia da sessão aberta está sobre a Revelação");
+    let outra = visual.debug_bounds("guia-g2").expect("a outra guia também");
+
+    visual.simulate_click(da_frente.center(), gpui::Modifiers::none());
+    cx.run_until_parked();
+    e.teclar(cx, "cmd-w");
+    e.esperar(cx);
+    e.app(cx, |app, _w, _cx| {
+        assert_eq!(
+            app.tela(),
+            Tela::Revelacao,
+            "a guia da frente não sai do editor"
+        );
+        assert_eq!(
+            app.guias_para_teste(),
+            [GALERIA, "g2"],
+            "⌘W não fecha guia na Revelação"
+        );
+    });
+
+    e.revelacao(cx, |tela, _w, cx| tela.arrastar_slider(0, 1.5, cx));
+    let mut visual = gpui::VisualTestContext::from_window(e.raiz.into(), cx);
+    visual.simulate_click(outra.center(), gpui::Modifiers::none());
+    cx.run_until_parked();
+    e.app(cx, |app, _w, cx| {
+        assert_eq!(app.tela(), Tela::Sessao);
+        assert_eq!(app.sessao_aberta_para_teste(), Some("g2"));
+        assert_eq!(app.detalhe.read(cx).galeria_id(), Some("g2"));
+    });
+    assert!(
+        e.gravador.gravado().iter().any(|(id, _, _)| id == "site:a"),
+        "o ajuste da foto aberta foi junto"
+    );
+
+    // E `⌘1` anda de dentro da Revelação também.
+    e.teclar(cx, "cmd-1");
+    e.esperar(cx);
+    e.revelar_a_do_site(cx, "a");
+    e.teclar(cx, "cmd-2");
+    e.esperar(cx);
+    e.app(cx, |app, _w, _cx| {
+        assert_eq!(app.tela(), Tela::Sessao);
+        assert_eq!(app.sessao_aberta_para_teste(), Some("g2"));
+    });
+}
+
 /// 🎬 **A guia se arruma como aba de navegador.** Arrastada com o mouse de
 /// verdade, passa por cima da vizinha e troca de lugar; pelo menu, ganha um
 /// nome só dela (o nome inteiro já vem selecionado, e digitar troca), uma cor,
