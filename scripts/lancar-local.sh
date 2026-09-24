@@ -6,6 +6,8 @@
 #   ./scripts/lancar-local.sh                       # publica o que está em dist/
 #   ./scripts/lancar-local.sh --notas "corrige X"   # com texto no aviso do app
 #   ./scripts/lancar-local.sh --conferir-r2         # só confere o wrangler e o bucket
+#   ./scripts/lancar-local.sh --aceitar-perda       # publica mesmo tirando plataforma
+#   ./scripts/lancar-local.sh --estrear-plataforma  # publica plataforma que nunca esteve no ar
 #
 # 🔑 **É o caminho de quando o GitHub Actions não está disponível**, e foi
 #    escrito porque ele não estava: em 7/set/2026 a conta ficou bloqueada por
@@ -37,10 +39,18 @@ REPO="alexkads/VintageLightbox"
 R2_BUCKET="vintagelightbox"
 NOTAS=""
 SO_CONFERIR=0
-case "${1:-}" in
-  --notas) NOTAS="${2:-}" ;;
-  --conferir-r2) SO_CONFERIR=1 ;;
-esac
+ACEITAR_PERDA=0
+ESTREAR=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --notas) NOTAS="${2:-}"; shift ;;
+    --conferir-r2) SO_CONFERIR=1 ;;
+    --aceitar-perda) ACEITAR_PERDA=1 ;;
+    --estrear-plataforma) ESTREAR=1 ;;
+    *) printf 'opção desconhecida: %s\n' "$1" >&2; exit 1 ;;
+  esac
+  shift
+done
 
 diga() { printf '\n\033[1;36m▸ %s\033[0m\n' "$*"; }
 aviso() { printf '\033[1;33m⚠️  %s\033[0m\n' "$*" >&2; }
@@ -49,6 +59,10 @@ erro() { printf '\033[1;31m❌ %s\033[0m\n' "$*" >&2; }
 cd "$RAIZ"
 VERSAO=$(sed -n '/^\[workspace\.package\]/,/^\[/p' Cargo.toml | sed -n 's/^version *= *"\(.*\)"/\1/p' | head -1)
 TAG="v$VERSAO"
+# O pacote carrega a versão do packager.toml e o app compara a do Cargo.toml:
+# divergentes, o balcão instala uma e continua se achando na outra.
+VERSAO_DO_PACOTE=$(sed -n 's/^version *= *"\(.*\)"/\1/p' empacotamento/packager.toml | head -1)
+[[ "$VERSAO" == "$VERSAO_DO_PACOTE" ]] || { printf '\033[1;31m❌ Cargo.toml diz %s e packager.toml diz %s\033[0m\n' "$VERSAO" "$VERSAO_DO_PACOTE" >&2; exit 1; }
 
 # ─── R2 ──────────────────────────────────────────────────────────────────────
 #
@@ -129,6 +143,67 @@ ARQUIVOS=$(find dist -type f \( -name '*.dmg' -o -name '*.deb' -o -name '*.AppIm
 diga "montando o manifesto da $VERSAO"
 python3 scripts/montar-manifesto.py --repo "$REPO" --tag "$TAG" --notas "$NOTAS" \
   ${MANIFESTO_R2:+--base "$BASE_R2"}
+
+# ─── Travas: o que prejudicaria quem já tem o app instalado ──────────────────
+#
+# Compara o manifesto novo com o que está no ar, pelo primeiro endereço da
+# lista (o que o app consulta primeiro). Recusar aqui não deixa rastro: o
+# `docs/` volta ao que era.
+diga "comparando com o que está no ar"
+NO_AR=$(grep -v '^[[:space:]]*#' empacotamento/enderecos-de-atualizacao.txt | grep -m1 'https://')
+if ! python3 - "$NO_AR" "$ACEITAR_PERDA" "$ESTREAR" <<'PY'
+import json, sys, urllib.error, urllib.request
+endereco, aceitar_perda, estrear = sys.argv[1], sys.argv[2] == "1", sys.argv[3] == "1"
+novo = json.load(open("docs/latest.json"))
+# ⚠️ Com User-Agent próprio: o r2.dev responde 403 ao do `urllib`.
+pedido = urllib.request.Request(f"{endereco}?sem-cache", headers={"User-Agent": "lancar-local"})
+try:
+    with urllib.request.urlopen(pedido, timeout=20) as r:
+        velho = json.load(r)
+except urllib.error.HTTPError as e:
+    if e.code != 404:
+        print(f"❌ não li {endereco} (HTTP {e.code}) — sem saber o que está no ar, não publico", file=sys.stderr)
+        sys.exit(1)
+    print(f"   {endereco} ainda não existe: primeiro lançamento ali")
+    sys.exit(0)
+except Exception as e:
+    print(f"❌ não li {endereco} ({e}) — sem saber o que está no ar, não publico", file=sys.stderr)
+    sys.exit(1)
+num = lambda v: tuple(int(p) for p in v.split("-")[0].split("."))
+# 🚨 Versão menor que a publicada: o app não volta versão, e o manifesto
+#    passaria a anunciar algo mais velho do que quem já atualizou tem.
+if num(novo["version"]) < num(velho["version"]):
+    print(f"❌ a {novo['version']} é MENOR que a {velho['version']} que está no ar — suba a versão", file=sys.stderr)
+    sys.exit(1)
+# 🚨 Plataforma que some do manifesto: quem a usa passa a ouvir "nada novo"
+#    para sempre, sem aviso. É o que acontece ao publicar um dist/ incompleto.
+perdidas = sorted(set(velho.get("platforms", {})) - set(novo["platforms"]))
+if perdidas:
+    if aceitar_perda:
+        print(f"⚠️  aceito por --aceitar-perda: {', '.join(perdidas)} deixam de receber atualização", file=sys.stderr)
+    else:
+        print(f"❌ o manifesto novo perde {', '.join(perdidas)}, que estão no ar na {velho['version']}.", file=sys.stderr)
+        print("   Traga o dist/ dessas plataformas, ou rode com --aceitar-perda se for de propósito.", file=sys.stderr)
+        sys.exit(1)
+# 🚨 Plataforma que estreia no manifesto: todo app daquele sistema que já está
+#    na rua passa a receber o pacote — inclusive os instalados COMPILANDO na
+#    máquina (o instalador .cmd), que não são o pacote. No Windows o NSIS
+#    instala ao lado, noutra pasta, e o atalho antigo fica; no Linux o .AppImage
+#    sobrescreve ~/.local/bin/vintagelightbox-gpui e só abre com FUSE. Estrear é
+#    decisão do dono, com o plano para esses balcões na mão.
+novas = sorted(set(novo["platforms"]) - set(velho.get("platforms", {})))
+if novas and not estrear:
+    print(f"❌ {', '.join(novas)} nunca estiveram no ar: os balcões desse sistema instalados pelo", file=sys.stderr)
+    print("   script que compila receberiam o pacote. Ver empacotamento/README.md, \"Plataforma nova\",", file=sys.stderr)
+    print("   e rode com --estrear-plataforma quando o dono tiver decidido.", file=sys.stderr)
+    sys.exit(1)
+print(f"   no ar: {velho['version']} ({', '.join(sorted(velho.get('platforms', {}))) or 'nenhuma'})")
+print(f"   novo:  {novo['version']} ({', '.join(sorted(novo['platforms'])) or 'nenhuma'})")
+PY
+then
+  git checkout -q -- docs/
+  exit 1
+fi
 
 # ─── R2: principal ───────────────────────────────────────────────────────────
 

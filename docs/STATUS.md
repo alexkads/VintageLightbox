@@ -40,9 +40,11 @@
 > versão com a lista nova. Até todo balcão ter passado por ela, o Pages não sai da lista (há teste
 > que o prende lá).
 >
-> 🚨 **O manifesto publicado (0.1.9) só tem macOS.** Para os balcões Windows e Linux o updater
-> ouve "nada novo" e **eles não atualizam** até sair uma versão com `dist/windows-x86_64/` e
-> `dist/linux-x86_64/`, gerados na máquina de cada um e juntados aqui antes do `make publicar`.
+> 🚨 **O manifesto publicado (0.1.9) só tem macOS.** Os balcões Windows e Linux instalaram
+> compilando e se atualizam repetindo o instalador. Publicar o pacote deles pela primeira vez faz o
+> updater instalá-lo ao lado (Windows) ou por cima (Linux) da instalação compilada, e **é decisão
+> pendente do dono**: ver `empacotamento/README.md`, "Plataforma nova". O `make publicar` recusa
+> sem `--estrear-plataforma`.
 
 > 🎯 **O objetivo do projeto mudou em 17/ago/2026** e está em
 > [`00-OBJETIVO.md`](00-OBJETIVO.md): substituir o Lightroom no fluxo do estúdio, para que a edição

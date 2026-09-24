@@ -127,9 +127,13 @@ que mudou.
 O download é validado antes de substituir o código anterior, e, se o conteúdo não mudou, o
 instalador preserva os arquivos e suas datas para não recompilar à toa.
 
-O app GPUI também tem **atualização automática**, que compara a versão instalada com a publicada
-(`docs/latest.json`). Compilado da branch `dev`, ele costuma estar à frente da publicada e não vê
-atualização; para acompanhar a `dev`, repita a instalação.
+O app GPUI também tem **atualização automática**. Ao abrir, ele lê o `latest.json` publicado,
+primeiro no R2 da Recordar Fotos e, se ele falhar, no GitHub Pages. Se houver versão maior que a
+instalada, mostra a faixa *"Versão X disponível"* com **Atualizar**, que baixa, confere a
+assinatura e instala. Depois vem **Reabrir agora**.
+
+Compilado da branch `dev`, o app costuma estar à frente da versão publicada e não vê atualização;
+para acompanhar a `dev`, repita a instalação.
 
 ## Opções (para quem sabe o que está fazendo)
 

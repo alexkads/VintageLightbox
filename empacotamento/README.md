@@ -78,6 +78,46 @@ cliente e é privado de propósito.
 manifesto velho lá responde "nada novo" *com sucesso*, então o updater nem chega ao Pages. Por isso
 o script recusa publicar sem o `wrangler`.
 
+## 🚨 O que não pode acontecer com quem já tem o app
+
+Todo app instalado confia no manifesto sem perguntar a ninguém. Um erro de lançamento chega a
+todos os balcões de uma vez, e o app não volta de versão. Por isso a lista abaixo é regra, e
+as linhas marcadas "trava do script" o `make publicar` recusa sozinho:
+
+| Não fazer | O que acontece | Quem segura |
+|---|---|---|
+| Publicar versão **menor** que a do ar | quem já atualizou fica à frente do manifesto; quem não atualizou "volta" | trava do script |
+| Publicar um `dist/` que **perde** plataforma | aquele sistema ouve "nada novo" para sempre, sem aviso | trava do script (`--aceitar-perda` para forçar) |
+| **Estrear** plataforma sem plano | os balcões instalados compilando recebem o pacote (ver abaixo) | trava do script (`--estrear-plataforma`) |
+| Publicar sem o `wrangler` com o R2 ligado | o R2 continua com o manifesto velho e responde "nada novo" com sucesso; o app nem chega ao Pages | trava do script |
+| Tirar o GitHub Pages de `enderecos-de-atualizacao.txt` | o app 0.1.9 e anteriores só conhecem ele e ficam presos | teste `o_pages_continua_na_lista…` |
+| Trocar o endereço do R2 (bucket, r2.dev, domínio) | os apps já instalados perguntam no endereço velho | ninguém: o endereço novo entra na lista **ao lado** do velho, e o velho só sai quando todo balcão tiver passado por uma versão que conhece o novo |
+| Desligar o acesso público ou apagar o bucket `vintagelightbox` | o app cai no Pages; se o Pages também falhar, ninguém atualiza | ninguém |
+| Regravar arquivo de `v<versão>/` já publicada | o pacote tem cache de um ano (`immutable`), e a assinatura no manifesto é do arquivo velho | ninguém: corrigir é publicar versão nova |
+| Perder `~/.vintagelightbox/atualizacao.key` ou trocar `chave-publica.txt` | toda atualização vira "assinatura inválida", e não há conserto pelo software | ninguém |
+| Subir a versão só no `Cargo.toml` (ou só no `packager.toml`) | o pacote diz uma versão e o app compara outra | trava do script |
+
+**Não há volta de versão.** O updater só instala versão maior que a instalada. Uma versão ruim se
+corrige com outra, maior, que desfaz o defeito.
+
+### Plataforma nova — as instalações compiladas
+
+A maior parte dos balcões **não instalou pacote**: rodou `instalar-vintagelightbox-gpui.cmd`, que
+compila o branch `dev` na máquina e instala fora de onde o pacote instalaria. O binário compilado tem
+o mesmo updater e a versão do `dev` naquele dia. Quando o manifesto passa a ter o sistema dele:
+
+| Sistema | Instalação compilada | O que o pacote faz com ela |
+|---|---|---|
+| Windows | `%LOCALAPPDATA%\Programs\VintageLightbox-GPUI\` + atalho "VintageLightbox (Zed GPUI)" | o NSIS instala o "VintageLightbox" **ao lado**; o atalho antigo continua abrindo a versão velha, que continua oferecendo a atualização |
+| Linux | `~/.local/bin/vintagelightbox-gpui` | sem a variável `APPIMAGE`, o updater **sobrescreve esse arquivo com o `.AppImage`**, que só abre com FUSE |
+| macOS | `/Applications/VintageLightbox (Zed GPUI).app` | o `.app.tar.gz` substitui o bundle no mesmo caminho (o macOS já está no manifesto desde a 0.1.1) |
+
+Em 24/set/2026 o manifesto só tem macOS, e por isso nada disso aconteceu ainda. **Estrear Windows ou
+Linux é decisão do dono**, com um destes planos na mão: o build compilado deixa de instalar pacote
+(o instalador marca o binário e o app só avisa "rode o instalador de novo"), ou os balcões migram
+para o pacote antes (desinstalar o compilado e instalar o `.exe`/`.AppImage`). Até lá o script
+recusa sem `--estrear-plataforma`.
+
 ## O que é o quê
 
 | Arquivo | Serve a |

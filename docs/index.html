@@ -306,9 +306,31 @@ VLB_POS_VENDA_URL=http://localhost:8080 VLB_SITE_URL=http://localhost:8001 cargo
 
   <h3 id="atualizar">Atualizar</h3>
   <p class="texto">
-    <strong>Repita o passo da instalação</strong>: dois cliques no arquivo no Windows, ou a mesma linha no
-    Terminal. Feche o app antes (pela bandeja, <strong>Sair</strong>). A partir da segunda vez leva poucos
-    minutos. O que estava no catálogo continua lá.
+    <strong>O app avisa quando há versão nova.</strong> Toda vez que ele abre, procura uma. Se achar,
+    aparece no alto a faixa <em>“Versão X disponível”</em>, com o que mudou, e dois botões:
+  </p>
+  <ol class="texto">
+    <li><strong>Atualizar</strong> baixa a versão nova e confere se ela foi mesmo publicada pela
+        Recordar Fotos. Só então instala. Um arquivo trocado no caminho é recusado.</li>
+    <li>No fim, a faixa diz <em>“Versão X instalada”</em>. Clique em <strong>Reabrir agora</strong>
+        para começar a usá-la. Até reabrir, a versão que está aberta continua sendo a antiga.</li>
+    <li><strong>Depois</strong> esconde o aviso até você fechar o app. Na próxima vez que abrir, ele
+        aparece de novo.</li>
+  </ol>
+  <p class="texto">
+    Se nada aparece, é porque não há versão nova, ou porque ela não é para o seu sistema: o app não
+    interrompe ninguém para dizer que está tudo em dia. O catálogo e as fotos não mudam com a
+    atualização.
+  </p>
+  <p class="texto">
+    <strong>Instalou pelo arquivo que compila no computador?</strong> Então atualizar é
+    <strong>repetir o passo da instalação</strong>: dois cliques no arquivo no Windows, ou a mesma
+    linha no Terminal. Feche o app antes (pela bandeja, <strong>Sair</strong>). A partir da segunda
+    vez leva poucos minutos, e o que estava no catálogo continua lá.
+  </p>
+  <p class="texto" style="font-size:.95em;color:var(--suave)">
+    As versões ficam num servidor da Recordar Fotos e, se ele não responder, numa cópia no GitHub.
+    Tudo é público e gratuito; o app não manda nada sobre você ou suas fotos ao procurar.
   </p>
 
   <h3 id="opcoes">Opções</h3>
@@ -394,6 +416,8 @@ sh instalar.cmd</code></pre>
       <tr><td><code>signal: 9</code> ou <code>SIGKILL</code> no meio da compilação</td><td>Faltou memória. O instalador já compila menos coisas ao mesmo tempo em máquinas com pouca memória; se ainda assim falhar, feche outros programas e repita com uma compilação de cada vez: ponha <code>CARGO_BUILD_JOBS=1</code> antes do <code>sh</code> (<code>… | CARGO_BUILD_JOBS=1 sh</code>).</td></tr>
       <tr><td>A janela do Windows fechou sozinha</td><td>Rode o arquivo de dentro do <strong>Prompt de Comando</strong> (veja <a href="#opcoes">Opções</a>) para ler a mensagem.</td></tr>
       <tr><td>Abre um app diferente, ou o app não muda depois de atualizar</td><td>O app antigo continuava aberto: saia pela bandeja (<strong>Sair</strong>) e abra de novo. Só roda uma cópia por vez.</td></tr>
+      <tr><td>A faixa diz <em>“Não consegui atualizar: …”</em></td><td>Confira a internet e clique em <strong>Atualizar</strong> de novo. Se continuar, feche o app e repita o <a href="#gpui">passo da instalação</a>: o resultado é o mesmo.</td></tr>
+      <tr><td>Atualizou, mas continua igual</td><td>Faltou reabrir. Clique em <strong>Reabrir agora</strong> na faixa, ou saia pela bandeja (<strong>Sair</strong>) e abra de novo.</td></tr>
       <tr><td>A tela do cliente abre preta</td><td>Atualize o app (repita a instalação).</td></tr>
       <tr><td>A tela do cliente não vai para o outro monitor</td><td>Confira se o segundo monitor está <strong>estendido</strong>, e não espelhado. No Linux com Wayland o sistema não deixa o app escolher o monitor: arraste a janela uma vez.</td></tr>
       <tr><td>A lista aparece vazia ou dá erro ao entrar</td><td>Confira a internet: as telas vêm do app, mas os dados vêm da RecordarFotos. As fotos já importadas continuam no catálogo.</td></tr>

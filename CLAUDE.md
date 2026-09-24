@@ -84,7 +84,7 @@ make rodar      # abre o app (sempre em release)
 make mac        # .app + .dmg universal
 make linux      # .deb + .AppImage, por Docker
 make windows    # explica por que o Windows sai do .ps1, e nao daqui
-make publicar   # sobe dist/ para o site
+make publicar   # publica dist/ no R2 e espelha no GitHub (o único caminho de lançar)
 make faxina     # apaga o cache de debug do cargo
 ```
 
@@ -133,7 +133,7 @@ cargo clippy -p biblioteca-web --target wasm32-unknown-unknown -- -D warnings
 make mac                 # .app + .dmg universal (só no macOS)
 make linux               # .deb + .AppImage    (só num Linux)
 .\scripts\empacotar.ps1  # .msi + .exe         (só num Windows 11)
-make lancar              # marca a tag; o GitHub Actions gera as tres e publica
+make publicar            # junta dist/ das três máquinas e publica (sem GitHub Actions)
 # 🔑 **Uma máquina por plataforma, e isso é decisão de desenho** (dono,
 #    7/set/2026: *"quero deixar tudo nativo mesmo"*). O `empacotar.sh` gera **só
 #    o sistema em que ele roda**; um alvo de outro sistema recusa de imediato.
@@ -266,27 +266,54 @@ funcionalidade entregue; a pergunta é sempre **"que clique chega até aqui?"**.
 ## A distribuição: projeto aberto, fora das lojas, e o app se atualiza sozinho
 
 O VintageLightbox é **software livre sob licença MIT** (7/set/2026) e **não passa por loja nenhuma**.
-Ele é baixado de `alexkads.github.io/VintageLightbox` e, a partir da primeira instalação, se atualiza
-sozinho. O caminho inteiro está em [`empacotamento/README.md`](empacotamento/README.md).
+A partir da primeira instalação ele se atualiza sozinho. O caminho inteiro e as regras estão em
+[`empacotamento/README.md`](empacotamento/README.md); **ler a seção "O que não pode acontecer com
+quem já tem o app" antes de tocar em versão, empacotamento, `atualizacao/`, `lancar-local.sh`,
+`montar-manifesto.py` ou `enderecos-de-atualizacao.txt`.**
 
-**Lançar é `make lancar`** — ele empurra a tag, e o GitHub Actions compila as três plataformas, cada
-uma no sistema dela, cria o Release e publica o manifesto no Pages.
+**Como funciona.** Ao abrir, o app lê `latest.json` nos endereços de
+[`empacotamento/enderecos-de-atualizacao.txt`](empacotamento/enderecos-de-atualizacao.txt), em
+ordem. Primeiro o bucket R2 `vintagelightbox`
+(`https://pub-f97274c3a83f47ff903a64fc1578efb0.r2.dev`); se ele falhar, o GitHub Pages. Se a versão
+do manifesto for maior que a `CARGO_PKG_VERSION`, aparece a faixa "Versão X disponível" com
+**Atualizar**. O pacote é baixado, a assinatura minisign é conferida e só então ele é instalado.
 
-🔑 **Não há credencial de nuvem no lançamento.** Foi o ganho da mudança: a versão anterior publicava
-no Supabase Storage e exigia a `SUPABASE_SERVICE_ROLE_KEY`. Hoje a única chave é a minisign.
+**Lançar é `make publicar`** (`scripts/lancar-local.sh`), sempre. `make lancar` depende do GitHub
+Actions, travado por cobrança desde 17/set/2026: empurra a tag e nada compila. O `publicar`:
+
+- confere o R2 pelo `wrangler` logado;
+- monta o manifesto a partir do `dist/` inteiro, com as três máquinas juntadas nele;
+- **recusa o que prejudicaria quem já tem o app**: versão menor que a do ar, plataforma que some,
+  plataforma que estreia sem decisão do dono e versões divergentes entre `Cargo.toml` e
+  `packager.toml`;
+- envia ao R2 com o `latest.json` por último;
+- espelha no GitHub (Pages + Releases). Se o GitHub recusar, é só aviso.
+
+O roteiro passo a passo é a skill `lancar-o-app-desktop`, no repositório do e-commerce.
+
+🚨 **Commit em `dev` não chega ao balcão empacotado.** Só uma versão nova publicada chega. E **não
+há volta de versão**: o updater só instala versão maior, então um lançamento ruim se corrige com
+outro, maior.
+
+🚨 **A maior parte dos balcões instalou compilando** (`instalar-vintagelightbox-gpui.cmd`, que
+compila o `dev`), e não pelo pacote. Esses se atualizam repetindo o instalador. Em 24/set/2026 o
+manifesto só tem macOS; publicar Windows ou Linux pela primeira vez faz o updater desses balcões
+instalar o pacote por cima ou ao lado da instalação compilada. Está no README, em "Plataforma
+nova", e o script recusa sem `--estrear-plataforma`.
 
 🔑 **O que substitui a loja é a assinatura minisign.** Cada pacote é assinado por
-`scripts/empacotar.sh`; a chave **pública** é compilada dentro do app
-(`atualizacao::porta::CHAVE_PUBLICA`), a **privada** mora em `~/.vintagelightbox/atualizacao.key`,
-fora do repositório. O app baixa, confere e só então instala.
+`scripts/empacotar.sh`. A chave **pública** é compilada dentro do app
+(`atualizacao::porta::CHAVE_PUBLICA`); a **privada** mora em `~/.vintagelightbox/atualizacao.key`,
+fora do repositório.
 
-🚨 **Perder a chave privada quebra a atualização de todo app já instalado** — os que estão na rua só
+🚨 **Perder a chave privada quebra a atualização de todo app já instalado.** Os que estão na rua só
 aceitam pacote assinado por ela, e isso não se conserta pelo software. Trocar `chave-publica.txt` por
 uma que não corresponda transforma toda atualização em "assinatura inválida", em silêncio.
 
-⚠️ **Lançar sem subir a versão do `[workspace.package]` não atualiza ninguém**: o app compara a
-própria `CARGO_PKG_VERSION` com a do manifesto. O `packager.toml` carrega a mesma versão, e o
-`make lancar` recusa se as duas divergirem — ou se a árvore estiver suja.
+⚠️ **Endereço de atualização só se acrescenta.** O app já instalado só conhece os endereços com que
+foi compilado. Trocar o bucket, o r2.dev ou pôr um domínio próprio é pôr o novo **ao lado**, e tirar
+o velho só quando todo balcão tiver passado por uma versão que conhece o novo. O GitHub Pages está
+preso na lista por teste pelo mesmo motivo: o app 0.1.9 e anteriores só conhecem ele.
 
 ## Portas para o mundo assíncrono — o padrão da casa
 
