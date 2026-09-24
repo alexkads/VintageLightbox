@@ -842,6 +842,15 @@ impl Revelacao {
             "sincronizar" => self.abrir_sincronizacao(window, cx),
             "sincronizar_ok" => cx.emit(super::PedidoDaRevelacao::Sincronizar),
             "baixar_jpeg" => cx.emit(super::PedidoDaRevelacao::Exportar),
+            // 🧪 Vai à foto pelo nome do arquivo — para o roteiro revelar uma
+            // foto certa (a que ainda sobe, por exemplo) sem contar setas.
+            "abrir" => {
+                let nome = gesto.split_whitespace().nth(1).unwrap_or_default();
+                match self.acervo.iter().position(|f| f.name == nome) {
+                    Some(posicao) => self.ir_para(posicao, window, cx),
+                    None => eprintln!("[roteiro] {nome} não está na tira"),
+                }
+            }
             // 🧪 Os outros dois botões da barra — "Zerar tudo" e "Salvar na
             // galeria e sair" —, pelo mesmo caminho do clique.
             "zerar" => self.zerar_tudo(window, cx),
