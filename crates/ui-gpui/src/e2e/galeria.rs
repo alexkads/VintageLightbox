@@ -1138,3 +1138,53 @@ fn os_dados_do_cliente_abrem_num_modal_e_a_recusa_fica_no_campo(cx: &mut TestApp
         assert!(tela.motivo_do_formulario().is_none(), "Cancelar fecha");
     });
 }
+
+/// 📐 **A grade fecha a linha na largura dela**, como no site (dono,
+/// 24/set/2026). O zoom diz quantas colunas cabem; a célula estica até a
+/// última encostar na borda — sem a sobra à direita que mudava a cada passo
+/// do zoom.
+#[gpui::test]
+fn a_grade_da_sessao_fecha_a_linha_na_largura_dela(cx: &mut TestAppContext) {
+    let e = abrir_o_ensaio(cx, Cenario::default());
+    // Dois quadros: o primeiro mede a grade, o segundo desenha com a medida.
+    let mut visual = VisualTestContext::from_window(e.raiz.into(), cx);
+    visual.run_until_parked();
+    // Zoom maior que o padrão: as seis fotos do cenário enchem a linha.
+    e.detalhe(cx, |tela, w, cx| tela.ajustar_zoom(260.0, w, cx));
+    visual.run_until_parked();
+    e.detalhe(cx, |_tela, _w, cx| cx.notify());
+    visual.run_until_parked();
+
+    let (ids, colunas) = e.detalhe(cx, |tela, w, _cx| {
+        let colunas = tela.colunas_visiveis(w);
+        let ids: Vec<String> = (0..colunas)
+            .filter_map(|p| tela.foto_visivel_para_teste(p))
+            .collect();
+        (ids, colunas)
+    });
+    assert!(
+        colunas >= 2,
+        "a janela de teste tem de caber mais de uma coluna"
+    );
+    assert_eq!(ids.len(), colunas, "o cenário enche a primeira linha");
+
+    let grade = visual
+        .debug_bounds("grade-da-sessao")
+        .expect("a grade está na tela");
+    let ultima = visual
+        .debug_bounds(Box::leak(
+            format!("sessao-tile-{}", ids[colunas - 1]).into_boxed_str(),
+        ))
+        .expect("a última célula da linha está na tela");
+    let primeira = visual
+        .debug_bounds(Box::leak(
+            format!("sessao-tile-{}", ids[0]).into_boxed_str(),
+        ))
+        .expect("a primeira célula está na tela");
+    assert_eq!(primeira.origin.y, ultima.origin.y, "as duas na mesma linha");
+    let sobra = f32::from(grade.right() - ultima.right());
+    assert!(
+        (0.0..=2.0).contains(&sobra),
+        "a linha fecha na borda da grade: sobraram {sobra} px"
+    );
+}

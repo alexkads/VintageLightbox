@@ -1191,15 +1191,36 @@ impl Detalhe {
         self.zoom_slider = Self::novo_slider_do_zoom(topo, self.zoom, cx);
     }
 
-    /// O lado da célula: o zoom, sem passar da largura da grade — no topo, uma
-    /// foto por linha, ocupando a linha inteira.
+    /// O lado da célula: o zoom diz **quantas colunas** cabem, e a célula
+    /// estica até a linha fechar na largura da grade — no topo, uma foto por
+    /// linha, ocupando a linha inteira.
+    ///
+    /// 🚨 **Era o zoom cru** (dono, 24/set/2026: *"na Web a galeria de fotos
+    /// da sessão sempre fica ajustada dentro do seu espaço e no
+    /// VintageLightbox fica bagunçado"*): quatro células de 380 px numa grade
+    /// de 1700 deixavam 160 px vazios à direita, e a sobra mudava a cada
+    /// passo do zoom. A conta é a do site (`grade-layout.ts`) e a do
+    /// `biblioteca_core::grade::Layout::calcular`: `(largura − vão × (n − 1)) / n`.
+    ///
+    /// ⚠️ **Um vigésimo de pixel a menos por célula**: com a conta exata, a
+    /// soma podia passar a largura por erro de ponto flutuante, e o
+    /// `flex_wrap` descia a última da linha. Arredondar para baixo resolvia
+    /// isso, mas deixava até um pixel por coluna sobrando à direita.
     fn lado_da_celula(&self) -> f32 {
         let largura = self.largura_da_grade(self.janela_no_quadro.0);
-        if largura.is_finite() && largura >= ZOOM_MINIMO {
-            self.zoom.min(largura)
-        } else {
-            self.zoom
+        if !(largura.is_finite() && largura >= ZOOM_MINIMO) {
+            return self.zoom;
         }
+        let colunas = colunas_que_cabem(
+            largura,
+            self.zoom.min(largura.max(ZOOM_MINIMO)),
+            VAO_DA_GRADE,
+        )
+        .max(1);
+        if colunas == 1 {
+            return largura - 0.05;
+        }
+        (largura - VAO_DA_GRADE * (colunas - 1) as f32) / colunas as f32 - 0.05
     }
 
     pub fn ajustar_zoom(&mut self, passo: f32, window: &mut Window, cx: &mut Context<Self>) {
@@ -2297,6 +2318,12 @@ impl Detalhe {
             }
         }
         cx.notify();
+    }
+
+    /// 🧪 O id da foto na posição `p` da grade, com o recorte de agora.
+    #[cfg(test)]
+    pub(crate) fn foto_visivel_para_teste(&self, p: usize) -> Option<String> {
+        self.acervo.visivel(p).map(|f| f.id.clone())
     }
 
     /// 🧪 A frase da recusa e o campo a que ela se refere.
@@ -4362,6 +4389,7 @@ impl Detalhe {
         div()
             .on_children_prepainted(conferir)
             .id("grade-da-sessao")
+            .debug_selector(|| "grade-da-sessao".into())
             .track_scroll(&self.rolagem_da_grade)
             // 🔑 **Ctrl + roda dá zoom**, e é o que o site promete no `title` do
             // controle de tamanho. Sem o modificador a roda rola, que é o que
