@@ -1,8 +1,8 @@
-//! 🎬 O app inteiro, de ponta a ponta, como o operador o usa.
+//! 🎬 Fluxos da janela GPUI até as portas do app, com serviços de memória.
 //!
 //! # O que estes cenários são
 //!
-//! A janela é a do `main.rs` — o `Root` do `gpui-component` com o
+//! A janela é **simulada pelo `TestAppContext`**, com o `Root` do `gpui-component` e o
 //! [`Aplicativo`] dentro, as mesmas teclas ligadas (`app::init`,
 //! `importacao::tela::init`, `cliente::init`) e o tema do site aplicado — e
 //! cada passo passa pela porta que o operador usa: a tecla de verdade
@@ -10,6 +10,11 @@
 //! quando não tem. Depois de cada passo o cenário afirma **três coisas**: a
 //! tela que está na frente, o estado que ela mostra e o que foi pedido às
 //! portas.
+//!
+//! Estes cenários exercitam o `render`, os cliques e o despacho do GPUI na janela
+//! de teste. **Não mostram a janela nativa nem falam com a API local**. Para conferir o
+//! binário e a janela reais, use `VLB_ROTEIRO` + `VLB_FOTOS` em build debug;
+//! esse é um teste visual separado, não uma evidência produzida por `cargo test`.
 //!
 //! 🔑 **O `render` do app inteiro roda a cada passo.** Com `test-support`, o
 //! GPUI redesenha a janela suja ao fim de todo `update` (`flush_effects`) — um
@@ -28,11 +33,11 @@
 //! "Sincronizar", o JPEG baixado, a lembrança do caixa e a do estúdio vão para
 //! pastas temporárias em `cfg(test)`.
 //!
-//! ⚠️ **Por que não o binário contra a pilha local.** O app só entra na conta
-//! pelo navegador (a autorização do site), e a sessão guardada fica no
-//! chaveiro — rodar o binário sem ninguém na frente exigiria a sessão em
-//! arquivo (`VLB_SESSAO_EM_ARQUIVO`) e uma janela de verdade. Fica registrado
-//! como o próximo degrau, e só contra `make up`.
+//! ⚠️ **Por que estes cenários não usam o binário contra a pilha local.** Eles
+//! foram escritos para testar as regras da interface rapidamente e sem dados
+//! externos. O roteiro de depuração do binário cobre a janela real contra
+//! `make up`, com fotos da tela, mas precisa de suas próprias verificações para
+//! ser considerado um E2E automatizado completo.
 //!
 //! | Módulo | O pedaço do fluxo |
 //! |---|---|

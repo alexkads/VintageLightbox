@@ -137,6 +137,21 @@ impl Aplicativo {
                     tela.clicar(posicao, Default::default(), cx);
                 });
             }
+            Passo::ConferirConta => {
+                assert!(
+                    self.entrou(),
+                    "[roteiro] a conta local ainda não foi autorizada; conclua a entrada antes de testar a galeria"
+                );
+                eprintln!("[roteiro] conta autorizada");
+            }
+            Passo::ConferirSelecao(esperadas) => {
+                let marcadas = self.detalhe.read(cx).quantas_marcadas();
+                assert_eq!(
+                    marcadas, *esperadas,
+                    "[roteiro] a janela real deveria ter {esperadas} fotos selecionadas"
+                );
+                eprintln!("[roteiro] seleção confirmada: {marcadas} fotos");
+            }
             Passo::Atendimento => self
                 .detalhe
                 .update(cx, |tela, cx| tela.alternar_atendimento(cx)),

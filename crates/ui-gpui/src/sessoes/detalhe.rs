@@ -207,6 +207,8 @@ pub enum Pedido {
     Negociar(Vec<String>),
     /// "Apagar": a foto sai do site, com os dois arquivos.
     ApagarDoSite(String),
+    /// "Apagar" em lote, depois da confirmação de todas as fotos editáveis.
+    ApagarDoSiteEmLote(Vec<String>),
     /// A tecla `X` em fotos que **só existem no disco**: a rejeição é gravada
     /// no catálogo local (C21), e é ela que as segura fora da fila de subida.
     ///
@@ -567,6 +569,8 @@ pub struct Detalhe {
     imagens_por_arquivo: std::collections::HashMap<String, Arc<gpui::RenderImage>>,
     /// Os controles do painel da foto em foco — ver [`CamposDoPainel`].
     campos_do_painel: Option<CamposDoPainel>,
+    /// Controles da seleção compartilhada pela grade e pela tira.
+    campos_do_lote: Option<CamposDoLote>,
     /// A gaveta do atendimento está aberta?
     atendimento_aberto: bool,
     /// A sanfona "Faixa, negociação e preço" do painel — **fechada por
@@ -584,6 +588,7 @@ pub struct Detalhe {
     /// **e os arquivos dela** do site, e não há como desfazer pela tela. O
     /// balcão é tela de dedo rápido; a pergunta é o freio.
     apagar_confirmando: Option<(String, String)>,
+    apagar_lote_confirmando: Option<Vec<(String, String)>>,
     /// O modal "Importar fotos" está aberto — o quadro de arrastar ou escolher,
     /// o mesmo da etapa 2 da nova sessão (`quadro_de_importacao`).
     importacao_aberta: bool,
@@ -718,6 +723,13 @@ struct CamposDoPainel {
     _assinaturas: Vec<gpui::Subscription>,
 }
 
+struct CamposDoLote {
+    ids: Vec<String>,
+    faixa: Entity<SelectState<SearchableVec<OpcaoDaFaixa>>>,
+    preco: Entity<InputState>,
+    _assinaturas: Vec<gpui::Subscription>,
+}
+
 fn campo_preenchido(
     valor: &str,
     dica: &'static str,
@@ -763,6 +775,7 @@ impl Detalhe {
             grade_no_quadro: false,
             janela_no_quadro: (0.0, 1000.0),
             painel_no_quadro: false,
+            campos_do_lote: None,
             tira_desenhada: (0, 0),
             tira_a_seguir: None,
             altura_da_tira: altura_da_tira::guardada("sessao"),
@@ -803,6 +816,7 @@ impl Detalhe {
             faixa_e_precos_aberto: false,
             detalhes_abertos: false,
             apagar_confirmando: None,
+            apagar_lote_confirmando: None,
             importacao_aberta: false,
             origem: None,
             _assinaturas_da_origem: Vec::new(),
@@ -1514,6 +1528,15 @@ impl Detalhe {
     /// esconde a foto do cliente é a tecla `X` ([`Self::alternar_rejeicao`]) —
     /// que **marca sem apagar**.
     pub fn dar_nota(&mut self, nota: u8, cx: &mut Context<Self>) {
+        let levadas = if nota == 0 {
+            self.selecao
+                .marcadas()
+                .filter_map(|p| self.acervo.visivel(p))
+                .filter(|f| f.editavel() && f.estado == acervo::Estado::LevadaNoBalcao)
+                .count()
+        } else {
+            0
+        };
         self.mudar_as_marcadas(
             domain::services::pos_venda::MudancaDaFoto {
                 nota: Some((nota != 0).then_some(nota as i16)),
@@ -1521,6 +1544,14 @@ impl Detalhe {
             },
             cx,
         );
+        if levadas > 0 {
+            self.recado(
+                format!(
+                    "{levadas} levada(s) no balcão ficaram com a nota: tire a marcação (P) antes."
+                ),
+                cx,
+            );
+        }
     }
 
     /// A tecla `X`: alterna a **rejeição** — contrato C21.
@@ -1724,6 +1755,7 @@ impl Detalhe {
             .marcadas()
             .filter_map(|p| self.acervo.visivel(p))
             .filter(|f| f.editavel())
+            .filter(|f| mudanca.nota != Some(None) || f.estado != acervo::Estado::LevadaNoBalcao)
             // 🔑 A que já subiu e ainda aparece como local recebe o gesto no
             // site, onde ela está agora — ver `subiu_como`.
             .map(|f| {
@@ -2766,7 +2798,11 @@ impl Detalhe {
                     };
                     self.abrir_formulario_do_cliente(motivo, Some(frase.into()), cx);
                 }
-                Recado::Produtos(lista) => self.produtos = lista,
+                Recado::Produtos(lista) => {
+                    self.produtos = lista;
+                    self.campos_do_painel = None;
+                    self.campos_do_lote = None;
+                }
                 Recado::Estudios(lista) => self.estudios = lista,
                 Recado::GaleriaAtualizada => {
                     if let Some((motivo, novo)) = self.gravando_dados.take() {
@@ -3332,6 +3368,7 @@ impl Render for Detalhe {
         }
         self.preparar_formulario_do_cliente(window, cx);
         self.preparar_painel(window, cx);
+        self.preparar_lote(window, cx);
         self.preparar_seletores(window, cx);
 
         // 🎨 **As faixas do site**: o cabeçalho de 48 px, a barra da importação
@@ -4282,6 +4319,10 @@ impl Detalhe {
 
         div()
             .id(SharedString::from(format!("sessao-tile-{}", foto.id)))
+            .debug_selector({
+                let id = foto.id.clone();
+                move || format!("sessao-tile-{id}")
+            })
             .w(px(lado))
             .flex()
             .flex_col()
@@ -4960,8 +5001,34 @@ impl Detalhe {
         cx.notify();
     }
 
+    fn apagar_marcadas_do_site(&mut self, cx: &mut Context<Self>) {
+        let fotos: Vec<_> = self
+            .selecao
+            .marcadas()
+            .filter_map(|p| self.acervo.visivel(p))
+            .filter(|f| f.editavel() && !self.ids_locais.contains(&f.id))
+            .map(|f| (f.id.clone(), f.arquivo.clone()))
+            .collect();
+        if fotos.is_empty() {
+            self.recado(
+                "Aguarde o envio das fotos para apagá-las da galeria.".into(),
+                cx,
+            );
+            return;
+        }
+        self.apagar_lote_confirmando = Some(fotos);
+        cx.notify();
+    }
+
     /// O "Apagar a foto" do diálogo.
     pub fn confirmar_apagar(&mut self, cx: &mut Context<Self>) {
+        if let Some(fotos) = self.apagar_lote_confirmando.take() {
+            cx.emit(Pedido::ApagarDoSiteEmLote(
+                fotos.into_iter().map(|(id, _)| id).collect(),
+            ));
+            cx.notify();
+            return;
+        }
         let Some((id, _)) = self.apagar_confirmando.take() else {
             return;
         };
@@ -4972,6 +5039,7 @@ impl Detalhe {
     /// O "Cancelar" do diálogo.
     pub fn cancelar_apagar(&mut self, cx: &mut Context<Self>) {
         self.apagar_confirmando = None;
+        self.apagar_lote_confirmando = None;
         cx.notify();
     }
 
@@ -5124,7 +5192,23 @@ impl Detalhe {
     }
 
     fn dialogo_de_apagar(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
-        let (_, arquivo) = self.apagar_confirmando.clone()?;
+        let (titulo, descricao, confirmar) = if let Some(fotos) = &self.apagar_lote_confirmando {
+            let n = fotos.len();
+            (
+                format!("Apagar {n} foto(s)?"),
+                "Os arquivos vão junto — original, prévia e miniatura. O cliente deixa de ver estas fotos na galeria, e não há como desfazer pela tela.".to_string(),
+                format!("Apagar as {n}"),
+            )
+        } else {
+            let (_, arquivo) = self.apagar_confirmando.as_ref()?;
+            (
+                "Apagar esta foto?".to_string(),
+                format!(
+                    "{arquivo} sai da galeria com os arquivos dela — original, prévia e miniatura. Não há como desfazer pela tela."
+                ),
+                "Apagar a foto".to_string(),
+            )
+        };
         Some(
             crate::estilo::veu_do_dialogo()
                 .id("apagar-veu")
@@ -5134,11 +5218,8 @@ impl Detalhe {
                         .w(px(460.))
                         .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
                         .child(crate::estilo::cabecalho_do_dialogo(
-                            "Apagar esta foto?",
-                            SharedString::from(format!(
-                                "{arquivo} sai da galeria com os arquivos dela — original, prévia \
-                                 e miniatura. Não há como desfazer pela tela."
-                            )),
+                            titulo,
+                            SharedString::from(descricao),
                             Some(crate::recursos::Icone::Trash2),
                             cx,
                         ))
@@ -5153,7 +5234,8 @@ impl Detalhe {
                                 )
                                 .child(
                                     crate::estilo::botao_perigo("apagar-confirmar", cx)
-                                        .child("Apagar a foto")
+                                        .debug_selector(|| "apagar-confirmar".into())
+                                        .child(confirmar)
                                         .on_click(cx.listener(|tela, _ev, _w, cx| {
                                             tela.confirmar_apagar(cx)
                                         })),
@@ -5215,6 +5297,27 @@ impl Detalhe {
             .unwrap_or_default()
     }
 
+    fn opcoes_da_faixa(&self) -> Vec<OpcaoDaFaixa> {
+        let mut opcoes = vec![OpcaoDaFaixa {
+            id: String::new(),
+            titulo: SharedString::from(format!(
+                "Padrão da galeria ({})",
+                self.nome_da_faixa(&self.produto_padrao_da_galeria())
+            )),
+        }];
+        opcoes.extend(self.produtos.iter().map(|p| OpcaoDaFaixa {
+            id: p.id.clone(),
+            titulo: SharedString::from(format!(
+                "{} — {}",
+                p.nome,
+                dinheiro::ler_campo(&p.preco.replace('.', ","))
+                    .map(dinheiro::formatar)
+                    .unwrap_or_else(|| format!("R$ {}", p.preco))
+            )),
+        }));
+        opcoes
+    }
+
     /// Manda uma mudança para **uma** foto do site — o gesto do painel, que age
     /// na foto em foco, e não na seleção.
     fn pedir_mudanca(
@@ -5265,23 +5368,6 @@ impl Detalhe {
         // Mudou a foto em foco: o "Apagar mesmo?" da anterior não vale mais.
         self.apagar_confirmando = None;
 
-        let mut opcoes = vec![OpcaoDaFaixa {
-            id: String::new(),
-            titulo: SharedString::from(format!(
-                "Padrão da galeria ({})",
-                self.nome_da_faixa(&self.produto_padrao_da_galeria())
-            )),
-        }];
-        opcoes.extend(self.produtos.iter().map(|p| OpcaoDaFaixa {
-            id: p.id.clone(),
-            titulo: SharedString::from(format!(
-                "{} — {}",
-                p.nome,
-                dinheiro::ler_campo(&p.preco.replace('.', ","))
-                    .map(dinheiro::formatar)
-                    .unwrap_or_else(|| format!("R$ {}", p.preco))
-            )),
-        }));
         // 🚨 **A faixa **própria** da foto, e não a efetiva.** Marcar a efetiva
         // diria que a foto tem faixa fixada quando ela só está seguindo a
         // galeria — e o primeiro clique no seletor "fixaria" sem querer o que
@@ -5290,7 +5376,9 @@ impl Detalhe {
             .do_site(&foto.id)
             .and_then(|f| f.produto_id.clone())
             .unwrap_or_default();
-        let faixa = cx.new(|cx| SelectState::new(SearchableVec::new(opcoes), None, window, cx));
+        let faixa = cx.new(|cx| {
+            SelectState::new(SearchableVec::new(self.opcoes_da_faixa()), None, window, cx)
+        });
         faixa.update(cx, |estado, cx| {
             // A opção "Padrão da galeria" tem id vazio: escolher por valor
             // acerta as duas pontas sem saber a posição de nenhuma.
@@ -5333,6 +5421,84 @@ impl Detalhe {
             preco,
             _assinaturas: assinaturas,
         });
+    }
+
+    /// A grade e a filmstrip usam a mesma seleção. O editor de lote acompanha
+    /// seus ids, mas não perde o texto digitado quando só o foco muda.
+    fn preparar_lote(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let ids = self.marcadas();
+        if self.campos_do_lote.as_ref().is_some_and(|c| c.ids != ids) {
+            self.apagar_lote_confirmando = None;
+        }
+        if ids.len() < 2 {
+            self.campos_do_lote = None;
+            return;
+        }
+        if self.campos_do_lote.as_ref().is_some_and(|c| c.ids == ids) {
+            return;
+        }
+
+        let faixa = cx.new(|cx| {
+            SelectState::new(SearchableVec::new(self.opcoes_da_faixa()), None, window, cx)
+        });
+        let preco = cx.new(|cx| InputState::new(window, cx).placeholder("Ex.: 39,90"));
+        let assinatura = cx.subscribe_in(
+            &faixa,
+            window,
+            |tela, _, evento: &SelectEvent<SearchableVec<OpcaoDaFaixa>>, _window, cx| {
+                let SelectEvent::Confirm(valor) = evento;
+                tela.mudar_faixa_do_lote(valor.clone().unwrap_or_default(), cx);
+            },
+        );
+        self.campos_do_lote = Some(CamposDoLote {
+            ids,
+            faixa,
+            preco,
+            _assinaturas: vec![assinatura],
+        });
+    }
+
+    fn mudar_faixa_do_lote(&mut self, produto_id: String, cx: &mut Context<Self>) {
+        self.mudar_as_marcadas(
+            domain::services::pos_venda::MudancaDaFoto {
+                produto_id: Some(if produto_id.is_empty() {
+                    None
+                } else {
+                    Some(produto_id)
+                }),
+                ..Default::default()
+            },
+            cx,
+        );
+    }
+
+    fn aplicar_preco_do_lote(&mut self, cx: &mut Context<Self>) {
+        let Some(campos) = self.campos_do_lote.as_ref() else {
+            return;
+        };
+        let texto = campos.preco.read(cx).value().trim().to_string();
+        let Some(centavos) = dinheiro::ler_campo(&texto) else {
+            self.recado("Preço inválido. Use 39,90.".into(), cx);
+            return;
+        };
+        if centavos <= 0 {
+            self.recado("Preço zero é cortesia: registre na negociação.".into(), cx);
+            return;
+        }
+        self.mudar_preco_do_lote(
+            Some(format!("{}.{:02}", centavos / 100, centavos % 100)),
+            cx,
+        );
+    }
+
+    fn mudar_preco_do_lote(&mut self, preco: Option<String>, cx: &mut Context<Self>) {
+        self.mudar_as_marcadas(
+            domain::services::pos_venda::MudancaDaFoto {
+                preco_de_venda: Some(preco),
+                ..Default::default()
+            },
+            cx,
+        );
     }
 
     /// A faixa da foto em foco. Id vazio = devolver ao padrão da galeria.
@@ -5410,18 +5576,230 @@ impl Detalhe {
         let foto = self.em_foco()?;
         let posicao = self.selecao.foco()? + 1;
         let negociada = foto.tem_negociacao();
+        let (editaveis, aguardando, fixadas, negociadas) = self
+            .selecao
+            .marcadas()
+            .filter_map(|p| self.acervo.visivel(p))
+            .filter(|f| f.editavel())
+            .fold(
+                (0, 0, 0, 0),
+                |(editaveis, aguardando, fixadas, negociadas), f| {
+                    if self.ids_locais.contains(&f.id) {
+                        (editaveis, aguardando + 1, fixadas, negociadas)
+                    } else {
+                        (
+                            editaveis + 1,
+                            aguardando,
+                            fixadas + usize::from(f.preco_de_venda.is_some()),
+                            negociadas + usize::from(f.tem_negociacao()),
+                        )
+                    }
+                },
+            );
 
         Some(
             div()
+                .id("painel-da-sessao")
                 .w(px(300.))
                 .flex_shrink_0()
                 .flex()
                 .flex_col()
+                .min_h(px(0.))
+                .overflow_y_scroll()
                 .gap(px(6.))
                 .p(px(10.))
                 .rounded(cx.theme().radius)
                 .border_1()
                 .border_color(cx.theme().border)
+                .children(self.campos_do_lote.as_ref().map(|campos| {
+                    let apagado = cx.theme().muted_foreground;
+                    let nota_do_lote = self
+                        .selecao
+                        .marcadas()
+                        .filter_map(|p| self.acervo.visivel(p))
+                        .map(|f| f.nota)
+                        .reduce(|a, b| if a == b { a } else { None })
+                        .flatten();
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(6.))
+                        .pb(px(10.))
+                        .border_b_1()
+                        .border_color(cx.theme().border)
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .justify_between()
+                                .child(format!("{} fotos selecionadas", campos.ids.len()))
+                                .child(
+                                    Button::new("lote-limpar")
+                                        .debug_selector(|| "lote-limpar".into())
+                                        .label("Limpar")
+                                        .xsmall()
+                                        .ghost()
+                                        .on_click(cx.listener(|tela, _, _, cx| {
+                                            tela.limpar_selecao(cx)
+                                        })),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(apagado)
+                                .child(format!(
+                                    "{editaveis} editáveis no site · {aguardando} aguardando envio. Compradas e excluídas ficam de fora."
+                                )),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(apagado)
+                                .child(format!(
+                                    "{fixadas} com preço fixado · {negociadas} com negociação no balcão."
+                                )),
+                        )
+                        .child(div().text_xs().text_color(apagado).child("Nota das selecionadas"))
+                        .child(
+                            div().flex().gap(px(2.)).children((1..=5u8).map(|nota| {
+                                Button::new(SharedString::from(format!("lote-nota-{nota}")))
+                                    .debug_selector(move || format!("lote-nota-{nota}"))
+                                    .label(if nota_do_lote.is_some_and(|atual| nota <= atual) {
+                                        "★"
+                                    } else {
+                                        "☆"
+                                    })
+                                    .xsmall()
+                                    .ghost()
+                                    .disabled(self.mudando > 0)
+                                    .on_click(cx.listener(move |tela, _, _, cx| {
+                                        tela.dar_nota(if nota_do_lote == Some(nota) { 0 } else { nota }, cx)
+                                    }))
+                            })),
+                        )
+                        .child(
+                            div()
+                                .flex()
+                                .gap(px(5.))
+                                .child(
+                                    Button::new("lote-marcar-levadas")
+                                        .debug_selector(|| "lote-marcar-levadas".into())
+                                        .label("Marcar como levadas")
+                                        .xsmall()
+                                        .disabled(editaveis + aguardando == 0 || self.mudando > 0)
+                                        .on_click(cx.listener(|tela, _, _, cx| {
+                                            tela.marcar_como(EstadoNoBalcao::LevadaNoBalcao, cx)
+                                        })),
+                                )
+                                .child(
+                                    Button::new("lote-por-a-venda")
+                                        .debug_selector(|| "lote-por-a-venda".into())
+                                        .label("Pôr à venda")
+                                        .xsmall()
+                                        .disabled(editaveis + aguardando == 0 || self.mudando > 0)
+                                        .on_click(cx.listener(|tela, _, _, cx| {
+                                            tela.marcar_como(EstadoNoBalcao::Disponivel, cx)
+                                        })),
+                                ),
+                        )
+                        .child(div().text_xs().text_color(apagado).child("Faixa para a seleção"))
+                        .child(
+                            div()
+                                .debug_selector(|| "lote-faixa".into())
+                                .child(
+                                    Select::new(&campos.faixa)
+                                        .xsmall()
+                                        .placeholder("Escolha a faixa para todas…")
+                                        .disabled(editaveis == 0 || self.mudando > 0)
+                                        .w_full(),
+                                ),
+                        )
+                        .when(fixadas > 0, |painel| {
+                            painel.child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().warning)
+                                    .child("Preço fixado continua valendo após trocar a faixa."),
+                            )
+                        })
+                        .child(
+                            Button::new("lote-negociar")
+                                .debug_selector(|| "lote-negociar".into())
+                                .label("Negociação…")
+                                .xsmall()
+                                .disabled(editaveis == 0)
+                                .on_click(cx.listener(|tela, _, _, cx| {
+                                    let ids = tela
+                                        .selecao
+                                        .marcadas()
+                                        .filter_map(|p| tela.acervo.visivel(p))
+                                        .filter(|f| f.editavel() && !tela.ids_locais.contains(&f.id))
+                                        .map(|f| f.id.clone())
+                                        .collect();
+                                    cx.emit(Pedido::Negociar(ids));
+                                })),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(apagado)
+                                .child("Preço de venda online para a seleção"),
+                        )
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(5.))
+                                .child("R$")
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .debug_selector(|| "lote-preco".into())
+                                        .child(Input::new(&campos.preco).xsmall()),
+                                )
+                                .child(
+                                    Button::new("lote-preco-aplicar")
+                                        .debug_selector(|| "lote-preco-aplicar".into())
+                                        .label("Aplicar")
+                                        .xsmall()
+                                        .disabled(editaveis == 0 || self.mudando > 0)
+                                        .on_click(cx.listener(|tela, _, _, cx| {
+                                            tela.aplicar_preco_do_lote(cx)
+                                        })),
+                                ),
+                        )
+                        .child(
+                            Button::new("lote-preco-voltar-faixa")
+                                .debug_selector(|| "lote-preco-voltar-faixa".into())
+                                .label("Remover preço fixado: usar a faixa")
+                                .xsmall()
+                                .disabled(editaveis == 0 || self.mudando > 0)
+                                .on_click(cx.listener(|tela, _, _, cx| {
+                                    tela.mudar_preco_do_lote(None, cx)
+                                })),
+                        )
+                        .child(
+                            Button::new("lote-apagar")
+                                .debug_selector(|| "lote-apagar".into())
+                                .label("Apagar")
+                                .xsmall()
+                                .danger()
+                                .ghost()
+                                .disabled(editaveis == 0 || self.mudando > 0)
+                                .on_click(cx.listener(|tela, _, _, cx| {
+                                    tela.apagar_marcadas_do_site(cx)
+                                })),
+                        )
+                }))
+                .when(self.campos_do_lote.is_some(), |painel| {
+                    painel.child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Foto em foco"),
+                    )
+                })
                 .child(
                     div()
                         .text_sm()
@@ -5821,6 +6199,10 @@ impl Detalhe {
 
         div()
             .id(SharedString::from(format!("tira-{}", foto.id)))
+            .debug_selector({
+                let id = foto.id.clone();
+                move || format!("tira-{id}")
+            })
             .relative()
             .w(px(largura))
             .h(px(lado))
@@ -8141,6 +8523,61 @@ mod testes {
             Some(Some(Some("19.90".to_string()))),
             "o preço fixado tinha de ir como 19.90"
         );
+    }
+
+    #[gpui::test]
+    fn a_selecao_da_grade_e_da_tira_muda_faixa_e_preco_sem_tocar_na_comprada(
+        cx: &mut TestAppContext,
+    ) {
+        let (janela, publicador) = janela(
+            cx,
+            vec![
+                foto("f1", EstadoDaFotoNoSite::Disponivel, Some(4)),
+                foto("f2", EstadoDaFotoNoSite::LevadaNoBalcao, Some(5)),
+                foto("f3", EstadoDaFotoNoSite::Comprada, Some(5)),
+            ],
+        );
+        entrar(cx, &janela);
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.clicar(0, Modificadores::default(), cx);
+                for posicao in [1, 2] {
+                    // O clique da tira chama este mesmo método com Ctrl/Cmd.
+                    tela.clicar(
+                        posicao,
+                        Modificadores {
+                            aditivo: true,
+                            faixa: false,
+                        },
+                        cx,
+                    );
+                }
+                tela.preparar_lote(window, cx);
+                assert_eq!(tela.campos_do_lote.as_ref().unwrap().ids.len(), 3);
+                tela.mudar_faixa_do_lote("p2".into(), cx);
+            })
+            .expect("a janela deve estar aberta");
+        let pedidos = publicador.negociadas();
+        assert_eq!(pedidos.len(), 2);
+        assert!(pedidos
+            .iter()
+            .all(|(_, m)| m.produto_id == Some(Some("p2".into()))));
+        assert!(!pedidos.iter().any(|(id, _)| id == "f3"));
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.mudando = 0;
+                let preco = &tela.campos_do_lote.as_ref().unwrap().preco;
+                preco.update(cx, |campo, cx| campo.set_value("31,90", window, cx));
+                tela.aplicar_preco_do_lote(cx);
+            })
+            .expect("a janela deve estar aberta");
+        let pedidos = publicador.negociadas();
+        assert_eq!(pedidos.len(), 4);
+        assert!(pedidos[2..].iter().all(|(_, m)| {
+            m.preco_de_venda == Some(Some("31.90".into())) && m.produto_id.is_none()
+        }));
     }
 
     /// 🚨 **A grade mostra a foto revelada pela receita padrão, e não o bruto.**

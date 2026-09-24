@@ -1,8 +1,8 @@
 //! 🖼️ Dentro da sessão: a galeria do ensaio, como a rota `[id]` do site.
 
 use biblioteca_core::acervo::{Estado, Filtro};
-use domain::services::pos_venda::{EstadoNoBalcao, MudancaDaGaleria};
-use gpui::{TestAppContext, VisualTestContext};
+use domain::services::pos_venda::{EstadoNoBalcao, MudancaDaGaleria, Produto};
+use gpui::{Modifiers, TestAppContext, VisualTestContext};
 
 use super::{abrir_o_app, abrir_o_ensaio, local, Cenario, Estudio, GALERIA};
 use crate::app::Tela;
@@ -10,13 +10,139 @@ use crate::impressao::porta::Destino;
 
 /// Clica no botão marcado com `debug_selector`, onde o dedo clicaria.
 fn clicar(e: &Estudio, cx: &mut TestAppContext, alvo: &'static str) {
+    clicar_com(e, cx, alvo, Modifiers::none());
+}
+
+fn clicar_com(e: &Estudio, cx: &mut TestAppContext, alvo: &'static str, teclas: Modifiers) {
     let mut visual = VisualTestContext::from_window(e.raiz.into(), cx);
     visual.run_until_parked();
     let onde = visual
         .debug_bounds(alvo)
         .unwrap_or_else(|| panic!("o botão {alvo} não está desenhado na tela"));
-    visual.simulate_click(onde.center(), gpui::Modifiers::none());
+    visual.simulate_click(onde.center(), teclas);
     visual.run_until_parked();
+}
+
+/// A marcação feita na grade e na tira alimenta o mesmo editor de lote.
+/// Os controles são acionados pela janela; asserções inspecionam somente o
+/// contrato de PATCH recebido pelo site de memória.
+#[gpui::test]
+fn faixa_e_preco_em_lote_pela_grade_e_filmstrip(cx: &mut TestAppContext) {
+    let e = abrir_o_ensaio(
+        cx,
+        Cenario {
+            site: Box::new(|site| {
+                site.produtos.push(Produto {
+                    id: "p2".into(),
+                    nome: "Família".into(),
+                    preco: "60.00".into(),
+                    inativo: false,
+                });
+                let mut fotos = site.fotos_da_sessao.lock().unwrap();
+                for foto in fotos.iter_mut() {
+                    foto.nota = Some(5);
+                }
+                fotos[0].preco_de_venda = Some("25.00".into());
+                fotos[0].preco_negociado = Some("20.00".into());
+            }),
+            ..Default::default()
+        },
+    );
+
+    clicar(&e, cx, "sessao-tile-a");
+    let aditivo = Modifiers {
+        #[cfg(target_os = "macos")]
+        platform: true,
+        #[cfg(not(target_os = "macos"))]
+        control: true,
+        ..Modifiers::none()
+    };
+    clicar_com(&e, cx, "tira-d", aditivo);
+    clicar_com(&e, cx, "tira-c", aditivo);
+    e.detalhe(cx, |tela, _, _| {
+        assert_eq!(tela.marcadas(), ["a", "d", "c"])
+    });
+
+    clicar(&e, cx, "lote-faixa");
+    e.teclar(cx, "down down down enter");
+    e.esperar(cx);
+    let pedidos = e.site.negociadas();
+    assert_eq!(
+        pedidos.len(),
+        2,
+        "faixa enviada para as duas editáveis: {pedidos:?}"
+    );
+    assert_eq!(
+        pedidos
+            .iter()
+            .map(|(id, _)| id.as_str())
+            .collect::<Vec<_>>(),
+        ["a", "d"]
+    );
+    assert!(pedidos.iter().all(|(_, m)| {
+        m.produto_id == Some(Some("p2".into()))
+            && m.preco_de_venda.is_none()
+            && m.preco_negociado.is_none()
+    }));
+
+    clicar(&e, cx, "lote-preco");
+    e.teclar(cx, "3 1 , 9 0");
+    clicar(&e, cx, "lote-preco-aplicar");
+    e.esperar(cx);
+    let pedidos = e.site.negociadas();
+    assert_eq!(
+        pedidos.len(),
+        4,
+        "preço enviado para as duas editáveis: {pedidos:?}"
+    );
+    assert!(pedidos[2..].iter().all(|(_, m)| {
+        m.preco_de_venda == Some(Some("31.90".into()))
+            && m.produto_id.is_none()
+            && m.preco_negociado.is_none()
+    }));
+
+    clicar(&e, cx, "lote-preco-voltar-faixa");
+    e.esperar(cx);
+    let pedidos = e.site.negociadas();
+    assert_eq!(pedidos.len(), 6);
+    assert!(pedidos[4..]
+        .iter()
+        .all(|(_, m)| m.preco_de_venda == Some(None) && m.produto_id.is_none()));
+    assert!(pedidos.iter().all(|(id, _)| id != "c"));
+
+    clicar(&e, cx, "lote-nota-5");
+    e.esperar(cx);
+    let pedidos = e.site.negociadas();
+    // Clicar na estrela já acesa tira a nota; a levada "a" mantém a sua.
+    assert_eq!(pedidos.len(), 7);
+    assert_eq!(pedidos[6].0, "d");
+    assert_eq!(pedidos[6].1.nota, Some(None));
+
+    clicar(&e, cx, "lote-nota-4");
+    e.esperar(cx);
+    let pedidos = e.site.negociadas();
+    assert_eq!(pedidos.len(), 9);
+    assert!(pedidos[7..].iter().all(|(_, m)| m.nota == Some(Some(4))));
+
+    clicar(&e, cx, "lote-por-a-venda");
+    e.esperar(cx);
+    let pedidos = e.site.negociadas();
+    assert_eq!(pedidos.len(), 11);
+    assert!(pedidos[9..]
+        .iter()
+        .all(|(_, m)| m.estado == Some(EstadoNoBalcao::Disponivel)));
+
+    clicar(&e, cx, "lote-negociar");
+    e.app(cx, |app, _, _| assert!(app.no_balcao()));
+
+    e.app(cx, |app, _, cx| app.fechar_balcao(cx));
+    let visual = VisualTestContext::from_window(e.raiz.into(), cx);
+    visual.simulate_resize(gpui::size(gpui::px(1600.), gpui::px(1100.)));
+    clicar(&e, cx, "lote-apagar");
+    assert!(e.site.tiradas().is_empty(), "apagar exige confirmação");
+    clicar(&e, cx, "apagar-confirmar");
+    e.esperar(cx);
+    assert_eq!(e.site.tiradas(), ["a", "d"], "a comprada fica de fora");
 }
 
 /// 🚨 **A receita padrão da sessão vale para quem chega depois.**

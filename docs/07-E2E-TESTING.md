@@ -4,8 +4,9 @@
 
 > ⚠️ **A versão anterior descrevia `egui_kittest` com retratos de tela** — 18 arquivos e 99 testes
 > E2E que saíram do repositório junto com o `crates/ui` em 17/ago/2026. O que os substituiu é
-> `gpui::TestAppContext`, que dirige janela de verdade e afirma sobre estado, sem imagem de
-> referência.
+> `gpui::TestAppContext`, que dirige uma janela GPUI **de teste** e afirma sobre estado, sem imagem de
+> referência. Esses cenários testam as interações da janela de ponta a ponta até as portas do app;
+> não executam o binário nativo nem a API local.
 
 ```bash
 cargo test --workspace     # tudo
@@ -119,12 +120,16 @@ sempre a mesma — **o caminho entra por parâmetro**, e o teste passa um `TempD
 
 ---
 
-## 4.1 Os cenários de ponta a ponta — `src/e2e/`
+## 4.1 Os cenários de integração da interface — `src/e2e/`
 
 > **Escrito em 18/set/2026**, quando a suíte passou a **olhar para as fotos**.
 
-`crates/ui-gpui/src/e2e/` monta o app inteiro — o `Root` do `main.rs`, as mesmas teclas, o mesmo
-tema — e percorre o fluxo do balcão como o operador o percorre. São **13 módulos, 39 cenários**.
+`crates/ui-gpui/src/e2e/` monta o `Root`, as teclas e o tema em `TestAppContext` e percorre
+os fluxos da janela GPUI com cliques e teclas simulados. São testes E2E **da interface até suas
+portas**, com serviços de memória. O binário `main.rs` não sobe e a API local não recebe as
+mudanças. O cenário
+`faixa_e_preco_em_lote_pela_grade_e_filmstrip`, por exemplo, verifica os pedidos de alteração
+recebidos pelo `PublicadorDeMentira`; não comprova que as fotos foram alteradas no servidor.
 
 | Módulo | O pedaço do fluxo |
 |---|---|
@@ -153,7 +158,7 @@ recortar(&e, cx, Filtro::Situacao(Estado::Disponivel));
 assert_eq!(na_grade(&e, cx), ["d"]); // a comprada não entra em "à venda"
 ```
 
-Os quatro cenários, e o que cada um prende:
+Alguns cenários e o que cada um prende:
 
 | Cenário | O que ele prende |
 |---|---|
@@ -162,14 +167,31 @@ Os quatro cenários, e o que cada um prende:
 | `a_tira_da_revelacao_segue_o_recorte_da_grade` | a revelação abrindo **na foto em foco**, a tira com as do recorte **na ordem da grade**, a seta que troca a aberta, e o gesto gravado **só** nela |
 | `a_tela_do_cliente_mostra_a_foto_da_vez_em_cada_tela` | o cliente acompanhando grade → revelação → gesto ao vivo → volta, sempre com a foto certa e **nunca com a de antes** |
 
-🔑 **Os observadores são `#[cfg(test)]` e leem o que a tela desenha**: `Detalhe::ids_visiveis`,
+🔑 **Os observadores são `#[cfg(test)]` e leem o estado usado pelo desenho**: `Detalhe::ids_visiveis`,
 `Detalhe::como_esta` (estado, nota, revelada), `Revelacao::ids_na_tira`,
 `Aplicativo::receita_no_cliente` (a foto **e os ajustes** que a segunda tela recebeu). Nenhum deles
 inventa estado: todos saem de onde o render lê.
 
-⚠️ **A foto do site chega pela rede, e o cenário espera por ela.** A segunda tela mostra a *cópia de
-trabalho*; quando ela não está no cache, o app a pede ao site. Um cenário que afirmasse na linha
+⚠️ **A foto remota chega por uma porta assíncrona de memória, e o cenário espera por ela.**
+A segunda tela mostra a *cópia de trabalho*; quando ela não está no cache, o app a pede à porta.
+Um cenário que afirmasse na linha
 seguinte veria `None` — e o defeito que ele acusaria seria o do próprio teste.
+
+### O que falta para um E2E nativo do lote
+
+`rodar-local.sh` prepara a pilha local e **inicia o aplicativo**; executá-lo não é um teste.
+`VLB_ROTEIRO` dirige o binário debug e pode capturar a janela com `VLB_FOTOS`. O roteiro atual
+confere a entrada na conta e a quantidade de fotos selecionadas após `⌘A`. Ele ainda precisa:
+
+1. criar uma galeria descartável com fotos e produtos conhecidos na API local;
+2. acionar pela janela real os controles de faixa e preço em lote;
+3. reler as fotos por outra requisição à API e comparar IDs, faixa e preço persistidos;
+4. retornar status diferente de zero se um gesto, captura ou asserção falhar.
+
+Só depois desses passos esse fluxo poderá ser chamado de E2E do GPUI. A captura da janela e a
+asserção da seleção são evidências parciais. A sessão do roteiro deve usar
+`VLB_SESSAO_EM_ARQUIVO=1` e `VLB_SESSAO_ARQUIVO=<arquivo temporário>` para não depender do diálogo
+do Chaves do macOS nem alterar a sessão de produção.
 
 ---
 
@@ -192,7 +214,7 @@ medem **pixel**. É onde ficam as perguntas que só a imagem responde: "este aju
 | `use-cases` | 96 |
 | `adapters` | **0** ⚠️ |
 | `infrastructure` | 92 + integração |
-| `ui-gpui` | 779 + 8 de integração — **39 deles são cenários de ponta a ponta** (§4.1) |
+| `ui-gpui` | Cenários de janela GPUI com `TestAppContext` em `src/e2e/` (§4.1); execute `cargo test -p ui-gpui e2e::` para a contagem atual |
 | **Total** | **1.184**, 0 falhando (medido em 18/set/2026) |
 
 ⚠️ **A camada `adapters` não tem nenhum teste**, e é ela que traduz entre use case e tela. É a única

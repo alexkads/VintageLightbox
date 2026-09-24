@@ -34,6 +34,10 @@ pub enum Passo {
     /// `foco 1` — põe o foco na N-ésima foto da grade da sessão, contando de 1.
     /// É o clique da grade, e é ele que faz o painel da direita aparecer.
     Foco(usize),
+    /// `conferir_conta` — falha se a autorização local ainda não terminou.
+    ConferirConta,
+    /// `conferir_selecao 2` — falha se a janela real não tiver N fotos marcadas.
+    ConferirSelecao(usize),
     /// `menu` — abre ou recolhe o menu lateral.
     Menu,
     /// `menu_usuario` — abre ou fecha o menu da conta.
@@ -147,6 +151,8 @@ pub fn ler_roteiro(texto: &str) -> Result<Vec<Passo>, String> {
             "atendimento" => Passo::Atendimento,
             "detalhes" => Passo::Detalhes,
             "foco" => Passo::Foco(numero(0)?.max(1.0) as usize),
+            "conferir_conta" => Passo::ConferirConta,
+            "conferir_selecao" => Passo::ConferirSelecao(numero(0)? as usize),
             "menu" => Passo::Menu,
             "menu_usuario" => Passo::MenuDoUsuario,
             "tema" => Passo::Tema(argumentos.first().copied().unwrap_or_default().to_string()),
@@ -507,6 +513,14 @@ mod testes {
                 Passo::ImportarOrigem,
                 Passo::Fim,
             ]
+        );
+        assert_eq!(
+            ler_roteiro("conferir_selecao 2").unwrap(),
+            vec![Passo::ConferirSelecao(2)]
+        );
+        assert_eq!(
+            ler_roteiro("conferir_conta").unwrap(),
+            vec![Passo::ConferirConta]
         );
     }
 
