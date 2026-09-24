@@ -81,8 +81,20 @@ function Ok($t)    { Write-Host "OK $t" -ForegroundColor Green }
 function Correr([scriptblock]$bloco) {
     if ($Seco) { Write-Host "   [seco] $bloco"; return }
     # ErrorActionPreference nao intercepta codigos de erro de executaveis no PS 5.1.
-    $global:LASTEXITCODE = 0
-    & $bloco | Out-Host
+    # 🐛 E o contrario: com a saida redirecionada (CI, ou `instalar.cmd > log.txt`),
+    #    o PS 5.1 transforma cada linha de stderr do programa em erro, e o "Stop"
+    #    derrubava o rustup-init no "info: profile set to minimal" e o cargo no
+    #    primeiro "Compiling". Aqui quem decide a falha e so o codigo de saida.
+    $antes = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $global:LASTEXITCODE = 0
+        # Sem `2>&1`: no console do balcao o stderr continua indo direto para a
+        #    tela, com cor e a barra de progresso do cargo.
+        & $bloco | Out-Host
+    } finally {
+        $ErrorActionPreference = $antes
+    }
     if ($LASTEXITCODE -ne 0) { throw "comando falhou (codigo $LASTEXITCODE): $bloco" }
 }
 

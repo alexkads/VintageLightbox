@@ -45,25 +45,22 @@ for:
   # O `.cmd` de dois cliques baixa a versão mais nova do próprio script do
   # `raw.githubusercontent.com/.../dev`, que tem cache de minutos, e termina
   # num `pause`. Aqui o bloco PowerShell é extraído **deste checkout** do mesmo
-  # jeito que o `.cmd` o extrai, e roda no mesmo Windows PowerShell 5.1.
+  # jeito que o `.cmd` o extrai, e roda como lá: num `powershell.exe` à parte.
+  #
+  # 🐛 A 1ª build (24/set) morreu no `info: profile set to minimal` do
+  #    rustup-init: com a saída redirecionada, o PS 5.1 transforma stderr de
+  #    programa em erro, e o "Stop" do instalador derrubava tudo. Era defeito do
+  #    instalador, não do CI (`instalar.cmd > log.txt` morria igual); o
+  #    `Correr` agora decide a falha só pelo código de saída.
   - matrix:
       only:
         - APPVEYOR_BUILD_WORKER_IMAGE: Visual Studio 2022
+    environment:
+      VLB_DESTINO: C:\vlb-instalado
     build_script:
-      - ps: |
-          $ErrorActionPreference = 'Stop'
-          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-          $env:VLB_VERSAO = $env:APPVEYOR_REPO_BRANCH
-          $env:VLB_DESTINO = 'C:\vlb-instalado'
-          $t = [IO.File]::ReadAllText("$env:APPVEYOR_BUILD_FOLDER\scripts\instalar-vintagelightbox-gpui.cmd")
-          $n = [char]10
-          $i = $t.IndexOf($n + '#==POWERSHELL==')
-          $f = $t.IndexOf($n + '#==FIM-POWERSHELL==', $i)
-          if ($i -lt 0 -or $f -le $i) { throw 'instalador sem o bloco PowerShell' }
-          Invoke-Expression $t.Substring($i, $f - $i)
-          $exe = 'C:\vlb-instalado\VintageLightbox-GPUI.exe'
-          if (-not (Test-Path $exe)) { throw "o instalador terminou sem deixar $exe" }
-          Get-Item $exe | Format-List FullName, Length, LastWriteTime
+      - cmd: powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; $env:VLB_VERSAO=$env:APPVEYOR_REPO_BRANCH; try { $t=[IO.File]::ReadAllText('scripts\instalar-vintagelightbox-gpui.cmd'); $n=[char]10; $i=$t.IndexOf($n+'#==POWERSHELL=='); $f=$t.IndexOf($n+'#==FIM-POWERSHELL==',$i); if ($i -lt 0 -or $f -le $i) { throw 'instalador sem o bloco PowerShell' }; Invoke-Expression $t.Substring($i, $f-$i) } catch { Write-Host ('X ' + $_) -ForegroundColor Red; exit 1 }"
+      - cmd: if not exist C:\vlb-instalado\VintageLightbox-GPUI.exe (echo o instalador terminou sem deixar o executavel & exit 1)
+      - cmd: dir C:\vlb-instalado
 
   # ── Linux ──────────────────────────────────────────────────────────────────
   #
